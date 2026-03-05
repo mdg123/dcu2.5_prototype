@@ -1,0 +1,2274 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>채움클래스 - 소통쪽지</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+<link rel="stylesheet" href="../../../common-nav.css">
+<style>
+/* ===== CSS Variables ===== */
+:root {
+    --primary: #2563EB;
+    --primary-dark: #1d4ed8;
+    --primary-light: #3b82f6;
+    --primary-bg: #EFF6FF;
+    --success: #10B981;
+    --success-light: #D1FAE5;
+    --warning: #F59E0B;
+    --danger: #EF4444;
+    --danger-light: #FEE2E2;
+
+    --bg-page: #F5F7FA;
+    --bg-card: #FFFFFF;
+    --bg-hover: #F9FAFB;
+    --bg-selected: #EFF6FF;
+    --bg-partner-bubble: #F3F4F6;
+
+    --text-primary: #1A1A2E;
+    --text-secondary: #4B5563;
+    --text-muted: #6B7280;
+    --text-light: #9CA3AF;
+
+    --border: #E5E7EB;
+    --border-light: #F3F4F6;
+
+    --radius-sm: 8px;
+    --radius-md: 12px;
+    --radius-lg: 16px;
+    --radius-xl: 20px;
+
+    --shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
+    --shadow-md: 0 4px 12px rgba(0,0,0,0.08);
+    --shadow-lg: 0 8px 24px rgba(0,0,0,0.12);
+
+    --transition: 0.2s ease;
+
+    --left-panel-width: 320px;
+    --input-max-lines: 5;
+}
+
+/* ===== Reset ===== */
+*, *::before, *::after {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: var(--bg-page);
+    color: var(--text-primary);
+    line-height: 1.5;
+    overflow: hidden;
+}
+
+/* ===== Main Container ===== */
+.msg-app {
+    display: flex;
+    height: calc(100vh - 100px);
+    margin-top: 100px;
+    background: var(--bg-card);
+    border-radius: 0;
+    overflow: hidden;
+}
+
+/* ===== Left Panel: Conversation List ===== */
+.msg-list-panel {
+    width: var(--left-panel-width);
+    min-width: var(--left-panel-width);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-card);
+}
+
+.msg-list-header {
+    padding: 16px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+}
+
+.msg-list-header-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+}
+
+.msg-list-title {
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--text-primary);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.msg-list-title i {
+    color: var(--primary);
+}
+
+.msg-header-actions {
+    display: flex;
+    gap: 4px;
+}
+
+.msg-header-btn {
+    width: 36px;
+    height: 36px;
+    border: none;
+    background: transparent;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    color: var(--text-muted);
+    font-size: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all var(--transition);
+}
+
+.msg-header-btn:hover {
+    background: var(--bg-hover);
+    color: var(--primary);
+}
+
+.msg-search-box {
+    position: relative;
+}
+
+.msg-search-box i {
+    position: absolute;
+    left: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--text-light);
+    font-size: 14px;
+}
+
+.msg-search-input {
+    width: 100%;
+    padding: 8px 12px 8px 36px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    font-family: inherit;
+    font-size: 13px;
+    color: var(--text-primary);
+    background: var(--bg-hover);
+    outline: none;
+    transition: all var(--transition);
+}
+
+.msg-search-input:focus {
+    border-color: var(--primary);
+    background: var(--bg-card);
+    box-shadow: 0 0 0 3px rgba(37,99,235,0.1);
+}
+
+.msg-search-input::placeholder {
+    color: var(--text-light);
+}
+
+/* Conversation List Items */
+.msg-conv-list {
+    flex: 1;
+    overflow-y: auto;
+}
+
+.msg-conv-list::-webkit-scrollbar {
+    width: 4px;
+}
+
+.msg-conv-list::-webkit-scrollbar-thumb {
+    background: #D1D5DB;
+    border-radius: 4px;
+}
+
+.msg-conv-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 16px;
+    cursor: pointer;
+    transition: background var(--transition);
+    border-bottom: 1px solid var(--border-light);
+    position: relative;
+}
+
+.msg-conv-item:hover {
+    background: var(--bg-hover);
+}
+
+.msg-conv-item.active {
+    background: var(--bg-selected);
+}
+
+.msg-conv-item.has-unread .msg-conv-name {
+    font-weight: 700;
+}
+
+.msg-conv-item.has-unread .msg-conv-preview {
+    color: var(--text-primary);
+    font-weight: 500;
+}
+
+.msg-conv-avatar {
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+    font-weight: 600;
+    color: #fff;
+    flex-shrink: 0;
+    position: relative;
+}
+
+.msg-conv-avatar.teacher {
+    background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+}
+
+.msg-conv-avatar.student {
+    background: linear-gradient(135deg, #8B5CF6, #7C3AED);
+}
+
+.msg-conv-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.msg-conv-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 2px;
+}
+
+.msg-conv-name {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-primary);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.msg-role-badge {
+    font-size: 10px;
+    padding: 1px 6px;
+    border-radius: 10px;
+    font-weight: 500;
+}
+
+.msg-role-badge.teacher {
+    background: #DBEAFE;
+    color: #1D4ED8;
+}
+
+.msg-role-badge.student {
+    background: #EDE9FE;
+    color: #6D28D9;
+}
+
+.msg-conv-time {
+    font-size: 11px;
+    color: var(--text-light);
+    flex-shrink: 0;
+}
+
+.msg-conv-bottom {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.msg-conv-preview {
+    font-size: 13px;
+    color: var(--text-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    flex: 1;
+    margin-right: 8px;
+}
+
+.msg-unread-badge {
+    background: var(--danger);
+    color: #fff;
+    font-size: 11px;
+    font-weight: 600;
+    min-width: 20px;
+    height: 20px;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 6px;
+    flex-shrink: 0;
+}
+
+/* ===== Right Panel: Chat View ===== */
+.msg-chat-panel {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-page);
+    min-width: 0;
+}
+
+/* Chat Header */
+.msg-chat-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 20px;
+    background: var(--bg-card);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+}
+
+.msg-chat-header-left {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.msg-back-btn {
+    display: none;
+    width: 36px;
+    height: 36px;
+    border: none;
+    background: transparent;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    color: var(--text-muted);
+    font-size: 18px;
+    align-items: center;
+    justify-content: center;
+    transition: all var(--transition);
+}
+
+.msg-back-btn:hover {
+    background: var(--bg-hover);
+    color: var(--primary);
+}
+
+.msg-chat-partner-avatar {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    font-weight: 600;
+    color: #fff;
+}
+
+.msg-chat-partner-avatar.teacher {
+    background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+}
+
+.msg-chat-partner-avatar.student {
+    background: linear-gradient(135deg, #8B5CF6, #7C3AED);
+}
+
+.msg-chat-partner-info {
+    display: flex;
+    flex-direction: column;
+}
+
+.msg-chat-partner-name {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.msg-chat-partner-status {
+    font-size: 12px;
+    color: var(--text-light);
+}
+
+.msg-chat-header-actions {
+    display: flex;
+    gap: 4px;
+}
+
+/* Chat Body */
+.msg-chat-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.msg-chat-body::-webkit-scrollbar {
+    width: 6px;
+}
+
+.msg-chat-body::-webkit-scrollbar-thumb {
+    background: #D1D5DB;
+    border-radius: 4px;
+}
+
+/* Date Separator */
+.msg-date-sep {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 16px 0;
+    gap: 12px;
+}
+
+.msg-date-sep::before,
+.msg-date-sep::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: #D1D5DB;
+}
+
+.msg-date-sep span {
+    font-size: 12px;
+    color: var(--text-light);
+    white-space: nowrap;
+    padding: 2px 12px;
+    background: var(--bg-page);
+    border-radius: 12px;
+}
+
+/* Message Bubbles */
+.msg-bubble-row {
+    display: flex;
+    align-items: flex-end;
+    gap: 6px;
+    margin-bottom: 2px;
+}
+
+.msg-bubble-row.me {
+    flex-direction: row-reverse;
+}
+
+.msg-bubble-row.partner {
+    flex-direction: row;
+}
+
+.msg-bubble {
+    max-width: 70%;
+    padding: 10px 16px;
+    border-radius: var(--radius-lg);
+    font-size: 14px;
+    line-height: 1.5;
+    word-break: break-word;
+    position: relative;
+}
+
+.msg-bubble.me {
+    background: var(--primary);
+    color: #FFFFFF;
+    border-bottom-right-radius: 4px;
+}
+
+.msg-bubble.partner {
+    background: var(--bg-partner-bubble);
+    color: var(--text-primary);
+    border-bottom-left-radius: 4px;
+}
+
+.msg-bubble-meta {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-shrink: 0;
+    align-self: flex-end;
+    margin-bottom: 4px;
+}
+
+.msg-bubble-time {
+    font-size: 11px;
+    color: var(--text-light);
+    white-space: nowrap;
+}
+
+.msg-read-status {
+    font-size: 11px;
+    display: flex;
+    align-items: center;
+}
+
+.msg-read-status.sent {
+    color: var(--text-light);
+}
+
+.msg-read-status.read {
+    color: var(--success);
+}
+
+/* Empty State */
+.msg-empty-state {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-light);
+    gap: 12px;
+}
+
+.msg-empty-state i {
+    font-size: 48px;
+    color: #D1D5DB;
+}
+
+.msg-empty-state p {
+    font-size: 15px;
+}
+
+.msg-empty-state .msg-empty-sub {
+    font-size: 13px;
+    color: #D1D5DB;
+}
+
+/* Chat Input */
+.msg-chat-input-area {
+    padding: 12px 20px;
+    background: var(--bg-card);
+    border-top: 1px solid var(--border);
+    flex-shrink: 0;
+}
+
+.msg-chat-input-wrapper {
+    display: flex;
+    align-items: flex-end;
+    gap: 8px;
+    background: var(--bg-hover);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 8px 12px;
+    transition: all var(--transition);
+}
+
+.msg-chat-input-wrapper:focus-within {
+    border-color: var(--primary);
+    background: var(--bg-card);
+    box-shadow: 0 0 0 3px rgba(37,99,235,0.1);
+}
+
+.msg-input-actions {
+    display: flex;
+    gap: 2px;
+    flex-shrink: 0;
+    padding-bottom: 2px;
+}
+
+.msg-input-action-btn {
+    width: 32px;
+    height: 32px;
+    border: none;
+    background: transparent;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    color: var(--text-light);
+    font-size: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all var(--transition);
+}
+
+.msg-input-action-btn:hover {
+    color: var(--primary);
+    background: var(--primary-bg);
+}
+
+.msg-textarea {
+    flex: 1;
+    border: none;
+    background: transparent;
+    font-family: inherit;
+    font-size: 14px;
+    line-height: 1.5;
+    color: var(--text-primary);
+    resize: none;
+    outline: none;
+    min-height: 20px;
+    max-height: calc(1.5em * 5 + 4px);
+    overflow-y: auto;
+}
+
+.msg-textarea::placeholder {
+    color: var(--text-light);
+}
+
+.msg-send-btn {
+    width: 36px;
+    height: 36px;
+    border: none;
+    background: var(--primary);
+    border-radius: 50%;
+    cursor: pointer;
+    color: #fff;
+    font-size: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    transition: all var(--transition);
+}
+
+.msg-send-btn:hover {
+    background: var(--primary-dark);
+    transform: scale(1.05);
+}
+
+.msg-send-btn:disabled {
+    background: #D1D5DB;
+    cursor: not-allowed;
+    transform: none;
+}
+
+/* ===== Letter Mode (Single-direction) ===== */
+.msg-letter-tabs {
+    display: flex;
+    gap: 0;
+    border-bottom: 1px solid var(--border);
+    padding: 0 20px;
+    background: var(--bg-card);
+}
+
+.msg-letter-tab {
+    padding: 10px 20px;
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text-muted);
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    transition: all var(--transition);
+    background: none;
+    border-top: none;
+    border-left: none;
+    border-right: none;
+    font-family: inherit;
+}
+
+.msg-letter-tab:hover {
+    color: var(--text-primary);
+}
+
+.msg-letter-tab.active {
+    color: var(--primary);
+    border-bottom-color: var(--primary);
+    font-weight: 600;
+}
+
+.msg-letter-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px 20px;
+}
+
+.msg-letter-card {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 16px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    margin-bottom: 8px;
+    cursor: pointer;
+    transition: all var(--transition);
+}
+
+.msg-letter-card:hover {
+    border-color: var(--primary);
+    box-shadow: var(--shadow-sm);
+}
+
+.msg-letter-card.unread {
+    background: var(--primary-bg);
+    border-color: rgba(37,99,235,0.2);
+}
+
+.msg-letter-card.unread .msg-letter-subject {
+    font-weight: 700;
+}
+
+.msg-letter-avatar {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    font-weight: 600;
+    color: #fff;
+    flex-shrink: 0;
+}
+
+.msg-letter-avatar.teacher {
+    background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+}
+
+.msg-letter-avatar.student {
+    background: linear-gradient(135deg, #8B5CF6, #7C3AED);
+}
+
+.msg-letter-content {
+    flex: 1;
+    min-width: 0;
+}
+
+.msg-letter-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 2px;
+}
+
+.msg-letter-sender {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.msg-letter-date {
+    font-size: 12px;
+    color: var(--text-light);
+}
+
+.msg-letter-subject {
+    font-size: 13px;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.msg-letter-status {
+    font-size: 12px;
+    padding: 2px 8px;
+    border-radius: 10px;
+    flex-shrink: 0;
+}
+
+.msg-letter-status.read {
+    background: var(--success-light);
+    color: #059669;
+}
+
+.msg-letter-status.unread {
+    background: var(--danger-light);
+    color: var(--danger);
+}
+
+/* Letter Detail View */
+.msg-letter-detail {
+    flex: 1;
+    overflow-y: auto;
+    padding: 24px;
+    display: none;
+}
+
+.msg-letter-detail.show {
+    display: block;
+}
+
+.msg-letter-paper {
+    max-width: 600px;
+    margin: 0 auto;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 32px;
+    box-shadow: var(--shadow-sm);
+    position: relative;
+}
+
+.msg-letter-paper::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 4px;
+    background: linear-gradient(90deg, var(--primary), #8B5CF6);
+    border-radius: var(--radius-md) var(--radius-md) 0 0;
+}
+
+.msg-letter-paper-header {
+    text-align: center;
+    padding-bottom: 20px;
+    border-bottom: 1px dashed var(--border);
+    margin-bottom: 20px;
+}
+
+.msg-letter-paper-icon {
+    font-size: 28px;
+    color: var(--primary);
+    margin-bottom: 8px;
+}
+
+.msg-letter-paper-from {
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 4px;
+}
+
+.msg-letter-paper-date {
+    font-size: 13px;
+    color: var(--text-light);
+}
+
+.msg-letter-paper-body {
+    font-size: 14px;
+    line-height: 1.8;
+    color: var(--text-secondary);
+    min-height: 120px;
+    padding: 12px 0;
+}
+
+.msg-letter-paper-footer {
+    text-align: right;
+    padding-top: 20px;
+    border-top: 1px dashed var(--border);
+    margin-top: 20px;
+}
+
+.msg-letter-reply-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 20px;
+    background: var(--primary);
+    color: #fff;
+    border: none;
+    border-radius: var(--radius-sm);
+    font-family: inherit;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all var(--transition);
+}
+
+.msg-letter-reply-btn:hover {
+    background: var(--primary-dark);
+}
+
+/* ===== Modals ===== */
+.msg-modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.5);
+    z-index: 10000;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    animation: fadeIn 0.2s ease;
+}
+
+.msg-modal-overlay.show {
+    display: flex;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+@keyframes slideUp {
+    from { transform: translateY(20px); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
+}
+
+.msg-modal {
+    background: var(--bg-card);
+    border-radius: var(--radius-md);
+    width: 90%;
+    max-width: 480px;
+    max-height: 90vh;
+    overflow-y: auto;
+    box-shadow: var(--shadow-lg);
+    animation: slideUp 0.25s ease;
+}
+
+.msg-modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border);
+}
+
+.msg-modal-title {
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--text-primary);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.msg-modal-title i {
+    color: var(--primary);
+}
+
+.msg-modal-close {
+    width: 32px;
+    height: 32px;
+    border: none;
+    background: transparent;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    color: var(--text-muted);
+    font-size: 18px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all var(--transition);
+}
+
+.msg-modal-close:hover {
+    background: var(--bg-hover);
+    color: var(--danger);
+}
+
+.msg-modal-body {
+    padding: 20px;
+}
+
+.msg-modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    padding: 16px 20px;
+    border-top: 1px solid var(--border);
+}
+
+/* Form elements */
+.msg-form-group {
+    margin-bottom: 16px;
+}
+
+.msg-form-label {
+    display: block;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    margin-bottom: 6px;
+}
+
+.msg-form-input {
+    width: 100%;
+    padding: 8px 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    font-family: inherit;
+    font-size: 14px;
+    color: var(--text-primary);
+    background: var(--bg-card);
+    outline: none;
+    transition: all var(--transition);
+}
+
+.msg-form-input:focus {
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px rgba(37,99,235,0.1);
+}
+
+.msg-form-textarea {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    font-family: inherit;
+    font-size: 14px;
+    line-height: 1.6;
+    color: var(--text-primary);
+    background: var(--bg-card);
+    outline: none;
+    resize: vertical;
+    min-height: 120px;
+    transition: all var(--transition);
+}
+
+.msg-form-textarea:focus {
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px rgba(37,99,235,0.1);
+}
+
+/* Selected members */
+.msg-selected-members {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 8px;
+    min-height: 24px;
+}
+
+.msg-selected-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 10px;
+    background: var(--primary-bg);
+    color: var(--primary);
+    border-radius: 12px;
+    font-size: 13px;
+    font-weight: 500;
+}
+
+.msg-selected-tag .remove-tag {
+    cursor: pointer;
+    font-size: 14px;
+    margin-left: 2px;
+    color: var(--primary);
+    opacity: 0.7;
+    transition: opacity var(--transition);
+    background: none;
+    border: none;
+    font-family: inherit;
+    padding: 0;
+    line-height: 1;
+}
+
+.msg-selected-tag .remove-tag:hover {
+    opacity: 1;
+}
+
+/* Member search list */
+.msg-member-search-list {
+    max-height: 200px;
+    overflow-y: auto;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    margin-top: 8px;
+}
+
+.msg-member-option {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    cursor: pointer;
+    transition: background var(--transition);
+    font-size: 14px;
+    border-bottom: 1px solid var(--border-light);
+}
+
+.msg-member-option:last-child {
+    border-bottom: none;
+}
+
+.msg-member-option:hover {
+    background: var(--bg-hover);
+}
+
+.msg-member-option.selected {
+    background: var(--primary-bg);
+}
+
+.msg-member-option-avatar {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #8B5CF6, #7C3AED);
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 600;
+    flex-shrink: 0;
+}
+
+.msg-member-option-name {
+    flex: 1;
+    font-weight: 500;
+}
+
+.msg-member-option-check {
+    color: var(--primary);
+    font-size: 14px;
+    display: none;
+}
+
+.msg-member-option.selected .msg-member-option-check {
+    display: block;
+}
+
+/* Buttons */
+.msg-btn {
+    padding: 8px 20px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    font-family: inherit;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all var(--transition);
+    background: var(--bg-card);
+    color: var(--text-secondary);
+}
+
+.msg-btn:hover {
+    background: var(--bg-hover);
+}
+
+.msg-btn-primary {
+    background: var(--primary);
+    color: #fff;
+    border-color: var(--primary);
+}
+
+.msg-btn-primary:hover {
+    background: var(--primary-dark);
+    border-color: var(--primary-dark);
+}
+
+.msg-btn-primary:disabled {
+    background: #93C5FD;
+    border-color: #93C5FD;
+    cursor: not-allowed;
+}
+
+/* ===== Settings Panel (as Modal) ===== */
+.msg-settings-section {
+    margin-bottom: 24px;
+}
+
+.msg-settings-section:last-child {
+    margin-bottom: 0;
+}
+
+.msg-settings-section-title {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border-light);
+}
+
+.msg-settings-option {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 8px 0;
+    cursor: pointer;
+}
+
+.msg-settings-option input[type="radio"] {
+    margin-top: 2px;
+    accent-color: var(--primary);
+    cursor: pointer;
+}
+
+.msg-settings-option-label {
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text-primary);
+}
+
+.msg-settings-option-desc {
+    font-size: 12px;
+    color: var(--text-light);
+    margin-top: 2px;
+}
+
+/* Toggle switch */
+.msg-toggle-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 0;
+}
+
+.msg-toggle-label {
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text-primary);
+}
+
+.msg-toggle {
+    position: relative;
+    width: 44px;
+    height: 24px;
+    background: #D1D5DB;
+    border-radius: 12px;
+    cursor: pointer;
+    transition: background var(--transition);
+    border: none;
+    padding: 0;
+}
+
+.msg-toggle.on {
+    background: var(--primary);
+}
+
+.msg-toggle::after {
+    content: '';
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 20px;
+    height: 20px;
+    background: #fff;
+    border-radius: 50%;
+    transition: transform var(--transition);
+    box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+}
+
+.msg-toggle.on::after {
+    transform: translateX(20px);
+}
+
+/* ===== Message type indicator ===== */
+.msg-type-indicator {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    background: var(--primary-bg);
+    border-radius: var(--radius-sm);
+    font-size: 12px;
+    color: var(--primary);
+    font-weight: 500;
+    margin: 0 20px 0 20px;
+}
+
+.msg-type-indicator i {
+    font-size: 14px;
+}
+
+/* ===== Responsive ===== */
+@media (max-width: 1024px) {
+    .msg-list-panel {
+        width: 240px;
+        min-width: 240px;
+    }
+    :root {
+        --left-panel-width: 240px;
+    }
+    .msg-conv-name .msg-role-badge {
+        display: none;
+    }
+}
+
+@media (max-width: 768px) {
+    .msg-app {
+        height: calc(100vh - 56px);
+        margin-top: 56px;
+    }
+
+    .msg-list-panel {
+        width: 100%;
+        min-width: 100%;
+    }
+
+    .msg-chat-panel {
+        position: fixed;
+        inset: 0;
+        top: 56px;
+        z-index: 100;
+        transform: translateX(100%);
+        transition: transform 0.3s ease;
+    }
+
+    .msg-chat-panel.mobile-show {
+        transform: translateX(0);
+    }
+
+    .msg-back-btn {
+        display: flex;
+    }
+
+    .msg-bubble {
+        max-width: 85%;
+    }
+}
+
+/* ===== Partner avatar in chat for partner messages ===== */
+.msg-partner-chat-avatar {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: 600;
+    color: #fff;
+    flex-shrink: 0;
+}
+
+.msg-partner-chat-avatar.teacher {
+    background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+}
+
+.msg-partner-chat-avatar.student {
+    background: linear-gradient(135deg, #8B5CF6, #7C3AED);
+}
+
+/* First message from same sender shows avatar */
+.msg-bubble-row.partner .msg-partner-chat-avatar {
+    visibility: hidden;
+}
+
+.msg-bubble-row.partner.show-avatar .msg-partner-chat-avatar {
+    visibility: visible;
+}
+
+/* ===== Notification toast ===== */
+.msg-toast {
+    position: fixed;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%) translateY(60px);
+    background: #1F2937;
+    color: #fff;
+    padding: 10px 24px;
+    border-radius: var(--radius-sm);
+    font-size: 14px;
+    font-weight: 500;
+    box-shadow: var(--shadow-lg);
+    z-index: 20000;
+    opacity: 0;
+    transition: all 0.3s ease;
+    pointer-events: none;
+}
+
+.msg-toast.show {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+}
+</style>
+</head>
+<body data-gnb-page="classMessage" data-gnb-base="../../../">
+
+<!-- ===== Main App ===== -->
+<div class="msg-app" id="msgApp">
+
+    <!-- ===== Left Panel: Conversation List ===== -->
+    <div class="msg-list-panel" id="msgListPanel">
+        <div class="msg-list-header">
+            <div class="msg-list-header-top">
+                <div class="msg-list-title">
+                    <i class="fa-solid fa-paper-plane"></i>
+                    소통쪽지
+                </div>
+                <div class="msg-header-actions">
+                    <button class="msg-header-btn" title="설정" onclick="openSettingsModal()">
+                        <i class="fa-solid fa-gear"></i>
+                    </button>
+                    <button class="msg-header-btn" title="새 쪽지" onclick="openNewMessageModal()" style="color: var(--primary);">
+                        <i class="fa-solid fa-pen-to-square"></i>
+                    </button>
+                </div>
+            </div>
+            <div class="msg-search-box">
+                <i class="fa-solid fa-magnifying-glass"></i>
+                <input type="text" class="msg-search-input" placeholder="이름 또는 내용 검색..." id="msgSearchInput" oninput="filterConversations()">
+            </div>
+        </div>
+        <div class="msg-conv-list" id="msgConvList">
+            <!-- Rendered by JS -->
+        </div>
+    </div>
+
+    <!-- ===== Right Panel: Chat / Letter View ===== -->
+    <div class="msg-chat-panel" id="msgChatPanel">
+        <!-- Empty state (default) -->
+        <div class="msg-empty-state" id="msgEmptyState">
+            <i class="fa-regular fa-comment-dots"></i>
+            <p>대화를 선택해주세요</p>
+            <span class="msg-empty-sub">좌측 목록에서 대화를 선택하거나 새 쪽지를 작성해보세요</span>
+        </div>
+
+        <!-- Chat header (hidden initially) -->
+        <div class="msg-chat-header" id="msgChatHeader" style="display:none;">
+            <div class="msg-chat-header-left">
+                <button class="msg-back-btn" onclick="goBackToList()" title="뒤로가기">
+                    <i class="fa-solid fa-arrow-left"></i>
+                </button>
+                <div class="msg-chat-partner-avatar" id="chatPartnerAvatar"></div>
+                <div class="msg-chat-partner-info">
+                    <div class="msg-chat-partner-name" id="chatPartnerName"></div>
+                    <div class="msg-chat-partner-status" id="chatPartnerStatus">채움클래스 멤버</div>
+                </div>
+            </div>
+            <div class="msg-chat-header-actions">
+                <button class="msg-header-btn" title="검색" onclick="showToast('대화 내 검색 기능 준비 중')">
+                    <i class="fa-solid fa-magnifying-glass"></i>
+                </button>
+                <button class="msg-header-btn" title="더보기" onclick="showToast('추가 기능 준비 중')">
+                    <i class="fa-solid fa-ellipsis-vertical"></i>
+                </button>
+            </div>
+        </div>
+
+        <!-- Chat type indicator (shown when in letter mode) -->
+        <div class="msg-type-indicator" id="msgTypeIndicator" style="display:none;">
+            <i class="fa-solid fa-info-circle"></i>
+            <span id="msgTypeText">양방향 채팅 모드</span>
+        </div>
+
+        <!-- Chat Body (chat mode) -->
+        <div class="msg-chat-body" id="msgChatBody" style="display:none;">
+            <!-- Rendered by JS -->
+        </div>
+
+        <!-- Letter Tabs (letter mode) -->
+        <div class="msg-letter-tabs" id="msgLetterTabs" style="display:none;">
+            <button class="msg-letter-tab active" data-tab="received" onclick="switchLetterTab('received')">받은 쪽지</button>
+            <button class="msg-letter-tab" data-tab="sent" onclick="switchLetterTab('sent')">보낸 쪽지</button>
+        </div>
+
+        <!-- Letter List (letter mode) -->
+        <div class="msg-letter-list" id="msgLetterList" style="display:none;">
+            <!-- Rendered by JS -->
+        </div>
+
+        <!-- Letter Detail (letter mode) -->
+        <div class="msg-letter-detail" id="msgLetterDetail">
+            <!-- Rendered by JS -->
+        </div>
+
+        <!-- Chat Input (chat mode) -->
+        <div class="msg-chat-input-area" id="msgChatInputArea" style="display:none;">
+            <div class="msg-chat-input-wrapper">
+                <div class="msg-input-actions">
+                    <button class="msg-input-action-btn" title="이미지 첨부" onclick="showToast('이미지 첨부 기능 준비 중')">
+                        <i class="fa-regular fa-image"></i>
+                    </button>
+                    <button class="msg-input-action-btn" title="파일 첨부" onclick="showToast('파일 첨부 기능 준비 중')">
+                        <i class="fa-solid fa-paperclip"></i>
+                    </button>
+                </div>
+                <textarea class="msg-textarea" id="msgTextarea" placeholder="메시지를 입력하세요..." rows="1" oninput="autoResizeTextarea(this)" onkeydown="handleTextareaKeydown(event)"></textarea>
+                <button class="msg-send-btn" id="msgSendBtn" onclick="sendMessage()" disabled>
+                    <i class="fa-solid fa-paper-plane"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ===== New Message Modal ===== -->
+<div class="msg-modal-overlay" id="newMsgModal">
+    <div class="msg-modal">
+        <div class="msg-modal-header">
+            <div class="msg-modal-title">
+                <i class="fa-solid fa-envelope"></i>
+                새 쪽지 보내기
+            </div>
+            <button class="msg-modal-close" onclick="closeNewMessageModal()">
+                <i class="fa-solid fa-xmark"></i>
+            </button>
+        </div>
+        <div class="msg-modal-body">
+            <div class="msg-form-group">
+                <label class="msg-form-label">받는 사람</label>
+                <input type="text" class="msg-form-input" placeholder="이름을 검색하세요..." id="memberSearchInput" oninput="filterMembers()">
+                <div class="msg-selected-members" id="selectedMembers"></div>
+                <div class="msg-member-search-list" id="memberSearchList">
+                    <!-- Rendered by JS -->
+                </div>
+            </div>
+            <div class="msg-form-group">
+                <label class="msg-form-label">메시지</label>
+                <textarea class="msg-form-textarea" placeholder="메시지를 입력하세요..." id="newMsgTextarea"></textarea>
+            </div>
+        </div>
+        <div class="msg-modal-footer">
+            <button class="msg-btn" onclick="closeNewMessageModal()">취소</button>
+            <button class="msg-btn msg-btn-primary" onclick="sendNewMessage()" id="sendNewMsgBtn">
+                <i class="fa-solid fa-paper-plane" style="margin-right:4px;"></i> 보내기
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- ===== Settings Modal ===== -->
+<div class="msg-modal-overlay" id="settingsModal">
+    <div class="msg-modal">
+        <div class="msg-modal-header">
+            <div class="msg-modal-title">
+                <i class="fa-solid fa-gear"></i>
+                소통쪽지 설정
+            </div>
+            <button class="msg-modal-close" onclick="closeSettingsModal()">
+                <i class="fa-solid fa-xmark"></i>
+            </button>
+        </div>
+        <div class="msg-modal-body">
+            <!-- Scope -->
+            <div class="msg-settings-section">
+                <div class="msg-settings-section-title">사용 범위</div>
+                <label class="msg-settings-option">
+                    <input type="radio" name="msgScope" value="teacher-member" checked>
+                    <div>
+                        <div class="msg-settings-option-label">개설자 ↔ 멤버</div>
+                        <div class="msg-settings-option-desc">개별 상담용 - 개설자와 멤버만 소통</div>
+                    </div>
+                </label>
+                <label class="msg-settings-option">
+                    <input type="radio" name="msgScope" value="member-member">
+                    <div>
+                        <div class="msg-settings-option-label">멤버 간 허용</div>
+                        <div class="msg-settings-option-desc">자유 소통 - 멤버끼리도 쪽지 가능</div>
+                    </div>
+                </label>
+                <label class="msg-settings-option">
+                    <input type="radio" name="msgScope" value="disabled">
+                    <div>
+                        <div class="msg-settings-option-label">비활성화</div>
+                        <div class="msg-settings-option-desc">소통쪽지 사용 안 함</div>
+                    </div>
+                </label>
+            </div>
+
+            <!-- Type -->
+            <div class="msg-settings-section">
+                <div class="msg-settings-section-title">메시지 유형</div>
+                <label class="msg-settings-option">
+                    <input type="radio" name="msgType" value="chat" checked>
+                    <div>
+                        <div class="msg-settings-option-label">양방향 채팅</div>
+                        <div class="msg-settings-option-desc">실시간 대화형 (카카오톡 스타일)</div>
+                    </div>
+                </label>
+                <label class="msg-settings-option">
+                    <input type="radio" name="msgType" value="letter">
+                    <div>
+                        <div class="msg-settings-option-label">단방향 쪽지</div>
+                        <div class="msg-settings-option-desc">편지형 메시지</div>
+                    </div>
+                </label>
+            </div>
+
+            <!-- Notifications -->
+            <div class="msg-settings-section">
+                <div class="msg-settings-section-title">알림 설정</div>
+                <div class="msg-toggle-row">
+                    <span class="msg-toggle-label">새 메시지 알림</span>
+                    <button class="msg-toggle on" id="notifToggle" onclick="toggleNotification()"></button>
+                </div>
+            </div>
+        </div>
+        <div class="msg-modal-footer">
+            <button class="msg-btn" onclick="closeSettingsModal()">취소</button>
+            <button class="msg-btn msg-btn-primary" onclick="saveSettings()">저장</button>
+        </div>
+    </div>
+</div>
+
+<!-- Toast -->
+<div class="msg-toast" id="msgToast"></div>
+
+<script src="../../../common-nav.js"></script>
+<script>
+(function() {
+    'use strict';
+
+    // ===== Data =====
+    var conversations = [
+        {
+            id: 1,
+            partner: { name: "김영희 선생님", role: "teacher" },
+            lastMessage: "그래도 모르겠으면 내일 수업 시간에 다시 설명해줄게요!",
+            time: "2026-03-04T14:30:00",
+            unread: 2,
+            messages: [
+                { id: 1, sender: "me", text: "안녕하세요, 수학 과제 관련 질문이 있습니다.", time: "2026-03-04T14:25:00", read: true },
+                { id: 2, sender: "partner", text: "네, 어떤 부분이 궁금한가요?", time: "2026-03-04T14:28:00", read: true },
+                { id: 3, sender: "me", text: "3단원 7번 문제가 이해가 안 돼요. 풀이 과정을 알려주실 수 있나요?", time: "2026-03-04T14:29:00", read: true },
+                { id: 4, sender: "partner", text: "7번 문제는 곱셈의 교환법칙을 활용하면 됩니다. 먼저 큰 수를 앞에 놓고 계산해보세요.", time: "2026-03-04T14:30:00", read: false },
+                { id: 5, sender: "partner", text: "그래도 모르겠으면 내일 수업 시간에 다시 설명해줄게요!", time: "2026-03-04T14:30:00", read: false }
+            ]
+        },
+        {
+            id: 2,
+            partner: { name: "박민준", role: "student" },
+            lastMessage: "감사합니다! 내일 봐요~",
+            time: "2026-03-04T11:20:00",
+            unread: 0,
+            messages: [
+                { id: 1, sender: "partner", text: "선생님, 다음 주 체험학습 준비물이 뭐예요?", time: "2026-03-04T11:10:00", read: true },
+                { id: 2, sender: "me", text: "필기도구랑 도시락 챙겨오면 돼요!", time: "2026-03-04T11:15:00", read: true },
+                { id: 3, sender: "partner", text: "감사합니다! 내일 봐요~", time: "2026-03-04T11:20:00", read: true }
+            ]
+        },
+        {
+            id: 3,
+            partner: { name: "이서연", role: "student" },
+            lastMessage: "독서록 제출했습니다!",
+            time: "2026-03-03T16:45:00",
+            unread: 1,
+            messages: [
+                { id: 1, sender: "partner", text: "선생님, 독서록 양식이 어디에 있나요?", time: "2026-03-03T16:30:00", read: true },
+                { id: 2, sender: "me", text: "게시판에 올려놨어요. 확인해보세요~", time: "2026-03-03T16:35:00", read: true },
+                { id: 3, sender: "partner", text: "독서록 제출했습니다!", time: "2026-03-03T16:45:00", read: false }
+            ]
+        },
+        {
+            id: 4,
+            partner: { name: "최수아", role: "student" },
+            lastMessage: "네 알겠습니다!",
+            time: "2026-03-03T10:00:00",
+            unread: 0,
+            messages: [
+                { id: 1, sender: "me", text: "수아야, 다음 주 발표 준비 잘 하고 있니?", time: "2026-03-03T09:50:00", read: true },
+                { id: 2, sender: "partner", text: "네 알겠습니다!", time: "2026-03-03T10:00:00", read: true }
+            ]
+        },
+        {
+            id: 5,
+            partner: { name: "정하윤", role: "student" },
+            lastMessage: "좋은 하루 되세요 선생님!",
+            time: "2026-03-02T15:30:00",
+            unread: 0,
+            messages: [
+                { id: 1, sender: "partner", text: "선생님 오늘 수업 감사했습니다!", time: "2026-03-02T15:25:00", read: true },
+                { id: 2, sender: "me", text: "하윤이도 수고했어!", time: "2026-03-02T15:28:00", read: true },
+                { id: 3, sender: "partner", text: "좋은 하루 되세요 선생님!", time: "2026-03-02T15:30:00", read: true }
+            ]
+        }
+    ];
+
+    var classMembers = [
+        { id: 1, name: "김민준", role: "student" },
+        { id: 2, name: "이서연", role: "student" },
+        { id: 3, name: "박지호", role: "student" },
+        { id: 4, name: "최수아", role: "student" },
+        { id: 5, name: "정하윤", role: "student" },
+        { id: 6, name: "한도윤", role: "student" },
+        { id: 7, name: "강서연", role: "student" },
+        { id: 8, name: "윤민서", role: "student" }
+    ];
+
+    // Letter mode dummy data
+    var letters = {
+        received: [
+            { id: 1, from: "김민준", role: "student", subject: "수학 과제에 대해 질문 있어요", body: "선생님 안녕하세요!\n\n수학 3단원 과제에서 7번 문제가 이해가 안 됩니다. 곱셈의 교환법칙이라고 하셨는데, 두 자리 수 곱셈에서도 적용이 되나요?\n\n예를 들어 23 x 45 = 45 x 23 이 되는 건지 궁금합니다.\n\n감사합니다!", date: "2026-03-04", read: false },
+            { id: 2, from: "이서연", role: "student", subject: "독서록 제출합니다", body: "선생님 안녕하세요.\n\n이번 주 독서록을 제출합니다. '어린 왕자'를 읽고 작성했습니다.\n\n감상을 한 마디로 요약하면, 정말 중요한 것은 눈에 보이지 않는다는 것을 배웠습니다.\n\n확인 부탁드립니다.", date: "2026-03-03", read: true },
+            { id: 3, from: "최수아", role: "student", subject: "발표 주제 변경 가능한가요?", body: "선생님 안녕하세요!\n\n다음 주 발표 주제를 '우주 탐험'에서 '해양 생물'로 변경해도 될까요? 관련 자료를 더 많이 찾았거든요.\n\n답변 기다리겠습니다!", date: "2026-03-02", read: true }
+        ],
+        sent: [
+            { id: 4, to: "김민준", role: "student", subject: "수학 과제 답변", body: "민준아 안녕!\n\n좋은 질문이야. 네, 곱셈의 교환법칙은 어떤 수에서든 적용돼.\n23 x 45 = 45 x 23 = 1,035 맞아!\n\n이해 안 되면 내일 수업 시간에 다시 설명해줄게.", date: "2026-03-04", read: true },
+            { id: 5, to: "전체", role: "teacher", subject: "다음 주 체험학습 안내", body: "우리 반 친구들 안녕!\n\n다음 주 화요일 체험학습 준비물 안내드립니다.\n\n1. 필기도구\n2. 도시락 및 물\n3. 활동복 착용\n\n날씨가 쌀쌀할 수 있으니 겉옷도 챙겨오세요!\n\n궁금한 점은 언제든 물어보세요.", date: "2026-03-03", read: true }
+        ]
+    };
+
+    // State
+    var activeConversationId = null;
+    var selectedMembers = [];
+    var messageMode = 'chat'; // 'chat' or 'letter'
+    var activeLetterTab = 'received';
+    var msgIdCounter = 100;
+
+    // ===== DOM Elements =====
+    var convListEl = document.getElementById('msgConvList');
+    var chatPanel = document.getElementById('msgChatPanel');
+    var emptyState = document.getElementById('msgEmptyState');
+    var chatHeader = document.getElementById('msgChatHeader');
+    var chatBody = document.getElementById('msgChatBody');
+    var chatInputArea = document.getElementById('msgChatInputArea');
+    var textarea = document.getElementById('msgTextarea');
+    var sendBtn = document.getElementById('msgSendBtn');
+    var typeIndicator = document.getElementById('msgTypeIndicator');
+    var typeText = document.getElementById('msgTypeText');
+    var letterTabs = document.getElementById('msgLetterTabs');
+    var letterListEl = document.getElementById('msgLetterList');
+    var letterDetailEl = document.getElementById('msgLetterDetail');
+
+    // ===== Utility Functions =====
+    function formatTime(isoStr) {
+        var d = new Date(isoStr);
+        var now = new Date();
+        var hours = d.getHours();
+        var minutes = d.getMinutes().toString().padStart(2, '0');
+        var period = hours < 12 ? '오전' : '오후';
+        var h12 = hours % 12 || 12;
+
+        if (d.toDateString() === now.toDateString()) {
+            return period + ' ' + h12 + ':' + minutes;
+        }
+
+        var yesterday = new Date(now);
+        yesterday.setDate(yesterday.getDate() - 1);
+        if (d.toDateString() === yesterday.toDateString()) {
+            return '어제';
+        }
+
+        return (d.getMonth() + 1) + '/' + d.getDate();
+    }
+
+    function formatFullTime(isoStr) {
+        var d = new Date(isoStr);
+        var hours = d.getHours();
+        var minutes = d.getMinutes().toString().padStart(2, '0');
+        var period = hours < 12 ? '오전' : '오후';
+        var h12 = hours % 12 || 12;
+        return period + ' ' + h12 + ':' + minutes;
+    }
+
+    function formatDateLabel(isoStr) {
+        var d = new Date(isoStr);
+        var year = d.getFullYear();
+        var month = d.getMonth() + 1;
+        var day = d.getDate();
+        var dayNames = ['일', '월', '화', '수', '목', '금', '토'];
+        var dayName = dayNames[d.getDay()];
+        return year + '년 ' + month + '월 ' + day + '일 ' + dayName + '요일';
+    }
+
+    function getInitial(name) {
+        return name.replace(/ 선생님$/, '').charAt(0);
+    }
+
+    function escapeHtml(text) {
+        var div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    // ===== Toast =====
+    window.showToast = function(msg) {
+        var toast = document.getElementById('msgToast');
+        toast.textContent = msg;
+        toast.classList.add('show');
+        clearTimeout(toast._timer);
+        toast._timer = setTimeout(function() {
+            toast.classList.remove('show');
+        }, 2000);
+    };
+
+    // ===== Render Conversation List =====
+    function renderConvList(filter) {
+        var html = '';
+        var filtered = conversations;
+        if (filter) {
+            var q = filter.toLowerCase();
+            filtered = conversations.filter(function(c) {
+                return c.partner.name.toLowerCase().indexOf(q) !== -1 ||
+                       c.lastMessage.toLowerCase().indexOf(q) !== -1;
+            });
+        }
+
+        filtered.forEach(function(conv) {
+            var isActive = conv.id === activeConversationId;
+            var hasUnread = conv.unread > 0;
+            var initial = getInitial(conv.partner.name);
+            var roleClass = conv.partner.role;
+            var roleBadgeText = conv.partner.role === 'teacher' ? '선생님' : '학생';
+
+            html += '<div class="msg-conv-item' +
+                    (isActive ? ' active' : '') +
+                    (hasUnread ? ' has-unread' : '') +
+                    '" data-id="' + conv.id + '" onclick="selectConversation(' + conv.id + ')">' +
+                    '<div class="msg-conv-avatar ' + roleClass + '">' + initial + '</div>' +
+                    '<div class="msg-conv-info">' +
+                        '<div class="msg-conv-top">' +
+                            '<span class="msg-conv-name">' +
+                                escapeHtml(conv.partner.name) +
+                                '<span class="msg-role-badge ' + roleClass + '">' + roleBadgeText + '</span>' +
+                            '</span>' +
+                            '<span class="msg-conv-time">' + formatTime(conv.time) + '</span>' +
+                        '</div>' +
+                        '<div class="msg-conv-bottom">' +
+                            '<span class="msg-conv-preview">' + escapeHtml(conv.lastMessage) + '</span>' +
+                            (hasUnread ? '<span class="msg-unread-badge">' + conv.unread + '</span>' : '') +
+                        '</div>' +
+                    '</div>' +
+                '</div>';
+        });
+
+        if (!filtered.length) {
+            html = '<div style="padding:40px 20px;text-align:center;color:var(--text-light);">' +
+                   '<i class="fa-regular fa-face-meh" style="font-size:32px;margin-bottom:8px;display:block;"></i>' +
+                   '검색 결과가 없습니다</div>';
+        }
+
+        convListEl.innerHTML = html;
+    }
+
+    window.filterConversations = function() {
+        var q = document.getElementById('msgSearchInput').value;
+        renderConvList(q);
+    };
+
+    // ===== Select Conversation =====
+    window.selectConversation = function(id) {
+        activeConversationId = id;
+        var conv = conversations.find(function(c) { return c.id === id; });
+        if (!conv) return;
+
+        // Mark as read
+        conv.unread = 0;
+        conv.messages.forEach(function(m) { m.read = true; });
+
+        renderConvList(document.getElementById('msgSearchInput').value);
+
+        if (messageMode === 'chat') {
+            showChatView(conv);
+        } else {
+            showLetterView(conv);
+        }
+
+        // Mobile: show chat panel
+        chatPanel.classList.add('mobile-show');
+    };
+
+    // ===== Show Chat View =====
+    function showChatView(conv) {
+        emptyState.style.display = 'none';
+        chatHeader.style.display = 'flex';
+        chatBody.style.display = 'flex';
+        chatInputArea.style.display = 'block';
+        letterTabs.style.display = 'none';
+        letterListEl.style.display = 'none';
+        letterDetailEl.classList.remove('show');
+        typeIndicator.style.display = 'flex';
+        typeText.textContent = '양방향 채팅 모드';
+
+        // Header
+        var initial = getInitial(conv.partner.name);
+        var avatarEl = document.getElementById('chatPartnerAvatar');
+        avatarEl.className = 'msg-chat-partner-avatar ' + conv.partner.role;
+        avatarEl.textContent = initial;
+        document.getElementById('chatPartnerName').textContent = conv.partner.name;
+        document.getElementById('chatPartnerStatus').textContent =
+            conv.partner.role === 'teacher' ? '담당 선생님' : '채움클래스 멤버';
+
+        // Messages
+        renderMessages(conv);
+    }
+
+    function renderMessages(conv) {
+        var html = '';
+        var lastDate = '';
+
+        conv.messages.forEach(function(msg, idx) {
+            var msgDate = new Date(msg.time).toDateString();
+            if (msgDate !== lastDate) {
+                html += '<div class="msg-date-sep"><span>' + formatDateLabel(msg.time) + '</span></div>';
+                lastDate = msgDate;
+            }
+
+            var isMe = msg.sender === 'me';
+            var nextMsg = conv.messages[idx + 1];
+            var showAvatar = !isMe && (!nextMsg || nextMsg.sender === 'me' ||
+                new Date(nextMsg.time).toDateString() !== msgDate);
+
+            var readIcon = '';
+            if (isMe) {
+                if (msg.read) {
+                    readIcon = '<span class="msg-read-status read"><i class="fa-solid fa-check-double"></i></span>';
+                } else {
+                    readIcon = '<span class="msg-read-status sent"><i class="fa-solid fa-check"></i></span>';
+                }
+            }
+
+            html += '<div class="msg-bubble-row ' + (isMe ? 'me' : 'partner') +
+                    (showAvatar ? ' show-avatar' : '') + '">';
+
+            if (!isMe) {
+                html += '<div class="msg-partner-chat-avatar ' + conv.partner.role + '">' +
+                        getInitial(conv.partner.name) + '</div>';
+            }
+
+            if (isMe) {
+                html += '<div class="msg-bubble-meta">' +
+                        readIcon +
+                        '<span class="msg-bubble-time">' + formatFullTime(msg.time) + '</span>' +
+                        '</div>';
+            }
+
+            html += '<div class="msg-bubble ' + (isMe ? 'me' : 'partner') + '">' +
+                    escapeHtml(msg.text) + '</div>';
+
+            if (!isMe) {
+                html += '<div class="msg-bubble-meta">' +
+                        '<span class="msg-bubble-time">' + formatFullTime(msg.time) + '</span>' +
+                        '</div>';
+            }
+
+            html += '</div>';
+        });
+
+        chatBody.innerHTML = html;
+        chatBody.scrollTop = chatBody.scrollHeight;
+    }
+
+    // ===== Show Letter View =====
+    function showLetterView(conv) {
+        emptyState.style.display = 'none';
+        chatHeader.style.display = 'flex';
+        chatBody.style.display = 'none';
+        chatInputArea.style.display = 'none';
+        letterTabs.style.display = 'flex';
+        letterListEl.style.display = 'block';
+        letterDetailEl.classList.remove('show');
+        typeIndicator.style.display = 'flex';
+        typeText.textContent = '단방향 쪽지 모드';
+
+        var initial = getInitial(conv.partner.name);
+        var avatarEl = document.getElementById('chatPartnerAvatar');
+        avatarEl.className = 'msg-chat-partner-avatar ' + conv.partner.role;
+        avatarEl.textContent = initial;
+        document.getElementById('chatPartnerName').textContent = conv.partner.name;
+        document.getElementById('chatPartnerStatus').textContent =
+            conv.partner.role === 'teacher' ? '담당 선생님' : '채움클래스 멤버';
+
+        renderLetterList();
+    }
+
+    function renderLetterList() {
+        var list = letters[activeLetterTab] || [];
+        var html = '';
+
+        list.forEach(function(letter) {
+            var personName = activeLetterTab === 'received' ? letter.from : (letter.to || '');
+            var initial = personName.charAt(0);
+            var isUnread = !letter.read;
+
+            html += '<div class="msg-letter-card' + (isUnread ? ' unread' : '') +
+                    '" onclick="viewLetter(\'' + activeLetterTab + '\',' + letter.id + ')">' +
+                    '<div class="msg-letter-avatar ' + letter.role + '">' + initial + '</div>' +
+                    '<div class="msg-letter-content">' +
+                        '<div class="msg-letter-top">' +
+                            '<span class="msg-letter-sender">' +
+                            (activeLetterTab === 'received' ? escapeHtml(letter.from) : '받는 사람: ' + escapeHtml(letter.to)) +
+                            '</span>' +
+                            '<span class="msg-letter-date">' + letter.date + '</span>' +
+                        '</div>' +
+                        '<div class="msg-letter-subject">' + escapeHtml(letter.subject) + '</div>' +
+                    '</div>' +
+                    '<span class="msg-letter-status ' + (letter.read ? 'read' : 'unread') + '">' +
+                        (letter.read ? '읽음' : '안읽음') +
+                    '</span>' +
+                '</div>';
+        });
+
+        if (!list.length) {
+            html = '<div style="padding:60px 20px;text-align:center;color:var(--text-light);">' +
+                   '<i class="fa-regular fa-envelope" style="font-size:36px;margin-bottom:12px;display:block;"></i>' +
+                   (activeLetterTab === 'received' ? '받은 쪽지가 없습니다' : '보낸 쪽지가 없습니다') +
+                   '</div>';
+        }
+
+        letterListEl.innerHTML = html;
+    }
+
+    window.switchLetterTab = function(tab) {
+        activeLetterTab = tab;
+        document.querySelectorAll('.msg-letter-tab').forEach(function(el) {
+            el.classList.toggle('active', el.getAttribute('data-tab') === tab);
+        });
+        letterDetailEl.classList.remove('show');
+        letterListEl.style.display = 'block';
+        renderLetterList();
+    };
+
+    window.viewLetter = function(tab, id) {
+        var list = letters[tab] || [];
+        var letter = list.find(function(l) { return l.id === id; });
+        if (!letter) return;
+
+        letter.read = true;
+        renderLetterList();
+
+        var personName = tab === 'received' ? letter.from : letter.to;
+        var initial = personName.charAt(0);
+
+        letterListEl.style.display = 'none';
+        letterDetailEl.innerHTML = '<div class="msg-letter-paper">' +
+            '<div class="msg-letter-paper-header">' +
+                '<div class="msg-letter-paper-icon"><i class="fa-solid fa-envelope-open-text"></i></div>' +
+                '<div class="msg-letter-paper-from">' +
+                (tab === 'received' ? escapeHtml(letter.from) + ' 님이 보낸 쪽지' : escapeHtml(letter.to) + ' 님에게 보낸 쪽지') +
+                '</div>' +
+                '<div class="msg-letter-paper-date">' + letter.date + '</div>' +
+            '</div>' +
+            '<div class="msg-letter-paper-body">' + escapeHtml(letter.body).replace(/\n/g, '<br>') + '</div>' +
+            '<div class="msg-letter-paper-footer">' +
+                '<button class="msg-btn" onclick="backToLetterList()" style="margin-right:8px;">' +
+                    '<i class="fa-solid fa-arrow-left"></i> 목록으로' +
+                '</button>' +
+                (tab === 'received' ? '<button class="msg-letter-reply-btn" onclick="showToast(\'답장 기능 준비 중\')">' +
+                    '<i class="fa-solid fa-reply"></i> 답장하기</button>' : '') +
+            '</div>' +
+        '</div>';
+        letterDetailEl.classList.add('show');
+    };
+
+    window.backToLetterList = function() {
+        letterDetailEl.classList.remove('show');
+        letterListEl.style.display = 'block';
+    };
+
+    // ===== Message Input =====
+    window.autoResizeTextarea = function(el) {
+        el.style.height = 'auto';
+        el.style.height = Math.min(el.scrollHeight, 120) + 'px';
+        sendBtn.disabled = !el.value.trim();
+    };
+
+    window.handleTextareaKeydown = function(e) {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            if (textarea.value.trim()) {
+                sendMessage();
+            }
+        }
+    };
+
+    window.sendMessage = function() {
+        var text = textarea.value.trim();
+        if (!text || !activeConversationId) return;
+
+        var conv = conversations.find(function(c) { return c.id === activeConversationId; });
+        if (!conv) return;
+
+        var now = new Date().toISOString();
+        msgIdCounter++;
+        conv.messages.push({
+            id: msgIdCounter,
+            sender: 'me',
+            text: text,
+            time: now,
+            read: false
+        });
+        conv.lastMessage = text;
+        conv.time = now;
+
+        textarea.value = '';
+        textarea.style.height = 'auto';
+        sendBtn.disabled = true;
+
+        renderMessages(conv);
+        renderConvList(document.getElementById('msgSearchInput').value);
+
+        // Simulate reply after 1.5s
+        setTimeout(function() {
+            if (activeConversationId !== conv.id) return;
+            msgIdCounter++;
+            var replies = [
+                '네, 알겠습니다!',
+                '감사합니다!',
+                '확인했어요~',
+                '좋아요!',
+                '네, 선생님!'
+            ];
+            var replyText = replies[Math.floor(Math.random() * replies.length)];
+            var replyTime = new Date().toISOString();
+            conv.messages.push({
+                id: msgIdCounter,
+                sender: 'partner',
+                text: replyText,
+                time: replyTime,
+                read: true
+            });
+            conv.lastMessage = replyText;
+            conv.time = replyTime;
+            renderMessages(conv);
+            renderConvList(document.getElementById('msgSearchInput').value);
+        }, 1500);
+    };
+
+    // ===== Mobile Back =====
+    window.goBackToList = function() {
+        chatPanel.classList.remove('mobile-show');
+        activeConversationId = null;
+        renderConvList(document.getElementById('msgSearchInput').value);
+    };
+
+    // ===== New Message Modal =====
+    window.openNewMessageModal = function() {
+        selectedMembers = [];
+        document.getElementById('memberSearchInput').value = '';
+        document.getElementById('newMsgTextarea').value = '';
+        renderSelectedMembers();
+        renderMemberList();
+        document.getElementById('newMsgModal').classList.add('show');
+    };
+
+    window.closeNewMessageModal = function() {
+        document.getElementById('newMsgModal').classList.remove('show');
+    };
+
+    function renderSelectedMembers() {
+        var html = '';
+        selectedMembers.forEach(function(m) {
+            html += '<span class="msg-selected-tag">' +
+                    escapeHtml(m.name) +
+                    '<button class="remove-tag" onclick="removeMember(' + m.id + ')">&times;</button>' +
+                    '</span>';
+        });
+        document.getElementById('selectedMembers').innerHTML = html;
+    }
+
+    window.removeMember = function(id) {
+        selectedMembers = selectedMembers.filter(function(m) { return m.id !== id; });
+        renderSelectedMembers();
+        renderMemberList();
+    };
+
+    function renderMemberList(filter) {
+        var html = '';
+        var filtered = classMembers;
+        if (filter) {
+            var q = filter.toLowerCase();
+            filtered = classMembers.filter(function(m) {
+                return m.name.toLowerCase().indexOf(q) !== -1;
+            });
+        }
+
+        filtered.forEach(function(m) {
+            var isSelected = selectedMembers.some(function(s) { return s.id === m.id; });
+            html += '<div class="msg-member-option' + (isSelected ? ' selected' : '') +
+                    '" onclick="toggleMember(' + m.id + ')">' +
+                    '<div class="msg-member-option-avatar">' + m.name.charAt(0) + '</div>' +
+                    '<span class="msg-member-option-name">' + escapeHtml(m.name) + '</span>' +
+                    '<i class="fa-solid fa-check msg-member-option-check"></i>' +
+                    '</div>';
+        });
+
+        if (!filtered.length) {
+            html = '<div style="padding:20px;text-align:center;color:var(--text-light);font-size:13px;">검색 결과가 없습니다</div>';
+        }
+
+        document.getElementById('memberSearchList').innerHTML = html;
+    }
+
+    window.toggleMember = function(id) {
+        var exists = selectedMembers.some(function(m) { return m.id === id; });
+        if (exists) {
+            selectedMembers = selectedMembers.filter(function(m) { return m.id !== id; });
+        } else {
+            var member = classMembers.find(function(m) { return m.id === id; });
+            if (member) selectedMembers.push(member);
+        }
+        renderSelectedMembers();
+        renderMemberList(document.getElementById('memberSearchInput').value);
+    };
+
+    window.filterMembers = function() {
+        var q = document.getElementById('memberSearchInput').value;
+        renderMemberList(q);
+    };
+
+    window.sendNewMessage = function() {
+        if (!selectedMembers.length) {
+            showToast('받는 사람을 선택해주세요');
+            return;
+        }
+        var text = document.getElementById('newMsgTextarea').value.trim();
+        if (!text) {
+            showToast('메시지를 입력해주세요');
+            return;
+        }
+
+        // Create new conversation or add to existing one
+        selectedMembers.forEach(function(member) {
+            var existing = conversations.find(function(c) {
+                return c.partner.name === member.name || c.partner.name === member.name + ' 선생님';
+            });
+
+            var now = new Date().toISOString();
+            msgIdCounter++;
+
+            if (existing) {
+                existing.messages.push({
+                    id: msgIdCounter,
+                    sender: 'me',
+                    text: text,
+                    time: now,
+                    read: false
+                });
+                existing.lastMessage = text;
+                existing.time = now;
+            } else {
+                conversations.unshift({
+                    id: Date.now() + member.id,
+                    partner: { name: member.name, role: member.role },
+                    lastMessage: text,
+                    time: now,
+                    unread: 0,
+                    messages: [{
+                        id: msgIdCounter,
+                        sender: 'me',
+                        text: text,
+                        time: now,
+                        read: false
+                    }]
+                });
+            }
+        });
+
+        closeNewMessageModal();
+        renderConvList();
+        showToast('쪽지를 보냈습니다');
+    };
+
+    // ===== Settings Modal =====
+    window.openSettingsModal = function() {
+        document.getElementById('settingsModal').classList.add('show');
+    };
+
+    window.closeSettingsModal = function() {
+        document.getElementById('settingsModal').classList.remove('show');
+    };
+
+    window.toggleNotification = function() {
+        var toggle = document.getElementById('notifToggle');
+        toggle.classList.toggle('on');
+    };
+
+    window.saveSettings = function() {
+        var scope = document.querySelector('input[name="msgScope"]:checked').value;
+        var type = document.querySelector('input[name="msgType"]:checked').value;
+
+        messageMode = type;
+
+        if (scope === 'disabled') {
+            closeSettingsModal();
+            showToast('소통쪽지가 비활성화되었습니다');
+            return;
+        }
+
+        closeSettingsModal();
+        showToast('설정이 저장되었습니다');
+
+        // Re-render current view if a conversation is selected
+        if (activeConversationId) {
+            var conv = conversations.find(function(c) { return c.id === activeConversationId; });
+            if (conv) {
+                if (messageMode === 'chat') {
+                    showChatView(conv);
+                } else {
+                    showLetterView(conv);
+                }
+            }
+        }
+    };
+
+    // ===== Initialize =====
+    renderConvList();
+    renderMemberList();
+
+})();
+</script>
+</body>
+</html>

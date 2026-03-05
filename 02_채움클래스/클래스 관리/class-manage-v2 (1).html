@@ -1,0 +1,838 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>클래스 관리 - 개선 프로토타입</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
+    <link rel="stylesheet" href="dacheum-common.css">
+    <style>
+        /* 페이지 전용 스타일 */
+        .page-title { display: flex; align-items: center; gap: var(--space-sm); }
+        .page-title::before { content: ''; width: 6px; height: 32px; background: linear-gradient(180deg, var(--primary-500), var(--primary-700)); border-radius: var(--radius-full); }
+        
+        /* 테이블 스타일 */
+        .data-table { width: 100%; border-collapse: collapse; }
+        .data-table th, .data-table td { padding: var(--space-md); text-align: left; border-bottom: 1px solid var(--gray-200); }
+        .data-table th { background: var(--gray-50); font-weight: 600; font-size: var(--font-size-sm); color: var(--gray-600); }
+        .data-table td { font-size: var(--font-size-sm); }
+        .data-table tr:hover { background: var(--gray-50); }
+        
+        /* 클래스 정보 */
+        .class-info { display: flex; flex-direction: column; gap: var(--space-xs); }
+        .class-meta { display: flex; gap: var(--space-md); font-size: var(--font-size-xs); color: var(--gray-500); }
+        .class-name-link { font-weight: 600; color: var(--gray-800); display: flex; align-items: center; gap: var(--space-xs); }
+        .class-name-link:hover { color: var(--primary); }
+        .owner-badge { font-size: 14px; }
+        
+        /* 게시판 라벨 */
+        .board-labels { display: flex; flex-wrap: wrap; gap: var(--space-xs); }
+        
+        /* 액션 버튼 그룹 */
+        .action-btns { display: flex; gap: var(--space-xs); flex-wrap: wrap; }
+        
+        /* 더보기 메뉴 */
+        .more-menu { position: relative; }
+        .more-menu-list { position: absolute; right: 0; top: 100%; background: white; border-radius: var(--radius-md); box-shadow: var(--shadow-lg); min-width: 120px; z-index: 100; display: none; overflow: hidden; }
+        .more-menu-list.show { display: block; }
+        .more-menu-list a, .more-menu-list button { display: block; width: 100%; padding: var(--space-sm) var(--space-md); text-align: left; border: none; background: none; font-size: var(--font-size-sm); cursor: pointer; }
+        .more-menu-list a:hover, .more-menu-list button:hover { background: var(--gray-50); }
+        
+        /* 복사 모달 스텝 */
+        .copy-steps { display: flex; gap: var(--space-md); margin-bottom: var(--space-lg); }
+        .copy-step { flex: 1; text-align: center; padding: var(--space-md); border-radius: var(--radius-md); background: var(--gray-100); color: var(--gray-500); position: relative; }
+        .copy-step.active { background: var(--primary); color: white; }
+        .copy-step.completed { background: var(--primary-100); color: var(--primary-700); }
+        .copy-step-num { font-size: var(--font-size-xl); font-weight: 700; }
+        .copy-step-label { font-size: var(--font-size-xs); margin-top: var(--space-xs); }
+        
+        /* 복사 항목 선택 */
+        .copy-item-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--space-md); }
+        .copy-item { padding: var(--space-lg); border: 2px solid var(--gray-200); border-radius: var(--radius-lg); cursor: pointer; transition: all var(--transition-fast); text-align: center; }
+        .copy-item:hover { border-color: var(--primary-300); background: var(--primary-50); }
+        .copy-item.selected { border-color: var(--primary); background: var(--primary-50); }
+        .copy-item-icon { font-size: 2rem; margin-bottom: var(--space-sm); }
+        .copy-item-name { font-weight: 600; margin-bottom: var(--space-xs); }
+        .copy-item-count { font-size: var(--font-size-xs); color: var(--gray-500); }
+        .copy-item-check { width: 24px; height: 24px; border: 2px solid var(--gray-300); border-radius: 50%; margin: var(--space-sm) auto 0; display: flex; align-items: center; justify-content: center; }
+        .copy-item.selected .copy-item-check { background: var(--primary); border-color: var(--primary); color: white; }
+        
+        /* 멤버 선택 */
+        .member-select-area { max-height: 300px; overflow-y: auto; border: 1px solid var(--gray-200); border-radius: var(--radius-md); }
+        .member-item { display: flex; align-items: center; gap: var(--space-md); padding: var(--space-sm) var(--space-md); border-bottom: 1px solid var(--gray-100); }
+        .member-item:last-child { border-bottom: none; }
+        .member-item:hover { background: var(--gray-50); }
+        .member-item input[type="checkbox"] { width: 18px; height: 18px; }
+        .member-info { flex: 1; }
+        .member-name { font-weight: 500; }
+        .member-detail { font-size: var(--font-size-xs); color: var(--gray-500); }
+        
+        /* 게시판 설정 */
+        .board-type-selector { display: flex; gap: var(--space-md); margin-bottom: var(--space-md); }
+        .board-type-option { flex: 1; padding: var(--space-lg); border: 2px solid var(--gray-200); border-radius: var(--radius-lg); cursor: pointer; text-align: center; }
+        .board-type-option:hover { border-color: var(--primary-300); }
+        .board-type-option.selected { border-color: var(--primary); background: var(--primary-50); }
+        .board-type-icon { font-size: 2.5rem; margin-bottom: var(--space-sm); }
+        .board-type-name { font-weight: 600; }
+        .board-type-desc { font-size: var(--font-size-xs); color: var(--gray-500); margin-top: var(--space-xs); }
+        
+        /* 설정 폼 */
+        .setting-section { margin-bottom: var(--space-xl); }
+        .setting-title { font-size: var(--font-size-lg); font-weight: 700; margin-bottom: var(--space-md); display: flex; align-items: center; gap: var(--space-sm); }
+        .setting-grid { display: grid; grid-template-columns: 160px 1fr; gap: var(--space-md); align-items: start; }
+        .setting-label { font-weight: 500; color: var(--gray-700); padding-top: var(--space-sm); }
+        .setting-label .required { color: var(--error); margin-left: var(--space-xs); }
+        
+        /* 드래그 가능한 리스트 */
+        .draggable-list { display: flex; flex-direction: column; gap: var(--space-sm); }
+        .draggable-item { display: flex; align-items: center; gap: var(--space-md); padding: var(--space-md); background: white; border: 1px solid var(--gray-200); border-radius: var(--radius-md); cursor: move; }
+        .draggable-item:hover { border-color: var(--primary-300); }
+        .drag-handle { color: var(--gray-400); cursor: grab; }
+        .draggable-item .flex-1 { display: flex; align-items: center; gap: var(--space-sm); }
+        
+        /* 토글 스위치 */
+        .toggle-switch { position: relative; width: 48px; height: 24px; }
+        .toggle-switch input { opacity: 0; width: 0; height: 0; }
+        .toggle-slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background: var(--gray-300); border-radius: var(--radius-full); transition: var(--transition-fast); }
+        .toggle-slider::before { content: ''; position: absolute; height: 18px; width: 18px; left: 3px; bottom: 3px; background: white; border-radius: 50%; transition: var(--transition-fast); }
+        .toggle-switch input:checked + .toggle-slider { background: var(--primary); }
+        .toggle-switch input:checked + .toggle-slider::before { transform: translateX(24px); }
+        
+        /* 나도 예술가 연결 배지 */
+        .art-connect-badge { display: inline-flex; align-items: center; gap: var(--space-xs); padding: 2px var(--space-sm); background: linear-gradient(135deg, #FF6B6B, #4ECDC4); color: white; border-radius: var(--radius-full); font-size: var(--font-size-xs); font-weight: 600; }
+        
+        @media (max-width: 768px) {
+            .copy-item-grid { grid-template-columns: repeat(2, 1fr); }
+            .setting-grid { grid-template-columns: 1fr; }
+            .board-type-selector { flex-direction: column; }
+        }
+    </style>
+    <link rel="stylesheet" href="../../common-nav.css">
+</head>
+<body data-gnb-page="classManage" data-gnb-base="../../">
+    <div class="container">
+        <!-- 페이지 헤더 -->
+        <header class="flex justify-between items-center mb-xl">
+            <h1 class="text-3xl font-bold page-title">클래스 관리</h1>
+            <a href="#" class="btn btn-primary" onclick="openModal('createClassModal')">➕ 새로 만들기</a>
+        </header>
+
+        <!-- 현재 클래스 섹션 -->
+        <section class="section mb-xl">
+            <div class="flex justify-between items-center mb-lg">
+                <h2 class="text-xl font-bold">현재 클래스</h2>
+                <div class="flex gap-md items-center">
+                    <span class="text-sm text-gray">총 <strong class="text-primary">8</strong>개</span>
+                    <select class="select">
+                        <option>최신순</option>
+                        <option>클래스명 오름차순</option>
+                    </select>
+                    <div class="search-box" style="width: 280px;">
+                        <span class="search-icon">🔍</span>
+                        <input type="text" class="input" placeholder="클래스명으로 검색하세요" style="padding-left: 40px;">
+                    </div>
+                </div>
+            </div>
+
+            <!-- 필터 -->
+            <div class="flex gap-sm mb-lg">
+                <select class="select">
+                    <option>전체 클래스</option>
+                    <option>개설 클래스</option>
+                    <option>참여 클래스</option>
+                    <option>가입 대기중</option>
+                    <option>초대 대기중</option>
+                </select>
+                <select class="select">
+                    <option>전체 연도</option>
+                    <option>2025</option>
+                    <option>2024</option>
+                </select>
+            </div>
+
+            <!-- 클래스 테이블 -->
+            <div class="card">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th style="width: 25%;">클래스명/멤버수</th>
+                            <th style="width: 10%;">개설자</th>
+                            <th style="width: 8%;">상태</th>
+                            <th>게시판 유형</th>
+                            <th style="width: 25%;">관리</th>
+                        </tr>
+                    </thead>
+                    <tbody id="classTableBody">
+                        <!-- JS로 렌더링 -->
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- 보관 클래스 섹션 -->
+        <section class="section">
+            <div class="flex justify-between items-center mb-lg">
+                <h2 class="text-xl font-bold">보관 클래스</h2>
+                <span class="text-sm text-gray">총 <strong>0</strong>개</span>
+            </div>
+            <div class="card p-xl">
+                <div class="empty-state">
+                    <div class="empty-state-icon">📦</div>
+                    <h3 class="empty-state-title">보관된 클래스가 없습니다</h3>
+                    <p class="empty-state-desc">보관된 클래스는 여기에 표시됩니다</p>
+                </div>
+            </div>
+        </section>
+    </div>
+
+    <!-- 클래스 복사 모달 -->
+    <div id="copyClassModal" class="modal-overlay">
+        <div class="modal modal-lg">
+            <div class="modal-header">
+                <h2 class="modal-title">클래스 복사</h2>
+                <button class="modal-close" onclick="closeModal('copyClassModal')">✕</button>
+            </div>
+            <div class="modal-body">
+                <!-- 스텝 인디케이터 -->
+                <div class="copy-steps">
+                    <div class="copy-step active" data-step="1">
+                        <div class="copy-step-num">1</div>
+                        <div class="copy-step-label">복사 항목 선택</div>
+                    </div>
+                    <div class="copy-step" data-step="2">
+                        <div class="copy-step-num">2</div>
+                        <div class="copy-step-label">멤버 선택</div>
+                    </div>
+                    <div class="copy-step" data-step="3">
+                        <div class="copy-step-num">3</div>
+                        <div class="copy-step-label">완료</div>
+                    </div>
+                </div>
+
+                <!-- Step 1: 복사 항목 선택 -->
+                <div id="copyStep1" class="copy-step-content">
+                    <div class="p-md mb-lg rounded-lg" style="background: var(--secondary-50); border-left: 4px solid var(--secondary);">
+                        <p class="text-sm"><strong>📌 안내:</strong> 복사할 항목을 선택하세요. 멤버가 제출한 결과는 복사되지 않습니다.</p>
+                    </div>
+                    
+                    <h4 class="font-semibold mb-md">클래스 설정</h4>
+                    <div class="copy-item selected mb-lg" onclick="toggleCopyItem(this)" style="max-width: 200px;">
+                        <div class="copy-item-icon">⚙️</div>
+                        <div class="copy-item-name">클래스 설정값</div>
+                        <div class="copy-item-count">클래스명, 특성, 게시판 유형 등</div>
+                        <div class="copy-item-check">✓</div>
+                    </div>
+
+                    <h4 class="font-semibold mb-md">콘텐츠 복사 (선택)</h4>
+                    <div class="copy-item-grid">
+                        <div class="copy-item" onclick="toggleCopyItem(this)" data-type="lesson">
+                            <div class="copy-item-icon">📚</div>
+                            <div class="copy-item-name">수업</div>
+                            <div class="copy-item-count">12개</div>
+                            <div class="copy-item-check">✓</div>
+                        </div>
+                        <div class="copy-item" onclick="toggleCopyItem(this)" data-type="homework">
+                            <div class="copy-item-icon">📝</div>
+                            <div class="copy-item-name">과제</div>
+                            <div class="copy-item-count">8개</div>
+                            <div class="copy-item-check">✓</div>
+                        </div>
+                        <div class="copy-item" onclick="toggleCopyItem(this)" data-type="evaluation">
+                            <div class="copy-item-icon">✅</div>
+                            <div class="copy-item-name">평가</div>
+                            <div class="copy-item-count">5개</div>
+                            <div class="copy-item-check">✓</div>
+                        </div>
+                        <div class="copy-item" onclick="toggleCopyItem(this)" data-type="survey">
+                            <div class="copy-item-icon">📊</div>
+                            <div class="copy-item-name">설문</div>
+                            <div class="copy-item-count">3개</div>
+                            <div class="copy-item-check">✓</div>
+                        </div>
+                        <div class="copy-item" onclick="toggleCopyItem(this)" data-type="notice">
+                            <div class="copy-item-icon">📢</div>
+                            <div class="copy-item-name">알림장</div>
+                            <div class="copy-item-count">15개</div>
+                            <div class="copy-item-check">✓</div>
+                        </div>
+                        <div class="copy-item" onclick="toggleCopyItem(this)" data-type="board">
+                            <div class="copy-item-icon">💬</div>
+                            <div class="copy-item-name">자유게시판</div>
+                            <div class="copy-item-count">2개 게시판</div>
+                            <div class="copy-item-check">✓</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Step 2: 멤버 선택 -->
+                <div id="copyStep2" class="copy-step-content" style="display: none;">
+                    <div class="p-md mb-lg rounded-lg" style="background: var(--warning); background: #FFF3E0; border-left: 4px solid var(--accent-orange);">
+                        <p class="text-sm"><strong>📌 안내:</strong> 멤버 복사 시 선택된 멤버에게 <strong>초대장</strong>이 전달됩니다.</p>
+                    </div>
+
+                    <div class="flex gap-md mb-md">
+                        <label class="chip active" onclick="toggleMemberCopy(true)">
+                            <input type="radio" name="memberCopy" checked hidden>
+                            <span>멤버 복사 안함</span>
+                        </label>
+                        <label class="chip" onclick="toggleMemberCopy(false)">
+                            <input type="radio" name="memberCopy" hidden>
+                            <span>멤버 복사</span>
+                        </label>
+                    </div>
+
+                    <div id="memberSelectArea" style="display: none;">
+                        <div class="flex justify-between items-center mb-sm">
+                            <label class="flex items-center gap-sm">
+                                <input type="checkbox" id="selectAllMembers" onchange="toggleAllMembers(this)">
+                                <span class="text-sm font-medium">전체 선택</span>
+                            </label>
+                            <span class="text-sm text-gray">선택: <strong id="selectedMemberCount">0</strong>명 / 60명</span>
+                        </div>
+                        <div class="member-select-area" id="memberList">
+                            <!-- JS로 렌더링 -->
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Step 3: 완료 -->
+                <div id="copyStep3" class="copy-step-content" style="display: none;">
+                    <div class="text-center p-xl">
+                        <div style="font-size: 4rem; margin-bottom: var(--space-lg);">🎉</div>
+                        <h3 class="text-xl font-bold mb-sm">복사 준비 완료!</h3>
+                        <p class="text-gray mb-lg">아래 내용으로 클래스가 복사됩니다.</p>
+                        
+                        <div class="card p-lg text-left" style="max-width: 400px; margin: 0 auto;">
+                            <h4 class="font-semibold mb-md">복사 요약</h4>
+                            <ul class="text-sm" style="line-height: 2;">
+                                <li>✅ 클래스 설정값</li>
+                                <li id="copySummaryItems"><!-- JS로 렌더링 --></li>
+                                <li id="copySummaryMembers"><!-- JS로 렌더링 --></li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" id="copyPrevBtn" onclick="prevCopyStep()" style="display: none;">이전</button>
+                <button class="btn btn-secondary" onclick="closeModal('copyClassModal')">취소</button>
+                <button class="btn btn-primary" id="copyNextBtn" onclick="nextCopyStep()">다음</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 게시판 추가 모달 (z-index 높게 설정) -->
+    <div id="addBoardModal" class="modal-overlay" style="z-index: 1100;">
+        <div class="modal" style="z-index: 1101;">
+            <div class="modal-header">
+                <h2 class="modal-title">게시판 추가</h2>
+                <button class="modal-close" onclick="closeModal('addBoardModal')">✕</button>
+            </div>
+            <div class="modal-body">
+                <h4 class="font-semibold mb-md">게시판 유형 선택</h4>
+                <div class="board-type-selector">
+                    <div class="board-type-option selected" onclick="selectBoardType(this, 'general')">
+                        <div class="board-type-icon">📋</div>
+                        <div class="board-type-name">일반 게시판</div>
+                        <div class="board-type-desc">텍스트 중심의 일반적인 게시판</div>
+                    </div>
+                    <div class="board-type-option" onclick="selectBoardType(this, 'gallery')">
+                        <div class="board-type-icon">🖼️</div>
+                        <div class="board-type-name">갤러리형 게시판</div>
+                        <div class="board-type-desc">이미지 중심의 갤러리 형태</div>
+                        <div class="art-connect-badge mt-sm">🎨 나도 예술가 연결 가능</div>
+                    </div>
+                </div>
+
+                <div class="setting-section">
+                    <div class="setting-grid">
+                        <label class="setting-label">게시판 이름<span class="required">*</span></label>
+                        <input type="text" class="input" placeholder="게시판의 이름을 입력하세요" id="newBoardName">
+                    </div>
+                    <div class="setting-grid mt-md">
+                        <label class="setting-label">댓글 사용</label>
+                        <div class="flex gap-md">
+                            <label class="flex items-center gap-sm">
+                                <input type="radio" name="boardComment" value="Y" checked> 사용
+                            </label>
+                            <label class="flex items-center gap-sm">
+                                <input type="radio" name="boardComment" value="N"> 미사용
+                            </label>
+                        </div>
+                    </div>
+                    
+                    <!-- 갤러리형 게시판 옵션 -->
+                    <div id="galleryOptions" style="display: none;">
+                        <div class="setting-grid mt-md">
+                            <label class="setting-label">나도 예술가 연결</label>
+                            <div class="flex items-center gap-md">
+                                <label class="toggle-switch">
+                                    <input type="checkbox" id="artConnectToggle">
+                                    <span class="toggle-slider"></span>
+                                </label>
+                                <span class="text-sm text-gray">게시물이 '나도 예술가' 서비스에 연결됩니다</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="setting-grid mt-md">
+                        <label class="setting-label">사용 멤버 설정</label>
+                        <button class="btn btn-secondary" onclick="openMemberSelectForBoard()">👥 멤버 선택</button>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal('addBoardModal')">취소</button>
+                <button class="btn btn-primary" onclick="addNewBoard()">추가</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 클래스 설정 모달 (통합형) -->
+    <div id="classSettingModal" class="modal-overlay">
+        <div class="modal modal-xl" style="max-width: 900px;">
+            <div class="modal-header">
+                <h2 class="modal-title">클래스 설정</h2>
+                <button class="modal-close" onclick="closeModal('classSettingModal')">✕</button>
+            </div>
+            <div class="modal-body" style="max-height: 70vh;">
+                <!-- 탭 네비게이션 -->
+                <div class="tabs-underline mb-xl">
+                    <button class="tab active" onclick="switchSettingTab(this, 'basic')">기본 정보</button>
+                    <button class="tab" onclick="switchSettingTab(this, 'board')">게시판 유형</button>
+                    <button class="tab" onclick="switchSettingTab(this, 'member')">멤버 관리</button>
+                </div>
+
+                <!-- 기본 정보 탭 -->
+                <div id="settingTabBasic" class="setting-tab-content">
+                    <div class="setting-section">
+                        <div class="setting-grid">
+                            <label class="setting-label">클래스 가입 코드</label>
+                            <div class="flex gap-sm items-center">
+                                <button class="btn btn-secondary btn-sm">📱 QR 코드</button>
+                                <code class="p-sm rounded" style="background: var(--gray-100);">NXIPJILWOWO19WD</code>
+                                <button class="btn btn-ghost btn-sm" onclick="copyCode()">📋 복사</button>
+                            </div>
+                        </div>
+                        <div class="setting-grid mt-md">
+                            <label class="setting-label">특성<span class="required">*</span></label>
+                            <div class="flex flex-wrap gap-sm">
+                                <label class="chip active"><input type="radio" name="classType" hidden checked><span>🏫 학년/반</span></label>
+                                <label class="chip"><input type="radio" name="classType" hidden><span>📖 교과목</span></label>
+                                <label class="chip"><input type="radio" name="classType" hidden><span>🎭 체험활동</span></label>
+                                <label class="chip"><input type="radio" name="classType" hidden><span>🎯 동아리</span></label>
+                                <label class="chip"><input type="radio" name="classType" hidden><span>💼 업무/소통</span></label>
+                                <label class="chip"><input type="radio" name="classType" hidden><span>📁 기타</span></label>
+                            </div>
+                        </div>
+                        <div class="setting-grid mt-md">
+                            <label class="setting-label">클래스명<span class="required">*</span></label>
+                            <input type="text" class="input" value="학부모 클래스" placeholder="클래스명을 입력하세요">
+                        </div>
+                        <div class="setting-grid mt-md">
+                            <label class="setting-label">클래스 설명</label>
+                            <textarea class="input" rows="3" placeholder="클래스 설명을 입력하세요">학부모 클래스</textarea>
+                        </div>
+                        <div class="setting-grid mt-md">
+                            <label class="setting-label">공개 여부</label>
+                            <div>
+                                <div class="flex gap-md mb-sm">
+                                    <label class="flex items-center gap-sm"><input type="radio" name="visibility" value="public"> 공개</label>
+                                    <label class="flex items-center gap-sm"><input type="radio" name="visibility" value="private" checked> 비공개</label>
+                                </div>
+                                <div class="flex gap-sm" id="visibilityOptions" style="display: none;">
+                                    <label class="chip"><input type="checkbox" hidden><span>학생</span></label>
+                                    <label class="chip"><input type="checkbox" hidden><span>교직원</span></label>
+                                    <label class="chip"><input type="checkbox" hidden><span>학부모</span></label>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="setting-grid mt-md">
+                            <label class="setting-label">가입 방식</label>
+                            <div class="flex gap-md">
+                                <label class="flex items-center gap-sm"><input type="radio" name="joinPolicy" value="auto" checked> 자동 승인</label>
+                                <label class="flex items-center gap-sm"><input type="radio" name="joinPolicy" value="manual"> 수동 승인</label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 게시판 유형 탭 -->
+                <div id="settingTabBoard" class="setting-tab-content" style="display: none;">
+                    <div class="p-md mb-lg rounded-lg" style="background: var(--gray-50);">
+                        <p class="text-sm text-gray">📌 항목을 드래그하여 표시 순서를 변경할 수 있습니다.</p>
+                    </div>
+                    
+                    <div class="draggable-list" id="boardList">
+                        <!-- JS로 렌더링 -->
+                    </div>
+
+                    <button class="btn btn-secondary w-full mt-lg" onclick="openModal('addBoardModal')">➕ 게시판 추가하기</button>
+                </div>
+
+                <!-- 멤버 관리 탭 -->
+                <div id="settingTabMember" class="setting-tab-content" style="display: none;">
+                    <div class="flex justify-between items-center mb-lg">
+                        <div class="flex gap-sm">
+                            <select class="select">
+                                <option>전체 멤버</option>
+                                <option>관리자</option>
+                                <option>일반 멤버</option>
+                            </select>
+                            <div class="search-box" style="width: 240px;">
+                                <span class="search-icon">🔍</span>
+                                <input type="text" class="input" placeholder="이름으로 검색" style="padding-left: 40px;">
+                            </div>
+                        </div>
+                        <div class="flex gap-sm">
+                            <button class="btn btn-secondary">📤 멤버 내보내기</button>
+                            <button class="btn btn-primary">👥 멤버 추가</button>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th><input type="checkbox"></th>
+                                    <th>이름</th>
+                                    <th>아이디</th>
+                                    <th>소속</th>
+                                    <th>역할</th>
+                                    <th>가입일</th>
+                                    <th>관리</th>
+                                </tr>
+                            </thead>
+                            <tbody id="memberTableBody">
+                                <!-- JS로 렌더링 -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <div class="flex gap-sm">
+                    <button class="btn btn-secondary" style="color: var(--error);">🗑️ 클래스 삭제</button>
+                    <button class="btn btn-secondary">📦 클래스 보관</button>
+                </div>
+                <div class="flex gap-sm">
+                    <button class="btn btn-secondary" onclick="closeModal('classSettingModal')">취소</button>
+                    <button class="btn btn-primary" onclick="saveClassSetting()">저장</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 토스트 -->
+    <div class="toast-container">
+        <div id="toast" class="toast"></div>
+    </div>
+
+<script>
+// ==================== 샘플 데이터 ====================
+const classData = [
+    { id: 'CLS001', name: '학부모 클래스', type: '학년/반', memberCount: 1, creator: '문동국', isOwner: true, status: '개설', boards: ['수업', '과제', '평가', '알림장', '감정출석부', '설문'] },
+    { id: 'CLS002', name: '매스 플레이 클래스', type: '기타', memberCount: 4, creator: '문동국', isOwner: true, status: '개설', boards: ['수업', '과제', '평가', '알림장'] },
+    { id: 'CLS003', name: '다채움 콘텐츠 크리에이터 클래스', type: '업무/소통', memberCount: 60, creator: '문동국', isOwner: true, status: '개설', boards: ['알림장', '자유게시판'] },
+    { id: 'CLS004', name: '2025. 연구학교 디지털종결보고회', type: '기타', memberCount: 35, creator: '최종희', isOwner: false, status: '참여', boards: ['수업', '과제', '자유게시판'] },
+    { id: 'CLS005', name: '다채움 핵심교원 역량강화 워크숍', type: '업무/소통', memberCount: 71, creator: '문동국', isOwner: true, status: '개설', boards: ['과제', '자유게시판'] },
+];
+
+const sampleMembers = [
+    { id: 'M001', name: '김철수', userId: 'cskim', school: '충북초등학교', grade: '5', class: '2', number: '1' },
+    { id: 'M002', name: '이영희', userId: 'yhlee', school: '충북초등학교', grade: '5', class: '2', number: '2' },
+    { id: 'M003', name: '박민수', userId: 'mspark', school: '충북초등학교', grade: '5', class: '2', number: '3' },
+    { id: 'M004', name: '정수진', userId: 'sjjung', school: '충북초등학교', grade: '5', class: '2', number: '4' },
+    { id: 'M005', name: '최동현', userId: 'dhchoi', school: '충북초등학교', grade: '5', class: '2', number: '5' },
+];
+
+const boardTypes = [
+    { id: 'LESSON', name: '수업', icon: '📚', color: 'primary' },
+    { id: 'HOMEWORK', name: '과제', icon: '📝', color: 'accent' },
+    { id: 'EVALUATION', name: '평가', icon: '✅', color: 'success' },
+    { id: 'NOTICE', name: '알림장', icon: '📢', color: 'warning' },
+    { id: 'EMOTION', name: '감정출석부', icon: '😊', color: 'error' },
+    { id: 'SURVEY', name: '설문', icon: '📊', color: 'info' },
+];
+
+// ==================== 상태 관리 ====================
+let currentCopyStep = 1;
+let selectedCopyItems = [];
+let selectedMembers = [];
+let currentClassId = null;
+
+// ==================== 초기화 ====================
+document.addEventListener('DOMContentLoaded', () => {
+    renderClassTable();
+    renderMemberList();
+    renderBoardList();
+    renderMemberTable();
+});
+
+// ==================== 클래스 테이블 렌더링 ====================
+function renderClassTable() {
+    const tbody = document.getElementById('classTableBody');
+    tbody.innerHTML = classData.map(cls => {
+        const boardBadges = cls.boards.map(b => {
+            const boardType = boardTypes.find(bt => bt.name === b);
+            const color = boardType ? boardType.color : 'secondary';
+            return `<span class="badge badge-${color}">${b}</span>`;
+        }).join('');
+
+        return `
+            <tr>
+                <td>
+                    <div class="class-info">
+                        <div class="class-meta">
+                            <span>${cls.type}</span>
+                            <span>${cls.memberCount}명</span>
+                        </div>
+                        <a href="#" class="class-name-link">
+                            ${cls.isOwner ? '<span class="owner-badge">👑</span>' : ''}
+                            ${cls.name}
+                        </a>
+                    </div>
+                </td>
+                <td>${cls.creator}</td>
+                <td><span class="badge ${cls.status === '개설' ? 'badge-primary' : 'badge-gray'}">${cls.status}</span></td>
+                <td><div class="board-labels">${boardBadges}</div></td>
+                <td>
+                    <div class="action-btns">
+                        ${cls.isOwner ? `
+                            <button class="btn btn-sm btn-secondary" onclick="openClassSetting('${cls.id}')">⚙️ 설정</button>
+                            <button class="btn btn-sm btn-secondary" onclick="openCopyModal('${cls.id}')">📋 복사</button>
+                            <button class="btn btn-sm btn-secondary">QR코드</button>
+                        ` : `
+                            <button class="btn btn-sm btn-secondary">QR코드</button>
+                            <button class="btn btn-sm btn-secondary" style="color: var(--error);">탈퇴</button>
+                        `}
+                    </div>
+                </td>
+            </tr>
+        `;
+    }).join('');
+}
+
+// ==================== 더보기 메뉴 ====================
+function toggleMoreMenu(btn) {
+    const menu = btn.nextElementSibling;
+    document.querySelectorAll('.more-menu-list').forEach(m => {
+        if (m !== menu) m.classList.remove('show');
+    });
+    menu.classList.toggle('show');
+}
+
+document.addEventListener('click', (e) => {
+    if (!e.target.closest('.more-menu')) {
+        document.querySelectorAll('.more-menu-list').forEach(m => m.classList.remove('show'));
+    }
+});
+
+// ==================== 모달 제어 ====================
+function openModal(id) {
+    document.getElementById(id).classList.add('show');
+}
+
+function closeModal(id) {
+    document.getElementById(id).classList.remove('show');
+    if (id === 'copyClassModal') resetCopyModal();
+}
+
+// ==================== 클래스 복사 ====================
+function openCopyModal(classId) {
+    currentClassId = classId;
+    openModal('copyClassModal');
+}
+
+function resetCopyModal() {
+    currentCopyStep = 1;
+    selectedCopyItems = [];
+    selectedMembers = [];
+    updateCopySteps();
+    document.getElementById('copyStep1').style.display = 'block';
+    document.getElementById('copyStep2').style.display = 'none';
+    document.getElementById('copyStep3').style.display = 'none';
+    document.getElementById('copyPrevBtn').style.display = 'none';
+    document.getElementById('copyNextBtn').textContent = '다음';
+    document.querySelectorAll('.copy-item').forEach(item => item.classList.remove('selected'));
+    document.querySelector('.copy-item').classList.add('selected'); // 클래스 설정값 기본 선택
+}
+
+function toggleCopyItem(item) {
+    item.classList.toggle('selected');
+}
+
+function nextCopyStep() {
+    if (currentCopyStep < 3) {
+        document.getElementById(`copyStep${currentCopyStep}`).style.display = 'none';
+        currentCopyStep++;
+        document.getElementById(`copyStep${currentCopyStep}`).style.display = 'block';
+        
+        document.getElementById('copyPrevBtn').style.display = 'block';
+        if (currentCopyStep === 3) {
+            document.getElementById('copyNextBtn').textContent = '복사하기';
+            updateCopySummary();
+        }
+        updateCopySteps();
+    } else {
+        // 복사 실행
+        showToast('클래스가 복사되었습니다! 🎉');
+        closeModal('copyClassModal');
+    }
+}
+
+function prevCopyStep() {
+    if (currentCopyStep > 1) {
+        document.getElementById(`copyStep${currentCopyStep}`).style.display = 'none';
+        currentCopyStep--;
+        document.getElementById(`copyStep${currentCopyStep}`).style.display = 'block';
+        
+        if (currentCopyStep === 1) document.getElementById('copyPrevBtn').style.display = 'none';
+        document.getElementById('copyNextBtn').textContent = '다음';
+        updateCopySteps();
+    }
+}
+
+function updateCopySteps() {
+    document.querySelectorAll('.copy-step').forEach((step, index) => {
+        step.classList.remove('active', 'completed');
+        if (index + 1 < currentCopyStep) step.classList.add('completed');
+        if (index + 1 === currentCopyStep) step.classList.add('active');
+    });
+}
+
+function updateCopySummary() {
+    const selectedItems = document.querySelectorAll('.copy-item-grid .copy-item.selected');
+    let summary = '';
+    selectedItems.forEach(item => {
+        const name = item.querySelector('.copy-item-name').textContent;
+        summary += `<li>✅ ${name}</li>`;
+    });
+    document.getElementById('copySummaryItems').outerHTML = summary || '<li>📌 콘텐츠 복사 없음</li>';
+    
+    const memberCount = selectedMembers.length;
+    document.getElementById('copySummaryMembers').innerHTML = memberCount > 0 
+        ? `✅ 멤버 ${memberCount}명 초대` 
+        : '📌 멤버 복사 없음';
+}
+
+// ==================== 멤버 선택 ====================
+function toggleMemberCopy(noMembers) {
+    document.querySelectorAll('[onclick^="toggleMemberCopy"]').forEach(el => el.classList.remove('active'));
+    event.target.closest('.chip').classList.add('active');
+    document.getElementById('memberSelectArea').style.display = noMembers ? 'none' : 'block';
+}
+
+function renderMemberList() {
+    document.getElementById('memberList').innerHTML = sampleMembers.map(m => `
+        <div class="member-item">
+            <input type="checkbox" onchange="updateSelectedMembers()">
+            <div class="avatar avatar-sm" style="background: var(--primary-100);">👤</div>
+            <div class="member-info">
+                <div class="member-name">${m.name} (${m.userId})</div>
+                <div class="member-detail">${m.school} ${m.grade}학년 ${m.class}반 ${m.number}번</div>
+            </div>
+        </div>
+    `).join('');
+}
+
+function toggleAllMembers(checkbox) {
+    document.querySelectorAll('#memberList input[type="checkbox"]').forEach(cb => cb.checked = checkbox.checked);
+    updateSelectedMembers();
+}
+
+function updateSelectedMembers() {
+    const checked = document.querySelectorAll('#memberList input[type="checkbox"]:checked');
+    selectedMembers = Array.from(checked);
+    document.getElementById('selectedMemberCount').textContent = selectedMembers.length;
+}
+
+// ==================== 게시판 추가 ====================
+function selectBoardType(el, type) {
+    document.querySelectorAll('.board-type-option').forEach(opt => opt.classList.remove('selected'));
+    el.classList.add('selected');
+    document.getElementById('galleryOptions').style.display = type === 'gallery' ? 'block' : 'none';
+}
+
+function addNewBoard() {
+    const name = document.getElementById('newBoardName').value;
+    if (!name) { showToast('게시판 이름을 입력하세요'); return; }
+    showToast(`"${name}" 게시판이 추가되었습니다`);
+    closeModal('addBoardModal');
+}
+
+// ==================== 클래스 설정 ====================
+function openClassSetting(classId) {
+    currentClassId = classId;
+    openModal('classSettingModal');
+}
+
+function switchSettingTab(tab, tabId) {
+    document.querySelectorAll('.tabs-underline .tab').forEach(t => t.classList.remove('active'));
+    tab.classList.add('active');
+    document.querySelectorAll('.setting-tab-content').forEach(c => c.style.display = 'none');
+    document.getElementById(`settingTab${tabId.charAt(0).toUpperCase() + tabId.slice(1)}`).style.display = 'block';
+}
+
+function renderBoardList() {
+    const boards = [
+        { id: 'LESSON', name: '수업', enabled: true },
+        { id: 'HOMEWORK', name: '과제', enabled: true },
+        { id: 'EVALUATION', name: '평가', enabled: true },
+        { id: 'NOTICE', name: '알림장', enabled: true },
+        { id: 'EMOTION', name: '감정출석부', enabled: true },
+        { id: 'SURVEY', name: '설문', enabled: true },
+    ];
+    
+    document.getElementById('boardList').innerHTML = boards.map(b => `
+        <div class="draggable-item">
+            <span class="drag-handle">☰</span>
+            <div class="flex-1">
+                <span class="font-medium">${b.name}</span>
+            </div>
+            <label class="toggle-switch">
+                <input type="checkbox" ${b.enabled ? 'checked' : ''}>
+                <span class="toggle-slider"></span>
+            </label>
+        </div>
+    `).join('');
+}
+
+function renderMemberTable() {
+    document.getElementById('memberTableBody').innerHTML = sampleMembers.map(m => `
+        <tr>
+            <td><input type="checkbox"></td>
+            <td><div class="flex items-center gap-sm"><div class="avatar avatar-sm">👤</div>${m.name}</div></td>
+            <td>${m.userId}</td>
+            <td>${m.school}</td>
+            <td><span class="badge badge-gray">멤버</span></td>
+            <td>2025.01.02</td>
+            <td>
+                <button class="btn btn-sm btn-ghost">권한변경</button>
+                <button class="btn btn-sm btn-ghost" style="color: var(--error);">내보내기</button>
+            </td>
+        </tr>
+    `).join('');
+}
+
+function saveClassSetting() {
+    showToast('클래스 설정이 저장되었습니다');
+    closeModal('classSettingModal');
+}
+
+// ==================== 유틸리티 ====================
+function copyCode() {
+    navigator.clipboard.writeText('NXIPJILWOWO19WD');
+    showToast('코드가 복사되었습니다 📋');
+}
+
+function showToast(message) {
+    const toast = document.getElementById('toast');
+    toast.textContent = message;
+    toast.classList.add('show');
+    setTimeout(() => toast.classList.remove('show'), 3000);
+}
+</script>
+<script src="../../common-nav.js"></script>
+</body>
+</html>

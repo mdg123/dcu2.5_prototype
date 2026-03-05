@@ -1,0 +1,2021 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>다채움 클래스 홈 - UI/UX 개편 프로토타입</title>
+    <link href="https://cdn.jsdelivr.net/npm/pretendard@1.3.9/dist/web/static/pretendard.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+/* ==================== CSS Variables ==================== */
+:root {
+    --primary-50: #E8F5E9;
+    --primary-100: #C8E6C9;
+    --primary-200: #A5D6A7;
+    --primary-300: #81C784;
+    --primary-400: #66BB6A;
+    --primary-500: #4CAF50;
+    --primary-600: #43A047;
+    --primary-700: #388E3C;
+    --primary: var(--primary-500);
+    
+    --secondary-50: #E3F2FD;
+    --secondary-100: #BBDEFB;
+    --secondary-200: #90CAF9;
+    --secondary-300: #64B5F6;
+    --secondary-400: #42A5F5;
+    --secondary-500: #2196F3;
+    --secondary-600: #1E88E5;
+    --secondary: var(--secondary-500);
+    
+    --accent-orange: #FF9800;
+    --accent-pink: #E91E63;
+    --accent-purple: #9C27B0;
+    --accent-teal: #009688;
+    
+    --gray-50: #FAFAFA;
+    --gray-100: #F5F5F5;
+    --gray-200: #EEEEEE;
+    --gray-300: #E0E0E0;
+    --gray-400: #BDBDBD;
+    --gray-500: #9E9E9E;
+    --gray-600: #757575;
+    --gray-700: #616161;
+    --gray-800: #424242;
+    --gray-900: #212121;
+    
+    --success: #4CAF50;
+    --warning: #FF9800;
+    --error: #F44336;
+    --info: #2196F3;
+    
+    --font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, sans-serif;
+    --font-size-xs: 0.75rem;
+    --font-size-sm: 0.875rem;
+    --font-size-md: 1rem;
+    --font-size-lg: 1.125rem;
+    --font-size-xl: 1.25rem;
+    --font-size-2xl: 1.5rem;
+    --font-size-3xl: 2rem;
+    
+    --space-xs: 4px;
+    --space-sm: 8px;
+    --space-md: 16px;
+    --space-lg: 24px;
+    --space-xl: 32px;
+    --space-2xl: 48px;
+    
+    --radius-sm: 6px;
+    --radius-md: 12px;
+    --radius-lg: 16px;
+    --radius-xl: 24px;
+    --radius-full: 9999px;
+    
+    --shadow-sm: 0 1px 3px rgba(0,0,0,0.08);
+    --shadow-md: 0 4px 12px rgba(0,0,0,0.1);
+    --shadow-lg: 0 8px 24px rgba(0,0,0,0.12);
+    --shadow-xl: 0 16px 48px rgba(0,0,0,0.15);
+    
+    --transition-fast: 150ms ease;
+    --transition-base: 250ms ease;
+    --transition-slow: 400ms ease;
+}
+
+/* ==================== Reset & Base ==================== */
+*, *::before, *::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+html {
+    font-size: 16px;
+    scroll-behavior: smooth;
+}
+
+body {
+    font-family: var(--font-family);
+    background: linear-gradient(135deg, #f8faf8 0%, #f0f4f0 100%);
+    color: var(--gray-800);
+    line-height: 1.6;
+    min-height: 100vh;
+}
+
+a {
+    color: inherit;
+    text-decoration: none;
+}
+
+button {
+    font-family: inherit;
+    cursor: pointer;
+    border: none;
+    background: none;
+}
+
+/* ==================== Control Panel ==================== */
+.control-panel {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    z-index: 1000;
+    background: rgba(31, 41, 55, 0.95);
+    color: white;
+    padding: 0;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+    border-radius: 16px;
+    max-width: 360px;
+    backdrop-filter: blur(8px);
+    overflow: hidden;
+    transition: all 0.3s ease;
+}
+
+.control-panel.collapsed .control-panel-inner {
+    display: none;
+}
+
+.control-panel-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 16px;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 600;
+    color: rgba(255,255,255,0.9);
+    background: rgba(255,255,255,0.05);
+    border: none;
+    width: 100%;
+    user-select: none;
+}
+
+.control-panel-toggle:hover {
+    background: rgba(255,255,255,0.1);
+}
+
+.control-panel-inner {
+    padding: 12px 16px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-md);
+}
+
+.control-panel h3 {
+    font-size: 12px;
+    color: var(--gray-400);
+    margin-bottom: var(--space-xs);
+}
+
+.control-section {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-xs);
+}
+
+.control-group {
+    display: flex;
+    gap: var(--space-sm);
+    flex-wrap: wrap;
+}
+
+.control-btn {
+    padding: var(--space-sm) var(--space-md);
+    border-radius: var(--radius-md);
+    font-size: var(--font-size-sm);
+    font-weight: 600;
+    transition: all var(--transition-fast);
+    background: var(--gray-700);
+    color: var(--gray-300);
+}
+
+.control-btn:hover {
+    background: var(--gray-600);
+}
+
+.control-btn.active {
+    background: var(--primary);
+    color: white;
+}
+
+.toggle-switch {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-sm);
+    cursor: pointer;
+}
+
+.toggle-switch input {
+    display: none;
+}
+
+.toggle-slider {
+    width: 44px;
+    height: 24px;
+    background: var(--gray-600);
+    border-radius: var(--radius-full);
+    position: relative;
+    transition: all var(--transition-fast);
+}
+
+.toggle-slider::after {
+    content: '';
+    position: absolute;
+    width: 18px;
+    height: 18px;
+    background: white;
+    border-radius: 50%;
+    top: 3px;
+    left: 3px;
+    transition: all var(--transition-fast);
+}
+
+.toggle-switch input:checked + .toggle-slider {
+    background: var(--primary);
+}
+
+.toggle-switch input:checked + .toggle-slider::after {
+    left: 23px;
+}
+
+.toggle-label {
+    font-size: var(--font-size-sm);
+    color: var(--gray-300);
+}
+
+/* ==================== Layout ==================== */
+.container {
+    max-width: 1440px;
+    margin: 0 auto;
+    padding: var(--space-lg);
+}
+
+/* ==================== Class Header ==================== */
+.class-header {
+    background: white;
+    border-radius: var(--radius-xl);
+    padding: var(--space-xl);
+    margin-bottom: var(--space-lg);
+    box-shadow: var(--shadow-sm);
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    flex-wrap: wrap;
+    gap: var(--space-lg);
+}
+
+.class-info {
+    flex: 1;
+    min-width: 300px;
+}
+
+.class-title {
+    font-size: var(--font-size-2xl);
+    font-weight: 700;
+    color: var(--gray-900);
+    margin-bottom: var(--space-sm);
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+}
+
+.class-desc {
+    color: var(--gray-600);
+    margin-bottom: var(--space-md);
+}
+
+.class-meta {
+    display: flex;
+    gap: var(--space-md);
+    flex-wrap: wrap;
+}
+
+.meta-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-xs);
+    padding: var(--space-xs) var(--space-md);
+    background: var(--gray-100);
+    border-radius: var(--radius-full);
+    font-size: var(--font-size-sm);
+    color: var(--gray-700);
+}
+
+.class-actions {
+    display: flex;
+    gap: var(--space-sm);
+    flex-wrap: wrap;
+}
+
+.btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-xs);
+    padding: var(--space-sm) var(--space-md);
+    border: none;
+    border-radius: var(--radius-md);
+    font-weight: 600;
+    font-size: var(--font-size-sm);
+    transition: all var(--transition-fast);
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.btn-primary {
+    background: var(--primary);
+    color: white;
+}
+
+.btn-primary:hover {
+    background: var(--primary-600);
+}
+
+.btn-secondary {
+    background: var(--gray-100);
+    color: var(--gray-700);
+}
+
+.btn-secondary:hover {
+    background: var(--gray-200);
+}
+
+.btn-outline {
+    background: transparent;
+    border: 1px solid var(--gray-300);
+    color: var(--gray-700);
+}
+
+.btn-outline:hover {
+    background: var(--gray-50);
+    border-color: var(--gray-400);
+}
+
+/* Student Progress Bar */
+.student-progress-section {
+    display: flex;
+    align-items: center;
+    gap: var(--space-lg);
+    flex-wrap: wrap;
+}
+
+.progress-ring-container {
+    position: relative;
+    width: 80px;
+    height: 80px;
+}
+
+.progress-ring {
+    transform: rotate(-90deg);
+}
+
+.progress-ring-bg {
+    fill: none;
+    stroke: var(--gray-200);
+    stroke-width: 8;
+}
+
+.progress-ring-fill {
+    fill: none;
+    stroke: var(--primary);
+    stroke-width: 8;
+    stroke-linecap: round;
+    transition: stroke-dashoffset var(--transition-slow);
+}
+
+.progress-text {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-size: var(--font-size-lg);
+    font-weight: 700;
+    color: var(--primary);
+}
+
+.streak-badge {
+    display: flex;
+    align-items: center;
+    gap: var(--space-xs);
+    padding: var(--space-sm) var(--space-md);
+    background: linear-gradient(135deg, #FF6B35, #F7931E);
+    color: white;
+    border-radius: var(--radius-full);
+    font-weight: 600;
+    font-size: var(--font-size-sm);
+}
+
+/* ==================== Alert Section ==================== */
+.alert-section {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: var(--space-md);
+    margin-bottom: var(--space-lg);
+}
+
+.alert-card {
+    background: white;
+    border-radius: var(--radius-lg);
+    padding: var(--space-md);
+    display: flex;
+    align-items: center;
+    gap: var(--space-md);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    border-left: 4px solid transparent;
+}
+
+.alert-card:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-md);
+}
+
+.alert-card.urgent {
+    border-left-color: var(--error);
+    background: linear-gradient(135deg, #FFF5F5, white);
+}
+
+.alert-card.warning {
+    border-left-color: var(--warning);
+    background: linear-gradient(135deg, #FFFAF0, white);
+}
+
+.alert-card.info {
+    border-left-color: var(--info);
+    background: linear-gradient(135deg, #F0F8FF, white);
+}
+
+.alert-card.success {
+    border-left-color: var(--success);
+    background: linear-gradient(135deg, #F0FFF4, white);
+}
+
+.alert-icon {
+    width: 48px;
+    height: 48px;
+    border-radius: var(--radius-md);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.5rem;
+    flex-shrink: 0;
+}
+
+.alert-card.urgent .alert-icon {
+    background: #FFEBEE;
+}
+
+.alert-card.warning .alert-icon {
+    background: #FFF3E0;
+}
+
+.alert-card.info .alert-icon {
+    background: #E3F2FD;
+}
+
+.alert-card.success .alert-icon {
+    background: #E8F5E9;
+}
+
+.alert-content {
+    flex: 1;
+}
+
+.alert-title {
+    font-weight: 600;
+    color: var(--gray-800);
+    margin-bottom: 2px;
+}
+
+.alert-count {
+    font-size: var(--font-size-2xl);
+    font-weight: 700;
+}
+
+.alert-card.urgent .alert-count {
+    color: var(--error);
+}
+
+.alert-card.warning .alert-count {
+    color: var(--warning);
+}
+
+.alert-card.info .alert-count {
+    color: var(--info);
+}
+
+.alert-card.success .alert-count {
+    color: var(--success);
+}
+
+.alert-desc {
+    font-size: var(--font-size-xs);
+    color: var(--gray-500);
+}
+
+/* ==================== Quick Actions ==================== */
+.quick-actions {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: var(--space-md);
+    margin-bottom: var(--space-lg);
+}
+
+.quick-action-card {
+    background: white;
+    border-radius: var(--radius-lg);
+    padding: var(--space-lg);
+    text-align: center;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    border: 2px solid transparent;
+}
+
+.quick-action-card:hover {
+    transform: translateY(-4px);
+    box-shadow: var(--shadow-lg);
+    border-color: var(--primary-200);
+}
+
+.quick-action-icon {
+    width: 64px;
+    height: 64px;
+    margin: 0 auto var(--space-md);
+    border-radius: var(--radius-lg);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 2rem;
+}
+
+.quick-action-card:nth-child(1) .quick-action-icon {
+    background: linear-gradient(135deg, var(--secondary-50), var(--secondary-100));
+}
+
+.quick-action-card:nth-child(2) .quick-action-icon {
+    background: linear-gradient(135deg, var(--primary-50), var(--primary-100));
+}
+
+.quick-action-card:nth-child(3) .quick-action-icon {
+    background: linear-gradient(135deg, #F3E5F5, #E1BEE7);
+}
+
+.quick-action-card:nth-child(4) .quick-action-icon {
+    background: linear-gradient(135deg, #FFF3E0, #FFE0B2);
+}
+
+.quick-action-title {
+    font-weight: 600;
+    color: var(--gray-800);
+}
+
+/* ==================== Main Grid Layout ==================== */
+.main-grid {
+    display: grid;
+    grid-template-columns: 1fr 380px;
+    gap: var(--space-lg);
+}
+
+@media (max-width: 1024px) {
+    .main-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* ==================== Widget Cards ==================== */
+.widget {
+    background: white;
+    border-radius: var(--radius-xl);
+    box-shadow: var(--shadow-sm);
+    overflow: hidden;
+    margin-bottom: var(--space-lg);
+    transition: all var(--transition-base);
+}
+
+.widget:hover {
+    box-shadow: var(--shadow-md);
+}
+
+.widget-header {
+    padding: var(--space-md) var(--space-lg);
+    border-bottom: 1px solid var(--gray-100);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.widget-title {
+    font-size: var(--font-size-lg);
+    font-weight: 700;
+    color: var(--gray-900);
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+}
+
+.widget-title::before {
+    content: '';
+    width: 4px;
+    height: 20px;
+    background: var(--primary);
+    border-radius: var(--radius-full);
+}
+
+.widget-subtitle {
+    font-size: var(--font-size-sm);
+    color: var(--gray-500);
+}
+
+.widget-body {
+    padding: var(--space-lg);
+}
+
+.widget-actions {
+    display: flex;
+    gap: var(--space-sm);
+}
+
+/* ==================== Stats Cards ==================== */
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: var(--space-md);
+}
+
+.stat-card {
+    background: var(--gray-50);
+    border-radius: var(--radius-md);
+    padding: var(--space-md);
+    text-align: center;
+    position: relative;
+    overflow: hidden;
+}
+
+.stat-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+}
+
+.stat-card.up::before {
+    background: var(--success);
+}
+
+.stat-card.down::before {
+    background: var(--error);
+}
+
+.stat-card.neutral::before {
+    background: var(--gray-400);
+}
+
+.stat-icon {
+    font-size: 1.5rem;
+    margin-bottom: var(--space-sm);
+}
+
+.stat-label {
+    font-size: var(--font-size-xs);
+    color: var(--gray-500);
+    margin-bottom: var(--space-xs);
+}
+
+.stat-value {
+    font-size: var(--font-size-xl);
+    font-weight: 700;
+    color: var(--gray-900);
+}
+
+.stat-change {
+    font-size: var(--font-size-xs);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    margin-top: var(--space-xs);
+}
+
+.stat-change.up {
+    color: var(--success);
+}
+
+.stat-change.down {
+    color: var(--error);
+}
+
+/* ==================== Today's Tasks ==================== */
+.task-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm);
+}
+
+.task-item {
+    display: flex;
+    align-items: center;
+    gap: var(--space-md);
+    padding: var(--space-md);
+    border-radius: var(--radius-md);
+    background: var(--gray-50);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    position: relative;
+}
+
+.task-item:hover {
+    background: var(--gray-100);
+    transform: translateX(4px);
+}
+
+.task-item.completed {
+    opacity: 0.6;
+}
+
+.task-item.completed .task-title {
+    text-decoration: line-through;
+}
+
+.task-item.urgent {
+    background: linear-gradient(135deg, #FFF5F5, var(--gray-50));
+    border-left: 3px solid var(--error);
+}
+
+.task-item.warning {
+    background: linear-gradient(135deg, #FFFAF0, var(--gray-50));
+    border-left: 3px solid var(--warning);
+}
+
+.task-type-badge {
+    padding: var(--space-xs) var(--space-sm);
+    border-radius: var(--radius-sm);
+    font-size: var(--font-size-xs);
+    font-weight: 600;
+    flex-shrink: 0;
+}
+
+.task-type-badge.lesson {
+    background: var(--secondary-100);
+    color: var(--secondary-600);
+}
+
+.task-type-badge.homework {
+    background: #F3E5F5;
+    color: #7B1FA2;
+}
+
+.task-type-badge.evaluation {
+    background: var(--primary-100);
+    color: var(--primary-700);
+}
+
+.task-type-badge.notice {
+    background: #FFF3E0;
+    color: #E65100;
+}
+
+.task-content {
+    flex: 1;
+    min-width: 0;
+}
+
+.task-title {
+    font-weight: 600;
+    color: var(--gray-800);
+    margin-bottom: 2px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.task-meta {
+    font-size: var(--font-size-xs);
+    color: var(--gray-500);
+    display: flex;
+    gap: var(--space-sm);
+}
+
+.task-status {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    flex-shrink: 0;
+}
+
+.status-badge {
+    padding: var(--space-xs) var(--space-sm);
+    border-radius: var(--radius-sm);
+    font-size: var(--font-size-xs);
+    font-weight: 500;
+}
+
+.status-badge.submitted {
+    background: var(--primary-100);
+    color: var(--primary-700);
+}
+
+.status-badge.pending {
+    background: var(--warning);
+    color: white;
+}
+
+.status-badge.graded {
+    background: var(--secondary-100);
+    color: var(--secondary-600);
+}
+
+/* Teacher specific - Rate display */
+.rate-badge {
+    font-size: var(--font-size-sm);
+    font-weight: 600;
+    padding: var(--space-xs) var(--space-sm);
+    border-radius: var(--radius-sm);
+    background: var(--gray-100);
+}
+
+.rate-badge.low {
+    background: #FFEBEE;
+    color: var(--error);
+}
+
+.rate-badge.medium {
+    background: #FFF3E0;
+    color: var(--warning);
+}
+
+.rate-badge.high {
+    background: #E8F5E9;
+    color: var(--success);
+}
+
+/* ==================== Chart Section ==================== */
+.chart-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    gap: var(--space-lg);
+}
+
+.chart-item {
+    text-align: center;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    padding: var(--space-md);
+    border-radius: var(--radius-md);
+}
+
+.chart-item:hover {
+    background: var(--gray-50);
+}
+
+.chart-container {
+    position: relative;
+    width: 100px;
+    height: 100px;
+    margin: 0 auto var(--space-sm);
+}
+
+.chart-label {
+    font-size: var(--font-size-sm);
+    color: var(--gray-600);
+}
+
+.chart-value {
+    font-size: var(--font-size-lg);
+    font-weight: 700;
+    color: var(--gray-900);
+}
+
+/* ==================== Gamification Section ==================== */
+.gamification-section {
+    display: flex;
+    gap: var(--space-md);
+    flex-wrap: wrap;
+}
+
+.achievement-card {
+    flex: 1;
+    min-width: 150px;
+    background: linear-gradient(135deg, var(--primary-50), var(--primary-100));
+    border-radius: var(--radius-lg);
+    padding: var(--space-md);
+    text-align: center;
+}
+
+.achievement-icon {
+    font-size: 2rem;
+    margin-bottom: var(--space-sm);
+}
+
+.achievement-title {
+    font-weight: 600;
+    color: var(--primary-700);
+    font-size: var(--font-size-sm);
+}
+
+.achievement-desc {
+    font-size: var(--font-size-xs);
+    color: var(--primary-600);
+}
+
+.badge-showcase {
+    display: flex;
+    gap: var(--space-sm);
+    margin-top: var(--space-md);
+    justify-content: center;
+}
+
+.badge-item {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.2rem;
+    background: white;
+    box-shadow: var(--shadow-sm);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+
+.badge-item:hover {
+    transform: scale(1.1);
+}
+
+.badge-item.locked {
+    opacity: 0.4;
+    filter: grayscale(1);
+}
+
+/* ==================== Board Widget ==================== */
+.board-list {
+    display: flex;
+    flex-direction: column;
+}
+
+.board-item {
+    display: flex;
+    align-items: center;
+    gap: var(--space-md);
+    padding: var(--space-md);
+    border-bottom: 1px solid var(--gray-100);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+
+.board-item:last-child {
+    border-bottom: none;
+}
+
+.board-item:hover {
+    background: var(--gray-50);
+}
+
+.board-item.pinned {
+    background: #FFFDE7;
+}
+
+.board-icon {
+    font-size: 1.2rem;
+}
+
+.board-content {
+    flex: 1;
+    min-width: 0;
+}
+
+.board-title {
+    font-weight: 500;
+    color: var(--gray-800);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: flex;
+    align-items: center;
+    gap: var(--space-xs);
+}
+
+.new-badge {
+    padding: 2px 6px;
+    background: var(--error);
+    color: white;
+    border-radius: var(--radius-sm);
+    font-size: 10px;
+    font-weight: 700;
+}
+
+.board-meta {
+    font-size: var(--font-size-xs);
+    color: var(--gray-500);
+}
+
+.board-stats {
+    display: flex;
+    gap: var(--space-sm);
+    font-size: var(--font-size-xs);
+    color: var(--gray-500);
+}
+
+/* ==================== Empty State ==================== */
+.empty-state {
+    text-align: center;
+    padding: var(--space-2xl);
+}
+
+.empty-state-icon {
+    font-size: 4rem;
+    margin-bottom: var(--space-lg);
+    opacity: 0.5;
+}
+
+.empty-state-title {
+    font-size: var(--font-size-xl);
+    font-weight: 700;
+    color: var(--gray-700);
+    margin-bottom: var(--space-sm);
+}
+
+.empty-state-desc {
+    color: var(--gray-500);
+    margin-bottom: var(--space-lg);
+}
+
+/* ==================== Modal ==================== */
+.modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0,0,0,0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 2000;
+    opacity: 0;
+    visibility: hidden;
+    transition: all var(--transition-base);
+}
+
+.modal-overlay.show {
+    opacity: 1;
+    visibility: visible;
+}
+
+.modal {
+    background: white;
+    border-radius: var(--radius-xl);
+    max-width: 500px;
+    width: 90%;
+    max-height: 90vh;
+    overflow: hidden;
+    transform: scale(0.9);
+    transition: all var(--transition-base);
+}
+
+.modal-overlay.show .modal {
+    transform: scale(1);
+}
+
+.modal-header {
+    padding: var(--space-lg);
+    border-bottom: 1px solid var(--gray-200);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.modal-title {
+    font-size: var(--font-size-xl);
+    font-weight: 700;
+}
+
+.modal-close {
+    width: 36px;
+    height: 36px;
+    border: none;
+    background: var(--gray-100);
+    border-radius: 50%;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.2rem;
+}
+
+.modal-close:hover {
+    background: var(--gray-200);
+}
+
+.modal-body {
+    padding: var(--space-lg);
+    overflow-y: auto;
+    max-height: 60vh;
+}
+
+.modal-footer {
+    padding: var(--space-lg);
+    border-top: 1px solid var(--gray-200);
+    display: flex;
+    gap: var(--space-sm);
+    justify-content: flex-end;
+}
+
+/* ==================== Toast ==================== */
+.toast-container {
+    position: fixed;
+    bottom: var(--space-xl);
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 3000;
+}
+
+.toast {
+    background: var(--gray-800);
+    color: white;
+    padding: var(--space-md) var(--space-xl);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-xl);
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    opacity: 0;
+    transform: translateY(20px);
+    transition: all var(--transition-base);
+}
+
+.toast.show {
+    opacity: 1;
+    transform: translateY(0);
+}
+
+/* ==================== Hidden class ==================== */
+.hidden {
+    display: none !important;
+}
+
+/* ==================== Responsive ==================== */
+@media (max-width: 768px) {
+    .container {
+        padding: var(--space-md);
+    }
+    
+    .control-panel {
+        bottom: 16px;
+        right: 16px;
+        max-width: 300px;
+    }
+    
+    .stats-grid {
+        grid-template-columns: 1fr;
+    }
+    
+    .chart-grid {
+        grid-template-columns: repeat(3, 1fr);
+    }
+}
+    </style>
+    <link rel="stylesheet" href="../../../common-nav.css">
+</head>
+<body data-gnb-page="classHome" data-gnb-base="../../../">
+    <!-- Control Panel -->
+    <div class="control-panel collapsed" id="controlPanel">
+        <div class="control-panel-toggle" onclick="document.getElementById('controlPanel').classList.toggle('collapsed')">
+            <span>🎛️ 프로토타입 설정</span>
+            <span style="font-size:11px;opacity:0.7;">▲▼</span>
+        </div>
+        <div class="control-panel-inner">
+            <div class="control-section">
+                <h3>🎭 역할 전환</h3>
+                <div class="control-group">
+                    <button class="control-btn active" id="teacherBtn" onclick="setRole('teacher')">👨‍🏫 교사 뷰</button>
+                    <button class="control-btn" id="studentBtn" onclick="setRole('student')">👨‍🎓 학생 뷰</button>
+                </div>
+            </div>
+            
+            <div class="control-section">
+                <h3>⚙️ 모듈 On/Off</h3>
+                <div class="control-group">
+                    <label class="toggle-switch">
+                        <input type="checkbox" checked onchange="toggleModule('lesson')">
+                        <span class="toggle-slider"></span>
+                        <span class="toggle-label">수업</span>
+                    </label>
+                    <label class="toggle-switch">
+                        <input type="checkbox" checked onchange="toggleModule('homework')">
+                        <span class="toggle-slider"></span>
+                        <span class="toggle-label">과제</span>
+                    </label>
+                    <label class="toggle-switch">
+                        <input type="checkbox" checked onchange="toggleModule('evaluation')">
+                        <span class="toggle-slider"></span>
+                        <span class="toggle-label">평가</span>
+                    </label>
+                    <label class="toggle-switch">
+                        <input type="checkbox" checked onchange="toggleModule('notice')">
+                        <span class="toggle-slider"></span>
+                        <span class="toggle-label">알림장</span>
+                    </label>
+                    <label class="toggle-switch">
+                        <input type="checkbox" checked onchange="toggleModule('board')">
+                        <span class="toggle-slider"></span>
+                        <span class="toggle-label">게시판</span>
+                    </label>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="container">
+        <!-- Class Header -->
+        <header class="class-header">
+            <div class="class-info">
+                <h1 class="class-title">
+                    <span>👑</span>
+                    매스 플레이 클래스
+                </h1>
+                <p class="class-desc">준용이 수학 놀이 클래스</p>
+                <div class="class-meta">
+                    <span class="meta-badge">👤 개설자: 문동국</span>
+                    <span class="meta-badge">👥 멤버: 25명</span>
+                    <span class="meta-badge">📅 개설일: 2024.03.01</span>
+                </div>
+            </div>
+            
+            <!-- Teacher Actions -->
+            <div class="class-actions teacher-only">
+                <button class="btn btn-secondary" onclick="showToast('클래스 설정 페이지로 이동합니다')">⚙️ 클래스 설정</button>
+                <button class="btn btn-secondary" onclick="showToast('멤버 관리 페이지로 이동합니다')">👥 멤버관리</button>
+                <button class="btn btn-outline" onclick="showModal('qrModal')">📱 QR코드</button>
+            </div>
+            
+            <!-- Student Progress -->
+            <div class="student-progress-section student-only hidden">
+                <div class="progress-ring-container">
+                    <svg class="progress-ring" width="80" height="80">
+                        <circle class="progress-ring-bg" cx="40" cy="40" r="32"/>
+                        <circle class="progress-ring-fill" cx="40" cy="40" r="32" 
+                                stroke-dasharray="201" stroke-dashoffset="40"/>
+                    </svg>
+                    <span class="progress-text">80%</span>
+                </div>
+                <div>
+                    <div style="font-weight: 600; color: var(--gray-800);">이번 주 진도율</div>
+                    <div style="font-size: var(--font-size-sm); color: var(--gray-500);">목표까지 2개 남음</div>
+                </div>
+                <div class="streak-badge">
+                    🔥 5일 연속 학습 중!
+                </div>
+            </div>
+        </header>
+
+        <!-- Alert Section - Teacher View -->
+        <section class="alert-section teacher-only" id="teacherAlerts">
+            <div class="alert-card urgent" onclick="showModal('urgentModal')">
+                <div class="alert-icon">📝</div>
+                <div class="alert-content">
+                    <div class="alert-title">채점 대기</div>
+                    <div class="alert-count">8건</div>
+                    <div class="alert-desc">제출된 과제 중 미채점</div>
+                </div>
+            </div>
+            <div class="alert-card warning" onclick="showModal('warningModal')">
+                <div class="alert-icon">⚠️</div>
+                <div class="alert-content">
+                    <div class="alert-title">미제출자 관리</div>
+                    <div class="alert-count">5명</div>
+                    <div class="alert-desc">D-1 과제 미제출</div>
+                </div>
+            </div>
+            <div class="alert-card info" onclick="showToast('신규 질문 목록으로 이동합니다')">
+                <div class="alert-icon">❓</div>
+                <div class="alert-content">
+                    <div class="alert-title">신규 질문</div>
+                    <div class="alert-count">3건</div>
+                    <div class="alert-desc">답변 대기 중</div>
+                </div>
+            </div>
+            <div class="alert-card success" onclick="showToast('오늘 출석 현황을 확인합니다')">
+                <div class="alert-icon">✅</div>
+                <div class="alert-content">
+                    <div class="alert-title">오늘 출석</div>
+                    <div class="alert-count">23/25</div>
+                    <div class="alert-desc">92% 출석률</div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Alert Section - Student View -->
+        <section class="alert-section student-only hidden" id="studentAlerts">
+            <div class="alert-card urgent" onclick="showToast('마감 임박 과제로 이동합니다')">
+                <div class="alert-icon">🚨</div>
+                <div class="alert-content">
+                    <div class="alert-title">오늘 마감</div>
+                    <div class="alert-count">2건</div>
+                    <div class="alert-desc">과제 제출 필요</div>
+                </div>
+            </div>
+            <div class="alert-card info" onclick="showModal('feedbackModal')">
+                <div class="alert-icon">💬</div>
+                <div class="alert-content">
+                    <div class="alert-title">새 피드백</div>
+                    <div class="alert-count">3건</div>
+                    <div class="alert-desc">선생님 코멘트</div>
+                </div>
+            </div>
+            <div class="alert-card warning" onclick="showToast('미완료 수업으로 이동합니다')">
+                <div class="alert-icon">📚</div>
+                <div class="alert-content">
+                    <div class="alert-title">미완료 수업</div>
+                    <div class="alert-count">1개</div>
+                    <div class="alert-desc">이어서 학습하기</div>
+                </div>
+            </div>
+            <div class="alert-card success" onclick="showToast('나의 성적을 확인합니다')">
+                <div class="alert-icon">🏆</div>
+                <div class="alert-content">
+                    <div class="alert-title">이번 주 랭킹</div>
+                    <div class="alert-count">3위</div>
+                    <div class="alert-desc">반 전체 기준</div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Quick Actions - Teacher View -->
+        <section class="quick-actions teacher-only" id="teacherQuickActions">
+            <div class="quick-action-card module-lesson" onclick="location.href='../02_%EC%88%98%EC%97%85/dacheum-lesson-player%20(4).html'">
+                <div class="quick-action-icon">📖</div>
+                <div class="quick-action-title">수업 만들기</div>
+            </div>
+            <div class="quick-action-card module-homework" onclick="location.href='../03_%EA%B3%BC%EC%A0%9C/homework-prototype%20(1).html'">
+                <div class="quick-action-icon">📝</div>
+                <div class="quick-action-title">과제 만들기</div>
+            </div>
+            <div class="quick-action-card module-evaluation" onclick="location.href='../04_%ED%8F%89%EA%B0%80/%EC%B1%84%EC%9B%80%ED%81%B4%EB%9E%98%EC%8A%A4_%ED%8F%89%EA%B0%80%EA%B8%B0%EB%8A%A5_%ED%86%B5%ED%95%A9_%ED%94%84%EB%A1%9C%ED%86%A0%ED%83%80%EC%9E%85.html'">
+                <div class="quick-action-icon">✍️</div>
+                <div class="quick-action-title">평가 만들기</div>
+            </div>
+            <div class="quick-action-card module-notice" onclick="location.href='../05_%EC%95%8C%EB%A6%BC%EC%9E%A5/%EB%8B%A4%EC%B1%84%EC%9B%80_%EC%95%8C%EB%A6%BC%EC%9E%A5_%ED%94%84%EB%A1%9C%ED%86%A0%ED%83%80%EC%9E%85%20(2).html'">
+                <div class="quick-action-icon">📢</div>
+                <div class="quick-action-title">알림장 쓰기</div>
+            </div>
+        </section>
+
+        <!-- Quick Actions - Student View -->
+        <section class="quick-actions student-only hidden" id="studentQuickActions">
+            <div class="quick-action-card" onclick="location.href='../../../04_%EC%8A%A4%EC%8A%A4%EB%A1%9C%EC%B1%84%EC%9B%80/%EC%98%A4%EB%8A%98%EC%9D%98%20%ED%95%99%EC%8A%B5/today-learning-prototype%20(3).html'">
+                <div class="quick-action-icon">🚀</div>
+                <div class="quick-action-title">오늘의 학습</div>
+            </div>
+            <div class="quick-action-card" onclick="showModal('pendingModal')">
+                <div class="quick-action-icon">📋</div>
+                <div class="quick-action-title">미제출 과제</div>
+            </div>
+            <div class="quick-action-card" onclick="showToast('나의 성적 페이지로 이동합니다')">
+                <div class="quick-action-icon">📊</div>
+                <div class="quick-action-title">나의 성적</div>
+            </div>
+            <div class="quick-action-card" onclick="showToast('선생님께 질문하기')">
+                <div class="quick-action-icon">🙋</div>
+                <div class="quick-action-title">질문하기</div>
+            </div>
+        </section>
+
+        <!-- Main Grid -->
+        <div class="main-grid">
+            <div class="main-content">
+                <!-- Recent Activity Stats -->
+                <div class="widget">
+                    <div class="widget-header">
+                        <div>
+                            <div class="widget-title">최근 활동 분석</div>
+                            <div class="widget-subtitle">2025.01.06.(월) ~ 2025.01.12.(일)</div>
+                        </div>
+                    </div>
+                    <div class="widget-body">
+                        <div class="stats-grid">
+                            <div class="stat-card up">
+                                <div class="stat-icon">⏱️</div>
+                                <div class="stat-label teacher-only">클래스 총 학습시간</div>
+                                <div class="stat-label student-only hidden">나의 학습시간</div>
+                                <div class="stat-value teacher-only">12시간 34분</div>
+                                <div class="stat-value student-only hidden">2시간 15분</div>
+                                <div class="stat-change up">▲ 1시간 20분</div>
+                            </div>
+                            <div class="stat-card up">
+                                <div class="stat-icon">📝</div>
+                                <div class="stat-label teacher-only">출제된 문제 수</div>
+                                <div class="stat-label student-only hidden">완료한 학습</div>
+                                <div class="stat-value teacher-only">24문제</div>
+                                <div class="stat-value student-only hidden">8개</div>
+                                <div class="stat-change up">▲ +5</div>
+                            </div>
+                            <div class="stat-card down">
+                                <div class="stat-icon">🎯</div>
+                                <div class="stat-label teacher-only">클래스 평균 정답률</div>
+                                <div class="stat-label student-only hidden">나의 정답률</div>
+                                <div class="stat-value teacher-only">72.5%</div>
+                                <div class="stat-value student-only hidden">85%</div>
+                                <div class="stat-change down">▼ -3.2%</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Today's Tasks Widget -->
+                <div class="widget">
+                    <div class="widget-header">
+                        <div>
+                            <div class="widget-title">오늘의 일정</div>
+                            <div class="widget-subtitle">2025년 1월 13일 월요일</div>
+                        </div>
+                        <div class="widget-actions">
+                            <button class="btn btn-secondary" onclick="showToast('전체 일정 보기')">전체보기</button>
+                        </div>
+                    </div>
+                    <div class="widget-body">
+                        <div class="task-list" id="taskList">
+                            <!-- Tasks will be rendered by JavaScript -->
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Activity Analysis Widget -->
+                <div class="widget">
+                    <div class="widget-header">
+                        <div class="widget-title">클래스 활동 분석</div>
+                        <div class="widget-actions">
+                            <button class="btn btn-secondary" onclick="showToast('상세 분석 페이지로 이동합니다')">상세보기</button>
+                        </div>
+                    </div>
+                    <div class="widget-body">
+                        <div class="chart-grid" id="chartGrid">
+                            <!-- Charts will be rendered by JavaScript -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="sidebar">
+                <!-- Gamification Widget (Student Only) -->
+                <div class="widget student-only hidden" id="gamificationWidget">
+                    <div class="widget-header">
+                        <div class="widget-title">🏆 나의 성취</div>
+                    </div>
+                    <div class="widget-body">
+                        <div class="gamification-section">
+                            <div class="achievement-card">
+                                <div class="achievement-icon">🎯</div>
+                                <div class="achievement-title">이번 주 목표</div>
+                                <div class="achievement-desc">80% 달성!</div>
+                            </div>
+                            <div class="achievement-card">
+                                <div class="achievement-icon">⭐</div>
+                                <div class="achievement-title">획득 포인트</div>
+                                <div class="achievement-desc">1,250 P</div>
+                            </div>
+                        </div>
+                        <div class="badge-showcase">
+                            <div class="badge-item" onclick="showToast('첫 과제 제출 배지')">🌟</div>
+                            <div class="badge-item" onclick="showToast('연속 5일 학습 배지')">🔥</div>
+                            <div class="badge-item" onclick="showToast('정답률 90% 달성')">🏅</div>
+                            <div class="badge-item locked" onclick="showToast('잠긴 배지입니다')">🔒</div>
+                            <div class="badge-item locked" onclick="showToast('잠긴 배지입니다')">🔒</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Notice Widget -->
+                <div class="widget module-notice">
+                    <div class="widget-header">
+                        <div class="widget-title">📢 알림장</div>
+                        <div class="widget-actions">
+                            <button class="btn btn-secondary" onclick="showToast('알림장 전체보기')">전체보기</button>
+                        </div>
+                    </div>
+                    <div class="widget-body" style="padding: 0;">
+                        <div class="board-list">
+                            <div class="board-item pinned" onclick="showModal('noticeDetailModal')">
+                                <div class="board-icon">📌</div>
+                                <div class="board-content">
+                                    <div class="board-title">
+                                        [중요] 기말고사 일정 안내
+                                        <span class="new-badge">NEW</span>
+                                    </div>
+                                    <div class="board-meta">2025.01.12 · 문동국</div>
+                                </div>
+                                <div class="board-stats teacher-only">
+                                    <span>👁️ 23/25</span>
+                                </div>
+                            </div>
+                            <div class="board-item" onclick="showToast('알림장 상세보기')">
+                                <div class="board-icon">📋</div>
+                                <div class="board-content">
+                                    <div class="board-title">다음 주 수업 준비물 안내</div>
+                                    <div class="board-meta">2025.01.10 · 문동국</div>
+                                </div>
+                                <div class="board-stats teacher-only">
+                                    <span>👁️ 20/25</span>
+                                </div>
+                            </div>
+                            <div class="board-item" onclick="showToast('알림장 상세보기')">
+                                <div class="board-icon">📋</div>
+                                <div class="board-content">
+                                    <div class="board-title">수학 경시대회 참가 신청</div>
+                                    <div class="board-meta">2025.01.08 · 문동국</div>
+                                </div>
+                                <div class="board-stats teacher-only">
+                                    <span>👁️ 18/25</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Board Widget -->
+                <div class="widget module-board">
+                    <div class="widget-header">
+                        <div class="widget-title">💬 커뮤니티</div>
+                        <div class="widget-actions">
+                            <button class="btn btn-secondary" onclick="showToast('게시판 전체보기')">전체보기</button>
+                        </div>
+                    </div>
+                    <div class="widget-body" style="padding: 0;">
+                        <div class="board-list">
+                            <div class="board-item" onclick="showToast('게시글 상세보기')">
+                                <div class="board-icon">💭</div>
+                                <div class="board-content">
+                                    <div class="board-title">분수 나눗셈 질문있어요!</div>
+                                    <div class="board-meta">김민수 · 10분 전</div>
+                                </div>
+                                <div class="board-stats">
+                                    <span>💬 3</span>
+                                    <span>👁️ 12</span>
+                                </div>
+                            </div>
+                            <div class="board-item" onclick="showToast('게시글 상세보기')">
+                                <div class="board-icon">💭</div>
+                                <div class="board-content">
+                                    <div class="board-title">오늘 수업 정리 공유합니다</div>
+                                    <div class="board-meta">이지은 · 1시간 전</div>
+                                </div>
+                                <div class="board-stats">
+                                    <span>💬 8</span>
+                                    <span>❤️ 15</span>
+                                </div>
+                            </div>
+                            <div class="board-item" onclick="showToast('게시글 상세보기')">
+                                <div class="board-icon">💭</div>
+                                <div class="board-content">
+                                    <div class="board-title">수학 공부 팁 공유해요~</div>
+                                    <div class="board-meta">박준영 · 어제</div>
+                                </div>
+                                <div class="board-stats">
+                                    <span>💬 12</span>
+                                    <span>❤️ 24</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modals -->
+    <!-- QR Modal -->
+    <div class="modal-overlay" id="qrModal" onclick="closeModal(event, 'qrModal')">
+        <div class="modal" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <div class="modal-title">클래스 가입코드</div>
+                <button class="modal-close" onclick="hideModal('qrModal')">✕</button>
+            </div>
+            <div class="modal-body" style="text-align: center;">
+                <div style="width: 200px; height: 200px; background: var(--gray-100); margin: 0 auto var(--space-lg); display: flex; align-items: center; justify-content: center; border-radius: var(--radius-lg);">
+                    <span style="font-size: 4rem;">📱</span>
+                </div>
+                <div style="font-size: var(--font-size-2xl); font-weight: 700; letter-spacing: 4px; margin-bottom: var(--space-md);">
+                    GAPBX7Y5YQ2FE0G
+                </div>
+                <p style="color: var(--gray-500); font-size: var(--font-size-sm);">
+                    QR코드를 촬영하거나 가입코드를 입력하여<br>클래스에 참여할 수 있습니다.
+                </p>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="showToast('코드가 복사되었습니다')">📋 코드 복사</button>
+                <button class="btn btn-primary" onclick="hideModal('qrModal')">확인</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Urgent Modal (Teacher) -->
+    <div class="modal-overlay" id="urgentModal" onclick="closeModal(event, 'urgentModal')">
+        <div class="modal" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <div class="modal-title">📝 채점 대기 과제</div>
+                <button class="modal-close" onclick="hideModal('urgentModal')">✕</button>
+            </div>
+            <div class="modal-body">
+                <div class="task-list">
+                    <div class="task-item" onclick="showToast('채점 페이지로 이동합니다')">
+                        <span class="task-type-badge homework">과제</span>
+                        <div class="task-content">
+                            <div class="task-title">분수의 나눗셈 연습문제</div>
+                            <div class="task-meta">미채점 5건</div>
+                        </div>
+                        <button class="btn btn-primary">채점하기</button>
+                    </div>
+                    <div class="task-item" onclick="showToast('채점 페이지로 이동합니다')">
+                        <span class="task-type-badge evaluation">평가</span>
+                        <div class="task-content">
+                            <div class="task-title">1월 단원평가</div>
+                            <div class="task-meta">미채점 3건</div>
+                        </div>
+                        <button class="btn btn-primary">채점하기</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Warning Modal (Teacher) -->
+    <div class="modal-overlay" id="warningModal" onclick="closeModal(event, 'warningModal')">
+        <div class="modal" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <div class="modal-title">⚠️ 미제출자 관리</div>
+                <button class="modal-close" onclick="hideModal('warningModal')">✕</button>
+            </div>
+            <div class="modal-body">
+                <div style="margin-bottom: var(--space-md);">
+                    <strong>분수의 나눗셈 과제</strong> (마감 D-1)
+                </div>
+                <div class="task-list">
+                    <div class="task-item">
+                        <div style="width: 40px; height: 40px; background: var(--gray-200); border-radius: 50%; display: flex; align-items: center; justify-content: center;">👤</div>
+                        <div class="task-content">
+                            <div class="task-title">김철수</div>
+                            <div class="task-meta">3번 · 미제출</div>
+                        </div>
+                        <input type="checkbox" style="width: 20px; height: 20px;">
+                    </div>
+                    <div class="task-item">
+                        <div style="width: 40px; height: 40px; background: var(--gray-200); border-radius: 50%; display: flex; align-items: center; justify-content: center;">👤</div>
+                        <div class="task-content">
+                            <div class="task-title">이영희</div>
+                            <div class="task-meta">7번 · 미제출</div>
+                        </div>
+                        <input type="checkbox" style="width: 20px; height: 20px;">
+                    </div>
+                    <div class="task-item">
+                        <div style="width: 40px; height: 40px; background: var(--gray-200); border-radius: 50%; display: flex; align-items: center; justify-content: center;">👤</div>
+                        <div class="task-content">
+                            <div class="task-title">박민지</div>
+                            <div class="task-meta">12번 · 미제출</div>
+                        </div>
+                        <input type="checkbox" style="width: 20px; height: 20px;">
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="hideModal('warningModal')">취소</button>
+                <button class="btn btn-primary" onclick="showToast('선택한 학생에게 독려 메시지를 발송했습니다'); hideModal('warningModal')">📨 독려 메시지 발송</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Feedback Modal (Student) -->
+    <div class="modal-overlay" id="feedbackModal" onclick="closeModal(event, 'feedbackModal')">
+        <div class="modal" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <div class="modal-title">💬 새 피드백</div>
+                <button class="modal-close" onclick="hideModal('feedbackModal')">✕</button>
+            </div>
+            <div class="modal-body">
+                <div class="task-list">
+                    <div class="task-item" onclick="showToast('피드백 상세보기')">
+                        <span class="task-type-badge homework">과제</span>
+                        <div class="task-content">
+                            <div class="task-title">분수의 나눗셈 연습문제</div>
+                            <div class="task-meta">"잘했어요! 다만 3번 문제는 다시 확인해보세요."</div>
+                        </div>
+                    </div>
+                    <div class="task-item" onclick="showToast('피드백 상세보기')">
+                        <span class="task-type-badge evaluation">평가</span>
+                        <div class="task-content">
+                            <div class="task-title">1월 단원평가</div>
+                            <div class="task-meta">"85점! 좋은 성적이에요 👍"</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Pending Tasks Modal (Student) -->
+    <div class="modal-overlay" id="pendingModal" onclick="closeModal(event, 'pendingModal')">
+        <div class="modal" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <div class="modal-title">📋 미제출 과제</div>
+                <button class="modal-close" onclick="hideModal('pendingModal')">✕</button>
+            </div>
+            <div class="modal-body">
+                <div class="task-list">
+                    <div class="task-item urgent" onclick="showToast('과제 페이지로 이동합니다')">
+                        <span class="task-type-badge homework">과제</span>
+                        <div class="task-content">
+                            <div class="task-title">분수의 나눗셈 연습문제</div>
+                            <div class="task-meta" style="color: var(--error);">⚠️ 오늘 마감!</div>
+                        </div>
+                        <button class="btn btn-primary">제출하기</button>
+                    </div>
+                    <div class="task-item warning" onclick="showToast('과제 페이지로 이동합니다')">
+                        <span class="task-type-badge homework">과제</span>
+                        <div class="task-content">
+                            <div class="task-title">소수점 계산 문제</div>
+                            <div class="task-meta" style="color: var(--warning);">D-2 마감</div>
+                        </div>
+                        <button class="btn btn-secondary">제출하기</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Notice Detail Modal -->
+    <div class="modal-overlay" id="noticeDetailModal" onclick="closeModal(event, 'noticeDetailModal')">
+        <div class="modal" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <div class="modal-title">📢 알림장</div>
+                <button class="modal-close" onclick="hideModal('noticeDetailModal')">✕</button>
+            </div>
+            <div class="modal-body">
+                <h3 style="margin-bottom: var(--space-md);">[중요] 기말고사 일정 안내</h3>
+                <div style="color: var(--gray-500); font-size: var(--font-size-sm); margin-bottom: var(--space-lg);">
+                    2025.01.12 · 문동국 선생님
+                </div>
+                <p style="line-height: 1.8;">
+                    안녕하세요, 학생 여러분!<br><br>
+                    다가오는 기말고사 일정을 안내드립니다.<br><br>
+                    📅 시험 기간: 2025년 1월 20일 ~ 22일<br>
+                    📚 시험 범위: 1단원 ~ 5단원<br>
+                    📝 준비물: 연필, 지우개, 자<br><br>
+                    열심히 준비해서 좋은 결과 있길 바랍니다! 💪
+                </p>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-primary" onclick="hideModal('noticeDetailModal')">확인</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Container -->
+    <div class="toast-container">
+        <div class="toast" id="toast">
+            <span id="toastMessage"></span>
+        </div>
+    </div>
+
+    <script>
+    // ==================== State Management ====================
+    const state = {
+        role: 'teacher',
+        modules: {
+            lesson: true,
+            homework: true,
+            evaluation: true,
+            notice: true,
+            board: true
+        }
+    };
+
+    // ==================== Sample Data ====================
+    const teacherTasks = [
+        { type: 'lesson', title: '분수의 나눗셈 개념 설명', deadline: '오늘', rate: 89, rateClass: 'high', urgent: false },
+        { type: 'homework', title: '분수의 나눗셈 연습문제', deadline: 'D-1', rate: 72, rateClass: 'medium', urgent: true },
+        { type: 'evaluation', title: '1월 단원평가', deadline: 'D-3', rate: 60, rateClass: 'low', urgent: false },
+        { type: 'notice', title: '기말고사 일정 안내', deadline: '오늘', rate: 92, rateClass: 'high', urgent: false },
+        { type: 'lesson', title: '소수점 계산의 기초', deadline: '기한없음', rate: 45, rateClass: 'low', urgent: false }
+    ];
+
+    const studentTasks = [
+        { type: 'homework', title: '분수의 나눗셈 연습문제', deadline: '오늘 마감', status: 'pending', statusText: '미제출', urgent: true },
+        { type: 'lesson', title: '분수의 나눗셈 개념 설명', deadline: '오늘', status: 'submitted', statusText: '완료', urgent: false, completed: true },
+        { type: 'evaluation', title: '1월 단원평가', deadline: 'D-3', status: 'pending', statusText: '미응시', urgent: false },
+        { type: 'homework', title: '소수점 계산 문제', deadline: 'D-2', status: 'pending', statusText: '미제출', urgent: false },
+        { type: 'notice', title: '기말고사 일정 안내', deadline: '오늘', status: 'graded', statusText: '확인완료', urgent: false, completed: true }
+    ];
+
+    const chartData = {
+        teacher: [
+            { label: '수업 이수율', value: 89, color: '#2196F3', module: 'lesson' },
+            { label: '과제 제출률', value: 72, color: '#9C27B0', module: 'homework' },
+            { label: '평가 풀이율', value: 60, color: '#4CAF50', module: 'evaluation' }
+        ],
+        student: [
+            { label: '수업 완료율', value: 85, color: '#2196F3', module: 'lesson' },
+            { label: '과제 제출률', value: 90, color: '#9C27B0', module: 'homework' },
+            { label: '평가 완료율', value: 75, color: '#4CAF50', module: 'evaluation' }
+        ]
+    };
+
+    // ==================== Role Switching ====================
+    function setRole(role) {
+        state.role = role;
+        
+        // Update control buttons
+        document.getElementById('teacherBtn').classList.toggle('active', role === 'teacher');
+        document.getElementById('studentBtn').classList.toggle('active', role === 'student');
+        
+        // Show/hide role-specific elements
+        document.querySelectorAll('.teacher-only').forEach(el => {
+            el.classList.toggle('hidden', role !== 'teacher');
+        });
+        document.querySelectorAll('.student-only').forEach(el => {
+            el.classList.toggle('hidden', role !== 'student');
+        });
+        
+        // Re-render dynamic content
+        renderTasks();
+        renderCharts();
+        
+        showToast(`${role === 'teacher' ? '교사' : '학생'} 뷰로 전환되었습니다`);
+    }
+
+    // ==================== Module Toggle ====================
+    function toggleModule(module) {
+        state.modules[module] = !state.modules[module];
+        
+        // Show/hide module-specific elements
+        document.querySelectorAll(`.module-${module}`).forEach(el => {
+            el.classList.toggle('hidden', !state.modules[module]);
+        });
+        
+        // Re-render charts
+        renderCharts();
+        
+        // Re-render tasks
+        renderTasks();
+    }
+
+    // ==================== Render Tasks ====================
+    function renderTasks() {
+        const taskList = document.getElementById('taskList');
+        const tasks = state.role === 'teacher' ? teacherTasks : studentTasks;
+        
+        const filteredTasks = tasks.filter(task => state.modules[task.type]);
+        
+        if (filteredTasks.length === 0) {
+            taskList.innerHTML = `
+                <div class="empty-state">
+                    <div class="empty-state-icon">📭</div>
+                    <div class="empty-state-title">일정이 없습니다</div>
+                    <div class="empty-state-desc">활성화된 모듈의 일정이 없습니다.</div>
+                </div>
+            `;
+            return;
+        }
+        
+        taskList.innerHTML = filteredTasks.map(task => {
+            const typeLabels = {
+                lesson: { text: '수업', class: 'lesson' },
+                homework: { text: '과제', class: 'homework' },
+                evaluation: { text: '평가', class: 'evaluation' },
+                notice: { text: '알림장', class: 'notice' }
+            };
+            
+            const typeInfo = typeLabels[task.type];
+            const urgentClass = task.urgent ? 'urgent' : '';
+            const completedClass = task.completed ? 'completed' : '';
+            
+            if (state.role === 'teacher') {
+                return `
+                    <div class="task-item ${urgentClass}" onclick="showToast('${task.title} 상세보기')">
+                        <span class="task-type-badge ${typeInfo.class}">${typeInfo.text}</span>
+                        <div class="task-content">
+                            <div class="task-title">${task.title}</div>
+                            <div class="task-meta">
+                                <span>${task.deadline}</span>
+                            </div>
+                        </div>
+                        <div class="task-status">
+                            <span class="rate-badge ${task.rateClass}">${task.rate}%</span>
+                        </div>
+                    </div>
+                `;
+            } else {
+                return `
+                    <div class="task-item ${urgentClass} ${completedClass}" onclick="showToast('${task.title} ${task.completed ? '결과보기' : '바로가기'}')">
+                        <span class="task-type-badge ${typeInfo.class}">${typeInfo.text}</span>
+                        <div class="task-content">
+                            <div class="task-title">${task.title}</div>
+                            <div class="task-meta">
+                                <span>${task.deadline}</span>
+                            </div>
+                        </div>
+                        <div class="task-status">
+                            <span class="status-badge ${task.status}">${task.statusText}</span>
+                            ${task.completed 
+                                ? '<button class="btn btn-secondary" onclick="event.stopPropagation(); showToast(\'결과보기\')">결과보기</button>' 
+                                : `<button class="btn btn-primary" onclick="event.stopPropagation(); showToast('${task.type === 'lesson' ? '학습하기' : '제출하기'}')">${task.type === 'lesson' ? '학습하기' : '제출하기'}</button>`
+                            }
+                        </div>
+                    </div>
+                `;
+            }
+        }).join('');
+    }
+
+    // ==================== Render Charts ====================
+    function renderCharts() {
+        const chartGrid = document.getElementById('chartGrid');
+        const data = state.role === 'teacher' ? chartData.teacher : chartData.student;
+        
+        const filteredData = data.filter(item => state.modules[item.module]);
+        
+        if (filteredData.length === 0) {
+            chartGrid.innerHTML = `
+                <div class="empty-state" style="grid-column: 1 / -1;">
+                    <div class="empty-state-icon">📊</div>
+                    <div class="empty-state-title">분석할 데이터가 없습니다</div>
+                    <div class="empty-state-desc">활성화된 모듈이 없습니다.</div>
+                </div>
+            `;
+            return;
+        }
+        
+        chartGrid.innerHTML = filteredData.map((item, index) => `
+            <div class="chart-item" onclick="showToast('${item.label} 상세 분석 보기')">
+                <div class="chart-container">
+                    <canvas id="chart${index}"></canvas>
+                </div>
+                <div class="chart-label">${item.label}</div>
+                <div class="chart-value">${item.value}%</div>
+            </div>
+        `).join('');
+        
+        // Render doughnut charts
+        filteredData.forEach((item, index) => {
+            const ctx = document.getElementById(`chart${index}`).getContext('2d');
+            new Chart(ctx, {
+                type: 'doughnut',
+                data: {
+                    datasets: [{
+                        data: [item.value, 100 - item.value],
+                        backgroundColor: [item.color, '#EEEEEE'],
+                        borderWidth: 0
+                    }]
+                },
+                options: {
+                    cutout: '70%',
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: { enabled: false }
+                    },
+                    responsive: true,
+                    maintainAspectRatio: true
+                }
+            });
+        });
+    }
+
+    // ==================== Modal Functions ====================
+    function showModal(modalId) {
+        document.getElementById(modalId).classList.add('show');
+        document.body.style.overflow = 'hidden';
+    }
+
+    function hideModal(modalId) {
+        document.getElementById(modalId).classList.remove('show');
+        document.body.style.overflow = '';
+    }
+
+    function closeModal(event, modalId) {
+        if (event.target.classList.contains('modal-overlay')) {
+            hideModal(modalId);
+        }
+    }
+
+    // ==================== Toast Functions ====================
+    function showToast(message) {
+        const toast = document.getElementById('toast');
+        const toastMessage = document.getElementById('toastMessage');
+        
+        toastMessage.textContent = message;
+        toast.classList.add('show');
+        
+        setTimeout(() => {
+            toast.classList.remove('show');
+        }, 2500);
+    }
+
+    // ==================== Initialize ====================
+    document.addEventListener('DOMContentLoaded', () => {
+        renderTasks();
+        renderCharts();
+    });
+    </script>
+    <script src="../../../common-nav.js"></script>
+</body>
+</html>

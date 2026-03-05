@@ -1,0 +1,500 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>클래스 찾기 - 채움클래스 개선안</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
+    <link rel="stylesheet" href="dacheum-common.css">
+    <style>
+        /* 페이지 전용 스타일 (최소화) */
+        .page-title::before { content: ''; width: 6px; height: 32px; background: linear-gradient(180deg, var(--primary-500) 0%, var(--primary-700) 100%); border-radius: var(--radius-full); }
+        .search-section { position: relative; }
+        .search-section::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 4px; background: linear-gradient(90deg, var(--primary), var(--secondary), var(--accent-teal)); border-radius: var(--radius-lg) var(--radius-lg) 0 0; }
+        .class-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: var(--space-lg); }
+        .class-card-img { height: 140px; background: linear-gradient(135deg, var(--primary-100), var(--secondary-100)); display: flex; align-items: center; justify-content: center; font-size: 3rem; position: relative; }
+        .class-card-img .category { position: absolute; top: var(--space-sm); left: var(--space-sm); }
+        .class-card-img .bookmark { position: absolute; top: var(--space-sm); right: var(--space-sm); width: 36px; height: 36px; border: none; background: rgba(255,255,255,0.9); border-radius: 50%; cursor: pointer; }
+        .class-card-img .bookmark:hover { transform: scale(1.1); }
+        .class-card-img .auto-badge { position: absolute; bottom: var(--space-sm); left: var(--space-sm); }
+        .class-card-img .activity { position: absolute; bottom: var(--space-sm); right: var(--space-sm); padding: 2px 8px; background: rgba(0,0,0,0.7); color: white; border-radius: 4px; font-size: 11px; }
+        .class-card-img .activity.active { background: var(--success); }
+        .recommend-scroll { display: flex; gap: var(--space-md); overflow-x: auto; padding-bottom: var(--space-sm); }
+        .recommend-scroll::-webkit-scrollbar { height: 4px; }
+        .recommend-card { flex: 0 0 240px; }
+        .main-layout { display: grid; grid-template-columns: 1fr 360px; gap: var(--space-xl); }
+        @media (max-width: 1200px) { .main-layout { grid-template-columns: 1fr; } .sidebar-area { order: -1; } }
+        .private-banner { background: var(--gray-800); color: white; padding: var(--space-lg); border-radius: var(--radius-lg); text-align: center; margin-top: var(--space-xl); }
+        .private-banner em { color: var(--accent-orange); font-style: normal; font-weight: 700; font-size: 1.5rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- 페이지 헤더 -->
+        <header class="mb-xl">
+            <h1 class="text-3xl font-bold flex items-center gap-sm page-title">클래스 찾기</h1>
+        </header>
+
+        <!-- 검색 섹션 -->
+        <section class="card p-xl mb-xl search-section">
+            <div class="tabs mb-lg" style="width: fit-content;">
+                <button class="tab active" data-type="keyword">키워드 검색</button>
+                <button class="tab" data-type="code">클래스 코드</button>
+            </div>
+            
+            <div class="search-box mb-lg">
+                <span class="search-icon">🔍</span>
+                <input type="text" id="searchInput" class="input input-lg" placeholder="클래스명, 학교명, 개설자명으로 검색">
+                <button id="searchBtn" class="btn btn-primary search-btn">검색</button>
+            </div>
+            
+            <div id="popularTags" class="flex flex-wrap gap-sm items-center"></div>
+        </section>
+
+        <!-- AI 추천 섹션 -->
+        <section class="mb-xl p-lg rounded-lg" style="background: linear-gradient(135deg, var(--primary-50), var(--secondary-50));">
+            <h2 class="text-lg font-bold mb-md flex items-center gap-sm">✨ 맞춤 추천 클래스</h2>
+            <div class="recommend-scroll" id="recommendList"></div>
+        </section>
+
+        <!-- 메인 콘텐츠 -->
+        <div class="main-layout">
+            <main>
+                <!-- 필터 -->
+                <section class="card p-md mb-lg">
+                    <div class="flex flex-wrap gap-md items-center justify-between">
+                        <div class="flex flex-wrap gap-sm items-center">
+                            <span class="text-sm font-semibold text-gray">필터</span>
+                            <label class="chip active" data-filter="joinable"><input type="checkbox" checked hidden><span>✓ 가입 가능</span></label>
+                            <label class="chip" data-filter="mySchool"><input type="checkbox" hidden><span>🏫 우리학교</span></label>
+                            <label class="chip" data-filter="autoApprove"><input type="checkbox" hidden><span>⚡ 자동승인</span></label>
+                            <select id="categoryFilter" class="select">
+                                <option value="all">전체 카테고리</option>
+                                <option value="학년/반">학년/반</option>
+                                <option value="교과목">교과목</option>
+                                <option value="동아리">동아리</option>
+                                <option value="업무/소통">업무/소통</option>
+                            </select>
+                        </div>
+                        <div class="flex gap-sm items-center">
+                            <select id="sortSelect" class="select">
+                                <option value="latest">최신 등록순</option>
+                                <option value="members">가입자수 순</option>
+                                <option value="activity">활동량 순</option>
+                            </select>
+                            <div class="tabs" style="padding: 2px;">
+                                <button class="tab active" data-view="grid" style="padding: 6px 10px;">▦</button>
+                                <button class="tab" data-view="list" style="padding: 6px 10px;">☰</button>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- 결과 정보 -->
+                <div class="p-md mb-lg rounded-lg flex items-center justify-between" style="background: var(--primary-50); border-left: 4px solid var(--primary);">
+                    <span id="resultsCount" class="font-semibold">총 <span class="text-primary text-xl">0</span>개의 클래스</span>
+                </div>
+
+                <!-- 클래스 목록 -->
+                <div id="classContainer" class="class-grid stagger-children"></div>
+
+                <!-- 페이지네이션 -->
+                <div id="pagination" class="pagination mt-xl"></div>
+
+                <!-- 비공개 클래스 배너 -->
+                <div class="private-banner">
+                    <h3 class="font-semibold mb-xs">그 외 비공개 클래스</h3>
+                    <p class="text-sm" style="color: var(--gray-300);">총 <em>781</em>개가 운영되고 있습니다.</p>
+                </div>
+            </main>
+
+            <!-- 사이드바 -->
+            <aside class="sidebar-area">
+                <div class="sidebar-card">
+                    <h3 class="sidebar-title">📚 나의 클래스 현황</h3>
+                    <select id="myClassSelect" class="select w-full mb-md"></select>
+                    <div class="flex gap-sm">
+                        <button class="btn btn-primary flex-1" onclick="goToMyClass()">GO</button>
+                        <button class="btn btn-secondary flex-1">나의 클래스</button>
+                    </div>
+                    <div class="mt-md text-right">
+                        <a href="#" class="text-sm text-primary">✏️ 채움 클래스 만들기</a>
+                    </div>
+                </div>
+
+                <div class="sidebar-card">
+                    <h3 class="sidebar-title">🏆 명예의 전당</h3>
+                    <div id="rankingList" class="list"></div>
+                </div>
+
+                <div class="sidebar-card">
+                    <h3 class="sidebar-title">🕐 최근 본 클래스</h3>
+                    <div id="recentList" class="list"></div>
+                </div>
+
+                <div class="sidebar-card">
+                    <h3 class="sidebar-title">📋 가입/승인 현황</h3>
+                    <div class="tabs mb-md">
+                        <button class="tab active" onclick="switchApprovalTab(this, 'request')">가입 신청</button>
+                        <button class="tab relative" onclick="switchApprovalTab(this, 'manage')">
+                            승인 관리
+                            <span class="badge badge-error" style="position:absolute;top:-4px;right:-4px;min-width:18px;height:18px;padding:0 4px;font-size:10px;">3</span>
+                        </button>
+                    </div>
+                    <div id="approvalList" class="list" style="max-height: 300px; overflow-y: auto;"></div>
+                </div>
+            </aside>
+        </div>
+    </div>
+
+    <!-- 모달 -->
+    <div id="modalOverlay" class="modal-overlay">
+        <div id="classDetailModal" class="modal modal-lg"></div>
+    </div>
+
+    <!-- 토스트 -->
+    <div class="toast-container">
+        <div id="toast" class="toast"></div>
+    </div>
+
+<script>
+// ==================== 샘플 데이터 ====================
+const sampleClasses = [
+    { id: 'CLS001', name: '음악이랑 예술교과연구회', category: '업무/소통', school: '한국교원대학교부설월곡초등학교', creator: '허기택', description: '음악이랑 예술교과연구회 다채움 클래스입니다.', memberCount: 45, postCount: 128, contentCount: 56, tags: ['학생', '교직원', '학부모'], autoApprove: true, isActive: true, lastActivity: '2시간 전', isBookmarked: false },
+    { id: 'CLS002', name: '2025학년도 5학년 2반', category: '학년/반', school: '덕벌초등학교', creator: '노승범', description: '2025학년도 5학년 2반 학급 클래스입니다.', memberCount: 28, postCount: 89, contentCount: 34, tags: ['학생', '교직원', '학부모'], autoApprove: true, isActive: true, lastActivity: '30분 전', isBookmarked: true },
+    { id: 'CLS003', name: '충북형 수학과 학습맵 클래스', category: '교과목', school: '충청북도교육청', creator: '문동국', description: 'AI 맞춤형 학습과 연계된 수학 학습맵 연구 클래스입니다.', memberCount: 156, postCount: 234, contentCount: 89, tags: ['학생', '교직원'], autoApprove: false, isActive: true, lastActivity: '1일 전', isBookmarked: false },
+    { id: 'CLS004', name: '다채움 콘텐츠 크리에이터 클래스', category: '업무/소통', school: '충청북도교육청', creator: '문동국', description: '다채움 플랫폼의 콘텐츠 크리에이터들을 위한 클래스입니다.', memberCount: 89, postCount: 167, contentCount: 203, tags: ['교직원'], autoApprove: true, isActive: true, lastActivity: '3시간 전', isBookmarked: true },
+    { id: 'CLS005', name: '성찰중심 학습공동체 수업 영상', category: '동아리', school: '충주상업고등학교', creator: '안종억', description: '성찰중심 학습공동체의 수업 영상을 공유하는 클래스입니다.', memberCount: 12, postCount: 45, contentCount: 78, tags: ['학생', '교직원', '학부모'], autoApprove: true, isActive: false, lastActivity: '1주 전', isBookmarked: false },
+    { id: 'CLS006', name: '다채움 핵심교원 역량강화 워크숍', category: '업무/소통', school: '충청북도교육청', creator: '문동국', description: '다채움 플랫폼 활용 역량 강화를 위한 핵심교원 연수 클래스입니다.', memberCount: 78, postCount: 56, contentCount: 42, tags: ['교직원'], autoApprove: false, isActive: true, lastActivity: '4시간 전', isBookmarked: false }
+];
+
+const popularTags = ['수학', '영어', '코딩', '독서', '과학탐구', '예술교육', '진로', '창의융합'];
+const rankingData = [
+    { rank: 1, name: '충북 AI 교육 연구회', change: 'up', changeValue: 2 },
+    { rank: 2, name: '다채움 콘텐츠 크리에이터', change: 'same', changeValue: 0 },
+    { rank: 3, name: '초등 수학 교구 연구회', change: 'down', changeValue: 1 },
+    { rank: 4, name: '중등 영어 수업 나눔터', change: 'up', changeValue: 3 },
+    { rank: 5, name: '충북 독서교육 클래스', change: 'same', changeValue: 0 }
+];
+const recentViewed = [
+    { id: 'CLS001', name: '음악이랑 예술교과연구회', viewedAt: '10분 전' },
+    { id: 'CLS003', name: '충북형 수학과 학습맵 클래스', viewedAt: '1시간 전' }
+];
+const approvalRequests = [
+    { className: '2025. 연구학교 디지털종결보고회', userName: '정정숙', status: 'completed' },
+    { className: '채움중학교 3학년 1반', userName: '학생316', status: 'completed' },
+    { className: '다채움 이벤트 클래스', userName: '김철수', status: 'pending' }
+];
+const myClasses = [
+    { id: 'MC001', name: '학부모 클래스' },
+    { id: 'MC002', name: '매스 플레이 클래스' },
+    { id: 'MC003', name: '다채움 콘텐츠 크리에이터 클래스' }
+];
+
+// ==================== 상태 관리 ====================
+const state = {
+    searchType: 'keyword',
+    searchQuery: '',
+    filters: { category: 'all', autoApprove: false },
+    sortBy: 'latest',
+    viewType: 'grid',
+    currentPage: 1,
+    itemsPerPage: 6
+};
+
+// ==================== 초기화 ====================
+document.addEventListener('DOMContentLoaded', () => {
+    setupEventListeners();
+    renderAll();
+});
+
+function setupEventListeners() {
+    // 검색 탭
+    document.querySelectorAll('.tabs .tab[data-type]').forEach(tab => {
+        tab.addEventListener('click', () => {
+            tab.parentElement.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            tab.classList.add('active');
+            state.searchType = tab.dataset.type;
+            document.getElementById('searchInput').placeholder = state.searchType === 'keyword' 
+                ? '클래스명, 학교명, 개설자명으로 검색' 
+                : '클래스 코드 입력 (예: CLS001)';
+        });
+    });
+
+    // 검색
+    document.getElementById('searchBtn').addEventListener('click', handleSearch);
+    document.getElementById('searchInput').addEventListener('keypress', e => { if (e.key === 'Enter') handleSearch(); });
+
+    // 필터 칩
+    document.querySelectorAll('.chip[data-filter]').forEach(chip => {
+        chip.addEventListener('click', () => {
+            chip.classList.toggle('active');
+            if (chip.dataset.filter === 'autoApprove') state.filters.autoApprove = chip.classList.contains('active');
+            renderClassList();
+        });
+    });
+
+    // 카테고리/정렬
+    document.getElementById('categoryFilter').addEventListener('change', e => { state.filters.category = e.target.value; renderClassList(); });
+    document.getElementById('sortSelect').addEventListener('change', e => { state.sortBy = e.target.value; renderClassList(); });
+
+    // 뷰 토글
+    document.querySelectorAll('.tab[data-view]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            btn.parentElement.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            btn.classList.add('active');
+            state.viewType = btn.dataset.view;
+            renderClassList();
+        });
+    });
+
+    // 모달 닫기
+    document.getElementById('modalOverlay').addEventListener('click', e => {
+        if (e.target.id === 'modalOverlay') closeModal();
+    });
+}
+
+function handleSearch() {
+    state.searchQuery = document.getElementById('searchInput').value.trim();
+    state.currentPage = 1;
+    
+    if (state.searchType === 'code' && state.searchQuery) {
+        const found = sampleClasses.find(c => c.id.toUpperCase() === state.searchQuery.toUpperCase());
+        if (found) { openClassDetail(found); return; }
+        else showToast('해당 코드의 클래스를 찾을 수 없습니다.');
+    }
+    renderClassList();
+    if (state.searchQuery) showToast(`"${state.searchQuery}" 검색 완료`);
+}
+
+// ==================== 렌더링 ====================
+function renderAll() {
+    renderPopularTags();
+    renderRecommendations();
+    renderClassList();
+    renderSidebar();
+}
+
+function renderPopularTags() {
+    document.getElementById('popularTags').innerHTML = `
+        <span class="text-sm text-gray">인기 검색어</span>
+        ${popularTags.map((tag, i) => `<span class="tag ${i < 3 ? 'active' : ''}" onclick="searchByTag('${tag}')">${i < 3 ? '🔥 ' : ''}${tag}</span>`).join('')}
+    `;
+}
+
+function searchByTag(tag) {
+    document.getElementById('searchInput').value = tag;
+    handleSearch();
+}
+
+function renderRecommendations() {
+    const icons = ['🧮', '🎨', '💻', '📖'];
+    document.getElementById('recommendList').innerHTML = sampleClasses.slice(0, 4).map((c, i) => `
+        <div class="card recommend-card card-clickable" onclick='openClassDetail(${JSON.stringify(c)})'>
+            <div class="class-card-img" style="height:100px;font-size:2.5rem;">${icons[i] || '📚'}
+                <span class="badge badge-gray category">${c.category}</span>
+            </div>
+            <div class="p-sm">
+                <div class="text-xs text-gray truncate">${c.school}</div>
+                <h3 class="text-sm font-semibold truncate">${c.name}</h3>
+                <div class="stat-inline mt-sm"><span>👥</span><span class="value">${c.memberCount}</span></div>
+            </div>
+        </div>
+    `).join('');
+}
+
+function getFilteredClasses() {
+    let filtered = [...sampleClasses];
+    if (state.searchQuery) {
+        const q = state.searchQuery.toLowerCase();
+        filtered = filtered.filter(c => c.name.toLowerCase().includes(q) || c.school.toLowerCase().includes(q) || c.creator.toLowerCase().includes(q));
+    }
+    if (state.filters.category !== 'all') filtered = filtered.filter(c => c.category === state.filters.category);
+    if (state.filters.autoApprove) filtered = filtered.filter(c => c.autoApprove);
+    
+    switch (state.sortBy) {
+        case 'members': filtered.sort((a, b) => b.memberCount - a.memberCount); break;
+        case 'activity': filtered.sort((a, b) => b.postCount - a.postCount); break;
+    }
+    return filtered;
+}
+
+function renderClassList() {
+    const filtered = getFilteredClasses();
+    const container = document.getElementById('classContainer');
+    const totalPages = Math.ceil(filtered.length / state.itemsPerPage);
+    const start = (state.currentPage - 1) * state.itemsPerPage;
+    const paginated = filtered.slice(start, start + state.itemsPerPage);
+
+    document.getElementById('resultsCount').innerHTML = `총 <span class="text-primary text-xl">${filtered.length}</span>개의 클래스${state.searchQuery ? ` (검색: "${state.searchQuery}")` : ''}`;
+
+    if (paginated.length === 0) {
+        container.innerHTML = `<div class="empty-state"><div class="empty-state-icon">🔍</div><h3 class="empty-state-title">검색 결과가 없습니다</h3><p class="empty-state-desc">다른 검색어로 시도해보세요</p><button class="btn btn-primary" onclick="clearSearch()">전체 보기</button></div>`;
+        container.className = '';
+    } else {
+        container.className = state.viewType === 'grid' ? 'class-grid stagger-children' : 'list stagger-children';
+        container.innerHTML = paginated.map(c => renderClassCard(c)).join('');
+    }
+    renderPagination(totalPages);
+}
+
+function renderClassCard(c) {
+    const tagColors = { '학생': 'badge-secondary', '교직원': 'badge-primary', '학부모': 'badge-warning' };
+    const tags = c.tags.map(t => `<span class="badge ${tagColors[t] || 'badge-gray'}">${t}</span>`).join('');
+    
+    if (state.viewType === 'list') {
+        return `<div class="card p-md flex gap-md items-center card-clickable" onclick='openClassDetail(${JSON.stringify(c)})'>
+            <div class="class-card-img rounded" style="width:120px;height:80px;font-size:2rem;flex-shrink:0;">📚</div>
+            <div class="flex-1">
+                <div class="text-xs text-gray">${c.school}</div>
+                <h3 class="font-semibold">${c.name}</h3>
+                <div class="flex gap-xs mt-xs">${tags}</div>
+            </div>
+            <div class="flex gap-md text-sm text-gray">
+                <span>👥 ${c.memberCount}</span><span>📝 ${c.postCount}</span>
+            </div>
+            <button class="btn btn-primary btn-sm" onclick="event.stopPropagation(); joinClass('${c.id}')">가입</button>
+        </div>`;
+    }
+    
+    return `<div class="card card-clickable" onclick='openClassDetail(${JSON.stringify(c)})'>
+        <div class="class-card-img">📚
+            <span class="badge badge-gray category">${c.category}</span>
+            <button class="bookmark" onclick="event.stopPropagation(); toggleBookmark('${c.id}')">${c.isBookmarked ? '❤️' : '🤍'}</button>
+            ${c.autoApprove ? '<span class="badge badge-success auto-badge">⚡ 자동승인</span>' : ''}
+            <span class="activity ${c.isActive ? 'active' : ''}">${c.isActive ? '🟢 활동중' : '⚪ 비활성'}</span>
+        </div>
+        <div class="card-body">
+            <div class="text-xs text-gray mb-xs">${c.school}</div>
+            <h3 class="font-semibold mb-sm line-clamp-2">${c.name}</h3>
+            <p class="text-sm text-gray mb-md line-clamp-2">${c.description}</p>
+            <div class="flex gap-xs mb-md">${tags}</div>
+            <div class="flex gap-md text-sm text-gray border-top pt-md">
+                <span class="stat-inline">👥 <span class="value">${c.memberCount}</span></span>
+                <span class="stat-inline">📝 <span class="value">${c.postCount}</span></span>
+                <span class="stat-inline">📦 <span class="value">${c.contentCount}</span></span>
+            </div>
+        </div>
+        <div class="card-footer flex gap-sm">
+            <button class="btn btn-secondary flex-1" onclick="event.stopPropagation()">상세보기</button>
+            <button class="btn btn-primary flex-1" onclick="event.stopPropagation(); joinClass('${c.id}')">가입신청</button>
+        </div>
+    </div>`;
+}
+
+function renderPagination(totalPages) {
+    if (totalPages <= 1) { document.getElementById('pagination').innerHTML = ''; return; }
+    let html = `<button class="page-btn" onclick="goToPage(1)" ${state.currentPage === 1 ? 'disabled' : ''}>⟪</button>`;
+    html += `<button class="page-btn" onclick="goToPage(${state.currentPage - 1})" ${state.currentPage === 1 ? 'disabled' : ''}>⟨</button>`;
+    for (let i = 1; i <= totalPages; i++) {
+        html += `<button class="page-btn ${i === state.currentPage ? 'active' : ''}" onclick="goToPage(${i})">${i}</button>`;
+    }
+    html += `<button class="page-btn" onclick="goToPage(${state.currentPage + 1})" ${state.currentPage === totalPages ? 'disabled' : ''}>⟩</button>`;
+    html += `<button class="page-btn" onclick="goToPage(${totalPages})" ${state.currentPage === totalPages ? 'disabled' : ''}>⟫</button>`;
+    document.getElementById('pagination').innerHTML = html;
+}
+
+function goToPage(page) { state.currentPage = page; renderClassList(); window.scrollTo({ top: 400, behavior: 'smooth' }); }
+function clearSearch() { state.searchQuery = ''; document.getElementById('searchInput').value = ''; state.currentPage = 1; renderClassList(); }
+
+// ==================== 사이드바 ====================
+function renderSidebar() {
+    document.getElementById('myClassSelect').innerHTML = myClasses.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
+    
+    document.getElementById('rankingList').innerHTML = rankingData.map(item => {
+        const badgeClass = item.rank === 1 ? 'rank-gold' : item.rank === 2 ? 'rank-silver' : item.rank === 3 ? 'rank-bronze' : 'rank-normal';
+        const changeIcon = item.change === 'up' ? '▲' : item.change === 'down' ? '▼' : '-';
+        const changeColor = item.change === 'up' ? 'text-success' : item.change === 'down' ? 'text-error' : 'text-muted';
+        return `<div class="list-item list-item-clickable"><div class="rank-badge ${badgeClass}">${item.rank}</div><div class="flex-1 truncate">${item.name}</div><span class="${changeColor} text-xs">${changeIcon}${item.changeValue || ''}</span></div>`;
+    }).join('');
+
+    document.getElementById('recentList').innerHTML = recentViewed.length ? recentViewed.map(item => `
+        <div class="list-item list-item-clickable" onclick="openClassById('${item.id}')">
+            <div class="avatar avatar-sm" style="background:var(--primary-100);">📚</div>
+            <div class="flex-1"><div class="text-sm font-medium truncate">${item.name}</div><div class="text-xs text-muted">${item.viewedAt}</div></div>
+        </div>
+    `).join('') : '<p class="text-sm text-gray text-center p-md">최근 본 클래스가 없습니다</p>';
+
+    document.getElementById('approvalList').innerHTML = approvalRequests.map(item => `
+        <div class="list-item list-divider">
+            <span class="badge ${item.status === 'completed' ? 'badge-success' : 'badge-warning'}">${item.status === 'completed' ? '가입완료' : '승인대기'}</span>
+            <div class="flex-1"><div class="text-sm font-medium truncate">${item.className}</div><div class="text-xs text-muted">👤 ${item.userName}</div></div>
+        </div>
+    `).join('');
+}
+
+function switchApprovalTab(el, type) {
+    el.parentElement.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    el.classList.add('active');
+}
+
+// ==================== 모달 ====================
+function openClassDetail(c) {
+    const tagColors = { '학생': 'badge-secondary', '교직원': 'badge-primary', '학부모': 'badge-warning' };
+    const tags = c.tags.map(t => `<span class="badge ${tagColors[t] || 'badge-gray'}">${t}</span>`).join('');
+    
+    document.getElementById('classDetailModal').innerHTML = `
+        <div class="modal-header"><h2 class="modal-title">클래스 상세</h2><button class="modal-close" onclick="closeModal()">✕</button></div>
+        <div class="modal-body">
+            <div class="class-card-img rounded-lg mb-lg" style="height:180px;font-size:4rem;">📚</div>
+            <div class="text-sm text-gray mb-xs">${c.school}</div>
+            <h2 class="text-2xl font-bold mb-md">${c.name}</h2>
+            <div class="flex items-center gap-sm mb-md">
+                <div class="avatar" style="background:var(--primary-100);">👤</div>
+                <div><div class="font-semibold">${c.creator}</div><div class="text-xs text-muted">개설자</div></div>
+            </div>
+            <div class="flex gap-xs mb-lg">${tags}</div>
+            <div class="grid grid-4 gap-md p-md rounded-lg mb-lg" style="background:var(--gray-50);">
+                <div class="stat-card"><div class="stat-value">${c.memberCount}</div><div class="stat-label">멤버</div></div>
+                <div class="stat-card"><div class="stat-value">${c.postCount}</div><div class="stat-label">게시글</div></div>
+                <div class="stat-card"><div class="stat-value">${c.contentCount}</div><div class="stat-label">콘텐츠</div></div>
+                <div class="stat-card"><div class="stat-value text-md">${c.lastActivity}</div><div class="stat-label">최근활동</div></div>
+            </div>
+            <h4 class="font-semibold mb-sm">클래스 소개</h4>
+            <p class="text-gray mb-lg">${c.description}</p>
+            <div class="p-md rounded-lg ${c.autoApprove ? 'bg-primary-light' : ''}" style="${!c.autoApprove ? 'background:#FFF3E0' : ''}">
+                <p class="text-sm ${c.autoApprove ? 'text-primary' : ''}" style="${!c.autoApprove ? 'color:#E65100' : ''}">${c.autoApprove ? '⚡ 멤버 가입 시 자동승인' : '⏳ 멤버 가입 시 관리자 승인 필요'}</p>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-secondary" onclick="shareClass('${c.id}')">📤 공유</button>
+            <button class="btn btn-secondary" onclick="toggleBookmark('${c.id}')">${c.isBookmarked ? '❤️ 찜해제' : '🤍 찜하기'}</button>
+            <button class="btn btn-primary" onclick="joinClass('${c.id}')">가입 신청</button>
+        </div>
+    `;
+    document.getElementById('modalOverlay').classList.add('show');
+}
+
+function closeModal() { document.getElementById('modalOverlay').classList.remove('show'); }
+function openClassById(id) { const c = sampleClasses.find(x => x.id === id); if (c) openClassDetail(c); }
+
+// ==================== 액션 ====================
+function joinClass(id) {
+    const c = sampleClasses.find(x => x.id === id);
+    if (c) { showToast(c.autoApprove ? `"${c.name}" 클래스에 가입되었습니다! 🎉` : `가입 신청되었습니다. 관리자 승인을 기다려주세요.`); closeModal(); }
+}
+
+function toggleBookmark(id) {
+    const c = sampleClasses.find(x => x.id === id);
+    if (c) { c.isBookmarked = !c.isBookmarked; showToast(c.isBookmarked ? '찜 목록에 추가 ❤️' : '찜 목록에서 제거'); renderClassList(); }
+}
+
+function shareClass(id) {
+    navigator.clipboard.writeText(`https://class.cbe.go.kr/class/${id}`).then(() => showToast('링크가 복사되었습니다! 📋'));
+}
+
+function goToMyClass() {
+    const sel = document.getElementById('myClassSelect');
+    if (sel.value) showToast(`"${sel.options[sel.selectedIndex].text}" 클래스로 이동`);
+}
+
+// ==================== 토스트 ====================
+function showToast(msg) {
+    const toast = document.getElementById('toast');
+    toast.textContent = msg;
+    toast.classList.add('show');
+    setTimeout(() => toast.classList.remove('show'), 3000);
+}
+</script>
+</body>
+</html>

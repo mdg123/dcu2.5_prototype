@@ -1,0 +1,2716 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>다채움 수업꾸러미 플레이어 - 고도화 프로토타입</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/pretendard/1.3.9/static/pretendard.min.css" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #0066FF;
+            --primary-light: #E8F1FF;
+            --primary-dark: #0052CC;
+            --success: #00C853;
+            --success-light: #E8F9EF;
+            --warning: #FF9800;
+            --warning-light: #FFF3E0;
+            --danger: #F44336;
+            --gray-50: #FAFAFA;
+            --gray-100: #F5F5F5;
+            --gray-200: #EEEEEE;
+            --gray-300: #E0E0E0;
+            --gray-400: #BDBDBD;
+            --gray-500: #9E9E9E;
+            --gray-600: #757575;
+            --gray-700: #616161;
+            --gray-800: #424242;
+            --gray-900: #212121;
+            --sidebar-width: 320px;
+            --header-height: 56px;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--gray-100);
+            color: var(--gray-900);
+            overflow: hidden;
+        }
+
+        /* 헤더 */
+        .viewer-header {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: var(--header-height);
+            background: white;
+            border-bottom: 1px solid var(--gray-200);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 20px;
+            z-index: 100;
+        }
+
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .lesson-title {
+            font-size: 16px;
+            font-weight: 600;
+            color: var(--gray-900);
+            max-width: 500px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 8px 16px;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            border: none;
+            transition: all 0.2s;
+        }
+
+        .btn-primary {
+            background: var(--primary);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: var(--primary-dark);
+        }
+
+        .btn-outline {
+            background: white;
+            color: var(--gray-700);
+            border: 1px solid var(--gray-300);
+        }
+
+        .btn-outline:hover {
+            background: var(--gray-50);
+            border-color: var(--gray-400);
+        }
+
+        .btn-danger {
+            background: var(--danger);
+            color: white;
+        }
+
+        .btn-success {
+            background: var(--success);
+            color: white;
+        }
+
+        /* 메인 레이아웃 */
+        .viewer-container {
+            display: flex;
+            margin-top: var(--header-height);
+            height: calc(100vh - var(--header-height));
+        }
+
+        /* 사이드바 */
+        .sidebar {
+            width: var(--sidebar-width);
+            background: white;
+            border-right: 1px solid var(--gray-200);
+            display: flex;
+            flex-direction: column;
+            transition: transform 0.3s;
+        }
+
+        .sidebar.collapsed {
+            transform: translateX(calc(-1 * var(--sidebar-width) + 40px));
+        }
+
+        .sidebar-header {
+            padding: 16px;
+            border-bottom: 1px solid var(--gray-200);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .sidebar-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--gray-800);
+        }
+
+        .progress-info {
+            font-size: 13px;
+            color: var(--primary);
+            font-weight: 500;
+        }
+
+        .sidebar-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 12px;
+        }
+
+        /* 목차 아이템 */
+        .nav-item {
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+            padding: 12px;
+            border-radius: 10px;
+            cursor: pointer;
+            transition: all 0.2s;
+            margin-bottom: 8px;
+            position: relative;
+        }
+
+        .nav-item:hover {
+            background: var(--gray-50);
+        }
+
+        .nav-item.active {
+            background: var(--primary-light);
+            border: 1px solid var(--primary);
+        }
+
+        .nav-item.completed {
+            background: var(--success-light);
+        }
+
+        .nav-item.completed .nav-num {
+            background: var(--success);
+            color: white;
+        }
+
+        .nav-num {
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            background: var(--gray-200);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--gray-600);
+            flex-shrink: 0;
+        }
+
+        .nav-item.active .nav-num {
+            background: var(--primary);
+            color: white;
+        }
+
+        .nav-content {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .nav-type {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 11px;
+            font-weight: 500;
+            padding: 2px 8px;
+            border-radius: 4px;
+            margin-bottom: 4px;
+        }
+
+        .nav-type.video { background: #E3F2FD; color: #1565C0; }
+        .nav-type.document { background: #FFF3E0; color: #EF6C00; }
+        .nav-type.question { background: #F3E5F5; color: #7B1FA2; }
+
+        .nav-title {
+            font-size: 13px;
+            color: var(--gray-800);
+            line-height: 1.4;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+
+        /* 완료 라벨 → 학습 상태 라벨로 변경 */
+        .status-label {
+            flex-shrink: 0;
+            font-size: 11px;
+            font-weight: 600;
+            padding: 4px 8px;
+            border-radius: 4px;
+            border: 1px solid;
+            white-space: nowrap;
+            margin-left: 8px;
+        }
+
+        .status-label.completed {
+            color: var(--success);
+            background: var(--success-light);
+            border-color: var(--success);
+        }
+
+        .status-label.in-progress {
+            color: white;
+            background: var(--success);
+            border-color: var(--success);
+        }
+
+        .status-label.not-started {
+            color: var(--gray-600);
+            background: white;
+            border-color: var(--gray-400);
+        }
+
+        /* nav-item 레이아웃 수정 */
+        .nav-item {
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+            padding: 12px;
+            border-radius: 10px;
+            cursor: pointer;
+            transition: all 0.2s;
+            margin-bottom: 8px;
+            position: relative;
+        }
+
+        .nav-item-main {
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+            flex: 1;
+            min-width: 0;
+        }
+
+        .nav-item-right {
+            display: flex;
+            align-items: center;
+            flex-shrink: 0;
+        }
+
+        /* 목차 편집 모드 */
+        .edit-mode .nav-item {
+            cursor: grab;
+        }
+
+        .edit-mode .nav-item:active {
+            cursor: grabbing;
+        }
+
+        .edit-actions {
+            display: flex;
+            gap: 8px;
+            padding: 12px 16px;
+            border-top: 1px solid var(--gray-200);
+            background: var(--gray-50);
+        }
+
+        /* 콘텐츠 영역 */
+        .content-area {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            background: var(--gray-100);
+            position: relative;
+        }
+
+        .content-viewer {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+            position: relative;
+        }
+
+        .content-frame {
+            width: 100%;
+            max-width: 900px;
+            height: 100%;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .content-display {
+            flex: 1;
+            padding: 32px;
+            overflow-y: auto;
+        }
+
+        /* 문항 UI */
+        .question-container {
+            max-width: 700px;
+            margin: 0 auto;
+        }
+
+        .question-text {
+            font-size: 18px;
+            font-weight: 600;
+            color: var(--gray-900);
+            margin-bottom: 24px;
+            line-height: 1.6;
+        }
+
+        .question-type-badge {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 500;
+            margin-bottom: 16px;
+        }
+
+        .question-type-badge.objective { background: #E3F2FD; color: #1565C0; }
+        .question-type-badge.subjective { background: #FFF3E0; color: #EF6C00; }
+        .question-type-badge.essay { background: #FCE4EC; color: #C2185B; }
+
+        .answer-options {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .answer-option {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 16px;
+            border: 2px solid var(--gray-200);
+            border-radius: 10px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .answer-option:hover {
+            border-color: var(--primary);
+            background: var(--primary-light);
+        }
+
+        .answer-option.selected {
+            border-color: var(--primary);
+            background: var(--primary-light);
+        }
+
+        .answer-option.correct {
+            border-color: var(--success);
+            background: var(--success-light);
+        }
+
+        .answer-option.wrong {
+            border-color: var(--danger);
+            background: #FFEBEE;
+        }
+
+        .option-num {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            background: var(--gray-200);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 600;
+            font-size: 14px;
+        }
+
+        .answer-option.selected .option-num {
+            background: var(--primary);
+            color: white;
+        }
+
+        .answer-option.correct .option-num {
+            background: var(--success);
+            color: white;
+        }
+
+        .answer-option.wrong .option-num {
+            background: var(--danger);
+            color: white;
+        }
+
+        /* 서술형 답안 */
+        .essay-answer {
+            width: 100%;
+            min-height: 150px;
+            padding: 16px;
+            border: 2px solid var(--gray-200);
+            border-radius: 10px;
+            font-size: 15px;
+            font-family: inherit;
+            resize: vertical;
+            transition: border-color 0.2s;
+        }
+
+        .essay-answer:focus {
+            outline: none;
+            border-color: var(--primary);
+        }
+
+        /* 서술형 채점 대기 표시 */
+        .manual-grading-notice {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 16px;
+            background: var(--warning-light);
+            border-radius: 10px;
+            margin-top: 16px;
+        }
+
+        .manual-grading-notice .icon {
+            width: 40px;
+            height: 40px;
+            background: var(--warning);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 20px;
+        }
+
+        .manual-grading-notice .text {
+            flex: 1;
+        }
+
+        .manual-grading-notice .title {
+            font-weight: 600;
+            color: var(--gray-900);
+            margin-bottom: 4px;
+        }
+
+        .manual-grading-notice .desc {
+            font-size: 13px;
+            color: var(--gray-600);
+        }
+
+        /* 해설 영역 */
+        .explanation-box {
+            margin-top: 24px;
+            padding: 20px;
+            background: var(--gray-50);
+            border-radius: 10px;
+            border-left: 4px solid var(--primary);
+        }
+
+        .explanation-title {
+            font-weight: 600;
+            color: var(--primary);
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .explanation-content {
+            font-size: 14px;
+            line-height: 1.7;
+            color: var(--gray-700);
+        }
+
+        /* 하단 컨트롤 */
+        .content-controls {
+            padding: 16px 24px;
+            background: white;
+            border-top: 1px solid var(--gray-200);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .nav-buttons {
+            display: flex;
+            gap: 8px;
+        }
+
+        .action-buttons {
+            display: flex;
+            gap: 8px;
+        }
+
+        /* 툴바 (필기 등) */
+        .toolbar {
+            position: fixed;
+            right: 24px;
+            top: 50%;
+            transform: translateY(-50%);
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.12);
+            padding: 8px;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            z-index: 50;
+        }
+
+        .tool-btn {
+            width: 44px;
+            height: 44px;
+            border-radius: 8px;
+            border: none;
+            background: transparent;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+            transition: all 0.2s;
+            color: var(--gray-600);
+        }
+
+        .tool-btn:hover {
+            background: var(--gray-100);
+        }
+
+        .tool-btn.active {
+            background: var(--primary-light);
+            color: var(--primary);
+        }
+
+        /* 필기 캔버스 */
+        .drawing-canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 10;
+        }
+
+        .drawing-canvas.active {
+            pointer-events: auto;
+            cursor: crosshair;
+        }
+
+        /* 채팅 패널 */
+        .chat-panel {
+            position: fixed;
+            right: 0;
+            top: var(--header-height);
+            width: 360px;
+            height: calc(100vh - var(--header-height));
+            background: white;
+            border-left: 1px solid var(--gray-200);
+            display: flex;
+            flex-direction: column;
+            transform: translateX(100%);
+            transition: transform 0.3s;
+            z-index: 80;
+        }
+
+        .chat-panel.open {
+            transform: translateX(0);
+        }
+
+        .chat-header {
+            padding: 16px;
+            border-bottom: 1px solid var(--gray-200);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .chat-title {
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .online-indicator {
+            width: 8px;
+            height: 8px;
+            background: var(--success);
+            border-radius: 50%;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .chat-messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .chat-message {
+            display: flex;
+            gap: 10px;
+            max-width: 85%;
+        }
+
+        .chat-message.mine {
+            align-self: flex-end;
+            flex-direction: row-reverse;
+        }
+
+        .chat-avatar {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            background: var(--primary);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 14px;
+            font-weight: 600;
+            flex-shrink: 0;
+        }
+
+        .chat-bubble {
+            padding: 10px 14px;
+            background: var(--gray-100);
+            border-radius: 16px;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+
+        .chat-message.mine .chat-bubble {
+            background: var(--primary);
+            color: white;
+        }
+
+        /* 교사 아바타 */
+        .chat-avatar.teacher {
+            background: #7B1FA2;
+        }
+
+        /* 채팅 역할 배지 */
+        .chat-role-badge {
+            font-size: 10px;
+            padding: 2px 6px;
+            background: #7B1FA2;
+            color: white;
+            border-radius: 4px;
+            margin-left: 8px;
+        }
+
+        /* 채팅 헤더 액션 */
+        .chat-header-actions {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .btn-sm {
+            padding: 4px 10px;
+            font-size: 12px;
+        }
+
+        /* 시스템 메시지 */
+        .chat-message.system {
+            max-width: 100%;
+            justify-content: center;
+        }
+
+        .chat-system-bubble {
+            padding: 8px 16px;
+            background: var(--primary-light);
+            color: var(--primary-dark);
+            border-radius: 8px;
+            font-size: 12px;
+            text-align: center;
+        }
+
+        .chat-system-bubble.warning {
+            background: var(--warning-light);
+            color: #E65100;
+        }
+
+        .chat-system-bubble.ended {
+            background: var(--gray-200);
+            color: var(--gray-600);
+        }
+
+        .chat-input-area {
+            padding: 16px;
+            border-top: 1px solid var(--gray-200);
+            display: flex;
+            gap: 8px;
+        }
+
+        .chat-input {
+            flex: 1;
+            padding: 10px 14px;
+            border: 1px solid var(--gray-300);
+            border-radius: 20px;
+            font-size: 14px;
+            outline: none;
+        }
+
+        .chat-input:focus {
+            border-color: var(--primary);
+        }
+
+        .chat-send-btn {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: var(--primary);
+            color: white;
+            border: none;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+        }
+
+        /* 채팅 종료 알림 */
+        .chat-ended-notice {
+            padding: 20px;
+            text-align: center;
+            background: var(--gray-50);
+            margin: 16px;
+            border-radius: 12px;
+        }
+
+        .chat-ended-notice .icon {
+            font-size: 48px;
+            margin-bottom: 12px;
+        }
+
+        .chat-ended-notice .title {
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+
+        .chat-ended-notice .desc {
+            font-size: 13px;
+            color: var(--gray-600);
+        }
+
+        /* AI 에이전트 패널 */
+        .ai-panel {
+            position: fixed;
+            left: var(--sidebar-width);
+            bottom: 24px;
+            width: 400px;
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.15);
+            display: none;
+            flex-direction: column;
+            z-index: 90;
+            overflow: hidden;
+        }
+
+        .ai-panel.open {
+            display: flex;
+        }
+
+        .ai-header {
+            padding: 16px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .ai-title {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-weight: 600;
+        }
+
+        .ai-icon {
+            width: 32px;
+            height: 32px;
+            background: rgba(255,255,255,0.2);
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+        }
+
+        .ai-content {
+            padding: 16px;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+
+        .ai-suggestion {
+            padding: 12px;
+            background: var(--gray-50);
+            border-radius: 10px;
+            margin-bottom: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .ai-suggestion:hover {
+            background: var(--primary-light);
+        }
+
+        .ai-suggestion-title {
+            font-weight: 600;
+            font-size: 14px;
+            margin-bottom: 4px;
+        }
+
+        .ai-suggestion-desc {
+            font-size: 12px;
+            color: var(--gray-600);
+        }
+
+        /* 모달 */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.5);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 200;
+            opacity: 0;
+            visibility: hidden;
+            transition: all 0.3s;
+        }
+
+        .modal-overlay.show {
+            opacity: 1;
+            visibility: visible;
+        }
+
+        .modal {
+            background: white;
+            border-radius: 16px;
+            width: 90%;
+            max-width: 440px;
+            overflow: hidden;
+            transform: scale(0.9);
+            transition: transform 0.3s;
+        }
+
+        .modal-overlay.show .modal {
+            transform: scale(1);
+        }
+
+        .modal-header {
+            padding: 20px 24px;
+            border-bottom: 1px solid var(--gray-200);
+        }
+
+        .modal-title {
+            font-size: 18px;
+            font-weight: 600;
+        }
+
+        .modal-body {
+            padding: 24px;
+        }
+
+        .modal-icon {
+            width: 64px;
+            height: 64px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 20px;
+            font-size: 32px;
+        }
+
+        .modal-icon.warning {
+            background: var(--warning-light);
+            color: var(--warning);
+        }
+
+        .modal-icon.success {
+            background: var(--success-light);
+            color: var(--success);
+        }
+
+        .modal-text {
+            text-align: center;
+            font-size: 15px;
+            line-height: 1.6;
+            color: var(--gray-700);
+        }
+
+        .modal-text strong {
+            color: var(--gray-900);
+        }
+
+        .modal-footer {
+            padding: 16px 24px;
+            border-top: 1px solid var(--gray-200);
+            display: flex;
+            gap: 12px;
+            justify-content: flex-end;
+        }
+
+        /* 드래그 앤 드롭 영역 */
+        .drop-zone {
+            border: 2px dashed var(--gray-300);
+            border-radius: 12px;
+            padding: 40px;
+            text-align: center;
+            transition: all 0.2s;
+            margin-top: 20px;
+        }
+
+        .drop-zone.drag-over {
+            border-color: var(--primary);
+            background: var(--primary-light);
+        }
+
+        .drop-zone-icon {
+            font-size: 48px;
+            color: var(--gray-400);
+            margin-bottom: 12px;
+        }
+
+        .drop-zone-text {
+            font-size: 14px;
+            color: var(--gray-600);
+        }
+
+        .drop-zone-sub {
+            font-size: 12px;
+            color: var(--gray-500);
+            margin-top: 8px;
+        }
+
+        /* 토스트 알림 */
+        .toast-container {
+            position: fixed;
+            bottom: 24px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 300;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .toast {
+            padding: 14px 24px;
+            background: var(--gray-900);
+            color: white;
+            border-radius: 10px;
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            animation: slideUp 0.3s ease;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+        }
+
+        .toast.success {
+            background: var(--success);
+        }
+
+        .toast.warning {
+            background: var(--warning);
+        }
+
+        @keyframes slideUp {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        /* 문서 뷰어 시뮬레이션 */
+        .document-viewer {
+            width: 100%;
+            height: 100%;
+            background: #f8f8f8;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+        }
+
+        .document-placeholder {
+            text-align: center;
+            color: var(--gray-500);
+        }
+
+        .document-placeholder .icon {
+            font-size: 64px;
+            margin-bottom: 16px;
+        }
+
+        /* 비디오 플레이어 시뮬레이션 */
+        .video-player {
+            width: 100%;
+            aspect-ratio: 16/9;
+            background: #000;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+        }
+
+        .video-placeholder {
+            color: white;
+            text-align: center;
+        }
+
+        .video-placeholder .play-btn {
+            width: 80px;
+            height: 80px;
+            background: rgba(255,255,255,0.2);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 32px;
+            margin: 0 auto 16px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .video-placeholder .play-btn:hover {
+            background: rgba(255,255,255,0.3);
+            transform: scale(1.1);
+        }
+
+        /* 필기 도구 팔레트 */
+        .pen-palette {
+            position: absolute;
+            right: 60px;
+            top: 50%;
+            transform: translateY(-50%);
+            background: white;
+            border-radius: 12px;
+            padding: 12px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.12);
+            display: none;
+        }
+
+        .pen-palette.show {
+            display: block;
+        }
+
+        .color-options {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 12px;
+        }
+
+        .color-btn {
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            border: 2px solid transparent;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .color-btn:hover, .color-btn.active {
+            transform: scale(1.15);
+            border-color: var(--gray-400);
+        }
+
+        .size-options {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+
+        .size-btn {
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            background: var(--gray-300);
+            border: none;
+            cursor: pointer;
+        }
+
+        .size-btn:hover, .size-btn.active {
+            background: var(--gray-500);
+        }
+
+        /* 수업 결과 요약 모달 */
+        .result-summary {
+            padding: 20px;
+        }
+
+        .result-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 12px 0;
+            border-bottom: 1px solid var(--gray-200);
+        }
+
+        .result-item:last-child {
+            border-bottom: none;
+        }
+
+        .result-label {
+            color: var(--gray-600);
+        }
+
+        .result-value {
+            font-weight: 600;
+        }
+
+        .result-value.highlight {
+            color: var(--primary);
+        }
+
+        /* 사이드바 푸터 */
+        .sidebar-footer {
+            padding: 12px 16px;
+            border-top: 1px solid var(--gray-200);
+            background: var(--gray-50);
+        }
+
+        .total-time {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 13px;
+            color: var(--gray-600);
+        }
+
+        .total-time strong {
+            color: var(--primary);
+        }
+
+        /* 콘텐츠 소요시간 표시 */
+        .nav-duration {
+            font-size: 11px;
+            color: var(--gray-500);
+            margin-top: 4px;
+        }
+
+        /* 설정 패널 */
+        .settings-panel {
+            position: fixed;
+            right: 0;
+            top: var(--header-height);
+            width: 320px;
+            height: calc(100vh - var(--header-height));
+            background: white;
+            border-left: 1px solid var(--gray-200);
+            transform: translateX(100%);
+            transition: transform 0.3s;
+            z-index: 85;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .settings-panel.open {
+            transform: translateX(0);
+        }
+
+        .settings-header {
+            padding: 16px;
+            border-bottom: 1px solid var(--gray-200);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .settings-title {
+            font-weight: 600;
+            font-size: 16px;
+        }
+
+        .settings-content {
+            flex: 1;
+            padding: 16px;
+            overflow-y: auto;
+        }
+
+        .setting-group {
+            margin-bottom: 24px;
+        }
+
+        .setting-label {
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--gray-700);
+            margin-bottom: 10px;
+        }
+
+        .setting-options {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .setting-btn {
+            padding: 8px 14px;
+            border: 1px solid var(--gray-300);
+            border-radius: 6px;
+            background: white;
+            font-size: 13px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .setting-btn:hover {
+            border-color: var(--primary);
+            background: var(--primary-light);
+        }
+
+        .setting-btn.active {
+            border-color: var(--primary);
+            background: var(--primary);
+            color: white;
+        }
+
+        .shortcut-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .shortcut-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-size: 13px;
+            color: var(--gray-600);
+        }
+
+        .shortcut-item kbd {
+            padding: 4px 8px;
+            background: var(--gray-100);
+            border: 1px solid var(--gray-300);
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: 12px;
+            min-width: 60px;
+            text-align: center;
+        }
+
+        /* 손들기 버튼 활성화 */
+        .btn.hand-raised {
+            background: var(--warning);
+            color: white;
+            border-color: var(--warning);
+            animation: handPulse 1s infinite;
+        }
+
+        @keyframes handPulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+        }
+
+        /* 링크/iframe 콘텐츠 */
+        .link-viewer {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .link-toolbar {
+            padding: 12px 16px;
+            background: var(--gray-50);
+            border-bottom: 1px solid var(--gray-200);
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .link-url {
+            flex: 1;
+            padding: 8px 12px;
+            background: white;
+            border: 1px solid var(--gray-300);
+            border-radius: 6px;
+            font-size: 13px;
+            color: var(--gray-600);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .link-iframe-container {
+            flex: 1;
+            position: relative;
+            background: white;
+        }
+
+        .link-iframe {
+            width: 100%;
+            height: 100%;
+            border: none;
+        }
+
+        .link-loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            color: var(--gray-500);
+        }
+
+        .link-loading .spinner {
+            width: 40px;
+            height: 40px;
+            border: 3px solid var(--gray-200);
+            border-top-color: var(--primary);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 12px;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* 다크 모드 */
+        body.dark-mode {
+            --gray-50: #1a1a1a;
+            --gray-100: #2d2d2d;
+            --gray-200: #404040;
+            --gray-300: #525252;
+            --gray-400: #737373;
+            --gray-500: #a3a3a3;
+            --gray-600: #d4d4d4;
+            --gray-700: #e5e5e5;
+            --gray-800: #f5f5f5;
+            --gray-900: #fafafa;
+            background: #121212;
+        }
+
+        body.dark-mode .viewer-header,
+        body.dark-mode .sidebar,
+        body.dark-mode .content-frame,
+        body.dark-mode .chat-panel,
+        body.dark-mode .settings-panel,
+        body.dark-mode .toolbar,
+        body.dark-mode .modal {
+            background: #1e1e1e;
+        }
+
+        /* 글자 크기 */
+        body.font-small { font-size: 14px; }
+        body.font-medium { font-size: 16px; }
+        body.font-large { font-size: 18px; }
+
+        body.font-large .question-text { font-size: 22px; }
+        body.font-large .answer-option { font-size: 17px; }
+        body.font-small .question-text { font-size: 16px; }
+        body.font-small .answer-option { font-size: 13px; }
+
+        /* 영상 컨트롤 */
+        .video-controls {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px 16px;
+            background: rgba(0,0,0,0.8);
+            border-radius: 8px;
+            margin-top: 12px;
+        }
+
+        .video-controls button {
+            background: transparent;
+            border: none;
+            color: white;
+            font-size: 18px;
+            cursor: pointer;
+            padding: 8px;
+            border-radius: 4px;
+            transition: background 0.2s;
+        }
+
+        .video-controls button:hover {
+            background: rgba(255,255,255,0.2);
+        }
+
+        .video-progress {
+            flex: 1;
+            height: 6px;
+            background: rgba(255,255,255,0.3);
+            border-radius: 3px;
+            cursor: pointer;
+        }
+
+        .video-progress-fill {
+            height: 100%;
+            background: var(--primary);
+            border-radius: 3px;
+            width: 35%;
+        }
+
+        .video-time {
+            color: white;
+            font-size: 13px;
+            font-family: monospace;
+        }
+
+        .playback-rate {
+            color: white;
+            font-size: 12px;
+            padding: 4px 8px;
+            background: rgba(255,255,255,0.2);
+            border-radius: 4px;
+        }
+
+        /* 수업 설계 패널 */
+        .design-panel {
+            position: fixed;
+            top: var(--header-height);
+            left: var(--sidebar-width);
+            right: 0;
+            bottom: 0;
+            background: white;
+            z-index: 70;
+            display: none;
+            flex-direction: column;
+        }
+
+        .design-panel.show {
+            display: flex;
+        }
+
+        .design-header {
+            padding: 20px 24px;
+            border-bottom: 1px solid var(--gray-200);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .design-content {
+            flex: 1;
+            padding: 24px;
+            overflow-y: auto;
+        }
+
+        .link-embed-input {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+
+        .link-embed-input input {
+            flex: 1;
+            padding: 12px 16px;
+            border: 1px solid var(--gray-300);
+            border-radius: 8px;
+            font-size: 14px;
+        }
+
+        /* 진행률 바 */
+        .progress-bar-container {
+            margin-top: 12px;
+        }
+
+        .progress-bar {
+            height: 6px;
+            background: var(--gray-200);
+            border-radius: 3px;
+            overflow: hidden;
+        }
+
+        .progress-bar-fill {
+            height: 100%;
+            background: linear-gradient(90deg, var(--primary), var(--success));
+            border-radius: 3px;
+            transition: width 0.5s ease;
+        }
+
+        /* 반응형 */
+        @media (max-width: 768px) {
+            .sidebar {
+                position: fixed;
+                left: 0;
+                top: var(--header-height);
+                height: calc(100vh - var(--header-height));
+                z-index: 60;
+                transform: translateX(-100%);
+            }
+
+            .sidebar.open {
+                transform: translateX(0);
+            }
+
+            .content-area {
+                margin-left: 0;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- 헤더 -->
+    <header class="viewer-header">
+        <div class="header-left">
+            <button class="btn btn-outline" onclick="toggleSidebar()" title="목차 토글">
+                ☰
+            </button>
+            <h1 class="lesson-title">[초5학년 2학기 사회] 삼국의 문화 중 백제에 대해 알아보아요.</h1>
+        </div>
+        <div class="header-right">
+            <button class="btn btn-outline" onclick="toggleChat()">
+                💬 채팅
+            </button>
+            <button class="btn btn-outline" onclick="toggleSettings()">
+                ⚙️ 설정
+            </button>
+            <button class="btn btn-outline" onclick="raiseHand()" id="raiseHandBtn">
+                ✋ 손들기
+            </button>
+            <button class="btn btn-danger" onclick="handleExit()">
+                🚪 나가기
+            </button>
+        </div>
+    </header>
+
+    <!-- 메인 컨테이너 -->
+    <div class="viewer-container">
+        <!-- 사이드바 -->
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <span class="sidebar-title">📚 수업 목차</span>
+                <span class="progress-info" id="progressInfo">5/14 완료</span>
+            </div>
+            <div class="sidebar-content" id="navList">
+                <!-- 동적으로 생성됨 -->
+            </div>
+            <div class="sidebar-footer">
+                <div class="total-time">
+                    <span>⏱️ 예상 학습 시간</span>
+                    <strong id="totalTime">약 32분</strong>
+                </div>
+            </div>
+            <div class="progress-bar-container" style="padding: 0 16px 16px;">
+                <div class="progress-bar">
+                    <div class="progress-bar-fill" id="progressBar" style="width: 0%"></div>
+                </div>
+            </div>
+        </aside>
+
+        <!-- 콘텐츠 영역 -->
+        <main class="content-area">
+            <div class="content-viewer">
+                <div class="content-frame">
+                    <div class="content-display" id="contentDisplay">
+                        <!-- 동적 콘텐츠 -->
+                    </div>
+                </div>
+                <!-- 필기 캔버스 -->
+                <canvas class="drawing-canvas" id="drawingCanvas"></canvas>
+            </div>
+
+            <!-- 하단 컨트롤 -->
+            <div class="content-controls">
+                <div class="nav-buttons">
+                    <button class="btn btn-outline" onclick="prevContent()" id="prevBtn">
+                        ◀ 이전
+                    </button>
+                    <button class="btn btn-outline" onclick="nextContent()" id="nextBtn">
+                        다음 ▶
+                    </button>
+                </div>
+                <div class="action-buttons">
+                    <button class="btn btn-outline" onclick="markComplete()" id="completeBtn">
+                        ✓ 완료 표시
+                    </button>
+                    <button class="btn btn-primary" onclick="submitAnswer()" id="submitBtn" style="display:none">
+                        정답 확인
+                    </button>
+                </div>
+            </div>
+        </main>
+
+        <!-- 필기 도구 -->
+        <div class="toolbar" id="toolbar">
+            <button class="tool-btn" onclick="togglePen()" id="penBtn" title="필기">✏️</button>
+            <button class="tool-btn" onclick="toggleHighlight()" id="highlightBtn" title="형광펜">🖍️</button>
+            <button class="tool-btn" onclick="toggleEraser()" id="eraserBtn" title="지우개">🧹</button>
+            <button class="tool-btn" onclick="clearDrawing()" title="전체 지우기">🗑️</button>
+            <button class="tool-btn" onclick="saveDrawing()" title="필기 저장">💾</button>
+            <hr style="border: none; border-top: 1px solid var(--gray-200); margin: 4px 0;">
+            <button class="tool-btn" onclick="toggleBookmark()" id="bookmarkBtn" title="북마크">🔖</button>
+        </div>
+
+        <!-- 필기 팔레트 -->
+        <div class="pen-palette" id="penPalette">
+            <div class="color-options">
+                <button class="color-btn active" style="background: #000" onclick="setColor('#000')"></button>
+                <button class="color-btn" style="background: #F44336" onclick="setColor('#F44336')"></button>
+                <button class="color-btn" style="background: #2196F3" onclick="setColor('#2196F3')"></button>
+                <button class="color-btn" style="background: #4CAF50" onclick="setColor('#4CAF50')"></button>
+                <button class="color-btn" style="background: #FF9800" onclick="setColor('#FF9800')"></button>
+            </div>
+            <div class="size-options">
+                <span style="font-size:12px; color: var(--gray-600);">굵기:</span>
+                <button class="size-btn active" style="width:16px; height:16px" onclick="setSize(2)"></button>
+                <button class="size-btn" style="width:20px; height:20px" onclick="setSize(4)"></button>
+                <button class="size-btn" style="width:24px; height:24px" onclick="setSize(6)"></button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 채팅 패널 -->
+    <div class="chat-panel" id="chatPanel">
+        <div class="chat-header">
+            <div class="chat-title">
+                <span class="online-indicator" id="chatIndicator"></span>
+                실시간 채팅
+                <span class="chat-role-badge">교사</span>
+            </div>
+            <div class="chat-header-actions">
+                <button class="btn btn-outline btn-sm" onclick="confirmEndChat()" id="endChatBtn" title="채팅 종료">
+                    🚫 채팅 종료
+                </button>
+                <button class="btn btn-outline" onclick="toggleChat()" style="padding: 4px 8px">✕</button>
+            </div>
+        </div>
+        <div class="chat-messages" id="chatMessages">
+            <div class="chat-message system">
+                <div class="chat-system-bubble">💬 실시간 채팅이 시작되었습니다. 학생들과 소통해보세요!</div>
+            </div>
+            <div class="chat-message">
+                <div class="chat-avatar">김</div>
+                <div class="chat-bubble">선생님, 백제의 고분은 어디에 주로 있나요?</div>
+            </div>
+            <div class="chat-message mine">
+                <div class="chat-avatar teacher">T</div>
+                <div class="chat-bubble">좋은 질문이에요! 백제의 고분은 주로 공주와 부여 지역에 많이 분포해 있습니다.</div>
+            </div>
+            <div class="chat-message">
+                <div class="chat-avatar">이</div>
+                <div class="chat-bubble">무령왕릉도 백제 고분인가요?</div>
+            </div>
+        </div>
+        <div class="chat-input-area" id="chatInputArea">
+            <input type="text" class="chat-input" placeholder="메시지를 입력하세요..." id="chatInput" onkeypress="handleChatKeypress(event)">
+            <button class="chat-send-btn" onclick="sendChat()">➤</button>
+        </div>
+        <!-- 채팅 종료 시 표시 -->
+        <div class="chat-ended-notice" id="chatEndedNotice" style="display: none;">
+            <div class="icon">🔒</div>
+            <div class="title">채팅이 종료되었습니다</div>
+            <div class="desc">수업 개설자가 채팅을 종료하였습니다.</div>
+        </div>
+    </div>
+
+    <!-- 채팅 종료 확인 모달 -->
+    <div class="modal-overlay" id="endChatModal">
+        <div class="modal">
+            <div class="modal-header">
+                <div class="modal-title">채팅 종료</div>
+            </div>
+            <div class="modal-body">
+                <div class="modal-icon warning">🚫</div>
+                <div class="modal-text">
+                    <strong>채팅을 종료하시겠습니까?</strong><br><br>
+                    채팅을 종료하면 모든 참여 학생의 채팅창이<br>
+                    동시에 종료됩니다.<br><br>
+                    <span style="color: var(--gray-500); font-size: 13px;">* 종료 후에는 다시 열 수 없습니다.</span>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-outline" onclick="closeModal('endChatModal')">취소</button>
+                <button class="btn btn-danger" onclick="executeEndChat()">채팅 종료</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 설정 패널 -->
+    <div class="settings-panel" id="settingsPanel">
+        <div class="settings-header">
+            <div class="settings-title">⚙️ 학습 설정</div>
+            <button style="background: transparent; border: none; cursor: pointer; font-size: 18px" onclick="toggleSettings()">✕</button>
+        </div>
+        <div class="settings-content">
+            <div class="setting-group">
+                <div class="setting-label">글자 크기</div>
+                <div class="setting-options">
+                    <button class="setting-btn" onclick="setFontSize('small')">작게</button>
+                    <button class="setting-btn active" onclick="setFontSize('medium')">보통</button>
+                    <button class="setting-btn" onclick="setFontSize('large')">크게</button>
+                </div>
+            </div>
+            <div class="setting-group">
+                <div class="setting-label">화면 모드</div>
+                <div class="setting-options">
+                    <button class="setting-btn active" onclick="setTheme('light')">☀️ 라이트</button>
+                    <button class="setting-btn" onclick="setTheme('dark')">🌙 다크</button>
+                </div>
+            </div>
+            <div class="setting-group">
+                <div class="setting-label">영상 배속</div>
+                <div class="setting-options">
+                    <button class="setting-btn" onclick="setPlaybackRate(0.5)">0.5x</button>
+                    <button class="setting-btn" onclick="setPlaybackRate(0.75)">0.75x</button>
+                    <button class="setting-btn active" onclick="setPlaybackRate(1)">1x</button>
+                    <button class="setting-btn" onclick="setPlaybackRate(1.25)">1.25x</button>
+                    <button class="setting-btn" onclick="setPlaybackRate(1.5)">1.5x</button>
+                    <button class="setting-btn" onclick="setPlaybackRate(2)">2x</button>
+                </div>
+            </div>
+            <div class="setting-group">
+                <div class="setting-label">키보드 단축키</div>
+                <div class="shortcut-list">
+                    <div class="shortcut-item"><kbd>←</kbd> <span>이전 콘텐츠</span></div>
+                    <div class="shortcut-item"><kbd>→</kbd> <span>다음 콘텐츠</span></div>
+                    <div class="shortcut-item"><kbd>Space</kbd> <span>영상 재생/일시정지</span></div>
+                    <div class="shortcut-item"><kbd>F</kbd> <span>전체화면</span></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 나가기 확인 모달 (미완료 시) -->
+    <div class="modal-overlay" id="exitModalIncomplete">
+        <div class="modal">
+            <div class="modal-header">
+                <div class="modal-title">수업 나가기</div>
+            </div>
+            <div class="modal-body">
+                <div class="modal-icon warning">⚠️</div>
+                <div class="modal-text">
+                    <strong>아직 보지 않은 수업 내용이 있습니다.</strong><br><br>
+                    완료하지 않은 콘텐츠: <span id="incompleteCount">8개</span><br><br>
+                    그래도 나가시겠습니까?
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-outline" onclick="closeModal('exitModalIncomplete')">계속 학습</button>
+                <button class="btn btn-danger" onclick="confirmExit()">나가기</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 나가기 확인 모달 (완료 시) -->
+    <div class="modal-overlay" id="exitModalComplete">
+        <div class="modal">
+            <div class="modal-header">
+                <div class="modal-title">수업 완료</div>
+            </div>
+            <div class="modal-body">
+                <div class="modal-icon success">🎉</div>
+                <div class="modal-text">
+                    <strong>모든 수업 내용을 수행하였습니다!</strong><br><br>
+                    수고하셨습니다.
+                </div>
+                <div class="result-summary">
+                    <div class="result-item">
+                        <span class="result-label">총 콘텐츠</span>
+                        <span class="result-value">14개</span>
+                    </div>
+                    <div class="result-item">
+                        <span class="result-label">객관식 정답률</span>
+                        <span class="result-value highlight">85%</span>
+                    </div>
+                    <div class="result-item">
+                        <span class="result-label">서술형 문항</span>
+                        <span class="result-value">2개 (채점 대기)</span>
+                    </div>
+                    <div class="result-item">
+                        <span class="result-label">학습 시간</span>
+                        <span class="result-value">32분</span>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-primary" onclick="confirmExit()">확인</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 토스트 컨테이너 -->
+    <div class="toast-container" id="toastContainer"></div>
+
+    <script>
+        // ===== 데이터 =====
+        const lessonData = {
+            title: '[초5학년 2학기 사회] 삼국의 문화 중 백제에 대해 알아보아요.',
+            contents: [
+                { id: 1, type: 'document', title: '백제의 역사와 문화유산 개요', completed: true, duration: '5분' },
+                { id: 2, type: 'video', title: '삼국의 문화 - 백제편 영상 학습', completed: true, duration: '8분' },
+                { id: 3, type: 'link', title: '국립중앙박물관 - 백제실 VR 투어', url: 'https://www.museum.go.kr/site/main/home', completed: true, duration: '자율' },
+                { id: 4, type: 'question', questionType: 'objective', title: '고분이란 무엇을 의미하나요?', 
+                  options: ['오래된 그릇', '옛날의 큰 무덤', '고대의 문서', '오래된 건물'], 
+                  answer: 1, completed: true, userAnswer: 1, duration: '1분' },
+                { id: 5, type: 'question', questionType: 'essay', title: '고분에서 무덤 주인이 사용하던 물건을 같이 넣은 이유는 무엇일까요?', 
+                  completed: true, userAnswer: '사후 세계를 믿었기 때문입니다.', sampleAnswer: '고대 사람들은 사후 세계를 믿었기 때문에, 죽은 뒤에도 생전에 사용하던 물건이 필요하다고 생각했습니다.', duration: '3분' },
+                { id: 6, type: 'question', questionType: 'subjective', title: '무덤에 함께 넣은 물건을 무엇이라고 하나요?', 
+                  answer: '부장품', completed: false, userAnswer: null, duration: '1분' },
+                { id: 7, type: 'link', title: '백제의 문화유산 (위키백과)', url: 'https://ko.wikipedia.org/wiki/%EB%B0%B1%EC%A0%9C', completed: false, duration: '자율' },
+                { id: 8, type: 'question', questionType: 'objective', title: '고분 벽화가 많이 남아 있는 이유는 무엇인가요?',
+                  options: ['외부와 차단되어 보존이 잘 되었기 때문', '특별한 재료로 그렸기 때문', '크기가 작았기 때문', '사람들이 잘 관리했기 때문'],
+                  answer: 0, completed: false, userAnswer: null, duration: '1분' },
+                { id: 9, type: 'question', questionType: 'essay', title: '벽화에 상상의 동물을 그린 이유는 무엇인가요?',
+                  completed: false, userAnswer: null, sampleAnswer: '무덤의 주인을 지켜주고 나쁜 것들을 막아준다고 믿었기 때문입니다.', duration: '3분' },
+                { id: 10, type: 'question', questionType: 'objective', title: '안악 3호분 벽화는 어떤 내용을 담고 있나요?',
+                  options: ['전쟁 장면', '무덤 주인의 생활 모습', '종교 의식', '자연 풍경'],
+                  answer: 1, completed: false, userAnswer: null, duration: '1분' },
+                { id: 11, type: 'question', questionType: 'subjective', title: '사신도 중 북쪽을 지키는 신의 이름은?',
+                  answer: '현무', completed: false, userAnswer: null, duration: '1분' },
+                { id: 12, type: 'question', questionType: 'objective', title: '묘주 행렬도에서 사람 크기가 다른 이유는?',
+                  options: ['그림 실력이 부족해서', '신분의 높고 낮음을 표현하기 위해', '원근법을 적용해서', '공간이 부족해서'],
+                  answer: 1, completed: false, userAnswer: null, duration: '1분' },
+                { id: 13, type: 'question', questionType: 'multiple', title: '무용도를 통해 알 수 있는 사실을 모두 고르세요.',
+                  options: ['고구려인들이 춤을 즐겼다', '고구려에는 악기가 있었다', '고구려인들은 긴 소매 옷을 입었다', '고구려에서는 농사를 지었다'],
+                  answer: [0, 1, 2], completed: false, userAnswer: [], duration: '2분' },
+                { id: 14, type: 'question', questionType: 'objective', title: '다음 중 고구려의 금속 공예품이 아닌 것은?',
+                  options: ['금동 연가 7년명 여래 입상', '서봉총 금관', '금동 미륵보살 반가 사유상', '금귀걸이'],
+                  answer: 1, completed: false, userAnswer: null, duration: '1분' }
+            ]
+        };
+
+        let currentIndex = 5;  // 6번째 콘텐츠(진행중)로 시작
+        let isDrawingMode = false;
+        let currentTool = null;
+        let penColor = '#000';
+        let penSize = 2;
+        let chatOpen = false;
+        let chatEnded = false;
+        let playbackRate = 1;
+        let handRaised = false;
+
+        // ===== 초기화 =====
+        function init() {
+            renderNavList();
+            renderContent();
+            updateProgress();
+            initCanvas();
+            initKeyboardShortcuts();
+            restoreLastPosition();
+        }
+
+        // ===== 네비게이션 렌더링 =====
+        function renderNavList() {
+            const navList = document.getElementById('navList');
+            navList.innerHTML = lessonData.contents.map((item, index) => {
+                // 학습 상태 결정
+                let statusClass = 'not-started';
+                let statusText = '학습전';
+                
+                if (item.completed) {
+                    statusClass = 'completed';
+                    statusText = '학습완료';
+                } else if (index === currentIndex) {
+                    statusClass = 'in-progress';
+                    statusText = '진행중';
+                }
+                
+                return `
+                <div class="nav-item ${index === currentIndex ? 'active' : ''} ${item.completed ? 'completed' : ''}" 
+                     onclick="goToContent(${index})" data-index="${index}">
+                    <div class="nav-item-main">
+                        <div class="nav-num">${item.completed ? '✓' : index + 1}</div>
+                        <div class="nav-content">
+                            <span class="nav-type ${item.type}">${getTypeLabel(item.type, item.questionType)}</span>
+                            <div class="nav-title">${item.title}</div>
+                            <div class="nav-duration">⏱️ ${item.duration || ''}</div>
+                        </div>
+                    </div>
+                    <div class="nav-item-right">
+                        <span class="status-label ${statusClass}">${statusText}</span>
+                    </div>
+                </div>
+            `}).join('');
+        }
+
+        function getTypeLabel(type, questionType) {
+            if (type === 'document') return '📄 문서';
+            if (type === 'video') return '🎬 영상';
+            if (type === 'link') return '🔗 링크';
+            if (type === 'question') {
+                if (questionType === 'objective' || questionType === 'multiple') return '❓ 객관식';
+                if (questionType === 'subjective') return '✍️ 단답형';
+                if (questionType === 'essay') return '📝 서술형';
+            }
+            return type;
+        }
+
+        // ===== 콘텐츠 렌더링 =====
+        function renderContent() {
+            const content = lessonData.contents[currentIndex];
+            const display = document.getElementById('contentDisplay');
+            const submitBtn = document.getElementById('submitBtn');
+
+            if (content.type === 'document') {
+                display.innerHTML = `
+                    <div class="document-viewer">
+                        <div class="document-placeholder">
+                            <div class="icon">📄</div>
+                            <div style="font-size: 18px; font-weight: 600; margin-bottom: 8px">${content.title}</div>
+                            <div style="color: var(--gray-500)">문서 뷰어 영역</div>
+                        </div>
+                        <div class="drop-zone" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleDrop(event)">
+                            <div class="drop-zone-icon">📁</div>
+                            <div class="drop-zone-text">파일을 드래그하여 추가하거나 붙여넣기 하세요</div>
+                            <div class="drop-zone-sub">이미지, 문서 파일 지원 (Ctrl+V로 붙여넣기 가능)</div>
+                        </div>
+                    </div>
+                `;
+                submitBtn.style.display = 'none';
+            } else if (content.type === 'video') {
+                display.innerHTML = `
+                    <div class="video-player">
+                        <div class="video-placeholder">
+                            <div class="play-btn" onclick="playVideo()">▶</div>
+                            <div>${content.title}</div>
+                        </div>
+                    </div>
+                    <div class="video-controls">
+                        <button onclick="toggleVideoPlay()" id="videoPlayBtn">⏸️</button>
+                        <div class="video-progress" onclick="seekVideo(event)">
+                            <div class="video-progress-fill" id="videoProgressFill"></div>
+                        </div>
+                        <span class="video-time">2:48 / 8:00</span>
+                        <span class="playback-rate" id="playbackRateDisplay">${playbackRate}x</span>
+                        <button onclick="toggleFullscreen()">⛶</button>
+                    </div>
+                `;
+                submitBtn.style.display = 'none';
+            } else if (content.type === 'link') {
+                display.innerHTML = `
+                    <div class="link-viewer">
+                        <div class="link-toolbar">
+                            <span class="link-url" title="${content.url}">${content.url}</span>
+                            <button class="btn btn-outline" onclick="openInNewTab('${content.url}')">🔗 새 탭에서 열기</button>
+                            <button class="btn btn-outline" onclick="refreshIframe()">🔄 새로고침</button>
+                        </div>
+                        <div class="link-iframe-container">
+                            <div class="link-loading" id="iframeLoading">
+                                <div class="spinner"></div>
+                                <div>페이지를 불러오는 중...</div>
+                            </div>
+                            <iframe class="link-iframe" id="contentIframe" src="${content.url}" 
+                                    onload="onIframeLoad()" 
+                                    sandbox="allow-scripts allow-same-origin allow-forms allow-popups"></iframe>
+                        </div>
+                    </div>
+                `;
+                submitBtn.style.display = 'none';
+            } else if (content.type === 'question') {
+                renderQuestion(content);
+                submitBtn.style.display = 'inline-flex';
+                submitBtn.textContent = content.userAnswer !== null && content.completed ? '다시 풀기' : '정답 확인';
+            }
+
+            renderNavList();
+            updateNavigationButtons();
+        }
+
+        function renderQuestion(content) {
+            const display = document.getElementById('contentDisplay');
+            let html = `<div class="question-container">`;
+            
+            // 문항 유형 표시
+            const typeClass = content.questionType === 'essay' ? 'essay' : 
+                              content.questionType === 'subjective' ? 'subjective' : 'objective';
+            const typeLabel = content.questionType === 'essay' ? '서술형 (수동채점)' : 
+                              content.questionType === 'subjective' ? '단답형' : 
+                              content.questionType === 'multiple' ? '복수정답' : '객관식';
+            
+            html += `<span class="question-type-badge ${typeClass}">${typeLabel}</span>`;
+            html += `<div class="question-text">${content.title}</div>`;
+
+            if (content.questionType === 'objective' || content.questionType === 'multiple') {
+                html += `<div class="answer-options">`;
+                content.options.forEach((option, idx) => {
+                    let optionClass = '';
+                    if (content.completed) {
+                        if (content.questionType === 'multiple') {
+                            if (content.answer.includes(idx)) optionClass = 'correct';
+                            else if (content.userAnswer && content.userAnswer.includes(idx) && !content.answer.includes(idx)) optionClass = 'wrong';
+                        } else {
+                            if (idx === content.answer) optionClass = 'correct';
+                            else if (idx === content.userAnswer) optionClass = 'wrong';
+                        }
+                    } else {
+                        if (content.questionType === 'multiple') {
+                            if (content.userAnswer && content.userAnswer.includes(idx)) optionClass = 'selected';
+                        } else {
+                            if (idx === content.userAnswer) optionClass = 'selected';
+                        }
+                    }
+                    
+                    html += `
+                        <div class="answer-option ${optionClass}" onclick="selectOption(${idx})" ${content.completed ? 'style="pointer-events:none"' : ''}>
+                            <div class="option-num">${idx + 1}</div>
+                            <div>${option}</div>
+                        </div>
+                    `;
+                });
+                html += `</div>`;
+            } else if (content.questionType === 'subjective') {
+                html += `
+                    <input type="text" class="essay-answer" style="min-height: auto; padding: 14px 16px" 
+                           placeholder="답을 입력하세요" 
+                           value="${content.userAnswer || ''}"
+                           onchange="updateSubjectiveAnswer(this.value)"
+                           ${content.completed ? 'disabled' : ''}>
+                `;
+            } else if (content.questionType === 'essay') {
+                html += `
+                    <textarea class="essay-answer" placeholder="답변을 작성하세요..." 
+                              onchange="updateEssayAnswer(this.value)"
+                              ${content.completed ? 'disabled' : ''}>${content.userAnswer || ''}</textarea>
+                `;
+                
+                // 서술형 문항 - 수동 채점 안내
+                if (content.completed) {
+                    html += `
+                        <div class="manual-grading-notice">
+                            <div class="icon">⏳</div>
+                            <div class="text">
+                                <div class="title">수동 채점 대기 중</div>
+                                <div class="desc">서술형 문항은 선생님이 직접 채점합니다. 수업 결과에 포함되어 기록됩니다.</div>
+                            </div>
+                        </div>
+                    `;
+                }
+            }
+
+            // 해설 표시 (완료된 문항)
+            if (content.completed && (content.questionType === 'objective' || content.questionType === 'subjective' || content.questionType === 'multiple')) {
+                const isCorrect = content.questionType === 'multiple' 
+                    ? JSON.stringify(content.userAnswer?.sort()) === JSON.stringify(content.answer.sort())
+                    : content.questionType === 'subjective' 
+                        ? content.userAnswer?.trim().toLowerCase() === content.answer.toLowerCase()
+                        : content.userAnswer === content.answer;
+                
+                html += `
+                    <div class="explanation-box">
+                        <div class="explanation-title">
+                            ${isCorrect ? '✅ 정답입니다!' : '❌ 오답입니다'}
+                        </div>
+                        <div class="explanation-content">
+                            정답: <strong>${content.questionType === 'multiple' ? content.answer.map(a => content.options[a]).join(', ') : (content.options ? content.options[content.answer] : content.answer)}</strong><br><br>
+                            ${content.sampleAnswer ? `모범답안: ${content.sampleAnswer}` : '고분은 옛날의 큰 무덤을 의미합니다. 주로 왕이나 귀족 등 높은 신분의 사람들을 묻은 무덤을 말합니다.'}
+                        </div>
+                    </div>
+                `;
+            }
+
+            // 서술형 완료 시 모범답안 표시
+            if (content.completed && content.questionType === 'essay' && content.sampleAnswer) {
+                html += `
+                    <div class="explanation-box" style="margin-top: 16px">
+                        <div class="explanation-title">📚 모범 답안 참고</div>
+                        <div class="explanation-content">${content.sampleAnswer}</div>
+                    </div>
+                `;
+            }
+
+            html += `</div>`;
+            display.innerHTML = html;
+        }
+
+        // ===== 문항 상호작용 =====
+        function selectOption(idx) {
+            const content = lessonData.contents[currentIndex];
+            if (content.completed) return;
+
+            if (content.questionType === 'multiple') {
+                if (!content.userAnswer) content.userAnswer = [];
+                const pos = content.userAnswer.indexOf(idx);
+                if (pos > -1) {
+                    content.userAnswer.splice(pos, 1);
+                } else {
+                    content.userAnswer.push(idx);
+                }
+            } else {
+                content.userAnswer = idx;
+            }
+            renderContent();
+        }
+
+        function updateSubjectiveAnswer(value) {
+            lessonData.contents[currentIndex].userAnswer = value;
+        }
+
+        function updateEssayAnswer(value) {
+            lessonData.contents[currentIndex].userAnswer = value;
+        }
+
+        function submitAnswer() {
+            const content = lessonData.contents[currentIndex];
+            
+            if (content.completed) {
+                // 다시 풀기
+                content.completed = false;
+                content.userAnswer = content.questionType === 'multiple' ? [] : null;
+                renderContent();
+                document.getElementById('submitBtn').textContent = '정답 확인';
+                return;
+            }
+
+            // 답안 검증
+            if (content.questionType === 'objective' && content.userAnswer === null) {
+                showToast('답을 선택해주세요', 'warning');
+                return;
+            }
+            if (content.questionType === 'multiple' && (!content.userAnswer || content.userAnswer.length === 0)) {
+                showToast('답을 선택해주세요 (복수 선택 가능)', 'warning');
+                return;
+            }
+            if (content.questionType === 'subjective' && !content.userAnswer?.trim()) {
+                showToast('답을 입력해주세요', 'warning');
+                return;
+            }
+            if (content.questionType === 'essay' && !content.userAnswer?.trim()) {
+                showToast('답변을 작성해주세요', 'warning');
+                return;
+            }
+
+            content.completed = true;
+            renderContent();
+            updateProgress();
+            
+            if (content.questionType === 'essay') {
+                showToast('서술형 답안이 제출되었습니다. 선생님 채점 후 결과가 반영됩니다.', 'success');
+            } else {
+                const isCorrect = content.questionType === 'multiple'
+                    ? JSON.stringify(content.userAnswer?.sort()) === JSON.stringify(content.answer.sort())
+                    : content.questionType === 'subjective'
+                        ? content.userAnswer?.trim().toLowerCase() === content.answer.toLowerCase()
+                        : content.userAnswer === content.answer;
+                showToast(isCorrect ? '정답입니다! 🎉' : '오답입니다. 해설을 확인하세요.', isCorrect ? 'success' : 'warning');
+            }
+            
+            document.getElementById('submitBtn').textContent = '다시 풀기';
+        }
+
+        // ===== 콘텐츠 완료 처리 =====
+        function markComplete() {
+            const content = lessonData.contents[currentIndex];
+            if (content.type === 'question' && !content.completed) {
+                showToast('문항을 먼저 풀어주세요', 'warning');
+                return;
+            }
+            content.completed = true;
+            renderContent();
+            updateProgress();
+            showToast('콘텐츠를 완료했습니다 ✓', 'success');
+            
+            // 자동으로 다음으로 이동
+            setTimeout(() => {
+                if (currentIndex < lessonData.contents.length - 1) {
+                    nextContent();
+                }
+            }, 500);
+        }
+
+        // ===== 네비게이션 =====
+        function goToContent(index) {
+            currentIndex = index;
+            renderContent();
+        }
+
+        function prevContent() {
+            if (currentIndex > 0) {
+                currentIndex--;
+                renderContent();
+            }
+        }
+
+        function nextContent() {
+            if (currentIndex < lessonData.contents.length - 1) {
+                currentIndex++;
+                renderContent();
+            }
+        }
+
+        function updateNavigationButtons() {
+            document.getElementById('prevBtn').disabled = currentIndex === 0;
+            document.getElementById('nextBtn').disabled = currentIndex === lessonData.contents.length - 1;
+        }
+
+        // ===== 진행률 =====
+        function updateProgress() {
+            const completed = lessonData.contents.filter(c => c.completed).length;
+            const total = lessonData.contents.length;
+            const percent = Math.round((completed / total) * 100);
+            
+            document.getElementById('progressInfo').textContent = `${completed}/${total} 완료`;
+            document.getElementById('progressBar').style.width = `${percent}%`;
+        }
+
+        // ===== 나가기 처리 =====
+        function handleExit() {
+            const completed = lessonData.contents.filter(c => c.completed).length;
+            const total = lessonData.contents.length;
+            
+            if (completed < total) {
+                document.getElementById('incompleteCount').textContent = `${total - completed}개`;
+                showModal('exitModalIncomplete');
+            } else {
+                showModal('exitModalComplete');
+            }
+        }
+
+        function confirmExit() {
+            showToast('수업을 종료합니다. 결과가 저장되었습니다.', 'success');
+            // 실제로는 window.close() 또는 페이지 이동
+            setTimeout(() => {
+                closeAllModals();
+            }, 1500);
+        }
+
+        // ===== 사이드바 토글 =====
+        function toggleSidebar() {
+            document.getElementById('sidebar').classList.toggle('collapsed');
+        }
+
+        // ===== 채팅 =====
+        function toggleChat() {
+            chatOpen = !chatOpen;
+            document.getElementById('chatPanel').classList.toggle('open', chatOpen);
+        }
+
+        function sendChat() {
+            const input = document.getElementById('chatInput');
+            const text = input.value.trim();
+            if (!text) return;
+
+            const messages = document.getElementById('chatMessages');
+            messages.innerHTML += `
+                <div class="chat-message mine">
+                    <div class="chat-avatar teacher">T</div>
+                    <div class="chat-bubble">${text}</div>
+                </div>
+            `;
+            input.value = '';
+            messages.scrollTop = messages.scrollHeight;
+        }
+
+        function handleChatKeypress(e) {
+            if (e.key === 'Enter') sendChat();
+        }
+
+        // 교사용: 채팅 종료 확인 모달 표시
+        function confirmEndChat() {
+            showModal('endChatModal');
+        }
+
+        // 교사용: 채팅 종료 실행
+        function executeEndChat() {
+            closeModal('endChatModal');
+            
+            const messages = document.getElementById('chatMessages');
+            
+            // 종료 안내 메시지 표시
+            messages.innerHTML += `
+                <div class="chat-message system">
+                    <div class="chat-system-bubble warning">⚠️ 선생님이 잠시 후 채팅을 종료합니다...</div>
+                </div>
+            `;
+            messages.scrollTop = messages.scrollHeight;
+            
+            // 3초 후 채팅 종료
+            setTimeout(() => {
+                messages.innerHTML += `
+                    <div class="chat-message system">
+                        <div class="chat-system-bubble ended">🔒 채팅이 종료되었습니다. 모든 참여자의 채팅창이 닫힙니다.</div>
+                    </div>
+                `;
+                messages.scrollTop = messages.scrollHeight;
+                
+                // 1초 후 채팅창 닫기
+                setTimeout(() => {
+                    endChatByHost();
+                    showToast('채팅이 종료되었습니다. 모든 학생에게 알림이 전송되었습니다.', 'warning');
+                    
+                    // 2초 후 채팅 패널 자동 닫기
+                    setTimeout(() => {
+                        chatOpen = false;
+                        document.getElementById('chatPanel').classList.remove('open');
+                    }, 2000);
+                }, 1000);
+            }, 2000);
+        }
+
+        // 채팅 종료 처리 (개설자가 종료 시)
+        function endChatByHost() {
+            chatEnded = true;
+            document.getElementById('chatInputArea').style.display = 'none';
+            document.getElementById('chatEndedNotice').style.display = 'block';
+            document.getElementById('chatIndicator').style.background = 'var(--gray-400)';
+            document.getElementById('endChatBtn').disabled = true;
+            document.getElementById('endChatBtn').style.opacity = '0.5';
+            showToast('수업 개설자가 채팅을 종료했습니다', 'warning');
+        }
+
+        // ===== 필기 기능 =====
+        let canvas, ctx;
+        let isDrawing = false;
+        let lastX = 0, lastY = 0;
+
+        function initCanvas() {
+            canvas = document.getElementById('drawingCanvas');
+            ctx = canvas.getContext('2d');
+            resizeCanvas();
+            window.addEventListener('resize', resizeCanvas);
+
+            canvas.addEventListener('mousedown', startDrawing);
+            canvas.addEventListener('mousemove', draw);
+            canvas.addEventListener('mouseup', stopDrawing);
+            canvas.addEventListener('mouseout', stopDrawing);
+        }
+
+        function resizeCanvas() {
+            const rect = canvas.parentElement.getBoundingClientRect();
+            canvas.width = rect.width;
+            canvas.height = rect.height;
+        }
+
+        function togglePen() {
+            if (currentTool === 'pen') {
+                deactivateTools();
+            } else {
+                activateTool('pen');
+            }
+        }
+
+        function toggleHighlight() {
+            if (currentTool === 'highlight') {
+                deactivateTools();
+            } else {
+                activateTool('highlight');
+            }
+        }
+
+        function toggleEraser() {
+            if (currentTool === 'eraser') {
+                deactivateTools();
+            } else {
+                activateTool('eraser');
+            }
+        }
+
+        function activateTool(tool) {
+            deactivateTools();
+            currentTool = tool;
+            document.getElementById(tool + 'Btn').classList.add('active');
+            canvas.classList.add('active');
+            
+            if (tool === 'pen' || tool === 'highlight') {
+                document.getElementById('penPalette').classList.add('show');
+            }
+        }
+
+        function deactivateTools() {
+            currentTool = null;
+            ['penBtn', 'highlightBtn', 'eraserBtn'].forEach(id => {
+                document.getElementById(id).classList.remove('active');
+            });
+            canvas.classList.remove('active');
+            document.getElementById('penPalette').classList.remove('show');
+        }
+
+        function startDrawing(e) {
+            if (!currentTool) return;
+            isDrawing = true;
+            [lastX, lastY] = [e.offsetX, e.offsetY];
+        }
+
+        function draw(e) {
+            if (!isDrawing || !currentTool) return;
+
+            ctx.beginPath();
+            ctx.moveTo(lastX, lastY);
+            ctx.lineTo(e.offsetX, e.offsetY);
+            
+            if (currentTool === 'eraser') {
+                ctx.globalCompositeOperation = 'destination-out';
+                ctx.lineWidth = 20;
+            } else {
+                ctx.globalCompositeOperation = 'source-over';
+                ctx.strokeStyle = currentTool === 'highlight' ? penColor + '60' : penColor;
+                ctx.lineWidth = currentTool === 'highlight' ? penSize * 4 : penSize;
+            }
+            
+            ctx.lineCap = 'round';
+            ctx.stroke();
+            
+            [lastX, lastY] = [e.offsetX, e.offsetY];
+        }
+
+        function stopDrawing() {
+            isDrawing = false;
+        }
+
+        function setColor(color) {
+            penColor = color;
+            document.querySelectorAll('.color-btn').forEach(btn => btn.classList.remove('active'));
+            event.target.classList.add('active');
+        }
+
+        function setSize(size) {
+            penSize = size;
+            document.querySelectorAll('.size-btn').forEach(btn => btn.classList.remove('active'));
+            event.target.classList.add('active');
+        }
+
+        function clearDrawing() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            showToast('필기 내용이 지워졌습니다');
+        }
+
+        function saveDrawing() {
+            showToast('필기 내용이 저장되었습니다 💾', 'success');
+        }
+
+        function toggleBookmark() {
+            const btn = document.getElementById('bookmarkBtn');
+            btn.classList.toggle('active');
+            showToast(btn.classList.contains('active') ? '북마크가 추가되었습니다' : '북마크가 해제되었습니다');
+        }
+
+        // ===== 드래그 앤 드롭 =====
+        function handleDragOver(e) {
+            e.preventDefault();
+            e.currentTarget.classList.add('drag-over');
+        }
+
+        function handleDragLeave(e) {
+            e.currentTarget.classList.remove('drag-over');
+        }
+
+        function handleDrop(e) {
+            e.preventDefault();
+            e.currentTarget.classList.remove('drag-over');
+            
+            const files = e.dataTransfer.files;
+            if (files.length > 0) {
+                showToast(`${files[0].name} 파일이 추가되었습니다`, 'success');
+            }
+        }
+
+        // 붙여넣기 이벤트
+        document.addEventListener('paste', (e) => {
+            const items = e.clipboardData.items;
+            for (let item of items) {
+                if (item.type.indexOf('image') !== -1) {
+                    showToast('이미지가 붙여넣기 되었습니다', 'success');
+                    break;
+                }
+            }
+        });
+
+        // ===== 설정 패널 =====
+        function toggleSettings() {
+            document.getElementById('settingsPanel').classList.toggle('open');
+        }
+
+        function setFontSize(size) {
+            document.body.classList.remove('font-small', 'font-medium', 'font-large');
+            document.body.classList.add('font-' + size);
+            document.querySelectorAll('.setting-group:first-child .setting-btn').forEach(btn => btn.classList.remove('active'));
+            event.target.classList.add('active');
+            showToast(`글자 크기: ${size === 'small' ? '작게' : size === 'medium' ? '보통' : '크게'}`);
+        }
+
+        function setTheme(theme) {
+            if (theme === 'dark') {
+                document.body.classList.add('dark-mode');
+            } else {
+                document.body.classList.remove('dark-mode');
+            }
+            document.querySelectorAll('.setting-group:nth-child(2) .setting-btn').forEach(btn => btn.classList.remove('active'));
+            event.target.classList.add('active');
+            showToast(`화면 모드: ${theme === 'dark' ? '다크' : '라이트'}`);
+        }
+
+        function setPlaybackRate(rate) {
+            playbackRate = rate;
+            document.querySelectorAll('.setting-group:nth-child(3) .setting-btn').forEach(btn => btn.classList.remove('active'));
+            event.target.classList.add('active');
+            const rateDisplay = document.getElementById('playbackRateDisplay');
+            if (rateDisplay) rateDisplay.textContent = rate + 'x';
+            showToast(`영상 배속: ${rate}x`);
+        }
+
+        // ===== 손들기 =====
+        function raiseHand() {
+            handRaised = !handRaised;
+            const btn = document.getElementById('raiseHandBtn');
+            btn.classList.toggle('hand-raised', handRaised);
+            btn.innerHTML = handRaised ? '🙋 손들기 중...' : '✋ 손들기';
+            showToast(handRaised ? '선생님께 질문 알림을 보냈습니다' : '손들기를 취소했습니다', handRaised ? 'success' : '');
+        }
+
+        // ===== 링크/iframe 관련 =====
+        function onIframeLoad() {
+            const loading = document.getElementById('iframeLoading');
+            if (loading) loading.style.display = 'none';
+        }
+
+        function openInNewTab(url) {
+            window.open(url, '_blank');
+        }
+
+        function refreshIframe() {
+            const iframe = document.getElementById('contentIframe');
+            if (iframe) {
+                const loading = document.getElementById('iframeLoading');
+                if (loading) loading.style.display = 'block';
+                iframe.src = iframe.src;
+            }
+        }
+
+        // ===== 영상 컨트롤 =====
+        let videoPlaying = true;
+        
+        function toggleVideoPlay() {
+            videoPlaying = !videoPlaying;
+            const btn = document.getElementById('videoPlayBtn');
+            if (btn) btn.textContent = videoPlaying ? '⏸️' : '▶️';
+            showToast(videoPlaying ? '재생 중' : '일시정지');
+        }
+
+        function seekVideo(event) {
+            const progressBar = event.currentTarget;
+            const rect = progressBar.getBoundingClientRect();
+            const percent = ((event.clientX - rect.left) / rect.width) * 100;
+            const fill = document.getElementById('videoProgressFill');
+            if (fill) fill.style.width = percent + '%';
+        }
+
+        function toggleFullscreen() {
+            const contentFrame = document.querySelector('.content-frame');
+            if (document.fullscreenElement) {
+                document.exitFullscreen();
+            } else {
+                contentFrame.requestFullscreen();
+            }
+        }
+
+        // ===== 키보드 단축키 =====
+        function initKeyboardShortcuts() {
+            document.addEventListener('keydown', (e) => {
+                // 입력 필드에서는 단축키 무시
+                if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+                
+                switch(e.key) {
+                    case 'ArrowLeft':
+                        prevContent();
+                        break;
+                    case 'ArrowRight':
+                        nextContent();
+                        break;
+                    case ' ':
+                        e.preventDefault();
+                        toggleVideoPlay();
+                        break;
+                    case 'f':
+                    case 'F':
+                        toggleFullscreen();
+                        break;
+                }
+            });
+        }
+
+        // ===== 마지막 학습 위치 기억 =====
+        function saveLastPosition() {
+            localStorage.setItem('lastLessonPosition', currentIndex);
+        }
+
+        function restoreLastPosition() {
+            const lastPos = localStorage.getItem('lastLessonPosition');
+            if (lastPos !== null) {
+                const pos = parseInt(lastPos);
+                if (pos > 0 && pos < lessonData.contents.length) {
+                    showToast(`이전에 ${pos + 1}번 콘텐츠에서 학습을 멈추셨습니다. 이어서 학습하시겠습니까?`, 'success');
+                }
+            }
+        }
+
+        // ===== 비디오 재생 =====
+        function playVideo() {
+            showToast('영상을 재생합니다...');
+            videoPlaying = true;
+            // 실제로는 비디오 플레이어 동작
+        }
+
+        // ===== 모달 =====
+        function showModal(id) {
+            document.getElementById(id).classList.add('show');
+        }
+
+        function closeModal(id) {
+            document.getElementById(id).classList.remove('show');
+        }
+
+        function closeAllModals() {
+            document.querySelectorAll('.modal-overlay').forEach(m => m.classList.remove('show'));
+        }
+
+        // ===== 토스트 =====
+        function showToast(message, type = '') {
+            const container = document.getElementById('toastContainer');
+            const toast = document.createElement('div');
+            toast.className = `toast ${type}`;
+            toast.innerHTML = message;
+            container.appendChild(toast);
+            
+            setTimeout(() => {
+                toast.style.opacity = '0';
+                setTimeout(() => toast.remove(), 300);
+            }, 3000);
+        }
+
+        // ===== 데모용: 채팅 종료 시뮬레이션 버튼 =====
+        setTimeout(() => {
+            // 5초 후 채팅에 시스템 메시지 추가 (데모용)
+            if (chatOpen) {
+                const messages = document.getElementById('chatMessages');
+                messages.innerHTML += `
+                    <div class="chat-message" style="max-width: 100%">
+                        <div style="width: 100%; padding: 12px; background: var(--warning-light); border-radius: 8px; text-align: center; font-size: 13px; color: var(--gray-700)">
+                            💡 <strong>데모:</strong> 개설자가 채팅 종료 버튼을 누르면 <a href="javascript:endChatByHost()" style="color: var(--primary)">실시간 동기화로 모든 참여자의 채팅이 종료</a>됩니다.
+                        </div>
+                    </div>
+                `;
+            }
+        }, 2000);
+
+        // 초기화 실행
+        init();
+    </script>
+</body>
+</html>

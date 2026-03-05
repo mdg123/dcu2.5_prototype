@@ -1,0 +1,684 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>채움콘텐츠 프로토타입</title>
+<link href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css" rel="stylesheet">
+<style>
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+:root {
+  --blue-50: #eff6ff; --blue-100: #dbeafe; --blue-200: #bfdbfe; --blue-400: #60a5fa;
+  --blue-500: #3b82f6; --blue-600: #2563eb; --blue-700: #1d4ed8;
+  --gray-50: #f9fafb; --gray-100: #f3f4f6; --gray-200: #e5e7eb; --gray-300: #d1d5db;
+  --gray-400: #9ca3af; --gray-500: #6b7280; --gray-600: #4b5563; --gray-700: #374151; --gray-800: #1f2937;
+  --emerald-50: #ecfdf5; --emerald-100: #d1fae5; --emerald-500: #10b981; --emerald-600: #059669; --emerald-700: #047857;
+  --amber-50: #fffbeb; --amber-100: #fef3c7; --amber-500: #f59e0b; --amber-700: #b45309;
+  --red-50: #fef2f2; --red-100: #fee2e2; --red-400: #f87171; --red-500: #ef4444; --red-600: #dc2626; --red-700: #b91c1c;
+  --purple-50: #faf5ff; --purple-100: #f3e8ff; --purple-200: #e9d5ff; --purple-500: #a855f7; --purple-600: #9333ea;
+}
+body { font-family: 'Pretendard Variable', 'Noto Sans KR', -apple-system, sans-serif; background: #f8f9fb; color: var(--gray-800); font-size: 14px; line-height: 1.5; }
+button { cursor: pointer; border: none; background: none; font: inherit; color: inherit; }
+input, select { font: inherit; }
+.truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Header */
+.header { background: #fff; border-bottom: 1px solid var(--gray-100); position: sticky; top: 0; z-index: 40; }
+.header-inner { max-width: 1200px; margin: 0 auto; padding: 0 20px; display: flex; align-items: center; justify-content: space-between; height: 56px; }
+.logo { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+.logo-icon { width: 28px; height: 28px; border-radius: 8px; background: linear-gradient(135deg, #4ade80, #3b82f6); display: flex; align-items: center; justify-content: center; color: #fff; font-size: 11px; font-weight: 800; }
+.logo-text { font-size: 14px; font-weight: 800; color: var(--gray-800); }
+.nav { display: flex; align-items: center; gap: 4px; margin-left: 24px; }
+.nav-item { position: relative; }
+.nav-btn { padding: 6px 12px; border-radius: 8px; font-size: 13px; color: var(--gray-500); transition: all .15s; }
+.nav-btn:hover { color: var(--gray-800); background: var(--gray-50); }
+.nav-btn.active { color: var(--blue-600); background: var(--blue-50); font-weight: 600; }
+.nav-dropdown { position: absolute; top: 100%; left: 0; margin-top: 4px; background: #fff; border-radius: 10px; box-shadow: 0 8px 30px rgba(0,0,0,.12); border: 1px solid var(--gray-100); padding: 4px; min-width: 140px; display: none; z-index: 50; }
+.nav-item:hover .nav-dropdown { display: block; }
+.nav-drop-btn { width: 100%; text-align: left; padding: 6px 12px; border-radius: 6px; font-size: 13px; color: var(--gray-600); }
+.nav-drop-btn:hover { background: var(--gray-50); }
+.nav-drop-btn.active { color: var(--blue-600); font-weight: 600; }
+.header-right { display: flex; align-items: center; gap: 12px; }
+.search-trigger { display: flex; align-items: center; gap: 8px; padding: 6px 12px; background: var(--gray-50); border-radius: 8px; font-size: 13px; color: var(--gray-400); transition: background .15s; }
+.search-trigger:hover { background: var(--gray-100); }
+.search-trigger kbd { font-size: 10px; border: 1px solid var(--gray-200); border-radius: 3px; padding: 1px 5px; margin-left: 8px; }
+.bell-btn { position: relative; padding: 6px; border-radius: 8px; }
+.bell-btn:hover { background: var(--gray-100); }
+.bell-dot { position: absolute; top: 2px; right: 2px; width: 7px; height: 7px; background: var(--red-500); border-radius: 50%; }
+.user-area { display: flex; align-items: center; gap: 8px; padding-left: 12px; border-left: 1px solid var(--gray-100); }
+.user-avatar { width: 32px; height: 32px; border-radius: 50%; background: linear-gradient(135deg, #bfdbfe, #e9d5ff); display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; color: var(--blue-700); }
+.user-name { font-size: 13px; font-weight: 600; color: var(--gray-700); }
+
+/* Sub Nav */
+.sub-nav { background: #fff; border-bottom: 1px solid var(--gray-100); }
+.sub-nav-inner { max-width: 1200px; margin: 0 auto; padding: 8px 20px; display: flex; gap: 4px; }
+.sub-nav-btn { padding: 6px 16px; border-radius: 8px; font-size: 13px; color: var(--gray-500); transition: all .15s; }
+.sub-nav-btn:hover { background: var(--gray-100); }
+.sub-nav-btn.active { background: var(--gray-800); color: #fff; font-weight: 600; }
+
+/* Main */
+.main { max-width: 1200px; margin: 0 auto; padding: 20px; }
+
+/* Cards */
+.stat-card { flex: 1; background: #fff; border-radius: 12px; padding: 16px; border: 1px solid var(--gray-100); cursor: pointer; transition: all .2s; text-align: left; }
+.stat-card:hover { border-color: var(--blue-200); box-shadow: 0 4px 12px rgba(59,130,246,.1); }
+.stat-card-label { font-size: 11px; color: var(--gray-400); margin-bottom: 4px; }
+.stat-card-value { font-size: 24px; font-weight: 800; color: var(--gray-800); }
+.stat-card:hover .stat-card-value { color: var(--blue-600); }
+.stat-card-change { font-size: 11px; margin-top: 4px; }
+.stat-card-change.up { color: var(--emerald-500); }
+.stat-card-change.down { color: var(--red-400); }
+
+/* Status Badge */
+.badge { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 50px; font-size: 11px; font-weight: 600; }
+.badge-dot { width: 6px; height: 6px; border-radius: 50%; }
+.badge-public { background: var(--emerald-100); color: var(--emerald-700); }
+.badge-public .badge-dot { background: var(--emerald-500); }
+.badge-review { background: var(--amber-100); color: var(--amber-700); }
+.badge-review .badge-dot { background: var(--amber-500); }
+.badge-rejected { background: var(--red-100); color: var(--red-700); }
+.badge-rejected .badge-dot { background: var(--red-500); }
+.badge-private { background: var(--gray-100); color: var(--gray-500); }
+.badge-private .badge-dot { background: var(--gray-400); }
+
+/* Type Badge */
+.type-badge { padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; }
+.type-영상 { background: #eff6ff; color: #2563eb; }
+.type-이미지 { background: #faf5ff; color: #9333ea; }
+.type-문서 { background: #fff7ed; color: #ea580c; }
+.type-문항 { background: #f0fdfa; color: #0d9488; }
+.type-평가지 { background: #fdf2f8; color: #db2777; }
+.type-활동지 { background: #f7fee7; color: #65a30d; }
+.type-수업꾸러미 { background: #fefce8; color: #a16207; }
+.type-수업레시피 { background: #ecfeff; color: #0891b2; }
+
+/* Content Card */
+.content-card { background: #fff; border-radius: 12px; border: 1px solid var(--gray-100); overflow: hidden; transition: all .2s; }
+.content-card:hover { box-shadow: 0 6px 20px rgba(0,0,0,.08); border-color: var(--gray-200); }
+.card-thumb { height: 140px; background: linear-gradient(135deg, var(--gray-100), var(--gray-50)); position: relative; display: flex; align-items: center; justify-content: center; }
+.card-thumb-icon { font-size: 36px; opacity: .15; }
+.card-thumb .badge { position: absolute; top: 8px; left: 8px; }
+.card-thumb .type-badge { position: absolute; top: 8px; right: 8px; }
+.card-body { padding: 12px; }
+.card-title { font-size: 13px; font-weight: 700; color: var(--gray-800); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-bottom: 6px; }
+.card-meta { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--gray-400); margin-bottom: 8px; }
+.card-meta .author-link { color: var(--blue-500); cursor: pointer; }
+.card-meta .author-link:hover { text-decoration: underline; }
+.card-actions { display: flex; align-items: center; gap: 12px; font-size: 11px; color: var(--gray-400); }
+.card-actions span { display: flex; align-items: center; gap: 3px; cursor: pointer; transition: color .15s; }
+.card-actions span:hover { color: var(--blue-500); }
+
+/* Compact Card */
+.compact-card { display: flex; gap: 12px; background: #fff; border-radius: 12px; border: 1px solid var(--gray-100); padding: 12px; transition: all .2s; }
+.compact-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,.06); }
+.compact-card .card-body { flex: 1; min-width: 0; padding: 0; }
+.compact-badges { display: flex; gap: 6px; margin-bottom: 4px; }
+
+/* List Row */
+.list-row { display: flex; align-items: center; gap: 12px; background: #fff; border-radius: 10px; border: 1px solid var(--gray-100); padding: 12px; transition: all .15s; cursor: pointer; }
+.list-row:hover { box-shadow: 0 2px 8px rgba(0,0,0,.05); }
+.list-row-thumb { width: 64px; height: 48px; border-radius: 8px; background: var(--gray-50); display: flex; align-items: center; justify-content: center; font-size: 18px; opacity: .3; flex-shrink: 0; }
+.list-row-body { flex: 1; min-width: 0; }
+.list-row-title { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.list-row-meta { font-size: 11px; color: var(--gray-400); }
+
+/* Action Alert */
+.action-alert { background: linear-gradient(135deg, var(--amber-50), var(--red-50)); border-radius: 12px; padding: 16px; border: 1px solid rgba(245,158,11,.15); margin-bottom: 20px; }
+.action-alert-title { font-size: 11px; font-weight: 800; color: var(--amber-700); margin-bottom: 12px; display: flex; align-items: center; gap: 6px; }
+.action-items { display: flex; gap: 10px; flex-wrap: wrap; }
+.action-item { display: flex; align-items: center; gap: 8px; background: #fff; border-radius: 8px; padding: 8px 16px; font-size: 13px; box-shadow: 0 1px 3px rgba(0,0,0,.06); cursor: pointer; transition: box-shadow .15s; }
+.action-item:hover { box-shadow: 0 3px 10px rgba(0,0,0,.1); }
+.action-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+
+/* Grid Layouts */
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+.grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+.grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+.stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.flex-row { display: flex; gap: 8px; align-items: center; }
+.flex-wrap { flex-wrap: wrap; }
+.flex-between { display: flex; justify-content: space-between; align-items: center; }
+.flex-1 { flex: 1; min-width: 0; }
+.flex-col { display: flex; flex-direction: column; }
+.gap-4 { gap: 4px; } .gap-8 { gap: 8px; } .gap-12 { gap: 12px; }
+.mb-4 { margin-bottom: 4px; } .mb-8 { margin-bottom: 8px; } .mb-12 { margin-bottom: 12px; } .mb-16 { margin-bottom: 16px; } .mb-20 { margin-bottom: 20px; } .mb-32 { margin-bottom: 32px; }
+.mt-8 { margin-top: 8px; } .mt-12 { margin-top: 12px; } .mt-16 { margin-top: 16px; }
+.section-label { font-size: 11px; font-weight: 800; color: var(--gray-400); letter-spacing: .05em; margin-bottom: 12px; }
+.section-title { font-size: 15px; font-weight: 800; color: var(--gray-800); }
+.link-sm { font-size: 11px; color: var(--blue-500); cursor: pointer; }
+.link-sm:hover { text-decoration: underline; }
+.text-xs { font-size: 11px; } .text-sm { font-size: 13px; }
+.text-gray { color: var(--gray-400); } .text-blue { color: var(--blue-500); } .text-bold { font-weight: 700; } .text-center { text-align: center; }
+
+/* Filters */
+.filter-row { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+.filter-label { font-size: 11px; color: var(--gray-400); margin-right: 4px; }
+.filter-check { display: flex; align-items: center; gap: 4px; padding: 4px 8px; border-radius: 8px; font-size: 11px; border: 1px solid var(--gray-100); background: #fff; color: var(--gray-500); cursor: pointer; transition: all .15s; user-select: none; }
+.filter-check:hover { border-color: var(--gray-200); }
+.filter-check.active { background: var(--blue-50); border-color: var(--blue-200); color: var(--blue-600); }
+.filter-check input[type="checkbox"] { width: 12px; height: 12px; accent-color: var(--blue-500); }
+.status-btn { padding: 4px 10px; border-radius: 50px; font-size: 11px; color: var(--gray-500); background: var(--gray-50); cursor: pointer; transition: all .15s; }
+.status-btn:hover { background: var(--gray-100); }
+.status-btn.active { background: var(--gray-800); color: #fff; }
+.period-btn { padding: 2px 8px; border-radius: 4px; font-size: 11px; color: var(--gray-500); background: var(--gray-100); cursor: pointer; transition: all .15s; }
+.period-btn:hover { background: var(--gray-200); }
+.period-btn.active { background: var(--blue-500); color: #fff; }
+.metric-btn { padding: 4px 10px; border-radius: 50px; font-size: 11px; color: var(--gray-400); cursor: pointer; transition: all .15s; }
+.metric-btn:hover { background: var(--gray-50); }
+.metric-btn.active { background: var(--blue-100); color: var(--blue-600); font-weight: 600; }
+.view-toggle { display: flex; gap: 2px; border: 1px solid var(--gray-100); border-radius: 8px; padding: 2px; }
+.view-btn { padding: 6px; border-radius: 6px; display: flex; align-items: center; justify-content: center; }
+.view-btn.active { background: var(--gray-100); }
+.tag-btn { padding: 4px 12px; background: var(--gray-50); border-radius: 50px; font-size: 11px; color: var(--gray-600); cursor: pointer; white-space: nowrap; transition: all .15s; }
+.tag-btn:hover { background: var(--blue-50); color: var(--blue-600); }
+.keyword-tag { padding: 4px 12px; background: #fff; border-radius: 50px; font-size: 11px; color: var(--gray-600); border: 1px solid var(--gray-200); }
+.keyword-edit-btn { padding: 4px 12px; border-radius: 50px; font-size: 11px; color: var(--blue-500); border: 1px solid var(--blue-200); background: var(--blue-50); cursor: pointer; }
+.keyword-edit-btn:hover { background: var(--blue-100); }
+.btn-primary { display: flex; align-items: center; gap: 6px; padding: 8px 16px; background: var(--blue-500); color: #fff; border-radius: 8px; font-size: 13px; font-weight: 600; transition: background .15s; }
+.btn-primary:hover { background: var(--blue-600); }
+.btn-secondary { padding: 8px 16px; background: var(--gray-100); border-radius: 8px; font-size: 13px; color: var(--gray-600); transition: background .15s; }
+.btn-secondary:hover { background: var(--gray-200); }
+.btn-outline { padding: 6px 14px; border: 1px solid var(--gray-200); border-radius: 8px; font-size: 12px; color: var(--gray-600); transition: all .15s; }
+.btn-outline:hover { border-color: var(--blue-300); color: var(--blue-600); background: var(--blue-50); }
+.btn-white { padding: 8px 20px; background: #fff; color: var(--blue-600); border-radius: 8px; font-size: 13px; font-weight: 600; transition: background .15s; }
+.btn-white:hover { background: var(--blue-50); }
+.dismiss-btn { position: absolute; top: 8px; left: 8px; background: rgba(255,255,255,.8); backdrop-filter: blur(4px); border-radius: 50px; padding: 2px 8px; font-size: 11px; color: var(--gray-400); cursor: pointer; transition: all .15s; }
+.dismiss-btn:hover { color: var(--red-400); background: var(--red-50); }
+
+/* Sidebar */
+.page-with-sidebar { display: flex; gap: 20px; }
+.sidebar { width: 210px; flex-shrink: 0; }
+.sidebar-box { background: #fff; border-radius: 12px; border: 1px solid var(--gray-100); padding: 12px; }
+.sidebar-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.sidebar-title { font-size: 11px; font-weight: 800; color: var(--gray-400); letter-spacing: .05em; }
+.folder-btn { width: 100%; text-align: left; padding: 6px 8px; border-radius: 8px; font-size: 13px; color: var(--gray-600); display: flex; align-items: center; justify-content: space-between; transition: all .15s; margin-bottom: 2px; }
+.folder-btn:hover { background: var(--gray-50); }
+.folder-btn.active { background: var(--blue-50); color: var(--blue-600); font-weight: 600; }
+.folder-btn-inner { display: flex; align-items: center; gap: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.folder-count { font-size: 11px; color: var(--gray-300); }
+.subfolder-btn { width: 100%; text-align: left; padding: 4px 8px 4px 28px; border-radius: 8px; font-size: 11px; color: var(--gray-500); transition: background .15s; }
+.subfolder-btn:hover { background: var(--gray-50); }
+.add-btn { padding: 4px; border-radius: 6px; display: flex; align-items: center; justify-content: center; }
+.add-btn:hover { background: var(--gray-100); }
+
+/* Line Chart */
+.chart-box { background: #fff; border-radius: 12px; border: 1px solid var(--gray-100); padding: 16px; }
+.line-chart { width: 100%; height: 160px; }
+
+/* Channel */
+.channel-banner { background: linear-gradient(135deg, var(--blue-500), var(--blue-400), var(--purple-500)); border-radius: 16px; padding: 24px; color: #fff; position: relative; overflow: hidden; margin-bottom: 16px; }
+.channel-banner-pattern { position: absolute; inset: 0; opacity: .08; background-image: radial-gradient(circle at 20% 50%, #fff 1px, transparent 1px); background-size: 20px 20px; }
+.channel-banner-inner { position: relative; display: flex; align-items: center; gap: 16px; }
+.channel-avatar-lg { width: 80px; height: 80px; border-radius: 50%; background: rgba(255,255,255,.2); backdrop-filter: blur(4px); display: flex; align-items: center; justify-content: center; font-size: 30px; border: 2px solid rgba(255,255,255,.3); flex-shrink: 0; }
+.channel-info h2 { font-size: 20px; font-weight: 800; }
+.channel-info p { font-size: 13px; color: rgba(255,255,255,.7); margin-top: 2px; }
+.channel-stats { display: flex; gap: 16px; margin-top: 8px; font-size: 13px; color: rgba(255,255,255,.8); }
+.channel-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--gray-100); margin-bottom: 16px; }
+.channel-tab { padding: 8px 16px; font-size: 13px; border-bottom: 2px solid transparent; color: var(--gray-400); transition: all .15s; }
+.channel-tab:hover { color: var(--gray-600); }
+.channel-tab.active { border-bottom-color: var(--blue-500); color: var(--blue-600); font-weight: 600; }
+.channel-card { background: #fff; border-radius: 12px; border: 1px solid var(--gray-100); padding: 16px; cursor: pointer; transition: all .2s; text-align: left; }
+.channel-card:hover { box-shadow: 0 6px 20px rgba(0,0,0,.08); border-color: var(--gray-200); }
+.channel-card-avatar { width: 48px; height: 48px; border-radius: 50%; background: linear-gradient(135deg, var(--blue-100), var(--purple-100)); display: flex; align-items: center; justify-content: center; font-size: 18px; margin-bottom: 8px; }
+.channel-card-name { font-size: 13px; font-weight: 700; }
+.channel-card-desc { font-size: 11px; color: var(--gray-400); margin-top: 2px; }
+.channel-card-stats { display: flex; gap: 12px; margin-top: 8px; font-size: 11px; color: var(--gray-400); }
+.post-card { background: #fff; border-radius: 12px; border: 1px solid var(--gray-100); padding: 16px; cursor: pointer; transition: all .15s; margin-bottom: 8px; }
+.post-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,.05); }
+.post-title { font-size: 13px; font-weight: 600; }
+.post-meta { display: flex; gap: 12px; margin-top: 8px; font-size: 11px; color: var(--gray-400); }
+.channel-info-box { background: #fff; border-radius: 12px; border: 1px solid var(--gray-100); padding: 24px; max-width: 500px; }
+.folder-section { margin-bottom: 24px; }
+.folder-section-title { font-size: 13px; font-weight: 700; color: var(--gray-700); margin-bottom: 8px; }
+
+/* My Channel Manage */
+.manage-banner { background: linear-gradient(135deg, var(--blue-500), var(--blue-400), var(--purple-500)); border-radius: 16px; padding: 24px; color: #fff; position: relative; overflow: hidden; margin-bottom: 20px; }
+.manage-banner-overlay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,.15); opacity: 0; transition: opacity .2s; border-radius: 16px; }
+.manage-banner:hover .manage-banner-overlay { opacity: 1; }
+.manage-section { background: #fff; border-radius: 12px; border: 1px solid var(--gray-100); padding: 20px; margin-bottom: 16px; }
+.manage-section-title { font-size: 13px; font-weight: 700; color: var(--gray-800); margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+.manage-field { margin-bottom: 12px; }
+.manage-field label { display: block; font-size: 11px; color: var(--gray-500); margin-bottom: 4px; font-weight: 600; }
+.manage-input { width: 100%; padding: 8px 12px; border: 1px solid var(--gray-200); border-radius: 8px; font-size: 13px; outline: none; transition: border-color .15s; }
+.manage-input:focus { border-color: var(--blue-400); }
+.manage-textarea { width: 100%; padding: 8px 12px; border: 1px solid var(--gray-200); border-radius: 8px; font-size: 13px; outline: none; min-height: 80px; resize: vertical; }
+.manage-textarea:focus { border-color: var(--blue-400); }
+.folder-expose-item { display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: var(--gray-50); border-radius: 8px; margin-bottom: 6px; }
+.folder-expose-item .text-sm { flex: 1; }
+.toggle-switch { position: relative; width: 36px; height: 20px; background: var(--gray-300); border-radius: 10px; cursor: pointer; transition: background .2s; }
+.toggle-switch.on { background: var(--blue-500); }
+.toggle-switch::after { content: ''; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; background: #fff; border-radius: 50%; transition: transform .2s; }
+.toggle-switch.on::after { transform: translateX(16px); }
+
+/* Sub channel list */
+.sub-channel-item { display: flex; align-items: center; gap: 12px; background: #fff; border-radius: 12px; border: 1px solid var(--gray-100); padding: 16px; margin-bottom: 8px; transition: all .15s; }
+.sub-channel-item:hover { box-shadow: 0 2px 8px rgba(0,0,0,.06); }
+.sub-ch-avatar { width: 44px; height: 44px; border-radius: 50%; background: linear-gradient(135deg, var(--blue-100), var(--purple-100)); display: flex; align-items: center; justify-content: center; font-size: 16px; flex-shrink: 0; }
+.sub-ch-info { flex: 1; min-width: 0; }
+.sub-ch-name { font-size: 13px; font-weight: 700; }
+.sub-ch-desc { font-size: 11px; color: var(--gray-400); margin-top: 2px; }
+.sub-ch-meta { font-size: 11px; color: var(--gray-400); margin-top: 4px; display: flex; gap: 12px; }
+
+/* Modal */
+.modal-overlay { position: fixed; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center; }
+.modal-overlay.top { align-items: flex-start; padding-top: 80px; }
+.modal-backdrop { position: absolute; inset: 0; background: rgba(0,0,0,.4); backdrop-filter: blur(4px); }
+.modal-content { position: relative; width: 100%; margin: 0 16px; background: #fff; border-radius: 16px; box-shadow: 0 20px 60px rgba(0,0,0,.2); overflow: hidden; }
+.modal-content.sm { max-width: 420px; } .modal-content.md { max-width: 520px; } .modal-content.lg { max-width: 640px; }
+.modal-header { display: flex; align-items: center; justify-content: space-between; padding: 16px; border-bottom: 1px solid var(--gray-100); }
+.modal-header h3 { font-size: 15px; font-weight: 700; }
+.modal-close { padding: 4px; border-radius: 8px; display: flex; align-items: center; justify-content: center; }
+.modal-close:hover { background: var(--gray-100); }
+.modal-body { padding: 16px; }
+.search-input-row { display: flex; align-items: center; gap: 12px; padding: 16px; border-bottom: 1px solid var(--gray-100); }
+.search-input { flex: 1; border: none; outline: none; font-size: 15px; }
+.search-results { max-height: 384px; overflow-y: auto; padding: 8px; }
+.search-result-item { width: 100%; display: flex; align-items: center; gap: 12px; padding: 10px; border-radius: 8px; text-align: left; transition: background .1s; }
+.search-result-item:hover { background: var(--gray-50); }
+.search-tags { padding: 16px; }
+.search-tags-label { font-size: 11px; color: var(--gray-400); margin-bottom: 8px; }
+.search-tags-list { display: flex; gap: 8px; flex-wrap: wrap; }
+.reject-reason-box { background: var(--red-50); border-radius: 8px; padding: 12px; margin-top: 12px; }
+.reject-reason-text { font-size: 13px; color: var(--red-700); }
+.reject-reason-date { font-size: 11px; color: var(--red-400); margin-top: 8px; }
+.modal-actions { display: flex; gap: 8px; margin-top: 16px; }
+.modal-actions .btn-primary { flex: 1; justify-content: center; }
+.stat-modal-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 16px; }
+.stat-modal-cell { border-radius: 8px; padding: 12px; text-align: center; }
+.stat-modal-cell-val { font-size: 18px; font-weight: 700; }
+.stat-modal-cell-label { font-size: 11px; color: var(--gray-500); margin-top: 2px; }
+.mini-chart { display: flex; align-items: flex-end; gap: 2px; height: 120px; padding: 8px 0; }
+.mini-bar { flex: 1; background: var(--blue-200); border-radius: 2px 2px 0 0; min-height: 4px; transition: all .15s; }
+.mini-bar:hover { background: var(--blue-500); }
+.back-link { font-size: 11px; color: var(--blue-500); cursor: pointer; margin-bottom: 12px; display: inline-block; }
+.back-link:hover { text-decoration: underline; }
+.section-badge { display: inline-block; background: var(--blue-500); color: #fff; font-size: 11px; padding: 2px 8px; border-radius: 50px; font-weight: 600; margin-right: 8px; }
+.recommend-section { margin-bottom: 32px; }
+.keyword-area { background: var(--gray-50); border-radius: 12px; padding: 16px; margin-bottom: 12px; }
+.content-relative { position: relative; }
+.empty-state { text-align: center; padding: 80px 20px; }
+.empty-state p { color: var(--gray-400); font-size: 13px; }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+const CONTENT_TYPES=["영상","이미지","문서","문항","평가지","활동지","수업꾸러미","수업레시피"];
+const STATUS_MAP={public:{label:"공개",cls:"badge-public"},review:{label:"검토중",cls:"badge-review"},rejected:{label:"반려",cls:"badge-rejected"},private:{label:"비공개",cls:"badge-private"}};
+
+const MY_CONTENTS=[
+  {id:1,title:"분수의 나눗셈 개념 영상",type:"영상",author:"문동국",authorId:"user1",views:234,likes:45,saves:23,comments:8,date:"2026.02.15",status:"public",folder:"5학년 수학",tags:["수학","분수"]},
+  {id:2,title:"AI 활용 사회정서교육 수업안",type:"수업꾸러미",author:"문동국",authorId:"user1",views:189,likes:38,saves:19,comments:5,date:"2026.02.13",status:"public",folder:"AI 교육",tags:["AI"]},
+  {id:3,title:"일차함수 평가문항 세트",type:"문항",author:"문동국",authorId:"user1",views:156,likes:32,saves:41,comments:3,date:"2026.02.10",status:"review",folder:"중2 수학",tags:["수학"]},
+  {id:4,title:"청주공예비엔날레 활동지",type:"활동지",author:"문동국",authorId:"user1",views:89,likes:12,saves:8,comments:1,date:"2026.02.08",status:"rejected",folder:null,tags:["미술"]},
+  {id:5,title:"소인수분해 개념 정리 문서",type:"문서",author:"문동국",authorId:"user1",views:67,likes:9,saves:15,comments:2,date:"2026.02.05",status:"private",folder:"중1 수학",tags:["수학"]},
+  {id:6,title:"디지털 리터러시 수업 영상",type:"영상",author:"문동국",authorId:"user1",views:312,likes:67,saves:45,comments:12,date:"2026.01.28",status:"public",folder:"디지털 교육",tags:["디지털"]},
+  {id:7,title:"2학기 수학 평가지 모음",type:"평가지",author:"문동국",authorId:"user1",views:445,likes:89,saves:67,comments:15,date:"2026.01.20",status:"public",folder:"5학년 수학",tags:["수학"]},
+  {id:8,title:"수업레시피: 토론 수업 설계",type:"수업레시피",author:"문동국",authorId:"user1",views:201,likes:34,saves:28,comments:7,date:"2026.01.15",status:"public",folder:null,tags:["토론"]},
+];
+const SAVED_CONTENTS=[
+  {id:101,title:"[초등 3학년 국어] 매체 활용 소통 예절",type:"영상",author:"정영태",authorId:"user2",views:14,likes:3,saves:5,comments:1,date:"2026.02.16",folder:"참고 영상",tags:["국어"]},
+  {id:102,title:"2025 다채움 UI/UX 연구회 보고서",type:"문서",author:"박상환",authorId:"user3",views:6,likes:2,saves:3,comments:0,date:"2026.02.14",folder:null,tags:["연구"]},
+  {id:103,title:"충북노벨프로젝트 성과공유회",type:"영상",author:"충북노벨",authorId:"user4",views:70,likes:15,saves:22,comments:4,date:"2026.02.12",folder:"참고 영상",tags:["과학"]},
+  {id:104,title:"일차함수 그래프 문제",type:"문항",author:"관리자",authorId:"admin",views:1,likes:0,saves:1,comments:0,date:"2026.02.10",folder:"수학 문항",tags:["수학"]},
+  {id:105,title:"3학년 수행평가 수학",type:"평가지",author:"심정현",authorId:"user5",views:38,likes:8,saves:12,comments:2,date:"2026.02.08",folder:"수학 문항",tags:["수학"]},
+];
+const PUBLIC_CONTENTS=[
+  {id:201,title:"성찰중심의 학습공동체 수업영상",type:"영상",author:"나영육",authorId:"user10",views:6,likes:2,saves:3,comments:1,date:"2026.02.01",tags:["학습공동체"]},
+  {id:202,title:"학습공동체 '하이터치스' 수업나눔 영상",type:"영상",author:"소나섭",authorId:"user11",views:5,likes:1,saves:2,comments:0,date:"2026.01.30",tags:["학습공동체"]},
+  {id:203,title:"AI 창작물 제작 수업 가이드",type:"문서",author:"김지현",authorId:"user12",views:89,likes:23,saves:34,comments:7,date:"2026.02.10",tags:["AI"]},
+  {id:204,title:"분수의 덧셈과 뺄셈 활동지",type:"활동지",author:"수포자탈출",authorId:"user13",views:26,likes:8,saves:15,comments:3,date:"2026.01.25",tags:["수학"]},
+  {id:205,title:"2025 중등 교수학습 콘텐츠",type:"수업꾸러미",author:"충북교육청",authorId:"admin2",views:312,likes:56,saves:78,comments:11,date:"2026.02.05",tags:["중등"]},
+  {id:206,title:"기초수학 연산 훈련 문항",type:"문항",author:"박수진",authorId:"user14",views:145,likes:34,saves:56,comments:5,date:"2026.01.20",tags:["수학"]},
+  {id:207,title:"영양교육 ON 수업자료",type:"영상",author:"영양ON",authorId:"user15",views:78,likes:12,saves:19,comments:2,date:"2026.02.12",tags:["보건"]},
+  {id:208,title:"클릭수학 인터랙티브 학습지",type:"이미지",author:"클릭수학",authorId:"user16",views:234,likes:45,saves:67,comments:8,date:"2026.01.18",tags:["수학"]},
+];
+const FOLDERS=[{id:"f1",name:"5학년 수학",count:12,children:[{id:"f1-1",name:"1학기",count:7},{id:"f1-2",name:"2학기",count:5}]},{id:"f2",name:"AI 교육",count:8,children:[]},{id:"f3",name:"중1 수학",count:5,children:[]},{id:"f4",name:"중2 수학",count:9,children:[]},{id:"f5",name:"디지털 교육",count:6,children:[]},{id:"f0",name:"미분류",count:3,children:[]}];
+const SAVED_FOLDERS=[{id:"sf1",name:"참고 영상",count:5,children:[]},{id:"sf2",name:"수학 문항",count:8,children:[]},{id:"sf0",name:"미분류",count:2,children:[]}];
+const CHANNELS=[
+  {id:"user2",name:"정영태",subscribers:45,contents:23,desc:"초등 국어 전문"},
+  {id:"user4",name:"충북노벨",subscribers:128,contents:67,desc:"충북 노벨 프로젝트"},
+  {id:"user13",name:"수포자탈출",subscribers:234,contents:89,desc:"수학을 쉽게!"},
+  {id:"user12",name:"김지현",subscribers:56,contents:34,desc:"AI·에듀테크 수업"},
+];
+
+const SVG={
+  search:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>',
+  heart:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>',
+  bookmark:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>',
+  share:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>',
+  comment:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>',
+  eye:'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>',
+  folder:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>',
+  plus:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>',
+  grid:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>',
+  list:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>',
+  bell:'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>',
+  alert:'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>',
+  x:'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>',
+  users:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>',
+  edit:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>',
+};
+
+// Generate line chart data
+function genLineData(n){ const d=[]; for(let i=0;i<n;i++) d.push(Math.floor(Math.random()*50)+10); return d; }
+const TREND_DATA=genLineData(30);
+
+function drawLineChart(data, w, h, color){
+  const max=Math.max(...data); const min=Math.min(...data);
+  const padT=10, padB=20, padL=30, padR=10;
+  const cw=w-padL-padR, ch=h-padT-padB;
+  const stepX=cw/(data.length-1);
+  let pts=[]; data.forEach((v,i)=>{ const x=padL+i*stepX; const y=padT+ch-(v-min)/(max-min||1)*ch; pts.push(`${x},${y}`); });
+  const polyline=pts.join(' ');
+  // Y axis labels
+  const yLabels=[min,Math.round((max+min)/2),max];
+  let ylHtml='';
+  yLabels.forEach(v=>{ const y=padT+ch-(v-min)/(max-min||1)*ch; ylHtml+=`<text x="${padL-4}" y="${y+3}" text-anchor="end" fill="#ccc" font-size="9">${v}</text><line x1="${padL}" y1="${y}" x2="${w-padR}" y2="${y}" stroke="#f3f4f6" stroke-width="1"/>`; });
+  // X axis labels (every 5)
+  let xlHtml='';
+  data.forEach((v,i)=>{ if(i%5===0){ const x=padL+i*stepX; xlHtml+=`<text x="${x}" y="${h-4}" text-anchor="middle" fill="#ccc" font-size="9">${i+1}일</text>`; }});
+  // Area fill
+  const areaPts=`${padL},${padT+ch} ${polyline} ${padL+(data.length-1)*stepX},${padT+ch}`;
+  return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">
+    ${ylHtml}${xlHtml}
+    <polygon points="${areaPts}" fill="${color}" opacity="0.08"/>
+    <polyline points="${polyline}" fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+  </svg>`;
+}
+function genBars(n){ let h=''; for(let i=0;i<n;i++){const v=Math.floor(Math.random()*80)+20; h+=`<div class="mini-bar" style="height:${v}%"></div>`;} return h; }
+
+let state={page:"dashboard",channelId:null,searchOpen:false,selectedFolder:null,typeFilters:new Set(),statusFilter:"전체",viewMode:"card",statModal:null,rejectModal:null,trendMetric:"조회수",trendPeriod:"30일",channelTab:"홈",expandedFolders:new Set()};
+
+function setState(u){ Object.assign(state,u); render(); }
+function navigate(p,param){ if(p==="channel"){setState({page:"channel",channelId:param,channelTab:"홈"});}else{setState({page:p,channelId:null,selectedFolder:null,typeFilters:new Set(),statusFilter:"전체",viewMode:"card"});} }
+
+function statusBadge(s){const m=STATUS_MAP[s];return m?`<span class="badge ${m.cls}"><span class="badge-dot"></span>${m.label}</span>`:'';}
+function typeBadge(t){return `<span class="type-badge type-${t}">${t}</span>`;}
+function thumbIcon(t){return t==="영상"?"▶":t==="이미지"?"🖼":"📄";}
+
+function contentCard(item,opts={}){
+  const{showStatus,compact}=opts;
+  if(compact) return `<div class="compact-card" ${item.status==="rejected"?`onclick="openRejectModal(${item.id})"`:''}><div class="card-body"><div class="compact-badges">${showStatus&&item.status?statusBadge(item.status):''}${typeBadge(item.type)}</div><div class="card-title">${item.title}</div><div class="card-meta"><span class="author-link" onclick="event.stopPropagation();navigate('channel','${item.authorId}')">${item.author}</span><span>·</span><span>${SVG.eye} ${item.views}</span><span>·</span><span>${item.date}</span></div><div class="card-actions"><span>${SVG.heart} ${item.likes}</span><span>${SVG.bookmark} ${item.saves}</span><span>${SVG.share}</span><span>${SVG.comment} ${item.comments}</span></div></div></div>`;
+  return `<div class="content-card" ${item.status==="rejected"?`onclick="openRejectModal(${item.id})"`:''}>
+    <div class="card-thumb"><span class="card-thumb-icon">${thumbIcon(item.type)}</span>${showStatus&&item.status?statusBadge(item.status):''}${typeBadge(item.type)}</div>
+    <div class="card-body"><div class="card-title">${item.title}</div><div class="card-meta"><span class="author-link" onclick="event.stopPropagation();navigate('channel','${item.authorId}')">${item.author}</span><span>·</span><span>${SVG.eye} ${item.views}</span><span>·</span><span>${item.date}</span></div><div class="card-actions"><span>${SVG.heart} ${item.likes}</span><span>${SVG.bookmark} ${item.saves}</span><span>${SVG.share}</span><span>${SVG.comment} ${item.comments}</span></div></div></div>`;
+}
+
+function listRow(item,showStatus){
+  return `<div class="list-row" ${item.status==="rejected"?`onclick="openRejectModal(${item.id})"`:''}>
+    <div class="list-row-thumb">${thumbIcon(item.type)}</div><div class="list-row-body"><div class="list-row-title">${item.title}</div><div class="list-row-meta"><span class="author-link" onclick="event.stopPropagation();navigate('channel','${item.authorId}')">${item.author}</span> · ${item.date}</div></div>
+    ${showStatus&&item.status?statusBadge(item.status):''} ${typeBadge(item.type)} <span style="font-size:11px;color:var(--gray-400);display:flex;align-items:center;gap:3px">${SVG.eye} ${item.views}</span></div>`;
+}
+
+function openRejectModal(id){const item=[...MY_CONTENTS,...SAVED_CONTENTS].find(c=>c.id===id);if(item)setState({rejectModal:item});}
+function toggleTypeFilter(t){const f=new Set(state.typeFilters);f.has(t)?f.delete(t):f.add(t);setState({typeFilters:f});}
+function toggleExpand(id){const f=new Set(state.expandedFolders);f.has(id)?f.delete(id):f.add(id);setState({expandedFolders:f});}
+
+// ===== PAGES =====
+function renderHeader(){
+  const isArchive=["dashboard","mydata","saved","mychannel","subscriptions"].includes(state.page);
+  return `<header class="header"><div class="header-inner"><div class="flex-row">
+    <div class="logo" onclick="navigate('dashboard')"><div class="logo-icon">채</div><span class="logo-text">채움콘텐츠</span></div>
+    <nav class="nav">
+      <div class="nav-item"><button class="nav-btn ${isArchive?'active':''}">나의 보관함</button><div class="nav-dropdown">
+        <button class="nav-drop-btn ${state.page==='dashboard'?'active':''}" onclick="navigate('dashboard')">대시보드</button>
+        <button class="nav-drop-btn ${state.page==='mydata'?'active':''}" onclick="navigate('mydata')">내자료</button>
+        <button class="nav-drop-btn ${state.page==='saved'?'active':''}" onclick="navigate('saved')">담은자료</button>
+        <button class="nav-drop-btn ${state.page==='subscriptions'?'active':''}" onclick="navigate('subscriptions')">구독 채널</button>
+        <button class="nav-drop-btn ${state.page==='mychannel'?'active':''}" onclick="navigate('mychannel')">내 채널 관리</button>
+      </div></div>
+      <button class="nav-btn ${state.page==='recommend'?'active':''}" onclick="navigate('recommend')">추천콘텐츠</button>
+      <button class="nav-btn ${state.page==='public'?'active':''}" onclick="navigate('public')">공개콘텐츠</button>
+      <button class="nav-btn ${state.page==='search-std'?'active':''}" onclick="navigate('search-std')">성취기준별 콘텐츠 찾기</button>
+    </nav></div>
+    <div class="header-right">
+      <button class="search-trigger" onclick="setState({searchOpen:true})">${SVG.search} 검색 <kbd>⌘K</kbd></button>
+      <button class="bell-btn">${SVG.bell}<span class="bell-dot"></span></button>
+      <div class="user-area"><div class="user-avatar">문</div><span class="user-name">문동국</span></div>
+    </div></div></header>
+  ${isArchive?`<div class="sub-nav"><div class="sub-nav-inner">
+    <button class="sub-nav-btn ${state.page==='dashboard'?'active':''}" onclick="navigate('dashboard')">대시보드</button>
+    <button class="sub-nav-btn ${state.page==='mydata'?'active':''}" onclick="navigate('mydata')">내자료</button>
+    <button class="sub-nav-btn ${state.page==='saved'?'active':''}" onclick="navigate('saved')">담은자료</button>
+    <button class="sub-nav-btn ${state.page==='subscriptions'?'active':''}" onclick="navigate('subscriptions')">구독 채널</button>
+    <button class="sub-nav-btn ${state.page==='mychannel'?'active':''}" onclick="navigate('mychannel')">내 채널 관리</button>
+  </div></div>`:''}`;
+}
+
+function renderDashboard(){
+  const rej=MY_CONTENTS.filter(c=>c.status==="rejected").length;
+  const rev=MY_CONTENTS.filter(c=>c.status==="review").length;
+  const chartW=520, chartH=160;
+  return `
+  <div class="action-alert"><div class="action-alert-title">${SVG.alert} 처리 필요</div><div class="action-items">
+    ${rej?`<button class="action-item" onclick="navigate('mydata')"><span class="action-dot" style="background:var(--red-500)"></span>반려된 콘텐츠 <strong style="color:var(--red-600)">${rej}건</strong></button>`:''}
+    ${rev?`<button class="action-item"><span class="action-dot" style="background:var(--amber-500)"></span>검토 대기 중 <strong style="color:var(--amber-600)">${rev}건</strong></button>`:''}
+    <button class="action-item"><span class="action-dot" style="background:var(--blue-500)"></span>새 댓글 <strong style="color:var(--blue-600)">3건</strong></button>
+  </div></div>
+  <div class="grid-2 mb-20"><div>
+    <div class="section-label">채널 성과 요약</div>
+    <div class="stat-grid">
+      <button class="stat-card" onclick="setState({statModal:'구독자'})"><div class="stat-card-label">누적 구독자</div><div class="stat-card-value">19</div><div class="stat-card-change up">▲ 8% vs 지난달</div></button>
+      <button class="stat-card" onclick="setState({statModal:'조회수'})"><div class="stat-card-label">최근 30일 조회수</div><div class="stat-card-value">1,245</div><div class="stat-card-change up">▲ 12% vs 지난달</div></button>
+      <button class="stat-card" onclick="setState({statModal:'담기'})"><div class="stat-card-label">총 담기 횟수</div><div class="stat-card-value">198</div><div class="stat-card-change down">▼ 3% vs 지난달</div></button>
+      <button class="stat-card" onclick="setState({statModal:'좋아요'})"><div class="stat-card-label">총 좋아요</div><div class="stat-card-value">326</div><div class="stat-card-change up">▲ 15% vs 지난달</div></button>
+    </div>
+    </div>
+    <div><div class="flex-between mb-12"><div class="section-label" style="margin-bottom:0">활동 추이</div><div class="flex-row gap-4">
+      ${["7일","30일","90일"].map(p=>`<button class="period-btn ${state.trendPeriod===p?'active':''}" onclick="setState({trendPeriod:'${p}'})">${p}</button>`).join('')}
+    </div></div>
+    <div class="chart-box"><div class="flex-row gap-8 mb-12">
+      ${["조회수","공유수","담기수"].map(m=>`<button class="metric-btn ${state.trendMetric===m?'active':''}" onclick="setState({trendMetric:'${m}'})">${m}</button>`).join('')}
+    </div><div class="line-chart">${drawLineChart(TREND_DATA,chartW,chartH,'#3b82f6')}</div></div></div>
+  </div>
+  <div style="background:#fff;border:1px solid var(--gray-100);border-radius:10px;overflow-x:auto;margin-bottom:20px">
+    <table style="width:100%;border-collapse:collapse;font-size:12px;min-width:700px">
+      <thead><tr style="background:var(--gray-50)">
+        <th style="padding:8px 12px;text-align:left;font-weight:600;color:var(--gray-500);width:60px"></th>
+        ${CONTENT_TYPES.map(t=>'<th style="padding:8px 12px;text-align:center;font-weight:600">'+typeBadge(t)+'</th>').join('')}
+        <th style="padding:8px 12px;text-align:center;font-weight:700;color:var(--gray-700)">합계</th>
+      </tr></thead>
+      <tbody>
+        <tr style="border-top:1px solid var(--gray-100)"><td style="padding:8px 12px;font-weight:600;color:var(--gray-500)">등록</td>
+          ${CONTENT_TYPES.map(t=>'<td style="padding:8px 12px;text-align:center;color:var(--gray-700)">'+MY_CONTENTS.filter(c=>c.type===t).length+'</td>').join('')}
+          <td style="padding:8px 12px;text-align:center;font-weight:700">${MY_CONTENTS.length}</td></tr>
+        <tr style="border-top:1px solid var(--gray-100)"><td style="padding:8px 12px;font-weight:600;color:var(--gray-500)">공개</td>
+          ${CONTENT_TYPES.map(t=>'<td style="padding:8px 12px;text-align:center;color:var(--emerald-600)">'+MY_CONTENTS.filter(c=>c.type===t&&c.status==='public').length+'</td>').join('')}
+          <td style="padding:8px 12px;text-align:center;font-weight:700;color:var(--emerald-600)">${MY_CONTENTS.filter(c=>c.status==='public').length}</td></tr>
+        <tr style="border-top:1px solid var(--gray-100)"><td style="padding:8px 12px;font-weight:600;color:var(--gray-500)">담은자료</td>
+          ${CONTENT_TYPES.map(t=>'<td style="padding:8px 12px;text-align:center;color:var(--blue-600)">'+SAVED_CONTENTS.filter(c=>c.type===t).length+'</td>').join('')}
+          <td style="padding:8px 12px;text-align:center;font-weight:700;color:var(--blue-600)">${SAVED_CONTENTS.length}</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="grid-2"><div>
+    <div class="flex-between mb-12"><div class="section-label" style="margin-bottom:0">최근 콘텐츠 성과</div><span class="link-sm" onclick="navigate('mydata')">내자료 바로가기 →</span></div>
+    <div class="flex-col gap-8">${MY_CONTENTS.slice(0,4).map(c=>contentCard(c,{showStatus:true,compact:true})).join('')}</div>
+  </div><div>
+    <div class="flex-between mb-12"><div class="section-label" style="margin-bottom:0">구독 채널 최신 업로드</div><span class="link-sm" onclick="navigate('subscriptions')">구독 채널 목록 →</span></div>
+    <div class="flex-col gap-8">${SAVED_CONTENTS.slice(0,4).map(c=>contentCard(c,{compact:true})).join('')}</div>
+  </div></div>`;
+}
+
+function renderFolderSidebar(folders,dataType){
+  const items=dataType==='mydata'?MY_CONTENTS:SAVED_CONTENTS;
+  let h=`<div class="sidebar"><div class="sidebar-box"><div class="sidebar-header"><span class="sidebar-title">폴더</span><button class="add-btn">${SVG.plus}</button></div>
+  <button class="folder-btn ${!state.selectedFolder?'active':''}" onclick="setState({selectedFolder:null})"><span class="folder-btn-inner">전체 보기</span></button>`;
+  folders.forEach(f=>{
+    h+=`<button class="folder-btn ${state.selectedFolder===f.name?'active':''}" onclick="setState({selectedFolder:'${f.name}'})${f.children.length?`;toggleExpand('${f.id}')`:''}'"><span class="folder-btn-inner">${SVG.folder} ${f.name}</span><span class="folder-count">${f.count}</span></button>`;
+    if(f.children.length&&state.expandedFolders.has(f.id)) f.children.forEach(s=>{h+=`<button class="subfolder-btn" onclick="setState({selectedFolder:'${s.name}'})">${s.name} <span style="color:var(--gray-300)">(${s.count})</span></button>`;});
+  });
+  h+=`</div>
+  <div style="margin-top:12px;background:#fff;border-radius:12px;border:1px solid var(--gray-100);padding:12px">
+    <div class="sidebar-title" style="margin-bottom:8px">유형별 집계</div>
+    ${CONTENT_TYPES.map(t=>{const cnt=items.filter(c=>c.type===t).length;return cnt?'<div class="flex-between" style="padding:3px 0;font-size:11px"><span style="color:var(--gray-600)">'+t+'</span><span style="font-weight:700;color:var(--gray-700)">'+cnt+'</span></div>':'';}).join('')}
+    <div class="flex-between" style="padding:4px 0;margin-top:4px;border-top:1px solid var(--gray-100);font-size:11px;font-weight:700"><span>합계</span><span>${items.length}</span></div>
+  </div></div>`;
+  return h;
+}
+
+function renderMyData(type){
+  const items=type==="mydata"?MY_CONTENTS:SAVED_CONTENTS;
+  const folders=type==="mydata"?FOLDERS:SAVED_FOLDERS;
+  const isMyData=type==="mydata";
+  let filtered=items.filter(c=>{
+    if(state.selectedFolder&&c.folder!==state.selectedFolder)return false;
+    if(state.typeFilters.size>0&&!state.typeFilters.has(c.type))return false;
+    if(isMyData&&state.statusFilter!=="전체"&&c.status!==state.statusFilter)return false;
+    return true;
+  });
+  let h=`<div class="page-with-sidebar">${renderFolderSidebar(folders,type)}<div class="flex-1">
+    <div class="flex-between mb-16"><h3 class="section-title">${isMyData?"내자료":"담은자료"}${state.selectedFolder?' / '+state.selectedFolder:''}</h3>
+    ${isMyData?`<button class="btn-primary">${SVG.plus} 새로 만들기</button>`:''}</div>
+    <div class="filter-row"><span class="filter-label">유형</span>
+    ${CONTENT_TYPES.map(t=>`<label class="filter-check ${state.typeFilters.has(t)?'active':''}"><input type="checkbox" ${state.typeFilters.has(t)?'checked':''} onchange="toggleTypeFilter('${t}')"> ${t}</label>`).join('')}</div>`;
+  if(isMyData) h+=`<div class="filter-row"><span class="filter-label">상태</span>
+    ${["전체","public","review","rejected","private"].map(s=>`<button class="status-btn ${state.statusFilter===s?'active':''}" onclick="setState({statusFilter:'${s}'})">${s==="전체"?"전체":STATUS_MAP[s].label}</button>`).join('')}
+    <div class="flex-1"></div><div class="view-toggle"><button class="view-btn ${state.viewMode==='card'?'active':''}" onclick="setState({viewMode:'card'})">${SVG.grid}</button><button class="view-btn ${state.viewMode==='list'?'active':''}" onclick="setState({viewMode:'list'})">${SVG.list}</button></div></div>`;
+  h+=`<div class="text-xs text-gray mb-12">총 <strong class="text-blue">${filtered.length}</strong>개</div>`;
+  if(state.viewMode==='card') h+=`<div class="grid-3">${filtered.map(c=>contentCard(c,{showStatus:isMyData})).join('')}</div>`;
+  else h+=`<div class="flex-col gap-4">${filtered.map(c=>listRow(c,isMyData)).join('')}</div>`;
+  return h+`</div></div>`;
+}
+
+function renderSubscriptions(){
+  return `<div class="flex-between mb-16"><h3 class="section-title">구독 채널</h3><span class="text-xs text-gray">총 ${CHANNELS.length}개 채널 구독중</span></div>
+  <div class="flex-col gap-8">${CHANNELS.map(ch=>`<div class="sub-channel-item">
+    <div class="sub-ch-avatar" style="cursor:pointer" onclick="navigate('channel','${ch.id}')">${ch.name[0]}</div>
+    <div class="sub-ch-info"><div class="sub-ch-name" style="cursor:pointer" onclick="navigate('channel','${ch.id}')">${ch.name}</div><div class="sub-ch-desc">${ch.desc}</div>
+    <div class="sub-ch-meta"><span>${SVG.users} 구독자 ${ch.subscribers}명</span><span>콘텐츠 ${ch.contents}개</span></div></div>
+    <button class="btn-outline" onclick="navigate('channel','${ch.id}')">채널 방문</button>
+    <button class="btn-outline" style="color:var(--red-400);border-color:var(--red-200)">구독 해제</button>
+  </div>`).join('')}</div>`;
+}
+
+function renderMyChannel(){
+  const publicContents=MY_CONTENTS.filter(c=>c.status==="public");
+  const folderNames=[...new Set(publicContents.map(c=>c.folder).filter(Boolean))];
+  return `<div class="flex-between mb-16"><h3 class="section-title">내 채널 관리</h3>
+    <button class="btn-outline" onclick="navigate('channel','user1')">채널 미리보기 →</button></div>
+
+  <div class="manage-banner"><div class="channel-banner-pattern"></div>
+    <div class="channel-banner-inner"><div class="channel-avatar-lg">문</div>
+    <div class="channel-info flex-1"><h2>문동국</h2><p>수학 교육 콘텐츠</p>
+    <div class="channel-stats"><span>구독자 19명</span><span>공개 콘텐츠 ${publicContents.length}개</span><span>총 조회수 1,245</span></div></div></div>
+    <div class="manage-banner-overlay"><span style="background:#fff;color:var(--gray-700);padding:8px 20px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer">배너 이미지 변경</span></div>
+  </div>
+
+  <div class="grid-2">
+    <div class="manage-section"><div class="manage-section-title">${SVG.edit} 채널 정보 수정</div>
+      <div class="manage-field"><label>채널명</label><input class="manage-input" value="문동국" placeholder="채널명"></div>
+      <div class="manage-field"><label>한 줄 소개</label><input class="manage-input" value="수학 교육 콘텐츠" placeholder="채널 소개"></div>
+      <div class="manage-field"><label>자기소개</label><textarea class="manage-textarea" placeholder="자세한 소개를 작성하세요">중학교 수학 교사입니다. 학생들이 수학을 쉽고 재미있게 배울 수 있는 콘텐츠를 만들고 있습니다.</textarea></div>
+      <div class="manage-field"><label>SNS 링크</label><input class="manage-input mb-8" value="https://blog.naver.com/example" placeholder="블로그 URL"><input class="manage-input" value="" placeholder="유튜브 URL"></div>
+      <button class="btn-primary mt-8">저장</button>
+    </div>
+
+    <div><div class="manage-section"><div class="manage-section-title">${SVG.folder} 채널 홈 폴더 노출 설정</div>
+      <div class="text-xs text-gray mb-12">채널 홈에 노출할 폴더를 선택하세요. 유튜브 재생목록처럼 보입니다.</div>
+      ${folderNames.map((f,i)=>`<div class="folder-expose-item"><span class="text-sm flex-1">${f}</span><span class="text-xs text-gray">${publicContents.filter(c=>c.folder===f).length}개 공개</span>
+        <div class="toggle-switch ${i<2?'on':''}" onclick="this.classList.toggle('on')"></div></div>`).join('')}
+    </div>
+
+    <div class="manage-section"><div class="manage-section-title">${SVG.comment} 게시판 관리</div>
+      <div class="text-xs text-gray mb-12">크리에이터 전용 게시판의 설정을 관리합니다.</div>
+      <div class="flex-row gap-12 mb-8"><span class="text-sm">게시판 사용</span><div class="toggle-switch on" onclick="this.classList.toggle('on')"></div></div>
+      <div class="flex-row gap-12 mb-8"><span class="text-sm">댓글 허용</span><div class="toggle-switch on" onclick="this.classList.toggle('on')"></div></div>
+      <div class="flex-row gap-12"><span class="text-sm">학생 접근 허용</span><div class="toggle-switch" onclick="this.classList.toggle('on')"></div></div>
+    </div></div>
+  </div>`;
+}
+
+function renderPublic(){
+  let filtered=PUBLIC_CONTENTS.concat(MY_CONTENTS.filter(c=>c.status==="public"));
+  if(state.typeFilters.size>0)filtered=filtered.filter(c=>state.typeFilters.has(c.type));
+  return `<div class="flex-between mb-16"><h3 class="section-title">공개 콘텐츠</h3><button class="btn-primary">${SVG.plus} 새로 만들기</button></div>
+  <div class="filter-row"><span class="filter-label">유형</span>${CONTENT_TYPES.map(t=>`<label class="filter-check ${state.typeFilters.has(t)?'active':''}"><input type="checkbox" ${state.typeFilters.has(t)?'checked':''} onchange="toggleTypeFilter('${t}')"> ${t}</label>`).join('')}<div class="flex-1"></div><div class="view-toggle"><button class="view-btn ${state.viewMode==='card'?'active':''}" onclick="setState({viewMode:'card'})">${SVG.grid}</button><button class="view-btn ${state.viewMode==='list'?'active':''}" onclick="setState({viewMode:'list'})">${SVG.list}</button></div></div>
+  <div class="flex-row gap-8 mb-16" style="overflow-x:auto;padding-bottom:4px">${["AI 에듀테크","학습공동체","디지털 리터러시","기초수학","보건교육","2025 중등 교수학습","맞춤교육","인성교육"].map(t=>`<button class="tag-btn">${t}</button>`).join('')}</div>
+  <div class="text-xs text-gray mb-12">총 <strong class="text-blue">${filtered.length}</strong>개</div>
+  ${state.viewMode==='card'?`<div class="grid-4">${filtered.map(c=>contentCard(c)).join('')}</div>`:`<div class="flex-col gap-4">${filtered.map(c=>listRow(c,false)).join('')}</div>`}`;
+}
+
+function renderRecommend(){
+  return `<div class="recommend-section"><div class="mb-12"><span class="section-badge">기획</span><span class="section-title">2026학년도 1학기 준비 자료</span></div><div class="grid-4">${PUBLIC_CONTENTS.slice(0,4).map(c=>contentCard(c)).join('')}</div></div>
+  <div class="recommend-section"><div class="section-title">🎯 문동국님을 위한 맞춤 콘텐츠</div><div class="text-xs text-gray mb-12" style="margin-top:4px">중학교 · 수학 담당 기반 추천</div>
+  <div class="keyword-area"><div class="text-xs text-gray mb-8">맞춤 키워드</div><div class="flex-row flex-wrap gap-8">${["수학","일차함수","평가","AI 교육","디지털 리터러시"].map(k=>`<span class="keyword-tag">${k}</span>`).join('')}<button class="keyword-edit-btn">+ 편집</button></div></div>
+  <div class="grid-4">${PUBLIC_CONTENTS.slice(4).map(c=>`<div class="content-relative">${contentCard(c)}<button class="dismiss-btn">관심없음</button></div>`).join('')}</div></div>
+  <div class="recommend-section"><div class="section-title">👥 같은 수학 교과 선생님들이 많이 담은 자료</div><div class="text-xs text-gray mb-12" style="margin-top:4px">중학교 수학 교사 128명의 활동 기반</div><div class="grid-4">${PUBLIC_CONTENTS.slice(2,6).map(c=>contentCard(c)).join('')}</div></div>
+  <div class="recommend-section"><div class="section-title mb-12">🌟 인기 채널</div><div class="grid-4">${CHANNELS.map(ch=>`<button class="channel-card" onclick="navigate('channel','${ch.id}')"><div class="channel-card-avatar">${ch.name[0]}</div><div class="channel-card-name">${ch.name}</div><div class="channel-card-desc">${ch.desc}</div><div class="channel-card-stats"><span>${SVG.users} ${ch.subscribers}</span><span>콘텐츠 ${ch.contents}</span></div></button>`).join('')}</div></div>
+  <div class="recommend-section"><div class="section-title mb-12">🆕 새로 올라온 맞춤 자료</div><div class="grid-4">${PUBLIC_CONTENTS.slice(0,4).map(c=>contentCard(c)).join('')}</div></div>`;
+}
+
+function renderChannel(){
+  const ch=CHANNELS.find(c=>c.id===state.channelId)||{id:"user1",name:"문동국",subscribers:19,contents:8,desc:"수학 교육 콘텐츠"};
+  const contents=MY_CONTENTS.filter(c=>c.status==="public");
+  let h=`<span class="back-link" onclick="navigate('dashboard')">← 뒤로가기</span>
+  <div class="channel-banner"><div class="channel-banner-pattern"></div><div class="channel-banner-inner"><div class="channel-avatar-lg">${ch.name[0]}</div><div class="channel-info flex-1"><h2>${ch.name}</h2><p>${ch.desc}</p><div class="channel-stats"><span>구독자 ${ch.subscribers}명</span><span>콘텐츠 ${contents.length}개</span><span>총 조회수 1,245</span></div></div><button class="btn-white">구독하기</button></div></div>
+  <div class="channel-tabs">${["홈","콘텐츠","게시판","정보"].map(t=>`<button class="channel-tab ${state.channelTab===t?'active':''}" onclick="setState({channelTab:'${t}'})">${t}</button>`).join('')}</div>`;
+  if(state.channelTab==="홈"){
+    const byF={};contents.forEach(c=>{const f=c.folder||"기타";if(!byF[f])byF[f]=[];byF[f].push(c);});
+    for(const[f,items]of Object.entries(byF)) h+=`<div class="folder-section"><div class="folder-section-title">📁 ${f}</div><div class="grid-4">${items.map(c=>contentCard(c)).join('')}</div></div>`;
+  } else if(state.channelTab==="콘텐츠"){
+    h+=`<div class="grid-4">${contents.map(c=>contentCard(c)).join('')}</div>`;
+  } else if(state.channelTab==="게시판"){
+    [{title:"2학기 수학 수업 자료 업데이트 안내",date:"2026.02.15",comments:5},{title:"일차함수 수업 팁 공유합니다",date:"2026.02.10",comments:12},{title:"새 활동지 시리즈를 준비하고 있습니다",date:"2026.02.05",comments:3}].forEach(p=>{h+=`<div class="post-card"><div class="post-title">${p.title}</div><div class="post-meta"><span>${p.date}</span><span>${SVG.comment} ${p.comments}</span></div></div>`;});
+  } else {
+    h+=`<div class="channel-info-box"><h4 style="font-weight:700;margin-bottom:12px">채널 소개</h4><p class="text-sm" style="color:var(--gray-600);margin-bottom:16px">중학교 수학 교사입니다. 학생들이 수학을 쉽고 재미있게 배울 수 있는 콘텐츠를 만들고 있습니다.</p><h4 style="font-weight:700;margin-bottom:8px">SNS</h4><div class="flex-row gap-8"><span class="tag-btn">📝 블로그</span><span class="tag-btn">▶ 유튜브</span></div><p class="text-xs text-gray mt-16">채널 생성일: 2024.03.15</p></div>`;
+  }
+  return h;
+}
+
+function renderSearchStd(){
+  return `<div class="empty-state"><p>성취기준별 콘텐츠 찾기</p><p class="text-xs" style="color:var(--gray-300);margin-top:4px">상세 요구사항은 [SFR-000] 검색 기능 고도화 문서 참조</p><button class="btn-primary mt-16" onclick="setState({searchOpen:true})" style="display:inline-flex">${SVG.search} 검색 열기</button></div>`;
+}
+
+function renderModals(){
+  let h='';
+  if(state.searchOpen){
+    h+=`<div class="modal-overlay top" onclick="setState({searchOpen:false})"><div class="modal-backdrop"></div><div class="modal-content lg" onclick="event.stopPropagation()">
+    <div class="search-input-row">${SVG.search}<input class="search-input" id="searchInput" placeholder="성취기준 코드, 키워드로 검색..." oninput="updateSearch(this.value)" autofocus><kbd style="font-size:10px;color:var(--gray-300);border:1px solid var(--gray-200);border-radius:3px;padding:1px 5px">ESC</kbd></div>
+    <div id="searchBody"><div class="search-tags"><div class="search-tags-label">최근 검색어</div><div class="search-tags-list">${["분수","일차함수","6수01-06","AI 교육"].map(k=>`<button class="tag-btn" onclick="document.getElementById('searchInput').value='${k}';updateSearch('${k}')">${k}</button>`).join('')}</div>
+    <div class="search-tags-label mt-16">인기 검색어</div><div class="search-tags-list">${["수학","디지털 리터러시","학습공동체","평가"].map(k=>`<button class="tag-btn" onclick="document.getElementById('searchInput').value='${k}';updateSearch('${k}')">${k}</button>`).join('')}</div></div></div></div></div>`;
+  }
+  if(state.statModal){
+    h+=`<div class="modal-overlay" onclick="setState({statModal:null})"><div class="modal-backdrop"></div><div class="modal-content md" onclick="event.stopPropagation()">
+    <div class="modal-header"><h3>${state.statModal} 상세 분석</h3><button class="modal-close" onclick="setState({statModal:null})">${SVG.x}</button></div>
+    <div class="modal-body"><div class="flex-row gap-8 mb-16">${["7일","30일","90일"].map(p=>`<button class="period-btn">${p}</button>`).join('')}</div>
+    <div style="height:140px">${drawLineChart(genLineData(14),480,140,'#3b82f6')}</div>
+    <div class="stat-modal-grid"><div class="stat-modal-cell" style="background:var(--blue-50)"><div class="stat-modal-cell-val" style="color:var(--blue-600)">1,245</div><div class="stat-modal-cell-label">총 ${state.statModal}</div></div><div class="stat-modal-cell" style="background:var(--emerald-50)"><div class="stat-modal-cell-val" style="color:var(--emerald-600)">+12%</div><div class="stat-modal-cell-label">전월 대비</div></div><div class="stat-modal-cell" style="background:var(--purple-50)"><div class="stat-modal-cell-val" style="color:var(--purple-600)">영상</div><div class="stat-modal-cell-label">최다 유형</div></div></div></div></div></div>`;
+  }
+  if(state.rejectModal){
+    const it=state.rejectModal;
+    h+=`<div class="modal-overlay" onclick="setState({rejectModal:null})"><div class="modal-backdrop"></div><div class="modal-content sm" onclick="event.stopPropagation()">
+    <div class="modal-header"><h3 style="color:var(--red-600)">반려 사유</h3><button class="modal-close" onclick="setState({rejectModal:null})">${SVG.x}</button></div>
+    <div class="modal-body"><p class="text-sm text-bold">${it.title}</p><div class="reject-reason-box"><div class="reject-reason-text">저작권 관련 확인이 필요합니다. 이미지 출처를 명시해 주세요.</div><div class="reject-reason-date">반려일: 2026.02.09</div></div>
+    <div class="modal-actions"><button class="btn-primary">수정 후 재신청</button><button class="btn-secondary" onclick="setState({rejectModal:null})">닫기</button></div></div></div></div>`;
+  }
+  return h;
+}
+
+function updateSearch(q){
+  const body=document.getElementById('searchBody'); if(!body)return;
+  if(!q){body.innerHTML=`<div class="search-tags"><div class="search-tags-label">최근 검색어</div><div class="search-tags-list">${["분수","일차함수","6수01-06","AI 교육"].map(k=>`<button class="tag-btn" onclick="document.getElementById('searchInput').value='${k}';updateSearch('${k}')">${k}</button>`).join('')}</div><div class="search-tags-label mt-16">인기 검색어</div><div class="search-tags-list">${["수학","디지털 리터러시","학습공동체","평가"].map(k=>`<button class="tag-btn" onclick="document.getElementById('searchInput').value='${k}';updateSearch('${k}')">${k}</button>`).join('')}</div></div>`;return;}
+  const all=[...MY_CONTENTS,...PUBLIC_CONTENTS,...SAVED_CONTENTS];
+  const res=all.filter(c=>c.title.includes(q)||c.tags?.some(t=>t.includes(q)));
+  if(!res.length){body.innerHTML=`<div style="padding:32px;text-align:center;color:var(--gray-400);font-size:13px">검색 결과가 없습니다.</div>`;return;}
+  body.innerHTML=`<div class="search-results">${res.map(r=>`<button class="search-result-item" onclick="setState({searchOpen:false})">${typeBadge(r.type)}<div class="flex-1" style="min-width:0"><div class="text-sm text-bold truncate">${r.title}</div><div class="text-xs text-gray">${r.author} · 조회 ${r.views}</div></div></button>`).join('')}</div>`;
+}
+
+function render(){
+  let pc='';
+  switch(state.page){
+    case'dashboard':pc=renderDashboard();break;case'mydata':pc=renderMyData('mydata');break;case'saved':pc=renderMyData('saved');break;
+    case'subscriptions':pc=renderSubscriptions();break;case'mychannel':pc=renderMyChannel();break;
+    case'public':pc=renderPublic();break;case'recommend':pc=renderRecommend();break;case'channel':pc=renderChannel();break;case'search-std':pc=renderSearchStd();break;
+  }
+  document.getElementById('app').innerHTML=renderHeader()+`<main class="main">${pc}</main>`+renderModals();
+}
+
+document.addEventListener('keydown',e=>{if(e.key==='Escape')setState({searchOpen:false,statModal:null,rejectModal:null});if(e.key==='k'&&(e.metaKey||e.ctrlKey)){e.preventDefault();setState({searchOpen:true});}});
+render();
+</script>
+</body>
+</html>

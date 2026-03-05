@@ -1,0 +1,1020 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>오답노트 개선 프로토타입 - 다채움</title>
+    <link rel="stylesheet" href="styles.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+</head>
+<body>
+    <div class="container">
+        <!-- 헤더 -->
+        <header class="site-header">
+            <div class="header-wrap">
+                <div class="logo">
+                    <a href="#">다채움</a>
+                    <span class="sub-logo">스스로 채움</span>
+                </div>
+                <nav class="gnb">
+                    <ul>
+                        <li><a href="#">오늘의 학습</a></li>
+                        <li><a href="#">AI 맞춤학습</a></li>
+                        <li class="active"><a href="#">오답노트</a></li>
+                    </ul>
+                </nav>
+                <div class="user-area">
+                    <div class="user-type-toggle">
+                        <button id="btnTeacher" class="active">교사 화면</button>
+                        <button id="btnStudent">학생 화면</button>
+                    </div>
+                    <div class="profile">
+                        <span class="user-name" id="currentUserName">박선생</span>
+                        <span class="user-role" id="currentUserRole">교사</span>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <!-- 메인 컨텐츠 -->
+        <main class="site-body">
+            <div class="page-header">
+                <h1 class="page-title">오답노트</h1>
+                <p class="page-desc" id="pageDesc">학생들의 오답 현황을 종합적으로 분석하고 맞춤형 학습을 지원합니다.</p>
+            </div>
+
+            <!-- 탭 네비게이션 -->
+            <ul class="tabs-nav">
+                <li><a href="#" class="tab-link active" data-tab="dashboard">대시보드</a></li>
+                <li><a href="#" class="tab-link" data-tab="byEvaluation">평가지로 보기</a></li>
+                <li><a href="#" class="tab-link" data-tab="byQuestion">문항으로 보기</a></li>
+                <li id="tabAnalysis"><a href="#" class="tab-link" data-tab="analysis">문항 분석</a></li>
+            </ul>
+
+            <!-- 대시보드 탭 -->
+            <section id="dashboard" class="tab-content active">
+                <!-- 교사용 대시보드 -->
+                <div id="teacherDashboard">
+                    <!-- 요약 카드 -->
+                    <div class="summary-cards">
+                        <div class="card">
+                            <div class="card-icon blue"><i class="fas fa-users"></i></div>
+                            <div class="card-content">
+                                <span class="card-label">관리 학생 수</span>
+                                <span class="card-value">32<small>명</small></span>
+                            </div>
+                        </div>
+                        <div class="card">
+                            <div class="card-icon orange"><i class="fas fa-percentage"></i></div>
+                            <div class="card-content">
+                                <span class="card-label">전체 평균 오답률</span>
+                                <span class="card-value">28.5<small>%</small></span>
+                            </div>
+                        </div>
+                        <div class="card">
+                            <div class="card-icon green"><i class="fas fa-check-circle"></i></div>
+                            <div class="card-content">
+                                <span class="card-label">해결된 오답</span>
+                                <span class="card-value">1,245<small>개</small></span>
+                            </div>
+                        </div>
+                        <div class="card">
+                            <div class="card-icon red"><i class="fas fa-times-circle"></i></div>
+                            <div class="card-content">
+                                <span class="card-label">미해결 오답</span>
+                                <span class="card-value">387<small>개</small></span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 차트 영역 -->
+                    <div class="chart-section">
+                        <div class="chart-card">
+                            <div class="chart-header">
+                                <h3>과목별 오답 분포</h3>
+                            </div>
+                            <div class="chart-body">
+                                <canvas id="subjectChart"></canvas>
+                            </div>
+                        </div>
+                        <div class="chart-card">
+                            <div class="chart-header">
+                                <h3>오답 해결 추이</h3>
+                                <select id="trendPeriod">
+                                    <option value="week">최근 1주</option>
+                                    <option value="month" selected>최근 1개월</option>
+                                    <option value="quarter">최근 3개월</option>
+                                </select>
+                            </div>
+                            <div class="chart-body">
+                                <canvas id="trendChart"></canvas>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 취약 영역 -->
+                    <div class="weakness-section">
+                        <div class="section-header">
+                            <h3>취약 영역 분석</h3>
+                        </div>
+                        <div class="weakness-list">
+                            <div class="weakness-item">
+                                <div class="weakness-info">
+                                    <span class="subject-badge math">수학</span>
+                                    <span class="weakness-name">비례식과 비례배분</span>
+                                </div>
+                                <div class="weakness-stat">
+                                    <div class="progress-bar">
+                                        <div class="progress-fill" style="width: 68%"></div>
+                                    </div>
+                                    <span class="error-rate">오답률 68%</span>
+                                </div>
+                            </div>
+                            <div class="weakness-item">
+                                <div class="weakness-info">
+                                    <span class="subject-badge social">사회</span>
+                                    <span class="weakness-name">지구촌 환경 문제</span>
+                                </div>
+                                <div class="weakness-stat">
+                                    <div class="progress-bar">
+                                        <div class="progress-fill" style="width: 52%"></div>
+                                    </div>
+                                    <span class="error-rate">오답률 52%</span>
+                                </div>
+                            </div>
+                            <div class="weakness-item">
+                                <div class="weakness-info">
+                                    <span class="subject-badge english">영어</span>
+                                    <span class="weakness-name">위치 묻고 답하기</span>
+                                </div>
+                                <div class="weakness-stat">
+                                    <div class="progress-bar">
+                                        <div class="progress-fill" style="width: 45%"></div>
+                                    </div>
+                                    <span class="error-rate">오답률 45%</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 학생별 현황 -->
+                    <div class="student-section">
+                        <div class="section-header">
+                            <h3>학생별 오답 현황</h3>
+                            <div class="section-controls">
+                                <input type="text" placeholder="학생 검색" class="search-input">
+                                <select id="studentSort">
+                                    <option value="name">이름순</option>
+                                    <option value="errorRate">오답률순</option>
+                                    <option value="unsolved">미해결순</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="student-grid">
+                            <div class="student-card" onclick="showStudentDetail(1)">
+                                <div class="student-info">
+                                    <div class="student-avatar">김</div>
+                                    <div class="student-name">
+                                        <strong>김하늘</strong>
+                                        <span>6학년 11반 1번</span>
+                                    </div>
+                                </div>
+                                <div class="student-stats">
+                                    <div class="stat">
+                                        <span class="stat-label">오답률</span>
+                                        <span class="stat-value red">32%</span>
+                                    </div>
+                                    <div class="stat">
+                                        <span class="stat-label">미해결</span>
+                                        <span class="stat-value">12개</span>
+                                    </div>
+                                    <div class="stat">
+                                        <span class="stat-label">재시도</span>
+                                        <span class="stat-value">8회</span>
+                                    </div>
+                                </div>
+                                <div class="student-weakness">
+                                    <span class="mini-badge">수학 취약</span>
+                                </div>
+                            </div>
+                            <div class="student-card" onclick="showStudentDetail(2)">
+                                <div class="student-info">
+                                    <div class="student-avatar">이</div>
+                                    <div class="student-name">
+                                        <strong>이서준</strong>
+                                        <span>6학년 11반 2번</span>
+                                    </div>
+                                </div>
+                                <div class="student-stats">
+                                    <div class="stat">
+                                        <span class="stat-label">오답률</span>
+                                        <span class="stat-value orange">25%</span>
+                                    </div>
+                                    <div class="stat">
+                                        <span class="stat-label">미해결</span>
+                                        <span class="stat-value">8개</span>
+                                    </div>
+                                    <div class="stat">
+                                        <span class="stat-label">재시도</span>
+                                        <span class="stat-value">15회</span>
+                                    </div>
+                                </div>
+                                <div class="student-weakness">
+                                    <span class="mini-badge">사회 취약</span>
+                                </div>
+                            </div>
+                            <div class="student-card" onclick="showStudentDetail(3)">
+                                <div class="student-info">
+                                    <div class="student-avatar">박</div>
+                                    <div class="student-name">
+                                        <strong>박지민</strong>
+                                        <span>6학년 11반 3번</span>
+                                    </div>
+                                </div>
+                                <div class="student-stats">
+                                    <div class="stat">
+                                        <span class="stat-label">오답률</span>
+                                        <span class="stat-value green">15%</span>
+                                    </div>
+                                    <div class="stat">
+                                        <span class="stat-label">미해결</span>
+                                        <span class="stat-value">3개</span>
+                                    </div>
+                                    <div class="stat">
+                                        <span class="stat-label">재시도</span>
+                                        <span class="stat-value">22회</span>
+                                    </div>
+                                </div>
+                                <div class="student-weakness">
+                                    <span class="mini-badge success">양호</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 학생용 대시보드 -->
+                <div id="studentDashboard" style="display: none;">
+                    <!-- 요약 카드 -->
+                    <div class="summary-cards">
+                        <div class="card">
+                            <div class="card-icon blue"><i class="fas fa-book"></i></div>
+                            <div class="card-content">
+                                <span class="card-label">총 오답 문항</span>
+                                <span class="card-value">57<small>개</small></span>
+                            </div>
+                        </div>
+                        <div class="card">
+                            <div class="card-icon orange"><i class="fas fa-percentage"></i></div>
+                            <div class="card-content">
+                                <span class="card-label">나의 평균 오답률</span>
+                                <span class="card-value">32<small>%</small></span>
+                            </div>
+                        </div>
+                        <div class="card">
+                            <div class="card-icon green"><i class="fas fa-check-circle"></i></div>
+                            <div class="card-content">
+                                <span class="card-label">해결 완료</span>
+                                <span class="card-value">45<small>개</small></span>
+                            </div>
+                        </div>
+                        <div class="card">
+                            <div class="card-icon red"><i class="fas fa-times-circle"></i></div>
+                            <div class="card-content">
+                                <span class="card-label">아직 미해결</span>
+                                <span class="card-value">12<small>개</small></span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 게이미피케이션 영역 -->
+                    <div class="gamification-section">
+                        <div class="level-card">
+                            <div class="level-header">
+                                <div class="level-badge">
+                                    <i class="fas fa-star"></i>
+                                    <span>Lv.5</span>
+                                </div>
+                                <div class="level-info">
+                                    <h4>오답 마스터</h4>
+                                    <p>다음 레벨까지 <strong>120</strong> 포인트</p>
+                                </div>
+                            </div>
+                            <div class="level-progress">
+                                <div class="progress-bar large">
+                                    <div class="progress-fill" style="width: 65%"></div>
+                                </div>
+                                <span class="progress-text">380 / 500 포인트</span>
+                            </div>
+                            <div class="today-point">
+                                <span>오늘 획득: <strong>30</strong> 포인트</span>
+                                <span class="point-limit">(일일 한도: 100P)</span>
+                            </div>
+                        </div>
+                        <div class="achievement-card">
+                            <h4>최근 획득 배지</h4>
+                            <div class="badge-list">
+                                <div class="badge-item" title="연속 7일 오답 풀이">
+                                    <i class="fas fa-fire"></i>
+                                    <span>7일 연속</span>
+                                </div>
+                                <div class="badge-item" title="수학 오답 10개 해결">
+                                    <i class="fas fa-calculator"></i>
+                                    <span>수학왕</span>
+                                </div>
+                                <div class="badge-item" title="첫 오답 해결">
+                                    <i class="fas fa-seedling"></i>
+                                    <span>첫걸음</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 차트 영역 -->
+                    <div class="chart-section">
+                        <div class="chart-card">
+                            <div class="chart-header">
+                                <h3>나의 과목별 오답 분포</h3>
+                            </div>
+                            <div class="chart-body">
+                                <canvas id="studentSubjectChart"></canvas>
+                            </div>
+                        </div>
+                        <div class="chart-card">
+                            <div class="chart-header">
+                                <h3>나의 해결 추이</h3>
+                            </div>
+                            <div class="chart-body">
+                                <canvas id="studentTrendChart"></canvas>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 나의 취약 영역 -->
+                    <div class="weakness-section">
+                        <div class="section-header">
+                            <h3>나의 취약 영역</h3>
+                        </div>
+                        <div class="weakness-list">
+                            <div class="weakness-item clickable" onclick="filterByWeakness('math')">
+                                <div class="weakness-info">
+                                    <span class="subject-badge math">수학</span>
+                                    <span class="weakness-name">원기둥의 부피와 겉넓이</span>
+                                </div>
+                                <div class="weakness-stat">
+                                    <div class="progress-bar">
+                                        <div class="progress-fill" style="width: 75%"></div>
+                                    </div>
+                                    <span class="error-rate">오답률 75%</span>
+                                </div>
+                                <div class="weakness-action">
+                                    <button class="btn-sm primary">집중 학습</button>
+                                </div>
+                            </div>
+                            <div class="weakness-item clickable">
+                                <div class="weakness-info">
+                                    <span class="subject-badge social">사회</span>
+                                    <span class="weakness-name">지구촌 갈등과 해결</span>
+                                </div>
+                                <div class="weakness-stat">
+                                    <div class="progress-bar">
+                                        <div class="progress-fill" style="width: 60%"></div>
+                                    </div>
+                                    <span class="error-rate">오답률 60%</span>
+                                </div>
+                                <div class="weakness-action">
+                                    <button class="btn-sm primary">집중 학습</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 교사 추천 문항 -->
+                    <div class="recommend-section">
+                        <div class="section-header">
+                            <h3><i class="fas fa-star" style="color: #ffc107;"></i> 선생님 필수 복습 지정</h3>
+                        </div>
+                        <div class="recommend-list">
+                            <div class="recommend-item">
+                                <div class="recommend-badge">필수</div>
+                                <div class="recommend-content">
+                                    <span class="subject-badge math">수학</span>
+                                    <p class="question-preview">원기둥을 앞에서 본 모양의 넓이는 몇 ㎠입니까?</p>
+                                </div>
+                                <button class="btn primary">풀러가기</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 평가지로 보기 탭 -->
+            <section id="byEvaluation" class="tab-content">
+                <!-- 필터 영역 -->
+                <div class="filter-area">
+                    <div class="filter-row">
+                        <div class="filter-group">
+                            <label>기간</label>
+                            <select id="periodFilter">
+                                <option value="all" selected>전체기간</option>
+                                <option value="3month">최근 3개월</option>
+                                <option value="1month">최근 1개월</option>
+                                <option value="1week">최근 1주</option>
+                                <option value="custom">직접 선택</option>
+                            </select>
+                            <div class="date-range" id="dateRange" style="display: none;">
+                                <input type="date" id="startDate">
+                                <span>~</span>
+                                <input type="date" id="endDate">
+                            </div>
+                        </div>
+                        <div class="filter-group">
+                            <label>과목</label>
+                            <select id="subjectFilter">
+                                <option value="">전체 과목</option>
+                                <option value="math">수학</option>
+                                <option value="social">사회</option>
+                                <option value="english">영어</option>
+                                <option value="science">과학</option>
+                                <option value="korean">국어</option>
+                            </select>
+                        </div>
+                        <div class="filter-group">
+                            <label>해결여부</label>
+                            <select id="solvedFilter">
+                                <option value="">전체</option>
+                                <option value="solved">해결</option>
+                                <option value="unsolved">미해결</option>
+                            </select>
+                        </div>
+                        <div class="filter-group" id="studentFilterGroup">
+                            <label>학생</label>
+                            <select id="studentFilter">
+                                <option value="1">김하늘 (6-11-1)</option>
+                                <option value="2">이서준 (6-11-2)</option>
+                                <option value="3">박지민 (6-11-3)</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="filter-row">
+                        <div class="search-area">
+                            <input type="text" placeholder="평가지명으로 검색" class="search-input">
+                            <button class="btn-search"><i class="fas fa-search"></i></button>
+                        </div>
+                        <div class="sort-area">
+                            <label>정렬</label>
+                            <select id="evalSort">
+                                <option value="date-desc">학습일 최신순</option>
+                                <option value="date-asc">학습일 오래된순</option>
+                                <option value="error-desc">오답률 높은순</option>
+                                <option value="error-asc">오답률 낮은순</option>
+                                <option value="retry-desc">재시도 많은순</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 목록 -->
+                <div class="list-info">
+                    <span class="total">총 <strong>8</strong>개</span>
+                </div>
+                <div class="data-table">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>번호</th>
+                                <th>과목</th>
+                                <th>평가지 제목</th>
+                                <th>학습일</th>
+                                <th>오답/총문항</th>
+                                <th>전체 정답률</th>
+                                <th>재시도</th>
+                                <th>해결여부</th>
+                                <th>관리</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>8</td>
+                                <td><span class="subject-badge math">수학</span></td>
+                                <td class="title-cell">오늘의 학습: 수학(31) 원기둥을 알아볼까요</td>
+                                <td>2026-01-19</td>
+                                <td><strong class="error-count">1</strong>/5</td>
+                                <td>80%</td>
+                                <td>2회</td>
+                                <td><span class="status-badge unsolved">미해결</span></td>
+                                <td class="action-cell">
+                                    <button class="btn-sm" onclick="showResultPopup()">결과보기</button>
+                                    <button class="btn-sm primary">다시풀기</button>
+                                </td>
+                            </tr>
+                            <tr>
+                                <td>7</td>
+                                <td><span class="subject-badge social">사회</span></td>
+                                <td class="title-cell">오늘의 학습: 사회(17) 지속 가능한 미래</td>
+                                <td>2026-01-08</td>
+                                <td><strong class="error-count">1</strong>/5</td>
+                                <td>20%</td>
+                                <td>0회</td>
+                                <td><span class="status-badge unsolved">미해결</span></td>
+                                <td class="action-cell">
+                                    <button class="btn-sm" onclick="showResultPopup()">결과보기</button>
+                                    <button class="btn-sm primary">다시풀기</button>
+                                </td>
+                            </tr>
+                            <tr>
+                                <td>6</td>
+                                <td><span class="subject-badge math">수학</span></td>
+                                <td class="title-cell">오늘의 학습: 수학(28) 원의 넓이를 어림해 볼까요</td>
+                                <td>2025-12-26</td>
+                                <td><strong class="error-count">6</strong>/6</td>
+                                <td>100%</td>
+                                <td>3회</td>
+                                <td><span class="status-badge solved">해결</span></td>
+                                <td class="action-cell">
+                                    <button class="btn-sm" onclick="showResultPopup()">결과보기</button>
+                                </td>
+                            </tr>
+                            <tr>
+                                <td>5</td>
+                                <td><span class="subject-badge english">영어</span></td>
+                                <td class="title-cell">오늘의 학습: 영어(15) 학년 묻고 답하기</td>
+                                <td>2025-12-26</td>
+                                <td><strong class="error-count">1</strong>/1</td>
+                                <td>100%</td>
+                                <td>1회</td>
+                                <td><span class="status-badge solved">해결</span></td>
+                                <td class="action-cell">
+                                    <button class="btn-sm" onclick="showResultPopup()">결과보기</button>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="pagination">
+                    <button class="page-btn"><i class="fas fa-chevron-left"></i></button>
+                    <button class="page-btn active">1</button>
+                    <button class="page-btn">2</button>
+                    <button class="page-btn"><i class="fas fa-chevron-right"></i></button>
+                </div>
+            </section>
+
+            <!-- 문항으로 보기 탭 -->
+            <section id="byQuestion" class="tab-content">
+                <!-- 필터 영역 -->
+                <div class="filter-area">
+                    <div class="filter-row">
+                        <div class="filter-group">
+                            <label>기간</label>
+                            <select>
+                                <option value="all" selected>전체기간</option>
+                                <option value="3month">최근 3개월</option>
+                                <option value="1month">최근 1개월</option>
+                            </select>
+                        </div>
+                        <div class="filter-group">
+                            <label>과목</label>
+                            <select>
+                                <option value="">전체 과목</option>
+                                <option value="math">수학</option>
+                                <option value="social">사회</option>
+                                <option value="english">영어</option>
+                            </select>
+                        </div>
+                        <div class="filter-group">
+                            <label>해결여부</label>
+                            <select>
+                                <option value="">전체</option>
+                                <option value="solved">해결</option>
+                                <option value="unsolved">미해결</option>
+                            </select>
+                        </div>
+                        <div class="filter-group" id="questionStudentFilterGroup">
+                            <label>학생</label>
+                            <select id="questionStudentFilter">
+                                <option value="1">김하늘 (6-11-1)</option>
+                                <option value="2">이서준 (6-11-2)</option>
+                                <option value="3">박지민 (6-11-3)</option>
+                            </select>
+                        </div>
+                        <div class="filter-group" id="tagFilterGroup" style="display: none;">
+                            <label>태그</label>
+                            <select id="tagFilter">
+                                <option value="">전체</option>
+                                <option value="important">⭐ 중요</option>
+                                <option value="retry">🔄 다시풀기</option>
+                                <option value="done">✅ 이해완료</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="filter-row">
+                        <div class="search-area">
+                            <input type="text" placeholder="문항 내용으로 검색" class="search-input">
+                            <button class="btn-search"><i class="fas fa-search"></i></button>
+                        </div>
+                        <div class="sort-area">
+                            <label>정렬</label>
+                            <select>
+                                <option value="date-desc">학습일 최신순</option>
+                                <option value="date-asc">학습일 오래된순</option>
+                                <option value="retry-desc">재시도 많은순</option>
+                            </select>
+                        </div>
+                        <button class="btn secondary" id="btnAddQuestion" style="display: none;">
+                            <i class="fas fa-plus"></i> 문항 직접 추가
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 목록 -->
+                <div class="list-info">
+                    <span class="total">총 <strong>15</strong>개</span>
+                </div>
+                <div class="data-table">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>번호</th>
+                                <th>난이도</th>
+                                <th>과목</th>
+                                <th>문항</th>
+                                <th>학습일</th>
+                                <th>재시도</th>
+                                <th>해결여부</th>
+                                <th class="tag-col" style="display: none;">태그</th>
+                                <th>관리</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>15</td>
+                                <td><span class="level-badge easy">쉬움</span></td>
+                                <td><span class="subject-badge math">수학</span></td>
+                                <td class="title-cell">직사각형 모양의 종이를 한 변을 기준으로 한 바퀴 돌려 만든 입체도형을 앞에서 본 모양의 넓이는?</td>
+                                <td>2026-01-19</td>
+                                <td>2회</td>
+                                <td><span class="status-badge unsolved">미해결</span></td>
+                                <td class="tag-col" style="display: none;">
+                                    <span class="tag important">⭐ 중요</span>
+                                </td>
+                                <td class="action-cell">
+                                    <button class="btn-sm" onclick="showResultPopup()">결과</button>
+                                    <button class="btn-sm primary">풀기</button>
+                                    <button class="btn-sm icon tag-btn" style="display: none;" onclick="showTagPopup(this)">
+                                        <i class="fas fa-tag"></i>
+                                    </button>
+                                </td>
+                            </tr>
+                            <tr class="required-item">
+                                <td>14</td>
+                                <td><span class="level-badge hard">어려움</span></td>
+                                <td><span class="subject-badge social">사회</span></td>
+                                <td class="title-cell">
+                                    <span class="required-badge">필수</span>
+                                    지구촌 문제의 의미, 원인과 해결 방안이 잘못 연결된 것은?
+                                </td>
+                                <td>2026-01-08</td>
+                                <td>0회</td>
+                                <td><span class="status-badge unsolved">미해결</span></td>
+                                <td class="tag-col" style="display: none;"></td>
+                                <td class="action-cell">
+                                    <button class="btn-sm" onclick="showResultPopup()">결과</button>
+                                    <button class="btn-sm primary">풀기</button>
+                                    <button class="btn-sm icon tag-btn" style="display: none;" onclick="showTagPopup(this)">
+                                        <i class="fas fa-tag"></i>
+                                    </button>
+                                </td>
+                            </tr>
+                            <tr>
+                                <td>13</td>
+                                <td><span class="level-badge medium">보통</span></td>
+                                <td><span class="subject-badge english">영어</span></td>
+                                <td class="title-cell">대화를 읽고, A가 가려는 곳의 위치를 우리말로 완성하세요.</td>
+                                <td>2025-12-26</td>
+                                <td>1회</td>
+                                <td><span class="status-badge solved">해결</span></td>
+                                <td class="tag-col" style="display: none;">
+                                    <span class="tag done">✅ 완료</span>
+                                </td>
+                                <td class="action-cell">
+                                    <button class="btn-sm" onclick="showResultPopup()">결과</button>
+                                    <button class="btn-sm icon tag-btn" style="display: none;" onclick="showTagPopup(this)">
+                                        <i class="fas fa-tag"></i>
+                                    </button>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <!-- 문항 분석 탭 (교사 전용) -->
+            <section id="analysis" class="tab-content">
+                <div class="filter-area">
+                    <div class="filter-row">
+                        <div class="filter-group">
+                            <label>평가지</label>
+                            <select id="evalSelect">
+                                <option value="">평가지 선택</option>
+                                <option value="1">오늘의 학습: 수학(31) 원기둥</option>
+                                <option value="2">오늘의 학습: 사회(17) 지속가능한 미래</option>
+                            </select>
+                        </div>
+                        <div class="filter-group">
+                            <label>정렬</label>
+                            <select>
+                                <option value="error-desc">오답률 높은순</option>
+                                <option value="error-asc">오답률 낮은순</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="analysis-content">
+                    <div class="question-analysis-card">
+                        <div class="question-header">
+                            <span class="question-num">문항 1</span>
+                            <span class="subject-badge math">수학</span>
+                            <span class="level-badge easy">쉬움</span>
+                            <div class="error-rate-badge high">오답률 45%</div>
+                        </div>
+                        <div class="question-body">
+                            <p class="question-text">직사각형 모양의 종이를 한 변을 기준으로 한 바퀴 돌려 어떤 입체도형을 만들었습니다. 만든 입체도형을 앞에서 본 모양의 넓이는 몇 ㎠입니까?</p>
+                        </div>
+                        <div class="question-stats">
+                            <div class="stat-item">
+                                <span class="stat-label">응시 학생</span>
+                                <span class="stat-value">32명</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">오답 학생</span>
+                                <span class="stat-value error">14명</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">해결 학생</span>
+                                <span class="stat-value success">8명</span>
+                            </div>
+                        </div>
+                        <div class="question-actions">
+                            <button class="btn secondary" onclick="showWrongStudents()">
+                                <i class="fas fa-users"></i> 오답 학생 목록
+                            </button>
+                            <button class="btn secondary" onclick="showRecommendPopup()">
+                                <i class="fas fa-link"></i> 추천 콘텐츠 연결
+                            </button>
+                            <button class="btn primary" onclick="setRequiredReview()">
+                                <i class="fas fa-star"></i> 필수 복습 지정
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="question-analysis-card">
+                        <div class="question-header">
+                            <span class="question-num">문항 2</span>
+                            <span class="subject-badge math">수학</span>
+                            <span class="level-badge medium">보통</span>
+                            <div class="error-rate-badge medium">오답률 28%</div>
+                        </div>
+                        <div class="question-body">
+                            <p class="question-text">원기둥의 전개도에서 옆면의 가로 길이는 밑면의 무엇과 같습니까?</p>
+                        </div>
+                        <div class="question-stats">
+                            <div class="stat-item">
+                                <span class="stat-label">응시 학생</span>
+                                <span class="stat-value">32명</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">오답 학생</span>
+                                <span class="stat-value error">9명</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">해결 학생</span>
+                                <span class="stat-value success">9명</span>
+                            </div>
+                        </div>
+                        <div class="question-actions">
+                            <button class="btn secondary" onclick="showWrongStudents()">
+                                <i class="fas fa-users"></i> 오답 학생 목록
+                            </button>
+                            <button class="btn secondary" onclick="showRecommendPopup()">
+                                <i class="fas fa-link"></i> 추천 콘텐츠 연결
+                            </button>
+                            <button class="btn primary" onclick="setRequiredReview()">
+                                <i class="fas fa-star"></i> 필수 복습 지정
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- 문제풀이 결과 팝업 -->
+    <div class="modal" id="resultModal">
+        <div class="modal-content large">
+            <div class="modal-header">
+                <h2>문제풀이 결과</h2>
+                <button class="modal-close" onclick="closeModal('resultModal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="result-summary">
+                    <div class="result-info">
+                        <span class="subject-badge social">사회</span>
+                        <span class="eval-title">오늘의 학습: 사회(17) 지속 가능한 미래를 위한 노력</span>
+                    </div>
+                    <div class="result-stats">
+                        <div class="stat">
+                            <span class="label">총 문항</span>
+                            <span class="value">5문항</span>
+                        </div>
+                        <div class="stat">
+                            <span class="label">정답</span>
+                            <span class="value success">4문항</span>
+                        </div>
+                        <div class="stat">
+                            <span class="label">오답</span>
+                            <span class="value error">1문항</span>
+                        </div>
+                        <div class="stat">
+                            <span class="label">소요시간</span>
+                            <span class="value">00:54</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="question-list">
+                    <div class="question-item correct">
+                        <div class="question-status"><i class="fas fa-check-circle"></i></div>
+                        <div class="question-content">
+                            <span class="q-num">1번</span>
+                            <span class="q-text">빈곤의 의미로 올바른 것은?</span>
+                        </div>
+                        <div class="question-time">00:17</div>
+                    </div>
+                    <div class="question-item correct">
+                        <div class="question-status"><i class="fas fa-check-circle"></i></div>
+                        <div class="question-content">
+                            <span class="q-num">2번</span>
+                            <span class="q-text">기아의 원인으로 올바른 것은?</span>
+                        </div>
+                        <div class="question-time">00:04</div>
+                    </div>
+                    <div class="question-item correct">
+                        <div class="question-status"><i class="fas fa-check-circle"></i></div>
+                        <div class="question-content">
+                            <span class="q-num">3번</span>
+                            <span class="q-text">차별의 해결 방안은?</span>
+                        </div>
+                        <div class="question-time">00:11</div>
+                    </div>
+                    <div class="question-item wrong" onclick="showQuestionDetail()">
+                        <div class="question-status"><i class="fas fa-times-circle"></i></div>
+                        <div class="question-content">
+                            <span class="q-num">4번</span>
+                            <span class="q-text">지구촌 문제의 의미, 원인과 해결 방안이 잘못 연결된 것은?</span>
+                            <span class="class-error-rate" id="classErrorRate">(전체 오답률: 45%)</span>
+                        </div>
+                        <div class="question-time">00:14</div>
+                        <div class="question-actions-inline" id="teacherQuestionActions" style="display: none;">
+                            <button class="btn-sm" onclick="event.stopPropagation(); setRequiredReview()">필수복습 지정</button>
+                            <button class="btn-sm" onclick="event.stopPropagation(); showRecommendPopup()">콘텐츠 연결</button>
+                        </div>
+                    </div>
+                    <div class="question-item correct">
+                        <div class="question-status"><i class="fas fa-check-circle"></i></div>
+                        <div class="question-content">
+                            <span class="q-num">5번</span>
+                            <span class="q-text">빈곤의 해결 방안으로 올바른 것은?</span>
+                        </div>
+                        <div class="question-time">00:08</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 오답 학생 목록 팝업 -->
+    <div class="modal" id="wrongStudentsModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>오답 학생 목록</h2>
+                <button class="modal-close" onclick="closeModal('wrongStudentsModal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="wrong-students-info">
+                    <p>문항: 지구촌 문제의 의미, 원인과 해결 방안이 잘못 연결된 것은?</p>
+                    <p class="error-stat">오답률 45% (14명 / 32명)</p>
+                </div>
+                <div class="student-list">
+                    <div class="student-row">
+                        <span class="student-name">김하늘 (6-11-1)</span>
+                        <span class="retry-count">재시도 2회</span>
+                        <span class="status-badge unsolved">미해결</span>
+                    </div>
+                    <div class="student-row">
+                        <span class="student-name">이서준 (6-11-2)</span>
+                        <span class="retry-count">재시도 1회</span>
+                        <span class="status-badge unsolved">미해결</span>
+                    </div>
+                    <div class="student-row">
+                        <span class="student-name">최민수 (6-11-5)</span>
+                        <span class="retry-count">재시도 3회</span>
+                        <span class="status-badge solved">해결</span>
+                    </div>
+                </div>
+                <div class="modal-actions">
+                    <button class="btn primary">전체 학생에게 필수복습 지정</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 추천 콘텐츠 연결 팝업 -->
+    <div class="modal" id="recommendModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>추천 콘텐츠 연결</h2>
+                <button class="modal-close" onclick="closeModal('recommendModal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="search-area">
+                    <input type="text" placeholder="콘텐츠 검색" class="search-input">
+                    <button class="btn-search"><i class="fas fa-search"></i></button>
+                </div>
+                <div class="content-type-filter">
+                    <button class="filter-btn active">전체</button>
+                    <button class="filter-btn">영상</button>
+                    <button class="filter-btn">문항</button>
+                    <button class="filter-btn">활동지</button>
+                </div>
+                <div class="content-list">
+                    <div class="content-item">
+                        <input type="checkbox" id="content1">
+                        <label for="content1">
+                            <span class="content-type video">영상</span>
+                            <span class="content-title">지구촌 환경 문제와 해결 방안</span>
+                        </label>
+                    </div>
+                    <div class="content-item">
+                        <input type="checkbox" id="content2">
+                        <label for="content2">
+                            <span class="content-type question">문항</span>
+                            <span class="content-title">지구촌 문제 연습 문제</span>
+                        </label>
+                    </div>
+                    <div class="content-item">
+                        <input type="checkbox" id="content3">
+                        <label for="content3">
+                            <span class="content-type activity">활동지</span>
+                            <span class="content-title">지속 가능한 미래 워크시트</span>
+                        </label>
+                    </div>
+                </div>
+                <div class="modal-actions">
+                    <button class="btn" onclick="closeModal('recommendModal')">취소</button>
+                    <button class="btn primary">연결하기</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 태그 설정 팝업 -->
+    <div class="modal" id="tagModal">
+        <div class="modal-content small">
+            <div class="modal-header">
+                <h2>태그 설정</h2>
+                <button class="modal-close" onclick="closeModal('tagModal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="tag-options">
+                    <label class="tag-option">
+                        <input type="checkbox" name="tag" value="important">
+                        <span class="tag important">⭐ 중요</span>
+                    </label>
+                    <label class="tag-option">
+                        <input type="checkbox" name="tag" value="retry">
+                        <span class="tag retry">🔄 다시풀기</span>
+                    </label>
+                    <label class="tag-option">
+                        <input type="checkbox" name="tag" value="done">
+                        <span class="tag done">✅ 이해완료</span>
+                    </label>
+                </div>
+                <div class="custom-tag">
+                    <input type="text" placeholder="직접 입력">
+                    <button class="btn-sm">추가</button>
+                </div>
+                <div class="modal-actions">
+                    <button class="btn" onclick="closeModal('tagModal')">취소</button>
+                    <button class="btn primary" onclick="saveTag()">저장</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 토스트 메시지 -->
+    <div class="toast" id="toast"></div>
+
+    <script src="script.js"></script>
+</body>
+</html>

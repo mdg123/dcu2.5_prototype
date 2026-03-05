@@ -1,0 +1,2032 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>채움클래스 - 평가 기능 통합 프로토타입</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;600;700;800&display=swap');
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: 'Noto Sans KR', -apple-system, BlinkMacSystemFont, sans-serif; background: #f5f6f8; color: #1a1a1a; line-height: 1.6; font-size: 14px; }
+button { cursor: pointer; border: none; background: none; font-family: inherit; }
+input, select, textarea { font-family: inherit; }
+a { text-decoration: none; color: inherit; }
+
+/* ============ CONTENT AREA ============ */
+.content { max-width: 1200px; margin: 0 auto; padding: 24px 32px 60px; }
+.screen { display: none; }
+.screen.active { display: block; }
+
+/* ============ PAGE HEADER ============ */
+.page-hdr { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
+.page-title { font-size: 24px; font-weight: 700; }
+.page-actions { display: flex; align-items: center; gap: 10px; }
+
+/* ============ BUTTONS ============ */
+.btn { padding: 9px 18px; border-radius: 6px; font-size: 13px; font-weight: 600; transition: all 0.15s; display: inline-flex; align-items: center; gap: 6px; }
+.btn-primary { background: #e8416e; color: white; }
+.btn-primary:hover { background: #d63660; }
+.btn-blue { background: #2563eb; color: white; }
+.btn-blue:hover { background: #1d4ed8; }
+.btn-outline { border: 1px solid #d1d5db; color: #4b5563; background: white; }
+.btn-outline:hover { background: #f9fafb; border-color: #9ca3af; }
+.btn-sm { padding: 6px 12px; font-size: 12px; }
+.btn-dark { background: #1f2937; color: white; }
+.btn-dark:hover { background: #374151; }
+.btn-ghost { color: #6b7280; padding: 6px 10px; font-size: 12px; }
+.btn-ghost:hover { background: #f3f4f6; border-radius: 4px; }
+
+/* ============ FILTER BAR ============ */
+.filter-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
+.filter-check { display: flex; align-items: center; gap: 5px; font-size: 13px; color: #4b5563; cursor: pointer; }
+.filter-check input[type="checkbox"] { accent-color: #2563eb; width: 15px; height: 15px; }
+.filter-sep { width: 1px; height: 20px; background: #e5e7eb; }
+.filter-right { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+
+/* ============ SUBJECT TABS ============ */
+.subj-tabs { display: flex; gap: 6px; margin-bottom: 16px; align-items: center; }
+.subj-tab { padding: 7px 18px; border-radius: 20px; font-size: 13px; font-weight: 500; color: #6b7280; background: white; border: 1px solid #e5e7eb; cursor: pointer; transition: all 0.15s; }
+.subj-tab:hover { border-color: #9ca3af; }
+.subj-tab.active { background: #1f2937; color: white; border-color: #1f2937; }
+.subj-tab-setting { font-size: 16px; color: #9ca3af; cursor: pointer; margin-left: 4px; }
+.subj-tab-setting:hover { color: #6b7280; }
+
+/* ============ BADGE ============ */
+.badge { display: inline-flex; align-items: center; gap: 3px; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; white-space: nowrap; }
+.badge-blue { background: #dbeafe; color: #1d4ed8; }
+.badge-green { background: #dcfce7; color: #15803d; }
+.badge-yellow { background: #fef9c3; color: #a16207; }
+.badge-orange { background: #ffedd5; color: #c2410c; }
+.badge-red { background: #fee2e2; color: #dc2626; }
+.badge-purple { background: #f3e8ff; color: #7c3aed; }
+.badge-gray { background: #f3f4f6; color: #6b7280; }
+.badge-teal { background: #ccfbf1; color: #0d9488; }
+
+/* ============ TABLE ============ */
+.tbl-wrap { background: white; border-radius: 10px; border: 1px solid #e5e7eb; overflow: hidden; }
+.tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
+.tbl thead { background: #f9fafb; }
+.tbl th { padding: 12px 16px; text-align: left; font-weight: 600; color: #6b7280; font-size: 12px; border-bottom: 1px solid #e5e7eb; }
+.tbl td { padding: 14px 16px; border-bottom: 1px solid #f3f4f6; vertical-align: middle; }
+.tbl tr:last-child td { border-bottom: none; }
+.tbl tr:hover td { background: #fafbfc; }
+.tbl .center { text-align: center; }
+.tbl .right { text-align: right; }
+.tbl .title-cell { font-weight: 600; color: #1f2937; }
+.tbl .title-cell .type-icon { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 4px; font-size: 11px; margin-right: 8px; vertical-align: middle; position: relative; }
+.tbl .title-cell .type-icon.eval { background: #dbeafe; color: #2563eb; }
+.tbl .title-cell .type-icon.activity { background: #fef3c7; color: #d97706; }
+.type-tooltip { display: none; position: absolute; bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%); background: #1f2937; color: white; font-size: 11px; padding: 4px 8px; border-radius: 4px; white-space: nowrap; z-index: 10; }
+.type-tooltip::after { content:''; position: absolute; top: 100%; left: 50%; transform: translateX(-50%); border: 4px solid transparent; border-top-color: #1f2937; }
+.tbl .title-cell .type-icon:hover .type-tooltip { display: block; }
+
+.submit-bar { display: flex; align-items: center; gap: 6px; }
+.submit-pct { font-weight: 700; font-size: 14px; }
+.submit-pct.full { color: #16a34a; }
+.submit-pct.partial { color: #2563eb; }
+.submit-pct.low { color: #dc2626; }
+.submit-detail { font-size: 11px; color: #9ca3af; }
+.progress-mini { width: 48px; height: 5px; background: #e5e7eb; border-radius: 3px; overflow: hidden; }
+.progress-mini-fill { height: 100%; border-radius: 3px; transition: width 0.3s; }
+
+.status-badge { padding: 3px 10px; border-radius: 12px; font-size: 11px; font-weight: 600; }
+.status-ongoing { background: #dcfce7; color: #15803d; }
+.status-ended { background: #f3f4f6; color: #9ca3af; }
+.status-scheduled { background: #dbeafe; color: #2563eb; }
+
+.action-btns { display: flex; gap: 6px; align-items: center; }
+.action-btn { padding: 5px 12px; border-radius: 4px; font-size: 12px; font-weight: 500; border: 1px solid #d1d5db; color: #4b5563; background: white; }
+.action-btn:hover { background: #f9fafb; }
+.action-btn.primary { background: #1f2937; color: white; border-color: #1f2937; }
+.action-btn.primary:hover { background: #374151; }
+
+.tbl-footer { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-top: 1px solid #e5e7eb; background: #f9fafb; font-size: 13px; color: #6b7280; }
+.tbl-count { font-weight: 500; }
+.tbl-count strong { color: #1f2937; }
+.sort-sel { padding: 5px 10px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 12px; background: white; cursor: pointer; }
+
+/* ============ SCREEN 2: 새로만들기 ============ */
+.create-form { background: white; border-radius: 10px; border: 1px solid #e5e7eb; }
+.form-section { display: flex; border-bottom: 1px solid #f3f4f6; }
+.form-section:last-child { border-bottom: none; }
+.form-label-col { width: 160px; padding: 16px 20px; background: #fafbfc; font-size: 13px; font-weight: 600; color: #374151; flex-shrink: 0; display: flex; align-items: flex-start; gap: 3px; }
+.form-label-col .req { color: #ef4444; }
+.form-value-col { flex: 1; padding: 16px 20px; }
+.form-input { width: 100%; padding: 9px 14px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 13px; outline: none; }
+.form-input:focus { border-color: #3b82f6; box-shadow: 0 0 0 2px rgba(59,130,246,0.1); }
+.form-textarea { width: 100%; min-height: 100px; padding: 12px 14px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 13px; resize: vertical; outline: none; line-height: 1.6; }
+.form-radio-group { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.form-radio { display: flex; align-items: center; gap: 5px; font-size: 13px; cursor: pointer; }
+.form-radio input { accent-color: #1f2937; }
+.form-hint { font-size: 11px; color: #9ca3af; margin-top: 6px; display: flex; align-items: center; gap: 4px; }
+.form-hint .info-ico { width: 14px; height: 14px; border-radius: 50%; background: #e5e7eb; color: #6b7280; display: inline-flex; align-items: center; justify-content: center; font-size: 9px; font-weight: 700; }
+.class-check-group { display: flex; gap: 12px; flex-wrap: wrap; }
+.class-check { display: flex; align-items: center; gap: 6px; font-size: 13px; }
+.class-check input[type="checkbox"] { accent-color: #2563eb; width: 16px; height: 16px; }
+.member-btn { padding: 4px 12px; border: 1px solid #2563eb; color: #2563eb; border-radius: 4px; font-size: 12px; font-weight: 600; background: white; }
+
+/* 평가지 선택 버튼 그룹 */
+.eval-btns { display: flex; gap: 10px; flex-wrap: wrap; }
+.eval-btn { display: flex; align-items: center; gap: 8px; padding: 12px 20px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 13px; font-weight: 500; color: #4b5563; background: white; cursor: pointer; transition: all 0.15s; }
+.eval-btn:hover { border-color: #3b82f6; color: #2563eb; background: #eff6ff; }
+.eval-btn.highlight { border-color: #ef4444; border-width: 2px; }
+.eval-btn .ico { font-size: 16px; }
+
+.form-actions { display: flex; justify-content: center; gap: 12px; padding: 24px; background: #fafbfc; border-top: 1px solid #e5e7eb; }
+.form-actions .btn { min-width: 120px; justify-content: center; padding: 12px 32px; font-size: 15px; }
+
+/* 제출기간 */
+.date-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.date-input { padding: 8px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 13px; }
+.time-sel { padding: 8px 6px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 13px; min-width: 64px; }
+
+/* ============ SCREEN 3: 결과 대시보드 ============ */
+.dash-hdr { display: flex; gap: 16px; margin-bottom: 24px; }
+.dash-card { flex: 1; background: white; border-radius: 10px; border: 1px solid #e5e7eb; padding: 20px; }
+.dash-card-label { font-size: 12px; color: #9ca3af; font-weight: 500; margin-bottom: 4px; }
+.dash-card-value { font-size: 28px; font-weight: 800; color: #1f2937; }
+.dash-card-sub { font-size: 12px; color: #6b7280; margin-top: 4px; }
+.dash-card.highlight { border-left: 4px solid #2563eb; }
+
+.dash-section { background: white; border-radius: 10px; border: 1px solid #e5e7eb; margin-bottom: 20px; overflow: hidden; }
+.dash-section-hdr { display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid #e5e7eb; }
+.dash-section-title { font-size: 15px; font-weight: 700; }
+.dash-section-body { padding: 20px; }
+
+/* 정오답 그리드 */
+.answer-grid { overflow-x: auto; }
+.answer-grid table { border-collapse: collapse; font-size: 12px; width: 100%; }
+.answer-grid th, .answer-grid td { padding: 8px 10px; text-align: center; border: 1px solid #e5e7eb; white-space: nowrap; }
+.answer-grid thead th { background: #f9fafb; font-weight: 600; color: #6b7280; position: sticky; top: 0; }
+.answer-grid .q-col { min-width: 50px; }
+.answer-grid .name-col { text-align: left; font-weight: 600; position: sticky; left: 0; background: white; z-index: 1; min-width: 80px; }
+.answer-grid thead .name-col { background: #f9fafb; z-index: 2; }
+.answer-grid .score-col { font-weight: 700; background: #f9fafb; }
+.cell-correct { background: #dcfce7; color: #15803d; font-weight: 600; }
+.cell-wrong { background: #fee2e2; color: #dc2626; font-weight: 600; }
+.cell-partial { background: #fef9c3; color: #a16207; font-weight: 600; }
+.cell-pending { background: #f3f4f6; color: #9ca3af; }
+.cell-essay { background: #eff6ff; color: #2563eb; cursor: pointer; font-weight: 600; text-decoration: underline; }
+.cell-essay:hover { background: #dbeafe; }
+
+/* 문항 분석 바 */
+.q-analysis { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+.q-bar-item { text-align: center; }
+.q-bar { width: 40px; height: 80px; background: #e5e7eb; border-radius: 4px; overflow: hidden; display: flex; flex-direction: column; justify-content: flex-end; margin-bottom: 4px; }
+.q-bar-fill { background: #22c55e; border-radius: 4px 4px 0 0; transition: height 0.5s; }
+.q-bar-fill.low { background: #ef4444; }
+.q-bar-fill.mid { background: #f59e0b; }
+.q-bar-label { font-size: 10px; color: #9ca3af; }
+.q-bar-pct { font-size: 11px; font-weight: 700; color: #374151; }
+
+/* 서술형 채점 */
+.essay-panel { border: 1px solid #e5e7eb; border-radius: 8px; margin-bottom: 12px; overflow: hidden; }
+.essay-panel-hdr { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; background: #f9fafb; border-bottom: 1px solid #e5e7eb; }
+.essay-student { font-weight: 600; font-size: 13px; }
+.essay-status { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 10px; }
+.essay-status.graded { background: #dcfce7; color: #15803d; }
+.essay-status.ungraded { background: #fee2e2; color: #dc2626; }
+.essay-panel-body { padding: 16px; }
+.essay-answer { background: #f9fafb; border-radius: 6px; padding: 12px; font-size: 13px; line-height: 1.8; color: #374151; margin-bottom: 12px; border-left: 3px solid #d1d5db; }
+.essay-score-row { display: flex; align-items: center; gap: 12px; }
+.essay-score-input { width: 60px; padding: 6px 10px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; font-weight: 700; text-align: center; }
+.essay-max { font-size: 13px; color: #6b7280; }
+
+/* ============ SCREEN 4: 멤버 결과 ============ */
+.result-summary { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; margin-bottom: 24px; }
+.result-card { background: white; border-radius: 10px; border: 1px solid #e5e7eb; padding: 20px; text-align: center; }
+.result-score { font-size: 48px; font-weight: 800; color: #2563eb; }
+.result-score span { font-size: 20px; color: #9ca3af; font-weight: 400; }
+
+.chart-placeholder { height: 200px; background: #f9fafb; border-radius: 8px; display: flex; flex-direction: column; align-items: center; justify-content: center; color: #9ca3af; font-size: 13px; }
+
+/* 성취기준별 분석 */
+.analysis-row { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 1px solid #f3f4f6; }
+.analysis-row:last-child { border-bottom: none; }
+.analysis-label { width: 200px; font-size: 13px; font-weight: 500; color: #374151; flex-shrink: 0; }
+.analysis-bar-wrap { flex: 1; display: flex; align-items: center; gap: 10px; }
+.analysis-bar { flex: 1; height: 12px; background: #e5e7eb; border-radius: 6px; overflow: hidden; }
+.analysis-bar-fill { height: 100%; border-radius: 6px; transition: width 0.5s; }
+.analysis-bar-fill.high { background: #22c55e; }
+.analysis-bar-fill.mid { background: #f59e0b; }
+.analysis-bar-fill.low { background: #ef4444; }
+.analysis-pct { font-size: 13px; font-weight: 700; width: 40px; text-align: right; }
+
+/* ============ SCREEN 5: CBT 풀이 ============ */
+.cbt-container { display: flex; gap: 0; height: calc(100vh - 200px); min-height: 500px; background: white; border-radius: 10px; border: 1px solid #e5e7eb; overflow: hidden; }
+.cbt-sidebar { width: 280px; background: #f9fafb; border-right: 1px solid #e5e7eb; display: flex; flex-direction: column; }
+.cbt-sidebar-hdr { padding: 16px; border-bottom: 1px solid #e5e7eb; }
+.cbt-sidebar-title { font-size: 14px; font-weight: 700; margin-bottom: 4px; }
+.cbt-sidebar-sub { font-size: 12px; color: #6b7280; }
+.cbt-q-list { flex: 1; overflow-y: auto; padding: 8px; }
+.cbt-q-item { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-radius: 8px; cursor: pointer; margin-bottom: 4px; transition: all 0.15s; }
+.cbt-q-item:hover { background: #e5e7eb; }
+.cbt-q-item.active { background: #dbeafe; }
+.cbt-q-num { width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; flex-shrink: 0; }
+.cbt-q-num.answered { background: #dcfce7; color: #15803d; }
+.cbt-q-num.unanswered { background: #e5e7eb; color: #9ca3af; }
+.cbt-q-num.inprogress { background: #fef9c3; color: #a16207; }
+.cbt-q-num.current { background: #2563eb; color: white; }
+.cbt-q-info { flex: 1; min-width: 0; }
+.cbt-q-type { font-size: 11px; color: #9ca3af; }
+.cbt-q-status { font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 8px; }
+.cbt-q-status.st-none { background: #f3f4f6; color: #9ca3af; }
+.cbt-q-status.st-prog { background: #fef9c3; color: #a16207; }
+.cbt-q-status.st-done { background: #dcfce7; color: #15803d; }
+
+.cbt-main { flex: 1; display: flex; flex-direction: column; }
+.cbt-toolbar { display: flex; align-items: center; justify-content: space-between; padding: 10px 16px; border-bottom: 1px solid #e5e7eb; background: #fafbfc; }
+.cbt-tools { display: flex; gap: 6px; }
+.cbt-tool-btn { padding: 6px 12px; border-radius: 6px; font-size: 12px; font-weight: 500; border: 1px solid #d1d5db; background: white; color: #4b5563; display: flex; align-items: center; gap: 5px; }
+.cbt-tool-btn:hover { background: #f3f4f6; }
+.cbt-tool-btn.active { background: #2563eb; color: white; border-color: #2563eb; }
+.cbt-tool-btn.fixed { position: sticky; right: 16px; }
+.cbt-zoom { display: flex; align-items: center; gap: 4px; }
+.cbt-zoom-btn { width: 28px; height: 28px; border: 1px solid #d1d5db; border-radius: 4px; background: white; display: flex; align-items: center; justify-content: center; font-size: 14px; color: #4b5563; }
+.cbt-zoom-val { font-size: 12px; font-weight: 600; color: #374151; min-width: 40px; text-align: center; }
+.cbt-body { flex: 1; overflow-y: auto; padding: 24px; }
+.cbt-question { max-width: 700px; margin: 0 auto; }
+.cbt-q-header { font-size: 15px; font-weight: 700; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
+.cbt-q-content { font-size: 14px; line-height: 1.8; color: #374151; background: #f9fafb; border-radius: 8px; padding: 20px; margin-bottom: 20px; }
+.cbt-choices { display: flex; flex-direction: column; gap: 8px; }
+.cbt-choice { padding: 12px 16px; border: 1px solid #e5e7eb; border-radius: 8px; cursor: pointer; display: flex; align-items: center; gap: 10px; transition: all 0.15s; font-size: 14px; }
+.cbt-choice:hover { border-color: #93c5fd; background: #f0f7ff; }
+.cbt-choice.selected { border-color: #2563eb; background: #eff6ff; }
+.cbt-choice-num { width: 28px; height: 28px; border-radius: 50%; background: #e5e7eb; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; color: #6b7280; flex-shrink: 0; }
+.cbt-choice.selected .cbt-choice-num { background: #2563eb; color: white; }
+.cbt-essay-input { width: 100%; min-height: 120px; padding: 14px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; line-height: 1.8; resize: vertical; outline: none; }
+.cbt-essay-input:focus { border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59,130,246,0.1); }
+.cbt-nav { display: flex; justify-content: space-between; padding: 12px 16px; border-top: 1px solid #e5e7eb; background: #fafbfc; }
+
+/* ============ MODAL ============ */
+.modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 100; align-items: center; justify-content: center; }
+.modal-overlay.show { display: flex; }
+.modal { background: white; border-radius: 12px; width: 520px; max-height: 80vh; overflow-y: auto; box-shadow: 0 20px 60px rgba(0,0,0,0.2); }
+.modal-hdr { display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid #e5e7eb; }
+.modal-title { font-size: 16px; font-weight: 700; }
+.modal-close { font-size: 18px; color: #9ca3af; padding: 4px; }
+.modal-body { padding: 20px; }
+.modal-footer { display: flex; justify-content: flex-end; gap: 8px; padding: 16px 20px; border-top: 1px solid #e5e7eb; }
+
+/* ============ IMPROVEMENT MARKER ============ */
+.imp-marker { display: inline-flex; align-items: center; gap: 4px; font-size: 10px; font-weight: 700; color: #2563eb; background: #eff6ff; padding: 2px 8px; border-radius: 4px; border: 1px solid #bfdbfe; margin-left: 8px; vertical-align: middle; }
+
+/* ============ SCROLLBAR ============ */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #9ca3af; }
+
+/* ============ COMPOSE: SPLIT VIEW, PREVIEW, SEARCH ============ */
+.split-view { display: flex; gap: 16px; height: calc(100vh - 380px); min-height: 520px; margin-top: 16px; }
+.split-left { width: 50%; display: flex; flex-direction: column; background: white; border-radius: 12px; border: 1px solid #e5e7eb; box-shadow: 0 1px 3px rgba(0,0,0,0.05); overflow: hidden; }
+.split-right { width: 50%; display: flex; flex-direction: column; gap: 16px; overflow: hidden; }
+
+/* SEARCH BAR */
+.search-bar { padding: 12px; border-bottom: 1px solid #e5e7eb; }
+.search-wrap { position: relative; }
+.search-input { width: 100%; padding: 8px 12px 8px 34px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 13px; outline: none; }
+.search-input:focus { border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59,130,246,0.1); }
+.search-ico { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: #9ca3af; font-size: 13px; }
+.filter-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 8px; }
+.filter-sel { padding: 4px 8px; border: 1px solid #e5e7eb; border-radius: 6px; font-size: 12px; background: white; outline: none; }
+.filter-div { width: 1px; height: 16px; background: #e5e7eb; }
+.filter-lbl { font-size: 11px; color: #6b7280; }
+.filter-cnt { font-size: 11px; color: #6b7280; margin-left: auto; }
+
+/* QUESTION LIST */
+.q-list { flex: 1; overflow-y: auto; }
+.q-item { padding: 10px 14px; border-bottom: 1px solid #f3f4f6; cursor: pointer; display: flex; align-items: center; gap: 10px; transition: all 0.15s; border-left: 4px solid transparent; }
+.q-item:hover { background: #f9fafb; }
+.q-item.active { background: #eff6ff; border-left-color: #2563eb; }
+.q-item.added { opacity: 0.5; }
+.q-item-body { flex: 1; min-width: 0; }
+.q-item-meta { display: flex; align-items: center; gap: 6px; margin-bottom: 3px; }
+.q-item-id { font-family: monospace; font-size: 10px; color: #9ca3af; }
+.q-item-title { font-size: 13px; color: #1f2937; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.q-item-badges { display: flex; gap: 5px; margin-top: 4px; align-items: center; }
+.q-item-src { font-size: 10px; color: #9ca3af; }
+.q-add-btn { flex-shrink: 0; width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 16px; transition: all 0.2s; }
+.q-add-btn.can { background: #dbeafe; color: #2563eb; }
+.q-add-btn.can:hover { background: #bfdbfe; }
+.q-add-btn.done { background: #dcfce7; color: #16a34a; cursor: pointer; }
+.q-add-btn.done:hover { background: #fee2e2; color: #dc2626; }
+
+/* PREVIEW */
+.preview { flex: 1; min-height: 0; background: white; border-radius: 12px; border: 1px solid #e5e7eb; box-shadow: 0 1px 3px rgba(0,0,0,0.05); overflow: hidden; display: flex; flex-direction: column; }
+.preview-empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; color: #9ca3af; }
+.preview-empty-ico { font-size: 44px; opacity: 0.3; margin-bottom: 12px; }
+.preview-empty p { font-size: 13px; }
+.prev-hdr { padding: 14px 16px; border-bottom: 1px solid #e5e7eb; background: #f9fafb; display: flex; align-items: center; justify-content: space-between; }
+.prev-hdr-left .prev-id { font-family: monospace; font-size: 11px; color: #6b7280; }
+.prev-hdr-left .prev-badges { display: flex; gap: 6px; margin-top: 4px; }
+.prev-body { flex: 1; overflow-y: auto; padding: 20px; }
+.prev-card { background: white; border: 1px solid #e5e7eb; border-radius: 10px; padding: 20px; }
+.prev-title { font-size: 15px; font-weight: 700; margin-bottom: 12px; }
+.prev-content { white-space: pre-wrap; font-size: 13px; color: #374151; line-height: 1.8; background: #f9fafb; border-radius: 8px; padding: 14px; }
+.prev-meta { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 14px; }
+.prev-meta-item { background: #f9fafb; border-radius: 8px; padding: 10px; }
+.prev-meta-item .lbl { font-size: 11px; color: #6b7280; }
+.prev-meta-item .val { font-size: 13px; font-weight: 600; margin-top: 2px; }
+
+/* ADDED LIST */
+.added-wrap { flex-shrink: 0; background: white; border-radius: 12px; border: 1px solid #e5e7eb; box-shadow: 0 1px 3px rgba(0,0,0,0.05); padding: 12px; }
+.added-hdr { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+.added-hdr-title { font-size: 13px; font-weight: 700; color: #374151; }
+.added-hdr-hint { font-size: 11px; color: #9ca3af; }
+.added-row { display: flex; align-items: center; gap: 6px; padding: 5px 6px; border-radius: 6px; }
+.added-row:hover { background: #f9fafb; }
+.added-row:hover .added-actions { opacity: 1; }
+.added-num { font-size: 11px; color: #9ca3af; width: 18px; text-align: center; }
+.added-id { font-family: monospace; font-size: 10px; color: #6b7280; }
+.added-title { flex: 1; font-size: 11px; color: #4b5563; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.added-actions { display: flex; gap: 3px; }
+.added-actions button { font-size: 10px; color: #9ca3af; padding: 2px 3px; }
+.added-actions button:hover { color: #4b5563; }
+.added-actions .rm { color: #ef4444; opacity: 0.6; }
+.added-actions .rm:hover { opacity: 1; }
+
+/* STEP 3 */
+.confirm-info { background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 12px; padding: 20px; margin-bottom: 24px; }
+.confirm-hdr { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+.confirm-title { font-size: 14px; font-weight: 700; color: #1d4ed8; }
+.confirm-hint { font-size: 11px; color: #3b82f6; background: #dbeafe; padding: 2px 8px; border-radius: 4px; }
+.confirm-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; font-size: 13px; }
+.confirm-item .lbl { color: #2563eb; font-size: 12px; }
+.confirm-item .val { font-weight: 600; color: #111827; margin-top: 2px; }
+.confirm-item.full { grid-column: span 2; }
+
+.sum-table { width: 100%; border-collapse: collapse; font-size: 13px; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden; }
+.sum-table thead { background: #f9fafb; }
+.sum-table th { padding: 8px 14px; text-align: left; font-weight: 600; color: #4b5563; font-size: 12px; }
+.sum-table td { padding: 8px 14px; border-top: 1px solid #f3f4f6; }
+.sum-table tr:hover { background: #f9fafb; }
+.sum-footer { background: #f9fafb; padding: 8px 14px; text-align: right; font-size: 13px; font-weight: 600; border-top: 1px solid #e5e7eb; }
+
+/* COMPLETE */
+.done-card { text-align: center; padding: 48px; }
+.done-ico { width: 72px; height: 72px; background: #dcfce7; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 20px; font-size: 32px; color: #16a34a; }
+.done-title { font-size: 22px; font-weight: 700; margin-bottom: 8px; }
+.done-sub { color: #6b7280; margin-bottom: 28px; font-size: 14px; }
+.done-summary { background: #f9fafb; border-radius: 12px; padding: 20px; max-width: 400px; margin: 0 auto; text-align: left; }
+.done-row { display: flex; justify-content: space-between; padding: 5px 0; font-size: 13px; }
+.done-row .lbl { color: #6b7280; }
+.done-row .val { font-weight: 600; }
+.done-actions { display: flex; gap: 12px; justify-content: center; margin-top: 28px; }
+
+/* NAV */
+.nav-btns { display: flex; justify-content: space-between; margin-top: 16px; }
+.nav-btns-right { display: flex; gap: 12px; }
+
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #9ca3af; }
+.hidden { display: none !important; }
+
+/* MODE TOGGLE */
+.mode-toggle { display: flex; background: #f3f4f6; border-radius: 10px; padding: 4px; margin-bottom: 16px; border: 1px solid #e5e7eb; }
+.mode-btn { flex: 1; padding: 10px 16px; border-radius: 8px; font-size: 13px; font-weight: 600; text-align: center; cursor: pointer; transition: all 0.2s; color: #6b7280; line-height: 1.4; }
+.mode-btn.active { background: white; color: #1f2937; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+.mode-btn .mode-sub { font-size: 11px; font-weight: 400; color: #9ca3af; display: block; margin-top: 2px; }
+.mode-btn.active .mode-sub { color: #6b7280; }
+.mode-badge { display: inline-block; font-size: 9px; font-weight: 700; padding: 1px 6px; border-radius: 8px; margin-left: 4px; vertical-align: middle; }
+.mode-badge.new { background: #dbeafe; color: #1d4ed8; }
+.mode-badge.cur { background: #f3f4f6; color: #9ca3af; }
+
+/* TOAST */
+.toast { position: fixed; top: 24px; left: 50%; transform: translateX(-50%) translateY(-100px); background: #1f2937; color: white; padding: 14px 24px; border-radius: 10px; font-size: 13px; z-index: 999; box-shadow: 0 8px 24px rgba(0,0,0,0.2); display: flex; align-items: center; gap: 10px; max-width: 600px; transition: transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1); }
+.toast.show { transform: translateX(-50%) translateY(0); }
+.toast-ico { font-size: 20px; flex-shrink: 0; }
+.toast-body { flex: 1; }
+.toast-title { font-weight: 700; margin-bottom: 2px; }
+.toast-desc { font-size: 12px; color: #d1d5db; }
+
+/* INFO BANNER */
+.info-banner { display: flex; align-items: flex-start; gap: 10px; padding: 14px 18px; border-radius: 10px; margin-bottom: 16px; font-size: 13px; line-height: 1.6; }
+.info-banner.blue { background: #eff6ff; border: 1px solid #bfdbfe; color: #1e40af; }
+.info-banner.green { background: #ecfdf5; border: 1px solid #a7f3d0; color: #065f46; }
+.info-banner.amber { background: #fffbeb; border: 1px solid #fde68a; color: #92400e; }
+.info-banner-ico { font-size: 18px; flex-shrink: 0; margin-top: 1px; }
+
+/* ===== ROCKET SEARCH (Spotlight 검색) ===== */
+.rkt-search-wrap { position: relative; margin-bottom: 12px; }
+.rkt-search-input { width: 100%; height: 44px; padding: 0 14px 0 40px; font-size: 15px; font-weight: 600; border: 2px solid #5d5fef; border-radius: 10px; background: #f8f9ff; outline: none; box-sizing: border-box; transition: box-shadow 0.2s; }
+.rkt-search-input:focus { box-shadow: 0 0 0 3px rgba(93,95,239,0.15); }
+.rkt-search-input::placeholder { color: #aaa; font-weight: 400; }
+.rkt-search-ico { position: absolute; left: 13px; top: 50%; transform: translateY(-50%); font-size: 16px; }
+.rkt-search-hint { font-size: 11px; color: #9ca3af; margin-top: 4px; display: flex; align-items: center; gap: 6px; }
+.rkt-search-hint kbd { display: inline-block; padding: 1px 5px; background: #f3f4f6; border: 1px solid #d1d5db; border-radius: 3px; font-size: 10px; font-family: monospace; color: #6b7280; }
+
+.rkt-results { max-height: 320px; overflow-y: auto; border: 1px solid #e5e7eb; border-radius: 10px; background: white; box-shadow: 0 4px 12px rgba(0,0,0,0.06); }
+.rkt-results:empty { display: none; }
+.rkt-no-result { padding: 24px; text-align: center; color: #9ca3af; font-size: 13px; }
+
+.rkt-item { padding: 10px 14px; border-bottom: 1px solid #f3f4f6; cursor: pointer; transition: background 0.1s; }
+.rkt-item:last-child { border-bottom: none; }
+.rkt-item:hover { background: #f0f7ff; }
+.rkt-item.rkt-selected { background: #e6f0ff; border-left: 4px solid #5d5fef; }
+.rkt-item-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; font-size: 12px; color: #888; }
+.rkt-badge { display: inline-block; padding: 2px 7px; border-radius: 4px; color: white; font-size: 11px; font-weight: 600; margin-right: 5px; }
+.rkt-badge.elem { background: #2ecc71; }
+.rkt-badge.mid { background: #f39c12; }
+.rkt-badge.high { background: #e74c3c; }
+.rkt-subject { font-weight: 700; color: #555; }
+.rkt-cnt-badge { display: inline-block; padding: 2px 8px; border-radius: 12px; background: #e9ecef; color: #555; font-size: 11px; font-weight: 700; border: 1px solid #ddd; }
+.rkt-cnt-badge.has-cnt { background: #fff0f6; color: #d6336c; border-color: #fcc2d7; }
+.rkt-item-unit { font-size: 13px; font-weight: 700; color: #111; margin-bottom: 3px; }
+.rkt-item-unit .rkt-sep { color: #ddd; margin: 0 5px; }
+.rkt-item-std { font-size: 12px; color: #555; line-height: 1.4; }
+.rkt-item-std .rkt-code { color: #5d5fef; font-weight: 700; margin-right: 5px; font-family: monospace; }
+.rkt-item-add { flex-shrink: 0; width: 26px; height: 26px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 14px; transition: all 0.15s; }
+.rkt-item-add.can { background: #dbeafe; color: #2563eb; cursor: pointer; }
+.rkt-item-add.can:hover { background: #bfdbfe; }
+.rkt-item-add.done { background: #dcfce7; color: #16a34a; }
+
+.rkt-divider { display: flex; align-items: center; gap: 10px; margin: 14px 0 10px; }
+.rkt-divider-line { flex: 1; height: 1px; background: #e5e7eb; }
+.rkt-divider-text { font-size: 11px; color: #9ca3af; font-weight: 600; white-space: nowrap; }
+
+/* ===== ENTRY SELECTION SCREEN ===== */
+.entry-screen { max-width: 900px; margin: 0 auto; padding-top: 10px; }
+.entry-title { font-size: 22px; font-weight: 700; margin-bottom: 4px; }
+.entry-sub { font-size: 13px; color: #6b7280; margin-bottom: 24px; }
+.entry-cards { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
+.entry-card { background: white; border: 2px solid #e5e7eb; border-radius: 16px; padding: 28px 24px; cursor: pointer; transition: all 0.2s; text-align: center; position: relative; }
+.entry-card:hover { border-color: #93c5fd; box-shadow: 0 4px 12px rgba(59,130,246,0.12); transform: translateY(-2px); }
+.entry-card.selected { border-color: #2563eb; background: #eff6ff; box-shadow: 0 4px 12px rgba(59,130,246,0.15); }
+.entry-card-icon { width: 56px; height: 56px; border-radius: 14px; display: flex; align-items: center; justify-content: center; font-size: 28px; margin: 0 auto 14px; }
+.entry-card-icon.storage { background: #fef3c7; }
+.entry-card-icon.public { background: #dcfce7; }
+.entry-card-icon.direct { background: #dbeafe; }
+.entry-card-name { font-size: 15px; font-weight: 700; color: #111827; margin-bottom: 6px; }
+.entry-card-desc { font-size: 12px; color: #6b7280; line-height: 1.5; }
+.entry-card-badge { position: absolute; top: 12px; right: 12px; font-size: 10px; font-weight: 600; padding: 2px 8px; border-radius: 10px; }
+.entry-card-badge.detail { background: #dbeafe; color: #1d4ed8; }
+.entry-card-items { margin-top: 14px; text-align: left; }
+.entry-card-items li { font-size: 11px; color: #6b7280; margin-bottom: 4px; list-style: none; padding-left: 14px; position: relative; }
+.entry-card-items li::before { content: "•"; position: absolute; left: 0; color: #9ca3af; }
+.entry-confirm { display: flex; justify-content: flex-end; margin-top: 20px; }
+
+/* ============ TOAST ============ */
+.toast { position: fixed; top: 24px; left: 50%; transform: translateX(-50%) translateY(-100px); background: #1f2937; color: white; padding: 14px 24px; border-radius: 10px; font-size: 13px; z-index: 999; box-shadow: 0 8px 24px rgba(0,0,0,0.2); display: flex; align-items: center; gap: 10px; max-width: 600px; transition: transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1); }
+.toast.show { transform: translateX(-50%) translateY(0); }
+.toast-ico { font-size: 20px; flex-shrink: 0; }
+.toast-body { flex: 1; }
+.toast-title { font-weight: 700; margin-bottom: 2px; }
+.toast-desc { font-size: 12px; color: #d1d5db; }
+
+/* ============ ATTACHED CARD ============ */
+.attached-card { border: 2px solid #16a34a; background: #f0fdf4; border-radius: 10px; padding: 16px; display: flex; align-items: center; gap: 14px; }
+.attached-ico { width: 44px; height: 44px; background: #dcfce7; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 22px; flex-shrink: 0; }
+.attached-info { flex: 1; }
+.attached-title { font-size: 14px; font-weight: 700; color: #15803d; }
+.attached-meta { font-size: 12px; color: #6b7280; margin-top: 2px; }
+.attached-badge { background: #dcfce7; color: #15803d; padding: 3px 10px; border-radius: 10px; font-size: 11px; font-weight: 700; flex-shrink: 0; }
+
+/* ============ COMPOSE SUB-VIEW ============ */
+.subview { display: none; }
+.subview.active { display: block; }
+
+/* ============ NEW ROW HIGHLIGHT ============ */
+@keyframes newRowGlow { 0%{background:#dcfce7;} 100%{background:transparent;} }
+.new-row-anim { animation: newRowGlow 3s ease-out; }
+</style>
+<link rel="stylesheet" href="../../../common-nav.css">
+</head>
+<body data-gnb-page="classEval" data-gnb-base="../../../">
+
+<!-- TOAST -->
+<div class="toast" id="toast">
+  <span class="toast-ico">✅</span>
+  <div class="toast-body">
+    <div class="toast-title" id="toastTitle"></div>
+    <div class="toast-desc" id="toastDesc"></div>
+  </div>
+</div>
+
+<div class="content">
+<div class="screen active" id="screen0">
+  <div class="page-hdr">
+    <div class="page-title">평가</div>
+    <div class="page-actions">
+      <button class="btn btn-outline btn-sm">📹 영상매뉴얼 보기</button>
+      <button class="btn btn-primary" onclick="showScreen(1)">＋ 새로 만들기</button>
+    </div>
+  </div>
+
+  <!-- 과목 탭 -->
+  <div class="subj-tabs">
+    <div class="subj-tab active" onclick="setSubjTab(this)">전체</div>
+    <div class="subj-tab" onclick="setSubjTab(this)">수학</div>
+    <div class="subj-tab" onclick="setSubjTab(this)">국어</div>
+    <div class="subj-tab" onclick="setSubjTab(this)">과학</div>
+    <span class="subj-tab-setting" title="과목 탭 순서 설정" onclick="document.getElementById('tabOrderModal').classList.add('show')">⚙️</span>
+    <span class="imp-marker">개선: 탭 순서 커스터마이징</span>
+  </div>
+
+  <!-- 필터 바 -->
+  <div class="filter-bar">
+    <label class="filter-check"><input type="checkbox" id="filterOngoing"> 진행중만 보기</label>
+    <div class="filter-sep"></div>
+    <label class="filter-check"><input type="checkbox" id="filterEval"> 평가지만 보기</label>
+    <label class="filter-check"><input type="checkbox" id="filterActivity"> 활동지만 보기</label>
+    <span class="imp-marker">개선: 필터링 강화</span>
+    <div class="filter-right">
+      <select class="sort-sel" id="sortSelect">
+        <option>최신 등록일 순 ↕</option>
+        <option>종료일 순</option>
+        <option>오래된 순</option>
+      </select>
+      <span class="imp-marker">개선: 오래된 순 추가</span>
+      <select class="sort-sel"><option>12개씩 보기</option><option>24개씩 보기</option></select>
+      <div style="position:relative;">
+        <input type="text" class="form-input" style="width:200px;padding:6px 12px 6px 32px;font-size:12px;" placeholder="검색어를 입력하세요">
+        <span style="position:absolute;left:10px;top:50%;transform:translateY(-50%);font-size:13px;color:#9ca3af;">🔍</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 목록 테이블 -->
+  <div class="tbl-wrap">
+    <table class="tbl">
+      <thead>
+        <tr>
+          <th style="width:60px;" class="center">번호</th>
+          <th style="width:70px;">과목</th>
+          <th>제목</th>
+          <th style="width:100px;" class="center">진행상태</th>
+          <th style="width:110px;" class="center">제출기한</th>
+          <th style="width:130px;" class="center">제출현황</th>
+          <th style="width:100px;" class="center">등록일</th>
+          <th style="width:200px;" class="center">관리</th>
+        </tr>
+      </thead>
+      <tbody id="evalTbody">
+        <tr>
+          <td class="center">5</td>
+          <td>수학</td>
+          <td class="title-cell">
+            <span class="type-icon eval" title="평가지">📝<span class="type-tooltip">평가지</span></span>
+            2월 분수의 나눗셈 단원평가
+          </td>
+          <td class="center"><span class="status-badge status-ongoing">진행중</span></td>
+          <td class="center" style="font-size:12px;">2026.02.28</td>
+          <td class="center">
+            <div class="submit-bar">
+              <span class="submit-pct partial">33.3%</span>
+              <span class="submit-detail">(1/3)</span>
+              <div class="progress-mini"><div class="progress-mini-fill" style="width:33%;background:#3b82f6;"></div></div>
+            </div>
+          </td>
+          <td class="center" style="font-size:12px;">2026.02.10</td>
+          <td class="center">
+            <div class="action-btns">
+              <button class="action-btn" onclick="showScreen(2)">문제풀이 결과</button>
+              <button class="action-btn primary" onclick="showScreen(4)">평가지보기</button>
+              <button class="btn-ghost">⋮</button>
+            </div>
+          </td>
+        </tr>
+        <tr>
+          <td class="center">4</td>
+          <td>수학</td>
+          <td class="title-cell">
+            <span class="type-icon activity" title="활동지">📄<span class="type-tooltip">활동지</span></span>
+            분수 개념 익히기 활동
+          </td>
+          <td class="center"><span class="status-badge status-ongoing">진행중</span></td>
+          <td class="center" style="font-size:12px;">기한없음</td>
+          <td class="center">
+            <div class="submit-bar">
+              <span class="submit-pct partial">66.7%</span>
+              <span class="submit-detail">(2/3)</span>
+              <div class="progress-mini"><div class="progress-mini-fill" style="width:67%;background:#3b82f6;"></div></div>
+            </div>
+          </td>
+          <td class="center" style="font-size:12px;">2026.02.05</td>
+          <td class="center">
+            <div class="action-btns">
+              <button class="action-btn" onclick="showScreen(2)">문제풀이 결과</button>
+              <button class="action-btn primary" onclick="showScreen(4)">평가지보기</button>
+              <button class="btn-ghost">⋮</button>
+            </div>
+          </td>
+        </tr>
+        <tr>
+          <td class="center">3</td>
+          <td>수학</td>
+          <td class="title-cell">
+            <span class="type-icon eval" title="평가지">📝<span class="type-tooltip">평가지</span></span>
+            1월 분수의 나눗셈 형성평가
+          </td>
+          <td class="center"><span class="status-badge status-ended">종료</span></td>
+          <td class="center" style="font-size:12px;">2026.01.31</td>
+          <td class="center">
+            <div class="submit-bar">
+              <span class="submit-pct full">100%</span>
+              <span class="submit-detail">(3/3)</span>
+              <div class="progress-mini"><div class="progress-mini-fill" style="width:100%;background:#16a34a;"></div></div>
+            </div>
+          </td>
+          <td class="center" style="font-size:12px;">2026.01.15</td>
+          <td class="center">
+            <div class="action-btns">
+              <button class="action-btn" onclick="showScreen(2)">문제풀이 결과</button>
+              <button class="action-btn primary" onclick="showScreen(4)">평가지보기</button>
+              <button class="btn-ghost">⋮</button>
+            </div>
+          </td>
+        </tr>
+        <tr>
+          <td class="center">2</td>
+          <td>수학</td>
+          <td class="title-cell">
+            <span class="type-icon eval" title="평가지">📝<span class="type-tooltip">평가지</span></span>
+            1월 분수의 나눗셈
+          </td>
+          <td class="center"><span class="status-badge status-ended">종료</span></td>
+          <td class="center" style="font-size:12px;">기한없음</td>
+          <td class="center">
+            <div class="submit-bar">
+              <span class="submit-pct partial">33.3%</span>
+              <span class="submit-detail">(1/3)</span>
+              <div class="progress-mini"><div class="progress-mini-fill" style="width:33%;background:#3b82f6;"></div></div>
+            </div>
+          </td>
+          <td class="center" style="font-size:12px;">2026.01.05</td>
+          <td class="center">
+            <div class="action-btns">
+              <button class="action-btn" onclick="showScreen(2)">문제풀이 결과</button>
+              <button class="action-btn primary" onclick="showScreen(4)">평가지보기</button>
+              <button class="btn-ghost">⋮</button>
+            </div>
+          </td>
+        </tr>
+        <tr>
+          <td class="center">1</td>
+          <td>수학</td>
+          <td class="title-cell">
+            <span class="type-icon eval" title="평가지">📝<span class="type-tooltip">평가지</span></span>
+            테스트
+          </td>
+          <td class="center"><span class="status-badge status-ended">종료</span></td>
+          <td class="center" style="font-size:12px;">기한없음</td>
+          <td class="center">
+            <div class="submit-bar">
+              <span class="submit-pct full">100%</span>
+              <span class="submit-detail">(2/2)</span>
+              <div class="progress-mini"><div class="progress-mini-fill" style="width:100%;background:#16a34a;"></div></div>
+            </div>
+          </td>
+          <td class="center" style="font-size:12px;">2026.01.03</td>
+          <td class="center">
+            <div class="action-btns">
+              <button class="action-btn" onclick="showScreen(2)">문제풀이 결과</button>
+              <button class="action-btn primary" onclick="showScreen(4)">평가지보기</button>
+              <button class="btn-ghost">⋮</button>
+            </div>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="tbl-footer">
+      <span class="tbl-count">총 <strong id="evalCount">5</strong>개</span>
+      <div style="display:flex;gap:4px;">
+        <button style="width:28px;height:28px;border-radius:50%;background:#1f2937;color:white;font-size:12px;font-weight:700;">1</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- =============================================== -->
+<!-- SCREEN 1: 새로 만들기 (간편등록 통합) -->
+<!-- =============================================== -->
+<div class="screen" id="screen1">
+
+  <!-- === SUB-VIEW: 평가 만들기 폼 === -->
+  <div class="subview active" id="sv-form">
+    <div class="page-hdr">
+      <div class="page-title">평가 만들기</div>
+      <div style="display:flex;align-items:center;gap:8px;background:#ecfdf5;padding:6px 14px;border-radius:8px;">
+        <span style="color:#059669;font-size:12px;font-weight:600;">간편 등록</span>
+        <span style="color:#065f46;font-size:11px;">메타데이터 이중입력 제거 · 자동 비공개 저장</span>
+      </div>
+    </div>
+
+    <div class="create-form">
+      <div class="form-section">
+        <div class="form-label-col">클래스 선택 <span class="req">*</span></div>
+        <div class="form-value-col">
+          <div class="class-check-group">
+            <label class="class-check"><input type="checkbox"> 충북형 수학과 학습맵 클래스</label>
+            <label class="class-check"><input type="checkbox"> 채움중학교 3학년 1반</label>
+            <label class="class-check"><input type="checkbox"> 학부모 클래스</label>
+            <label class="class-check"><input type="checkbox" checked> 매스 플레이 클래스</label>
+          </div>
+        </div>
+      </div>
+      <div class="form-section">
+        <div class="form-label-col">제목 <span class="req">*</span></div>
+        <div class="form-value-col">
+          <input type="text" id="evalTitle" class="form-input" placeholder="제목을 입력하세요." oninput="checkFormValid()">
+        </div>
+      </div>
+      <div class="form-section">
+        <div class="form-label-col">제출 기간</div>
+        <div class="form-value-col">
+          <div class="form-radio-group" style="margin-bottom:10px;">
+            <label class="form-radio"><input type="radio" name="period" value="none" checked> 기한없음</label>
+            <label class="form-radio"><input type="radio" name="period" value="set" onchange="document.getElementById('dateRow').style.opacity=this.checked?'1':'0.4'"> 기한설정</label>
+          </div>
+          <div class="date-row" style="opacity:0.4;" id="dateRow">
+            <input type="date" class="date-input" id="dateFrom" value="2026-02-15">
+            <select class="time-sel"><option>00</option></select> : <select class="time-sel"><option>00</option></select>
+            <span style="color:#9ca3af;">~</span>
+            <input type="date" class="date-input" id="dateTo" value="2026-03-01">
+            <select class="time-sel"><option>00</option></select> : <select class="time-sel"><option>00</option></select>
+          </div>
+        </div>
+      </div>
+      <div class="form-section">
+        <div class="form-label-col">제출 대상 <span class="req">*</span></div>
+        <div class="form-value-col">
+          <div class="form-radio-group">
+            <label class="form-radio"><input type="radio" name="target" value="member" checked> 멤버</label>
+            <button class="member-btn">멤버선택</button>
+            <span style="font-size:13px;color:#6b7280;">0명</span>
+          </div>
+          <div class="form-hint"><span class="info-ico">i</span> 이 게시물을 등록하는 시점에서 선택한 멤버에게 전송됩니다.</div>
+          <div style="margin-top:8px;"><label class="form-radio"><input type="radio" name="target" value="all"> 모둠</label></div>
+        </div>
+      </div>
+      <div class="form-section">
+        <div class="form-label-col">내용(선택)</div>
+        <div class="form-value-col">
+          <textarea id="evalContent" class="form-textarea" placeholder="텍스트를 입력하세요."></textarea>
+        </div>
+      </div>
+      <div class="form-section">
+        <div class="form-label-col">평가지 <span class="req">*</span></div>
+        <div class="form-value-col">
+          <!-- 미첨부 -->
+          <div id="evalBtns">
+            <div class="eval-btns">
+              <button class="eval-btn highlight" onclick="alert('나의 보관함 (프로토타입 미구현)')"><span class="ico">📂</span> 나의 보관함에서 선택</button>
+              <button class="eval-btn highlight" onclick="alert('공개콘텐츠 검색 (프로토타입 미구현)')"><span class="ico">🔍</span> 공개콘텐츠에서 검색</button>
+              <button class="eval-btn highlight" style="border:2px solid #e8416e;background:#fff5f7;" onclick="goCompose()"><span class="ico">✏️</span> 평가지 직접 만들기</button>
+              <button class="eval-btn" onclick="alert('활동지 만들기 (프로토타입 미구현)')"><span class="ico">📄</span> 활동지 직접 만들기</button>
+            </div>
+            <div class="form-hint"><span class="info-ico">i</span> 하나의 평가지 또는 활동지만 추가 가능합니다.</div>
+          </div>
+          <!-- 첨부 완료 -->
+          <div id="evalAttached" style="display:none;">
+            <div class="attached-card">
+              <div class="attached-ico">📋</div>
+              <div class="attached-info">
+                <div class="attached-title" id="attachTitle"></div>
+                <div class="attached-meta" id="attachMeta"></div>
+              </div>
+              <span class="attached-badge">✓ 자동 첨부</span>
+              <div style="display:flex;gap:6px;">
+                <button class="btn btn-outline btn-sm" onclick="goCompose()">수정</button>
+                <button class="btn btn-sm" style="color:#dc2626;font-size:12px;" onclick="detachEval()">삭제</button>
+              </div>
+            </div>
+            <div class="form-hint" style="margin-top:8px;color:#065f46;">💡 <strong>간편 등록:</strong> 평가지가 채움콘텐츠 나의 보관함에 비공개로 자동 저장됩니다.</div>
+          </div>
+        </div>
+      </div>
+      <div class="form-actions">
+        <button class="btn btn-outline" onclick="showScreen(0)">취소</button>
+        <button class="btn btn-blue" id="registerBtn" style="min-width:140px;" disabled onclick="doRegister()">등록</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- === SUB-VIEW: 문항 구성 === -->
+  <div class="subview" id="sv-compose">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+      <div>
+        <div style="font-size:18px;font-weight:700;">✏️ 평가지 직접 만들기 <span class="imp-marker">간편 등록</span></div>
+        <p style="font-size:13px;color:#6b7280;margin-top:2px;">문항을 선택하여 평가지를 구성하세요. 완료하면 평가 게시물에 자동 첨부됩니다.</p>
+      </div>
+      <span style="font-size:13px;color:#6b7280;cursor:pointer;" onclick="cancelCompose()">← 평가 만들기로 돌아가기</span>
+    </div>
+
+    <!-- 안내 배너 -->
+    <div style="background:#ecfdf5;border:1px solid #a7f3d0;border-radius:10px;padding:12px 16px;margin-bottom:16px;display:flex;align-items:center;gap:10px;">
+      <span style="font-size:20px;">💡</span>
+      <div style="font-size:13px;color:#065f46;line-height:1.6;">
+        <strong>기본설정이 필요 없습니다</strong> — 제목(<strong id="passedTitle" style="color:#15803d;"></strong>)은 이전 화면에서 이미 입력했고, 교육과정 정보는 성취기준 선택 시 자동 반영됩니다.
+      </div>
+    </div>
+
+    <!-- 선택된 성취기준 태그 -->
+    <div id="tagList" style="margin-bottom:8px;display:flex;flex-wrap:wrap;gap:6px;"></div>
+
+    <!-- 통합 검색 -->
+    <div style="border:1px solid #e5e7eb;border-radius:8px;background:#f9fafb;padding:14px;margin-top:10px;">
+      <div style="display:flex;gap:10px;margin-bottom:10px;">
+        <div style="flex:1;">
+          <label style="display:block;font-size:12px;font-weight:600;color:#5d5fef;margin-bottom:4px;">🚀 성취기준 검색</label>
+          <div class="rkt-search-wrap" style="margin-bottom:0;">
+            <span class="rkt-search-ico">🔍</span>
+            <input type="text" id="rktInput" class="rkt-search-input" style="height:40px;font-size:14px;" placeholder="학년, 과목, 단원, 성취기준 코드..." autocomplete="off" oninput="rocketSearch(this.value)" onkeydown="handleRocketKey(event)">
+          </div>
+        </div>
+        <div style="flex:1;">
+          <label style="display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:4px;">📝 콘텐츠 키워드 (제목, 저작자, 키워드)</label>
+          <input type="text" id="rktSubInput" class="rkt-search-input" style="height:40px;font-size:14px;border-color:#d1d5db;background:white;" placeholder="제목, 저작자명, 키워드..." autocomplete="off" oninput="combinedSearch()" onkeydown="handleRocketKey(event)">
+        </div>
+      </div>
+      <div class="rkt-search-hint" style="margin-bottom:10px;">
+        성취기준만, 키워드만, 또는 둘 다 입력하여 교집합 검색 가능 &nbsp;|&nbsp; <kbd>↑</kbd><kbd>↓</kbd> 이동 <kbd>Enter</kbd> 선택
+      </div>
+      <div id="rktResults" class="rkt-results"></div>
+    </div>
+    <span id="pickerDone" style="display:none;"></span>
+
+    <!-- 스플릿 뷰 -->
+    <div id="splitView" class="split-view hidden">
+      <div class="split-left">
+        <div class="search-bar">
+          <div class="search-wrap">
+            <span class="search-ico">🔍</span>
+            <input type="text" id="searchIn" class="search-input" placeholder="문항 제목, ID, 출처 검색..." oninput="doFilter()">
+          </div>
+          <div class="filter-row">
+            <select id="fDiff" class="filter-sel" onchange="doFilter()"><option value="전체">난이도: 전체</option><option>매우 쉬움</option><option>쉬움</option><option>보통</option><option>어려움</option><option>매우 어려움</option></select>
+            <select id="fType" class="filter-sel" onchange="doFilter()"><option value="전체">유형: 전체</option><option>객관식</option><option>주관식</option></select>
+            <div class="filter-div"></div>
+            <span class="filter-lbl">정렬:</span>
+            <select id="fSort" class="filter-sel" onchange="doFilter()"><option value="difficulty">난이도순</option><option value="type">유형순</option><option value="usage">사용횟수순</option><option value="date">최신등록순</option></select>
+            <span id="fCnt" class="filter-cnt">0개 문항</span>
+          </div>
+        </div>
+        <div id="qList" class="q-list"></div>
+      </div>
+      <div class="split-right">
+        <div class="preview" id="prevPanel" style="flex:1;">
+          <div class="preview-empty" id="prevEmpty"><div class="preview-empty-ico">👁</div><p>왼쪽 목록에서 문항을 클릭하면</p><p>여기에 미리보기가 표시됩니다</p></div>
+          <div id="prevFull" class="hidden" style="display:none;flex-direction:column;height:100%;">
+            <div class="prev-hdr"><div class="prev-hdr-left"><div class="prev-id" id="pId"></div><div class="prev-badges" id="pBadges"></div></div><button class="btn btn-primary btn-sm" id="pAddBtn" onclick="addPrevQ()">+ 평가지에 추가</button></div>
+            <div class="prev-body"><div class="prev-card"><h3 class="prev-title" id="pTitle"></h3><div class="prev-content" id="pContent"></div></div><div class="prev-meta"><div class="prev-meta-item"><div class="lbl">출처</div><div class="val" id="pSrc"></div></div><div class="prev-meta-item"><div class="lbl">저작자</div><div class="val" id="pAuth"></div></div><div class="prev-meta-item"><div class="lbl">사용횟수</div><div class="val" id="pUse"></div></div><div class="prev-meta-item"><div class="lbl">등록일</div><div class="val" id="pDate"></div></div></div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 추가된 문항 -->
+    <div id="pickerAdded" class="added-wrap" style="display:none;margin-top:12px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+        <span style="font-size:13px;font-weight:700;color:#374151;">📋 추가된 문항 (<span id="pickerAddedCnt">0</span>)</span>
+        <span style="font-size:11px;color:#9ca3af;">▲▼로 순서 변경</span>
+      </div>
+      <div id="pickerAddedItems" style="max-height:180px;overflow-y:auto;"></div>
+    </div>
+
+    <!-- 하단 -->
+    <div style="display:flex;justify-content:space-between;margin-top:16px;">
+      <button class="btn btn-outline" onclick="cancelCompose()">← 취소</button>
+      <button class="btn btn-primary" id="composeBtn" disabled onclick="finishCompose()">완료: 평가지 첨부 → (<span id="addCnt">0</span>개 문항)</button>
+    </div>
+  </div>
+</div>
+
+
+<!-- =============================================== -->
+<!-- SCREEN 2: 문제풀이 결과 - 개설자 -->
+<!-- =============================================== -->
+<div class="screen" id="screen2">
+  <div class="page-hdr">
+    <div>
+      <div class="page-title">문제풀이 결과 <span class="badge badge-blue" style="font-size:12px;vertical-align:middle;margin-left:8px;">2월 분수의 나눗셈 단원평가</span></div>
+      <div style="font-size:13px;color:#6b7280;margin-top:4px;">초등학교 · 5학년 · 수학 | 문항 8개 (객관식 5, 서술형 3) | 배점 합계 100점</div>
+    </div>
+    <div class="page-actions">
+      <button class="btn btn-outline btn-sm" onclick="showScreen(0)">← 목록으로</button>
+      <span class="imp-marker">개선: 이전 화면 버튼</span>
+    </div>
+  </div>
+
+  <!-- 요약 카드 -->
+  <div class="dash-hdr">
+    <div class="dash-card highlight">
+      <div class="dash-card-label">평균 점수</div>
+      <div class="dash-card-value">72.5<span style="font-size:16px;color:#9ca3af;">점</span></div>
+      <div class="dash-card-sub">응시자 기준 (미응시자 제외)</div>
+    </div>
+    <div class="dash-card">
+      <div class="dash-card-label">제출 현황</div>
+      <div class="dash-card-value" style="color:#16a34a;">2<span style="font-size:16px;color:#9ca3af;"> / 3명</span></div>
+      <div class="dash-card-sub">66.7% 응시 완료</div>
+    </div>
+    <div class="dash-card">
+      <div class="dash-card-label">평가지 정답 합계 <span class="imp-marker">개선</span></div>
+      <div class="dash-card-value">100<span style="font-size:16px;color:#9ca3af;">점</span></div>
+      <div class="dash-card-sub">객관식 50점 + 서술형 50점</div>
+    </div>
+    <div class="dash-card">
+      <div class="dash-card-label">서술형 채점 현황</div>
+      <div class="dash-card-value" style="color:#f59e0b;">1<span style="font-size:16px;color:#9ca3af;"> / 6건</span></div>
+      <div class="dash-card-sub">미채점 5건 남음</div>
+    </div>
+  </div>
+
+  <!-- 정오답 현황 -->
+  <div class="dash-section">
+    <div class="dash-section-hdr">
+      <div class="dash-section-title">📊 정오답 현황</div>
+      <div style="display:flex;align-items:center;gap:8px;">
+        <span style="font-size:12px;color:#6b7280;">정렬:</span>
+        <select class="sort-sel" style="font-size:12px;">
+          <option>번호순</option>
+          <option>이름순</option>
+          <option>점수순</option>
+        </select>
+        <span class="imp-marker">개선: 정렬 옵션</span>
+      </div>
+    </div>
+    <div class="dash-section-body">
+      <div class="answer-grid">
+        <table>
+          <thead>
+            <tr>
+              <th class="name-col">학생</th>
+              <th class="q-col">1번<br><span style="font-size:10px;font-weight:400;color:#9ca3af;">객관식·10점</span></th>
+              <th class="q-col">2번<br><span style="font-size:10px;font-weight:400;color:#9ca3af;">객관식·10점</span></th>
+              <th class="q-col">3번<br><span style="font-size:10px;font-weight:400;color:#9ca3af;">객관식·10점</span></th>
+              <th class="q-col">4번<br><span style="font-size:10px;font-weight:400;color:#9ca3af;">객관식·10점</span></th>
+              <th class="q-col">5번<br><span style="font-size:10px;font-weight:400;color:#9ca3af;">객관식·10점</span></th>
+              <th class="q-col">6번<br><span style="font-size:10px;font-weight:400;color:#9ca3af;">서술형·15점</span></th>
+              <th class="q-col">7번<br><span style="font-size:10px;font-weight:400;color:#9ca3af;">서술형·15점</span></th>
+              <th class="q-col">8번<br><span style="font-size:10px;font-weight:400;color:#9ca3af;">서술형·20점</span></th>
+              <th class="score-col">총점</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="name-col">김민서</td>
+              <td class="cell-correct">○</td>
+              <td class="cell-correct">○</td>
+              <td class="cell-wrong">✕</td>
+              <td class="cell-correct">○</td>
+              <td class="cell-correct">○</td>
+              <td class="cell-essay" onclick="document.getElementById('essayModal').classList.add('show')">보기</td>
+              <td class="cell-partial">8/15</td>
+              <td class="cell-pending">미채점</td>
+              <td class="score-col">58+</td>
+            </tr>
+            <tr>
+              <td class="name-col">박지훈</td>
+              <td class="cell-correct">○</td>
+              <td class="cell-wrong">✕</td>
+              <td class="cell-correct">○</td>
+              <td class="cell-correct">○</td>
+              <td class="cell-wrong">✕</td>
+              <td class="cell-essay" onclick="document.getElementById('essayModal').classList.add('show')">보기</td>
+              <td class="cell-pending">미채점</td>
+              <td class="cell-pending">미채점</td>
+              <td class="score-col">30+</td>
+            </tr>
+            <tr>
+              <td class="name-col" style="color:#9ca3af;">이수현</td>
+              <td class="cell-pending" colspan="8" style="text-align:center;color:#9ca3af;">미응시</td>
+              <td class="score-col" style="color:#9ca3af;">-</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- 문항별 정답률 -->
+  <div class="dash-section">
+    <div class="dash-section-hdr">
+      <div class="dash-section-title">📈 문항별 정답률</div>
+    </div>
+    <div class="dash-section-body">
+      <div class="q-analysis">
+        <div class="q-bar-item"><div class="q-bar"><div class="q-bar-fill" style="height:100%;"></div></div><div class="q-bar-pct">100%</div><div class="q-bar-label">1번</div></div>
+        <div class="q-bar-item"><div class="q-bar"><div class="q-bar-fill mid" style="height:50%;"></div></div><div class="q-bar-pct">50%</div><div class="q-bar-label">2번</div></div>
+        <div class="q-bar-item"><div class="q-bar"><div class="q-bar-fill mid" style="height:50%;"></div></div><div class="q-bar-pct">50%</div><div class="q-bar-label">3번</div></div>
+        <div class="q-bar-item"><div class="q-bar"><div class="q-bar-fill" style="height:100%;"></div></div><div class="q-bar-pct">100%</div><div class="q-bar-label">4번</div></div>
+        <div class="q-bar-item"><div class="q-bar"><div class="q-bar-fill mid" style="height:50%;"></div></div><div class="q-bar-pct">50%</div><div class="q-bar-label">5번</div></div>
+        <div class="q-bar-item"><div class="q-bar"><div class="q-bar-fill" style="height:0%;background:#9ca3af;"></div></div><div class="q-bar-pct" style="color:#9ca3af;">채점중</div><div class="q-bar-label">6번</div></div>
+        <div class="q-bar-item"><div class="q-bar"><div class="q-bar-fill" style="height:0%;background:#9ca3af;"></div></div><div class="q-bar-pct" style="color:#9ca3af;">채점중</div><div class="q-bar-label">7번</div></div>
+        <div class="q-bar-item"><div class="q-bar"><div class="q-bar-fill" style="height:0%;background:#9ca3af;"></div></div><div class="q-bar-pct" style="color:#9ca3af;">채점중</div><div class="q-bar-label">8번</div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 서술형 채점 -->
+  <div class="dash-section">
+    <div class="dash-section-hdr">
+      <div class="dash-section-title">✍️ 서술형 채점하기 <span class="imp-marker">개선: 부분점수 후 재조회 가능</span></div>
+      <div style="display:flex;gap:8px;">
+        <select class="sort-sel" style="font-size:12px;">
+          <option>문항 선택: 6번 (서술형·15점)</option>
+          <option>7번 (서술형·15점)</option>
+          <option>8번 (서술형·20점)</option>
+        </select>
+      </div>
+    </div>
+    <div class="dash-section-body">
+      <!-- 제시자료 -->
+      <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:14px;margin-bottom:16px;">
+        <div style="font-size:12px;font-weight:600;color:#2563eb;margin-bottom:6px;">📖 문제 제시자료 <span class="imp-marker">개선: 제시자료 정상 표출</span></div>
+        <div style="font-size:13px;color:#374151;line-height:1.7;">주사위를 한 번 던질 때, 3의 배수의 눈이 나올 가능성을 다음 보기 중에서 골라 말로 표현하고, 그 이유를 서술하시오.<br>보기: 불가능하다 / ~아닐 것 같다 / 반반이다 / ~일 것 같다 / 확실하다</div>
+      </div>
+
+      <div class="essay-panel">
+        <div class="essay-panel-hdr">
+          <div class="essay-student">김민서</div>
+          <span class="essay-status graded">채점완료</span>
+        </div>
+        <div class="essay-panel-body">
+          <div class="essay-answer">~아닐 것 같다. 주사위 눈 1~6 중 3의 배수는 3, 6으로 2개이므로 6개 중 2개라서 반보다 작기 때문입니다.</div>
+          <div class="essay-score-row">
+            <span style="font-size:13px;font-weight:600;">부분점수:</span>
+            <input type="number" class="essay-score-input" value="12">
+            <span class="essay-max">/ 15점</span>
+            <button class="btn btn-blue btn-sm" style="margin-left:auto;">저장</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="essay-panel">
+        <div class="essay-panel-hdr">
+          <div class="essay-student">박지훈</div>
+          <span class="essay-status ungraded">미채점</span>
+        </div>
+        <div class="essay-panel-body">
+          <div class="essay-answer">반반이다. 왜냐하면 주사위에는 3이 있으니까요.</div>
+          <div class="essay-score-row">
+            <span style="font-size:13px;font-weight:600;">부분점수:</span>
+            <input type="number" class="essay-score-input" placeholder="0">
+            <span class="essay-max">/ 15점</span>
+            <button class="btn btn-blue btn-sm" style="margin-left:auto;">저장</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- =============================================== -->
+<!-- SCREEN 3: 문제풀이 결과 - 멤버 -->
+<!-- =============================================== -->
+<div class="screen" id="screen3">
+  <div class="page-hdr">
+    <div>
+      <div class="page-title">나의 문제풀이 결과</div>
+      <div style="font-size:13px;color:#6b7280;margin-top:4px;">2월 분수의 나눗셈 단원평가 | 초등학교 · 5학년 · 수학</div>
+    </div>
+    <button class="btn btn-outline btn-sm" onclick="showScreen(0)">← 목록으로</button>
+  </div>
+
+  <!-- 평가지 정보 -->
+  <div style="background:white;border:1px solid #e5e7eb;border-radius:10px;padding:16px 20px;margin-bottom:20px;display:flex;gap:24px;align-items:center;flex-wrap:wrap;">
+    <div><span style="font-size:12px;color:#9ca3af;">평가지</span><div style="font-weight:600;">2월 분수의 나눗셈 단원평가</div></div>
+    <div style="width:1px;height:32px;background:#e5e7eb;"></div>
+    <div><span style="font-size:12px;color:#9ca3af;">문항수</span><div style="font-weight:600;">8문항</div></div>
+    <div style="width:1px;height:32px;background:#e5e7eb;"></div>
+    <div><span style="font-size:12px;color:#9ca3af;">핵심개념</span><div style="font-weight:600;">분수의 나눗셈, 가능성</div></div>
+    <div style="width:1px;height:32px;background:#e5e7eb;"></div>
+    <div><span style="font-size:12px;color:#9ca3af;">성취기준</span><div style="font-weight:600;">[6수01-11], [6수05-01]</div></div>
+    <span class="imp-marker">개선: 평가지 정보·핵심 개념 표출</span>
+  </div>
+
+  <!-- 결과 요약 -->
+  <div class="result-summary">
+    <div class="result-card">
+      <div style="font-size:12px;color:#9ca3af;margin-bottom:8px;">나의 점수</div>
+      <div class="result-score">72<span>/100</span></div>
+    </div>
+    <div class="result-card">
+      <div style="font-size:12px;color:#9ca3af;margin-bottom:8px;">클래스 평균</div>
+      <div class="result-score" style="color:#6b7280;">65<span>/100</span></div>
+    </div>
+    <div class="result-card">
+      <div style="font-size:12px;color:#9ca3af;margin-bottom:8px;">정답률</div>
+      <div class="result-score" style="color:#16a34a;">72<span>%</span></div>
+    </div>
+  </div>
+
+  <!-- 성취기준별 분석 -->
+  <div class="dash-section">
+    <div class="dash-section-hdr">
+      <div class="dash-section-title">📐 성취기준별 분석 <span class="imp-marker">개선: 영역별 분석 표출</span></div>
+    </div>
+    <div class="dash-section-body">
+      <div class="analysis-row">
+        <div class="analysis-label">[6수01-11] 분수의 나눗셈</div>
+        <div class="analysis-bar-wrap">
+          <div class="analysis-bar"><div class="analysis-bar-fill high" style="width:80%;"></div></div>
+          <div class="analysis-pct">80%</div>
+        </div>
+      </div>
+      <div class="analysis-row">
+        <div class="analysis-label">[6수05-01] 가능성 표현</div>
+        <div class="analysis-bar-wrap">
+          <div class="analysis-bar"><div class="analysis-bar-fill mid" style="width:60%;"></div></div>
+          <div class="analysis-pct">60%</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 영역별 분석 -->
+  <div class="dash-section">
+    <div class="dash-section-hdr">
+      <div class="dash-section-title">📊 내용체계 영역별 분석</div>
+    </div>
+    <div class="dash-section-body">
+      <div class="analysis-row">
+        <div class="analysis-label">수와 연산</div>
+        <div class="analysis-bar-wrap">
+          <div class="analysis-bar"><div class="analysis-bar-fill high" style="width:85%;"></div></div>
+          <div class="analysis-pct">85%</div>
+        </div>
+      </div>
+      <div class="analysis-row">
+        <div class="analysis-label">자료와 가능성</div>
+        <div class="analysis-bar-wrap">
+          <div class="analysis-bar"><div class="analysis-bar-fill mid" style="width:55%;"></div></div>
+          <div class="analysis-pct">55%</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 난이도별 분석 -->
+  <div class="dash-section">
+    <div class="dash-section-hdr">
+      <div class="dash-section-title">🎯 난이도별 분석</div>
+    </div>
+    <div class="dash-section-body">
+      <div class="analysis-row">
+        <div class="analysis-label"><span class="badge badge-blue">쉬움</span></div>
+        <div class="analysis-bar-wrap">
+          <div class="analysis-bar"><div class="analysis-bar-fill high" style="width:100%;"></div></div>
+          <div class="analysis-pct">100%</div>
+        </div>
+      </div>
+      <div class="analysis-row">
+        <div class="analysis-label"><span class="badge badge-yellow">보통</span></div>
+        <div class="analysis-bar-wrap">
+          <div class="analysis-bar"><div class="analysis-bar-fill high" style="width:75%;"></div></div>
+          <div class="analysis-pct">75%</div>
+        </div>
+      </div>
+      <div class="analysis-row">
+        <div class="analysis-label"><span class="badge badge-red">어려움</span></div>
+        <div class="analysis-bar-wrap">
+          <div class="analysis-bar"><div class="analysis-bar-fill low" style="width:33%;"></div></div>
+          <div class="analysis-pct">33%</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- =============================================== -->
+<!-- SCREEN 4: CBT 풀이 화면 (멤버) -->
+<!-- =============================================== -->
+<div class="screen" id="screen4">
+  <div style="margin-bottom:12px;display:flex;align-items:center;justify-content:space-between;">
+    <div style="display:flex;align-items:center;gap:12px;">
+      <button class="btn btn-outline btn-sm" onclick="showScreen(0)">← 목록으로</button>
+      <div class="page-title" style="font-size:18px;">📝 평가 응시 - 2월 분수의 나눗셈 단원평가</div>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;">
+      <span style="font-size:13px;color:#6b7280;">남은 시간: <strong style="color:#dc2626;">14:32</strong></span>
+      <button class="btn btn-blue btn-sm">제출하기</button>
+    </div>
+  </div>
+
+  <div class="cbt-container">
+    <!-- 사이드바: 문항 목록 -->
+    <div class="cbt-sidebar">
+      <div class="cbt-sidebar-hdr">
+        <div class="cbt-sidebar-title">문항 목록 (8문항)</div>
+        <div class="cbt-sidebar-sub">응답 3/8 완료</div>
+      </div>
+      <div class="cbt-q-list">
+        <div class="cbt-q-item" onclick="setCbtQ(0)">
+          <div class="cbt-q-num answered">1</div>
+          <div class="cbt-q-info"><div style="font-size:12px;font-weight:500;">분수 나눗셈 기본</div><div class="cbt-q-type">객관식 · 10점</div></div>
+          <span class="cbt-q-status st-done">답변완료</span>
+        </div>
+        <div class="cbt-q-item" onclick="setCbtQ(1)">
+          <div class="cbt-q-num answered">2</div>
+          <div class="cbt-q-info"><div style="font-size:12px;font-weight:500;">대분수의 나눗셈</div><div class="cbt-q-type">객관식 · 10점</div></div>
+          <span class="cbt-q-status st-done">답변완료</span>
+        </div>
+        <div class="cbt-q-item active" onclick="setCbtQ(2)">
+          <div class="cbt-q-num current">3</div>
+          <div class="cbt-q-info"><div style="font-size:12px;font-weight:500;">분수 나눗셈 응용</div><div class="cbt-q-type">객관식 · 10점</div></div>
+          <span class="cbt-q-status st-none">미응답</span>
+        </div>
+        <div class="cbt-q-item" onclick="setCbtQ(3)">
+          <div class="cbt-q-num unanswered">4</div>
+          <div class="cbt-q-info"><div style="font-size:12px;font-weight:500;">분수 나눗셈 활용</div><div class="cbt-q-type">객관식 · 10점</div></div>
+          <span class="cbt-q-status st-none">미응답</span>
+        </div>
+        <div class="cbt-q-item" onclick="setCbtQ(4)">
+          <div class="cbt-q-num answered">5</div>
+          <div class="cbt-q-info"><div style="font-size:12px;font-weight:500;">혼합 계산</div><div class="cbt-q-type">객관식 · 10점</div></div>
+          <span class="cbt-q-status st-done">답변완료</span>
+        </div>
+        <div class="cbt-q-item" onclick="setCbtQ(5)">
+          <div class="cbt-q-num inprogress">6</div>
+          <div class="cbt-q-info"><div style="font-size:12px;font-weight:500;">가능성 표현 (서술)</div><div class="cbt-q-type">주관식(서술형) · 15점</div></div>
+          <span class="cbt-q-status st-prog">진행중</span>
+        </div>
+        <div class="cbt-q-item" onclick="setCbtQ(6)">
+          <div class="cbt-q-num unanswered">7</div>
+          <div class="cbt-q-info"><div style="font-size:12px;font-weight:500;">가능성 비교 (서술)</div><div class="cbt-q-type">주관식(서술형) · 15점</div></div>
+          <span class="cbt-q-status st-none">미응답</span>
+        </div>
+        <div class="cbt-q-item" onclick="setCbtQ(7)">
+          <div class="cbt-q-num unanswered">8</div>
+          <div class="cbt-q-info"><div style="font-size:12px;font-weight:500;">종합 서술 문항</div><div class="cbt-q-type">주관식(서술형) · 20점</div></div>
+          <span class="cbt-q-status st-none">미응답</span>
+        </div>
+      </div>
+      <div style="padding:12px;border-top:1px solid #e5e7eb;">
+        <div style="display:flex;justify-content:space-between;font-size:11px;color:#6b7280;margin-bottom:6px;">
+          <span>진행률</span><span>3/8 (37.5%)</span>
+        </div>
+        <div style="height:6px;background:#e5e7eb;border-radius:3px;overflow:hidden;">
+          <div style="width:37.5%;height:100%;background:#2563eb;border-radius:3px;"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 메인 영역 -->
+    <div class="cbt-main">
+      <!-- 툴바 -->
+      <div class="cbt-toolbar">
+        <div class="cbt-tools">
+          <button class="cbt-tool-btn" onclick="this.classList.toggle('active')">🖊️ 필기 <span class="imp-marker" style="margin:0;border:0;background:transparent;color:#2563eb;font-size:9px;">안정화</span></button>
+          <button class="cbt-tool-btn" onclick="this.classList.toggle('active')">🖱️ 커서</button>
+          <button class="cbt-tool-btn">🗑️ 필기 지우기</button>
+          <div style="width:1px;height:24px;background:#e5e7eb;margin:0 4px;"></div>
+          <div class="cbt-zoom">
+            <button class="cbt-zoom-btn">−</button>
+            <span class="cbt-zoom-val">100%</span>
+            <button class="cbt-zoom-btn">+</button>
+          </div>
+          <span class="imp-marker">개선: 확대/축소 지원</span>
+        </div>
+      </div>
+
+      <!-- 문제 영역 -->
+      <div class="cbt-body">
+        <div class="cbt-question">
+          <div class="cbt-q-header">
+            <span class="badge badge-yellow">보통</span>
+            <span>3번 문항</span>
+            <span style="font-size:12px;color:#9ca3af;">(10점)</span>
+          </div>
+          <div class="cbt-q-content">
+다음 중 올바른 것을 고르시오.
+
+3/4 ÷ 1/2 의 계산 결과로 올바른 것은?
+          </div>
+          <div class="cbt-choices">
+            <div class="cbt-choice" onclick="this.classList.toggle('selected')">
+              <div class="cbt-choice-num">①</div>
+              <div>3/8</div>
+            </div>
+            <div class="cbt-choice" onclick="this.classList.toggle('selected')">
+              <div class="cbt-choice-num">②</div>
+              <div>3/2</div>
+            </div>
+            <div class="cbt-choice" onclick="this.classList.toggle('selected')">
+              <div class="cbt-choice-num">③</div>
+              <div>1/2</div>
+            </div>
+            <div class="cbt-choice" onclick="this.classList.toggle('selected')">
+              <div class="cbt-choice-num">④</div>
+              <div>6/4</div>
+            </div>
+            <div class="cbt-choice" onclick="this.classList.toggle('selected')">
+              <div class="cbt-choice-num">⑤</div>
+              <div>2/3</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 하단 네비게이션 -->
+      <div class="cbt-nav">
+        <button class="btn btn-outline btn-sm">← 이전 문항</button>
+        <button class="btn btn-blue btn-sm">다음 문항 →</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+</div><!-- /content -->
+
+<!-- ===== MODALS ===== -->
+
+<!-- 과목 탭 순서 설정 모달 -->
+<div class="modal-overlay" id="tabOrderModal">
+  <div class="modal">
+    <div class="modal-hdr">
+      <div class="modal-title">⚙️ 과목 탭 순서 설정</div>
+      <button class="modal-close" onclick="this.closest('.modal-overlay').classList.remove('show')">✕</button>
+    </div>
+    <div class="modal-body">
+      <p style="font-size:13px;color:#6b7280;margin-bottom:16px;">드래그하여 순서를 변경하세요. 변경된 순서는 이 클래스에서 저장됩니다.</p>
+      <div style="display:flex;flex-direction:column;gap:6px;">
+        <div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;cursor:grab;">
+          <span style="color:#9ca3af;">☰</span><span style="font-weight:600;">전체</span><span style="font-size:11px;color:#9ca3af;margin-left:auto;">기본 (고정)</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:white;border:1px solid #e5e7eb;border-radius:8px;cursor:grab;">
+          <span style="color:#9ca3af;">☰</span><span style="font-weight:600;">수학</span><span style="font-size:11px;color:#9ca3af;margin-left:auto;">1순위</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:white;border:1px solid #e5e7eb;border-radius:8px;cursor:grab;">
+          <span style="color:#9ca3af;">☰</span><span style="font-weight:600;">국어</span><span style="font-size:11px;color:#9ca3af;margin-left:auto;">2순위</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:white;border:1px solid #e5e7eb;border-radius:8px;cursor:grab;">
+          <span style="color:#9ca3af;">☰</span><span style="font-weight:600;">과학</span><span style="font-size:11px;color:#9ca3af;margin-left:auto;">3순위</span>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="this.closest('.modal-overlay').classList.remove('show')">취소</button>
+      <button class="btn btn-blue" onclick="this.closest('.modal-overlay').classList.remove('show')">저장</button>
+    </div>
+  </div>
+</div>
+
+<!-- 서술형 답변 조회 모달 -->
+<div class="modal-overlay" id="essayModal">
+  <div class="modal">
+    <div class="modal-hdr">
+      <div class="modal-title">📝 서술형 답변 조회 <span class="imp-marker">개선: 주관식 답변 조회</span></div>
+      <button class="modal-close" onclick="this.closest('.modal-overlay').classList.remove('show')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div style="margin-bottom:16px;">
+        <div style="font-size:12px;color:#9ca3af;margin-bottom:4px;">학생</div>
+        <div style="font-weight:700;">김민서</div>
+      </div>
+      <div style="margin-bottom:16px;">
+        <div style="font-size:12px;color:#9ca3af;margin-bottom:4px;">6번 문항 (서술형 · 15점)</div>
+        <div style="background:#eff6ff;padding:12px;border-radius:8px;font-size:13px;line-height:1.7;">주사위를 한 번 던질 때, 3의 배수의 눈이 나올 가능성을 말로 표현하고 이유를 서술하시오.</div>
+      </div>
+      <div>
+        <div style="font-size:12px;color:#9ca3af;margin-bottom:4px;">학생 답변</div>
+        <div style="background:#f9fafb;padding:12px;border-radius:8px;font-size:13px;line-height:1.7;border-left:3px solid #2563eb;">~아닐 것 같다. 주사위 눈 1~6 중 3의 배수는 3, 6으로 2개이므로 6개 중 2개라서 반보다 작기 때문입니다.</div>
+      </div>
+      <div style="margin-top:16px;display:flex;align-items:center;gap:12px;">
+        <span style="font-size:13px;font-weight:600;">채점:</span>
+        <input type="number" class="essay-score-input" value="12">
+        <span class="essay-max">/ 15점</span>
+        <span class="badge badge-green" style="margin-left:auto;">채점완료</span>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="this.closest('.modal-overlay').classList.remove('show')">닫기</button>
+      <button class="btn btn-blue" onclick="this.closest('.modal-overlay').classList.remove('show')">저장</button>
+    </div>
+  </div>
+</div>
+
+
+<script>
+// ================================================
+// SCREEN NAVIGATION
+// ================================================
+function showScreen(idx) {
+  document.querySelectorAll('.screen').forEach(function(s){ s.classList.remove('active'); });
+  document.getElementById('screen'+idx).classList.add('active');
+  // proto-tab이 보이는 경우에만 활성화 (하위 호환)
+  var tabs = document.querySelectorAll('.proto-tab');
+  if (tabs.length > 0 && tabs[0].offsetParent !== null) {
+    tabs.forEach(function(t){ t.classList.remove('active'); });
+    if (tabs[idx]) tabs[idx].classList.add('active');
+  }
+  window.scrollTo(0,0);
+  // Reset sub-views when entering screen1
+  if (idx === 1) {
+    document.getElementById('sv-form').classList.add('active');
+    document.getElementById('sv-compose').classList.remove('active');
+  }
+}
+function setSubjTab(el) {
+  document.querySelectorAll('.subj-tab').forEach(function(t){ t.classList.remove('active'); });
+  el.classList.add('active');
+}
+function setCbtQ(idx) {
+  document.querySelectorAll('.cbt-q-item').forEach(function(q,i){ q.classList.toggle('active', i===idx); });
+}
+
+// ================================================
+// SCREEN 1: FORM ↔ COMPOSE FLOW
+// ================================================
+var attachedData = null; // 첨부된 평가지 정보 저장
+
+function goCompose() {
+  var title = document.getElementById('evalTitle').value || '(제목 미입력)';
+  document.getElementById('passedTitle').textContent = title;
+  document.getElementById('sv-form').classList.remove('active');
+  document.getElementById('sv-compose').classList.add('active');
+  window.scrollTo(0,0);
+}
+
+function cancelCompose() {
+  document.getElementById('sv-compose').classList.remove('active');
+  document.getElementById('sv-form').classList.add('active');
+  window.scrollTo(0,0);
+}
+
+function finishCompose() {
+  if (addedQ.length === 0) return;
+  var title = document.getElementById('evalTitle').value || '(제목 미입력)';
+  var gradeMap = {};
+  selStds.forEach(function(s){ gradeMap[s.grade||""] = true; });
+  var grades = Object.keys(gradeMap).join(", ");
+  var stds = selStds.map(function(s){ return '['+s.code+']'; }).join(' ');
+
+  // 첨부 정보 저장
+  attachedData = {
+    title: title,
+    grades: grades,
+    stdsCount: selStds.length,
+    qCount: addedQ.length,
+    stds: stds
+  };
+
+  document.getElementById('attachTitle').textContent = title + ' — ' + addedQ.length + '문항';
+  document.getElementById('attachMeta').textContent = grades + ' · 수학 · 성취기준 ' + selStds.length + '개 · ' + stds;
+  document.getElementById('evalBtns').style.display = 'none';
+  document.getElementById('evalAttached').style.display = 'block';
+
+  document.getElementById('sv-compose').classList.remove('active');
+  document.getElementById('sv-form').classList.add('active');
+  window.scrollTo(0,0);
+  checkFormValid();
+
+  showToast('평가지가 비공개로 자동 저장되었습니다', '채움콘텐츠 나의 보관함에 비공개로 저장되었습니다. 공개 및 상세 정보 수정은 나의 보관함에서 가능합니다.');
+}
+
+function detachEval() {
+  attachedData = null;
+  document.getElementById('evalBtns').style.display = 'block';
+  document.getElementById('evalAttached').style.display = 'none';
+  checkFormValid();
+}
+
+function checkFormValid() {
+  var title = document.getElementById('evalTitle').value.trim();
+  var hasAttach = attachedData !== null;
+  document.getElementById('registerBtn').disabled = !(title && hasAttach);
+}
+
+// ================================================
+// REGISTER → ADD ROW TO LIST
+// ================================================
+var evalNextNo = 6;
+
+function doRegister() {
+  var title = document.getElementById('evalTitle').value.trim();
+  if (!title || !attachedData) return;
+
+  var today = new Date();
+  var dateStr = today.getFullYear() + '.' + String(today.getMonth()+1).padStart(2,'0') + '.' + String(today.getDate()).padStart(2,'0');
+
+  var periodRadios = document.querySelectorAll('input[name="period"]');
+  var hasDeadline = false;
+  periodRadios.forEach(function(r){ if(r.value==='set' && r.checked) hasDeadline=true; });
+  var deadline = hasDeadline ? document.getElementById('dateTo').value.replace(/-/g,'.') : '기한없음';
+
+  var tr = document.createElement('tr');
+  tr.className = 'new-row-anim';
+  tr.innerHTML = '<td class="center">'+(evalNextNo)+'</td>' +
+    '<td>수학</td>' +
+    '<td class="title-cell"><span class="type-icon eval" title="평가지">📝<span class="type-tooltip">평가지</span></span>' + title +
+    ' <span class="imp-marker" style="margin-left:6px;">NEW</span></td>' +
+    '<td class="center"><span class="status-badge status-ongoing">진행중</span></td>' +
+    '<td class="center" style="font-size:12px;">' + deadline + '</td>' +
+    '<td class="center"><div class="submit-bar"><span class="submit-pct low">0%</span><span class="submit-detail">(0/3)</span>' +
+    '<div class="progress-mini"><div class="progress-mini-fill" style="width:0%;background:#ef4444;"></div></div></div></td>' +
+    '<td class="center" style="font-size:12px;">' + dateStr + '</td>' +
+    '<td class="center"><div class="action-btns"><button class="action-btn" onclick="showScreen(2)">문제풀이 결과</button>' +
+    '<button class="action-btn primary" onclick="showScreen(4)">평가지보기</button><button class="btn-ghost">⋮</button></div></td>';
+
+  var tbody = document.getElementById('evalTbody');
+  tbody.insertBefore(tr, tbody.firstChild);
+  evalNextNo++;
+  document.getElementById('evalCount').textContent = evalNextNo - 1;
+
+  // Navigate to list FIRST
+  showScreen(0);
+
+  // Then show toast
+  showToast('✅ 평가가 등록되었습니다!', '"' + title + '" — ' + attachedData.qCount + '문항 · 성취기준 ' + attachedData.stdsCount + '개가 목록에 추가되었습니다.');
+
+  // Reset form after navigation
+  resetCreateForm();
+}
+
+function resetCreateForm() {
+  document.getElementById('evalTitle').value = '';
+  document.getElementById('evalContent').value = '';
+  document.getElementById('evalBtns').style.display = 'block';
+  document.getElementById('evalAttached').style.display = 'none';
+  document.getElementById('registerBtn').disabled = true;
+  attachedData = null;
+  selStds = []; allQ = []; addedQ = []; prevQId = null;
+  var el;
+  el = document.getElementById('tagList'); if(el) el.innerHTML = '';
+  el = document.getElementById('splitView'); if(el) el.classList.add('hidden');
+  el = document.getElementById('pickerAdded'); if(el) el.style.display='none';
+  el = document.getElementById('rktInput'); if(el) el.value='';
+  el = document.getElementById('rktSubInput'); if(el) el.value='';
+  el = document.getElementById('rktResults'); if(el) el.innerHTML='';
+  el = document.getElementById('addCnt'); if(el) el.textContent='0';
+  el = document.getElementById('composeBtn'); if(el) el.disabled=true;
+  el = document.getElementById('prevEmpty'); if(el) el.style.display='';
+  el = document.getElementById('prevFull'); if(el){ el.style.display='none'; el.classList.add('hidden'); }
+}
+
+function showToast(title, desc) {
+  var t = document.getElementById('toast');
+  document.getElementById('toastTitle').textContent = title;
+  document.getElementById('toastDesc').textContent = desc;
+  t.classList.add('show');
+  setTimeout(function(){ t.classList.remove('show'); }, 5000);
+}
+
+// ================================================
+// DATA
+// ================================================
+var DIFFS = ["매우 쉬움","쉬움","보통","어려움","매우 어려움"];
+var TYPES = ["객관식(단일선택)","객관식(다중선택)","주관식(단답형)","주관식(서술형)"];
+
+var ALL_STANDARDS = {
+  "3학년": [
+    { code: "4수01-01", area: "수와 연산", desc: "네 자리 이하의 수의 범위에서 덧셈과 뺄셈을 할 수 있다.", sub1: "덧셈과 뺄셈", sub2: "받아올림과 받아내림", school: "초등학교", subject: "수학", term: "1", unit: "1. 덧셈과 뺄셈", lesson: "받아올림이 있는 덧셈", qCount: 12 },
+    { code: "4수01-02", area: "수와 연산", desc: "곱셈구구를 이용하여 나눗셈의 몫을 구할 수 있다.", sub1: "나눗셈", sub2: "곱셈구구와 나눗셈의 관계", school: "초등학교", subject: "수학", term: "1", unit: "3. 나눗셈", lesson: "곱셈과 나눗셈의 관계", qCount: 9 },
+    { code: "4수03-01", area: "도형과 측정", desc: "1cm, 1mm의 관계를 이해하고 길이를 측정할 수 있다.", sub1: "길이 재기", sub2: "cm와 mm", school: "초등학교", subject: "수학", term: "1", unit: "5. 길이와 시간", lesson: "1cm와 1mm 알아보기", qCount: 7 },
+  ],
+  "4학년": [
+    { code: "4수01-05", area: "수와 연산", desc: "분모가 같은 분수의 덧셈과 뺄셈을 할 수 있다.", sub1: "분수의 덧셈과 뺄셈", sub2: "동분모 분수의 연산", school: "초등학교", subject: "수학", term: "2", unit: "1. 분수의 덧셈과 뺄셈", lesson: "분모가 같은 분수의 덧셈", qCount: 15 },
+    { code: "4수02-01", area: "변화와 관계", desc: "규칙을 찾아 수나 식으로 나타낼 수 있다.", sub1: "규칙 찾기", sub2: "수 배열의 규칙", school: "초등학교", subject: "수학", term: "1", unit: "6. 규칙 찾기", lesson: "수 배열에서 규칙 찾기", qCount: 8 },
+    { code: "4수03-03", area: "도형과 측정", desc: "각도의 단위를 알고 각도를 측정할 수 있다.", sub1: "각도", sub2: "각도기 사용", school: "초등학교", subject: "수학", term: "1", unit: "2. 각도", lesson: "각도 재기", qCount: 11 },
+    { code: "4수05-01", area: "자료와 가능성", desc: "자료를 수집하여 막대그래프로 나타낼 수 있다.", sub1: "막대그래프", sub2: "자료 정리와 막대그래프", school: "초등학교", subject: "수학", term: "2", unit: "5. 막대그래프", lesson: "막대그래프 그리기", qCount: 2 },
+  ],
+  "5학년": [
+    { code: "6수01-11", area: "수와 연산", desc: "분수의 나눗셈의 계산 원리를 탐구하고 그 계산을 할 수 있다.", sub1: "자연수의 혼합 계산", sub2: "혼합 계산 순서", school: "초등학교", subject: "수학", term: "1", unit: "1. 자연수의 혼합 계산", lesson: "덧셈과 뺄셈이 섞인 식", qCount: 14 },
+    { code: "6수01-12", area: "수와 연산", desc: "소수의 나눗셈의 계산 원리를 탐구하고 그 계산을 할 수 있다.", sub1: "소수의 나눗셈", sub2: "소수 나눗셈 원리", school: "초등학교", subject: "수학", term: "2", unit: "4. 소수의 나눗셈", lesson: "소수를 자연수로 나누기", qCount: 10 },
+    { code: "6수02-01", area: "변화와 관계", desc: "두 양의 크기를 비교하는 상황을 통해 비의 개념을 이해한다.", sub1: "비와 비율", sub2: "두 양의 크기 비교", school: "초등학교", subject: "수학", term: "2", unit: "5. 비와 비율", lesson: "두 양의 크기 비교하기", qCount: 6 },
+    { code: "6수05-01", area: "자료와 가능성", desc: "사건이 일어날 가능성을 말로 표현하고 비교할 수 있다.", sub1: "가능성", sub2: "사건이 일어날 가능성", sub3: "가능성 비교", school: "초등학교", subject: "수학", term: "2", unit: "6. 자료의 가능성", lesson: "일어날 가능성 표현하기", qCount: 7 },
+    { code: "6수05-02", area: "자료와 가능성", desc: "간단한 사건이 일어날 가능성을 수로 표현할 수 있다.", sub1: "가능성", sub2: "가능성의 수 표현", sub3: "확률 기초", school: "초등학교", subject: "수학", term: "2", unit: "6. 자료의 가능성", lesson: "가능성을 수로 나타내기", qCount: 6 },
+  ],
+  "6학년": [
+    { code: "6수01-15", area: "수와 연산", desc: "분수와 소수의 혼합 계산을 할 수 있다.", sub1: "혼합 계산", sub2: "분수와 소수", school: "초등학교", subject: "수학", term: "1", unit: "1. 분수와 소수의 혼합 계산", lesson: "분수와 소수가 섞인 식", qCount: 13 },
+    { code: "6수03-01", area: "도형과 측정", desc: "원의 넓이를 구하는 방법을 이해하고 구할 수 있다.", sub1: "원의 넓이", sub2: "원주율과 넓이", school: "초등학교", subject: "수학", term: "2", unit: "5. 원의 넓이", lesson: "원의 넓이 구하기", qCount: 9 },
+    { code: "6수04-01", area: "규칙성", desc: "비례식을 알고 그 성질을 이해하며 이를 활용할 수 있다.", sub1: "비례식", sub2: "비례식의 성질", school: "초등학교", subject: "수학", term: "2", unit: "3. 비례식과 비례배분", lesson: "비례식 알아보기", qCount: 11 },
+    { code: "6수05-03", area: "자료와 가능성", desc: "자료를 수집, 분류, 정리하여 목적에 맞는 그래프로 나타낼 수 있다.", sub1: "그래프", sub2: "원그래프, 띠그래프", school: "초등학교", subject: "수학", term: "2", unit: "4. 자료 정리", lesson: "원그래프와 띠그래프", qCount: 5 },
+  ]
+};
+
+// 디테일한 문항 데이터
+var DETAIL_Q = {
+  "6수05-01": [
+    { id: "6수05-01-Q001", title: "주사위를 던질 때 3의 배수가 나올 가능성을 말로 표현하시오.", difficulty: "쉬움", type: "주관식(단답형)", source: "교육부 검정", author: "김현정", usageCount: 187, createdAt: "2025-03-12",
+      content: "[문제]\n주사위를 한 번 던질 때, 3의 배수의 눈이 나올 가능성을 다음 보기 중에서 골라 말로 표현하시오.\n\n보기: 불가능하다 / ~아닐 것 같다 / 반반이다 / ~일 것 같다 / 확실하다\n\n[모범답안]\n\"~아닐 것 같다\"\n(풀이: 주사위 눈 1~6 중 3의 배수는 3, 6으로 2개 → 6개 중 2개 → 반보다 작다)" },
+    { id: "6수05-01-Q002", title: "다음 중 '확실하다'로 표현할 수 있는 사건을 고르시오.", difficulty: "매우 쉬움", type: "객관식(단일선택)", source: "충북교육청", author: "이미영", usageCount: 245, createdAt: "2025-04-05",
+      content: "[문제]\n다음 중 '확실하다'로 표현할 수 있는 사건을 고르시오.\n\n① 동전을 던지면 앞면이 나온다\n② 주사위를 던지면 7이 나온다\n③ 1~6 주사위를 던지면 6 이하의 수가 나온다\n④ 내일 비가 온다\n⑤ 가위바위보에서 내가 이긴다\n\n[정답] ③" },
+    { id: "6수05-01-Q003", title: "빨간 구슬 3개, 파란 구슬 7개에서 빨간 구슬을 뽑을 가능성을 비교하시오.", difficulty: "보통", type: "주관식(서술형)", source: "한국교육과정평가원", author: "박준영", usageCount: 132, createdAt: "2025-05-18",
+      content: "[문제]\n주머니에 빨간 구슬 3개, 파란 구슬 7개가 있습니다.\n(1) 빨간/파란 구슬이 나올 가능성을 비교하여 말로 표현하시오.\n(2) 이유를 설명하시오.\n\n[모범답안]\n(1) 파란 구슬이 나올 가능성이 더 높다\n(2) 전체 10개 중 파란 7개, 빨간 3개이므로" },
+    { id: "6수05-01-Q004", title: "일어날 가능성에 따라 사건을 분류하시오.", difficulty: "어려움", type: "주관식(서술형)", source: "한국교육과정평가원", author: "김선호", usageCount: 76, createdAt: "2025-07-15",
+      content: "[문제]\n(가) 12월에 눈이 온다\n(나) 동전을 던지면 앞면이 나온다\n(다) 해가 서쪽에서 뜬다\n(라) 주사위를 던지면 7 이하가 나온다\n(마) 빨간 공 1개, 파란 공 9개 중 빨간 공을 뽑는다\n\n분류: 불가능 / ~아닐 것 같다 / 반반 / ~일 것 같다 / 확실\n\n[모범답안]\n불가능: (다) / ~아닐 것 같다: (마) / 반반: (나) / ~일 것 같다: (가) / 확실: (라)" },
+    { id: "6수05-01-Q005", title: "회전판의 결과를 예측하고 가능성을 말로 표현하시오.", difficulty: "어려움", type: "주관식(서술형)", source: "충북교육청", author: "이도윤", usageCount: 61, createdAt: "2025-08-20",
+      content: "[문제]\n8칸 회전판: 빨강 5칸, 파랑 2칸, 노랑 1칸\n각 색에 멈출 가능성을 말로 표현하고 비교하시오.\n\n[모범답안]\n빨강: ~일 것 같다 / 파랑: ~아닐 것 같다 / 노랑: ~아닐 것 같다\n빨강 > 파랑 > 노랑" },
+    { id: "6수05-01-Q006", title: "다음 중 '불가능하다'로 표현할 수 있는 사건을 모두 고르시오.", difficulty: "쉬움", type: "객관식(다중선택)", source: "교육부 검정", author: "박지현", usageCount: 203, createdAt: "2025-02-28",
+      content: "[문제]\n① 주사위를 던져 0이 나온다\n② 동전을 던져 뒷면이 나온다\n③ 1~5 카드에서 6을 뽑는다\n④ 빨간 공만 있는 주머니에서 파란 공 꺼내기\n⑤ 가위바위보에서 비긴다\n\n[정답] ①③④" },
+    { id: "6수05-01-Q007", title: "실생활에서 가능성을 표현하는 상황을 만드시오.", difficulty: "매우 어려움", type: "주관식(서술형)", source: "한국교육과정평가원", author: "김민수", usageCount: 42, createdAt: "2025-09-10",
+      content: "[문제]\n각 가능성에 해당하는 실생활 상황을 1개씩 만드시오.\n(1) 확실하다 (2) ~일 것 같다 (3) 반반이다 (4) ~아닐 것 같다 (5) 불가능하다\n\n[모범답안 예시]\n(1) 1월 다음은 2월 (2) 여름 25도 이상 (3) 동전 앞면 (4) 로또 당첨 (5) 날개 없이 비행" },
+  ],
+  "6수05-02": [
+    { id: "6수05-02-Q001", title: "주사위를 던질 때 짝수가 나올 가능성을 수로 표현하시오.", difficulty: "쉬움", type: "주관식(단답형)", source: "교육부 검정", author: "이승현", usageCount: 178, createdAt: "2025-03-25",
+      content: "[문제]\n주사위를 던질 때 짝수 나올 가능성을 수로 표현하시오.\n\n[모범답안] 3/6 = 1/2\n(풀이: 짝수 2,4,6 → 3가지/6가지)" },
+    { id: "6수05-02-Q002", title: "빨간 공 2개, 파란 공 3개에서 빨간 공을 뽑을 가능성을 분수로 나타내시오.", difficulty: "보통", type: "주관식(단답형)", source: "충북교육청", author: "최정아", usageCount: 156, createdAt: "2025-04-18",
+      content: "[문제]\n빨간 공 2개, 파란 공 3개. 빨간 공 나올 가능성을 분수로?\n\n[모범답안] 2/5" },
+    { id: "6수05-02-Q003", title: "가능성을 수로 올바르게 표현한 것을 고르시오.", difficulty: "보통", type: "객관식(단일선택)", source: "한국교육과정평가원", author: "박현우", usageCount: 201, createdAt: "2025-05-30",
+      content: "[문제]\n카드 1~8에서 5 이상 뽑을 가능성?\n① 3/8 ② 4/8 ③ 5/8 ④ 4/5 ⑤ 3/5\n\n[정답] ② (5,6,7,8 → 4개/8개)" },
+    { id: "6수05-02-Q004", title: "확실한 사건과 불가능한 사건의 가능성을 수로 나타내시오.", difficulty: "쉬움", type: "주관식(서술형)", source: "교육부 검정", author: "김태희", usageCount: 134, createdAt: "2025-06-15",
+      content: "[문제]\n(1) 확실한 사건의 가능성을 수로?\n(2) 불가능한 사건은?\n(3) 이유?\n\n[모범답안] (1) 1 (2) 0 (3) 확실=분자=분모, 불가능=분자=0" },
+    { id: "6수05-02-Q005", title: "회전판에서 각 색에 멈출 가능성을 수로 나타내고 비교하시오.", difficulty: "어려움", type: "주관식(서술형)", source: "한국교육과정평가원", author: "이서진", usageCount: 88, createdAt: "2025-07-22",
+      content: "[문제]\n10칸 회전판: 빨 4, 파 3, 노 2, 초 1\n각 가능성을 분수로, 큰 순서대로.\n\n[모범답안] 빨 4/10=2/5 > 파 3/10 > 노 2/10=1/5 > 초 1/10" },
+    { id: "6수05-02-Q006", title: "주머니 속 공의 수를 가능성 조건에 맞게 구하시오.", difficulty: "매우 어려움", type: "주관식(서술형)", source: "충북교육청", author: "박서연", usageCount: 35, createdAt: "2025-08-05",
+      content: "[문제]\n조건: 전체 12개, 빨간 뽑을 가능성 1/3, 파란 가능성은 빨간의 2배\n\n[모범답안] 빨간 4개(4/12=1/3), 파란 8개(8/12=2/3)" },
+  ],
+  "4수05-01": [
+    { id: "4수05-01-Q001", title: "막대그래프를 보고 가장 많은 항목을 찾으시오.", difficulty: "쉬움", type: "객관식(단일선택)", source: "교육부 검정", author: "한지수", usageCount: 210, createdAt: "2025-02-15",
+      content: "[문제]\n좋아하는 과일 조사 막대그래프에서 가장 인기 있는 과일은?\n① 사과 ② 바나나 ③ 포도 ④ 딸기\n\n[정답] ④ 딸기 (막대가 가장 높음)" },
+    { id: "4수05-01-Q002", title: "주어진 자료를 막대그래프로 나타내시오.", difficulty: "보통", type: "주관식(서술형)", source: "충북교육청", author: "김유진", usageCount: 145, createdAt: "2025-03-20",
+      content: "[문제]\n우리 반 좋아하는 운동: 축구 8명, 농구 5명, 야구 3명, 수영 6명\n이 자료를 막대그래프로 나타내시오.\n\n[모범답안] (막대그래프 작성 - 세로축: 명수, 가로축: 운동 종류)" },
+  ]
+};
+
+// ================================================
+// STATE
+
+var curStep=2, selStds=[], allQ=[], addedQ=[], prevQId=null;
+
+// ================================================
+// COMPOSE FUNCTIONS
+// ================================================
+function initPicker() {
+  renderTags();
+  genAllQ();
+  updatePickerAdded();
+  updatePickerDone();
+}
+
+function toggleStd(code, grade) {
+  var idx = selStds.findIndex(function(s) { return s.code === code; });
+  if (idx >= 0) {
+    selStds.splice(idx, 1);
+  } else {
+    var stds = ALL_STANDARDS[grade] || [];
+    var found = stds.find(function(s) { return s.code === code; });
+    if (found) selStds.push(Object.assign({}, found, { grade: grade }));
+  }
+  renderTags();
+  genAllQ();
+  updatePickerDone();
+}
+
+function updatePickerDone() {
+  var el = document.getElementById("pickerDone");
+  if (el) el.textContent = "선택 완료 (" + selStds.length + "개 성취기준, " + addedQ.length + "개 문항)";
+}
+
+function updatePickerAdded() {
+  var wrap = document.getElementById("pickerAdded");
+  var items = document.getElementById("pickerAddedItems");
+  var cnt = document.getElementById("pickerAddedCnt");
+  var addCntEl = document.getElementById("addCnt");
+  if (!wrap) return;
+  if (addedQ.length === 0) { wrap.style.display = "none"; if (addCntEl) addCntEl.textContent = "0"; return; }
+  wrap.style.display = "block";
+  cnt.textContent = addedQ.length;
+  if (addCntEl) addCntEl.textContent = addedQ.length;
+  var h = "";
+  addedQ.forEach(function(q, i) {
+    h += '<div class="added-row" style="padding:6px 10px;">';
+    h += '<span class="added-num">'+(i+1)+'</span>';
+    h += '<span class="added-id">'+q.id+'</span>'+dbHTML(q.difficulty);
+    h += '<span class="added-title">'+q.title+'</span>';
+    h += '<div class="added-actions">';
+    h += '<button onclick="mvQ('+i+',-1)"'+(i===0?' disabled style="opacity:.3"':'')+'>▲</button>';
+    h += '<button onclick="mvQ('+i+',1)"'+(i===addedQ.length-1?' disabled style="opacity:.3"':'')+'>▼</button>';
+    h += '<button class="rm" onclick="rmQ(\''+q.id+'\')">✕</button></div></div>';
+  });
+  items.innerHTML = h;
+}
+
+function renderTags() {
+  var el = document.getElementById("tagList");
+  if (selStds.length === 0) { el.innerHTML = ""; return; }
+  var h = "";
+  selStds.forEach(function(s) {
+    h += '<span class="tag"><span class="grade-label">'+(s.grade||"")+'</span>['+s.code+'] '+s.desc.substring(0,20)+'...';
+    h += '<button class="tag-rm" onclick="event.stopPropagation();rmStd(\''+s.code+'\')">×</button></span>';
+  });
+  h += '<button class="btn-danger-text" onclick="clearStds()">모두 삭제</button>';
+  el.innerHTML = h;
+}
+
+function rmStd(code) {
+  selStds = selStds.filter(function(s) { return s.code !== code; });
+  renderTags(); genAllQ();
+}
+function clearStds() { selStds = []; renderTags(); genAllQ(); }
+
+// ================================================
+// QUESTION GENERATION
+// ================================================
+function genAllQ() {
+  allQ = [];
+  selStds.forEach(function(st) {
+    var dq = DETAIL_Q[st.code];
+    if (dq) allQ = allQ.concat(dq);
+    else allQ = allQ.concat(mockQ(st.code));
+  });
+  var sv = document.getElementById("splitView");
+  selStds.length > 0 ? sv.classList.remove("hidden") : sv.classList.add("hidden");
+  doFilter();
+}
+
+var mockQCache = {};
+function mockQ(code) {
+  if (mockQCache[code]) return mockQCache[code];
+  var titles = ["다음 중 올바른 것을 고르시오.","빈칸에 알맞은 수를 구하시오.","풀이 과정을 쓰시오.","조건을 이용하여 답을 구하시오.","옳은 것을 모두 고르시오.","그림을 보고 풀어보시오."];
+  var srcs = ["교육부 검정","충북교육청","한국교육과정평가원","자체 제작"];
+  var auths = ["김선생","이교사","박연구원","교육부"];
+  var r = [], n = 8 + Math.floor(Math.random()*6);
+  for (var i = 0; i < n; i++) {
+    var tp = TYPES[Math.floor(Math.random()*4)];
+    r.push({
+      id: code+"-Q"+String(i+1).padStart(3,"0"), title: titles[i%titles.length],
+      difficulty: DIFFS[Math.floor(Math.random()*5)], type: tp,
+      source: srcs[Math.floor(Math.random()*4)], author: auths[Math.floor(Math.random()*4)],
+      usageCount: Math.floor(Math.random()*200),
+      createdAt: "2025-"+String(Math.floor(Math.random()*12)+1).padStart(2,"0")+"-"+String(Math.floor(Math.random()*28)+1).padStart(2,"0"),
+      content: "["+code+"] 문항 "+(i+1)+"번\n\n"+titles[i%titles.length]+"\n\n"+(tp.includes("객관식")?"① A ② B ③ C ④ D ⑤ E\n\n정답: ③":"서술형 답안 작성\n\n모범답안: (풀이 과정)")
+    });
+  }
+  mockQCache[code] = r;
+  return r;
+}
+
+// ================================================
+// FILTER / SORT
+// ================================================
+function doFilter() {
+  var kw = document.getElementById("searchIn").value.trim();
+  var df = document.getElementById("fDiff").value;
+  var tf = document.getElementById("fType").value;
+  var sb = document.getElementById("fSort").value;
+
+  var f = allQ.filter(function(q) {
+    if (df !== "전체" && q.difficulty !== df) return false;
+    if (tf !== "전체" && !q.type.includes(tf)) return false;
+    if (kw && q.title.indexOf(kw)===-1 && q.id.indexOf(kw)===-1 && q.source.indexOf(kw)===-1) return false;
+    return true;
+  });
+  f.sort(function(a,b) {
+    if (sb==="difficulty") return DIFFS.indexOf(a.difficulty)-DIFFS.indexOf(b.difficulty);
+    if (sb==="type") return a.type.localeCompare(b.type);
+    if (sb==="usage") return b.usageCount-a.usageCount;
+    if (sb==="date") return b.createdAt.localeCompare(a.createdAt);
+    return 0;
+  });
+  renderQList(f);
+  document.getElementById("fCnt").textContent = f.length+"개 문항";
+}
+
+// ================================================
+// RENDER Q LIST
+// ================================================
+function renderQList(qs) {
+  var h = "";
+  qs.forEach(function(q) {
+    var ia = addedQ.some(function(a){return a.id===q.id;});
+    var ac = prevQId===q.id;
+    h += '<div class="q-item '+(ac?"active ":"")+(ia?"added":"")+'" onclick="showPrev(\''+q.id+'\')">';
+    h += '<div class="q-item-body"><div class="q-item-meta">';
+    h += '<span class="q-item-id">'+q.id+'</span>';
+    if (ia) h += '<span class="badge badge-green">추가됨</span>';
+    h += '</div><div class="q-item-title">'+q.title+'</div>';
+    h += '<div class="q-item-badges">'+dbHTML(q.difficulty)+tbHTML(q.type)+'<span class="q-item-src">'+q.source+'</span></div></div>';
+    h += '<button class="q-add-btn '+(ia?"done":"can")+'" onclick="event.stopPropagation();'+(ia?"rmQ(\'"+q.id+"\')":"addQ(\'"+q.id+"\')")+'">'+(ia?"✓":"+")+'</button></div>';
+  });
+  document.getElementById("qList").innerHTML = h;
+}
+
+function dbHTML(d) { var m={"매우 쉬움":"blue","쉬움":"green","보통":"yellow","어려움":"orange","매우 어려움":"red"}; return '<span class="badge badge-'+(m[d]||"gray")+'">'+d+'</span>'; }
+function tbHTML(t) { return '<span class="badge badge-'+(t.includes("객관식")?"purple":"gray")+'">'+t+'</span>'; }
+
+// ================================================
+// PREVIEW
+// ================================================
+function showPrev(id) {
+  prevQId = id;
+  var q = allQ.find(function(x){return x.id===id;});
+  if (!q) return;
+  document.getElementById("prevEmpty").style.display = "none";
+  var pf = document.getElementById("prevFull"); pf.classList.remove("hidden"); pf.style.display = "flex";
+  document.getElementById("pId").textContent = q.id;
+  document.getElementById("pBadges").innerHTML = dbHTML(q.difficulty)+" "+tbHTML(q.type);
+  document.getElementById("pTitle").textContent = q.title;
+  document.getElementById("pContent").textContent = q.content;
+  document.getElementById("pSrc").textContent = q.source;
+  document.getElementById("pAuth").textContent = q.author;
+  document.getElementById("pUse").textContent = q.usageCount+"회";
+  document.getElementById("pDate").textContent = q.createdAt;
+
+  var ia = addedQ.some(function(a){return a.id===q.id;});
+  var btn = document.getElementById("pAddBtn");
+  btn.textContent = ia ? "✓ 추가됨 (클릭하여 제거)" : "+ 평가지에 추가";
+  btn.disabled = false;
+  btn.style.background = ia ? "#fee2e2" : "";
+  btn.style.color = ia ? "#dc2626" : "";
+  doFilter();
+}
+function addPrevQ() {
+  if (!prevQId) return;
+  var ia = addedQ.some(function(a){return a.id===prevQId;});
+  if (ia) { rmQ(prevQId); } else { addQ(prevQId); }
+}
+
+// ================================================
+// ADD / REMOVE / MOVE
+// ================================================
+function addQ(id) {
+  if (addedQ.some(function(a){return a.id===id;})) return;
+  var q = allQ.find(function(x){return x.id===id;});
+  if (q) { addedQ.push(q); updAdded(); doFilter(); if (prevQId===id) showPrev(id); }
+}
+function rmQ(id) {
+  addedQ = addedQ.filter(function(q){return q.id!==id;});
+  updAdded(); doFilter(); if (prevQId===id) showPrev(id);
+}
+function mvQ(i,d) {
+  var t = i+d;
+  if (t<0||t>=addedQ.length) return;
+  var tmp = addedQ[i]; addedQ[i]=addedQ[t]; addedQ[t]=tmp; updAdded();
+}
+
+function updAdded() {
+  document.getElementById("addCnt").textContent = addedQ.length;
+  document.getElementById("composeBtn").disabled = addedQ.length === 0;
+  updatePickerAdded();
+  updatePickerDone();
+}
+
+// ================================================
+// COMBINED SEARCH (성취기준 + 콘텐츠 키워드 통합)
+// ================================================
+var rktSelIdx = -1;
+
+function getFlatStandards() {
+  var flat = [];
+  var grades = Object.keys(ALL_STANDARDS);
+  for (var g = 0; g < grades.length; g++) {
+    var grade = grades[g];
+    var stds = ALL_STANDARDS[grade];
+    for (var i = 0; i < stds.length; i++) {
+      flat.push(Object.assign({}, stds[i], { grade: grade }));
+    }
+  }
+  return flat;
+}
+
+// 성취기준 검색 → combinedSearch 호출
+function rocketSearch() { combinedSearch(); }
+
+// 통합 검색: 성취기준만 / 키워드만 / 교집합 모두 지원
+function combinedSearch() {
+  var box = document.getElementById("rktResults");
+  rktSelIdx = -1;
+  var stdQ = (document.getElementById("rktInput").value || "").trim();
+  var kwQ = (document.getElementById("rktSubInput").value || "").trim();
+
+  // 둘 다 비어있으면 결과 비움
+  if (!stdQ && !kwQ) { box.innerHTML = ""; return; }
+
+  // 1) 성취기준 필터링
+  var flat = getFlatStandards();
+  var matchedStds = flat; // 성취기준 입력 없으면 전체
+  if (stdQ) {
+    var stdTerms = stdQ.split(" ").filter(function(t) { return t; });
+    matchedStds = flat.filter(function(s) {
+      var fullText = [
+        s.school||"", s.subject||"", s.grade||"",
+        s.term ? s.term+"학기" : "", s.unit||"", s.lesson||"",
+        s.area||"", s.code||"", s.desc||"",
+        s.sub1||"", s.sub2||"", s.sub3||"",
+        s.grade ? s.grade.replace("학년","")+"학년" : ""
+      ].join(" ");
+      return stdTerms.every(function(t) { return fullText.toLowerCase().indexOf(t.toLowerCase()) !== -1; });
+    });
+  }
+
+  // 2) 키워드가 있으면 해당 성취기준의 문항까지 필터
+  if (kwQ) {
+    var kwTerms = kwQ.split(" ").filter(function(t) { return t; });
+    // 성취기준별로 매칭 문항 수 계산
+    var resultsWithQ = [];
+    matchedStds.forEach(function(s) {
+      var dq = DETAIL_Q[s.code] || mockQ(s.code);
+      var matched = dq.filter(function(q) {
+        var qText = [q.id, q.title, q.content||"", q.source||"", q.author||""].join(" ");
+        return kwTerms.every(function(t) { return qText.toLowerCase().indexOf(t.toLowerCase()) !== -1; });
+      });
+      if (matched.length > 0) {
+        resultsWithQ.push({ std: s, matchedCount: matched.length, totalCount: dq.length });
+      }
+    });
+    renderCombinedResults(resultsWithQ, true);
+  } else {
+    // 성취기준만 검색
+    var resultsOnly = matchedStds.slice(0, 30).map(function(s) {
+      return { std: s, matchedCount: 0, totalCount: s.qCount || 0 };
+    });
+    renderCombinedResults(resultsOnly, false);
+  }
+}
+
+function renderCombinedResults(results, hasKw) {
+  var box = document.getElementById("rktResults");
+  if (results.length === 0) {
+    box.innerHTML = '<div class="rkt-no-result">검색 결과가 없습니다. 다른 키워드를 시도해보세요.</div>';
+    return;
+  }
+
+  var h = "";
+  for (var r = 0; r < results.length; r++) {
+    var item = results[r];
+    var s = item.std;
+    var isSel = selStds.some(function(ss) { return ss.code === s.code; });
+    var badgeClass = (parseInt(s.grade)||0) > 6 ? "mid" : "elem";
+
+    h += '<div class="rkt-item" data-code="'+s.code+'" data-grade="'+s.grade+'" onclick="toggleStdFromRocket(\''+s.code+'\',\''+s.grade+'\')" style="cursor:pointer;">';
+    h += '<div style="display:flex; align-items:flex-start; gap:10px;">';
+    h += '<div style="flex:1; min-width:0;">';
+
+    // 1줄: 배지 + 과목
+    h += '<div class="rkt-item-top"><div>';
+    h += '<span class="rkt-badge '+badgeClass+'">'+(s.school||"초등학교")+' '+s.grade+'</span>';
+    h += '<span class="rkt-subject">'+(s.subject||"수학")+'</span>';
+    if (s.term) h += ' <span style="font-size:11px; color:#aaa;">'+s.term+'학기</span>';
+    h += '</div><div>';
+    if (hasKw) {
+      h += '<span class="rkt-cnt-badge has-cnt" title="키워드 매칭 문항">🎯 '+item.matchedCount+'건 매칭</span>';
+    } else if (s.qCount > 0) {
+      h += '<span class="rkt-cnt-badge has-cnt" title="전체 문항 수">📦 '+s.qCount+'건</span>';
+    }
+    h += '</div></div>';
+
+    // 2줄: 단원 | 차시
+    if (s.unit || s.lesson) {
+      h += '<div class="rkt-item-unit">'+(s.unit||"");
+      if (s.lesson) h += '<span class="rkt-sep">|</span>'+s.lesson;
+      h += '</div>';
+    }
+
+    // 3줄: 코드 + 성취기준
+    h += '<div class="rkt-item-std"><span class="rkt-code">['+s.code+']</span>'+s.desc+'</div>';
+    h += '</div>';
+
+    // 선택/해제 버튼
+    h += '<div class="rkt-item-add '+(isSel?"done":"can")+'" onclick="event.stopPropagation(); toggleStdFromRocket(\''+s.code+'\',\''+s.grade+'\')">';
+    h += isSel ? "✓" : "+";
+    h += '</div></div></div>';
+  }
+  box.innerHTML = h;
+}
+
+function handleRocketKey(e) {
+  var items = document.querySelectorAll("#rktResults .rkt-item");
+  if (!items.length) return;
+  if (e.key === "ArrowDown") {
+    e.preventDefault();
+    rktSelIdx = (rktSelIdx + 1) % items.length;
+    highlightRocket(items);
+  } else if (e.key === "ArrowUp") {
+    e.preventDefault();
+    rktSelIdx = (rktSelIdx - 1 + items.length) % items.length;
+    highlightRocket(items);
+  } else if (e.key === "Enter") {
+    e.preventDefault();
+    var idx = rktSelIdx > -1 ? rktSelIdx : 0;
+    if (items[idx]) {
+      var code = items[idx].getAttribute("data-code");
+      var grade = items[idx].getAttribute("data-grade");
+      toggleStdFromRocket(code, grade);
+    }
+  }
+}
+
+function highlightRocket(items) {
+  for (var i = 0; i < items.length; i++) {
+    if (i === rktSelIdx) {
+      items[i].classList.add("rkt-selected");
+      items[i].scrollIntoView({ block: "nearest" });
+    } else {
+      items[i].classList.remove("rkt-selected");
+    }
+  }
+}
+
+function toggleStdFromRocket(code, grade) {
+  toggleStd(code, grade);
+  // 검색 결과 재렌더링 (선택 상태 갱신)
+  combinedSearch();
+}
+
+// ================================================
+// INIT
+
+// ================================================
+// INIT
+// ================================================
+document.addEventListener("DOMContentLoaded", function() {
+  checkFormValid();
+});
+</script>
+<script src="../../../common-nav.js"></script>
+</body>
+</html>

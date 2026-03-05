@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>다채움 - 나의 클래스</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/pretendard/1.3.9/variable/pretendardvariable.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="dacheum-style.css">
+    <link rel="stylesheet" href="../../common-nav.css">
+</head>
+<body data-gnb-page="myClass" data-gnb-base="../../">
+    <div class="container">
+        <div class="tab-nav">
+            <button class="tab-btn active" onclick="switchTab('created')">📚 개설 클래스 <span class="badge-count">5</span></button>
+            <button class="tab-btn" onclick="switchTab('joined')">🎓 참여 클래스 <span class="badge-count">8</span></button>
+        </div>
+
+        <div class="main-grid">
+            <div class="card class-shortcuts">
+                <div class="card-header">
+                    <h2 class="card-title">📁 클래스 바로가기</h2>
+                    <button class="btn btn-ghost btn-sm">전체보기</button>
+                </div>
+                <div class="card-body">
+                    <div class="class-list" id="classList"></div>
+                </div>
+            </div>
+
+            <div class="card calendar-section">
+                <div class="card-header">
+                    <h2 class="card-title">📅 일정 캘린더</h2>
+                    <button class="btn btn-primary btn-sm" onclick="openDetailCalendar()">상세 캘린더 보기</button>
+                </div>
+                <div class="card-body">
+                    <div class="calendar-controls">
+                        <div class="calendar-nav">
+                            <button onclick="prevMonth()">‹</button>
+                            <span class="calendar-month" id="calendarMonth">2025년 1월</span>
+                            <button onclick="nextMonth()">›</button>
+                        </div>
+                        <div class="calendar-legend">
+                            <div class="legend-item"><div class="legend-dot lesson"></div>수업</div>
+                            <div class="legend-item"><div class="legend-dot assignment"></div>과제</div>
+                            <div class="legend-item"><div class="legend-dot evaluation"></div>평가</div>
+                            <div class="legend-item"><div class="legend-dot survey"></div>설문</div>
+                        </div>
+                    </div>
+                    <div class="calendar-grid" id="calendarGrid"></div>
+                    <button class="no-deadline-btn" onclick="openNoDeadlinePopup()">
+                        <span class="no-deadline-btn-icon">📋</span>
+                        <span>기한없음 일정 확인</span>
+                        <span class="no-deadline-btn-count" id="noDeadlineCount">0</span>
+                        <span class="no-deadline-btn-arrow">›</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <section style="margin-top:1.5rem;">
+            <div class="card">
+                <div class="card-header"><h2 class="card-title">📊 클래스 현황</h2></div>
+                <div class="card-body">
+                    <div class="filter-bar">
+                        <div class="filter-group">
+                            <span class="filter-label">기간</span>
+                            <select class="filter-select" id="periodFilter" onchange="applyFilters()">
+                                <option value="week">최근 1주</option>
+                                <option value="month" selected>최근 1개월</option>
+                                <option value="quarter">최근 3개월</option>
+                            </select>
+                        </div>
+                        <div class="filter-group">
+                            <span class="filter-label">클래스</span>
+                            <select class="filter-select" id="classFilter" onchange="applyFilters()">
+                                <option value="all">전체 클래스</option>
+                                <option value="1">SW교육 연구회</option>
+                                <option value="2">수학교육 혁신반</option>
+                            </select>
+                        </div>
+                        <div class="filter-chips" id="submitFilterChips" style="display:none;">
+                            <button class="filter-chip active" onclick="filterBySubmit('all')">전체</button>
+                            <button class="filter-chip" onclick="filterBySubmit('completed')">✓ 제출 완료</button>
+                            <button class="filter-chip" onclick="filterBySubmit('pending')">! 미제출</button>
+                        </div>
+                    </div>
+                    <div class="stats-grid" id="statsGrid"></div>
+                    <div class="content-sections">
+                        <div class="content-card">
+                            <div class="card-header"><h3 class="card-title">📝 새로 올라온 글</h3><button class="btn btn-ghost btn-sm" onclick="openListModal('new-posts')">전체보기</button></div>
+                            <div class="content-list" id="newPostsList"></div>
+                        </div>
+                        <div class="content-card">
+                            <div class="card-header"><h3 class="card-title">🔥 인기글</h3><button class="btn btn-ghost btn-sm" onclick="openListModal('popular-posts')">전체보기</button></div>
+                            <div class="content-list" id="popularPostsList"></div>
+                        </div>
+                        <div class="content-card">
+                            <div class="card-header"><h3 class="card-title">📊 설문</h3><button class="btn btn-ghost btn-sm" onclick="openListModal('surveys')">전체보기</button></div>
+                            <div class="content-list" id="surveysList"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+        <!-- 활동 내역 섹션 -->
+        <section style="margin-top:1.5rem;">
+            <div class="card">
+                <div class="card-header">
+                    <h2 class="card-title">📋 활동 내역</h2>
+                    <button class="btn btn-ghost btn-sm" onclick="openListModal('all-activities')">전체보기</button>
+                </div>
+                <div class="card-body">
+                    <div class="filter-bar">
+                        <div class="filter-group">
+                            <span class="filter-label">활동 유형</span>
+                            <select class="filter-select" id="activityTypeFilter">
+                                <option value="all">전체</option>
+                                <option value="assignment">📝 과제</option>
+                                <option value="evaluation">🎯 평가</option>
+                                <option value="lesson">📺 수업</option>
+                            </select>
+                        </div>
+                        <div class="filter-group">
+                            <span class="filter-label">상태</span>
+                            <select class="filter-select" id="activityStatusFilter">
+                                <option value="all">전체</option>
+                                <option value="urgent">🔴 긴급</option>
+                                <option value="progress">🟡 진행중</option>
+                                <option value="done">✅ 완료</option>
+                            </select>
+                        </div>
+                    </div>
+                    
+                    <!-- 개설 클래스용 (교사 뷰) -->
+                    <div class="activity-list" id="createdActivityList">
+                        <div class="activity-card urgent">
+                            <div class="activity-status-line urgent"></div>
+                            <div class="activity-icon danger"><i class="fa-solid fa-fire"></i></div>
+                            <div class="activity-content">
+                                <div class="activity-meta">
+                                    <span class="activity-class-badge">SW교육 연구회</span>
+                                    <span class="activity-type">과제</span>
+                                </div>
+                                <div class="activity-title">[사회] 지역 문제 탐구 보고서 <span class="d-day-badge">D-Day</span></div>
+                                <div class="activity-date">📅 2025.01.05 ~ 2025.01.13 (오늘 마감)</div>
+                            </div>
+                            <div class="activity-progress">
+                                <div class="progress-text"><span>제출률 40%</span><span class="text-danger">12/30명</span></div>
+                                <div class="progress-bar"><div class="progress-fill danger" style="width:40%"></div></div>
+                            </div>
+                            <div class="activity-actions">
+                                <button class="btn btn-nudge btn-sm"><i class="fa-regular fa-bell"></i> 미제출 알림</button>
+                                <button class="btn btn-primary btn-sm"><i class="fa-solid fa-pen"></i> 채점하기</button>
+                            </div>
+                        </div>
+
+                        <div class="activity-card">
+                            <div class="activity-status-line progress"></div>
+                            <div class="activity-icon"><i class="fa-solid fa-check-to-slot"></i></div>
+                            <div class="activity-content">
+                                <div class="activity-meta">
+                                    <span class="activity-class-badge">수학교육 혁신반</span>
+                                    <span class="activity-type">평가</span>
+                                </div>
+                                <div class="activity-title">1단원 형성평가</div>
+                                <div class="activity-date">📅 2025.01.01 ~ 2025.01.15</div>
+                            </div>
+                            <div class="activity-progress">
+                                <div class="progress-text"><span>응시율 75%</span><span class="text-primary">15/20명</span></div>
+                                <div class="progress-bar"><div class="progress-fill primary" style="width:75%"></div></div>
+                            </div>
+                            <div class="activity-actions">
+                                <button class="btn btn-outline btn-sm"><i class="fa-solid fa-chart-pie"></i> 결과 분석</button>
+                            </div>
+                        </div>
+
+                        <div class="activity-card done">
+                            <div class="activity-status-line done"></div>
+                            <div class="activity-icon"><i class="fa-solid fa-video"></i></div>
+                            <div class="activity-content">
+                                <div class="activity-meta">
+                                    <span class="activity-class-badge">SW교육 연구회</span>
+                                    <span class="activity-type">수업</span>
+                                </div>
+                                <div class="activity-title">파이썬 기초 - 변수와 자료형</div>
+                                <div class="activity-date">📅 상시 운영</div>
+                            </div>
+                            <div class="activity-progress">
+                                <div class="progress-text"><span>이수율 95%</span><span class="text-success">완료</span></div>
+                                <div class="progress-bar"><div class="progress-fill success" style="width:95%"></div></div>
+                            </div>
+                            <div class="activity-actions">
+                                <button class="btn btn-outline btn-sm"><i class="fa-solid fa-eye"></i> 상세보기</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 참여 클래스용 (학생 뷰) -->
+                    <div class="activity-list" id="joinedActivityList" style="display:none;">
+                        <div class="activity-card urgent">
+                            <div class="activity-status-line urgent"></div>
+                            <div class="activity-icon danger"><i class="fa-solid fa-fire"></i></div>
+                            <div class="activity-content">
+                                <div class="activity-meta">
+                                    <span class="activity-class-badge">충북 교사 연수</span>
+                                    <span class="activity-type">과제</span>
+                                </div>
+                                <div class="activity-title">[연수] 수업 성찰 보고서 <span class="d-day-badge">D-Day</span></div>
+                                <div class="activity-date text-danger">⚠️ 제출 마감이 임박했습니다!</div>
+                            </div>
+                            <div class="activity-actions">
+                                <button class="btn btn-danger"><i class="fa-solid fa-paper-plane"></i> 지금 제출하기</button>
+                            </div>
+                        </div>
+
+                        <div class="activity-card">
+                            <div class="activity-status-line progress"></div>
+                            <div class="activity-icon"><i class="fa-solid fa-video"></i></div>
+                            <div class="activity-content">
+                                <div class="activity-meta">
+                                    <span class="activity-class-badge">에듀테크 활용반</span>
+                                    <span class="activity-type">수업</span>
+                                </div>
+                                <div class="activity-title">AI 도구 활용 수업 설계</div>
+                                <div class="activity-date">📅 상시 운영</div>
+                            </div>
+                            <div class="activity-progress">
+                                <div class="progress-text"><span>나의 진도율</span><span>50%</span></div>
+                                <div class="progress-bar"><div class="progress-fill primary" style="width:50%"></div></div>
+                            </div>
+                            <div class="activity-actions">
+                                <button class="btn btn-outline btn-sm"><i class="fa-solid fa-play"></i> 이어 학습하기</button>
+                            </div>
+                        </div>
+
+                        <div class="activity-card done">
+                            <div class="activity-status-line done"></div>
+                            <div class="activity-icon"><i class="fa-solid fa-clipboard-check"></i></div>
+                            <div class="activity-content">
+                                <div class="activity-meta">
+                                    <span class="activity-class-badge">교육과정 연구회</span>
+                                    <span class="activity-type">평가</span>
+                                </div>
+                                <div class="activity-title completed">교육과정 이해도 테스트</div>
+                                <div class="activity-date">제출일: 2025.01.07</div>
+                            </div>
+                            <div class="activity-score">
+                                <div class="score-label">내 점수</div>
+                                <div class="score-value">92점</div>
+                            </div>
+                            <div class="activity-actions">
+                                <button class="btn btn-outline btn-sm"><i class="fa-solid fa-eye"></i> 결과 보기</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+
+    <!-- 기한없음 일정 레이어 팝업 -->
+    <div class="no-deadline-overlay" id="noDeadlinePopup" onclick="if(event.target===this)closeNoDeadlinePopup()">
+        <div class="no-deadline-popup">
+            <div class="no-deadline-popup-header">
+                <div class="no-deadline-popup-title">
+                    <span style="font-size:1.25rem;">📋</span>
+                    <h3>기한없음 일정</h3>
+                    <span class="no-deadline-popup-badge" id="noDeadlinePopupCount">0건</span>
+                </div>
+                <button class="no-deadline-popup-close" onclick="closeNoDeadlinePopup()">×</button>
+            </div>
+            <p class="no-deadline-popup-desc">기한이 설정되지 않은 일정입니다. 언제든 제출할 수 있습니다.</p>
+            <div class="no-deadline-list" id="noDeadlineList"></div>
+        </div>
+    </div>
+
+    <!-- 모달들 -->
+    <div class="modal-overlay" id="detailCalendarModal">
+        <div class="modal large">
+            <div class="modal-header"><h3 class="modal-title">📅 상세 캘린더</h3><button class="modal-close" onclick="closeModal('detailCalendarModal')">×</button></div>
+            <div class="modal-body">
+                <div class="detail-calendar-header">
+                    <div class="calendar-nav">
+                        <button onclick="prevDetailMonth()">‹</button>
+                        <span class="calendar-month" id="detailCalendarMonth">2025년 1월</span>
+                        <button onclick="nextDetailMonth()">›</button>
+                    </div>
+                    <div style="display:flex;align-items:center;gap:1rem;">
+                        <div class="calendar-legend">
+                            <div class="legend-item"><div class="legend-dot lesson"></div>수업</div>
+                            <div class="legend-item"><div class="legend-dot assignment"></div>과제</div>
+                            <div class="legend-item"><div class="legend-dot evaluation"></div>평가</div>
+                            <div class="legend-item"><div class="legend-dot survey"></div>설문</div>
+                        </div>
+                        <div class="view-toggle">
+                            <button class="active" onclick="setCalendarView('month')">월간</button>
+                            <button onclick="setCalendarView('week')">주간</button>
+                        </div>
+                    </div>
+                </div>
+                <div class="detail-calendar" id="detailCalendar"></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="schedule-sidebar" id="scheduleSidebar">
+        <div class="sidebar-header"><span class="sidebar-title" id="sidebarDate">1월 15일</span><button class="modal-close" onclick="closeSidebar()">×</button></div>
+        <div class="sidebar-filter-bar" id="sidebarFilterBar">
+            <button class="sidebar-filter-btn active" data-filter="all" onclick="filterDaySchedule('all')">전체</button>
+            <button class="sidebar-filter-btn" data-filter="completed" onclick="filterDaySchedule('completed')">완료</button>
+            <button class="sidebar-filter-btn" data-filter="incomplete" onclick="filterDaySchedule('incomplete')">미완료</button>
+        </div>
+        <div class="sidebar-body" id="sidebarBody"></div>
+    </div>
+
+    <div class="modal-overlay" id="statModal">
+        <div class="modal">
+            <div class="modal-header"><h3 class="modal-title" id="statModalTitle">상세 정보</h3><button class="modal-close" onclick="closeModal('statModal')">×</button></div>
+            <div class="modal-body" id="statModalBody"></div>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="listModal">
+        <div class="modal">
+            <div class="modal-header"><h3 class="modal-title" id="listModalTitle">전체 목록</h3><button class="modal-close" onclick="closeModal('listModal')">×</button></div>
+            <div class="modal-body" id="listModalBody"></div>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="postModal">
+        <div class="modal" style="max-width:700px;">
+            <div class="modal-header"><h3 class="modal-title">글 상세보기</h3><button class="modal-close" onclick="closeModal('postModal')">×</button></div>
+            <div class="modal-body" id="postModalBody"></div>
+        </div>
+    </div>
+
+    <script src="dacheum-script.js"></script>
+    <script src="../../common-nav.js"></script>
+</body>
+</html>

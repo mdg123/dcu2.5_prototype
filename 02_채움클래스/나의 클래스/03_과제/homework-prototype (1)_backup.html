@@ -1,0 +1,1819 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>채움클래스 과제 기능 프로토타입</title>
+    <link href="https://cdn.quilljs.com/1.3.6/quill.snow.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #4A6CF7;
+            --primary-light: #E8EDFF;
+            --primary-dark: #3451B2;
+            --success: #10B981;
+            --success-light: #D1FAE5;
+            --warning: #F59E0B;
+            --warning-light: #FEF3C7;
+            --danger: #EF4444;
+            --danger-light: #FEE2E2;
+            --gray-50: #F9FAFB;
+            --gray-100: #F3F4F6;
+            --gray-200: #E5E7EB;
+            --gray-300: #D1D5DB;
+            --gray-400: #9CA3AF;
+            --gray-500: #6B7280;
+            --gray-600: #4B5563;
+            --gray-700: #374151;
+            --gray-800: #1F2937;
+            --gray-900: #111827;
+            --radius-sm: 6px;
+            --radius-md: 10px;
+            --radius-lg: 16px;
+            --shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
+            --shadow-md: 0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -1px rgba(0,0,0,0.06);
+            --shadow-lg: 0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px -2px rgba(0,0,0,0.05);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Noto Sans KR', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--gray-50);
+            color: var(--gray-800);
+            line-height: 1.6;
+        }
+
+        /* Header */
+        .header {
+            background: white;
+            border-bottom: 1px solid var(--gray-200);
+            padding: 0 24px;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        .header-inner {
+            max-width: 1400px;
+            margin: 0 auto;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            height: 64px;
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-weight: 700;
+            font-size: 18px;
+            color: var(--primary);
+        }
+
+        .logo-icon {
+            width: 36px;
+            height: 36px;
+            background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+            border-radius: var(--radius-sm);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 20px;
+        }
+
+        .role-switcher {
+            display: flex;
+            background: var(--gray-100);
+            border-radius: var(--radius-md);
+            padding: 4px;
+            gap: 4px;
+        }
+
+        .role-btn {
+            padding: 8px 20px;
+            border: none;
+            background: transparent;
+            border-radius: var(--radius-sm);
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            color: var(--gray-600);
+        }
+
+        .role-btn.active {
+            background: white;
+            color: var(--primary);
+            box-shadow: var(--shadow-sm);
+        }
+
+        .role-btn:hover:not(.active) {
+            color: var(--gray-800);
+        }
+
+        /* Main Layout */
+        .main-container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 24px;
+        }
+
+        /* Page Header */
+        .page-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 24px;
+        }
+
+        .page-title {
+            font-size: 24px;
+            font-weight: 700;
+            color: var(--gray-900);
+        }
+
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 20px;
+            border: none;
+            border-radius: var(--radius-sm);
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .btn-primary {
+            background: var(--primary);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: var(--primary-dark);
+        }
+
+        .btn-secondary {
+            background: white;
+            color: var(--gray-700);
+            border: 1px solid var(--gray-300);
+        }
+
+        .btn-secondary:hover {
+            background: var(--gray-50);
+            border-color: var(--gray-400);
+        }
+
+        /* Filter Area */
+        .filter-area {
+            background: white;
+            border-radius: var(--radius-lg);
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: var(--shadow-sm);
+        }
+
+        .filter-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 16px;
+        }
+
+        .filter-left {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .filter-right {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .subject-tabs {
+            display: flex;
+            gap: 8px;
+        }
+
+        .subject-tab {
+            padding: 8px 16px;
+            border: 1px solid var(--gray-200);
+            background: white;
+            border-radius: var(--radius-sm);
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.2s;
+            color: var(--gray-600);
+        }
+
+        .subject-tab.active {
+            background: var(--primary);
+            color: white;
+            border-color: var(--primary);
+        }
+
+        .subject-tab:hover:not(.active) {
+            border-color: var(--primary);
+            color: var(--primary);
+        }
+
+        .checkbox-filter {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 14px;
+            color: var(--gray-600);
+            cursor: pointer;
+        }
+
+        .checkbox-filter input {
+            width: 18px;
+            height: 18px;
+            accent-color: var(--primary);
+        }
+
+        .select-box {
+            padding: 8px 32px 8px 12px;
+            border: 1px solid var(--gray-200);
+            border-radius: var(--radius-sm);
+            font-size: 14px;
+            background: white url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%236B7280' d='M2 4l4 4 4-4'/%3E%3C/svg%3E") no-repeat right 12px center;
+            appearance: none;
+            cursor: pointer;
+        }
+
+        .search-box {
+            display: flex;
+            align-items: center;
+            border: 1px solid var(--gray-200);
+            border-radius: var(--radius-sm);
+            overflow: hidden;
+        }
+
+        .search-box input {
+            padding: 8px 12px;
+            border: none;
+            font-size: 14px;
+            width: 200px;
+            outline: none;
+        }
+
+        .search-box button {
+            padding: 8px 12px;
+            border: none;
+            background: var(--gray-100);
+            cursor: pointer;
+        }
+
+        /* Homework List */
+        .homework-list {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .homework-card {
+            background: white;
+            border-radius: var(--radius-lg);
+            box-shadow: var(--shadow-sm);
+            overflow: hidden;
+            transition: all 0.2s;
+            cursor: pointer;
+        }
+
+        .homework-card:hover {
+            box-shadow: var(--shadow-md);
+            transform: translateY(-2px);
+        }
+
+        .homework-card-header {
+            padding: 20px;
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .homework-subject {
+            padding: 4px 10px;
+            background: var(--primary-light);
+            color: var(--primary);
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .homework-title {
+            flex: 1;
+            font-size: 16px;
+            font-weight: 600;
+            color: var(--gray-800);
+        }
+
+        .status-label {
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .status-progress {
+            background: var(--success-light);
+            color: var(--success);
+        }
+
+        .status-ended {
+            background: var(--gray-200);
+            color: var(--gray-500);
+        }
+
+        .status-upcoming {
+            background: var(--warning-light);
+            color: var(--warning);
+        }
+
+        .status-reserved {
+            background: #EDE9FE;
+            color: #8B5CF6;
+        }
+
+        /* 제출 시간 상태 라벨 */
+        .submit-status {
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 600;
+        }
+
+        .submit-ontime {
+            background: var(--success-light);
+            color: var(--success);
+        }
+
+        .submit-late {
+            background: var(--warning-light);
+            color: var(--warning);
+        }
+
+        .submit-late-info {
+            font-size: 11px;
+            color: var(--warning);
+            margin-left: 4px;
+        }
+
+        /* 페이지 상단 뷰 탭 */
+        .page-view-tabs {
+            display: flex;
+            gap: 4px;
+            background: var(--gray-100);
+            padding: 4px;
+            border-radius: var(--radius-md);
+            margin-right: 16px;
+        }
+
+        .page-view-tab {
+            padding: 10px 24px;
+            border: none;
+            background: transparent;
+            border-radius: var(--radius-sm);
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            color: var(--gray-600);
+        }
+
+        .page-view-tab.active {
+            background: white;
+            color: var(--primary);
+            box-shadow: var(--shadow-sm);
+        }
+
+        .page-view-tab:hover:not(.active) {
+            color: var(--gray-800);
+        }
+
+        /* 제목 영역 (라벨 포함) */
+        .homework-title-area {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex: 1;
+        }
+
+        /* 멤버별 보기 화면 */
+        .member-portfolio-view {
+            display: none;
+        }
+
+        .member-portfolio-view.active {
+            display: block;
+        }
+
+        .member-select-area {
+            background: white;
+            border-radius: var(--radius-lg);
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: var(--shadow-sm);
+        }
+
+        .member-select-row {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .member-select-label {
+            font-weight: 500;
+            color: var(--gray-700);
+        }
+
+        .member-select {
+            padding: 10px 16px;
+            border: 1px solid var(--gray-300);
+            border-radius: var(--radius-sm);
+            font-size: 14px;
+            min-width: 200px;
+        }
+
+        .member-sort-select {
+            padding: 8px 12px;
+            border: 1px solid var(--gray-200);
+            border-radius: var(--radius-sm);
+            font-size: 13px;
+            color: var(--gray-600);
+        }
+
+        .portfolio-card {
+            background: white;
+            border-radius: var(--radius-lg);
+            padding: 24px;
+            box-shadow: var(--shadow-sm);
+        }
+
+        .portfolio-header {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            margin-bottom: 24px;
+            padding-bottom: 16px;
+            border-bottom: 1px solid var(--gray-200);
+        }
+
+        .portfolio-avatar {
+            width: 56px;
+            height: 56px;
+            background: linear-gradient(135deg, var(--primary-light), var(--primary));
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: 700;
+            font-size: 20px;
+        }
+
+        .portfolio-info h3 {
+            font-size: 18px;
+            font-weight: 600;
+            color: var(--gray-800);
+        }
+
+        .portfolio-info p {
+            font-size: 14px;
+            color: var(--gray-500);
+            margin-top: 4px;
+        }
+
+        .portfolio-stats {
+            margin-left: auto;
+            display: flex;
+            gap: 24px;
+        }
+
+        .portfolio-stat {
+            text-align: center;
+        }
+
+        .portfolio-stat-value {
+            font-size: 24px;
+            font-weight: 700;
+            color: var(--primary);
+        }
+
+        .portfolio-stat-label {
+            font-size: 12px;
+            color: var(--gray-500);
+        }
+
+        .portfolio-list {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .portfolio-item {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            padding: 16px;
+            background: var(--gray-50);
+            border-radius: var(--radius-md);
+            border: 1px solid var(--gray-200);
+        }
+
+        .portfolio-item-subject {
+            padding: 4px 10px;
+            background: var(--primary-light);
+            color: var(--primary);
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .portfolio-item-title {
+            flex: 1;
+            font-weight: 500;
+            color: var(--gray-800);
+        }
+
+        .portfolio-item-date {
+            font-size: 13px;
+            color: var(--gray-500);
+        }
+
+        .portfolio-item-score {
+            font-weight: 600;
+            color: var(--primary);
+        }
+
+        .homework-meta {
+            display: flex;
+            align-items: center;
+            gap: 24px;
+            font-size: 13px;
+            color: var(--gray-500);
+        }
+
+        .homework-meta-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .submit-rate {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .submit-rate-bar {
+            width: 80px;
+            height: 6px;
+            background: var(--gray-200);
+            border-radius: 3px;
+            overflow: hidden;
+        }
+
+        .submit-rate-fill {
+            height: 100%;
+            background: var(--primary);
+            border-radius: 3px;
+        }
+
+        /* Homework Detail (Expanded) */
+        .homework-detail {
+            display: none;
+            border-top: 1px solid var(--gray-200);
+            background: var(--gray-50);
+        }
+
+        .homework-card.expanded .homework-detail {
+            display: block;
+        }
+
+        .detail-content {
+            padding: 24px;
+        }
+
+        .detail-section {
+            background: white;
+            border-radius: var(--radius-md);
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+
+        .detail-section-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--gray-700);
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .detail-section-title::before {
+            content: '';
+            width: 4px;
+            height: 16px;
+            background: var(--primary);
+            border-radius: 2px;
+        }
+
+        .homework-description {
+            font-size: 14px;
+            line-height: 1.8;
+            color: var(--gray-600);
+        }
+
+        .attachment-list {
+            display: flex;
+            gap: 12px;
+            margin-top: 12px;
+        }
+
+        .attachment-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 14px;
+            background: var(--gray-50);
+            border: 1px solid var(--gray-200);
+            border-radius: var(--radius-sm);
+            font-size: 13px;
+            color: var(--gray-600);
+        }
+
+        /* Submissions (Teacher View) */
+        .submissions-list {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .submission-item {
+            background: white;
+            border-radius: var(--radius-md);
+            padding: 16px;
+            display: flex;
+            align-items: flex-start;
+            gap: 16px;
+            border: 1px solid var(--gray-200);
+        }
+
+        .submission-avatar {
+            width: 40px;
+            height: 40px;
+            background: linear-gradient(135deg, var(--primary-light), var(--primary));
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: 600;
+            font-size: 14px;
+            flex-shrink: 0;
+        }
+
+        .submission-content {
+            flex: 1;
+        }
+
+        .submission-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 8px;
+        }
+
+        .submission-name {
+            font-weight: 600;
+            color: var(--gray-800);
+        }
+
+        .submission-info {
+            font-size: 12px;
+            color: var(--gray-500);
+        }
+
+        .submission-date {
+            font-size: 12px;
+            color: var(--gray-400);
+        }
+
+        .submission-text {
+            font-size: 14px;
+            color: var(--gray-600);
+            line-height: 1.7;
+            margin-bottom: 12px;
+        }
+
+        .submission-files {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .submission-file {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 12px;
+            background: var(--gray-50);
+            border: 1px solid var(--gray-200);
+            border-radius: var(--radius-sm);
+            font-size: 12px;
+            color: var(--gray-600);
+        }
+
+        .submission-actions {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            align-items: flex-end;
+        }
+
+        .plagiarism-info {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 12px;
+            color: var(--gray-500);
+            cursor: help;
+            position: relative;
+        }
+
+        .plagiarism-badge {
+            padding: 4px 8px;
+            background: var(--success-light);
+            color: var(--success);
+            border-radius: 4px;
+            font-weight: 500;
+        }
+
+        .plagiarism-badge.warning {
+            background: var(--warning-light);
+            color: var(--warning);
+        }
+
+        .plagiarism-badge.danger {
+            background: var(--danger-light);
+            color: var(--danger);
+        }
+
+        .tooltip {
+            position: absolute;
+            bottom: calc(100% + 8px);
+            right: 0;
+            background: var(--gray-800);
+            color: white;
+            padding: 8px 12px;
+            border-radius: var(--radius-sm);
+            font-size: 12px;
+            white-space: nowrap;
+            opacity: 0;
+            visibility: hidden;
+            transition: all 0.2s;
+        }
+
+        .plagiarism-info:hover .tooltip {
+            opacity: 1;
+            visibility: visible;
+        }
+
+        .grade-input {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .grade-input input {
+            width: 60px;
+            padding: 6px 10px;
+            border: 1px solid var(--gray-300);
+            border-radius: var(--radius-sm);
+            text-align: center;
+            font-size: 14px;
+        }
+
+        .btn-sm {
+            padding: 6px 12px;
+            font-size: 13px;
+        }
+
+        .btn-grade {
+            background: var(--success);
+            color: white;
+        }
+
+        .btn-grade:hover {
+            background: #059669;
+        }
+
+        /* Member Submit Area */
+        .submit-area {
+            background: white;
+            border-radius: var(--radius-md);
+            padding: 20px;
+        }
+
+        .editor-container {
+            border: 1px solid var(--gray-200);
+            border-radius: var(--radius-sm);
+            overflow: hidden;
+            margin-bottom: 16px;
+        }
+
+        .ql-toolbar {
+            border: none !important;
+            border-bottom: 1px solid var(--gray-200) !important;
+            background: var(--gray-50);
+        }
+
+        .ql-container {
+            border: none !important;
+            min-height: 200px;
+            font-family: 'Noto Sans KR', sans-serif;
+        }
+
+        .ql-editor {
+            min-height: 200px;
+            font-size: 14px;
+            line-height: 1.8;
+        }
+
+        .file-upload-area {
+            border: 2px dashed var(--gray-300);
+            border-radius: var(--radius-md);
+            padding: 24px;
+            text-align: center;
+            margin-bottom: 16px;
+            transition: all 0.2s;
+            cursor: pointer;
+        }
+
+        .file-upload-area:hover {
+            border-color: var(--primary);
+            background: var(--primary-light);
+        }
+
+        .file-upload-icon {
+            font-size: 32px;
+            margin-bottom: 8px;
+        }
+
+        .file-upload-text {
+            font-size: 14px;
+            color: var(--gray-600);
+            margin-bottom: 4px;
+        }
+
+        .file-upload-hint {
+            font-size: 12px;
+            color: var(--gray-400);
+        }
+
+        .submit-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 12px;
+        }
+
+        /* My Result (Member View) */
+        .my-result {
+            background: white;
+            border-radius: var(--radius-md);
+            padding: 20px;
+            border-left: 4px solid var(--success);
+        }
+
+        .result-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 16px;
+        }
+
+        .result-score {
+            display: flex;
+            align-items: baseline;
+            gap: 4px;
+        }
+
+        .result-score-value {
+            font-size: 32px;
+            font-weight: 700;
+            color: var(--primary);
+        }
+
+        .result-score-max {
+            font-size: 16px;
+            color: var(--gray-500);
+        }
+
+        .result-feedback {
+            background: var(--gray-50);
+            padding: 16px;
+            border-radius: var(--radius-sm);
+            font-size: 14px;
+            line-height: 1.7;
+            color: var(--gray-600);
+        }
+
+        /* Shared Submissions (Member View when sharing enabled) */
+        .shared-section {
+            margin-top: 20px;
+            padding-top: 20px;
+            border-top: 1px solid var(--gray-200);
+        }
+
+        .shared-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--gray-700);
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .shared-badge {
+            padding: 2px 8px;
+            background: var(--primary-light);
+            color: var(--primary);
+            border-radius: 4px;
+            font-size: 11px;
+        }
+
+        .shared-submission {
+            background: var(--gray-50);
+            border-radius: var(--radius-md);
+            padding: 16px;
+            margin-bottom: 12px;
+        }
+
+        .shared-submission-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 12px;
+        }
+
+        .shared-avatar {
+            width: 32px;
+            height: 32px;
+            background: var(--gray-300);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            font-weight: 600;
+            color: white;
+        }
+
+        .shared-name {
+            font-weight: 500;
+            color: var(--gray-700);
+        }
+
+        .shared-content {
+            font-size: 14px;
+            color: var(--gray-600);
+            line-height: 1.7;
+            margin-bottom: 12px;
+        }
+
+        .shared-actions {
+            display: flex;
+            gap: 16px;
+        }
+
+        .action-btn {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 13px;
+            color: var(--gray-500);
+            background: none;
+            border: none;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .action-btn:hover {
+            color: var(--primary);
+        }
+
+        .action-btn.liked {
+            color: var(--danger);
+        }
+
+        /* View Toggle */
+        .view-toggle {
+            display: flex;
+            background: var(--gray-100);
+            border-radius: var(--radius-sm);
+            padding: 4px;
+            margin-bottom: 16px;
+        }
+
+        .view-toggle-btn {
+            flex: 1;
+            padding: 8px 16px;
+            border: none;
+            background: transparent;
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            border-radius: 4px;
+            transition: all 0.2s;
+            color: var(--gray-600);
+        }
+
+        .view-toggle-btn.active {
+            background: white;
+            color: var(--primary);
+            box-shadow: var(--shadow-sm);
+        }
+
+        /* Empty State */
+        .empty-state {
+            text-align: center;
+            padding: 48px;
+            color: var(--gray-500);
+        }
+
+        .empty-state-icon {
+            font-size: 48px;
+            margin-bottom: 16px;
+        }
+
+        /* Animations */
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .homework-card {
+            animation: fadeIn 0.3s ease-out;
+        }
+
+        .homework-detail {
+            animation: fadeIn 0.2s ease-out;
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .filter-row {
+                flex-direction: column;
+                align-items: stretch;
+            }
+
+            .filter-left, .filter-right {
+                flex-wrap: wrap;
+            }
+
+            .homework-card-header {
+                flex-wrap: wrap;
+            }
+
+            .homework-meta {
+                width: 100%;
+                margin-top: 12px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Header -->
+    <header class="header">
+        <div class="header-inner">
+            <div class="logo">
+                <div class="logo-icon">📚</div>
+                채움클래스
+            </div>
+            <div class="role-switcher">
+                <button class="role-btn active" onclick="switchRole('teacher')">👨‍🏫 개설자 화면</button>
+                <button class="role-btn" onclick="switchRole('member')">👨‍🎓 멤버 화면</button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="main-container">
+        <!-- Page Header -->
+        <div class="page-header">
+            <h1 class="page-title">과제</h1>
+            <div style="display: flex; align-items: center;">
+                <div class="page-view-tabs" id="pageViewTabs">
+                    <button class="page-view-tab active" onclick="switchPageView('homework')">과제별 보기</button>
+                    <button class="page-view-tab" onclick="switchPageView('member')">멤버별 보기</button>
+                </div>
+                <button class="btn btn-primary" id="createBtn">
+                    <span>➕</span> 새로 만들기
+                </button>
+            </div>
+        </div>
+
+        <!-- Filter Area -->
+        <div class="filter-area">
+            <div class="filter-row">
+                <div class="filter-left">
+                    <div class="subject-tabs">
+                        <button class="subject-tab active">전체</button>
+                        <button class="subject-tab">수학</button>
+                        <button class="subject-tab">국어</button>
+                        <button class="subject-tab">영어</button>
+                    </div>
+                    <label class="checkbox-filter">
+                        <input type="checkbox" checked>
+                        <span>진행중만 보기</span>
+                    </label>
+                </div>
+                <div class="filter-right">
+                    <select class="select-box">
+                        <option>최신 등록일 순</option>
+                        <option>등록일 오래된 순</option>
+                        <option>시작일 기준</option>
+                        <option>종료일 기준</option>
+                        <option>제출현황 높은순</option>
+                    </select>
+                    <div class="search-box">
+                        <input type="text" placeholder="검색어를 입력하세요">
+                        <button>🔍</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Homework List -->
+        <div class="homework-list" id="homeworkList">
+            <!-- 과제 1 -->
+            <div class="homework-card" onclick="toggleDetail(this)">
+                <div class="homework-card-header">
+                    <span class="homework-subject">수학</span>
+                    <div class="homework-title-area">
+                        <h3 class="homework-title">1월 수학 방학과제</h3>
+                        <span class="status-label status-progress">진행중</span>
+                    </div>
+                    <div class="homework-meta">
+                        <span class="homework-meta-item">📅 2026-01-05 ~ 2026-01-12</span>
+                        <span class="homework-meta-item submit-rate" id="submitRate1">
+                            <span>제출률</span>
+                            <div class="submit-rate-bar">
+                                <div class="submit-rate-fill" style="width: 33%"></div>
+                            </div>
+                            <span>33% (1/3)</span>
+                        </span>
+                    </div>
+                </div>
+                <div class="homework-detail">
+                    <div class="detail-content">
+                        <!-- 과제 내용 -->
+                        <div class="detail-section">
+                            <div class="detail-section-title">과제 내용</div>
+                            <div class="homework-description">
+                                <p>겨울방학 동안 1학기에 배운 수학 개념을 복습하는 과제입니다.</p>
+                                <p style="margin-top: 12px;"><strong>과제 안내:</strong></p>
+                                <ol style="margin-left: 20px; margin-top: 8px;">
+                                    <li>교과서 1~3단원 복습 문제 풀이</li>
+                                    <li>오답노트 작성 (최소 10문제)</li>
+                                    <li>자기 평가 소감문 작성</li>
+                                </ol>
+                            </div>
+                            <div class="attachment-list">
+                                <div class="attachment-item">📄 과제안내서.pdf</div>
+                                <div class="attachment-item">📊 수학복습자료.hwp</div>
+                            </div>
+                        </div>
+
+                        <!-- 개설자: 제출물 목록 / 멤버: 제출 영역 -->
+                        <div id="teacherView1" class="teacher-view">
+                            <div class="detail-section">
+                                <div class="detail-section-title">제출 현황</div>
+                                <div class="submissions-list">
+                                    <div class="submission-item">
+                                        <div class="submission-avatar">김</div>
+                                        <div class="submission-content">
+                                            <div class="submission-header">
+                                                <span class="submission-name">김하늘</span>
+                                                <span class="submission-info">6학년 1반 1번</span>
+                                                <span class="submit-status submit-ontime">정시</span>
+                                                <span class="submission-date">2026-01-06 14:32</span>
+                                            </div>
+                                            <div class="submission-text">
+                                                열심히 복습했습니다. 특히 분수 계산 부분이 어려웠는데 여러 번 반복해서 풀어보니 이해가 되었습니다. 오답노트도 꼼꼼히 작성했습니다.
+                                            </div>
+                                            <div class="submission-files">
+                                                <span class="submission-file">📄 수학과제_김하늘.pdf</span>
+                                                <span class="submission-file">📝 오답노트.hwp</span>
+                                            </div>
+                                        </div>
+                                        <div class="submission-actions">
+                                            <div class="plagiarism-info">
+                                                <span class="plagiarism-badge">표절 0%</span>
+                                                <span class="plagiarism-badge">AI 0%</span>
+                                                <div class="tooltip">표절률 / AI 표절 확률</div>
+                                            </div>
+                                            <div class="grade-input">
+                                                <input type="number" placeholder="점수" min="0" max="100">
+                                                <span>/ 100</span>
+                                                <button class="btn btn-sm btn-grade">채점</button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div id="memberView1" class="member-view" style="display: none;">
+                            <!-- 제출 영역 -->
+                            <div class="detail-section submit-area">
+                                <div class="detail-section-title">과제 제출</div>
+                                <div class="editor-container">
+                                    <div id="editor1"></div>
+                                </div>
+                                <div class="file-upload-area">
+                                    <div class="file-upload-icon">📁</div>
+                                    <div class="file-upload-text">파일을 드래그하거나 클릭하여 업로드</div>
+                                    <div class="file-upload-hint">허용 확장자: hwp, docx, pdf, jpg, png, mp4 (최대 100MB)</div>
+                                </div>
+                                <div class="submit-actions">
+                                    <button class="btn btn-secondary">임시저장</button>
+                                    <button class="btn btn-primary">제출하기</button>
+                                </div>
+                            </div>
+
+                            <!-- 평가 결과 (제출 완료 시) -->
+                            <div class="detail-section my-result" style="display: none;">
+                                <div class="detail-section-title">📊 평가 결과</div>
+                                <div class="result-header">
+                                    <div class="result-score">
+                                        <span class="result-score-value">85</span>
+                                        <span class="result-score-max">/ 100</span>
+                                    </div>
+                                </div>
+                                <div class="result-feedback">
+                                    <strong>선생님 피드백:</strong><br>
+                                    꼼꼼하게 잘 정리했습니다. 오답노트 작성이 특히 좋았어요. 다음에는 소감문을 조금 더 구체적으로 작성해보세요.
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 과제 2 -->
+            <div class="homework-card" onclick="toggleDetail(this)">
+                <div class="homework-card-header">
+                    <span class="homework-subject">수학</span>
+                    <div class="homework-title-area">
+                        <h3 class="homework-title">수학과제입니다.</h3>
+                        <span class="status-label status-progress">진행중</span>
+                    </div>
+                    <div class="homework-meta">
+                        <span class="homework-meta-item">📅 기한없음</span>
+                        <span class="homework-meta-item submit-rate" id="submitRate2">
+                            <span>제출률</span>
+                            <div class="submit-rate-bar">
+                                <div class="submit-rate-fill" style="width: 100%"></div>
+                            </div>
+                            <span>100% (2/2)</span>
+                        </span>
+                    </div>
+                </div>
+                <div class="homework-detail">
+                    <div class="detail-content">
+                        <div class="detail-section">
+                            <div class="detail-section-title">과제 내용</div>
+                            <div class="homework-description">
+                                수학 심화 문제를 풀어보세요. 자유롭게 제출 가능합니다.
+                            </div>
+                        </div>
+
+                        <div id="teacherView2" class="teacher-view">
+                            <div class="detail-section">
+                                <div class="detail-section-title">제출 현황</div>
+                                <div class="submissions-list">
+                                    <div class="submission-item">
+                                        <div class="submission-avatar" style="background: linear-gradient(135deg, #FEF3C7, #F59E0B);">문</div>
+                                        <div class="submission-content">
+                                            <div class="submission-header">
+                                                <span class="submission-name">문준용</span>
+                                                <span class="submission-info">1학년 10반 12번</span>
+                                                <span class="submit-status submit-ontime">정시</span>
+                                                <span class="submission-date">2026-01-03 14:12</span>
+                                            </div>
+                                            <div class="submission-text">
+                                                심화 문제 풀이 완료했습니다.
+                                            </div>
+                                            <div class="submission-files">
+                                                <span class="submission-file">📄 심화문제풀이.pdf</span>
+                                            </div>
+                                        </div>
+                                        <div class="submission-actions">
+                                            <div class="plagiarism-info">
+                                                <span class="plagiarism-badge warning">표절 18%</span>
+                                                <span class="plagiarism-badge">AI 0%</span>
+                                                <div class="tooltip">표절률 / AI 표절 확률</div>
+                                            </div>
+                                            <div class="grade-input">
+                                                <input type="number" placeholder="점수" min="0" max="100">
+                                                <span>/ 100</span>
+                                                <button class="btn btn-sm btn-grade">채점</button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="submission-item">
+                                        <div class="submission-avatar" style="background: linear-gradient(135deg, #D1FAE5, #10B981);">김</div>
+                                        <div class="submission-content">
+                                            <div class="submission-header">
+                                                <span class="submission-name">김하늘</span>
+                                                <span class="submission-info">6학년 1반 1번</span>
+                                                <span class="submit-status submit-ontime">정시</span>
+                                                <span class="submission-date">2026-01-03 14:39</span>
+                                            </div>
+                                            <div class="submission-text">
+                                                문제 풀이 제출합니다.
+                                            </div>
+                                            <div class="submission-files">
+                                                <span class="submission-file">📄 과제제출.pdf</span>
+                                            </div>
+                                        </div>
+                                        <div class="submission-actions">
+                                            <div class="plagiarism-info">
+                                                <span class="plagiarism-badge danger">표절 100%</span>
+                                                <span class="plagiarism-badge">AI 0%</span>
+                                                <div class="tooltip">표절률 / AI 표절 확률</div>
+                                            </div>
+                                            <div class="grade-input">
+                                                <input type="number" placeholder="점수" min="0" max="100">
+                                                <span>/ 100</span>
+                                                <button class="btn btn-sm btn-grade">채점</button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div id="memberView2" class="member-view" style="display: none;">
+                            <div class="detail-section submit-area">
+                                <div class="detail-section-title">과제 제출</div>
+                                <div class="editor-container">
+                                    <div id="editor2"></div>
+                                </div>
+                                <div class="file-upload-area">
+                                    <div class="file-upload-icon">📁</div>
+                                    <div class="file-upload-text">파일을 드래그하거나 클릭하여 업로드</div>
+                                    <div class="file-upload-hint">허용 확장자: hwp, docx, pdf, jpg, png, mp4 (최대 100MB)</div>
+                                </div>
+                                <div class="submit-actions">
+                                    <button class="btn btn-secondary">임시저장</button>
+                                    <button class="btn btn-primary">제출하기</button>
+                                </div>
+                            </div>
+
+                            <!-- 공유된 제출물 (공유 활성화 시) -->
+                            <div class="shared-section">
+                                <div class="shared-title">
+                                    👥 다른 멤버의 제출물
+                                    <span class="shared-badge">공유 활성화됨</span>
+                                </div>
+                                <div class="shared-submission">
+                                    <div class="shared-submission-header">
+                                        <div class="shared-avatar" style="background: #F59E0B;">문</div>
+                                        <div>
+                                            <div class="shared-name">문준용</div>
+                                            <div class="submission-date">2026-01-03 14:12</div>
+                                        </div>
+                                    </div>
+                                    <div class="shared-content">
+                                        심화 문제 풀이 완료했습니다. 특히 3번 문제가 어려웠는데 여러 가지 방법으로 접근해봤습니다.
+                                    </div>
+                                    <div class="shared-actions">
+                                        <button class="action-btn liked">❤️ 좋아요 3</button>
+                                        <button class="action-btn">💬 댓글 1</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 과제 3 -->
+            <div class="homework-card" onclick="toggleDetail(this)">
+                <div class="homework-card-header">
+                    <span class="homework-subject">수학</span>
+                    <div class="homework-title-area">
+                        <h3 class="homework-title">수학 숙제</h3>
+                        <span class="status-label status-ended">종료</span>
+                    </div>
+                    <div class="homework-meta">
+                        <span class="homework-meta-item">📅 2025-11-12 ~ 2025-11-19</span>
+                        <span class="homework-meta-item submit-rate" id="submitRate3">
+                            <span>제출률</span>
+                            <div class="submit-rate-bar">
+                                <div class="submit-rate-fill" style="width: 67%"></div>
+                            </div>
+                            <span>67% (2/3)</span>
+                        </span>
+                    </div>
+                </div>
+                <div class="homework-detail">
+                    <div class="detail-content">
+                        <div class="detail-section">
+                            <div class="detail-section-title">과제 내용</div>
+                            <div class="homework-description">
+                                11월 수학 숙제입니다. 기한 내에 제출해주세요.
+                            </div>
+                        </div>
+
+                        <div id="teacherView3" class="teacher-view">
+                            <div class="detail-section">
+                                <div class="detail-section-title">제출 현황</div>
+                                <div class="submissions-list">
+                                    <div class="submission-item">
+                                        <div class="submission-avatar" style="background: linear-gradient(135deg, #FEE2E2, #EF4444);">박</div>
+                                        <div class="submission-content">
+                                            <div class="submission-header">
+                                                <span class="submission-name">박민수</span>
+                                                <span class="submission-info">3학년 2반 5번</span>
+                                                <span class="submit-status submit-late">지각</span>
+                                                <span class="submit-late-info">(3일 늦음)</span>
+                                                <span class="submission-date">2025-11-22 09:15</span>
+                                            </div>
+                                            <div class="submission-text">
+                                                늦게 제출해서 죄송합니다.
+                                            </div>
+                                            <div class="submission-files">
+                                                <span class="submission-file">📄 수학숙제_박민수.pdf</span>
+                                            </div>
+                                        </div>
+                                        <div class="submission-actions">
+                                            <div class="plagiarism-info">
+                                                <span class="plagiarism-badge">표절 0%</span>
+                                                <span class="plagiarism-badge">AI 0%</span>
+                                                <div class="tooltip">표절률 / AI 표절 확률</div>
+                                            </div>
+                                            <div class="grade-input">
+                                                <input type="number" placeholder="점수" min="0" max="100" value="75">
+                                                <span>/ 100</span>
+                                                <button class="btn btn-sm btn-grade">채점</button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="submission-item">
+                                        <div class="submission-avatar" style="background: linear-gradient(135deg, #D1FAE5, #10B981);">이</div>
+                                        <div class="submission-content">
+                                            <div class="submission-header">
+                                                <span class="submission-name">이서연</span>
+                                                <span class="submission-info">3학년 2반 12번</span>
+                                                <span class="submit-status submit-ontime">정시</span>
+                                                <span class="submission-date">2025-11-18 16:42</span>
+                                            </div>
+                                            <div class="submission-text">
+                                                수학 숙제 제출합니다.
+                                            </div>
+                                            <div class="submission-files">
+                                                <span class="submission-file">📄 수학숙제_이서연.pdf</span>
+                                            </div>
+                                        </div>
+                                        <div class="submission-actions">
+                                            <div class="plagiarism-info">
+                                                <span class="plagiarism-badge">표절 0%</span>
+                                                <span class="plagiarism-badge">AI 0%</span>
+                                                <div class="tooltip">표절률 / AI 표절 확률</div>
+                                            </div>
+                                            <div class="grade-input">
+                                                <input type="number" placeholder="점수" min="0" max="100" value="95">
+                                                <span>/ 100</span>
+                                                <button class="btn btn-sm btn-grade">채점</button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div id="memberView3" class="member-view" style="display: none;">
+                            <div class="detail-section" style="text-align: center; padding: 40px;">
+                                <div style="font-size: 48px; margin-bottom: 16px;">⏰</div>
+                                <p style="color: var(--gray-500);">제출 기한이 종료되었습니다.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 과제 4 - 예약 (개설자만 보임) -->
+            <div class="homework-card homework-reserved" onclick="toggleDetail(this)">
+                <div class="homework-card-header">
+                    <span class="homework-subject">국어</span>
+                    <div class="homework-title-area">
+                        <h3 class="homework-title">2월 독서 감상문</h3>
+                        <span class="status-label status-reserved">예약</span>
+                    </div>
+                    <div class="homework-meta">
+                        <span class="homework-meta-item">📅 2026-02-01 ~ 2026-02-15</span>
+                        <span class="homework-meta-item submit-rate" id="submitRate4">
+                            <span>제출률</span>
+                            <div class="submit-rate-bar">
+                                <div class="submit-rate-fill" style="width: 0%"></div>
+                            </div>
+                            <span>0% (0/3)</span>
+                        </span>
+                    </div>
+                </div>
+                <div class="homework-detail">
+                    <div class="detail-content">
+                        <div class="detail-section">
+                            <div class="detail-section-title">과제 내용</div>
+                            <div class="homework-description">
+                                <p>2월에 공개될 독서 감상문 과제입니다.</p>
+                                <p style="margin-top: 12px; padding: 12px; background: #EDE9FE; border-radius: 8px; color: #8B5CF6;">
+                                    ℹ️ 이 과제는 <strong>2026-02-01</strong>에 멤버에게 공개됩니다.
+                                </p>
+                            </div>
+                        </div>
+
+                        <div id="teacherView4" class="teacher-view">
+                            <div class="detail-section">
+                                <div class="detail-section-title">제출 현황</div>
+                                <div class="empty-state">
+                                    <div class="empty-state-icon">📋</div>
+                                    <p>예약된 과제입니다. 시작일 이후 제출을 받을 수 있습니다.</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 멤버별 보기 화면 -->
+        <div class="member-portfolio-view" id="memberPortfolioView">
+            <div class="member-select-area">
+                <div class="member-select-row">
+                    <span class="member-select-label">멤버 선택</span>
+                    <select class="member-select" id="memberSelect">
+                        <option value="">멤버를 선택하세요</option>
+                        <option value="kim">김하늘 (6학년 1반 1번)</option>
+                        <option value="moon">문준용 (1학년 10반 12번)</option>
+                        <option value="park">박민수 (3학년 2반 5번)</option>
+                        <option value="lee">이서연 (3학년 2반 12번)</option>
+                    </select>
+                    <select class="member-sort-select">
+                        <option>번호순</option>
+                        <option>가나다순</option>
+                        <option>제출순</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="portfolio-card" id="portfolioCard" style="display: none;">
+                <div class="portfolio-header">
+                    <div class="portfolio-avatar">김</div>
+                    <div class="portfolio-info">
+                        <h3>김하늘</h3>
+                        <p>6학년 1반 1번</p>
+                    </div>
+                    <div class="portfolio-stats">
+                        <div class="portfolio-stat">
+                            <div class="portfolio-stat-value">3</div>
+                            <div class="portfolio-stat-label">제출 과제</div>
+                        </div>
+                        <div class="portfolio-stat">
+                            <div class="portfolio-stat-value">92</div>
+                            <div class="portfolio-stat-label">평균 점수</div>
+                        </div>
+                        <div class="portfolio-stat">
+                            <div class="portfolio-stat-value">100%</div>
+                            <div class="portfolio-stat-label">정시 제출률</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="detail-section-title">제출 이력</div>
+                <div class="portfolio-list">
+                    <div class="portfolio-item">
+                        <span class="portfolio-item-subject">수학</span>
+                        <span class="portfolio-item-title">1월 수학 방학과제</span>
+                        <span class="submit-status submit-ontime">정시</span>
+                        <span class="portfolio-item-date">2026-01-06</span>
+                        <span class="portfolio-item-score">85점</span>
+                    </div>
+                    <div class="portfolio-item">
+                        <span class="portfolio-item-subject">수학</span>
+                        <span class="portfolio-item-title">수학과제입니다.</span>
+                        <span class="submit-status submit-ontime">정시</span>
+                        <span class="portfolio-item-date">2026-01-03</span>
+                        <span class="portfolio-item-score">90점</span>
+                    </div>
+                    <div class="portfolio-item">
+                        <span class="portfolio-item-subject">수학</span>
+                        <span class="portfolio-item-title">수학 숙제</span>
+                        <span class="submit-status submit-ontime">정시</span>
+                        <span class="portfolio-item-date">2025-11-18</span>
+                        <span class="portfolio-item-score">100점</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script src="https://cdn.quilljs.com/1.3.6/quill.min.js"></script>
+    <script>
+        let currentRole = 'teacher';
+        let currentPageView = 'homework';
+        let editors = {};
+
+        // 역할 전환
+        function switchRole(role) {
+            currentRole = role;
+            
+            // 버튼 상태 업데이트
+            document.querySelectorAll('.role-btn').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            event.target.classList.add('active');
+
+            // 새로 만들기 버튼 표시/숨김
+            document.getElementById('createBtn').style.display = role === 'teacher' ? 'flex' : 'none';
+
+            // 페이지 뷰 탭 표시/숨김 (멤버는 멤버별 보기 불필요)
+            document.getElementById('pageViewTabs').style.display = role === 'teacher' ? 'flex' : 'none';
+
+            // 멤버일 때 과제별 보기로 강제 전환
+            if (role === 'member') {
+                switchPageView('homework');
+            }
+
+            // 제출률 표시/숨김 (멤버는 제출현황 볼 필요 없음)
+            document.querySelectorAll('.submit-rate').forEach(el => {
+                el.style.display = role === 'teacher' ? 'flex' : 'none';
+            });
+
+            // 예약 과제 표시/숨김 (개설자만 보임)
+            document.querySelectorAll('.homework-reserved').forEach(el => {
+                el.style.display = role === 'teacher' ? 'block' : 'none';
+            });
+
+            // 역할별 뷰 전환
+            document.querySelectorAll('.teacher-view').forEach(el => {
+                el.style.display = role === 'teacher' ? 'block' : 'none';
+            });
+            document.querySelectorAll('.member-view').forEach(el => {
+                el.style.display = role === 'member' ? 'block' : 'none';
+            });
+
+            // 에디터 초기화 (멤버 화면 전환 시)
+            if (role === 'member') {
+                initEditors();
+            }
+        }
+
+        // 페이지 뷰 전환 (과제별 / 멤버별)
+        function switchPageView(view) {
+            currentPageView = view;
+
+            // 탭 버튼 상태 업데이트
+            document.querySelectorAll('.page-view-tab').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            event.target.classList.add('active');
+
+            // 뷰 전환
+            const homeworkList = document.getElementById('homeworkList');
+            const filterArea = document.querySelector('.filter-area');
+            const portfolioView = document.getElementById('memberPortfolioView');
+
+            if (view === 'homework') {
+                homeworkList.style.display = 'flex';
+                filterArea.style.display = 'block';
+                portfolioView.style.display = 'none';
+            } else {
+                homeworkList.style.display = 'none';
+                filterArea.style.display = 'none';
+                portfolioView.style.display = 'block';
+            }
+        }
+
+        // 과제 상세 토글
+        function toggleDetail(card) {
+            const wasExpanded = card.classList.contains('expanded');
+            
+            // 다른 카드 모두 닫기
+            document.querySelectorAll('.homework-card').forEach(c => {
+                c.classList.remove('expanded');
+            });
+
+            // 클릭한 카드 토글
+            if (!wasExpanded) {
+                card.classList.add('expanded');
+                
+                // 멤버 화면일 때 에디터 초기화
+                if (currentRole === 'member') {
+                    setTimeout(initEditors, 100);
+                }
+            }
+
+            event.stopPropagation();
+        }
+
+        // WYSIWYG 에디터 초기화
+        function initEditors() {
+            const editorContainers = document.querySelectorAll('.member-view .ql-container');
+            
+            // 이미 초기화된 에디터가 없는 컨테이너만 초기화
+            for (let i = 1; i <= 4; i++) {
+                const container = document.getElementById(`editor${i}`);
+                if (container && !container.classList.contains('ql-container')) {
+                    editors[`editor${i}`] = new Quill(`#editor${i}`, {
+                        theme: 'snow',
+                        placeholder: '과제 내용을 작성하세요...',
+                        modules: {
+                            toolbar: [
+                                [{ 'header': [1, 2, 3, false] }],
+                                ['bold', 'italic', 'underline', 'strike'],
+                                [{ 'color': [] }, { 'background': [] }],
+                                [{ 'list': 'ordered'}, { 'list': 'bullet' }],
+                                ['link', 'image', 'video'],
+                                ['clean']
+                            ]
+                        }
+                    });
+                }
+            }
+        }
+
+        // 멤버 선택 시 포트폴리오 표시
+        document.getElementById('memberSelect').addEventListener('change', function() {
+            const portfolioCard = document.getElementById('portfolioCard');
+            if (this.value) {
+                portfolioCard.style.display = 'block';
+            } else {
+                portfolioCard.style.display = 'none';
+            }
+        });
+
+        // 과목 탭 클릭
+        document.querySelectorAll('.subject-tab').forEach(tab => {
+            tab.addEventListener('click', function(e) {
+                e.stopPropagation();
+                document.querySelectorAll('.subject-tab').forEach(t => t.classList.remove('active'));
+                this.classList.add('active');
+            });
+        });
+
+        // 채점 버튼 클릭 방지
+        document.querySelectorAll('.grade-input').forEach(input => {
+            input.addEventListener('click', function(e) {
+                e.stopPropagation();
+            });
+        });
+
+        // 파일 업로드 영역 클릭 방지
+        document.querySelectorAll('.file-upload-area').forEach(area => {
+            area.addEventListener('click', function(e) {
+                e.stopPropagation();
+            });
+        });
+
+        // 제출/저장 버튼 클릭 방지
+        document.querySelectorAll('.submit-actions button').forEach(btn => {
+            btn.addEventListener('click', function(e) {
+                e.stopPropagation();
+                if (this.classList.contains('btn-primary')) {
+                    alert('과제가 제출되었습니다!');
+                } else {
+                    alert('임시 저장되었습니다.');
+                }
+            });
+        });
+
+        // 좋아요/댓글 버튼 클릭 방지
+        document.querySelectorAll('.action-btn').forEach(btn => {
+            btn.addEventListener('click', function(e) {
+                e.stopPropagation();
+                if (this.textContent.includes('좋아요')) {
+                    this.classList.toggle('liked');
+                }
+            });
+        });
+    </script>
+</body>
+</html>

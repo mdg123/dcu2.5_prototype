@@ -1,0 +1,2371 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>오늘의 학습 2.0 - 다채움 프로토타입</title>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #4A7CFF;
+            --primary-light: #E8F0FF;
+            --primary-dark: #3A5FCC;
+            --accent: #FF6B6B;
+            --accent-light: #FFE8E8;
+            --secondary: #7C4DFF;
+            --secondary-light: #EDE7FF;
+            --success: #00C48C;
+            --success-light: #E0FFF5;
+            --warning: #FFB800;
+            --warning-light: #FFF8E0;
+            --gray-50: #F8FAFC;
+            --gray-100: #F1F5F9;
+            --gray-200: #E2E8F0;
+            --gray-300: #CBD5E1;
+            --gray-400: #94A3B8;
+            --gray-500: #64748B;
+            --gray-600: #475569;
+            --gray-700: #334155;
+            --gray-800: #1E293B;
+            --shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
+            --shadow-md: 0 4px 6px -1px rgba(0,0,0,0.1);
+            --shadow-lg: 0 10px 15px -3px rgba(0,0,0,0.1);
+            --radius-sm: 6px;
+            --radius-md: 10px;
+            --radius-lg: 16px;
+            --radius-xl: 24px;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Noto Sans KR', sans-serif;
+            background: linear-gradient(135deg, #F0F4FF 0%, #FAFBFF 100%);
+            min-height: 100vh;
+            color: var(--gray-800);
+            line-height: 1.6;
+        }
+        .header {
+            background: white;
+            border-bottom: 1px solid var(--gray-200);
+            padding: 12px 24px;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+        .header-inner {
+            max-width: 1400px;
+            margin: 0 auto;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-weight: 700;
+            font-size: 20px;
+            color: var(--primary);
+            text-decoration: none;
+        }
+        .logo-icon {
+            width: 36px;
+            height: 36px;
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            border-radius: var(--radius-md);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 18px;
+        }
+        .user-info { display: flex; align-items: center; gap: 16px; }
+        .point-badge {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            background: var(--warning-light);
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-weight: 600;
+            color: var(--gray-700);
+        }
+        .user-avatar {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, var(--primary-light), var(--secondary-light));
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 600;
+            color: var(--primary);
+        }
+        .main-container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 24px;
+            display: grid;
+            grid-template-columns: 1fr 320px;
+            gap: 24px;
+        }
+        .learning-settings {
+            background: white;
+            border-radius: var(--radius-lg);
+            padding: 20px;
+            margin-bottom: 24px;
+            box-shadow: var(--shadow-sm);
+        }
+        .settings-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 16px;
+        }
+        .settings-title {
+            font-size: 16px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .settings-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 12px;
+        }
+        .setting-select {
+            padding: 10px 14px;
+            border: 1px solid var(--gray-200);
+            border-radius: var(--radius-md);
+            font-size: 14px;
+            color: var(--gray-700);
+            background: white;
+            cursor: pointer;
+        }
+        .setting-select:focus {
+            outline: none;
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px var(--primary-light);
+        }
+        /* 학습 목표 달성률 섹션 */
+        .goal-section {
+            background: white;
+            border-radius: var(--radius-lg);
+            padding: 24px;
+            margin-bottom: 24px;
+            box-shadow: var(--shadow-sm);
+        }
+        .goal-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 24px;
+        }
+        .goal-title-area {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+        .goal-title {
+            font-size: 18px;
+            font-weight: 700;
+        }
+        .goal-tabs {
+            display: flex;
+            background: var(--gray-100);
+            border-radius: 8px;
+            padding: 4px;
+        }
+        .goal-tab {
+            padding: 6px 16px;
+            border: none;
+            background: none;
+            font-size: 13px;
+            font-weight: 500;
+            color: var(--gray-500);
+            cursor: pointer;
+            border-radius: 6px;
+            transition: all 0.2s;
+        }
+        .goal-tab.active {
+            background: white;
+            color: var(--primary);
+            box-shadow: var(--shadow-sm);
+        }
+        .goal-tab:hover:not(.active) {
+            color: var(--gray-700);
+        }
+        .goal-content {
+            display: flex;
+            align-items: center;
+            gap: 40px;
+        }
+        .goal-progress-main {
+            flex-shrink: 0;
+        }
+        .goal-progress-circle {
+            position: relative;
+            width: 140px;
+            height: 140px;
+        }
+        .goal-progress-circle svg {
+            transform: rotate(-90deg);
+            width: 100%;
+            height: 100%;
+        }
+        .goal-circle-bg {
+            fill: none;
+            stroke: var(--gray-100);
+            stroke-width: 8;
+        }
+        .goal-circle-fill {
+            fill: none;
+            stroke: url(#goalGradient);
+            stroke-width: 8;
+            stroke-linecap: round;
+            transition: stroke-dashoffset 0.5s ease;
+        }
+        .goal-progress-text {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+        }
+        .goal-percent {
+            display: block;
+            font-size: 32px;
+            font-weight: 700;
+            color: var(--gray-800);
+        }
+        .goal-label {
+            font-size: 13px;
+            color: var(--gray-500);
+        }
+        .goal-details {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+        .goal-detail-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .goal-detail-icon {
+            width: 36px;
+            height: 36px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+        }
+        .goal-detail-info {
+            min-width: 140px;
+        }
+        .goal-detail-label {
+            display: block;
+            font-size: 13px;
+            color: var(--gray-500);
+        }
+        .goal-detail-value {
+            font-size: 15px;
+            font-weight: 600;
+            color: var(--gray-800);
+        }
+        .goal-detail-bar {
+            flex: 1;
+            height: 8px;
+            background: var(--gray-100);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        .goal-detail-fill {
+            height: 100%;
+            border-radius: 4px;
+            transition: width 0.3s ease;
+        }
+        /* 날짜 선택 - 상태 표시 개선 */
+        .date-selector {
+            background: white;
+            border-radius: var(--radius-lg);
+            padding: 20px;
+            margin-bottom: 24px;
+            box-shadow: var(--shadow-sm);
+        }
+        .date-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 16px;
+        }
+        .date-nav { display: flex; align-items: center; gap: 8px; }
+        .date-nav-btn {
+            width: 36px;
+            height: 36px;
+            border: 1px solid var(--gray-200);
+            background: white;
+            border-radius: 50%;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .date-nav-btn:hover { background: var(--gray-50); }
+        .date-list {
+            display: grid;
+            grid-template-columns: repeat(7, 1fr);
+            gap: 8px;
+        }
+        .date-item {
+            position: relative;
+            padding: 12px 8px;
+            border-radius: var(--radius-md);
+            text-align: center;
+            cursor: pointer;
+            border: 2px solid transparent;
+            transition: all 0.2s;
+            background: var(--gray-50);
+        }
+        .date-item:hover { 
+            border-color: var(--gray-200);
+        }
+        .date-item.active {
+            border-color: var(--primary);
+        }
+        .date-item.today::before {
+            content: '오늘';
+            position: absolute;
+            top: -8px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 10px;
+            background: var(--accent);
+            color: white;
+            padding: 2px 6px;
+            border-radius: 10px;
+            z-index: 1;
+        }
+        /* 날짜 상태별 배경색 */
+        .date-item.completed-day {
+            background: var(--success-light);
+        }
+        .date-item.progress-day {
+            background: var(--gray-50);
+        }
+        .date-item.empty-day {
+            background: var(--gray-50);
+            opacity: 0.6;
+        }
+        .date-day { font-size: 12px; color: var(--gray-500); margin-bottom: 4px; }
+        .date-num { font-size: 18px; font-weight: 600; margin-bottom: 8px; }
+        /* 날짜 상태 표시 */
+        .date-status {
+            min-height: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .status-check {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 20px;
+            height: 20px;
+            background: var(--success);
+            color: white;
+            border-radius: 50%;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        .status-fraction {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--gray-600);
+            background: white;
+            padding: 2px 8px;
+            border-radius: 10px;
+        }
+        .status-empty {
+            font-size: 14px;
+            color: var(--gray-400);
+        }
+        .date-item.completed-day .status-fraction {
+            background: var(--success);
+            color: white;
+        }
+        .date-item.active .status-fraction {
+            background: var(--primary);
+            color: white;
+        }
+        .date-detail {
+            font-size: 10px;
+            color: var(--gray-400);
+            margin-top: 4px;
+        }
+        .date-item.completed-day .date-detail {
+            color: var(--success);
+        }
+        .date-item.active .date-detail {
+            color: var(--primary);
+        }
+        .date-help-text {
+            font-size: 13px;
+            color: var(--gray-500);
+            font-weight: 400;
+        }
+        /* 캐릭터 표시 */
+        .character-display {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+        .character-avatar {
+            width: 60px;
+            height: 60px;
+            background: linear-gradient(135deg, #FFE066, #FFB800);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 32px;
+            box-shadow: var(--shadow-md);
+        }
+        .character-info { text-align: left; }
+        .character-level { font-size: 12px; color: var(--gray-500); }
+        .character-name { font-size: 16px; font-weight: 600; }
+        .character-exp { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
+        .exp-bar {
+            width: 100px;
+            height: 6px;
+            background: var(--gray-200);
+            border-radius: 3px;
+            overflow: hidden;
+        }
+        .exp-fill {
+            height: 100%;
+            background: linear-gradient(90deg, var(--warning), #FF9500);
+            width: 65%;
+        }
+        .exp-text { font-size: 11px; color: var(--gray-500); }
+        .section-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 20px;
+        }
+        .section-title {
+            font-size: 20px;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .section-title-icon {
+            width: 32px;
+            height: 32px;
+            border-radius: var(--radius-md);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+        }
+        .section-title-icon.primary { background: var(--primary); }
+        .legend { display: flex; gap: 16px; }
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 13px;
+            color: var(--gray-600);
+        }
+        .legend-dot { width: 10px; height: 10px; border-radius: 50%; }
+        .legend-dot.primary { background: var(--primary); }
+        .legend-dot.secondary { background: var(--secondary); }
+        .legend-dot.accent { background: var(--accent); }
+        .learning-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 16px;
+        }
+        .learning-card {
+            background: white;
+            border-radius: var(--radius-lg);
+            overflow: hidden;
+            box-shadow: var(--shadow-sm);
+            transition: all 0.3s;
+            cursor: pointer;
+            border: 2px solid transparent;
+        }
+        .learning-card:hover {
+            box-shadow: var(--shadow-lg);
+            transform: translateY(-2px);
+        }
+        .learning-card.completed { border-color: var(--success); }
+        .learning-card.in-progress { border-color: var(--warning); }
+        .card-thumbnail {
+            height: 140px;
+            background: linear-gradient(135deg, var(--primary-light), var(--secondary-light));
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .card-thumbnail-placeholder { font-size: 48px; opacity: 0.5; }
+        .status-label {
+            position: absolute;
+            top: 12px;
+            right: 12px;
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        .status-label.completed { background: var(--success); color: white; }
+        .status-label.in-progress { background: var(--warning); color: var(--gray-800); }
+        .status-label.not-started { background: var(--gray-300); color: var(--gray-700); }
+        .card-content { padding: 16px; }
+        .card-tags { display: flex; gap: 6px; margin-bottom: 10px; flex-wrap: wrap; }
+        .card-tag {
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 500;
+        }
+        .card-tag.subject { background: var(--primary-light); color: var(--primary); }
+        .card-tag.level-easy { background: var(--success-light); color: var(--success); }
+        .card-tag.level-normal { background: var(--primary-light); color: var(--primary); }
+        .card-tag.type { background: var(--gray-100); color: var(--gray-600); }
+        .card-title {
+            font-size: 15px;
+            font-weight: 600;
+            color: var(--gray-800);
+            margin-bottom: 12px;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+        .element-progress { display: flex; gap: 12px; margin-bottom: 12px; }
+        .element-item {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 12px;
+            color: var(--gray-500);
+        }
+        .element-item.completed { color: var(--success); }
+        .element-item svg { width: 14px; height: 14px; }
+        .card-footer {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding-top: 12px;
+            border-top: 1px solid var(--gray-100);
+        }
+        .card-point {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--warning);
+        }
+        .card-btn {
+            padding: 8px 16px;
+            border-radius: var(--radius-md);
+            font-size: 13px;
+            font-weight: 500;
+            border: none;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .card-btn.primary { background: var(--primary); color: white; }
+        .card-btn.primary:hover { background: var(--primary-dark); }
+        .card-btn.secondary { background: var(--gray-100); color: var(--gray-700); }
+        .card-btn.secondary:hover { background: var(--gray-200); }
+        .sidebar { display: flex; flex-direction: column; gap: 20px; }
+        .sidebar-card {
+            background: white;
+            border-radius: var(--radius-lg);
+            padding: 20px;
+            box-shadow: var(--shadow-sm);
+        }
+        .sidebar-title {
+            font-size: 16px;
+            font-weight: 600;
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .ai-learning-card {
+            background: linear-gradient(135deg, var(--secondary) 0%, #9D7AFF 100%);
+            color: white;
+        }
+        .ai-learning-card .sidebar-title { color: white; }
+        .ai-menu-list { display: flex; flex-direction: column; gap: 10px; }
+        .ai-menu-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px;
+            background: rgba(255,255,255,0.15);
+            border-radius: var(--radius-md);
+            cursor: pointer;
+            transition: all 0.2s;
+            text-decoration: none;
+            color: white;
+        }
+        .ai-menu-item:hover { background: rgba(255,255,255,0.25); }
+        .ai-menu-icon {
+            width: 36px;
+            height: 36px;
+            background: rgba(255,255,255,0.2);
+            border-radius: var(--radius-sm);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .ai-menu-text { font-weight: 500; }
+        .note-card { border-left: 4px solid var(--accent); }
+        .note-count {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 12px;
+            background: var(--accent-light);
+            border-radius: var(--radius-md);
+        }
+        .note-count strong { color: var(--accent); font-size: 24px; }
+        .progress-stat {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 0;
+            border-bottom: 1px solid var(--gray-100);
+        }
+        .progress-stat:last-child { border-bottom: none; }
+        .progress-label { font-size: 14px; color: var(--gray-600); }
+        .progress-value { font-size: 18px; font-weight: 700; }
+        .progress-value.primary { color: var(--primary); }
+        .progress-value.secondary { color: var(--secondary); }
+        .progress-value.accent { color: var(--accent); }
+        .point-card { background: linear-gradient(135deg, #FFF8E0 0%, #FFEFB8 100%); }
+        .point-display { display: flex; align-items: center; gap: 12px; }
+        .point-icon {
+            width: 48px;
+            height: 48px;
+            background: var(--warning);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+        }
+        .point-info { flex: 1; }
+        .point-amount { font-size: 28px; font-weight: 700; color: var(--gray-800); }
+        .point-label { font-size: 13px; color: var(--gray-600); }
+        .quick-menu { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+        .quick-menu-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 8px;
+            padding: 16px 12px;
+            background: var(--gray-50);
+            border-radius: var(--radius-md);
+            text-decoration: none;
+            color: var(--gray-700);
+            transition: all 0.2s;
+        }
+        .quick-menu-item:hover { background: var(--gray-100); }
+        .quick-menu-icon {
+            width: 40px;
+            height: 40px;
+            background: white;
+            border-radius: var(--radius-md);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: var(--shadow-sm);
+        }
+        .quick-menu-text { font-size: 12px; font-weight: 500; text-align: center; }
+        .planner-mini {
+            background: linear-gradient(135deg, #E8F4FF 0%, #F0E8FF 100%);
+            border-radius: var(--radius-md);
+            padding: 16px;
+            margin-bottom: 16px;
+        }
+        .planner-mini-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 12px;
+        }
+        .planner-mini-title { font-size: 14px; font-weight: 600; }
+        .planner-mini-link { font-size: 12px; color: var(--primary); text-decoration: none; }
+        .planner-tasks { display: flex; flex-direction: column; gap: 8px; }
+        .planner-task {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 12px;
+            background: white;
+            border-radius: var(--radius-sm);
+        }
+        .task-checkbox {
+            width: 20px;
+            height: 20px;
+            border: 2px solid var(--gray-300);
+            border-radius: 50%;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .task-checkbox.checked {
+            background: var(--success);
+            border-color: var(--success);
+            color: white;
+            font-size: 12px;
+        }
+        .task-checkbox.checked::after { content: '✓'; }
+        .task-text { flex: 1; font-size: 13px; }
+        .task-text.completed { text-decoration: line-through; color: var(--gray-400); }
+        .ranking-mini { background: white; border-radius: var(--radius-md); padding: 16px; }
+        .ranking-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 12px;
+        }
+        .ranking-title { font-size: 14px; font-weight: 600; }
+        .ranking-tabs { display: flex; gap: 4px; }
+        .ranking-tab {
+            padding: 4px 10px;
+            font-size: 11px;
+            border: none;
+            background: var(--gray-100);
+            border-radius: 10px;
+            cursor: pointer;
+        }
+        .ranking-tab.active { background: var(--primary); color: white; }
+        .ranking-list { display: flex; flex-direction: column; gap: 8px; }
+        .ranking-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 8px;
+            background: var(--gray-50);
+            border-radius: var(--radius-sm);
+        }
+        .ranking-item.me {
+            background: var(--primary-light);
+            border: 1px solid var(--primary);
+        }
+        .ranking-position {
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            background: var(--gray-200);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        .ranking-item:nth-child(1) .ranking-position {
+            background: linear-gradient(135deg, #FFD700, #FFA500);
+            color: white;
+        }
+        .ranking-item:nth-child(2) .ranking-position {
+            background: linear-gradient(135deg, #C0C0C0, #A0A0A0);
+            color: white;
+        }
+        .ranking-item:nth-child(3) .ranking-position {
+            background: linear-gradient(135deg, #CD7F32, #A0522D);
+            color: white;
+        }
+        .ranking-name { flex: 1; font-size: 13px; }
+        .ranking-score { font-size: 13px; font-weight: 600; color: var(--primary); }
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.6);
+            backdrop-filter: blur(4px);
+            z-index: 1000;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+        }
+        .modal-overlay.active { display: flex; }
+        .modal-content {
+            background: white;
+            border-radius: var(--radius-xl);
+            width: 100%;
+            max-width: 1100px;
+            max-height: 90vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            animation: modalSlideIn 0.3s ease;
+        }
+        @keyframes modalSlideIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .modal-header {
+            padding: 20px 24px;
+            border-bottom: 1px solid var(--gray-200);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .modal-title { font-size: 18px; font-weight: 600; }
+        .modal-close {
+            width: 36px;
+            height: 36px;
+            border: none;
+            background: var(--gray-100);
+            border-radius: 50%;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .modal-close:hover { background: var(--gray-200); }
+        .modal-body { display: flex; flex: 1; overflow: hidden; }
+        .element-sidebar {
+            width: 280px;
+            background: var(--gray-50);
+            border-right: 1px solid var(--gray-200);
+            padding: 20px;
+            overflow-y: auto;
+        }
+        .element-list-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--gray-600);
+            margin-bottom: 12px;
+        }
+        .element-list { display: flex; flex-direction: column; gap: 8px; }
+        .element-list-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px;
+            background: white;
+            border-radius: var(--radius-md);
+            cursor: pointer;
+            border: 2px solid transparent;
+            transition: all 0.2s;
+        }
+        .element-list-item:hover { border-color: var(--gray-200); }
+        .element-list-item.active {
+            border-color: var(--primary);
+            background: var(--primary-light);
+        }
+        .element-list-item.completed { background: var(--success-light); }
+        .element-number {
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            background: var(--gray-200);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 13px;
+            font-weight: 600;
+        }
+        .element-list-item.completed .element-number {
+            background: var(--success);
+            color: white;
+        }
+        .element-list-item.active .element-number {
+            background: var(--primary);
+            color: white;
+        }
+        .element-info { flex: 1; }
+        .element-type { font-size: 11px; color: var(--gray-500); }
+        .element-name { font-size: 13px; font-weight: 500; color: var(--gray-700); }
+        .element-status-icon { width: 20px; height: 20px; }
+        .element-status-icon.completed { color: var(--success); }
+        .content-viewer { flex: 1; padding: 24px; overflow-y: auto; }
+        .viewer-placeholder {
+            height: 400px;
+            background: var(--gray-100);
+            border-radius: var(--radius-lg);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 16px;
+            color: var(--gray-500);
+        }
+        .viewer-placeholder svg { width: 64px; height: 64px; opacity: 0.5; }
+        .modal-footer {
+            padding: 16px 24px;
+            border-top: 1px solid var(--gray-200);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .footer-progress { display: flex; align-items: center; gap: 12px; }
+        .progress-bar {
+            width: 200px;
+            height: 8px;
+            background: var(--gray-200);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, var(--primary), var(--secondary));
+            border-radius: 4px;
+        }
+        .progress-text { font-size: 14px; color: var(--gray-600); }
+        .footer-buttons { display: flex; gap: 10px; }
+        .btn-nav {
+            padding: 10px 20px;
+            border-radius: var(--radius-md);
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            border: none;
+        }
+        .btn-nav.secondary { background: var(--gray-100); color: var(--gray-700); }
+        .btn-nav.secondary:hover { background: var(--gray-200); }
+        .btn-nav.primary { background: var(--primary); color: white; }
+        .btn-nav.primary:hover { background: var(--primary-dark); }
+        .result-modal .modal-content { max-width: 900px; }
+        .result-tabs {
+            display: flex;
+            gap: 4px;
+            padding: 0 24px;
+            border-bottom: 1px solid var(--gray-200);
+        }
+        .result-tab {
+            padding: 12px 20px;
+            border: none;
+            background: none;
+            font-size: 14px;
+            font-weight: 500;
+            color: var(--gray-500);
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+        }
+        .result-tab.active { color: var(--primary); border-bottom-color: var(--primary); }
+        .result-filters {
+            padding: 16px 24px;
+            display: flex;
+            gap: 10px;
+            border-bottom: 1px solid var(--gray-100);
+        }
+        .filter-chip {
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-size: 13px;
+            border: 1px solid var(--gray-200);
+            background: white;
+            cursor: pointer;
+        }
+        .filter-chip.active {
+            background: var(--primary);
+            color: white;
+            border-color: var(--primary);
+        }
+        .result-list { padding: 16px 24px; max-height: 400px; overflow-y: auto; }
+        .result-item {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            padding: 16px;
+            background: var(--gray-50);
+            border-radius: var(--radius-md);
+            margin-bottom: 10px;
+            cursor: pointer;
+        }
+        .result-item:hover { background: var(--gray-100); }
+        .result-date { text-align: center; min-width: 60px; }
+        .result-date-day { font-size: 12px; color: var(--gray-500); }
+        .result-date-num { font-size: 20px; font-weight: 700; }
+        .result-info { flex: 1; }
+        .result-title { font-size: 14px; font-weight: 500; margin-bottom: 4px; }
+        .result-meta { display: flex; gap: 12px; font-size: 12px; color: var(--gray-500); }
+        .result-status {
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+        .result-status.completed { background: var(--success-light); color: var(--success); }
+        .result-status.in-progress { background: var(--warning-light); color: var(--gray-700); }
+        .result-status.not-started { background: var(--gray-100); color: var(--gray-500); }
+        .result-point {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            font-weight: 600;
+            color: var(--warning);
+        }
+        .confirm-modal .modal-content { max-width: 400px; text-align: center; padding: 32px; }
+        .confirm-icon {
+            width: 64px;
+            height: 64px;
+            background: var(--warning-light);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 20px;
+        }
+        .confirm-icon svg { width: 32px; height: 32px; color: var(--warning); }
+        .confirm-title { font-size: 18px; font-weight: 600; margin-bottom: 12px; }
+        .confirm-message { font-size: 14px; color: var(--gray-600); margin-bottom: 8px; }
+        .confirm-incomplete {
+            background: var(--accent-light);
+            padding: 12px;
+            border-radius: var(--radius-md);
+            margin: 16px 0;
+        }
+        .incomplete-title { font-size: 13px; font-weight: 600; color: var(--accent); margin-bottom: 8px; }
+        .incomplete-list { font-size: 13px; color: var(--gray-700); }
+        .confirm-buttons { display: flex; gap: 10px; justify-content: center; margin-top: 20px; }
+        .workbook-section {
+            background: white;
+            border-radius: var(--radius-lg);
+            padding: 24px;
+            box-shadow: var(--shadow-sm);
+            margin-top: 24px;
+        }
+        .workbook-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 20px;
+        }
+        .workbook-title {
+            font-size: 18px;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .workbook-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 16px;
+        }
+        .workbook-card {
+            background: var(--gray-50);
+            border-radius: var(--radius-md);
+            padding: 16px;
+            cursor: pointer;
+            border: 2px solid transparent;
+            transition: all 0.2s;
+        }
+        .workbook-card:hover {
+            border-color: var(--primary);
+            background: var(--primary-light);
+        }
+        .workbook-icon {
+            width: 48px;
+            height: 48px;
+            background: white;
+            border-radius: var(--radius-md);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 12px;
+            font-size: 24px;
+            box-shadow: var(--shadow-sm);
+        }
+        .workbook-name { font-size: 14px; font-weight: 600; margin-bottom: 4px; }
+        .workbook-count { font-size: 12px; color: var(--gray-500); }
+        .workbook-add {
+            background: white;
+            border: 2px dashed var(--gray-300);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            min-height: 120px;
+        }
+        .workbook-add:hover {
+            border-color: var(--primary);
+            background: var(--primary-light);
+        }
+        .workbook-add-icon {
+            width: 40px;
+            height: 40px;
+            background: var(--gray-100);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .workbook-add-text { font-size: 13px; color: var(--gray-500); }
+        .btn-settings {
+            padding: 10px 20px;
+            background: var(--primary);
+            color: white;
+            border: none;
+            border-radius: var(--radius-md);
+            font-weight: 500;
+            cursor: pointer;
+        }
+        .btn-settings:hover { background: var(--primary-dark); }
+        .btn-icon-setting {
+            width: 36px;
+            height: 36px;
+            border: 1px solid var(--gray-200);
+            background: white;
+            border-radius: 50%;
+            cursor: pointer;
+            font-size: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s;
+        }
+        .btn-icon-setting:hover {
+            background: var(--gray-50);
+            border-color: var(--primary);
+        }
+        .btn-result-report {
+            padding: 8px 16px;
+            background: white;
+            color: var(--primary);
+            border: 1px solid var(--primary);
+            border-radius: var(--radius-md);
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .btn-result-report:hover {
+            background: var(--primary-light);
+        }
+        .settings-modal .modal-content {
+            max-width: 500px;
+        }
+        .settings-modal .modal-body {
+            padding: 24px;
+            display: block;
+        }
+        .settings-form-group {
+            margin-bottom: 20px;
+        }
+        .settings-form-group label {
+            display: block;
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--gray-700);
+            margin-bottom: 8px;
+        }
+        .settings-form-group select {
+            width: 100%;
+            padding: 12px 14px;
+            border: 1px solid var(--gray-200);
+            border-radius: var(--radius-md);
+            font-size: 14px;
+            color: var(--gray-700);
+            background: white;
+            cursor: pointer;
+        }
+        .settings-form-group select:focus {
+            outline: none;
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px var(--primary-light);
+        }
+        .settings-subject-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 10px;
+        }
+        .settings-subject-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px;
+            border: 1px solid var(--gray-200);
+            border-radius: var(--radius-md);
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .settings-subject-item:hover {
+            border-color: var(--primary);
+            background: var(--primary-light);
+        }
+        .settings-subject-item.selected {
+            border-color: var(--primary);
+            background: var(--primary-light);
+        }
+        .settings-subject-item input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            accent-color: var(--primary);
+        }
+        .settings-subject-item span {
+            font-size: 14px;
+        }
+        .settings-level-select {
+            padding: 4px 8px;
+            border: 1px solid var(--gray-200);
+            border-radius: 4px;
+            font-size: 12px;
+            margin-left: auto;
+        }
+        .card-tag.level-hard { background: var(--accent-light); color: var(--accent); }
+        .encourage-toast {
+            position: fixed;
+            bottom: 100px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            color: white;
+            padding: 16px 24px;
+            border-radius: var(--radius-lg);
+            box-shadow: 0 20px 25px -5px rgba(0,0,0,0.2);
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            z-index: 2000;
+            animation: toastSlideUp 0.5s ease;
+        }
+        @keyframes toastSlideUp {
+            from { opacity: 0; transform: translate(-50%, 20px); }
+            to { opacity: 1; transform: translate(-50%, 0); }
+        }
+        .encourage-icon { font-size: 24px; }
+        .encourage-text { font-size: 15px; font-weight: 500; }
+        @media (max-width: 1024px) {
+            .main-container { grid-template-columns: 1fr; }
+            .sidebar { display: grid; grid-template-columns: repeat(2, 1fr); }
+            .modal-body { flex-direction: column; }
+            .element-sidebar { width: 100%; max-height: 200px; }
+        }
+        @media (max-width: 768px) {
+            .main-container { padding: 16px; }
+            .settings-grid { grid-template-columns: repeat(2, 1fr); }
+            .sidebar { grid-template-columns: 1fr; }
+            .learning-grid { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+    <!-- SVG 그라데이션 정의 -->
+    <svg width="0" height="0" style="position: absolute;">
+        <defs>
+            <linearGradient id="goalGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+                <stop offset="0%" style="stop-color:#4A7CFF"/>
+                <stop offset="100%" style="stop-color:#7C4DFF"/>
+            </linearGradient>
+        </defs>
+    </svg>
+
+    <header class="header">
+        <div class="header-inner">
+            <a href="#" class="logo">
+                <div class="logo-icon">📚</div>
+                <span>다채움</span>
+                <span style="color: var(--gray-400); font-weight: 400; font-size: 14px;">스스로 채움</span>
+            </a>
+            <div class="user-info">
+                <div class="point-badge">⭐ 1,250 P</div>
+                <div class="user-avatar">김</div>
+            </div>
+        </div>
+    </header>
+
+    <div class="main-container">
+        <main>
+            <!-- 학습 목표 달성률 -->
+            <section class="goal-section">
+                <div class="goal-header">
+                    <div class="goal-title-area">
+                        <h2 class="goal-title">🎯 학습 목표 달성률</h2>
+                        <div class="goal-tabs">
+                            <button class="goal-tab active" data-period="weekly">주간</button>
+                            <button class="goal-tab" data-period="monthly">월간</button>
+                        </div>
+                    </div>
+                    <div class="character-display">
+                        <div class="character-avatar">🦊</div>
+                        <div class="character-info">
+                            <div class="character-level">Lv.12</div>
+                            <div class="character-name">호기심 탐험가</div>
+                            <div class="character-exp">
+                                <div class="exp-bar"><div class="exp-fill"></div></div>
+                                <span class="exp-text">650/1000</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="goal-content">
+                    <div class="goal-progress-main">
+                        <div class="goal-progress-circle">
+                            <svg viewBox="0 0 100 100">
+                                <circle class="goal-circle-bg" cx="50" cy="50" r="42"/>
+                                <circle class="goal-circle-fill" cx="50" cy="50" r="42" stroke-dasharray="264" stroke-dashoffset="84"/>
+                            </svg>
+                            <div class="goal-progress-text">
+                                <span class="goal-percent">68%</span>
+                                <span class="goal-label">달성</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="goal-details">
+                        <div class="goal-detail-item">
+                            <div class="goal-detail-icon" style="background: var(--primary-light); color: var(--primary);">📖</div>
+                            <div class="goal-detail-info">
+                                <span class="goal-detail-label">오늘의 학습</span>
+                                <span class="goal-detail-value">12 / 18회</span>
+                            </div>
+                            <div class="goal-detail-bar">
+                                <div class="goal-detail-fill" style="width: 67%; background: var(--primary);"></div>
+                            </div>
+                        </div>
+                        <div class="goal-detail-item">
+                            <div class="goal-detail-icon" style="background: var(--secondary-light); color: var(--secondary);">🤖</div>
+                            <div class="goal-detail-info">
+                                <span class="goal-detail-label">AI 맞춤학습</span>
+                                <span class="goal-detail-value">5 / 8회</span>
+                            </div>
+                            <div class="goal-detail-bar">
+                                <div class="goal-detail-fill" style="width: 63%; background: var(--secondary);"></div>
+                            </div>
+                        </div>
+                        <div class="goal-detail-item">
+                            <div class="goal-detail-icon" style="background: var(--accent-light); color: var(--accent);">📕</div>
+                            <div class="goal-detail-info">
+                                <span class="goal-detail-label">오답노트 정리</span>
+                                <span class="goal-detail-value">3 / 5개</span>
+                            </div>
+                            <div class="goal-detail-bar">
+                                <div class="goal-detail-fill" style="width: 60%; background: var(--accent);"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 날짜 선택 -->
+            <section class="date-selector">
+                <div class="date-header">
+                    <div style="display: flex; align-items: center; gap: 12px;">
+                        <h2 style="font-size: 18px; font-weight: 700;">📅 1월 4주차</h2>
+                        <span class="date-help-text">오늘의 학습 완료 현황</span>
+                    </div>
+                    <div class="date-nav">
+                        <button class="date-nav-btn">◀</button>
+                        <button class="date-nav-btn">▶</button>
+                    </div>
+                </div>
+                <div class="date-list">
+                    <div class="date-item completed-day" title="6개 학습 모두 완료">
+                        <div class="date-day">월</div>
+                        <div class="date-num">20</div>
+                        <div class="date-status">
+                            <span class="status-check">✓</span>
+                        </div>
+                        <div class="date-detail">6개 완료</div>
+                    </div>
+                    <div class="date-item completed-day" title="6개 학습 모두 완료">
+                        <div class="date-day">화</div>
+                        <div class="date-num">21</div>
+                        <div class="date-status">
+                            <span class="status-check">✓</span>
+                        </div>
+                        <div class="date-detail">6개 완료</div>
+                    </div>
+                    <div class="date-item progress-day" title="6개 중 4개 완료">
+                        <div class="date-day">수</div>
+                        <div class="date-num">22</div>
+                        <div class="date-status">
+                            <span class="status-fraction">4/6</span>
+                        </div>
+                        <div class="date-detail">4개 완료</div>
+                    </div>
+                    <div class="date-item progress-day" title="6개 중 3개 완료">
+                        <div class="date-day">목</div>
+                        <div class="date-num">23</div>
+                        <div class="date-status">
+                            <span class="status-fraction">3/6</span>
+                        </div>
+                        <div class="date-detail">3개 완료</div>
+                    </div>
+                    <div class="date-item progress-day" title="6개 중 2개 완료">
+                        <div class="date-day">금</div>
+                        <div class="date-num">24</div>
+                        <div class="date-status">
+                            <span class="status-fraction">2/6</span>
+                        </div>
+                        <div class="date-detail">2개 완료</div>
+                    </div>
+                    <div class="date-item active today progress-day" title="6개 중 2개 완료">
+                        <div class="date-day">토</div>
+                        <div class="date-num">25</div>
+                        <div class="date-status">
+                            <span class="status-fraction">2/6</span>
+                        </div>
+                        <div class="date-detail">2개 완료</div>
+                    </div>
+                    <div class="date-item empty-day" title="학습 예정">
+                        <div class="date-day">일</div>
+                        <div class="date-num">26</div>
+                        <div class="date-status">
+                            <span class="status-empty">-</span>
+                        </div>
+                        <div class="date-detail">예정</div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 오늘의 학습 -->
+            <section>
+                <div class="section-header">
+                    <div style="display: flex; align-items: center; gap: 12px;">
+                        <h2 class="section-title">
+                            <span class="section-title-icon primary">📖</span>
+                            오늘의 학습
+                        </h2>
+                        <button class="btn-icon-setting" onclick="openSettingsModal()" title="학습 설정">⚙️</button>
+                    </div>
+                    <button class="btn-result-report" onclick="openResultModal()">📊 학습 현황</button>
+                </div>
+
+                <div class="learning-grid">
+                    <!-- 완료 카드 1 -->
+                    <article class="learning-card completed" onclick="openLearningModal()">
+                        <div class="card-thumbnail">
+                            <span class="card-thumbnail-placeholder">📐</span>
+                            <span class="status-label completed">완료</span>
+                        </div>
+                        <div class="card-content">
+                            <div class="card-tags">
+                                <span class="card-tag subject">수학</span>
+                                <span class="card-tag level-easy">쉬움</span>
+                            </div>
+                            <h3 class="card-title">오늘의 학습: 수학(31) 원기둥을 알아볼까요</h3>
+                            <div class="element-progress">
+                                <span class="element-item completed">
+                                    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
+                                    영상 2개
+                                </span>
+                                <span class="element-item completed">
+                                    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
+                                    문항 5개
+                                </span>
+                            </div>
+                            <div class="card-footer">
+                                <span class="card-point">⭐ +20P 획득</span>
+                                <button class="card-btn secondary">재학습</button>
+                            </div>
+                        </div>
+                    </article>
+
+                    <!-- 완료 카드 2 -->
+                    <article class="learning-card completed" onclick="openLearningModal()">
+                        <div class="card-thumbnail">
+                            <span class="card-thumbnail-placeholder">📝</span>
+                            <span class="status-label completed">완료</span>
+                        </div>
+                        <div class="card-content">
+                            <div class="card-tags">
+                                <span class="card-tag subject">국어</span>
+                                <span class="card-tag level-normal">보통</span>
+                            </div>
+                            <h3 class="card-title">오늘의 학습: 국어(28) 토론의 절차와 방법</h3>
+                            <div class="element-progress">
+                                <span class="element-item completed">
+                                    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
+                                    영상 1개
+                                </span>
+                                <span class="element-item completed">
+                                    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
+                                    문항 4개
+                                </span>
+                            </div>
+                            <div class="card-footer">
+                                <span class="card-point">⭐ +20P 획득</span>
+                                <button class="card-btn secondary">재학습</button>
+                            </div>
+                        </div>
+                    </article>
+
+                    <!-- 진행중 카드 -->
+                    <article class="learning-card in-progress" onclick="openLearningModal()">
+                        <div class="card-thumbnail">
+                            <span class="card-thumbnail-placeholder">🔤</span>
+                            <span class="status-label in-progress">진행중</span>
+                        </div>
+                        <div class="card-content">
+                            <div class="card-tags">
+                                <span class="card-tag subject">영어</span>
+                                <span class="card-tag level-normal">보통</span>
+                            </div>
+                            <h3 class="card-title">오늘의 학습: 영어(17) 학년 묻고 답하기</h3>
+                            <div class="element-progress">
+                                <span class="element-item completed">
+                                    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
+                                    영상 1개
+                                </span>
+                                <span class="element-item">○ 문항 3개</span>
+                            </div>
+                            <div class="card-footer">
+                                <span class="card-point">⭐ 20P</span>
+                                <button class="card-btn primary">이어하기</button>
+                            </div>
+                        </div>
+                    </article>
+
+                    <!-- 미참여 카드 1 -->
+                    <article class="learning-card" onclick="openLearningModal()">
+                        <div class="card-thumbnail">
+                            <span class="card-thumbnail-placeholder">🔬</span>
+                            <span class="status-label not-started">미참여</span>
+                        </div>
+                        <div class="card-content">
+                            <div class="card-tags">
+                                <span class="card-tag subject">과학</span>
+                                <span class="card-tag level-hard">어려움</span>
+                            </div>
+                            <h3 class="card-title">오늘의 학습: 과학(22) 전기의 작용</h3>
+                            <div class="element-progress">
+                                <span class="element-item">○ 영상 2개</span>
+                                <span class="element-item">○ 문항 6개</span>
+                            </div>
+                            <div class="card-footer">
+                                <span class="card-point">⭐ 25P</span>
+                                <button class="card-btn primary">학습하기</button>
+                            </div>
+                        </div>
+                    </article>
+
+                    <!-- 미참여 카드 2 (비교과) -->
+                    <article class="learning-card" onclick="openLearningModal()">
+                        <div class="card-thumbnail">
+                            <span class="card-thumbnail-placeholder">📖</span>
+                            <span class="status-label not-started">미참여</span>
+                        </div>
+                        <div class="card-content">
+                            <div class="card-tags">
+                                <span class="card-tag type">오늘의 책</span>
+                            </div>
+                            <h3 class="card-title">오늘의 책(6) '나무를 심은 사람' 소개</h3>
+                            <div class="element-progress">
+                                <span class="element-item">○ 영상 1개</span>
+                                <span class="element-item">○ 문서 1개</span>
+                            </div>
+                            <div class="card-footer">
+                                <span class="card-point">⭐ 10P</span>
+                                <button class="card-btn primary">학습하기</button>
+                            </div>
+                        </div>
+                    </article>
+
+                    <!-- 미참여 카드 3 (비교과) -->
+                    <article class="learning-card" onclick="openLearningModal()">
+                        <div class="card-thumbnail">
+                            <span class="card-thumbnail-placeholder">🏃</span>
+                            <span class="status-label not-started">미참여</span>
+                        </div>
+                        <div class="card-content">
+                            <div class="card-tags">
+                                <span class="card-tag type">오늘의 몸활동</span>
+                            </div>
+                            <h3 class="card-title">오늘의 몸활동(14) STEP2 앉아서 여유있게</h3>
+                            <div class="element-progress">
+                                <span class="element-item">○ 영상 1개</span>
+                            </div>
+                            <div class="card-footer">
+                                <span class="card-point">⭐ 10P</span>
+                                <button class="card-btn primary">학습하기</button>
+                            </div>
+                        </div>
+                    </article>
+                </div>
+            </section>
+
+            <!-- 나만의 문제집 -->
+            <section class="workbook-section">
+                <div class="workbook-header">
+                    <h2 class="workbook-title">📝 나만의 문제집</h2>
+                </div>
+                <div class="workbook-grid">
+                    <div class="workbook-card">
+                        <div class="workbook-icon">📘</div>
+                        <div class="workbook-name">수학 복습 문제집</div>
+                        <div class="workbook-count">15문항</div>
+                    </div>
+                    <div class="workbook-card">
+                        <div class="workbook-icon">📗</div>
+                        <div class="workbook-name">영어 단어 테스트</div>
+                        <div class="workbook-count">20문항</div>
+                    </div>
+                    <div class="workbook-card workbook-add">
+                        <div class="workbook-add-icon">+</div>
+                        <div class="workbook-add-text">새 문제집 만들기</div>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <!-- 사이드바 -->
+        <aside class="sidebar">
+            <!-- AI 맞춤학습 -->
+            <div class="sidebar-card ai-learning-card">
+                <h3 class="sidebar-title">🎯 AI 맞춤학습 (수학)</h3>
+                <div class="ai-menu-list">
+                    <a href="#" class="ai-menu-item">
+                        <div class="ai-menu-icon">💡</div>
+                        <span class="ai-menu-text">스스로 진단</span>
+                    </a>
+                    <a href="#" class="ai-menu-item">
+                        <div class="ai-menu-icon">🤖</div>
+                        <span class="ai-menu-text">맞춤형 AI학습</span>
+                    </a>
+                </div>
+            </div>
+
+            <!-- 오답노트 -->
+            <div class="sidebar-card note-card">
+                <h3 class="sidebar-title">📕 오답노트</h3>
+                <div class="note-count">
+                    <span>점검 필요</span>
+                    <strong>3</strong>
+                    <span>개</span>
+                </div>
+            </div>
+
+            <!-- 이번주 진행현황 -->
+            <div class="sidebar-card">
+                <h3 class="sidebar-title">📊 이번주 현황</h3>
+                <div class="progress-stat">
+                    <span class="progress-label">오늘의 학습</span>
+                    <span class="progress-value primary">12회</span>
+                </div>
+                <div class="progress-stat">
+                    <span class="progress-label">AI맞춤학습</span>
+                    <span class="progress-value secondary">5회</span>
+                </div>
+                <div class="progress-stat">
+                    <span class="progress-label">오답노트</span>
+                    <span class="progress-value accent">8개</span>
+                </div>
+            </div>
+
+            <!-- 포인트 -->
+            <div class="sidebar-card point-card">
+                <div class="point-display">
+                    <div class="point-icon">💰</div>
+                    <div class="point-info">
+                        <div class="point-amount">1,250</div>
+                        <div class="point-label">채움포인트</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 랭킹 -->
+            <div class="sidebar-card">
+                <div class="ranking-mini">
+                    <div class="ranking-header">
+                        <span class="ranking-title">🏆 학습 랭킹</span>
+                        <div class="ranking-tabs">
+                            <button class="ranking-tab active">주간</button>
+                            <button class="ranking-tab">월간</button>
+                        </div>
+                    </div>
+                    <div class="ranking-list">
+                        <div class="ranking-item">
+                            <div class="ranking-position">1</div>
+                            <span class="ranking-name">이지은</span>
+                            <span class="ranking-score">2,450P</span>
+                        </div>
+                        <div class="ranking-item">
+                            <div class="ranking-position">2</div>
+                            <span class="ranking-name">박민수</span>
+                            <span class="ranking-score">2,120P</span>
+                        </div>
+                        <div class="ranking-item">
+                            <div class="ranking-position">3</div>
+                            <span class="ranking-name">최유진</span>
+                            <span class="ranking-score">1,980P</span>
+                        </div>
+                        <div class="ranking-item me">
+                            <div class="ranking-position">7</div>
+                            <span class="ranking-name">나 (김하늘)</span>
+                            <span class="ranking-score">1,250P</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 퀵 메뉴 -->
+            <div class="sidebar-card">
+                <h3 class="sidebar-title">⚡ 바로가기</h3>
+                <div class="quick-menu">
+                    <a href="#" class="quick-menu-item">
+                        <div class="quick-menu-icon">😊</div>
+                        <span class="quick-menu-text">감정체크</span>
+                    </a>
+                    <a href="#" class="quick-menu-item">
+                        <div class="quick-menu-icon">🏠</div>
+                        <span class="quick-menu-text">나의클래스</span>
+                    </a>
+                    <a href="#" class="quick-menu-item">
+                        <div class="quick-menu-icon">📈</div>
+                        <span class="quick-menu-text">성장기록</span>
+                    </a>
+                    <a href="#" class="quick-menu-item">
+                        <div class="quick-menu-icon">📚</div>
+                        <span class="quick-menu-text">채움책방</span>
+                    </a>
+                </div>
+            </div>
+        </aside>
+    </div>
+
+    <!-- 학습 뷰어 모달 -->
+    <div class="modal-overlay" id="learningModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 class="modal-title">오늘의 학습: 수학(31) 원기둥을 알아볼까요</h2>
+                <button class="modal-close" onclick="closeLearningModal()">✕</button>
+            </div>
+            <div class="modal-body">
+                <div class="element-sidebar">
+                    <div class="element-list-title">학습 요소 (5개)</div>
+                    <div class="element-list">
+                        <div class="element-list-item completed">
+                            <div class="element-number">✓</div>
+                            <div class="element-info">
+                                <div class="element-type">영상</div>
+                                <div class="element-name">원기둥의 정의</div>
+                            </div>
+                        </div>
+                        <div class="element-list-item completed">
+                            <div class="element-number">✓</div>
+                            <div class="element-info">
+                                <div class="element-type">영상</div>
+                                <div class="element-name">원기둥의 전개도</div>
+                            </div>
+                        </div>
+                        <div class="element-list-item active">
+                            <div class="element-number">3</div>
+                            <div class="element-info">
+                                <div class="element-type">문항</div>
+                                <div class="element-name">개념 확인 문제</div>
+                            </div>
+                        </div>
+                        <div class="element-list-item">
+                            <div class="element-number">4</div>
+                            <div class="element-info">
+                                <div class="element-type">문항</div>
+                                <div class="element-name">응용 문제 1</div>
+                            </div>
+                        </div>
+                        <div class="element-list-item">
+                            <div class="element-number">5</div>
+                            <div class="element-info">
+                                <div class="element-type">문항</div>
+                                <div class="element-name">응용 문제 2</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="content-viewer">
+                    <div class="viewer-placeholder">
+                        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+                        <p>학습 콘텐츠가 여기에 표시됩니다</p>
+                        <p style="font-size: 13px;">영상, 문항, 문서를 모달 내에서 진행</p>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <div class="footer-progress">
+                    <div class="progress-bar"><div class="progress-fill" style="width: 40%"></div></div>
+                    <span class="progress-text">2/5 완료</span>
+                </div>
+                <div class="footer-buttons">
+                    <button class="btn-nav secondary">이전</button>
+                    <button class="btn-nav primary">다음</button>
+                    <button class="btn-nav secondary" onclick="openExitConfirm()">나가기</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 나가기 확인 모달 -->
+    <div class="modal-overlay confirm-modal" id="exitConfirmModal">
+        <div class="modal-content">
+            <div class="confirm-icon">⚠️</div>
+            <h3 class="confirm-title">학습을 종료하시겠습니까?</h3>
+            <p class="confirm-message">아직 완료하지 않은 학습 요소가 있습니다.</p>
+            <div class="confirm-incomplete">
+                <div class="incomplete-title">미완료 학습 요소</div>
+                <div class="incomplete-list">
+                    3번 - 개념 확인 문제<br>
+                    4번 - 응용 문제 1<br>
+                    5번 - 응용 문제 2
+                </div>
+            </div>
+            <div class="confirm-buttons">
+                <button class="btn-nav secondary" onclick="closeExitConfirm()">계속 학습</button>
+                <button class="btn-nav primary" onclick="confirmExit()">종료하기</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 결과표 모달 -->
+    <div class="modal-overlay result-modal" id="resultModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 class="modal-title">📊 학습 현황</h2>
+                <button class="modal-close" onclick="closeResultModal()">✕</button>
+            </div>
+            <div class="result-tabs">
+                <button class="result-tab active" data-period="weekly">주간 현황</button>
+                <button class="result-tab" data-period="monthly">월간 현황</button>
+            </div>
+            <div class="result-filters">
+                <button class="filter-chip active">전체</button>
+                <button class="filter-chip">완료</button>
+                <button class="filter-chip">진행중</button>
+                <button class="filter-chip">미참여</button>
+            </div>
+            <div class="result-list" id="resultList">
+                <!-- 주간 데이터 (기본) -->
+                <div class="result-item">
+                    <div class="result-date">
+                        <div class="result-date-day">토</div>
+                        <div class="result-date-num">25</div>
+                    </div>
+                    <div class="result-info">
+                        <div class="result-title">수학(31) 원기둥을 알아볼까요</div>
+                        <div class="result-meta">
+                            <span>수학</span>
+                            <span>완료율 100%</span>
+                            <span>15분</span>
+                        </div>
+                    </div>
+                    <span class="result-status completed">완료</span>
+                    <span class="result-point">⭐ +20P</span>
+                </div>
+                <div class="result-item">
+                    <div class="result-date">
+                        <div class="result-date-day">토</div>
+                        <div class="result-date-num">25</div>
+                    </div>
+                    <div class="result-info">
+                        <div class="result-title">국어(28) 토론의 절차와 방법</div>
+                        <div class="result-meta">
+                            <span>국어</span>
+                            <span>완료율 100%</span>
+                            <span>18분</span>
+                        </div>
+                    </div>
+                    <span class="result-status completed">완료</span>
+                    <span class="result-point">⭐ +20P</span>
+                </div>
+                <div class="result-item">
+                    <div class="result-date">
+                        <div class="result-date-day">토</div>
+                        <div class="result-date-num">25</div>
+                    </div>
+                    <div class="result-info">
+                        <div class="result-title">영어(17) 학년 묻고 답하기</div>
+                        <div class="result-meta">
+                            <span>영어</span>
+                            <span>완료율 60%</span>
+                            <span>8분</span>
+                        </div>
+                    </div>
+                    <span class="result-status in-progress">진행중</span>
+                    <span class="result-point">⭐ 20P</span>
+                </div>
+                <div class="result-item">
+                    <div class="result-date">
+                        <div class="result-date-day">토</div>
+                        <div class="result-date-num">25</div>
+                    </div>
+                    <div class="result-info">
+                        <div class="result-title">과학(22) 전기의 작용</div>
+                        <div class="result-meta">
+                            <span>과학</span>
+                            <span>완료율 0%</span>
+                            <span>-</span>
+                        </div>
+                    </div>
+                    <span class="result-status not-started">미참여</span>
+                    <span class="result-point">⭐ 25P</span>
+                </div>
+                <div class="result-item">
+                    <div class="result-date">
+                        <div class="result-date-day">금</div>
+                        <div class="result-date-num">24</div>
+                    </div>
+                    <div class="result-info">
+                        <div class="result-title">수학(30) 원의 넓이 구하기</div>
+                        <div class="result-meta">
+                            <span>수학</span>
+                            <span>완료율 100%</span>
+                            <span>20분</span>
+                        </div>
+                    </div>
+                    <span class="result-status completed">완료</span>
+                    <span class="result-point">⭐ +20P</span>
+                </div>
+                <div class="result-item">
+                    <div class="result-date">
+                        <div class="result-date-day">금</div>
+                        <div class="result-date-num">24</div>
+                    </div>
+                    <div class="result-info">
+                        <div class="result-title">영어(16) 날씨 표현하기</div>
+                        <div class="result-meta">
+                            <span>영어</span>
+                            <span>완료율 50%</span>
+                            <span>10분</span>
+                        </div>
+                    </div>
+                    <span class="result-status in-progress">진행중</span>
+                    <span class="result-point">⭐ 20P</span>
+                </div>
+                <div class="result-item">
+                    <div class="result-date">
+                        <div class="result-date-day">목</div>
+                        <div class="result-date-num">23</div>
+                    </div>
+                    <div class="result-info">
+                        <div class="result-title">국어(27) 글의 구조 파악하기</div>
+                        <div class="result-meta">
+                            <span>국어</span>
+                            <span>완료율 100%</span>
+                            <span>22분</span>
+                        </div>
+                    </div>
+                    <span class="result-status completed">완료</span>
+                    <span class="result-point">⭐ +20P</span>
+                </div>
+                <div class="result-item">
+                    <div class="result-date">
+                        <div class="result-date-day">수</div>
+                        <div class="result-date-num">22</div>
+                    </div>
+                    <div class="result-info">
+                        <div class="result-title">수학(29) 원주율 알아보기</div>
+                        <div class="result-meta">
+                            <span>수학</span>
+                            <span>완료율 100%</span>
+                            <span>25분</span>
+                        </div>
+                    </div>
+                    <span class="result-status completed">완료</span>
+                    <span class="result-point">⭐ +20P</span>
+                </div>
+                <div class="result-item">
+                    <div class="result-date">
+                        <div class="result-date-day">화</div>
+                        <div class="result-date-num">21</div>
+                    </div>
+                    <div class="result-info">
+                        <div class="result-title">과학(21) 자석의 성질</div>
+                        <div class="result-meta">
+                            <span>과학</span>
+                            <span>완료율 100%</span>
+                            <span>18분</span>
+                        </div>
+                    </div>
+                    <span class="result-status completed">완료</span>
+                    <span class="result-point">⭐ +25P</span>
+                </div>
+                <div class="result-item">
+                    <div class="result-date">
+                        <div class="result-date-day">월</div>
+                        <div class="result-date-num">20</div>
+                    </div>
+                    <div class="result-info">
+                        <div class="result-title">영어(15) 자기소개하기</div>
+                        <div class="result-meta">
+                            <span>영어</span>
+                            <span>완료율 100%</span>
+                            <span>15분</span>
+                        </div>
+                    </div>
+                    <span class="result-status completed">완료</span>
+                    <span class="result-point">⭐ +20P</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 격려 메시지 -->
+    <div class="encourage-toast" id="encourageToast" style="display: none;">
+        <span class="encourage-icon">🎉</span>
+        <span class="encourage-text">대단해요! 오늘 학습 목표의 절반을 달성했어요!</span>
+    </div>
+
+    <!-- 학습 설정 모달 -->
+    <div class="modal-overlay settings-modal" id="settingsModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 class="modal-title">⚙️ 학습 설정</h2>
+                <button class="modal-close" onclick="closeSettingsModal()">✕</button>
+            </div>
+            <div class="modal-body">
+                <p style="font-size: 14px; color: var(--gray-500); margin-bottom: 24px;">설정에 따라 맞춤 학습 콘텐츠가 제공됩니다.</p>
+                
+                <div class="settings-form-group">
+                    <label>학교급</label>
+                    <select>
+                        <option>학교급 선택</option>
+                        <option selected>초등학교</option>
+                        <option>중학교</option>
+                        <option>고등학교</option>
+                    </select>
+                </div>
+                
+                <div class="settings-form-group">
+                    <label>학년</label>
+                    <select>
+                        <option>학년 선택</option>
+                        <option>1학년</option>
+                        <option>2학년</option>
+                        <option>3학년</option>
+                        <option>4학년</option>
+                        <option>5학년</option>
+                        <option selected>6학년</option>
+                    </select>
+                </div>
+                
+                <div class="settings-form-group">
+                    <label>과목 및 난이도 선택</label>
+                    <div class="settings-subject-grid">
+                        <div class="settings-subject-item selected">
+                            <input type="checkbox" checked>
+                            <span>국어</span>
+                            <select class="settings-level-select">
+                                <option>쉬움</option>
+                                <option selected>보통</option>
+                                <option>어려움</option>
+                            </select>
+                        </div>
+                        <div class="settings-subject-item selected">
+                            <input type="checkbox" checked>
+                            <span>수학</span>
+                            <select class="settings-level-select">
+                                <option selected>쉬움</option>
+                                <option>보통</option>
+                                <option>어려움</option>
+                            </select>
+                        </div>
+                        <div class="settings-subject-item selected">
+                            <input type="checkbox" checked>
+                            <span>영어</span>
+                            <select class="settings-level-select">
+                                <option>쉬움</option>
+                                <option selected>보통</option>
+                                <option>어려움</option>
+                            </select>
+                        </div>
+                        <div class="settings-subject-item selected">
+                            <input type="checkbox" checked>
+                            <span>사회</span>
+                            <select class="settings-level-select">
+                                <option>쉬움</option>
+                                <option selected>보통</option>
+                                <option>어려움</option>
+                            </select>
+                        </div>
+                        <div class="settings-subject-item selected">
+                            <input type="checkbox" checked>
+                            <span>과학</span>
+                            <select class="settings-level-select">
+                                <option>쉬움</option>
+                                <option>보통</option>
+                                <option selected>어려움</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer" style="justify-content: flex-end;">
+                <div class="footer-buttons">
+                    <button class="btn-nav secondary" onclick="closeSettingsModal()">취소</button>
+                    <button class="btn-nav primary" onclick="saveSettings()">저장</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function openLearningModal() {
+            document.getElementById('learningModal').classList.add('active');
+            document.body.style.overflow = 'hidden';
+        }
+        function closeLearningModal() {
+            document.getElementById('learningModal').classList.remove('active');
+            document.body.style.overflow = '';
+        }
+        function openExitConfirm() {
+            document.getElementById('exitConfirmModal').classList.add('active');
+        }
+        function closeExitConfirm() {
+            document.getElementById('exitConfirmModal').classList.remove('active');
+        }
+        function confirmExit() {
+            closeExitConfirm();
+            closeLearningModal();
+        }
+        function openResultModal() {
+            document.getElementById('resultModal').classList.add('active');
+            document.body.style.overflow = 'hidden';
+        }
+        function closeResultModal() {
+            document.getElementById('resultModal').classList.remove('active');
+            document.body.style.overflow = '';
+        }
+        function openSettingsModal() {
+            document.getElementById('settingsModal').classList.add('active');
+            document.body.style.overflow = 'hidden';
+        }
+        function closeSettingsModal() {
+            document.getElementById('settingsModal').classList.remove('active');
+            document.body.style.overflow = '';
+        }
+        function saveSettings() {
+            alert('설정이 저장되었습니다.');
+            closeSettingsModal();
+        }
+
+        // 모달 외부 클릭 닫기
+        document.querySelectorAll('.modal-overlay').forEach(modal => {
+            modal.addEventListener('click', function(e) {
+                if (e.target === this) {
+                    this.classList.remove('active');
+                    document.body.style.overflow = '';
+                }
+            });
+        });
+
+        // 학습요소 선택
+        document.querySelectorAll('.element-list-item').forEach(item => {
+            item.addEventListener('click', function() {
+                document.querySelectorAll('.element-list-item').forEach(i => i.classList.remove('active'));
+                this.classList.add('active');
+            });
+        });
+
+        // 날짜 선택
+        document.querySelectorAll('.date-item').forEach(item => {
+            item.addEventListener('click', function() {
+                document.querySelectorAll('.date-item').forEach(i => i.classList.remove('active'));
+                this.classList.add('active');
+            });
+        });
+
+        // 필터/탭 선택
+        document.querySelectorAll('.filter-chip').forEach(chip => {
+            chip.addEventListener('click', function() {
+                document.querySelectorAll('.filter-chip').forEach(c => c.classList.remove('active'));
+                this.classList.add('active');
+            });
+        });
+        
+        // 결과표 탭 전환 (주간/월간)
+        document.querySelectorAll('.result-tab').forEach(tab => {
+            tab.addEventListener('click', function() {
+                document.querySelectorAll('.result-tab').forEach(t => t.classList.remove('active'));
+                this.classList.add('active');
+                
+                const period = this.dataset.period;
+                const resultList = document.getElementById('resultList');
+                
+                if (period === 'monthly') {
+                    // 월간 데이터로 변경
+                    resultList.innerHTML = `
+                        <div class="result-item">
+                            <div class="result-date"><div class="result-date-day">4주</div><div class="result-date-num">25</div></div>
+                            <div class="result-info"><div class="result-title">수학(31) 원기둥을 알아볼까요</div><div class="result-meta"><span>수학</span><span>완료율 100%</span><span>15분</span></div></div>
+                            <span class="result-status completed">완료</span><span class="result-point">⭐ +20P</span>
+                        </div>
+                        <div class="result-item">
+                            <div class="result-date"><div class="result-date-day">4주</div><div class="result-date-num">24</div></div>
+                            <div class="result-info"><div class="result-title">영어(17) 학년 묻고 답하기</div><div class="result-meta"><span>영어</span><span>완료율 60%</span><span>8분</span></div></div>
+                            <span class="result-status in-progress">진행중</span><span class="result-point">⭐ 20P</span>
+                        </div>
+                        <div class="result-item">
+                            <div class="result-date"><div class="result-date-day">3주</div><div class="result-date-num">18</div></div>
+                            <div class="result-info"><div class="result-title">국어(25) 문단의 짜임</div><div class="result-meta"><span>국어</span><span>완료율 100%</span><span>22분</span></div></div>
+                            <span class="result-status completed">완료</span><span class="result-point">⭐ +20P</span>
+                        </div>
+                        <div class="result-item">
+                            <div class="result-date"><div class="result-date-day">3주</div><div class="result-date-num">16</div></div>
+                            <div class="result-info"><div class="result-title">수학(28) 원의 넓이</div><div class="result-meta"><span>수학</span><span>완료율 100%</span><span>18분</span></div></div>
+                            <span class="result-status completed">완료</span><span class="result-point">⭐ +20P</span>
+                        </div>
+                        <div class="result-item">
+                            <div class="result-date"><div class="result-date-day">2주</div><div class="result-date-num">11</div></div>
+                            <div class="result-info"><div class="result-title">과학(18) 빛과 그림자</div><div class="result-meta"><span>과학</span><span>완료율 100%</span><span>25분</span></div></div>
+                            <span class="result-status completed">완료</span><span class="result-point">⭐ +25P</span>
+                        </div>
+                        <div class="result-item">
+                            <div class="result-date"><div class="result-date-day">2주</div><div class="result-date-num">9</div></div>
+                            <div class="result-info"><div class="result-title">영어(12) 감정 표현하기</div><div class="result-meta"><span>영어</span><span>완료율 100%</span><span>15분</span></div></div>
+                            <span class="result-status completed">완료</span><span class="result-point">⭐ +20P</span>
+                        </div>
+                        <div class="result-item">
+                            <div class="result-date"><div class="result-date-day">1주</div><div class="result-date-num">4</div></div>
+                            <div class="result-info"><div class="result-title">국어(20) 글의 흐름 파악</div><div class="result-meta"><span>국어</span><span>완료율 100%</span><span>20분</span></div></div>
+                            <span class="result-status completed">완료</span><span class="result-point">⭐ +20P</span>
+                        </div>
+                        <div class="result-item">
+                            <div class="result-date"><div class="result-date-day">1주</div><div class="result-date-num">2</div></div>
+                            <div class="result-info"><div class="result-title">수학(25) 분수의 나눗셈</div><div class="result-meta"><span>수학</span><span>완료율 100%</span><span>30분</span></div></div>
+                            <span class="result-status completed">완료</span><span class="result-point">⭐ +20P</span>
+                        </div>
+                    `;
+                } else {
+                    // 주간 데이터로 복원
+                    resultList.innerHTML = `
+                        <div class="result-item">
+                            <div class="result-date"><div class="result-date-day">토</div><div class="result-date-num">25</div></div>
+                            <div class="result-info"><div class="result-title">수학(31) 원기둥을 알아볼까요</div><div class="result-meta"><span>수학</span><span>완료율 100%</span><span>15분</span></div></div>
+                            <span class="result-status completed">완료</span><span class="result-point">⭐ +20P</span>
+                        </div>
+                        <div class="result-item">
+                            <div class="result-date"><div class="result-date-day">토</div><div class="result-date-num">25</div></div>
+                            <div class="result-info"><div class="result-title">국어(28) 토론의 절차와 방법</div><div class="result-meta"><span>국어</span><span>완료율 100%</span><span>18분</span></div></div>
+                            <span class="result-status completed">완료</span><span class="result-point">⭐ +20P</span>
+                        </div>
+                        <div class="result-item">
+                            <div class="result-date"><div class="result-date-day">토</div><div class="result-date-num">25</div></div>
+                            <div class="result-info"><div class="result-title">영어(17) 학년 묻고 답하기</div><div class="result-meta"><span>영어</span><span>완료율 60%</span><span>8분</span></div></div>
+                            <span class="result-status in-progress">진행중</span><span class="result-point">⭐ 20P</span>
+                        </div>
+                        <div class="result-item">
+                            <div class="result-date"><div class="result-date-day">토</div><div class="result-date-num">25</div></div>
+                            <div class="result-info"><div class="result-title">과학(22) 전기의 작용</div><div class="result-meta"><span>과학</span><span>완료율 0%</span><span>-</span></div></div>
+                            <span class="result-status not-started">미참여</span><span class="result-point">⭐ 25P</span>
+                        </div>
+                        <div class="result-item">
+                            <div class="result-date"><div class="result-date-day">금</div><div class="result-date-num">24</div></div>
+                            <div class="result-info"><div class="result-title">수학(30) 원의 넓이 구하기</div><div class="result-meta"><span>수학</span><span>완료율 100%</span><span>20분</span></div></div>
+                            <span class="result-status completed">완료</span><span class="result-point">⭐ +20P</span>
+                        </div>
+                        <div class="result-item">
+                            <div class="result-date"><div class="result-date-day">금</div><div class="result-date-num">24</div></div>
+                            <div class="result-info"><div class="result-title">영어(16) 날씨 표현하기</div><div class="result-meta"><span>영어</span><span>완료율 50%</span><span>10분</span></div></div>
+                            <span class="result-status in-progress">진행중</span><span class="result-point">⭐ 20P</span>
+                        </div>
+                        <div class="result-item">
+                            <div class="result-date"><div class="result-date-day">목</div><div class="result-date-num">23</div></div>
+                            <div class="result-info"><div class="result-title">국어(27) 글의 구조 파악하기</div><div class="result-meta"><span>국어</span><span>완료율 100%</span><span>22분</span></div></div>
+                            <span class="result-status completed">완료</span><span class="result-point">⭐ +20P</span>
+                        </div>
+                        <div class="result-item">
+                            <div class="result-date"><div class="result-date-day">수</div><div class="result-date-num">22</div></div>
+                            <div class="result-info"><div class="result-title">수학(29) 원주율 알아보기</div><div class="result-meta"><span>수학</span><span>완료율 100%</span><span>25분</span></div></div>
+                            <span class="result-status completed">완료</span><span class="result-point">⭐ +20P</span>
+                        </div>
+                        <div class="result-item">
+                            <div class="result-date"><div class="result-date-day">화</div><div class="result-date-num">21</div></div>
+                            <div class="result-info"><div class="result-title">과학(21) 자석의 성질</div><div class="result-meta"><span>과학</span><span>완료율 100%</span><span>18분</span></div></div>
+                            <span class="result-status completed">완료</span><span class="result-point">⭐ +25P</span>
+                        </div>
+                        <div class="result-item">
+                            <div class="result-date"><div class="result-date-day">월</div><div class="result-date-num">20</div></div>
+                            <div class="result-info"><div class="result-title">영어(15) 자기소개하기</div><div class="result-meta"><span>영어</span><span>완료율 100%</span><span>15분</span></div></div>
+                            <span class="result-status completed">완료</span><span class="result-point">⭐ +20P</span>
+                        </div>
+                    `;
+                }
+            });
+        });
+        
+        document.querySelectorAll('.ranking-tab').forEach(tab => {
+            tab.addEventListener('click', function() {
+                document.querySelectorAll('.ranking-tab').forEach(t => t.classList.remove('active'));
+                this.classList.add('active');
+            });
+        });
+
+        // 목표 달성률 탭 전환
+        document.querySelectorAll('.goal-tab').forEach(tab => {
+            tab.addEventListener('click', function() {
+                document.querySelectorAll('.goal-tab').forEach(t => t.classList.remove('active'));
+                this.classList.add('active');
+                
+                // 주간/월간에 따라 데이터 변경 (데모)
+                const period = this.dataset.period;
+                const percentEl = document.querySelector('.goal-percent');
+                const labelEl = document.querySelector('.goal-label');
+                
+                if (period === 'weekly') {
+                    percentEl.textContent = '68%';
+                    document.querySelector('.goal-detail-item:nth-child(1) .goal-detail-value').textContent = '12 / 18회';
+                    document.querySelector('.goal-detail-item:nth-child(2) .goal-detail-value').textContent = '5 / 8회';
+                    document.querySelector('.goal-detail-item:nth-child(3) .goal-detail-value').textContent = '3 / 5개';
+                } else {
+                    percentEl.textContent = '72%';
+                    document.querySelector('.goal-detail-item:nth-child(1) .goal-detail-value').textContent = '48 / 72회';
+                    document.querySelector('.goal-detail-item:nth-child(2) .goal-detail-value').textContent = '18 / 24회';
+                    document.querySelector('.goal-detail-item:nth-child(3) .goal-detail-value').textContent = '12 / 20개';
+                }
+            });
+        });
+
+        // 플래너 체크박스
+        document.querySelectorAll('.task-checkbox').forEach(cb => {
+            cb.addEventListener('click', function() {
+                this.classList.toggle('checked');
+                const text = this.nextElementSibling;
+                if (text) text.classList.toggle('completed');
+            });
+        });
+
+        // 과목 설정 체크박스 토글
+        document.querySelectorAll('.settings-subject-item').forEach(item => {
+            const checkbox = item.querySelector('input[type="checkbox"]');
+            item.addEventListener('click', function(e) {
+                if (e.target.tagName !== 'SELECT' && e.target.tagName !== 'INPUT') {
+                    checkbox.checked = !checkbox.checked;
+                    item.classList.toggle('selected', checkbox.checked);
+                }
+            });
+            checkbox.addEventListener('change', function() {
+                item.classList.toggle('selected', this.checked);
+            });
+        });
+
+        // 격려 메시지 (3초 후 표시)
+        setTimeout(() => {
+            const toast = document.getElementById('encourageToast');
+            toast.style.display = 'flex';
+            setTimeout(() => {
+                toast.style.opacity = '0';
+                setTimeout(() => { toast.style.display = 'none'; toast.style.opacity = '1'; }, 300);
+            }, 5000);
+        }, 3000);
+
+        // ESC 키로 모달 닫기
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') {
+                document.querySelectorAll('.modal-overlay.active').forEach(m => m.classList.remove('active'));
+                document.body.style.overflow = '';
+            }
+        });
+    </script>
+</body>
+</html>

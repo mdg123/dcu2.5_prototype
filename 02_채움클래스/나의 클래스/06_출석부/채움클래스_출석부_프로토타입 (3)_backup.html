@@ -1,0 +1,1127 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>채움클래스 - 출석부 개선 프로토타입</title>
+<link href="https://cdnjs.cloudflare.com/ajax/libs/pretendard/1.3.9/static/pretendard.min.css" rel="stylesheet">
+<style>
+:root {
+  --primary: #2563eb;
+  --primary-light: #dbeafe;
+  --primary-dark: #1d4ed8;
+  --success: #16a34a;
+  --success-light: #dcfce7;
+  --warning: #f59e0b;
+  --warning-light: #fef3c7;
+  --danger: #ef4444;
+  --danger-light: #fef2f2;
+  --gray-50: #f8fafc;
+  --gray-100: #f1f5f9;
+  --gray-200: #e2e8f0;
+  --gray-300: #cbd5e1;
+  --gray-400: #94a3b8;
+  --gray-500: #64748b;
+  --gray-600: #475569;
+  --gray-700: #334155;
+  --gray-800: #1e293b;
+  --gray-900: #0f172a;
+  --radius: 10px;
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
+  --shadow: 0 1px 3px rgba(0,0,0,0.1), 0 1px 2px rgba(0,0,0,0.06);
+  --shadow-md: 0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -2px rgba(0,0,0,0.1);
+  --streak-orange: #f97316;
+  --streak-light: #fff7ed;
+  --badge-purple: #7c3aed;
+  --badge-light: #f5f3ff;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, sans-serif;
+  background: var(--gray-50);
+  color: var(--gray-800);
+  line-height: 1.6;
+  min-height: 100vh;
+}
+
+/* ===== Header ===== */
+.site-header { background: #fff; border-bottom: 1px solid var(--gray-200); position: sticky; top: 0; z-index: 100; }
+.header-top { display: flex; align-items: center; justify-content: space-between; padding: 0 24px; height: 56px; }
+.logo { display: flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 700; color: var(--gray-800); text-decoration: none; }
+.logo .divider { color: var(--gray-300); font-weight: 300; }
+.logo .sub { color: var(--primary); font-weight: 600; }
+.header-user { display: flex; align-items: center; gap: 12px; }
+.user-avatar { width: 32px; height: 32px; border-radius: 50%; background: var(--primary-light); display: flex; align-items: center; justify-content: center; font-size: 14px; }
+.user-name { font-size: 14px; font-weight: 500; }
+.class-nav-bar { display: flex; align-items: center; padding: 0 24px; border-top: 1px solid var(--gray-100); overflow-x: auto; }
+.class-select { font-size: 15px; font-weight: 700; color: var(--gray-800); border: none; background: none; padding: 12px 16px 12px 0; cursor: pointer; min-width: 200px; border-right: 1px solid var(--gray-200); margin-right: 4px; font-family: inherit; }
+.class-nav-bar a { padding: 12px 16px; font-size: 14px; color: var(--gray-500); text-decoration: none; white-space: nowrap; border-bottom: 2px solid transparent; transition: all 0.2s; }
+.class-nav-bar a:hover { color: var(--gray-700); }
+.class-nav-bar a.active { color: var(--primary); font-weight: 600; border-bottom-color: var(--primary); }
+
+/* Role Switcher */
+.role-switcher { background: linear-gradient(135deg, #1e293b 0%, #334155 100%); color: white; padding: 10px 24px; display: flex; align-items: center; justify-content: center; gap: 12px; font-size: 13px; }
+.role-switcher span { opacity: 0.7; }
+.role-btn { padding: 5px 16px; border-radius: 20px; border: 1px solid rgba(255,255,255,0.3); background: transparent; color: white; font-size: 13px; cursor: pointer; transition: all 0.2s; font-family: inherit; }
+.role-btn:hover { background: rgba(255,255,255,0.1); }
+.role-btn.active { background: white; color: var(--gray-800); font-weight: 600; border-color: white; }
+
+/* Main */
+.main-content { max-width: 1100px; margin: 0 auto; padding: 24px; }
+.page-title-area { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; flex-wrap: wrap; gap: 12px; }
+.page-title { font-size: 22px; font-weight: 700; color: var(--gray-900); }
+.page-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+/* Buttons */
+.btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; border-radius: 8px; font-size: 14px; font-weight: 500; border: 1px solid var(--gray-200); background: white; color: var(--gray-700); cursor: pointer; transition: all 0.15s; font-family: inherit; white-space: nowrap; }
+.btn:hover { background: var(--gray-50); border-color: var(--gray-300); }
+.btn-primary { background: var(--primary); color: white; border-color: var(--primary); }
+.btn-primary:hover { background: var(--primary-dark); }
+.btn-success { background: var(--success); color: white; border-color: var(--success); }
+.btn-sm { padding: 6px 12px; font-size: 13px; }
+.btn-icon { width: 36px; height: 36px; padding: 0; justify-content: center; border-radius: 8px; }
+
+/* Period Selector */
+.period-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.period-btn { padding: 6px 14px; border-radius: 20px; border: 1px solid var(--gray-200); background: white; color: var(--gray-600); font-size: 13px; font-weight: 500; cursor: pointer; transition: all 0.15s; font-family: inherit; }
+.period-btn:hover { border-color: var(--primary); color: var(--primary); }
+.period-btn.active { background: var(--primary); color: white; border-color: var(--primary); }
+.weekend-toggle { display: flex; align-items: center; gap: 6px; margin-left: 8px; padding-left: 12px; border-left: 1px solid var(--gray-200); }
+.weekend-toggle label { font-size: 13px; color: var(--gray-500); cursor: pointer; display: flex; align-items: center; gap: 4px; }
+.weekend-toggle input[type="checkbox"] { accent-color: var(--primary); width: 15px; height: 15px; cursor: pointer; }
+
+/* Toggle */
+.toggle-switch { position: relative; width: 44px; height: 24px; }
+.toggle-switch input { display: none; }
+.toggle-slider { position: absolute; inset: 0; background: var(--gray-300); border-radius: 12px; cursor: pointer; transition: 0.2s; }
+.toggle-slider::after { content: ''; position: absolute; top: 2px; left: 2px; width: 20px; height: 20px; background: white; border-radius: 50%; transition: 0.2s; box-shadow: var(--shadow-sm); }
+.toggle-switch input:checked + .toggle-slider { background: var(--primary); }
+.toggle-switch input:checked + .toggle-slider::after { left: 22px; }
+
+/* Card */
+.card { background: white; border: 1px solid var(--gray-200); border-radius: var(--radius); overflow: hidden; }
+.card-header { display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid var(--gray-100); flex-wrap: wrap; gap: 8px; }
+.card-title { font-size: 15px; font-weight: 600; color: var(--gray-800); }
+.card-body { padding: 20px; }
+
+/* Info Banner */
+.info-banner { display: flex; align-items: flex-start; gap: 10px; padding: 12px 16px; border-radius: 8px; font-size: 13px; line-height: 1.5; margin-bottom: 16px; }
+.info-banner.info { background: var(--primary-light); color: var(--primary-dark); }
+.info-banner.success { background: var(--success-light); color: #15803d; }
+
+/* Stats Grid */
+.stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 20px; }
+.stat-card { background: white; border: 1px solid var(--gray-200); border-radius: var(--radius); padding: 16px; text-align: center; }
+.stat-value { font-size: 28px; font-weight: 700; margin-bottom: 2px; }
+.stat-label { font-size: 13px; color: var(--gray-500); }
+.stat-card.highlight { border-color: var(--primary); background: var(--primary-light); }
+.stat-card.highlight .stat-value { color: var(--primary); }
+
+/* ===== Attendance Table ===== */
+.table-wrap { overflow-x: auto; position: relative; }
+.attendance-table { width: max-content; min-width: 100%; border-collapse: separate; border-spacing: 0; font-size: 14px; }
+
+/* thead */
+.attendance-table thead th { background: var(--gray-50); padding: 10px 8px; text-align: center; font-weight: 600; font-size: 13px; color: var(--gray-600); border-bottom: 2px solid var(--gray-200); white-space: nowrap; }
+.attendance-table thead th .day-label { display: block; font-size: 11px; color: var(--gray-400); font-weight: 400; }
+.attendance-table thead th.today-col { background: var(--primary-light); color: var(--primary-dark); }
+.attendance-table thead th.weekend { color: var(--danger); }
+
+/* Sticky left: member name */
+.attendance-table thead th:first-child { text-align: left; position: sticky; left: 0; z-index: 3; background: var(--gray-50); min-width: 160px; box-shadow: 4px 0 8px -2px rgba(0,0,0,0.06); }
+/* Sticky right: rate */
+.attendance-table thead th:last-child { position: sticky; right: 0; z-index: 3; background: var(--gray-50); min-width: 120px; box-shadow: -4px 0 8px -2px rgba(0,0,0,0.06); }
+
+/* tbody */
+.attendance-table tbody td { padding: 8px 6px; text-align: center; border-bottom: 1px solid var(--gray-100); vertical-align: middle; white-space: nowrap; }
+.attendance-table tbody th { padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--gray-100); font-weight: 500; vertical-align: middle; position: sticky; left: 0; background: white; z-index: 2; box-shadow: 4px 0 8px -2px rgba(0,0,0,0.06); }
+.attendance-table tbody td:last-child { position: sticky; right: 0; background: white; z-index: 2; box-shadow: -4px 0 8px -2px rgba(0,0,0,0.06); }
+.attendance-table tbody tr:hover td { background: var(--gray-50); }
+.attendance-table tbody tr:hover td:last-child { background: var(--gray-50); }
+.attendance-table tbody tr:hover th { background: var(--gray-50); }
+
+/* Member name cell */
+.member-cell { display: flex; align-items: center; gap: 8px; min-width: 150px; }
+.member-name { font-weight: 600; font-size: 14px; }
+.member-labels { display: flex; gap: 4px; flex-wrap: wrap; }
+.member-label { display: inline-flex; align-items: center; gap: 2px; padding: 1px 7px; border-radius: 10px; font-size: 11px; font-weight: 600; white-space: nowrap; }
+.label-streak { background: var(--streak-light); color: var(--streak-orange); }
+.label-perfect { background: var(--success-light); color: var(--success); }
+.label-top { background: var(--warning-light); color: #b45309; }
+.label-danger { background: var(--danger-light); color: var(--danger); }
+
+/* Attendance check marks */
+.att-mark { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; border-radius: 50%; font-size: 15px; transition: all 0.3s ease; }
+.att-mark.present { background: var(--success-light); color: var(--success); }
+.att-mark.absent { background: var(--gray-100); color: var(--gray-300); }
+.att-mark.today-present { background: var(--success); color: white; animation: popIn 0.4s cubic-bezier(0.34, 1.56, 0.64, 1); }
+.att-mark.today-absent { background: var(--danger-light); color: var(--danger); border: 2px dashed var(--danger); width: 28px; height: 28px; animation: pulse 2s infinite; }
+
+@keyframes popIn {
+  0% { transform: scale(0); opacity: 0; }
+  60% { transform: scale(1.3); }
+  100% { transform: scale(1); opacity: 1; }
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.att-time { display: block; font-size: 10px; color: var(--gray-400); margin-top: 1px; }
+.att-comment { display: block; font-size: 10px; color: var(--gray-500); margin-top: 1px; max-width: 70px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-left: auto; margin-right: auto; }
+
+/* Rate column */
+.rate-col { min-width: 110px; }
+.rate-bar-wrap { display: flex; align-items: center; gap: 6px; }
+.rate-bar { flex: 1; height: 6px; background: var(--gray-100); border-radius: 3px; overflow: hidden; }
+.rate-bar-fill { height: 100%; border-radius: 3px; transition: width 0.8s ease; }
+.rate-bar-fill.high { background: var(--success); }
+.rate-bar-fill.mid { background: var(--warning); }
+.rate-bar-fill.low { background: var(--danger); }
+.rate-value { font-size: 13px; font-weight: 600; min-width: 38px; text-align: right; }
+
+/* Footer */
+.attendance-table tfoot td, .attendance-table tfoot th { padding: 10px 8px; text-align: center; font-weight: 600; font-size: 13px; border-top: 2px solid var(--gray-200); background: var(--gray-50); color: var(--gray-700); }
+.attendance-table tfoot th { text-align: left; position: sticky; left: 0; z-index: 2; box-shadow: 4px 0 8px -2px rgba(0,0,0,0.06); }
+.attendance-table tfoot td:last-child { position: sticky; right: 0; z-index: 2; box-shadow: -4px 0 8px -2px rgba(0,0,0,0.06); }
+.attendance-table tfoot td.today-col { background: var(--primary-light); }
+
+/* Badge tags */
+.badge-tag { display: inline-flex; align-items: center; gap: 4px; padding: 3px 10px; border-radius: 12px; font-size: 12px; font-weight: 600; }
+.badge-tag.public { background: var(--success-light); color: var(--success); }
+.badge-tag.private { background: var(--gray-100); color: var(--gray-500); }
+
+/* Settings Panel */
+.settings-panel { display: none; background: white; border: 1px solid var(--gray-200); border-radius: var(--radius); padding: 20px; margin-bottom: 20px; animation: slideDown 0.2s ease; }
+.settings-panel.show { display: block; }
+@keyframes slideDown { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: translateY(0); } }
+.settings-row { display: flex; align-items: center; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid var(--gray-100); }
+.settings-row:last-child { border-bottom: none; }
+.settings-label { font-size: 14px; font-weight: 500; }
+.settings-desc { font-size: 12px; color: var(--gray-500); margin-top: 2px; }
+
+/* ===== STUDENT VIEW ===== */
+.student-view { display: none; }
+
+.attendance-hero { background: white; border: 1px solid var(--gray-200); border-radius: var(--radius); overflow: hidden; margin-bottom: 20px; }
+.attendance-hero-inner { padding: 32px 24px; text-align: center; }
+.today-date { font-size: 14px; color: var(--gray-500); margin-bottom: 4px; }
+.attendance-status { font-size: 20px; font-weight: 700; margin-bottom: 20px; }
+
+.check-in-btn { display: inline-flex; align-items: center; justify-content: center; gap: 10px; padding: 14px 48px; font-size: 17px; font-weight: 700; color: white; background: var(--primary); border: none; border-radius: 12px; cursor: pointer; transition: all 0.2s; font-family: inherit; box-shadow: 0 2px 8px rgba(37,99,235,0.3); }
+.check-in-btn:hover { background: var(--primary-dark); transform: translateY(-1px); box-shadow: 0 4px 12px rgba(37,99,235,0.4); }
+.check-in-btn:active { transform: translateY(0); }
+.check-in-btn.done { background: var(--success); box-shadow: 0 2px 8px rgba(22,163,74,0.3); cursor: default; pointer-events: none; }
+
+.comment-input-area { margin-top: 16px; display: flex; justify-content: center; gap: 8px; }
+.comment-input { width: 320px; max-width: 100%; padding: 10px 14px; border: 1px solid var(--gray-200); border-radius: 8px; font-size: 14px; font-family: inherit; transition: border-color 0.2s; outline: none; }
+.comment-input:focus { border-color: var(--primary); }
+.comment-input::placeholder { color: var(--gray-400); }
+
+/* Gamification */
+.gamification-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 20px; }
+.streak-card { background: white; border: 1px solid var(--gray-200); border-radius: var(--radius); padding: 16px; display: flex; align-items: center; gap: 14px; }
+.streak-icon { width: 48px; height: 48px; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 24px; flex-shrink: 0; }
+.streak-icon.fire { background: var(--streak-light); }
+.streak-icon.trophy { background: var(--warning-light); }
+.streak-icon.badge { background: var(--badge-light); }
+.streak-icon.target { background: var(--success-light); }
+.streak-info .streak-value { font-size: 20px; font-weight: 700; color: var(--gray-900); }
+.streak-info .streak-label { font-size: 12px; color: var(--gray-500); margin-top: 1px; }
+
+/* Feed */
+.feed-list { list-style: none; }
+.feed-item { display: flex; align-items: center; gap: 12px; padding: 12px 20px; border-bottom: 1px solid var(--gray-100); transition: background 0.15s; }
+.feed-item:last-child { border-bottom: none; }
+.feed-item:hover { background: var(--gray-50); }
+.feed-item.just-arrived { animation: feedSlide 0.5s ease; }
+@keyframes feedSlide { from { opacity: 0; transform: translateY(-12px); } to { opacity: 1; transform: translateY(0); } }
+
+.feed-avatar { width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 15px; font-weight: 600; flex-shrink: 0; }
+.feed-avatar.a1 { background: #dbeafe; color: #2563eb; }
+.feed-avatar.a2 { background: #fce7f3; color: #db2777; }
+.feed-avatar.a3 { background: #dcfce7; color: #16a34a; }
+.feed-avatar.a4 { background: #fef3c7; color: #d97706; }
+.feed-content { flex: 1; min-width: 0; }
+.feed-name { font-size: 14px; font-weight: 600; color: var(--gray-800); }
+.feed-comment { font-size: 13px; color: var(--gray-500); margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.feed-meta { text-align: right; flex-shrink: 0; }
+.feed-time { font-size: 12px; color: var(--gray-400); }
+.feed-streak-badge { display: inline-flex; align-items: center; gap: 3px; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; background: var(--streak-light); color: var(--streak-orange); margin-top: 4px; }
+
+/* Student Calendar */
+.cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 0; }
+.cal-head { text-align: center; padding: 8px 4px; font-size: 12px; font-weight: 600; color: var(--gray-500); }
+.cal-head:first-child { color: var(--danger); }
+.cal-head:last-child { color: var(--primary); }
+.cal-cell { aspect-ratio: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 14px; color: var(--gray-600); border: 1px solid var(--gray-100); margin: -0.5px; position: relative; gap: 2px; }
+.cal-cell.empty { background: transparent; border-color: transparent; }
+.cal-cell.today { background: var(--primary-light); font-weight: 700; color: var(--primary); }
+.cal-cell .cal-check { width: 18px; height: 18px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 10px; }
+.cal-cell .cal-check.present { background: var(--success); color: white; }
+.cal-cell .cal-check.check-animated { animation: popIn 0.4s cubic-bezier(0.34, 1.56, 0.64, 1); }
+
+/* Period Display */
+.period-display {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  background: var(--gray-50);
+  border-bottom: 1px solid var(--gray-100);
+  font-size: 14px;
+  color: var(--gray-600);
+}
+.period-range {
+  font-weight: 700;
+  color: var(--gray-800);
+  font-size: 15px;
+}
+.period-days {
+  font-size: 12px;
+  color: var(--gray-400);
+  background: var(--gray-100);
+  padding: 2px 8px;
+  border-radius: 10px;
+}
+
+/* Calendar Picker Overlay */
+.cal-picker-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.3);
+  z-index: 200;
+  justify-content: center;
+  align-items: center;
+  animation: fadeIn 0.15s ease;
+}
+.cal-picker-overlay.show { display: flex; }
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+.cal-picker {
+  background: white;
+  border-radius: 14px;
+  box-shadow: 0 20px 40px rgba(0,0,0,0.15);
+  width: 360px;
+  max-width: 95vw;
+  overflow: hidden;
+  animation: scaleIn 0.2s ease;
+}
+@keyframes scaleIn { from { transform: scale(0.95); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+
+.cal-picker-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--gray-100);
+}
+.cal-picker-header h3 { font-size: 16px; font-weight: 700; }
+.cal-picker-close {
+  width: 32px; height: 32px; border-radius: 8px; border: none;
+  background: var(--gray-100); color: var(--gray-500); font-size: 18px;
+  cursor: pointer; display: flex; align-items: center; justify-content: center;
+  transition: all 0.15s;
+}
+.cal-picker-close:hover { background: var(--gray-200); }
+
+.cal-picker-body { padding: 16px 20px; }
+.cal-picker-nav {
+  display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;
+}
+.cal-picker-month { font-size: 16px; font-weight: 700; }
+
+.cal-picker-grid {
+  display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; text-align: center;
+}
+.cal-picker-grid .cpd-head {
+  font-size: 12px; font-weight: 600; color: var(--gray-400); padding: 6px 0;
+}
+.cal-picker-grid .cpd-head:first-child { color: var(--danger); }
+.cal-picker-grid .cpd-head:last-child { color: var(--primary); }
+
+.cpd-cell {
+  padding: 8px 4px; font-size: 14px; color: var(--gray-600); border-radius: 8px;
+  cursor: pointer; transition: all 0.15s; position: relative; user-select: none;
+}
+.cpd-cell:hover { background: var(--gray-100); }
+.cpd-cell.empty { cursor: default; }
+.cpd-cell.empty:hover { background: transparent; }
+.cpd-cell.today { font-weight: 700; color: var(--primary); }
+.cpd-cell.selected { background: var(--primary); color: white; font-weight: 600; }
+.cpd-cell.in-range { background: var(--primary-light); color: var(--primary-dark); }
+.cpd-cell.range-start { background: var(--primary); color: white; border-radius: 8px 0 0 8px; }
+.cpd-cell.range-end { background: var(--primary); color: white; border-radius: 0 8px 8px 0; }
+.cpd-cell.range-start.range-end { border-radius: 8px; }
+
+.cal-picker-footer {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 20px; border-top: 1px solid var(--gray-100); background: var(--gray-50);
+}
+.cal-picker-footer .range-preview {
+  font-size: 13px; color: var(--gray-500);
+}
+.cal-picker-footer .range-preview strong {
+  color: var(--gray-800);
+}
+
+/* Toast */
+.toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(100px); background: var(--gray-800); color: white; padding: 12px 24px; border-radius: 10px; font-size: 14px; font-weight: 500; z-index: 1000; opacity: 0; transition: all 0.3s ease; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1); }
+.toast.show { transform: translateX(-50%) translateY(0); opacity: 1; }
+
+#confetti-canvas { position: fixed; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 999; }
+
+@media (max-width: 768px) {
+  .stats-grid { grid-template-columns: repeat(2, 1fr); }
+  .gamification-grid { grid-template-columns: repeat(2, 1fr); }
+  .main-content { padding: 16px; }
+  .page-title-area { flex-direction: column; align-items: flex-start; }
+}
+</style>
+</head>
+<body>
+
+<header class="site-header">
+  <div class="header-top">
+    <a class="logo" href="#"><span>다채움</span><span class="divider">|</span><span class="sub">채움클래스</span></a>
+    <div class="header-user">
+      <div class="user-avatar" id="userAvatar">👤</div>
+      <span class="user-name" id="userName">문동국</span>
+    </div>
+  </div>
+  <nav class="class-nav-bar">
+    <select class="class-select">
+      <option>👑 매스 플레이 클래스</option>
+      <option>👑 채움중학교 3학년 1반</option>
+    </select>
+    <a href="#">홈</a><a href="#">수업</a><a href="#">과제</a><a href="#">평가</a><a href="#">알림장</a>
+    <a href="#" class="active">출석부</a><a href="#">커뮤니티</a>
+  </nav>
+</header>
+
+<div class="role-switcher">
+  <span>🔄 프로토타입 뷰 전환:</span>
+  <button class="role-btn active" onclick="switchView('teacher')">👨‍🏫 개설자(교사) 뷰</button>
+  <button class="role-btn" onclick="switchView('student')">👩‍🎓 멤버(학생) 뷰</button>
+</div>
+
+<!-- ========== TEACHER VIEW ========== -->
+<div class="teacher-view" id="teacherView">
+  <div class="main-content">
+    <div class="page-title-area">
+      <h2 class="page-title">출석부</h2>
+      <div class="page-actions">
+        <button class="btn btn-sm" onclick="toggleSettings()">⚙️ 출석 설정</button>
+        <button class="btn btn-sm" onclick="showToast('출석 데이터가 엑셀 파일로 다운로드됩니다.')">📥 엑셀 다운로드</button>
+      </div>
+    </div>
+
+    <div class="info-banner info">
+      <span class="icon">ℹ️</span>
+      <span>출석 데이터는 이 클래스 내에서만 관리되며, 다른 클래스와 공유되지 않습니다.</span>
+    </div>
+
+    <!-- Settings -->
+    <div class="settings-panel" id="settingsPanel">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+        <strong style="font-size:16px;">출석 설정</strong>
+        <button class="btn btn-sm" onclick="toggleSettings()">닫기</button>
+      </div>
+      <div class="settings-row">
+        <div><div class="settings-label">출석 현황 공개</div><div class="settings-desc">멤버들에게 오늘 출석한 사람 목록을 공개합니다.</div></div>
+        <label class="toggle-switch"><input type="checkbox" checked id="publicToggle" onchange="togglePublic()"><span class="toggle-slider"></span></label>
+      </div>
+      <div class="settings-row">
+        <div><div class="settings-label">출석 알림</div><div class="settings-desc">설정 시간에 미출석 멤버에게 알림을 보냅니다.</div></div>
+        <label class="toggle-switch"><input type="checkbox"><span class="toggle-slider"></span></label>
+      </div>
+      <div class="settings-row">
+        <div><div class="settings-label">출석 랭킹 표시</div><div class="settings-desc">공개 모드에서 이번 달 출석률 랭킹을 표시합니다.</div></div>
+        <label class="toggle-switch"><input type="checkbox" checked><span class="toggle-slider"></span></label>
+      </div>
+      <div class="settings-row">
+        <div><div class="settings-label">한마디 코멘트 허용</div><div class="settings-desc">출석 시 선택적으로 한 줄 코멘트를 남길 수 있습니다.</div></div>
+        <label class="toggle-switch"><input type="checkbox" checked><span class="toggle-slider"></span></label>
+      </div>
+      <div class="settings-row">
+        <div><div class="settings-label">클래스 출석 목표</div><div class="settings-desc">이번 주 전체 출석률 목표를 설정합니다.</div></div>
+        <div style="display:flex;align-items:center;gap:8px;">
+          <input type="number" value="90" min="0" max="100" style="width:60px;padding:6px 8px;border:1px solid var(--gray-200);border-radius:6px;font-size:14px;text-align:center;font-family:inherit;">
+          <span style="font-size:14px;color:var(--gray-500);">%</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Stats -->
+    <div class="stats-grid">
+      <div class="stat-card"><div class="stat-value">6</div><div class="stat-label">전체 멤버</div></div>
+      <div class="stat-card highlight"><div class="stat-value">4</div><div class="stat-label">오늘 출석</div></div>
+      <div class="stat-card"><div class="stat-value">2</div><div class="stat-label">미출석</div></div>
+      <div class="stat-card"><div class="stat-value" style="color:var(--success);">66.7%</div><div class="stat-label">오늘 출석률</div></div>
+    </div>
+
+    <!-- Controls Bar -->
+    <div class="card" style="margin-bottom:0; border-radius: var(--radius) var(--radius) 0 0; border-bottom:none;">
+      <div class="card-header" style="border-bottom:none;">
+        <div class="period-bar">
+          <button class="period-btn active" onclick="setPeriod('1w', this)">최근 1주</button>
+          <button class="period-btn" onclick="setPeriod('2w', this)">최근 2주</button>
+          <button class="period-btn" onclick="setPeriod('1m', this)">최근 1달</button>
+          <button class="period-btn" onclick="openCalPicker()" id="customPeriodBtn">📅 기간 선택</button>
+          <div class="weekend-toggle">
+            <label><input type="checkbox" id="weekendCheck" onchange="toggleWeekend()"> 주말 포함</label>
+          </div>
+        </div>
+        <span class="badge-tag public" id="publicBadge">🔓 공개</span>
+      </div>
+      <!-- Period Range Display -->
+      <div class="period-display" id="periodDisplay">
+        <span>📆</span>
+        <span class="period-range" id="periodRange">02/14 (월) ~ 02/20 (금)</span>
+        <span class="period-days" id="periodDays">5일간</span>
+      </div>
+    </div>
+
+    <!-- Calendar Picker Overlay -->
+    <div class="cal-picker-overlay" id="calPickerOverlay" onclick="closeCalPickerOutside(event)">
+      <div class="cal-picker">
+        <div class="cal-picker-header">
+          <h3>기간 선택</h3>
+          <button class="cal-picker-close" onclick="closeCalPicker()">✕</button>
+        </div>
+        <div class="cal-picker-body">
+          <div class="cal-picker-nav">
+            <button class="btn btn-icon btn-sm" onclick="calPickerPrev()">◀</button>
+            <span class="cal-picker-month" id="calPickerMonth">2026년 2월</span>
+            <button class="btn btn-icon btn-sm" onclick="calPickerNext()">▶</button>
+          </div>
+          <div class="cal-picker-grid" id="calPickerGrid">
+            <!-- JS renders -->
+          </div>
+        </div>
+        <div class="cal-picker-footer">
+          <div class="range-preview" id="rangePreview">시작일과 종료일을 선택하세요</div>
+          <button class="btn btn-primary btn-sm" onclick="applyCalPicker()">적용</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Attendance Table -->
+    <div class="card" id="attendanceCard" style="border-radius: 0 0 var(--radius) var(--radius);">
+      <div class="table-wrap" id="tableWrap">
+        <!-- JS로 동적 렌더링 -->
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ========== STUDENT VIEW ========== -->
+<div class="student-view" id="studentView">
+  <div class="main-content">
+    <div class="page-title-area"><h2 class="page-title">출석부</h2></div>
+
+    <div class="info-banner info">
+      <span class="icon">ℹ️</span>
+      <span>이 클래스의 출석 기록은 다른 클래스와 공유되지 않습니다.</span>
+    </div>
+
+    <!-- Check-in -->
+    <div class="attendance-hero" id="attendanceHero">
+      <div class="attendance-hero-inner">
+        <div class="today-date">2026년 2월 20일 금요일</div>
+        <div class="attendance-status" id="attendanceStatus">오늘 출석을 해주세요</div>
+        <button class="check-in-btn" id="checkInBtn" onclick="doCheckIn()">✋ 출석하기</button>
+        <div class="comment-input-area" id="commentArea">
+          <input type="text" class="comment-input" id="commentInput" placeholder="오늘의 한마디 (선택)" maxlength="30">
+          <button class="btn btn-sm" onclick="submitComment()">등록</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Gamification -->
+    <div class="gamification-grid">
+      <div class="streak-card">
+        <div class="streak-icon fire">🔥</div>
+        <div class="streak-info"><div class="streak-value" id="streakCount">12일</div><div class="streak-label">연속 출석 중</div></div>
+      </div>
+      <div class="streak-card">
+        <div class="streak-icon trophy">🏆</div>
+        <div class="streak-info"><div class="streak-value">92%</div><div class="streak-label">이번 달 출석률</div></div>
+      </div>
+      <div class="streak-card">
+        <div class="streak-icon badge">🎖️</div>
+        <div class="streak-info"><div class="streak-value">꾸준한 학생</div><div class="streak-label">현재 칭호</div></div>
+      </div>
+      <div class="streak-card">
+        <div class="streak-icon target">🎯</div>
+        <div class="streak-info"><div class="streak-value">87%<span style="font-size:14px;color:var(--gray-400);"> / 90%</span></div><div class="streak-label">클래스 출석 목표</div></div>
+      </div>
+    </div>
+
+    <!-- Feed -->
+    <div class="card" style="margin-bottom:20px;">
+      <div class="card-header">
+        <span class="card-title">오늘의 출석 현황</span>
+        <span class="badge-tag public">🔓 공개</span>
+      </div>
+      <ul class="feed-list" id="feedList">
+        <li class="feed-item">
+          <div class="feed-avatar a3">정</div>
+          <div class="feed-content"><div class="feed-name">정수아</div><div class="feed-comment">항상 화이팅!</div></div>
+          <div class="feed-meta"><div class="feed-time">08:29</div><div class="feed-streak-badge">🔥 18일 연속</div></div>
+        </li>
+        <li class="feed-item">
+          <div class="feed-avatar a4">박</div>
+          <div class="feed-content"><div class="feed-name">박서연</div><div class="feed-comment">개근 도전중!</div></div>
+          <div class="feed-meta"><div class="feed-time">08:33</div><div class="feed-streak-badge">🔥 15일 연속</div></div>
+        </li>
+        <li class="feed-item">
+          <div class="feed-avatar a2">김</div>
+          <div class="feed-content"><div class="feed-name">김지혜</div><div class="feed-comment"></div></div>
+          <div class="feed-meta"><div class="feed-time">08:47</div><div class="feed-streak-badge">🔥 9일 연속</div></div>
+        </li>
+      </ul>
+    </div>
+
+    <!-- Calendar -->
+    <div class="card" style="margin-bottom:20px;">
+      <div class="card-header">
+        <div style="display:flex;align-items:center;gap:8px;">
+          <button class="btn btn-icon btn-sm">◀</button>
+          <span class="card-title" style="min-width:120px;text-align:center;">2026년 2월</span>
+          <button class="btn btn-icon btn-sm">▶</button>
+        </div>
+      </div>
+      <div class="card-body">
+        <div class="cal-grid">
+          <div class="cal-head">일</div><div class="cal-head">월</div><div class="cal-head">화</div><div class="cal-head">수</div><div class="cal-head">목</div><div class="cal-head">금</div><div class="cal-head">토</div>
+          <div class="cal-cell empty"></div><div class="cal-cell empty"></div><div class="cal-cell empty"></div><div class="cal-cell empty"></div><div class="cal-cell empty"></div><div class="cal-cell empty"></div><div class="cal-cell">1</div>
+          <div class="cal-cell">2</div><div class="cal-cell">3<div class="cal-check present">✓</div></div><div class="cal-cell">4<div class="cal-check present">✓</div></div><div class="cal-cell">5<div class="cal-check present">✓</div></div><div class="cal-cell">6<div class="cal-check present">✓</div></div><div class="cal-cell">7<div class="cal-check present">✓</div></div><div class="cal-cell">8</div>
+          <div class="cal-cell">9</div><div class="cal-cell">10<div class="cal-check present">✓</div></div><div class="cal-cell">11<div class="cal-check present">✓</div></div><div class="cal-cell">12<div class="cal-check present">✓</div></div><div class="cal-cell">13<div class="cal-check present">✓</div></div><div class="cal-cell">14<div class="cal-check present">✓</div></div><div class="cal-cell">15</div>
+          <div class="cal-cell">16</div><div class="cal-cell">17<div class="cal-check present">✓</div></div><div class="cal-cell">18<div class="cal-check present">✓</div></div><div class="cal-cell">19<div class="cal-check present">✓</div></div><div class="cal-cell today" id="todayCell">20</div><div class="cal-cell">21</div><div class="cal-cell">22</div>
+          <div class="cal-cell">23</div><div class="cal-cell">24</div><div class="cal-cell">25</div><div class="cal-cell">26</div><div class="cal-cell">27</div><div class="cal-cell">28</div><div class="cal-cell empty"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+<canvas id="confetti-canvas"></canvas>
+
+<script>
+// ===== DATA =====
+const MEMBERS = [
+  { name: '김하늘', labels: ['streak','perfect'], streak: 12, rate: 100, avatar: 'a1',
+    attendance: {
+      '01/23':1,'01/24':0,'01/25':0,'01/26':1,'01/27':1,'01/28':1,'01/29':1,'01/30':1,'01/31':0,
+      '02/01':0,'02/02':1,'02/03':1,'02/04':1,'02/05':1,'02/06':1,'02/07':0,'02/08':0,
+      '02/09':1,'02/10':1,'02/11':1,'02/12':1,'02/13':1,'02/14':0,'02/15':0,
+      '02/16':1,'02/17':1,'02/18':1,'02/19':1,'02/20':1
+    },
+    times: {'01/23':'08:45','01/26':'08:40','01/27':'08:38','01/28':'08:50','01/29':'08:42','01/30':'08:55',
+      '02/02':'08:41','02/03':'08:38','02/04':'08:50','02/05':'08:42','02/06':'08:55',
+      '02/09':'08:41','02/10':'08:38','02/11':'08:50','02/12':'08:42','02/13':'08:55',
+      '02/16':'08:40','02/17':'08:42','02/18':'08:38','02/19':'09:01','02/20':'08:55'},
+    comments: {'02/12':'좋은 하루!','02/19':'오늘도 화이팅','02/20':'좋은 아침!'}
+  },
+  { name: '김지혜', labels: ['streak'], streak: 9, rate: 95, avatar: 'a2',
+    attendance: {
+      '01/23':1,'01/24':0,'01/25':0,'01/26':1,'01/27':0,'01/28':1,'01/29':1,'01/30':1,'01/31':0,
+      '02/01':0,'02/02':1,'02/03':1,'02/04':0,'02/05':1,'02/06':1,'02/07':0,'02/08':0,
+      '02/09':1,'02/10':1,'02/11':0,'02/12':1,'02/13':1,'02/14':0,'02/15':0,
+      '02/16':1,'02/17':1,'02/18':1,'02/19':1,'02/20':1
+    },
+    times: {'01/23':'08:48','01/26':'08:48','01/28':'08:50','01/29':'08:52','01/30':'08:45',
+      '02/02':'08:48','02/03':'08:45','02/05':'08:50','02/06':'08:52',
+      '02/09':'08:48','02/10':'08:45','02/12':'08:50','02/13':'08:52',
+      '02/16':'08:30','02/17':'08:50','02/18':'08:45','02/19':'08:30','02/20':'08:47'},
+    comments: {'02/18':'수학 재밌다'}
+  },
+  { name: '문준용', labels: ['danger'], streak: 0, rate: 50, avatar: 'a3',
+    attendance: {
+      '01/23':0,'01/24':0,'01/25':0,'01/26':1,'01/27':0,'01/28':0,'01/29':1,'01/30':0,'01/31':0,
+      '02/01':0,'02/02':0,'02/03':1,'02/04':0,'02/05':0,'02/06':0,'02/07':0,'02/08':0,
+      '02/09':1,'02/10':0,'02/11':0,'02/12':1,'02/13':0,'02/14':0,'02/15':0,
+      '02/16':0,'02/17':1,'02/18':0,'02/19':1,'02/20':0
+    },
+    times: {'01/26':'09:15','01/29':'09:20','02/03':'09:15','02/09':'09:15','02/12':'09:20','02/17':'09:15','02/19':'08:58'},
+    comments: {}
+  },
+  { name: '박서연', labels: ['streak','perfect'], streak: 15, rate: 100, avatar: 'a4',
+    attendance: {
+      '01/23':1,'01/24':0,'01/25':0,'01/26':1,'01/27':1,'01/28':1,'01/29':1,'01/30':1,'01/31':0,
+      '02/01':0,'02/02':1,'02/03':1,'02/04':1,'02/05':1,'02/06':1,'02/07':0,'02/08':0,
+      '02/09':1,'02/10':1,'02/11':1,'02/12':1,'02/13':1,'02/14':0,'02/15':0,
+      '02/16':1,'02/17':1,'02/18':1,'02/19':1,'02/20':1
+    },
+    times: {'01/23':'08:32','01/26':'08:30','01/27':'08:32','01/28':'08:28','01/29':'08:35','01/30':'08:31',
+      '02/02':'08:30','02/03':'08:32','02/04':'08:28','02/05':'08:35','02/06':'08:31',
+      '02/09':'08:30','02/10':'08:32','02/11':'08:28','02/12':'08:35','02/13':'08:31',
+      '02/16':'08:29','02/17':'08:35','02/18':'08:32','02/19':'08:40','02/20':'08:33'},
+    comments: {'02/17':'개근 도전중!','02/20':'오늘도 1등!'}
+  },
+  { name: '이민호', labels: ['danger'], streak: 0, rate: 25, avatar: 'a5',
+    attendance: {
+      '01/23':0,'01/24':0,'01/25':0,'01/26':0,'01/27':1,'01/28':0,'01/29':0,'01/30':0,'01/31':0,
+      '02/01':0,'02/02':0,'02/03':0,'02/04':1,'02/05':0,'02/06':0,'02/07':0,'02/08':0,
+      '02/09':0,'02/10':1,'02/11':0,'02/12':0,'02/13':0,'02/14':0,'02/15':0,
+      '02/16':0,'02/17':0,'02/18':1,'02/19':0,'02/20':0
+    },
+    times: {'01/27':'09:30','02/04':'09:30','02/10':'09:30','02/18':'09:30'},
+    comments: {}
+  },
+  { name: '정수아', labels: ['streak','top'], streak: 18, rate: 100, avatar: 'a1',
+    attendance: {
+      '01/23':1,'01/24':0,'01/25':0,'01/26':1,'01/27':1,'01/28':1,'01/29':1,'01/30':1,'01/31':0,
+      '02/01':0,'02/02':1,'02/03':1,'02/04':1,'02/05':1,'02/06':1,'02/07':0,'02/08':0,
+      '02/09':1,'02/10':1,'02/11':1,'02/12':1,'02/13':1,'02/14':0,'02/15':0,
+      '02/16':1,'02/17':1,'02/18':1,'02/19':1,'02/20':1
+    },
+    times: {'01/23':'08:22','01/26':'08:25','01/27':'08:22','01/28':'08:20','01/29':'08:28','01/30':'08:24',
+      '02/02':'08:25','02/03':'08:22','02/04':'08:20','02/05':'08:28','02/06':'08:24',
+      '02/09':'08:25','02/10':'08:22','02/11':'08:20','02/12':'08:28','02/13':'08:24',
+      '02/16':'08:21','02/17':'08:28','02/18':'08:25','02/19':'08:31','02/20':'08:29'},
+    comments: {'02/20':'항상 화이팅!'}
+  }
+];
+
+// ===== Date Utilities =====
+// 2026: Jan has 31 days, Feb has 28 days
+// Jan 1, 2026 = Thursday => Jan 23 = Friday, Feb 1 = Sunday, Feb 20 = Friday
+const DAY_NAMES = ['일','월','화','수','목','금','토'];
+
+function dateToObj(mm, dd) {
+  // Returns { mm, dd, dow, key, isWeekend }
+  let dayOfYear;
+  if (mm === 1) dayOfYear = dd;
+  else dayOfYear = 31 + dd; // Feb
+  // Jan 1 = Thursday(4)
+  const dow = (3 + dayOfYear) % 7; // 0=Sun..6=Sat
+  const key = (mm<10?'0'+mm:mm) + '/' + (dd<10?'0'+dd:dd);
+  return { mm, dd, dow, key, dayName: DAY_NAMES[dow], isWeekend: dow===0||dow===6 };
+}
+
+function dateObjToDisplay(d) {
+  return d.key + ' (' + d.dayName + ')';
+}
+
+const TODAY_OBJ = dateToObj(2, 20);
+
+let currentPeriod = '1w'; // '1w','2w','1m','custom'
+let includeWeekend = false;
+let customStart = null; // { mm, dd }
+let customEnd = null;
+
+function getDateRange() {
+  let startMM, startDD, endMM = 2, endDD = 20;
+  if (currentPeriod === '1w') { // 7 days back from today
+    startMM = 2; startDD = 14;
+  } else if (currentPeriod === '2w') {
+    startMM = 2; startDD = 7;
+  } else if (currentPeriod === '1m') {
+    startMM = 1; startDD = 23; // ~28 days
+  } else if (currentPeriod === 'custom' && customStart && customEnd) {
+    startMM = customStart.mm; startDD = customStart.dd;
+    endMM = customEnd.mm; endDD = customEnd.dd;
+  } else {
+    startMM = 2; startDD = 14;
+  }
+  return { startMM, startDD, endMM, endDD };
+}
+
+function getDatesInRange(startMM, startDD, endMM, endDD, weekend) {
+  const dates = [];
+  let mm = startMM, dd = startDD;
+  while (true) {
+    const daysInMonth = mm === 1 ? 31 : 28;
+    const d = dateToObj(mm, dd);
+    if (!weekend && d.isWeekend) {
+      // skip
+    } else {
+      d.isToday = (mm === 2 && dd === 20);
+      dates.push(d);
+    }
+    // Check end
+    if (mm === endMM && dd === endDD) break;
+    // Advance
+    dd++;
+    if (dd > daysInMonth) { dd = 1; mm++; }
+    if (mm > 2 || (mm === 2 && dd > 28)) break; // safety
+  }
+  return dates;
+}
+
+function updatePeriodDisplay(dates) {
+  if (dates.length === 0) return;
+  const first = dates[0];
+  const last = dates[dates.length - 1];
+  document.getElementById('periodRange').textContent = dateObjToDisplay(first) + '  ~  ' + dateObjToDisplay(last);
+  document.getElementById('periodDays').textContent = dates.length + '일간';
+}
+
+// ===== Member Labels =====
+function getLabelHtml(labels, streak) {
+  let html = '';
+  labels.forEach(l => {
+    if (l === 'streak' && streak >= 7) html += `<span class="member-label label-streak">🔥 ${streak}일</span>`;
+    if (l === 'perfect') html += `<span class="member-label label-perfect">개근</span>`;
+    if (l === 'top') html += `<span class="member-label label-top">🏆 출석왕</span>`;
+    if (l === 'danger') html += `<span class="member-label label-danger">⚠ 관심</span>`;
+  });
+  return html;
+}
+
+function getRateClass(rate) { return rate >= 80 ? 'high' : rate >= 50 ? 'mid' : 'low'; }
+function getRateColor(rate) { return rate >= 80 ? 'var(--success)' : rate >= 50 ? 'var(--warning)' : 'var(--danger)'; }
+
+// ===== Render Table =====
+function renderTable() {
+  const { startMM, startDD, endMM, endDD } = getDateRange();
+  const dates = getDatesInRange(startMM, startDD, endMM, endDD, includeWeekend);
+  updatePeriodDisplay(dates);
+
+  let html = '<table class="attendance-table"><thead><tr>';
+  html += '<th>멤버</th>';
+  dates.forEach(d => {
+    let cls = d.isToday ? ' class="today-col"' : (d.isWeekend ? ' class="weekend"' : '');
+    html += `<th${cls}>${d.key.split('/')[1]}<span class="day-label">${d.dayName}${d.isToday?' (오늘)':''}</span></th>`;
+  });
+  html += '<th class="rate-col">출석률</th></tr></thead><tbody>';
+
+  MEMBERS.forEach(m => {
+    html += '<tr><th><div class="member-cell"><div><div class="member-name">' + m.name + '</div>';
+    html += '<div class="member-labels">' + getLabelHtml(m.labels, m.streak) + '</div>';
+    html += '</div></div></th>';
+
+    let present = 0, total = 0;
+    dates.forEach(d => {
+      const val = m.attendance[d.key];
+      const isToday = d.isToday;
+      total++;
+      if (val === 1) {
+        present++;
+        const tdCls = isToday ? ' class="today-col"' : '';
+        html += `<td${tdCls}><span class="att-mark ${isToday?'today-present':'present'}">✓</span>`;
+        if (m.times[d.key]) html += `<span class="att-time">${m.times[d.key]}</span>`;
+        if (m.comments[d.key]) html += `<span class="att-comment">${m.comments[d.key]}</span>`;
+        html += '</td>';
+      } else {
+        if (isToday) {
+          html += '<td class="today-col"><span class="att-mark today-absent">✗</span></td>';
+        } else {
+          html += '<td><span class="att-mark absent">-</span></td>';
+        }
+      }
+    });
+
+    const rate = total > 0 ? Math.round(present / total * 100) : 0;
+    html += `<td class="rate-col"><div class="rate-bar-wrap"><div class="rate-bar"><div class="rate-bar-fill ${getRateClass(rate)}" style="width:${rate}%"></div></div><span class="rate-value" style="color:${getRateColor(rate)}">${rate}%</span></div></td>`;
+    html += '</tr>';
+  });
+
+  html += '</tbody><tfoot><tr><th>출석 합계</th>';
+  dates.forEach(d => {
+    let cnt = MEMBERS.filter(m => m.attendance[d.key] === 1).length;
+    const tdCls = d.isToday ? ' class="today-col"' : '';
+    html += `<td${tdCls}>${cnt}/6</td>`;
+  });
+  html += '<td class="rate-col" style="text-align:center;font-weight:700;color:var(--primary);">-</td>';
+  html += '</tr></tfoot></table>';
+
+  document.getElementById('tableWrap').innerHTML = html;
+}
+
+function setPeriod(p, btn) {
+  currentPeriod = p;
+  document.querySelectorAll('.period-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('customPeriodBtn').classList.remove('active');
+  if (p !== 'custom') {
+    document.getElementById('customPeriodBtn').textContent = '📅 기간 선택';
+  }
+  renderTable();
+}
+
+function toggleWeekend() {
+  includeWeekend = document.getElementById('weekendCheck').checked;
+  renderTable();
+}
+
+// ===== Calendar Picker =====
+let calPickerYear = 2026;
+let calPickerMonth = 2; // 1-indexed
+let pickStart = null; // day num
+let pickEnd = null;
+let pickStartMonth = null;
+let pickEndMonth = null;
+
+function openCalPicker() {
+  pickStart = null; pickEnd = null;
+  calPickerYear = 2026; calPickerMonth = 2;
+  renderCalPicker();
+  updateRangePreview();
+  document.getElementById('calPickerOverlay').classList.add('show');
+}
+function closeCalPicker() {
+  document.getElementById('calPickerOverlay').classList.remove('show');
+}
+function closeCalPickerOutside(e) {
+  if (e.target === document.getElementById('calPickerOverlay')) closeCalPicker();
+}
+
+function calPickerPrev() {
+  calPickerMonth--;
+  if (calPickerMonth < 1) { calPickerMonth = 12; calPickerYear--; }
+  renderCalPicker();
+}
+function calPickerNext() {
+  calPickerMonth++;
+  if (calPickerMonth > 12) { calPickerMonth = 1; calPickerYear++; }
+  renderCalPicker();
+}
+
+function getDaysInMonth(y, m) {
+  return new Date(y, m, 0).getDate();
+}
+function getFirstDow(y, m) {
+  return new Date(y, m-1, 1).getDay(); // 0=Sun
+}
+
+function toAbsDay(mm, dd) {
+  // simple comparison helper for Jan-Feb 2026
+  return mm * 100 + dd;
+}
+
+function renderCalPicker() {
+  const dim = getDaysInMonth(calPickerYear, calPickerMonth);
+  const firstDow = getFirstDow(calPickerYear, calPickerMonth);
+
+  document.getElementById('calPickerMonth').textContent = calPickerYear + '년 ' + calPickerMonth + '월';
+
+  let html = '';
+  DAY_NAMES.forEach((d, i) => {
+    html += `<div class="cpd-head">${d}</div>`;
+  });
+
+  // Empty cells
+  for (let i = 0; i < firstDow; i++) {
+    html += '<div class="cpd-cell empty"></div>';
+  }
+
+  const startAbs = pickStart ? toAbsDay(pickStartMonth, pickStart) : null;
+  const endAbs = pickEnd ? toAbsDay(pickEndMonth, pickEnd) : null;
+
+  for (let d = 1; d <= dim; d++) {
+    const abs = toAbsDay(calPickerMonth, d);
+    let cls = 'cpd-cell';
+    if (calPickerMonth === 2 && d === 20) cls += ' today';
+
+    if (startAbs && endAbs) {
+      const lo = Math.min(startAbs, endAbs);
+      const hi = Math.max(startAbs, endAbs);
+      if (abs === lo && abs === hi) cls += ' selected';
+      else if (abs === lo) cls += ' range-start';
+      else if (abs === hi) cls += ' range-end';
+      else if (abs > lo && abs < hi) cls += ' in-range';
+    } else if (startAbs && abs === startAbs) {
+      cls += ' selected';
+    }
+
+    html += `<div class="${cls}" onclick="pickDate(${calPickerMonth},${d})">${d}</div>`;
+  }
+
+  document.getElementById('calPickerGrid').innerHTML = html;
+}
+
+function pickDate(mm, dd) {
+  if (!pickStart || (pickStart && pickEnd)) {
+    // First click or reset
+    pickStart = dd; pickStartMonth = mm;
+    pickEnd = null; pickEndMonth = null;
+  } else {
+    // Second click
+    pickEnd = dd; pickEndMonth = mm;
+    // Ensure start <= end
+    const sAbs = toAbsDay(pickStartMonth, pickStart);
+    const eAbs = toAbsDay(pickEndMonth, pickEnd);
+    if (eAbs < sAbs) {
+      [pickStart, pickEnd] = [pickEnd, pickStart];
+      [pickStartMonth, pickEndMonth] = [pickEndMonth, pickStartMonth];
+    }
+  }
+  renderCalPicker();
+  updateRangePreview();
+}
+
+function updateRangePreview() {
+  const el = document.getElementById('rangePreview');
+  if (pickStart && pickEnd) {
+    const s = dateToObj(pickStartMonth, pickStart);
+    const e = dateToObj(pickEndMonth, pickEnd);
+    el.innerHTML = '<strong>' + dateObjToDisplay(s) + '</strong> ~ <strong>' + dateObjToDisplay(e) + '</strong>';
+  } else if (pickStart) {
+    const s = dateToObj(pickStartMonth, pickStart);
+    el.innerHTML = '<strong>' + dateObjToDisplay(s) + '</strong> ~ 종료일을 선택하세요';
+  } else {
+    el.textContent = '시작일과 종료일을 선택하세요';
+  }
+}
+
+function applyCalPicker() {
+  if (!pickStart || !pickEnd) {
+    showToast('시작일과 종료일을 모두 선택하세요.');
+    return;
+  }
+  customStart = { mm: pickStartMonth, dd: pickStart };
+  customEnd = { mm: pickEndMonth, dd: pickEnd };
+  currentPeriod = 'custom';
+
+  document.querySelectorAll('.period-btn').forEach(b => b.classList.remove('active'));
+  const customBtn = document.getElementById('customPeriodBtn');
+  customBtn.classList.add('active');
+  const s = dateToObj(pickStartMonth, pickStart);
+  const e = dateToObj(pickEndMonth, pickEnd);
+  customBtn.textContent = '📅 ' + s.key + ' ~ ' + e.key;
+
+  closeCalPicker();
+  renderTable();
+}
+
+// ===== Initial render =====
+renderTable();
+
+// ===== View Switching =====
+function switchView(view) {
+  document.querySelectorAll('.role-btn').forEach(b => b.classList.remove('active'));
+  event.target.classList.add('active');
+  if (view === 'teacher') {
+    document.getElementById('teacherView').style.display = 'block';
+    document.getElementById('studentView').style.display = 'none';
+    document.getElementById('userName').textContent = '문동국';
+    document.getElementById('userAvatar').textContent = '👨‍🏫';
+  } else {
+    document.getElementById('teacherView').style.display = 'none';
+    document.getElementById('studentView').style.display = 'block';
+    document.getElementById('userName').textContent = '김하늘';
+    document.getElementById('userAvatar').textContent = '👩‍🎓';
+  }
+}
+
+// ===== Settings =====
+function toggleSettings() { document.getElementById('settingsPanel').classList.toggle('show'); }
+function togglePublic() {
+  const badge = document.getElementById('publicBadge');
+  const isPublic = document.getElementById('publicToggle').checked;
+  badge.className = isPublic ? 'badge-tag public' : 'badge-tag private';
+  badge.textContent = isPublic ? '🔓 공개' : '🔒 비공개';
+}
+
+// ===== Student Check-in =====
+let checkedIn = false;
+function doCheckIn() {
+  if (checkedIn) return;
+  checkedIn = true;
+  const btn = document.getElementById('checkInBtn');
+  const status = document.getElementById('attendanceStatus');
+  btn.classList.add('done');
+  btn.innerHTML = '✅ 출석 완료!';
+  status.textContent = '오늘 출석이 완료되었습니다';
+  status.style.color = 'var(--success)';
+  document.getElementById('streakCount').textContent = '13일';
+
+  // Calendar check
+  const todayCell = document.getElementById('todayCell');
+  const check = document.createElement('div');
+  check.className = 'cal-check present check-animated';
+  check.textContent = '✓';
+  todayCell.appendChild(check);
+
+  // Add to feed with animation
+  const feedList = document.getElementById('feedList');
+  const myItem = document.createElement('li');
+  myItem.className = 'feed-item just-arrived';
+  myItem.innerHTML = `
+    <div class="feed-avatar a1">김</div>
+    <div class="feed-content"><div class="feed-name">김하늘 <span style="color:var(--primary);font-size:12px;">(나)</span></div><div class="feed-comment">방금 출석!</div></div>
+    <div class="feed-meta"><div class="feed-time">지금</div><div class="feed-streak-badge">🔥 13일 연속</div></div>
+  `;
+  feedList.appendChild(myItem);
+
+  launchConfetti();
+  showToast('🎉 출석 완료! 13일 연속 출석 중이에요!');
+}
+
+function submitComment() {
+  const input = document.getElementById('commentInput');
+  const val = input.value.trim();
+  if (!val) { showToast('한마디를 입력해주세요.'); return; }
+  // Update last feed item comment
+  const items = document.querySelectorAll('#feedList .feed-item');
+  const last = items[items.length - 1];
+  if (last) {
+    last.querySelector('.feed-comment').textContent = val;
+  }
+  showToast('💬 한마디가 등록되었습니다: "' + val + '"');
+  input.value = '';
+  input.disabled = true;
+  input.placeholder = val;
+}
+
+// ===== Toast =====
+function showToast(msg) {
+  const toast = document.getElementById('toast');
+  toast.textContent = msg;
+  toast.classList.add('show');
+  setTimeout(() => toast.classList.remove('show'), 2800);
+}
+
+// ===== Confetti =====
+function launchConfetti() {
+  const canvas = document.getElementById('confetti-canvas');
+  const ctx = canvas.getContext('2d');
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+  const particles = [];
+  const colors = ['#2563eb','#16a34a','#f59e0b','#ef4444','#7c3aed','#ec4899'];
+  for (let i = 0; i < 60; i++) {
+    particles.push({
+      x: canvas.width/2 + (Math.random()-0.5)*200, y: canvas.height/2,
+      vx: (Math.random()-0.5)*12, vy: Math.random()*-14-4,
+      w: Math.random()*8+4, h: Math.random()*6+3,
+      color: colors[Math.floor(Math.random()*colors.length)],
+      rotation: Math.random()*360, rotationSpeed: (Math.random()-0.5)*10,
+      gravity: 0.3, opacity: 1
+    });
+  }
+  let frame = 0;
+  function animate() {
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    let alive = false;
+    particles.forEach(p => {
+      p.vy += p.gravity; p.x += p.vx; p.y += p.vy;
+      p.rotation += p.rotationSpeed; p.opacity -= 0.012;
+      if (p.opacity > 0) {
+        alive = true;
+        ctx.save(); ctx.globalAlpha = p.opacity;
+        ctx.translate(p.x, p.y); ctx.rotate(p.rotation*Math.PI/180);
+        ctx.fillStyle = p.color; ctx.fillRect(-p.w/2,-p.h/2,p.w,p.h);
+        ctx.restore();
+      }
+    });
+    frame++;
+    if (alive && frame < 120) requestAnimationFrame(animate);
+    else ctx.clearRect(0,0,canvas.width,canvas.height);
+  }
+  animate();
+}
+
+window.addEventListener('resize', () => {
+  const c = document.getElementById('confetti-canvas');
+  c.width = window.innerWidth; c.height = window.innerHeight;
+});
+</script>
+</body>
+</html>

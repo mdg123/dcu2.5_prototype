@@ -1,0 +1,1120 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>채움CBT 서비스 프로토타입 (고도화)</title>
+<link href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css" rel="stylesheet">
+<style>
+:root {
+  --primary: #2563eb;
+  --primary-light: #3b82f6;
+  --primary-dark: #1d4ed8;
+  --primary-bg: #eff6ff;
+  --accent: #0ea5e9;
+  --success: #10b981;
+  --success-bg: #ecfdf5;
+  --warning: #f59e0b;
+  --warning-bg: #fffbeb;
+  --danger: #ef4444;
+  --danger-bg: #fef2f2;
+  --purple: #8b5cf6;
+  --purple-bg: #f5f3ff;
+  --bg: #f1f5f9;
+  --surface: #ffffff;
+  --surface-alt: #f8fafc;
+  --border: #e2e8f0;
+  --border-strong: #cbd5e1;
+  --text: #1e293b;
+  --text-secondary: #64748b;
+  --text-muted: #94a3b8;
+  --radius: 12px;
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
+  --shadow: 0 1px 3px rgba(0,0,0,0.1);
+  --shadow-md: 0 4px 12px rgba(0,0,0,0.08);
+  --shadow-lg: 0 10px 30px rgba(0,0,0,0.1);
+  --header-h: 60px;
+}
+*{margin:0;padding:0;box-sizing:border-box;}
+body{font-family:'Pretendard',-apple-system,sans-serif;background:var(--bg);color:var(--text);font-size:14px;min-height:100vh;}
+button{cursor:pointer;font-family:inherit;border:none;background:none;}
+input,select,textarea{font-family:inherit;font-size:14px;}
+
+/* ===== HEADER ===== */
+.g-header{
+  height:var(--header-h);background:var(--surface);
+  border-bottom:1px solid var(--border);
+  display:flex;align-items:center;justify-content:space-between;
+  padding:0 24px;position:sticky;top:0;z-index:100;
+}
+.g-logo{display:flex;align-items:center;gap:10px;}
+.g-logo-icon{
+  width:36px;height:36px;border-radius:10px;
+  background:linear-gradient(135deg,var(--primary),var(--accent));
+  display:flex;align-items:center;justify-content:center;
+  color:#fff;font-weight:900;font-size:14px;
+}
+.g-logo-text{font-size:18px;font-weight:800;}
+.g-logo-text span{color:var(--primary);}
+.g-logo-sub{font-size:11px;color:var(--text-muted);background:var(--bg);padding:2px 8px;border-radius:4px;margin-left:6px;}
+.g-user{display:flex;align-items:center;gap:12px;}
+.g-user-name{font-size:13px;font-weight:600;}
+.g-user-avatar{
+  width:32px;height:32px;border-radius:50%;background:var(--primary);color:#fff;
+  display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;
+}
+
+/* ===== NAV ===== */
+.g-nav{
+  background:var(--surface);border-bottom:1px solid var(--border);
+  display:flex;align-items:stretch;padding:0 24px;
+  position:sticky;top:var(--header-h);z-index:99;
+}
+.nav-item{
+  padding:14px 18px;font-size:13px;font-weight:600;
+  color:var(--text-secondary);display:flex;align-items:center;gap:6px;
+  border-bottom:2.5px solid transparent;transition:all 0.15s;cursor:pointer;
+  white-space:nowrap;
+}
+.nav-item:hover{color:var(--text);background:var(--surface-alt);}
+.nav-item.active{color:var(--primary);border-bottom-color:var(--primary);}
+.nav-item svg{width:16px;height:16px;}
+.nav-divider{width:1px;background:var(--border);margin:10px 12px;align-self:stretch;}
+
+/* Sub nav bar (inline, shown on 보관함 pages) */
+.sub-nav{
+  display:none;background:var(--surface-alt);border-bottom:1px solid var(--border);
+  padding:0 24px;
+}
+.sub-nav.show{display:flex;}
+.sub-nav-item{
+  padding:10px 18px;font-size:13px;font-weight:500;
+  color:var(--text-secondary);display:flex;align-items:center;gap:6px;
+  border-bottom:2px solid transparent;transition:all 0.15s;cursor:pointer;
+}
+.sub-nav-item:hover{color:var(--text);}
+.sub-nav-item.active{color:var(--primary);border-bottom-color:var(--primary);font-weight:600;}
+.sub-nav-item svg{width:14px;height:14px;opacity:0.6;}
+
+/* ===== COMMON ===== */
+.page{display:none;padding:24px 32px;max-width:1480px;margin:0 auto;animation:fadeIn 0.2s ease;}
+.page.active{display:block;}
+@keyframes fadeIn{from{opacity:0;transform:translateY(6px);}to{opacity:1;transform:translateY(0);}}
+
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow-sm);}
+.card-header{padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;}
+.card-header h2{font-size:16px;font-weight:700;}
+.card-body{padding:20px;}
+
+.btn{display:inline-flex;align-items:center;gap:6px;padding:8px 16px;border-radius:8px;font-size:13px;font-weight:600;transition:all 0.15s;}
+.btn-primary{background:var(--primary);color:#fff;}
+.btn-primary:hover{background:var(--primary-dark);transform:translateY(-1px);box-shadow:var(--shadow-md);}
+.btn-secondary{background:var(--bg);color:var(--text);border:1px solid var(--border);}
+.btn-secondary:hover{border-color:var(--primary);color:var(--primary);}
+.btn-success{background:var(--success);color:#fff;}
+.btn-danger{background:var(--danger-bg);color:var(--danger);}
+.btn-sm{padding:6px 12px;font-size:12px;}
+.btn svg{width:14px;height:14px;}
+
+.badge-tag{display:inline-flex;align-items:center;gap:3px;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600;}
+.badge-tag.blue{background:var(--primary-bg);color:var(--primary);}
+.badge-tag.green{background:var(--success-bg);color:var(--success);}
+.badge-tag.orange{background:var(--warning-bg);color:var(--warning);}
+.badge-tag.red{background:var(--danger-bg);color:var(--danger);}
+.badge-tag.gray{background:var(--bg);color:var(--text-secondary);}
+
+.search-bar{
+  display:flex;align-items:center;gap:8px;padding:8px 14px;border-radius:10px;
+  background:var(--bg);border:1.5px solid transparent;transition:all 0.2s;
+}
+.search-bar:focus-within{border-color:var(--primary);background:var(--surface);box-shadow:0 0 0 3px rgba(37,99,235,0.1);}
+.search-bar input{border:none;background:none;outline:none;flex:1;font-size:13px;}
+.search-bar svg{width:16px;height:16px;color:var(--text-muted);}
+
+.filter-select{
+  padding:7px 12px;border-radius:8px;border:1px solid var(--border);
+  background:var(--surface);font-size:13px;color:var(--text);cursor:pointer;outline:none;
+  appearance:none;background-image:url("data:image/svg+xml,%3Csvg width='10' height='6' viewBox='0 0 10 6' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%2394a3b8' stroke-width='1.5' fill='none'/%3E%3C/svg%3E");
+  background-repeat:no-repeat;background-position:right 10px center;padding-right:28px;
+}
+
+.stat-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px 20px;text-align:center;}
+.stat-card .val{font-size:24px;font-weight:800;color:var(--primary);}
+.stat-card .label{font-size:12px;color:var(--text-muted);margin-top:2px;}
+
+.data-table{width:100%;border-collapse:collapse;}
+.data-table th{background:var(--surface-alt);font-size:12px;font-weight:600;color:var(--text-secondary);text-align:left;padding:10px 14px;border-bottom:1px solid var(--border);white-space:nowrap;}
+.data-table td{padding:12px 14px;border-bottom:1px solid var(--border);font-size:13px;vertical-align:middle;}
+.data-table tr:hover td{background:var(--surface-alt);}
+.data-table tr.row-mine td{background:#fefce8;}
+.data-table tr.row-mine td:first-child{border-left:3px solid var(--warning);}
+
+/* Participant count (like view count) */
+.participant-count{
+  display:inline-flex;align-items:center;gap:4px;
+  font-size:12px;color:var(--text-secondary);
+}
+.participant-count svg{width:13px;height:13px;opacity:0.6;}
+.participant-count b{color:var(--text);font-weight:700;}
+
+.inner-tabs{display:flex;gap:4px;margin-bottom:16px;}
+.inner-tab{padding:8px 16px;border-radius:8px;font-size:13px;font-weight:600;color:var(--text-secondary);transition:all 0.15s;}
+.inner-tab:hover{background:var(--bg);}
+.inner-tab.active{background:var(--primary);color:#fff;}
+
+.pagination{display:flex;align-items:center;justify-content:center;gap:4px;margin-top:20px;}
+.pg-btn{width:32px;height:32px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:600;color:var(--text-secondary);transition:all 0.15s;}
+.pg-btn:hover{background:var(--bg);}
+.pg-btn.active{background:var(--primary);color:#fff;}
+
+.form-group{margin-bottom:16px;}
+.form-label{display:block;font-size:12px;font-weight:600;color:var(--text-secondary);margin-bottom:6px;}
+.form-input{width:100%;padding:10px 14px;border:1.5px solid var(--border);border-radius:10px;outline:none;transition:border-color 0.2s;background:var(--surface);}
+.form-input:focus{border-color:var(--primary);box-shadow:0 0 0 3px rgba(37,99,235,0.1);}
+textarea.form-input{min-height:100px;resize:vertical;line-height:1.6;}
+.form-row{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+.form-hint{font-size:11px;color:var(--text-muted);margin-top:4px;}
+
+/* Step indicator */
+.step-indicator{display:flex;align-items:center;gap:0;margin-bottom:24px;}
+.step-item{display:flex;align-items:center;gap:8px;padding:8px 16px;font-size:13px;font-weight:600;color:var(--text-muted);}
+.step-item .step-num{width:28px;height:28px;border-radius:50%;background:var(--bg);display:flex;align-items:center;justify-content:center;font-size:12px;}
+.step-item.active{color:var(--primary);}
+.step-item.active .step-num{background:var(--primary);color:#fff;}
+.step-item.done{color:var(--success);}
+.step-item.done .step-num{background:var(--success);color:#fff;}
+.step-arrow{color:var(--border-strong);margin:0 4px;}
+
+.file-upload{border:2px dashed var(--border);border-radius:12px;padding:32px;text-align:center;cursor:pointer;transition:all 0.2s;}
+.file-upload:hover{border-color:var(--primary);background:var(--primary-bg);}
+.file-upload svg{width:36px;height:36px;color:var(--text-muted);margin-bottom:8px;}
+.file-upload p{font-size:13px;color:var(--text-secondary);}
+
+.answer-key-table{width:100%;border-collapse:collapse;}
+.answer-key-table th,.answer-key-table td{padding:10px 12px;border:1px solid var(--border);font-size:13px;text-align:center;}
+.answer-key-table th{background:var(--surface-alt);font-weight:600;color:var(--text-secondary);}
+
+.review-badge{display:inline-flex;align-items:center;gap:4px;padding:4px 10px;border-radius:6px;font-size:12px;font-weight:700;}
+.review-badge.correct{background:var(--success-bg);color:var(--success);}
+.review-badge.wrong{background:var(--danger-bg);color:var(--danger);}
+
+.q-row{cursor:pointer;transition:background 0.15s;}
+.q-row:hover td{background:var(--primary-bg) !important;}
+.q-detail td{padding:0 !important;border-bottom:1px solid var(--border);}
+
+.bar-chart{display:flex;align-items:flex-end;gap:8px;height:120px;padding-top:8px;}
+.bar-col{flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;}
+.bar-col .bar{width:100%;border-radius:4px 4px 0 0;transition:height 0.5s ease;min-height:2px;}
+.bar-col .bar-label{font-size:10px;color:var(--text-muted);}
+.bar-col .bar-val{font-size:11px;font-weight:700;}
+
+/* Modal */
+.modal-bg{position:fixed;inset:0;background:rgba(0,0,0,0.5);backdrop-filter:blur(4px);z-index:1000;display:none;align-items:center;justify-content:center;}
+.modal-bg.show{display:flex;}
+.modal-box{background:var(--surface);border-radius:16px;width:560px;max-width:90vw;max-height:90vh;overflow:auto;box-shadow:var(--shadow-lg);animation:modalIn 0.25s ease;}
+@keyframes modalIn{from{opacity:0;transform:scale(0.96) translateY(12px);}to{opacity:1;transform:scale(1) translateY(0);}}
+.modal-box .modal-h{padding:20px 24px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;}
+.modal-box .modal-h h3{font-size:16px;font-weight:700;}
+.modal-box .modal-b{padding:24px;}
+.modal-box .modal-f{padding:16px 24px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px;}
+
+/* Toast */
+.toast{position:fixed;bottom:24px;right:24px;background:var(--text);color:#fff;padding:12px 20px;border-radius:10px;font-size:13px;font-weight:500;box-shadow:var(--shadow-lg);z-index:9999;display:none;align-items:center;gap:8px;animation:slideUp 0.3s ease;}
+.toast.show{display:flex;}
+@keyframes slideUp{from{opacity:0;transform:translateY(20px);}to{opacity:1;transform:translateY(0);}}
+
+/* Player overlay */
+.player-container{position:fixed;inset:0;z-index:2000;background:var(--bg);display:none;flex-direction:column;}
+.player-container.show{display:flex;}
+.player-header{height:56px;background:var(--primary);color:#fff;display:flex;align-items:center;justify-content:space-between;padding:0 20px;}
+.player-header h1{font-size:16px;font-weight:700;display:flex;align-items:center;gap:8px;}
+.player-header .p-badge{background:rgba(255,255,255,0.2);font-size:11px;padding:2px 8px;border-radius:10px;}
+.player-right{display:flex;align-items:center;gap:10px;}
+.timer-box{display:flex;align-items:center;gap:6px;background:rgba(255,255,255,0.15);padding:6px 14px;border-radius:8px;font-size:15px;font-weight:600;font-variant-numeric:tabular-nums;color:#fff;}
+.p-btn{background:rgba(255,255,255,0.15);color:#fff;padding:7px 14px;border-radius:8px;font-size:13px;font-weight:500;display:flex;align-items:center;gap:5px;transition:background 0.15s;}
+.p-btn:hover{background:rgba(255,255,255,0.25);}
+.p-btn svg{width:16px;height:16px;}
+.player-body{flex:1;display:flex;overflow:hidden;}
+.p-sidebar{width:300px;background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;flex-shrink:0;}
+.p-sidebar-head{padding:12px 16px;border-bottom:1px solid var(--border);}
+.p-sidebar-list{flex:1;overflow-y:auto;padding:8px;}
+.p-q-item{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:8px;cursor:pointer;transition:all 0.15s;margin-bottom:2px;}
+.p-q-item:hover{background:var(--surface-alt);}
+.p-q-item.active{background:var(--primary-bg);}
+.p-q-num{width:28px;height:28px;border-radius:7px;background:var(--bg);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:12px;color:var(--text-secondary);flex-shrink:0;}
+.p-q-item.active .p-q-num{background:var(--primary);color:#fff;}
+.p-q-item.answered .p-q-num{background:var(--success);color:#fff;}
+.p-sidebar-foot{padding:12px 16px;border-top:1px solid var(--border);display:flex;gap:8px;align-items:center;}
+.p-sidebar-foot .autosave{display:flex;align-items:center;gap:4px;font-size:11px;color:var(--text-muted);}
+.p-sidebar-foot .dot{width:6px;height:6px;border-radius:50%;background:var(--success);animation:pulse 2s infinite;}
+@keyframes pulse{0%,100%{opacity:1;}50%{opacity:0.4;}}
+.p-main{flex:1;display:flex;flex-direction:column;overflow:hidden;}
+.p-content{flex:1;overflow-y:auto;padding:32px 40px;background:var(--surface-alt);}
+.p-nav{height:52px;background:var(--surface);border-top:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;padding:0 24px;}
+.qc{display:none;max-width:780px;margin:0 auto;}
+.qc.active{display:block;}
+.qc-head{display:flex;align-items:center;gap:12px;margin-bottom:16px;}
+.qc-num{background:var(--primary);color:#fff;width:36px;height:36px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:15px;}
+.qc-body{background:var(--surface);border-radius:14px;border:1px solid var(--border);overflow:hidden;}
+.qc-text{padding:24px 28px;font-size:15px;line-height:1.8;}
+.qc-options{padding:16px 28px 24px;border-top:1px solid var(--border);background:var(--surface-alt);}
+.opt-item{display:flex;align-items:center;gap:12px;padding:11px 14px;border-radius:10px;border:1.5px solid var(--border);background:var(--surface);cursor:pointer;transition:all 0.15s;margin-bottom:6px;}
+.opt-item:hover{border-color:var(--primary-light);}
+.opt-item.selected{border-color:var(--primary);background:var(--primary-bg);}
+.opt-marker{width:26px;height:26px;border-radius:50%;border:2px solid var(--border-strong);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:var(--text-secondary);flex-shrink:0;transition:all 0.15s;}
+.opt-item.selected .opt-marker{border-color:var(--primary);background:var(--primary);color:#fff;}
+.subj-area{padding:16px 28px 24px;border-top:1px solid var(--border);background:var(--surface-alt);}
+.tab-warn{position:fixed;top:0;left:0;right:0;background:var(--danger);color:#fff;padding:8px 20px;font-size:13px;font-weight:600;z-index:9999;display:none;align-items:center;justify-content:center;gap:8px;}
+.tab-warn.show{display:flex;}
+
+@keyframes spin{to{transform:rotate(360deg);}}
+</style>
+</head>
+<body>
+
+<!-- ===== HEADER ===== -->
+<header class="g-header">
+  <div class="g-logo">
+    <div class="g-logo-icon">C</div>
+    <div class="g-logo-text">다<span>채움</span></div>
+    <div class="g-logo-sub">CBT 프로토타입</div>
+  </div>
+  <div class="g-user">
+    <span class="g-user-name">김다채 선생님</span>
+    <div class="g-user-avatar">김</div>
+  </div>
+</header>
+
+<!-- ===== NAV ===== -->
+<nav class="g-nav">
+  <div class="nav-item active" data-page="cbt-list" onclick="goPage('cbt-list')">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>
+    채움CBT
+  </div>
+  <div class="nav-divider"></div>
+  <div class="nav-item" data-page="my-exams" onclick="goPage('my-exams')">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>
+    나의 보관함
+  </div>
+  <div class="nav-divider"></div>
+  <div class="nav-item" data-page="register" onclick="goPage('register')">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+    시험지 등록
+  </div>
+</nav>
+<!-- Sub nav for 나의 보관함 -->
+<div class="sub-nav" id="subNav">
+  <div class="sub-nav-item active" data-page="my-exams" onclick="goPage('my-exams')">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+    나의 평가지 관리
+  </div>
+  <div class="sub-nav-item" data-page="my-results" onclick="goPage('my-results')">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+    나의 응시 결과
+  </div>
+</div>
+
+
+<!-- ============================================================ -->
+<!-- PAGE: 채움CBT (전체 목록) -->
+<!-- ============================================================ -->
+<div class="page active" id="page-cbt-list">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+    <h1 style="font-size:20px;font-weight:800;">채움CBT</h1>
+  </div>
+
+  <!-- Filters -->
+  <div class="card" style="margin-bottom:16px;">
+    <div class="card-body" style="padding:14px 16px;">
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+        <select class="filter-select"><option>학교급 전체</option><option>초등학교</option><option selected>중학교</option><option>고등학교</option></select>
+        <select class="filter-select"><option>교과 전체</option><option>수학</option><option>영어</option><option>국어</option><option>과학</option><option>사회</option></select>
+        <select class="filter-select"><option>검색영역 전체</option><option>시험지명</option><option>출제자</option></select>
+        <div class="search-bar" style="flex:1;min-width:200px;">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <input type="text" placeholder="시험지명, 출제자를 검색하세요">
+        </div>
+        <button class="btn btn-primary btn-sm">검색</button>
+      </div>
+    </div>
+  </div>
+
+  <div style="margin-bottom:10px;">
+    <span style="font-size:13px;color:var(--text-secondary);">총 <b style="color:var(--primary);">8</b>건</span>
+  </div>
+
+  <!-- Table -->
+  <div class="card">
+    <div style="overflow-x:auto;">
+      <table class="data-table">
+        <thead><tr>
+          <th style="width:40px;">번호</th>
+          <th>시험지명</th>
+          <th style="width:55px;">학교급</th>
+          <th style="width:50px;">교과</th>
+          <th style="width:45px;">문항</th>
+          <th style="width:65px;">출제자</th>
+          <th style="width:95px;">응시기간</th>
+          <th style="width:50px;">응시</th>
+          <th style="width:55px;">상태</th>
+          <th style="width:90px;"></th>
+        </tr></thead>
+        <tbody id="cbtListBody"></tbody>
+      </table>
+    </div>
+  </div>
+  <div class="pagination">
+    <button class="pg-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg></button>
+    <button class="pg-btn active">1</button><button class="pg-btn">2</button>
+    <button class="pg-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg></button>
+  </div>
+</div>
+
+
+<!-- ============================================================ -->
+<!-- PAGE: 나의 평가지 관리 -->
+<!-- ============================================================ -->
+<div class="page" id="page-my-exams">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+    <div>
+      <h1 style="font-size:20px;font-weight:800;">나의 평가지 관리</h1>
+      <p style="font-size:13px;color:var(--text-secondary);margin-top:4px;">내가 등록한 평가지를 관리하고, 응시 현황과 결과를 확인합니다.</p>
+    </div>
+    <div style="display:flex;gap:8px;">
+      <button class="btn btn-secondary btn-sm" onclick="showToast('채움콘텐츠에서 평가지를 가져옵니다.')">📥 채움콘텐츠에서 가져오기</button>
+      <button class="btn btn-primary" onclick="goPage('register')">+ 새 시험지 등록</button>
+    </div>
+  </div>
+
+  <!-- Count -->
+  <div style="margin-bottom:12px;">
+    <span style="font-size:13px;color:var(--text-secondary);">총 <b style="color:var(--primary);">5</b>건</span>
+  </div>
+
+  <div class="card">
+    <div style="overflow-x:auto;">
+      <table class="data-table">
+        <thead><tr>
+          <th style="width:40px;">No</th>
+          <th>시험지명</th>
+          <th style="width:65px;">상태</th>
+          <th style="width:140px;">응시 현황</th>
+          <th style="width:85px;">등록일</th>
+          <th style="width:210px;">관리</th>
+        </tr></thead>
+        <tbody>
+          <tr>
+            <td>5</td>
+            <td>
+              <b>2학기 기말평가 - 수학</b>
+              <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">중2 · 수학 · 8문항 · ~12/31</div>
+            </td>
+            <td><span class="badge-tag green">공개</span></td>
+            <td>
+              <div style="font-weight:700;">24명 응시</div>
+              <div style="font-size:11px;color:var(--text-muted);">평균 72점 · 68%</div>
+            </td>
+            <td style="font-size:12px;">2025-12-09</td>
+            <td>
+              <div style="display:flex;gap:4px;white-space:nowrap;">
+                <button class="btn btn-sm btn-primary" onclick="prevPage='my-exams';goPage('teacher-result')">📊 결과</button>
+                <button class="btn btn-sm btn-secondary">수정</button>
+                <button class="btn btn-sm btn-danger">삭제</button>
+              </div>
+            </td>
+          </tr>
+          <tr>
+            <td>4</td>
+            <td>
+              <b>중간고사 대비 - 영어 듣기</b> <span class="badge-tag blue" style="font-size:10px;">🔊 음원</span>
+              <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">중2 · 영어 · 10문항 · ~12/15</div>
+            </td>
+            <td><span class="badge-tag green">공개</span></td>
+            <td>
+              <div style="font-weight:700;">18명 응시</div>
+              <div style="font-size:11px;color:var(--text-muted);">평균 65점 · 60%</div>
+            </td>
+            <td style="font-size:12px;">2025-11-20</td>
+            <td>
+              <div style="display:flex;gap:4px;white-space:nowrap;">
+                <button class="btn btn-sm btn-primary" onclick="prevPage='my-exams';goPage('teacher-result')">📊 결과</button>
+                <button class="btn btn-sm btn-secondary">수정</button>
+                <button class="btn btn-sm btn-danger">삭제</button>
+              </div>
+            </td>
+          </tr>
+          <tr>
+            <td>3</td>
+            <td>
+              <b>일차방정식 단원평가</b>
+              <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">중1 · 수학 · 5문항 · ~11/15</div>
+            </td>
+            <td><span class="badge-tag green">공개</span></td>
+            <td>
+              <div style="font-weight:700;">45명 응시</div>
+              <div style="font-size:11px;color:var(--text-muted);">평균 80점 · 78%</div>
+            </td>
+            <td style="font-size:12px;">2025-10-15</td>
+            <td>
+              <div style="display:flex;gap:4px;white-space:nowrap;">
+                <button class="btn btn-sm btn-primary" onclick="prevPage='my-exams';goPage('teacher-result')">📊 결과</button>
+                <button class="btn btn-sm btn-secondary">수정</button>
+                <button class="btn btn-sm btn-danger">삭제</button>
+              </div>
+            </td>
+          </tr>
+          <tr style="background:#fffbeb;">
+            <td>2</td>
+            <td>
+              <b>3학년 모의고사 - 국어</b> <span class="badge-tag orange" style="font-size:10px;">임시저장</span>
+              <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">고1 · 국어 · 미완성</div>
+            </td>
+            <td><span class="badge-tag orange">비공개</span></td>
+            <td><span style="color:var(--text-muted);font-size:12px;">-</span></td>
+            <td style="font-size:12px;">2025-10-01</td>
+            <td>
+              <div style="display:flex;gap:4px;white-space:nowrap;">
+                <button class="btn btn-sm btn-primary" onclick="goPage('register')">이어서 등록</button>
+                <button class="btn btn-sm btn-danger">삭제</button>
+              </div>
+            </td>
+          </tr>
+          <tr>
+            <td>1</td>
+            <td>
+              <b>1학기 중간평가 - 수학</b>
+              <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">중2 · 수학 · 6문항</div>
+            </td>
+            <td><span class="badge-tag gray">마감</span></td>
+            <td>
+              <div style="font-weight:700;">30명 응시</div>
+              <div style="font-size:11px;color:var(--text-muted);">평균 68점</div>
+            </td>
+            <td style="font-size:12px;">2025-04-20</td>
+            <td>
+              <div style="display:flex;gap:4px;white-space:nowrap;">
+                <button class="btn btn-sm btn-secondary" onclick="prevPage='my-exams';goPage('teacher-result')">📊 결과</button>
+                <button class="btn btn-sm btn-secondary">복제</button>
+              </div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+
+<!-- ============================================================ -->
+<!-- PAGE: 나의 응시 결과 -->
+<!-- ============================================================ -->
+<div class="page" id="page-my-results">
+  <div style="margin-bottom:16px;">
+    <h1 style="font-size:20px;font-weight:800;">나의 응시 결과</h1>
+    <p style="font-size:13px;color:var(--text-secondary);margin-top:4px;">내가 응시한 평가의 결과를 확인합니다.</p>
+  </div>
+
+  <div class="card" style="margin-bottom:20px;">
+    <div style="overflow-x:auto;">
+      <table class="data-table">
+        <thead><tr>
+          <th>시험지명</th>
+          <th style="width:55px;">교과</th>
+          <th style="width:85px;">응시일</th>
+          <th style="width:65px;">점수</th>
+          <th style="width:55px;">정답률</th>
+          <th style="width:75px;">소요시간</th>
+          <th style="width:70px;">상태</th>
+          <th style="width:80px;"></th>
+        </tr></thead>
+        <tbody>
+          <tr>
+            <td><b>2학기 기말평가 - 수학</b><div style="font-size:11px;color:var(--text-muted);">김다채 · 중2 수학</div></td>
+            <td>수학</td><td style="white-space:nowrap;">2025-12-10</td>
+            <td><b style="color:var(--primary);">32/40</b></td>
+            <td><b>75%</b></td><td style="white-space:nowrap;">25분 30초</td>
+            <td><span class="badge-tag green">공개</span></td>
+            <td><button class="btn btn-sm btn-primary" onclick="showResultDetail()">상세보기</button></td>
+          </tr>
+          <tr>
+            <td><b>일차방정식 단원평가</b><div style="font-size:11px;color:var(--text-muted);">김다채 · 중1 수학</div></td>
+            <td>수학</td><td style="white-space:nowrap;">2025-10-18</td>
+            <td><b style="color:var(--success);">18/20</b></td>
+            <td><b>90%</b></td><td style="white-space:nowrap;">12분 45초</td>
+            <td><span class="badge-tag green">공개</span></td>
+            <td><button class="btn btn-sm btn-primary" onclick="showResultDetail()">상세보기</button></td>
+          </tr>
+          <tr>
+            <td><b>중간고사 대비 - 영어 듣기</b><div style="font-size:11px;color:var(--text-muted);">김다채 · 중2 영어</div></td>
+            <td>영어</td><td style="white-space:nowrap;">2025-11-22</td>
+            <td colspan="3" style="color:var(--text-muted);text-align:center;">결과 미공개</td>
+            <td><span class="badge-tag gray">대기</span></td>
+            <td><button class="btn btn-sm btn-secondary" disabled>대기중</button></td>
+          </tr>
+          <tr>
+            <td><b>3학년 과학 탐구 실력평가</b><div style="font-size:11px;color:var(--text-muted);">이영호 · 중3 과학</div></td>
+            <td>과학</td><td style="white-space:nowrap;">2025-12-05</td>
+            <td><b style="color:var(--warning);">21/30</b></td>
+            <td><b>70%</b></td><td style="white-space:nowrap;">28분 10초</td>
+            <td><span class="badge-tag green">공개</span></td>
+            <td><button class="btn btn-sm btn-primary" onclick="showResultDetail()">상세보기</button></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Result Detail (toggled) -->
+  <div class="card" id="resultDetail" style="display:none;">
+    <div class="card-header">
+      <h2>📊 2학기 기말평가 - 수학 · 상세 결과</h2>
+      <button class="btn btn-sm btn-secondary" onclick="openReviewModal()">🔍 시험지 리뷰</button>
+    </div>
+    <div class="card-body">
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px;">
+        <div class="stat-card"><div class="val">32<span style="font-size:14px;color:var(--text-muted);">/40</span></div><div class="label">총점</div></div>
+        <div class="stat-card"><div class="val" style="color:var(--success);">75%</div><div class="label">정답률</div></div>
+        <div class="stat-card"><div class="val" style="color:var(--accent);">25:30</div><div class="label">소요시간</div></div>
+        <div class="stat-card"><div class="val" style="color:var(--danger);">2<span style="font-size:14px;color:var(--text-muted);">/8</span></div><div class="label">오답 수</div></div>
+      </div>
+      <h3 style="font-size:14px;font-weight:700;margin-bottom:12px;">문항별 결과 <span style="font-size:11px;color:var(--text-muted);font-weight:400;">· 문항을 클릭하면 문제를 확인할 수 있습니다</span></h3>
+      <table class="data-table" style="margin-bottom:20px;">
+        <thead><tr><th>문항</th><th>유형</th><th>정답</th><th>내 답</th><th>결과</th><th>배점</th><th>득점</th></tr></thead>
+        <tbody>
+          <tr class="q-row" onclick="toggleQDetail(1)"><td><span style="color:var(--primary);cursor:pointer;text-decoration:underline;">1</span></td><td>객관식</td><td>①</td><td>①</td><td><span class="review-badge correct">정답</span></td><td>4</td><td>4</td></tr>
+          <tr class="q-detail" id="qd-1" style="display:none;"><td colspan="7"><div style="background:var(--surface-alt);border-radius:8px;padding:14px 16px;font-size:13px;line-height:1.7;"><b style="color:var(--primary);">Q1.</b> 다음 식을 간단히 하면?<div style="text-align:center;padding:8px;background:var(--surface);border-radius:6px;margin:8px 0;font-family:serif;font-size:16px;">3<i>x</i> + 5<i>y</i> − 2<i>x</i> + 3<i>y</i></div><div style="margin-top:6px;">① <b style="color:var(--success);">x+8y ✓</b> &nbsp; ② 5x+8y &nbsp; ③ x+2y &nbsp; ④ 5x+2y &nbsp; ⑤ x−8y</div></div></td></tr>
+
+          <tr class="q-row" onclick="toggleQDetail(2)"><td><span style="color:var(--primary);cursor:pointer;text-decoration:underline;">2</span></td><td>객관식</td><td>②</td><td>②</td><td><span class="review-badge correct">정답</span></td><td>4</td><td>4</td></tr>
+          <tr class="q-detail" id="qd-2" style="display:none;"><td colspan="7"><div style="background:var(--surface-alt);border-radius:8px;padding:14px 16px;font-size:13px;line-height:1.7;"><b style="color:var(--primary);">Q2.</b> 직각삼각형 ABC에서 ∠B=90°, AB=3cm, BC=4cm일 때, 빗변 AC의 길이는?<div style="margin-top:6px;">① 4cm &nbsp; ② <b style="color:var(--success);">5cm ✓</b> &nbsp; ③ 6cm &nbsp; ④ 7cm &nbsp; ⑤ 8cm</div></div></td></tr>
+
+          <tr class="q-row" onclick="toggleQDetail(3)"><td><span style="color:var(--primary);cursor:pointer;text-decoration:underline;">3</span></td><td>객관식</td><td>③</td><td>③</td><td><span class="review-badge correct">정답</span></td><td>4</td><td>4</td></tr>
+          <tr class="q-detail" id="qd-3" style="display:none;"><td colspan="7"><div style="background:var(--surface-alt);border-radius:8px;padding:14px 16px;font-size:13px;line-height:1.7;"><b style="color:var(--primary);">Q3.</b> 일차함수 y=2x−1의 그래프가 지나는 점은?<div style="margin-top:6px;">① (0, 1) &nbsp; ② (1, 0) &nbsp; ③ <b style="color:var(--success);">(1, 1) ✓</b> &nbsp; ④ (2, 1) &nbsp; ⑤ (−1, 1)</div></div></td></tr>
+
+          <tr class="q-row" style="background:#fef2f2;" onclick="toggleQDetail(4)"><td><span style="color:var(--danger);cursor:pointer;text-decoration:underline;">4</span></td><td>복수선택</td><td>①③⑤</td><td style="color:var(--danger);">①③</td><td><span class="review-badge wrong">오답</span></td><td>5</td><td style="color:var(--danger);">0</td></tr>
+          <tr class="q-detail" id="qd-4" style="display:none;"><td colspan="7"><div style="background:#fff5f5;border-radius:8px;padding:14px 16px;font-size:13px;line-height:1.7;border:1px solid #fecaca;"><b style="color:var(--danger);">Q4.</b> 다음 중 일차방정식인 것을 <u>모두</u> 고르시오.<div style="margin-top:6px;">① <b style="color:var(--success);">3x+1=0 ✓</b> &nbsp; ② x²+2=0 &nbsp; ③ <b style="color:var(--success);">5y−3=2 ✓</b> &nbsp; ④ xy=6 &nbsp; ⑤ <b style="color:var(--danger);">−2x=10 (누락)</b></div><div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:6px;padding:10px;margin-top:8px;"><b style="color:var(--primary);">💡</b> −2x=10도 일차방정식. 미지수의 최고차항이 1차이고 등식입니다.</div></div></td></tr>
+
+          <tr class="q-row" onclick="toggleQDetail(5)"><td><span style="color:var(--primary);cursor:pointer;text-decoration:underline;">5</span></td><td>단답형</td><td>3</td><td>3</td><td><span class="review-badge correct">정답</span></td><td>5</td><td>5</td></tr>
+          <tr class="q-detail" id="qd-5" style="display:none;"><td colspan="7"><div style="background:var(--surface-alt);border-radius:8px;padding:14px 16px;font-size:13px;line-height:1.7;"><b style="color:var(--primary);">Q5.</b> 연립방정식 2x+y=7, x−y=2 의 해 x의 값을 구하시오.<div style="margin-top:6px;">정답: <b style="color:var(--success);">3</b></div></div></td></tr>
+
+          <tr class="q-row" onclick="toggleQDetail(6)"><td><span style="color:var(--primary);cursor:pointer;text-decoration:underline;">6</span></td><td>복수단답</td><td>2, 3</td><td>2, 3</td><td><span class="review-badge correct">정답</span></td><td>6</td><td>6</td></tr>
+          <tr class="q-detail" id="qd-6" style="display:none;"><td colspan="7"><div style="background:var(--surface-alt);border-radius:8px;padding:14px 16px;font-size:13px;line-height:1.7;"><b style="color:var(--primary);">Q6.</b> 연립방정식 x+y=5, 2x−y=1 의 해 x, y 값을 각각 구하시오.<div style="margin-top:6px;">정답: <b style="color:var(--success);">x=2, y=3</b></div></div></td></tr>
+
+          <tr class="q-row" onclick="toggleQDetail(7)"><td><span style="color:var(--primary);cursor:pointer;text-decoration:underline;">7</span></td><td>서술형</td><td>-</td><td>(작성)</td><td><span class="review-badge correct">부분</span></td><td>8</td><td>5</td></tr>
+          <tr class="q-detail" id="qd-7" style="display:none;"><td colspan="7"><div style="background:var(--surface-alt);border-radius:8px;padding:14px 16px;font-size:13px;line-height:1.7;"><b style="color:var(--primary);">Q7.</b> 어떤 수의 3배에서 5를 뺀 값이 그 수에 7을 더한 값과 같을 때, 그 수를 구하는 과정을 서술하시오.<div style="margin-top:6px;">부분 점수: <b>5/8점</b></div></div></td></tr>
+
+          <tr class="q-row" style="background:#fef2f2;" onclick="toggleQDetail(8)"><td><span style="color:var(--danger);cursor:pointer;text-decoration:underline;">8</span></td><td>객관식</td><td>③</td><td style="color:var(--danger);">④</td><td><span class="review-badge wrong">오답</span></td><td>4</td><td style="color:var(--danger);">0</td></tr>
+          <tr class="q-detail" id="qd-8" style="display:none;"><td colspan="7"><div style="background:#fff5f5;border-radius:8px;padding:14px 16px;font-size:13px;line-height:1.7;border:1px solid #fecaca;"><b style="color:var(--danger);">Q8.</b> 다음 중 y=2x의 그래프 위의 점은?<div style="margin-top:6px;">① (0, 2) &nbsp; ② (2, 2) &nbsp; ③ <b style="color:var(--success);">(1, 2) ✓</b> &nbsp; ④ <b style="color:var(--danger);">(3, 5) ✗</b> &nbsp; ⑤ (4, 6)</div><div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:6px;padding:10px;margin-top:8px;"><b style="color:var(--primary);">💡</b> y=2x에 (3,5)를 대입하면 y=6≠5이므로 그래프 위의 점이 아닙니다.</div></div></td></tr>
+        </tbody>
+      </table>
+      <h3 style="font-size:14px;font-weight:700;margin-bottom:12px;">📝 오답 해설</h3>
+      <div style="background:var(--surface-alt);border-radius:12px;padding:16px;border:1px solid var(--border);margin-bottom:10px;">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;"><b style="color:var(--danger);">4번</b><span class="badge-tag red">오답</span></div>
+        <div style="font-size:13px;margin-bottom:8px;">내 답: <b>①③</b> → 정답: <b>①③⑤</b></div>
+        <div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:8px;padding:12px;font-size:13px;line-height:1.7;">
+          <b style="color:var(--primary);">💡 해설:</b> −2x=10도 일차방정식입니다. 미지수 x의 최고차항이 1차이고 등식의 형태를 갖추고 있기 때문입니다.
+        </div>
+      </div>
+      <div style="background:var(--surface-alt);border-radius:12px;padding:16px;border:1px solid var(--border);">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;"><b style="color:var(--danger);">8번</b><span class="badge-tag red">오답</span></div>
+        <div style="font-size:13px;margin-bottom:8px;">내 답: <b>④</b> → 정답: <b>③</b></div>
+        <div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:8px;padding:12px;font-size:13px;line-height:1.7;">
+          <b style="color:var(--primary);">💡 해설:</b> y=2x에 (3,5)를 대입하면 y=6≠5이므로 그래프 위의 점이 아닙니다.
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ============================================================ -->
+<!-- PAGE: 문제풀이 결과 (교사 뷰) - from 나의 평가지 관리 진입 -->
+<!-- ============================================================ -->
+<div class="page" id="page-teacher-result">
+  <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+    <button class="btn btn-sm btn-secondary" onclick="goPage(prevPage)" style="padding:6px 10px;">← 돌아가기</button>
+    <span style="font-size:12px;color:var(--text-muted);" id="teacherResultBreadcrumb">나의 평가지 관리 ›</span>
+  </div>
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+    <h1 style="font-size:20px;font-weight:800;">2학기 기말평가 - 수학 · 응시 결과</h1>
+    <div style="display:flex;gap:8px;">
+      <button class="btn btn-secondary btn-sm" onclick="showToast('결과가 공개되었습니다.')">📢 결과 공개</button>
+      <button class="btn btn-success btn-sm" onclick="showToast('엑셀 다운로드가 시작됩니다.')">📥 엑셀 다운로드</button>
+    </div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:16px;">
+    <div class="stat-card"><div class="val">24</div><div class="label">응시 인원</div></div>
+    <div class="stat-card"><div class="val">28.8<span style="font-size:14px;">/40</span></div><div class="label">평균 점수</div></div>
+    <div class="stat-card"><div class="val" style="color:var(--success);">72%</div><div class="label">평균 정답률</div></div>
+    <div class="stat-card"><div class="val" style="color:var(--accent);">22:15</div><div class="label">평균 소요시간</div></div>
+    <div class="stat-card"><div class="val" style="color:var(--warning);">38<span style="font-size:14px;">/40</span></div><div class="label">최고점</div></div>
+  </div>
+
+  <div class="inner-tabs">
+    <button class="inner-tab active" onclick="showTTab('students')">응시자 목록</button>
+    <button class="inner-tab" onclick="showTTab('analysis')">문항 분석</button>
+    <button class="inner-tab" onclick="showTTab('achievement')">성취기준 분석</button>
+  </div>
+
+  <div class="card" id="ttab-students">
+    <div style="overflow-x:auto;">
+      <table class="data-table">
+        <thead><tr>
+          <th style="width:40px;">No.</th><th>이름</th><th>학년반</th><th>총점</th><th>정답률</th><th>시간</th>
+          <th>1</th><th>2</th><th>3</th><th>4</th><th>5</th><th>6</th><th>7</th><th>8</th><th style="width:60px;">이탈</th>
+        </tr></thead>
+        <tbody>
+          <tr><td>1</td><td><b>이도현</b></td><td>2-3</td><td><b>38</b></td><td>92%</td><td>18:42</td><td>⭕</td><td>⭕</td><td>⭕</td><td>⭕</td><td>⭕</td><td>⭕</td><td>6/8</td><td>⭕</td><td>0</td></tr>
+          <tr><td>2</td><td><b>박서연</b></td><td>2-3</td><td><b>32</b></td><td>75%</td><td>25:30</td><td>⭕</td><td>⭕</td><td>⭕</td><td>❌</td><td>⭕</td><td>⭕</td><td>5/8</td><td>❌</td><td>0</td></tr>
+          <tr><td>3</td><td><b>정하은</b></td><td>2-1</td><td><b>28</b></td><td>67%</td><td>30:15</td><td>⭕</td><td>❌</td><td>⭕</td><td>⭕</td><td>⭕</td><td>❌</td><td>4/8</td><td>⭕</td><td style="color:var(--danger);font-weight:700;">3</td></tr>
+          <tr><td>4</td><td><b>김민준</b></td><td>2-3</td><td><b>24</b></td><td>58%</td><td>35:10</td><td>⭕</td><td>⭕</td><td>❌</td><td>❌</td><td>❌</td><td>⭕</td><td>2/8</td><td>⭕</td><td>1</td></tr>
+          <tr><td>5</td><td><b>최윤아</b></td><td>2-1</td><td><b>36</b></td><td>88%</td><td>20:05</td><td>⭕</td><td>⭕</td><td>⭕</td><td>⭕</td><td>⭕</td><td>⭕</td><td>7/8</td><td>❌</td><td>0</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div style="padding:12px 16px;font-size:11px;color:var(--text-muted);border-top:1px solid var(--border);">
+      전체 24명 중 상위 5명 표시 · ⭕정답 ❌오답 · 서술형은 부분점수 · 이탈=응시 중 창 전환 횟수
+    </div>
+  </div>
+
+  <div class="card" id="ttab-analysis" style="display:none;">
+    <div class="card-body">
+      <h3 style="font-size:14px;font-weight:700;margin-bottom:16px;">문항별 정답률</h3>
+      <div class="bar-chart" style="margin-bottom:20px;">
+        <div class="bar-col"><div class="bar-val">92%</div><div class="bar" style="height:92%;background:var(--success);"></div><div class="bar-label">1번</div></div>
+        <div class="bar-col"><div class="bar-val">83%</div><div class="bar" style="height:83%;background:var(--success);"></div><div class="bar-label">2번</div></div>
+        <div class="bar-col"><div class="bar-val">79%</div><div class="bar" style="height:79%;background:var(--primary);"></div><div class="bar-label">3번</div></div>
+        <div class="bar-col"><div class="bar-val">42%</div><div class="bar" style="height:42%;background:var(--danger);"></div><div class="bar-label">4번</div></div>
+        <div class="bar-col"><div class="bar-val">75%</div><div class="bar" style="height:75%;background:var(--primary);"></div><div class="bar-label">5번</div></div>
+        <div class="bar-col"><div class="bar-val">67%</div><div class="bar" style="height:67%;background:var(--warning);"></div><div class="bar-label">6번</div></div>
+        <div class="bar-col"><div class="bar-val">54%</div><div class="bar" style="height:54%;background:var(--warning);"></div><div class="bar-label">7번</div></div>
+        <div class="bar-col"><div class="bar-val">71%</div><div class="bar" style="height:71%;background:var(--primary);"></div><div class="bar-label">8번</div></div>
+      </div>
+      <div style="background:var(--danger-bg);border-radius:10px;padding:14px;font-size:13px;">⚠️ <b>4번</b> 정답률 42%로 최저. 복수선택에서 ⑤번 누락이 주요 오답 패턴.</div>
+    </div>
+  </div>
+
+  <div class="card" id="ttab-achievement" style="display:none;">
+    <div class="card-body">
+      <h3 style="font-size:14px;font-weight:700;margin-bottom:16px;">성취기준별 분석</h3>
+      <table class="data-table">
+        <thead><tr><th>성취기준</th><th>영역</th><th>관련문항</th><th>평균정답률</th><th>수준</th></tr></thead>
+        <tbody>
+          <tr><td>[9수01-01] 다항식의 덧셈과 뺄셈</td><td>수와 연산</td><td>1번</td><td><b>92%</b></td><td><span class="badge-tag green">우수</span></td></tr>
+          <tr><td>[9수04-01] 피타고라스 정리</td><td>기하</td><td>2번</td><td><b>83%</b></td><td><span class="badge-tag green">우수</span></td></tr>
+          <tr><td>[9수02-03] 일차방정식의 판별</td><td>문자와 식</td><td>4번</td><td><b style="color:var(--danger);">42%</b></td><td><span class="badge-tag red">미달</span></td></tr>
+          <tr><td>[9수02-05] 연립방정식의 풀이</td><td>문자와 식</td><td>5, 6번</td><td><b>71%</b></td><td><span class="badge-tag blue">보통</span></td></tr>
+          <tr><td>[9수03-02] 정비례 관계</td><td>함수</td><td>8번</td><td><b>71%</b></td><td><span class="badge-tag blue">보통</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+
+<!-- ============================================================ -->
+<!-- PAGE: 시험지 등록 -->
+<!-- ============================================================ -->
+<div class="page" id="page-register">
+  <h1 style="font-size:20px;font-weight:800;margin-bottom:20px;">시험지 등록하기</h1>
+  <div class="step-indicator">
+    <div class="step-item active" id="step1"><span class="step-num">1</span> 기본 정보</div><span class="step-arrow">→</span>
+    <div class="step-item" id="step2"><span class="step-num">2</span> 파일 업로드</div><span class="step-arrow">→</span>
+    <div class="step-item" id="step3"><span class="step-num">3</span> 정답 입력</div><span class="step-arrow">→</span>
+    <div class="step-item" id="step4"><span class="step-num">4</span> 해설 등록 <span class="badge-tag blue" style="font-size:10px;">선택</span></div>
+  </div>
+
+  <div class="card" id="regStep1">
+    <div class="card-header"><h2>기본 정보 입력</h2></div>
+    <div class="card-body">
+      <div class="form-group"><label class="form-label">시험지명 *</label><input type="text" class="form-input" value="2학기 기말평가 - 수학"></div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">학교급 *</label><select class="form-input"><option>초등</option><option selected>중학교</option><option>고등</option></select></div>
+        <div class="form-group"><label class="form-label">교과 *</label><select class="form-input"><option selected>수학</option><option>영어</option><option>국어</option></select></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">학년</label><select class="form-input"><option>1</option><option selected>2</option><option>3</option></select></div>
+        <div class="form-group"><label class="form-label">문항 수 *</label><input type="number" class="form-input" value="8"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">응시 시작일</label><input type="date" class="form-input" value="2025-12-09"></div>
+        <div class="form-group"><label class="form-label">응시 종료일</label><input type="date" class="form-input" value="2025-12-31"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">제한시간 (분)</label><input type="number" class="form-input" value="40"><div class="form-hint">0 입력 시 제한시간 없음</div></div>
+        <div class="form-group"><label class="form-label">입장코드</label><input type="text" class="form-input" placeholder="비워두면 자유 응시"><div class="form-hint">코드 설정 시 코드를 아는 응시자만 접근</div></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">결과 공개 설정</label><select class="form-input"><option>즉시 공개</option><option selected>수동 공개</option><option>기간 종료 후 공개</option></select></div>
+        <div class="form-group"><label class="form-label">결과 열람 권한 위임</label><input type="text" class="form-input" placeholder="교사 검색 후 추가"><div class="form-hint">지정 교사가 전체 결과를 열람할 수 있습니다</div></div>
+      </div>
+    </div>
+    <div style="padding:16px 20px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px;">
+      <button class="btn btn-secondary" onclick="showToast('임시저장되었습니다.')">임시저장</button>
+      <button class="btn btn-primary" onclick="regStep(2)">다음: 파일 업로드 →</button>
+    </div>
+  </div>
+  <div class="card" id="regStep2" style="display:none;">
+    <div class="card-header"><h2>시험지 파일 업로드</h2></div>
+    <div class="card-body">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;">
+        <div><div class="form-label" style="margin-bottom:8px;">파일 업로드</div>
+          <div class="file-upload" onclick="showToast('파일 업로드 완료: 기말평가_수학.hwp')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg><p>파일을 끌어다 놓거나 클릭</p><div style="font-size:11px;color:var(--text-muted);margin-top:4px;">HWP, HWPX, PDF, 이미지(JPG/PNG)</div></div>
+        </div>
+        <div><div class="form-label" style="margin-bottom:8px;">채움콘텐츠 문항뱅크</div>
+          <div class="file-upload" style="border-color:var(--primary);background:var(--primary-bg);" onclick="showToast('채움콘텐츠 문항뱅크 연동')"><svg viewBox="0 0 24 24" fill="none" stroke="var(--primary)" stroke-width="1.5"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg><p style="color:var(--primary);font-weight:600;">문항뱅크에서 가져오기</p></div>
+        </div>
+      </div>
+      <div style="background:var(--warning-bg);border-radius:10px;padding:12px 16px;font-size:12px;color:#92400e;">💡 듣기 평가용 음원(MP3)이나 영상(MP4)도 첨부할 수 있습니다. <button class="btn btn-sm" style="background:#fde68a;color:#92400e;margin-left:8px;" onclick="showToast('음원/영상 첨부 영역 활성화')">+ 음원/영상 추가</button></div>
+    </div>
+    <div style="padding:16px 20px;border-top:1px solid var(--border);display:flex;justify-content:space-between;">
+      <button class="btn btn-secondary" onclick="regStep(1)">← 이전</button>
+      <div style="display:flex;gap:8px;"><button class="btn btn-secondary" onclick="showToast('임시저장')">임시저장</button><button class="btn btn-primary" onclick="regStep(3)">다음: 정답 입력 →</button></div>
+    </div>
+  </div>
+  <div class="card" id="regStep3" style="display:none;">
+    <div class="card-header"><h2>정답 입력</h2></div>
+    <div class="card-body">
+      <table class="answer-key-table">
+        <thead><tr><th style="width:50px;">문항</th><th style="width:120px;">유형</th><th>정답</th><th style="width:70px;">배점</th></tr></thead>
+        <tbody>
+          <tr><td>1</td><td><select class="form-input" style="padding:6px 8px;font-size:12px;"><option selected>객관식(단일)</option><option>객관식(복수)</option><option>단답형</option><option>복수단답</option><option>서술형</option></select></td><td><input class="form-input" style="padding:6px 8px;width:80px;text-align:center;" value="1"></td><td><input class="form-input" style="padding:6px 8px;width:60px;text-align:center;" type="number" value="4"></td></tr>
+          <tr><td>2</td><td><select class="form-input" style="padding:6px 8px;font-size:12px;"><option selected>객관식(단일)</option></select></td><td><input class="form-input" style="padding:6px 8px;width:80px;text-align:center;" value="2"></td><td><input class="form-input" style="padding:6px 8px;width:60px;text-align:center;" type="number" value="4"></td></tr>
+          <tr><td>3~6</td><td colspan="3" style="text-align:center;color:var(--text-muted);">... (동일 구조 반복) ...</td></tr>
+          <tr><td>7</td><td><select class="form-input" style="padding:6px 8px;font-size:12px;"><option>객관식(단일)</option><option>객관식(복수)</option><option>단답형</option><option>복수단답</option><option selected>서술형</option></select></td><td><span style="font-size:12px;color:var(--text-muted);">수동 채점</span></td><td><input class="form-input" style="padding:6px 8px;width:60px;text-align:center;" type="number" value="8"></td></tr>
+          <tr><td>8</td><td><select class="form-input" style="padding:6px 8px;font-size:12px;"><option selected>객관식(단일)</option></select></td><td><input class="form-input" style="padding:6px 8px;width:80px;text-align:center;" value="3"></td><td><input class="form-input" style="padding:6px 8px;width:60px;text-align:center;" type="number" value="4"></td></tr>
+        </tbody>
+        <tfoot><tr><td colspan="3" style="text-align:right;font-weight:700;">총점</td><td style="text-align:center;font-weight:700;color:var(--primary);">40점</td></tr></tfoot>
+      </table>
+    </div>
+    <div style="padding:16px 20px;border-top:1px solid var(--border);display:flex;justify-content:space-between;">
+      <button class="btn btn-secondary" onclick="regStep(2)">← 이전</button>
+      <div style="display:flex;gap:8px;"><button class="btn btn-secondary" onclick="showToast('임시저장')">임시저장</button><button class="btn btn-primary" onclick="regStep(4)">다음: 해설 등록 →</button></div>
+    </div>
+  </div>
+  <div class="card" id="regStep4" style="display:none;">
+    <div class="card-header"><h2>해설 등록 <span class="badge-tag blue">선택사항</span></h2></div>
+    <div class="card-body">
+      <div style="background:var(--primary-bg);border-radius:10px;padding:14px 16px;margin-bottom:16px;font-size:13px;color:var(--primary);">💡 해설을 등록하면 응시자가 결과 확인 시 정답과 함께 볼 수 있습니다.</div>
+      <div style="display:flex;gap:12px;align-items:flex-start;margin-bottom:12px;">
+        <div style="width:36px;height:36px;border-radius:10px;background:var(--primary);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;flex-shrink:0;">1</div>
+        <textarea class="form-input" style="min-height:60px;" placeholder="1번 해설...">동류항끼리 묶어 계산: (3−2)x+(5+3)y = x+8y</textarea>
+      </div>
+      <div style="display:flex;gap:12px;align-items:flex-start;">
+        <div style="width:36px;height:36px;border-radius:10px;background:var(--primary);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;flex-shrink:0;">2</div>
+        <textarea class="form-input" style="min-height:60px;" placeholder="2번 해설...">피타고라스 정리: AC²=9+16=25, AC=5cm</textarea>
+      </div>
+      <div style="text-align:center;padding:12px;color:var(--text-muted);font-size:13px;">... (3~8번 해설 입력) ...</div>
+    </div>
+    <div style="padding:16px 20px;border-top:1px solid var(--border);display:flex;justify-content:space-between;">
+      <button class="btn btn-secondary" onclick="regStep(3)">← 이전</button>
+      <div style="display:flex;gap:8px;">
+        <button class="btn btn-secondary" onclick="showToast('해설 없이 등록 완료');setTimeout(()=>goPage('my-exams'),1500);">해설 없이 등록</button>
+        <button class="btn btn-success" onclick="showToast('✅ 등록 완료! 채움콘텐츠에도 자동 저장됩니다.');setTimeout(()=>goPage('my-exams'),1500);">✓ 등록 완료</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ============================================================ -->
+<!-- PLAYER OVERLAY -->
+<!-- ============================================================ -->
+<div class="player-container" id="playerContainer">
+  <div class="tab-warn" id="tabWarn">⚠️ 화면 이탈이 감지되었습니다. 이탈 횟수: <b id="tabCount">0</b>회</div>
+  <div id="waitingRoom" style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;background:var(--surface-alt);gap:16px;">
+    <div style="width:48px;height:48px;border:4px solid var(--border);border-top-color:var(--primary);border-radius:50%;animation:spin 1s linear infinite;"></div>
+    <div style="font-size:20px;font-weight:700;">평가 대기실</div>
+    <div style="font-size:14px;color:var(--text-secondary);">선생님이 시작하면 자동으로 진행됩니다.</div>
+    <div style="background:var(--surface);border-radius:14px;padding:20px 32px;box-shadow:var(--shadow-md);display:flex;flex-direction:column;gap:8px;margin-top:12px;">
+      <div style="display:flex;justify-content:space-between;gap:40px;font-size:14px;"><span style="color:var(--text-muted);">평가명</span><b>2학기 기말평가 - 수학</b></div>
+      <div style="display:flex;justify-content:space-between;gap:40px;font-size:14px;"><span style="color:var(--text-muted);">문항수</span><b>8문항 · 40분</b></div>
+    </div>
+    <button class="btn btn-primary" style="margin-top:20px;padding:12px 36px;font-size:15px;" onclick="startPlayer()">시뮬레이션: 평가 시작</button>
+  </div>
+  <div class="player-header" id="playerHeader" style="display:none;">
+    <h1>2학기 기말평가 - 수학 <span class="p-badge">중2</span></h1>
+    <div class="player-right">
+      <div class="timer-box" id="playerTimer">⏱ 40:00</div>
+      <button class="p-btn" onclick="showToast('필기 모드')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3a2.85 2.85 0 114 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg> 필기</button>
+      <button class="p-btn" onclick="closePlayer()">✕ 나가기</button>
+    </div>
+  </div>
+  <div class="player-body" id="playerBody" style="display:none;">
+    <aside class="p-sidebar">
+      <div class="p-sidebar-head"><span style="font-size:13px;color:var(--text-secondary);"><b id="pAnswered" style="color:var(--primary);">0</b>/3 풀이</span></div>
+      <div class="p-sidebar-list" id="pSideList"></div>
+      <div class="p-sidebar-foot"><span class="autosave"><span class="dot"></span> 자동저장됨</span><button class="btn btn-primary btn-sm" style="margin-left:auto;" onclick="submitPlayer()">평가 제출</button></div>
+    </aside>
+    <div class="p-main">
+      <div class="p-content" id="pContent"></div>
+      <div class="p-nav">
+        <button class="btn btn-secondary btn-sm" id="pPrev" onclick="pNav(-1)">← 이전</button>
+        <span id="pNavInfo" style="font-size:13px;color:var(--text-secondary);"></span>
+        <button class="btn btn-secondary btn-sm" id="pNext" onclick="pNav(1)">다음 →</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- REVIEW MODAL -->
+<div class="modal-bg" id="reviewModal">
+  <div class="modal-box" style="width:700px;max-height:85vh;">
+    <div class="modal-h"><h3>🔍 시험지 리뷰</h3><button onclick="closeModal('reviewModal')" style="background:var(--bg);width:32px;height:32px;border-radius:8px;display:flex;align-items:center;justify-content:center;">✕</button></div>
+    <div class="modal-b" style="max-height:70vh;overflow-y:auto;">
+      <div style="border:1px solid var(--border);border-radius:12px;overflow:hidden;margin-bottom:12px;">
+        <div style="padding:14px 16px;display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--border);"><span style="background:var(--primary);color:#fff;width:28px;height:28px;border-radius:7px;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:12px;">1</span><span style="font-size:13px;font-weight:600;">3x+5y−2x+3y를 간단히 하면?</span><span class="review-badge correct" style="margin-left:auto;">정답 ✓</span></div>
+        <div style="padding:12px 16px;font-size:13px;background:var(--surface-alt);">정답: <b>① x+8y</b> · 내 답: <b>① x+8y</b></div>
+      </div>
+      <div style="border:1px solid #fecaca;border-radius:12px;overflow:hidden;background:#fff5f5;margin-bottom:12px;">
+        <div style="padding:14px 16px;display:flex;align-items:center;gap:10px;border-bottom:1px solid #fecaca;"><span style="background:var(--danger);color:#fff;width:28px;height:28px;border-radius:7px;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:12px;">4</span><span style="font-size:13px;font-weight:600;">일차방정식인 것을 모두 고르시오.</span><span class="review-badge wrong" style="margin-left:auto;">오답 ✕</span></div>
+        <div style="padding:12px 16px;font-size:13px;">정답: <b>①③⑤</b> · 내 답: <b style="color:var(--danger);">①③</b></div>
+        <div style="padding:12px 16px;background:#f0f9ff;border-top:1px solid #bae6fd;font-size:13px;line-height:1.7;"><b style="color:var(--primary);">💡 해설:</b> −2x=10도 일차방정식. 미지수의 최고차항이 1차이고 등식입니다.</div>
+      </div>
+      <div style="text-align:center;padding:16px;color:var(--text-muted);font-size:13px;">... (나머지 문항 생략) ...</div>
+    </div>
+    <div class="modal-f"><button class="btn btn-secondary" onclick="closeModal('reviewModal')">닫기</button></div>
+  </div>
+</div>
+
+<!-- EXAM PREVIEW MODAL (내가 등록한 평가지) -->
+<div class="modal-bg" id="examPreviewModal">
+  <div class="modal-box" style="width:600px;">
+    <div class="modal-h"><h3>📄 평가지 미리보기</h3><button onclick="closeModal('examPreviewModal')" style="background:var(--bg);width:32px;height:32px;border-radius:8px;display:flex;align-items:center;justify-content:center;">✕</button></div>
+    <div class="modal-b">
+      <div style="margin-bottom:16px;">
+        <h2 id="previewTitle" style="font-size:18px;font-weight:700;margin-bottom:8px;">시험지명</h2>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <span class="badge-tag orange">내가 등록</span>
+          <span class="badge-tag blue" id="previewSubj">수학</span>
+          <span class="badge-tag gray" id="previewCnt">8문항</span>
+        </div>
+      </div>
+      <div style="background:var(--surface-alt);border-radius:10px;padding:16px;border:1px solid var(--border);margin-bottom:16px;">
+        <div style="font-size:12px;font-weight:600;color:var(--text-secondary);margin-bottom:8px;">📋 문항 구성 (미리보기)</div>
+        <div style="display:flex;flex-direction:column;gap:8px;">
+          <div style="display:flex;align-items:center;gap:10px;font-size:13px;"><span style="background:var(--primary);color:#fff;width:24px;height:24px;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;">1</span>객관식(단일) · 4점 — 다항식의 덧셈과 뺄셈</div>
+          <div style="display:flex;align-items:center;gap:10px;font-size:13px;"><span style="background:var(--primary);color:#fff;width:24px;height:24px;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;">2</span>객관식(단일) · 4점 — 피타고라스 정리</div>
+          <div style="display:flex;align-items:center;gap:10px;font-size:13px;"><span style="background:var(--primary);color:#fff;width:24px;height:24px;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;">3</span>객관식(단일) · 4점 — 일차함수의 그래프</div>
+          <div style="text-align:center;font-size:12px;color:var(--text-muted);padding:4px 0;">⋮</div>
+          <div style="display:flex;align-items:center;gap:10px;font-size:13px;"><span style="background:var(--primary);color:#fff;width:24px;height:24px;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;">8</span>객관식(단일) · 4점 — 좌표평면 위의 점</div>
+        </div>
+      </div>
+      <div style="display:flex;gap:12px;font-size:13px;color:var(--text-secondary);">
+        <span>⏱ 제한시간 40분</span>
+        <span>🔒 입장코드 있음</span>
+        <span>📅 ~12/31</span>
+      </div>
+    </div>
+    <div class="modal-f">
+      <button class="btn btn-secondary" onclick="closeModal('examPreviewModal')">닫기</button>
+      <button class="btn btn-primary" onclick="closeModal('examPreviewModal');prevPage='cbt-list';goPage('teacher-result');">📊 응시 결과 보기</button>
+    </div>
+  </div>
+</div>
+
+<!-- TAKE CONFIRM MODAL (타인 평가지 응시 확인) -->
+<div class="modal-bg" id="takeConfirmModal">
+  <div class="modal-box" style="width:440px;">
+    <div class="modal-h"><h3>평가 응시</h3><button onclick="closeModal('takeConfirmModal')" style="background:var(--bg);width:32px;height:32px;border-radius:8px;display:flex;align-items:center;justify-content:center;">✕</button></div>
+    <div class="modal-b" style="text-align:center;padding:28px 24px;">
+      <div style="width:56px;height:56px;border-radius:16px;background:var(--primary-bg);display:flex;align-items:center;justify-content:center;margin:0 auto 16px;font-size:24px;">📝</div>
+      <h3 id="takeTitle" style="font-size:16px;font-weight:700;margin-bottom:6px;">시험지명</h3>
+      <p id="takeInfo" style="font-size:13px;color:var(--text-secondary);margin-bottom:20px;">8문항</p>
+      <p style="font-size:14px;color:var(--text);line-height:1.6;">해당 평가지에 응시하시겠습니까?<br><span style="font-size:12px;color:var(--text-muted);">시작 후에는 제한시간이 적용됩니다.</span></p>
+    </div>
+    <div class="modal-f" style="justify-content:center;gap:12px;">
+      <button class="btn btn-secondary" onclick="closeModal('takeConfirmModal')">취소</button>
+      <button class="btn btn-primary" onclick="closeModal('takeConfirmModal');openPlayer();">응시하기</button>
+    </div>
+  </div>
+</div>
+
+<!-- TOAST -->
+<div class="toast" id="toast"></div>
+
+<script>
+// ===== NAV =====
+function goPage(page) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  const el = document.getElementById('page-' + page);
+  if (el) el.classList.add('active');
+
+  // Update nav highlights
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  document.querySelectorAll('.sub-nav-item').forEach(s => s.classList.remove('active'));
+
+  // Show/hide sub-nav
+  const subNav = document.getElementById('subNav');
+  const isStorage = (page === 'my-exams' || page === 'my-results' || page === 'teacher-result');
+  subNav.classList.toggle('show', isStorage);
+
+  if (page === 'cbt-list') {
+    document.querySelector('.nav-item[data-page="cbt-list"]').classList.add('active');
+  } else if (isStorage) {
+    document.querySelector('.nav-item[data-page="my-exams"]').classList.add('active');
+    const sub = document.querySelector(`.sub-nav-item[data-page="${page === 'teacher-result' ? 'my-exams' : page}"]`);
+    if (sub) sub.classList.add('active');
+    // Update breadcrumb for teacher-result
+    if (page === 'teacher-result') {
+      const bc = document.getElementById('teacherResultBreadcrumb');
+      if (bc) bc.textContent = prevPage === 'cbt-list' ? '채움CBT ›' : '나의 평가지 관리 ›';
+    }
+  } else if (page === 'register') {
+    document.querySelector('.nav-item[data-page="register"]').classList.add('active');
+  }
+  window.scrollTo({top:0,behavior:'smooth'});
+}
+
+// ===== EXAM LIST (채움CBT) =====
+let prevPage = 'cbt-list'; // for back navigation
+const exams = [
+  { id:8, name:'2학기 기말평가 - 수학', level:'중학교', subj:'수학', cnt:8, author:'김다채', period:'12/09~12/31', status:'active', mine:true, taken:false, participants:24, code:true },
+  { id:7, name:'중간고사 대비 - 영어 듣기', level:'중학교', subj:'영어', cnt:10, author:'김다채', period:'11/20~12/15', status:'active', mine:true, taken:false, participants:18, code:true },
+  { id:6, name:'3학년 과학 탐구 실력평가', level:'중학교', subj:'과학', cnt:15, author:'이영호', period:'12/01~12/20', status:'active', mine:false, taken:false, participants:32, code:false },
+  { id:5, name:'사회 지리 영역 평가', level:'중학교', subj:'사회', cnt:12, author:'박지현', period:'11/15~12/10', status:'active', mine:false, taken:true, participants:56, code:true },
+  { id:4, name:'일차방정식 단원평가', level:'중학교', subj:'수학', cnt:5, author:'김다채', period:'10/15~11/15', status:'closed', mine:true, taken:false, participants:45, code:false },
+  { id:3, name:'영어 문법 총정리', level:'중학교', subj:'영어', cnt:20, author:'정수민', period:'09/20~10/20', status:'closed', mine:false, taken:true, participants:89, code:false },
+  { id:2, name:'2학기 국어 문학 평가', level:'중학교', subj:'국어', cnt:10, author:'한미영', period:'09/01~09/30', status:'closed', mine:false, taken:false, participants:67, code:true },
+  { id:1, name:'1학기 중간평가 - 수학', level:'중학교', subj:'수학', cnt:6, author:'김다채', period:'04/10~04/30', status:'closed', mine:true, taken:false, participants:30, code:false },
+];
+
+function renderCBTList() {
+  document.getElementById('cbtListBody').innerHTML = exams.map(e => {
+    const statusHtml = e.status === 'active'
+      ? `<span class="badge-tag green">진행중</span>`
+      : `<span class="badge-tag gray">마감</span>`;
+
+    const partHtml = `<span class="participant-count"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/></svg><b>${e.participants}</b></span>`;
+
+    let actionHtml = '';
+    if (e.mine) {
+      actionHtml = `<button class="btn btn-sm btn-secondary" style="white-space:nowrap;" onclick="prevPage='cbt-list';goPage('teacher-result')">📊 응시현황</button>`;
+    } else if (e.taken) {
+      actionHtml = `<button class="btn btn-sm btn-secondary" style="white-space:nowrap;" onclick="goPage('my-results');setTimeout(showResultDetail,300);">📋 결과확인</button>`;
+    } else if (e.status === 'active') {
+      actionHtml = `<button class="btn btn-sm btn-primary" style="white-space:nowrap;" onclick="showTakeConfirm('${e.name}', ${e.cnt})">▶ 응시하기</button>`;
+    } else {
+      actionHtml = `<span style="font-size:11px;color:var(--text-muted);">마감</span>`;
+    }
+
+    // Badges
+    let nameExtras = '';
+    if (e.mine) nameExtras += ` <span class="badge-tag orange" style="font-size:10px;">내가 등록</span>`;
+    if (e.taken) nameExtras += ` <span class="badge-tag blue" style="font-size:10px;">응시완료</span>`;
+
+    // Code indicator
+    const codeIcon = e.code ? `<span title="입장코드 필요" style="font-size:11px;color:var(--warning);">🔒</span>` : '';
+
+    // Title click
+    const titleClick = e.mine
+      ? `onclick="showExamPreview('${e.name}', ${e.cnt}, '${e.subj}')" style="cursor:pointer;color:var(--primary);"`
+      : (e.status === 'active' && !e.taken
+        ? `onclick="showTakeConfirm('${e.name}', ${e.cnt})" style="cursor:pointer;"`
+        : (e.taken
+          ? `onclick="goPage('my-results');setTimeout(showResultDetail,300);" style="cursor:pointer;"`
+          : ''));
+
+    return `<tr class="${e.mine ? 'row-mine' : ''}">
+      <td>${e.id}</td>
+      <td><b ${titleClick}>${e.name}</b> ${codeIcon}${nameExtras}</td>
+      <td style="white-space:nowrap;">${e.level}</td>
+      <td style="white-space:nowrap;">${e.subj}</td>
+      <td>${e.cnt}</td>
+      <td>${e.author}</td>
+      <td style="font-size:12px;white-space:nowrap;">${e.period}</td>
+      <td>${partHtml}</td>
+      <td>${statusHtml}</td>
+      <td>${actionHtml}</td>
+    </tr>`;
+  }).join('');
+}
+renderCBTList();
+
+// ===== REGISTRATION STEPS =====
+function regStep(n) {
+  [1,2,3,4].forEach(i => {
+    document.getElementById('regStep'+i).style.display = i===n?'block':'none';
+    const s = document.getElementById('step'+i);
+    s.classList.remove('active','done');
+    if(i<n) s.classList.add('done');
+    if(i===n) s.classList.add('active');
+  });
+  window.scrollTo({top:0,behavior:'smooth'});
+}
+
+// ===== TEACHER RESULT TABS =====
+function showTTab(tab) {
+  document.querySelectorAll('#page-teacher-result .inner-tab').forEach((t,i)=>t.classList.toggle('active',['students','analysis','achievement'][i]===tab));
+  ['ttab-students','ttab-analysis','ttab-achievement'].forEach(id=>document.getElementById(id).style.display=id==='ttab-'+tab?'block':'none');
+}
+
+// ===== RESULT DETAIL =====
+function showResultDetail() {
+  const el = document.getElementById('resultDetail');
+  el.style.display = el.style.display === 'none' ? 'block' : 'block';
+  el.scrollIntoView({behavior:'smooth'});
+}
+function toggleQDetail(n) {
+  const el = document.getElementById('qd-' + n);
+  el.style.display = el.style.display === 'none' ? '' : 'none';
+}
+
+// ===== PLAYER =====
+const pQuestions = [
+  {id:1,type:'객관식(단일)',text:'다음 식을 간단히 하면?<br><div style="text-align:center;padding:12px;background:var(--surface-alt);border-radius:8px;margin:8px 0;font-family:serif;font-size:18px;">3<i>x</i> + 5<i>y</i> − 2<i>x</i> + 3<i>y</i></div>',options:['x + 8y','5x + 8y','x + 2y','5x + 2y','x − 8y'],pts:4},
+  {id:2,type:'객관식(단일)',text:'직각삼각형 ABC에서 ∠B=90°, AB=3cm, BC=4cm일 때, 빗변 AC의 길이는?',options:['4cm','5cm','6cm','7cm','8cm'],pts:4},
+  {id:3,type:'주관식(단답)',text:'연립방정식 2x+y=7, x−y=2 의 해 x의 값을 구하시오.',pts:5},
+];
+let pCur=0,pAns={},pTimerSec=2400,pTimerInt=null;
+
+function openPlayer(){document.getElementById('playerContainer').classList.add('show');document.getElementById('waitingRoom').style.display='flex';document.getElementById('playerHeader').style.display='none';document.getElementById('playerBody').style.display='none';}
+function closePlayer(){if(confirm('평가를 종료하시겠습니까?')){document.getElementById('playerContainer').classList.remove('show');clearInterval(pTimerInt);}}
+function startPlayer(){
+  document.getElementById('waitingRoom').style.display='none';
+  document.getElementById('playerHeader').style.display='flex';
+  document.getElementById('playerBody').style.display='flex';
+  renderP();
+  pTimerInt=setInterval(()=>{pTimerSec--;const m=Math.floor(pTimerSec/60),s=pTimerSec%60;document.getElementById('playerTimer').textContent=`⏱ ${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;},1000);
+  document.addEventListener('visibilitychange',()=>{if(document.hidden&&document.getElementById('playerContainer').classList.contains('show')){const c=document.getElementById('tabCount');c.textContent=+c.textContent+1;document.getElementById('tabWarn').classList.add('show');setTimeout(()=>document.getElementById('tabWarn').classList.remove('show'),4000);}});
+}
+function renderP(){
+  document.getElementById('pSideList').innerHTML=pQuestions.map((q,i)=>`<div class="p-q-item ${i===pCur?'active':''} ${pAns[i]?'answered':''}" onclick="pGo(${i})"><div class="p-q-num">${q.id}</div><div><div style="font-size:12px;font-weight:600;">${q.type} · ${q.pts}점</div><div style="font-size:11px;color:var(--text-muted);">${pAns[i]?'✓ 작성':'미작성'}</div></div></div>`).join('');
+  document.getElementById('pContent').innerHTML=pQuestions.map((q,i)=>{
+    let ah='';
+    if(q.options){ah=`<div class="qc-options"><div style="font-size:11px;color:var(--text-muted);font-weight:600;margin-bottom:8px;">보기 선택</div>${q.options.map((o,j)=>`<div class="opt-item ${pAns[i]===(j+1)?'selected':''}" onclick="pSel(${i},${j+1})"><div class="opt-marker">${j+1}</div><div style="font-size:14px;">${o}</div></div>`).join('')}</div>`;}
+    else{ah=`<div class="subj-area"><label class="form-label">✏️ 정답 입력</label><input type="text" class="form-input" placeholder="정답을 입력하세요" value="${pAns[i]||''}" oninput="pSub(${i},this.value)"></div>`;}
+    return `<div class="qc ${i===pCur?'active':''}" data-qi="${i}"><div class="qc-head"><div class="qc-num">${q.id}</div><div><div style="font-size:12px;color:var(--text-muted);">${q.type}</div><div style="font-size:12px;color:var(--primary);font-weight:600;">${q.pts}점</div></div></div><div class="qc-body"><div class="qc-text">${q.text}</div>${ah}</div></div>`;
+  }).join('');
+  document.getElementById('pNavInfo').textContent=`${pCur+1} / ${pQuestions.length}`;
+  document.getElementById('pPrev').disabled=pCur===0;
+  document.getElementById('pNext').disabled=pCur===pQuestions.length-1;
+}
+function pGo(i){pCur=i;renderP();}
+function pNav(d){pGo(Math.max(0,Math.min(pQuestions.length-1,pCur+d)));}
+function pSel(qi,v){pAns[qi]=v;renderP();document.getElementById('pAnswered').textContent=Object.keys(pAns).length;}
+function pSub(qi,v){if(v.trim())pAns[qi]=v.trim();else delete pAns[qi];document.getElementById('pAnswered').textContent=Object.keys(pAns).length;}
+function submitPlayer(){if(confirm(`${Object.keys(pAns).length}/${pQuestions.length}문항 작성. 제출하시겠습니까?`)){clearInterval(pTimerInt);document.getElementById('playerContainer').classList.remove('show');showToast('✅ 평가가 제출되었습니다!');goPage('my-results');}}
+
+// ===== MODALS =====
+function openReviewModal(){document.getElementById('reviewModal').classList.add('show');}
+function closeModal(id){document.getElementById(id).classList.remove('show');}
+
+function showExamPreview(name, cnt, subj) {
+  document.getElementById('previewTitle').textContent = name;
+  document.getElementById('previewSubj').textContent = subj;
+  document.getElementById('previewCnt').textContent = cnt + '문항';
+  document.getElementById('examPreviewModal').classList.add('show');
+}
+function showTakeConfirm(name, cnt) {
+  document.getElementById('takeTitle').textContent = name;
+  document.getElementById('takeInfo').textContent = cnt + '문항';
+  document.getElementById('takeConfirmModal').classList.add('show');
+}
+
+// ===== TOAST =====
+function showToast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),3000);}
+</script>
+</body>
+</html>

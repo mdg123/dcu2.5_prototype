@@ -1,0 +1,1798 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>채움콘텐츠 - 통합 프로토타입</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f3f4f6; color: #111827; line-height: 1.5; }
+button { cursor: pointer; border: none; background: none; font-family: inherit; }
+input, select, textarea { font-family: inherit; }
+
+.container { max-width: 1280px; margin: 0 auto; padding: 0 24px; }
+
+/* HEADER */
+.header { background: linear-gradient(135deg, #1d4ed8, #1e3a5f); color: white; }
+.header-inner { display: flex; align-items: center; justify-content: space-between; padding: 12px 24px; max-width: 1280px; margin: 0 auto; }
+.header-logo { font-size: 20px; font-weight: 800; }
+.header-logo span { color: #93c5fd; font-size: 13px; margin-left: 10px; font-weight: 400; }
+.header-user { display: flex; align-items: center; gap: 12px; font-size: 13px; }
+.header-class { background: rgba(255,255,255,0.15); padding: 4px 14px; border-radius: 20px; font-size: 12px; }
+
+/* BREADCRUMB */
+.breadcrumb { background: white; border-bottom: 1px solid #e5e7eb; padding: 10px 0; }
+.breadcrumb-inner { max-width: 1280px; margin: 0 auto; padding: 0 24px; font-size: 12px; color: #6b7280; display: flex; align-items: center; gap: 6px; }
+.breadcrumb-inner a { color: #3b82f6; text-decoration: none; }
+.breadcrumb-inner .sep { color: #d1d5db; }
+
+/* STEP INDICATOR */
+.step-bar { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 16px; background: white; border-radius: 12px 12px 0 0; border-bottom: 1px solid #e5e7eb; }
+.step-item { display: flex; align-items: center; gap: 8px; }
+.step-circle { width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; }
+.step-circle.done { background: #2563eb; color: white; }
+.step-circle.active { background: #2563eb; color: white; box-shadow: 0 0 0 4px #bfdbfe; }
+.step-circle.pending { background: #e5e7eb; color: #9ca3af; }
+.step-lbl { font-size: 13px; font-weight: 500; }
+.step-lbl.active { color: #1d4ed8; }
+.step-lbl.pending { color: #9ca3af; }
+.step-conn { width: 50px; height: 2px; }
+.step-conn.done { background: #2563eb; }
+.step-conn.pending { background: #e5e7eb; }
+
+/* CARD */
+.scard { background: white; border-radius: 12px; border: 1px solid #e5e7eb; box-shadow: 0 1px 3px rgba(0,0,0,0.05); margin-top: 16px; }
+.scard .card-body { padding: 24px; }
+
+/* FORMS */
+.form-group { margin-bottom: 20px; }
+.form-label { display: block; font-size: 13px; font-weight: 600; color: #374151; margin-bottom: 6px; }
+.form-label .req { color: #ef4444; }
+.form-label .hint { margin-left: 8px; font-size: 11px; font-weight: 500; color: #2563eb; background: #eff6ff; padding: 2px 8px; border-radius: 4px; }
+.form-hint { font-size: 11px; color: #9ca3af; margin-top: 4px; }
+.form-input { width: 100%; padding: 10px 14px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; outline: none; transition: all 0.2s; }
+.form-input:focus { border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59,130,246,0.1); }
+.form-select { padding: 10px 14px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 13px; background: white; outline: none; cursor: pointer; min-width: 120px; }
+.form-select:focus { border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59,130,246,0.1); }
+.form-row { display: flex; gap: 12px; }
+
+/* RADIO */
+.radio-group { display: flex; gap: 16px; }
+.radio-label { display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 13px; }
+.radio-label input[type="radio"] { accent-color: #2563eb; }
+
+/* BADGE */
+.badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 600; white-space: nowrap; }
+.badge-blue { background: #dbeafe; color: #1d4ed8; }
+.badge-green { background: #dcfce7; color: #15803d; }
+.badge-yellow { background: #fef9c3; color: #a16207; }
+.badge-orange { background: #ffedd5; color: #c2410c; }
+.badge-red { background: #fee2e2; color: #dc2626; }
+.badge-purple { background: #f3e8ff; color: #7c3aed; }
+.badge-gray { background: #f3f4f6; color: #4b5563; }
+.badge-indigo { background: #e0e7ff; color: #4338ca; }
+
+/* BUTTONS */
+.btn { padding: 10px 20px; border-radius: 8px; font-size: 13px; font-weight: 600; transition: all 0.2s; display: inline-flex; align-items: center; gap: 6px; }
+.btn-primary { background: #2563eb; color: white; box-shadow: 0 1px 3px rgba(37,99,235,0.3); }
+.btn-primary:hover { background: #1d4ed8; }
+.btn-primary:disabled { background: #d1d5db; color: #9ca3af; cursor: not-allowed; box-shadow: none; }
+.btn-outline { border: 1px solid #d1d5db; color: #4b5563; background: white; }
+.btn-outline:hover { background: #f9fafb; }
+.btn-sm { padding: 6px 14px; font-size: 12px; }
+.btn-danger-text { color: #ef4444; font-size: 12px; padding: 4px 8px; }
+.btn-danger-text:hover { color: #dc2626; }
+
+/* SECTION */
+.sec-title { font-size: 17px; font-weight: 700; color: #1f2937; display: flex; align-items: center; gap: 10px; margin-bottom: 24px; }
+.sec-num { width: 28px; height: 28px; background: #dbeafe; color: #1d4ed8; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; }
+
+/* ===== ACCORDION (Grade groups) ===== */
+.grade-group { border: 1px solid #e5e7eb; border-radius: 8px; margin-bottom: 8px; overflow: hidden; }
+.grade-group-header { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; background: #f9fafb; cursor: pointer; transition: background 0.15s; user-select: none; }
+.grade-group-header:hover { background: #f3f4f6; }
+.grade-group-header.expanded { background: #eff6ff; border-bottom: 1px solid #e5e7eb; }
+.grade-group-left { display: flex; align-items: center; gap: 10px; }
+.grade-group-arrow { font-size: 12px; color: #6b7280; transition: transform 0.2s; }
+.grade-group-arrow.open { transform: rotate(90deg); }
+.grade-group-name { font-size: 14px; font-weight: 600; color: #374151; }
+.grade-group-count { font-size: 12px; color: #6b7280; }
+.grade-group-selected { font-size: 11px; color: #2563eb; font-weight: 600; }
+.grade-group-body { display: none; padding: 8px; }
+.grade-group-body.open { display: block; }
+.grade-group.is-default .grade-group-header { background: #eff6ff; }
+.grade-group.is-default .grade-group-name { color: #1d4ed8; }
+
+/* STANDARD ITEM */
+.std-item { padding: 10px 12px; border-radius: 8px; border: 1px solid #e5e7eb; background: white; cursor: pointer; margin-bottom: 6px; transition: all 0.15s; }
+.std-item:hover { border-color: #93c5fd; }
+.std-item.selected { border-color: #3b82f6; background: #eff6ff; }
+.std-item-top { display: flex; align-items: center; justify-content: space-between; }
+.std-item-left { display: flex; align-items: center; gap: 10px; }
+.std-chk { width: 18px; height: 18px; border: 2px solid #d1d5db; border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 10px; flex-shrink: 0; transition: all 0.15s; }
+.std-chk.checked { background: #2563eb; border-color: #2563eb; color: white; }
+.std-code { font-family: monospace; font-size: 11px; color: #6b7280; }
+.std-desc { font-size: 12px; color: #374151; margin-left: 6px; }
+.std-sub { margin-left: 28px; margin-top: 3px; font-size: 11px; color: #9ca3af; }
+
+/* TAGS */
+.tag-list { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.tag { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; background: #eff6ff; color: #1d4ed8; border-radius: 20px; font-size: 11px; font-weight: 500; border: 1px solid #bfdbfe; }
+.tag .grade-label { background: #dbeafe; padding: 1px 6px; border-radius: 10px; font-size: 10px; font-weight: 600; margin-right: 2px; }
+.tag-rm { width: 16px; height: 16px; border-radius: 50%; background: #bfdbfe; color: #1d4ed8; display: flex; align-items: center; justify-content: center; font-size: 10px; }
+.tag-rm:hover { background: #93c5fd; }
+
+/* SPLIT VIEW */
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;600;700;800&display=swap');
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: 'Noto Sans KR', -apple-system, BlinkMacSystemFont, sans-serif; background: #f5f6f8; color: #1a1a1a; line-height: 1.6; font-size: 14px; }
+button { cursor: pointer; border: none; background: none; font-family: inherit; }
+input, select, textarea { font-family: inherit; }
+a { text-decoration: none; color: inherit; }
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;600;700;800&display=swap');
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: 'Noto Sans KR', -apple-system, BlinkMacSystemFont, sans-serif; background: #f5f6f8; color: #1a1a1a; line-height: 1.6; font-size: 14px; }
+button { cursor: pointer; border: none; background: none; font-family: inherit; }
+input, select, textarea { font-family: inherit; }
+a { text-decoration: none; color: inherit; }
+
+/* ============ GNB ============ */
+.gnb { background: white; border-bottom: 1px solid #e8e8e8; padding: 0 32px; display: flex; align-items: center; justify-content: space-between; height: 56px; }
+.gnb-logo { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+.gnb-logo-icon { width: 32px; height: 32px; background: linear-gradient(135deg, #e8416e, #f06090); border-radius: 8px; display: flex; align-items: center; justify-content: center; color: white; font-weight: 800; font-size: 11px; }
+.gnb-logo-text { font-size: 16px; font-weight: 700; color: #333; }
+.gnb-logo-text span { color: #e8416e; }
+.gnb-menu { display: flex; gap: 28px; }
+.gnb-menu a { font-size: 14px; color: #666; font-weight: 500; padding: 16px 0; border-bottom: 2px solid transparent; }
+.gnb-menu a:hover { color: #333; }
+.gnb-menu a.active { color: #e8416e; font-weight: 600; border-bottom-color: #e8416e; }
+.gnb-right { display: flex; align-items: center; gap: 20px; font-size: 13px; color: #666; }
+.gnb-user { display: flex; align-items: center; gap: 8px; }
+.gnb-avatar { width: 32px; height: 32px; background: #e8416e; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: white; font-size: 12px; font-weight: 700; }
+.gnb-search { display: flex; align-items: center; gap: 8px; background: #f5f5f5; border-radius: 8px; padding: 8px 16px; min-width: 300px; }
+.gnb-search input { border: none; background: none; outline: none; font-size: 13px; flex: 1; }
+.gnb-search-btn { background: #f3f4f6; border: 1px solid #d1d5db; border-radius: 6px; padding: 5px 14px; font-size: 12px; font-weight: 600; color: #4b5563; }
+
+/* ============ SUB TABS ============ */
+.sub-tabs { background: white; border-bottom: 1px solid #e8e8e8; padding: 0 32px; }
+.sub-tabs-inner { max-width: 1200px; margin: 0 auto; display: flex; gap: 4px; }
+.sub-tab { padding: 12px 16px; font-size: 13px; color: #666; cursor: pointer; border-bottom: 2px solid transparent; font-weight: 500; }
+.sub-tab:hover { color: #333; }
+.sub-tab.active { color: #e8416e; font-weight: 600; border-bottom-color: #e8416e; }
+
+/* ============ CONTENT ============ */
+.content { max-width: 1200px; margin: 0 auto; padding: 24px 32px 60px; }
+
+/* ============ PAGE HEADER ============ */
+.page-hdr { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
+.page-title { font-size: 24px; font-weight: 700; }
+.page-actions { display: flex; align-items: center; gap: 10px; }
+
+/* ============ BUTTONS ============ */
+.btn { padding: 9px 18px; border-radius: 6px; font-size: 13px; font-weight: 600; transition: all 0.15s; display: inline-flex; align-items: center; gap: 6px; }
+.btn-primary { background: #e8416e; color: white; }
+.btn-primary:hover { background: #d63660; }
+.btn-outline { border: 1px solid #d1d5db; color: #4b5563; background: white; }
+.btn-outline:hover { background: #f9fafb; }
+.btn-sm { padding: 6px 12px; font-size: 12px; }
+.btn-ghost { color: #6b7280; padding: 6px 10px; font-size: 12px; }
+.btn-ghost:hover { background: #f3f4f6; border-radius: 4px; }
+
+/* ============ CONTENT TYPE TABS ============ */
+.type-tabs { display: flex; justify-content: center; gap: 0; background: white; border: 1px solid #e5e7eb; border-radius: 12px; padding: 6px; margin-bottom: 20px; }
+.type-tab { padding: 10px 24px; border-radius: 8px; font-size: 14px; font-weight: 500; color: #6b7280; cursor: pointer; transition: all 0.15s; white-space: nowrap; }
+.type-tab:hover { color: #333; background: #f9fafb; }
+.type-tab.active { background: #e8416e; color: white; font-weight: 600; }
+
+/* ============ FILTER BAR ============ */
+.filter-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
+.filter-right { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+.sort-sel { padding: 5px 10px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 12px; background: white; cursor: pointer; }
+.filter-radio { display: flex; align-items: center; gap: 6px; }
+.filter-radio label { display: flex; align-items: center; gap: 4px; font-size: 13px; color: #4b5563; cursor: pointer; }
+.filter-radio input { accent-color: #2563eb; }
+.view-toggle { display: flex; border: 1px solid #d1d5db; border-radius: 6px; overflow: hidden; }
+.view-btn { padding: 6px 10px; font-size: 14px; background: white; border: none; cursor: pointer; color: #9ca3af; }
+.view-btn.active { background: #e8416e; color: white; }
+.search-mini { position: relative; }
+.search-mini input { padding: 6px 12px 6px 30px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 12px; width: 200px; outline: none; }
+.search-mini input:focus { border-color: #e8416e; }
+.search-mini-ico { position: absolute; left: 9px; top: 50%; transform: translateY(-50%); font-size: 13px; color: #9ca3af; }
+
+/* ============ BADGES ============ */
+.badge { display: inline-flex; align-items: center; gap: 3px; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; white-space: nowrap; }
+.badge-blue { background: #dbeafe; color: #1d4ed8; }
+.badge-green { background: #dcfce7; color: #15803d; }
+.badge-red { background: #fee2e2; color: #dc2626; }
+.badge-amber { background: #fef3c7; color: #d97706; }
+.badge-gray { background: #f3f4f6; color: #6b7280; }
+.badge-purple { background: #f3e8ff; color: #7c3aed; }
+.badge-simple { background: #fff7ed; color: #c2410c; border: 1px solid #fed7aa; }
+
+/* ============ CARD GRID ============ */
+.card-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; }
+.card { background: white; border-radius: 10px; border: 1px solid #e5e7eb; overflow: hidden; transition: box-shadow 0.2s; position: relative; }
+.card:hover { box-shadow: 0 4px 16px rgba(0,0,0,0.08); }
+.card-check { position: absolute; top: 10px; left: 10px; z-index: 2; width: 22px; height: 22px; border-radius: 4px; background: rgba(255,255,255,0.9); border: 1px solid #d1d5db; display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 12px; color: transparent; }
+.card-check:hover, .card-check.checked { background: #2563eb; color: white; border-color: #2563eb; }
+.card-more { position: absolute; top: 10px; right: 10px; z-index: 2; width: 24px; height: 24px; border-radius: 4px; background: rgba(255,255,255,0.9); display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 14px; color: #6b7280; }
+.card-thumb { height: 150px; background: linear-gradient(135deg, #f0f4ff, #e8eeff); display: flex; align-items: center; justify-content: center; overflow: hidden; }
+.card-thumb-icon { font-size: 48px; opacity: 0.3; }
+.card-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.card-actions { display: flex; gap: 0; padding: 6px 12px; border-bottom: 1px solid #f3f4f6; }
+.card-action-btn { flex: 1; display: flex; align-items: center; justify-content: center; padding: 4px; font-size: 16px; color: #9ca3af; cursor: pointer; border-radius: 4px; }
+.card-action-btn:hover { background: #f3f4f6; color: #4b5563; }
+.card-body { padding: 12px 14px; }
+.card-type-ico { font-size: 14px; margin-right: 4px; vertical-align: middle; }
+.card-title { font-size: 14px; font-weight: 600; color: #1f2937; line-height: 1.4; margin-bottom: 6px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.card-meta { font-size: 11px; color: #9ca3af; display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.card-meta-sep { color: #e5e7eb; }
+.card-desc { font-size: 12px; color: #6b7280; margin-top: 6px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.card-labels { display: flex; gap: 4px; margin-top: 8px; flex-wrap: wrap; }
+.card-label-simple { display: inline-flex; align-items: center; gap: 3px; font-size: 10px; font-weight: 700; color: #c2410c; background: #fff7ed; border: 1px solid #fed7aa; padding: 1px 6px; border-radius: 4px; }
+.card-label-rejected { display: inline-flex; align-items: center; font-size: 10px; font-weight: 700; color: #dc2626; }
+
+/* ============ BULK ACTIONS ============ */
+.bulk-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+.bulk-check-all { display: flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer; }
+.bulk-check-all input { accent-color: #2563eb; width: 15px; height: 15px; }
+.bulk-btn { padding: 5px 14px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 12px; background: white; color: #4b5563; }
+.bulk-btn:hover { background: #f9fafb; }
+
+/* ============ PAGINATION ============ */
+.pagination { display: flex; justify-content: center; gap: 4px; margin-top: 24px; }
+.page-btn { width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 13px; color: #6b7280; cursor: pointer; border: 1px solid transparent; }
+.page-btn:hover { background: #f3f4f6; }
+.page-btn.active { background: #1f2937; color: white; }
+
+/* ============ IMPROVEMENT MARKER ============ */
+.imp { display: inline-flex; align-items: center; gap: 4px; font-size: 10px; font-weight: 700; color: #2563eb; background: #eff6ff; padding: 2px 8px; border-radius: 4px; border: 1px solid #bfdbfe; margin-left: 8px; vertical-align: middle; }
+
+/* ============ SCREEN SWITCH ============ */
+.screen { display: none; }
+.screen.active { display: block; }
+
+/* ============ PROTO TAB ============ */
+.proto-nav { background: #1a1a2e; padding: 0 32px; display: flex; align-items: center; gap: 4px; overflow-x: auto; }
+.proto-tab { padding: 12px 20px; font-size: 13px; font-weight: 600; color: rgba(255,255,255,0.5); cursor: pointer; white-space: nowrap; border-bottom: 3px solid transparent; transition: all 0.2s; }
+.proto-tab:hover { color: rgba(255,255,255,0.8); }
+.proto-tab.active { color: #f087a0; border-bottom-color: #f087a0; }
+.proto-tab .new-badge { display: inline-block; background: #ef4444; color: white; font-size: 9px; padding: 1px 5px; border-radius: 8px; margin-left: 6px; font-weight: 700; vertical-align: middle; }
+
+/* ============ COMPARISON TABLE ============ */
+.cmp-wrap { background: white; border-radius: 10px; border: 1px solid #e5e7eb; overflow: hidden; margin-bottom: 24px; }
+.cmp-hdr { padding: 16px 20px; border-bottom: 1px solid #e5e7eb; font-size: 15px; font-weight: 700; }
+.cmp-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.cmp-table th { padding: 10px 16px; text-align: left; background: #f9fafb; font-weight: 600; color: #6b7280; border-bottom: 1px solid #e5e7eb; font-size: 12px; }
+.cmp-table td { padding: 12px 16px; border-bottom: 1px solid #f3f4f6; vertical-align: top; }
+.cmp-table tr:last-child td { border-bottom: none; }
+.cmp-old { color: #dc2626; text-decoration: line-through; opacity: 0.6; }
+.cmp-new { color: #16a34a; font-weight: 600; }
+.cmp-arrow { color: #9ca3af; margin: 0 6px; }
+
+/* SCROLLBAR */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 3px; }
+/* ============ COMPOSE: SPLIT VIEW, PREVIEW, SEARCH ============ */
+.split-view { display: flex; gap: 16px; height: calc(100vh - 380px); min-height: 520px; margin-top: 16px; }
+.split-left { width: 50%; display: flex; flex-direction: column; background: white; border-radius: 12px; border: 1px solid #e5e7eb; box-shadow: 0 1px 3px rgba(0,0,0,0.05); overflow: hidden; }
+.split-right { width: 50%; display: flex; flex-direction: column; gap: 16px; overflow: hidden; }
+
+/* SEARCH BAR */
+.search-bar { padding: 12px; border-bottom: 1px solid #e5e7eb; }
+.search-wrap { position: relative; }
+.search-input { width: 100%; padding: 8px 12px 8px 34px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 13px; outline: none; }
+.search-input:focus { border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59,130,246,0.1); }
+.search-ico { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: #9ca3af; font-size: 13px; }
+.filter-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 8px; }
+.filter-sel { padding: 4px 8px; border: 1px solid #e5e7eb; border-radius: 6px; font-size: 12px; background: white; outline: none; }
+.filter-div { width: 1px; height: 16px; background: #e5e7eb; }
+.filter-lbl { font-size: 11px; color: #6b7280; }
+.filter-cnt { font-size: 11px; color: #6b7280; margin-left: auto; }
+
+/* QUESTION LIST */
+.q-list { flex: 1; overflow-y: auto; }
+.q-item { padding: 10px 14px; border-bottom: 1px solid #f3f4f6; cursor: pointer; display: flex; align-items: center; gap: 10px; transition: all 0.15s; border-left: 4px solid transparent; }
+.q-item:hover { background: #f9fafb; }
+.q-item.active { background: #eff6ff; border-left-color: #2563eb; }
+.q-item.added { opacity: 0.5; }
+.q-item-body { flex: 1; min-width: 0; }
+.q-item-meta { display: flex; align-items: center; gap: 6px; margin-bottom: 3px; }
+.q-item-id { font-family: monospace; font-size: 10px; color: #9ca3af; }
+.q-item-title { font-size: 13px; color: #1f2937; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.q-item-badges { display: flex; gap: 5px; margin-top: 4px; align-items: center; }
+.q-item-src { font-size: 10px; color: #9ca3af; }
+.q-add-btn { flex-shrink: 0; width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 16px; transition: all 0.2s; }
+.q-add-btn.can { background: #dbeafe; color: #2563eb; }
+.q-add-btn.can:hover { background: #bfdbfe; }
+.q-add-btn.done { background: #dcfce7; color: #16a34a; cursor: pointer; }
+.q-add-btn.done:hover { background: #fee2e2; color: #dc2626; }
+
+/* PREVIEW */
+.preview { flex: 1; min-height: 0; background: white; border-radius: 12px; border: 1px solid #e5e7eb; box-shadow: 0 1px 3px rgba(0,0,0,0.05); overflow: hidden; display: flex; flex-direction: column; }
+.preview-empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; color: #9ca3af; }
+.preview-empty-ico { font-size: 44px; opacity: 0.3; margin-bottom: 12px; }
+.preview-empty p { font-size: 13px; }
+.prev-hdr { padding: 14px 16px; border-bottom: 1px solid #e5e7eb; background: #f9fafb; display: flex; align-items: center; justify-content: space-between; }
+.prev-hdr-left .prev-id { font-family: monospace; font-size: 11px; color: #6b7280; }
+.prev-hdr-left .prev-badges { display: flex; gap: 6px; margin-top: 4px; }
+.prev-body { flex: 1; overflow-y: auto; padding: 20px; }
+.prev-card { background: white; border: 1px solid #e5e7eb; border-radius: 10px; padding: 20px; }
+.prev-title { font-size: 15px; font-weight: 700; margin-bottom: 12px; }
+.prev-content { white-space: pre-wrap; font-size: 13px; color: #374151; line-height: 1.8; background: #f9fafb; border-radius: 8px; padding: 14px; }
+.prev-meta { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 14px; }
+.prev-meta-item { background: #f9fafb; border-radius: 8px; padding: 10px; }
+.prev-meta-item .lbl { font-size: 11px; color: #6b7280; }
+.prev-meta-item .val { font-size: 13px; font-weight: 600; margin-top: 2px; }
+
+/* ADDED LIST */
+.added-wrap { flex-shrink: 0; background: white; border-radius: 12px; border: 1px solid #e5e7eb; box-shadow: 0 1px 3px rgba(0,0,0,0.05); padding: 12px; }
+.added-hdr { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+.added-hdr-title { font-size: 13px; font-weight: 700; color: #374151; }
+.added-hdr-hint { font-size: 11px; color: #9ca3af; }
+.added-row { display: flex; align-items: center; gap: 6px; padding: 5px 6px; border-radius: 6px; }
+.added-row:hover { background: #f9fafb; }
+.added-row:hover .added-actions { opacity: 1; }
+.added-num { font-size: 11px; color: #9ca3af; width: 18px; text-align: center; }
+.added-id { font-family: monospace; font-size: 10px; color: #6b7280; }
+.added-title { flex: 1; font-size: 11px; color: #4b5563; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.added-actions { display: flex; gap: 3px; }
+.added-actions button { font-size: 10px; color: #9ca3af; padding: 2px 3px; }
+.added-actions button:hover { color: #4b5563; }
+.added-actions .rm { color: #ef4444; opacity: 0.6; }
+.added-actions .rm:hover { opacity: 1; }
+
+/* STEP 3 */
+.confirm-info { background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 12px; padding: 20px; margin-bottom: 24px; }
+.confirm-hdr { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+.confirm-title { font-size: 14px; font-weight: 700; color: #1d4ed8; }
+.confirm-hint { font-size: 11px; color: #3b82f6; background: #dbeafe; padding: 2px 8px; border-radius: 4px; }
+.confirm-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; font-size: 13px; }
+.confirm-item .lbl { color: #2563eb; font-size: 12px; }
+.confirm-item .val { font-weight: 600; color: #111827; margin-top: 2px; }
+.confirm-item.full { grid-column: span 2; }
+
+.sum-table { width: 100%; border-collapse: collapse; font-size: 13px; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden; }
+.sum-table thead { background: #f9fafb; }
+.sum-table th { padding: 8px 14px; text-align: left; font-weight: 600; color: #4b5563; font-size: 12px; }
+.sum-table td { padding: 8px 14px; border-top: 1px solid #f3f4f6; }
+.sum-table tr:hover { background: #f9fafb; }
+.sum-footer { background: #f9fafb; padding: 8px 14px; text-align: right; font-size: 13px; font-weight: 600; border-top: 1px solid #e5e7eb; }
+
+/* COMPLETE */
+.done-card { text-align: center; padding: 48px; }
+.done-ico { width: 72px; height: 72px; background: #dcfce7; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 20px; font-size: 32px; color: #16a34a; }
+.done-title { font-size: 22px; font-weight: 700; margin-bottom: 8px; }
+.done-sub { color: #6b7280; margin-bottom: 28px; font-size: 14px; }
+.done-summary { background: #f9fafb; border-radius: 12px; padding: 20px; max-width: 400px; margin: 0 auto; text-align: left; }
+.done-row { display: flex; justify-content: space-between; padding: 5px 0; font-size: 13px; }
+.done-row .lbl { color: #6b7280; }
+.done-row .val { font-weight: 600; }
+.done-actions { display: flex; gap: 12px; justify-content: center; margin-top: 28px; }
+
+/* NAV */
+.nav-btns { display: flex; justify-content: space-between; margin-top: 16px; }
+.nav-btns-right { display: flex; gap: 12px; }
+
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #9ca3af; }
+.hidden { display: none !important; }
+
+/* MODE TOGGLE */
+.mode-toggle { display: flex; background: #f3f4f6; border-radius: 10px; padding: 4px; margin-bottom: 16px; border: 1px solid #e5e7eb; }
+.mode-btn { flex: 1; padding: 10px 16px; border-radius: 8px; font-size: 13px; font-weight: 600; text-align: center; cursor: pointer; transition: all 0.2s; color: #6b7280; line-height: 1.4; }
+.mode-btn.active { background: white; color: #1f2937; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+.mode-btn .mode-sub { font-size: 11px; font-weight: 400; color: #9ca3af; display: block; margin-top: 2px; }
+.mode-btn.active .mode-sub { color: #6b7280; }
+.mode-badge { display: inline-block; font-size: 9px; font-weight: 700; padding: 1px 6px; border-radius: 8px; margin-left: 4px; vertical-align: middle; }
+.mode-badge.new { background: #dbeafe; color: #1d4ed8; }
+.mode-badge.cur { background: #f3f4f6; color: #9ca3af; }
+
+/* TOAST */
+.toast { position: fixed; top: 24px; left: 50%; transform: translateX(-50%) translateY(-100px); background: #1f2937; color: white; padding: 14px 24px; border-radius: 10px; font-size: 13px; z-index: 999; box-shadow: 0 8px 24px rgba(0,0,0,0.2); display: flex; align-items: center; gap: 10px; max-width: 600px; transition: transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1); }
+.toast.show { transform: translateX(-50%) translateY(0); }
+.toast-ico { font-size: 20px; flex-shrink: 0; }
+.toast-body { flex: 1; }
+.toast-title { font-weight: 700; margin-bottom: 2px; }
+.toast-desc { font-size: 12px; color: #d1d5db; }
+
+/* INFO BANNER */
+.info-banner { display: flex; align-items: flex-start; gap: 10px; padding: 14px 18px; border-radius: 10px; margin-bottom: 16px; font-size: 13px; line-height: 1.6; }
+.info-banner.blue { background: #eff6ff; border: 1px solid #bfdbfe; color: #1e40af; }
+.info-banner.green { background: #ecfdf5; border: 1px solid #a7f3d0; color: #065f46; }
+.info-banner.amber { background: #fffbeb; border: 1px solid #fde68a; color: #92400e; }
+.info-banner-ico { font-size: 18px; flex-shrink: 0; margin-top: 1px; }
+
+/* ===== ROCKET SEARCH (Spotlight 검색) ===== */
+.rkt-search-wrap { position: relative; margin-bottom: 12px; }
+.rkt-search-input { width: 100%; height: 44px; padding: 0 14px 0 40px; font-size: 15px; font-weight: 600; border: 2px solid #5d5fef; border-radius: 10px; background: #f8f9ff; outline: none; box-sizing: border-box; transition: box-shadow 0.2s; }
+.rkt-search-input:focus { box-shadow: 0 0 0 3px rgba(93,95,239,0.15); }
+.rkt-search-input::placeholder { color: #aaa; font-weight: 400; }
+.rkt-search-ico { position: absolute; left: 13px; top: 50%; transform: translateY(-50%); font-size: 16px; }
+.rkt-search-hint { font-size: 11px; color: #9ca3af; margin-top: 4px; display: flex; align-items: center; gap: 6px; }
+.rkt-search-hint kbd { display: inline-block; padding: 1px 5px; background: #f3f4f6; border: 1px solid #d1d5db; border-radius: 3px; font-size: 10px; font-family: monospace; color: #6b7280; }
+
+.rkt-results { max-height: 320px; overflow-y: auto; border: 1px solid #e5e7eb; border-radius: 10px; background: white; box-shadow: 0 4px 12px rgba(0,0,0,0.06); }
+.rkt-results:empty { display: none; }
+.rkt-no-result { padding: 24px; text-align: center; color: #9ca3af; font-size: 13px; }
+
+.rkt-item { padding: 10px 14px; border-bottom: 1px solid #f3f4f6; cursor: pointer; transition: background 0.1s; }
+.rkt-item:last-child { border-bottom: none; }
+.rkt-item:hover { background: #f0f7ff; }
+.rkt-item.rkt-selected { background: #e6f0ff; border-left: 4px solid #5d5fef; }
+.rkt-item-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; font-size: 12px; color: #888; }
+.rkt-badge { display: inline-block; padding: 2px 7px; border-radius: 4px; color: white; font-size: 11px; font-weight: 600; margin-right: 5px; }
+.rkt-badge.elem { background: #2ecc71; }
+.rkt-badge.mid { background: #f39c12; }
+.rkt-badge.high { background: #e74c3c; }
+.rkt-subject { font-weight: 700; color: #555; }
+.rkt-cnt-badge { display: inline-block; padding: 2px 8px; border-radius: 12px; background: #e9ecef; color: #555; font-size: 11px; font-weight: 700; border: 1px solid #ddd; }
+.rkt-cnt-badge.has-cnt { background: #fff0f6; color: #d6336c; border-color: #fcc2d7; }
+.rkt-item-unit { font-size: 13px; font-weight: 700; color: #111; margin-bottom: 3px; }
+.rkt-item-unit .rkt-sep { color: #ddd; margin: 0 5px; }
+.rkt-item-std { font-size: 12px; color: #555; line-height: 1.4; }
+.rkt-item-std .rkt-code { color: #5d5fef; font-weight: 700; margin-right: 5px; font-family: monospace; }
+.rkt-item-add { flex-shrink: 0; width: 26px; height: 26px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 14px; transition: all 0.15s; }
+.rkt-item-add.can { background: #dbeafe; color: #2563eb; cursor: pointer; }
+.rkt-item-add.can:hover { background: #bfdbfe; }
+.rkt-item-add.done { background: #dcfce7; color: #16a34a; }
+
+.rkt-divider { display: flex; align-items: center; gap: 10px; margin: 14px 0 10px; }
+.rkt-divider-line { flex: 1; height: 1px; background: #e5e7eb; }
+.rkt-divider-text { font-size: 11px; color: #9ca3af; font-weight: 600; white-space: nowrap; }
+
+/* ===== ENTRY SELECTION SCREEN ===== */
+.entry-screen { max-width: 900px; margin: 0 auto; padding-top: 10px; }
+.entry-title { font-size: 22px; font-weight: 700; margin-bottom: 4px; }
+.entry-sub { font-size: 13px; color: #6b7280; margin-bottom: 24px; }
+.entry-cards { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
+.entry-card { background: white; border: 2px solid #e5e7eb; border-radius: 16px; padding: 28px 24px; cursor: pointer; transition: all 0.2s; text-align: center; position: relative; }
+.entry-card:hover { border-color: #93c5fd; box-shadow: 0 4px 12px rgba(59,130,246,0.12); transform: translateY(-2px); }
+.entry-card.selected { border-color: #2563eb; background: #eff6ff; box-shadow: 0 4px 12px rgba(59,130,246,0.15); }
+.entry-card-icon { width: 56px; height: 56px; border-radius: 14px; display: flex; align-items: center; justify-content: center; font-size: 28px; margin: 0 auto 14px; }
+.entry-card-icon.storage { background: #fef3c7; }
+.entry-card-icon.public { background: #dcfce7; }
+.entry-card-icon.direct { background: #dbeafe; }
+.entry-card-name { font-size: 15px; font-weight: 700; color: #111827; margin-bottom: 6px; }
+.entry-card-desc { font-size: 12px; color: #6b7280; line-height: 1.5; }
+.entry-card-badge { position: absolute; top: 12px; right: 12px; font-size: 10px; font-weight: 600; padding: 2px 8px; border-radius: 10px; }
+.entry-card-badge.detail { background: #dbeafe; color: #1d4ed8; }
+.entry-card-items { margin-top: 14px; text-align: left; }
+.entry-card-items li { font-size: 11px; color: #6b7280; margin-bottom: 4px; list-style: none; padding-left: 14px; position: relative; }
+.entry-card-items li::before { content: "•"; position: absolute; left: 0; color: #9ca3af; }
+
+/* TOAST */
+.toast { position: fixed; top: 24px; left: 50%; transform: translateX(-50%) translateY(-100px); background: #1f2937; color: white; padding: 14px 24px; border-radius: 10px; font-size: 13px; z-index: 999; box-shadow: 0 8px 24px rgba(0,0,0,0.2); display: flex; align-items: center; gap: 10px; max-width: 600px; transition: transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1); }
+.toast.show { transform: translateX(-50%) translateY(0); }
+.toast-ico { font-size: 20px; flex-shrink: 0; }
+.toast-body { flex: 1; }
+.toast-title { font-weight: 700; margin-bottom: 2px; }
+.toast-desc { font-size: 12px; color: #d1d5db; }
+
+/* NEW CARD HIGHLIGHT */
+@keyframes newCardGlow { 0%{box-shadow:0 0 0 3px #86efac;} 100%{box-shadow:none;} }
+.new-card-anim { animation: newCardGlow 3s ease-out; }
+.new-marker { position: absolute; top: 10px; right: 10px; z-index: 2; background: #ef4444; color: white; font-size: 9px; font-weight: 700; padding: 2px 8px; border-radius: 8px; }
+</style>
+</head>
+<body>
+
+<!-- TOAST -->
+<div class="toast" id="toast">
+  <span class="toast-ico">✅</span>
+  <div class="toast-body">
+    <div class="toast-title" id="toastTitle"></div>
+    <div class="toast-desc" id="toastDesc"></div>
+  </div>
+</div>
+
+<!-- GNB -->
+<div class="gnb">
+  <div style="display:flex;align-items:center;gap:32px;">
+    <div class="gnb-logo">
+      <div class="gnb-logo-icon">다</div>
+      <div class="gnb-logo-text">다<span>채움</span> 채움콘텐츠</div>
+    </div>
+    <div class="gnb-menu">
+      <a href="#" class="active" onclick="showScreen(0);return false;">나의 보관함</a>
+      <a href="#">추천콘텐츠</a>
+      <a href="#" onclick="showScreen(1);return false;">공개콘텐츠</a>
+      <a href="#">성취기준별 콘텐츠 찾기</a>
+    </div>
+  </div>
+  <div style="display:flex;align-items:center;gap:16px;">
+    <div class="gnb-search">
+      <input type="text" placeholder="저작자명, 콘텐츠 키워드로 검색하세요.">
+      <span style="color:#9ca3af;">🔍</span>
+    </div>
+    <button class="gnb-search-btn">조건검색</button>
+    <div class="gnb-right">
+      <span>🔔 알림</span>
+      <span>⊞ 바로가기</span>
+      <div class="gnb-user">
+        <div class="gnb-avatar">문</div>
+        <span style="font-weight:600;color:#333;">문동국</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- PROTO NAV -->
+<div class="proto-nav">
+  <div class="proto-tab active" onclick="showScreen(0)">📂 나의 보관함<span class="new-badge">NEW</span></div>
+  <div class="proto-tab" onclick="showScreen(1)">🌐 공개콘텐츠<span class="new-badge">NEW</span></div>
+  <div class="proto-tab" onclick="showScreen(2)">📊 개선 비교표<span class="new-badge">NEW</span></div>
+  <div class="proto-tab" onclick="showScreen(3)">✏️ 평가지 정식등록<span class="new-badge">NEW</span></div>
+</div>
+
+<div class="content">
+<!-- ====================== SCREEN 0: 나의 보관함 ====================== -->
+<div class="screen active" id="screen0">
+  <div style="display:flex;gap:8px;margin-bottom:20px;">
+    <button class="btn btn-outline btn-sm" style="font-weight:600;border-bottom:2px solid #e8416e;border-radius:4px;color:#e8416e;">내자료</button>
+    <button class="btn btn-outline btn-sm" style="border-radius:4px;">담은자료</button>
+  </div>
+  <div class="page-hdr">
+    <div class="page-title">내 자료</div>
+    <div class="page-actions">
+      <button class="btn btn-outline btn-sm" onclick="alert('휴지통으로 이동')">🗑 휴지통으로 이동</button>
+      <button class="btn btn-primary" onclick="showScreen(3)">＋ 새로 만들기</button>
+    </div>
+  </div>
+  <div class="type-tabs">
+    <div class="type-tab" onclick="setTypeTab(this)">영상</div>
+    <div class="type-tab" onclick="setTypeTab(this)">이미지</div>
+    <div class="type-tab" onclick="setTypeTab(this)">문서</div>
+    <div class="type-tab" onclick="setTypeTab(this)">문항</div>
+    <div class="type-tab active" onclick="setTypeTab(this)">평가지</div>
+    <div class="type-tab" onclick="setTypeTab(this)">활동지</div>
+    <div class="type-tab" onclick="setTypeTab(this)">수업꾸러미</div>
+    <div class="type-tab" onclick="setTypeTab(this)">수업레시피</div>
+  </div>
+  <div class="filter-bar">
+    <span style="font-size:13px;font-weight:500;">총 <strong>6</strong>개</span>
+    <div class="filter-right">
+      <select class="sort-sel"><option>최신등록순 ↕</option></select>
+      <select class="sort-sel"><option>12개씩 보기</option></select>
+      <div class="search-mini"><span class="search-mini-ico">🔍</span><input type="text" placeholder="제목, 키워드 설명으로 검색하세요"></div>
+      <div class="view-toggle"><button class="view-btn">☰</button><button class="view-btn active">⊞</button><button class="view-btn">≡</button></div>
+    </div>
+  </div>
+  <div class="filter-bar" style="margin-bottom:12px;">
+    <div class="filter-radio">
+      <label><input type="radio" name="vis" checked> 전체</label>
+      <label><input type="radio" name="vis"> 공개</label>
+      <label><input type="radio" name="vis"> 비공개</label>
+    </div>
+    <span class="imp">개선: 간편등록 필터 추가</span>
+    <label style="display:flex;align-items:center;gap:4px;font-size:13px;color:#c2410c;cursor:pointer;margin-left:12px;">
+      <input type="checkbox" style="accent-color:#c2410c;"> 간편등록만 보기
+    </label>
+  </div>
+  <div class="bulk-bar">
+    <label class="bulk-check-all"><input type="checkbox"> 전체 선택</label>
+    <button class="bulk-btn">선택 삭제</button>
+  </div>
+  <div class="card-grid" id="cardGrid">
+    <div class="card">
+      <div class="card-check">✓</div><div class="card-more">⋮</div>
+      <div class="card-thumb"><div class="card-thumb-icon">📋</div></div>
+      <div class="card-actions"><div class="card-action-btn">♡</div><div class="card-action-btn">📋</div><div class="card-action-btn">↗</div></div>
+      <div class="card-body">
+        <div class="card-title"><span class="card-type-ico">📋</span> 2월 분수의 나눗셈 단원평가</div>
+        <div class="card-meta"><span>👤 문동국</span> <span class="card-meta-sep">·</span> <span>👁 0</span> <span class="card-meta-sep">·</span> <span>📅 2026.02.10</span></div>
+        <div class="card-desc">5학년 수학 · 분수의 나눗셈 · 8문항</div>
+        <div class="card-labels"><span class="card-label-simple">📌 간편등록</span><span class="badge badge-gray">비공개</span></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-check">✓</div><div class="card-more">⋮</div>
+      <div class="card-thumb"><div class="card-thumb-icon">📋</div></div>
+      <div class="card-actions"><div class="card-action-btn">♡</div><div class="card-action-btn">📋</div><div class="card-action-btn">↗</div></div>
+      <div class="card-body">
+        <div class="card-title"><span class="card-type-ico">📋</span> 1월 분수의 나눗셈 형성평가</div>
+        <div class="card-meta"><span>👤 문동국</span> <span class="card-meta-sep">·</span> <span>👁 0</span> <span class="card-meta-sep">·</span> <span>📅 2026.01.15</span></div>
+        <div class="card-desc">5학년 수학 · 가능성 표현 · 10문항</div>
+        <div class="card-labels"><span class="card-label-simple">📌 간편등록</span><span class="badge badge-gray">비공개</span></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-check">✓</div><div class="card-more">⋮</div>
+      <div class="card-thumb"><div class="card-thumb-icon">📋</div></div>
+      <div class="card-actions"><div class="card-action-btn">♡</div><div class="card-action-btn">📋</div><div class="card-action-btn">↗</div></div>
+      <div class="card-body">
+        <div class="card-title"><span class="card-type-ico">📋</span> 분수의 나눗셈</div>
+        <div class="card-meta"><span>👤 문동국</span> <span class="card-meta-sep">·</span> <span>👁 3</span> <span class="card-meta-sep">·</span> <span>📅 2026.01.05</span></div>
+        <div class="card-desc">분수의 나눗셈</div>
+        <div class="card-labels"><span class="badge badge-green">공개</span></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-check">✓</div><div class="card-more">⋮</div>
+      <div class="card-thumb"><div class="card-thumb-icon">📋</div></div>
+      <div class="card-actions"><div class="card-action-btn">♡</div><div class="card-action-btn">📋</div><div class="card-action-btn">↗</div></div>
+      <div class="card-body">
+        <div class="card-title"><span class="card-type-ico">📋</span> 테스트 평가지</div>
+        <div class="card-meta"><span>👤 문동국</span> <span class="card-meta-sep">·</span> <span>👁 0</span> <span class="card-meta-sep">·</span> <span>📅 2026.01.03</span></div>
+        <div class="card-labels"><span class="badge badge-gray">비공개</span></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-check">✓</div><div class="card-more">⋮</div>
+      <div class="card-thumb"><div class="card-thumb-icon">📋</div></div>
+      <div class="card-actions"><div class="card-action-btn">♡</div><div class="card-action-btn">📋</div><div class="card-action-btn">↗</div></div>
+      <div class="card-body">
+        <div class="card-title"><span class="card-type-ico">📋</span> 4학년 막대그래프 퀴즈</div>
+        <div class="card-meta"><span>👤 문동국</span> <span class="card-meta-sep">·</span> <span>👁 0</span> <span class="card-meta-sep">·</span> <span>📅 2025.12.20</span></div>
+        <div class="card-desc">4학년 수학 · 자료와 가능성 · 5문항</div>
+        <div class="card-labels"><span class="card-label-simple">📌 간편등록</span><span class="badge badge-gray">비공개</span></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-check">✓</div><div class="card-more">⋮</div>
+      <div class="card-thumb"><div class="card-thumb-icon">📋</div></div>
+      <div class="card-actions"><div class="card-action-btn">♡</div><div class="card-action-btn">📋</div><div class="card-action-btn">↗</div></div>
+      <div class="card-body">
+        <div class="card-title"><span class="card-type-ico">📋</span> 6학년 비례식 종합평가</div>
+        <div class="card-meta"><span>👤 문동국</span> <span class="card-meta-sep">·</span> <span>👁 2</span> <span class="card-meta-sep">·</span> <span>📅 2025.11.15</span></div>
+        <div class="card-labels"><span class="card-label-rejected">● 반려</span></div>
+      </div>
+    </div>
+  </div>
+  <div class="pagination"><button class="page-btn active">1</button></div>
+</div>
+<!-- END SCREEN 0 -->
+
+<!-- ====================== SCREEN 1: 공개콘텐츠 ====================== -->
+<div class="screen" id="screen1">
+  <div class="page-hdr">
+    <div class="page-title">공개 콘텐츠</div>
+    <div class="page-actions"><button class="btn btn-primary" onclick="showScreen(3)">＋ 새로 만들기</button></div>
+  </div>
+  <div class="type-tabs">
+    <div class="type-tab" onclick="setTypeTab(this)">영상</div><div class="type-tab" onclick="setTypeTab(this)">이미지</div>
+    <div class="type-tab" onclick="setTypeTab(this)">문서</div><div class="type-tab" onclick="setTypeTab(this)">문항</div>
+    <div class="type-tab active" onclick="setTypeTab(this)">평가지</div><div class="type-tab" onclick="setTypeTab(this)">활동지</div>
+    <div class="type-tab" onclick="setTypeTab(this)">수업꾸러미</div><div class="type-tab" onclick="setTypeTab(this)">수업레시피</div>
+  </div>
+  <div class="filter-bar">
+    <span style="font-size:13px;font-weight:500;">총 <strong>12,386</strong>개</span>
+    <div class="filter-right">
+      <select class="sort-sel"><option>최신등록순 ↕</option></select>
+      <select class="sort-sel"><option>12개씩 보기</option></select>
+      <div class="search-mini"><span class="search-mini-ico">🔍</span><input type="text" placeholder="검색어를 입력하세요"></div>
+      <div class="view-toggle"><button class="view-btn">☰</button><button class="view-btn active">⊞</button><button class="view-btn">≡</button></div>
+    </div>
+  </div>
+  <div style="background:white;border:1px solid #e5e7eb;border-radius:10px;padding:14px 18px;margin-bottom:16px;display:flex;flex-wrap:wrap;gap:8px;">
+    <span style="font-size:12px;padding:4px 12px;border:1px solid #e5e7eb;border-radius:16px;color:#4b5563;cursor:pointer;">다채움 예술은</span>
+    <span style="font-size:12px;padding:4px 12px;border:1px solid #e5e7eb;border-radius:16px;color:#4b5563;cursor:pointer;">인성교육</span>
+    <span style="font-size:12px;padding:4px 12px;border:1px solid #e5e7eb;border-radius:16px;color:#4b5563;cursor:pointer;">AI 에듀테크</span>
+    <span style="font-size:12px;padding:4px 12px;border:1px solid #e5e7eb;border-radius:16px;color:#4b5563;cursor:pointer;">보건교육</span>
+    <span style="font-size:12px;padding:4px 12px;border:1px solid #e5e7eb;border-radius:16px;color:#4b5563;cursor:pointer;">맞춤법</span>
+  </div>
+  <div class="card-grid">
+    <div class="card">
+      <div class="card-check">✓</div>
+      <div class="card-thumb" style="background:linear-gradient(135deg,#e0f2fe,#bae6fd);"><div class="card-thumb-icon">📋</div></div>
+      <div class="card-actions"><div class="card-action-btn">♡</div><div class="card-action-btn">📋</div><div class="card-action-btn">↗</div></div>
+      <div class="card-body">
+        <div class="card-title">초등 5학년 분수 나눗셈 단원평가 모음</div>
+        <div class="card-meta"><span>👤 김현정</span><span class="card-meta-sep">·</span><span>👁 187</span><span class="card-meta-sep">·</span><span>📅 2025.12.05</span></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-check">✓</div>
+      <div class="card-thumb" style="background:linear-gradient(135deg,#fef3c7,#fde68a);"><div class="card-thumb-icon">📋</div></div>
+      <div class="card-actions"><div class="card-action-btn">♡</div><div class="card-action-btn">📋</div><div class="card-action-btn">↗</div></div>
+      <div class="card-body">
+        <div class="card-title">중등 1학년 정수와 유리수 형성평가</div>
+        <div class="card-meta"><span>👤 소니샘</span><span class="card-meta-sep">·</span><span>👁 95</span><span class="card-meta-sep">·</span><span>📅 2025.11.20</span></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-check">✓</div>
+      <div class="card-thumb" style="background:linear-gradient(135deg,#dcfce7,#bbf7d0);"><div class="card-thumb-icon">📋</div></div>
+      <div class="card-actions"><div class="card-action-btn">♡</div><div class="card-action-btn">📋</div><div class="card-action-btn">↗</div></div>
+      <div class="card-body">
+        <div class="card-title">초등 6학년 비례식과 비례배분 종합</div>
+        <div class="card-meta"><span>👤 박준영</span><span class="card-meta-sep">·</span><span>👁 132</span><span class="card-meta-sep">·</span><span>📅 2025.10.18</span></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-check">✓</div>
+      <div class="card-thumb" style="background:linear-gradient(135deg,#f3e8ff,#e9d5ff);"><div class="card-thumb-icon">📋</div></div>
+      <div class="card-actions"><div class="card-action-btn">♡</div><div class="card-action-btn">📋</div><div class="card-action-btn">↗</div></div>
+      <div class="card-body">
+        <div class="card-title">중등 2학년 확률과 통계 진단평가</div>
+        <div class="card-meta"><span>👤 이교사</span><span class="card-meta-sep">·</span><span>👁 67</span><span class="card-meta-sep">·</span><span>📅 2025.09.30</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+<!-- END SCREEN 1 -->
+
+<!-- ====================== SCREEN 2: 개선 비교표 ====================== -->
+<div class="screen" id="screen2">
+  <div class="page-hdr"><div class="page-title">📊 등록 프로세스 개선 비교</div></div>
+
+  <div class="cmp-wrap">
+    <div class="cmp-hdr">📝 채움콘텐츠 → 평가지 등록 (정식등록)</div>
+    <table class="cmp-table">
+      <thead><tr><th style="width:40px;">#</th><th>현재 (AS-IS)</th><th style="width:40px;"></th><th>개선 (TO-BE)</th></tr></thead>
+      <tbody>
+        <tr><td>①</td><td>성취기준 검색 → 문항 조회·선별·삽입</td><td class="cmp-arrow">→</td><td class="cmp-new">동일</td></tr>
+        <tr><td>②</td><td>평가지 구성</td><td class="cmp-arrow">→</td><td class="cmp-new">동일</td></tr>
+        <tr><td>③</td><td class="cmp-old">등록: 메타데이터 입력 + 성취기준 재검색 → 저장</td><td class="cmp-arrow">→</td><td class="cmp-new">등록: 메타데이터 입력 + 성취기준 <strong>자동 세팅</strong> → 저장</td></tr>
+        <tr><td></td><td class="cmp-old">성취기준 2회 검색</td><td class="cmp-arrow">→</td><td class="cmp-new">성취기준 <strong>1회 검색</strong></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="cmp-wrap">
+    <div class="cmp-hdr">🚀 채움클래스 → 평가지 직접 만들기 (간편등록)</div>
+    <table class="cmp-table">
+      <thead><tr><th style="width:40px;">#</th><th>현재 (AS-IS)</th><th style="width:40px;"></th><th>개선 (TO-BE)</th></tr></thead>
+      <tbody>
+        <tr><td>①</td><td class="cmp-old">클래스에서 제목·내용 입력 → 채움콘텐츠로 이동</td><td class="cmp-arrow">→</td><td class="cmp-new">메타데이터 파라미터 전달</td></tr>
+        <tr><td>②</td><td>성취기준 검색, 문항 구성</td><td class="cmp-arrow">→</td><td class="cmp-new">동일</td></tr>
+        <tr><td>③</td><td class="cmp-old">메타데이터 재입력 + 성취기준 재검색 후 등록</td><td class="cmp-arrow">→</td><td class="cmp-new"><strong>자동 등록 (간편등록)</strong></td></tr>
+        <tr><td>④</td><td class="cmp-old">클래스 복귀 → 평가지 첨부</td><td class="cmp-arrow">→</td><td class="cmp-new">평가지 <strong>자동 첨부</strong></td></tr>
+        <tr><td></td><td class="cmp-old">제목 2회 입력, 성취기준 2회 검색</td><td class="cmp-arrow">→</td><td class="cmp-new">제목·성취기준 모두 <strong>1회</strong></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="cmp-wrap">
+    <div class="cmp-hdr">⚙️ 간편등록 기본값 정책</div>
+    <table class="cmp-table">
+      <thead><tr><th>항목</th><th>기본값</th></tr></thead>
+      <tbody>
+        <tr><td>제목</td><td>클래스에서 입력한 제목 사용</td></tr>
+        <tr><td>공개옵션</td><td><strong>자동 비공개</strong></td></tr>
+        <tr><td>교육과정/테마</td><td>클래스 학교급·학년 자동 세팅, 과목·성취기준은 문항 선별 시 반영</td></tr>
+        <tr><td>저작권/다운로드/댓글</td><td>비허용</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+<!-- END SCREEN 2 -->
+
+<!-- ====================== SCREEN 3: 정식등록 ====================== -->
+<div class="screen" id="screen3">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin:20px 0 12px;">
+    <div>
+      <h1 style="font-size:22px;font-weight:700;">평가지 등록</h1>
+      <p style="font-size:13px;color:#6b7280;margin-top:2px;">채움콘텐츠에서 평가지를 직접 구성하고 등록합니다</p>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px;">
+      <div style="background:#eff6ff;padding:6px 14px;border-radius:8px;">
+        <span style="color:#2563eb;font-size:12px;font-weight:600;">개선:</span>
+        <span style="color:#1e40af;font-size:11px;">성취기준 1회 검색 · 등록 시 자동 세팅</span>
+      </div>
+      <button class="btn btn-outline btn-sm" onclick="showScreen(0)">← 나의 보관함</button>
+    </div>
+  </div>
+  <div id="stepBar" class="step-bar"></div>
+
+  <div id="step1" class="scard">
+    <div class="card-body">
+      <div class="sec-title"><span class="sec-num">1</span> 기본설정</div>
+
+      <div class="form-group">
+        <label class="form-label">평가지 제목 <span class="req">*</span></label>
+        <input type="text" id="sheetTitle" class="form-input" placeholder="예: 5학년 수학 가능성 단원평가">
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">
+          교육과정 <span class="req">*</span>
+          <span class="hint">이 설정이 성취기준 검색에 사용됩니다</span>
+        </label>
+        <div class="form-row">
+          <select id="schoolLevel" class="form-select">
+            <option value="초등학교">초등학교</option>
+            <option value="중학교">중학교</option>
+            <option value="고등학교">고등학교</option>
+          </select>
+          <select id="gradeSelect" class="form-select">
+            <option value="3학년">3학년</option>
+            <option value="4학년">4학년</option>
+            <option value="5학년" selected="">5학년</option>
+            <option value="6학년">6학년</option>
+          </select>
+          <select id="subjectSelect" class="form-select">
+            <option value="">과목 선택</option>
+            <option value="수학">수학</option>
+            <option value="국어">국어</option>
+            <option value="과학">과학</option>
+            <option value="사회">사회</option>
+            <option value="영어">영어</option>
+          </select>
+        </div>
+        <p class="form-hint">선택한 학년이 기본 펼침 상태로 표시되며, 다른 학년의 성취기준도 자유롭게 선택할 수 있습니다</p>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">구성 방식</label>
+        <div class="radio-group">
+          <label class="radio-label"><input type="radio" name="mode" value="direct" checked=""> 직접 구성</label>
+          <label class="radio-label"><input type="radio" name="mode" value="auto"> 자동 구성</label>
+        </div>
+      </div>
+
+      <div style="display: flex; justify-content: flex-end; margin-top: 28px;">
+        <button class="btn btn-primary" id="toStep2" onclick="goStep(2)">다음: 문항 구성 →</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== STEP 2: 문항 구성 ===== -->
+  <div id="step2" class="hidden" style="margin-top: 16px;">
+    <div class="scard">
+      <div class="card-body" style="padding: 14px 24px;">
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;">
+          <div class="sec-title" style="margin-bottom: 0;">
+            <span class="sec-num">2</span> 문항 구성
+            <span id="s2Meta" style="font-size: 13px; font-weight: 400; color: #6b7280; margin-left: 8px;"></span>
+          </div>
+          <span style="font-size: 13px; color: #6b7280;">추가 문항: <strong id="addCnt" style="color: #1d4ed8;">0</strong>개</span>
+        </div>
+
+        <!-- 검색 영역: 항상 펼침 -->
+        <div id="picker" style="border: 1px solid #e5e7eb; border-radius: 8px; background: #f9fafb; padding: 14px; margin-top: 10px;">
+          <div style="display: flex; gap: 10px; margin-bottom: 10px;">
+            <!-- 성취기준 검색 -->
+            <div style="flex: 1;">
+              <label style="display: block; font-size: 12px; font-weight: 600; color: #5d5fef; margin-bottom: 4px;">🚀 성취기준 검색</label>
+              <div class="rkt-search-wrap" style="margin-bottom: 0;">
+                <span class="rkt-search-ico">🔍</span>
+                <input type="text" id="rktInput" class="rkt-search-input" style="height: 40px; font-size: 14px;" placeholder="학년, 과목, 단원, 성취기준 코드..." autocomplete="off" oninput="rocketSearch(this.value)" onkeydown="handleRocketKey(event)">
+              </div>
+            </div>
+            <!-- 콘텐츠 키워드 -->
+            <div style="flex: 1;">
+              <label style="display: block; font-size: 12px; font-weight: 600; color: #374151; margin-bottom: 4px;">📝 콘텐츠 키워드 (제목, 저작자, 키워드)</label>
+              <input type="text" id="rktSubInput" class="rkt-search-input" style="height: 40px; font-size: 14px; border-color: #d1d5db; background: white;" placeholder="제목, 저작자명, 키워드..." autocomplete="off" oninput="combinedSearch()" onkeydown="handleRocketKey(event)">
+            </div>
+          </div>
+          <div class="rkt-search-hint" style="margin-bottom: 10px;">
+            성취기준만, 키워드만, 또는 둘 다 입력하여 교집합 검색 가능 &nbsp;|&nbsp; <kbd>↑</kbd><kbd>↓</kbd> 이동 <kbd>Enter</kbd> 선택
+          </div>
+
+          <!-- 검색 결과 -->
+          <div id="rktResults" class="rkt-results"></div>
+        </div>
+        <span id="pickerDone" style="display:none;"></span>
+
+        <div id="tagList" class="tag-list"></div>
+      </div>
+    </div>
+
+    <!-- SPLIT VIEW -->
+    <div id="splitView" class="split-view hidden">
+      <div class="split-left">
+        <div class="search-bar">
+          <div class="search-wrap">
+            <span class="search-ico">🔍</span>
+            <input type="text" id="searchIn" class="search-input" placeholder="문항 제목, ID, 출처 검색..." oninput="doFilter()">
+          </div>
+          <div class="filter-row">
+            <select id="fDiff" class="filter-sel" onchange="doFilter()">
+              <option value="전체">난이도: 전체</option>
+              <option>매우 쉬움</option><option>쉬움</option><option>보통</option><option>어려움</option><option>매우 어려움</option>
+            </select>
+            <select id="fType" class="filter-sel" onchange="doFilter()">
+              <option value="전체">유형: 전체</option><option>객관식</option><option>주관식</option>
+            </select>
+            <div class="filter-div"></div>
+            <span class="filter-lbl">정렬:</span>
+            <select id="fSort" class="filter-sel" onchange="doFilter()">
+              <option value="difficulty">난이도순</option><option value="type">유형순</option><option value="usage">사용횟수순</option><option value="date">최신등록순</option>
+            </select>
+            <span id="fCnt" class="filter-cnt">8개 문항</span>
+          </div>
+        </div>
+        <div id="qList" class="q-list"></div>
+      </div>
+
+      <div class="split-right">
+        <div class="preview" id="prevPanel" style="flex:1;">
+          <div class="preview-empty" id="prevEmpty">
+            <div class="preview-empty-ico">👁</div>
+            <p>왼쪽 목록에서 문항을 클릭하면</p>
+            <p>여기에 미리보기가 표시됩니다</p>
+          </div>
+          <div id="prevFull" class="hidden" style="display: none; flex-direction: column; height: 100%;">
+            <div class="prev-hdr">
+              <div class="prev-hdr-left">
+                <div class="prev-id" id="pId"></div>
+                <div class="prev-badges" id="pBadges"></div>
+              </div>
+              <button class="btn btn-primary btn-sm" id="pAddBtn" onclick="addPrevQ()">+ 평가지에 추가</button>
+            </div>
+            <div class="prev-body">
+              <div class="prev-card">
+                <h3 class="prev-title" id="pTitle"></h3>
+                <div class="prev-content" id="pContent"></div>
+              </div>
+              <div class="prev-meta">
+                <div class="prev-meta-item"><div class="lbl">출처</div><div class="val" id="pSrc"></div></div>
+                <div class="prev-meta-item"><div class="lbl">저작자</div><div class="val" id="pAuth"></div></div>
+                <div class="prev-meta-item"><div class="lbl">사용횟수</div><div class="val" id="pUse"></div></div>
+                <div class="prev-meta-item"><div class="lbl">등록일</div><div class="val" id="pDate"></div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 추가된 문항 목록 (split-view 바깥, 독립 섹션) -->
+    <div id="pickerAdded" class="added-wrap" style="display: none; margin-top: 12px;">
+      <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
+        <span style="font-size: 13px; font-weight: 700; color: #374151;">📋 추가된 문항 (<span id="pickerAddedCnt">0</span>)</span>
+        <span style="font-size: 11px; color: #9ca3af;">▲▼로 순서 변경</span>
+      </div>
+      <div id="pickerAddedItems" style="max-height: 180px; overflow-y: auto;"></div>
+    </div>
+
+    <div class="nav-btns">
+      <button class="btn btn-outline" onclick="goStep(1)">← 이전</button>
+      <button class="btn btn-primary" id="toStep3" onclick="goStep(3)">다음: 확인 →</button>
+    </div>
+  </div>
+
+  <!-- ===== STEP 3: 확인 ===== -->
+  <div id="step3" class="scard hidden">
+    <div class="card-body">
+      <div class="sec-title"><span class="sec-num">3</span> 확인 및 저장</div>
+      <div class="confirm-info" id="confirmArea"></div>
+
+      <div class="form-group">
+        <label class="form-label">문항 구성 요약</label>
+        <table class="sum-table" id="sumTable"></table>
+        <div class="sum-footer" id="sumFooter"></div>
+      </div>
+
+      <div class="nav-btns" style="margin-top: 28px;">
+        <button class="btn btn-outline" onclick="goStep(2)">← 이전</button>
+        <div class="nav-btns-right">
+          <button class="btn btn-outline">임시저장</button>
+          <button class="btn btn-primary" onclick="goStep(4)">다음: 등록 정보 입력 →</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== STEP 4: 게시물 등록 (자동 채움) ===== -->
+  <div id="step4" class="scard hidden">
+    <div class="card-body">
+      <div class="sec-title"><span class="sec-num">4</span> 등록 정보 입력 <span style="font-size:12px;color:#2563eb;font-weight:500;margin-left:8px;">성취기준 자동 세팅</span></div>
+
+      <!-- 자동 채움 안내 배너 -->
+      <div style="background: #ecfdf5; border: 1px solid #a7f3d0; border-radius: 10px; padding: 12px 16px; margin-bottom: 20px; display: flex; align-items: center; gap: 10px;">
+        <span style="font-size: 20px;">✨</span>
+        <div>
+          <div style="font-size: 13px; font-weight: 600; color: #065f46;">정식 등록: 성취기준이 자동 세팅되었습니다</div>
+          <div style="font-size: 11px; color: #047857; margin-top: 2px;">
+            <strong>개선:</strong> 기존에는 등록 시 성취기준을 다시 검색해야 했으나(2회 검색), 이제 문항 선별 시 선택한 성취기준이 자동으로 반영됩니다(1회 검색). 나머지 메타데이터만 보완하세요.
+          </div>
+        </div>
+      </div>
+
+      <!-- 제목 -->
+      <div class="form-group">
+        <label class="form-label">제목 <span class="req">*</span> <span class="hint">평가지 제목에서 자동 입력됨</span></label>
+        <input type="text" id="postTitle" class="form-input" placeholder="평가 게시물 제목">
+      </div>
+
+      <!-- 내용 -->
+      <div class="form-group">
+        <label class="form-label">내용 <span class="hint">성취기준 · 문항 정보에서 자동 생성됨</span></label>
+        <div style="border: 1px solid #d1d5db; border-radius: 8px; overflow: hidden;">
+          <div style="background: #f9fafb; border-bottom: 1px solid #e5e7eb; padding: 6px 12px; display: flex; gap: 8px;">
+            <button style="font-size: 12px; color: #6b7280; padding: 2px 6px; border: 1px solid #e5e7eb; border-radius: 4px; background: white;">B</button>
+            <button style="font-size: 12px; color: #6b7280; padding: 2px 6px; border: 1px solid #e5e7eb; border-radius: 4px; background: white;"><i>I</i></button>
+            <button style="font-size: 12px; color: #6b7280; padding: 2px 6px; border: 1px solid #e5e7eb; border-radius: 4px; background: white;"><u>U</u></button>
+            <span style="width: 1px; background: #e5e7eb;"></span>
+            <button style="font-size: 12px; color: #6b7280; padding: 2px 6px; border: 1px solid #e5e7eb; border-radius: 4px; background: white;">목록</button>
+            <button style="font-size: 12px; color: #6b7280; padding: 2px 6px; border: 1px solid #e5e7eb; border-radius: 4px; background: white;">표</button>
+          </div>
+          <textarea id="postContent" style="width: 100%; min-height: 100px; padding: 12px; border: none; font-size: 13px; color: #374151; line-height: 1.6; resize: vertical; outline: none; box-sizing: border-box;"></textarea>
+        </div>
+      </div>
+
+      <!-- 첨부된 평가지 -->
+      <div class="form-group">
+        <label class="form-label">평가지 <span style="color: #16a34a; font-size: 11px; font-weight: 500;">✓ 첨부 완료</span></label>
+        <div id="postAttach" style="border: 1px solid #d1d5db; border-radius: 8px; padding: 12px 16px; background: #f9fafb;"></div>
+      </div>
+
+      <!-- 제출 기간 -->
+      <div class="form-group">
+        <label class="form-label">제출 기간 <span class="req">*</span></label>
+        <div class="form-row">
+          <input type="date" id="postDateFrom" class="form-input" style="max-width: 200px;">
+          <span style="color: #9ca3af; font-size: 13px; line-height: 42px;">~</span>
+          <input type="date" id="postDateTo" class="form-input" style="max-width: 200px;">
+        </div>
+      </div>
+
+      <!-- 제출 대상 -->
+      <div class="form-group">
+        <label class="form-label">제출 대상</label>
+        <div class="radio-group">
+          <label class="radio-label"><input type="radio" name="postTarget" value="all" checked=""> 전체 학생</label>
+          <label class="radio-label"><input type="radio" name="postTarget" value="select"> 선택 학생</label>
+        </div>
+      </div>
+
+      <!-- 공개 설정 -->
+      <div class="form-group">
+        <label class="form-label">공개 설정</label>
+        <div class="radio-group">
+          <label class="radio-label"><input type="radio" name="postVisibility" value="class" checked=""> 클래스 내 공개</label>
+          <label class="radio-label"><input type="radio" name="postVisibility" value="school"> 학교 공개</label>
+          <label class="radio-label"><input type="radio" name="postVisibility" value="public"> 전체 공개 (채움콘텐츠)</label>
+        </div>
+      </div>
+
+      <div class="nav-btns" style="margin-top: 28px;">
+        <button class="btn btn-outline" onclick="goStep(3)">← 이전</button>
+        <div class="nav-btns-right">
+          <button class="btn btn-outline">임시저장</button>
+          <button class="btn btn-primary" onclick="goStep(5)">등록하기</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== STEP 5: 완료 ===== -->
+  <div id="step5" class="scard hidden">
+    <div class="done-card">
+      <div class="done-ico" style="background: #dbeafe;">✓</div>
+      <h2 class="done-title">평가지가 등록되었습니다!</h2>
+      <p class="done-sub">채움콘텐츠에 정식으로 등록되었습니다.<br><strong>개선:</strong> 성취기준이 문항 선별에서 자동 세팅되어 이중 검색이 제거되었습니다.</p>
+      <div class="done-summary" id="doneSummary"></div>
+      <div class="done-actions">
+        <button class="btn btn-outline" onclick="resetAndNew()">새 평가지 만들기</button>
+        <button class="btn btn-primary" onclick="goToStorage()">나의 보관함 확인 →</button>
+      </div>
+    </div>
+  </div>
+</div>
+<!-- END SCREEN 3 -->
+
+</div><!-- /content -->
+<script>
+// ================================================
+// NAVIGATION
+// ================================================
+function showScreen(idx) {
+  document.querySelectorAll('.screen').forEach(function(s){ s.classList.remove('active'); });
+  document.querySelectorAll('.proto-tab').forEach(function(t){ t.classList.remove('active'); });
+  document.getElementById('screen'+idx).classList.add('active');
+  document.querySelectorAll('.proto-tab')[idx].classList.add('active');
+  window.scrollTo(0,0);
+}
+function setTypeTab(el) {
+  el.parentElement.querySelectorAll('.type-tab').forEach(function(t){ t.classList.remove('active'); });
+  el.classList.add('active');
+}
+function showToast(title, desc) {
+  var t = document.getElementById('toast');
+  document.getElementById('toastTitle').textContent = title;
+  document.getElementById('toastDesc').textContent = desc;
+  t.classList.add('show');
+  setTimeout(function(){ t.classList.remove('show'); }, 5000);
+}
+
+// ================================================
+// DATA: 학년별 성취기준 (수학)
+// ================================================
+var DIFFS = ["매우 쉬움","쉬움","보통","어려움","매우 어려움"];
+var TYPES = ["객관식(단일선택)","객관식(다중선택)","주관식(단답형)","주관식(서술형)"];
+
+var ALL_STANDARDS = {
+  "3학년": [
+    { code: "4수01-01", area: "수와 연산", desc: "네 자리 이하의 수의 범위에서 덧셈과 뺄셈을 할 수 있다.", sub1: "덧셈과 뺄셈", sub2: "받아올림과 받아내림", school: "초등학교", subject: "수학", term: "1", unit: "1. 덧셈과 뺄셈", lesson: "받아올림이 있는 덧셈", qCount: 12 },
+    { code: "4수01-02", area: "수와 연산", desc: "곱셈구구를 이용하여 나눗셈의 몫을 구할 수 있다.", sub1: "나눗셈", sub2: "곱셈구구와 나눗셈의 관계", school: "초등학교", subject: "수학", term: "1", unit: "3. 나눗셈", lesson: "곱셈과 나눗셈의 관계", qCount: 9 },
+    { code: "4수03-01", area: "도형과 측정", desc: "1cm, 1mm의 관계를 이해하고 길이를 측정할 수 있다.", sub1: "길이 재기", sub2: "cm와 mm", school: "초등학교", subject: "수학", term: "1", unit: "5. 길이와 시간", lesson: "1cm와 1mm 알아보기", qCount: 7 },
+  ],
+  "4학년": [
+    { code: "4수01-05", area: "수와 연산", desc: "분모가 같은 분수의 덧셈과 뺄셈을 할 수 있다.", sub1: "분수의 덧셈과 뺄셈", sub2: "동분모 분수의 연산", school: "초등학교", subject: "수학", term: "2", unit: "1. 분수의 덧셈과 뺄셈", lesson: "분모가 같은 분수의 덧셈", qCount: 15 },
+    { code: "4수02-01", area: "변화와 관계", desc: "규칙을 찾아 수나 식으로 나타낼 수 있다.", sub1: "규칙 찾기", sub2: "수 배열의 규칙", school: "초등학교", subject: "수학", term: "1", unit: "6. 규칙 찾기", lesson: "수 배열에서 규칙 찾기", qCount: 8 },
+    { code: "4수03-03", area: "도형과 측정", desc: "각도의 단위를 알고 각도를 측정할 수 있다.", sub1: "각도", sub2: "각도기 사용", school: "초등학교", subject: "수학", term: "1", unit: "2. 각도", lesson: "각도 재기", qCount: 11 },
+    { code: "4수05-01", area: "자료와 가능성", desc: "자료를 수집하여 막대그래프로 나타낼 수 있다.", sub1: "막대그래프", sub2: "자료 정리와 막대그래프", school: "초등학교", subject: "수학", term: "2", unit: "5. 막대그래프", lesson: "막대그래프 그리기", qCount: 2 },
+  ],
+  "5학년": [
+    { code: "6수01-11", area: "수와 연산", desc: "분수의 나눗셈의 계산 원리를 탐구하고 그 계산을 할 수 있다.", sub1: "자연수의 혼합 계산", sub2: "혼합 계산 순서", school: "초등학교", subject: "수학", term: "1", unit: "1. 자연수의 혼합 계산", lesson: "덧셈과 뺄셈이 섞인 식", qCount: 14 },
+    { code: "6수01-12", area: "수와 연산", desc: "소수의 나눗셈의 계산 원리를 탐구하고 그 계산을 할 수 있다.", sub1: "소수의 나눗셈", sub2: "소수 나눗셈 원리", school: "초등학교", subject: "수학", term: "2", unit: "4. 소수의 나눗셈", lesson: "소수를 자연수로 나누기", qCount: 10 },
+    { code: "6수02-01", area: "변화와 관계", desc: "두 양의 크기를 비교하는 상황을 통해 비의 개념을 이해한다.", sub1: "비와 비율", sub2: "두 양의 크기 비교", school: "초등학교", subject: "수학", term: "2", unit: "5. 비와 비율", lesson: "두 양의 크기 비교하기", qCount: 6 },
+    { code: "6수05-01", area: "자료와 가능성", desc: "사건이 일어날 가능성을 말로 표현하고 비교할 수 있다.", sub1: "가능성", sub2: "사건이 일어날 가능성", sub3: "가능성 비교", school: "초등학교", subject: "수학", term: "2", unit: "6. 자료의 가능성", lesson: "일어날 가능성 표현하기", qCount: 7 },
+    { code: "6수05-02", area: "자료와 가능성", desc: "간단한 사건이 일어날 가능성을 수로 표현할 수 있다.", sub1: "가능성", sub2: "가능성의 수 표현", sub3: "확률 기초", school: "초등학교", subject: "수학", term: "2", unit: "6. 자료의 가능성", lesson: "가능성을 수로 나타내기", qCount: 6 },
+  ],
+  "6학년": [
+    { code: "6수01-15", area: "수와 연산", desc: "분수와 소수의 혼합 계산을 할 수 있다.", sub1: "혼합 계산", sub2: "분수와 소수", school: "초등학교", subject: "수학", term: "1", unit: "1. 분수와 소수의 혼합 계산", lesson: "분수와 소수가 섞인 식", qCount: 13 },
+    { code: "6수03-01", area: "도형과 측정", desc: "원의 넓이를 구하는 방법을 이해하고 구할 수 있다.", sub1: "원의 넓이", sub2: "원주율과 넓이", school: "초등학교", subject: "수학", term: "2", unit: "5. 원의 넓이", lesson: "원의 넓이 구하기", qCount: 9 },
+    { code: "6수04-01", area: "규칙성", desc: "비례식을 알고 그 성질을 이해하며 이를 활용할 수 있다.", sub1: "비례식", sub2: "비례식의 성질", school: "초등학교", subject: "수학", term: "2", unit: "3. 비례식과 비례배분", lesson: "비례식 알아보기", qCount: 11 },
+    { code: "6수05-03", area: "자료와 가능성", desc: "자료를 수집, 분류, 정리하여 목적에 맞는 그래프로 나타낼 수 있다.", sub1: "그래프", sub2: "원그래프, 띠그래프", school: "초등학교", subject: "수학", term: "2", unit: "4. 자료 정리", lesson: "원그래프와 띠그래프", qCount: 5 },
+  ]
+};
+
+// 디테일한 문항 데이터
+var DETAIL_Q = {
+  "6수05-01": [
+    { id: "6수05-01-Q001", title: "주사위를 던질 때 3의 배수가 나올 가능성을 말로 표현하시오.", difficulty: "쉬움", type: "주관식(단답형)", source: "교육부 검정", author: "김현정", usageCount: 187, createdAt: "2025-03-12",
+      content: "[문제]\n주사위를 한 번 던질 때, 3의 배수의 눈이 나올 가능성을 다음 보기 중에서 골라 말로 표현하시오.\n\n보기: 불가능하다 / ~아닐 것 같다 / 반반이다 / ~일 것 같다 / 확실하다\n\n[모범답안]\n\"~아닐 것 같다\"\n(풀이: 주사위 눈 1~6 중 3의 배수는 3, 6으로 2개 → 6개 중 2개 → 반보다 작다)" },
+    { id: "6수05-01-Q002", title: "다음 중 '확실하다'로 표현할 수 있는 사건을 고르시오.", difficulty: "매우 쉬움", type: "객관식(단일선택)", source: "충북교육청", author: "이미영", usageCount: 245, createdAt: "2025-04-05",
+      content: "[문제]\n다음 중 '확실하다'로 표현할 수 있는 사건을 고르시오.\n\n① 동전을 던지면 앞면이 나온다\n② 주사위를 던지면 7이 나온다\n③ 1~6 주사위를 던지면 6 이하의 수가 나온다\n④ 내일 비가 온다\n⑤ 가위바위보에서 내가 이긴다\n\n[정답] ③" },
+    { id: "6수05-01-Q003", title: "빨간 구슬 3개, 파란 구슬 7개에서 빨간 구슬을 뽑을 가능성을 비교하시오.", difficulty: "보통", type: "주관식(서술형)", source: "한국교육과정평가원", author: "박준영", usageCount: 132, createdAt: "2025-05-18",
+      content: "[문제]\n주머니에 빨간 구슬 3개, 파란 구슬 7개가 있습니다.\n(1) 빨간/파란 구슬이 나올 가능성을 비교하여 말로 표현하시오.\n(2) 이유를 설명하시오.\n\n[모범답안]\n(1) 파란 구슬이 나올 가능성이 더 높다\n(2) 전체 10개 중 파란 7개, 빨간 3개이므로" },
+    { id: "6수05-01-Q004", title: "일어날 가능성에 따라 사건을 분류하시오.", difficulty: "어려움", type: "주관식(서술형)", source: "한국교육과정평가원", author: "김선호", usageCount: 76, createdAt: "2025-07-15",
+      content: "[문제]\n(가) 12월에 눈이 온다\n(나) 동전을 던지면 앞면이 나온다\n(다) 해가 서쪽에서 뜬다\n(라) 주사위를 던지면 7 이하가 나온다\n(마) 빨간 공 1개, 파란 공 9개 중 빨간 공을 뽑는다\n\n분류: 불가능 / ~아닐 것 같다 / 반반 / ~일 것 같다 / 확실\n\n[모범답안]\n불가능: (다) / ~아닐 것 같다: (마) / 반반: (나) / ~일 것 같다: (가) / 확실: (라)" },
+    { id: "6수05-01-Q005", title: "회전판의 결과를 예측하고 가능성을 말로 표현하시오.", difficulty: "어려움", type: "주관식(서술형)", source: "충북교육청", author: "이도윤", usageCount: 61, createdAt: "2025-08-20",
+      content: "[문제]\n8칸 회전판: 빨강 5칸, 파랑 2칸, 노랑 1칸\n각 색에 멈출 가능성을 말로 표현하고 비교하시오.\n\n[모범답안]\n빨강: ~일 것 같다 / 파랑: ~아닐 것 같다 / 노랑: ~아닐 것 같다\n빨강 > 파랑 > 노랑" },
+    { id: "6수05-01-Q006", title: "다음 중 '불가능하다'로 표현할 수 있는 사건을 모두 고르시오.", difficulty: "쉬움", type: "객관식(다중선택)", source: "교육부 검정", author: "박지현", usageCount: 203, createdAt: "2025-02-28",
+      content: "[문제]\n① 주사위를 던져 0이 나온다\n② 동전을 던져 뒷면이 나온다\n③ 1~5 카드에서 6을 뽑는다\n④ 빨간 공만 있는 주머니에서 파란 공 꺼내기\n⑤ 가위바위보에서 비긴다\n\n[정답] ①③④" },
+    { id: "6수05-01-Q007", title: "실생활에서 가능성을 표현하는 상황을 만드시오.", difficulty: "매우 어려움", type: "주관식(서술형)", source: "한국교육과정평가원", author: "김민수", usageCount: 42, createdAt: "2025-09-10",
+      content: "[문제]\n각 가능성에 해당하는 실생활 상황을 1개씩 만드시오.\n(1) 확실하다 (2) ~일 것 같다 (3) 반반이다 (4) ~아닐 것 같다 (5) 불가능하다\n\n[모범답안 예시]\n(1) 1월 다음은 2월 (2) 여름 25도 이상 (3) 동전 앞면 (4) 로또 당첨 (5) 날개 없이 비행" },
+  ],
+  "6수05-02": [
+    { id: "6수05-02-Q001", title: "주사위를 던질 때 짝수가 나올 가능성을 수로 표현하시오.", difficulty: "쉬움", type: "주관식(단답형)", source: "교육부 검정", author: "이승현", usageCount: 178, createdAt: "2025-03-25",
+      content: "[문제]\n주사위를 던질 때 짝수 나올 가능성을 수로 표현하시오.\n\n[모범답안] 3/6 = 1/2\n(풀이: 짝수 2,4,6 → 3가지/6가지)" },
+    { id: "6수05-02-Q002", title: "빨간 공 2개, 파란 공 3개에서 빨간 공을 뽑을 가능성을 분수로 나타내시오.", difficulty: "보통", type: "주관식(단답형)", source: "충북교육청", author: "최정아", usageCount: 156, createdAt: "2025-04-18",
+      content: "[문제]\n빨간 공 2개, 파란 공 3개. 빨간 공 나올 가능성을 분수로?\n\n[모범답안] 2/5" },
+    { id: "6수05-02-Q003", title: "가능성을 수로 올바르게 표현한 것을 고르시오.", difficulty: "보통", type: "객관식(단일선택)", source: "한국교육과정평가원", author: "박현우", usageCount: 201, createdAt: "2025-05-30",
+      content: "[문제]\n카드 1~8에서 5 이상 뽑을 가능성?\n① 3/8 ② 4/8 ③ 5/8 ④ 4/5 ⑤ 3/5\n\n[정답] ② (5,6,7,8 → 4개/8개)" },
+    { id: "6수05-02-Q004", title: "확실한 사건과 불가능한 사건의 가능성을 수로 나타내시오.", difficulty: "쉬움", type: "주관식(서술형)", source: "교육부 검정", author: "김태희", usageCount: 134, createdAt: "2025-06-15",
+      content: "[문제]\n(1) 확실한 사건의 가능성을 수로?\n(2) 불가능한 사건은?\n(3) 이유?\n\n[모범답안] (1) 1 (2) 0 (3) 확실=분자=분모, 불가능=분자=0" },
+    { id: "6수05-02-Q005", title: "회전판에서 각 색에 멈출 가능성을 수로 나타내고 비교하시오.", difficulty: "어려움", type: "주관식(서술형)", source: "한국교육과정평가원", author: "이서진", usageCount: 88, createdAt: "2025-07-22",
+      content: "[문제]\n10칸 회전판: 빨 4, 파 3, 노 2, 초 1\n각 가능성을 분수로, 큰 순서대로.\n\n[모범답안] 빨 4/10=2/5 > 파 3/10 > 노 2/10=1/5 > 초 1/10" },
+    { id: "6수05-02-Q006", title: "주머니 속 공의 수를 가능성 조건에 맞게 구하시오.", difficulty: "매우 어려움", type: "주관식(서술형)", source: "충북교육청", author: "박서연", usageCount: 35, createdAt: "2025-08-05",
+      content: "[문제]\n조건: 전체 12개, 빨간 뽑을 가능성 1/3, 파란 가능성은 빨간의 2배\n\n[모범답안] 빨간 4개(4/12=1/3), 파란 8개(8/12=2/3)" },
+  ],
+  "4수05-01": [
+    { id: "4수05-01-Q001", title: "막대그래프를 보고 가장 많은 항목을 찾으시오.", difficulty: "쉬움", type: "객관식(단일선택)", source: "교육부 검정", author: "한지수", usageCount: 210, createdAt: "2025-02-15",
+      content: "[문제]\n좋아하는 과일 조사 막대그래프에서 가장 인기 있는 과일은?\n① 사과 ② 바나나 ③ 포도 ④ 딸기\n\n[정답] ④ 딸기 (막대가 가장 높음)" },
+    { id: "4수05-01-Q002", title: "주어진 자료를 막대그래프로 나타내시오.", difficulty: "보통", type: "주관식(서술형)", source: "충북교육청", author: "김유진", usageCount: 145, createdAt: "2025-03-20",
+      content: "[문제]\n우리 반 좋아하는 운동: 축구 8명, 농구 5명, 야구 3명, 수영 6명\n이 자료를 막대그래프로 나타내시오.\n\n[모범답안] (막대그래프 작성 - 세로축: 명수, 가로축: 운동 종류)" },
+  ]
+};
+
+// ================================================
+// STATE
+// ================================================
+var curStep = 1, selStds = [], allQ = [], addedQ = [], prevQId = null;
+
+// ================================================
+// STEP BAR (정식등록: 5단계)
+// ================================================
+function renderStepBar() {
+  var labels = ["기본설정", "문항 구성", "확인", "등록 정보 입력", "완료"];
+  var total = labels.length;
+  var h = "";
+  for (var i = 0; i < total; i++) {
+    var n = i + 1;
+    var cc = n < curStep ? "done" : n === curStep ? "active" : "pending";
+    h += '<div class="step-item"><div class="step-circle '+cc+'">'+(n<curStep?"✓":n)+'</div>';
+    h += '<span class="step-lbl '+(n===curStep?"active":"pending")+'">'+labels[i]+'</span>';
+    if (i < total - 1) h += '<div class="step-conn '+(n<curStep?"done":"pending")+'"></div>';
+    h += '</div>';
+  }
+  document.getElementById("stepBar").innerHTML = h;
+}
+
+// ================================================
+// NAVIGATION
+// ================================================
+function goStep(s) {
+  if (s === 2) {
+    var t = document.getElementById("sheetTitle").value.trim();
+    var sub = document.getElementById("subjectSelect").value;
+    if (!t || !sub) return;
+  }
+  if (s === 3 && addedQ.length === 0) return;
+
+  ["step1","step2","step3","step4","step5"].forEach(function(id) { document.getElementById(id).classList.add("hidden"); });
+  curStep = s;
+  renderStepBar();
+
+  if (s === 1) document.getElementById("step1").classList.remove("hidden");
+  else if (s === 2) {
+    document.getElementById("step2").classList.remove("hidden");
+    document.getElementById("s2Meta").textContent = document.getElementById("schoolLevel").value + " · " + document.getElementById("gradeSelect").value + " · " + document.getElementById("subjectSelect").value;
+    initPicker();
+  }
+  else if (s === 3) { document.getElementById("step3").classList.remove("hidden"); renderConfirm(); renderSumTable(); }
+  else if (s === 4) { document.getElementById("step4").classList.remove("hidden"); renderPostForm(); }
+  else if (s === 5) {
+    document.getElementById("step5").classList.remove("hidden");
+    renderDone();
+    addCardToStorage();
+  }
+}
+
+function checkValid() {
+  var t = document.getElementById("sheetTitle").value.trim();
+  var sub = document.getElementById("subjectSelect").value;
+  document.getElementById("toStep2").disabled = !(t && sub);
+}
+
+// ================================================
+// STANDARD PICKER (검색 기반)
+// ================================================
+function initPicker() {
+  renderTags();
+  genAllQ();
+  updatePickerAdded();
+  updatePickerDone();
+}
+
+function toggleStd(code, grade) {
+  var idx = selStds.findIndex(function(s) { return s.code === code; });
+  if (idx >= 0) {
+    selStds.splice(idx, 1);
+  } else {
+    var stds = ALL_STANDARDS[grade] || [];
+    var found = stds.find(function(s) { return s.code === code; });
+    if (found) selStds.push(Object.assign({}, found, { grade: grade }));
+  }
+  renderTags();
+  genAllQ();
+  updatePickerDone();
+}
+
+function updatePickerDone() {
+  var el = document.getElementById("pickerDone");
+  if (el) el.textContent = "선택 완료 (" + selStds.length + "개 성취기준, " + addedQ.length + "개 문항)";
+}
+
+function updatePickerAdded() {
+  var wrap = document.getElementById("pickerAdded");
+  var items = document.getElementById("pickerAddedItems");
+  var cnt = document.getElementById("pickerAddedCnt");
+  var addCntEl = document.getElementById("addCnt");
+  if (!wrap) return;
+  if (addedQ.length === 0) { wrap.style.display = "none"; if (addCntEl) addCntEl.textContent = "0"; return; }
+  wrap.style.display = "block";
+  cnt.textContent = addedQ.length;
+  if (addCntEl) addCntEl.textContent = addedQ.length;
+  var h = "";
+  addedQ.forEach(function(q, i) {
+    h += '<div class="added-row" style="padding:6px 10px;">';
+    h += '<span class="added-num">'+(i+1)+'</span>';
+    h += '<span class="added-id">'+q.id+'</span>'+dbHTML(q.difficulty);
+    h += '<span class="added-title">'+q.title+'</span>';
+    h += '<div class="added-actions">';
+    h += '<button onclick="mvQ('+i+',-1)"'+(i===0?' disabled style="opacity:.3"':'')+'>▲</button>';
+    h += '<button onclick="mvQ('+i+',1)"'+(i===addedQ.length-1?' disabled style="opacity:.3"':'')+'>▼</button>';
+    h += '<button class="rm" onclick="rmQ(\''+q.id+'\')">✕</button></div></div>';
+  });
+  items.innerHTML = h;
+}
+
+function renderTags() {
+  var el = document.getElementById("tagList");
+  if (selStds.length === 0) { el.innerHTML = ""; return; }
+  var h = "";
+  selStds.forEach(function(s) {
+    h += '<span class="tag"><span class="grade-label">'+(s.grade||"")+'</span>['+s.code+'] '+s.desc.substring(0,20)+'...';
+    h += '<button class="tag-rm" onclick="event.stopPropagation();rmStd(\''+s.code+'\')">×</button></span>';
+  });
+  h += '<button class="btn-danger-text" onclick="clearStds()">모두 삭제</button>';
+  el.innerHTML = h;
+}
+
+function rmStd(code) {
+  selStds = selStds.filter(function(s) { return s.code !== code; });
+  renderTags(); genAllQ();
+}
+function clearStds() { selStds = []; renderTags(); genAllQ(); }
+
+// ================================================
+// QUESTION GENERATION
+// ================================================
+function genAllQ() {
+  allQ = [];
+  selStds.forEach(function(st) {
+    var dq = DETAIL_Q[st.code];
+    if (dq) allQ = allQ.concat(dq);
+    else allQ = allQ.concat(mockQ(st.code));
+  });
+  var sv = document.getElementById("splitView");
+  selStds.length > 0 ? sv.classList.remove("hidden") : sv.classList.add("hidden");
+  doFilter();
+}
+
+var mockQCache = {};
+function mockQ(code) {
+  if (mockQCache[code]) return mockQCache[code];
+  var titles = ["다음 중 올바른 것을 고르시오.","빈칸에 알맞은 수를 구하시오.","풀이 과정을 쓰시오.","조건을 이용하여 답을 구하시오.","옳은 것을 모두 고르시오.","그림을 보고 풀어보시오."];
+  var srcs = ["교육부 검정","충북교육청","한국교육과정평가원","자체 제작"];
+  var auths = ["김선생","이교사","박연구원","교육부"];
+  var r = [], n = 8 + Math.floor(Math.random()*6);
+  for (var i = 0; i < n; i++) {
+    var tp = TYPES[Math.floor(Math.random()*4)];
+    r.push({
+      id: code+"-Q"+String(i+1).padStart(3,"0"), title: titles[i%titles.length],
+      difficulty: DIFFS[Math.floor(Math.random()*5)], type: tp,
+      source: srcs[Math.floor(Math.random()*4)], author: auths[Math.floor(Math.random()*4)],
+      usageCount: Math.floor(Math.random()*200),
+      createdAt: "2025-"+String(Math.floor(Math.random()*12)+1).padStart(2,"0")+"-"+String(Math.floor(Math.random()*28)+1).padStart(2,"0"),
+      content: "["+code+"] 문항 "+(i+1)+"번\n\n"+titles[i%titles.length]+"\n\n"+(tp.includes("객관식")?"① A ② B ③ C ④ D ⑤ E\n\n정답: ③":"서술형 답안 작성\n\n모범답안: (풀이 과정)")
+    });
+  }
+  mockQCache[code] = r;
+  return r;
+}
+
+// ================================================
+// FILTER / SORT
+// ================================================
+function doFilter() {
+  var kw = document.getElementById("searchIn").value.trim();
+  var df = document.getElementById("fDiff").value;
+  var tf = document.getElementById("fType").value;
+  var sb = document.getElementById("fSort").value;
+
+  var f = allQ.filter(function(q) {
+    if (df !== "전체" && q.difficulty !== df) return false;
+    if (tf !== "전체" && !q.type.includes(tf)) return false;
+    if (kw && q.title.indexOf(kw)===-1 && q.id.indexOf(kw)===-1 && q.source.indexOf(kw)===-1) return false;
+    return true;
+  });
+  f.sort(function(a,b) {
+    if (sb==="difficulty") return DIFFS.indexOf(a.difficulty)-DIFFS.indexOf(b.difficulty);
+    if (sb==="type") return a.type.localeCompare(b.type);
+    if (sb==="usage") return b.usageCount-a.usageCount;
+    if (sb==="date") return b.createdAt.localeCompare(a.createdAt);
+    return 0;
+  });
+  renderQList(f);
+  document.getElementById("fCnt").textContent = f.length+"개 문항";
+}
+
+// ================================================
+// RENDER Q LIST
+// ================================================
+function renderQList(qs) {
+  var h = "";
+  qs.forEach(function(q) {
+    var ia = addedQ.some(function(a){return a.id===q.id;});
+    var ac = prevQId===q.id;
+    h += '<div class="q-item '+(ac?"active ":"")+(ia?"added":"")+'" onclick="showPrev(\''+q.id+'\')">';
+    h += '<div class="q-item-body"><div class="q-item-meta">';
+    h += '<span class="q-item-id">'+q.id+'</span>';
+    if (ia) h += '<span class="badge badge-green">추가됨</span>';
+    h += '</div><div class="q-item-title">'+q.title+'</div>';
+    h += '<div class="q-item-badges">'+dbHTML(q.difficulty)+tbHTML(q.type)+'<span class="q-item-src">'+q.source+'</span></div></div>';
+    h += '<button class="q-add-btn '+(ia?"done":"can")+'" onclick="event.stopPropagation();'+(ia?"rmQ(\'"+q.id+"\')":"addQ(\'"+q.id+"\')")+'">'+(ia?"✓":"+")+'</button></div>';
+  });
+  document.getElementById("qList").innerHTML = h;
+}
+
+function dbHTML(d) { var m={"매우 쉬움":"blue","쉬움":"green","보통":"yellow","어려움":"orange","매우 어려움":"red"}; return '<span class="badge badge-'+(m[d]||"gray")+'">'+d+'</span>'; }
+function tbHTML(t) { return '<span class="badge badge-'+(t.includes("객관식")?"purple":"gray")+'">'+t+'</span>'; }
+
+// ================================================
+// PREVIEW
+// ================================================
+function showPrev(id) {
+  prevQId = id;
+  var q = allQ.find(function(x){return x.id===id;});
+  if (!q) return;
+  document.getElementById("prevEmpty").style.display = "none";
+  var pf = document.getElementById("prevFull"); pf.classList.remove("hidden"); pf.style.display = "flex";
+  document.getElementById("pId").textContent = q.id;
+  document.getElementById("pBadges").innerHTML = dbHTML(q.difficulty)+" "+tbHTML(q.type);
+  document.getElementById("pTitle").textContent = q.title;
+  document.getElementById("pContent").textContent = q.content;
+  document.getElementById("pSrc").textContent = q.source;
+  document.getElementById("pAuth").textContent = q.author;
+  document.getElementById("pUse").textContent = q.usageCount+"회";
+  document.getElementById("pDate").textContent = q.createdAt;
+
+  var ia = addedQ.some(function(a){return a.id===q.id;});
+  var btn = document.getElementById("pAddBtn");
+  btn.textContent = ia ? "✓ 추가됨 (클릭하여 제거)" : "+ 평가지에 추가";
+  btn.disabled = false;
+  btn.style.background = ia ? "#fee2e2" : "";
+  btn.style.color = ia ? "#dc2626" : "";
+  doFilter();
+}
+function addPrevQ() {
+  if (!prevQId) return;
+  var ia = addedQ.some(function(a){return a.id===prevQId;});
+  if (ia) { rmQ(prevQId); } else { addQ(prevQId); }
+}
+
+// ================================================
+// ADD / REMOVE / MOVE
+// ================================================
+function addQ(id) {
+  if (addedQ.some(function(a){return a.id===id;})) return;
+  var q = allQ.find(function(x){return x.id===id;});
+  if (q) { addedQ.push(q); updAdded(); doFilter(); if (prevQId===id) showPrev(id); }
+}
+function rmQ(id) {
+  addedQ = addedQ.filter(function(q){return q.id!==id;});
+  updAdded(); doFilter(); if (prevQId===id) showPrev(id);
+}
+function mvQ(i,d) {
+  var t = i+d;
+  if (t<0||t>=addedQ.length) return;
+  var tmp = addedQ[i]; addedQ[i]=addedQ[t]; addedQ[t]=tmp; updAdded();
+}
+
+function updAdded() {
+  document.getElementById("addCnt").textContent = addedQ.length;
+  document.getElementById("toStep3").disabled = addedQ.length === 0;
+  updatePickerAdded();
+  updatePickerDone();
+}
+
+// ================================================
+// STEP 3: CONFIRM
+// ================================================
+function renderConfirm() {
+  var title = document.getElementById("sheetTitle").value;
+  var sl = document.getElementById("schoolLevel").value;
+  var gr = document.getElementById("gradeSelect").value;
+  var sub = document.getElementById("subjectSelect").value;
+  var mode = document.querySelector('input[name="mode"]:checked').value;
+
+  var stTags = selStds.map(function(s) {
+    return '<span style="font-size:11px;background:white;padding:3px 8px;border-radius:4px;border:1px solid #e5e7eb;margin:2px 4px 2px 0;display:inline-block;"><span style="background:#dbeafe;padding:1px 5px;border-radius:8px;font-size:10px;font-weight:600;margin-right:4px;">'+(s.grade||"")+'</span>['+s.code+']</span>';
+  }).join("");
+
+  // 학년 통계
+  var gradeMap = {};
+  selStds.forEach(function(s) { gradeMap[s.grade||""] = (gradeMap[s.grade||""]||0) + 1; });
+  var gradeInfo = Object.keys(gradeMap).map(function(g){return g+"("+gradeMap[g]+"개)";}).join(", ");
+
+  var h = '<div class="confirm-hdr"><span class="confirm-title">평가지 구성 정보</span>';
+  h += '<span class="confirm-hint">앞 단계에서 설정한 정보입니다</span></div>';
+  h += '<div class="confirm-grid">';
+  h += '<div class="confirm-item"><div class="lbl">제목</div><div class="val">'+title+'</div></div>';
+  h += '<div class="confirm-item"><div class="lbl">교육과정</div><div class="val">'+sl+' · '+gr+' · '+sub+'</div></div>';
+  h += '<div class="confirm-item"><div class="lbl">구성 방식</div><div class="val">'+(mode==="direct"?"직접 구성":"자동 구성")+'</div></div>';
+  h += '<div class="confirm-item"><div class="lbl">문항 수</div><div class="val">'+addedQ.length+'개</div></div>';
+  h += '<div class="confirm-item full"><div class="lbl">성취기준 ('+selStds.length+'개 · '+gradeInfo+')</div><div style="margin-top:6px;">'+stTags+'</div></div>';
+  h += '</div>';
+  document.getElementById("confirmArea").innerHTML = h;
+}
+
+function renderSumTable() {
+  var pp = addedQ.length > 0 ? Math.round(100/addedQ.length) : 0;
+  var h = '<thead><tr><th>순서</th><th>문항 ID</th><th>제목</th><th>난이도</th><th>유형</th><th>배점</th></tr></thead><tbody>';
+  addedQ.forEach(function(q,i) {
+    h += '<tr><td>'+(i+1)+'</td><td style="font-family:monospace;font-size:11px;">'+q.id+'</td>';
+    h += '<td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+q.title+'</td>';
+    h += '<td>'+dbHTML(q.difficulty)+'</td><td>'+tbHTML(q.type)+'</td><td>'+pp+'점</td></tr>';
+  });
+  h += '</tbody>';
+  document.getElementById("sumTable").innerHTML = h;
+  document.getElementById("sumFooter").innerHTML = '합계: <span style="color:#1d4ed8;">'+addedQ.length+'문항</span> / <span style="color:#1d4ed8;">100점</span>';
+}
+
+// ================================================
+// STEP 4: 게시물 등록 (자동 채움)
+// ================================================
+function renderPostForm() {
+  var sheetTitle = document.getElementById("sheetTitle").value;
+  var sl = document.getElementById("schoolLevel").value;
+  var gr = document.getElementById("gradeSelect").value;
+  var sub = document.getElementById("subjectSelect").value;
+
+  // 제목 자동 채움
+  document.getElementById("postTitle").value = sheetTitle;
+
+  // 내용 자동 생성
+  var contentLines = [];
+  contentLines.push("■ 평가 정보");
+  contentLines.push("교육과정: " + sl + " " + gr + " " + sub);
+  contentLines.push("문항 수: " + addedQ.length + "개 / 총점: 100점");
+  contentLines.push("");
+  contentLines.push("■ 성취기준 (" + selStds.length + "개)");
+  selStds.forEach(function(s) {
+    contentLines.push("  [" + s.code + "] " + s.desc);
+  });
+  contentLines.push("");
+  contentLines.push("■ 난이도 구성");
+  var diffMap = {};
+  addedQ.forEach(function(q) { diffMap[q.difficulty] = (diffMap[q.difficulty]||0) + 1; });
+  Object.keys(diffMap).forEach(function(d) { contentLines.push("  " + d + ": " + diffMap[d] + "문항"); });
+  document.getElementById("postContent").value = contentLines.join("\n");
+
+  // 첨부 평가지 카드
+  var gradeMap = {};
+  selStds.forEach(function(s) { gradeMap[s.grade||""] = true; });
+  var grades = Object.keys(gradeMap).join(", ");
+  var ah = '';
+  ah += '<div style="display:flex; align-items:center; gap:12px;">';
+  ah += '<div style="width:40px; height:40px; background:#dbeafe; border-radius:8px; display:flex; align-items:center; justify-content:center; font-size:18px;">📋</div>';
+  ah += '<div style="flex:1;">';
+  ah += '<div style="font-size:13px; font-weight:600; color:#111827;">' + sheetTitle + '</div>';
+  ah += '<div style="font-size:11px; color:#6b7280; margin-top:2px;">' + sub + ' · ' + grades + ' · ' + addedQ.length + '문항 · ' + selStds.length + '개 성취기준</div>';
+  ah += '</div>';
+  ah += '<span class="badge badge-green">자동 첨부</span>';
+  ah += '</div>';
+  document.getElementById("postAttach").innerHTML = ah;
+
+  // 제출 기간 기본값 (오늘 ~ 2주 후)
+  var today = new Date();
+  var twoWeeks = new Date(today.getTime() + 14*24*60*60*1000);
+  document.getElementById("postDateFrom").value = formatDate(today);
+  document.getElementById("postDateTo").value = formatDate(twoWeeks);
+}
+
+function formatDate(d) {
+  var y = d.getFullYear();
+  var m = String(d.getMonth()+1).padStart(2,"0");
+  var day = String(d.getDate()).padStart(2,"0");
+  return y+"-"+m+"-"+day;
+}
+
+// ================================================
+// STEP 5: 완료
+// ================================================
+function renderDone() {
+  var title = document.getElementById("postTitle").value || document.getElementById("sheetTitle").value;
+  var sub = document.getElementById("subjectSelect").value;
+  var gradeMap = {};
+  selStds.forEach(function(s) { gradeMap[s.grade||""] = true; });
+  var grades = Object.keys(gradeMap).join(", ");
+  var dateFrom = document.getElementById("postDateFrom");
+  var dateTo = document.getElementById("postDateTo");
+
+  var h = '';
+  h += '<div class="done-row"><span class="lbl">제목</span><span class="val">'+title+'</span></div>';
+  h += '<div class="done-row"><span class="lbl">과목</span><span class="val">'+sub+'</span></div>';
+  h += '<div class="done-row"><span class="lbl">학년</span><span class="val">'+grades+'</span></div>';
+  h += '<div class="done-row"><span class="lbl">문항 수</span><span class="val">'+addedQ.length+'개</span></div>';
+  h += '<div class="done-row"><span class="lbl">성취기준</span><span class="val">'+selStds.length+'개 <span style="color:#16a34a;">(자동 세팅됨)</span></span></div>';
+  h += '<div class="done-row"><span class="lbl">총점</span><span class="val">100점</span></div>';
+  if (dateFrom && dateTo) {
+    h += '<div class="done-row"><span class="lbl">제출 기간</span><span class="val">'+(dateFrom.value||'-')+' ~ '+(dateTo.value||'-')+'</span></div>';
+  }
+  document.getElementById("doneSummary").innerHTML = h;
+}
+
+// ================================================
+// RESET
+// ================================================
+function resetAll() {
+  curStep = 1; selStds = []; allQ = []; addedQ = []; prevQId = null;
+  document.getElementById("sheetTitle").value = "";
+  document.getElementById("subjectSelect").value = "";
+  document.getElementById("searchIn").value = "";
+  document.getElementById("prevEmpty").style.display = "";
+  var pf = document.getElementById("prevFull"); pf.style.display = "none"; pf.classList.add("hidden");
+  renderTags(); updAdded(); goStep(1); checkValid();
+}
+
+// ================================================
+// COMBINED SEARCH (성취기준 + 콘텐츠 키워드 통합)
+// ================================================
+var rktSelIdx = -1;
+
+function getFlatStandards() {
+  var flat = [];
+  var grades = Object.keys(ALL_STANDARDS);
+  for (var g = 0; g < grades.length; g++) {
+    var grade = grades[g];
+    var stds = ALL_STANDARDS[grade];
+    for (var i = 0; i < stds.length; i++) {
+      flat.push(Object.assign({}, stds[i], { grade: grade }));
+    }
+  }
+  return flat;
+}
+
+// 성취기준 검색 → combinedSearch 호출
+function rocketSearch() { combinedSearch(); }
+
+// 통합 검색: 성취기준만 / 키워드만 / 교집합 모두 지원
+function combinedSearch() {
+  var box = document.getElementById("rktResults");
+  rktSelIdx = -1;
+  var stdQ = (document.getElementById("rktInput").value || "").trim();
+  var kwQ = (document.getElementById("rktSubInput").value || "").trim();
+
+  // 둘 다 비어있으면 결과 비움
+  if (!stdQ && !kwQ) { box.innerHTML = ""; return; }
+
+  // 1) 성취기준 필터링
+  var flat = getFlatStandards();
+  var matchedStds = flat; // 성취기준 입력 없으면 전체
+  if (stdQ) {
+    var stdTerms = stdQ.split(" ").filter(function(t) { return t; });
+    matchedStds = flat.filter(function(s) {
+      var fullText = [
+        s.school||"", s.subject||"", s.grade||"",
+        s.term ? s.term+"학기" : "", s.unit||"", s.lesson||"",
+        s.area||"", s.code||"", s.desc||"",
+        s.sub1||"", s.sub2||"", s.sub3||"",
+        s.grade ? s.grade.replace("학년","")+"학년" : ""
+      ].join(" ");
+      return stdTerms.every(function(t) { return fullText.toLowerCase().indexOf(t.toLowerCase()) !== -1; });
+    });
+  }
+
+  // 2) 키워드가 있으면 해당 성취기준의 문항까지 필터
+  if (kwQ) {
+    var kwTerms = kwQ.split(" ").filter(function(t) { return t; });
+    // 성취기준별로 매칭 문항 수 계산
+    var resultsWithQ = [];
+    matchedStds.forEach(function(s) {
+      var dq = DETAIL_Q[s.code] || mockQ(s.code);
+      var matched = dq.filter(function(q) {
+        var qText = [q.id, q.title, q.content||"", q.source||"", q.author||""].join(" ");
+        return kwTerms.every(function(t) { return qText.toLowerCase().indexOf(t.toLowerCase()) !== -1; });
+      });
+      if (matched.length > 0) {
+        resultsWithQ.push({ std: s, matchedCount: matched.length, totalCount: dq.length });
+      }
+    });
+    renderCombinedResults(resultsWithQ, true);
+  } else {
+    // 성취기준만 검색
+    var resultsOnly = matchedStds.slice(0, 30).map(function(s) {
+      return { std: s, matchedCount: 0, totalCount: s.qCount || 0 };
+    });
+    renderCombinedResults(resultsOnly, false);
+  }
+}
+
+function renderCombinedResults(results, hasKw) {
+  var box = document.getElementById("rktResults");
+  if (results.length === 0) {
+    box.innerHTML = '<div class="rkt-no-result">검색 결과가 없습니다. 다른 키워드를 시도해보세요.</div>';
+    return;
+  }
+
+  var h = "";
+  for (var r = 0; r < results.length; r++) {
+    var item = results[r];
+    var s = item.std;
+    var isSel = selStds.some(function(ss) { return ss.code === s.code; });
+    var badgeClass = (parseInt(s.grade)||0) > 6 ? "mid" : "elem";
+
+    h += '<div class="rkt-item" data-code="'+s.code+'" data-grade="'+s.grade+'" onclick="toggleStdFromRocket(\''+s.code+'\',\''+s.grade+'\')" style="cursor:pointer;">';
+    h += '<div style="display:flex; align-items:flex-start; gap:10px;">';
+    h += '<div style="flex:1; min-width:0;">';
+
+    // 1줄: 배지 + 과목
+    h += '<div class="rkt-item-top"><div>';
+    h += '<span class="rkt-badge '+badgeClass+'">'+(s.school||"초등학교")+' '+s.grade+'</span>';
+    h += '<span class="rkt-subject">'+(s.subject||"수학")+'</span>';
+    if (s.term) h += ' <span style="font-size:11px; color:#aaa;">'+s.term+'학기</span>';
+    h += '</div><div>';
+    if (hasKw) {
+      h += '<span class="rkt-cnt-badge has-cnt" title="키워드 매칭 문항">🎯 '+item.matchedCount+'건 매칭</span>';
+    } else if (s.qCount > 0) {
+      h += '<span class="rkt-cnt-badge has-cnt" title="전체 문항 수">📦 '+s.qCount+'건</span>';
+    }
+    h += '</div></div>';
+
+    // 2줄: 단원 | 차시
+    if (s.unit || s.lesson) {
+      h += '<div class="rkt-item-unit">'+(s.unit||"");
+      if (s.lesson) h += '<span class="rkt-sep">|</span>'+s.lesson;
+      h += '</div>';
+    }
+
+    // 3줄: 코드 + 성취기준
+    h += '<div class="rkt-item-std"><span class="rkt-code">['+s.code+']</span>'+s.desc+'</div>';
+    h += '</div>';
+
+    // 선택/해제 버튼
+    h += '<div class="rkt-item-add '+(isSel?"done":"can")+'" onclick="event.stopPropagation(); toggleStdFromRocket(\''+s.code+'\',\''+s.grade+'\')">';
+    h += isSel ? "✓" : "+";
+    h += '</div></div></div>';
+  }
+  box.innerHTML = h;
+}
+
+function handleRocketKey(e) {
+  var items = document.querySelectorAll("#rktResults .rkt-item");
+  if (!items.length) return;
+  if (e.key === "ArrowDown") {
+    e.preventDefault();
+    rktSelIdx = (rktSelIdx + 1) % items.length;
+    highlightRocket(items);
+  } else if (e.key === "ArrowUp") {
+    e.preventDefault();
+    rktSelIdx = (rktSelIdx - 1 + items.length) % items.length;
+    highlightRocket(items);
+  } else if (e.key === "Enter") {
+    e.preventDefault();
+    var idx = rktSelIdx > -1 ? rktSelIdx : 0;
+    if (items[idx]) {
+      var code = items[idx].getAttribute("data-code");
+      var grade = items[idx].getAttribute("data-grade");
+      toggleStdFromRocket(code, grade);
+    }
+  }
+}
+
+function highlightRocket(items) {
+  for (var i = 0; i < items.length; i++) {
+    if (i === rktSelIdx) {
+      items[i].classList.add("rkt-selected");
+      items[i].scrollIntoView({ block: "nearest" });
+    } else {
+      items[i].classList.remove("rkt-selected");
+    }
+  }
+}
+
+function toggleStdFromRocket(code, grade) {
+  toggleStd(code, grade);
+  // 검색 결과 재렌더링 (선택 상태 갱신)
+  combinedSearch();
+}
+
+// ================================================
+// STORAGE INTEGRATION
+// ================================================
+function addCardToStorage() {
+  var title = document.getElementById("postTitle").value || document.getElementById("sheetTitle").value;
+  var sub = document.getElementById("subjectSelect").value;
+  var gradeMap = {};
+  selStds.forEach(function(s){ gradeMap[s.grade||""] = true; });
+  var grades = Object.keys(gradeMap).join(", ");
+  var today = new Date();
+  var dateStr = today.getFullYear() + '.' + String(today.getMonth()+1).padStart(2,'0') + '.' + String(today.getDate()).padStart(2,'0');
+
+  var visRadios = document.querySelectorAll('input[name="postVisibility"]');
+  var vis = 'class';
+  visRadios.forEach(function(r){ if(r.checked) vis = r.value; });
+  var visLabel = vis === 'public' ? '<span class="badge badge-green">공개</span>' : '<span class="badge badge-gray">비공개</span>';
+
+  var card = document.createElement('div');
+  card.className = 'card new-card-anim';
+  card.innerHTML =
+    '<span class="new-marker">NEW</span>' +
+    '<div class="card-check">✓</div>' +
+    '<div class="card-thumb"><div class="card-thumb-icon">📋</div></div>' +
+    '<div class="card-actions"><div class="card-action-btn">♡</div><div class="card-action-btn">📋</div><div class="card-action-btn">↗</div></div>' +
+    '<div class="card-body">' +
+      '<div class="card-title"><span class="card-type-ico">📋</span> ' + title + '</div>' +
+      '<div class="card-meta"><span>👤 문동국</span> <span class="card-meta-sep">·</span> <span>👁 0</span> <span class="card-meta-sep">·</span> <span>📅 ' + dateStr + '</span></div>' +
+      '<div class="card-desc">' + grades + ' · ' + sub + ' · ' + addedQ.length + '문항 · 성취기준 ' + selStds.length + '개</div>' +
+      '<div class="card-labels">' + visLabel + '</div>' +
+    '</div>';
+
+  var grid = document.getElementById('cardGrid');
+  grid.insertBefore(card, grid.firstChild);
+}
+
+function goToStorage() {
+  var title = document.getElementById("postTitle").value || document.getElementById("sheetTitle").value;
+  showScreen(0);
+  showToast('✅ 평가지가 나의 보관함에 추가되었습니다', '"' + title + '" — ' + addedQ.length + '문항');
+  resetAll();
+}
+
+function resetAndNew() {
+  resetAll();
+  goStep(1);
+}
+
+// ================================================
+// INIT
+// ================================================
+document.addEventListener("DOMContentLoaded", function() {
+  renderStepBar();
+  document.getElementById("sheetTitle").addEventListener("input", checkValid);
+  document.getElementById("subjectSelect").addEventListener("change", checkValid);
+  checkValid();
+});
+</script>
+</body>
+</html>

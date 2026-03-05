@@ -1,0 +1,2729 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>채움클래스 - 갤러리 게시판</title>
+<link href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css" rel="stylesheet">
+<link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+<link rel="stylesheet" href="../../../common-nav.css">
+<style>
+/* ===== CSS Variables ===== */
+:root {
+    --primary: #2563EB;
+    --primary-hover: #1D4ED8;
+    --primary-light: #DBEAFE;
+    --success: #10B981;
+    --success-bg: #D1FAE5;
+    --success-text: #059669;
+    --warning: #F59E0B;
+    --warning-bg: #FEF3C7;
+    --warning-text: #D97706;
+    --danger: #EF4444;
+    --danger-bg: #FEE2E2;
+    --danger-text: #DC2626;
+    --like-active: #EF4444;
+    --notice-bg: #FFFBEB;
+    --gray-50: #F9FAFB;
+    --gray-100: #F3F4F6;
+    --gray-200: #E5E7EB;
+    --gray-300: #D1D5DB;
+    --gray-400: #9CA3AF;
+    --gray-500: #6B7280;
+    --gray-600: #4B5563;
+    --gray-700: #374151;
+    --gray-800: #1F2937;
+    --gray-900: #111827;
+    --white: #FFFFFF;
+    --radius: 12px;
+    --radius-sm: 8px;
+    --radius-xs: 6px;
+    --shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
+    --shadow-md: 0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -1px rgba(0,0,0,0.06);
+    --shadow-lg: 0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px -2px rgba(0,0,0,0.05);
+    --transition: 0.2s ease;
+}
+
+/* ===== Reset & Base ===== */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+    font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, sans-serif;
+    background: var(--gray-50);
+    color: var(--gray-800);
+    line-height: 1.6;
+}
+
+/* ===== Layout ===== */
+.main-container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 24px;
+}
+
+/* ===== Page Header ===== */
+.page-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+    gap: 12px;
+}
+.page-header-left {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+.page-title {
+    font-size: 22px;
+    font-weight: 700;
+    color: var(--gray-900);
+}
+.page-title i {
+    color: var(--primary);
+    margin-right: 6px;
+}
+.page-header-right {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+/* ===== Buttons ===== */
+.btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 16px;
+    border: 1px solid var(--gray-200);
+    border-radius: var(--radius-xs);
+    font-size: 13px;
+    font-weight: 500;
+    font-family: inherit;
+    cursor: pointer;
+    background: var(--white);
+    color: var(--gray-700);
+    transition: all var(--transition);
+    white-space: nowrap;
+}
+.btn:hover { background: var(--gray-50); border-color: var(--gray-300); }
+.btn-primary {
+    background: var(--primary);
+    color: var(--white);
+    border-color: var(--primary);
+}
+.btn-primary:hover { background: var(--primary-hover); border-color: var(--primary-hover); }
+.btn-danger { background: var(--danger); color: var(--white); border-color: var(--danger); }
+.btn-danger:hover { background: var(--danger-text); }
+.btn-success { background: var(--success); color: var(--white); border-color: var(--success); }
+.btn-success:hover { background: var(--success-text); }
+.btn-sm { padding: 5px 10px; font-size: 12px; }
+.btn-ghost { border: none; background: transparent; }
+.btn-ghost:hover { background: var(--gray-100); }
+.btn-icon {
+    width: 36px; height: 36px; padding: 0;
+    display: inline-flex; align-items: center; justify-content: center;
+    border-radius: var(--radius-xs);
+}
+.btn:disabled {
+    opacity: 0.5; cursor: not-allowed;
+}
+
+/* ===== View Toggle ===== */
+.view-toggle {
+    display: inline-flex;
+    border: 1px solid var(--gray-200);
+    border-radius: var(--radius-xs);
+    overflow: hidden;
+}
+.view-toggle-btn {
+    padding: 7px 12px;
+    border: none;
+    background: var(--white);
+    color: var(--gray-500);
+    font-size: 13px;
+    cursor: pointer;
+    transition: all var(--transition);
+    font-family: inherit;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+.view-toggle-btn + .view-toggle-btn { border-left: 1px solid var(--gray-200); }
+.view-toggle-btn.active {
+    background: var(--primary);
+    color: var(--white);
+}
+.view-toggle-btn:hover:not(.active) { background: var(--gray-50); }
+
+/* ===== Filter Bar ===== */
+.filter-bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+}
+.search-box {
+    flex: 1;
+    min-width: 200px;
+    position: relative;
+}
+.search-box input {
+    width: 100%;
+    padding: 9px 14px 9px 36px;
+    border: 1px solid var(--gray-200);
+    border-radius: var(--radius-xs);
+    font-size: 13px;
+    font-family: inherit;
+    outline: none;
+    transition: border-color var(--transition);
+}
+.search-box input:focus { border-color: var(--primary); }
+.search-box i {
+    position: absolute;
+    left: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--gray-400);
+    font-size: 13px;
+}
+.filter-select {
+    padding: 9px 12px;
+    border: 1px solid var(--gray-200);
+    border-radius: var(--radius-xs);
+    font-size: 13px;
+    font-family: inherit;
+    background: var(--white);
+    color: var(--gray-700);
+    outline: none;
+    cursor: pointer;
+}
+.filter-select:focus { border-color: var(--primary); }
+
+/* ===== Stats Bar ===== */
+.stats-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+    font-size: 13px;
+    color: var(--gray-500);
+}
+.stats-bar .total { font-weight: 600; color: var(--gray-700); }
+.pending-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 10px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 600;
+    background: var(--warning-bg);
+    color: var(--warning-text);
+    cursor: pointer;
+    transition: all var(--transition);
+}
+.pending-badge:hover { background: #FDE68A; }
+
+/* ===== List View (Table) ===== */
+.board-table {
+    width: 100%;
+    border-collapse: collapse;
+    background: var(--white);
+    border-radius: var(--radius);
+    overflow: hidden;
+    box-shadow: var(--shadow-sm);
+}
+.board-table thead th {
+    padding: 12px 14px;
+    background: var(--gray-50);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--gray-500);
+    text-align: left;
+    border-bottom: 1px solid var(--gray-200);
+    white-space: nowrap;
+}
+.board-table thead th.center { text-align: center; }
+.board-table tbody tr {
+    border-bottom: 1px solid var(--gray-100);
+    cursor: pointer;
+    transition: background var(--transition);
+}
+.board-table tbody tr:hover { background: var(--gray-50); }
+.board-table tbody tr:last-child { border-bottom: none; }
+.board-table tbody td {
+    padding: 13px 14px;
+    font-size: 13px;
+    color: var(--gray-700);
+    vertical-align: middle;
+}
+.board-table tbody td.center { text-align: center; }
+.board-table tbody td.num { color: var(--gray-400); font-size: 12px; }
+
+/* Notice row */
+.board-table tbody tr.notice-row { background: var(--notice-bg); }
+.board-table tbody tr.notice-row:hover { background: #FEF9C3; }
+
+/* Pending row */
+.board-table tbody tr.pending-row { opacity: 0.7; }
+
+.notice-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    background: #FEF3C7;
+    color: #B45309;
+    margin-right: 6px;
+}
+.post-title-cell {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-wrap: wrap;
+}
+.post-title-text {
+    font-weight: 500;
+    color: var(--gray-800);
+}
+.post-title-text:hover { color: var(--primary); }
+.post-icons {
+    display: inline-flex;
+    gap: 4px;
+    margin-left: 4px;
+}
+.post-icons i { font-size: 11px; color: var(--gray-400); }
+.post-icons .fa-paperclip { color: var(--gray-400); }
+.post-icons .fa-image { color: #60A5FA; }
+.comment-count {
+    font-size: 11px;
+    color: var(--primary);
+    font-weight: 600;
+    margin-left: 4px;
+}
+.author-role {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 13px;
+}
+.author-role .role-badge {
+    font-size: 10px;
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-weight: 600;
+}
+.role-badge.teacher { background: #DBEAFE; color: #1D4ED8; }
+.role-badge.student { background: #E0E7FF; color: #4338CA; }
+
+/* Status badges */
+.status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+}
+.status-badge.pending { background: var(--warning-bg); color: var(--warning-text); }
+.status-badge.approved { background: var(--success-bg); color: var(--success-text); }
+.status-badge.rejected { background: var(--danger-bg); color: var(--danger-text); }
+
+/* ===== Gallery View (Cards) ===== */
+.gallery-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+}
+.gallery-card {
+    background: var(--white);
+    border-radius: var(--radius);
+    overflow: hidden;
+    box-shadow: var(--shadow-sm);
+    cursor: pointer;
+    transition: all var(--transition);
+    border: 1px solid var(--gray-100);
+}
+.gallery-card:hover {
+    box-shadow: var(--shadow-md);
+    transform: translateY(-2px);
+}
+.gallery-card.notice-card {
+    border: 2px solid #F59E0B;
+}
+.gallery-card-thumb {
+    height: 160px;
+    background: linear-gradient(135deg, var(--gray-100), var(--gray-200));
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--gray-400);
+    font-size: 40px;
+    position: relative;
+    overflow: hidden;
+}
+.gallery-card-thumb.has-image {
+    background: linear-gradient(135deg, #DBEAFE, #BFDBFE);
+    color: #60A5FA;
+}
+.gallery-card-thumb .notice-ribbon {
+    position: absolute;
+    top: 10px;
+    left: -30px;
+    transform: rotate(-45deg);
+    background: #F59E0B;
+    color: white;
+    font-size: 10px;
+    font-weight: 700;
+    padding: 3px 35px;
+}
+.gallery-card-body {
+    padding: 14px 16px;
+}
+.gallery-card-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--gray-800);
+    margin-bottom: 8px;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+.gallery-card-meta {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 12px;
+    color: var(--gray-500);
+}
+.gallery-card-stats {
+    display: flex;
+    gap: 10px;
+    font-size: 11px;
+    color: var(--gray-400);
+    margin-top: 8px;
+}
+.gallery-card-stats span {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+}
+
+/* ===== Post Detail View ===== */
+.detail-view {
+    background: var(--white);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-sm);
+    padding: 0;
+    overflow: hidden;
+}
+.detail-header {
+    padding: 24px 28px;
+    border-bottom: 1px solid var(--gray-100);
+}
+.detail-back {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--gray-500);
+    font-size: 13px;
+    cursor: pointer;
+    margin-bottom: 16px;
+    transition: color var(--transition);
+    background: none;
+    border: none;
+    font-family: inherit;
+}
+.detail-back:hover { color: var(--primary); }
+.detail-title {
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--gray-900);
+    margin-bottom: 12px;
+}
+.detail-meta {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+}
+.detail-author {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.detail-avatar {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--white);
+}
+.detail-avatar.teacher-avatar { background: linear-gradient(135deg, #3B82F6, #2563EB); }
+.detail-avatar.student-avatar { background: linear-gradient(135deg, #8B5CF6, #6D28D9); }
+.detail-author-info {
+    display: flex;
+    flex-direction: column;
+}
+.detail-author-name {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--gray-800);
+}
+.detail-author-date {
+    font-size: 12px;
+    color: var(--gray-400);
+}
+.detail-stats {
+    display: flex;
+    gap: 14px;
+    font-size: 12px;
+    color: var(--gray-400);
+    margin-left: auto;
+}
+.detail-stats span {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+.detail-body {
+    padding: 28px;
+    font-size: 14px;
+    line-height: 1.8;
+    color: var(--gray-700);
+    min-height: 150px;
+    white-space: pre-wrap;
+}
+.detail-body .embedded-image {
+    max-width: 100%;
+    border-radius: var(--radius-sm);
+    margin: 16px 0;
+    background: var(--gray-100);
+    padding: 40px;
+    text-align: center;
+    color: var(--gray-400);
+    font-size: 13px;
+}
+.detail-attachments {
+    padding: 0 28px 20px;
+}
+.attachment-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.attachment-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    background: var(--gray-50);
+    border-radius: var(--radius-xs);
+    border: 1px solid var(--gray-100);
+    transition: background var(--transition);
+}
+.attachment-item:hover { background: var(--gray-100); }
+.attachment-icon {
+    width: 32px;
+    height: 32px;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+}
+.attachment-icon.doc { background: #DBEAFE; color: #2563EB; }
+.attachment-icon.pdf { background: #FEE2E2; color: #DC2626; }
+.attachment-icon.img { background: #D1FAE5; color: #059669; }
+.attachment-info { flex: 1; }
+.attachment-name {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--gray-700);
+}
+.attachment-size {
+    font-size: 11px;
+    color: var(--gray-400);
+}
+.attachment-download {
+    color: var(--primary);
+    font-size: 13px;
+    cursor: pointer;
+}
+
+/* Detail Actions */
+.detail-actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 28px;
+    border-top: 1px solid var(--gray-100);
+    flex-wrap: wrap;
+    gap: 10px;
+}
+.detail-actions-left {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+.detail-actions-right {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.like-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 16px;
+    border-radius: 20px;
+    border: 1px solid var(--gray-200);
+    background: var(--white);
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--gray-500);
+    cursor: pointer;
+    transition: all var(--transition);
+    font-family: inherit;
+}
+.like-btn:hover { border-color: var(--like-active); color: var(--like-active); }
+.like-btn.active {
+    border-color: var(--like-active);
+    color: var(--like-active);
+    background: #FEF2F2;
+}
+.like-btn i { font-size: 14px; }
+
+/* ===== Comments ===== */
+.comments-section {
+    padding: 24px 28px;
+    border-top: 1px solid var(--gray-100);
+}
+.comments-title {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--gray-800);
+    margin-bottom: 16px;
+}
+.comment-item {
+    display: flex;
+    gap: 12px;
+    padding: 14px 0;
+    border-bottom: 1px solid var(--gray-50);
+}
+.comment-item:last-child { border-bottom: none; }
+.comment-item.reply {
+    margin-left: 40px;
+    position: relative;
+}
+.comment-item.reply::before {
+    content: '';
+    position: absolute;
+    left: -20px;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: var(--gray-200);
+}
+.comment-avatar {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--white);
+    flex-shrink: 0;
+}
+.comment-content { flex: 1; }
+.comment-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 4px;
+}
+.comment-author {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--gray-800);
+}
+.comment-date {
+    font-size: 11px;
+    color: var(--gray-400);
+}
+.comment-text {
+    font-size: 13px;
+    color: var(--gray-700);
+    line-height: 1.6;
+}
+.comment-actions {
+    display: flex;
+    gap: 12px;
+    margin-top: 6px;
+}
+.comment-action-btn {
+    font-size: 11px;
+    color: var(--gray-400);
+    cursor: pointer;
+    background: none;
+    border: none;
+    font-family: inherit;
+    transition: color var(--transition);
+    display: flex;
+    align-items: center;
+    gap: 3px;
+}
+.comment-action-btn:hover { color: var(--primary); }
+
+/* Comment Input */
+.comment-input-area {
+    margin-top: 16px;
+    padding-top: 16px;
+    border-top: 1px solid var(--gray-100);
+}
+.comment-input-wrapper {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+}
+.comment-textarea {
+    flex: 1;
+    padding: 10px 14px;
+    border: 1px solid var(--gray-200);
+    border-radius: var(--radius-sm);
+    font-size: 13px;
+    font-family: inherit;
+    resize: vertical;
+    min-height: 44px;
+    max-height: 120px;
+    outline: none;
+    transition: border-color var(--transition);
+}
+.comment-textarea:focus { border-color: var(--primary); }
+.comment-input-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+.comment-image-btn {
+    width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--gray-200);
+    border-radius: var(--radius-xs);
+    background: var(--white);
+    color: var(--gray-400);
+    cursor: pointer;
+    font-size: 14px;
+    transition: all var(--transition);
+}
+.comment-image-btn:hover { border-color: var(--primary); color: var(--primary); }
+.comment-dropzone {
+    border: 2px dashed var(--gray-300);
+    border-radius: var(--radius-sm);
+    padding: 12px;
+    text-align: center;
+    font-size: 12px;
+    color: var(--gray-400);
+    margin-top: 8px;
+    display: none;
+    transition: all var(--transition);
+}
+.comment-dropzone.active {
+    display: block;
+}
+.comment-dropzone.drag-over {
+    border-color: var(--primary);
+    background: var(--primary-light);
+    color: var(--primary);
+}
+.comment-image-preview {
+    margin-top: 8px;
+    display: none;
+}
+.comment-image-preview.has-image { display: block; }
+.comment-image-preview .preview-box {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    background: var(--gray-50);
+    border-radius: var(--radius-xs);
+    font-size: 12px;
+    color: var(--gray-600);
+}
+.comment-image-preview .remove-preview {
+    cursor: pointer;
+    color: var(--gray-400);
+}
+.comment-image-preview .remove-preview:hover { color: var(--danger); }
+
+/* Reply input */
+.reply-input-area {
+    margin-top: 10px;
+    margin-left: 40px;
+    display: none;
+}
+.reply-input-area.visible { display: block; }
+
+/* ===== Write View ===== */
+.write-view {
+    background: var(--white);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-sm);
+    overflow: hidden;
+}
+.write-header {
+    padding: 20px 28px;
+    border-bottom: 1px solid var(--gray-100);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+.write-title {
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--gray-900);
+}
+.write-body {
+    padding: 24px 28px;
+}
+.form-group {
+    margin-bottom: 20px;
+}
+.form-label {
+    display: block;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--gray-700);
+    margin-bottom: 6px;
+}
+.form-input {
+    width: 100%;
+    padding: 10px 14px;
+    border: 1px solid var(--gray-200);
+    border-radius: var(--radius-xs);
+    font-size: 14px;
+    font-family: inherit;
+    outline: none;
+    transition: border-color var(--transition);
+}
+.form-input:focus { border-color: var(--primary); }
+.form-radio-group {
+    display: flex;
+    gap: 20px;
+    align-items: center;
+}
+.form-radio {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    cursor: pointer;
+}
+.form-radio input[type="radio"] {
+    accent-color: var(--primary);
+}
+
+/* Simple WYSIWYG Editor */
+.editor-container {
+    border: 1px solid var(--gray-200);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+}
+.editor-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    padding: 8px 10px;
+    background: var(--gray-50);
+    border-bottom: 1px solid var(--gray-200);
+    flex-wrap: wrap;
+}
+.editor-toolbar .separator {
+    width: 1px;
+    height: 20px;
+    background: var(--gray-200);
+    margin: 0 4px;
+}
+.toolbar-btn {
+    width: 32px;
+    height: 32px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    background: transparent;
+    border-radius: 4px;
+    color: var(--gray-600);
+    font-size: 13px;
+    cursor: pointer;
+    transition: all var(--transition);
+}
+.toolbar-btn:hover { background: var(--gray-200); color: var(--gray-800); }
+.toolbar-btn.active { background: var(--primary-light); color: var(--primary); }
+.editor-area {
+    min-height: 250px;
+    padding: 16px;
+    font-size: 14px;
+    line-height: 1.8;
+    outline: none;
+    color: var(--gray-800);
+}
+.editor-area:empty::before {
+    content: '내용을 입력해주세요...';
+    color: var(--gray-400);
+}
+.editor-area:focus { background: #FAFBFF; }
+
+/* Attachment Upload */
+.attachment-upload {
+    border: 2px dashed var(--gray-200);
+    border-radius: var(--radius-sm);
+    padding: 20px;
+    text-align: center;
+    cursor: pointer;
+    transition: all var(--transition);
+}
+.attachment-upload:hover {
+    border-color: var(--primary);
+    background: var(--primary-light);
+}
+.attachment-upload i {
+    font-size: 28px;
+    color: var(--gray-300);
+    margin-bottom: 8px;
+}
+.attachment-upload p {
+    font-size: 13px;
+    color: var(--gray-500);
+}
+.attachment-upload .hint {
+    font-size: 11px;
+    color: var(--gray-400);
+    margin-top: 4px;
+}
+.uploaded-files { margin-top: 12px; }
+.uploaded-file {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    background: var(--gray-50);
+    border-radius: var(--radius-xs);
+    margin-bottom: 6px;
+    font-size: 13px;
+}
+.uploaded-file .file-info { flex: 1; color: var(--gray-700); }
+.uploaded-file .file-size { font-size: 11px; color: var(--gray-400); }
+.uploaded-file .file-remove {
+    cursor: pointer;
+    color: var(--gray-400);
+    font-size: 12px;
+}
+.uploaded-file .file-remove:hover { color: var(--danger); }
+
+/* Write Footer */
+.write-footer {
+    padding: 16px 28px;
+    border-top: 1px solid var(--gray-100);
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+}
+
+/* ===== Settings Modal ===== */
+.modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.5);
+    z-index: 1000;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+}
+.modal-overlay.active { display: flex; }
+.modal {
+    background: var(--white);
+    border-radius: var(--radius);
+    width: 100%;
+    max-width: 520px;
+    max-height: 90vh;
+    overflow-y: auto;
+    box-shadow: var(--shadow-lg);
+}
+.modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 20px 24px;
+    border-bottom: 1px solid var(--gray-100);
+}
+.modal-title {
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--gray-900);
+}
+.modal-close {
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    background: transparent;
+    border-radius: 50%;
+    color: var(--gray-400);
+    font-size: 16px;
+    cursor: pointer;
+    transition: all var(--transition);
+}
+.modal-close:hover { background: var(--gray-100); color: var(--gray-700); }
+.modal-body { padding: 24px; }
+.modal-footer {
+    padding: 16px 24px;
+    border-top: 1px solid var(--gray-100);
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+}
+
+/* Settings Sections */
+.settings-section {
+    margin-bottom: 24px;
+}
+.settings-section:last-child { margin-bottom: 0; }
+.settings-section-title {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--gray-800);
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--gray-100);
+}
+.settings-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 0;
+}
+.settings-label {
+    font-size: 13px;
+    color: var(--gray-700);
+}
+.settings-desc {
+    font-size: 11px;
+    color: var(--gray-400);
+    margin-top: 2px;
+}
+/* Toggle Switch */
+.toggle-switch {
+    width: 44px;
+    height: 24px;
+    background: var(--gray-300);
+    border-radius: 12px;
+    position: relative;
+    cursor: pointer;
+    transition: background var(--transition);
+}
+.toggle-switch.active { background: var(--primary); }
+.toggle-switch::after {
+    content: '';
+    width: 20px;
+    height: 20px;
+    background: white;
+    border-radius: 50%;
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    transition: transform var(--transition);
+    box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+}
+.toggle-switch.active::after { transform: translateX(20px); }
+
+/* ===== Approval Management View ===== */
+.approval-view {
+    background: var(--white);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-sm);
+    overflow: hidden;
+}
+.approval-header {
+    padding: 20px 24px;
+    border-bottom: 1px solid var(--gray-100);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+.approval-title {
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--gray-900);
+}
+.approval-actions {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+.approval-list { padding: 0; }
+.approval-item {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 16px 24px;
+    border-bottom: 1px solid var(--gray-100);
+    transition: background var(--transition);
+}
+.approval-item:hover { background: var(--gray-50); }
+.approval-item:last-child { border-bottom: none; }
+.approval-checkbox {
+    accent-color: var(--primary);
+    width: 16px;
+    height: 16px;
+    cursor: pointer;
+}
+.approval-info { flex: 1; }
+.approval-post-title {
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--gray-800);
+    margin-bottom: 4px;
+}
+.approval-post-meta {
+    font-size: 12px;
+    color: var(--gray-400);
+}
+.approval-buttons {
+    display: flex;
+    gap: 6px;
+}
+
+/* ===== Pagination ===== */
+.pagination {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    margin-top: 24px;
+}
+.page-btn {
+    min-width: 36px;
+    height: 36px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--gray-200);
+    border-radius: var(--radius-xs);
+    background: var(--white);
+    color: var(--gray-600);
+    font-size: 13px;
+    font-family: inherit;
+    cursor: pointer;
+    transition: all var(--transition);
+}
+.page-btn:hover { border-color: var(--primary); color: var(--primary); }
+.page-btn.active {
+    background: var(--primary);
+    color: var(--white);
+    border-color: var(--primary);
+}
+
+/* ===== Toast ===== */
+.toast {
+    position: fixed;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%) translateY(80px);
+    padding: 12px 24px;
+    background: var(--gray-800);
+    color: var(--white);
+    border-radius: var(--radius-sm);
+    font-size: 13px;
+    font-weight: 500;
+    box-shadow: var(--shadow-lg);
+    z-index: 2000;
+    opacity: 0;
+    transition: all 0.3s ease;
+    white-space: nowrap;
+}
+.toast.show {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+}
+
+/* ===== Video Embed Modal ===== */
+.video-input-modal .modal { max-width: 440px; }
+.video-url-input {
+    width: 100%;
+    padding: 10px 14px;
+    border: 1px solid var(--gray-200);
+    border-radius: var(--radius-xs);
+    font-size: 13px;
+    font-family: inherit;
+    outline: none;
+}
+.video-url-input:focus { border-color: var(--primary); }
+
+/* ===== Responsive ===== */
+@media (max-width: 1024px) {
+    .gallery-grid { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 768px) {
+    .main-container { padding: 16px; }
+    .page-header { flex-direction: column; align-items: flex-start; }
+    .page-header-right { width: 100%; justify-content: space-between; }
+    .filter-bar { flex-direction: column; }
+    .search-box { min-width: 100%; }
+    .gallery-grid { grid-template-columns: 1fr; }
+    .board-table { font-size: 12px; }
+    .board-table thead th:nth-child(1),
+    .board-table tbody td:nth-child(1),
+    .board-table thead th:nth-child(5),
+    .board-table tbody td:nth-child(5),
+    .board-table thead th:nth-child(6),
+    .board-table tbody td:nth-child(6) { display: none; }
+    .detail-header, .detail-body, .detail-actions, .comments-section, .detail-attachments {
+        padding-left: 16px;
+        padding-right: 16px;
+    }
+    .detail-meta { flex-direction: column; align-items: flex-start; gap: 8px; }
+    .detail-stats { margin-left: 0; }
+    .detail-actions { flex-direction: column; align-items: flex-start; }
+    .write-body, .write-header, .write-footer { padding-left: 16px; padding-right: 16px; }
+    .comment-item.reply { margin-left: 24px; }
+    .reply-input-area { margin-left: 24px; }
+    .approval-item { flex-direction: column; align-items: flex-start; }
+    .approval-buttons { width: 100%; }
+    .stats-bar { flex-direction: column; align-items: flex-start; gap: 8px; }
+}
+
+/* ===== Utility ===== */
+.hidden { display: none !important; }
+.text-center { text-align: center; }
+.mt-8 { margin-top: 8px; }
+.mt-16 { margin-top: 16px; }
+.gap-8 { gap: 8px; }
+
+/* ===== Gallery Card Media ===== */
+.gallery-card-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.gallery-card-thumb.media-video, .gallery-card-thumb.media-youtube { position: relative; }
+.gallery-card-thumb .play-overlay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.25); transition: background var(--transition); }
+.gallery-card:hover .play-overlay { background: rgba(0,0,0,0.4); }
+.play-overlay .play-icon { width: 48px; height: 48px; border-radius: 50%; background: rgba(255,255,255,0.9); display: flex; align-items: center; justify-content: center; font-size: 18px; color: var(--gray-800); box-shadow: 0 2px 8px rgba(0,0,0,0.2); transition: transform var(--transition); }
+.gallery-card:hover .play-icon { transform: scale(1.1); }
+.gallery-card-thumb.media-audio { background: linear-gradient(135deg, #E0E7FF, #C7D2FE); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; }
+.audio-wave { display: flex; align-items: flex-end; gap: 3px; height: 40px; }
+.audio-wave .bar { width: 4px; border-radius: 2px; background: var(--primary); opacity: 0.6; animation: audioWave 1.2s ease-in-out infinite; }
+.audio-wave .bar:nth-child(1) { height: 12px; animation-delay: 0s; }
+.audio-wave .bar:nth-child(2) { height: 24px; animation-delay: 0.15s; }
+.audio-wave .bar:nth-child(3) { height: 36px; animation-delay: 0.3s; }
+.audio-wave .bar:nth-child(4) { height: 20px; animation-delay: 0.45s; }
+.audio-wave .bar:nth-child(5) { height: 30px; animation-delay: 0.6s; }
+.audio-wave .bar:nth-child(6) { height: 16px; animation-delay: 0.75s; }
+.audio-wave .bar:nth-child(7) { height: 28px; animation-delay: 0.9s; }
+@keyframes audioWave { 0%, 100% { transform: scaleY(0.5); } 50% { transform: scaleY(1); } }
+.gallery-card-thumb .media-type-badge { position: absolute; top: 10px; right: 10px; padding: 3px 8px; border-radius: 4px; font-size: 10px; font-weight: 600; color: var(--white); background: rgba(0,0,0,0.5); backdrop-filter: blur(4px); display: flex; align-items: center; gap: 4px; }
+
+/* ===== Detail Media Container ===== */
+.detail-media-container { margin: 0 28px 20px; border-radius: var(--radius-sm); overflow: hidden; background: var(--gray-100); }
+.detail-media-container img { width: 100%; display: block; border-radius: var(--radius-sm); cursor: pointer; }
+.detail-media-container video { width: 100%; display: block; border-radius: var(--radius-sm); background: #000; }
+.detail-media-container .youtube-wrapper { position: relative; width: 100%; padding-bottom: 56.25%; height: 0; overflow: hidden; border-radius: var(--radius-sm); }
+.detail-media-container .youtube-wrapper iframe { position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: none; }
+.detail-audio-player { padding: 24px; background: linear-gradient(135deg, #E0E7FF, #DBEAFE); border-radius: var(--radius-sm); display: flex; flex-direction: column; align-items: center; gap: 16px; }
+.detail-audio-player .audio-icon { width: 64px; height: 64px; border-radius: 50%; background: var(--white); display: flex; align-items: center; justify-content: center; font-size: 24px; color: var(--primary); box-shadow: var(--shadow-md); }
+.detail-audio-player audio { width: 100%; max-width: 500px; }
+
+/* ===== Write Media Upload ===== */
+.media-upload-section { margin-bottom: 20px; }
+.media-upload-area { border: 2px dashed var(--gray-200); border-radius: var(--radius-sm); padding: 24px 20px; text-align: center; cursor: pointer; transition: all var(--transition); background: var(--gray-50); }
+.media-upload-area:hover, .media-upload-area.drag-over { border-color: var(--primary); background: var(--primary-light); }
+.media-upload-area i.upload-icon { font-size: 32px; color: var(--gray-300); margin-bottom: 8px; display: block; }
+.media-upload-area .upload-text { font-size: 13px; color: var(--gray-500); margin-bottom: 4px; }
+.media-upload-area .upload-hint { font-size: 11px; color: var(--gray-400); }
+.media-upload-area .upload-types { display: flex; justify-content: center; gap: 16px; margin-top: 12px; font-size: 11px; color: var(--gray-400); }
+.media-upload-area .upload-types span { display: flex; align-items: center; gap: 4px; }
+.media-preview { margin-top: 12px; display: none; }
+.media-preview.show { display: block; }
+.media-preview-card { display: flex; align-items: center; gap: 12px; padding: 12px 14px; background: var(--white); border: 1px solid var(--gray-200); border-radius: var(--radius-sm); }
+.media-preview-thumb { width: 64px; height: 64px; border-radius: var(--radius-xs); overflow: hidden; flex-shrink: 0; background: var(--gray-100); display: flex; align-items: center; justify-content: center; }
+.media-preview-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.media-preview-thumb i { font-size: 24px; color: var(--gray-400); }
+.media-preview-info { flex: 1; min-width: 0; }
+.media-preview-name { font-size: 13px; font-weight: 600; color: var(--gray-700); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.media-preview-meta { font-size: 11px; color: var(--gray-400); margin-top: 2px; }
+.media-preview-remove { cursor: pointer; color: var(--gray-400); font-size: 14px; padding: 4px; border: none; background: none; }
+.media-preview-remove:hover { color: var(--danger); }
+.url-input-row { display: flex; gap: 8px; margin-top: 12px; }
+.url-input-row input { flex: 1; padding: 9px 14px; border: 1px solid var(--gray-200); border-radius: var(--radius-xs); font-size: 13px; font-family: inherit; outline: none; }
+.url-input-row input:focus { border-color: var(--primary); }
+.youtube-write-preview { margin-top: 12px; display: none; border-radius: var(--radius-sm); overflow: hidden; border: 1px solid var(--gray-200); }
+.youtube-write-preview.show { display: block; }
+.youtube-write-preview .yt-preview-inner { position: relative; width: 100%; padding-bottom: 56.25%; background: #000; }
+.youtube-write-preview .yt-preview-inner iframe { position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: none; }
+.youtube-write-preview .yt-preview-info { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; background: var(--gray-50); font-size: 12px; color: var(--gray-500); }
+
+@media (max-width: 768px) {
+    .detail-media-container { margin: 0 16px 16px; }
+    .media-upload-area .upload-types { flex-wrap: wrap; gap: 8px; }
+}
+</style>
+</head>
+<body data-gnb-page="classBoard" data-gnb-base="../../../">
+
+<!-- ===== Main Container ===== -->
+<div class="main-container">
+
+    <!-- ================== LIST VIEW ================== -->
+    <div id="listView">
+        <!-- Page Header -->
+        <div class="page-header">
+            <div class="page-header-left">
+                <h1 class="page-title"><i class="fa-solid fa-images"></i> 갤러리 게시판</h1>
+            </div>
+            <div class="page-header-right">
+                <div class="view-toggle">
+                    <button class="view-toggle-btn" onclick="setViewMode('list')" id="listToggle">
+                        <i class="fa-solid fa-list"></i> 일반형
+                    </button>
+                    <button class="view-toggle-btn active" onclick="setViewMode('gallery')" id="galleryToggle">
+                        <i class="fa-solid fa-grip"></i> 갤러리형
+                    </button>
+                </div>
+                <button class="btn btn-icon" onclick="openSettings()" title="게시판 설정">
+                    <i class="fa-solid fa-gear"></i>
+                </button>
+                <button class="btn btn-primary" onclick="showView('writeView')">
+                    <i class="fa-solid fa-pen"></i> 글쓰기
+                </button>
+            </div>
+        </div>
+
+        <!-- Filter Bar -->
+        <div class="filter-bar">
+            <div class="search-box">
+                <i class="fa-solid fa-magnifying-glass"></i>
+                <input type="text" id="searchInput" placeholder="제목, 내용, 작성자 검색" oninput="filterPosts()">
+            </div>
+            <select class="filter-select" id="typeFilter" onchange="filterPosts()">
+                <option value="all">전체</option>
+                <option value="notice">공지</option>
+                <option value="normal">일반</option>
+                <option value="mine">내 글</option>
+            </select>
+            <select class="filter-select" id="sortFilter" onchange="filterPosts()">
+                <option value="latest">최신순</option>
+                <option value="views">조회순</option>
+                <option value="likes">좋아요순</option>
+                <option value="comments">댓글순</option>
+            </select>
+        </div>
+
+        <!-- Stats Bar -->
+        <div class="stats-bar">
+            <span>전체 <span class="total" id="totalCount">0</span>건</span>
+            <span class="pending-badge" onclick="showView('approvalView')" id="pendingBadge" style="display:none;">
+                <i class="fa-solid fa-clock"></i> 승인대기 <strong id="pendingCount">0</strong>건
+            </span>
+        </div>
+
+        <!-- List Mode Table -->
+        <div id="listMode" class="hidden">
+            <table class="board-table">
+                <thead>
+                    <tr>
+                        <th class="center" style="width:50px;">번호</th>
+                        <th>제목</th>
+                        <th style="width:120px;">작성자</th>
+                        <th class="center" style="width:90px;">날짜</th>
+                        <th class="center" style="width:60px;">조회</th>
+                        <th class="center" style="width:60px;"><i class="fa-solid fa-heart" style="color:#EF4444;"></i></th>
+                        <th class="center" style="width:60px;"><i class="fa-solid fa-comment" style="color:#3B82F6;"></i></th>
+                    </tr>
+                </thead>
+                <tbody id="listTableBody">
+                    <!-- rendered by JS -->
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Gallery Mode Grid -->
+        <div id="galleryMode">
+            <div class="gallery-grid" id="galleryGrid">
+                <!-- rendered by JS -->
+            </div>
+        </div>
+
+        <!-- Pagination -->
+        <div class="pagination" id="pagination"></div>
+    </div>
+
+    <!-- ================== DETAIL VIEW ================== -->
+    <div id="detailView" class="hidden">
+        <div class="detail-view">
+            <div class="detail-header">
+                <button class="detail-back" onclick="showView('listView')">
+                    <i class="fa-solid fa-arrow-left"></i> 목록으로
+                </button>
+                <div id="detailNoticeLabel"></div>
+                <h2 class="detail-title" id="detailTitle"></h2>
+                <div class="detail-meta">
+                    <div class="detail-author">
+                        <div class="detail-avatar" id="detailAvatar"></div>
+                        <div class="detail-author-info">
+                            <span class="detail-author-name" id="detailAuthor"></span>
+                            <span class="detail-author-date" id="detailDate"></span>
+                        </div>
+                    </div>
+                    <div class="detail-stats" id="detailStats"></div>
+                </div>
+            </div>
+            <div class="detail-media-container" id="detailMedia" style="display:none;"></div>
+            <div class="detail-body" id="detailBody"></div>
+            <div class="detail-attachments" id="detailAttachments"></div>
+            <div class="detail-actions">
+                <div class="detail-actions-left">
+                    <button class="like-btn" id="detailLikeBtn" onclick="toggleDetailLike()">
+                        <i class="fa-regular fa-heart"></i> <span id="detailLikeCount">0</span>
+                    </button>
+                </div>
+                <div class="detail-actions-right" id="detailEditBtns">
+                    <button class="btn btn-sm" onclick="editPost()"><i class="fa-solid fa-pen-to-square"></i> 수정</button>
+                    <button class="btn btn-sm btn-danger" onclick="deletePost()"><i class="fa-solid fa-trash"></i> 삭제</button>
+                </div>
+            </div>
+            <!-- Comments -->
+            <div class="comments-section">
+                <div class="comments-title" id="commentsTitle">댓글 0개</div>
+                <div id="commentsList"></div>
+                <div class="comment-input-area">
+                    <div class="comment-input-wrapper">
+                        <textarea class="comment-textarea" id="commentInput" placeholder="댓글을 입력하세요..." rows="1"></textarea>
+                        <div class="comment-input-actions">
+                            <button class="comment-image-btn" onclick="toggleCommentDropzone('main')" title="이미지 첨부">
+                                <i class="fa-solid fa-image"></i>
+                            </button>
+                            <button class="btn btn-primary btn-sm" onclick="addComment()">등록</button>
+                        </div>
+                    </div>
+                    <div class="comment-dropzone" id="commentDropzone-main"
+                        ondragover="handleDragOver(event, 'main')"
+                        ondragleave="handleDragLeave(event, 'main')"
+                        ondrop="handleDrop(event, 'main')">
+                        <i class="fa-solid fa-cloud-arrow-up"></i><br>
+                        이미지를 드래그하여 놓거나 클릭하세요
+                    </div>
+                    <div class="comment-image-preview" id="commentPreview-main">
+                        <div class="preview-box">
+                            <i class="fa-solid fa-image"></i>
+                            <span id="commentPreviewName-main">image.png</span>
+                            <span class="remove-preview" onclick="removeCommentImage('main')"><i class="fa-solid fa-xmark"></i></span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ================== WRITE VIEW ================== -->
+    <div id="writeView" class="hidden">
+        <div class="write-view">
+            <div class="write-header">
+                <h2 class="write-title" id="writeViewTitle"><i class="fa-solid fa-pen"></i> 게시글 작성</h2>
+                <button class="modal-close" onclick="showView('listView')"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="write-body">
+                <div class="form-group">
+                    <label class="form-label">제목</label>
+                    <input type="text" class="form-input" id="writeTitle" placeholder="제목을 입력하세요">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">유형</label>
+                    <div class="form-radio-group">
+                        <label class="form-radio">
+                            <input type="radio" name="postType" value="normal" checked> 일반
+                        </label>
+                        <label class="form-radio">
+                            <input type="radio" name="postType" value="notice"> 공지 <span style="font-size:11px;color:var(--gray-400);">(개설자만)</span>
+                        </label>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">내용</label>
+                    <div class="editor-container">
+                        <div class="editor-toolbar">
+                            <button class="toolbar-btn" onclick="execCmd('bold')" title="굵게"><i class="fa-solid fa-bold"></i></button>
+                            <button class="toolbar-btn" onclick="execCmd('italic')" title="기울임"><i class="fa-solid fa-italic"></i></button>
+                            <button class="toolbar-btn" onclick="execCmd('underline')" title="밑줄"><i class="fa-solid fa-underline"></i></button>
+                            <span class="separator"></span>
+                            <button class="toolbar-btn" onclick="execCmd('formatBlock','H2')" title="제목1"><b style="font-size:14px;">H1</b></button>
+                            <button class="toolbar-btn" onclick="execCmd('formatBlock','H3')" title="제목2"><b style="font-size:12px;">H2</b></button>
+                            <span class="separator"></span>
+                            <button class="toolbar-btn" onclick="execCmd('insertUnorderedList')" title="목록"><i class="fa-solid fa-list-ul"></i></button>
+                            <button class="toolbar-btn" onclick="execCmd('insertOrderedList')" title="번호목록"><i class="fa-solid fa-list-ol"></i></button>
+                            <span class="separator"></span>
+                            <button class="toolbar-btn" onclick="insertLink()" title="링크"><i class="fa-solid fa-link"></i></button>
+                            <button class="toolbar-btn" onclick="insertImage()" title="이미지"><i class="fa-solid fa-image"></i></button>
+                            <button class="toolbar-btn" onclick="openVideoModal()" title="동영상"><i class="fa-solid fa-video"></i></button>
+                            <button class="toolbar-btn" onclick="document.getElementById('fileAttachInput').click()" title="파일 첨부"><i class="fa-solid fa-paperclip"></i></button>
+                        </div>
+                        <div class="editor-area" id="editorArea" contenteditable="true"></div>
+                    </div>
+                </div>
+                <!-- 대표 미디어 업로드 -->
+                <div class="form-group media-upload-section">
+                    <label class="form-label"><i class="fa-solid fa-photo-film" style="color:var(--primary);margin-right:4px;"></i> 대표 미디어</label>
+                    <div class="media-upload-area" id="mediaUploadArea"
+                         onclick="document.getElementById('mediaFileInput').click()"
+                         ondragover="handleMediaDragOver(event)"
+                         ondragleave="handleMediaDragLeave(event)"
+                         ondrop="handleMediaDrop(event)">
+                        <i class="fa-solid fa-cloud-arrow-up upload-icon"></i>
+                        <div class="upload-text">이미지, 동영상, 오디오 파일을 드래그하거나 클릭하세요</div>
+                        <div class="upload-hint">갤러리 카드에 표시될 대표 미디어 (1개)</div>
+                        <div class="upload-types">
+                            <span><i class="fa-solid fa-image"></i> JPG, PNG, GIF</span>
+                            <span><i class="fa-solid fa-video"></i> MP4, WebM</span>
+                            <span><i class="fa-solid fa-headphones"></i> MP3, WAV</span>
+                        </div>
+                    </div>
+                    <input type="file" id="mediaFileInput" accept="image/*,video/*,audio/*" style="display:none;" onchange="handleMediaFileSelect(event)">
+                    <div class="media-preview" id="mediaPreview">
+                        <div class="media-preview-card">
+                            <div class="media-preview-thumb" id="mediaPreviewThumb"><i class="fa-solid fa-file"></i></div>
+                            <div class="media-preview-info">
+                                <div class="media-preview-name" id="mediaPreviewName">파일명</div>
+                                <div class="media-preview-meta" id="mediaPreviewMeta">유형 · 크기</div>
+                            </div>
+                            <button class="media-preview-remove" onclick="removeMediaUpload()"><i class="fa-solid fa-xmark"></i></button>
+                        </div>
+                    </div>
+                    <div class="url-input-row">
+                        <input type="text" id="youtubeUrlInput" placeholder="YouTube URL 붙여넣기 (예: https://www.youtube.com/watch?v=...)">
+                        <button class="btn btn-sm" onclick="parseYoutubeUrl()" style="white-space:nowrap;"><i class="fa-brands fa-youtube" style="color:#FF0000;"></i> 확인</button>
+                    </div>
+                    <div class="youtube-write-preview" id="youtubeWritePreview">
+                        <div class="yt-preview-inner" id="youtubePreviewFrame"></div>
+                        <div class="yt-preview-info">
+                            <span id="youtubePreviewUrl">YouTube 영상</span>
+                            <button class="media-preview-remove" onclick="removeYoutubeEmbed()"><i class="fa-solid fa-xmark"></i></button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">첨부파일</label>
+                    <div class="attachment-upload" onclick="document.getElementById('fileAttachInput').click()">
+                        <i class="fa-solid fa-cloud-arrow-up"></i>
+                        <p>클릭하여 파일을 선택하거나 드래그하세요</p>
+                        <p class="hint">최대 5개, 각 20MB 이하</p>
+                    </div>
+                    <input type="file" id="fileAttachInput" multiple style="display:none;" onchange="handleFileSelect(event)">
+                    <div class="uploaded-files" id="uploadedFiles"></div>
+                </div>
+
+                <!-- 나도 예술가 동시 게시 -->
+                <div class="form-group" id="galleryUploadSection">
+                    <label class="form-label"><i class="fa-solid fa-palette" style="color:#8B5CF6;margin-right:4px;"></i> 나도 예술가 동시 게시</label>
+                    <div style="background:var(--gray-50);border:1px solid var(--gray-200);border-radius:var(--radius-sm);padding:14px 16px;">
+                        <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;">
+                            <input type="checkbox" id="galleryUploadCheck" style="accent-color:#8B5CF6;margin-top:2px;width:16px;height:16px;" onchange="toggleGalleryOptions(this)">
+                            <div>
+                                <div style="font-size:13px;font-weight:600;color:var(--gray-800);">이 작품을 '나도 예술가' 갤러리에도 함께 게시</div>
+                                <div style="font-size:12px;color:var(--gray-400);margin-top:2px;">체크 시 작품이 전체 학생 예술 갤러리에 동시 노출됩니다</div>
+                            </div>
+                        </label>
+                        <div id="galleryUploadOptions" style="display:none;margin-top:12px;padding-top:12px;border-top:1px solid var(--gray-200);">
+                            <div style="display:flex;gap:10px;margin-bottom:10px;flex-wrap:wrap;">
+                                <div style="flex:1;min-width:140px;">
+                                    <label style="font-size:12px;font-weight:600;color:var(--gray-500);display:block;margin-bottom:4px;">작품 분야</label>
+                                    <select class="filter-select" id="galleryCategory" style="width:100%;">
+                                        <option value="미술">미술</option>
+                                        <option value="음악">음악</option>
+                                        <option value="문학">문학</option>
+                                        <option value="영상">영상</option>
+                                        <option value="기타">기타</option>
+                                    </select>
+                                </div>
+                                <div style="flex:1;min-width:140px;">
+                                    <label style="font-size:12px;font-weight:600;color:var(--gray-500);display:block;margin-bottom:4px;">사용 재료/도구</label>
+                                    <input type="text" class="form-input" id="galleryMaterial" placeholder="예: 수채화 물감, 색연필" style="padding:9px 12px;font-size:13px;">
+                                </div>
+                            </div>
+                            <div style="display:flex;align-items:center;gap:6px;padding:8px 12px;background:#FAF5FF;border-radius:6px;border:1px solid #E9D5FF;">
+                                <i class="fa-solid fa-circle-info" style="color:#8B5CF6;font-size:13px;"></i>
+                                <span style="font-size:12px;color:#6D28D9;">게시글의 제목과 내용, 첨부 이미지가 나도 예술가에 함께 등록됩니다</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="write-footer">
+                <button class="btn" onclick="showView('listView')">취소</button>
+                <button class="btn" onclick="previewPost()"><i class="fa-solid fa-eye"></i> 미리보기</button>
+                <button class="btn btn-primary" onclick="submitPost()"><i class="fa-solid fa-paper-plane"></i> 등록하기</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ================== APPROVAL VIEW ================== -->
+    <div id="approvalView" class="hidden">
+        <div class="approval-view">
+            <div class="approval-header">
+                <div style="display:flex;align-items:center;gap:10px;">
+                    <button class="detail-back" onclick="showView('listView')">
+                        <i class="fa-solid fa-arrow-left"></i> 목록으로
+                    </button>
+                    <h2 class="approval-title"><i class="fa-solid fa-clipboard-check"></i> 승인 관리</h2>
+                </div>
+                <div class="approval-actions">
+                    <label style="display:flex;align-items:center;gap:5px;font-size:13px;color:var(--gray-600);cursor:pointer;">
+                        <input type="checkbox" id="selectAllApproval" class="approval-checkbox" onchange="toggleSelectAll(this)"> 전체 선택
+                    </label>
+                    <button class="btn btn-success btn-sm" onclick="batchApprove()"><i class="fa-solid fa-check"></i> 선택 승인</button>
+                    <button class="btn btn-danger btn-sm" onclick="batchReject()"><i class="fa-solid fa-xmark"></i> 선택 반려</button>
+                </div>
+            </div>
+            <div class="approval-list" id="approvalList">
+                <!-- rendered by JS -->
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<!-- ===== Settings Modal ===== -->
+<div class="modal-overlay" id="settingsModal">
+    <div class="modal">
+        <div class="modal-header">
+            <h3 class="modal-title"><i class="fa-solid fa-gear"></i> 게시판 설정</h3>
+            <button class="modal-close" onclick="closeSettings()"><i class="fa-solid fa-xmark"></i></button>
+        </div>
+        <div class="modal-body">
+            <div class="settings-section">
+                <div class="settings-section-title">게시판 유형</div>
+                <div class="form-radio-group">
+                    <label class="form-radio">
+                        <input type="radio" name="boardType" value="list"> 일반형 (리스트)
+                    </label>
+                    <label class="form-radio">
+                        <input type="radio" name="boardType" value="gallery" checked> 갤러리형 (그리드)
+                    </label>
+                </div>
+            </div>
+            <div class="settings-section">
+                <div class="settings-section-title">승인 설정</div>
+                <div class="settings-row">
+                    <div>
+                        <div class="settings-label">글 등록 승인</div>
+                        <div class="settings-desc">활성화 시 멤버 글은 승인 후 게시됩니다</div>
+                    </div>
+                    <div class="toggle-switch active" id="approvalToggle" onclick="toggleApproval()"></div>
+                </div>
+            </div>
+            <div class="settings-section">
+                <div class="settings-section-title">권한 설정</div>
+                <div class="settings-row">
+                    <div class="settings-label">읽기 권한</div>
+                    <select class="filter-select" style="width:140px;">
+                        <option value="all" selected>전체 멤버</option>
+                        <option value="owner">개설자만</option>
+                    </select>
+                </div>
+                <div class="settings-row">
+                    <div class="settings-label">쓰기 권한</div>
+                    <select class="filter-select" style="width:140px;">
+                        <option value="all" selected>전체 멤버</option>
+                        <option value="owner">개설자만</option>
+                    </select>
+                </div>
+                <div class="settings-row">
+                    <div class="settings-label">댓글 권한</div>
+                    <select class="filter-select" style="width:140px;">
+                        <option value="all" selected>전체 멤버</option>
+                        <option value="owner">개설자만</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn" onclick="closeSettings()">취소</button>
+            <button class="btn btn-primary" onclick="saveSettings()"><i class="fa-solid fa-check"></i> 저장</button>
+        </div>
+    </div>
+</div>
+
+<!-- ===== Reject Reason Modal ===== -->
+<div class="modal-overlay" id="rejectModal">
+    <div class="modal" style="max-width:420px;">
+        <div class="modal-header">
+            <h3 class="modal-title"><i class="fa-solid fa-comment-dots"></i> 반려 사유</h3>
+            <button class="modal-close" onclick="closeRejectModal()"><i class="fa-solid fa-xmark"></i></button>
+        </div>
+        <div class="modal-body">
+            <div class="form-group" style="margin-bottom:0;">
+                <label class="form-label">반려 사유를 입력해주세요</label>
+                <textarea class="form-input" id="rejectReason" rows="3" placeholder="반려 사유를 입력하세요..." style="resize:vertical;"></textarea>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn" onclick="closeRejectModal()">취소</button>
+            <button class="btn btn-danger" onclick="confirmReject()"><i class="fa-solid fa-xmark"></i> 반려</button>
+        </div>
+    </div>
+</div>
+
+<!-- ===== Video URL Modal ===== -->
+<div class="modal-overlay video-input-modal" id="videoModal">
+    <div class="modal">
+        <div class="modal-header">
+            <h3 class="modal-title"><i class="fa-solid fa-video"></i> 동영상 삽입</h3>
+            <button class="modal-close" onclick="closeVideoModal()"><i class="fa-solid fa-xmark"></i></button>
+        </div>
+        <div class="modal-body">
+            <div class="form-group" style="margin-bottom:0;">
+                <label class="form-label">YouTube 또는 Vimeo URL</label>
+                <input type="text" class="video-url-input" id="videoUrlInput" placeholder="https://www.youtube.com/watch?v=...">
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn" onclick="closeVideoModal()">취소</button>
+            <button class="btn btn-primary" onclick="insertVideo()"><i class="fa-solid fa-check"></i> 삽입</button>
+        </div>
+    </div>
+</div>
+
+<!-- ===== Toast ===== -->
+<div class="toast" id="toast"></div>
+
+<script src="../../../common-nav.js"></script>
+<script>
+// ===== DATA =====
+const boardPosts = [
+    { id: 1, type: "notice", title: "🎨 3월 미술 작품 전시회 안내", author: "김영희 선생님", authorRole: "teacher", date: "2026-03-04", views: 156, likes: 12, comments: 8, hasImage: true, hasAttachment: true, status: "approved",
+      content: "3월 미술 작품 전시회를 다음과 같이 안내합니다.\n\n주제: 봄이 오는 풍경\n기간: 2026년 3월 20일 ~ 3월 31일\n장소: 학교 갤러리 복도\n\n작품 제출은 3월 18일까지 해주세요.\n다양한 재료(수채화, 크레파스, 색연필 등)를 자유롭게 사용해도 됩니다.",
+      attachments: [{name: "작품전시_안내문.pdf", size: "1.2MB"}],
+      thumbColor: "linear-gradient(135deg, #FBBF24, #F59E0B)",
+      mediaType: "image", mediaSrc: "https://picsum.photos/seed/art-exhibit/800/500", mediaThumb: "https://picsum.photos/seed/art-exhibit/400/250"
+    },
+    { id: 2, type: "notice", title: "📋 예술작품 게시 규칙 안내", author: "김영희 선생님", authorRole: "teacher", date: "2026-03-03", views: 132, likes: 8, comments: 3, hasImage: false, hasAttachment: false, status: "approved",
+      content: "예술작품 게시판 이용 규칙을 안내합니다.\n\n1. 본인이 직접 만든 작품만 올려주세요\n2. 다른 친구 작품에 따뜻한 댓글을 남겨주세요\n3. 사용한 재료와 느낀 점을 함께 적어주면 좋아요\n4. 작품 사진은 밝은 곳에서 찍어주세요",
+      mediaType: "none"
+    },
+    { id: 3, type: "normal", title: "봄 풍경 수채화 — 벚꽃 나무 아래에서", author: "박민준", authorRole: "student", date: "2026-03-03", views: 89, likes: 35, comments: 12, hasImage: true, status: "approved",
+      content: "수채화 물감으로 학교 앞 벚꽃 나무를 그렸어요.\n분홍색이랑 하늘색을 섞어서 봄 느낌을 냈는데, 물을 너무 많이 넣어서 좀 번졌지만 오히려 더 예뻐진 것 같아요!\n\n사용 재료: 수채화 물감, 200g 수채화지\n제작 시간: 약 2시간",
+      thumbColor: "linear-gradient(135deg, #FBCFE8, #F9A8D4)",
+      mediaType: "image", mediaSrc: "https://picsum.photos/seed/watercolor-cherry/800/600", mediaThumb: "https://picsum.photos/seed/watercolor-cherry/400/300"
+    },
+    { id: 4, type: "normal", title: "클레이로 만든 우리 가족 인형", author: "이서연", authorRole: "student", date: "2026-03-03", views: 67, likes: 42, comments: 15, hasImage: true, status: "approved",
+      content: "경량 클레이로 우리 가족을 만들었어요! 엄마, 아빠, 나, 그리고 강아지 초코까지!\n\n얼굴 표정 만드는 게 제일 어려웠는데 선생님이 도와주셔서 잘 만들었습니다.\n눈은 검정 클레이로 동그랗게 붙이면 귀여워져요.\n\n사용 재료: 경량 클레이, 이쑤시개, 물감\n제작 시간: 약 1시간 30분",
+      thumbColor: "linear-gradient(135deg, #C4B5FD, #A78BFA)",
+      mediaType: "image", mediaSrc: "https://picsum.photos/seed/clay-family/800/600", mediaThumb: "https://picsum.photos/seed/clay-family/400/300"
+    },
+    { id: 5, type: "normal", title: "색연필 일러스트 — 우리 학교 운동장", author: "최수아", authorRole: "student", date: "2026-03-02", views: 54, likes: 28, comments: 8, hasImage: true, status: "approved",
+      content: "파버카스텔 색연필로 운동장에서 친구들이 노는 모습을 그렸어요.\n그림자를 넣는 방법을 배워서 처음으로 써봤는데 입체감이 생겼어요!\n\n사용 재료: 파버카스텔 색연필 36색, 켄트지\n제작 시간: 약 3시간",
+      thumbColor: "linear-gradient(135deg, #BBF7D0, #86EFAC)",
+      mediaType: "image", mediaSrc: "https://picsum.photos/seed/pencil-illust/800/600", mediaThumb: "https://picsum.photos/seed/pencil-illust/400/300"
+    },
+    { id: 6, type: "normal", title: "종이 접기 동물 친구들 🐰🦊🐸 (만드는 과정)", author: "정하윤", authorRole: "student", date: "2026-03-02", views: 73, likes: 38, comments: 10, hasImage: true, status: "approved",
+      content: "색종이로 토끼, 여우, 개구리를 접었어요!\n유튜브에서 보고 따라 접었는데 여우가 제일 어려웠어요.\n개구리는 진짜로 점프도 해요!\n\n아래 영상은 제가 참고한 종이접기 튜토리얼입니다.\n\n사용 재료: 색종이 15cm, 사인펜\n제작 시간: 약 40분",
+      thumbColor: "linear-gradient(135deg, #FDE68A, #FCD34D)",
+      mediaType: "youtube", mediaSrc: "https://www.youtube.com/embed/GHTA143_b-s", mediaThumb: "https://img.youtube.com/vi/GHTA143_b-s/mqdefault.jpg"
+    },
+    { id: 7, type: "normal", title: "내가 상상한 미래 도시 — 크레파스 그림", author: "한도윤", authorRole: "student", date: "2026-03-01", views: 61, likes: 31, comments: 9, hasImage: true, status: "approved",
+      content: "2050년 미래 도시를 상상해서 그렸어요.\n하늘을 나는 자동차, 투명한 건물, 로봇 친구가 있는 세상이에요.\n배경은 우주까지 보이게 그렸습니다.\n\n사용 재료: 크레파스, 8절 도화지\n제작 시간: 약 1시간",
+      thumbColor: "linear-gradient(135deg, #93C5FD, #60A5FA)",
+      mediaType: "image", mediaSrc: "https://picsum.photos/seed/future-city/800/600", mediaThumb: "https://picsum.photos/seed/future-city/400/300"
+    },
+    { id: 8, type: "normal", title: "판화 찍기 — 나뭇잎 무늬 (제작 과정 영상)", author: "김지우", authorRole: "student", date: "2026-03-01", views: 45, likes: 22, comments: 6, hasImage: true, status: "approved",
+      content: "고무판에 나뭇잎 모양을 새기고 판화를 찍었어요.\n칼로 파는 게 좀 무서웠지만 선생님이 안전하게 하는 법을 알려주셨어요.\n여러 번 찍을 수 있어서 친구들한테 선물도 했습니다!\n\n아래 영상에서 제작 과정을 확인하세요.\n\n사용 재료: 고무판, 조각칼, 판화 잉크\n제작 시간: 약 2시간",
+      thumbColor: "linear-gradient(135deg, #FCA5A5, #F87171)",
+      mediaType: "video", mediaSrc: "https://www.w3schools.com/html/mov_bbb.mp4", mediaThumb: "https://picsum.photos/seed/printmaking/400/300"
+    },
+    { id: 9, type: "normal", title: "모자이크 아트 — 바다 거북이 🐢", author: "윤서준", authorRole: "student", date: "2026-02-28", views: 58, likes: 34, comments: 7, hasImage: true, status: "approved",
+      content: "색종이를 작게 잘라서 모자이크로 바다 거북이를 만들었어요!\n파란색, 초록색, 하얀색 종이를 섞어서 바다 느낌을 냈습니다.\n거북이 등딱지 부분이 제일 오래 걸렸는데 완성하니까 뿌듯해요!\n\n사용 재료: 색종이, 풀, 도화지\n제작 시간: 약 2시간 30분",
+      thumbColor: "linear-gradient(135deg, #99F6E4, #5EEAD4)",
+      mediaType: "image", mediaSrc: "https://picsum.photos/seed/mosaic-turtle/800/600", mediaThumb: "https://picsum.photos/seed/mosaic-turtle/400/300"
+    },
+    { id: 10, type: "normal", title: "연필 소묘 — 우리 집 고양이 나비", author: "강예은", authorRole: "student", date: "2026-02-28", views: 71, likes: 45, comments: 11, hasImage: true, status: "approved",
+      content: "4B 연필로 우리 집 고양이 나비를 그렸어요.\n털 표현이 제일 어려웠는데 짧은 선을 여러 번 그으면 진짜 털처럼 보여요!\n선생님이 명암 넣는 법을 알려주셔서 입체감도 살렸습니다.\n\n사용 재료: 4B·2B 연필, 지우개, 스케치북\n제작 시간: 약 1시간 30분",
+      thumbColor: "linear-gradient(135deg, #E5E7EB, #9CA3AF)",
+      mediaType: "image", mediaSrc: "https://picsum.photos/seed/cat-sketch/800/600", mediaThumb: "https://picsum.photos/seed/cat-sketch/400/300"
+    },
+    { id: 11, type: "normal", title: "리코더 연주 — 봄바람 🎵", author: "김지우", authorRole: "student", date: "2026-02-27", views: 33, likes: 18, comments: 4, hasImage: false, hasAttachment: false, status: "approved",
+      content: "음악 시간에 배운 '봄바람' 곡을 리코더로 연주했어요!\n아직 높은 음이 어렵지만 열심히 연습해서 녹음했습니다.\n아래에서 바로 들어보세요!\n\n사용 악기: 소프라노 리코더\n연습 기간: 약 2주",
+      mediaType: "audio", mediaSrc: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3", mediaThumb: null
+    },
+    { id: 12, type: "normal", title: "수채화 그리기 타임랩스 영상 🎬", author: "박민준", authorRole: "student", date: "2026-02-26", views: 48, likes: 25, comments: 5, hasImage: false, hasAttachment: false, status: "approved",
+      content: "벚꽃 나무 수채화 그리는 과정을 타임랩스로 찍어봤어요!\n2시간 작업을 1분으로 요약했습니다.\n아래 영상에서 확인하세요.\n\n촬영: 스마트폰 타임랩스 모드\n편집: 없음 (원본 그대로!)",
+      mediaType: "video", mediaSrc: "https://www.w3schools.com/html/movie.mp4", mediaThumb: "https://picsum.photos/seed/timelapse-art/400/300"
+    }
+];
+
+const commentsData = [
+    { id: 1, postId: 3, author: "이서연", authorRole: "student", content: "와 진짜 예쁘다! 물이 번진 부분이 오히려 진짜 벚꽃 같아요 🌸", date: "2026-03-03 14:30", likes: 8 },
+    { id: 2, postId: 3, author: "김영희 선생님", authorRole: "teacher", content: "물 조절이 어려웠을 텐데 잘 표현했어요! 번짐 효과가 자연스럽네요 👏", date: "2026-03-03 15:10", likes: 5 },
+    { id: 3, postId: 3, author: "박민준", authorRole: "student", content: "감사합니다 선생님! 다음엔 가을 풍경도 그려볼게요~", date: "2026-03-03 15:20", likes: 2, parentId: 2 },
+    { id: 4, postId: 4, author: "최수아", authorRole: "student", content: "강아지 초코 너무 귀여워! 나도 클레이 해보고 싶다", date: "2026-03-03 16:00", likes: 6 },
+    { id: 5, postId: 4, author: "김영희 선생님", authorRole: "teacher", content: "가족을 정성껏 표현한 게 느껴져요. 표정이 살아있네! 😊", date: "2026-03-03 16:30", likes: 4, parentId: 4 },
+    { id: 6, postId: 1, author: "이서연", authorRole: "student", content: "선생님, 수채화 말고 디지털 그림도 출품할 수 있나요?", date: "2026-03-04 09:00", likes: 2 },
+    { id: 7, postId: 1, author: "김영희 선생님", authorRole: "teacher", content: "물론이죠! 태블릿으로 그린 디지털 작품도 환영합니다 🎨", date: "2026-03-04 09:15", likes: 4, parentId: 6 },
+    { id: 8, postId: 6, author: "한도윤", authorRole: "student", content: "개구리 진짜 점프해?! 대박이다 나도 알려줘!", date: "2026-03-02 15:00", likes: 3 },
+    { id: 9, postId: 7, author: "정하윤", authorRole: "student", content: "미래 도시 진짜 멋있다! 하늘 나는 자동차 타고 싶어", date: "2026-03-01 15:00", likes: 5 }
+];
+
+// ===== STATE =====
+let currentView = 'listView';
+let viewMode = 'gallery';
+let currentPostId = null;
+let likedPosts = new Set();
+let uploadedMedia = null;
+let youtubeEmbed = null;
+let likedComments = new Set();
+let attachedFiles = [];
+let rejectTargetId = null;
+let rejectBatchIds = null;
+let approvalEnabled = true;
+let nextCommentId = 100;
+
+// ===== VIEW MANAGEMENT =====
+function showView(viewId) {
+    ['listView', 'detailView', 'writeView', 'approvalView'].forEach(id => {
+        document.getElementById(id).classList.add('hidden');
+    });
+    document.getElementById(viewId).classList.remove('hidden');
+    currentView = viewId;
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+
+    if (viewId === 'listView') {
+        renderList();
+    } else if (viewId === 'approvalView') {
+        renderApprovalList();
+    }
+}
+
+// ===== VIEW MODE TOGGLE =====
+function setViewMode(mode) {
+    viewMode = mode;
+    document.getElementById('listToggle').classList.toggle('active', mode === 'list');
+    document.getElementById('galleryToggle').classList.toggle('active', mode === 'gallery');
+    document.getElementById('listMode').classList.toggle('hidden', mode !== 'list');
+    document.getElementById('galleryMode').classList.toggle('hidden', mode !== 'gallery');
+    // 뷰 모드에 따라 게시판 명칭 변경
+    var titleEl = document.querySelector('.page-title');
+    if (titleEl) {
+        titleEl.innerHTML = mode === 'gallery'
+            ? '<i class="fa-solid fa-images"></i> 갤러리 게시판'
+            : '<i class="fa-solid fa-clipboard-list"></i> 일반 게시판';
+    }
+    document.title = '채움클래스 - ' + (mode === 'gallery' ? '갤러리 게시판' : '일반 게시판');
+    renderList();
+}
+
+// ===== FILTERING & SORTING =====
+function getFilteredPosts() {
+    const search = document.getElementById('searchInput').value.toLowerCase();
+    const typeFilter = document.getElementById('typeFilter').value;
+    const sortFilter = document.getElementById('sortFilter').value;
+
+    let filtered = boardPosts.filter(p => {
+        if (typeFilter === 'notice') return p.type === 'notice' && p.status === 'approved';
+        if (typeFilter === 'normal') return p.type === 'normal' && p.status === 'approved';
+        if (typeFilter === 'mine') return p.author === '김영희 선생님'; // mock: current user
+        return p.status === 'approved' || p.status === 'pending';
+    });
+
+    if (search) {
+        filtered = filtered.filter(p =>
+            p.title.toLowerCase().includes(search) ||
+            p.content?.toLowerCase().includes(search) ||
+            p.author.toLowerCase().includes(search)
+        );
+    }
+
+    // Sort: notices always on top
+    const notices = filtered.filter(p => p.type === 'notice');
+    let normals = filtered.filter(p => p.type !== 'notice');
+
+    switch (sortFilter) {
+        case 'views': normals.sort((a, b) => b.views - a.views); break;
+        case 'likes': normals.sort((a, b) => b.likes - a.likes); break;
+        case 'comments': normals.sort((a, b) => b.comments - a.comments); break;
+        default: normals.sort((a, b) => new Date(b.date) - new Date(a.date));
+    }
+
+    return [...notices, ...normals];
+}
+
+function filterPosts() {
+    renderList();
+}
+
+// ===== RENDER LIST =====
+function renderList() {
+    const posts = getFilteredPosts();
+    const approvedPosts = posts.filter(p => p.status === 'approved');
+    document.getElementById('totalCount').textContent = approvedPosts.length;
+
+    // Pending badge
+    const pendingPosts = boardPosts.filter(p => p.status === 'pending');
+    const pendingBadge = document.getElementById('pendingBadge');
+    if (pendingPosts.length > 0) {
+        pendingBadge.style.display = 'inline-flex';
+        document.getElementById('pendingCount').textContent = pendingPosts.length;
+    } else {
+        pendingBadge.style.display = 'none';
+    }
+
+    if (viewMode === 'list') {
+        renderListTable(posts);
+    } else {
+        renderGalleryGrid(posts);
+    }
+}
+
+function renderListTable(posts) {
+    const tbody = document.getElementById('listTableBody');
+    tbody.innerHTML = posts.map((p, i) => {
+        const isNotice = p.type === 'notice';
+        const isPending = p.status === 'pending';
+        const rowClass = isNotice ? 'notice-row' : (isPending ? 'pending-row' : '');
+        const roleBadge = p.authorRole === 'teacher'
+            ? '<span class="role-badge teacher">교사</span>'
+            : '<span class="role-badge student">학생</span>';
+        const icons = [];
+        if (p.hasAttachment) icons.push('<i class="fa-solid fa-paperclip"></i>');
+        const mt = p.mediaType || 'none';
+        if (mt === 'image') icons.push('<i class="fa-solid fa-image" style="color:#60A5FA;"></i>');
+        else if (mt === 'video') icons.push('<i class="fa-solid fa-video" style="color:#8B5CF6;"></i>');
+        else if (mt === 'audio') icons.push('<i class="fa-solid fa-headphones" style="color:#EC4899;"></i>');
+        else if (mt === 'youtube') icons.push('<i class="fa-brands fa-youtube" style="color:#FF0000;"></i>');
+        else if (p.hasImage) icons.push('<i class="fa-solid fa-image"></i>');
+        const iconsHtml = icons.length ? `<span class="post-icons">${icons.join('')}</span>` : '';
+        const commentBadge = p.comments > 0 ? `<span class="comment-count">[${p.comments}]</span>` : '';
+        const statusHtml = isPending ? ' <span class="status-badge pending"><i class="fa-solid fa-clock"></i> 대기</span>' : '';
+        const noticeLabel = isNotice ? '<span class="notice-label"><i class="fa-solid fa-thumbtack"></i> 공지</span>' : '';
+        const dateShort = p.date.slice(5);
+
+        return `<tr class="${rowClass}" onclick="openDetail(${p.id})">
+            <td class="center num">${isNotice ? '' : (posts.length - i)}</td>
+            <td>
+                <div class="post-title-cell">
+                    ${noticeLabel}
+                    <span class="post-title-text">${p.title}</span>
+                    ${iconsHtml}${commentBadge}${statusHtml}
+                </div>
+            </td>
+            <td><span class="author-role">${roleBadge} ${p.author.replace(' 선생님','')}</span></td>
+            <td class="center">${dateShort}</td>
+            <td class="center">${p.views}</td>
+            <td class="center">${p.likes}</td>
+            <td class="center">${p.comments}</td>
+        </tr>`;
+    }).join('');
+}
+
+function renderGalleryGrid(posts) {
+    const grid = document.getElementById('galleryGrid');
+    grid.innerHTML = posts.filter(p => p.status === 'approved').map(p => {
+        const isNotice = p.type === 'notice';
+        const ribbon = isNotice ? '<div class="notice-ribbon">공지</div>' : '';
+        const cardClass = isNotice ? 'notice-card' : '';
+        const mt = p.mediaType || 'none';
+        let thumbContent = '';
+        let thumbClass = '';
+
+        switch (mt) {
+            case 'image':
+                thumbClass = 'has-image';
+                thumbContent = `<img src="${p.mediaThumb || p.mediaSrc}" alt="${p.title}" onerror="this.parentElement.innerHTML='<i class=\\'fa-solid fa-image\\'></i>'">`
+                    + `<span class="media-type-badge"><i class="fa-solid fa-image"></i> 이미지</span>`;
+                break;
+            case 'video':
+                thumbClass = 'media-video has-image';
+                thumbContent = (p.mediaThumb ? `<img src="${p.mediaThumb}" alt="${p.title}" onerror="this.style.display='none'">` : '')
+                    + `<div class="play-overlay"><div class="play-icon"><i class="fa-solid fa-play"></i></div></div>`
+                    + `<span class="media-type-badge"><i class="fa-solid fa-video"></i> 동영상</span>`;
+                break;
+            case 'youtube':
+                thumbClass = 'media-youtube has-image';
+                thumbContent = (p.mediaThumb ? `<img src="${p.mediaThumb}" alt="${p.title}" onerror="this.style.display='none'">` : '')
+                    + `<div class="play-overlay"><div class="play-icon"><i class="fa-brands fa-youtube" style="color:#FF0000;font-size:22px;"></i></div></div>`
+                    + `<span class="media-type-badge"><i class="fa-brands fa-youtube"></i> YouTube</span>`;
+                break;
+            case 'audio':
+                thumbClass = 'media-audio';
+                thumbContent = `<div class="audio-wave">`
+                    + `<div class="bar"></div><div class="bar"></div><div class="bar"></div>`
+                    + `<div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div>`
+                    + `</div>`
+                    + `<i class="fa-solid fa-music" style="font-size:20px;color:var(--primary);opacity:0.7;"></i>`
+                    + `<span class="media-type-badge"><i class="fa-solid fa-headphones"></i> 오디오</span>`;
+                break;
+            default:
+                thumbClass = p.hasImage ? 'has-image' : '';
+                thumbContent = p.hasImage ? '<i class="fa-solid fa-image"></i>' : '<i class="fa-solid fa-file-lines"></i>';
+                break;
+        }
+
+        return `<div class="gallery-card ${cardClass}" onclick="openDetail(${p.id})">
+            <div class="gallery-card-thumb ${thumbClass}">
+                ${ribbon}${thumbContent}
+            </div>
+            <div class="gallery-card-body">
+                <div class="gallery-card-title">${p.title}</div>
+                <div class="gallery-card-meta">
+                    <span>${p.author}</span>
+                    <span>${p.date.slice(5)}</span>
+                </div>
+                <div class="gallery-card-stats">
+                    <span><i class="fa-solid fa-eye"></i> ${p.views}</span>
+                    <span><i class="fa-solid fa-heart"></i> ${p.likes}</span>
+                    <span><i class="fa-solid fa-comment"></i> ${p.comments}</span>
+                </div>
+            </div>
+        </div>`;
+    }).join('');
+}
+
+// ===== DETAIL VIEW =====
+function openDetail(postId) {
+    const post = boardPosts.find(p => p.id === postId);
+    if (!post) return;
+    currentPostId = postId;
+
+    // Notice label
+    const noticeLabelEl = document.getElementById('detailNoticeLabel');
+    noticeLabelEl.innerHTML = post.type === 'notice'
+        ? '<span class="notice-label" style="margin-bottom:8px;display:inline-flex;"><i class="fa-solid fa-thumbtack"></i> 공지</span>'
+        : '';
+
+    document.getElementById('detailTitle').textContent = post.title;
+
+    // Avatar
+    const avatar = document.getElementById('detailAvatar');
+    avatar.textContent = post.author.charAt(0);
+    avatar.className = 'detail-avatar ' + (post.authorRole === 'teacher' ? 'teacher-avatar' : 'student-avatar');
+
+    document.getElementById('detailAuthor').textContent = post.author;
+    document.getElementById('detailDate').textContent = post.date;
+    document.getElementById('detailStats').innerHTML = `
+        <span><i class="fa-solid fa-eye"></i> ${post.views}</span>
+        <span><i class="fa-solid fa-heart"></i> ${post.likes}</span>
+    `;
+
+    // Media display
+    const mediaEl = document.getElementById('detailMedia');
+    const mt = post.mediaType || 'none';
+    if (mt === 'image' && post.mediaSrc) {
+        mediaEl.innerHTML = `<img src="${post.mediaSrc}" alt="${post.title}" onclick="window.open(this.src,'_blank')" onerror="this.parentElement.style.display='none'">`;
+        mediaEl.style.display = 'block';
+    } else if (mt === 'video' && post.mediaSrc) {
+        mediaEl.innerHTML = `<video controls preload="metadata" poster="${post.mediaThumb || ''}"><source src="${post.mediaSrc}" type="video/mp4">브라우저가 비디오를 지원하지 않습니다.</video>`;
+        mediaEl.style.display = 'block';
+    } else if (mt === 'youtube' && post.mediaSrc) {
+        mediaEl.innerHTML = `<div class="youtube-wrapper"><iframe src="${post.mediaSrc}" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe></div>`;
+        mediaEl.style.display = 'block';
+    } else if (mt === 'audio' && post.mediaSrc) {
+        mediaEl.innerHTML = `<div class="detail-audio-player"><div class="audio-icon"><i class="fa-solid fa-music"></i></div><audio controls preload="metadata"><source src="${post.mediaSrc}" type="audio/mpeg">브라우저가 오디오를 지원하지 않습니다.</audio></div>`;
+        mediaEl.style.display = 'block';
+    } else {
+        mediaEl.innerHTML = '';
+        mediaEl.style.display = 'none';
+    }
+
+    // Body
+    let bodyHtml = post.content.replace(/\n/g, '<br>');
+    document.getElementById('detailBody').innerHTML = bodyHtml;
+
+    // Attachments
+    const attachEl = document.getElementById('detailAttachments');
+    if (post.attachments && post.attachments.length > 0) {
+        attachEl.innerHTML = '<div class="form-label" style="margin-bottom:8px;"><i class="fa-solid fa-paperclip"></i> 첨부파일</div><div class="attachment-list">' +
+            post.attachments.map(a => {
+                const ext = a.name.split('.').pop().toLowerCase();
+                let iconClass = 'doc';
+                if (ext === 'pdf') iconClass = 'pdf';
+                else if (['jpg','jpeg','png','gif','bmp'].includes(ext)) iconClass = 'img';
+                return `<div class="attachment-item">
+                    <div class="attachment-icon ${iconClass}"><i class="fa-solid fa-file"></i></div>
+                    <div class="attachment-info">
+                        <div class="attachment-name">${a.name}</div>
+                        <div class="attachment-size">${a.size}</div>
+                    </div>
+                    <span class="attachment-download"><i class="fa-solid fa-download"></i></span>
+                </div>`;
+            }).join('') + '</div>';
+        attachEl.style.display = 'block';
+    } else {
+        attachEl.innerHTML = '';
+        attachEl.style.display = 'none';
+    }
+
+    // Like button
+    const isLiked = likedPosts.has(postId);
+    const likeBtn = document.getElementById('detailLikeBtn');
+    likeBtn.classList.toggle('active', isLiked);
+    likeBtn.querySelector('i').className = isLiked ? 'fa-solid fa-heart' : 'fa-regular fa-heart';
+    document.getElementById('detailLikeCount').textContent = post.likes;
+
+    // Edit/delete buttons (show for current user's posts, mock: teacher)
+    const editBtns = document.getElementById('detailEditBtns');
+    editBtns.style.display = post.authorRole === 'teacher' ? 'flex' : 'none';
+
+    // Comments
+    renderComments(postId);
+
+    showView('detailView');
+}
+
+// ===== LIKES =====
+function toggleDetailLike() {
+    const post = boardPosts.find(p => p.id === currentPostId);
+    if (!post) return;
+
+    if (likedPosts.has(currentPostId)) {
+        likedPosts.delete(currentPostId);
+        post.likes--;
+    } else {
+        likedPosts.add(currentPostId);
+        post.likes++;
+    }
+
+    const isLiked = likedPosts.has(currentPostId);
+    const likeBtn = document.getElementById('detailLikeBtn');
+    likeBtn.classList.toggle('active', isLiked);
+    likeBtn.querySelector('i').className = isLiked ? 'fa-solid fa-heart' : 'fa-regular fa-heart';
+    document.getElementById('detailLikeCount').textContent = post.likes;
+}
+
+// ===== COMMENTS =====
+function renderComments(postId) {
+    const postComments = commentsData.filter(c => c.postId === postId);
+    const topLevel = postComments.filter(c => !c.parentId);
+    const replies = postComments.filter(c => c.parentId);
+
+    document.getElementById('commentsTitle').textContent = `댓글 ${postComments.length}개`;
+
+    const listEl = document.getElementById('commentsList');
+    let html = '';
+
+    topLevel.forEach(c => {
+        html += renderCommentItem(c, false);
+        // Render replies
+        replies.filter(r => r.parentId === c.id).forEach(r => {
+            html += renderCommentItem(r, true);
+        });
+        // Reply input area
+        html += `<div class="reply-input-area" id="replyInput-${c.id}">
+            <div class="comment-input-wrapper">
+                <textarea class="comment-textarea" id="replyText-${c.id}" placeholder="답글을 입력하세요..." rows="1"></textarea>
+                <div class="comment-input-actions">
+                    <button class="btn btn-primary btn-sm" onclick="addReply(${c.id})">등록</button>
+                </div>
+            </div>
+        </div>`;
+    });
+
+    listEl.innerHTML = html;
+}
+
+function renderCommentItem(c, isReply) {
+    const avatarBg = c.authorRole === 'teacher' ? 'background:linear-gradient(135deg,#3B82F6,#2563EB);' : 'background:linear-gradient(135deg,#8B5CF6,#6D28D9);';
+    const isLiked = likedComments.has(c.id);
+    const likeColor = isLiked ? 'color:var(--like-active);' : '';
+    const likeIcon = isLiked ? 'fa-solid' : 'fa-regular';
+
+    return `<div class="comment-item ${isReply ? 'reply' : ''}">
+        <div class="comment-avatar" style="${avatarBg}">${c.author.charAt(0)}</div>
+        <div class="comment-content">
+            <div class="comment-header">
+                <span class="comment-author">${c.author}</span>
+                <span class="comment-date">${c.date}</span>
+            </div>
+            <div class="comment-text">${c.content}</div>
+            <div class="comment-actions">
+                <button class="comment-action-btn" onclick="toggleCommentLike(${c.id})" style="${likeColor}">
+                    <i class="${likeIcon} fa-heart"></i> ${c.likes}
+                </button>
+                ${!isReply ? `<button class="comment-action-btn" onclick="toggleReplyInput(${c.id})"><i class="fa-solid fa-reply"></i> 답글</button>` : ''}
+            </div>
+        </div>
+    </div>`;
+}
+
+function toggleCommentLike(commentId) {
+    const c = commentsData.find(x => x.id === commentId);
+    if (!c) return;
+    if (likedComments.has(commentId)) {
+        likedComments.delete(commentId);
+        c.likes--;
+    } else {
+        likedComments.add(commentId);
+        c.likes++;
+    }
+    renderComments(currentPostId);
+}
+
+function toggleReplyInput(commentId) {
+    const el = document.getElementById('replyInput-' + commentId);
+    if (el) el.classList.toggle('visible');
+}
+
+function addComment() {
+    const input = document.getElementById('commentInput');
+    const text = input.value.trim();
+    if (!text) return;
+
+    commentsData.push({
+        id: nextCommentId++,
+        postId: currentPostId,
+        author: "김영희 선생님",
+        authorRole: "teacher",
+        content: text,
+        date: new Date().toLocaleString('ko-KR', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }).replace(/\. /g, '-').replace('.', ''),
+        likes: 0
+    });
+
+    const post = boardPosts.find(p => p.id === currentPostId);
+    if (post) post.comments++;
+
+    input.value = '';
+    removeCommentImage('main');
+    renderComments(currentPostId);
+    showToast('댓글이 등록되었습니다.');
+}
+
+function addReply(parentId) {
+    const input = document.getElementById('replyText-' + parentId);
+    const text = input.value.trim();
+    if (!text) return;
+
+    commentsData.push({
+        id: nextCommentId++,
+        postId: currentPostId,
+        author: "김영희 선생님",
+        authorRole: "teacher",
+        content: text,
+        date: new Date().toLocaleString('ko-KR', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }).replace(/\. /g, '-').replace('.', ''),
+        likes: 0,
+        parentId: parentId
+    });
+
+    const post = boardPosts.find(p => p.id === currentPostId);
+    if (post) post.comments++;
+
+    renderComments(currentPostId);
+    showToast('답글이 등록되었습니다.');
+}
+
+// ===== COMMENT IMAGE D&D =====
+function toggleCommentDropzone(id) {
+    const dz = document.getElementById('commentDropzone-' + id);
+    if (dz) dz.classList.toggle('active');
+}
+
+function handleDragOver(e, id) {
+    e.preventDefault();
+    document.getElementById('commentDropzone-' + id).classList.add('drag-over');
+}
+
+function handleDragLeave(e, id) {
+    document.getElementById('commentDropzone-' + id).classList.remove('drag-over');
+}
+
+function handleDrop(e, id) {
+    e.preventDefault();
+    const dz = document.getElementById('commentDropzone-' + id);
+    dz.classList.remove('drag-over');
+    dz.classList.remove('active');
+
+    // Mock image attached
+    const preview = document.getElementById('commentPreview-' + id);
+    preview.classList.add('has-image');
+    document.getElementById('commentPreviewName-' + id).textContent = 'dropped-image.png';
+    showToast('이미지가 첨부되었습니다.');
+}
+
+function removeCommentImage(id) {
+    const preview = document.getElementById('commentPreview-' + id);
+    if (preview) preview.classList.remove('has-image');
+}
+
+// ===== WRITE VIEW =====
+function submitPost() {
+    const title = document.getElementById('writeTitle').value.trim();
+    if (!title) {
+        showToast('제목을 입력해주세요.');
+        return;
+    }
+
+    const editorContent = document.getElementById('editorArea').innerHTML.trim();
+    if (!editorContent) {
+        showToast('내용을 입력해주세요.');
+        return;
+    }
+
+    const postType = document.querySelector('input[name="postType"]:checked').value;
+
+    // Determine media fields
+    let newMediaType = 'none';
+    let newMediaSrc = '';
+    let newMediaThumb = '';
+    if (youtubeEmbed) {
+        newMediaType = 'youtube';
+        newMediaSrc = youtubeEmbed.embedUrl;
+        newMediaThumb = youtubeEmbed.thumbUrl;
+    } else if (uploadedMedia) {
+        newMediaType = uploadedMedia.type;
+        newMediaSrc = uploadedMedia.src;
+        newMediaThumb = uploadedMedia.type === 'image' ? uploadedMedia.src : (uploadedMedia.type === 'video' ? 'https://picsum.photos/seed/user-video/400/300' : null);
+    }
+
+    const newPost = {
+        id: boardPosts.length + 100,
+        type: postType,
+        title: title,
+        author: "김영희 선생님",
+        authorRole: "teacher",
+        date: new Date().toISOString().slice(0, 10),
+        views: 0,
+        likes: 0,
+        comments: 0,
+        hasImage: newMediaType === 'image' || editorContent.includes('image'),
+        hasAttachment: attachedFiles.length > 0,
+        status: postType === 'notice' ? 'approved' : (approvalEnabled ? 'pending' : 'approved'),
+        content: document.getElementById('editorArea').innerText,
+        attachments: attachedFiles.map(f => ({ name: f.name, size: f.size })),
+        mediaType: newMediaType,
+        mediaSrc: newMediaSrc,
+        mediaThumb: newMediaThumb
+    };
+
+    boardPosts.unshift(newPost);
+    resetWriteForm();
+    showView('listView');
+    showToast(newPost.status === 'pending' ? '게시글이 등록되었습니다. 승인 후 게시됩니다.' : '게시글이 등록되었습니다.');
+}
+
+function resetWriteForm() {
+    document.getElementById('writeTitle').value = '';
+    document.getElementById('editorArea').innerHTML = '';
+    document.querySelector('input[name="postType"][value="normal"]').checked = true;
+    attachedFiles = [];
+    document.getElementById('uploadedFiles').innerHTML = '';
+    document.getElementById('writeViewTitle').innerHTML = '<i class="fa-solid fa-pen"></i> 게시글 작성';
+    // 미디어 초기화
+    removeMediaUpload();
+    removeYoutubeEmbed();
+    // 나도 예술가 체크박스 초기화
+    var galCheck = document.getElementById('galleryUploadCheck');
+    if (galCheck) { galCheck.checked = false; toggleGalleryOptions(galCheck); }
+}
+
+function previewPost() {
+    showToast('미리보기는 준비 중입니다.');
+}
+
+function editPost() {
+    const post = boardPosts.find(p => p.id === currentPostId);
+    if (!post) return;
+    document.getElementById('writeTitle').value = post.title;
+    document.getElementById('editorArea').innerText = post.content || '';
+    const radio = document.querySelector(`input[name="postType"][value="${post.type}"]`);
+    if (radio) radio.checked = true;
+    document.getElementById('writeViewTitle').innerHTML = '<i class="fa-solid fa-pen-to-square"></i> 게시글 수정';
+    showView('writeView');
+}
+
+function deletePost() {
+    if (!confirm('정말 삭제하시겠습니까?')) return;
+    const idx = boardPosts.findIndex(p => p.id === currentPostId);
+    if (idx > -1) boardPosts.splice(idx, 1);
+    showView('listView');
+    showToast('게시글이 삭제되었습니다.');
+}
+
+// ===== EDITOR COMMANDS =====
+function execCmd(cmd, val) {
+    document.getElementById('editorArea').focus();
+    document.execCommand(cmd, false, val || null);
+}
+
+function insertLink() {
+    const url = prompt('링크 URL을 입력하세요:', 'https://');
+    if (url) {
+        document.getElementById('editorArea').focus();
+        document.execCommand('createLink', false, url);
+    }
+}
+
+function insertImage() {
+    const placeholder = document.createElement('div');
+    placeholder.className = 'embedded-image';
+    placeholder.innerHTML = '<i class="fa-solid fa-image" style="font-size:32px;"></i><br>이미지 삽입 영역';
+    placeholder.contentEditable = false;
+
+    const editor = document.getElementById('editorArea');
+    editor.focus();
+
+    const sel = window.getSelection();
+    if (sel.rangeCount) {
+        const range = sel.getRangeAt(0);
+        range.deleteContents();
+        range.insertNode(placeholder);
+        range.collapse(false);
+    } else {
+        editor.appendChild(placeholder);
+    }
+    showToast('이미지가 삽입되었습니다. (Mock)');
+}
+
+function openVideoModal() {
+    document.getElementById('videoModal').classList.add('active');
+    document.getElementById('videoUrlInput').value = '';
+    document.getElementById('videoUrlInput').focus();
+}
+
+function closeVideoModal() {
+    document.getElementById('videoModal').classList.remove('active');
+}
+
+function insertVideo() {
+    const url = document.getElementById('videoUrlInput').value.trim();
+    if (!url) { showToast('URL을 입력해주세요.'); return; }
+
+    const ytId = extractYoutubeId(url);
+    const placeholder = document.createElement('div');
+
+    if (ytId) {
+        placeholder.className = 'embedded-image';
+        placeholder.style.cssText = 'padding:0;background:#000;position:relative;padding-bottom:56.25%;height:0;overflow:hidden;border-radius:8px;';
+        placeholder.innerHTML = `<iframe src="https://www.youtube.com/embed/${ytId}" style="position:absolute;top:0;left:0;width:100%;height:100%;border:none;" allowfullscreen></iframe>`;
+    } else {
+        placeholder.className = 'embedded-image';
+        placeholder.innerHTML = '<i class="fa-solid fa-video" style="font-size:32px;"></i><br>동영상 임베드: ' + url;
+    }
+    placeholder.contentEditable = false;
+
+    const editor = document.getElementById('editorArea');
+    editor.focus();
+    const sel = window.getSelection();
+    if (sel.rangeCount) {
+        const range = sel.getRangeAt(0);
+        range.deleteContents();
+        range.insertNode(placeholder);
+        range.collapse(false);
+    } else {
+        editor.appendChild(placeholder);
+    }
+
+    closeVideoModal();
+    showToast(ytId ? 'YouTube 영상이 삽입되었습니다.' : '동영상이 삽입되었습니다. (Mock)');
+}
+
+// ===== FILE ATTACHMENT =====
+function handleFileSelect(e) {
+    const files = Array.from(e.target.files);
+    if (attachedFiles.length + files.length > 5) {
+        showToast('최대 5개까지 첨부할 수 있습니다.');
+        return;
+    }
+    files.forEach(f => {
+        if (f.size > 20 * 1024 * 1024) {
+            showToast(`${f.name}: 20MB를 초과합니다.`);
+            return;
+        }
+        attachedFiles.push({ name: f.name, size: formatFileSize(f.size) });
+    });
+    renderUploadedFiles();
+    e.target.value = '';
+}
+
+function renderUploadedFiles() {
+    const el = document.getElementById('uploadedFiles');
+    el.innerHTML = attachedFiles.map((f, i) => `
+        <div class="uploaded-file">
+            <i class="fa-solid fa-file" style="color:var(--gray-400);"></i>
+            <span class="file-info">${f.name}</span>
+            <span class="file-size">${f.size}</span>
+            <span class="file-remove" onclick="removeFile(${i})"><i class="fa-solid fa-xmark"></i></span>
+        </div>
+    `).join('');
+}
+
+function removeFile(idx) {
+    attachedFiles.splice(idx, 1);
+    renderUploadedFiles();
+}
+
+function formatFileSize(bytes) {
+    if (bytes < 1024) return bytes + 'B';
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + 'KB';
+    return (bytes / (1024 * 1024)).toFixed(1) + 'MB';
+}
+
+// ===== GALLERY UPLOAD TOGGLE =====
+function toggleGalleryOptions(cb) {
+    const opts = document.getElementById('galleryUploadOptions');
+    opts.style.display = cb.checked ? 'block' : 'none';
+}
+
+// ===== MEDIA UPLOAD =====
+function handleMediaDragOver(e) {
+    e.preventDefault(); e.stopPropagation();
+    document.getElementById('mediaUploadArea').classList.add('drag-over');
+}
+function handleMediaDragLeave(e) {
+    e.preventDefault(); e.stopPropagation();
+    document.getElementById('mediaUploadArea').classList.remove('drag-over');
+}
+function handleMediaDrop(e) {
+    e.preventDefault(); e.stopPropagation();
+    document.getElementById('mediaUploadArea').classList.remove('drag-over');
+    if (e.dataTransfer.files.length > 0) processMediaFile(e.dataTransfer.files[0]);
+}
+function handleMediaFileSelect(e) {
+    if (e.target.files.length > 0) processMediaFile(e.target.files[0]);
+    e.target.value = '';
+}
+function processMediaFile(file) {
+    const fileType = file.type.split('/')[0];
+    if (!['image', 'video', 'audio'].includes(fileType)) {
+        showToast('이미지, 동영상, 오디오 파일만 업로드할 수 있습니다.');
+        return;
+    }
+    const maxSize = fileType === 'video' ? 100 * 1024 * 1024 : 20 * 1024 * 1024;
+    if (file.size > maxSize) {
+        showToast(`파일 크기가 ${fileType === 'video' ? '100MB' : '20MB'}를 초과합니다.`);
+        return;
+    }
+    if (youtubeEmbed) removeYoutubeEmbed();
+    uploadedMedia = { type: fileType, name: file.name, size: formatFileSize(file.size), file: file, src: URL.createObjectURL(file) };
+    const thumbEl = document.getElementById('mediaPreviewThumb');
+    document.getElementById('mediaPreviewName').textContent = file.name;
+    const typeLabels = { image: '이미지', video: '동영상', audio: '오디오' };
+    document.getElementById('mediaPreviewMeta').textContent = `${typeLabels[fileType]} · ${formatFileSize(file.size)}`;
+    if (fileType === 'image') {
+        thumbEl.innerHTML = `<img src="${uploadedMedia.src}" alt="미리보기">`;
+    } else if (fileType === 'video') {
+        thumbEl.innerHTML = `<i class="fa-solid fa-video" style="color:var(--primary);font-size:24px;"></i>`;
+    } else {
+        thumbEl.innerHTML = `<i class="fa-solid fa-headphones" style="color:var(--primary);font-size:24px;"></i>`;
+    }
+    document.getElementById('mediaPreview').classList.add('show');
+    document.getElementById('mediaUploadArea').style.display = 'none';
+    showToast(`${typeLabels[fileType]} 파일이 등록되었습니다.`);
+}
+function removeMediaUpload() {
+    if (uploadedMedia && uploadedMedia.src && uploadedMedia.src.startsWith('blob:')) {
+        URL.revokeObjectURL(uploadedMedia.src);
+    }
+    uploadedMedia = null;
+    var preview = document.getElementById('mediaPreview');
+    if (preview) preview.classList.remove('show');
+    var area = document.getElementById('mediaUploadArea');
+    if (area) area.style.display = '';
+    var fi = document.getElementById('mediaFileInput');
+    if (fi) fi.value = '';
+}
+
+// ===== YOUTUBE URL PARSING =====
+function extractYoutubeId(url) {
+    const patterns = [
+        /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/|youtube\.com\/v\/)([a-zA-Z0-9_-]{11})/,
+        /^([a-zA-Z0-9_-]{11})$/
+    ];
+    for (const pattern of patterns) {
+        const match = url.match(pattern);
+        if (match) return match[1];
+    }
+    return null;
+}
+function parseYoutubeUrl() {
+    const urlInput = document.getElementById('youtubeUrlInput');
+    const url = urlInput.value.trim();
+    if (!url) { showToast('YouTube URL을 입력해주세요.'); return; }
+    const videoId = extractYoutubeId(url);
+    if (!videoId) { showToast('올바른 YouTube URL이 아닙니다.'); return; }
+    if (uploadedMedia) removeMediaUpload();
+    youtubeEmbed = { videoId: videoId, embedUrl: `https://www.youtube.com/embed/${videoId}`, thumbUrl: `https://img.youtube.com/vi/${videoId}/mqdefault.jpg` };
+    document.getElementById('youtubePreviewFrame').innerHTML = `<iframe src="${youtubeEmbed.embedUrl}" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>`;
+    document.getElementById('youtubePreviewUrl').textContent = url;
+    document.getElementById('youtubeWritePreview').classList.add('show');
+    document.getElementById('mediaUploadArea').style.display = 'none';
+    showToast('YouTube 영상이 등록되었습니다.');
+}
+function removeYoutubeEmbed() {
+    youtubeEmbed = null;
+    var preview = document.getElementById('youtubeWritePreview');
+    if (preview) preview.classList.remove('show');
+    var frame = document.getElementById('youtubePreviewFrame');
+    if (frame) frame.innerHTML = '';
+    var input = document.getElementById('youtubeUrlInput');
+    if (input) input.value = '';
+    var area = document.getElementById('mediaUploadArea');
+    if (area && !uploadedMedia) area.style.display = '';
+}
+
+// ===== SETTINGS =====
+function openSettings() {
+    document.getElementById('settingsModal').classList.add('active');
+}
+
+function closeSettings() {
+    document.getElementById('settingsModal').classList.remove('active');
+}
+
+function toggleApproval() {
+    const toggle = document.getElementById('approvalToggle');
+    toggle.classList.toggle('active');
+    approvalEnabled = toggle.classList.contains('active');
+}
+
+function saveSettings() {
+    const boardType = document.querySelector('input[name="boardType"]:checked').value;
+    if (boardType === 'gallery') {
+        setViewMode('gallery');
+    } else {
+        setViewMode('list');
+    }
+    closeSettings();
+    showToast('설정이 저장되었습니다.');
+}
+
+// ===== APPROVAL MANAGEMENT =====
+function renderApprovalList() {
+    const pending = boardPosts.filter(p => p.status === 'pending');
+    const el = document.getElementById('approvalList');
+
+    if (pending.length === 0) {
+        el.innerHTML = '<div style="padding:40px;text-align:center;color:var(--gray-400);"><i class="fa-solid fa-check-circle" style="font-size:40px;margin-bottom:12px;display:block;"></i>승인 대기 중인 게시글이 없습니다.</div>';
+        return;
+    }
+
+    el.innerHTML = pending.map(p => `
+        <div class="approval-item" id="approval-${p.id}">
+            <input type="checkbox" class="approval-checkbox approval-item-check" value="${p.id}">
+            <div class="approval-info">
+                <div class="approval-post-title">${p.title}</div>
+                <div class="approval-post-meta">
+                    <span class="status-badge pending"><i class="fa-solid fa-clock"></i> 대기</span>
+                    &nbsp; ${p.author} &middot; ${p.date}
+                </div>
+            </div>
+            <div class="approval-buttons">
+                <button class="btn btn-success btn-sm" onclick="approvePost(${p.id})"><i class="fa-solid fa-check"></i> 승인</button>
+                <button class="btn btn-danger btn-sm" onclick="openRejectModal(${p.id})"><i class="fa-solid fa-xmark"></i> 반려</button>
+            </div>
+        </div>
+    `).join('');
+}
+
+function approvePost(postId) {
+    const post = boardPosts.find(p => p.id === postId);
+    if (post) {
+        post.status = 'approved';
+        renderApprovalList();
+        showToast('게시글이 승인되었습니다.');
+    }
+}
+
+function openRejectModal(postId) {
+    rejectTargetId = postId;
+    rejectBatchIds = null;
+    document.getElementById('rejectReason').value = '';
+    document.getElementById('rejectModal').classList.add('active');
+}
+
+function closeRejectModal() {
+    document.getElementById('rejectModal').classList.remove('active');
+    rejectTargetId = null;
+    rejectBatchIds = null;
+}
+
+function confirmReject() {
+    const reason = document.getElementById('rejectReason').value.trim();
+    if (!reason) {
+        showToast('반려 사유를 입력해주세요.');
+        return;
+    }
+
+    if (rejectBatchIds) {
+        rejectBatchIds.forEach(id => {
+            const post = boardPosts.find(p => p.id === id);
+            if (post) post.status = 'rejected';
+        });
+        showToast(`${rejectBatchIds.length}건이 반려되었습니다.`);
+    } else if (rejectTargetId) {
+        const post = boardPosts.find(p => p.id === rejectTargetId);
+        if (post) post.status = 'rejected';
+        showToast('게시글이 반려되었습니다.');
+    }
+
+    closeRejectModal();
+    renderApprovalList();
+}
+
+function toggleSelectAll(el) {
+    document.querySelectorAll('.approval-item-check').forEach(cb => cb.checked = el.checked);
+}
+
+function getSelectedApprovalIds() {
+    return Array.from(document.querySelectorAll('.approval-item-check:checked')).map(cb => parseInt(cb.value));
+}
+
+function batchApprove() {
+    const ids = getSelectedApprovalIds();
+    if (ids.length === 0) { showToast('게시글을 선택해주세요.'); return; }
+    ids.forEach(id => {
+        const post = boardPosts.find(p => p.id === id);
+        if (post) post.status = 'approved';
+    });
+    document.getElementById('selectAllApproval').checked = false;
+    renderApprovalList();
+    showToast(`${ids.length}건이 승인되었습니다.`);
+}
+
+function batchReject() {
+    const ids = getSelectedApprovalIds();
+    if (ids.length === 0) { showToast('게시글을 선택해주세요.'); return; }
+    rejectBatchIds = ids;
+    rejectTargetId = null;
+    document.getElementById('rejectReason').value = '';
+    document.getElementById('rejectModal').classList.add('active');
+}
+
+// ===== TOAST =====
+function showToast(msg) {
+    const toast = document.getElementById('toast');
+    toast.textContent = msg;
+    toast.classList.add('show');
+    setTimeout(() => toast.classList.remove('show'), 2500);
+}
+
+// ===== INIT =====
+document.addEventListener('DOMContentLoaded', () => {
+    renderList();
+});
+</script>
+</body>
+</html>

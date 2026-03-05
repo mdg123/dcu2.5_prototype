@@ -1,0 +1,791 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>채움수리력 - AI 맞춤학습</title>
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:linear-gradient(135deg,#eff6ff,#eef2ff);min-height:100vh}
+    .main-container{display:flex;height:calc(100vh - 64px);overflow:hidden}
+    .sidebar{width:300px;background:#fff;box-shadow:2px 0 8px rgba(0,0,0,.05);padding:20px;overflow-y:auto;flex-shrink:0}.sidebar h3{font-size:18px;color:#111827;margin-bottom:16px}
+    .filter-group{margin-bottom:16px}.filter-label{display:block;font-size:12px;font-weight:600;color:#6b7280;margin-bottom:8px;text-transform:uppercase}.filter-select{width:100%;padding:10px 12px;border:1px solid #e5e7eb;border-radius:8px;font-size:14px}.filter-select:focus{outline:none;border-color:#2563eb}
+    .view-toggle{display:flex;gap:8px;margin-bottom:16px}.view-btn{flex:1;display:flex;align-items:center;justify-content:center;gap:6px;padding:10px;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer}.view-btn.active{background:#2563eb;color:#fff}.view-btn:not(.active){background:#f3f4f6;color:#6b7280}
+    .search-btn{width:100%;display:flex;align-items:center;justify-content:center;gap:8px;padding:12px;border:none;border-radius:8px;background:linear-gradient(135deg,#2563eb,#4f46e5);color:#fff;font-size:14px;font-weight:600;cursor:pointer;margin-bottom:12px}
+    .status-legend{background:#f9fafb;border-radius:8px;padding:16px;margin-top:20px}.status-legend h4{font-size:11px;font-weight:700;color:#6b7280;text-transform:uppercase;margin-bottom:12px}.legend-item{display:flex;align-items:center;gap:8px;margin-bottom:8px;font-size:13px}.legend-color{width:20px;height:20px;border-radius:4px;border:2px solid}.legend-color.completed{background:#dcfce7;border-color:#16a34a}.legend-color.in-progress{background:#dbeafe;border-color:#3b82f6}.legend-color.diagnosing{background:#fef3c7;border-color:#f59e0b}.legend-color.not-started{background:#f1f5f9;border-color:#cbd5e1}
+    .main-content{flex:1;position:relative;overflow:hidden;background:#fff}
+    .map-container{width:100%;height:100%;cursor:grab;overflow:hidden;background:linear-gradient(135deg,#f8fafc,#f1f5f9);position:relative}.map-container:active{cursor:grabbing}
+    .map-controls{position:absolute;top:16px;right:16px;background:#fff;border-radius:12px;box-shadow:0 2px 12px rgba(0,0,0,.1);overflow:hidden;z-index:10}.map-control-btn{display:block;padding:12px;border:none;background:0 0;cursor:pointer;border-bottom:1px solid #e5e7eb}.map-control-btn:last-child{border-bottom:none}.map-control-btn:hover{background:#eff6ff}
+    .map-info{position:absolute;top:16px;left:16px;background:#fff;padding:8px 16px;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,.1);font-size:13px;z-index:10}
+    .map-scale{position:absolute;bottom:24px;right:24px;background:#fff;padding:8px 16px;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,.1);font-size:13px;font-weight:600;z-index:10}
+    .node-detail-panel{position:absolute;bottom:0;left:0;right:0;background:#fff;box-shadow:0 -4px 20px rgba(0,0,0,.15);border-radius:24px 24px 0 0;max-height:60vh;overflow-y:auto;z-index:50;border-top:4px solid #2563eb;transform:translateY(100%);transition:transform .3s}.node-detail-panel.active{transform:translateY(0)}
+    .panel-content{padding:24px}.panel-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px}.panel-badges{display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap}
+    .badge{padding:4px 12px;border-radius:20px;font-size:12px;font-weight:600}.badge.grade{background:linear-gradient(135deg,#2563eb,#4f46e5);color:#fff}.badge.area{background:#f3e8ff;color:#7c3aed}.badge.status{color:#fff}.badge.completed{background:#16a34a}.badge.in-progress{background:#3b82f6}.badge.diagnosing{background:#f59e0b}.badge.not-started{background:#94a3b8}
+    .panel-title{font-size:20px;font-weight:700;margin-bottom:4px}.panel-desc{font-size:14px;color:#6b7280}
+    .panel-progress{display:flex;align-items:center;gap:12px;margin-top:12px}.progress-bar{flex:1;height:8px;background:#e5e7eb;border-radius:4px;overflow:hidden}.progress-fill{height:100%;background:linear-gradient(90deg,#2563eb,#4f46e5);border-radius:4px}
+    .close-btn{padding:8px;border:none;background:0 0;border-radius:8px;cursor:pointer;color:#6b7280}.close-btn:hover{background:#f3f4f6}
+    .dual-buttons{display:flex;gap:12px;margin-bottom:24px}.dual-btn{flex:1;display:flex;align-items:center;justify-content:center;gap:8px;padding:16px 24px;border:2px solid;border-radius:12px;font-size:15px;font-weight:600;cursor:pointer;transition:.2s}.dual-btn.diagnosis{border-color:#f59e0b;background:linear-gradient(135deg,#fef3c7,#fde68a);color:#92400e}.dual-btn.direct{border-color:#2563eb;background:linear-gradient(135deg,#dbeafe,#bfdbfe);color:#1e40af}
+    .list-container{overflow-y:auto;height:100%;padding:16px}.list-item{background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:16px;margin-bottom:8px;cursor:pointer}.list-item:hover{border-color:#2563eb;box-shadow:0 2px 8px rgba(37,99,235,.1)}.list-item-header{display:flex;gap:8px;margin-bottom:8px}.list-item-title{font-size:15px;font-weight:700;margin-bottom:4px}.list-item-desc{font-size:13px;color:#6b7280;margin-bottom:8px}.list-item-footer{display:flex;align-items:center;gap:12px;font-size:12px;color:#6b7280}.list-item-progress{flex:1;height:4px;background:#e5e7eb;border-radius:2px;overflow:hidden}.list-item-progress-fill{height:100%;background:#2563eb;border-radius:2px}
+    .upload-area{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:20px}.upload-box{border:3px dashed #cbd5e1;border-radius:16px;padding:60px;text-align:center;cursor:pointer;transition:.3s}.upload-box:hover{border-color:#2563eb;background:#eff6ff}.upload-box input{display:none}
+    .node-mode-toggle{display:flex;gap:4px;background:#f3f4f6;border-radius:8px;padding:4px;margin-bottom:16px}.node-mode-btn{flex:1;padding:8px;border:none;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;text-align:center}.node-mode-btn.active{background:#fff;color:#2563eb;box-shadow:0 1px 3px rgba(0,0,0,.1)}.node-mode-btn:not(.active){background:0 0;color:#6b7280}
+    .search-input{width:100%;padding:10px 12px;border:1px solid #e5e7eb;border-radius:8px;font-size:14px;margin-bottom:12px}.search-input:focus{outline:none;border-color:#2563eb}
+    .stats-row{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:16px}.stat-card{background:#f9fafb;border-radius:8px;padding:12px;text-align:center}.stat-card .num{font-size:24px;font-weight:700;color:#2563eb}.stat-card .label{font-size:11px;color:#6b7280}
+    .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:300}
+    .modal{background:#fff;border-radius:16px;padding:32px;max-width:750px;width:92%;max-height:85vh;overflow-y:auto}
+    .modal h2{font-size:20px;font-weight:700;margin-bottom:16px}
+    .question-option{display:flex;align-items:center;gap:12px;padding:14px 16px;margin-bottom:8px;border:2px solid #e5e7eb;border-radius:10px;cursor:pointer;transition:.2s}.question-option:hover{border-color:#2563eb;background:#eff6ff}.question-option.selected{border-color:#2563eb;background:#dbeafe}.question-option.correct{border-color:#16a34a;background:#dcfce7}.question-option.wrong{border-color:#ef4444;background:#fee2e2}
+    .option-number{width:28px;height:28px;border-radius:50%;background:#f3f4f6;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:#6b7280;flex-shrink:0}
+    .tab-content{padding:24px;overflow-y:auto;height:100%}
+    .sb-btn{display:flex;align-items:center;gap:8px;width:100%;padding:12px 16px;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;margin-bottom:6px;text-align:left}.sb-btn.active{background:#2563eb;color:#fff}.sb-btn:not(.active){background:#f3f4f6;color:#6b7280}
+    .diag-queue-item{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:6px;margin-bottom:6px;border:1px solid #e5e7eb}
+    .diag-queue-icon{width:20px;height:20px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#fff;flex-shrink:0}
+    .loading-spinner{width:48px;height:48px;border:4px solid #e5e7eb;border-top:4px solid #2563eb;border-radius:50%;animation:spin 1s linear infinite;margin:0 auto}
+    @keyframes spin{0%{transform:rotate(0deg)}100%{transform:rotate(360deg)}}
+  </style>
+<link rel="stylesheet" href="../../common-nav.css">
+</head>
+<body data-gnb-page="aiLearning" data-gnb-base="../../">
+<div id="app"></div>
+<script>
+// ===== 전역 상태 =====
+let allData=[],unitNodes=[],lessonNodes=[];
+let currentTab='map',viewMode='map',nodeDisplayMode='unit';
+let selectedNodeId=null,searchText='';
+let filterSchool='초등',filterGrade='초5-6',filterArea='수와 연산',filterStatus='전체',filterSemester='전체';
+let mapState={scale:.7,position:{x:50,y:30},isDragging:false,dragStart:{x:0,y:0}};
+let rankingPeriod='weekly',communityFilter='all',recordFilter='all';
+let defaultLoading=false, defaultLoadError=false;
+
+// ===== 더미 데이터 (프로토타입 원본) =====
+const rankingData={weekly:[{rank:1,name:'김수학',solved:45,avatar:'🏆',accuracy:92},{rank:2,name:'이공부',solved:42,avatar:'🥈',accuracy:88},{rank:3,name:'박열정',solved:38,avatar:'🥉',accuracy:85},{rank:4,name:'최도전',solved:35,avatar:'⭐',accuracy:82},{rank:5,name:'정꾸준',solved:32,avatar:'💪',accuracy:79},{rank:12,name:'나',solved:15,avatar:'👤',accuracy:73,isMe:true}],monthly:[{rank:1,name:'김수학',solved:187,avatar:'🏆',accuracy:91},{rank:2,name:'이공부',solved:165,avatar:'🥈',accuracy:87},{rank:3,name:'박열정',solved:152,avatar:'🥉',accuracy:84},{rank:4,name:'최도전',solved:148,avatar:'⭐',accuracy:81},{rank:5,name:'정꾸준',solved:140,avatar:'💪',accuracy:78},{rank:8,name:'나',solved:58,avatar:'👤',accuracy:73,isMe:true}],total:[{rank:1,name:'김수학',solved:845,avatar:'🏆',accuracy:90},{rank:2,name:'이공부',solved:798,avatar:'🥈',accuracy:86},{rank:3,name:'박열정',solved:756,avatar:'🥉',accuracy:83},{rank:4,name:'최도전',solved:723,avatar:'⭐',accuracy:80},{rank:5,name:'정꾸준',solved:698,avatar:'💪',accuracy:77},{rank:15,name:'나',solved:289,avatar:'👤',accuracy:73,isMe:true}]};
+const suneungProblems=[{id:1,year:2024,session:'수능',number:1,title:'수열의 극한',difficulty:'하',accuracy:89,totalAttempts:5420,myAttempts:2,solved:true},{id:2,year:2024,session:'수능',number:15,title:'미분법의 활용',difficulty:'중',accuracy:67,totalAttempts:5380,myAttempts:3,solved:true},{id:3,year:2024,session:'수능',number:22,title:'적분법',difficulty:'상',accuracy:35,totalAttempts:5210,myAttempts:0,solved:false},{id:4,year:2024,session:'9월모평',number:20,title:'확률의 덧셈정리',difficulty:'중',accuracy:58,totalAttempts:4230,myAttempts:1,solved:true},{id:5,year:2024,session:'6월모평',number:30,title:'킬러문항',difficulty:'상',accuracy:12,totalAttempts:4150,myAttempts:5,solved:false},{id:6,year:2023,session:'수능',number:22,title:'함수의 극한',difficulty:'상',accuracy:28,totalAttempts:8920,myAttempts:2,solved:false}];
+const communityPosts=[{id:1,type:'question',title:'분수 나눗셈에서 역수를 곱하는 이유가 뭔가요?',author:'수학초보',avatar:'🙋',time:'10분 전',answers:3,likes:12,views:45},{id:2,type:'solution',title:'[풀이공유] 2024 수능 22번 색다른 풀이법',author:'수학마스터',avatar:'🎓',time:'1시간 전',answers:8,likes:47,views:234},{id:3,type:'question',title:'일차방정식 활용 문제 어떻게 접근하나요?',author:'중2학생',avatar:'📚',time:'2시간 전',answers:5,likes:8,views:67},{id:4,type:'tip',title:'수학 공부 꿀팁 공유합니다!',author:'공부왕',avatar:'💡',time:'3시간 전',answers:15,likes:89,views:456},{id:5,type:'solution',title:'[풀이공유] 소인수분해 빠르게 하는 방법',author:'계산왕',avatar:'⚡',time:'5시간 전',answers:6,likes:34,views:189}];
+const myRecordData={totalSolved:89,totalAttempts:156,avgAccuracy:73,completedNodes:3,streak:7,areaStats:[{area:'수와 연산',solved:35,accuracy:78,total:50},{area:'도형과 측정',solved:22,accuracy:71,total:35},{area:'변화와 관계',solved:15,accuracy:68,total:25},{area:'자료와 가능성',solved:5,accuracy:70,total:15}],recentProblems:[{id:1,title:'분수의 나눗셈 기본',node:'분수의 나눗셈',result:'correct',time:'오늘'},{id:2,title:'소인수분해 응용',node:'소인수분해',result:'wrong',time:'오늘'},{id:3,title:'정수 연산',node:'정수와 유리수',result:'correct',time:'어제'},{id:4,title:'문자식 계산',node:'문자의 사용과 식',result:'correct',time:'어제'},{id:5,title:'일차방정식 활용',node:'일차방정식',result:'wrong',time:'2일 전'}]};
+let wrongAnswers=[];
+
+// ===== 진단 상태 (CAT 방식) =====
+// diagState moved to diagnosis system section
+
+// ===== 유틸 =====
+function getStatusColor(s){return{completed:'#16a34a','in-progress':'#3b82f6',diagnosing:'#f59e0b','not-started':'#94a3b8'}[s]||'#94a3b8'}
+function getStatusLabel(s){return{completed:'완료','in-progress':'진행중',diagnosing:'진단중','not-started':'미시작'}[s]||'미시작'}
+function getGradeLabelFromId(id){const p=String(id).substring(0,2);return{E2:'초1-2',E4:'초3-4',E6:'초5-6',M1:'중1',M2:'중2',M3:'중3',H1:'고1'}[p]||'?'}
+function parseSchool(id){const p=String(id).substring(0,1);return p==='E'?'초등':p==='M'?'중등':p==='H'?'고등':'기타'}
+
+// ===== 엑셀 로드 =====
+function loadExcel(file){
+  const reader=new FileReader();
+  reader.onload=e=>{
+    try{const wb=XLSX.read(e.target.result,{type:'binary'});allData=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);processData();render();setTimeout(fitToNodes,400)}catch(err){alert('파일 읽기 오류: '+err.message)}};
+  reader.readAsBinaryString(file)}
+
+// ===== 기본 엑셀 자동 로드 =====
+function loadDefaultExcel(){
+  defaultLoading=true;defaultLoadError=false;render();
+  const url='../../%ED%86%B5%ED%95%A9_%ED%95%99%EC%8A%B5%EB%A7%B5_%EA%B3%84%ED%86%B5%EB%8F%84_%EC%97%B0%EA%B2%B0_%EC%99%84%EC%84%B1.xlsx';
+  fetch(url).then(r=>{if(!r.ok)throw new Error('파일을 찾을 수 없습니다 ('+r.status+')');return r.arrayBuffer()}).then(buf=>{
+    try{const wb=XLSX.read(buf,{type:'array'});allData=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);processData();defaultLoading=false;render();setTimeout(fitToNodes,400)}
+    catch(err){defaultLoading=false;defaultLoadError=true;render();console.error('엑셀 파싱 오류:',err)}
+  }).catch(err=>{defaultLoading=false;defaultLoadError=true;render();console.error('기본 데이터 로드 실패:',err)})}
+
+function reloadExcelFile(){
+  document.getElementById('reloadFileInput').click();
+}
+function handleReloadFile(input){
+  if(input.files&&input.files[0]){allData=[];unitNodes=[];lessonNodes=[];loadExcel(input.files[0])}
+}
+
+// ===== 데이터 가공 =====
+function processData(){
+  const lm={};
+  allData.forEach(row=>{
+    const id=String(row['3단계ID']||'').trim();if(!id||lm[id])return;
+    const r=Math.random(),st=r<.1?'completed':r<.15?'in-progress':r<.18?'diagnosing':'not-started';
+    const prob=Math.floor(Math.random()*15)+5;
+    const uname=String(row['단원명']||'').trim();
+    const sem=String(row['적용학기']||'');
+    lm[id]={id,code:String(row['성취기준코드']||''),title:String(row['3단계내용요소']||''),area:String(row['내용체계영역']||''),school:parseSchool(id),gradeLabel:getGradeLabelFromId(id),stage1:String(row['1단계내용요소']||''),stage2:String(row['2단계내용요소']||''),unitKey:uname,unitName:uname,semester:sem,prereqs:String(row['선수학습ID']||'').split(',').map(s=>s.trim()).filter(s=>s&&s!=='nan'),nexts:String(row['후속학습ID']||'').split(',').map(s=>s.trim()).filter(s=>s&&s!=='nan'),achievement:String(row['성취기준']||''),status:st,videos:Math.floor(Math.random()*4)+1,problems:prob,solved:st==='completed'?prob:st==='in-progress'?Math.floor(Math.random()*prob):0,x:0,y:0}});
+  lessonNodes=Object.values(lm);
+  // 단원 그룹핑: J열 단원명 기준
+  const um={};let unitIdx=0;
+  allData.forEach(row=>{
+    const uname=String(row['단원명']||'').trim();if(!uname)return;
+    const lid=String(row['3단계ID']||'').trim();
+    const firstLessonId=lid||String(row['2단계ID']||'');
+    if(!um[uname]){
+      unitIdx++;const uid='U'+String(unitIdx).padStart(3,'0');
+      const sem=String(row['적용학기']||'');
+      um[uname]={id:uid,title:uname,area:String(row['내용체계영역']||''),school:parseSchool(firstLessonId),gradeLabel:getGradeLabelFromId(firstLessonId),grade:String(row['학년']||''),semester:sem,stage1:String(row['1단계내용요소']||''),lessons:[],prereqUnits:new Set(),x:0,y:0};
+    }
+    if(lid){
+      if(!um[uname].lessons.includes(lid))um[uname].lessons.push(lid);
+      // lesson에 unitKey를 단원 ID로 설정
+      const ln=lm[lid];if(ln)ln.unitKey=um[uname].id;
+    }
+  });
+  // 단원 간 선수관계
+  const umById={};Object.values(um).forEach(u=>umById[u.id]=u);
+  lessonNodes.forEach(ln=>{ln.prereqs.forEach(pid=>{const pl=lm[pid];if(pl&&pl.unitKey!==ln.unitKey){const u=umById[ln.unitKey];if(u)u.prereqUnits.add(pl.unitKey)}})});
+  unitNodes=Object.values(um).map(u=>({...u,prereqUnits:[...u.prereqUnits]}));
+  layoutNodes()}
+
+// ===== 레이아웃 (가로: 선수→후속) =====
+function layoutNodes(){
+  const W=220,H=130,GX=60,GY=30;
+  // 차시
+  const lm={};lessonNodes.forEach(n=>{lm[n.id]=n});
+  const dc={};
+  function gd(id,v){if(dc[id]!==undefined)return dc[id];if(!v)v=new Set();if(v.has(id))return 0;v.add(id);const n=lm[id];if(!n||!n.prereqs.length){dc[id]=0;return 0}let m=0;n.prereqs.forEach(p=>{if(lm[p])m=Math.max(m,gd(p,v)+1)});dc[id]=m;return m}
+  lessonNodes.forEach(n=>gd(n.id));
+  const lg={};lessonNodes.forEach(n=>{const d=dc[n.id]||0;if(!lg[d])lg[d]=[];lg[d].push(n)});
+  Object.keys(lg).forEach(l=>{const g=lg[l];g.sort((a,b)=>a.area.localeCompare(b.area)||a.id.localeCompare(b.id));g.forEach((n,i)=>{n.x=parseInt(l)*(W+GX)+50;n.y=i*(H+GY)+50})});
+  // 단원
+  const um2={};unitNodes.forEach(n=>{um2[n.id]=n});
+  const udc={};
+  function gud(id,v){if(udc[id]!==undefined)return udc[id];if(!v)v=new Set();if(v.has(id))return 0;v.add(id);const n=um2[id];if(!n||!n.prereqUnits.length){udc[id]=0;return 0}let m=0;n.prereqUnits.forEach(p=>{if(um2[p])m=Math.max(m,gud(p,v)+1)});udc[id]=m;return m}
+  unitNodes.forEach(n=>gud(n.id));
+  const ulg={};unitNodes.forEach(n=>{const d=udc[n.id]||0;if(!ulg[d])ulg[d]=[];ulg[d].push(n)});
+  Object.keys(ulg).forEach(l=>{const g=ulg[l];g.sort((a,b)=>a.area.localeCompare(b.area)||a.id.localeCompare(b.id));g.forEach((n,i)=>{n.x=parseInt(l)*(W+GX)+50;n.y=i*(H+GY)+50})})}
+
+// ===== 로드 후 뷰포트 맞추기 =====
+function fitToNodes(){
+  const nodes=nodeDisplayMode==='unit'?getFilteredUnits():getFilteredLessons();
+  if(!nodes.length)return;
+  let minX=1e9,minY=1e9,maxX=-1e9,maxY=-1e9;
+  nodes.forEach(n=>{if(n.x<minX)minX=n.x;if(n.y<minY)minY=n.y;if(n.x+220>maxX)maxX=n.x+220;if(n.y+130>maxY)maxY=n.y+130});
+  const c=document.getElementById('mapContainer');if(!c)return;
+  const cw=c.clientWidth,ch=c.clientHeight,nw=maxX-minX+100,nh=maxY-minY+100;
+  const s=Math.min(cw/nw,ch/nh,1.2);
+  mapState.scale=Math.max(.15,Math.min(s,1.5));
+  mapState.position={x:-minX*mapState.scale+50,y:-minY*mapState.scale+30};
+  updateMapTransform();
+  const el=document.getElementById('mapScale');if(el)el.textContent=Math.round(mapState.scale*100)+'%'}
+
+// ===== 필터링 =====
+function getFilteredLessons(){return lessonNodes.filter(n=>{if(filterSchool!=='전체'&&n.school!==filterSchool)return false;if(filterGrade!=='전체'&&n.gradeLabel!==filterGrade)return false;if(filterArea!=='전체'&&n.area!==filterArea)return false;if(filterSemester!=='전체'&&n.semester!==filterSemester)return false;if(filterStatus!=='전체'&&n.status!==filterStatus)return false;if(searchText&&!n.title.includes(searchText)&&!n.code.includes(searchText)&&!n.id.includes(searchText))return false;return true})}
+function getFilteredUnits(){return unitNodes.filter(n=>{if(filterSchool!=='전체'&&n.school!==filterSchool)return false;if(filterGrade!=='전체'&&n.gradeLabel!==filterGrade)return false;if(filterArea!=='전체'&&n.area!==filterArea)return false;if(filterSemester!=='전체'&&n.semester!==filterSemester)return false;if(searchText&&!n.title.includes(searchText)&&!n.id.includes(searchText))return false;return true})}
+function getUniqueGrades(){const s=new Set();lessonNodes.forEach(n=>{if(filterSchool==='전체'||n.school===filterSchool)s.add(n.gradeLabel)});return[...s].sort()}
+function getUniqueAreas(){const s=new Set();lessonNodes.forEach(n=>{if(filterSchool==='전체'||n.school===filterSchool)s.add(n.area)});return[...s]}
+
+// ===== 메인 렌더 =====
+function render(){document.getElementById('app').innerHTML=renderHeader()+renderBody();lucide.createIcons();if(currentTab==='map'&&allData.length>0)initMap()}
+
+function renderHeader(){return''}
+
+function renderBody(){
+  if(currentTab==='map'){if(!allData.length)return renderUpload();return`<div class="main-container">${renderMapSidebar()}<div class="main-content" id="mainContent">${viewMode==='map'?renderMapArea():renderListView()}</div></div>`}
+  const tabMap={ranking:{sb:renderRankingSidebar,ct:renderRankingContent},exam:{sb:renderExamSidebar,ct:renderExamContent},community:{sb:renderCommunitySidebar,ct:renderCommunityContent},record:{sb:renderRecordSidebar,ct:renderRecordContent},workbook:{sb:renderWorkbookSidebar,ct:renderWorkbookContent}};
+  const t=tabMap[currentTab];if(!t)return'';
+  return`<div class="main-container">${t.sb()}<div class="main-content" id="mainContent">${t.ct()}</div></div>`}
+
+function renderUpload(){
+  if(defaultLoading){return`<div class="upload-area" style="height:calc(100vh - 64px)"><div style="text-align:center"><div class="loading-spinner"></div><h2 style="font-size:20px;color:#374151;margin-top:20px;margin-bottom:8px">학습맵 데이터 불러오는 중...</h2><p style="font-size:14px;color:#6b7280">통합_학습맵_계통도_연결_완성.xlsx 파일을 로드하고 있습니다</p></div></div>`}
+  if(defaultLoadError){return`<div class="upload-area" style="height:calc(100vh - 64px)"><div style="text-align:center"><div style="font-size:48px;margin-bottom:16px">⚠️</div><h2 style="font-size:20px;color:#374151;margin-bottom:8px">기본 데이터 로드 실패</h2><p style="font-size:14px;color:#6b7280;margin-bottom:20px">기본 엑셀 파일을 불러올 수 없습니다.<br>직접 파일을 선택해 주세요.</p><div class="upload-box" onclick="document.getElementById('fileInput').click()" style="display:inline-block"><div style="font-size:36px;margin-bottom:12px">📂</div><h3 style="font-size:16px;color:#2563eb;margin-bottom:4px">파일 직접 선택</h3><p style="font-size:13px;color:#6b7280">.xlsx 파일을 선택하세요</p><input type="file" id="fileInput" accept=".xlsx,.xls" onchange="loadExcel(this.files[0])"></div><div style="margin-top:16px"><button onclick="loadDefaultExcel()" style="padding:10px 24px;border:1px solid #e5e7eb;border-radius:8px;background:#fff;color:#374151;font-size:14px;cursor:pointer">🔄 다시 시도</button></div></div></div>`}
+  return`<div class="upload-area" style="height:calc(100vh - 64px)"><div class="upload-box" onclick="document.getElementById('fileInput').click()"><div style="font-size:48px;margin-bottom:16px">📊</div><h2 style="font-size:20px;color:#374151;margin-bottom:8px">학습맵 데이터 업로드</h2><p style="font-size:14px;color:#6b7280">통합_학습맵_계통도연결.xlsx 파일을 선택하세요</p><input type="file" id="fileInput" accept=".xlsx,.xls" onchange="loadExcel(this.files[0])"></div></div>`}
+
+// ===== 학습맵 사이드바 =====
+function renderMapSidebar(){
+  const grades=getUniqueGrades(),areas=getUniqueAreas(),filtered=nodeDisplayMode==='unit'?getFilteredUnits():getFilteredLessons();
+  const llNodes=[...learningList].map(id=>lessonNodes.find(n=>n.id===id)).filter(Boolean);
+  const continueHtml=lastLearning?`<div style="background:linear-gradient(135deg,#dbeafe,#bfdbfe);border-radius:10px;padding:14px;margin-bottom:16px;cursor:pointer" onclick="goToLastLearning()"><div style="font-size:12px;font-weight:600;color:#1e40af;margin-bottom:4px">▶ 이어하기</div><div style="font-size:13px;font-weight:700;color:#1e3a5f">${lastLearning.title}</div><div style="font-size:11px;color:#3b82f6;margin-top:2px">${lastLearning.type==='video'?'📹 영상':'📝 문제'}</div></div>`:'';
+  const llHtml=llNodes.length?`<div style="background:linear-gradient(135deg,#f3e8ff,#e9d5ff);border-radius:10px;padding:14px;margin-bottom:16px"><div style="font-size:12px;font-weight:600;color:#7c3aed;margin-bottom:8px">📋 학습목록 (${llNodes.length}개)</div>${llNodes.slice(0,5).map(n=>`<div style="display:flex;align-items:center;gap:6px;font-size:12px;padding:4px 0;cursor:pointer;color:#374151" onclick="selectedNodeId='${n.id}';nodeDisplayMode='lesson';detailTab='overview';render()"><span style="color:#8b5cf6">●</span>${n.title.length>14?n.title.substring(0,14)+'…':n.title}</div>`).join('')}${llNodes.length>5?`<div style="font-size:11px;color:#8b5cf6;margin-top:4px">외 ${llNodes.length-5}개</div>`:''}</div>`:'';
+  return`<div class="sidebar"><h3>🗺️ 학습맵</h3>
+  ${continueHtml}${llHtml}
+  <div class="node-mode-toggle"><button class="node-mode-btn ${nodeDisplayMode==='unit'?'active':''}" onclick="nodeDisplayMode='unit';render();setTimeout(fitToNodes,200)">단원명</button><button class="node-mode-btn ${nodeDisplayMode==='lesson'?'active':''}" onclick="nodeDisplayMode='lesson';render();setTimeout(fitToNodes,200)">차시명</button></div>
+  <input class="search-input" placeholder="🔍 검색..." value="${searchText}" oninput="searchText=this.value;render()">
+  <div class="view-toggle"><button class="view-btn ${viewMode==='map'?'active':''}" onclick="viewMode='map';render()">🗺️ 맵</button><button class="view-btn ${viewMode==='list'?'active':''}" onclick="viewMode='list';render()">📋 리스트</button></div>
+  <div class="filter-group"><label class="filter-label">학교급</label><select class="filter-select" onchange="filterSchool=this.value;filterGrade='전체';render();setTimeout(fitToNodes,200)"><option ${filterSchool==='전체'?'selected':''}>전체</option><option ${filterSchool==='초등'?'selected':''}>초등</option><option ${filterSchool==='중등'?'selected':''}>중등</option><option ${filterSchool==='고등'?'selected':''}>고등</option></select></div>
+  <div class="filter-group"><label class="filter-label">학년</label><select class="filter-select" onchange="filterGrade=this.value;render();setTimeout(fitToNodes,200)"><option ${filterGrade==='전체'?'selected':''}>전체</option>${grades.map(g=>`<option ${filterGrade===g?'selected':''}>${g}</option>`).join('')}</select></div>
+  <div class="filter-group"><label class="filter-label">학기</label><select class="filter-select" onchange="filterSemester=this.value;render();setTimeout(fitToNodes,200)"><option ${filterSemester==='전체'?'selected':''}>전체</option><option value="1" ${filterSemester==='1'?'selected':''}>1학기</option><option value="2" ${filterSemester==='2'?'selected':''}>2학기</option></select></div>
+  <div class="filter-group"><label class="filter-label">영역</label><select class="filter-select" onchange="filterArea=this.value;render();setTimeout(fitToNodes,200)"><option ${filterArea==='전체'?'selected':''}>전체</option>${areas.map(a=>`<option ${filterArea===a?'selected':''}>${a}</option>`).join('')}</select></div>
+  <div class="filter-group"><label class="filter-label">상태</label><select class="filter-select" onchange="filterStatus=this.value;render()"><option ${filterStatus==='전체'?'selected':''}>전체</option><option value="completed" ${filterStatus==='completed'?'selected':''}>완료</option><option value="in-progress" ${filterStatus==='in-progress'?'selected':''}>진행중</option><option value="not-started" ${filterStatus==='not-started'?'selected':''}>미시작</option></select></div>
+  <div class="stats-row"><div class="stat-card"><div class="num">${filtered.length}</div><div class="label">표시</div></div><div class="stat-card"><div class="num">${nodeDisplayMode==='unit'?unitNodes.length:lessonNodes.length}</div><div class="label">전체</div></div></div>
+  <div class="status-legend"><h4>상태 범례</h4><div class="legend-item"><div class="legend-color completed"></div>완료</div><div class="legend-item"><div class="legend-color in-progress"></div>진행중</div><div class="legend-item"><div class="legend-color diagnosing"></div>진단중</div><div class="legend-item"><div class="legend-color not-started"></div>미시작</div><div class="legend-item"><div class="legend-color" style="background:#f3e8ff;border-color:#8b5cf6"></div>학습목록</div></div>
+  <div style="margin-top:16px;padding-top:16px;border-top:1px solid #e5e7eb">
+    <input type="file" id="reloadFileInput" accept=".xlsx,.xls" style="display:none" onchange="handleReloadFile(this)">
+    <button onclick="reloadExcelFile()" style="width:100%;display:flex;align-items:center;justify-content:center;gap:8px;padding:12px;border:1px solid #e5e7eb;border-radius:8px;background:#fff;color:#374151;font-size:13px;font-weight:600;cursor:pointer;transition:.2s" onmouseover="this.style.borderColor='#2563eb';this.style.background='#eff6ff'" onmouseout="this.style.borderColor='#e5e7eb';this.style.background='#fff'">📂 데이터 파일 다시 선택</button>
+    <p style="font-size:11px;color:#9ca3af;text-align:center;margin-top:6px">다른 엑셀 파일로 학습맵 교체</p>
+  </div></div>`}
+
+// ===== 랭킹 탭 =====
+function renderRankingSidebar(){const r=rankingData[rankingPeriod].find(x=>x.isMe);return`<div class="sidebar"><h3>🏆 랭킹</h3><button class="sb-btn ${rankingPeriod==='weekly'?'active':''}" onclick="rankingPeriod='weekly';render()">📅 주간</button><button class="sb-btn ${rankingPeriod==='monthly'?'active':''}" onclick="rankingPeriod='monthly';render()">📆 월간</button><button class="sb-btn ${rankingPeriod==='total'?'active':''}" onclick="rankingPeriod='total';render()">🏅 전체</button><div style="background:#fef3c7;border-radius:8px;padding:16px;margin-top:20px"><h4 style="font-size:14px;color:#92400e;margin-bottom:8px">🏆 나의 순위</h4><p style="font-size:24px;font-weight:700;color:#d97706">${r?r.rank:'-'}위</p><p style="font-size:13px;color:#a16207;margin-top:4px">${r?r.solved:0}문제 해결</p></div></div>`}
+function renderRankingContent(){const d=rankingData[rankingPeriod],pl={weekly:'주간',monthly:'월간',total:'전체'}[rankingPeriod];return`<div class="tab-content"><div style="background:linear-gradient(135deg,#fef3c7,#fde68a);padding:24px;border-radius:16px;margin-bottom:24px"><div style="display:flex;align-items:center;gap:12px;margin-bottom:8px"><span style="font-size:32px">🏆</span><h2 style="font-size:24px;color:#92400e">${pl} 랭킹</h2></div><p style="color:#a16207;font-size:14px">문제 해결 개수 기준 · 매주 월요일 초기화</p></div><div style="display:flex;flex-direction:column;gap:12px">${d.map(u=>`<div style="display:flex;align-items:center;gap:16px;padding:16px 20px;border-radius:12px;${u.isMe?'background:#dbeafe;border:2px solid #3b82f6':'background:#f9fafb;border:1px solid #e5e7eb'}"><div style="font-size:24px;font-weight:700;width:50px;text-align:center;${u.rank<=3?'color:#f59e0b':'color:#9ca3af'}">${u.rank}</div><div style="font-size:32px">${u.avatar}</div><div style="flex:1"><div style="font-weight:700;font-size:16px">${u.name}${u.isMe?'<span style="margin-left:8px;font-size:12px;background:#2563eb;color:#fff;padding:2px 10px;border-radius:20px">나</span>':''}</div><div style="display:flex;gap:16px;font-size:13px;color:#6b7280;margin-top:4px"><span>📝 ${u.solved}문제</span><span>🎯 ${u.accuracy}%</span></div></div>${u.rank<=3?`<div style="font-size:32px">${['','🥇','🥈','🥉'][u.rank]}</div>`:''}</div>`).join('')}</div></div>`}
+
+// ===== 수능기출 탭 =====
+function renderExamSidebar(){return`<div class="sidebar"><h3>📝 수능 기출</h3><div class="filter-group"><label class="filter-label">연도</label><select class="filter-select"><option>전체</option><option>2024</option><option>2023</option></select></div><div class="filter-group"><label class="filter-label">시험</label><select class="filter-select"><option>전체</option><option>수능</option><option>9월모평</option><option>6월모평</option></select></div><div class="filter-group"><label class="filter-label">난이도</label><select class="filter-select"><option>전체</option><option>하</option><option>중</option><option>상</option></select></div><div class="filter-group"><label class="filter-label">풀이 상태</label><select class="filter-select"><option>전체</option><option value="solved">클리어</option><option value="unsolved">미해결</option></select></div></div>`}
+function renderExamContent(){return`<div class="tab-content"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px"><div><h2 style="font-size:20px;margin-bottom:4px">수능 기출문제</h2><p style="font-size:14px;color:#6b7280">총 ${suneungProblems.length}문제 · 클리어 ${suneungProblems.filter(p=>p.solved).length}문제</p></div></div><div style="display:flex;flex-direction:column;gap:12px">${suneungProblems.map(p=>`<div style="display:flex;align-items:center;gap:16px;padding:16px;background:#f9fafb;border-radius:12px;cursor:pointer" onmouseover="this.style.background='#eff6ff'" onmouseout="this.style.background='#f9fafb'"><div style="min-width:80px"><div style="font-size:14px;font-weight:700;color:#2563eb">${p.year}</div><div style="font-size:12px;color:#6b7280">${p.session}</div></div><div style="flex:1"><div style="display:flex;align-items:center;gap:8px;margin-bottom:4px"><span style="font-weight:600">${p.number}번. ${p.title}</span><span style="padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;background:${p.difficulty==='하'?'#dcfce7':p.difficulty==='중'?'#fef3c7':'#fee2e2'};color:${p.difficulty==='하'?'#166534':p.difficulty==='중'?'#92400e':'#991b1b'}">${p.difficulty}</span>${p.solved?'<span style="color:#16a34a">✓</span>':''}</div><div style="display:flex;gap:16px;font-size:12px;color:#6b7280"><span style="color:${p.accuracy>=70?'#16a34a':p.accuracy>=40?'#f59e0b':'#dc2626'};font-weight:600">정답률 ${p.accuracy}%</span><span>👥 ${p.totalAttempts.toLocaleString()}명</span><span style="color:#2563eb;font-weight:600">내 시도 ${p.myAttempts}회</span></div></div><button style="padding:8px 16px;border:none;border-radius:8px;background:#2563eb;color:#fff;font-weight:600;cursor:pointer" onclick="alert('풀기 기능 준비중')">풀기</button></div>`).join('')}</div></div>`}
+
+// ===== 커뮤니티 탭 =====
+function renderCommunitySidebar(){return`<div class="sidebar"><h3>💬 커뮤니티</h3><button class="search-btn" style="background:linear-gradient(135deg,#16a34a,#15803d)" onclick="alert('질문 작성 기능 준비중')">✏️ 질문하기</button><button class="sb-btn ${communityFilter==='all'?'active':''}" onclick="communityFilter='all';render()">📋 전체</button><button class="sb-btn ${communityFilter==='question'?'active':''}" onclick="communityFilter='question';render()">❓ 질문</button><button class="sb-btn ${communityFilter==='solution'?'active':''}" onclick="communityFilter='solution';render()">💡 풀이공유</button><button class="sb-btn ${communityFilter==='tip'?'active':''}" onclick="communityFilter='tip';render()">✨ 꿀팁</button><div style="background:#eff6ff;border-radius:8px;padding:16px;margin-top:16px"><h4 style="font-size:13px;color:#1e40af;margin-bottom:8px">💬 이용안내</h4><p style="font-size:12px;color:#3b82f6">• 문제 클리어 후 풀이 공유 가능<br>• 욕설/비방 게시글은 삭제됩니다</p></div></div>`}
+function renderCommunityContent(){const ti={question:'❓',solution:'💡',tip:'✨'},tl={question:'질문',solution:'풀이공유',tip:'꿀팁'},posts=communityFilter==='all'?communityPosts:communityPosts.filter(p=>p.type===communityFilter);return`<div class="tab-content"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px"><div><h2 style="font-size:20px;margin-bottom:4px">커뮤니티</h2><p style="font-size:14px;color:#6b7280">총 ${posts.length}개의 게시글</p></div><button style="padding:10px 20px;border:none;border-radius:8px;background:linear-gradient(135deg,#16a34a,#15803d);color:#fff;font-weight:600;cursor:pointer" onclick="alert('질문 작성 기능 준비중')">✏️ 질문하기</button></div><div style="display:flex;flex-direction:column;gap:12px">${posts.map(p=>`<div style="padding:16px;background:#fff;border:1px solid #e5e7eb;border-radius:12px;cursor:pointer" onmouseover="this.style.borderColor='#2563eb'" onmouseout="this.style.borderColor='#e5e7eb'"><div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><span style="padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;background:${p.type==='question'?'#fef3c7':p.type==='solution'?'#dbeafe':'#dcfce7'};color:${p.type==='question'?'#92400e':p.type==='solution'?'#1e40af':'#166534'}">${ti[p.type]} ${tl[p.type]}</span><span style="font-size:12px;color:#6b7280">${p.time}</span></div><h3 style="font-size:15px;font-weight:600;margin-bottom:8px">${p.title}</h3><div style="display:flex;align-items:center;justify-content:space-between"><div style="display:flex;align-items:center;gap:8px"><span style="font-size:20px">${p.avatar}</span><span style="font-size:13px;color:#374151">${p.author}</span></div><div style="display:flex;gap:16px;font-size:12px;color:#6b7280"><span>💬${p.answers}</span><span>👍${p.likes}</span><span>👁${p.views}</span></div></div><div style="display:flex;gap:6px;margin-top:8px;padding-top:8px;border-top:1px solid #f3f4f6"><button style="padding:4px 10px;border:1px solid #e5e7eb;border-radius:6px;background:#fff;font-size:11px;cursor:pointer" onclick="alert('댓글 기능 준비중')">💬 댓글</button><button style="padding:4px 10px;border:1px solid #e5e7eb;border-radius:6px;background:#fff;font-size:11px;cursor:pointer" onclick="alert('도움이 됐어요!')">👍 도움됨</button><button style="padding:4px 10px;border:1px solid #e5e7eb;border-radius:6px;background:#fff;font-size:11px;cursor:pointer;color:#dc2626" onclick="showReport('post_${p.id}','community')">🚨 신고</button></div></div>`).join('')}</div>
+  <div style="background:#fef2f2;border-radius:8px;padding:12px;margin-top:16px;font-size:12px;color:#991b1b">⚠️ 부적절한 댓글(욕설, 비방, 스팸 등)은 관리자 검토 후 삭제되며, 반복 시 이용이 제한될 수 있습니다.</div></div>`}
+
+// ===== 나의기록 탭 =====
+function renderRecordSidebar(){return`<div class="sidebar"><h3>📊 나의 기록</h3><button class="sb-btn ${recordFilter==='all'?'active':''}" onclick="recordFilter='all';render()">📋 전체</button><button class="sb-btn ${recordFilter==='correct'?'active':''}" onclick="recordFilter='correct';render()">✅ 클리어</button><button class="sb-btn ${recordFilter==='wrong'?'active':''}" onclick="recordFilter='wrong';render()">❌ 미해결</button><div style="background:#dcfce7;border-radius:8px;padding:16px;margin-top:16px"><h4 style="font-size:14px;color:#166534;margin-bottom:8px">🔥 연속 학습</h4><p style="font-size:28px;font-weight:700;color:#16a34a">${myRecordData.streak}일</p></div></div>`}
+function renderRecordContent(){const fp=recordFilter==='all'?myRecordData.recentProblems:myRecordData.recentProblems.filter(p=>p.result===recordFilter);return`<div class="tab-content"><h2 style="font-size:20px;margin-bottom:20px">나의 학습 기록</h2><div style="display:grid;grid-template-columns:repeat(5,1fr);gap:16px;margin-bottom:24px"><div style="background:linear-gradient(135deg,#dbeafe,#bfdbfe);padding:20px;border-radius:12px;text-align:center"><div style="font-size:28px;font-weight:700;color:#1e40af">${myRecordData.totalSolved}</div><div style="font-size:13px;color:#3b82f6;margin-top:4px">총 풀이</div></div><div style="background:linear-gradient(135deg,#dcfce7,#bbf7d0);padding:20px;border-radius:12px;text-align:center"><div style="font-size:28px;font-weight:700;color:#166534">${myRecordData.avgAccuracy}%</div><div style="font-size:13px;color:#16a34a;margin-top:4px">평균 정답률</div></div><div style="background:linear-gradient(135deg,#f3e8ff,#e9d5ff);padding:20px;border-radius:12px;text-align:center"><div style="font-size:28px;font-weight:700;color:#7c3aed">${myRecordData.completedNodes}</div><div style="font-size:13px;color:#8b5cf6;margin-top:4px">완료 성취기준</div></div><div style="background:linear-gradient(135deg,#fef3c7,#fde68a);padding:20px;border-radius:12px;text-align:center"><div style="font-size:28px;font-weight:700;color:#d97706">${myRecordData.streak}</div><div style="font-size:13px;color:#f59e0b;margin-top:4px">연속 학습일</div></div><div style="background:linear-gradient(135deg,#fee2e2,#fecaca);padding:20px;border-radius:12px;text-align:center"><div style="font-size:28px;font-weight:700;color:#dc2626">${myRecordData.totalAttempts}</div><div style="font-size:13px;color:#ef4444;margin-top:4px">총 시도</div></div></div><div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:20px;margin-bottom:24px"><h3 style="font-size:16px;font-weight:600;margin-bottom:16px">📊 영역별 정답률</h3>${myRecordData.areaStats.map(s=>`<div style="margin-bottom:12px"><div style="display:flex;justify-content:space-between;margin-bottom:6px"><span style="font-size:14px">${s.area}</span><span style="font-size:14px;font-weight:700;color:#2563eb">${s.accuracy}%</span></div><div style="display:flex;align-items:center;gap:8px"><div style="flex:1;height:10px;background:#e5e7eb;border-radius:5px;overflow:hidden"><div style="height:100%;width:${s.accuracy}%;background:linear-gradient(90deg,#3b82f6,#6366f1);border-radius:5px"></div></div><span style="font-size:12px;color:#6b7280;min-width:60px">${s.solved}/${s.total}</span></div></div>`).join('')}</div><div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:20px;margin-bottom:24px"><h3 style="font-size:16px;font-weight:600;margin-bottom:16px">📝 최근 풀이 문제</h3>${fp.map(p=>`<div style="display:flex;align-items:center;gap:12px;padding:12px;background:#f9fafb;border-radius:8px;margin-bottom:8px"><span style="font-size:20px">${p.result==='correct'?'✅':'❌'}</span><div style="flex:1"><div style="font-size:14px;font-weight:500">${p.title}</div><div style="font-size:12px;color:#6b7280">${p.node}</div></div><span style="font-size:12px;color:#9ca3af">${p.time}</span></div>`).join('')}</div><div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:20px"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px"><h3 style="font-size:16px;font-weight:600">📕 오답노트</h3><span style="font-size:13px;color:#6b7280">${wrongAnswers.length}개 문제</span></div>${wrongAnswers.length===0?'<div style="text-align:center;padding:40px;color:#6b7280"><p style="font-size:14px">아직 오답노트가 비어있습니다.</p><p style="font-size:12px;margin-top:4px">틀린 문제는 자동으로 이곳에 추가됩니다.</p></div>':wrongAnswers.slice(0,5).map(w=>`<div style="display:flex;align-items:center;gap:12px;padding:12px;background:#fef2f2;border-radius:8px;border:1px solid #fecaca;margin-bottom:8px"><span style="font-size:20px">❌</span><div style="flex:1"><div style="font-size:14px;font-weight:500">${w.question.substring(0,30)}...</div><div style="font-size:12px;color:#6b7280">${w.nodeTitle} · 복습 ${w.reviewCount}회</div></div><button onclick="alert('복습 기능 준비중')" style="padding:6px 12px;border:none;border-radius:6px;background:#dc2626;color:#fff;font-size:12px;cursor:pointer">복습</button></div>`).join('')}</div></div>`}
+
+// ===== 문제집 탭 =====
+function renderWorkbookSidebar(){return`<div class="sidebar"><h3>📚 문제집</h3><button class="search-btn" onclick="alert('새 문제집 만들기 준비중')">➕ 새 문제집</button><div style="color:#6b7280;font-size:14px"><p style="margin-bottom:8px;cursor:pointer" onclick="alert('기본 문제집 열기')">📁 기본 문제집 (12)</p><p style="margin-bottom:8px;cursor:pointer" onclick="alert('오답노트 열기')">📁 오답노트 (5)</p><p style="margin-bottom:8px;cursor:pointer" onclick="alert('시험대비 열기')">📁 시험대비 (8)</p></div></div>`}
+function renderWorkbookContent(){return`<div class="tab-content"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px"><div><h2 style="font-size:20px;margin-bottom:4px">나의 문제집</h2><p style="font-size:14px;color:#6b7280">저장한 문제와 영상을 관리하세요</p></div><button style="padding:10px 20px;border:none;border-radius:8px;background:linear-gradient(135deg,#2563eb,#4f46e5);color:#fff;font-weight:600;cursor:pointer" onclick="alert('새 문제집 만들기')">➕ 새 문제집</button></div><div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px"><div style="padding:20px;background:#fff;border:2px solid #e5e7eb;border-radius:12px;cursor:pointer" onmouseover="this.style.borderColor='#2563eb'" onmouseout="this.style.borderColor='#e5e7eb'"><div style="font-size:32px;margin-bottom:12px">📚</div><h3 style="font-size:16px;font-weight:600;margin-bottom:4px">기본 문제집</h3><p style="font-size:13px;color:#6b7280;margin-bottom:12px">12개 문제 · 3개 영상</p><div style="display:flex;gap:8px"><span style="padding:4px 8px;background:#dbeafe;color:#1e40af;font-size:11px;border-radius:4px">수와 연산</span></div></div><div style="padding:20px;background:#fff;border:2px solid #e5e7eb;border-radius:12px;cursor:pointer" onmouseover="this.style.borderColor='#2563eb'" onmouseout="this.style.borderColor='#e5e7eb'"><div style="font-size:32px;margin-bottom:12px">📝</div><h3 style="font-size:16px;font-weight:600;margin-bottom:4px">오답노트</h3><p style="font-size:13px;color:#6b7280;margin-bottom:12px">5개 문제</p><div style="display:flex;gap:8px"><span style="padding:4px 8px;background:#fee2e2;color:#dc2626;font-size:11px;border-radius:4px">틀린 문제</span></div></div><div style="padding:20px;background:#fff;border:2px solid #e5e7eb;border-radius:12px;cursor:pointer" onmouseover="this.style.borderColor='#2563eb'" onmouseout="this.style.borderColor='#e5e7eb'"><div style="font-size:32px;margin-bottom:12px">🎯</div><h3 style="font-size:16px;font-weight:600;margin-bottom:4px">시험대비</h3><p style="font-size:13px;color:#6b7280;margin-bottom:12px">8개 문제 · 2개 영상</p><div style="display:flex;gap:8px"><span style="padding:4px 8px;background:#fef3c7;color:#d97706;font-size:11px;border-radius:4px">중간고사</span></div></div></div></div>`}
+
+// ===== 맵 영역 =====
+function renderMapArea(){return`<div class="map-container" id="mapContainer"><svg id="mapSvg" width="20000" height="20000" style="transform-origin:0 0"></svg><div class="map-info">${filterSchool}·${filterGrade}·${filterSemester!=='전체'?filterSemester+'학기·':''}${filterArea}</div><div class="map-controls"><button class="map-control-btn" onclick="zoomIn()">➕</button><button class="map-control-btn" onclick="zoomOut()">➖</button><button class="map-control-btn" onclick="resetMap()">↺</button><button class="map-control-btn" onclick="fitToNodes()">⊞</button></div><div class="map-scale" id="mapScale">${Math.round(mapState.scale*100)}%</div><div class="node-detail-panel ${selectedNodeId?'active':''}" id="detailPanel">${selectedNodeId?renderDetailPanel():''}</div></div>`}
+
+
+// ===== 노드별 더미 콘텐츠 생성 =====
+let nodeVideos={}, nodeProblems={}, learningList=new Set(), lastLearning=null;
+function getNodeVideos(nodeId){
+  if(nodeVideos[nodeId])return nodeVideos[nodeId];
+  const n=lessonNodes.find(x=>x.id===nodeId);if(!n)return[];
+  const count=n.videos||3;
+  const vids=[];
+  for(let i=0;i<count;i++){
+    vids.push({id:nodeId+'_v'+i,title:n.title+' 개념 '+(i+1),duration:Math.floor(Math.random()*8+3)+':'+(Math.floor(Math.random()*50+10)),totalViews:Math.floor(Math.random()*3000+500),myViews:Math.floor(Math.random()*3),watched:Math.random()<.3,watchedPct:Math.floor(Math.random()*100)});
+  }
+  nodeVideos[nodeId]=vids;return vids;
+}
+function getNodeProblems(nodeId){
+  if(nodeProblems[nodeId])return nodeProblems[nodeId];
+  const n=lessonNodes.find(x=>x.id===nodeId);if(!n)return[];
+  const count=n.problems||5;const probs=[];
+  const diffs=['하','하','중','중','상'];
+  for(let i=0;i<count;i++){
+    const d=diffs[i%5]||'중';
+    const solved=i<n.solved;
+    probs.push({id:nodeId+'_p'+i,title:n.title+' 문제 '+(i+1),difficulty:d,
+      accuracy:Math.floor(Math.random()*50+30),totalAttempts:Math.floor(Math.random()*2000+200),
+      myAttempts:solved?Math.floor(Math.random()*3+1):0,solved,
+      question:n.title+'에 대한 '+(d==='하'?'기본':d==='중'?'응용':'심화')+' 문제입니다.',
+      options:['보기 ①','보기 ②','보기 ③','보기 ④'],answer:Math.floor(Math.random()*4),
+      explanation:n.title+'의 핵심 개념을 활용하여 풀 수 있습니다. 정답은 '+(Math.floor(Math.random()*4)+1)+'번입니다.',
+      clearUsers:[{name:'김수학',score:100,time:'1분 23초'},{name:'이공부',score:95,time:'2분 10초'},{name:'박열정',score:90,time:'2분 45초'}]
+    });
+  }
+  nodeProblems[nodeId]=probs;return probs;
+}
+
+// ===== 노드 상세 패널 (콘텐츠 탭 포함) =====
+let detailTab='overview'; // overview, videos, problems
+function renderDetailPanel(){
+  const nodes=nodeDisplayMode==='unit'?unitNodes:lessonNodes,node=nodes.find(n=>n.id===selectedNodeId);if(!node)return'';
+  if(nodeDisplayMode==='unit'){
+    const ch=lessonNodes.filter(l=>l.unitKey===node.id),t=ch.length,d=ch.filter(l=>l.status==='completed').length,pr=t>0?Math.round(d/t*100):0;
+    return`<div class="panel-content"><div class="panel-header"><div><div class="panel-badges"><span class="badge grade">${node.gradeLabel}</span><span class="badge area">${node.area}</span><span class="badge" style="background:#e0e7ff;color:#4338ca">${node.semester}학기</span>${learningList.has(node.id)?'<span class="badge" style="background:#8b5cf6;color:#fff">📋 학습목록</span>':''}</div><div class="panel-title">${node.title}</div><div class="panel-desc">${node.stage1} · 📚 ${t}개 차시</div><div class="panel-progress"><div class="progress-bar"><div class="progress-fill" style="width:${pr}%"></div></div><span style="font-weight:600;color:#2563eb">${pr}%</span></div></div><button class="close-btn" onclick="selectedNodeId=null;render()">✕</button></div><div class="dual-buttons"><button class="dual-btn diagnosis" onclick="startDiagnosis()">🔍 진단하기</button><button class="dual-btn direct" onclick="startDirectLearning()">📖 바로 학습하기</button></div><div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">${ch.map(l=>`<div style="display:flex;align-items:center;gap:8px;padding:8px;border-radius:8px;background:${learningList.has(l.id)?'#f3e8ff':'#f9fafb'};cursor:pointer;font-size:13px;border:1px solid ${learningList.has(l.id)?'#c084fc':'transparent'}" onclick="selectedNodeId='${l.id}';nodeDisplayMode='lesson';detailTab='overview';render()"><span style="color:${getStatusColor(l.status)}">●</span>${l.title.length>15?l.title.substring(0,15)+'…':l.title}</div>`).join('')}</div></div>`;
+  }
+  // 차시 모드 - 탭 기반 콘텐츠
+  const pr=node.problems>0?Math.round(node.solved/node.problems*100):0;
+  const vids=getNodeVideos(node.id),probs=getNodeProblems(node.id);
+  const tabs=[{id:'overview',label:'📋 개요'},{id:'videos',label:`📹 영상 (${vids.length})`},{id:'problems',label:`📝 문제 (${probs.length})`}];
+  let tabContent='';
+  if(detailTab==='overview'){
+    tabContent=`<div style="font-size:13px;color:#6b7280"><p><b>성취기준:</b> ${node.achievement||'(없음)'}</p><p style="margin-top:8px"><b>선수학습:</b> ${node.prereqs.length?node.prereqs.map(p=>{const pn=lessonNodes.find(x=>x.id===p);return pn?pn.title+'('+p+')':p}).join(', '):'없음'}</p><p><b>후속학습:</b> ${node.nexts.length?node.nexts.map(p=>{const pn=lessonNodes.find(x=>x.id===p);return pn?pn.title+'('+p+')':p}).join(', '):'없음'}</p><p style="margin-top:8px"><b>📹 영상:</b> ${vids.length}개 (${vids.filter(v=>v.watched).length}개 시청) · <b>📝 문제:</b> ${node.solved}/${node.problems} 클리어</p></div>`;
+  }else if(detailTab==='videos'){
+    tabContent=vids.map(v=>`<div style="display:flex;align-items:center;gap:12px;padding:12px;background:${v.watched?'#f0fdf4':'#f9fafb'};border-radius:8px;margin-bottom:8px;cursor:pointer;border:1px solid ${v.watched?'#bbf7d0':'#e5e7eb'}" onclick="playVideo('${v.id}')"><div style="width:48px;height:36px;background:#1e293b;border-radius:6px;display:flex;align-items:center;justify-content:center;color:#fff;font-size:16px;flex-shrink:0">▶</div><div style="flex:1;min-width:0"><div style="font-size:14px;font-weight:600;margin-bottom:2px">${v.title}${v.watched?' ✅':''}</div><div style="font-size:12px;color:#6b7280">⏱ ${v.duration} · 👁 ${v.totalViews.toLocaleString()}회 · 내 시청 ${v.myViews}회</div>${!v.watched&&v.watchedPct>0?`<div style="display:flex;align-items:center;gap:6px;margin-top:4px"><div style="flex:1;height:3px;background:#e5e7eb;border-radius:2px"><div style="height:100%;width:${v.watchedPct}%;background:#3b82f6;border-radius:2px"></div></div><span style="font-size:10px;color:#3b82f6">${v.watchedPct}% 이어보기</span></div>`:''}</div><button style="padding:4px 8px;border:1px solid #e5e7eb;border-radius:4px;background:#fff;font-size:10px;cursor:pointer;flex-shrink:0" onclick="event.stopPropagation();alert('문제집에 담았습니다!')">📚 담기</button></div>`).join('');
+  }else if(detailTab==='problems'){
+    tabContent=probs.map(p=>`<div style="display:flex;align-items:center;gap:12px;padding:12px;background:${p.solved?'#f0fdf4':'#f9fafb'};border-radius:8px;margin-bottom:8px;border:1px solid ${p.solved?'#bbf7d0':'#e5e7eb'}"><div style="flex:1"><div style="display:flex;align-items:center;gap:8px;margin-bottom:4px"><span style="font-size:14px;font-weight:600">${p.title}</span><span style="padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;background:${p.difficulty==='하'?'#dcfce7':p.difficulty==='중'?'#fef3c7':'#fee2e2'};color:${p.difficulty==='하'?'#166534':p.difficulty==='중'?'#92400e':'#991b1b'}">${p.difficulty}</span>${p.solved?'<span style="color:#16a34a;font-weight:600">✓ 클리어</span>':''}</div><div style="font-size:12px;color:#6b7280">정답률 ${p.accuracy}% · 👥 ${p.totalAttempts.toLocaleString()}명 · 내 시도 ${p.myAttempts}회</div></div><div style="display:flex;gap:6px"><button style="padding:6px 14px;border:none;border-radius:6px;background:#2563eb;color:#fff;font-size:12px;font-weight:600;cursor:pointer" onclick="solveProblem('${node.id}','${p.id}')">풀기</button><button style="padding:6px 8px;border:1px solid #e5e7eb;border-radius:6px;background:#fff;font-size:12px;cursor:pointer" onclick="event.stopPropagation();alert('문제집에 담았습니다!')">📚</button><button style="padding:6px 8px;border:1px solid #e5e7eb;border-radius:6px;background:#fff;font-size:12px;cursor:pointer" onclick="showReport('${p.id}','problem')">🚨</button></div></div>`).join('');
+  }
+  return`<div class="panel-content"><div class="panel-header"><div><div class="panel-badges"><span class="badge grade">${node.gradeLabel}</span><span class="badge area">${node.area}</span><span class="badge" style="background:#e0e7ff;color:#4338ca">${node.semester}학기</span><span class="badge status ${node.status}">${getStatusLabel(node.status)}</span>${learningList.has(node.id)?'<span class="badge" style="background:#8b5cf6;color:#fff">📋 학습목록</span>':''}</div><div class="panel-title">${node.title}</div><div class="panel-desc">${node.code} · ${node.unitName}</div><div class="panel-progress"><div class="progress-bar"><div class="progress-fill" style="width:${pr}%"></div></div><span style="font-weight:600;color:#2563eb">${pr}%</span></div></div><button class="close-btn" onclick="selectedNodeId=null;render()">✕</button></div>
+  <div class="dual-buttons"><button class="dual-btn diagnosis" onclick="startDiagnosis()">🔍 진단하기</button><button class="dual-btn direct" onclick="startDirectLearning()">📖 바로 학습하기</button></div>
+  <div style="display:flex;gap:4px;margin-bottom:16px;background:#f3f4f6;border-radius:8px;padding:4px">${tabs.map(t=>`<button style="flex:1;padding:8px;border:none;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;${detailTab===t.id?'background:#fff;color:#2563eb;box-shadow:0 1px 3px rgba(0,0,0,.1)':'background:transparent;color:#6b7280'}" onclick="detailTab='${t.id}';selectNode('${node.id}')">${t.label}</button>`).join('')}</div>
+  <div style="max-height:250px;overflow-y:auto">${tabContent}</div></div>`;
+}
+
+// ===== 영상 재생 (더미) =====
+function playVideo(vid){
+  const parts=vid.split('_v');const nodeId=parts[0];const vids=getNodeVideos(nodeId);
+  const v=vids.find(x=>x.id===vid);if(!v)return;
+  v.myViews++;v.watched=true;v.watchedPct=100;
+  lastLearning={type:'video',nodeId,contentId:vid,title:v.title};
+  alert('📹 영상 재생: '+v.title+'\n(실제 구현 시 영상 플레이어 연동)');
+  selectNode(nodeId);
+}
+
+// ===== 문제 풀이 모달 =====
+let solvingProblem=null, solveSelected=null, solveSubmitted=false;
+function solveProblem(nodeId,probId){
+  const probs=getNodeProblems(nodeId);const p=probs.find(x=>x.id===probId);if(!p)return;
+  solvingProblem={...p,nodeId};solveSelected=null;solveSubmitted=false;
+  lastLearning={type:'problem',nodeId,contentId:probId,title:p.title};
+  renderSolveModal();
+}
+function renderSolveModal(){
+  const p=solvingProblem;if(!p){const el=document.getElementById('solveModal');if(el)el.remove();return}
+  let el=document.getElementById('solveModal');if(!el){el=document.createElement('div');el.id='solveModal';document.body.appendChild(el)}
+  const diffColor={하:'#16a34a',중:'#f59e0b',상:'#dc2626'}[p.difficulty];
+  el.innerHTML=`<div class="modal-overlay"><div class="modal" style="max-width:650px" onclick="event.stopPropagation()">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px"><h2>${p.title}</h2><button class="close-btn" onclick="solvingProblem=null;renderSolveModal()">✕</button></div>
+    <div style="display:flex;gap:8px;margin-bottom:16px"><span style="padding:4px 10px;border-radius:6px;font-size:12px;font-weight:600;background:${diffColor}20;color:${diffColor}">난이도: ${p.difficulty}</span><span style="font-size:12px;color:#6b7280">정답률 ${p.accuracy}% · 시도 ${p.totalAttempts.toLocaleString()}명</span></div>
+    <div style="background:#f9fafb;border-radius:12px;padding:20px;margin-bottom:16px">
+      <div style="font-size:15px;font-weight:600;margin-bottom:16px">${p.question}</div>
+      ${p.options.map((o,i)=>{
+        let cls='question-option';
+        if(solveSubmitted&&i===p.answer)cls+=' correct';
+        else if(solveSubmitted&&i===solveSelected&&i!==p.answer)cls+=' wrong';
+        else if(!solveSubmitted&&i===solveSelected)cls+=' selected';
+        return`<div class="${cls}" onclick="${solveSubmitted?'':`solveSelectOpt(${i})`}" style="${solveSubmitted?'pointer-events:none':''}"><span class="option-number">${i+1}</span><span>${o}</span></div>`}).join('')}
+    </div>
+    ${solveSubmitted?`
+      <div style="padding:16px;border-radius:12px;margin-bottom:16px;${solveSelected===p.answer?'background:#f0fdf4;border:1px solid #bbf7d0':'background:#fef2f2;border:1px solid #fecaca'}">
+        <div style="font-weight:700;margin-bottom:8px;color:${solveSelected===p.answer?'#16a34a':'#dc2626'}">${solveSelected===p.answer?'✅ 정답입니다!':'❌ 오답입니다.'}</div>
+        <div style="font-size:13px;color:#374151"><b>해설:</b> ${p.explanation}</div>
+      </div>
+      <div style="background:#f9fafb;border-radius:12px;padding:16px;margin-bottom:16px"><h4 style="font-size:13px;margin-bottom:8px">🏆 클리어 사용자</h4>
+      ${p.clearUsers.map((u,i)=>`<div style="display:flex;align-items:center;gap:12px;padding:8px;margin-bottom:4px"><span style="font-weight:700;color:${i<3?'#f59e0b':'#9ca3af'}">${i+1}</span><span style="flex:1;font-size:13px">${u.name}</span><span style="font-size:12px;color:#6b7280">${u.score}점</span><span style="font-size:12px;color:#6b7280">${u.time}</span></div>`).join('')}</div>
+      <div style="display:flex;gap:12px"><button class="search-btn" style="flex:1" onclick="solvingProblem=null;renderSolveModal();selectNode('${p.nodeId}')">돌아가기</button><button style="flex:1;padding:12px;border:1px solid #e5e7eb;border-radius:8px;background:#fff;font-weight:600;cursor:pointer" onclick="showReport('${p.id}','problem')">🚨 오류 신고</button></div>
+    `:`
+      <div style="display:flex;gap:12px"><button style="flex:1;padding:12px;border:1px solid #e5e7eb;border-radius:8px;background:#fff;font-weight:600;cursor:pointer" onclick="solvingProblem=null;renderSolveModal()">취소</button><button id="solveSubmitBtn" style="flex:2;padding:12px;border:none;border-radius:8px;background:#2563eb;color:#fff;font-weight:600;cursor:pointer;${solveSelected===null?'opacity:.5':'opacity:1'}" ${solveSelected===null?'disabled':''} onclick="submitSolve()">정답 제출</button></div>
+    `}
+  </div></div>`;
+}
+function solveSelectOpt(i){solveSelected=i;renderSolveModal()}
+function submitSolve(){
+  solveSubmitted=true;
+  const p=solvingProblem,probs=getNodeProblems(p.nodeId),prob=probs.find(x=>x.id===p.id);
+  if(prob){prob.myAttempts++;if(solveSelected===p.answer){prob.solved=true;const n=lessonNodes.find(x=>x.id===p.nodeId);if(n)n.solved=Math.min(n.solved+1,n.problems)}
+  else{wrongAnswers.push({id:Date.now(),question:p.title,nodeId:p.nodeId,nodeTitle:p.title,reviewCount:0})}}
+  renderSolveModal();
+}
+
+// ===== 신고 기능 =====
+function showReport(contentId,contentType){
+  let el=document.getElementById('reportModal');if(!el){el=document.createElement('div');el.id='reportModal';document.body.appendChild(el)}
+  el.innerHTML=`<div class="modal-overlay"><div class="modal" style="max-width:500px" onclick="event.stopPropagation()">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px"><h2>🚨 오류 신고</h2><button class="close-btn" onclick="document.getElementById('reportModal').remove()">✕</button></div>
+    <p style="font-size:13px;color:#6b7280;margin-bottom:16px">대상: ${contentType==='problem'?'문제':'영상'} (${contentId})</p>
+    <div style="margin-bottom:16px"><label style="font-size:13px;font-weight:600;display:block;margin-bottom:8px">신고 사유</label>
+    <div style="display:flex;flex-direction:column;gap:8px">
+      ${['정답 오류','해설 오류','오타','기타'].map(r=>`<label style="display:flex;align-items:center;gap:8px;padding:10px;background:#f9fafb;border-radius:8px;cursor:pointer;font-size:14px"><input type="radio" name="reportReason" value="${r}"> ${r}</label>`).join('')}
+    </div></div>
+    <div style="margin-bottom:16px"><label style="font-size:13px;font-weight:600;display:block;margin-bottom:8px">상세 내용</label><textarea style="width:100%;height:80px;border:1px solid #e5e7eb;border-radius:8px;padding:10px;font-size:14px;resize:none" placeholder="구체적인 오류 내용을 작성해주세요"></textarea></div>
+    <div style="display:flex;gap:12px"><button style="flex:1;padding:12px;border:1px solid #e5e7eb;border-radius:8px;background:#fff;font-weight:600;cursor:pointer" onclick="document.getElementById('reportModal').remove()">취소</button><button style="flex:1;padding:12px;border:none;border-radius:8px;background:#dc2626;color:#fff;font-weight:600;cursor:pointer" onclick="alert('신고가 접수되었습니다. 검토 후 조치하겠습니다.');document.getElementById('reportModal').remove()">신고 제출</button></div>
+  </div></div>`;
+}
+
+// ===== 이어하기 =====
+function goToLastLearning(){
+  if(!lastLearning)return;
+  selectedNodeId=lastLearning.nodeId;nodeDisplayMode='lesson';
+  detailTab=lastLearning.type==='video'?'videos':'problems';
+  render();
+}
+
+// ===== 바로 학습하기 =====
+function startDirectLearning(){
+  const node=nodeDisplayMode==='unit'?unitNodes.find(n=>n.id===selectedNodeId):lessonNodes.find(n=>n.id===selectedNodeId);
+  if(!node)return;
+  if(nodeDisplayMode==='unit'){
+    const ch=lessonNodes.filter(l=>l.unitKey===node.id);
+    const first=ch.find(l=>l.status!=='completed')||ch[0];
+    if(first){selectedNodeId=first.id;nodeDisplayMode='lesson';detailTab='videos';render()}
+  }else{detailTab='videos';selectNode(node.id)}
+}
+
+// ===== 리스트 뷰 =====
+function renderListView(){
+  const nodes=nodeDisplayMode==='unit'?getFilteredUnits():getFilteredLessons();
+  if(!nodes.length)return'<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;color:#6b7280"><h2 style="font-size:20px;margin-bottom:8px">표시할 노드가 없습니다</h2><p>필터를 조정해보세요</p></div>';
+  if(nodeDisplayMode==='unit')return`<div class="list-container">${nodes.map(n=>{const ch=lessonNodes.filter(l=>l.unitKey===n.id),t=ch.length,d=ch.filter(l=>l.status==='completed').length,pr=t>0?Math.round(d/t*100):0;const inLL=ch.some(l=>learningList.has(l.id));return`<div class="list-item" style="${inLL?'border-color:#c084fc;background:#faf5ff':''}" onclick="selectedNodeId='${n.id}';viewMode='map';detailTab='overview';render()"><div class="list-item-header"><span class="badge grade">${n.gradeLabel}</span><span class="badge area">${n.area}</span>${inLL?'<span class="badge" style="background:#8b5cf6;color:#fff">📋 학습목록</span>':''}</div><div class="list-item-title">${n.title}</div><div class="list-item-desc">${n.stage1} · 📚 ${t}개 차시</div><div class="list-item-footer"><div class="list-item-progress"><div class="list-item-progress-fill" style="width:${pr}%"></div></div><span>${pr}%</span></div></div>`}).join('')}</div>`;
+  return`<div class="list-container">${nodes.map(n=>{const pr=n.problems>0?Math.round(n.solved/n.problems*100):0;const inLL=learningList.has(n.id);return`<div class="list-item" style="${inLL?'border-color:#c084fc;background:#faf5ff':''}" onclick="selectedNodeId='${n.id}';viewMode='map';detailTab='overview';render()"><div class="list-item-header"><span class="badge grade">${n.gradeLabel}</span><span class="badge area">${n.area}</span><span class="badge status ${n.status}">${getStatusLabel(n.status)}</span>${inLL?'<span class="badge" style="background:#8b5cf6;color:#fff">📋</span>':''}</div><div class="list-item-title">[${n.code}] ${n.title}</div><div class="list-item-desc">${n.unitName}</div><div class="list-item-footer"><span>📹${n.videos}</span><span>📝${n.solved}/${n.problems}</span><div class="list-item-progress"><div class="list-item-progress-fill" style="width:${pr}%"></div></div><span>${pr}%</span></div></div>`}).join('')}</div>`}
+
+// ===== SVG 맵 렌더 =====
+function initMap(){const c=document.getElementById('mapContainer');if(!c)return;c.onmousedown=mapMouseDown;c.onmousemove=mapMouseMove;c.onmouseup=mapMouseUp;c.onmouseleave=mapMouseUp;c.addEventListener('wheel',mapWheel,{passive:false});c.ontouchstart=e=>{if(e.touches.length===1){e.preventDefault();mapState.isDragging=true;mapState.dragStart={x:e.touches[0].clientX-mapState.position.x,y:e.touches[0].clientY-mapState.position.y}}};c.ontouchmove=e=>{if(mapState.isDragging&&e.touches.length===1){e.preventDefault();mapState.position.x=e.touches[0].clientX-mapState.dragStart.x;mapState.position.y=e.touches[0].clientY-mapState.dragStart.y;updateMapTransform()}};c.ontouchend=mapMouseUp;renderSvgMap()}
+function renderSvgMap(){const svg=document.getElementById('mapSvg');if(!svg)return;svg.style.transform=`translate(${mapState.position.x}px,${mapState.position.y}px) scale(${mapState.scale})`;nodeDisplayMode==='unit'?renderUnitMap(svg):renderLessonMap(svg)}
+function getNodeColor(n){
+  if(learningList.has(n.id))return'#8b5cf6'; // 학습목록=보라
+  return getStatusColor(n.status);
+}
+function renderLessonMap(svg){
+  const nodes=getFilteredLessons(),ids=new Set(nodes.map(n=>n.id));
+  let h=`<defs><marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto"><polygon points="0 0,10 3,0 6" fill="#94a3b8"/></marker><filter id="shadow" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="2" stdDeviation="3" flood-opacity=".1"/></filter><filter id="glow"><feGaussianBlur stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>`;
+  nodes.forEach(n=>{n.nexts.forEach(nid=>{if(ids.has(nid)){const t=lessonNodes.find(x=>x.id===nid);if(t){const x1=n.x+200,y1=n.y+55,x2=t.x,y2=t.y+55,cx1=x1+(x2-x1)*.4,cx2=x1+(x2-x1)*.6;h+=`<path d="M${x1},${y1} C${cx1},${y1} ${cx2},${y2} ${x2},${y2}" fill="none" stroke="#cbd5e1" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#arrow)"/>`}}})});
+  nodes.forEach(n=>{
+    const sc=getNodeColor(n),pr=n.problems>0?(n.solved/n.problems)*100:0,sel=selectedNodeId===n.id;
+    const f=sel?'filter="url(#glow)"':'filter="url(#shadow)"',sw=sel?4:learningList.has(n.id)?3:2;
+    const ts=n.title.length>12?n.title.substring(0,12)+'…':n.title;
+    h+=`<g style="cursor:pointer" onclick="selectNode('${n.id}')">`;
+    if(learningList.has(n.id))h+=`<rect x="${n.x-3}" y="${n.y-3}" width="206" height="116" rx="10" fill="none" stroke="#c084fc" stroke-width="3" stroke-dasharray="6 3"/>`;
+    h+=`<rect x="${n.x}" y="${n.y}" width="200" height="110" rx="8" fill="#fff" stroke="${sc}" stroke-width="${sw}" ${f}/><rect x="${n.x}" y="${n.y}" width="200" height="32" rx="8" fill="${sc}"/><text x="${n.x+10}" y="${n.y+21}" font-size="12" font-weight="700" fill="#fff">${n.gradeLabel}</text><text x="${n.x+55}" y="${n.y+21}" font-size="11" fill="rgba(255,255,255,.9)">${n.area.length>6?n.area.substring(0,6)+'…':n.area}</text>${n.status==='completed'?`<circle cx="${n.x+180}" cy="${n.y+16}" r="8" fill="#fff"/><text x="${n.x+176}" y="${n.y+20}" font-size="11" fill="${sc}">✓</text>`:''}${learningList.has(n.id)?`<circle cx="${n.x+180}" cy="${n.y+16}" r="8" fill="#8b5cf6"/><text x="${n.x+176}" y="${n.y+20}" font-size="9" fill="#fff">📋</text>`:''}<text x="${n.x+10}" y="${n.y+52}" font-size="10" font-weight="600" fill="#6b7280">${n.code}</text><text x="${n.x+10}" y="${n.y+70}" font-size="13" font-weight="700" fill="#111827">${ts}</text><rect x="${n.x+10}" y="${n.y+80}" width="180" height="4" rx="2" fill="#e5e7eb"/><rect x="${n.x+10}" y="${n.y+80}" width="${180*pr/100}" height="4" rx="2" fill="${sc}"/><text x="${n.x+10}" y="${n.y+100}" font-size="10" fill="#6b7280">📹${n.videos} 📝${n.solved}/${n.problems}</text><text x="${n.x+140}" y="${n.y+100}" font-size="9" font-weight="600" fill="${sc}">${getStatusLabel(n.status)}</text></g>`;
+  });
+  svg.innerHTML=h;
+}
+function renderUnitMap(svg){
+  const nodes=getFilteredUnits(),ids=new Set(nodes.map(n=>n.id));
+  let h=`<defs><marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto"><polygon points="0 0,10 3,0 6" fill="#94a3b8"/></marker><filter id="shadow" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="2" stdDeviation="3" flood-opacity=".1"/></filter><filter id="glow"><feGaussianBlur stdDeviation="4" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>`;
+  nodes.forEach(n=>{n.prereqUnits.forEach(pid=>{if(ids.has(pid)){const p=unitNodes.find(x=>x.id===pid);if(p){const x1=p.x+200,y1=p.y+55,x2=n.x,y2=n.y+55,cx1=x1+(x2-x1)*.4,cx2=x1+(x2-x1)*.6;h+=`<path d="M${x1},${y1} C${cx1},${y1} ${cx2},${y2} ${x2},${y2}" fill="none" stroke="#cbd5e1" stroke-width="3" stroke-dasharray="8 4" marker-end="url(#arrow)"/>`}}})});
+  nodes.forEach(n=>{
+    const ch=lessonNodes.filter(l=>l.unitKey===n.id),tot=ch.reduce((s,l)=>s+l.problems,0),sol=ch.reduce((s,l)=>s+l.solved,0),pr=tot>0?(sol/tot)*100:0;
+    const hasLL=ch.some(l=>learningList.has(l.id));
+    let us='not-started';if(ch.length&&ch.every(l=>l.status==='completed'))us='completed';else if(ch.some(l=>l.status==='diagnosing'))us='diagnosing';else if(ch.some(l=>l.status==='in-progress'||l.status==='completed'))us='in-progress';
+    const sc=hasLL?'#8b5cf6':getStatusColor(us),sel=selectedNodeId===n.id,f=sel?'filter="url(#glow)"':'filter="url(#shadow)"';
+    const ts=n.title.length>14?n.title.substring(0,14)+'…':n.title;
+    h+=`<g style="cursor:pointer" onclick="selectNode('${n.id}')">`;
+    if(hasLL)h+=`<rect x="${n.x-3}" y="${n.y-3}" width="206" height="116" rx="14" fill="none" stroke="#c084fc" stroke-width="3" stroke-dasharray="6 3"/>`;
+    h+=`<rect x="${n.x}" y="${n.y}" width="200" height="110" rx="12" fill="#fff" stroke="${sc}" stroke-width="3" ${f}/><rect x="${n.x}" y="${n.y}" width="200" height="36" rx="12" fill="${sc}"/><text x="${n.x+10}" y="${n.y+24}" font-size="13" font-weight="700" fill="#fff">${n.gradeLabel}</text><text x="${n.x+60}" y="${n.y+24}" font-size="12" fill="rgba(255,255,255,.9)">${n.area.length>6?n.area.substring(0,6)+'…':n.area} · ${n.semester}학기</text>${us==='completed'?`<circle cx="${n.x+180}" cy="${n.y+18}" r="10" fill="#fff"/><text x="${n.x+175}" y="${n.y+23}" font-size="14" fill="${sc}">✓</text>`:''}${hasLL?`<circle cx="${n.x+180}" cy="${n.y+18}" r="10" fill="#8b5cf6"/><text x="${n.x+175}" y="${n.y+23}" font-size="10" fill="#fff">📋</text>`:''}<text x="${n.x+10}" y="${n.y+60}" font-size="14" font-weight="700" fill="#111827">${ts}</text><text x="${n.x+10}" y="${n.y+78}" font-size="11" fill="#6b7280">📚 ${ch.length}개 차시</text><rect x="${n.x+10}" y="${n.y+88}" width="180" height="6" rx="3" fill="#e5e7eb"/><rect x="${n.x+10}" y="${n.y+88}" width="${180*pr/100}" height="6" rx="3" fill="${sc}"/><text x="${n.x+150}" y="${n.y+78}" font-size="10" font-weight="600" fill="${sc}">${Math.round(pr)}%</text></g>`;
+  });
+  svg.innerHTML=h;
+}
+function selectNode(id){selectedNodeId=id;const p=document.getElementById('detailPanel');if(p){p.innerHTML=renderDetailPanel();p.classList.add('active')}}
+
+// ===== 맵 조작 =====
+function mapMouseDown(e){if(e.target.closest('g'))return;mapState.isDragging=true;mapState.dragStart={x:e.clientX-mapState.position.x,y:e.clientY-mapState.position.y}}
+function mapMouseMove(e){if(!mapState.isDragging)return;mapState.position.x=e.clientX-mapState.dragStart.x;mapState.position.y=e.clientY-mapState.dragStart.y;updateMapTransform()}
+function mapMouseUp(){mapState.isDragging=false}
+function mapWheel(e){e.preventDefault();const d=e.deltaY>0?.9:1.1;mapState.scale=Math.min(2.5,Math.max(.1,mapState.scale*d));updateMapTransform();document.getElementById('mapScale').textContent=Math.round(mapState.scale*100)+'%'}
+function updateMapTransform(){const s=document.getElementById('mapSvg');if(s)s.style.transform=`translate(${mapState.position.x}px,${mapState.position.y}px) scale(${mapState.scale})`}
+function zoomIn(){mapState.scale=Math.min(mapState.scale*1.2,2.5);updateMapTransform();document.getElementById('mapScale').textContent=Math.round(mapState.scale*100)+'%'}
+function zoomOut(){mapState.scale=Math.max(mapState.scale*.8,.1);updateMapTransform();document.getElementById('mapScale').textContent=Math.round(mapState.scale*100)+'%'}
+function resetMap(){mapState.scale=.7;mapState.position={x:50,y:30};updateMapTransform();document.getElementById('mapScale').textContent='70%'}
+
+
+// ===== 진단 시스템 (점진적 확장 방식) =====
+// 학년 우선순위
+const gradePriority={E2:1,E4:2,E6:3,M1:4,M2:5,M3:6,H1:7};
+function getGradeNum(id){return gradePriority[String(id).substring(0,2)]||0}
+
+let diagState={
+  active:false,targetNode:null,
+  queue:[],           // 우선순위 큐 (현재 진단 대상)
+  diagnosed:{},       // 진단 완료: {nodeId: {correct,total,passed}}
+  currentNode:null,   // 현재 진단 중인 노드
+  currentQIdx:0,      // 현재 노드 내 문항 인덱스
+  maxQPerNode:3,      // 노드당 문항 수 (3~5)
+  difficulty:'medium', consCorrect:0, consWrong:0,
+  selectedAnswer:null,
+  phase:'idle',       // idle, intro, testing, gradeWarn, nodeResult, choice, final
+  pendingDeeper:[],   // 학년 경계 넘는 추가 선수학습
+  failedNodes:[],     // 진단 실패한 노드들
+  selectedForLearning:new Set()
+};
+
+function startDiagnosis(){
+  const node=nodeDisplayMode==='unit'?unitNodes.find(n=>n.id===selectedNodeId):lessonNodes.find(n=>n.id===selectedNodeId);
+  if(!node)return;
+  // ① 직전 선수학습만 수집
+  let directPrereqs=[];
+  if(nodeDisplayMode==='unit'){
+    const ch=lessonNodes.filter(l=>l.unitKey===node.id);
+    const pids=new Set();ch.forEach(l=>l.prereqs.forEach(p=>pids.add(p)));
+    directPrereqs=[...pids].map(id=>lessonNodes.find(n=>n.id===id)).filter(n=>n&&n.status!=='completed');
+  }else{
+    directPrereqs=node.prereqs.map(id=>lessonNodes.find(n=>n.id===id)).filter(n=>n&&n.status!=='completed');
+  }
+  if(!directPrereqs.length){alert('🎉 선수학습이 모두 완료되었습니다!\n바로 학습을 시작합니다.');startDirectLearning();return}
+  // 학년순 정렬
+  directPrereqs.sort((a,b)=>getGradeNum(a.id)-getGradeNum(b.id));
+  // 진단 상태 시작
+  diagState={active:true,targetNode:node,queue:[...directPrereqs],diagnosed:{},currentNode:null,currentQIdx:0,maxQPerNode:3,difficulty:'medium',consCorrect:0,consWrong:0,selectedAnswer:null,phase:'intro',pendingDeeper:[],failedNodes:[],selectedForLearning:new Set()};
+  // 진단 대상 노드 상태 변경
+  directPrereqs.forEach(n=>{if(n.status==='not-started')n.status='diagnosing'});
+  renderSvgMap();
+  renderDiagUI();
+}
+
+function renderDiagUI(){
+  let el=document.getElementById('diagModal');if(!el){el=document.createElement('div');el.id='diagModal';document.body.appendChild(el)}
+  if(!diagState.active){el.remove();return}
+  const phase=diagState.phase;
+  if(phase==='intro')renderDiagIntro(el);
+  else if(phase==='testing')renderDiagQuestion(el);
+  else if(phase==='gradeWarn')renderGradeWarning(el);
+  else if(phase==='nodeResult')renderNodeResult(el);
+  else if(phase==='choice')renderDiagChoice(el);
+  else if(phase==='final')renderDiagFinal(el);
+}
+
+// ===== 인트로 =====
+function renderDiagIntro(el){
+  const tn=diagState.targetNode,q=diagState.queue;
+  el.innerHTML=`<div class="modal-overlay"><div class="modal" onclick="event.stopPropagation()">
+    <h2>🔍 선수학습 진단</h2>
+    <div style="background:#eff6ff;border-radius:12px;padding:16px;margin-bottom:16px"><p style="font-size:14px;color:#1e40af"><b>목표:</b> ${tn.title||tn.id}</p><p style="font-size:13px;color:#3b82f6;margin-top:4px">직전 선수학습 ${q.length}개를 먼저 진단합니다.</p></div>
+    <div style="margin-bottom:16px"><h4 style="font-size:14px;margin-bottom:8px">📋 진단 대상 (직전 선수학습)</h4><div style="max-height:200px;overflow-y:auto">${q.map(n=>`<div class="diag-queue-item"><div class="diag-queue-icon" style="background:#94a3b8">○</div><div style="flex:1;min-width:0"><div style="font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${n.title}</div><div style="font-size:10px;color:#6b7280">${n.gradeLabel} · ${n.area}</div></div></div>`).join('')}</div></div>
+    <p style="font-size:13px;color:#6b7280;margin-bottom:16px">• 노드당 3~5문항 (CAT 난이도 자동 조절)<br>• 부족 시 해당 노드의 선수학습을 추가 진단 가능<br>• 언제든 진단 종료 가능</p>
+    <div style="display:flex;gap:12px"><button style="flex:1;padding:12px;border:1px solid #e5e7eb;border-radius:8px;background:#fff;font-weight:600;cursor:pointer" onclick="cancelDiag()">취소</button><button style="flex:2;padding:12px;border:none;border-radius:8px;background:linear-gradient(135deg,#2563eb,#4f46e5);color:#fff;font-weight:600;cursor:pointer" onclick="beginDiagTesting()">진단 시작 →</button></div>
+  </div></div>`;
+}
+
+function beginDiagTesting(){
+  if(!diagState.queue.length){diagState.phase='final';renderDiagUI();return}
+  diagState.currentNode=diagState.queue.shift();
+  diagState.currentQIdx=0;diagState.difficulty='medium';diagState.consCorrect=0;diagState.consWrong=0;diagState.selectedAnswer=null;
+  diagState.phase='testing';renderDiagUI();
+}
+
+// ===== 문항 출제 =====
+function renderDiagQuestion(el){
+  const cn=diagState.currentNode,qi=diagState.currentQIdx;
+  if(qi>=diagState.maxQPerNode){evaluateNode();return}
+  const totalDiagnosed=Object.keys(diagState.diagnosed).length;
+  const totalRemain=diagState.queue.length;
+  const diffLabel={easy:'하',medium:'중',hard:'상'}[diagState.difficulty];
+  const diffColor={easy:'#16a34a',medium:'#f59e0b',hard:'#dc2626'}[diagState.difficulty];
+  // 큐 표시
+  let queueHtml='';
+  // 이미 진단된 노드
+  Object.entries(diagState.diagnosed).forEach(([id,r])=>{
+    const n=lessonNodes.find(x=>x.id===id);if(!n)return;
+    queueHtml+=`<div class="diag-queue-item" style="background:${r.passed?'#f0fdf4':'#fef2f2'}"><div class="diag-queue-icon" style="background:${r.passed?'#16a34a':'#dc2626'}">${r.passed?'✓':'✕'}</div><div style="flex:1;min-width:0"><div style="font-size:11px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${n.title}</div></div><span style="font-size:10px;font-weight:600;color:${r.passed?'#16a34a':'#dc2626'}">${r.correct}/${r.total}</span></div>`;
+  });
+  // 현재 노드
+  queueHtml+=`<div class="diag-queue-item" style="background:#fef3c7;border-color:#f59e0b"><div class="diag-queue-icon" style="background:#f59e0b">▶</div><div style="flex:1;min-width:0"><div style="font-size:11px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${cn.title}</div><div style="font-size:10px;color:#6b7280">${cn.gradeLabel}</div></div></div>`;
+  // 대기 중
+  diagState.queue.forEach(n=>{
+    queueHtml+=`<div class="diag-queue-item"><div class="diag-queue-icon" style="background:#94a3b8">○</div><div style="flex:1;min-width:0"><div style="font-size:11px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${n.title}</div></div></div>`;
+  });
+
+  el.innerHTML=`<div class="modal-overlay"><div class="modal" style="max-width:900px;display:flex;gap:24px" onclick="event.stopPropagation()">
+    <div style="width:200px;flex-shrink:0;border-right:1px solid #e5e7eb;padding-right:16px;max-height:65vh;overflow-y:auto">
+      <h4 style="font-size:13px;font-weight:600;margin-bottom:8px">📋 진단 큐</h4>
+      ${queueHtml}
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:12px">
+        <div style="padding:6px;background:#f0fdf4;border-radius:6px;text-align:center"><div style="font-size:16px;font-weight:700;color:#16a34a">${Object.values(diagState.diagnosed).filter(r=>r.passed).length}</div><div style="font-size:10px;color:#15803d">통과</div></div>
+        <div style="padding:6px;background:#fef2f2;border-radius:6px;text-align:center"><div style="font-size:16px;font-weight:700;color:#dc2626">${Object.values(diagState.diagnosed).filter(r=>!r.passed).length}</div><div style="font-size:10px;color:#b91c1c">보완</div></div>
+      </div>
+    </div>
+    <div style="flex:1">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <div><span class="badge grade">${cn.gradeLabel}</span> <span style="font-size:14px;font-weight:600">${cn.title}</span></div>
+        <div style="display:flex;gap:8px;align-items:center"><span style="padding:4px 10px;border-radius:6px;font-size:12px;font-weight:600;background:${diffColor}20;color:${diffColor}">난이도: ${diffLabel}</span></div>
+      </div>
+      <div style="font-size:12px;color:#6b7280;margin-bottom:8px">문제 ${qi+1}/${diagState.maxQPerNode}</div>
+      <div style="height:4px;background:#e5e7eb;border-radius:2px;margin-bottom:16px"><div style="height:100%;width:${(qi/diagState.maxQPerNode)*100}%;background:#2563eb;border-radius:2px"></div></div>
+      <div style="background:#f9fafb;border-radius:12px;padding:20px;margin-bottom:16px">
+        <div style="font-size:15px;font-weight:600;margin-bottom:16px">[${cn.gradeLabel}] ${cn.title} - ${diffLabel} 문제</div>
+        ${[0,1,2,3].map(i=>`<div class="question-option${diagState.selectedAnswer===i?' selected':''}" id="dopt${i}" onclick="diagSelectAnswer(${i})"><span class="option-number">${i+1}</span><span>보기 ${i+1}</span></div>`).join('')}
+      </div>
+      <div style="display:flex;gap:12px"><button style="flex:1;padding:10px;border:1px solid #e5e7eb;border-radius:8px;background:#fff;font-size:13px;font-weight:600;cursor:pointer" onclick="diagSkipQ()">건너뛰기</button><button id="diagSubmitBtn" style="flex:2;padding:10px;border:none;border-radius:8px;background:#2563eb;color:#fff;font-size:13px;font-weight:600;cursor:pointer;${diagState.selectedAnswer===null?'opacity:.5':'opacity:1'}" ${diagState.selectedAnswer===null?'disabled':''} onclick="diagSubmitAnswer()">제출</button></div>
+      <div style="margin-top:8px;display:flex;gap:8px"><button style="padding:6px 12px;border:1px solid #e5e7eb;border-radius:6px;background:#fff;font-size:11px;cursor:pointer;color:#6b7280" onclick="endDiagEarly()">진단 종료</button><button style="padding:6px 12px;border:1px solid #e5e7eb;border-radius:6px;background:#fff;font-size:11px;cursor:pointer;color:#6b7280" onclick="diagSkipNode()">이 노드 건너뛰기</button></div>
+    </div>
+  </div></div>`;
+}
+
+function diagSelectAnswer(i){diagState.selectedAnswer=i;renderDiagUI()}
+
+function diagSubmitAnswer(){
+  const cn=diagState.currentNode;
+  const correctAns=Math.floor(Math.random()*4);
+  const isCorrect=diagState.selectedAnswer===correctAns;
+  if(!diagState.diagnosed[cn.id])diagState.diagnosed[cn.id]={correct:0,total:0,passed:false};
+  diagState.diagnosed[cn.id].total++;
+  if(isCorrect){diagState.diagnosed[cn.id].correct++;diagState.consCorrect++;diagState.consWrong=0;if(diagState.consCorrect>=2){diagState.difficulty=diagState.difficulty==='easy'?'medium':'hard';diagState.consCorrect=0}}
+  else{diagState.consWrong++;diagState.consCorrect=0;if(diagState.consWrong>=2){diagState.difficulty=diagState.difficulty==='hard'?'medium':'easy';diagState.consWrong=0}
+    wrongAnswers.push({id:Date.now(),question:cn.title+' 진단문제',nodeId:cn.id,nodeTitle:cn.title,reviewCount:0})}
+  // 피드백
+  document.querySelectorAll('.question-option').forEach((el,i)=>{
+    if(i===correctAns)el.classList.add('correct');
+    else if(i===diagState.selectedAnswer&&!isCorrect)el.classList.add('wrong');
+    el.style.pointerEvents='none';
+  });
+  diagState.selectedAnswer=null;
+  setTimeout(()=>{diagState.currentQIdx++;diagState.phase='testing';renderDiagUI()},700);
+}
+
+function diagSkipQ(){diagState.currentQIdx++;diagState.selectedAnswer=null;renderDiagUI()}
+function diagSkipNode(){
+  diagState.diagnosed[diagState.currentNode.id]={correct:0,total:0,passed:false,skipped:true};
+  diagState.failedNodes.push(diagState.currentNode);
+  afterNodeDiagnosed();
+}
+
+// ② 노드 진단 완료 → 판정
+function evaluateNode(){
+  const cn=diagState.currentNode,r=diagState.diagnosed[cn.id];
+  if(!r){diagState.diagnosed[cn.id]={correct:0,total:0,passed:false}}
+  const d=diagState.diagnosed[cn.id];
+  d.passed=d.total>0&&(d.correct/d.total)>=0.5;
+  // 맵 상태 반영
+  if(d.passed){cn.status='completed'}
+  renderSvgMap();
+  if(!d.passed){
+    diagState.failedNodes.push(cn);
+    // ③ 실패 → 해당 노드의 선수학습 확인
+    const deeperPrereqs=cn.prereqs.map(id=>lessonNodes.find(n=>n.id===id)).filter(n=>n&&n.status!=='completed'&&!diagState.diagnosed[n.id]&&!diagState.queue.some(q=>q.id===n.id));
+    if(deeperPrereqs.length){
+      // 학년 경계 체크
+      const targetGrade=getGradeNum(cn.id);
+      const hasGradeDrop=deeperPrereqs.some(n=>targetGrade-getGradeNum(n.id)>=1);
+      if(hasGradeDrop){
+        diagState.pendingDeeper=deeperPrereqs;
+        diagState.phase='gradeWarn';renderDiagUI();return;
+      }else{
+        // 자동으로 큐에 추가
+        deeperPrereqs.forEach(n=>{if(n.status==='not-started')n.status='diagnosing'});
+        diagState.queue.unshift(...deeperPrereqs);
+        renderSvgMap();
+      }
+    }
+  }
+  afterNodeDiagnosed();
+}
+
+function afterNodeDiagnosed(){
+  if(diagState.queue.length){beginDiagTesting()}
+  else{diagState.phase='choice';renderDiagUI()}
+}
+
+// ※ 학년 경계 경고
+function renderGradeWarning(el){
+  const cn=diagState.currentNode,deeper=diagState.pendingDeeper;
+  el.innerHTML=`<div class="modal-overlay"><div class="modal" onclick="event.stopPropagation()">
+    <h2>⚠️ 정밀 진단 필요</h2>
+    <div style="background:#fef3c7;border-radius:12px;padding:16px;margin-bottom:16px">
+      <p style="font-size:14px;color:#92400e"><b>${cn.title}</b> 진단 결과 보완이 필요합니다.</p>
+      <p style="font-size:13px;color:#a16207;margin-top:4px">선수학습이 <b>이전 학년</b>으로 내려갑니다. 정밀 진단을 진행하시겠습니까?</p>
+    </div>
+    <div style="margin-bottom:16px"><h4 style="font-size:14px;margin-bottom:8px">추가 진단 대상</h4>
+    ${deeper.map(n=>`<div class="diag-queue-item" style="background:#fef3c7"><div class="diag-queue-icon" style="background:#f59e0b">!</div><div style="flex:1;min-width:0"><div style="font-size:12px;font-weight:600">${n.title}</div><div style="font-size:10px;color:#6b7280">${n.gradeLabel} · ${n.area}</div></div></div>`).join('')}</div>
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <button style="padding:14px;border:none;border-radius:8px;background:linear-gradient(135deg,#f59e0b,#d97706);color:#fff;font-weight:600;cursor:pointer" onclick="acceptDeeper()">🔍 더 정밀 진단 (추가 선수학습 진단)</button>
+      <button style="padding:14px;border:none;border-radius:8px;background:linear-gradient(135deg,#2563eb,#4f46e5);color:#fff;font-weight:600;cursor:pointer" onclick="skipDeeper()">⏩ 건너뛰고 계속</button>
+      <button style="padding:14px;border:1px solid #e5e7eb;border-radius:8px;background:#fff;font-weight:600;cursor:pointer" onclick="endDiagEarly()">📋 여기까지 결과 보기</button>
+    </div>
+  </div></div>`;
+}
+function acceptDeeper(){
+  diagState.pendingDeeper.forEach(n=>{if(n.status==='not-started')n.status='diagnosing'});
+  diagState.queue.unshift(...diagState.pendingDeeper);
+  diagState.pendingDeeper=[];renderSvgMap();
+  afterNodeDiagnosed();
+}
+function skipDeeper(){diagState.pendingDeeper=[];afterNodeDiagnosed()}
+
+// ④ 선택지: 보정학습 / 더 정밀 진단 / 본 바로 학습
+function renderDiagChoice(el){
+  const failed=diagState.failedNodes,passed=Object.values(diagState.diagnosed).filter(r=>r.passed).length;
+  const total=Object.keys(diagState.diagnosed).length;
+  // 추가 진단 가능한 노드 확인
+  let canDiagMore=false;
+  failed.forEach(fn=>{
+    const deeper=fn.prereqs.map(id=>lessonNodes.find(n=>n.id===id)).filter(n=>n&&n.status!=='completed'&&!diagState.diagnosed[n.id]);
+    if(deeper.length)canDiagMore=true;
+  });
+  el.innerHTML=`<div class="modal-overlay"><div class="modal" onclick="event.stopPropagation()">
+    <h2>📊 진단 중간 결과</h2>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin:16px 0">
+      <div style="padding:12px;background:#f0fdf4;border-radius:12px;text-align:center"><div style="font-size:20px;font-weight:700;color:#16a34a">${passed}</div><div style="font-size:11px;color:#15803d">통과</div></div>
+      <div style="padding:12px;background:#fef2f2;border-radius:12px;text-align:center"><div style="font-size:20px;font-weight:700;color:#dc2626">${failed.length}</div><div style="font-size:11px;color:#b91c1c">보완필요</div></div>
+      <div style="padding:12px;background:#eff6ff;border-radius:12px;text-align:center"><div style="font-size:20px;font-weight:700;color:#2563eb">${total>0?Math.round(passed/total*100):0}%</div><div style="font-size:11px;color:#3b82f6">통과율</div></div>
+    </div>
+    ${failed.length?`<div style="margin-bottom:16px"><h4 style="font-size:13px;margin-bottom:8px">보완 필요 노드</h4>${failed.map(n=>`<div style="display:flex;align-items:center;gap:8px;padding:8px;background:#fef2f2;border-radius:6px;margin-bottom:4px"><span>❌</span><span style="font-size:13px;flex:1">${n.title}</span><span style="font-size:11px;color:#6b7280">${n.gradeLabel}</span></div>`).join('')}</div>`:''}
+    <div style="display:flex;flex-direction:column;gap:10px;margin-top:16px">
+      <button style="padding:14px;border:none;border-radius:8px;background:linear-gradient(135deg,#16a34a,#15803d);color:#fff;font-weight:600;cursor:pointer;font-size:14px" onclick="goToFinalChecklist()">📚 보정학습 시작 (학습목록 선택)</button>
+      ${canDiagMore?`<button style="padding:14px;border:none;border-radius:8px;background:linear-gradient(135deg,#f59e0b,#d97706);color:#fff;font-weight:600;cursor:pointer;font-size:14px" onclick="diagDeeperAll()">🔍 더 정밀 진단 (추가 선수학습)</button>`:''}
+      <button style="padding:14px;border:none;border-radius:8px;background:linear-gradient(135deg,#2563eb,#4f46e5);color:#fff;font-weight:600;cursor:pointer;font-size:14px" onclick="cancelDiag();startDirectLearning()">📖 본 학습 바로 시작</button>
+    </div>
+  </div></div>`;
+}
+
+function diagDeeperAll(){
+  // 실패 노드들의 선수학습을 큐에 추가
+  const added=[];
+  diagState.failedNodes.forEach(fn=>{
+    fn.prereqs.forEach(pid=>{
+      const n=lessonNodes.find(x=>x.id===pid);
+      if(n&&n.status!=='completed'&&!diagState.diagnosed[n.id]&&!diagState.queue.some(q=>q.id===n.id)&&!added.some(a=>a.id===n.id)){
+        added.push(n);
+      }
+    });
+  });
+  if(!added.length){alert('추가 진단할 선수학습이 없습니다.');return}
+  added.sort((a,b)=>getGradeNum(a.id)-getGradeNum(b.id));
+  added.forEach(n=>{if(n.status==='not-started')n.status='diagnosing'});
+  diagState.queue.push(...added);renderSvgMap();
+  beginDiagTesting();
+}
+
+// ⑤⑥ 최종 결과: 체크박스로 학습목록 선택
+function goToFinalChecklist(){diagState.phase='final';renderDiagUI()}
+function endDiagEarly(){
+  // 현재 노드 평가
+  if(diagState.currentNode&&diagState.diagnosed[diagState.currentNode.id]){
+    const r=diagState.diagnosed[diagState.currentNode.id];
+    r.passed=r.total>0&&r.correct/r.total>=.5;
+    if(!r.passed)diagState.failedNodes.push(diagState.currentNode);
+    if(r.passed)diagState.currentNode.status='completed';
+  }
+  renderSvgMap();
+  diagState.phase='final';renderDiagUI();
+}
+
+function renderDiagFinal(el){
+  const results=diagState.diagnosed;
+  const passedIds=Object.entries(results).filter(([,r])=>r.passed).map(([id])=>id);
+  const failedIds=Object.entries(results).filter(([,r])=>!r.passed).map(([id])=>id);
+  // 미통과 노드 상태 복원 (diagnosing→not-started)
+  failedIds.forEach(id=>{const n=lessonNodes.find(x=>x.id===id);if(n&&n.status==='diagnosing')n.status='not-started'});
+  // 통과 노드 완료 처리
+  passedIds.forEach(id=>{const n=lessonNodes.find(x=>x.id===id);if(n)n.status='completed'});
+  renderSvgMap();
+  const failedNodes=failedIds.map(id=>lessonNodes.find(n=>n.id===id)).filter(Boolean);
+  // 기본: 실패한 노드 모두 체크
+  if(diagState.selectedForLearning.size===0)failedIds.forEach(id=>diagState.selectedForLearning.add(id));
+
+  el.innerHTML=`<div class="modal-overlay"><div class="modal" style="max-width:700px" onclick="event.stopPropagation()">
+    <h2>${failedIds.length===0?'🎉 진단 완료 - 준비 완료!':'📋 진단 완료 - 학습목록 선택'}</h2>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin:16px 0">
+      <div style="padding:14px;background:#f0fdf4;border-radius:12px;text-align:center"><div style="font-size:22px;font-weight:700;color:#16a34a">${passedIds.length}</div><div style="font-size:12px;color:#15803d">통과</div></div>
+      <div style="padding:14px;background:#fef2f2;border-radius:12px;text-align:center"><div style="font-size:22px;font-weight:700;color:#dc2626">${failedIds.length}</div><div style="font-size:12px;color:#b91c1c">보완필요</div></div>
+      <div style="padding:14px;background:#eff6ff;border-radius:12px;text-align:center"><div style="font-size:22px;font-weight:700;color:#2563eb">${Object.keys(results).length>0?Math.round(passedIds.length/Object.keys(results).length*100):0}%</div><div style="font-size:12px;color:#3b82f6">통과율</div></div>
+    </div>
+    ${failedNodes.length?`
+      <div style="margin-bottom:16px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><h4 style="font-size:14px">⑥ 학습목록에 포함할 선수학습 선택</h4><button style="padding:4px 10px;border:1px solid #e5e7eb;border-radius:6px;background:#fff;font-size:11px;cursor:pointer" onclick="toggleAllLearning()">전체 선택/해제</button></div>
+        <p style="font-size:12px;color:#6b7280;margin-bottom:8px">체크한 노드가 학습목록에 추가되고 맵에서 보라색으로 표시됩니다.</p>
+        <div style="max-height:220px;overflow-y:auto">${failedNodes.map(n=>{
+          const r=results[n.id];const checked=diagState.selectedForLearning.has(n.id);
+          return`<label style="display:flex;align-items:center;gap:10px;padding:10px;background:${checked?'#f3e8ff':'#fef2f2'};border:1px solid ${checked?'#c084fc':'#fecaca'};border-radius:8px;margin-bottom:6px;cursor:pointer">
+            <input type="checkbox" ${checked?'checked':''} onchange="toggleLearningNode('${n.id}')" style="width:18px;height:18px">
+            <div style="flex:1"><div style="font-size:13px;font-weight:600">${n.title}</div><div style="font-size:11px;color:#6b7280">${n.gradeLabel} · ${n.area}</div></div>
+            ${r?`<span style="font-size:11px;font-weight:600;color:#dc2626">${r.correct}/${r.total}</span>`:''}
+          </label>`}).join('')}</div>
+      </div>
+    `:'<p style="font-size:14px;color:#16a34a;margin-bottom:16px">✅ 모든 선수학습을 통과했습니다! 목표 학습을 바로 시작하세요.</p>'}
+    <div style="display:flex;gap:12px">
+      <button style="flex:1;padding:12px;border:none;border-radius:8px;background:linear-gradient(135deg,#8b5cf6,#7c3aed);color:#fff;font-weight:600;cursor:pointer" onclick="applyLearningList()">✅ 학습목록 확정 (${diagState.selectedForLearning.size}개)</button>
+      <button style="flex:1;padding:12px;border:1px solid #e5e7eb;border-radius:8px;background:#fff;font-weight:600;cursor:pointer" onclick="cancelDiag()">닫기</button>
+    </div>
+  </div></div>`;
+}
+
+function toggleLearningNode(id){
+  if(diagState.selectedForLearning.has(id))diagState.selectedForLearning.delete(id);
+  else diagState.selectedForLearning.add(id);
+  renderDiagUI();
+}
+function toggleAllLearning(){
+  const failedIds=Object.entries(diagState.diagnosed).filter(([,r])=>!r.passed).map(([id])=>id);
+  if(diagState.selectedForLearning.size===failedIds.length)diagState.selectedForLearning.clear();
+  else failedIds.forEach(id=>diagState.selectedForLearning.add(id));
+  renderDiagUI();
+}
+
+// ⑦ 학습목록 확정 → 맵 노드 색상 변경
+function applyLearningList(){
+  // 기존 학습목록 갱신
+  learningList=new Set(diagState.selectedForLearning);
+  // 선택된 노드 상태를 'in-progress'로 변경
+  learningList.forEach(id=>{
+    const n=lessonNodes.find(x=>x.id===id);
+    if(n&&n.status==='not-started')n.status='in-progress';
+  });
+  cancelDiag();
+  render();setTimeout(fitToNodes,300);
+}
+
+function cancelDiag(){
+  // 남은 diagnosing 상태 복원
+  lessonNodes.forEach(n=>{if(n.status==='diagnosing')n.status='not-started'});
+  diagState.active=false;
+  const el=document.getElementById('diagModal');if(el)el.remove();
+  renderSvgMap();
+}
+
+
+// ===== 초기화 =====
+loadDefaultExcel();
+</script>
+<script src="../../common-nav.js"></script>
+</body>
+</html>
