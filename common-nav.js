@@ -57,9 +57,9 @@
             id: 'chaeumContents',
             label: '채움콘텐츠',
             sub: [
+                { id: 'contentsPublic',    label: '공개콘텐츠',           page: 'contentsBrowse', hash: 'public' },
                 { id: 'contentsArchive',   label: '나의 보관함',           page: 'contentsBrowse', hash: 'dashboard' },
                 { id: 'contentsRecommend', label: '추천콘텐츠',           page: 'contentsBrowse', hash: 'recommend' },
-                { id: 'contentsPublic',    label: '공개콘텐츠',           page: 'contentsBrowse', hash: 'public' },
                 { id: 'contentsSearchStd', label: '성취기준별 콘텐츠 찾기', page: 'contentsBrowse', hash: 'search-std' }
             ]
         },
@@ -164,7 +164,7 @@
             if (currentHash === 'recommend') return 'contentsRecommend';
             if (currentHash === 'public') return 'contentsPublic';
             if (currentHash === 'search-std') return 'contentsSearchStd';
-            return 'contentsArchive';
+            return 'contentsPublic';
         }
         if (currentPageId === 'cbtService' || currentPageId === 'cbtPlayer') {
             if (currentHash === 'my-exams' || currentHash === 'my-results' || currentHash === 'teacher-result') return 'cbtArchive';
@@ -185,7 +185,7 @@
 
     function isContentsArchive() {
         return currentPageId === 'contentsBrowse' &&
-            (ARCHIVE_HASHES.indexOf(currentHash) !== -1 || !currentHash);
+            (ARCHIVE_HASHES.indexOf(currentHash) !== -1);
     }
 
     function isCbtArchive() {
