@@ -1,0 +1,799 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>다채움 LRS 학습분석 대시보드</title>
+<link href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family:'Pretendard',sans-serif; background:#f0f2f5; color:#1f2937; }
+.lrs-wrapper { display:flex; height:100vh; overflow:hidden; }
+body.gnb-has-header .lrs-wrapper { height:calc(100vh - var(--gnb-header-height)); }
+body.gnb-has-sub .lrs-wrapper { height:calc(100vh - var(--gnb-header-height) - var(--gnb-sub-height)); }
+body.gnb-has-sub-multi .lrs-wrapper { height:calc(100vh - var(--gnb-total-height)); }
+
+/* ── 좌측 1차 메뉴 사이드바 ── */
+.sidebar { width:64px; background:#1e293b; display:flex; flex-direction:column; align-items:center; padding:12px 0; gap:4px; z-index:100; flex-shrink:0; }
+.sidebar .logo { color:#fff; font-size:11px; font-weight:700; margin-bottom:12px; text-align:center; line-height:1.3; }
+.sidebar .logo span { display:block; font-size:9px; color:#94a3b8; font-weight:400; }
+.nav-item { width:56px; padding:8px 4px; border-radius:8px; text-align:center; cursor:pointer; transition:all .2s; color:#94a3b8; }
+.nav-item:hover { background:#334155; color:#e2e8f0; }
+.nav-item.active { background:#2563eb; color:#fff; }
+.nav-item .icon { font-size:18px; display:block; margin-bottom:2px; }
+.nav-item .label { font-size:9px; font-weight:500; line-height:1.2; }
+.nav-spacer { flex:1; }
+
+/* ── 2차 메뉴 패널 ── */
+.sub-menu { width:200px; background:#fff; border-right:1px solid #e5e7eb; padding:16px 0; overflow-y:auto; flex-shrink:0; }
+.sub-menu-title { padding:8px 16px; font-size:13px; font-weight:700; color:#1e293b; border-bottom:1px solid #f3f4f6; margin-bottom:4px; }
+.sub-menu-group { padding:4px 0; }
+.sub-menu-group-title { padding:6px 16px; font-size:11px; font-weight:600; color:#6b7280; text-transform:uppercase; letter-spacing:.5px; }
+.sub-menu-item { padding:8px 16px 8px 28px; font-size:12px; color:#4b5563; cursor:pointer; transition:all .15s; border-left:3px solid transparent; }
+.sub-menu-item:hover { background:#f9fafb; color:#1e293b; }
+.sub-menu-item.active { background:#eff6ff; color:#2563eb; font-weight:600; border-left-color:#2563eb; }
+
+/* ── 메인 콘텐츠 ── */
+.main { flex:1; display:flex; flex-direction:column; overflow:hidden; }
+.top-bar { height:48px; background:#fff; border-bottom:1px solid #e5e7eb; display:flex; align-items:center; padding:0 24px; justify-content:space-between; flex-shrink:0; }
+.breadcrumb { font-size:12px; color:#6b7280; }
+.breadcrumb span { color:#2563eb; font-weight:600; }
+.top-right { display:flex; align-items:center; gap:12px; font-size:12px; color:#6b7280; }
+.content { flex:1; overflow-y:auto; padding:20px 24px; }
+
+/* ── 필터 영역 ── */
+.filter-bar { background:#fff; border:1px solid #e5e7eb; border-radius:10px; padding:16px 20px; margin-bottom:16px; }
+.filter-row { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:8px; }
+.filter-row:last-child { margin-bottom:0; }
+.filter-label { font-size:12px; font-weight:600; color:#374151; min-width:60px; }
+.filter-select { padding:6px 10px; border:1px solid #d1d5db; border-radius:6px; font-size:12px; font-family:inherit; background:#fff; min-width:120px; }
+.filter-input { padding:6px 10px; border:1px solid #d1d5db; border-radius:6px; font-size:12px; font-family:inherit; width:130px; }
+.filter-radio { display:flex; gap:4px; }
+.filter-radio label { padding:5px 12px; border:1px solid #d1d5db; border-radius:6px; font-size:11px; cursor:pointer; transition:all .15s; background:#fff; }
+.filter-radio label:hover { border-color:#93c5fd; }
+.filter-radio input { display:none; }
+.filter-radio input:checked + span { background:#2563eb; color:#fff; border-color:#2563eb; }
+.filter-radio label.active { background:#2563eb; color:#fff; border-color:#2563eb; }
+.filter-check { display:flex; align-items:center; gap:4px; font-size:12px; }
+.btn-search { padding:7px 24px; background:#2563eb; color:#fff; border:none; border-radius:6px; font-size:12px; font-weight:600; cursor:pointer; font-family:inherit; }
+.btn-search:hover { background:#1d4ed8; }
+.btn-reset { padding:7px 16px; background:#fff; color:#6b7280; border:1px solid #d1d5db; border-radius:6px; font-size:12px; cursor:pointer; font-family:inherit; }
+.output-type { display:flex; gap:4px; margin-left:auto; }
+.output-type label { padding:5px 10px; border:1px solid #d1d5db; border-radius:6px; font-size:11px; cursor:pointer; }
+.output-type label.active { background:#1e293b; color:#fff; border-color:#1e293b; }
+
+/* ── 화면설명 및 산출식 ── */
+.formula-bar { background:#fffbeb; border:1px solid #fde68a; border-radius:8px; padding:10px 16px; margin-bottom:16px; font-size:11px; color:#92400e; cursor:pointer; display:flex; align-items:center; gap:8px; }
+.formula-bar .toggle { font-size:14px; }
+
+/* ── 차트 + 표 영역 ── */
+.chart-section { background:#fff; border:1px solid #e5e7eb; border-radius:10px; padding:20px; margin-bottom:16px; }
+.chart-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; }
+.chart-title { font-size:13px; font-weight:700; color:#1e293b; }
+.chart-title::before { content:'▸ '; color:#2563eb; }
+.chart-toggle { display:flex; gap:4px; }
+.chart-toggle label { padding:4px 10px; border:1px solid #d1d5db; border-radius:5px; font-size:11px; cursor:pointer; }
+.chart-toggle label.active { background:#2563eb; color:#fff; border-color:#2563eb; }
+.chart-container { position:relative; height:320px; }
+
+.table-section { background:#fff; border:1px solid #e5e7eb; border-radius:10px; padding:20px; margin-bottom:16px; }
+.table-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; }
+.table-title { font-size:13px; font-weight:700; color:#1e293b; }
+.table-title::before { content:'▸ '; color:#2563eb; }
+.table-count { font-size:12px; color:#6b7280; margin-left:8px; }
+.btn-excel { padding:5px 14px; background:#16a34a; color:#fff; border:none; border-radius:5px; font-size:11px; cursor:pointer; font-family:inherit; }
+.btn-excel::before { content:'📊 '; }
+.data-table { width:100%; border-collapse:collapse; font-size:12px; }
+.data-table thead th { background:#f8fafc; padding:8px 10px; text-align:center; font-weight:600; color:#374151; border-bottom:2px solid #e5e7eb; white-space:nowrap; }
+.data-table tbody td { padding:7px 10px; text-align:center; border-bottom:1px solid #f3f4f6; }
+.data-table tbody tr:hover { background:#f9fafb; }
+.data-table .num { text-align:right; font-variant-numeric:tabular-nums; }
+
+/* ── 홈 대시보드 ── */
+.home-cards { display:grid; grid-template-columns:repeat(4,1fr); gap:16px; margin-bottom:20px; }
+.home-card { background:#fff; border:1px solid #e5e7eb; border-radius:12px; padding:20px; }
+.home-card .card-label { font-size:11px; color:#6b7280; font-weight:500; margin-bottom:8px; }
+.home-card .card-value { font-size:28px; font-weight:700; color:#1e293b; }
+.home-card .card-sub { font-size:11px; margin-top:4px; }
+.home-card .card-sub.up { color:#16a34a; }
+.home-card .card-sub.down { color:#dc2626; }
+.home-card .card-sub.flat { color:#6b7280; }
+
+.notice-section { background:#fff; border:1px solid #e5e7eb; border-radius:10px; padding:16px 20px; margin-bottom:16px; }
+.notice-title { font-size:13px; font-weight:700; margin-bottom:12px; }
+.notice-title::before { content:'● '; color:#2563eb; }
+.notice-list { list-style:none; }
+.notice-list li { display:flex; justify-content:space-between; padding:6px 0; border-bottom:1px solid #f3f4f6; font-size:12px; }
+.notice-list li:last-child { border:none; }
+.notice-list .date { color:#9ca3af; }
+
+/* ── 페이지 숨기기 ── */
+.page { display:none; }
+.page.active { display:block; }
+
+/* ── 스크롤바 ── */
+::-webkit-scrollbar { width:6px; }
+::-webkit-scrollbar-track { background:transparent; }
+::-webkit-scrollbar-thumb { background:#cbd5e1; border-radius:3px; }
+</style>
+</head>
+<body data-gnb-page="lrsDashboard" data-gnb-base="../">
+
+<div class="lrs-wrapper">
+<!-- ===== 1차 메뉴 사이드바 ===== -->
+<nav class="sidebar">
+  <div class="logo">LRS<span>학습분석</span></div>
+  <div class="nav-item active" data-menu="home"><span class="icon">🏠</span><span class="label">홈</span></div>
+  <div class="nav-item" data-menu="usage"><span class="icon">📊</span><span class="label">학습현황</span></div>
+  <div class="nav-item" data-menu="achieve"><span class="icon">🏆</span><span class="label">학업성취</span></div>
+  <div class="nav-item" data-menu="perform"><span class="icon">📝</span><span class="label">학습수행</span></div>
+  <div class="nav-item" data-menu="custom"><span class="icon">🎯</span><span class="label">맞춤학습</span></div>
+  <div class="nav-item" data-menu="teacher"><span class="icon">👨‍🏫</span><span class="label">교사활용<br>지수</span></div>
+  <div class="nav-item" data-menu="daily"><span class="icon">📋</span><span class="label">일일현황</span></div>
+  <div class="nav-spacer"></div>
+</nav>
+
+<!-- ===== 2차 메뉴 패널 ===== -->
+<aside class="sub-menu" id="subMenu">
+  <!-- JS로 동적 생성 -->
+</aside>
+
+<!-- ===== 메인 콘텐츠 ===== -->
+<div class="main">
+  <div class="top-bar">
+    <div class="breadcrumb" id="breadcrumb">홈</div>
+    <div class="top-right">
+      <span>충청북도교육청</span>
+      <span>|</span>
+      <span>집계일자 2025-03-11</span>
+    </div>
+  </div>
+  <div class="content" id="contentArea">
+    <!-- 페이지 콘텐츠가 JS로 렌더링됨 -->
+  </div>
+</div>
+</div><!-- /.lrs-wrapper -->
+
+<script>
+// ============================================================
+// 메뉴 구조 정의
+// ============================================================
+const MENUS = {
+  home: { title:'홈', items:[] },
+  usage: {
+    title:'학습현황',
+    items:[
+      { group:'활용빈도', children:[
+        { id:'usage-rate', name:'활용률' },
+        { id:'usage-freq', name:'활용빈도' },
+        { id:'usage-freq-subj', name:'과목별 활용빈도' },
+        { id:'usage-freq-school', name:'학교급별 활용빈도' }
+      ]},
+      { group:'활용시간', children:[
+        { id:'usage-time', name:'학습활동 시간' },
+        { id:'usage-time-subj', name:'과목별 학습활동 시간' },
+        { id:'usage-time-school', name:'학교급별 학습활동 시간' }
+      ]}
+    ]
+  },
+  achieve: {
+    title:'학업성취',
+    items:[
+      { group:'성취수준', children:[
+        { id:'achieve-status', name:'성취수준 현황' },
+        { id:'achieve-dist', name:'성취수준 분포' }
+      ]}
+    ]
+  },
+  perform: {
+    title:'학습수행',
+    items:[
+      { group:'학습콘텐츠 활용도', children:[
+        { id:'perform-content-freq', name:'콘텐츠 유형별 활용빈도' },
+        { id:'perform-content-time', name:'콘텐츠 유형별 활용시간' }
+      ]},
+      { group:'문항풀이 활용도', children:[
+        { id:'perform-quiz-freq', name:'평가문항풀이 빈도·시간' },
+        { id:'perform-quiz-subj', name:'과목별 평가문항풀이 빈도·시간' },
+        { id:'perform-quiz-school', name:'학교급별 평가문항풀이 빈도·시간' }
+      ]},
+      { group:'과제 수행도', children:[
+        { id:'perform-hw-assign', name:'과제 출제 빈도' },
+        { id:'perform-hw-submit', name:'과제 제출 빈도' },
+        { id:'perform-hw-rate', name:'과제 수행률' }
+      ]}
+    ]
+  },
+  custom: {
+    title:'맞춤학습',
+    items:[
+      { group:'AI튜터 활용도', children:[
+        { id:'custom-ai-freq', name:'AI튜터 활용빈도' },
+        { id:'custom-ai-recommend', name:'AI튜터 추천 콘텐츠 활용도' }
+      ]},
+      { group:'학생 주도 평가', children:[
+        { id:'custom-student-eval', name:'학생 주도 평가 참여빈도' },
+        { id:'custom-student-reeval', name:'학생 주도 재평가 참여빈도' },
+        { id:'custom-student-retry', name:'오답 재도전 참여율' }
+      ]},
+      { group:'교사 콘텐츠 재구성', children:[
+        { id:'custom-teacher-reorg', name:'교육자료 재구성 빈도' }
+      ]},
+      { group:'교사 피드백 빈도', children:[
+        { id:'custom-teacher-feedback', name:'교사 피드백 활동' }
+      ]}
+    ]
+  },
+  teacher: {
+    title:'교사활용지수',
+    items:[
+      { group:'활용빈도', children:[
+        { id:'teacher-rate', name:'교사 활용률' },
+        { id:'teacher-freq', name:'교사 활용빈도' },
+        { id:'teacher-subj', name:'과목별 교사 활용빈도' },
+        { id:'teacher-school', name:'학교급별 교사 활용빈도' }
+      ]}
+    ]
+  },
+  daily: {
+    title:'일일현황',
+    items:[
+      { group:'운영 현황', children:[
+        { id:'daily-access', name:'접속 현황' },
+        { id:'daily-usage', name:'활용 현황' }
+      ]}
+    ]
+  }
+};
+
+// ============================================================
+// 더미 데이터 생성
+// ============================================================
+const WEEKS = [];
+const startDate = new Date(2025, 2, 3);
+for(let i=0; i<52; i++){
+  const s = new Date(startDate); s.setDate(s.getDate()+i*7);
+  const e = new Date(s); e.setDate(e.getDate()+6);
+  const fmt = d => `${String(d.getMonth()+1).padStart(2,'0')}.${String(d.getDate()).padStart(2,'0')}`;
+  WEEKS.push({ label:`${i+10}주차`, range:`(${fmt(s)}~${fmt(e)})` });
+}
+
+function genData(base, variance, len=52){
+  const arr = [];
+  for(let i=0; i<len; i++){
+    let v = base + Math.sin(i*0.3)*variance + (Math.random()-0.5)*variance*0.5;
+    if(i>=26 && i<=34) v *= 0.15; // 방학
+    arr.push(Math.max(0, Math.round(v)));
+  }
+  return arr;
+}
+
+const DATA = {
+  totalFreq: genData(12000, 5000),
+  totalRate: genData(180, 120).map(v=>Math.min(536, v)),
+  subjMath: genData(7000, 3000),
+  subjEng: genData(4000, 1500),
+  subjInfo: genData(2000, 1000),
+  schoolElem: genData(9000, 4000),
+  schoolMid: genData(3500, 1500),
+  schoolHigh: genData(1200, 600),
+  totalTime: genData(1500, 700).map(v=>+(v*0.1).toFixed(1)),
+  contentVideo: genData(3000, 1500),
+  contentText: genData(2000, 800),
+  contentAudio: genData(500, 300),
+  contentPractice: genData(800, 400),
+  contentImage: genData(300, 200),
+  contentOther: genData(200, 100),
+  quizFreq: genData(5000, 2500),
+  hwAssign: genData(800, 400),
+  hwSubmit: genData(600, 350),
+  aiTutor: genData(300, 200),
+  studentEval: genData(2000, 1000),
+  studentReeval: genData(500, 300),
+  retryRate: genData(35, 15).map(v=>Math.min(80, Math.max(5, v))),
+  teacherReorg: genData(200, 100),
+  teacherFeedback: genData(400, 200),
+  teacherRate: genData(120, 80).map(v=>Math.min(400, v)),
+  teacherFreq: genData(8000, 3000),
+};
+
+// ============================================================
+// 차트 인스턴스 관리
+// ============================================================
+let activeCharts = [];
+function destroyCharts(){
+  activeCharts.forEach(c=>c.destroy());
+  activeCharts = [];
+}
+
+function createLineChart(canvasId, labels, datasets, yLabel='건수'){
+  const ctx = document.getElementById(canvasId);
+  if(!ctx) return;
+  const chart = new Chart(ctx, {
+    type:'line',
+    data:{ labels, datasets },
+    options:{
+      responsive:true, maintainAspectRatio:false,
+      plugins:{ legend:{ position:'top', labels:{ font:{size:11,family:'Pretendard'}, usePointStyle:true, pointStyle:'circle' }}},
+      scales:{
+        x:{ ticks:{ font:{size:10}, maxRotation:45 }},
+        y:{ beginAtZero:true, title:{ display:true, text:`[ ${yLabel} ]`, font:{size:11} }, ticks:{ font:{size:10}, callback:v=>v.toLocaleString() }}
+      },
+      interaction:{ mode:'index', intersect:false }
+    }
+  });
+  activeCharts.push(chart);
+}
+
+function createBarChart(canvasId, labels, datasets, yLabel='건수', stacked=false){
+  const ctx = document.getElementById(canvasId);
+  if(!ctx) return;
+  const chart = new Chart(ctx, {
+    type:'bar',
+    data:{ labels, datasets },
+    options:{
+      responsive:true, maintainAspectRatio:false,
+      plugins:{ legend:{ position:'top', labels:{ font:{size:11,family:'Pretendard'}, usePointStyle:true }}},
+      scales:{
+        x:{ stacked, ticks:{ font:{size:10} }},
+        y:{ stacked, beginAtZero:true, title:{ display:true, text:`[ ${yLabel} ]`, font:{size:11} }, ticks:{ font:{size:10}, callback:v=>v.toLocaleString() }}
+      }
+    }
+  });
+  activeCharts.push(chart);
+}
+
+// ============================================================
+// 필터 HTML 생성 헬퍼
+// ============================================================
+function filterStandard(opts={}){
+  const showCalc = opts.calc !== false;
+  const showSubj = opts.subj === true;
+  const showSchool = opts.school === true;
+  const showHours = opts.hours === true;
+  return `
+  <div class="filter-bar">
+    <div class="filter-row">
+      <span class="filter-label">교육청</span>
+      <select class="filter-select"><option>충청북도교육청</option></select>
+      <select class="filter-select"><option>교육지원청 전체</option></select>
+      <span class="filter-label" style="margin-left:8px">학교</span>
+      <input class="filter-input" placeholder="학교명 검색">
+      ${showSchool ? `<span class="filter-label">학교급</span><select class="filter-select"><option>전체</option><option>초등학교</option><option>중학교</option><option>고등학교</option></select>` : ''}
+      ${showSubj ? `<span class="filter-label">과목</span><select class="filter-select"><option>전체</option><option>수학</option><option>영어</option><option>정보</option></select>` : ''}
+      <div class="output-type">
+        <label class="active" onclick="this.parentElement.querySelectorAll('label').forEach(l=>l.classList.remove('active'));this.classList.add('active')">전체</label>
+        <label onclick="this.parentElement.querySelectorAll('label').forEach(l=>l.classList.remove('active'));this.classList.add('active')">그래프</label>
+        <label onclick="this.parentElement.querySelectorAll('label').forEach(l=>l.classList.remove('active'));this.classList.add('active')">표</label>
+      </div>
+    </div>
+    <div class="filter-row">
+      <span class="filter-label">*학년도</span>
+      <select class="filter-select" style="min-width:80px"><option>2025</option><option>2026</option></select>
+      <span class="filter-label">*기간</span>
+      <div class="filter-radio">
+        <label onclick="toggleRadio(this)">일간</label>
+        <label onclick="toggleRadio(this)">월간</label>
+        <label onclick="toggleRadio(this)">학기별</label>
+        <label class="active" onclick="toggleRadio(this)">년간</label>
+      </div>
+      <span style="font-size:12px;color:#9ca3af">2025-03 ~ 2026-02</span>
+      ${showCalc ? `<span class="filter-label" style="margin-left:12px">계산방식</span><div class="filter-radio"><label class="active" onclick="toggleRadio(this)">합계</label><label onclick="toggleRadio(this)">평균</label></div>` : ''}
+      ${showHours ? `<label class="filter-check"><input type="checkbox"> 주간 과목시수 반영</label>` : ''}
+      <div style="margin-left:auto;display:flex;gap:6px">
+        <button class="btn-reset">↻ 초기화</button>
+        <button class="btn-search">조회</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function filterDateRange(opts={}){
+  const showSubj = opts.subj !== false;
+  return `
+  <div class="filter-bar">
+    <div class="filter-row">
+      <span class="filter-label">교육청</span>
+      <select class="filter-select"><option>충청북도교육청</option></select>
+      <select class="filter-select"><option>교육지원청 전체</option></select>
+      <span class="filter-label" style="margin-left:8px">학교</span>
+      <input class="filter-input" placeholder="학교명 검색">
+      ${showSubj ? `<span class="filter-label">*과목</span><select class="filter-select"><option>수학</option><option>영어</option><option>정보</option></select>` : ''}
+      <span class="filter-label">*학교급</span>
+      <select class="filter-select"><option>초등학교</option><option>중학교</option><option>고등학교</option></select>
+      <div class="output-type">
+        <label class="active" onclick="this.parentElement.querySelectorAll('label').forEach(l=>l.classList.remove('active'));this.classList.add('active')">전체</label>
+        <label onclick="this.parentElement.querySelectorAll('label').forEach(l=>l.classList.remove('active'));this.classList.add('active')">그래프</label>
+        <label onclick="this.parentElement.querySelectorAll('label').forEach(l=>l.classList.remove('active'));this.classList.add('active')">표</label>
+      </div>
+    </div>
+    <div class="filter-row">
+      <span class="filter-label">*기간</span>
+      <select class="filter-select" style="min-width:90px"><option>2025 학년도</option><option>2026 학년도</option></select>
+      <input type="date" class="filter-input" value="2025-03-11"> ~ <input type="date" class="filter-input" value="2026-03-11">
+      <div class="filter-radio">
+        <label onclick="toggleRadio(this)">1일</label>
+        <label onclick="toggleRadio(this)">1주일</label>
+        <label onclick="toggleRadio(this)">1개월</label>
+        <label onclick="toggleRadio(this)">6개월</label>
+        <label class="active" onclick="toggleRadio(this)">1년</label>
+      </div>
+      <div style="margin-left:auto;display:flex;gap:6px">
+        <button class="btn-reset">↻ 초기화</button>
+        <button class="btn-search">조회</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function filterDaily(){
+  return `
+  <div class="filter-bar">
+    <div class="filter-row">
+      <span class="filter-label">교육청</span>
+      <select class="filter-select"><option>충청북도교육청</option></select>
+      <span class="filter-label">시군</span>
+      <select class="filter-select"><option>전체</option><option>청주시</option><option>충주시</option><option>제천시</option></select>
+      <span class="filter-label">학교급</span>
+      <select class="filter-select"><option>전체</option><option>초등학교</option><option>중학교</option><option>고등학교</option></select>
+      <span class="filter-label">학교</span>
+      <input class="filter-input" placeholder="학교명 검색">
+      <span class="filter-label">기준일</span>
+      <input type="date" class="filter-input" value="2026-03-11">
+      <div style="margin-left:auto"><button class="btn-search">조회</button></div>
+    </div>
+  </div>`;
+}
+
+function toggleRadio(el){
+  el.parentElement.querySelectorAll('label').forEach(l=>l.classList.remove('active'));
+  el.classList.add('active');
+}
+
+// ============================================================
+// 표 HTML 생성 헬퍼
+// ============================================================
+function tableHTML(headers, rows, count){
+  let h = headers.map(h=>`<th>${h}</th>`).join('');
+  let r = rows.map(row=>`<tr>${row.map((c,i)=>`<td class="${i>=2?'num':''}">${typeof c==='number'?c.toLocaleString():c}</td>`).join('')}</tr>`).join('');
+  return `
+  <div class="table-section">
+    <div class="table-header">
+      <div><span class="table-title">데이터(표)</span><span class="table-count">총 ${count}건</span></div>
+      <button class="btn-excel">엑셀다운로드</button>
+    </div>
+    <div style="max-height:300px;overflow-y:auto">
+    <table class="data-table"><thead><tr>${h}</tr></thead><tbody>${r}</tbody></table>
+    </div>
+  </div>`;
+}
+
+function genTableRows(dataKey, colName, limit=15){
+  const d = DATA[dataKey];
+  return d.slice(0,limit).map((v,i)=>[i+1, `${WEEKS[i].label}${WEEKS[i].range}`, '충청북도교육청', v]);
+}
+
+// ============================================================
+// 페이지 렌더링 함수
+// ============================================================
+function renderHome(){
+  const totalFreq = DATA.totalFreq.reduce((a,b)=>a+b,0);
+  const totalRate = (DATA.totalRate.reduce((a,b)=>a+b,0)/52).toFixed(1);
+  return `
+  <div class="home-cards">
+    <div class="home-card">
+      <div class="card-label">전체 활용빈도</div>
+      <div class="card-value">${totalFreq.toLocaleString()}</div>
+      <div class="card-sub up">▲ 전일대비 +2.3%</div>
+    </div>
+    <div class="home-card">
+      <div class="card-label">초등학교</div>
+      <div class="card-value">${DATA.schoolElem.reduce((a,b)=>a+b,0).toLocaleString()}</div>
+      <div class="card-sub up">▲ +1.8%</div>
+    </div>
+    <div class="home-card">
+      <div class="card-label">중학교</div>
+      <div class="card-value">${DATA.schoolMid.reduce((a,b)=>a+b,0).toLocaleString()}</div>
+      <div class="card-sub down">▼ -0.5%</div>
+    </div>
+    <div class="home-card">
+      <div class="card-label">고등학교</div>
+      <div class="card-value">${DATA.schoolHigh.reduce((a,b)=>a+b,0).toLocaleString()}</div>
+      <div class="card-sub flat">— 0.0%</div>
+    </div>
+  </div>
+  <div style="display:grid;grid-template-columns:2fr 1fr;gap:16px">
+    <div class="chart-section">
+      <div class="chart-header"><span class="chart-title">AI·디지털 교육자료 활용빈도 추이</span></div>
+      <div class="chart-container"><canvas id="homeChart"></canvas></div>
+    </div>
+    <div class="notice-section">
+      <div class="notice-title">공지사항</div>
+      <ul class="notice-list">
+        <li><span>브라우저 캐시 및 쿠키 삭제 안내</span><span class="date">2026-03-04</span></li>
+        <li><span>학습분석 지원 서비스 사용 안내</span><span class="date">2026-03-06</span></li>
+        <li><span>시스템 정기 점검 안내</span><span class="date">2026-02-04</span></li>
+        <li><span>2차 인증(구글 OTP) 등록 안내</span><span class="date">2026-01-06</span></li>
+        <li><span>학습분석 지원 서비스 오픈 안내</span><span class="date">2025-09-05</span></li>
+      </ul>
+    </div>
+  </div>
+  <div class="chart-section">
+    <div class="chart-header"><span class="chart-title">학교급별 활용빈도 현황 (2025학년도)</span></div>
+    <div class="chart-container"><canvas id="homeBarChart"></canvas></div>
+  </div>`;
+}
+
+function renderLineChartPage(title, dataKey, yLabel, filterOpts){
+  const labels = WEEKS.slice(0,52).map(w=>w.label);
+  const d = DATA[dataKey];
+  return {
+    html: `
+    ${filterStandard(filterOpts||{})}
+    <div class="formula-bar"><span class="toggle">▸</span> 화면설명 및 산출식</div>
+    <div class="chart-section">
+      <div class="chart-header"><span class="chart-title">${title}(그래프)-합계</span></div>
+      <div class="chart-container"><canvas id="mainChart"></canvas></div>
+    </div>
+    ${tableHTML(['순번','기간','시도교육청',yLabel], genTableRows(dataKey, yLabel), d.length)}`,
+    init:()=>{
+      createLineChart('mainChart', labels, [{
+        label:'충청북도교육청', data:d, borderColor:'#2563eb', backgroundColor:'rgba(37,99,235,0.1)',
+        tension:0.3, pointRadius:3, fill:true
+      }], yLabel);
+    }
+  };
+}
+
+function renderMultiLinePage(title, datasets, yLabel, filterOpts){
+  const labels = WEEKS.slice(0,52).map(w=>w.label);
+  const colors = [['#2563eb','rgba(37,99,235,0.1)'],['#16a34a','rgba(22,163,106,0.1)'],['#f59e0b','rgba(245,158,11,0.1)']];
+  const chartDatasets = datasets.map((ds,i)=>({
+    label:ds.name, data:DATA[ds.key], borderColor:colors[i][0], backgroundColor:colors[i][1],
+    tension:0.3, pointRadius:2
+  }));
+  const headers = ['순번','기간','시도교육청',...datasets.map(d=>d.name)];
+  const rows = [];
+  for(let i=0; i<15; i++){
+    rows.push([i+1, `${WEEKS[i].label}${WEEKS[i].range}`, '충청북도교육청', ...datasets.map(ds=>DATA[ds.key][i])]);
+  }
+  return {
+    html: `
+    ${filterStandard(filterOpts||{})}
+    <div class="formula-bar"><span class="toggle">▸</span> 화면설명 및 산출식</div>
+    <div class="chart-section">
+      <div class="chart-header"><span class="chart-title">${title}(그래프)-합계</span></div>
+      <div class="chart-container"><canvas id="mainChart"></canvas></div>
+    </div>
+    ${tableHTML(headers, rows, 52)}`,
+    init:()=>{ createLineChart('mainChart', labels, chartDatasets, yLabel); }
+  };
+}
+
+function renderStackedBarPage(title, datasets, yLabel, filterOpts){
+  const labels = ['수학','영어','정보'];
+  const colors = ['#3b82f6','#84cc16','#1f2937','#f97316','#06b6d4','#eab308'];
+  const chartDatasets = datasets.map((ds,i)=>({
+    label:ds.name, data:[ds.data[0]||0, ds.data[1]||0, ds.data[2]||0],
+    backgroundColor:colors[i%6]
+  }));
+  return {
+    html: `
+    ${filterStandard(filterOpts||{})}
+    <div class="formula-bar"><span class="toggle">▸</span> 화면설명 및 산출식</div>
+    <div class="chart-section">
+      <div class="chart-header"><span class="chart-title">${title}(그래프)-합계</span></div>
+      <div class="chart-container"><canvas id="mainChart"></canvas></div>
+    </div>`,
+    init:()=>{ createBarChart('mainChart', labels, chartDatasets, yLabel, true); }
+  };
+}
+
+function renderAchieveStatus(){
+  const rows = [];
+  const items = [
+    ['E4MATA01B01C01','수와 연산','10000 이상의 큰 수의 자릿값과 위치적 기수법',1345,154,68],
+    ['E4MATA01B01C02','','10000 이상의 큰 수 읽고 쓰기',897,168,52],
+    ['E4MATA01B02C03','','다섯 자리 이상의 수의 범위에서 수의 계열',226,79,28],
+    ['E4MATA01B02C04','','다섯 자리 이상의 수의 크기 비교',243,65,7],
+    ['E4MATA01B03C05','','세 자리 수의 덧셈의 계산 원리',603,158,171],
+    ['E4MATA01B03C06','','세 자리 수의 뺄셈의 계산 원리',166,60,69],
+    ['E4MATA01B03C07','','세 자리 수의 덧셈의 계산',733,151,69],
+    ['E4MATA01B03C08','','세 자리 수의 뺄셈의 계산',243,105,86],
+    ['E4MATA01B04C09','','곱하는 수가 한 자리 수인 곱셈의 계산 원리',1244,220,321],
+    ['E4MATA01B04C10','','곱하는 수가 두 자리 수인 곱셈의 계산 원리',350,299,332],
+  ];
+  items.forEach((item,i)=>{
+    rows.push([i+1,...item]);
+  });
+  const total = [35601,10479,8995];
+  return {
+    html: `
+    ${filterDateRange({subj:true})}
+    <div class="formula-bar"><span class="toggle">▸</span> 화면설명 및 산출식</div>
+    <div class="table-section">
+      <div class="table-header">
+        <div><span class="table-title">성취수준 현황(표)</span><span class="table-count">총 283건</span></div>
+        <button class="btn-excel">엑셀다운로드</button>
+      </div>
+      <div style="max-height:400px;overflow-y:auto">
+      <table class="data-table">
+        <thead><tr><th>순번</th><th>교육과정표준체계ID</th><th>내용체계 영역</th><th>2단계 내용요소</th><th colspan="3" style="text-align:center">성취수준</th></tr>
+        <tr><th></th><th></th><th></th><th></th><th>A</th><th>B</th><th>C</th></tr></thead>
+        <tbody>${rows.map(r=>`<tr>${r.map((c,i)=>`<td class="${i>=4?'num':''}">${typeof c==='number'?c.toLocaleString():c}</td>`).join('')}</tr>`).join('')}
+        <tr style="font-weight:700;background:#f8fafc"><td colspan="4" style="text-align:center">합계</td><td class="num">${total[0].toLocaleString()}</td><td class="num">${total[1].toLocaleString()}</td><td class="num">${total[2].toLocaleString()}</td></tr>
+        </tbody>
+      </table>
+      </div>
+    </div>`,
+    init:()=>{}
+  };
+}
+
+function renderDailyAccess(){
+  const schools = ['금성초','청주교대부설초','서원초','봉명초','산남초','가경초','복대초','사직초','남성초','개신초'];
+  const rows = schools.map((s,i)=>[i+1, s, '청주시', '초등학교', Math.round(50+Math.random()*200), Math.round(30+Math.random()*150), `${(40+Math.random()*50).toFixed(1)}%`]);
+  return {
+    html: `
+    ${filterDaily()}
+    <div class="table-section">
+      <div class="table-header">
+        <div><span class="table-title">접속 현황(표)</span><span class="table-count">총 ${schools.length}건</span></div>
+        <button class="btn-excel">엑셀다운로드</button>
+      </div>
+      <table class="data-table">
+        <thead><tr><th>순번</th><th>학교명</th><th>시군</th><th>학교급</th><th>전일 접속자수</th><th>당일 접속자수</th><th>접속률</th></tr></thead>
+        <tbody>${rows.map(r=>`<tr>${r.map((c,i)=>`<td class="${i>=4?'num':''}">${typeof c==='number'?c.toLocaleString():c}</td>`).join('')}</tr>`).join('')}</tbody>
+      </table>
+    </div>`,
+    init:()=>{}
+  };
+}
+
+// ============================================================
+// 페이지 매핑
+// ============================================================
+function getPageContent(pageId){
+  switch(pageId){
+    case 'home': return { html:renderHome(), init:()=>{
+      const labels = WEEKS.slice(0,52).map(w=>w.label);
+      createLineChart('homeChart', labels, [{ label:'충청북도교육청', data:DATA.totalFreq, borderColor:'#2563eb', backgroundColor:'rgba(37,99,235,0.08)', tension:0.3, pointRadius:2, fill:true }], '빈도합계');
+      createBarChart('homeBarChart', ['초3','초4','초5','초6','중1','중2','중3','고1','고2','고3'],
+        [{ label:'활용빈도', data:[28500,32100,35800,31200,18900,16200,12800,8500,6200,4100], backgroundColor:'#3b82f6' }], '건수');
+    }};
+    case 'usage-rate': return renderLineChartPage('활용률','totalRate','활용률(%)',{calc:false});
+    case 'usage-freq': return renderLineChartPage('활용빈도','totalFreq','빈도합계',{});
+    case 'usage-freq-subj': return renderMultiLinePage('과목별 활용빈도',[{name:'수학',key:'subjMath'},{name:'영어',key:'subjEng'},{name:'정보',key:'subjInfo'}],'빈도합계',{hours:true});
+    case 'usage-freq-school': return renderMultiLinePage('학교급별 활용빈도',[{name:'초등학교',key:'schoolElem'},{name:'중학교',key:'schoolMid'},{name:'고등학교',key:'schoolHigh'}],'빈도합계',{school:true});
+    case 'usage-time': return renderLineChartPage('학습활동 시간','totalTime','학습시간(h)',{});
+    case 'usage-time-subj': return renderMultiLinePage('과목별 학습활동 시간',[{name:'수학',key:'subjMath'},{name:'영어',key:'subjEng'},{name:'정보',key:'subjInfo'}],'학습시간(h)',{hours:true});
+    case 'usage-time-school': return renderMultiLinePage('학교급별 학습활동 시간',[{name:'초등학교',key:'schoolElem'},{name:'중학교',key:'schoolMid'},{name:'고등학교',key:'schoolHigh'}],'학습시간(h)',{school:true});
+    case 'achieve-status': return renderAchieveStatus();
+    case 'achieve-dist': return renderMultiLinePage('성취수준 분포',[{name:'A등급',key:'subjMath'},{name:'B등급',key:'subjEng'},{name:'C등급',key:'subjInfo'}],'비율(%)',{});
+    case 'perform-content-freq':{
+      const sums = [ks=>DATA[ks].reduce((a,b)=>a+b,0)];
+      return renderStackedBarPage('콘텐츠 유형별 활용빈도',
+        [{name:'영상',data:[sums[0]('contentVideo'),sums[0]('contentVideo')*0.6,sums[0]('contentVideo')*0.3]},
+         {name:'음원',data:[sums[0]('contentAudio'),sums[0]('contentAudio')*0.5,sums[0]('contentAudio')*0.2]},
+         {name:'텍스트',data:[sums[0]('contentText'),sums[0]('contentText')*0.7,sums[0]('contentText')*0.4]},
+         {name:'실습',data:[sums[0]('contentPractice'),sums[0]('contentPractice')*0.4,sums[0]('contentPractice')*0.3]},
+         {name:'이미지',data:[sums[0]('contentImage'),sums[0]('contentImage')*0.3,sums[0]('contentImage')*0.2]},
+         {name:'기타',data:[sums[0]('contentOther'),sums[0]('contentOther')*0.2,sums[0]('contentOther')*0.1]}],
+        '건수',{school:true,hours:true});
+    }
+    case 'perform-content-time': return renderLineChartPage('콘텐츠 유형별 활용시간','totalTime','시간(h)',{school:true});
+    case 'perform-quiz-freq': return renderLineChartPage('평가문항풀이 빈도','quizFreq','건수',{});
+    case 'perform-quiz-subj': return renderMultiLinePage('과목별 평가문항풀이',[{name:'수학',key:'subjMath'},{name:'영어',key:'subjEng'},{name:'정보',key:'subjInfo'}],'건수',{subj:true});
+    case 'perform-quiz-school': return renderMultiLinePage('학교급별 평가문항풀이',[{name:'초등학교',key:'schoolElem'},{name:'중학교',key:'schoolMid'},{name:'고등학교',key:'schoolHigh'}],'건수',{school:true});
+    case 'perform-hw-assign': return renderLineChartPage('과제 출제 빈도','hwAssign','건수',{});
+    case 'perform-hw-submit': return renderLineChartPage('과제 제출 빈도','hwSubmit','건수',{});
+    case 'perform-hw-rate': return renderLineChartPage('과제 수행률','retryRate','수행률(%)',{calc:false});
+    case 'custom-ai-freq': return renderLineChartPage('AI튜터 활용빈도','aiTutor','건수',{});
+    case 'custom-ai-recommend': return renderLineChartPage('AI튜터 추천 콘텐츠 활용도','aiTutor','건수',{});
+    case 'custom-student-eval': return renderLineChartPage('학생 주도 평가 참여빈도','studentEval','건수',{});
+    case 'custom-student-reeval': return renderLineChartPage('학생 주도 재평가 참여빈도','studentReeval','건수',{});
+    case 'custom-student-retry': return renderLineChartPage('오답 재도전 참여율','retryRate','참여율(%)',{calc:false});
+    case 'custom-teacher-reorg': return renderLineChartPage('교육자료 재구성 빈도','teacherReorg','건수',{});
+    case 'custom-teacher-feedback': return renderLineChartPage('교사 피드백 활동','teacherFeedback','건수',{});
+    case 'teacher-rate': return renderLineChartPage('교사 활용률','teacherRate','활용률(%)',{calc:false});
+    case 'teacher-freq': return renderLineChartPage('교사 활용빈도','teacherFreq','빈도합계',{});
+    case 'teacher-subj': return renderMultiLinePage('과목별 교사 활용빈도',[{name:'수학',key:'subjMath'},{name:'영어',key:'subjEng'},{name:'정보',key:'subjInfo'}],'빈도합계',{subj:true});
+    case 'teacher-school': return renderMultiLinePage('학교급별 교사 활용빈도',[{name:'초등학교',key:'schoolElem'},{name:'중학교',key:'schoolMid'},{name:'고등학교',key:'schoolHigh'}],'빈도합계',{school:true});
+    case 'daily-access': return renderDailyAccess();
+    case 'daily-usage': return renderDailyAccess();
+    default: return { html:'<p>준비 중입니다.</p>', init:()=>{} };
+  }
+}
+
+// ============================================================
+// 네비게이션
+// ============================================================
+let currentMenu = 'home';
+let currentPage = 'home';
+
+function renderSubMenu(menuKey){
+  const menu = MENUS[menuKey];
+  const el = document.getElementById('subMenu');
+  if(menuKey === 'home'){
+    el.innerHTML = '<div class="sub-menu-title">홈</div><div class="sub-menu-item active" data-page="home">대시보드</div>';
+    return;
+  }
+  let html = `<div class="sub-menu-title">${menu.title}</div>`;
+  menu.items.forEach(group=>{
+    html += `<div class="sub-menu-group"><div class="sub-menu-group-title">▸ ${group.group}</div>`;
+    group.children.forEach((item,i)=>{
+      const isFirst = !currentPage || !menu.items.flatMap(g=>g.children).find(c=>c.id===currentPage);
+      const active = currentPage === item.id || (isFirst && i===0 && group === menu.items[0]);
+      html += `<div class="sub-menu-item${active?' active':''}" data-page="${item.id}">${item.name}</div>`;
+    });
+    html += '</div>';
+  });
+  el.innerHTML = html;
+}
+
+function navigateTo(menuKey, pageId){
+  destroyCharts();
+  currentMenu = menuKey;
+  currentPage = pageId || (menuKey === 'home' ? 'home' : MENUS[menuKey].items[0].children[0].id);
+
+  // 1차 메뉴 활성화
+  document.querySelectorAll('.nav-item').forEach(n=>{
+    n.classList.toggle('active', n.dataset.menu === menuKey);
+  });
+
+  // 2차 메뉴 렌더링
+  renderSubMenu(menuKey);
+
+  // 2차 메뉴 항목 클릭 이벤트
+  document.querySelectorAll('.sub-menu-item').forEach(item=>{
+    item.addEventListener('click', ()=>{
+      document.querySelectorAll('.sub-menu-item').forEach(i=>i.classList.remove('active'));
+      item.classList.add('active');
+      currentPage = item.dataset.page;
+      renderPage(currentPage);
+    });
+  });
+
+  renderPage(currentPage);
+}
+
+function renderPage(pageId){
+  destroyCharts();
+  const content = getPageContent(pageId);
+  document.getElementById('contentArea').innerHTML = content.html;
+
+  // 브레드크럸 업데이트
+  let bc = '';
+  if(pageId === 'home'){ bc = '홈'; }
+  else {
+    for(const [key,menu] of Object.entries(MENUS)){
+      for(const group of menu.items){
+        const found = group.children.find(c=>c.id === pageId);
+        if(found){ bc = `${menu.title} > ${group.group} > <span>${found.name}</span>`; break; }
+      }
+      if(bc) break;
+    }
+  }
+  document.getElementById('breadcrumb').innerHTML = bc;
+
+  // 차트 초기화
+  requestAnimationFrame(()=>content.init());
+}
+
+// ============================================================
+// 이벤트 바인딩
+// ============================================================
+document.querySelectorAll('.nav-item').forEach(item=>{
+  item.addEventListener('click', ()=>{
+    navigateTo(item.dataset.menu);
+  });
+});
+
+// 초기 렌더링
+navigateTo('home');
+</script>
+<link rel="stylesheet" href="../common-nav.css">
+<script src="../common-nav.js"></script>
+</body>
+</html>

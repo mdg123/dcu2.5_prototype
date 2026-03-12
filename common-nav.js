@@ -38,7 +38,9 @@
         portfolioDetail:  '05_우리반 성장기록/학생 포트폴리오 예시안/Portfolid.html',
         // 채움CBT
         cbtService:       '06_채움CBT/채움CBT_전체서비스_프로토타입_v2 (3).html',
-        cbtPlayer:        '06_채움CBT/채움CBT_평가지플레이어_프로토타입.html'
+        cbtPlayer:        '06_채움CBT/채움CBT_평가지플레이어_프로토타입.html',
+        // LRS 학습분석
+        lrsDashboard:     '07_LRS 대시보드/lrs-dashboard.html'
     };
 
     // ─── 메뉴 구조 정의 ───
@@ -94,6 +96,13 @@
             sub: [
                 { id: 'cbtBoard',   label: 'CBT 목록',     page: 'cbtService', hash: 'cbt-list' },
                 { id: 'cbtArchive', label: '나의 보관함',   page: 'cbtService', hash: 'my-exams' }
+            ]
+        },
+        {
+            id: 'lrsAnalytics',
+            label: 'LRS 학습분석',
+            sub: [
+                { id: 'lrsDashboard', label: '학습분석 대시보드', page: 'lrsDashboard' }
             ]
         }
     ];
