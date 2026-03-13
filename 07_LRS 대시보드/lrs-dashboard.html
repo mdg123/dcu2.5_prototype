@@ -264,7 +264,9 @@ for(let i=0; i<52; i++){
   const s = new Date(startDate); s.setDate(s.getDate()+i*7);
   const e = new Date(s); e.setDate(e.getDate()+6);
   const fmt = d => `${String(d.getMonth()+1).padStart(2,'0')}.${String(d.getDate()).padStart(2,'0')}`;
-  WEEKS.push({ label:`${i+10}주차`, range:`(${fmt(s)}~${fmt(e)})` });
+  const mon = s.getMonth()+1;
+  const weekInMonth = Math.ceil(s.getDate()/7);
+  WEEKS.push({ label:`${mon}월${weekInMonth}주`, range:`(${fmt(s)}~${fmt(e)})` });
 }
 
 function genData(base, variance, len=52){
@@ -524,7 +526,15 @@ function renderHome(){
   </div>
   <div style="display:grid;grid-template-columns:2fr 1fr;gap:16px">
     <div class="chart-section">
-      <div class="chart-header"><span class="chart-title">다채움 활용빈도 추이</span></div>
+      <div class="chart-header" style="flex-wrap:wrap;gap:8px">
+        <span class="chart-title">다채움 활용빈도 추이</span>
+        <div class="subj-check-group" id="homeSchoolCheck">
+          <label class="checked"><input type="checkbox" value="total" checked>전체</label>
+          <label><input type="checkbox" value="elem">초등학교</label>
+          <label><input type="checkbox" value="mid">중학교</label>
+          <label><input type="checkbox" value="high">고등학교</label>
+        </div>
+      </div>
       <div class="chart-container"><canvas id="homeChart"></canvas></div>
     </div>
     <div class="notice-section">
@@ -547,20 +557,49 @@ function renderHome(){
 function renderLineChartPage(title, dataKey, yLabel, filterOpts){
   const labels = WEEKS.slice(0,52).map(w=>w.label);
   const d = DATA[dataKey];
+  const schoolDataMap = {
+    total: { label:'전체', data:d, borderColor:'#2563eb', backgroundColor:'rgba(37,99,235,0.08)', tension:0.3, pointRadius:2, fill:true },
+    elem:  { label:'초등학교', data:DATA.schoolElem.map((v,i)=>Math.round(v*d[i]/DATA.totalFreq[i]||0)), borderColor:'#16a34a', backgroundColor:'transparent', tension:0.3, pointRadius:2, fill:false },
+    mid:   { label:'중학교', data:DATA.schoolMid.map((v,i)=>Math.round(v*d[i]/DATA.totalFreq[i]||0)), borderColor:'#f59e0b', backgroundColor:'transparent', tension:0.3, pointRadius:2, fill:false },
+    high:  { label:'고등학교', data:DATA.schoolHigh.map((v,i)=>Math.round(v*d[i]/DATA.totalFreq[i]||0)), borderColor:'#8b5cf6', backgroundColor:'transparent', tension:0.3, pointRadius:2, fill:false }
+  };
   return {
     html: `
     ${filterStandard(filterOpts||{})}
     <div class="formula-bar"><span class="toggle">▸</span> 화면설명 및 산출식</div>
     <div class="chart-section">
-      <div class="chart-header"><span class="chart-title">${title}(그래프)-합계</span></div>
+      <div class="chart-header" style="flex-wrap:wrap;gap:8px">
+        <span class="chart-title">${title}(그래프)-합계</span>
+        <div class="subj-check-group" id="lineSchoolCheck">
+          <label class="checked"><input type="checkbox" value="total" checked>전체</label>
+          <label><input type="checkbox" value="elem">초등학교</label>
+          <label><input type="checkbox" value="mid">중학교</label>
+          <label><input type="checkbox" value="high">고등학교</label>
+        </div>
+      </div>
       <div class="chart-container"><canvas id="mainChart"></canvas></div>
     </div>
     ${tableHTML(['순번','기간',yLabel], genTableRows(dataKey, yLabel), d.length)}`,
     init:()=>{
-      createLineChart('mainChart', labels, [{
-        label:'전체', data:d, borderColor:'#2563eb', backgroundColor:'rgba(37,99,235,0.1)',
-        tension:0.3, pointRadius:3, fill:true
-      }], yLabel);
+      function refreshLine(){
+        destroyCharts();
+        const checked = [];
+        document.querySelectorAll('#lineSchoolCheck input:checked').forEach(cb=>checked.push(cb.value));
+        const ds = checked.map(k=>schoolDataMap[k]).filter(Boolean);
+        if(ds.length) createLineChart('mainChart', labels, ds, yLabel);
+      }
+      document.querySelectorAll('#lineSchoolCheck label').forEach(label=>{
+        label.addEventListener('click', function(e){
+          if(e.target.tagName==='INPUT') return;
+          const cb = this.querySelector('input');
+          cb.checked = !cb.checked;
+          this.classList.toggle('checked', cb.checked);
+          refreshLine();
+        });
+        const cb = label.querySelector('input');
+        if(cb) cb.addEventListener('change', function(){ label.classList.toggle('checked', this.checked); refreshLine(); });
+      });
+      refreshLine();
     }
   };
 }
@@ -674,8 +713,9 @@ function renderDailyAccess(){
 // 교과 체크박스 기반 그래프 페이지
 // ============================================================
 function renderSubjCheckPage(title, yLabel, dataMultiplier){
+  const MAX_SUBJ = 3;
   const defaultSchool = '초등학교';
-  const defaultSubjs = ['국어','수학','사회','과학'];
+  const defaultSubjs = ['국어','수학','과학'];
   const id = 'subjChart_' + Math.random().toString(36).slice(2,8);
 
   function buildCheckboxes(school, selected){
@@ -727,7 +767,7 @@ function renderSubjCheckPage(title, yLabel, dataMultiplier){
       <div class="subj-filter-row">
         <span class="filter-label">*학교급</span>
         <select class="filter-select" id="schoolLevelSel"><option selected>초등학교</option><option>중학교</option><option>고등학교</option></select>
-        <span class="filter-label" style="margin-left:8px">*교과</span>
+        <span class="filter-label" style="margin-left:8px">*교과</span><span style="font-size:10px;color:#9ca3af;margin-right:4px">(최대 ${MAX_SUBJ}개)</span>
         <div class="subj-check-group" id="subjCheckGroup">
           ${buildCheckboxes(defaultSchool, defaultSubjs)}
         </div>
@@ -743,39 +783,43 @@ function renderSubjCheckPage(title, yLabel, dataMultiplier){
       <div class="chart-container"><canvas id="${id}"></canvas></div>
     </div>`,
     init:()=>{
-      // 체크박스 토글
-      document.querySelectorAll('#subjCheckGroup label').forEach(label=>{
-        label.addEventListener('click', function(e){
-          if(e.target.tagName==='INPUT') return;
-          const cb = this.querySelector('input');
-          cb.checked = !cb.checked;
-          this.classList.toggle('checked', cb.checked);
+      // 체크박스 토글 (최대 MAX_SUBJ개 제한)
+      function bindCheckboxes(){
+        document.querySelectorAll('#subjCheckGroup label').forEach(label=>{
+          label.addEventListener('click', function(e){
+            if(e.target.tagName==='INPUT') return;
+            const cb = this.querySelector('input');
+            if(!cb.checked){
+              const cnt = document.querySelectorAll('#subjCheckGroup input:checked').length;
+              if(cnt >= MAX_SUBJ){ alert('최대 '+MAX_SUBJ+'개까지 선택 가능합니다.'); return; }
+            }
+            cb.checked = !cb.checked;
+            this.classList.toggle('checked', cb.checked);
+          });
+          const cb = label.querySelector('input');
+          if(cb) cb.addEventListener('change', function(){
+            if(this.checked){
+              const cnt = document.querySelectorAll('#subjCheckGroup input:checked').length;
+              if(cnt > MAX_SUBJ){ this.checked=false; label.classList.remove('checked'); alert('최대 '+MAX_SUBJ+'개까지 선택 가능합니다.'); return; }
+            }
+            label.classList.toggle('checked', this.checked);
+          });
         });
-        const cb = label.querySelector('input');
-        if(cb) cb.addEventListener('change', function(){ label.classList.toggle('checked', this.checked); });
-      });
+      }
+      bindCheckboxes();
 
       // 학교급 변경 시 체크박스 갱신
       const schoolSel = document.getElementById('schoolLevelSel');
       schoolSel.addEventListener('change', function(){
         const school = this.value;
         const group = document.getElementById('subjCheckGroup');
-        const defaultSel = SUBJ_BY_SCHOOL[school].slice(0,4);
+        const defaultSel = SUBJ_BY_SCHOOL[school].slice(0,MAX_SUBJ);
         group.innerHTML = SUBJ_BY_SCHOOL[school].map(s=>{
           const chk = defaultSel.includes(s) ? 'checked' : '';
           const cls = defaultSel.includes(s) ? ' checked' : '';
           return '<label class="'+cls+'"><input type="checkbox" value="'+s+'" '+chk+'>'+s+'</label>';
         }).join('');
-        group.querySelectorAll('label').forEach(label=>{
-          label.addEventListener('click', function(e){
-            if(e.target.tagName==='INPUT') return;
-            const cb = this.querySelector('input');
-            cb.checked = !cb.checked;
-            this.classList.toggle('checked', cb.checked);
-          });
-          const cb = label.querySelector('input');
-          if(cb) cb.addEventListener('change', function(){ label.classList.toggle('checked', this.checked); });
-        });
+        bindCheckboxes();
         window.__refreshSubjChart();
       });
 
@@ -794,36 +838,250 @@ function renderSubjCheckPage(title, yLabel, dataMultiplier){
 }
 
 // ============================================================
+// 성취수준 분포 (원그래프 + 학교급/과목 선택)
+// ============================================================
+function renderAchieveDist(){
+  const id = 'achievePie_' + Math.random().toString(36).slice(2,8);
+  const defaultSchool = '초등학교';
+  const defaultSubj = '국어';
+  const gradeColors = ['#2563eb','#16a34a','#f59e0b','#ef4444','#8b5cf6'];
+  const gradeLabels = ['A (매우 잘함)','B (잘함)','C (보통)','D (노력 필요)','E (매우 노력 필요)'];
+
+  function genPieData(school, subj){
+    const seed = (school+subj).split('').reduce((a,c)=>a+c.charCodeAt(0),0);
+    const r = (n)=>{ const x=Math.sin(seed*n)*10000; return x-Math.floor(x); };
+    const raw = [15+r(1)*20, 20+r(2)*15, 25+r(3)*10, 15+r(4)*15, 5+r(5)*10];
+    const sum = raw.reduce((a,b)=>a+b,0);
+    return raw.map(v=>Math.round(v/sum*100));
+  }
+
+  function buildSubjOptions(school, selected){
+    return SUBJ_BY_SCHOOL[school].map(s=>`<option ${s===selected?'selected':''}>${s}</option>`).join('');
+  }
+
+  return {
+    html: `
+    <div class="subj-filter-bar">
+      <div class="subj-filter-row">
+        <span class="filter-label">*학년도</span>
+        <select class="filter-select" style="min-width:80px"><option>2025</option></select>
+        <span class="filter-label">*학교급</span>
+        <select class="filter-select" id="achieveSchoolSel"><option selected>초등학교</option><option>중학교</option><option>고등학교</option></select>
+        <span class="filter-label">*과목</span>
+        <select class="filter-select" id="achieveSubjSel">${buildSubjOptions(defaultSchool, defaultSubj)}</select>
+        <button class="btn-search" onclick="window.__refreshAchievePie()" style="margin-left:8px">조회</button>
+      </div>
+    </div>
+    <div class="formula-bar"><span class="toggle">▸</span> 화면설명 및 산출식</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+      <div class="chart-section">
+        <div class="chart-header"><span class="chart-title">성취수준 분포</span></div>
+        <div class="chart-container" style="max-height:350px"><canvas id="${id}"></canvas></div>
+      </div>
+      <div class="chart-section" id="achieveTable">
+        <div class="chart-header"><span class="chart-title">성취수준별 비율</span></div>
+        <table class="data-table" id="achieveDataTable">
+          <thead><tr><th>성취수준</th><th>비율(%)</th><th>학생수(추정)</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>`,
+    init:()=>{
+      function refresh(){
+        destroyCharts();
+        const school = document.getElementById('achieveSchoolSel').value;
+        const subj = document.getElementById('achieveSubjSel').value;
+        const data = genPieData(school, subj);
+        const ctx = document.getElementById('${id}');
+        if(!ctx) return;
+        const chart = new Chart(ctx, {
+          type:'doughnut',
+          data:{ labels:gradeLabels, datasets:[{ data, backgroundColor:gradeColors, borderWidth:2, borderColor:'#fff' }] },
+          options:{
+            responsive:true, maintainAspectRatio:false,
+            plugins:{
+              legend:{ position:'bottom', labels:{ font:{size:11,family:'Pretendard'}, padding:12 }},
+              tooltip:{ callbacks:{ label:ctx2=>ctx2.label+': '+ctx2.parsed+'%' }}
+            }
+          }
+        });
+        activeCharts.push(chart);
+        // 테이블 갱신
+        const tbody = document.querySelector('#achieveDataTable tbody');
+        const total = 1200+Math.floor(Math.random()*300);
+        tbody.innerHTML = gradeLabels.map((g,i)=>{
+          const cnt = Math.round(total*data[i]/100);
+          return '<tr><td>'+g+'</td><td class="num">'+data[i]+'%</td><td class="num">'+cnt.toLocaleString()+'명</td></tr>';
+        }).join('');
+      }
+      document.getElementById('achieveSchoolSel').addEventListener('change', function(){
+        const subSel = document.getElementById('achieveSubjSel');
+        subSel.innerHTML = SUBJ_BY_SCHOOL[this.value].map(s=>'<option>'+s+'</option>').join('');
+        refresh();
+      });
+      window.__refreshAchievePie = refresh;
+      refresh();
+    }
+  };
+}
+
+// ============================================================
+// 콘텐츠 유형별 활용빈도 (기간별 막대그래프 + 과목 선택 + 표)
+// ============================================================
+function renderContentFreqPage(){
+  const id = 'contentBar_' + Math.random().toString(36).slice(2,8);
+  const types = ['영상','음원','텍스트','실습','이미지','기타'];
+  const typeColors = ['#2563eb','#16a34a','#f59e0b','#8b5cf6','#ef4444','#64748b'];
+  const defaultSchool = '초등학교';
+  const defaultSubj = '전체';
+
+  function genContentData(school, subj){
+    const seed = (school+subj).split('').reduce((a,c)=>a+c.charCodeAt(0),0);
+    const r = (n)=>{ const x=Math.sin(seed*n)*10000; return x-Math.floor(x); };
+    return WEEKS.slice(0,52).map((_,wi)=>{
+      return types.map((t,ti)=>{
+        let base = [3000,800,2000,500,1200,400][ti];
+        let v = base + Math.sin(wi*0.3)*base*0.3 + r(wi*10+ti)*base*0.2;
+        if(wi>=26&&wi<=34) v*=0.15;
+        return Math.max(0,Math.round(v));
+      });
+    });
+  }
+
+  function buildSubjOpts(school){
+    return '<option selected>전체</option>'+SUBJ_BY_SCHOOL[school].map(s=>'<option>'+s+'</option>').join('');
+  }
+
+  return {
+    html: `
+    <div class="subj-filter-bar">
+      <div class="subj-filter-row">
+        <span class="filter-label">*학년도</span>
+        <select class="filter-select" style="min-width:80px"><option>2025</option></select>
+        <span class="filter-label">*기간</span>
+        <div class="filter-radio">
+          <label onclick="toggleRadio(this)">일간</label>
+          <label onclick="toggleRadio(this)">월간</label>
+          <label onclick="toggleRadio(this)">학기별</label>
+          <label class="active" onclick="toggleRadio(this)">년간</label>
+        </div>
+        <span class="filter-label" style="margin-left:12px">*학교급</span>
+        <select class="filter-select" id="contentSchoolSel"><option selected>초등학교</option><option>중학교</option><option>고등학교</option></select>
+        <span class="filter-label">*과목</span>
+        <select class="filter-select" id="contentSubjSel">${buildSubjOpts(defaultSchool)}</select>
+        <button class="btn-search" onclick="window.__refreshContentChart()" style="margin-left:8px">조회</button>
+      </div>
+    </div>
+    <div class="formula-bar"><span class="toggle">▸</span> 화면설명 및 산출식</div>
+    <div class="chart-section">
+      <div class="chart-header"><span class="chart-title">콘텐츠 유형별 활용빈도(그래프)-합계</span></div>
+      <div class="chart-container"><canvas id="${id}"></canvas></div>
+    </div>
+    <div class="table-section" id="contentTableSection">
+      <div class="table-header">
+        <div><span class="table-title">콘텐츠 유형별 활용빈도(표)</span><span class="table-count"></span></div>
+        <button class="btn-excel">엑셀다운로드</button>
+      </div>
+      <div style="max-height:300px;overflow-y:auto">
+        <table class="data-table" id="contentDataTable">
+          <thead><tr><th>기간</th><th>영상</th><th>음원</th><th>텍스트</th><th>실습</th><th>이미지</th><th>기타</th><th>합계</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>`,
+    init:()=>{
+      function refresh(){
+        destroyCharts();
+        const school = document.getElementById('contentSchoolSel').value;
+        const subj = document.getElementById('contentSubjSel').value;
+        const weekData = genContentData(school, subj);
+        const labels = WEEKS.slice(0,52).map(w=>w.label);
+        // 스택드 바 차트
+        const datasets = types.map((t,ti)=>({
+          label: t,
+          data: weekData.map(w=>w[ti]),
+          backgroundColor: typeColors[ti]
+        }));
+        const ctx = document.getElementById('${id}');
+        if(!ctx) return;
+        const chart = new Chart(ctx, {
+          type:'bar',
+          data:{ labels, datasets },
+          options:{
+            responsive:true, maintainAspectRatio:false,
+            plugins:{ legend:{ position:'top', labels:{ font:{size:11,family:'Pretendard'}, usePointStyle:true }}},
+            scales:{
+              x:{ stacked:true, ticks:{ font:{size:9}, maxRotation:45 }},
+              y:{ stacked:true, beginAtZero:true, title:{ display:true, text:'[ 건수 ]', font:{size:11}}, ticks:{ font:{size:10}, callback:v=>v.toLocaleString() }}
+            }
+          }
+        });
+        activeCharts.push(chart);
+        // 테이블 갱신
+        const tbody = document.querySelector('#contentDataTable tbody');
+        const rows = weekData.slice(0,20).map((w,i)=>{
+          const sum = w.reduce((a,b)=>a+b,0);
+          return '<tr><td>'+WEEKS[i].label+'</td>'+w.map(v=>'<td class="num">'+v.toLocaleString()+'</td>').join('')+'<td class="num" style="font-weight:600">'+sum.toLocaleString()+'</td></tr>';
+        });
+        tbody.innerHTML = rows.join('');
+        document.querySelector('#contentTableSection .table-count').textContent = '총 52건';
+      }
+      document.getElementById('contentSchoolSel').addEventListener('change', function(){
+        const subSel = document.getElementById('contentSubjSel');
+        subSel.innerHTML = '<option selected>전체</option>'+SUBJ_BY_SCHOOL[this.value].map(s=>'<option>'+s+'</option>').join('');
+        refresh();
+      });
+      window.__refreshContentChart = refresh;
+      refresh();
+    }
+  };
+}
+
+// ============================================================
 // 페이지 매핑
 // ============================================================
 function getPageContent(pageId){
   switch(pageId){
     case 'home': return { html:renderHome(), init:()=>{
       const labels = WEEKS.slice(0,52).map(w=>w.label);
-      createLineChart('homeChart', labels, [{ label:'전체', data:DATA.totalFreq, borderColor:'#2563eb', backgroundColor:'rgba(37,99,235,0.08)', tension:0.3, pointRadius:2, fill:true }], '빈도합계');
-      createBarChart('homeBarChart', ['초3','초4','초5','초6','중1','중2','중3','고1','고2','고3'],
-        [{ label:'활용빈도', data:[28500,32100,35800,31200,18900,16200,12800,8500,6200,4100], backgroundColor:'#3b82f6' }], '건수');
+      const homeDataMap = {
+        total: { label:'전체', data:DATA.totalFreq, borderColor:'#2563eb', backgroundColor:'rgba(37,99,235,0.08)', tension:0.3, pointRadius:2, fill:true },
+        elem:  { label:'초등학교', data:DATA.schoolElem, borderColor:'#16a34a', backgroundColor:'rgba(22,163,106,0.08)', tension:0.3, pointRadius:2, fill:false },
+        mid:   { label:'중학교', data:DATA.schoolMid, borderColor:'#f59e0b', backgroundColor:'rgba(245,158,11,0.08)', tension:0.3, pointRadius:2, fill:false },
+        high:  { label:'고등학교', data:DATA.schoolHigh, borderColor:'#8b5cf6', backgroundColor:'rgba(139,92,246,0.08)', tension:0.3, pointRadius:2, fill:false }
+      };
+      function refreshHomeChart(){
+        destroyCharts();
+        const checked = [];
+        document.querySelectorAll('#homeSchoolCheck input:checked').forEach(cb=>checked.push(cb.value));
+        const ds = checked.map(k=>homeDataMap[k]).filter(Boolean);
+        if(ds.length) createLineChart('homeChart', labels, ds, '빈도합계');
+        createBarChart('homeBarChart', ['초3','초4','초5','초6','중1','중2','중3','고1','고2','고3'],
+          [{ label:'활용빈도', data:[28500,32100,35800,31200,18900,16200,12800,8500,6200,4100], backgroundColor:'#3b82f6' }], '건수');
+      }
+      document.querySelectorAll('#homeSchoolCheck label').forEach(label=>{
+        label.addEventListener('click', function(e){
+          if(e.target.tagName==='INPUT') return;
+          const cb = this.querySelector('input');
+          cb.checked = !cb.checked;
+          this.classList.toggle('checked', cb.checked);
+          refreshHomeChart();
+        });
+        const cb = label.querySelector('input');
+        if(cb) cb.addEventListener('change', function(){ label.classList.toggle('checked', this.checked); refreshHomeChart(); });
+      });
+      refreshHomeChart();
     }};
     case 'usage-rate': return renderLineChartPage('활용률','totalRate','활용률(%)',{calc:false});
     case 'usage-freq': return renderLineChartPage('활용빈도','totalFreq','빈도합계',{});
-    case 'usage-freq-subj': return renderMultiLinePage('과목별 활용빈도',[{name:'수학',key:'subjMath'},{name:'영어',key:'subjEng'},{name:'정보',key:'subjInfo'}],'빈도합계',{hours:true});
+    case 'usage-freq-subj': return renderSubjCheckPage('과목별 활용빈도','빈도합계',1);
     case 'usage-freq-school': return renderMultiLinePage('학교급별 활용빈도',[{name:'초등학교',key:'schoolElem'},{name:'중학교',key:'schoolMid'},{name:'고등학교',key:'schoolHigh'}],'빈도합계',{school:true});
     case 'usage-time': return renderLineChartPage('학습활동 시간','totalTime','학습시간(h)',{});
     case 'usage-time-subj': return renderSubjCheckPage('과목별 학습활동 시간','학습시간(h)',0.1);
     case 'usage-time-school': return renderMultiLinePage('학교급별 학습활동 시간',[{name:'초등학교',key:'schoolElem'},{name:'중학교',key:'schoolMid'},{name:'고등학교',key:'schoolHigh'}],'학습시간(h)',{school:true});
     case 'achieve-status': return renderAchieveStatus();
-    case 'achieve-dist': return renderMultiLinePage('성취수준 분포',[{name:'A등급',key:'subjMath'},{name:'B등급',key:'subjEng'},{name:'C등급',key:'subjInfo'}],'비율(%)',{});
-    case 'perform-content-freq':{
-      const sums = [ks=>DATA[ks].reduce((a,b)=>a+b,0)];
-      return renderStackedBarPage('콘텐츠 유형별 활용빈도',
-        [{name:'영상',data:[sums[0]('contentVideo'),sums[0]('contentVideo')*0.6,sums[0]('contentVideo')*0.3]},
-         {name:'음원',data:[sums[0]('contentAudio'),sums[0]('contentAudio')*0.5,sums[0]('contentAudio')*0.2]},
-         {name:'텍스트',data:[sums[0]('contentText'),sums[0]('contentText')*0.7,sums[0]('contentText')*0.4]},
-         {name:'실습',data:[sums[0]('contentPractice'),sums[0]('contentPractice')*0.4,sums[0]('contentPractice')*0.3]},
-         {name:'이미지',data:[sums[0]('contentImage'),sums[0]('contentImage')*0.3,sums[0]('contentImage')*0.2]},
-         {name:'기타',data:[sums[0]('contentOther'),sums[0]('contentOther')*0.2,sums[0]('contentOther')*0.1]}],
-        '건수',{school:true,hours:true});
-    }
+    case 'achieve-dist': return renderAchieveDist();
+    case 'perform-content-freq': return renderContentFreqPage();
     case 'perform-content-time': return renderLineChartPage('콘텐츠 유형별 활용시간','totalTime','시간(h)',{school:true});
     case 'perform-quiz-freq': return renderLineChartPage('평가문항풀이 빈도','quizFreq','건수',{});
     case 'perform-quiz-subj': return renderMultiLinePage('과목별 평가문항풀이',[{name:'수학',key:'subjMath'},{name:'영어',key:'subjEng'},{name:'정보',key:'subjInfo'}],'건수',{subj:true});
