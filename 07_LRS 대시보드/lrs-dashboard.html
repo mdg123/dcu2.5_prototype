@@ -729,14 +729,24 @@ function renderSubjCheckPage(title, yLabel, dataMultiplier){
   function buildChart(school, subjects){
     destroyCharts();
     const labels = WEEKS.slice(0,52).map(w=>w.label);
-    const datasets = subjects.map(subj=>({
+    const subjDataArr = subjects.map(subj=>SUBJ_DATA[school][subj].map(v=>Math.round(v*(dataMultiplier||1))));
+    const datasets = subjects.map((subj,si)=>({
       label: subj,
-      data: SUBJ_DATA[school][subj].map(v=>Math.round(v*(dataMultiplier||1))),
+      data: subjDataArr[si],
       borderColor: SUBJ_COLORS[subj]||'#6b7280',
       backgroundColor: 'transparent',
       tension:0.3, pointRadius:2
     }));
     createLineChart(id, labels, datasets, yLabel);
+    // 테이블 갱신
+    const thead = document.querySelector('#subjDataTable thead tr');
+    if(thead){
+      thead.innerHTML = '<th>순번</th><th>학습주수</th>' + subjects.map(s=>'<th>'+s+'</th>').join('');
+      const tbody = document.querySelector('#subjDataTable tbody');
+      tbody.innerHTML = WEEKS.slice(0,52).map((w,i)=>{
+        return '<tr><td>'+(i+1)+'</td><td>'+w.label+'('+w.range+')</td>'+subjects.map((s,si)=>'<td class="num">'+(subjDataArr[si][i]||0).toLocaleString()+'</td>').join('')+'</tr>';
+      }).join('');
+    }
   }
 
   return {
@@ -781,6 +791,18 @@ function renderSubjCheckPage(title, yLabel, dataMultiplier){
     <div class="chart-section">
       <div class="chart-header"><span class="chart-title">${title}(그래프)-합계</span></div>
       <div class="chart-container"><canvas id="${id}"></canvas></div>
+    </div>
+    <div class="table-section" id="subjTableSection">
+      <div class="table-header">
+        <div><span class="table-title">${title}(표)-합계</span> <span style="font-size:11px;color:#9ca3af">(단위: ${yLabel})</span> <span class="table-count">총 52건</span></div>
+        <button class="btn-excel">엑셀다운로드</button>
+      </div>
+      <div style="max-height:300px;overflow-y:auto">
+        <table class="data-table" id="subjDataTable">
+          <thead><tr><th>순번</th><th>학습주수</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
     </div>`,
     init:()=>{
       // 체크박스 토글 (최대 MAX_SUBJ개 제한)
