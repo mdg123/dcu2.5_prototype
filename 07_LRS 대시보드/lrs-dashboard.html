@@ -108,6 +108,16 @@ body.gnb-has-sub-multi .lrs-wrapper { height:calc(100vh - var(--gnb-total-height
 .notice-list li:last-child { border:none; }
 .notice-list .date { color:#9ca3af; }
 
+/* ── 교과 체크박스 필터 ── */
+.subj-filter-bar { background:#fff; border:1px solid #e5e7eb; border-radius:10px; padding:14px 20px; margin-bottom:16px; }
+.subj-filter-row { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:8px; }
+.subj-filter-row:last-child { margin-bottom:0; }
+.subj-check-group { display:flex; gap:6px; flex-wrap:wrap; }
+.subj-check-group label { display:flex; align-items:center; gap:4px; padding:5px 12px; border:1px solid #d1d5db; border-radius:6px; font-size:12px; cursor:pointer; transition:all .15s; background:#fff; user-select:none; }
+.subj-check-group label:hover { border-color:#93c5fd; background:#f0f7ff; }
+.subj-check-group label.checked { background:#2563eb; color:#fff; border-color:#2563eb; }
+.subj-check-group input[type=checkbox] { display:none; }
+
 /* ── 페이지 숨기기 ── */
 .page { display:none; }
 .page.active { display:block; }
@@ -144,8 +154,6 @@ body.gnb-has-sub-multi .lrs-wrapper { height:calc(100vh - var(--gnb-total-height
   <div class="top-bar">
     <div class="breadcrumb" id="breadcrumb">홈</div>
     <div class="top-right">
-      <span>충청북도교육청</span>
-      <span>|</span>
       <span>집계일자 2025-03-11</span>
     </div>
   </div>
@@ -208,9 +216,9 @@ const MENUS = {
   custom: {
     title:'맞춤학습',
     items:[
-      { group:'AI튜터 활용도', children:[
-        { id:'custom-ai-freq', name:'AI튜터 활용빈도' },
-        { id:'custom-ai-recommend', name:'AI튜터 추천 콘텐츠 활용도' }
+      { group:'AI 맞춤학습 활용도', children:[
+        { id:'custom-ai-freq', name:'AI 맞춤학습 활용빈도' },
+        { id:'custom-ai-recommend', name:'AI 맞춤학습 추천 콘텐츠 활용도' }
       ]},
       { group:'학생 주도 평가', children:[
         { id:'custom-student-eval', name:'학생 주도 평가 참여빈도' },
@@ -298,6 +306,25 @@ const DATA = {
   teacherFreq: genData(8000, 3000),
 };
 
+// 학교급별 교과 데이터
+const SUBJ_BY_SCHOOL = {
+  '초등학교': ['국어','수학','사회','과학','영어','음악','미술','체육','실과'],
+  '중학교':   ['국어','수학','사회','과학','영어','음악','미술','체육','기술가정','정보'],
+  '고등학교': ['국어','수학','사회','과학','영어','음악','미술','체육','정보','기술가정']
+};
+const SUBJ_COLORS = {
+  '국어':'#2563eb','수학':'#16a34a','사회':'#f59e0b','과학':'#8b5cf6','영어':'#ef4444',
+  '음악':'#ec4899','미술':'#06b6d4','체육':'#f97316','실과':'#84cc16','기술가정':'#64748b','정보':'#1e293b'
+};
+// 교과별 더미 데이터 (학교급별)
+const SUBJ_DATA = {};
+Object.keys(SUBJ_BY_SCHOOL).forEach(school=>{
+  SUBJ_DATA[school] = {};
+  SUBJ_BY_SCHOOL[school].forEach(subj=>{
+    SUBJ_DATA[school][subj] = genData(1500+Math.random()*3000, 800+Math.random()*1000);
+  });
+});
+
 // ============================================================
 // 차트 인스턴스 관리
 // ============================================================
@@ -355,10 +382,7 @@ function filterStandard(opts={}){
   return `
   <div class="filter-bar">
     <div class="filter-row">
-      <span class="filter-label">교육청</span>
-      <select class="filter-select"><option>충청북도교육청</option></select>
-      <select class="filter-select"><option>교육지원청 전체</option></select>
-      <span class="filter-label" style="margin-left:8px">학교</span>
+      <span class="filter-label">학교</span>
       <input class="filter-input" placeholder="학교명 검색">
       ${showSchool ? `<span class="filter-label">학교급</span><select class="filter-select"><option>전체</option><option>초등학교</option><option>중학교</option><option>고등학교</option></select>` : ''}
       ${showSubj ? `<span class="filter-label">과목</span><select class="filter-select"><option>전체</option><option>수학</option><option>영어</option><option>정보</option></select>` : ''}
@@ -394,10 +418,7 @@ function filterDateRange(opts={}){
   return `
   <div class="filter-bar">
     <div class="filter-row">
-      <span class="filter-label">교육청</span>
-      <select class="filter-select"><option>충청북도교육청</option></select>
-      <select class="filter-select"><option>교육지원청 전체</option></select>
-      <span class="filter-label" style="margin-left:8px">학교</span>
+      <span class="filter-label">학교</span>
       <input class="filter-input" placeholder="학교명 검색">
       ${showSubj ? `<span class="filter-label">*과목</span><select class="filter-select"><option>수학</option><option>영어</option><option>정보</option></select>` : ''}
       <span class="filter-label">*학교급</span>
@@ -431,8 +452,6 @@ function filterDaily(){
   return `
   <div class="filter-bar">
     <div class="filter-row">
-      <span class="filter-label">교육청</span>
-      <select class="filter-select"><option>충청북도교육청</option></select>
       <span class="filter-label">시군</span>
       <select class="filter-select"><option>전체</option><option>청주시</option><option>충주시</option><option>제천시</option></select>
       <span class="filter-label">학교급</span>
@@ -471,7 +490,7 @@ function tableHTML(headers, rows, count){
 
 function genTableRows(dataKey, colName, limit=15){
   const d = DATA[dataKey];
-  return d.slice(0,limit).map((v,i)=>[i+1, `${WEEKS[i].label}${WEEKS[i].range}`, '충청북도교육청', v]);
+  return d.slice(0,limit).map((v,i)=>[i+1, `${WEEKS[i].label}${WEEKS[i].range}`, v]);
 }
 
 // ============================================================
@@ -505,7 +524,7 @@ function renderHome(){
   </div>
   <div style="display:grid;grid-template-columns:2fr 1fr;gap:16px">
     <div class="chart-section">
-      <div class="chart-header"><span class="chart-title">AI·디지털 교육자료 활용빈도 추이</span></div>
+      <div class="chart-header"><span class="chart-title">다채움 활용빈도 추이</span></div>
       <div class="chart-container"><canvas id="homeChart"></canvas></div>
     </div>
     <div class="notice-section">
@@ -536,10 +555,10 @@ function renderLineChartPage(title, dataKey, yLabel, filterOpts){
       <div class="chart-header"><span class="chart-title">${title}(그래프)-합계</span></div>
       <div class="chart-container"><canvas id="mainChart"></canvas></div>
     </div>
-    ${tableHTML(['순번','기간','시도교육청',yLabel], genTableRows(dataKey, yLabel), d.length)}`,
+    ${tableHTML(['순번','기간',yLabel], genTableRows(dataKey, yLabel), d.length)}`,
     init:()=>{
       createLineChart('mainChart', labels, [{
-        label:'충청북도교육청', data:d, borderColor:'#2563eb', backgroundColor:'rgba(37,99,235,0.1)',
+        label:'전체', data:d, borderColor:'#2563eb', backgroundColor:'rgba(37,99,235,0.1)',
         tension:0.3, pointRadius:3, fill:true
       }], yLabel);
     }
@@ -553,10 +572,10 @@ function renderMultiLinePage(title, datasets, yLabel, filterOpts){
     label:ds.name, data:DATA[ds.key], borderColor:colors[i][0], backgroundColor:colors[i][1],
     tension:0.3, pointRadius:2
   }));
-  const headers = ['순번','기간','시도교육청',...datasets.map(d=>d.name)];
+  const headers = ['순번','기간',...datasets.map(d=>d.name)];
   const rows = [];
   for(let i=0; i<15; i++){
-    rows.push([i+1, `${WEEKS[i].label}${WEEKS[i].range}`, '충청북도교육청', ...datasets.map(ds=>DATA[ds.key][i])]);
+    rows.push([i+1, `${WEEKS[i].label}${WEEKS[i].range}`, ...datasets.map(ds=>DATA[ds.key][i])]);
   }
   return {
     html: `
@@ -652,13 +671,136 @@ function renderDailyAccess(){
 }
 
 // ============================================================
+// 교과 체크박스 기반 그래프 페이지
+// ============================================================
+function renderSubjCheckPage(title, yLabel, dataMultiplier){
+  const defaultSchool = '초등학교';
+  const defaultSubjs = ['국어','수학','사회','과학'];
+  const id = 'subjChart_' + Math.random().toString(36).slice(2,8);
+
+  function buildCheckboxes(school, selected){
+    return SUBJ_BY_SCHOOL[school].map(s=>{
+      const chk = selected.includes(s) ? 'checked' : '';
+      const cls = selected.includes(s) ? ' checked' : '';
+      return `<label class="${cls}"><input type="checkbox" value="${s}" ${chk}>${s}</label>`;
+    }).join('');
+  }
+
+  function buildChart(school, subjects){
+    destroyCharts();
+    const labels = WEEKS.slice(0,52).map(w=>w.label);
+    const datasets = subjects.map(subj=>({
+      label: subj,
+      data: SUBJ_DATA[school][subj].map(v=>Math.round(v*(dataMultiplier||1))),
+      borderColor: SUBJ_COLORS[subj]||'#6b7280',
+      backgroundColor: 'transparent',
+      tension:0.3, pointRadius:2
+    }));
+    createLineChart(id, labels, datasets, yLabel);
+  }
+
+  return {
+    html: `
+    <div class="subj-filter-bar">
+      <div class="subj-filter-row">
+        <span class="filter-label">*학년도</span>
+        <select class="filter-select" style="min-width:80px"><option>2025</option><option>2026</option></select>
+        <span class="filter-label">*기간</span>
+        <div class="filter-radio">
+          <label onclick="toggleRadio(this)">일간</label>
+          <label onclick="toggleRadio(this)">월간</label>
+          <label onclick="toggleRadio(this)">학기별</label>
+          <label class="active" onclick="toggleRadio(this)">년간</label>
+        </div>
+        <span style="font-size:12px;color:#9ca3af">2025-03 ~ 2026-02</span>
+        <span class="filter-label" style="margin-left:12px">계산방식</span>
+        <div class="filter-radio">
+          <label class="active" onclick="toggleRadio(this)">합계</label>
+          <label onclick="toggleRadio(this)">평균</label>
+        </div>
+        <div class="output-type" style="margin-left:auto">
+          <label class="active" onclick="this.parentElement.querySelectorAll('label').forEach(l=>l.classList.remove('active'));this.classList.add('active')">전체</label>
+          <label onclick="this.parentElement.querySelectorAll('label').forEach(l=>l.classList.remove('active'));this.classList.add('active')">그래프</label>
+          <label onclick="this.parentElement.querySelectorAll('label').forEach(l=>l.classList.remove('active'));this.classList.add('active')">표</label>
+        </div>
+      </div>
+      <div class="subj-filter-row">
+        <span class="filter-label">*학교급</span>
+        <select class="filter-select" id="schoolLevelSel"><option selected>초등학교</option><option>중학교</option><option>고등학교</option></select>
+        <span class="filter-label" style="margin-left:8px">*교과</span>
+        <div class="subj-check-group" id="subjCheckGroup">
+          ${buildCheckboxes(defaultSchool, defaultSubjs)}
+        </div>
+        <div style="margin-left:auto;display:flex;gap:6px">
+          <button class="btn-reset" onclick="document.querySelectorAll('#subjCheckGroup label').forEach(l=>{l.classList.remove('checked');l.querySelector('input').checked=false})">↻ 초기화</button>
+          <button class="btn-search" onclick="window.__refreshSubjChart()">조회</button>
+        </div>
+      </div>
+    </div>
+    <div class="formula-bar"><span class="toggle">▸</span> 화면설명 및 산출식</div>
+    <div class="chart-section">
+      <div class="chart-header"><span class="chart-title">${title}(그래프)-합계</span></div>
+      <div class="chart-container"><canvas id="${id}"></canvas></div>
+    </div>`,
+    init:()=>{
+      // 체크박스 토글
+      document.querySelectorAll('#subjCheckGroup label').forEach(label=>{
+        label.addEventListener('click', function(e){
+          if(e.target.tagName==='INPUT') return;
+          const cb = this.querySelector('input');
+          cb.checked = !cb.checked;
+          this.classList.toggle('checked', cb.checked);
+        });
+        const cb = label.querySelector('input');
+        if(cb) cb.addEventListener('change', function(){ label.classList.toggle('checked', this.checked); });
+      });
+
+      // 학교급 변경 시 체크박스 갱신
+      const schoolSel = document.getElementById('schoolLevelSel');
+      schoolSel.addEventListener('change', function(){
+        const school = this.value;
+        const group = document.getElementById('subjCheckGroup');
+        const defaultSel = SUBJ_BY_SCHOOL[school].slice(0,4);
+        group.innerHTML = SUBJ_BY_SCHOOL[school].map(s=>{
+          const chk = defaultSel.includes(s) ? 'checked' : '';
+          const cls = defaultSel.includes(s) ? ' checked' : '';
+          return '<label class="'+cls+'"><input type="checkbox" value="'+s+'" '+chk+'>'+s+'</label>';
+        }).join('');
+        group.querySelectorAll('label').forEach(label=>{
+          label.addEventListener('click', function(e){
+            if(e.target.tagName==='INPUT') return;
+            const cb = this.querySelector('input');
+            cb.checked = !cb.checked;
+            this.classList.toggle('checked', cb.checked);
+          });
+          const cb = label.querySelector('input');
+          if(cb) cb.addEventListener('change', function(){ label.classList.toggle('checked', this.checked); });
+        });
+        window.__refreshSubjChart();
+      });
+
+      // 조회 버튼
+      window.__refreshSubjChart = function(){
+        const school = document.getElementById('schoolLevelSel').value;
+        const checked = [];
+        document.querySelectorAll('#subjCheckGroup input:checked').forEach(cb=>checked.push(cb.value));
+        if(checked.length===0) return;
+        buildChart(school, checked);
+      };
+
+      buildChart(defaultSchool, defaultSubjs);
+    }
+  };
+}
+
+// ============================================================
 // 페이지 매핑
 // ============================================================
 function getPageContent(pageId){
   switch(pageId){
     case 'home': return { html:renderHome(), init:()=>{
       const labels = WEEKS.slice(0,52).map(w=>w.label);
-      createLineChart('homeChart', labels, [{ label:'충청북도교육청', data:DATA.totalFreq, borderColor:'#2563eb', backgroundColor:'rgba(37,99,235,0.08)', tension:0.3, pointRadius:2, fill:true }], '빈도합계');
+      createLineChart('homeChart', labels, [{ label:'전체', data:DATA.totalFreq, borderColor:'#2563eb', backgroundColor:'rgba(37,99,235,0.08)', tension:0.3, pointRadius:2, fill:true }], '빈도합계');
       createBarChart('homeBarChart', ['초3','초4','초5','초6','중1','중2','중3','고1','고2','고3'],
         [{ label:'활용빈도', data:[28500,32100,35800,31200,18900,16200,12800,8500,6200,4100], backgroundColor:'#3b82f6' }], '건수');
     }};
@@ -667,7 +809,7 @@ function getPageContent(pageId){
     case 'usage-freq-subj': return renderMultiLinePage('과목별 활용빈도',[{name:'수학',key:'subjMath'},{name:'영어',key:'subjEng'},{name:'정보',key:'subjInfo'}],'빈도합계',{hours:true});
     case 'usage-freq-school': return renderMultiLinePage('학교급별 활용빈도',[{name:'초등학교',key:'schoolElem'},{name:'중학교',key:'schoolMid'},{name:'고등학교',key:'schoolHigh'}],'빈도합계',{school:true});
     case 'usage-time': return renderLineChartPage('학습활동 시간','totalTime','학습시간(h)',{});
-    case 'usage-time-subj': return renderMultiLinePage('과목별 학습활동 시간',[{name:'수학',key:'subjMath'},{name:'영어',key:'subjEng'},{name:'정보',key:'subjInfo'}],'학습시간(h)',{hours:true});
+    case 'usage-time-subj': return renderSubjCheckPage('과목별 학습활동 시간','학습시간(h)',0.1);
     case 'usage-time-school': return renderMultiLinePage('학교급별 학습활동 시간',[{name:'초등학교',key:'schoolElem'},{name:'중학교',key:'schoolMid'},{name:'고등학교',key:'schoolHigh'}],'학습시간(h)',{school:true});
     case 'achieve-status': return renderAchieveStatus();
     case 'achieve-dist': return renderMultiLinePage('성취수준 분포',[{name:'A등급',key:'subjMath'},{name:'B등급',key:'subjEng'},{name:'C등급',key:'subjInfo'}],'비율(%)',{});
@@ -689,8 +831,8 @@ function getPageContent(pageId){
     case 'perform-hw-assign': return renderLineChartPage('과제 출제 빈도','hwAssign','건수',{});
     case 'perform-hw-submit': return renderLineChartPage('과제 제출 빈도','hwSubmit','건수',{});
     case 'perform-hw-rate': return renderLineChartPage('과제 수행률','retryRate','수행률(%)',{calc:false});
-    case 'custom-ai-freq': return renderLineChartPage('AI튜터 활용빈도','aiTutor','건수',{});
-    case 'custom-ai-recommend': return renderLineChartPage('AI튜터 추천 콘텐츠 활용도','aiTutor','건수',{});
+    case 'custom-ai-freq': return renderLineChartPage('AI 맞춤학습 활용빈도','aiTutor','건수',{});
+    case 'custom-ai-recommend': return renderLineChartPage('AI 맞춤학습 추천 콘텐츠 활용도','aiTutor','건수',{});
     case 'custom-student-eval': return renderLineChartPage('학생 주도 평가 참여빈도','studentEval','건수',{});
     case 'custom-student-reeval': return renderLineChartPage('학생 주도 재평가 참여빈도','studentReeval','건수',{});
     case 'custom-student-retry': return renderLineChartPage('오답 재도전 참여율','retryRate','참여율(%)',{calc:false});
@@ -698,7 +840,7 @@ function getPageContent(pageId){
     case 'custom-teacher-feedback': return renderLineChartPage('교사 피드백 활동','teacherFeedback','건수',{});
     case 'teacher-rate': return renderLineChartPage('교사 활용률','teacherRate','활용률(%)',{calc:false});
     case 'teacher-freq': return renderLineChartPage('교사 활용빈도','teacherFreq','빈도합계',{});
-    case 'teacher-subj': return renderMultiLinePage('과목별 교사 활용빈도',[{name:'수학',key:'subjMath'},{name:'영어',key:'subjEng'},{name:'정보',key:'subjInfo'}],'빈도합계',{subj:true});
+    case 'teacher-subj': return renderSubjCheckPage('과목별 교사 활용빈도','빈도합계',1);
     case 'teacher-school': return renderMultiLinePage('학교급별 교사 활용빈도',[{name:'초등학교',key:'schoolElem'},{name:'중학교',key:'schoolMid'},{name:'고등학교',key:'schoolHigh'}],'빈도합계',{school:true});
     case 'daily-access': return renderDailyAccess();
     case 'daily-usage': return renderDailyAccess();
