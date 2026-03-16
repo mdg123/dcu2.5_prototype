@@ -128,6 +128,7 @@
 
     // 채움콘텐츠 나의 보관함 3차 탭
     var CONTENTS_ARCHIVE_TABS = [
+        { id: 'contentsDashboard',     label: '콘텐츠 대시보드', hash: 'dashboard' },
         { id: 'contentsMydata',        label: '내자료',      hash: 'mydata' },
         { id: 'contentsSaved',         label: '담은자료',    hash: 'saved' },
         { id: 'contentsSubscriptions', label: '구독 채널',   hash: 'subscriptions' },
@@ -328,7 +329,7 @@
                 archiveNav.className = 'gnb-sub-nav visible';
                 CONTENTS_ARCHIVE_TABS.forEach(function(tab) {
                     var a = document.createElement('a');
-                    var tabActive = (tab.hash === currentHash) || (!currentHash && tab.hash === 'mydata');
+                    var tabActive = (tab.hash === currentHash) || (!currentHash && tab.hash === 'dashboard');
                     a.className = 'gnb-sub-item' + (tabActive ? ' active' : '');
                     a.textContent = tab.label;
                     a.href = '#' + tab.hash;
