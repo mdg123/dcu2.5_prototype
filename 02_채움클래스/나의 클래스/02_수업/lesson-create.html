@@ -137,25 +137,26 @@ body { font-family:'Pretendard',system-ui,sans-serif; background:#F5F7FA; overfl
   padding:32px; color:var(--gray-400); font-size:14px;
 }
 
-/* 저장 패널 */
-.save-overlay { position:fixed; inset:0; background:rgba(0,0,0,.3); z-index:89; opacity:0; visibility:hidden; transition:all .3s; }
+/* 저장 모달 */
+.save-overlay { position:fixed; inset:0; background:rgba(0,0,0,.5); z-index:89; opacity:0; visibility:hidden; transition:all .2s; display:flex; align-items:center; justify-content:center; }
 .save-overlay.open { opacity:1; visibility:visible; }
 .save-panel {
-  position:fixed; right:0; top:var(--header-height); width:440px;
-  height:calc(100vh - var(--header-height)); background:#fff;
-  border-left:1px solid var(--gray-200); z-index:90;
-  transform:translateX(100%); transition:transform .3s; display:flex; flex-direction:column;
+  background:#fff; border-radius:16px; width:860px; max-height:85vh;
+  display:flex; flex-direction:column; z-index:90;
+  box-shadow:0 16px 48px rgba(0,0,0,.18); transform:scale(.95); opacity:0;
+  transition:all .25s ease;
 }
-.save-panel.open { transform:translateX(0); }
+.save-overlay.open .save-panel { transform:scale(1); opacity:1; }
 .save-header {
-  padding:20px 24px; border-bottom:1px solid var(--gray-200);
-  display:flex; align-items:center; justify-content:space-between;
+  padding:20px 28px; border-bottom:1px solid var(--gray-200);
+  display:flex; align-items:center; justify-content:space-between; flex-shrink:0;
 }
 .save-header h2 { font-size:18px; font-weight:700; }
 .close-btn { width:32px; height:32px; border:none; background:transparent; font-size:18px; cursor:pointer; border-radius:6px; }
 .close-btn:hover { background:var(--gray-100); }
-.save-body { flex:1; overflow-y:auto; padding:24px; }
-.save-footer { padding:16px 24px; border-top:1px solid var(--gray-200); display:flex; gap:8px; justify-content:flex-end; }
+.save-body { flex:1; overflow-y:auto; padding:28px; display:grid; grid-template-columns:1fr 1fr; gap:0 28px; align-content:start; }
+.save-body .form-section:nth-child(2) { grid-column:1/-1; } /* 교육과정/테마 풀 너비 */
+.save-footer { padding:16px 28px; border-top:1px solid var(--gray-200); display:flex; gap:8px; justify-content:flex-end; flex-shrink:0; }
 
 /* 폼 스타일 */
 .form-section { margin-bottom:24px; }
@@ -330,11 +331,9 @@ body { font-family:'Pretendard',system-ui,sans-serif; background:#F5F7FA; overfl
   </div>
 </div>
 
-<!-- 저장 오버레이 -->
-<div class="save-overlay" id="saveOverlay" onclick="closeSavePanel()"></div>
-
-<!-- 저장 패널 -->
-<div class="save-panel" id="savePanel">
+<!-- 저장 모달 -->
+<div class="save-overlay" id="saveOverlay" onclick="closeSavePanel()">
+<div class="save-panel" id="savePanel" onclick="event.stopPropagation()">
   <div class="save-header">
     <h2>수업 정보 입력</h2>
     <button class="close-btn" onclick="closeSavePanel()">✕</button>
@@ -359,7 +358,7 @@ body { font-family:'Pretendard',system-ui,sans-serif; background:#F5F7FA; overfl
 
     <!-- 교육과정 연결 -->
     <div class="form-section">
-      <div class="form-section-title">📚 교육과정 연결</div>
+      <div class="form-section-title">📚 교육과정/테마</div>
       <div class="form-group">
         <div class="radio-group" style="margin-bottom:10px">
           <label class="radio-label"><input type="radio" name="curType" value="curriculum" checked> 교육과정</label>
@@ -389,7 +388,8 @@ body { font-family:'Pretendard',system-ui,sans-serif; background:#F5F7FA; overfl
         </div>
       </div>
       <div class="form-group">
-        <label class="form-label">🔍 성취기준 통합 검색</label>
+        <label class="form-label">교육과정 메타정보 (성취기준)</label>
+        <p style="font-size:11px;color:var(--gray-500);margin-bottom:8px;line-height:1.5">💡 키워드를 입력하면 2022 개정 교육과정 성취기준이 자동완성됩니다. 학교급, 학년, 과목, 성취기준 코드, 단원명 등 다양한 조합으로 검색할 수 있습니다.</p>
         <div class="std-search-wrap">
           <span class="std-search-icon">🔍</span>
           <input class="std-search-input" id="stdSearchInput" placeholder="단원명, 성취기준 코드, 내용요소, 키워드로 검색..." oninput="onStdSearch(this.value)">
@@ -459,6 +459,7 @@ body { font-family:'Pretendard',system-ui,sans-serif; background:#F5F7FA; overfl
     <button class="btn-save btn-draft" onclick="closeSavePanel()">취소</button>
     <button class="btn-save btn-primary" onclick="submitLesson()">저장하기</button>
   </div>
+</div>
 </div>
 
 <!-- 모달: 파일 업로드 -->
@@ -729,11 +730,9 @@ function showPreview(index) {
 function openSavePanel() {
   if(steps.length === 0) { showToast('최소 1개의 과정을 추가해주세요', 'warning'); return; }
   document.getElementById('saveTitle').value = document.getElementById('lessonTitle').value;
-  document.getElementById('savePanel').classList.add('open');
   document.getElementById('saveOverlay').classList.add('open');
 }
 function closeSavePanel() {
-  document.getElementById('savePanel').classList.remove('open');
   document.getElementById('saveOverlay').classList.remove('open');
 }
 function saveDraft() { showToast('임시저장되었습니다', 'success'); }
