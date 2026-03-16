@@ -60,9 +60,9 @@
             label: '채움콘텐츠',
             sub: [
                 { id: 'contentsPublic',    label: '공개콘텐츠',           page: 'contentsBrowse', hash: 'public' },
-                { id: 'contentsArchive',   label: '나의 보관함',           page: 'contentsBrowse', hash: 'dashboard' },
                 { id: 'contentsRecommend', label: '추천콘텐츠',           page: 'contentsBrowse', hash: 'recommend' },
-                { id: 'contentsSearchStd', label: '성취기준별 콘텐츠 찾기', page: 'contentsBrowse', hash: 'search-std' }
+                { id: 'contentsSearchStd', label: '성취기준별 콘텐츠 찾기', page: 'contentsBrowse', hash: 'search-std' },
+                { id: 'contentsArchive',   label: '나의 보관함',           page: 'contentsBrowse', hash: 'dashboard' }
             ]
         },
         {
