@@ -1,0 +1,866 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>수업 만들기 - 다채움</title>
+<link href="https://cdnjs.cloudflare.com/ajax/libs/pretendard/1.3.9/static/pretendard.min.css" rel="stylesheet">
+<link rel="stylesheet" href="../../../common-nav.css">
+<style>
+:root {
+  --primary: #0066FF;
+  --primary-light: #E8F1FF;
+  --primary-dark: #0052CC;
+  --success: #00C853;
+  --success-light: #E8F9EF;
+  --warning: #FF9800;
+  --danger: #F44336;
+  --gray-50: #F9FAFB;
+  --gray-100: #F3F4F6;
+  --gray-200: #E5E7EB;
+  --gray-300: #D1D5DB;
+  --gray-400: #9CA3AF;
+  --gray-500: #6B7280;
+  --gray-600: #4B5563;
+  --gray-700: #374151;
+  --gray-800: #1F2937;
+  --sidebar-width: 320px;
+  --header-height: 56px;
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family:'Pretendard',system-ui,sans-serif; background:#F5F7FA; overflow:hidden; height:100vh; }
+
+/* 헤더 */
+.viewer-header {
+  position:fixed; top:0; left:0; right:0; height:var(--header-height);
+  background:#fff; border-bottom:1px solid var(--gray-200);
+  display:flex; align-items:center; justify-content:space-between;
+  padding:0 16px; z-index:100;
+}
+.header-left { display:flex; align-items:center; gap:12px; }
+.header-right { display:flex; align-items:center; gap:8px; }
+.btn-back { display:flex; align-items:center; gap:4px; font-size:13px; color:var(--gray-500); cursor:pointer; border:none; background:none; padding:6px 10px; border-radius:6px; }
+.btn-back:hover { background:var(--gray-100); color:var(--gray-700); }
+.title-input { border:none; border-bottom:2px solid var(--gray-200); font-size:16px; font-weight:600; padding:6px 8px; width:360px; outline:none; font-family:inherit; }
+.title-input:focus { border-bottom-color:var(--primary); }
+.title-input::placeholder { color:var(--gray-400); font-weight:400; }
+.btn-save { padding:8px 20px; border-radius:8px; font-size:13px; font-weight:600; cursor:pointer; border:none; }
+.btn-draft { background:var(--gray-100); color:var(--gray-600); }
+.btn-draft:hover { background:var(--gray-200); }
+.btn-primary { background:var(--primary); color:#fff; }
+.btn-primary:hover { background:var(--primary-dark); }
+
+/* 전체 레이아웃 */
+.viewer-container {
+  display:flex; height:calc(100vh - var(--header-height));
+  margin-top:var(--header-height);
+}
+
+/* 사이드바 */
+.sidebar {
+  width:var(--sidebar-width); background:#fff; border-right:1px solid var(--gray-200);
+  display:flex; flex-direction:column; flex-shrink:0;
+}
+.sidebar-header {
+  padding:16px; border-bottom:1px solid var(--gray-100);
+  display:flex; align-items:center; justify-content:space-between;
+}
+.sidebar-title { font-size:14px; font-weight:700; color:var(--gray-800); }
+.sidebar-count { font-size:12px; color:var(--gray-400); }
+.sidebar-content { flex:1; overflow-y:auto; padding:8px; }
+.sidebar-footer { padding:12px; border-top:1px solid var(--gray-100); }
+.btn-add-step {
+  width:100%; padding:10px; border:2px dashed var(--gray-300); border-radius:10px;
+  background:transparent; color:var(--gray-500); font-size:13px; font-weight:500;
+  cursor:pointer; display:flex; align-items:center; justify-content:center; gap:6px;
+}
+.btn-add-step:hover { border-color:var(--primary); color:var(--primary); background:var(--primary-light); }
+
+/* 과정 아이템 */
+.step-item {
+  display:flex; align-items:center; gap:8px; padding:10px 12px;
+  border-radius:10px; cursor:pointer; margin-bottom:4px;
+  border:1px solid transparent; transition:all .15s;
+}
+.step-item:hover { background:var(--gray-50); }
+.step-item.active { background:var(--primary-light); border-color:var(--primary); }
+.step-item.dragging { opacity:.4; }
+.step-item.drag-over { border-top:2px solid var(--primary); }
+.step-num {
+  width:28px; height:28px; border-radius:50%; background:var(--gray-100);
+  display:flex; align-items:center; justify-content:center;
+  font-size:12px; font-weight:700; color:var(--gray-600); flex-shrink:0;
+}
+.step-item.active .step-num { background:var(--primary); color:#fff; }
+.step-info { flex:1; min-width:0; }
+.step-type { font-size:10px; color:var(--gray-400); font-weight:600; text-transform:uppercase; }
+.step-title { font-size:13px; color:var(--gray-700); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.step-actions { display:flex; gap:2px; opacity:0; transition:opacity .15s; }
+.step-item:hover .step-actions { opacity:1; }
+.step-action-btn {
+  width:26px; height:26px; border:none; background:transparent; border-radius:4px;
+  cursor:pointer; font-size:12px; display:flex; align-items:center; justify-content:center;
+}
+.step-action-btn:hover { background:var(--gray-200); }
+.drag-handle { cursor:grab; color:var(--gray-400); font-size:14px; }
+.drag-handle:active { cursor:grabbing; }
+
+/* 메인 콘텐츠 영역 */
+.content-area { flex:1; display:flex; flex-direction:column; overflow-y:auto; background:var(--gray-50); }
+.content-empty {
+  flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; padding:40px;
+}
+.empty-icon { font-size:48px; margin-bottom:16px; }
+.empty-text { font-size:16px; color:var(--gray-500); margin-bottom:32px; }
+.add-grid {
+  display:grid; grid-template-columns:repeat(3,1fr); gap:12px; max-width:520px; width:100%;
+}
+.add-card {
+  display:flex; flex-direction:column; align-items:center; gap:8px;
+  padding:24px 16px; background:#fff; border:1px solid var(--gray-200); border-radius:12px;
+  cursor:pointer; transition:all .15s;
+}
+.add-card:hover { border-color:var(--primary); background:var(--primary-light); transform:translateY(-2px); box-shadow:0 4px 12px rgba(0,0,0,.08); }
+.add-card-icon { font-size:28px; }
+.add-card-label { font-size:12px; color:var(--gray-600); font-weight:500; text-align:center; }
+.add-card:last-child { grid-column: 2; }
+
+/* 콘텐츠 미리보기 */
+.content-preview {
+  flex:1; display:flex; flex-direction:column; padding:24px;
+}
+.preview-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:16px; }
+.preview-type-badge { font-size:11px; padding:4px 10px; border-radius:20px; background:var(--primary-light); color:var(--primary); font-weight:600; }
+.preview-frame {
+  flex:1; background:#fff; border-radius:12px; border:1px solid var(--gray-200);
+  display:flex; align-items:center; justify-content:center; min-height:300px;
+  padding:32px; color:var(--gray-400); font-size:14px;
+}
+
+/* 저장 패널 */
+.save-overlay { position:fixed; inset:0; background:rgba(0,0,0,.3); z-index:89; opacity:0; visibility:hidden; transition:all .3s; }
+.save-overlay.open { opacity:1; visibility:visible; }
+.save-panel {
+  position:fixed; right:0; top:var(--header-height); width:440px;
+  height:calc(100vh - var(--header-height)); background:#fff;
+  border-left:1px solid var(--gray-200); z-index:90;
+  transform:translateX(100%); transition:transform .3s; display:flex; flex-direction:column;
+}
+.save-panel.open { transform:translateX(0); }
+.save-header {
+  padding:20px 24px; border-bottom:1px solid var(--gray-200);
+  display:flex; align-items:center; justify-content:space-between;
+}
+.save-header h2 { font-size:18px; font-weight:700; }
+.close-btn { width:32px; height:32px; border:none; background:transparent; font-size:18px; cursor:pointer; border-radius:6px; }
+.close-btn:hover { background:var(--gray-100); }
+.save-body { flex:1; overflow-y:auto; padding:24px; }
+.save-footer { padding:16px 24px; border-top:1px solid var(--gray-200); display:flex; gap:8px; justify-content:flex-end; }
+
+/* 폼 스타일 */
+.form-section { margin-bottom:24px; }
+.form-section-title { font-size:14px; font-weight:700; color:var(--gray-800); margin-bottom:12px; display:flex; align-items:center; gap:6px; }
+.form-group { margin-bottom:14px; }
+.form-label { display:block; font-size:12px; font-weight:600; color:var(--gray-600); margin-bottom:6px; }
+.form-label .required { color:var(--danger); }
+.form-input {
+  width:100%; padding:9px 12px; border:1px solid var(--gray-200); border-radius:8px;
+  font-size:13px; font-family:inherit; outline:none;
+}
+.form-input:focus { border-color:var(--primary); box-shadow:0 0 0 3px rgba(0,102,255,.1); }
+.form-textarea { resize:vertical; min-height:64px; }
+.form-select { appearance:none; background:#fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%239CA3AF' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E") no-repeat right 10px center; padding-right:28px; }
+.form-row { display:flex; gap:8px; }
+.form-row > * { flex:1; }
+.radio-group { display:flex; gap:12px; }
+.radio-label { display:flex; align-items:center; gap:6px; font-size:13px; color:var(--gray-600); cursor:pointer; }
+.radio-label input { accent-color:var(--primary); }
+.checkbox-group { display:flex; flex-wrap:wrap; gap:8px; }
+.checkbox-label {
+  display:flex; align-items:center; gap:6px; font-size:12px; color:var(--gray-600);
+  padding:6px 12px; border:1px solid var(--gray-200); border-radius:6px; cursor:pointer;
+}
+.checkbox-label:has(input:checked) { border-color:var(--primary); background:var(--primary-light); color:var(--primary); }
+.checkbox-label input { display:none; }
+.thumbnail-upload {
+  width:160px; height:90px; border:2px dashed var(--gray-300); border-radius:8px;
+  display:flex; align-items:center; justify-content:center; font-size:24px; color:var(--gray-400);
+  cursor:pointer;
+}
+.thumbnail-upload:hover { border-color:var(--primary); color:var(--primary); }
+
+/* 성취기준 검색 */
+.std-search-wrap { position:relative; }
+.std-search-input {
+  width:100%; padding:10px 12px 10px 34px; border:1px solid var(--gray-200); border-radius:8px;
+  font-size:13px; font-family:inherit; outline:none; background:#fff;
+}
+.std-search-input:focus { border-color:var(--primary); box-shadow:0 0 0 3px rgba(0,102,255,.1); }
+.std-search-icon { position:absolute; left:10px; top:50%; transform:translateY(-50%); font-size:14px; color:var(--gray-400); }
+.std-results {
+  position:absolute; top:100%; left:0; right:0; max-height:240px; overflow-y:auto;
+  background:#fff; border:1px solid var(--gray-200); border-radius:0 0 8px 8px;
+  box-shadow:0 8px 24px rgba(0,0,0,.12); z-index:10; display:none;
+}
+.std-results.visible { display:block; }
+.std-result-item {
+  padding:10px 12px; cursor:pointer; border-bottom:1px solid var(--gray-100);
+  display:flex; flex-direction:column; gap:2px;
+}
+.std-result-item:hover { background:var(--primary-light); }
+.std-result-item:last-child { border-bottom:none; }
+.std-code { font-size:11px; font-weight:700; color:var(--primary); }
+.std-content { font-size:12px; color:var(--gray-700); }
+.std-meta { font-size:10px; color:var(--gray-400); }
+.std-tags { display:flex; flex-wrap:wrap; gap:4px; margin-top:6px; }
+.std-tag {
+  display:flex; align-items:center; gap:4px; padding:4px 8px;
+  background:var(--primary-light); color:var(--primary); border-radius:4px;
+  font-size:11px; font-weight:500;
+}
+.std-tag-remove { cursor:pointer; font-size:14px; line-height:1; }
+.std-tag-remove:hover { color:var(--danger); }
+.std-no-result { padding:16px; text-align:center; color:var(--gray-400); font-size:12px; }
+
+/* 모달 */
+.modal-overlay {
+  position:fixed; inset:0; background:rgba(0,0,0,.5); z-index:200;
+  display:flex; align-items:center; justify-content:center;
+  opacity:0; visibility:hidden; transition:all .2s;
+}
+.modal-overlay.show { opacity:1; visibility:visible; }
+.modal-card {
+  background:#fff; border-radius:16px; width:560px; max-height:80vh;
+  display:flex; flex-direction:column; box-shadow:0 16px 48px rgba(0,0,0,.15);
+}
+.modal-header { padding:20px 24px; border-bottom:1px solid var(--gray-200); display:flex; align-items:center; justify-content:space-between; }
+.modal-header h3 { font-size:16px; font-weight:700; }
+.modal-body { padding:24px; overflow-y:auto; flex:1; }
+.modal-footer { padding:16px 24px; border-top:1px solid var(--gray-200); display:flex; gap:8px; justify-content:flex-end; }
+
+/* 파일 업로드 */
+.drop-zone {
+  border:2px dashed var(--gray-300); border-radius:12px; padding:40px;
+  text-align:center; cursor:pointer; transition:all .15s;
+}
+.drop-zone:hover, .drop-zone.drag-active { border-color:var(--primary); background:var(--primary-light); }
+.drop-zone-icon { font-size:36px; margin-bottom:12px; }
+.drop-zone-text { font-size:14px; color:var(--gray-500); margin-bottom:4px; }
+.drop-zone-hint { font-size:11px; color:var(--gray-400); }
+
+/* 링크 입력 */
+.link-input-group { display:flex; flex-direction:column; gap:12px; }
+
+/* 보관함/콘텐츠 검색 리스트 */
+.search-list { max-height:300px; overflow-y:auto; }
+.search-item {
+  display:flex; align-items:center; gap:12px; padding:12px;
+  border-bottom:1px solid var(--gray-100); cursor:pointer;
+}
+.search-item:hover { background:var(--gray-50); }
+.search-item-icon { font-size:24px; width:40px; text-align:center; }
+.search-item-info { flex:1; }
+.search-item-title { font-size:13px; font-weight:600; color:var(--gray-700); }
+.search-item-meta { font-size:11px; color:var(--gray-400); }
+.search-item-select { padding:4px 12px; border:1px solid var(--primary); color:var(--primary); border-radius:6px; font-size:11px; background:transparent; cursor:pointer; }
+.search-item-select:hover { background:var(--primary); color:#fff; }
+
+/* 토스트 */
+.toast-container { position:fixed; bottom:24px; left:50%; transform:translateX(-50%); z-index:300; }
+.toast {
+  padding:12px 24px; background:var(--gray-800); color:#fff; border-radius:10px;
+  font-size:13px; box-shadow:0 4px 12px rgba(0,0,0,.2); animation:toastIn .3s ease;
+}
+.toast.success { background:var(--success); }
+@keyframes toastIn { from { opacity:0; transform:translateY(20px); } to { opacity:1; transform:translateY(0); } }
+</style>
+</head>
+<body data-gnb-page="classLessonCreate" data-gnb-base="../../../" data-gnb-adjust-header=".viewer-header">
+
+<!-- 헤더 -->
+<header class="viewer-header">
+  <div class="header-left">
+    <button class="btn-back" onclick="location.href='lesson-board.html'">← 수업게시판</button>
+    <input class="title-input" id="lessonTitle" placeholder="수업 제목을 입력하세요" maxlength="100">
+  </div>
+  <div class="header-right">
+    <button class="btn-save btn-draft" onclick="saveDraft()">임시저장</button>
+    <button class="btn-save btn-primary" onclick="openSavePanel()">저장</button>
+  </div>
+</header>
+
+<!-- 메인 레이아웃 -->
+<div class="viewer-container">
+  <!-- 사이드바 -->
+  <aside class="sidebar">
+    <div class="sidebar-header">
+      <span class="sidebar-title">📚 과정 목록</span>
+      <span class="sidebar-count" id="stepCount">0개 과정</span>
+    </div>
+    <div class="sidebar-content" id="stepList"></div>
+    <div class="sidebar-footer">
+      <button class="btn-add-step" onclick="showAddGrid()">＋ 과정 추가</button>
+    </div>
+  </aside>
+
+  <!-- 콘텐츠 영역 -->
+  <div class="content-area" id="contentArea">
+    <!-- 빈 상태 (기본) -->
+    <div class="content-empty" id="emptyState">
+      <div class="empty-icon">📝</div>
+      <div class="empty-text">수업을 구성해보세요.</div>
+      <div class="add-grid" id="addGrid">
+        <div class="add-card" onclick="openModal('fileUpload')"><div class="add-card-icon">📁</div><div class="add-card-label">파일 업로드</div></div>
+        <div class="add-card" onclick="openModal('linkAdd')"><div class="add-card-icon">🔗</div><div class="add-card-label">링크 추가</div></div>
+        <div class="add-card" onclick="openModal('myBox')"><div class="add-card-icon">📦</div><div class="add-card-label">나의 보관함에서 선택</div></div>
+        <div class="add-card" onclick="openModal('contentSearch')"><div class="add-card-icon">🔍</div><div class="add-card-label">콘텐츠에서 검색</div></div>
+        <div class="add-card" onclick="addWhiteboard()"><div class="add-card-icon">🖌️</div><div class="add-card-label">화이트 보드</div></div>
+        <div class="add-card" onclick="openModal('newCreate')"><div class="add-card-icon">✏️</div><div class="add-card-label">새로 만들기</div></div>
+        <div class="add-card" onclick="openModal('drive')"><div class="add-card-icon">☁️</div><div class="add-card-label">채움드라이브에서 추가</div></div>
+      </div>
+    </div>
+    <!-- 콘텐츠 미리보기 (동적) -->
+    <div class="content-preview" id="previewArea" style="display:none">
+      <div class="preview-header">
+        <span class="preview-type-badge" id="previewType"></span>
+        <button class="btn-back" onclick="showAddGrid()" style="font-size:12px">＋ 콘텐츠 추가</button>
+      </div>
+      <div class="preview-frame" id="previewFrame">콘텐츠 미리보기 영역</div>
+    </div>
+  </div>
+</div>
+
+<!-- 저장 오버레이 -->
+<div class="save-overlay" id="saveOverlay" onclick="closeSavePanel()"></div>
+
+<!-- 저장 패널 -->
+<div class="save-panel" id="savePanel">
+  <div class="save-header">
+    <h2>수업 정보 입력</h2>
+    <button class="close-btn" onclick="closeSavePanel()">✕</button>
+  </div>
+  <div class="save-body">
+    <!-- 기본 정보 -->
+    <div class="form-section">
+      <div class="form-section-title">📋 기본 정보</div>
+      <div class="form-group">
+        <label class="form-label">제목 <span class="required">*</span></label>
+        <input class="form-input" id="saveTitle" placeholder="수업 제목을 입력하세요">
+      </div>
+      <div class="form-group">
+        <label class="form-label">설명</label>
+        <textarea class="form-input form-textarea" placeholder="수업에 대한 설명을 입력하세요"></textarea>
+      </div>
+      <div class="form-group">
+        <label class="form-label">키워드</label>
+        <input class="form-input" placeholder="키워드를 입력해주세요 (쉼표로 구분)">
+      </div>
+    </div>
+
+    <!-- 교육과정 연결 -->
+    <div class="form-section">
+      <div class="form-section-title">📚 교육과정 연결</div>
+      <div class="form-group">
+        <div class="radio-group" style="margin-bottom:10px">
+          <label class="radio-label"><input type="radio" name="curType" value="curriculum" checked> 교육과정</label>
+          <label class="radio-label"><input type="radio" name="curType" value="theme"> 테마</label>
+        </div>
+      </div>
+      <div class="form-group">
+        <div class="form-row">
+          <div>
+            <label class="form-label">학교급</label>
+            <select class="form-input form-select" id="stdSchool" onchange="updateStdFilter()">
+              <option value="">선택</option><option value="초등학교" selected>초등학교</option><option value="중학교">중학교</option><option value="고등학교">고등학교</option>
+            </select>
+          </div>
+          <div>
+            <label class="form-label">학년</label>
+            <select class="form-input form-select" id="stdGrade" onchange="updateStdFilter()">
+              <option value="">선택</option><option>3학년</option><option>4학년</option><option selected>5학년</option><option>6학년</option>
+            </select>
+          </div>
+          <div>
+            <label class="form-label">교과</label>
+            <select class="form-input form-select" id="stdSubject" onchange="updateStdFilter()">
+              <option value="">선택</option><option selected>국어</option><option>수학</option><option>사회</option><option>과학</option><option>영어</option><option>음악</option><option>미술</option><option>체육</option><option>실과</option>
+            </select>
+          </div>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">🔍 성취기준 통합 검색</label>
+        <div class="std-search-wrap">
+          <span class="std-search-icon">🔍</span>
+          <input class="std-search-input" id="stdSearchInput" placeholder="단원명, 성취기준 코드, 내용요소, 키워드로 검색..." oninput="onStdSearch(this.value)">
+          <div class="std-results" id="stdResults"></div>
+        </div>
+        <div class="std-tags" id="stdTags"></div>
+      </div>
+    </div>
+
+    <!-- 세부정보 -->
+    <div class="form-section">
+      <div class="form-section-title">⚙️ 세부정보</div>
+      <div class="form-group">
+        <label class="form-label">섬네일</label>
+        <div class="thumbnail-upload" onclick="this.innerHTML='📷 이미지 선택됨'; this.style.borderStyle='solid'; this.style.borderColor='var(--primary)'">＋</div>
+        <span style="font-size:11px;color:var(--gray-400);margin-top:4px;display:block">권장 사이즈: 480×270px</span>
+      </div>
+      <div class="form-group">
+        <label class="form-label">공식 태그</label>
+        <select class="form-input form-select"><option>없음</option><option>추천</option><option>필수</option><option>심화</option></select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">채움콘텐츠 공개옵션 <span class="required">*</span></label>
+        <div class="radio-group">
+          <label class="radio-label"><input type="radio" name="openOpt" value="public"> 공개</label>
+          <label class="radio-label"><input type="radio" name="openOpt" value="private" checked> 비공개</label>
+        </div>
+        <p style="font-size:11px;color:var(--gray-400);margin-top:4px">ℹ️ 나의 보관함에만 저장합니다. 비공개 콘텐츠인 경우에도 채움클래스에서 활용할 수 있습니다.</p>
+      </div>
+    </div>
+
+    <!-- 클래스 정보 -->
+    <div class="form-section">
+      <div class="form-section-title">🏫 클래스 정보 설정</div>
+      <div class="form-group">
+        <label class="form-label">클래스 선택 <span class="required">*</span></label>
+        <div class="checkbox-group">
+          <label class="checkbox-label"><input type="checkbox" checked> 충북형 수학과 학습법 클래스</label>
+          <label class="checkbox-label"><input type="checkbox" checked> 2025. 연구학교 디지털종합보고회</label>
+          <label class="checkbox-label"><input type="checkbox"> 채움중학교 3학년 1반</label>
+          <label class="checkbox-label"><input type="checkbox"> 학부모 클래스</label>
+          <label class="checkbox-label"><input type="checkbox" checked> 매스 플레이 클래스</label>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">학습 기간</label>
+        <div class="radio-group" style="margin-bottom:8px">
+          <label class="radio-label"><input type="radio" name="period" value="none"> 기한없음</label>
+          <label class="radio-label"><input type="radio" name="period" value="set" checked> 기한설정</label>
+        </div>
+        <div class="form-row">
+          <input class="form-input" type="date" value="2026-03-16">
+          <input class="form-input" type="date" value="2026-03-16">
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">공개 대상</label>
+        <div class="radio-group">
+          <label class="radio-label"><input type="radio" name="target" value="member" checked> 멤버</label>
+          <label class="radio-label"><input type="radio" name="target" value="all"> 모두</label>
+        </div>
+        <p style="font-size:11px;color:var(--gray-400);margin-top:4px">ℹ️ 이 게시글을 등록하는 시점에서 선택한 멤버에게 전송됩니다.</p>
+      </div>
+    </div>
+  </div>
+  <div class="save-footer">
+    <button class="btn-save btn-draft" onclick="closeSavePanel()">취소</button>
+    <button class="btn-save btn-primary" onclick="submitLesson()">저장하기</button>
+  </div>
+</div>
+
+<!-- 모달: 파일 업로드 -->
+<div class="modal-overlay" id="modal-fileUpload">
+  <div class="modal-card" onclick="event.stopPropagation()">
+    <div class="modal-header"><h3>📁 파일 업로드</h3><button class="close-btn" onclick="closeModal('fileUpload')">✕</button></div>
+    <div class="modal-body">
+      <div class="drop-zone" id="dropZone">
+        <div class="drop-zone-icon">📂</div>
+        <div class="drop-zone-text">파일을 여기에 끌어다 놓거나 클릭하여 선택하세요</div>
+        <div class="drop-zone-hint">지원 형식: PDF, HWP, DOCX, PPTX, JPG, PNG, MP4 (최대 500MB)</div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-save btn-draft" onclick="closeModal('fileUpload')">취소</button>
+      <button class="btn-save btn-primary" onclick="addStep('파일','📄','업로드된 파일');closeModal('fileUpload')">추가하기</button>
+    </div>
+  </div>
+</div>
+
+<!-- 모달: 링크 추가 -->
+<div class="modal-overlay" id="modal-linkAdd">
+  <div class="modal-card" onclick="event.stopPropagation()">
+    <div class="modal-header"><h3>🔗 링크 추가</h3><button class="close-btn" onclick="closeModal('linkAdd')">✕</button></div>
+    <div class="modal-body">
+      <div class="link-input-group">
+        <div class="form-group">
+          <label class="form-label">링크 제목</label>
+          <input class="form-input" id="linkTitle" placeholder="링크 제목을 입력하세요">
+        </div>
+        <div class="form-group">
+          <label class="form-label">URL <span class="required">*</span></label>
+          <input class="form-input" id="linkUrl" placeholder="https://" type="url">
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-save btn-draft" onclick="closeModal('linkAdd')">취소</button>
+      <button class="btn-save btn-primary" onclick="addLinkStep()">추가하기</button>
+    </div>
+  </div>
+</div>
+
+<!-- 모달: 나의 보관함 -->
+<div class="modal-overlay" id="modal-myBox">
+  <div class="modal-card" onclick="event.stopPropagation()">
+    <div class="modal-header"><h3>📦 나의 보관함에서 선택</h3><button class="close-btn" onclick="closeModal('myBox')">✕</button></div>
+    <div class="modal-body">
+      <input class="form-input" placeholder="보관함 콘텐츠 검색..." style="margin-bottom:12px">
+      <div class="search-list">
+        <div class="search-item" onclick="addStep('문서','📄','수와 연산 개념 정리');closeModal('myBox')"><div class="search-item-icon">📄</div><div class="search-item-info"><div class="search-item-title">수와 연산 개념 정리</div><div class="search-item-meta">문서 · 2026-03-10 등록</div></div><button class="search-item-select">선택</button></div>
+        <div class="search-item" onclick="addStep('영상','🎬','분수의 덧셈과 뺄셈 강의');closeModal('myBox')"><div class="search-item-icon">🎬</div><div class="search-item-info"><div class="search-item-title">분수의 덧셈과 뺄셈 강의</div><div class="search-item-meta">영상 · 2026-03-08 등록 · 12분</div></div><button class="search-item-select">선택</button></div>
+        <div class="search-item" onclick="addStep('평가','❓','단원평가 - 분수');closeModal('myBox')"><div class="search-item-icon">❓</div><div class="search-item-info"><div class="search-item-title">단원평가 - 분수 (10문항)</div><div class="search-item-meta">평가 · 2026-03-05 등록</div></div><button class="search-item-select">선택</button></div>
+        <div class="search-item" onclick="addStep('링크','🔗','e학습터 수학 자료');closeModal('myBox')"><div class="search-item-icon">🔗</div><div class="search-item-info"><div class="search-item-title">e학습터 수학 자료 모음</div><div class="search-item-meta">링크 · 2026-02-28 등록</div></div><button class="search-item-select">선택</button></div>
+        <div class="search-item" onclick="addStep('문서','📄','도형의 넓이 학습지');closeModal('myBox')"><div class="search-item-icon">📄</div><div class="search-item-info"><div class="search-item-title">도형의 넓이 학습지</div><div class="search-item-meta">문서 · 2026-02-25 등록</div></div><button class="search-item-select">선택</button></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 모달: 콘텐츠 검색 -->
+<div class="modal-overlay" id="modal-contentSearch">
+  <div class="modal-card" onclick="event.stopPropagation()">
+    <div class="modal-header"><h3>🔍 콘텐츠에서 검색</h3><button class="close-btn" onclick="closeModal('contentSearch')">✕</button></div>
+    <div class="modal-body">
+      <div class="form-row" style="margin-bottom:12px">
+        <select class="form-input form-select"><option>전체</option><option>영상</option><option>문서</option><option>평가</option><option>활동</option></select>
+        <input class="form-input" placeholder="콘텐츠 검색..." style="flex:2">
+      </div>
+      <div class="search-list">
+        <div class="search-item" onclick="addStep('영상','🎬','[EBS] 삼국시대의 문화유산');closeModal('contentSearch')"><div class="search-item-icon">🎬</div><div class="search-item-info"><div class="search-item-title">[EBS] 삼국시대의 문화유산</div><div class="search-item-meta">영상 · EBS 공식 · 조회 3,421</div></div><button class="search-item-select">선택</button></div>
+        <div class="search-item" onclick="addStep('문서','📄','[교육부] 사회과 교수학습자료');closeModal('contentSearch')"><div class="search-item-icon">📄</div><div class="search-item-info"><div class="search-item-title">[교육부] 사회과 교수학습자료</div><div class="search-item-meta">문서 · 교육부 · 조회 1,892</div></div><button class="search-item-select">선택</button></div>
+        <div class="search-item" onclick="addStep('활동','✍️','[인터랙티브] 지도 위의 역사');closeModal('contentSearch')"><div class="search-item-icon">✍️</div><div class="search-item-info"><div class="search-item-title">[인터랙티브] 지도 위의 역사</div><div class="search-item-meta">활동 · 한국교육학술정보원 · 조회 987</div></div><button class="search-item-select">선택</button></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 모달: 새로 만들기 -->
+<div class="modal-overlay" id="modal-newCreate">
+  <div class="modal-card" onclick="event.stopPropagation()">
+    <div class="modal-header"><h3>✏️ 새로 만들기</h3><button class="close-btn" onclick="closeModal('newCreate')">✕</button></div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label class="form-label">콘텐츠 제목 <span class="required">*</span></label>
+        <input class="form-input" id="newTitle" placeholder="제목을 입력하세요">
+      </div>
+      <div class="form-group">
+        <label class="form-label">내용</label>
+        <textarea class="form-input form-textarea" id="newContent" placeholder="내용을 입력하세요..." style="min-height:160px"></textarea>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-save btn-draft" onclick="closeModal('newCreate')">취소</button>
+      <button class="btn-save btn-primary" onclick="addNewStep()">추가하기</button>
+    </div>
+  </div>
+</div>
+
+<!-- 모달: 채움드라이브 -->
+<div class="modal-overlay" id="modal-drive">
+  <div class="modal-card" onclick="event.stopPropagation()">
+    <div class="modal-header"><h3>☁️ 채움드라이브</h3><button class="close-btn" onclick="closeModal('drive')">✕</button></div>
+    <div class="modal-body">
+      <div class="search-list">
+        <div class="search-item" onclick="addStep('문서','📄','2025년 수업계획서.hwp');closeModal('drive')"><div class="search-item-icon">📁</div><div class="search-item-info"><div class="search-item-title">📂 내 드라이브</div><div class="search-item-meta">12개 파일</div></div></div>
+        <div class="search-item" onclick="addStep('문서','📄','수학 수업자료.pptx');closeModal('drive')"><div class="search-item-icon">📄</div><div class="search-item-info"><div class="search-item-title">수학 수업자료.pptx</div><div class="search-item-meta">2026-03-14 · 2.3MB</div></div><button class="search-item-select">선택</button></div>
+        <div class="search-item" onclick="addStep('영상','🎬','실험 영상.mp4');closeModal('drive')"><div class="search-item-icon">🎬</div><div class="search-item-info"><div class="search-item-title">실험 영상.mp4</div><div class="search-item-meta">2026-03-12 · 48MB</div></div><button class="search-item-select">선택</button></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 토스트 -->
+<div class="toast-container" id="toastContainer"></div>
+
+<script>
+// ============================================================
+// 데이터
+// ============================================================
+let steps = [];
+let activeStepIndex = -1;
+let selectedStandards = [];
+
+// 성취기준 더미 데이터 (2022 개정 교육과정 기반)
+const STANDARDS_DATA = [
+  { code:'[6국01-01]', content:'듣기와 말하기의 개념과 중요성을 이해한다', subject:'국어', grade:'5-6학년', area:'듣기·말하기', unit:'1단원. 소통과 공감', keywords:['듣기','말하기','소통','의사소통'] },
+  { code:'[6국01-02]', content:'의견을 제시하고 함께 조정하며 토의한다', subject:'국어', grade:'5-6학년', area:'듣기·말하기', unit:'2단원. 토의와 토론', keywords:['토의','토론','의견','조정'] },
+  { code:'[6국02-01]', content:'읽기의 목적에 따라 읽기 방법을 조절한다', subject:'국어', grade:'5-6학년', area:'읽기', unit:'3단원. 읽기의 방법', keywords:['읽기','목적','방법','전략'] },
+  { code:'[6국03-01]', content:'체험에서 얻은 깨달음을 쓰기에 활용한다', subject:'국어', grade:'5-6학년', area:'쓰기', unit:'4단원. 체험과 글쓰기', keywords:['쓰기','체험','깨달음','글쓰기'] },
+  { code:'[6국05-01]', content:'문학 작품의 갈래별 특성을 이해한다', subject:'국어', grade:'5-6학년', area:'문학', unit:'5단원. 문학의 갈래와 특성', keywords:['문학','갈래','시','소설','수필'] },
+  { code:'[6수01-01]', content:'10000 이상의 큰 수의 자릿값과 위치적 기수법을 이해한다', subject:'수학', grade:'5-6학년', area:'수와 연산', unit:'1단원. 큰 수', keywords:['큰 수','자릿값','기수법','수와 연산'] },
+  { code:'[6수01-02]', content:'분수의 덧셈과 뺄셈의 계산 원리를 이해한다', subject:'수학', grade:'5-6학년', area:'수와 연산', unit:'2단원. 분수의 연산', keywords:['분수','덧셈','뺄셈','연산'] },
+  { code:'[6수01-03]', content:'소수의 곱셈과 나눗셈의 계산 원리를 이해한다', subject:'수학', grade:'5-6학년', area:'수와 연산', unit:'3단원. 소수의 연산', keywords:['소수','곱셈','나눗셈'] },
+  { code:'[6수02-01]', content:'도형의 합동과 대칭을 이해한다', subject:'수학', grade:'5-6학년', area:'도형과 측정', unit:'4단원. 합동과 대칭', keywords:['합동','대칭','도형'] },
+  { code:'[6수02-02]', content:'직육면체와 정육면체의 성질을 이해한다', subject:'수학', grade:'5-6학년', area:'도형과 측정', unit:'5단원. 입체도형', keywords:['직육면체','정육면체','입체'] },
+  { code:'[6수02-03]', content:'원의 넓이를 구하는 방법을 이해한다', subject:'수학', grade:'5-6학년', area:'도형과 측정', unit:'6단원. 원의 넓이', keywords:['원','넓이','둘레','반지름'] },
+  { code:'[6수03-01]', content:'비와 비율을 이해한다', subject:'수학', grade:'5-6학년', area:'변화와 관계', unit:'7단원. 비와 비율', keywords:['비','비율','백분율'] },
+  { code:'[6사01-01]', content:'우리나라의 위치와 영역의 특성을 이해한다', subject:'사회', grade:'5-6학년', area:'지리', unit:'1단원. 우리 국토의 위치와 영역', keywords:['국토','위치','영역','지리'] },
+  { code:'[6사01-02]', content:'우리나라의 자연환경과 인문환경을 이해한다', subject:'사회', grade:'5-6학년', area:'지리', unit:'2단원. 우리나라의 자연환경', keywords:['자연환경','인문환경','기후','지형'] },
+  { code:'[6사02-01]', content:'삼국의 성립과 발전 과정을 이해한다', subject:'사회', grade:'5-6학년', area:'역사', unit:'3단원. 삼국의 성립과 발전', keywords:['삼국','고구려','백제','신라','역사'] },
+  { code:'[6사02-02]', content:'통일 신라와 발해의 발전상을 이해한다', subject:'사회', grade:'5-6학년', area:'역사', unit:'4단원. 통일 신라와 발해', keywords:['통일신라','발해','남북국'] },
+  { code:'[6과01-01]', content:'빛이 직진, 반사, 굴절하는 현상을 탐구한다', subject:'과학', grade:'5-6학년', area:'에너지', unit:'1단원. 빛과 렌즈', keywords:['빛','직진','반사','굴절','렌즈'] },
+  { code:'[6과01-02]', content:'전기 회로에서 전류의 흐름을 이해한다', subject:'과학', grade:'5-6학년', area:'에너지', unit:'2단원. 전기의 이용', keywords:['전기','전류','회로','직렬','병렬'] },
+  { code:'[6과02-01]', content:'식물의 구조와 기능을 이해한다', subject:'과학', grade:'5-6학년', area:'생명', unit:'3단원. 식물의 구조와 기능', keywords:['식물','뿌리','줄기','잎','광합성'] },
+  { code:'[6과02-02]', content:'생태계의 구성 요소와 상호 작용을 탐구한다', subject:'과학', grade:'5-6학년', area:'생명', unit:'4단원. 생태계와 환경', keywords:['생태계','먹이사슬','환경','생산자','소비자'] },
+  { code:'[6과03-01]', content:'용해와 용액의 성질을 탐구한다', subject:'과학', grade:'5-6학년', area:'물질', unit:'5단원. 용해와 용액', keywords:['용해','용액','용질','용매','농도'] },
+  { code:'[6과04-01]', content:'날씨와 우리 생활의 관계를 이해한다', subject:'과학', grade:'5-6학년', area:'지구와 우주', unit:'6단원. 날씨와 우리 생활', keywords:['날씨','기온','습도','기압','구름'] },
+  { code:'[6영01-01]', content:'알파벳과 소리의 관계를 이해하고 발음한다', subject:'영어', grade:'5-6학년', area:'듣기·말하기', unit:'1단원. Hello, Friends!', keywords:['알파벳','발음','영어','파닉스'] },
+  { code:'[6영02-01]', content:'쉽고 간단한 문장을 읽고 이해한다', subject:'영어', grade:'5-6학년', area:'읽기·쓰기', unit:'2단원. Reading Fun', keywords:['읽기','문장','이해','영어읽기'] },
+  { code:'[4수01-01]', content:'다섯 자리 이상의 수의 범위에서 수의 계열을 이해한다', subject:'수학', grade:'3-4학년', area:'수와 연산', unit:'1단원. 큰 수', keywords:['큰 수','수의 계열','자릿값'] },
+  { code:'[4수01-02]', content:'세 자리 수의 덧셈과 뺄셈의 계산 원리를 이해한다', subject:'수학', grade:'3-4학년', area:'수와 연산', unit:'2단원. 덧셈과 뺄셈', keywords:['덧셈','뺄셈','세 자리 수'] },
+  { code:'[4과01-01]', content:'자석의 성질을 탐구한다', subject:'과학', grade:'3-4학년', area:'에너지', unit:'1단원. 자석의 이용', keywords:['자석','극','인력','척력'] },
+  { code:'[4사01-01]', content:'우리 지역의 지리적 특성을 이해한다', subject:'사회', grade:'3-4학년', area:'지리', unit:'1단원. 우리 고장의 모습', keywords:['고장','지역','지도','위치'] },
+  { code:'[9수01-01]', content:'소인수분해를 할 수 있다', subject:'수학', grade:'중1', area:'수와 연산', unit:'1단원. 소인수분해', keywords:['소인수분해','약수','배수','소수'] },
+  { code:'[9과01-01]', content:'힘의 개념을 이해하고 여러 가지 힘을 설명한다', subject:'과학', grade:'중1', area:'역학', unit:'1단원. 힘과 운동', keywords:['힘','중력','마찰력','탄성력'] },
+];
+
+// ============================================================
+// 과정 관리
+// ============================================================
+function addStep(type, icon, title) {
+  steps.push({ type, icon, title, id: Date.now() });
+  activeStepIndex = steps.length - 1;
+  renderSteps();
+  showPreview(activeStepIndex);
+  showToast(`"${title}" 과정이 추가되었습니다`);
+}
+
+function addLinkStep() {
+  const title = document.getElementById('linkTitle').value || '링크';
+  const url = document.getElementById('linkUrl').value || 'https://';
+  addStep('링크', '🔗', title);
+  closeModal('linkAdd');
+}
+
+function addNewStep() {
+  const title = document.getElementById('newTitle').value || '새 콘텐츠';
+  addStep('텍스트', '📝', title);
+  closeModal('newCreate');
+}
+
+function addWhiteboard() {
+  addStep('화이트보드', '🖌️', '화이트보드 ' + (steps.filter(s=>s.type==='화이트보드').length+1));
+}
+
+function removeStep(index) {
+  if(!confirm(`"${steps[index].title}" 과정을 삭제하시겠습니까?`)) return;
+  steps.splice(index, 1);
+  if(activeStepIndex >= steps.length) activeStepIndex = steps.length - 1;
+  renderSteps();
+  if(steps.length === 0) showEmptyState();
+  else if(activeStepIndex >= 0) showPreview(activeStepIndex);
+}
+
+function renderSteps() {
+  const list = document.getElementById('stepList');
+  document.getElementById('stepCount').textContent = steps.length + '개 과정';
+  if(steps.length === 0) { list.innerHTML = '<div style="padding:20px;text-align:center;color:var(--gray-400);font-size:13px">과정이 없습니다.<br>콘텐츠를 추가해보세요.</div>'; return; }
+  list.innerHTML = steps.map((s, i) => `
+    <div class="step-item ${i===activeStepIndex?'active':''}" draggable="true" data-index="${i}"
+         ondragstart="onDragStart(event,${i})" ondragover="onDragOver(event,${i})" ondragleave="onDragLeave(event)" ondrop="onDrop(event,${i})"
+         onclick="selectStep(${i})">
+      <div class="step-num">${i+1}</div>
+      <div class="step-info">
+        <div class="step-type">${s.icon} ${s.type}</div>
+        <div class="step-title">${s.title}</div>
+      </div>
+      <div class="step-actions">
+        <button class="step-action-btn" title="삭제" onclick="event.stopPropagation();removeStep(${i})">🗑️</button>
+        <span class="drag-handle" title="순서 변경">⋮⋮</span>
+      </div>
+    </div>
+  `).join('');
+}
+
+function selectStep(index) {
+  activeStepIndex = index;
+  renderSteps();
+  showPreview(index);
+}
+
+// 드래그앤드롭
+let dragIndex = -1;
+function onDragStart(e, i) { dragIndex = i; e.currentTarget.classList.add('dragging'); e.dataTransfer.effectAllowed = 'move'; }
+function onDragOver(e, i) { e.preventDefault(); if(i !== dragIndex) e.currentTarget.classList.add('drag-over'); }
+function onDragLeave(e) { e.currentTarget.classList.remove('drag-over'); }
+function onDrop(e, i) {
+  e.preventDefault(); e.currentTarget.classList.remove('drag-over');
+  if(dragIndex === i) return;
+  const item = steps.splice(dragIndex, 1)[0];
+  steps.splice(i, 0, item);
+  activeStepIndex = i;
+  renderSteps();
+  document.querySelectorAll('.step-item').forEach(el => el.classList.remove('dragging'));
+}
+
+// ============================================================
+// 콘텐츠 영역
+// ============================================================
+function showEmptyState() {
+  document.getElementById('emptyState').style.display = 'flex';
+  document.getElementById('previewArea').style.display = 'none';
+}
+
+function showAddGrid() {
+  showEmptyState();
+}
+
+function showPreview(index) {
+  if(index < 0 || index >= steps.length) return;
+  const s = steps[index];
+  document.getElementById('emptyState').style.display = 'none';
+  document.getElementById('previewArea').style.display = 'flex';
+  document.getElementById('previewType').textContent = s.icon + ' ' + s.type;
+  document.getElementById('previewFrame').innerHTML = `
+    <div style="text-align:center">
+      <div style="font-size:48px;margin-bottom:16px">${s.icon}</div>
+      <div style="font-size:16px;font-weight:600;color:var(--gray-700);margin-bottom:8px">${s.title}</div>
+      <div style="font-size:13px;color:var(--gray-400)">콘텐츠 미리보기 영역입니다</div>
+    </div>
+  `;
+}
+
+// ============================================================
+// 저장 패널
+// ============================================================
+function openSavePanel() {
+  if(steps.length === 0) { showToast('최소 1개의 과정을 추가해주세요', 'warning'); return; }
+  document.getElementById('saveTitle').value = document.getElementById('lessonTitle').value;
+  document.getElementById('savePanel').classList.add('open');
+  document.getElementById('saveOverlay').classList.add('open');
+}
+function closeSavePanel() {
+  document.getElementById('savePanel').classList.remove('open');
+  document.getElementById('saveOverlay').classList.remove('open');
+}
+function saveDraft() { showToast('임시저장되었습니다', 'success'); }
+function submitLesson() {
+  const title = document.getElementById('saveTitle').value;
+  if(!title) { showToast('수업 제목을 입력해주세요', 'warning'); return; }
+  closeSavePanel();
+  showToast('수업이 저장되었습니다!', 'success');
+  setTimeout(() => { location.href = 'lesson-board.html'; }, 1500);
+}
+
+// ============================================================
+// 성취기준 검색
+// ============================================================
+let stdSearchTimer;
+function onStdSearch(query) {
+  clearTimeout(stdSearchTimer);
+  stdSearchTimer = setTimeout(() => {
+    const results = searchStandards(query);
+    renderStdResults(results, query);
+  }, 300);
+}
+
+function searchStandards(query) {
+  const q = query.toLowerCase().trim();
+  if(q.length < 2) return [];
+  const school = document.getElementById('stdSchool').value;
+  const subject = document.getElementById('stdSubject').value;
+  return STANDARDS_DATA.filter(item => {
+    if(school && !item.grade.includes(school === '초등학교' ? '학년' : (school === '중학교' ? '중' : '고'))) {
+      if(school === '초등학교' && !item.grade.match(/[3-6]학년/)) return false;
+      if(school === '중학교' && !item.grade.includes('중')) return false;
+      if(school === '고등학교' && !item.grade.includes('고')) return false;
+    }
+    if(subject && item.subject !== subject) return false;
+    if(selectedStandards.some(s => s.code === item.code)) return false;
+    return item.code.toLowerCase().includes(q) ||
+           item.content.toLowerCase().includes(q) ||
+           item.subject.includes(q) ||
+           item.grade.includes(q) ||
+           item.area.includes(q) ||
+           item.unit.toLowerCase().includes(q) ||
+           item.keywords.some(k => k.includes(q));
+  }).slice(0, 10);
+}
+
+function renderStdResults(results, query) {
+  const container = document.getElementById('stdResults');
+  if(!query || query.length < 2) { container.classList.remove('visible'); return; }
+  container.classList.add('visible');
+  if(results.length === 0) {
+    container.innerHTML = '<div class="std-no-result">검색 결과가 없습니다</div>';
+    return;
+  }
+  container.innerHTML = results.map((r, i) => `
+    <div class="std-result-item" onclick="selectStandard(${i})" data-index="${i}">
+      <div class="std-code">${r.code}</div>
+      <div class="std-content">${r.content}</div>
+      <div class="std-meta">${r.subject} > ${r.grade} > ${r.area} | ${r.unit}</div>
+    </div>
+  `).join('');
+  container._results = results;
+}
+
+function selectStandard(index) {
+  const container = document.getElementById('stdResults');
+  const item = container._results[index];
+  if(!item || selectedStandards.some(s => s.code === item.code)) return;
+  selectedStandards.push(item);
+  renderStdTags();
+  document.getElementById('stdSearchInput').value = '';
+  container.classList.remove('visible');
+}
+
+function removeStandard(code) {
+  selectedStandards = selectedStandards.filter(s => s.code !== code);
+  renderStdTags();
+}
+
+function renderStdTags() {
+  document.getElementById('stdTags').innerHTML = selectedStandards.map(s =>
+    `<span class="std-tag">${s.code} ${s.content.slice(0,20)}... <span class="std-tag-remove" onclick="removeStandard('${s.code}')">✕</span></span>`
+  ).join('');
+}
+
+function updateStdFilter() {
+  const query = document.getElementById('stdSearchInput').value;
+  if(query.length >= 2) onStdSearch(query);
+}
+
+// ============================================================
+// 모달
+// ============================================================
+function openModal(id) { document.getElementById('modal-'+id).classList.add('show'); }
+function closeModal(id) { document.getElementById('modal-'+id).classList.remove('show'); }
+document.querySelectorAll('.modal-overlay').forEach(m => {
+  m.addEventListener('click', function(e) { if(e.target === this) this.classList.remove('show'); });
+});
+document.addEventListener('keydown', e => {
+  if(e.key === 'Escape') {
+    document.querySelectorAll('.modal-overlay.show').forEach(m => m.classList.remove('show'));
+    closeSavePanel();
+  }
+});
+
+// ============================================================
+// 토스트
+// ============================================================
+function showToast(text, type) {
+  const container = document.getElementById('toastContainer');
+  const toast = document.createElement('div');
+  toast.className = 'toast' + (type === 'success' ? ' success' : '');
+  toast.textContent = text;
+  container.appendChild(toast);
+  setTimeout(() => toast.remove(), 2500);
+}
+
+// 초기화
+renderSteps();
+document.getElementById('stdSearchInput').addEventListener('blur', () => {
+  setTimeout(() => document.getElementById('stdResults').classList.remove('visible'), 200);
+});
+document.getElementById('stdSearchInput').addEventListener('focus', () => {
+  const q = document.getElementById('stdSearchInput').value;
+  if(q.length >= 2) onStdSearch(q);
+});
+</script>
+<script src="../../../common-nav.js"></script>
+</body>
+</html>

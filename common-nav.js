@@ -14,6 +14,7 @@
         classHome:        '02_채움클래스/나의 클래스/01_개별 클래스 홈/class-home-prototype.html',
         classLessonBoard: '02_채움클래스/나의 클래스/02_수업/lesson-board.html',
         classLesson:      '02_채움클래스/나의 클래스/02_수업/dacheum-lesson-player (4).html',
+        classLessonCreate:'02_채움클래스/나의 클래스/02_수업/lesson-create.html',
         classHomework:    '02_채움클래스/나의 클래스/03_과제/homework-prototype (1).html',
         classEval:        '02_채움클래스/나의 클래스/04_평가/채움클래스_평가기능_통합_프로토타입.html',
         classNotice:      '02_채움클래스/나의 클래스/05_알림장/다채움_알림장_프로토타입 (2).html',
@@ -123,7 +124,8 @@
     // 클래스 홈 탭 별칭 (하위 페이지 → 탭 ID 매핑)
     // 수업 플레이어는 수업 게시판 탭으로 표시
     var CLASS_HOME_ALIASES = {
-        'classLesson': 'classLessonBoard'
+        'classLesson': 'classLessonBoard',
+        'classLessonCreate': 'classLessonBoard'
     };
 
     // 채움콘텐츠 나의 보관함 3차 탭
