@@ -453,6 +453,17 @@
         // 서브메뉴 컨테이너 삽입
         wrapper.appendChild(subNavContainer);
 
+        // 서브메뉴 padding-left를 1차 메뉴 첫 아이템 위치에 맞춤
+        function alignSubNav() {
+            var firstItem = mainNav.querySelector('.gnb-main-item');
+            if (!firstItem) return;
+            var left = firstItem.getBoundingClientRect().left;
+            var subs = subNavContainer.querySelectorAll('.gnb-sub-nav');
+            for (var i = 0; i < subs.length; i++) {
+                subs[i].style.paddingLeft = left + 'px';
+            }
+        }
+
         // 현재 페이지의 메뉴 그룹으로 초기 서브메뉴 표시
         if (activeMain && activeMain !== 'portal') {
             populateSubNav(activeMain);
@@ -460,6 +471,10 @@
             // 포털/명예의전당 등 서브메뉴 없는 페이지도 바디 패딩 적용
             updateBodyPadding();
         }
+
+        // 서브메뉴 정렬 (렌더링 후)
+        requestAnimationFrame(alignSubNav);
+        window.addEventListener('resize', alignSubNav);
 
         // === 모바일 메뉴 패널 ===
         var mobilePanel = document.createElement('div');
