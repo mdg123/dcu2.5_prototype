@@ -260,6 +260,43 @@ body {
     font-size:12px; color:var(--primary); cursor:pointer; font-weight:500;
 }
 .rubric-add:hover { text-decoration:underline; }
+
+/* 미리보기 모달 */
+.preview-modal-overlay {
+    position:fixed; inset:0; background:rgba(0,0,0,.5); z-index:100000;
+    display:none; align-items:center; justify-content:center;
+}
+.preview-modal-overlay.open { display:flex; }
+.preview-modal {
+    background:#fff; border-radius:var(--radius-lg); width:680px; max-height:80vh;
+    display:flex; flex-direction:column; box-shadow:0 16px 48px rgba(0,0,0,.2);
+    animation:modalIn .2s ease;
+}
+@keyframes modalIn { from{transform:scale(.95);opacity:0} to{transform:scale(1);opacity:1} }
+.preview-modal-header {
+    display:flex; align-items:center; justify-content:space-between;
+    padding:16px 24px; border-bottom:1px solid var(--gray-200);
+}
+.preview-modal-body {
+    flex:1; overflow-y:auto; padding:24px;
+}
+.preview-modal-footer {
+    padding:14px 24px; border-top:1px solid var(--gray-200);
+    display:flex; gap:8px; justify-content:flex-end;
+}
+.pv-card { background:var(--gray-50); border-radius:var(--radius-md); padding:16px; margin-bottom:14px; }
+.pv-label { font-size:11px; font-weight:600; color:var(--gray-400); margin-bottom:6px; text-transform:uppercase; letter-spacing:.3px; }
+.pv-title { font-size:18px; font-weight:700; color:var(--gray-900); margin-bottom:8px; }
+.pv-content { font-size:13px; color:var(--gray-600); line-height:1.8; }
+.pv-meta-grid { display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; }
+.pv-meta-item { padding:10px 12px; background:#fff; border:1px solid var(--gray-200); border-radius:var(--radius-sm); }
+.pv-meta-item .label { font-size:10px; color:var(--gray-400); }
+.pv-meta-item .value { font-size:13px; font-weight:600; margin-top:2px; }
+.pv-badge-list { display:flex; flex-wrap:wrap; gap:6px; }
+.pv-badge { padding:4px 10px; border-radius:4px; font-size:11px; font-weight:500; }
+.pv-badge-blue { background:var(--primary-light); color:var(--primary); }
+.pv-badge-green { background:var(--success-light); color:var(--success); }
+.pv-badge-orange { background:var(--warning-light); color:var(--warning); }
     </style>
 </head>
 <body>
@@ -270,7 +307,8 @@ body {
             <span class="create-header-title">과제 새로 만들기</span>
         </div>
         <div class="create-header-right">
-            <button class="btn btn-secondary" onclick="alert('임시저장되었습니다')">임시저장</button>
+            <button class="btn btn-secondary" onclick="alert('임시저장되었습니다')">💾 임시저장</button>
+            <button class="btn btn-secondary" onclick="openPreviewModal()">👁️ 미리보기</button>
             <button class="btn btn-primary" onclick="alert('과제가 등록되었습니다')">등록하기</button>
         </div>
     </div>
@@ -283,28 +321,33 @@ body {
                 <label class="form-label">과제 제목 <span class="required">*</span></label>
                 <input class="form-input" type="text" placeholder="과제 제목을 입력하세요" id="hwTitle" oninput="updatePreview()">
             </div>
-            <div class="form-row">
-                <div class="form-group">
-                    <label class="form-label">과목 <span class="required">*</span></label>
-                    <div class="subject-chips" id="subjectChips">
-                        <span class="subject-chip active" onclick="selectSubject(this)">수학</span>
-                        <span class="subject-chip" onclick="selectSubject(this)">국어</span>
-                        <span class="subject-chip" onclick="selectSubject(this)">영어</span>
-                        <span class="subject-chip" onclick="selectSubject(this)">사회</span>
-                        <span class="subject-chip" onclick="selectSubject(this)">과학</span>
-                        <span class="subject-chip" onclick="selectSubject(this)">음악</span>
-                        <span class="subject-chip" onclick="selectSubject(this)">미술</span>
-                        <span class="subject-chip" onclick="selectSubject(this)">체육</span>
-                        <span class="subject-chip" onclick="selectSubject(this)">기타</span>
-                    </div>
+            <!-- 교육과정 메타데이터 (스마트검색) -->
+            <div class="form-group">
+                <label class="form-label">교육과정 연결 <span class="required">*</span></label>
+                <p style="font-size:12px;color:var(--gray-400);margin-bottom:8px">💡 키워드를 입력하면 2022 개정 교육과정 성취기준이 자동완성됩니다. 학교급, 학년, 과목, 단원명 등 다양한 조합으로 검색할 수 있습니다.</p>
+                <div class="std-search-wrap">
+                    <span class="std-search-icon">🔍</span>
+                    <input class="std-search-input" id="metaSearchInput" type="text"
+                           placeholder="단원명, 성취기준 코드, 내용요소, 키워드로 검색..."
+                           oninput="onMetaSearch(this.value)">
+                    <div class="std-results" id="metaResults"></div>
                 </div>
-                <div class="form-group">
-                    <label class="form-label">상태</label>
-                    <select class="form-select">
-                        <option>진행중</option>
-                        <option>예약 등록</option>
-                        <option>임시저장</option>
-                    </select>
+                <div class="std-tags" id="metaTags"></div>
+                <div id="metaInfo" style="margin-top:10px;display:none">
+                    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px">
+                        <div style="padding:8px 12px;background:var(--gray-50);border-radius:var(--radius-sm);font-size:12px">
+                            <span style="color:var(--gray-400)">학교급</span>
+                            <div id="metaSchool" style="font-weight:600;margin-top:2px">-</div>
+                        </div>
+                        <div style="padding:8px 12px;background:var(--gray-50);border-radius:var(--radius-sm);font-size:12px">
+                            <span style="color:var(--gray-400)">과목</span>
+                            <div id="metaSubject" style="font-weight:600;margin-top:2px">-</div>
+                        </div>
+                        <div style="padding:8px 12px;background:var(--gray-50);border-radius:var(--radius-sm);font-size:12px">
+                            <span style="color:var(--gray-400)">학년</span>
+                            <div id="metaGrade" style="font-weight:600;margin-top:2px">-</div>
+                        </div>
+                    </div>
                 </div>
             </div>
             <div class="form-group">
@@ -465,21 +508,7 @@ body {
             </div>
         </div>
 
-        <!-- 4. 교육과정 연결 -->
-        <div class="section-card">
-            <div class="section-title">📚 교육과정 연결</div>
-            <p style="font-size:12px;color:var(--gray-400);margin-bottom:10px">💡 키워드를 입력하면 2022 개정 교육과정 성취기준이 자동완성됩니다.</p>
-            <div class="std-search-wrap">
-                <span class="std-search-icon">🔍</span>
-                <input class="std-search-input" id="stdSearchInput" type="text"
-                       placeholder="단원명, 성취기준 코드, 내용요소, 키워드로 검색..."
-                       oninput="onStdSearch(this.value)">
-                <div class="std-results" id="stdResults"></div>
-            </div>
-            <div class="std-tags" id="stdTags"></div>
-        </div>
-
-        <!-- 5. 평가 설정 -->
+        <!-- 4. 평가 설정 -->
         <div class="section-card">
             <div class="section-title">📊 평가 설정</div>
             <div class="form-group">
@@ -546,26 +575,24 @@ body {
             </div>
         </div>
 
-        <!-- 미리보기 -->
-        <div class="preview-section">
-            <div class="preview-label">📎 등록 미리보기</div>
-            <div class="preview-card">
-                <span class="preview-subject" id="previewSubject">수학</span>
-                <div class="preview-title" id="previewTitle">과제 제목을 입력하세요</div>
-                <div class="preview-meta">
-                    <span>📅 기한없음</span>
-                    <span>👤 문 선생님</span>
-                    <span>🏠 충북형 수학과 학습법 클래스</span>
-                </div>
-                <div class="preview-types" id="previewTypes">
-                    <span class="preview-type-badge">📝 텍스트</span>
-                    <span class="preview-type-badge">📷 사진</span>
-                    <span class="preview-type-badge">📁 파일</span>
-                </div>
+        <div style="height:40px"></div>
+    </div>
+
+    <!-- 미리보기 모달 -->
+    <div class="preview-modal-overlay" id="previewModal" onclick="if(event.target===this)closePreviewModal()">
+        <div class="preview-modal">
+            <div class="preview-modal-header">
+                <span style="font-size:15px;font-weight:700">👁️ 과제 미리보기</span>
+                <button onclick="closePreviewModal()" style="background:none;border:none;font-size:18px;cursor:pointer;color:var(--gray-400)">✕</button>
+            </div>
+            <div class="preview-modal-body" id="previewBody">
+                <!-- JS에서 동적 생성 -->
+            </div>
+            <div class="preview-modal-footer">
+                <button class="btn btn-secondary" onclick="closePreviewModal()">닫기</button>
+                <button class="btn btn-primary" onclick="alert('과제가 등록되었습니다')">바로 등록하기</button>
             </div>
         </div>
-
-        <div style="height:40px"></div>
     </div>
 
     <script src="https://cdn.quilljs.com/1.3.6/quill.min.js"></script>
@@ -577,20 +604,12 @@ body {
         modules: { toolbar: [['bold','italic','underline'],['link','image'],[{list:'ordered'},{list:'bullet'}]] }
     });
 
-    // 과목 선택
-    function selectSubject(el) {
-        el.parentElement.querySelectorAll('.subject-chip').forEach(function(c){ c.classList.remove('active'); });
-        el.classList.add('active');
-        updatePreview();
-    }
-
     // 제출 유형 토글
     function toggleSubmitType(el) {
         el.classList.toggle('active');
         var type = el.dataset.type;
         var detail = document.getElementById('typeDetail-' + type);
         if (detail) detail.style.display = el.classList.contains('active') ? 'block' : 'none';
-        updatePreview();
     }
 
     // 기한 토글
@@ -609,17 +628,134 @@ body {
         tbody.appendChild(tr);
     }
 
-    // 미리보기 업데이트
-    function updatePreview() {
-        var title = document.getElementById('hwTitle').value;
-        document.getElementById('previewTitle').textContent = title || '과제 제목을 입력하세요';
-        var subj = document.querySelector('.subject-chip.active');
-        if (subj) document.getElementById('previewSubject').textContent = subj.textContent;
+    // ============================================================
+    // 교육과정 메타데이터 스마트검색
+    // ============================================================
+    var selectedMeta = [];
+    var _metaState = { q:'', res:[], ai:-1, visible:false };
+    var metaTimer;
+
+    function onMetaSearch(val) {
+        _metaState.q = val; _metaState.ai = -1;
+        clearTimeout(metaTimer);
+        if (!val || val.trim().length < 2) { _metaState.res=[]; _metaState.visible=false; updMetaDrop(); return; }
+        metaTimer = setTimeout(function(){
+            if (!rS.loaded && !rS.loading) { RL.load().then(function(){ doMetaSearch(val); }); return; }
+            doMetaSearch(val);
+        }, 300);
+    }
+    function doMetaSearch(val) {
+        var r = RL.search(val);
+        r = r.filter(function(x){ return !selectedMeta.some(function(s){ return s.code === x.code; }); });
+        _metaState.res = r; _metaState.visible = true; updMetaDrop();
+    }
+    function updMetaDrop() {
+        var c = document.getElementById('metaResults'); if (!c) return;
+        if (!_metaState.visible || !_metaState.q) { c.classList.remove('visible'); return; }
+        c.classList.add('visible');
+        var r = _metaState.res, q = _metaState.q;
+        if (!r.length) { c.innerHTML = '<div style="padding:16px;text-align:center;color:var(--gray-400);font-size:12px">검색 결과가 없습니다</div>'; return; }
+        var h = '';
+        for (var i = 0; i < Math.min(r.length, 20); i++) {
+            h += '<div class="std-result-item' + (i === _metaState.ai ? ' active' : '') + '" onclick="selMeta(' + i + ')">';
+            h += '<div class="std-code">' + RL.hl(r[i].code, q) + '</div>';
+            h += '<div class="std-content">' + RL.hl(r[i].std, q) + '</div>';
+            h += '<div class="std-meta">' + [r[i].school, r[i].subject, r[i].grade + '학년', r[i].area, r[i].unit].filter(Boolean).join(' > ') + '</div></div>';
+        }
+        c.innerHTML = h;
+    }
+    function selMeta(i) {
+        var item = _metaState.res[i];
+        if (!item || selectedMeta.some(function(s){ return s.code === item.code; })) return;
+        selectedMeta.push(item);
+        renderMetaTags();
+        updateMetaInfo();
+        document.getElementById('metaSearchInput').value = '';
+        _metaState.q = ''; _metaState.visible = false; updMetaDrop();
+    }
+    function remMeta(code) {
+        selectedMeta = selectedMeta.filter(function(s){ return s.code !== code; });
+        renderMetaTags();
+        updateMetaInfo();
+    }
+    function renderMetaTags() {
+        document.getElementById('metaTags').innerHTML = selectedMeta.map(function(s){
+            var label = s.code + ' ' + (s.std || '').slice(0, 25) + ((s.std && s.std.length > 25) ? '...' : '');
+            return '<span class="std-tag">' + label + ' <span class="std-tag-remove" onclick="remMeta(\'' + s.code.replace(/'/g, "\\'") + '\')">✕</span></span>';
+        }).join('');
+    }
+    function updateMetaInfo() {
+        var info = document.getElementById('metaInfo');
+        if (selectedMeta.length === 0) { info.style.display = 'none'; return; }
+        info.style.display = 'block';
+        var first = selectedMeta[0];
+        document.getElementById('metaSchool').textContent = first.school || '-';
+        document.getElementById('metaSubject').textContent = first.subject || '-';
+        document.getElementById('metaGrade').textContent = (first.grade || '-') + '학년';
+    }
+    document.addEventListener('DOMContentLoaded', function(){
+        var inp = document.getElementById('metaSearchInput');
+        if (inp) inp.addEventListener('keydown', function(e){
+            if (e.key === 'Escape') { _metaState.visible = false; updMetaDrop(); }
+            else if (e.key === 'ArrowDown') { e.preventDefault(); _metaState.ai = Math.min(_metaState.ai + 1, _metaState.res.length - 1); updMetaDrop(); }
+            else if (e.key === 'ArrowUp') { e.preventDefault(); _metaState.ai = Math.max(_metaState.ai - 1, 0); updMetaDrop(); }
+            else if (e.key === 'Enter') { e.preventDefault(); if (_metaState.ai >= 0) selMeta(_metaState.ai); else if (_metaState.res.length > 0) selMeta(0); }
+        });
+    });
+
+    // ============================================================
+    // 미리보기 모달
+    // ============================================================
+    function openPreviewModal() {
+        var title = document.getElementById('hwTitle').value || '(제목 없음)';
+        var content = quill.root.innerHTML;
         var types = [];
         document.querySelectorAll('.submit-type-option.active').forEach(function(el){
-            types.push('<span class="preview-type-badge">' + el.querySelector('.type-icon').textContent + ' ' + el.querySelector('.type-label').textContent + '</span>');
+            types.push(el.querySelector('.type-icon').textContent + ' ' + el.querySelector('.type-label').textContent);
         });
-        document.getElementById('previewTypes').innerHTML = types.join('');
+        var classes = [];
+        document.querySelectorAll('.class-select-chip.active').forEach(function(el){
+            classes.push(el.textContent.trim());
+        });
+        var stds = selectedMeta.map(function(s){ return s.code + ' ' + (s.std||'').slice(0,30); });
+        var subject = selectedMeta.length > 0 ? selectedMeta[0].subject : '-';
+        var school = selectedMeta.length > 0 ? selectedMeta[0].school : '-';
+
+        var html = '';
+        html += '<div class="pv-card">';
+        html += '  <div class="pv-label">과제 정보</div>';
+        html += '  <div class="pv-title">' + title + '</div>';
+        html += '  <div class="pv-meta-grid">';
+        html += '    <div class="pv-meta-item"><div class="label">과목</div><div class="value">' + subject + '</div></div>';
+        html += '    <div class="pv-meta-item"><div class="label">학교급</div><div class="value">' + school + '</div></div>';
+        html += '    <div class="pv-meta-item"><div class="label">작성자</div><div class="value">문 선생님</div></div>';
+        html += '  </div>';
+        html += '</div>';
+
+        if (content && content !== '<p><br></p>') {
+            html += '<div class="pv-card"><div class="pv-label">과제 내용</div><div class="pv-content">' + content + '</div></div>';
+        }
+
+        html += '<div class="pv-card"><div class="pv-label">제출 유형</div><div class="pv-badge-list">';
+        types.forEach(function(t){ html += '<span class="pv-badge pv-badge-green">' + t + '</span>'; });
+        html += '</div></div>';
+
+        if (stds.length > 0) {
+            html += '<div class="pv-card"><div class="pv-label">교육과정 연결</div><div class="pv-badge-list">';
+            stds.forEach(function(s){ html += '<span class="pv-badge pv-badge-blue">' + s + '</span>'; });
+            html += '</div></div>';
+        }
+
+        html += '<div class="pv-card"><div class="pv-label">배정 클래스</div><div class="pv-badge-list">';
+        classes.forEach(function(c){ html += '<span class="pv-badge pv-badge-orange">' + c + '</span>'; });
+        if (classes.length === 0) html += '<span style="font-size:12px;color:var(--gray-400)">선택된 클래스 없음</span>';
+        html += '</div></div>';
+
+        document.getElementById('previewBody').innerHTML = html;
+        document.getElementById('previewModal').classList.add('open');
+    }
+    function closePreviewModal() {
+        document.getElementById('previewModal').classList.remove('open');
     }
 
     // ============================================================
@@ -661,41 +797,9 @@ body {
     };
     RL.load();
 
-    var selectedStandards=[], _st={q:'',res:[],ai:-1}, stTimer;
-    function onStdSearch(v){
-        _st.q=v;_st.ai=-1;clearTimeout(stTimer);
-        if(!v||v.trim().length<2){_st.res=[];_st.visible=false;updDrop();return}
-        stTimer=setTimeout(function(){
-            if(!rS.loaded&&!rS.loading){RL.load().then(function(){doSS(v)});return}
-            doSS(v);
-        },300);
-    }
-    function doSS(v){var r=RL.search(v);r=r.filter(function(x){return!selectedStandards.some(function(s){return s.code===x.code})});_st.res=r;_st.visible=true;updDrop()}
-    function updDrop(){
-        var c=document.getElementById('stdResults');if(!c)return;
-        if(!_st.visible||!_st.q){c.classList.remove('visible');return}
-        c.classList.add('visible');var r=_st.res,q=_st.q;
-        if(!r.length){c.innerHTML='<div style="padding:16px;text-align:center;color:var(--gray-400);font-size:12px">검색 결과가 없습니다</div>';return}
-        var h='';for(var i=0;i<Math.min(r.length,20);i++){
-            h+='<div class="std-result-item'+(i===_st.ai?' active':'')+'" onclick="selStd('+i+')">';
-            h+='<div class="std-code">'+RL.hl(r[i].code,q)+'</div>';
-            h+='<div class="std-content">'+RL.hl(r[i].std,q)+'</div>';
-            h+='<div class="std-meta">'+[r[i].school,r[i].subject,r[i].grade+'학년',r[i].area,r[i].unit].filter(Boolean).join(' > ')+'</div></div>'}
-        c.innerHTML=h;
-    }
-    function selStd(i){var item=_st.res[i];if(!item||selectedStandards.some(function(s){return s.code===item.code}))return;
-        selectedStandards.push(item);renderTags();document.getElementById('stdSearchInput').value='';_st.q='';_st.visible=false;updDrop()}
-    function remStd(code){selectedStandards=selectedStandards.filter(function(s){return s.code!==code});renderTags()}
-    function renderTags(){document.getElementById('stdTags').innerHTML=selectedStandards.map(function(s){
-        return'<span class="std-tag">'+s.code+' '+(s.std||'').slice(0,25)+'... <span class="std-tag-remove" onclick="remStd(\''+s.code.replace(/'/g,"\\'")+'\')">✕</span></span>'}).join('')}
-    document.addEventListener('DOMContentLoaded',function(){
-        var inp=document.getElementById('stdSearchInput');
-        if(inp)inp.addEventListener('keydown',function(e){
-            if(e.key==='Escape'){_st.visible=false;updDrop()}
-            else if(e.key==='ArrowDown'){e.preventDefault();_st.ai=Math.min(_st.ai+1,_st.res.length-1);updDrop()}
-            else if(e.key==='ArrowUp'){e.preventDefault();_st.ai=Math.max(_st.ai-1,0);updDrop()}
-            else if(e.key==='Enter'){e.preventDefault();if(_st.ai>=0)selStd(_st.ai);else if(_st.res.length>0)selStd(0)}
-        });
+    // ESC로 미리보기 모달 닫기
+    document.addEventListener('keydown', function(e){
+        if(e.key==='Escape') closePreviewModal();
     });
     </script>
     <script src="../../../common-nav.js"></script>
