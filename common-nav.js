@@ -399,19 +399,22 @@
         var util = document.createElement('div');
         util.className = 'gnb-util';
 
-        var hamburger = document.createElement('button');
-        hamburger.className = 'gnb-hamburger';
-        if (!isPortal) hamburger.style.display = 'flex'; // 하위 페이지에서 항상 표시
-        hamburger.innerHTML = '<span></span>';
-        hamburger.setAttribute('aria-label', '메뉴');
-        util.appendChild(hamburger);
-
         var user = document.createElement('div');
         user.className = 'gnb-user';
         user.innerHTML = '<span>문 선생님</span><div class="gnb-user-avatar">문</div>';
         util.appendChild(user);
 
         header.appendChild(util);
+
+        // 햄버거 버튼: 하위 페이지에서 로고 왼쪽에 배치
+        var hamburger = document.createElement('button');
+        hamburger.className = 'gnb-hamburger';
+        if (!isPortal) {
+            hamburger.style.display = 'flex';
+            header.insertBefore(hamburger, header.firstChild);
+        }
+        hamburger.innerHTML = '<span></span>';
+        hamburger.setAttribute('aria-label', '전체 메뉴');
         wrapper.appendChild(header);
 
         // 서브메뉴 컨테이너 삽입
@@ -424,17 +427,22 @@
         var mobilePanel = document.createElement('div');
         mobilePanel.className = 'gnb-mobile-panel';
 
+        // inner wrapper for layer popup
+        var mobileInner = document.createElement('div');
+        mobileInner.className = 'gnb-mobile-inner';
+        mobileInner.addEventListener('click', function(e) { e.stopPropagation(); });
+
         var portalSection = document.createElement('div');
         portalSection.className = 'gnb-mobile-section';
         var portalLink = document.createElement('a');
         portalLink.className = 'gnb-mobile-sub-item' + (currentPageId === 'portal' ? ' active' : '');
         portalLink.href = getRelativePath('portal');
-        portalLink.textContent = '다채움 포털';
+        portalLink.textContent = '🏠 다채움 포털';
         portalLink.style.paddingLeft = '20px';
         portalLink.style.fontWeight = '600';
         portalLink.style.fontSize = '15px';
         portalSection.appendChild(portalLink);
-        mobilePanel.appendChild(portalSection);
+        mobileInner.appendChild(portalSection);
 
         MENU.forEach(function(group) {
             var section = document.createElement('div');
@@ -479,9 +487,10 @@
 
             section.appendChild(title);
             section.appendChild(subList);
-            mobilePanel.appendChild(section);
+            mobileInner.appendChild(section);
         });
 
+        mobilePanel.appendChild(mobileInner);
         wrapper.appendChild(mobilePanel);
 
         // === 오버레이 ===
@@ -490,19 +499,26 @@
         wrapper.appendChild(overlay);
 
         // === 햄버거 토글 ===
-        hamburger.addEventListener('click', function() {
-            var isOpen = mobilePanel.classList.contains('open');
-            mobilePanel.classList.toggle('open');
-            overlay.classList.toggle('open');
-            hamburger.classList.toggle('open');
-            document.body.style.overflow = isOpen ? '' : 'hidden';
-        });
-
-        overlay.addEventListener('click', function() {
+        function closeMenu() {
             mobilePanel.classList.remove('open');
-            overlay.classList.remove('open');
             hamburger.classList.remove('open');
             document.body.style.overflow = '';
+        }
+        hamburger.addEventListener('click', function() {
+            var isOpen = mobilePanel.classList.contains('open');
+            if (isOpen) { closeMenu(); } else {
+                mobilePanel.classList.add('open');
+                hamburger.classList.add('open');
+                document.body.style.overflow = 'hidden';
+            }
+        });
+        // 배경(오버레이) 클릭 시 닫기
+        mobilePanel.addEventListener('click', function(e) {
+            if (e.target === mobilePanel) closeMenu();
+        });
+        // ESC 키로 닫기
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape' && mobilePanel.classList.contains('open')) closeMenu();
         });
 
         // === 채움콘텐츠 SPA: 해시 변경 시 서브메뉴 업데이트 ===
