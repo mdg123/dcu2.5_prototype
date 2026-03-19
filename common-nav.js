@@ -319,10 +319,15 @@
                 var showArchiveTabs = isContentsArchive();
                 var showCbtArchiveTabs = isCbtArchive();
 
-                // 1차 메뉴 위치 표시 (네이버 스타일)
+                // 1차 메뉴 위치 표시 (클릭 시 전체 메뉴 팝업)
                 var groupLabel = document.createElement('div');
                 groupLabel.className = 'gnb-group-label';
                 groupLabel.textContent = activeGroup.label;
+                groupLabel.style.cursor = 'pointer';
+                groupLabel.title = '전체 메뉴 열기';
+                groupLabel.addEventListener('click', function() {
+                    hamburger.click();
+                });
                 mainNav.appendChild(groupLabel);
 
                 var groupSep = document.createElement('div');
@@ -416,13 +421,9 @@
 
         header.appendChild(util);
 
-        // 햄버거 버튼: 하위 페이지에서 로고 왼쪽에 배치
+        // 햄버거 버튼 (레이어 팝업용, 숨김 상태)
         var hamburger = document.createElement('button');
         hamburger.className = 'gnb-hamburger';
-        if (!isPortal) {
-            hamburger.style.display = 'flex';
-            header.insertBefore(hamburger, header.firstChild);
-        }
         hamburger.innerHTML = '<span></span>';
         hamburger.setAttribute('aria-label', '전체 메뉴');
         wrapper.appendChild(header);
