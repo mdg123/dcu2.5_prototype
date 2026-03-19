@@ -264,171 +264,129 @@
         var subNavContainer = document.createElement('div');
         subNavContainer.id = 'gnb-sub-container';
 
-        // 서브 메뉴 동적 채우기
-        function populateSubNav(groupId) {
-            subNavContainer.innerHTML = '';
+        // 포털인지 하위 페이지인지 판별
+        var isPortal = (!activeMain || activeMain === 'portal');
 
-            var group = null;
-            for (var gi = 0; gi < MENU.length; gi++) {
-                if (MENU[gi].id === groupId) { group = MENU[gi]; break; }
-            }
-            if (!group) return;
-
-            var isOwn = (groupId === activeMain);
-            var curActiveSub = getActiveSubMenu();
-            var showClassTabs = isOwn && isClassHomeTab();
-            var showArchiveTabs = isOwn && isContentsArchive();
-            var showCbtArchiveTabs = isOwn && isCbtArchive();
-
-            // 2차 메뉴 바
-            var subNav2 = document.createElement('div');
-            subNav2.className = 'gnb-sub-nav visible';
-            if (showClassTabs || showArchiveTabs || showCbtArchiveTabs) {
-                subNav2.style.borderBottom = '1px solid #e5e7eb';
-                subNav2.style.background = '#f9fafb';
-            }
-
-            group.sub.forEach(function(sub) {
-                var a = document.createElement('a');
-                a.className = 'gnb-sub-item';
-                if (isOwn) {
-                    if (showClassTabs && sub.id === 'myClass') a.className += ' active';
-                    else if (showArchiveTabs && sub.id === 'contentsArchive') a.className += ' active';
-                    else if (showCbtArchiveTabs && sub.id === 'cbtArchive') a.className += ' active';
-                    else if (!showClassTabs && !showArchiveTabs && !showCbtArchiveTabs && sub.id === curActiveSub) a.className += ' active';
-                }
-                a.textContent = sub.label;
-                if (sub.page) {
-                    var href = getRelativePath(sub.page);
-                    if (sub.hash) href += '#' + sub.hash;
-                    a.href = href;
-                } else {
-                    a.className += ' disabled';
-                    a.href = '#';
-                    a.onclick = function(e) { e.preventDefault(); showToast('준비 중입니다'); };
-                }
-                subNav2.appendChild(a);
-            });
-            subNavContainer.appendChild(subNav2);
-
-            // 3차 탭: 클래스 홈
-            if (showClassTabs) {
-                var tabNav = document.createElement('div');
-                tabNav.className = 'gnb-sub-nav visible';
-                CLASS_HOME_TABS.forEach(function(tab) {
-                    var a = document.createElement('a');
-                    a.className = 'gnb-sub-item' + (tab.id === getActiveClassTab() ? ' active' : '');
-                    a.textContent = tab.label;
-                    a.href = getRelativePath(tab.page);
-                    tabNav.appendChild(a);
-                });
-                subNavContainer.appendChild(tabNav);
-            }
-
-            // 3차 탭: 채움콘텐츠 나의 보관함
-            if (showArchiveTabs) {
-                var archiveNav = document.createElement('div');
-                archiveNav.className = 'gnb-sub-nav visible';
-                CONTENTS_ARCHIVE_TABS.forEach(function(tab) {
-                    var a = document.createElement('a');
-                    var tabActive = (tab.hash === currentHash) || (!currentHash && tab.hash === 'dashboard');
-                    a.className = 'gnb-sub-item' + (tabActive ? ' active' : '');
-                    a.textContent = tab.label;
-                    a.href = '#' + tab.hash;
-                    archiveNav.appendChild(a);
-                });
-                subNavContainer.appendChild(archiveNav);
-            }
-
-            // 3차 탭: 채움CBT 나의 보관함
-            if (showCbtArchiveTabs) {
-                var cbtArchiveNav = document.createElement('div');
-                cbtArchiveNav.className = 'gnb-sub-nav visible';
-                CBT_ARCHIVE_TABS.forEach(function(tab) {
-                    var tabActive = (tab.hash === currentHash) || (currentHash === 'teacher-result' && tab.hash === 'my-exams');
-                    var a = document.createElement('a');
-                    a.className = 'gnb-sub-item' + (tabActive ? ' active' : '');
-                    a.textContent = tab.label;
-                    a.href = '#' + tab.hash;
-                    cbtArchiveNav.appendChild(a);
-                });
-                subNavContainer.appendChild(cbtArchiveNav);
-            }
-
-            // 바디 패딩 업데이트
-            updateBodyPadding();
-        }
-
+        // 바디 패딩 업데이트
         function updateBodyPadding() {
             document.body.classList.remove('gnb-has-header', 'gnb-has-sub', 'gnb-has-sub-multi');
             var count = subNavContainer.querySelectorAll('.gnb-sub-nav.visible').length;
-            if (count >= 2) {
+            if (count >= 1) {
                 var totalHeight = 56 + 44 * count;
                 document.body.style.setProperty('--gnb-total-height', totalHeight + 'px');
-                document.body.classList.add('gnb-has-sub-multi');
-            } else if (count === 1) {
                 document.body.classList.add('gnb-has-sub');
             } else {
                 document.body.classList.add('gnb-has-header');
             }
         }
 
-        // 메인 메뉴 아이템 생성
-        MENU.forEach(function(group) {
-            var item = document.createElement('div');
-            item.className = 'gnb-main-item' + (activeMain === group.id ? ' active' : '');
+        if (isPortal) {
+            // ═══ 포털: 1차 메뉴를 헤더에 표시 ═══
+            MENU.forEach(function(group) {
+                var item = document.createElement('div');
+                item.className = 'gnb-main-item';
 
-            var label = document.createElement('span');
-            label.textContent = group.label;
-            item.appendChild(label);
+                var label = document.createElement('span');
+                label.textContent = group.label;
+                item.appendChild(label);
 
-            // 드롭다운 (호버 시 빠른 접근용)
-            var dropdown = document.createElement('div');
-            dropdown.className = 'gnb-dropdown';
+                item.addEventListener('click', function() {
+                    var firstSub = group.sub[0];
+                    if (firstSub && firstSub.page) {
+                        var href = getRelativePath(firstSub.page);
+                        if (firstSub.hash) href += '#' + firstSub.hash;
+                        window.location.href = href;
+                    }
+                });
 
-            group.sub.forEach(function(sub) {
-                var a = document.createElement('a');
-                a.className = 'gnb-dropdown-item' + (activeSub === sub.id ? ' active' : '');
-                a.textContent = sub.label;
-                if (sub.page) {
-                    var href = getRelativePath(sub.page);
-                    if (sub.hash) href += '#' + sub.hash;
-                    a.href = href;
-                } else {
-                    a.className += ' disabled';
-                    a.href = '#';
-                    a.onclick = function(e) { e.preventDefault(); showToast('준비 중입니다'); };
-                }
-                dropdown.appendChild(a);
+                mainNav.appendChild(item);
             });
+        } else {
+            // ═══ 하위 페이지: 2차 메뉴를 헤더(1차 자리)에 표시 ═══
+            var activeGroup = null;
+            for (var gi = 0; gi < MENU.length; gi++) {
+                if (MENU[gi].id === activeMain) { activeGroup = MENU[gi]; break; }
+            }
 
-            item.appendChild(dropdown);
+            if (activeGroup) {
+                var curActiveSub = getActiveSubMenu();
+                var showClassTabs = isClassHomeTab();
+                var showArchiveTabs = isContentsArchive();
+                var showCbtArchiveTabs = isCbtArchive();
 
-            // 메인 아이템 클릭 → 2차 서브메뉴의 첫 번째 페이지로 이동
-            item.addEventListener('click', function(e) {
-                if (e.target.closest('.gnb-dropdown')) return;
+                // 2차 메뉴를 헤더 nav에 삽입 (1차 메뉴 자리)
+                activeGroup.sub.forEach(function(sub) {
+                    var item = document.createElement('div');
+                    item.className = 'gnb-main-item';
+                    // 활성 상태 판별
+                    if (showClassTabs && sub.id === 'myClass') item.className += ' active';
+                    else if (showArchiveTabs && sub.id === 'contentsArchive') item.className += ' active';
+                    else if (showCbtArchiveTabs && sub.id === 'cbtArchive') item.className += ' active';
+                    else if (!showClassTabs && !showArchiveTabs && !showCbtArchiveTabs && sub.id === curActiveSub) item.className += ' active';
 
-                // 이미 해당 그룹에 있으면 서브메뉴만 표시
-                if (group.id === activeMain) {
-                    populateSubNav(group.id);
-                    mainNav.querySelectorAll('.gnb-main-item').forEach(function(el) {
-                        el.classList.remove('active');
+                    var label = document.createElement('span');
+                    label.textContent = sub.label;
+                    item.appendChild(label);
+
+                    if (sub.page) {
+                        item.addEventListener('click', (function(s) {
+                            return function() {
+                                var href = getRelativePath(s.page);
+                                if (s.hash) href += '#' + s.hash;
+                                window.location.href = href;
+                            };
+                        })(sub));
+                    } else {
+                        item.classList.add('disabled');
+                        item.addEventListener('click', function(e) { e.preventDefault(); showToast('준비 중입니다'); });
+                    }
+
+                    mainNav.appendChild(item);
+                });
+
+                // 3차 메뉴를 서브 컨테이너에 삽입 (2차 자리)
+                if (showClassTabs) {
+                    var tabNav = document.createElement('div');
+                    tabNav.className = 'gnb-sub-nav visible';
+                    CLASS_HOME_TABS.forEach(function(tab) {
+                        var a = document.createElement('a');
+                        a.className = 'gnb-sub-item' + (tab.id === getActiveClassTab() ? ' active' : '');
+                        a.textContent = tab.label;
+                        a.href = getRelativePath(tab.page);
+                        tabNav.appendChild(a);
                     });
-                    item.classList.add('active');
-                    return;
+                    subNavContainer.appendChild(tabNav);
                 }
 
-                // 다른 그룹이면 첫 번째 2차 메뉴 페이지로 이동
-                var firstSub = group.sub[0];
-                if (firstSub && firstSub.page) {
-                    var href = getRelativePath(firstSub.page);
-                    if (firstSub.hash) href += '#' + firstSub.hash;
-                    window.location.href = href;
+                if (showArchiveTabs) {
+                    var archiveNav = document.createElement('div');
+                    archiveNav.className = 'gnb-sub-nav visible';
+                    CONTENTS_ARCHIVE_TABS.forEach(function(tab) {
+                        var a = document.createElement('a');
+                        var tabActive = (tab.hash === currentHash) || (!currentHash && tab.hash === 'dashboard');
+                        a.className = 'gnb-sub-item' + (tabActive ? ' active' : '');
+                        a.textContent = tab.label;
+                        a.href = '#' + tab.hash;
+                        archiveNav.appendChild(a);
+                    });
+                    subNavContainer.appendChild(archiveNav);
                 }
-            });
 
-            mainNav.appendChild(item);
-        });
+                if (showCbtArchiveTabs) {
+                    var cbtArchiveNav = document.createElement('div');
+                    cbtArchiveNav.className = 'gnb-sub-nav visible';
+                    CBT_ARCHIVE_TABS.forEach(function(tab) {
+                        var tabActive = (tab.hash === currentHash) || (currentHash === 'teacher-result' && tab.hash === 'my-exams');
+                        var a = document.createElement('a');
+                        a.className = 'gnb-sub-item' + (tabActive ? ' active' : '');
+                        a.textContent = tab.label;
+                        a.href = '#' + tab.hash;
+                        cbtArchiveNav.appendChild(a);
+                    });
+                    subNavContainer.appendChild(cbtArchiveNav);
+                }
+            }
+        }
 
         header.appendChild(mainNav);
 
@@ -438,6 +396,7 @@
 
         var hamburger = document.createElement('button');
         hamburger.className = 'gnb-hamburger';
+        if (!isPortal) hamburger.style.display = 'flex'; // 하위 페이지에서 항상 표시
         hamburger.innerHTML = '<span></span>';
         hamburger.setAttribute('aria-label', '메뉴');
         util.appendChild(hamburger);
@@ -453,28 +412,8 @@
         // 서브메뉴 컨테이너 삽입
         wrapper.appendChild(subNavContainer);
 
-        // 서브메뉴 padding-left를 1차 메뉴 첫 아이템 위치에 맞춤
-        function alignSubNav() {
-            var firstItem = mainNav.querySelector('.gnb-main-item');
-            if (!firstItem) return;
-            var left = firstItem.getBoundingClientRect().left;
-            var subs = subNavContainer.querySelectorAll('.gnb-sub-nav');
-            for (var i = 0; i < subs.length; i++) {
-                subs[i].style.paddingLeft = left + 'px';
-            }
-        }
-
-        // 현재 페이지의 메뉴 그룹으로 초기 서브메뉴 표시
-        if (activeMain && activeMain !== 'portal') {
-            populateSubNav(activeMain);
-        } else {
-            // 포털/명예의전당 등 서브메뉴 없는 페이지도 바디 패딩 적용
-            updateBodyPadding();
-        }
-
-        // 서브메뉴 정렬 (렌더링 후)
-        requestAnimationFrame(alignSubNav);
-        window.addEventListener('resize', alignSubNav);
+        // 바디 패딩 업데이트
+        updateBodyPadding();
 
         // === 모바일 메뉴 패널 ===
         var mobilePanel = document.createElement('div');
@@ -565,13 +504,35 @@
         if (currentPageId === 'contentsBrowse') {
             window.addEventListener('hashchange', function() {
                 currentHash = window.location.hash.replace('#', '');
-                populateSubNav('chaeumContents');
-                // 메인 메뉴 active 상태도 복원
-                mainNav.querySelectorAll('.gnb-main-item').forEach(function(el) {
-                    el.classList.remove('active');
-                });
-                var contentsItem = mainNav.querySelectorAll('.gnb-main-item')[1];
-                if (contentsItem) contentsItem.classList.add('active');
+                // 헤더(2차) active 갱신
+                var newActiveSub = getActiveSubMenu();
+                var items = mainNav.querySelectorAll('.gnb-main-item');
+                var activeGroup = null;
+                for (var i = 0; i < MENU.length; i++) { if (MENU[i].id === 'chaeumContents') { activeGroup = MENU[i]; break; } }
+                if (activeGroup) {
+                    items.forEach(function(el, idx) {
+                        el.classList.remove('active');
+                        if (activeGroup.sub[idx] && activeGroup.sub[idx].id === newActiveSub) el.classList.add('active');
+                        // 나의 보관함 활성 (archive 해시)
+                        if (activeGroup.sub[idx] && activeGroup.sub[idx].id === 'contentsArchive' && ARCHIVE_HASHES.indexOf(currentHash) !== -1) el.classList.add('active');
+                    });
+                }
+                // 3차 메뉴 갱신
+                subNavContainer.innerHTML = '';
+                if (ARCHIVE_HASHES.indexOf(currentHash) !== -1) {
+                    var archiveNav = document.createElement('div');
+                    archiveNav.className = 'gnb-sub-nav visible';
+                    CONTENTS_ARCHIVE_TABS.forEach(function(tab) {
+                        var a = document.createElement('a');
+                        var tabActive = (tab.hash === currentHash) || (!currentHash && tab.hash === 'dashboard');
+                        a.className = 'gnb-sub-item' + (tabActive ? ' active' : '');
+                        a.textContent = tab.label;
+                        a.href = '#' + tab.hash;
+                        archiveNav.appendChild(a);
+                    });
+                    subNavContainer.appendChild(archiveNav);
+                }
+                updateBodyPadding();
             });
         }
 
@@ -579,12 +540,32 @@
         if (currentPageId === 'cbtService') {
             window.addEventListener('hashchange', function() {
                 currentHash = window.location.hash.replace('#', '');
-                populateSubNav('chaeumCBT');
-                mainNav.querySelectorAll('.gnb-main-item').forEach(function(el) {
-                    el.classList.remove('active');
-                });
-                var cbtItem = mainNav.querySelectorAll('.gnb-main-item')[5];
-                if (cbtItem) cbtItem.classList.add('active');
+                var newActiveSub = getActiveSubMenu();
+                var items = mainNav.querySelectorAll('.gnb-main-item');
+                var activeGroup = null;
+                for (var i = 0; i < MENU.length; i++) { if (MENU[i].id === 'chaeumCBT') { activeGroup = MENU[i]; break; } }
+                if (activeGroup) {
+                    items.forEach(function(el, idx) {
+                        el.classList.remove('active');
+                        if (activeGroup.sub[idx] && activeGroup.sub[idx].id === newActiveSub) el.classList.add('active');
+                        if (activeGroup.sub[idx] && activeGroup.sub[idx].id === 'cbtArchive' && CBT_ARCHIVE_HASHES.indexOf(currentHash) !== -1) el.classList.add('active');
+                    });
+                }
+                subNavContainer.innerHTML = '';
+                if (CBT_ARCHIVE_HASHES.indexOf(currentHash) !== -1) {
+                    var cbtArchiveNav = document.createElement('div');
+                    cbtArchiveNav.className = 'gnb-sub-nav visible';
+                    CBT_ARCHIVE_TABS.forEach(function(tab) {
+                        var tabActive = (tab.hash === currentHash) || (currentHash === 'teacher-result' && tab.hash === 'my-exams');
+                        var a = document.createElement('a');
+                        a.className = 'gnb-sub-item' + (tabActive ? ' active' : '');
+                        a.textContent = tab.label;
+                        a.href = '#' + tab.hash;
+                        cbtArchiveNav.appendChild(a);
+                    });
+                    subNavContainer.appendChild(cbtArchiveNav);
+                }
+                updateBodyPadding();
             });
         }
 
