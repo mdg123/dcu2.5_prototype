@@ -319,6 +319,16 @@
                 var showArchiveTabs = isContentsArchive();
                 var showCbtArchiveTabs = isCbtArchive();
 
+                // 1차 메뉴 위치 표시 (네이버 스타일)
+                var groupLabel = document.createElement('div');
+                groupLabel.className = 'gnb-group-label';
+                groupLabel.textContent = activeGroup.label;
+                mainNav.appendChild(groupLabel);
+
+                var groupSep = document.createElement('div');
+                groupSep.className = 'gnb-group-sep';
+                mainNav.appendChild(groupSep);
+
                 // 2차 메뉴를 헤더 nav에 삽입 (1차 메뉴 자리)
                 activeGroup.sub.forEach(function(sub) {
                     var item = document.createElement('div');
