@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>감정체크 - 스스로채움</title>
+<link href="https://fonts.googleapis.com/css2?family=Pretendard:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../common-nav.css">
+<style>
+:root {
+  --primary:#6366F1; --primary-light:#EEF2FF; --primary-dark:#4F46E5;
+  --happy:#10B981; --good:#34D399; --okay:#FBBF24; --bad:#F97316; --sad:#EF4444;
+  --gray-50:#F9FAFB; --gray-100:#F3F4F6; --gray-200:#E5E7EB; --gray-300:#D1D5DB;
+  --gray-400:#9CA3AF; --gray-500:#6B7280; --gray-600:#4B5563; --gray-700:#374151;
+  --gray-800:#1F2937; --gray-900:#111827;
+  --radius:12px; --radius-lg:16px;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Pretendard',sans-serif;background:var(--gray-50);color:var(--gray-800);line-height:1.6}
+
+.page-wrap{max-width:900px;margin:0 auto;padding:24px}
+.page-title{font-size:22px;font-weight:700;margin-bottom:20px;display:flex;align-items:center;gap:10px}
+
+/* 탭 */
+.tabs{display:flex;gap:4px;background:#fff;border-radius:var(--radius);padding:4px;border:1px solid var(--gray-200);margin-bottom:24px}
+.tab{flex:1;padding:10px;text-align:center;font-size:14px;font-weight:600;border-radius:8px;cursor:pointer;color:var(--gray-500);transition:all .15s}
+.tab.active{background:var(--primary);color:#fff}
+.tab:hover:not(.active){background:var(--gray-100)}
+.tab-panel{display:none}
+.tab-panel.active{display:block}
+
+/* 감정 선택 */
+.checkin-card{background:#fff;border-radius:var(--radius-lg);padding:28px;border:1px solid var(--gray-200);margin-bottom:20px}
+.checkin-question{font-size:16px;font-weight:600;margin-bottom:20px;padding:14px 18px;background:var(--primary-light);border-radius:var(--radius);color:var(--primary-dark)}
+.emotion-grid{display:flex;justify-content:center;gap:16px;margin-bottom:24px}
+.emotion-btn{display:flex;flex-direction:column;align-items:center;gap:8px;padding:16px 20px;border:2px solid var(--gray-200);border-radius:var(--radius-lg);cursor:pointer;transition:all .2s;background:#fff;min-width:100px}
+.emotion-btn:hover{border-color:var(--primary);transform:translateY(-2px);box-shadow:0 4px 12px rgba(99,102,241,.15)}
+.emotion-btn.selected{border-color:var(--primary);background:var(--primary-light)}
+.emotion-icon{font-size:36px}
+.emotion-text{font-size:13px;font-weight:600;color:var(--gray-700)}
+
+/* 세부감정 */
+.detail-emotions{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:20px}
+.detail-chip{padding:8px 16px;border:1px solid var(--gray-200);border-radius:20px;font-size:13px;cursor:pointer;transition:all .15s;background:#fff}
+.detail-chip:hover{border-color:var(--primary)}
+.detail-chip.selected{background:var(--primary);color:#fff;border-color:var(--primary)}
+
+.comment-area{width:100%;padding:12px;border:1px solid var(--gray-200);border-radius:var(--radius);font-size:14px;min-height:80px;resize:vertical;font-family:inherit;outline:none}
+.comment-area:focus{border-color:var(--primary);box-shadow:0 0 0 3px rgba(99,102,241,.1)}
+
+.submit-btn{display:block;width:100%;padding:14px;background:var(--primary);color:#fff;border:none;border-radius:var(--radius);font-size:15px;font-weight:700;cursor:pointer;transition:background .15s;font-family:inherit;margin-top:16px}
+.submit-btn:hover{background:var(--primary-dark)}
+.submit-btn:disabled{background:var(--gray-300);cursor:not-allowed}
+
+/* 대시보드 */
+.dash-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:20px}
+.stat-card{background:#fff;border:1px solid var(--gray-200);border-radius:var(--radius);padding:16px;text-align:center}
+.stat-value{font-size:24px;font-weight:800;margin-bottom:4px}
+.stat-label{font-size:12px;color:var(--gray-500)}
+.stat-card.happy .stat-value{color:var(--happy)}
+.stat-card.streak .stat-value{color:var(--primary)}
+.stat-card.positive .stat-value{color:#3B82F6}
+
+.chart-card{background:#fff;border:1px solid var(--gray-200);border-radius:var(--radius-lg);padding:20px;margin-bottom:20px}
+.chart-title{font-size:14px;font-weight:700;margin-bottom:14px;display:flex;align-items:center;gap:6px}
+
+/* 주간 차트 */
+.week-chart{display:flex;align-items:flex-end;gap:8px;height:120px;padding:0 10px}
+.week-bar{flex:1;display:flex;flex-direction:column;align-items:center;gap:4px}
+.week-bar-fill{width:100%;border-radius:6px 6px 0 0;transition:height .3s;min-height:4px}
+.week-bar-label{font-size:11px;color:var(--gray-500)}
+.week-bar-value{font-size:10px;font-weight:600}
+
+/* 감정 클러스터 */
+.cluster-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.cluster-item{padding:12px;border:1px solid var(--gray-200);border-radius:var(--radius);text-align:center;transition:all .15s;cursor:default}
+.cluster-item:hover{box-shadow:0 2px 8px rgba(0,0,0,.06)}
+.cluster-icon{font-size:24px;margin-bottom:4px}
+.cluster-name{font-size:12px;font-weight:600;margin-bottom:2px}
+.cluster-pct{font-size:11px;color:var(--gray-400)}
+.cluster-desc{font-size:10px;color:var(--gray-400);margin-top:2px}
+
+/* 추천활동 */
+.activity-list{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
+.activity-item{display:flex;align-items:center;gap:10px;padding:12px;border:1px solid var(--gray-200);border-radius:var(--radius);cursor:pointer;transition:all .15s}
+.activity-item:hover{background:var(--primary-light);border-color:var(--primary)}
+.activity-icon{font-size:24px}
+.activity-info .name{font-size:13px;font-weight:600}
+.activity-info .desc{font-size:11px;color:var(--gray-400)}
+
+/* 인기감정 */
+.top-emotions{display:flex;gap:12px}
+.top-emotion{flex:1;display:flex;align-items:center;gap:10px;padding:12px;background:var(--gray-50);border-radius:var(--radius)}
+.top-rank{font-size:16px;font-weight:800;color:var(--primary)}
+.top-emoji{font-size:24px}
+.top-info .name{font-size:13px;font-weight:600}
+.top-info .count{font-size:11px;color:var(--gray-400)}
+
+/* 체크인 완료 */
+.checkin-done{text-align:center;padding:40px 20px}
+.checkin-done-icon{font-size:64px;margin-bottom:12px}
+.checkin-done-title{font-size:18px;font-weight:700;margin-bottom:6px}
+.checkin-done-sub{font-size:14px;color:var(--gray-500)}
+</style>
+</head>
+<body data-gnb-page="emotionCheck" data-gnb-base="../../">
+
+<div class="page-wrap">
+  <div class="page-title">😊 감정체크</div>
+
+  <div class="tabs">
+    <div class="tab active" onclick="switchTab('checkin')">감정 체크인</div>
+    <div class="tab" onclick="switchTab('dashboard')">나의 감정 대시보드</div>
+  </div>
+
+  <!-- ============ 탭1: 감정 체크인 ============ -->
+  <div class="tab-panel active" id="panel-checkin">
+    <div class="checkin-card" id="checkinForm">
+      <div class="checkin-question">💬 오늘 하루는 어땠나요?</div>
+
+      <div class="emotion-grid">
+        <div class="emotion-btn" onclick="selectEmotion(this,5)" data-val="5">
+          <span class="emotion-icon">🤩</span>
+          <span class="emotion-text">아주 좋아요</span>
+        </div>
+        <div class="emotion-btn" onclick="selectEmotion(this,4)" data-val="4">
+          <span class="emotion-icon">😊</span>
+          <span class="emotion-text">좋아요</span>
+        </div>
+        <div class="emotion-btn" onclick="selectEmotion(this,3)" data-val="3">
+          <span class="emotion-icon">😐</span>
+          <span class="emotion-text">괜찮아요</span>
+        </div>
+        <div class="emotion-btn" onclick="selectEmotion(this,2)" data-val="2">
+          <span class="emotion-icon">😕</span>
+          <span class="emotion-text">별로예요</span>
+        </div>
+        <div class="emotion-btn" onclick="selectEmotion(this,1)" data-val="1">
+          <span class="emotion-icon">😢</span>
+          <span class="emotion-text">안 좋아요</span>
+        </div>
+      </div>
+
+      <div id="detailSection" style="display:none">
+        <p style="font-size:13px;font-weight:600;margin-bottom:8px;color:var(--gray-700)">더 구체적으로 표현해볼까요?</p>
+        <div class="detail-emotions" id="detailChips"></div>
+
+        <p style="font-size:13px;font-weight:600;margin-bottom:8px;margin-top:16px;color:var(--gray-700)">하고 싶은 말이 있나요? (선택)</p>
+        <textarea class="comment-area" placeholder="자유롭게 적어보세요..." id="commentInput"></textarea>
+
+        <button class="submit-btn" onclick="submitCheckin()">체크인 완료 ✓</button>
+      </div>
+    </div>
+
+    <!-- 체크인 완료 상태 -->
+    <div id="checkinDone" style="display:none">
+      <div class="checkin-card">
+        <div class="checkin-done">
+          <div class="checkin-done-icon">🎉</div>
+          <div class="checkin-done-title">오늘의 감정 체크인 완료!</div>
+          <div class="checkin-done-sub">꾸준한 체크인이 나를 더 잘 이해하는 첫걸음이에요</div>
+          <button class="submit-btn" style="max-width:200px;margin:20px auto 0" onclick="switchTab('dashboard')">대시보드 보기 →</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ 탭2: 감정 대시보드 ============ -->
+  <div class="tab-panel" id="panel-dashboard">
+
+    <!-- 통계 카드 -->
+    <div class="dash-grid">
+      <div class="stat-card happy">
+        <div class="stat-value">3.8</div>
+        <div class="stat-label">이번 주 평균 감정</div>
+      </div>
+      <div class="stat-card positive">
+        <div class="stat-value">72%</div>
+        <div class="stat-label">긍정 감정 비율</div>
+      </div>
+      <div class="stat-card streak">
+        <div class="stat-value">5일</div>
+        <div class="stat-label">연속 체크인</div>
+      </div>
+    </div>
+
+    <!-- 주간 감정 추세 -->
+    <div class="chart-card">
+      <div class="chart-title">📈 이번 주 감정 추세</div>
+      <div class="week-chart">
+        <div class="week-bar"><div class="week-bar-value">😊</div><div class="week-bar-fill" style="height:80%;background:var(--good)"></div><div class="week-bar-label">월</div></div>
+        <div class="week-bar"><div class="week-bar-value">🤩</div><div class="week-bar-fill" style="height:100%;background:var(--happy)"></div><div class="week-bar-label">화</div></div>
+        <div class="week-bar"><div class="week-bar-value">😐</div><div class="week-bar-fill" style="height:60%;background:var(--okay)"></div><div class="week-bar-label">수</div></div>
+        <div class="week-bar"><div class="week-bar-value">😊</div><div class="week-bar-fill" style="height:80%;background:var(--good)"></div><div class="week-bar-label">목</div></div>
+        <div class="week-bar"><div class="week-bar-value">😕</div><div class="week-bar-fill" style="height:40%;background:var(--bad)"></div><div class="week-bar-label">금</div></div>
+        <div class="week-bar" style="opacity:.4"><div class="week-bar-value">-</div><div class="week-bar-fill" style="height:4%;background:var(--gray-300)"></div><div class="week-bar-label">토</div></div>
+        <div class="week-bar" style="opacity:.4"><div class="week-bar-value">-</div><div class="week-bar-fill" style="height:4%;background:var(--gray-300)"></div><div class="week-bar-label">일</div></div>
+      </div>
+    </div>
+
+    <!-- 인기 감정 TOP 3 -->
+    <div class="chart-card">
+      <div class="chart-title">🏆 이번 주 인기 감정 TOP 3</div>
+      <div class="top-emotions">
+        <div class="top-emotion"><span class="top-rank">1</span><span class="top-emoji">😊</span><div class="top-info"><div class="name">행복해요</div><div class="count">3회</div></div></div>
+        <div class="top-emotion"><span class="top-rank">2</span><span class="top-emoji">🤩</span><div class="top-info"><div class="name">신나요</div><div class="count">2회</div></div></div>
+        <div class="top-emotion"><span class="top-rank">3</span><span class="top-emoji">😌</span><div class="top-info"><div class="name">평온해요</div><div class="count">1회</div></div></div>
+      </div>
+    </div>
+
+    <!-- 감정 클러스터 -->
+    <div class="chart-card">
+      <div class="chart-title">🌈 나의 감정 클러스터</div>
+      <div class="cluster-grid">
+        <div class="cluster-item" style="border-left:3px solid #FBBF24"><div class="cluster-icon">☀️</div><div class="cluster-name">햇살</div><div class="cluster-pct">35%</div><div class="cluster-desc">기쁨, 행복, 흥분</div></div>
+        <div class="cluster-item" style="border-left:3px solid #3B82F6"><div class="cluster-icon">🌊</div><div class="cluster-name">파도</div><div class="cluster-pct">20%</div><div class="cluster-desc">놀람, 궁금, 기대</div></div>
+        <div class="cluster-item" style="border-left:3px solid #6B7280"><div class="cluster-icon">🏔️</div><div class="cluster-name">바위</div><div class="cluster-pct">18%</div><div class="cluster-desc">차분, 자신감, 평온</div></div>
+        <div class="cluster-item" style="border-left:3px solid #8B5CF6"><div class="cluster-icon">🌧️</div><div class="cluster-name">비</div><div class="cluster-pct">15%</div><div class="cluster-desc">그리움, 슬픔, 회상</div></div>
+        <div class="cluster-item" style="border-left:3px solid #EF4444"><div class="cluster-icon">🔥</div><div class="cluster-name">불꽃</div><div class="cluster-pct">8%</div><div class="cluster-desc">화남, 열정, 동기</div></div>
+        <div class="cluster-item" style="border-left:3px solid #14B8A6"><div class="cluster-icon">🌿</div><div class="cluster-name">풀잎</div><div class="cluster-pct">4%</div><div class="cluster-desc">안도, 감사, 여유</div></div>
+      </div>
+    </div>
+
+    <!-- 추천 활동 -->
+    <div class="chart-card">
+      <div class="chart-title">💡 오늘의 추천 활동</div>
+      <div class="activity-list">
+        <div class="activity-item"><span class="activity-icon">🧘</span><div class="activity-info"><div class="name">명상하기</div><div class="desc">3분 호흡 명상</div></div></div>
+        <div class="activity-item"><span class="activity-icon">💃</span><div class="activity-info"><div class="name">춤추기</div><div class="desc">좋아하는 노래에 맞춰</div></div></div>
+        <div class="activity-item"><span class="activity-icon">🎵</span><div class="activity-info"><div class="name">음악 듣기</div><div class="desc">기분 전환 플레이리스트</div></div></div>
+        <div class="activity-item"><span class="activity-icon">📝</span><div class="activity-info"><div class="name">일기 쓰기</div><div class="desc">오늘 하루 돌아보기</div></div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+var selectedVal = 0;
+var detailWords = {
+  5: ['신나요','행복해요','뿌듯해요','감사해요','설레요','자신감 넘쳐요'],
+  4: ['편안해요','즐거워요','기대돼요','만족해요','웃음이 나요'],
+  3: ['그냥 그래요','평범해요','무난해요','생각이 많아요'],
+  2: ['지루해요','짜증나요','걱정돼요','피곤해요','답답해요'],
+  1: ['슬퍼요','외로워요','무서워요','화나요','힘들어요','우울해요']
+};
+
+function selectEmotion(el, val) {
+  selectedVal = val;
+  document.querySelectorAll('.emotion-btn').forEach(function(b){b.classList.remove('selected')});
+  el.classList.add('selected');
+  var section = document.getElementById('detailSection');
+  section.style.display = 'block';
+  var chips = document.getElementById('detailChips');
+  chips.innerHTML = detailWords[val].map(function(w){
+    return '<span class="detail-chip" onclick="this.classList.toggle(\'selected\')">' + w + '</span>';
+  }).join('');
+}
+
+function submitCheckin() {
+  document.getElementById('checkinForm').style.display = 'none';
+  document.getElementById('checkinDone').style.display = 'block';
+}
+
+function switchTab(id) {
+  document.querySelectorAll('.tab').forEach(function(t,i){
+    t.classList.toggle('active', (id==='checkin'&&i===0)||(id==='dashboard'&&i===1));
+  });
+  document.querySelectorAll('.tab-panel').forEach(function(p){p.classList.remove('active')});
+  document.getElementById('panel-'+id).classList.add('active');
+}
+</script>
+<script src="../../common-nav.js"></script>
+</body>
+</html>

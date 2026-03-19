@@ -33,11 +33,13 @@
         aiLearning:       '04_스스로채움/AI 맞춤 학습/learning_map (4).html',
         todayLearning:    '04_스스로채움/오늘의 학습/today-learning-prototype (3).html',
         wrongNote:        '04_스스로채움/오답노트/index.html',
+        emotionCheck:     '04_스스로채움/감정체크/emotion-check.html',
         // 우리반 성장기록
         growthDashboard:  '05_우리반 성장기록/class-growth-dashboard.html',
         growthReport:     '05_우리반 성장기록/student-growth-report (1).html',
         portfolio:        '05_우리반 성장기록/학생 포트폴리오 예시안/student-portfolio (1).html',
         portfolioDetail:  '05_우리반 성장기록/학생 포트폴리오 예시안/Portfolid.html',
+        emotionMonitoring:'05_우리반 성장기록/emotion-monitoring.html',
         // 채움CBT
         cbtService:       '06_채움CBT/채움CBT_전체서비스_프로토타입_v2 (3).html',
         cbtPlayer:        '06_채움CBT/채움CBT_평가지플레이어_프로토타입.html',
@@ -73,7 +75,8 @@
             sub: [
                 { id: 'todayLearning', label: '오늘의 학습',    page: 'todayLearning' },
                 { id: 'aiLearning',    label: 'AI 맞춤 학습',   page: 'aiLearning' },
-                { id: 'wrongNote',     label: '오답노트',       page: 'wrongNote' }
+                { id: 'wrongNote',     label: '오답노트',       page: 'wrongNote' },
+                { id: 'emotionCheck',  label: '감정체크',       page: 'emotionCheck' }
             ]
         },
         {
@@ -167,7 +170,7 @@
                 if (group.sub[j].id === currentPageId) return group.id;
             }
         }
-        if (currentPageId === 'portfolioDetail') return 'growthRecord';
+        if (currentPageId === 'portfolioDetail' || currentPageId === 'emotionMonitoring') return 'growthRecord';
         return '';
     }
 
