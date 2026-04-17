@@ -1,0 +1,311 @@
+/**
+ * 초등학교 개별 문항 100건 이상 시딩 스크립트
+ * 국어, 수학, 사회, 과학, 영어 - 각 과목별 25~30문항
+ * 실행: node seed-quiz-items.js
+ */
+const db = require('./db/index');
+
+// teacher1 의 user id 조회
+const teacher = db.prepare("SELECT id FROM users WHERE username = 'teacher1'").get();
+if (!teacher) { console.error('teacher1 사용자를 찾을 수 없습니다.'); process.exit(1); }
+const creatorId = teacher.id;
+
+const insertContent = db.prepare(`
+  INSERT INTO contents (creator_id, title, description, content_type, subject, grade, tags, is_public, status, achievement_code, school_level, difficulty, estimated_minutes, created_at)
+  VALUES (?, ?, ?, 'quiz', ?, ?, ?, 1, 'approved', ?, '초등학교', ?, ?, DATETIME('now'))
+`);
+
+const insertQuestion = db.prepare(`
+  INSERT INTO content_questions (content_id, question_number, question_text, question_type, options, answer, explanation)
+  VALUES (?, 1, ?, 'multiple_choice', ?, ?, ?)
+`);
+
+// ============ 문항 데이터 ============
+const quizData = [
+  // ============ 국어 ============
+  { subject: '국어', grade: '3학년', title: '맞춤법 - 되/돼 구분', achv: '[4국01-01]', tags: ['맞춤법','되돼'], diff: 2, min: 1,
+    q: '"숙제를 다 ___." 빈칸에 알맞은 말은?', opts: ['했되','했돼','했대','했데'], ans: 1, exp: '"했돼"가 올바른 표현입니다. "되어"를 줄인 말입니다.' },
+  { subject: '국어', grade: '3학년', title: '맞춤법 - 안/않 구분', achv: '[4국01-02]', tags: ['맞춤법','부정표현'], diff: 2, min: 1,
+    q: '"나는 학교에 ___ 갔다." 빈칸에 알맞은 말은?', opts: ['안','않','앉','않은'], ans: 0, exp: '"안"은 "아니"의 줄임말로 부정 부사입니다.' },
+  { subject: '국어', grade: '4학년', title: '받침 규칙 - 겹받침', achv: '[4국04-01]', tags: ['받침','겹받침'], diff: 3, min: 1,
+    q: '"닭"의 받침 소리로 알맞은 것은?', opts: ['ㄱ','ㄹ','ㄺ','ㄷ'], ans: 0, exp: '겹받침 ㄺ은 뒤에 모음이 오지 않으면 ㄱ으로 소리 납니다.' },
+  { subject: '국어', grade: '3학년', title: '높임말 사용하기', achv: '[4국01-03]', tags: ['높임말','존댓말'], diff: 1, min: 1,
+    q: '윗사람에게 바른 높임말은?', opts: ['밥 먹어','진지 드세요','밥 먹으세요','진지 먹어요'], ans: 1, exp: '"진지 드세요"가 가장 바른 높임말 표현입니다.' },
+  { subject: '국어', grade: '4학년', title: '문장 성분 - 주어 찾기', achv: '[4국04-02]', tags: ['문장성분','주어'], diff: 2, min: 1,
+    q: '"예쁜 꽃이 활짝 피었다."에서 주어는?', opts: ['예쁜','꽃이','활짝','피었다'], ans: 1, exp: '주어는 "누가/무엇이"에 해당하는 말로, "꽃이"가 주어입니다.' },
+  { subject: '국어', grade: '5학년', title: '관용 표현 이해하기', achv: '[6국04-01]', tags: ['관용표현','속담'], diff: 3, min: 1,
+    q: '"발이 넓다"의 뜻으로 알맞은 것은?', opts: ['발이 크다','아는 사람이 많다','걸음이 빠르다','땅이 넓다'], ans: 1, exp: '"발이 넓다"는 아는 사람이 많고 교제 범위가 넓다는 뜻입니다.' },
+  { subject: '국어', grade: '5학년', title: '글의 종류 구분하기', achv: '[6국05-01]', tags: ['글의종류','설명문'], diff: 2, min: 1,
+    q: '사실이나 정보를 알려주기 위해 쓰는 글은?', opts: ['동화','일기','설명문','편지'], ans: 2, exp: '설명문은 사실이나 정보를 전달하기 위해 쓰는 글입니다.' },
+  { subject: '국어', grade: '3학년', title: '띄어쓰기 규칙', achv: '[4국04-03]', tags: ['띄어쓰기'], diff: 2, min: 1,
+    q: '띄어쓰기가 바른 것은?', opts: ['나는학생이다','나는 학생이다','나 는 학생이다','나는 학생 이다'], ans: 1, exp: '조사는 앞말에 붙여 쓰고, 단어와 단어 사이는 띄어 씁니다.' },
+  { subject: '국어', grade: '6학년', title: '토론의 절차 이해하기', achv: '[6국01-06]', tags: ['토론','말하기'], diff: 3, min: 1,
+    q: '토론에서 가장 먼저 하는 것은?', opts: ['반론하기','주장하기','논제 확인하기','투표하기'], ans: 2, exp: '토론은 논제를 먼저 확인한 후 주장, 반론 순으로 진행합니다.' },
+  { subject: '국어', grade: '4학년', title: '사전 찾기 - 자모 순서', achv: '[4국04-04]', tags: ['사전찾기','자모순서'], diff: 2, min: 1,
+    q: '국어사전에서 가장 먼저 나오는 낱말은?', opts: ['다람쥐','나비','가방','라면'], ans: 2, exp: '국어사전은 ㄱ, ㄴ, ㄷ, ㄹ 순서로 나열되므로 "가방"이 먼저 나옵니다.' },
+  { subject: '국어', grade: '5학년', title: '비유적 표현 이해', achv: '[6국05-02]', tags: ['비유','은유'], diff: 3, min: 1,
+    q: '"내 마음은 호수"에 사용된 표현 방법은?', opts: ['직유법','은유법','의인법','과장법'], ans: 1, exp: '"~은 ~이다"로 빗대는 표현은 은유법입니다.' },
+  { subject: '국어', grade: '3학년', title: '글자의 짜임 이해하기', achv: '[4국04-05]', tags: ['글자','모음'], diff: 1, min: 1,
+    q: '"하늘"에서 모음의 개수는?', opts: ['1개','2개','3개','4개'], ans: 1, exp: '"하"의 ㅏ, "늘"의 ㅡ로 모음은 2개입니다.' },
+  { subject: '국어', grade: '4학년', title: '이어주는 말 사용하기', achv: '[4국03-01]', tags: ['접속어','이어주는말'], diff: 2, min: 1,
+    q: '"비가 온다. ___ 우산을 가져가자." 알맞은 이어주는 말은?', opts: ['그런데','그래서','하지만','그러나'], ans: 1, exp: '앞 문장이 원인이고 뒤 문장이 결과이므로 "그래서"가 알맞습니다.' },
+  { subject: '국어', grade: '6학년', title: '뉴스 비판적으로 읽기', achv: '[6국02-04]', tags: ['비판적읽기','미디어'], diff: 4, min: 2,
+    q: '뉴스를 비판적으로 읽을 때 가장 먼저 할 일은?', opts: ['댓글 읽기','사실과 의견 구분하기','공유하기','제목만 읽기'], ans: 1, exp: '비판적 읽기의 첫 단계는 사실과 의견을 구분하는 것입니다.' },
+  { subject: '국어', grade: '5학년', title: '한자어 이해하기', achv: '[6국04-02]', tags: ['한자어','어휘'], diff: 3, min: 1,
+    q: '"학교(學校)"에서 "학(學)"의 뜻은?', opts: ['집','배우다','가르치다','학교'], ans: 1, exp: '학(學)은 "배우다"라는 뜻을 가진 한자입니다.' },
+  { subject: '국어', grade: '3학년', title: '소리와 표기가 다른 말', achv: '[4국04-06]', tags: ['발음','표기'], diff: 2, min: 1,
+    q: '"같이"의 바른 발음은?', opts: ['[가티]','[같이]','[가치]','[가시]'], ans: 2, exp: '"같이"는 구개음화로 [가치]로 발음합니다.' },
+  { subject: '국어', grade: '4학년', title: '글쓴이의 의견 파악하기', achv: '[4국02-03]', tags: ['읽기','의견파악'], diff: 3, min: 2,
+    q: '글쓴이의 의견을 파악하려면 어떻게 해야 할까요?', opts: ['제목만 읽기','그림만 보기','근거와 주장 구분하기','빨리 읽기'], ans: 2, exp: '글쓴이의 의견은 근거와 주장을 구분해서 파악합니다.' },
+  { subject: '국어', grade: '6학년', title: '요약하기 방법', achv: '[6국02-05]', tags: ['요약','읽기전략'], diff: 3, min: 1,
+    q: '글을 요약할 때 가장 중요한 것은?', opts: ['모든 문장 쓰기','중심 내용 찾기','어려운 단어 찾기','글자 수 세기'], ans: 1, exp: '요약은 중심 내용을 찾아 간추리는 것이 핵심입니다.' },
+  { subject: '국어', grade: '5학년', title: '동음이의어 구분', achv: '[6국04-03]', tags: ['동음이의어','어휘'], diff: 2, min: 1,
+    q: '"배"가 과일의 뜻으로 쓰인 문장은?', opts: ['배를 타고 바다로 갔다','배가 너무 아프다','배를 깎아 먹었다','배가 항구에 들어왔다'], ans: 2, exp: '"배를 깎아 먹었다"에서 배는 과일을 뜻합니다.' },
+  { subject: '국어', grade: '3학년', title: '읽기 - 중심 문장 찾기', achv: '[4국02-01]', tags: ['읽기','중심문장'], diff: 2, min: 1,
+    q: '문단의 중심 문장은 보통 어디에 있나요?', opts: ['맨 마지막에만','맨 처음이나 마지막','항상 가운데','어디에도 없다'], ans: 1, exp: '중심 문장은 보통 문단의 처음이나 마지막에 위치합니다.' },
+  { subject: '국어', grade: '4학년', title: '편지 쓰기 형식', achv: '[4국03-02]', tags: ['편지','글쓰기'], diff: 1, min: 1,
+    q: '편지에 꼭 들어가야 할 것이 아닌 것은?', opts: ['받는 사람','쓴 날짜','목차','인사말'], ans: 2, exp: '편지에는 받는 사람, 쓴 날짜, 인사말이 필요하지만 목차는 불필요합니다.' },
+  { subject: '국어', grade: '6학년', title: '매체 자료 활용하기', achv: '[6국03-05]', tags: ['매체','발표'], diff: 3, min: 1,
+    q: '발표할 때 매체 자료를 사용하는 가장 큰 이유는?', opts: ['시간을 채우려고','내용을 잘 전달하려고','글을 안 읽으려고','멋있어 보이려고'], ans: 1, exp: '매체 자료는 내용을 효과적으로 전달하기 위해 사용합니다.' },
+  { subject: '국어', grade: '5학년', title: '문장 부호 사용법', achv: '[6국04-04]', tags: ['문장부호','쉼표'], diff: 2, min: 1,
+    q: '쉼표(,)를 사용해야 하는 경우가 아닌 것은?', opts: ['같은 자격의 어구 사이','부르는 말 뒤','문장 끝','열거할 때'], ans: 2, exp: '문장 끝에는 마침표(.)를 사용합니다.' },
+  { subject: '국어', grade: '3학년', title: '듣기 태도', achv: '[4국01-04]', tags: ['듣기','태도'], diff: 1, min: 1,
+    q: '바른 듣기 태도가 아닌 것은?', opts: ['눈을 맞추며 듣기','고개를 끄덕이며 듣기','딴 짓하며 듣기','질문하며 듣기'], ans: 2, exp: '딴 짓하며 듣기는 바르지 않은 태도입니다.' },
+  { subject: '국어', grade: '4학년', title: '독서 감상문 쓰기', achv: '[4국05-04]', tags: ['독서감상문','글쓰기'], diff: 3, min: 2,
+    q: '독서 감상문에 꼭 들어가야 할 내용은?', opts: ['책 가격','읽은 후 느낀 점','작가의 나이','페이지 수'], ans: 1, exp: '독서 감상문의 핵심은 책을 읽고 느낀 점을 쓰는 것입니다.' },
+
+  // ============ 수학 ============
+  { subject: '수학', grade: '3학년', title: '세 자리 수 덧셈', achv: '[4수01-01]', tags: ['덧셈','세자리수'], diff: 2, min: 1,
+    q: '345 + 278 = ?', opts: ['613','623','523','633'], ans: 1, exp: '345 + 278: 일의 자리 5+8=13(올림1), 십의 자리 4+7+1=12(올림1), 백의 자리 3+2+1=6 → 623' },
+  { subject: '수학', grade: '3학년', title: '세 자리 수 뺄셈', achv: '[4수01-02]', tags: ['뺄셈','세자리수'], diff: 2, min: 1,
+    q: '502 - 167 = ?', opts: ['335','345','325','435'], ans: 0, exp: '502 - 167: 받아내림을 하면 335가 됩니다.' },
+  { subject: '수학', grade: '3학년', title: '곱셈구구 활용', achv: '[4수01-03]', tags: ['곱셈','구구단'], diff: 1, min: 1,
+    q: '7 × 8 = ?', opts: ['54','56','63','48'], ans: 1, exp: '7 × 8 = 56입니다.' },
+  { subject: '수학', grade: '4학년', title: '분수의 크기 비교', achv: '[4수01-11]', tags: ['분수','크기비교'], diff: 3, min: 1,
+    q: '다음 중 가장 큰 분수는?', opts: ['1/3','2/5','3/8','1/2'], ans: 3, exp: '통분하면 1/2 = 12/24, 2/5 = 9.6/24, 3/8 = 9/24, 1/3 = 8/24이므로 1/2가 가장 큽니다.' },
+  { subject: '수학', grade: '4학년', title: '소수의 덧셈', achv: '[4수01-12]', tags: ['소수','덧셈'], diff: 2, min: 1,
+    q: '2.5 + 1.8 = ?', opts: ['3.3','4.3','4.13','3.13'], ans: 1, exp: '2.5 + 1.8 = 4.3입니다.' },
+  { subject: '수학', grade: '5학년', title: '약분과 통분', achv: '[6수01-01]', tags: ['약분','통분'], diff: 3, min: 1,
+    q: '6/8을 약분하면?', opts: ['2/4','3/4','3/6','4/6'], ans: 1, exp: '6/8의 분자와 분모를 공약수 2로 나누면 3/4입니다.' },
+  { subject: '수학', grade: '5학년', title: '분수의 곱셈', achv: '[6수01-02]', tags: ['분수','곱셈'], diff: 3, min: 1,
+    q: '2/3 × 3/4 = ?', opts: ['6/12','1/2','5/7','2/4'], ans: 1, exp: '2/3 × 3/4 = 6/12 = 1/2입니다.' },
+  { subject: '수학', grade: '3학년', title: '나눗셈의 기초', achv: '[4수01-04]', tags: ['나눗셈','기초'], diff: 2, min: 1,
+    q: '24 ÷ 6 = ?', opts: ['3','4','5','6'], ans: 1, exp: '24 ÷ 6 = 4입니다. 6 × 4 = 24' },
+  { subject: '수학', grade: '4학년', title: '큰 수 읽기', achv: '[4수01-05]', tags: ['큰수','읽기'], diff: 2, min: 1,
+    q: '50,000을 한글로 읽으면?', opts: ['오천','오만','오백','오십만'], ans: 1, exp: '50,000은 "오만"으로 읽습니다.' },
+  { subject: '수학', grade: '3학년', title: '길이 단위 변환', achv: '[4수03-01]', tags: ['길이','단위변환'], diff: 2, min: 1,
+    q: '3 km = ? m', opts: ['30','300','3000','30000'], ans: 2, exp: '1 km = 1000 m이므로 3 km = 3000 m입니다.' },
+  { subject: '수학', grade: '4학년', title: '삼각형의 종류', achv: '[4수02-04]', tags: ['삼각형','도형'], diff: 2, min: 1,
+    q: '세 변의 길이가 모두 같은 삼각형은?', opts: ['이등변삼각형','직각삼각형','정삼각형','둔각삼각형'], ans: 2, exp: '세 변의 길이가 모두 같은 삼각형은 정삼각형입니다.' },
+  { subject: '수학', grade: '5학년', title: '평균 구하기', achv: '[6수05-01]', tags: ['평균','통계'], diff: 2, min: 1,
+    q: '80, 90, 70의 평균은?', opts: ['70','75','80','85'], ans: 2, exp: '(80+90+70) ÷ 3 = 240 ÷ 3 = 80' },
+  { subject: '수학', grade: '6학년', title: '원의 넓이 구하기', achv: '[6수02-06]', tags: ['원','넓이'], diff: 4, min: 2,
+    q: '반지름이 5cm인 원의 넓이는? (π=3.14)', opts: ['31.4cm²','78.5cm²','15.7cm²','157cm²'], ans: 1, exp: '원의 넓이 = π × r² = 3.14 × 25 = 78.5cm²' },
+  { subject: '수학', grade: '4학년', title: '각도 측정하기', achv: '[4수02-05]', tags: ['각도','측정'], diff: 2, min: 1,
+    q: '직각은 몇 도인가요?', opts: ['45°','60°','90°','180°'], ans: 2, exp: '직각은 90°입니다.' },
+  { subject: '수학', grade: '5학년', title: '비와 비율 이해', achv: '[6수05-02]', tags: ['비','비율'], diff: 3, min: 1,
+    q: '사과 3개, 배 5개일 때 사과와 배의 비는?', opts: ['3:5','5:3','3:8','8:3'], ans: 0, exp: '사과 대 배의 비는 3:5입니다.' },
+  { subject: '수학', grade: '3학년', title: '시각과 시간', achv: '[4수03-02]', tags: ['시각','시간'], diff: 1, min: 1,
+    q: '2시 30분에서 1시간 45분이 지나면?', opts: ['3시 15분','4시 15분','3시 45분','4시 45분'], ans: 1, exp: '2시 30분 + 1시간 = 3시 30분, +45분 = 4시 15분' },
+  { subject: '수학', grade: '6학년', title: '비례식 풀기', achv: '[6수05-03]', tags: ['비례식','비율'], diff: 4, min: 2,
+    q: '3:4 = x:12 에서 x의 값은?', opts: ['6','8','9','10'], ans: 2, exp: '외항의 곱 = 내항의 곱이므로, 3×12 = 4×x, 36 = 4x, x = 9' },
+  { subject: '수학', grade: '4학년', title: '곱셈과 나눗셈의 관계', achv: '[4수01-06]', tags: ['곱셈','나눗셈'], diff: 2, min: 1,
+    q: '□ × 7 = 63 에서 □의 값은?', opts: ['7','8','9','10'], ans: 2, exp: '63 ÷ 7 = 9이므로 □ = 9' },
+  { subject: '수학', grade: '5학년', title: '소수의 나눗셈', achv: '[6수01-03]', tags: ['소수','나눗셈'], diff: 3, min: 1,
+    q: '6.4 ÷ 0.8 = ?', opts: ['0.8','8','80','0.08'], ans: 1, exp: '6.4 ÷ 0.8 = 64 ÷ 8 = 8' },
+  { subject: '수학', grade: '3학년', title: '들이와 무게', achv: '[4수03-03]', tags: ['들이','무게','단위'], diff: 2, min: 1,
+    q: '1 L = ? mL', opts: ['10','100','1000','10000'], ans: 2, exp: '1 L = 1000 mL입니다.' },
+  { subject: '수학', grade: '6학년', title: '직육면체의 부피', achv: '[6수02-07]', tags: ['부피','직육면체'], diff: 3, min: 1,
+    q: '가로 3cm, 세로 4cm, 높이 5cm인 직육면체의 부피는?', opts: ['12cm³','20cm³','60cm³','35cm³'], ans: 2, exp: '부피 = 가로 × 세로 × 높이 = 3 × 4 × 5 = 60cm³' },
+  { subject: '수학', grade: '4학년', title: '사각형의 종류', achv: '[4수02-06]', tags: ['사각형','도형'], diff: 2, min: 1,
+    q: '네 변의 길이와 네 각이 모두 같은 사각형은?', opts: ['마름모','평행사변형','정사각형','사다리꼴'], ans: 2, exp: '정사각형은 네 변의 길이와 네 각이 모두 같습니다.' },
+  { subject: '수학', grade: '5학년', title: '대칭과 대칭축', achv: '[6수02-03]', tags: ['대칭','도형'], diff: 3, min: 1,
+    q: '정사각형의 대칭축은 몇 개인가요?', opts: ['1개','2개','4개','8개'], ans: 2, exp: '정사각형은 가로, 세로, 대각선 2개 = 총 4개의 대칭축이 있습니다.' },
+  { subject: '수학', grade: '3학년', title: '규칙 찾기', achv: '[4수04-01]', tags: ['규칙','패턴'], diff: 2, min: 1,
+    q: '2, 5, 8, 11, ? 다음에 올 수는?', opts: ['12','13','14','15'], ans: 2, exp: '3씩 커지는 규칙이므로 11 + 3 = 14' },
+  { subject: '수학', grade: '6학년', title: '경우의 수', achv: '[6수05-04]', tags: ['경우의수','확률'], diff: 4, min: 2,
+    q: '동전 2개를 동시에 던질 때 나올 수 있는 경우의 수는?', opts: ['2가지','3가지','4가지','6가지'], ans: 2, exp: '(앞,앞), (앞,뒤), (뒤,앞), (뒤,뒤) = 4가지' },
+
+  // ============ 사회 ============
+  { subject: '사회', grade: '3학년', title: '지도의 기본 요소', achv: '[4사01-01]', tags: ['지도','방위'], diff: 1, min: 1,
+    q: '지도에서 위쪽은 어느 방위인가요?', opts: ['동','서','남','북'], ans: 3, exp: '지도에서 위쪽은 북쪽을 나타냅니다.' },
+  { subject: '사회', grade: '3학년', title: '우리 고장의 모습', achv: '[4사01-02]', tags: ['고장','지역'], diff: 1, min: 1,
+    q: '우리가 사는 고장을 알아보는 방법이 아닌 것은?', opts: ['지도 보기','현장 답사','외국 여행','인터넷 검색'], ans: 2, exp: '외국 여행은 우리 고장을 알아보는 방법이 아닙니다.' },
+  { subject: '사회', grade: '4학년', title: '경제 활동의 이해', achv: '[4사03-01]', tags: ['경제','생산소비'], diff: 2, min: 1,
+    q: '물건을 만드는 활동을 무엇이라 하나요?', opts: ['소비','저축','생산','분배'], ans: 2, exp: '물건을 만드는 활동을 "생산"이라 합니다.' },
+  { subject: '사회', grade: '4학년', title: '지방자치단체의 역할', achv: '[4사02-03]', tags: ['지방자치','행정'], diff: 3, min: 1,
+    q: '시·군·구에서 주민을 위해 하는 일이 아닌 것은?', opts: ['도로 건설','쓰레기 수거','외교 활동','공원 관리'], ans: 2, exp: '외교 활동은 중앙 정부의 역할입니다.' },
+  { subject: '사회', grade: '5학년', title: '우리나라의 위치', achv: '[6사01-01]', tags: ['위치','한반도'], diff: 2, min: 1,
+    q: '우리나라가 위치한 대륙은?', opts: ['유럽','아프리카','아시아','아메리카'], ans: 2, exp: '우리나라는 아시아 대륙의 동쪽에 위치해 있습니다.' },
+  { subject: '사회', grade: '5학년', title: '조선의 건국', achv: '[6사02-01]', tags: ['조선','역사'], diff: 3, min: 1,
+    q: '조선을 건국한 사람은?', opts: ['왕건','이성계','세종대왕','정조'], ans: 1, exp: '이성계가 1392년에 조선을 건국하였습니다.' },
+  { subject: '사회', grade: '6학년', title: '민주주의의 원리', achv: '[6사01-04]', tags: ['민주주의','정치'], diff: 3, min: 1,
+    q: '민주주의에서 가장 중요한 원리는?', opts: ['왕의 명령','국민 주권','군대의 힘','종교의 가르침'], ans: 1, exp: '민주주의의 핵심은 국민이 나라의 주인이라는 국민 주권입니다.' },
+  { subject: '사회', grade: '3학년', title: '교통수단의 발달', achv: '[4사01-03]', tags: ['교통','발달'], diff: 1, min: 1,
+    q: '가장 나중에 발명된 교통수단은?', opts: ['마차','배','비행기','자전거'], ans: 2, exp: '비행기는 1903년 라이트 형제가 발명한 가장 나중의 교통수단입니다.' },
+  { subject: '사회', grade: '4학년', title: '문화유산 보호', achv: '[4사04-01]', tags: ['문화유산','보호'], diff: 2, min: 1,
+    q: '문화유산을 보호해야 하는 이유로 알맞은 것은?', opts: ['돈을 벌기 위해','조상의 지혜를 배우기 위해','관광객 유치를 위해','숙제를 하기 위해'], ans: 1, exp: '문화유산은 조상의 지혜와 문화를 배울 수 있는 소중한 자산입니다.' },
+  { subject: '사회', grade: '5학년', title: '기후와 생활', achv: '[6사01-02]', tags: ['기후','생활'], diff: 2, min: 1,
+    q: '우리나라의 기후 특징은?', opts: ['일년 내내 더움','사계절이 뚜렷함','일년 내내 비가 옴','항상 춥다'], ans: 1, exp: '우리나라는 사계절이 뚜렷한 온대 기후입니다.' },
+  { subject: '사회', grade: '6학년', title: '세계 여러 나라의 자연환경', achv: '[6사03-01]', tags: ['세계','자연환경'], diff: 3, min: 1,
+    q: '적도 근처 나라의 기후 특징은?', opts: ['매우 춥다','사계절이 뚜렷하다','일년 내내 덥고 비가 많다','건조하다'], ans: 2, exp: '적도 근처는 열대 기후로 일년 내내 기온이 높고 강수량이 많습니다.' },
+  { subject: '사회', grade: '4학년', title: '시장과 가격', achv: '[4사03-02]', tags: ['시장','가격'], diff: 2, min: 1,
+    q: '물건의 가격이 올라가는 경우는?', opts: ['물건이 많을 때','사려는 사람이 적을 때','사려는 사람이 많을 때','할인할 때'], ans: 2, exp: '수요(사려는 사람)가 많으면 가격이 올라갑니다.' },
+  { subject: '사회', grade: '5학년', title: '독도의 중요성', achv: '[6사01-03]', tags: ['독도','영토'], diff: 2, min: 1,
+    q: '독도에 대한 설명으로 옳은 것은?', opts: ['일본 땅이다','사람이 살 수 없다','우리나라의 영토이다','바다 한가운데 있어 중요하지 않다'], ans: 2, exp: '독도는 역사적, 지리적, 국제법적으로 우리나라의 영토입니다.' },
+  { subject: '사회', grade: '6학년', title: '국제기구와 협력', achv: '[6사03-02]', tags: ['국제기구','UN'], diff: 3, min: 2,
+    q: '세계 평화를 위해 활동하는 국제기구는?', opts: ['올림픽','유엔(UN)','FIFA','WHO'], ans: 1, exp: '유엔(UN)은 세계 평화와 안전을 위해 활동하는 국제기구입니다.' },
+  { subject: '사회', grade: '3학년', title: '계절과 생활 모습', achv: '[4사01-04]', tags: ['계절','생활'], diff: 1, min: 1,
+    q: '겨울에 볼 수 없는 풍경은?', opts: ['눈','고드름','단풍','얼음'], ans: 2, exp: '단풍은 가을에 볼 수 있는 풍경입니다.' },
+  { subject: '사회', grade: '4학년', title: '촌락과 도시의 차이', achv: '[4사02-01]', tags: ['촌락','도시'], diff: 2, min: 1,
+    q: '촌락의 특징이 아닌 것은?', opts: ['자연이 많다','인구가 적다','고층 건물이 많다','농사를 짓는다'], ans: 2, exp: '고층 건물이 많은 것은 도시의 특징입니다.' },
+  { subject: '사회', grade: '5학년', title: '6·25 전쟁', achv: '[6사02-06]', tags: ['한국전쟁','역사'], diff: 3, min: 1,
+    q: '6·25 전쟁이 일어난 해는?', opts: ['1945년','1948년','1950년','1953년'], ans: 2, exp: '6·25 전쟁은 1950년 6월 25일에 일어났습니다.' },
+  { subject: '사회', grade: '6학년', title: '인권의 의미와 중요성', achv: '[6사01-05]', tags: ['인권','권리'], diff: 2, min: 1,
+    q: '인권에 대한 설명으로 옳은 것은?', opts: ['어른만 가진 권리','돈이 있어야 가지는 권리','모든 사람이 태어날 때부터 가지는 권리','나라가 정해주는 권리'], ans: 2, exp: '인권은 모든 사람이 태어날 때부터 가지는 기본적인 권리입니다.' },
+  { subject: '사회', grade: '3학년', title: '우리 지역의 공공기관', achv: '[4사02-02]', tags: ['공공기관','지역사회'], diff: 1, min: 1,
+    q: '공공기관에 해당하지 않는 것은?', opts: ['학교','소방서','편의점','도서관'], ans: 2, exp: '편의점은 개인이 운영하는 가게로 공공기관이 아닙니다.' },
+  { subject: '사회', grade: '4학년', title: '정보화 사회의 문제점', achv: '[4사04-02]', tags: ['정보화','인터넷'], diff: 3, min: 1,
+    q: '인터넷 사용 시 주의할 점이 아닌 것은?', opts: ['개인정보 보호','저작권 지키기','사이버 폭력 하기','예절 지키기'], ans: 2, exp: '사이버 폭력은 하지 말아야 하는 것입니다.' },
+
+  // ============ 과학 ============
+  { subject: '과학', grade: '3학년', title: '물질의 상태 - 고체', achv: '[4과01-01]', tags: ['물질','고체'], diff: 1, min: 1,
+    q: '고체의 특징으로 알맞은 것은?', opts: ['모양이 변한다','담는 그릇에 따라 모양이 변한다','일정한 모양이 있다','눈에 보이지 않는다'], ans: 2, exp: '고체는 모양과 크기가 일정합니다.' },
+  { subject: '과학', grade: '3학년', title: '물질의 상태 - 액체', achv: '[4과01-02]', tags: ['물질','액체'], diff: 1, min: 1,
+    q: '액체에 해당하는 것은?', opts: ['돌','물','공기','나무'], ans: 1, exp: '물은 담는 그릇에 따라 모양이 변하는 액체입니다.' },
+  { subject: '과학', grade: '3학년', title: '자석의 성질', achv: '[4과02-01]', tags: ['자석','극'], diff: 2, min: 1,
+    q: '자석의 같은 극을 가까이 하면?', opts: ['붙는다','밀어낸다','아무 변화 없다','사라진다'], ans: 1, exp: '자석의 같은 극(N-N, S-S)끼리는 서로 밀어냅니다.' },
+  { subject: '과학', grade: '4학년', title: '식물의 한살이', achv: '[4과03-01]', tags: ['식물','한살이'], diff: 2, min: 1,
+    q: '식물의 한살이 순서로 올바른 것은?', opts: ['꽃→씨→싹→열매','씨→싹→꽃→열매','싹→씨→꽃→열매','열매→꽃→싹→씨'], ans: 1, exp: '식물의 한살이: 씨 → 싹 → 자라기 → 꽃 → 열매(씨)' },
+  { subject: '과학', grade: '4학년', title: '물의 상태 변화', achv: '[4과01-03]', tags: ['물','상태변화'], diff: 2, min: 1,
+    q: '물이 끓으면 무엇으로 변하나요?', opts: ['얼음','수증기','이슬','안개'], ans: 1, exp: '물이 끓으면 기체인 수증기로 상태가 변합니다.' },
+  { subject: '과학', grade: '5학년', title: '태양계 행성', achv: '[6과01-01]', tags: ['태양계','행성'], diff: 2, min: 1,
+    q: '태양에서 세 번째로 가까운 행성은?', opts: ['금성','화성','지구','수성'], ans: 2, exp: '태양에서의 순서: 수성, 금성, 지구, 화성... 세 번째는 지구입니다.' },
+  { subject: '과학', grade: '5학년', title: '용해와 용액', achv: '[6과02-01]', tags: ['용해','용액'], diff: 3, min: 1,
+    q: '소금이 물에 녹는 현상을 무엇이라 하나요?', opts: ['증발','응결','용해','융해'], ans: 2, exp: '물질이 액체에 골고루 섞여 녹는 현상을 용해라 합니다.' },
+  { subject: '과학', grade: '3학년', title: '동물의 한살이', achv: '[4과03-02]', tags: ['동물','한살이'], diff: 2, min: 1,
+    q: '완전 변태를 하는 곤충은?', opts: ['메뚜기','잠자리','나비','귀뚜라미'], ans: 2, exp: '나비는 알→애벌레→번데기→성충의 완전 변태를 합니다.' },
+  { subject: '과학', grade: '4학년', title: '지층과 화석', achv: '[4과04-01]', tags: ['지층','화석'], diff: 2, min: 1,
+    q: '화석이 만들어지려면 어떤 조건이 필요한가요?', opts: ['높은 온도','빠른 매몰','많은 빛','강한 바람'], ans: 1, exp: '생물이 빠르게 퇴적물에 묻혀야 화석이 잘 만들어집니다.' },
+  { subject: '과학', grade: '5학년', title: '날씨와 우리 생활', achv: '[6과03-01]', tags: ['날씨','기상'], diff: 2, min: 1,
+    q: '습도가 높을 때 일어나는 현상은?', opts: ['빨래가 잘 마른다','음식이 잘 상한다','피부가 건조하다','불이 잘 붙는다'], ans: 1, exp: '습도가 높으면 세균이 잘 번식하여 음식이 잘 상합니다.' },
+  { subject: '과학', grade: '6학년', title: '전기 회로', achv: '[6과04-01]', tags: ['전기','회로'], diff: 3, min: 1,
+    q: '전구에 불이 켜지려면 필요한 것이 아닌 것은?', opts: ['전지','전선','스위치','자석'], ans: 3, exp: '전기 회로에는 전지, 전선, 스위치가 필요하며 자석은 불필요합니다.' },
+  { subject: '과학', grade: '3학년', title: '그림자와 거울', achv: '[4과02-02]', tags: ['그림자','빛'], diff: 1, min: 1,
+    q: '그림자가 생기려면 반드시 필요한 것은?', opts: ['물','빛','바람','소리'], ans: 1, exp: '그림자는 빛이 물체에 가려서 생깁니다.' },
+  { subject: '과학', grade: '4학년', title: '혼합물의 분리', achv: '[4과01-04]', tags: ['혼합물','분리'], diff: 3, min: 1,
+    q: '소금물에서 소금을 얻으려면?', opts: ['거르기','자석 사용','증발시키기','가라앉히기'], ans: 2, exp: '소금물을 증발시키면 물이 날아가고 소금이 남습니다.' },
+  { subject: '과학', grade: '5학년', title: '생태계와 먹이 사슬', achv: '[6과05-01]', tags: ['생태계','먹이사슬'], diff: 3, min: 1,
+    q: '먹이 사슬에서 생산자에 해당하는 것은?', opts: ['토끼','풀','여우','독수리'], ans: 1, exp: '풀은 광합성으로 스스로 양분을 만드는 생산자입니다.' },
+  { subject: '과학', grade: '6학년', title: '우리 몸의 소화', achv: '[6과06-01]', tags: ['소화','인체'], diff: 3, min: 1,
+    q: '음식물이 가장 먼저 소화되는 곳은?', opts: ['위','소장','입','대장'], ans: 2, exp: '음식물은 입에서 씹고 침으로 분해하면서 소화가 시작됩니다.' },
+  { subject: '과학', grade: '3학년', title: '소리의 성질', achv: '[4과02-03]', tags: ['소리','진동'], diff: 2, min: 1,
+    q: '소리가 나는 물체의 공통점은?', opts: ['뜨겁다','차갑다','떨린다(진동한다)','빛이 난다'], ans: 2, exp: '소리는 물체의 진동(떨림)에 의해 발생합니다.' },
+  { subject: '과학', grade: '4학년', title: '열의 이동', achv: '[4과02-04]', tags: ['열','전도'], diff: 3, min: 1,
+    q: '열이 이동하는 방향은?', opts: ['차가운 곳→뜨거운 곳','뜨거운 곳→차가운 곳','위→아래','아래→위'], ans: 1, exp: '열은 항상 온도가 높은 곳에서 낮은 곳으로 이동합니다.' },
+  { subject: '과학', grade: '5학년', title: '산과 염기', achv: '[6과02-02]', tags: ['산','염기','지시약'], diff: 3, min: 1,
+    q: '리트머스 종이가 빨간색으로 변하면?', opts: ['중성','산성','염기성','알 수 없다'], ans: 1, exp: '푸른색 리트머스 종이가 빨간색으로 변하면 산성입니다.' },
+  { subject: '과학', grade: '6학년', title: '렌즈의 이용', achv: '[6과04-02]', tags: ['렌즈','빛'], diff: 3, min: 1,
+    q: '볼록 렌즈로 멀리 있는 물체를 보면?', opts: ['더 작게 보인다','거꾸로 보인다','안 보인다','같은 크기로 보인다'], ans: 1, exp: '볼록 렌즈로 먼 곳의 물체를 보면 상하좌우가 바뀌어 거꾸로 보입니다.' },
+  { subject: '과학', grade: '3학년', title: '흙의 생성', achv: '[4과04-02]', tags: ['흙','풍화'], diff: 2, min: 1,
+    q: '바위가 흙이 되는 과정을 무엇이라 하나요?', opts: ['증발','풍화','용해','응결'], ans: 1, exp: '바위가 오랜 시간 비, 바람, 온도 변화 등으로 부서져 흙이 되는 과정을 풍화라 합니다.' },
+  { subject: '과학', grade: '4학년', title: '식물의 구조와 기능', achv: '[4과03-03]', tags: ['식물','뿌리','줄기'], diff: 2, min: 1,
+    q: '식물의 뿌리가 하는 일은?', opts: ['광합성','물과 양분 흡수','꽃가루 만들기','씨앗 보호'], ans: 1, exp: '뿌리는 땅속의 물과 양분을 흡수하는 역할을 합니다.' },
+  { subject: '과학', grade: '6학년', title: '지구와 달의 운동', achv: '[6과01-02]', tags: ['지구','달','자전'], diff: 3, min: 1,
+    q: '낮과 밤이 생기는 이유는?', opts: ['지구의 공전','지구의 자전','달의 공전','태양의 자전'], ans: 1, exp: '지구가 하루에 한 바퀴 자전하기 때문에 낮과 밤이 생깁니다.' },
+  { subject: '과학', grade: '5학년', title: '물체의 빠르기', achv: '[6과03-02]', tags: ['속력','운동'], diff: 2, min: 1,
+    q: '100m를 10초에 달린 사람의 속력은?', opts: ['1 m/s','10 m/s','100 m/s','1000 m/s'], ans: 1, exp: '속력 = 거리 ÷ 시간 = 100m ÷ 10초 = 10 m/s' },
+  { subject: '과학', grade: '6학년', title: '에너지 전환', achv: '[6과04-03]', tags: ['에너지','전환'], diff: 3, min: 1,
+    q: '선풍기에서 전기 에너지는 무엇으로 바뀌나요?', opts: ['빛 에너지','열 에너지','운동 에너지','화학 에너지'], ans: 2, exp: '선풍기는 전기 에너지를 운동(바람) 에너지로 전환합니다.' },
+
+  // ============ 영어 ============
+  { subject: '영어', grade: '3학년', title: 'Alphabet - 대소문자', achv: '[4영01-01]', tags: ['알파벳','대소문자'], diff: 1, min: 1,
+    q: '"b"의 대문자는?', opts: ['D','P','B','G'], ans: 2, exp: '"b"의 대문자는 "B"입니다.' },
+  { subject: '영어', grade: '3학년', title: 'Greetings - 인사 표현', achv: '[4영02-01]', tags: ['인사','기초회화'], diff: 1, min: 1,
+    q: '아침에 만났을 때 하는 인사는?', opts: ['Good night','Good morning','Good bye','See you'], ans: 1, exp: '아침 인사는 "Good morning"입니다.' },
+  { subject: '영어', grade: '3학년', title: 'Colors - 색깔 단어', achv: '[4영01-02]', tags: ['색깔','어휘'], diff: 1, min: 1,
+    q: '"빨간색"을 영어로 하면?', opts: ['Blue','Green','Red','Yellow'], ans: 2, exp: '빨간색은 영어로 "Red"입니다.' },
+  { subject: '영어', grade: '4학년', title: 'Numbers - 숫자 읽기', achv: '[4영01-03]', tags: ['숫자','읽기'], diff: 1, min: 1,
+    q: '"Fifteen"은 숫자로?', opts: ['5','13','15','50'], ans: 2, exp: 'Fifteen은 15입니다.' },
+  { subject: '영어', grade: '4학년', title: 'Days of the Week', achv: '[4영02-02]', tags: ['요일','어휘'], diff: 2, min: 1,
+    q: '수요일을 영어로 하면?', opts: ['Monday','Tuesday','Wednesday','Thursday'], ans: 2, exp: '수요일은 "Wednesday"입니다.' },
+  { subject: '영어', grade: '4학년', title: 'Animals - 동물 단어', achv: '[4영01-04]', tags: ['동물','어휘'], diff: 1, min: 1,
+    q: '"고양이"를 영어로 하면?', opts: ['Dog','Cat','Bird','Fish'], ans: 1, exp: '고양이는 영어로 "Cat"입니다.' },
+  { subject: '영어', grade: '5학년', title: 'Be동사 문장 만들기', achv: '[6영03-01]', tags: ['be동사','문법'], diff: 2, min: 1,
+    q: '"I ___ a student." 빈칸에 알맞은 것은?', opts: ['is','are','am','be'], ans: 2, exp: '주어가 I일 때는 "am"을 씁니다.' },
+  { subject: '영어', grade: '5학년', title: 'What time is it?', achv: '[6영02-02]', tags: ['시간','회화'], diff: 2, min: 1,
+    q: '"3시 30분"을 영어로 하면?', opts: ['Three thirteen','Three thirty','Thirty three','Three three'], ans: 1, exp: '3시 30분은 "Three thirty"입니다.' },
+  { subject: '영어', grade: '5학년', title: 'Can 활용하기', achv: '[6영03-02]', tags: ['can','조동사'], diff: 2, min: 1,
+    q: '"나는 수영할 수 있어"를 영어로?', opts: ['I swim can','I can swim','I swimming','Can I swim'], ans: 1, exp: '"I can swim"이 올바른 어순입니다.' },
+  { subject: '영어', grade: '6학년', title: '과거형 - 규칙 변화', achv: '[6영03-03]', tags: ['과거형','문법'], diff: 3, min: 1,
+    q: '"play"의 과거형은?', opts: ['plaied','playd','played','plaid'], ans: 2, exp: 'play의 과거형은 ed를 붙여 "played"입니다.' },
+  { subject: '영어', grade: '6학년', title: '과거형 - 불규칙 변화', achv: '[6영03-04]', tags: ['과거형','불규칙'], diff: 3, min: 1,
+    q: '"go"의 과거형은?', opts: ['goed','gos','gone','went'], ans: 3, exp: 'go의 과거형은 불규칙 변화로 "went"입니다.' },
+  { subject: '영어', grade: '3학년', title: 'Body Parts - 신체 부위', achv: '[4영01-05]', tags: ['신체','어휘'], diff: 1, min: 1,
+    q: '"눈"을 영어로 하면?', opts: ['Ear','Eye','Nose','Mouth'], ans: 1, exp: '눈은 영어로 "Eye"입니다.' },
+  { subject: '영어', grade: '4학년', title: 'Weather - 날씨 표현', achv: '[4영02-03]', tags: ['날씨','회화'], diff: 2, min: 1,
+    q: '"오늘 날씨가 어때?"를 영어로?', opts: ['How are you?','What day is it?','How is the weather?','Where are you?'], ans: 2, exp: '날씨를 물을 때 "How is the weather?"를 사용합니다.' },
+  { subject: '영어', grade: '5학년', title: 'There is / There are', achv: '[6영03-05]', tags: ['there is','문법'], diff: 2, min: 1,
+    q: '"책상 위에 책이 한 권 있다"를 영어로?', opts: ['There are a book on the desk','There is a book on the desk','A book is there on the desk','On the desk a book is'], ans: 1, exp: '단수 명사 앞에는 "There is"를 씁니다.' },
+  { subject: '영어', grade: '6학년', title: 'Comparatives - 비교급', achv: '[6영03-06]', tags: ['비교급','문법'], diff: 3, min: 2,
+    q: '"bigger"의 원급(기본형)은?', opts: ['bigg','biger','big','biggest'], ans: 2, exp: 'bigger의 원급은 "big"이고, 자음을 하나 더 쓰고 er을 붙입니다.' },
+  { subject: '영어', grade: '3학년', title: 'Fruits - 과일 단어', achv: '[4영01-06]', tags: ['과일','어휘'], diff: 1, min: 1,
+    q: '"사과"를 영어로 하면?', opts: ['Banana','Orange','Apple','Grape'], ans: 2, exp: '사과는 영어로 "Apple"입니다.' },
+  { subject: '영어', grade: '4학년', title: 'Family - 가족 호칭', achv: '[4영01-07]', tags: ['가족','어휘'], diff: 1, min: 1,
+    q: '"어머니"를 영어로 하면?', opts: ['Father','Mother','Sister','Brother'], ans: 1, exp: '어머니는 영어로 "Mother"입니다.' },
+  { subject: '영어', grade: '5학년', title: 'Like + ~ing 표현', achv: '[6영03-07]', tags: ['동명사','취미'], diff: 2, min: 1,
+    q: '"나는 노래 부르는 것을 좋아해"를 영어로?', opts: ['I like sing','I like singing','I liking sing','I singing like'], ans: 1, exp: '"like + ~ing"로 좋아하는 활동을 표현합니다.' },
+  { subject: '영어', grade: '6학년', title: 'Prepositions - 전치사', achv: '[6영03-08]', tags: ['전치사','위치'], diff: 3, min: 1,
+    q: '"상자 안에"를 영어로 하면?', opts: ['on the box','under the box','in the box','next to the box'], ans: 2, exp: '"안에"는 "in"을 사용합니다.' },
+  { subject: '영어', grade: '4학년', title: 'Food - 음식 단어', achv: '[4영01-08]', tags: ['음식','어휘'], diff: 1, min: 1,
+    q: '"빵"을 영어로 하면?', opts: ['Rice','Bread','Milk','Meat'], ans: 1, exp: '빵은 영어로 "Bread"입니다.' },
+  { subject: '영어', grade: '5학년', title: 'Seasons - 계절 표현', achv: '[6영02-03]', tags: ['계절','어휘'], diff: 1, min: 1,
+    q: '"봄"을 영어로 하면?', opts: ['Summer','Fall','Winter','Spring'], ans: 3, exp: '봄은 영어로 "Spring"입니다.' },
+  { subject: '영어', grade: '6학년', title: 'Future tense - 미래형', achv: '[6영03-09]', tags: ['미래형','will'], diff: 3, min: 1,
+    q: '"나는 내일 공부할 거야"를 영어로?', opts: ['I study tomorrow','I studied tomorrow','I will study tomorrow','I studying tomorrow'], ans: 2, exp: '미래를 나타낼 때 "will + 동사원형"을 씁니다.' },
+  { subject: '영어', grade: '3학년', title: 'School Supplies - 학용품', achv: '[4영01-09]', tags: ['학용품','어휘'], diff: 1, min: 1,
+    q: '"연필"을 영어로 하면?', opts: ['Pen','Pencil','Eraser','Ruler'], ans: 1, exp: '연필은 영어로 "Pencil"입니다.' },
+  { subject: '영어', grade: '4학년', title: 'Feelings - 감정 표현', achv: '[4영02-04]', tags: ['감정','회화'], diff: 2, min: 1,
+    q: '"기분이 어때?"라고 물을 때 쓰는 표현은?', opts: ['How old are you?','How do you feel?','What is this?','Where do you live?'], ans: 1, exp: '감정을 물을 때 "How do you feel?"을 씁니다.' },
+  { subject: '영어', grade: '5학년', title: 'Directions - 길 안내', achv: '[6영02-04]', tags: ['길안내','회화'], diff: 3, min: 2,
+    q: '"왼쪽으로 도세요"를 영어로?', opts: ['Go straight','Turn right','Turn left','Stop here'], ans: 2, exp: '왼쪽으로 돌라고 할 때 "Turn left"를 씁니다.' },
+];
+
+let created = 0;
+const insertTransaction = db.transaction(() => {
+  for (const item of quizData) {
+    try {
+      const info = insertContent.run(
+        creatorId,
+        item.title,
+        item.q.substring(0, 50) + '...',
+        item.subject,
+        item.grade,
+        JSON.stringify(item.tags),
+        item.achv,
+        item.diff,
+        item.min
+      );
+      const contentId = info.lastInsertRowid;
+      insertQuestion.run(
+        contentId,
+        item.q,
+        JSON.stringify(item.opts),
+        item.ans,
+        item.exp
+      );
+      created++;
+    } catch (err) {
+      console.error(`오류 (${item.title}):`, err.message);
+    }
+  }
+});
+
+insertTransaction();
+console.log(`\n✅ ${created}개 개별 문항이 공개콘텐츠에 등록되었습니다.`);
+console.log(`과목별 분포:`);
+const subjects = {};
+quizData.forEach(q => { subjects[q.subject] = (subjects[q.subject] || 0) + 1; });
+Object.entries(subjects).forEach(([s, c]) => console.log(`  ${s}: ${c}문항`));
+
+process.exit(0);

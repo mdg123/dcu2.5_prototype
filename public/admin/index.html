@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>다채움 - 관리자</title>
+  <link rel="stylesheet" href="/css/common-nav.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Pretendard','Noto Sans KR',system-ui,sans-serif; background: #F5F7FA; color: #1A1A2E; }
+    .admin-layout { display: grid; grid-template-columns: 240px 1fr; min-height: calc(100vh - 60px); }
+
+    .admin-sidebar { background: #1e293b; color: #e2e8f0; padding: 24px 0; }
+    .admin-sidebar h2 { font-size: 16px; font-weight: 700; padding: 0 20px 20px; border-bottom: 1px solid #334155; display: flex; align-items: center; gap: 8px; }
+    .admin-sidebar h2 i { color: #f59e0b; }
+    .admin-nav { list-style: none; margin-top: 8px; }
+    .admin-nav li { padding: 12px 20px; cursor: pointer; font-size: 14px; display: flex; align-items: center; gap: 10px; transition: background 0.15s; }
+    .admin-nav li:hover { background: #334155; }
+    .admin-nav li.active { background: #2563eb; color: #fff; font-weight: 600; }
+    .admin-nav li i { width: 18px; text-align: center; }
+
+    .admin-main { padding: 28px 32px; overflow-y: auto; }
+    .page-title { font-size: 20px; font-weight: 700; margin-bottom: 20px; display: flex; align-items: center; gap: 10px; }
+    .page-title i { color: #2563eb; }
+
+    .stat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px; }
+    .stat-card { background: #fff; border-radius: 12px; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
+    .stat-card .label { font-size: 12px; color: #6B7280; margin-bottom: 6px; }
+    .stat-card .value { font-size: 28px; font-weight: 700; color: #1A1A2E; }
+    .stat-card .value.blue { color: #2563eb; }
+    .stat-card .value.green { color: #10b981; }
+    .stat-card .value.purple { color: #8b5cf6; }
+    .stat-card .value.orange { color: #f59e0b; }
+    .stat-card .value.red { color: #ef4444; }
+
+    .card { background: #fff; border-radius: 12px; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); margin-bottom: 16px; }
+    .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+    .card-header h3 { font-size: 16px; font-weight: 600; }
+
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th { text-align: left; padding: 10px 12px; background: #f9fafb; border-bottom: 2px solid #e5e7eb; font-weight: 600; color: #374151; }
+    td { padding: 10px 12px; border-bottom: 1px solid #f3f4f6; }
+    tr:hover { background: #f9fafb; }
+
+    .badge { padding: 3px 10px; border-radius: 6px; font-size: 11px; font-weight: 600; }
+    .badge-student { background: #dbeafe; color: #2563eb; }
+    .badge-teacher { background: #dcfce7; color: #16a34a; }
+    .badge-admin { background: #fef3c7; color: #d97706; }
+    .badge-pending { background: #fff7ed; color: #ea580c; }
+    .badge-published { background: #dcfce7; color: #16a34a; }
+    .badge-rejected { background: #fee2e2; color: #dc2626; }
+    .badge-draft { background: #f3f4f6; color: #6B7280; }
+    .badge-archived { background: #e5e7eb; color: #4b5563; }
+
+    .btn { padding: 6px 14px; border: none; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer; font-family: inherit; }
+    .btn-approve { background: #10b981; color: #fff; }
+    .btn-approve:hover { background: #059669; }
+    .btn-reject { background: #ef4444; color: #fff; }
+    .btn-reject:hover { background: #dc2626; }
+    .btn-sm { padding: 4px 10px; font-size: 11px; }
+    .btn-outline { background: #fff; color: #374151; border: 1px solid #d1d5db; }
+    .btn-outline:hover { background: #f3f4f6; }
+
+    .filter-bar { display: flex; gap: 10px; margin-bottom: 16px; flex-wrap: wrap; }
+    .filter-bar select { padding: 8px 12px; border: 1.5px solid #d1d5db; border-radius: 8px; font-size: 13px; font-family: inherit; }
+
+    .admin-section { display: none; }
+    .admin-section.active { display: block; }
+
+    @media (max-width: 768px) {
+      .admin-layout { grid-template-columns: 1fr; }
+      .admin-sidebar { display: none; }
+      .stat-grid { grid-template-columns: repeat(2, 1fr); }
+    }
+  </style>
+</head>
+<body>
+  <script src="/js/common-nav.js"></script>
+  <div class="admin-layout" id="adminLayout" style="display:none;">
+    <aside class="admin-sidebar">
+      <h2><i class="fas fa-shield-alt"></i> 관리자</h2>
+      <ul class="admin-nav">
+        <li class="active" data-section="dashboard"><i class="fas fa-chart-pie"></i> 대시보드</li>
+        <li data-section="users"><i class="fas fa-users"></i> 사용자 관리</li>
+        <li data-section="contents"><i class="fas fa-file-alt"></i> 콘텐츠 관리</li>
+        <li data-section="lessons"><i class="fas fa-chalkboard-teacher"></i> 수업 관리</li>
+        <li data-section="learning"><i class="fas fa-book-reader"></i> 학습 배포</li>
+      </ul>
+    </aside>
+    <main class="admin-main">
+
+      <!-- 대시보드 -->
+      <section id="sec-dashboard" class="admin-section active">
+        <div class="page-title"><i class="fas fa-chart-pie"></i> 대시보드</div>
+        <div class="stat-grid" id="statsGrid"></div>
+      </section>
+
+      <!-- 사용자 관리 -->
+      <section id="sec-users" class="admin-section">
+        <div class="page-title"><i class="fas fa-users"></i> 사용자 관리</div>
+        <div class="filter-bar">
+          <select id="userRoleFilter" onchange="loadUsers()">
+            <option value="">전체 역할</option>
+            <option value="student">학생</option>
+            <option value="teacher">교사</option>
+            <option value="admin">관리자</option>
+          </select>
+        </div>
+        <div class="card">
+          <table>
+            <thead><tr><th>ID</th><th>아이디</th><th>이름</th><th>역할</th><th>가입일</th><th>마지막 로그인</th><th>관리</th></tr></thead>
+            <tbody id="userTableBody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- 콘텐츠 관리 -->
+      <section id="sec-contents" class="admin-section">
+        <div class="page-title"><i class="fas fa-file-alt"></i> 콘텐츠 관리</div>
+        <div class="filter-bar">
+          <select id="contentStatusFilter" onchange="loadContents()">
+            <option value="">전체 상태</option>
+            <option value="pending">승인 대기</option>
+            <option value="published">공개</option>
+            <option value="draft">임시저장</option>
+            <option value="rejected">거절</option>
+          </select>
+        </div>
+        <div class="card">
+          <table>
+            <thead><tr><th>ID</th><th>제목</th><th>유형</th><th>작성자</th><th>상태</th><th>생성일</th><th>관리</th></tr></thead>
+            <tbody id="contentTableBody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- 수업 관리 -->
+      <section id="sec-lessons" class="admin-section">
+        <div class="page-title"><i class="fas fa-chalkboard-teacher"></i> 수업 관리</div>
+        <div class="filter-bar">
+          <select id="lessonStatusFilter" onchange="loadLessons()">
+            <option value="">전체 상태</option>
+            <option value="pending">승인 대기</option>
+            <option value="published">공개</option>
+            <option value="archived">비공개</option>
+            <option value="draft">임시저장</option>
+            <option value="rejected">거절</option>
+          </select>
+        </div>
+        <div class="card">
+          <table>
+            <thead><tr><th>ID</th><th>수업 제목</th><th>클래스</th><th>교사</th><th>상태</th><th>수업일</th><th>생성일</th><th>관리</th></tr></thead>
+            <tbody id="lessonTableBody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- 학습 배포 -->
+      <section id="sec-learning" class="admin-section">
+        <div class="page-title"><i class="fas fa-book-reader"></i> 오늘의 학습 배포</div>
+        <div class="card" style="margin-bottom:20px;">
+          <h3 style="font-size:16px;font-weight:600;margin-bottom:14px;"><i class="fas fa-plus-circle" style="color:#2563eb;"></i> 새 학습 배포</h3>
+          <div style="display:grid;gap:12px;">
+            <div>
+              <label style="display:block;font-size:13px;font-weight:600;color:#374151;margin-bottom:4px;">제목</label>
+              <input type="text" id="assignTitle" placeholder="예: 3월 15일 오늘의 학습" style="width:100%;padding:10px 12px;border:1.5px solid #d1d5db;border-radius:8px;font-size:14px;font-family:inherit;">
+            </div>
+            <div>
+              <label style="display:block;font-size:13px;font-weight:600;color:#374151;margin-bottom:4px;">설명</label>
+              <textarea id="assignDesc" rows="2" placeholder="학습 설명" style="width:100%;padding:10px 12px;border:1.5px solid #d1d5db;border-radius:8px;font-size:14px;font-family:inherit;"></textarea>
+            </div>
+            <div>
+              <label style="display:block;font-size:13px;font-weight:600;color:#374151;margin-bottom:4px;">학습 목표 (줄바꿈으로 구분)</label>
+              <textarea id="assignGoals" rows="4" placeholder="국어: 시의 운율 분석하기&#10;수학: 분수의 덧셈 연습 문제 10개&#10;사회: 지역 특산물 조사하기" style="width:100%;padding:10px 12px;border:1.5px solid #d1d5db;border-radius:8px;font-size:14px;font-family:inherit;"></textarea>
+            </div>
+            <div style="display:flex;gap:10px;align-items:flex-end;">
+              <div>
+                <label style="display:block;font-size:13px;font-weight:600;color:#374151;margin-bottom:4px;">배포 날짜</label>
+                <input type="date" id="assignDate" style="padding:10px 12px;border:1.5px solid #d1d5db;border-radius:8px;font-size:14px;font-family:inherit;">
+              </div>
+              <div>
+                <label style="display:block;font-size:13px;font-weight:600;color:#374151;margin-bottom:4px;">대상 클래스</label>
+                <select id="assignClassSelect" style="padding:10px 12px;border:1.5px solid #d1d5db;border-radius:8px;font-size:14px;font-family:inherit;">
+                  <option value="all">전체 클래스</option>
+                </select>
+              </div>
+              <button class="btn btn-approve" style="padding:10px 20px;font-size:14px;" onclick="distributeAssignment()"><i class="fas fa-paper-plane"></i> 배포하기</button>
+            </div>
+          </div>
+        </div>
+        <div class="card">
+          <h3 style="font-size:16px;font-weight:600;margin-bottom:14px;"><i class="fas fa-history" style="color:#2563eb;"></i> 배포 이력</h3>
+          <div id="assignHistoryList" style="color:#9ca3af;font-size:13px;">불러오는 중...</div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <script>
+    function escHtml(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+    // 네비게이션
+    document.querySelectorAll('.admin-nav li').forEach(li => {
+      li.addEventListener('click', () => {
+        document.querySelectorAll('.admin-nav li').forEach(l => l.classList.remove('active'));
+        document.querySelectorAll('.admin-section').forEach(s => s.classList.remove('active'));
+        li.classList.add('active');
+        document.getElementById('sec-' + li.dataset.section).classList.add('active');
+        if (li.dataset.section === 'users') loadUsers();
+        if (li.dataset.section === 'contents') loadContents();
+        if (li.dataset.section === 'lessons') loadLessons();
+        if (li.dataset.section === 'learning') loadLearningSection();
+      });
+    });
+
+    // 대시보드
+    async function loadStats() {
+      const res = await fetch('/api/admin/stats');
+      const data = await res.json();
+      if (!data.success) return;
+      const s = data.stats;
+      document.getElementById('statsGrid').innerHTML = `
+        <div class="stat-card"><div class="label">전체 사용자</div><div class="value blue">${s.totalUsers}</div></div>
+        <div class="stat-card"><div class="label">학생</div><div class="value green">${s.studentCount}</div></div>
+        <div class="stat-card"><div class="label">교사</div><div class="value purple">${s.teacherCount}</div></div>
+        <div class="stat-card"><div class="label">클래스</div><div class="value blue">${s.classCount}</div></div>
+        <div class="stat-card"><div class="label">콘텐츠</div><div class="value">${s.contentCount}</div></div>
+        <div class="stat-card"><div class="label">승인 대기 (콘텐츠+수업)</div><div class="value ${(s.pendingTotal ?? s.pendingContents) > 0 ? 'red' : 'green'}">${s.pendingTotal ?? s.pendingContents}<span style="font-size:11px;font-weight:normal;color:var(--gray-500);margin-left:6px;">콘 ${s.pendingContents} · 수 ${s.pendingLessons ?? 0}</span></div></div>
+        <div class="stat-card"><div class="label">학습 로그 (누적)</div><div class="value orange">${s.logCount}<span style="font-size:11px;font-weight:normal;color:var(--gray-500);margin-left:6px;">오늘 ${s.logToday ?? 0} · 이번주 ${s.logWeek ?? 0}</span></div></div>
+      `;
+    }
+
+    // 사용자 관리
+    async function loadUsers() {
+      const role = document.getElementById('userRoleFilter').value;
+      const res = await fetch(`/api/admin/users?role=${role}`);
+      const data = await res.json();
+      if (!data.success) return;
+      const roleLabel = { student: '학생', teacher: '교사', admin: '관리자' };
+      document.getElementById('userTableBody').innerHTML = data.users.map(u => `
+        <tr>
+          <td>${u.id}</td>
+          <td>${escHtml(u.username)}</td>
+          <td>${escHtml(u.display_name)}</td>
+          <td><span class="badge badge-${u.role}">${roleLabel[u.role] || u.role}</span></td>
+          <td>${u.created_at ? u.created_at.slice(0, 10) : '-'}</td>
+          <td>${u.last_login_at ? u.last_login_at.slice(0, 16) : '-'}</td>
+          <td style="white-space:nowrap;">
+            <select class="btn btn-outline btn-sm" onchange="changeUserRole(${u.id}, this.value)" style="font-size:11px;">
+              <option value="">역할 변경</option>
+              <option value="student">학생</option>
+              <option value="teacher">교사</option>
+              <option value="admin">관리자</option>
+            </select>
+            <button class="btn btn-reject btn-sm" onclick="deleteUser(${u.id}, '${escHtml(u.display_name)}')" title="삭제"><i class="fas fa-trash"></i></button>
+          </td>
+        </tr>
+      `).join('');
+    }
+
+    async function changeUserRole(userId, role) {
+      if (!role) return;
+      if (!confirm(`이 사용자의 역할을 "${role}"(으)로 변경하시겠습니까?`)) return;
+      const res = await fetch(`/api/admin/users/${userId}`, {
+        method: 'PUT', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ role })
+      });
+      const data = await res.json();
+      if (data.success) loadUsers();
+      else alert(data.message);
+    }
+
+    async function deleteUser(userId, name) {
+      if (!confirm(`"${name}" 사용자를 삭제하시겠습니까? 이 작업은 취소할 수 없습니다.`)) return;
+      const res = await fetch(`/api/admin/users/${userId}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (data.success) { loadUsers(); loadStats(); } else alert(data.message);
+    }
+
+    // 콘텐츠 관리
+    async function loadContents() {
+      const status = document.getElementById('contentStatusFilter').value;
+      const res = await fetch(`/api/admin/contents?status=${status}`);
+      const data = await res.json();
+      if (!data.success) return;
+      const statusLabel = { pending: '승인 대기', published: '공개', draft: '임시저장', rejected: '거절' };
+      document.getElementById('contentTableBody').innerHTML = data.contents.map(c => `
+        <tr>
+          <td>${c.id}</td>
+          <td>${escHtml(c.title)}</td>
+          <td>${escHtml(c.content_type || '-')}</td>
+          <td>${escHtml(c.creator_name)}</td>
+          <td><span class="badge badge-${c.status}">${statusLabel[c.status] || c.status}</span></td>
+          <td>${c.created_at ? c.created_at.slice(0, 10) : '-'}</td>
+          <td style="white-space:nowrap;">
+            ${c.status === 'pending' ? `
+              <button class="btn btn-approve btn-sm" onclick="approveContent(${c.id})"><i class="fas fa-check"></i> 승인</button>
+              <button class="btn btn-reject btn-sm" onclick="rejectContent(${c.id})"><i class="fas fa-times"></i> 거절</button>
+            ` : c.status === 'rejected' ? `
+              <button class="btn btn-approve btn-sm" onclick="approveContent(${c.id})"><i class="fas fa-check"></i> 승인</button>
+            ` : ''}
+            <button class="btn btn-reject btn-sm" onclick="deleteContent(${c.id})"><i class="fas fa-trash"></i></button>
+          </td>
+        </tr>
+      `).join('');
+    }
+
+    async function approveContent(id) {
+      if (!confirm('이 콘텐츠를 승인하시겠습니까?')) return;
+      const res = await fetch(`/api/admin/contents/${id}/approve`, { method: 'PUT' });
+      const data = await res.json();
+      if (data.success) { loadContents(); loadStats(); } else alert(data.message);
+    }
+
+    async function rejectContent(id) {
+      if (!confirm('이 콘텐츠를 거절하시겠습니까?')) return;
+      const res = await fetch(`/api/admin/contents/${id}/reject`, { method: 'PUT' });
+      const data = await res.json();
+      if (data.success) { loadContents(); loadStats(); } else alert(data.message);
+    }
+
+    async function deleteContent(id) {
+      if (!confirm('이 콘텐츠를 삭제하시겠습니까? 이 작업은 취소할 수 없습니다.')) return;
+      const res = await fetch(`/api/admin/contents/${id}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (data.success) { loadContents(); loadStats(); } else alert(data.message);
+    }
+
+    // ======== 수업 관리 ========
+    async function loadLessons() {
+      const status = document.getElementById('lessonStatusFilter').value;
+      const res = await fetch(`/api/admin/lessons?status=${status}`);
+      const data = await res.json();
+      if (!data.success) return;
+      const statusLabel = { pending: '승인 대기', published: '공개', archived: '비공개', draft: '임시저장', rejected: '거절', scheduled: '예약' };
+      const statusBadge = { pending: 'pending', published: 'published', archived: 'draft', draft: 'draft', rejected: 'rejected', scheduled: 'pending' };
+      document.getElementById('lessonTableBody').innerHTML = data.lessons.map(l => `
+        <tr>
+          <td>${l.id}</td>
+          <td>${escHtml(l.title)}</td>
+          <td>${escHtml(l.class_name || '-')}</td>
+          <td>${escHtml(l.teacher_name || '-')}</td>
+          <td><span class="badge badge-${statusBadge[l.status] || 'draft'}">${statusLabel[l.status] || l.status}</span></td>
+          <td>${l.lesson_date || '-'}</td>
+          <td>${l.created_at ? l.created_at.slice(0, 10) : '-'}</td>
+          <td style="white-space:nowrap;">
+            ${l.status === 'pending' ? `
+              <button class="btn btn-approve btn-sm" onclick="approveLesson(${l.id})"><i class="fas fa-check"></i> 승인</button>
+              <button class="btn btn-reject btn-sm" onclick="rejectLesson(${l.id})"><i class="fas fa-times"></i> 거절</button>
+            ` : l.status === 'rejected' ? `
+              <button class="btn btn-approve btn-sm" onclick="approveLesson(${l.id})"><i class="fas fa-check"></i> 승인</button>
+            ` : ''}
+            <button class="btn btn-reject btn-sm" onclick="deleteLesson(${l.id})"><i class="fas fa-trash"></i></button>
+          </td>
+        </tr>
+      `).join('');
+    }
+
+    async function approveLesson(id) {
+      if (!confirm('이 수업을 승인하시겠습니까?')) return;
+      const res = await fetch(`/api/admin/lessons/${id}/approve`, { method: 'PUT' });
+      const data = await res.json();
+      if (data.success) { loadLessons(); loadStats(); } else alert(data.message);
+    }
+
+    async function rejectLesson(id) {
+      if (!confirm('이 수업을 거절하시겠습니까?')) return;
+      const res = await fetch(`/api/admin/lessons/${id}/reject`, { method: 'PUT' });
+      const data = await res.json();
+      if (data.success) { loadLessons(); loadStats(); } else alert(data.message);
+    }
+
+    async function deleteLesson(id) {
+      if (!confirm('이 수업을 삭제하시겠습니까? 이 작업은 취소할 수 없습니다.')) return;
+      const res = await fetch(`/api/admin/lessons/${id}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (data.success) { loadLessons(); loadStats(); } else alert(data.message);
+    }
+
+    // 학습 배포
+    async function loadLearningSection() {
+      // 날짜 기본값
+      document.getElementById('assignDate').value = new Date().toISOString().slice(0, 10);
+      // 클래스 목록 로드 (admin 전용 API 사용)
+      try {
+        const classRes = await fetch('/api/admin/classes?limit=200');
+        const classData = await classRes.json();
+        const sel = document.getElementById('assignClassSelect');
+        sel.innerHTML = '<option value="all">전체 클래스</option>';
+        (classData.classes || []).forEach(c => {
+          sel.innerHTML += `<option value="${c.id}">${escHtml(c.name)}</option>`;
+        });
+      } catch (e) {}
+      // 배포 이력 로드
+      loadAssignHistory();
+    }
+
+    async function loadAssignHistory() {
+      const box = document.getElementById('assignHistoryList');
+      try {
+        const res = await fetch('/api/admin/assignments?limit=20');
+        const data = await res.json();
+        if (!data.success || !Array.isArray(data.assignments) || data.assignments.length === 0) {
+          box.innerHTML = '<div style="padding:14px;text-align:center;color:#9ca3af;">배포 이력이 없습니다.</div>';
+          return;
+        }
+        box.innerHTML = `
+          <table>
+            <thead><tr><th>ID</th><th>제목</th><th>클래스</th><th>배포자</th><th>배포일</th><th>생성일</th></tr></thead>
+            <tbody>
+              ${data.assignments.map(a => `
+                <tr>
+                  <td>${a.id}</td>
+                  <td>${escHtml(a.title)}</td>
+                  <td>${escHtml(a.class_name || '-')}</td>
+                  <td>${escHtml(a.teacher_name || '-')}</td>
+                  <td>${a.assign_date || '-'}</td>
+                  <td>${a.created_at ? a.created_at.slice(0, 16) : '-'}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>`;
+      } catch (err) {
+        box.innerHTML = '<div style="padding:14px;text-align:center;color:#ef4444;">이력 로드 실패</div>';
+      }
+    }
+
+    async function distributeAssignment() {
+      const title = document.getElementById('assignTitle').value.trim();
+      if (!title) return alert('제목을 입력하세요.');
+      const goalsText = document.getElementById('assignGoals').value.trim();
+      const goals = goalsText ? goalsText.split('\n').filter(Boolean).map(g => ({ text: g.trim(), completed: false })) : [];
+      const body = {
+        title,
+        description: document.getElementById('assignDesc').value.trim(),
+        goals,
+        assign_date: document.getElementById('assignDate').value
+      };
+      const classId = document.getElementById('assignClassSelect').value;
+      let url, method = 'POST';
+      if (classId === 'all') {
+        url = '/api/learning/assign-all';
+      } else {
+        url = `/api/learning/assign/${classId}`;
+      }
+      const res = await fetch(url, { method, headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
+      const data = await res.json();
+      if (data.success) {
+        alert(data.message || '배포 완료!');
+        document.getElementById('assignTitle').value = '';
+        document.getElementById('assignDesc').value = '';
+        document.getElementById('assignGoals').value = '';
+        loadAssignHistory();
+      } else {
+        alert(data.message);
+      }
+    }
+
+    // 초기화
+    window.addEventListener('dacheim:user-loaded', (e) => {
+      if (e.detail.role !== 'admin') {
+        alert('관리자만 접근 가능합니다.');
+        location.href = '/';
+        return;
+      }
+      document.getElementById('adminLayout').style.display = 'grid';
+      loadStats();
+    });
+  </script>
+</body>
+</html>

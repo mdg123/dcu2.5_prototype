@@ -1,0 +1,2242 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>다채움 - AI 맞춤학습</title>
+  <link rel="stylesheet" href="/css/common-nav.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      /* Design Tokens (디자이너 제안) */
+      --color-primary:#2563eb; --color-primary-600:#1d4ed8; --color-primary-50:#eff6ff;
+      --status-completed:#16a34a; --status-progress:#3b82f6; --status-diagnosing:#8b5cf6; --status-idle:#475569;
+      --color-warning:#f59e0b; --color-danger:#ef4444;
+      --color-text:#111827; --color-text-muted:#6B7280; --color-border:#e5e7eb;
+      --space-1:4px; --space-2:8px; --space-3:12px; --space-4:16px; --space-5:20px; --space-6:24px;
+      --radius-sm:6px; --radius-md:10px; --radius-lg:12px; --radius-xl:16px;
+      /* ===== 공통 UI 글자 크기 (today.html 과 동일한 스케일) ===== */
+      --fs-xs:12px; --fs-sm:13px; --fs-base:14px; --fs-md:15px; --fs-lg:16px; --fs-xl:18px; --fs-2xl:22px; --fs-3xl:28px;
+      /* Legacy 호환 */
+      --font-xs:var(--fs-xs); --font-sm:var(--fs-sm); --font-base:var(--fs-base); --font-md:var(--fs-lg); --font-lg:var(--fs-2xl); --font-xl:var(--fs-3xl);
+
+      /* Legacy tokens (호환) */
+      --primary:#4A7CFF; --primary-light:#E8F0FF; --primary-dark:#3A5FCC;
+      --accent:#FF6B6B; --accent-light:#FFE8E8;
+      --secondary:#7C4DFF; --secondary-light:#EDE7FF;
+      --success:#00C48C; --success-light:#E0FFF5;
+      --warning:#FFB800; --warning-light:#FFF8E0;
+      --gray-50:#F8FAFC; --gray-100:#F1F5F9; --gray-200:#E2E8F0; --gray-300:#CBD5E1;
+      --gray-400:#94A3B8; --gray-500:#64748B; --gray-600:#475569; --gray-700:#334155; --gray-800:#1E293B;
+      --shadow-sm:0 1px 2px rgba(0,0,0,.05); --shadow-md:0 4px 6px -1px rgba(0,0,0,.1);
+      --shadow-lg:0 10px 15px -3px rgba(0,0,0,.1);
+      --radius-sm:6px; --radius-md:10px; --radius-lg:16px; --radius-xl:24px;
+    }
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:'Pretendard','Noto Sans KR',system-ui,sans-serif;background:linear-gradient(135deg,#F0F4FF 0%,#FAFBFF 100%);color:var(--gray-800);min-height:100vh;font-size:var(--fs-base);line-height:1.5}
+
+    /* ===== Top Layout ===== */
+    .app-layout{display:flex;min-height:calc(100vh - 60px)}
+    .main-content{flex:1;padding:20px;width:100%;max-width:2400px;margin:0 auto;overflow-x:hidden}
+
+    /* ===== Page Header ===== */
+    .page-header{margin-bottom:18px}
+    .page-title{font-size:var(--fs-2xl);font-weight:700;display:flex;align-items:center;gap:12px}
+    .page-title-icon{width:38px;height:38px;background:linear-gradient(135deg,var(--secondary),var(--primary));border-radius:var(--radius-md);display:flex;align-items:center;justify-content:center;color:#fff;font-size:var(--fs-lg)}
+    .page-subtitle{font-size:var(--fs-sm);color:var(--gray-500);margin-top:4px;margin-left:50px}
+
+    /* ===== Dashboard Cards ===== */
+    .dashboard-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:18px}
+    .dash-card{background:#fff;border-radius:var(--radius-lg);padding:16px 18px;box-shadow:var(--shadow-sm);display:flex;align-items:center;gap:14px}
+    .dash-icon{width:44px;height:44px;border-radius:var(--radius-md);display:flex;align-items:center;justify-content:center;font-size:var(--fs-xl);color:#fff;flex-shrink:0}
+    .dash-label{font-size:var(--fs-xs);color:var(--gray-500);margin-bottom:3px}
+    .dash-value{font-size:24px;font-weight:700;line-height:1.1}
+    .dash-sub{font-size:var(--fs-xs);color:var(--gray-400);margin-top:2px}
+
+    /* ===== Top Tabs ===== */
+    .tab-nav{display:flex;gap:4px;background:var(--gray-100);border-radius:var(--radius-md);padding:4px;margin-bottom:18px;width:fit-content}
+    .tab-btn{padding:9px 22px;border:none;background:none;font-size:13.5px;font-weight:500;color:var(--gray-500);cursor:pointer;border-radius:var(--radius-sm);transition:all .2s;font-family:inherit;display:flex;align-items:center;gap:7px}
+    .tab-btn:hover{color:var(--gray-700)}
+    .tab-btn.active{background:#fff;color:var(--primary);box-shadow:var(--shadow-sm);font-weight:600}
+    .tab-panel{display:none}
+    .tab-panel.active{display:block}
+
+    /* ===== Map Tab: two-column inside ===== */
+    .map-layout{display:grid;grid-template-columns:296px 1fr;gap:16px;align-items:flex-start}
+
+    /* Filter Sidebar */
+    .filter-sidebar{background:#fff;border-radius:var(--radius-lg);padding:18px;box-shadow:var(--shadow-sm);position:sticky;top:12px;max-height:calc(100vh - 80px);overflow-y:auto}
+    .filter-sidebar h3{font-size:var(--fs-base);font-weight:700;color:var(--gray-700);margin-bottom:12px;display:flex;align-items:center;gap:6px}
+    .continue-card{background:linear-gradient(135deg,#E8F0FF,#D8E6FF);border-radius:var(--radius-md);padding:12px;margin-bottom:12px;cursor:pointer;border:1px solid rgba(74,124,255,.25)}
+    .continue-card:hover{box-shadow:var(--shadow-sm)}
+    .continue-label{font-size:var(--fs-xs);font-weight:700;color:var(--primary);margin-bottom:4px;display:flex;align-items:center;gap:4px}
+    .continue-title{font-size:var(--fs-sm);font-weight:600;color:var(--gray-800);line-height:1.35}
+    .continue-meta{font-size:var(--fs-xs);color:var(--primary-dark);margin-top:3px}
+    .llist-card{background:linear-gradient(135deg,#F1E8FF,#E6D8FF);border-radius:var(--radius-md);padding:12px;margin-bottom:14px;border:1px solid rgba(124,77,255,.25)}
+    .llist-card h4{font-size:var(--fs-xs);font-weight:700;color:var(--secondary);margin-bottom:8px;display:flex;align-items:center;gap:4px}
+    .llist-row{display:flex;align-items:center;gap:6px;font-size:var(--fs-xs);padding:3px 0;color:var(--gray-700);cursor:pointer}
+    .llist-row:hover{color:var(--secondary)}
+    .llist-row .dot{width:6px;height:6px;border-radius:50%;background:var(--secondary);flex-shrink:0}
+    .llist-empty{font-size:var(--fs-xs);color:var(--gray-500);font-style:italic}
+
+    .filter-group{margin-bottom:12px}
+    .filter-label{display:block;font-size:var(--fs-xs);font-weight:700;color:var(--gray-500);text-transform:uppercase;margin-bottom:6px;letter-spacing:.3px}
+    .filter-select{width:100%;padding:8px 10px;border:1px solid var(--gray-200);border-radius:var(--radius-sm);font-size:var(--fs-sm);background:#fff;color:var(--gray-700);font-family:inherit}
+    .filter-select:focus{outline:none;border-color:var(--primary)}
+    .radio-row{display:flex;gap:6px}
+    .radio-btn{flex:1;padding:7px 4px;border:1px solid var(--gray-200);border-radius:var(--radius-sm);background:#fff;font-size:var(--fs-xs);font-weight:500;color:var(--gray-600);cursor:pointer;text-align:center}
+    .radio-btn.active{background:var(--primary);color:#fff;border-color:var(--primary);font-weight:600}
+    .semester-row{display:flex;gap:6px}
+    .sem-btn{flex:1;padding:7px;border:1px solid var(--gray-200);border-radius:var(--radius-sm);background:#fff;font-size:var(--fs-xs);font-weight:500;color:var(--gray-600);cursor:pointer;text-align:center}
+    .sem-btn.active{background:var(--secondary);color:#fff;border-color:var(--secondary);font-weight:600}
+    .checkbox-group{display:flex;flex-direction:column;gap:5px}
+    .cbx-label{display:flex;align-items:center;gap:6px;font-size:var(--fs-xs);color:var(--gray-700);cursor:pointer;padding:3px 0}
+    .cbx-label input{margin:0}
+    .search-input{width:100%;padding:8px 10px;border:1px solid var(--gray-200);border-radius:var(--radius-sm);font-size:var(--fs-sm);font-family:inherit}
+    .search-input:focus{outline:none;border-color:var(--primary)}
+
+    /* Main Canvas area */
+    .map-main{background:#fff;border-radius:var(--radius-lg);box-shadow:var(--shadow-sm);overflow:hidden;display:flex;flex-direction:column;min-height:660px}
+    .map-toolbar{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--gray-100);flex-wrap:wrap}
+    .mini-toggle{display:flex;background:var(--gray-100);border-radius:var(--radius-sm);padding:3px}
+    .mini-toggle button{padding:5px 12px;border:none;background:none;font-size:var(--fs-xs);font-weight:600;color:var(--gray-500);cursor:pointer;border-radius:4px;font-family:inherit}
+    .mini-toggle button.active{background:#fff;color:var(--primary);box-shadow:var(--shadow-sm)}
+    .zoom-ctrl{display:flex;gap:4px;margin-left:auto}
+    .zoom-btn{width:30px;height:30px;border:1px solid var(--gray-200);background:#fff;border-radius:var(--radius-sm);cursor:pointer;font-size:var(--fs-xs);color:var(--gray-600);display:flex;align-items:center;justify-content:center}
+    .zoom-btn:hover{background:var(--gray-50);color:var(--primary)}
+    .zoom-level{font-size:var(--fs-xs);font-weight:600;color:var(--gray-600);padding:6px 10px;background:var(--gray-50);border-radius:var(--radius-sm);min-width:52px;text-align:center}
+    .map-legend{display:flex;gap:12px;flex-wrap:wrap;padding:8px 16px;border-bottom:1px solid var(--gray-100);background:var(--gray-50)}
+    .legend-item{display:flex;align-items:center;gap:5px;font-size:11.5px;color:var(--gray-600)}
+    .legend-dot{width:11px;height:11px;border-radius:3px;border:2px solid}
+
+    /* Canvas */
+    .map-canvas{flex:1;position:relative;overflow:hidden;background:linear-gradient(135deg,#F8FAFC,#F1F5F9);cursor:grab;min-height:720px;height:calc(100vh - 340px)}
+    .map-canvas:active{cursor:grabbing}
+    .map-canvas.drag-pan{cursor:grabbing}
+    .map-svg{position:absolute;top:0;left:0;pointer-events:none;overflow:visible}
+    .map-world{position:absolute;top:0;left:0;transform-origin:0 0}
+    .svg-node{position:absolute;background:#fff;border:2px solid var(--gray-200);border-radius:var(--radius-md);width:220px;height:130px;padding:12px;cursor:pointer;transition:transform .15s,box-shadow .15s;display:flex;flex-direction:column;gap:4px;box-shadow:var(--shadow-sm);user-select:none}
+    .svg-node:hover{transform:translateY(-2px);box-shadow:var(--shadow-md)}
+    .svg-node.status-locked{background:#F8FAFC;border-color:var(--gray-300);opacity:.7}
+    .svg-node.status-available{background:#fff;border-color:var(--gray-300)}
+    .svg-node.status-in_progress{background:var(--warning-light);border-color:var(--warning)}
+    .svg-node.status-diagnosing{background:#FFF3DC;border-color:#F59E0B}
+    .svg-node.status-completed{background:var(--success-light);border-color:var(--success)}
+    .svg-node.status-in-learning-list{border-color:var(--secondary);box-shadow:0 0 0 3px rgba(124,77,255,.12)}
+    .svg-node-top{display:flex;align-items:center;justify-content:space-between;gap:6px}
+    .svg-node-area{font-size:10.5px;font-weight:600;padding:2px 7px;border-radius:10px;background:var(--primary-light);color:var(--primary)}
+    .svg-node-grade{font-size:10.5px;color:var(--gray-500);font-weight:500}
+    .svg-node-title{font-size:var(--fs-sm);font-weight:700;color:var(--gray-800);line-height:1.3;margin-top:2px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+    .svg-node-footer{margin-top:auto;display:flex;align-items:center;justify-content:space-between;gap:4px}
+    .svg-node-status{font-size:var(--fs-sm);font-weight:700;padding:5px 12px;border-radius:10px;color:#fff}
+    .svg-node-status.locked{background:var(--gray-400)}
+    .svg-node-status.available{background:var(--primary)}
+    .svg-node-status.in_progress{background:var(--warning);color:var(--gray-800)}
+    .svg-node-status.diagnosing{background:#F59E0B}
+    .svg-node-status.completed{background:var(--success)}
+    .svg-node-bookmark{color:var(--secondary);font-size:var(--fs-xs)}
+
+    .map-empty{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;color:var(--gray-400);gap:8px}
+    .map-empty i{font-size:44px;color:var(--gray-300)}
+    .map-empty p{font-size:var(--fs-base)}
+
+    /* List view */
+    .list-view{padding:16px;display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px;overflow-y:auto;max-height:620px}
+    .list-card{background:#fff;border:2px solid var(--gray-200);border-radius:var(--radius-md);padding:14px;cursor:pointer;transition:all .15s}
+    .list-card:hover{border-color:var(--primary);box-shadow:var(--shadow-md)}
+    .list-card.status-completed{border-color:var(--success);background:var(--success-light)}
+    .list-card.status-in_progress{border-color:var(--warning);background:var(--warning-light)}
+    .list-card.status-diagnosing{border-color:#F59E0B;background:#FFF8E8}
+    .list-card.status-locked{opacity:.7}
+    .list-card-header{display:flex;align-items:center;gap:6px;margin-bottom:8px;flex-wrap:wrap}
+    .list-card-title{font-size:var(--fs-base);font-weight:700;color:var(--gray-800);margin-bottom:4px;line-height:1.3}
+    .list-card-meta{font-size:var(--fs-xs);color:var(--gray-500)}
+    .list-card-progress{height:4px;background:var(--gray-200);border-radius:2px;overflow:hidden;margin-top:8px}
+    .list-card-progress-fill{height:100%;background:var(--primary);border-radius:2px}
+
+    /* Drawer → Center Modal */
+    .drawer-overlay{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:90;display:none;backdrop-filter:blur(2px)}
+    .drawer-overlay.show{display:block}
+    .drawer{position:fixed;top:50%;left:50%;width:92vw;max-width:940px;max-height:88vh;background:#fff;border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.25);z-index:100;opacity:0;pointer-events:none;transform:translate(-50%,-50%) scale(.95);transition:opacity .2s ease,transform .2s ease;display:flex;flex-direction:column;overflow:hidden;border-top:4px solid var(--primary)}
+    .drawer.show{opacity:1;pointer-events:auto;transform:translate(-50%,-50%) scale(1)}
+    .drawer-header{padding:18px 22px 14px;display:flex;align-items:flex-start;justify-content:space-between;gap:16px;border-bottom:1px solid var(--gray-100)}
+    .drawer-head-info{flex:1}
+    .drawer-badges{display:flex;gap:6px;margin-bottom:6px;flex-wrap:wrap}
+    .drawer-badge{padding:3px 10px;border-radius:12px;font-size:var(--fs-xs);font-weight:600}
+    .drawer-badge.grade{background:linear-gradient(135deg,var(--primary),var(--secondary));color:#fff}
+    .drawer-badge.area{background:var(--secondary-light);color:var(--secondary)}
+    .drawer-badge.status{color:#fff}
+    .drawer-badge.status.locked{background:var(--gray-400)}
+    .drawer-badge.status.available{background:var(--primary)}
+    .drawer-badge.status.in_progress{background:var(--warning);color:var(--gray-800)}
+    .drawer-badge.status.diagnosing{background:#F59E0B}
+    .drawer-badge.status.completed{background:var(--success)}
+    .drawer-title{font-size:var(--fs-xl);font-weight:700;color:var(--gray-800);margin-bottom:4px}
+    .drawer-subtitle{font-size:12.5px;color:var(--gray-500)}
+    .drawer-close{width:34px;height:34px;background:var(--gray-100);border:none;border-radius:50%;cursor:pointer;color:var(--gray-600);display:flex;align-items:center;justify-content:center;font-size:var(--fs-base);flex-shrink:0}
+    .drawer-close:hover{background:var(--gray-200)}
+    .drawer-tabs{display:flex;gap:4px;padding:10px 22px;border-bottom:1px solid var(--gray-100);background:var(--gray-50)}
+    .drawer-tab{padding:7px 16px;border:none;background:none;font-size:var(--fs-sm);font-weight:500;color:var(--gray-500);cursor:pointer;border-radius:var(--radius-sm);font-family:inherit;display:flex;align-items:center;gap:5px}
+    .drawer-tab.active{background:#fff;color:var(--primary);font-weight:600;box-shadow:var(--shadow-sm)}
+    .drawer-body{flex:1;padding:18px 22px;overflow-y:auto}
+    .drawer-section{margin-bottom:16px}
+    .drawer-section-label{font-size:var(--fs-xs);font-weight:700;color:var(--gray-500);text-transform:uppercase;margin-bottom:6px;letter-spacing:.3px}
+    .drawer-text{font-size:var(--fs-sm);color:var(--gray-700);line-height:1.6}
+    .progress-row{display:flex;align-items:center;gap:10px;margin-top:6px}
+    .progress-bar{flex:1;height:8px;background:var(--gray-200);border-radius:4px;overflow:hidden}
+    .progress-fill{height:100%;background:linear-gradient(90deg,var(--primary),var(--secondary));border-radius:4px}
+    .progress-text{font-size:var(--fs-xs);font-weight:700;color:var(--primary);min-width:40px;text-align:right}
+
+    .video-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px}
+    .video-card{background:var(--gray-50);border:1px solid var(--gray-200);border-radius:var(--radius-md);padding:10px;cursor:pointer;transition:.15s}
+    .video-card:hover{border-color:var(--primary);box-shadow:var(--shadow-sm)}
+    .video-thumb{position:relative;background:linear-gradient(135deg,var(--primary-dark),var(--secondary));height:110px;border-radius:var(--radius-sm);display:flex;align-items:center;justify-content:center;color:#fff;font-size:26px;margin-bottom:8px;overflow:hidden}
+    .video-duration{position:absolute;bottom:6px;right:6px;background:rgba(0,0,0,.65);color:#fff;font-size:10.5px;padding:2px 6px;border-radius:3px;font-weight:600}
+    .video-progress-bar{position:absolute;bottom:0;left:0;right:0;height:3px;background:rgba(255,255,255,.25)}
+    .video-progress-bar>div{height:100%;background:var(--accent)}
+    .video-title{font-size:var(--fs-sm);font-weight:600;color:var(--gray-800);margin-bottom:4px;line-height:1.3}
+    .video-meta{display:flex;justify-content:space-between;align-items:center;font-size:var(--fs-xs);color:var(--gray-500)}
+    .video-actions{display:flex;gap:6px;margin-top:6px}
+    .video-actions .mini-btn{flex:1;padding:5px;font-size:var(--fs-xs);border:1px solid var(--gray-200);background:#fff;border-radius:4px;cursor:pointer;color:var(--gray-600)}
+    .video-actions .mini-btn:hover{border-color:var(--primary);color:var(--primary)}
+
+    .problem-list{display:flex;flex-direction:column;gap:8px}
+    .problem-row{background:var(--gray-50);border:1px solid var(--gray-200);border-radius:var(--radius-md);padding:12px 14px;display:flex;align-items:center;gap:12px}
+    .problem-row:hover{border-color:var(--primary)}
+    .problem-info{flex:1}
+    .problem-title{font-size:var(--fs-sm);font-weight:600;color:var(--gray-800);margin-bottom:2px}
+    .problem-meta{font-size:var(--fs-xs);color:var(--gray-500);display:flex;gap:10px}
+    .diff-badge{padding:2px 8px;border-radius:4px;font-size:var(--fs-xs);font-weight:700}
+    .diff-badge.easy{background:var(--success-light);color:#0F6E4E}
+    .diff-badge.medium{background:var(--warning-light);color:#916200}
+    .diff-badge.hard{background:var(--accent-light);color:#A63030}
+    .problem-actions{display:flex;gap:6px;flex-shrink:0}
+    .btn-mini{padding:6px 12px;font-size:var(--fs-xs);border:none;border-radius:var(--radius-sm);cursor:pointer;font-weight:600;font-family:inherit}
+    .btn-mini.primary{background:var(--primary);color:#fff}
+    .btn-mini.ghost{background:var(--gray-100);color:var(--gray-600)}
+    .btn-mini.report{background:#fff;color:var(--accent);border:1px solid var(--accent-light)}
+
+    .drawer-footer{padding:14px 22px;border-top:1px solid var(--gray-100);background:#fff;display:flex;gap:10px}
+    .dual-btn{flex:1;padding:14px 16px;border:2px solid;border-radius:var(--radius-md);font-size:var(--fs-base);font-weight:700;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:8px;transition:.15s}
+    .dual-btn.diag{border-color:var(--warning);background:linear-gradient(135deg,#FFF8E0,#FFE8B0);color:#8B6200}
+    .dual-btn.diag:hover{background:linear-gradient(135deg,#FFE8B0,#FFD880)}
+    .dual-btn.direct{border-color:var(--primary);background:linear-gradient(135deg,#E8F0FF,#D0DFFF);color:var(--primary-dark)}
+    .dual-btn.direct:hover{background:linear-gradient(135deg,#D0DFFF,#B8CFFF)}
+    .dual-btn.bookmark{border-color:var(--secondary);background:#fff;color:var(--secondary);flex:0 0 auto;padding:14px 18px}
+    .dual-btn.bookmark.active{background:var(--secondary);color:#fff}
+
+    /* Modal (problems, report, diag start picker) */
+    .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:200;display:none;align-items:center;justify-content:center;padding:24px}
+    .modal-overlay.show{display:flex}
+    .modal{background:#fff;border-radius:var(--radius-lg);max-width:920px;width:100%;max-height:92vh;overflow-y:auto;box-shadow:var(--shadow-lg)}
+    .modal.modal-lg{max-width:1100px}
+    .modal .modal-header{padding:22px 28px}
+    .modal .modal-body{padding:24px 28px 28px}
+    .modal .modal-footer{padding:18px 28px}
+    .modal-title{font-size:20px!important;font-weight:700}
+    .modal-header{padding:18px 22px;border-bottom:1px solid var(--gray-100);display:flex;align-items:center;justify-content:space-between}
+    .modal-title{font-size:var(--fs-lg);font-weight:700;color:var(--gray-800);display:flex;align-items:center;gap:8px}
+    .modal-body{padding:22px}
+    .modal-actions{padding:14px 22px;border-top:1px solid var(--gray-100);display:flex;justify-content:flex-end;gap:8px}
+
+    /* Problem solve UI */
+    .solve-question{font-size:var(--fs-2xl);font-weight:700;color:var(--gray-800);line-height:1.55;margin-bottom:24px;padding:24px 28px;background:var(--gray-50);border-radius:var(--radius-lg);border-left:5px solid var(--primary)}
+    .solve-options{display:flex;flex-direction:column;gap:12px}
+    .solve-option{padding:18px 22px;border:2px solid var(--gray-200);border-radius:var(--radius-md);cursor:pointer;display:flex;align-items:center;gap:14px;background:#fff;transition:all .15s}
+    .solve-option:hover{border-color:var(--primary);background:var(--primary-light);transform:translateX(2px)}
+    .solve-option.selected{border-color:var(--primary);background:var(--primary-light)}
+    .solve-option.correct{border-color:var(--success);background:var(--success-light)}
+    .solve-option.wrong{border-color:var(--accent);background:var(--accent-light)}
+    .solve-option-num{width:36px;height:36px;border-radius:50%;background:var(--gray-100);display:flex;align-items:center;justify-content:center;font-size:var(--fs-lg);font-weight:700;color:var(--gray-700);flex-shrink:0}
+    .solve-option.selected .solve-option-num{background:var(--primary);color:#fff}
+    .solve-option.correct .solve-option-num{background:var(--success);color:#fff}
+    .solve-option.wrong .solve-option-num{background:var(--accent);color:#fff}
+    .solve-option-text{font-size:17px;color:var(--gray-700);font-weight:500}
+    .solve-explain{margin-top:22px;padding:20px 22px;background:var(--primary-light);border-radius:var(--radius-md);font-size:var(--fs-md);color:var(--gray-700);line-height:1.7;border-left:5px solid var(--primary)}
+    .solve-explain strong{font-size:17px}
+    .clear-top3{margin-top:14px;padding:12px 16px;background:#FFF9E6;border-radius:var(--radius-md);font-size:var(--fs-base);color:var(--gray-700);border-left:4px solid var(--warning)}
+    .clear-top3{margin-top:12px;padding:10px 14px;background:var(--warning-light);border-radius:var(--radius-md);font-size:var(--fs-xs);color:#7A5100;display:flex;align-items:center;gap:10px}
+    .clear-top3 .medal{font-size:var(--fs-lg)}
+
+    /* Report modal */
+    .report-reasons{display:flex;flex-direction:column;gap:6px;margin-bottom:12px}
+    .report-reasons label{display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--gray-200);border-radius:var(--radius-sm);cursor:pointer;font-size:var(--fs-sm)}
+    .report-reasons label:hover{background:var(--gray-50)}
+    .report-reasons input:checked+span{color:var(--accent);font-weight:600}
+    textarea.report-detail{width:100%;padding:10px;border:1px solid var(--gray-200);border-radius:var(--radius-sm);font-size:var(--fs-sm);font-family:inherit;resize:vertical;min-height:80px}
+
+    /* Buttons */
+    .btn{padding:9px 18px;border:none;border-radius:var(--radius-sm);font-size:var(--fs-sm);font-weight:600;cursor:pointer;font-family:inherit;transition:.15s;display:inline-flex;align-items:center;gap:6px}
+    .btn-primary{background:var(--primary);color:#fff}
+    .btn-primary:hover{background:var(--primary-dark)}
+    .btn-secondary{background:var(--secondary);color:#fff}
+    .btn-success{background:var(--success);color:#fff}
+    .btn-outline{background:#fff;color:var(--primary);border:1px solid var(--primary)}
+    .btn-outline:hover{background:var(--primary-light)}
+    .btn-ghost{background:var(--gray-100);color:var(--gray-700)}
+    .btn-accent{background:var(--accent);color:#fff}
+    .btn-lg{padding:13px 28px;font-size:var(--fs-md);border-radius:var(--radius-md)}
+
+    /* ===== Diagnosis Tab ===== */
+    .diag-intro{text-align:center;padding:40px 20px;background:#fff;border-radius:var(--radius-lg);box-shadow:var(--shadow-sm)}
+    .diag-intro-icon{width:88px;height:88px;border-radius:50%;background:linear-gradient(135deg,var(--warning),#FF9500);display:flex;align-items:center;justify-content:center;font-size:36px;color:#fff;margin:0 auto 20px}
+    .diag-intro h2{font-size:20px;font-weight:700;margin-bottom:10px;color:var(--gray-800)}
+    .diag-intro p{font-size:13.5px;color:var(--gray-500);margin-bottom:6px;max-width:480px;margin-left:auto;margin-right:auto}
+    .diag-config{background:var(--gray-50);border-radius:var(--radius-md);padding:22px;max-width:520px;margin:24px auto 0;text-align:left}
+    .diag-config .form-group{margin-bottom:14px}
+    .diag-config label{display:block;font-size:12.5px;font-weight:700;color:var(--gray-600);margin-bottom:6px}
+    .diag-config select,.diag-config input{width:100%;padding:10px 12px;border:1px solid var(--gray-200);border-radius:var(--radius-sm);font-size:13.5px;font-family:inherit}
+
+    .diag-running{display:grid;grid-template-columns:280px 1fr;gap:16px}
+    .diag-sidebar{background:#fff;border-radius:var(--radius-lg);padding:18px;box-shadow:var(--shadow-sm)}
+    .diag-sidebar h4{font-size:var(--fs-sm);font-weight:700;margin-bottom:10px;color:var(--gray-700)}
+    .diag-node-item{padding:8px 10px;border:1px solid var(--gray-200);border-radius:var(--radius-sm);margin-bottom:6px;font-size:var(--fs-xs);display:flex;align-items:center;gap:8px}
+    .diag-node-item.done{background:var(--success-light);border-color:var(--success);color:#0F6E4E}
+    .diag-node-item.failed{background:var(--accent-light);border-color:var(--accent);color:#7F2828}
+    .diag-node-item.current{background:var(--warning-light);border-color:var(--warning);font-weight:700}
+    .diag-node-item.queued{background:#fff;color:var(--gray-600)}
+    .diag-main{background:#fff;border-radius:var(--radius-lg);padding:24px;box-shadow:var(--shadow-sm)}
+    .diag-progress-header{margin-bottom:20px}
+    .diag-stat-row{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px}
+    .diag-stat{padding:8px;border-radius:var(--radius-sm);text-align:center;background:var(--gray-50)}
+    .diag-stat .v{font-size:var(--fs-xl);font-weight:700}
+    .diag-stat .l{font-size:10.5px;color:var(--gray-500);margin-top:2px}
+
+    /* ===== Learning Path Tab ===== */
+    .path-container{background:#fff;border-radius:var(--radius-lg);padding:24px;box-shadow:var(--shadow-sm)}
+    .path-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:10px}
+    .path-header h3{font-size:var(--fs-lg);font-weight:700;color:var(--gray-800);display:flex;align-items:center;gap:8px}
+    .path-steps{position:relative;padding-left:28px}
+    .path-steps::before{content:'';position:absolute;left:13px;top:0;bottom:0;width:2px;background:var(--gray-200)}
+    .path-step{position:relative;margin-bottom:16px;padding:14px 16px;background:var(--gray-50);border-radius:var(--radius-md);border:1px solid var(--gray-200)}
+    .path-step::before{content:'';position:absolute;left:-21px;top:18px;width:12px;height:12px;border-radius:50%;background:var(--gray-300);border:3px solid #fff;z-index:1}
+    .path-step.completed::before{background:var(--success)}
+    .path-step.in_progress::before{background:var(--warning)}
+    .path-step.available::before{background:var(--primary)}
+    .path-step.completed{background:var(--success-light);border-color:var(--success)}
+    .path-step.in_progress{background:var(--warning-light);border-color:var(--warning)}
+    .step-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
+    .step-order{font-size:var(--fs-xs);font-weight:700;color:var(--gray-500)}
+    .step-status-tag{font-size:10.5px;font-weight:700;padding:2px 8px;border-radius:10px}
+    .step-status-tag.completed{background:var(--success);color:#fff}
+    .step-status-tag.in_progress{background:var(--warning);color:var(--gray-800)}
+    .step-status-tag.locked{background:var(--gray-200);color:var(--gray-600)}
+    .step-status-tag.available{background:var(--primary-light);color:var(--primary)}
+    .step-title{font-size:var(--fs-base);font-weight:700;margin-bottom:3px}
+    .step-subject{font-size:var(--fs-xs);color:var(--gray-500)}
+    .path-empty{text-align:center;padding:60px 20px;color:var(--gray-500)}
+    .path-empty i{font-size:48px;margin-bottom:14px;color:var(--gray-300)}
+
+    /* ===== My Record Tab ===== */
+    .record-stats{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:18px}
+    .rec-card{background:#fff;padding:18px;border-radius:var(--radius-md);text-align:center;box-shadow:var(--shadow-sm)}
+    .rec-card .v{font-size:26px;font-weight:700}
+    .rec-card .l{font-size:var(--fs-xs);color:var(--gray-500);margin-top:4px}
+    .rec-area{background:#fff;border-radius:var(--radius-md);padding:20px;margin-bottom:18px;box-shadow:var(--shadow-sm)}
+    .rec-area h3{font-size:var(--fs-md);font-weight:700;margin-bottom:14px;color:var(--gray-700)}
+    .area-row{margin-bottom:12px}
+    .area-head{display:flex;justify-content:space-between;margin-bottom:5px;font-size:var(--fs-sm)}
+    .area-bar{height:8px;background:var(--gray-200);border-radius:4px;overflow:hidden}
+    .area-fill{height:100%;background:linear-gradient(90deg,var(--primary),var(--secondary));border-radius:4px}
+    .rec-recent{background:#fff;border-radius:var(--radius-md);padding:20px;margin-bottom:18px;box-shadow:var(--shadow-sm)}
+    .rec-recent h3{font-size:var(--fs-md);font-weight:700;margin-bottom:14px;color:var(--gray-700)}
+    .recent-item{display:flex;align-items:center;gap:12px;padding:10px;background:var(--gray-50);border-radius:var(--radius-sm);margin-bottom:6px}
+    .recent-icon{width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:var(--fs-base);color:#fff;flex-shrink:0}
+    .recent-icon.correct{background:var(--success)}
+    .recent-icon.wrong{background:var(--accent)}
+
+    /* Ranking section */
+    .rank-section{background:#fff;border-radius:var(--radius-lg);padding:22px;box-shadow:var(--shadow-sm);margin-top:18px}
+    .rank-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:8px}
+    .rank-title{font-size:var(--fs-md);font-weight:700;display:flex;align-items:center;gap:8px}
+    .rank-period{display:flex;background:var(--gray-100);border-radius:var(--radius-sm);padding:3px}
+    .rank-period button{padding:6px 14px;border:none;background:none;font-size:var(--fs-xs);font-weight:600;color:var(--gray-500);cursor:pointer;border-radius:4px;font-family:inherit}
+    .rank-period button.active{background:#fff;color:var(--primary);box-shadow:var(--shadow-sm)}
+    .rank-list{list-style:none;display:flex;flex-direction:column;gap:6px}
+    .rank-item{display:flex;align-items:center;gap:12px;padding:10px 14px;background:var(--gray-50);border-radius:var(--radius-sm)}
+    .rank-item.me{background:var(--primary-light);border:1px solid var(--primary)}
+    .rank-num{width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:var(--fs-sm);font-weight:700;flex-shrink:0}
+    .rank-num.gold{background:linear-gradient(135deg,#FFD700,#FFA500);color:#fff}
+    .rank-num.silver{background:linear-gradient(135deg,#C0C0C0,#A0A0A0);color:#fff}
+    .rank-num.bronze{background:linear-gradient(135deg,#CD7F32,#B87333);color:#fff}
+    .rank-num.normal{background:var(--gray-200);color:var(--gray-600)}
+    .rank-name{flex:1;font-size:var(--fs-sm);font-weight:600;color:var(--gray-700)}
+    .rank-score{font-size:var(--fs-sm);font-weight:700;color:var(--primary)}
+
+    /* Toast */
+    .toast{position:fixed;bottom:30px;left:50%;transform:translateX(-50%);background:var(--gray-800);color:#fff;padding:12px 22px;border-radius:var(--radius-md);font-size:13.5px;z-index:5000;display:flex;align-items:center;gap:8px;box-shadow:var(--shadow-lg);animation:toastIn .3s ease}
+    @keyframes toastIn{from{opacity:0;transform:translate(-50%,20px)}to{opacity:1;transform:translate(-50%,0)}}
+
+    /* Spinner */
+    .spinner{text-align:center;padding:40px;color:var(--gray-400)}
+    .spinner i{font-size:26px;animation:spin 1s linear infinite}
+    @keyframes spin{to{transform:rotate(360deg)}}
+
+    /* ===== Accessibility ===== */
+    :focus-visible { outline:2px solid var(--color-primary, #2563eb); outline-offset:2px; border-radius:4px }
+    .svg-node:focus-visible { outline-offset:3px; box-shadow:0 0 0 3px var(--color-primary-50, #eff6ff) }
+    .badge.not-started { background:#475569; color:#fff }
+    /* 상태 상징(색각 대응): 아이콘 병기 영역 */
+    .svg-node-status::before { margin-right:3px }
+    .svg-node-status.completed::before { content:'✓' }
+    .svg-node-status.in_progress::before { content:'▶' }
+    .svg-node-status.diagnosing::before { content:'🔍' }
+    .svg-node-status.locked::before { content:'🔒' }
+    .svg-node-status.available::before { content:'○' }
+
+    /* ===== Empty state ===== */
+    .empty-state{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:60px 20px;color:var(--color-text-muted,#6B7280);gap:10px;text-align:center}
+    .empty-state i{font-size:48px;color:var(--gray-300)}
+    .empty-state p{font-size:var(--fs-base)}
+    .empty-state .hint{font-size:var(--fs-xs);color:var(--gray-400)}
+
+    /* Responsive */
+    @media (max-width:1200px){
+      .map-layout{grid-template-columns:260px 1fr}
+      .record-stats{grid-template-columns:repeat(3,1fr)}
+    }
+    @media (max-width:1024px){
+      .dashboard-grid{grid-template-columns:repeat(2,1fr)}
+      .map-layout{grid-template-columns:1fr}
+      .filter-sidebar{position:static;max-height:none}
+      .diag-running{grid-template-columns:1fr}
+      .record-stats{grid-template-columns:repeat(2,1fr)}
+    }
+    @media (max-width:640px){
+      .dashboard-grid{grid-template-columns:1fr}
+      .record-stats{grid-template-columns:1fr}
+      .tab-nav{width:100%;overflow-x:auto}
+    }
+  </style>
+</head>
+<body>
+<script src="/js/common-nav.js"></script>
+<div class="app-layout" id="mainContent" style="display:none">
+  <div class="main-content">
+
+    <!-- Page Header -->
+    <div class="page-header">
+      <div class="page-title">
+        <div class="page-title-icon"><i class="fas fa-brain"></i></div>
+        AI 맞춤학습
+      </div>
+      <div class="page-subtitle">나의 학습 수준에 맞는 맞춤형 학습 경로를 추천받고, 체계적으로 학습해 보세요.</div>
+    </div>
+
+    <!-- Dashboard 4 cards -->
+    <div class="dashboard-grid">
+      <div class="dash-card">
+        <div class="dash-icon" style="background:linear-gradient(135deg,var(--primary),var(--primary-dark))"><i class="fas fa-book-open"></i></div>
+        <div class="dash-info">
+          <div class="dash-label">완료한 노드</div>
+          <div class="dash-value" id="dashCompleted">0</div>
+          <div class="dash-sub" id="dashCompletedSub">전체 0개</div>
+        </div>
+      </div>
+      <div class="dash-card">
+        <div class="dash-icon" style="background:linear-gradient(135deg,var(--success),#00A67C)"><i class="fas fa-chart-line"></i></div>
+        <div class="dash-info">
+          <div class="dash-label">학습 진행률</div>
+          <div class="dash-value" id="dashProgress">0%</div>
+          <div class="dash-sub" id="dashProgressSub">학습 중</div>
+        </div>
+      </div>
+      <div class="dash-card">
+        <div class="dash-icon" style="background:linear-gradient(135deg,var(--warning),#FF9500)"><i class="fas fa-clock"></i></div>
+        <div class="dash-info">
+          <div class="dash-label">총 학습 시간</div>
+          <div class="dash-value" id="dashTime">0분</div>
+          <div class="dash-sub" id="dashTimeSub">이번 주</div>
+        </div>
+      </div>
+      <div class="dash-card">
+        <div class="dash-icon" style="background:linear-gradient(135deg,var(--secondary),#6B3FC7)"><i class="fas fa-trophy"></i></div>
+        <div class="dash-info">
+          <div class="dash-label">랭킹</div>
+          <div class="dash-value" id="dashRank">-</div>
+          <div class="dash-sub" id="dashRankSub">순위</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Top Tabs -->
+    <div class="tab-nav">
+      <button class="tab-btn active" data-tab="map"><i class="fas fa-project-diagram"></i> 학습맵</button>
+      <button class="tab-btn" data-tab="diagnosis"><i class="fas fa-stethoscope"></i> 진단평가</button>
+      <button class="tab-btn" data-tab="path"><i class="fas fa-route"></i> 학습경로</button>
+      <button class="tab-btn" data-tab="record"><i class="fas fa-chart-bar"></i> 나의 기록</button>
+    </div>
+
+    <!-- ===== Tab: Learning Map ===== -->
+    <div class="tab-panel active" id="tab-map">
+      <div class="map-layout">
+        <!-- Filter Sidebar -->
+        <aside class="filter-sidebar">
+          <h3><i class="fas fa-sliders-h"></i> 학습맵 필터</h3>
+
+          <!-- Continue card -->
+          <div id="continueCard"></div>
+          <!-- Learning list card -->
+          <div id="llistCard"></div>
+
+          <div class="filter-group">
+            <label class="filter-label">학교급</label>
+            <div class="radio-row" id="schoolRadio">
+              <button class="radio-btn active" data-val="초등">초</button>
+              <button class="radio-btn" data-val="중등">중</button>
+              <button class="radio-btn" data-val="고등">고</button>
+            </div>
+          </div>
+          <div class="filter-group">
+            <label class="filter-label">학년</label>
+            <select class="filter-select" id="gradeSelect">
+              <option value="">전체</option>
+            </select>
+          </div>
+          <div class="filter-group">
+            <label class="filter-label">학기</label>
+            <div class="semester-row">
+              <button class="sem-btn active" data-sem="">전체</button>
+              <button class="sem-btn" data-sem="1">1학기</button>
+              <button class="sem-btn" data-sem="2">2학기</button>
+            </div>
+          </div>
+          <div class="filter-group">
+            <label class="filter-label">과목(영역)</label>
+            <select class="filter-select" id="areaSelect">
+              <option value="">전체</option>
+              <option value="국어">국어</option>
+              <option value="수학">수학</option>
+              <option value="영어">영어</option>
+              <option value="과학">과학</option>
+              <option value="사회">사회</option>
+              <option value="도덕">도덕</option>
+            </select>
+          </div>
+          <div class="filter-group">
+            <label class="filter-label">상태</label>
+            <div class="checkbox-group" id="statusChecks">
+              <label class="cbx-label"><input type="checkbox" value="completed" checked> 완료</label>
+              <label class="cbx-label"><input type="checkbox" value="in_progress" checked> 진행중</label>
+              <label class="cbx-label"><input type="checkbox" value="diagnosing" checked> 진단중</label>
+              <label class="cbx-label"><input type="checkbox" value="available" checked> 학습가능</label>
+              <label class="cbx-label"><input type="checkbox" value="locked" checked> 잠김</label>
+            </div>
+          </div>
+          <div class="filter-group">
+            <label class="filter-label">키워드 검색</label>
+            <input type="text" class="search-input" id="keywordInput" placeholder="학습 카드 이름/코드 검색..." aria-label="학습 카드 키워드 검색" title="노드 = 학습 카드 (하나의 학습 단위)">
+          </div>
+        </aside>
+
+        <!-- Map Main -->
+        <section class="map-main">
+          <div class="map-toolbar">
+            <div class="mini-toggle" id="nodeDisplayToggle">
+              <button class="active" data-val="unit">단원</button>
+              <button data-val="lesson">차시</button>
+            </div>
+            <div class="mini-toggle" id="viewModeToggle">
+              <button class="active" data-val="map"><i class="fas fa-project-diagram"></i> 맵</button>
+              <button data-val="list"><i class="fas fa-list"></i> 리스트</button>
+            </div>
+            <div class="zoom-ctrl">
+              <button class="zoom-btn" onclick="zoomBy(1.25)" title="확대" aria-label="맵 확대"><i class="fas fa-plus"></i></button>
+              <button class="zoom-btn" onclick="zoomBy(0.8)" title="축소" aria-label="맵 축소"><i class="fas fa-minus"></i></button>
+              <div class="zoom-level" id="zoomLevel" aria-live="polite">70%</div>
+              <button class="zoom-btn" onclick="resetView()" title="리셋" aria-label="맵 리셋"><i class="fas fa-expand"></i></button>
+              <button class="zoom-btn" onclick="fitView()" title="맞춤" aria-label="화면에 맞춤"><i class="fas fa-compress"></i></button>
+            </div>
+          </div>
+          <div class="map-legend">
+            <div class="legend-item"><div class="legend-dot" style="background:var(--success-light);border-color:var(--success)"></div> 완료</div>
+            <div class="legend-item"><div class="legend-dot" style="background:var(--warning-light);border-color:var(--warning)"></div> 진행중</div>
+            <div class="legend-item"><div class="legend-dot" style="background:#FFF8E8;border-color:#F59E0B"></div> 진단중</div>
+            <div class="legend-item"><div class="legend-dot" style="background:#fff;border-color:var(--secondary)"></div> 학습목록</div>
+            <div class="legend-item"><div class="legend-dot" style="background:#F8FAFC;border-color:var(--gray-300)"></div> 잠김/기본</div>
+          </div>
+
+          <div class="map-canvas" id="mapCanvas">
+            <div class="spinner"><i class="fas fa-spinner"></i><p style="margin-top:8px">학습맵 로딩 중...</p></div>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <!-- ===== Tab: Diagnosis ===== -->
+    <div class="tab-panel" id="tab-diagnosis">
+      <div id="diagnosisContent"></div>
+    </div>
+
+    <!-- ===== Tab: Learning Path ===== -->
+    <div class="tab-panel" id="tab-path">
+      <div class="path-container">
+        <div class="path-header">
+          <h3><i class="fas fa-route" style="color:var(--secondary)"></i> 나의 학습 경로</h3>
+          <div style="display:flex;gap:8px;align-items:center">
+            <label style="font-size:var(--fs-xs);color:var(--gray-500);display:flex;align-items:center;gap:6px">
+              <input type="checkbox" id="pathSyncList"> 학습목록 연동
+            </label>
+            <button class="btn btn-secondary" onclick="generatePath()"><i class="fas fa-magic"></i> AI 경로 생성</button>
+          </div>
+        </div>
+        <div id="pathContainer">
+          <div class="spinner"><i class="fas fa-spinner"></i></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== Tab: My Record ===== -->
+    <div class="tab-panel" id="tab-record">
+      <div class="record-stats" id="recordStats">
+        <div class="rec-card"><div class="v" style="color:var(--primary)" id="recTotal">-</div><div class="l">총 풀이</div></div>
+        <div class="rec-card"><div class="v" style="color:var(--success)" id="recAcc">-</div><div class="l">평균 정답률</div></div>
+        <div class="rec-card"><div class="v" style="color:var(--secondary)" id="recNodes">-</div><div class="l">완료 노드</div></div>
+        <div class="rec-card"><div class="v" style="color:var(--warning)" id="recStreak">-</div><div class="l">연속 학습일</div></div>
+        <div class="rec-card"><div class="v" style="color:var(--accent)" id="recAttempts">-</div><div class="l">총 시도</div></div>
+      </div>
+      <div class="rec-area">
+        <h3><i class="fas fa-chart-bar" style="color:var(--primary)"></i> 영역별 정답률</h3>
+        <div id="recAreaList"><div class="spinner"><i class="fas fa-spinner"></i></div></div>
+      </div>
+      <div class="rec-recent">
+        <h3><i class="fas fa-history" style="color:var(--secondary)"></i> 최근 풀이 5건</h3>
+        <div id="recRecentList"></div>
+      </div>
+      <div class="rec-recent">
+        <h3><i class="fas fa-book" style="color:var(--accent)"></i> 오답노트 (미니)</h3>
+        <div id="recWrongList"></div>
+      </div>
+    </div>
+
+    <!-- Ranking -->
+    <div class="rank-section">
+      <div class="rank-head">
+        <div class="rank-title"><i class="fas fa-trophy" style="color:var(--warning)"></i> 학습 랭킹</div>
+        <div class="rank-period" id="rankPeriod">
+          <button class="active" data-p="weekly">주간</button>
+          <button data-p="monthly">월간</button>
+          <button data-p="total">전체</button>
+        </div>
+      </div>
+      <ul class="rank-list" id="rankList"></ul>
+    </div>
+
+  </div>
+</div>
+
+<!-- ===== Node Detail Drawer ===== -->
+<div class="drawer-overlay" id="drawerOverlay" onclick="closeDrawer()"></div>
+<div class="drawer" id="nodeDrawer">
+  <div class="drawer-header">
+    <div class="drawer-head-info">
+      <div class="drawer-badges" id="drawerBadges"></div>
+      <div class="drawer-title" id="drawerTitle">-</div>
+      <div class="drawer-subtitle" id="drawerSubtitle"></div>
+    </div>
+    <button class="drawer-close" onclick="closeDrawer()" aria-label="드로어 닫기"><i class="fas fa-times"></i></button>
+  </div>
+  <div class="drawer-tabs" id="drawerTabs">
+    <button class="drawer-tab active" data-dt="overview"><i class="fas fa-info-circle"></i> 개요</button>
+    <button class="drawer-tab" data-dt="videos"><i class="fas fa-video"></i> 영상</button>
+    <button class="drawer-tab" data-dt="problems"><i class="fas fa-clipboard-question"></i> 문제</button>
+  </div>
+  <div class="drawer-body" id="drawerBody"></div>
+  <div class="drawer-footer" id="drawerFooter"></div>
+</div>
+
+<!-- ===== Problem Solve Modal ===== -->
+<div class="modal-overlay" id="solveModal">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title"><i class="fas fa-clipboard-question" style="color:var(--primary)"></i> <span id="solveTitle">문제 풀이</span></div>
+      <button class="drawer-close" onclick="closeSolve()" aria-label="문제 풀이 닫기"><i class="fas fa-times"></i></button>
+    </div>
+    <div class="modal-body" id="solveBody"></div>
+    <div class="modal-actions" id="solveActions"></div>
+  </div>
+</div>
+
+<!-- ===== Report Modal ===== -->
+<div class="modal-overlay" id="reportModal">
+  <div class="modal" style="max-width:520px">
+    <div class="modal-header">
+      <div class="modal-title"><i class="fas fa-exclamation-triangle" style="color:var(--accent)"></i> 오류 신고</div>
+      <button class="drawer-close" onclick="closeReport()" aria-label="오류 신고 닫기"><i class="fas fa-times"></i></button>
+    </div>
+    <div class="modal-body">
+      <div style="font-size:var(--fs-sm);color:var(--gray-500);margin-bottom:12px">문제가 있다면 알려주세요. 빠르게 확인하겠습니다.</div>
+      <div class="report-reasons" id="reportReasons">
+        <label><input type="radio" name="rprReason" value="정답 오류"> <span>정답이 잘못됐어요</span></label>
+        <label><input type="radio" name="rprReason" value="문제 오타"> <span>문제/보기에 오타가 있어요</span></label>
+        <label><input type="radio" name="rprReason" value="그림 깨짐"> <span>그림이나 수식이 깨져 보여요</span></label>
+        <label><input type="radio" name="rprReason" value="기타"> <span>기타 문제</span></label>
+      </div>
+      <textarea class="report-detail" id="reportDetail" placeholder="자세한 내용을 적어주세요(선택)"></textarea>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeReport()">취소</button>
+      <button class="btn btn-accent" onclick="submitReport()"><i class="fas fa-paper-plane"></i> 제출</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/* =========================================================
+   Globals
+   ========================================================= */
+let currentUser = null;
+let allNodes = [];
+let allEdges = [];
+let userStatuses = {};      // nodeId -> status
+let nodeById = {};          // nodeId -> node object
+let learningList = new Set();
+let lastActivity = null;
+let currentDrawerNode = null;
+let currentDrawerTab = 'overview';
+let currentSolveProblem = null;
+let currentSolveNodeId = null;
+let currentReportTarget = null; // {contentId, contentType}
+let rankingPeriod = 'weekly';
+let viewMode = 'map';
+let nodeDisplayMode = 'unit';
+// 페이지 로드 직후 드로어 자동 오픈 방지 — 이어하기 카드는 표시만, 클릭시에만 오픈
+let userInteracted = false;
+document.addEventListener('click', () => { userInteracted = true; }, { once: true, capture: true });
+
+// Filters
+const filters = {
+  school: '초등',
+  grade: '',
+  semester: '',
+  area: '',
+  status: new Set(['completed','in_progress','diagnosing','available','locked']),
+  keyword: ''
+};
+
+// Map state (pan & zoom)
+const mapState = { scale: 0.7, x: 50, y: 30, dragging: false, sx: 0, sy: 0, lastX: 0, lastY: 0 };
+
+// Diagnosis state (CAT-like)
+let diagState = null;
+
+/* =========================================================
+   Utilities
+   ========================================================= */
+function escHtml(s) { if (s === null || s === undefined) return ''; const d = document.createElement('div'); d.textContent = String(s); return d.innerHTML; }
+function $(id) { return document.getElementById(id); }
+
+function showToast(msg, icon = 'fa-check-circle') {
+  const t = document.createElement('div');
+  t.className = 'toast';
+  t.innerHTML = `<i class="fas ${icon}"></i> ${escHtml(msg)}`;
+  document.body.appendChild(t);
+  setTimeout(() => { t.style.opacity = '0'; t.style.transform = 'translate(-50%,20px)'; t.style.transition = 'all .3s'; setTimeout(() => t.remove(), 300); }, 2400);
+}
+
+async function fetchApi(url, opts = {}) {
+  try {
+    const res = await fetch(url, { headers: { 'Content-Type': 'application/json' }, credentials: 'include', ...opts });
+    if (!res.ok) {
+      console.warn('API non-OK:', url, res.status);
+      return null;
+    }
+    const data = await res.json().catch(() => null);
+    if (!data) return null;
+    if (data.success === false) { console.warn('API unsuccessful:', url, data.message); return null; }
+    return data;
+  } catch (e) {
+    console.warn('Fetch error:', url, e.message);
+    return null;
+  }
+}
+
+function inferStatus(nodeId) {
+  const s = userStatuses[nodeId];
+  if (s) return s;
+  return 'available'; // 기본: 학습 가능 (잠김보다 친화적)
+}
+
+function normalizeSubjectArea(node) {
+  // node.subject / node.area 어느 쪽이든 수용
+  return node?.area || node?.subject || '';
+}
+
+/* =========================================================
+   Init: wait for user
+   ========================================================= */
+window.addEventListener('dacheim:user-loaded', async (e) => {
+  currentUser = e.detail;
+  $('mainContent').style.display = 'flex';
+
+  // 로그인 학생 학교급/학년 기본값
+  try {
+    const sl = currentUser?.school_level || currentUser?.schoolLevel || '';
+    if (sl.includes('중')) filters.school = '중등';
+    else if (sl.includes('고')) filters.school = '고등';
+    else filters.school = '초등';
+    document.querySelectorAll('#schoolRadio .radio-btn').forEach(b => {
+      b.classList.toggle('active', b.dataset.val === filters.school);
+    });
+    if (currentUser?.subject) { filters.area = currentUser.subject; }
+    if (currentUser?.grade != null) { filters.grade = String(currentUser.grade); }
+  } catch(e) {}
+
+  // URL params
+  const p = new URLSearchParams(location.search);
+  if (p.get('subject')) { filters.area = p.get('subject'); }
+
+  bindUI();
+  populateGradeOptions();
+  // 셀렉트 UI 동기화
+  if (filters.area) $('areaSelect').value = filters.area;
+  if (filters.grade) $('gradeSelect').value = filters.grade;
+
+  await Promise.all([
+    loadDashboard(),
+    loadMap(),
+    loadLearningList(),
+    loadLastActivity(),
+    loadRanking()
+  ]);
+  renderSidebarCards();
+});
+
+/* Fallback: if user-loaded event already fired before our listener attached */
+setTimeout(() => {
+  if (!currentUser && window.currentUser) {
+    window.dispatchEvent(new CustomEvent('dacheim:user-loaded', { detail: window.currentUser }));
+  } else if (!currentUser) {
+    // Try fetch /api/auth/me
+    fetchApi('/api/auth/me').then(d => {
+      if (d && (d.user || d.username)) {
+        currentUser = d.user || d;
+        $('mainContent').style.display = 'flex';
+        bindUI(); populateGradeOptions();
+        loadDashboard(); loadMap(); loadLearningList(); loadLastActivity(); loadRanking();
+        renderSidebarCards();
+      }
+    });
+  }
+}, 500);
+
+/* =========================================================
+   UI Bindings
+   ========================================================= */
+function bindUI() {
+  // Top tabs
+  document.querySelectorAll('.tab-btn').forEach(b => {
+    b.addEventListener('click', () => {
+      document.querySelectorAll('.tab-btn').forEach(x => x.classList.remove('active'));
+      document.querySelectorAll('.tab-panel').forEach(x => x.classList.remove('active'));
+      b.classList.add('active');
+      $('tab-' + b.dataset.tab).classList.add('active');
+      if (b.dataset.tab === 'path') loadPath();
+      if (b.dataset.tab === 'record') loadRecord();
+      if (b.dataset.tab === 'diagnosis' && !diagState) renderDiagIntro();
+    });
+  });
+
+  // School radio
+  document.querySelectorAll('#schoolRadio .radio-btn').forEach(b => {
+    b.addEventListener('click', () => {
+      document.querySelectorAll('#schoolRadio .radio-btn').forEach(x => x.classList.remove('active'));
+      b.classList.add('active');
+      filters.school = b.dataset.val;
+      populateGradeOptions();
+      filters.grade = '';
+      $('gradeSelect').value = '';
+      loadMap();
+    });
+  });
+
+  // Grade select
+  $('gradeSelect').addEventListener('change', (e) => { filters.grade = e.target.value; loadMap(); });
+
+  // Semester buttons
+  document.querySelectorAll('.sem-btn').forEach(b => {
+    b.addEventListener('click', () => {
+      document.querySelectorAll('.sem-btn').forEach(x => x.classList.remove('active'));
+      b.classList.add('active');
+      filters.semester = b.dataset.sem;
+      loadMap();
+    });
+  });
+
+  // Area select
+  $('areaSelect').addEventListener('change', (e) => { filters.area = e.target.value; loadMap(); });
+
+  // Status checkboxes
+  document.querySelectorAll('#statusChecks input').forEach(cb => {
+    cb.addEventListener('change', () => {
+      if (cb.checked) filters.status.add(cb.value);
+      else filters.status.delete(cb.value);
+      renderMap();
+    });
+  });
+
+  // Keyword search
+  let ki;
+  $('keywordInput').addEventListener('input', (e) => {
+    filters.keyword = e.target.value.trim();
+    clearTimeout(ki);
+    ki = setTimeout(renderMap, 200);
+  });
+
+  // Node display & view mode toggles
+  document.querySelectorAll('#nodeDisplayToggle button').forEach(b => {
+    b.addEventListener('click', () => {
+      document.querySelectorAll('#nodeDisplayToggle button').forEach(x => x.classList.remove('active'));
+      b.classList.add('active');
+      nodeDisplayMode = b.dataset.val;
+      renderMap();
+    });
+  });
+  document.querySelectorAll('#viewModeToggle button').forEach(b => {
+    b.addEventListener('click', () => {
+      document.querySelectorAll('#viewModeToggle button').forEach(x => x.classList.remove('active'));
+      b.classList.add('active');
+      viewMode = b.dataset.val;
+      renderMap();
+    });
+  });
+
+  // Ranking period
+  document.querySelectorAll('#rankPeriod button').forEach(b => {
+    b.addEventListener('click', () => {
+      document.querySelectorAll('#rankPeriod button').forEach(x => x.classList.remove('active'));
+      b.classList.add('active');
+      rankingPeriod = b.dataset.p;
+      loadRanking();
+    });
+  });
+
+  // Drawer tabs
+  document.querySelectorAll('.drawer-tab').forEach(b => {
+    b.addEventListener('click', () => {
+      document.querySelectorAll('.drawer-tab').forEach(x => x.classList.remove('active'));
+      b.classList.add('active');
+      currentDrawerTab = b.dataset.dt;
+      renderDrawerBody();
+    });
+  });
+
+  // Map canvas pan + zoom
+  const canvas = $('mapCanvas');
+  canvas.addEventListener('mousedown', (e) => {
+    if (e.target.closest('.svg-node')) return;
+    mapState.dragging = true; mapState.sx = e.clientX - mapState.x; mapState.sy = e.clientY - mapState.y;
+    canvas.classList.add('drag-pan');
+  });
+  window.addEventListener('mousemove', (e) => {
+    if (!mapState.dragging) return;
+    mapState.x = e.clientX - mapState.sx; mapState.y = e.clientY - mapState.sy;
+    updateMapTransform();
+  });
+  window.addEventListener('mouseup', () => { mapState.dragging = false; canvas.classList.remove('drag-pan'); });
+  canvas.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    const factor = e.deltaY < 0 ? 1.1 : 0.9;
+    zoomAt(e.offsetX, e.offsetY, factor);
+  }, { passive: false });
+}
+
+function resetFilters() {
+  filters.grade = '';
+  filters.semester = '';
+  filters.area = '';
+  filters.keyword = '';
+  filters.status = new Set(['completed','in_progress','diagnosing','available','locked']);
+  if ($('gradeSelect')) $('gradeSelect').value = '';
+  if ($('areaSelect')) $('areaSelect').value = '';
+  if ($('keywordInput')) $('keywordInput').value = '';
+  document.querySelectorAll('.sem-btn').forEach(b => b.classList.toggle('active', b.dataset.sem === ''));
+  document.querySelectorAll('#statusChecks input').forEach(cb => cb.checked = true);
+  loadMap();
+}
+
+function populateGradeOptions() {
+  const gradeSel = $('gradeSelect');
+  gradeSel.innerHTML = '<option value="">전체</option>';
+  const opts = filters.school === '초등' ? [1,2,3,4,5,6] : filters.school === '중등' ? [1,2,3] : [1,2,3];
+  opts.forEach(g => {
+    const o = document.createElement('option');
+    o.value = g; o.textContent = g + '학년';
+    gradeSel.appendChild(o);
+  });
+}
+
+/* =========================================================
+   Dashboard
+   ========================================================= */
+// 대시보드 데이터를 캐시해 상단 카드와 "나의 기록" 탭이 동일 필드를 참조하게 한다.
+let dashboardCache = null;
+async function loadDashboard() {
+  const d = await fetchApi('/api/self-learn/dashboard');
+  if (!d) return;
+  dashboardCache = d;
+  // 공통 필드 정규화 — 두 화면이 같은 소스를 참조
+  const completed = d.completed_nodes ?? d.completedNodes ?? 0;
+  const totalNodes = d.total_nodes ?? d.totalNodes ?? 0;
+  const pct = totalNodes ? Math.round(completed / totalNodes * 100) : (d.progress_pct ?? 0);
+  $('dashCompleted').textContent = completed;
+  $('dashCompletedSub').textContent = `전체 ${totalNodes}개`;
+  $('dashProgress').textContent = pct + '%';
+  $('dashProgressSub').textContent = `${d.in_progress_nodes ?? d.inProgressNodes ?? 0}개 진행 중`;
+  $('dashTime').textContent = (d.total_time_minutes ?? d.totalTimeMinutes ?? 0) + '분';
+  if (d.rank) { $('dashRank').textContent = d.rank + '위'; }
+}
+
+/* =========================================================
+   Map loading + render
+   ========================================================= */
+async function loadMap() {
+  const canvas = $('mapCanvas');
+  if (!allNodes.length) canvas.innerHTML = '<div class="spinner"><i class="fas fa-spinner"></i><p style="margin-top:8px">학습맵 로딩 중...</p></div>';
+
+  const q = new URLSearchParams();
+  if (filters.area) q.set('subject', filters.area);
+  if (filters.grade) q.set('grade', filters.grade);
+  if (filters.semester) q.set('semester', filters.semester);
+  if (filters.keyword) q.set('keyword', filters.keyword);
+  const qs = q.toString() ? '?' + q.toString() : '';
+
+  const [nodesD, edgesD, statusD] = await Promise.all([
+    fetchApi('/api/self-learn/map/nodes' + qs),
+    fetchApi('/api/self-learn/map/edges' + qs),
+    fetchApi('/api/self-learn/map/user-status')
+  ]);
+
+  allNodes = (nodesD && nodesD.nodes) || [];
+  allEdges = (edgesD && edgesD.edges) || [];
+  const statuses = (statusD && statusD.statuses) || [];
+
+  userStatuses = {};
+  const statusRemap = { not_started: 'available', in_progress: 'in_progress', completed: 'completed', diagnosing: 'diagnosing', locked: 'locked', available: 'available' };
+  statuses.forEach(s => { userStatuses[s.node_id || s.nodeId || s.id] = statusRemap[s.status] || s.status || 'available'; });
+
+  // Build indexing
+  nodeById = {};
+  allNodes.forEach(n => {
+    const id = n.node_id || n.id;
+    n._id = id;
+    // title resolution
+    n._title = n.title || n.name || n.lesson_name || n.unit_name || id;
+    // fallback: use user_status if present
+    if (n.user_status && !userStatuses[id]) {
+      const map = { not_started: 'available', in_progress: 'in_progress', completed: 'completed', diagnosing: 'diagnosing', locked: 'locked' };
+      userStatuses[id] = map[n.user_status] || 'available';
+    }
+    n._status = inferStatus(id);
+    nodeById[id] = n;
+  });
+
+  // Layout
+  layoutNodes();
+  renderMap();
+}
+
+function layoutNodes() {
+  // Topological-ish layout using prereq edges (edges: {from, to} or {source, target})
+  const W = 220, H = 130, GX = 70, GY = 30;
+  const prereqMap = {}; // id -> [prereqIds]
+  allNodes.forEach(n => { prereqMap[n._id] = []; });
+  allEdges.forEach(e => {
+    const from = e.from_node_id || e.from || e.source || e.prereq_id || e.prereqId;
+    const to = e.to_node_id || e.to || e.target || e.next_id || e.nextId;
+    if (from && to && prereqMap[to]) prereqMap[to].push(from);
+  });
+
+  const depth = {};
+  function getDepth(id, visited) {
+    if (depth[id] !== undefined) return depth[id];
+    if (!visited) visited = new Set();
+    if (visited.has(id)) return 0;
+    visited.add(id);
+    const prs = prereqMap[id] || [];
+    if (!prs.length) { depth[id] = 0; return 0; }
+    let m = 0;
+    prs.forEach(p => { if (nodeById[p]) m = Math.max(m, getDepth(p, visited) + 1); });
+    depth[id] = m;
+    return m;
+  }
+  allNodes.forEach(n => getDepth(n._id));
+
+  // Column grouping by depth; sort within column by area -> grade -> title
+  const cols = {};
+  allNodes.forEach(n => {
+    const d = depth[n._id] || 0;
+    if (!cols[d]) cols[d] = [];
+    cols[d].push(n);
+  });
+  Object.keys(cols).forEach(k => {
+    const col = cols[k];
+    col.sort((a, b) => {
+      const aa = normalizeSubjectArea(a); const bb = normalizeSubjectArea(b);
+      if (aa !== bb) return String(aa).localeCompare(String(bb));
+      const ag = (a.grade || 0); const bg = (b.grade || 0);
+      if (ag !== bg) return ag - bg;
+      return String(a._title || '').localeCompare(String(b._title || ''));
+    });
+    col.forEach((n, i) => {
+      n._x = parseInt(k) * (W + GX) + 20;
+      n._y = i * (H + GY) + 20;
+    });
+  });
+
+  // If there are no edges at all -> fallback grid by area/grade columns
+  if (!allEdges.length && allNodes.length) {
+    const areaMap = {};
+    allNodes.forEach(n => { const a = normalizeSubjectArea(n) || '기타'; if (!areaMap[a]) areaMap[a] = []; areaMap[a].push(n); });
+    const areas = Object.keys(areaMap);
+    if (areas.length > 1) {
+      areas.forEach((a, ci) => {
+        areaMap[a].sort((x, y) => (x.grade||0) - (y.grade||0) || String(x._title).localeCompare(y._title));
+        areaMap[a].forEach((n, ri) => { n._x = ci * (W + GX) + 20; n._y = ri * (H + GY) + 20; });
+      });
+    } else {
+      // Single area: split by grade -> columns, title -> rows
+      const gradeMap = {};
+      allNodes.forEach(n => { const g = n.grade || 0; if (!gradeMap[g]) gradeMap[g] = []; gradeMap[g].push(n); });
+      const grades = Object.keys(gradeMap).sort((a,b)=>parseInt(a)-parseInt(b));
+      if (grades.length > 1) {
+        grades.forEach((g, ci) => {
+          gradeMap[g].sort((x, y) => String(x._title).localeCompare(y._title));
+          gradeMap[g].forEach((n, ri) => { n._x = ci * (W + GX) + 20; n._y = ri * (H + GY) + 20; });
+        });
+      } else {
+        // All same grade+area: wrap into grid of up to 4 cols
+        const cols = 4;
+        allNodes.forEach((n, i) => { n._x = (i % cols) * (W + GX) + 20; n._y = Math.floor(i / cols) * (H + GY) + 20; });
+      }
+    }
+  }
+}
+
+function getFilteredNodes() {
+  return allNodes.filter(n => {
+    // status checkbox
+    if (!filters.status.has(n._status)) return false;
+    // keyword (client-side too)
+    if (filters.keyword) {
+      const k = filters.keyword.toLowerCase();
+      const hay = (n._title || '') + ' ' + (n.code || '') + ' ' + (n._id || '') + ' ' + (normalizeSubjectArea(n) || '');
+      if (!hay.toLowerCase().includes(k)) return false;
+    }
+    return true;
+  });
+}
+
+function renderMap() {
+  const canvas = $('mapCanvas');
+  const nodes = getFilteredNodes();
+  if (!allNodes.length) {
+    canvas.innerHTML = `
+      <div class="empty-state" role="status" aria-live="polite">
+        <i class="fas fa-map-marked-alt"></i>
+        <p>표시할 학습 카드(노드)가 없습니다.</p>
+        <p class="hint">필터 조건을 바꾸거나, 진단평가를 완료해 맞춤 학습맵을 생성하세요.</p>
+        <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;justify-content:center">
+          <button class="btn btn-outline" onclick="resetFilters()" aria-label="필터 초기화"><i class="fas fa-rotate-left"></i> 필터 초기화</button>
+          <button class="btn btn-primary" onclick="switchToDiagnosis()" aria-label="진단평가 시작"><i class="fas fa-play"></i> 진단평가 시작</button>
+        </div>
+      </div>`;
+    return;
+  }
+  if (!nodes.length) {
+    canvas.innerHTML = `
+      <div class="empty-state" role="status" aria-live="polite">
+        <i class="fas fa-filter"></i>
+        <p>조건에 해당하는 학습 카드가 없어요.</p>
+        <p class="hint">필터를 바꾸거나 검색어를 지워보세요.</p>
+        <button class="btn btn-outline" onclick="resetFilters()" aria-label="필터 초기화"><i class="fas fa-rotate-left"></i> 필터 초기화</button>
+      </div>`;
+    return;
+  }
+
+  if (viewMode === 'list') {
+    let html = '<div class="list-view">';
+    nodes.forEach(n => {
+      const status = n._status;
+      const area = normalizeSubjectArea(n);
+      const prog = n.progress || (status === 'completed' ? 100 : status === 'in_progress' ? 50 : 0);
+      html += `
+        <div class="list-card status-${status}" onclick="openDrawer('${n._id}')">
+          <div class="list-card-header">
+            <span class="drawer-badge area">${escHtml(area || '전체')}</span>
+            <span class="svg-node-status ${status}">${statusLabel(status)}</span>
+          </div>
+          <div class="list-card-title">${escHtml(n._title)}</div>
+          <div class="list-card-meta">${escHtml(n.code || n._id)}${n.grade ? ' · ' + n.grade + '학년' : ''}</div>
+          <div class="list-card-progress"><div class="list-card-progress-fill" style="width:${prog}%"></div></div>
+        </div>`;
+    });
+    html += '</div>';
+    canvas.innerHTML = html;
+    return;
+  }
+
+  // Map view
+  // Build world
+  let maxX = 800, maxY = 600;
+  nodes.forEach(n => { if ((n._x + 220) > maxX) maxX = n._x + 220; if ((n._y + 130) > maxY) maxY = n._y + 130; });
+  const W = maxX + 80, H = maxY + 80;
+
+  // Edges as SVG lines (only between filtered nodes)
+  const filteredIds = new Set(nodes.map(n => n._id));
+  let svg = `<svg class="map-svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
+    <defs>
+      <marker id="arrow" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+        <path d="M0,0 L10,5 L0,10 Z" fill="#94A3B8"/>
+      </marker>
+    </defs>`;
+  allEdges.forEach(e => {
+    const from = e.from_node_id || e.from || e.source || e.prereq_id;
+    const to = e.to_node_id || e.to || e.target || e.next_id;
+    if (!filteredIds.has(from) || !filteredIds.has(to)) return;
+    const a = nodeById[from], b = nodeById[to];
+    if (!a || !b) return;
+    const x1 = a._x + 220, y1 = a._y + 65;
+    const x2 = b._x, y2 = b._y + 65;
+    const mx = (x1 + x2) / 2;
+    svg += `<path d="M${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}" stroke="#94A3B8" stroke-width="1.5" fill="none" marker-end="url(#arrow)" opacity=".6"/>`;
+  });
+  svg += '</svg>';
+
+  // Nodes
+  let nodesHtml = '';
+  nodes.forEach(n => {
+    const status = n._status;
+    const area = normalizeSubjectArea(n) || '';
+    const inList = learningList.has(n._id);
+    const extraCls = inList ? ' status-in-learning-list' : '';
+    const ariaLabel = `${n.unit_name || area || '학습'} ${n._title} ${statusLabel(status)}`;
+    nodesHtml += `
+      <div class="svg-node status-${status}${extraCls}" style="left:${n._x}px;top:${n._y}px"
+           tabindex="0" role="button" aria-label="${escHtml(ariaLabel)}"
+           onclick="openDrawer('${n._id}')" ondblclick="openDrawer('${n._id}')"
+           onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openDrawer('${n._id}')}">
+        <div class="svg-node-top">
+          <span class="svg-node-area">${escHtml(area || '공통')}</span>
+          <span class="svg-node-grade">${n.grade ? n.grade + '학년' : ''}${n.semester ? ' ' + n.semester + '학기' : ''}</span>
+        </div>
+        <div class="svg-node-title">${escHtml(n._title)}</div>
+        <div class="svg-node-footer">
+          <span class="svg-node-status ${status}" aria-hidden="true">${statusLabel(status)}</span>
+          ${inList ? '<span class="svg-node-bookmark" aria-label="학습목록에 담김"><i class="fas fa-bookmark"></i></span>' : ''}
+        </div>
+      </div>`;
+  });
+
+  canvas.innerHTML = `<div class="map-world" id="mapWorld" style="width:${W}px;height:${H}px">${svg}${nodesHtml}</div>`;
+  // 최초 렌더 시 자동 맞춤 — 잘림 방지
+  if (!mapState._fitted) {
+    mapState._fitted = true;
+    requestAnimationFrame(() => fitView());
+  } else {
+    updateMapTransform();
+  }
+}
+
+function statusLabel(s) {
+  return { locked:'잠김', available:'학습가능', in_progress:'진행중', diagnosing:'진단중', completed:'완료' }[s] || s;
+}
+
+function updateMapTransform() {
+  const world = $('mapWorld');
+  if (!world) return;
+  world.style.transform = `translate(${mapState.x}px, ${mapState.y}px) scale(${mapState.scale})`;
+  $('zoomLevel').textContent = Math.round(mapState.scale * 100) + '%';
+}
+
+function zoomBy(f) {
+  const canvas = $('mapCanvas');
+  const cx = canvas.clientWidth / 2, cy = canvas.clientHeight / 2;
+  zoomAt(cx, cy, f);
+}
+
+function zoomAt(px, py, f) {
+  const newScale = Math.max(0.5, Math.min(2.0, mapState.scale * f));
+  const ratio = newScale / mapState.scale;
+  mapState.x = px - (px - mapState.x) * ratio;
+  mapState.y = py - (py - mapState.y) * ratio;
+  mapState.scale = newScale;
+  updateMapTransform();
+}
+
+function resetView() { mapState.scale = 0.7; mapState.x = 50; mapState.y = 30; updateMapTransform(); }
+function fitView() {
+  const nodes = getFilteredNodes();
+  if (!nodes.length) return;
+  let minX = 1e9, minY = 1e9, maxX = -1e9, maxY = -1e9;
+  nodes.forEach(n => {
+    if (n._x < minX) minX = n._x; if (n._y < minY) minY = n._y;
+    if (n._x + 220 > maxX) maxX = n._x + 220; if (n._y + 130 > maxY) maxY = n._y + 130;
+  });
+  const canvas = $('mapCanvas');
+  const cw = canvas.clientWidth, ch = canvas.clientHeight;
+  const nw = maxX - minX + 100, nh = maxY - minY + 100;
+  // 높이 맞춤 우선 (세로로는 전부 보이게), 가로는 필요 시 팬으로 이동
+  const sByH = ch / nh;
+  const sByW = cw / nw;
+  // 가독성을 위해 최소 0.5 보장 — 너무 작으면 가로 스크롤 가능
+  const s = Math.max(0.5, Math.min(2.0, Math.min(sByW, sByH)));
+  mapState.scale = s;
+  mapState.x = -minX * s + 40;
+  mapState.y = -minY * s + 20;
+  updateMapTransform();
+}
+
+/* =========================================================
+   Drawer (node detail)
+   ========================================================= */
+async function openDrawer(nodeId, opts) {
+  // 사용자 클릭 전 자동 호출이면 무시 (이어하기 자동 오픈 방지)
+  if (!userInteracted && !(opts && opts.force)) {
+    console.info('[drawer] 자동 오픈 차단:', nodeId);
+    return;
+  }
+  currentDrawerNode = null;
+  currentDrawerTab = 'overview';
+  document.querySelectorAll('.drawer-tab').forEach(t => t.classList.toggle('active', t.dataset.dt === 'overview'));
+
+  $('drawerOverlay').classList.add('show');
+  $('nodeDrawer').classList.add('show');
+  $('drawerTitle').textContent = '로딩 중...';
+  $('drawerSubtitle').textContent = '';
+  $('drawerBadges').innerHTML = '';
+  $('drawerBody').innerHTML = '<div class="spinner"><i class="fas fa-spinner"></i></div>';
+  $('drawerFooter').innerHTML = '';
+
+  const data = await fetchApi('/api/self-learn/map/nodes/' + encodeURIComponent(nodeId));
+  const node = data?.node || data || {};
+  node._id = nodeId;
+  node._status = inferStatus(nodeId);
+  node.videos = data?.videos || node.videos || node.contents?.filter(c => (c.type === 'video' || c.content_type === 'video')) || [];
+  node.problems = data?.problems || node.problems || node.contents?.filter(c => (c.type === 'problem' || c.content_type === 'problem')) || [];
+  node.prerequisites = data?.prerequisites || node.prerequisites || [];
+  node.nexts = data?.nexts || node.next_nodes || node.nexts || [];
+  node.achievement = data?.achievement || node.achievement || node.achievement_standard || '';
+
+  currentDrawerNode = node;
+
+  const area = normalizeSubjectArea(node);
+  const status = node._status;
+  const displayTitle = node.title || node.name || node.lesson_name || node.unit_name || nodeById[nodeId]?._title || '학습 노드';
+  $('drawerTitle').textContent = displayTitle;
+  $('drawerSubtitle').textContent = (node.achievement_code || node.code ? '[' + (node.achievement_code || node.code) + '] ' : '') + (area || '') + (node.grade ? ' · ' + node.grade + '학년' : '') + (node.semester ? ' ' + node.semester + '학기' : '');
+
+  $('drawerBadges').innerHTML = `
+    ${area ? `<span class="drawer-badge area">${escHtml(area)}</span>` : ''}
+    ${node.grade ? `<span class="drawer-badge grade">${escHtml(node.grade)}학년</span>` : ''}
+    <span class="drawer-badge status ${status}">${statusLabel(status)}</span>`;
+
+  renderDrawerBody();
+  renderDrawerFooter();
+}
+
+function closeDrawer() {
+  $('drawerOverlay').classList.remove('show');
+  $('nodeDrawer').classList.remove('show');
+}
+
+function renderDrawerBody() {
+  if (!currentDrawerNode) return;
+  const n = currentDrawerNode;
+  const body = $('drawerBody');
+
+  if (currentDrawerTab === 'overview') {
+    const prog = n.progress ?? (n._status === 'completed' ? 100 : n._status === 'in_progress' ? 50 : 0);
+    let html = '';
+    if (n.achievement) {
+      html += `<div class="drawer-section">
+        <div class="drawer-section-label">성취기준</div>
+        <div class="drawer-text">${escHtml(n.achievement)}</div>
+      </div>`;
+    }
+    if (n.description) {
+      html += `<div class="drawer-section">
+        <div class="drawer-section-label">설명</div>
+        <div class="drawer-text">${escHtml(n.description)}</div>
+      </div>`;
+    }
+    html += `<div class="drawer-section">
+      <div class="drawer-section-label">진행률</div>
+      <div class="progress-row">
+        <div class="progress-bar"><div class="progress-fill" style="width:${prog}%"></div></div>
+        <div class="progress-text">${prog}%</div>
+      </div>
+    </div>`;
+    // 단원명/차시명 해결: 현재 보기 모드(viewMode)에 맞는 이름으로 표시
+    const resolveLabel = (p) => {
+      const pid = p.id || p.node_id || p;
+      const fromPayload = p.title || p.name || p.lesson_name || p.unit_name;
+      const fromMap = nodeById[pid];
+      if (fromPayload && fromPayload !== pid) return fromPayload;
+      if (fromMap) {
+        // viewMode 가 'unit'이면 단원명 우선, 그 외엔 차시명/기본 타이틀
+        if (typeof viewMode !== 'undefined' && viewMode === 'unit') {
+          return fromMap.unit_name || fromMap._title || fromMap.title || fromMap.name || pid;
+        }
+        return fromMap.lesson_name || fromMap._title || fromMap.title || fromMap.name || fromMap.unit_name || pid;
+      }
+      return pid;
+    };
+    if (n.prerequisites && n.prerequisites.length) {
+      html += `<div class="drawer-section">
+        <div class="drawer-section-label">선행 학습</div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px">
+          ${n.prerequisites.map(p => {
+            const pid = p.id || p.node_id || p;
+            const pt = resolveLabel(p);
+            const st = inferStatus(pid);
+            return `<span class="svg-node-status ${st}" style="cursor:pointer;padding:4px 10px" onclick="openDrawer('${pid}')" title="${escHtml(pid)}"><i class="fas fa-arrow-left"></i> ${escHtml(pt)}</span>`;
+          }).join('')}
+        </div>
+      </div>`;
+    }
+    if (n.nexts && n.nexts.length) {
+      html += `<div class="drawer-section">
+        <div class="drawer-section-label">후속 학습</div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px">
+          ${n.nexts.map(p => {
+            const pid = p.id || p.node_id || p;
+            const pt = resolveLabel(p);
+            const st = inferStatus(pid);
+            return `<span class="svg-node-status ${st}" style="cursor:pointer;padding:4px 10px" onclick="openDrawer('${pid}')" title="${escHtml(pid)}">${escHtml(pt)} <i class="fas fa-arrow-right"></i></span>`;
+          }).join('')}
+        </div>
+      </div>`;
+    }
+    // Legacy "contents chip" fallback
+    if ((!n.videos || !n.videos.length) && (!n.problems || !n.problems.length) && n.contents && n.contents.length) {
+      html += `<div class="drawer-section">
+        <div class="drawer-section-label">관련 자료</div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px">
+          ${n.contents.map(c => `<span class="drawer-badge area">${escHtml(c.title || c.name || c)}</span>`).join('')}
+        </div>
+      </div>`;
+    }
+    body.innerHTML = html || '<div class="drawer-text" style="padding:20px 0;color:var(--gray-500)">표시할 상세 정보가 없습니다.</div>';
+  }
+  else if (currentDrawerTab === 'videos') {
+    const vids = n.videos || [];
+    if (!vids.length) {
+      body.innerHTML = '<div class="drawer-text" style="padding:20px 0;color:var(--gray-500)">등록된 학습 영상이 아직 없습니다.</div>';
+      return;
+    }
+    let html = '<div class="video-grid">';
+    vids.forEach(v => {
+      const id = v.id || v.content_id || v.contentId;
+      const title = v.title || v.name || '학습 영상';
+      const dur = v.duration_sec ?? v.duration ?? 0;
+      const durLabel = dur ? Math.floor(dur/60) + ':' + String(dur%60).padStart(2,'0') : '-';
+      const watched = v.position_sec ?? v.watched_sec ?? 0;
+      const pct = dur ? Math.round(watched/dur*100) : 0;
+      html += `
+        <div class="video-card" onclick="playVideo('${id}')">
+          <div class="video-thumb">
+            <i class="fas fa-play-circle"></i>
+            <span class="video-duration">${durLabel}</span>
+            <div class="video-progress-bar"><div style="width:${pct}%"></div></div>
+          </div>
+          <div class="video-title">${escHtml(title)}</div>
+          <div class="video-meta">
+            <span><i class="fas fa-eye"></i> 시청률 ${v.view_rate ?? v.viewRate ?? '-'}%</span>
+            <span>${pct > 0 ? '이어보기 ' + pct + '%' : ''}</span>
+          </div>
+          <div class="video-actions">
+            <button class="mini-btn" onclick="event.stopPropagation();addToProblemSet('${id}','video')"><i class="fas fa-plus"></i> 문제집 담기</button>
+          </div>
+        </div>`;
+    });
+    html += '</div>';
+    body.innerHTML = html;
+  }
+  else if (currentDrawerTab === 'problems') {
+    const probs = n.problems || [];
+    if (!probs.length) {
+      body.innerHTML = '<div class="drawer-text" style="padding:20px 0;color:var(--gray-500)">등록된 문제가 아직 없습니다.</div>';
+      return;
+    }
+    let html = '<div class="problem-list">';
+    probs.forEach((p, i) => {
+      const id = p.id || p.content_id || p.contentId;
+      const title = p.title || p.name || ('문제 ' + (i+1));
+      const diff = (p.difficulty || 'medium').toLowerCase();
+      const diffKo = { easy:'하', medium:'중', hard:'상' }[diff] || '중';
+      const acc = p.accuracy ?? '-';
+      const myAttempts = p.my_attempts ?? p.myAttempts ?? 0;
+      html += `
+        <div class="problem-row">
+          <div class="problem-info">
+            <div class="problem-title">${escHtml(title)}</div>
+            <div class="problem-meta">
+              <span class="diff-badge ${diff}">난이도 ${diffKo}</span>
+              <span><i class="fas fa-percent"></i> 정답률 ${acc}${typeof acc === 'number' ? '%' : ''}</span>
+              <span><i class="fas fa-redo"></i> 내 시도 ${myAttempts}회</span>
+            </div>
+          </div>
+          <div class="problem-actions">
+            <button class="btn-mini primary" onclick='openSolve(${JSON.stringify({id, title, difficulty: diff, options: p.options || p.choices, question: p.question || p.text || p.content, answer: p.answer || p.correct_answer, explanation: p.explanation, clear_top3: p.clear_top3 || p.clearTop3}).replace(/"/g,"&quot;")})'>풀기</button>
+            <button class="btn-mini ghost" onclick="addToProblemSet('${id}','problem')"><i class="fas fa-plus"></i></button>
+            <button class="btn-mini report" onclick="openReport('${id}','problem')"><i class="fas fa-flag"></i></button>
+          </div>
+        </div>`;
+    });
+    html += '</div>';
+    body.innerHTML = html;
+  }
+}
+
+function renderDrawerFooter() {
+  const n = currentDrawerNode; if (!n) return;
+  const inList = learningList.has(n._id);
+  $('drawerFooter').innerHTML = `
+    <button class="dual-btn diag" onclick="startDiagnosisFromNode('${n._id}')">🔍 진단하기</button>
+    <button class="dual-btn direct" onclick="startDirectLearning('${n._id}')">📖 바로 학습하기</button>
+    <button class="dual-btn bookmark ${inList ? 'active' : ''}" onclick="toggleLearningList('${n._id}')">
+      <i class="fas ${inList ? 'fa-bookmark' : 'fa-bookmark'}"></i> ${inList ? '목록에서 제거' : '학습목록 추가'}
+    </button>`;
+}
+
+/* =========================================================
+   Learning List / Last Activity / Sidebar cards
+   ========================================================= */
+async function loadLearningList() {
+  const d = await fetchApi('/api/self-learn/learning-list');
+  const items = d?.items || d?.learning_list || [];
+  learningList = new Set(items.map(i => i.node_id || i.nodeId || i.id));
+  renderSidebarCards();
+}
+
+async function loadLastActivity() {
+  const d = await fetchApi('/api/self-learn/last-activity');
+  lastActivity = d?.activity || d?.last || d || null;
+  renderSidebarCards();
+}
+
+async function toggleLearningList(nodeId) {
+  if (learningList.has(nodeId)) {
+    const r = await fetchApi('/api/self-learn/learning-list/' + encodeURIComponent(nodeId), { method: 'DELETE' });
+    learningList.delete(nodeId);
+    showToast('학습목록에서 제거했습니다', 'fa-bookmark');
+  } else {
+    const r = await fetchApi('/api/self-learn/learning-list', { method: 'POST', body: JSON.stringify({ nodeId }) });
+    learningList.add(nodeId);
+    showToast('학습목록에 추가했습니다', 'fa-bookmark');
+  }
+  // 사이드바에 제목 노출을 위해 서버에서 최신 items 재조회
+  await loadLearningList();
+  renderMap();
+  if (currentDrawerNode && currentDrawerNode._id === nodeId) renderDrawerFooter();
+}
+
+function renderSidebarCards() {
+  // Continue card
+  const cc = $('continueCard');
+  if (lastActivity && (lastActivity.title || lastActivity.node_title)) {
+    cc.innerHTML = `
+      <div class="continue-card" onclick="goToLastActivity()">
+        <div class="continue-label"><i class="fas fa-play-circle"></i> 이어하기</div>
+        <div class="continue-title">${escHtml(lastActivity.node_title || lastActivity.title)}</div>
+        <div class="continue-meta">${lastActivity.type === 'video' ? '📹 영상' : '📝 문제'} ${lastActivity.progress ? '· ' + lastActivity.progress + '%' : ''}</div>
+      </div>`;
+  } else {
+    cc.innerHTML = '';
+  }
+  // Learning list (top 5)
+  const ll = $('llistCard');
+  const ids = [...learningList];
+  if (ids.length) {
+    const rows = ids.slice(0, 5).map(id => {
+      const n = nodeById[id];
+      const title = n ? (n._title || id) : id;
+      const shortT = title.length > 16 ? title.slice(0, 16) + '…' : title;
+      return `<div class="llist-row" onclick="openDrawer('${id}')"><span class="dot"></span>${escHtml(shortT)}</div>`;
+    }).join('');
+    ll.innerHTML = `
+      <div class="llist-card">
+        <h4><i class="fas fa-bookmark"></i> 학습목록 (${ids.length}개)</h4>
+        ${rows}
+        ${ids.length > 5 ? `<div style="font-size:var(--fs-xs);color:var(--secondary);margin-top:4px">외 ${ids.length - 5}개</div>` : ''}
+      </div>`;
+  } else {
+    ll.innerHTML = `<div class="llist-card"><h4><i class="fas fa-bookmark"></i> 학습목록</h4><div class="llist-empty">아직 담긴 노드가 없어요. 노드 상세에서 "학습목록 추가"를 눌러보세요.</div></div>`;
+  }
+}
+
+function goToLastActivity() {
+  if (!lastActivity) return;
+  const id = lastActivity.node_id || lastActivity.nodeId;
+  if (id) openDrawer(id);
+}
+
+/* =========================================================
+   Problem Solve Modal
+   ========================================================= */
+let solveStart = 0;
+function openSolve(problem) {
+  currentSolveProblem = problem;
+  currentSolveNodeId = currentDrawerNode ? currentDrawerNode._id : null;
+  solveStart = Date.now();
+  $('solveTitle').textContent = problem.title || '문제 풀이';
+  const opts = problem.options || problem.choices || ['보기1', '보기2', '보기3', '보기4'];
+  const labels = ['①', '②', '③', '④', '⑤'];
+
+  $('solveBody').innerHTML = `
+    <div class="solve-question">${escHtml(problem.question || '문항 내용이 제공되지 않았습니다. 보기 중 하나를 선택해보세요.')}</div>
+    <div class="solve-options" id="solveOpts">
+      ${opts.map((opt, i) => {
+        const t = typeof opt === 'string' ? opt : (opt.text || opt.label || opt.content || '보기' + (i+1));
+        return `<div class="solve-option" data-idx="${i}" onclick="selectSolveOption(this)">
+          <div class="solve-option-num">${labels[i] || (i+1)}</div>
+          <div class="solve-option-text">${escHtml(t)}</div>
+        </div>`;
+      }).join('')}
+    </div>`;
+  $('solveActions').innerHTML = `
+    <button class="btn btn-ghost" onclick="closeSolve()">닫기</button>
+    <button class="btn btn-accent" onclick="openReport('${problem.id}','problem')"><i class="fas fa-exclamation-triangle"></i> 오류 신고</button>
+    <button class="btn btn-primary" id="solveSubmitBtn" disabled onclick="submitSolve()"><i class="fas fa-check"></i> 제출</button>`;
+  $('solveModal').classList.add('show');
+}
+
+function selectSolveOption(el) {
+  document.querySelectorAll('#solveOpts .solve-option').forEach(o => o.classList.remove('selected'));
+  el.classList.add('selected');
+  $('solveSubmitBtn').disabled = false;
+}
+
+async function submitSolve() {
+  const sel = document.querySelector('#solveOpts .solve-option.selected');
+  if (!sel) return;
+  const idx = parseInt(sel.dataset.idx);
+  const p = currentSolveProblem;
+  const answer = p.answer;
+  let isCorrect = false;
+  if (typeof answer === 'number') isCorrect = (idx + 1) === answer || idx === answer;
+  else if (typeof answer === 'string') isCorrect = (idx + 1).toString() === answer;
+
+  // Color
+  document.querySelectorAll('#solveOpts .solve-option').forEach(o => {
+    const i = parseInt(o.dataset.idx);
+    if (typeof answer === 'number' && (i + 1 === answer || i === answer)) o.classList.add('correct');
+    else if (o.classList.contains('selected') && !isCorrect) o.classList.add('wrong');
+  });
+
+  // Submit to server (defensive)
+  const timeTaken = Math.round((Date.now() - solveStart) / 1000);
+  fetchApi(`/api/self-learn/contents/${encodeURIComponent(p.id)}/attempt`, {
+    method: 'POST',
+    body: JSON.stringify({ isCorrect, selectedAnswer: idx + 1, timeTaken, nodeId: currentSolveNodeId })
+  });
+
+  // Show explanation
+  // 해설 안에 "정답은 N번" / "N번이 정답" 등이 포함된 경우 해설 기준으로 번호 재조정 (서버 데이터 불일치 대응)
+  const expText = p.explanation || '';
+  let displayAnswer = answer;
+  const m = expText.match(/정답은?\s*([①②③④⑤1-5])\s*번|([①②③④⑤1-5])\s*번\s*이?\s*정답/);
+  if (m) {
+    const raw = m[1] || m[2];
+    const circleMap = { '①':1,'②':2,'③':3,'④':4,'⑤':5 };
+    displayAnswer = circleMap[raw] || parseInt(raw) || displayAnswer;
+    // 화면 색칠도 해설과 일치시키기 — 기존 정답 하이라이트 제거 후 재적용
+    document.querySelectorAll('#solveOpts .solve-option').forEach(o => {
+      o.classList.remove('correct');
+      const oi = parseInt(o.dataset.idx);
+      if (oi + 1 === displayAnswer) o.classList.add('correct');
+    });
+    // 정답 일치 여부 재판정(해설 기준)
+    isCorrect = (idx + 1) === displayAnswer;
+  }
+  const body = $('solveBody');
+  let footer = `<div class="solve-explain"><strong>${isCorrect ? '✅ 정답입니다!' : '❌ 아쉬워요. 정답은 ' + (displayAnswer || '?') + '번입니다.'}</strong><br>${escHtml(expText || '해설이 준비되면 이 자리에 표시됩니다.')}</div>`;
+  if (p.clear_top3 && p.clear_top3.length) {
+    footer += `<div class="clear-top3"><span class="medal">🏆</span> 클리어 TOP3: ${p.clear_top3.map((u, i) => ['🥇','🥈','🥉'][i] + ' ' + escHtml(u.name || u.username || '익명')).join(' · ')}</div>`;
+  }
+  body.insertAdjacentHTML('beforeend', footer);
+
+  $('solveActions').innerHTML = `
+    <button class="btn btn-accent" onclick="openReport('${p.id}','problem')"><i class="fas fa-exclamation-triangle"></i> 오류 신고</button>
+    <button class="btn btn-primary" onclick="closeSolve()"><i class="fas fa-check"></i> 확인</button>`;
+}
+
+function closeSolve() {
+  $('solveModal').classList.remove('show');
+  currentSolveProblem = null;
+}
+
+/* =========================================================
+   Report Modal
+   ========================================================= */
+function openReport(contentId, contentType) {
+  currentReportTarget = { contentId, contentType };
+  $('reportDetail').value = '';
+  document.querySelectorAll('#reportReasons input').forEach(r => r.checked = false);
+  $('reportModal').classList.add('show');
+}
+function closeReport() { $('reportModal').classList.remove('show'); }
+async function submitReport() {
+  const reason = document.querySelector('#reportReasons input:checked')?.value;
+  if (!reason) { showToast('신고 사유를 선택해 주세요', 'fa-exclamation-circle'); return; }
+  const details = $('reportDetail').value.trim();
+  const t = currentReportTarget;
+  await fetchApi(`/api/self-learn/contents/${encodeURIComponent(t.contentId)}/report`, {
+    method: 'POST',
+    body: JSON.stringify({ reason, details, contentType: t.contentType })
+  });
+  closeReport();
+  showToast('신고가 접수되었습니다. 감사합니다!', 'fa-check-circle');
+}
+
+function addToProblemSet(contentId, contentType) {
+  // Graceful attempt
+  fetchApi('/api/self-learn/problem-sets', {
+    method: 'POST',
+    body: JSON.stringify({ contentId, contentType })
+  }).then(() => showToast('문제집에 담았습니다!', 'fa-plus'));
+}
+
+function playVideo(id) {
+  fetchApi(`/api/self-learn/contents/${encodeURIComponent(id)}/video-progress`, {
+    method: 'POST',
+    body: JSON.stringify({ positionSec: 0, durationSec: 0, nodeId: currentDrawerNode?._id })
+  });
+  showToast('영상 재생 시작 (데모)', 'fa-play');
+}
+
+/* =========================================================
+   Diagnosis (CAT-like)
+   ========================================================= */
+function renderDiagIntro() {
+  $('diagnosisContent').innerHTML = `
+    <div class="diag-intro">
+      <div class="diag-intro-icon"><i class="fas fa-stethoscope"></i></div>
+      <h2>AI 진단평가 (CAT)</h2>
+      <p>현재 학습 수준을 진단해 맞춤형 학습 경로를 추천해 드립니다.</p>
+      <p style="font-size:12.5px;color:var(--gray-400)">목표 노드를 학습맵에서 더블클릭하거나, 과목/학년을 선택해 바로 시작하세요.</p>
+      <div class="diag-config">
+        <div class="form-group">
+          <label><i class="fas fa-book"></i> 과목</label>
+          <select id="diagSubject">
+            <option value="수학">수학</option><option value="국어">국어</option>
+            <option value="영어">영어</option><option value="과학">과학</option>
+            <option value="사회">사회</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label><i class="fas fa-graduation-cap"></i> 학년</label>
+          <select id="diagGrade" aria-label="진단평가 학년 선택">
+            <optgroup label="초등">
+              <option value="3">3학년</option><option value="4">4학년</option>
+              <option value="5">5학년</option><option value="6">6학년</option>
+            </optgroup>
+            <optgroup label="중학교">
+              <option value="m1">중1</option><option value="m2">중2</option><option value="m3">중3</option>
+            </optgroup>
+            <optgroup label="고등학교">
+              <option value="h1">고1</option><option value="h2">고2</option><option value="h3">고3</option>
+            </optgroup>
+          </select>
+        </div>
+        <div style="text-align:center;margin-top:16px">
+          <button class="btn btn-primary btn-lg" onclick="startDiagnosisBySubject()"><i class="fas fa-play"></i> 진단평가 시작하기</button>
+        </div>
+      </div>
+    </div>`;
+  // 학생 학년/과목 기본값 설정
+  try {
+    if (currentUser) {
+      if (currentUser.subject && $('diagSubject')) $('diagSubject').value = currentUser.subject;
+      const g = currentUser.grade;
+      const sl = currentUser.school_level || currentUser.schoolLevel || '';
+      if (g != null && $('diagGrade')) {
+        let v = String(g);
+        if (sl.includes('중') || /^m/i.test(v)) v = 'm' + String(g).replace(/\D/g,'');
+        else if (sl.includes('고') || /^h/i.test(v)) v = 'h' + String(g).replace(/\D/g,'');
+        $('diagGrade').value = v;
+      }
+    }
+  } catch(e) { console.warn('diag default grade set failed', e); }
+}
+
+async function startDiagnosisBySubject() {
+  const subject = $('diagSubject').value;
+  const grade = $('diagGrade').value;
+  const data = await fetchApi('/api/self-learn/diagnosis/start', {
+    method: 'POST',
+    body: JSON.stringify({ subject, grade })
+  });
+  if (!data) { showToast('진단평가 시작에 실패했습니다.', 'fa-exclamation-circle'); return; }
+  initDiagState(data, null);
+  switchToDiagnosis();
+  renderDiagRunning();
+}
+
+async function startDiagnosisFromNode(nodeId) {
+  closeDrawer();
+  const node = nodeById[nodeId] || {};
+  let data = await fetchApi('/api/self-learn/diagnosis/start', {
+    method: 'POST',
+    body: JSON.stringify({ targetNodeId: nodeId, subject: normalizeSubjectArea(node), grade: node.grade })
+  });
+  if (!data) {
+    // Fallback: build synthetic diag state from local prereqs (no placeholder questions)
+    data = { sessionId: Date.now(), targetNode: node, queue: (node.prerequisites || []).map(p => ({ id: p.id || p, title: p.title || p.name || p })), question: null };
+    showToast('서버 진단 세션 생성 실패, 대기 상태로 진입합니다.', 'fa-info-circle');
+  }
+  initDiagState(data, nodeId);
+  // 현재 노드가 비어 있으면 타겟 노드를 currentNode로 승격
+  if (!diagState.currentNode) diagState.currentNode = { id: nodeId, title: node._title || node.title || node.name };
+  switchToDiagnosis();
+  renderDiagRunning();
+  // 서버가 첫 문항을 주지 않았다면 자동으로 문항을 요청 (placeholder는 만들지 않음)
+  if (!diagState.question) {
+    fetchNextDiagQuestion();
+  }
+}
+
+function switchToDiagnosis() {
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === 'diagnosis'));
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.id === 'tab-diagnosis'));
+}
+
+function initDiagState(data, targetNodeId) {
+  diagState = {
+    sessionId: data.sessionId || data.session_id || Date.now(),
+    targetNode: data.targetNode || nodeById[targetNodeId] || { title: '진단평가' },
+    queue: data.queue || data.queue_nodes || [],
+    diagnosed: {},    // nodeId -> { passed, correct, total }
+    currentNode: data.currentNode || (data.queue?.[0]) || null,
+    question: data.question || data.first_question || null,
+    selected: null,
+    finished: false,
+    results: null
+  };
+}
+
+function renderDiagRunning() {
+  const s = diagState;
+  if (!s) return;
+  if (s.finished) { renderDiagResult(); return; }
+
+  const passed = Object.values(s.diagnosed).filter(r => r.passed).length;
+  const failed = Object.values(s.diagnosed).filter(r => !r.passed).length;
+
+  // Sidebar queue
+  let queueHtml = '';
+  Object.entries(s.diagnosed).forEach(([id, r]) => {
+    const title = nodeById[id]?._title || id;
+    const cls = r.passed ? 'done' : 'failed';
+    const icon = r.passed ? 'fa-check' : 'fa-times';
+    queueHtml += `<div class="diag-node-item ${cls}"><i class="fas ${icon}"></i> ${escHtml(title)}</div>`;
+  });
+  if (s.currentNode) {
+    queueHtml += `<div class="diag-node-item current"><i class="fas fa-play"></i> ${escHtml(s.currentNode.title || s.currentNode.name || '진단 중')}</div>`;
+  }
+  (s.queue || []).forEach(n => {
+    queueHtml += `<div class="diag-node-item queued"><i class="fas fa-clock"></i> ${escHtml(n.title || n.name || n.id)}</div>`;
+  });
+
+  // Question
+  const q = s.question;
+  const opts = (q && (q.options || q.choices)) ? (q.options || q.choices) : [];
+  const labels = ['①','②','③','④','⑤'];
+
+  $('diagnosisContent').innerHTML = `
+    <div class="diag-running">
+      <aside class="diag-sidebar">
+        <h4><i class="fas fa-list-ol"></i> 진단 진행</h4>
+        <div class="diag-stat-row">
+          <div class="diag-stat"><div class="v" style="color:var(--success)">${passed}</div><div class="l">통과</div></div>
+          <div class="diag-stat"><div class="v" style="color:var(--accent)">${failed}</div><div class="l">보완</div></div>
+          <div class="diag-stat"><div class="v" style="color:var(--gray-500)">${(s.queue||[]).length}</div><div class="l">대기</div></div>
+        </div>
+        <div style="margin-top:14px">${queueHtml || '<div style="color:var(--gray-400);font-size:var(--fs-xs);padding:12px 0">진단 대기 노드가 없습니다.</div>'}</div>
+      </aside>
+      <div class="diag-main">
+        <div class="diag-progress-header">
+          <div style="font-size:var(--fs-xs);color:var(--gray-500);margin-bottom:4px">현재 노드</div>
+          <div style="font-size:17px;font-weight:700;color:var(--gray-800)">${escHtml(s.currentNode?.title || s.currentNode?.name || '진단 시작')}</div>
+        </div>
+        ${(q && opts.length) ? `
+          <div style="font-size:var(--fs-md);font-weight:600;color:var(--gray-800);line-height:1.55;margin-bottom:16px;padding:14px;background:var(--gray-50);border-radius:var(--radius-md);border-left:4px solid var(--primary)">
+            ${escHtml(q.question || q.text || q.content || '')}
+          </div>
+          <div class="solve-options" id="diagOpts">
+            ${opts.map((opt, i) => {
+              const t = typeof opt === 'string' ? opt : (opt.text || opt.label || opt.content || '보기' + (i+1));
+              return `<div class="solve-option" data-idx="${i}" onclick="selectDiagOption(this)">
+                <div class="solve-option-num">${labels[i] || (i+1)}</div>
+                <div class="solve-option-text">${escHtml(t)}</div>
+              </div>`;
+            }).join('')}
+          </div>
+          <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">
+            <button class="btn btn-ghost" onclick="finishDiagnosisEarly()">종료</button>
+            <button class="btn btn-primary" id="diagNextBtn" disabled onclick="submitDiagAnswer()">다음 <i class="fas fa-chevron-right"></i></button>
+          </div>
+        ` : `
+          <div class="empty-state" role="status" aria-live="polite">
+            <i class="fas fa-inbox"></i>
+            <p>이 노드에 등록된 문항이 없습니다.</p>
+            <p class="hint">다음 노드로 진행하거나 진단을 종료할 수 있습니다.</p>
+            <div style="display:flex;gap:8px;margin-top:10px">
+              <button class="btn btn-ghost" onclick="finishDiagnosisEarly()">종료</button>
+              <button class="btn btn-primary" onclick="fetchNextDiagQuestion()"><i class="fas fa-forward"></i> 다음 노드</button>
+            </div>
+          </div>
+        `}
+      </div>
+    </div>`;
+}
+
+function selectDiagOption(el) {
+  document.querySelectorAll('#diagOpts .solve-option').forEach(o => o.classList.remove('selected'));
+  el.classList.add('selected');
+  diagState.selected = parseInt(el.dataset.idx);
+  $('diagNextBtn').disabled = false;
+}
+
+async function submitDiagAnswer() {
+  const s = diagState;
+  if (s.selected === null) return;
+  const q = s.question;
+  const answer = q?.answer;
+  let isCorrect = false;
+  if (typeof answer === 'number') isCorrect = (s.selected + 1 === answer || s.selected === answer);
+  else if (typeof answer === 'string') isCorrect = (s.selected + 1).toString() === answer;
+  else isCorrect = Math.random() > 0.4; // demo fallback
+
+  // Flash feedback
+  document.querySelectorAll('#diagOpts .solve-option').forEach(o => {
+    const i = parseInt(o.dataset.idx);
+    if (typeof answer === 'number' && (i + 1 === answer || i === answer)) o.classList.add('correct');
+    else if (i === s.selected && !isCorrect) o.classList.add('wrong');
+  });
+
+  // Server call
+  const data = await fetchApi(`/api/self-learn/diagnosis/${encodeURIComponent(s.sessionId)}/answer`, {
+    method: 'POST',
+    body: JSON.stringify({ contentId: q?.id || q?.content_id, isCorrect, selected: s.selected + 1 })
+  });
+
+  setTimeout(() => {
+    if (data && data.finished) {
+      s.finished = true; s.results = data.results || data;
+      renderDiagResult();
+      return;
+    }
+    // Update state from server or synthetic
+    const cur = s.currentNode;
+    if (cur) {
+      if (!s.diagnosed[cur.id]) s.diagnosed[cur.id] = { passed: false, correct: 0, total: 0 };
+      s.diagnosed[cur.id].total++;
+      if (isCorrect) s.diagnosed[cur.id].correct++;
+    }
+    if (data?.next_question || data?.question) {
+      s.question = data.next_question || data.question;
+      s.selected = null;
+      if (data.current_node) s.currentNode = data.current_node;
+      renderDiagRunning();
+    } else {
+      // move to next node in queue
+      if (cur) {
+        s.diagnosed[cur.id].passed = s.diagnosed[cur.id].correct >= Math.ceil(s.diagnosed[cur.id].total * 0.6);
+      }
+      if (s.queue && s.queue.length) {
+        s.currentNode = s.queue.shift();
+        s.question = null;
+        s.selected = null;
+        fetchNextDiagQuestion();
+      } else {
+        s.finished = true;
+        s.results = { diagnosed: s.diagnosed, targetNode: s.targetNode };
+        renderDiagResult();
+      }
+    }
+  }, 650);
+}
+
+async function fetchNextDiagQuestion() {
+  const s = diagState;
+  // 서버에서 다음 문항을 가져온다. 플레이스홀더 문항 금지.
+  const data = await fetchApi(`/api/self-learn/diagnosis/${encodeURIComponent(s.sessionId)}/next`);
+  const nextQ = data?.question || data?.next_question || null;
+  if (nextQ) {
+    s.question = nextQ;
+    s.selected = null;
+    renderDiagRunning();
+    return;
+  }
+  // nextQuestion이 null: 가짜 문항 생성하지 않고 다음 노드로 skip
+  const cur = s.currentNode;
+  if (cur) {
+    s.diagnosed[cur.id || cur.node_id || 'x'] = s.diagnosed[cur.id || cur.node_id || 'x'] || { passed: false, correct: 0, total: 0, skipped: true };
+  }
+  showToast('이 노드에 등록된 문항이 없습니다. 다른 노드로 진행합니다.', 'fa-info-circle');
+  if (s.queue && s.queue.length) {
+    s.currentNode = s.queue.shift();
+    s.question = null;
+    s.selected = null;
+    renderDiagRunning();
+    // 한번 더 시도(꼬리 재귀 대신 setTimeout으로 루프 스택 방지)
+    setTimeout(() => fetchNextDiagQuestion(), 300);
+  } else {
+    s.finished = true;
+    s.results = { diagnosed: s.diagnosed, targetNode: s.targetNode, ended_reason: 'no_question' };
+    renderDiagResult();
+  }
+}
+
+async function finishDiagnosisEarly() {
+  const s = diagState;
+  s.finished = true;
+  const r = await fetchApi(`/api/self-learn/diagnosis/${encodeURIComponent(s.sessionId)}/finish`, { method: 'POST' });
+  s.results = r?.results || r || { diagnosed: s.diagnosed, targetNode: s.targetNode };
+  renderDiagResult();
+}
+
+function renderDiagResult() {
+  const s = diagState;
+  const diagnosed = s.diagnosed || {};
+  const total = Object.keys(diagnosed).length;
+  const passed = Object.values(diagnosed).filter(r => r.passed).length;
+  const failed = total - passed;
+
+  let rowsHtml = '';
+  Object.entries(diagnosed).forEach(([id, r]) => {
+    const n = nodeById[id] || {};
+    rowsHtml += `
+      <div class="diag-node-item ${r.passed ? 'done' : 'failed'}" style="padding:12px;display:flex;align-items:center;justify-content:space-between">
+        <div>
+          <i class="fas ${r.passed ? 'fa-check' : 'fa-times'}"></i> ${escHtml(n._title || id)}
+          <span style="font-size:var(--fs-xs);color:var(--gray-500);margin-left:8px">${r.correct}/${r.total} 정답</span>
+        </div>
+        ${!r.passed ? `<button class="btn-mini primary" onclick="toggleLearningList('${id}')">학습목록 추가</button>` : ''}
+      </div>`;
+  });
+  if (!rowsHtml) rowsHtml = '<div style="color:var(--gray-500);font-size:var(--fs-sm);padding:20px 0;text-align:center">진단된 노드가 없습니다.</div>';
+
+  $('diagnosisContent').innerHTML = `
+    <div class="diag-main" style="max-width:720px;margin:0 auto">
+      <div style="text-align:center;margin-bottom:20px">
+        <div style="width:90px;height:90px;margin:0 auto 14px;border-radius:50%;background:linear-gradient(135deg,var(--success),var(--primary));display:flex;align-items:center;justify-content:center;color:#fff;font-size:36px"><i class="fas fa-flag-checkered"></i></div>
+        <h2 style="font-size:20px;font-weight:700">진단 완료!</h2>
+        <p style="font-size:var(--fs-sm);color:var(--gray-500);margin-top:6px">${total}개 노드 중 ${passed}개 통과, ${failed}개 보완 필요</p>
+      </div>
+      <div style="margin-bottom:20px">${rowsHtml}</div>
+      <div style="display:flex;gap:10px;justify-content:center">
+        ${failed ? `<button class="btn btn-secondary" onclick="drillDownFailed()"><i class="fas fa-chevron-down"></i> 추가 진단(하위 선수노드)</button>` : ''}
+        <button class="btn btn-primary" onclick="addFailedToList()"><i class="fas fa-bookmark"></i> 보완 노드 학습목록에 추가</button>
+        <button class="btn btn-outline" onclick="renderDiagIntro();diagState=null"><i class="fas fa-redo"></i> 다시</button>
+      </div>
+    </div>`;
+  loadDashboard(); loadMap();
+}
+
+async function drillDownFailed() {
+  const s = diagState;
+  await fetchApi(`/api/self-learn/diagnosis/${encodeURIComponent(s.sessionId)}/drill-down`, { method: 'POST' });
+  showToast('추가 진단 문항을 준비 중입니다...', 'fa-spinner');
+  // Reset to running with empty queue for demo
+  const failedIds = Object.entries(s.diagnosed).filter(([, r]) => !r.passed).map(([id]) => id);
+  s.queue = failedIds.map(id => ({ id, title: nodeById[id]?._title || id }));
+  s.diagnosed = {};
+  s.finished = false;
+  s.currentNode = s.queue.shift() || null;
+  s.question = null;
+  renderDiagRunning();
+  if (s.currentNode) fetchNextDiagQuestion();
+}
+
+async function addFailedToList() {
+  const s = diagState;
+  const failedIds = Object.entries(s.diagnosed).filter(([, r]) => !r.passed).map(([id]) => id);
+  for (const id of failedIds) {
+    if (!learningList.has(id)) {
+      await fetchApi('/api/self-learn/learning-list', { method: 'POST', body: JSON.stringify({ nodeId: id }) });
+      learningList.add(id);
+    }
+  }
+  renderSidebarCards();
+  showToast(`${failedIds.length}개 노드를 학습목록에 추가했습니다!`, 'fa-bookmark');
+}
+
+function startDirectLearning(nodeId) {
+  closeDrawer();
+  showToast('바로 학습하기 세션을 시작합니다 (데모)', 'fa-play');
+  // In a full build, we'd open the first problem/video in solve modal
+  const n = nodeById[nodeId];
+  if (n && n.problems && n.problems.length) {
+    openSolve(n.problems[0]);
+  } else {
+    // open first problem via drawer fetch
+    fetchApi('/api/self-learn/map/nodes/' + encodeURIComponent(nodeId)).then(d => {
+      const probs = d?.problems || [];
+      if (probs.length) openSolve(probs[0]);
+    });
+  }
+}
+
+/* =========================================================
+   Learning Path Tab
+   ========================================================= */
+async function loadPath() {
+  const container = $('pathContainer');
+  container.innerHTML = '<div class="spinner"><i class="fas fa-spinner"></i></div>';
+  const syncWithList = $('pathSyncList').checked;
+  const data = await fetchApi('/api/self-learn/path/current');
+  let items = [];
+  if (data?.path) {
+    items = Array.isArray(data.path) ? data.path : (data.path.steps || data.path.nodes || []);
+  }
+  if (syncWithList && learningList.size) {
+    items = [...learningList].map(id => nodeById[id] || { id, title: id });
+  }
+  if (!items.length) {
+    container.innerHTML = `<div class="path-empty">
+      <i class="fas fa-route"></i>
+      <p>아직 학습 경로가 없습니다.</p>
+      <p style="font-size:var(--fs-xs);margin-top:6px">진단평가를 완료하거나 'AI 경로 생성' 버튼을 눌러 경로를 만들어 보세요.</p>
+    </div>`;
+    return;
+  }
+  let html = '<div class="path-steps">';
+  items.forEach((st, idx) => {
+    const id = st.node_id || st.id || st._id;
+    const status = st.status || inferStatus(id) || 'available';
+    const title = st.title || st.name || id;
+    const subject = normalizeSubjectArea(st) || normalizeSubjectArea(nodeById[id] || {});
+    html += `<div class="path-step ${status}">
+      <div class="step-header">
+        <span class="step-order">STEP ${idx + 1}</span>
+        <span class="step-status-tag ${status}">${statusLabel(status)}</span>
+      </div>
+      <div class="step-title">${escHtml(title)}</div>
+      <div class="step-subject">${escHtml(subject)}${st.grade ? ' · ' + st.grade + '학년' : ''}</div>
+      <div style="margin-top:8px">
+        <button class="btn-mini primary" onclick="openDrawer('${id}')">상세 보기</button>
+      </div>
+    </div>`;
+  });
+  html += '</div>';
+  container.innerHTML = html;
+}
+
+async function generatePath() {
+  showToast('AI가 학습 경로를 생성 중입니다...', 'fa-magic');
+  const subject = filters.area || '수학';
+  const d = await fetchApi('/api/self-learn/path/generate', { method: 'POST', body: JSON.stringify({ subject }) });
+  if (d) { showToast('학습 경로가 생성되었습니다!', 'fa-check'); loadPath(); }
+  else showToast('경로 생성에 실패했습니다.', 'fa-exclamation-circle');
+}
+
+/* =========================================================
+   My Record Tab
+   ========================================================= */
+async function loadRecord() {
+  // 동일 소스(dashboard API) 참조 — 상단 카드와 수치 일치 보장
+  const d = dashboardCache || await fetchApi('/api/self-learn/dashboard');
+  if (d) dashboardCache = d;
+  const completed = d?.completed_nodes ?? d?.completedNodes;
+  const totalSolved = d?.total_solved ?? d?.totalSolved ?? d?.total_attempts;
+  const acc = d?.avg_accuracy ?? d?.accuracy;
+  $('recTotal').textContent = totalSolved != null ? totalSolved : '-';
+  $('recAcc').textContent = acc != null ? acc + '%' : '-';
+  $('recNodes').textContent = completed != null ? completed : '-';
+  $('recStreak').textContent = (d?.streak ?? '-') + (d?.streak ? '일' : '');
+  $('recAttempts').textContent = d?.total_attempts ?? d?.totalAttempts ?? '-';
+
+  // Area breakdown fallback
+  const areas = d?.area_stats || d?.subject_stats || [];
+  const areaList = $('recAreaList');
+  if (areas && areas.length) {
+    let h = '';
+    areas.forEach(s => {
+      const acc = s.accuracy ?? 0;
+      h += `<div class="area-row">
+        <div class="area-head"><span>${escHtml(s.area || s.subject)}</span><span style="font-weight:700;color:var(--primary)">${acc}%</span></div>
+        <div class="area-bar"><div class="area-fill" style="width:${acc}%"></div></div>
+      </div>`;
+    });
+    areaList.innerHTML = h;
+  } else {
+    areaList.innerHTML = '<div style="color:var(--gray-400);font-size:var(--fs-sm);padding:10px 0">영역별 통계 데이터가 아직 없습니다.</div>';
+  }
+
+  // Recent problems
+  const recent = d?.recent_problems || d?.recent_attempts || [];
+  const recentList = $('recRecentList');
+  if (recent.length) {
+    recentList.innerHTML = recent.slice(0, 5).map(p => {
+      const ok = p.is_correct ?? p.isCorrect ?? (p.result === 'correct');
+      return `<div class="recent-item">
+        <div class="recent-icon ${ok ? 'correct' : 'wrong'}"><i class="fas fa-${ok ? 'check' : 'times'}"></i></div>
+        <div style="flex:1">
+          <div style="font-size:var(--fs-sm);font-weight:600">${escHtml(p.title || p.content_title || '문제')}</div>
+          <div style="font-size:var(--fs-xs);color:var(--gray-500)">${escHtml(p.node_title || p.node || '')}</div>
+        </div>
+        <span style="font-size:var(--fs-xs);color:var(--gray-400)">${escHtml(p.time || p.created_at || '')}</span>
+      </div>`;
+    }).join('');
+  } else {
+    recentList.innerHTML = '<div style="color:var(--gray-400);font-size:var(--fs-sm);padding:10px 0">최근 풀이 기록이 없습니다.</div>';
+  }
+
+  // Wrong notes mini
+  const wd = await fetchApi('/api/self-learn/wrong-notes');
+  const wrongs = wd?.notes || wd?.wrong_notes || wd?.items || [];
+  const wl = $('recWrongList');
+  if (wrongs.length) {
+    wl.innerHTML = wrongs.slice(0, 5).map(w => {
+      const qText = w.question || w.question_text || w.content_title || w.title || '오답 문제';
+      const meta = [w.unit_name || w.node_title || w.subject || '', w.correct_answer ? '정답: ' + w.correct_answer : ''].filter(Boolean).join(' · ');
+      return `<div class="recent-item">
+        <div class="recent-icon wrong"><i class="fas fa-times"></i></div>
+        <div style="flex:1">
+          <div style="font-size:var(--fs-sm);font-weight:600">${escHtml(String(qText).slice(0, 40))}${String(qText).length > 40 ? '…' : ''}</div>
+          <div style="font-size:var(--fs-xs);color:var(--gray-500)">${escHtml(meta)} · 복습 ${w.review_count || w.attempt_count || 0}회</div>
+        </div>
+        <button class="btn-mini primary">복습</button>
+      </div>`;
+    }).join('');
+  } else {
+    wl.innerHTML = '<div style="color:var(--gray-400);font-size:var(--fs-sm);padding:10px 0">아직 오답노트가 비어있습니다. 틀린 문제는 자동으로 추가됩니다.</div>';
+  }
+}
+
+/* =========================================================
+   Ranking
+   ========================================================= */
+async function loadRanking() {
+  const d = await fetchApi('/api/self-learn/ranking?period=' + encodeURIComponent(rankingPeriod));
+  const list = $('rankList');
+  const rankings = d?.rankings || [];
+  if (!rankings.length) {
+    list.innerHTML = '<li class="rank-item" style="justify-content:center;color:var(--gray-400)">랭킹 데이터가 없습니다</li>';
+    return;
+  }
+  list.innerHTML = rankings.slice(0, 10).map((r, i) => {
+    const rc = i === 0 ? 'gold' : i === 1 ? 'silver' : i === 2 ? 'bronze' : 'normal';
+    const isMe = currentUser && (r.user_id === currentUser.id || r.username === currentUser.username);
+    return `<li class="rank-item ${isMe ? 'me' : ''}">
+      <div class="rank-num ${rc}">${i + 1}</div>
+      <span class="rank-name">${escHtml(r.display_name || r.username || '사용자')}${isMe ? ' <span style="font-size:var(--fs-xs);color:var(--primary)">(나)</span>' : ''}</span>
+      <span class="rank-score">${r.score ?? r.points ?? r.completed_nodes ?? r.solved ?? 0}점</span>
+    </li>`;
+  }).join('');
+
+  // Update dashboard rank
+  if (currentUser) {
+    const myIdx = rankings.findIndex(r => r.user_id === currentUser.id || r.username === currentUser.username);
+    if (myIdx >= 0) { $('dashRank').textContent = (myIdx + 1) + '위'; $('dashRankSub').textContent = rankings.length + '명 중'; }
+  }
+}
+</script>
+</body>
+</html>

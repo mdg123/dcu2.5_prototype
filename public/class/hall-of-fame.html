@@ -1,0 +1,528 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>다채움 - 명예의 전당</title>
+  <link rel="stylesheet" href="/css/common-nav.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <style>
+    :root {
+      --primary: #4A7CFF; --primary-dark: #3A6AE8; --primary-light: #E8EEFF;
+      --gold: #F59E0B; --silver: #9CA3AF; --bronze: #EA580C;
+      --gray-50: #F9FAFB; --gray-100: #F3F4F6; --gray-200: #E5E7EB;
+      --gray-500: #6B7280; --gray-700: #374151; --gray-800: #1F2937;
+      --radius: 12px; --radius-lg: 16px; --radius-sm: 8px;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Pretendard','Noto Sans KR',system-ui,sans-serif; background: #E8ECF1; color: #1A1A2E; }
+    .container { max-width: 1800px; margin: 0 auto; padding: 24px 20px; }
+
+    /* 헤더 */
+    .page-header {
+      background: linear-gradient(135deg, #1E3A5F 0%, #2563EB 50%, #7C3AED 100%);
+      border-radius: var(--radius-lg); padding: 28px 36px; margin-bottom: 20px; color: #fff;
+      display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px;
+    }
+    .page-header h1 { font-size: 26px; font-weight: 800; display: flex; align-items: center; gap: 10px; }
+    .page-header .subtitle { font-size: 14px; color: rgba(255,255,255,0.7); margin-top: 4px; }
+    .header-controls { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+    .month-select {
+      padding: 8px 14px; border: 1.5px solid rgba(255,255,255,0.3); border-radius: 8px;
+      background: rgba(255,255,255,0.1); color: #fff; font-size: 14px; font-family: inherit; cursor: pointer; outline: none;
+    }
+    .month-select option { color: #333; background: #fff; }
+    .period-btn {
+      padding: 8px 18px; border: 1.5px solid rgba(255,255,255,0.3); border-radius: 8px;
+      background: transparent; color: rgba(255,255,255,0.7); font-size: 13px; font-weight: 600;
+      cursor: pointer; font-family: inherit; transition: all 0.2s;
+    }
+    .period-btn.active { background: #fff; color: var(--primary); border-color: #fff; }
+    .period-btn:hover:not(.active) { background: rgba(255,255,255,0.15); color: #fff; }
+
+    /* 탭 바 */
+    .tab-bar {
+      display: flex; gap: 0; background: #fff; border-radius: var(--radius) var(--radius) 0 0;
+      border: 1px solid var(--gray-200); border-bottom: none; overflow: hidden;
+    }
+    .tab-item {
+      flex: 1; padding: 14px; text-align: center; font-size: 15px; font-weight: 700;
+      cursor: pointer; border: none; background: transparent; font-family: inherit;
+      color: var(--gray-500); transition: all 0.2s; position: relative;
+    }
+    .tab-item.active { color: var(--primary); background: var(--primary-light); }
+    .tab-item.active::after {
+      content: ''; position: absolute; bottom: 0; left: 0; right: 0; height: 3px;
+      background: var(--primary);
+    }
+
+    /* 뱃지 범례 */
+    .badge-legend {
+      display: flex; gap: 16px; align-items: center; padding: 12px 20px;
+      background: #fff; border: 1px solid var(--gray-200); border-top: none;
+      font-size: 12px; color: var(--gray-500); flex-wrap: wrap;
+    }
+    .badge-legend .legend-label { font-weight: 600; color: var(--gray-700); }
+    .badge-pill { padding: 2px 10px; border-radius: 99px; font-size: 11px; font-weight: 600; }
+    .badge-pill.bronze { background: #FED7AA; color: #9A3412; }
+    .badge-pill.silver { background: #E5E7EB; color: #374151; }
+    .badge-pill.gold { background: #FDE68A; color: #92400E; }
+    .badge-pill.diamond { background: #DBEAFE; color: #1E40AF; }
+
+    /* 컨트롤 바 */
+    .control-bar {
+      display: flex; justify-content: space-between; align-items: center; padding: 12px 20px;
+      background: #fff; border: 1px solid var(--gray-200); border-top: none;
+      border-radius: 0 0 var(--radius) var(--radius); margin-bottom: 16px; flex-wrap: wrap; gap: 10px;
+    }
+    .sort-select {
+      padding: 7px 12px; border: 1.5px solid var(--gray-200); border-radius: 8px;
+      font-size: 13px; font-family: inherit; outline: none; background: #fff; color: var(--gray-700);
+    }
+    .top-btns { display: flex; gap: 4px; }
+    .top-btn {
+      padding: 6px 14px; border: 1.5px solid var(--gray-200); border-radius: 6px;
+      font-size: 12px; font-weight: 600; cursor: pointer; font-family: inherit;
+      background: #fff; color: var(--gray-500); transition: all 0.2s;
+    }
+    .top-btn.active { background: var(--primary); color: #fff; border-color: var(--primary); }
+
+    /* 랭킹 카드 */
+    .ranking-list { display: flex; flex-direction: column; gap: 10px; }
+    .rank-card {
+      display: flex; align-items: center; gap: 16px; padding: 18px 20px;
+      background: #fff; border-radius: var(--radius); border: 1px solid var(--gray-200);
+      box-shadow: 0 1px 4px rgba(0,0,0,0.04); transition: all 0.2s; cursor: pointer;
+    }
+    .rank-card:hover { box-shadow: 0 4px 16px rgba(0,0,0,0.08); border-color: var(--primary); }
+    .rank-card.top1 { background: linear-gradient(90deg, #FFFBEB, #FEF3C7); border-color: #FDE68A; }
+    .rank-card.top2 { background: linear-gradient(90deg, #F9FAFB, #F3F4F6); border-color: #D1D5DB; }
+    .rank-card.top3 { background: linear-gradient(90deg, #FFF7ED, #FFEDD5); border-color: #FDBA74; }
+
+    .rank-medal { width: 44px; text-align: center; flex-shrink: 0; }
+    .rank-medal .medal { font-size: 28px; }
+    .rank-medal .num { font-size: 18px; font-weight: 800; color: var(--gray-500); }
+
+    .rank-avatar {
+      width: 48px; height: 48px; border-radius: 12px; display: flex; align-items: center; justify-content: center;
+      font-size: 22px; font-weight: 700; color: #fff; flex-shrink: 0;
+    }
+    .rank-info { flex: 1; min-width: 0; }
+    .rank-name-row { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; flex-wrap: wrap; }
+    .rank-name { font-size: 16px; font-weight: 700; }
+    .rank-meta { font-size: 12px; color: var(--gray-500); display: flex; gap: 12px; }
+
+    /* 점수 막대 */
+    .score-bars { display: flex; gap: 8px; flex: 1; min-width: 200px; }
+    .score-bar-group { flex: 1; }
+    .score-bar-label { font-size: 11px; color: var(--gray-500); margin-bottom: 2px; display: flex; justify-content: space-between; }
+    .score-bar-track { height: 8px; background: var(--gray-100); border-radius: 4px; overflow: hidden; }
+    .score-bar-fill { height: 100%; border-radius: 4px; transition: width 1s ease; width: 0; }
+    .score-bar-fill.blue { background: #3B82F6; }
+    .score-bar-fill.green { background: #10B981; }
+    .score-bar-fill.amber { background: #F59E0B; }
+    .score-bar-fill.purple { background: #8B5CF6; }
+
+    .total-score {
+      font-size: 28px; font-weight: 800; color: var(--primary); min-width: 70px; text-align: center;
+      flex-shrink: 0; display: flex; flex-direction: column; align-items: center;
+    }
+    .total-score .label { font-size: 11px; font-weight: 500; color: var(--gray-500); }
+
+    .chart-btn {
+      width: 38px; height: 38px; border-radius: 8px; border: 1.5px solid var(--gray-200);
+      background: #fff; cursor: pointer; display: flex; align-items: center; justify-content: center;
+      font-size: 16px; color: var(--primary); transition: all 0.2s; flex-shrink: 0;
+    }
+    .chart-btn:hover { background: var(--primary-light); border-color: var(--primary); }
+
+    /* 크리에이터 스탯 */
+    .creator-stats { display: flex; gap: 16px; font-size: 13px; color: var(--gray-700); }
+    .creator-stats span { display: flex; align-items: center; gap: 4px; }
+    .creator-stats strong { color: var(--primary); font-size: 15px; }
+
+    /* 모달 */
+    .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.45); display: none; align-items: center; justify-content: center; z-index: 10000; padding: 20px; }
+    .modal-overlay.active { display: flex; }
+    .modal { background: #fff; border-radius: var(--radius-lg); padding: 28px; width: 100%; max-width: 520px; max-height: 85vh; overflow-y: auto; }
+    .modal h3 { font-size: 18px; font-weight: 700; margin-bottom: 20px; display: flex; align-items: center; gap: 8px; }
+    .modal-close { float: right; border: none; background: none; font-size: 20px; cursor: pointer; color: var(--gray-500); }
+
+    .radar-info { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 16px; }
+    .radar-info-item { padding: 10px; background: var(--gray-50); border-radius: 8px; }
+    .radar-info-item .ri-label { font-size: 12px; color: var(--gray-500); }
+    .radar-info-item .ri-value { font-size: 16px; font-weight: 700; color: var(--gray-800); }
+
+    .empty-state { text-align: center; padding: 60px 20px; color: var(--gray-500); }
+    .empty-state i { font-size: 40px; display: block; margin-bottom: 10px; color: var(--gray-200); }
+
+    @media (max-width: 1024px) { .score-bars { flex-direction: column; } }
+    @media (max-width: 768px) {
+      .page-header { flex-direction: column; text-align: center; }
+      .rank-card { flex-wrap: wrap; }
+      .score-bars { width: 100%; }
+    }
+  </style>
+</head>
+<body>
+  <script src="/js/common-nav.js"></script>
+  <div class="container" id="mainContent" style="display:none;">
+    <!-- 헤더 -->
+    <div class="page-header">
+      <div>
+        <h1>🏆 명예의 전당</h1>
+        <div class="subtitle">다채움 인기 클래스와 크리에이터를 확인하세요</div>
+      </div>
+      <div class="header-controls">
+        <select class="month-select" id="monthSelect" onchange="onMonthChange()"></select>
+        <button class="period-btn active" onclick="setPeriod(this,'weekly')">주간</button>
+        <button class="period-btn" onclick="setPeriod(this,'monthly')">월간</button>
+      </div>
+    </div>
+
+    <!-- 탭 -->
+    <div class="tab-bar">
+      <button class="tab-item active" onclick="switchTab(this,'class')"><i class="fas fa-school"></i> 인기 클래스</button>
+      <button class="tab-item" onclick="switchTab(this,'creator')"><i class="fas fa-user-pen"></i> 인기 크리에이터</button>
+    </div>
+
+    <!-- 뱃지 범례 -->
+    <div class="badge-legend">
+      <span class="legend-label">뱃지 등급</span>
+      <span class="badge-pill bronze">브론즈 1회</span>
+      <span class="badge-pill silver">실버 3회</span>
+      <span class="badge-pill gold">골드 5회</span>
+      <span class="badge-pill diamond">다이아 10회</span>
+    </div>
+
+    <!-- 컨트롤 -->
+    <div class="control-bar">
+      <div></div>
+      <div class="top-btns">
+        <button class="top-btn active" onclick="setTopN(this,20)">TOP 20</button>
+      </div>
+    </div>
+
+    <!-- 랭킹 리스트 -->
+    <div class="ranking-list" id="rankingList">
+      <div class="empty-state"><i class="fas fa-spinner fa-spin"></i>로딩 중...</div>
+    </div>
+  </div>
+
+  <!-- 레이더 차트 모달 -->
+  <div class="modal-overlay" id="radarModal">
+    <div class="modal">
+      <button class="modal-close" onclick="closeRadarModal()"><i class="fas fa-times"></i></button>
+      <h3><i class="fas fa-chart-radar" style="color:var(--primary);"></i> <span id="radarTitle">상세 분석</span></h3>
+      <canvas id="radarChart" width="300" height="300"></canvas>
+      <div class="radar-info" id="radarInfo"></div>
+    </div>
+  </div>
+
+  <script>
+    const avatarColors = ['#3B82F6','#10B981','#F59E0B','#EF4444','#8B5CF6','#EC4899','#06B6D4','#6366F1','#14B8A6','#F97316'];
+    let currentTab = 'class';
+    let currentPeriod = 'weekly';
+    let currentMonth = '';
+    let topN = 20;
+    let allData = null;
+    let radarChartInstance = null;
+    let useSpecificMonth = false;
+
+    function escHtml(s) { if(!s) return ''; const d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
+
+    // 월 드롭다운 생성
+    function initMonthSelect() {
+      const sel = document.getElementById('monthSelect');
+      const now = new Date();
+      for (let i = 0; i < 12; i++) {
+        const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+        const val = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+        const label = `${d.getFullYear()}년 ${d.getMonth()+1}월`;
+        sel.innerHTML += `<option value="${val}"${i===0?' selected':''}>${label}</option>`;
+      }
+      currentMonth = sel.value;
+    }
+
+    function onMonthChange() {
+      currentMonth = document.getElementById('monthSelect').value;
+      currentPeriod = 'monthly';
+      useSpecificMonth = true;
+      document.querySelectorAll('.period-btn').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.period-btn')[1].classList.add('active');
+      loadData();
+    }
+
+    function setPeriod(btn, period) {
+      document.querySelectorAll('.period-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      currentPeriod = period;
+      useSpecificMonth = false;
+      loadData();
+    }
+
+    function switchTab(btn, tab) {
+      document.querySelectorAll('.tab-item').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      currentTab = tab;
+      updateSortOptions();
+      renderList();
+    }
+
+    function updateSortOptions() {}
+
+    function setTopN(btn, n) {
+      document.querySelectorAll('.top-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      topN = n;
+      renderList();
+    }
+
+    function getBadge(count) {
+      if (count >= 10) return '<span class="badge-pill diamond">다이아 '+count+'회</span>';
+      if (count >= 5) return '<span class="badge-pill gold">골드 '+count+'회</span>';
+      if (count >= 3) return '<span class="badge-pill silver">실버 '+count+'회</span>';
+      if (count >= 1) return '<span class="badge-pill bronze">브론즈 '+count+'회</span>';
+      return '';
+    }
+
+    function getMedal(rank) {
+      if (rank === 1) return '<span class="medal">🥇</span>';
+      if (rank === 2) return '<span class="medal">🥈</span>';
+      if (rank === 3) return '<span class="medal">🥉</span>';
+      return `<span class="num">${rank}</span>`;
+    }
+
+    // 점수 계산 (활동량 기반 정규화) — 실제 API 필드만 사용. 미제공 항목은 0으로 표시.
+    function calcScores(item, maxActivity, maxMembers) {
+      const activity = Math.round(((item.activity_count || 0) / Math.max(maxActivity, 1)) * 100);
+      // 출석률/피드백 전용 API 미연동: 실데이터가 들어오기 전까지 정직하게 0 처리
+      const attendance = Number.isFinite(item.attendance_rate) ? Math.round(item.attendance_rate) : 0;
+      const feedback = Number.isFinite(item.feedback_score) ? Math.round(item.feedback_score) : 0;
+      const members = Math.round(((item.member_count || 0) / Math.max(maxMembers, 1)) * 100);
+      // 종합점수는 실측 가능한 항목(활동량 + 멤버수)만 합산
+      const measured = [];
+      measured.push({ v: activity, w: 0.6 });
+      measured.push({ v: members, w: 0.4 });
+      if (attendance > 0) measured.push({ v: attendance, w: 0.0 });
+      if (feedback > 0) measured.push({ v: feedback, w: 0.0 });
+      const total = Math.round(measured.reduce((s, m) => s + m.v * m.w, 0));
+      return { activity, attendance, feedback, members, total };
+    }
+
+    async function loadData() {
+      const list = document.getElementById('rankingList');
+      list.innerHTML = '<div class="empty-state"><i class="fas fa-spinner fa-spin"></i>로딩 중...</div>';
+      try {
+        let url = '/api/portal/hall-of-fame?period=' + currentPeriod;
+        if (currentPeriod === 'monthly' && useSpecificMonth) url += '&month=' + currentMonth;
+        const res = await fetch(url);
+        const data = await res.json();
+        if (!data.success) throw new Error(data.message);
+        allData = data;
+        renderList();
+      } catch(e) {
+        list.innerHTML = '<div class="empty-state"><i class="fas fa-exclamation-circle"></i>데이터를 불러오지 못했습니다.</div>';
+      }
+    }
+
+    function renderList() {
+      if (!allData) return;
+      const list = document.getElementById('rankingList');
+      const sortKey = 'total';
+
+      if (currentTab === 'class') {
+        let items = [...(allData.topClasses || [])];
+        const maxActivity = Math.max(...items.map(i => i.activity_count || 0), 1);
+        const maxMembers = Math.max(...items.map(i => i.member_count || 0), 1);
+
+        // 점수 계산
+        items = items.map(it => ({ ...it, scores: calcScores(it, maxActivity, maxMembers) }));
+
+        // 정렬
+        if (sortKey === 'activity') items.sort((a,b) => b.scores.activity - a.scores.activity);
+        else if (sortKey === 'members') items.sort((a,b) => b.scores.members - a.scores.members);
+        else items.sort((a,b) => b.scores.total - a.scores.total);
+
+        items = items.slice(0, topN);
+
+        if (!items.length) {
+          list.innerHTML = '<div class="empty-state"><i class="fas fa-trophy"></i>해당 기간에 활동 기록이 없습니다.</div>';
+          return;
+        }
+
+        list.innerHTML = items.map((item, i) => {
+          const rank = i + 1;
+          const topClass = rank <= 3 ? `top${rank}` : '';
+          const color = avatarColors[i % avatarColors.length];
+          const initial = (item.name || '?').charAt(0);
+          const s = item.scores;
+          const badgeCount = Math.min(Math.floor((item.activity_count || 0) / 5), 12);
+          return `
+          <div class="rank-card ${topClass}" onclick="showRadar(${JSON.stringify(item).replace(/"/g,'&quot;')})">
+            <div class="rank-medal">${getMedal(rank)}</div>
+            <div class="rank-avatar" style="background:${color};border-radius:12px;">${initial}</div>
+            <div class="rank-info">
+              <div class="rank-name-row">
+                <span class="rank-name">${escHtml(item.name)}</span>
+                ${getBadge(badgeCount)}
+              </div>
+              <div class="rank-meta">
+                <span><i class="fas fa-user-pen"></i> ${escHtml(item.school_name || '학교 미등록')}</span>
+                <span><i class="fas fa-users"></i> ${item.member_count || 0}명</span>
+              </div>
+            </div>
+            <div class="score-bars">
+              <div class="score-bar-group">
+                <div class="score-bar-label"><span>활동량</span><span>${s.activity}</span></div>
+                <div class="score-bar-track"><div class="score-bar-fill blue" data-w="${s.activity}"></div></div>
+              </div>
+              <div class="score-bar-group">
+                <div class="score-bar-label"><span>출석률</span><span>${s.attendance}</span></div>
+                <div class="score-bar-track"><div class="score-bar-fill green" data-w="${s.attendance}"></div></div>
+              </div>
+              <div class="score-bar-group">
+                <div class="score-bar-label"><span>피드백</span><span>${s.feedback}</span></div>
+                <div class="score-bar-track"><div class="score-bar-fill amber" data-w="${s.feedback}"></div></div>
+              </div>
+              <div class="score-bar-group">
+                <div class="score-bar-label"><span>멤버수</span><span>${s.members}</span></div>
+                <div class="score-bar-track"><div class="score-bar-fill purple" data-w="${s.members}"></div></div>
+              </div>
+            </div>
+            <div class="total-score">
+              <span>${s.total}</span>
+              <span class="label">종합</span>
+            </div>
+            <button class="chart-btn" onclick="event.stopPropagation();showRadar(${JSON.stringify(item).replace(/"/g,'&quot;')})"><i class="fas fa-chart-pie"></i></button>
+          </div>`;
+        }).join('');
+
+        // 막대 애니메이션
+        setTimeout(() => {
+          list.querySelectorAll('.score-bar-fill').forEach((bar, i) => {
+            setTimeout(() => { bar.style.width = bar.dataset.w + '%'; }, i * 30);
+          });
+        }, 100);
+
+      } else {
+        // 크리에이터 탭
+        let items = [...(allData.topCreators || [])];
+        if (sortKey === 'content') items.sort((a,b) => (b.content_count||0) - (a.content_count||0));
+
+        items = items.slice(0, topN);
+
+        if (!items.length) {
+          list.innerHTML = '<div class="empty-state"><i class="fas fa-trophy"></i>해당 기간에 콘텐츠 제작 기록이 없습니다.</div>';
+          return;
+        }
+
+        list.innerHTML = items.map((item, i) => {
+          const rank = i + 1;
+          const topClass = rank <= 3 ? `top${rank}` : '';
+          const color = avatarColors[i % avatarColors.length];
+          const initial = (item.display_name || '?').charAt(0);
+          const badgeCount = Math.min(Math.floor((item.content_count || 0) / 3), 12);
+          const totalScore = Math.round((item.content_count || 0) * 8.5);
+          return `
+          <div class="rank-card ${topClass}" onclick="goToCreatorChannel(${item.id})" title="${escHtml(item.display_name)}의 채널 방문">
+            <div class="rank-medal">${getMedal(rank)}</div>
+            <div class="rank-avatar" style="background:${color};border-radius:50%;">${initial}</div>
+            <div class="rank-info">
+              <div class="rank-name-row">
+                <span class="rank-name">${escHtml(item.display_name)}</span>
+                ${getBadge(badgeCount)}
+              </div>
+              <div class="rank-meta">
+                <span><i class="fas fa-school"></i> ${escHtml(item.school_name || '학교 미등록')}</span>
+                <span><i class="fas fa-id-badge"></i> ${item.role === 'teacher' ? '교사' : item.role === 'admin' ? '관리자' : '학생'}</span>
+              </div>
+            </div>
+            <div class="creator-stats">
+              <span><i class="fas fa-file-alt"></i> 기간 내 <strong>${item.content_count || 0}</strong>개</span>
+              <span><i class="fas fa-folder"></i> 총 <strong>${item.all_content_count || 0}</strong>개</span>
+              <span><i class="fas fa-eye"></i> <strong>${(item.total_views || 0).toLocaleString()}</strong></span>
+              <span><i class="fas fa-bookmark"></i> <strong>${item.total_bookmarks || 0}</strong></span>
+              <span><i class="fas fa-heart" style="color:#EF4444;"></i> <strong>${item.total_likes || 0}</strong></span>
+            </div>
+            <button class="chart-btn" onclick="event.stopPropagation();goToCreatorChannel(${item.id})" title="채널 방문"><i class="fas fa-external-link-alt"></i></button>
+          </div>`;
+        }).join('');
+      }
+    }
+
+    // 레이더 차트 모달
+    function showRadar(item) {
+      if (currentTab !== 'class') return;
+      const maxActivity = Math.max(...(allData.topClasses||[]).map(i=>i.activity_count||0), 1);
+      const maxMembers = Math.max(...(allData.topClasses||[]).map(i=>i.member_count||0), 1);
+      const s = calcScores(item, maxActivity, maxMembers);
+
+      document.getElementById('radarTitle').textContent = item.name + ' 상세 분석';
+      document.getElementById('radarInfo').innerHTML = `
+        <div class="radar-info-item"><div class="ri-label">종합 점수</div><div class="ri-value">${s.total}점</div></div>
+        <div class="radar-info-item"><div class="ri-label">멤버수</div><div class="ri-value">${item.member_count||0}명</div></div>
+        <div class="radar-info-item"><div class="ri-label">활동 건수</div><div class="ri-value">${item.activity_count||0}건</div></div>
+        <div class="radar-info-item"><div class="ri-label">학교</div><div class="ri-value">${escHtml(item.school_name||'미등록')}</div></div>
+      `;
+
+      if (radarChartInstance) radarChartInstance.destroy();
+      const ctx = document.getElementById('radarChart').getContext('2d');
+      radarChartInstance = new Chart(ctx, {
+        type: 'radar',
+        data: {
+          labels: ['활동량', '출석률', '피드백', '멤버수'],
+          datasets: [{
+            label: item.name,
+            data: [s.activity, s.attendance, s.feedback, s.members],
+            backgroundColor: 'rgba(74, 124, 255, 0.2)',
+            borderColor: '#4A7CFF',
+            borderWidth: 2,
+            pointBackgroundColor: '#4A7CFF',
+            pointRadius: 5
+          }]
+        },
+        options: {
+          scales: { r: { beginAtZero: true, max: 100, ticks: { stepSize: 20 } } },
+          plugins: { legend: { display: false } }
+        }
+      });
+
+      document.getElementById('radarModal').classList.add('active');
+    }
+
+    function closeRadarModal() {
+      document.getElementById('radarModal').classList.remove('active');
+    }
+    document.getElementById('radarModal').addEventListener('click', e => {
+      if (e.target.id === 'radarModal') closeRadarModal();
+    });
+
+    // 크리에이터 채널로 이동
+    async function goToCreatorChannel(creatorId) {
+      if (!creatorId) return;
+      try {
+        const res = await fetch('/api/contents/channels/list').then(r => r.json());
+        const channels = res.channels || [];
+        const ch = channels.find(c => c.user_id === creatorId);
+        if (ch) {
+          // 채움콘텐츠 페이지의 채널 뷰로 이동
+          window.location.href = '/content/#channel-' + ch.id;
+        } else {
+          alert('이 크리에이터의 채널이 아직 없습니다.');
+        }
+      } catch(e) {
+        alert('채널 정보를 불러올 수 없습니다.');
+      }
+    }
+
+    // 초기화
+    window.addEventListener('dacheim:user-loaded', () => {
+      document.getElementById('mainContent').style.display = 'block';
+      initMonthSelect();
+      loadData();
+    });
+  </script>
+</body>
+</html>

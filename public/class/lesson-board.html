@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>다채움 - 수업 게시판</title>
+  <link rel="stylesheet" href="/css/common-nav.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <style>
+    :root {
+      --primary: #2563eb; --primary-light: #dbeafe; --primary-dark: #1d4ed8;
+      --success: #10b981; --success-light: #d1fae5;
+      --warning: #f59e0b; --warning-light: #fef3c7;
+      --danger: #ef4444; --danger-light: #fee2e2;
+      --purple: #8b5cf6; --purple-light: #ede9fe;
+      --gray-50: #f9fafb; --gray-100: #f3f4f6; --gray-200: #e5e7eb; --gray-300: #d1d5db;
+      --gray-400: #9ca3af; --gray-500: #6b7280; --gray-600: #4b5563; --gray-700: #374151; --gray-800: #1f2937;
+      --shadow-sm: 0 1px 3px rgba(0,0,0,.06); --shadow-md: 0 4px 6px -1px rgba(0,0,0,.1);
+      --radius-md: 10px; --radius-lg: 16px;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Pretendard','Noto Sans KR',system-ui,sans-serif; background: #F5F7FA; color: var(--gray-800); }
+    .container { max-width: 1600px; margin: 0 auto; padding: 24px 20px; }
+
+    /* 클래스 탭 바 */
+    .class-tabs { display: flex; background: #fff; border-bottom: 1px solid var(--gray-200); padding: 0 20px; overflow-x: auto; }
+    .class-tab { padding: 12px 16px; font-size: 14px; font-weight: 500; color: var(--gray-500); text-decoration: none; border-bottom: 2px solid transparent; white-space: nowrap; transition: all .15s; }
+    .class-tab:hover { color: var(--primary); }
+    .class-tab.active { color: var(--primary); font-weight: 600; border-bottom-color: var(--primary); }
+
+    /* 페이지 헤더 */
+    .page-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
+    .page-title { font-size: 24px; font-weight: 700; display: flex; align-items: center; gap: 12px; }
+    .page-title .count { font-size: 14px; font-weight: 400; color: var(--gray-500); }
+    .btn-create { display: inline-flex; align-items: center; gap: 6px; padding: 12px 24px; background: var(--primary); color: #fff; border: none; border-radius: 10px; font-size: 15px; font-weight: 600; cursor: pointer; font-family: inherit; text-decoration: none; transition: background .15s; }
+    .btn-create:hover { background: var(--primary-dark); }
+
+    /* 통계 카드 */
+    .stats-bar { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 24px; }
+    .stat-card { background: #fff; border-radius: var(--radius-lg); padding: 20px 24px; box-shadow: var(--shadow-sm); display: flex; align-items: center; gap: 16px; }
+    .stat-icon { width: 48px; height: 48px; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 22px; flex-shrink: 0; }
+    .stat-icon.blue { background: var(--primary-light); color: var(--primary); }
+    .stat-icon.green { background: var(--success-light); color: var(--success); }
+    .stat-icon.orange { background: var(--warning-light); color: var(--warning); }
+    .stat-icon.purple { background: var(--purple-light); color: var(--purple); }
+    .stat-label { font-size: 13px; color: var(--gray-500); margin-bottom: 2px; }
+    .stat-value { font-size: 24px; font-weight: 700; }
+
+    /* 필터 바 */
+    .filter-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 12px; }
+    .filter-tabs { display: flex; gap: 6px; }
+    .filter-tab { padding: 8px 18px; border-radius: 20px; border: 1px solid var(--gray-300); background: #fff; color: var(--gray-600); font-size: 13px; font-weight: 500; cursor: pointer; font-family: inherit; transition: all .15s; }
+    .filter-tab:hover { border-color: var(--primary); color: var(--primary); }
+    .filter-tab.active { background: var(--primary); color: #fff; border-color: var(--primary); }
+    .filter-right { display: flex; gap: 10px; align-items: center; }
+    .sort-select { padding: 8px 12px; border: 1px solid var(--gray-300); border-radius: 8px; font-size: 13px; font-family: inherit; background: #fff; }
+    .search-box { display: flex; align-items: center; border: 1px solid var(--gray-300); border-radius: 8px; background: #fff; overflow: hidden; }
+    .search-box input { border: none; padding: 8px 12px; font-size: 13px; font-family: inherit; outline: none; width: 160px; }
+    .search-box button { padding: 8px 12px; border: none; background: none; color: var(--primary); cursor: pointer; font-size: 14px; }
+
+    /* 수업 카드 리스트 */
+    .lesson-list { display: flex; flex-direction: column; gap: 12px; }
+    .lesson-card { background: #fff; border-radius: var(--radius-lg); padding: 20px 24px; box-shadow: var(--shadow-sm); cursor: pointer; transition: all .15s; border: 1px solid transparent; }
+    .lesson-card:hover { border-color: var(--primary-light); box-shadow: var(--shadow-md); transform: translateY(-1px); }
+    .lesson-card-top { display: flex; align-items: flex-start; gap: 16px; }
+    .lesson-num { width: 40px; height: 40px; border-radius: 50%; background: var(--primary-light); color: var(--primary); display: flex; align-items: center; justify-content: center; font-size: 15px; font-weight: 700; flex-shrink: 0; }
+    .lesson-info { flex: 1; min-width: 0; }
+    .lesson-title { font-size: 16px; font-weight: 600; margin-bottom: 6px; }
+    .lesson-meta { display: flex; gap: 16px; font-size: 13px; color: var(--gray-500); flex-wrap: wrap; }
+    .lesson-meta span { display: flex; align-items: center; gap: 4px; }
+    .lesson-tags { display: flex; gap: 6px; align-items: center; flex-shrink: 0; flex-wrap: wrap; }
+    .content-tag { padding: 4px 10px; border-radius: 6px; font-size: 11px; font-weight: 600; }
+    .tag-video { background: #fee2e2; color: #dc2626; }
+    .tag-document { background: #dbeafe; color: #2563eb; }
+    .tag-link { background: #d1fae5; color: #059669; }
+    .tag-image { background: #fef3c7; color: #d97706; }
+    .tag-audio { background: #ede9fe; color: #7c3aed; }
+    .tag-activity { background: #fce7f3; color: #db2777; }
+    .tag-quiz { background: #fff7ed; color: #ea580c; }
+    .tag-bundle { background: #f0fdf4; color: #16a34a; }
+    .status-badge { padding: 4px 12px; border-radius: 6px; font-size: 11px; font-weight: 600; }
+    .status-published { background: #dbeafe; color: #2563eb; }
+    .status-draft { background: var(--gray-100); color: var(--gray-500); }
+    .status-scheduled { background: #fef3c7; color: #d97706; }
+    .status-archived { background: var(--success-light); color: var(--success); }
+
+    .lesson-actions { display: flex; gap: 4px; margin-left: 12px; flex-shrink: 0; }
+    .lesson-action-btn { width: 32px; height: 32px; border: 1px solid var(--gray-200); background: #fff; border-radius: 8px; cursor: pointer; font-size: 13px; color: var(--gray-500); display: flex; align-items: center; justify-content: center; transition: all .15s; }
+    .lesson-action-btn:hover { background: var(--gray-50); color: var(--gray-700); border-color: var(--gray-300); }
+    .lesson-action-btn.danger:hover { background: #fee2e2; color: #dc2626; border-color: #fca5a5; }
+
+    .lesson-card-bottom { display: flex; justify-content: space-between; align-items: center; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--gray-100); }
+    .progress-label { font-size: 12px; color: var(--gray-500); }
+    .progress-bar-wrap { flex: 1; max-width: 300px; display: flex; align-items: center; gap: 10px; }
+    .progress-bar { flex: 1; height: 8px; background: var(--gray-200); border-radius: 4px; overflow: hidden; }
+    .progress-fill { height: 100%; border-radius: 4px; transition: width .3s; }
+    .progress-fill.high { background: var(--success); }
+    .progress-fill.mid { background: var(--warning); }
+    .progress-fill.low { background: var(--danger); }
+    .progress-percent { font-size: 14px; font-weight: 700; min-width: 40px; text-align: right; }
+    .progress-percent.high { color: var(--success); }
+    .progress-percent.mid { color: var(--warning); }
+    .progress-percent.low { color: var(--danger); }
+
+    .empty-state { text-align: center; padding: 60px 20px; color: var(--gray-400); }
+    .empty-state i { font-size: 48px; margin-bottom: 12px; display: block; }
+    .empty-state p { font-size: 14px; margin-bottom: 16px; }
+
+    .pagination { display: flex; justify-content: center; gap: 4px; margin-top: 20px; }
+    .pagination button { padding: 8px 14px; border: 1px solid var(--gray-300); border-radius: 6px; background: #fff; font-size: 13px; cursor: pointer; font-family: inherit; }
+    .pagination button.active { background: var(--primary); color: #fff; border-color: var(--primary); }
+
+    .toast { position: fixed; bottom: 24px; right: 24px; background: var(--gray-800); color: #fff; padding: 12px 20px; border-radius: 8px; font-size: 13px; z-index: 2000; display: none; }
+    .toast.show { display: block; animation: fadeIn .3s; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+    @media (max-width: 768px) {
+      .stats-bar { grid-template-columns: repeat(2, 1fr); }
+      .filter-bar { flex-direction: column; align-items: stretch; }
+      .filter-right { justify-content: space-between; }
+    }
+  </style>
+</head>
+<body>
+  <script src="/js/common-nav.js"></script>
+
+  <!-- 클래스 내 탭 바 -->
+  <div class="class-tabs" id="classTabs">
+    <a class="class-tab" href="#" data-tab="home"><i class="fas fa-home"></i> 클래스 홈</a>
+    <a class="class-tab active" href="#" data-tab="lesson"><i class="fas fa-book"></i> 수업</a>
+    <a class="class-tab" href="#" data-tab="homework"><i class="fas fa-tasks"></i> 과제</a>
+    <a class="class-tab" href="#" data-tab="exam"><i class="fas fa-file-alt"></i> 평가</a>
+    <a class="class-tab" href="#" data-tab="notice"><i class="fas fa-bullhorn"></i> 알림장</a>
+    <a class="class-tab" href="#" data-tab="attendance"><i class="fas fa-clipboard-check"></i> 출석부</a>
+    <a class="class-tab" href="#" data-tab="board"><i class="fas fa-comments"></i> 게시판</a>
+  </div>
+
+  <div class="container" id="mainContent" style="display:none;">
+    <!-- 페이지 헤더 -->
+    <div class="page-header">
+      <div class="page-title">
+        수업 게시판 <span class="count" id="totalCount">총 0개의 수업</span>
+      </div>
+      <a class="btn-create" id="btnCreate" href="#" style="display:none;">
+        <i class="fas fa-plus"></i> 수업 만들기
+      </a>
+    </div>
+
+    <!-- 통계 바 -->
+    <div class="stats-bar">
+      <div class="stat-card">
+        <div class="stat-icon blue"><i class="fas fa-book-open"></i></div>
+        <div><div class="stat-label">전체 수업</div><div class="stat-value" id="statTotal">0</div></div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon green"><i class="fas fa-check-square"></i></div>
+        <div><div class="stat-label">진행중</div><div class="stat-value" id="statActive">0</div></div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon orange"><i class="fas fa-chart-bar"></i></div>
+        <div><div class="stat-label">평균 이수율</div><div class="stat-value" id="statRate">0%</div></div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon purple"><i class="fas fa-clock"></i></div>
+        <div><div class="stat-label">총 학습시간</div><div class="stat-value" id="statTime">0h</div></div>
+      </div>
+    </div>
+
+    <!-- 필터 바 -->
+    <div class="filter-bar">
+      <div class="filter-tabs">
+        <button class="filter-tab active" data-status="all">전체</button>
+        <button class="filter-tab" data-status="active">진행중</button>
+        <button class="filter-tab" data-status="completed">완료</button>
+        <button class="filter-tab" data-status="scheduled">예정</button>
+        <button class="filter-tab owner-only" data-status="draft" style="display:none">임시저장</button>
+      </div>
+      <div class="filter-right">
+        <select class="sort-select" id="sortSelect">
+          <option value="latest">최신순</option>
+          <option value="name">이름순</option>
+          <option value="order">차시순</option>
+        </select>
+        <div class="search-box">
+          <input type="text" id="searchInput" placeholder="수업명 검색">
+          <button onclick="doSearch()"><i class="fas fa-search"></i></button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 수업 목록 -->
+    <div class="lesson-list" id="lessonList"></div>
+    <div class="pagination" id="pagination"></div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script>
+    let currentUser = null;
+    let classId = null;
+    let myRole = null;
+    let currentStatus = 'all';
+    let currentPage = 1;
+
+    // URL에서 classId 가져오기
+    const params = new URLSearchParams(location.search);
+    classId = parseInt(params.get('classId')) || null;
+
+    async function fetchWithAuth(url, opts = {}) {
+      const res = await fetch(url, opts);
+      if (res.status === 401) window.location.href = '/login.html';
+      return res;
+    }
+
+    // 탭 네비게이션
+    document.querySelectorAll('.class-tab').forEach(tab => {
+      tab.addEventListener('click', (e) => {
+        e.preventDefault();
+        const t = tab.dataset.tab;
+        if (t === 'home') location.href = `/class/class-home.html?id=${classId}`;
+        else if (t === 'lesson') { /* 현재 페이지 */ }
+        else location.href = `/class/class-home.html?id=${classId}&tab=${t}`;
+      });
+    });
+
+    // 콘텐츠 타입 라벨
+    const typeLabels = {
+      video: '영상', document: '문서', link: '링크', image: '이미지',
+      audio: '오디오', activity: '활동', quiz: '퀴즈', assessment: '평가',
+      bundle: '꾸러미', html: 'HTML', presentation: '발표'
+    };
+    const typeTagClass = {
+      video: 'tag-video', document: 'tag-document', link: 'tag-link', image: 'tag-image',
+      audio: 'tag-audio', activity: 'tag-activity', quiz: 'tag-quiz', assessment: 'tag-quiz',
+      bundle: 'tag-bundle', html: 'tag-document', presentation: 'tag-document'
+    };
+
+    // 상태 뱃지
+    const statusLabels = { published: '진행중', draft: '임시저장', scheduled: '예정', archived: '완료' };
+    const statusClasses = { published: 'status-published', draft: 'status-draft', scheduled: 'status-scheduled', archived: 'status-archived' };
+
+    // 통계 로드
+    async function loadStats() {
+      try {
+        const res = await fetchWithAuth(`/api/lesson/${classId}/board-stats`);
+        const data = await res.json();
+        if (data.success) {
+          const s = data.stats;
+          document.getElementById('statTotal').textContent = s.total;
+          document.getElementById('statActive').textContent = s.active;
+          document.getElementById('statTime').textContent = s.totalMinutes >= 60 ? Math.round(s.totalMinutes / 60) + 'h' : s.totalMinutes + '분';
+          document.getElementById('totalCount').textContent = `총 ${s.total}개의 수업`;
+        }
+      } catch (e) {}
+    }
+
+    // 수업 목록 로드
+    async function loadLessons() {
+      try {
+        const search = document.getElementById('searchInput').value;
+        const sort = document.getElementById('sortSelect').value;
+        let url = `/api/lesson/${classId}/board?page=${currentPage}&status=${currentStatus}&sort=${sort}`;
+        if (search) url += `&search=${encodeURIComponent(search)}`;
+
+        const res = await fetchWithAuth(url);
+        const data = await res.json();
+        if (!data.success) return;
+
+        const list = document.getElementById('lessonList');
+
+        if (!data.lessons.length) {
+          list.innerHTML = `<div class="empty-state">
+            <i class="fas fa-book-open"></i>
+            <p>등록된 수업이 없습니다.</p>
+            ${myRole === 'owner' ? '<button class="btn-create" onclick="goCreate()" style="display:inline-flex"><i class="fas fa-plus"></i> 수업 만들기</button>' : ''}
+          </div>`;
+          document.getElementById('pagination').innerHTML = '';
+          return;
+        }
+
+        // 평균 이수율 계산
+        const rates = data.lessons.filter(l => l.status === 'published').map(l => l.avg_completion_rate || 0);
+        const avgRate = rates.length ? Math.round(rates.reduce((a, b) => a + b, 0) / rates.length) : 0;
+        document.getElementById('statRate').textContent = avgRate + '%';
+
+        list.innerHTML = data.lessons.map((lesson, i) => {
+          const num = (currentPage - 1) * 20 + i + 1;
+          const rate = lesson.avg_completion_rate || 0;
+          const rateClass = rate >= 70 ? 'high' : rate >= 40 ? 'mid' : 'low';
+          const dateRange = lesson.start_date && lesson.end_date
+            ? `📅 ${lesson.start_date} ~ ${lesson.end_date}`
+            : lesson.lesson_date ? `📅 ${lesson.lesson_date}` : '';
+          const timeStr = lesson.estimated_minutes ? `⏱ ${lesson.estimated_minutes}분` : '';
+          const completionStr = `👥 이수 ${lesson.completed_students || 0}/${lesson.member_count || 0}명`;
+
+          return `<div class="lesson-card" onclick="goLesson(${lesson.id})">
+            <div class="lesson-card-top">
+              <div class="lesson-num">${num}</div>
+              <div class="lesson-info">
+                <div class="lesson-title">${lesson.title}</div>
+                <div class="lesson-meta">
+                  ${dateRange ? `<span>${dateRange}</span>` : ''}
+                  <span>${completionStr}</span>
+                  ${timeStr ? `<span>${timeStr}</span>` : ''}
+                </div>
+              </div>
+              <div class="lesson-tags">
+                ${(lesson.content_types || []).map(t =>
+                  `<span class="content-tag ${typeTagClass[t] || 'tag-document'}">${typeLabels[t] || t}</span>`
+                ).join('')}
+                <span class="status-badge ${statusClasses[lesson.status] || 'status-draft'}">${statusLabels[lesson.status] || lesson.status}</span>
+              </div>
+              ${(myRole === 'owner' || (currentUser && currentUser.role === 'admin')) ? `
+              <div class="lesson-actions">
+                <button class="lesson-action-btn" onclick="event.stopPropagation(); goEdit(${lesson.id})" title="수정"><i class="fas fa-pen"></i></button>
+                <button class="lesson-action-btn danger" onclick="event.stopPropagation(); confirmDelete(${lesson.id}, '${lesson.title.replace(/'/g,"\\'")}' )" title="삭제"><i class="fas fa-trash"></i></button>
+              </div>` : ''}
+            </div>
+            <div class="lesson-card-bottom">
+              <span class="progress-label">이수율</span>
+              <div class="progress-bar-wrap">
+                <div class="progress-bar"><div class="progress-fill ${rateClass}" style="width:${rate}%"></div></div>
+                <span class="progress-percent ${rateClass}">${rate}%</span>
+              </div>
+            </div>
+          </div>`;
+        }).join('');
+
+        // 페이지네이션
+        if (data.totalPages > 1) {
+          document.getElementById('pagination').innerHTML = Array.from({ length: data.totalPages }, (_, i) =>
+            `<button class="${i + 1 === currentPage ? 'active' : ''}" onclick="goPage(${i + 1})">${i + 1}</button>`
+          ).join('');
+        } else {
+          document.getElementById('pagination').innerHTML = '';
+        }
+      } catch (e) { console.error('loadLessons error:', e); }
+    }
+
+    function goPage(p) { currentPage = p; loadLessons(); }
+    function doSearch() { currentPage = 1; loadLessons(); }
+    document.getElementById('searchInput').addEventListener('keydown', e => { if (e.key === 'Enter') doSearch(); });
+    document.getElementById('sortSelect').addEventListener('change', () => { currentPage = 1; loadLessons(); });
+
+    // 필터 탭
+    document.querySelectorAll('.filter-tab').forEach(tab => {
+      tab.addEventListener('click', () => {
+        document.querySelectorAll('.filter-tab').forEach(t => t.classList.remove('active'));
+        tab.classList.add('active');
+        currentStatus = tab.dataset.status;
+        currentPage = 1;
+        loadLessons();
+      });
+    });
+
+    function goLesson(lessonId) {
+      location.href = `/class/lesson-player.html?classId=${classId}&lessonId=${lessonId}`;
+    }
+
+    function goCreate() {
+      location.href = `/class/lesson-create.html?classId=${classId}`;
+    }
+
+    function goEdit(lessonId) {
+      location.href = `/class/lesson-create.html?classId=${classId}&id=${lessonId}`;
+    }
+
+    async function confirmDelete(lessonId, title) {
+      if (!confirm(`"${title}" 수업을 삭제하시겠습니까?\n삭제된 수업은 복구할 수 없습니다.`)) return;
+      try {
+        const res = await fetchWithAuth(`/api/lesson/${classId}/${lessonId}`, { method: 'DELETE' });
+        const data = await res.json();
+        if (data.success) {
+          showToast('수업이 삭제되었습니다');
+          loadStats();
+          loadLessons();
+        } else {
+          showToast(data.message || '삭제 실패');
+        }
+      } catch (e) {
+        showToast('삭제 중 오류 발생');
+      }
+    }
+
+    // 초기화
+    window.addEventListener('dacheim:user-loaded', async (e) => {
+      currentUser = e.detail;
+
+      if (!classId) {
+        // classId가 없으면 내 클래스 목록에서 첫번째로
+        try {
+          const res = await fetchWithAuth('/api/class/my');
+          const classes = await res.json();
+          if (classes.length > 0) classId = classes[0].id;
+          else { location.href = '/class/index.html'; return; }
+        } catch (e) { location.href = '/class/index.html'; return; }
+      }
+
+      // 역할 확인
+      try {
+        const res = await fetchWithAuth(`/api/class/${classId}`);
+        const data = await res.json();
+        if (data.success) {
+          myRole = data.myRole;
+          if (myRole === 'owner' || currentUser.role === 'admin') {
+            document.getElementById('btnCreate').style.display = 'inline-flex';
+            document.getElementById('btnCreate').href = `/class/lesson-create.html?classId=${classId}`;
+            document.querySelectorAll('.owner-only').forEach(el => el.style.display = '');
+          }
+        }
+      } catch (e) {}
+
+      document.getElementById('mainContent').style.display = 'block';
+      loadStats();
+      loadLessons();
+    });
+
+    function showToast(msg) {
+      const t = document.getElementById('toast');
+      t.textContent = msg;
+      t.classList.add('show');
+      setTimeout(() => t.classList.remove('show'), 2500);
+    }
+  </script>
+</body>
+</html>

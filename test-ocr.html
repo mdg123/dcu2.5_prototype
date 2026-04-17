@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>캡차 OCR 테스트</title>
+  <style>
+    body { background: #1a1a2e; color: #eee; font-family: monospace; padding: 20px; }
+    canvas { border: 1px solid #fff; margin: 10px 0; display: block; }
+    .result { font-size: 24px; color: #0f0; margin: 10px 0; }
+    .error { color: #f00; }
+    button { padding: 10px 20px; font-size: 16px; cursor: pointer; margin: 5px; }
+    img { border: 1px solid #444; margin: 10px 0; }
+    #log { white-space: pre-wrap; font-size: 12px; color: #aaa; max-height: 400px; overflow-y: auto; }
+  </style>
+</head>
+<body>
+  <h2>캡차 OCR 테스트</h2>
+  <button onclick="loadAndTest()">캡차 이미지 로드 + OCR 테스트</button>
+  <button onclick="loadAndTest()">다시 시도 (새 캡차)</button>
+
+  <h3>원본 이미지:</h3>
+  <img id="captchaImg" crossorigin="anonymous" style="width:200px;">
+
+  <h3>확대 (3x):</h3>
+  <img id="bigImg" style="width:400px;">
+
+  <h3>이진화 결과:</h3>
+  <canvas id="binaryCanvas"></canvas>
+
+  <h3>수직 프로젝션:</h3>
+  <canvas id="projCanvas" width="400" height="100"></canvas>
+
+  <div class="result">인식 결과: <span id="ocrResult">-</span></div>
+  <div>소요 시간: <span id="ocrTime">-</span></div>
+
+  <h3>디버그 로그:</h3>
+  <div id="log"></div>
+
+<script>
+function debugLog(msg) {
+  document.getElementById('log').textContent += msg + '\n';
+}
+
+function loadAndTest() {
+  document.getElementById('log').textContent = '';
+  document.getElementById('ocrResult').textContent = '로딩중...';
+
+  const img = document.getElementById('captchaImg');
+  const ts = Date.now();
+  img.crossOrigin = 'anonymous';
+  img.src = 'https://camping.gtdc.or.kr/DZ_reservation/CAPTCHA/code_numbers.png?v=' + ts;
+  document.getElementById('bigImg').src = img.src;
+
+  img.onload = function() {
+    debugLog('이미지 로드 완료: ' + img.naturalWidth + 'x' + img.naturalHeight);
+    const start = performance.now();
+
+    try {
+      const result = fastOCR(img);
+      const elapsed = (performance.now() - start).toFixed(1);
+      document.getElementById('ocrResult').textContent = result || '실패';
+      document.getElementById('ocrTime').textContent = elapsed + 'ms';
+      debugLog('결과: ' + result + ' (' + elapsed + 'ms)');
+    } catch(e) {
+      document.getElementById('ocrResult').textContent = 'ERROR: ' + e.message;
+      debugLog('에러: ' + e.stack);
+    }
+  };
+
+  img.onerror = function() {
+    debugLog('이미지 로드 실패 (CORS). 프록시 필요할 수 있음.');
+    document.getElementById('ocrResult').textContent = '이미지 로드 실패';
+  };
+}
+
+function fastOCR(img) {
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  const w = img.naturalWidth;
+  const h = img.naturalHeight;
+  canvas.width = w;
+  canvas.height = h;
+  ctx.drawImage(img, 0, 0);
+
+  const imageData = ctx.getImageData(0, 0, w, h);
+  const data = imageData.data;
+
+  debugLog('이미지 크기: ' + w + 'x' + h);
+
+  // 1) 배경색 추정: 모서리 픽셀 평균
+  let bgR = 0, bgG = 0, bgB = 0, bgCount = 0;
+  for (let x = 0; x < w; x++) {
+    for (const y of [0, 1, h - 1, h - 2]) {
+      const i = (y * w + x) * 4;
+      bgR += data[i]; bgG += data[i + 1]; bgB += data[i + 2]; bgCount++;
+    }
+  }
+  bgR /= bgCount; bgG /= bgCount; bgB /= bgCount;
+  debugLog('배경색 추정: RGB(' + Math.round(bgR) + ',' + Math.round(bgG) + ',' + Math.round(bgB) + ')');
+
+  // 2) 이진화
+  const binary = new Uint8Array(w * h);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = (y * w + x) * 4;
+      const dr = data[i] - bgR, dg = data[i + 1] - bgG, db = data[i + 2] - bgB;
+      const dist = Math.sqrt(dr * dr + dg * dg + db * db);
+      binary[y * w + x] = dist > 60 ? 1 : 0;
+    }
+  }
+
+  // 이진화 결과 시각화
+  const binCanvas = document.getElementById('binaryCanvas');
+  binCanvas.width = w * 3;
+  binCanvas.height = h * 3;
+  const binCtx = binCanvas.getContext('2d');
+  binCtx.imageSmoothingEnabled = false;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      binCtx.fillStyle = binary[y * w + x] ? '#fff' : '#000';
+      binCtx.fillRect(x * 3, y * 3, 3, 3);
+    }
+  }
+
+  // 3) 수직 프로젝션
+  const colSum = new Uint16Array(w);
+  for (let x = 0; x < w; x++) {
+    for (let y = 0; y < h; y++) {
+      colSum[x] += binary[y * w + x];
+    }
+  }
+
+  // 프로젝션 시각화
+  const projCanvas = document.getElementById('projCanvas');
+  projCanvas.width = w * 3;
+  const projCtx = projCanvas.getContext('2d');
+  projCtx.fillStyle = '#000';
+  projCtx.fillRect(0, 0, projCanvas.width, 100);
+  const maxCol = Math.max(...colSum);
+  for (let x = 0; x < w; x++) {
+    const barH = maxCol > 0 ? (colSum[x] / maxCol) * 90 : 0;
+    projCtx.fillStyle = colSum[x] > Math.max(2, h * 0.05) ? '#0f0' : '#333';
+    projCtx.fillRect(x * 3, 100 - barH, 3, barH);
+  }
+
+  // 4) 자릿수 영역 찾기
+  const regions = [];
+  const threshold = Math.max(2, h * 0.05);
+  let inRegion = false, start = 0;
+  for (let x = 0; x < w; x++) {
+    if (colSum[x] > threshold) {
+      if (!inRegion) { start = x; inRegion = true; }
+    } else {
+      if (inRegion) { regions.push([start, x]); inRegion = false; }
+    }
+  }
+  if (inRegion) regions.push([start, w]);
+
+  debugLog('초기 영역: ' + regions.map(r => r[0]+'-'+r[1]+'(w'+(r[1]-r[0])+')').join(', '));
+
+  const merged = mergeRegions(regions, w, h);
+  debugLog('병합/분할 후: ' + merged.map(r => r[0]+'-'+r[1]+'(w'+(r[1]-r[0])+')').join(', '));
+  debugLog('자릿수: ' + merged.length + '개');
+
+  // 영역 시각화
+  merged.forEach((r, i) => {
+    const colors = ['#f00','#0f0','#00f','#ff0','#f0f'];
+    projCtx.strokeStyle = colors[i % colors.length];
+    projCtx.lineWidth = 2;
+    projCtx.strokeRect(r[0]*3, 0, (r[1]-r[0])*3, 100);
+
+    binCtx.strokeStyle = colors[i % colors.length];
+    binCtx.lineWidth = 2;
+    binCtx.strokeRect(r[0]*3, 0, (r[1]-r[0])*3, h*3);
+  });
+
+  if (merged.length !== 5) {
+    debugLog('5자리가 아님 → 실패');
+    return null;
+  }
+
+  // 5) 각 자릿수 인식
+  const digits = [];
+  for (let di = 0; di < merged.length; di++) {
+    const [x1, x2] = merged[di];
+    let yTop = h, yBot = 0;
+    for (let y = 0; y < h; y++) {
+      for (let x = x1; x < x2; x++) {
+        if (binary[y * w + x]) {
+          if (y < yTop) yTop = y;
+          if (y > yBot) yBot = y;
+        }
+      }
+    }
+    if (yBot <= yTop) { digits.push(-1); continue; }
+
+    const gw = 8, gh = 12;
+    const grid = new Float32Array(gw * gh);
+    const rw = x2 - x1, rh = yBot - yTop + 1;
+
+    for (let gy = 0; gy < gh; gy++) {
+      for (let gx = 0; gx < gw; gx++) {
+        let sum = 0, cnt = 0;
+        const sy = yTop + Math.floor(gy * rh / gh);
+        const ey = yTop + Math.floor((gy + 1) * rh / gh);
+        const sx = x1 + Math.floor(gx * rw / gw);
+        const ex = x1 + Math.floor((gx + 1) * rw / gw);
+        for (let y = sy; y < ey; y++) {
+          for (let x = sx; x < ex; x++) {
+            sum += binary[y * w + x]; cnt++;
+          }
+        }
+        grid[gy * gw + gx] = cnt > 0 ? sum / cnt : 0;
+      }
+    }
+
+    const digit = matchDigit(grid, gw, gh);
+    debugLog('자리 ' + (di+1) + ': 인식=' + digit + ' 영역=' + x1 + '-' + x2 + ' y=' + yTop + '-' + yBot);
+    digits.push(digit);
+  }
+
+  if (digits.includes(-1)) return null;
+  return digits.join('');
+}
+
+function mergeRegions(regions, totalW, totalH) {
+  if (regions.length === 0) return [];
+  const merged = [regions[0].slice()];
+  for (let i = 1; i < regions.length; i++) {
+    const prev = merged[merged.length - 1];
+    if (regions[i][0] - prev[1] < 3) {
+      prev[1] = regions[i][1];
+    } else {
+      merged.push(regions[i].slice());
+    }
+  }
+
+  if (merged.length < 5) {
+    const avgWidth = merged.reduce((s, r) => s + (r[1] - r[0]), 0) / merged.length;
+    const result = [];
+    for (const [x1, x2] of merged) {
+      const rw = x2 - x1;
+      const parts = Math.round(rw / avgWidth);
+      if (parts > 1 && result.length + parts + (merged.length - result.length - 1) <= 6) {
+        const pw = rw / parts;
+        for (let p = 0; p < parts; p++) {
+          result.push([Math.round(x1 + p * pw), Math.round(x1 + (p + 1) * pw)]);
+        }
+      } else {
+        result.push([x1, x2]);
+      }
+    }
+    return result;
+  }
+  return merged;
+}
+
+function matchDigit(grid, gw, gh) {
+  const features = extractFeatures(grid, gw, gh);
+  return classifyByFeatures(features, grid, gw, gh);
+}
+
+function extractFeatures(grid, gw, gh) {
+  const f = {};
+  let total = 0;
+  let top = 0, mid = 0, bot = 0;
+  const t1 = Math.floor(gh / 3), t2 = Math.floor(2 * gh / 3);
+  for (let y = 0; y < gh; y++) {
+    for (let x = 0; x < gw; x++) {
+      const v = grid[y * gw + x];
+      total += v;
+      if (y < t1) top += v;
+      else if (y < t2) mid += v;
+      else bot += v;
+    }
+  }
+  f.total = total / (gw * gh);
+  f.top = top; f.mid = mid; f.bot = bot;
+
+  let left = 0, right = 0;
+  const half = Math.floor(gw / 2);
+  for (let y = 0; y < gh; y++) {
+    for (let x = 0; x < gw; x++) {
+      if (x < half) left += grid[y * gw + x];
+      else right += grid[y * gw + x];
+    }
+  }
+  f.left = left; f.right = right;
+
+  let center = 0;
+  for (let y = t1; y < t2; y++) {
+    for (let x = half - 1; x <= half; x++) {
+      center += grid[y * gw + x];
+    }
+  }
+  f.center = center;
+
+  f.rows = [];
+  for (let y = 0; y < gh; y++) {
+    let rowSum = 0;
+    for (let x = 0; x < gw; x++) rowSum += grid[y * gw + x];
+    f.rows.push(rowSum / gw);
+  }
+
+  return f;
+}
+
+function classifyByFeatures(f, grid, gw, gh) {
+  const scores = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+  const topR = f.top / (f.top + f.mid + f.bot + 0.01);
+  const midR = f.mid / (f.top + f.mid + f.bot + 0.01);
+  const botR = f.bot / (f.top + f.mid + f.bot + 0.01);
+  const leftR = f.left / (f.left + f.right + 0.01);
+  const rightR = f.right / (f.left + f.right + 0.01);
+
+  if (rightR > 0.55 && f.total < 0.35) scores[1] += 3;
+  if (f.total < 0.25) scores[1] += 2;
+
+  if (f.center < f.total * 2 && Math.abs(leftR - 0.5) < 0.1) scores[0] += 2;
+  if (midR > 0.25 && f.center < 1) scores[0] += 2;
+
+  if (f.total > 0.4 && Math.abs(leftR - 0.5) < 0.1) scores[8] += 3;
+
+  if (rightR > 0.52) scores[3] += 1;
+  if (f.rows[Math.floor(gh / 2)] > 0.5) scores[3] += 1;
+
+  if (topR > 0.4) scores[7] += 2;
+  if (botR < 0.25) scores[7] += 1;
+
+  if (topR > 0.3 && leftR > 0.5 && f.rows[Math.floor(gh / 2)] > 0.5) scores[4] += 3;
+
+  if (topR > 0.3 && botR > 0.35) scores[2] += 2;
+
+  if (topR > 0.3 && leftR > 0.52) scores[5] += 1;
+  if (botR > 0.3 && rightR > 0.48) scores[5] += 1;
+
+  if (botR > 0.4) scores[6] += 2;
+  if (leftR > 0.52) scores[6] += 1;
+
+  if (topR > 0.38) scores[9] += 2;
+  if (rightR > 0.52) scores[9] += 1;
+
+  let best = 0, bestScore = -1;
+  for (let d = 0; d <= 9; d++) {
+    if (scores[d] > bestScore) { bestScore = scores[d]; best = d; }
+  }
+
+  debugLog('  scores: ' + scores.map((s,i)=>i+':'+s).join(' ') + ' → ' + best);
+  debugLog('  topR=' + topR.toFixed(2) + ' midR=' + midR.toFixed(2) + ' botR=' + botR.toFixed(2) + ' leftR=' + leftR.toFixed(2) + ' total=' + f.total.toFixed(2) + ' center=' + f.center.toFixed(2));
+
+  return best;
+}
+</script>
+</body>
+</html>

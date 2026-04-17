@@ -1,0 +1,903 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>다채움 - LRS 학습분석 대시보드</title>
+  <link rel="stylesheet" href="/css/common-nav.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body { font-family:'Pretendard','Noto Sans KR',system-ui,sans-serif; background:#f0f2f5; color:#1f2937; }
+    .lrs-wrapper { display:flex; min-height: calc(100vh - 60px); }
+    .sidebar { width:64px; background:#1e293b; display:flex; flex-direction:column; align-items:center; padding:12px 0; gap:4px; z-index:100; flex-shrink:0; position:sticky; top:0; height:100vh; }
+    .sidebar .logo { color:#fff; font-size:11px; font-weight:700; margin-bottom:12px; text-align:center; line-height:1.3; }
+    .sidebar .logo span { display:block; font-size:9px; color:#94a3b8; font-weight:400; }
+    .nav-item { width:56px; padding:8px 4px; border-radius:8px; text-align:center; cursor:pointer; transition:all .2s; color:#94a3b8; }
+    .nav-item:hover { background:#334155; color:#e2e8f0; }
+    .nav-item.active { background:#2563eb; color:#fff; }
+    .nav-item .icon { font-size:18px; display:block; margin-bottom:2px; }
+    .nav-item .label { font-size:9px; font-weight:500; line-height:1.2; }
+    .nav-spacer { flex:1; }
+    .sub-menu { width:200px; background:#fff; border-right:1px solid #e5e7eb; padding:16px 0; overflow-y:auto; flex-shrink:0; position:sticky; top:0; height:100vh; }
+    .sub-menu-title { padding:8px 16px; font-size:13px; font-weight:700; color:#1e293b; border-bottom:1px solid #f3f4f6; margin-bottom:4px; }
+    .sub-menu-group { padding:4px 0; }
+    .sub-menu-group-title { padding:6px 16px; font-size:11px; font-weight:600; color:#6b7280; text-transform:uppercase; letter-spacing:.5px; }
+    .sub-menu-item { padding:8px 16px 8px 28px; font-size:12px; color:#4b5563; cursor:pointer; transition:all .15s; border-left:3px solid transparent; }
+    .sub-menu-item:hover { background:#f9fafb; color:#1e293b; }
+    .sub-menu-item.active { background:#eff6ff; color:#2563eb; font-weight:600; border-left-color:#2563eb; }
+    .main { flex:1; display:flex; flex-direction:column; overflow:hidden; min-width:0; }
+    .top-bar { height:48px; background:#fff; border-bottom:1px solid #e5e7eb; display:flex; align-items:center; padding:0 24px; justify-content:space-between; flex-shrink:0; }
+    .breadcrumb { font-size:12px; color:#6b7280; }
+    .breadcrumb span { color:#2563eb; font-weight:600; }
+    .top-right { display:flex; align-items:center; gap:12px; font-size:12px; color:#6b7280; }
+    .content { flex:1; overflow-y:auto; padding:20px 24px; }
+    .home-cards { display:grid; grid-template-columns:repeat(4,1fr); gap:16px; margin-bottom:20px; }
+    .home-card { background:#fff; border:1px solid #e5e7eb; border-radius:12px; padding:20px; }
+    .home-card .card-label { font-size:11px; color:#6b7280; font-weight:500; margin-bottom:8px; }
+    .home-card .card-value { font-size:28px; font-weight:700; color:#1e293b; }
+    .home-card .card-sub { font-size:11px; margin-top:4px; }
+    .home-card .card-sub.up { color:#16a34a; }
+    .home-card .card-sub.down { color:#dc2626; }
+    .home-card .card-sub.flat { color:#6b7280; }
+    .filter-bar { background:#fff; border:1px solid #e5e7eb; border-radius:10px; padding:16px 20px; margin-bottom:16px; }
+    .filter-row { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:8px; }
+    .filter-row:last-child { margin-bottom:0; }
+    .filter-label { font-size:12px; font-weight:600; color:#374151; min-width:60px; }
+    .filter-select { padding:6px 10px; border:1px solid #d1d5db; border-radius:6px; font-size:12px; font-family:inherit; background:#fff; min-width:120px; }
+    .filter-input { padding:6px 10px; border:1px solid #d1d5db; border-radius:6px; font-size:12px; font-family:inherit; width:130px; }
+    .btn-search { padding:7px 24px; background:#2563eb; color:#fff; border:none; border-radius:6px; font-size:12px; font-weight:600; cursor:pointer; font-family:inherit; }
+    .btn-search:hover { background:#1d4ed8; }
+    .chart-section { background:#fff; border:1px solid #e5e7eb; border-radius:10px; padding:20px; margin-bottom:16px; }
+    .chart-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; }
+    .chart-title { font-size:13px; font-weight:700; color:#1e293b; }
+    .chart-title::before { content:'▸ '; color:#2563eb; }
+    .chart-container { position:relative; height:320px; }
+    .table-section { background:#fff; border:1px solid #e5e7eb; border-radius:10px; padding:20px; margin-bottom:16px; }
+    .table-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; }
+    .table-title { font-size:13px; font-weight:700; color:#1e293b; }
+    .table-title::before { content:'▸ '; color:#2563eb; }
+    .table-count { font-size:12px; color:#6b7280; margin-left:8px; }
+    .btn-excel { padding:5px 14px; background:#16a34a; color:#fff; border:none; border-radius:5px; font-size:11px; cursor:pointer; font-family:inherit; }
+    .data-table { width:100%; border-collapse:collapse; font-size:12px; }
+    .data-table thead th { background:#f8fafc; padding:8px 10px; text-align:center; font-weight:600; color:#374151; border-bottom:2px solid #e5e7eb; white-space:nowrap; }
+    .data-table tbody td { padding:7px 10px; text-align:center; border-bottom:1px solid #f3f4f6; }
+    .data-table tbody tr:hover { background:#f9fafb; }
+    .data-table .num { text-align:right; font-variant-numeric:tabular-nums; }
+    .notice-section { background:#fff; border:1px solid #e5e7eb; border-radius:10px; padding:16px 20px; margin-bottom:16px; }
+    .notice-title { font-size:13px; font-weight:700; margin-bottom:12px; }
+    .notice-title::before { content:'● '; color:#2563eb; }
+    .notice-list { list-style:none; }
+    .notice-list li { display:flex; justify-content:space-between; padding:6px 0; border-bottom:1px solid #f3f4f6; font-size:12px; }
+    .notice-list li:last-child { border:none; }
+    .notice-list .date { color:#9ca3af; }
+    .badge { padding:3px 8px; border-radius:10px; font-size:11px; font-weight:600; }
+    .badge-blue { background:#eff6ff; color:#2563eb; }
+    .badge-green { background:#f0fdf4; color:#16a34a; }
+    .badge-orange { background:#fff7ed; color:#ea580c; }
+    .badge-purple { background:#faf5ff; color:#9333ea; }
+    .empty-state { text-align:center; padding:40px 20px; color:#9ca3af; }
+    .empty-state i { font-size:40px; margin-bottom:10px; display:block; }
+    .empty-state p { font-size:13px; }
+    .formula-bar { background:#fffbeb; border:1px solid #fde68a; border-radius:8px; padding:10px 16px; margin-bottom:16px; font-size:11px; color:#92400e; cursor:pointer; display:flex; align-items:center; gap:8px; }
+    .formula-bar .toggle { font-size:14px; transition:transform .2s; }
+    .formula-bar.open .toggle { transform:rotate(90deg); }
+    .formula-detail { display:none; margin-top:8px; padding:8px 12px; background:#fef9c3; border-radius:6px; font-size:11px; color:#78350f; line-height:1.6; }
+    .formula-bar.open + .formula-detail, .formula-bar.open .formula-detail { display:block; }
+    .output-type { display:flex; gap:4px; }
+    .output-type label { padding:5px 10px; border:1px solid #d1d5db; border-radius:6px; font-size:11px; cursor:pointer; }
+    .output-type label.active { background:#1e293b; color:#fff; border-color:#1e293b; }
+    ::-webkit-scrollbar { width:6px; }
+    ::-webkit-scrollbar-track { background:transparent; }
+    ::-webkit-scrollbar-thumb { background:#cbd5e1; border-radius:3px; }
+    @media (max-width:1024px) { .home-cards { grid-template-columns:repeat(2,1fr); } .sub-menu { display:none; } .sidebar { width:52px; } }
+    @media (max-width:768px) { .home-cards { grid-template-columns:1fr 1fr; } .sidebar { display:none; } }
+  </style>
+</head>
+<body>
+  <script src="/js/common-nav.js"></script>
+
+  <div class="lrs-wrapper" id="mainContent" style="display:none;">
+    <aside class="sub-menu" id="subMenu"></aside>
+    <div class="main">
+      <div class="top-bar">
+        <div class="breadcrumb" id="breadcrumb">홈</div>
+        <div class="top-right" style="display:flex;align-items:center;gap:10px;">
+          <span style="font-size:12px;font-weight:700;color:#374151;">📅 기간</span>
+          <input type="date" id="globalFrom" style="padding:5px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;font-family:inherit;outline:none;">
+          <span style="color:#9ca3af;">~</span>
+          <input type="date" id="globalTo" style="padding:5px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;font-family:inherit;outline:none;">
+          <select id="globalQuickRange" onchange="applyGlobalQuickRange(this.value)" style="padding:5px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;font-family:inherit;background:#fff;cursor:pointer;">
+            <option value="">빠른선택</option>
+            <option value="7">최근 7일</option>
+            <option value="30" selected>최근 30일</option>
+            <option value="90">최근 90일</option>
+            <option value="365">최근 1년</option>
+            <option value="all">전체기간</option>
+          </select>
+          <button onclick="reloadGlobalRange()" style="padding:5px 14px;background:#2563eb;color:#fff;border:none;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;"><i class="fas fa-search"></i> 조회</button>
+          <span id="aggDate" style="font-size:11px;color:#9ca3af;margin-left:8px;"></span>
+        </div>
+      </div>
+      <div class="content" id="contentArea"></div>
+    </div>
+  </div>
+
+  <script>
+    const MENUS = {
+      home: { title:'홈', items:[] },
+      usage: { title:'학습현황', items:[
+        { group:'활용빈도', children:[
+          { id:'usage-rate', name:'활용률' },
+          { id:'usage-freq', name:'활용빈도 추이' },
+          { id:'usage-by-type', name:'활동유형별 빈도' },
+          { id:'usage-by-service', name:'서비스별 빈도' }
+        ]},
+        { group:'활용시간', children:[
+          { id:'usage-time', name:'학습활동 시간' }
+        ]}
+      ]},
+      achieve: { title:'학업성취', items:[
+        { group:'성취수준', children:[
+          { id:'achieve-status', name:'성취기준별 현황' },
+          { id:'achieve-dist', name:'성취수준 분포' },
+          { id:'achieve-score', name:'평균 점수 추이' }
+        ]}
+      ]},
+      perform: { title:'학습수행', items:[
+        { group:'학습콘텐츠', children:[
+          { id:'perform-content', name:'콘텐츠 활용 현황' }
+        ]},
+        { group:'교과별', children:[
+          { id:'perform-subject', name:'교과별 활동 현황' }
+        ]},
+        { group:'클래스별', children:[
+          { id:'perform-class', name:'클래스별 현황' }
+        ]}
+      ]},
+      custom: { title:'맞춤학습', items:[
+        { group:'사용자 분석', children:[
+          { id:'custom-user', name:'내 학습 요약' }
+        ]}
+      ]},
+      teacher: { title:'교사활용지수', items:[
+        { group:'활용빈도', children:[
+          { id:'teacher-rate', name:'교사 활용률' },
+          { id:'teacher-freq', name:'교사 활용빈도' }
+        ]}
+      ]},
+      daily: { title:'일일현황', items:[
+        { group:'운영 현황', children:[
+          { id:'daily-trend', name:'일별 활동 추이' },
+          { id:'daily-logs', name:'최근 활동 로그' }
+        ]}
+      ]}
+    };
+
+    const typeLabels = { lesson_view:'수업조회', lesson_progress:'수업진행', homework_submit:'과제제출', exam_complete:'평가완료', content_view:'콘텐츠조회', attendance_checkin:'출석', daily_complete:'일일학습', diagnosis_complete:'진단', post_create:'게시글', survey_respond:'설문응답', node_complete:'노드완료', wrong_note_retry:'오답재도전', problem_set_complete:'문제풀이' };
+    const verbLabels = { accessed:'조회', completed:'완료', submitted:'제출', started:'시작', attempted:'시도', answered:'응답', attended:'출석', created:'생성', responded:'응답', progressed:'진행' };
+    const serviceLabels = { content:'채움콘텐츠', class:'채움클래스', 'self-learn':'스스로채움', cbt:'채움CBT', growth:'성장기록', portal:'포털' };
+    function svcLabel(s){ return serviceLabels[s] || s; }
+    const typeColors = ['#2563eb','#10b981','#f59e0b','#ef4444','#8b5cf6','#ec4899','#06b6d4','#84cc16','#f97316','#14b8a6','#a855f7','#64748b'];
+
+    // ── 차트 관리 ──
+    let activeCharts = [];
+    function destroyCharts(){ activeCharts.forEach(c=>c.destroy()); activeCharts=[]; }
+
+    function makeChart(canvasId, type, labels, datasets, yLabel='건수', opts={}){
+      const ctx = document.getElementById(canvasId); if(!ctx) return;
+      const isDoughnut = type==='doughnut'||type==='pie';
+      const showLegend = isDoughnut || datasets.length>1;
+      const chart = new Chart(ctx, {
+        type, data:{labels,datasets},
+        options:{responsive:true,maintainAspectRatio:false,
+          plugins:{legend:{display:showLegend,position:isDoughnut?'bottom':'top',labels:{font:{size:11},usePointStyle:true,pointStyle:'circle',padding:8}}},
+          scales: isDoughnut ? {} : {
+            x:{stacked:opts.stacked,ticks:{font:{size:10},maxRotation:45}},
+            y:{stacked:opts.stacked,beginAtZero:true,title:{display:true,text:`[ ${yLabel} ]`,font:{size:11}},ticks:{font:{size:10},callback:v=>v.toLocaleString()}}
+          }
+        }
+      });
+      activeCharts.push(chart);
+    }
+
+    function emptyHTML(msg='학습 활동이 기록되면 여기에 데이터가 표시됩니다.'){
+      return `<div class="chart-section"><div class="empty-state"><i class="fas fa-chart-area"></i><p>${msg}</p></div></div>`;
+    }
+
+    // ── 데이터 저장소 ──
+    let realData = {};
+    let globalRange = { from: '', to: '' };
+
+    function rangeQS(extra=''){
+      const qs = [];
+      if (globalRange.from) qs.push('from=' + globalRange.from);
+      if (globalRange.to)   qs.push('to=' + globalRange.to);
+      if (extra) qs.push(extra);
+      return qs.length ? '?' + qs.join('&') : '';
+    }
+
+    async function loadRealData(){
+      const r = rangeQS();
+      const r2 = rangeQS('limit=10');
+      const tDaily = rangeQS('role=teacher');
+      const tSvc = rangeQS('role=teacher');
+      const fetches = {
+        dashboard: fetch('/api/lrs/dashboard' + r).then(r=>r.json()).catch(()=>({})),
+        logs: fetch('/api/lrs/logs' + r2).then(r=>r.json()).catch(()=>({logs:[]})),
+        daily: fetch('/api/lrs/stats/daily' + (r || '?days=30')).then(r=>r.json()).catch(()=>({data:[]})),
+        byService: fetch('/api/lrs/stats/by-service' + r).then(r=>r.json()).catch(()=>({stats:[]})),
+        byAchievement: fetch('/api/lrs/stats/by-achievement' + r).then(r=>r.json()).catch(()=>({stats:[]})),
+        coverage: fetch('/api/lrs/dataset-coverage' + r).then(r=>r.json()).catch(()=>({})),
+        userSummary: fetch('/api/lrs/stats/user-summary' + r).then(r=>r.json()).catch(()=>({summary:[],total:0})),
+        bySubject: fetch('/api/lrs/stats/by-subject' + r).then(r=>r.json()).catch(()=>({})),
+        byClass: fetch('/api/lrs/stats/by-class' + r).then(r=>r.json()).catch(()=>({stats:[]})),
+        teacherDaily: fetch('/api/lrs/stats/daily' + tDaily).then(r=>r.json()).catch(()=>({data:[]})),
+        teacherByService: fetch('/api/lrs/stats/by-service' + tSvc).then(r=>r.json()).catch(()=>({stats:[]})),
+      };
+      const results = await Promise.all(Object.values(fetches));
+      const keys = Object.keys(fetches);
+      keys.forEach((k,i) => realData[k] = results[i]);
+    }
+
+    function applyGlobalQuickRange(val){
+      if (!val) return;
+      const fromEl = document.getElementById('globalFrom');
+      const toEl = document.getElementById('globalTo');
+      if (val === 'all') { fromEl.value = ''; toEl.value = ''; return; }
+      const days = parseInt(val);
+      const today = new Date();
+      const past = new Date(today); past.setDate(past.getDate() - days + 1);
+      fromEl.value = past.toISOString().slice(0,10);
+      toEl.value = today.toISOString().slice(0,10);
+    }
+
+    async function reloadGlobalRange(){
+      globalRange.from = document.getElementById('globalFrom').value || '';
+      globalRange.to   = document.getElementById('globalTo').value || '';
+      // 표시 라벨
+      const lbl = (globalRange.from || globalRange.to)
+        ? `📊 ${globalRange.from || '처음'} ~ ${globalRange.to || '오늘'}`
+        : '집계일자 ' + new Date().toISOString().slice(0,10);
+      document.getElementById('aggDate').textContent = lbl;
+      destroyCharts();
+      await loadRealData();
+      renderPageContent(currentPage || 'home');
+    }
+
+    // ── 페이지 렌더러 ──
+    function renderHome(){
+      const s = realData.dashboard?.stats || {};
+      const daily = realData.daily?.data || [];
+      const coverage = realData.coverage || {};
+      const logs = realData.logs?.logs || [];
+      // 전체 통계는 coverage 우선 (전체 사용자 합계). dashboard.stats는 로그인 사용자 본인 통계.
+      const totalActivities = coverage.totalStatements || s.totalActivities || 0;
+      const byType = (coverage.byType && coverage.byType.length) ? coverage.byType : (s.byType || []);
+      const byService = realData.byService?.stats || [];
+
+      return {
+        html: `
+        <div class="home-cards">
+          <div class="home-card"><div class="card-label">전체 학습 활동</div><div class="card-value">${totalActivities.toLocaleString()}</div><div class="card-sub ${totalActivities>0?'up':'flat'}">${totalActivities>0?'▲ 데이터 수집 중':'— 아직 활동 없음'}</div></div>
+          <div class="home-card"><div class="card-label">활동 유형 수</div><div class="card-value">${byType.length || 0}</div><div class="card-sub flat">— ${byType.map(t=>typeLabels[t.activity_type]||t.activity_type).slice(0,3).join(', ')||'없음'}</div></div>
+          <div class="home-card"><div class="card-label">서비스 영역 수</div><div class="card-value">${byService.length || 0}</div><div class="card-sub flat">— ${byService.map(s=>svcLabel(s.source_service)).slice(0,3).join(', ')||'없음'}</div></div>
+          <div class="home-card"><div class="card-label">활동 일수 ${(globalRange.from||globalRange.to)?'(선택기간)':'(최근 30일)'}</div><div class="card-value">${daily.length}</div><div class="card-sub ${daily.length>0?'up':'flat'}">${daily.length>0?`▲ ${daily.length}일 활동 기록`:'— 기록 없음'}</div></div>
+        </div>
+        <div style="display:grid;grid-template-columns:2fr 1fr;gap:16px;margin-bottom:16px">
+          <div class="chart-section">
+            <div class="chart-header"><span class="chart-title">일별 활동 추이 ${(globalRange.from||globalRange.to)?'('+(globalRange.from||'~')+' ~ '+(globalRange.to||'오늘')+')':'(최근 30일)'}</span></div>
+            ${daily.length > 0
+              ? '<div class="chart-container"><canvas id="homeChart"></canvas></div>'
+              : '<div class="empty-state"><i class="fas fa-chart-line"></i><p>학습 활동이 기록되면 일별 추이가 표시됩니다.</p></div>'}
+          </div>
+          <div class="notice-section">
+            <div class="notice-title">시스템 안내</div>
+            <ul class="notice-list">
+              <li><span>LRS 대시보드는 실제 학습 활동 데이터를 기반으로 표시됩니다.</span></li>
+              <li><span>수업 조회, 과제 제출, 평가 응시 등의 활동이 자동으로 수집됩니다.</span></li>
+              <li><span>교과 메타데이터(성취기준) 연동이 완료되었습니다.</span></li>
+            </ul>
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
+          <div class="chart-section">
+            <div class="chart-header"><span class="chart-title">활동 유형 분포</span></div>
+            ${byType.length > 0
+              ? '<div class="chart-container"><canvas id="typeChart"></canvas></div>'
+              : '<div class="empty-state"><i class="fas fa-chart-pie"></i><p>활동 데이터가 쌓이면 유형별 분포가 표시됩니다.</p></div>'}
+          </div>
+          <div class="chart-section">
+            <div class="chart-header"><span class="chart-title">서비스별 활용 현황</span></div>
+            ${byService.length > 0
+              ? '<div class="chart-container"><canvas id="serviceChart"></canvas></div>'
+              : '<div class="empty-state"><i class="fas fa-server"></i><p>서비스별 활용 데이터가 쌓이면 표시됩니다.</p></div>'}
+          </div>
+        </div>
+        ${logs.length ? `
+        <div class="table-section">
+          <div class="table-header"><div><span class="table-title">최근 학습 기록</span></div></div>
+          <table class="data-table">
+            <thead><tr><th>활동</th><th>행동</th><th>대상</th><th>일시</th></tr></thead>
+            <tbody>${logs.map(l=>`<tr>
+              <td><span class="badge badge-blue">${typeLabels[l.activity_type]||l.activity_type}</span></td>
+              <td><span class="badge badge-green">${verbLabels[l.verb]||l.verb}</span></td>
+              <td style="font-size:11px;color:#6b7280">${l.target_type||''} #${l.activity_id||l.target_id||''}</td>
+              <td style="color:#6B7280;font-size:11px">${l.created_at||''}</td>
+            </tr>`).join('')}</tbody>
+          </table>
+        </div>` : emptyHTML('학습 활동을 시작하면 최근 기록이 여기에 표시됩니다.')}
+        `,
+        init:()=>{
+          if(daily.length > 0){
+            makeChart('homeChart','line',daily.map(d=>d.stat_date.slice(5)),[
+              {label:'활동 수',data:daily.map(d=>d.count),borderColor:'#2563eb',backgroundColor:'rgba(37,99,235,0.08)',tension:.3,pointRadius:3,fill:true},
+              {label:'사용자 수',data:daily.map(d=>d.users),borderColor:'#10b981',backgroundColor:'transparent',tension:.3,pointRadius:3}
+            ],'건수');
+          }
+          if(byType.length > 0){
+            makeChart('typeChart','doughnut',
+              byType.map(t=>typeLabels[t.activity_type]||t.activity_type),
+              [{data:byType.map(t=>t.cnt||t.count),backgroundColor:typeColors.slice(0,byType.length)}]);
+          }
+          if(byService.length > 0){
+            makeChart('serviceChart','bar',
+              byService.map(s=>svcLabel(s.source_service)),
+              [{label:'활동 수',data:byService.map(s=>s.count),backgroundColor:'#3b82f6'}],'건수');
+          }
+        }
+      };
+    }
+
+    function renderDailyTrend(){
+      const daily = realData.daily?.data || [];
+      return {
+        html: `
+        <div class="filter-bar"><div class="filter-row">
+          <span class="filter-label">기간</span>
+          <select class="filter-select" id="dailyDays" onchange="reloadDaily()"><option value="7">7일</option><option value="30" selected>30일</option><option value="90">90일</option></select>
+          <button class="btn-search" onclick="reloadDaily()">조회</button>
+          <button class="btn-reset" onclick="document.getElementById('dailyDays').value='30';reloadDaily()" style="padding:7px 16px;background:#fff;color:#6b7280;border:1px solid #d1d5db;border-radius:6px;font-size:12px;cursor:pointer;">초기화</button>
+        </div></div>
+        ${daily.length > 0 ? `
+          <div class="chart-section">
+            <div class="chart-header"><span class="chart-title">일별 활동 추이</span></div>
+            <div class="chart-container"><canvas id="dailyChart"></canvas></div>
+          </div>
+          <div class="table-section">
+            <div class="table-header"><div><span class="table-title">일별 데이터</span><span class="table-count">총 ${daily.length}건</span></div></div>
+            <table class="data-table">
+              <thead><tr><th>날짜</th><th>활동 수</th><th>사용자 수</th><th>평균 점수</th></tr></thead>
+              <tbody>${daily.map(d=>`<tr><td>${d.stat_date}</td><td class="num">${d.count.toLocaleString()}</td><td class="num">${d.users}</td><td class="num">${d.avg_score!==null?Number(d.avg_score).toFixed(1):'-'}</td></tr>`).join('')}</tbody>
+            </table>
+          </div>
+        ` : emptyHTML()}`,
+        init:()=>{
+          if(daily.length > 0){
+            makeChart('dailyChart','line',daily.map(d=>d.stat_date.slice(5)),[
+              {label:'활동 수',data:daily.map(d=>d.count),borderColor:'#2563eb',backgroundColor:'rgba(37,99,235,0.08)',tension:.3,pointRadius:3,fill:true}
+            ],'건수');
+          }
+        }
+      };
+    }
+
+    async function reloadDaily(){
+      // 페이지 내 로컬 기간선택(dailyDays/rateDays) 값 우선, 없으면 globalRange 사용
+      const daysEl = document.getElementById('dailyDays') || document.getElementById('rateDays');
+      const days = daysEl?.value || null;
+      let qs;
+      if (days) {
+        // 로컬 기간선택시 해당 일수로 조회 (글로벌 범위 무시)
+        qs = `?days=${days}`;
+      } else if (globalRange.from || globalRange.to) {
+        const parts = [];
+        if (globalRange.from) parts.push('from=' + globalRange.from);
+        if (globalRange.to) parts.push('to=' + globalRange.to);
+        qs = '?' + parts.join('&');
+      } else {
+        qs = '?days=30';
+      }
+      realData.daily = await fetch('/api/lrs/stats/daily' + qs).then(r=>r.json()).catch(()=>({data:[]}));
+      // 교사 데이터도 갱신 (teacher-* 페이지에서 사용)
+      realData.teacherDaily = await fetch('/api/lrs/stats/daily' + qs + (qs.includes('?')?'&':'?') + 'role=teacher').then(r=>r.json()).catch(()=>({data:[]}));
+      // 현재 페이지를 다시 렌더 (usage-rate 페이지에서 호출시 daily-trend로 이동하지 않도록)
+      renderPageContent(currentPage || 'daily-trend');
+    }
+
+    function renderRecentLogs(){
+      const logs = realData.logs?.logs || [];
+      return {
+        html: logs.length ? `
+          <div class="table-section">
+            <div class="table-header"><div><span class="table-title">최근 활동 로그</span><span class="table-count">총 ${logs.length}건</span></div></div>
+            <table class="data-table">
+              <thead><tr><th>활동유형</th><th>행동</th><th>대상유형</th><th>서비스</th><th>점수</th><th>일시</th></tr></thead>
+              <tbody>${logs.map(l=>`<tr>
+                <td><span class="badge badge-blue">${typeLabels[l.activity_type]||l.activity_type}</span></td>
+                <td>${verbLabels[l.verb]||l.verb}</td>
+                <td>${l.target_type||'-'}</td>
+                <td>${svcLabel(l.source_service)||'-'}</td>
+                <td class="num">${l.result_score!==null&&l.result_score!==undefined?l.result_score:'-'}</td>
+                <td style="font-size:11px;color:#6b7280">${l.created_at}</td>
+              </tr>`).join('')}</tbody>
+            </table>
+          </div>` : emptyHTML(),
+        init:()=>{}
+      };
+    }
+
+    function renderByType(){
+      const coverage = realData.coverage || {};
+      const byType = coverage.byType || [];
+      return {
+        html: byType.length > 0 ? `
+          <div class="chart-section">
+            <div class="chart-header"><span class="chart-title">활동 유형별 빈도</span></div>
+            <div class="chart-container"><canvas id="typeBarChart"></canvas></div>
+          </div>
+          <div class="table-section">
+            <div class="table-header"><div><span class="table-title">활동 유형별 데이터</span></div></div>
+            <table class="data-table">
+              <thead><tr><th>활동 유형</th><th>건수</th></tr></thead>
+              <tbody>${byType.map(t=>`<tr><td>${typeLabels[t.activity_type]||t.activity_type}</td><td class="num">${t.count.toLocaleString()}</td></tr>`).join('')}</tbody>
+            </table>
+          </div>` : emptyHTML(),
+        init:()=>{
+          if(byType.length > 0){
+            makeChart('typeBarChart','bar',
+              byType.map(t=>typeLabels[t.activity_type]||t.activity_type),
+              [{label:'건수',data:byType.map(t=>t.count),backgroundColor:typeColors.slice(0,byType.length)}],'건수');
+          }
+        }
+      };
+    }
+
+    function renderByService(){
+      const stats = realData.byService?.stats || [];
+      return {
+        html: stats.length > 0 ? `
+          <div class="chart-section">
+            <div class="chart-header"><span class="chart-title">서비스별 활용 빈도</span></div>
+            <div class="chart-container"><canvas id="svcChart"></canvas></div>
+          </div>
+          <div class="table-section">
+            <div class="table-header"><div><span class="table-title">서비스별 상세</span></div></div>
+            <table class="data-table">
+              <thead><tr><th>서비스</th><th>건수</th><th>사용자 수</th><th>평균 점수</th></tr></thead>
+              <tbody>${stats.map(s=>`<tr><td>${svcLabel(s.source_service)}</td><td class="num">${s.count.toLocaleString()}</td><td class="num">${s.unique_users}</td><td class="num">${s.avg_score?Number(s.avg_score).toFixed(1):'-'}</td></tr>`).join('')}</tbody>
+            </table>
+          </div>` : emptyHTML(),
+        init:()=>{
+          if(stats.length > 0){
+            makeChart('svcChart','bar',stats.map(s=>svcLabel(s.source_service)),
+              [{label:'건수',data:stats.map(s=>s.count),backgroundColor:'#8b5cf6'}],'건수');
+          }
+        }
+      };
+    }
+
+    function renderUsageTime(){
+      const daily = realData.daily?.data || [];
+      // 차트와 표가 동일한 hours 값을 읽도록 각 행에 hours 병합 (total_duration 초 → 시간)
+      daily.forEach(d => { d._hours = Math.round((Number(d.total_duration)||0)/3600*10)/10; });
+      const totalSec = daily.reduce((s,d)=>s+(Number(d.total_duration)||0),0);
+      return {
+        html: `
+          ${formulaHTML('화면설명 및 산출식', '학습활동 시간은 learning_logs.duration(초) 컬럼의 일별 합계입니다.<br>시간(h) = 총 소요 시간(초) / 3600<br>전체 누적: <strong>' + Math.round(totalSec/60) + '분</strong>')}
+          ${daily.length > 0 ? `
+          <div class="chart-section">
+            <div class="chart-header"><span class="chart-title">학습 활동 시간 추이</span></div>
+            <div class="chart-container"><canvas id="timeChart"></canvas></div>
+          </div>
+          <div class="table-section">
+            <div class="table-header"><div><span class="table-title">일별 학습시간 데이터</span><span class="table-count">총 ${daily.length}건</span></div>${excelBtnHTML('timeTable','학습활동시간.csv')}</div>
+            <table class="data-table" id="timeTable">
+              <thead><tr><th>날짜</th><th>활동 수</th><th>사용자 수</th><th>학습시간(h)</th></tr></thead>
+              <tbody>${daily.map(d=>`<tr><td>${d.stat_date}</td><td class="num">${d.count.toLocaleString()}</td><td class="num">${d.users}</td><td class="num">${d._hours}</td></tr>`).join('')}</tbody>
+            </table>
+          </div>` : emptyHTML('학습 활동이 기록되면 시간 추이가 표시됩니다.')}`,
+        init:()=>{
+          if(daily.length > 0){
+            makeChart('timeChart','line',daily.map(d=>d.stat_date.slice(5)),[
+              {label:'학습시간(h)',data:daily.map(d=>d._hours),borderColor:'#f59e0b',backgroundColor:'rgba(245,158,11,0.08)',tension:.3,pointRadius:3,fill:true}
+            ],'시간(h)');
+          }
+        }
+      };
+    }
+
+    function renderAchievement(){
+      const stats = realData.byAchievement?.stats || [];
+      return {
+        html: stats.length > 0 ? `
+          <div class="table-section">
+            <div class="table-header"><div><span class="table-title">성취기준별 현황</span><span class="table-count">${stats.length}개</span></div></div>
+            <table class="data-table">
+              <thead><tr><th>성취기준</th><th>활동 수</th><th>평균 점수</th><th>성공 횟수</th></tr></thead>
+              <tbody>${stats.map(s=>{const sc=s.avg_score?Number(s.avg_score):null;const disp=sc!==null?(sc<=1?(sc*100).toFixed(1):sc.toFixed(1)):'-';return `<tr><td><span class="badge badge-purple">${s.achievement_code}</span></td><td class="num">${s.count}</td><td class="num">${disp}</td><td class="num">${s.success_count||0}</td></tr>`;}).join('')}</tbody>
+            </table>
+          </div>` : emptyHTML('수업·과제·평가에 성취기준을 연결하면 데이터가 표시됩니다.'),
+        init:()=>{}
+      };
+    }
+
+    function renderAchieveScore(){
+      const daily = realData.daily?.data || [];
+      const scored = daily.filter(d=>d.avg_score !== null);
+      return {
+        html: scored.length > 0 ? `
+          <div class="chart-section">
+            <div class="chart-header"><span class="chart-title">평균 점수 추이</span></div>
+            <div class="chart-container"><canvas id="scoreChart"></canvas></div>
+          </div>` : emptyHTML('점수가 포함된 활동이 기록되면 추이가 표시됩니다.'),
+        init:()=>{
+          if(scored.length > 0){
+            makeChart('scoreChart','line',scored.map(d=>d.stat_date.slice(5)),[
+              {label:'평균 점수',data:scored.map(d=>{const v=Number(d.avg_score);return (v<=1?v*100:v).toFixed(1);}),borderColor:'#ef4444',backgroundColor:'rgba(239,68,68,0.08)',tension:.3,pointRadius:3,fill:true}
+            ],'점수');
+          }
+        }
+      };
+    }
+
+    function renderContentUsage(){
+      const coverage = realData.coverage || {};
+      const byVerb = coverage.byVerb || [];
+      return {
+        html: byVerb.length > 0 ? `
+          <div class="chart-section">
+            <div class="chart-header"><span class="chart-title">행동(verb)별 콘텐츠 활용</span></div>
+            <div class="chart-container"><canvas id="verbChart"></canvas></div>
+          </div>
+          <div class="table-section">
+            <div class="table-header"><div><span class="table-title">행동별 데이터</span></div></div>
+            <table class="data-table">
+              <thead><tr><th>행동</th><th>건수</th></tr></thead>
+              <tbody>${byVerb.map(v=>`<tr><td>${verbLabels[v.verb]||v.verb}</td><td class="num">${v.count.toLocaleString()}</td></tr>`).join('')}</tbody>
+            </table>
+          </div>` : emptyHTML(),
+        init:()=>{
+          if(byVerb.length > 0){
+            makeChart('verbChart','doughnut',byVerb.map(v=>verbLabels[v.verb]||v.verb),
+              [{data:byVerb.map(v=>v.count),backgroundColor:typeColors}]);
+          }
+        }
+      };
+    }
+
+    function renderBySubject(){
+      const data = realData.bySubject || {};
+      const lessons = data.lessonStats || [];
+      const hws = data.homeworkStats || [];
+      const exams = data.examStats || [];
+      const hasData = lessons.length || hws.length || exams.length;
+      return {
+        html: hasData ? `
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-bottom:16px">
+            <div class="chart-section">
+              <div class="chart-header"><span class="chart-title">교과별 수업 수</span></div>
+              ${lessons.length ? '<div class="chart-container"><canvas id="subjLessonChart"></canvas></div>' : '<div class="empty-state"><p>수업에 교과를 지정하면 표시됩니다.</p></div>'}
+            </div>
+            <div class="chart-section">
+              <div class="chart-header"><span class="chart-title">교과별 과제 수</span></div>
+              ${hws.length ? '<div class="chart-container"><canvas id="subjHwChart"></canvas></div>' : '<div class="empty-state"><p>과제에 교과를 지정하면 표시됩니다.</p></div>'}
+            </div>
+            <div class="chart-section">
+              <div class="chart-header"><span class="chart-title">교과별 평가 수</span></div>
+              ${exams.length ? '<div class="chart-container"><canvas id="subjExamChart"></canvas></div>' : '<div class="empty-state"><p>평가에 교과를 지정하면 표시됩니다.</p></div>'}
+            </div>
+          </div>` : emptyHTML('수업/과제/평가 생성 시 교과를 지정하면 데이터가 표시됩니다.'),
+        init:()=>{
+          if(lessons.length) makeChart('subjLessonChart','bar',lessons.map(l=>l.subject_name),[{label:'수업',data:lessons.map(l=>l.lesson_count),backgroundColor:'#3b82f6'}],'개');
+          if(hws.length) makeChart('subjHwChart','bar',hws.map(h=>h.subject_name),[{label:'과제',data:hws.map(h=>h.hw_count),backgroundColor:'#10b981'}],'개');
+          if(exams.length) makeChart('subjExamChart','bar',exams.map(e=>e.subject_name),[{label:'평가',data:exams.map(e=>e.exam_count),backgroundColor:'#f59e0b'}],'개');
+        }
+      };
+    }
+
+    function renderByClass(){
+      const stats = realData.byClass?.stats || [];
+      return {
+        html: stats.length > 0 ? `
+          <div class="table-section">
+            <div class="table-header"><div><span class="table-title">클래스별 활동 현황</span><span class="table-count">${stats.length}건</span></div></div>
+            <table class="data-table">
+              <thead><tr><th>클래스</th><th>활동유형</th><th>활동 수</th><th>사용자 수</th><th>평균 점수</th></tr></thead>
+              <tbody>${stats.map(s=>`<tr><td>${s.class_name}</td><td><span class="badge badge-blue">${typeLabels[s.activity_type]||s.activity_type}</span></td><td class="num">${s.total_count}</td><td class="num">${s.unique_users}</td><td class="num">${s.avg_score?Number(s.avg_score).toFixed(1):'-'}</td></tr>`).join('')}</tbody>
+            </table>
+          </div>` : emptyHTML('클래스에서 학습 활동이 발생하면 표시됩니다.'),
+        init:()=>{}
+      };
+    }
+
+    function renderUserSummary(){
+      const data = realData.userSummary || {};
+      const summary = data.summary || [];
+      const total = data.total || 0;
+      return {
+        html: `
+          <div class="home-cards" style="margin-bottom:16px">
+            <div class="home-card"><div class="card-label">나의 총 활동 수</div><div class="card-value">${total.toLocaleString()}</div></div>
+            <div class="home-card"><div class="card-label">활동 유형 수</div><div class="card-value">${summary.length}</div></div>
+          </div>
+          ${summary.length > 0 ? `
+          <div class="chart-section">
+            <div class="chart-header"><span class="chart-title">활동 유형별 요약</span></div>
+            <div class="chart-container"><canvas id="userChart"></canvas></div>
+          </div>
+          <div class="table-section">
+            <div class="table-header"><div><span class="table-title">상세 요약</span></div></div>
+            <table class="data-table">
+              <thead><tr><th>활동유형</th><th>횟수</th><th>총 시간(초)</th><th>평균 점수</th><th>최근 활동</th></tr></thead>
+              <tbody>${summary.map(s=>`<tr><td>${typeLabels[s.activity_type]||s.activity_type}</td><td class="num">${s.total_count}</td><td class="num">${s.total_duration||0}</td><td class="num">${s.avg_score?Number(s.avg_score).toFixed(1):'-'}</td><td style="font-size:11px;color:#6b7280">${s.last_activity_at||'-'}</td></tr>`).join('')}</tbody>
+            </table>
+          </div>` : emptyHTML('학습 활동을 시작하면 요약이 표시됩니다.')}`,
+        init:()=>{
+          if(summary.length > 0){
+            makeChart('userChart','bar',summary.map(s=>typeLabels[s.activity_type]||s.activity_type),
+              [{label:'횟수',data:summary.map(s=>s.total_count),backgroundColor:typeColors.slice(0,summary.length)}],'건수');
+          }
+        }
+      };
+    }
+
+    // ── 유틸: CSV 내보내기 ──
+    function exportCSV(tableId, filename){
+      const table = document.getElementById(tableId);
+      if(!table) return;
+      let csv = '';
+      table.querySelectorAll('tr').forEach(row => {
+        const cols = [];
+        row.querySelectorAll('th,td').forEach(cell => cols.push('"'+cell.textContent.replace(/"/g,'""')+'"'));
+        csv += cols.join(',') + '\n';
+      });
+      const bom = '\uFEFF';
+      const blob = new Blob([bom + csv], {type:'text/csv;charset=utf-8;'});
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = filename || 'data.csv';
+      link.click();
+    }
+    window.exportCSV = exportCSV;
+
+    // ── 유틸: 산출식 토글 ──
+    function formulaHTML(title, detail){
+      return `<div class="formula-bar" onclick="this.classList.toggle('open')">
+        <span class="toggle">▸</span> <strong>${title}</strong>
+      </div>
+      <div class="formula-detail">${detail}</div>`;
+    }
+
+    // ── 유틸: 출력유형 선택 ──
+    function outputTypeHTML(){
+      return `<div class="output-type">
+        <label class="active" onclick="setOutputType('all',this)">전체</label>
+        <label onclick="setOutputType('chart',this)">그래프</label>
+        <label onclick="setOutputType('table',this)">표</label>
+      </div>`;
+    }
+    function setOutputType(type, el){
+      el.parentElement.querySelectorAll('label').forEach(l=>l.classList.remove('active'));
+      el.classList.add('active');
+      const content = el.closest('.content') || document.getElementById('contentArea');
+      content.querySelectorAll('.chart-section').forEach(s => s.style.display = type==='table'?'none':'');
+      content.querySelectorAll('.table-section').forEach(s => s.style.display = type==='chart'?'none':'');
+    }
+    window.setOutputType = setOutputType;
+
+    // ── 유틸: 엑셀 버튼 HTML ──
+    function excelBtnHTML(tableId, filename){
+      return `<button class="btn-excel" onclick="exportCSV('${tableId}','${filename}')">📊 엑셀 다운로드</button>`;
+    }
+
+    // ── 렌더: 활용률 ──
+    function renderUsageRate(){
+      const daily = realData.daily?.data || [];
+      const coverage = realData.coverage || {};
+      const totalUsers = coverage.totalLearners || coverage.totalAccounts || realData.userSummary?.totalUsers || 1;
+      const rateData = daily.map(d => ({ date: d.stat_date, rate: Math.min(100, Math.round(d.users / Math.max(totalUsers,1) * 100 * 10)/10) }));
+      return {
+        html: `
+          ${formulaHTML('화면설명 및 산출식', '활용률(%) = 해당일 접속 사용자 수 / 전체 등록 사용자 수 × 100<br>전체 등록 사용자 수: <strong>' + totalUsers + '명</strong>')}
+          <div class="filter-bar"><div class="filter-row">
+            <span class="filter-label">기간</span>
+            <select class="filter-select" id="rateDays" onchange="reloadDaily()"><option value="7">7일</option><option value="30" selected>30일</option><option value="90">90일</option></select>
+            <button class="btn-search" onclick="reloadDaily()">조회</button>
+            <button class="btn-reset" onclick="document.getElementById('rateDays').value='30';reloadDaily()" style="padding:7px 16px;background:#fff;color:#6b7280;border:1px solid #d1d5db;border-radius:6px;font-size:12px;cursor:pointer;">초기화</button>
+            ${outputTypeHTML()}
+          </div></div>
+          ${rateData.length > 0 ? `
+            <div class="chart-section"><div class="chart-header"><span class="chart-title">활용률 추이</span></div>
+              <div class="chart-container"><canvas id="rateChart"></canvas></div></div>
+            <div class="table-section"><div class="table-header"><div><span class="table-title">활용률 데이터</span><span class="table-count">총 ${rateData.length}건</span></div>${excelBtnHTML('rateTable','활용률.csv')}</div>
+              <table class="data-table" id="rateTable"><thead><tr><th>순번</th><th>기간</th><th>접속 사용자 수</th><th>활용률(%)</th></tr></thead>
+              <tbody>${rateData.map((d,i)=>`<tr><td>${i+1}</td><td>${d.date}</td><td class="num">${daily[i]?.users||0}</td><td class="num">${d.rate}%</td></tr>`).join('')}</tbody></table></div>
+          ` : emptyHTML()}`,
+        init:()=>{
+          if(rateData.length > 0){
+            makeChart('rateChart','line',rateData.map(d=>d.date.slice(5)),[
+              {label:'활용률(%)',data:rateData.map(d=>d.rate),borderColor:'#2563eb',backgroundColor:'rgba(37,99,235,0.08)',tension:.3,pointRadius:3,fill:true}
+            ],'%');
+          }
+        }
+      };
+    }
+
+    // ── 렌더: 성취수준 분포 ──
+    function renderAchieveDist(){
+      const stats = realData.byAchievement?.stats || [];
+      const gradeMap = {A:0,B:0,C:0,D:0,E:0};
+      stats.forEach(s => {
+        const raw = s.avg_score ? Number(s.avg_score) : null;
+        if(raw===null) { gradeMap.E++; return; }
+        const score = raw <= 1 ? raw * 100 : raw; // 0~1 스케일 → 100점 환산
+        if(score>=90) gradeMap.A++;
+        else if(score>=80) gradeMap.B++;
+        else if(score>=70) gradeMap.C++;
+        else if(score>=60) gradeMap.D++;
+        else gradeMap.E++;
+      });
+      const grades = Object.entries(gradeMap);
+      const total = grades.reduce((s,g)=>s+g[1],0);
+      const gradeColors = ['#2563eb','#10b981','#f59e0b','#f97316','#ef4444'];
+      return {
+        html: `
+          ${formulaHTML('화면설명 및 산출식', '성취수준은 성취기준별 평균 점수를 기반으로 분류합니다.<br>A: 90점 이상 / B: 80~89점 / C: 70~79점 / D: 60~69점 / E: 60점 미만')}
+          ${total > 0 ? `
+            <div class="chart-section"><div class="chart-header"><span class="chart-title">성취수준 분포</span></div>
+              <div class="chart-container"><canvas id="gradeChart"></canvas></div></div>
+            <div class="table-section"><div class="table-header"><div><span class="table-title">성취수준별 누적 건수</span><span class="table-count">총 ${total}건</span></div>${excelBtnHTML('gradeTable','성취수준분포.csv')}</div>
+              <table class="data-table" id="gradeTable"><thead><tr><th>등급</th><th>건수</th><th>비율(%)</th></tr></thead>
+              <tbody>${grades.map(([g,c])=>`<tr><td><span class="badge badge-blue">${g}</span></td><td class="num">${c}</td><td class="num">${total?Math.round(c/total*100):0}%</td></tr>`).join('')}</tbody></table></div>
+          ` : emptyHTML('성취기준에 연결된 점수 데이터가 있으면 분포가 표시됩니다.')}`,
+        init:()=>{
+          if(total > 0){
+            makeChart('gradeChart','doughnut',grades.map(g=>g[0]+' 등급'),
+              [{data:grades.map(g=>g[1]),backgroundColor:gradeColors}]);
+          }
+        }
+      };
+    }
+
+    // ── 렌더: 교사 활용률 ──
+    function renderTeacherRate(){
+      const daily = realData.teacherDaily?.data || [];
+      const coverage = realData.coverage || {};
+      const totalTeachers = coverage.totalTeachers || 1;
+      const rateData = daily.map(d => ({ date: d.stat_date, rate: Math.min(100, Math.round(d.users / Math.max(totalTeachers,1) * 100 * 10)/10), count: d.count, users: d.users }));
+      return {
+        html: `
+          ${formulaHTML('화면설명 및 산출식', '교사 활용률은 교사 역할 사용자의 서비스 접속률을 산출합니다.<br>교사 활용률(%) = 해당일 교사 접속자 수 / 전체 교사 수 × 100<br>전체 교사 수: <strong>' + totalTeachers + '명</strong>')}
+          ${daily.length > 0 ? `
+            <div class="chart-section"><div class="chart-header"><span class="chart-title">교사 활용 추이</span></div>
+              <div class="chart-container"><canvas id="teacherRateChart"></canvas></div></div>
+            <div class="table-section"><div class="table-header"><div><span class="table-title">교사 활동 데이터</span><span class="table-count">총 ${daily.length}건</span></div>${excelBtnHTML('teacherTable','교사활용률.csv')}</div>
+              <table class="data-table" id="teacherTable"><thead><tr><th>날짜</th><th>활동 수</th><th>접속 교사 수</th><th>활용률(%)</th></tr></thead>
+              <tbody>${rateData.map(d=>`<tr><td>${d.date}</td><td class="num">${d.count}</td><td class="num">${d.users}</td><td class="num">${d.rate}%</td></tr>`).join('')}</tbody></table></div>
+          ` : emptyHTML('교사 활동이 기록되면 표시됩니다.')}`,
+        init:()=>{
+          if(daily.length > 0){
+            makeChart('teacherRateChart','line',daily.map(d=>d.stat_date.slice(5)),[
+              {label:'활동 수',data:daily.map(d=>d.count),borderColor:'#8b5cf6',backgroundColor:'rgba(139,92,246,0.08)',tension:.3,pointRadius:3,fill:true},
+              {label:'활용률(%)',data:rateData.map(d=>d.rate),borderColor:'#ec4899',backgroundColor:'transparent',tension:.3,pointRadius:3,yAxisID:'y1'}
+            ],'건수');
+          }
+        }
+      };
+    }
+
+    // ── 렌더: 교사 활용빈도 ──
+    function renderTeacherFreq(){
+      const byService = realData.teacherByService?.stats || [];
+      return {
+        html: `
+          ${formulaHTML('화면설명 및 산출식', '교사 활용빈도는 교사 역할(role=teacher) 사용자의 서비스별 활동 건수입니다.')}
+          ${byService.length > 0 ? `
+            <div class="chart-section"><div class="chart-header"><span class="chart-title">교사 서비스별 활용빈도</span></div>
+              <div class="chart-container"><canvas id="teacherFreqChart"></canvas></div></div>
+            <div class="table-section"><div class="table-header"><div><span class="table-title">서비스별 상세</span></div>${excelBtnHTML('teacherFreqTable','교사활용빈도.csv')}</div>
+              <table class="data-table" id="teacherFreqTable"><thead><tr><th>서비스</th><th>활동 수</th><th>사용 교사 수</th></tr></thead>
+              <tbody>${byService.map(s=>`<tr><td>${svcLabel(s.source_service)}</td><td class="num">${s.count}</td><td class="num">${s.unique_users}</td></tr>`).join('')}</tbody></table></div>
+          ` : emptyHTML('교사 활동이 기록되면 표시됩니다.')}`,
+        init:()=>{
+          if(byService.length > 0){
+            makeChart('teacherFreqChart','bar',byService.map(s=>svcLabel(s.source_service)),
+              [{label:'활동 수',data:byService.map(s=>s.count),backgroundColor:'#8b5cf6'}],'건수');
+          }
+        }
+      };
+    }
+
+    function getPage(id){
+      switch(id){
+        case 'home': return renderHome();
+        case 'usage-rate': return renderUsageRate();
+        case 'usage-freq': return renderDailyTrend();
+        case 'usage-by-type': return renderByType();
+        case 'usage-by-service': return renderByService();
+        case 'usage-time': return renderUsageTime();
+        case 'achieve-status': return renderAchievement();
+        case 'achieve-dist': return renderAchieveDist();
+        case 'achieve-score': return renderAchieveScore();
+        case 'perform-content': return renderContentUsage();
+        case 'perform-subject': return renderBySubject();
+        case 'perform-class': return renderByClass();
+        case 'custom-user': return renderUserSummary();
+        case 'teacher-rate': return renderTeacherRate();
+        case 'teacher-freq': return renderTeacherFreq();
+        case 'daily-trend': return renderDailyTrend();
+        case 'daily-logs': return renderRecentLogs();
+        default: return { html: emptyHTML('준비 중입니다.'), init:()=>{} };
+      }
+    }
+
+    // ── 네비게이션 ──
+    let currentMenu='home', currentPage='home';
+
+    function renderSubMenu(menuKey){
+      const menu=MENUS[menuKey], el=document.getElementById('subMenu');
+      if(menuKey==='home'){ el.style.display='none'; return; }
+      el.style.display='';
+      let html=`<div class="sub-menu-title">${menu.title}</div>`;
+      menu.items.forEach(group=>{
+        html+=`<div class="sub-menu-group"><div class="sub-menu-group-title">▸ ${group.group}</div>`;
+        group.children.forEach((item,i)=>{
+          const active = currentPage===item.id || (!currentPage && i===0 && group===menu.items[0]);
+          html+=`<div class="sub-menu-item${active?' active':''}" data-page="${item.id}">${item.name}</div>`;
+        });
+        html+='</div>';
+      });
+      el.innerHTML=html;
+    }
+
+    function navigateTo(menuKey, pageId){
+      destroyCharts();
+      currentMenu=menuKey;
+      currentPage=pageId||(menuKey==='home'?'home':MENUS[menuKey]?.items[0]?.children[0]?.id||'home');
+      renderSubMenu(menuKey);
+      document.querySelectorAll('.sub-menu-item').forEach(item=>{
+        item.addEventListener('click',()=>{
+          document.querySelectorAll('.sub-menu-item').forEach(i=>i.classList.remove('active'));
+          item.classList.add('active');
+          currentPage=item.dataset.page;
+          renderPageContent(currentPage);
+        });
+      });
+      renderPageContent(currentPage);
+    }
+
+    function renderPageContent(pageId){
+      destroyCharts();
+      const page=getPage(pageId);
+      document.getElementById('contentArea').innerHTML=page.html;
+      let bc='';
+      if(pageId==='home') bc='홈';
+      else {
+        for(const [key,menu] of Object.entries(MENUS)){
+          for(const group of menu.items){
+            const found=group.children.find(c=>c.id===pageId);
+            if(found){ bc=`${menu.title} > ${group.group} > <span>${found.name}</span>`; break; }
+          }
+          if(bc) break;
+        }
+      }
+      document.getElementById('breadcrumb').innerHTML=bc;
+      requestAnimationFrame(()=>page.init());
+    }
+
+    window.addEventListener('dacheim:user-loaded', async ()=>{
+      document.getElementById('mainContent').style.display='flex';
+      // 기본: 최근 30일 (빠른선택 옵션과 일치)
+      applyGlobalQuickRange('30');
+      globalRange.from = document.getElementById('globalFrom').value;
+      globalRange.to   = document.getElementById('globalTo').value;
+      document.getElementById('aggDate').textContent = `📊 ${globalRange.from} ~ ${globalRange.to}`;
+      await loadRealData();
+      const urlMenu = new URLSearchParams(location.search).get('menu') || 'home';
+      navigateTo(urlMenu);
+    });
+  </script>
+</body>
+</html>

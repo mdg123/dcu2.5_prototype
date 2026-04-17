@@ -1,0 +1,796 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>다채움 - 우리반 성장기록</title>
+  <link rel="stylesheet" href="/css/common-nav.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    :root {
+      --primary: #2563eb; --primary-light: #dbeafe; --primary-dark: #1d4ed8;
+      --secondary: #10b981; --secondary-light: #d1fae5;
+      --warning: #f59e0b; --warning-light: #fef3c7;
+      --danger: #ef4444; --danger-light: #fee2e2;
+      --purple: #8b5cf6; --purple-light: #ede9fe;
+      --pink: #ec4899; --pink-light: #fce7f3;
+      --gray-50: #f9fafb; --gray-100: #f3f4f6; --gray-200: #e5e7eb; --gray-300: #d1d5db;
+      --gray-400: #9ca3af; --gray-500: #6b7280; --gray-600: #4b5563; --gray-700: #374151; --gray-800: #1f2937;
+      --shadow-sm: 0 1px 3px rgba(0,0,0,.08); --shadow-md: 0 4px 6px -1px rgba(0,0,0,.1);
+      --shadow-lg: 0 10px 15px -3px rgba(0,0,0,.1);
+      --radius-md: 10px; --radius-lg: 16px;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Pretendard','Noto Sans KR',system-ui,sans-serif; background: var(--gray-100); color: var(--gray-800); }
+
+    .app-layout { display: flex; min-height: calc(100vh - 60px); }
+    .sidebar { width: 220px; background: #fff; border-right: 1px solid var(--gray-200); padding: 20px 0; flex-shrink: 0; }
+    .sidebar-menu { list-style: none; }
+    .sidebar-menu li { padding: 10px 20px; font-size: 14px; cursor: pointer; display: flex; align-items: center; gap: 10px; color: var(--gray-600); transition: all .15s; }
+    .sidebar-menu li:hover { background: var(--gray-50); }
+    .sidebar-menu li.active { background: var(--primary-light); color: var(--primary); font-weight: 600; border-right: 3px solid var(--primary); }
+    .sidebar-menu li i { width: 18px; text-align: center; }
+    .main-content { flex: 1; padding: 24px; max-width: 1800px; }
+
+    /* Growth summary banner */
+    .growth-banner { background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%); border-radius: var(--radius-lg); padding: 28px; color: #fff; margin-bottom: 24px; position: relative; overflow: hidden; }
+    .growth-banner::before { content: ''; position: absolute; top: -50%; right: -20%; width: 400px; height: 400px; background: radial-gradient(circle, rgba(255,255,255,.1) 0%, transparent 70%); border-radius: 50%; }
+    .growth-banner::after { content: ''; position: absolute; bottom: -30px; left: -30px; width: 160px; height: 160px; background: rgba(255,255,255,.06); border-radius: 50%; }
+    .growth-banner h2 { font-size: 20px; font-weight: 700; margin-bottom: 8px; position: relative; z-index: 1; display: flex; align-items: center; gap: 10px; }
+    .growth-banner p { font-size: 14px; opacity: .85; position: relative; z-index: 1; }
+    .growth-banner .highlight-tags { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; position: relative; z-index: 1; }
+    .growth-banner .highlight-tag { display: inline-block; background: rgba(255,255,255,.18); padding: 4px 14px; border-radius: 20px; font-size: 12px; font-weight: 500; }
+
+    /* Metric cards */
+    .metrics-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 24px; }
+    .metric-card { background: #fff; border-radius: var(--radius-lg); padding: 20px; box-shadow: var(--shadow-sm); }
+    .metric-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
+    .metric-title { font-size: 13px; font-weight: 600; color: var(--gray-600); display: flex; align-items: center; gap: 8px; }
+    .metric-icon { width: 28px; height: 28px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 13px; }
+    .metric-badge { font-size: 10px; padding: 2px 8px; border-radius: 10px; font-weight: 600; }
+    .metric-badge.up { background: var(--secondary-light); color: var(--secondary); }
+    .metric-badge.down { background: var(--danger-light); color: var(--danger); }
+    .metric-body { display: flex; gap: 16px; align-items: center; }
+    .metric-value { font-size: 28px; font-weight: 700; color: var(--gray-800); }
+    .metric-unit { font-size: 14px; font-weight: 500; color: var(--gray-500); }
+    .metric-sub { font-size: 12px; color: var(--gray-500); margin-top: 4px; }
+
+    /* Section cards */
+    .section-card { background: #fff; border-radius: var(--radius-lg); padding: 24px; box-shadow: var(--shadow-sm); margin-bottom: 16px; }
+    .section-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px; }
+    .section-title { display: flex; align-items: center; gap: 10px; font-size: 16px; font-weight: 700; color: var(--gray-800); }
+    .section-icon { width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 14px; color: #fff; }
+
+    .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+
+    /* Portfolio */
+    .portfolio-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px; }
+    .portfolio-card { background: #fff; border-radius: var(--radius-lg); overflow: hidden; box-shadow: var(--shadow-sm); cursor: pointer; transition: all .2s; border: 2px solid transparent; }
+    .portfolio-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-lg); border-color: var(--gray-200); }
+    .portfolio-thumb { height: 120px; display: flex; align-items: center; justify-content: center; color: rgba(255,255,255,.7); font-size: 32px; }
+    .portfolio-body { padding: 14px; }
+    .portfolio-body h4 { font-size: 14px; font-weight: 600; margin-bottom: 4px; }
+    .portfolio-body .meta { font-size: 12px; color: var(--gray-500); }
+
+    /* Gallery */
+    .gallery-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 14px; }
+    .gallery-card { background: #fff; border-radius: var(--radius-lg); overflow: hidden; box-shadow: var(--shadow-sm); transition: all .2s; }
+    .gallery-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-lg); }
+    .gallery-thumb { height: 160px; display: flex; align-items: center; justify-content: center; color: rgba(255,255,255,.7); font-size: 36px; }
+    .gallery-body { padding: 12px; }
+    .gallery-body h4 { font-size: 13px; font-weight: 600; margin-bottom: 4px; }
+    .gallery-body .meta { font-size: 11px; color: var(--gray-500); display: flex; justify-content: space-between; align-items: center; }
+
+    /* Student table */
+    .student-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .student-table th { text-align: left; padding: 12px 10px; border-bottom: 2px solid var(--gray-200); font-weight: 600; color: var(--gray-600); }
+    .student-table td { padding: 12px 10px; border-bottom: 1px solid var(--gray-100); }
+    .student-table tr:hover { background: var(--gray-50); }
+    .student-avatar { width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 600; flex-shrink: 0; }
+    .progress-bar-sm { width: 100px; height: 6px; background: var(--gray-200); border-radius: 3px; overflow: hidden; display: inline-block; vertical-align: middle; }
+    .progress-bar-sm .fill { height: 100%; border-radius: 3px; }
+
+    /* Alert card */
+    .alert-card { display: flex; align-items: center; gap: 12px; padding: 14px; border-radius: var(--radius-md); margin-bottom: 8px; border-left: 4px solid; }
+    .alert-card.warning { background: var(--warning-light); border-color: var(--warning); }
+    .alert-card.danger { background: var(--danger-light); border-color: var(--danger); }
+    .alert-card .alert-icon { width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 14px; flex-shrink: 0; }
+
+    /* Class header */
+    .class-header { background: #fff; border-radius: var(--radius-lg); padding: 24px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; box-shadow: var(--shadow-sm); }
+    .class-info { display: flex; align-items: center; gap: 16px; }
+    .class-icon { width: 56px; height: 56px; border-radius: 14px; background: linear-gradient(135deg, var(--primary), var(--purple)); display: flex; align-items: center; justify-content: center; font-size: 24px; color: #fff; }
+    .class-details h2 { font-size: 18px; font-weight: 700; }
+    .class-meta { color: var(--gray-500); font-size: 13px; display: flex; gap: 12px; margin-top: 4px; }
+
+    .chart-container { height: 200px; margin-top: 10px; }
+
+    .btn { padding: 8px 16px; border: none; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit; transition: all .2s; }
+    .btn-primary { background: var(--primary); color: #fff; }
+    .btn-primary:hover { background: var(--primary-dark); }
+    .btn-sm { padding: 6px 12px; font-size: 12px; }
+    .btn-outline { background: #fff; color: var(--gray-700); border: 1.5px solid var(--gray-300); }
+    .btn-outline:hover { background: var(--gray-50); }
+    .empty-state { text-align: center; padding: 40px 20px; color: var(--gray-400); }
+    .empty-state i { font-size: 40px; margin-bottom: 10px; display: block; }
+
+    .filter-bar { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+    .filter-chip { padding: 6px 14px; border-radius: 20px; font-size: 12px; border: 1.5px solid var(--gray-200); cursor: pointer; background: #fff; font-family: inherit; transition: all .15s; }
+    .filter-chip.active { background: var(--primary); color: #fff; border-color: var(--primary); }
+    .filter-chip:hover:not(.active) { border-color: var(--gray-400); }
+
+    .class-selector { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+    .class-selector select { padding: 8px 14px; border: 1.5px solid var(--gray-200); border-radius: 8px; font-size: 14px; font-family: inherit; background: #fff; }
+
+    .modal-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,.5); backdrop-filter: blur(4px); z-index: 10000; align-items: center; justify-content: center; padding: 24px; }
+    .modal-overlay.active { display: flex; }
+    .modal { background: #fff; border-radius: var(--radius-lg); padding: 28px; width: 90%; max-width: 500px; max-height: 90vh; overflow-y: auto; animation: modalIn .3s ease; }
+    @keyframes modalIn { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+    .modal h3 { font-size: 18px; font-weight: 700; margin-bottom: 16px; }
+    .form-group { margin-bottom: 14px; }
+    .form-group label { display: block; font-size: 13px; font-weight: 600; color: var(--gray-700); margin-bottom: 6px; }
+    .form-group input, .form-group select, .form-group textarea { width: 100%; padding: 10px 12px; border: 1.5px solid var(--gray-200); border-radius: 8px; font-size: 14px; outline: none; font-family: inherit; }
+    .form-group input:focus, .form-group select:focus { border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-light); }
+    .form-group textarea { min-height: 80px; resize: vertical; }
+    .modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 16px; }
+
+    /* Toast */
+    .toast { position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%); background: linear-gradient(135deg, var(--primary), var(--purple)); color: #fff; padding: 14px 24px; border-radius: var(--radius-lg); box-shadow: 0 10px 25px rgba(0,0,0,.2); display: flex; align-items: center; gap: 10px; z-index: 20000; animation: toastIn .4s ease; font-size: 14px; font-weight: 500; }
+    @keyframes toastIn { from { opacity: 0; transform: translate(-50%, 20px); } to { opacity: 1; transform: translate(-50%, 0); } }
+
+    /* Student card grid */
+    .student-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+    .student-card { background: #fff; border-radius: var(--radius-md); padding: 16px; box-shadow: var(--shadow-sm); cursor: pointer; transition: all .2s; border: 2px solid transparent; }
+    .student-card:hover { border-color: var(--primary); box-shadow: var(--shadow-md); }
+    .student-card .s-info { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+    .student-card .s-name { font-size: 14px; font-weight: 600; }
+    .student-card .s-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+    .student-card .s-stat { text-align: center; padding: 6px; background: var(--gray-50); border-radius: 6px; }
+    .student-card .s-stat-val { font-size: 16px; font-weight: 700; }
+    .student-card .s-stat-lbl { font-size: 10px; color: var(--gray-500); }
+
+    @media (max-width: 768px) {
+      .app-layout { flex-direction: column; }
+      .sidebar { width: 100%; border-right: none; border-bottom: 1px solid var(--gray-200); padding: 10px 0; }
+      .sidebar-menu { display: flex; overflow-x: auto; }
+      .sidebar-menu li { white-space: nowrap; padding: 8px 14px; }
+      .sidebar-menu li.active { border-right: none; border-bottom: 3px solid var(--primary); }
+      .two-col { grid-template-columns: 1fr; }
+      .metrics-grid { grid-template-columns: repeat(2, 1fr); }
+      .portfolio-grid { grid-template-columns: 1fr 1fr; }
+      .gallery-grid { grid-template-columns: 1fr 1fr; }
+      .class-header { flex-direction: column; gap: 12px; align-items: flex-start; }
+      .student-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <script src="/js/common-nav.js"></script>
+  <div class="app-layout" id="mainContent" style="display:none;">
+    <nav class="sidebar">
+      <ul class="sidebar-menu">
+        <li class="active" data-page="dashboard"><i class="fas fa-chart-pie"></i> 대시보드</li>
+        <li data-page="portfolio"><i class="fas fa-folder-open"></i> 포트폴리오</li>
+        <li data-page="gallery"><i class="fas fa-palette"></i> 나도예술가</li>
+        <li class="teacher-only" data-page="class-dashboard" style="display:none"><i class="fas fa-users"></i> 학급 현황</li>
+      </ul>
+    </nav>
+    <div class="main-content" id="pageContent"></div>
+  </div>
+
+  <!-- 포트폴리오 생성 모달 -->
+  <div class="modal-overlay" id="pfModal">
+    <div class="modal">
+      <h3><i class="fas fa-plus-circle" style="color:var(--primary);margin-right:6px;"></i>포트폴리오 추가</h3>
+      <div class="form-group"><label>제목 *</label><input type="text" id="pfTitle" placeholder="포트폴리오 제목"></div>
+      <div class="form-group"><label>설명</label><textarea id="pfDesc" placeholder="설명"></textarea></div>
+      <div class="form-group">
+        <label>카테고리</label>
+        <select id="pfCat">
+          <option value="general">일반</option><option value="project">프로젝트</option>
+          <option value="research">탐구</option><option value="creative">창작</option>
+        </select>
+      </div>
+      <div class="form-group"><label><input type="checkbox" id="pfPublic"> 공개</label></div>
+      <div class="modal-actions">
+        <button class="btn btn-outline" onclick="closeModal('pfModal')">취소</button>
+        <button class="btn btn-primary" onclick="submitPortfolio()">등록</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 갤러리 작품 등록 모달 -->
+  <div class="modal-overlay" id="artModal">
+    <div class="modal">
+      <h3><i class="fas fa-palette" style="color:#f97316;margin-right:6px;"></i>작품 등록</h3>
+      <div class="form-group"><label>제목 *</label><input type="text" id="artTitle" placeholder="작품 제목"></div>
+      <div class="form-group"><label>설명</label><textarea id="artDesc" placeholder="작품 설명"></textarea></div>
+      <div class="form-group">
+        <label>카테고리</label>
+        <select id="artCat">
+          <option value="art">미술</option><option value="music">음악</option>
+          <option value="writing">문학</option><option value="video">영상</option><option value="other">기타</option>
+        </select>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-outline" onclick="closeModal('artModal')">취소</button>
+        <button class="btn btn-primary" onclick="submitArt()">등록</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 포트폴리오 상세 모달 -->
+  <div class="modal-overlay" id="pfDetailModal">
+    <div class="modal" style="max-width:560px;">
+      <div id="pfDetailBody"></div>
+      <div class="modal-actions">
+        <button class="btn btn-outline" onclick="closeModal('pfDetailModal')">닫기</button>
+        <button class="btn" style="background:var(--danger-light);color:var(--danger)" id="pfDeleteBtn" onclick="deletePortfolio()"><i class="fas fa-trash"></i> 삭제</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let currentPage = 'dashboard';
+    let currentUser = null;
+    let selectedClassId = null;
+    let detailPfId = null;
+
+    function escHtml(s) { if (!s) return ''; const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+    function showToast(msg, icon='fa-check-circle') {
+      const t = document.createElement('div');
+      t.className = 'toast';
+      t.innerHTML = `<i class="fas ${icon}"></i> ${msg}`;
+      document.body.appendChild(t);
+      setTimeout(() => { t.style.opacity = '0'; t.style.transform = 'translate(-50%, 20px)'; t.style.transition = 'all .3s'; setTimeout(() => t.remove(), 300); }, 2500);
+    }
+
+    document.querySelectorAll('.sidebar-menu li').forEach(li => {
+      li.addEventListener('click', () => {
+        document.querySelectorAll('.sidebar-menu li').forEach(l => l.classList.remove('active'));
+        li.classList.add('active');
+        currentPage = li.dataset.page;
+        renderPage();
+      });
+    });
+
+    // 모달 배경 클릭으로 닫기
+    document.querySelectorAll('.modal-overlay').forEach(ov => {
+      ov.addEventListener('click', (e) => { if (e.target === ov) ov.classList.remove('active'); });
+    });
+
+    function renderPage() {
+      const c = document.getElementById('pageContent');
+      switch (currentPage) {
+        case 'dashboard': renderDashboard(c); break;
+        case 'portfolio': renderPortfolio(c); break;
+        case 'gallery': renderGallery(c); break;
+        case 'class-dashboard': renderClassDashboard(c); break;
+      }
+    }
+
+    // ===== 대시보드 =====
+    async function renderDashboard(c) {
+      const res = await fetch('/api/growth/summary').then(r => r.json());
+      const s = res.summary || {};
+      const wa = s.wrongAnswers || {};
+      const resolveRate = wa.total ? Math.round(wa.resolved / wa.total * 100) : 0;
+      const totalAct = s.totalActivities || 0;
+      const totalTime = s.totalTimeMinutes || 0;
+      const pfCount = s.portfolioCount || 0;
+
+      // Build highlight tags
+      const tags = [];
+      if (totalAct > 0) tags.push(`활동 ${totalAct}건`);
+      if (totalTime > 0) tags.push(`학습 ${totalTime}분`);
+      if (pfCount > 0) tags.push(`포트폴리오 ${pfCount}개`);
+      if (resolveRate > 0) tags.push(`오답해결 ${resolveRate}%`);
+
+      c.innerHTML = `
+        <div class="growth-banner">
+          <h2><i class="fas fa-seedling"></i> 나의 성장 대시보드</h2>
+          <p>학습 활동과 성장 기록을 한눈에 확인하세요. 꾸준한 노력이 빛나는 순간을 기록합니다.</p>
+          ${tags.length ? `<div class="highlight-tags">${tags.map(t => `<span class="highlight-tag">${t}</span>`).join('')}</div>` : ''}
+        </div>
+
+        <div class="metrics-grid">
+          <div class="metric-card">
+            <div class="metric-header">
+              <span class="metric-title">
+                <span class="metric-icon" style="background:var(--primary-light);color:var(--primary)"><i class="fas fa-book"></i></span>
+                학습 활동
+              </span>
+              ${totalAct > 5 ? '<span class="metric-badge up"><i class="fas fa-arrow-up"></i> 활발</span>' : ''}
+            </div>
+            <div class="metric-body">
+              <div><span class="metric-value">${totalAct}</span><span class="metric-unit"> 건</span></div>
+            </div>
+            <div class="metric-sub">전체 기간 누적</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-header">
+              <span class="metric-title">
+                <span class="metric-icon" style="background:var(--secondary-light);color:var(--secondary)"><i class="fas fa-clock"></i></span>
+                학습 시간
+              </span>
+            </div>
+            <div class="metric-body">
+              <div><span class="metric-value">${totalTime}</span><span class="metric-unit"> 분</span></div>
+            </div>
+            <div class="metric-sub">${totalTime > 60 ? Math.floor(totalTime/60)+'시간 '+totalTime%60+'분' : ''}</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-header">
+              <span class="metric-title">
+                <span class="metric-icon" style="background:var(--warning-light);color:var(--warning)"><i class="fas fa-folder"></i></span>
+                포트폴리오
+              </span>
+            </div>
+            <div class="metric-body">
+              <div><span class="metric-value">${pfCount}</span><span class="metric-unit"> 개</span></div>
+            </div>
+            <div class="metric-sub">성장 기록 포트폴리오</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-header">
+              <span class="metric-title">
+                <span class="metric-icon" style="background:var(--purple-light);color:var(--purple)"><i class="fas fa-check-circle"></i></span>
+                오답 해결률
+              </span>
+              ${resolveRate >= 70 ? '<span class="metric-badge up"><i class="fas fa-star"></i> 우수</span>' : ''}
+            </div>
+            <div class="metric-body">
+              <div><span class="metric-value">${resolveRate}</span><span class="metric-unit"> %</span></div>
+            </div>
+            <div class="metric-sub">${wa.resolved || 0} / ${wa.total || 0} 해결</div>
+          </div>
+        </div>
+
+        <div class="two-col">
+          <div class="section-card">
+            <div class="section-header">
+              <span class="section-title">
+                <span class="section-icon" style="background:var(--primary)"><i class="fas fa-chart-line"></i></span>
+                최근 7일 활동
+              </span>
+            </div>
+            ${s.recentActivity && s.recentActivity.length ?
+              '<div class="chart-container"><canvas id="actChart"></canvas></div>' :
+              '<div class="empty-state"><i class="fas fa-chart-area"></i><p>최근 활동이 없습니다.</p></div>'}
+          </div>
+          <div class="section-card">
+            <div class="section-header">
+              <span class="section-title">
+                <span class="section-icon" style="background:var(--purple)"><i class="fas fa-layer-group"></i></span>
+                활동 유형 분포
+              </span>
+            </div>
+            ${s.byType && s.byType.length ?
+              '<div class="chart-container"><canvas id="typeChart"></canvas></div>' :
+              '<div class="empty-state"><i class="fas fa-chart-pie"></i><p>활동 데이터가 없습니다.</p></div>'}
+          </div>
+        </div>
+
+        ${s.byType && s.byType.length ? `
+        <div class="section-card">
+          <div class="section-header">
+            <span class="section-title">
+              <span class="section-icon" style="background:var(--warning)"><i class="fas fa-list-ol"></i></span>
+              활동 유형별 상세
+            </span>
+          </div>
+          <table style="width:100%;border-collapse:collapse;font-size:13px;">
+            <thead><tr style="border-bottom:2px solid var(--gray-200);">
+              <th style="text-align:left;padding:10px 8px;">유형</th>
+              <th style="text-align:center;padding:10px 8px;">활동 수</th>
+              <th style="text-align:center;padding:10px 8px;">학습 시간</th>
+              <th style="text-align:left;padding:10px 8px;">비율</th>
+            </tr></thead>
+            <tbody>
+              ${s.byType.map((t, i) => {
+                const pct = totalAct ? Math.round(t.cnt / totalAct * 100) : 0;
+                const colors = ['#2563eb','#10b981','#f59e0b','#ef4444','#8b5cf6','#ec4899'];
+                return `<tr style="border-bottom:1px solid var(--gray-100);">
+                  <td style="padding:10px 8px;"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${colors[i%colors.length]};margin-right:6px;"></span>${escHtml(t.activity_type)}</td>
+                  <td style="text-align:center;padding:10px 8px;font-weight:600;">${t.cnt}</td>
+                  <td style="text-align:center;padding:10px 8px;">${Math.round((t.total_time||0)/60)}분</td>
+                  <td style="padding:10px 8px;">
+                    <div style="display:flex;align-items:center;gap:8px;">
+                      <div class="progress-bar-sm"><div class="fill" style="width:${pct}%;background:${colors[i%colors.length]}"></div></div>
+                      <span style="font-size:12px;font-weight:600;">${pct}%</span>
+                    </div>
+                  </td>
+                </tr>`;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>` : `
+        <div class="section-card">
+          <div class="empty-state"><i class="fas fa-seedling"></i><p>학습 활동이 기록되면 여기에 성장 통계가 표시됩니다.</p></div>
+        </div>`}
+      `;
+
+      if (s.recentActivity && s.recentActivity.length) {
+        new Chart(document.getElementById('actChart'), {
+          type: 'line',
+          data: {
+            labels: s.recentActivity.map(a => a.date.slice(5)),
+            datasets: [{ label: '활동 수', data: s.recentActivity.map(a => a.cnt), borderColor: '#2563eb', backgroundColor: 'rgba(37,99,235,.1)', fill: true, tension: .4, pointBackgroundColor: '#2563eb', pointRadius: 4 }]
+          },
+          options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } } }
+        });
+      }
+      if (s.byType && s.byType.length) {
+        const colors = ['#2563eb','#10b981','#f59e0b','#ef4444','#8b5cf6','#ec4899'];
+        new Chart(document.getElementById('typeChart'), {
+          type: 'doughnut',
+          data: {
+            labels: s.byType.map(t => t.activity_type),
+            datasets: [{ data: s.byType.map(t => t.cnt), backgroundColor: colors.slice(0, s.byType.length), borderWidth: 0 }]
+          },
+          options: { responsive: true, maintainAspectRatio: false, cutout: '65%', plugins: { legend: { position: 'bottom', labels: { font: { size: 11 }, padding: 12 } } } }
+        });
+      }
+    }
+
+    // ===== 포트폴리오 =====
+    let pfCategory = null;
+    async function renderPortfolio(c) {
+      const params = pfCategory ? '?category=' + pfCategory : '';
+      const res = await fetch('/api/growth/portfolios' + params).then(r => r.json());
+      const items = res.items || [];
+      const catColors = { general: '#6B7280', project: '#2563eb', research: '#10b981', creative: '#f97316' };
+      const catNames = { general: '일반', project: '프로젝트', research: '탐구', creative: '창작' };
+      const catGrads = { general: 'linear-gradient(135deg,#667eea,#764ba2)', project: 'linear-gradient(135deg,#4facfe,#00f2fe)', research: 'linear-gradient(135deg,#43e97b,#38f9d7)', creative: 'linear-gradient(135deg,#f093fb,#f5576c)' };
+      const catIcons = { general: 'fa-file-alt', project: 'fa-project-diagram', research: 'fa-flask', creative: 'fa-paint-brush' };
+
+      const allRes = await fetch('/api/growth/portfolios').then(r => r.json());
+      const allItems = allRes.items || [];
+      const countByCat = {};
+      allItems.forEach(p => { countByCat[p.category] = (countByCat[p.category] || 0) + 1; });
+
+      c.innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
+          <div class="section-title">
+            <span class="section-icon" style="background:var(--primary)"><i class="fas fa-folder-open"></i></span>
+            포트폴리오
+          </div>
+          <button class="btn btn-primary" onclick="openModal('pfModal')"><i class="fas fa-plus"></i> 새 포트폴리오</button>
+        </div>
+        <div class="metrics-grid" style="grid-template-columns:repeat(5,1fr);margin-bottom:20px;">
+          <div class="metric-card" style="cursor:pointer;${!pfCategory?'border:2px solid var(--primary)':''}" onclick="pfCategory=null;renderPage()">
+            <div style="text-align:center">
+              <div class="metric-value" style="font-size:22px">${allItems.length}</div>
+              <div class="metric-sub">전체</div>
+            </div>
+          </div>
+          ${Object.entries(catNames).map(([k,v]) => `
+            <div class="metric-card" style="cursor:pointer;${pfCategory===k?'border:2px solid '+catColors[k]:''}" onclick="pfCategory='${k}';renderPage()">
+              <div style="text-align:center">
+                <div class="metric-value" style="font-size:22px;color:${catColors[k]}">${countByCat[k]||0}</div>
+                <div class="metric-sub">${v}</div>
+              </div>
+            </div>
+          `).join('')}
+        </div>
+        <div class="portfolio-grid">
+          ${items.length ? items.map(p => `
+            <div class="portfolio-card" onclick="openPortfolioDetail(${p.id})">
+              <div class="portfolio-thumb" style="background:${catGrads[p.category] || catGrads.general}">
+                <i class="fas ${catIcons[p.category] || 'fa-file-alt'}"></i>
+              </div>
+              <div class="portfolio-body">
+                <h4>${escHtml(p.title)}</h4>
+                <div class="meta">
+                  <span style="color:${catColors[p.category] || '#6B7280'};font-weight:500">${catNames[p.category] || p.category}</span>
+                  · ${p.created_at ? p.created_at.slice(0,10) : ''}
+                  ${p.is_public ? ' · <i class="fas fa-globe" style="color:var(--secondary)"></i> 공개' : ''}
+                </div>
+                ${p.description ? `<div style="font-size:12px;color:var(--gray-400);margin-top:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escHtml(p.description)}</div>` : ''}
+              </div>
+            </div>
+          `).join('') : '<div class="empty-state" style="grid-column:1/-1"><i class="fas fa-folder-open"></i><p>포트폴리오를 만들어보세요!</p></div>'}
+        </div>
+      `;
+    }
+
+    async function openPortfolioDetail(id) {
+      detailPfId = id;
+      const res = await fetch(`/api/growth/portfolios/${id}`).then(r => r.json());
+      const p = res.portfolio;
+      if (!p) return;
+      const catNames = { general: '일반', project: '프로젝트', research: '탐구', creative: '창작' };
+      const catColors = { general: '#6B7280', project: '#2563eb', research: '#10b981', creative: '#f97316' };
+
+      document.getElementById('pfDetailBody').innerHTML = `
+        <h3><i class="fas fa-folder-open" style="color:var(--primary);margin-right:6px;"></i> ${escHtml(p.title)}</h3>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;">
+          <span style="padding:4px 12px;border-radius:12px;font-size:12px;font-weight:600;color:#fff;background:${catColors[p.category]||'#6B7280'}">${catNames[p.category]||p.category}</span>
+          ${p.is_public ? '<span style="padding:4px 12px;border-radius:12px;font-size:12px;font-weight:600;color:var(--secondary);background:var(--secondary-light)"><i class="fas fa-globe"></i> 공개</span>' : '<span style="padding:4px 12px;border-radius:12px;font-size:12px;font-weight:600;color:var(--gray-500);background:var(--gray-100)"><i class="fas fa-lock"></i> 비공개</span>'}
+        </div>
+        <div style="padding:16px;background:var(--gray-50);border-radius:var(--radius-md);margin-bottom:16px;">
+          ${p.description ? `<p style="font-size:14px;line-height:1.7;color:var(--gray-700);">${escHtml(p.description)}</p>` :
+            '<p style="font-size:13px;color:var(--gray-400);">설명이 없습니다.</p>'}
+        </div>
+        ${p.content ? `<div style="padding:16px;background:#fff;border:1px solid var(--gray-200);border-radius:var(--radius-md);margin-bottom:16px;">
+          <h4 style="font-size:14px;font-weight:600;margin-bottom:8px;"><i class="fas fa-file-alt" style="color:var(--primary);margin-right:4px;"></i> 내용</h4>
+          <div style="font-size:14px;line-height:1.7;color:var(--gray-700);">${escHtml(p.content)}</div>
+        </div>` : ''}
+        ${p.file_path ? `<div style="margin-bottom:16px;"><a href="${escHtml(p.file_path)}" target="_blank" class="btn btn-outline btn-sm"><i class="fas fa-download"></i> 첨부파일 열기</a></div>` : ''}
+        <div style="font-size:12px;color:var(--gray-400);display:flex;gap:12px;">
+          <span><i class="fas fa-user"></i> ${escHtml(p.student_name)}</span>
+          <span><i class="fas fa-calendar"></i> ${p.created_at ? p.created_at.slice(0,10) : ''}</span>
+        </div>
+      `;
+
+      document.getElementById('pfDeleteBtn').style.display = (p.student_id === currentUser?.id || currentUser?.role === 'admin') ? '' : 'none';
+      openModal('pfDetailModal');
+    }
+
+    async function deletePortfolio() {
+      if (!detailPfId || !confirm('이 포트폴리오를 삭제하시겠습니까?')) return;
+      await fetch(`/api/growth/portfolios/${detailPfId}`, { method: 'DELETE' });
+      closeModal('pfDetailModal');
+      showToast('포트폴리오가 삭제되었습니다', 'fa-trash');
+      renderPage();
+    }
+
+    // ===== 나도예술가 (갤러리) =====
+    let galleryCat = null;
+    async function renderGallery(c) {
+      const params = galleryCat ? '?category=' + galleryCat : '';
+      const res = await fetch('/api/growth/gallery' + params).then(r => r.json());
+      const items = res.items || [];
+      const catGrads = { art: 'linear-gradient(135deg,#f093fb,#f5576c)', music: 'linear-gradient(135deg,#667eea,#764ba2)', writing: 'linear-gradient(135deg,#a18cd1,#fbc2eb)', video: 'linear-gradient(135deg,#ff6b6b,#ee5a24)', other: 'linear-gradient(135deg,#4facfe,#00f2fe)' };
+      const catNames = { art: '미술', music: '음악', writing: '문학', video: '영상', other: '기타' };
+      const catIcons = { art: 'fa-paint-brush', music: 'fa-music', writing: 'fa-pen-fancy', video: 'fa-video', other: 'fa-star' };
+
+      c.innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
+          <div class="section-title">
+            <span class="section-icon" style="background:#f97316"><i class="fas fa-palette"></i></span>
+            나도예술가
+          </div>
+          <button class="btn btn-primary" onclick="openModal('artModal')"><i class="fas fa-plus"></i> 작품 등록</button>
+        </div>
+        <div class="filter-bar">
+          <button class="filter-chip ${!galleryCat ? 'active' : ''}" onclick="galleryCat=null;renderPage()">전체</button>
+          ${Object.entries(catNames).map(([k,v]) => `<button class="filter-chip ${galleryCat===k?'active':''}" onclick="galleryCat='${k}';renderPage()"><i class="fas ${catIcons[k]}"></i> ${v}</button>`).join('')}
+        </div>
+        <div class="gallery-grid">
+          ${items.length ? items.map(g => `
+            <div class="gallery-card">
+              <div class="gallery-thumb" style="background:${catGrads[g.category] || catGrads.other}">
+                <i class="fas ${catIcons[g.category] || 'fa-image'}"></i>
+              </div>
+              <div class="gallery-body">
+                <h4>${escHtml(g.title)}</h4>
+                ${g.description ? `<div style="font-size:11px;color:var(--gray-400);margin-bottom:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escHtml(g.description)}</div>` : ''}
+                <div class="meta">
+                  <span>${escHtml(g.student_name)}</span>
+                  <span style="cursor:pointer" onclick="likeArt(${g.id})"><i class="fas fa-heart" style="color:var(--danger)"></i> ${g.like_count}</span>
+                </div>
+              </div>
+            </div>
+          `).join('') : '<div class="empty-state" style="grid-column:1/-1"><i class="fas fa-palette"></i><p>등록된 작품이 없습니다.</p></div>'}
+        </div>
+      `;
+    }
+
+    async function likeArt(id) {
+      await fetch(`/api/growth/gallery/${id}/like`, { method: 'POST' });
+      showToast('좋아요를 눌렀습니다!', 'fa-heart');
+      renderPage();
+    }
+
+    // ===== 학급 현황 (교사 전용) =====
+    async function renderClassDashboard(c) {
+      const classRes = await fetch('/api/class/my').then(r => r.json());
+      const classes = (classRes.classes || []).filter(cl => cl.my_role === 'owner' || cl.my_role === 'teacher');
+      if (!classes.length) {
+        c.innerHTML = '<div class="section-card"><div class="empty-state"><i class="fas fa-chalkboard"></i><p>담당 클래스가 없습니다.</p></div></div>';
+        return;
+      }
+      if (!selectedClassId) selectedClassId = classes[0].id;
+
+      const overviewRes = await fetch(`/api/growth/class/${selectedClassId}`).then(r => r.json());
+      const students = overviewRes.overview || [];
+      const totalStudents = students.length;
+      const totalActivities = students.reduce((s, st) => s + st.activityCount, 0);
+      const totalTime = students.reduce((s, st) => s + st.totalTimeMinutes, 0);
+      const totalPortfolios = students.reduce((s, st) => s + st.portfolioCount, 0);
+      const avgActivities = totalStudents ? Math.round(totalActivities / totalStudents) : 0;
+      const lowActivity = students.filter(st => st.activityCount < avgActivities * 0.5 && avgActivities > 0);
+      const currentClass = classes.find(cl => cl.id === selectedClassId);
+
+      c.innerHTML = `
+        <div class="class-header">
+          <div class="class-info">
+            <div class="class-icon"><i class="fas fa-users"></i></div>
+            <div class="class-details">
+              <h2>${escHtml(currentClass?.name || '학급')}</h2>
+              <div class="class-meta">
+                <span><i class="fas fa-user-friends"></i> ${totalStudents}명</span>
+                <span><i class="fas fa-chart-bar"></i> 활동 ${totalActivities}건</span>
+                <span><i class="fas fa-clock"></i> ${totalTime}분</span>
+              </div>
+            </div>
+          </div>
+          <div class="class-selector">
+            <select onchange="selectedClassId=parseInt(this.value);renderPage()">
+              ${classes.map(cl => `<option value="${cl.id}" ${selectedClassId===cl.id?'selected':''}>${escHtml(cl.name)}</option>`).join('')}
+            </select>
+          </div>
+        </div>
+
+        <div class="metrics-grid">
+          <div class="metric-card">
+            <div class="metric-header">
+              <span class="metric-title"><span class="metric-icon" style="background:var(--primary-light);color:var(--primary)"><i class="fas fa-users"></i></span> 학생 수</span>
+            </div>
+            <div><span class="metric-value">${totalStudents}</span><span class="metric-unit"> 명</span></div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-header">
+              <span class="metric-title"><span class="metric-icon" style="background:var(--secondary-light);color:var(--secondary)"><i class="fas fa-chart-bar"></i></span> 총 활동</span>
+            </div>
+            <div><span class="metric-value">${totalActivities}</span><span class="metric-unit"> 건</span></div>
+            <div class="metric-sub">평균 ${avgActivities}건/학생</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-header">
+              <span class="metric-title"><span class="metric-icon" style="background:var(--warning-light);color:var(--warning)"><i class="fas fa-clock"></i></span> 총 시간</span>
+            </div>
+            <div><span class="metric-value">${totalTime}</span><span class="metric-unit"> 분</span></div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-header">
+              <span class="metric-title"><span class="metric-icon" style="background:var(--purple-light);color:var(--purple)"><i class="fas fa-folder"></i></span> 포트폴리오</span>
+            </div>
+            <div><span class="metric-value">${totalPortfolios}</span><span class="metric-unit"> 개</span></div>
+          </div>
+        </div>
+
+        ${lowActivity.length ? `
+        <div class="section-card">
+          <div class="section-header">
+            <span class="section-title">
+              <span class="section-icon" style="background:var(--warning)"><i class="fas fa-exclamation-triangle"></i></span>
+              관심 필요 학생
+            </span>
+          </div>
+          ${lowActivity.map(st => `
+            <div class="alert-card warning">
+              <div class="alert-icon" style="background:var(--warning)"><i class="fas fa-user"></i></div>
+              <div style="flex:1">
+                <div style="font-size:14px;font-weight:600;">${escHtml(st.display_name)}</div>
+                <div style="font-size:12px;color:var(--gray-500);">활동 ${st.activityCount}건 · 학습 시간 ${st.totalTimeMinutes}분 (평균 ${avgActivities}건 대비 부족)</div>
+              </div>
+            </div>
+          `).join('')}
+        </div>` : ''}
+
+        <!-- 학생 카드 그리드 -->
+        <div class="section-card">
+          <div class="section-header">
+            <span class="section-title">
+              <span class="section-icon" style="background:var(--primary)"><i class="fas fa-th-large"></i></span>
+              학생별 현황
+            </span>
+          </div>
+          ${students.length ? `<div class="student-grid">
+            ${students.map(st => {
+              const avatarColors = ['#2563eb','#10b981','#f59e0b','#8b5cf6','#ec4899','#ef4444'];
+              const colorIdx = st.display_name.charCodeAt(0) % avatarColors.length;
+              return `<div class="student-card">
+                <div class="s-info">
+                  <div class="student-avatar" style="background:${avatarColors[colorIdx]};color:#fff">${escHtml(st.display_name.charAt(0))}</div>
+                  <span class="s-name">${escHtml(st.display_name)}</span>
+                </div>
+                <div class="s-stats">
+                  <div class="s-stat"><div class="s-stat-val" style="color:var(--primary)">${st.activityCount}</div><div class="s-stat-lbl">활동</div></div>
+                  <div class="s-stat"><div class="s-stat-val" style="color:var(--secondary)">${st.totalTimeMinutes}m</div><div class="s-stat-lbl">시간</div></div>
+                  <div class="s-stat"><div class="s-stat-val" style="color:var(--purple)">${st.portfolioCount}</div><div class="s-stat-lbl">포폴</div></div>
+                </div>
+              </div>`;
+            }).join('')}
+          </div>` : '<div class="empty-state"><p>학생이 없습니다.</p></div>'}
+        </div>
+
+        <div class="two-col">
+          <div class="section-card">
+            <div class="section-header">
+              <span class="section-title">
+                <span class="section-icon" style="background:var(--primary)"><i class="fas fa-chart-bar"></i></span>
+                학생별 활동 현황
+              </span>
+            </div>
+            <div class="chart-container" style="height:${Math.max(200, totalStudents * 30)}px"><canvas id="studentBarChart"></canvas></div>
+          </div>
+          <div class="section-card">
+            <div class="section-header">
+              <span class="section-title">
+                <span class="section-icon" style="background:var(--secondary)"><i class="fas fa-clock"></i></span>
+                학생별 학습 시간
+              </span>
+            </div>
+            <div class="chart-container" style="height:${Math.max(200, totalStudents * 30)}px"><canvas id="studentTimeChart"></canvas></div>
+          </div>
+        </div>
+      `;
+
+      if (students.length) {
+        const names = students.map(s => s.display_name);
+        new Chart(document.getElementById('studentBarChart'), {
+          type: 'bar',
+          data: {
+            labels: names,
+            datasets: [{ label: '활동 수', data: students.map(s => s.activityCount), backgroundColor: '#3b82f6', borderRadius: 4 }]
+          },
+          options: { responsive: true, maintainAspectRatio: false, indexAxis: 'y', plugins: { legend: { display: false } }, scales: { x: { beginAtZero: true } } }
+        });
+        new Chart(document.getElementById('studentTimeChart'), {
+          type: 'bar',
+          data: {
+            labels: names,
+            datasets: [{ label: '학습 시간(분)', data: students.map(s => s.totalTimeMinutes), backgroundColor: '#10b981', borderRadius: 4 }]
+          },
+          options: { responsive: true, maintainAspectRatio: false, indexAxis: 'y', plugins: { legend: { display: false } }, scales: { x: { beginAtZero: true } } }
+        });
+      }
+    }
+
+    function openModal(id) { document.getElementById(id).classList.add('active'); }
+    function closeModal(id) { document.getElementById(id).classList.remove('active'); }
+
+    async function submitPortfolio() {
+      const title = document.getElementById('pfTitle').value.trim();
+      if (!title) { showToast('제목을 입력하세요.', 'fa-exclamation-circle'); return; }
+      const res = await fetch('/api/growth/portfolios', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title, description: document.getElementById('pfDesc').value.trim() || null,
+          category: document.getElementById('pfCat').value,
+          is_public: document.getElementById('pfPublic').checked
+        })
+      }).then(r => r.json());
+      if (res.success) {
+        closeModal('pfModal');
+        document.getElementById('pfTitle').value = '';
+        document.getElementById('pfDesc').value = '';
+        showToast('포트폴리오가 등록되었습니다!');
+        renderPage();
+      } else showToast(res.message || '오류가 발생했습니다', 'fa-exclamation-circle');
+    }
+
+    async function submitArt() {
+      const title = document.getElementById('artTitle').value.trim();
+      if (!title) { showToast('제목을 입력하세요.', 'fa-exclamation-circle'); return; }
+      const res = await fetch('/api/growth/gallery', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title, description: document.getElementById('artDesc').value.trim() || null,
+          category: document.getElementById('artCat').value
+        })
+      }).then(r => r.json());
+      if (res.success) {
+        closeModal('artModal');
+        document.getElementById('artTitle').value = '';
+        document.getElementById('artDesc').value = '';
+        showToast('작품이 등록되었습니다!');
+        renderPage();
+      } else showToast(res.message || '오류가 발생했습니다', 'fa-exclamation-circle');
+    }
+
+    window.addEventListener('dacheim:user-loaded', (e) => {
+      currentUser = e.detail;
+      document.getElementById('mainContent').style.display = 'flex';
+      if (currentUser.role === 'teacher' || currentUser.role === 'admin') {
+        document.querySelectorAll('.teacher-only').forEach(el => el.style.display = '');
+      }
+      renderPage();
+    });
+  </script>
+</body>
+</html>

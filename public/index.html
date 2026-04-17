@@ -1,0 +1,1552 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>다채움 - 포털</title>
+  <link rel="stylesheet" href="/css/common-nav.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <style>
+    :root {
+      --primary: #4A7CFF;
+      --primary-light: #6B94FF;
+      --primary-dark: #3A5FCC;
+      --secondary: #10B981;
+      --accent: #F59E0B;
+      --danger: #EF4444;
+      --purple: #8B5CF6;
+      --pink: #EC4899;
+      --gray-50: #F9FAFB;
+      --gray-100: #F3F4F6;
+      --gray-200: #E5E7EB;
+      --gray-300: #D1D5DB;
+      --gray-400: #9CA3AF;
+      --gray-500: #6B7280;
+      --gray-600: #4B5563;
+      --gray-700: #374151;
+      --gray-800: #1F2937;
+      --gray-900: #111827;
+      --shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
+      --shadow: 0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -1px rgba(0,0,0,0.06);
+      --shadow-md: 0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px -2px rgba(0,0,0,0.05);
+      --shadow-lg: 0 20px 25px -5px rgba(0,0,0,0.1), 0 10px 10px -5px rgba(0,0,0,0.04);
+      --radius: 12px;
+      --radius-lg: 16px;
+      --radius-xl: 24px;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Pretendard', 'Noto Sans KR', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+      background: linear-gradient(135deg, #F0F4FF 0%, #FAFBFF 100%);
+      min-height: 100vh;
+      color: var(--gray-800);
+      line-height: 1.6;
+    }
+
+    .main-container {
+      max-width: 1800px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+
+    /* ===== 배너 슬라이더 ===== */
+    .banner-section {
+      margin-bottom: 24px;
+      border-radius: var(--radius-lg);
+      overflow: hidden;
+      box-shadow: var(--shadow-lg);
+      position: relative;
+    }
+    .banner-slider { position: relative; height: 260px; overflow: hidden; }
+    .banner-slide {
+      position: absolute; inset: 0;
+      display: flex; align-items: center;
+      padding: 0 48px; color: white; overflow: hidden;
+      opacity: 0; transition: opacity 0.8s ease; pointer-events: none;
+    }
+    .banner-slide.active { opacity: 1; pointer-events: auto; }
+    .banner-slide[data-role="teacher"] { background: linear-gradient(135deg, #4A7CFF 0%, #7C5CFC 50%, #A855F7 100%); }
+    .banner-slide[data-role="student"] { background: linear-gradient(135deg, #10B981 0%, #06B6D4 50%, #3B82F6 100%); }
+    .banner-slide[data-role="parent"] { background: linear-gradient(135deg, #F59E0B 0%, #EC4899 50%, #A855F7 100%); }
+
+    .banner-bg-shapes { position: absolute; inset: 0; pointer-events: none; }
+    .shape { position: absolute; border-radius: 50%; background: rgba(255,255,255,0.08); }
+    .shape-1 { width: 220px; height: 220px; top: -70px; right: -50px; animation: float 4s ease-in-out infinite alternate; }
+    .shape-2 { width: 160px; height: 160px; bottom: -40px; left: 8%; background: rgba(255,255,255,0.06); animation: drift 5s ease-in-out infinite alternate; animation-delay: 1s; }
+    .shape-3 { width: 100px; height: 100px; top: 30%; left: 45%; background: rgba(255,255,255,0.05); border-radius: 30%; animation: float 6s ease-in-out infinite alternate; animation-delay: 2s; }
+
+    @keyframes float { 0% { transform: translateY(0) rotate(0deg); } 100% { transform: translateY(-20px) rotate(10deg); } }
+    @keyframes drift { 0% { transform: translateX(0) scale(1); } 100% { transform: translateX(30px) scale(1.05); } }
+    @keyframes fadeInUp { 0% { opacity: 0; transform: translateY(20px); } 100% { opacity: 1; transform: translateY(0); } }
+    @keyframes bounce { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-15px); } }
+
+    .banner-illust {
+      position: absolute; right: 48px; top: 50%; transform: translateY(-50%);
+      font-size: 5rem; opacity: 0.25; animation: bounce 3s ease-in-out infinite;
+      z-index: 0; filter: drop-shadow(0 4px 12px rgba(0,0,0,0.15));
+    }
+    .banner-content { position: relative; z-index: 1; max-width: 60%; }
+    .banner-badge {
+      display: inline-block; background: rgba(255,255,255,0.2); backdrop-filter: blur(4px);
+      padding: 6px 16px; border-radius: 20px; font-size: 0.9rem; font-weight: 600; margin-bottom: 12px;
+    }
+    .banner-title { font-size: 2.2rem; font-weight: 700; margin-bottom: 12px; line-height: 1.3; text-shadow: 0 2px 12px rgba(0,0,0,0.2); }
+    .banner-desc { font-size: 1.05rem; opacity: 0.9; }
+    .banner-slide.active .banner-badge { animation: fadeInUp 0.6s ease both; }
+    .banner-slide.active .banner-title { animation: fadeInUp 0.6s ease 0.15s both; }
+    .banner-slide.active .banner-desc { animation: fadeInUp 0.6s ease 0.3s both; }
+
+    .banner-dots {
+      position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%);
+      display: flex; gap: 8px; z-index: 2;
+    }
+    .dot {
+      width: 10px; height: 10px; border-radius: 50%; background: rgba(255,255,255,0.4);
+      cursor: pointer; transition: all 0.3s;
+    }
+    .dot.active { background: white; transform: scale(1.3); box-shadow: 0 0 8px rgba(255,255,255,0.5); }
+    .dot:hover { background: rgba(255,255,255,0.7); }
+
+    /* ===== 퀵메뉴 + 대시보드 ===== */
+    .top-section {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 24px;
+    }
+    @media (max-width: 1024px) { .top-section { grid-template-columns: 1fr; } }
+
+    .quick-menu-card {
+      background: white; border-radius: var(--radius-lg); padding: 16px; box-shadow: var(--shadow);
+    }
+    .quick-menu-header {
+      display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;
+    }
+    .quick-menu-title {
+      display: flex; align-items: center; gap: 8px; font-size: 1rem; font-weight: 700; color: var(--gray-800);
+    }
+    .quick-menu-edit {
+      display: flex; align-items: center; gap: 4px; padding: 4px 10px;
+      background: var(--gray-100); border: none; border-radius: 6px; cursor: pointer;
+      font-size: 0.8rem; font-weight: 500; color: var(--gray-600); transition: all 0.2s; font-family: inherit;
+    }
+    .quick-menu-edit:hover { background: var(--gray-200); color: var(--gray-800); }
+
+    .quick-menu-grid { display: grid; gap: 8px; }
+    .quick-menu-grid.cols-2 { grid-template-columns: repeat(2, 1fr); }
+    .quick-menu-grid.cols-3 { grid-template-columns: repeat(3, 1fr); }
+    .quick-menu-grid.cols-4 { grid-template-columns: repeat(4, 1fr); }
+    .quick-menu-grid.cols-5 { grid-template-columns: repeat(5, 1fr); }
+
+    .quick-menu-item {
+      display: flex; flex-direction: column; align-items: center; gap: 8px;
+      padding: 16px 12px; background: var(--gray-50); border-radius: var(--radius);
+      cursor: pointer; transition: all 0.2s; text-decoration: none; color: var(--gray-700);
+      border: 1px solid transparent;
+    }
+    .quick-menu-item:hover {
+      transform: translateY(-3px); box-shadow: var(--shadow-md);
+      border-color: var(--primary); background: white;
+    }
+    .quick-menu-icon {
+      width: 52px; height: 52px; border-radius: 14px;
+      display: flex; align-items: center; justify-content: center; font-size: 1.6rem;
+    }
+    .quick-menu-label { font-size: 0.85rem; font-weight: 600; text-align: center; }
+
+    /* 개인 대시보드 */
+    .personal-dashboard {
+      background: white; border-radius: var(--radius-lg); padding: 20px;
+      box-shadow: var(--shadow); border-left: 4px solid var(--primary);
+      display: flex; flex-direction: column;
+    }
+    .dashboard-header {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 16px; padding-bottom: 16px; border-bottom: 1px solid var(--gray-200);
+    }
+    .dashboard-title { display: flex; align-items: center; gap: 14px; }
+    .dashboard-avatar {
+      width: 56px; height: 56px; border-radius: 50%;
+      background: linear-gradient(135deg, var(--primary) 0%, var(--purple) 100%);
+      display: flex; align-items: center; justify-content: center;
+      color: white; font-size: 1.5rem; font-weight: 700;
+      box-shadow: 0 4px 14px rgba(74, 124, 255, 0.3);
+    }
+    .dashboard-greeting h2 { font-size: 1.2rem; font-weight: 700; color: var(--gray-900); }
+    .dashboard-greeting p { font-size: 0.85rem; color: var(--gray-500); }
+
+    .user-type-badge {
+      display: inline-flex; align-items: center; gap: 4px;
+      padding: 5px 12px; border-radius: 20px; font-size: 0.75rem; font-weight: 600;
+    }
+    .user-type-badge.teacher { background: #EEF2FF; color: #4F46E5; }
+    .user-type-badge.student { background: #ECFDF5; color: #059669; }
+    .user-type-badge.parent { background: #FEF3C7; color: #D97706; }
+    .user-type-badge.staff { background: #FCE7F3; color: #DB2777; }
+    .user-type-badge.admin { background: #FEE2E2; color: #DC2626; }
+
+    .stats-grid {
+      display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; flex: 1;
+    }
+    .stat-card {
+      border-radius: var(--radius); padding: 14px;
+      display: flex; align-items: center; gap: 12px;
+      transition: all 0.2s; cursor: pointer;
+    }
+    .stat-card:nth-child(1) { background: linear-gradient(135deg, #EFF6FF, #DBEAFE); }
+    .stat-card:nth-child(2) { background: linear-gradient(135deg, #ECFDF5, #D1FAE5); }
+    .stat-card:nth-child(3) { background: linear-gradient(135deg, #FFFBEB, #FEF3C7); }
+    .stat-card:nth-child(4) { background: linear-gradient(135deg, #F5F3FF, #EDE9FE); }
+    .stat-card { cursor: pointer; }
+    .stat-card:hover { transform: translateY(-2px); box-shadow: var(--shadow); }
+    .stat-icon {
+      width: 42px; height: 42px; border-radius: 10px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1.3rem; background: white; box-shadow: var(--shadow-sm);
+    }
+    .stat-label { font-size: 0.75rem; color: var(--gray-500); }
+    .stat-value { font-size: 1.1rem; font-weight: 700; color: var(--gray-900); }
+
+    /* ===== 카드 공통 ===== */
+    .card {
+      background: white; border-radius: var(--radius-lg); padding: 24px; box-shadow: var(--shadow);
+    }
+    .card-header {
+      display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px;
+    }
+    .card-title {
+      display: flex; align-items: center; gap: 8px;
+      font-size: 1.05rem; font-weight: 700; color: var(--gray-800);
+    }
+    .card-more {
+      display: flex; align-items: center; gap: 4px;
+      color: var(--gray-500); text-decoration: none; font-size: 0.85rem; font-weight: 500;
+    }
+    .card-more:hover { color: var(--primary); }
+
+    /* ===== 컨텐츠 그리드 ===== */
+    .content-grid {
+      display: grid; grid-template-columns: 2fr 1fr; gap: 24px; margin-bottom: 24px; align-items: start;
+    }
+    @media (max-width: 1024px) { .content-grid { grid-template-columns: 1fr; } }
+
+    .two-column-grid {
+      display: grid; grid-template-columns: repeat(2, 1fr); gap: 24px; margin-bottom: 24px; align-items: start;
+    }
+    @media (max-width: 768px) { .two-column-grid { grid-template-columns: 1fr; } }
+
+    /* 인기 클래스 */
+    .popular-class-list { display: flex; flex-direction: column; gap: 14px; }
+    .class-item {
+      display: flex; align-items: center; gap: 14px; padding: 14px;
+      background: var(--gray-50); border-radius: var(--radius);
+      cursor: pointer; transition: all 0.2s; border: 1px solid transparent;
+    }
+    .class-item:hover { background: white; border-color: var(--gray-300); transform: translateX(4px); }
+    .class-rank {
+      width: 34px; height: 34px; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 0.9rem; font-weight: 700; flex-shrink: 0;
+    }
+    .class-rank.gold { background: linear-gradient(135deg, #FCD34D, #F59E0B); color: white; }
+    .class-rank.silver { background: linear-gradient(135deg, #D1D5DB, #9CA3AF); color: white; }
+    .class-rank.bronze { background: linear-gradient(135deg, #FBBF24, #D97706); color: white; }
+    .class-thumb {
+      width: 52px; height: 52px; border-radius: 14px;
+      display: flex; align-items: center; justify-content: center; font-size: 1.4rem; flex-shrink: 0;
+    }
+    .class-info { flex: 1; min-width: 0; }
+    .class-name { font-size: 0.9rem; font-weight: 600; color: var(--gray-800); margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .class-meta { font-size: 0.78rem; color: var(--gray-500); }
+    .class-stats { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
+    .class-members { font-size: 0.85rem; font-weight: 700; color: var(--primary); background: rgba(74, 124, 255, 0.1); padding: 2px 8px; border-radius: 10px; }
+    .class-activity { font-size: 0.72rem; color: var(--gray-500); }
+
+    /* 인기 콘텐츠 */
+    .content-grid-items { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }
+    @media (max-width: 640px) { .content-grid-items { grid-template-columns: 1fr; } }
+    .content-item {
+      display: flex; gap: 14px; padding: 14px;
+      background: var(--gray-50); border-radius: var(--radius);
+      cursor: pointer; transition: all 0.2s; border: 1px solid transparent;
+    }
+    .content-item { cursor: pointer; }
+    .content-item:hover { background: white; border-color: var(--gray-300); transform: translateY(-2px); box-shadow: var(--shadow-sm); }
+    .content-thumb {
+      width: 52px; height: 52px; border-radius: 14px;
+      display: flex; align-items: center; justify-content: center;
+      color: white; font-size: 1.4rem; flex-shrink: 0;
+    }
+    .content-info { flex: 1; min-width: 0; }
+    .content-name { font-size: 0.9rem; font-weight: 600; color: var(--gray-800); margin-bottom: 5px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+    .content-meta { font-size: 0.78rem; color: var(--gray-500); display: flex; align-items: center; gap: 8px; }
+
+    /* 공지사항 */
+    .notice-list { display: flex; flex-direction: column; gap: 10px; }
+    .notice-item {
+      display: flex; align-items: center; gap: 12px; padding: 14px;
+      background: var(--gray-50); border-radius: 10px; cursor: pointer; transition: all 0.2s;
+    }
+    .notice-item:hover { background: var(--gray-100); transform: translateX(4px); }
+    .notice-badge { padding: 4px 10px; border-radius: 6px; font-size: 0.78rem; font-weight: 600; flex-shrink: 0; }
+    .notice-badge.important { background: #FEE2E2; color: #DC2626; }
+    .notice-badge.event { background: #DBEAFE; color: #2563EB; }
+    .notice-badge.normal { background: var(--gray-200); color: var(--gray-600); }
+    .notice-text { flex: 1; font-size: 0.88rem; color: var(--gray-700); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .notice-date { font-size: 0.72rem; color: var(--gray-400); flex-shrink: 0; }
+
+    /* 오늘의 일정 */
+    .schedule-section { margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--gray-200); }
+    .schedule-header { font-size: 0.88rem; font-weight: 700; color: var(--gray-700); margin-bottom: 10px; }
+    .schedule-item {
+      display: flex; align-items: center; gap: 10px; padding: 8px 12px;
+      border-radius: 8px; margin-bottom: 6px; background: linear-gradient(135deg, #F0F4FF, #FAFBFF); font-size: 0.85rem;
+    }
+    .schedule-icon { font-size: 1rem; flex-shrink: 0; }
+    .schedule-time { font-weight: 700; color: var(--primary); min-width: 42px; flex-shrink: 0; }
+    .schedule-title { color: var(--gray-700); }
+
+    /* 독서 현황 */
+    .reading-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 14px; }
+    .reading-stat { text-align: center; padding: 14px 12px; border-radius: var(--radius); }
+    .reading-stat:nth-child(1) { background: linear-gradient(135deg, #EFF6FF, #DBEAFE); }
+    .reading-stat:nth-child(2) { background: linear-gradient(135deg, #ECFDF5, #D1FAE5); }
+    .reading-stat:nth-child(3) { background: linear-gradient(135deg, #FFF7ED, #FFEDD5); }
+    .reading-stat-value { font-size: 1.5rem; font-weight: 700; color: var(--primary); }
+    .reading-stat-label { font-size: 0.78rem; color: var(--gray-500); margin-top: 4px; }
+
+    .book-list { display: flex; flex-direction: column; gap: 10px; }
+    .book-item {
+      display: flex; align-items: center; gap: 12px; padding: 12px;
+      background: var(--gray-50); border-radius: 10px; cursor: pointer; transition: all 0.2s;
+    }
+    .book-item:hover { background: var(--gray-100); transform: translateX(4px); }
+    .book-cover {
+      width: 40px; height: 56px; border-radius: 6px;
+      display: flex; align-items: center; justify-content: center;
+      color: white; font-size: 1rem; flex-shrink: 0;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+    }
+    .book-info { flex: 1; }
+    .book-title { font-size: 0.88rem; font-weight: 600; color: var(--gray-800); }
+    .book-author { font-size: 0.72rem; color: var(--gray-500); }
+
+    /* 체인지 활동 */
+    .change-stats { display: flex; gap: 14px; margin-bottom: 14px; }
+    .change-stat {
+      flex: 1; text-align: center; padding: 14px;
+      background: linear-gradient(135deg, #ECFDF5, #D1FAE5); border-radius: var(--radius);
+    }
+    .change-stat-icon { font-size: 1.4rem; margin-bottom: 4px; }
+    .change-stat-value { font-size: 1.2rem; font-weight: 700; color: #059669; }
+    .change-stat-label { font-size: 0.72rem; color: #047857; }
+    .change-course-list { display: flex; flex-direction: column; gap: 10px; }
+    .change-course {
+      display: flex; align-items: center; gap: 14px; padding: 14px;
+      background: var(--gray-50); border-radius: 10px; transition: all 0.2s;
+    }
+    .change-course:hover { background: var(--gray-100); transform: translateX(4px); }
+    .change-course-icon {
+      width: 42px; height: 42px; border-radius: 50%;
+      background: linear-gradient(135deg, #10B981, #059669);
+      display: flex; align-items: center; justify-content: center; color: white; font-size: 1.1rem;
+    }
+    .change-course-info { flex: 1; }
+    .change-course-name { font-size: 0.88rem; font-weight: 600; color: var(--gray-800); }
+    .change-course-meta { font-size: 0.72rem; color: var(--gray-500); }
+
+    /* 전체 서비스 */
+    .all-services-section {
+      background: white; border-radius: var(--radius-lg); padding: 24px; box-shadow: var(--shadow);
+    }
+    .all-services-header {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid var(--gray-200);
+    }
+    .all-services-title { font-size: 1rem; font-weight: 700; color: var(--gray-800); }
+    .collapse-toggle {
+      display: flex; align-items: center; gap: 6px; padding: 6px 12px;
+      background: var(--gray-100); border: none; border-radius: 6px;
+      cursor: pointer; font-size: 0.8rem; font-weight: 500; color: var(--gray-600); font-family: inherit;
+    }
+    .collapse-toggle:hover { background: var(--gray-200); }
+    .all-services-grid {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 14px;
+    }
+    .all-service-item {
+      display: flex; align-items: center; gap: 12px; padding: 14px;
+      background: var(--gray-50); border-radius: 10px; cursor: pointer;
+      transition: all 0.2s; border: 1px solid transparent; text-decoration: none; color: inherit;
+    }
+    .all-service-item:hover { background: white; border-color: var(--gray-300); transform: translateY(-2px); box-shadow: var(--shadow-sm); }
+    .all-service-item.recommended { background: #FFFBEB; border-color: #FDE68A; }
+    .all-service-icon {
+      width: 42px; height: 42px; border-radius: 12px;
+      display: flex; align-items: center; justify-content: center; font-size: 1.15rem; color: white;
+    }
+    .all-service-name { font-size: 0.9rem; font-weight: 600; color: var(--gray-800); }
+
+    /* 모달 */
+    .modal-overlay {
+      position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center;
+      z-index: 1000; opacity: 0; visibility: hidden; transition: all 0.3s;
+    }
+    .modal-overlay.active { opacity: 1; visibility: visible; }
+    .modal-content {
+      background: white; border-radius: var(--radius-lg);
+      width: 80vw; max-width: 720px; max-height: 85vh; overflow: hidden;
+      transform: translateY(20px); transition: all 0.3s;
+    }
+    .modal-overlay.active .modal-content { transform: translateY(0); }
+    .modal-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 20px; border-bottom: 1px solid var(--gray-200);
+    }
+    .modal-title { display: flex; align-items: center; gap: 10px; font-size: 1.1rem; font-weight: 700; color: var(--gray-900); }
+    .modal-close {
+      width: 36px; height: 36px; border: none; background: var(--gray-100); border-radius: 50%;
+      cursor: pointer; display: flex; align-items: center; justify-content: center;
+      font-size: 1.2rem; color: var(--gray-600); transition: all 0.2s;
+    }
+    .modal-close:hover { background: var(--gray-200); }
+    .modal-body { padding: 16px 20px; max-height: 60vh; overflow-y: auto; }
+    .modal-list { display: flex; flex-direction: column; gap: 8px; }
+    .modal-item {
+      display: flex; align-items: center; gap: 14px; padding: 14px;
+      background: var(--gray-50); border-radius: var(--radius);
+      cursor: pointer; transition: all 0.2s; text-decoration: none; color: inherit;
+    }
+    .modal-item:hover { background: var(--primary); color: white; transform: translateX(4px); }
+    .modal-item:hover .modal-item-meta { color: rgba(255,255,255,0.8); }
+    .modal-item-icon {
+      width: 42px; height: 42px; border-radius: 10px;
+      display: flex; align-items: center; justify-content: center; font-size: 1.15rem; flex-shrink: 0;
+    }
+    .modal-item-info { flex: 1; min-width: 0; }
+    .modal-item-name { font-weight: 600; font-size: 0.9rem; margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .modal-item-meta { font-size: 0.78rem; color: var(--gray-500); }
+    .modal-item-badge { padding: 3px 10px; border-radius: 20px; font-size: 0.72rem; font-weight: 600; white-space: nowrap; }
+    .modal-item-badge.member { background: #DBEAFE; color: #1D4ED8; }
+    .modal-item-badge.join { background: #10B981; color: white; }
+    .modal-item-badge.graded { background: #D1FAE5; color: #059669; }
+    .modal-item-badge.pending { background: #FEF3C7; color: #D97706; }
+    /* 콘텐츠 상세 모달 확장 */
+    .content-detail-section { padding: 16px 0; }
+    .content-detail-section + .content-detail-section { border-top: 1px solid var(--gray-200); }
+    .content-detail-title { font-size: 1.1rem; font-weight: 700; color: var(--gray-900); margin-bottom: 6px; }
+    .content-detail-desc { font-size: 0.88rem; color: var(--gray-600); line-height: 1.6; margin-bottom: 12px; }
+    .content-detail-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+    .content-detail-tag { padding: 3px 10px; background: var(--gray-100); border-radius: 12px; font-size: 0.75rem; color: var(--gray-600); }
+    .content-detail-meta-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 12px 0; }
+    .content-detail-meta-item { text-align: center; padding: 10px; background: var(--gray-50); border-radius: 10px; }
+    .content-detail-meta-item .val { font-size: 1.1rem; font-weight: 700; color: var(--primary); }
+    .content-detail-meta-item .lbl { font-size: 0.72rem; color: var(--gray-500); margin-top: 2px; }
+    .content-detail-actions { display: flex; gap: 8px; margin-top: 16px; }
+    .content-detail-actions .btn { flex: 1; padding: 10px; border: none; border-radius: 10px; font-size: 0.88rem; font-weight: 600; cursor: pointer; transition: all 0.2s; }
+    .content-detail-actions .btn-primary { background: var(--primary); color: white; }
+    .content-detail-actions .btn-primary:hover { background: #1D4ED8; }
+    .content-detail-actions .btn-secondary { background: var(--gray-100); color: var(--gray-700); }
+    .content-detail-actions .btn-secondary:hover { background: var(--gray-200); }
+    /* 클래스 소개 모달 */
+    .class-detail-header { text-align: center; padding: 20px 0; }
+    .class-detail-avatar { width: 60px; height: 60px; border-radius: 16px; margin: 0 auto 12px; display: flex; align-items: center; justify-content: center; font-size: 1.8rem; }
+    .class-detail-name { font-size: 1.2rem; font-weight: 700; color: var(--gray-900); }
+    .class-detail-teacher { font-size: 0.85rem; color: var(--gray-500); margin-top: 4px; }
+    .class-detail-stats { display: flex; justify-content: center; gap: 24px; margin: 16px 0; }
+    .class-detail-stat { text-align: center; }
+    .class-detail-stat .num { font-size: 1.3rem; font-weight: 700; color: var(--primary); }
+    .class-detail-stat .lbl { font-size: 0.72rem; color: var(--gray-500); }
+
+    /* 편집 모달 */
+    .edit-modal-body { padding: 20px; max-height: 50vh; overflow-y: auto; }
+    .edit-modal-desc { font-size: 0.88rem; color: var(--gray-600); margin-bottom: 14px; }
+    .edit-service-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 18px; }
+    .edit-service-item {
+      position: relative; display: flex; flex-direction: column; align-items: center; gap: 8px;
+      padding: 14px 12px; background: var(--gray-50); border: 2px solid var(--gray-200);
+      border-radius: var(--radius); cursor: pointer; transition: all 0.2s;
+    }
+    .edit-service-item:hover { border-color: var(--gray-400); }
+    .edit-service-item.selected { background: #EEF2FF; border-color: var(--primary); }
+    .edit-service-item.selected::after {
+      content: '\f00c'; font-family: 'Font Awesome 6 Free'; font-weight: 900;
+      position: absolute; top: 4px; right: 4px; width: 18px; height: 18px;
+      background: var(--primary); color: white; border-radius: 50%;
+      font-size: 0.55rem; display: flex; align-items: center; justify-content: center;
+    }
+    .edit-service-icon {
+      width: 38px; height: 38px; border-radius: 10px;
+      display: flex; align-items: center; justify-content: center; font-size: 1.15rem;
+    }
+    .edit-service-name { font-size: 0.78rem; font-weight: 600; color: var(--gray-700); text-align: center; }
+    .edit-modal-footer {
+      display: flex; justify-content: flex-end; gap: 10px;
+      padding: 16px 20px; border-top: 1px solid var(--gray-200);
+    }
+    .edit-modal-btn {
+      padding: 10px 20px; border-radius: 8px; font-size: 0.88rem; font-weight: 600;
+      cursor: pointer; transition: all 0.2s; font-family: inherit; border: none;
+    }
+    .edit-modal-btn.cancel { background: var(--gray-100); color: var(--gray-600); }
+    .edit-modal-btn.cancel:hover { background: var(--gray-200); }
+    .edit-modal-btn.save { background: var(--primary); color: white; }
+    .edit-modal-btn.save:hover { background: var(--primary-dark); }
+    .selected-count { font-size: 0.85rem; color: var(--gray-500); margin-bottom: 10px; }
+    .selected-count strong { color: var(--primary); }
+
+    /* 토스트 */
+    .toast {
+      position: fixed; bottom: 32px; left: 50%; transform: translateX(-50%) translateY(80px);
+      padding: 12px 28px; border-radius: 10px; font-size: 0.9rem; font-weight: 600;
+      color: #fff; background: var(--gray-800); box-shadow: var(--shadow-md);
+      z-index: 9999; opacity: 0; transition: all 0.4s ease; pointer-events: none;
+    }
+    .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+    @media (max-width: 768px) {
+      .banner-slider { height: 200px; }
+      .banner-slide { padding: 0 24px; }
+      .banner-title { font-size: 1.5rem; }
+      .banner-illust { right: 20px; font-size: 3rem; }
+      .main-container { padding: 16px; }
+    }
+  </style>
+</head>
+<body>
+  <script src="/js/common-nav.js"></script>
+
+  <main class="main-container" id="portalContent" style="display:none;">
+    <!-- 배너 슬라이더 -->
+    <section class="banner-section">
+      <div class="banner-slider" id="bannerSlider">
+        <div class="banner-slide active" data-role="teacher">
+          <div class="banner-bg-shapes"><div class="shape shape-1"></div><div class="shape shape-2"></div><div class="shape shape-3"></div></div>
+          <div class="banner-illust">📚</div>
+          <div class="banner-content">
+            <p class="banner-badge"><i class="fas fa-chalkboard-teacher"></i> 선생님을 위한</p>
+            <h2 class="banner-title">수업을 더 풍요롭게,<br>다채움과 함께</h2>
+            <p class="banner-desc">클래스 개설부터 학습분석까지 한번에</p>
+          </div>
+        </div>
+        <div class="banner-slide" data-role="student">
+          <div class="banner-bg-shapes"><div class="shape shape-1"></div><div class="shape shape-2"></div><div class="shape shape-3"></div></div>
+          <div class="banner-illust">🎯</div>
+          <div class="banner-content">
+            <p class="banner-badge"><i class="fas fa-user-graduate"></i> 학생을 위한</p>
+            <h2 class="banner-title">나만의 학습 여정을<br>시작해볼까?</h2>
+            <p class="banner-desc">AI 맞춤 학습으로 실력을 키워보세요</p>
+          </div>
+        </div>
+        <div class="banner-slide" data-role="parent">
+          <div class="banner-bg-shapes"><div class="shape shape-1"></div><div class="shape shape-2"></div><div class="shape shape-3"></div></div>
+          <div class="banner-illust">🌱</div>
+          <div class="banner-content">
+            <p class="banner-badge"><i class="fas fa-users"></i> 학부모를 위한</p>
+            <h2 class="banner-title">우리 아이의 성장을<br>함께 확인해요</h2>
+            <p class="banner-desc">학습 현황과 성장 리포트를 한눈에</p>
+          </div>
+        </div>
+      </div>
+      <div class="banner-dots" id="bannerDots">
+        <span class="dot active" onclick="goToBannerSlide(0)"></span>
+        <span class="dot" onclick="goToBannerSlide(1)"></span>
+        <span class="dot" onclick="goToBannerSlide(2)"></span>
+      </div>
+    </section>
+
+    <!-- 퀵메뉴 + 대시보드 -->
+    <section class="top-section" id="topSection">
+      <div class="quick-menu-card">
+        <div class="quick-menu-header">
+          <h3 class="quick-menu-title"><i class="fas fa-bolt" style="color:#F59E0B;"></i> 바로가기</h3>
+          <button class="quick-menu-edit" onclick="openEditModal()">
+            <i class="fas fa-cog"></i> 편집
+          </button>
+        </div>
+        <div class="quick-menu-grid cols-3" id="quickMenuGrid"></div>
+      </div>
+      <div class="personal-dashboard" id="personalDashboard"></div>
+    </section>
+
+    <!-- 인기 콘텐츠 + 인기 클래스 -->
+    <div class="content-grid">
+      <div class="card" id="popularContentsCard">
+        <div class="card-header">
+          <h3 class="card-title"><i class="fas fa-fire" style="color:#EF4444;"></i> 인기 콘텐츠</h3>
+          <a href="/content/index.html" class="card-more">전체보기 <i class="fas fa-chevron-right"></i></a>
+        </div>
+        <div class="content-grid-items" id="popularContentsGrid"></div>
+      </div>
+      <div class="card" id="popularClassCard">
+        <div class="card-header">
+          <h3 class="card-title"><i class="fas fa-trophy" style="color:#F59E0B;"></i> 이달의 인기 클래스</h3>
+          <a href="/class/hall-of-fame.html" class="card-more">전체보기 <i class="fas fa-chevron-right"></i></a>
+        </div>
+        <div class="popular-class-list" id="popularClassList"></div>
+      </div>
+    </div>
+
+    <!-- 독서 + 공지사항 -->
+    <div class="two-column-grid">
+      <div class="card" id="readingCard">
+        <div class="card-header">
+          <h3 class="card-title" id="readingTitle"><i class="fas fa-book-reader" style="color:#8B5CF6;"></i> 나의 독서 현황</h3>
+        </div>
+        <div id="readingContent"></div>
+      </div>
+      <div class="card">
+        <div class="card-header">
+          <h3 class="card-title"><i class="fas fa-bullhorn" style="color:#2563EB;"></i> 공지사항</h3>
+        </div>
+        <div class="notice-list" id="noticeList"></div>
+      </div>
+    </div>
+
+    <!-- 체인지 + 추천 서비스 -->
+    <div class="two-column-grid">
+      <div class="card" id="changeCard">
+        <div class="card-header">
+          <h3 class="card-title"><i class="fas fa-walking" style="color:#10B981;"></i> 체인지 활동</h3>
+        </div>
+        <div id="changeContent"></div>
+      </div>
+      <div class="card" id="recommendCard">
+        <div class="card-header">
+          <h3 class="card-title" id="recommendTitle"><i class="fas fa-star" style="color:#F59E0B;"></i> 추천 서비스</h3>
+        </div>
+        <div id="recommendContent"></div>
+      </div>
+    </div>
+
+    <!-- 전체 서비스 -->
+    <section class="all-services-section">
+      <div class="all-services-header">
+        <h3 class="all-services-title"><i class="fas fa-th" style="color:var(--primary);margin-right:6px;"></i> 모든 서비스</h3>
+        <button class="collapse-toggle" onclick="toggleAllServices()">
+          <i class="fas fa-chevron-down" id="collapseIcon"></i>
+          <span id="collapseText">접기</span>
+        </button>
+      </div>
+      <div class="all-services-grid" id="allServicesGrid"></div>
+    </section>
+
+    <!-- 상세 모달 -->
+    <div class="modal-overlay" id="modalOverlay" onclick="closeModal(event)">
+      <div class="modal-content" onclick="event.stopPropagation()">
+        <div class="modal-header">
+          <div class="modal-title">
+            <span id="modalIcon">📚</span>
+            <span id="modalTitleText">상세 정보</span>
+          </div>
+          <button class="modal-close" onclick="closeModal()"><i class="fas fa-times"></i></button>
+        </div>
+        <div class="modal-body">
+          <div class="modal-list" id="modalList"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 편집 모달 -->
+    <div class="modal-overlay" id="editModalOverlay" onclick="closeEditModal(event)">
+      <div class="modal-content" style="max-width:540px;" onclick="event.stopPropagation()">
+        <div class="modal-header">
+          <div class="modal-title"><i class="fas fa-bolt" style="color:#F59E0B;"></i> <span>바로가기 편집</span></div>
+          <button class="modal-close" onclick="closeEditModal()"><i class="fas fa-times"></i></button>
+        </div>
+        <div class="edit-modal-body">
+          <p class="edit-modal-desc">바로가기에 표시할 서비스를 선택하세요. (최대 15개)</p>
+          <p class="selected-count">선택됨: <strong id="selectedCount">6</strong>/15개</p>
+          <div class="edit-service-grid" id="editServiceGrid"></div>
+        </div>
+        <div class="edit-modal-footer">
+          <button class="edit-modal-btn cancel" onclick="closeEditModal()">취소</button>
+          <button class="edit-modal-btn save" onclick="saveQuickMenu()">저장</button>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <div class="toast" id="toast"></div>
+
+  <script>
+    // ==================== 상태 ====================
+    let currentUser = null;
+    let isServicesExpanded = true;
+
+    // ==================== 서비스 데이터 ====================
+    const SERVICES = {
+      'class':     { name: '채움클래스', icon: '📚', color: '#4F46E5', url: '/class/index.html' },
+      'contents':  { name: '채움콘텐츠', icon: '📝', color: '#059669', url: '/content/index.html' },
+      'self':      { name: '스스로채움', icon: '🎯', color: '#EC4899', url: '/self-learn/index.html' },
+      'cbt':       { name: '채움CBT',   icon: '📋', color: '#8B5CF6', url: '/cbt/index.html' },
+      'growth':    { name: '성장기록',   icon: '📈', color: '#EF4444', url: '/growth/index.html' },
+      'lrs':       { name: 'LRS 분석',  icon: '📊', color: '#06B6D4', url: '/lrs/index.html' },
+      'notice':    { name: '공지사항',   icon: '📢', color: '#D97706', url: null },
+      'popular':   { name: '인기콘텐츠', icon: '🔥', color: '#EF4444', url: '/content/index.html' },
+      'monitor':   { name: '채움모니터', icon: '📹', color: '#6366F1', url: null },
+      'canvas':    { name: '채움캔버스', icon: '🎨', color: '#F59E0B', url: null },
+      'hwp':       { name: '한글웹에디터', icon: '📄', color: '#3B82F6', url: null },
+      'coding':    { name: '채움코딩',   icon: '💻', color: '#14B8A6', url: null },
+      'typing':    { name: '채움타자',   icon: '⌨️', color: '#64748B', url: null },
+      'math':      { name: '채움수학',   icon: '🔢', color: '#0EA5E9', url: null },
+      'english':   { name: '채움영어',   icon: '🔤', color: '#A855F7', url: null },
+      'career':    { name: '진로진학',   icon: '🎓', color: '#F97316', url: null },
+      'nawoolbom': { name: '나우늘봄',   icon: '🌱', color: '#84CC16', url: null },
+      'admin':     { name: '관리자',     icon: '🛡️', color: '#1E293B', url: '/admin/index.html' }
+    };
+
+    const DEFAULT_QUICK = ['class', 'contents', 'self', 'cbt', 'growth', 'lrs'];
+    let selectedQuickKeys = [...DEFAULT_QUICK];
+    let tempSelectedKeys = [];
+
+    const ROLE_SERVICE_ORDER = {
+      teacher: ['class','contents','lrs','cbt','growth','notice','popular','monitor','hwp','canvas','self','career','coding','typing','math','english','nawoolbom'],
+      student: ['self','class','contents','cbt','popular','growth','coding','typing','math','english','career','notice','monitor','canvas','hwp','lrs','nawoolbom'],
+      parent:  ['class','contents','notice','growth','career','nawoolbom','self','popular','cbt','monitor','canvas','hwp','coding','typing','math','english','lrs'],
+      staff:   ['class','contents','monitor','canvas','hwp','notice','lrs','cbt','growth','popular','career','self','coding','typing','math','english','nawoolbom'],
+      admin:   ['admin','class','contents','lrs','cbt','growth','self','notice','popular','monitor','canvas','hwp','coding','typing','math','english','career','nawoolbom']
+    };
+
+    const ROLE_RECOMMEND = {
+      teacher: ['lrs','cbt','growth'],
+      student: ['self','coding','math'],
+      parent:  ['growth','career','nawoolbom'],
+      staff:   ['monitor','canvas','hwp'],
+      admin:   ['lrs','admin','class']
+    };
+
+    const ROLE_STATS = {
+      teacher: [
+        { label: '개설한 클래스', icon: '📚', color: '#4F46E5' },
+        { label: '진행 중 과제',  icon: '📝', color: '#059669' },
+        { label: '예정 평가',    icon: '📋', color: '#D97706' },
+        { label: '새 알림',      icon: '🔔', color: '#DC2626' }
+      ],
+      student: [
+        { label: '참여 클래스',   icon: '📚', color: '#4F46E5' },
+        { label: '이번 주 학습',  icon: '⏱️', color: '#059669' },
+        { label: '저장한 콘텐츠', icon: '💾', color: '#D97706' },
+        { label: '모은 포인트',   icon: '🏆', color: '#8B5CF6' }
+      ],
+      parent: [
+        { label: '자녀 클래스',   icon: '📚', color: '#4F46E5' },
+        { label: '이번 주 학습',  icon: '⏱️', color: '#059669' },
+        { label: '읽은 책',      icon: '📖', color: '#D97706' },
+        { label: '체인지 활동',   icon: '🚶', color: '#EC4899' }
+      ],
+      staff: [
+        { label: '운영 클래스',   icon: '📚', color: '#4F46E5' },
+        { label: '참여 클래스',   icon: '👥', color: '#059669' },
+        { label: '문서 작성',    icon: '📄', color: '#D97706' },
+        { label: '이번 주 활동',  icon: '📊', color: '#DC2626' }
+      ],
+      admin: [
+        { label: '전체 사용자',   icon: '👥', color: '#4F46E5' },
+        { label: '전체 클래스',   icon: '📚', color: '#059669' },
+        { label: '오늘 접속자',   icon: '📊', color: '#D97706' },
+        { label: '시스템 알림',   icon: '🔔', color: '#DC2626' }
+      ]
+    };
+
+    // 더미 데이터 제거됨 — 모든 데이터는 API에서 로드
+
+    // ==================== 초기화 ====================
+    window.addEventListener('dacheim:user-loaded', async (e) => {
+      currentUser = e.detail;
+      document.getElementById('portalContent').style.display = 'block';
+
+      // 실제 API에서 데이터 가져오기
+      await loadRealStats();
+
+      renderBanner();
+      renderQuickMenu();
+      renderDashboard();
+      loadPopularClasses();
+      loadPopularContents();
+      loadReading();
+      loadNotices();
+      renderChange();
+      renderRecommend();
+      renderAllServices();
+      startBannerAutoSlide();
+
+      // 추가 API 로드 (비동기)
+      loadTrendingPosts();
+    });
+
+    // ==================== API 로드 ====================
+    // 역할별 4개 슬롯: teacher=[클래스,과제,예정평가,새알림], student=[클래스,이번주학습,담은자료,포인트]
+    let realStats = { slot0: 0, slot1: 0, slot2: 0, slot3: 0 };
+
+    async function loadRealStats() {
+      try {
+        const res = await fetch('/api/portal/my-summary');
+        if (res.ok) {
+          const data = await res.json();
+          if (data.success) {
+            const role = currentUser?.role || 'teacher';
+            if (role === 'student') {
+              realStats.slot0 = data.classCount || 0;
+              realStats.slot1 = data.weekCompleted || 0;
+              realStats.slot2 = data.collectionCount || 0;
+              realStats.slot3 = data.totalPoints || 0;
+            } else {
+              // teacher / admin / staff / parent 모두 교사 4슬롯 형식 사용
+              realStats.slot0 = data.classCount || 0;
+              realStats.slot1 = data.pendingHomework || 0;
+              realStats.slot2 = data.upcomingExams || 0;
+              realStats.slot3 = data.unreadNotifications || 0;
+            }
+          }
+        }
+      } catch(e) {
+        // fallback: basic class count
+        try {
+          const res2 = await fetch('/api/class/my');
+          if (res2.ok) { const cls = await res2.json(); realStats.slot0 = cls.length; }
+        } catch(e2) {}
+      }
+    }
+
+    async function loadTrendingPosts() {
+      // 인기 게시글은 공지사항 영역 아래에 별도 표시 (인기 클래스 영역 덮어쓰기 방지)
+      try {
+        const res = await fetch('/api/portal/trending?limit=5');
+        if (res.ok) {
+          const data = await res.json();
+          if (data.success && data.popular && data.popular.length > 0) {
+            const noticeList = document.getElementById('noticeList');
+            if (noticeList) {
+              // 기존 공지사항 아래에 인기 게시글 추가
+              const trendingHtml = `
+                <div style="margin-top:16px;padding-top:12px;border-top:1px solid #E5E7EB;">
+                  <div style="font-size:0.85rem;font-weight:600;color:#6B7280;margin-bottom:8px;">🔥 인기 게시글</div>
+                  ${data.popular.slice(0, 3).map(post => `
+                    <div style="display:flex;align-items:center;gap:10px;padding:8px 0;cursor:pointer;" onclick="location.href='/class/class-home.html?classId=${post.class_id}&tab=board'">
+                      <div style="flex:1;font-size:0.85rem;color:#374151;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${post.title || ''}</div>
+                      <div style="font-size:0.72rem;color:#9CA3AF;white-space:nowrap;">❤️ ${post.like_count || 0} 💬 ${post.comment_count || 0}</div>
+                    </div>
+                  `).join('')}
+                </div>
+              `;
+              noticeList.insertAdjacentHTML('beforeend', trendingHtml);
+            }
+          }
+        }
+      } catch(e) {}
+    }
+
+    async function loadCalendarEvents() {
+      try {
+        const now = new Date();
+        const start = now.toISOString().slice(0, 10);
+        const end = new Date(now.getTime() + 7 * 86400000).toISOString().slice(0, 10);
+        const res = await fetch(`/api/portal/calendar?startDate=${start}&endDate=${end}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.success && data.events && data.events.length > 0) {
+            const scheduleEl = document.querySelector('.schedule-mini');
+            if (scheduleEl) {
+              const iconMap = { lesson: '📚', homework: '📝', survey: '📊' };
+              scheduleEl.innerHTML = `
+                <div class="schedule-header"><i class="fas fa-calendar-day" style="color:var(--primary);margin-right:6px;"></i> 이번 주 일정</div>
+                ${data.events.slice(0, 5).map(e => `
+                  <div class="schedule-item">
+                    <span class="schedule-icon">${iconMap[e.type] || '📌'}</span>
+                    <span class="schedule-time">${(e.date || '').slice(5)}</span>
+                    <span class="schedule-title">${e.title}</span>
+                  </div>
+                `).join('')}
+              `;
+            }
+          }
+        }
+      } catch(e) {}
+    }
+
+    // ==================== 배너 슬라이더 ====================
+    let currentBannerSlide = 0;
+    let bannerInterval;
+    const bannerRoleMap = { teacher: 0, student: 1, parent: 2, staff: 0, admin: 0 };
+
+    function renderBanner() {
+      const role = currentUser?.role || 'teacher';
+      goToBannerSlide(bannerRoleMap[role] || 0);
+    }
+
+    function goToBannerSlide(index) {
+      const slides = document.querySelectorAll('.banner-slide');
+      const dots = document.querySelectorAll('.dot');
+      if (!slides.length) return;
+      slides.forEach(s => s.classList.remove('active'));
+      dots.forEach(d => d.classList.remove('active'));
+      slides[index % slides.length].classList.add('active');
+      dots[index % dots.length].classList.add('active');
+      currentBannerSlide = index;
+    }
+
+    function nextBannerSlide() {
+      const slides = document.querySelectorAll('.banner-slide');
+      goToBannerSlide((currentBannerSlide + 1) % slides.length);
+    }
+
+    function startBannerAutoSlide() {
+      clearInterval(bannerInterval);
+      bannerInterval = setInterval(nextBannerSlide, 5000);
+    }
+
+    // ==================== 퀵메뉴 ====================
+    function renderQuickMenu() {
+      const grid = document.getElementById('quickMenuGrid');
+      const count = selectedQuickKeys.length;
+      let cols = 3;
+      if (count <= 4) cols = 2;
+      else if (count <= 9) cols = 3;
+      else if (count <= 12) cols = 4;
+      else cols = 5;
+      grid.className = 'quick-menu-grid cols-' + cols;
+
+      grid.innerHTML = selectedQuickKeys.map(key => {
+        const svc = SERVICES[key];
+        if (!svc) return '';
+        const href = svc.url || '#';
+        const onclick = svc.url ? '' : ` onclick="showToast('${svc.name} 서비스는 준비 중입니다.');return false;"`;
+        return `<a href="${href}" class="quick-menu-item"${onclick}>
+          <div class="quick-menu-icon" style="background:${svc.color}15;color:${svc.color}">${svc.icon}</div>
+          <span class="quick-menu-label">${svc.name}</span>
+        </a>`;
+      }).join('');
+    }
+
+    // ==================== 개인 대시보드 ====================
+    function renderDashboard() {
+      const dash = document.getElementById('personalDashboard');
+      const role = currentUser?.role || 'teacher';
+      const name = currentUser?.display_name || '사용자';
+      const statsConfig = ROLE_STATS[role] || ROLE_STATS.teacher;
+      const values = [realStats.slot0 || 0, realStats.slot1 || 0, realStats.slot2 || 0, realStats.slot3 || 0];
+
+      const roleLabelMap = {
+        teacher: '선생님', student: '학생', parent: '학부모', staff: '교직원', admin: '관리자'
+      };
+
+      dash.innerHTML = `
+        <div class="dashboard-header">
+          <div class="dashboard-title">
+            <div class="dashboard-avatar">${name.charAt(0)}</div>
+            <div class="dashboard-greeting">
+              <h2>${name}님의 다채움</h2>
+              <p>오늘도 다채로운 하루 되세요!</p>
+            </div>
+          </div>
+          <span class="user-type-badge ${role}">${roleLabelMap[role] || role}</span>
+        </div>
+        <div class="stats-grid">
+          ${statsConfig.map((stat, i) => `
+            <div class="stat-card" onclick="onStatCardClick(${i}, '${role}')">
+              <div class="stat-icon" style="color:${stat.color}">${stat.icon}</div>
+              <div>
+                <div class="stat-label">${stat.label}</div>
+                <div class="stat-value">${values[i]}</div>
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      `;
+    }
+
+    // ==================== 인기 클래스 (API) ====================
+    async function loadPopularClasses() {
+      const list = document.getElementById('popularClassList');
+      try {
+        const res = await fetch('/api/class/');
+        const data = await res.json();
+        if (data.success && data.classes && data.classes.length > 0) {
+          const rankColors = ['gold', 'silver', 'bronze'];
+          const icons = ['📚','📐','🎮','🔤','🌿','💻'];
+          const bgs = ['#4F46E5','#A855F7','#059669','#D97706','#14B8A6','#EC4899'];
+          // Store for click handler
+          window._popularClasses = data.classes.slice(0, 5);
+          list.innerHTML = data.classes.slice(0, 5).map((cls, i) => `
+            <div class="class-item" onclick="openClassDetailModal(${i})" style="cursor:pointer;">
+              <div class="class-rank ${rankColors[i] || ''}">${i + 1}</div>
+              <div class="class-thumb" style="background:${bgs[i % bgs.length]}15">${icons[i % icons.length]}</div>
+              <div class="class-info">
+                <div class="class-name">${cls.name}</div>
+                <div class="class-meta">${cls.owner_name || ''}</div>
+              </div>
+              <div class="class-stats">
+                <div class="class-members"><i class="fas fa-users" style="font-size:0.7rem;"></i> ${cls.member_count || 0}명</div>
+              </div>
+            </div>
+          `).join('');
+        } else {
+          list.innerHTML = '<div style="padding:16px;text-align:center;color:#9CA3AF;font-size:13px;">등록된 클래스가 없습니다.</div>';
+        }
+      } catch(e) { list.innerHTML = '<div style="padding:16px;text-align:center;color:#9CA3AF;font-size:13px;">데이터를 불러올 수 없습니다.</div>'; }
+    }
+
+    // ==================== 인기 콘텐츠 (API) ====================
+    async function loadPopularContents() {
+      const grid = document.getElementById('popularContentsGrid');
+      try {
+        const res = await fetch('/api/contents/recommendations?limit=6');
+        const data = await res.json();
+        if (data.success && data.contents && data.contents.length > 0) {
+          const bgs = ['#4F46E5','#D97706','#059669','#A855F7','#14B8A6','#EC4899'];
+          const typeIcons = { video:'🎬', document:'📄', image:'🖼️', quiz:'❓', link:'🔗' };
+          // Store for click handler
+          window._popularContents = data.contents.slice(0, 6);
+          grid.innerHTML = data.contents.slice(0, 6).map((c, i) => `
+            <div class="content-item" onclick="openContentDetailModal(${i})">
+              <div class="content-thumb" style="background:${bgs[i % bgs.length]}">${typeIcons[c.content_type] || '📁'}</div>
+              <div class="content-info">
+                <div class="content-name">${c.title || '콘텐츠'}</div>
+                <div class="content-meta">
+                  <span>${c.content_type || '기타'}</span>
+                  <span><i class="fas fa-eye"></i> ${(c.view_count || 0).toLocaleString()}</span>
+                </div>
+              </div>
+            </div>
+          `).join('');
+        } else {
+          grid.innerHTML = '<div style="padding:16px;text-align:center;color:#9CA3AF;font-size:13px;">추천 콘텐츠가 없습니다.</div>';
+        }
+      } catch(e) { grid.innerHTML = '<div style="padding:16px;text-align:center;color:#9CA3AF;font-size:13px;">데이터를 불러올 수 없습니다.</div>'; }
+    }
+
+    // ==================== 독서 현황 (API) ====================
+    async function loadReading() {
+      const content = document.getElementById('readingContent');
+      try {
+        const res = await fetch('/api/growth/reading');
+        const data = await res.json();
+        const books = (data.success && data.books) ? data.books : [];
+        const stats = (data.success && data.stats) ? data.stats : {};
+        const colors = ['#f093fb','#667eea','#f5576c','#43e97b','#fa709a','#38f9d7'];
+        content.innerHTML = `
+          <div class="reading-stats">
+            <div class="reading-stat"><div class="reading-stat-value">${stats.completed || books.filter(b => b.status === 'completed').length}</div><div class="reading-stat-label">읽은 책</div></div>
+            <div class="reading-stat"><div class="reading-stat-value">${stats.reading || books.filter(b => b.status === 'reading').length}</div><div class="reading-stat-label">읽는 중</div></div>
+            <div class="reading-stat"><div class="reading-stat-value">${stats.reviews || books.filter(b => b.review).length}</div><div class="reading-stat-label">독서 리뷰</div></div>
+          </div>
+          <div style="font-size:0.85rem;font-weight:600;color:var(--gray-700);margin-bottom:8px;">📚 최근 읽은 책</div>
+          <div class="book-list">
+            ${books.length > 0 ? books.slice(0, 3).map((book, i) => `
+              <div class="book-item">
+                <div class="book-cover" style="background:linear-gradient(135deg, ${colors[i % colors.length]}, ${colors[i % colors.length]}aa);">📕</div>
+                <div class="book-info">
+                  <div class="book-title">${book.title || '제목 없음'}</div>
+                  <div class="book-author">${book.author || ''}</div>
+                </div>
+              </div>
+            `).join('') : '<div style="text-align:center;color:#9CA3AF;font-size:12px;padding:12px;">등록된 책이 없습니다.</div>'}
+          </div>
+        `;
+      } catch(e) {
+        content.innerHTML = '<div style="text-align:center;color:#9CA3AF;font-size:13px;padding:20px;">독서 데이터를 불러올 수 없습니다.</div>';
+      }
+    }
+
+    // ==================== 공지사항 + 일정 (API) ====================
+    async function loadNotices() {
+      const container = document.getElementById('noticeList');
+      const badgeText = { important: '중요', event: '이벤트', normal: '공지' };
+      let noticeHtml = '';
+      let scheduleHtml = '';
+
+      // 공지사항 로드 (내 클래스의 최근 공지)
+      try {
+        const classRes = await fetch('/api/class/my');
+        const classData = await classRes.json();
+        if (classData.success && classData.classes && classData.classes.length > 0) {
+          const firstClass = classData.classes[0];
+          const res = await fetch(`/api/notice/${firstClass.id}?limit=5`);
+          const data = await res.json();
+          if (data.success && data.notices && data.notices.length > 0) {
+            noticeHtml = data.notices.map(n => `
+              <div class="notice-item">
+                <span class="notice-badge ${n.is_pinned ? 'important' : 'normal'}">${n.is_pinned ? '중요' : '공지'}</span>
+                <span class="notice-text">${n.title}</span>
+                <span class="notice-date">${(n.created_at || '').slice(0, 10)}</span>
+              </div>
+            `).join('');
+          }
+        }
+      } catch(e) {}
+
+      if (!noticeHtml) {
+        noticeHtml = '<div style="padding:12px;text-align:center;color:#9CA3AF;font-size:12px;">새로운 공지가 없습니다.</div>';
+      }
+
+      // 일정은 loadCalendarEvents()에서 별도로 처리
+      const now = new Date();
+      const iconMap = { lesson: '📚', homework: '📝', survey: '📊', exam: '✏️' };
+      try {
+        const start = now.toISOString().slice(0, 10);
+        const end = new Date(now.getTime() + 7 * 86400000).toISOString().slice(0, 10);
+        const res = await fetch(`/api/portal/calendar?startDate=${start}&endDate=${end}`);
+        const data = await res.json();
+        if (data.success && data.events && data.events.length > 0) {
+          scheduleHtml = `
+            <div class="schedule-section">
+              <div class="schedule-header"><i class="fas fa-calendar-day" style="color:var(--primary);margin-right:6px;"></i> 이번 주 일정</div>
+              ${data.events.slice(0, 5).map(e => `
+                <div class="schedule-item">
+                  <span class="schedule-icon">${iconMap[e.type] || '📌'}</span>
+                  <span class="schedule-time">${(e.date || '').slice(5)}</span>
+                  <span class="schedule-title">${e.title}</span>
+                </div>
+              `).join('')}
+            </div>`;
+        } else {
+          scheduleHtml = '<div class="schedule-section"><div class="schedule-header"><i class="fas fa-calendar-day" style="color:var(--primary);margin-right:6px;"></i> 이번 주 일정</div><div style="padding:12px;text-align:center;color:#9CA3AF;font-size:12px;">등록된 일정이 없습니다.</div></div>';
+        }
+      } catch(e) {
+        scheduleHtml = '<div class="schedule-section"><div class="schedule-header"><i class="fas fa-calendar-day" style="color:var(--primary);margin-right:6px;"></i> 이번 주 일정</div><div style="padding:12px;text-align:center;color:#9CA3AF;font-size:12px;">일정을 불러올 수 없습니다.</div></div>';
+      }
+
+      container.innerHTML = noticeHtml + scheduleHtml;
+    }
+
+    // ==================== 체인지 활동 ====================
+    function renderChange() {
+      document.getElementById('changeContent').innerHTML = `
+        <div class="change-stats">
+          <div class="change-stat"><div class="change-stat-icon">👟</div><div class="change-stat-value">45,230</div><div class="change-stat-label">이번 달 걸음</div></div>
+          <div class="change-stat"><div class="change-stat-icon">📍</div><div class="change-stat-value">32.4km</div><div class="change-stat-label">이동 거리</div></div>
+          <div class="change-stat"><div class="change-stat-icon">🏅</div><div class="change-stat-value">3</div><div class="change-stat-label">완료 코스</div></div>
+        </div>
+        <div style="font-size:0.85rem;font-weight:600;color:var(--gray-700);margin-bottom:8px;">🗺️ 추천 코스</div>
+        <div class="change-course-list">
+          <div class="change-course">
+            <div class="change-course-icon">🏔️</div>
+            <div class="change-course-info"><div class="change-course-name">단양 도담삼봉 코스</div><div class="change-course-meta">5.2km · 예상 1시간 30분</div></div>
+          </div>
+          <div class="change-course">
+            <div class="change-course-icon">🌊</div>
+            <div class="change-course-info"><div class="change-course-name">청주 무심천 산책로</div><div class="change-course-meta">3.8km · 예상 50분</div></div>
+          </div>
+        </div>
+      `;
+    }
+
+    // ==================== 추천 서비스 ====================
+    function renderRecommend() {
+      const role = currentUser?.role || 'teacher';
+      const recommended = ROLE_RECOMMEND[role] || ROLE_RECOMMEND.teacher;
+      const roleLabelMap = { teacher: '선생님', student: '학생', parent: '학부모', staff: '교직원', admin: '관리자' };
+      document.getElementById('recommendTitle').innerHTML = `<i class="fas fa-star" style="color:#F59E0B;"></i> ${roleLabelMap[role] || ''} 추천 서비스`;
+
+      document.getElementById('recommendContent').innerHTML = `
+        <div style="display:flex;flex-direction:column;gap:10px;">
+          ${recommended.map(id => {
+            const svc = SERVICES[id];
+            if (!svc) return '';
+            const tag = svc.url
+              ? `<a href="${svc.url}" style="display:flex;align-items:center;gap:12px;padding:12px;background:#FFFBEB;border:1px solid #FDE68A;border-radius:10px;text-decoration:none;color:inherit;transition:all 0.2s;">`
+              : `<div style="display:flex;align-items:center;gap:12px;padding:12px;background:#FFFBEB;border:1px solid #FDE68A;border-radius:10px;cursor:pointer;transition:all 0.2s;" onclick="showToast('${svc.name} 서비스는 준비 중입니다.')">`;
+            const closeTag = svc.url ? '</a>' : '</div>';
+            return `${tag}
+              <div style="width:40px;height:40px;border-radius:10px;background:${svc.color};display:flex;align-items:center;justify-content:center;color:white;font-size:1.1rem;">${svc.icon}</div>
+              <div style="flex:1;"><div style="font-weight:600;color:var(--gray-800);">${svc.name}</div></div>
+              <span style="font-size:0.75rem;color:#D97706;"><i class="fas fa-star"></i> 추천</span>
+            ${closeTag}`;
+          }).join('')}
+        </div>
+      `;
+    }
+
+    // ==================== 전체 서비스 ====================
+    function renderAllServices() {
+      const grid = document.getElementById('allServicesGrid');
+      const role = currentUser?.role || 'teacher';
+      const order = ROLE_SERVICE_ORDER[role] || ROLE_SERVICE_ORDER.teacher;
+      const recommended = ROLE_RECOMMEND[role] || [];
+
+      grid.innerHTML = order.map(id => {
+        const svc = SERVICES[id];
+        if (!svc) return '';
+        if (id === 'admin' && role !== 'admin') return '';
+        const isRec = recommended.includes(id);
+        const href = svc.url || '#';
+        const onclick = svc.url ? '' : ` onclick="showToast('${svc.name} 서비스는 준비 중입니다.');return false;"`;
+        return `<a href="${href}" class="all-service-item ${isRec ? 'recommended' : ''}"${onclick}>
+          <div class="all-service-icon" style="background:${svc.color}">${svc.icon}</div>
+          <span class="all-service-name">${svc.name}${isRec ? ' ⭐' : ''}</span>
+        </a>`;
+      }).join('');
+
+      grid.style.display = isServicesExpanded ? 'grid' : 'none';
+    }
+
+    function toggleAllServices() {
+      isServicesExpanded = !isServicesExpanded;
+      document.getElementById('allServicesGrid').style.display = isServicesExpanded ? 'grid' : 'none';
+      document.getElementById('collapseIcon').className = isServicesExpanded ? 'fas fa-chevron-down' : 'fas fa-chevron-right';
+      document.getElementById('collapseText').textContent = isServicesExpanded ? '접기' : '펼치기';
+    }
+
+    // ==================== 편집 모달 ====================
+    function openEditModal() {
+      tempSelectedKeys = [...selectedQuickKeys];
+      renderEditGrid();
+      document.getElementById('editModalOverlay').classList.add('active');
+      document.body.style.overflow = 'hidden';
+    }
+
+    function closeEditModal(event) {
+      if (event && event.target !== event.currentTarget) return;
+      document.getElementById('editModalOverlay').classList.remove('active');
+      document.body.style.overflow = '';
+    }
+
+    function renderEditGrid() {
+      const allKeys = Object.keys(SERVICES).filter(k => k !== 'admin');
+      document.getElementById('editServiceGrid').innerHTML = allKeys.map(key => {
+        const svc = SERVICES[key];
+        const sel = tempSelectedKeys.includes(key);
+        return `<div class="edit-service-item ${sel ? 'selected' : ''}" onclick="toggleEditService('${key}')">
+          <div class="edit-service-icon" style="background:${svc.color}15;color:${svc.color}">${svc.icon}</div>
+          <span class="edit-service-name">${svc.name}</span>
+        </div>`;
+      }).join('');
+      document.getElementById('selectedCount').textContent = tempSelectedKeys.length;
+    }
+
+    function toggleEditService(key) {
+      const idx = tempSelectedKeys.indexOf(key);
+      if (idx > -1) { tempSelectedKeys.splice(idx, 1); }
+      else if (tempSelectedKeys.length < 15) { tempSelectedKeys.push(key); }
+      else { showToast('최대 15개까지 선택할 수 있습니다.'); return; }
+      renderEditGrid();
+    }
+
+    function saveQuickMenu() {
+      if (tempSelectedKeys.length === 0) { showToast('최소 1개 이상 선택해주세요.'); return; }
+      selectedQuickKeys = [...tempSelectedKeys];
+      renderQuickMenu();
+      closeEditModal();
+      showToast('바로가기가 저장되었습니다.');
+    }
+
+    // ==================== 대시보드 카드 클릭 ====================
+    async function onStatCardClick(index, role) {
+      const modal = document.getElementById('modalOverlay');
+      const icon = document.getElementById('modalIcon');
+      const title = document.getElementById('modalTitleText');
+      const list = document.getElementById('modalList');
+
+      if (role === 'teacher') {
+        if (index === 0) {
+          // 개설한 클래스
+          icon.textContent = '📚';
+          title.textContent = '내 클래스 목록';
+          try {
+            const res = await fetch('/api/class/my');
+            const data = await res.json();
+            const classes = data.classes || [];
+            if (classes.length === 0) {
+              list.innerHTML = '<div style="padding:24px;text-align:center;color:#9CA3AF;">개설하거나 참여한 클래스가 없습니다.</div>';
+            } else {
+              const bgs = ['#4F46E5','#A855F7','#059669','#D97706','#14B8A6'];
+              const icons = ['📚','📐','🎮','🔤','🌿'];
+              list.innerHTML = classes.map((cls, i) => `
+                <a href="/class/class-home.html?classId=${cls.id}" class="modal-item">
+                  <div class="modal-item-icon" style="background:${bgs[i%bgs.length]}15;color:${bgs[i%bgs.length]}">${icons[i%icons.length]}</div>
+                  <div class="modal-item-info">
+                    <div class="modal-item-name">${cls.name}</div>
+                    <div class="modal-item-meta">${cls.my_role === 'owner' ? '개설자' : '멤버'} · ${cls.member_count || 0}명</div>
+                  </div>
+                  <span class="modal-item-badge ${cls.my_role === 'owner' ? 'pending' : 'member'}">${cls.my_role === 'owner' ? '관리' : '참여중'}</span>
+                </a>
+              `).join('');
+            }
+          } catch { list.innerHTML = '<div style="padding:24px;text-align:center;color:#9CA3AF;">데이터를 불러올 수 없습니다.</div>'; }
+        } else if (index === 1) {
+          // 진행 중 과제
+          icon.textContent = '📝';
+          title.textContent = '진행 중 과제';
+          try {
+            const clsRes = await fetch('/api/class/my');
+            const clsData = await clsRes.json();
+            const myClasses = (clsData.classes || []).filter(c => c.my_role === 'owner');
+            let allHw = [];
+            for (const cls of myClasses) {
+              const hwRes = await fetch(`/api/homework/${cls.id}`);
+              const hwData = await hwRes.json();
+              (hwData.homework || []).forEach(h => allHw.push({ ...h, className: cls.name, classId: cls.id }));
+            }
+            if (allHw.length === 0) {
+              list.innerHTML = '<div style="padding:24px;text-align:center;color:#9CA3AF;">진행 중인 과제가 없습니다.</div>';
+            } else {
+              list.innerHTML = allHw.map(h => `
+                <a href="/class/class-home.html?classId=${h.classId}&tab=homework" class="modal-item">
+                  <div class="modal-item-icon" style="background:#D1FAE515;color:#059669">📝</div>
+                  <div class="modal-item-info">
+                    <div class="modal-item-name">${h.title}</div>
+                    <div class="modal-item-meta">${h.className} · 제출 ${h.submission_count || 0}건${h.due_date ? ' · 마감 ' + h.due_date : ''}</div>
+                  </div>
+                </a>
+              `).join('');
+            }
+          } catch { list.innerHTML = '<div style="padding:24px;text-align:center;color:#9CA3AF;">데이터를 불러올 수 없습니다.</div>'; }
+        } else if (index === 2) {
+          // 예정 평가
+          icon.textContent = '📋';
+          title.textContent = '예정 평가';
+          try {
+            const clsRes = await fetch('/api/class/my');
+            const clsData = await clsRes.json();
+            const myClasses = (clsData.classes || []).filter(c => c.my_role === 'owner');
+            let allExams = [];
+            for (const cls of myClasses) {
+              const exRes = await fetch(`/api/exam/${cls.id}`);
+              const exData = await exRes.json();
+              (exData.exams || []).forEach(e => allExams.push({ ...e, className: cls.name, classId: cls.id }));
+            }
+            if (allExams.length === 0) {
+              list.innerHTML = '<div style="padding:24px;text-align:center;color:#9CA3AF;">예정된 평가가 없습니다.</div>';
+            } else {
+              list.innerHTML = allExams.map(e => `
+                <a href="/class/class-home.html?classId=${e.classId}&tab=exam" class="modal-item">
+                  <div class="modal-item-icon" style="background:#FEF3C715;color:#D97706">📋</div>
+                  <div class="modal-item-info">
+                    <div class="modal-item-name">${e.title}</div>
+                    <div class="modal-item-meta">${e.className} · ${e.status || ''} · 응시 ${e.student_count || 0}명</div>
+                  </div>
+                </a>
+              `).join('');
+            }
+          } catch { list.innerHTML = '<div style="padding:24px;text-align:center;color:#9CA3AF;">데이터를 불러올 수 없습니다.</div>'; }
+        } else if (index === 3) {
+          // 새 알림
+          icon.textContent = '🔔';
+          title.textContent = '새 알림';
+          try {
+            const clsRes = await fetch('/api/class/my');
+            const clsData = await clsRes.json();
+            const myClasses = clsData.classes || [];
+            let allNotices = [];
+            for (const cls of myClasses.slice(0, 5)) {
+              const nRes = await fetch(`/api/notice/${cls.id}`);
+              const nData = await nRes.json();
+              (nData.notices || []).slice(0, 3).forEach(n => allNotices.push({ ...n, className: cls.name, classId: cls.id }));
+            }
+            if (allNotices.length === 0) {
+              list.innerHTML = '<div style="padding:24px;text-align:center;color:#9CA3AF;">알림이 없습니다.</div>';
+            } else {
+              list.innerHTML = allNotices.map(n => `
+                <a href="/class/class-home.html?classId=${n.classId}&tab=notice" class="modal-item">
+                  <div class="modal-item-icon" style="background:#FEE2E215;color:#DC2626">🔔</div>
+                  <div class="modal-item-info">
+                    <div class="modal-item-name">${n.title}</div>
+                    <div class="modal-item-meta">${n.className}${n.is_pinned ? ' · 📌 고정' : ''}</div>
+                  </div>
+                </a>
+              `).join('');
+            }
+          } catch { list.innerHTML = '<div style="padding:24px;text-align:center;color:#9CA3AF;">데이터를 불러올 수 없습니다.</div>'; }
+        }
+      } else {
+        // 학생 역할
+        if (index === 0) {
+          // 참여 클래스
+          icon.textContent = '📚'; title.textContent = '참여 클래스';
+          try {
+            const res = await fetch('/api/class/my');
+            const data = await res.json();
+            const classes = data.classes || [];
+            const bgs = ['#4F46E5','#A855F7','#059669','#D97706','#14B8A6'];
+            list.innerHTML = classes.length ? classes.map((cls, i) => `
+              <a href="/class/class-home.html?classId=${cls.id}" class="modal-item">
+                <div class="modal-item-icon" style="background:${bgs[i%bgs.length]}15;color:${bgs[i%bgs.length]}">📚</div>
+                <div class="modal-item-info">
+                  <div class="modal-item-name">${cls.name}</div>
+                  <div class="modal-item-meta">${cls.owner_name || ''} · ${cls.member_count || 0}명</div>
+                </div>
+              </a>
+            `).join('') : '<div style="padding:24px;text-align:center;color:#9CA3AF;">참여한 클래스가 없습니다.</div>';
+          } catch { list.innerHTML = '<div style="padding:24px;text-align:center;color:#9CA3AF;">데이터를 불러올 수 없습니다.</div>'; }
+        } else {
+          showToast('준비 중인 기능입니다.');
+          return;
+        }
+      }
+      modal.classList.add('active');
+      document.body.style.overflow = 'hidden';
+    }
+
+    // ==================== 인기 콘텐츠 상세 모달 ====================
+    async function openContentDetailModal(index) {
+      const contents = window._popularContents || [];
+      if (!contents[index]) return;
+      const c = contents[index];
+      const modal = document.getElementById('modalOverlay');
+      const icon = document.getElementById('modalIcon');
+      const title = document.getElementById('modalTitleText');
+      const list = document.getElementById('modalList');
+
+      const typeNames = { video:'영상', document:'문서', image:'이미지', quiz:'문항', exam:'평가지', package:'수업꾸러미' };
+      const typeIcons = { video:'🎬', document:'📄', image:'🖼️', quiz:'❓', exam:'📋', package:'📦' };
+
+      icon.textContent = typeIcons[c.content_type] || '📁';
+      title.textContent = '콘텐츠 상세';
+
+      list.innerHTML = `
+        <div class="content-detail-section">
+          <div class="content-detail-title">${c.title || '콘텐츠'}</div>
+          <div class="content-detail-desc">${c.description || '설명이 없습니다.'}</div>
+          <div class="content-detail-tags">
+            <span class="content-detail-tag">${typeNames[c.content_type] || c.content_type}</span>
+            ${c.subject ? `<span class="content-detail-tag">${c.subject}</span>` : ''}
+            ${c.grade ? `<span class="content-detail-tag">${c.grade}학년</span>` : ''}
+            ${c.tags ? (Array.isArray(c.tags) ? c.tags : String(c.tags).split(',')).map(t => `<span class="content-detail-tag">${String(t).trim()}</span>`).join('') : ''}
+          </div>
+        </div>
+        <div class="content-detail-section">
+          <div class="content-detail-meta-grid">
+            <div class="content-detail-meta-item">
+              <div class="val">${(c.view_count || 0).toLocaleString()}</div>
+              <div class="lbl">조회수</div>
+            </div>
+            <div class="content-detail-meta-item">
+              <div class="val">${(c.like_count || 0).toLocaleString()}</div>
+              <div class="lbl">좋아요</div>
+            </div>
+            <div class="content-detail-meta-item">
+              <div class="val">${c.author_name || '-'}</div>
+              <div class="lbl">등록자</div>
+            </div>
+          </div>
+        </div>
+        <div class="content-detail-actions">
+          <button class="btn btn-secondary" onclick="likeContent(${c.id})"><i class="fas fa-heart"></i> 좋아요</button>
+          <button class="btn btn-secondary" onclick="saveToCollection(${c.id})"><i class="fas fa-bookmark"></i> 보관함</button>
+          <button class="btn btn-primary" onclick="viewContent(${c.id}, '${c.content_type}')"><i class="fas fa-play"></i> 보기</button>
+        </div>
+      `;
+
+      modal.classList.add('active');
+      document.body.style.overflow = 'hidden';
+    }
+
+    async function likeContent(contentId) {
+      try {
+        const res = await fetch('/api/contents/' + contentId + '/like', { method: 'POST', headers: {'Content-Type':'application/json'} });
+        const data = await res.json();
+        showToast(data.success ? '좋아요를 눌렀습니다! ❤️' : (data.message || '처리 실패'));
+      } catch { showToast('오류가 발생했습니다.'); }
+    }
+
+    async function saveToCollection(contentId) {
+      try {
+        const res = await fetch('/api/contents/collection/' + contentId, {
+          method: 'POST', headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({ folder: '포털에서 담기' })
+        });
+        const data = await res.json();
+        showToast(data.success ? '보관함에 담았습니다! 📚' : (data.message || '처리 실패'));
+      } catch { showToast('오류가 발생했습니다.'); }
+    }
+
+    function viewContent(contentId, type) {
+      closeModal();
+      location.href = '/content/index.html?id=' + contentId;
+    }
+
+    // ==================== 인기 클래스 상세 모달 ====================
+    async function openClassDetailModal(index) {
+      const classes = window._popularClasses || [];
+      if (!classes[index]) return;
+      const cls = classes[index];
+      const modal = document.getElementById('modalOverlay');
+      const icon = document.getElementById('modalIcon');
+      const title = document.getElementById('modalTitleText');
+      const list = document.getElementById('modalList');
+      const bgs = ['#4F46E5','#A855F7','#059669','#D97706','#14B8A6'];
+      const icons = ['📚','📐','🎮','🔤','🌿'];
+
+      icon.textContent = icons[index % icons.length];
+      title.textContent = '클래스 소개';
+
+      // Check if user is already a member
+      let isMember = false;
+      try {
+        const myRes = await fetch('/api/class/my');
+        const myData = await myRes.json();
+        isMember = (myData.classes || []).some(c => c.id === cls.id);
+      } catch {}
+
+      list.innerHTML = `
+        <div class="class-detail-header">
+          <div class="class-detail-avatar" style="background:${bgs[index%bgs.length]}15;color:${bgs[index%bgs.length]}">${icons[index%icons.length]}</div>
+          <div class="class-detail-name">${cls.name}</div>
+          <div class="class-detail-teacher">${cls.owner_name || '선생님'}</div>
+        </div>
+        <div class="class-detail-stats">
+          <div class="class-detail-stat"><div class="num">${cls.member_count || 0}</div><div class="lbl">멤버</div></div>
+          <div class="class-detail-stat"><div class="num">${cls.class_type === 'subject' ? '교과' : '일반'}</div><div class="lbl">유형</div></div>
+          <div class="class-detail-stat"><div class="num">${cls.is_public ? '공개' : '비공개'}</div><div class="lbl">공개여부</div></div>
+        </div>
+        ${cls.description ? `<div class="content-detail-desc" style="text-align:center;padding:0 16px;">${cls.description}</div>` : ''}
+        <div class="content-detail-actions" style="margin-top:20px;">
+          ${isMember
+            ? `<button class="btn btn-primary" onclick="closeModal(); location.href='/class/class-home.html?classId=${cls.id}'">
+                <i class="fas fa-arrow-right"></i> 클래스 바로가기
+              </button>`
+            : `<button class="btn btn-primary" onclick="joinClass(${cls.id}, '${cls.code || ''}')">
+                <i class="fas fa-user-plus"></i> 가입 신청
+              </button>`
+          }
+        </div>
+      `;
+
+      modal.classList.add('active');
+      document.body.style.overflow = 'hidden';
+    }
+
+    async function joinClass(classId, code) {
+      try {
+        const res = await fetch('/api/class/' + classId + '/join', {
+          method: 'POST', headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({ code })
+        });
+        const data = await res.json();
+        if (data.success) {
+          showToast('클래스에 가입되었습니다! 🎉');
+          closeModal();
+          loadPopularClasses();
+          loadRealStats().then(renderDashboard);
+        } else {
+          showToast(data.message || '가입에 실패했습니다.');
+        }
+      } catch { showToast('오류가 발생했습니다.'); }
+    }
+
+    // ==================== 모달 ====================
+    function closeModal(event) {
+      if (event && event.target && event.currentTarget && event.target !== event.currentTarget) return;
+      const overlay = document.getElementById('modalOverlay');
+      overlay.classList.remove('active');
+      document.body.style.overflow = '';
+      // 모달 내용 초기화 (다음 열기를 위해)
+      setTimeout(() => {
+        if (!overlay.classList.contains('active')) {
+          document.getElementById('modalList').innerHTML = '';
+        }
+      }, 350);
+    }
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') { closeModal(); closeEditModal(); }
+    });
+
+    // ==================== 토스트 ====================
+    function showToast(msg) {
+      const t = document.getElementById('toast');
+      t.textContent = msg;
+      t.classList.add('show');
+      setTimeout(() => t.classList.remove('show'), 2500);
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>다채움 - 과제 상세</title>
+  <link rel="stylesheet" href="/css/common-nav.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Pretendard','Noto Sans KR',system-ui,sans-serif; background: #F5F7FA; color: #1A1A2E; font-size: 16px; }
+    .container { max-width: 1800px; margin: 0 auto; padding: 24px 20px; }
+
+    .breadcrumb { font-size: 15px; color: #6B7280; margin-bottom: 16px; }
+    .breadcrumb a { color: #2563eb; text-decoration: none; }
+
+    .hw-header { background: linear-gradient(135deg, #10b981, #059669); border-radius: 16px; padding: 32px 36px; color: #fff; margin-bottom: 20px; }
+    .hw-header h1 { font-size: 26px; font-weight: 700; margin-bottom: 10px; }
+    .hw-header .meta { font-size: 15px; opacity: 0.85; display: flex; gap: 16px; flex-wrap: wrap; }
+    .hw-header .meta span { display: flex; align-items: center; gap: 4px; }
+
+    .card { background: #fff; border-radius: 12px; padding: 28px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); margin-bottom: 16px; }
+    .card h3 { font-size: 19px; font-weight: 700; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
+    .card h3 i { color: #10b981; }
+
+    .hw-desc { font-size: 14px; line-height: 1.8; white-space: pre-wrap; }
+
+    .stat-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 16px; }
+    .mini-stat { background: #f9fafb; border-radius: 8px; padding: 14px; text-align: center; }
+    .mini-stat .val { font-size: 24px; font-weight: 700; color: #10b981; }
+    .mini-stat .lbl { font-size: 12px; color: #6B7280; margin-top: 4px; }
+
+    .submit-form textarea { width: 100%; padding: 12px; border: 1.5px solid #d1d5db; border-radius: 8px; font-size: 14px; font-family: inherit; resize: vertical; }
+    .submit-form textarea:focus { border-color: #10b981; outline: none; }
+
+    .file-upload { margin: 12px 0; }
+    .file-upload label { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; background: #f3f4f6; border-radius: 8px; cursor: pointer; font-size: 13px; font-weight: 500; }
+    .file-upload label:hover { background: #e5e7eb; }
+    .file-upload input[type="file"] { display: none; }
+    .file-name { font-size: 12px; color: #6B7280; margin-top: 4px; }
+
+    .submission-status { padding: 16px; border-radius: 10px; margin-bottom: 16px; }
+    .status-submitted { background: #dcfce7; border: 1px solid #bbf7d0; }
+    .status-graded { background: #dbeafe; border: 1px solid #bfdbfe; }
+
+    table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    th { text-align: left; padding: 10px 12px; background: #f9fafb; border-bottom: 2px solid #e5e7eb; font-weight: 600; }
+    td { padding: 10px 12px; border-bottom: 1px solid #f3f4f6; }
+
+    .btn { padding: 10px 20px; border: none; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; font-family: inherit; display: inline-flex; align-items: center; gap: 6px; }
+    .btn-primary { background: #10b981; color: #fff; }
+    .btn-primary:hover { background: #059669; }
+    .btn-outline { background: #fff; color: #374151; border: 1.5px solid #d1d5db; }
+    .btn-outline:hover { background: #f3f4f6; }
+    .btn-blue { background: #2563eb; color: #fff; }
+    .btn-sm { padding: 6px 12px; font-size: 12px; }
+
+    .badge { padding: 3px 10px; border-radius: 6px; font-size: 11px; font-weight: 600; }
+    .badge-submitted { background: #dcfce7; color: #16a34a; }
+    .badge-graded { background: #dbeafe; color: #2563eb; }
+    .badge-pending { background: #fef3c7; color: #d97706; }
+
+    .grade-form { display: flex; gap: 8px; align-items: center; }
+    .grade-form input { width: 60px; padding: 6px 8px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 13px; text-align: center; }
+    .grade-form input:focus { border-color: #2563eb; outline: none; }
+
+    @media (max-width: 768px) {
+      .stat-row { grid-template-columns: repeat(2, 1fr); }
+    }
+
+    /* ===== 피드백 채팅 ===== */
+    .fb-modal-overlay { display:none; position:fixed; inset:0; background:rgba(15,23,42,0.5); z-index:1000; align-items:center; justify-content:center; padding:20px; }
+    .fb-modal-overlay.active { display:flex; }
+    .fb-modal { background:#fff; border-radius:16px; width:100%; max-width:560px; max-height:85vh; display:flex; flex-direction:column; box-shadow:0 20px 40px rgba(0,0,0,0.2); overflow:hidden; }
+    .fb-header { padding:18px 22px; border-bottom:1px solid #E5E7EB; display:flex; align-items:center; justify-content:space-between; }
+    .fb-header h3 { font-size:17px; font-weight:700; margin:0; color:#111827; }
+    .fb-header .sub { font-size:12px; color:#6B7280; margin-top:2px; }
+    .fb-close { background:none; border:none; font-size:20px; color:#9CA3AF; cursor:pointer; padding:4px; }
+    .fb-body { flex:1; padding:16px 20px; overflow-y:auto; background:#F9FAFB; min-height:300px; max-height:420px; }
+    .fb-empty { text-align:center; color:#9CA3AF; font-size:13px; padding:40px 0; }
+    .fb-msg { margin-bottom:14px; display:flex; flex-direction:column; max-width:78%; }
+    .fb-msg.mine { margin-left:auto; align-items:flex-end; }
+    .fb-msg.theirs { margin-right:auto; align-items:flex-start; }
+    .fb-meta { font-size:11px; color:#6B7280; margin-bottom:4px; display:flex; gap:6px; align-items:center; }
+    .fb-role-chip { padding:1px 6px; border-radius:4px; font-size:10px; font-weight:600; }
+    .fb-role-teacher { background:#FEF3C7; color:#B45309; }
+    .fb-role-student { background:#DBEAFE; color:#1D4ED8; }
+    .fb-bubble { padding:10px 14px; border-radius:14px; font-size:14px; line-height:1.55; word-break:break-word; white-space:pre-wrap; }
+    .fb-msg.mine .fb-bubble { background:#2563eb; color:#fff; border-bottom-right-radius:4px; }
+    .fb-msg.theirs .fb-bubble { background:#fff; color:#1F2937; border:1px solid #E5E7EB; border-bottom-left-radius:4px; }
+    .fb-footer { padding:12px 16px; border-top:1px solid #E5E7EB; background:#fff; display:flex; gap:8px; align-items:flex-end; }
+    .fb-footer textarea { flex:1; padding:10px 12px; border:1.5px solid #D1D5DB; border-radius:10px; font-size:14px; font-family:inherit; resize:none; outline:none; min-height:42px; max-height:120px; }
+    .fb-footer textarea:focus { border-color:#2563eb; }
+    .fb-send { background:#2563eb; color:#fff; border:none; border-radius:10px; padding:10px 16px; font-size:13px; font-weight:600; cursor:pointer; white-space:nowrap; }
+    .fb-send:hover { background:#1d4ed8; }
+    .fb-send:disabled { background:#9CA3AF; cursor:not-allowed; }
+
+    /* 공개 제출물 카드 */
+    .pub-sub-item { border:1px solid #E5E7EB; border-radius:10px; padding:14px 16px; margin-bottom:10px; background:#fff; }
+    .pub-sub-item.mine { border-color:#2563eb; background:#EFF6FF; }
+    .pub-sub-head { display:flex; align-items:center; justify-content:space-between; margin-bottom:8px; }
+    .pub-sub-name { font-weight:600; font-size:14px; color:#111827; display:flex; align-items:center; gap:6px; }
+    .pub-sub-content { font-size:13px; color:#374151; line-height:1.6; white-space:pre-wrap; }
+    .pub-sub-time { font-size:11px; color:#9CA3AF; }
+
+    /* 피드백 버튼 */
+    .btn-feedback { background:#F3F4F6; color:#374151; border:1px solid #D1D5DB; border-radius:8px; padding:6px 10px; font-size:12px; font-weight:600; cursor:pointer; display:inline-flex; align-items:center; gap:4px; }
+    .btn-feedback:hover { background:#E5E7EB; }
+    .btn-feedback.has-new { background:#FEF3C7; border-color:#FCD34D; color:#B45309; }
+
+    .public-chip { display:inline-flex; align-items:center; gap:4px; background:rgba(255,255,255,0.2); padding:4px 10px; border-radius:6px; font-weight:600; font-size:12px; }
+  </style>
+</head>
+<body>
+  <script src="/js/common-nav.js"></script>
+  <div class="container" id="mainContent" style="display:none;">
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;">
+      <button class="btn btn-outline" onclick="location.href='/class/class-home.html?id='+classId" style="padding:6px 14px;font-size:13px;"><i class="fas fa-arrow-left"></i> 목록으로</button>
+      <div class="breadcrumb" id="breadcrumb" style="margin-bottom:0;"></div>
+    </div>
+
+    <div class="hw-header">
+      <h1 id="hwTitle">로딩 중...</h1>
+      <div class="meta" id="hwMeta"></div>
+    </div>
+
+    <div class="card">
+      <h3><i class="fas fa-clipboard-list"></i> 과제 설명</h3>
+      <div class="hw-desc" id="hwDesc"></div>
+    </div>
+
+    <!-- 학생: 제출 영역 -->
+    <div class="card" id="studentSubmitCard" style="display:none;">
+      <h3><i class="fas fa-paper-plane"></i> 과제 제출</h3>
+      <div id="submissionStatus"></div>
+      <div class="submit-form" id="submitForm">
+        <textarea id="submitContent" rows="4" placeholder="과제 내용을 입력하세요..."></textarea>
+        <div class="file-upload">
+          <label><i class="fas fa-paperclip"></i> 파일 첨부 <input type="file" id="submitFile" onchange="onFileSelect(this)"></label>
+          <div class="file-name" id="fileName"></div>
+        </div>
+        <div style="margin-top:12px;">
+          <button class="btn btn-primary" onclick="submitHomework()"><i class="fas fa-check"></i> 제출하기</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 교사: 제출 현황 -->
+    <div class="card" id="teacherSubmissionsCard" style="display:none;">
+      <h3><i class="fas fa-users"></i> 제출 현황</h3>
+      <div class="stat-row" id="submissionStats"></div>
+      <table>
+        <thead><tr><th>학생</th><th>제출 내용</th><th>제출일</th><th>상태</th><th>점수</th><th>채점</th><th>피드백</th></tr></thead>
+        <tbody id="submissionTable"></tbody>
+      </table>
+    </div>
+
+    <!-- 학생: 나의 피드백 영역 (1:1 채팅) -->
+    <div class="card" id="studentFeedbackCard" style="display:none;">
+      <h3><i class="fas fa-comments"></i> 선생님과의 피드백</h3>
+      <div id="studentFeedbackBody" class="fb-body" style="border-radius:10px;"></div>
+      <div class="fb-footer" style="border:1px solid #E5E7EB;border-top:none;border-radius:0 0 10px 10px;">
+        <textarea id="studentFeedbackInput" placeholder="선생님께 메시지를 남겨보세요..." onkeydown="if(event.ctrlKey && event.key==='Enter'){sendStudentFeedback();}"></textarea>
+        <button class="fb-send" onclick="sendStudentFeedback()"><i class="fas fa-paper-plane"></i> 전송</button>
+      </div>
+    </div>
+
+    <!-- 학생: 공개 제출물 영역 -->
+    <div class="card" id="publicSubmissionsCard" style="display:none;">
+      <h3><i class="fas fa-globe"></i> 친구들의 제출물 <span style="font-size:12px;font-weight:500;color:#6B7280;">(공개 과제)</span></h3>
+      <div id="publicSubmissionsList"></div>
+    </div>
+
+  </div>
+
+  <!-- 교사용 피드백 채팅 모달 -->
+  <div class="fb-modal-overlay" id="feedbackModal">
+    <div class="fb-modal">
+      <div class="fb-header">
+        <div>
+          <h3 id="fbModalTitle">피드백</h3>
+          <div class="sub" id="fbModalSub"></div>
+        </div>
+        <button class="fb-close" onclick="closeFeedbackModal()"><i class="fas fa-times"></i></button>
+      </div>
+      <div class="fb-body" id="fbModalBody"></div>
+      <div class="fb-footer">
+        <textarea id="fbModalInput" placeholder="메시지를 입력하세요... (Ctrl+Enter로 전송)" onkeydown="if(event.ctrlKey && event.key==='Enter'){sendTeacherFeedback();}"></textarea>
+        <button class="fb-send" onclick="sendTeacherFeedback()"><i class="fas fa-paper-plane"></i> 전송</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const params = new URLSearchParams(location.search);
+    const classId = params.get('classId');
+    const homeworkId = params.get('id');
+    if (!classId || !homeworkId) location.href = '/class/index.html';
+
+    let hwData = null, myRole = null, currentUser = null;
+    let uploadedFileUrl = null;
+    let mySubmissionId = null;
+
+    function escHtml(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+    async function loadHomework() {
+      const classRes = await fetch(`/api/class/${classId}`);
+      const classData = await classRes.json();
+      if (classData.success) myRole = classData.myRole;
+
+      document.getElementById('breadcrumb').innerHTML =
+        `<a href="/class/index.html">나의 클래스</a> &gt; <a href="/class/class-home.html?id=${classId}">${escHtml(classData.class?.name || '클래스')}</a> &gt; 과제`;
+
+      const res = await fetch(`/api/homework/${classId}/${homeworkId}`);
+      const data = await res.json();
+      if (!data.success) { alert(data.message); history.back(); return; }
+
+      hwData = data.homework;
+      document.title = `다채움 - ${hwData.title}`;
+      document.getElementById('hwTitle').textContent = hwData.title;
+
+      const isOverdue = hwData.due_date && new Date(hwData.due_date) < new Date();
+      const pubChip = hwData.public_submissions
+        ? '<span class="public-chip"><i class="fas fa-globe"></i> 제출물 공개</span>'
+        : '<span class="public-chip" style="background:rgba(255,255,255,0.12);"><i class="fas fa-lock"></i> 비공개</span>';
+      document.getElementById('hwMeta').innerHTML = `
+        <span><i class="fas fa-user"></i> ${escHtml(hwData.author_name || '교사')}</span>
+        <span><i class="fas fa-calendar"></i> 마감: ${hwData.due_date || '없음'}</span>
+        <span><i class="fas fa-star"></i> 만점: ${hwData.max_score}점</span>
+        ${pubChip}
+        <span style="background:${isOverdue ? 'rgba(239,68,68,0.2)' : 'rgba(16,185,129,0.2)'};padding:4px 10px;border-radius:6px;font-weight:600;">${isOverdue ? '마감됨' : '진행중'}</span>
+      `;
+      document.getElementById('hwDesc').textContent = hwData.description || '과제 설명이 없습니다.';
+
+      if (myRole === 'owner') {
+        // 교사 뷰: 제출 현황
+        document.getElementById('teacherSubmissionsCard').style.display = 'block';
+        const subs = data.submissions || [];
+        const graded = subs.filter(s => s.score !== null).length;
+        document.getElementById('submissionStats').innerHTML = `
+          <div class="mini-stat"><div class="val">${subs.length}</div><div class="lbl">제출</div></div>
+          <div class="mini-stat"><div class="val">${graded}</div><div class="lbl">채점 완료</div></div>
+          <div class="mini-stat"><div class="val">${subs.length - graded}</div><div class="lbl">미채점</div></div>
+        `;
+        document.getElementById('submissionTable').innerHTML = subs.length === 0
+          ? '<tr><td colspan="7" style="text-align:center;color:#9ca3af;">제출된 과제가 없습니다.</td></tr>'
+          : subs.map(s => `
+            <tr>
+              <td>${escHtml(s.display_name)}</td>
+              <td>
+                <div style="max-width:200px;font-size:12px;color:#374151;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"
+                  title="${escHtml(s.content || '')}" onclick="alert('📝 ${escHtml(s.display_name)}의 제출 내용:\\n\\n' + '${escHtml((s.content || '내용 없음').replace(/'/g, "\\'"))}')">
+                  ${escHtml((s.content || '내용 없음').substring(0, 40))}${(s.content || '').length > 40 ? '...' : ''}
+                </div>
+                ${s.file_path ? '<a href="'+s.file_path+'" target="_blank" style="font-size:11px;color:#2563eb;"><i class="fas fa-paperclip"></i> 첨부파일</a>' : ''}
+              </td>
+              <td>${s.submitted_at ? s.submitted_at.slice(0,16) : '-'}</td>
+              <td><span class="badge ${s.score !== null ? 'badge-graded' : 'badge-submitted'}">${s.score !== null ? '채점완료' : '제출됨'}</span></td>
+              <td>${s.score !== null ? s.score + '/' + hwData.max_score : '-'}</td>
+              <td>
+                <div class="grade-form">
+                  <input type="number" id="grade_${s.id}" value="${s.score || ''}" min="0" max="${hwData.max_score}" placeholder="점수">
+                  <button class="btn btn-blue btn-sm" onclick="gradeSubmission(${s.id})">채점</button>
+                </div>
+              </td>
+              <td>
+                <button class="btn-feedback" onclick="openFeedbackModal(${s.id}, '${escHtml(s.display_name).replace(/'/g, "\\'")}')"><i class="fas fa-comment-dots"></i> 피드백</button>
+              </td>
+            </tr>
+          `).join('');
+      } else {
+        // 학생 뷰: 제출
+        document.getElementById('studentSubmitCard').style.display = 'block';
+        if (data.submission) {
+          mySubmissionId = data.submission.id;
+          document.getElementById('submissionStatus').innerHTML = `
+            <div class="submission-status ${data.submission.score !== null ? 'status-graded' : 'status-submitted'}">
+              <strong>${data.submission.score !== null ? '채점 완료' : '제출 완료'}</strong>
+              ${data.submission.score !== null ? `<span style="margin-left:8px;font-size:18px;font-weight:700;">${data.submission.score}/${hwData.max_score}점</span>` : ''}
+              ${data.submission.feedback ? `<div style="margin-top:8px;font-size:13px;color:#374151;">${escHtml(data.submission.feedback)}</div>` : ''}
+              <div style="font-size:12px;color:#6B7280;margin-top:4px;">제출: ${data.submission.submitted_at ? data.submission.submitted_at.slice(0,16) : ''}</div>
+            </div>
+          `;
+          document.getElementById('submitContent').value = data.submission.content || '';
+
+          // 제출물이 있으면 피드백 영역 표시
+          document.getElementById('studentFeedbackCard').style.display = 'block';
+          loadStudentFeedback();
+        }
+
+        // 공개 과제인 경우 다른 학생들 제출물 표시
+        if (hwData.public_submissions && Array.isArray(data.submissions)) {
+          document.getElementById('publicSubmissionsCard').style.display = 'block';
+          renderPublicSubmissions(data.submissions);
+        }
+      }
+    }
+
+    function renderPublicSubmissions(subs) {
+      const listEl = document.getElementById('publicSubmissionsList');
+      if (!subs || subs.length === 0) {
+        listEl.innerHTML = '<div style="text-align:center;color:#9CA3AF;font-size:13px;padding:20px 0;">아직 공개된 제출물이 없습니다.</div>';
+        return;
+      }
+      listEl.innerHTML = subs.map(s => `
+        <div class="pub-sub-item ${s.isMe ? 'mine' : ''}">
+          <div class="pub-sub-head">
+            <div class="pub-sub-name">
+              <i class="fas fa-user-circle" style="color:${s.isMe ? '#2563eb' : '#9CA3AF'};"></i>
+              ${escHtml(s.display_name)}${s.isMe ? ' <span style="font-size:11px;color:#2563eb;">(나)</span>' : ''}
+            </div>
+            <span class="pub-sub-time">${s.submitted_at ? s.submitted_at.slice(0,16) : ''}</span>
+          </div>
+          <div class="pub-sub-content">${escHtml(s.content || '(내용 없음)')}</div>
+          ${s.file_path ? `<div style="margin-top:6px;"><a href="${s.file_path}" target="_blank" style="font-size:12px;color:#2563eb;"><i class="fas fa-paperclip"></i> 첨부파일</a></div>` : ''}
+        </div>
+      `).join('');
+    }
+
+    // ===== 피드백 채팅 =====
+    let currentFeedbackSubId = null;
+
+    function fmtTime(t) {
+      if (!t) return '';
+      const s = String(t).replace('T', ' ').slice(0, 16);
+      return s;
+    }
+
+    function renderFeedbackList(containerId, items) {
+      const el = document.getElementById(containerId);
+      if (!items || items.length === 0) {
+        el.innerHTML = '<div class="fb-empty"><i class="fas fa-comments" style="font-size:32px;color:#E5E7EB;display:block;margin-bottom:8px;"></i>아직 피드백이 없습니다.<br>첫 메시지를 남겨보세요.</div>';
+        return;
+      }
+      const myId = currentUser ? currentUser.id : null;
+      el.innerHTML = items.map(f => {
+        const mine = f.author_id === myId;
+        const roleChip = f.author_role === 'teacher'
+          ? '<span class="fb-role-chip fb-role-teacher">교사</span>'
+          : '<span class="fb-role-chip fb-role-student">학생</span>';
+        return `
+          <div class="fb-msg ${mine ? 'mine' : 'theirs'}">
+            <div class="fb-meta">
+              ${!mine ? roleChip : ''}
+              <span>${escHtml(f.author_name || '')}</span>
+              <span>· ${fmtTime(f.created_at)}</span>
+              ${mine ? roleChip : ''}
+            </div>
+            <div class="fb-bubble">${escHtml(f.content)}</div>
+          </div>
+        `;
+      }).join('');
+      // 스크롤 최하단
+      el.scrollTop = el.scrollHeight;
+    }
+
+    // 교사: 제출물별 피드백 모달 열기
+    async function openFeedbackModal(subId, studentName) {
+      currentFeedbackSubId = subId;
+      document.getElementById('fbModalTitle').textContent = studentName + '님과의 피드백';
+      document.getElementById('fbModalSub').textContent = hwData ? hwData.title : '';
+      document.getElementById('fbModalInput').value = '';
+      document.getElementById('fbModalBody').innerHTML = '<div class="fb-empty">불러오는 중...</div>';
+      document.getElementById('feedbackModal').classList.add('active');
+      await refreshFeedbackModal();
+    }
+    function closeFeedbackModal() {
+      document.getElementById('feedbackModal').classList.remove('active');
+      currentFeedbackSubId = null;
+    }
+    async function refreshFeedbackModal() {
+      if (!currentFeedbackSubId) return;
+      const res = await fetch(`/api/homework/${classId}/${homeworkId}/submissions/${currentFeedbackSubId}/feedback`);
+      const data = await res.json();
+      if (!data.success) {
+        document.getElementById('fbModalBody').innerHTML = `<div class="fb-empty" style="color:#ef4444;">${escHtml(data.message || '불러오기 실패')}</div>`;
+        return;
+      }
+      renderFeedbackList('fbModalBody', data.feedback);
+    }
+    async function sendTeacherFeedback() {
+      if (!currentFeedbackSubId) return;
+      const input = document.getElementById('fbModalInput');
+      const content = input.value.trim();
+      if (!content) return;
+      input.disabled = true;
+      try {
+        const res = await fetch(`/api/homework/${classId}/${homeworkId}/submissions/${currentFeedbackSubId}/feedback`, {
+          method: 'POST', headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({ content })
+        });
+        const data = await res.json();
+        if (data.success) {
+          input.value = '';
+          await refreshFeedbackModal();
+        } else alert(data.message);
+      } finally { input.disabled = false; input.focus(); }
+    }
+
+    // 학생: 자기 제출물 피드백
+    async function loadStudentFeedback() {
+      if (!mySubmissionId) return;
+      currentFeedbackSubId = mySubmissionId;
+      const res = await fetch(`/api/homework/${classId}/${homeworkId}/submissions/${mySubmissionId}/feedback`);
+      const data = await res.json();
+      if (!data.success) {
+        document.getElementById('studentFeedbackBody').innerHTML = `<div class="fb-empty" style="color:#ef4444;">${escHtml(data.message || '불러오기 실패')}</div>`;
+        return;
+      }
+      renderFeedbackList('studentFeedbackBody', data.feedback);
+    }
+    async function sendStudentFeedback() {
+      if (!currentFeedbackSubId) return;
+      const input = document.getElementById('studentFeedbackInput');
+      const content = input.value.trim();
+      if (!content) return;
+      input.disabled = true;
+      try {
+        const res = await fetch(`/api/homework/${classId}/${homeworkId}/submissions/${currentFeedbackSubId}/feedback`, {
+          method: 'POST', headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({ content })
+        });
+        const data = await res.json();
+        if (data.success) {
+          input.value = '';
+          await loadStudentFeedback();
+        } else alert(data.message);
+      } finally { input.disabled = false; input.focus(); }
+    }
+
+    function onFileSelect(input) {
+      if (input.files.length > 0) {
+        document.getElementById('fileName').textContent = input.files[0].name;
+      }
+    }
+
+    async function submitHomework() {
+      const content = document.getElementById('submitContent').value.trim();
+      const fileInput = document.getElementById('submitFile');
+
+      // 파일 업로드
+      if (fileInput.files.length > 0) {
+        const formData = new FormData();
+        formData.append('file', fileInput.files[0]);
+        const uploadRes = await fetch('/api/upload?type=homework', { method: 'POST', body: formData });
+        const uploadData = await uploadRes.json();
+        if (uploadData.success) uploadedFileUrl = uploadData.file.url;
+      }
+
+      const res = await fetch(`/api/homework/${classId}/${homeworkId}/submit`, {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ content, file_url: uploadedFileUrl })
+      });
+      const data = await res.json();
+      if (data.success) { alert(data.message); loadHomework(); }
+      else alert(data.message);
+    }
+
+    async function gradeSubmission(subId) {
+      const score = parseInt(document.getElementById('grade_' + subId).value);
+      if (isNaN(score)) return alert('점수를 입력하세요.');
+      const feedbackEl = document.getElementById('feedback_' + subId);
+      const feedback = feedbackEl ? feedbackEl.value.trim() : '';
+      const res = await fetch(`/api/homework/${classId}/${homeworkId}/grade/${subId}`, {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ score, feedback })
+      });
+      const data = await res.json();
+      if (data.success) { alert('채점 완료!'); loadHomework(); }
+      else alert(data.message);
+    }
+
+    window.addEventListener('dacheim:user-loaded', (e) => {
+      currentUser = e.detail;
+      document.getElementById('mainContent').style.display = 'block';
+      loadHomework();
+    });
+  </script>
+</body>
+</html>

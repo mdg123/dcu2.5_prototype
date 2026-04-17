@@ -1,0 +1,1496 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>수업 편집 - 다채움</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <style>
+    :root {
+      --primary: #0066FF;
+      --primary-light: #E8F1FF;
+      --primary-dark: #0052CC;
+      --success: #00C853;
+      --success-light: #E8F9EF;
+      --warning: #FF9800;
+      --danger: #F44336;
+      --gray-50: #F9FAFB;
+      --gray-100: #F3F4F6;
+      --gray-200: #E5E7EB;
+      --gray-300: #D1D5DB;
+      --gray-400: #9CA3AF;
+      --gray-500: #6B7280;
+      --gray-600: #4B5563;
+      --gray-700: #374151;
+      --gray-800: #1F2937;
+      --sidebar-width: 320px;
+      --header-height: 56px;
+    }
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body { font-family:'Pretendard','Noto Sans KR',system-ui,sans-serif; background:#F5F7FA; overflow:hidden; height:100vh; }
+
+    .viewer-header { position:fixed; top:0; left:0; right:0; height:var(--header-height); background:#fff; border-bottom:1px solid var(--gray-200); display:flex; align-items:center; justify-content:space-between; padding:0 16px; z-index:100; }
+    .header-left { display:flex; align-items:center; gap:12px; }
+    .header-right { display:flex; align-items:center; gap:8px; }
+    .btn-back { display:flex; align-items:center; gap:4px; font-size:13px; color:var(--gray-500); cursor:pointer; border:none; background:none; padding:6px 10px; border-radius:6px; font-family:inherit; }
+    .btn-back:hover { background:var(--gray-100); color:var(--gray-700); }
+    .title-input { border:none; border-bottom:2px solid var(--gray-200); font-size:16px; font-weight:600; padding:6px 8px; width:360px; outline:none; font-family:inherit; }
+    .title-input:focus { border-bottom-color:var(--primary); }
+    .title-input::placeholder { color:var(--gray-400); font-weight:400; }
+    .btn-save { padding:8px 20px; border-radius:8px; font-size:13px; font-weight:600; cursor:pointer; border:none; font-family:inherit; }
+    .btn-draft { background:var(--gray-100); color:var(--gray-600); }
+    .btn-draft:hover { background:var(--gray-200); }
+    .btn-primary { background:var(--primary); color:#fff; }
+    .btn-primary:hover { background:var(--primary-dark); }
+
+    .viewer-container { display:flex; height:calc(100vh - var(--header-height)); margin-top:var(--header-height); }
+    .sidebar { width:var(--sidebar-width); background:#fff; border-right:1px solid var(--gray-200); display:flex; flex-direction:column; flex-shrink:0; }
+    .sidebar-header { padding:16px; border-bottom:1px solid var(--gray-100); display:flex; align-items:center; justify-content:space-between; }
+    .sidebar-title { font-size:14px; font-weight:700; color:var(--gray-800); }
+    .sidebar-count { font-size:12px; color:var(--gray-400); }
+    .sidebar-content { flex:1; overflow-y:auto; padding:8px; }
+    .sidebar-footer { padding:12px; border-top:1px solid var(--gray-100); }
+    .btn-add-step { width:100%; padding:10px; border:2px dashed var(--gray-300); border-radius:10px; background:transparent; color:var(--gray-500); font-size:13px; font-weight:500; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:6px; font-family:inherit; }
+    .btn-add-step:hover { border-color:var(--primary); color:var(--primary); background:var(--primary-light); }
+
+    .step-item { display:flex; align-items:center; gap:8px; padding:10px 12px; border-radius:10px; cursor:pointer; margin-bottom:4px; border:1px solid transparent; transition:all 0.15s; }
+    .step-item:hover { background:var(--gray-50); }
+    .step-item.active { background:var(--primary-light); border-color:var(--primary); }
+    .step-item.dragging { opacity:0.4; }
+    .step-item.drag-over { border-top:2px solid var(--primary); }
+    .step-num { width:28px; height:28px; border-radius:50%; background:var(--gray-100); display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:700; color:var(--gray-600); flex-shrink:0; }
+    .step-item.active .step-num { background:var(--primary); color:#fff; }
+    .step-info { flex:1; min-width:0; }
+    .step-type { font-size:10px; color:var(--gray-400); font-weight:600; text-transform:uppercase; }
+    .step-title { font-size:13px; color:var(--gray-700); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .step-actions { display:flex; gap:2px; opacity:0; transition:opacity 0.15s; }
+    .step-item:hover .step-actions { opacity:1; }
+    .step-action-btn { width:26px; height:26px; border:none; background:transparent; border-radius:4px; cursor:pointer; font-size:12px; display:flex; align-items:center; justify-content:center; color:var(--gray-500); }
+    .step-action-btn:hover { background:var(--gray-200); }
+    .drag-handle { cursor:grab; color:var(--gray-400); font-size:14px; }
+    .drag-handle:active { cursor:grabbing; }
+
+    .content-area { flex:1; display:flex; flex-direction:column; overflow-y:auto; background:var(--gray-50); }
+    .content-empty { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; padding:40px; }
+    .empty-icon { font-size:48px; margin-bottom:16px; }
+    .empty-text { font-size:16px; color:var(--gray-500); margin-bottom:32px; }
+    .add-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; max-width:520px; width:100%; }
+    .add-card { display:flex; flex-direction:column; align-items:center; gap:8px; padding:24px 16px; background:#fff; border:1px solid var(--gray-200); border-radius:12px; cursor:pointer; transition:all 0.15s; }
+    .add-card:hover { border-color:var(--primary); background:var(--primary-light); transform:translateY(-2px); box-shadow:0 4px 12px rgba(0,0,0,0.08); }
+    .add-card-icon { font-size:28px; }
+    .add-card-label { font-size:12px; color:var(--gray-600); font-weight:500; text-align:center; }
+
+    .content-preview { flex:1; display:flex; flex-direction:column; padding:24px; }
+    .preview-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:16px; }
+    .preview-type-badge { font-size:11px; padding:4px 10px; border-radius:20px; background:var(--primary-light); color:var(--primary); font-weight:600; }
+    .preview-frame { flex:1; background:#fff; border-radius:12px; border:1px solid var(--gray-200); display:flex; align-items:center; justify-content:center; min-height:300px; padding:32px; color:var(--gray-400); font-size:14px; }
+
+    /* Save Modal */
+    .save-overlay { position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:100000; opacity:0; visibility:hidden; transition:all 0.2s; display:flex; align-items:center; justify-content:center; }
+    .save-overlay.open { opacity:1; visibility:visible; }
+    .save-panel { background:#fff; border-radius:16px; width:860px; max-height:85vh; display:flex; flex-direction:column; box-shadow:0 16px 48px rgba(0,0,0,0.18); transform:scale(0.95); opacity:0; z-index:100001; transition:all 0.25s ease; }
+    .save-overlay.open .save-panel { transform:scale(1); opacity:1; }
+    .save-header { padding:20px 28px; border-bottom:1px solid var(--gray-200); display:flex; align-items:center; justify-content:space-between; flex-shrink:0; }
+    .save-header h2 { font-size:18px; font-weight:700; }
+    .close-btn { width:32px; height:32px; border:none; background:transparent; font-size:18px; cursor:pointer; border-radius:6px; }
+    .close-btn:hover { background:var(--gray-100); }
+    .save-body { flex:1; overflow-y:auto; padding:28px; }
+    .save-footer { padding:16px 28px; border-top:1px solid var(--gray-200); display:flex; gap:8px; justify-content:flex-end; flex-shrink:0; }
+
+    .form-section { margin-bottom:18px; }
+    .form-section-title { font-size:14px; font-weight:700; color:var(--gray-800); margin-bottom:12px; display:flex; align-items:center; gap:6px; }
+    .form-group { margin-bottom:14px; }
+    .form-label { display:block; font-size:12px; font-weight:600; color:var(--gray-600); margin-bottom:6px; }
+    .form-label .required { color:var(--danger); }
+    .form-input { width:100%; padding:9px 12px; border:1px solid var(--gray-200); border-radius:8px; font-size:13px; font-family:inherit; outline:none; }
+    .form-input:focus { border-color:var(--primary); box-shadow:0 0 0 3px rgba(0,102,255,0.1); }
+    .form-textarea { resize:vertical; min-height:64px; }
+    .form-row { display:flex; gap:8px; }
+    .form-row > * { flex:1; }
+    .radio-group { display:flex; gap:12px; }
+    .radio-label { display:flex; align-items:center; gap:6px; font-size:13px; color:var(--gray-600); cursor:pointer; }
+    .radio-label input { accent-color:var(--primary); }
+
+    /* Modals */
+    .modal-overlay { position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:200; display:flex; align-items:center; justify-content:center; opacity:0; visibility:hidden; transition:all 0.2s; }
+    .modal-overlay.show { opacity:1; visibility:visible; }
+    .modal-card { background:#fff; border-radius:16px; width:560px; max-height:80vh; display:flex; flex-direction:column; box-shadow:0 16px 48px rgba(0,0,0,0.15); }
+    .modal-header { padding:20px 24px; border-bottom:1px solid var(--gray-200); display:flex; align-items:center; justify-content:space-between; }
+    .modal-header h3 { font-size:16px; font-weight:700; }
+    .modal-body { padding:24px; overflow-y:auto; flex:1; }
+    .modal-footer { padding:16px 24px; border-top:1px solid var(--gray-200); display:flex; gap:8px; justify-content:flex-end; }
+    .modal-btn-cancel { padding:8px 20px; border:1px solid var(--gray-300); border-radius:8px; background:#fff; color:var(--gray-600); cursor:pointer; font-size:13px; font-weight:600; font-family:inherit; }
+
+    .drop-zone { border:2px dashed var(--gray-300); border-radius:12px; padding:40px; text-align:center; cursor:pointer; transition:all 0.15s; }
+    .drop-zone:hover,.drop-zone.drag-active { border-color:var(--primary); background:var(--primary-light); }
+    .drop-zone-icon { font-size:36px; margin-bottom:12px; }
+    .drop-zone-text { font-size:14px; color:var(--gray-500); margin-bottom:4px; }
+    .drop-zone-hint { font-size:11px; color:var(--gray-400); }
+
+    .search-list { max-height:300px; overflow-y:auto; }
+    .search-item { display:flex; align-items:center; gap:12px; padding:12px; border-bottom:1px solid var(--gray-100); cursor:pointer; }
+    .search-item:hover { background:var(--gray-50); }
+    .search-item-icon { font-size:24px; width:40px; text-align:center; }
+    .search-item-info { flex:1; }
+    .search-item-title { font-size:13px; font-weight:600; color:var(--gray-700); }
+    .search-item-meta { font-size:11px; color:var(--gray-400); }
+    .search-item-select { padding:4px 12px; border:1px solid var(--primary); color:var(--primary); border-radius:6px; font-size:11px; background:transparent; cursor:pointer; font-family:inherit; }
+    .search-item-select:hover { background:var(--primary); color:#fff; }
+
+    .toast-container { position:fixed; bottom:24px; left:50%; transform:translateX(-50%); z-index:300; }
+    .toast { padding:12px 24px; background:var(--gray-800); color:#fff; border-radius:10px; font-size:13px; box-shadow:0 4px 12px rgba(0,0,0,0.2); animation:toastIn 0.3s ease; }
+    .toast.success { background:var(--success); }
+    @keyframes toastIn { from { opacity:0; transform:translateY(20px); } to { opacity:1; transform:translateY(0); } }
+
+    .search-input-wrap { position:relative; margin-bottom:12px; }
+    .search-input-wrap input { width:100%; padding:10px 12px 10px 34px; border:1px solid var(--gray-200); border-radius:8px; font-size:13px; font-family:inherit; outline:none; }
+    .search-input-wrap input:focus { border-color:var(--primary); }
+    .search-input-wrap i { position:absolute; left:10px; top:50%; transform:translateY(-50%); color:var(--gray-400); font-size:14px; }
+
+    .empty-search { text-align:center; padding:24px; color:var(--gray-400); font-size:13px; }
+    .loading-text { text-align:center; padding:24px; color:var(--gray-400); font-size:13px; }
+
+    /* Floating Toolbar */
+    .floating-toolbar {
+      position:fixed; right:20px; top:50%; transform:translateY(-50%);
+      background:#fff; border-radius:14px; padding:6px; display:flex;
+      flex-direction:column; gap:2px; z-index:50;
+      border:1px solid var(--gray-200); box-shadow:0 4px 16px rgba(0,0,0,0.1);
+    }
+    .ftool-btn {
+      width:42px; height:42px; border:none; background:transparent;
+      border-radius:10px; color:var(--gray-500); font-size:16px; cursor:pointer;
+      display:flex; align-items:center; justify-content:center; transition:all 0.15s;
+    }
+    .ftool-btn:hover { background:var(--gray-100); color:var(--gray-700); }
+    .ftool-btn.active { background:var(--primary-light); color:var(--primary); }
+    .ftool-sep { height:1px; background:var(--gray-200); margin:4px 6px; }
+
+    /* Drawing Canvas */
+    .drawing-canvas {
+      position:absolute; inset:0; z-index:20; cursor:crosshair;
+      pointer-events:none; opacity:0; transition:opacity 0.2s;
+    }
+    .drawing-canvas.active { pointer-events:auto; opacity:1; }
+
+    /* Pen Palette */
+    .pen-palette {
+      position:fixed; right:76px; top:50%; transform:translateY(-50%);
+      background:#fff; border-radius:14px; padding:14px; z-index:55;
+      border:1px solid var(--gray-200); box-shadow:0 4px 16px rgba(0,0,0,0.12); display:none;
+    }
+    .pen-palette.show { display:block; }
+    .palette-title { font-size:11px; color:var(--gray-400); margin-bottom:8px; font-weight:600; }
+    .color-options { display:flex; gap:6px; margin-bottom:12px; }
+    .color-btn {
+      width:24px; height:24px; border-radius:50%; border:2px solid transparent;
+      cursor:pointer; transition:all 0.15s;
+    }
+    .color-btn.active { border-color:var(--primary); transform:scale(1.2); }
+    .size-options { display:flex; gap:8px; align-items:center; }
+    .size-btn {
+      border-radius:50%; background:var(--gray-700); border:2px solid transparent;
+      cursor:pointer; transition:all 0.15s;
+    }
+    .size-btn.active { border-color:var(--primary); }
+
+    /* Whiteboard Modal */
+    .whiteboard-container { position:relative; width:100%; height:400px; background:#fff; border:1px solid var(--gray-200); border-radius:12px; overflow:hidden; }
+    .whiteboard-canvas { width:100%; height:100%; cursor:crosshair; }
+    .whiteboard-tools { display:flex; gap:8px; margin-top:12px; flex-wrap:wrap; }
+    .wb-tool-btn { padding:8px 14px; border:1px solid var(--gray-200); border-radius:8px; background:#fff; font-size:12px; cursor:pointer; font-family:inherit; display:flex; align-items:center; gap:6px; }
+    .wb-tool-btn:hover { background:var(--gray-50); }
+    .wb-tool-btn.active { background:var(--primary-light); border-color:var(--primary); color:var(--primary); }
+    .wb-color-btn { width:24px; height:24px; border-radius:50%; border:2px solid transparent; cursor:pointer; }
+    .wb-color-btn.active { border-color:var(--primary); }
+  </style>
+</head>
+<body>
+  <!-- Header -->
+  <header class="viewer-header">
+    <div class="header-left">
+      <button class="btn-back" onclick="goBack()"><i class="fas fa-arrow-left"></i> 수업게시판</button>
+      <input type="text" class="title-input" id="lessonTitleInput" placeholder="수업 제목을 입력하세요">
+    </div>
+    <div class="header-right">
+      <button class="btn-save btn-draft" onclick="saveDraft()">임시저장</button>
+      <button class="btn-save btn-primary" onclick="openSavePanel()">저장</button>
+    </div>
+  </header>
+
+  <!-- Main Container -->
+  <div class="viewer-container">
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <span class="sidebar-title">📚 과정 목록</span>
+        <span class="sidebar-count" id="stepCount">0개 과정</span>
+      </div>
+      <div class="sidebar-content" id="stepList"></div>
+      <div class="sidebar-footer">
+        <button class="btn-add-step" onclick="showAddGrid()">＋ 과정 추가</button>
+      </div>
+    </aside>
+
+    <!-- Content Area -->
+    <section class="content-area">
+      <!-- Empty State -->
+      <div class="content-empty" id="emptyState">
+        <div class="empty-icon">📝</div>
+        <div class="empty-text">수업을 구성해보세요.</div>
+        <div class="add-grid">
+          <div class="add-card" onclick="openModal('fileUpload')">
+            <div class="add-card-icon">📁</div>
+            <div class="add-card-label">파일 업로드</div>
+          </div>
+          <div class="add-card" onclick="openModal('linkAdd')">
+            <div class="add-card-icon">🔗</div>
+            <div class="add-card-label">링크 추가</div>
+          </div>
+          <div class="add-card" onclick="openModal('myArchive')">
+            <div class="add-card-icon">📦</div>
+            <div class="add-card-label">나의 보관함에서 선택</div>
+          </div>
+          <div class="add-card" onclick="openModal('contentSearch')">
+            <div class="add-card-icon">🔍</div>
+            <div class="add-card-label">콘텐츠에서 검색</div>
+          </div>
+          <div class="add-card" onclick="openModal('whiteboard')">
+            <div class="add-card-icon">🖌️</div>
+            <div class="add-card-label">화이트보드</div>
+          </div>
+          <div class="add-card" onclick="openModal('newCreate')">
+            <div class="add-card-icon">✏️</div>
+            <div class="add-card-label">새로 만들기</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Content Preview -->
+      <div class="content-preview" id="previewArea" style="display:none;">
+        <div class="preview-header">
+          <span class="preview-type-badge" id="previewType"></span>
+          <button class="btn-back" onclick="showAddGrid()" style="font-size:12px;"><i class="fas fa-plus"></i> 과정 추가</button>
+        </div>
+        <div class="preview-frame" id="previewFrame">미리보기 영역</div>
+      </div>
+
+      <!-- Drawing Canvas Overlay -->
+      <canvas class="drawing-canvas" id="drawingCanvas"></canvas>
+    </section>
+  </div>
+
+  <!-- Floating Toolbar (필기 도구) -->
+  <div class="floating-toolbar" id="floatingToolbar">
+    <button class="ftool-btn" id="ftPen" onclick="ftActivateTool('pen')" title="펜"><i class="fas fa-pen"></i></button>
+    <button class="ftool-btn" id="ftHighlight" onclick="ftActivateTool('highlight')" title="형광펜"><i class="fas fa-highlighter"></i></button>
+    <button class="ftool-btn" id="ftEraser" onclick="ftActivateTool('eraser')" title="지우개"><i class="fas fa-eraser"></i></button>
+    <button class="ftool-btn" onclick="ftClearDrawing()" title="전체 지우기"><i class="fas fa-trash-alt"></i></button>
+    <div class="ftool-sep"></div>
+    <button class="ftool-btn" id="ftText" onclick="ftActivateTool('text')" title="텍스트"><i class="fas fa-font"></i></button>
+    <button class="ftool-btn" onclick="ftSaveDrawing()" title="저장"><i class="fas fa-save"></i></button>
+  </div>
+
+  <!-- Pen Palette -->
+  <div class="pen-palette" id="penPalette">
+    <div class="palette-title">색상</div>
+    <div class="color-options">
+      <div class="color-btn active" style="background:#1F2937;" onclick="ftSetColor('#1F2937')"></div>
+      <div class="color-btn" style="background:#EF4444;" onclick="ftSetColor('#EF4444')"></div>
+      <div class="color-btn" style="background:#3B82F6;" onclick="ftSetColor('#3B82F6')"></div>
+      <div class="color-btn" style="background:#10B981;" onclick="ftSetColor('#10B981')"></div>
+      <div class="color-btn" style="background:#F59E0B;" onclick="ftSetColor('#F59E0B')"></div>
+    </div>
+    <div class="palette-title">굵기</div>
+    <div class="size-options">
+      <div class="size-btn active" style="width:8px;height:8px;" onclick="ftSetSize(2)"></div>
+      <div class="size-btn" style="width:14px;height:14px;" onclick="ftSetSize(4)"></div>
+      <div class="size-btn" style="width:20px;height:20px;" onclick="ftSetSize(8)"></div>
+    </div>
+  </div>
+
+  <!-- Save Overlay -->
+  <div class="save-overlay" id="saveOverlay">
+    <div class="save-panel">
+      <div class="save-header">
+        <h2>수업 정보 입력</h2>
+        <button class="close-btn" onclick="closeSavePanel()">✕</button>
+      </div>
+      <div class="save-body">
+        <div class="form-section">
+          <div class="form-section-title">📋 기본 정보</div>
+          <div class="form-group">
+            <label class="form-label">제목 <span class="required">*</span></label>
+            <input type="text" class="form-input" id="saveTitle" placeholder="수업 제목을 입력하세요">
+          </div>
+          <div class="form-group">
+            <label class="form-label">설명</label>
+            <textarea class="form-input form-textarea" id="saveDescription" placeholder="수업에 대한 설명을 입력하세요"></textarea>
+          </div>
+        </div>
+
+        <div class="form-section">
+          <div class="form-section-title">📚 교육과정 연결</div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">학교급</label>
+              <select class="form-input" id="saveSchoolLevel" onchange="onSchoolLevelChange()">
+                <option value="">선택 안 함</option>
+                <option value="초">초등</option>
+                <option value="중">중등</option>
+                <option value="고">고등</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">교과</label>
+              <select class="form-input" id="saveSubjectCode" onchange="onSubjectChange()" disabled>
+                <option value="">학교급을 먼저 선택</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">학년군</label>
+              <select class="form-input" id="saveGradeGroup" onchange="onGradeGroupChange()" disabled>
+                <option value="">교과를 먼저 선택</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">영역</label>
+              <select class="form-input" id="saveArea" onchange="onAreaChange()" disabled>
+                <option value="">학년군을 먼저 선택</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">성취기준</label>
+            <div style="position:relative;">
+              <input type="text" class="form-input" id="saveAchievementSearch" placeholder="키워드로 검색 (예: 분수, 곱셈)" oninput="searchStandards()" disabled>
+              <div id="achievementDropdown" style="position:absolute;top:100%;left:0;right:0;max-height:200px;overflow-y:auto;background:#fff;border:1px solid var(--gray-200);border-radius:0 0 8px 8px;display:none;z-index:10;box-shadow:0 4px 12px rgba(0,0,0,0.1);"></div>
+            </div>
+            <div id="selectedAchievement" style="margin-top:6px;font-size:12px;color:var(--gray-500);"></div>
+            <input type="hidden" id="saveAchievementCode">
+          </div>
+        </div>
+
+        <div class="form-section">
+          <div class="form-section-title">⚙️ 세부정보</div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">시작일</label>
+              <input type="date" class="form-input" id="saveStartDate">
+            </div>
+            <div class="form-group">
+              <label class="form-label">종료일</label>
+              <input type="date" class="form-input" id="saveEndDate">
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">예상 학습 시간 (분)</label>
+            <input type="number" class="form-input" id="saveMinutes" placeholder="45" min="0" value="45">
+          </div>
+          <div class="form-group">
+            <label class="form-label">차시</label>
+            <input type="number" class="form-input" id="saveLessonOrder" placeholder="1" min="1">
+          </div>
+        </div>
+
+        <div class="form-section">
+          <div class="form-section-title">📋 과정 목록</div>
+          <div id="saveStepSummary" style="font-size:13px;color:var(--gray-600);"></div>
+        </div>
+      </div>
+      <div class="save-footer">
+        <button class="modal-btn-cancel" onclick="closeSavePanel()">취소</button>
+        <button class="btn-save btn-primary" onclick="submitLesson('published')">게시하기</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- File Upload Modal -->
+  <div class="modal-overlay" id="modal-fileUpload">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3>📁 파일 업로드</h3>
+        <button class="close-btn" onclick="closeModal('fileUpload')">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label class="form-label">콘텐츠 제목</label>
+          <input type="text" class="form-input" id="fileTitle" placeholder="제목 입력 (미입력시 파일명 사용)">
+        </div>
+        <div class="drop-zone" id="dropZone" onclick="document.getElementById('fileInput').click()">
+          <div class="drop-zone-icon">📂</div>
+          <div class="drop-zone-text" id="dropZoneText">파일을 여기에 끌어다 놓거나 클릭하여 선택하세요</div>
+          <div class="drop-zone-hint">지원 형식: PDF, HWP, DOCX, PPTX, JPG, PNG, MP4 (최대 500MB)</div>
+        </div>
+        <input type="file" id="fileInput" style="display:none" accept=".pdf,.hwp,.docx,.pptx,.jpg,.jpeg,.png,.gif,.mp4,.mp3,.zip">
+      </div>
+      <div class="modal-footer">
+        <button class="modal-btn-cancel" onclick="closeModal('fileUpload')">취소</button>
+        <button class="btn-save btn-primary" onclick="addFileStep()">추가하기</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Link Add Modal -->
+  <div class="modal-overlay" id="modal-linkAdd">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3>🔗 링크 추가</h3>
+        <button class="close-btn" onclick="closeModal('linkAdd')">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label class="form-label">링크 제목</label>
+          <input type="text" id="linkTitle" class="form-input" placeholder="제목 입력">
+        </div>
+        <div class="form-group">
+          <label class="form-label">URL <span class="required">*</span></label>
+          <input type="url" id="linkUrl" class="form-input" placeholder="https://example.com">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="modal-btn-cancel" onclick="closeModal('linkAdd')">취소</button>
+        <button class="btn-save btn-primary" onclick="addLinkStep()">추가하기</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- My Archive Modal -->
+  <div class="modal-overlay" id="modal-myArchive">
+    <div class="modal-card" style="width:640px;">
+      <div class="modal-header">
+        <h3>📦 나의 보관함에서 선택</h3>
+        <button class="close-btn" onclick="closeModal('myArchive')">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="search-input-wrap">
+          <i class="fas fa-search"></i>
+          <input type="text" id="archiveSearch" placeholder="보관함 콘텐츠 검색..." oninput="searchMyArchive()">
+        </div>
+        <div class="search-list" id="archiveList">
+          <div class="loading-text">불러오는 중...</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Content Search Modal -->
+  <div class="modal-overlay" id="modal-contentSearch">
+    <div class="modal-card" style="width:640px;">
+      <div class="modal-header">
+        <h3>🔍 콘텐츠에서 검색</h3>
+        <button class="close-btn" onclick="closeModal('contentSearch')">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="search-input-wrap">
+          <i class="fas fa-search"></i>
+          <input type="text" id="contentSearchInput" placeholder="콘텐츠 검색..." oninput="debounceContentSearch()">
+        </div>
+        <div class="search-list" id="contentSearchList">
+          <div class="empty-search">검색어를 입력하세요</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- New Create Modal -->
+  <div class="modal-overlay" id="modal-newCreate">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3>✏️ 새로 만들기</h3>
+        <button class="close-btn" onclick="closeModal('newCreate')">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label class="form-label">콘텐츠 제목 <span class="required">*</span></label>
+          <input type="text" id="newTitle" class="form-input" placeholder="제목 입력">
+        </div>
+        <div class="form-group">
+          <label class="form-label">콘텐츠 타입</label>
+          <select id="newType" class="form-input">
+            <option value="document">문서</option>
+            <option value="link">링크</option>
+            <option value="image">이미지</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">설명</label>
+          <textarea id="newContent" class="form-input form-textarea" placeholder="내용 설명을 입력하세요"></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="modal-btn-cancel" onclick="closeModal('newCreate')">취소</button>
+        <button class="btn-save btn-primary" onclick="addNewStep()">추가하기</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Whiteboard Modal -->
+  <div class="modal-overlay" id="modal-whiteboard">
+    <div class="modal-card" style="width:760px;">
+      <div class="modal-header">
+        <h3>🖌️ 화이트보드</h3>
+        <button class="close-btn" onclick="closeModal('whiteboard')">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label class="form-label">제목 <span class="required">*</span></label>
+          <input type="text" id="wbTitle" class="form-input" placeholder="화이트보드 제목을 입력하세요">
+        </div>
+        <div class="whiteboard-container">
+          <canvas class="whiteboard-canvas" id="wbCanvas"></canvas>
+        </div>
+        <div class="whiteboard-tools">
+          <button class="wb-tool-btn active" onclick="wbSetTool('pen',this)"><i class="fas fa-pen"></i> 펜</button>
+          <button class="wb-tool-btn" onclick="wbSetTool('highlight',this)"><i class="fas fa-highlighter"></i> 형광펜</button>
+          <button class="wb-tool-btn" onclick="wbSetTool('eraser',this)"><i class="fas fa-eraser"></i> 지우개</button>
+          <button class="wb-tool-btn" onclick="wbClear()"><i class="fas fa-trash-alt"></i> 지우기</button>
+          <div style="display:flex;gap:4px;align-items:center;margin-left:auto;">
+            <div class="wb-color-btn active" style="background:#1F2937;" onclick="wbSetColor('#1F2937',this)"></div>
+            <div class="wb-color-btn" style="background:#EF4444;" onclick="wbSetColor('#EF4444',this)"></div>
+            <div class="wb-color-btn" style="background:#3B82F6;" onclick="wbSetColor('#3B82F6',this)"></div>
+            <div class="wb-color-btn" style="background:#10B981;" onclick="wbSetColor('#10B981',this)"></div>
+            <div class="wb-color-btn" style="background:#F59E0B;" onclick="wbSetColor('#F59E0B',this)"></div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="modal-btn-cancel" onclick="closeModal('whiteboard')">취소</button>
+        <button class="btn-save btn-primary" onclick="addWhiteboardStep()">추가하기</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Container -->
+  <div id="toastContainer" class="toast-container"></div>
+
+  <script>
+    const params = new URLSearchParams(location.search);
+    const classId = params.get('classId');
+    const editLessonId = params.get('id'); // edit mode
+    if (!classId) location.href = '/class/index.html';
+
+    let currentUser = null;
+    let steps = []; // { type, icon, title, id, contentId?, file_path? }
+    let activeStepIndex = -1;
+    let contentSearchTimer = null;
+
+    function escHtml(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+    const typeIcons = { video: '🎬', document: '📄', image: '🖼️', link: '🔗', quiz: '❓', whiteboard: '🖌️' };
+    const typeLabels = { video: '영상', document: '문서', image: '이미지', link: '링크', quiz: '퀴즈', whiteboard: '화이트보드' };
+
+    // ============================================================
+    // Step Management
+    // ============================================================
+    function addStep(type, icon, title, contentId, filePath) {
+      steps.push({ type, icon, title, id: Date.now(), contentId: contentId || null, file_path: filePath || null });
+      activeStepIndex = steps.length - 1;
+      renderSteps();
+      showPreview(activeStepIndex);
+      showToast(`"${title}" 과정이 추가되었습니다`);
+    }
+
+    function removeStep(index) {
+      steps.splice(index, 1);
+      if (activeStepIndex >= steps.length) activeStepIndex = steps.length - 1;
+      renderSteps();
+      if (steps.length === 0) {
+        document.getElementById('emptyState').style.display = 'flex';
+        document.getElementById('previewArea').style.display = 'none';
+      } else if (activeStepIndex >= 0) {
+        showPreview(activeStepIndex);
+      }
+    }
+
+    function renderSteps() {
+      const list = document.getElementById('stepList');
+      document.getElementById('stepCount').textContent = steps.length + '개 과정';
+      if (steps.length === 0) {
+        list.innerHTML = '<div style="padding:20px;text-align:center;color:var(--gray-400);font-size:13px;">추가된 과정이 없습니다</div>';
+        return;
+      }
+      list.innerHTML = steps.map((s, i) => `
+        <div class="step-item ${i === activeStepIndex ? 'active' : ''}" onclick="selectStep(${i})" draggable="true" ondragstart="dragStart(event,${i})" ondragover="dragOver(event,${i})" ondrop="drop(event,${i})" ondragend="dragEnd(event)">
+          <span class="drag-handle"><i class="fas fa-grip-vertical"></i></span>
+          <div class="step-num">${i + 1}</div>
+          <div class="step-info">
+            <div class="step-type">${escHtml(s.type)}</div>
+            <div class="step-title">${escHtml(s.title)}</div>
+          </div>
+          <div class="step-actions">
+            <button class="step-action-btn" title="삭제" onclick="event.stopPropagation(); removeStep(${i})"><i class="fas fa-trash"></i></button>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    function selectStep(index) {
+      activeStepIndex = index;
+      renderSteps();
+      showPreview(index);
+    }
+
+    function showPreview(index) {
+      const s = steps[index];
+      if (!s) return;
+      document.getElementById('emptyState').style.display = 'none';
+      document.getElementById('previewArea').style.display = 'flex';
+      document.getElementById('previewType').textContent = typeLabels[s.type] || s.type;
+      const frame = document.getElementById('previewFrame');
+
+      if (s.file_path && (s.type === 'video' || (s.type === 'link' && typeof isYouTubeUrl === 'function' && isYouTubeUrl(s.file_path)))) {
+        let url = s.file_path;
+        const ytEmbed = typeof toYouTubeEmbed === 'function' ? toYouTubeEmbed(url) : null;
+        if (ytEmbed) url = ytEmbed;
+        frame.innerHTML = `<iframe src="${url}" style="width:100%;height:100%;border:none;border-radius:12px;" allowfullscreen allow="autoplay; encrypted-media"></iframe>`;
+      } else if (s.file_path && s.type === 'link') {
+        frame.innerHTML = `<div style="display:flex;flex-direction:column;height:100%;gap:8px;">
+          <div style="flex:1;min-height:0;"><iframe src="${escHtml(s.file_path)}" style="width:100%;height:100%;border:1px solid var(--gray-200);border-radius:8px;" sandbox="allow-scripts allow-same-origin allow-popups"></iframe></div>
+          <div style="text-align:center;padding:4px;"><a href="${escHtml(s.file_path)}" target="_blank" style="color:var(--primary);font-size:12px;"><i class="fas fa-external-link-alt"></i> 새 탭에서 열기</a></div>
+        </div>`;
+      } else if (s.file_path && s.type === 'image') {
+        frame.innerHTML = `<img src="${escHtml(s.file_path)}" style="max-width:100%;max-height:400px;object-fit:contain;border-radius:8px;" alt="${escHtml(s.title)}">`;
+      } else {
+        frame.innerHTML = `<div style="text-align:center;"><div style="font-size:32px;margin-bottom:12px;">${s.icon || '📄'}</div><div style="font-size:14px;font-weight:600;color:var(--gray-700);">${escHtml(s.title)}</div><div style="font-size:12px;color:var(--gray-400);margin-top:6px;">${typeLabels[s.type] || s.type} 콘텐츠</div></div>`;
+      }
+    }
+
+    function showAddGrid() {
+      if (steps.length > 0) {
+        // Show add grid in a simpler way when steps exist
+        openModal('addContent');
+      }
+    }
+
+    // Drag & Drop
+    let dragIdx = -1;
+    function dragStart(e, i) { dragIdx = i; e.currentTarget.classList.add('dragging'); }
+    function dragOver(e, i) { e.preventDefault(); document.querySelectorAll('.step-item').forEach(el => el.classList.remove('drag-over')); e.currentTarget.classList.add('drag-over'); }
+    function drop(e, i) {
+      e.preventDefault();
+      if (dragIdx === i) return;
+      const [moved] = steps.splice(dragIdx, 1);
+      steps.splice(i, 0, moved);
+      if (activeStepIndex === dragIdx) activeStepIndex = i;
+      renderSteps();
+    }
+    function dragEnd(e) { document.querySelectorAll('.step-item').forEach(el => { el.classList.remove('dragging','drag-over'); }); }
+
+    // ============================================================
+    // Modal Management
+    // ============================================================
+    function openModal(name) {
+      if (name === 'addContent') {
+        // Re-show empty state grid temporarily
+        const overlay = document.getElementById('modal-addContent');
+        if (!overlay) {
+          // create a quick add modal
+          const div = document.createElement('div');
+          div.className = 'modal-overlay show';
+          div.id = 'modal-addContent';
+          div.innerHTML = `
+            <div class="modal-card" style="width:480px;">
+              <div class="modal-header"><h3>과정 추가</h3><button class="close-btn" onclick="closeModal('addContent')">✕</button></div>
+              <div class="modal-body" style="display:flex;justify-content:center;">
+                <div class="add-grid" style="max-width:400px;">
+                  <div class="add-card" onclick="closeModal('addContent');openModal('fileUpload')"><div class="add-card-icon">📁</div><div class="add-card-label">파일 업로드</div></div>
+                  <div class="add-card" onclick="closeModal('addContent');openModal('linkAdd')"><div class="add-card-icon">🔗</div><div class="add-card-label">링크 추가</div></div>
+                  <div class="add-card" onclick="closeModal('addContent');openModal('myArchive')"><div class="add-card-icon">📦</div><div class="add-card-label">보관함</div></div>
+                  <div class="add-card" onclick="closeModal('addContent');openModal('contentSearch')"><div class="add-card-icon">🔍</div><div class="add-card-label">콘텐츠 검색</div></div>
+                  <div class="add-card" onclick="closeModal('addContent');openModal('whiteboard')"><div class="add-card-icon">🖌️</div><div class="add-card-label">화이트보드</div></div>
+                  <div class="add-card" onclick="closeModal('addContent');openModal('newCreate')"><div class="add-card-icon">✏️</div><div class="add-card-label">새로 만들기</div></div>
+                </div>
+              </div>
+            </div>
+          `;
+          document.body.appendChild(div);
+        } else {
+          overlay.classList.add('show');
+        }
+        return;
+      }
+      const el = document.getElementById('modal-' + name);
+      if (el) {
+        el.classList.add('show');
+        if (name === 'myArchive') loadMyArchive();
+      }
+    }
+
+    function closeModal(name) {
+      const el = document.getElementById('modal-' + name);
+      if (el) el.classList.remove('show');
+    }
+
+    function openSavePanel() {
+      if (steps.length === 0) {
+        showToast('과정을 1개 이상 추가해주세요');
+        return;
+      }
+      const title = document.getElementById('lessonTitleInput').value;
+      document.getElementById('saveTitle').value = title;
+      document.getElementById('saveStepSummary').innerHTML = steps.map((s, i) =>
+        `<div style="display:flex;gap:8px;padding:6px 0;border-bottom:1px solid var(--gray-100);align-items:center;">
+          <span style="font-size:12px;font-weight:700;color:var(--gray-400);">${i+1}</span>
+          <span>${s.icon || '📄'}</span>
+          <span style="font-size:13px;">${escHtml(s.title)}</span>
+          <span style="font-size:11px;color:var(--gray-400);margin-left:auto;">${typeLabels[s.type] || s.type}</span>
+        </div>`
+      ).join('');
+      // 수정 모드일 때 버튼 텍스트 변경
+      const submitBtn = document.querySelector('.save-footer .btn-primary');
+      if (editLessonId) {
+        submitBtn.textContent = '수정 완료';
+        submitBtn.setAttribute('onclick', `submitLesson('${window._editOriginalStatus || 'published'}')`);
+      } else {
+        submitBtn.textContent = '게시하기';
+        submitBtn.setAttribute('onclick', "submitLesson('published')");
+      }
+      document.getElementById('saveOverlay').classList.add('open');
+    }
+
+    function closeSavePanel() {
+      document.getElementById('saveOverlay').classList.remove('open');
+    }
+
+    // ============================================================
+    // File Upload
+    // ============================================================
+    const fileInput = document.getElementById('fileInput');
+    const dropZone = document.getElementById('dropZone');
+
+    fileInput.addEventListener('change', (e) => {
+      if (e.target.files.length > 0) {
+        const file = e.target.files[0];
+        document.getElementById('dropZoneText').textContent = `${file.name} (${(file.size/1024/1024).toFixed(1)}MB)`;
+      }
+    });
+
+    dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('drag-active'); });
+    dropZone.addEventListener('dragleave', () => { dropZone.classList.remove('drag-active'); });
+    dropZone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dropZone.classList.remove('drag-active');
+      if (e.dataTransfer.files.length > 0) {
+        fileInput.files = e.dataTransfer.files;
+        const file = e.dataTransfer.files[0];
+        document.getElementById('dropZoneText').textContent = `${file.name} (${(file.size/1024/1024).toFixed(1)}MB)`;
+      }
+    });
+
+    async function addFileStep() {
+      const file = fileInput.files[0];
+      if (!file) { showToast('파일을 선택하세요'); return; }
+
+      const title = document.getElementById('fileTitle').value || file.name;
+      // Upload file first
+      const formData = new FormData();
+      formData.append('file', file);
+      try {
+        const res = await fetch('/api/upload', { method: 'POST', body: formData });
+        const data = await res.json();
+        if (data.success) {
+          // Create content record
+          const ext = file.name.split('.').pop().toLowerCase();
+          let contentType = 'document';
+          if (['mp4','avi','mov','webm'].includes(ext)) contentType = 'video';
+          else if (['jpg','jpeg','png','gif','svg','webp'].includes(ext)) contentType = 'image';
+
+          const contentRes = await fetch('/api/contents', {
+            method: 'POST', headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({ title, content_type: contentType, file_path: data.filePath, description: `업로드된 파일: ${file.name}` })
+          });
+          const contentData = await contentRes.json();
+          if (contentData.success) {
+            addStep(contentType, typeIcons[contentType], title, contentData.content.id, data.filePath);
+          } else {
+            addStep(contentType, typeIcons[contentType], title, null, data.filePath);
+          }
+        } else {
+          showToast('파일 업로드 실패: ' + (data.message || ''));
+          return;
+        }
+      } catch (err) {
+        console.error('Upload error:', err);
+        showToast('파일 업로드 중 오류 발생');
+        return;
+      }
+      closeModal('fileUpload');
+      fileInput.value = '';
+      document.getElementById('fileTitle').value = '';
+      document.getElementById('dropZoneText').textContent = '파일을 여기에 끌어다 놓거나 클릭하여 선택하세요';
+    }
+
+    // ============================================================
+    // Link Add
+    // ============================================================
+    function isYouTubeUrl(url) {
+      return /(?:youtube\.com\/watch|youtu\.be\/|youtube\.com\/embed\/|youtube\.com\/shorts\/)/.test(url);
+    }
+    function toYouTubeEmbed(url) {
+      if (url.includes('youtube.com/watch')) { try { const v = new URL(url).searchParams.get('v'); return `https://www.youtube.com/embed/${v}`; } catch(e){} }
+      if (url.includes('youtu.be/')) { const v = url.split('youtu.be/')[1].split(/[?#]/)[0]; return `https://www.youtube.com/embed/${v}`; }
+      if (url.includes('youtube.com/shorts/')) { const v = url.split('shorts/')[1].split(/[?#]/)[0]; return `https://www.youtube.com/embed/${v}`; }
+      if (url.includes('youtube.com/embed/')) return url;
+      return null;
+    }
+
+    function addLinkStep() {
+      const title = document.getElementById('linkTitle').value || '링크';
+      const url = document.getElementById('linkUrl').value;
+      if (!url) { showToast('URL을 입력하세요'); return; }
+
+      // Auto-detect YouTube URLs → video type
+      const isYT = isYouTubeUrl(url);
+      const contentType = isYT ? 'video' : 'link';
+      const icon = isYT ? '🎬' : '🔗';
+      const stepTitle = title === '링크' && isYT ? 'YouTube 동영상' : title;
+
+      // Create content record
+      fetch('/api/contents', {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ title: stepTitle, content_type: contentType, file_path: url })
+      }).then(r => r.json()).then(data => {
+        if (data.success) {
+          addStep(contentType, icon, stepTitle, data.content.id, url);
+        } else {
+          addStep(contentType, icon, stepTitle, null, url);
+        }
+      }).catch(() => {
+        addStep(contentType, icon, stepTitle, null, url);
+      });
+
+      closeModal('linkAdd');
+      document.getElementById('linkTitle').value = '';
+      document.getElementById('linkUrl').value = '';
+    }
+
+    // ============================================================
+    // My Archive
+    // ============================================================
+    async function loadMyArchive() {
+      const list = document.getElementById('archiveList');
+      list.innerHTML = '<div class="loading-text">불러오는 중...</div>';
+      try {
+        const res = await fetch('/api/contents/my');
+        const data = await res.json();
+        if (data.success && data.contents && data.contents.length > 0) {
+          renderArchiveList(data.contents);
+        } else {
+          list.innerHTML = '<div class="empty-search">보관함에 콘텐츠가 없습니다</div>';
+        }
+      } catch (err) {
+        list.innerHTML = '<div class="empty-search">불러오기 실패</div>';
+      }
+    }
+
+    function renderArchiveList(contents) {
+      const list = document.getElementById('archiveList');
+      list.innerHTML = contents.map(c => `
+        <div class="search-item">
+          <div class="search-item-icon">${typeIcons[c.content_type] || '📄'}</div>
+          <div class="search-item-info">
+            <div class="search-item-title">${escHtml(c.title)}</div>
+            <div class="search-item-meta">${typeLabels[c.content_type] || c.content_type} · ${c.created_at ? c.created_at.substring(0,10) : ''}</div>
+          </div>
+          <button class="search-item-select" onclick="selectArchiveContent(${c.id}, '${escHtml(c.title).replace(/'/g,"\\'")}', '${c.content_type}', '${escHtml(c.file_path||'').replace(/'/g,"\\'")}')">선택</button>
+        </div>
+      `).join('');
+    }
+
+    function searchMyArchive() {
+      const keyword = document.getElementById('archiveSearch').value.trim().toLowerCase();
+      const items = document.querySelectorAll('#archiveList .search-item');
+      items.forEach(item => {
+        const title = item.querySelector('.search-item-title')?.textContent?.toLowerCase() || '';
+        item.style.display = title.includes(keyword) ? '' : 'none';
+      });
+    }
+
+    function selectArchiveContent(id, title, type, filePath) {
+      addStep(type, typeIcons[type] || '📄', title, id, filePath || null);
+      closeModal('myArchive');
+    }
+
+    // ============================================================
+    // Content Search
+    // ============================================================
+    function debounceContentSearch() {
+      clearTimeout(contentSearchTimer);
+      contentSearchTimer = setTimeout(doContentSearch, 300);
+    }
+
+    async function doContentSearch() {
+      const keyword = document.getElementById('contentSearchInput').value.trim();
+      const list = document.getElementById('contentSearchList');
+      if (!keyword) { list.innerHTML = '<div class="empty-search">검색어를 입력하세요</div>'; return; }
+      list.innerHTML = '<div class="loading-text">검색 중...</div>';
+      try {
+        const res = await fetch(`/api/contents/search-for-lesson?keyword=${encodeURIComponent(keyword)}`);
+        const data = await res.json();
+        if (data.success && data.contents && data.contents.length > 0) {
+          list.innerHTML = data.contents.map(c => `
+            <div class="search-item">
+              <div class="search-item-icon">${typeIcons[c.content_type] || '📄'}</div>
+              <div class="search-item-info">
+                <div class="search-item-title">${escHtml(c.title)}</div>
+                <div class="search-item-meta">${typeLabels[c.content_type] || c.content_type} · ${c.creator_name || ''}</div>
+              </div>
+              <button class="search-item-select" onclick="selectSearchContent(${c.id}, '${escHtml(c.title).replace(/'/g,"\\'")}', '${c.content_type}', '${escHtml(c.file_path||'').replace(/'/g,"\\'")}')">선택</button>
+            </div>
+          `).join('');
+        } else {
+          list.innerHTML = '<div class="empty-search">검색 결과가 없습니다</div>';
+        }
+      } catch (err) {
+        list.innerHTML = '<div class="empty-search">검색 중 오류 발생</div>';
+      }
+    }
+
+    function selectSearchContent(id, title, type, filePath) {
+      addStep(type, typeIcons[type] || '📄', title, id, filePath || null);
+      closeModal('contentSearch');
+    }
+
+    // ============================================================
+    // New Create (직접 콘텐츠 만들기)
+    // ============================================================
+    async function addNewStep() {
+      const title = document.getElementById('newTitle').value.trim();
+      if (!title) { showToast('제목을 입력하세요'); return; }
+      const type = document.getElementById('newType').value;
+      const desc = document.getElementById('newContent').value.trim();
+
+      try {
+        const res = await fetch('/api/contents', {
+          method: 'POST', headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({ title, content_type: type, description: desc })
+        });
+        const data = await res.json();
+        if (data.success) {
+          addStep(type, typeIcons[type], title, data.content.id);
+        } else {
+          addStep(type, typeIcons[type], title);
+        }
+      } catch (err) {
+        addStep(type, typeIcons[type], title);
+      }
+
+      closeModal('newCreate');
+      document.getElementById('newTitle').value = '';
+      document.getElementById('newContent').value = '';
+    }
+
+    // ============================================================
+    // Save / Submit
+    // ============================================================
+    async function saveDraft() {
+      await submitLesson('draft');
+    }
+
+    async function submitLesson(status) {
+      const title = document.getElementById('saveTitle').value || document.getElementById('lessonTitleInput').value;
+      if (!title) { showToast('수업 제목을 입력하세요'); return; }
+
+      const body = {
+        title,
+        description: document.getElementById('saveDescription')?.value || '',
+        start_date: document.getElementById('saveStartDate')?.value || null,
+        end_date: document.getElementById('saveEndDate')?.value || null,
+        estimated_minutes: parseInt(document.getElementById('saveMinutes')?.value) || 45,
+        lesson_order: parseInt(document.getElementById('saveLessonOrder')?.value) || null,
+        subject_code: document.getElementById('saveSubjectCode')?.value || null,
+        grade_group: parseInt(document.getElementById('saveGradeGroup')?.value) || null,
+        achievement_code: document.getElementById('saveAchievementCode')?.value || null,
+        status: status || 'draft',
+        content_ids: steps.filter(s => s.contentId).map(s => s.contentId)
+      };
+
+      try {
+        let res;
+        if (editLessonId) {
+          // 수정 모드: PUT으로 수업 정보 + 콘텐츠 전체 갱신
+          res = await fetch(`/api/lesson/${classId}/${editLessonId}`, {
+            method: 'PUT', headers: {'Content-Type':'application/json'},
+            body: JSON.stringify(body)
+          });
+        } else {
+          // 새 수업 생성
+          res = await fetch(`/api/lesson/${classId}`, {
+            method: 'POST', headers: {'Content-Type':'application/json'},
+            body: JSON.stringify(body)
+          });
+        }
+        const data = await res.json();
+        if (data.success) {
+          const msg = editLessonId
+            ? (status === 'draft' ? '임시저장되었습니다' : '수업이 수정되었습니다')
+            : (status === 'draft' ? '임시저장되었습니다' : '수업이 게시되었습니다');
+          showToast(msg, 'success');
+          closeSavePanel();
+          setTimeout(() => {
+            location.href = `/class/lesson-board.html?classId=${classId}`;
+          }, 1000);
+        } else {
+          showToast(data.message || '저장 실패');
+        }
+      } catch (err) {
+        console.error('Save error:', err);
+        showToast('저장 중 오류 발생');
+      }
+    }
+
+    // ============================================================
+    // Edit Mode: Load existing lesson
+    // ============================================================
+    async function loadExistingLesson() {
+      if (!editLessonId) return;
+
+      // 헤더 UI를 수정 모드로 변경
+      document.title = '수업 수정 - 다채움';
+      document.querySelector('.save-header h2').textContent = '수업 정보 수정';
+
+      try {
+        const res = await fetch(`/api/lesson/${classId}/${editLessonId}`);
+        const data = await res.json();
+        if (!data.success) {
+          showToast('수업을 불러올 수 없습니다');
+          return;
+        }
+
+        const lesson = data.lesson;
+        // 기본 정보 로드
+        document.getElementById('lessonTitleInput').value = lesson.title || '';
+        // Save 패널 필드도 미리 채우기
+        document.getElementById('saveTitle').value = lesson.title || '';
+        document.getElementById('saveDescription').value = lesson.description || '';
+        document.getElementById('saveStartDate').value = lesson.start_date || '';
+        document.getElementById('saveEndDate').value = lesson.end_date || '';
+        document.getElementById('saveMinutes').value = lesson.estimated_minutes || 45;
+        document.getElementById('saveLessonOrder').value = lesson.lesson_order || '';
+
+        // 기존 상태 저장 (수정 시 상태 유지용)
+        window._editOriginalStatus = lesson.status;
+
+        // Load existing contents as steps
+        if (data.contents && data.contents.length > 0) {
+          data.contents.forEach(c => {
+            steps.push({
+              type: c.content_type,
+              icon: typeIcons[c.content_type] || '📄',
+              title: c.title,
+              id: Date.now() + Math.random(),
+              contentId: c.id,
+              file_path: c.file_path || null
+            });
+          });
+          activeStepIndex = 0;
+          renderSteps();
+          showPreview(0);
+        }
+      } catch (err) {
+        console.error('Load lesson error:', err);
+        showToast('수업 불러오기 중 오류 발생');
+      }
+    }
+
+    // ============================================================
+    // Utils
+    // ============================================================
+    function showToast(msg, cls) {
+      const container = document.getElementById('toastContainer');
+      const toast = document.createElement('div');
+      toast.className = 'toast ' + (cls || '');
+      toast.textContent = msg;
+      container.appendChild(toast);
+      setTimeout(() => toast.remove(), 3000);
+    }
+
+    function goBack() {
+      location.href = `/class/lesson-board.html?classId=${classId}`;
+    }
+
+    // ============================================================
+    // Init
+    // ============================================================
+    window.addEventListener('dacheim:user-loaded', (e) => {
+      currentUser = e.detail;
+      loadExistingLesson();
+    });
+
+    // If no auth event in 2s, still allow usage
+    setTimeout(() => {
+      if (!currentUser) loadExistingLesson();
+    }, 2000);
+
+    renderSteps();
+
+    // ============================================================
+    // Whiteboard Modal
+    // ============================================================
+    let wbCtx = null;
+    let wbDrawing = false;
+    let wbTool = 'pen';
+    let wbColor = '#1F2937';
+
+    function initWhiteboard() {
+      const canvas = document.getElementById('wbCanvas');
+      if (!canvas || wbCtx) return;
+      const rect = canvas.parentElement.getBoundingClientRect();
+      canvas.width = rect.width;
+      canvas.height = rect.height;
+      wbCtx = canvas.getContext('2d');
+      wbCtx.fillStyle = '#fff';
+      wbCtx.fillRect(0, 0, canvas.width, canvas.height);
+
+      canvas.addEventListener('mousedown', (e) => {
+        wbDrawing = true;
+        wbCtx.beginPath();
+        wbCtx.moveTo(e.offsetX, e.offsetY);
+      });
+      canvas.addEventListener('mousemove', (e) => {
+        if (!wbDrawing) return;
+        if (wbTool === 'eraser') {
+          wbCtx.globalCompositeOperation = 'destination-out';
+          wbCtx.lineWidth = 20;
+        } else if (wbTool === 'highlight') {
+          wbCtx.globalCompositeOperation = 'source-over';
+          wbCtx.strokeStyle = wbColor;
+          wbCtx.lineWidth = 16;
+          wbCtx.globalAlpha = 0.3;
+        } else {
+          wbCtx.globalCompositeOperation = 'source-over';
+          wbCtx.strokeStyle = wbColor;
+          wbCtx.lineWidth = 2;
+          wbCtx.globalAlpha = 1;
+        }
+        wbCtx.lineCap = 'round';
+        wbCtx.lineJoin = 'round';
+        wbCtx.lineTo(e.offsetX, e.offsetY);
+        wbCtx.stroke();
+      });
+      canvas.addEventListener('mouseup', () => { wbDrawing = false; wbCtx.globalAlpha = 1; wbCtx.globalCompositeOperation = 'source-over'; });
+      canvas.addEventListener('mouseleave', () => { wbDrawing = false; wbCtx.globalAlpha = 1; });
+    }
+
+    function wbSetTool(tool, btn) {
+      wbTool = tool;
+      document.querySelectorAll('.wb-tool-btn').forEach(b => b.classList.remove('active'));
+      if (btn) btn.classList.add('active');
+    }
+
+    function wbSetColor(color, btn) {
+      wbColor = color;
+      document.querySelectorAll('.wb-color-btn').forEach(b => b.classList.remove('active'));
+      if (btn) btn.classList.add('active');
+    }
+
+    function wbClear() {
+      if (!wbCtx) return;
+      const canvas = document.getElementById('wbCanvas');
+      wbCtx.fillStyle = '#fff';
+      wbCtx.fillRect(0, 0, canvas.width, canvas.height);
+    }
+
+    async function addWhiteboardStep() {
+      const title = document.getElementById('wbTitle').value.trim();
+      if (!title) { showToast('제목을 입력하세요'); return; }
+      const canvas = document.getElementById('wbCanvas');
+      const dataUrl = canvas.toDataURL('image/png');
+
+      // Upload as image blob
+      try {
+        const blob = await (await fetch(dataUrl)).blob();
+        const formData = new FormData();
+        formData.append('file', blob, 'whiteboard.png');
+        const uploadRes = await fetch('/api/upload', { method: 'POST', body: formData });
+        const uploadData = await uploadRes.json();
+        if (uploadData.success) {
+          const contentRes = await fetch('/api/contents', {
+            method: 'POST', headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({ title, content_type: 'image', file_path: uploadData.filePath, description: '화이트보드로 작성됨' })
+          });
+          const contentData = await contentRes.json();
+          addStep('image', '🖌️', title, contentData.success ? contentData.content.id : null, uploadData.filePath);
+        } else {
+          addStep('whiteboard', '🖌️', title);
+        }
+      } catch (err) {
+        console.error('Whiteboard save error:', err);
+        addStep('whiteboard', '🖌️', title);
+      }
+      closeModal('whiteboard');
+      document.getElementById('wbTitle').value = '';
+      wbClear();
+    }
+
+    // Patch openModal to init whiteboard
+    const _origOpenModal = openModal;
+    openModal = function(name) {
+      _origOpenModal(name);
+      if (name === 'whiteboard') {
+        setTimeout(initWhiteboard, 100);
+      }
+    };
+
+    // ============================================================
+    // Floating Toolbar (필기 도구)
+    // ============================================================
+    const ftCanvas = document.getElementById('drawingCanvas');
+    const ftCtx = ftCanvas ? ftCanvas.getContext('2d') : null;
+    let ftDrawing = false;
+    let ftActive = false;
+    let ftTool = null;
+    let ftColor = '#1F2937';
+    let ftSize = 2;
+
+    function ftResizeCanvas() {
+      if (!ftCanvas) return;
+      const area = document.querySelector('.content-area');
+      if (!area) return;
+      ftCanvas.width = area.offsetWidth;
+      ftCanvas.height = area.offsetHeight;
+    }
+
+    function ftActivateTool(tool) {
+      if (ftTool === tool) {
+        ftDeactivate();
+        return;
+      }
+      ftTool = tool;
+      ftActive = true;
+      if (ftCanvas) ftCanvas.classList.add('active');
+      document.getElementById('ftPen').classList.toggle('active', tool === 'pen');
+      document.getElementById('ftHighlight').classList.toggle('active', tool === 'highlight');
+      document.getElementById('ftEraser').classList.toggle('active', tool === 'eraser');
+      document.getElementById('ftText').classList.toggle('active', tool === 'text');
+      document.getElementById('penPalette').classList.toggle('show', tool === 'pen' || tool === 'highlight');
+      ftResizeCanvas();
+    }
+
+    function ftDeactivate() {
+      ftTool = null;
+      ftActive = false;
+      if (ftCanvas) ftCanvas.classList.remove('active');
+      document.querySelectorAll('.ftool-btn').forEach(b => b.classList.remove('active'));
+      document.getElementById('penPalette').classList.remove('show');
+    }
+
+    function ftSetColor(color) {
+      ftColor = color;
+      document.querySelectorAll('.pen-palette .color-btn').forEach(b => {
+        b.classList.toggle('active', b.style.background === color || b.style.backgroundColor === color);
+      });
+    }
+
+    function ftSetSize(size) {
+      ftSize = size;
+      const sizeMap = { 2: 0, 4: 1, 8: 2 };
+      document.querySelectorAll('.pen-palette .size-btn').forEach((b, i) => b.classList.toggle('active', i === sizeMap[size]));
+    }
+
+    function ftClearDrawing() {
+      if (ftCtx) ftCtx.clearRect(0, 0, ftCanvas.width, ftCanvas.height);
+      showToast('필기가 지워졌습니다');
+    }
+
+    function ftSaveDrawing() {
+      showToast('필기가 저장되었습니다', 'success');
+    }
+
+    if (ftCanvas && ftCtx) {
+      ftCanvas.addEventListener('mousedown', (e) => {
+        if (!ftActive) return;
+        ftDrawing = true;
+        ftCtx.beginPath();
+        ftCtx.moveTo(e.offsetX, e.offsetY);
+      });
+      ftCanvas.addEventListener('mousemove', (e) => {
+        if (!ftDrawing || !ftActive) return;
+        if (ftTool === 'eraser') {
+          ftCtx.globalCompositeOperation = 'destination-out';
+          ftCtx.lineWidth = ftSize * 5;
+        } else if (ftTool === 'highlight') {
+          ftCtx.globalCompositeOperation = 'source-over';
+          ftCtx.strokeStyle = ftColor;
+          ftCtx.lineWidth = ftSize * 3;
+          ftCtx.globalAlpha = 0.3;
+        } else {
+          ftCtx.globalCompositeOperation = 'source-over';
+          ftCtx.strokeStyle = ftColor;
+          ftCtx.lineWidth = ftSize;
+          ftCtx.globalAlpha = 1;
+        }
+        ftCtx.lineCap = 'round';
+        ftCtx.lineJoin = 'round';
+        ftCtx.lineTo(e.offsetX, e.offsetY);
+        ftCtx.stroke();
+      });
+      ftCanvas.addEventListener('mouseup', () => { ftDrawing = false; ftCtx.globalAlpha = 1; ftCtx.globalCompositeOperation = 'source-over'; });
+      ftCanvas.addEventListener('mouseleave', () => { ftDrawing = false; });
+      window.addEventListener('resize', ftResizeCanvas);
+      ftResizeCanvas();
+    }
+
+    // ============================================================
+    // 교육과정 연동 (학교급 → 교과 → 학년군 → 영역 → 성취기준)
+    // ============================================================
+    let _searchTimer = null;
+
+    async function onSchoolLevelChange() {
+      const level = document.getElementById('saveSchoolLevel').value;
+      const subjectSel = document.getElementById('saveSubjectCode');
+      const gradeGroupSel = document.getElementById('saveGradeGroup');
+      const areaSel = document.getElementById('saveArea');
+      const searchInput = document.getElementById('saveAchievementSearch');
+
+      // 하위 초기화
+      subjectSel.innerHTML = '<option value="">선택하세요</option>';
+      gradeGroupSel.innerHTML = '<option value="">교과를 먼저 선택</option>';
+      areaSel.innerHTML = '<option value="">학년군을 먼저 선택</option>';
+      gradeGroupSel.disabled = true;
+      areaSel.disabled = true;
+      searchInput.disabled = true;
+      searchInput.value = '';
+      document.getElementById('selectedAchievement').textContent = '';
+      document.getElementById('saveAchievementCode').value = '';
+
+      if (!level) { subjectSel.disabled = true; return; }
+      subjectSel.disabled = false;
+
+      try {
+        const res = await fetch(`/api/curriculum/subjects?school_level=${encodeURIComponent(level)}`);
+        const data = await res.json();
+        if (data.success) {
+          data.data.forEach(s => {
+            subjectSel.innerHTML += `<option value="${s.code}">${s.name}</option>`;
+          });
+        }
+      } catch (e) { console.error('교과 로드 실패:', e); }
+    }
+
+    async function onSubjectChange() {
+      const subjectCode = document.getElementById('saveSubjectCode').value;
+      const gradeGroupSel = document.getElementById('saveGradeGroup');
+      const areaSel = document.getElementById('saveArea');
+      const searchInput = document.getElementById('saveAchievementSearch');
+
+      gradeGroupSel.innerHTML = '<option value="">선택하세요</option>';
+      areaSel.innerHTML = '<option value="">학년군을 먼저 선택</option>';
+      areaSel.disabled = true;
+      searchInput.disabled = true;
+      searchInput.value = '';
+      document.getElementById('selectedAchievement').textContent = '';
+      document.getElementById('saveAchievementCode').value = '';
+
+      if (!subjectCode) { gradeGroupSel.disabled = true; return; }
+      gradeGroupSel.disabled = false;
+
+      try {
+        const res = await fetch(`/api/curriculum/grade-groups?subject_code=${subjectCode}`);
+        const data = await res.json();
+        if (data.success) {
+          data.data.forEach(g => {
+            gradeGroupSel.innerHTML += `<option value="${g.grade_group}">${g.grade_label}</option>`;
+          });
+        }
+      } catch (e) { console.error('학년군 로드 실패:', e); }
+    }
+
+    async function onGradeGroupChange() {
+      const subjectCode = document.getElementById('saveSubjectCode').value;
+      const gradeGroup = document.getElementById('saveGradeGroup').value;
+      const areaSel = document.getElementById('saveArea');
+      const searchInput = document.getElementById('saveAchievementSearch');
+
+      areaSel.innerHTML = '<option value="">전체</option>';
+      searchInput.value = '';
+      document.getElementById('selectedAchievement').textContent = '';
+      document.getElementById('saveAchievementCode').value = '';
+
+      if (!gradeGroup) { areaSel.disabled = true; searchInput.disabled = true; return; }
+      areaSel.disabled = false;
+      searchInput.disabled = false;
+
+      try {
+        const res = await fetch(`/api/curriculum/areas?subject_code=${subjectCode}&grade_group=${gradeGroup}`);
+        const data = await res.json();
+        if (data.success) {
+          data.data.forEach(a => {
+            areaSel.innerHTML += `<option value="${a}">${a}</option>`;
+          });
+        }
+      } catch (e) { console.error('영역 로드 실패:', e); }
+    }
+
+    function onAreaChange() {
+      document.getElementById('saveAchievementSearch').value = '';
+      document.getElementById('selectedAchievement').textContent = '';
+      document.getElementById('saveAchievementCode').value = '';
+      searchStandards();
+    }
+
+    function searchStandards() {
+      clearTimeout(_searchTimer);
+      _searchTimer = setTimeout(async () => {
+        const subjectCode = document.getElementById('saveSubjectCode').value;
+        const gradeGroup = document.getElementById('saveGradeGroup').value;
+        const area = document.getElementById('saveArea').value;
+        const search = document.getElementById('saveAchievementSearch').value.trim();
+        const dropdown = document.getElementById('achievementDropdown');
+
+        if (!subjectCode || !gradeGroup) { dropdown.style.display = 'none'; return; }
+        if (!search && !area) { dropdown.style.display = 'none'; return; }
+
+        let url = `/api/curriculum/standards?subject_code=${subjectCode}&grade_group=${gradeGroup}`;
+        if (area) url += `&area=${encodeURIComponent(area)}`;
+        if (search) url += `&search=${encodeURIComponent(search)}`;
+
+        try {
+          const res = await fetch(url);
+          const data = await res.json();
+          if (data.success && data.data.length > 0) {
+            dropdown.innerHTML = data.data.map(s =>
+              `<div class="search-item" onclick="selectStandard('${s.code}', \`${s.content.replace(/`/g,"'")}\`)" style="padding:8px 12px;cursor:pointer;border-bottom:1px solid #f3f4f6;">
+                <span style="color:var(--primary);font-weight:600;font-size:12px;margin-right:6px;">${s.code}</span>
+                <span style="font-size:12px;color:#374151;">${s.content.length > 60 ? s.content.substring(0,60)+'...' : s.content}</span>
+              </div>`
+            ).join('');
+            dropdown.style.display = 'block';
+          } else if (search) {
+            dropdown.innerHTML = '<div style="padding:12px;text-align:center;color:#9ca3af;font-size:12px;">검색 결과 없음</div>';
+            dropdown.style.display = 'block';
+          } else {
+            dropdown.style.display = 'none';
+          }
+        } catch (e) { console.error('성취기준 검색 실패:', e); }
+      }, 300);
+    }
+
+    function selectStandard(code, content) {
+      document.getElementById('saveAchievementCode').value = code;
+      document.getElementById('saveAchievementSearch').value = '';
+      document.getElementById('selectedAchievement').innerHTML =
+        `<span style="background:var(--primary-light);color:var(--primary);padding:3px 8px;border-radius:4px;font-weight:600;">${code}</span> ${content}
+         <button onclick="clearStandard()" style="border:none;background:none;color:#ef4444;cursor:pointer;font-size:12px;margin-left:4px;">✕</button>`;
+      document.getElementById('achievementDropdown').style.display = 'none';
+    }
+
+    function clearStandard() {
+      document.getElementById('saveAchievementCode').value = '';
+      document.getElementById('selectedAchievement').textContent = '';
+    }
+
+    // 드롭다운 외부 클릭 시 닫기
+    document.addEventListener('click', (e) => {
+      const dropdown = document.getElementById('achievementDropdown');
+      if (dropdown && !e.target.closest('#saveAchievementSearch') && !e.target.closest('#achievementDropdown')) {
+        dropdown.style.display = 'none';
+      }
+    });
+  </script>
+  <!-- GNB 제외: 전체화면 편집기 모드 -->
+</body>
+</html>

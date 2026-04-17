@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>다채움 - 수업 상세</title>
+  <link rel="stylesheet" href="/css/common-nav.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Pretendard','Noto Sans KR',system-ui,sans-serif; background: #F5F7FA; color: #1A1A2E; font-size: 16px; }
+    .container { max-width: 1800px; margin: 0 auto; padding: 24px 20px; }
+
+    .breadcrumb { font-size: 15px; color: #6B7280; margin-bottom: 16px; }
+    .breadcrumb a { color: #2563eb; text-decoration: none; }
+    .breadcrumb a:hover { text-decoration: underline; }
+
+    .lesson-header { background: linear-gradient(135deg, #2563eb, #1d4ed8); border-radius: 16px; padding: 32px 36px; color: #fff; margin-bottom: 20px; }
+    .lesson-header .status-badge { display: inline-block; padding: 5px 14px; border-radius: 6px; font-size: 13px; font-weight: 600; margin-bottom: 10px; }
+    .badge-published { background: rgba(16,185,129,0.2); color: #a7f3d0; }
+    .badge-draft { background: rgba(255,255,255,0.2); color: rgba(255,255,255,0.8); }
+    .lesson-header h1 { font-size: 26px; font-weight: 700; margin-bottom: 10px; }
+    .lesson-header .meta { font-size: 15px; opacity: 0.85; display: flex; gap: 16px; flex-wrap: wrap; }
+    .lesson-header .meta span { display: flex; align-items: center; gap: 4px; }
+
+    .card { background: #fff; border-radius: 12px; padding: 28px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); margin-bottom: 16px; }
+    .card h3 { font-size: 19px; font-weight: 700; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; color: #1A1A2E; }
+    .card h3 i { color: #2563eb; }
+
+    .lesson-content { font-size: 16px; line-height: 1.8; white-space: pre-wrap; word-break: break-word; }
+    .lesson-content:empty::after { content: '수업 내용이 없습니다.'; color: #9ca3af; font-style: italic; }
+
+    .attachment-list { list-style: none; }
+    .attachment-item { display: flex; align-items: center; gap: 10px; padding: 10px 14px; background: #f9fafb; border-radius: 8px; margin-bottom: 8px; font-size: 13px; }
+    .attachment-item i { color: #2563eb; font-size: 16px; }
+    .attachment-item a { color: #2563eb; text-decoration: none; font-weight: 500; }
+    .attachment-item a:hover { text-decoration: underline; }
+
+    .actions { display: flex; gap: 10px; margin-top: 20px; flex-wrap: wrap; }
+    .btn { padding: 10px 20px; border: none; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; font-family: inherit; display: flex; align-items: center; gap: 6px; }
+    .btn-primary { background: #2563eb; color: #fff; }
+    .btn-primary:hover { background: #1d4ed8; }
+    .btn-outline { background: #fff; color: #374151; border: 1.5px solid #d1d5db; }
+    .btn-outline:hover { background: #f3f4f6; }
+    .btn-danger { background: #dc2626; color: #fff; }
+    .btn-danger:hover { background: #b91c1c; }
+
+    .modal-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 10000; align-items: center; justify-content: center; }
+    .modal-overlay.active { display: flex; }
+    .modal { background: #fff; border-radius: 16px; padding: 28px; width: 90%; max-width: 560px; max-height: 90vh; overflow-y: auto; }
+    .modal h3 { font-size: 18px; font-weight: 700; margin-bottom: 16px; }
+    .form-group { margin-bottom: 14px; }
+    .form-group label { display: block; font-size: 13px; font-weight: 600; color: #374151; margin-bottom: 6px; }
+    .form-group input, .form-group select, .form-group textarea {
+      width: 100%; padding: 10px 12px; border: 1.5px solid #d1d5db; border-radius: 8px; font-size: 14px; outline: none; font-family: inherit;
+    }
+    .form-group input:focus, .form-group textarea:focus { border-color: #2563eb; }
+    .modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 16px; }
+
+    .empty-state { text-align: center; padding: 32px; color: #9ca3af; font-size: 13px; }
+    .empty-state i { font-size: 28px; margin-bottom: 8px; display: block; }
+
+    .progress-tab { transition: all .15s; }
+    .progress-tab.active { background: #2563eb !important; color: #fff !important; border-color: #2563eb !important; }
+    .student-row { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 10px; margin-bottom: 6px; border: 1px solid #e5e7eb; background: #fff; }
+    .student-row.done { background: #f0fdf4; border-color: #bbf7d0; }
+    .student-row.not { background: #fef2f2; border-color: #fecaca; }
+    .student-avatar { width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 700; color: #fff; flex-shrink: 0; }
+    .my-progress-banner { display: flex; align-items: center; gap: 16px; padding: 16px 20px; border-radius: 12px; }
+    .my-progress-banner.complete { background: linear-gradient(135deg, #ecfdf5, #d1fae5); border: 1.5px solid #6ee7b7; }
+    .my-progress-banner.incomplete { background: linear-gradient(135deg, #fef3c7, #fef9c3); border: 1.5px solid #fcd34d; }
+
+    @media (max-width: 768px) {
+      .container { padding: 16px 12px; }
+      .lesson-header { padding: 20px; }
+    }
+  </style>
+</head>
+<body>
+  <script src="/js/common-nav.js"></script>
+  <div class="container" id="mainContent" style="display:none;">
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;">
+      <button class="btn btn-outline" onclick="goBackToList()" style="padding:6px 14px;font-size:13px;"><i class="fas fa-arrow-left"></i> 목록으로</button>
+      <div class="breadcrumb" id="breadcrumb" style="margin-bottom:0;"></div>
+    </div>
+
+    <div class="lesson-header" id="lessonHeader">
+      <div id="statusBadge"></div>
+      <h1 id="lessonTitle">로딩 중...</h1>
+      <div class="meta" id="lessonMeta"></div>
+    </div>
+
+    <div class="card">
+      <h3><i class="fas fa-book-open"></i> 수업 내용</h3>
+      <div class="lesson-content" id="lessonContent"></div>
+    </div>
+
+    <!-- 학습 콘텐츠 -->
+    <div class="card" id="contentsCard" style="display:none;">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+        <h3 style="margin-bottom:0;"><i class="fas fa-cubes" style="color:#8b5cf6;"></i> 학습 콘텐츠</h3>
+        <button class="btn btn-primary" id="btnAddContent" style="display:none;padding:8px 16px;font-size:13px;" onclick="goAddContent()">
+          <i class="fas fa-plus"></i> 콘텐츠 추가
+        </button>
+      </div>
+      <div id="lessonContentsList"></div>
+      <div style="margin-top:16px;display:none;" id="startPlayerArea">
+        <button class="btn btn-primary" style="width:100%;padding:18px 32px;font-size:18px;font-weight:700;border-radius:12px;display:flex;align-items:center;justify-content:center;gap:10px;" onclick="startPlayer()">
+          <i class="fas fa-play-circle" style="font-size:22px;"></i> 수업 플레이어 시작
+        </button>
+      </div>
+    </div>
+
+    <!-- 개설자: 수업 플레이어 바로가기 -->
+    <div id="ownerPlayerArea" style="display:none;margin-bottom:16px;">
+      <button class="btn btn-primary" style="width:100%;padding:18px 32px;font-size:18px;font-weight:700;border-radius:12px;display:flex;align-items:center;justify-content:center;gap:10px;" onclick="startPlayer()">
+        <i class="fas fa-play-circle" style="font-size:22px;"></i> 수업 플레이어 시작
+      </button>
+    </div>
+
+
+    <!-- 교사용 이수 현황 -->
+    <div class="card" id="studentProgressCard" style="display:none;">
+      <h3><i class="fas fa-user-check"></i> 이수 현황</h3>
+      <div id="progressSummary" style="margin-bottom:16px;"></div>
+      <div id="studentProgressList" style="display:none;"></div>
+    </div>
+
+    <div class="card" id="attachmentsCard" style="display:none;">
+      <h3><i class="fas fa-paperclip"></i> 첨부파일</h3>
+      <ul class="attachment-list" id="attachmentList"></ul>
+    </div>
+
+    <div class="actions" id="teacherActions" style="display:none;">
+      <button class="btn btn-primary" onclick="goEditLesson()"><i class="fas fa-edit"></i> 콘텐츠 내용 수정</button>
+      <button class="btn btn-outline" onclick="showEditModal()"><i class="fas fa-cog"></i> 게시물 정보 수정</button>
+      <button class="btn btn-danger" onclick="deleteLesson()"><i class="fas fa-trash"></i> 삭제</button>
+    </div>
+
+  </div>
+
+  <!-- 수정 모달 -->
+  <div class="modal-overlay" id="editModal">
+    <div class="modal" style="max-width:600px;">
+      <h3>게시물 정보 수정</h3>
+      <div class="form-group"><label>제목</label><input type="text" id="editTitle"></div>
+      <div class="form-group"><label>설명</label><textarea id="editContent" rows="4"></textarea></div>
+      <div style="display:flex;gap:12px;">
+        <div class="form-group" style="flex:1;"><label>시작일</label><input type="date" id="editStartDate"></div>
+        <div class="form-group" style="flex:1;"><label>종료일</label><input type="date" id="editEndDate"></div>
+      </div>
+      <div style="display:flex;gap:12px;">
+        <div class="form-group" style="flex:1;"><label>상태</label>
+          <select id="editStatus">
+            <option value="published">공개</option>
+            <option value="archived">비공개</option>
+            <option value="draft">임시저장</option>
+          </select>
+        </div>
+        <div class="form-group" style="flex:1;"><label>태그</label><input type="text" id="editTags" placeholder="쉼표로 구분"></div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-outline" onclick="closeEditModal()">취소</button>
+        <button class="btn btn-primary" onclick="saveEdit()">저장</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const params = new URLSearchParams(location.search);
+    const classId = params.get('classId');
+    const lessonId = params.get('id');
+    if (!classId || !lessonId) location.href = '/class/index.html';
+
+    let lessonData = null;
+    let myRole = null;
+
+    function escHtml(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+    async function loadLesson() {
+      // 역할 확인
+      const classRes = await fetch(`/api/class/${classId}`);
+      const classData = await classRes.json();
+      if (classData.success) myRole = classData.myRole;
+
+      const res = await fetch(`/api/lesson/${classId}/${lessonId}`);
+      const data = await res.json();
+      if (!data.success) {
+        alert(data.message || '수업을 찾을 수 없습니다.');
+        history.back();
+        return;
+      }
+
+      lessonData = data.lesson;
+      document.title = `다채움 - ${lessonData.title}`;
+
+      // 학생이 예정 수업 접근 시 차단
+      if (myRole !== 'owner' && lessonData.status === 'published') {
+        const _today = new Date().toISOString().slice(0, 10);
+        const _sd = lessonData.start_date || lessonData.lesson_date;
+        if (_sd && _today < _sd) {
+          alert('아직 시작되지 않은 수업입니다.');
+          location.href = `/class/class-home.html?id=${classId}&tab=lesson`;
+          return;
+        }
+      }
+
+      document.getElementById('breadcrumb').innerHTML =
+        `<a href="/class/index.html">나의 클래스</a> &gt; <a href="/class/class-home.html?id=${classId}">${escHtml(classData.class?.name || '클래스')}</a> &gt; 수업`;
+
+      // 날짜 기반 상태 뱃지
+      let statusLabel, statusCls;
+      if (lessonData.status === 'published') {
+        const today = new Date().toISOString().slice(0, 10);
+        const sd = lessonData.start_date || lessonData.lesson_date;
+        const ed = lessonData.end_date;
+        if (sd && today < sd) { statusLabel = '예정'; statusCls = 'scheduled'; }
+        else if (ed && today > ed) { statusLabel = '마감'; statusCls = 'completed'; }
+        else { statusLabel = '진행중'; statusCls = 'published'; }
+      } else {
+        const smap = { draft: '임시저장', pending: '승인대기', rejected: '거절', archived: '비공개' };
+        statusLabel = smap[lessonData.status] || lessonData.status;
+        statusCls = lessonData.status;
+      }
+      document.getElementById('statusBadge').innerHTML =
+        `<span class="status-badge badge-${statusCls}">${statusLabel}</span>`;
+
+      document.getElementById('lessonTitle').textContent = lessonData.title;
+      const sd = lessonData.start_date || lessonData.lesson_date;
+      const ed = lessonData.end_date;
+      const dateStr = sd ? (ed ? `${sd} ~ ${ed}` : sd) : '';
+      document.getElementById('lessonMeta').innerHTML = `
+        <span><i class="fas fa-user"></i> ${escHtml(lessonData.author_name || '교사')}</span>
+        ${dateStr ? `<span><i class="fas fa-calendar"></i> ${dateStr}</span>` : ''}
+        <span><i class="fas fa-clock"></i> ${lessonData.created_at ? lessonData.created_at.slice(0, 16) : ''}</span>
+      `;
+
+      document.getElementById('lessonContent').innerHTML = lessonData.content || '';
+
+      // 첨부파일
+      if (data.attachments && data.attachments.length > 0) {
+        document.getElementById('attachmentsCard').style.display = 'block';
+        document.getElementById('attachmentList').innerHTML = data.attachments.map(a => `
+          <li class="attachment-item">
+            <i class="fas fa-file"></i>
+            <a href="${a.file_url}" target="_blank">${escHtml(a.original_name || a.file_url)}</a>
+          </li>
+        `).join('');
+      }
+
+      // 연결된 콘텐츠
+      if (data.contents && data.contents.length > 0) {
+        document.getElementById('contentsCard').style.display = 'block';
+        document.getElementById('startPlayerArea').style.display = 'block';
+        const typeIcons = { video: 'fa-play-circle', document: 'fa-file-alt', image: 'fa-image', link: 'fa-link', quiz: 'fa-question-circle' };
+        const typeColors = { video: '#dc2626', document: '#2563eb', image: '#10b981', link: '#f59e0b', quiz: '#8b5cf6' };
+        const typeLabels = { video: '영상', document: '문서', image: '이미지', link: '링크', quiz: '퀴즈' };
+
+        // 진도 매핑
+        const progressMap = {};
+        (data.progress || []).forEach(p => { progressMap[p.content_id] = p; });
+
+        const total = data.contents.length;
+        const doneCount = data.contents.filter(c => progressMap[c.id]?.completed).length;
+        document.getElementById('lessonContentsList').innerHTML = `
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;font-size:13px;color:#6B7280;">
+            <span>총 ${total}개</span><span>·</span>
+            <span style="color:#10b981;font-weight:600;">완료 ${doneCount}</span><span>·</span>
+            <span style="color:#f59e0b;font-weight:600;">미완료 ${total - doneCount}</span>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:2px;">
+          ${data.contents.map((c, i) => {
+            const prog = progressMap[c.id];
+            const isDone = prog && prog.completed;
+            return `
+              <div style="display:flex;align-items:center;gap:10px;padding:8px 12px;border-radius:8px;background:${isDone ? '#f0fdf4' : 'transparent'};">
+                <span style="width:22px;text-align:center;font-size:12px;color:#9ca3af;font-weight:600;">${i + 1}</span>
+                <i class="fas ${typeIcons[c.content_type] || 'fa-file'}" style="color:${typeColors[c.content_type] || '#6B7280'};font-size:14px;width:16px;text-align:center;"></i>
+                <span style="flex:1;font-size:14px;${isDone ? 'color:#374151;' : 'color:#374151;'}overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escHtml(c.title)}</span>
+                <span style="font-size:11px;color:#9ca3af;flex-shrink:0;">${typeLabels[c.content_type] || c.content_type}</span>
+                ${isDone ? '<i class="fas fa-check-circle" style="color:#10b981;font-size:15px;flex-shrink:0;"></i>' : '<i class="far fa-circle" style="color:#d1d5db;font-size:15px;flex-shrink:0;"></i>'}
+              </div>`;
+          }).join('')}
+          </div>`;
+      }
+
+      // 역할별 표시
+      if (myRole === 'owner') {
+        // 개설자: 콘텐츠 목록 숨기고 플레이어 버튼 + 이수 명단만
+        document.getElementById('teacherActions').style.display = 'flex';
+        document.getElementById('contentsCard').style.display = 'none';
+        // 플레이어 버튼은 별도로 표시
+        document.getElementById('ownerPlayerArea').style.display = 'block';
+        loadStudentProgress();
+      }
+    }
+
+    // ===== 일반 멤버: 나의 이수 현황 =====
+    function showMyProgress(data) {
+      const contents = data.contents || [];
+      if (contents.length === 0) return;
+      const progressMap = {};
+      (data.progress || []).forEach(p => { progressMap[p.content_id] = p; });
+      const total = contents.length;
+      const done = contents.filter(c => progressMap[c.id]?.completed).length;
+      const isComplete = done >= total;
+      const pct = Math.round((done / total) * 100);
+
+      const card = document.getElementById('myProgressCard');
+      card.style.display = 'block';
+      document.getElementById('myProgressContent').innerHTML = `
+        <div class="my-progress-banner ${isComplete ? 'complete' : 'incomplete'}">
+          <div style="width:52px;height:52px;border-radius:50%;background:${isComplete ? '#10b981' : '#f59e0b'};display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+            <i class="fas ${isComplete ? 'fa-check' : 'fa-hourglass-half'}" style="color:#fff;font-size:22px;"></i>
+          </div>
+          <div style="flex:1;">
+            <div style="font-size:16px;font-weight:700;color:${isComplete ? '#065f46' : '#92400e'};margin-bottom:4px;">
+              ${isComplete ? '이수 완료!' : '학습 진행 중'}
+            </div>
+            <div style="font-size:13px;color:${isComplete ? '#047857' : '#b45309'};">
+              전체 ${total}개 콘텐츠 중 ${done}개 완료 (${pct}%)
+            </div>
+            <div style="margin-top:8px;background:${isComplete ? '#a7f3d0' : '#fde68a'};border-radius:4px;height:8px;overflow:hidden;">
+              <div style="height:100%;background:${isComplete ? '#10b981' : '#f59e0b'};width:${pct}%;border-radius:4px;transition:width .3s;"></div>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    // ===== 개설자: 이수 명단 =====
+    let allStudentProgress = [];
+    async function loadStudentProgress() {
+      try {
+        const res = await fetch(`/api/lesson/${classId}/${lessonId}/students`).then(r => r.json());
+        if (!res.success) return;
+        allStudentProgress = res.students;
+        document.getElementById('studentProgressCard').style.display = 'block';
+
+        const total = allStudentProgress.length;
+        const doneCount = allStudentProgress.filter(s => s.is_complete).length;
+        const notCount = total - doneCount;
+
+        const pct = total > 0 ? Math.round((doneCount/total)*100) : 0;
+        document.getElementById('progressSummary').innerHTML = `
+          <div style="display:flex;gap:12px;flex-wrap:wrap;">
+            <div onclick="toggleStudentTable('all')" style="flex:1;min-width:120px;background:linear-gradient(135deg,#eff6ff,#dbeafe);padding:16px;border-radius:12px;text-align:center;border:1px solid #bfdbfe;cursor:pointer;transition:transform 0.15s;" onmouseover="this.style.transform='scale(1.03)'" onmouseout="this.style.transform='scale(1)'">
+              <div style="font-size:28px;font-weight:800;color:#2563eb;">${total}</div>
+              <div style="font-size:12px;color:#3b82f6;font-weight:600;">전체 멤버</div>
+            </div>
+            <div onclick="toggleStudentTable('done')" style="flex:1;min-width:120px;background:linear-gradient(135deg,#ecfdf5,#d1fae5);padding:16px;border-radius:12px;text-align:center;border:1px solid #a7f3d0;cursor:pointer;transition:transform 0.15s;" onmouseover="this.style.transform='scale(1.03)'" onmouseout="this.style.transform='scale(1)'">
+              <div style="font-size:28px;font-weight:800;color:#10b981;">${doneCount}</div>
+              <div style="font-size:12px;color:#059669;font-weight:600;">이수 완료</div>
+            </div>
+            <div onclick="toggleStudentTable('not')" style="flex:1;min-width:120px;background:linear-gradient(135deg,#fef2f2,#fecaca);padding:16px;border-radius:12px;text-align:center;border:1px solid #fca5a5;cursor:pointer;transition:transform 0.15s;" onmouseover="this.style.transform='scale(1.03)'" onmouseout="this.style.transform='scale(1)'">
+              <div style="font-size:28px;font-weight:800;color:#ef4444;">${notCount}</div>
+              <div style="font-size:12px;color:#dc2626;font-weight:600;">미이수</div>
+            </div>
+            <div style="flex:1;min-width:120px;background:linear-gradient(135deg,#f5f3ff,#ede9fe);padding:16px;border-radius:12px;text-align:center;border:1px solid #c4b5fd;">
+              <div style="font-size:28px;font-weight:800;color:#8b5cf6;">${pct}%</div>
+              <div style="font-size:12px;color:#7c3aed;font-weight:600;">이수율</div>
+            </div>
+          </div>
+        `;
+      } catch (e) { console.error(e); }
+    }
+
+    let currentProgressFilter = null;
+    function toggleStudentTable(filter) {
+      const listEl = document.getElementById('studentProgressList');
+      if (currentProgressFilter === filter && listEl.style.display !== 'none') {
+        listEl.style.display = 'none';
+        currentProgressFilter = null;
+        return;
+      }
+      currentProgressFilter = filter;
+      renderStudentTable(filter);
+      listEl.style.display = 'block';
+    }
+
+    function renderStudentTable(filter) {
+      let list = allStudentProgress;
+      if (filter === 'done') list = list.filter(s => s.is_complete);
+      else if (filter === 'not') list = list.filter(s => !s.is_complete);
+
+      const filterLabels = { all: '전체 멤버', done: '이수 완료', not: '미이수' };
+
+      if (list.length === 0) {
+        document.getElementById('studentProgressList').innerHTML = `
+          <div style="margin-top:12px;padding:20px;text-align:center;color:#6B7280;font-size:14px;">
+            <i class="fas fa-${filter === 'done' ? 'check-circle' : 'exclamation-circle'}" style="font-size:24px;margin-bottom:8px;display:block;color:#d1d5db;"></i>
+            ${filter === 'done' ? '이수 완료한 멤버가 없습니다.' : filter === 'not' ? '모든 멤버가 이수를 완료했습니다!' : '멤버가 없습니다.'}
+          </div>`;
+        return;
+      }
+
+      document.getElementById('studentProgressList').innerHTML = `
+        <div style="margin-top:12px;">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+            <span style="font-size:14px;font-weight:600;color:#374151;">${filterLabels[filter]} (${list.length}명)</span>
+            <button class="btn btn-outline" onclick="document.getElementById('studentProgressList').style.display='none';currentProgressFilter=null;" style="padding:4px 12px;font-size:12px;">닫기</button>
+          </div>
+          <table style="width:100%;border-collapse:collapse;font-size:14px;">
+            <thead>
+              <tr style="background:#f9fafb;">
+                <th style="text-align:left;padding:10px 12px;border-bottom:2px solid #e5e7eb;font-weight:600;">번호</th>
+                <th style="text-align:left;padding:10px 12px;border-bottom:2px solid #e5e7eb;font-weight:600;">이름</th>
+                <th style="text-align:center;padding:10px 12px;border-bottom:2px solid #e5e7eb;font-weight:600;">진도</th>
+                <th style="text-align:center;padding:10px 12px;border-bottom:2px solid #e5e7eb;font-weight:600;">상태</th>
+                <th style="text-align:center;padding:10px 12px;border-bottom:2px solid #e5e7eb;font-weight:600;">최근 활동</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${list.map((s, i) => `
+                <tr style="border-bottom:1px solid #f3f4f6;">
+                  <td style="padding:10px 12px;color:#6B7280;">${i + 1}</td>
+                  <td style="padding:10px 12px;font-weight:600;">${escHtml(s.display_name)}</td>
+                  <td style="padding:10px 12px;text-align:center;">${s.completed_count}/${s.total_count}</td>
+                  <td style="padding:10px 12px;text-align:center;">
+                    ${s.is_complete
+                      ? '<span style="padding:3px 10px;background:#dcfce7;color:#16a34a;border-radius:6px;font-size:12px;font-weight:700;">이수</span>'
+                      : `<span style="padding:3px 10px;background:${s.rate > 0 ? '#fef3c7' : '#fee2e2'};color:${s.rate > 0 ? '#d97706' : '#dc2626'};border-radius:6px;font-size:12px;font-weight:700;">${s.rate > 0 ? '진행중' : '미시작'}</span>`
+                    }
+                  </td>
+                  <td style="padding:10px 12px;text-align:center;font-size:13px;color:#6B7280;">${s.last_activity ? s.last_activity.slice(0,10) : '-'}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      `;
+    }
+
+    function goBackToList() {
+      location.href = `/class/class-home.html?id=${classId}&tab=lesson`;
+    }
+
+    function startPlayer() {
+      location.href = `/class/lesson-player.html?classId=${classId}&id=${lessonId}`;
+    }
+
+    function goAddContent() {
+      location.href = `/class/lesson-player.html?classId=${classId}&id=${lessonId}&mode=edit`;
+    }
+
+    function goEditLesson() {
+      location.href = `/class/lesson-player.html?classId=${classId}&id=${lessonId}&mode=edit`;
+    }
+
+    function showEditModal() {
+      document.getElementById('editTitle').value = lessonData.title;
+      document.getElementById('editStartDate').value = lessonData.start_date || lessonData.lesson_date || '';
+      document.getElementById('editEndDate').value = lessonData.end_date || '';
+      document.getElementById('editContent').value = lessonData.content || '';
+      document.getElementById('editStatus').value = lessonData.status || 'draft';
+      document.getElementById('editTags').value = lessonData.tags || '';
+      document.getElementById('editModal').classList.add('active');
+    }
+    function closeEditModal() { document.getElementById('editModal').classList.remove('active'); }
+
+    async function saveEdit() {
+      const startDate = document.getElementById('editStartDate').value || null;
+      const endDate = document.getElementById('editEndDate').value || null;
+      let status = document.getElementById('editStatus').value;
+      // 공개 선택 시 → pending (관리자 승인 필요)
+      if (status === 'published' && lessonData.status !== 'published') status = 'pending';
+      const res = await fetch(`/api/lesson/${classId}/${lessonId}`, {
+        method: 'PUT', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({
+          title: document.getElementById('editTitle').value,
+          content: document.getElementById('editContent').value,
+          lesson_date: startDate,
+          start_date: startDate,
+          end_date: endDate,
+          status,
+          tags: document.getElementById('editTags').value || null
+        })
+      });
+      const data = await res.json();
+      if (data.success) { closeEditModal(); loadLesson(); }
+      else alert(data.message);
+    }
+
+    async function deleteLesson() {
+      if (!confirm('이 수업을 삭제하시겠습니까?')) return;
+      const res = await fetch(`/api/lesson/${classId}/${lessonId}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (data.success) { location.href = `/class/class-home.html?id=${classId}`; }
+      else alert(data.message);
+    }
+
+    window.addEventListener('dacheim:user-loaded', () => {
+      document.getElementById('mainContent').style.display = 'block';
+      loadLesson();
+    });
+  </script>
+</body>
+</html>

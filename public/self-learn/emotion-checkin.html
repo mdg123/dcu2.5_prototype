@@ -1,0 +1,678 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>다채움 - 마음채움 감정체크</title>
+  <link rel="stylesheet" href="/css/common-nav.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <style>
+    :root {
+      --primary: #4A7CFF; --primary-light: #E8F0FF; --primary-dark: #3A5FCC;
+      --accent: #FF6B6B; --accent-light: #FFE8E8;
+      --secondary: #7C4DFF; --secondary-light: #EDE7FF;
+      --success: #00C48C; --success-light: #E0FFF5;
+      --warning: #FFB800; --warning-light: #FFF8E0;
+      --gray-50: #F8FAFC; --gray-100: #F1F5F9; --gray-200: #E2E8F0; --gray-300: #CBD5E1;
+      --gray-400: #94A3B8; --gray-500: #64748B; --gray-600: #475569; --gray-700: #334155; --gray-800: #1E293B;
+      --shadow-sm: 0 1px 2px rgba(0,0,0,0.05); --shadow-md: 0 4px 6px -1px rgba(0,0,0,0.1);
+      --shadow-lg: 0 10px 15px -3px rgba(0,0,0,0.1);
+      --radius: 12px; --radius-lg: 16px;
+      --fs-xs: 12px;
+      --fs-sm: 13px;
+      --fs-base: 14px;
+      --fs-md: 15px;
+      --fs-lg: 16px;
+      --fs-xl: 18px;
+      --fs-2xl: 22px;
+      --fs-3xl: 28px;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Pretendard','Noto Sans KR',system-ui,sans-serif; background: linear-gradient(135deg, #FFF8F0 0%, #FFF5F5 50%, #F0F4FF 100%); color: var(--gray-800); min-height: 100vh; font-size: var(--fs-base); line-height: 1.5; }
+
+    .page-wrap { max-width: 960px; margin: 0 auto; padding: 24px 20px 60px; }
+
+    /* 탭 네비게이션 */
+    .tab-nav { display: flex; background: #fff; border-radius: var(--radius); box-shadow: var(--shadow-sm); margin-bottom: 24px; overflow: hidden; }
+    .tab-btn { flex: 1; padding: 14px 16px; border: none; background: none; font-size: var(--fs-base); font-weight: 600; color: var(--gray-400); cursor: pointer; transition: all .2s; font-family: inherit; display: flex; align-items: center; justify-content: center; gap: 8px; border-bottom: 3px solid transparent; }
+    .tab-btn:hover { background: var(--gray-50); color: var(--gray-600); }
+    .tab-btn.active { color: var(--primary); border-bottom-color: var(--primary); background: var(--primary-light); }
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+
+    /* 카드 기본 */
+    .card { background: #fff; border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); margin-bottom: 20px; overflow: hidden; }
+    .card-header { padding: 20px 24px 16px; border-bottom: 1px solid var(--gray-100); }
+    .card-title { font-size: var(--fs-xl); font-weight: 700; display: flex; align-items: center; gap: 10px; }
+    .card-subtitle { font-size: var(--fs-sm); color: var(--gray-500); margin-top: 4px; }
+    .card-body { padding: 24px; }
+
+    /* 감정 체크인 헤더 */
+    .checkin-header { background: linear-gradient(135deg, #fff8f0 0%, #fff5f5 50%, #f0f4ff 100%); border-radius: var(--radius-lg); padding: 32px; text-align: center; margin-bottom: 24px; box-shadow: var(--shadow-sm); }
+    .checkin-header h1 { font-size: var(--fs-3xl); font-weight: 800; margin-bottom: 8px; }
+    .checkin-header p { font-size: var(--fs-base); color: var(--gray-500); }
+    .checkin-header .status-badge { display: inline-flex; align-items: center; gap: 6px; padding: 6px 16px; border-radius: 20px; font-size: var(--fs-sm); font-weight: 600; margin-top: 12px; }
+    .status-badge.done { background: var(--success-light); color: #059669; }
+    .status-badge.pending { background: var(--warning-light); color: #B45309; }
+
+    /* 감정 선택 그리드 */
+    .emotion-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 16px; margin: 24px 0; }
+    @media (max-width: 768px) { .emotion-grid { grid-template-columns: repeat(3, 1fr); } .page-wrap { padding: 16px 12px 40px; } }
+    @media (max-width: 480px) { .emotion-grid { grid-template-columns: repeat(2, 1fr); } .tab-btn { font-size: var(--fs-xs); padding: 10px 8px; } }
+    .emotion-item { background: var(--gray-50); border: 3px solid transparent; border-radius: var(--radius); padding: 24px 16px; min-height: 100px; text-align: center; cursor: pointer; transition: all .25s; }
+    .emotion-item:hover { background: #e0e7ff; transform: translateY(-3px); box-shadow: var(--shadow-md); }
+    .emotion-item.selected { border-color: var(--primary); background: var(--primary-light); transform: translateY(-3px); box-shadow: 0 4px 12px rgba(74,124,255,0.2); }
+    .emotion-icon { font-size: 40px; margin-bottom: 8px; }
+    .emotion-label { font-size: var(--fs-base); font-weight: 600; color: var(--gray-700); }
+    .emotion-score { font-size: var(--fs-xs); color: var(--gray-400); margin-top: 2px; }
+
+    /* 감정 점수 슬라이더 */
+    .emotion-score-section { display: none; margin: 20px 0; padding: 24px; background: var(--gray-50); border-radius: var(--radius); border: 1px solid var(--gray-200); }
+    .emotion-score-section.visible { display: block; animation: fadeIn .3s ease; }
+    .score-slider-wrap { display: flex; align-items: center; gap: 16px; margin-top: 16px; }
+    .score-slider-wrap input[type="range"] {
+      flex: 1; height: 8px; -webkit-appearance: none; appearance: none;
+      background: linear-gradient(90deg, #EF4444, #F97316, #EAB308, #4AC55E, #16A34A);
+      border-radius: 4px; outline: none; cursor: pointer;
+    }
+    .score-slider-wrap input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none; width: 28px; height: 28px; border-radius: 50%;
+      background: #fff; border: 3px solid var(--primary); box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+      cursor: pointer; transition: transform .15s;
+    }
+    .score-slider-wrap input[type="range"]::-webkit-slider-thumb:hover { transform: scale(1.15); }
+    .score-slider-wrap input[type="range"]::-moz-range-thumb {
+      width: 28px; height: 28px; border-radius: 50%;
+      background: #fff; border: 3px solid var(--primary); box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+      cursor: pointer;
+    }
+    .score-display {
+      min-width: 64px; text-align: center; font-size: 28px; font-weight: 800;
+      background: #fff; border-radius: var(--radius); padding: 8px 12px;
+      box-shadow: var(--shadow-sm); border: 2px solid var(--gray-200);
+      transition: color .2s;
+    }
+    .score-range-labels { display: flex; justify-content: space-between; margin-top: 8px; font-size: var(--fs-xs); color: var(--gray-400); }
+    .score-desc { text-align: center; margin-top: 12px; font-size: var(--fs-sm); font-weight: 600; padding: 8px 16px; border-radius: 20px; display: inline-block; }
+
+    /* 감정 단어 선택 */
+    .emotion-words-section { display: none; margin: 20px 0; padding: 20px; background: var(--gray-50); border-radius: var(--radius); border: 1px solid var(--gray-200); }
+    .emotion-words-section.visible { display: block; animation: fadeIn .3s ease; }
+    .emotion-words-title { font-size: var(--fs-base); font-weight: 600; color: var(--gray-700); margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+    .emotion-words-grid { display: flex; flex-wrap: wrap; gap: 8px; }
+    .emotion-word { padding: 8px 16px; background: #fff; border: 2px solid var(--gray-200); border-radius: 20px; font-size: var(--fs-sm); font-weight: 500; cursor: pointer; transition: all .2s; font-family: inherit; color: var(--gray-600); }
+    .emotion-word:hover { border-color: var(--primary); background: var(--primary-light); color: var(--primary); }
+    .emotion-word.selected { background: var(--primary); color: #fff; border-color: var(--primary); }
+
+    /* 이유 입력 */
+    .reason-section { margin: 20px 0; }
+    .reason-label { font-size: var(--fs-sm); font-weight: 600; color: var(--gray-600); margin-bottom: 8px; display: block; }
+    .reason-textarea { width: 100%; padding: 14px 16px; border: 2px solid var(--gray-200); border-radius: var(--radius); font-family: inherit; font-size: var(--fs-base); resize: vertical; min-height: 80px; transition: border-color .2s; }
+    .reason-textarea:focus { outline: none; border-color: var(--primary); }
+
+    /* 제출 버튼 */
+    .submit-area { display: flex; gap: 12px; justify-content: center; margin-top: 24px; }
+    .btn { padding: 12px 28px; border: none; border-radius: var(--radius); font-size: var(--fs-base); font-weight: 700; cursor: pointer; font-family: inherit; transition: all .2s; display: inline-flex; align-items: center; gap: 8px; }
+    .btn-primary { background: var(--primary); color: #fff; box-shadow: 0 2px 8px rgba(74,124,255,0.3); }
+    .btn-primary:hover { background: var(--primary-dark); box-shadow: 0 4px 12px rgba(74,124,255,0.4); }
+    .btn-primary:disabled { background: var(--gray-300); color: var(--gray-500); box-shadow: none; cursor: not-allowed; }
+    .btn-outline { background: #fff; color: var(--gray-600); border: 2px solid var(--gray-200); }
+    .btn-outline:hover { border-color: var(--gray-400); }
+
+    /* 완료 상태 */
+    .done-overlay { display: none; text-align: center; padding: 40px 20px; }
+    .done-overlay.visible { display: block; animation: fadeIn .4s ease; }
+    .done-emoji { font-size: 64px; margin-bottom: 16px; }
+    .done-text { font-size: var(--fs-xl); font-weight: 700; color: var(--gray-800); margin-bottom: 8px; }
+    .done-detail { font-size: var(--fs-base); color: var(--gray-500); margin-bottom: 4px; }
+
+    /* 대시보드 통계 */
+    .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 16px; margin: 20px 0; }
+    .stat-card { background: var(--gray-50); padding: 20px; border-radius: var(--radius); text-align: center; }
+    .stat-icon { font-size: var(--fs-3xl); margin-bottom: 8px; }
+    .stat-value { font-size: var(--fs-3xl); font-weight: 800; color: var(--primary); margin-bottom: 4px; }
+    .stat-label { font-size: var(--fs-xs); color: var(--gray-500); }
+
+    /* 주간 감정 바차트 */
+    .week-chart { display: flex; align-items: flex-end; justify-content: space-around; padding: 0; gap: 8px; }
+    .week-bar-item { flex: 1; display: flex; flex-direction: column; align-items: center; max-width: 90px; }
+    .week-bar-top { display: flex; flex-direction: column; align-items: center; gap: 2px; margin-bottom: 4px; }
+    .week-bar-area { width: 100%; height: 180px; display: flex; align-items: flex-end; justify-content: center; }
+    .week-bar { width: 65%; border-radius: 8px 8px 0 0; transition: height .5s ease; min-height: 8px; }
+    .week-bar-emoji { font-size: 22px; }
+    .week-bar-label { font-size: var(--fs-xs); font-weight: 600; color: var(--gray-500); margin-top: 6px; }
+
+    /* 감정 TOP 랭킹 */
+    .ranking-list { display: flex; flex-direction: column; gap: 12px; }
+    .ranking-item { display: flex; align-items: center; gap: 16px; padding: 14px 16px; background: var(--gray-50); border-radius: var(--radius); }
+    .ranking-medal { font-size: var(--fs-3xl); min-width: 36px; text-align: center; }
+    .ranking-text { flex: 1; font-weight: 600; font-size: var(--fs-base); }
+    .ranking-value { font-size: var(--fs-lg); font-weight: 700; color: var(--primary); }
+
+    /* 히스토리 리스트 */
+    .history-list { display: flex; flex-direction: column; gap: 12px; }
+    .history-item { display: flex; align-items: flex-start; gap: 16px; padding: 16px; background: var(--gray-50); border-radius: var(--radius); border-left: 4px solid var(--primary); }
+    .history-emoji { font-size: var(--fs-3xl); flex-shrink: 0; }
+    .history-content { flex: 1; }
+    .history-date { font-size: var(--fs-xs); color: var(--gray-400); margin-bottom: 4px; }
+    .history-emotion { font-size: var(--fs-base); font-weight: 600; color: var(--gray-800); }
+    .history-reason { font-size: var(--fs-sm); color: var(--gray-500); margin-top: 4px; }
+
+    /* 감정 클러스터 */
+    .cluster-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 16px; }
+    .cluster-card { background: var(--gray-50); border-radius: var(--radius); padding: 20px; text-align: center; border: 3px solid transparent; transition: all .3s; cursor: default; }
+    .cluster-card.active { border-color: var(--primary); background: var(--primary-light); }
+    .cluster-icon { font-size: 36px; margin-bottom: 8px; }
+    .cluster-name { font-size: var(--fs-base); font-weight: 700; margin-bottom: 4px; }
+    .cluster-desc { font-size: var(--fs-xs); color: var(--gray-500); margin-bottom: 8px; }
+    .cluster-pct { font-size: var(--fs-2xl); font-weight: 800; color: var(--primary); }
+
+    /* 알림 배너 */
+    .alert-banner { padding: 16px 20px; border-radius: var(--radius); display: flex; align-items: flex-start; gap: 12px; margin-bottom: 20px; }
+    .alert-success { background: var(--success-light); border-left: 4px solid var(--success); }
+    .alert-info { background: var(--primary-light); border-left: 4px solid var(--primary); }
+    .alert-title { font-size: var(--fs-base); font-weight: 700; margin-bottom: 4px; }
+    .alert-text { font-size: var(--fs-sm); color: var(--gray-600); line-height: 1.5; }
+
+    /* 뒤로가기 */
+    .back-link { display: inline-flex; align-items: center; gap: 6px; color: var(--gray-500); font-size: var(--fs-sm); text-decoration: none; margin-bottom: 16px; font-weight: 500; }
+    .back-link:hover { color: var(--primary); }
+
+    .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: var(--gray-800); color: #fff; padding: 12px 24px; border-radius: var(--radius); font-size: var(--fs-base); z-index: 9999; box-shadow: var(--shadow-lg); display: flex; align-items: center; gap: 8px; }
+
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+  </style>
+</head>
+<body>
+  <script src="/js/common-nav.js"></script>
+
+  <div class="page-wrap">
+    <a href="/self-learn/today.html" class="back-link"><i class="fas fa-arrow-left"></i> 오늘의 학습으로 돌아가기</a>
+
+    <!-- 헤더 -->
+    <div class="checkin-header">
+      <h1>💛 마음채움</h1>
+      <p>오늘 나의 감정을 기록하고, 마음의 변화를 살펴보세요</p>
+      <div id="headerStatus"></div>
+    </div>
+
+    <!-- 탭 -->
+    <div class="tab-nav">
+      <button class="tab-btn active" onclick="switchTab('checkin')"><i class="fas fa-heart"></i> 감정 체크인</button>
+      <button class="tab-btn" onclick="switchTab('dashboard')"><i class="fas fa-chart-bar"></i> 감정 대시보드</button>
+      <button class="tab-btn" onclick="switchTab('history')"><i class="fas fa-history"></i> 기록 보기</button>
+    </div>
+
+    <!-- ===== 탭 1: 감정 체크인 ===== -->
+    <div id="tab-checkin" class="tab-content active">
+      <!-- 체크인 폼 -->
+      <div id="checkinForm">
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title"><i class="fas fa-smile" style="color:var(--warning)"></i> 지금 기분이 어때요?</div>
+            <div class="card-subtitle">가장 가까운 감정을 선택해주세요</div>
+          </div>
+          <div class="card-body">
+            <div class="emotion-grid">
+              <div class="emotion-item" onclick="selectMainEmotion(this, 'great')" data-emotion="great">
+                <div class="emotion-icon">🤩</div>
+                <div class="emotion-label">아주 좋아요</div>
+              </div>
+              <div class="emotion-item" onclick="selectMainEmotion(this, 'good')" data-emotion="good">
+                <div class="emotion-icon">😊</div>
+                <div class="emotion-label">좋아요</div>
+              </div>
+              <div class="emotion-item" onclick="selectMainEmotion(this, 'okay')" data-emotion="okay">
+                <div class="emotion-icon">😐</div>
+                <div class="emotion-label">괜찮아요</div>
+              </div>
+              <div class="emotion-item" onclick="selectMainEmotion(this, 'notgood')" data-emotion="notgood">
+                <div class="emotion-icon">😕</div>
+                <div class="emotion-label">별로예요</div>
+              </div>
+              <div class="emotion-item" onclick="selectMainEmotion(this, 'bad')" data-emotion="bad">
+                <div class="emotion-icon">😢</div>
+                <div class="emotion-label">안 좋아요</div>
+              </div>
+            </div>
+
+            <!-- 감정 점수 슬라이더 -->
+            <div id="emotionScoreSection" class="emotion-score-section">
+              <div style="font-size:var(--fs-base);font-weight:600;color:var(--gray-700);display:flex;align-items:center;gap:8px;">
+                <i class="fas fa-sliders-h" style="color:var(--primary)"></i>
+                <span id="scoreSliderTitle">감정의 정도를 조절해주세요</span>
+              </div>
+              <div class="score-slider-wrap">
+                <span id="scoreMinLabel" style="font-size:var(--fs-sm);color:var(--gray-500);white-space:nowrap;">약하게</span>
+                <input type="range" id="emotionScoreSlider" min="10" max="100" step="1" value="50">
+                <span id="scoreMaxLabel" style="font-size:var(--fs-sm);color:var(--gray-500);white-space:nowrap;">강하게</span>
+                <div class="score-display" id="scoreDisplay">5.0</div>
+              </div>
+              <div class="score-range-labels">
+                <span id="scoreRangeMin">1.0</span>
+                <span id="scoreRangeMax">10.0</span>
+              </div>
+              <div style="text-align:center;margin-top:12px;">
+                <span class="score-desc" id="scoreDescBadge" style="background:var(--warning-light);color:#B45309;">보통</span>
+              </div>
+            </div>
+
+            <!-- 구체적 감정 단어 -->
+            <div id="emotionWordsSection" class="emotion-words-section">
+              <div class="emotion-words-title"><i class="fas fa-tags" style="color:var(--secondary)"></i> 이 감정을 더 구체적으로 표현하면?</div>
+              <div id="emotionWordsList" class="emotion-words-grid"></div>
+            </div>
+
+            <!-- 이유 입력 -->
+            <div class="reason-section">
+              <label class="reason-label"><i class="fas fa-pen"></i> 더 나누고 싶은 이야기가 있나요? (선택)</label>
+              <textarea id="emotionReason" class="reason-textarea" placeholder="오늘의 감정에 대해 자유롭게 적어보세요..."></textarea>
+            </div>
+
+            <div class="submit-area">
+              <button class="btn btn-outline" onclick="resetCheckin()"><i class="fas fa-redo"></i> 다시 선택</button>
+              <button id="submitBtn" class="btn btn-primary" onclick="submitCheckin()" disabled><i class="fas fa-check"></i> 감정 기록하기</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 완료 상태 -->
+      <div id="checkinDone" class="done-overlay">
+        <div class="card">
+          <div class="card-body" style="padding:40px;">
+            <div class="done-emoji" id="doneEmoji">😊</div>
+            <div class="done-text" id="doneMainText">오늘의 감정을 기록했어요!</div>
+            <div class="done-detail" id="doneDetail"></div>
+            <div class="done-detail" id="doneWord" style="color:var(--primary);font-weight:600;"></div>
+            <div class="done-detail" id="doneReason" style="margin-top:8px;"></div>
+            <div style="margin-top:24px;display:flex;gap:12px;justify-content:center;">
+              <button class="btn btn-outline" onclick="reCheckin()"><i class="fas fa-redo"></i> 다시 선택</button>
+              <button class="btn btn-primary" onclick="switchTab('dashboard')"><i class="fas fa-chart-bar"></i> 대시보드 보기</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== 탭 2: 감정 대시보드 ===== -->
+    <div id="tab-dashboard" class="tab-content">
+      <div id="dashboardContent">
+        <div style="text-align:center;padding:40px;color:var(--gray-400);"><i class="fas fa-spinner fa-spin" style="font-size:24px;"></i></div>
+      </div>
+    </div>
+
+    <!-- ===== 탭 3: 기록 보기 ===== -->
+    <div id="tab-history" class="tab-content">
+      <div id="historyContent">
+        <div style="text-align:center;padding:40px;color:var(--gray-400);"><i class="fas fa-spinner fa-spin" style="font-size:24px;"></i></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ===== 감정 데이터 =====
+    const EMOTION_MAP = {
+      great:   { emoji: '🤩', label: '아주 좋아요', apiValue: 'happy', color: '#FFD54F', scoreMin: 8.0, scoreMax: 10.0, scoreDefault: 9.0, words: ['흥분된','신나는','기쁜','만족스러운','행복한','즐거운','희망찬','자신있는'] },
+      good:    { emoji: '😊', label: '좋아요', apiValue: 'good', color: '#4FC3F7', scoreMin: 6.0, scoreMax: 8.0, scoreDefault: 7.0, words: ['편안한','만족한','평온한','차분한','긍정적인','고마운','뿌듯한','여유로운'] },
+      okay:    { emoji: '😐', label: '괜찮아요', apiValue: 'calm', color: '#FFF176', scoreMin: 4.0, scoreMax: 6.0, scoreDefault: 5.0, words: ['보통의','무난한','안정적인','평범한','중립적인','담담한'] },
+      notgood: { emoji: '😕', label: '별로예요', apiValue: 'tired', color: '#FFB74D', scoreMin: 2.0, scoreMax: 4.0, scoreDefault: 3.0, words: ['불편한','피곤한','지루한','답답한','걱정되는','긴장된'] },
+      bad:     { emoji: '😢', label: '안 좋아요', apiValue: 'sad', color: '#EF9A9A', scoreMin: 1.0, scoreMax: 3.0, scoreDefault: 2.0, words: ['슬픈','힘든','외로운','불안한','우울한','속상한','짜증나는','화난'] }
+    };
+
+    const EMOTION_CLUSTERS = [
+      { icon: '☀️', name: 'Sunshine', nameKr: '햇살', desc: '기쁨, 활기, 열정', emotions: ['happy','excited','great'] },
+      { icon: '🌊', name: 'Wave', nameKr: '파도', desc: '놀람, 궁금함, 기대', emotions: ['good'] },
+      { icon: '🏔️', name: 'Rock', nameKr: '바위', desc: '차분함, 안정, 평온', emotions: ['calm'] },
+      { icon: '🌧️', name: 'Rain', nameKr: '비', desc: '그리움, 슬픔, 성찰', emotions: ['sad'] },
+      { icon: '🔥', name: 'Fire', nameKr: '불꽃', desc: '열정, 에너지, 분노', emotions: ['angry','frustrated'] },
+      { icon: '☁️', name: 'Cloud', nameKr: '구름', desc: '걱정, 불안', emotions: ['anxious'] },
+      { icon: '🏜️', name: 'Desert', nameKr: '사막', desc: '무기력, 피로', emotions: ['tired'] }
+    ];
+
+    // API emotion → display 매핑
+    const API_EMOJI = { happy:'🤩', excited:'🤩', great:'🤩', good:'😊', calm:'😐', tired:'😕', sad:'😢', angry:'😡', anxious:'😰', frustrated:'😤' };
+    const API_LABEL = { happy:'행복한', excited:'신나는', great:'아주좋은', good:'좋은', calm:'평온한', tired:'피곤한', sad:'슬픈', angry:'화난', anxious:'불안한', frustrated:'답답한' };
+
+    let selectedMainEmotion = null;
+    let selectedWord = null;
+    let selectedScore = null;
+    let hasCheckedToday = false;
+
+    // ===== 탭 전환 =====
+    function switchTab(tabId) {
+      document.querySelectorAll('.tab-btn').forEach((b, i) => {
+        b.classList.toggle('active', b.textContent.includes(
+          tabId === 'checkin' ? '체크인' : tabId === 'dashboard' ? '대시보드' : '기록'
+        ));
+      });
+      document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+      document.getElementById('tab-' + tabId).classList.add('active');
+
+      if (tabId === 'dashboard') loadDashboard();
+      if (tabId === 'history') loadHistory();
+    }
+
+    // ===== 감정 선택 =====
+    function selectMainEmotion(el, emotion) {
+      document.querySelectorAll('.emotion-item').forEach(e => e.classList.remove('selected'));
+      el.classList.add('selected');
+      selectedMainEmotion = emotion;
+      selectedWord = null;
+
+      const data = EMOTION_MAP[emotion];
+
+      // 감정 점수 슬라이더 초기화
+      const scoreSection = document.getElementById('emotionScoreSection');
+      const slider = document.getElementById('emotionScoreSlider');
+      const display = document.getElementById('scoreDisplay');
+      const rangeMin = document.getElementById('scoreRangeMin');
+      const rangeMax = document.getElementById('scoreRangeMax');
+      const title = document.getElementById('scoreSliderTitle');
+
+      // 슬라이더 범위: 내부적으로 10~100 (0.1 단위 표현용)
+      const sMin = data.scoreMin, sMax = data.scoreMax;
+      slider.min = Math.round(sMin * 10);
+      slider.max = Math.round(sMax * 10);
+      slider.value = Math.round(data.scoreDefault * 10);
+      selectedScore = data.scoreDefault;
+
+      rangeMin.textContent = sMin.toFixed(1);
+      rangeMax.textContent = sMax.toFixed(1);
+      title.textContent = `${data.emoji} "${data.label}" 감정의 정도를 조절해주세요`;
+
+      updateScoreDisplay(data.scoreDefault);
+      scoreSection.classList.add('visible');
+
+      // 슬라이더 이벤트
+      slider.oninput = function() {
+        const val = parseInt(this.value) / 10;
+        selectedScore = val;
+        updateScoreDisplay(val);
+      };
+
+      // 구체적 감정 단어 표시
+      const wordsSection = document.getElementById('emotionWordsSection');
+      const wordsList = document.getElementById('emotionWordsList');
+      wordsList.innerHTML = data.words.map(w =>
+        `<button class="emotion-word" onclick="selectWord(this, '${w}')">${w}</button>`
+      ).join('');
+      wordsSection.classList.add('visible');
+
+      document.getElementById('submitBtn').disabled = false;
+    }
+
+    function updateScoreDisplay(val) {
+      const display = document.getElementById('scoreDisplay');
+      const badge = document.getElementById('scoreDescBadge');
+      display.textContent = val.toFixed(1);
+
+      // 점수 색상
+      if (val >= 7) { display.style.color = '#16A34A'; }
+      else if (val >= 5) { display.style.color = '#EAB308'; }
+      else if (val >= 3) { display.style.color = '#F97316'; }
+      else { display.style.color = '#EF4444'; }
+
+      // 설명 뱃지
+      if (val >= 8) { badge.textContent = '아주 좋음'; badge.style.background = '#DCFCE7'; badge.style.color = '#15803D'; }
+      else if (val >= 6) { badge.textContent = '좋음'; badge.style.background = '#D1FAE5'; badge.style.color = '#059669'; }
+      else if (val >= 4) { badge.textContent = '보통'; badge.style.background = '#FEF9C3'; badge.style.color = '#A16207'; }
+      else if (val >= 2) { badge.textContent = '별로'; badge.style.background = '#FED7AA'; badge.style.color = '#C2410C'; }
+      else { badge.textContent = '안 좋음'; badge.style.background = '#FEE2E2'; badge.style.color = '#DC2626'; }
+    }
+
+    function selectWord(el, word) {
+      document.querySelectorAll('.emotion-word').forEach(w => w.classList.remove('selected'));
+      el.classList.add('selected');
+      selectedWord = word;
+    }
+
+    // ===== 제출 =====
+    async function submitCheckin() {
+      if (!selectedMainEmotion) return;
+      const data = EMOTION_MAP[selectedMainEmotion];
+      const reason = document.getElementById('emotionReason').value.trim();
+      const fullReason = selectedWord ? (selectedWord + (reason ? ' - ' + reason : '')) : reason;
+
+      try {
+        const res = await fetch('/api/growth/emotion-checkin', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ emotion: data.apiValue, emotionReason: fullReason || null, emotionScore: selectedScore })
+        });
+        const result = await res.json();
+        if (result.success) {
+          showDone(selectedMainEmotion, selectedWord, reason, selectedScore);
+          showToast('감정이 기록되었습니다!');
+        } else {
+          showToast('기록에 실패했습니다: ' + (result.message || ''));
+        }
+      } catch (err) {
+        console.error('감정 기록 실패:', err);
+        showToast('네트워크 오류가 발생했습니다.');
+      }
+    }
+
+    function showDone(emotion, word, reason, score) {
+      hasCheckedToday = true;
+      const data = EMOTION_MAP[emotion];
+      document.getElementById('checkinForm').style.display = 'none';
+      const done = document.getElementById('checkinDone');
+      done.classList.add('visible');
+      document.getElementById('doneEmoji').textContent = data.emoji;
+      document.getElementById('doneMainText').textContent = '오늘의 감정을 기록했어요!';
+      const scoreText = score != null ? ` (${parseFloat(score).toFixed(1)}점)` : '';
+      document.getElementById('doneDetail').textContent = data.label + scoreText;
+      document.getElementById('doneWord').textContent = word ? '구체적 감정: ' + word : '';
+      document.getElementById('doneReason').textContent = reason ? '"' + reason + '"' : '';
+      updateHeaderStatus(true, data.emoji + ' ' + data.label + scoreText);
+    }
+
+    function resetCheckin() {
+      selectedMainEmotion = null;
+      selectedWord = null;
+      selectedScore = null;
+      document.querySelectorAll('.emotion-item').forEach(e => e.classList.remove('selected'));
+      document.getElementById('emotionWordsSection').classList.remove('visible');
+      document.getElementById('emotionScoreSection').classList.remove('visible');
+      document.getElementById('emotionReason').value = '';
+      document.getElementById('submitBtn').disabled = true;
+    }
+
+    function reCheckin() {
+      document.getElementById('checkinForm').style.display = '';
+      document.getElementById('checkinDone').classList.remove('visible');
+      resetCheckin();
+    }
+
+    function updateHeaderStatus(done, text) {
+      const el = document.getElementById('headerStatus');
+      if (done) {
+        el.innerHTML = `<div class="status-badge done"><i class="fas fa-check-circle"></i> 오늘 기록 완료 ${text ? '— ' + text : ''}</div>`;
+      } else {
+        el.innerHTML = `<div class="status-badge pending"><i class="fas fa-clock"></i> 아직 오늘의 감정을 기록하지 않았어요</div>`;
+      }
+    }
+
+    // ===== 대시보드 =====
+    async function loadDashboard() {
+      try {
+        const res = await fetch('/api/growth/emotion-history?limit=60');
+        const data = await res.json();
+        if (!data.success) throw new Error('데이터 로드 실패');
+        renderDashboard(data);
+      } catch (err) {
+        document.getElementById('dashboardContent').innerHTML =
+          '<div class="card"><div class="card-body" style="text-align:center;color:var(--gray-400);padding:40px;">데이터를 불러올 수 없습니다.</div></div>';
+      }
+    }
+
+    function renderDashboard(data) {
+      const { records, weekStats, totalCheckins, streak, positiveRate } = data;
+      let html = '';
+
+      // 통계 카드
+      html += `<div class="stats-grid">
+        <div class="stat-card"><div class="stat-icon">📊</div><div class="stat-value">${totalCheckins}</div><div class="stat-label">총 체크인 수</div></div>
+        <div class="stat-card"><div class="stat-icon">🔥</div><div class="stat-value">${streak}일</div><div class="stat-label">연속 체크인</div></div>
+        <div class="stat-card"><div class="stat-icon">😊</div><div class="stat-value">${positiveRate}%</div><div class="stat-label">긍정 감정 비율</div></div>
+      </div>`;
+
+      // 긍정 메시지
+      if (positiveRate >= 60) {
+        html += `<div class="alert-banner alert-success"><i class="fas fa-lightbulb" style="font-size:20px;color:#059669;margin-top:2px;"></i><div><div class="alert-title">긍정적인 감정이 많아요!</div><div class="alert-text">최근 기록에서 긍정 감정이 ${positiveRate}%를 차지하고 있어요. 계속 잘 지내고 있네요!</div></div></div>`;
+      } else if (positiveRate < 40 && totalCheckins > 3) {
+        html += `<div class="alert-banner alert-info"><i class="fas fa-hand-holding-heart" style="font-size:20px;color:var(--primary);margin-top:2px;"></i><div><div class="alert-title">마음이 힘들 때는 이야기해주세요</div><div class="alert-text">최근 힘든 감정이 많았어요. 선생님이나 친구에게 이야기해보는 것도 좋아요.</div></div></div>`;
+      }
+
+      // 주간 감정 차트 (점수 기반 막대그래프 + 그라데이션)
+      const SCORE_FALLBACK = { happy:9, excited:9, great:8, good:7, calm:5, tired:3, sad:2, angry:2, anxious:3, frustrated:2 };
+      const scoreGradient = (score) => {
+        const stops = [
+          {s:1,r:239,g:68,b:68},{s:2,r:245,g:101,b:56},{s:3,r:249,g:115,b:22},{s:4,r:245,g:158,b:11},
+          {s:5,r:234,g:179,b:8},{s:6,r:163,g:197,b:52},{s:7,r:74,g:197,b:94},{s:8,r:34,g:197,b:94},
+          {s:9,r:22,g:163,b:74},{s:10,r:21,g:128,b:61}
+        ];
+        const c = Math.max(1, Math.min(10, score));
+        const lo = stops[Math.floor(c)-1], hi = stops[Math.min(Math.ceil(c)-1, 9)];
+        const t = c - Math.floor(c);
+        const r = Math.round(lo.r+(hi.r-lo.r)*t), g = Math.round(lo.g+(hi.g-lo.g)*t), b = Math.round(lo.b+(hi.b-lo.b)*t);
+        return `rgb(${r},${g},${b})`;
+      };
+
+      html += `<div class="card"><div class="card-header"><div class="card-title"><i class="fas fa-chart-bar" style="color:var(--secondary)"></i> 최근 감정 추이</div><div class="card-subtitle">날짜별 감정 점수 (1~10)</div></div><div class="card-body">`;
+      const recent7 = records.slice(0, 7).reverse();
+      if (recent7.length > 0) {
+        html += '<div class="week-chart">';
+        recent7.forEach(r => {
+          const em = API_EMOJI[r.emotion] || '😐';
+          const score = r.emotion_score != null ? r.emotion_score : (SCORE_FALLBACK[r.emotion] || 5);
+          const hPct = Math.max(5, (score / 10) * 100);
+          const barColor = scoreGradient(score);
+          const barColorLight = barColor.replace('rgb', 'rgba').replace(')', ',0.5)');
+          const d = new Date(r.attendance_date);
+          const dayNames = ['일','월','화','수','목','금','토'];
+          html += `<div class="week-bar-item">
+            <div class="week-bar-top">
+              <div style="font-size:var(--fs-xs);font-weight:800;color:${barColor};">${typeof score === 'number' ? score.toFixed(1) : score}</div>
+              <div class="week-bar-emoji">${em}</div>
+            </div>
+            <div class="week-bar-area">
+              <div class="week-bar" style="height:${hPct}%;background:linear-gradient(180deg,${barColor},${barColorLight});"></div>
+            </div>
+            <div class="week-bar-label">${d.getMonth()+1}/${d.getDate()} (${dayNames[d.getDay()]})</div>
+          </div>`;
+        });
+        html += '</div>';
+      } else {
+        html += '<div style="text-align:center;color:var(--gray-400);padding:20px;">기록된 감정이 없습니다.</div>';
+      }
+      html += '</div></div>';
+
+      // TOP 감정
+      if (weekStats && weekStats.length > 0) {
+        html += `<div class="card"><div class="card-header"><div class="card-title"><i class="fas fa-trophy" style="color:var(--warning)"></i> 이번 주 감정 TOP</div></div><div class="card-body"><div class="ranking-list">`;
+        const medals = ['🥇','🥈','🥉'];
+        weekStats.slice(0, 3).forEach((s, i) => {
+          const em = API_EMOJI[s.emotion] || '😐';
+          const lb = API_LABEL[s.emotion] || s.emotion;
+          html += `<div class="ranking-item"><div class="ranking-medal">${medals[i] || ''}</div><div class="ranking-text">${em} ${lb}</div><div class="ranking-value">${s.cnt}회</div></div>`;
+        });
+        html += '</div></div></div>';
+      }
+
+      // 감정 클러스터
+      html += `<div class="card"><div class="card-header"><div class="card-title"><i class="fas fa-cloud-sun" style="color:var(--secondary)"></i> 나의 감정 클러스터</div><div class="card-subtitle">자연 요소로 표현하는 감정 패턴</div></div><div class="card-body"><div class="cluster-grid">`;
+      const allEmotions = records.map(r => r.emotion);
+      const total = allEmotions.length || 1;
+      EMOTION_CLUSTERS.forEach(cl => {
+        const cnt = allEmotions.filter(e => cl.emotions.includes(e)).length;
+        const pct = Math.round(cnt / total * 100);
+        const isActive = pct > 0 && pct === Math.max(...EMOTION_CLUSTERS.map(c2 => {
+          return Math.round(allEmotions.filter(e => c2.emotions.includes(e)).length / total * 100);
+        }));
+        html += `<div class="cluster-card${isActive ? ' active' : ''}"><div class="cluster-icon">${cl.icon}</div><div class="cluster-name">${cl.name}</div><div class="cluster-desc">${cl.desc}</div><div class="cluster-pct">${pct}%</div></div>`;
+      });
+      html += '</div></div></div>';
+
+      document.getElementById('dashboardContent').innerHTML = html;
+    }
+
+    // ===== 히스토리 =====
+    async function loadHistory() {
+      try {
+        const res = await fetch('/api/growth/emotion-history?limit=60');
+        const data = await res.json();
+        if (!data.success) throw new Error('데이터 로드 실패');
+        renderHistory(data.records);
+      } catch (err) {
+        document.getElementById('historyContent').innerHTML =
+          '<div class="card"><div class="card-body" style="text-align:center;color:var(--gray-400);padding:40px;">기록을 불러올 수 없습니다.</div></div>';
+      }
+    }
+
+    function renderHistory(records) {
+      if (!records || records.length === 0) {
+        document.getElementById('historyContent').innerHTML =
+          '<div class="card"><div class="card-body" style="text-align:center;color:var(--gray-400);padding:40px;"><i class="fas fa-inbox" style="font-size:32px;margin-bottom:12px;display:block;"></i>아직 기록된 감정이 없습니다.<br>첫 번째 감정을 기록해보세요!</div></div>';
+        return;
+      }
+
+      let html = `<div class="card"><div class="card-header"><div class="card-title"><i class="fas fa-list" style="color:var(--primary)"></i> 감정 기록 (${records.length}건)</div></div><div class="card-body"><div class="history-list">`;
+
+      records.forEach(r => {
+        const em = API_EMOJI[r.emotion] || '😐';
+        const lb = API_LABEL[r.emotion] || r.emotion;
+        const d = new Date(r.attendance_date);
+        const dateStr = `${d.getFullYear()}.${String(d.getMonth()+1).padStart(2,'0')}.${String(d.getDate()).padStart(2,'0')}`;
+        const dayNames = ['일','월','화','수','목','금','토'];
+        const dayStr = dayNames[d.getDay()];
+
+        const borderColors = { happy:'#FFD54F', excited:'#FFD54F', great:'#FFD54F', good:'#4FC3F7', calm:'#FFF176', tired:'#FFB74D', sad:'#EF9A9A', angry:'#EF5350', anxious:'#CE93D8', frustrated:'#FFAB91' };
+        const bc = borderColors[r.emotion] || 'var(--primary)';
+
+        html += `<div class="history-item" style="border-left-color:${bc};">
+          <div class="history-emoji">${em}</div>
+          <div class="history-content">
+            <div class="history-date">${dateStr} (${dayStr})</div>
+            <div class="history-emotion">${lb}</div>
+            ${r.emotion_reason ? `<div class="history-reason">${escHtml(r.emotion_reason)}</div>` : ''}
+          </div>
+        </div>`;
+      });
+
+      html += '</div></div></div>';
+      document.getElementById('historyContent').innerHTML = html;
+    }
+
+    function escHtml(s) { if (!s) return ''; const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+    function showToast(msg) {
+      const t = document.createElement('div');
+      t.className = 'toast';
+      t.innerHTML = '<i class="fas fa-check-circle"></i> ' + msg;
+      document.body.appendChild(t);
+      setTimeout(() => { t.style.opacity = '0'; t.style.transition = 'opacity .3s'; setTimeout(() => t.remove(), 300); }, 2500);
+    }
+
+    // ===== 초기화 =====
+    (async () => {
+      try {
+        const res = await fetch('/api/growth/emotion-today');
+        const data = await res.json();
+        if (data.success && data.hasChecked) {
+          // 이미 기록한 경우 - API emotion을 main emotion key로 역변환
+          const reverseMap = {};
+          Object.entries(EMOTION_MAP).forEach(([k, v]) => { reverseMap[v.apiValue] = k; });
+          const mainKey = reverseMap[data.emotion] || 'okay';
+          showDone(mainKey, null, data.reason, data.emotionScore);
+        } else {
+          updateHeaderStatus(false);
+        }
+      } catch (err) {
+        updateHeaderStatus(false);
+      }
+    })();
+  </script>
+</body>
+</html>

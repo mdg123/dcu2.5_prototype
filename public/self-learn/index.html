@@ -1,0 +1,1183 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>다채움 - 스스로채움</title>
+  <link rel="stylesheet" href="/css/common-nav.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    :root {
+      --primary: #4A7CFF; --primary-light: #E8F0FF; --primary-dark: #3A5FCC;
+      --accent: #FF6B6B; --accent-light: #FFE8E8;
+      --secondary: #7C4DFF; --secondary-light: #EDE7FF;
+      --success: #00C48C; --success-light: #E0FFF5;
+      --warning: #FFB800; --warning-light: #FFF8E0;
+      --gray-50: #F8FAFC; --gray-100: #F1F5F9; --gray-200: #E2E8F0; --gray-300: #CBD5E1;
+      --gray-400: #94A3B8; --gray-500: #64748B; --gray-600: #475569; --gray-700: #334155; --gray-800: #1E293B;
+      --shadow-sm: 0 1px 2px rgba(0,0,0,0.05); --shadow-md: 0 4px 6px -1px rgba(0,0,0,0.1);
+      --shadow-lg: 0 10px 15px -3px rgba(0,0,0,0.1);
+      --radius-sm: 6px; --radius-md: 10px; --radius-lg: 16px; --radius-xl: 24px;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Pretendard','Noto Sans KR',system-ui,sans-serif; background: linear-gradient(135deg, #F0F4FF 0%, #FAFBFF 100%); color: var(--gray-800); min-height: 100vh; }
+
+    .app-layout { display: flex; min-height: calc(100vh - 60px); }
+    .sidebar-nav { width: 220px; background: #fff; border-right: 1px solid var(--gray-200); padding: 20px 0; flex-shrink: 0; }
+    .sidebar-menu { list-style: none; }
+    .sidebar-menu li { padding: 10px 20px; font-size: 14px; cursor: pointer; display: flex; align-items: center; gap: 10px; color: var(--gray-600); transition: all .15s; }
+    .sidebar-menu li:hover { background: var(--gray-50); }
+    .sidebar-menu li.active { background: var(--primary-light); color: var(--primary); font-weight: 600; border-right: 3px solid var(--primary); }
+    .sidebar-menu li i { width: 18px; text-align: center; }
+    .main-content { flex: 1; padding: 24px; max-width: 1800px; }
+
+    /* ===== 오늘의 학습 2-column layout ===== */
+    .today-layout { display: grid; grid-template-columns: 1fr 320px; gap: 24px; }
+    .today-main { display: flex; flex-direction: column; gap: 20px; }
+    .today-sidebar { display: flex; flex-direction: column; gap: 16px; }
+
+    /* 목표 달성률 섹션 */
+    .goal-section { background: #fff; border-radius: var(--radius-lg); padding: 24px; box-shadow: var(--shadow-sm); }
+    .goal-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
+    .goal-title-area { display: flex; align-items: center; gap: 16px; }
+    .goal-title { font-size: 18px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+    .goal-tabs { display: flex; background: var(--gray-100); border-radius: 8px; padding: 4px; }
+    .goal-tab { padding: 6px 16px; border: none; background: none; font-size: 13px; font-weight: 500; color: var(--gray-500); cursor: pointer; border-radius: 6px; transition: all .2s; font-family: inherit; }
+    .goal-tab.active { background: #fff; color: var(--primary); box-shadow: var(--shadow-sm); }
+    .goal-content { display: flex; align-items: center; gap: 40px; }
+    .goal-progress-circle { position: relative; width: 140px; height: 140px; flex-shrink: 0; }
+    .goal-progress-circle svg { transform: rotate(-90deg); width: 100%; height: 100%; }
+    .goal-circle-bg { fill: none; stroke: var(--gray-100); stroke-width: 8; }
+    .goal-circle-fill { fill: none; stroke: url(#goalGradient); stroke-width: 8; stroke-linecap: round; transition: stroke-dashoffset .5s ease; }
+    .goal-progress-text { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); text-align: center; }
+    .goal-percent { display: block; font-size: 32px; font-weight: 700; color: var(--gray-800); }
+    .goal-label { font-size: 13px; color: var(--gray-500); }
+    .goal-details { flex: 1; display: flex; flex-direction: column; gap: 14px; }
+    .goal-detail-item { display: flex; align-items: center; gap: 12px; }
+    .goal-detail-icon { width: 36px; height: 36px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 16px; flex-shrink: 0; }
+    .goal-detail-info { min-width: 120px; }
+    .goal-detail-label { display: block; font-size: 13px; color: var(--gray-500); }
+    .goal-detail-value { font-size: 15px; font-weight: 600; color: var(--gray-800); }
+    .goal-detail-bar { flex: 1; height: 8px; background: var(--gray-100); border-radius: 4px; overflow: hidden; }
+    .goal-detail-fill { height: 100%; border-radius: 4px; transition: width .3s ease; }
+
+    /* 캐릭터 표시 */
+    .character-display { display: flex; align-items: center; gap: 12px; }
+    .character-avatar { width: 52px; height: 52px; background: linear-gradient(135deg, #FFE066, #FFB800); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 28px; box-shadow: var(--shadow-md); }
+    .character-info { text-align: left; }
+    .character-level { font-size: 11px; color: var(--gray-500); }
+    .character-name { font-size: 14px; font-weight: 600; }
+    .exp-bar { width: 80px; height: 5px; background: var(--gray-200); border-radius: 3px; overflow: hidden; display: inline-block; }
+    .exp-fill { height: 100%; background: linear-gradient(90deg, var(--warning), #FF9500); }
+    .exp-text { font-size: 10px; color: var(--gray-500); margin-left: 4px; }
+
+    /* 날짜 선택 */
+    .date-selector { background: #fff; border-radius: var(--radius-lg); padding: 20px; box-shadow: var(--shadow-sm); }
+    .date-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+    .date-header h3 { font-size: 16px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+    .date-help-text { font-size: 13px; color: var(--gray-500); }
+    .date-nav-btn { width: 32px; height: 32px; border: 1px solid var(--gray-200); background: #fff; border-radius: 50%; cursor: pointer; display: flex; align-items: center; justify-content: center; font-family: inherit; }
+    .date-nav-btn:hover { background: var(--gray-50); }
+    .date-list { display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; }
+    .date-item { position: relative; padding: 12px 6px; border-radius: var(--radius-md); text-align: center; cursor: pointer; border: 2px solid transparent; transition: all .2s; background: var(--gray-50); }
+    .date-item:hover { border-color: var(--gray-200); }
+    .date-item.active { border-color: var(--primary); }
+    .date-item.today::before { content: '오늘'; position: absolute; top: -8px; left: 50%; transform: translateX(-50%); font-size: 9px; background: var(--accent); color: #fff; padding: 1px 6px; border-radius: 10px; z-index: 1; }
+    .date-item.completed-day { background: var(--success-light); }
+    .date-item.empty-day { opacity: .6; }
+    .date-day { font-size: 11px; color: var(--gray-500); margin-bottom: 4px; }
+    .date-num { font-size: 18px; font-weight: 600; margin-bottom: 6px; }
+    .date-status { min-height: 20px; display: flex; align-items: center; justify-content: center; }
+    .status-check { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; background: var(--success); color: #fff; border-radius: 50%; font-size: 10px; }
+    .status-fraction { font-size: 11px; font-weight: 600; color: var(--gray-600); background: #fff; padding: 2px 8px; border-radius: 10px; }
+    .date-item.completed-day .status-fraction { background: var(--success); color: #fff; }
+    .date-item.active .status-fraction { background: var(--primary); color: #fff; }
+    .date-detail { font-size: 10px; color: var(--gray-400); margin-top: 4px; }
+    .date-item.completed-day .date-detail { color: var(--success); }
+
+    /* 학습 카드 그리드 */
+    .section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+    .section-title { font-size: 18px; font-weight: 700; display: flex; align-items: center; gap: 10px; }
+    .section-title-icon { width: 32px; height: 32px; border-radius: var(--radius-md); display: flex; align-items: center; justify-content: center; color: #fff; font-size: 14px; }
+    .learning-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; }
+    .learning-card { background: #fff; border-radius: var(--radius-lg); overflow: hidden; box-shadow: var(--shadow-sm); transition: all .2s; cursor: pointer; border: 2px solid transparent; }
+    .learning-card:hover { box-shadow: var(--shadow-lg); transform: translateY(-2px); }
+    .learning-card.completed { border-color: var(--success); }
+    .learning-card.in-progress { border-color: var(--warning); }
+    .card-thumbnail { height: 120px; position: relative; display: flex; align-items: center; justify-content: center; }
+    .card-thumbnail-icon { font-size: 40px; opacity: .6; }
+    .status-label { position: absolute; top: 10px; right: 10px; padding: 4px 10px; border-radius: 12px; font-size: 11px; font-weight: 600; }
+    .status-label.completed { background: var(--success); color: #fff; }
+    .status-label.in-progress { background: var(--warning); color: var(--gray-800); }
+    .status-label.not-started { background: var(--gray-300); color: var(--gray-700); }
+    .card-content { padding: 14px; }
+    .card-tags { display: flex; gap: 6px; margin-bottom: 8px; flex-wrap: wrap; }
+    .card-tag { padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 500; }
+    .card-tag.subject { background: var(--primary-light); color: var(--primary); }
+    .card-tag.level-easy { background: var(--success-light); color: var(--success); }
+    .card-tag.level-normal { background: var(--primary-light); color: var(--primary); }
+    .card-tag.level-hard { background: var(--accent-light); color: var(--accent); }
+    .card-tag.type { background: var(--gray-100); color: var(--gray-600); }
+    .card-title { font-size: 14px; font-weight: 600; color: var(--gray-800); margin-bottom: 10px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+    .element-progress { display: flex; gap: 10px; margin-bottom: 10px; font-size: 12px; color: var(--gray-500); }
+    .element-progress .done { color: var(--success); }
+    .card-footer { display: flex; align-items: center; justify-content: space-between; padding-top: 10px; border-top: 1px solid var(--gray-100); }
+    .card-point { display: flex; align-items: center; gap: 4px; font-size: 13px; font-weight: 600; color: var(--warning); }
+    .card-btn { padding: 7px 14px; border-radius: var(--radius-md); font-size: 12px; font-weight: 500; border: none; cursor: pointer; font-family: inherit; transition: all .2s; }
+    .card-btn.primary { background: var(--primary); color: #fff; }
+    .card-btn.primary:hover { background: var(--primary-dark); }
+    .card-btn.secondary { background: var(--gray-100); color: var(--gray-700); }
+
+    /* 사이드바 카드 */
+    .sidebar-card { background: #fff; border-radius: var(--radius-lg); padding: 18px; box-shadow: var(--shadow-sm); }
+    .sidebar-title { font-size: 15px; font-weight: 600; margin-bottom: 14px; display: flex; align-items: center; gap: 8px; }
+    .ai-learning-card { background: linear-gradient(135deg, var(--secondary) 0%, #9D7AFF 100%); color: #fff; }
+    .ai-learning-card .sidebar-title { color: #fff; }
+    .ai-menu-list { display: flex; flex-direction: column; gap: 8px; }
+    .ai-menu-item { display: flex; align-items: center; gap: 10px; padding: 10px; background: rgba(255,255,255,.15); border-radius: var(--radius-md); cursor: pointer; transition: all .2s; color: #fff; text-decoration: none; font-size: 13px; font-weight: 500; }
+    .ai-menu-item:hover { background: rgba(255,255,255,.25); }
+    .ai-menu-icon { width: 32px; height: 32px; background: rgba(255,255,255,.2); border-radius: var(--radius-sm); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+    .note-card { border-left: 4px solid var(--accent); }
+    .note-count { display: flex; align-items: center; gap: 8px; padding: 10px; background: var(--accent-light); border-radius: var(--radius-md); font-size: 13px; }
+    .note-count strong { color: var(--accent); font-size: 22px; }
+    .progress-stat { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--gray-100); }
+    .progress-stat:last-child { border-bottom: none; }
+    .progress-stat .lbl { font-size: 13px; color: var(--gray-600); }
+    .progress-stat .val { font-size: 16px; font-weight: 700; }
+    .point-card { background: linear-gradient(135deg, #FFF8E0 0%, #FFEFB8 100%); }
+    .point-display { display: flex; align-items: center; gap: 12px; }
+    .point-icon { width: 44px; height: 44px; background: var(--warning); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 20px; flex-shrink: 0; }
+    .point-amount { font-size: 24px; font-weight: 700; color: var(--gray-800); }
+    .point-label { font-size: 12px; color: var(--gray-600); }
+    .ranking-mini { background: var(--gray-50); border-radius: var(--radius-md); padding: 14px; }
+    .ranking-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+    .ranking-title { font-size: 13px; font-weight: 600; }
+    .ranking-list { display: flex; flex-direction: column; gap: 6px; }
+    .ranking-item { display: flex; align-items: center; gap: 10px; padding: 6px 8px; background: #fff; border-radius: var(--radius-sm); font-size: 12px; }
+    .ranking-item.me { background: var(--primary-light); border: 1px solid var(--primary); }
+    .ranking-position { width: 22px; height: 22px; border-radius: 50%; background: var(--gray-200); display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 600; flex-shrink: 0; }
+    .ranking-item:nth-child(1) .ranking-position { background: linear-gradient(135deg, #FFD700, #FFA500); color: #fff; }
+    .ranking-item:nth-child(2) .ranking-position { background: linear-gradient(135deg, #C0C0C0, #A0A0A0); color: #fff; }
+    .ranking-item:nth-child(3) .ranking-position { background: linear-gradient(135deg, #CD7F32, #A0522D); color: #fff; }
+    .ranking-name { flex: 1; }
+    .ranking-score { font-weight: 600; color: var(--primary); }
+    .quick-menu { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+    .quick-menu-item { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 12px 8px; background: var(--gray-50); border-radius: var(--radius-md); text-decoration: none; color: var(--gray-700); transition: all .2s; font-size: 11px; font-weight: 500; }
+    .quick-menu-item:hover { background: var(--gray-100); }
+    .quick-menu-icon { width: 36px; height: 36px; background: #fff; border-radius: var(--radius-md); display: flex; align-items: center; justify-content: center; box-shadow: var(--shadow-sm); font-size: 16px; }
+
+    /* ===== 오답노트 ===== */
+    .stat-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 12px; margin-bottom: 20px; }
+    .stat-card { background: #fff; border-radius: 12px; padding: 18px; box-shadow: var(--shadow-sm); }
+    .stat-card .stat-icon { width: 40px; height: 40px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 18px; color: #fff; margin-bottom: 10px; }
+    .stat-card .stat-value { font-size: 24px; font-weight: 700; }
+    .stat-card .stat-label { font-size: 12px; color: var(--gray-500); margin-top: 2px; }
+
+    /* 게이미피케이션 */
+    .gamification-section { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 20px; }
+    .level-card { background: linear-gradient(135deg, var(--primary-light), var(--secondary-light)); border-radius: var(--radius-lg); padding: 20px; }
+    .level-header { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+    .level-badge { width: 48px; height: 48px; background: linear-gradient(135deg, var(--primary), var(--secondary)); border-radius: 12px; display: flex; flex-direction: column; align-items: center; justify-content: center; color: #fff; font-size: 11px; font-weight: 600; }
+    .level-badge i { font-size: 16px; margin-bottom: 2px; }
+    .level-info h4 { font-size: 16px; font-weight: 700; }
+    .level-info p { font-size: 12px; color: var(--gray-600); }
+    .level-progress .progress-bar { height: 8px; background: var(--gray-200); border-radius: 4px; overflow: hidden; margin-bottom: 6px; }
+    .level-progress .progress-fill { height: 100%; background: linear-gradient(90deg, var(--primary), var(--secondary)); border-radius: 4px; }
+    .level-progress .progress-text { font-size: 11px; color: var(--gray-500); }
+    .achievement-card { background: #fff; border-radius: var(--radius-lg); padding: 20px; box-shadow: var(--shadow-sm); }
+    .achievement-card h4 { font-size: 14px; font-weight: 600; margin-bottom: 12px; }
+    .badge-list { display: flex; gap: 12px; }
+    .badge-item { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 10px; background: var(--gray-50); border-radius: var(--radius-md); flex: 1; text-align: center; }
+    .badge-item i { font-size: 20px; color: var(--warning); }
+    .badge-item span { font-size: 10px; color: var(--gray-600); font-weight: 500; }
+
+    /* 취약 영역 */
+    .weakness-section { background: #fff; border-radius: var(--radius-lg); padding: 20px; box-shadow: var(--shadow-sm); margin-bottom: 16px; }
+    .weakness-section h3 { font-size: 16px; font-weight: 700; margin-bottom: 14px; display: flex; align-items: center; gap: 8px; }
+    .weakness-item { display: flex; align-items: center; gap: 12px; padding: 12px; border-radius: 8px; background: var(--gray-50); margin-bottom: 8px; }
+    .weakness-item:last-child { margin-bottom: 0; }
+    .subject-badge-sm { padding: 3px 10px; border-radius: 12px; font-size: 11px; font-weight: 600; color: #fff; }
+    .weakness-name { flex: 1; font-size: 13px; font-weight: 500; }
+    .weakness-bar { width: 120px; height: 6px; background: var(--gray-200); border-radius: 3px; overflow: hidden; }
+    .weakness-bar-fill { height: 100%; border-radius: 3px; }
+    .error-rate { font-size: 12px; font-weight: 600; color: var(--accent); min-width: 60px; text-align: right; }
+
+    .card { background: #fff; border-radius: var(--radius-lg); padding: 20px; box-shadow: var(--shadow-sm); margin-bottom: 16px; }
+    .card h3 { font-size: 16px; font-weight: 700; margin-bottom: 14px; display: flex; align-items: center; gap: 8px; }
+
+    .tab-nav { display: flex; gap: 4px; margin-bottom: 16px; border-bottom: 2px solid var(--gray-200); }
+    .tab-btn { padding: 10px 18px; font-size: 13px; font-weight: 500; background: none; border: none; cursor: pointer; color: var(--gray-500); border-bottom: 2px solid transparent; margin-bottom: -2px; font-family: inherit; transition: all .15s; }
+    .tab-btn.active { color: var(--primary); border-bottom-color: var(--primary); font-weight: 600; }
+    .tab-btn:hover { color: var(--gray-700); }
+
+    .wrong-item { border: 1px solid var(--gray-200); border-radius: var(--radius-md); padding: 16px; margin-bottom: 10px; transition: all .15s; }
+    .wrong-item:hover { border-color: var(--gray-300); box-shadow: var(--shadow-sm); }
+    .wrong-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+    .wrong-subject { padding: 3px 10px; border-radius: 12px; font-size: 11px; font-weight: 600; color: #fff; }
+    .wrong-q { font-size: 14px; font-weight: 500; margin-bottom: 8px; }
+    .wrong-answers { display: flex; gap: 16px; font-size: 13px; }
+    .wrong-answers .my { color: var(--accent); }
+    .wrong-answers .correct { color: var(--success); }
+    .resolve-btn { padding: 5px 12px; font-size: 12px; border: 1px solid var(--success); color: var(--success); background: #fff; border-radius: 6px; cursor: pointer; font-family: inherit; transition: all .15s; font-weight: 500; }
+    .resolve-btn:hover { background: var(--success-light); }
+
+    .filter-bar { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+    .filter-chip { padding: 6px 14px; border-radius: 20px; font-size: 12px; border: 1.5px solid var(--gray-200); cursor: pointer; background: #fff; font-family: inherit; transition: all .15s; }
+    .filter-chip.active { background: var(--primary); color: #fff; border-color: var(--primary); }
+    .filter-chip:hover:not(.active) { border-color: var(--gray-400); }
+
+    .chart-container { height: 200px; margin-top: 10px; }
+    .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+
+    /* ===== AI 맞춤학습 ===== */
+    .map-filter-bar { display: flex; gap: 10px; margin-bottom: 16px; flex-wrap: wrap; align-items: center; }
+    .map-filter-bar select { padding: 8px 12px; border: 1.5px solid var(--gray-200); border-radius: 8px; font-size: 13px; font-family: inherit; background: #fff; }
+    .map-node-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px; }
+    .map-node-card { background: #fff; border-radius: var(--radius-lg); padding: 16px; box-shadow: var(--shadow-sm); border-left: 4px solid transparent; transition: all .2s; cursor: pointer; }
+    .map-node-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-lg); }
+    .map-node-card .node-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 10px; }
+    .map-node-card .node-subject { padding: 3px 10px; border-radius: 12px; font-size: 11px; font-weight: 600; color: #fff; }
+    .map-node-card .node-level { font-size: 11px; color: var(--gray-500); }
+    .map-node-card .node-title { font-size: 14px; font-weight: 600; margin-bottom: 4px; }
+    .map-node-card .node-sub { font-size: 12px; color: var(--gray-500); margin-bottom: 10px; }
+    .card-progress { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+    .card-progress .bar { flex: 1; height: 6px; background: var(--gray-200); border-radius: 3px; overflow: hidden; }
+    .card-progress .bar-fill { height: 100%; border-radius: 3px; transition: width .3s; }
+    .card-progress span { font-size: 12px; font-weight: 600; }
+    .node-footer { display: flex; align-items: center; justify-content: space-between; }
+    .node-status { padding: 3px 10px; border-radius: 12px; font-size: 11px; font-weight: 600; }
+
+    /* ===== 학습 목표 ===== */
+    .goal-item { display: flex; align-items: center; gap: 12px; padding: 12px; border-radius: 8px; background: var(--gray-50); margin-bottom: 8px; }
+    .goal-check { width: 22px; height: 22px; border-radius: 50%; border: 2px solid var(--gray-300); cursor: pointer; flex-shrink: 0; display: flex; align-items: center; justify-content: center; transition: all .2s; }
+    .goal-check:hover { border-color: var(--success); }
+    .goal-check.done { background: var(--success); border-color: var(--success); color: #fff; }
+    .goal-text { flex: 1; font-size: 14px; }
+    .goal-text.done { text-decoration: line-through; color: var(--gray-400); }
+
+    .progress-bar { height: 8px; background: var(--gray-200); border-radius: 4px; overflow: hidden; }
+    .progress-fill { height: 100%; border-radius: 4px; transition: width .3s; }
+
+    .btn { padding: 8px 16px; border: none; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit; }
+    .btn-primary { background: var(--primary); color: #fff; }
+    .btn-primary:hover { background: var(--primary-dark); }
+    .btn-sm { padding: 6px 12px; font-size: 12px; }
+    .btn-outline { background: #fff; color: var(--gray-600); border: 1.5px solid var(--gray-200); }
+    .btn-outline:hover { background: var(--gray-50); }
+
+    .empty-state { text-align: center; padding: 40px 20px; color: var(--gray-400); }
+    .empty-state i { font-size: 40px; margin-bottom: 10px; display: block; }
+
+    .modal-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,.5); backdrop-filter: blur(4px); z-index: 10000; align-items: center; justify-content: center; padding: 24px; }
+    .modal-overlay.active { display: flex; }
+    .modal { background: #fff; border-radius: var(--radius-xl); padding: 28px; width: 90%; max-width: 500px; max-height: 90vh; overflow-y: auto; animation: modalIn .3s ease; }
+    @keyframes modalIn { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+    .modal h3 { font-size: 18px; font-weight: 700; margin-bottom: 16px; }
+    .form-group { margin-bottom: 14px; }
+    .form-group label { display: block; font-size: 13px; font-weight: 600; color: var(--gray-700); margin-bottom: 6px; }
+    .form-group input, .form-group select, .form-group textarea { width: 100%; padding: 10px 12px; border: 1.5px solid var(--gray-200); border-radius: 8px; font-size: 14px; outline: none; font-family: inherit; }
+    .form-group input:focus, .form-group select:focus { border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-light); }
+    .modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 16px; }
+
+    /* Node detail modal */
+    .node-detail-header { display: flex; gap: 16px; align-items: center; margin-bottom: 16px; padding: 16px; background: var(--gray-50); border-radius: var(--radius-md); }
+    .node-detail-icon { width: 48px; height: 48px; border-radius: 12px; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 20px; flex-shrink: 0; }
+    .node-detail-info h4 { font-size: 16px; font-weight: 600; }
+    .node-detail-info p { font-size: 13px; color: var(--gray-500); }
+    .node-detail-meta { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 16px; }
+    .node-detail-meta .meta-item { text-align: center; padding: 12px; background: var(--gray-50); border-radius: 8px; }
+    .node-detail-meta .meta-val { font-size: 20px; font-weight: 700; }
+    .node-detail-meta .meta-lbl { font-size: 11px; color: var(--gray-500); }
+
+    /* Toast */
+    .toast { position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%); background: linear-gradient(135deg, var(--primary), var(--secondary)); color: #fff; padding: 14px 24px; border-radius: var(--radius-lg); box-shadow: 0 10px 25px rgba(0,0,0,.2); display: flex; align-items: center; gap: 10px; z-index: 20000; animation: toastIn .4s ease; font-size: 14px; font-weight: 500; }
+    @keyframes toastIn { from { opacity: 0; transform: translate(-50%, 20px); } to { opacity: 1; transform: translate(-50%, 0); } }
+
+    @media (max-width: 1024px) {
+      .today-layout { grid-template-columns: 1fr; }
+      .today-sidebar { display: grid; grid-template-columns: repeat(2, 1fr); }
+      .goal-content { flex-direction: column; gap: 20px; }
+    }
+    @media (max-width: 768px) {
+      .app-layout { flex-direction: column; }
+      .sidebar-nav { width: 100%; border-right: none; border-bottom: 1px solid var(--gray-200); padding: 10px 0; }
+      .sidebar-menu { display: flex; overflow-x: auto; }
+      .sidebar-menu li { white-space: nowrap; padding: 8px 14px; border-right: none; }
+      .sidebar-menu li.active { border-right: none; border-bottom: 3px solid var(--primary); }
+      .stat-cards { grid-template-columns: repeat(2, 1fr); }
+      .two-col { grid-template-columns: 1fr; }
+      .learning-grid { grid-template-columns: 1fr; }
+      .map-node-grid { grid-template-columns: 1fr; }
+      .date-list { grid-template-columns: repeat(4, 1fr); }
+      .gamification-section { grid-template-columns: 1fr; }
+      .today-sidebar { grid-template-columns: 1fr; }
+      .goal-header { flex-direction: column; align-items: flex-start; gap: 12px; }
+    }
+  </style>
+</head>
+<body>
+  <!-- SVG 그라데이션 정의 -->
+  <svg width="0" height="0" style="position: absolute;">
+    <defs>
+      <linearGradient id="goalGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+        <stop offset="0%" style="stop-color:#4A7CFF"/>
+        <stop offset="100%" style="stop-color:#7C4DFF"/>
+      </linearGradient>
+    </defs>
+  </svg>
+
+  <script src="/js/common-nav.js"></script>
+  <div class="app-layout" id="mainContent" style="display:none;">
+    <!-- 사이드 메뉴 제거: GNB 2차 바로 페이지 전환 -->
+    <div class="main-content" id="pageContent"></div>
+  </div>
+
+  <!-- 목표 추가 모달 -->
+  <div class="modal-overlay" id="goalModal">
+    <div class="modal">
+      <h3><i class="fas fa-plus-circle" style="color:var(--primary);margin-right:6px;"></i>학습 목표 추가</h3>
+      <div class="form-group"><label>목표</label><input type="text" id="goalTitle" placeholder="학습 목표를 입력하세요"></div>
+      <div class="form-group"><label>설명 (선택)</label><input type="text" id="goalDesc" placeholder="상세 설명"></div>
+      <div class="modal-actions">
+        <button class="btn" style="background:var(--gray-100);color:var(--gray-700)" onclick="closeModal('goalModal')">취소</button>
+        <button class="btn btn-primary" onclick="submitGoal()">추가</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 학습 노드 상세 모달 -->
+  <div class="modal-overlay" id="nodeModal">
+    <div class="modal" style="max-width:520px;">
+      <div id="nodeModalBody"></div>
+      <div class="modal-actions">
+        <button class="btn" style="background:var(--gray-100);color:var(--gray-700)" onclick="closeModal('nodeModal')">닫기</button>
+        <button class="btn btn-primary" id="nodeStartBtn" style="display:none">학습 시작</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let currentPage = 'today';
+    const subjectColors = { '국어':'#2563eb','수학':'#dc2626','영어':'#f59e0b','과학':'#10b981','사회':'#8b5cf6','도덕':'#ec4899','음악':'#06b6d4','미술':'#f97316','체육':'#22c55e','실과':'#6366f1','통합':'#14b8a6' };
+    const subjectGrads = { '국어':'linear-gradient(135deg,#667eea,#764ba2)','수학':'linear-gradient(135deg,#ff6b6b,#ee5a24)','영어':'linear-gradient(135deg,#f7971e,#ffd200)','과학':'linear-gradient(135deg,#43e97b,#38f9d7)','사회':'linear-gradient(135deg,#a18cd1,#fbc2eb)','도덕':'linear-gradient(135deg,#fbc2eb,#a6c1ee)','음악':'linear-gradient(135deg,#4facfe,#00f2fe)','미술':'linear-gradient(135deg,#f093fb,#f5576c)','체육':'linear-gradient(135deg,#11998e,#38ef7d)','실과':'linear-gradient(135deg,#6a11cb,#2575fc)','통합':'linear-gradient(135deg,#0ba360,#3cba92)' };
+    const defaultGrad = 'linear-gradient(135deg,#667eea,#764ba2)';
+    const subjectIcons = { '국어':'fa-book','수학':'fa-calculator','영어':'fa-language','과학':'fa-flask','사회':'fa-globe','도덕':'fa-heart','음악':'fa-music','미술':'fa-palette','체육':'fa-running','실과':'fa-tools','통합':'fa-puzzle-piece' };
+
+    function escHtml(s) { if (!s) return ''; const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+    function showToast(msg, icon='fa-check-circle') {
+      const t = document.createElement('div');
+      t.className = 'toast';
+      t.innerHTML = `<i class="fas ${icon}"></i> ${msg}`;
+      document.body.appendChild(t);
+      setTimeout(() => { t.style.opacity = '0'; t.style.transform = 'translate(-50%, 20px)'; t.style.transition = 'all .3s'; setTimeout(() => t.remove(), 300); }, 2500);
+    }
+
+    document.querySelectorAll('.sidebar-menu li').forEach(li => {
+      li.addEventListener('click', () => {
+        document.querySelectorAll('.sidebar-menu li').forEach(l => l.classList.remove('active'));
+        li.classList.add('active');
+        currentPage = li.dataset.page;
+        renderPage();
+      });
+    });
+
+    function renderPage() {
+      const c = document.getElementById('pageContent');
+      switch (currentPage) {
+        case 'today': renderToday(c); break;
+        case 'wrong': renderWrong(c); break;
+        case 'map': renderMap(c); break;
+        case 'goals': renderGoals(c); break;
+      }
+    }
+
+    // ===== 오늘의 학습 =====
+    async function renderToday(c) {
+      const [res, statsRes] = await Promise.all([
+        fetch('/api/learning/today').then(r => r.json()),
+        fetch('/api/self-learn/daily/stats').then(r => r.json()).catch(() => ({}))
+      ]);
+      const t = res.today || {};
+      const goals = t.goals || [];
+      const done = goals.filter(g => g.completed).length;
+      const progress = goals.length ? Math.round(done / goals.length * 100) : 0;
+      const circumference = 2 * Math.PI * 42;
+      const offset = circumference - (progress / 100 * circumference);
+      const timeMin = t.actual_time_minutes || 0;
+      // API가 제공하는 주간 배열 (월~일 7칸, 각각 {total, completed})
+      const weeklyStats = Array.isArray(statsRes.weekly) ? statsRes.weekly : [];
+
+      // 주간 날짜 계산
+      const today = new Date();
+      const dayOfWeek = today.getDay();
+      const monday = new Date(today);
+      monday.setDate(today.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1));
+      const dayNames = ['월','화','수','목','금','토','일'];
+      let dateItems = '';
+      for (let i = 0; i < 7; i++) {
+        const d = new Date(monday);
+        d.setDate(monday.getDate() + i);
+        const isToday = d.toDateString() === today.toDateString();
+        const isPast = d < today && !isToday;
+        const isFuture = d > today;
+        // 과거 날짜는 실제 그 날의 배포·완료 데이터로만 판단 (무조건 완료 아님)
+        const dayData = weeklyStats[i] || { total: 0, completed: 0 };
+        const hadWork = (dayData.total || 0) > 0;
+        const completedAll = isPast && hadWork && dayData.completed >= dayData.total;
+        const partialPast = isPast && hadWork && !completedAll;
+        let cls = 'date-item';
+        if (isToday) cls += ' active today';
+        if (completedAll) cls += ' completed-day';
+        if (isFuture || (isPast && !hadWork)) cls += ' empty-day';
+        const frac = isToday ? `${done}/${goals.length || 0}` : '';
+        const pastFrac = partialPast ? `${dayData.completed}/${dayData.total}` : '';
+        dateItems += `
+          <div class="${cls}">
+            <div class="date-day">${dayNames[i]}</div>
+            <div class="date-num">${d.getDate()}</div>
+            <div class="date-status">
+              ${completedAll ? '<span class="status-check"><i class="fas fa-check" style="font-size:10px"></i></span>' :
+                (partialPast ? `<span class="status-fraction">${pastFrac}</span>` :
+                (isToday && goals.length ? `<span class="status-fraction">${frac}</span>` :
+                  ((isFuture || (isPast && !hadWork)) ? '<span style="font-size:12px;color:var(--gray-400)">-</span>' : '')))}
+            </div>
+            <div class="date-detail">${completedAll ? '완료' : (partialPast ? dayData.completed+'/'+dayData.total : (isToday ? done+'개 완료' : (isFuture ? '예정' : (isPast && !hadWork ? '-' : ''))))}</div>
+          </div>`;
+      }
+
+      // 학습 카드 목록
+      const learningItems = goals.length ? goals.map((g, i) => {
+        const subj = g.subject || ['수학','국어','영어','과학','사회'][i % 5];
+        const grad = subjectGrads[subj] || defaultGrad;
+        const icon = subjectIcons[subj] || 'fa-book';
+        const statusCls = g.completed ? 'completed' : (i === done ? 'in-progress' : '');
+        const statusLabel = g.completed ? '완료' : (i === done ? '진행중' : '미참여');
+        const statusLabelCls = g.completed ? 'completed' : (i === done ? 'in-progress' : 'not-started');
+        const pts = g.completed ? '+15P 획득' : '15P';
+        return `
+          <article class="learning-card ${statusCls}">
+            <div class="card-thumbnail" style="background:${grad}">
+              <i class="fas ${icon} card-thumbnail-icon" style="color:rgba(255,255,255,.8);font-size:36px"></i>
+              <span class="status-label ${statusLabelCls}">${statusLabel}</span>
+            </div>
+            <div class="card-content">
+              <div class="card-tags">
+                <span class="card-tag subject">${escHtml(subj)}</span>
+              </div>
+              <h3 class="card-title">${escHtml(g.title)}</h3>
+              <div class="element-progress">
+                <span class="${g.completed ? 'done' : ''}"><i class="fas ${g.completed ? 'fa-check-circle' : 'fa-circle'}" style="font-size:10px"></i> 영상 1개</span>
+                <span class="${g.completed ? 'done' : ''}"><i class="fas ${g.completed ? 'fa-check-circle' : 'fa-circle'}" style="font-size:10px"></i> 문항 3개</span>
+              </div>
+              <div class="card-footer">
+                <span class="card-point"><i class="fas fa-star"></i> ${pts}</span>
+                ${g.completed
+                  ? '<button class="card-btn secondary" onclick="event.stopPropagation()">재학습</button>'
+                  : (i === done
+                    ? '<button class="card-btn primary" onclick="event.stopPropagation()">이어하기</button>'
+                    : '<button class="card-btn primary" onclick="event.stopPropagation()">학습하기</button>')}
+              </div>
+            </div>
+          </article>`;
+      }).join('') : '<div class="empty-state"><i class="fas fa-clipboard-list"></i><p>오늘의 학습 목표가 없습니다.<br>목표를 추가해보세요!</p></div>';
+
+      c.innerHTML = `
+        <div class="today-layout">
+          <div class="today-main">
+            <!-- 목표 달성률 -->
+            <section class="goal-section">
+              <div class="goal-header">
+                <div class="goal-title-area">
+                  <h2 class="goal-title"><i class="fas fa-bullseye" style="color:var(--primary)"></i> 학습 목표 달성률</h2>
+                  <div class="goal-tabs">
+                    <button class="goal-tab active">주간</button>
+                    <button class="goal-tab">월간</button>
+                  </div>
+                </div>
+                <div class="character-display">
+                  <div class="character-avatar"><i class="fas fa-user-graduate" style="font-size:22px;color:#fff"></i></div>
+                  <div class="character-info">
+                    <div class="character-level" id="homeCharLevel">Lv.-</div>
+                    <div class="character-name" id="homeCharName">-</div>
+                    <div style="margin-top:2px;">
+                      <span class="exp-bar"><span class="exp-fill" id="homeExpFill" style="width:0%"></span></span>
+                      <span class="exp-text" id="homeExpText">0/100</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div class="goal-content">
+                <div class="goal-progress-circle">
+                  <svg viewBox="0 0 100 100">
+                    <circle class="goal-circle-bg" cx="50" cy="50" r="42"/>
+                    <circle class="goal-circle-fill" cx="50" cy="50" r="42"
+                      stroke-dasharray="${circumference}" stroke-dashoffset="${offset}"/>
+                  </svg>
+                  <div class="goal-progress-text">
+                    <span class="goal-percent">${progress}%</span>
+                    <span class="goal-label">달성</span>
+                  </div>
+                </div>
+                <div class="goal-details">
+                  <div class="goal-detail-item">
+                    <div class="goal-detail-icon" style="background:var(--primary-light);color:var(--primary)"><i class="fas fa-book-open"></i></div>
+                    <div class="goal-detail-info">
+                      <span class="goal-detail-label">오늘의 학습</span>
+                      <span class="goal-detail-value">${done} / ${goals.length}개</span>
+                    </div>
+                    <div class="goal-detail-bar">
+                      <div class="goal-detail-fill" style="width:${progress}%;background:var(--primary)"></div>
+                    </div>
+                  </div>
+                  <div class="goal-detail-item">
+                    <div class="goal-detail-icon" style="background:var(--secondary-light);color:var(--secondary)"><i class="fas fa-robot"></i></div>
+                    <div class="goal-detail-info">
+                      <span class="goal-detail-label">AI 맞춤학습</span>
+                      <span class="goal-detail-value" id="aiLearningProgress">- / -</span>
+                    </div>
+                    <div class="goal-detail-bar">
+                      <div class="goal-detail-fill" id="aiLearningBar" style="width:0%;background:var(--secondary)"></div>
+                    </div>
+                  </div>
+                  <div class="goal-detail-item">
+                    <div class="goal-detail-icon" style="background:var(--accent-light);color:var(--accent)"><i class="fas fa-edit"></i></div>
+                    <div class="goal-detail-info">
+                      <span class="goal-detail-label">오답노트 정리</span>
+                      <span class="goal-detail-value" id="wrongNoteProgress">- / -</span>
+                    </div>
+                    <div class="goal-detail-bar">
+                      <div class="goal-detail-fill" id="wrongNoteBar" style="width:0%;background:var(--accent)"></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <!-- 날짜 선택 -->
+            <section class="date-selector">
+              <div class="date-header">
+                <div style="display:flex;align-items:center;gap:12px">
+                  <h3><i class="fas fa-calendar-alt" style="color:var(--primary)"></i> ${today.getMonth()+1}월 ${Math.ceil(today.getDate()/7)}주차</h3>
+                  <span class="date-help-text">오늘의 학습 완료 현황</span>
+                </div>
+                <div style="display:flex;gap:6px">
+                  <button class="date-nav-btn"><i class="fas fa-chevron-left" style="font-size:12px"></i></button>
+                  <button class="date-nav-btn"><i class="fas fa-chevron-right" style="font-size:12px"></i></button>
+                </div>
+              </div>
+              <div class="date-list">${dateItems}</div>
+            </section>
+
+            <!-- 학습 카드 -->
+            <section>
+              <div class="section-header">
+                <div style="display:flex;align-items:center;gap:10px">
+                  <h2 class="section-title">
+                    <span class="section-title-icon" style="background:var(--primary)"><i class="fas fa-book-open"></i></span>
+                    오늘의 학습
+                  </h2>
+                </div>
+                <button class="btn btn-sm btn-outline" onclick="addTodayGoal()"><i class="fas fa-plus"></i> 목표 추가</button>
+              </div>
+              <div class="learning-grid">${learningItems}</div>
+            </section>
+          </div>
+
+          <!-- 사이드바 -->
+          <aside class="today-sidebar">
+            <div class="sidebar-card ai-learning-card">
+              <h3 class="sidebar-title"><i class="fas fa-bullseye"></i> AI 맞춤학습</h3>
+              <div class="ai-menu-list">
+                <a class="ai-menu-item" onclick="document.querySelectorAll('.sidebar-menu li')[2].click()">
+                  <div class="ai-menu-icon"><i class="fas fa-lightbulb"></i></div>
+                  <span>스스로 진단</span>
+                </a>
+                <a class="ai-menu-item" onclick="document.querySelectorAll('.sidebar-menu li')[2].click()">
+                  <div class="ai-menu-icon"><i class="fas fa-robot"></i></div>
+                  <span>맞춤형 AI학습</span>
+                </a>
+              </div>
+            </div>
+
+            <div class="sidebar-card note-card">
+              <h3 class="sidebar-title"><i class="fas fa-sticky-note" style="color:var(--accent)"></i> 오답노트</h3>
+              <div class="note-count">
+                <span>점검 필요</span>
+                <strong id="wrongCountSidebar">0</strong>
+                <span>개</span>
+              </div>
+            </div>
+
+            <div class="sidebar-card">
+              <h3 class="sidebar-title"><i class="fas fa-chart-bar" style="color:var(--primary)"></i> 이번주 현황</h3>
+              <div class="progress-stat"><span class="lbl">오늘의 학습</span><span class="val" style="color:var(--primary)">${done}회</span></div>
+              <div class="progress-stat"><span class="lbl">AI맞춤학습</span><span class="val" id="homeWeekAI" style="color:var(--secondary)">0회</span></div>
+              <div class="progress-stat"><span class="lbl">학습 시간</span><span class="val" style="color:var(--accent)">${timeMin}분</span></div>
+            </div>
+
+            <div class="sidebar-card point-card">
+              <div class="point-display">
+                <div class="point-icon"><i class="fas fa-coins" style="color:#fff"></i></div>
+                <div>
+                  <div class="point-amount" id="homePoints">0</div>
+                  <div class="point-label">채움포인트</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="sidebar-card">
+              <div class="ranking-mini">
+                <div class="ranking-header">
+                  <span class="ranking-title"><i class="fas fa-trophy" style="color:var(--warning)"></i> 학습 랭킹</span>
+                </div>
+                <div class="ranking-list" id="rankingList">
+                  <div style="padding:8px;text-align:center;color:var(--gray-400);font-size:12px;">불러오는 중...</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="sidebar-card">
+              <h3 class="sidebar-title"><i class="fas fa-bolt" style="color:var(--warning)"></i> 바로가기</h3>
+              <div class="quick-menu">
+                <a href="/class" class="quick-menu-item"><div class="quick-menu-icon"><i class="fas fa-chalkboard-teacher"></i></div><span>나의클래스</span></a>
+                <a href="/growth" class="quick-menu-item"><div class="quick-menu-icon"><i class="fas fa-chart-line"></i></div><span>성장기록</span></a>
+                <a href="/content" class="quick-menu-item"><div class="quick-menu-icon"><i class="fas fa-folder-open"></i></div><span>콘텐츠</span></a>
+                <a href="/lrs" class="quick-menu-item"><div class="quick-menu-icon"><i class="fas fa-tachometer-alt"></i></div><span>대시보드</span></a>
+              </div>
+            </div>
+          </aside>
+        </div>
+      `;
+
+      // 사이드바 오답 수 로드
+      fetch('/api/learning/wrong-answers/stats').then(r=>r.json()).then(d=>{
+        const el = document.getElementById('wrongCountSidebar');
+        if(el) el.textContent = d.stats?.unresolved || 0;
+        // 오답노트 진행률
+        const wnEl = document.getElementById('wrongNoteProgress');
+        const wnBar = document.getElementById('wrongNoteBar');
+        if (wnEl && d.stats) {
+          const resolved = d.stats.resolved || 0;
+          const total = (d.stats.resolved || 0) + (d.stats.unresolved || 0);
+          wnEl.textContent = `${resolved} / ${total}개`;
+          if (wnBar && total > 0) wnBar.style.width = Math.round(resolved/total*100) + '%';
+        }
+      }).catch(()=>{});
+
+      // AI 맞춤학습 진행률 로드
+      fetch('/api/self-learn/dashboard').then(r=>r.json()).then(d=>{
+        const el = document.getElementById('aiLearningProgress');
+        const bar = document.getElementById('aiLearningBar');
+        if (el && d.success) {
+          const mastered = d.completedNodes || d.mastered || 0;
+          const total = d.totalNodes || 0;
+          el.textContent = `${mastered} / ${total}개`;
+          if (bar && total > 0) bar.style.width = Math.round(mastered/total*100) + '%';
+        }
+      }).catch(()=>{});
+
+      // 포인트·레벨·주간 AI학습 카운트 로드 (DB 기반)
+      fetch('/api/self-learn/daily/stats').then(r=>r.json()).then(d=>{
+        if (!d || d.success === false) return;
+        const points = d.total_points || 0;
+        const lvl = Math.floor(points / 100) + 1;
+        const exp = points % 100;
+        const levelEl = document.getElementById('homeCharLevel');
+        const nameEl = document.getElementById('homeCharName');
+        const fillEl = document.getElementById('homeExpFill');
+        const textEl = document.getElementById('homeExpText');
+        const ptEl   = document.getElementById('homePoints');
+        const aiEl   = document.getElementById('homeWeekAI');
+        if (levelEl) levelEl.textContent = 'Lv.' + lvl;
+        if (nameEl)  nameEl.textContent  = lvl < 5 ? '호기심 새싹' : lvl < 10 ? '꾸준한 학습자' : '호기심 탐험가';
+        if (fillEl)  fillEl.style.width  = exp + '%';
+        if (textEl)  textEl.textContent  = exp + '/100';
+        if (ptEl)    ptEl.textContent    = points.toLocaleString();
+        if (aiEl)    aiEl.textContent    = (d.ai_completed || 0) + '회';
+      }).catch(()=>{});
+
+      // 랭킹 로드 — API는 `rankings`(복수) 필드로 반환
+      fetch('/api/self-learn/ranking').then(r=>r.json()).then(d=>{
+        const el = document.getElementById('rankingList');
+        const list = d.rankings || d.ranking || [];
+        if (el && d.success && list.length > 0) {
+          el.innerHTML = list.slice(0, 4).map((r, i) => {
+            const myId = window.dacheumUser?.id;
+            const isMe = (r.id ?? r.user_id) === myId;
+            return `<div class="ranking-item ${isMe ? 'me' : ''}"><div class="ranking-position">${i + 1}</div><span class="ranking-name">${isMe ? '나' : (r.display_name || r.username)}</span><span class="ranking-score">${(r.total_points || 0).toLocaleString()}P</span></div>`;
+          }).join('');
+        } else if (el) {
+          el.innerHTML = '<div style="padding:8px;text-align:center;color:var(--gray-400);font-size:12px;">랭킹 데이터가 없습니다.</div>';
+        }
+      }).catch(()=>{});
+    }
+
+    async function addTodayGoal() {
+      const title = prompt('학습 목표를 입력하세요:');
+      if (!title) return;
+      const res = await fetch('/api/learning/today').then(r => r.json());
+      const goals = res.today?.goals || [];
+      goals.push({ title, completed: false });
+      await fetch('/api/learning/today', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ goals })
+      });
+      showToast('학습 목표가 추가되었습니다');
+      renderPage();
+    }
+
+    async function toggleTodayGoal(idx) {
+      const res = await fetch('/api/learning/today').then(r => r.json());
+      const goals = res.today?.goals || [];
+      if (goals[idx]) goals[idx].completed = !goals[idx].completed;
+      const done = goals.filter(g => g.completed).length;
+      const progress = goals.length ? Math.round(done / goals.length * 100) : 0;
+      await fetch('/api/learning/today', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ goals, progress_percent: progress })
+      });
+      if (goals[idx]?.completed) showToast('목표를 완료했습니다! 🎉');
+      renderPage();
+    }
+
+    // ===== 오답노트 =====
+    let wrongFilter = null;
+    let wrongTab = 'list';
+    async function renderWrong(c) {
+      const [waRes, statsRes] = await Promise.all([
+        fetch('/api/learning/wrong-answers' + (wrongFilter ? '?subject=' + encodeURIComponent(wrongFilter) : '')).then(r => r.json()),
+        fetch('/api/learning/wrong-answers/stats').then(r => r.json())
+      ]);
+      const items = waRes.items || [];
+      const stats = statsRes.stats || {};
+      const subjects = (stats.bySubject || []).map(s => s.subject);
+      const resolved = stats.resolved || 0;
+      const total = stats.total || 0;
+      const unresolved = stats.unresolved || 0;
+      const resolveRate = total ? Math.round(resolved / total * 100) : 0;
+
+      c.innerHTML = `
+        <h2 class="section-title" style="margin-bottom:20px"><span class="section-title-icon" style="background:var(--accent)"><i class="fas fa-times-circle"></i></span> 오답노트</h2>
+
+        <div class="stat-cards">
+          <div class="stat-card">
+            <div class="stat-icon" style="background:var(--accent)"><i class="fas fa-times"></i></div>
+            <div class="stat-value">${total}</div>
+            <div class="stat-label">전체 오답</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-icon" style="background:var(--success)"><i class="fas fa-check-circle"></i></div>
+            <div class="stat-value">${resolved}</div>
+            <div class="stat-label">해결됨</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-icon" style="background:var(--warning)"><i class="fas fa-exclamation-triangle"></i></div>
+            <div class="stat-value">${unresolved}</div>
+            <div class="stat-label">미해결</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-icon" style="background:var(--secondary)"><i class="fas fa-chart-line"></i></div>
+            <div class="stat-value">${resolveRate}<span style="font-size:14px">%</span></div>
+            <div class="stat-label">해결률</div>
+          </div>
+        </div>
+
+        <!-- 취약 영역 -->
+        ${stats.bySubject && stats.bySubject.length ? `
+        <div class="weakness-section">
+          <h3><i class="fas fa-exclamation-circle" style="color:var(--accent)"></i> 취약 영역 분석</h3>
+          ${stats.bySubject.filter(s => s.cnt > 0).sort((a,b) => (b.cnt - b.resolved) - (a.cnt - a.resolved)).slice(0,4).map(s => {
+            const rate = s.cnt ? Math.round((s.cnt - s.resolved) / s.cnt * 100) : 0;
+            return `<div class="weakness-item">
+              <span class="subject-badge-sm" style="background:${subjectColors[s.subject]||'#6B7280'}">${escHtml(s.subject)}</span>
+              <span class="weakness-name">${escHtml(s.subject)} 관련 문항</span>
+              <div class="weakness-bar"><div class="weakness-bar-fill" style="width:${rate}%;background:${rate > 50 ? 'var(--accent)' : 'var(--warning)'}"></div></div>
+              <span class="error-rate">오답률 ${rate}%</span>
+            </div>`;
+          }).join('')}
+        </div>` : ''}
+
+        <div class="tab-nav">
+          <button class="tab-btn ${wrongTab==='list'?'active':''}" onclick="wrongTab='list';renderPage()"><i class="fas fa-list"></i> 오답 목록</button>
+          <button class="tab-btn ${wrongTab==='chart'?'active':''}" onclick="wrongTab='chart';renderPage()"><i class="fas fa-chart-bar"></i> 분석</button>
+        </div>
+
+        <div id="wrongTabContent"></div>
+      `;
+
+      const tc = document.getElementById('wrongTabContent');
+      if (wrongTab === 'chart') {
+        tc.innerHTML = `
+          <div class="two-col">
+            <div class="card">
+              <h3><i class="fas fa-chart-bar" style="color:var(--secondary)"></i> 과목별 오답 분포</h3>
+              <div class="chart-container"><canvas id="wrongBarChart"></canvas></div>
+            </div>
+            <div class="card">
+              <h3><i class="fas fa-chart-pie" style="color:var(--primary)"></i> 해결 현황</h3>
+              <div class="chart-container"><canvas id="wrongPieChart"></canvas></div>
+            </div>
+          </div>
+          ${stats.bySubject && stats.bySubject.length ? `
+          <div class="card">
+            <h3><i class="fas fa-list-ol" style="color:var(--warning)"></i> 과목별 상세</h3>
+            <table style="width:100%;border-collapse:collapse;font-size:13px;">
+              <thead><tr style="border-bottom:2px solid var(--gray-200);">
+                <th style="text-align:left;padding:10px 8px;">과목</th>
+                <th style="text-align:center;padding:10px 8px;">전체</th>
+                <th style="text-align:center;padding:10px 8px;">해결</th>
+                <th style="text-align:center;padding:10px 8px;">미해결</th>
+                <th style="text-align:center;padding:10px 8px;">해결률</th>
+              </tr></thead>
+              <tbody>
+                ${stats.bySubject.map(s => `<tr style="border-bottom:1px solid var(--gray-100);">
+                  <td style="padding:10px 8px;"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${subjectColors[s.subject]||'#6B7280'};margin-right:6px;"></span>${escHtml(s.subject)}</td>
+                  <td style="text-align:center;padding:10px 8px;font-weight:600;">${s.cnt}</td>
+                  <td style="text-align:center;padding:10px 8px;color:var(--success);">${s.resolved}</td>
+                  <td style="text-align:center;padding:10px 8px;color:var(--accent);">${s.cnt - s.resolved}</td>
+                  <td style="text-align:center;padding:10px 8px;">${s.cnt ? Math.round(s.resolved/s.cnt*100) : 0}%</td>
+                </tr>`).join('')}
+              </tbody>
+            </table>
+          </div>` : ''}
+        `;
+        if (stats.bySubject && stats.bySubject.length) {
+          new Chart(document.getElementById('wrongBarChart'), {
+            type: 'bar',
+            data: {
+              labels: stats.bySubject.map(s => s.subject),
+              datasets: [
+                { label: '미해결', data: stats.bySubject.map(s => s.cnt - s.resolved), backgroundColor: '#fca5a5' },
+                { label: '해결', data: stats.bySubject.map(s => s.resolved), backgroundColor: '#86efac' }
+              ]
+            },
+            options: { responsive: true, maintainAspectRatio: false, scales: { x: { stacked: true }, y: { stacked: true, beginAtZero: true } }, plugins: { legend: { position: 'bottom' } } }
+          });
+          new Chart(document.getElementById('wrongPieChart'), {
+            type: 'doughnut',
+            data: {
+              labels: ['해결', '미해결'],
+              datasets: [{ data: [resolved, unresolved], backgroundColor: ['#00C48C', '#fca5a5'] }]
+            },
+            options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } } }
+          });
+        }
+      } else {
+        tc.innerHTML = `
+          <div class="card">
+            <h3><i class="fas fa-list" style="color:var(--accent)"></i> 오답 목록</h3>
+            <div class="filter-bar">
+              <button class="filter-chip ${!wrongFilter ? 'active' : ''}" onclick="wrongFilter=null;renderPage()">전체</button>
+              ${subjects.map(s => `<button class="filter-chip ${wrongFilter===s ? 'active' : ''}" onclick="wrongFilter='${s}';renderPage()">${escHtml(s)}</button>`).join('')}
+            </div>
+            ${items.length ? items.map(w => `
+              <div class="wrong-item">
+                <div class="wrong-header">
+                  <span class="wrong-subject" style="background:${subjectColors[w.subject] || '#6B7280'}">${escHtml(w.subject || '기타')}</span>
+                  ${w.difficulty ? `<span style="font-size:11px;color:var(--gray-500);"><i class="fas fa-signal"></i> ${escHtml(w.difficulty)}</span>` : ''}
+                  ${w.is_resolved ? '<span style="color:var(--success);font-size:12px;font-weight:500"><i class="fas fa-check-circle"></i> 해결</span>' :
+                    `<button class="resolve-btn" onclick="resolveWrong(${w.id})"><i class="fas fa-redo"></i> 다시 풀기</button>`}
+                </div>
+                <div class="wrong-q">${escHtml(w.question_text || '문제 ' + (w.question_number || ''))}</div>
+                <div class="wrong-answers">
+                  <span class="my"><i class="fas fa-times"></i> 내 답: ${escHtml(w.student_answer || '-')}</span>
+                  <span class="correct"><i class="fas fa-check"></i> 정답: ${escHtml(w.correct_answer || '-')}</span>
+                </div>
+                ${w.explanation ? `<div style="margin-top:8px;">
+                  <button onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none';this.textContent=this.nextElementSibling.style.display==='none'?'해설 보기':'해설 접기'" style="font-size:12px;color:var(--primary);background:none;border:none;cursor:pointer;font-weight:600;padding:0;font-family:inherit;">해설 보기</button>
+                  <div style="display:none;margin-top:6px;padding:12px;background:var(--primary-light);border-radius:8px;font-size:13px;line-height:1.6;color:#1e40af;">${escHtml(w.explanation)}</div>
+                </div>` : ''}
+              </div>
+            `).join('') : '<div class="empty-state"><i class="fas fa-check-circle"></i><p>오답이 없습니다!</p></div>'}
+          </div>
+        `;
+      }
+    }
+
+    async function resolveWrong(id) {
+      await fetch(`/api/learning/wrong-answers/${id}/resolve`, { method: 'PUT' });
+      showToast('오답을 해결했습니다! +10P');
+      renderPage();
+    }
+
+    // ===== AI 맞춤학습 (학습맵) =====
+    let mapSubjectFilter = '';
+    let mapStatusFilter = '';
+    async function renderMap(c) {
+      const [nodesRes, progressRes] = await Promise.all([
+        fetch('/api/learning/map/nodes').then(r => r.json()),
+        fetch('/api/learning/map/progress').then(r => r.json())
+      ]);
+      const nodes = nodesRes.nodes || [];
+      const progress = progressRes.progress || [];
+      const progressMap = {};
+      progress.forEach(p => { progressMap[p.node_id] = p; });
+
+      const subjects = [...new Set(nodes.map(n => n.subject))];
+      const totalNodes = nodes.length;
+      const completed = progress.filter(p => p.status === 'completed' || p.status === 'mastered').length;
+      const inProgress = progress.filter(p => p.status === 'in_progress').length;
+
+      let filtered = nodes;
+      if (mapSubjectFilter) filtered = filtered.filter(n => n.subject === mapSubjectFilter);
+      if (mapStatusFilter) {
+        filtered = filtered.filter(n => {
+          const p = progressMap[n.id];
+          const s = p ? p.status : 'not_started';
+          return s === mapStatusFilter;
+        });
+      }
+
+      const statusLabel = { not_started: '미시작', in_progress: '진행 중', completed: '완료', mastered: '마스터' };
+      const statusColor = { not_started: '#94A3B8', in_progress: '#4A7CFF', completed: '#00C48C', mastered: '#FFB800' };
+      const statusBg = { not_started: 'var(--gray-50)', in_progress: 'var(--primary-light)', completed: 'var(--success-light)', mastered: 'var(--warning-light)' };
+
+      c.innerHTML = `
+        <h2 class="section-title" style="margin-bottom:20px"><span class="section-title-icon" style="background:var(--secondary)"><i class="fas fa-map"></i></span> AI 맞춤학습</h2>
+        <div class="stat-cards">
+          <div class="stat-card">
+            <div class="stat-icon" style="background:var(--secondary)"><i class="fas fa-puzzle-piece"></i></div>
+            <div class="stat-value">${totalNodes}</div>
+            <div class="stat-label">전체 학습 노드</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-icon" style="background:var(--primary)"><i class="fas fa-spinner"></i></div>
+            <div class="stat-value">${inProgress}</div>
+            <div class="stat-label">진행 중</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-icon" style="background:var(--success)"><i class="fas fa-check-double"></i></div>
+            <div class="stat-value">${completed}</div>
+            <div class="stat-label">완료</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-icon" style="background:var(--warning)"><i class="fas fa-percentage"></i></div>
+            <div class="stat-value">${totalNodes ? Math.round(completed / totalNodes * 100) : 0}<span style="font-size:14px">%</span></div>
+            <div class="stat-label">달성률</div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="map-filter-bar">
+            <select onchange="mapSubjectFilter=this.value;renderPage()">
+              <option value="">전체 과목</option>
+              ${subjects.map(s => `<option value="${s}" ${mapSubjectFilter===s?'selected':''}>${s}</option>`).join('')}
+            </select>
+            <select onchange="mapStatusFilter=this.value;renderPage()">
+              <option value="">전체 상태</option>
+              <option value="not_started" ${mapStatusFilter==='not_started'?'selected':''}>미시작</option>
+              <option value="in_progress" ${mapStatusFilter==='in_progress'?'selected':''}>진행 중</option>
+              <option value="completed" ${mapStatusFilter==='completed'?'selected':''}>완료</option>
+              <option value="mastered" ${mapStatusFilter==='mastered'?'selected':''}>마스터</option>
+            </select>
+            <span style="font-size:13px;color:var(--gray-500);margin-left:auto;">${filtered.length}개 노드</span>
+          </div>
+          ${filtered.length ? `
+          <div class="map-node-grid">
+            ${filtered.map(n => {
+              const p = progressMap[n.id];
+              const status = p ? p.status : 'not_started';
+              const pct = p ? p.progress_percent : 0;
+              return `
+                <div class="map-node-card" style="border-left-color:${subjectColors[n.subject] || '#6B7280'}" onclick="openNodeDetail(${n.id})">
+                  <div class="node-header">
+                    <span class="node-subject" style="background:${subjectColors[n.subject] || '#6B7280'}">${escHtml(n.subject)}</span>
+                    <span class="node-level"><i class="fas fa-layer-group"></i> Lv.${n.level}</span>
+                  </div>
+                  <div class="node-title">${escHtml(n.topic)}</div>
+                  ${n.subtopic ? `<div class="node-sub">${escHtml(n.subtopic)}</div>` : '<div style="height:18px"></div>'}
+                  <div class="card-progress">
+                    <div class="bar"><div class="bar-fill" style="width:${pct}%;background:${statusColor[status]}"></div></div>
+                    <span style="color:${statusColor[status]}">${pct}%</span>
+                  </div>
+                  <div class="node-footer">
+                    <span class="node-status" style="background:${statusBg[status]};color:${statusColor[status]}">${statusLabel[status]}</span>
+                  </div>
+                </div>
+              `;
+            }).join('')}
+          </div>` : '<div class="empty-state"><i class="fas fa-map-marked-alt"></i><p>조건에 맞는 학습 노드가 없습니다.</p></div>'}
+        </div>
+      `;
+    }
+
+    async function openNodeDetail(nodeId) {
+      const [nodesRes, progressRes] = await Promise.all([
+        fetch('/api/learning/map/nodes').then(r => r.json()),
+        fetch('/api/learning/map/progress').then(r => r.json())
+      ]);
+      const nodes = nodesRes.nodes || [];
+      const progress = progressRes.progress || [];
+      const progressMap = {};
+      progress.forEach(p => { progressMap[p.node_id] = p; });
+
+      const n = nodes.find(nd => nd.id === nodeId);
+      if (!n) return;
+      const p = progressMap[n.id];
+      const status = p ? p.status : 'not_started';
+      const pct = p ? p.progress_percent : 0;
+      const attempts = p ? (p.attempts || 0) : 0;
+      const statusLabel = { not_started: '미시작', in_progress: '진행 중', completed: '완료', mastered: '마스터' };
+      const statusColor = { not_started: '#94A3B8', in_progress: '#4A7CFF', completed: '#00C48C', mastered: '#FFB800' };
+
+      document.getElementById('nodeModalBody').innerHTML = `
+        <h3><i class="fas fa-puzzle-piece" style="color:${subjectColors[n.subject] || 'var(--secondary)'};margin-right:6px;"></i> 학습 노드 상세</h3>
+        <div class="node-detail-header">
+          <div class="node-detail-icon" style="background:${subjectColors[n.subject] || 'var(--secondary)'}">
+            <i class="fas ${subjectIcons[n.subject] || 'fa-book'}"></i>
+          </div>
+          <div class="node-detail-info">
+            <h4>${escHtml(n.topic)}${n.subtopic ? ' > ' + escHtml(n.subtopic) : ''}</h4>
+            <p>${escHtml(n.subject)} · 레벨 ${n.level}</p>
+          </div>
+        </div>
+        <div class="node-detail-meta">
+          <div class="meta-item">
+            <div class="meta-val" style="color:${statusColor[status]}">${statusLabel[status]}</div>
+            <div class="meta-lbl">상태</div>
+          </div>
+          <div class="meta-item">
+            <div class="meta-val" style="color:var(--primary)">${pct}%</div>
+            <div class="meta-lbl">진행률</div>
+          </div>
+          <div class="meta-item">
+            <div class="meta-val" style="color:var(--warning)">${attempts}</div>
+            <div class="meta-lbl">시도 횟수</div>
+          </div>
+        </div>
+        <div class="progress-bar" style="margin-bottom:16px;height:10px;">
+          <div class="progress-fill" style="width:${pct}%;background:${statusColor[status]}"></div>
+        </div>
+        ${n.learning_content_url ? `<div style="margin-bottom:8px;"><a href="${escHtml(n.learning_content_url)}" target="_blank" class="btn btn-outline btn-sm"><i class="fas fa-external-link-alt"></i> 학습 자료 열기</a></div>` : ''}
+        ${n.practice_url ? `<div><a href="${escHtml(n.practice_url)}" target="_blank" class="btn btn-outline btn-sm"><i class="fas fa-pencil-alt"></i> 연습 문제 풀기</a></div>` : ''}
+      `;
+
+      const startBtn = document.getElementById('nodeStartBtn');
+      if (status === 'not_started') {
+        startBtn.style.display = '';
+        startBtn.onclick = async () => {
+          await fetch('/api/learning/map/progress', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ node_id: nodeId, status: 'in_progress', progress_percent: 10 })
+          });
+          closeModal('nodeModal');
+          showToast('학습을 시작합니다!', 'fa-play-circle');
+          renderPage();
+        };
+      } else {
+        startBtn.style.display = 'none';
+      }
+      openModal('nodeModal');
+    }
+
+    // ===== 학습 목표 =====
+    async function renderGoals(c) {
+      const res = await fetch('/api/learning/goals').then(r => r.json());
+      const goals = res.goals || [];
+      const active = goals.filter(g => g.status === 'active');
+      const completed = goals.filter(g => g.status === 'completed');
+
+      c.innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
+          <h2 class="section-title"><span class="section-title-icon" style="background:var(--success)"><i class="fas fa-flag"></i></span> 학습 목표</h2>
+          <button class="btn btn-primary" onclick="openModal('goalModal')"><i class="fas fa-plus"></i> 목표 추가</button>
+        </div>
+        <div class="stat-cards" style="grid-template-columns:repeat(3,1fr);">
+          <div class="stat-card">
+            <div class="stat-icon" style="background:var(--primary)"><i class="fas fa-flag"></i></div>
+            <div class="stat-value">${goals.length}</div>
+            <div class="stat-label">전체 목표</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-icon" style="background:var(--warning)"><i class="fas fa-fire"></i></div>
+            <div class="stat-value">${active.length}</div>
+            <div class="stat-label">진행 중</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-icon" style="background:var(--success)"><i class="fas fa-trophy"></i></div>
+            <div class="stat-value">${completed.length}</div>
+            <div class="stat-label">달성</div>
+          </div>
+        </div>
+        <div class="card">
+          <h3><i class="fas fa-fire" style="color:var(--accent)"></i> 진행 중 (${active.length})</h3>
+          ${active.length ? active.map(g => `
+            <div class="goal-item" style="justify-content:space-between;">
+              <div style="display:flex;align-items:center;gap:12px;flex:1;">
+                <div class="goal-check" onclick="completeGoal(${g.id})"></div>
+                <div style="flex:1">
+                  <div style="font-size:14px;font-weight:500">${escHtml(g.title)}</div>
+                  ${g.description ? `<div style="font-size:12px;color:var(--gray-500);margin-top:2px">${escHtml(g.description)}</div>` : ''}
+                </div>
+              </div>
+              <div style="display:flex;align-items:center;gap:8px;">
+                <span style="font-size:11px;color:var(--gray-400)">${g.created_at ? g.created_at.slice(0,10) : ''}</span>
+                <button class="btn btn-sm" style="background:var(--accent-light);color:var(--accent);font-size:11px;" onclick="deleteGoal(${g.id})"><i class="fas fa-trash"></i></button>
+              </div>
+            </div>
+          `).join('') : '<div class="empty-state"><p>진행 중인 목표가 없습니다.</p></div>'}
+        </div>
+        ${completed.length ? `
+        <div class="card">
+          <h3><i class="fas fa-check-circle" style="color:var(--success)"></i> 완료 (${completed.length})</h3>
+          ${completed.map(g => `
+            <div class="goal-item" style="opacity:.7">
+              <div class="goal-check done"><i class="fas fa-check" style="font-size:12px"></i></div>
+              <div style="flex:1">
+                <span class="goal-text done">${escHtml(g.title)}</span>
+              </div>
+              <span style="font-size:11px;color:var(--gray-400)">${g.completed_at ? g.completed_at.slice(0,10) : ''}</span>
+            </div>
+          `).join('')}
+        </div>` : ''}
+      `;
+    }
+
+    async function completeGoal(id) {
+      await fetch(`/api/learning/goals/${id}`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'completed' })
+      });
+      showToast('목표를 달성했습니다! 🎉');
+      renderPage();
+    }
+
+    async function deleteGoal(id) {
+      if (!confirm('이 목표를 삭제하시겠습니까?')) return;
+      await fetch(`/api/learning/goals/${id}`, { method: 'DELETE' });
+      showToast('목표가 삭제되었습니다', 'fa-trash');
+      renderPage();
+    }
+
+    function openModal(id) { document.getElementById(id).classList.add('active'); }
+    function closeModal(id) { document.getElementById(id).classList.remove('active'); }
+
+    // 모달 배경 클릭으로 닫기
+    document.querySelectorAll('.modal-overlay').forEach(ov => {
+      ov.addEventListener('click', (e) => { if (e.target === ov) ov.classList.remove('active'); });
+    });
+
+    async function submitGoal() {
+      const title = document.getElementById('goalTitle').value.trim();
+      if (!title) { showToast('목표를 입력하세요.', 'fa-exclamation-circle'); return; }
+      const res = await fetch('/api/learning/goals', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title, description: document.getElementById('goalDesc').value.trim() || null })
+      }).then(r => r.json());
+      if (res.success) {
+        closeModal('goalModal');
+        document.getElementById('goalTitle').value = '';
+        document.getElementById('goalDesc').value = '';
+        showToast('새 학습 목표가 추가되었습니다!');
+        renderPage();
+      } else showToast(res.message || '오류가 발생했습니다', 'fa-exclamation-circle');
+    }
+
+    window.addEventListener('dacheim:user-loaded', () => {
+      document.getElementById('mainContent').style.display = 'flex';
+      renderPage();
+    });
+  </script>
+</body>
+</html>

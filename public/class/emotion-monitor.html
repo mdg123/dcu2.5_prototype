@@ -1,0 +1,573 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>다채움 - 마음채움 교사 모니터링</title>
+  <link rel="stylesheet" href="/css/common-nav.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <style>
+    :root {
+      --primary: #4A7CFF; --primary-light: #E8F0FF; --primary-dark: #3A5FCC;
+      --secondary: #03dac6; --error: #b00020;
+      --surface: #ffffff; --bg: #f5f5f5;
+      --on-surface: rgba(0,0,0,0.87); --on-surface-md: rgba(0,0,0,0.6); --on-surface-dis: rgba(0,0,0,0.38);
+      --success: #4caf50; --warning: #ff9800; --danger: #f44336;
+      --shadow-sm: 0 1px 3px rgba(0,0,0,0.12); --shadow-md: 0 4px 8px rgba(0,0,0,0.15);
+      --radius: 12px; --radius-lg: 16px;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Pretendard','Noto Sans KR',system-ui,sans-serif; background: var(--bg); color: var(--on-surface); min-height: 100vh; }
+
+    .page-wrap { max-width: 1400px; margin: 0 auto; padding: 24px 20px 60px; }
+    .back-link { display: inline-flex; align-items: center; gap: 6px; color: var(--on-surface-md); font-size: 13px; text-decoration: none; margin-bottom: 16px; font-weight: 500; }
+    .back-link:hover { color: var(--primary); }
+
+    /* 헤더 */
+    .page-header { background: linear-gradient(135deg, #4A7CFF 0%, #3A5FCC 100%); color: #fff; border-radius: var(--radius-lg); padding: 28px 32px; margin-bottom: 24px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px; }
+    .page-header h1 { font-size: 22px; font-weight: 800; display: flex; align-items: center; gap: 12px; }
+    .page-header .subtitle { font-size: 14px; opacity: 0.8; margin-top: 4px; }
+    .header-stats { display: flex; gap: 24px; }
+    .header-stat { text-align: center; }
+    .header-stat-value { font-size: 28px; font-weight: 800; }
+    .header-stat-label { font-size: 12px; opacity: 0.7; }
+
+    /* 탭 */
+    .tab-nav { display: flex; background: var(--surface); border-radius: var(--radius); box-shadow: var(--shadow-sm); margin-bottom: 24px; overflow-x: auto; }
+    .tab-btn { flex: 1; padding: 14px 12px; border: none; background: none; font-size: 13px; font-weight: 600; color: var(--on-surface-md); cursor: pointer; transition: all .2s; font-family: inherit; display: flex; align-items: center; justify-content: center; gap: 6px; border-bottom: 3px solid transparent; white-space: nowrap; }
+    .tab-btn:hover { background: rgba(74,124,255,0.06); }
+    .tab-btn.active { color: var(--primary); border-bottom-color: var(--primary); background: var(--primary-light); }
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+
+    /* 카드 */
+    .card { background: var(--surface); border-radius: var(--radius); box-shadow: var(--shadow-sm); margin-bottom: 20px; overflow: hidden; transition: box-shadow .3s; }
+    .card:hover { box-shadow: var(--shadow-md); }
+    .card-full { grid-column: 1 / -1; }
+    .card-header { padding: 20px 24px 16px; border-bottom: 1px solid rgba(0,0,0,0.08); }
+    .card-title { font-size: 16px; font-weight: 700; display: flex; align-items: center; gap: 10px; }
+    .card-subtitle { font-size: 13px; color: var(--on-surface-md); margin-top: 4px; }
+    .card-body { padding: 24px; }
+
+    /* 그리드 */
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+    @media (max-width: 900px) { .grid-2 { grid-template-columns: 1fr; } }
+
+    /* 감정 분포 progress bars */
+    .dist-item { margin-bottom: 14px; }
+    .dist-label { display: flex; justify-content: space-between; align-items: center; font-size: 14px; margin-bottom: 6px; }
+    .dist-label span:first-child { font-weight: 500; }
+    .dist-label span:last-child { font-weight: 600; color: var(--on-surface-md); }
+    .dist-bar { height: 10px; background: rgba(0,0,0,0.06); border-radius: 5px; overflow: hidden; }
+    .dist-fill { height: 100%; border-radius: 5px; transition: width .5s ease; }
+
+    /* Feelings Stairs */
+    .stairs-container { background: linear-gradient(180deg, #f0f4ff 0%, #e8efff 100%); border-radius: var(--radius-lg); padding: 24px 16px; }
+    .emotion-level { display: flex; align-items: center; gap: 16px; min-height: 80px; padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.5); }
+    .emotion-level:last-child { border-bottom: none; }
+    .level-label { display: flex; flex-direction: column; align-items: center; min-width: 90px; padding: 10px; background: #fff; border-radius: var(--radius); box-shadow: 0 2px 6px rgba(0,0,0,0.08); }
+    .level-emoji { font-size: 28px; margin-bottom: 4px; }
+    .level-text { font-size: 12px; font-weight: 600; text-align: center; }
+    .level-students { flex: 1; display: flex; flex-wrap: wrap; gap: 10px; padding: 8px 12px; min-height: 60px; border-radius: var(--radius); align-content: center; }
+    .level-5 .level-students { background: linear-gradient(135deg, #c8e6c9, #a5d6a7); border: 2px solid #66bb6a; }
+    .level-4 .level-students { background: linear-gradient(135deg, #bbdefb, #90caf9); border: 2px solid #42a5f5; }
+    .level-3 .level-students { background: linear-gradient(135deg, #fff9c4, #fff59d); border: 2px solid #ffee58; }
+    .level-2 .level-students { background: linear-gradient(135deg, #ffe0b2, #ffcc80); border: 2px solid #ffa726; }
+    .level-1 .level-students { background: linear-gradient(135deg, #ffcdd2, #ef9a9a); border: 2px solid #ef5350; }
+
+    /* Monster character */
+    .monster { display: inline-flex; flex-direction: column; align-items: center; padding: 6px; background: #fff; border-radius: var(--radius); box-shadow: 0 2px 8px rgba(0,0,0,0.1); cursor: pointer; transition: all .2s; border: 2px solid transparent; min-width: 64px; }
+    .monster:hover { transform: translateY(-4px); box-shadow: 0 6px 16px rgba(0,0,0,0.15); border-color: var(--primary); }
+    .monster-avatar { width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 20px; margin-bottom: 4px; position: relative; }
+    .monster-avatar.boy { background: linear-gradient(135deg, #4fc3f7, #29b6f6); }
+    .monster-avatar.girl { background: linear-gradient(135deg, #f48fb1, #ec407a); }
+    .monster-badge { position: absolute; top: -4px; right: -4px; font-size: 14px; background: #fff; border-radius: 50%; width: 20px; height: 20px; display: flex; align-items: center; justify-content: center; box-shadow: 0 1px 4px rgba(0,0,0,0.15); }
+    .monster-name { font-size: 11px; font-weight: 600; text-align: center; max-width: 56px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+    /* Alert banner */
+    .alert-banner { padding: 16px 20px; border-radius: var(--radius); display: flex; align-items: flex-start; gap: 12px; margin-bottom: 16px; }
+    .alert-warning { background: #fff3e0; border-left: 4px solid var(--warning); }
+    .alert-danger { background: #fce4ec; border-left: 4px solid var(--danger); }
+    .alert-success { background: #e8f5e9; border-left: 4px solid var(--success); }
+    .alert-title { font-size: 14px; font-weight: 700; margin-bottom: 4px; }
+    .alert-text { font-size: 13px; color: var(--on-surface-md); line-height: 1.6; }
+
+    /* Stats grid */
+    .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 16px; margin: 16px 0; }
+    .stat-card { padding: 20px; border-radius: var(--radius); text-align: center; }
+    .stat-icon { font-size: 28px; margin-bottom: 8px; }
+    .stat-value { font-size: 24px; font-weight: 800; margin-bottom: 4px; }
+    .stat-label { font-size: 12px; color: var(--on-surface-md); }
+
+    /* Student timeline table */
+    .timeline-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .timeline-table th { background: var(--bg); padding: 10px 12px; text-align: left; font-weight: 600; border-bottom: 2px solid #e0e0e0; position: sticky; top: 0; }
+    .timeline-table td { padding: 10px 12px; border-bottom: 1px solid rgba(0,0,0,0.06); }
+    .timeline-table tr:hover td { background: rgba(74,124,255,0.06); }
+
+    /* Question builder */
+    .category-chips { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0; }
+    .cat-chip { padding: 8px 16px; border: 2px solid #e0e0e0; border-radius: 20px; background: #fff; font-size: 13px; font-weight: 500; cursor: pointer; transition: all .2s; font-family: inherit; display: inline-flex; align-items: center; gap: 6px; }
+    .cat-chip:hover { border-color: var(--primary); background: var(--primary-light); }
+    .cat-chip.selected { background: var(--primary); color: #fff; border-color: var(--primary); }
+    .template-chip { padding: 6px 14px; background: #e0e0e0; border-radius: 16px; font-size: 13px; cursor: pointer; transition: all .2s; display: inline-block; margin: 4px; }
+    .template-chip:hover { background: var(--primary); color: #fff; }
+
+    .text-input { width: 100%; padding: 14px 16px; border: 1px solid rgba(0,0,0,0.23); border-radius: 4px; font-family: inherit; font-size: 14px; transition: border-color .2s; resize: vertical; }
+    .text-input:focus { outline: none; border-color: var(--primary); border-width: 2px; }
+
+    .btn { padding: 10px 24px; border: none; border-radius: 4px; font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit; transition: all .2s; display: inline-flex; align-items: center; gap: 8px; text-transform: uppercase; letter-spacing: 0.5px; }
+    .btn-primary { background: var(--primary); color: #fff; box-shadow: 0 2px 4px rgba(74,124,255,0.3); }
+    .btn-primary:hover { background: var(--primary-dark); }
+    .btn-text { background: none; color: var(--primary); }
+    .btn-text:hover { background: rgba(74,124,255,0.06); }
+    .btn-outlined { background: none; color: var(--primary); border: 1px solid var(--primary); }
+
+    /* Student modal */
+    .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: none; align-items: center; justify-content: center; z-index: 2000; backdrop-filter: blur(4px); }
+    .modal-overlay.visible { display: flex; }
+    .modal { background: #fff; border-radius: var(--radius-lg); max-width: 560px; width: 90%; max-height: 80vh; overflow-y: auto; box-shadow: 0 20px 60px rgba(0,0,0,0.3); animation: modalIn .3s ease; }
+    @keyframes modalIn { from { opacity:0; transform:translateY(-40px) scale(.95); } to { opacity:1; transform:translateY(0) scale(1); } }
+    .modal-header { padding: 20px 24px; border-bottom: 1px solid rgba(0,0,0,0.08); display: flex; justify-content: space-between; align-items: center; }
+    .modal-header h3 { font-size: 18px; font-weight: 600; }
+    .modal-close { background: none; border: none; cursor: pointer; padding: 8px; border-radius: 50%; font-size: 18px; color: var(--on-surface-md); }
+    .modal-close:hover { background: rgba(0,0,0,0.04); }
+    .modal-body { padding: 24px; }
+    .modal-footer { padding: 16px 24px; border-top: 1px solid rgba(0,0,0,0.08); display: flex; gap: 12px; justify-content: flex-end; }
+    .info-row { display: flex; align-items: center; gap: 16px; margin-bottom: 16px; padding: 14px; background: var(--bg); border-radius: 8px; }
+    .info-row i { color: var(--primary); font-size: 20px; width: 24px; text-align: center; }
+    .info-label { font-size: 12px; color: var(--on-surface-md); }
+    .info-value { font-size: 15px; font-weight: 600; }
+
+    /* Question list */
+    .q-item { background: var(--bg); padding: 18px; border-radius: var(--radius); border: 1px solid rgba(0,0,0,0.06); margin-bottom: 14px; }
+    .q-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+    .q-badge { padding: 3px 12px; border-radius: 12px; font-size: 11px; font-weight: 600; }
+    .q-active { background: #e8f5e9; color: #2e7d32; }
+    .q-done { background: #e3f2fd; color: #1565c0; }
+    .q-text { font-size: 15px; font-weight: 600; margin-bottom: 10px; }
+    .q-stats { display: flex; gap: 16px; font-size: 13px; color: var(--on-surface-md); margin-bottom: 10px; }
+    .q-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+    .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: #323232; color: #fff; padding: 12px 24px; border-radius: 4px; font-size: 14px; z-index: 9999; box-shadow: var(--shadow-md); }
+    .empty-state { text-align: center; padding: 40px; color: var(--on-surface-md); }
+    .empty-state i { font-size: 40px; margin-bottom: 12px; display: block; opacity: 0.4; }
+
+    /* 날짜 필터 */
+    .date-filter { background: var(--surface); border-radius: var(--radius); box-shadow: var(--shadow-sm); padding: 16px 20px; margin-bottom: 20px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+    .date-filter label { font-size: 13px; font-weight: 600; color: var(--on-surface-md); white-space: nowrap; }
+    .date-filter input[type="date"] { padding: 8px 12px; border: 1px solid #e0e0e0; border-radius: 6px; font-family: inherit; font-size: 13px; }
+    .date-filter input[type="date"]:focus { outline: none; border-color: var(--primary); }
+    .date-filter .filter-btn { padding: 8px 20px; border: none; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit; transition: all .2s; }
+    .date-filter .filter-btn.primary { background: var(--primary); color: #fff; }
+    .date-filter .filter-btn.primary:hover { background: var(--primary-dark); }
+    .date-filter .filter-btn.secondary { background: #e0e0e0; color: var(--on-surface); }
+    .date-filter .filter-btn.secondary:hover { background: #d0d0d0; }
+    .date-filter .quick-btns { display: flex; gap: 6px; margin-left: auto; }
+    .date-filter .quick-btn { padding: 6px 12px; border: 1px solid #e0e0e0; border-radius: 16px; background: #fff; font-size: 12px; cursor: pointer; transition: all .2s; font-family: inherit; }
+    .date-filter .quick-btn:hover, .date-filter .quick-btn.active { background: var(--primary); color: #fff; border-color: var(--primary); }
+  </style>
+</head>
+<body>
+  <script src="/js/common-nav.js"></script>
+
+  <div class="page-wrap">
+    <a href="/growth/class-dashboard.html" class="back-link" id="backLink"><i class="fas fa-arrow-left"></i> 학습분석 대시보드로 돌아가기</a>
+
+    <div class="page-header">
+      <div>
+        <h1>💛 마음채움 — 교사 모니터링</h1>
+        <div class="subtitle" id="headerSubtitle">학급 감정 현황을 한눈에 확인하세요</div>
+      </div>
+      <div class="header-stats">
+        <div class="header-stat"><div class="header-stat-value" id="hChecked">-</div><div class="header-stat-label">감정 기록</div></div>
+        <div class="header-stat"><div class="header-stat-value" id="hTotal">-</div><div class="header-stat-label">전체 학생</div></div>
+        <div class="header-stat"><div class="header-stat-value" id="hRate">-</div><div class="header-stat-label">참여율</div></div>
+      </div>
+    </div>
+
+    <!-- 날짜 필터 -->
+    <div class="date-filter">
+      <label><i class="fas fa-calendar-alt"></i> 기간</label>
+      <input type="date" id="filterStart" />
+      <span style="color:var(--on-surface-md);">~</span>
+      <input type="date" id="filterEnd" />
+      <button class="filter-btn primary" onclick="applyDateFilter()"><i class="fas fa-search"></i> 검색</button>
+      <button class="filter-btn secondary" onclick="resetDateFilter()"><i class="fas fa-undo"></i> 초기화</button>
+      <div class="quick-btns">
+        <button class="quick-btn active" onclick="quickFilter('today', this)">오늘</button>
+        <button class="quick-btn" onclick="quickFilter('week', this)">최근 1주</button>
+        <button class="quick-btn" onclick="quickFilter('month', this)">최근 1개월</button>
+        <button class="quick-btn" onclick="quickFilter('3month', this)">최근 3개월</button>
+      </div>
+    </div>
+
+    <div class="tab-nav">
+      <button class="tab-btn active" onclick="switchTab('overview')"><i class="fas fa-dashboard"></i> 감정 현황</button>
+      <button class="tab-btn" onclick="switchTab('stairs')"><i class="fas fa-stairs"></i> 감정 계단</button>
+      <button class="tab-btn" onclick="switchTab('timeline')"><i class="fas fa-chart-line"></i> 추이 분석</button>
+      <button class="tab-btn" onclick="switchTab('sel')"><i class="fas fa-comments"></i> SEL 활동</button>
+    </div>
+
+    <!-- ===== 탭 1: 감정 현황 ===== -->
+    <div id="tab-overview" class="tab-content active">
+      <div id="overviewContent"><div class="empty-state"><i class="fas fa-spinner fa-spin"></i></div></div>
+    </div>
+
+    <!-- ===== 탭 2: 감정 계단 ===== -->
+    <div id="tab-stairs" class="tab-content">
+      <div id="stairsContent"><div class="empty-state"><i class="fas fa-spinner fa-spin"></i></div></div>
+    </div>
+
+    <!-- ===== 탭 3: 추이 분석 ===== -->
+    <div id="tab-timeline" class="tab-content">
+      <div id="timelineContent"><div class="empty-state"><i class="fas fa-spinner fa-spin"></i></div></div>
+    </div>
+
+    <!-- ===== 탭 4: SEL 활동 ===== -->
+    <div id="tab-sel" class="tab-content">
+      <div id="selContent"></div>
+    </div>
+  </div>
+
+  <!-- 학생 상세 모달 -->
+  <div class="modal-overlay" id="studentModal" onclick="if(event.target===this)closeModal()">
+    <div class="modal">
+      <div class="modal-header">
+        <h3 id="modalTitle">학생 상세</h3>
+        <button class="modal-close" onclick="closeModal()">&times;</button>
+      </div>
+      <div class="modal-body" id="modalBody"></div>
+      <div class="modal-footer">
+        <button class="btn btn-text" onclick="closeModal()">닫기</button>
+        <button class="btn btn-primary" onclick="showToast('메시지 기능은 준비 중입니다.')"><i class="fas fa-comment"></i> 메시지</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const API_EMOJI = { happy:'🤩', excited:'🤩', great:'🤩', good:'😊', calm:'😐', tired:'😕', sad:'😢', angry:'😡', anxious:'😰', frustrated:'😤' };
+    const API_LABEL = { happy:'행복', excited:'신남', great:'최고', good:'좋음', calm:'평온', tired:'피곤', sad:'슬픔', angry:'화남', anxious:'불안', frustrated:'답답' };
+    const EMOTION_COLORS = { happy:'#FFD54F', excited:'#FFD54F', great:'#FFD54F', good:'#4FC3F7', calm:'#FFF176', tired:'#FFB74D', sad:'#EF9A9A', angry:'#EF5350', anxious:'#CE93D8', frustrated:'#FFAB91' };
+    const SCORE_MAP = { happy:9, excited:9, great:8, good:7, calm:5, tired:3, sad:2, angry:2, anxious:3, frustrated:2 };
+    const MONSTER_EMOJI_BOY = ['👦','🧒','🤴','🦸‍♂️','🧑‍🚀','🧙‍♂️'];
+    const MONSTER_EMOJI_GIRL = ['👧','👸','🧚‍♀️','🦸‍♀️','👩‍🚀','🧜‍♀️'];
+
+    const params = new URLSearchParams(location.search);
+    const classId = params.get('id') || params.get('classId') || 1;
+    let monitorData = null;
+
+    // 날짜 초기값 세팅 (오늘)
+    const todayStr = new Date().toISOString().slice(0, 10);
+    document.getElementById('filterStart').value = todayStr;
+    document.getElementById('filterEnd').value = todayStr;
+
+    // Back link
+    document.getElementById('backLink').href = '/growth/class-dashboard.html';
+
+    function applyDateFilter() {
+      const s = document.getElementById('filterStart').value;
+      const e = document.getElementById('filterEnd').value;
+      if (!s || !e) { showToast('시작일과 종료일을 모두 선택해주세요.'); return; }
+      if (s > e) { showToast('시작일이 종료일보다 뒤입니다.'); return; }
+      document.querySelectorAll('.quick-btn').forEach(b => b.classList.remove('active'));
+      loadData(s, e);
+    }
+
+    function resetDateFilter() {
+      document.getElementById('filterStart').value = todayStr;
+      document.getElementById('filterEnd').value = todayStr;
+      document.querySelectorAll('.quick-btn').forEach(b => b.classList.remove('active'));
+      document.querySelector('.quick-btn').classList.add('active'); // '오늘' 버튼
+      loadData();
+    }
+
+    function quickFilter(range, btn) {
+      document.querySelectorAll('.quick-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      const end = new Date();
+      const start = new Date();
+      if (range === 'today') { /* 기본값 */ }
+      else if (range === 'week') { start.setDate(start.getDate() - 7); }
+      else if (range === 'month') { start.setMonth(start.getMonth() - 1); }
+      else if (range === '3month') { start.setMonth(start.getMonth() - 3); }
+      const sStr = start.toISOString().slice(0, 10);
+      const eStr = end.toISOString().slice(0, 10);
+      document.getElementById('filterStart').value = sStr;
+      document.getElementById('filterEnd').value = eStr;
+      if (range === 'today') {
+        loadData(); // 날짜 없이 호출 = 오늘만
+      } else {
+        loadData(sStr, eStr);
+      }
+    }
+
+    function switchTab(tabId) {
+      document.querySelectorAll('.tab-btn').forEach(b => {
+        const map = { overview:'현황', stairs:'계단', timeline:'추이', sel:'SEL' };
+        b.classList.toggle('active', b.textContent.includes(map[tabId] || ''));
+      });
+      document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+      document.getElementById('tab-' + tabId).classList.add('active');
+      if (tabId === 'sel') renderSEL();
+    }
+
+    async function loadData(startDate, endDate) {
+      try {
+        let url = '/api/growth/emotion-monitor/' + classId;
+        if (startDate && endDate) {
+          url += `?startDate=${startDate}&endDate=${endDate}`;
+        }
+        const res = await fetch(url);
+        const data = await res.json();
+        if (!data.success) throw new Error(data.message);
+        monitorData = data;
+
+        document.getElementById('hChecked').textContent = data.checkedCount;
+        document.getElementById('hTotal').textContent = data.totalStudents;
+        document.getElementById('hRate').textContent = data.totalStudents > 0 ? Math.round(data.checkedCount / data.totalStudents * 100) + '%' : '0%';
+        document.getElementById('headerSubtitle').textContent = data.today + ' 기준 · 총 ' + data.totalStudents + '명';
+
+        renderOverview(data);
+        renderStairs(data);
+        renderTimeline(data);
+      } catch (err) {
+        console.error('Monitor load error:', err);
+        document.getElementById('overviewContent').innerHTML = '<div class="empty-state"><i class="fas fa-exclamation-triangle"></i>데이터를 불러올 수 없습니다.</div>';
+      }
+    }
+
+    // ===== 감정 현황 =====
+    function renderOverview(data) {
+      let html = '';
+
+      // 주의 학생 알림
+      if (data.alertStudents.length > 0) {
+        data.alertStudents.forEach(a => {
+          const cls = a.type === 'consecutive_negative' ? 'alert-danger' : 'alert-warning';
+          const icon = a.type === 'consecutive_negative' ? 'fa-exclamation-circle' : 'fa-exclamation-triangle';
+          const msg = a.type === 'consecutive_negative'
+            ? `${a.name} 학생 — ${a.days}일 연속 부정 감정 (상담 권장)`
+            : `${a.name} 학생 — 급격한 감정 하락 감지 (${a.drop}점 하락)`;
+          html += `<div class="alert-banner ${cls}"><i class="fas ${icon}" style="font-size:20px;margin-top:2px;"></i><div><div class="alert-title">감정 변화 주의</div><div class="alert-text">${msg}</div></div></div>`;
+        });
+      }
+
+      html += '<div class="grid-2">';
+
+      // 오늘의 감정 분포
+      html += '<div class="card"><div class="card-header"><div class="card-title"><i class="fas fa-chart-pie" style="color:var(--primary)"></i> 오늘의 감정 분포</div><div class="card-subtitle">' + data.checkedCount + '명 참여</div></div><div class="card-body">';
+      const dist = data.emotionDist;
+      const distEntries = Object.entries(dist).sort((a, b) => b[1] - a[1]);
+      if (distEntries.length > 0) {
+        distEntries.forEach(([emotion, cnt]) => {
+          const pct = Math.round(cnt / data.checkedCount * 100);
+          const em = API_EMOJI[emotion] || '😐';
+          const lb = API_LABEL[emotion] || emotion;
+          const color = EMOTION_COLORS[emotion] || '#90CAF9';
+          html += `<div class="dist-item"><div class="dist-label"><span>${em} ${lb}</span><span>${cnt}명 (${pct}%)</span></div><div class="dist-bar"><div class="dist-fill" style="width:${pct}%;background:${color};"></div></div></div>`;
+        });
+      } else {
+        html += '<div class="empty-state"><i class="fas fa-inbox"></i>오늘 감정 기록이 없습니다.</div>';
+      }
+      html += '</div></div>';
+
+      // 감정 클러스터
+      html += '<div class="card"><div class="card-header"><div class="card-title"><i class="fas fa-users" style="color:var(--primary)"></i> 감정 클러스터 분석</div></div><div class="card-body"><div class="stats-grid">';
+      data.clusters.forEach(cl => {
+        const bgMap = { positive: 'linear-gradient(135deg,#c8e6c9,#a5d6a7)', watch: 'linear-gradient(135deg,#fff9c4,#fff59d)', help: 'linear-gradient(135deg,#ffcdd2,#ef9a9a)' };
+        const colorMap = { positive: '#2e7d32', watch: '#f57f17', help: '#c62828' };
+        const iconMap = { positive: '😊', watch: '🟡', help: '🔴' };
+        html += `<div class="stat-card" style="background:${bgMap[cl.id]};"><div class="stat-icon">${iconMap[cl.id]}</div><div class="stat-value" style="color:${colorMap[cl.id]};">${cl.count}명</div><div class="stat-label">${cl.label}</div></div>`;
+      });
+      html += '</div></div></div>';
+
+      html += '</div>'; // grid-2
+
+      // 상담 필요 학생
+      if (data.alertStudents.length > 0) {
+        html += '<div class="card"><div class="card-header"><div class="card-title"><i class="fas fa-hand-holding-heart" style="color:var(--danger)"></i> 상담 필요 학생</div></div><div class="card-body">';
+        data.alertStudents.forEach(a => {
+          const em = API_EMOJI[a.emotion] || '😐';
+          const desc = a.type === 'consecutive_negative' ? `${a.days}일 연속 부정 감정 · 상담 우선 권장` : `급격한 감정 하락 · 관찰 필요`;
+          html += `<div style="display:flex;align-items:center;gap:16px;padding:14px;border-bottom:1px solid rgba(0,0,0,0.06);">
+            <i class="fas fa-exclamation-triangle" style="color:${a.type === 'consecutive_negative' ? 'var(--danger)' : 'var(--warning)'};"></i>
+            <div style="flex:1;"><div style="font-weight:600;">${a.name} 학생</div><div style="font-size:13px;color:var(--on-surface-md);">${em} ${desc}</div></div>
+            <button class="btn btn-outlined" onclick="showToast('상담 연계 기능은 준비 중입니다.')">상담 연계</button>
+          </div>`;
+        });
+        html += '</div></div>';
+      }
+
+      document.getElementById('overviewContent').innerHTML = html;
+    }
+
+    // ===== 감정 계단 =====
+    function renderStairs(data) {
+      const levels = [
+        { level: 5, emoji: '🤩', text: '아주 좋아요!' },
+        { level: 4, emoji: '😊', text: '좋아요' },
+        { level: 3, emoji: '😐', text: '괜찮아요' },
+        { level: 2, emoji: '😕', text: '별로예요' },
+        { level: 1, emoji: '😢', text: '안 좋아요' }
+      ];
+
+      let html = '<div class="card card-full"><div class="card-header"><div class="card-title"><i class="fas fa-stairs" style="color:var(--primary)"></i> 학급 감정 계단 (Feelings Monsters)</div><div class="card-subtitle">학생 캐릭터를 클릭하면 상세 정보를 볼 수 있습니다</div></div><div class="card-body"><div class="stairs-container">';
+
+      levels.forEach(lv => {
+        const students = data.stairsData.filter(s => s.level === lv.level);
+        html += `<div class="emotion-level level-${lv.level}"><div class="level-label"><span class="level-emoji">${lv.emoji}</span><span class="level-text">${lv.text}</span></div><div class="level-students">`;
+        if (students.length === 0) {
+          html += '<span style="font-size:12px;color:rgba(0,0,0,0.3);font-style:italic;">아직 없음</span>';
+        } else {
+          students.forEach((s, i) => {
+            const isGirl = i % 2 === 1; // 간단 구분
+            const monsterList = isGirl ? MONSTER_EMOJI_GIRL : MONSTER_EMOJI_BOY;
+            const monsterEmoji = monsterList[i % monsterList.length];
+            const em = API_EMOJI[s.emotion] || '😐';
+            html += `<div class="monster" onclick="showStudentModal(${JSON.stringify(s).replace(/"/g, '&quot;')})">
+              <div class="monster-avatar ${isGirl ? 'girl' : 'boy'}">${monsterEmoji}<div class="monster-badge">${em}</div></div>
+              <div class="monster-name">${s.name}</div>
+            </div>`;
+          });
+        }
+        html += '</div></div>';
+      });
+
+      html += '</div></div></div>';
+
+      // 미체크 학생 안내
+      const unchecked = data.totalStudents - data.checkedCount;
+      if (unchecked > 0) {
+        html += `<div class="alert-banner alert-warning"><i class="fas fa-info-circle" style="font-size:18px;color:var(--warning);margin-top:2px;"></i><div><div class="alert-title">${unchecked}명의 학생이 아직 감정을 기록하지 않았습니다</div><div class="alert-text">감정 기록을 독려해주세요.</div></div></div>`;
+      }
+
+      document.getElementById('stairsContent').innerHTML = html;
+    }
+
+    // ===== 추이 분석 =====
+    function renderTimeline(data) {
+      if (!data.studentTimeline || data.studentTimeline.length === 0) {
+        document.getElementById('timelineContent').innerHTML = '<div class="card"><div class="card-body"><div class="empty-state"><i class="fas fa-chart-line"></i>감정 기록 데이터가 부족합니다.</div></div></div>';
+        return;
+      }
+
+      let html = '';
+
+      // 학생별 감정 추이 테이블
+      html += '<div class="card"><div class="card-header"><div class="card-title"><i class="fas fa-table" style="color:var(--primary)"></i> 학생별 감정 현황</div><div class="card-subtitle">최근 30일 데이터</div></div><div class="card-body" style="overflow-x:auto;"><table class="timeline-table"><thead><tr><th>학생</th><th>최근 감정</th><th>긍정 비율</th><th>기록 수</th><th>최근 추이</th></tr></thead><tbody>';
+
+      const sorted = [...data.studentTimeline].sort((a, b) => a.positiveRate - b.positiveRate);
+      sorted.forEach(s => {
+        const em = API_EMOJI[s.lastEmotion] || '😐';
+        const lb = API_LABEL[s.lastEmotion] || s.lastEmotion;
+        const rateColor = s.positiveRate >= 60 ? 'var(--success)' : s.positiveRate >= 40 ? 'var(--warning)' : 'var(--danger)';
+        // 최근 5개 감정 미니 타임라인
+        const recent5 = s.timeline.slice(-5).map(t => API_EMOJI[t.emotion] || '😐').join(' ');
+
+        html += `<tr><td style="font-weight:600;">${s.name}</td><td>${em} ${lb}</td><td style="color:${rateColor};font-weight:700;">${s.positiveRate}%</td><td>${s.totalCount}회</td><td style="font-size:16px;">${recent5}</td></tr>`;
+      });
+
+      html += '</tbody></table></div></div>';
+
+      document.getElementById('timelineContent').innerHTML = html;
+    }
+
+    // ===== SEL 활동 =====
+    function renderSEL() {
+      let html = '';
+
+      // 질문 만들기
+      html += `<div class="card"><div class="card-header"><div class="card-title"><i class="fas fa-plus-circle" style="color:var(--primary)"></i> 새 질문 만들기</div><div class="card-subtitle">학생들에게 감정 체크를 요청할 질문을 만들어보세요</div></div><div class="card-body">
+        <div style="margin-bottom:16px;"><label style="font-size:12px;font-weight:600;color:var(--on-surface-md);display:block;margin-bottom:8px;">카테고리 선택</label>
+        <div class="category-chips">
+          <button class="cat-chip" onclick="toggleCat(this)"><i class="fas fa-users"></i> 소속감</button>
+          <button class="cat-chip" onclick="toggleCat(this)"><i class="fas fa-graduation-cap"></i> 학습</button>
+          <button class="cat-chip" onclick="toggleCat(this)"><i class="fas fa-clipboard"></i> 과제</button>
+          <button class="cat-chip" onclick="toggleCat(this)"><i class="fas fa-comments"></i> 참여</button>
+          <button class="cat-chip" onclick="toggleCat(this)"><i class="fas fa-chart-bar"></i> 평가</button>
+          <button class="cat-chip" onclick="toggleCat(this)"><i class="fas fa-heart"></i> 웰빙</button>
+        </div></div>
+        <div style="margin-bottom:16px;"><label style="font-size:12px;font-weight:600;color:var(--on-surface-md);display:block;margin-bottom:8px;">질문 입력</label>
+        <textarea class="text-input" id="selQuestion" rows="3" placeholder="예: 오늘 수업에서 배운 내용이 흥미로웠나요?"></textarea></div>
+        <div style="margin-bottom:16px;"><label style="font-size:12px;font-weight:600;color:var(--on-surface-md);display:block;margin-bottom:8px;">응답 마감 시간</label>
+        <input type="datetime-local" class="text-input" style="max-width:300px;"></div>
+        <div style="display:flex;align-items:center;gap:12px;padding:14px;background:var(--bg);border-radius:8px;margin-bottom:16px;">
+          <input type="checkbox" id="anonMode" style="width:18px;height:18px;">
+          <label for="anonMode" style="flex:1;cursor:pointer;"><div style="font-weight:500;font-size:14px;">익명 모드</div><div style="font-size:12px;color:var(--on-surface-md);">학생들의 이름이 기록되지 않습니다.</div></label>
+        </div>
+        <div style="margin-bottom:16px;"><div style="font-weight:500;margin-bottom:10px;">💡 추천 질문 템플릿</div>
+        <div><span class="template-chip" onclick="useTemplate(this)">오늘 수업이 재미있었나요?</span><span class="template-chip" onclick="useTemplate(this)">친구들과 잘 지내고 있나요?</span><span class="template-chip" onclick="useTemplate(this)">과제의 난이도는 적당한가요?</span><span class="template-chip" onclick="useTemplate(this)">수업 시간에 질문하기 편한가요?</span></div></div>
+      </div><div style="padding:8px 24px 16px;display:flex;gap:8px;justify-content:flex-end;border-top:1px solid rgba(0,0,0,0.08);">
+        <button class="btn btn-text">미리보기</button>
+        <button class="btn btn-primary" onclick="showToast('질문이 전송되었습니다! (프로토타입)')"><i class="fas fa-paper-plane"></i> 질문 보내기</button>
+      </div></div>`;
+
+      // 최근 질문 목록 — 전용 API 미연동 상태. 가짜 데이터를 노출하지 않고 빈 상태로 표시.
+      html += `<div class="card"><div class="card-header"><div class="card-title"><i class="fas fa-list" style="color:var(--primary)"></i> 최근 질문 목록</div></div><div class="card-body">
+        <div class="empty-state" style="padding:24px;text-align:center;color:var(--on-surface-md);font-size:13px;">
+          <i class="fas fa-inbox" style="font-size:28px;opacity:.5;display:block;margin-bottom:8px;"></i>
+          아직 전송한 SEL 질문이 없습니다.
+        </div>
+      </div></div>`;
+
+      document.getElementById('selContent').innerHTML = html;
+    }
+
+    // ===== 학생 모달 =====
+    function showStudentModal(student) {
+      const em = API_EMOJI[student.emotion] || '😐';
+      const lb = API_LABEL[student.emotion] || student.emotion;
+      const score = SCORE_MAP[student.emotion] || 5;
+      // 타임라인에서 이 학생 찾기
+      const st = monitorData?.studentTimeline?.find(s => s.userId === student.userId);
+
+      document.getElementById('modalTitle').textContent = student.name + ' 학생';
+      let body = '';
+      body += `<div class="info-row"><i class="fas fa-smile"></i><div><div class="info-label">현재 감정</div><div class="info-value">${em} ${lb}</div></div></div>`;
+      body += `<div class="info-row"><i class="fas fa-chart-bar"></i><div><div class="info-label">감정 점수</div><div class="info-value">${score} / 10</div></div></div>`;
+      if (student.reason) {
+        body += `<div class="info-row"><i class="fas fa-quote-left"></i><div><div class="info-label">감정 이유</div><div class="info-value">"${escHtml(student.reason)}"</div></div></div>`;
+      }
+      if (st) {
+        body += `<div class="info-row"><i class="fas fa-percentage"></i><div><div class="info-label">긍정 감정 비율 (30일)</div><div class="info-value" style="color:${st.positiveRate >= 60 ? 'var(--success)' : st.positiveRate >= 40 ? 'var(--warning)' : 'var(--danger)'};">${st.positiveRate}%</div></div></div>`;
+        body += `<div class="info-row"><i class="fas fa-calendar-check"></i><div><div class="info-label">총 기록 수</div><div class="info-value">${st.totalCount}회</div></div></div>`;
+        // 최근 감정 타임라인
+        if (st.timeline.length > 0) {
+          body += '<div style="margin-top:12px;"><div style="font-size:12px;font-weight:600;color:var(--on-surface-md);margin-bottom:8px;">최근 감정 타임라인</div><div style="display:flex;gap:4px;flex-wrap:wrap;">';
+          st.timeline.slice(-10).forEach(t => {
+            body += `<span style="font-size:18px;" title="${t.date}">${API_EMOJI[t.emotion] || '😐'}</span>`;
+          });
+          body += '</div></div>';
+        }
+      }
+      document.getElementById('modalBody').innerHTML = body;
+      document.getElementById('studentModal').classList.add('visible');
+    }
+
+    function closeModal() {
+      document.getElementById('studentModal').classList.remove('visible');
+    }
+
+    function toggleCat(el) {
+      el.classList.toggle('selected');
+    }
+
+    function useTemplate(el) {
+      document.getElementById('selQuestion').value = el.textContent;
+    }
+
+    function escHtml(s) { if (!s) return ''; const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+    function showToast(msg) {
+      const t = document.createElement('div'); t.className = 'toast';
+      t.innerHTML = '<i class="fas fa-check-circle"></i> ' + msg;
+      document.body.appendChild(t);
+      setTimeout(() => { t.style.opacity = '0'; t.style.transition = 'opacity .3s'; setTimeout(() => t.remove(), 300); }, 2500);
+    }
+
+    // 초기 로드
+    loadData();
+  </script>
+</body>
+</html>

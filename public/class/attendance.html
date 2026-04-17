@@ -1,0 +1,652 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>다채움 - 출석부</title>
+  <link rel="stylesheet" href="/css/common-nav.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Pretendard','Noto Sans KR',system-ui,sans-serif; background: #F5F7FA; color: #1A1A2E; }
+    .container { max-width: 1800px; margin: 0 auto; padding: 24px 20px; }
+    .page-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; flex-wrap: wrap; gap: 12px; }
+    .page-header h2 { font-size: 20px; font-weight: 700; }
+    .back-link { color: #6B7280; text-decoration: none; font-size: 14px; display: flex; align-items: center; gap: 4px; }
+    .back-link:hover { color: #2563eb; }
+    .tabs { display: flex; gap: 4px; margin-bottom: 24px; border-bottom: 2px solid #e5e7eb; }
+    .tab-btn { padding: 10px 16px; border: none; background: none; font-size: 14px; font-weight: 500; color: #6B7280; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -2px; font-family: inherit; }
+    .tab-btn.active { color: #2563eb; border-bottom-color: #2563eb; font-weight: 600; }
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+    .card { background: #fff; border-radius: 12px; padding: 24px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); margin-bottom: 20px; }
+
+    /* 출석 체크 영역 */
+    .checkin-area { text-align: center; padding: 40px 20px; }
+    .checkin-btn {
+      width: 160px; height: 160px; border-radius: 50%; border: none;
+      background: linear-gradient(135deg, #2563eb, #1d4ed8);
+      color: #fff; font-size: 18px; font-weight: 700; cursor: pointer;
+      display: inline-flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: 8px; box-shadow: 0 8px 24px rgba(37,99,235,0.3);
+      transition: transform 0.2s, box-shadow 0.2s; font-family: inherit;
+    }
+    .checkin-btn:hover:not(:disabled) { transform: scale(1.05); box-shadow: 0 12px 32px rgba(37,99,235,0.4); }
+    .checkin-btn:disabled { background: linear-gradient(135deg, #10b981, #059669); box-shadow: 0 8px 24px rgba(16,185,129,0.3); cursor: default; }
+    .checkin-btn i { font-size: 36px; }
+    .comment-input { margin-top: 16px; }
+    .comment-input input {
+      padding: 8px 14px; border: 1.5px solid #d1d5db; border-radius: 8px;
+      font-size: 13px; width: 250px; max-width: 100%; outline: none; font-family: inherit;
+    }
+    .comment-input input:focus { border-color: #2563eb; }
+
+    /* 감정 선택 */
+    .emotion-picker { margin-bottom: 24px; }
+    .emotion-label { font-size: 16px; font-weight: 600; margin-bottom: 12px; color: #374151; }
+    .emotion-options { display: flex; justify-content: center; gap: 12px; margin-bottom: 14px; flex-wrap: wrap; }
+    .emotion-btn {
+      display: flex; flex-direction: column; align-items: center; gap: 4px;
+      padding: 12px 16px; border: 2px solid #e5e7eb; border-radius: 12px; background: #fff;
+      cursor: pointer; transition: all 0.2s; font-family: inherit; font-size: 12px; color: #6B7280; min-width: 64px;
+    }
+    .emotion-btn:hover { border-color: #2563eb; background: #eff6ff; }
+    .emotion-btn.selected { border-color: #2563eb; background: #dbeafe; color: #1d4ed8; box-shadow: 0 0 0 3px rgba(37,99,235,0.15); }
+    .emotion-btn .emoji { font-size: 32px; line-height: 1; }
+    .emotion-reason-input { margin-top: 10px; }
+    .emotion-reason-input input { padding: 8px 14px; border: 1.5px solid #d1d5db; border-radius: 8px; font-size: 13px; width: 300px; max-width: 100%; outline: none; font-family: inherit; }
+    .emotion-reason-input input:focus { border-color: #2563eb; }
+
+    /* 감정 타임라인 */
+    .emotion-calendar { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; margin-top: 12px; }
+    .emotion-day { text-align: center; padding: 6px 2px; border-radius: 6px; font-size: 11px; }
+    .emotion-day .day-num { color: #6B7280; }
+    .emotion-day .day-emoji { font-size: 18px; }
+    .emotion-day.today { background: #eff6ff; border: 1px solid #2563eb; }
+
+    /* 통계 카드 */
+    .stats-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 24px; }
+    .stat-card { background: #fff; border-radius: 12px; padding: 16px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
+    .stat-card .stat-value { font-size: 28px; font-weight: 700; color: #2563eb; }
+    .stat-card .stat-label { font-size: 12px; color: #6B7280; margin-top: 4px; }
+    .stat-card .stat-icon { font-size: 20px; margin-bottom: 4px; }
+
+    /* 칭호 & 뱃지 */
+    .title-badge { display: inline-block; padding: 6px 16px; background: linear-gradient(135deg, #f59e0b, #d97706); color: #fff; border-radius: 20px; font-size: 14px; font-weight: 700; margin: 12px 0; }
+    .badge-grid { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; margin-top: 12px; }
+    .badge-item { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 10px 12px; background: #fef3c7; border-radius: 10px; font-size: 11px; font-weight: 600; color: #92400e; min-width: 80px; }
+    .badge-item i { font-size: 22px; color: #d97706; }
+    .badge-item.locked { background: #f3f4f6; color: #9ca3af; }
+    .badge-item.locked i { color: #d1d5db; }
+
+    /* 랭킹 */
+    .ranking-list { list-style: none; }
+    .ranking-item { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-bottom: 1px solid #f3f4f6; }
+    .ranking-item:last-child { border-bottom: none; }
+    .rank-num { width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; border-radius: 50%; font-size: 13px; font-weight: 700; background: #f3f4f6; color: #6B7280; flex-shrink: 0; }
+    .rank-num.gold { background: #fef3c7; color: #d97706; }
+    .rank-num.silver { background: #f1f5f9; color: #64748b; }
+    .rank-num.bronze { background: #fed7aa; color: #c2410c; }
+    .rank-name { flex: 1; font-size: 14px; font-weight: 500; }
+    .rank-days { font-size: 13px; color: #2563eb; font-weight: 600; }
+    .rank-streak { font-size: 11px; color: #f59e0b; }
+
+    /* 교사용 출석 테이블 */
+    .date-filter { display: flex; gap: 10px; align-items: center; margin-bottom: 16px; flex-wrap: wrap; }
+    .date-filter input, .date-filter select { padding: 8px 12px; border: 1.5px solid #d1d5db; border-radius: 8px; font-size: 13px; outline: none; font-family: inherit; }
+    .date-filter button { padding: 8px 16px; background: #2563eb; color: #fff; border: none; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit; }
+    .date-filter label { font-size: 13px; color: #374151; display: flex; align-items: center; gap: 4px; cursor: pointer; }
+
+    .attendance-table { width: 100%; border-collapse: collapse; font-size: 12px; overflow-x: auto; display: block; }
+    .attendance-table th, .attendance-table td { padding: 8px 6px; text-align: center; border: 1px solid #e5e7eb; white-space: nowrap; }
+    .attendance-table th { background: #f8fafc; font-weight: 600; color: #374151; position: sticky; top: 0; }
+    .attendance-table th:first-child { position: sticky; left: 0; z-index: 2; background: #f1f5f9; }
+    .attendance-table td:first-child { position: sticky; left: 0; background: #fff; font-weight: 500; z-index: 1; }
+    .attendance-table .present { color: #10b981; }
+    .attendance-table .absent { color: #dc2626; }
+    .member-stats { font-size: 11px; color: #6B7280; }
+
+    .btn { padding: 8px 16px; border: none; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit; }
+    .btn-outline { background: #fff; color: #374151; border: 1.5px solid #d1d5db; }
+    .btn-outline:hover { background: #f3f4f6; }
+
+    @media (max-width: 768px) {
+      .checkin-btn { width: 130px; height: 130px; font-size: 15px; }
+      .checkin-btn i { font-size: 28px; }
+      .stats-row { grid-template-columns: repeat(2, 1fr); }
+    }
+  </style>
+</head>
+<body>
+  <script src="/js/common-nav.js"></script>
+  <div class="container" id="mainContent" style="display:none;">
+    <div class="page-header">
+      <a class="back-link" id="backLink" href="#"><i class="fas fa-arrow-left"></i> 클래스 홈으로</a>
+      <h2><i class="fas fa-calendar-check" style="color:#10b981;margin-right:6px;"></i>출석부</h2>
+    </div>
+
+    <div class="tabs">
+      <button class="tab-btn active" data-tab="student">출석하기</button>
+      <button class="tab-btn" data-tab="emotion">감정기록</button>
+      <button class="tab-btn" data-tab="ranking">랭킹</button>
+      <button class="tab-btn" data-tab="badges">뱃지</button>
+      <button class="tab-btn teacher-only" data-tab="teacher" style="display:none;">출석 관리</button>
+      <button class="tab-btn teacher-only" data-tab="emotion-admin" style="display:none;">감정 현황</button>
+    </div>
+
+    <!-- 학생 출석 탭 -->
+    <div id="tab-student" class="tab-content active">
+      <div class="stats-row" id="statsRow">
+        <div class="stat-card">
+          <div class="stat-icon" style="color:#2563eb;"><i class="fas fa-calendar-check"></i></div>
+          <div class="stat-value" id="statTotal">0</div>
+          <div class="stat-label">총 출석일</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon" style="color:#f59e0b;"><i class="fas fa-fire"></i></div>
+          <div class="stat-value" id="statStreak">0</div>
+          <div class="stat-label">연속 출석</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon" style="color:#8b5cf6;"><i class="fas fa-trophy"></i></div>
+          <div class="stat-value" id="statBadges">0</div>
+          <div class="stat-label">획득 뱃지</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="checkin-area">
+          <div id="titleArea"></div>
+          <!-- 감정 선택 영역 -->
+          <div class="emotion-picker" id="emotionPicker">
+            <p class="emotion-label">오늘 기분은 어때요?</p>
+            <div class="emotion-options">
+              <button type="button" class="emotion-btn" data-emotion="very_happy" onclick="selectEmotion(this)"><span class="emoji">😄</span>최고</button>
+              <button type="button" class="emotion-btn" data-emotion="happy" onclick="selectEmotion(this)"><span class="emoji">😊</span>좋아</button>
+              <button type="button" class="emotion-btn" data-emotion="neutral" onclick="selectEmotion(this)"><span class="emoji">😐</span>보통</button>
+              <button type="button" class="emotion-btn" data-emotion="sad" onclick="selectEmotion(this)"><span class="emoji">😢</span>슬퍼</button>
+              <button type="button" class="emotion-btn" data-emotion="angry" onclick="selectEmotion(this)"><span class="emoji">😡</span>화나</button>
+            </div>
+            <div class="emotion-reason-input">
+              <input type="text" id="emotionReason" placeholder="이유를 알려주세요 (선택)" maxlength="100">
+            </div>
+          </div>
+          <button class="checkin-btn" id="checkinBtn" onclick="doCheckin()">
+            <i class="fas fa-hand-pointer"></i>
+            출석하기
+          </button>
+          <div class="comment-input" id="commentArea">
+            <input type="text" id="commentInput" placeholder="오늘의 한마디 (선택, 30자)" maxlength="30">
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 랭킹 탭 -->
+    <div id="tab-ranking" class="tab-content">
+      <div class="card">
+        <h3 style="font-size:16px;font-weight:600;margin-bottom:16px;"><i class="fas fa-trophy" style="color:#f59e0b;margin-right:6px;"></i>출석 랭킹</h3>
+        <ul class="ranking-list" id="rankingList"></ul>
+      </div>
+    </div>
+
+    <!-- 뱃지 탭 -->
+    <div id="tab-badges" class="tab-content">
+      <div class="card" style="text-align:center;">
+        <h3 style="font-size:16px;font-weight:600;margin-bottom:16px;"><i class="fas fa-medal" style="color:#d97706;margin-right:6px;"></i>나의 뱃지</h3>
+        <div class="badge-grid" id="badgeGrid"></div>
+      </div>
+    </div>
+
+    <!-- 감정 기록 탭 (학생) -->
+    <div id="tab-emotion" class="tab-content">
+      <div class="card">
+        <h3 style="font-size:16px;font-weight:600;margin-bottom:16px;"><i class="fas fa-heart" style="color:#ec4899;margin-right:6px;"></i>나의 감정 기록</h3>
+        <div id="emotionTimeline" style="margin-bottom:20px;"></div>
+      </div>
+      <div class="card">
+        <h3 style="font-size:16px;font-weight:600;margin-bottom:16px;"><i class="fas fa-pen-fancy" style="color:#8b5cf6;margin-right:6px;"></i>감정 회고</h3>
+        <div style="margin-bottom:12px;">
+          <select id="reflectionType" style="padding:8px 12px;border:1.5px solid #d1d5db;border-radius:8px;font-size:13px;margin-right:8px;">
+            <option value="weekly">주간 회고</option>
+            <option value="monthly">월간 회고</option>
+          </select>
+        </div>
+        <textarea id="reflectionContent" rows="4" placeholder="이번 주/달을 돌아보며... 가장 기억에 남는 순간은?" style="width:100%;padding:12px;border:1.5px solid #d1d5db;border-radius:8px;font-size:14px;font-family:inherit;resize:vertical;margin-bottom:10px;"></textarea>
+        <button class="btn" style="background:#8b5cf6;color:#fff;" onclick="saveReflection()"><i class="fas fa-save"></i> 저장</button>
+        <div id="reflectionList" style="margin-top:16px;"></div>
+      </div>
+    </div>
+
+    <!-- 교사: 감정 현황 탭 -->
+    <div id="tab-emotion-admin" class="tab-content">
+      <div class="card">
+        <h3 style="font-size:16px;font-weight:600;margin-bottom:16px;"><i class="fas fa-chart-pie" style="color:#ec4899;margin-right:6px;"></i>우리반 감정 현황</h3>
+        <div id="emotionStatsArea"></div>
+      </div>
+      <div class="card">
+        <h3 style="font-size:16px;font-weight:600;margin-bottom:16px;"><i class="fas fa-comment-medical" style="color:#10b981;margin-right:6px;"></i>학생 피드백</h3>
+        <div id="emotionStudentList"></div>
+      </div>
+    </div>
+
+    <!-- 교사 관리 탭 -->
+    <div id="tab-teacher" class="tab-content">
+      <div class="card">
+        <h3 style="font-size:16px;font-weight:600;margin-bottom:16px;"><i class="fas fa-table" style="color:#2563eb;margin-right:6px;"></i>기간별 출석 현황</h3>
+        <div class="date-filter">
+          <input type="date" id="filterStart">
+          <span>~</span>
+          <input type="date" id="filterEnd">
+          <label><input type="checkbox" id="filterWeekends"> 주말 포함</label>
+          <button onclick="loadTable()">조회</button>
+          <button class="btn btn-outline" onclick="exportCSV()"><i class="fas fa-file-csv"></i> CSV 다운로드</button>
+        </div>
+        <div style="overflow-x:auto;">
+          <table class="attendance-table" id="attendanceTable"></table>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3 style="font-size:16px;font-weight:600;margin-bottom:16px;"><i class="fas fa-users" style="color:#10b981;margin-right:6px;"></i>오늘의 출석 현황</h3>
+        <div id="todayList"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const params = new URLSearchParams(location.search);
+    const classId = params.get('id');
+    if (!classId) location.href = '/class/index.html';
+    document.getElementById('backLink').href = '/class/class-home.html?id=' + classId;
+
+    let currentUser = null;
+    let myRole = null;
+
+    const ALL_BADGES = [
+      { type: 'streak_3', name: '3일 연속', icon: 'fa-seedling' },
+      { type: 'streak_5', name: '5일 연속', icon: 'fa-leaf' },
+      { type: 'streak_10', name: '10일 연속', icon: 'fa-tree' },
+      { type: 'streak_20', name: '20일 연속', icon: 'fa-crown' },
+      { type: 'streak_30', name: '한 달 개근', icon: 'fa-star' },
+      { type: 'streak_50', name: '50일 연속', icon: 'fa-gem' },
+      { type: 'streak_100', name: '100일 전설', icon: 'fa-dragon' },
+    ];
+
+    // 탭 전환
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+        document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+        btn.classList.add('active');
+        document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
+        if (btn.dataset.tab === 'ranking') loadRanking();
+        if (btn.dataset.tab === 'emotion') loadEmotionTimeline();
+        if (btn.dataset.tab === 'emotion-admin') loadEmotionStats();
+        if (btn.dataset.tab === 'teacher') { loadTable(); loadToday(); }
+      });
+    });
+
+    async function loadStatus() {
+      const res = await fetch(`/api/attendance/${classId}/status`);
+      const data = await res.json();
+      if (!data.success) return;
+
+      document.getElementById('statTotal').textContent = data.totalDays;
+      document.getElementById('statStreak').textContent = data.streak;
+      document.getElementById('statBadges').textContent = (data.badges || []).length;
+
+      if (data.title) {
+        document.getElementById('titleArea').innerHTML = `<span class="title-badge"><i class="fas fa-award"></i> ${data.title}</span>`;
+      }
+
+      if (data.checkedIn) {
+        const btn = document.getElementById('checkinBtn');
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fas fa-check-circle"></i>출석 완료!';
+        document.getElementById('commentArea').style.display = 'none';
+        document.getElementById('emotionPicker').style.display = 'none';
+      }
+
+      // 뱃지 탭
+      renderBadges(data.badges || []);
+    }
+
+    function renderBadges(earned) {
+      const earnedTypes = earned.map(b => b.badge_type);
+      document.getElementById('badgeGrid').innerHTML = ALL_BADGES.map(b => {
+        const has = earnedTypes.includes(b.type);
+        return `<div class="badge-item ${has ? '' : 'locked'}">
+          <i class="fas ${b.icon}"></i>
+          <span>${b.name}</span>
+        </div>`;
+      }).join('');
+    }
+
+    let selectedEmotion = null;
+    const EMOTION_MAP = {
+      very_happy: '😄', happy: '😊', neutral: '😐', sad: '😢', angry: '😡'
+    };
+
+    function selectEmotion(btn) {
+      document.querySelectorAll('.emotion-btn').forEach(b => b.classList.remove('selected'));
+      btn.classList.add('selected');
+      selectedEmotion = btn.dataset.emotion;
+    }
+
+    async function doCheckin() {
+      const comment = document.getElementById('commentInput').value.trim();
+      const emotionReason = document.getElementById('emotionReason').value.trim();
+      const res = await fetch(`/api/attendance/${classId}/checkin`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          comment: comment || null,
+          emotion: selectedEmotion || null,
+          emotion_reason: emotionReason || null,
+          emotion_reason_type: 'text'
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        loadStatus();
+      } else {
+        alert(data.message);
+      }
+    }
+
+    async function loadRanking() {
+      const res = await fetch(`/api/attendance/${classId}/ranking`);
+      const data = await res.json();
+      if (!data.success) return;
+
+      const list = document.getElementById('rankingList');
+      if (data.ranking.length === 0) {
+        list.innerHTML = '<div style="text-align:center;padding:24px;color:#9ca3af;">아직 출석 기록이 없습니다.</div>';
+        return;
+      }
+
+      list.innerHTML = data.ranking.map((r, i) => {
+        const rankClass = i === 0 ? 'gold' : i === 1 ? 'silver' : i === 2 ? 'bronze' : '';
+        return `<li class="ranking-item">
+          <span class="rank-num ${rankClass}">${i + 1}</span>
+          <span class="rank-name">${escHtml(r.display_name)}</span>
+          <span class="rank-streak"><i class="fas fa-fire"></i> ${r.streak}일</span>
+          <span class="rank-days">${r.total_days}일 출석</span>
+        </li>`;
+      }).join('');
+    }
+
+    async function loadTable() {
+      const start = document.getElementById('filterStart').value;
+      const end = document.getElementById('filterEnd').value;
+      const weekends = document.getElementById('filterWeekends').checked;
+      const params = new URLSearchParams({ startDate: start, endDate: end, includeWeekends: weekends });
+      const res = await fetch(`/api/attendance/${classId}/table?${params}`);
+      const data = await res.json();
+      if (!data.success) return;
+
+      const { members, dates, records } = data;
+      if (!dates.length || !members.length) {
+        document.getElementById('attendanceTable').innerHTML = '<tr><td style="padding:24px;color:#9ca3af;">데이터가 없습니다.</td></tr>';
+        return;
+      }
+
+      let html = '<thead><tr><th>이름</th>';
+      dates.forEach(d => {
+        const dt = new Date(d);
+        html += `<th>${dt.getMonth()+1}/${dt.getDate()}</th>`;
+      });
+      html += '<th>출석</th><th>결석</th></tr></thead><tbody>';
+
+      members.forEach(m => {
+        html += `<tr><td>${escHtml(m.display_name)}</td>`;
+        let present = 0, absent = 0;
+        dates.forEach(d => {
+          const key = `${m.user_id}_${d}`;
+          const rec = records[key];
+          if (rec && rec.status === 'present') {
+            html += '<td class="present"><i class="fas fa-circle" style="font-size:8px;"></i></td>';
+            present++;
+          } else {
+            html += '<td class="absent">-</td>';
+            absent++;
+          }
+        });
+        html += `<td class="member-stats">${present}</td><td class="member-stats">${absent}</td></tr>`;
+      });
+      html += '</tbody>';
+      document.getElementById('attendanceTable').innerHTML = html;
+    }
+
+    async function loadToday() {
+      const res = await fetch(`/api/attendance/${classId}/today`);
+      const data = await res.json();
+      if (!data.success) return;
+
+      const el = document.getElementById('todayList');
+      if (data.records.length === 0) {
+        el.innerHTML = '<div style="text-align:center;padding:24px;color:#9ca3af;">오늘 출석한 학생이 없습니다.</div>';
+        return;
+      }
+
+      el.innerHTML = data.records.map(r =>
+        `<div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid #f3f4f6;">
+          <span style="font-size:14px;font-weight:500;">${escHtml(r.display_name)}</span>
+          <span style="font-size:12px;color:#6B7280;">${r.checked_at ? r.checked_at.slice(11,16) : ''}</span>
+          ${r.comment ? `<span style="font-size:12px;color:#374151;background:#f3f4f6;padding:2px 8px;border-radius:4px;">${escHtml(r.comment)}</span>` : ''}
+        </div>`
+      ).join('');
+    }
+
+    function exportCSV() {
+      const table = document.getElementById('attendanceTable');
+      if (!table.rows.length) return;
+      let csv = '\uFEFF'; // BOM for Excel
+      for (const row of table.rows) {
+        const cells = [];
+        for (const cell of row.cells) {
+          cells.push('"' + cell.textContent.replace(/"/g, '""') + '"');
+        }
+        csv += cells.join(',') + '\n';
+      }
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `출석부_${new Date().toISOString().slice(0,10)}.csv`;
+      a.click();
+    }
+
+    // ===== 감정 타임라인 =====
+    async function loadEmotionTimeline() {
+      try {
+        const res = await fetch(`/api/attendance/${classId}/emotion-timeline`);
+        const data = await res.json();
+        if (!data.success) return;
+
+        const timeline = data.timeline || [];
+        if (timeline.length === 0) {
+          document.getElementById('emotionTimeline').innerHTML = '<div style="text-align:center;padding:20px;color:#9ca3af;">감정 기록이 없습니다. 출석 시 감정을 선택해보세요!</div>';
+          return;
+        }
+
+        // 달력 형태로 표시
+        let html = '<div style="display:flex;justify-content:space-around;margin-bottom:8px;font-size:11px;color:#9ca3af;"><span>일</span><span>월</span><span>화</span><span>수</span><span>목</span><span>금</span><span>토</span></div>';
+        html += '<div class="emotion-calendar">';
+        timeline.slice(-28).forEach(d => {
+          const emoji = EMOTION_MAP[d.emotion] || '';
+          const dt = new Date(d.date);
+          const isToday = d.date === new Date().toISOString().slice(0,10);
+          html += `<div class="emotion-day ${isToday ? 'today' : ''}" title="${d.date}: ${d.emotion || '없음'}${d.emotion_reason ? ' - ' + d.emotion_reason : ''}">
+            <div class="day-num">${dt.getDate()}</div>
+            <div class="day-emoji">${emoji || (d.checked_in ? '✅' : '')}</div>
+          </div>`;
+        });
+        html += '</div>';
+
+        // 감정 분포
+        const counts = {};
+        timeline.filter(d => d.emotion).forEach(d => { counts[d.emotion] = (counts[d.emotion] || 0) + 1; });
+        if (Object.keys(counts).length > 0) {
+          const total = Object.values(counts).reduce((a, b) => a + b, 0);
+          html += '<div style="margin-top:20px;"><h4 style="font-size:14px;margin-bottom:10px;">감정 분포</h4>';
+          for (const [emotion, count] of Object.entries(counts).sort((a, b) => b[1] - a[1])) {
+            const pct = Math.round(count / total * 100);
+            html += `<div style="margin-bottom:6px;display:flex;align-items:center;gap:8px;">
+              <span style="font-size:20px;">${EMOTION_MAP[emotion] || emotion}</span>
+              <div style="flex:1;background:#e5e7eb;border-radius:4px;height:8px;overflow:hidden;">
+                <div style="background:#2563eb;height:100%;width:${pct}%;border-radius:4px;"></div>
+              </div>
+              <span style="font-size:12px;color:#6B7280;min-width:40px;">${count}회 (${pct}%)</span>
+            </div>`;
+          }
+          html += '</div>';
+        }
+        document.getElementById('emotionTimeline').innerHTML = html;
+      } catch (e) { console.error('emotion timeline error:', e); }
+
+      // 회고 기록 로드
+      loadReflections();
+    }
+
+    async function saveReflection() {
+      const type = document.getElementById('reflectionType').value;
+      const content = document.getElementById('reflectionContent').value.trim();
+      if (!content) return alert('회고 내용을 입력하세요.');
+      try {
+        const res = await fetch(`/api/attendance/${classId}/emotion-reflection`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type, content })
+        });
+        const data = await res.json();
+        if (data.success) {
+          document.getElementById('reflectionContent').value = '';
+          loadReflections();
+        } else alert(data.message);
+      } catch (e) { alert('저장 중 오류가 발생했습니다.'); }
+    }
+
+    async function loadReflections() {
+      try {
+        const res = await fetch(`/api/attendance/${classId}/emotion-reflections`);
+        const data = await res.json();
+        const list = document.getElementById('reflectionList');
+        if (!data.success || !data.reflections || data.reflections.length === 0) {
+          list.innerHTML = '<div style="font-size:13px;color:#9ca3af;">아직 회고 기록이 없습니다.</div>';
+          return;
+        }
+        list.innerHTML = data.reflections.map(r => `
+          <div style="padding:12px;background:#f9fafb;border-radius:8px;margin-bottom:8px;">
+            <div style="font-size:11px;color:#6B7280;margin-bottom:4px;">
+              <span style="background:#ede9fe;color:#7c3aed;padding:2px 8px;border-radius:4px;font-weight:600;">${r.type === 'weekly' ? '주간' : '월간'}</span>
+              ${r.created_at ? r.created_at.slice(0, 10) : ''}
+            </div>
+            <div style="font-size:13px;line-height:1.6;">${escHtml(r.content)}</div>
+            ${r.feedback ? `<div style="margin-top:8px;padding:8px 12px;background:#dcfce7;border-radius:6px;font-size:12px;"><i class="fas fa-comment" style="color:#16a34a;margin-right:4px;"></i>${escHtml(r.feedback)}</div>` : ''}
+          </div>
+        `).join('');
+      } catch (e) {}
+    }
+
+    // ===== 교사: 감정 현황 =====
+    async function loadEmotionStats() {
+      try {
+        const res = await fetch(`/api/attendance/${classId}/emotion-stats`);
+        const data = await res.json();
+        if (!data.success) return;
+
+        const stats = data.stats || {};
+        const distribution = stats.distribution || {};
+        const total = Object.values(distribution).reduce((a, b) => a + b, 0);
+
+        let html = '<div style="margin-bottom:20px;">';
+        html += '<h4 style="font-size:14px;margin-bottom:12px;">오늘의 감정 분포</h4>';
+        if (total === 0) {
+          html += '<div style="color:#9ca3af;font-size:13px;">오늘 감정 기록이 없습니다.</div>';
+        } else {
+          for (const [emotion, count] of Object.entries(distribution).sort((a, b) => b[1] - a[1])) {
+            const pct = Math.round(count / total * 100);
+            html += `<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+              <span style="font-size:24px;">${EMOTION_MAP[emotion] || emotion}</span>
+              <div style="flex:1;background:#e5e7eb;border-radius:4px;height:12px;overflow:hidden;">
+                <div style="background:${emotion === 'sad' || emotion === 'angry' ? '#ef4444' : '#10b981'};height:100%;width:${pct}%;border-radius:4px;"></div>
+              </div>
+              <span style="font-size:13px;font-weight:600;min-width:60px;">${count}명 (${pct}%)</span>
+            </div>`;
+          }
+        }
+        html += '</div>';
+        document.getElementById('emotionStatsArea').innerHTML = html;
+
+        // 학생별 감정 목록 (피드백용)
+        const students = stats.students || [];
+        if (students.length === 0) {
+          document.getElementById('emotionStudentList').innerHTML = '<div style="color:#9ca3af;font-size:13px;">데이터가 없습니다.</div>';
+          return;
+        }
+        document.getElementById('emotionStudentList').innerHTML = students.map(s => `
+          <div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid #f3f4f6;">
+            <span style="font-size:20px;">${EMOTION_MAP[s.emotion] || '—'}</span>
+            <div style="flex:1;">
+              <div style="font-size:14px;font-weight:500;">${escHtml(s.display_name)}</div>
+              ${s.emotion_reason ? `<div style="font-size:12px;color:#6B7280;">${escHtml(s.emotion_reason)}</div>` : ''}
+            </div>
+            <button class="btn btn-outline" style="font-size:11px;padding:4px 10px;" onclick="sendEmotionFeedback(${s.user_id}, '${escHtml(s.display_name)}')"><i class="fas fa-comment"></i> 피드백</button>
+          </div>
+        `).join('');
+      } catch (e) { console.error('emotion stats error:', e); }
+    }
+
+    async function sendEmotionFeedback(studentId, studentName) {
+      const msg = prompt(`${studentName}에게 보낼 피드백:`);
+      if (!msg) return;
+      try {
+        const res = await fetch(`/api/attendance/${classId}/emotion-feedback`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ student_id: studentId, feedback: msg })
+        });
+        const data = await res.json();
+        if (data.success) alert('피드백을 보냈습니다.');
+        else alert(data.message);
+      } catch (e) { alert('오류가 발생했습니다.'); }
+    }
+
+    function escHtml(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+    window.addEventListener('dacheim:user-loaded', async (e) => {
+      currentUser = e.detail;
+      document.getElementById('mainContent').style.display = 'block';
+
+      // 역할 확인
+      const classRes = await fetch(`/api/class/${classId}`);
+      const classData = await classRes.json();
+      if (classData.success) {
+        myRole = classData.myRole;
+        if (myRole === 'owner' || currentUser.role === 'admin') {
+          document.querySelectorAll('.teacher-only').forEach(el => el.style.display = '');
+          // 교사/관리자: 기본 탭을 '출석 관리'로 전환
+          document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+          document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+          const teacherBtn = document.querySelector('.tab-btn[data-tab="teacher"]');
+          if (teacherBtn) { teacherBtn.classList.add('active'); }
+          const teacherTab = document.getElementById('tab-teacher');
+          if (teacherTab) { teacherTab.classList.add('active'); }
+        }
+      }
+
+      // 날짜 기본값
+      const today = new Date().toISOString().slice(0, 10);
+      const monthStart = today.slice(0, 8) + '01';
+      document.getElementById('filterEnd').value = today;
+      document.getElementById('filterStart').value = monthStart;
+
+      // 교사면 출석 관리 데이터 로드, 학생이면 출석하기 로드
+      if (myRole === 'owner' || (currentUser && currentUser.role === 'admin')) {
+        loadTable();
+        loadToday();
+      }
+      loadStatus();
+    });
+  </script>
+</body>
+</html>

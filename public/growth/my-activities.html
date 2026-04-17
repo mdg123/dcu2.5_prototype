@@ -1,0 +1,542 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>다채움 - 나의 활동 기록</title>
+  <link rel="stylesheet" href="/css/common-nav.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <style>
+    :root {
+      --primary: #2563eb; --primary-light: #dbeafe; --primary-dark: #1d4ed8;
+      --secondary: #10b981; --secondary-light: #d1fae5;
+      --warning: #f59e0b; --warning-light: #fef3c7;
+      --danger: #ef4444; --danger-light: #fee2e2;
+      --purple: #8b5cf6; --purple-light: #ede9fe;
+      --gray-50: #f9fafb; --gray-100: #f3f4f6; --gray-200: #e5e7eb; --gray-300: #d1d5db;
+      --gray-400: #9ca3af; --gray-500: #6b7280; --gray-600: #4b5563; --gray-700: #374151; --gray-800: #1f2937;
+      --shadow-sm: 0 1px 3px rgba(0,0,0,.08); --shadow-md: 0 4px 6px -1px rgba(0,0,0,.1);
+      --radius-md: 10px; --radius-lg: 16px;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Pretendard','Noto Sans KR',system-ui,sans-serif; background: var(--gray-100); color: var(--gray-800); }
+
+    .app-layout { display: flex; min-height: calc(100vh - 60px); }
+    .sidebar { width: 220px; background: #fff; border-right: 1px solid var(--gray-200); padding: 20px 0; flex-shrink: 0; }
+    .sidebar-title { padding: 0 20px 16px; font-size: 15px; font-weight: 700; color: var(--gray-800); display: flex; align-items: center; gap: 8px; }
+    .sidebar-menu { list-style: none; }
+    .sidebar-menu li { padding: 10px 20px; font-size: 14px; cursor: pointer; display: flex; align-items: center; gap: 10px; color: var(--gray-600); transition: all .15s; }
+    .sidebar-menu li:hover { background: var(--gray-50); }
+    .sidebar-menu li.active { background: var(--primary-light); color: var(--primary); font-weight: 600; border-right: 3px solid var(--primary); }
+    .sidebar-menu li i { width: 18px; text-align: center; }
+    .sidebar-menu li a { text-decoration: none; color: inherit; display: flex; align-items: center; gap: 10px; width: 100%; }
+    .main-content { flex: 1; padding: 24px; max-width: 1200px; }
+
+    .page-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+    .page-title { font-size: 20px; font-weight: 700; display: flex; align-items: center; gap: 10px; }
+
+    .tabs { display: flex; gap: 4px; margin-bottom: 20px; }
+    .tab { padding: 10px 20px; border: 1.5px solid var(--gray-200); background: #fff; border-radius: 20px; font-size: 14px; font-weight: 500; cursor: pointer; transition: all .2s; color: var(--gray-600); }
+    .tab:hover { background: var(--gray-50); }
+    .tab.active { background: var(--primary); color: #fff; border-color: var(--primary); }
+
+    .section { display: none; }
+    .section.active { display: block; }
+
+    .card { background: #fff; border-radius: var(--radius-lg); padding: 24px; box-shadow: var(--shadow-sm); margin-bottom: 16px; }
+    .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+    .card-title { font-size: 16px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+
+    .btn { padding: 8px 16px; border: none; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit; transition: all .2s; display: inline-flex; align-items: center; gap: 6px; }
+    .btn-primary { background: var(--primary); color: #fff; }
+    .btn-primary:hover { background: var(--primary-dark); }
+    .btn-sm { padding: 6px 12px; font-size: 12px; }
+    .btn-outline { background: #fff; color: var(--gray-700); border: 1.5px solid var(--gray-300); }
+    .btn-outline:hover { background: var(--gray-50); }
+    .btn-danger { background: var(--danger); color: #fff; }
+    .btn-danger:hover { background: #dc2626; }
+
+    .form-group { margin-bottom: 14px; }
+    .form-group label { font-size: 13px; font-weight: 600; color: var(--gray-700); display: block; margin-bottom: 4px; }
+    .form-group input, .form-group select, .form-group textarea {
+      width: 100%; padding: 9px 12px; border: 1.5px solid var(--gray-300); border-radius: 8px;
+      font-size: 13px; font-family: inherit; background: #fff;
+    }
+    .form-group input:focus, .form-group select:focus, .form-group textarea:focus { outline: none; border-color: var(--primary); }
+    .form-group textarea { min-height: 80px; resize: vertical; }
+    .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .form-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; }
+
+    .rating-stars { display: flex; gap: 4px; cursor: pointer; }
+    .rating-stars .star { font-size: 20px; color: var(--gray-300); transition: color .15s; }
+    .rating-stars .star.filled { color: #f59e0b; }
+
+    .item-list { display: flex; flex-direction: column; gap: 10px; }
+    .item-card { display: flex; gap: 14px; padding: 14px; border: 1px solid var(--gray-200); border-radius: var(--radius-md); transition: all .15s; align-items: flex-start; }
+    .item-card:hover { background: var(--gray-50); box-shadow: 0 2px 8px rgba(0,0,0,.04); }
+    .item-icon { width: 40px; height: 40px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 18px; flex-shrink: 0; }
+    .item-body { flex: 1; min-width: 0; }
+    .item-title { font-size: 14px; font-weight: 600; color: var(--gray-800); margin-bottom: 2px; }
+    .item-meta { font-size: 12px; color: var(--gray-500); display: flex; gap: 12px; flex-wrap: wrap; }
+    .item-actions { display: flex; gap: 6px; flex-shrink: 0; }
+    .item-review { font-size: 13px; color: var(--gray-600); margin-top: 6px; line-height: 1.5; }
+
+    .empty-state { text-align: center; padding: 40px 20px; color: var(--gray-400); }
+    .empty-state i { font-size: 36px; margin-bottom: 10px; display: block; }
+
+    .stats-row { display: flex; gap: 16px; margin-bottom: 20px; }
+    .stat-card { flex: 1; background: #fff; border-radius: var(--radius-md); padding: 16px; box-shadow: var(--shadow-sm); text-align: center; }
+    .stat-value { font-size: 24px; font-weight: 700; }
+    .stat-label { font-size: 12px; color: var(--gray-500); margin-top: 4px; }
+
+    .modal-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,.4); z-index: 1000; align-items: center; justify-content: center; }
+    .modal-overlay.open { display: flex; }
+    .modal { background: #fff; border-radius: var(--radius-lg); padding: 24px; max-width: 520px; width: 90%; max-height: 80vh; overflow-y: auto; }
+    .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+    .modal-header h3 { font-size: 17px; font-weight: 700; }
+    .modal-close { background: none; border: none; font-size: 18px; cursor: pointer; color: var(--gray-400); padding: 4px; }
+
+    .tag { display: inline-block; padding: 3px 10px; border-radius: 12px; font-size: 11px; font-weight: 600; }
+
+    @media (max-width: 768px) {
+      .app-layout { flex-direction: column; }
+      .sidebar { width: 100%; border-right: none; border-bottom: 1px solid var(--gray-200); padding: 10px 0; }
+      .sidebar-menu { display: flex; overflow-x: auto; }
+      .sidebar-menu li { white-space: nowrap; }
+      .main-content { padding: 16px; }
+      .form-row { grid-template-columns: 1fr; }
+      .stats-row { flex-wrap: wrap; }
+      .stat-card { min-width: 120px; }
+    }
+  </style>
+</head>
+<body>
+<div class="app-layout">
+  <aside class="sidebar">
+    <div class="sidebar-title"><i class="fas fa-chart-line"></i> 성장기록</div>
+    <ul class="sidebar-menu" id="sidebarMenu">
+      <li><a href="/growth/class-dashboard.html"><i class="fas fa-tachometer-alt"></i> 학습분석 대시보드</a></li>
+      <li><a href="/growth/student-report.html"><i class="fas fa-user-graduate"></i> 학생 성장 리포트</a></li>
+      <li><a href="/growth/portfolio.html"><i class="fas fa-folder-open"></i> 학생 포트폴리오</a></li>
+      <li class="active"><a href="/growth/my-activities.html"><i class="fas fa-pen-fancy"></i> 나의 활동 기록</a></li>
+    </ul>
+  </aside>
+
+  <main class="main-content">
+    <div class="page-header">
+      <div class="page-title"><i class="fas fa-pen-fancy" style="color:var(--primary)"></i> 나의 활동 기록</div>
+    </div>
+
+    <div class="tabs">
+      <button class="tab active" onclick="switchSection('reading')"><i class="fas fa-book-open"></i> 독서 활동</button>
+      <button class="tab" onclick="switchSection('career')"><i class="fas fa-compass"></i> 진로 탐색</button>
+    </div>
+
+    <!-- 독서 활동 섹션 -->
+    <div class="section active" id="section-reading">
+      <div class="stats-row" id="readingStats"></div>
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title"><i class="fas fa-book" style="color:#f59e0b"></i> 독서 기록</div>
+          <button class="btn btn-primary btn-sm" onclick="openReadingForm()"><i class="fas fa-plus"></i> 새 독서 기록</button>
+        </div>
+        <div class="item-list" id="readingList"></div>
+      </div>
+    </div>
+
+    <!-- 진로 탐색 섹션 -->
+    <div class="section" id="section-career">
+      <div class="stats-row" id="careerStats"></div>
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title"><i class="fas fa-compass" style="color:#06b6d4"></i> 진로 탐색 기록</div>
+          <button class="btn btn-primary btn-sm" onclick="openCareerForm()"><i class="fas fa-plus"></i> 새 활동 기록</button>
+        </div>
+        <div class="item-list" id="careerList"></div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<!-- 독서 기록 모달 -->
+<div class="modal-overlay" id="readingModal">
+  <div class="modal">
+    <div class="modal-header">
+      <h3 id="readingModalTitle"><i class="fas fa-book"></i> 독서 기록 추가</h3>
+      <button class="modal-close" onclick="closeModal('readingModal')">&times;</button>
+    </div>
+    <form id="readingForm" onsubmit="return saveReading(event)">
+      <input type="hidden" id="readingId">
+      <div class="form-group">
+        <label>책 제목 <span style="color:var(--danger)">*</span></label>
+        <input type="text" id="bookTitle" required placeholder="읽은 책의 제목을 입력하세요">
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>저자</label>
+          <input type="text" id="bookAuthor" placeholder="저자명">
+        </div>
+        <div class="form-group">
+          <label>읽은 날짜</label>
+          <input type="date" id="readDate">
+        </div>
+      </div>
+      <div class="form-group">
+        <label>평점</label>
+        <div class="rating-stars" id="ratingStars">
+          <span class="star" data-v="1">★</span>
+          <span class="star" data-v="2">★</span>
+          <span class="star" data-v="3">★</span>
+          <span class="star" data-v="4">★</span>
+          <span class="star" data-v="5">★</span>
+        </div>
+        <input type="hidden" id="bookRating" value="0">
+      </div>
+      <div class="form-group">
+        <label>독서 감상문</label>
+        <textarea id="bookReview" placeholder="책을 읽고 느낀 점을 써보세요..."></textarea>
+      </div>
+      <div class="form-actions">
+        <button type="button" class="btn btn-outline" onclick="closeModal('readingModal')">취소</button>
+        <button type="submit" class="btn btn-primary"><i class="fas fa-save"></i> 저장</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- 진로 기록 모달 -->
+<div class="modal-overlay" id="careerModal">
+  <div class="modal">
+    <div class="modal-header">
+      <h3 id="careerModalTitle"><i class="fas fa-compass"></i> 진로 활동 기록</h3>
+      <button class="modal-close" onclick="closeModal('careerModal')">&times;</button>
+    </div>
+    <form id="careerForm" onsubmit="return saveCareer(event)">
+      <input type="hidden" id="careerId">
+      <div class="form-group">
+        <label>활동 제목 <span style="color:var(--danger)">*</span></label>
+        <input type="text" id="careerTitle" required placeholder="어떤 활동을 했나요?">
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>활동 유형</label>
+          <select id="careerType">
+            <option value="직업탐구">직업탐구</option>
+            <option value="체험활동">체험활동</option>
+            <option value="진로상담">진로상담</option>
+            <option value="자기이해">자기이해</option>
+            <option value="기타">기타</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>활동 날짜</label>
+          <input type="date" id="careerDate">
+        </div>
+      </div>
+      <div class="form-group">
+        <label>관심 분야</label>
+        <input type="text" id="careerArea" placeholder="예: 과학/연구, IT/프로그래밍, 예술 등">
+      </div>
+      <div class="form-group">
+        <label>활동 내용</label>
+        <textarea id="careerDesc" placeholder="어떤 활동을 했는지 설명해주세요..."></textarea>
+      </div>
+      <div class="form-group">
+        <label>느낀 점</label>
+        <textarea id="careerReflection" placeholder="활동을 하고 느낀 점을 써보세요..."></textarea>
+      </div>
+      <div class="form-actions">
+        <button type="button" class="btn btn-outline" onclick="closeModal('careerModal')">취소</button>
+        <button type="submit" class="btn btn-primary"><i class="fas fa-save"></i> 저장</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script src="/js/common-nav.js"></script>
+<script>
+(function() {
+  'use strict';
+  let currentUser = null;
+
+  async function fetchWithAuth(url, opts) {
+    const res = await fetch(url, opts);
+    if (res.status === 401) window.location.href = '/login.html';
+    return res;
+  }
+
+  function initWithUser(user) {
+    if (currentUser) return;
+    currentUser = user;
+    // 사이드바: 교사는 대시보드/리포트, 학생은 나의 활동 강조
+    if (currentUser.role === 'teacher' || currentUser.role === 'admin') {
+      // 교사도 이 페이지를 볼 수 있지만 주로 학생용
+    }
+    loadReadingLogs();
+  }
+
+  window.addEventListener('dacheim:user-loaded', (e) => initWithUser(e.detail));
+  if (window.dacheumUser) initWithUser(window.dacheumUser);
+
+  // ===== 탭 전환 =====
+  window.switchSection = function(section) {
+    document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.getElementById('section-' + section).classList.add('active');
+    event.target.closest('.tab').classList.add('active');
+    if (section === 'reading') loadReadingLogs();
+    else loadCareerLogs();
+  };
+
+  // ===== 독서 활동 =====
+  async function loadReadingLogs() {
+    try {
+      const res = await fetchWithAuth('/api/growth/reading');
+      const data = await res.json();
+      if (!data.success) return;
+      renderReadingStats(data);
+      renderReadingList(data.items || []);
+    } catch (err) { console.error('독서 기록 로드 실패:', err); }
+  }
+
+  function renderReadingStats(data) {
+    const items = data.items || [];
+    const total = items.length;
+    const avgRating = total > 0 ? (items.reduce((s, i) => s + (i.rating || 0), 0) / total).toFixed(1) : '-';
+    const withReview = items.filter(i => i.review).length;
+    document.getElementById('readingStats').innerHTML = `
+      <div class="stat-card"><div class="stat-value" style="color:#f59e0b">${total}</div><div class="stat-label">읽은 책 (권)</div></div>
+      <div class="stat-card"><div class="stat-value" style="color:#f59e0b">⭐ ${avgRating}</div><div class="stat-label">평균 평점</div></div>
+      <div class="stat-card"><div class="stat-value" style="color:var(--secondary)">${withReview}</div><div class="stat-label">감상문 작성</div></div>
+    `;
+  }
+
+  function renderReadingList(items) {
+    const list = document.getElementById('readingList');
+    if (!items.length) {
+      list.innerHTML = '<div class="empty-state"><i class="fas fa-book-open"></i><p>아직 독서 기록이 없습니다.<br>위의 "새 독서 기록" 버튼을 눌러 시작해보세요!</p></div>';
+      return;
+    }
+    list.innerHTML = items.map(item => {
+      const stars = item.rating ? '⭐'.repeat(item.rating) : '';
+      const date = item.read_date ? new Date(item.read_date).toLocaleDateString('ko-KR') : '';
+      return `<div class="item-card">
+        <div class="item-icon" style="background:var(--warning-light);color:#b45309;">📖</div>
+        <div class="item-body">
+          <div class="item-title">${escapeHtml(item.book_title)}</div>
+          <div class="item-meta">
+            ${item.author ? '<span><i class="fas fa-user"></i> ' + escapeHtml(item.author) + '</span>' : ''}
+            ${date ? '<span><i class="fas fa-calendar"></i> ' + date + '</span>' : ''}
+            ${stars ? '<span>' + stars + '</span>' : ''}
+          </div>
+          ${item.review ? '<div class="item-review">' + escapeHtml(item.review) + '</div>' : ''}
+        </div>
+        <div class="item-actions">
+          <button class="btn btn-outline btn-sm" onclick="editReading(${item.id})"><i class="fas fa-edit"></i></button>
+          <button class="btn btn-outline btn-sm" onclick="deleteReading(${item.id})" style="color:var(--danger);border-color:var(--danger-light);"><i class="fas fa-trash"></i></button>
+        </div>
+      </div>`;
+    }).join('');
+    // 수정/삭제를 위해 데이터 저장
+    window._readingItems = items;
+  }
+
+  window.openReadingForm = function(data) {
+    document.getElementById('readingId').value = data ? data.id : '';
+    document.getElementById('bookTitle').value = data ? data.book_title : '';
+    document.getElementById('bookAuthor').value = data ? (data.author || '') : '';
+    document.getElementById('readDate').value = data ? (data.read_date || '') : new Date().toISOString().slice(0, 10);
+    document.getElementById('bookRating').value = data ? (data.rating || 0) : 0;
+    document.getElementById('bookReview').value = data ? (data.review || '') : '';
+    document.getElementById('readingModalTitle').innerHTML = data
+      ? '<i class="fas fa-edit"></i> 독서 기록 수정'
+      : '<i class="fas fa-book"></i> 독서 기록 추가';
+    updateStars(data ? (data.rating || 0) : 0);
+    document.getElementById('readingModal').classList.add('open');
+  };
+
+  window.editReading = function(id) {
+    const item = (window._readingItems || []).find(i => i.id === id);
+    if (item) openReadingForm(item);
+  };
+
+  window.deleteReading = async function(id) {
+    if (!confirm('이 독서 기록을 삭제하시겠습니까?')) return;
+    try {
+      const res = await fetchWithAuth('/api/growth/reading/' + id, { method: 'DELETE' });
+      const data = await res.json();
+      if (data.success) loadReadingLogs();
+      else alert(data.message || '삭제 실패');
+    } catch (err) { alert('서버 오류'); }
+  };
+
+  window.saveReading = async function(e) {
+    e.preventDefault();
+    const id = document.getElementById('readingId').value;
+    const body = {
+      bookTitle: document.getElementById('bookTitle').value.trim(),
+      author: document.getElementById('bookAuthor').value.trim(),
+      readDate: document.getElementById('readDate').value,
+      rating: parseInt(document.getElementById('bookRating').value) || null,
+      review: document.getElementById('bookReview').value.trim()
+    };
+    if (!body.bookTitle) { alert('책 제목을 입력하세요.'); return false; }
+    try {
+      const url = id ? '/api/growth/reading/' + id : '/api/growth/reading';
+      const method = id ? 'PUT' : 'POST';
+      const res = await fetchWithAuth(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const data = await res.json();
+      if (data.success) {
+        closeModal('readingModal');
+        loadReadingLogs();
+      } else { alert(data.message || '저장 실패'); }
+    } catch (err) { alert('서버 오류'); }
+    return false;
+  };
+
+  // 별점
+  function updateStars(rating) {
+    document.querySelectorAll('#ratingStars .star').forEach(star => {
+      star.classList.toggle('filled', parseInt(star.dataset.v) <= rating);
+    });
+  }
+  document.querySelectorAll('#ratingStars .star').forEach(star => {
+    star.addEventListener('click', () => {
+      const v = parseInt(star.dataset.v);
+      document.getElementById('bookRating').value = v;
+      updateStars(v);
+    });
+  });
+
+  // ===== 진로 탐색 =====
+  async function loadCareerLogs() {
+    try {
+      const res = await fetchWithAuth('/api/growth/career');
+      const data = await res.json();
+      if (!data.success) return;
+      renderCareerStats(data);
+      renderCareerList(data.items || []);
+    } catch (err) { console.error('진로 기록 로드 실패:', err); }
+  }
+
+  function renderCareerStats(data) {
+    const items = data.items || [];
+    const total = items.length;
+    const types = new Set(items.map(i => i.activity_type)).size;
+    const areas = new Set(items.filter(i => i.interest_area).map(i => i.interest_area)).size;
+    document.getElementById('careerStats').innerHTML = `
+      <div class="stat-card"><div class="stat-value" style="color:#06b6d4">${total}</div><div class="stat-label">총 활동 수</div></div>
+      <div class="stat-card"><div class="stat-value" style="color:#06b6d4">${types}</div><div class="stat-label">활동 유형</div></div>
+      <div class="stat-card"><div class="stat-value" style="color:var(--purple)">${areas}</div><div class="stat-label">관심 분야</div></div>
+    `;
+  }
+
+  const typeColors = { '직업탐구': '#2563eb', '체험활동': '#10b981', '진로상담': '#8b5cf6', '자기이해': '#ec4899', '기타': '#6b7280' };
+  const typeIcons = { '직업탐구': '🔍', '체험활동': '🎯', '진로상담': '💬', '자기이해': '🪞', '기타': '📝' };
+
+  function renderCareerList(items) {
+    const list = document.getElementById('careerList');
+    if (!items.length) {
+      list.innerHTML = '<div class="empty-state"><i class="fas fa-compass"></i><p>아직 진로 탐색 기록이 없습니다.<br>위의 "새 활동 기록" 버튼을 눌러 시작해보세요!</p></div>';
+      return;
+    }
+    list.innerHTML = items.map(item => {
+      const color = typeColors[item.activity_type] || '#6b7280';
+      const icon = typeIcons[item.activity_type] || '📝';
+      const date = item.activity_date ? new Date(item.activity_date).toLocaleDateString('ko-KR') : '';
+      return `<div class="item-card">
+        <div class="item-icon" style="background:${color}15;color:${color};font-size:20px;">${icon}</div>
+        <div class="item-body">
+          <div class="item-title">${escapeHtml(item.title)}</div>
+          <div class="item-meta">
+            <span class="tag" style="background:${color}15;color:${color};">${item.activity_type}</span>
+            ${item.interest_area ? '<span><i class="fas fa-tag"></i> ' + escapeHtml(item.interest_area) + '</span>' : ''}
+            ${date ? '<span><i class="fas fa-calendar"></i> ' + date + '</span>' : ''}
+          </div>
+          ${item.description ? '<div class="item-review">' + escapeHtml(item.description) + '</div>' : ''}
+          ${item.reflection ? '<div class="item-review" style="color:var(--primary);"><i class="fas fa-lightbulb" style="margin-right:4px;"></i>' + escapeHtml(item.reflection) + '</div>' : ''}
+        </div>
+        <div class="item-actions">
+          <button class="btn btn-outline btn-sm" onclick="editCareer(${item.id})"><i class="fas fa-edit"></i></button>
+          <button class="btn btn-outline btn-sm" onclick="deleteCareer(${item.id})" style="color:var(--danger);border-color:var(--danger-light);"><i class="fas fa-trash"></i></button>
+        </div>
+      </div>`;
+    }).join('');
+    window._careerItems = items;
+  }
+
+  window.openCareerForm = function(data) {
+    document.getElementById('careerId').value = data ? data.id : '';
+    document.getElementById('careerTitle').value = data ? data.title : '';
+    document.getElementById('careerType').value = data ? (data.activity_type || '기타') : '직업탐구';
+    document.getElementById('careerDate').value = data ? (data.activity_date || '') : new Date().toISOString().slice(0, 10);
+    document.getElementById('careerArea').value = data ? (data.interest_area || '') : '';
+    document.getElementById('careerDesc').value = data ? (data.description || '') : '';
+    document.getElementById('careerReflection').value = data ? (data.reflection || '') : '';
+    document.getElementById('careerModalTitle').innerHTML = data
+      ? '<i class="fas fa-edit"></i> 진로 활동 수정'
+      : '<i class="fas fa-compass"></i> 진로 활동 기록';
+    document.getElementById('careerModal').classList.add('open');
+  };
+
+  window.editCareer = function(id) {
+    const item = (window._careerItems || []).find(i => i.id === id);
+    if (item) openCareerForm(item);
+  };
+
+  window.deleteCareer = async function(id) {
+    if (!confirm('이 진로 탐색 기록을 삭제하시겠습니까?')) return;
+    try {
+      const res = await fetchWithAuth('/api/growth/career/' + id, { method: 'DELETE' });
+      const data = await res.json();
+      if (data.success) loadCareerLogs();
+      else alert(data.message || '삭제 실패');
+    } catch (err) { alert('서버 오류'); }
+  };
+
+  window.saveCareer = async function(e) {
+    e.preventDefault();
+    const id = document.getElementById('careerId').value;
+    const body = {
+      title: document.getElementById('careerTitle').value.trim(),
+      activityType: document.getElementById('careerType').value,
+      activityDate: document.getElementById('careerDate').value,
+      interestArea: document.getElementById('careerArea').value.trim(),
+      description: document.getElementById('careerDesc').value.trim(),
+      reflection: document.getElementById('careerReflection').value.trim()
+    };
+    if (!body.title) { alert('활동 제목을 입력하세요.'); return false; }
+    try {
+      const url = id ? '/api/growth/career/' + id : '/api/growth/career';
+      const method = id ? 'PUT' : 'POST';
+      const res = await fetchWithAuth(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const data = await res.json();
+      if (data.success) {
+        closeModal('careerModal');
+        loadCareerLogs();
+      } else { alert(data.message || '저장 실패'); }
+    } catch (err) { alert('서버 오류'); }
+    return false;
+  };
+
+  // ===== 공통 =====
+  window.closeModal = function(id) {
+    document.getElementById(id).classList.remove('open');
+  };
+  // 모달 외부 클릭 닫기
+  document.querySelectorAll('.modal-overlay').forEach(overlay => {
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) overlay.classList.remove('open');
+    });
+  });
+
+  function escapeHtml(str) {
+    if (!str) return '';
+    const d = document.createElement('div');
+    d.textContent = str;
+    return d.innerHTML;
+  }
+})();
+</script>
+</body>
+</html>

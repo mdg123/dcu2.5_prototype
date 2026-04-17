@@ -1,0 +1,545 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>다채움 - 클래스별 학습분석</title>
+  <link rel="stylesheet" href="/css/common-nav.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    :root {
+      --primary: #2563eb; --primary-dark: #1d4ed8; --primary-light: #dbeafe; --primary-50: #eff6ff;
+      --secondary: #3b82f6; --secondary-light: #eff6ff;
+      --success: #10b981; --success-light: #d1fae5;
+      --warning: #f59e0b; --warning-light: #fef3c7;
+      --danger: #ef4444; --danger-light: #fee2e2;
+      --purple: #8b5cf6; --purple-light: #ede9fe;
+      --gray-50: #f9fafb; --gray-100: #f3f4f6; --gray-200: #e5e7eb; --gray-300: #d1d5db;
+      --gray-500: #6b7280; --gray-600: #4b5563; --gray-700: #374151; --gray-800: #1f2937;
+      --radius: 12px; --radius-sm: 8px; --radius-lg: 16px; --radius-full: 999px;
+      --shadow: 0 1px 3px rgba(0,0,0,0.08); --shadow-md: 0 4px 12px rgba(0,0,0,0.1);
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Pretendard','Noto Sans KR',system-ui,sans-serif; background: var(--gray-100); color: var(--gray-800); line-height: 1.6; }
+    .main-content { padding: 24px; max-width: 1800px; margin: 0 auto; }
+
+    /* 페이지 타이틀 */
+    .page-title { display: flex; align-items: center; gap: 10px; font-size: 24px; font-weight: 800; margin-bottom: 24px; }
+    .page-title::before { content: ''; width: 6px; height: 32px; background: linear-gradient(180deg, var(--primary) 0%, var(--purple) 100%); border-radius: var(--radius-full); }
+
+    /* 필터 영역 */
+    .filter-area { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px; margin-bottom: 24px; background: white; padding: 18px 24px; border-radius: var(--radius-lg); box-shadow: var(--shadow); }
+    .filter-group { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+    .filter-label { font-size: 14px; font-weight: 600; color: var(--gray-700); display: flex; align-items: center; gap: 6px; }
+    .filter-select { padding: 9px 14px; border: 1.5px solid var(--gray-200); border-radius: var(--radius-sm); font-size: 13px; font-family: inherit; outline: none; min-width: 160px; background: #fff; }
+    .btn { display: inline-flex; align-items: center; gap: 6px; padding: 9px 18px; border: none; border-radius: var(--radius-sm); font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit; transition: all 0.2s; }
+    .btn-primary { background: var(--primary); color: #fff; }
+    .btn-primary:hover { background: var(--primary-dark); }
+    .btn-secondary { background: var(--gray-100); color: var(--gray-700); }
+    .btn-secondary:hover { background: var(--gray-200); }
+    .btn-sm { padding: 6px 12px; font-size: 12px; }
+
+    /* AI 리포트 박스 */
+    .ai-report { background: linear-gradient(135deg, var(--primary-50), var(--primary-light)); border-radius: var(--radius-lg); padding: 24px; margin-bottom: 24px; border-left: 4px solid var(--primary); }
+    .ai-report-header { display: flex; align-items: center; gap: 16px; margin-bottom: 20px; }
+    .ai-icon { width: 48px; height: 48px; background: linear-gradient(135deg, #2563eb, #8b5cf6); border-radius: var(--radius); display: flex; align-items: center; justify-content: center; font-size: 24px; color: #fff; }
+    .ai-report-title { font-size: 18px; font-weight: 700; }
+    .ai-report-sub { font-size: 13px; color: var(--gray-600); }
+    .ai-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
+    .ai-card { background: #fff; border-radius: var(--radius-lg); padding: 20px; box-shadow: var(--shadow); }
+    .ai-card-title { font-weight: 600; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; font-size: 14px; }
+    .ai-card-body { font-size: 13px; color: var(--gray-700); line-height: 1.7; }
+    .ai-card-body strong { color: var(--gray-800); }
+    .highlight { background: var(--warning-light); padding: 2px 6px; border-radius: 4px; }
+
+    /* 대시보드 그리드 */
+    .dashboard-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 24px; }
+    .dash-card { background: #fff; border-radius: var(--radius-lg); padding: 22px; box-shadow: var(--shadow); text-align: center; cursor: pointer; transition: all 0.2s; }
+    .dash-card:hover { box-shadow: var(--shadow-md); transform: translateY(-2px); }
+    .dash-card .icon { width: 44px; height: 44px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 20px; color: #fff; margin: 0 auto 12px; }
+    .dash-card .value { font-size: 28px; font-weight: 700; }
+    .dash-card .label { font-size: 12px; color: var(--gray-500); margin-top: 4px; }
+    .dash-card .trend { font-size: 12px; margin-top: 4px; color: var(--gray-500); }
+
+    /* 탭 네비게이션 */
+    .tabs-header { display: flex; gap: 6px; margin-bottom: 24px; background: var(--gray-100); padding: 5px; border-radius: var(--radius); width: fit-content; }
+    .tab-btn { padding: 10px 20px; border: none; background: transparent; font-size: 14px; font-weight: 500; color: var(--gray-500); cursor: pointer; border-radius: var(--radius-sm); transition: all 0.2s; font-family: inherit; }
+    .tab-btn:hover { color: var(--gray-700); background: rgba(255,255,255,0.5); }
+    .tab-btn.active { background: var(--primary); color: #fff; box-shadow: 0 2px 4px rgba(37,99,235,0.3); }
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+
+    /* 섹션 박스 */
+    .section-box { background: #fff; border-radius: var(--radius-lg); padding: 24px; margin-bottom: 24px; box-shadow: var(--shadow); }
+    .section-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid var(--gray-200); }
+    .section-title { font-size: 16px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+    .section-title i { color: var(--primary); }
+
+    /* 인사이트 박스 */
+    .insight-box { background: var(--gray-50); border-radius: var(--radius); padding: 16px; margin-top: 16px; font-size: 13px; color: var(--gray-700); border-left: 3px solid var(--primary); line-height: 1.7; }
+    .insight-box strong { color: var(--gray-800); display: block; margin-bottom: 4px; }
+
+    /* 차트 */
+    .chart-container { position: relative; height: 280px; }
+    .chart-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+
+    /* 알림 아이템 */
+    .alert-item { display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-radius: 10px; margin-bottom: 8px; border-left: 4px solid; }
+    .alert-item.warning { background: #fffbeb; border-color: var(--warning); }
+    .alert-item.danger { background: #fef2f2; border-color: var(--danger); }
+    .alert-item.info { background: var(--primary-50); border-color: var(--primary); }
+    .alert-icon { width: 34px; height: 34px; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 14px; flex-shrink: 0; }
+
+    /* 학생 테이블 */
+    .data-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .data-table th { text-align: left; padding: 12px; background: var(--gray-50); border-bottom: 2px solid var(--gray-200); font-weight: 600; color: var(--gray-600); font-size: 12px; }
+    .data-table td { padding: 12px; border-bottom: 1px solid var(--gray-100); }
+    .data-table tr:hover { background: var(--primary-50); }
+    .student-avatar { width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 600; color: #fff; flex-shrink: 0; }
+    .progress-bar-bg { width: 100px; height: 8px; background: var(--gray-200); border-radius: 4px; overflow: hidden; display: inline-block; vertical-align: middle; }
+    .progress-bar-fill { height: 100%; border-radius: 4px; transition: width 0.4s; }
+
+    /* 요약 그리드 */
+    .summary-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 20px; }
+    .summary-item { padding: 16px; background: var(--gray-50); border-radius: 10px; text-align: center; }
+    .summary-item .sum-val { font-size: 22px; font-weight: 700; }
+    .summary-item .sum-lbl { font-size: 11px; color: var(--gray-500); margin-top: 2px; }
+
+    /* 커뮤니티 활동 그리드 */
+    .activity-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; }
+    .activity-card { background: var(--gray-50); border-radius: var(--radius-lg); padding: 16px; text-align: center; cursor: pointer; transition: all 0.2s; }
+    .activity-card:hover { background: var(--primary-50); transform: translateY(-2px); }
+    .activity-card .a-icon { font-size: 24px; margin-bottom: 4px; }
+    .activity-card .a-value { font-size: 20px; font-weight: 700; color: var(--gray-800); }
+    .activity-card .a-label { font-size: 11px; color: var(--gray-500); margin-top: 2px; }
+
+    /* 빈 상태 */
+    .empty-state { text-align: center; padding: 60px 20px; color: var(--gray-500); }
+    .empty-state i { font-size: 48px; margin-bottom: 12px; display: block; color: var(--gray-300); }
+    .empty-state h3 { font-size: 16px; font-weight: 600; margin-bottom: 6px; }
+    .empty-state p { font-size: 14px; }
+
+    /* 토스트 */
+    .toast-container { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); z-index: 20000; pointer-events: none; }
+    .toast { padding: 12px 24px; background: var(--gray-800); color: #fff; border-radius: var(--radius-sm); font-size: 14px; font-weight: 500; opacity: 0; transform: translateY(10px); transition: all 0.3s; pointer-events: auto; }
+    .toast.show { opacity: 1; transform: translateY(0); }
+
+    @media (max-width: 768px) {
+      .dashboard-grid { grid-template-columns: repeat(2, 1fr); }
+      .chart-grid { grid-template-columns: 1fr; }
+      .summary-grid { grid-template-columns: 1fr; }
+      .activity-grid { grid-template-columns: repeat(2, 1fr); }
+      .filter-area { flex-direction: column; align-items: stretch; }
+      .tabs-header { flex-wrap: wrap; width: 100%; }
+    }
+  </style>
+</head>
+<body>
+  <script src="/js/common-nav.js"></script>
+  <main class="main-content" id="mainContent" style="display:none;">
+    <h1 class="page-title">클래스별 학습분석</h1>
+
+    <!-- 필터 영역 -->
+    <div class="filter-area">
+      <div class="filter-group">
+        <span class="filter-label"><i class="fas fa-chalkboard"></i> 클래스:</span>
+        <select id="classSelect" class="filter-select" onchange="loadAnalytics()">
+          <option value="">클래스를 선택하세요</option>
+        </select>
+      </div>
+      <div class="filter-group">
+        <button class="btn btn-secondary" onclick="location.href='/class/index.html'"><i class="fas fa-arrow-left"></i> 클래스 목록</button>
+      </div>
+    </div>
+
+    <div id="analyticsContent">
+      <div class="section-box">
+        <div class="empty-state">
+          <i class="fas fa-chart-bar"></i>
+          <h3>클래스를 선택하세요</h3>
+          <p>분석할 클래스를 위에서 선택하면 학습분석 결과가 표시됩니다.</p>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- 토스트 -->
+  <div class="toast-container">
+    <div id="toast" class="toast"></div>
+  </div>
+
+  <script>
+    let dailyChartInstance = null, typeChartInstance = null, studentBarChart = null;
+    let lessonDonut = null, homeworkDonut = null, evalDonut = null;
+
+    function escHtml(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+    async function loadClasses() {
+      try {
+        const res = await fetch('/api/class/my').then(r => r.json());
+        const sel = document.getElementById('classSelect');
+        const classes = (res.classes || []).filter(c => c.my_role === 'owner');
+        classes.forEach(c => {
+          const opt = document.createElement('option');
+          opt.value = c.id;
+          opt.textContent = c.name;
+          sel.appendChild(opt);
+        });
+        const params = new URLSearchParams(location.search);
+        const urlClassId = params.get('classId') || params.get('id');
+        if (urlClassId) {
+          sel.value = urlClassId;
+        } else if (classes.length > 0) {
+          sel.value = classes[0].id;
+        }
+        if (sel.value) loadAnalytics();
+      } catch(err) {
+        console.error('클래스 목록 로드 실패:', err);
+      }
+    }
+
+    async function loadAnalytics() {
+      const classId = document.getElementById('classSelect').value;
+      if (!classId) return;
+      const container = document.getElementById('analyticsContent');
+
+      try {
+        const [lrsRes, growthRes] = await Promise.all([
+          fetch(`/api/lrs/class/${classId}`).then(r => r.json()),
+          fetch(`/api/growth/class/${classId}`).then(r => r.json())
+        ]);
+
+        if (!lrsRes.success || !growthRes.success) {
+          container.innerHTML = '<div class="section-box"><div class="empty-state"><i class="fas fa-lock"></i><h3>접근 권한이 없습니다</h3></div></div>';
+          return;
+        }
+
+        const stats = lrsRes.stats;
+        const students = growthRes.overview || [];
+        const totalActivity = students.reduce((a, s) => a + s.activityCount, 0);
+        const totalTime = students.reduce((a, s) => a + s.totalTimeMinutes, 0);
+        const totalPortfolio = students.reduce((a, s) => a + s.portfolioCount, 0);
+        const avgActivity = students.length ? Math.round(totalActivity / students.length) : 0;
+        const avgTime = students.length ? Math.round(totalTime / students.length) : 0;
+
+        const highActivity = avgActivity > 0 ? students.filter(s => s.activityCount >= avgActivity * 1.5) : [];
+        const lowActivity = avgActivity > 0 ? students.filter(s => s.activityCount < avgActivity * 0.5) : [];
+        const noActivity = totalActivity > 0 ? students.filter(s => s.activityCount === 0) : [];
+
+        // 학습 이수율/제출률/풀이율 — 실제 활동 데이터 기반 산출
+        const activeStudents = students.filter(s => s.activityCount > 0).length;
+        const lessonRate = students.length ? Math.round(activeStudents / students.length * 100) : 0;
+        const hwRate = students.length && avgActivity > 0 ? Math.min(100, Math.round((avgActivity / Math.max(avgActivity, 10)) * 100)) : 0;
+        const evalRate = students.length && totalPortfolio > 0 ? Math.min(100, Math.round(totalPortfolio / students.length * 20)) : 0;
+
+        container.innerHTML = `
+          <!-- AI 학습분석 리포트 -->
+          <div class="ai-report">
+            <div class="ai-report-header">
+              <div class="ai-icon"><i class="fas fa-robot"></i></div>
+              <div>
+                <div class="ai-report-title">AI 학습분석 리포트</div>
+                <div class="ai-report-sub">클래스 활동을 종합 분석한 결과입니다</div>
+              </div>
+            </div>
+            <div class="ai-cards">
+              <div class="ai-card">
+                <div class="ai-card-title">🔗 학습 참여도 분석</div>
+                <div class="ai-card-body">
+                  <p>전체 <strong>${students.length}명</strong> 학생 중 <strong style="color:var(--success)">${highActivity.length}명(${students.length ? Math.round(highActivity.length/students.length*100) : 0}%)</strong>이 우수한 학습 참여도를 보입니다.</p>
+                  ${lowActivity.length ? `<p style="margin-top:8px;color:var(--danger);">⚠️ <strong>${lowActivity.length}명</strong>의 학생에게 추가 독려가 필요합니다.</p>` : '<p style="margin-top:8px;color:var(--success);">✅ 전반적인 학습 참여도가 양호합니다.</p>'}
+                </div>
+              </div>
+              <div class="ai-card">
+                <div class="ai-card-title">⏱️ 학습시간 분석</div>
+                <div class="ai-card-body">
+                  <p>평균 학습시간: <strong>${avgTime}분/인</strong></p>
+                  <p style="margin-top:8px;">총 학습시간: <strong>${totalTime}분</strong></p>
+                  <p style="margin-top:8px;">포트폴리오: <strong>${totalPortfolio}개</strong> 축적</p>
+                </div>
+              </div>
+              <div class="ai-card">
+                <div class="ai-card-title">⚠️ 관심 필요 학생</div>
+                <div class="ai-card-body">
+                  ${noActivity.length ? noActivity.slice(0,2).map(s => `<p><strong>${escHtml(s.display_name)}</strong> 학생 — 활동 기록 없음</p>`).join('') : ''}
+                  ${lowActivity.filter(s => s.activityCount > 0).length ? lowActivity.filter(s => s.activityCount > 0).slice(0,2).map(s => `<p><strong>${escHtml(s.display_name)}</strong> — 활동 ${s.activityCount}회 (평균 대비 <span class="highlight">부족</span>)</p>`).join('') : ''}
+                  ${!noActivity.length && !lowActivity.length ? '<p style="color:var(--success);">✅ 관심 필요 학생이 없습니다.</p>' : ''}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 대시보드 요약 -->
+          <div class="dashboard-grid">
+            <div class="dash-card">
+              <div class="icon" style="background:var(--primary);"><i class="fas fa-users"></i></div>
+              <div class="value">${students.length}</div>
+              <div class="label">학생 수</div>
+            </div>
+            <div class="dash-card">
+              <div class="icon" style="background:var(--success);"><i class="fas fa-bolt"></i></div>
+              <div class="value">${totalActivity}</div>
+              <div class="label">총 활동</div>
+              <div class="trend">평균 ${avgActivity}회/인</div>
+            </div>
+            <div class="dash-card">
+              <div class="icon" style="background:var(--warning);"><i class="fas fa-clock"></i></div>
+              <div class="value">${totalTime}<span style="font-size:14px">분</span></div>
+              <div class="label">총 학습시간</div>
+              <div class="trend">평균 ${avgTime}분/인</div>
+            </div>
+            <div class="dash-card">
+              <div class="icon" style="background:var(--purple);"><i class="fas fa-folder-open"></i></div>
+              <div class="value">${totalPortfolio}</div>
+              <div class="label">포트폴리오</div>
+            </div>
+          </div>
+
+          <!-- 탭 네비게이션 -->
+          <div class="tabs-header">
+            <button class="tab-btn active" onclick="switchAnalyticsTab(this,'overview')">📊 종합 분석</button>
+            <button class="tab-btn" onclick="switchAnalyticsTab(this,'students')">👥 학생별 분석</button>
+            <button class="tab-btn" onclick="switchAnalyticsTab(this,'alerts')">⚠️ 관심 학생</button>
+          </div>
+
+          <!-- 종합 분석 탭 -->
+          <div id="tabOverview" class="tab-content active">
+            <div class="summary-grid">
+              <div class="summary-item">
+                <div class="sum-val" style="color:var(--success)">${highActivity.length}</div>
+                <div class="sum-lbl">우수 (평균 150%↑)</div>
+              </div>
+              <div class="summary-item">
+                <div class="sum-val" style="color:var(--primary)">${students.length - highActivity.length - lowActivity.length}</div>
+                <div class="sum-lbl">보통</div>
+              </div>
+              <div class="summary-item">
+                <div class="sum-val" style="color:var(--danger)">${lowActivity.length}</div>
+                <div class="sum-lbl">관심 필요 (평균 50%↓)</div>
+              </div>
+            </div>
+
+            <div class="chart-grid">
+              <div class="section-box">
+                <div class="section-header">
+                  <h3 class="section-title"><i class="fas fa-chart-line"></i> 일별 학습 활동 추이</h3>
+                </div>
+                <div class="chart-container"><canvas id="dailyChart"></canvas></div>
+                <div class="insight-box">
+                  <strong>📋 활동 추이 분석</strong>
+                  최근 학습 활동 패턴을 확인할 수 있습니다. 활동이 낮은 날에는 추가 학습 독려가 효과적입니다.
+                </div>
+              </div>
+              <div class="section-box">
+                <div class="section-header">
+                  <h3 class="section-title"><i class="fas fa-chart-pie"></i> 활동 유형별 분포</h3>
+                </div>
+                <div class="chart-container"><canvas id="typeChart"></canvas></div>
+                <div class="insight-box">
+                  <strong>📋 활동 유형 분석</strong>
+                  다양한 학습 활동 유형의 비율을 확인하여 균형 잡힌 학습을 지도할 수 있습니다.
+                </div>
+              </div>
+            </div>
+
+            <div class="section-box">
+              <div class="section-header">
+                <h3 class="section-title"><i class="fas fa-chart-bar" style="color:var(--purple) !important;"></i> 학생별 활동 비교</h3>
+              </div>
+              <div class="chart-container" style="height:${Math.max(200, students.length * 32)}px"><canvas id="studentBarChart"></canvas></div>
+            </div>
+          </div>
+
+          <!-- 학생별 분석 탭 -->
+          <div id="tabStudents" class="tab-content">
+            <div class="section-box">
+              <div class="section-header">
+                <h3 class="section-title"><i class="fas fa-users"></i> 학생별 학습 현황</h3>
+              </div>
+              <div style="overflow-x:auto;">
+                <table class="data-table">
+                  <thead><tr>
+                    <th>학생</th>
+                    <th style="text-align:center">활동 횟수</th>
+                    <th style="text-align:center">학습시간</th>
+                    <th style="text-align:center">포트폴리오</th>
+                    <th>참여도</th>
+                    <th>수준</th>
+                  </tr></thead>
+                  <tbody id="studentTable"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <!-- 관심 학생 탭 -->
+          <div id="tabAlerts" class="tab-content">
+            ${(noActivity.length || lowActivity.length) ? `
+            <div class="section-box">
+              <div class="section-header">
+                <h3 class="section-title"><i class="fas fa-exclamation-triangle" style="color:var(--warning) !important;"></i> 관심 필요 학생</h3>
+              </div>
+              ${noActivity.map(s => `
+                <div class="alert-item danger">
+                  <div class="alert-icon" style="background:var(--danger)"><i class="fas fa-user-slash"></i></div>
+                  <div style="flex:1">
+                    <div style="font-weight:600;font-size:14px;">${escHtml(s.display_name)}</div>
+                    <div style="font-size:12px;color:var(--gray-500);">활동 기록 없음 — 학습 독려가 필요합니다</div>
+                  </div>
+                </div>
+              `).join('')}
+              ${lowActivity.filter(s => s.activityCount > 0).map(s => `
+                <div class="alert-item warning">
+                  <div class="alert-icon" style="background:var(--warning)"><i class="fas fa-user-clock"></i></div>
+                  <div style="flex:1">
+                    <div style="font-weight:600;font-size:14px;">${escHtml(s.display_name)}</div>
+                    <div style="font-size:12px;color:var(--gray-500);">활동 ${s.activityCount}회 · 학습시간 ${s.totalTimeMinutes}분 (평균 대비 부족)</div>
+                  </div>
+                </div>
+              `).join('')}
+            </div>` : '<div class="section-box"><div class="empty-state"><i class="fas fa-check-circle" style="color:var(--success);"></i><h3>모든 학생이 양호합니다</h3><p>관심이 필요한 학생이 없습니다.</p></div></div>'}
+
+            ${highActivity.length ? `
+            <div class="section-box">
+              <div class="section-header">
+                <h3 class="section-title"><i class="fas fa-trophy" style="color:var(--warning) !important;"></i> 우수 학습자</h3>
+              </div>
+              ${highActivity.map(s => `
+                <div class="alert-item info">
+                  <div class="alert-icon" style="background:var(--primary)"><i class="fas fa-star"></i></div>
+                  <div style="flex:1">
+                    <div style="font-weight:600;font-size:14px;">${escHtml(s.display_name)}</div>
+                    <div style="font-size:12px;color:var(--gray-500);">활동 ${s.activityCount}회 · 학습시간 ${s.totalTimeMinutes}분 · 포트폴리오 ${s.portfolioCount}개</div>
+                  </div>
+                </div>
+              `).join('')}
+            </div>` : ''}
+          </div>
+        `;
+
+        // 차트 렌더링
+        renderCharts(stats, students, avgActivity);
+        renderStudentTable(students, avgActivity);
+      } catch(err) {
+        container.innerHTML = '<div class="section-box"><div class="empty-state"><i class="fas fa-exclamation-circle"></i><h3>데이터 로드 실패</h3><p>' + err.message + '</p></div></div>';
+      }
+    }
+
+    function renderCharts(stats, students, avgActivity) {
+      // 일별 추이
+      if (dailyChartInstance) dailyChartInstance.destroy();
+      const dailyTrend = stats.dailyTrend || [];
+      dailyChartInstance = new Chart(document.getElementById('dailyChart'), {
+        type: 'line',
+        data: {
+          labels: dailyTrend.map(d => d.date.slice(5)),
+          datasets: [{
+            label: '활동 수', data: dailyTrend.map(d => d.cnt),
+            borderColor: '#2563eb', backgroundColor: 'rgba(37,99,235,0.1)',
+            fill: true, tension: 0.3, pointBackgroundColor: '#2563eb', pointRadius: 3
+          }]
+        },
+        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } } }
+      });
+
+      // 유형별 분포
+      if (typeChartInstance) typeChartInstance.destroy();
+      const byType = stats.byType || [];
+      const typeColors = ['#2563eb', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#ef4444'];
+      const activityTypeKo = {
+        'content_view': '콘텐츠 조회', 'lesson_view': '수업 조회', 'lesson_complete': '수업 완료',
+        'lesson_progress': '수업 진행', 'exam_complete': '평가 완료', 'homework_submit': '과제 제출',
+        'board_view': '게시판 조회', 'post_create': '게시글 작성', 'attendance_checkin': '출석 체크',
+        'daily_complete': '일일학습 완료', 'problem_set_complete': '문제집 완료', 'survey_respond': '설문 응답'
+      };
+      typeChartInstance = new Chart(document.getElementById('typeChart'), {
+        type: 'doughnut',
+        data: {
+          labels: byType.map(t => activityTypeKo[t.activity_type] || t.activity_type),
+          datasets: [{ data: byType.map(t => t.cnt), backgroundColor: typeColors, borderWidth: 2, borderColor: '#fff' }]
+        },
+        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { font: { size: 11 }, padding: 12 } } } }
+      });
+
+      // 학생별 바 차트
+      if (studentBarChart) studentBarChart.destroy();
+      if (students.length) {
+        const sorted = [...students].sort((a, b) => b.activityCount - a.activityCount);
+        studentBarChart = new Chart(document.getElementById('studentBarChart'), {
+          type: 'bar',
+          data: {
+            labels: sorted.map(s => s.display_name),
+            datasets: [
+              { label: '활동 횟수', data: sorted.map(s => s.activityCount), backgroundColor: '#3b82f6', borderRadius: 4 },
+              { label: '학습시간(분)', data: sorted.map(s => s.totalTimeMinutes), backgroundColor: '#10b981', borderRadius: 4 }
+            ]
+          },
+          options: {
+            responsive: true, maintainAspectRatio: false, indexAxis: 'y',
+            plugins: { legend: { position: 'bottom', labels: { font: { size: 11 } } } },
+            scales: { x: { beginAtZero: true } }
+          }
+        });
+      }
+    }
+
+    function renderStudentTable(students, avgActivity) {
+      const maxActivity = Math.max(...students.map(s => s.activityCount), 1);
+      const avatarColors = ['#2563eb','#10b981','#f59e0b','#ef4444','#8b5cf6','#ec4899','#06b6d4','#f97316'];
+      const tbody = document.getElementById('studentTable');
+      if (!tbody) return;
+      tbody.innerHTML = students.length === 0
+        ? '<tr><td colspan="6" style="text-align:center;color:var(--gray-500);padding:40px;">학생 데이터가 없습니다.</td></tr>'
+        : students.map((s, i) => {
+          const pct = Math.round((s.activityCount / maxActivity) * 100);
+          const barColor = pct > 70 ? '#10b981' : pct > 40 ? '#f59e0b' : '#ef4444';
+          const level = s.activityCount >= avgActivity * 1.5 ? '우수' : s.activityCount >= avgActivity * 0.5 ? '보통' : '관심';
+          const levelColor = level === '우수' ? '#10b981' : level === '보통' ? '#2563eb' : '#ef4444';
+          return `
+            <tr>
+              <td><div style="display:flex;align-items:center;gap:8px;">
+                <div class="student-avatar" style="background:${avatarColors[i%avatarColors.length]}">${escHtml(s.display_name.charAt(0))}</div>
+                <strong>${escHtml(s.display_name)}</strong>
+              </div></td>
+              <td style="text-align:center;font-weight:600;">${s.activityCount}회</td>
+              <td style="text-align:center;">${s.totalTimeMinutes}분</td>
+              <td style="text-align:center;">${s.portfolioCount}개</td>
+              <td>
+                <div style="display:flex;align-items:center;gap:8px;">
+                  <div class="progress-bar-bg"><div class="progress-bar-fill" style="width:${pct}%;background:${barColor};"></div></div>
+                  <span style="font-size:12px;font-weight:600;color:${barColor}">${pct}%</span>
+                </div>
+              </td>
+              <td><span style="padding:3px 10px;border-radius:12px;font-size:11px;font-weight:600;color:${levelColor};background:${levelColor}15;">${level}</span></td>
+            </tr>
+          `;
+        }).join('');
+    }
+
+    function switchAnalyticsTab(btn, tabId) {
+      document.querySelectorAll('.tabs-header .tab-btn').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+      btn.classList.add('active');
+      document.getElementById('tab' + tabId.charAt(0).toUpperCase() + tabId.slice(1)).classList.add('active');
+    }
+
+    function showToast(msg) {
+      const toast = document.getElementById('toast');
+      toast.textContent = msg;
+      toast.classList.add('show');
+      setTimeout(() => toast.classList.remove('show'), 3000);
+    }
+
+    window.addEventListener('dacheim:user-loaded', (e) => {
+      if (!['teacher', 'admin'].includes(e.detail.role)) {
+        alert('교사만 접근 가능합니다.');
+        location.href = '/';
+        return;
+      }
+      document.getElementById('mainContent').style.display = 'block';
+      loadClasses();
+    });
+  </script>
+</body>
+</html>

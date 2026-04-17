@@ -1,0 +1,937 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PDF 평가 - 다채움 CBT</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <style>
+    :root {
+      --primary: #2563eb;
+      --primary-dark: #1d4ed8;
+      --primary-light: #eff6ff;
+      --success: #10b981;
+      --warning: #f59e0b;
+      --danger: #ef4444;
+      --gray-50: #F9FAFB;
+      --gray-100: #F3F4F6;
+      --gray-200: #E5E7EB;
+      --gray-300: #D1D5DB;
+      --gray-400: #9CA3AF;
+      --gray-500: #6B7280;
+      --gray-600: #4B5563;
+      --gray-700: #374151;
+      --gray-800: #1F2937;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: 'Pretendard', 'Noto Sans KR', system-ui, sans-serif; background: #F5F7FA; height: 100vh; overflow: hidden; }
+
+    /* ── 경고 알림바 ── */
+    .alert-bar {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 1000;
+      background: var(--danger); color: #fff;
+      display: flex; align-items: center; justify-content: center; gap: 10px;
+      padding: 10px 20px; font-size: 13px; font-weight: 700;
+      transform: translateY(-100%); transition: transform .35s ease;
+      box-shadow: 0 2px 10px rgba(239,68,68,.4);
+    }
+    .alert-bar.visible { transform: translateY(0); }
+    .alert-bar i { font-size: 16px; animation: shake .4s ease; }
+    @keyframes shake {
+      0%,100%{transform:translateX(0);} 25%{transform:translateX(-4px);} 75%{transform:translateX(4px);}
+    }
+    .alert-bar-close {
+      position: absolute; right: 16px; background: none; border: none;
+      color: rgba(255,255,255,.8); cursor: pointer; font-size: 18px; line-height: 1;
+    }
+
+    /* ── 헤더 ── */
+    .exam-header {
+      position: fixed; top: 0; left: 0; right: 0; height: 56px;
+      background: #fff; border-bottom: 1px solid var(--gray-200);
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 0 20px; z-index: 100;
+      transition: top .35s ease;
+    }
+    .exam-header.shifted { top: 40px; }
+    .header-left { display: flex; align-items: center; gap: 12px; }
+    .header-center { display: flex; align-items: center; gap: 16px; }
+    .header-right { display: flex; align-items: center; gap: 8px; }
+    .exam-title-bar { font-size: 15px; font-weight: 700; color: var(--gray-800); }
+
+    .timer {
+      display: flex; align-items: center; gap: 6px;
+      font-size: 14px; font-weight: 700; padding: 6px 14px;
+      border-radius: 8px; background: #ecfdf5; color: var(--success);
+    }
+    .timer.warn { background: #fffbeb; color: var(--warning); }
+    .timer.danger { background: #fef2f2; color: var(--danger); }
+    .progress-text { font-size: 13px; color: var(--gray-500); }
+
+    .btn {
+      padding: 8px 16px; border-radius: 8px; font-size: 13px; font-weight: 600;
+      cursor: pointer; border: none; font-family: inherit;
+      display: inline-flex; align-items: center; gap: 6px; transition: all .2s;
+    }
+    .btn-back { background: none; color: var(--gray-500); }
+    .btn-back:hover { background: var(--gray-100); }
+    .btn-primary { background: var(--primary); color: #fff; }
+    .btn-primary:hover { background: var(--primary-dark); }
+    .btn-outline { background: #fff; color: var(--gray-600); border: 1.5px solid var(--gray-300); }
+    .btn-outline:hover { background: var(--gray-50); }
+    .btn-sm { padding: 6px 12px; font-size: 13px; }
+    .btn:disabled { opacity: .4; cursor: not-allowed; }
+
+    /* ── 메인 레이아웃 ── */
+    .exam-body {
+      display: flex; height: calc(100vh - 56px); margin-top: 56px;
+      transition: margin-top .35s ease;
+    }
+    .exam-body.shifted { margin-top: 96px; height: calc(100vh - 96px); }
+
+    /* ── PDF 영역 ── */
+    .pdf-area {
+      flex: 0 0 65%; display: flex; flex-direction: column;
+      background: #525659; overflow: hidden;
+    }
+    .pdf-toolbar {
+      background: #3c3f41; display: flex; align-items: center; justify-content: center;
+      gap: 12px; padding: 8px 16px; flex-shrink: 0;
+    }
+    .pdf-toolbar-btn {
+      width: 32px; height: 32px; border-radius: 6px; background: rgba(255,255,255,.1);
+      border: none; color: #ccc; cursor: pointer; font-size: 13px;
+      display: flex; align-items: center; justify-content: center; transition: all .2s;
+    }
+    .pdf-toolbar-btn:hover { background: rgba(255,255,255,.2); color: #fff; }
+    .pdf-toolbar-btn:disabled { opacity: .3; cursor: not-allowed; }
+    .page-indicator {
+      font-size: 13px; color: #ccc; min-width: 80px; text-align: center;
+    }
+    .zoom-controls { display: flex; align-items: center; gap: 6px; }
+    .zoom-level { font-size: 13px; color: #aaa; min-width: 40px; text-align: center; }
+
+    .pdf-canvas-area {
+      flex: 1; overflow: auto; display: flex; align-items: flex-start; justify-content: center;
+      padding: 20px;
+    }
+    .pdf-canvas-wrapper {
+      position: relative; background: #fff; box-shadow: 0 4px 20px rgba(0,0,0,.4);
+    }
+    #pdfCanvas { display: block; }
+
+    /* PDF 플레이스홀더 (PDF.js 로드 전) */
+    .pdf-placeholder {
+      width: min(595px, 100%); max-width: 595px; aspect-ratio: 595/842; height: auto; background: #fff;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      color: var(--gray-400); gap: 12px;
+      box-shadow: 0 4px 20px rgba(0,0,0,.4);
+    }
+    .pdf-placeholder i { font-size: 48px; }
+    .pdf-placeholder p { font-size: 14px; }
+    .pdf-placeholder .pdf-filename {
+      font-size: 13px; color: var(--gray-300); margin-top: 4px;
+    }
+
+    /* ── OMR 영역 ── */
+    .omr-area {
+      flex: 0 0 35%; background: #fff; border-left: 1px solid var(--gray-200);
+      display: flex; flex-direction: column; overflow: hidden;
+    }
+    .omr-header {
+      padding: 14px 16px; border-bottom: 1px solid var(--gray-100);
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .omr-title { font-size: 15px; font-weight: 700; color: var(--gray-800); }
+    .omr-subtitle { font-size: 13px; color: var(--gray-500); margin-top: 2px; }
+    .omr-scroll { flex: 1; overflow-y: auto; padding: 12px; }
+    .omr-question {
+      display: flex; align-items: center; gap: 10px; padding: 8px 6px;
+      border-radius: 8px; margin-bottom: 4px; transition: background .15s;
+    }
+    .omr-question:hover { background: var(--gray-50); }
+    .omr-question.answered { background: var(--primary-light); }
+    .omr-q-num {
+      font-size: 14px; font-weight: 700; color: var(--gray-500);
+      min-width: 24px; text-align: right;
+    }
+    .omr-question.answered .omr-q-num { color: var(--primary); }
+    .omr-options { display: flex; gap: 6px; flex: 1; }
+
+    /* OMR 보기 버튼 */
+    .omr-btn {
+      width: 36px; height: 36px; border-radius: 50%;
+      border: 2px solid var(--gray-200); background: #fff;
+      font-size: 13px; font-weight: 700; color: var(--gray-500);
+      cursor: pointer; transition: all .15s; display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+    }
+    .omr-btn:hover { border-color: var(--primary); color: var(--primary); background: var(--primary-light); }
+    .omr-btn.selected {
+      background: var(--primary); border-color: var(--primary); color: #fff;
+      box-shadow: 0 2px 6px rgba(37,99,235,.35);
+    }
+    .omr-num-label { font-size: 15px; line-height: 1; }
+
+    /* 진행 바 + 제출 영역 */
+    .omr-footer { padding: 14px 16px; border-top: 1px solid var(--gray-100); }
+    .progress-bar-track { height: 6px; background: var(--gray-100); border-radius: 3px; margin-bottom: 10px; overflow: hidden; }
+    .progress-bar-fill { height: 100%; background: var(--primary); border-radius: 3px; transition: width .3s ease; }
+    .progress-summary { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+    .progress-count { font-size: 13px; color: var(--gray-600); }
+    .progress-count strong { color: var(--primary); }
+
+    /* ── 대기실 모드 ── */
+    .waiting-room {
+      position: fixed; inset: 0; background: #F5F7FA;
+      display: flex; align-items: center; justify-content: center;
+      z-index: 500;
+    }
+    .waiting-card {
+      background: #fff; border-radius: 20px; padding: 48px 40px; text-align: center;
+      max-width: 460px; width: 90%; box-shadow: 0 8px 32px rgba(0,0,0,.1);
+    }
+    .waiting-spinner {
+      width: 64px; height: 64px; border: 4px solid var(--gray-100);
+      border-top-color: var(--primary); border-radius: 50%;
+      animation: spin 1s linear infinite; margin: 0 auto 20px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .waiting-title { font-size: 22px; font-weight: 800; color: var(--gray-800); margin-bottom: 8px; }
+    .waiting-subtitle { font-size: 14px; color: var(--gray-500); margin-bottom: 24px; line-height: 1.6; }
+    .waiting-info-list { text-align: left; background: var(--gray-50); border-radius: 12px; padding: 16px 20px; margin-bottom: 24px; }
+    .waiting-info-item {
+      display: flex; align-items: flex-start; gap: 10px;
+      font-size: 13px; color: var(--gray-600); margin-bottom: 8px;
+    }
+    .waiting-info-item:last-child { margin-bottom: 0; }
+    .waiting-info-item i { color: var(--primary); margin-top: 1px; flex-shrink: 0; }
+    .waiting-status {
+      display: inline-flex; align-items: center; gap: 6px;
+      background: #fffbeb; color: #d97706; padding: 8px 16px;
+      border-radius: 20px; font-size: 13px; font-weight: 600;
+    }
+    .waiting-status .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--warning); animation: pulse-badge 1s ease-in-out infinite; }
+    @keyframes pulse-badge { 0%,100%{opacity:1;} 50%{opacity:.4;} }
+
+    /* ── 제출 완료 화면 ── */
+    .submit-screen {
+      position: fixed; inset: 0; background: rgba(37,99,235,.05);
+      display: none; align-items: center; justify-content: center; z-index: 500;
+    }
+    .submit-screen.show { display: flex; }
+    .submit-card {
+      background: #fff; border-radius: 20px; padding: 48px 40px;
+      text-align: center; max-width: 400px; width: 90%;
+      box-shadow: 0 8px 32px rgba(0,0,0,.1);
+    }
+    .submit-icon { font-size: 64px; color: var(--success); margin-bottom: 16px; }
+    .submit-title { font-size: 22px; font-weight: 800; color: var(--gray-800); margin-bottom: 8px; }
+    .submit-score { font-size: 52px; font-weight: 900; color: var(--primary); margin: 12px 0; }
+    .submit-desc { font-size: 14px; color: var(--gray-500); }
+
+    /* ── 토스트 ── */
+    .toast {
+      position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+      background: var(--gray-800); color: #fff; padding: 12px 24px;
+      border-radius: 10px; font-size: 13px; z-index: 9999; display: none;
+      animation: fadeInUp .3s;
+    }
+    @keyframes fadeInUp { from{opacity:0;transform:translateX(-50%) translateY(8px);}to{opacity:1;transform:translateX(-50%) translateY(0);} }
+
+    /* 리뷰 모드 */
+    .review-banner{background:linear-gradient(135deg,#ecfdf5,#d1fae5);border-bottom:2px solid #6ee7b7;padding:10px 20px;text-align:center;font-size:14px;font-weight:700;color:#16a34a;}
+    .review-banner i{margin-right:6px;}
+    .omr-btn.review-correct{background:#22c55e!important;border-color:#22c55e!important;color:#fff!important;box-shadow:0 2px 6px rgba(34,197,94,.35);}
+    .omr-btn.review-wrong{background:#ef4444!important;border-color:#ef4444!important;color:#fff!important;box-shadow:0 2px 6px rgba(239,68,68,.35);}
+    .omr-btn.review-correct-mark{border-color:#22c55e!important;color:#22c55e!important;background:#f0fdf4!important;}
+    .omr-question.review-correct-row{background:#f0fdf4;}
+    .omr-question.review-wrong-row{background:#fef2f2;}
+    .omr-question.review-unanswered-row{background:#fffbeb;}
+    .review-score-box{text-align:center;padding:16px;border-bottom:1px solid var(--gray-100);}
+    .review-score-big{font-size:36px;font-weight:800;margin:4px 0;}
+    .review-score-big.high{color:#16a34a;}.review-score-big.mid{color:#d97706;}.review-score-big.low{color:#ef4444;}
+
+    /* 반응형 */
+    @media (max-width: 1024px) {
+      .pdf-area { flex: 0 0 55%; }
+      .omr-area { flex: 0 0 45%; }
+    }
+    @media (max-width: 768px) {
+      .exam-body { flex-direction: column; overflow-y: auto; height: calc(100vh - 56px); }
+      .pdf-area { flex: none; height: 65vh; min-height: 400px; }
+      .omr-area { flex: none; min-height: 300px; }
+      body { overflow: auto; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- 탭 전환 경고 알림바 -->
+  <div class="alert-bar" id="alertBar">
+    <i class="fas fa-exclamation-triangle"></i>
+    <span id="alertBarText">화면 이탈이 감지되었습니다! 시험 중 다른 탭 또는 창으로 이동하면 기록됩니다.</span>
+    <button class="alert-bar-close" onclick="hideAlertBar()">&times;</button>
+  </div>
+
+  <!-- 헤더 -->
+  <div class="exam-header" id="examHeader">
+    <div class="header-left">
+      <button class="btn btn-back" onclick="exitExam()"><i class="fas fa-arrow-left"></i> 나가기</button>
+      <span class="exam-title-bar" id="examTitleBar">PDF 평가</span>
+    </div>
+    <div class="header-center">
+      <div class="timer" id="timerDisplay"><i class="fas fa-clock"></i> <span id="timerText">--:--</span></div>
+      <div class="progress-text" id="progressText">0 / 0 응답</div>
+    </div>
+    <div class="header-right">
+      <button class="btn btn-outline btn-sm" onclick="doAutosave()"><i class="fas fa-save"></i> 임시저장</button>
+      <button class="btn btn-primary" onclick="confirmSubmit()"><i class="fas fa-paper-plane"></i> 제출하기</button>
+    </div>
+  </div>
+
+  <!-- 메인 레이아웃 -->
+  <div class="exam-body" id="examBody">
+
+    <!-- PDF 뷰어 영역 -->
+    <div class="pdf-area">
+      <div class="pdf-toolbar">
+        <button class="pdf-toolbar-btn" id="prevPageBtn" onclick="prevPage()" disabled title="이전 페이지">
+          <i class="fas fa-chevron-left"></i>
+        </button>
+        <span class="page-indicator" id="pageIndicator">1 / 1</span>
+        <button class="pdf-toolbar-btn" id="nextPageBtn" onclick="nextPage()" disabled title="다음 페이지">
+          <i class="fas fa-chevron-right"></i>
+        </button>
+        <div style="width:1px;height:20px;background:rgba(255,255,255,.15);margin:0 4px;"></div>
+        <div class="zoom-controls">
+          <button class="pdf-toolbar-btn" onclick="zoomOut()" title="축소"><i class="fas fa-minus"></i></button>
+          <span class="zoom-level" id="zoomLevel">100%</span>
+          <button class="pdf-toolbar-btn" onclick="zoomIn()" title="확대"><i class="fas fa-plus"></i></button>
+          <button class="pdf-toolbar-btn" onclick="fitPage()" title="화면 맞춤"><i class="fas fa-expand"></i></button>
+        </div>
+      </div>
+
+      <div class="pdf-canvas-area" id="pdfCanvasArea">
+        <!-- PDF.js 로드 후 여기에 canvas가 삽입됨 -->
+        <div class="pdf-placeholder" id="pdfPlaceholder">
+          <i class="fas fa-file-pdf" style="color:#ef4444;"></i>
+          <p>문제지를 불러오는 중...</p>
+          <div class="pdf-filename" id="pdfFilename"></div>
+          <div style="margin-top:16px;">
+            <div style="width:48px;height:48px;border:4px solid #f3f4f6;border-top-color:var(--primary);border-radius:50%;animation:spin 1s linear infinite;margin:0 auto;"></div>
+          </div>
+        </div>
+        <canvas id="pdfCanvas" style="display:none;"></canvas>
+      </div>
+    </div>
+
+    <!-- OMR 답안지 -->
+    <div class="omr-area">
+      <div class="omr-header">
+        <div>
+          <div class="omr-title"><i class="fas fa-list-ol" style="color:var(--primary);margin-right:6px;"></i>답안 입력</div>
+          <div class="omr-subtitle" id="omrSubtitle">총 0문항 · ①②③④⑤ 중 선택</div>
+        </div>
+      </div>
+      <div class="omr-scroll" id="omrScroll">
+        <!-- JS로 렌더링 -->
+      </div>
+      <div class="omr-footer">
+        <div class="progress-bar-track">
+          <div class="progress-bar-fill" id="omrProgressFill" style="width:0%;"></div>
+        </div>
+        <div class="progress-summary">
+          <div class="progress-count"><strong id="answeredCountNum">0</strong> / <span id="totalCountNum">0</span> 문항 응답 완료</div>
+          <span id="unansweredWarning" style="font-size:13px;color:var(--warning);display:none;">
+            <i class="fas fa-exclamation-circle"></i> 미응답 있음
+          </span>
+        </div>
+        <button class="btn btn-primary" style="width:100%;" onclick="confirmSubmit()">
+          <i class="fas fa-paper-plane"></i> 최종 제출
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 대기실 -->
+  <div class="waiting-room" id="waitingRoom">
+    <div class="waiting-card">
+      <div class="waiting-spinner"></div>
+      <div class="waiting-title">평가 대기실</div>
+      <div class="waiting-subtitle">
+        선생님이 시험을 시작할 때까지<br>잠시 기다려 주세요.
+      </div>
+      <div class="waiting-info-list">
+        <div class="waiting-info-item">
+          <i class="fas fa-ban"></i>
+          <span>시험 중 다른 탭이나 창으로 이동하지 마세요. 이탈 횟수가 기록됩니다.</span>
+        </div>
+        <div class="waiting-info-item">
+          <i class="fas fa-clock"></i>
+          <span>시험이 시작되면 타이머가 자동으로 작동합니다.</span>
+        </div>
+        <div class="waiting-info-item">
+          <i class="fas fa-save"></i>
+          <span>답안은 30초마다 자동 저장됩니다.</span>
+        </div>
+        <div class="waiting-info-item">
+          <i class="fas fa-file-pdf"></i>
+          <span>왼쪽 문제지를 보고 오른쪽 OMR에 번호를 선택하세요.</span>
+        </div>
+      </div>
+      <div class="waiting-status" id="waitingStatus">
+        <span class="dot"></span> 시험 시작 대기 중...
+      </div>
+    </div>
+  </div>
+
+  <!-- 제출 완료 화면 -->
+  <div class="submit-screen" id="submitScreen">
+    <div class="submit-card">
+      <div class="submit-icon"><i class="fas fa-check-circle"></i></div>
+      <div class="submit-title">제출 완료!</div>
+      <div class="submit-score" id="submitScore">-</div>
+      <div class="submit-desc" id="submitDesc">수고하셨습니다.</div>
+      <button class="btn btn-primary" style="margin-top:24px;width:100%;" onclick="exitExam()">
+        <i class="fas fa-arrow-left"></i> 돌아가기
+      </button>
+    </div>
+  </div>
+
+  <!-- 강제 제출 카운트다운 오버레이 -->
+  <div id="forceSubmitOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:9000;align-items:center;justify-content:center;">
+    <div style="background:#fff;border-radius:20px;padding:48px 40px;text-align:center;max-width:420px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,.3);">
+      <div style="font-size:48px;color:var(--danger);margin-bottom:16px;"><i class="fas fa-exclamation-circle"></i></div>
+      <div style="font-size:20px;font-weight:800;color:var(--gray-800);margin-bottom:8px;">시험 종료 안내</div>
+      <div style="font-size:14px;color:var(--gray-500);margin-bottom:20px;">감독관이 시험을 종료합니다.</div>
+      <div id="forceCountdownNum" style="font-size:64px;font-weight:900;color:var(--danger);margin:12px 0;">5</div>
+      <div style="font-size:13px;color:var(--gray-500);">초 후 자동 제출됩니다.</div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <!-- PDF.js 라이브러리 (CDN) -->
+  <!-- TODO: 개발자 — PDF.js 서버 배포 시 로컬 경로로 변경 가능 -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/js/auth.js"></script>
+  <script>
+    // ─── URL 파라미터 ─────────────────────────────────────────────────────────
+    const params = new URLSearchParams(location.search);
+    const classId = params.get('classId');
+    const examId = params.get('examId');
+    const pdfUrl = params.get('pdf');
+    const isReviewMode = params.get('review') === 'true';
+
+    // ─── 상태 ─────────────────────────────────────────────────────────────────
+    let currentUser = null;
+    let socket = null;
+    let examData = null;
+    let questionCount = 0;
+    let answers = [];         // [null | 0..4] (0=①, 1=②, ...)
+    let timerInterval = null;
+    let autosaveTimer = null;
+    let remainingSeconds = 0;
+    let totalSeconds = 0;
+    let leaveCount = 0;
+    let alertBarTimer = null;
+    let zoomScale = 1.0;
+    let currentPage = 1;
+    let totalPages = 1;
+    let pdfDoc = null;
+    let isWaiting = true;
+    let examStarted = false;
+
+    // ─── 초기화 ────────────────────────────────────────────────────────────────
+    document.addEventListener('dacheim:user-loaded', (e) => { currentUser = e.detail; init(); });
+    document.addEventListener('DOMContentLoaded', () => { setTimeout(() => { if (!currentUser) init(); }, 500); });
+
+    async function init() {
+      if (!currentUser) { currentUser = await checkAuth(); if (!currentUser) return; }
+      if (!classId || !examId) { showToast('잘못된 접근입니다.'); return; }
+
+      connectSocket();
+      await loadExamInfo();
+    }
+
+    async function loadExamInfo() {
+      try {
+        const res = await fetch(`/api/exam/${classId}/${examId}`);
+        const data = await res.json();
+        if (data.success && data.exam) {
+          examData = data.exam;
+          // PDF 기반 평가 — 문항 수는 exam.question_count 또는 questions.length
+          const qs = typeof examData.questions === 'string' ? JSON.parse(examData.questions) : (examData.questions || []);
+          questionCount = examData.question_count || qs.length || 10;
+          answers = new Array(questionCount).fill(null);
+          totalSeconds = (examData.time_limit || 30) * 60;
+          remainingSeconds = totalSeconds;
+
+          document.getElementById('examTitleBar').textContent = examData.title || 'PDF 평가';
+          document.getElementById('omrSubtitle').textContent = `총 ${questionCount}문항 · ①②③④⑤ 중 선택`;
+          document.getElementById('totalCountNum').textContent = questionCount;
+          document.getElementById('progressText').textContent = `0 / ${questionCount} 응답`;
+
+          renderOMR();
+
+          // 저장된 답안 복원
+          try {
+            const savedRes = await fetch(`/api/exam/${classId}/${examId}/autosave`);
+            const savedData = await savedRes.json();
+            if (savedData.success && savedData.data) {
+              const savedAnswers = savedData.data.answers;
+              const saved = typeof savedAnswers === 'string' ? JSON.parse(savedAnswers) : (savedAnswers || []);
+              saved.forEach((a, i) => { if (i < answers.length) answers[i] = a; });
+              renderOMR();
+            }
+          } catch(e) {}
+
+          // PDF 로드 — API 엔드포인트 사용
+          const pdf = examData.pdf_url || `/api/exam/${classId}/${examId}/pdf` || pdfUrl;
+          if (examData.pdf_file || pdfUrl) { loadPDF(pdf); }
+          else {
+            document.getElementById('pdfFilename').textContent = 'PDF 파일이 연결되지 않았습니다.';
+          }
+
+          // 리뷰 모드
+          if (isReviewMode && data.studentExam) {
+            const myAns = data.studentExam.answers || [];
+            myAns.forEach((a, i) => { if (i < answers.length) answers[i] = a; });
+            const qs = typeof examData.questions === 'string' ? JSON.parse(examData.questions) : (examData.questions || []);
+            enterPdfReviewMode(qs, data.studentExam.score);
+            return;
+          }
+
+          // tab_detection 설정에 따라 이탈 감지 활성화
+          if (examData.tab_detection !== 0) {
+            setupTabDetection();
+          }
+
+          // 시험 상태 및 start_mode에 따른 분기
+          if (examData.start_mode === 'direct' || examData.status === 'active') {
+            startExam();
+          } else if (examData.status === 'waiting') {
+            // 대기실에 시험 정보 표시
+            const waitingSubtitle = document.querySelector('.waiting-subtitle');
+            if (waitingSubtitle) {
+              waitingSubtitle.innerHTML = `<strong>${examData.title || 'PDF 평가'}</strong> (${questionCount}문항)<br>감독관이 시험을 시작하면 자동으로 진행됩니다.`;
+            }
+          }
+          // 소켓에서 exam:started 이벤트 기다림
+        }
+      } catch (e) {
+        console.error('loadExamInfo:', e);
+        // 개발/목업 환경 fallback
+        questionCount = 10;
+        answers = new Array(questionCount).fill(null);
+        totalSeconds = 30 * 60; remainingSeconds = totalSeconds;
+        document.getElementById('omrSubtitle').textContent = `총 ${questionCount}문항 · ①②③④⑤ 중 선택`;
+        document.getElementById('totalCountNum').textContent = questionCount;
+        renderOMR();
+      }
+    }
+
+    // ─── PDF.js 렌더링 ─────────────────────────────────────────────────────────
+    function loadPDF(url) {
+      // TODO: PDF.js workerSrc 경로 서버 환경에 맞게 수정
+      if (typeof pdfjsLib === 'undefined') {
+        document.getElementById('pdfFilename').textContent = 'PDF 뷰어 라이브러리 로드 중...';
+        return;
+      }
+      pdfjsLib.GlobalWorkerOptions.workerSrc =
+        'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+      pdfjsLib.getDocument(url).promise.then(pdf => {
+        pdfDoc = pdf;
+        totalPages = pdf.numPages;
+        document.getElementById('prevPageBtn').disabled = false;
+        document.getElementById('nextPageBtn').disabled = totalPages <= 1;
+        renderPage(1);
+      }).catch(e => {
+        console.error('PDF load error:', e);
+        document.getElementById('pdfFilename').textContent = 'PDF를 불러올 수 없습니다.';
+      });
+    }
+
+    function renderPage(pageNum) {
+      if (!pdfDoc) return;
+      pdfDoc.getPage(pageNum).then(page => {
+        const placeholder = document.getElementById('pdfPlaceholder');
+        const canvas = document.getElementById('pdfCanvas');
+        const viewport = page.getViewport({ scale: zoomScale });
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+        const ctx = canvas.getContext('2d');
+        page.render({ canvasContext: ctx, viewport }).promise.then(() => {
+          placeholder.style.display = 'none';
+          canvas.style.display = 'block';
+          currentPage = pageNum;
+          document.getElementById('pageIndicator').textContent = `${pageNum} / ${totalPages}`;
+          document.getElementById('prevPageBtn').disabled = pageNum <= 1;
+          document.getElementById('nextPageBtn').disabled = pageNum >= totalPages;
+        });
+      });
+    }
+
+    function prevPage() { if (currentPage > 1) renderPage(currentPage - 1); }
+    function nextPage() { if (currentPage < totalPages) renderPage(currentPage + 1); }
+    function zoomIn() { zoomScale = Math.min(zoomScale + 0.25, 3.0); document.getElementById('zoomLevel').textContent = Math.round(zoomScale * 100) + '%'; renderPage(currentPage); }
+    function zoomOut() { zoomScale = Math.max(zoomScale - 0.25, 0.5); document.getElementById('zoomLevel').textContent = Math.round(zoomScale * 100) + '%'; renderPage(currentPage); }
+    function fitPage() {
+      const area = document.getElementById('pdfCanvasArea');
+      const targetWidth = area.clientWidth - 40;
+      zoomScale = Math.round((targetWidth / 595) * 100) / 100; // 595 = A4 기준
+      document.getElementById('zoomLevel').textContent = Math.round(zoomScale * 100) + '%';
+      renderPage(currentPage);
+    }
+
+    // ─── OMR 렌더링 ───────────────────────────────────────────────────────────
+    const OMR_LABELS = ['①', '②', '③', '④', '⑤'];
+    function renderOMR() {
+      const container = document.getElementById('omrScroll');
+      container.innerHTML = Array.from({ length: questionCount }, (_, i) => {
+        const selected = answers[i];
+        return `<div class="omr-question ${selected !== null ? 'answered' : ''}" id="omr-row-${i}">
+          <div class="omr-q-num">${i + 1}</div>
+          <div class="omr-options">
+            ${OMR_LABELS.map((label, j) => `
+              <button class="omr-btn ${selected === j ? 'selected' : ''}"
+                onclick="selectAnswer(${i}, ${j})" title="${j+1}번 선택">
+                <span class="omr-num-label">${label}</span>
+              </button>
+            `).join('')}
+          </div>
+        </div>`;
+      }).join('');
+      updateOMRProgress();
+    }
+
+    function selectAnswer(qIdx, ansIdx) {
+      // 토글: 같은 번호 누르면 취소
+      answers[qIdx] = answers[qIdx] === ansIdx ? null : ansIdx;
+      // 해당 행만 업데이트 (전체 재렌더 대신 빠른 DOM 업데이트)
+      const row = document.getElementById(`omr-row-${qIdx}`);
+      if (!row) { renderOMR(); return; }
+      row.className = `omr-question ${answers[qIdx] !== null ? 'answered' : ''}`;
+      row.querySelectorAll('.omr-btn').forEach((btn, j) => {
+        btn.className = `omr-btn ${answers[qIdx] === j ? 'selected' : ''}`;
+      });
+      row.querySelector('.omr-q-num').style.color = answers[qIdx] !== null ? 'var(--primary)' : '';
+      updateOMRProgress();
+      if (socket) socket.emit('answer:update', { examId: parseInt(examId), questionIndex: qIdx, answer: answers[qIdx] });
+    }
+
+    function updateOMRProgress() {
+      const answered = answers.filter(a => a !== null).length;
+      document.getElementById('answeredCountNum').textContent = answered;
+      document.getElementById('progressText').textContent = `${answered} / ${questionCount} 응답`;
+      const pct = questionCount > 0 ? (answered / questionCount) * 100 : 0;
+      document.getElementById('omrProgressFill').style.width = pct + '%';
+      document.getElementById('unansweredWarning').style.display = answered < questionCount ? '' : 'none';
+    }
+
+    // ─── 시험 시작 ────────────────────────────────────────────────────────────
+    function startExam() {
+      if (examStarted) return; // 중복 호출 방지
+      isWaiting = false;
+      examStarted = true;
+      document.getElementById('waitingRoom').style.display = 'none';
+
+      // started_at 기준 경과 시간 계산
+      const startedAt = (examData && (examData._startedAt || examData.started_at));
+      if (startedAt) {
+        const elapsed = Math.floor((Date.now() - new Date(startedAt).getTime()) / 1000);
+        remainingSeconds = Math.max(0, totalSeconds - elapsed);
+      }
+      if (remainingSeconds <= 0) {
+        showToast('시간이 종료되었습니다. 자동 제출합니다.');
+        submitExam(true);
+        return;
+      }
+
+      startTimer();
+      autosaveTimer = setInterval(doAutosave, 30000);
+      fetch(`/api/exam/${classId}/${examId}/start`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: '{}' }).catch(() => {});
+    }
+
+    // ─── Socket.IO ────────────────────────────────────────────────────────────
+    let isSubmitted = false;
+
+    function connectSocket() {
+      try {
+        socket = io();
+        socket.emit('exam:join', { examId, classId: parseInt(classId) });
+
+        // 시험 상태 확인 (접속 시 서버에서 전송)
+        socket.on('exam:status', (data) => {
+          if (data.status === 'active' && isWaiting && !examStarted) startExam();
+        });
+
+        // 감독관이 시험 시작
+        socket.on('exam:started', (data) => {
+          if (data && data.startedAt && examData) {
+            examData._startedAt = data.startedAt;
+          }
+          if (isWaiting && !examStarted) startExam();
+        });
+
+        // 강제 제출 (감독관이 시험 종료) - 5초 카운트다운
+        socket.on('force:submit', (data) => {
+          if (!isSubmitted) {
+            showForceSubmitCountdown();
+          }
+        });
+
+        // 시험 종료
+        socket.on('exam:ended', () => {
+          if (!isSubmitted) {
+            clearInterval(timerInterval);
+            clearInterval(autosaveTimer);
+            showToast('시험이 종료되었습니다.');
+            submitExam(true);
+          }
+        });
+
+        socket.on('disconnect', () => {
+          console.warn('Socket disconnected, attempting reconnect...');
+        });
+      } catch(e) { console.warn('Socket.IO unavailable:', e); }
+    }
+
+    // ─── 타이머 ──────────────────────────────────────────────────────────────
+    function startTimer() {
+      if (timerInterval) clearInterval(timerInterval); // 중복 타이머 방지
+      updateTimerDisplay();
+      timerInterval = setInterval(() => {
+        remainingSeconds--;
+        if (remainingSeconds <= 0) {
+          clearInterval(timerInterval);
+          remainingSeconds = 0;
+          showToast('시간이 종료되었습니다. 자동 제출합니다.');
+          submitExam(true);
+          return;
+        }
+        updateTimerDisplay();
+      }, 1000);
+    }
+
+    function updateTimerDisplay() {
+      const m = Math.floor(remainingSeconds / 60);
+      const s = remainingSeconds % 60;
+      document.getElementById('timerText').textContent = `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+      const el = document.getElementById('timerDisplay');
+      el.className = remainingSeconds > 300 ? 'timer' : remainingSeconds > 60 ? 'timer warn' : 'timer danger';
+    }
+
+    // ─── 탭 이탈 감지 ────────────────────────────────────────────────────────
+    function setupTabDetection() {
+      document.addEventListener('visibilitychange', () => {
+        if (!examStarted || isSubmitted) return;
+        if (document.hidden) {
+          leaveCount++;
+          if (socket) socket.emit('tab:leave', { examId, type: 'visibilitychange' });
+          showTabAlert(`화면 이탈 ${leaveCount}회 감지되었습니다. 시험 화면에 집중해주세요.`);
+        } else {
+          if (socket) socket.emit('tab:return', { examId });
+        }
+      });
+      window.addEventListener('blur', () => {
+        if (!examStarted || isSubmitted) return;
+        if (socket) socket.emit('focus:lost', { examId, duration: 0 });
+      });
+      window.addEventListener('focus', () => {
+        if (!examStarted || isSubmitted) return;
+        if (socket) socket.emit('focus:gained', { examId });
+      });
+      // 마우스가 시험 창 영역을 벗어남 감지
+      document.addEventListener('mouseleave', () => {
+        if (!examStarted || isSubmitted) return;
+        leaveCount++;
+        if (socket) socket.emit('tab:leave', { examId, type: 'mouseleave' });
+        showTabAlert(`화면 이탈 ${leaveCount}회 감지되었습니다. 시험 화면에 집중해주세요.`);
+      });
+    }
+
+    function showTabAlert(msg) {
+      document.getElementById('alertBarText').textContent = msg || '화면 이탈이 감지되었습니다!';
+      const bar = document.getElementById('alertBar');
+      const header = document.getElementById('examHeader');
+      const body = document.getElementById('examBody');
+      bar.classList.add('visible');
+      header.classList.add('shifted');
+      body.classList.add('shifted');
+      clearTimeout(alertBarTimer);
+      alertBarTimer = setTimeout(hideAlertBar, 5000);
+    }
+
+    function hideAlertBar() {
+      document.getElementById('alertBar').classList.remove('visible');
+      document.getElementById('examHeader').classList.remove('shifted');
+      document.getElementById('examBody').classList.remove('shifted');
+    }
+
+    // ─── 자동저장 ─────────────────────────────────────────────────────────────
+    async function doAutosave() {
+      try {
+        await fetch(`/api/exam/${classId}/${examId}/autosave`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ answers })
+        });
+        showToast('임시저장 완료');
+      } catch(e) {}
+    }
+
+    // ─── 제출 ─────────────────────────────────────────────────────────────────
+    function confirmSubmit() {
+      const unanswered = answers.filter(a => a === null).length;
+      const msg = unanswered > 0
+        ? `${unanswered}개 문항이 미응답입니다.\n제출하시겠습니까?`
+        : '답안을 제출하시겠습니까?';
+      if (confirm(msg)) submitExam(false);
+    }
+
+    async function submitExam(force) {
+      if (isSubmitted) return;
+      isSubmitted = true;
+      clearInterval(timerInterval);
+      clearInterval(autosaveTimer);
+      try {
+        const res = await fetch(`/api/exam/${classId}/${examId}/submit`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ answers })
+        });
+        const data = await res.json();
+        if (data.success) {
+          const screen = document.getElementById('submitScreen');
+          document.getElementById('submitScore').textContent = data.score != null ? data.score + '점' : '–';
+          document.getElementById('submitDesc').textContent =
+            `${questionCount}문항 중 ${answers.filter(a => a !== null).length}문항 응답 완료`;
+          screen.classList.add('show');
+        } else {
+          isSubmitted = false;
+          showToast(data.message || '제출 실패');
+        }
+      } catch(e) {
+        isSubmitted = false;
+        showToast('서버 오류가 발생했습니다.');
+      }
+    }
+
+    function showForceSubmitCountdown() {
+      const overlay = document.getElementById('forceSubmitOverlay');
+      const numEl = document.getElementById('forceCountdownNum');
+      overlay.style.display = 'flex';
+      let count = 5;
+      numEl.textContent = count;
+      const cdInterval = setInterval(() => {
+        count--;
+        numEl.textContent = count;
+        if (count <= 0) {
+          clearInterval(cdInterval);
+          overlay.style.display = 'none';
+          submitExam(true);
+        }
+      }, 1000);
+    }
+
+    function exitExam() { location.href = `/cbt/index.html`; }
+
+    // ─── PDF 리뷰 모드 ───────────────────────────────────────────────────────
+    function enterPdfReviewMode(qs, score) {
+      // 소켓 이벤트로 인한 startExam() 호출 방지
+      examStarted = true;
+      isWaiting = false;
+      isSubmitted = true;
+      if (socket) { socket.disconnect(); socket = null; }
+
+      // 대기실 숨기기
+      document.getElementById('waitingRoom').style.display = 'none';
+
+      // 헤더 변경
+      document.querySelector('.header-right').innerHTML = `<button class="btn btn-back" onclick="exitExam()"><i class="fas fa-arrow-left"></i> 목록으로</button>`;
+      document.getElementById('timerDisplay').innerHTML = `<i class="fas fa-eye"></i> <span>결과 확인</span>`;
+      document.getElementById('timerDisplay').className = 'timer';
+      document.getElementById('timerDisplay').style.background = '#ecfdf5';
+      document.getElementById('timerDisplay').style.color = '#16a34a';
+
+      // 리뷰 배너
+      const banner = document.createElement('div');
+      banner.className = 'review-banner';
+      banner.innerHTML = `<i class="fas fa-clipboard-check"></i> 응시 결과 확인 모드 — 정답과 내 답을 비교해 보세요`;
+      document.getElementById('examHeader').after(banner);
+
+      // 점수 요약을 OMR 헤더에 표시
+      const correctAnswerMap = qs.map(q => q.answer);
+      let correctCount = 0;
+      answers.forEach((a, i) => {
+        if (correctAnswerMap[i] !== undefined && (String(a) === String(correctAnswerMap[i]) || Number(a) === Number(correctAnswerMap[i]))) correctCount++;
+      });
+      const scoreCls = score >= 80 ? 'high' : score >= 60 ? 'mid' : 'low';
+
+      const omrHeader = document.querySelector('.omr-header');
+      omrHeader.innerHTML = `<div>
+        <div class="omr-title"><i class="fas fa-clipboard-check" style="color:var(--success);margin-right:6px;"></i>응시 결과</div>
+        <div class="omr-subtitle">${questionCount}문항 중 <strong style="color:var(--success);">${correctCount}개 정답</strong></div>
+      </div>
+      <div class="review-score-big ${scoreCls}" style="font-size:28px;">${score != null ? score + '점' : '-'}</div>`;
+
+      // OMR 제출 버튼 영역 → 목록으로 돌아가기
+      document.querySelector('.omr-footer').innerHTML = `
+        <div style="text-align:center;padding:8px 0;">
+          <button class="btn btn-primary" style="width:100%;" onclick="exitExam()"><i class="fas fa-arrow-left"></i> 목록으로 돌아가기</button>
+        </div>`;
+
+      // OMR 리뷰 렌더링
+      const container = document.getElementById('omrScroll');
+      container.innerHTML = Array.from({ length: questionCount }, (_, i) => {
+        const myAns = answers[i];
+        const correctAns = correctAnswerMap[i];
+        const isCorrect = correctAns !== undefined && (String(myAns) === String(correctAns) || Number(myAns) === Number(correctAns));
+        const isUnanswered = myAns === undefined || myAns === null;
+        const rowClass = isUnanswered ? 'review-unanswered-row' : (isCorrect ? 'review-correct-row' : 'review-wrong-row');
+        const icon = isUnanswered ? '<span style="color:#d97706;font-size:13px;font-weight:700;">무응답</span>'
+          : isCorrect ? '<span style="color:#16a34a;font-size:13px;font-weight:700;">✓ 정답</span>'
+          : '<span style="color:#ef4444;font-size:13px;font-weight:700;">✗ 오답</span>';
+
+        return `<div class="omr-question ${rowClass}" id="omr-row-${i}">
+          <div class="omr-q-num" style="color:${isCorrect ? '#16a34a' : isUnanswered ? '#d97706' : '#ef4444'}">${i + 1}</div>
+          <div class="omr-options">
+            ${OMR_LABELS.map((label, j) => {
+              let cls = 'omr-btn';
+              const isMyAnswer = Number(myAns) === j;
+              const isCorrectAnswer = Number(correctAns) === j;
+              if (isMyAnswer && isCorrectAnswer) cls += ' review-correct';
+              else if (isCorrectAnswer) cls += ' review-correct-mark';
+              else if (isMyAnswer) cls += ' review-wrong';
+              return `<button class="${cls}" style="cursor:default;" disabled>
+                <span class="omr-num-label">${label}</span>
+              </button>`;
+            }).join('')}
+          </div>
+          ${icon}
+        </div>`;
+      }).join('');
+
+      // PDF 로드
+      const pdf = examData.pdf_url || `/api/exam/${classId}/${examId}/pdf`;
+      if (examData.pdf_file || pdfUrl) { loadPDF(pdf); }
+
+      // 진행률 표시 업데이트
+      document.getElementById('progressText').textContent = `${correctCount} / ${questionCount} 정답`;
+    }
+
+    // ─── 유틸 ─────────────────────────────────────────────────────────────────
+    function showToast(msg) {
+      const t = document.getElementById('toast'); t.textContent = msg;
+      t.style.display = 'block'; setTimeout(() => t.style.display = 'none', 2500);
+    }
+
+    // Spin keyframe for spinner fallback (inline)
+    const spinStyle = document.createElement('style');
+    spinStyle.textContent = '@keyframes spin{to{transform:rotate(360deg);}}';
+    document.head.appendChild(spinStyle);
+  </script>
+</body>
+</html>

@@ -1,0 +1,893 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>다채움 - 평가 상세</title>
+  <link rel="stylesheet" href="/css/common-nav.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Pretendard','Noto Sans KR',system-ui,sans-serif; background: #F5F7FA; color: #1A1A2E; font-size: 16px; }
+    .container { max-width: 1800px; margin: 0 auto; padding: 24px 20px; }
+
+    .breadcrumb { font-size: 15px; color: #6B7280; margin-bottom: 16px; }
+    .breadcrumb a { color: #2563eb; text-decoration: none; }
+
+    .exam-header { background: linear-gradient(135deg, #8b5cf6, #7c3aed); border-radius: 16px; padding: 32px 36px; color: #fff; margin-bottom: 20px; }
+    .exam-header h1 { font-size: 26px; font-weight: 700; margin-bottom: 10px; }
+    .exam-header .meta { font-size: 15px; opacity: 0.85; display: flex; gap: 16px; flex-wrap: wrap; }
+    .exam-header .meta span { display: flex; align-items: center; gap: 4px; }
+    .exam-badge { display: inline-block; padding: 5px 14px; border-radius: 6px; font-size: 13px; font-weight: 600; margin-bottom: 10px; }
+    .exam-badge.active { background: rgba(16,185,129,0.2); color: #a7f3d0; }
+    .exam-badge.draft { background: rgba(255,255,255,0.2); color: rgba(255,255,255,0.8); }
+    .exam-badge.completed { background: rgba(59,130,246,0.2); color: #93c5fd; }
+
+    .card { background: #fff; border-radius: 12px; padding: 28px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); margin-bottom: 16px; }
+    .card h3 { font-size: 19px; font-weight: 700; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
+    .card h3 i { color: #8b5cf6; }
+
+    .question-card { background: #f9fafb; border-radius: 10px; padding: 20px; margin-bottom: 14px; }
+    .question-num { font-size: 14px; font-weight: 600; color: #8b5cf6; margin-bottom: 8px; }
+    .question-text { font-size: 18px; font-weight: 600; margin-bottom: 14px; line-height: 1.6; }
+    .option-list { list-style: none; }
+    .option-item { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-radius: 8px; margin-bottom: 6px; cursor: pointer; transition: background 0.15s; font-size: 16px; }
+    .option-item:hover { background: #eff6ff; }
+    .option-item.selected { background: #dbeafe; border: 1.5px solid #2563eb; }
+    .option-item input[type="radio"] { accent-color: #2563eb; }
+
+    .stat-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 16px; }
+    .mini-stat { background: #f9fafb; border-radius: 8px; padding: 14px; text-align: center; }
+    .mini-stat .val { font-size: 24px; font-weight: 700; color: #8b5cf6; }
+    .mini-stat .lbl { font-size: 12px; color: #6B7280; margin-top: 4px; }
+
+    table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    th { text-align: left; padding: 10px 12px; background: #f9fafb; border-bottom: 2px solid #e5e7eb; font-weight: 600; }
+    td { padding: 10px 12px; border-bottom: 1px solid #f3f4f6; }
+
+    .btn { padding: 10px 20px; border: none; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; font-family: inherit; display: inline-flex; align-items: center; gap: 6px; }
+    .btn-primary { background: #8b5cf6; color: #fff; }
+    .btn-primary:hover { background: #7c3aed; }
+    .btn-success { background: #10b981; color: #fff; }
+    .btn-outline { background: #fff; color: #374151; border: 1.5px solid #d1d5db; }
+    .btn-outline:hover { background: #f3f4f6; }
+    .btn-danger { background: #dc2626; color: #fff; }
+
+    .result-card { text-align: center; padding: 32px; }
+    .result-score { font-size: 48px; font-weight: 800; color: #8b5cf6; }
+    .result-label { font-size: 14px; color: #6B7280; margin-top: 8px; }
+
+    .timer { position: fixed; top: 80px; right: 24px; background: #fff; padding: 12px 20px; border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); font-size: 18px; font-weight: 700; color: #8b5cf6; z-index: 100; display: none; }
+    .timer.warning { color: #ef4444; animation: pulse 1s infinite; }
+    @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
+
+    .badge { padding: 3px 10px; border-radius: 6px; font-size: 11px; font-weight: 600; }
+    .badge-active { background: #dcfce7; color: #16a34a; }
+    .badge-completed { background: #dbeafe; color: #2563eb; }
+
+    /* 답안 분석 그리드 */
+    #analysisGrid th, #analysisGrid td { text-align: center; padding: 6px 10px; white-space: nowrap; min-width: 42px; }
+    #analysisGrid th { position: sticky; top: 0; background: #f9fafb; z-index: 1; }
+    #analysisGrid td:first-child { position: sticky; left: 0; background: #fff; z-index: 1; font-weight: 600; text-align: left; }
+    #analysisGrid th:first-child { position: sticky; left: 0; z-index: 2; }
+    .cell-correct { background: #dcfce7 !important; color: #16a34a; font-weight: 700; }
+    .cell-wrong { background: #fee2e2 !important; color: #dc2626; font-weight: 700; }
+    .cell-partial { background: #fef3c7 !important; color: #d97706; font-weight: 600; }
+    .cell-empty { background: #f3f4f6 !important; color: #9ca3af; }
+    .cell-essay { background: #dbeafe !important; color: #2563eb; cursor: pointer; text-decoration: underline; }
+    .rate-bar { height: 24px; border-radius: 6px; position: relative; overflow: hidden; background: #fee2e2; }
+    .rate-bar-inner { height: 100%; background: #dcfce7; border-radius: 6px; transition: width 0.5s; }
+    .rate-bar-label { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); font-size: 11px; font-weight: 700; color: #374151; }
+
+    /* 커스텀 모달 */
+    .custom-modal-overlay { display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.35);z-index:9999;justify-content:center;align-items:center; }
+    .custom-modal-overlay.active { display:flex; }
+    .custom-modal-box { background:#fff;border-radius:16px;padding:28px 32px;max-width:420px;width:90%;box-shadow:0 12px 40px rgba(0,0,0,0.2);text-align:center; }
+    .custom-modal-box .modal-icon { font-size:36px;margin-bottom:12px; }
+    .custom-modal-box .modal-msg { font-size:15px;color:#374151;line-height:1.6;margin-bottom:20px; }
+    .custom-modal-box .modal-btns { display:flex;gap:10px;justify-content:center; }
+    .custom-modal-box .modal-btn { padding:10px 24px;border-radius:10px;font-size:14px;font-weight:600;cursor:pointer;border:none;font-family:inherit; }
+    .custom-modal-box .modal-btn-primary { background:#8b5cf6;color:#fff; }
+    .custom-modal-box .modal-btn-primary:hover { background:#7c3aed; }
+    .custom-modal-box .modal-btn-cancel { background:#f3f4f6;color:#6b7280; }
+    .custom-modal-box .modal-btn-cancel:hover { background:#e5e7eb; }
+    .custom-modal-box .modal-btn-ok { background:#8b5cf6;color:#fff; }
+    .custom-modal-box .modal-btn-ok:hover { background:#7c3aed; }
+
+    @media (max-width: 768px) {
+      .stat-row { grid-template-columns: repeat(2, 1fr); }
+      .timer { top: auto; bottom: 16px; right: 16px; }
+    }
+  </style>
+</head>
+<body>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/js/common-nav.js"></script>
+  <div id="timerDisplay" class="timer"></div>
+  <div class="container" id="mainContent" style="display:none;">
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;">
+      <button class="btn btn-outline" onclick="location.href='/class/class-home.html?id='+classId+'&tab=exam'" style="padding:6px 14px;font-size:13px;"><i class="fas fa-arrow-left"></i> 목록으로</button>
+      <div class="breadcrumb" id="breadcrumb" style="margin-bottom:0;"></div>
+    </div>
+
+    <div class="exam-header">
+      <div id="examBadge"></div>
+      <h1 id="examTitle">로딩 중...</h1>
+      <div class="meta" id="examMeta"></div>
+    </div>
+
+    <!-- 시험 시작 전 -->
+    <div class="card" id="examInfoCard">
+      <h3><i class="fas fa-info-circle"></i> 평가 정보</h3>
+      <p id="examDesc" style="font-size:14px;line-height:1.6;margin-bottom:16px;"></p>
+      <div id="examStartArea"></div>
+    </div>
+
+    <!-- 개설자: 평가지 보기 버튼 -->
+    <div id="examSheetBtnArea" style="display:none;margin-bottom:16px;">
+      <button class="btn" onclick="openExamSheet()" style="width:100%;justify-content:center;padding:14px;font-size:15px;font-weight:600;background:linear-gradient(135deg,#f5f3ff,#ede9fe);border:1.5px solid #c4b5fd;color:#7c3aed;border-radius:12px;cursor:pointer;"><i class="fas fa-file-alt" style="margin-right:8px;"></i>평가지 보기 / 수정</button>
+    </div>
+
+    <!-- 문제 풀기 (학생) -->
+    <div id="questionsArea" style="display:none;"></div>
+    <div id="submitExamArea" style="display:none;margin-bottom:16px;">
+      <button class="btn btn-success" onclick="submitExam()" style="width:100%;justify-content:center;font-size:16px;padding:14px;"><i class="fas fa-paper-plane"></i> 시험 제출</button>
+    </div>
+
+    <!-- 결과 (학생) -->
+    <div class="card" id="resultCard" style="display:none;">
+      <div class="result-card">
+        <i class="fas fa-trophy" style="font-size:36px;color:#f59e0b;margin-bottom:8px;"></i>
+        <div class="result-score" id="resultScore"></div>
+        <div class="result-label">점</div>
+      </div>
+    </div>
+    <!-- 문항별 결과 상세 (학생) -->
+    <div class="card" id="studentResultDetail" style="display:none;">
+      <h3><i class="fas fa-clipboard-check"></i> 문항별 결과</h3>
+      <div id="studentResultList"></div>
+    </div>
+
+    <!-- 교사: 학생 현황 -->
+    <div class="card" id="teacherStudentsCard" style="display:none;">
+      <h3><i class="fas fa-users"></i> 참여 학생 현황</h3>
+      <div class="stat-row" id="examStats"></div>
+      <table>
+        <thead><tr><th>학생</th><th>상태</th><th>점수</th><th>이탈</th><th>시작 시간</th><th>제출 시간</th></tr></thead>
+        <tbody id="studentTable"></tbody>
+      </table>
+    </div>
+
+    <!-- 교사: 답안 분석 그리드 -->
+    <div class="card" id="analysisCard" style="display:none;">
+      <h3><i class="fas fa-table"></i> 답안 분석 그리드</h3>
+      <div style="overflow-x:auto;">
+        <table id="analysisGrid" style="font-size:12px;"></table>
+      </div>
+    </div>
+
+    <!-- 교사: 문항별 정답률 -->
+    <div class="card" id="questionStatsCard" style="display:none;">
+      <h3><i class="fas fa-chart-bar"></i> 문항별 정답률</h3>
+      <canvas id="questionChart" style="max-height:300px;"></canvas>
+    </div>
+
+    <!-- 교사: 관리 버튼 -->
+    <div id="teacherManageArea" style="display:none;margin-bottom:16px;display:flex;gap:10px;flex-wrap:wrap;">
+    </div>
+
+  </div>
+
+  <!-- 평가지 플레이어 모달 -->
+  <div id="examSheetOverlay" onclick="if(event.target===this)closeExamSheet()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:9000;overflow-y:auto;">
+    <div style="max-width:1100px;width:94%;margin:24px auto;background:#fff;border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,0.3);overflow:hidden;min-height:60vh;">
+      <div style="position:sticky;top:0;z-index:1;background:#fff;padding:16px 24px;border-bottom:1px solid #e5e7eb;display:flex;align-items:center;justify-content:space-between;">
+        <h2 style="margin:0;font-size:18px;font-weight:700;color:#1f2937;"><i class="fas fa-file-alt" style="color:#8b5cf6;margin-right:8px;"></i>평가지</h2>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <button class="btn btn-outline" id="examEditToggle" onclick="toggleExamEdit()" style="padding:5px 14px;font-size:12px;"><i class="fas fa-edit"></i> 수정</button>
+          <button onclick="closeExamSheet()" style="background:none;border:none;font-size:22px;cursor:pointer;color:#9ca3af;padding:4px 8px;line-height:1;">&times;</button>
+        </div>
+      </div>
+      <div id="examSheetBody" style="padding:24px 32px;font-size:16px;"></div>
+    </div>
+  </div>
+
+  <!-- 커스텀 모달 -->
+  <div class="custom-modal-overlay" id="customModal">
+    <div class="custom-modal-box">
+      <div class="modal-icon" id="customModalIcon"></div>
+      <div class="modal-msg" id="customModalMsg"></div>
+      <div class="modal-btns" id="customModalBtns"></div>
+    </div>
+  </div>
+
+  <script>
+    // 커스텀 confirm/alert
+    let _modalResolve = null;
+    function showModal(msg, type = 'alert', icon = '') {
+      return new Promise(resolve => {
+        _modalResolve = resolve;
+        const overlay = document.getElementById('customModal');
+        document.getElementById('customModalIcon').innerHTML = icon || (type === 'confirm' ? '<i class="fas fa-question-circle" style="color:#8b5cf6;"></i>' : '<i class="fas fa-info-circle" style="color:#8b5cf6;"></i>');
+        document.getElementById('customModalMsg').innerHTML = msg;
+        const btns = document.getElementById('customModalBtns');
+        if (type === 'confirm') {
+          btns.innerHTML = '<button class="modal-btn modal-btn-cancel" onclick="closeModal(false)">취소</button><button class="modal-btn modal-btn-primary" onclick="closeModal(true)">확인</button>';
+        } else {
+          btns.innerHTML = '<button class="modal-btn modal-btn-ok" onclick="closeModal(true)">확인</button>';
+        }
+        overlay.classList.add('active');
+      });
+    }
+    function closeModal(result) {
+      document.getElementById('customModal').classList.remove('active');
+      if (_modalResolve) { _modalResolve(result); _modalResolve = null; }
+    }
+
+    const params = new URLSearchParams(location.search);
+    const classId = params.get('classId');
+    const examId = params.get('id');
+    if (!classId || !examId) location.href = '/class/index.html';
+
+    let examData = null, myRole = null, currentUser = null;
+    let timerInterval = null;
+    let studentAnswers = {};
+
+    function escHtml(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+    // LaTeX 수식이 포함된 텍스트를 안전하게 HTML로 변환
+    function renderMathText(s) {
+      if (!s) return '';
+      // 먼저 HTML 이스케이프
+      let html = escHtml(s);
+      // $$...$$ 디스플레이 수식
+      html = html.replace(/\$\$([^$]+)\$\$/g, (m, tex) => {
+        try { return katex.renderToString(tex.trim().replace(/\\\\/g, '\\'), { throwOnError: false, displayMode: true }); } catch(e) { return m; }
+      });
+      // $...$ 인라인 수식
+      html = html.replace(/\$([^$]+)\$/g, (m, tex) => {
+        try { return katex.renderToString(tex.trim().replace(/\\\\/g, '\\'), { throwOnError: false, displayMode: false }); } catch(e) { return m; }
+      });
+      return html;
+    }
+
+    async function loadExam() {
+      const classRes = await fetch(`/api/class/${classId}`);
+      const classData = await classRes.json();
+      if (classData.success) myRole = classData.myRole;
+
+      document.getElementById('breadcrumb').innerHTML =
+        `<a href="/class/index.html">나의 클래스</a> &gt; <a href="/class/class-home.html?id=${classId}">${escHtml(classData.class?.name || '클래스')}</a> &gt; 평가`;
+
+      const res = await fetch(`/api/exam/${classId}/${examId}`);
+      const data = await res.json();
+      if (!data.success) { await showModal(data.message); history.back(); return; }
+
+      examData = data.exam;
+      const questions = examData.questions || [];
+      document.title = `다채움 - ${examData.title}`;
+
+      // 날짜 기반 상태 계산
+      function getDateStatus(exam) {
+        if (exam.status === 'draft' || exam.status === 'waiting') return { label: '준비중', cls: 'draft' };
+        const today = new Date().toISOString().slice(0, 10);
+        if (exam.start_date && today < exam.start_date) return { label: '예정', cls: 'draft' };
+        if (exam.end_date && today > exam.end_date) return { label: '마감', cls: 'completed' };
+        return { label: '진행중', cls: 'active' };
+      }
+      const dateStatus = getDateStatus(examData);
+
+      document.getElementById('examBadge').innerHTML =
+        `<span class="exam-badge ${dateStatus.cls}">${dateStatus.label}</span>`;
+      document.getElementById('examTitle').textContent = examData.title;
+      document.getElementById('examMeta').innerHTML = `
+        <span><i class="fas fa-list"></i> ${questions.length}문항</span>
+        ${examData.time_limit ? `<span><i class="fas fa-clock"></i> ${examData.time_limit}분</span>` : ''}
+        ${examData.start_date || examData.end_date ? `<span><i class="fas fa-calendar"></i> ${examData.start_date || ''} ~ ${examData.end_date || ''}</span>` : ''}
+        <span><i class="fas fa-users"></i> ${examData.student_count}명 참여</span>
+      `;
+
+      document.getElementById('examDesc').textContent = examData.description || '평가 설명이 없습니다.';
+
+      if (myRole === 'owner') {
+        // 교사 뷰
+        document.getElementById('teacherStudentsCard').style.display = 'block';
+        const students = data.students || [];
+        const completed = students.filter(s => s.status === 'completed' || s.status === 'submitted').length;
+        const avgScore = completed > 0 ? Math.round(students.filter(s => s.score !== null).reduce((a, s) => a + s.score, 0) / completed) : 0;
+
+        document.getElementById('examStats').innerHTML = `
+          <div class="mini-stat"><div class="val">${students.length}</div><div class="lbl">참여자</div></div>
+          <div class="mini-stat"><div class="val">${completed}</div><div class="lbl">제출 완료</div></div>
+          <div class="mini-stat"><div class="val">${avgScore}점</div><div class="lbl">평균 점수</div></div>
+        `;
+
+        document.getElementById('studentTable').innerHTML = students.length === 0
+          ? '<tr><td colspan="6" style="text-align:center;color:#9ca3af;">참여한 학생이 없습니다.</td></tr>'
+          : students.map(s => `
+            <tr id="student-row-${s.user_id}">
+              <td>${escHtml(s.display_name)}</td>
+              <td><span class="badge badge-${(s.status === 'completed' || s.status === 'submitted') ? 'completed' : 'active'}">${(s.status === 'completed' || s.status === 'submitted') ? '제출' : '진행중'}</span></td>
+              <td>${s.score !== null ? s.score + '점' : '-'}</td>
+              <td class="tab-leave-count" style="color:${(s.tab_switch_count||0)>0?'#ef4444':'#6B7280'};font-weight:${(s.tab_switch_count||0)>0?'600':'400'}">${s.tab_switch_count || 0}회</td>
+              <td>${s.started_at ? s.started_at.slice(11, 16) : '-'}</td>
+              <td>${s.submitted_at ? s.submitted_at.slice(11, 16) : '-'}</td>
+            </tr>
+          `).join('');
+
+        // 평가지 보기 버튼
+        document.getElementById('examSheetBtnArea').style.display = 'block';
+
+        // 관리 버튼
+        const manageArea = document.getElementById('teacherManageArea');
+        manageArea.style.display = 'flex';
+        if (examData.status === 'draft') {
+          manageArea.innerHTML = `
+            <button class="btn btn-primary" onclick="changeExamStatus('active')"><i class="fas fa-play"></i> 시험 시작</button>
+            <button class="btn btn-danger" onclick="deleteExam()"><i class="fas fa-trash"></i> 삭제</button>
+          `;
+        } else if (examData.status === 'active') {
+          manageArea.innerHTML = `
+            <button class="btn btn-danger" onclick="changeExamStatus('completed')"><i class="fas fa-stop"></i> 시험 종료</button>
+          `;
+        } else {
+          manageArea.style.display = 'none';
+        }
+
+        document.getElementById('examStartArea').innerHTML =
+          `<div style="color:#6B7280;font-size:13px;">문항 수: ${questions.length}개 ${examData.time_limit ? ' · 제한시간: ' + examData.time_limit + '분' : ''}</div>`;
+
+        // 답안 분석 그리드 + 문항별 정답률 (제출 완료 학생이 있을 때)
+        if (completed > 0) {
+          renderAnalysisGrid(students, questions);
+          renderQuestionChart(students, questions);
+        }
+
+        // 교사: 실시간 이탈 감지 수신
+        if (examData.status === 'active') {
+          initTeacherSocket();
+        }
+      } else {
+        // 학생 뷰
+        if (data.studentExam && (data.studentExam.status === 'completed' || data.studentExam.status === 'submitted')) {
+          // 이미 제출 — 결과 표시
+          document.getElementById('resultCard').style.display = 'block';
+          document.getElementById('resultScore').textContent = data.studentExam.score;
+          document.getElementById('examStartArea').innerHTML =
+            '<div style="color:#10b981;font-weight:600;font-size:14px;"><i class="fas fa-check-circle"></i> 이미 제출한 평가입니다.</div>';
+          // 문항별 정답/오답 상세 표시
+          renderStudentResult(questions, data.studentExam);
+        } else if (examData.status === 'active') {
+          if (data.studentExam) {
+            // 이미 시작 - 문제 보여주기
+            showQuestions(questions);
+          } else {
+            document.getElementById('examStartArea').innerHTML =
+              `<button class="btn btn-primary" onclick="startExam()"><i class="fas fa-play"></i> 시험 시작하기</button>`;
+          }
+        } else if (examData.status === 'draft') {
+          document.getElementById('examStartArea').innerHTML =
+            '<div style="color:#9ca3af;font-size:13px;">아직 시작되지 않은 평가입니다.</div>';
+        } else {
+          document.getElementById('examStartArea').innerHTML =
+            '<div style="color:#6B7280;font-size:13px;">종료된 평가입니다.</div>';
+        }
+      }
+    }
+
+    function showQuestions(questions) {
+      document.getElementById('examInfoCard').style.display = 'none';
+      document.getElementById('questionsArea').style.display = 'block';
+      document.getElementById('submitExamArea').style.display = 'block';
+
+      document.getElementById('questionsArea').innerHTML = questions.map((q, i) => {
+        let optionsHtml = '';
+        if (q.options && q.options.length > 0) {
+          optionsHtml = '<ul class="option-list">' + q.options.map((o, oi) => `
+            <li class="option-item" onclick="selectOption(${i}, ${oi}, this)">
+              <input type="radio" name="q${i}" value="${oi}">
+              <span>${renderMathText(o)}</span>
+            </li>
+          `).join('') + '</ul>';
+        } else {
+          optionsHtml = `<textarea onchange="studentAnswers[${i}]=this.value" style="width:100%;padding:10px;border:1.5px solid #d1d5db;border-radius:8px;font-size:14px;font-family:inherit;" rows="2" placeholder="답을 입력하세요"></textarea>`;
+        }
+        return `<div class="card"><div class="question-card">
+          <div class="question-num">문항 ${i + 1} / ${questions.length}</div>
+          <div class="question-text">${renderMathText(q.question || q.text || '')}</div>
+          ${optionsHtml}
+        </div></div>`;
+      }).join('');
+
+      // 타이머
+      if (examData.time_limit) {
+        let remaining = examData.time_limit * 60;
+        const timer = document.getElementById('timerDisplay');
+        timer.style.display = 'block';
+        timerInterval = setInterval(() => {
+          remaining--;
+          const min = Math.floor(remaining / 60);
+          const sec = remaining % 60;
+          timer.textContent = `${min}:${String(sec).padStart(2, '0')}`;
+          if (remaining <= 60) timer.classList.add('warning');
+          if (remaining <= 0) { clearInterval(timerInterval); submitExam(); }
+        }, 1000);
+      }
+
+      // Socket.IO 이탈 감지
+      initTabDetection();
+      // 자동저장 (30초 간격)
+      initAutoSave();
+    }
+
+    // ===== 답안 분석 그리드 =====
+    function renderAnalysisGrid(students, questions) {
+      const card = document.getElementById('analysisCard');
+      const grid = document.getElementById('analysisGrid');
+      const completedStudents = students.filter(s => (s.status === 'completed' || s.status === 'submitted') && s.answers);
+      if (completedStudents.length === 0) return;
+
+      card.style.display = 'block';
+
+      // 헤더: 학생 | Q1 | Q2 | ... | 점수
+      let headerHtml = '<thead><tr><th>학생</th>';
+      questions.forEach((q, i) => headerHtml += `<th>Q${i+1}</th>`);
+      headerHtml += '<th>점수</th></tr></thead>';
+
+      // 바디
+      let bodyHtml = '<tbody>';
+      completedStudents.forEach(s => {
+        let answers;
+        try { answers = typeof s.answers === 'string' ? JSON.parse(s.answers) : s.answers; } catch { answers = []; }
+        bodyHtml += `<tr><td>${escHtml(s.display_name)}</td>`;
+        questions.forEach((q, i) => {
+          const userAns = answers[i] !== undefined ? answers[i] : null;
+          const correctAns = q.answer !== undefined ? q.answer : q.correct_answer;
+          let cellClass = 'cell-empty';
+          let cellText = '-';
+
+          if (userAns !== null && userAns !== undefined) {
+            if (q.type === 'essay' || q.type === 'short') {
+              cellClass = 'cell-essay';
+              cellText = '답변';
+            } else {
+              // 객관식 비교
+              const isCorrect = String(userAns) === String(correctAns) ||
+                Number(userAns) === Number(correctAns) ||
+                (q.options && q.options[userAns] === correctAns);
+              cellClass = isCorrect ? 'cell-correct' : 'cell-wrong';
+              cellText = isCorrect ? '○' : '✕';
+            }
+          }
+          bodyHtml += `<td class="${cellClass}">${cellText}</td>`;
+        });
+        bodyHtml += `<td style="font-weight:700;">${s.score !== null ? s.score + '점' : '-'}</td></tr>`;
+      });
+
+      // 문항별 정답률 행
+      bodyHtml += '<tr style="background:#f0f9ff;font-weight:600;"><td>정답률</td>';
+      questions.forEach((q, i) => {
+        let correct = 0, total = 0;
+        completedStudents.forEach(s => {
+          let answers;
+          try { answers = typeof s.answers === 'string' ? JSON.parse(s.answers) : s.answers; } catch { answers = []; }
+          const userAns = answers[i];
+          if (userAns !== null && userAns !== undefined) {
+            total++;
+            const correctAns = q.answer !== undefined ? q.answer : q.correct_answer;
+            if (q.type !== 'essay' && q.type !== 'short') {
+              if (String(userAns) === String(correctAns) || Number(userAns) === Number(correctAns) || (q.options && q.options[userAns] === correctAns)) correct++;
+            }
+          }
+        });
+        const rate = total > 0 ? Math.round((correct / total) * 100) : 0;
+        const color = rate >= 80 ? '#16a34a' : rate >= 50 ? '#d97706' : '#dc2626';
+        bodyHtml += `<td style="color:${color};">${rate}%</td>`;
+      });
+      bodyHtml += '<td></td></tr></tbody>';
+
+      grid.innerHTML = headerHtml + bodyHtml;
+    }
+
+    // ===== 문항별 정답률 차트 =====
+    function renderQuestionChart(students, questions) {
+      const card = document.getElementById('questionStatsCard');
+      const completedStudents = students.filter(s => (s.status === 'completed' || s.status === 'submitted') && s.answers);
+      if (completedStudents.length === 0) return;
+
+      card.style.display = 'block';
+
+      const rates = questions.map((q, i) => {
+        let correct = 0, total = 0;
+        completedStudents.forEach(s => {
+          let answers;
+          try { answers = typeof s.answers === 'string' ? JSON.parse(s.answers) : s.answers; } catch { answers = []; }
+          const userAns = answers[i];
+          if (userAns !== null && userAns !== undefined) {
+            total++;
+            const correctAns = q.answer !== undefined ? q.answer : q.correct_answer;
+            if (q.type !== 'essay' && q.type !== 'short') {
+              if (String(userAns) === String(correctAns) || Number(userAns) === Number(correctAns) || (q.options && q.options[userAns] === correctAns)) correct++;
+            }
+          }
+        });
+        return total > 0 ? Math.round((correct / total) * 100) : 0;
+      });
+
+      new Chart(document.getElementById('questionChart'), {
+        type: 'bar',
+        data: {
+          labels: questions.map((q, i) => `Q${i + 1}`),
+          datasets: [{
+            label: '정답률 (%)',
+            data: rates,
+            backgroundColor: rates.map(r => r >= 80 ? '#86efac' : r >= 50 ? '#fde68a' : '#fca5a5'),
+            borderColor: rates.map(r => r >= 80 ? '#16a34a' : r >= 50 ? '#d97706' : '#dc2626'),
+            borderWidth: 1,
+            borderRadius: 6
+          }]
+        },
+        options: {
+          responsive: true,
+          scales: { y: { beginAtZero: true, max: 100, ticks: { callback: v => v + '%' } } },
+          plugins: { legend: { display: false } }
+        }
+      });
+    }
+
+    // ===== 교사 실시간 감독 =====
+    function initTeacherSocket() {
+      try {
+        const tSocket = io();
+        tSocket.emit('exam:join', { examId, classId });
+        tSocket.on('student:tab-leave', (data) => {
+          const row = document.getElementById(`student-row-${data.studentId}`);
+          if (row) {
+            const cell = row.querySelector('.tab-leave-count');
+            if (cell) {
+              const cur = parseInt(cell.textContent) || 0;
+              cell.textContent = (cur + 1) + '회';
+              cell.style.color = '#ef4444';
+              cell.style.fontWeight = '600';
+            }
+            row.style.background = '#fef2f2';
+            setTimeout(() => { row.style.background = ''; }, 3000);
+          }
+        });
+        tSocket.on('student:tab-return', (data) => {
+          const row = document.getElementById(`student-row-${data.studentId}`);
+          if (row) { setTimeout(() => { row.style.background = ''; }, 1000); }
+        });
+        tSocket.on('student:disconnected', (data) => {
+          const row = document.getElementById(`student-row-${data.studentId}`);
+          if (row) { row.style.background = '#fff7ed'; }
+        });
+      } catch (e) { console.error('Teacher socket error:', e); }
+    }
+
+    // ===== Socket.IO 이탈 감지 =====
+    let socket = null;
+    let leaveTime = null;
+
+    function initTabDetection() {
+      try {
+        socket = io();
+        socket.emit('exam:join', { examId, classId });
+
+        document.addEventListener('visibilitychange', () => {
+          if (document.hidden) {
+            leaveTime = Date.now();
+            socket.emit('tab:leave', { examId });
+          } else {
+            if (leaveTime) {
+              const duration = (Date.now() - leaveTime) / 1000;
+              socket.emit('tab:return', { examId });
+              socket.emit('focus:lost', { examId, duration });
+              leaveTime = null;
+            }
+          }
+        });
+
+        window.addEventListener('blur', () => {
+          leaveTime = Date.now();
+          socket.emit('tab:leave', { examId });
+        });
+        window.addEventListener('focus', () => {
+          if (leaveTime) {
+            const duration = (Date.now() - leaveTime) / 1000;
+            socket.emit('tab:return', { examId });
+            socket.emit('focus:lost', { examId, duration });
+            leaveTime = null;
+          }
+        });
+      } catch (e) { console.error('Socket.IO init error:', e); }
+    }
+
+    // ===== 자동저장 =====
+    let autoSaveInterval = null;
+    function initAutoSave() {
+      autoSaveInterval = setInterval(async () => {
+        const questions = examData.questions || [];
+        const answers = [];
+        for (let i = 0; i < questions.length; i++) {
+          answers.push(studentAnswers[i] !== undefined ? studentAnswers[i] : null);
+        }
+        try {
+          await fetch(`/api/exam/${classId}/${examId}/autosave`, {
+            method: 'POST', headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({ answers })
+          });
+        } catch (e) {}
+      }, 30000);
+    }
+
+    function selectOption(qIdx, optIdx, el) {
+      studentAnswers[qIdx] = optIdx;
+      el.closest('.option-list').querySelectorAll('.option-item').forEach(li => li.classList.remove('selected'));
+      el.classList.add('selected');
+      el.querySelector('input').checked = true;
+    }
+
+    async function startExam() {
+      const res = await fetch(`/api/exam/${classId}/${examId}/start`, { method: 'POST' });
+      const data = await res.json();
+      if (data.success) {
+        showQuestions(data.exam.questions);
+        // 자동저장된 답안 복구
+        try {
+          const saved = await fetch(`/api/exam/${classId}/${examId}/autosave`);
+          const savedData = await saved.json();
+          if (savedData.success && savedData.data && savedData.data.answers) {
+            const answers = JSON.parse(savedData.data.answers);
+            answers.forEach((a, i) => {
+              if (a !== null && a !== undefined) {
+                studentAnswers[i] = a;
+                const opts = document.querySelectorAll(`input[name="q${i}"]`);
+                if (opts[a]) { opts[a].checked = true; opts[a].closest('.option-item').classList.add('selected'); }
+              }
+            });
+          }
+        } catch (e) {}
+      } else showModal(data.message);
+    }
+
+    async function submitExam() {
+      const ok = await showModal('시험을 제출하시겠습니까?<br><span style="font-size:13px;color:#9ca3af;">제출 후 수정할 수 없습니다.</span>', 'confirm', '<i class="fas fa-paper-plane" style="color:#8b5cf6;"></i>');
+      if (!ok) return;
+      if (timerInterval) clearInterval(timerInterval);
+      if (autoSaveInterval) clearInterval(autoSaveInterval);
+      if (socket) socket.disconnect();
+      document.getElementById('timerDisplay').style.display = 'none';
+
+      const questions = examData.questions || [];
+      const answers = [];
+      for (let i = 0; i < questions.length; i++) {
+        answers.push(studentAnswers[i] !== undefined ? studentAnswers[i] : null);
+      }
+
+      const res = await fetch(`/api/exam/${classId}/${examId}/submit`, {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ answers })
+      });
+      const data = await res.json();
+      if (data.success) {
+        document.getElementById('questionsArea').style.display = 'none';
+        document.getElementById('submitExamArea').style.display = 'none';
+        document.getElementById('resultCard').style.display = 'block';
+        document.getElementById('resultScore').textContent = data.score;
+        // 제출 후 정답 포함된 데이터 다시 가져오기
+        try {
+          const freshRes = await fetch(`/api/exam/${classId}/${examId}`);
+          const freshData = await freshRes.json();
+          if (freshData.success) {
+            examData = freshData.exam;
+            renderStudentResult(freshData.exam.questions, { answers, score: data.score });
+          } else {
+            renderStudentResult(examData.questions, { answers, score: data.score });
+          }
+        } catch(e) {
+          renderStudentResult(examData.questions, { answers, score: data.score });
+        }
+      } else showModal(data.message);
+    }
+
+    function renderStudentResult(questions, studentExam) {
+      const container = document.getElementById('studentResultList');
+      const detail = document.getElementById('studentResultDetail');
+      if (!container || !detail) return;
+      let answers = studentExam.answers || [];
+      if (typeof answers === 'string') try { answers = JSON.parse(answers); } catch { answers = []; }
+
+      detail.style.display = 'block';
+      container.innerHTML = questions.map((q, i) => {
+        const userAns = answers[i];
+        const correctAns = q.answer !== undefined ? q.answer : q.correct_answer;
+        const isCorrect = userAns !== null && userAns !== undefined &&
+          (String(userAns) === String(correctAns) || Number(userAns) === Number(correctAns));
+        const opts = q.options || [];
+
+        return `
+          <div class="question-card" style="border-left:4px solid ${isCorrect ? '#10b981' : '#ef4444'};">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+              <span class="question-num">문항 ${i + 1}</span>
+              <span style="font-size:13px;font-weight:700;color:${isCorrect ? '#10b981' : '#ef4444'};">
+                <i class="fas fa-${isCorrect ? 'check-circle' : 'times-circle'}"></i> ${isCorrect ? '정답' : '오답'}
+              </span>
+            </div>
+            <div class="question-text">${renderMathText(q.question || q.text || '')}</div>
+            ${opts.length > 0 ? `<ul class="option-list" style="pointer-events:none;">${opts.map((o, oi) => {
+              const isUserChoice = Number(userAns) === oi;
+              const isAnswer = Number(correctAns) === oi;
+              let bg = '#fff', border = '#e5e7eb', color = '#374151', icon = '';
+              if (isAnswer && isUserChoice) { bg = '#dcfce7'; border = '#16a34a'; color = '#166534'; icon = '<i class="fas fa-check-circle" style="color:#16a34a;margin-left:auto;"></i>'; }
+              else if (isAnswer) { bg = '#dcfce7'; border = '#86efac'; color = '#166534'; icon = '<i class="fas fa-check" style="color:#16a34a;margin-left:auto;font-size:12px;"></i>'; }
+              else if (isUserChoice) { bg = '#fee2e2'; border = '#ef4444'; color = '#991b1b'; icon = '<i class="fas fa-times" style="color:#ef4444;margin-left:auto;"></i>'; }
+              return `<li class="option-item" style="background:${bg};border:1.5px solid ${border};color:${color};cursor:default;">
+                <span>${String.fromCharCode(9312 + oi)}</span>
+                <span>${renderMathText(typeof o === 'string' ? o : (o.text || o))}</span>
+                ${icon}
+              </li>`;
+            }).join('')}</ul>` : ''}
+            ${q.explanation ? `<div style="margin-top:10px;padding:12px 14px;background:#fefce8;border-radius:8px;font-size:13px;color:#854d0e;"><i class="fas fa-lightbulb" style="color:#f59e0b;margin-right:6px;"></i><strong>해설:</strong> ${renderMathText(q.explanation)}</div>` : ''}
+          </div>`;
+      }).join('');
+    }
+
+    // ===== 개설자: 평가지 보기/수정 =====
+    let examEditMode = false;
+
+    function openExamSheet() {
+      const overlay = document.getElementById('examSheetOverlay');
+      overlay.style.display = 'block';
+      document.body.style.overflow = 'hidden';
+      examEditMode = false;
+      const btn = document.getElementById('examEditToggle');
+      btn.innerHTML = '<i class="fas fa-edit"></i> 수정';
+      btn.className = 'btn btn-outline';
+      btn.style.cssText = 'padding:5px 14px;font-size:12px;';
+      renderExamSheet(examData.questions || []);
+    }
+
+    function closeExamSheet() {
+      document.getElementById('examSheetOverlay').style.display = 'none';
+      document.body.style.overflow = '';
+    }
+
+    function renderExamSheet(questions) {
+      const body = document.getElementById('examSheetBody');
+      if (!body || !questions || questions.length === 0) return;
+
+      body.innerHTML = questions.map((q, i) => {
+        const opts = q.options || [];
+        const correctIdx = Number(q.answer);
+        return `
+          <div class="question-card" style="border-left:3px solid #8b5cf6;">
+            <div class="question-num">문항 ${i + 1}</div>
+            <div class="question-text">${renderMathText(q.question || q.text || '')}</div>
+            ${opts.length > 0 ? `<ul class="option-list" style="pointer-events:none;">${opts.map((o, oi) => {
+              const isAnswer = oi === correctIdx || Number(q.answer) === Number(oi);
+              return `<li class="option-item" style="background:${isAnswer ? '#dcfce7' : '#fff'};border:1.5px solid ${isAnswer ? '#16a34a' : '#e5e7eb'};color:${isAnswer ? '#166534' : '#374151'};cursor:default;">
+                <span>${String.fromCharCode(9312 + oi)}</span>
+                <span>${renderMathText(typeof o === 'string' ? o : (o.text || o))}</span>
+                ${isAnswer ? '<i class="fas fa-check" style="color:#16a34a;margin-left:auto;font-size:12px;"></i>' : ''}
+              </li>`;
+            }).join('')}</ul>` : ''}
+            ${q.explanation ? `<div style="margin-top:10px;padding:10px 14px;background:#fefce8;border-radius:8px;font-size:13px;color:#854d0e;"><i class="fas fa-lightbulb" style="color:#f59e0b;margin-right:6px;"></i><strong>해설:</strong> ${renderMathText(q.explanation)}</div>` : ''}
+          </div>`;
+      }).join('');
+
+      setTimeout(() => { if (typeof renderMath === 'function') renderMath(body); }, 50);
+    }
+
+    function toggleExamEdit() {
+      examEditMode = !examEditMode;
+      const btn = document.getElementById('examEditToggle');
+      const body = document.getElementById('examSheetBody');
+      const questions = examData.questions || [];
+
+      if (examEditMode) {
+        btn.innerHTML = '<i class="fas fa-save"></i> 저장';
+        btn.className = 'btn btn-primary';
+        btn.style.cssText = 'padding:5px 14px;font-size:12px;';
+
+        body.innerHTML = questions.map((q, i) => {
+          const opts = q.options || [];
+          const correctIdx = Number(q.answer);
+          return `
+            <div class="question-card" style="border-left:3px solid #f59e0b;padding:16px;">
+              <div class="question-num" style="margin-bottom:8px;">문항 ${i + 1}</div>
+              <div style="margin-bottom:10px;">
+                <label style="font-size:12px;color:#6b7280;font-weight:600;">문항 텍스트</label>
+                <textarea id="editQ_${i}" rows="2" style="width:100%;padding:8px 10px;border:1px solid #d1d5db;border-radius:8px;font-size:14px;resize:vertical;font-family:inherit;">${escHtml(q.question || q.text || '')}</textarea>
+              </div>
+              ${opts.length > 0 ? `<div style="margin-bottom:10px;">
+                <label style="font-size:12px;color:#6b7280;font-weight:600;">선택지 (정답에 체크)</label>
+                ${opts.map((o, oi) => `
+                  <div style="display:flex;gap:8px;align-items:center;margin-bottom:4px;">
+                    <input type="radio" name="editAns_${i}" value="${oi}" ${oi === correctIdx ? 'checked' : ''} style="width:auto;margin:0;">
+                    <span style="font-size:13px;color:#6b7280;width:18px;">${String.fromCharCode(9312 + oi)}</span>
+                    <input type="text" id="editOpt_${i}_${oi}" value="${escHtml(typeof o === 'string' ? o : (o.text || o))}" style="flex:1;padding:6px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;">
+                  </div>
+                `).join('')}
+              </div>` : ''}
+              <div>
+                <label style="font-size:12px;color:#6b7280;font-weight:600;">해설</label>
+                <textarea id="editExp_${i}" rows="2" style="width:100%;padding:8px 10px;border:1px solid #d1d5db;border-radius:8px;font-size:13px;resize:vertical;font-family:inherit;">${escHtml(q.explanation || '')}</textarea>
+              </div>
+            </div>`;
+        }).join('');
+      } else {
+        saveExamQuestions();
+      }
+    }
+
+    async function saveExamQuestions() {
+      const questions = examData.questions || [];
+      const updated = questions.map((q, i) => {
+        const opts = (q.options || []).map((o, oi) => {
+          const el = document.getElementById(`editOpt_${i}_${oi}`);
+          return el ? el.value : (typeof o === 'string' ? o : (o.text || o));
+        });
+        const checkedRadio = document.querySelector(`input[name="editAns_${i}"]:checked`);
+        return {
+          ...q,
+          question: document.getElementById(`editQ_${i}`)?.value || q.question || q.text || '',
+          options: opts,
+          answer: checkedRadio ? Number(checkedRadio.value) : Number(q.answer),
+          explanation: document.getElementById(`editExp_${i}`)?.value || ''
+        };
+      });
+
+      const res = await fetch(`/api/exam/${classId}/${examId}`, {
+        method: 'PUT',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ questions: updated })
+      });
+      const data = await res.json();
+      if (data.success) {
+        examData.questions = updated;
+        const btn = document.getElementById('examEditToggle');
+        btn.innerHTML = '<i class="fas fa-edit"></i> 수정';
+        btn.className = 'btn btn-outline';
+        btn.style.cssText = 'padding:5px 14px;font-size:12px;';
+        renderExamSheet(updated);
+      } else {
+        await showModal(data.message || '저장 실패');
+        examEditMode = true;
+      }
+    }
+
+    async function changeExamStatus(status) {
+      const label = status === 'active' ? '시작' : '종료';
+      const ok = await showModal(`평가를 <strong>${label}</strong>하시겠습니까?`, 'confirm');
+      if (!ok) return;
+      const res = await fetch(`/api/exam/${classId}/${examId}`, {
+        method: 'PUT', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ status })
+      });
+      const data = await res.json();
+      if (data.success) loadExam();
+      else showModal(data.message);
+    }
+
+    async function deleteExam() {
+      const ok = await showModal('이 평가를 <strong>삭제</strong>하시겠습니까?<br><span style="font-size:13px;color:#ef4444;">이 작업은 되돌릴 수 없습니다.</span>', 'confirm', '<i class="fas fa-trash-alt" style="color:#ef4444;"></i>');
+      if (!ok) return;
+      const res = await fetch(`/api/exam/${classId}/${examId}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (data.success) location.href = `/class/class-home.html?id=${classId}`;
+      else showModal(data.message);
+    }
+
+    window.addEventListener('dacheim:user-loaded', (e) => {
+      currentUser = e.detail;
+      document.getElementById('mainContent').style.display = 'block';
+      loadExam();
+    });
+  </script>
+</body>
+</html>

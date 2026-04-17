@@ -1,0 +1,1843 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>다채움 - 학습분석 대시보드</title>
+  <link rel="stylesheet" href="/css/common-nav.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    :root {
+      --primary: #2563eb; --primary-light: #dbeafe; --primary-dark: #1d4ed8;
+      --secondary: #10b981; --secondary-light: #d1fae5;
+      --warning: #f59e0b; --warning-light: #fef3c7;
+      --danger: #ef4444; --danger-light: #fee2e2;
+      --purple: #8b5cf6; --purple-light: #ede9fe;
+      --pink: #ec4899; --pink-light: #fce7f3;
+      --gray-50: #f9fafb; --gray-100: #f3f4f6; --gray-200: #e5e7eb; --gray-300: #d1d5db;
+      --gray-400: #9ca3af; --gray-500: #6b7280; --gray-600: #4b5563; --gray-700: #374151; --gray-800: #1f2937; --gray-900: #111827;
+      --shadow-sm: 0 1px 3px rgba(0,0,0,.08); --shadow-md: 0 4px 6px -1px rgba(0,0,0,.1);
+      --shadow-lg: 0 10px 15px -3px rgba(0,0,0,.1);
+      --radius-md: 10px; --radius-lg: 16px;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Noto Sans KR','Pretendard',system-ui,sans-serif; background: var(--gray-100); color: var(--gray-800); line-height: 1.6; }
+
+    .app-layout { display: flex; min-height: calc(100vh - 60px); }
+    .sidebar { width: 220px; background: #fff; border-right: 1px solid var(--gray-200); padding: 20px 0; flex-shrink: 0; }
+    .sidebar-title { padding: 0 20px 16px; font-size: 15px; font-weight: 700; color: var(--gray-800); display: flex; align-items: center; gap: 8px; }
+    .sidebar-menu { list-style: none; }
+    .sidebar-menu li { padding: 10px 20px; font-size: 14px; cursor: pointer; display: flex; align-items: center; gap: 10px; color: var(--gray-600); transition: all .15s; }
+    .sidebar-menu li:hover { background: var(--gray-50); }
+    .sidebar-menu li.active { background: var(--primary-light); color: var(--primary); font-weight: 600; border-right: 3px solid var(--primary); }
+    .sidebar-menu li i { width: 18px; text-align: center; }
+    .sidebar-menu li a { text-decoration: none; color: inherit; display: flex; align-items: center; gap: 10px; width: 100%; }
+    .main-content { flex: 1; padding: 24px; max-width: 1400px; margin: 0 auto; }
+
+    /* Class header - prototype style */
+    .class-header {
+      background: white; border-radius: 16px; padding: 24px; margin-bottom: 24px;
+      display: flex; justify-content: space-between; align-items: center;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
+    .class-info { display: flex; align-items: center; gap: 20px; }
+    .class-icon {
+      width: 64px; height: 64px; border-radius: 16px;
+      background: linear-gradient(135deg, var(--primary), var(--purple));
+      display: flex; align-items: center; justify-content: center;
+      font-size: 28px; color: white;
+    }
+    .class-details h1 { font-size: 22px; font-weight: 700; color: var(--gray-900); margin-bottom: 4px; }
+    .class-meta { color: var(--gray-500); font-size: 14px; display: flex; align-items: center; gap: 12px; }
+    .class-meta-item { display: flex; align-items: center; gap: 4px; }
+    .report-controls { display: flex; align-items: center; gap: 16px; }
+    .period-selector {
+      display: flex; align-items: center; gap: 8px; padding: 10px 16px;
+      background: var(--gray-50); border-radius: 8px; border: 1px solid var(--gray-200);
+      font-size: 15px; font-weight: 500; color: var(--gray-700); cursor: pointer;
+    }
+    .class-selector-inline { display: flex; align-items: center; gap: 8px; }
+    .class-selector-inline select {
+      padding: 8px 14px; border: 1.5px solid var(--gray-300); border-radius: 8px;
+      font-size: 14px; font-family: inherit; background: #fff; min-width: 220px; cursor: pointer;
+    }
+    .class-selector-inline select:focus { outline: none; border-color: var(--primary); }
+
+    /* Metrics grid - 4 cards */
+    .metrics-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 24px; }
+    .metric-card { background: white; border-radius: 16px; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+    .metric-card.dimmed { opacity: 0.5; pointer-events: none; }
+    .metric-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+    .metric-title { font-size: 14px; font-weight: 600; color: var(--gray-600); display: flex; align-items: center; gap: 8px; }
+    .metric-icon { width: 28px; height: 28px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 14px; }
+    .metric-icon.emotion { background: var(--warning-light); }
+    .metric-icon.basic { background: #e0f2fe; }
+    .metric-icon.daily { background: var(--pink-light); }
+    .metric-icon.reading { background: var(--secondary-light); }
+    .metric-badge { font-size: 11px; padding: 2px 8px; border-radius: 10px; font-weight: 500; }
+    .metric-badge.up { background: var(--secondary-light); color: var(--secondary); }
+    .metric-badge.down { background: var(--danger-light); color: var(--danger); }
+    .metric-badge.na { background: var(--gray-100); color: var(--gray-400); }
+    .metric-body { display: flex; gap: 16px; align-items: center; }
+    .metric-chart { flex: 0 0 80px; }
+
+    /* Mini donut (CSS conic-gradient) */
+    .mini-donut { width: 80px; height: 80px; border-radius: 50%; display: flex; align-items: center; justify-content: center; position: relative; }
+    .mini-donut-inner {
+      width: 56px; height: 56px; background: white; border-radius: 50%;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+    }
+    .mini-donut-value { font-size: 18px; font-weight: 700; color: var(--secondary); }
+    .mini-donut-label { font-size: 9px; color: var(--gray-500); }
+    .metric-stats { flex: 1; }
+    .metric-stat-row { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--gray-100); }
+    .metric-stat-row:last-child { border-bottom: none; }
+    .metric-stat-label { font-size: 13px; color: var(--gray-600); display: flex; align-items: center; gap: 6px; }
+    .metric-stat-dot { width: 8px; height: 8px; border-radius: 50%; }
+    .metric-stat-dot.positive { background: var(--secondary); }
+    .metric-stat-dot.negative { background: var(--danger); }
+    .metric-stat-dot.neutral { background: var(--gray-300); }
+    .metric-stat-dot.reached { background: var(--secondary); }
+    .metric-stat-dot.warning { background: var(--warning); }
+    .metric-stat-dot.not-reached { background: var(--danger); }
+    .metric-stat-value { font-size: 14px; font-weight: 600; color: var(--gray-800); }
+    .metric-big-number { text-align: center; padding: 10px 0; }
+    .big-number-value { font-size: 36px; font-weight: 700; color: var(--gray-800); }
+    .big-number-unit { font-size: 16px; font-weight: 500; color: var(--gray-500); }
+    .big-number-label { font-size: 12px; color: var(--gray-500); margin-top: 4px; }
+    .big-number-sub { font-size: 12px; color: var(--gray-400); margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--gray-100); }
+    .service-na { text-align: center; padding: 20px 10px; color: var(--gray-400); font-size: 13px; }
+    .service-na i { font-size: 24px; display: block; margin-bottom: 8px; color: var(--gray-300); }
+
+    /* Alert section */
+    .alert-section {
+      background: white; border-radius: 16px; padding: 24px; margin-bottom: 24px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
+    .alert-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+    .alert-title { font-size: 16px; font-weight: 600; color: var(--gray-800); display: flex; align-items: center; gap: 10px; }
+    .alert-count { background: var(--danger); color: white; font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 10px; }
+    .alert-list { display: flex; flex-direction: column; gap: 12px; }
+    .alert-item { display: flex; align-items: center; gap: 16px; padding: 16px; background: var(--gray-50); border-radius: 12px; border-left: 4px solid; }
+    .alert-item.danger { border-left-color: var(--danger); }
+    .alert-item.warning { border-left-color: var(--warning); }
+    .alert-type { width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 16px; }
+    .alert-type.danger { background: var(--danger-light); }
+    .alert-type.warning { background: var(--warning-light); }
+    .alert-content { flex: 1; }
+    .alert-student { font-size: 15px; font-weight: 600; color: var(--gray-800); margin-bottom: 2px; }
+    .alert-reason { font-size: 13px; color: var(--gray-600); }
+    .alert-action {
+      padding: 8px 16px; background: white; border: 1px solid var(--gray-300); border-radius: 8px;
+      font-size: 13px; font-weight: 500; color: var(--gray-700); cursor: pointer; transition: all 0.2s;
+    }
+    .alert-action:hover { background: var(--gray-50); border-color: var(--primary); color: var(--primary); }
+    .no-alert { text-align: center; padding: 32px; color: var(--gray-400); }
+    .no-alert-icon { font-size: 40px; margin-bottom: 12px; }
+
+    /* Tabs */
+    .tabs-section {
+      background: white; border-radius: 16px; padding: 24px; margin-bottom: 24px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
+    .tabs-header {
+      display: flex; gap: 8px; margin-bottom: 24px; border-bottom: 1px solid var(--gray-200);
+      padding-bottom: 16px; overflow-x: auto;
+    }
+    .tab-btn {
+      padding: 10px 20px; border: none; background: transparent; font-size: 14px;
+      font-weight: 500; color: var(--gray-500); cursor: pointer; border-radius: 8px;
+      transition: all 0.2s; white-space: nowrap; font-family: inherit;
+    }
+    .tab-btn:hover { background: var(--gray-50); color: var(--gray-700); }
+    .tab-btn.active { background: var(--primary); color: white; }
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+
+    /* Analysis grid */
+    .analysis-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+    .analysis-card { background: var(--gray-50); border-radius: 12px; padding: 20px; }
+    .analysis-title { font-size: 14px; font-weight: 600; color: var(--gray-700); margin-bottom: 16px; }
+
+    /* Weekday chart */
+    .weekday-chart { display: flex; justify-content: space-between; gap: 8px; }
+    .weekday-bar { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 8px; }
+    .weekday-bar-track { width: 100%; height: 120px; background: var(--gray-200); border-radius: 6px; display: flex; flex-direction: column; justify-content: flex-end; overflow: hidden; }
+    .weekday-bar-fill { width: 100%; border-radius: 6px 6px 0 0; transition: height 0.3s; }
+    .weekday-bar-fill.positive { background: var(--secondary); }
+    .weekday-bar-fill.negative { background: var(--danger); }
+    .weekday-label { font-size: 12px; color: var(--gray-500); }
+    .weekday-pct { font-size: 11px; font-weight: 600; color: var(--gray-600); }
+
+    /* Word cloud */
+    .word-cloud { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; padding: 20px; }
+    .word-tag { padding: 8px 16px; border-radius: 20px; font-weight: 500; display: inline-block; margin: 4px; }
+    .word-tag.size-1 { font-size: 12px; background: var(--gray-100); color: var(--gray-500); }
+    .word-tag.size-2 { font-size: 14px; background: var(--purple-light); color: var(--purple); }
+    .word-tag.size-3 { font-size: 16px; background: var(--primary-light); color: var(--primary); }
+    .word-tag.size-4 { font-size: 20px; background: var(--secondary-light); color: var(--secondary); }
+    .word-tag.size-5 { font-size: 24px; background: var(--primary); color: white; }
+
+    /* Bar chart */
+    .bar-chart { display: flex; flex-direction: column; gap: 12px; }
+    .bar-row { display: flex; align-items: center; gap: 12px; }
+    .bar-label { flex: 0 0 80px; font-size: 13px; color: var(--gray-600); }
+    .bar-track { flex: 1; height: 24px; background: var(--gray-200); border-radius: 6px; overflow: hidden; display: flex; }
+    .bar-segment { height: 100%; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 600; color: white; }
+    .bar-segment.reached { background: var(--secondary); }
+    .bar-segment.warning { background: var(--warning); }
+    .bar-segment.not-reached { background: var(--danger); }
+    .bar-value { flex: 0 0 60px; font-size: 13px; font-weight: 600; color: var(--gray-700); text-align: right; }
+
+    /* Emotion bar for tabs */
+    .emotion-bar-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+    .emotion-bar-label { width: 60px; font-size: 12px; color: var(--gray-600); text-align: right; }
+    .emotion-bar-track { flex: 1; height: 20px; background: var(--gray-200); border-radius: 4px; overflow: hidden; }
+    .emotion-bar-fill { height: 100%; border-radius: 4px; transition: width .3s; display: flex; align-items: center; justify-content: flex-end; padding-right: 6px; font-size: 10px; color: #fff; font-weight: 600; }
+
+    /* Rank items */
+    .student-rank-item { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--gray-100); }
+    .student-rank-item:last-child { border-bottom: none; }
+    .rank-num { width: 24px; height: 24px; border-radius: 50%; background: var(--primary); color: #fff; font-size: 11px; font-weight: 700; display: flex; align-items: center; justify-content: center; }
+    .rank-num.silver { background: var(--gray-400); }
+    .rank-num.bronze { background: #cd7f32; }
+
+    /* Radar chart area */
+    .section-card { background: #fff; border-radius: var(--radius-lg); padding: 24px; box-shadow: var(--shadow-sm); margin-bottom: 16px; }
+    .section-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px; }
+    .section-title { display: flex; align-items: center; gap: 10px; font-size: 16px; font-weight: 700; color: var(--gray-800); }
+    .section-icon { width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 14px; color: #fff; }
+    .chart-container { height: 260px; }
+
+    /* Student table */
+    .student-list-section {
+      background: white; border-radius: 16px; padding: 24px; margin-bottom: 24px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
+    .student-list-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+    .student-list-title { font-size: 16px; font-weight: 600; color: var(--gray-800); }
+    .student-list-controls { display: flex; gap: 12px; align-items: center; }
+    .search-box { display: flex; align-items: center; gap: 8px; padding: 8px 16px; background: var(--gray-50); border: 1px solid var(--gray-200); border-radius: 8px; }
+    .search-box input { border: none; background: transparent; outline: none; font-size: 14px; color: var(--gray-700); width: 200px; font-family: inherit; }
+    .search-box input::placeholder { color: var(--gray-400); }
+
+    .student-table { width: 100%; border-collapse: collapse; }
+    .student-table th {
+      text-align: left; padding: 12px 16px; background: var(--gray-50); font-size: 13px;
+      font-weight: 600; color: var(--gray-600); border-bottom: 1px solid var(--gray-200);
+      user-select: none; white-space: nowrap; cursor: pointer;
+    }
+    .student-table th:first-child { border-radius: 8px 0 0 8px; }
+    .student-table th:last-child { border-radius: 0 8px 8px 0; }
+    .student-table th .sort-icon { margin-left: 4px; font-size: 11px; opacity: 0.3; transition: opacity .15s; }
+    .student-table th.sort-active .sort-icon { opacity: 1; color: var(--primary); }
+    .student-table td { padding: 16px; border-bottom: 1px solid var(--gray-100); font-size: 14px; color: var(--gray-700); }
+    .student-table tr:hover { background: var(--gray-50); }
+    .student-table tr { cursor: pointer; }
+    .student-name { display: flex; align-items: center; gap: 12px; }
+    .student-avatar {
+      width: 36px; height: 36px; border-radius: 50%;
+      background: linear-gradient(135deg, var(--primary-light), var(--purple-light));
+      display: flex; align-items: center; justify-content: center;
+      font-size: 14px; font-weight: 600; color: var(--primary); flex-shrink: 0;
+    }
+    .status-badge {
+      display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px;
+      border-radius: 12px; font-size: 12px; font-weight: 500; white-space: nowrap;
+    }
+    .status-badge.positive { background: var(--secondary-light); color: var(--secondary); }
+    .status-badge.negative { background: var(--danger-light); color: var(--danger); }
+    .status-badge.neutral { background: var(--gray-100); color: var(--gray-500); }
+    .score-cell { text-align: center; border-radius: 4px; }
+    .score-high { background: rgba(16,185,129,0.1); color: #059669; font-weight: 600; }
+    .score-mid { background: rgba(59,130,246,0.08); }
+    .score-low { background: rgba(245,158,11,0.1); color: #d97706; }
+    .score-danger { background: rgba(239,68,68,0.08); color: #dc2626; }
+    .detail-link {
+      color: var(--primary); text-decoration: none; font-size: 13px; font-weight: 500;
+      display: flex; align-items: center; gap: 4px;
+    }
+    .detail-link:hover { text-decoration: underline; }
+
+    /* Footer actions */
+    .report-footer { display: flex; justify-content: center; gap: 16px; margin-top: 32px; padding-bottom: 40px; }
+    .footer-btn {
+      padding: 14px 28px; border-radius: 12px; font-size: 15px; font-weight: 600;
+      cursor: pointer; display: flex; align-items: center; gap: 8px; transition: all 0.2s; font-family: inherit;
+    }
+    .footer-btn.secondary { background: white; border: 1px solid var(--gray-300); color: var(--gray-700); }
+    .footer-btn.secondary:hover { background: var(--gray-50); }
+    .footer-btn.primary { background: var(--primary); border: 1px solid var(--primary); color: white; }
+    .footer-btn.primary:hover { background: #1d4ed8; }
+
+    /* Observation form & modal */
+    .obs-form { display: none; margin-top: 16px; padding: 16px; border: 1.5px solid var(--gray-200); border-radius: var(--radius-md); background: var(--gray-50); }
+    .obs-form.open { display: block; }
+    .obs-form .form-group { margin-bottom: 12px; }
+    .obs-form label { font-size: 13px; font-weight: 600; color: var(--gray-700); display: block; margin-bottom: 4px; }
+    .obs-form select, .obs-form input, .obs-form textarea { width: 100%; padding: 8px 12px; border: 1.5px solid var(--gray-300); border-radius: 8px; font-size: 13px; font-family: inherit; }
+    .obs-form textarea { min-height: 80px; resize: vertical; }
+    .obs-form .form-actions { display: flex; gap: 8px; justify-content: flex-end; }
+    .obs-timeline { margin-top: 12px; }
+    .obs-item { display: flex; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--gray-100); }
+    .obs-item:last-child { border-bottom: none; }
+    .obs-dot { width: 10px; height: 10px; border-radius: 50%; margin-top: 4px; flex-shrink: 0; }
+    .obs-content { flex: 1; }
+    .obs-content .obs-text { font-size: 13px; color: var(--gray-700); margin-bottom: 4px; }
+    .obs-content .obs-meta { font-size: 11px; color: var(--gray-400); }
+    .modal-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,.4); z-index: 1000; align-items: center; justify-content: center; }
+    .modal-overlay.open { display: flex; }
+    .modal { background: #fff; border-radius: var(--radius-lg); padding: 24px; max-width: 560px; width: 90%; max-height: 80vh; overflow-y: auto; }
+    .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+    .modal-header h3 { font-size: 17px; font-weight: 700; }
+    .modal-close { background: none; border: none; font-size: 18px; cursor: pointer; color: var(--gray-400); padding: 4px; }
+    .btn { padding: 8px 16px; border: none; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit; transition: all .2s; }
+    .btn-primary { background: var(--primary); color: #fff; }
+    .btn-primary:hover { background: var(--primary-dark); }
+    .btn-sm { padding: 6px 12px; font-size: 12px; }
+    .btn-outline { background: #fff; color: var(--gray-700); border: 1.5px solid var(--gray-300); }
+    .btn-outline:hover { background: var(--gray-50); }
+
+    .empty-state { text-align: center; padding: 40px 20px; color: var(--gray-400); }
+    .empty-state i { font-size: 40px; margin-bottom: 10px; display: block; }
+
+    /* Responsive */
+    @media (max-width: 1200px) {
+      .metrics-grid { grid-template-columns: repeat(2, 1fr); }
+    }
+    @media (max-width: 768px) {
+      .app-layout { flex-direction: column; }
+      .sidebar { width: 100%; border-right: none; border-bottom: 1px solid var(--gray-200); padding: 10px 0; }
+      .sidebar-menu { display: flex; overflow-x: auto; }
+      .sidebar-menu li { white-space: nowrap; }
+      .metrics-grid { grid-template-columns: 1fr; }
+      .analysis-grid { grid-template-columns: 1fr; }
+      .class-header { flex-direction: column; gap: 16px; text-align: center; }
+      .class-info { flex-direction: column; }
+      .report-controls { flex-direction: column; width: 100%; }
+      .main-content { padding: 16px; }
+      .tabs-header { flex-wrap: nowrap; }
+      .student-list-controls { flex-direction: column; }
+    }
+
+    /* Print */
+    @media print {
+      body { background: white; }
+      .sidebar, .report-controls, .report-footer, .alert-action,
+      .student-list-controls, .obs-form, .class-selector-inline { display: none !important; }
+      .app-layout { display: block; }
+      .main-content { max-width: 100%; padding: 0; }
+      .metric-card, .alert-section, .tabs-section, .student-list-section, .section-card {
+        box-shadow: none; border: 1px solid var(--gray-200); break-inside: avoid;
+      }
+      .class-header { box-shadow: none; border: 1px solid var(--gray-200); }
+    }
+  </style>
+</head>
+<body>
+<div class="app-layout">
+  <main class="main-content" style="padding:24px;max-width:1400px;margin:0 auto;">
+    <!-- Class Header (prototype style) -->
+    <div class="class-header" id="classHeader" style="display:none;">
+      <div class="class-info">
+        <div class="class-icon">&#127979;</div>
+        <div class="class-details">
+          <h1 id="classHeaderTitle">클래스를 선택하세요</h1>
+          <div class="class-meta">
+            <span class="class-meta-item" id="classHeaderTeacher">&#128104;&#8205;&#127979; 담임</span>
+            <span class="class-meta-item" id="classHeaderCount">&#128101; 학생 0명</span>
+          </div>
+        </div>
+      </div>
+      <div class="report-controls">
+        <div class="class-selector-inline">
+          <select id="classSelect">
+            <option value="">클래스를 선택하세요</option>
+          </select>
+        </div>
+        <div class="period-selector" id="periodSelector" onclick="toggleMonthPicker(event)" style="position:relative;">
+          <span>&#128197;</span> <span id="periodLabel">2026년 4월</span> <span>&#9660;</span>
+          <div id="monthPickerDropdown" style="display:none;position:absolute;top:100%;right:0;margin-top:6px;background:#fff;border:1px solid var(--gray-200);border-radius:12px;box-shadow:var(--shadow-lg);padding:16px;z-index:100;min-width:240px;" onclick="event.stopPropagation();">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+              <button onclick="changePickerYear(-1)" style="border:none;background:none;cursor:pointer;font-size:16px;color:var(--gray-500);padding:4px 8px;">◀</button>
+              <span id="pickerYearLabel" style="font-weight:600;font-size:15px;"></span>
+              <button onclick="changePickerYear(1)" style="border:none;background:none;cursor:pointer;font-size:16px;color:var(--gray-500);padding:4px 8px;">▶</button>
+            </div>
+            <div id="monthGrid" style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Empty state (before class selected) -->
+    <div class="empty-state" id="emptyState">
+      <i class="fas fa-chalkboard-teacher"></i>
+      <p>클래스를 선택하면 학습분석 대시보드를 확인할 수 있습니다.</p>
+    </div>
+
+    <!-- Metrics Grid (4 cards) -->
+    <div class="metrics-grid" id="metricsArea" style="display:none;"></div>
+
+    <!-- Alert Section (below metrics) -->
+    <div class="alert-section" id="alertSection" style="display:none;">
+      <div class="alert-header">
+        <div class="alert-title">
+          &#128276; 관심 필요 학생
+          <span class="alert-count" id="alertCount">0</span>
+        </div>
+      </div>
+      <div class="alert-list" id="alertList"></div>
+    </div>
+
+    <!-- Radar chart -->
+    <div class="section-card" id="radarSection" style="display:none;">
+      <div class="section-header">
+        <div class="section-title"><div class="section-icon" style="background:var(--purple)"><i class="fas fa-spider"></i></div> 영역별 성장 분포</div>
+      </div>
+      <div class="chart-container"><canvas id="radarChart"></canvas></div>
+    </div>
+
+    <!-- Tabs (7 tabs) -->
+    <div class="tabs-section" id="analysisTabsSection" style="display:none;">
+      <div class="tabs-header" id="analysisTabsHeader">
+        <button class="tab-btn active" onclick="showAnalysisTab('emotion')">정서 발달</button>
+        <button class="tab-btn" onclick="showAnalysisTab('basic')">기초학력</button>
+        <button class="tab-btn" onclick="showAnalysisTab('learning')">학습 역량</button>
+        <button class="tab-btn" onclick="showAnalysisTab('daily')">오늘의 학습</button>
+        <button class="tab-btn" onclick="showAnalysisTab('reading')">독서 활동</button>
+        <button class="tab-btn" onclick="showAnalysisTab('career')">진로 탐색</button>
+        <button class="tab-btn" onclick="showAnalysisTab('content')">콘텐츠 활용</button>
+      </div>
+      <div class="tab-content active" id="tab-emotion"></div>
+      <div class="tab-content" id="tab-basic"></div>
+      <div class="tab-content" id="tab-learning"></div>
+      <div class="tab-content" id="tab-daily"></div>
+      <div class="tab-content" id="tab-reading"></div>
+      <div class="tab-content" id="tab-career"></div>
+      <div class="tab-content" id="tab-content"></div>
+    </div>
+
+    <!-- Student Table -->
+    <div class="student-list-section" id="studentSection" style="display:none;">
+      <div class="student-list-header">
+        <div class="student-list-title" id="studentListTitle">&#128101; 학생 목록</div>
+        <div class="student-list-controls">
+          <div class="search-box">
+            <span>&#128269;</span>
+            <input type="text" id="studentSearchInput" placeholder="학생 이름 검색">
+          </div>
+          <button class="btn btn-primary btn-sm" id="toggleObsFormBtn" style="display:none;"><i class="fas fa-pen"></i> 관찰 기록 작성</button>
+        </div>
+      </div>
+
+      <!-- Observation Form -->
+      <div class="obs-form" id="obsForm">
+        <div class="form-group">
+          <label>학생 선택</label>
+          <select id="obsStudentSelect"><option value="">학생을 선택하세요</option></select>
+        </div>
+        <div class="form-group">
+          <label>성장 영역</label>
+          <select id="obsAreaSelect">
+            <option value="정서발달">정서발달</option>
+            <option value="기초학력">기초학력</option>
+            <option value="학습역량">학습역량</option>
+            <option value="오늘의학습">오늘의학습</option>
+            <option value="독서활동">독서활동</option>
+            <option value="진로탐색">진로탐색</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>관찰 내용</label>
+          <textarea id="obsContent" placeholder="학생에 대한 관찰 기록을 작성하세요..."></textarea>
+        </div>
+        <div class="form-actions">
+          <button class="btn btn-outline btn-sm" id="cancelObsBtn">취소</button>
+          <button class="btn btn-primary btn-sm" id="submitObsBtn"><i class="fas fa-save"></i> 저장</button>
+        </div>
+      </div>
+
+      <table class="student-table" id="studentTable">
+        <thead>
+          <tr>
+            <th></th>
+            <th class="sortable" onclick="sortStudents('이름')">이름 <i class="fas fa-sort sort-icon" id="sort-icon-이름"></i></th>
+            <th class="sortable" onclick="sortStudents('정서')">정서 <i class="fas fa-sort sort-icon" id="sort-icon-정서"></i></th>
+            <th class="sortable" onclick="sortStudents('종합점수')">종합 점수 <i class="fas fa-sort sort-icon" id="sort-icon-종합점수"></i></th>
+            <th class="sortable" onclick="sortStudents('학습역량')">학습역량 <i class="fas fa-sort sort-icon" id="sort-icon-학습역량"></i></th>
+            <th class="sortable" onclick="sortStudents('오늘의학습')">오늘의학습 <i class="fas fa-sort sort-icon" id="sort-icon-오늘의학습"></i></th>
+            <th>관찰</th>
+            <th>상세</th>
+          </tr>
+        </thead>
+        <tbody id="studentTableBody"></tbody>
+      </table>
+    </div>
+
+    <!-- Observation Modal -->
+    <div class="modal-overlay" id="obsModal">
+      <div class="modal">
+        <div class="modal-header">
+          <h3><i class="fas fa-clipboard-list"></i> <span id="obsModalTitle">관찰 기록</span></h3>
+          <button class="modal-close" id="closeObsModal">&times;</button>
+        </div>
+        <div class="obs-timeline" id="obsTimeline"></div>
+      </div>
+    </div>
+
+    <!-- Footer Actions -->
+    <div class="report-footer" id="reportFooter" style="display:none;">
+      <button class="footer-btn secondary" onclick="alert('준비 중입니다')">
+        <span>&#128196;</span> PDF 저장
+      </button>
+      <button class="footer-btn secondary" onclick="alert('준비 중입니다')">
+        <span>&#128424;</span> 인쇄
+      </button>
+      <button class="footer-btn primary" onclick="alert('준비 중입니다')">
+        <span>&#128202;</span> 학기말 종합 리포트
+      </button>
+    </div>
+  </main>
+</div>
+
+<script src="/js/common-nav.js"></script>
+<script>
+(function() {
+  'use strict';
+
+  // 영어 코드값 → 한글 매핑
+  const ACTIVITY_TYPE_KO = {
+    content_view: '콘텐츠 조회', lesson_view: '수업 조회', homework_submit: '과제 제출',
+    homework_graded: '과제 채점', exam_complete: '평가 완료', daily_complete: '오늘의 학습',
+    diagnosis_complete: '진단 완료', attendance_checkin: '출석 체크인', post_create: '게시물 작성',
+    survey_respond: '설문 응답', portfolio_add: '포트폴리오 추가',
+    lesson_progress: '수업 진행', problem_set_complete: '문제풀이 완료',
+    lesson_complete: '수업 완료', board_view: '게시판 조회',
+    homework: '과제', exam: '평가', lesson: '수업활동', quiz: '퀴즈',
+    assignment: '과제물', activity: '활동', external: '외부연동'
+  };
+  const SOURCE_SERVICE_KO = {
+    'class': '채움클래스', content: '채움콘텐츠', 'self-learn': '스스로채움',
+    cbt: '채움CBT', growth: '성장기록', portal: '포털'
+  };
+  function toKoActivityType(v) { return (v && ACTIVITY_TYPE_KO[v]) || v; }
+  function toKoSource(v) { return (v && SOURCE_SERVICE_KO[v]) || v; }
+
+  let currentUser = null;
+  let currentClassId = null;
+  let radarChartInstance = null;
+
+
+
+  const AREAS = [
+    { key: '정서발달', icon: 'fas fa-heart', color: '#ec4899', bg: '#fce7f3' },
+    { key: '기초학력', icon: 'fas fa-book', color: '#2563eb', bg: '#dbeafe' },
+    { key: '학습역량', icon: 'fas fa-brain', color: '#8b5cf6', bg: '#ede9fe' },
+    { key: '오늘의학습', icon: 'fas fa-calendar-check', color: '#10b981', bg: '#d1fae5' },
+    { key: '독서활동', icon: 'fas fa-book-reader', color: '#f59e0b', bg: '#fef3c7' },
+    { key: '진로탐색', icon: 'fas fa-compass', color: '#06b6d4', bg: '#cffafe' }
+  ];
+
+  const posEmotions = ['happy','excited','good','great','calm'];
+  const negEmotions = ['sad','angry','anxious','tired','frustrated'];
+  const emotionLabels = {
+    happy: '행복', excited: '신남', good: '좋음', great: '최고', calm: '평온',
+    sad: '슬픔', angry: '화남', anxious: '불안', tired: '피곤', frustrated: '답답'
+  };
+  const emotionEmojis = {
+    happy: '&#128522;', excited: '&#129321;', good: '&#128578;', great: '&#129395;', calm: '&#128524;',
+    sad: '&#128546;', angry: '&#128544;', anxious: '&#128560;', tired: '&#128564;', frustrated: '&#128553;'
+  };
+
+  async function fetchWithAuth(url, opts) {
+    const res = await fetch(url, opts);
+    if (res.status === 401) window.location.href = '/login.html';
+    return res;
+  }
+
+  function initWithUser(user) {
+    if (currentUser) return;
+    currentUser = user;
+    if (currentUser.role !== 'teacher' && currentUser.role !== 'admin') {
+      document.querySelector('.main-content').innerHTML = '<div class="empty-state"><i class="fas fa-lock"></i><p>교사 전용 페이지입니다.</p></div>';
+      return;
+    }
+    loadClasses();
+  }
+
+  window.addEventListener('dacheim:user-loaded', (e) => initWithUser(e.detail));
+  if (window.dacheumUser) initWithUser(window.dacheumUser);
+
+  // ===== 월 선택 기능 =====
+  const now = new Date();
+  let selectedYear = now.getFullYear();
+  let selectedMonth = now.getMonth() + 1;
+  let pickerYear = selectedYear;
+
+  document.getElementById('periodLabel').textContent = selectedYear + '년 ' + selectedMonth + '월';
+
+  window.toggleMonthPicker = function(e) {
+    e.stopPropagation();
+    const dd = document.getElementById('monthPickerDropdown');
+    if (dd.style.display === 'none') {
+      pickerYear = selectedYear;
+      renderMonthGrid();
+      dd.style.display = '';
+    } else {
+      dd.style.display = 'none';
+    }
+  };
+
+  window.changePickerYear = function(delta) {
+    pickerYear += delta;
+    renderMonthGrid();
+  };
+
+  function renderMonthGrid() {
+    document.getElementById('pickerYearLabel').textContent = pickerYear + '년';
+    const grid = document.getElementById('monthGrid');
+    const months = [];
+    for (let m = 1; m <= 12; m++) {
+      const isSelected = (pickerYear === selectedYear && m === selectedMonth);
+      const isCurrent = (pickerYear === now.getFullYear() && m === now.getMonth() + 1);
+      months.push(
+        '<button onclick="selectMonth(' + pickerYear + ',' + m + ')" style="padding:8px 4px;border-radius:8px;font-size:13px;font-weight:' + (isSelected ? '700' : '500') + ';cursor:pointer;border:' + (isCurrent ? '2px solid var(--primary)' : '1px solid var(--gray-200)') + ';background:' + (isSelected ? 'var(--primary)' : '#fff') + ';color:' + (isSelected ? '#fff' : 'var(--gray-700)') + ';">' + m + '월</button>'
+      );
+    }
+    grid.innerHTML = months.join('');
+  }
+
+  window.selectMonth = function(year, month) {
+    selectedYear = year;
+    selectedMonth = month;
+    document.getElementById('periodLabel').textContent = year + '년 ' + month + '월';
+    document.getElementById('monthPickerDropdown').style.display = 'none';
+    // 선택된 월로 대시보드 새로고침
+    if (currentClassId) {
+      const startDate = year + '-' + String(month).padStart(2, '0') + '-01';
+      const lastDay = new Date(year, month, 0).getDate();
+      const endDate = year + '-' + String(month).padStart(2, '0') + '-' + String(lastDay).padStart(2, '0');
+      loadDashboardWithPeriod(currentClassId, startDate, endDate);
+    }
+  };
+
+  // 외부 클릭 시 드롭다운 닫기
+  document.addEventListener('click', () => {
+    document.getElementById('monthPickerDropdown').style.display = 'none';
+  });
+
+  // Student search
+  document.getElementById('studentSearchInput').addEventListener('input', function() {
+    const query = this.value.trim().toLowerCase();
+    const rows = document.querySelectorAll('#studentTableBody tr');
+    rows.forEach(row => {
+      const name = row.querySelector('td:nth-child(2)')?.textContent?.toLowerCase() || '';
+      row.style.display = name.includes(query) ? '' : 'none';
+    });
+  });
+
+  async function loadClasses() {
+    try {
+      const res = await fetchWithAuth('/api/class');
+      const data = await res.json();
+      if (!data.success) return;
+      const select = document.getElementById('classSelect');
+      const classes = (data.classes || []).filter(c => c.my_role === 'owner' || c.owner_id === currentUser.id || currentUser.role === 'admin');
+      classes.forEach(c => {
+        const opt = document.createElement('option');
+        opt.value = c.id;
+        opt.textContent = c.name;
+        select.appendChild(opt);
+      });
+      // Show header with class selector
+      document.getElementById('classHeader').style.display = '';
+      if (classes.length > 0) {
+        // URL ?classId= 파라미터 우선; 없거나 일치 없으면 첫 클래스
+        const urlParams = new URLSearchParams(location.search);
+        const wantedId = parseInt(urlParams.get('classId'));
+        const target = classes.find(c => c.id === wantedId) || classes[0];
+        select.value = target.id;
+        loadDashboard(target.id);
+      }
+    } catch (err) { console.error('클래스 로드 실패:', err); }
+  }
+
+  document.getElementById('classSelect').addEventListener('change', (e) => {
+    const classId = parseInt(e.target.value);
+    if (classId) loadDashboard(classId);
+    else hideDashboard();
+  });
+
+  function hideDashboard() {
+    ['metricsArea','alertSection','radarSection','analysisTabsSection','studentSection','reportFooter'].forEach(id => {
+      document.getElementById(id).style.display = 'none';
+    });
+    document.getElementById('emptyState').style.display = '';
+  }
+
+  async function loadDashboard(classId) {
+    currentClassId = classId;
+    document.getElementById('emptyState').style.display = 'none';
+    try {
+      const res = await fetchWithAuth(`/api/growth/report/class/${classId}`);
+      const data = await res.json();
+      if (!data.success) { console.error('데이터 로드 실패:', data.message); return; }
+      renderDashboard(data);
+    } catch (err) {
+      console.error('대시보드 로드 실패:', err);
+    }
+  }
+
+  async function loadDashboardWithPeriod(classId, startDate, endDate) {
+    currentClassId = classId;
+    document.getElementById('emptyState').style.display = 'none';
+    try {
+      const res = await fetchWithAuth(`/api/growth/report/class/${classId}?startDate=${startDate}&endDate=${endDate}`);
+      const data = await res.json();
+      if (!data.success) { console.error('데이터 로드 실패:', data.message); return; }
+      renderDashboard(data);
+    } catch (err) {
+      console.error('대시보드 로드 실패:', err);
+    }
+  }
+
+  function renderDashboard(data) {
+    const d = data;
+    const students = d.students || [];
+    const studentCount = d.studentCount || 0;
+
+    // Class header
+    document.getElementById('classHeaderTitle').textContent = d.className || '클래스';
+    document.getElementById('classHeaderTeacher').innerHTML = '&#128104;&#8205;&#127979; 담임 ' + (currentUser?.display_name || '선생님');
+    document.getElementById('classHeaderCount').innerHTML = '&#128101; 학생 ' + studentCount + '명';
+
+    // ===== Metrics (4 cards: 정서현황, 기초학력현황, 오늘의학습, 독서현황) =====
+    const metricsArea = document.getElementById('metricsArea');
+    metricsArea.style.display = '';
+
+    // Emotion stats
+    const emotionStats = { positive: 0, negative: 0, none: 0 };
+    students.forEach(s => {
+      const em = s.latest_emotion || '';
+      if (posEmotions.includes(em)) emotionStats.positive++;
+      else if (negEmotions.includes(em)) emotionStats.negative++;
+      else emotionStats.none++;
+    });
+    const emotionTotal = students.length || 1;
+    const posRate = Math.round(emotionStats.positive / emotionTotal * 100);
+    const negRate = Math.round(emotionStats.negative / emotionTotal * 100);
+    const noneRate = 100 - posRate - negRate;
+
+    // Donut angles
+    const posDeg = Math.round(posRate * 3.6);
+    const negDeg = Math.round(negRate * 3.6);
+
+    // Daily learning stats — 오늘의학습 영역 데이터 사용
+    const dailyArea = d.areas?.['오늘의학습'] || {};
+    const dailyAvgScore = dailyArea.averageScore != null ? dailyArea.averageScore : 0;
+    const dailyCompletionRate = dailyArea.completionRate != null ? dailyArea.completionRate : 0;
+
+    // Reading stats
+    const totalBooks = students.reduce((s, st) => s + (st.areas?.['독서활동']?.bookCount || 0), 0);
+    const avgBooks = students.length ? (totalBooks / students.length).toFixed(1) : 0;
+
+    metricsArea.innerHTML = `
+      <!-- 정서 현황 -->
+      <div class="metric-card">
+        <div class="metric-header">
+          <div class="metric-title"><div class="metric-icon emotion">&#128155;</div> 정서 현황</div>
+          <span class="metric-badge up">${posRate > 50 ? '&#8593; ' + posRate + '%' : '&#8595; ' + posRate + '%'}</span>
+        </div>
+        <div class="metric-body">
+          <div class="metric-chart">
+            <div class="mini-donut" style="background: conic-gradient(var(--secondary) 0deg ${posDeg}deg, var(--danger) ${posDeg}deg ${posDeg+negDeg}deg, var(--gray-200) ${posDeg+negDeg}deg 360deg);">
+              <div class="mini-donut-inner">
+                <div class="mini-donut-value">${posRate}%</div>
+                <div class="mini-donut-label">긍정</div>
+              </div>
+            </div>
+          </div>
+          <div class="metric-stats">
+            <div class="metric-stat-row">
+              <span class="metric-stat-label"><span class="metric-stat-dot positive"></span> 긍정</span>
+              <span class="metric-stat-value">${posRate}%</span>
+            </div>
+            <div class="metric-stat-row">
+              <span class="metric-stat-label"><span class="metric-stat-dot negative"></span> 부정</span>
+              <span class="metric-stat-value">${negRate}%</span>
+            </div>
+            <div class="metric-stat-row">
+              <span class="metric-stat-label"><span class="metric-stat-dot neutral"></span> 무응답</span>
+              <span class="metric-stat-value">${noneRate}%</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 기초학력 현황 (예시 데이터) -->
+      <div class="metric-card">
+        <div class="metric-header">
+          <div class="metric-title"><div class="metric-icon basic">&#128203;</div> 기초학력 현황</div>
+          <span class="metric-badge" style="background:#fef3c7;color:#92400e;">예시</span>
+        </div>
+        <div class="metric-body" style="display:flex;flex-direction:column;gap:6px;">
+          <div style="display:flex;align-items:baseline;gap:4px;">
+            <div style="font-size:30px;font-weight:800;color:#2563eb;line-height:1;">73</div>
+            <div style="font-size:12px;color:var(--gray-500);font-weight:600;">점</div>
+            <div style="margin-left:auto;font-size:11px;color:var(--gray-400);">학급 평균</div>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:4px;font-size:11px;text-align:center;margin-top:2px;">
+            <div style="background:#eff6ff;border-radius:6px;padding:4px 0;"><div style="font-size:13px;font-weight:700;color:#3b82f6;">75</div><div style="color:var(--gray-500);">국어</div></div>
+            <div style="background:#f5f3ff;border-radius:6px;padding:4px 0;"><div style="font-size:13px;font-weight:700;color:#8b5cf6;">73</div><div style="color:var(--gray-500);">수학</div></div>
+            <div style="background:#fdf2f8;border-radius:6px;padding:4px 0;"><div style="font-size:13px;font-weight:700;color:#ec4899;">71</div><div style="color:var(--gray-500);">영어</div></div>
+          </div>
+          <div style="font-size:11px;color:#dc2626;font-weight:600;margin-top:2px;"><i class="fas fa-exclamation-circle"></i> 학습지원 대상 2명</div>
+        </div>
+      </div>
+
+      <!-- 오늘의 학습 -->
+      <div class="metric-card">
+        <div class="metric-header">
+          <div class="metric-title"><div class="metric-icon daily">&#128221;</div> 오늘의 학습</div>
+          <span class="metric-badge ${dailyCompletionRate > 50 ? 'up' : 'down'}">&#8593; ${Math.round(dailyCompletionRate)}%</span>
+        </div>
+        <div class="metric-body">
+          <div class="metric-big-number" style="width:100%;">
+            <div class="big-number-value">${Math.round(dailyCompletionRate)}<span class="big-number-unit">%</span></div>
+            <div class="big-number-label">학습 완료율</div>
+            <div class="big-number-sub">평균 점수 ${Math.round(dailyAvgScore)}점</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 독서 현황 (예시 데이터) -->
+      <div class="metric-card">
+        <div class="metric-header">
+          <div class="metric-title"><div class="metric-icon reading">&#128214;</div> 독서 현황</div>
+          <span class="metric-badge" style="background:#fef3c7;color:#92400e;">예시</span>
+        </div>
+        <div class="metric-body" style="display:flex;flex-direction:column;gap:6px;">
+          <div style="display:flex;align-items:baseline;gap:4px;">
+            <div style="font-size:30px;font-weight:800;color:#10b981;line-height:1;">9.2</div>
+            <div style="font-size:12px;color:var(--gray-500);font-weight:600;">권</div>
+            <div style="margin-left:auto;font-size:11px;color:var(--gray-400);">학생 평균</div>
+          </div>
+          <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--gray-500);margin-top:2px;">
+            <span>학급 총 <strong style="color:#3b82f6;">55권</strong></span>
+            <span>다독왕 <strong style="color:#92400e;">이학생</strong></span>
+          </div>
+          <div style="background:#f0fdf4;border-radius:6px;padding:6px 8px;font-size:11px;color:#065f46;margin-top:2px;">
+            <i class="fas fa-book"></i> 인기 도서 <strong>몽실언니</strong> (8회)
+          </div>
+        </div>
+      </div>
+    `;
+
+    // ===== Alert section (below metrics) =====
+    const alertSection = document.getElementById('alertSection');
+    alertSection.style.display = '';
+    const alerts = d.alerts || d.attentionStudents || [];
+    renderAlerts(alerts);
+
+    // ===== Radar chart =====
+    document.getElementById('radarSection').style.display = '';
+    renderRadarChart(d.areas || {});
+
+    // ===== Tabs =====
+    document.getElementById('analysisTabsSection').style.display = '';
+    renderAnalysisTabs(d);
+    showAnalysisTab('emotion');
+
+    // ===== Student table =====
+    document.getElementById('studentSection').style.display = '';
+    document.getElementById('toggleObsFormBtn').style.display = '';
+    document.getElementById('studentListTitle').innerHTML = '&#128101; 학생 목록 (' + studentCount + '명)';
+    currentStudents = d.students || [];
+    currentSortField = null;
+    currentSortOrder = 'asc';
+    updateSortIcons();
+    renderStudentTable(currentStudents);
+
+    // ===== Footer =====
+    document.getElementById('reportFooter').style.display = '';
+  }
+
+  // ===== Sort =====
+  let currentStudents = [];
+  let currentSortField = null;
+  let currentSortOrder = 'asc';
+
+  window.sortStudents = function(field) {
+    if (currentSortField === field) {
+      currentSortOrder = currentSortOrder === 'asc' ? 'desc' : 'asc';
+    } else {
+      currentSortField = field;
+      currentSortOrder = field === '이름' ? 'asc' : 'desc';
+    }
+    const sorted = [...currentStudents].sort((a, b) => {
+      let aVal, bVal;
+      if (field === '이름') {
+        aVal = (a.display_name || a.studentName || '').toLowerCase();
+        bVal = (b.display_name || b.studentName || '').toLowerCase();
+        return currentSortOrder === 'asc' ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
+      } else if (field === '종합점수') {
+        aVal = a.averageScore ?? -1;
+        bVal = b.averageScore ?? -1;
+      } else if (field === '정서') {
+        const emOrder = (em) => posEmotions.includes(em) ? 2 : negEmotions.includes(em) ? 0 : 1;
+        aVal = emOrder(a.latest_emotion || '');
+        bVal = emOrder(b.latest_emotion || '');
+      } else {
+        aVal = a.areas?.[field]?.score ?? -1;
+        bVal = b.areas?.[field]?.score ?? -1;
+      }
+      return currentSortOrder === 'asc' ? aVal - bVal : bVal - aVal;
+    });
+    updateSortIcons();
+    renderStudentTable(sorted);
+  };
+
+  function updateSortIcons() {
+    document.querySelectorAll('#studentTable th').forEach(th => th.classList.remove('sort-active'));
+    document.querySelectorAll('#studentTable .sort-icon').forEach(icon => {
+      icon.className = 'fas fa-sort sort-icon';
+    });
+    if (currentSortField) {
+      const icon = document.getElementById('sort-icon-' + currentSortField);
+      if (icon) {
+        icon.className = 'fas fa-sort-' + (currentSortOrder === 'asc' ? 'up' : 'down') + ' sort-icon';
+        icon.closest('th').classList.add('sort-active');
+      }
+    }
+  }
+
+  function scoreClass(v) {
+    if (v === '-' || v == null) return '';
+    if (v >= 80) return 'score-high';
+    if (v >= 60) return 'score-mid';
+    if (v >= 40) return 'score-low';
+    return 'score-danger';
+  }
+
+  function renderRadarChart(areas) {
+    const ctx = document.getElementById('radarChart').getContext('2d');
+    if (radarChartInstance) radarChartInstance.destroy();
+    const labels = AREAS.map(a => a.key);
+    const values = AREAS.map(a => {
+      const ad = areas[a.key] || {};
+      return ad.averageScore != null ? ad.averageScore : 0;
+    });
+    radarChartInstance = new Chart(ctx, {
+      type: 'radar',
+      data: {
+        labels,
+        datasets: [{
+          label: '클래스 평균',
+          data: values,
+          backgroundColor: 'rgba(37,99,235,.15)',
+          borderColor: 'rgba(37,99,235,.7)',
+          borderWidth: 2,
+          pointBackgroundColor: '#2563eb',
+          pointRadius: 4
+        }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        scales: { r: { beginAtZero: true, max: 100, ticks: { stepSize: 20, font: { size: 11 } }, pointLabels: { font: { size: 12 } } } },
+        plugins: { legend: { display: false } }
+      }
+    });
+  }
+
+  function renderAlerts(alerts) {
+    const countEl = document.getElementById('alertCount');
+    const list = document.getElementById('alertList');
+    if (!alerts.length) {
+      countEl.textContent = '0';
+      list.innerHTML = '<div class="no-alert"><div class="no-alert-icon">&#9989;</div><p>관심 필요 학생이 없습니다.</p></div>';
+      return;
+    }
+    countEl.textContent = Math.min(alerts.length, 3);
+    list.innerHTML = alerts.slice(0, 3).map(a => {
+      const level = (a.level === 'danger' || a.severity === 'high') ? 'danger' : 'warning';
+      const icon = level === 'danger' ? '&#128546;' : '&#128200;';
+      return `<div class="alert-item ${level}">
+        <div class="alert-type ${level}">${icon}</div>
+        <div class="alert-content">
+          <div class="alert-student">${a.studentName || a.display_name || '학생'}</div>
+          <div class="alert-reason">${a.message || a.reason || '성장 지표 하락'}</div>
+        </div>
+        <button class="alert-action" onclick="location.href='/growth/student-report.html?studentId=${a.studentId || a.student_id}'">상세보기 &#8594;</button>
+      </div>`;
+    }).join('');
+  }
+
+  function renderStudentTable(students) {
+    const tbody = document.getElementById('studentTableBody');
+    const obsSelect = document.getElementById('obsStudentSelect');
+    obsSelect.innerHTML = '<option value="">학생을 선택하세요</option>';
+    const colors = ['#2563eb','#10b981','#8b5cf6','#ec4899','#f59e0b','#06b6d4','#ef4444'];
+
+    if (!students.length) {
+      tbody.innerHTML = '<tr><td colspan="8" class="empty-state">등록된 학생이 없습니다.</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = students.map((s, i) => {
+      const c = colors[i % colors.length];
+      const name = s.display_name || s.studentName || s.username || '학생';
+      const initial = name.charAt(0);
+      const avg = s.averageScore != null ? Math.round(s.averageScore) : '-';
+
+      // Emotion badge (emoji style like prototype)
+      const em = s.latest_emotion || '';
+      let emotionBadge;
+      if (posEmotions.includes(em)) emotionBadge = '<span class="status-badge positive">&#128522; 긍정</span>';
+      else if (negEmotions.includes(em)) emotionBadge = '<span class="status-badge negative">&#128546; 부정</span>';
+      else emotionBadge = '<span class="status-badge neutral">&#128528; 무응답</span>';
+
+      // Area scores (학습역량, 오늘의학습)
+      const learningScore = s.areas?.['학습역량']?.hasData !== false ? (s.areas?.['학습역량']?.score != null ? Math.round(s.areas['학습역량'].score) : '-') : '-';
+      const dailyScore = s.areas?.['오늘의학습']?.hasData !== false ? (s.areas?.['오늘의학습']?.score != null ? Math.round(s.areas['오늘의학습'].score) : '-') : '-';
+
+      obsSelect.innerHTML += `<option value="${s.studentId || s.id}">${name}</option>`;
+      return `<tr onclick="location.href='/growth/student-report.html?studentId=${s.studentId || s.id}'">
+        <td><div class="student-avatar" style="background:${c}20;color:${c}">${initial}</div></td>
+        <td><strong>${name}</strong></td>
+        <td>${emotionBadge}</td>
+        <td class="score-cell ${scoreClass(avg)}"><strong>${avg}</strong></td>
+        <td class="score-cell ${scoreClass(learningScore)}">${learningScore}</td>
+        <td class="score-cell ${scoreClass(dailyScore)}">${dailyScore}</td>
+        <td><button class="btn btn-outline btn-sm obs-view-btn" data-student-id="${s.studentId || s.id}" data-student-name="${name}" onclick="event.stopPropagation();"><i class="fas fa-eye"></i></button></td>
+        <td><a href="/growth/student-report.html?studentId=${s.studentId || s.id}" class="detail-link" onclick="event.stopPropagation();">보기 &#8594;</a></td>
+      </tr>`;
+    }).join('');
+
+    tbody.querySelectorAll('.obs-view-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        showObservations(parseInt(btn.dataset.studentId), btn.dataset.studentName);
+      });
+    });
+  }
+
+  // Observation form toggle
+  document.getElementById('toggleObsFormBtn').addEventListener('click', () => {
+    document.getElementById('obsForm').classList.toggle('open');
+  });
+  document.getElementById('cancelObsBtn').addEventListener('click', () => {
+    document.getElementById('obsForm').classList.remove('open');
+  });
+
+  // Submit observation
+  document.getElementById('submitObsBtn').addEventListener('click', async () => {
+    const studentId = parseInt(document.getElementById('obsStudentSelect').value);
+    const area = document.getElementById('obsAreaSelect').value;
+    const content = document.getElementById('obsContent').value.trim();
+    if (!studentId) { alert('학생을 선택하세요.'); return; }
+    if (!content) { alert('관찰 내용을 입력하세요.'); return; }
+    try {
+      const res = await fetchWithAuth('/api/growth/report/observation', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ studentId, classId: currentClassId, area, content })
+      });
+      const data = await res.json();
+      if (data.success) {
+        alert('관찰 기록이 저장되었습니다.');
+        document.getElementById('obsContent').value = '';
+        document.getElementById('obsForm').classList.remove('open');
+        loadDashboard(currentClassId);
+      } else { alert(data.message || '저장 실패'); }
+    } catch (err) { alert('서버 오류가 발생했습니다.'); }
+  });
+
+  // View observations modal
+  async function showObservations(studentId, studentName) {
+    document.getElementById('obsModalTitle').textContent = studentName + ' 관찰 기록';
+    const timeline = document.getElementById('obsTimeline');
+    timeline.innerHTML = '<div style="text-align:center;padding:20px;color:var(--gray-400);"><i class="fas fa-spinner fa-spin"></i> 로딩 중...</div>';
+    document.getElementById('obsModal').classList.add('open');
+    try {
+      const res = await fetchWithAuth('/api/growth/report/observations/' + studentId + '?classId=' + (currentClassId || ''));
+      const data = await res.json();
+      if (!data.success || !data.observations?.length) {
+        timeline.innerHTML = '<div class="empty-state" style="padding:20px;"><p>관찰 기록이 없습니다.</p></div>';
+        return;
+      }
+      timeline.innerHTML = data.observations.map(o => {
+        const areaInfo = AREAS.find(a => a.key === o.area) || AREAS[0];
+        return `<div class="obs-item">
+          <div class="obs-dot" style="background:${areaInfo.color}"></div>
+          <div class="obs-content">
+            <div class="obs-text">${escapeHtml(o.content)}</div>
+            <div class="obs-meta"><span style="color:${areaInfo.color};font-weight:600;">${o.area || ''}</span> &middot; ${formatDate(o.created_at || o.createdAt)}</div>
+          </div>
+        </div>`;
+      }).join('');
+    } catch (err) {
+      timeline.innerHTML = '<div class="empty-state"><p>로딩에 실패했습니다.</p></div>';
+    }
+  }
+
+  document.getElementById('closeObsModal').addEventListener('click', () => {
+    document.getElementById('obsModal').classList.remove('open');
+  });
+  document.getElementById('obsModal').addEventListener('click', (e) => {
+    if (e.target === e.currentTarget) e.currentTarget.classList.remove('open');
+  });
+
+  function escapeHtml(str) {
+    if (!str) return '';
+    const d = document.createElement('div');
+    d.textContent = str;
+    return d.innerHTML;
+  }
+
+  function formatDate(dateStr) {
+    if (!dateStr) return '';
+    const d = new Date(dateStr);
+    return d.getFullYear() + '.' + String(d.getMonth()+1).padStart(2,'0') + '.' + String(d.getDate()).padStart(2,'0');
+  }
+
+  // ===== Analysis Tabs =====
+  window.showAnalysisTab = function(tabName) {
+    document.querySelectorAll('#analysisTabsSection .tab-btn').forEach(btn => btn.classList.remove('active'));
+    document.querySelectorAll('#analysisTabsSection .tab-content').forEach(tc => tc.classList.remove('active'));
+    const btns = document.querySelectorAll('#analysisTabsSection .tab-btn');
+    const tabNames = ['emotion','basic','learning','daily','reading','career','content'];
+    const idx = tabNames.indexOf(tabName);
+    if (idx >= 0 && btns[idx]) btns[idx].classList.add('active');
+    const tabEl = document.getElementById('tab-' + tabName);
+    if (tabEl) tabEl.classList.add('active');
+  };
+
+  function renderAnalysisTabs(data) {
+    const students = data.students || [];
+    const total = students.length || 1;
+
+    // --- 1. 정서발달 탭 (요일별 바차트 + 감정 태그 클라우드) ---
+    const emotionMap = {};
+    let posCount = 0, negCount = 0, noneCount = 0;
+    students.forEach(s => {
+      const em = s.latest_emotion || '';
+      if (posEmotions.includes(em)) posCount++;
+      else if (negEmotions.includes(em)) negCount++;
+      else noneCount++;
+      if (em) emotionMap[em] = (emotionMap[em] || 0) + 1;
+    });
+    // 전체 기간 감정 통계 (API에서 가져온 실제 데이터 우선 사용)
+    const apiEmotionCounts = data.emotionStats?.emotionCounts || [];
+    const emotionEntries = apiEmotionCounts.length > 0
+      ? apiEmotionCounts.map(e => [e.emotion, e.cnt])
+      : Object.entries(emotionMap).sort((a, b) => b[1] - a[1]);
+
+    // 실제 DB 기반 요일별 긍정 감정 비율
+    const weekdayPcts = data.emotionStats?.weekdayPositiveRates || [0, 0, 0, 0, 0];
+    const weekdays = ['월','화','수','목','금'];
+
+    // Build emotion tag cloud with emojis
+    const emotionTagEmojis = {
+      happy: '&#128522; 기뻐요', excited: '&#129321; 설레요', good: '&#128578; 좋아요', great: '&#129395; 최고에요', calm: '&#128524; 평온해요',
+      sad: '&#128546; 슬퍼요', angry: '&#128544; 화나요', anxious: '&#128560; 긴장돼요', tired: '&#128564; 피곤해요', frustrated: '&#128553; 답답해요'
+    };
+    const maxEmCount = emotionEntries.length > 0 ? emotionEntries[0][1] : 1;
+
+    document.getElementById('tab-emotion').innerHTML = `
+      <div class="analysis-grid">
+        <div class="analysis-card">
+          <div class="analysis-title">요일별 긍정 감정 비율</div>
+          <div class="weekday-chart">
+            ${weekdays.map((day, i) => `
+              <div class="weekday-bar">
+                <div class="weekday-pct">${weekdayPcts[i]}%</div>
+                <div class="weekday-bar-track">
+                  <div class="weekday-bar-fill positive" style="height: ${weekdayPcts[i]}%;"></div>
+                </div>
+                <span class="weekday-label">${day}</span>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+        <div class="analysis-card">
+          <div class="analysis-title">이번 달 주요 감정</div>
+          <div class="word-cloud">
+            ${emotionEntries.map(([em, cnt]) => {
+              const ratio = cnt / maxEmCount;
+              const sizeClass = ratio >= 0.9 ? 'size-5' : ratio >= 0.7 ? 'size-4' : ratio >= 0.5 ? 'size-3' : ratio >= 0.3 ? 'size-2' : 'size-1';
+              const label = emotionTagEmojis[em] || em;
+              return `<span class="word-tag ${sizeClass}" style="cursor:pointer;" onclick="showEmotionRespondents('${em}', '${label.replace(/'/g, "&#39;")}', ${cnt})" title="응답 학생 보기">${label} <span style="opacity:.75;font-size:0.85em;">(${cnt})</span></span>`;
+            }).join('')}
+            ${emotionEntries.length === 0 ? '<div style="padding:20px;color:var(--gray-400);font-size:13px;">감정 데이터가 없습니다</div>' : ''}
+          </div>
+        </div>
+      </div>`;
+
+    // --- 2. 기초학력 탭 (예시 데이터) — 5과목 + 다인원 대응 ---
+    {
+      const SUBJECTS = [
+        { key: 'korean',  label: '국어', color: '#3b82f6', bg: '#eff6ff' },
+        { key: 'math',    label: '수학', color: '#8b5cf6', bg: '#f5f3ff' },
+        { key: 'english', label: '영어', color: '#ec4899', bg: '#fdf2f8' },
+        { key: 'social',  label: '사회', color: '#f59e0b', bg: '#fffbeb' },
+        { key: 'science', label: '과학', color: '#10b981', bg: '#ecfdf5' }
+      ];
+      // 결정적 점수 생성 (학생명 기반 해시로 항상 같은 값) — 데모용
+      const hash = (s) => { let h = 0; for (let i = 0; i < s.length; i++) h = ((h << 5) - h + s.charCodeAt(i)) | 0; return Math.abs(h); };
+      const baseStudents = students.length > 0 ? students : [
+        { display_name: '강다은' }, { display_name: '박학생' }, { display_name: '이지원' },
+        { display_name: '정유진' }, { display_name: '김민서' }, { display_name: '최준호' }
+      ];
+      const sampleStudents = baseStudents.map(s => {
+        const name = s.display_name || s.studentName || s.name || '학생';
+        const h = hash(name);
+        // 학생별 학력 수준(학생당 베이스라인 50~85) + 과목별 변동(±10)
+        const baseline = 55 + (h % 31); // 55~85
+        const row = { name };
+        SUBJECTS.forEach((sub, i) => {
+          const variation = ((h >> (i * 3)) % 21) - 10; // -10 ~ +10
+          row[sub.key] = Math.max(30, Math.min(100, baseline + variation));
+        });
+        return row;
+      });
+      const subjectAvg = (key) => Math.round(sampleStudents.reduce((s, st) => s + st[key], 0) / sampleStudents.length);
+      const subjectAvgs = Object.fromEntries(SUBJECTS.map(s => [s.key, subjectAvg(s.key)]));
+      const levelOf = (s) => (s >= 80 ? '우수' : s >= 60 ? '보통' : s >= 40 ? '주의' : '지원');
+      const levelColor = (s) => (s >= 80 ? '#10b981' : s >= 60 ? '#2563eb' : s >= 40 ? '#f59e0b' : '#ef4444');
+      const studentMin = (s) => Math.min(...SUBJECTS.map(sub => s[sub.key]));
+      const supportCount = sampleStudents.filter(s => studentMin(s) < 60).length;
+      const ROW_HEIGHT = 38; // px per row
+      const VIEW_ROWS = 8;   // 표 영역에 보이는 행 수 (이상이면 스크롤)
+      const tableMaxH = ROW_HEIGHT * VIEW_ROWS + 40; // 헤더 포함 추정
+
+      document.getElementById('tab-basic').innerHTML = `
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;">
+          <span style="background:#fef3c7;color:#92400e;padding:5px 12px;border-radius:6px;font-size:13px;font-weight:700;letter-spacing:.3px;">예시</span>
+          <span style="font-size:13px;color:var(--gray-500);">실제 진단평가 연동 시 자동 표시됩니다</span>
+        </div>
+        <div class="analysis-grid">
+          <div class="analysis-card">
+            <div class="analysis-title">교과별 평균 (진단평가)</div>
+            <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:16px;">
+              ${SUBJECTS.map(sub => `
+                <div style="background:${sub.bg};border-radius:10px;padding:14px 6px;text-align:center;border-top:3px solid ${sub.color};">
+                  <div style="font-size:13px;color:var(--gray-500);margin-bottom:4px;font-weight:600;">${sub.label}</div>
+                  <div style="font-size:28px;font-weight:800;color:${sub.color};line-height:1.1;">${subjectAvgs[sub.key]}<span style="font-size:13px;font-weight:500;color:var(--gray-400);margin-left:1px;">점</span></div>
+                </div>`).join('')}
+            </div>
+            <div style="font-size:14px;color:var(--gray-600);padding:12px 14px;background:#fff7ed;border-radius:8px;border:1px solid #fed7aa;margin-bottom:12px;">
+              <i class="fas fa-info-circle" style="color:#f59e0b;"></i> 학습지원 대상(60점 미만): <strong style="color:#dc2626;">${supportCount}명</strong> / ${sampleStudents.length}명
+            </div>
+            <div style="display:flex;flex-wrap:wrap;gap:10px;font-size:13px;color:var(--gray-600);">
+              <span style="display:inline-flex;align-items:center;gap:5px;"><span style="display:inline-block;width:12px;height:12px;border-radius:3px;background:#10b981;"></span>우수(80+)</span>
+              <span style="display:inline-flex;align-items:center;gap:5px;"><span style="display:inline-block;width:12px;height:12px;border-radius:3px;background:#2563eb;"></span>보통(60~79)</span>
+              <span style="display:inline-flex;align-items:center;gap:5px;"><span style="display:inline-block;width:12px;height:12px;border-radius:3px;background:#f59e0b;"></span>주의(40~59)</span>
+              <span style="display:inline-flex;align-items:center;gap:5px;"><span style="display:inline-block;width:12px;height:12px;border-radius:3px;background:#ef4444;"></span>지원(40미만)</span>
+            </div>
+          </div>
+          <div class="analysis-card">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px;">
+              <div class="analysis-title" style="margin:0;">학생별 진단 결과</div>
+              <div style="display:flex;gap:8px;align-items:center;">
+                <input type="text" id="basicSearchInput" placeholder="🔍 학생 검색" oninput="filterBasicStudents(this.value)" style="padding:6px 10px;border:1px solid var(--gray-200);border-radius:6px;font-size:13px;width:130px;">
+                <select id="basicSortSelect" onchange="sortBasicStudents(this.value)" style="padding:6px 8px;border:1px solid var(--gray-200);border-radius:6px;font-size:13px;background:#fff;">
+                  <option value="default">정렬: 기본</option>
+                  <option value="avg-desc">평균 ↓</option>
+                  <option value="avg-asc">평균 ↑</option>
+                  <option value="min-asc">최저점 ↑</option>
+                </select>
+              </div>
+            </div>
+            <div style="overflow:auto;max-height:${tableMaxH}px;border:1px solid var(--gray-100);border-radius:8px;">
+              <table id="basicResultTable" style="width:100%;border-collapse:collapse;font-size:14px;min-width:420px;">
+                <thead style="position:sticky;top:0;background:#f9fafb;z-index:1;">
+                  <tr>
+                    <th style="padding:10px 8px;text-align:left;font-weight:600;color:var(--gray-600);font-size:13px;border-bottom:1px solid var(--gray-200);position:sticky;left:0;background:#f9fafb;">이름</th>
+                    ${SUBJECTS.map(sub => `<th style="padding:10px 6px;text-align:center;font-weight:700;color:${sub.color};font-size:13px;border-bottom:1px solid var(--gray-200);min-width:48px;">${sub.label}</th>`).join('')}
+                    <th style="padding:10px 6px;text-align:center;font-weight:700;color:var(--gray-700);font-size:13px;border-bottom:1px solid var(--gray-200);min-width:48px;">평균</th>
+                    <th style="padding:10px 8px;text-align:center;font-weight:700;color:var(--gray-700);font-size:13px;border-bottom:1px solid var(--gray-200);min-width:56px;">판정</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${sampleStudents.map(s => {
+                    const min = studentMin(s);
+                    const avg = Math.round(SUBJECTS.reduce((sum, sub) => sum + s[sub.key], 0) / SUBJECTS.length);
+                    return `<tr class="basic-row" data-name="${escapeHtml(s.name)}" data-avg="${avg}" data-min="${min}" style="border-bottom:1px solid var(--gray-100);height:${ROW_HEIGHT}px;">
+                      <td style="padding:0 8px;font-weight:600;font-size:14px;white-space:nowrap;position:sticky;left:0;background:#fff;">${escapeHtml(s.name)}</td>
+                      ${SUBJECTS.map(sub => `<td style="padding:0 6px;text-align:center;color:${levelColor(s[sub.key])};font-weight:700;font-size:14px;">${s[sub.key]}</td>`).join('')}
+                      <td style="padding:0 6px;text-align:center;color:var(--gray-700);font-weight:800;font-size:14px;background:#f9fafb;">${avg}</td>
+                      <td style="padding:0 8px;text-align:center;"><span style="background:${levelColor(min)}20;color:${levelColor(min)};padding:3px 9px;border-radius:6px;font-size:12px;font-weight:700;white-space:nowrap;">${levelOf(min)}</span></td>
+                    </tr>`;
+                  }).join('')}
+                </tbody>
+              </table>
+            </div>
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px;font-size:13px;color:var(--gray-500);">
+              <span>총 <strong id="basicVisibleCount">${sampleStudents.length}</strong> / ${sampleStudents.length}명</span>
+              <span>${sampleStudents.length > VIEW_ROWS ? '<i class="fas fa-arrows-alt-v"></i> 스크롤하여 더 보기' : ''}</span>
+            </div>
+          </div>
+        </div>`;
+    }
+
+    // --- 3. 학습역량 탭 ---
+    const learnScores = students.map(s => ({ name: s.display_name || s.studentName, score: s.areas?.['학습역량']?.score ?? null })).filter(s => s.score !== null);
+    const learnSorted = [...learnScores].sort((a, b) => b.score - a.score);
+    const learnAvg = learnScores.length > 0 ? Math.round(learnScores.reduce((s, l) => s + l.score, 0) / learnScores.length) : 0;
+
+    document.getElementById('tab-learning').innerHTML = `
+      <div class="analysis-grid">
+        <div class="analysis-card">
+          <div class="analysis-title">학습역량 점수 분포</div>
+          <div style="text-align:center;padding:12px;margin-bottom:12px;border-radius:10px;background:var(--purple-light);">
+            <div style="font-size:28px;font-weight:700;color:#8b5cf6;">${learnAvg}<span style="font-size:14px;font-weight:500;">점</span></div>
+            <div style="font-size:12px;color:var(--gray-500);">클래스 평균</div>
+          </div>
+          ${learnSorted.map(s => {
+            const color = s.score >= 80 ? '#10b981' : s.score >= 60 ? '#2563eb' : s.score >= 40 ? '#f59e0b' : '#ef4444';
+            return `<div class="emotion-bar-row">
+              <div class="emotion-bar-label">${s.name}</div>
+              <div class="emotion-bar-track"><div class="emotion-bar-fill" style="width:${Math.min(s.score,100)}%;background:${color};">${s.score}점</div></div>
+            </div>`;
+          }).join('') || '<div style="padding:12px;text-align:center;color:var(--gray-400);">데이터 없음</div>'}
+        </div>
+        <div class="analysis-card">
+          <div class="analysis-title">학습역량 순위</div>
+          ${learnSorted.slice(0, 10).map((s, i) => {
+            const rankClass = i === 0 ? '' : i === 1 ? 'silver' : i === 2 ? 'bronze' : '';
+            return `<div class="student-rank-item">
+              <div class="rank-num ${rankClass}">${i+1}</div>
+              <div style="flex:1;"><strong>${s.name}</strong></div>
+              <span style="font-weight:700;color:${s.score >= 60 ? '#059669' : '#d97706'};">${s.score}점</span>
+            </div>`;
+          }).join('') || '<div style="padding:12px;text-align:center;color:var(--gray-400);">데이터 없음</div>'}
+        </div>
+      </div>`;
+
+    // --- 4. 오늘의학습 탭 (날짜별 학생 참여 테이블) ---
+    document.getElementById('tab-daily').innerHTML = `
+      <div style="margin-bottom:16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+        <div style="display:flex;gap:4px;">
+          <button class="daily-period-btn active" onclick="loadDailyLearning('weekly')" id="dailyBtnWeekly" style="padding:6px 16px;border-radius:8px;border:1px solid var(--gray-200);background:var(--primary);color:#fff;font-size:13px;font-weight:600;cursor:pointer;">주간</button>
+          <button class="daily-period-btn" onclick="loadDailyLearning('monthly')" id="dailyBtnMonthly" style="padding:6px 16px;border-radius:8px;border:1px solid var(--gray-200);background:#fff;color:var(--gray-600);font-size:13px;font-weight:600;cursor:pointer;">월간</button>
+        </div>
+        <span id="dailyPeriodLabel" style="font-size:13px;color:var(--gray-500);"></span>
+      </div>
+      <div id="dailyLearningTableWrap" style="overflow-x:auto;">
+        <div style="text-align:center;padding:40px;color:var(--gray-400);">데이터 로딩 중...</div>
+      </div>
+      <div style="margin-top:12px;display:flex;gap:16px;font-size:12px;color:var(--gray-500);flex-wrap:wrap;">
+        <span><span style="display:inline-block;width:12px;height:12px;border-radius:3px;background:#10b981;vertical-align:middle;"></span> 완료</span>
+        <span><span style="display:inline-block;width:12px;height:12px;border-radius:3px;background:#f59e0b;vertical-align:middle;"></span> 부분 완료</span>
+        <span><span style="display:inline-block;width:12px;height:12px;border-radius:3px;background:#ef4444;vertical-align:middle;"></span> 미참여</span>
+        <span><span style="display:inline-block;width:12px;height:12px;border-radius:3px;background:var(--gray-200);vertical-align:middle;"></span> 학습 없음</span>
+      </div>`;
+    // 초기 로드
+    loadDailyLearning('weekly');
+
+    // --- 5. 독서활동 탭 (예시 데이터) ---
+    {
+      const readingStudents = (students.length > 0 ? students : [
+        { display_name: '강다은' }, { display_name: '박학생' }, { display_name: '이지원' },
+        { display_name: '정유진' }, { display_name: '김민서' }, { display_name: '최준호' }
+      ]).slice(0, 6).map((s, i) => ({
+        name: s.display_name || s.studentName || ('학생' + (i+1)),
+        books: [12, 8, 5, 17, 3, 10][i % 6],
+        pages: [1240, 820, 510, 1890, 320, 1020][i % 6],
+        minutes: [420, 280, 180, 580, 120, 350][i % 6]
+      }));
+      const totalBooks = readingStudents.reduce((s, st) => s + st.books, 0);
+      const avgBooks = Math.round(totalBooks / readingStudents.length * 10) / 10;
+      const topReader = [...readingStudents].sort((a, b) => b.books - a.books)[0];
+      const popularBooks = [
+        { title: '몽실언니', author: '권정생', genre: '동화', cnt: 8 },
+        { title: '어린이를 위한 사피엔스', author: '유발 하라리', genre: '교양', cnt: 6 },
+        { title: '마당을 나온 암탉', author: '황선미', genre: '동화', cnt: 5 },
+        { title: '이상한 과자가게 전천당', author: '히로시마 레이코', genre: '판타지', cnt: 5 },
+        { title: '해리포터와 마법사의 돌', author: 'J.K.롤링', genre: '판타지', cnt: 4 }
+      ];
+      const maxBooksVal = Math.max(...readingStudents.map(s => s.books));
+      document.getElementById('tab-reading').innerHTML = `
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;">
+          <span style="background:#fef3c7;color:#92400e;padding:3px 10px;border-radius:6px;font-size:11px;font-weight:700;letter-spacing:.3px;">예시</span>
+          <span style="font-size:12px;color:var(--gray-500);">학교도서관 시스템 연동 시 자동 표시됩니다</span>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:18px;">
+          <div style="background:#eff6ff;border-radius:10px;padding:14px;text-align:center;border-top:3px solid #3b82f6;">
+            <div style="font-size:11px;color:var(--gray-500);margin-bottom:4px;">학급 총 독서량</div>
+            <div style="font-size:24px;font-weight:800;color:#3b82f6;">${totalBooks}<span style="font-size:11px;font-weight:500;color:var(--gray-400);">권</span></div>
+          </div>
+          <div style="background:#f0fdf4;border-radius:10px;padding:14px;text-align:center;border-top:3px solid #10b981;">
+            <div style="font-size:11px;color:var(--gray-500);margin-bottom:4px;">학생 평균</div>
+            <div style="font-size:24px;font-weight:800;color:#10b981;">${avgBooks}<span style="font-size:11px;font-weight:500;color:var(--gray-400);">권</span></div>
+          </div>
+          <div style="background:#fef3c7;border-radius:10px;padding:14px;text-align:center;border-top:3px solid #f59e0b;">
+            <div style="font-size:11px;color:var(--gray-500);margin-bottom:4px;">이번 달 다독왕</div>
+            <div style="font-size:18px;font-weight:800;color:#92400e;">${topReader.name}</div>
+            <div style="font-size:11px;color:#b45309;">${topReader.books}권</div>
+          </div>
+        </div>
+        <div class="analysis-grid">
+          <div class="analysis-card">
+            <div class="analysis-title">학생별 독서량</div>
+            ${readingStudents.map(s => {
+              const pct = Math.round(s.books / maxBooksVal * 100);
+              const color = s.books >= 10 ? '#10b981' : s.books >= 5 ? '#3b82f6' : '#f59e0b';
+              return `<div class="emotion-bar-row">
+                <div class="emotion-bar-label">${s.name}</div>
+                <div class="emotion-bar-track"><div class="emotion-bar-fill" style="width:${pct}%;background:${color};">${s.books}권</div></div>
+              </div>`;
+            }).join('')}
+          </div>
+          <div class="analysis-card">
+            <div class="analysis-title">인기 도서 Top 5</div>
+            ${popularBooks.map((b, i) => {
+              const rankClass = i === 0 ? '' : i === 1 ? 'silver' : i === 2 ? 'bronze' : '';
+              return `<div class="student-rank-item">
+                <div class="rank-num ${rankClass}">${i+1}</div>
+                <div style="flex:1;">
+                  <div style="font-weight:600;font-size:13px;">${b.title}</div>
+                  <div style="font-size:11px;color:var(--gray-400);">${b.author} · ${b.genre}</div>
+                </div>
+                <span style="font-weight:700;color:#3b82f6;">${b.cnt}회</span>
+              </div>`;
+            }).join('')}
+          </div>
+        </div>`;
+    }
+
+    // --- 6. 진로탐색 탭 (서비스 미제공) ---
+    document.getElementById('tab-career').innerHTML = `
+      <div style="text-align:center;padding:60px 20px;">
+        <div style="font-size:48px;margin-bottom:16px;opacity:0.3;">&#128717;</div>
+        <div style="font-size:18px;font-weight:600;color:var(--gray-500);margin-bottom:8px;">서비스 미제공</div>
+        <div style="font-size:14px;color:var(--gray-400);">외부 데이터 연동 시 표시됩니다</div>
+      </div>`;
+
+    // --- 7. 콘텐츠 활용 탭 ---
+    const cu = data.contentUsage || {};
+    const cuByType = cu.byType || [];
+    const cuByService = cu.byService || [];
+    const cuTotal = cu.totalActivities || 0;
+    const cuUnique = cu.uniqueContents || 0;
+    if (cuTotal === 0) {
+      document.getElementById('tab-content').innerHTML = `
+        <div style="text-align:center;padding:60px 20px;">
+          <div style="font-size:48px;margin-bottom:16px;opacity:0.3;">&#128187;</div>
+          <div style="font-size:18px;font-weight:600;color:var(--gray-500);margin-bottom:8px;">데이터 없음</div>
+          <div style="font-size:14px;color:var(--gray-400);">아직 학습 활동 기록이 없습니다</div>
+        </div>`;
+    } else {
+      const typeLabels = { homework: '과제', exam: '평가', lesson: '수업활동', quiz: '퀴즈', assignment: '과제물', activity: '활동', external: '외부연동', '기타': '기타',
+        content_view: '콘텐츠 조회', lesson_view: '수업 조회', homework_submit: '과제 제출', homework_graded: '과제 채점',
+        exam_complete: '평가 완료', daily_complete: '오늘의 학습', diagnosis_complete: '진단 완료',
+        attendance_checkin: '출석 체크인', post_create: '게시물 작성', survey_respond: '설문 응답', portfolio_add: '포트폴리오 추가' };
+      const typeMaxCnt = cuByType.length > 0 ? Math.max(...cuByType.map(t => t.cnt)) : 1;
+      const typeColors = ['#2563eb','#8b5cf6','#10b981','#f59e0b','#ef4444','#06b6d4','#ec4899','#6366f1'];
+      const typeBarsHtml = cuByType.map((t, i) => {
+        const label = typeLabels[t.activity_type] || toKoActivityType(t.activity_type) || '기타';
+        const pct = Math.round(t.cnt / typeMaxCnt * 100);
+        const color = typeColors[i % typeColors.length];
+        const avgScore = t.avg_score != null ? Math.round(t.avg_score * 100) + '%' : '-';
+        return `<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
+          <div style="width:80px;font-size:13px;color:var(--gray-600);text-align:right;">${label}</div>
+          <div style="flex:1;background:var(--gray-100);border-radius:6px;height:22px;overflow:hidden;">
+            <div style="width:${pct}%;background:${color};height:100%;border-radius:6px;display:flex;align-items:center;padding-left:8px;">
+              <span style="font-size:11px;color:#fff;font-weight:600;">${t.cnt}건</span>
+            </div>
+          </div>
+          <div style="width:50px;font-size:12px;color:var(--gray-500);text-align:right;">${avgScore}</div>
+        </div>`;
+      }).join('');
+
+      const svcMaxCnt = cuByService.length > 0 ? Math.max(...cuByService.map(s => s.cnt)) : 1;
+      const svcBarsHtml = cuByService.length > 0 ? cuByService.slice(0, 5).map((s, i) => {
+        const pct = Math.round(s.cnt / svcMaxCnt * 100);
+        const color = typeColors[(i + 3) % typeColors.length];
+        return `<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
+          <div style="width:100px;font-size:13px;color:var(--gray-600);text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${toKoSource(s.source_service)}</div>
+          <div style="flex:1;background:var(--gray-100);border-radius:6px;height:22px;overflow:hidden;">
+            <div style="width:${pct}%;background:${color};height:100%;border-radius:6px;display:flex;align-items:center;padding-left:8px;">
+              <span style="font-size:11px;color:#fff;font-weight:600;">${s.cnt}건</span>
+            </div>
+          </div>
+        </div>`;
+      }).join('') : '<div style="color:var(--gray-400);font-size:13px;">서비스별 데이터 없음</div>';
+
+      document.getElementById('tab-content').innerHTML = `
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;">
+          <div>
+            <div style="font-size:15px;font-weight:700;margin-bottom:4px;">활동 유형별 현황</div>
+            <div style="font-size:13px;color:var(--gray-500);margin-bottom:16px;">총 ${cuTotal}건 | ${cuUnique}개 콘텐츠</div>
+            ${typeBarsHtml}
+          </div>
+          <div>
+            <div style="font-size:15px;font-weight:700;margin-bottom:4px;">서비스별 활용</div>
+            <div style="font-size:13px;color:var(--gray-500);margin-bottom:16px;">Top 5 서비스</div>
+            ${svcBarsHtml}
+            <div style="margin-top:24px;padding:16px;background:var(--gray-50);border-radius:12px;">
+              <div style="font-size:13px;font-weight:600;margin-bottom:8px;">요약 통계</div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:13px;">
+                <div>총 활동: <strong>${cuTotal}건</strong></div>
+                <div>활용 콘텐츠: <strong>${cuUnique}개</strong></div>
+                <div>활동 유형: <strong>${cuByType.length}종</strong></div>
+                <div>연동 서비스: <strong>${cuByService.length}개</strong></div>
+              </div>
+            </div>
+          </div>
+        </div>`;
+    }
+  }
+
+  // ===== 오늘의 학습 상세 테이블 로드 =====
+  const DAY_NAMES = ['일','월','화','수','목','금','토'];
+  window.loadDailyLearning = async function(period) {
+    // 버튼 활성화 토글
+    document.getElementById('dailyBtnWeekly').style.background = period === 'weekly' ? 'var(--primary)' : '#fff';
+    document.getElementById('dailyBtnWeekly').style.color = period === 'weekly' ? '#fff' : 'var(--gray-600)';
+    document.getElementById('dailyBtnMonthly').style.background = period === 'monthly' ? 'var(--primary)' : '#fff';
+    document.getElementById('dailyBtnMonthly').style.color = period === 'monthly' ? '#fff' : 'var(--gray-600)';
+
+    const wrap = document.getElementById('dailyLearningTableWrap');
+    wrap.innerHTML = '<div style="text-align:center;padding:40px;color:var(--gray-400);">데이터 로딩 중...</div>';
+
+    try {
+      const classId = currentClassId;
+      const res = await fetch(`/api/growth/report/class/${classId}/daily-learning?period=${period}`);
+      const data = await res.json();
+      if (!data.success) throw new Error(data.message);
+
+      // 기간 라벨
+      const label = document.getElementById('dailyPeriodLabel');
+      if (data.startDate && data.endDate) {
+        label.textContent = data.startDate.replace(/-/g, '.') + ' ~ ' + data.endDate.replace(/-/g, '.');
+      }
+
+      const { students, dates, sets } = data;
+
+      if (!students || students.length === 0 || !dates || dates.length === 0) {
+        wrap.innerHTML = '<div style="text-align:center;padding:40px;color:var(--gray-400);">해당 기간 데이터가 없습니다.</div>';
+        return;
+      }
+
+      // 학습 세트가 있는 날짜 세트
+      const setDates = new Set(sets.map(s => s.targetDate));
+
+      // 테이블 생성
+      let html = '<table style="width:100%;border-collapse:collapse;font-size:13px;min-width:600px;">';
+
+      // 헤더 1: 날짜
+      html += '<thead><tr>';
+      html += '<th style="position:sticky;left:0;background:#fff;z-index:2;padding:8px 12px;border-bottom:2px solid var(--gray-200);text-align:left;min-width:100px;font-weight:600;">학생</th>';
+      dates.forEach(d => {
+        const dt = new Date(d + 'T00:00:00');
+        const dayName = DAY_NAMES[dt.getDay()];
+        const dayNum = dt.getDate();
+        const isToday = d === new Date().toISOString().slice(0, 10);
+        const hasSet = setDates.has(d);
+        const isWeekend = dt.getDay() === 0 || dt.getDay() === 6;
+        html += '<th style="padding:6px 4px;border-bottom:2px solid var(--gray-200);text-align:center;min-width:52px;font-weight:500;' +
+          (isToday ? 'background:var(--primary-light);' : '') +
+          (isWeekend ? 'color:var(--gray-400);' : '') + '">' +
+          '<div style="font-size:12px;' + (isToday ? 'color:var(--primary);font-weight:700;' : '') + '">' + dayNum + '</div>' +
+          '<div style="font-size:11px;color:' + (isToday ? 'var(--primary)' : 'var(--gray-400)') + ';">' + dayName + '</div>' +
+          (hasSet ? '<div style="width:6px;height:6px;background:var(--primary);border-radius:50%;margin:2px auto 0;"></div>' : '') +
+          '</th>';
+      });
+      html += '<th style="padding:6px 8px;border-bottom:2px solid var(--gray-200);text-align:center;min-width:60px;font-weight:600;">참여율</th>';
+      html += '<th style="padding:6px 8px;border-bottom:2px solid var(--gray-200);text-align:center;min-width:60px;font-weight:600;">정답률</th>';
+      html += '</tr></thead>';
+
+      // 바디: 학생별 행 — 모든 셀 고정 높이로 통일하여 행 높이 일관성 유지
+      const ROW_H = 56; // px — 학생당 행 높이
+      const CELL_INNER = 'display:flex;flex-direction:column;align-items:center;justify-content:center;height:' + ROW_H + 'px;line-height:1.2;';
+      html += '<tbody>';
+      students.forEach(st => {
+        html += '<tr style="height:' + ROW_H + 'px;">';
+        html += '<td style="position:sticky;left:0;background:#fff;z-index:1;padding:0 12px;border-bottom:1px solid var(--gray-100);font-weight:500;white-space:nowrap;height:' + ROW_H + 'px;vertical-align:middle;font-size:14px;">' + escapeHtml(st.name) + '</td>';
+        dates.forEach(d => {
+          const info = st.daily[d];
+          const hasSet = setDates.has(d);
+          const isToday = d === new Date().toISOString().slice(0, 10);
+          // 해당 날짜의 set id 찾기
+          const dateSet = sets.find(s => s.targetDate === d);
+          let inner = '';
+          let cellBg = '';
+          let clickable = false;
+          if (!hasSet) {
+            cellBg = 'var(--gray-50)';
+            inner = '<span style="color:var(--gray-300);font-size:14px;">-</span>';
+          } else if (info && info.participated) {
+            clickable = true;
+            const scoreLine = info.score != null
+              ? '<div style="font-size:11px;margin-top:2px;color:' + (info.accuracy >= 100 ? '#059669' : '#d97706') + ';">' + info.score + '점</div>'
+              : '';
+            if (info.accuracy >= 100) {
+              cellBg = '#d1fae5';
+              inner = '<span style="color:#059669;font-weight:700;font-size:15px;">✓</span>' + scoreLine;
+            } else {
+              cellBg = '#fef3c7';
+              inner = '<span style="color:#d97706;font-weight:700;font-size:13px;">' + info.accuracy + '%</span>' + scoreLine;
+            }
+          } else {
+            cellBg = '#fee2e2';
+            inner = '<span style="color:#dc2626;font-weight:700;font-size:14px;">✕</span>';
+          }
+          const cellContent = '<div style="' + CELL_INNER + '">' + inner + '</div>';
+          const clickAttr = clickable && dateSet ? ` onclick="openDailyResultModal(${st.id}, ${dateSet.id}, '${escapeHtml(st.name)}', '${d}')" title="정오답 상세 보기"` : '';
+          html += '<td' + clickAttr + ' style="padding:0;border-bottom:1px solid var(--gray-100);text-align:center;vertical-align:middle;background:' + cellBg + ';height:' + ROW_H + 'px;' +
+            (isToday ? 'box-shadow:inset 0 0 0 2px var(--primary-light);' : '') +
+            (clickable ? 'cursor:pointer;' : '') + '">' + cellContent + '</td>';
+        });
+
+        // 참여율
+        const prColor = st.participationRate >= 80 ? '#059669' : st.participationRate >= 50 ? '#d97706' : '#dc2626';
+        html += '<td style="padding:0 8px;border-bottom:1px solid var(--gray-100);text-align:center;vertical-align:middle;font-weight:700;font-size:14px;color:' + prColor + ';height:' + ROW_H + 'px;">' + st.participationRate + '%</td>';
+
+        // 평균 정답률
+        const scoreColor = st.avgScore == null ? 'var(--gray-400)' : st.avgScore >= 80 ? '#059669' : st.avgScore >= 50 ? '#d97706' : '#dc2626';
+        html += '<td style="padding:0 8px;border-bottom:1px solid var(--gray-100);text-align:center;vertical-align:middle;font-weight:700;font-size:14px;color:' + scoreColor + ';height:' + ROW_H + 'px;">' + (st.avgScore != null ? st.avgScore + '점' : '-') + '</td>';
+        html += '</tr>';
+      });
+      html += '</tbody>';
+
+      // 하단 요약 행: 날짜별 참여 학생 수 — 학생 행과 동일 높이/정렬
+      html += '<tfoot><tr style="height:' + ROW_H + 'px;">';
+      html += '<td style="position:sticky;left:0;background:var(--gray-50);z-index:1;padding:0 12px;border-top:2px solid var(--gray-200);font-weight:700;font-size:14px;color:var(--gray-600);height:' + ROW_H + 'px;vertical-align:middle;">참여 학생</td>';
+      dates.forEach(d => {
+        const hasSet = setDates.has(d);
+        if (!hasSet) {
+          html += '<td style="padding:0 4px;border-top:2px solid var(--gray-200);text-align:center;vertical-align:middle;background:var(--gray-50);font-size:14px;color:var(--gray-300);height:' + ROW_H + 'px;">-</td>';
+        } else {
+          const participated = students.filter(s => s.daily[d]?.participated).length;
+          const total = students.length;
+          const pct = total > 0 ? Math.round(participated / total * 100) : 0;
+          const c = pct >= 80 ? '#059669' : pct >= 50 ? '#d97706' : '#dc2626';
+          html += '<td style="padding:0 4px;border-top:2px solid var(--gray-200);text-align:center;vertical-align:middle;background:var(--gray-50);font-size:15px;font-weight:700;color:' + c + ';height:' + ROW_H + 'px;">' + participated + '/' + total + '</td>';
+        }
+      });
+      html += '<td colspan="2" style="border-top:2px solid var(--gray-200);background:var(--gray-50);"></td>';
+      html += '</tr></tfoot>';
+
+      html += '</table>';
+
+      // 학습 세트 요약
+      if (sets.length > 0) {
+        html += '<div style="margin-top:16px;padding:12px 16px;background:var(--gray-50);border-radius:10px;">';
+        html += '<div style="font-size:13px;font-weight:600;margin-bottom:8px;color:var(--gray-600);">📋 학습 세트 현황</div>';
+        html += '<div style="display:flex;gap:8px;flex-wrap:wrap;">';
+        sets.forEach(s => {
+          html += '<div style="padding:6px 12px;background:#fff;border:1px solid var(--gray-200);border-radius:8px;font-size:12px;">' +
+            '<strong>' + escapeHtml(s.title) + '</strong>' +
+            '<span style="margin-left:6px;color:var(--gray-400);">' + s.targetDate.slice(5).replace('-', '/') + '</span>' +
+            (s.subject ? '<span style="margin-left:6px;color:var(--primary);">' + s.subject + '</span>' : '') +
+            '<span style="margin-left:6px;color:var(--gray-400);">' + s.itemCount + '문항</span>' +
+            '</div>';
+        });
+        html += '</div></div>';
+      }
+
+      wrap.innerHTML = html;
+    } catch (err) {
+      console.error('Daily learning load error:', err);
+      wrap.innerHTML = '<div style="text-align:center;padding:40px;color:var(--gray-400);">데이터를 불러올 수 없습니다.</div>';
+    }
+  };
+
+  // ===== 교사용 정오답 상세 모달 =====
+  window.openDailyResultModal = async function(studentId, setId, studentName, dateStr) {
+    let modal = document.getElementById('dailyResultModal');
+    if (!modal) {
+      modal = document.createElement('div');
+      modal.id = 'dailyResultModal';
+      modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px;';
+      modal.innerHTML = '<div id="dailyResultBox" style="background:#fff;border-radius:14px;max-width:820px;width:100%;max-height:90vh;overflow-y:auto;padding:24px;"></div>';
+      modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
+      document.body.appendChild(modal);
+    }
+    const box = modal.querySelector('#dailyResultBox');
+    box.innerHTML = '<div style="text-align:center;padding:40px;color:#94a3b8;">로딩 중...</div>';
+
+    try {
+      const itemsRes = await fetch(`/api/growth/report/student/${studentId}/daily-set/${setId}/items`).then(r => r.json());
+      if (!itemsRes.success) throw new Error(itemsRes.message);
+      const { set, student, items } = itemsRes;
+
+      let html = `
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px;">
+          <div>
+            <div style="font-size:18px;font-weight:800;color:#1e293b;">${escapeHtml(student.display_name || student.username)} · ${escapeHtml(set.title)}</div>
+            <div style="font-size:12px;color:#64748b;margin-top:4px;">📅 ${set.target_date} · ${escapeHtml(set.target_subject||'')}</div>
+          </div>
+          <button onclick="document.getElementById('dailyResultModal').remove();" style="background:none;border:none;font-size:24px;color:#94a3b8;cursor:pointer;line-height:1;">×</button>
+        </div>
+      `;
+
+      // 항목별 카드
+      for (const it of items) {
+        const isQuiz = it.source_type === 'content' && (it.total_questions || it.answers_json);
+        const completed = it.status === 'completed';
+        const statusBadge = completed ? '<span style="background:#16A34A;color:#fff;padding:2px 8px;border-radius:6px;font-size:11px;font-weight:700;">완료</span>' : '<span style="background:#94A3B8;color:#fff;padding:2px 8px;border-radius:6px;font-size:11px;font-weight:700;">미참여</span>';
+        html += `
+          <div style="border:1px solid #E5E7EB;border-radius:10px;padding:14px 16px;margin-bottom:10px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+              <div style="font-weight:700;font-size:14px;color:#1e293b;">${it.sort_order}. ${escapeHtml(it.item_title)}</div>
+              <div style="display:flex;gap:8px;align-items:center;">
+                ${it.score != null ? `<span style="font-size:12px;color:#4A7CFF;font-weight:700;">${it.score}점</span>` : ''}
+                ${statusBadge}
+              </div>
+            </div>
+        `;
+
+        if (it.answers_json) {
+          let ansList = [];
+          try { ansList = JSON.parse(it.answers_json); } catch(e) {}
+          if (ansList.length > 0) {
+            const correctN = ansList.filter(a => a.isCorrect).length;
+            html += `<div style="font-size:12px;color:#475569;margin-bottom:8px;">정답 <strong style="color:#16A34A;">${correctN}</strong> / 오답 <strong style="color:#DC2626;">${ansList.length - correctN}</strong> · 총 ${ansList.length}문항</div>`;
+            ansList.forEach((d, i) => {
+              const okBg = d.isCorrect ? '#F0FDF4' : '#FEF2F2';
+              const okBd = d.isCorrect ? '#86EFAC' : '#FCA5A5';
+              const badge = d.isCorrect ? '<span style="color:#16A34A;font-weight:700;">✓</span>' : '<span style="color:#DC2626;font-weight:700;">✕</span>';
+              html += `
+                <div style="border:1px solid ${okBd};background:${okBg};border-radius:8px;padding:10px 12px;margin-bottom:6px;">
+                  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+                    <div style="font-weight:600;font-size:13px;">문제 ${d.questionNumber || (i+1)} ${badge}</div>
+                  </div>
+                  <div style="font-size:13px;color:#1e293b;margin-bottom:6px;">${escapeHtml(d.questionText || '')}</div>`;
+              if (d.options && d.options.length > 0) {
+                html += '<div style="display:grid;gap:4px;">';
+                d.options.forEach((opt, oi) => {
+                  const isMine = String(d.myAnswer) === String(oi);
+                  const isCorrect = String(d.correctAnswer) === String(oi);
+                  let bg = '#fff', bd = '#E5E7EB', mark = '';
+                  if (isCorrect) { bg = '#DCFCE7'; bd = '#22C55E'; mark = '<span style="color:#16A34A;font-weight:700;margin-left:6px;font-size:11px;">정답</span>'; }
+                  if (isMine && !isCorrect) { bg = '#FEE2E2'; bd = '#EF4444'; mark += '<span style="color:#DC2626;font-weight:700;margin-left:6px;font-size:11px;">학생답</span>'; }
+                  else if (isMine && isCorrect) { mark += '<span style="color:#16A34A;font-weight:700;margin-left:6px;font-size:11px;">학생답</span>'; }
+                  html += `<div style="padding:6px 10px;border:1px solid ${bd};background:${bg};border-radius:6px;font-size:12px;">${oi+1}. ${escapeHtml(opt)} ${mark}</div>`;
+                });
+                html += '</div>';
+              } else {
+                html += `<div style="font-size:12px;color:#475569;">학생답: <strong style="color:${d.isCorrect?'#16A34A':'#DC2626'};">${escapeHtml(d.myAnswerText || '-')}</strong> · 정답: <strong style="color:#16A34A;">${escapeHtml(d.correctAnswerText || '-')}</strong></div>`;
+              }
+              if (d.explanation) html += `<div style="margin-top:6px;padding:6px 10px;background:#F1F5F9;border-radius:5px;font-size:11px;color:#475569;">💡 ${escapeHtml(d.explanation)}</div>`;
+              html += '</div>';
+            });
+          } else {
+            html += '<div style="font-size:12px;color:#94a3b8;">정오답 상세가 저장되지 않았습니다 (영상/문서 등 비문항 항목)</div>';
+          }
+        } else if (it.score != null) {
+          html += '<div style="font-size:12px;color:#94a3b8;">이 항목은 정오답 상세 데이터가 없습니다 (구버전 응시 기록).</div>';
+        } else {
+          html += '<div style="font-size:12px;color:#94a3b8;">이 항목은 별도 정답 데이터가 없습니다 (영상/자료 시청 항목).</div>';
+        }
+        html += '</div>';
+      }
+
+      box.innerHTML = html;
+    } catch (err) {
+      console.error('Daily result modal error:', err);
+      box.innerHTML = '<div style="text-align:center;padding:40px;color:#dc2626;">데이터를 불러올 수 없습니다.</div>';
+    }
+  };
+
+  // ===== 기초학력 표 필터/정렬 =====
+  window.filterBasicStudents = function(query) {
+    const q = (query || '').trim().toLowerCase();
+    const rows = document.querySelectorAll('#basicResultTable .basic-row');
+    let visible = 0;
+    rows.forEach(r => {
+      const name = (r.dataset.name || '').toLowerCase();
+      const show = !q || name.includes(q);
+      r.style.display = show ? '' : 'none';
+      if (show) visible++;
+    });
+    const el = document.getElementById('basicVisibleCount');
+    if (el) el.textContent = visible;
+  };
+  window.sortBasicStudents = function(mode) {
+    const tbody = document.querySelector('#basicResultTable tbody');
+    if (!tbody) return;
+    const rows = Array.from(tbody.querySelectorAll('.basic-row'));
+    if (mode === 'avg-desc') rows.sort((a, b) => parseInt(b.dataset.avg) - parseInt(a.dataset.avg));
+    else if (mode === 'avg-asc') rows.sort((a, b) => parseInt(a.dataset.avg) - parseInt(b.dataset.avg));
+    else if (mode === 'min-asc') rows.sort((a, b) => parseInt(a.dataset.min) - parseInt(b.dataset.min));
+    else rows.sort((a, b) => (a.dataset.name || '').localeCompare(b.dataset.name || '', 'ko'));
+    rows.forEach(r => tbody.appendChild(r));
+  };
+
+  // ===== 감정별 응답자 모달 (정서 발달 탭 word-tag 클릭) =====
+  window.showEmotionRespondents = async function(emotion, label, totalCount) {
+    let modal = document.getElementById('emotionRespondentsModal');
+    if (!modal) {
+      modal = document.createElement('div');
+      modal.id = 'emotionRespondentsModal';
+      modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px;';
+      modal.innerHTML = '<div id="emotionRespondentsBox" style="background:#fff;border-radius:14px;max-width:680px;width:100%;max-height:85vh;overflow-y:auto;padding:24px;"></div>';
+      modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
+      document.body.appendChild(modal);
+    }
+    const box = modal.querySelector('#emotionRespondentsBox');
+    box.innerHTML = '<div style="text-align:center;padding:40px;color:#94a3b8;">로딩 중...</div>';
+
+    try {
+      if (!currentClassId) throw new Error('클래스가 선택되지 않았습니다.');
+      const res = await fetch(`/api/attendance/${currentClassId}/emotion-respondents?emotion=${encodeURIComponent(emotion)}`).then(r => r.json());
+      if (!res.success) throw new Error(res.message);
+      const list = res.respondents || [];
+
+      // 학생별 그룹화
+      const byUser = {};
+      list.forEach(r => {
+        const k = r.user_id;
+        if (!byUser[k]) byUser[k] = { name: r.display_name || r.username, dates: [], reasons: [] };
+        byUser[k].dates.push(r.attendance_date);
+        if (r.emotion_reason) byUser[k].reasons.push({ date: r.attendance_date, reason: r.emotion_reason });
+      });
+      const users = Object.values(byUser).sort((a, b) => b.dates.length - a.dates.length);
+
+      let html = `
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px;border-bottom:1px solid var(--gray-100);padding-bottom:12px;">
+          <div>
+            <div style="font-size:18px;font-weight:800;color:#1e293b;">${label} 응답 학생</div>
+            <div style="font-size:12px;color:#64748b;margin-top:4px;">총 ${list.length}건 응답 · ${users.length}명 학생</div>
+          </div>
+          <button onclick="document.getElementById('emotionRespondentsModal').remove();" style="background:none;border:none;font-size:24px;color:#94a3b8;cursor:pointer;line-height:1;">×</button>
+        </div>
+      `;
+
+      if (list.length === 0) {
+        html += '<div style="text-align:center;padding:40px;color:#94a3b8;">해당 감정 응답 기록이 없습니다.</div>';
+      } else {
+        html += '<div style="display:flex;flex-direction:column;gap:10px;">';
+        users.forEach(u => {
+          const dateChips = u.dates.map(d => `<span style="display:inline-block;background:#eff6ff;color:#1d4ed8;padding:2px 8px;border-radius:6px;font-size:11px;font-weight:600;margin:2px;">${d.replace(/-/g, '.')}</span>`).join('');
+          const reasonsHtml = u.reasons.length > 0
+            ? '<div style="margin-top:6px;padding-top:6px;border-top:1px dashed var(--gray-100);">' +
+              u.reasons.map(r => `<div style="font-size:11px;color:var(--gray-500);"><span style="color:#94a3b8;">${r.date.replace(/-/g, '.')}</span> · ${escapeHtml(r.reason)}</div>`).join('') +
+              '</div>'
+            : '';
+          html += `
+            <div style="border:1px solid var(--gray-100);border-radius:10px;padding:12px 14px;background:#fff;">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+                <div style="font-weight:700;font-size:14px;color:#1e293b;">${escapeHtml(u.name)}</div>
+                <span style="background:#f1f5f9;color:#475569;padding:2px 8px;border-radius:6px;font-size:11px;font-weight:700;">${u.dates.length}회</span>
+              </div>
+              <div>${dateChips}</div>
+              ${reasonsHtml}
+            </div>`;
+        });
+        html += '</div>';
+      }
+
+      box.innerHTML = html;
+    } catch (err) {
+      console.error('Emotion respondents modal error:', err);
+      box.innerHTML = '<div style="text-align:center;padding:40px;color:#dc2626;">데이터를 불러올 수 없습니다.<br><span style="font-size:12px;color:#94a3b8;">' + (err.message || '') + '</span></div>';
+    }
+  };
+})();
+</script>
+</body>
+</html>

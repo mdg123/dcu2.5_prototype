@@ -1,0 +1,2886 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>다채움 - 수업 플레이어</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+  <style>
+    :root {
+      --primary: #0066FF;
+      --primary-light: #E8F1FF;
+      --primary-dark: #0052CC;
+      --success: #00C853;
+      --success-light: #E8F9EF;
+      --warning: #FF9800;
+      --warning-light: #FFF3E0;
+      --danger: #F44336;
+      --gray-50: #F9FAFB;
+      --gray-100: #F3F4F6;
+      --gray-200: #E5E7EB;
+      --gray-300: #D1D5DB;
+      --gray-400: #9CA3AF;
+      --gray-500: #6B7280;
+      --gray-600: #4B5563;
+      --gray-700: #374151;
+      --gray-800: #1F2937;
+      --gray-900: #111827;
+      --sidebar-width: 320px;
+      --header-height: 56px;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Pretendard','Noto Sans KR',system-ui,sans-serif; background: #0f172a; color: #fff; overflow: hidden; height: 100vh; }
+
+    /* ===== Header ===== */
+    .viewer-header {
+      position: fixed; top: 0; left: 0; right: 0; height: var(--header-height);
+      background: #1e293b; border-bottom: 1px solid rgba(255,255,255,0.1);
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 0 16px; z-index: 100;
+    }
+    .header-left { display: flex; align-items: center; gap: 12px; flex: 1; min-width: 0; }
+    .header-center { display: flex; align-items: center; gap: 8px; }
+    .header-right { display: flex; align-items: center; gap: 8px; }
+    .btn-back { display: flex; align-items: center; gap: 4px; font-size: 13px; color: #94a3b8; cursor: pointer; border: none; background: rgba(255,255,255,0.1); padding: 8px 12px; border-radius: 8px; font-family: inherit; }
+    .btn-back:hover { background: rgba(255,255,255,0.2); color: #fff; }
+    .lesson-title { font-size: 16px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .progress-badge { font-size: 12px; color: #94a3b8; background: rgba(255,255,255,0.1); padding: 4px 12px; border-radius: 20px; white-space: nowrap; }
+
+    .header-btn { display: flex; align-items: center; gap: 6px; padding: 8px 14px; border-radius: 8px; border: none; cursor: pointer; font-size: 13px; font-weight: 500; font-family: inherit; transition: all .15s; position: relative; }
+    .header-btn-ghost { background: rgba(255,255,255,0.1); color: #e2e8f0; }
+    .header-btn-ghost:hover { background: rgba(255,255,255,0.2); }
+    .header-btn-danger { background: rgba(239,68,68,0.2); color: #fca5a5; }
+    .header-btn-danger:hover { background: rgba(239,68,68,0.3); }
+    .header-btn.hand-raised { background: rgba(245,158,11,0.3); color: #fcd34d; animation: pulse-hand 1.5s infinite; }
+    @keyframes pulse-hand { 0%,100% { box-shadow: 0 0 0 0 rgba(245,158,11,0.4); } 50% { box-shadow: 0 0 0 6px rgba(245,158,11,0); } }
+
+    /* ===== Layout ===== */
+    .viewer-container { display: flex; height: calc(100vh - var(--header-height)); margin-top: var(--header-height); }
+
+    /* ===== Sidebar ===== */
+    .sidebar {
+      width: var(--sidebar-width); background: #1e293b; border-right: 1px solid rgba(255,255,255,0.1);
+      display: flex; flex-direction: column; flex-shrink: 0; overflow: hidden;
+      transition: width 0.3s ease, min-width 0.3s ease, opacity 0.25s ease;
+      position: relative;
+    }
+    .sidebar.collapsed { width: 0; min-width: 0; border-right: none; opacity: 0; pointer-events: none; }
+
+    /* 사이드바 토글 버튼 (사이드바 바깥) */
+    .sidebar-toggle-btn {
+      position: fixed; top: calc(var(--header-height) + 12px); z-index: 50;
+      width: 28px; height: 48px; display: flex; align-items: center; justify-content: center;
+      background: #1e293b; border: 1px solid rgba(255,255,255,0.1); border-left: none;
+      border-radius: 0 8px 8px 0; cursor: pointer; color: #94a3b8;
+      font-size: 12px; transition: left 0.3s ease, background 0.15s;
+      left: var(--sidebar-width);
+    }
+    .sidebar-toggle-btn:hover { background: #334155; color: #e2e8f0; }
+    .sidebar-toggle-btn.collapsed { left: 0; }
+    .sidebar-header { padding: 16px; border-bottom: 1px solid rgba(255,255,255,0.05); }
+    .sidebar-title { font-size: 14px; font-weight: 700; color: #e2e8f0; margin-bottom: 8px; }
+    .overall-progress { margin-top: 8px; }
+    .overall-progress .label { display: flex; justify-content: space-between; font-size: 11px; color: #64748b; margin-bottom: 4px; }
+    .overall-bar { background: #334155; border-radius: 6px; height: 8px; overflow: hidden; }
+    .overall-bar-inner { height: 100%; background: linear-gradient(90deg, #10b981, #14b8a6); border-radius: 6px; transition: width 0.5s; }
+
+    .sidebar-content { flex: 1; overflow-y: auto; padding: 8px; }
+    .sidebar-content::-webkit-scrollbar { width: 4px; }
+    .sidebar-content::-webkit-scrollbar-track { background: transparent; }
+    .sidebar-content::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+
+    .step-item {
+      display: flex; align-items: center; gap: 10px; padding: 10px 12px;
+      border-radius: 10px; cursor: pointer; margin-bottom: 4px;
+      border: 1px solid transparent; transition: all 0.15s;
+    }
+    .step-item:hover { background: rgba(255,255,255,0.05); }
+    .step-item.active { background: rgba(59,130,246,0.15); border-color: rgba(59,130,246,0.3); }
+    .step-item.drag-over { border-top: 2px solid #60a5fa; background: rgba(59,130,246,0.08); }
+    .step-item[draggable="true"] { cursor: default; }
+    .step-item[draggable="true"] .drag-handle:hover { color: #94a3b8; }
+    .step-num {
+      width: 28px; height: 28px; border-radius: 50%; background: #334155;
+      color: #94a3b8; display: flex; align-items: center; justify-content: center;
+      font-size: 12px; font-weight: 700; flex-shrink: 0;
+    }
+    .step-item.active .step-num { background: #3b82f6; color: #fff; }
+    .step-item.done .step-num { background: #10b981; color: #fff; }
+    .step-info { flex: 1; min-width: 0; }
+    .step-title { font-size: 13px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .step-meta { display: flex; align-items: center; gap: 6px; margin-top: 2px; }
+    .step-type-tag { font-size: 10px; padding: 1px 6px; border-radius: 4px; font-weight: 600; }
+    .tag-video { background: rgba(239,68,68,0.2); color: #fca5a5; }
+    .tag-document { background: rgba(37,99,235,0.2); color: #93c5fd; }
+    .tag-image { background: rgba(16,185,129,0.2); color: #6ee7b7; }
+    .tag-link { background: rgba(139,92,246,0.2); color: #c4b5fd; }
+    .tag-quiz { background: rgba(245,158,11,0.2); color: #fcd34d; }
+    .tag-whiteboard { background: rgba(16,185,129,0.2); color: #34d399; }
+    .step-status { font-size: 10px; color: #64748b; }
+    .step-status.done { color: #10b981; }
+    .step-status.active { color: #3b82f6; }
+    .step-check { color: #10b981; font-size: 14px; }
+
+    /* ===== Content Area ===== */
+    .content-area { flex: 1; display: flex; flex-direction: column; overflow: hidden; position: relative; }
+    .player-viewport {
+      flex: 1; background: #000; display: flex; align-items: center; justify-content: center;
+      position: relative; min-height: 0; overflow: auto;
+      scrollbar-width: none; /* Firefox */
+    }
+    .player-viewport::-webkit-scrollbar { display: none; /* Chrome/Safari/Edge */ }
+    .player-viewport *::-webkit-scrollbar { display: none; }
+    .player-viewport * { scrollbar-width: none; }
+    .player-viewport iframe { width: 100%; height: 100%; border: none; }
+    .player-viewport img { max-width: 100%; max-height: 100%; object-fit: contain; }
+    .doc-viewer { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; padding: 32px; text-align: center; }
+    .doc-viewer i { font-size: 48px; color: #3b82f6; }
+
+    /* ===== Quiz UI ===== */
+    .quiz-container { width: 100%; max-width: 700px; padding: 40px 32px; margin: 0 auto; overflow-y: auto; max-height: 100%; scrollbar-width: none; }
+    .quiz-container::-webkit-scrollbar { display: none; }
+    .quiz-type-badge { display: inline-block; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 600; margin-bottom: 16px; }
+    .badge-objective { background: rgba(59,130,246,0.2); color: #93c5fd; }
+    .badge-subjective { background: rgba(245,158,11,0.2); color: #fcd34d; }
+    .badge-essay { background: rgba(236,72,153,0.2); color: #f9a8d4; }
+    .badge-multiple { background: rgba(139,92,246,0.2); color: #c4b5fd; }
+    .quiz-question { font-size: 18px; font-weight: 700; line-height: 1.6; margin-bottom: 24px; }
+    .quiz-options { display: flex; flex-direction: column; gap: 10px; }
+    .quiz-option {
+      display: flex; align-items: center; gap: 12px; padding: 14px 16px;
+      background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 12px; cursor: pointer; transition: all 0.15s; font-size: 14px;
+    }
+    .quiz-option:hover { background: rgba(255,255,255,0.1); border-color: rgba(255,255,255,0.2); }
+    .quiz-option.selected { background: rgba(59,130,246,0.15); border-color: rgba(59,130,246,0.4); }
+    .quiz-option.correct { background: rgba(16,185,129,0.15); border-color: #10b981; }
+    .quiz-option.wrong { background: rgba(239,68,68,0.15); border-color: #ef4444; }
+    .quiz-option-num {
+      width: 28px; height: 28px; border-radius: 50%; background: rgba(255,255,255,0.1);
+      display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; flex-shrink: 0;
+    }
+    .quiz-option.selected .quiz-option-num { background: #3b82f6; color: #fff; }
+    .quiz-option.correct .quiz-option-num { background: #10b981; color: #fff; }
+    .quiz-option.wrong .quiz-option-num { background: #ef4444; color: #fff; }
+    .quiz-answer-input {
+      width: 100%; padding: 14px 16px; background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.1); border-radius: 12px;
+      color: #fff; font-size: 14px; font-family: inherit; outline: none; resize: none;
+    }
+    .quiz-answer-input:focus { border-color: rgba(59,130,246,0.4); }
+    .quiz-answer-input::placeholder { color: #64748b; }
+    .quiz-submit-btn {
+      margin-top: 16px; padding: 12px 24px; background: #3b82f6; color: #fff;
+      border: none; border-radius: 10px; font-size: 14px; font-weight: 600;
+      cursor: pointer; font-family: inherit; display: flex; align-items: center; gap: 8px;
+    }
+    .quiz-submit-btn:hover { background: #2563eb; }
+    .quiz-submit-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .quiz-explanation {
+      margin-top: 20px; padding: 16px; background: rgba(59,130,246,0.1);
+      border-left: 3px solid #3b82f6; border-radius: 0 12px 12px 0; font-size: 14px; line-height: 1.6;
+    }
+    .quiz-result { margin-top: 12px; padding: 12px 16px; border-radius: 10px; font-size: 14px; font-weight: 600; }
+    .quiz-result.correct { background: rgba(16,185,129,0.15); color: #10b981; }
+    .quiz-result.wrong { background: rgba(239,68,68,0.15); color: #ef4444; }
+    .quiz-result.pending { background: rgba(245,158,11,0.15); color: #fcd34d; }
+    .quiz-retry-btn {
+      margin-top: 12px; padding: 8px 16px; background: rgba(255,255,255,0.1);
+      border: 1px solid rgba(255,255,255,0.2); border-radius: 8px; color: #e2e8f0;
+      font-size: 13px; cursor: pointer; font-family: inherit;
+    }
+    .quiz-retry-btn:hover { background: rgba(255,255,255,0.15); }
+
+    /* ===== Controls Bar ===== */
+    .controls-bar { background: #1e293b; padding: 16px 20px; border-top: 1px solid rgba(255,255,255,0.1); }
+    .controls-top { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+    .controls-top h3 { font-size: 15px; font-weight: 600; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .type-badge { padding: 4px 10px; border-radius: 6px; font-size: 11px; font-weight: 600; }
+    .badge-video { background: rgba(239,68,68,0.2); color: #fca5a5; }
+    .badge-document { background: rgba(37,99,235,0.2); color: #93c5fd; }
+    .badge-image { background: rgba(16,185,129,0.2); color: #6ee7b7; }
+    .badge-link { background: rgba(139,92,246,0.2); color: #c4b5fd; }
+    .badge-whiteboard { background: rgba(16,185,129,0.2); color: #34d399; }
+
+    .progress-section { margin-bottom: 12px; }
+    .progress-section label { font-size: 12px; color: #64748b; margin-bottom: 6px; display: block; }
+    .progress-bar-outer { background: #334155; border-radius: 6px; height: 8px; overflow: hidden; }
+    .progress-bar-inner { height: 100%; background: linear-gradient(90deg, #3b82f6, #8b5cf6); border-radius: 6px; transition: width 0.5s; }
+
+    .controls-bottom { display: flex; align-items: center; gap: 8px; }
+    .nav-btn {
+      display: flex; align-items: center; gap: 6px; padding: 10px 18px;
+      border-radius: 10px; border: 1px solid rgba(255,255,255,0.15); background: transparent;
+      color: #e2e8f0; font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit; transition: all .15s;
+    }
+    .nav-btn:hover { background: rgba(255,255,255,0.1); }
+    .nav-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+    .complete-btn {
+      flex: 1; padding: 12px; background: #10b981; color: #fff; border: none;
+      border-radius: 10px; font-size: 14px; font-weight: 700; cursor: pointer;
+      font-family: inherit; display: flex; align-items: center; justify-content: center; gap: 8px; transition: all .15s;
+    }
+    .complete-btn:hover { background: #059669; }
+    .complete-btn.completed { background: #334155; color: #10b981; cursor: default; }
+
+    /* ===== Right Toolbar ===== */
+    .toolbar {
+      position: fixed; right: 16px; top: 50%; transform: translateY(-50%);
+      background: #1e293b; border-radius: 12px; padding: 6px; display: flex;
+      flex-direction: column; gap: 2px; z-index: 50; border: 1px solid rgba(255,255,255,0.1);
+      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    }
+    .toolbar-btn {
+      width: 40px; height: 40px; border: none; background: transparent;
+      border-radius: 8px; color: #94a3b8; font-size: 16px; cursor: pointer;
+      display: flex; align-items: center; justify-content: center; transition: all 0.15s;
+    }
+    .toolbar-btn:hover { background: rgba(255,255,255,0.1); color: #fff; }
+    .toolbar-btn.active { background: rgba(59,130,246,0.2); color: #3b82f6; }
+    .toolbar-sep { height: 1px; background: rgba(255,255,255,0.1); margin: 4px 6px; }
+
+    /* ===== Drawing Canvas ===== */
+    .drawing-canvas {
+      position: absolute; inset: 0; z-index: 20; cursor: crosshair;
+      pointer-events: none; opacity: 0; transition: opacity 0.2s;
+    }
+    .drawing-canvas.active { pointer-events: auto; opacity: 1; }
+
+    /* ===== Pen Palette ===== */
+    .pen-palette {
+      position: fixed; right: 68px; top: 50%; transform: translateY(-50%);
+      background: #1e293b; border-radius: 12px; padding: 12px; z-index: 55;
+      border: 1px solid rgba(255,255,255,0.1); display: none;
+    }
+    .pen-palette.show { display: block; }
+    .palette-title { font-size: 11px; color: #64748b; margin-bottom: 8px; font-weight: 600; }
+    .color-options { display: flex; gap: 6px; margin-bottom: 12px; }
+    .color-btn {
+      width: 24px; height: 24px; border-radius: 50%; border: 2px solid transparent;
+      cursor: pointer; transition: all 0.15s;
+    }
+    .color-btn.active { border-color: #fff; transform: scale(1.2); }
+    .size-options { display: flex; gap: 8px; align-items: center; }
+    .size-btn {
+      border-radius: 50%; background: #fff; border: 2px solid transparent;
+      cursor: pointer; transition: all 0.15s;
+    }
+    .size-btn.active { border-color: #3b82f6; }
+
+    /* ===== Chat Panel ===== */
+    .chat-panel {
+      position: fixed; right: 0; top: var(--header-height); bottom: 0;
+      width: 360px; background: #1e293b; border-left: 1px solid rgba(255,255,255,0.1);
+      z-index: 80; display: flex; flex-direction: column;
+      transform: translateX(100%); transition: transform 0.3s ease;
+    }
+    .chat-panel.open { transform: translateX(0); }
+    .chat-header {
+      padding: 16px; border-bottom: 1px solid rgba(255,255,255,0.05);
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .chat-header-left { display: flex; align-items: center; gap: 8px; }
+    .online-dot { width: 8px; height: 8px; background: #10b981; border-radius: 50%; }
+    .chat-messages {
+      flex: 1; overflow-y: auto; padding: 16px; display: flex;
+      flex-direction: column; gap: 12px;
+    }
+    .chat-messages::-webkit-scrollbar { width: 4px; }
+    .chat-messages::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+    .chat-msg {
+      max-width: 80%; padding: 10px 14px; border-radius: 12px;
+      font-size: 13px; line-height: 1.5;
+    }
+    .chat-msg.mine { background: #3b82f6; align-self: flex-end; border-bottom-right-radius: 4px; }
+    .chat-msg.other { background: #334155; align-self: flex-start; border-bottom-left-radius: 4px; }
+    .chat-msg.system { background: rgba(245,158,11,0.15); align-self: center; color: #fcd34d; font-size: 12px; text-align: center; }
+    .chat-msg .sender { font-size: 11px; color: #94a3b8; margin-bottom: 4px; font-weight: 600; }
+    .chat-input-area {
+      padding: 12px; border-top: 1px solid rgba(255,255,255,0.05);
+      display: flex; gap: 8px;
+    }
+    .chat-input {
+      flex: 1; padding: 10px 14px; background: #334155; border: none;
+      border-radius: 10px; color: #fff; font-size: 13px; font-family: inherit; outline: none;
+    }
+    .chat-input::placeholder { color: #64748b; }
+    .chat-send-btn {
+      padding: 10px 16px; background: #3b82f6; color: #fff; border: none;
+      border-radius: 10px; font-size: 13px; cursor: pointer; font-family: inherit;
+    }
+    .chat-send-btn:hover { background: #2563eb; }
+    .chat-ended-notice {
+      padding: 16px; text-align: center; font-size: 13px; color: #64748b;
+      border-top: 1px solid rgba(255,255,255,0.05);
+    }
+
+    /* ===== Settings Panel ===== */
+    .settings-panel {
+      position: fixed; right: 0; top: var(--header-height); bottom: 0;
+      width: 320px; background: #1e293b; border-left: 1px solid rgba(255,255,255,0.1);
+      z-index: 80; display: flex; flex-direction: column;
+      transform: translateX(100%); transition: transform 0.3s ease;
+      overflow-y: auto; padding: 24px;
+    }
+    .settings-panel.open { transform: translateX(0); }
+    .settings-title { font-size: 16px; font-weight: 700; margin-bottom: 24px; }
+    .settings-group { margin-bottom: 20px; }
+    .settings-label { font-size: 13px; font-weight: 600; color: #94a3b8; margin-bottom: 10px; }
+    .settings-options { display: flex; gap: 8px; flex-wrap: wrap; }
+    .settings-opt {
+      padding: 8px 16px; background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.1); border-radius: 8px;
+      color: #e2e8f0; font-size: 13px; cursor: pointer; font-family: inherit;
+      transition: all 0.15s;
+    }
+    .settings-opt:hover { background: rgba(255,255,255,0.1); }
+    .settings-opt.active { background: rgba(59,130,246,0.2); border-color: #3b82f6; color: #3b82f6; }
+    .shortcut-list { display: flex; flex-direction: column; gap: 8px; }
+    .shortcut-item { display: flex; justify-content: space-between; font-size: 13px; }
+    .shortcut-key { padding: 2px 8px; background: #334155; border-radius: 4px; font-size: 12px; font-family: monospace; }
+
+    /* ===== Toast ===== */
+    .toast-container { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); z-index: 300; }
+    .toast { padding: 12px 24px; background: #1e293b; color: #fff; border-radius: 10px; font-size: 13px; box-shadow: 0 4px 12px rgba(0,0,0,0.3); animation: toastIn 0.3s ease; border: 1px solid rgba(255,255,255,0.1); }
+    .toast.success { background: #10b981; border-color: #059669; }
+    @keyframes toastIn { from { opacity:0; transform:translateY(20px); } to { opacity:1; transform:translateY(0); } }
+
+    /* ===== Completion Overlay ===== */
+    .completion-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 200; display: flex; align-items: center; justify-content: center; opacity: 0; visibility: hidden; transition: all .3s; }
+    .completion-overlay.show { opacity: 1; visibility: visible; }
+    .completion-card { background: #1e293b; border-radius: 20px; padding: 40px; text-align: center; max-width: 440px; border: 1px solid rgba(255,255,255,0.1); }
+    .completion-icon { font-size: 64px; margin-bottom: 16px; }
+    .completion-title { font-size: 20px; font-weight: 700; margin-bottom: 8px; }
+    .completion-desc { font-size: 14px; color: #94a3b8; margin-bottom: 12px; }
+    .completion-stats { display: grid; grid-template-columns: repeat(2,1fr); gap: 12px; margin-bottom: 24px; text-align: center; }
+    .completion-stat { background: rgba(255,255,255,0.05); border-radius: 10px; padding: 12px; }
+    .completion-stat-value { font-size: 20px; font-weight: 700; color: #3b82f6; }
+    .completion-stat-label { font-size: 11px; color: #64748b; margin-top: 4px; }
+    .completion-btn { padding: 12px 32px; background: #3b82f6; color: #fff; border: none; border-radius: 10px; font-size: 14px; font-weight: 600; cursor: pointer; font-family: inherit; }
+    .completion-btn:hover { background: #2563eb; }
+
+    /* ===== Dark/Light mode ===== */
+    body.light-mode { background: #f1f5f9; color: #1e293b; }
+    body.light-mode .viewer-header { background: #fff; border-bottom-color: #e2e8f0; }
+    body.light-mode .viewer-header * { color: #334155; }
+    body.light-mode .sidebar { background: #fff; border-right-color: #e2e8f0; }
+    body.light-mode .sidebar * { color: #334155; }
+    body.light-mode .controls-bar { background: #fff; border-top-color: #e2e8f0; }
+    body.light-mode .controls-bar * { color: #334155; }
+    body.light-mode .player-viewport { background: #f8fafc; }
+    body.light-mode .toolbar { background: #fff; border-color: #e2e8f0; }
+    body.light-mode .toolbar-btn { color: #64748b; }
+
+    /* ===== Font sizes ===== */
+    body.font-small { font-size: 14px; }
+    body.font-medium { font-size: 16px; }
+    body.font-large { font-size: 18px; }
+
+    @media (max-width: 768px) {
+      .viewer-container { flex-direction: column; }
+      .sidebar { width: 100%; max-height: 200px; border-right: none; border-bottom: 1px solid rgba(255,255,255,0.1); }
+      .sidebar.collapsed { margin-left: 0; max-height: 0; overflow: hidden; }
+      .header-center { display: none; }
+      .chat-panel, .settings-panel { width: 100%; }
+      .toolbar { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <!-- Header -->
+  <header class="viewer-header">
+    <div class="header-left">
+      <button class="btn-back" onclick="goBack()"><i class="fas fa-arrow-left"></i> 돌아가기</button>
+      <span class="lesson-title" id="lessonTitle">수업 로딩 중...</span>
+    </div>
+    <div class="header-center">
+      <span class="progress-badge" id="progressBadge">0 / 0 완료</span>
+    </div>
+    <div class="header-right">
+      <button class="header-btn header-btn-ghost" id="chatBtn" onclick="toggleChat()" title="채팅"><i class="fas fa-comments"></i> 채팅</button>
+      <button class="header-btn header-btn-ghost" id="settingsBtn" onclick="toggleSettings()" title="설정"><i class="fas fa-cog"></i> 설정</button>
+      <button class="header-btn header-btn-ghost" id="handBtn" onclick="raiseHand()" title="손들기"><i class="fas fa-hand-paper"></i> 손들기</button>
+      <button class="header-btn header-btn-ghost" onclick="toggleSidebar()" title="목차 토글"><i class="fas fa-bars"></i></button>
+      <button class="header-btn header-btn-danger" onclick="goBack()"><i class="fas fa-sign-out-alt"></i> 나가기</button>
+    </div>
+  </header>
+
+  <!-- Main Container -->
+  <div class="viewer-container">
+    <!-- 사이드바 토글 버튼 (사이드바 바깥 고정) -->
+    <button class="sidebar-toggle-btn" id="sidebarToggleBtn" onclick="toggleSidebarCollapse()" title="수업 목차 열기/닫기">
+      <i class="fas fa-chevron-left" id="sidebarToggleIcon"></i>
+    </button>
+
+    <!-- Sidebar -->
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-header">
+        <div style="display:flex;align-items:center;justify-content:space-between;">
+          <div class="sidebar-title">📚 수업 목차</div>
+          <button onclick="toggleSidebarCollapse()" style="background:none;border:none;color:#94a3b8;cursor:pointer;font-size:12px;padding:4px 8px;border-radius:6px;font-family:inherit;display:flex;align-items:center;gap:4px;" onmouseenter="this.style.background='rgba(255,255,255,.1)'" onmouseleave="this.style.background='none'" title="목차 접기">
+            <i class="fas fa-chevron-left"></i> <span style="font-size:11px;">접기</span>
+          </button>
+        </div>
+        <div class="overall-progress" id="sidebarProgress">
+          <div class="label"><span>전체 진행률</span><span id="overallPercent">0%</span></div>
+          <div class="overall-bar"><div class="overall-bar-inner" id="overallBar" style="width:0%;"></div></div>
+        </div>
+      </div>
+      <div class="sidebar-content" id="stepList">
+        <div style="text-align:center;color:#64748b;padding:24px;font-size:13px;">불러오는 중...</div>
+      </div>
+      <!-- 개설자: 콘텐츠 추가 버튼 -->
+      <div id="addContentBtn" style="display:none;padding:10px 12px;border-top:1px solid rgba(255,255,255,.08);">
+        <button onclick="openAddContentModal()" style="width:100%;padding:9px;background:rgba(59,130,246,.15);color:#60a5fa;border:1.5px dashed rgba(59,130,246,.4);border-radius:10px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;transition:all .15s;" onmouseenter="this.style.background='rgba(59,130,246,.25)'" onmouseleave="this.style.background='rgba(59,130,246,.15)'">
+          <i class="fas fa-plus-circle"></i> 콘텐츠 추가
+        </button>
+        <div style="display:flex;gap:5px;margin-top:5px;">
+          <button onclick="openUrlAddModal()" style="flex:1;padding:8px;background:rgba(139,92,246,.12);color:#a78bfa;border:1.5px dashed rgba(139,92,246,.4);border-radius:8px;font-size:11px;font-weight:600;cursor:pointer;font-family:inherit;transition:all .15s;" onmouseenter="this.style.background='rgba(139,92,246,.22)'" onmouseleave="this.style.background='rgba(139,92,246,.12)'">
+            <i class="fas fa-link"></i> URL 추가
+          </button>
+          <button onclick="openFileAddModal()" style="flex:1;padding:8px;background:rgba(245,158,11,.12);color:#fbbf24;border:1.5px dashed rgba(245,158,11,.4);border-radius:8px;font-size:11px;font-weight:600;cursor:pointer;font-family:inherit;transition:all .15s;" onmouseenter="this.style.background='rgba(245,158,11,.22)'" onmouseleave="this.style.background='rgba(245,158,11,.12)'">
+            <i class="fas fa-file-upload"></i> 파일 추가
+          </button>
+          <button onclick="addWhiteboard()" style="flex:1;padding:8px;background:rgba(16,185,129,.12);color:#34d399;border:1.5px dashed rgba(16,185,129,.4);border-radius:8px;font-size:11px;font-weight:600;cursor:pointer;font-family:inherit;transition:all .15s;" onmouseenter="this.style.background='rgba(16,185,129,.22)'" onmouseleave="this.style.background='rgba(16,185,129,.12)'">
+            <i class="fas fa-chalkboard"></i> 화이트보드
+          </button>
+        </div>
+      </div>
+      <!-- 파일 업로드 숨김 input -->
+      <input type="file" id="fileUploadInput" style="display:none;" accept="video/*,image/*,.pdf,.doc,.docx,.ppt,.pptx,.hwp,.hwpx,.xls,.xlsx,.txt" onchange="handleFileUpload(this)">
+    </aside>
+
+    <!-- Content Area -->
+    <section class="content-area">
+      <div class="player-viewport" id="playerViewport">
+        <div style="color:#64748b;font-size:14px;">콘텐츠를 선택하세요</div>
+      </div>
+      <!-- Drawing Canvas -->
+      <canvas class="drawing-canvas" id="drawingCanvas"></canvas>
+
+      <div class="controls-bar">
+        <div class="controls-top">
+          <h3 id="currentTitle">콘텐츠를 선택하세요</h3>
+          <span class="type-badge" id="currentBadge" style="display:none;"></span>
+        </div>
+        <div class="progress-section">
+          <label>현재 콘텐츠 진행률</label>
+          <div class="progress-bar-outer"><div class="progress-bar-inner" id="contentProgressBar" style="width:0%;"></div></div>
+        </div>
+        <div class="controls-bottom">
+          <button class="nav-btn" id="prevBtn" onclick="goStep(-1)" disabled><i class="fas fa-chevron-left"></i> 이전</button>
+          <button class="complete-btn" id="completeBtn" onclick="markComplete()" style="display:none;">
+            <i class="fas fa-check-circle"></i> 학습 완료 처리
+          </button>
+          <button class="nav-btn" id="nextBtn" onclick="goStep(1)" disabled>다음 <i class="fas fa-chevron-right"></i></button>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <!-- Right Toolbar -->
+  <div class="toolbar" id="toolbar">
+    <button class="toolbar-btn" id="penBtn" onclick="togglePen()" title="펜"><i class="fas fa-pen"></i></button>
+    <button class="toolbar-btn" id="highlightBtn" onclick="toggleHighlight()" title="형광펜"><i class="fas fa-highlighter"></i></button>
+    <button class="toolbar-btn" id="eraserBtn" onclick="toggleEraser()" title="지우개"><i class="fas fa-eraser"></i></button>
+    <button class="toolbar-btn" onclick="clearDrawing()" title="전체 지우기"><i class="fas fa-trash-alt"></i></button>
+    <div class="toolbar-sep"></div>
+    <button class="toolbar-btn" id="bookmarkBtn" onclick="toggleBookmark()" title="북마크"><i class="fas fa-bookmark"></i></button>
+  </div>
+
+  <!-- Pen Palette -->
+  <div class="pen-palette" id="penPalette">
+    <div class="palette-title">색상</div>
+    <div class="color-options">
+      <div class="color-btn active" style="background:#fff;" onclick="setColor('#ffffff')"></div>
+      <div class="color-btn" style="background:#ef4444;" onclick="setColor('#ef4444')"></div>
+      <div class="color-btn" style="background:#3b82f6;" onclick="setColor('#3b82f6')"></div>
+      <div class="color-btn" style="background:#10b981;" onclick="setColor('#10b981')"></div>
+      <div class="color-btn" style="background:#f59e0b;" onclick="setColor('#f59e0b')"></div>
+    </div>
+    <div class="palette-title">굵기</div>
+    <div class="size-options">
+      <div class="size-btn active" style="width:8px;height:8px;" onclick="setSize(2)"></div>
+      <div class="size-btn" style="width:14px;height:14px;" onclick="setSize(4)"></div>
+      <div class="size-btn" style="width:20px;height:20px;" onclick="setSize(8)"></div>
+    </div>
+  </div>
+
+  <!-- Chat Panel -->
+  <div class="chat-panel" id="chatPanel">
+    <div class="chat-header">
+      <div class="chat-header-left">
+        <div class="online-dot"></div>
+        <span style="font-size:14px;font-weight:700;">수업 채팅</span>
+      </div>
+      <button class="toolbar-btn" onclick="toggleChat()" style="color:#94a3b8;"><i class="fas fa-times"></i></button>
+    </div>
+    <div class="chat-messages" id="chatMessages">
+      <div class="chat-msg system">수업 채팅이 시작되었습니다</div>
+    </div>
+    <div class="chat-input-area" id="chatInputArea">
+      <input type="text" class="chat-input" id="chatInput" placeholder="메시지를 입력하세요..." onkeypress="handleChatKey(event)">
+      <button class="chat-send-btn" onclick="sendChat()"><i class="fas fa-paper-plane"></i></button>
+    </div>
+  </div>
+
+  <!-- Settings Panel -->
+  <div class="settings-panel" id="settingsPanel">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:24px;">
+      <span class="settings-title" style="margin-bottom:0;">⚙️ 설정</span>
+      <button class="toolbar-btn" onclick="toggleSettings()" style="color:#94a3b8;"><i class="fas fa-times"></i></button>
+    </div>
+    <div class="settings-group">
+      <div class="settings-label">글자 크기</div>
+      <div class="settings-options">
+        <button class="settings-opt" onclick="setFontSize('small')">작게</button>
+        <button class="settings-opt active" onclick="setFontSize('medium')">보통</button>
+        <button class="settings-opt" onclick="setFontSize('large')">크게</button>
+      </div>
+    </div>
+    <div class="settings-group">
+      <div class="settings-label">테마</div>
+      <div class="settings-options">
+        <button class="settings-opt active" onclick="setTheme('dark')">🌙 다크</button>
+        <button class="settings-opt" onclick="setTheme('light')">☀️ 라이트</button>
+      </div>
+    </div>
+    <div class="settings-group">
+      <div class="settings-label">재생 속도</div>
+      <div class="settings-options">
+        <button class="settings-opt" onclick="setPlaybackRate(0.5)">0.5x</button>
+        <button class="settings-opt" onclick="setPlaybackRate(0.75)">0.75x</button>
+        <button class="settings-opt active" onclick="setPlaybackRate(1)">1x</button>
+        <button class="settings-opt" onclick="setPlaybackRate(1.25)">1.25x</button>
+        <button class="settings-opt" onclick="setPlaybackRate(1.5)">1.5x</button>
+        <button class="settings-opt" onclick="setPlaybackRate(2)">2x</button>
+      </div>
+    </div>
+    <div class="settings-group">
+      <div class="settings-label">키보드 단축키</div>
+      <div class="shortcut-list">
+        <div class="shortcut-item"><span>이전 콘텐츠</span><span class="shortcut-key">←</span></div>
+        <div class="shortcut-item"><span>다음 콘텐츠</span><span class="shortcut-key">→</span></div>
+        <div class="shortcut-item"><span>학습 완료</span><span class="shortcut-key">Enter</span></div>
+        <div class="shortcut-item"><span>전체화면</span><span class="shortcut-key">F</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Completion Overlay -->
+  <div class="completion-overlay" id="completionOverlay">
+    <div class="completion-card">
+      <div class="completion-icon">🎉</div>
+      <div class="completion-title">수업 완료!</div>
+      <div class="completion-desc" id="completionDesc">모든 학습 콘텐츠를 완료했습니다.</div>
+      <div class="completion-stats" id="completionStats"></div>
+      <button class="completion-btn" onclick="closeCompletion()">확인</button>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div id="toastContainer" class="toast-container"></div>
+
+  <script>
+    const params = new URLSearchParams(location.search);
+    const classId = params.get('classId');
+    const lessonId = params.get('lessonId') || params.get('id');
+    const isCreatorMode = params.get('mode') === 'creator';
+    const isEditMode = params.get('mode') === 'edit';
+    const isPreviewMode = params.get('mode') === 'preview';
+    const previewContentId = params.get('contentId');
+    if (!isCreatorMode && !isEditMode && !isPreviewMode && (!classId || !lessonId)) location.href = '/class/index.html';
+
+    let contents = [];
+    let progressMap = {};
+    let currentIndex = -1;
+    let currentUser = null;
+    let lessonData = null;
+    let quizAnswers = {}; // contentId -> { answer, submitted }
+    let handRaised = false;
+    let chatOpen = false;
+    let settingsOpen = false;
+    let playbackRate = 1;
+
+    // Drawing state
+    let isDrawing = false;
+    let drawingActive = false;
+    let currentTool = null; // pen | highlight | eraser
+    let penColor = '#ffffff';
+    let penSize = 2;
+    const canvas = document.getElementById('drawingCanvas');
+    const ctx = canvas.getContext('2d');
+
+    function escHtml(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+    const typeLabels = { video: '영상', document: '문서', image: '이미지', link: '링크', quiz: '퀴즈', whiteboard: '화이트보드' };
+    const typeTagClass = { video: 'tag-video', document: 'tag-document', image: 'tag-image', link: 'tag-link', quiz: 'tag-quiz', whiteboard: 'tag-whiteboard' };
+    const badgeClass = { video: 'badge-video', document: 'badge-document', image: 'badge-image', link: 'badge-link', whiteboard: 'badge-whiteboard' };
+    let whiteboardIdCounter = 0; // 화이트보드 가상 ID 카운터
+    const whiteboardDataMap = {}; // 화이트보드별 드로잉 데이터 저장 { id: dataURL }
+    const optionLabels = ['①', '②', '③', '④', '⑤'];
+
+    // ============================================================
+    // Load
+    // ============================================================
+    async function loadPlayer() {
+      try {
+        // 사용자 정보 가져오기
+        if (!currentUser) {
+          try {
+            const meRes = await fetch('/api/auth/me').then(r => r.json());
+            if (meRes.success && meRes.user) currentUser = meRes.user;
+          } catch {}
+        }
+
+        // 미리보기 모드: 수업꾸러미 콘텐츠를 읽기 전용으로 보기
+        if (isPreviewMode && previewContentId) {
+          try {
+            const pvRes = await fetch(`/api/contents/${previewContentId}`).then(r => r.json());
+            if (!pvRes.success || !pvRes.content) { showToast('콘텐츠 로드 실패'); return; }
+            const pvContent = pvRes.content;
+            const bundleItems = pvContent.bundle_items || [];
+            lessonData = { title: pvContent.title, teacher_id: pvContent.creator_id };
+            document.getElementById('lessonTitle').textContent = `👁️ ${pvContent.title} — 미리보기`;
+            // 번들 아이템이 있으면 해당 콘텐츠를 로드
+            if (bundleItems.length > 0) {
+              contents = bundleItems.map((b, i) => ({
+                id: b.content_id || b.id,
+                title: b.title || '콘텐츠',
+                content_type: b.content_type || 'document',
+                content_url: b.content_url || '',
+                file_path: b.file_path || '',
+                description: b.description || '',
+                creator_name: b.creator_name || '',
+                sort_order: i
+              }));
+              // quiz/exam 타입 콘텐츠의 questions 데이터 로드
+              await Promise.all(contents.map(async (c) => {
+                if (c.content_type === 'quiz' || c.content_type === 'exam') {
+                  try {
+                    const qRes = await fetch(`/api/contents/${c.id}`).then(r => r.json());
+                    if (qRes.success && qRes.content && qRes.content.questions) {
+                      c.questions = qRes.content.questions;
+                    }
+                  } catch(e) { console.warn('quiz questions load failed:', c.id, e); }
+                }
+              }));
+            } else {
+              // 번들이 아닌 단일 콘텐츠
+              contents = [{
+                id: pvContent.id,
+                title: pvContent.title,
+                content_type: pvContent.content_type,
+                content_url: pvContent.content_url || '',
+                file_path: pvContent.file_path || '',
+                description: pvContent.description || '',
+                creator_name: pvContent.creator_name || '',
+                sort_order: 0
+              }];
+            }
+            document.querySelector('.btn-back').onclick = () => {
+              if (classId) location.href = `/class/class-home.html?id=${classId}`;
+              else if (document.referrer) history.back();
+              else location.href = '/content/index.html';
+            };
+            renderSidebar();
+            if (contents.length > 0) selectContent(0);
+            // 미리보기 모드: 학습완료 버튼, 진행률 숨김
+            document.getElementById('completeBtn').style.display = 'none';
+            document.querySelector('.progress-section').style.display = 'none';
+            initCanvas();
+          } catch(e) { console.error(e); showToast('미리보기 로드 실패'); }
+          return;
+        }
+
+        // 크리에이터 모드: 빈 수업 플레이어
+        if (isCreatorMode) {
+          const isClassCreator = !!classId; // 클래스에서 진입한 경우
+          lessonData = { teacher_id: currentUser?.id, title: '수업꾸러미 만들기' };
+          document.getElementById('lessonTitle').textContent = isClassCreator ? '📦 수업 만들기' : '📦 수업꾸러미 만들기';
+          contents = [];
+          document.getElementById('stepList').innerHTML = '<div style="text-align:center;color:#64748b;padding:24px;font-size:13px;"><i class="fas fa-box-open" style="font-size:28px;margin-bottom:8px;display:block;"></i>아래 "콘텐츠 추가" 버튼을 눌러<br>수업 자료를 구성하세요</div>';
+          document.getElementById('playerViewport').innerHTML = `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;color:#64748b;"><i class="fas fa-box-open" style="font-size:64px;margin-bottom:16px;color:#475569;"></i><div style="font-size:18px;font-weight:700;margin-bottom:8px;">${isClassCreator ? '수업 만들기' : '수업꾸러미 만들기'}</div><div style="font-size:14px;">왼쪽 목차에서 콘텐츠를 추가하고 미리보기하세요</div></div>`;
+          showAddButton();
+          // "돌아가기"
+          document.querySelector('.btn-back').onclick = () => {
+            location.href = isClassCreator ? `/class/class-home.html?id=${classId}` : '/content/index.html#mydata';
+          };
+          // 하단 컨트롤바
+          const controlsBar = document.querySelector('.controls-bar');
+          if (controlsBar) {
+            const metaDiv = document.createElement('div');
+            metaDiv.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-top:1px solid rgba(255,255,255,.1);margin-top:8px;';
+            if (isClassCreator) {
+              metaDiv.innerHTML = `
+                <div style="font-size:13px;color:#94a3b8;">구성한 콘텐츠: <strong id="creatorItemCount" style="color:#60a5fa;">0</strong>개</div>
+                <button onclick="saveClassLesson()" style="padding:10px 28px;background:#10b981;color:#fff;border:none;border-radius:10px;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;"><i class="fas fa-save"></i> 수업 등록</button>`;
+            } else {
+              metaDiv.innerHTML = `
+                <div style="font-size:13px;color:#94a3b8;">구성한 콘텐츠: <strong id="creatorItemCount" style="color:#60a5fa;">0</strong>개</div>
+                <button onclick="openCreatorMeta()" style="padding:10px 28px;background:#3b82f6;color:#fff;border:none;border-radius:10px;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;"><i class="fas fa-arrow-right"></i> 다음: 메타정보 입력</button>`;
+            }
+            controlsBar.appendChild(metaDiv);
+          }
+          initCanvas();
+          return;
+        }
+
+        // 수정 모드: 기존 수업의 콘텐츠를 로드하고 편집 가능하게
+        if (isEditMode && classId && lessonId) {
+          const editRes = await fetch(`/api/lesson/${classId}/${lessonId}`);
+          const editData = await editRes.json();
+          if (!editData.success) { showToast('수업 로드 실패'); goBack(); return; }
+          lessonData = editData.lesson;
+          document.getElementById('lessonTitle').textContent = `✏️ ${lessonData.title} — 수정`;
+          contents = editData.contents || [];
+          document.querySelector('.btn-back').onclick = () => {
+            location.href = `/class/lesson-view.html?classId=${classId}&id=${lessonId}`;
+          };
+          showAddButton();
+          renderSidebar();
+          if (contents.length > 0) selectContent(0);
+          else {
+            document.getElementById('playerViewport').innerHTML = '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;color:#64748b;"><i class="fas fa-edit" style="font-size:64px;margin-bottom:16px;color:#475569;"></i><div style="font-size:18px;font-weight:700;margin-bottom:8px;">수업 수정</div><div style="font-size:14px;">콘텐츠를 추가하거나 순서를 변경하세요</div></div>';
+          }
+          // 하단 컨트롤바에 저장 버튼
+          const controlsBar = document.querySelector('.controls-bar');
+          if (controlsBar) {
+            const metaDiv = document.createElement('div');
+            metaDiv.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-top:1px solid rgba(255,255,255,.1);margin-top:8px;';
+            metaDiv.innerHTML = `
+              <div style="font-size:13px;color:#94a3b8;">콘텐츠: <strong id="creatorItemCount" style="color:#60a5fa;">${contents.length}</strong>개</div>
+              <button onclick="saveEditedLesson()" style="padding:10px 28px;background:#10b981;color:#fff;border:none;border-radius:10px;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;"><i class="fas fa-save"></i> 저장</button>`;
+            controlsBar.appendChild(metaDiv);
+          }
+          initCanvas();
+          return;
+        }
+
+        const res = await fetch(`/api/lesson/${classId}/${lessonId}`);
+        if (res.status === 401) { location.href = '/login.html'; return; }
+        const data = await res.json();
+        if (!data.success) { showToast(data.message || '로드 실패'); goBack(); return; }
+
+        lessonData = data.lesson;
+
+        // 학생이 예정 수업 플레이어 접근 시 차단
+        if (!isCreatorMode && lessonData.status === 'published') {
+          const _td = new Date().toISOString().slice(0, 10);
+          const _sd2 = lessonData.start_date || lessonData.lesson_date;
+          if (_sd2 && _td < _sd2) {
+            alert('아직 시작되지 않은 수업입니다.');
+            location.href = `/class/class-home.html?id=${classId}&tab=lesson`;
+            return;
+          }
+        }
+
+        document.getElementById('lessonTitle').textContent = data.lesson.title;
+        contents = data.contents || [];
+
+        // Enrich contents with quiz data if content has quiz_data in metadata
+        contents.forEach(c => {
+          if (c.content_type === 'quiz' || (c.metadata && c.metadata.includes('quiz_data'))) {
+            try {
+              const meta = JSON.parse(c.metadata || '{}');
+              if (meta.quiz_data) c._quiz = meta.quiz_data;
+            } catch(e) {}
+          }
+        });
+
+        (data.progress || []).forEach(p => { progressMap[p.content_id] = p; });
+
+        // 개설자면 콘텐츠 추가 버튼 표시
+        showAddButton();
+
+        if (contents.length === 0) {
+          document.getElementById('stepList').innerHTML = '<div style="text-align:center;color:#64748b;padding:24px;font-size:13px;">연결된 콘텐츠가 없습니다.<br><br>개설자라면 아래 "콘텐츠 추가" 버튼을 눌러<br>수업 자료를 구성하세요.</div>';
+          return;
+        }
+
+        renderSidebar();
+        updateOverallProgress();
+        initCanvas();
+        const firstUndone = contents.findIndex(c => !progressMap[c.id]?.completed);
+        selectContent(firstUndone >= 0 ? firstUndone : 0);
+      } catch (err) {
+        console.error('Load error:', err);
+        showToast('수업을 불러올 수 없습니다');
+      }
+    }
+
+    // ============================================================
+    // Sidebar
+    // ============================================================
+    function renderSidebar() {
+      const list = document.getElementById('stepList');
+      list.innerHTML = contents.map((c, i) => {
+        const prog = progressMap[c.id];
+        const isDone = prog && prog.completed;
+        const isActive = i === currentIndex;
+        let statusText = '학습전';
+        let statusClass = '';
+        if (isDone) { statusText = '학습완료'; statusClass = 'done'; }
+        else if (isActive) { statusText = '진행중'; statusClass = 'active'; }
+        else if (prog && prog.progress_percent > 0) { statusText = `${Math.round(prog.progress_percent)}%`; statusClass = 'active'; }
+
+        const cType = c.content_type || 'document';
+        return `
+          <div class="step-item ${isActive ? 'active' : ''} ${isDone ? 'done' : ''}" onclick="selectContent(${i})" ${(isCreatorMode || isEditMode) ? `draggable="true" ondragstart="dragStart(event,${i})" ondragover="dragOver(event,${i})" ondragenter="dragEnter(event)" ondragleave="dragLeave(event)" ondrop="dropStep(event,${i})" ondragend="dragEnd(event)"` : ''}>
+            ${(isCreatorMode || isEditMode) ? `<div class="drag-handle" style="cursor:grab;color:#4b5563;font-size:10px;margin-right:2px;display:flex;align-items:center;flex-shrink:0;" title="드래그하여 순서 변경"><i class="fas fa-grip-vertical"></i></div>` : ''}
+            <div class="step-num">${isDone ? '<i class="fas fa-check"></i>' : (i + 1)}</div>
+            <div class="step-info">
+              <div class="step-title" ${(isCreatorMode || isEditMode) ? `ondblclick="event.stopPropagation();editStepTitle(${i},this)" title="더블클릭으로 제목 수정"` : ''}>${escHtml(c.title)}</div>
+              <div class="step-meta">
+                <span class="step-type-tag ${typeTagClass[cType] || 'tag-document'}">${typeLabels[cType] || cType}</span>
+                <span class="step-status ${statusClass}">${statusText}</span>
+              </div>
+            </div>
+            ${isDone ? '<i class="fas fa-check-circle step-check"></i>' : ''}
+            ${(isCreatorMode || isEditMode) ? `<div style="display:flex;gap:2px;margin-left:auto;flex-shrink:0;" onclick="event.stopPropagation()">
+              <button onclick="removeStep(${i})" style="width:20px;height:20px;border:none;background:rgba(239,68,68,.15);border-radius:4px;color:#ef4444;cursor:pointer;font-size:9px;display:flex;align-items:center;justify-content:center;"><i class="fas fa-times"></i></button>
+            </div>` : ''}
+          </div>
+        `;
+      }).join('');
+
+      const done = contents.filter(c => progressMap[c.id]?.completed).length;
+      document.getElementById('progressBadge').textContent = `${done} / ${contents.length} 완료`;
+    }
+
+    // ============================================================
+    // Content Selection & Rendering
+    // ============================================================
+    function selectContent(index) {
+      currentIndex = index;
+      const c = contents[index];
+      const viewport = document.getElementById('playerViewport');
+
+      document.getElementById('currentTitle').textContent = c.title;
+      const badge = document.getElementById('currentBadge');
+      const cType = c.content_type || 'document';
+      badge.textContent = typeLabels[cType] || cType;
+      badge.className = 'type-badge ' + (badgeClass[cType] || 'badge-document');
+      badge.style.display = '';
+
+      // Clear drawing canvas
+      clearDrawing();
+
+      // Render viewport based on type
+      if (cType === 'whiteboard') {
+        renderWhiteboard(c, viewport);
+      } else if ((cType === 'quiz' || cType === 'exam') && c.questions && c.questions.length > 0) {
+        renderQuestions(c, viewport);
+      } else if (cType === 'quiz' || c._quiz) {
+        renderQuiz(c, viewport);
+      } else if (cType === 'video' && (c.file_path || c.content_url)) {
+        const videoSrc = c.content_url || c.file_path;
+        const isYT = /youtube\.com|youtu\.be/.test(videoSrc);
+        if (isYT) {
+          let embedUrl = videoSrc;
+          if (embedUrl.includes('youtube.com/watch')) {
+            try { const vid = new URL(embedUrl).searchParams.get('v'); embedUrl = `https://www.youtube.com/embed/${vid}`; } catch(e){}
+          } else if (embedUrl.includes('youtu.be/')) {
+            const vid = embedUrl.split('youtu.be/')[1].split(/[?#]/)[0];
+            embedUrl = `https://www.youtube.com/embed/${vid}`;
+          } else if (embedUrl.includes('youtube.com/shorts/')) {
+            const vid = embedUrl.split('shorts/')[1].split(/[?#]/)[0];
+            embedUrl = `https://www.youtube.com/embed/${vid}`;
+          }
+          viewport.innerHTML = `<iframe src="${embedUrl}" allowfullscreen allow="autoplay; encrypted-media" style="width:100%;height:100%;border:none;"></iframe>`;
+        } else {
+          // MP4 등 로컬 파일
+          viewport.innerHTML = `<video src="${videoSrc}" style="width:100%;height:100%;object-fit:contain;background:#000;" controls autoplay></video>`;
+        }
+      } else if (cType === 'image' && c.file_path) {
+        viewport.innerHTML = `<img src="${c.file_path}" alt="${escHtml(c.title)}">`;
+      } else if (cType === 'document' && c.file_path) {
+        const isPdf = c.file_path.toLowerCase().endsWith('.pdf');
+        if (isPdf) {
+          // PDF 미리보기
+          viewport.innerHTML = `<iframe src="${c.file_path}" style="width:100%;height:100%;border:none;background:#fff;" type="application/pdf"></iframe>
+            <div style="position:absolute;bottom:12px;right:12px;z-index:10;">
+              <a href="${escHtml(c.file_path)}" target="_blank" style="display:inline-flex;align-items:center;gap:6px;padding:8px 16px;background:rgba(59,130,246,0.9);color:#fff;border-radius:8px;text-decoration:none;font-size:12px;font-weight:600;backdrop-filter:blur(4px);">
+                <i class="fas fa-external-link-alt"></i> 새 탭에서 열기
+              </a>
+            </div>`;
+        } else {
+          viewport.innerHTML = `
+            <div class="doc-viewer">
+              <i class="fas fa-file-alt" style="font-size:48px;color:#64748b;margin-bottom:16px;"></i>
+              <div style="font-size:18px;font-weight:700;margin-bottom:8px;">${escHtml(c.title)}</div>
+              <div style="font-size:14px;color:#94a3b8;margin-bottom:24px;">${escHtml(c.description || '문서 콘텐츠입니다.')}</div>
+              <a href="${c.file_path}" target="_blank" style="display:inline-flex;align-items:center;gap:8px;padding:14px 28px;background:#3b82f6;color:#fff;border-radius:10px;text-decoration:none;font-weight:600;font-size:15px;transition:background .2s;" onmouseenter="this.style.background='#2563eb'" onmouseleave="this.style.background='#3b82f6'">
+                <i class="fas fa-download"></i> 문서 다운로드
+              </a>
+            </div>`;
+        }
+      } else if (cType === 'link' && (c.file_path || c.content_url)) {
+        const linkUrl = c.content_url || c.file_path;
+        viewport.innerHTML = `
+          <iframe id="linkIframe" src="${escHtml(linkUrl)}" style="width:100%;height:100%;border:none;" sandbox="allow-scripts allow-same-origin allow-popups allow-forms"></iframe>
+          <div id="linkFallback" style="display:none;position:absolute;inset:0;background:#0f172a;display:none;flex-direction:column;align-items:center;justify-content:center;gap:16px;">
+            <i class="fas fa-shield-alt" style="font-size:48px;color:#f59e0b;"></i>
+            <div style="font-size:16px;font-weight:700;color:#f1f5f9;">이 사이트는 임베디드를 허용하지 않습니다</div>
+            <div style="font-size:13px;color:#94a3b8;max-width:400px;text-align:center;">${escHtml(linkUrl)}</div>
+            <a href="${escHtml(linkUrl)}" target="_blank" style="display:inline-flex;align-items:center;gap:8px;padding:14px 28px;background:#3b82f6;color:#fff;border-radius:10px;text-decoration:none;font-weight:700;font-size:15px;margin-top:8px;">
+              <i class="fas fa-external-link-alt"></i> 새 탭에서 열기
+            </a>
+          </div>
+          <div style="position:absolute;bottom:12px;right:12px;z-index:10;">
+            <a href="${escHtml(linkUrl)}" target="_blank" style="display:inline-flex;align-items:center;gap:6px;padding:8px 16px;background:rgba(59,130,246,0.9);color:#fff;border-radius:8px;text-decoration:none;font-size:12px;font-weight:600;backdrop-filter:blur(4px);">
+              <i class="fas fa-external-link-alt"></i> 새 탭에서 열기
+            </a>
+          </div>`;
+        // iframe 로드 실패 감지
+        const iframe = document.getElementById('linkIframe');
+        const fallback = document.getElementById('linkFallback');
+        if (iframe && fallback) {
+          iframe.onerror = () => { iframe.style.display = 'none'; fallback.style.display = 'flex'; };
+          // X-Frame-Options 차단 감지 (3초 후 빈 iframe 체크)
+          setTimeout(() => {
+            try {
+              if (iframe.contentDocument && iframe.contentDocument.body && iframe.contentDocument.body.innerHTML === '') {
+                iframe.style.display = 'none'; fallback.style.display = 'flex';
+              }
+            } catch(e) {
+              // cross-origin이면 정상 로드된 것
+            }
+          }, 3000);
+        }
+      } else {
+        viewport.innerHTML = `
+          <div class="doc-viewer">
+            <i class="fas fa-cubes"></i>
+            <div style="font-size:16px;font-weight:600;">${escHtml(c.title)}</div>
+            <div style="font-size:13px;color:#94a3b8;">${escHtml(c.description || '콘텐츠를 학습하세요.')}</div>
+          </div>`;
+      }
+
+      // Progress
+      const prog = progressMap[c.id];
+      const percent = prog ? Math.round(prog.progress_percent) : 0;
+      const isDone = prog && prog.completed;
+      document.getElementById('contentProgressBar').style.width = (isDone ? 100 : percent) + '%';
+
+      const btn = document.getElementById('completeBtn');
+      const isOwner = currentUser && lessonData && currentUser.id === lessonData.teacher_id;
+      btn.style.display = (isOwner || isPreviewMode) ? 'none' : 'flex';
+      if (isDone) {
+        btn.className = 'complete-btn completed';
+        btn.innerHTML = '<i class="fas fa-check-circle"></i> 학습 완료됨';
+      } else {
+        btn.className = 'complete-btn';
+        btn.innerHTML = '<i class="fas fa-check-circle"></i> 학습 완료 처리';
+      }
+
+      document.getElementById('prevBtn').disabled = (currentIndex === 0);
+      document.getElementById('nextBtn').disabled = (currentIndex === contents.length - 1);
+
+      // Auto-record 50% progress on view
+      if (!isDone && !isPreviewMode) {
+        saveProgress(c.id, { progress_percent: Math.max(percent, 50) });
+      }
+
+      renderSidebar();
+      resizeCanvas();
+    }
+
+    // ============================================================
+    // Questions Rendering (content_questions 기반)
+    // ============================================================
+    function renderQuestions(content, viewport) {
+      const questions = content.questions || [];
+      const typeBadges = { choice: { label: '객관식', color: '#3b82f6' }, short: { label: '주관식', color: '#10b981' }, essay: { label: '서술형', color: '#8b5cf6' } };
+
+      let html = `<div style="width:100%;padding:32px 48px;overflow-y:auto;max-height:100%;scrollbar-width:none;-webkit-overflow-scrolling:touch;">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:24px;">
+          <span style="background:#3b82f6;color:#fff;padding:4px 12px;border-radius:8px;font-size:13px;font-weight:700;">${content.content_type === 'exam' ? '📋 평가지' : '❓ 문항'}</span>
+          <span style="font-size:18px;font-weight:700;color:#fff;">${escHtml(content.title)}</span>
+          <span style="font-size:13px;color:#94a3b8;">(${questions.length}문항)</span>
+        </div>`;
+
+      questions.forEach((q, i) => {
+        const tb = typeBadges[q.question_type] || typeBadges.choice;
+        const optionLabels = ['①', '②', '③', '④', '⑤'];
+
+        html += `<div style="background:rgba(255,255,255,0.05);border-radius:12px;padding:20px;margin-bottom:16px;border-left:3px solid ${tb.color};">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+            <span style="background:${tb.color};color:#fff;padding:2px 10px;border-radius:6px;font-size:11px;font-weight:700;">${tb.label}</span>
+            <span style="font-size:12px;color:#64748b;">${q.points || 1}점</span>
+          </div>
+          <div style="font-size:15px;font-weight:600;color:#f1f5f9;margin-bottom:12px;">Q${q.question_number}. ${escHtml(q.question_text)}</div>`;
+
+        if (q.options && Array.isArray(q.options)) {
+          html += '<div style="display:flex;flex-direction:column;gap:6px;">';
+          q.options.forEach((opt, oi) => {
+            const isAnswer = String(oi + 1) === String(q.answer);
+            html += `<div style="padding:8px 14px;border-radius:8px;font-size:14px;cursor:pointer;transition:all .15s;
+              ${isAnswer ? 'background:rgba(16,185,129,0.15);color:#34d399;font-weight:600;' : 'background:rgba(255,255,255,0.05);color:#cbd5e1;'}
+              " onmouseenter="this.style.background='rgba(255,255,255,0.1)'" onmouseleave="this.style.background='${isAnswer ? 'rgba(16,185,129,0.15)' : 'rgba(255,255,255,0.05)'}'">
+              ${optionLabels[oi] || (oi+1)} ${escHtml(opt)} ${isAnswer ? '<i class="fas fa-check" style="float:right;"></i>' : ''}
+            </div>`;
+          });
+          html += '</div>';
+        } else if (q.question_type === 'short') {
+          html += `<div style="padding:8px 14px;background:rgba(16,185,129,0.1);border-radius:8px;color:#34d399;font-size:14px;font-weight:500;">정답: ${escHtml(q.answer || '-')}</div>`;
+        } else {
+          html += `<div style="padding:8px 14px;background:rgba(139,92,246,0.1);border-radius:8px;color:#a78bfa;font-size:13px;">서술형 문항입니다.</div>`;
+        }
+
+        if (q.explanation) {
+          html += `<div style="margin-top:10px;padding:8px 12px;background:rgba(59,130,246,0.1);border-radius:8px;font-size:12px;color:#93c5fd;"><i class="fas fa-lightbulb" style="margin-right:4px;color:#fbbf24;"></i>${escHtml(q.explanation)}</div>`;
+        }
+        html += '</div>';
+      });
+
+      html += '</div>';
+      viewport.innerHTML = html;
+      // KaTeX 수식 렌더링
+      setTimeout(() => {
+        if (typeof renderMathInElement === 'function') {
+          renderMathInElement(viewport, {
+            delimiters: [
+              { left: '$$', right: '$$', display: true },
+              { left: '$', right: '$', display: false },
+              { left: '\\(', right: '\\)', display: false },
+              { left: '\\[', right: '\\]', display: true }
+            ],
+            throwOnError: false
+          });
+        }
+      }, 50);
+    }
+
+    // ============================================================
+    // Quiz Rendering (legacy _quiz 기반)
+    // ============================================================
+    function renderQuiz(content, viewport) {
+      const quiz = content._quiz || {};
+      const qType = quiz.questionType || 'objective';
+      const saved = quizAnswers[content.id] || {};
+      const submitted = saved.submitted;
+
+      let badgeLabel = '객관식';
+      let badgeClass = 'badge-objective';
+      if (qType === 'subjective') { badgeLabel = '단답형'; badgeClass = 'badge-subjective'; }
+      else if (qType === 'essay') { badgeLabel = '서술형'; badgeClass = 'badge-essay'; }
+      else if (qType === 'multiple') { badgeLabel = '복수선택'; badgeClass = 'badge-multiple'; }
+
+      let html = `<div class="quiz-container">
+        <span class="quiz-type-badge ${badgeClass}">${badgeLabel}</span>
+        <div class="quiz-question">${escHtml(quiz.question || content.title)}</div>`;
+
+      if (qType === 'objective' || qType === 'multiple') {
+        const options = quiz.options || [];
+        html += '<div class="quiz-options">';
+        options.forEach((opt, i) => {
+          let cls = '';
+          if (submitted) {
+            const correct = Array.isArray(quiz.answer) ? quiz.answer.includes(i) : quiz.answer === i;
+            const userSelected = Array.isArray(saved.answer) ? saved.answer.includes(i) : saved.answer === i;
+            if (correct) cls = 'correct';
+            else if (userSelected && !correct) cls = 'wrong';
+          } else {
+            const isSelected = Array.isArray(saved.answer) ? saved.answer.includes(i) : saved.answer === i;
+            if (isSelected) cls = 'selected';
+          }
+          html += `<div class="quiz-option ${cls}" onclick="selectQuizOption(${content.id}, ${i}, '${qType}')" ${submitted ? 'style="pointer-events:none;"' : ''}>
+            <div class="quiz-option-num">${optionLabels[i] || (i+1)}</div>
+            <span>${escHtml(opt)}</span>
+          </div>`;
+        });
+        html += '</div>';
+      } else if (qType === 'subjective') {
+        html += `<input type="text" class="quiz-answer-input" id="quizInput_${content.id}"
+          placeholder="답을 입력하세요" value="${escHtml(saved.answer || '')}"
+          ${submitted ? 'disabled' : ''} oninput="quizAnswers[${content.id}] = quizAnswers[${content.id}]||{}; quizAnswers[${content.id}].answer = this.value;">`;
+      } else if (qType === 'essay') {
+        html += `<textarea class="quiz-answer-input" id="quizInput_${content.id}"
+          placeholder="답변을 서술하세요" rows="6"
+          ${submitted ? 'disabled' : ''} oninput="quizAnswers[${content.id}] = quizAnswers[${content.id}]||{}; quizAnswers[${content.id}].answer = this.value;">${escHtml(saved.answer || '')}</textarea>`;
+      }
+
+      if (!submitted) {
+        html += `<button class="quiz-submit-btn" onclick="submitQuizAnswer(${content.id})"><i class="fas fa-paper-plane"></i> 제출하기</button>`;
+      } else {
+        // Show result
+        if (qType === 'essay') {
+          html += `<div class="quiz-result pending"><i class="fas fa-clock"></i> 서술형은 교사가 직접 채점합니다</div>`;
+        } else if (qType === 'subjective') {
+          const isCorrect = saved.answer && quiz.answer && saved.answer.trim().toLowerCase() === String(quiz.answer).trim().toLowerCase();
+          html += `<div class="quiz-result ${isCorrect ? 'correct' : 'wrong'}">
+            <i class="fas fa-${isCorrect ? 'check-circle' : 'times-circle'}"></i> ${isCorrect ? '정답!' : '오답. 정답: ' + escHtml(String(quiz.answer))}
+          </div>`;
+        } else {
+          const correct = Array.isArray(quiz.answer) ? quiz.answer : [quiz.answer];
+          const userAns = Array.isArray(saved.answer) ? saved.answer : [saved.answer];
+          const isCorrect = correct.length === userAns.length && correct.every(a => userAns.includes(a));
+          html += `<div class="quiz-result ${isCorrect ? 'correct' : 'wrong'}">
+            <i class="fas fa-${isCorrect ? 'check-circle' : 'times-circle'}"></i> ${isCorrect ? '정답!' : '오답'}
+          </div>`;
+        }
+
+        if (quiz.explanation) {
+          html += `<div class="quiz-explanation"><strong>💡 해설:</strong> ${escHtml(quiz.explanation)}</div>`;
+        }
+
+        html += `<button class="quiz-retry-btn" onclick="retryQuiz(${content.id})"><i class="fas fa-redo"></i> 다시 풀기</button>`;
+      }
+
+      html += '</div>';
+      viewport.innerHTML = html;
+    }
+
+    function selectQuizOption(contentId, optIndex, qType) {
+      if (!quizAnswers[contentId]) quizAnswers[contentId] = {};
+      if (quizAnswers[contentId].submitted) return;
+
+      if (qType === 'multiple') {
+        if (!Array.isArray(quizAnswers[contentId].answer)) quizAnswers[contentId].answer = [];
+        const arr = quizAnswers[contentId].answer;
+        const idx = arr.indexOf(optIndex);
+        if (idx >= 0) arr.splice(idx, 1);
+        else arr.push(optIndex);
+      } else {
+        quizAnswers[contentId].answer = optIndex;
+      }
+
+      renderQuiz(contents[currentIndex], document.getElementById('playerViewport'));
+    }
+
+    function submitQuizAnswer(contentId) {
+      const saved = quizAnswers[contentId] || {};
+      if (saved.answer === undefined || saved.answer === '' || (Array.isArray(saved.answer) && saved.answer.length === 0)) {
+        showToast('답을 선택하거나 입력해주세요');
+        return;
+      }
+      quizAnswers[contentId].submitted = true;
+
+      // Auto-mark complete for quiz
+      progressMap[contentId] = { ...progressMap[contentId], progress_percent: 100, completed: 1 };
+      saveProgress(contentId, { progress_percent: 100, completed: true });
+      updateOverallProgress();
+      renderSidebar();
+      renderQuiz(contents[currentIndex], document.getElementById('playerViewport'));
+
+      // Update complete button
+      const btn = document.getElementById('completeBtn');
+      btn.className = 'complete-btn completed';
+      btn.innerHTML = '<i class="fas fa-check-circle"></i> 학습 완료됨';
+
+      showToast('답안이 제출되었습니다', 'success');
+
+      // Check all done
+      const allDone = contents.every(c => progressMap[c.id]?.completed);
+      if (allDone) setTimeout(() => showCompletionOverlay(), 800);
+    }
+
+    function retryQuiz(contentId) {
+      quizAnswers[contentId] = {};
+      renderQuiz(contents[currentIndex], document.getElementById('playerViewport'));
+    }
+
+    // ============================================================
+    // Actions
+    // ============================================================
+    async function markComplete() {
+      const c = contents[currentIndex];
+      if (!c) return;
+      const prog = progressMap[c.id];
+      if (prog && prog.completed) return;
+
+      await saveProgress(c.id, { progress_percent: 100, completed: true });
+      progressMap[c.id] = { ...progressMap[c.id], progress_percent: 100, completed: 1 };
+      document.getElementById('contentProgressBar').style.width = '100%';
+
+      const btn = document.getElementById('completeBtn');
+      btn.className = 'complete-btn completed';
+      btn.innerHTML = '<i class="fas fa-check-circle"></i> 학습 완료됨';
+
+      updateOverallProgress();
+      renderSidebar();
+      showToast('학습 완료 처리되었습니다', 'success');
+
+      const allDone = contents.every(c => progressMap[c.id]?.completed);
+      if (allDone) {
+        setTimeout(() => showCompletionOverlay(), 500);
+        return;
+      }
+
+      if (currentIndex < contents.length - 1) {
+        setTimeout(() => {
+          const nextUndone = contents.findIndex((c, i) => i > currentIndex && !progressMap[c.id]?.completed);
+          if (nextUndone >= 0) selectContent(nextUndone);
+        }, 1200);
+      }
+    }
+
+    function goStep(dir) {
+      const newIndex = currentIndex + dir;
+      if (newIndex >= 0 && newIndex < contents.length) selectContent(newIndex);
+    }
+
+    async function saveProgress(contentId, data) {
+      try {
+        await fetch(`/api/lesson/${classId}/${lessonId}/progress`, {
+          method: 'POST', headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({ content_id: contentId, ...data })
+        });
+      } catch (err) { console.error('Save progress error:', err); }
+    }
+
+    function updateOverallProgress() {
+      const total = contents.length;
+      const done = contents.filter(c => progressMap[c.id]?.completed).length;
+      const percent = total > 0 ? Math.round((done / total) * 100) : 0;
+      document.getElementById('overallPercent').textContent = percent + '%';
+      document.getElementById('overallBar').style.width = percent + '%';
+    }
+
+    // ============================================================
+    // Completion
+    // ============================================================
+    function showCompletionOverlay() {
+      const total = contents.length;
+      const quizzes = contents.filter(c => c.content_type === 'quiz' || c._quiz);
+      let correctCount = 0;
+      quizzes.forEach(c => {
+        const quiz = c._quiz || {};
+        const saved = quizAnswers[c.id];
+        if (!saved || !saved.submitted) return;
+        if (quiz.questionType === 'essay') return;
+        if (quiz.questionType === 'subjective') {
+          if (saved.answer && quiz.answer && saved.answer.trim().toLowerCase() === String(quiz.answer).trim().toLowerCase()) correctCount++;
+        } else {
+          const correct = Array.isArray(quiz.answer) ? quiz.answer : [quiz.answer];
+          const userAns = Array.isArray(saved.answer) ? saved.answer : [saved.answer];
+          if (correct.length === userAns.length && correct.every(a => userAns.includes(a))) correctCount++;
+        }
+      });
+
+      document.getElementById('completionDesc').textContent = `${total}개 콘텐츠를 모두 학습 완료했습니다!`;
+      document.getElementById('completionStats').innerHTML = `
+        <div class="completion-stat"><div class="completion-stat-value">${total}</div><div class="completion-stat-label">전체 콘텐츠</div></div>
+        <div class="completion-stat"><div class="completion-stat-value">${quizzes.length > 0 ? Math.round((correctCount/quizzes.length)*100)+'%' : '-'}</div><div class="completion-stat-label">퀴즈 정답률</div></div>
+        <div class="completion-stat"><div class="completion-stat-value">${quizzes.filter(q => quizAnswers[q.id]?.submitted && (q._quiz?.questionType === 'essay')).length}</div><div class="completion-stat-label">서술형 답안</div></div>
+        <div class="completion-stat"><div class="completion-stat-value">-</div><div class="completion-stat-label">학습 시간</div></div>
+      `;
+      document.getElementById('completionOverlay').classList.add('show');
+    }
+
+    function closeCompletion() { document.getElementById('completionOverlay').classList.remove('show'); }
+
+    // ============================================================
+    // Sidebar Toggle
+    // ============================================================
+    function toggleSidebar() {
+      document.getElementById('sidebar').classList.toggle('collapsed');
+    }
+
+    let sidebarCollapsed = false;
+    function toggleSidebarCollapse() {
+      sidebarCollapsed = !sidebarCollapsed;
+      const sidebar = document.getElementById('sidebar');
+      const toggleBtn = document.getElementById('sidebarToggleBtn');
+      const toggleIcon = document.getElementById('sidebarToggleIcon');
+
+      if (sidebarCollapsed) {
+        sidebar.classList.add('collapsed');
+        toggleBtn.classList.add('collapsed');
+        toggleIcon.className = 'fas fa-chevron-right';
+      } else {
+        sidebar.classList.remove('collapsed');
+        toggleBtn.classList.remove('collapsed');
+        toggleIcon.className = 'fas fa-chevron-left';
+      }
+
+      // 캔버스 리사이즈 (약간 딜레이 후 실행)
+      setTimeout(() => resizeCanvas(), 350);
+    }
+
+    // ============================================================
+    // Chat
+    // ============================================================
+    function toggleChat() {
+      // Close settings if open
+      if (settingsOpen) toggleSettings();
+      chatOpen = !chatOpen;
+      document.getElementById('chatPanel').classList.toggle('open', chatOpen);
+      document.getElementById('chatBtn').classList.toggle('active', chatOpen);
+      if (chatOpen) document.getElementById('chatInput').focus();
+    }
+
+    function sendChat() {
+      const input = document.getElementById('chatInput');
+      const msg = input.value.trim();
+      if (!msg) return;
+
+      const messages = document.getElementById('chatMessages');
+      const div = document.createElement('div');
+      div.className = 'chat-msg mine';
+      div.textContent = msg;
+      messages.appendChild(div);
+      messages.scrollTop = messages.scrollHeight;
+      input.value = '';
+
+      // Simulate a system response after a moment
+      setTimeout(() => {
+        const resp = document.createElement('div');
+        resp.className = 'chat-msg system';
+        resp.textContent = '메시지가 전송되었습니다 (실시간 채팅은 Socket.IO 연결 시 동작합니다)';
+        messages.appendChild(resp);
+        messages.scrollTop = messages.scrollHeight;
+      }, 500);
+    }
+
+    function handleChatKey(e) {
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat(); }
+    }
+
+    // ============================================================
+    // Hand Raise
+    // ============================================================
+    function raiseHand() {
+      handRaised = !handRaised;
+      const btn = document.getElementById('handBtn');
+      btn.classList.toggle('hand-raised', handRaised);
+      showToast(handRaised ? '✋ 손을 들었습니다!' : '손을 내렸습니다');
+    }
+
+    // ============================================================
+    // Settings
+    // ============================================================
+    function toggleSettings() {
+      if (chatOpen) toggleChat();
+      settingsOpen = !settingsOpen;
+      document.getElementById('settingsPanel').classList.toggle('open', settingsOpen);
+      document.getElementById('settingsBtn').classList.toggle('active', settingsOpen);
+    }
+
+    function setFontSize(size) {
+      document.body.classList.remove('font-small', 'font-medium', 'font-large');
+      document.body.classList.add('font-' + size);
+      updateSettingsActive('글자 크기', size === 'small' ? 0 : size === 'medium' ? 1 : 2);
+    }
+
+    function setTheme(theme) {
+      document.body.classList.toggle('light-mode', theme === 'light');
+      updateSettingsActive('테마', theme === 'dark' ? 0 : 1);
+    }
+
+    function setPlaybackRate(rate) {
+      playbackRate = rate;
+      const iframe = document.querySelector('.player-viewport iframe');
+      if (iframe) {
+        try { iframe.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'setPlaybackRate', args: [rate] }), '*'); } catch(e) {}
+      }
+      const rateIdx = [0.5, 0.75, 1, 1.25, 1.5, 2].indexOf(rate);
+      updateSettingsActive('재생 속도', rateIdx);
+      showToast(`재생 속도: ${rate}x`);
+    }
+
+    function updateSettingsActive(groupLabel, activeIdx) {
+      const groups = document.querySelectorAll('.settings-group');
+      groups.forEach(g => {
+        const label = g.querySelector('.settings-label');
+        if (label && label.textContent === groupLabel) {
+          const opts = g.querySelectorAll('.settings-opt');
+          opts.forEach((o, i) => o.classList.toggle('active', i === activeIdx));
+        }
+      });
+    }
+
+    // ============================================================
+    // Drawing / Annotation Tools
+    // ============================================================
+    function initCanvas() {
+      resizeCanvas();
+      window.addEventListener('resize', resizeCanvas);
+
+      canvas.addEventListener('mousedown', startDrawing);
+      canvas.addEventListener('mousemove', draw);
+      canvas.addEventListener('mouseup', stopDrawing);
+      canvas.addEventListener('mouseleave', stopDrawing);
+
+      // Touch support
+      canvas.addEventListener('touchstart', (e) => { e.preventDefault(); const t = e.touches[0]; startDrawing({ offsetX: t.clientX - canvas.getBoundingClientRect().left, offsetY: t.clientY - canvas.getBoundingClientRect().top }); });
+      canvas.addEventListener('touchmove', (e) => { e.preventDefault(); const t = e.touches[0]; draw({ offsetX: t.clientX - canvas.getBoundingClientRect().left, offsetY: t.clientY - canvas.getBoundingClientRect().top }); });
+      canvas.addEventListener('touchend', stopDrawing);
+    }
+
+    function resizeCanvas() {
+      const viewport = document.querySelector('.content-area');
+      if (!viewport) return;
+      canvas.width = viewport.offsetWidth;
+      canvas.height = viewport.offsetHeight - document.querySelector('.controls-bar').offsetHeight;
+    }
+
+    function startDrawing(e) {
+      if (!drawingActive) return;
+      isDrawing = true;
+      ctx.beginPath();
+      ctx.moveTo(e.offsetX, e.offsetY);
+    }
+
+    function draw(e) {
+      if (!isDrawing || !drawingActive) return;
+      if (currentTool === 'eraser') {
+        ctx.globalCompositeOperation = 'destination-out';
+        ctx.lineWidth = penSize * 5;
+      } else if (currentTool === 'highlight') {
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.strokeStyle = penColor;
+        ctx.lineWidth = penSize * 3;
+        ctx.globalAlpha = 0.3;
+      } else {
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.strokeStyle = penColor;
+        ctx.lineWidth = penSize;
+        ctx.globalAlpha = 1;
+      }
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.lineTo(e.offsetX, e.offsetY);
+      ctx.stroke();
+    }
+
+    function stopDrawing() {
+      isDrawing = false;
+      ctx.globalAlpha = 1;
+      ctx.globalCompositeOperation = 'source-over';
+    }
+
+    function activateTool(tool) {
+      if (currentTool === tool) {
+        deactivateTools();
+        return;
+      }
+      currentTool = tool;
+      drawingActive = true;
+      canvas.classList.add('active');
+      document.getElementById('penBtn').classList.toggle('active', tool === 'pen');
+      document.getElementById('highlightBtn').classList.toggle('active', tool === 'highlight');
+      document.getElementById('eraserBtn').classList.toggle('active', tool === 'eraser');
+      document.getElementById('penPalette').classList.toggle('show', tool === 'pen' || tool === 'highlight');
+    }
+
+    function deactivateTools() {
+      currentTool = null;
+      drawingActive = false;
+      canvas.classList.remove('active');
+      document.querySelectorAll('.toolbar-btn').forEach(b => b.classList.remove('active'));
+      document.getElementById('penPalette').classList.remove('show');
+    }
+
+    function togglePen() { activateTool('pen'); }
+    function toggleHighlight() { activateTool('highlight'); }
+    function toggleEraser() { activateTool('eraser'); }
+
+    function setColor(color) {
+      penColor = color;
+      document.querySelectorAll('.color-btn').forEach(b => b.classList.toggle('active', b.style.background === color || b.style.backgroundColor === color));
+    }
+
+    function setSize(size) {
+      penSize = size;
+      const sizeMap = { 2: 0, 4: 1, 8: 2 };
+      document.querySelectorAll('.size-btn').forEach((b, i) => b.classList.toggle('active', i === sizeMap[size]));
+    }
+
+    function clearDrawing() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+    }
+
+    function toggleBookmark() {
+      const btn = document.getElementById('bookmarkBtn');
+      btn.classList.toggle('active');
+      showToast(btn.classList.contains('active') ? '📌 북마크 추가됨' : '북마크 해제됨');
+    }
+
+    // ============================================================
+    // Navigation & Utilities
+    // ============================================================
+    function goBack() { location.href = `/class/lesson-board.html?classId=${classId}`; }
+
+    function showToast(msg, cls) {
+      const container = document.getElementById('toastContainer');
+      const toast = document.createElement('div');
+      toast.className = 'toast ' + (cls || '');
+      toast.textContent = msg;
+      container.appendChild(toast);
+      setTimeout(() => toast.remove(), 3000);
+    }
+
+    // ============================================================
+    // Keyboard shortcuts
+    // ============================================================
+    document.addEventListener('keydown', (e) => {
+      // Don't handle if typing in input
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+      if (e.key === 'ArrowLeft') goStep(-1);
+      else if (e.key === 'ArrowRight') goStep(1);
+      else if (e.key === 'Enter' && !e.shiftKey) markComplete();
+      else if (e.key === 'f' || e.key === 'F') {
+        if (!document.fullscreenElement) document.documentElement.requestFullscreen();
+        else document.exitFullscreen();
+      }
+    });
+
+    // ============================================================
+    // Init
+    // ============================================================
+    window.addEventListener('dacheim:user-loaded', (e) => {
+      currentUser = e.detail;
+    });
+
+    // ============================================================
+    // 콘텐츠 추가 (개설자 전용)
+    // ============================================================
+    let addContentSrc = 'public';
+    let addContentType = '';
+
+    function showAddButton() {
+      if (!currentUser || !lessonData) return;
+      const isOwner = currentUser.id === lessonData.teacher_id;
+      if (isOwner) {
+        document.getElementById('addContentBtn').style.display = 'block';
+        // 개설자 편집 모드: 학습 완료/채팅/손들기/나가기 숨김
+        const completeBtn = document.getElementById('completeBtn');
+        if (completeBtn) completeBtn.style.display = 'none';
+        const chatBtn = document.getElementById('chatBtn');
+        if (chatBtn) chatBtn.style.display = 'none';
+        const handBtn = document.getElementById('handBtn');
+        if (handBtn) handBtn.style.display = 'none';
+        // 오른쪽 나가기 버튼 숨김 (왼쪽 돌아가기만 유지)
+        document.querySelectorAll('.header-btn-danger').forEach(b => {
+          b.style.display = 'none';
+        });
+        // 하단 컨트롤바의 학습완료 버튼도 숨김
+        const controlsBar = document.querySelector('.controls-bar');
+        if (controlsBar) {
+          const complBtns = controlsBar.querySelectorAll('.complete-btn');
+          complBtns.forEach(b => b.style.display = 'none');
+        }
+      }
+    }
+
+    function openAddContentModal() {
+      document.getElementById('addContentOverlay').style.display = 'flex';
+      searchAddContent();
+    }
+
+    function closeAddContentModal() {
+      document.getElementById('addContentOverlay').style.display = 'none';
+    }
+
+    function switchAddSrc(btn, src) {
+      document.querySelectorAll('.add-src-tab').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      addContentSrc = src;
+      searchAddContent();
+    }
+
+    function filterAddType(btn, type) {
+      document.querySelectorAll('.add-type-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      addContentType = type;
+      searchAddContent();
+    }
+
+    let addSelectedStdCodes = []; // 선택된 성취기준 코드 목록
+
+    async function searchAddStandard(query) {
+      const dd = document.getElementById('addStdDropdown');
+      if (!dd) return;
+      if (!query || query.length < 1) { dd.style.display = 'none'; return; }
+      // 스마트 검색: 학교급 별칭 변환
+      let q = query.replace(/초등학교|초등/g, '초').replace(/중학교|중등/g, '중').replace(/고등학교|고등/g, '고');
+      try {
+        const res = await fetch('/api/curriculum/standards?search=' + encodeURIComponent(q) + '&limit=15').then(r => r.json());
+        const stds = res.data || [];
+        if (!stds.length) { dd.innerHTML = '<div style="padding:12px;color:#9ca3af;font-size:12px;text-align:center;">검색 결과 없음</div>'; dd.style.display = 'block'; return; }
+        dd.innerHTML = stds.map(s => `
+          <div onclick="selectAddStd('${escHtml(s.code)}','${escHtml(s.subject_name)}','${escHtml(s.area)}');event.stopPropagation();"
+            style="padding:8px 12px;cursor:pointer;border-bottom:1px solid #f3f4f6;font-size:12px;"
+            onmouseenter="this.style.background='#eff6ff'" onmouseleave="this.style.background=''">
+            <div style="display:flex;gap:4px;margin-bottom:2px;flex-wrap:wrap;">
+              <span style="background:#dbeafe;color:#2563eb;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:600;">${s.school_level}</span>
+              <span style="background:#e0e7ff;color:#4338ca;padding:1px 6px;border-radius:4px;font-size:10px;">${escHtml(s.subject_name)}</span>
+              <span style="background:#fef3c7;color:#92400e;padding:1px 6px;border-radius:4px;font-size:10px;">${s.grade_label || s.grade_group + '학년군'}</span>
+              <span style="background:#f3f4f6;color:#6b7280;padding:1px 6px;border-radius:4px;font-size:10px;">${escHtml(s.area)}</span>
+            </div>
+            <div style="color:#374151;"><strong style="color:#6366f1;">${escHtml(s.code)}</strong> ${escHtml(s.content)}</div>
+          </div>
+        `).join('');
+        dd.style.display = 'block';
+      } catch { dd.style.display = 'none'; }
+    }
+
+    function selectAddStd(code, subject, area) {
+      if (addSelectedStdCodes.includes(code)) return;
+      addSelectedStdCodes.push(code);
+      document.getElementById('addStdDropdown').style.display = 'none';
+      document.getElementById('addStdSearchInput').value = '';
+      renderAddSelectedStds();
+      searchAddContent(); // 재검색
+    }
+
+    function removeAddStd(code) {
+      addSelectedStdCodes = addSelectedStdCodes.filter(c => c !== code);
+      renderAddSelectedStds();
+      searchAddContent();
+    }
+
+    function renderAddSelectedStds() {
+      const container = document.getElementById('addSelectedStds');
+      if (!container) return;
+      if (!addSelectedStdCodes.length) { container.style.display = 'none'; return; }
+      container.style.display = 'flex';
+      container.innerHTML = addSelectedStdCodes.map(c => `
+        <span style="display:inline-flex;align-items:center;gap:4px;background:#eff6ff;color:#3b82f6;padding:3px 10px;border-radius:6px;font-size:11px;font-weight:600;">
+          🎯 ${c} <button onclick="removeAddStd('${c}')" style="background:none;border:none;color:#93c5fd;cursor:pointer;font-size:12px;padding:0 2px;">&times;</button>
+        </span>`).join('');
+    }
+
+    let addViewMode = 'card';
+    let _addLastItems = [];
+
+    function setAddViewMode(mode) {
+      addViewMode = mode;
+      document.getElementById('addViewCardBtn').style.cssText = mode === 'card' ? 'padding:4px 8px;border:none;border-radius:4px;background:#fff;color:#374151;cursor:pointer;font-size:12px;box-shadow:0 1px 2px rgba(0,0,0,.08);' : 'padding:4px 8px;border:none;border-radius:4px;background:transparent;color:#9ca3af;cursor:pointer;font-size:12px;';
+      document.getElementById('addViewListBtn').style.cssText = mode === 'list' ? 'padding:4px 8px;border:none;border-radius:4px;background:#fff;color:#374151;cursor:pointer;font-size:12px;box-shadow:0 1px 2px rgba(0,0,0,.08);' : 'padding:4px 8px;border:none;border-radius:4px;background:transparent;color:#9ca3af;cursor:pointer;font-size:12px;';
+      if (_addLastItems.length) renderAddItems(_addLastItems);
+    }
+
+    const _addTypeColors = { video:'#3B82F6', document:'#F97316', image:'#8B5CF6', quiz:'#14B8A6', exam:'#EC4899', activity:'#10B981', package:'#EAB308', recipe:'#06B6D4' };
+    const _addTypeIcons = { video:'fa-video', document:'fa-file-alt', image:'fa-image', quiz:'fa-question-circle', exam:'fa-clipboard-check', activity:'fa-puzzle-piece', package:'fa-box-open', recipe:'fa-book-reader' };
+    const _addTypeNames = { video:'영상', document:'문서', image:'이미지', quiz:'문항', exam:'평가지', activity:'활동지', package:'수업꾸러미', recipe:'수업레시피' };
+
+    function renderAddItems(items) {
+      const container = document.getElementById('addSearchResults');
+      if (!container) return;
+      _addLastItems = items;
+      const existIds = new Set(contents.map(c => c.id));
+
+      if (!items.length) {
+        container.innerHTML = '<div style="padding:40px;text-align:center;color:#d1d5db;font-size:13px;">검색 결과가 없습니다.</div>';
+        return;
+      }
+
+      if (addViewMode === 'list') {
+        container.innerHTML = items.map(c => {
+          const added = existIds.has(c.id);
+          const color = _addTypeColors[c.content_type] || '#6B7280';
+          return `<div style="display:flex;align-items:center;gap:12px;padding:10px 12px;border-bottom:1px solid #f3f4f6;${added?'opacity:.45;':''}cursor:pointer;" onclick="previewAddContent(${c.id})" onmouseenter="this.style.background='#f9fafb'" onmouseleave="this.style.background=''">
+            <div style="width:32px;height:32px;border-radius:8px;background:${color}12;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+              <i class="fas ${_addTypeIcons[c.content_type]||'fa-file'}" style="font-size:14px;color:${color};"></i>
+            </div>
+            <div style="flex:1;min-width:0;">
+              <div style="font-size:13px;font-weight:600;color:#1f2937;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escHtml(c.title)}</div>
+              <div style="font-size:11px;color:#9ca3af;">${_addTypeNames[c.content_type]||c.content_type}${c.creator_name?' · '+escHtml(c.creator_name):''}</div>
+            </div>
+            ${added ? '<span style="font-size:11px;color:#10b981;flex-shrink:0;"><i class="fas fa-check-circle"></i></span>'
+            : `<button onclick="event.stopPropagation();addContentToLesson(${c.id})" style="padding:5px 14px;background:#3b82f6;color:#fff;border:none;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;font-family:inherit;flex-shrink:0;"><i class="fas fa-plus"></i> 추가</button>`}
+          </div>`;
+        }).join('');
+      } else {
+        container.innerHTML = `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;">` +
+          items.map(c => {
+            const added = existIds.has(c.id);
+            const color = _addTypeColors[c.content_type] || '#6B7280';
+            return `<div style="border:1px solid ${added?'#86efac':'#e5e7eb'};border-radius:10px;background:#fff;overflow:hidden;transition:all .15s;${added?'opacity:.45;':''}" onmouseenter="this.style.boxShadow='0 2px 8px rgba(0,0,0,.08)'" onmouseleave="this.style.boxShadow=''">
+              <div onclick="previewAddContent(${c.id})" style="height:64px;background:${color}10;display:flex;align-items:center;justify-content:center;cursor:pointer;position:relative;">
+                <i class="fas ${_addTypeIcons[c.content_type]||'fa-file'}" style="font-size:22px;color:${color};opacity:.6;"></i>
+                <span style="position:absolute;top:6px;left:8px;font-size:10px;font-weight:600;color:${color};background:${color}12;padding:2px 6px;border-radius:4px;">${_addTypeNames[c.content_type]||c.content_type}</span>
+              </div>
+              <div style="padding:10px 12px;">
+                <div style="font-size:13px;font-weight:600;color:#1f2937;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-bottom:3px;">${escHtml(c.title)}</div>
+                <div style="font-size:11px;color:#9ca3af;margin-bottom:8px;">${c.creator_name ? escHtml(c.creator_name) : ''}</div>
+                ${added ? '<div style="text-align:center;font-size:11px;color:#10b981;padding:4px;"><i class="fas fa-check-circle"></i> 추가됨</div>'
+                : `<button onclick="addContentToLesson(${c.id})" style="width:100%;padding:6px;background:#3b82f6;color:#fff;border:none;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;"><i class="fas fa-plus"></i> 추가</button>`}
+              </div>
+            </div>`;
+          }).join('') + '</div>';
+      }
+    }
+
+    async function searchAddContent() {
+      const keyword = document.getElementById('addSearchInput')?.value?.trim() || '';
+      const container = document.getElementById('addSearchResults');
+      if (!container) return;
+
+      let url;
+      if (addContentSrc === 'public') {
+        let params = `page=1&limit=50&sort=latest`;
+        if (keyword) params += '&keyword=' + encodeURIComponent(keyword);
+        if (addContentType) params += '&content_type=' + addContentType;
+        if (addSelectedStdCodes.length) params += '&achievement_codes=' + encodeURIComponent(addSelectedStdCodes.join(','));
+        url = `/api/contents?${params}`;
+      } else if (addContentSrc === 'my') {
+        url = '/api/contents/my';
+      } else {
+        url = '/api/contents/collection/list';
+      }
+
+      try {
+        const res = await fetch(url).then(r => r.json());
+        let items = res.data || res.contents || [];
+        if (addContentSrc !== 'public') {
+          if (addContentType) items = items.filter(c => c.content_type === addContentType);
+          if (keyword) items = items.filter(c => c.title?.toLowerCase().includes(keyword.toLowerCase()));
+        }
+        renderAddItems(items);
+        // 카운터 업데이트
+        const countEl = document.getElementById('addResultCount');
+        if (countEl) countEl.textContent = `검색 결과: ${items.length}건`;
+        const addedEl = document.getElementById('addedCount');
+        if (addedEl) addedEl.textContent = contents.length;
+      } catch(e) {
+        container.innerHTML = '<div style="padding:20px;text-align:center;color:#ef4444;">로드 실패</div>';
+      }
+    }
+
+    async function previewAddContent(contentId) {
+      // 미리보기 모달 표시
+      try {
+        const res = await fetch('/api/contents/' + contentId).then(r => r.json());
+        if (!res.success) return;
+        const c = res.content;
+        const cType = c.content_type || 'document';
+        const typeColors = { video:'#3B82F6', document:'#F97316', image:'#8B5CF6', quiz:'#14B8A6', exam:'#EC4899' };
+        const typeNames = { video:'영상', document:'문서', image:'이미지', quiz:'문항', exam:'평가지' };
+        const already = contents.find(x => x.id === contentId);
+
+        // 미리보기 콘텐츠 생성
+        let previewHtml = '';
+        if ((cType === 'quiz' || cType === 'exam') && c.questions && c.questions.length > 0) {
+          previewHtml = c.questions.map((q, i) => `
+            <div style="background:#f9fafb;border-radius:8px;padding:12px;margin-bottom:8px;border-left:3px solid ${q.question_type==='choice'?'#3b82f6':'#10b981'};">
+              <div style="font-size:13px;font-weight:600;margin-bottom:4px;">Q${q.question_number}. ${escHtml(q.question_text)}</div>
+              ${q.options && Array.isArray(q.options) ? q.options.map((o,oi) => `<div style="font-size:12px;color:#6b7280;padding:2px 8px;${String(oi+1)===String(q.answer)?'color:#10b981;font-weight:600;':''}">① ${escHtml(o)}</div>`).join('') : ''}
+            </div>`).join('');
+        } else if (cType === 'video') {
+          const src = c.content_url || c.file_path;
+          if (/youtube|youtu\.be/.test(src)) {
+            previewHtml = `<iframe src="${toEmbedUrl(src)}" style="width:100%;height:400px;border:none;border-radius:8px;" allowfullscreen></iframe>`;
+          } else {
+            previewHtml = `<video src="${src}" style="width:100%;max-height:400px;border-radius:8px;" controls></video>`;
+          }
+        } else if (cType === 'image' && c.file_path) {
+          previewHtml = `<img src="${c.file_path}" style="width:100%;max-height:300px;object-fit:contain;border-radius:8px;">`;
+        } else if (cType === 'document' && c.file_path && c.file_path.toLowerCase().endsWith('.pdf')) {
+          previewHtml = `<iframe src="${c.file_path}" style="width:100%;height:300px;border:none;border-radius:8px;background:#fff;"></iframe>`;
+        } else {
+          previewHtml = `<div style="padding:30px;text-align:center;color:#9ca3af;"><i class="fas fa-file-alt" style="font-size:36px;margin-bottom:8px;"></i><div>${escHtml(c.description || '미리보기할 내용이 없습니다.')}</div></div>`;
+        }
+
+        // 미리보기 오버레이 생성
+        let overlay = document.getElementById('previewOverlay');
+        if (!overlay) {
+          overlay = document.createElement('div');
+          overlay.id = 'previewOverlay';
+          overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.75);z-index:20000;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(4px);';
+          document.body.appendChild(overlay);
+        }
+        overlay.style.display = 'flex';
+        overlay.onclick = (e) => { if (e.target === overlay) overlay.style.display = 'none'; };
+
+        overlay.innerHTML = `
+          <div style="background:#fff;border-radius:16px;width:90vw;max-width:860px;max-height:90vh;overflow-y:auto;" onclick="event.stopPropagation()">
+            <div style="padding:20px 24px;border-bottom:1px solid #e5e7eb;display:flex;align-items:center;justify-content:space-between;">
+              <div>
+                <div style="display:flex;gap:6px;align-items:center;margin-bottom:4px;">
+                  <span style="background:${typeColors[cType]||'#6B7280'}15;color:${typeColors[cType]||'#6B7280'};padding:2px 8px;border-radius:6px;font-size:11px;font-weight:700;">${typeNames[cType]||cType}</span>
+                  ${c.subject ? `<span style="font-size:11px;color:#6b7280;">${escHtml(c.subject)}</span>` : ''}
+                  ${c.grade ? `<span style="font-size:11px;color:#6b7280;">${c.grade}학년</span>` : ''}
+                </div>
+                <h3 style="font-size:18px;font-weight:800;color:#1f2937;">${escHtml(c.title)}</h3>
+                <div style="font-size:12px;color:#9ca3af;margin-top:4px;">${escHtml(c.creator_name||'')} · 조회 ${c.view_count||0} · ${(c.created_at||'').slice(0,10)}</div>
+              </div>
+              <button onclick="document.getElementById('previewOverlay').style.display='none'" style="background:none;border:none;font-size:22px;cursor:pointer;color:#9ca3af;padding:4px 8px;">&times;</button>
+            </div>
+            <div style="padding:20px 24px;">
+              ${previewHtml}
+              ${c.description ? `<div style="margin-top:16px;padding:12px;background:#f9fafb;border-radius:8px;font-size:13px;color:#4b5563;line-height:1.6;">${escHtml(c.description)}</div>` : ''}
+            </div>
+            <div style="padding:16px 24px;border-top:1px solid #e5e7eb;display:flex;gap:10px;justify-content:flex-end;">
+              <button onclick="document.getElementById('previewOverlay').style.display='none'" style="padding:10px 20px;background:#f3f4f6;color:#4b5563;border:none;border-radius:8px;font-size:13px;cursor:pointer;font-family:inherit;">닫기</button>
+              ${already
+                ? `<span style="padding:10px 20px;color:#10b981;font-size:13px;font-weight:600;"><i class="fas fa-check"></i> 이미 추가됨</span>`
+                : `<button onclick="addContentToLesson(${contentId});document.getElementById('previewOverlay').style.display='none'" style="padding:10px 24px;background:#3b82f6;color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;"><i class="fas fa-plus"></i> 수업 목차에 추가</button>`
+              }
+            </div>
+          </div>`;
+      } catch(e) { showToast('미리보기 실패'); }
+    }
+
+    function toEmbedUrl(url) {
+      if (!url) return url;
+      if (url.includes('youtube.com/watch')) { try { return 'https://www.youtube.com/embed/' + new URL(url).searchParams.get('v'); } catch{} }
+      if (url.includes('youtu.be/')) return 'https://www.youtube.com/embed/' + url.split('youtu.be/')[1].split(/[?#]/)[0];
+      return url;
+    }
+
+    async function addContentToLesson(contentId) {
+      if (isCreatorMode) {
+        // 크리에이터 모드: 로컬 목차에만 추가
+        try {
+          const res = await fetch('/api/contents/' + contentId).then(r => r.json());
+          if (!res.success) { showToast('콘텐츠를 불러올 수 없습니다'); return; }
+          const c = res.content;
+          contents.push(c);
+          closeAddContentModal();
+          renderSidebar();
+          selectContent(contents.length - 1);
+          const countEl = document.getElementById('creatorItemCount');
+          if (countEl) countEl.textContent = contents.length;
+          showToast('콘텐츠가 추가되었습니다!');
+        } catch(e) { showToast('추가 실패'); }
+        return;
+      }
+      try {
+        const res = await fetch('/api/lesson/' + classId + '/' + lessonId + '/contents', {
+          method: 'POST', headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({ contentId, sortOrder: contents.length + 1 })
+        }).then(r => r.json());
+        if (res.success) {
+          showToast('콘텐츠가 추가되었습니다!');
+          closeAddContentModal();
+          loadPlayer();
+        } else {
+          showToast(res.message || '추가 실패');
+        }
+      } catch(e) { showToast('추가 실패'); }
+    }
+
+    // ============================================================
+    // 드래그 순서 변경
+    // ============================================================
+    let dragFromIndex = -1;
+
+    function dragStart(e, index) {
+      dragFromIndex = index;
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', index);
+      e.target.closest('.step-item').style.opacity = '0.4';
+    }
+
+    function dragOver(e, index) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+    }
+
+    function dragEnter(e) {
+      e.preventDefault();
+      const item = e.target.closest('.step-item');
+      if (item) item.classList.add('drag-over');
+    }
+
+    function dragLeave(e) {
+      const item = e.target.closest('.step-item');
+      if (item) item.classList.remove('drag-over');
+    }
+
+    function dropStep(e, toIndex) {
+      e.preventDefault();
+      const item = e.target.closest('.step-item');
+      if (item) item.classList.remove('drag-over');
+      if (dragFromIndex < 0 || dragFromIndex === toIndex) return;
+
+      // contents 배열에서 아이템을 이동
+      const [moved] = contents.splice(dragFromIndex, 1);
+      contents.splice(toIndex, 0, moved);
+
+      // currentIndex 업데이트
+      if (currentIndex === dragFromIndex) currentIndex = toIndex;
+      else if (dragFromIndex < currentIndex && toIndex >= currentIndex) currentIndex--;
+      else if (dragFromIndex > currentIndex && toIndex <= currentIndex) currentIndex++;
+
+      dragFromIndex = -1;
+      renderSidebar();
+      const countEl = document.getElementById('creatorItemCount');
+      if (countEl) countEl.textContent = contents.length;
+    }
+
+    function dragEnd(e) {
+      e.target.closest('.step-item').style.opacity = '1';
+      document.querySelectorAll('.step-item.drag-over').forEach(el => el.classList.remove('drag-over'));
+      dragFromIndex = -1;
+    }
+
+    function moveStep(index, dir) {
+      const newIdx = index + dir;
+      if (newIdx < 0 || newIdx >= contents.length) return;
+      [contents[index], contents[newIdx]] = [contents[newIdx], contents[index]];
+      if (currentIndex === index) currentIndex = newIdx;
+      else if (currentIndex === newIdx) currentIndex = index;
+      renderSidebar();
+      const countEl = document.getElementById('creatorItemCount');
+      if (countEl) countEl.textContent = contents.length;
+    }
+
+    function removeStep(index) {
+      contents.splice(index, 1);
+      if (currentIndex >= contents.length) currentIndex = contents.length - 1;
+      if (contents.length === 0) {
+        currentIndex = -1;
+        document.getElementById('playerViewport').innerHTML = '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;color:#64748b;"><i class="fas fa-box-open" style="font-size:64px;margin-bottom:16px;color:#475569;"></i><div style="font-size:18px;font-weight:700;margin-bottom:8px;">수업꾸러미 만들기</div><div style="font-size:14px;">콘텐츠를 추가하세요</div></div>';
+      } else {
+        selectContent(currentIndex >= 0 ? currentIndex : 0);
+      }
+      renderSidebar();
+      const countEl = document.getElementById('creatorItemCount');
+      if (countEl) countEl.textContent = contents.length;
+      showToast('콘텐츠가 제거되었습니다');
+    }
+
+    // ============================================================
+    // 제목 수정 (더블클릭)
+    // ============================================================
+    function editStepTitle(index, el) {
+      const c = contents[index];
+      const oldTitle = c.title || '';
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.value = oldTitle;
+      input.style.cssText = 'width:100%;padding:2px 6px;border:1.5px solid #60a5fa;border-radius:4px;font-size:12px;font-weight:600;background:rgba(255,255,255,.1);color:#fff;outline:none;font-family:inherit;';
+      el.innerHTML = '';
+      el.appendChild(input);
+      input.focus();
+      input.select();
+
+      const save = () => {
+        const newTitle = input.value.trim() || oldTitle;
+        c.title = newTitle;
+        renderSidebar();
+        if (currentIndex === index) {
+          document.getElementById('currentTitle').textContent = newTitle;
+        }
+        const countEl = document.getElementById('creatorItemCount');
+        if (countEl) countEl.textContent = contents.length;
+      };
+      input.addEventListener('blur', save);
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+        if (e.key === 'Escape') { input.value = oldTitle; input.blur(); }
+      });
+    }
+
+    // ============================================================
+    // URL 링크 추가
+    // ============================================================
+    function openUrlAddModal() {
+      document.getElementById('urlAddOverlay').style.display = 'flex';
+      document.getElementById('urlAddInput').value = '';
+      document.getElementById('urlAddTitle').value = '';
+      document.getElementById('urlAddInput').focus();
+    }
+
+    function closeUrlAddModal() {
+      document.getElementById('urlAddOverlay').style.display = 'none';
+    }
+
+    function submitUrlAdd() {
+      let url = document.getElementById('urlAddInput').value.trim();
+      if (!url) { showToast('URL을 입력하세요'); return; }
+      // http:// 또는 https:// 없으면 자동 추가
+      if (!/^https?:\/\//i.test(url)) {
+        url = 'https://' + url;
+        document.getElementById('urlAddInput').value = url;
+      }
+      let title = document.getElementById('urlAddTitle').value.trim();
+      if (!title) {
+        // URL에서 도메인 추출하여 기본 제목 생성
+        try { title = new URL(url).hostname; } catch { title = 'URL 링크'; }
+      }
+
+      // 콘텐츠 타입 결정
+      let cType = 'link';
+      const isYT = /youtube\.com|youtu\.be/i.test(url);
+      const isVimeo = /vimeo\.com/i.test(url);
+      if (isYT || isVimeo) cType = 'video';
+
+      whiteboardIdCounter--;
+      const item = {
+        id: whiteboardIdCounter,
+        title: title,
+        content_type: cType,
+        content_url: url,
+        file_path: url,
+        description: url,
+        _isLocal: true
+      };
+      contents.push(item);
+      closeUrlAddModal();
+      renderSidebar();
+      selectContent(contents.length - 1);
+      const countEl = document.getElementById('creatorItemCount');
+      if (countEl) countEl.textContent = contents.length;
+      showToast('URL 링크가 추가되었습니다!');
+    }
+
+    // ============================================================
+    // 파일 추가 (업로드)
+    // ============================================================
+    function openFileAddModal() {
+      document.getElementById('fileUploadInput').click();
+    }
+
+    async function handleFileUpload(input) {
+      const file = input.files[0];
+      if (!file) return;
+      input.value = ''; // reset
+
+      // 파일 크기 체크 (50MB)
+      if (file.size > 50 * 1024 * 1024) {
+        showToast('파일 크기가 50MB를 초과합니다');
+        return;
+      }
+
+      // 파일 타입 결정
+      let cType = 'document';
+      if (file.type.startsWith('video/')) cType = 'video';
+      else if (file.type.startsWith('image/')) cType = 'image';
+      else if (file.type === 'application/pdf') cType = 'document';
+
+      showToast('파일 업로드 중...');
+
+      try {
+        const formData = new FormData();
+        formData.append('file', file);
+        const res = await fetch('/api/upload?type=contents', { method: 'POST', body: formData }).then(r => r.json());
+        if (!res.success) { showToast('업로드 실패: ' + (res.message || '')); return; }
+
+        const filePath = res.file.url;
+        const title = file.name.replace(/\.[^.]+$/, ''); // 확장자 제거
+
+        whiteboardIdCounter--;
+        const item = {
+          id: whiteboardIdCounter,
+          title: title,
+          content_type: cType,
+          file_path: filePath,
+          description: `${file.name} (${(file.size / 1024 / 1024).toFixed(1)}MB)`,
+          _isLocal: true
+        };
+        contents.push(item);
+        renderSidebar();
+        selectContent(contents.length - 1);
+        const countEl = document.getElementById('creatorItemCount');
+        if (countEl) countEl.textContent = contents.length;
+        showToast('파일이 추가되었습니다!');
+      } catch (e) {
+        showToast('업로드 오류: ' + e.message);
+      }
+    }
+
+    // ============================================================
+    // 화이트보드 추가
+    // ============================================================
+    function addWhiteboard() {
+      whiteboardIdCounter--;
+      const wbId = whiteboardIdCounter; // 음수 ID로 가상 콘텐츠 구분
+      const wbTitle = `화이트보드 ${contents.filter(c => c.content_type === 'whiteboard').length + 1}`;
+      const wb = {
+        id: wbId,
+        title: wbTitle,
+        content_type: 'whiteboard',
+        description: '자유롭게 그릴 수 있는 화이트보드입니다.',
+        _isWhiteboard: true
+      };
+      contents.push(wb);
+      renderSidebar();
+      selectContent(contents.length - 1);
+      const countEl = document.getElementById('creatorItemCount');
+      if (countEl) countEl.textContent = contents.length;
+      showToast('화이트보드가 추가되었습니다!');
+    }
+
+    function renderWhiteboard(content, viewport) {
+      const wbId = content.id;
+      viewport.innerHTML = `
+        <div id="wbContainer" style="width:100%;height:100%;position:relative;background:#fff;overflow:hidden;">
+          <canvas id="wbCanvas" style="width:100%;height:100%;cursor:crosshair;touch-action:none;"></canvas>
+          <!-- 화이트보드 툴바 -->
+          <div id="wbToolbar" style="position:absolute;top:12px;left:50%;transform:translateX(-50%);display:flex;gap:6px;padding:8px 14px;background:rgba(30,41,59,.92);border-radius:12px;box-shadow:0 4px 20px rgba(0,0,0,.3);backdrop-filter:blur(8px);z-index:10;align-items:center;">
+            <button class="wb-tool active" data-tool="pen" onclick="setWbTool('pen',this)" title="펜" style="width:34px;height:34px;border:none;border-radius:8px;background:rgba(59,130,246,.3);color:#60a5fa;cursor:pointer;font-size:14px;display:flex;align-items:center;justify-content:center;"><i class="fas fa-pen"></i></button>
+            <button class="wb-tool" data-tool="highlight" onclick="setWbTool('highlight',this)" title="형광펜" style="width:34px;height:34px;border:none;border-radius:8px;background:rgba(255,255,255,.08);color:#94a3b8;cursor:pointer;font-size:14px;display:flex;align-items:center;justify-content:center;"><i class="fas fa-highlighter"></i></button>
+            <button class="wb-tool" data-tool="eraser" onclick="setWbTool('eraser',this)" title="지우개" style="width:34px;height:34px;border:none;border-radius:8px;background:rgba(255,255,255,.08);color:#94a3b8;cursor:pointer;font-size:14px;display:flex;align-items:center;justify-content:center;"><i class="fas fa-eraser"></i></button>
+            <div style="width:1px;height:24px;background:rgba(255,255,255,.15);margin:0 4px;"></div>
+            <!-- 색상 팔레트 -->
+            <button onclick="setWbColor('#1e293b')" class="wb-color active" style="width:24px;height:24px;border:2px solid #60a5fa;border-radius:50%;background:#1e293b;cursor:pointer;"></button>
+            <button onclick="setWbColor('#ef4444')" class="wb-color" style="width:24px;height:24px;border:2px solid transparent;border-radius:50%;background:#ef4444;cursor:pointer;"></button>
+            <button onclick="setWbColor('#3b82f6')" class="wb-color" style="width:24px;height:24px;border:2px solid transparent;border-radius:50%;background:#3b82f6;cursor:pointer;"></button>
+            <button onclick="setWbColor('#10b981')" class="wb-color" style="width:24px;height:24px;border:2px solid transparent;border-radius:50%;background:#10b981;cursor:pointer;"></button>
+            <button onclick="setWbColor('#f59e0b')" class="wb-color" style="width:24px;height:24px;border:2px solid transparent;border-radius:50%;background:#f59e0b;cursor:pointer;"></button>
+            <button onclick="setWbColor('#8b5cf6')" class="wb-color" style="width:24px;height:24px;border:2px solid transparent;border-radius:50%;background:#8b5cf6;cursor:pointer;"></button>
+            <div style="width:1px;height:24px;background:rgba(255,255,255,.15);margin:0 4px;"></div>
+            <!-- 굵기 -->
+            <button onclick="setWbSize(2)" class="wb-size active" style="width:28px;height:28px;border:none;border-radius:6px;background:rgba(255,255,255,.15);cursor:pointer;display:flex;align-items:center;justify-content:center;"><div style="width:4px;height:4px;border-radius:50%;background:#94a3b8;"></div></button>
+            <button onclick="setWbSize(5)" class="wb-size" style="width:28px;height:28px;border:none;border-radius:6px;background:rgba(255,255,255,.08);cursor:pointer;display:flex;align-items:center;justify-content:center;"><div style="width:8px;height:8px;border-radius:50%;background:#94a3b8;"></div></button>
+            <button onclick="setWbSize(10)" class="wb-size" style="width:28px;height:28px;border:none;border-radius:6px;background:rgba(255,255,255,.08);cursor:pointer;display:flex;align-items:center;justify-content:center;"><div style="width:14px;height:14px;border-radius:50%;background:#94a3b8;"></div></button>
+            <div style="width:1px;height:24px;background:rgba(255,255,255,.15);margin:0 4px;"></div>
+            <button onclick="clearWb()" title="전체 지우기" style="width:34px;height:34px;border:none;border-radius:8px;background:rgba(239,68,68,.15);color:#f87171;cursor:pointer;font-size:14px;display:flex;align-items:center;justify-content:center;"><i class="fas fa-trash-alt"></i></button>
+          </div>
+          <!-- 화이트보드 라벨 -->
+          <div style="position:absolute;bottom:12px;left:12px;font-size:11px;color:rgba(0,0,0,.2);font-weight:600;pointer-events:none;">
+            <i class="fas fa-chalkboard"></i> ${escHtml(content.title)}
+          </div>
+        </div>`;
+      initWhiteboardCanvas(wbId);
+    }
+
+    let wbCtx = null, wbCanvas = null, wbDrawing = false;
+    let wbTool = 'pen', wbColor = '#1e293b', wbSize = 2;
+    let wbCurrentId = null;
+
+    function initWhiteboardCanvas(wbId) {
+      wbCurrentId = wbId;
+      wbCanvas = document.getElementById('wbCanvas');
+      if (!wbCanvas) return;
+      const container = document.getElementById('wbContainer');
+      wbCanvas.width = container.offsetWidth;
+      wbCanvas.height = container.offsetHeight;
+      wbCtx = wbCanvas.getContext('2d');
+      wbCtx.lineCap = 'round';
+      wbCtx.lineJoin = 'round';
+
+      // 이전 데이터 복원
+      if (whiteboardDataMap[wbId]) {
+        const img = new Image();
+        img.onload = () => { wbCtx.drawImage(img, 0, 0); };
+        img.src = whiteboardDataMap[wbId];
+      }
+
+      // 이벤트 바인딩
+      wbCanvas.addEventListener('mousedown', wbStart);
+      wbCanvas.addEventListener('mousemove', wbDraw);
+      wbCanvas.addEventListener('mouseup', wbStop);
+      wbCanvas.addEventListener('mouseleave', wbStop);
+      wbCanvas.addEventListener('touchstart', (e) => { e.preventDefault(); const t = e.touches[0]; wbStart({ offsetX: t.clientX - wbCanvas.getBoundingClientRect().left, offsetY: t.clientY - wbCanvas.getBoundingClientRect().top }); }, { passive: false });
+      wbCanvas.addEventListener('touchmove', (e) => { e.preventDefault(); const t = e.touches[0]; wbDraw({ offsetX: t.clientX - wbCanvas.getBoundingClientRect().left, offsetY: t.clientY - wbCanvas.getBoundingClientRect().top }); }, { passive: false });
+      wbCanvas.addEventListener('touchend', wbStop);
+
+      // 리사이즈 핸들러
+      const resizeWb = () => {
+        if (!wbCanvas || !document.getElementById('wbContainer')) return;
+        const dataUrl = wbCanvas.toDataURL();
+        wbCanvas.width = container.offsetWidth;
+        wbCanvas.height = container.offsetHeight;
+        const img = new Image();
+        img.onload = () => { wbCtx.drawImage(img, 0, 0); };
+        img.src = dataUrl;
+      };
+      window.addEventListener('resize', resizeWb);
+    }
+
+    function wbStart(e) {
+      wbDrawing = true;
+      wbCtx.beginPath();
+      wbCtx.moveTo(e.offsetX, e.offsetY);
+    }
+
+    function wbDraw(e) {
+      if (!wbDrawing) return;
+      if (wbTool === 'eraser') {
+        wbCtx.globalCompositeOperation = 'destination-out';
+        wbCtx.lineWidth = wbSize * 5;
+        wbCtx.globalAlpha = 1;
+      } else if (wbTool === 'highlight') {
+        wbCtx.globalCompositeOperation = 'source-over';
+        wbCtx.strokeStyle = wbColor;
+        wbCtx.lineWidth = wbSize * 4;
+        wbCtx.globalAlpha = 0.25;
+      } else {
+        wbCtx.globalCompositeOperation = 'source-over';
+        wbCtx.strokeStyle = wbColor;
+        wbCtx.lineWidth = wbSize;
+        wbCtx.globalAlpha = 1;
+      }
+      wbCtx.lineCap = 'round';
+      wbCtx.lineJoin = 'round';
+      wbCtx.lineTo(e.offsetX, e.offsetY);
+      wbCtx.stroke();
+    }
+
+    function wbStop() {
+      if (wbDrawing && wbCurrentId !== null && wbCanvas) {
+        wbCtx.globalAlpha = 1;
+        wbCtx.globalCompositeOperation = 'source-over';
+        // 드로잉 데이터 저장
+        whiteboardDataMap[wbCurrentId] = wbCanvas.toDataURL();
+      }
+      wbDrawing = false;
+    }
+
+    function setWbTool(tool, btn) {
+      wbTool = tool;
+      document.querySelectorAll('.wb-tool').forEach(b => {
+        b.classList.remove('active');
+        b.style.background = 'rgba(255,255,255,.08)';
+        b.style.color = '#94a3b8';
+      });
+      if (btn) {
+        btn.classList.add('active');
+        btn.style.background = 'rgba(59,130,246,.3)';
+        btn.style.color = '#60a5fa';
+      }
+      if (wbCanvas) wbCanvas.style.cursor = tool === 'eraser' ? 'cell' : 'crosshair';
+    }
+
+    function setWbColor(color) {
+      wbColor = color;
+      document.querySelectorAll('.wb-color').forEach(b => {
+        b.style.borderColor = b.style.backgroundColor === color || b.style.background === color ? '#60a5fa' : 'transparent';
+        b.classList.toggle('active', b.style.backgroundColor === color);
+      });
+    }
+
+    function setWbSize(size) {
+      wbSize = size;
+      const sizes = [2, 5, 10];
+      document.querySelectorAll('.wb-size').forEach((b, i) => {
+        const isActive = sizes[i] === size;
+        b.classList.toggle('active', isActive);
+        b.style.background = isActive ? 'rgba(255,255,255,.15)' : 'rgba(255,255,255,.08)';
+      });
+    }
+
+    function clearWb() {
+      if (!wbCtx || !wbCanvas) return;
+      wbCtx.clearRect(0, 0, wbCanvas.width, wbCanvas.height);
+      if (wbCurrentId !== null) whiteboardDataMap[wbCurrentId] = null;
+    }
+
+    // 클래스 수업 등록 (크리에이터 → 클래스 수업 게시판)
+    // ======== 수업 메타 모달: 교육과정 스마트 검색 ========
+    const _clmSmart = { results: [], activeIdx: -1, query: '', selectedStds: [] };
+    let _clmSmartTimer = null;
+    let _clmClassifyMode = 'curriculum';
+
+    function saveClassLesson() {
+      if (contents.length === 0) { showToast('최소 1개 이상의 콘텐츠를 추가하세요'); return; }
+      // 메타정보 모달 열기
+      document.getElementById('classLessonMetaOverlay').style.display = 'flex';
+      document.getElementById('clmTitle').value = '';
+      document.getElementById('clmDesc').value = '';
+      const _today = new Date();
+      document.getElementById('clmStartDate').value = _today.toISOString().slice(0, 10);
+      const _weekLater = new Date(_today); _weekLater.setDate(_weekLater.getDate() + 7);
+      document.getElementById('clmEndDate').value = _weekLater.toISOString().slice(0, 10);
+      document.getElementById('clmStatus').value = 'published';
+      document.getElementById('clmTags').value = '';
+      // 성취기준 초기화
+      _clmSmart.selectedStds = [];
+      _clmSmart.results = [];
+      _clmSmart.query = '';
+      _clmSmart.activeIdx = -1;
+      document.getElementById('clmAchievementSearch').value = '';
+      document.getElementById('clmAchievementCode').value = '';
+      document.getElementById('clmSelectedStds').innerHTML = '';
+      // 탭 초기화
+      clmSwitchTab('curriculum');
+      // 체크박스 초기화
+      document.querySelectorAll('input[name="clmSchool"],input[name="clmGradeChk"],input[name="clmTheme"]').forEach(c => {
+        c.checked = false;
+        clmThemeChkStyle(c);
+      });
+      document.getElementById('clmTitle').focus();
+    }
+
+    function closeClassLessonMeta() {
+      document.getElementById('classLessonMetaOverlay').style.display = 'none';
+      document.getElementById('clmAchievementResults').style.display = 'none';
+    }
+
+    // 탭 전환
+    function clmSwitchTab(mode) {
+      _clmClassifyMode = mode;
+      const cBtn = document.getElementById('clmTabCurriculum');
+      const tBtn = document.getElementById('clmTabTheme');
+      const cPanel = document.getElementById('clmPanelCurriculum');
+      const tPanel = document.getElementById('clmPanelTheme');
+      if (mode === 'curriculum') {
+        cBtn.style.background = '#2563eb'; cBtn.style.color = '#fff';
+        tBtn.style.background = '#f9fafb'; tBtn.style.color = '#6b7280';
+        cPanel.style.display = ''; tPanel.style.display = 'none';
+      } else {
+        tBtn.style.background = '#f59e0b'; tBtn.style.color = '#fff';
+        cBtn.style.background = '#f9fafb'; cBtn.style.color = '#6b7280';
+        tPanel.style.display = ''; cPanel.style.display = 'none';
+      }
+    }
+
+    // 테마 체크박스 스타일
+    function clmThemeChkStyle(cb) {
+      const label = cb.closest('.clm-theme-chk');
+      if (!label) return;
+      if (cb.checked) {
+        label.style.borderColor = '#60a5fa';
+        label.style.background = '#eff6ff';
+        label.style.color = '#1d4ed8';
+      } else {
+        label.style.borderColor = '#e5e7eb';
+        label.style.background = '#fff';
+        label.style.color = '';
+      }
+    }
+
+    // 스마트 검색
+    function clmSmartInput(val) {
+      _clmSmart.query = val.trim();
+      _clmSmart.activeIdx = -1;
+      clearTimeout(_clmSmartTimer);
+      if (!_clmSmart.query || _clmSmart.query.length < 1) {
+        document.getElementById('clmAchievementResults').style.display = 'none';
+        return;
+      }
+      _clmSmartTimer = setTimeout(async () => {
+        try {
+          const res = await fetch('/api/curriculum/standards?search=' + encodeURIComponent(_clmSmart.query));
+          const data = await res.json();
+          _clmSmart.results = data.success ? data.data : [];
+          clmRenderDropdown();
+        } catch { _clmSmart.results = []; clmRenderDropdown(); }
+      }, 200);
+    }
+
+    function clmSmartFocus() {
+      if (_clmSmart.query && _clmSmart.results.length > 0) {
+        document.getElementById('clmAchievementResults').style.display = 'block';
+      } else if (!_clmSmart.query) {
+        const recents = clmGetRecentStds();
+        const dd = document.getElementById('clmAchievementResults');
+        if (recents.length > 0) {
+          const sl = { '초': '초등', '중': '중등', '고': '고등' };
+          dd.innerHTML = `
+            <div style="padding:10px 14px 6px;font-size:12px;font-weight:700;color:#6b7280;display:flex;align-items:center;gap:6px;">
+              <i class="fas fa-history" style="color:#60a5fa;"></i> 최근 선택한 성취기준
+            </div>
+            ${recents.map((r, i) => `
+              <div data-clm-recent="${i}" onclick="clmAddRecent(${i})" onmouseenter="this.style.background='#eff6ff'" onmouseleave="this.style.background=''"
+                style="padding:10px 14px;cursor:pointer;border-bottom:1px solid #f3f4f6;transition:background .1s;">
+                <div style="display:flex;gap:4px;margin-bottom:3px;flex-wrap:wrap;">
+                  ${r.school_level ? `<span style="padding:1px 6px;border-radius:4px;font-size:10px;font-weight:600;background:#dbeafe;color:#1d4ed8;">${sl[r.school_level]||r.school_level}</span>` : ''}
+                  ${r.subject_name ? `<span style="padding:1px 6px;border-radius:4px;font-size:10px;font-weight:600;background:#d1fae5;color:#047857;">${r.subject_name}</span>` : ''}
+                  ${r.grade_label ? `<span style="padding:1px 6px;border-radius:4px;font-size:10px;font-weight:600;background:#fef3c7;color:#b45309;">${r.grade_label}</span>` : ''}
+                </div>
+                <div style="display:flex;align-items:baseline;gap:8px;">
+                  <span style="font-size:12px;font-weight:700;color:#2563eb;">${r.code}</span>
+                  <span style="font-size:12px;color:#4b5563;">${r.content}</span>
+                </div>
+              </div>
+            `).join('')}`;
+          clmPositionDropdown(); dd.style.display = 'block';
+        }
+      }
+    }
+
+    function clmSmartKeydown(e) {
+      const dd = document.getElementById('clmAchievementResults');
+      if (dd.style.display === 'none') return;
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        _clmSmart.activeIdx = Math.min(_clmSmart.activeIdx + 1, _clmSmart.results.length - 1);
+        clmRenderDropdown();
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        _clmSmart.activeIdx = Math.max(_clmSmart.activeIdx - 1, 0);
+        clmRenderDropdown();
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        if (_clmSmart.activeIdx >= 0 && _clmSmart.activeIdx < _clmSmart.results.length) {
+          clmAddStd(_clmSmart.activeIdx);
+        } else if (_clmSmart.results.length > 0) {
+          clmAddStd(0);
+        }
+      } else if (e.key === 'Escape') {
+        dd.style.display = 'none';
+      }
+    }
+
+    function clmPositionDropdown() {
+      const input = document.getElementById('clmAchievementSearch');
+      const dd = document.getElementById('clmAchievementResults');
+      if (!input || !dd) return;
+      const rect = input.getBoundingClientRect();
+      dd.style.top = (rect.bottom + 4) + 'px';
+      dd.style.left = rect.left + 'px';
+      dd.style.width = rect.width + 'px';
+    }
+
+    function clmHighlight(text, query) {
+      if (!query || !text) return text || '';
+      const words = query.trim().split(/\s+/).filter(Boolean);
+      let result = text;
+      for (const word of words) {
+        const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        result = result.replace(new RegExp(`(${escaped})`, 'gi'), '<mark style="background:#fef08a;padding:0 1px;border-radius:2px;">$1</mark>');
+      }
+      return result;
+    }
+
+    function clmRenderDropdown() {
+      const dd = document.getElementById('clmAchievementResults');
+      clmPositionDropdown();
+      if (_clmSmart.results.length === 0) {
+        dd.innerHTML = '<div style="padding:30px 20px;text-align:center;color:#9ca3af;font-size:13px;">검색 결과가 없습니다</div>';
+        clmPositionDropdown(); dd.style.display = 'block';
+        return;
+      }
+      const q = _clmSmart.query;
+      const sl = { '초': '초등', '중': '중등', '고': '고등' };
+      dd.innerHTML = _clmSmart.results.slice(0, 20).map((r, i) => {
+        const isActive = i === _clmSmart.activeIdx;
+        return `<div class="clm-smart-item ${isActive?'active':''}" onclick="clmAddStd(${i})" onmouseenter="_clmSmart.activeIdx=${i};clmRenderDropdown()"
+          style="padding:10px 14px;cursor:pointer;border-bottom:1px solid #f3f4f6;transition:background .1s;${isActive?'background:#eff6ff;':''}">
+          <div style="display:flex;gap:4px;margin-bottom:4px;flex-wrap:wrap;">
+            ${r.school_level ? `<span style="padding:1px 8px;border-radius:4px;font-size:10px;font-weight:600;background:#dbeafe;color:#1d4ed8;">${clmHighlight(sl[r.school_level]||r.school_level,q)}</span>` : ''}
+            ${r.subject_name ? `<span style="padding:1px 8px;border-radius:4px;font-size:10px;font-weight:600;background:#d1fae5;color:#047857;">${clmHighlight(r.subject_name,q)}</span>` : ''}
+            ${r.grade_label ? `<span style="padding:1px 8px;border-radius:4px;font-size:10px;font-weight:600;background:#fef3c7;color:#b45309;">${clmHighlight(r.grade_label,q)}</span>` : ''}
+            ${r.area ? `<span style="padding:1px 8px;border-radius:4px;font-size:10px;background:#f3e8ff;color:#7c3aed;">${clmHighlight(r.area,q)}</span>` : ''}
+          </div>
+          <div style="display:flex;align-items:baseline;gap:8px;">
+            <span style="font-size:12px;font-weight:700;color:#2563eb;white-space:nowrap;">${clmHighlight(r.code,q)}</span>
+            <span style="font-size:12px;color:#374151;line-height:1.4;">${clmHighlight(r.content,q)}</span>
+          </div>
+        </div>`;
+      }).join('');
+      if (_clmSmart.results.length > 20) {
+        dd.innerHTML += `<div style="padding:10px;text-align:center;color:#9ca3af;font-size:11px;">... 외 ${_clmSmart.results.length - 20}개 결과</div>`;
+      }
+      clmPositionDropdown(); dd.style.display = 'block';
+    }
+
+    function clmAddStd(idx) {
+      const r = _clmSmart.results[idx];
+      if (!r) return;
+      if (_clmSmart.selectedStds.some(s => s.code === r.code)) { showToast('이미 추가된 성취기준입니다.'); return; }
+      const obj = { code: r.code, content: r.content, subject_name: r.subject_name, area: r.area, school_level: r.school_level, grade_label: r.grade_label };
+      _clmSmart.selectedStds.push(obj);
+      document.getElementById('clmAchievementCode').value = _clmSmart.selectedStds.map(s => s.code).join(',');
+      // 최근 기록 저장
+      try {
+        let recents = JSON.parse(localStorage.getItem('recentStds') || '[]');
+        recents = recents.filter(s => s.code !== obj.code);
+        recents.unshift(obj);
+        if (recents.length > 10) recents = recents.slice(0, 10);
+        localStorage.setItem('recentStds', JSON.stringify(recents));
+      } catch {}
+      clmRenderSelectedStds();
+      _clmSmart.query = ''; _clmSmart.results = []; _clmSmart.activeIdx = -1;
+      document.getElementById('clmAchievementResults').style.display = 'none';
+      document.getElementById('clmAchievementSearch').value = '';
+      document.getElementById('clmAchievementSearch').focus();
+      showToast('[' + r.code + '] 성취기준이 추가되었습니다.');
+    }
+
+    function clmAddRecent(idx) {
+      const recents = clmGetRecentStds();
+      const r = recents[idx];
+      if (!r) return;
+      if (_clmSmart.selectedStds.some(s => s.code === r.code)) { showToast('이미 추가된 성취기준입니다.'); return; }
+      _clmSmart.selectedStds.push(r);
+      document.getElementById('clmAchievementCode').value = _clmSmart.selectedStds.map(s => s.code).join(',');
+      clmRenderSelectedStds();
+      document.getElementById('clmAchievementResults').style.display = 'none';
+      showToast('[' + r.code + '] 성취기준이 추가되었습니다.');
+    }
+
+    function clmGetRecentStds() {
+      try { return JSON.parse(localStorage.getItem('recentStds') || '[]'); } catch { return []; }
+    }
+
+    function clmRemoveStd(idx) {
+      _clmSmart.selectedStds.splice(idx, 1);
+      document.getElementById('clmAchievementCode').value = _clmSmart.selectedStds.map(s => s.code).join(',');
+      clmRenderSelectedStds();
+    }
+
+    function clmRenderSelectedStds() {
+      const el = document.getElementById('clmSelectedStds');
+      if (_clmSmart.selectedStds.length === 0) { el.innerHTML = ''; return; }
+      const sl = { '초': '초등', '중': '중등', '고': '고등' };
+      el.innerHTML = _clmSmart.selectedStds.map((s, i) => `
+        <div style="display:flex;align-items:flex-start;gap:10px;padding:10px 14px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;margin-bottom:6px;">
+          <div style="flex:1;min-width:0;">
+            <div style="display:flex;gap:4px;margin-bottom:4px;flex-wrap:wrap;">
+              ${s.school_level ? `<span style="padding:1px 6px;border-radius:4px;font-size:10px;font-weight:600;background:#dbeafe;color:#1d4ed8;">${sl[s.school_level]||s.school_level}</span>` : ''}
+              ${s.subject_name ? `<span style="padding:1px 6px;border-radius:4px;font-size:10px;font-weight:600;background:#d1fae5;color:#047857;">${s.subject_name}</span>` : ''}
+              ${s.grade_label ? `<span style="padding:1px 6px;border-radius:4px;font-size:10px;font-weight:600;background:#fef3c7;color:#b45309;">${s.grade_label}</span>` : ''}
+            </div>
+            <div style="font-size:12px;"><strong style="color:#2563eb;">${s.code}</strong> <span style="color:#4b5563;">${s.content}</span></div>
+          </div>
+          <button onclick="clmRemoveStd(${i})" style="border:none;background:none;color:#ef4444;cursor:pointer;font-size:14px;padding:2px;"><i class="fas fa-times"></i></button>
+        </div>
+      `).join('');
+    }
+
+    // 외부 클릭 시 드롭다운 닫기
+    document.addEventListener('click', function(e) {
+      const wrap = document.getElementById('clmSmartWrap');
+      const dd = document.getElementById('clmAchievementResults');
+      if (wrap && dd && !wrap.contains(e.target)) {
+        dd.style.display = 'none';
+      }
+    });
+
+    async function submitClassLesson() {
+      const title = document.getElementById('clmTitle').value.trim();
+      if (!title) { showToast('수업 제목을 입력하세요'); document.getElementById('clmTitle').focus(); return; }
+      const desc = document.getElementById('clmDesc').value.trim();
+      const startDate = document.getElementById('clmStartDate').value || null;
+      const endDate = document.getElementById('clmEndDate').value || null;
+      let status = document.getElementById('clmStatus').value;
+      // 공개 선택 시 → pending (관리자 승인 필요), 비공개 → archived (승인 불필요)
+      if (status === 'published') status = 'pending';
+      const tags = document.getElementById('clmTags').value.trim() || null;
+
+      // 교육과정/테마 메타
+      let achievement_code = null, subject_code = null, grade_group = null;
+      let school_level = null, theme = null;
+      const classify_mode = _clmClassifyMode;
+
+      if (_clmClassifyMode === 'curriculum') {
+        achievement_code = document.getElementById('clmAchievementCode').value || null;
+        // 성취기준에서 과목/학년 자동 추출
+        if (_clmSmart.selectedStds.length > 0) {
+          const first = _clmSmart.selectedStds[0];
+          if (first.subject_name) subject_code = first.subject_name;
+          if (first.grade_label) {
+            const gMatch = first.grade_label.match(/(\d)/);
+            if (gMatch) grade_group = parseInt(gMatch[1]);
+          }
+          if (first.school_level) school_level = first.school_level;
+        }
+      } else {
+        // 테마 모드
+        const schools = Array.from(document.querySelectorAll('input[name="clmSchool"]:checked')).map(c => c.value);
+        school_level = schools.length > 0 ? schools.join(',') : null;
+        const grades = Array.from(document.querySelectorAll('input[name="clmGradeChk"]:checked')).map(c => c.value);
+        grade_group = grades.length > 0 ? parseInt(grades[0]) : null;
+        const themes = Array.from(document.querySelectorAll('input[name="clmTheme"]:checked')).map(c => c.value);
+        theme = themes.length > 0 ? themes.join(',') : null;
+      }
+
+      try {
+        // 로컬 콘텐츠(URL/파일 추가)를 먼저 서버에 등록
+        const nonWb = contents.filter(c => c.content_type !== 'whiteboard');
+        for (const c of nonWb) {
+          if (c._isLocal || c.id < 0) {
+            const cRes = await fetch('/api/contents', {
+              method: 'POST', headers: {'Content-Type':'application/json'},
+              body: JSON.stringify({
+                title: c.title,
+                content_type: c.content_type || 'document',
+                content_url: c.content_url || '',
+                file_path: c.file_path || '',
+                description: c.description || '',
+                is_public: 0, status: 'draft'
+              })
+            }).then(r => r.json());
+            if (cRes.success && cRes.content) c.id = cRes.content.id;
+          }
+        }
+        const res = await fetch(`/api/lesson/${classId}`, {
+          method: 'POST', headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({
+            title,
+            content: desc || `수업 플레이어에서 구성한 수업입니다. (콘텐츠 ${nonWb.length}개)`,
+            lesson_date: startDate,
+            start_date: startDate,
+            end_date: endDate,
+            status,
+            tags,
+            achievement_code,
+            subject_code,
+            grade_group,
+            school_level,
+            theme,
+            classify_mode,
+            content_ids: nonWb.map(c => c.id)
+          })
+        }).then(r => r.json());
+        if (res.success) {
+          closeClassLessonMeta();
+          if (status === 'pending') {
+            showToast('수업이 등록되었습니다! 관리자 승인 후 공개됩니다.');
+          } else {
+            showToast('수업이 등록되었습니다!');
+          }
+          setTimeout(() => { location.href = `/class/class-home.html?id=${classId}`; }, 1200);
+        } else {
+          showToast(res.message || '등록 실패');
+        }
+      } catch(e) { console.error(e); showToast('서버 오류'); }
+    }
+
+    // 수정 모드: 콘텐츠 변경사항 저장
+    async function saveEditedLesson() {
+      try {
+        const res = await fetch(`/api/lesson/${classId}/${lessonId}`, {
+          method: 'PUT', headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({
+            content_ids: contents.filter(c => c.content_type !== 'whiteboard').map(c => c.id)
+          })
+        }).then(r => r.json());
+        if (res.success) {
+          showToast('수업이 저장되었습니다!');
+          setTimeout(() => { location.href = `/class/lesson-view.html?classId=${classId}&id=${lessonId}`; }, 1000);
+        } else {
+          showToast(res.message || '저장 실패');
+        }
+      } catch(e) { showToast('서버 오류'); }
+    }
+
+    // 크리에이터 모드: 메타정보 입력
+    function openCreatorMeta() {
+      const realContents = contents.filter(c => c.content_type !== 'whiteboard');
+      if (realContents.length === 0) { showToast('최소 1개 이상의 콘텐츠를 추가하세요'); return; }
+      // 메타정보를 localStorage에 임시 저장하고 채움콘텐츠로 이동
+      const bundleData = {
+        items: realContents.map((c, i) => ({ content_id: c.id, title: c.title, content_type: c.content_type, sort_order: i + 1 })),
+        timestamp: Date.now()
+      };
+      localStorage.setItem('pendingBundle', JSON.stringify(bundleData));
+      // 채움콘텐츠 수업꾸러미 메타정보 입력으로 이동
+      location.href = '/content/index.html#bundleMeta';
+    }
+
+    // common-nav.js가 없으므로 즉시 로드 (2초 대기 제거)
+    loadPlayer();
+  </script>
+
+  <!-- 콘텐츠 추가 모달 -->
+  <div id="addContentOverlay" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.6);z-index:10000;align-items:center;justify-content:center;backdrop-filter:blur(4px);" onclick="if(event.target===this)closeAddContentModal()">
+    <div style="background:#fff;border-radius:16px;width:92vw;max-width:1350px;height:85vh;overflow:hidden;display:flex;flex-direction:column;" onclick="event.stopPropagation()">
+      <div style="padding:20px 24px;border-bottom:1px solid #e5e7eb;display:flex;align-items:center;justify-content:space-between;">
+        <h3 style="font-size:18px;font-weight:800;color:#1f2937;display:flex;align-items:center;gap:8px;"><i class="fas fa-plus-circle" style="color:#3b82f6;"></i> 콘텐츠 추가</h3>
+        <button onclick="closeAddContentModal()" style="background:none;border:none;font-size:20px;cursor:pointer;color:#9ca3af;padding:4px 8px;border-radius:6px;" onmouseenter="this.style.background='#f3f4f6'" onmouseleave="this.style.background=''">&times;</button>
+      </div>
+      <div style="padding:16px 24px;border-bottom:1px solid #f3f4f6;">
+        <!-- 소스 탭 -->
+        <div style="display:flex;gap:6px;margin-bottom:12px;">
+          <button class="add-src-tab active" onclick="switchAddSrc(this,'public')" style="padding:7px 16px;border:1.5px solid #e5e7eb;border-radius:8px;background:#3b82f6;color:#fff;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;border-color:#3b82f6;">공개콘텐츠</button>
+          <button class="add-src-tab" onclick="switchAddSrc(this,'my')" style="padding:7px 16px;border:1.5px solid #e5e7eb;border-radius:8px;background:#fff;color:#6b7280;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;">내자료</button>
+          <button class="add-src-tab" onclick="switchAddSrc(this,'saved')" style="padding:7px 16px;border:1.5px solid #e5e7eb;border-radius:8px;background:#fff;color:#6b7280;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;">담은자료</button>
+        </div>
+        <!-- 검색 영역: 유형필터 + 일반검색 + 성취기준 검색 -->
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+          <!-- 유형 필터 -->
+          <div style="display:flex;gap:4px;">
+            <button class="add-type-btn active" onclick="filterAddType(this,'')" style="padding:4px 10px;border:1px solid #e5e7eb;border-radius:6px;background:#374151;color:#fff;font-size:11px;cursor:pointer;font-family:inherit;">전체</button>
+            <button class="add-type-btn" onclick="filterAddType(this,'video')" style="padding:4px 10px;border:1px solid #e5e7eb;border-radius:6px;background:#fff;color:#6b7280;font-size:11px;cursor:pointer;font-family:inherit;">영상</button>
+            <button class="add-type-btn" onclick="filterAddType(this,'document')" style="padding:4px 10px;border:1px solid #e5e7eb;border-radius:6px;background:#fff;color:#6b7280;font-size:11px;cursor:pointer;font-family:inherit;">문서</button>
+            <button class="add-type-btn" onclick="filterAddType(this,'quiz')" style="padding:4px 10px;border:1px solid #e5e7eb;border-radius:6px;background:#fff;color:#6b7280;font-size:11px;cursor:pointer;font-family:inherit;">문항</button>
+            <button class="add-type-btn" onclick="filterAddType(this,'exam')" style="padding:4px 10px;border:1px solid #e5e7eb;border-radius:6px;background:#fff;color:#6b7280;font-size:11px;cursor:pointer;font-family:inherit;">평가지</button>
+            <button class="add-type-btn" onclick="filterAddType(this,'image')" style="padding:4px 10px;border:1px solid #e5e7eb;border-radius:6px;background:#fff;color:#6b7280;font-size:11px;cursor:pointer;font-family:inherit;">이미지</button>
+          </div>
+          <!-- 일반 검색 -->
+          <div style="flex:1;position:relative;min-width:200px;">
+            <input type="text" id="addSearchInput" placeholder="제목, 키워드, 저작자명 검색..." style="width:100%;padding:8px 14px 8px 34px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:13px;outline:none;font-family:inherit;" onfocus="this.style.borderColor='#3b82f6'" onblur="this.style.borderColor='#e5e7eb'" oninput="searchAddContent()">
+            <i class="fas fa-search" style="position:absolute;left:12px;top:10px;color:#d1d5db;font-size:12px;"></i>
+          </div>
+          <!-- 성취기준 검색 -->
+          <div style="flex:1;position:relative;min-width:200px;" id="addStdSearchWrap">
+            <input type="text" id="addStdSearchInput" placeholder="🎯 성취기준 검색 (학년, 교과, 키워드...)" style="width:100%;padding:8px 14px 8px 34px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:13px;outline:none;font-family:inherit;background:#eff6ff;" onfocus="this.style.borderColor='#6366f1';clearTimeout(window._addStdBlurTimer);" onblur="window._addStdBlurTimer=setTimeout(()=>{document.getElementById('addStdDropdown').style.display='none'},300)" oninput="clearTimeout(window._addStdBlurTimer);searchAddStandard(this.value)">
+            <i class="fas fa-graduation-cap" style="position:absolute;left:12px;top:10px;color:#818cf8;font-size:12px;"></i>
+            <div id="addStdDropdown" style="display:none;position:absolute;top:100%;left:0;right:0;background:#fff;border:1.5px solid #c7d2fe;border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.12);z-index:100;max-height:250px;overflow-y:auto;margin-top:4px;"></div>
+          </div>
+        </div>
+        <!-- 선택된 성취기준 태그 -->
+        <div id="addSelectedStds" style="display:none;margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;"></div>
+      </div>
+      <div id="addSearchResults" style="flex:1;overflow-y:auto;padding:16px 24px;"></div>
+      <div style="padding:12px 24px;border-top:1px solid #e5e7eb;display:flex;justify-content:space-between;align-items:center;background:#f9fafb;">
+        <span id="addResultCount" style="font-size:12px;color:#9ca3af;"></span>
+        <div style="display:flex;align-items:center;gap:12px;">
+          <div style="display:flex;gap:2px;background:#f3f4f6;border-radius:6px;padding:2px;">
+            <button onclick="setAddViewMode('card')" id="addViewCardBtn" style="padding:4px 8px;border:none;border-radius:4px;background:#fff;color:#374151;cursor:pointer;font-size:12px;box-shadow:0 1px 2px rgba(0,0,0,.08);"><i class="fas fa-th-large"></i></button>
+            <button onclick="setAddViewMode('list')" id="addViewListBtn" style="padding:4px 8px;border:none;border-radius:4px;background:transparent;color:#9ca3af;cursor:pointer;font-size:12px;"><i class="fas fa-list"></i></button>
+          </div>
+          <span style="font-size:12px;color:#9ca3af;">구성한 콘텐츠: <strong id="addedCount" style="color:#3b82f6;">0</strong>개</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <style>
+    .add-src-tab.active { background:#3b82f6 !important; color:#fff !important; border-color:#3b82f6 !important; }
+    .add-type-btn.active { background:#374151 !important; color:#fff !important; border-color:#374151 !important; }
+    #addContentOverlay { display:flex; }
+  </style>
+
+  <!-- 수업 등록 메타정보 모달 -->
+  <div id="classLessonMetaOverlay" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.6);z-index:20000;align-items:center;justify-content:center;backdrop-filter:blur(4px);" onclick="if(event.target===this)closeClassLessonMeta()">
+    <div style="background:#fff;border-radius:16px;width:85vw;max-width:780px;max-height:90vh;overflow-y:auto;padding:0;color:#1f2937;box-shadow:0 20px 60px rgba(0,0,0,.2);" onclick="event.stopPropagation()">
+      <!-- 헤더 -->
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:20px 28px 16px;border-bottom:1px solid #f3f4f6;position:sticky;top:0;background:#fff;z-index:1;border-radius:16px 16px 0 0;">
+        <h3 style="font-size:18px;font-weight:800;display:flex;align-items:center;gap:8px;margin:0;"><i class="fas fa-chalkboard-teacher" style="color:#2563eb;"></i> 수업 정보 입력</h3>
+        <button onclick="closeClassLessonMeta()" style="border:none;background:none;font-size:22px;color:#9ca3af;cursor:pointer;width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;">&times;</button>
+      </div>
+      <div style="padding:24px 28px;">
+        <!-- 제목 -->
+        <div style="margin-bottom:16px;">
+          <label style="display:block;font-size:14px;font-weight:700;color:#374151;margin-bottom:8px;">제목 <span style="color:#dc2626;">*</span></label>
+          <input type="text" id="clmTitle" placeholder="수업 제목을 입력하세요" style="width:100%;padding:12px 14px;border:2px solid #e5e7eb;border-radius:10px;font-size:14px;outline:none;font-family:inherit;box-sizing:border-box;transition:border .2s;" onfocus="this.style.borderColor='#3b82f6'" onblur="this.style.borderColor='#e5e7eb'">
+        </div>
+        <!-- 설명 -->
+        <div style="margin-bottom:16px;">
+          <label style="display:block;font-size:14px;font-weight:700;color:#374151;margin-bottom:8px;">설명</label>
+          <textarea id="clmDesc" rows="3" placeholder="수업 내용을 간단히 설명해주세요" style="width:100%;padding:12px 14px;border:2px solid #e5e7eb;border-radius:10px;font-size:14px;outline:none;font-family:inherit;resize:vertical;box-sizing:border-box;transition:border .2s;" onfocus="this.style.borderColor='#3b82f6'" onblur="this.style.borderColor='#e5e7eb'"></textarea>
+        </div>
+
+        <!-- 분류 방식: 교육과정 / 테마 탭 -->
+        <div style="border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;margin-bottom:16px;">
+          <div style="display:flex;border-bottom:1px solid #e5e7eb;">
+            <button type="button" id="clmTabCurriculum" onclick="clmSwitchTab('curriculum')"
+              style="flex:1;padding:12px;font-size:14px;font-weight:700;cursor:pointer;border:none;background:#2563eb;color:#fff;display:flex;align-items:center;justify-content:center;gap:6px;transition:all .2s;">
+              <i class="fas fa-graduation-cap"></i> 교육과정
+            </button>
+            <button type="button" id="clmTabTheme" onclick="clmSwitchTab('theme')"
+              style="flex:1;padding:12px;font-size:14px;font-weight:700;cursor:pointer;border:none;background:#f9fafb;color:#6b7280;display:flex;align-items:center;justify-content:center;gap:6px;transition:all .2s;">
+              <i class="fas fa-palette"></i> 테마
+            </button>
+          </div>
+
+          <!-- 교육과정 패널 -->
+          <div id="clmPanelCurriculum" style="padding:20px;background:#eff6ff;">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+              <label style="font-weight:700;color:#1d4ed8;font-size:13px;">🎯 교육과정 성취기준 연결</label>
+            </div>
+            <div style="position:relative;" id="clmSmartWrap">
+              <i class="fas fa-search" style="position:absolute;left:14px;top:50%;transform:translateY(-50%);color:#3b82f6;font-size:14px;pointer-events:none;z-index:1;"></i>
+              <input type="text" id="clmAchievementSearch" autocomplete="off"
+                placeholder="예: 수학 3학년 분수, 6수01-06"
+                oninput="clmSmartInput(this.value)"
+                onkeydown="clmSmartKeydown(event)"
+                onfocus="clmSmartFocus()"
+                style="width:100%;padding:12px 80px 12px 40px;border:2px solid #e5e7eb;border-radius:10px;font-size:14px;font-family:inherit;outline:none;transition:all .2s;box-sizing:border-box;">
+              <span style="position:absolute;right:12px;top:50%;transform:translateY(-50%);font-size:10px;color:#d1d5db;pointer-events:none;">↑↓ · Enter</span>
+              <div id="clmAchievementResults" style="display:none;position:fixed;background:#fff;border:1px solid #e5e7eb;border-radius:12px;box-shadow:0 12px 36px rgba(0,0,0,0.15);z-index:20002;max-height:350px;overflow-y:auto;"></div>
+            </div>
+            <div id="clmSelectedStds" style="margin-top:10px;"></div>
+            <input type="hidden" id="clmAchievementCode">
+            <input type="hidden" id="clmSubject">
+            <input type="hidden" id="clmGrade">
+          </div>
+
+          <!-- 테마 패널 -->
+          <div id="clmPanelTheme" style="padding:20px;background:#fffbeb;display:none;">
+            <!-- 학교급 -->
+            <div style="margin-bottom:16px;">
+              <label style="font-size:13px;font-weight:700;color:#374151;margin-bottom:8px;display:block;">학교급 <span style="color:#9ca3af;font-size:11px;font-weight:400;">(중복 선택 가능)</span></label>
+              <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                <label style="display:flex;align-items:center;gap:5px;padding:8px 14px;border:1.5px solid #e5e7eb;border-radius:8px;cursor:pointer;font-size:13px;background:#fff;transition:all .15s;" class="clm-theme-chk">
+                  <input type="checkbox" name="clmSchool" value="초" style="width:auto;" onchange="clmThemeChkStyle(this)"> 초등
+                </label>
+                <label style="display:flex;align-items:center;gap:5px;padding:8px 14px;border:1.5px solid #e5e7eb;border-radius:8px;cursor:pointer;font-size:13px;background:#fff;transition:all .15s;" class="clm-theme-chk">
+                  <input type="checkbox" name="clmSchool" value="중" style="width:auto;" onchange="clmThemeChkStyle(this)"> 중등
+                </label>
+                <label style="display:flex;align-items:center;gap:5px;padding:8px 14px;border:1.5px solid #e5e7eb;border-radius:8px;cursor:pointer;font-size:13px;background:#fff;transition:all .15s;" class="clm-theme-chk">
+                  <input type="checkbox" name="clmSchool" value="고" style="width:auto;" onchange="clmThemeChkStyle(this)"> 고등
+                </label>
+                <label style="display:flex;align-items:center;gap:5px;padding:8px 14px;border:1.5px solid #e5e7eb;border-radius:8px;cursor:pointer;font-size:13px;background:#fff;transition:all .15s;" class="clm-theme-chk">
+                  <input type="checkbox" name="clmSchool" value="공통" style="width:auto;" onchange="clmThemeChkStyle(this)"> 공통
+                </label>
+              </div>
+            </div>
+            <!-- 대상 학년 -->
+            <div style="margin-bottom:16px;">
+              <label style="font-size:13px;font-weight:700;color:#374151;margin-bottom:8px;display:block;">대상 학년 <span style="color:#9ca3af;font-size:11px;font-weight:400;">(중복 선택 가능)</span></label>
+              <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                <label style="display:flex;align-items:center;gap:5px;padding:7px 12px;border:1.5px solid #e5e7eb;border-radius:8px;cursor:pointer;font-size:12px;background:#fff;transition:all .15s;" class="clm-theme-chk"><input type="checkbox" name="clmGradeChk" value="1" style="width:auto;" onchange="clmThemeChkStyle(this)"> 1학년</label>
+                <label style="display:flex;align-items:center;gap:5px;padding:7px 12px;border:1.5px solid #e5e7eb;border-radius:8px;cursor:pointer;font-size:12px;background:#fff;transition:all .15s;" class="clm-theme-chk"><input type="checkbox" name="clmGradeChk" value="2" style="width:auto;" onchange="clmThemeChkStyle(this)"> 2학년</label>
+                <label style="display:flex;align-items:center;gap:5px;padding:7px 12px;border:1.5px solid #e5e7eb;border-radius:8px;cursor:pointer;font-size:12px;background:#fff;transition:all .15s;" class="clm-theme-chk"><input type="checkbox" name="clmGradeChk" value="3" style="width:auto;" onchange="clmThemeChkStyle(this)"> 3학년</label>
+                <label style="display:flex;align-items:center;gap:5px;padding:7px 12px;border:1.5px solid #e5e7eb;border-radius:8px;cursor:pointer;font-size:12px;background:#fff;transition:all .15s;" class="clm-theme-chk"><input type="checkbox" name="clmGradeChk" value="4" style="width:auto;" onchange="clmThemeChkStyle(this)"> 4학년</label>
+                <label style="display:flex;align-items:center;gap:5px;padding:7px 12px;border:1.5px solid #e5e7eb;border-radius:8px;cursor:pointer;font-size:12px;background:#fff;transition:all .15s;" class="clm-theme-chk"><input type="checkbox" name="clmGradeChk" value="5" style="width:auto;" onchange="clmThemeChkStyle(this)"> 5학년</label>
+                <label style="display:flex;align-items:center;gap:5px;padding:7px 12px;border:1.5px solid #e5e7eb;border-radius:8px;cursor:pointer;font-size:12px;background:#fff;transition:all .15s;" class="clm-theme-chk"><input type="checkbox" name="clmGradeChk" value="6" style="width:auto;" onchange="clmThemeChkStyle(this)"> 6학년</label>
+              </div>
+            </div>
+            <!-- 테마 -->
+            <div style="margin-bottom:16px;">
+              <label style="font-size:13px;font-weight:700;color:#374151;margin-bottom:8px;display:block;">테마 <span style="color:#9ca3af;font-size:11px;font-weight:400;">(중복 선택 가능)</span></label>
+              <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                <label style="display:flex;align-items:center;gap:5px;padding:7px 12px;border:1.5px solid #e5e7eb;border-radius:8px;cursor:pointer;font-size:12px;background:#fff;transition:all .15s;" class="clm-theme-chk"><input type="checkbox" name="clmTheme" value="교원연수교육" style="width:auto;" onchange="clmThemeChkStyle(this)"> 교원연수교육</label>
+                <label style="display:flex;align-items:center;gap:5px;padding:7px 12px;border:1.5px solid #e5e7eb;border-radius:8px;cursor:pointer;font-size:12px;background:#fff;transition:all .15s;" class="clm-theme-chk"><input type="checkbox" name="clmTheme" value="동아리활동" style="width:auto;" onchange="clmThemeChkStyle(this)"> 동아리활동</label>
+                <label style="display:flex;align-items:center;gap:5px;padding:7px 12px;border:1.5px solid #e5e7eb;border-radius:8px;cursor:pointer;font-size:12px;background:#fff;transition:all .15s;" class="clm-theme-chk"><input type="checkbox" name="clmTheme" value="봉사활동" style="width:auto;" onchange="clmThemeChkStyle(this)"> 봉사활동</label>
+                <label style="display:flex;align-items:center;gap:5px;padding:7px 12px;border:1.5px solid #e5e7eb;border-radius:8px;cursor:pointer;font-size:12px;background:#fff;transition:all .15s;" class="clm-theme-chk"><input type="checkbox" name="clmTheme" value="안전교육" style="width:auto;" onchange="clmThemeChkStyle(this)"> 안전교육</label>
+                <label style="display:flex;align-items:center;gap:5px;padding:7px 12px;border:1.5px solid #e5e7eb;border-radius:8px;cursor:pointer;font-size:12px;background:#fff;transition:all .15s;" class="clm-theme-chk"><input type="checkbox" name="clmTheme" value="자율활동" style="width:auto;" onchange="clmThemeChkStyle(this)"> 자율활동</label>
+                <label style="display:flex;align-items:center;gap:5px;padding:7px 12px;border:1.5px solid #e5e7eb;border-radius:8px;cursor:pointer;font-size:12px;background:#fff;transition:all .15s;" class="clm-theme-chk"><input type="checkbox" name="clmTheme" value="진로교육" style="width:auto;" onchange="clmThemeChkStyle(this)"> 진로교육</label>
+                <label style="display:flex;align-items:center;gap:5px;padding:7px 12px;border:1.5px solid #e5e7eb;border-radius:8px;cursor:pointer;font-size:12px;background:#fff;transition:all .15s;" class="clm-theme-chk"><input type="checkbox" name="clmTheme" value="특수교육" style="width:auto;" onchange="clmThemeChkStyle(this)"> 특수교육</label>
+                <label style="display:flex;align-items:center;gap:5px;padding:7px 12px;border:1.5px solid #e5e7eb;border-radius:8px;cursor:pointer;font-size:12px;background:#fff;transition:all .15s;" class="clm-theme-chk"><input type="checkbox" name="clmTheme" value="학부모교육" style="width:auto;" onchange="clmThemeChkStyle(this)"> 학부모교육</label>
+                <label style="display:flex;align-items:center;gap:5px;padding:7px 12px;border:1.5px solid #e5e7eb;border-radius:8px;cursor:pointer;font-size:12px;background:#fff;transition:all .15s;" class="clm-theme-chk"><input type="checkbox" name="clmTheme" value="기타" style="width:auto;" onchange="clmThemeChkStyle(this)"> 기타</label>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 키워드/태그 -->
+        <div style="margin-bottom:16px;">
+          <label style="display:block;font-size:14px;font-weight:700;color:#374151;margin-bottom:8px;">키워드 <span style="color:#9ca3af;font-size:11px;font-weight:400;">(쉼표로 구분)</span></label>
+          <input type="text" id="clmTags" placeholder="예: 분수, 덧셈, 초등수학" style="width:100%;padding:12px 14px;border:2px solid #e5e7eb;border-radius:10px;font-size:14px;outline:none;font-family:inherit;box-sizing:border-box;transition:border .2s;" onfocus="this.style.borderColor='#3b82f6'" onblur="this.style.borderColor='#e5e7eb'">
+        </div>
+
+        <!-- 기간 + 상태 -->
+        <div style="display:flex;gap:16px;margin-bottom:16px;">
+          <div style="flex:1;">
+            <label style="display:block;font-size:14px;font-weight:700;color:#374151;margin-bottom:8px;">시작일</label>
+            <input type="date" id="clmStartDate" style="width:100%;padding:12px 14px;border:2px solid #e5e7eb;border-radius:10px;font-size:14px;outline:none;font-family:inherit;box-sizing:border-box;">
+          </div>
+          <div style="flex:1;">
+            <label style="display:block;font-size:14px;font-weight:700;color:#374151;margin-bottom:8px;">종료일</label>
+            <input type="date" id="clmEndDate" style="width:100%;padding:12px 14px;border:2px solid #e5e7eb;border-radius:10px;font-size:14px;outline:none;font-family:inherit;box-sizing:border-box;">
+          </div>
+          <div style="flex:1;">
+            <label style="display:block;font-size:14px;font-weight:700;color:#374151;margin-bottom:8px;">상태</label>
+            <select id="clmStatus" style="width:100%;padding:12px 14px;border:2px solid #e5e7eb;border-radius:10px;font-size:14px;outline:none;font-family:inherit;box-sizing:border-box;">
+              <option value="published">공개</option>
+              <option value="archived">비공개</option>
+              <option value="draft">임시저장</option>
+            </select>
+          </div>
+        </div>
+      </div>
+      <!-- 하단 버튼 -->
+      <div style="display:flex;gap:10px;justify-content:flex-end;padding:16px 28px 20px;border-top:1px solid #f3f4f6;position:sticky;bottom:0;background:#fff;border-radius:0 0 16px 16px;">
+        <button onclick="closeClassLessonMeta()" style="padding:10px 24px;background:#f3f4f6;color:#374151;border:1.5px solid #d1d5db;border-radius:10px;font-size:14px;font-weight:600;cursor:pointer;font-family:inherit;">취소</button>
+        <button onclick="submitClassLesson()" style="padding:10px 28px;background:#2563eb;color:#fff;border:none;border-radius:10px;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;display:flex;align-items:center;gap:6px;"><i class="fas fa-save"></i> 수업 등록</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- URL 추가 모달 -->
+  <div id="urlAddOverlay" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.6);z-index:20000;align-items:center;justify-content:center;backdrop-filter:blur(4px);" onclick="if(event.target===this)closeUrlAddModal()">
+    <div style="background:#fff;border-radius:16px;width:90%;max-width:460px;padding:28px;color:#1f2937;" onclick="event.stopPropagation()">
+      <h3 style="font-size:18px;font-weight:800;margin-bottom:20px;display:flex;align-items:center;gap:8px;"><i class="fas fa-link" style="color:#8b5cf6;"></i> URL 링크 추가</h3>
+      <div style="margin-bottom:14px;">
+        <label style="display:block;font-size:13px;font-weight:600;color:#374151;margin-bottom:6px;">URL 주소 <span style="color:#dc2626;">*</span></label>
+        <input type="url" id="urlAddInput" placeholder="https://..." style="width:100%;padding:10px 12px;border:1.5px solid #d1d5db;border-radius:8px;font-size:14px;outline:none;font-family:inherit;" onfocus="this.style.borderColor='#8b5cf6'" onblur="this.style.borderColor='#d1d5db'">
+        <div style="font-size:11px;color:#9ca3af;margin-top:4px;">YouTube, 웹사이트, Google Docs, Padlet 등 다양한 URL 지원</div>
+      </div>
+      <div style="margin-bottom:14px;">
+        <label style="display:block;font-size:13px;font-weight:600;color:#374151;margin-bottom:6px;">제목 (선택)</label>
+        <input type="text" id="urlAddTitle" placeholder="목차에 표시할 제목" style="width:100%;padding:10px 12px;border:1.5px solid #d1d5db;border-radius:8px;font-size:14px;outline:none;font-family:inherit;" onfocus="this.style.borderColor='#8b5cf6'" onblur="this.style.borderColor='#d1d5db'">
+        <div style="font-size:11px;color:#9ca3af;margin-top:4px;">비워두면 URL 도메인이 제목으로 사용됩니다</div>
+      </div>
+      <div style="background:#f8fafc;border-radius:10px;padding:12px;margin-bottom:18px;border:1px solid #e2e8f0;">
+        <div style="font-size:12px;font-weight:600;color:#475569;margin-bottom:6px;"><i class="fas fa-info-circle" style="color:#3b82f6;"></i> 안내</div>
+        <div style="font-size:11px;color:#64748b;line-height:1.5;">
+          • 임베디드를 허용하는 사이트는 화면 내에서 바로 표시됩니다<br>
+          • 허용하지 않는 사이트는 "새 탭에서 열기" 링크로 제공됩니다<br>
+          • YouTube, Vimeo 등 영상 URL은 자동으로 영상 플레이어로 재생됩니다
+        </div>
+      </div>
+      <div style="display:flex;gap:10px;justify-content:flex-end;">
+        <button onclick="closeUrlAddModal()" style="padding:10px 20px;background:#f3f4f6;color:#374151;border:1.5px solid #d1d5db;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;font-family:inherit;">취소</button>
+        <button onclick="submitUrlAdd()" style="padding:10px 24px;background:#8b5cf6;color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;font-family:inherit;"><i class="fas fa-plus"></i> 추가</button>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

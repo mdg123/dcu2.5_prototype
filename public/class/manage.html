@@ -1,0 +1,811 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>다채움 - 클래스 설정</title>
+  <link rel="stylesheet" href="/css/common-nav.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <style>
+    :root {
+      --primary: #4A7CFF; --primary-dark: #3A6AE8; --primary-light: #E8EEFF;
+      --secondary: #7C4DFF; --secondary-light: #F0EBFF;
+      --success: #10B981; --success-light: #D1FAE5;
+      --warning: #F59E0B; --warning-light: #FEF3C7;
+      --danger: #EF4444; --danger-light: #FEE2E2;
+      --gray-50: #F9FAFB; --gray-100: #F3F4F6; --gray-200: #E5E7EB; --gray-300: #D1D5DB;
+      --gray-500: #6B7280; --gray-600: #4B5563; --gray-700: #374151; --gray-800: #1F2937;
+      --radius: 12px; --radius-sm: 8px; --radius-full: 999px;
+      --shadow: 0 1px 3px rgba(0,0,0,0.08); --shadow-md: 0 4px 12px rgba(0,0,0,0.1);
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Pretendard','Noto Sans KR',system-ui,sans-serif; background: #F5F7FA; color: #1A1A2E; }
+    .container { max-width: 1800px; margin: 0 auto; padding: 24px 20px; }
+
+    /* 페이지 헤더 */
+    .page-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
+    .page-title { display: flex; align-items: center; gap: 10px; font-size: 22px; font-weight: 800; }
+    .page-title::before { content: ''; width: 6px; height: 28px; background: linear-gradient(180deg, var(--primary) 0%, var(--secondary) 100%); border-radius: var(--radius-full); }
+    .back-link { color: var(--gray-500); text-decoration: none; font-size: 14px; display: flex; align-items: center; gap: 6px; padding: 8px 14px; background: var(--gray-100); border-radius: var(--radius-sm); transition: all 0.2s; }
+    .back-link:hover { background: var(--gray-200); color: var(--gray-700); }
+
+    /* 탭 네비게이션 */
+    .tabs-nav { display: flex; gap: 2px; background: var(--gray-100); border-radius: var(--radius); padding: 4px; margin-bottom: 24px; }
+    .tab-btn { flex: 1; padding: 12px 16px; border: none; background: transparent; border-radius: var(--radius-sm); font-size: 14px; font-weight: 600; cursor: pointer; font-family: inherit; color: var(--gray-500); transition: all 0.2s; display: flex; align-items: center; justify-content: center; gap: 6px; }
+    .tab-btn.active { background: #fff; color: var(--primary); box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+    .tab-btn:hover:not(.active) { color: var(--gray-700); }
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+
+    /* 카드 */
+    .card { background: #fff; border-radius: var(--radius); padding: 24px; box-shadow: var(--shadow); margin-bottom: 20px; }
+    .card-title { font-size: 16px; font-weight: 700; margin-bottom: 20px; padding-bottom: 14px; border-bottom: 1px solid var(--gray-200); display: flex; align-items: center; gap: 8px; }
+
+    /* 설정 그리드 */
+    .setting-row { display: grid; grid-template-columns: 140px 1fr; gap: 16px; align-items: start; margin-bottom: 18px; }
+    .setting-label { font-size: 14px; font-weight: 600; color: var(--gray-700); padding-top: 10px; }
+    .setting-label .required { color: var(--danger); margin-left: 2px; }
+
+    /* 폼 요소 */
+    .input, .select, .textarea { width: 100%; padding: 10px 14px; border: 1.5px solid var(--gray-200); border-radius: var(--radius-sm); font-size: 14px; font-family: inherit; outline: none; transition: border-color 0.2s; background: #fff; color: var(--gray-800); }
+    .input:focus, .select:focus, .textarea:focus { border-color: var(--primary); }
+    .textarea { resize: vertical; }
+
+    /* 초대코드 */
+    .code-box { display: flex; gap: 8px; align-items: center; }
+    .code-display { padding: 10px 16px; background: var(--gray-50); border: 1.5px solid var(--gray-200); border-radius: var(--radius-sm); font-family: monospace; font-size: 16px; letter-spacing: 3px; color: var(--gray-800); flex: 1; }
+    .code-actions { display: flex; gap: 6px; }
+    .code-actions button { padding: 8px 14px; border: none; border-radius: var(--radius-sm); font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit; background: var(--gray-100); color: var(--gray-700); transition: all 0.2s; }
+    .code-actions button:hover { background: var(--gray-200); }
+
+    /* 공개 설정 */
+    .radio-group { display: flex; gap: 16px; }
+    .radio-option { display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 14px; padding: 10px 16px; border: 1.5px solid var(--gray-200); border-radius: var(--radius-sm); transition: all 0.2s; }
+    .radio-option:has(input:checked) { border-color: var(--primary); background: var(--primary-light); }
+    .radio-option input { margin: 0; }
+    .radio-option i { font-size: 15px; }
+
+    /* 칩 선택 */
+    .chip-group { display: flex; flex-wrap: wrap; gap: 8px; }
+    .chip { padding: 7px 14px; border-radius: var(--radius-full); border: 1.5px solid var(--gray-200); background: #fff; font-size: 13px; cursor: pointer; font-family: inherit; transition: all 0.2s; color: var(--gray-600); }
+    .chip.active { border-color: var(--primary); background: var(--primary-light); color: var(--primary); font-weight: 600; }
+
+    /* 버튼 */
+    .btn { padding: 10px 20px; border: none; border-radius: var(--radius-sm); font-size: 14px; font-weight: 600; cursor: pointer; font-family: inherit; transition: all 0.2s; }
+    .btn-primary { background: var(--primary); color: #fff; }
+    .btn-primary:hover { background: var(--primary-dark); }
+    .btn-secondary { background: var(--gray-100); color: var(--gray-700); }
+    .btn-secondary:hover { background: var(--gray-200); }
+    .btn-danger { background: var(--danger); color: #fff; }
+    .btn-danger:hover { background: #dc2626; }
+    .btn-sm { padding: 6px 12px; font-size: 12px; }
+    .btn-ghost { background: transparent; color: var(--gray-600); padding: 6px 10px; }
+    .btn-ghost:hover { background: var(--gray-100); }
+
+    /* 멤버 테이블 */
+    .member-toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; flex-wrap: wrap; gap: 10px; }
+    .member-toolbar .search-box { display: flex; align-items: center; gap: 8px; }
+    .member-toolbar .search-box input { padding: 8px 12px 8px 34px; border: 1.5px solid var(--gray-200); border-radius: var(--radius-sm); font-size: 13px; font-family: inherit; outline: none; width: 220px; }
+    .member-toolbar .search-box i { position: absolute; left: 10px; color: var(--gray-500); }
+    .data-table { width: 100%; border-collapse: collapse; }
+    .data-table th, .data-table td { padding: 12px 14px; text-align: left; border-bottom: 1px solid var(--gray-100); font-size: 13px; }
+    .data-table th { font-weight: 600; color: var(--gray-500); font-size: 12px; background: var(--gray-50); }
+    .data-table tr:hover { background: var(--gray-50); }
+    .role-badge { display: inline-flex; align-items: center; gap: 4px; padding: 3px 10px; border-radius: var(--radius-full); font-size: 12px; font-weight: 600; }
+    .role-badge.owner { background: var(--warning-light); color: #D97706; }
+    .role-badge.member { background: var(--gray-100); color: var(--gray-500); }
+    .user-role-tag { font-size: 10px; padding: 1px 6px; border-radius: var(--radius-full); background: var(--gray-100); color: var(--gray-500); margin-left: 4px; }
+
+    /* 멤버 추가 */
+    .add-member-section { display: flex; gap: 8px; margin-bottom: 16px; padding: 14px; background: var(--gray-50); border-radius: var(--radius-sm); }
+    .add-member-section input { flex: 1; padding: 9px 14px; border: 1.5px solid var(--gray-200); border-radius: var(--radius-sm); font-size: 14px; font-family: inherit; outline: none; background: #fff; }
+    .add-member-section input:focus { border-color: var(--primary); }
+
+    /* 위험 영역 */
+    .danger-zone { border: 2px solid #FECACA; }
+    .danger-zone .card-title { color: var(--danger); border-bottom-color: #FECACA; }
+    .danger-zone p { font-size: 13px; color: var(--gray-600); margin-bottom: 16px; line-height: 1.6; }
+
+    /* 메시지 */
+    .msg { padding: 12px 16px; border-radius: var(--radius-sm); font-size: 13px; margin-bottom: 14px; display: none; }
+    .msg-success { background: #F0FDF4; color: #16A34A; border: 1px solid #BBF7D0; }
+    .msg-error { background: #FEF2F2; color: #DC2626; border: 1px solid #FECACA; }
+
+    /* 토스트 */
+    .toast-container { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); z-index: 20000; pointer-events: none; }
+    .toast { padding: 12px 24px; background: var(--gray-800); color: #fff; border-radius: var(--radius-sm); font-size: 14px; font-weight: 500; opacity: 0; transform: translateY(10px); transition: all 0.3s; pointer-events: auto; }
+    .toast.show { opacity: 1; transform: translateY(0); }
+
+    /* 토글 스위치 */
+    .toggle-switch { position: relative; width: 48px; height: 26px; display: inline-block; }
+    .toggle-switch input { opacity: 0; width: 0; height: 0; }
+    .toggle-slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background: var(--gray-300); border-radius: var(--radius-full); transition: 0.2s; }
+    .toggle-slider::before { content: ''; position: absolute; height: 20px; width: 20px; left: 3px; bottom: 3px; background: white; border-radius: 50%; transition: 0.2s; }
+    .toggle-switch input:checked + .toggle-slider { background: var(--primary); }
+    .toggle-switch input:checked + .toggle-slider::before { transform: translateX(22px); }
+
+    /* 탭 설정 아이템 */
+    .tab-toggle-item { display: flex; align-items: center; justify-content: space-between; padding: 14px 16px; border-radius: var(--radius-sm); transition: background 0.15s; }
+    .tab-toggle-item:hover { background: var(--gray-50); }
+    .tab-toggle-item .tab-info { display: flex; align-items: center; gap: 12px; }
+    .tab-toggle-item .tab-icon { width: 36px; height: 36px; border-radius: var(--radius-sm); display: flex; align-items: center; justify-content: center; font-size: 16px; flex-shrink: 0; }
+    .tab-toggle-item .tab-name { font-size: 14px; font-weight: 600; color: var(--gray-800); }
+    .tab-toggle-item .tab-desc { font-size: 12px; color: var(--gray-500); margin-top: 2px; }
+    .tab-toggle-item.disabled { opacity: 0.5; }
+
+    /* 게시판 관리 */
+    .board-item { display: flex; align-items: center; gap: 12px; padding: 14px 16px; border: 1.5px solid var(--gray-200); border-radius: var(--radius-sm); margin-bottom: 10px; background: #fff; transition: border-color 0.2s; }
+    .board-item:hover { border-color: var(--primary); }
+    .board-type-badge { display: inline-flex; align-items: center; gap: 4px; padding: 3px 10px; border-radius: var(--radius-full); font-size: 11px; font-weight: 700; }
+    .board-type-badge.general { background: #dbeafe; color: #2563eb; }
+    .board-type-badge.gallery { background: #fde8d8; color: #c2410c; }
+    .board-modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 1000; align-items: center; justify-content: center; }
+    .board-modal-overlay.active { display: flex; }
+    .board-modal { background: #fff; border-radius: var(--radius); padding: 28px; width: 480px; max-width: 95vw; box-shadow: 0 20px 60px rgba(0,0,0,0.2); }
+    .board-modal h3 { font-size: 18px; font-weight: 700; margin-bottom: 20px; }
+    .board-modal .form-group { margin-bottom: 16px; }
+    .board-modal label { font-size: 13px; font-weight: 600; color: var(--gray-700); display: block; margin-bottom: 6px; }
+    .type-selector { display: flex; gap: 12px; }
+    .type-option { flex: 1; padding: 14px; border: 2px solid var(--gray-200); border-radius: var(--radius-sm); cursor: pointer; text-align: center; transition: all 0.2s; }
+    .type-option:hover { border-color: var(--primary); }
+    .type-option.selected { border-color: var(--primary); background: var(--primary-light); }
+    .type-option .type-icon { font-size: 24px; margin-bottom: 6px; }
+    .type-option .type-name { font-size: 13px; font-weight: 700; }
+    .type-option .type-desc { font-size: 11px; color: var(--gray-500); margin-top: 3px; line-height: 1.4; }
+
+    @media (max-width: 768px) {
+      .setting-row { grid-template-columns: 1fr; gap: 6px; }
+      .radio-group { flex-direction: column; }
+      .tabs-nav { flex-direction: column; }
+      .member-toolbar { flex-direction: column; }
+    }
+  </style>
+</head>
+<body>
+  <script src="/js/common-nav.js"></script>
+  <div class="container" id="mainContent" style="display:none;">
+    <div class="page-header">
+      <h1 class="page-title">클래스 설정</h1>
+      <a class="back-link" id="backLink" href="#"><i class="fas fa-arrow-left"></i> 클래스 홈으로</a>
+    </div>
+
+    <!-- 탭 네비게이션 -->
+    <div class="tabs-nav">
+      <button class="tab-btn active" onclick="switchTab(this,'basic')"><i class="fas fa-info-circle"></i> 기본 정보</button>
+      <button class="tab-btn" onclick="switchTab(this,'member')"><i class="fas fa-users"></i> 멤버 관리</button>
+      <button class="tab-btn" onclick="switchTab(this,'tabs')"><i class="fas fa-th-large"></i> 탭 설정</button>
+      <button class="tab-btn" onclick="switchTab(this,'boards')"><i class="fas fa-comments"></i> 게시판 관리</button>
+      <button class="tab-btn" onclick="switchTab(this,'danger')"><i class="fas fa-exclamation-triangle"></i> 위험 영역</button>
+    </div>
+
+    <!-- 기본 정보 탭 -->
+    <div id="tabBasic" class="tab-content active">
+      <div class="card">
+        <h3 class="card-title"><i class="fas fa-cog" style="color:var(--primary);"></i> 기본 정보</h3>
+        <div id="editMsg" class="msg"></div>
+        <form id="editForm">
+          <div class="setting-row">
+            <label class="setting-label">초대 코드</label>
+            <div class="code-box">
+              <div class="code-display" id="codeDisplay"></div>
+              <div class="code-actions">
+                <button type="button" onclick="copyCode()"><i class="fas fa-copy"></i> 복사</button>
+                <button type="button" onclick="showQR()"><i class="fas fa-qrcode"></i> QR</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="setting-row">
+            <label class="setting-label">클래스명<span class="required">*</span></label>
+            <input type="text" class="input" id="editName" required placeholder="클래스명을 입력하세요">
+          </div>
+
+          <div class="setting-row">
+            <label class="setting-label">과목</label>
+            <select class="select" id="editSubject">
+              <option value="">선택하세요</option>
+              <option>국어</option><option>수학</option><option>영어</option><option>과학</option><option>사회</option>
+              <option>도덕</option><option>음악</option><option>미술</option><option>체육</option><option>실과</option>
+              <option>통합</option><option>기타</option>
+            </select>
+          </div>
+
+          <div class="setting-row">
+            <label class="setting-label">클래스 설명</label>
+            <textarea class="textarea" id="editDesc" rows="3" placeholder="클래스 설명을 입력하세요"></textarea>
+          </div>
+
+          <div class="setting-row">
+            <label class="setting-label">학년</label>
+            <select class="select" id="editGrade">
+              <option value="">선택</option>
+              <option value="1">1학년</option><option value="2">2학년</option><option value="3">3학년</option>
+              <option value="4">4학년</option><option value="5">5학년</option><option value="6">6학년</option>
+            </select>
+          </div>
+
+          <div class="setting-row">
+            <label class="setting-label">공개 여부</label>
+            <div class="radio-group">
+              <label class="radio-option">
+                <input type="radio" name="isPublic" id="isPublicYes" value="1">
+                <i class="fas fa-globe" style="color:var(--primary);"></i> 공개 (클래스 찾기에 노출)
+              </label>
+              <label class="radio-option">
+                <input type="radio" name="isPublic" id="isPublicNo" value="0">
+                <i class="fas fa-lock" style="color:var(--gray-500);"></i> 비공개 (코드로만 가입)
+              </label>
+            </div>
+          </div>
+
+          <div style="text-align:right; margin-top:8px;">
+            <button type="submit" class="btn btn-primary"><i class="fas fa-save"></i> 저장</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- 멤버 관리 탭 -->
+    <div id="tabMember" class="tab-content">
+      <div class="card">
+        <h3 class="card-title"><i class="fas fa-users" style="color:var(--primary);"></i> 멤버 관리</h3>
+        <div id="memberMsg" class="msg"></div>
+
+        <div class="add-member-section">
+          <input type="text" id="addUsername" placeholder="추가할 사용자 아이디를 입력하세요">
+          <button class="btn btn-primary" onclick="addMember()"><i class="fas fa-user-plus"></i> 멤버 추가</button>
+        </div>
+
+        <div class="member-toolbar">
+          <div style="font-size:14px;color:var(--gray-500);">
+            총 <strong id="memberCount" style="color:var(--primary);">0</strong>명
+          </div>
+        </div>
+
+        <div style="overflow-x:auto;">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>이름</th>
+                <th>아이디</th>
+                <th>역할</th>
+                <th>가입일</th>
+                <th style="text-align:right;">관리</th>
+              </tr>
+            </thead>
+            <tbody id="memberBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- 탭 설정 탭 -->
+    <div id="tabTabs" class="tab-content">
+      <div class="card">
+        <h3 class="card-title"><i class="fas fa-th-large" style="color:var(--primary);"></i> 클래스 탭 관리</h3>
+        <p style="font-size:13px;color:var(--gray-500);margin-bottom:20px;line-height:1.6;">
+          클래스에서 사용할 탭을 선택하세요. 비활성화된 탭은 멤버에게 표시되지 않습니다.<br>
+          <strong>홈 탭</strong>은 기본 탭으로 항상 활성화되어 있습니다.
+        </p>
+        <div id="tabToggles" style="display:flex;flex-direction:column;gap:2px;">
+        </div>
+        <div style="text-align:right;margin-top:20px;">
+          <button class="btn btn-primary" onclick="saveTabSettings()"><i class="fas fa-save"></i> 탭 설정 저장</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 게시판 관리 탭 -->
+    <div id="tabBoards" class="tab-content">
+      <div class="card">
+        <h3 class="card-title"><i class="fas fa-comments" style="color:var(--primary);"></i> 게시판 관리</h3>
+        <p style="font-size:13px;color:var(--gray-500);margin-bottom:20px;line-height:1.6;">
+          클래스에 게시판을 추가하고 유형(일반/갤러리형)을 설정합니다.<br>
+          <strong>갤러리형 게시판</strong>은 게시물 공개 시 교사 승인이 필요하며, <strong>나도예술가</strong>와 연동됩니다.
+        </p>
+        <div id="boardsList" style="margin-bottom:16px;min-height:60px;">
+          <div style="text-align:center;color:var(--gray-400);padding:20px;"><i class="fas fa-spinner fa-spin"></i> 로딩 중...</div>
+        </div>
+        <div style="text-align:right;">
+          <button class="btn btn-primary" onclick="showBoardModal()"><i class="fas fa-plus"></i> 게시판 추가</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 위험 영역 탭 -->
+    <div id="tabDanger" class="tab-content">
+      <div class="card danger-zone">
+        <h3 class="card-title"><i class="fas fa-exclamation-triangle"></i> 위험 영역</h3>
+        <p>
+          <strong>⚠️ 주의:</strong> 클래스를 삭제하면 모든 수업, 과제, 평가, 알림장, 출석 데이터가 함께 <strong>영구 삭제</strong>됩니다.
+          이 작업은 되돌릴 수 없습니다.
+        </p>
+        <button class="btn btn-danger" onclick="deleteClass()"><i class="fas fa-trash-alt"></i> 클래스 삭제</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 게시판 추가/수정 모달 -->
+  <div class="board-modal-overlay" id="boardModalOverlay" onclick="hideBoardModal(event)">
+    <div class="board-modal" onclick="event.stopPropagation()">
+      <h3 id="boardModalTitle"><i class="fas fa-comments"></i> 게시판 추가</h3>
+      <input type="hidden" id="editBoardId">
+      <div class="form-group">
+        <label>게시판 이름 <span style="color:var(--danger)">*</span></label>
+        <input type="text" class="input" id="boardName" placeholder="예: 자유게시판, 갤러리" maxlength="30">
+      </div>
+      <div class="form-group">
+        <label>게시판 유형</label>
+        <div class="type-selector">
+          <div class="type-option selected" id="typeGeneral" onclick="selectBoardType('general')">
+            <div class="type-icon">📋</div>
+            <div class="type-name">일반 게시판</div>
+            <div class="type-desc">텍스트·이미지 게시글<br>즉시 공개</div>
+          </div>
+          <div class="type-option" id="typeGallery" onclick="selectBoardType('gallery')">
+            <div class="type-icon">🎨</div>
+            <div class="type-name">갤러리형 게시판</div>
+            <div class="type-desc">이미지 중심 게시글<br>교사 승인 후 공개</div>
+          </div>
+        </div>
+        <input type="hidden" id="boardType" value="general">
+      </div>
+      <div class="form-group" id="approvalGroup" style="display:none;background:var(--warning-light);border-radius:var(--radius-sm);padding:12px 14px;">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin:0;">
+          <input type="checkbox" id="boardRequiresApproval" checked>
+          <span><i class="fas fa-shield-alt" style="color:#D97706;"></i> 게시물 공개 시 교사 승인 필요</span>
+        </label>
+        <p style="font-size:11px;color:#92400e;margin-top:6px;margin-left:20px;">학생이 게시물을 올리면 교사 확인 후 공개됩니다. 나도예술가에도 연동됩니다.</p>
+      </div>
+      <div class="form-group">
+        <label>설명 (선택)</label>
+        <input type="text" class="input" id="boardDesc" placeholder="게시판 설명을 입력하세요" maxlength="100">
+      </div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px;">
+        <button class="btn btn-secondary" onclick="hideBoardModal()">취소</button>
+        <button class="btn btn-primary" onclick="saveBoard()"><i class="fas fa-save"></i> 저장</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 토스트 -->
+  <div class="toast-container">
+    <div id="toast" class="toast"></div>
+  </div>
+
+  <script>
+    const params = new URLSearchParams(location.search);
+    let classId = params.get('id');
+
+    // classId 없으면 클래스 선택 화면 표시
+    if (!classId) {
+      (async function showClassPicker() {
+        try {
+          const res = await fetch('/api/class/my');
+          const data = await res.json();
+          const myClasses = (data.classes || []).filter(c => c.my_role === 'owner');
+          if (myClasses.length === 0) {
+            document.querySelector('.container').innerHTML = `
+              <div style="text-align:center;padding:80px 20px;">
+                <i class="fas fa-chalkboard" style="font-size:48px;color:var(--gray-300);margin-bottom:16px;"></i>
+                <h2 style="margin-bottom:8px;color:var(--gray-700);">개설한 클래스가 없습니다</h2>
+                <p style="color:var(--gray-500);margin-bottom:24px;">클래스를 먼저 개설해주세요.</p>
+                <a href="/class/index.html" class="btn btn-primary"><i class="fas fa-plus"></i> 클래스 만들기</a>
+              </div>`;
+            return;
+          }
+          if (myClasses.length === 1) {
+            location.replace('/class/manage.html?id=' + myClasses[0].id);
+            return;
+          }
+          document.querySelector('.container').innerHTML = `
+            <div class="page-header"><h1 class="page-title">클래스 관리</h1></div>
+            <p style="color:var(--gray-500);margin-bottom:24px;">관리할 클래스를 선택하세요.</p>
+            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px;">
+              ${myClasses.map(c => `
+                <a href="/class/manage.html?id=${c.id}" style="text-decoration:none;background:#fff;border-radius:14px;padding:24px;box-shadow:var(--shadow);transition:all .2s;display:block;border:2px solid transparent;" onmouseenter="this.style.borderColor='var(--primary)';this.style.boxShadow='var(--shadow-md)'" onmouseleave="this.style.borderColor='transparent';this.style.boxShadow='var(--shadow)'">
+                  <div style="font-size:18px;font-weight:700;color:var(--gray-800);margin-bottom:8px;">${c.name}</div>
+                  <div style="font-size:13px;color:var(--gray-500);">${c.description || ''}</div>
+                  <div style="margin-top:12px;font-size:12px;color:var(--gray-400);display:flex;gap:12px;">
+                    <span><i class="fas fa-users"></i> ${c.member_count || 0}명</span>
+                    <span><i class="fas fa-code"></i> ${c.code || ''}</span>
+                  </div>
+                </a>
+              `).join('')}
+            </div>`;
+        } catch (e) { location.href = '/class/index.html'; }
+      })();
+    }
+
+    if (classId) document.getElementById('backLink').href = '/class/class-home.html?id=' + classId;
+
+    let classOwnerId = null;
+
+    function escHtml(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+    // ==================== 탭 전환 ====================
+    function switchTab(btn, tabId) {
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+      btn.classList.add('active');
+      document.getElementById('tab' + tabId.charAt(0).toUpperCase() + tabId.slice(1)).classList.add('active');
+      if (tabId === 'boards') loadBoards();
+    }
+
+    // ==================== 게시판 관리 ====================
+    async function loadBoards() {
+      if (!classId) return;
+      const res = await fetch(`/api/board/${classId}/boards`);
+      const data = await res.json();
+      const container = document.getElementById('boardsList');
+      if (!data.success || !data.boards.length) {
+        container.innerHTML = `<div style="text-align:center;color:var(--gray-400);padding:24px;"><i class="fas fa-comments" style="font-size:32px;margin-bottom:8px;display:block;"></i>게시판이 없습니다.<br>게시판을 추가해주세요.</div>`;
+        return;
+      }
+      container.innerHTML = data.boards.map(b => `
+        <div class="board-item" id="board-item-${b.id}">
+          <div style="font-size:22px;">${b.board_type === 'gallery' ? '🎨' : '📋'}</div>
+          <div style="flex:1;min-width:0;">
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+              <span style="font-size:14px;font-weight:700;color:var(--gray-800);">${escHtml(b.name)}</span>
+              <span class="board-type-badge ${b.board_type}">${b.board_type === 'gallery' ? '갤러리형' : '일반'}</span>
+              ${b.requires_approval ? '<span style="font-size:11px;color:#D97706;background:#FEF3C7;padding:2px 8px;border-radius:99px;"><i class="fas fa-shield-alt"></i> 승인 필요</span>' : ''}
+            </div>
+            ${b.description ? `<div style="font-size:12px;color:var(--gray-500);margin-top:2px;">${escHtml(b.description)}</div>` : ''}
+            <div style="font-size:11px;color:var(--gray-400);margin-top:2px;">게시글 ${b.post_count || 0}개</div>
+          </div>
+          <div style="display:flex;gap:6px;flex-shrink:0;">
+            <button class="btn btn-ghost btn-sm" onclick="editBoard(${b.id},'${escHtml(b.name)}','${b.board_type}',${b.requires_approval},'${escHtml(b.description||'')}')">
+              <i class="fas fa-edit"></i> 수정
+            </button>
+            <button class="btn btn-ghost btn-sm" onclick="deleteBoardConfirm(${b.id},'${escHtml(b.name)}')" style="color:var(--danger);">
+              <i class="fas fa-trash"></i>
+            </button>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    function showBoardModal(mode = 'add') {
+      document.getElementById('boardModalTitle').innerHTML = mode === 'add'
+        ? '<i class="fas fa-plus"></i> 게시판 추가'
+        : '<i class="fas fa-edit"></i> 게시판 수정';
+      document.getElementById('boardModalOverlay').classList.add('active');
+      if (mode === 'add') {
+        document.getElementById('editBoardId').value = '';
+        document.getElementById('boardName').value = '';
+        document.getElementById('boardDesc').value = '';
+        selectBoardType('general');
+        document.getElementById('boardRequiresApproval').checked = true;
+      }
+      setTimeout(() => document.getElementById('boardName').focus(), 100);
+    }
+
+    function hideBoardModal(e) {
+      if (e && e.target !== document.getElementById('boardModalOverlay')) return;
+      document.getElementById('boardModalOverlay').classList.remove('active');
+    }
+
+    function selectBoardType(type) {
+      document.getElementById('boardType').value = type;
+      document.getElementById('typeGeneral').classList.toggle('selected', type === 'general');
+      document.getElementById('typeGallery').classList.toggle('selected', type === 'gallery');
+      document.getElementById('approvalGroup').style.display = type === 'gallery' ? '' : 'none';
+    }
+
+    function editBoard(id, name, type, requiresApproval, desc) {
+      document.getElementById('editBoardId').value = id;
+      document.getElementById('boardName').value = name;
+      document.getElementById('boardDesc').value = desc;
+      document.getElementById('boardRequiresApproval').checked = !!requiresApproval;
+      selectBoardType(type);
+      showBoardModal('edit');
+    }
+
+    async function saveBoard() {
+      const name = document.getElementById('boardName').value.trim();
+      if (!name) { showToast('게시판 이름을 입력하세요.'); return; }
+      const boardId = document.getElementById('editBoardId').value;
+      const payload = {
+        name,
+        board_type: document.getElementById('boardType').value,
+        requires_approval: document.getElementById('boardRequiresApproval').checked ? 1 : 0,
+        description: document.getElementById('boardDesc').value.trim()
+      };
+      const url = boardId
+        ? `/api/board/${classId}/boards/${boardId}`
+        : `/api/board/${classId}/boards`;
+      const method = boardId ? 'PUT' : 'POST';
+      const res = await fetch(url, { method, headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+      const data = await res.json();
+      if (data.success) {
+        document.getElementById('boardModalOverlay').classList.remove('active');
+        showToast(boardId ? '게시판이 수정되었습니다.' : '게시판이 추가되었습니다.');
+        loadBoards();
+      } else { showToast(data.message || '오류가 발생했습니다.'); }
+    }
+
+    async function deleteBoardConfirm(boardId, name) {
+      if (!confirm(`"${name}" 게시판을 삭제하시겠습니까?\n기존 게시글은 보존됩니다.`)) return;
+      const res = await fetch(`/api/board/${classId}/boards/${boardId}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (data.success) { showToast('게시판이 삭제되었습니다.'); loadBoards(); }
+      else showToast(data.message || '오류가 발생했습니다.');
+    }
+
+    // ==================== 데이터 로드 ====================
+    async function loadData() {
+      try {
+        const res = await fetch(`/api/class/${classId}`);
+        const data = await res.json();
+        if (!data.success) { showToast(data.message || '데이터 로드 실패'); location.href = '/class/index.html'; return; }
+
+        const c = data.class || data.classInfo;
+        classOwnerId = c.owner_id;
+        document.getElementById('editName').value = c.name;
+        document.getElementById('editSubject').value = c.subject || '';
+        document.getElementById('editDesc').value = c.description || '';
+        document.getElementById('editGrade').value = c.grade || '';
+        document.getElementById('codeDisplay').textContent = c.code;
+        if (c.is_public) document.getElementById('isPublicYes').checked = true;
+        else document.getElementById('isPublicNo').checked = true;
+
+        // 탭 설정 로드
+        if (c.enabled_tabs) {
+          try { currentEnabledTabs = JSON.parse(c.enabled_tabs); } catch(e) { currentEnabledTabs = null; }
+        } else {
+          currentEnabledTabs = null;
+        }
+        renderTabToggles();
+
+        renderMembers(data.members);
+      } catch(err) {
+        showToast('데이터를 불러올 수 없습니다.');
+      }
+    }
+
+    // ==================== 멤버 렌더링 ====================
+    function renderMembers(members) {
+      document.getElementById('memberCount').textContent = members.length;
+      const roleLabel = { owner: '개설자', member: '멤버' };
+      const userRoleLabel = { student: '학생', teacher: '교사', parent: '학부모', staff: '교직원', admin: '관리자' };
+      document.getElementById('memberBody').innerHTML = members.map(m => {
+        const isOriginalOwner = m.user_id === classOwnerId;
+        let actions = '';
+        if (m.role === 'member') {
+          actions = `
+            <button class="btn btn-ghost btn-sm" onclick="changeRole(${m.user_id},'owner','${escHtml(m.display_name)}')" title="개설자 권한 부여">
+              <i class="fas fa-crown" style="color:#D97706;"></i> 권한부여
+            </button>
+            <button class="btn btn-ghost btn-sm" onclick="removeMember(${m.user_id},'${escHtml(m.display_name)}')" style="color:var(--danger);">
+              <i class="fas fa-user-minus"></i> 내보내기
+            </button>`;
+        } else if (m.role === 'owner' && !isOriginalOwner) {
+          actions = `
+            <button class="btn btn-ghost btn-sm" onclick="changeRole(${m.user_id},'member','${escHtml(m.display_name)}')" title="권한 회수">
+              <i class="fas fa-user-minus" style="color:var(--gray-500);"></i> 권한회수
+            </button>`;
+        } else if (isOriginalOwner) {
+          actions = '<span style="font-size:11px;color:var(--warning);">★ 원래 생성자</span>';
+        }
+        return `
+        <tr>
+          <td>
+            <div style="display:flex;align-items:center;gap:8px;">
+              <div style="width:32px;height:32px;border-radius:50%;background:var(--primary-light);display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0;">👤</div>
+              <strong>${escHtml(m.display_name)}</strong>
+            </div>
+          </td>
+          <td>${escHtml(m.username)} <span class="user-role-tag">${userRoleLabel[m.user_role] || m.user_role}</span></td>
+          <td><span class="role-badge ${m.role}">${m.role === 'owner' ? '👑 ' : ''}${roleLabel[m.role]}</span></td>
+          <td style="color:var(--gray-500);">${m.joined_at ? m.joined_at.slice(0,10) : ''}</td>
+          <td style="text-align:right;">${actions}</td>
+        </tr>`;
+      }).join('');
+    }
+
+    // ==================== 저장 ====================
+    document.getElementById('editForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      try {
+        const res = await fetch(`/api/class/${classId}`, {
+          method: 'PUT',
+          headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({
+            name: document.getElementById('editName').value,
+            subject: document.getElementById('editSubject').value || null,
+            description: document.getElementById('editDesc').value || null,
+            grade: document.getElementById('editGrade').value ? parseInt(document.getElementById('editGrade').value) : null,
+            is_public: document.querySelector('input[name="isPublic"]:checked')?.value === '1' ? 1 : 0
+          })
+        });
+        const data = await res.json();
+        if (data.success) {
+          showToast('✅ 클래스 설정이 저장되었습니다');
+        } else {
+          showToast(data.message || '저장에 실패했습니다');
+        }
+      } catch(err) {
+        showToast('저장 중 오류가 발생했습니다');
+      }
+    });
+
+    // ==================== 멤버 관리 ====================
+    async function addMember() {
+      const username = document.getElementById('addUsername').value.trim();
+      if (!username) { showToast('사용자 아이디를 입력하세요'); return; }
+      try {
+        const res = await fetch(`/api/class/${classId}/members`, {
+          method: 'POST',
+          headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({ username })
+        });
+        const data = await res.json();
+        if (data.success) {
+          showToast('✅ 멤버가 추가되었습니다');
+          document.getElementById('addUsername').value = '';
+          loadData();
+        } else {
+          showToast(data.message || '멤버 추가에 실패했습니다');
+        }
+      } catch(err) {
+        showToast('멤버 추가 중 오류가 발생했습니다');
+      }
+    }
+
+    async function changeRole(userId, newRole, name) {
+      const msg = newRole === 'owner'
+        ? `${name}님에게 개설자 권한을 부여하시겠습니까?\n수업, 과제, 평가, 알림장 등록이 가능해집니다.`
+        : `${name}님의 개설자 권한을 회수하시겠습니까?`;
+      if (!confirm(msg)) return;
+      try {
+        const res = await fetch(`/api/class/${classId}/members/${userId}/role`, {
+          method: 'PUT',
+          headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({ role: newRole })
+        });
+        const data = await res.json();
+        if (data.success) {
+          showToast(newRole === 'owner' ? '👑 개설자 권한이 부여되었습니다' : '권한이 회수되었습니다');
+          loadData();
+        } else {
+          showToast(data.message || '역할 변경에 실패했습니다');
+        }
+      } catch(err) {
+        showToast('역할 변경 중 오류가 발생했습니다');
+      }
+    }
+
+    async function removeMember(userId, name) {
+      if (!confirm(`${name}님을 클래스에서 제거하시겠습니까?`)) return;
+      try {
+        const res = await fetch(`/api/class/${classId}/members/${userId}`, { method: 'DELETE' });
+        const data = await res.json();
+        if (data.success) {
+          showToast('멤버가 제거되었습니다');
+          loadData();
+        } else {
+          showToast(data.message || '멤버 제거에 실패했습니다');
+        }
+      } catch(err) {
+        showToast('멤버 제거 중 오류가 발생했습니다');
+      }
+    }
+
+    async function deleteClass() {
+      if (!confirm('정말로 이 클래스를 삭제하시겠습니까?\n모든 수업, 과제, 평가 데이터가 영구 삭제됩니다.')) return;
+      if (!confirm('⚠️ 마지막 확인: 되돌릴 수 없습니다. 계속하시겠습니까?')) return;
+      try {
+        const res = await fetch(`/api/class/${classId}`, { method: 'DELETE' });
+        const data = await res.json();
+        if (data.success) {
+          showToast('클래스가 삭제되었습니다');
+          setTimeout(() => location.href = '/class/index.html', 1000);
+        } else {
+          showToast(data.message || '삭제에 실패했습니다');
+        }
+      } catch(err) {
+        showToast('삭제 중 오류가 발생했습니다');
+      }
+    }
+
+    // ==================== 유틸리티 ====================
+    function copyCode() {
+      const code = document.getElementById('codeDisplay').textContent;
+      navigator.clipboard.writeText(code).then(() => showToast('📋 초대코드가 복사되었습니다'));
+    }
+
+    function showQR() {
+      showToast('QR 코드 기능은 준비 중입니다');
+    }
+
+    function showToast(msg) {
+      const toast = document.getElementById('toast');
+      toast.textContent = msg;
+      toast.classList.add('show');
+      setTimeout(() => toast.classList.remove('show'), 3000);
+    }
+
+    // ==================== 탭 설정 ====================
+    const TAB_CONFIG = [
+      { id: 'home', name: '홈', icon: 'fas fa-home', color: '#4A7CFF', desc: '클래스 대시보드 (항상 활성)', fixed: true },
+      { id: 'lesson', name: '수업', icon: 'fas fa-book-open', color: '#10B981', desc: '수업 목록 및 콘텐츠 학습' },
+      { id: 'homework', name: '과제', icon: 'fas fa-tasks', color: '#F59E0B', desc: '과제 출제 및 제출 관리' },
+      { id: 'exam', name: '평가', icon: 'fas fa-clipboard-check', color: '#EF4444', desc: 'CBT 시험 및 평가' },
+      { id: 'notice', name: '알림장', icon: 'fas fa-bullhorn', color: '#8B5CF6', desc: '공지사항 및 알림' },
+      { id: 'attendance', name: '출석부', icon: 'fas fa-calendar-check', color: '#06B6D4', desc: '출석 체크 및 통계' },
+      { id: 'board', name: '게시판', icon: 'fas fa-comments', color: '#EC4899', desc: '자유 게시판 및 토론' },
+      { id: 'message', name: '소통쪽지', icon: 'fas fa-envelope', color: '#14B8A6', desc: '클래스 내 쪽지' },
+      { id: 'survey', name: '설문', icon: 'fas fa-poll', color: '#6366F1', desc: '설문조사 및 투표' },
+    ];
+
+    let currentEnabledTabs = null; // null = 모두 활성
+
+    function renderTabToggles() {
+      const container = document.getElementById('tabToggles');
+      const allEnabled = !currentEnabledTabs; // null이면 전부 활성
+      container.innerHTML = TAB_CONFIG.map(tab => {
+        const isEnabled = tab.fixed || allEnabled || (currentEnabledTabs && currentEnabledTabs.includes(tab.id));
+        return `
+        <div class="tab-toggle-item ${tab.fixed ? 'disabled' : ''}">
+          <div class="tab-info">
+            <div class="tab-icon" style="background:${tab.color}15;color:${tab.color};">
+              <i class="${tab.icon}"></i>
+            </div>
+            <div>
+              <div class="tab-name">${tab.name}</div>
+              <div class="tab-desc">${tab.desc}</div>
+            </div>
+          </div>
+          <label class="toggle-switch">
+            <input type="checkbox" data-tab="${tab.id}" ${isEnabled ? 'checked' : ''} ${tab.fixed ? 'disabled' : ''} onchange="onTabToggle()">
+            <span class="toggle-slider"></span>
+          </label>
+        </div>`;
+      }).join('');
+    }
+
+    function onTabToggle() {
+      // 체크된 탭 목록 수집 (home 제외, 항상 포함이므로)
+      const checked = [];
+      document.querySelectorAll('#tabToggles input[type="checkbox"]').forEach(cb => {
+        if (cb.checked) checked.push(cb.dataset.tab);
+      });
+      currentEnabledTabs = checked;
+    }
+
+    async function saveTabSettings() {
+      try {
+        const res = await fetch(`/api/class/${classId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ enabled_tabs: JSON.stringify(currentEnabledTabs) })
+        });
+        const data = await res.json();
+        if (data.success) {
+          showToast('✅ 탭 설정이 저장되었습니다');
+        } else {
+          showToast(data.message || '탭 설정 저장에 실패했습니다');
+        }
+      } catch (err) {
+        showToast('탭 설정 저장 중 오류가 발생했습니다');
+      }
+    }
+
+    // ==================== 초기화 ====================
+    window.addEventListener('dacheim:user-loaded', () => {
+      document.getElementById('mainContent').style.display = 'block';
+      if (classId) {
+        loadData().then(() => {
+          // URL tab 파라미터로 탭 자동 전환
+          const tabParam = params.get('tab');
+          if (tabParam) {
+            const tabBtn = document.querySelector(`.tab-btn[onclick*="'${tabParam}'"]`);
+            if (tabBtn) switchTab(tabBtn, tabParam);
+          }
+        });
+      }
+    });
+  </script>
+</body>
+</html>

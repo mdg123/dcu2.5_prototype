@@ -1,0 +1,1673 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>다채움 - 마음채움 교사 모니터링</title>
+  <link rel="stylesheet" href="/css/common-nav.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    :root {
+      --primary: #4A7CFF; --primary-light: #E8F0FF; --primary-dark: #3A5FCC;
+      --secondary: #03dac6; --error: #b00020;
+      --surface: #ffffff; --bg: #f5f5f5;
+      --on-surface: rgba(0,0,0,0.87); --on-surface-md: rgba(0,0,0,0.6); --on-surface-dis: rgba(0,0,0,0.38);
+      --success: #4caf50; --warning: #ff9800; --danger: #f44336;
+      --shadow-sm: 0 1px 3px rgba(0,0,0,0.12); --shadow-md: 0 4px 8px rgba(0,0,0,0.15);
+      --radius: 12px; --radius-lg: 16px;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Pretendard','Noto Sans KR',system-ui,sans-serif; background: var(--bg); color: var(--on-surface); min-height: 100vh; }
+
+    .page-wrap { max-width: 1400px; margin: 0 auto; padding: 24px 20px 60px; }
+    .back-link { display: inline-flex; align-items: center; gap: 6px; color: var(--on-surface-md); font-size: 13px; text-decoration: none; margin-bottom: 16px; font-weight: 500; }
+    .back-link:hover { color: var(--primary); }
+
+    /* 헤더 */
+    .page-header { background: linear-gradient(135deg, #4A7CFF 0%, #3A5FCC 100%); color: #fff; border-radius: var(--radius-lg); padding: 28px 32px; margin-bottom: 24px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px; }
+    .page-header h1 { font-size: 22px; font-weight: 800; display: flex; align-items: center; gap: 12px; }
+    .page-header .subtitle { font-size: 14px; opacity: 0.8; margin-top: 4px; }
+    .header-stats { display: flex; gap: 24px; }
+    .header-stat { text-align: center; }
+    .header-stat-value { font-size: 28px; font-weight: 800; }
+    .header-stat-label { font-size: 12px; opacity: 0.7; }
+
+    /* 탭 */
+    .tab-nav { display: flex; background: var(--surface); border-radius: var(--radius); box-shadow: var(--shadow-sm); margin-bottom: 24px; overflow-x: auto; }
+    .tab-btn { flex: 1; padding: 14px 12px; border: none; background: none; font-size: 13px; font-weight: 600; color: var(--on-surface-md); cursor: pointer; transition: all .2s; font-family: inherit; display: flex; align-items: center; justify-content: center; gap: 6px; border-bottom: 3px solid transparent; white-space: nowrap; }
+    .tab-btn:hover { background: rgba(74,124,255,0.06); }
+    .tab-btn.active { color: var(--primary); border-bottom-color: var(--primary); background: var(--primary-light); }
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+
+    /* 카드 */
+    .card { background: var(--surface); border-radius: var(--radius); box-shadow: var(--shadow-sm); margin-bottom: 20px; overflow: hidden; transition: box-shadow .3s; }
+    .card:hover { box-shadow: var(--shadow-md); }
+    .card-full { grid-column: 1 / -1; }
+    .card-header { padding: 20px 24px 16px; border-bottom: 1px solid rgba(0,0,0,0.08); }
+    .card-title { font-size: 16px; font-weight: 700; display: flex; align-items: center; gap: 10px; }
+    .card-subtitle { font-size: 13px; color: var(--on-surface-md); margin-top: 4px; }
+    .card-body { padding: 24px; }
+
+    /* 그리드 */
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+    @media (max-width: 900px) { .grid-2 { grid-template-columns: 1fr; } }
+
+    /* 감정 분포 progress bars */
+    .dist-item { margin-bottom: 14px; }
+    .dist-label { display: flex; justify-content: space-between; align-items: center; font-size: 14px; margin-bottom: 6px; }
+    .dist-label span:first-child { font-weight: 500; }
+    .dist-label span:last-child { font-weight: 600; color: var(--on-surface-md); }
+    .dist-bar { height: 10px; background: rgba(0,0,0,0.06); border-radius: 5px; overflow: hidden; }
+    .dist-fill { height: 100%; border-radius: 5px; transition: width .5s ease; }
+
+    /* Feelings Stairs */
+    .stairs-container { background: linear-gradient(180deg, #f0f4ff 0%, #e8efff 100%); border-radius: var(--radius-lg); padding: 24px 16px; }
+    .emotion-level { display: flex; align-items: center; gap: 16px; min-height: 80px; padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.5); }
+    .emotion-level:last-child { border-bottom: none; }
+    .level-label { display: flex; flex-direction: column; align-items: center; min-width: 90px; padding: 10px; background: #fff; border-radius: var(--radius); box-shadow: 0 2px 6px rgba(0,0,0,0.08); }
+    .level-emoji { font-size: 28px; margin-bottom: 4px; }
+    .level-text { font-size: 12px; font-weight: 600; text-align: center; }
+    .level-students { flex: 1; display: flex; flex-wrap: wrap; gap: 10px; padding: 8px 12px; min-height: 60px; border-radius: var(--radius); align-content: center; }
+    .level-5 .level-students { background: linear-gradient(135deg, #c8e6c9, #a5d6a7); border: 2px solid #66bb6a; }
+    .level-4 .level-students { background: linear-gradient(135deg, #bbdefb, #90caf9); border: 2px solid #42a5f5; }
+    .level-3 .level-students { background: linear-gradient(135deg, #fff9c4, #fff59d); border: 2px solid #ffee58; }
+    .level-2 .level-students { background: linear-gradient(135deg, #ffe0b2, #ffcc80); border: 2px solid #ffa726; }
+    .level-1 .level-students { background: linear-gradient(135deg, #ffcdd2, #ef9a9a); border: 2px solid #ef5350; }
+
+    /* Monster character */
+    .monster { display: inline-flex; flex-direction: column; align-items: center; padding: 6px; background: #fff; border-radius: var(--radius); box-shadow: 0 2px 8px rgba(0,0,0,0.1); cursor: pointer; transition: all .2s; border: 2px solid transparent; min-width: 64px; }
+    .monster:hover { transform: translateY(-4px); box-shadow: 0 6px 16px rgba(0,0,0,0.15); border-color: var(--primary); }
+    .monster-avatar { width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 20px; margin-bottom: 4px; position: relative; }
+    .monster-avatar.boy { background: linear-gradient(135deg, #4fc3f7, #29b6f6); }
+    .monster-avatar.girl { background: linear-gradient(135deg, #f48fb1, #ec407a); }
+    .monster-badge { position: absolute; top: -4px; right: -4px; font-size: 14px; background: #fff; border-radius: 50%; width: 20px; height: 20px; display: flex; align-items: center; justify-content: center; box-shadow: 0 1px 4px rgba(0,0,0,0.15); }
+    .monster-name { font-size: 11px; font-weight: 600; text-align: center; max-width: 56px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+    /* Alert banner */
+    .alert-banner { padding: 16px 20px; border-radius: var(--radius); display: flex; align-items: flex-start; gap: 12px; margin-bottom: 16px; }
+    .alert-warning { background: #fff3e0; border-left: 4px solid var(--warning); }
+    .alert-danger { background: #fce4ec; border-left: 4px solid var(--danger); }
+    .alert-success { background: #e8f5e9; border-left: 4px solid var(--success); }
+    .alert-title { font-size: 14px; font-weight: 700; margin-bottom: 4px; }
+    .alert-text { font-size: 13px; color: var(--on-surface-md); line-height: 1.6; }
+
+    /* Stats grid */
+    .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 16px; margin: 16px 0; }
+    .stat-card { padding: 20px; border-radius: var(--radius); text-align: center; }
+    .stat-icon { font-size: 28px; margin-bottom: 8px; }
+    .stat-value { font-size: 24px; font-weight: 800; margin-bottom: 4px; }
+    .stat-label { font-size: 12px; color: var(--on-surface-md); }
+
+    /* Student timeline table */
+    .timeline-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .timeline-table th { background: var(--bg); padding: 10px 12px; text-align: left; font-weight: 600; border-bottom: 2px solid #e0e0e0; position: sticky; top: 0; }
+    .timeline-table td { padding: 10px 12px; border-bottom: 1px solid rgba(0,0,0,0.06); }
+    .timeline-table tr:hover td { background: rgba(74,124,255,0.06); }
+
+    /* Question builder */
+    .category-chips { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0; }
+    .cat-chip { padding: 8px 16px; border: 2px solid #e0e0e0; border-radius: 20px; background: #fff; font-size: 13px; font-weight: 500; cursor: pointer; transition: all .2s; font-family: inherit; display: inline-flex; align-items: center; gap: 6px; }
+    .cat-chip:hover { border-color: var(--primary); background: var(--primary-light); }
+    .cat-chip.selected { background: var(--primary); color: #fff; border-color: var(--primary); }
+    .template-chip { padding: 6px 14px; background: #e0e0e0; border-radius: 16px; font-size: 13px; cursor: pointer; transition: all .2s; display: inline-block; margin: 4px; }
+    .template-chip:hover { background: var(--primary); color: #fff; }
+
+    .text-input { width: 100%; padding: 14px 16px; border: 1px solid rgba(0,0,0,0.23); border-radius: 4px; font-family: inherit; font-size: 14px; transition: border-color .2s; resize: vertical; }
+    .text-input:focus { outline: none; border-color: var(--primary); border-width: 2px; }
+
+    .btn { padding: 10px 24px; border: none; border-radius: 4px; font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit; transition: all .2s; display: inline-flex; align-items: center; gap: 8px; text-transform: uppercase; letter-spacing: 0.5px; }
+    .btn-primary { background: var(--primary); color: #fff; box-shadow: 0 2px 4px rgba(74,124,255,0.3); }
+    .btn-primary:hover { background: var(--primary-dark); }
+    .btn-text { background: none; color: var(--primary); }
+    .btn-text:hover { background: rgba(74,124,255,0.06); }
+    .btn-outlined { background: none; color: var(--primary); border: 1px solid var(--primary); }
+
+    /* Student modal */
+    .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: none; align-items: center; justify-content: center; z-index: 2000; backdrop-filter: blur(4px); }
+    .modal-overlay.visible { display: flex; }
+    .modal { background: #fff; border-radius: var(--radius-lg); max-width: 560px; width: 90%; max-height: 80vh; overflow-y: auto; box-shadow: 0 20px 60px rgba(0,0,0,0.3); animation: modalIn .3s ease; }
+    @keyframes modalIn { from { opacity:0; transform:translateY(-40px) scale(.95); } to { opacity:1; transform:translateY(0) scale(1); } }
+    .modal-header { padding: 20px 24px; border-bottom: 1px solid rgba(0,0,0,0.08); display: flex; justify-content: space-between; align-items: center; }
+    .modal-header h3 { font-size: 18px; font-weight: 600; }
+    .modal-close { background: none; border: none; cursor: pointer; padding: 8px; border-radius: 50%; font-size: 18px; color: var(--on-surface-md); }
+    .modal-close:hover { background: rgba(0,0,0,0.04); }
+    .modal-body { padding: 24px; }
+    .modal-footer { padding: 16px 24px; border-top: 1px solid rgba(0,0,0,0.08); display: flex; gap: 12px; justify-content: flex-end; }
+    .info-row { display: flex; align-items: center; gap: 16px; margin-bottom: 16px; padding: 14px; background: var(--bg); border-radius: 8px; }
+    .info-row i { color: var(--primary); font-size: 20px; width: 24px; text-align: center; }
+    .info-label { font-size: 12px; color: var(--on-surface-md); }
+    .info-value { font-size: 15px; font-weight: 600; }
+
+    /* Question list */
+    .q-item { background: var(--bg); padding: 18px; border-radius: var(--radius); border: 1px solid rgba(0,0,0,0.06); margin-bottom: 14px; }
+    .q-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+    .q-badge { padding: 3px 12px; border-radius: 12px; font-size: 11px; font-weight: 600; }
+    .q-active { background: #e8f5e9; color: #2e7d32; }
+    .q-done { background: #e3f2fd; color: #1565c0; }
+    .q-text { font-size: 15px; font-weight: 600; margin-bottom: 10px; }
+    .q-stats { display: flex; gap: 16px; font-size: 13px; color: var(--on-surface-md); margin-bottom: 10px; }
+    .q-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+    .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: #323232; color: #fff; padding: 12px 24px; border-radius: 4px; font-size: 14px; z-index: 9999; box-shadow: var(--shadow-md); }
+    .empty-state { text-align: center; padding: 40px; color: var(--on-surface-md); }
+    .empty-state i { font-size: 40px; margin-bottom: 12px; display: block; opacity: 0.4; }
+
+    /* 날짜 필터 */
+    .date-filter { background: var(--surface); border-radius: var(--radius); box-shadow: var(--shadow-sm); padding: 16px 20px; margin-bottom: 20px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+    .date-filter label { font-size: 13px; font-weight: 600; color: var(--on-surface-md); white-space: nowrap; }
+    .date-filter input[type="date"] { padding: 8px 12px; border: 1px solid #e0e0e0; border-radius: 6px; font-family: inherit; font-size: 13px; }
+    .date-filter input[type="date"]:focus { outline: none; border-color: var(--primary); }
+    .date-filter .filter-btn { padding: 8px 20px; border: none; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit; transition: all .2s; }
+    .date-filter .filter-btn.primary { background: var(--primary); color: #fff; }
+    .date-filter .filter-btn.primary:hover { background: var(--primary-dark); }
+    .date-filter .filter-btn.secondary { background: #e0e0e0; color: var(--on-surface); }
+    .date-filter .filter-btn.secondary:hover { background: #d0d0d0; }
+    .date-filter .quick-btns { display: flex; gap: 6px; margin-left: auto; }
+    .date-filter .quick-btn { padding: 6px 12px; border: 1px solid #e0e0e0; border-radius: 16px; background: #fff; font-size: 12px; cursor: pointer; transition: all .2s; font-family: inherit; }
+    .date-filter .quick-btn:hover, .date-filter .quick-btn.active { background: var(--primary); color: #fff; border-color: var(--primary); }
+
+    /* ===== 학생 선택 모달 (추이 분석) ===== */
+    .student-modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: flex; align-items: center; justify-content: center; z-index: 1000; }
+    .student-modal-overlay[hidden] { display: none; }
+    .modal-panel { width: min(860px, 92vw); max-height: 86vh; background: #fff; border-radius: 12px; display: flex; flex-direction: column; box-shadow: 0 20px 50px rgba(0,0,0,.25); }
+    .modal-panel header { padding: 14px 18px; border-bottom: 1px solid #e5e7eb; display: flex; justify-content: space-between; align-items: center; }
+    .modal-panel header h3 { font-size: 16px; font-weight: 700; }
+    .modal-panel .modal-close-x { background: none; border: none; cursor: pointer; font-size: 22px; line-height: 1; color: #6b7280; padding: 4px 8px; border-radius: 6px; }
+    .modal-panel .modal-close-x:hover { background: #f3f4f6; color: #111827; }
+    .modal-toolbar { padding: 10px 18px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; border-bottom: 1px solid #f1f5f9; }
+    .modal-toolbar input[type="search"], .modal-toolbar input[type="text"] { flex: 1; min-width: 200px; height: 32px; padding: 0 10px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 13px; font-family: inherit; }
+    .modal-toolbar input[type="search"]:focus, .modal-toolbar input[type="text"]:focus { outline: none; border-color: var(--primary); }
+    .modal-toolbar button { height: 30px; padding: 0 12px; border: 1px solid #d1d5db; background: #fff; color: #374151; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer; font-family: inherit; }
+    .modal-toolbar button:hover { background: #f3f4f6; border-color: #9ca3af; }
+    .modal-table-wrap { overflow-y: auto; max-height: 60vh; flex: 1; padding: 0 18px; }
+    #student-table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 13px; }
+    #student-table thead th { position: sticky; top: 0; background: #f8fafc; z-index: 2; padding: 10px 8px; text-align: left; border-bottom: 1px solid #e5e7eb; font-weight: 600; }
+    #student-table th[data-sort] { cursor: pointer; user-select: none; }
+    #student-table th[data-sort]::after { content: ''; margin-left: 4px; opacity: .4; }
+    #student-table th[aria-sort="ascending"]::after { content: '▲'; opacity: 1; }
+    #student-table th[aria-sort="descending"]::after { content: '▼'; opacity: 1; }
+    #student-table tbody td { padding: 8px; border-bottom: 1px solid #f1f5f9; }
+    #student-table tbody tr:hover { background: #f8fafc; }
+    #student-table tbody tr.row-disabled td { opacity: .5; }
+    #student-table input[type="checkbox"][aria-disabled="true"] { cursor: not-allowed; }
+    .modal-panel footer { padding: 12px 18px; border-top: 1px solid #e5e7eb; display: flex; justify-content: space-between; align-items: center; }
+    .modal-panel footer .footer-count { font-size: 13px; color: #374151; font-weight: 600; }
+    .modal-panel footer .footer-actions { display: flex; gap: 8px; }
+    .modal-panel footer button { height: 34px; padding: 0 16px; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit; border: 1px solid transparent; }
+    .modal-panel footer .btn-cancel { background: #fff; border-color: #d1d5db; color: #374151; }
+    .modal-panel footer .btn-cancel:hover { background: #f3f4f6; }
+    .modal-panel footer .btn-apply { background: var(--primary); color: #fff; }
+    .modal-panel footer .btn-apply:hover { background: var(--primary-dark); }
+
+    /* ===== 학생별 감정 현황 — 테이블 내부 스크롤 ===== */
+    .table-scroll-wrap { max-height: 480px; overflow-y: auto; overflow-x: auto; border: 1px solid #e5e7eb; border-radius: 8px; }
+    .table-scroll-wrap table { width: 100%; border-collapse: separate; border-spacing: 0; }
+    .table-scroll-wrap thead th { position: sticky; top: 0; background: #f8fafc; z-index: 1; box-shadow: inset 0 -1px 0 #e5e7eb; }
+
+    /* Summary bar */
+    #student-selector-bar { margin-bottom: 12px; }
+    #student-selector-bar #selected-summary { font-size: 13px; color: #374151; }
+    #student-selector-bar button { height: 32px; padding: 0 14px; border-radius: 16px; font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit; border: 1px solid #d1d5db; background: #fff; color: #374151; }
+    #student-selector-bar #btn-open-student-modal { background: var(--primary); color: #fff; border-color: var(--primary); }
+    #student-selector-bar #btn-open-student-modal:hover { background: var(--primary-dark); }
+    #student-selector-bar button:hover:not(#btn-open-student-modal) { background: #f3f4f6; }
+  </style>
+</head>
+<body>
+  <script src="/js/common-nav.js"></script>
+
+  <div class="page-wrap">
+    <a href="/growth/class-dashboard.html" class="back-link" id="backLink"><i class="fas fa-arrow-left"></i> 학습분석 대시보드로 돌아가기</a>
+
+    <div class="page-header">
+      <div>
+        <h1>💛 마음채움 — 교사 모니터링</h1>
+        <div class="subtitle" id="headerSubtitle">학급 감정 현황을 한눈에 확인하세요</div>
+      </div>
+      <div class="header-stats">
+        <div class="header-stat"><div class="header-stat-value" id="hChecked">-</div><div class="header-stat-label">감정 기록</div></div>
+        <div class="header-stat"><div class="header-stat-value" id="hTotal">-</div><div class="header-stat-label">전체 학생</div></div>
+        <div class="header-stat"><div class="header-stat-value" id="hRate">-</div><div class="header-stat-label">참여율</div></div>
+      </div>
+    </div>
+
+    <!-- 날짜 필터 -->
+    <div class="date-filter">
+      <label><i class="fas fa-calendar-alt"></i> 기간</label>
+      <input type="date" id="filterStart" />
+      <span style="color:var(--on-surface-md);">~</span>
+      <input type="date" id="filterEnd" />
+      <button class="filter-btn primary" onclick="applyDateFilter()"><i class="fas fa-search"></i> 검색</button>
+      <button class="filter-btn secondary" onclick="resetDateFilter()"><i class="fas fa-undo"></i> 초기화</button>
+      <div class="quick-btns">
+        <button class="quick-btn active" onclick="quickFilter('week', this)">최근 1주</button>
+        <button class="quick-btn" onclick="quickFilter('month', this)">최근 1개월</button>
+        <button class="quick-btn" onclick="quickFilter('3month', this)">최근 3개월</button>
+      </div>
+    </div>
+
+    <div class="tab-nav">
+      <button class="tab-btn active" onclick="switchTab('overview')"><i class="fas fa-dashboard"></i> 감정 현황</button>
+      <button class="tab-btn" onclick="switchTab('timeline')"><i class="fas fa-chart-line"></i> 추이 분석</button>
+      <button class="tab-btn" onclick="switchTab('sel')"><i class="fas fa-comments"></i> SEL 활동</button>
+    </div>
+
+    <!-- ===== 탭 1: 감정 현황 + 감정 계단 통합 ===== -->
+    <div id="tab-overview" class="tab-content active">
+      <div id="overviewContent"><div class="empty-state"><i class="fas fa-spinner fa-spin"></i></div></div>
+      <div id="stairsContent"></div>
+    </div>
+
+    <!-- ===== 탭 3: 추이 분석 ===== -->
+    <div id="tab-timeline" class="tab-content">
+      <div id="timelineContent"><div class="empty-state"><i class="fas fa-spinner fa-spin"></i></div></div>
+    </div>
+
+    <!-- ===== 탭 4: SEL 활동 ===== -->
+    <div id="tab-sel" class="tab-content">
+      <div id="selContent"></div>
+    </div>
+  </div>
+
+  <!-- 학생 선택 모달 (추이 분석) -->
+  <div class="student-modal-overlay" id="studentSelectModal" role="dialog" aria-modal="true" aria-labelledby="studentSelectModalTitle" hidden>
+    <div class="modal-panel" role="document">
+      <header>
+        <h3 id="studentSelectModalTitle">학생 선택 (최대 100명)</h3>
+        <button type="button" class="modal-close-x" id="studentModalCloseBtn" aria-label="닫기">&times;</button>
+      </header>
+      <div class="modal-toolbar">
+        <input type="search" id="studentModalSearch" placeholder="🔍 이름으로 검색" aria-label="학생 이름 검색" />
+        <button type="button" id="modalSelAllBtn">전체선택</button>
+        <button type="button" id="modalSelNoneBtn">전체해제</button>
+        <button type="button" id="modalSelTop10Btn">상위10(평균낮은순)</button>
+        <button type="button" id="modalSelInvertBtn">선택 반전</button>
+      </div>
+      <div class="modal-table-wrap">
+        <table id="student-table">
+          <thead>
+            <tr>
+              <th style="width:36px;"><input type="checkbox" id="studentTableHeadCheckbox" aria-label="전체선택 체크박스" /></th>
+              <th data-sort="name" aria-sort="none" tabindex="0">이름</th>
+              <th data-sort="avg" aria-sort="none" tabindex="0">최근 감정 평균</th>
+              <th data-sort="days" aria-sort="none" tabindex="0">기록일수</th>
+              <th>최근 감정</th>
+              <th data-sort="last" aria-sort="none" tabindex="0">최근 체크인</th>
+            </tr>
+          </thead>
+          <tbody id="studentTableBody"></tbody>
+        </table>
+      </div>
+      <footer>
+        <span class="footer-count" id="modalSelCount">0명 선택됨</span>
+        <div class="footer-actions">
+          <button type="button" class="btn-cancel" id="modalCancelBtn">취소</button>
+          <button type="button" class="btn-apply" id="modalApplyBtn">적용</button>
+        </div>
+      </footer>
+    </div>
+  </div>
+
+  <!-- 학생 상세 모달 -->
+  <div class="modal-overlay" id="studentModal" onclick="if(event.target===this)closeModal()">
+    <div class="modal">
+      <div class="modal-header">
+        <h3 id="modalTitle">학생 상세</h3>
+        <button class="modal-close" onclick="closeModal()">&times;</button>
+      </div>
+      <div class="modal-body" id="modalBody"></div>
+      <div class="modal-footer">
+        <button class="btn btn-text" onclick="closeModal()">닫기</button>
+        <button class="btn btn-primary" onclick="showToast('메시지 기능은 준비 중입니다.')"><i class="fas fa-comment"></i> 메시지</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const API_EMOJI = { happy:'🤩', excited:'🤩', great:'🤩', good:'😊', calm:'😐', tired:'😕', sad:'😢', angry:'😡', anxious:'😰', frustrated:'😤' };
+    const API_LABEL = { happy:'행복', excited:'신남', great:'최고', good:'좋음', calm:'평온', tired:'피곤', sad:'슬픔', angry:'화남', anxious:'불안', frustrated:'답답' };
+    const EMOTION_COLORS = { happy:'#FFD54F', excited:'#FFD54F', great:'#FFD54F', good:'#4FC3F7', calm:'#FFF176', tired:'#FFB74D', sad:'#EF9A9A', angry:'#EF5350', anxious:'#CE93D8', frustrated:'#FFAB91' };
+    const SCORE_MAP = { happy:9, excited:9, great:8, good:7, calm:5, tired:3, sad:2, angry:2, anxious:3, frustrated:2 };
+    const MONSTER_EMOJI_BOY = ['👦','🧒','🤴','🦸‍♂️','🧑‍🚀','🧙‍♂️'];
+    const MONSTER_EMOJI_GIRL = ['👧','👸','🧚‍♀️','🦸‍♀️','👩‍🚀','🧜‍♀️'];
+
+    const params = new URLSearchParams(location.search);
+    const classId = params.get('id') || params.get('classId') || 1;
+    let monitorData = null;
+
+    // 로컬 기준 YYYY-MM-DD 포맷터 (toISOString은 UTC 변환으로 KST에서 하루 밀림 발생)
+    const toLocalYMD = (d) => {
+      const pad = n => String(n).padStart(2, '0');
+      return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+    };
+
+    // 날짜 초기값 세팅 (최근 1주, 오늘 포함 7일)
+    const todayStr = toLocalYMD(new Date());
+    const weekStart = new Date();
+    weekStart.setDate(weekStart.getDate() - 6);
+    const weekStartStr = toLocalYMD(weekStart);
+    document.getElementById('filterStart').value = weekStartStr;
+    document.getElementById('filterEnd').value = todayStr;
+
+    // Back link
+    document.getElementById('backLink').href = '/growth/class-dashboard.html';
+
+    function applyDateFilter() {
+      const s = document.getElementById('filterStart').value;
+      const e = document.getElementById('filterEnd').value;
+      if (!s || !e) { showToast('시작일과 종료일을 모두 선택해주세요.'); return; }
+      if (s > e) { showToast('시작일이 종료일보다 뒤입니다.'); return; }
+      document.querySelectorAll('.quick-btn').forEach(b => b.classList.remove('active'));
+      loadData(s, e);
+    }
+
+    function resetDateFilter() {
+      document.getElementById('filterStart').value = weekStartStr;
+      document.getElementById('filterEnd').value = todayStr;
+      document.querySelectorAll('.quick-btn').forEach(b => b.classList.remove('active'));
+      // 최근 1주 버튼을 활성화 (첫 번째 .quick-btn)
+      const firstBtn = document.querySelector('.quick-btn');
+      if (firstBtn) firstBtn.classList.add('active');
+      loadData(weekStartStr, todayStr);
+    }
+
+    function quickFilter(range, btn) {
+      document.querySelectorAll('.quick-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      const end = new Date();
+      const start = new Date();
+      if (range === 'week') { start.setDate(start.getDate() - 6); }
+      else if (range === 'month') { start.setDate(start.getDate() - 29); }
+      else if (range === '3month') { start.setDate(start.getDate() - 89); }
+      const sStr = toLocalYMD(start);
+      const eStr = toLocalYMD(end);
+      document.getElementById('filterStart').value = sStr;
+      document.getElementById('filterEnd').value = eStr;
+      loadData(sStr, eStr);
+    }
+
+    function switchTab(tabId) {
+      document.querySelectorAll('.tab-btn').forEach(b => {
+        const map = { overview:'현황', timeline:'추이', sel:'SEL' };
+        b.classList.toggle('active', b.textContent.includes(map[tabId] || ''));
+      });
+      document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+      document.getElementById('tab-' + tabId).classList.add('active');
+      if (tabId === 'sel') renderSEL();
+    }
+
+    async function loadData(startDate, endDate) {
+      try {
+        let url = '/api/growth/emotion-monitor/' + classId;
+        if (startDate && endDate) {
+          url += `?startDate=${startDate}&endDate=${endDate}`;
+        }
+        const res = await fetch(url);
+        const data = await res.json();
+        if (!data.success) throw new Error(data.message);
+        monitorData = data;
+
+        document.getElementById('hChecked').textContent = data.checkedCount;
+        document.getElementById('hTotal').textContent = data.totalStudents;
+        document.getElementById('hRate').textContent = data.totalStudents > 0 ? Math.round(data.checkedCount / data.totalStudents * 100) + '%' : '0%';
+        document.getElementById('headerSubtitle').textContent = data.today + ' 기준 · 총 ' + data.totalStudents + '명';
+
+        renderOverview(data);
+        renderStairs(data);
+        renderTimeline(data);
+      } catch (err) {
+        console.error('Monitor load error:', err);
+        document.getElementById('overviewContent').innerHTML = '<div class="empty-state"><i class="fas fa-exclamation-triangle"></i>데이터를 불러올 수 없습니다.</div>';
+      }
+    }
+
+    // ===== 감정 현황 =====
+    function renderOverview(data) {
+      let html = '';
+
+      // 주의 학생 알림
+      if (data.alertStudents.length > 0) {
+        data.alertStudents.forEach(a => {
+          const cls = a.type === 'consecutive_negative' ? 'alert-danger' : 'alert-warning';
+          const icon = a.type === 'consecutive_negative' ? 'fa-exclamation-circle' : 'fa-exclamation-triangle';
+          const msg = a.type === 'consecutive_negative'
+            ? `${a.name} 학생 — ${a.days}일 연속 부정 감정 (상담 권장)`
+            : `${a.name} 학생 — 급격한 감정 하락 감지 (${a.drop}점 하락)`;
+          html += `<div class="alert-banner ${cls}"><i class="fas ${icon}" style="font-size:20px;margin-top:2px;"></i><div><div class="alert-title">감정 변화 주의</div><div class="alert-text">${msg}</div></div></div>`;
+        });
+      }
+
+      html += '<div class="grid-2">';
+
+      // 오늘의 감정 분포
+      html += '<div class="card"><div class="card-header"><div class="card-title"><i class="fas fa-chart-pie" style="color:var(--primary)"></i> 오늘의 감정 분포</div><div class="card-subtitle">' + data.checkedCount + '명 참여</div></div><div class="card-body">';
+      const dist = data.emotionDist;
+      const distEntries = Object.entries(dist).sort((a, b) => b[1] - a[1]);
+      if (distEntries.length > 0) {
+        distEntries.forEach(([emotion, cnt]) => {
+          const pct = Math.round(cnt / data.checkedCount * 100);
+          const em = API_EMOJI[emotion] || '😐';
+          const lb = API_LABEL[emotion] || emotion;
+          const color = EMOTION_COLORS[emotion] || '#90CAF9';
+          html += `<div class="dist-item"><div class="dist-label"><span>${em} ${lb}</span><span>${cnt}명 (${pct}%)</span></div><div class="dist-bar"><div class="dist-fill" style="width:${pct}%;background:${color};"></div></div></div>`;
+        });
+      } else {
+        html += '<div class="empty-state"><i class="fas fa-inbox"></i>오늘 감정 기록이 없습니다.</div>';
+      }
+      html += '</div></div>';
+
+      // 감정 클러스터
+      html += '<div class="card"><div class="card-header"><div class="card-title"><i class="fas fa-users" style="color:var(--primary)"></i> 감정 클러스터 분석</div></div><div class="card-body"><div class="stats-grid">';
+      data.clusters.forEach(cl => {
+        const bgMap = { positive: 'linear-gradient(135deg,#c8e6c9,#a5d6a7)', watch: 'linear-gradient(135deg,#fff9c4,#fff59d)', help: 'linear-gradient(135deg,#ffcdd2,#ef9a9a)' };
+        const colorMap = { positive: '#2e7d32', watch: '#f57f17', help: '#c62828' };
+        const iconMap = { positive: '😊', watch: '😟', help: '😢' };
+        html += `<div class="stat-card" style="background:${bgMap[cl.id]};"><div class="stat-icon">${iconMap[cl.id]}</div><div class="stat-value" style="color:${colorMap[cl.id]};">${cl.count}명</div><div class="stat-label">${cl.label}</div></div>`;
+      });
+      html += '</div></div></div>';
+
+      html += '</div>'; // grid-2
+
+      // 상담 필요 학생
+      if (data.alertStudents.length > 0) {
+        html += '<div class="card"><div class="card-header"><div class="card-title"><i class="fas fa-hand-holding-heart" style="color:var(--danger)"></i> 상담 필요 학생</div></div><div class="card-body">';
+        data.alertStudents.forEach(a => {
+          const em = API_EMOJI[a.emotion] || '😐';
+          const desc = a.type === 'consecutive_negative' ? `${a.days}일 연속 부정 감정 · 상담 우선 권장` : `급격한 감정 하락 · 관찰 필요`;
+          html += `<div style="display:flex;align-items:center;gap:16px;padding:14px;border-bottom:1px solid rgba(0,0,0,0.06);">
+            <i class="fas fa-exclamation-triangle" style="color:${a.type === 'consecutive_negative' ? 'var(--danger)' : 'var(--warning)'};"></i>
+            <div style="flex:1;"><div style="font-weight:600;">${a.name} 학생</div><div style="font-size:13px;color:var(--on-surface-md);">${em} ${desc}</div></div>
+            <button class="btn btn-outlined" onclick="showToast('상담 연계 기능은 준비 중입니다.')">상담 연계</button>
+          </div>`;
+        });
+        html += '</div></div>';
+      }
+
+      document.getElementById('overviewContent').innerHTML = html;
+    }
+
+    // ===== 감정 계단 =====
+    function renderStairs(data) {
+      const levels = [
+        { level: 5, emoji: '🤩', text: '아주 좋아요!' },
+        { level: 4, emoji: '😊', text: '좋아요' },
+        { level: 3, emoji: '😐', text: '괜찮아요' },
+        { level: 2, emoji: '😕', text: '별로예요' },
+        { level: 1, emoji: '😢', text: '안 좋아요' }
+      ];
+
+      let html = '<div class="card card-full"><div class="card-header"><div class="card-title"><i class="fas fa-stairs" style="color:var(--primary)"></i> 학급 감정 계단 (Feelings Monsters)</div><div class="card-subtitle">학생 캐릭터를 클릭하면 상세 정보를 볼 수 있습니다</div></div><div class="card-body"><div class="stairs-container">';
+
+      levels.forEach(lv => {
+        const students = data.stairsData.filter(s => s.level === lv.level);
+        html += `<div class="emotion-level level-${lv.level}"><div class="level-label"><span class="level-emoji">${lv.emoji}</span><span class="level-text">${lv.text}</span></div><div class="level-students">`;
+        if (students.length === 0) {
+          html += '<span style="font-size:12px;color:rgba(0,0,0,0.3);font-style:italic;">아직 없음</span>';
+        } else {
+          students.forEach((s, i) => {
+            const isGirl = i % 2 === 1; // 간단 구분
+            const monsterList = isGirl ? MONSTER_EMOJI_GIRL : MONSTER_EMOJI_BOY;
+            const monsterEmoji = monsterList[i % monsterList.length];
+            const em = API_EMOJI[s.emotion] || '😐';
+            html += `<div class="monster" onclick="showStudentModal(${JSON.stringify(s).replace(/"/g, '&quot;')})">
+              <div class="monster-avatar ${isGirl ? 'girl' : 'boy'}">${monsterEmoji}<div class="monster-badge">${em}</div></div>
+              <div class="monster-name">${s.name}</div>
+            </div>`;
+          });
+        }
+        html += '</div></div>';
+      });
+
+      html += '</div></div></div>';
+
+      // 미체크 학생 안내
+      const unchecked = data.totalStudents - data.checkedCount;
+      if (unchecked > 0) {
+        html += `<div class="alert-banner alert-warning"><i class="fas fa-info-circle" style="font-size:18px;color:var(--warning);margin-top:2px;"></i><div><div class="alert-title">${unchecked}명의 학생이 아직 감정을 기록하지 않았습니다</div><div class="alert-text">감정 기록을 독려해주세요.</div></div></div>`;
+      }
+
+      document.getElementById('stairsContent').innerHTML = html;
+    }
+
+    // ===== 추이 분석 =====
+    let _scatterChart = null;
+    let _timelineState = { selectedIds: null };
+    let _showLines = false;
+    let _highlightedUserId = null;
+
+    function renderTimeline(data) {
+      const hasData = data.studentTimeline && data.studentTimeline.length > 0
+        && data.studentTimeline.some(s => s.timeline && s.timeline.length > 0);
+      if (!hasData) {
+        document.getElementById('timelineContent').innerHTML = '<div class="card"><div class="card-body"><div class="empty-state"><i class="fas fa-chart-line"></i>선택한 기간에 감정 기록이 없습니다</div></div></div>';
+        return;
+      }
+
+      const fStart = document.getElementById('filterStart').value;
+      const filterStartDate = new Date(fStart + 'T00:00:00');
+
+      // 학생 정렬 (userId 오름차순)
+      const sortedStudents = [...data.studentTimeline].sort((a, b) => {
+        const ua = String(a.userId ?? ''); const ub = String(b.userId ?? '');
+        return ua < ub ? -1 : ua > ub ? 1 : 0;
+      });
+      const studentCount = sortedStudents.length;
+      const MAX_SELECTION = 100;
+
+      // 최근 체크인 날짜 헬퍼
+      const lastCheckinDate = (s) => {
+        if (!s.timeline || s.timeline.length === 0) return '';
+        let mx = '';
+        s.timeline.forEach(t => { if (t.date > mx) mx = t.date; });
+        return mx;
+      };
+
+      const fEnd = document.getElementById('filterEnd').value;
+
+      // 학생별 개별 체크인 기록 scatter 데이터 (X=날짜+시간, Y=그날 감정점수 1-10)
+      const computeScatterData = () => {
+        const points = [];
+        sortedStudents.forEach(s => {
+          const tl = s.timeline || [];
+          if (tl.length === 0) return;
+          const lastDate = lastCheckinDate(s);
+          tl.forEach(t => {
+            const score = t.emotionScore != null ? t.emotionScore : (SCORE_MAP[t.emotion] || 5);
+            // checkedAt이 있으면 날짜+시간 반영, 없으면 날짜만 (정오 기본)
+            let ts;
+            if (t.checkedAt) {
+              ts = new Date(t.checkedAt).getTime();
+              // checkedAt이 UTC이면 로컬로 보정 (SQLite CURRENT_TIMESTAMP는 UTC)
+              if (!isNaN(ts)) {
+                // 이미 파싱됨
+              } else {
+                ts = new Date(t.date + 'T12:00:00').getTime();
+              }
+            } else {
+              ts = new Date(t.date + 'T12:00:00').getTime();
+            }
+            points.push({
+              userId: s.userId,
+              name: s.name,
+              score,
+              lastDateTs: ts,
+              lastDateStr: t.date,
+              checkedAt: t.checkedAt || null,
+              emotion: t.emotion,
+              isLastRecord: t.date === lastDate
+            });
+          });
+        });
+        return points;
+      };
+
+      const allScatterData = computeScatterData();
+
+      // 기본: 전체 선택
+      let selectedIds = _timelineState.selectedIds || new Set(sortedStudents.map(s => s.userId));
+      _timelineState.selectedIds = selectedIds;
+
+      let html = '';
+
+      // === 1. XY Scatter Card ===
+      html += `<div class="card card-full">
+        <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
+          <div>
+            <div class="card-title">📊 감정 추이 분석 (XY 그래프)</div>
+            <div class="card-subtitle">X축: 날짜 / Y축: 감정 점수 (1~10)</div>
+          </div>
+          <div id="student-selector-bar" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+            <span id="selected-summary" aria-live="polite" style="font-size:13px;color:#374151;"></span>
+            <button type="button" id="btn-open-student-modal" style="height:32px;padding:0 14px;border-radius:16px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;background:var(--primary);color:#fff;border:1px solid var(--primary);">학생 선택</button>
+            <button type="button" id="btn-show-all" style="height:32px;padding:0 14px;border-radius:16px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;border:1px solid #d1d5db;background:#fff;color:#374151;">전체표시</button>
+            <button type="button" id="btn-toggle-lines" style="height:32px;padding:0 14px;border-radius:16px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;border:1px solid #d1d5db;background:#fff;color:#374151;" title="같은 학생의 포인트를 연결선으로 표시">🔗 연결선</button>
+          </div>
+        </div>
+        <div class="card-body">
+          <div style="height:480px;position:relative;"><canvas id="scatterChart"></canvas></div>
+          <div id="scatterLegend" style="display:flex;justify-content:center;gap:24px;margin-top:12px;font-size:13px;font-weight:600;color:#374151;"></div>
+        </div>
+      </div>`;
+
+      // === 2. Warning Card ===
+      html += '<div id="warningCardContainer"></div>';
+
+      // === 3. 학생별 감정 현황 테이블 (평균 점수 컬럼) ===
+      html += '<div class="card"><div class="card-header"><div class="card-title"><i class="fas fa-table" style="color:var(--primary)"></i> 학생별 감정 현황</div><div class="card-subtitle">최근 30일 데이터</div></div><div class="card-body"><div class="table-scroll-wrap" role="region" aria-label="학생별 감정 현황" tabindex="0"><table class="timeline-table"><thead><tr><th>학생</th><th>최근 감정</th><th>평균 점수</th><th>기록 수</th><th>최근 추이</th></tr></thead><tbody>';
+
+      const sorted = [...data.studentTimeline].sort((a, b) => {
+        const avgA = a.timeline.length > 0 ? a.timeline.reduce((acc, t) => acc + (SCORE_MAP[t.emotion] || 5), 0) / a.timeline.length : 0;
+        const avgB = b.timeline.length > 0 ? b.timeline.reduce((acc, t) => acc + (SCORE_MAP[t.emotion] || 5), 0) / b.timeline.length : 0;
+        return avgA - avgB;
+      });
+      sorted.forEach(s => {
+        const em = API_EMOJI[s.lastEmotion] || '😐';
+        const lb = API_LABEL[s.lastEmotion] || s.lastEmotion;
+        const tl = s.timeline || [];
+        const avgScore = tl.length > 0 ? +(tl.reduce((acc, t) => acc + (SCORE_MAP[t.emotion] || 5), 0) / tl.length).toFixed(1) : 0;
+        const avgColor = avgScore >= 7 ? 'var(--success)' : avgScore >= 5 ? 'var(--warning)' : 'var(--danger)';
+        const recent5 = tl.slice(-5).map(t => API_EMOJI[t.emotion] || '😐').join(' ');
+        html += `<tr><td style="font-weight:600;">${s.name}</td><td>${em} ${lb}</td><td style="color:${avgColor};font-weight:700;">${avgScore}</td><td>${s.totalCount}회</td><td style="font-size:16px;">${recent5}</td></tr>`;
+      });
+
+      html += '</tbody></table></div></div></div>';
+
+      document.getElementById('timelineContent').innerHTML = html;
+
+      // Render warning card
+      renderWarningCard(data);
+
+      // Update summary
+      updateScatterSummary(selectedIds, studentCount);
+
+      // Build scatter chart
+      buildScatterChart(allScatterData.filter(d => selectedIds.has(d.userId)));
+
+      // Bind student selector
+      bindStudentSelector({
+        sortedStudents, studentCount, allScatterData,
+        selectedIds, maxSelection: MAX_SELECTION
+      });
+    }
+
+    function renderWarningCard(data) {
+      const container = document.getElementById('warningCardContainer');
+      if (!container) return;
+      if (!data.alertStudents || data.alertStudents.length === 0) { container.innerHTML = ''; return; }
+      let items = '';
+      data.alertStudents.forEach(a => {
+        if (a.type === 'consecutive_negative') {
+          items += `<li style="margin-bottom:6px;">${escHtml(a.name)}: ${a.days}일 연속 부정 감정 · 감정 점수 급격히 하락</li>`;
+        } else {
+          items += `<li style="margin-bottom:6px;">${escHtml(a.name)}: 급격한 감정 하락 감지</li>`;
+        }
+      });
+      container.innerHTML = `<div style="background:#FFF7ED;border-left:4px solid #F59E0B;border-radius:var(--radius);padding:20px 24px;margin-bottom:20px;">
+        <div style="font-size:15px;font-weight:700;margin-bottom:10px;">⚠️ 이번 학급 주의 상황</div>
+        <ul style="margin:0;padding-left:20px;font-size:13px;color:#92400E;line-height:1.8;">${items}</ul>
+      </div>`;
+    }
+
+    function updateScatterSummary(selectedIds, total) {
+      const el = document.getElementById('selected-summary');
+      if (!el) return;
+      if (selectedIds.size === total) {
+        el.innerHTML = `전체 <b>${total}</b>명`;
+      } else {
+        el.innerHTML = `<b>${selectedIds.size}</b>명 선택됨 <span style="color:#9ca3af;">/ 전체 ${total}명</span>`;
+      }
+    }
+
+    // Chart.js custom plugin: 겹침 적층 카운트 뱃지 (클릭 가능)
+    const scatterLabelPlugin = {
+      id: 'scatterLabels',
+      afterDatasetsDraw(chart) {
+        const ctx = chart.ctx;
+        // 1. 모든 포인트의 화면 좌표 수집 (겹침 감지용)
+        const allPixels = [];
+        chart.data.datasets.forEach((dataset, di) => {
+          if (dataset._isTrendLine || dataset._isConnLine || dataset._isHighlightLine) return;
+          const meta = chart.getDatasetMeta(di);
+          if (meta.hidden) return;
+          meta.data.forEach((point, pi) => {
+            const raw = dataset.data[pi];
+            if (!raw) return;
+            allPixels.push({ px: point.x, py: point.y, fullName: raw._fullName, emotion: raw._emotion, score: raw.y, dateStr: raw._dateStr, status: raw._status, userId: raw._userId });
+          });
+        });
+
+        // 2. 겹침 그룹 감지 (화면 좌표 기준 12px 이내)
+        const overlapThreshold = 12;
+        const visited = new Set();
+        const overlapGroups = [];
+        for (let i = 0; i < allPixels.length; i++) {
+          if (visited.has(i)) continue;
+          const group = [i];
+          visited.add(i);
+          for (let j = i + 1; j < allPixels.length; j++) {
+            if (visited.has(j)) continue;
+            const dx = allPixels[i].px - allPixels[j].px;
+            const dy = allPixels[i].py - allPixels[j].py;
+            if (Math.sqrt(dx * dx + dy * dy) < overlapThreshold) {
+              group.push(j);
+              visited.add(j);
+            }
+          }
+          if (group.length > 1) overlapGroups.push(group);
+        }
+
+        // 3. 겹침 그룹에 적층 카운트 뱃지 표시 + 위치 저장
+        const badgeHitAreas = [];
+        overlapGroups.forEach(group => {
+          const first = allPixels[group[0]];
+          const bx = first.px + 12, by = first.py - 12, badgeR = 10;
+          ctx.save();
+          // 뱃지 배경 (클릭 유도 커서용 약간 더 큰 원)
+          ctx.fillStyle = '#1F2937';
+          ctx.beginPath();
+          ctx.arc(bx, by, badgeR, 0, Math.PI * 2);
+          ctx.fill();
+          // 숫자
+          ctx.fillStyle = '#fff';
+          ctx.font = 'bold 10px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(group.length.toString(), bx, by);
+          ctx.restore();
+
+          // 클릭 영역 저장
+          badgeHitAreas.push({
+            cx: bx, cy: by, r: badgeR + 4,
+            members: group.map(idx => allPixels[idx])
+          });
+        });
+
+        // chart 인스턴스에 hit area 저장
+        chart._overlapBadges = badgeHitAreas;
+
+        // 4. 하이라이트 학생 이름 라벨 표시
+        if (chart._highlightUserId != null && chart._highlightName) {
+          const hlId = chart._highlightUserId;
+          allPixels.filter(p => p.userId === hlId).forEach(p => {
+            ctx.save();
+            ctx.font = '700 12px Pretendard, "Noto Sans KR", system-ui, sans-serif';
+            ctx.fillStyle = '#1E3A8A';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'bottom';
+            ctx.shadowColor = 'rgba(255,255,255,0.9)';
+            ctx.shadowBlur = 4;
+            ctx.fillText(p.fullName, p.px, p.py - 16);
+            ctx.restore();
+          });
+        }
+      }
+    };
+
+    function buildScatterChart(visibleData) {
+      if (typeof Chart === 'undefined') return;
+      if (_scatterChart) { _scatterChart.destroy(); _scatterChart = null; }
+      _highlightedUserId = null;
+
+      const canvas = document.getElementById('scatterChart');
+      if (!canvas) return;
+
+      // 날짜 포맷 헬퍼
+      const fmtDate = (ts) => {
+        const d = new Date(ts);
+        return (d.getMonth()+1) + '/' + d.getDate();
+      };
+      const fmtDateFull = (ts) => {
+        const d = new Date(ts);
+        const pad = n => String(n).padStart(2,'0');
+        return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+      };
+
+      // 점수별 그라데이션 색상 함수 (1~10)
+      // 1=빨강 → 3=주황 → 5=노랑 → 7=연두 → 9~10=초록
+      const scoreGradient = (score) => {
+        const stops = [
+          { s: 1, r: 239, g: 68, b: 68 },   // #EF4444
+          { s: 2, r: 245, g: 101, b: 56 },   // #F56538
+          { s: 3, r: 249, g: 115, b: 22 },   // #F97316
+          { s: 4, r: 245, g: 158, b: 11 },   // #F59E0B
+          { s: 5, r: 234, g: 179, b: 8 },    // #EAB308
+          { s: 6, r: 163, g: 197, b: 52 },   // #A3C534
+          { s: 7, r: 74, g: 197, b: 94 },    // #4AC55E
+          { s: 8, r: 34, g: 197, b: 94 },    // #22C55E
+          { s: 9, r: 22, g: 163, b: 74 },    // #16A34A
+          { s: 10, r: 21, g: 128, b: 61 }    // #15803D
+        ];
+        const clamped = Math.max(1, Math.min(10, score));
+        const lo = stops[Math.floor(clamped) - 1];
+        const hi = stops[Math.min(Math.ceil(clamped) - 1, 9)];
+        const t = clamped - Math.floor(clamped);
+        const r = Math.round(lo.r + (hi.r - lo.r) * t);
+        const g = Math.round(lo.g + (hi.g - lo.g) * t);
+        const b = Math.round(lo.b + (hi.b - lo.b) * t);
+        return { fill: `rgba(${r},${g},${b},0.85)`, border: `rgba(${Math.max(0,r-30)},${Math.max(0,g-30)},${Math.max(0,b-30)},1)` };
+      };
+
+      // 모든 포인트를 단일 데이터셋 + per-point 색상
+      const allPoints = [];
+      let greenCount = 0, yellowCount = 0, redCount = 0;
+      visibleData.forEach(d => {
+        const pt = { x: d.lastDateTs, y: d.score, _fullName: d.name, _dateStr: d.lastDateStr, _emotion: d.emotion, _status: '', _userId: d.userId };
+        if (d.score >= 7) { pt._status = '긍정·좋음'; greenCount++; }
+        else if (d.score >= 5) { pt._status = '보통 일상'; yellowCount++; }
+        else { pt._status = '관찰 필요'; redCount++; }
+        allPoints.push(pt);
+      });
+
+      // per-point 색상 배열
+      const bgColors = allPoints.map(pt => scoreGradient(pt.y).fill);
+      const borderColors = allPoints.map(pt => scoreGradient(pt.y).border);
+
+      // X축 범위: 필터 시작~끝 날짜
+      const fStartVal = document.getElementById('filterStart').value;
+      const fEndVal = document.getElementById('filterEnd').value;
+      const xMin = new Date(fStartVal + 'T00:00:00').getTime();
+      const xMax = new Date(fEndVal + 'T00:00:00').getTime();
+      const dayMs = 86400000;
+
+      // X축 틱 생성 (날짜 범위에 따라 적절한 간격)
+      const totalDays = Math.round((xMax - xMin) / dayMs) + 1;
+      let stepDays = 1;
+      if (totalDays > 60) stepDays = 7;
+      else if (totalDays > 14) stepDays = 3;
+      else if (totalDays > 7) stepDays = 2;
+
+      const datasets = [
+        {
+          label: '감정 체크인',
+          data: allPoints,
+          backgroundColor: bgColors,
+          borderColor: borderColors,
+          pointRadius: 9,
+          pointHoverRadius: 12,
+          borderWidth: 1.5,
+          order: 2
+        }
+      ];
+
+      // 연결선 모드: 같은 학생의 포인트를 선으로 연결
+      if (_showLines) {
+        const LINE_COLORS = [
+          '#4A7CFF','#F97316','#8B5CF6','#EF4444','#10B981',
+          '#EC4899','#F59E0B','#06B6D4','#6366F1','#84CC16',
+          '#14B8A6','#E11D48','#7C3AED','#D97706','#0EA5E9'
+        ];
+        const byStudent = {};
+        visibleData.forEach(d => {
+          if (!byStudent[d.userId]) byStudent[d.userId] = { name: d.name, points: [] };
+          byStudent[d.userId].points.push({ x: d.lastDateTs, y: d.score, _fullName: d.name, _dateStr: d.lastDateStr, _emotion: d.emotion, _status: d.score >= 7 ? '긍정·좋음' : d.score >= 5 ? '보통 일상' : '관찰 필요' });
+        });
+        let colorIdx = 0;
+        Object.keys(byStudent).forEach(uid => {
+          const st = byStudent[uid];
+          if (st.points.length < 2) return; // 1개면 연결선 불필요
+          st.points.sort((a, b) => a.x - b.x);
+          const c = LINE_COLORS[colorIdx % LINE_COLORS.length];
+          datasets.push({
+            label: st.name,
+            data: st.points,
+            showLine: true,
+            borderColor: c + '66',
+            borderWidth: 2,
+            borderDash: [6, 3],
+            pointRadius: 0,
+            pointHoverRadius: 0,
+            fill: false,
+            tension: 0.3,
+            order: 3,
+            _isConnLine: true
+          });
+          colorIdx++;
+        });
+      }
+
+      _scatterChart = new Chart(canvas, {
+        type: 'scatter',
+        data: { datasets },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          scales: {
+            x: {
+              type: 'linear',
+              title: { display: true, text: '날짜', font: { size: 13, weight: '600' } },
+              min: xMin - dayMs * 0.5,
+              max: xMax + dayMs * 1.5,
+              grid: { color: 'rgba(0,0,0,0.06)' },
+              ticks: {
+                font: { size: 12 },
+                stepSize: stepDays * dayMs,
+                callback: function(value) { return fmtDate(value); },
+                maxRotation: 40,
+                autoSkip: true,
+                maxTicksLimit: 12
+              }
+            },
+            y: {
+              title: { display: true, text: '감정 점수', font: { size: 13, weight: '600' } },
+              min: 0,
+              max: 10,
+              grid: { color: 'rgba(0,0,0,0.06)' },
+              ticks: { font: { size: 12 }, stepSize: 1 }
+            }
+          },
+          interaction: {
+            mode: 'nearest',
+            intersect: true
+          },
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              titleFont: { size: 14, weight: '700' },
+              bodyFont: { size: 13 },
+              padding: 12,
+              filter: (item) => !item.dataset._isConnLine && !item.dataset._isHighlightLine,
+              callbacks: {
+                title: (items) => {
+                  const raw = items[0]?.raw;
+                  return raw?._fullName || '';
+                },
+                label: (ctx) => {
+                  const raw = ctx.raw;
+                  if (!raw) return '';
+                  const emEmoji = API_EMOJI[raw._emotion] || '😐';
+                  const emLabel = API_LABEL[raw._emotion] || raw._emotion;
+                  return [
+                    `${emEmoji} ${emLabel} (${raw.y}점)`,
+                    `날짜: ${raw._dateStr || fmtDateFull(raw.x)}`,
+                    `상태: ${raw._status}`
+                  ];
+                }
+              }
+            }
+          }
+        },
+        plugins: [scatterLabelPlugin]
+      });
+
+      // 클릭 핸들러: 겹침 뱃지 클릭 + 학생 포인트 하이라이트
+      canvas.style.cursor = 'default';
+      canvas.onclick = function(e) {
+        const popup = document.getElementById('overlapPopup');
+        if (popup) popup.style.display = 'none';
+        if (!_scatterChart) return;
+
+        const rect = canvas.getBoundingClientRect();
+        const mx = e.clientX - rect.left;
+        const my = e.clientY - rect.top;
+
+        // 1) 겹침 뱃지 클릭 확인
+        if (_scatterChart._overlapBadges) {
+          for (const badge of _scatterChart._overlapBadges) {
+            const dx = mx - badge.cx, dy = my - badge.cy;
+            if (dx * dx + dy * dy <= badge.r * badge.r) {
+              showOverlapPopup(badge, e.clientX, e.clientY);
+              return;
+            }
+          }
+        }
+
+        // 2) 포인트 클릭 → 학생 하이라이트
+        const elements = _scatterChart.getElementsAtEventForMode(e, 'nearest', { intersect: true }, false);
+        if (elements.length > 0) {
+          const el = elements[0];
+          const ds = _scatterChart.data.datasets[el.datasetIndex];
+          if (ds._isConnLine) return; // 연결선 무시
+          const raw = ds.data[el.index];
+          if (raw && raw._userId != null) {
+            const clickedId = raw._userId;
+            // 같은 학생 다시 클릭 → 해제
+            if (_highlightedUserId === clickedId) {
+              _highlightedUserId = null;
+            } else {
+              _highlightedUserId = clickedId;
+            }
+            applyHighlight(_scatterChart, scoreGradient);
+            return;
+          }
+        }
+
+        // 3) 빈 영역 클릭 → 하이라이트 해제
+        if (_highlightedUserId != null) {
+          _highlightedUserId = null;
+          applyHighlight(_scatterChart, scoreGradient);
+        }
+      };
+      canvas.onmousemove = function(e) {
+        if (!_scatterChart) { canvas.style.cursor = 'default'; return; }
+        const rect = canvas.getBoundingClientRect();
+        const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+        // 뱃지 hover
+        let hit = false;
+        if (_scatterChart._overlapBadges) {
+          for (const badge of _scatterChart._overlapBadges) {
+            const dx = mx - badge.cx, dy = my - badge.cy;
+            if (dx * dx + dy * dy <= badge.r * badge.r) { hit = true; break; }
+          }
+        }
+        if (!hit) {
+          // 포인트 hover
+          const elements = _scatterChart.getElementsAtEventForMode(e, 'nearest', { intersect: true }, false);
+          if (elements.length > 0 && !_scatterChart.data.datasets[elements[0].datasetIndex]._isConnLine) hit = true;
+        }
+        canvas.style.cursor = hit ? 'pointer' : 'default';
+      };
+
+      // Custom legend: 그라데이션 바 + 카운트
+      const legendEl = document.getElementById('scatterLegend');
+      if (legendEl) {
+        legendEl.innerHTML = `
+          <div style="display:flex;flex-direction:column;align-items:center;gap:8px;width:100%;">
+            <div style="display:flex;align-items:center;gap:10px;width:100%;max-width:500px;">
+              <span style="font-size:12px;color:#6b7280;white-space:nowrap;">관찰 필요</span>
+              <div style="flex:1;height:12px;border-radius:6px;background:linear-gradient(90deg, #EF4444 0%, #F97316 25%, #EAB308 45%, #4AC55E 70%, #16A34A 100%);"></div>
+              <span style="font-size:12px;color:#6b7280;white-space:nowrap;">긍정·좋음</span>
+            </div>
+            <div style="display:flex;gap:20px;font-size:12px;color:#374151;">
+              <span>🟢 긍정·좋음 <b>${greenCount}건</b></span>
+              <span>🟡 보통 일상 <b>${yellowCount}건</b></span>
+              <span>🔴 관찰 필요 <b>${redCount}건</b></span>
+            </div>
+          </div>`;
+      }
+    }
+
+    // ===== 학생 포인트 하이라이트 =====
+    function applyHighlight(chart, scoreGradient) {
+      const hId = _highlightedUserId;
+      const mainDs = chart.data.datasets.find(ds => !ds._isConnLine && !ds._isHighlightLine);
+
+      if (!mainDs) return;
+
+      // 기존 하이라이트 연결선 제거
+      chart.data.datasets = chart.data.datasets.filter(ds => !ds._isHighlightLine);
+
+      if (hId == null) {
+        // 해제: 원래 색상·크기 복원
+        mainDs.backgroundColor = mainDs.data.map(pt => scoreGradient(pt.y).fill);
+        mainDs.borderColor = mainDs.data.map(pt => scoreGradient(pt.y).border);
+        mainDs.pointRadius = mainDs.data.map(() => 9);
+        mainDs.borderWidth = 1.5;
+        // 기존 연결선 복원
+        chart.data.datasets.forEach(ds => {
+          if (ds._isConnLine) {
+            ds.borderColor = ds._origColor || ds.borderColor;
+            ds.borderWidth = 2;
+          }
+        });
+        // 하이라이트 이름 라벨 해제
+        chart._highlightName = null;
+      } else {
+        // 하이라이트 적용
+        const hlPoints = []; // 하이라이트 학생의 포인트 수집
+        mainDs.backgroundColor = mainDs.data.map(pt => {
+          if (pt._userId === hId) {
+            hlPoints.push(pt);
+            const g = scoreGradient(pt.y);
+            return g.fill.replace('0.85', '1'); // 더 진하게
+          }
+          return 'rgba(200,200,200,0.25)'; // 나머지 흐리게
+        });
+        mainDs.borderColor = mainDs.data.map(pt => {
+          if (pt._userId === hId) return scoreGradient(pt.y).border;
+          return 'rgba(180,180,180,0.3)';
+        });
+        mainDs.pointRadius = mainDs.data.map(pt => pt._userId === hId ? 12 : 6);
+        mainDs.borderWidth = mainDs.data.map(pt => pt._userId === hId ? 2.5 : 1);
+
+        // 기존 연결선 흐리게 처리
+        chart.data.datasets.forEach(ds => {
+          if (ds._isConnLine) {
+            if (!ds._origColor) ds._origColor = ds.borderColor;
+            ds.borderColor = 'rgba(200,200,200,0.15)';
+            ds.borderWidth = 1;
+          }
+        });
+
+        // 하이라이트 학생 전용 연결선 추가
+        if (hlPoints.length >= 2) {
+          const sorted = [...hlPoints].sort((a, b) => a.x - b.x);
+          chart.data.datasets.push({
+            label: sorted[0]._fullName + ' (하이라이트)',
+            data: sorted,
+            showLine: true,
+            borderColor: '#4A7CFF',
+            borderWidth: 3,
+            borderDash: [],
+            pointRadius: 0,
+            pointHoverRadius: 0,
+            fill: false,
+            tension: 0.3,
+            order: 1, // 가장 앞으로
+            _isHighlightLine: true,
+            _isConnLine: false
+          });
+        }
+
+        // 하이라이트 이름 저장 (plugin에서 사용)
+        chart._highlightName = hlPoints.length > 0 ? hlPoints[0]._fullName : null;
+        chart._highlightUserId = hId;
+      }
+
+      chart.update('none'); // 애니메이션 없이 즉시 업데이트
+    }
+
+    // ===== 겹침 뱃지 클릭 팝업 =====
+    function showOverlapPopup(badge, clientX, clientY) {
+      let popup = document.getElementById('overlapPopup');
+      if (!popup) {
+        popup = document.createElement('div');
+        popup.id = 'overlapPopup';
+        popup.style.cssText = 'position:fixed;z-index:9999;background:#fff;border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,0.22);padding:0;min-width:220px;max-width:320px;display:none;overflow:hidden;';
+        document.body.appendChild(popup);
+        document.addEventListener('click', (e) => {
+          if (!popup.contains(e.target)) popup.style.display = 'none';
+        }, true);
+        document.addEventListener('keydown', (e) => {
+          if (e.key === 'Escape') popup.style.display = 'none';
+        });
+      }
+
+      const rows = badge.members.map(m => {
+        const emoji = API_EMOJI[m.emotion] || '😐';
+        const label = API_LABEL[m.emotion] || m.emotion;
+        const scoreColor = m.score >= 7 ? '#16A34A' : m.score >= 5 ? '#EAB308' : '#EF4444';
+        const statusLabel = m.score >= 7 ? '긍정·좋음' : m.score >= 5 ? '보통 일상' : '관찰 필요';
+        const uid = m.userId != null ? m.userId : '';
+        return `<div class="overlap-member-row" data-uid="${uid}" style="display:flex;align-items:center;gap:10px;padding:10px 16px;border-bottom:1px solid #f3f4f6;cursor:pointer;transition:background .15s;" onmouseenter="this.style.background='#F0F4FF'" onmouseleave="this.style.background=''">
+          <span style="font-size:20px;">${emoji}</span>
+          <div style="flex:1;min-width:0;">
+            <div style="font-weight:700;font-size:13px;color:#1f2937;">${m.fullName}</div>
+            <div style="font-size:12px;color:#6b7280;">${label} · ${m.dateStr || ''}</div>
+          </div>
+          <div style="text-align:right;">
+            <div style="font-weight:800;font-size:15px;color:${scoreColor};">${m.score}점</div>
+            <div style="font-size:10px;color:#9ca3af;">${statusLabel}</div>
+          </div>
+          <i class="fas fa-chevron-right" style="color:#d1d5db;font-size:11px;"></i>
+        </div>`;
+      }).join('');
+
+      popup.innerHTML = `
+        <div style="padding:12px 16px;background:#1f2937;color:#fff;font-size:13px;font-weight:700;display:flex;align-items:center;justify-content:space-between;">
+          <span>겹친 체크인 ${badge.members.length}건</span>
+          <button onclick="document.getElementById('overlapPopup').style.display='none'" style="background:none;border:none;color:#fff;font-size:18px;cursor:pointer;line-height:1;padding:0;">&times;</button>
+        </div>
+        <div style="max-height:300px;overflow-y:auto;">${rows}</div>`;
+
+      // 학생 행 클릭 → 하이라이트
+      popup.querySelectorAll('.overlap-member-row').forEach(row => {
+        row.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const uid = parseInt(row.dataset.uid);
+          if (!isNaN(uid) && _scatterChart) {
+            popup.style.display = 'none';
+            _highlightedUserId = uid;
+            const sg = (score) => {
+              const stops = [
+                { s:1,r:239,g:68,b:68 },{s:2,r:245,g:101,b:56},{s:3,r:249,g:115,b:22},{s:4,r:245,g:158,b:11},
+                {s:5,r:234,g:179,b:8},{s:6,r:163,g:197,b:52},{s:7,r:74,g:197,b:94},{s:8,r:34,g:197,b:94},
+                {s:9,r:22,g:163,b:74},{s:10,r:21,g:128,b:61}
+              ];
+              const c = Math.max(1,Math.min(10,score));
+              const lo = stops[Math.floor(c)-1], hi = stops[Math.min(Math.ceil(c)-1,9)];
+              const t = c - Math.floor(c);
+              const r = Math.round(lo.r+(hi.r-lo.r)*t), g = Math.round(lo.g+(hi.g-lo.g)*t), b = Math.round(lo.b+(hi.b-lo.b)*t);
+              return { fill:`rgba(${r},${g},${b},0.85)`, border:`rgba(${Math.max(0,r-30)},${Math.max(0,g-30)},${Math.max(0,b-30)},1)` };
+            };
+            applyHighlight(_scatterChart, sg);
+          }
+        });
+      });
+
+      // 위치 계산 (화면 밖으로 안 나가도록)
+      popup.style.display = 'block';
+      const pw = popup.offsetWidth, ph = popup.offsetHeight;
+      let left = clientX + 8, top = clientY + 8;
+      if (left + pw > window.innerWidth - 16) left = clientX - pw - 8;
+      if (top + ph > window.innerHeight - 16) top = clientY - ph - 8;
+      if (left < 8) left = 8;
+      if (top < 8) top = 8;
+      popup.style.left = left + 'px';
+      popup.style.top = top + 'px';
+    }
+
+    // ===== 학생 선택기 =====
+    function bindStudentSelector(ctx) {
+      const { sortedStudents, studentCount, allScatterData, maxSelection } = ctx;
+      let selectedIds = ctx.selectedIds;
+
+      const summaryEl = document.getElementById('selected-summary');
+      const openBtn = document.getElementById('btn-open-student-modal');
+      const showAllBtn = document.getElementById('btn-show-all');
+
+      // 모달 내부 요소
+      const modalOverlay = document.getElementById('studentSelectModal');
+      const modalCloseBtn = document.getElementById('studentModalCloseBtn');
+      const modalCancelBtn = document.getElementById('modalCancelBtn');
+      const modalApplyBtn = document.getElementById('modalApplyBtn');
+      const modalSearchEl = document.getElementById('studentModalSearch');
+      const modalSelAllBtn = document.getElementById('modalSelAllBtn');
+      const modalSelNoneBtn = document.getElementById('modalSelNoneBtn');
+      const modalSelTop10Btn = document.getElementById('modalSelTop10Btn');
+      const modalSelInvertBtn = document.getElementById('modalSelInvertBtn');
+      const tbodyEl = document.getElementById('studentTableBody');
+      const modalCountEl = document.getElementById('modalSelCount');
+      const tableHeadCheckbox = document.getElementById('studentTableHeadCheckbox');
+
+      // 학생별 메트릭 (SCORE_MAP 1-10)
+      const metricsByUid = new Map();
+      sortedStudents.forEach(s => {
+        const tl = s.timeline || [];
+        const days = tl.length;
+        let avg = null;
+        if (days > 0) {
+          const sum = tl.reduce((acc, t) => acc + (SCORE_MAP[t.emotion] || 5), 0);
+          avg = +(sum / days).toFixed(2);
+        }
+        let last = '';
+        tl.forEach(t => { if (t.date > last) last = t.date; });
+        const lastEmotionKey = s.lastEmotion || (tl.length ? tl[tl.length - 1].emotion : '');
+        metricsByUid.set(String(s.userId), { avg, days, last, lastEmotionKey });
+      });
+
+      // 모달 상태
+      let draftSelected = new Set(selectedIds);
+      let sortKey = 'name';
+      let sortDir = 'asc';
+      let searchQuery = '';
+      let searchDebounce = null;
+      let lastFocused = null;
+
+      const matchesQuery = (s, q) => {
+        if (!q) return true;
+        return (s.name || '').toLowerCase().includes(q);
+      };
+
+      const getFilteredSorted = () => {
+        const filtered = sortedStudents.filter(s => matchesQuery(s, searchQuery));
+        const dirMul = sortDir === 'asc' ? 1 : -1;
+        filtered.sort((a, b) => {
+          const ma = metricsByUid.get(String(a.userId));
+          const mb = metricsByUid.get(String(b.userId));
+          let va, vb;
+          if (sortKey === 'name') {
+            va = (a.name || ''); vb = (b.name || '');
+            return va.localeCompare(vb, 'ko') * dirMul;
+          } else if (sortKey === 'avg') {
+            va = ma.avg; vb = mb.avg;
+            if (va == null && vb == null) return 0;
+            if (va == null) return 1;
+            if (vb == null) return -1;
+            return (va - vb) * dirMul;
+          } else if (sortKey === 'days') {
+            return (ma.days - mb.days) * dirMul;
+          } else if (sortKey === 'last') {
+            va = ma.last || ''; vb = mb.last || '';
+            if (va === vb) return 0;
+            return (va < vb ? -1 : 1) * dirMul;
+          }
+          return 0;
+        });
+        return filtered;
+      };
+
+      const renderStudentTable = () => {
+        const rows = getFilteredSorted();
+        const atCap = draftSelected.size >= maxSelection;
+        let html = '';
+        if (rows.length === 0) {
+          html = '<tr><td colspan="6" style="text-align:center;color:#9ca3af;padding:24px;">검색 결과가 없습니다</td></tr>';
+        } else {
+          rows.forEach(s => {
+            const m = metricsByUid.get(String(s.userId));
+            const checked = draftSelected.has(s.userId);
+            const disabled = !checked && atCap;
+            const emoji = API_EMOJI[m.lastEmotionKey] || '—';
+            const label = API_LABEL[m.lastEmotionKey] || (m.lastEmotionKey ? m.lastEmotionKey : '-');
+            const avgTxt = m.avg != null ? m.avg.toFixed(2) : '-';
+            const lastTxt = m.last || '-';
+            const chkAttrs = `data-uid="${String(s.userId)}"${checked ? ' checked' : ''}${disabled ? ' aria-disabled="true" title="최대 100명까지 선택 가능"' : ''}`;
+            html += `<tr class="${disabled ? 'row-disabled' : ''}"><td><input type="checkbox" ${chkAttrs} /></td><td>${escHtml(s.name)}</td><td>${avgTxt}</td><td>${m.days}일</td><td>${emoji} ${label}</td><td>${lastTxt}</td></tr>`;
+          });
+        }
+        tbodyEl.innerHTML = html;
+
+        // thead checkbox state
+        const filteredIds = rows.map(r => String(r.userId));
+        const allFilteredSelected = filteredIds.length > 0 && filteredIds.every(id => draftSelected.has(id) || draftSelected.has(Number(id)));
+        tableHeadCheckbox.checked = allFilteredSelected;
+        tableHeadCheckbox.indeterminate = !allFilteredSelected && filteredIds.some(id => draftSelected.has(id) || draftSelected.has(Number(id)));
+
+        // row checkbox handlers
+        tbodyEl.querySelectorAll('input[type="checkbox"][data-uid]').forEach(cb => {
+          cb.addEventListener('click', (e) => {
+            const uid = cb.getAttribute('data-uid');
+            const origUid = sortedStudents.find(s => String(s.userId) === uid)?.userId;
+            if (cb.getAttribute('aria-disabled') === 'true') {
+              e.preventDefault();
+              cb.checked = false;
+              showToast(`최대 ${maxSelection}명까지 선택 가능`);
+              return;
+            }
+            if (cb.checked) {
+              if (draftSelected.size >= maxSelection) {
+                e.preventDefault();
+                cb.checked = false;
+                showToast(`최대 ${maxSelection}명까지 선택 가능`);
+                return;
+              }
+              draftSelected.add(origUid);
+            } else {
+              draftSelected.delete(origUid);
+            }
+            renderStudentTable();
+            updateModalCount();
+          });
+        });
+      };
+
+      const updateModalCount = () => {
+        modalCountEl.textContent = `${draftSelected.size}명 선택됨`;
+      };
+
+      // 정렬 토글
+      const thSortables = document.querySelectorAll('#student-table th[data-sort]');
+      thSortables.forEach(th => {
+        const handler = () => {
+          const key = th.getAttribute('data-sort');
+          if (sortKey === key) {
+            sortDir = sortDir === 'asc' ? 'desc' : 'asc';
+          } else {
+            sortKey = key;
+            sortDir = 'asc';
+          }
+          thSortables.forEach(o => o.setAttribute('aria-sort', 'none'));
+          th.setAttribute('aria-sort', sortDir === 'asc' ? 'ascending' : 'descending');
+          renderStudentTable();
+        };
+        th.addEventListener('click', handler);
+        th.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handler(); }
+        });
+      });
+
+      // 모달 열기/닫기
+      const getFocusable = () => {
+        return modalOverlay.querySelectorAll('button, input, [tabindex]:not([tabindex="-1"])');
+      };
+      const trapFocus = (e) => {
+        if (e.key !== 'Tab') return;
+        const focusable = Array.from(getFocusable()).filter(el => !el.disabled && el.offsetParent !== null);
+        if (focusable.length === 0) return;
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      };
+      const onModalKeydown = (e) => {
+        if (e.key === 'Escape') { closeSelectModal(true); }
+        else { trapFocus(e); }
+      };
+
+      const openSelectModal = () => {
+        lastFocused = document.activeElement;
+        draftSelected = new Set(selectedIds);
+        searchQuery = '';
+        modalSearchEl.value = '';
+        sortKey = 'name';
+        sortDir = 'asc';
+        thSortables.forEach(o => o.setAttribute('aria-sort', 'none'));
+        const nameTh = document.querySelector('#student-table th[data-sort="name"]');
+        if (nameTh) nameTh.setAttribute('aria-sort', 'ascending');
+        renderStudentTable();
+        updateModalCount();
+        modalOverlay.hidden = false;
+        document.addEventListener('keydown', onModalKeydown);
+        setTimeout(() => modalSearchEl.focus(), 0);
+      };
+      const closeSelectModal = (discard) => {
+        modalOverlay.hidden = true;
+        document.removeEventListener('keydown', onModalKeydown);
+        if (lastFocused && typeof lastFocused.focus === 'function') {
+          try { lastFocused.focus(); } catch (_) {}
+        }
+      };
+
+      const applySelection = () => {
+        const visibleData = allScatterData.filter(d => selectedIds.has(d.userId));
+        buildScatterChart(visibleData);
+        updateScatterSummary(selectedIds, studentCount);
+      };
+
+      // 오버레이 클릭 → 취소
+      modalOverlay.addEventListener('click', (e) => {
+        if (e.target === modalOverlay) closeSelectModal(true);
+      });
+      modalCloseBtn.addEventListener('click', () => closeSelectModal(true));
+      modalCancelBtn.addEventListener('click', () => closeSelectModal(true));
+      modalApplyBtn.addEventListener('click', () => {
+        selectedIds = new Set(draftSelected);
+        _timelineState.selectedIds = selectedIds;
+        ctx.selectedIds = selectedIds;
+        applySelection();
+        closeSelectModal(false);
+      });
+
+      // 검색 (debounce 150ms)
+      modalSearchEl.addEventListener('input', (e) => {
+        const val = e.target.value || '';
+        if (searchDebounce) clearTimeout(searchDebounce);
+        searchDebounce = setTimeout(() => {
+          searchQuery = val.trim().toLowerCase();
+          renderStudentTable();
+        }, 150);
+      });
+
+      // 모달 내 일괄 선택
+      modalSelAllBtn.addEventListener('click', () => {
+        const filtered = getFilteredSorted();
+        let truncated = false;
+        for (const s of filtered) {
+          if (draftSelected.size >= maxSelection) { truncated = true; break; }
+          draftSelected.add(s.userId);
+        }
+        if (truncated) showToast(`최대 ${maxSelection}명까지 선택됩니다`);
+        renderStudentTable();
+        updateModalCount();
+      });
+      modalSelNoneBtn.addEventListener('click', () => {
+        draftSelected = new Set();
+        renderStudentTable();
+        updateModalCount();
+      });
+      const top10ByLowAvg = () => {
+        const sortedByAvg = [...sortedStudents].sort((a, b) => {
+          const ma = metricsByUid.get(String(a.userId)).avg;
+          const mb = metricsByUid.get(String(b.userId)).avg;
+          if (ma == null && mb == null) return 0;
+          if (ma == null) return 1;
+          if (mb == null) return -1;
+          return ma - mb;
+        });
+        return sortedByAvg.slice(0, Math.min(10, maxSelection));
+      };
+      modalSelTop10Btn.addEventListener('click', () => {
+        draftSelected = new Set(top10ByLowAvg().map(s => s.userId));
+        renderStudentTable();
+        updateModalCount();
+      });
+      modalSelInvertBtn.addEventListener('click', () => {
+        const filtered = getFilteredSorted();
+        let truncated = false;
+        filtered.forEach(s => {
+          if (draftSelected.has(s.userId)) {
+            draftSelected.delete(s.userId);
+          } else {
+            if (draftSelected.size >= maxSelection) { truncated = true; return; }
+            draftSelected.add(s.userId);
+          }
+        });
+        if (truncated) showToast(`최대 ${maxSelection}명까지 선택됩니다`);
+        renderStudentTable();
+        updateModalCount();
+      });
+      // thead checkbox: 전체선택(현재 필터)
+      tableHeadCheckbox.addEventListener('click', (e) => {
+        const filtered = getFilteredSorted();
+        const allSelected = filtered.every(s => draftSelected.has(s.userId));
+        if (allSelected) {
+          filtered.forEach(s => draftSelected.delete(s.userId));
+        } else {
+          let truncated = false;
+          for (const s of filtered) {
+            if (draftSelected.size >= maxSelection) { truncated = true; break; }
+            draftSelected.add(s.userId);
+          }
+          if (truncated) showToast(`최대 ${maxSelection}명까지 선택됩니다`);
+        }
+        renderStudentTable();
+        updateModalCount();
+      });
+
+      // 바깥 버튼
+      openBtn.addEventListener('click', openSelectModal);
+      showAllBtn.addEventListener('click', () => {
+        selectedIds = new Set(sortedStudents.map(s => s.userId));
+        _timelineState.selectedIds = selectedIds;
+        ctx.selectedIds = selectedIds;
+        applySelection();
+      });
+
+      // 연결선 토글
+      const lineBtn = document.getElementById('btn-toggle-lines');
+      if (lineBtn) {
+        // 버튼 초기 스타일 반영
+        if (_showLines) {
+          lineBtn.style.background = 'var(--primary)';
+          lineBtn.style.color = '#fff';
+          lineBtn.style.borderColor = 'var(--primary)';
+        }
+        lineBtn.addEventListener('click', () => {
+          _showLines = !_showLines;
+          if (_showLines) {
+            lineBtn.style.background = 'var(--primary)';
+            lineBtn.style.color = '#fff';
+            lineBtn.style.borderColor = 'var(--primary)';
+          } else {
+            lineBtn.style.background = '#fff';
+            lineBtn.style.color = '#374151';
+            lineBtn.style.borderColor = '#d1d5db';
+          }
+          applySelection();
+        });
+      }
+    }
+
+    // ===== SEL 활동 =====
+    function renderSEL() {
+      let html = '';
+
+      // 질문 만들기
+      html += `<div class="card"><div class="card-header"><div class="card-title"><i class="fas fa-plus-circle" style="color:var(--primary)"></i> 새 질문 만들기</div><div class="card-subtitle">학생들에게 감정 체크를 요청할 질문을 만들어보세요</div></div><div class="card-body">
+        <div style="margin-bottom:16px;"><label style="font-size:12px;font-weight:600;color:var(--on-surface-md);display:block;margin-bottom:8px;">카테고리 선택</label>
+        <div class="category-chips">
+          <button class="cat-chip" onclick="toggleCat(this)"><i class="fas fa-users"></i> 소속감</button>
+          <button class="cat-chip" onclick="toggleCat(this)"><i class="fas fa-graduation-cap"></i> 학습</button>
+          <button class="cat-chip" onclick="toggleCat(this)"><i class="fas fa-clipboard"></i> 과제</button>
+          <button class="cat-chip" onclick="toggleCat(this)"><i class="fas fa-comments"></i> 참여</button>
+          <button class="cat-chip" onclick="toggleCat(this)"><i class="fas fa-chart-bar"></i> 평가</button>
+          <button class="cat-chip" onclick="toggleCat(this)"><i class="fas fa-heart"></i> 웰빙</button>
+        </div></div>
+        <div style="margin-bottom:16px;"><label style="font-size:12px;font-weight:600;color:var(--on-surface-md);display:block;margin-bottom:8px;">질문 입력</label>
+        <textarea class="text-input" id="selQuestion" rows="3" placeholder="예: 오늘 수업에서 배운 내용이 흥미로웠나요?"></textarea></div>
+        <div style="margin-bottom:16px;"><label style="font-size:12px;font-weight:600;color:var(--on-surface-md);display:block;margin-bottom:8px;">응답 마감 시간</label>
+        <input type="datetime-local" id="selDeadline" class="text-input" style="max-width:300px;"></div>
+        <div style="display:flex;align-items:center;gap:12px;padding:14px;background:var(--bg);border-radius:8px;margin-bottom:16px;">
+          <input type="checkbox" id="anonMode" style="width:18px;height:18px;">
+          <label for="anonMode" style="flex:1;cursor:pointer;"><div style="font-weight:500;font-size:14px;">익명 모드</div><div style="font-size:12px;color:var(--on-surface-md);">학생들의 이름이 기록되지 않습니다.</div></label>
+        </div>
+        <div style="margin-bottom:16px;"><div style="font-weight:500;margin-bottom:10px;">💡 추천 질문 템플릿</div>
+        <div><span class="template-chip" onclick="useTemplate(this)">오늘 수업이 재미있었나요?</span><span class="template-chip" onclick="useTemplate(this)">친구들과 잘 지내고 있나요?</span><span class="template-chip" onclick="useTemplate(this)">과제의 난이도는 적당한가요?</span><span class="template-chip" onclick="useTemplate(this)">수업 시간에 질문하기 편한가요?</span></div></div>
+      </div><div style="padding:8px 24px 16px;display:flex;gap:8px;justify-content:flex-end;border-top:1px solid rgba(0,0,0,0.08);">
+        <button class="btn btn-text">미리보기</button>
+        <button class="btn btn-primary" onclick="showToast('질문이 전송되었습니다! (프로토타입)')"><i class="fas fa-paper-plane"></i> 질문 보내기</button>
+      </div></div>`;
+
+      // 최근 질문 목록 (프로토타입 데이터)
+      html += `<div class="card"><div class="card-header"><div class="card-title"><i class="fas fa-list" style="color:var(--primary)"></i> 최근 질문 목록</div></div><div class="card-body">
+        <div class="q-item"><div class="q-header"><span class="q-badge q-active">진행중</span><span style="font-size:12px;color:var(--on-surface-md);">소속감</span></div>
+        <div class="q-text">우리 반에서 친구들과 함께할 때 어떤 기분이 드나요?</div>
+        <div class="q-stats"><span><i class="fas fa-users"></i> 23/25 응답</span><span><i class="fas fa-clock"></i> 2시간 남음</span></div>
+        <div class="q-actions"><button class="btn btn-text">결과 보기</button><button class="btn btn-text"><i class="fas fa-file-excel"></i> Excel</button><button class="btn btn-text">편집</button></div></div>
+
+        <div class="q-item"><div class="q-header"><span class="q-badge q-done">완료</span><span style="font-size:12px;color:var(--on-surface-md);">학습</span></div>
+        <div class="q-text">오늘 배운 내용을 이해하는 것이 어땠나요?</div>
+        <div class="q-stats"><span><i class="fas fa-users"></i> 25/25 응답</span><span><i class="fas fa-check-circle"></i> 어제 완료</span></div>
+        <div class="q-actions"><button class="btn btn-text">결과 보기</button><button class="btn btn-text">다시 보내기</button></div></div>
+
+        <div class="q-item"><div class="q-header"><span class="q-badge q-done">완료</span><span style="font-size:12px;color:var(--on-surface-md);">과제</span></div>
+        <div class="q-text">이번 주 과제의 양은 어떤가요?</div>
+        <div class="q-stats"><span><i class="fas fa-users"></i> 24/25 응답</span><span><i class="fas fa-check-circle"></i> 2일 전 완료</span></div>
+        <div class="q-actions"><button class="btn btn-text">결과 보기</button><button class="btn btn-text">다시 보내기</button></div></div>
+      </div></div>`;
+
+      document.getElementById('selContent').innerHTML = html;
+
+      // 응답 마감 시간 기본값: 등록일(오늘) 23:59
+      const dl = document.getElementById('selDeadline');
+      if (dl) {
+        const now = new Date();
+        const pad = n => String(n).padStart(2, '0');
+        dl.value = `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}T23:59`;
+      }
+    }
+
+    // ===== 학생 모달 =====
+    function showStudentModal(student) {
+      const em = API_EMOJI[student.emotion] || '😐';
+      const lb = API_LABEL[student.emotion] || student.emotion;
+      const score = SCORE_MAP[student.emotion] || 5;
+      // 타임라인에서 이 학생 찾기
+      const st = monitorData?.studentTimeline?.find(s => s.userId === student.userId);
+
+      document.getElementById('modalTitle').textContent = student.name + ' 학생';
+      let body = '';
+      body += `<div class="info-row"><i class="fas fa-smile"></i><div><div class="info-label">현재 감정</div><div class="info-value">${em} ${lb}</div></div></div>`;
+      body += `<div class="info-row"><i class="fas fa-chart-bar"></i><div><div class="info-label">감정 점수</div><div class="info-value">${score} / 10</div></div></div>`;
+      if (student.reason) {
+        body += `<div class="info-row"><i class="fas fa-quote-left"></i><div><div class="info-label">감정 이유</div><div class="info-value">"${escHtml(student.reason)}"</div></div></div>`;
+      }
+      if (st) {
+        body += `<div class="info-row"><i class="fas fa-percentage"></i><div><div class="info-label">긍정 감정 비율 (30일)</div><div class="info-value" style="color:${st.positiveRate >= 60 ? 'var(--success)' : st.positiveRate >= 40 ? 'var(--warning)' : 'var(--danger)'};">${st.positiveRate}%</div></div></div>`;
+        body += `<div class="info-row"><i class="fas fa-calendar-check"></i><div><div class="info-label">총 기록 수</div><div class="info-value">${st.totalCount}회</div></div></div>`;
+        // 최근 감정 타임라인
+        if (st.timeline.length > 0) {
+          body += '<div style="margin-top:12px;"><div style="font-size:12px;font-weight:600;color:var(--on-surface-md);margin-bottom:8px;">최근 감정 타임라인</div><div style="display:flex;gap:4px;flex-wrap:wrap;">';
+          st.timeline.slice(-10).forEach(t => {
+            body += `<span style="font-size:18px;" title="${t.date}">${API_EMOJI[t.emotion] || '😐'}</span>`;
+          });
+          body += '</div></div>';
+        }
+      }
+      document.getElementById('modalBody').innerHTML = body;
+      document.getElementById('studentModal').classList.add('visible');
+    }
+
+    function closeModal() {
+      document.getElementById('studentModal').classList.remove('visible');
+    }
+
+    function toggleCat(el) {
+      el.classList.toggle('selected');
+    }
+
+    function useTemplate(el) {
+      document.getElementById('selQuestion').value = el.textContent;
+    }
+
+    function escHtml(s) { if (!s) return ''; const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+    function showToast(msg) {
+      const t = document.createElement('div'); t.className = 'toast';
+      t.innerHTML = '<i class="fas fa-check-circle"></i> ' + msg;
+      document.body.appendChild(t);
+      setTimeout(() => { t.style.opacity = '0'; t.style.transition = 'opacity .3s'; setTimeout(() => t.remove(), 300); }, 2500);
+    }
+
+    // 초기 로드
+    loadData(weekStartStr, todayStr);
+  </script>
+</body>
+</html>

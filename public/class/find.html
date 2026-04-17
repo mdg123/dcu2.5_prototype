@@ -1,0 +1,1100 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>다채움 - 클래스 찾기</title>
+  <link rel="stylesheet" href="/css/common-nav.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <style>
+    :root {
+      --primary: #4A7CFF; --primary-dark: #3A6AE8; --primary-light: #E8EEFF;
+      --secondary: #7C4DFF; --secondary-light: #F0EBFF;
+      --success: #10B981; --success-light: #D1FAE5;
+      --warning: #F59E0B; --warning-light: #FEF3C7;
+      --danger: #EF4444; --danger-light: #FEE2E2;
+      --gray-50: #F9FAFB; --gray-100: #F3F4F6; --gray-200: #E5E7EB; --gray-300: #D1D5DB;
+      --gray-500: #6B7280; --gray-600: #4B5563; --gray-700: #374151; --gray-800: #1F2937;
+      --radius: 12px; --radius-lg: 16px; --radius-sm: 8px; --radius-full: 999px;
+      --shadow: 0 1px 3px rgba(0,0,0,0.08); --shadow-md: 0 4px 12px rgba(0,0,0,0.1);
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Pretendard','Noto Sans KR',system-ui,sans-serif; background: #E8ECF1; color: #1A1A2E; }
+    .container { max-width: 1800px; margin: 0 auto; padding: 24px 20px; }
+
+    /* 페이지 헤더 */
+    .page-title { display: flex; align-items: center; gap: 10px; font-size: 24px; font-weight: 800; margin-bottom: 24px; }
+    .page-title::before { content: ''; width: 6px; height: 32px; background: linear-gradient(180deg, var(--primary) 0%, var(--secondary) 100%); border-radius: var(--radius-full); }
+
+    /* 검색 섹션 */
+    .search-section {
+      background: #fff; border-radius: var(--radius-lg); padding: 24px; margin-bottom: 24px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.08); border: 1px solid var(--gray-200); position: relative; overflow: hidden;
+    }
+    .search-section::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 4px; background: linear-gradient(90deg, var(--primary), var(--secondary), #14b8a6); }
+    .search-tabs { display: flex; background: var(--gray-100); border-radius: var(--radius-sm); width: fit-content; padding: 3px; margin-bottom: 16px; }
+    .search-tab { padding: 8px 20px; border: none; background: transparent; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer; font-family: inherit; color: var(--gray-500); transition: all 0.2s; }
+    .search-tab.active { background: #fff; color: var(--primary); box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+    .search-box { display: flex; gap: 10px; margin-bottom: 16px; position: relative; }
+    .search-box input { flex: 1; padding: 12px 16px 12px 42px; border: 2px solid var(--gray-200); border-radius: var(--radius-sm); font-size: 15px; outline: none; font-family: inherit; transition: border-color 0.2s; }
+    .search-box input:focus { border-color: var(--primary); }
+    .search-box .search-icon { position: absolute; left: 14px; top: 50%; transform: translateY(-50%); color: var(--gray-500); font-size: 16px; z-index: 1; }
+    .search-box button { padding: 12px 28px; background: var(--primary); color: #fff; border: none; border-radius: var(--radius-sm); font-size: 14px; font-weight: 600; cursor: pointer; font-family: inherit; white-space: nowrap; transition: background 0.2s; }
+    .search-box button:hover { background: var(--primary-dark); }
+    .popular-tags { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    .popular-tags .label { font-size: 13px; color: var(--gray-500); font-weight: 500; }
+    .tag-chip { padding: 4px 12px; background: var(--gray-100); border-radius: var(--radius-full); font-size: 13px; cursor: pointer; border: none; font-family: inherit; transition: all 0.2s; color: var(--gray-600); }
+    .tag-chip:hover { background: var(--primary-light); color: var(--primary); }
+    .tag-chip.hot { background: #FFF1F2; color: #E11D48; font-weight: 600; }
+
+    /* AI 추천 섹션 */
+    .recommend-section {
+      background: linear-gradient(135deg, #C7D2FE, #DDD6FE);
+      border-radius: var(--radius-lg); padding: 20px 24px; margin-bottom: 24px;
+      border: 1px solid #A5B4FC;
+    }
+    .recommend-section h2 { font-size: 16px; font-weight: 700; margin-bottom: 14px; display: flex; align-items: center; gap: 8px; }
+    .recommend-scroll { display: flex; gap: 14px; overflow-x: auto; padding-bottom: 8px; }
+    .recommend-scroll::-webkit-scrollbar { height: 4px; }
+    .recommend-scroll::-webkit-scrollbar-thumb { background: var(--gray-300); border-radius: 2px; }
+    .recommend-card {
+      flex: 0 0 220px; background: #fff; border-radius: var(--radius); overflow: hidden;
+      box-shadow: 0 3px 10px rgba(0,0,0,0.12); border: 1px solid rgba(255,255,255,0.8); cursor: pointer; transition: transform 0.2s, box-shadow 0.2s;
+    }
+    .recommend-card:hover { transform: translateY(-3px); box-shadow: 0 6px 20px rgba(0,0,0,0.18); }
+    .recommend-card-img { height: 90px; background: linear-gradient(135deg, var(--primary-light), var(--secondary-light)); display: flex; align-items: center; justify-content: center; font-size: 2.5rem; position: relative; }
+    .recommend-card-img .cat-badge { position: absolute; top: 8px; left: 8px; font-size: 11px; padding: 2px 8px; background: rgba(255,255,255,0.9); border-radius: var(--radius-full); color: var(--gray-600); font-weight: 500; }
+    .recommend-card-body { padding: 10px 12px; }
+    .recommend-card-body .school { font-size: 11px; color: var(--gray-500); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .recommend-card-body h3 { font-size: 13px; font-weight: 600; margin: 2px 0 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .recommend-card-body .members { font-size: 12px; color: var(--gray-500); }
+
+    /* 메인 레이아웃 (2컬럼) */
+    .main-layout { display: grid; grid-template-columns: 1fr 340px; gap: 24px; }
+
+    /* 필터 바 */
+    .filter-bar {
+      background: #fff; border-radius: var(--radius); padding: 14px 18px; margin-bottom: 16px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.08); border: 1px solid var(--gray-200); display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between;
+    }
+    .filter-left { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    .filter-left .label { font-size: 13px; font-weight: 600; color: var(--gray-500); }
+    .filter-chip { padding: 6px 14px; border-radius: var(--radius-full); border: 1.5px solid var(--gray-200); background: #fff; font-size: 13px; cursor: pointer; font-family: inherit; transition: all 0.2s; color: var(--gray-600); }
+    .filter-chip.active { border-color: var(--primary); background: var(--primary-light); color: var(--primary); font-weight: 600; }
+    .filter-chip:hover { border-color: var(--primary); }
+    .filter-right { display: flex; gap: 8px; align-items: center; }
+    .filter-select { padding: 6px 12px; border: 1.5px solid var(--gray-200); border-radius: var(--radius-sm); font-size: 13px; outline: none; font-family: inherit; background: #fff; color: var(--gray-700); }
+    .view-toggle { display: flex; background: var(--gray-100); border-radius: 6px; padding: 2px; }
+    .view-btn { padding: 5px 10px; border: none; background: transparent; border-radius: 4px; cursor: pointer; font-size: 14px; color: var(--gray-500); transition: all 0.2s; }
+    .view-btn.active { background: #fff; color: var(--primary); box-shadow: 0 1px 2px rgba(0,0,0,0.08); }
+
+    /* 결과 정보 바 */
+    .results-bar { background: var(--primary-light); border-left: 4px solid var(--primary); border-radius: var(--radius-sm); padding: 12px 16px; margin-bottom: 16px; font-size: 14px; font-weight: 600; }
+    .results-bar .count { color: var(--primary); font-size: 18px; font-weight: 700; }
+
+    /* 클래스 그리드 */
+    .class-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; }
+    .class-grid.list-view { grid-template-columns: 1fr; }
+
+    /* 클래스 카드 (그리드 뷰) */
+    .class-card {
+      background: #fff; border-radius: var(--radius); overflow: hidden;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1); border: 1px solid var(--gray-200); cursor: pointer; transition: transform 0.15s, box-shadow 0.15s;
+    }
+    .class-card:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(0,0,0,0.12); border-color: var(--primary); }
+    .card-img { height: 130px; background: linear-gradient(135deg, var(--primary-light), var(--secondary-light)); display: flex; align-items: center; justify-content: center; font-size: 3rem; position: relative; }
+    .card-img .cat-badge { position: absolute; top: 10px; left: 10px; font-size: 11px; padding: 3px 10px; background: rgba(255,255,255,0.9); border-radius: var(--radius-full); color: var(--gray-600); font-weight: 500; }
+    .card-img .bookmark-btn { position: absolute; top: 10px; right: 10px; width: 34px; height: 34px; border: none; background: rgba(255,255,255,0.9); border-radius: 50%; cursor: pointer; font-size: 15px; display: flex; align-items: center; justify-content: center; transition: transform 0.2s; }
+    .card-img .bookmark-btn:hover { transform: scale(1.1); }
+    .card-img .auto-badge { position: absolute; bottom: 10px; left: 10px; font-size: 11px; padding: 3px 10px; background: var(--success); color: #fff; border-radius: var(--radius-full); font-weight: 600; }
+    .card-img .activity-badge { position: absolute; bottom: 10px; right: 10px; padding: 3px 10px; border-radius: 4px; font-size: 11px; font-weight: 500; }
+    .activity-badge.active { background: var(--success); color: #fff; }
+    .activity-badge.inactive { background: rgba(0,0,0,0.6); color: #fff; }
+    .card-body { padding: 14px 16px; }
+    .card-body .school { font-size: 12px; color: var(--gray-500); margin-bottom: 2px; }
+    .card-body h3 { font-size: 15px; font-weight: 600; margin-bottom: 6px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+    .card-body .desc { font-size: 13px; color: var(--gray-600); margin-bottom: 10px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.5; }
+    .card-body .tags { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 10px; }
+    .tag-badge { font-size: 11px; padding: 2px 8px; border-radius: var(--radius-full); font-weight: 500; }
+    .tag-badge.student { background: #DBEAFE; color: #2563EB; }
+    .tag-badge.teacher { background: #E0E7FF; color: #4F46E5; }
+    .tag-badge.parent { background: var(--warning-light); color: #D97706; }
+    .card-body .stats { display: flex; gap: 14px; font-size: 12px; color: var(--gray-500); padding-top: 10px; border-top: 1px solid var(--gray-100); }
+    .card-body .stats i { margin-right: 3px; }
+    .card-footer { display: flex; gap: 8px; padding: 0 16px 14px; }
+    .card-footer button { flex: 1; padding: 8px; border-radius: var(--radius-sm); font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit; border: none; transition: all 0.2s; }
+    .btn-detail { background: var(--gray-100); color: var(--gray-700); }
+    .btn-detail:hover { background: var(--gray-200); }
+    .btn-join { background: var(--primary); color: #fff; }
+    .btn-join:hover { background: var(--primary-dark); }
+
+    /* 리스트 뷰 카드 */
+    .class-card.list-item { display: flex; align-items: center; gap: 16px; padding: 14px; }
+    .class-card.list-item .card-img { width: 110px; height: 75px; border-radius: var(--radius-sm); flex-shrink: 0; font-size: 2rem; }
+    .class-card.list-item .card-img .cat-badge,
+    .class-card.list-item .card-img .bookmark-btn,
+    .class-card.list-item .card-img .auto-badge,
+    .class-card.list-item .card-img .activity-badge { display: none; }
+    .class-card.list-item .list-info { flex: 1; min-width: 0; }
+    .class-card.list-item .list-info .school { font-size: 12px; color: var(--gray-500); }
+    .class-card.list-item .list-info h3 { font-size: 14px; font-weight: 600; margin: 2px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .class-card.list-item .list-info .tags { display: flex; gap: 4px; margin-top: 4px; }
+    .class-card.list-item .list-stats { display: flex; gap: 14px; font-size: 13px; color: var(--gray-500); flex-shrink: 0; }
+    .class-card.list-item .list-join { padding: 7px 18px; background: var(--primary); color: #fff; border: none; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit; flex-shrink: 0; }
+
+    /* 페이지네이션 */
+    .pagination { display: flex; justify-content: center; gap: 4px; margin-top: 24px; }
+    .page-btn { padding: 7px 13px; border: 1px solid var(--gray-200); background: #fff; border-radius: 6px; font-size: 13px; cursor: pointer; font-family: inherit; transition: all 0.2s; color: var(--gray-600); }
+    .page-btn.active { background: var(--primary); color: #fff; border-color: var(--primary); }
+    .page-btn:hover:not(.active):not(:disabled) { background: var(--gray-100); }
+    .page-btn:disabled { opacity: 0.4; cursor: default; }
+
+    /* 비공개 클래스 배너 */
+    .private-banner { background: var(--gray-800); color: #fff; padding: 20px; border-radius: var(--radius-lg); text-align: center; margin-top: 24px; }
+    .private-banner h3 { font-size: 15px; font-weight: 600; margin-bottom: 4px; }
+    .private-banner p { font-size: 13px; color: var(--gray-300); }
+    .private-banner em { color: #FB923C; font-style: normal; font-weight: 700; font-size: 20px; }
+
+    /* 사이드바 */
+    .sidebar-area { display: flex; flex-direction: column; gap: 16px; }
+    .sidebar-card {
+      background: #fff; border-radius: var(--radius); padding: 18px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.08); border: 1px solid var(--gray-200);
+    }
+    .sidebar-title { font-size: 15px; font-weight: 700; margin-bottom: 14px; display: flex; align-items: center; gap: 6px; }
+    .sidebar-card select { width: 100%; padding: 9px 12px; border: 1.5px solid var(--gray-200); border-radius: var(--radius-sm); font-size: 13px; font-family: inherit; outline: none; margin-bottom: 10px; }
+    .sidebar-card .btn-row { display: flex; gap: 8px; }
+    .sidebar-card .btn-row button { flex: 1; padding: 8px; border-radius: var(--radius-sm); font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit; border: none; }
+    .sidebar-card .create-link { display: block; text-align: right; margin-top: 10px; font-size: 13px; color: var(--primary); text-decoration: none; font-weight: 500; }
+    .sidebar-card .create-link:hover { text-decoration: underline; }
+
+    /* 랭킹 리스트 */
+    .rank-item { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--gray-100); }
+    .rank-item:last-child { border-bottom: none; }
+    .rank-badge { width: 26px; height: 26px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; flex-shrink: 0; }
+    .rank-badge.gold { background: linear-gradient(135deg, #FCD34D, #F59E0B); color: #fff; }
+    .rank-badge.silver { background: linear-gradient(135deg, #D1D5DB, #9CA3AF); color: #fff; }
+    .rank-badge.bronze { background: linear-gradient(135deg, #FDBA74, #EA580C); color: #fff; }
+    .rank-badge.normal { background: var(--gray-100); color: var(--gray-500); }
+    .rank-item .name { flex: 1; font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .rank-item .change { font-size: 11px; font-weight: 600; flex-shrink: 0; }
+    .change.up { color: var(--success); }
+    .change.down { color: var(--danger); }
+    .change.same { color: var(--gray-500); }
+
+    /* 최근 본 클래스 */
+    .recent-item { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--gray-100); cursor: pointer; }
+    .recent-item:last-child { border-bottom: none; }
+    .recent-item:hover { background: var(--gray-50); margin: 0 -4px; padding: 8px 4px; border-radius: 6px; }
+    .recent-icon { width: 36px; height: 36px; border-radius: var(--radius-sm); background: var(--primary-light); display: flex; align-items: center; justify-content: center; font-size: 16px; flex-shrink: 0; }
+    .recent-item .info { flex: 1; min-width: 0; }
+    .recent-item .info .name { font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .recent-item .info .time { font-size: 11px; color: var(--gray-500); }
+
+    /* 승인 현황 */
+    .approval-tabs { display: flex; background: var(--gray-100); border-radius: 6px; padding: 3px; margin-bottom: 12px; }
+    .approval-tab { flex: 1; padding: 7px; border: none; background: transparent; border-radius: 4px; font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit; color: var(--gray-500); position: relative; transition: all 0.2s; }
+    .approval-tab.active { background: #fff; color: var(--primary); box-shadow: 0 1px 2px rgba(0,0,0,0.08); }
+    .approval-tab .badge-count { position: absolute; top: -2px; right: -2px; min-width: 18px; height: 18px; background: var(--danger); color: #fff; border-radius: var(--radius-full); font-size: 10px; font-weight: 700; display: flex; align-items: center; justify-content: center; padding: 0 4px; }
+    .approval-item { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--gray-100); }
+    .approval-item:last-child { border-bottom: none; }
+    .approval-status { font-size: 11px; padding: 3px 8px; border-radius: var(--radius-full); font-weight: 600; flex-shrink: 0; }
+    .approval-status.completed { background: var(--success-light); color: var(--success); }
+    .approval-status.pending { background: var(--warning-light); color: #D97706; }
+    .approval-item .info { flex: 1; min-width: 0; }
+    .approval-item .info .cls-name { font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .approval-item .info .user-name { font-size: 11px; color: var(--gray-500); }
+
+    /* 클래스 상세 모달 */
+    .modal-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 10000; align-items: center; justify-content: center; }
+    .modal-overlay.active { display: flex; }
+    .modal { background: #fff; border-radius: var(--radius-lg); width: 90%; max-width: 560px; max-height: 90vh; overflow-y: auto; }
+    .modal-header { display: flex; justify-content: space-between; align-items: center; padding: 20px 24px 0; }
+    .modal-header h2 { font-size: 18px; font-weight: 700; }
+    .modal-close { width: 32px; height: 32px; border: none; background: var(--gray-100); border-radius: 50%; cursor: pointer; font-size: 16px; display: flex; align-items: center; justify-content: center; }
+    .modal-body { padding: 20px 24px; }
+    .modal-body .detail-img { height: 160px; background: linear-gradient(135deg, var(--primary-light), var(--secondary-light)); border-radius: var(--radius); display: flex; align-items: center; justify-content: center; font-size: 4rem; margin-bottom: 16px; }
+    .modal-body .detail-school { font-size: 13px; color: var(--gray-500); margin-bottom: 4px; }
+    .modal-body .detail-name { font-size: 20px; font-weight: 700; margin-bottom: 12px; }
+    .modal-body .detail-creator { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+    .modal-body .detail-creator .avatar { width: 40px; height: 40px; border-radius: 50%; background: var(--primary-light); display: flex; align-items: center; justify-content: center; font-size: 18px; }
+    .modal-body .detail-creator .name { font-weight: 600; font-size: 14px; }
+    .modal-body .detail-creator .role { font-size: 12px; color: var(--gray-500); }
+    .modal-body .detail-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; background: var(--gray-50); border-radius: var(--radius-sm); padding: 14px; margin-bottom: 16px; text-align: center; }
+    .modal-body .detail-stats .stat-val { font-size: 18px; font-weight: 700; color: var(--primary); }
+    .modal-body .detail-stats .stat-label { font-size: 11px; color: var(--gray-500); margin-top: 2px; }
+    .modal-body .detail-desc { font-size: 14px; color: var(--gray-600); line-height: 1.6; margin-bottom: 16px; }
+    .modal-body .approve-info { padding: 12px 16px; border-radius: var(--radius-sm); font-size: 13px; font-weight: 500; }
+    .approve-info.auto { background: var(--primary-light); color: var(--primary); }
+    .approve-info.manual { background: #FFF7ED; color: #C2410C; }
+    .modal-footer { display: flex; gap: 8px; padding: 0 24px 20px; }
+    .modal-footer button { flex: 1; padding: 10px; border-radius: var(--radius-sm); font-size: 14px; font-weight: 600; cursor: pointer; font-family: inherit; border: none; transition: all 0.2s; }
+
+    /* 초대코드 모달 */
+    .code-modal { background: #fff; border-radius: var(--radius-lg); padding: 28px; width: 90%; max-width: 400px; }
+    .code-modal h3 { font-size: 18px; font-weight: 700; margin-bottom: 16px; }
+    .code-modal .form-group { margin-bottom: 16px; }
+    .code-modal .form-group label { display: block; font-size: 13px; font-weight: 600; color: var(--gray-700); margin-bottom: 6px; }
+    .code-modal .form-group input { width: 100%; padding: 12px 14px; border: 2px solid var(--gray-200); border-radius: var(--radius-sm); font-size: 18px; text-align: center; letter-spacing: 6px; font-family: monospace; outline: none; transition: border-color 0.2s; }
+    .code-modal .form-group input:focus { border-color: var(--primary); }
+    .code-modal .modal-actions { display: flex; gap: 10px; justify-content: flex-end; }
+    .code-modal .modal-actions button { padding: 10px 20px; border: none; border-radius: var(--radius-sm); font-size: 14px; font-weight: 600; cursor: pointer; font-family: inherit; }
+    .code-modal .btn-cancel { background: var(--gray-100); color: var(--gray-700); }
+    .code-modal .btn-join { background: var(--primary); color: #fff; }
+    .msg { padding: 10px; border-radius: var(--radius-sm); font-size: 13px; margin-bottom: 12px; display: none; }
+    .msg-success { background: #f0fdf4; color: #16a34a; border: 1px solid #bbf7d0; }
+    .msg-error { background: #fef2f2; color: #dc2626; border: 1px solid #fecaca; }
+
+    /* 토스트 */
+    .toast-container { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); z-index: 20000; pointer-events: none; }
+    .toast { padding: 12px 24px; background: var(--gray-800); color: #fff; border-radius: var(--radius-sm); font-size: 14px; font-weight: 500; opacity: 0; transform: translateY(10px); transition: all 0.3s; pointer-events: auto; }
+    .toast.show { opacity: 1; transform: translateY(0); }
+
+    /* 빈 상태 */
+    .empty-state { text-align: center; padding: 60px 20px; color: var(--gray-500); }
+    .empty-state i { font-size: 48px; margin-bottom: 12px; display: block; color: var(--gray-300); }
+    .empty-state h3 { font-size: 16px; font-weight: 600; margin-bottom: 6px; }
+    .empty-state p { font-size: 14px; margin-bottom: 16px; }
+    .empty-state button { padding: 8px 20px; background: var(--primary); color: #fff; border: none; border-radius: var(--radius-sm); font-size: 14px; font-weight: 600; cursor: pointer; font-family: inherit; }
+
+    /* 클래스 통계 가로 막대 */
+    .stats-banner {
+      background: #fff; border-radius: var(--radius-lg); padding: 28px 32px; margin-bottom: 24px;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.1); border: 1px solid var(--gray-200);
+    }
+    .stats-banner h2 { font-size: 17px; font-weight: 800; color: var(--gray-800); margin-bottom: 20px; display: flex; align-items: center; gap: 8px; }
+    .hbar-row { display: flex; align-items: center; gap: 16px; margin-bottom: 16px; }
+    .hbar-row:last-child { margin-bottom: 0; }
+    .hbar-label { width: 100px; font-size: 14px; font-weight: 700; color: var(--gray-700); text-align: right; flex-shrink: 0; }
+    .hbar-track { flex: 1; height: 36px; background: var(--gray-100); border-radius: 18px; overflow: hidden; position: relative; }
+    .hbar-fill { height: 100%; border-radius: 18px; width: 0; transition: width 1.5s cubic-bezier(0.22, 1, 0.36, 1); display: flex; align-items: center; justify-content: flex-end; padding-right: 16px; min-width: 60px; }
+    .hbar-fill.blue { background: linear-gradient(90deg, #3B82F6, #1D4ED8); }
+    .hbar-fill.green { background: linear-gradient(90deg, #10B981, #047857); }
+    .hbar-count { font-size: 15px; font-weight: 800; color: #fff; white-space: nowrap; text-shadow: 0 1px 2px rgba(0,0,0,0.2); }
+
+    @media (max-width: 1200px) {
+      .main-layout { grid-template-columns: 1fr; }
+      .sidebar-area { order: -1; display: grid; grid-template-columns: repeat(2, 1fr); }
+    }
+    @media (max-width: 768px) {
+      .search-box { flex-wrap: wrap; }
+      .filter-bar { flex-direction: column; align-items: flex-start; }
+      .filter-right { width: 100%; justify-content: space-between; }
+      .class-grid { grid-template-columns: 1fr; }
+      .sidebar-area { grid-template-columns: 1fr; }
+      .recommend-card { flex: 0 0 180px; }
+    }
+  </style>
+</head>
+<body>
+  <script src="/js/common-nav.js"></script>
+  <div class="container" id="mainContent" style="display:none;">
+    <!-- 페이지 타이틀 -->
+    <h1 class="page-title">클래스 찾기</h1>
+
+    <!-- 검색 섹션 -->
+    <section class="search-section">
+      <div class="search-tabs">
+        <button class="search-tab active" data-type="keyword">키워드 검색</button>
+        <button class="search-tab" data-type="code">클래스 코드</button>
+      </div>
+      <div class="search-box">
+        <i class="fas fa-search search-icon"></i>
+        <input type="text" id="searchInput" placeholder="클래스명, 학교명, 개설자명으로 검색">
+        <button onclick="handleSearch()"><i class="fas fa-search"></i> 검색</button>
+      </div>
+      <div id="popularTags" class="popular-tags">
+        <span class="label">인기 검색어</span>
+      </div>
+    </section>
+
+    <!-- AI 추천 섹션 -->
+    <section class="recommend-section">
+      <h2>✨ 맞춤 추천 클래스</h2>
+      <div id="recommendList" class="recommend-scroll"></div>
+    </section>
+
+    <!-- 메인 레이아웃 -->
+    <div class="main-layout">
+      <main>
+        <!-- 필터 바 -->
+        <div class="filter-bar">
+          <div class="filter-left">
+            <span class="label">필터</span>
+            <button class="filter-chip active" data-filter="joinable">✓ 가입 가능</button>
+            <button class="filter-chip" data-filter="mySchool">🏫 우리학교</button>
+            <select id="subjectFilter" class="filter-select">
+              <option value="">전체 과목</option>
+              <option>국어</option><option>수학</option><option>영어</option><option>과학</option><option>사회</option>
+              <option>도덕</option><option>음악</option><option>미술</option><option>체육</option><option>실과</option>
+              <option>통합</option><option>기타</option>
+            </select>
+            <select id="gradeFilter" class="filter-select">
+              <option value="">전체 학년</option>
+              <option value="1">1학년</option><option value="2">2학년</option><option value="3">3학년</option>
+              <option value="4">4학년</option><option value="5">5학년</option><option value="6">6학년</option>
+            </select>
+          </div>
+          <div class="filter-right">
+            <select id="sortSelect" class="filter-select">
+              <option value="latest">최신 등록순</option>
+              <option value="members">가입자수 순</option>
+            </select>
+            <div class="view-toggle">
+              <button class="view-btn active" data-view="grid" title="그리드 보기"><i class="fas fa-th-large"></i></button>
+              <button class="view-btn" data-view="list" title="리스트 보기"><i class="fas fa-list"></i></button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 결과 정보 -->
+        <div id="resultsBar" class="results-bar">총 <span class="count">0</span>개의 클래스</div>
+
+        <!-- 결과 메시지 -->
+        <div id="resultMsg" class="msg"></div>
+
+        <!-- 클래스 목록 -->
+        <div id="classList" class="class-grid"></div>
+
+        <!-- 페이지네이션 -->
+        <div id="pagination" class="pagination"></div>
+
+        <!-- 비공개 클래스 배너 -->
+        <div class="private-banner" id="privateBanner" style="display:none;">
+          <h3><i class="fas fa-lock"></i> 그 외 비공개 클래스</h3>
+          <p>초대코드로만 참가 가능한 비공개 클래스가 운영되고 있습니다.</p>
+        </div>
+      </main>
+
+      <!-- 사이드바 -->
+      <aside class="sidebar-area">
+        <div class="sidebar-card" id="statsBanner">
+          <h3 class="sidebar-title">📊 클래스 현황</h3>
+          <div style="display:flex;align-items:center;justify-content:space-around;">
+            <div style="text-align:center;">
+              <div style="font-size:12px;font-weight:600;color:var(--gray-500);margin-bottom:4px;"><i class="fas fa-chalkboard" style="color:var(--primary);margin-right:4px;"></i>개설 클래스</div>
+              <div style="display:flex;align-items:baseline;justify-content:center;gap:2px;">
+                <span id="statClassCount" style="font-size:28px;font-weight:800;color:var(--primary);line-height:1;">0</span>
+                <span style="font-size:12px;color:var(--gray-400);">개</span>
+              </div>
+            </div>
+            <div style="width:1px;height:40px;background:var(--gray-200);"></div>
+            <div style="text-align:center;">
+              <div style="font-size:12px;font-weight:600;color:var(--gray-500);margin-bottom:4px;"><i class="fas fa-users" style="color:#10B981;margin-right:4px;"></i>총 참여자</div>
+              <div style="display:flex;align-items:baseline;justify-content:center;gap:2px;">
+                <span id="statMemberCount" style="font-size:28px;font-weight:800;color:#10B981;line-height:1;">0</span>
+                <span style="font-size:12px;color:var(--gray-400);">명</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="sidebar-card">
+          <h3 class="sidebar-title">📚 나의 클래스 현황</h3>
+          <select id="myClassSelect"></select>
+          <div class="btn-row">
+            <button style="background:var(--primary);color:#fff;" onclick="goToMyClass()">GO</button>
+            <button style="background:var(--gray-100);color:var(--gray-700);" onclick="location.href='/class/'">나의 클래스</button>
+          </div>
+          <a href="/class/" class="create-link">✏️ 채움 클래스 만들기</a>
+        </div>
+
+        <div class="sidebar-card">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+            <h3 class="sidebar-title" style="margin-bottom:0;">🏆 명예의 전당</h3>
+            <a href="/class/hall-of-fame.html" style="font-size:13px;color:var(--primary);text-decoration:none;font-weight:600;">전체보기 →</a>
+          </div>
+          <div id="rankingList"></div>
+        </div>
+
+        <div class="sidebar-card">
+          <h3 class="sidebar-title">🕐 최근 본 클래스</h3>
+          <div id="recentList"></div>
+        </div>
+
+        <div class="sidebar-card">
+          <h3 class="sidebar-title">📋 가입/승인 현황</h3>
+          <div class="approval-tabs">
+            <button class="approval-tab active" onclick="switchApprovalTab(this,'request')">가입 신청</button>
+            <button class="approval-tab" onclick="switchApprovalTab(this,'manage')">
+              승인 관리
+              <span class="badge-count" id="approvalBadge" style="display:none;">0</span>
+            </button>
+          </div>
+          <div id="approvalList"></div>
+        </div>
+      </aside>
+    </div>
+  </div>
+
+  <!-- 클래스 상세 모달 -->
+  <div class="modal-overlay" id="detailModal">
+    <div class="modal" id="detailContent"></div>
+  </div>
+
+  <!-- 초대코드 모달 -->
+  <div class="modal-overlay" id="codeModal">
+    <div class="code-modal">
+      <h3><i class="fas fa-key" style="color:var(--success);margin-right:6px;"></i>초대코드로 참가</h3>
+      <div id="codeMsg" class="msg"></div>
+      <div class="form-group">
+        <label>초대 코드 입력</label>
+        <input type="text" id="joinCode" maxlength="6" placeholder="ABC123" style="text-transform:uppercase;">
+      </div>
+      <div class="modal-actions">
+        <button class="btn-cancel" onclick="document.getElementById('codeModal').classList.remove('active')">취소</button>
+        <button class="btn-join" onclick="joinByCode()">참가하기</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 토스트 -->
+  <div class="toast-container">
+    <div id="toast" class="toast"></div>
+  </div>
+
+  <script>
+    const subjectColors = {
+      '국어': '#2563eb', '수학': '#dc2626', '영어': '#f59e0b', '과학': '#10b981',
+      '사회': '#8b5cf6', '도덕': '#ec4899', '음악': '#06b6d4', '미술': '#f97316',
+      '체육': '#22c55e', '실과': '#6366f1', '통합': '#14b8a6', '기타': '#6B7280'
+    };
+    const subjectIcons = {
+      '국어': '📖', '수학': '🧮', '영어': '🌍', '과학': '🔬',
+      '사회': '🏛️', '도덕': '💜', '음악': '🎵', '미술': '🎨',
+      '체육': '⚽', '실과': '🔧', '통합': '📚', '기타': '📁'
+    };
+    const popularTags = ['수학', '영어', '코딩', '독서', '과학탐구', '예술교육', '진로', '창의융합'];
+    // 명예의 전당 API 실패/빈 응답 시 가짜 데이터 대신 빈 상태로 처리
+    const rankingData = [];
+
+    let state = {
+      searchType: 'keyword',
+      viewType: 'grid',
+      currentPage: 1,
+      totalPages: 1,
+      total: 0
+    };
+
+    // 무한 스크롤 상태
+    let classPage = 1;
+    let classLoading = false;
+    let classHasMore = true;
+
+    function escHtml(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+    // ==================== 검색 탭 ====================
+    document.querySelectorAll('.search-tab').forEach(tab => {
+      tab.addEventListener('click', () => {
+        document.querySelectorAll('.search-tab').forEach(t => t.classList.remove('active'));
+        tab.classList.add('active');
+        state.searchType = tab.dataset.type;
+        const input = document.getElementById('searchInput');
+        if (state.searchType === 'code') {
+          input.placeholder = '클래스 초대코드 입력 (예: ABC123)';
+          input.style.letterSpacing = '3px';
+          input.style.textTransform = 'uppercase';
+        } else {
+          input.placeholder = '클래스명, 학교명, 개설자명으로 검색';
+          input.style.letterSpacing = 'normal';
+          input.style.textTransform = 'none';
+        }
+      });
+    });
+
+    // ==================== 뷰 토글 ====================
+    document.querySelectorAll('.view-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.view-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        state.viewType = btn.dataset.view;
+        classPage = 1; classHasMore = true;
+        searchClasses(1);
+      });
+    });
+
+    // ==================== 필터 칩 ====================
+    document.querySelectorAll('.filter-chip').forEach(chip => {
+      chip.addEventListener('click', () => {
+        chip.classList.toggle('active');
+        classPage = 1; classHasMore = true;
+        searchClasses(1);
+      });
+    });
+
+    // ==================== 필터 변경 ====================
+    document.getElementById('subjectFilter').addEventListener('change', () => { classPage = 1; classHasMore = true; searchClasses(1); });
+    document.getElementById('gradeFilter').addEventListener('change', () => { classPage = 1; classHasMore = true; searchClasses(1); });
+    document.getElementById('sortSelect').addEventListener('change', () => { classPage = 1; classHasMore = true; searchClasses(1); });
+
+    // ==================== 엔터 검색 ====================
+    document.getElementById('searchInput').addEventListener('keydown', e => {
+      if (e.key === 'Enter') handleSearch();
+    });
+
+    // ==================== 검색 핸들러 ====================
+    function handleSearch() {
+      if (state.searchType === 'code') {
+        const code = document.getElementById('searchInput').value.trim().toUpperCase();
+        if (code) {
+          joinByCodeDirect(code);
+          return;
+        }
+      }
+      classPage = 1; classHasMore = true;
+      searchClasses(1);
+    }
+
+    // ==================== 클래스 검색 (API) — 무한 스크롤 지원 ====================
+    async function searchClasses(page = 1, append = false) {
+      if (classLoading) return;
+      classLoading = true;
+      state.currentPage = page;
+      classPage = page;
+
+      const keyword = document.getElementById('searchInput').value.trim();
+      const subject = document.getElementById('subjectFilter').value;
+      const grade = document.getElementById('gradeFilter').value;
+      const sort = document.getElementById('sortSelect').value;
+
+      const params = new URLSearchParams({ page, limit: 12 });
+      if (keyword && state.searchType === 'keyword') params.set('keyword', keyword);
+      if (subject) params.set('subject', subject);
+      if (grade) params.set('grade', grade);
+      if (sort) params.set('sort', sort);
+
+      try {
+        const res = await fetch('/api/class/search?' + params);
+        const data = await res.json();
+
+        if (!data.success) {
+          if (!append) {
+            document.getElementById('classList').innerHTML = '<div class="empty-state"><i class="fas fa-exclamation-circle"></i><h3>검색에 실패했습니다</h3></div>';
+          }
+          classLoading = false;
+          return;
+        }
+
+        const { classes, total, totalPages } = data;
+        state.total = total;
+        state.totalPages = totalPages;
+        classHasMore = page < totalPages;
+
+        if (keyword) {
+          document.getElementById('resultsBar').innerHTML = `총 <span class="count">${total}</span>개의 클래스 (검색: "${escHtml(keyword)}")`;
+        } else {
+          document.getElementById('resultsBar').innerHTML = `총 <span class="count">${total}</span>개의 클래스`;
+        }
+
+        const container = document.getElementById('classList');
+
+        if (!append) {
+          // 새 검색: 기존 결과 초기화
+          if (classes.length === 0) {
+            container.innerHTML = `
+              <div class="empty-state">
+                <i class="fas fa-search"></i>
+                <h3>검색 결과가 없습니다</h3>
+                <p>다른 검색어로 시도해보세요</p>
+                <button onclick="clearSearch()">전체 보기</button>
+              </div>`;
+            document.getElementById('pagination').innerHTML = '';
+            classLoading = false;
+            return;
+          }
+          container.className = state.viewType === 'list' ? 'class-grid list-view' : 'class-grid';
+          if (state.viewType === 'list') {
+            container.innerHTML = classes.map(c => renderListCard(c)).join('');
+          } else {
+            container.innerHTML = classes.map(c => renderGridCard(c)).join('');
+          }
+        } else {
+          // 무한 스크롤: 기존 결과에 추가
+          const html = state.viewType === 'list'
+            ? classes.map(c => renderListCard(c)).join('')
+            : classes.map(c => renderGridCard(c)).join('');
+          container.insertAdjacentHTML('beforeend', html);
+        }
+
+        // 기존 페이지네이션 숨기기 (무한 스크롤로 대체)
+        document.getElementById('pagination').innerHTML = '';
+        document.getElementById('privateBanner').style.display = total > 0 ? 'block' : 'none';
+      } catch(err) {
+        console.error('검색 오류:', err);
+      } finally {
+        classLoading = false;
+      }
+    }
+
+    // ==================== 무한 스크롤 이벤트 ====================
+    window.addEventListener('scroll', () => {
+      if (classLoading || !classHasMore) return;
+      const scrollBottom = window.innerHeight + window.scrollY;
+      const docHeight = document.documentElement.scrollHeight;
+      if (docHeight - scrollBottom < 200) {
+        searchClasses(classPage + 1, true);
+      }
+    });
+
+    function renderGridCard(c) {
+      const icon = subjectIcons[c.subject] || '📚';
+      const subjectLabel = c.subject || '기타';
+      return `
+        <div class="class-card" onclick="openClassDetail(${c.id})">
+          <div class="card-img">${icon}
+            <span class="cat-badge">${escHtml(subjectLabel)}</span>
+            ${c.is_public !== 0 ? '<span class="activity-badge active"><i class="fas fa-circle" style="font-size:6px;margin-right:3px;"></i>공개</span>' : '<span class="activity-badge inactive"><i class="fas fa-lock" style="font-size:9px;margin-right:3px;"></i>비공개</span>'}
+          </div>
+          <div class="card-body">
+            <div class="school"><i class="fas fa-user" style="margin-right:3px;"></i>${escHtml(c.owner_name || '')}</div>
+            <h3>${escHtml(c.name)}</h3>
+            ${c.description ? `<div class="desc">${escHtml(c.description)}</div>` : ''}
+            <div class="tags">
+              ${c.grade ? `<span class="tag-badge student">${c.grade}학년</span>` : ''}
+              ${c.subject ? `<span class="tag-badge teacher">${escHtml(c.subject)}</span>` : ''}
+            </div>
+            <div class="stats">
+              <span><i class="fas fa-users"></i> ${c.member_count || 0}명</span>
+            </div>
+          </div>
+          <div class="card-footer">
+            <button class="btn-detail" onclick="event.stopPropagation();openClassDetail(${c.id})">상세보기</button>
+            <button class="btn-join" onclick="event.stopPropagation();joinClass(${c.id})">가입신청</button>
+          </div>
+        </div>`;
+    }
+
+    function renderListCard(c) {
+      const icon = subjectIcons[c.subject] || '📚';
+      return `
+        <div class="class-card list-item" onclick="openClassDetail(${c.id})">
+          <div class="card-img">${icon}</div>
+          <div class="list-info">
+            <div class="school">${escHtml(c.owner_name || '')}</div>
+            <h3>${escHtml(c.name)}</h3>
+            <div class="tags">
+              ${c.grade ? `<span class="tag-badge student">${c.grade}학년</span>` : ''}
+              ${c.subject ? `<span class="tag-badge teacher">${escHtml(c.subject)}</span>` : ''}
+            </div>
+          </div>
+          <div class="list-stats">
+            <span><i class="fas fa-users"></i> ${c.member_count || 0}</span>
+          </div>
+          <button class="list-join" onclick="event.stopPropagation();joinClass(${c.id})">가입</button>
+        </div>`;
+    }
+
+    function renderPagination(totalPages, currentPage) {
+      if (totalPages <= 1) { document.getElementById('pagination').innerHTML = ''; return; }
+      let html = `<button class="page-btn" onclick="searchClasses(1)" ${currentPage===1?'disabled':''}>⟪</button>`;
+      html += `<button class="page-btn" onclick="searchClasses(${currentPage-1})" ${currentPage===1?'disabled':''}>⟨</button>`;
+      for (let i = 1; i <= totalPages; i++) {
+        html += `<button class="page-btn ${i===currentPage?'active':''}" onclick="searchClasses(${i})">${i}</button>`;
+      }
+      html += `<button class="page-btn" onclick="searchClasses(${currentPage+1})" ${currentPage===totalPages?'disabled':''}>⟩</button>`;
+      html += `<button class="page-btn" onclick="searchClasses(${totalPages})" ${currentPage===totalPages?'disabled':''}>⟫</button>`;
+      document.getElementById('pagination').innerHTML = html;
+    }
+
+    function clearSearch() {
+      document.getElementById('searchInput').value = '';
+      document.getElementById('subjectFilter').value = '';
+      document.getElementById('gradeFilter').value = '';
+      classPage = 1; classHasMore = true;
+      searchClasses(1);
+    }
+
+    // ==================== 인기 태그 ====================
+    function renderPopularTags() {
+      const container = document.getElementById('popularTags');
+      container.innerHTML = '<span class="label">인기 검색어</span>' +
+        popularTags.map((tag, i) => `<button class="tag-chip ${i < 3 ? 'hot' : ''}" onclick="searchByTag('${tag}')">${i < 3 ? '🔥 ' : ''}${tag}</button>`).join('');
+    }
+
+    function searchByTag(tag) {
+      document.getElementById('searchInput').value = tag;
+      state.searchType = 'keyword';
+      document.querySelectorAll('.search-tab').forEach(t => t.classList.remove('active'));
+      document.querySelector('.search-tab[data-type="keyword"]').classList.add('active');
+      classPage = 1; classHasMore = true;
+      searchClasses(1);
+      showToast(`"${tag}" 검색 완료`);
+    }
+
+    // ==================== AI 추천 ====================
+    async function loadRecommendations() {
+      try {
+        const res = await fetch('/api/class/search?limit=6&sort=members');
+        const data = await res.json();
+        if (!data.success || !data.classes.length) {
+          document.querySelector('.recommend-section').style.display = 'none';
+          return;
+        }
+        const icons = ['🧮', '🎨', '💻', '📖', '🔬', '🎵'];
+        document.getElementById('recommendList').innerHTML = data.classes.map((c, i) => {
+          const icon = subjectIcons[c.subject] || icons[i % icons.length];
+          return `
+            <div class="recommend-card" onclick="openClassDetail(${c.id})">
+              <div class="recommend-card-img">${icon}
+                <span class="cat-badge">${escHtml(c.subject || '기타')}</span>
+              </div>
+              <div class="recommend-card-body">
+                <div class="school">${escHtml(c.owner_name || '')}</div>
+                <h3>${escHtml(c.name)}</h3>
+                <div class="members"><i class="fas fa-users"></i> ${c.member_count || 0}명</div>
+              </div>
+            </div>`;
+        }).join('');
+      } catch(err) {
+        document.querySelector('.recommend-section').style.display = 'none';
+      }
+    }
+
+    // ==================== 사이드바 ====================
+    async function loadSidebar() {
+      // 나의 클래스
+      try {
+        const res = await fetch('/api/class/my');
+        const data = await res.json();
+        if (data.success && data.classes.length) {
+          document.getElementById('myClassSelect').innerHTML =
+            data.classes.map(c => `<option value="${c.id}">${escHtml(c.name)}</option>`).join('');
+        } else {
+          document.getElementById('myClassSelect').innerHTML = '<option value="">참여 중인 클래스 없음</option>';
+        }
+      } catch(e) {
+        document.getElementById('myClassSelect').innerHTML = '<option value="">로드 실패</option>';
+      }
+
+      // 명예의 전당 (실제 API)
+      try {
+        const fameRes = await fetch('/api/portal/hall-of-fame?period=weekly');
+        const fameData = await fameRes.json();
+        if (fameData.success) {
+          const topItems = (fameData.topClasses || []).slice(0, 5);
+          if (topItems.length) {
+            document.getElementById('rankingList').innerHTML = topItems.map((item, i) => {
+              const rank = i + 1;
+              const bc = rank === 1 ? 'gold' : rank === 2 ? 'silver' : rank === 3 ? 'bronze' : 'normal';
+              return `<div class="rank-item">
+                <div class="rank-badge ${bc}">${rank}</div>
+                <span class="name">${escHtml(item.name)}</span>
+                <span class="change" style="font-size:12px;color:var(--gray-500);">${item.activity_count}건</span>
+              </div>`;
+            }).join('');
+          } else {
+            document.getElementById('rankingList').innerHTML = '<div style="text-align:center;padding:18px;font-size:12px;color:var(--gray-500);">이번 주 활동 랭킹 데이터가 없습니다.</div>';
+          }
+        }
+      } catch(e) {
+        document.getElementById('rankingList').innerHTML = '<div style="text-align:center;padding:18px;font-size:12px;color:var(--gray-500);">랭킹을 불러오지 못했습니다.</div>';
+      }
+
+      // 최근 본 클래스 (로컬스토리지)
+      renderRecentViewed();
+
+      // 가입/승인 현황 (실제 API)
+      loadApprovalList('request');
+    }
+
+    async function loadApprovalList(type) {
+      const container = document.getElementById('approvalList');
+      try {
+        const res = await fetch('/api/class/my').then(r => r.json());
+        const myClasses = res.classes || [];
+
+        if (type === 'request') {
+          // 내가 가입한 클래스 목록 표시
+          if (!myClasses.length) {
+            container.innerHTML = '<p style="text-align:center;font-size:13px;color:var(--gray-500);padding:12px 0;">참여 중인 클래스가 없습니다.</p>';
+            return;
+          }
+          container.innerHTML = myClasses.slice(0, 5).map(c => `
+            <div class="approval-item" onclick="location.href='/class/class-home.html?id=${c.id}'" style="cursor:pointer;">
+              <span class="approval-status completed">가입완료</span>
+              <div class="info">
+                <div class="cls-name">${escHtml(c.name)}</div>
+                <div class="user-name">👤 ${escHtml(c.owner_name || '개설자')}</div>
+              </div>
+            </div>`).join('');
+        } else {
+          // 승인 관리 탭: 내가 개설한 클래스의 멤버 목록
+          const ownedClasses = myClasses.filter(c => c.my_role === 'owner');
+          if (!ownedClasses.length) {
+            container.innerHTML = '<p style="text-align:center;font-size:13px;color:var(--gray-500);padding:12px 0;">개설한 클래스가 없습니다.</p>';
+            return;
+          }
+          let html = '';
+          for (const cls of ownedClasses.slice(0, 2)) {
+            const mRes = await fetch(`/api/class/${cls.id}/members`).then(r => r.json());
+            const members = (mRes.members || []).filter(m => m.role === 'member');
+            html += members.slice(0, 3).map(m => `
+              <div class="approval-item">
+                <span class="approval-status completed">멤버</span>
+                <div class="info">
+                  <div class="cls-name">${escHtml(cls.name)}</div>
+                  <div class="user-name">👤 ${escHtml(m.display_name)}</div>
+                </div>
+              </div>`).join('');
+          }
+          container.innerHTML = html || '<p style="text-align:center;font-size:13px;color:var(--gray-500);padding:12px 0;">멤버가 없습니다.</p>';
+          // 뱃지 업데이트
+          const totalMembers = ownedClasses.reduce((s, c) => s + (c.member_count || 0), 0);
+          const badge = document.getElementById('approvalBadge');
+          if (badge && totalMembers > 0) { badge.textContent = totalMembers; badge.style.display = 'inline-block'; }
+        }
+      } catch(e) {
+        container.innerHTML = '<p style="text-align:center;font-size:13px;color:var(--gray-500);padding:12px 0;">데이터 로드 실패</p>';
+      }
+    }
+
+    function renderRecentViewed() {
+      const recent = JSON.parse(localStorage.getItem('recentViewedClasses') || '[]');
+      const container = document.getElementById('recentList');
+      if (!recent.length) {
+        container.innerHTML = '<p style="text-align:center;font-size:13px;color:var(--gray-500);padding:12px 0;">최근 본 클래스가 없습니다</p>';
+        return;
+      }
+      container.innerHTML = recent.slice(0, 5).map(c => `
+        <div class="recent-item" onclick="location.href='/class/class-home.html?id=${c.id}'">
+          <div class="recent-icon">${subjectIcons[c.subject] || '📚'}</div>
+          <div class="info">
+            <div class="name">${escHtml(c.name)}</div>
+            <div class="time">${c.viewedAt || ''}</div>
+          </div>
+        </div>`).join('');
+    }
+
+    function addToRecentViewed(cls) {
+      let recent = JSON.parse(localStorage.getItem('recentViewedClasses') || '[]');
+      recent = recent.filter(c => c.id !== cls.id);
+      recent.unshift({ id: cls.id, name: cls.name, subject: cls.subject, viewedAt: '방금 전' });
+      if (recent.length > 10) recent = recent.slice(0, 10);
+      localStorage.setItem('recentViewedClasses', JSON.stringify(recent));
+      renderRecentViewed();
+    }
+
+    function goToMyClass() {
+      const sel = document.getElementById('myClassSelect');
+      if (sel.value) location.href = '/class/class-home.html?id=' + sel.value;
+    }
+
+    function switchApprovalTab(el, type) {
+      el.parentElement.querySelectorAll('.approval-tab').forEach(t => t.classList.remove('active'));
+      el.classList.add('active');
+      loadApprovalList(type);
+    }
+
+    // ==================== 클래스 상세 모달 ====================
+    async function openClassDetail(classId) {
+      try {
+        const res = await fetch(`/api/class/${classId}`);
+        const data = await res.json();
+        if (!data.success) { showToast('클래스 정보를 불러올 수 없습니다.'); return; }
+        const c = data.classInfo;
+        const icon = subjectIcons[c.subject] || '📚';
+        addToRecentViewed(c);
+
+        document.getElementById('detailContent').innerHTML = `
+          <div class="modal-header">
+            <h2>클래스 상세</h2>
+            <button class="modal-close" onclick="closeDetailModal()">✕</button>
+          </div>
+          <div class="modal-body">
+            <div class="detail-img">${icon}</div>
+            <div class="detail-school"><i class="fas fa-user" style="margin-right:4px;"></i>${escHtml(c.owner_name || '')}</div>
+            <div class="detail-name">${escHtml(c.name)}</div>
+            <div class="detail-creator">
+              <div class="avatar">👤</div>
+              <div><div class="name">${escHtml(c.owner_name || '개설자')}</div><div class="role">개설자</div></div>
+            </div>
+            <div class="tags" style="display:flex;gap:4px;margin-bottom:14px;">
+              ${c.grade ? `<span class="tag-badge student">${c.grade}학년</span>` : ''}
+              ${c.subject ? `<span class="tag-badge teacher">${escHtml(c.subject)}</span>` : ''}
+            </div>
+            <div class="detail-stats">
+              <div><div class="stat-val">${c.member_count || data.members?.length || 0}</div><div class="stat-label">멤버</div></div>
+              <div><div class="stat-val">${c.lesson_count || 0}</div><div class="stat-label">수업</div></div>
+              <div><div class="stat-val">${c.homework_count || 0}</div><div class="stat-label">과제</div></div>
+              <div><div class="stat-val">${c.exam_count || 0}</div><div class="stat-label">평가</div></div>
+            </div>
+            ${c.description ? `<h4 style="font-weight:600;margin-bottom:6px;">클래스 소개</h4><p class="detail-desc">${escHtml(c.description)}</p>` : ''}
+            <div class="approve-info ${c.is_public ? 'auto' : 'manual'}">
+              ${c.is_public ? '⚡ 공개 클래스 — 누구나 가입 가능' : '🔒 비공개 클래스 — 초대코드 필요'}
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button style="background:var(--gray-100);color:var(--gray-700);" onclick="shareClass(${c.id})"><i class="fas fa-share-alt"></i> 공유</button>
+            <button style="background:var(--primary);color:#fff;" onclick="joinClass(${c.id})">가입 신청</button>
+          </div>`;
+        document.getElementById('detailModal').classList.add('active');
+      } catch(err) {
+        showToast('클래스 정보를 불러올 수 없습니다.');
+      }
+    }
+
+    function closeDetailModal() {
+      document.getElementById('detailModal').classList.remove('active');
+    }
+
+    document.getElementById('detailModal').addEventListener('click', e => {
+      if (e.target.id === 'detailModal') closeDetailModal();
+    });
+
+    // ==================== 클래스 가입 ====================
+    async function joinClass(classId) {
+      try {
+        const res = await fetch(`/api/class/${classId}/members`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ selfJoin: true })
+        });
+        const data = await res.json();
+        if (data.success) {
+          showToast('🎉 클래스에 참가했습니다!');
+          closeDetailModal();
+          searchClasses(state.currentPage);
+          loadSidebar();
+        } else {
+          showToast(data.message || '참가에 실패했습니다.');
+        }
+      } catch(err) {
+        showToast('참가 처리 중 오류가 발생했습니다.');
+      }
+    }
+
+    async function joinByCode() {
+      const code = document.getElementById('joinCode').value.trim().toUpperCase();
+      if (!code) return;
+      try {
+        const res = await fetch('/api/class/join', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ code })
+        });
+        const data = await res.json();
+        const msg = document.getElementById('codeMsg');
+        msg.textContent = data.message;
+        msg.className = 'msg ' + (data.success ? 'msg-success' : 'msg-error');
+        msg.style.display = 'block';
+        if (data.success) {
+          setTimeout(() => {
+            document.getElementById('codeModal').classList.remove('active');
+            msg.style.display = 'none';
+            location.href = '/class/class-home.html?id=' + data.classId;
+          }, 1000);
+        }
+      } catch(err) {
+        const msg = document.getElementById('codeMsg');
+        msg.textContent = '오류가 발생했습니다.';
+        msg.className = 'msg msg-error';
+        msg.style.display = 'block';
+      }
+    }
+
+    async function joinByCodeDirect(code) {
+      try {
+        const res = await fetch('/api/class/join', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ code })
+        });
+        const data = await res.json();
+        if (data.success) {
+          showToast('🎉 클래스에 참가했습니다!');
+          setTimeout(() => location.href = '/class/class-home.html?id=' + data.classId, 1000);
+        } else {
+          showToast(data.message || '해당 코드의 클래스를 찾을 수 없습니다.');
+        }
+      } catch(err) {
+        showToast('코드 참가 처리 중 오류가 발생했습니다.');
+      }
+    }
+
+    function shareClass(classId) {
+      const url = location.origin + '/class/class-home.html?id=' + classId;
+      navigator.clipboard.writeText(url).then(() => showToast('📋 링크가 복사되었습니다!'));
+    }
+
+    // ==================== 토스트 ====================
+    function showToast(msg) {
+      const toast = document.getElementById('toast');
+      toast.textContent = msg;
+      toast.classList.add('show');
+      setTimeout(() => toast.classList.remove('show'), 3000);
+    }
+
+    // ==================== 클래스 통계 막대그래프 ====================
+    async function loadClassStats() {
+      try {
+        const res = await fetch('/api/class/search?q=&limit=200');
+        const data = await res.json();
+        const classes = data.classes || [];
+        const totalClass = classes.length;
+        const totalMembers = classes.reduce((s, c) => s + (c.member_count || 0), 0);
+
+        // 숫자 카운트업 애니메이션
+        setTimeout(() => {
+          animateCount(document.getElementById('statClassCount'), totalClass, 1500);
+          setTimeout(() => {
+            animateCount(document.getElementById('statMemberCount'), totalMembers, 1500);
+          }, 200);
+        }, 300);
+      } catch (e) {
+        console.warn('클래스 통계 로드 실패:', e);
+      }
+    }
+
+    function animateCount(el, target, duration, suffix) {
+      suffix = suffix || '';
+      const start = performance.now();
+      function tick(now) {
+        const elapsed = now - start;
+        const progress = Math.min(elapsed / duration, 1);
+        const eased = 1 - Math.pow(1 - progress, 3);
+        el.textContent = Math.round(target * eased) + suffix;
+        if (progress < 1) requestAnimationFrame(tick);
+      }
+      requestAnimationFrame(tick);
+    }
+
+    // ==================== 초기화 ====================
+    window.addEventListener('dacheim:user-loaded', () => {
+      document.getElementById('mainContent').style.display = 'block';
+      renderPopularTags();
+      loadRecommendations();
+      searchClasses(1);
+      loadSidebar();
+      loadClassStats();
+    });
+
+    // 코드 모달 열기 (외부 트리거)
+    document.getElementById('codeModal').addEventListener('click', e => {
+      if (e.target.id === 'codeModal') document.getElementById('codeModal').classList.remove('active');
+    });
+  </script>
+
+<!-- 맨 위로 플로팅 버튼 -->
+<button id="scrollTopBtn" onclick="window.scrollTo({top:0,behavior:'smooth'})"
+  style="display:none;position:fixed;bottom:32px;right:32px;width:52px;height:52px;border-radius:50%;
+  background:linear-gradient(135deg,#2563eb,#7c3aed);color:#fff;border:none;font-size:20px;
+  box-shadow:0 4px 16px rgba(37,99,235,.4);cursor:pointer;z-index:9998;transition:all .3s;opacity:0;transform:translateY(20px);">
+  <i class="fas fa-arrow-up"></i>
+</button>
+<script>
+  window.addEventListener('scroll', () => {
+    const btn = document.getElementById('scrollTopBtn');
+    if (window.scrollY > 400) {
+      btn.style.display = 'flex';
+      btn.style.alignItems = 'center';
+      btn.style.justifyContent = 'center';
+      setTimeout(() => { btn.style.opacity = '1'; btn.style.transform = ''; }, 10);
+    } else {
+      btn.style.opacity = '0';
+      btn.style.transform = 'translateY(20px)';
+      setTimeout(() => { if (window.scrollY <= 400) btn.style.display = 'none'; }, 300);
+    }
+  });
+</script>
+</body>
+</html>
