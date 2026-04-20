@@ -1086,16 +1086,17 @@ window.addEventListener('dacheim:user-loaded', async (e) => {
     });
     if (currentUser?.subject) { filters.area = currentUser.subject; }
     if (currentUser?.grade != null) { filters.grade = String(currentUser.grade); }
-    // 로그인 사용자의 학교급·학년으로 학년군 기본값 자동 선택
+    // 학교급별 기본 학년군: 초등은 1~6학년군 모두 선택, 중·고는 단일 밴드
     try {
-      const g = parseInt(currentUser?.grade);
-      let band = 'E56';
       if (filters.school === '초등') {
-        band = g <= 2 ? 'E12' : (g <= 4 ? 'E34' : 'E56');
-      } else if (filters.school === '중등') { band = 'M'; }
-      else if (filters.school === '고등') { band = 'H1'; }
-      applyGradeBand(band);
-      const sel = $('gradeBandSelect'); if (sel) sel.value = band;
+        applyGradeBands(['E12','E34','E56']);
+      } else if (filters.school === '중등') {
+        applyGradeBand('M');
+        const sel = $('gradeBandSelect'); if (sel) sel.value = 'M';
+      } else if (filters.school === '고등') {
+        applyGradeBand('H1');
+        const sel = $('gradeBandSelect'); if (sel) sel.value = 'H1';
+      }
     } catch(_) {}
   } catch(e) {}
 
@@ -1106,9 +1107,9 @@ window.addEventListener('dacheim:user-loaded', async (e) => {
   bindUI();
   // 셀렉트 UI 동기화
   if (filters.area) $('areaSelect').value = filters.area;
-  if (!filters.gradeBand) {
-    applyGradeBand('E56');
-    const sel = $('gradeBandSelect'); if (sel) sel.value = 'E56';
+  if (!filters.gradeBand && (!filters.gradeBands || filters.gradeBands.size === 0)) {
+    // 기본: 초등 1~6학년군 전체 선택
+    applyGradeBands(['E12','E34','E56']);
   }
 
   await Promise.all([
@@ -1132,9 +1133,8 @@ setTimeout(() => {
         currentUser = d.user || d;
         $('mainContent').style.display = 'flex';
         bindUI();
-        if (!filters.gradeBand) {
-          applyGradeBand('E56');
-          const sel = $('gradeBandSelect'); if (sel) sel.value = 'E56';
+        if (!filters.gradeBand && (!filters.gradeBands || filters.gradeBands.size === 0)) {
+          applyGradeBands(['E12','E34','E56']);
         }
         loadDashboard(); loadMap(); loadLearningList(); loadLastActivity(); loadRanking();
         renderSidebarCards();
