@@ -13,11 +13,19 @@
     :root {
       /* Design Tokens (디자이너 제안) */
       --color-primary:#2563eb; --color-primary-600:#1d4ed8; --color-primary-50:#eff6ff;
-      --status-completed:#16a34a; --status-progress:#3b82f6; --status-diagnosing:#8b5cf6; --status-idle:#475569;
       --color-warning:#f59e0b; --color-danger:#ef4444;
       --color-text:#111827; --color-text-muted:#6B7280; --color-border:#e5e7eb;
       --space-1:4px; --space-2:8px; --space-3:12px; --space-4:16px; --space-5:20px; --space-6:24px;
-      --radius-sm:6px; --radius-md:10px; --radius-lg:12px; --radius-xl:16px;
+      --radius-sm:6px; --radius-md:10px; --radius-lg:16px; --radius-xl:24px; --radius-card:12px;
+      /* Layout chrome tokens (맵 영역 높이 계산용) */
+      --gnb-h:140px; --page-gap-top:20px; --dash-h:80px; --tab-h:52px;
+      --map-top-chrome:calc(var(--gnb-h) + var(--page-gap-top) + var(--dash-h) + var(--tab-h));
+      /* 상태 색 (디자이너 스펙 §3) */
+      --status-completed:#16a34a; --status-in-progress:#f59e0b; --status-diagnosing:#D946EF;
+      --status-available:#FFFFFF; --status-locked:#475569;
+      --status-completed-bg:#E8F7EE; --status-in-progress-bg:#FFF7E6; --status-diagnosing-bg:#FAE8FF;
+      --status-available-bg:#FFFFFF; --status-locked-bg:#F8FAFC;
+      --status-available-ink:var(--gray-400,#94a3b8);
       /* ===== 공통 UI 글자 크기 (today.html 과 동일한 스케일) ===== */
       --fs-xs:12px; --fs-sm:13px; --fs-base:14px; --fs-md:15px; --fs-lg:16px; --fs-xl:18px; --fs-2xl:22px; --fs-3xl:28px;
       /* Legacy 호환 */
@@ -33,7 +41,7 @@
       --gray-400:#94A3B8; --gray-500:#64748B; --gray-600:#475569; --gray-700:#334155; --gray-800:#1E293B;
       --shadow-sm:0 1px 2px rgba(0,0,0,.05); --shadow-md:0 4px 6px -1px rgba(0,0,0,.1);
       --shadow-lg:0 10px 15px -3px rgba(0,0,0,.1);
-      --radius-sm:6px; --radius-md:10px; --radius-lg:16px; --radius-xl:24px;
+      /* Legacy radius 블록 제거: 위의 디자인 토큰이 단일 정의 */
     }
     *{box-sizing:border-box;margin:0;padding:0}
     body{font-family:'Pretendard','Noto Sans KR',system-ui,sans-serif;background:linear-gradient(135deg,#F0F4FF 0%,#FAFBFF 100%);color:var(--gray-800);min-height:100vh;font-size:var(--fs-base);line-height:1.5}
@@ -58,17 +66,25 @@
 
     /* ===== Top Tabs ===== */
     .tab-nav{display:flex;gap:4px;background:var(--gray-100);border-radius:var(--radius-md);padding:4px;margin-bottom:18px;width:fit-content}
-    .tab-btn{padding:9px 22px;border:none;background:none;font-size:13.5px;font-weight:500;color:var(--gray-500);cursor:pointer;border-radius:var(--radius-sm);transition:all .2s;font-family:inherit;display:flex;align-items:center;gap:7px}
+    .tab-btn{padding:9px 22px;border:none;background:none;font-size:var(--fs-sm);font-weight:500;color:var(--gray-500);cursor:pointer;border-radius:var(--radius-sm);transition:all .2s;font-family:inherit;display:flex;align-items:center;gap:7px}
     .tab-btn:hover{color:var(--gray-700)}
     .tab-btn.active{background:#fff;color:var(--primary);box-shadow:var(--shadow-sm);font-weight:600}
     .tab-panel{display:none}
     .tab-panel.active{display:block}
 
     /* ===== Map Tab: two-column inside ===== */
-    .map-layout{display:grid;grid-template-columns:296px 1fr;gap:16px;align-items:flex-start}
+    .map-layout{display:block;position:relative}
+    /* 필터 팝업: 기본 닫힘(뷰포트 밖). GNB(z-index:9999) 위에 오버레이되도록 z-index를 올려 잘림 방지 */
+    .filter-sidebar{position:fixed;top:calc(var(--gnb-h) + 20px);left:-340px;width:300px;max-height:calc(100vh - var(--gnb-h) - 40px);z-index:10010;transition:left 250ms ease,box-shadow 250ms ease;background:#fff;border:1px solid var(--gray-200);border-radius:var(--radius-lg);box-shadow:0 8px 24px rgba(0,0,0,.12);padding:18px;overflow-y:auto}
+    .map-layout.filter-open .filter-sidebar{left:20px;box-shadow:var(--shadow-lg,0 20px 40px rgba(0,0,0,.22))}
+    .filter-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.25);z-index:10005;opacity:0;pointer-events:none;transition:opacity 200ms ease}
+    .map-layout.filter-open .filter-backdrop{opacity:1;pointer-events:auto}
+    .filter-open-btn{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 12px;border-radius:16px;background:#fff;border:1px solid var(--gray-200);color:var(--gray-700);font-size:var(--fs-sm);font-weight:600;cursor:pointer;font-family:inherit;box-shadow:var(--shadow-sm)}
+    .filter-open-btn:hover{border-color:var(--primary);color:var(--primary)}
+    .filter-toggle-btn{position:absolute;top:8px;right:8px;width:28px;height:28px;border-radius:50%;border:1px solid var(--gray-200);background:#fff;color:var(--gray-600);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:var(--fs-sm);box-shadow:var(--shadow-sm);z-index:5}
+    .filter-toggle-btn:hover{background:var(--gray-100);color:var(--primary)}
 
-    /* Filter Sidebar */
-    .filter-sidebar{background:#fff;border-radius:var(--radius-lg);padding:18px;box-shadow:var(--shadow-sm);position:sticky;top:12px;max-height:calc(100vh - 80px);overflow-y:auto}
+    /* Filter Sidebar (inner styles only — position/z-index defined above) */
     .filter-sidebar h3{font-size:var(--fs-base);font-weight:700;color:var(--gray-700);margin-bottom:12px;display:flex;align-items:center;gap:6px}
     .continue-card{background:linear-gradient(135deg,#E8F0FF,#D8E6FF);border-radius:var(--radius-md);padding:12px;margin-bottom:12px;cursor:pointer;border:1px solid rgba(74,124,255,.25)}
     .continue-card:hover{box-shadow:var(--shadow-sm)}
@@ -94,12 +110,20 @@
     .sem-btn.active{background:var(--secondary);color:#fff;border-color:var(--secondary);font-weight:600}
     .checkbox-group{display:flex;flex-direction:column;gap:5px}
     .cbx-label{display:flex;align-items:center;gap:6px;font-size:var(--fs-xs);color:var(--gray-700);cursor:pointer;padding:3px 0}
+    .status-legend{display:flex;flex-direction:column;gap:6px;padding:2px 0}
+    .status-legend .legend-item{display:flex;align-items:center;gap:8px;font-size:var(--fs-xs);color:var(--gray-700)}
+    .legend-dot{width:14px;height:14px;border-radius:3px;flex-shrink:0;display:inline-block;border:1px solid rgba(0,0,0,.05)}
+    .status-legend .legend-dot{width:14px;height:14px;border-radius:3px;border:1px solid rgba(0,0,0,.1);flex-shrink:0}
+    .status-legend .legend-dot.st-completed{background:var(--success,#16a34a);border-color:var(--success,#16a34a)}
+    .status-legend .legend-dot.st-in_progress{background:var(--warning,#f59e0b);border-color:var(--warning,#f59e0b)}
+    .status-legend .legend-dot.st-diagnosing{background:var(--status-diagnosing);border-color:var(--status-diagnosing)}
+    .status-legend .legend-dot.st-available{background:#fff;border-color:var(--status-available-ink)}
     .cbx-label input{margin:0}
     .search-input{width:100%;padding:8px 10px;border:1px solid var(--gray-200);border-radius:var(--radius-sm);font-size:var(--fs-sm);font-family:inherit}
     .search-input:focus{outline:none;border-color:var(--primary)}
 
     /* Main Canvas area */
-    .map-main{background:#fff;border-radius:var(--radius-lg);box-shadow:var(--shadow-sm);overflow:hidden;display:flex;flex-direction:column;min-height:660px}
+    .map-main{position:relative;background:#fff;border-radius:var(--radius-lg);box-shadow:var(--shadow-sm);overflow:hidden;display:flex;flex-direction:column;height:calc(100vh - var(--map-top-chrome));min-height:560px;width:100%}
     .map-toolbar{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--gray-100);flex-wrap:wrap}
     .mini-toggle{display:flex;background:var(--gray-100);border-radius:var(--radius-sm);padding:3px}
     .mini-toggle button{padding:5px 12px;border:none;background:none;font-size:var(--fs-xs);font-weight:600;color:var(--gray-500);cursor:pointer;border-radius:4px;font-family:inherit}
@@ -109,59 +133,115 @@
     .zoom-btn:hover{background:var(--gray-50);color:var(--primary)}
     .zoom-level{font-size:var(--fs-xs);font-weight:600;color:var(--gray-600);padding:6px 10px;background:var(--gray-50);border-radius:var(--radius-sm);min-width:52px;text-align:center}
     .map-legend{display:flex;gap:12px;flex-wrap:wrap;padding:8px 16px;border-bottom:1px solid var(--gray-100);background:var(--gray-50)}
-    .legend-item{display:flex;align-items:center;gap:5px;font-size:11.5px;color:var(--gray-600)}
-    .legend-dot{width:11px;height:11px;border-radius:3px;border:2px solid}
+    .map-legend .legend-item{display:flex;align-items:center;gap:5px;font-size:var(--fs-xs);color:var(--gray-600)}
+    .map-legend .legend-dot{width:11px;height:11px;border-radius:3px;border:2px solid}
 
     /* Canvas */
-    .map-canvas{flex:1;position:relative;overflow:hidden;background:linear-gradient(135deg,#F8FAFC,#F1F5F9);cursor:grab;min-height:720px;height:calc(100vh - 340px)}
+    .map-canvas{flex:1;position:relative;overflow:hidden;background:linear-gradient(135deg,#F8FAFC,#F1F5F9);cursor:grab;height:calc(100vh - var(--map-top-chrome));min-height:560px}
     .map-canvas:active{cursor:grabbing}
     .map-canvas.drag-pan{cursor:grabbing}
     .map-svg{position:absolute;top:0;left:0;pointer-events:none;overflow:visible}
     .map-world{position:absolute;top:0;left:0;transform-origin:0 0}
-    .svg-node{position:absolute;background:#fff;border:2px solid var(--gray-200);border-radius:var(--radius-md);width:220px;height:130px;padding:12px;cursor:pointer;transition:transform .15s,box-shadow .15s;display:flex;flex-direction:column;gap:4px;box-shadow:var(--shadow-sm);user-select:none}
+    .svg-node{position:absolute;background:#fff;border:2px solid var(--gray-200);border-left:6px solid var(--node-area-color,var(--gray-300));border-radius:var(--radius-md);width:220px;height:130px;padding:0;overflow:hidden;cursor:pointer;transition:transform .15s,box-shadow .15s;display:flex;flex-direction:column;box-shadow:var(--shadow-sm);user-select:none}
     .svg-node:hover{transform:translateY(-2px);box-shadow:var(--shadow-md)}
-    .svg-node.status-locked{background:#F8FAFC;border-color:var(--gray-300);opacity:.7}
-    .svg-node.status-available{background:#fff;border-color:var(--gray-300)}
-    .svg-node.status-in_progress{background:var(--warning-light);border-color:var(--warning)}
-    .svg-node.status-diagnosing{background:#FFF3DC;border-color:#F59E0B}
-    .svg-node.status-completed{background:var(--success-light);border-color:var(--success)}
-    .svg-node.status-in-learning-list{border-color:var(--secondary);box-shadow:0 0 0 3px rgba(124,77,255,.12)}
+    .svg-node.status-locked{background:var(--status-locked-bg);border-top-color:var(--gray-300);border-right-color:var(--gray-300);border-bottom-color:var(--gray-300);opacity:.7}
+    .svg-node.status-available{background:var(--status-available-bg);border-top-color:var(--gray-300);border-right-color:var(--gray-300);border-bottom-color:var(--gray-300)}
+    .svg-node.status-in_progress{background:var(--status-in-progress-bg);border-top-color:var(--status-in-progress);border-right-color:var(--status-in-progress);border-bottom-color:var(--status-in-progress)}
+    .svg-node.status-diagnosing{background:var(--status-diagnosing-bg);border-top-color:var(--status-diagnosing);border-right-color:var(--status-diagnosing);border-bottom-color:var(--status-diagnosing)}
+    .svg-node.status-completed{background:var(--status-completed-bg);border-top-color:var(--status-completed);border-right-color:var(--status-completed);border-bottom-color:var(--status-completed)}
+    .svg-node[data-area]{border-left-color:var(--node-area-color)!important}
+    .svg-node.status-in-learning-list{outline:3px dashed #c084fc;outline-offset:3px;box-shadow:none}
+    .svg-node-header{height:30px;padding:0 10px;display:flex;align-items:center;justify-content:space-between;color:#fff;font-size:var(--fs-xs);font-weight:700;gap:6px}
+    .svg-node.status-completed .svg-node-header{background:var(--status-completed)}
+    .svg-node.status-in_progress .svg-node-header{background:var(--status-in-progress)}
+    .svg-node.status-diagnosing .svg-node-header{background:var(--status-diagnosing)}
+    .svg-node.status-available .svg-node-header{background:var(--status-available-ink)}
+    .svg-node.status-locked .svg-node-header{background:var(--status-locked)}
+    .svg-node-body{flex:1;padding:8px 10px 10px;display:flex;flex-direction:column;gap:4px;min-height:0}
+    .svg-node-progress{height:4px;background:#e5e7eb;border-radius:2px;overflow:hidden;margin-top:auto}
+    .svg-node-progress>div{height:100%;background:currentColor;border-radius:2px}
+    .svg-node-meta{font-size:var(--fs-xs);color:#6b7280;display:flex;justify-content:space-between;gap:6px}
     .svg-node-top{display:flex;align-items:center;justify-content:space-between;gap:6px}
-    .svg-node-area{font-size:10.5px;font-weight:600;padding:2px 7px;border-radius:10px;background:var(--primary-light);color:var(--primary)}
-    .svg-node-grade{font-size:10.5px;color:var(--gray-500);font-weight:500}
-    .svg-node-title{font-size:var(--fs-sm);font-weight:700;color:var(--gray-800);line-height:1.3;margin-top:2px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+    .svg-node-area{font-size:var(--fs-xs);font-weight:600;padding:2px 7px;border-radius:10px;background:var(--primary-light);color:var(--primary)}
+    .svg-node-grade{font-size:var(--fs-xs);color:var(--gray-500);font-weight:500}
+    .svg-node-title{font-size:var(--fs-lg);font-weight:700;color:var(--gray-800);line-height:1.25;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;letter-spacing:-.2px}
     .svg-node-footer{margin-top:auto;display:flex;align-items:center;justify-content:space-between;gap:4px}
-    .svg-node-status{font-size:var(--fs-sm);font-weight:700;padding:5px 12px;border-radius:10px;color:#fff}
+    .svg-node-status{font-size:var(--fs-sm);font-weight:700;padding:5px 12px;border-radius:10px;color:#fff;max-width:100%;white-space:normal;word-break:keep-all;overflow-wrap:anywhere;line-height:1.35}
     .svg-node-status.locked{background:var(--gray-400)}
     .svg-node-status.available{background:var(--primary)}
     .svg-node-status.in_progress{background:var(--warning);color:var(--gray-800)}
-    .svg-node-status.diagnosing{background:#F59E0B}
+    .svg-node-status.diagnosing{background:#D946EF}
     .svg-node-status.completed{background:var(--success)}
     .svg-node-bookmark{color:var(--secondary);font-size:var(--fs-xs)}
+
+    /* 노드 클릭 하이라이트 — 이웃 노드/엣지 강조, 나머지 dim */
+    .map-world.highlight-mode .svg-node{opacity:.25;filter:grayscale(.4);transition:opacity .2s ease, filter .2s ease, box-shadow .2s ease, transform .15s}
+    .map-world.highlight-mode .svg-node.hl-target{opacity:1;filter:none;box-shadow:0 0 0 3px rgba(37,99,235,.35), var(--shadow-md)}
+    .map-world.highlight-mode .svg-node.hl-center{opacity:1;filter:none;box-shadow:0 0 0 4px var(--primary), 0 8px 20px rgba(37,99,235,.25);transform:translateY(-2px)}
+    .map-world.highlight-mode .map-svg path.edge-line{opacity:.12;transition:opacity .2s ease, stroke .2s ease, stroke-width .2s ease}
+    @keyframes hlEdgePulse {
+      0%   { stroke-opacity: 1;   stroke-width: 2.5; }
+      50%  { stroke-opacity: .55; stroke-width: 3.5; }
+      100% { stroke-opacity: 1;   stroke-width: 2.5; }
+    }
+    @keyframes hlEdgeFlow {
+      from { stroke-dashoffset: 20; }
+      to   { stroke-dashoffset: 0; }
+    }
+    @keyframes hlCenterBreath {
+      0%,100% { box-shadow: 0 0 0 4px var(--primary), 0 8px 20px rgba(37,99,235,.25); }
+      50%     { box-shadow: 0 0 0 6px rgba(37,99,235,.6), 0 10px 28px rgba(37,99,235,.4); }
+    }
+    .map-world.highlight-mode .map-svg path.edge-line.hl-edge{
+      opacity:1;
+      stroke: var(--primary);
+      stroke-width: 2.5;
+      stroke-dasharray: 8 6;
+      animation: hlEdgePulse 1.6s ease-in-out infinite, hlEdgeFlow 1.2s linear infinite;
+      filter: drop-shadow(0 0 4px rgba(37,99,235,.45));
+    }
+    .map-world.highlight-mode .svg-node.hl-center{ animation: hlCenterBreath 1.8s ease-in-out infinite; }
+    .map-world.smooth-transform{ transition: transform .35s ease; }
+
+    .hl-close-btn{
+      position:absolute; top:104px; right:16px; z-index:50;
+      display:flex; align-items:center; gap:6px;
+      padding:8px 14px; border-radius:999px;
+      background:#fff; color:var(--primary);
+      border:2px solid var(--primary);
+      font-size:13px; font-weight:600; cursor:pointer;
+      box-shadow:0 4px 12px rgba(37,99,235,.18);
+      transition:all .15s ease;
+    }
+    .hl-close-btn:hover{ background:var(--primary); color:#fff; transform:translateY(-1px); }
+    .hl-close-btn i{ font-size:12px; }
 
     .map-empty{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;color:var(--gray-400);gap:8px}
     .map-empty i{font-size:44px;color:var(--gray-300)}
     .map-empty p{font-size:var(--fs-base)}
 
     /* List view */
-    .list-view{padding:16px;display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px;overflow-y:auto;max-height:620px}
-    .list-card{background:#fff;border:2px solid var(--gray-200);border-radius:var(--radius-md);padding:14px;cursor:pointer;transition:all .15s}
-    .list-card:hover{border-color:var(--primary);box-shadow:var(--shadow-md)}
+    .list-view{padding:16px;display:flex;flex-direction:column;gap:8px;overflow-y:auto;max-height:calc(100vh - var(--map-top-chrome))}
+    .list-card{background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:14px 16px;display:flex;flex-direction:column;gap:6px;cursor:pointer;transition:all .15s}
+    .list-card:hover{border-color:#2563eb;box-shadow:0 2px 8px rgba(37,99,235,.1)}
     .list-card.status-completed{border-color:var(--success);background:var(--success-light)}
     .list-card.status-in_progress{border-color:var(--warning);background:var(--warning-light)}
-    .list-card.status-diagnosing{border-color:#F59E0B;background:#FFF8E8}
+    .list-card.status-diagnosing{border-color:#D946EF;background:#FAE8FF}
     .list-card.status-locked{opacity:.7}
-    .list-card-header{display:flex;align-items:center;gap:6px;margin-bottom:8px;flex-wrap:wrap}
-    .list-card-title{font-size:var(--fs-base);font-weight:700;color:var(--gray-800);margin-bottom:4px;line-height:1.3}
+    .list-card.in-learning-list{outline:3px dashed #c084fc;outline-offset:3px}
+    .list-card-header{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+    .list-card-title{font-size:var(--fs-md);font-weight:700;color:#111827;line-height:1.3}
+    .list-card-desc{font-size:var(--fs-sm);color:#6b7280}
+    .list-card-footer{display:flex;align-items:center;gap:12px;font-size:var(--fs-xs);color:#6b7280}
     .list-card-meta{font-size:var(--fs-xs);color:var(--gray-500)}
-    .list-card-progress{height:4px;background:var(--gray-200);border-radius:2px;overflow:hidden;margin-top:8px}
+    .list-card-progress{flex:1;height:4px;background:var(--gray-200);border-radius:2px;overflow:hidden}
     .list-card-progress-fill{height:100%;background:var(--primary);border-radius:2px}
 
     /* Drawer → Center Modal */
-    .drawer-overlay{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:90;display:none;backdrop-filter:blur(2px)}
+    .drawer-overlay{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:10020;display:none;backdrop-filter:blur(2px)}
     .drawer-overlay.show{display:block}
-    .drawer{position:fixed;top:50%;left:50%;width:92vw;max-width:940px;max-height:88vh;background:#fff;border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.25);z-index:100;opacity:0;pointer-events:none;transform:translate(-50%,-50%) scale(.95);transition:opacity .2s ease,transform .2s ease;display:flex;flex-direction:column;overflow:hidden;border-top:4px solid var(--primary)}
-    .drawer.show{opacity:1;pointer-events:auto;transform:translate(-50%,-50%) scale(1)}
+    .drawer{position:fixed;top:24px;left:50%;width:calc(100% - 48px);max-width:940px;max-height:calc(100vh - 48px);background:#fff;border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.25);z-index:10021;opacity:0;pointer-events:none;transform:translateX(-50%) scale(.95);transition:opacity .2s ease,transform .2s ease;display:flex;flex-direction:column;overflow:hidden;border-top:4px solid var(--primary)}
+    .drawer.show{opacity:1;pointer-events:auto;transform:translateX(-50%) scale(1)}
     .drawer-header{padding:18px 22px 14px;display:flex;align-items:flex-start;justify-content:space-between;gap:16px;border-bottom:1px solid var(--gray-100)}
     .drawer-head-info{flex:1}
     .drawer-badges{display:flex;gap:6px;margin-bottom:6px;flex-wrap:wrap}
@@ -172,10 +252,10 @@
     .drawer-badge.status.locked{background:var(--gray-400)}
     .drawer-badge.status.available{background:var(--primary)}
     .drawer-badge.status.in_progress{background:var(--warning);color:var(--gray-800)}
-    .drawer-badge.status.diagnosing{background:#F59E0B}
+    .drawer-badge.status.diagnosing{background:#D946EF}
     .drawer-badge.status.completed{background:var(--success)}
     .drawer-title{font-size:var(--fs-xl);font-weight:700;color:var(--gray-800);margin-bottom:4px}
-    .drawer-subtitle{font-size:12.5px;color:var(--gray-500)}
+    .drawer-subtitle{font-size:var(--fs-xs);color:var(--gray-500)}
     .drawer-close{width:34px;height:34px;background:var(--gray-100);border:none;border-radius:50%;cursor:pointer;color:var(--gray-600);display:flex;align-items:center;justify-content:center;font-size:var(--fs-base);flex-shrink:0}
     .drawer-close:hover{background:var(--gray-200)}
     .drawer-tabs{display:flex;gap:4px;padding:10px 22px;border-bottom:1px solid var(--gray-100);background:var(--gray-50)}
@@ -194,7 +274,7 @@
     .video-card{background:var(--gray-50);border:1px solid var(--gray-200);border-radius:var(--radius-md);padding:10px;cursor:pointer;transition:.15s}
     .video-card:hover{border-color:var(--primary);box-shadow:var(--shadow-sm)}
     .video-thumb{position:relative;background:linear-gradient(135deg,var(--primary-dark),var(--secondary));height:110px;border-radius:var(--radius-sm);display:flex;align-items:center;justify-content:center;color:#fff;font-size:26px;margin-bottom:8px;overflow:hidden}
-    .video-duration{position:absolute;bottom:6px;right:6px;background:rgba(0,0,0,.65);color:#fff;font-size:10.5px;padding:2px 6px;border-radius:3px;font-weight:600}
+    .video-duration{position:absolute;bottom:6px;right:6px;background:rgba(0,0,0,.65);color:#fff;font-size:var(--fs-xs);padding:2px 6px;border-radius:3px;font-weight:600}
     .video-progress-bar{position:absolute;bottom:0;left:0;right:0;height:3px;background:rgba(255,255,255,.25)}
     .video-progress-bar>div{height:100%;background:var(--accent)}
     .video-title{font-size:var(--fs-sm);font-weight:600;color:var(--gray-800);margin-bottom:4px;line-height:1.3}
@@ -229,14 +309,15 @@
     .dual-btn.bookmark.active{background:var(--secondary);color:#fff}
 
     /* Modal (problems, report, diag start picker) */
-    .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:200;display:none;align-items:center;justify-content:center;padding:24px}
-    .modal-overlay.show{display:flex}
-    .modal{background:#fff;border-radius:var(--radius-lg);max-width:920px;width:100%;max-height:92vh;overflow-y:auto;box-shadow:var(--shadow-lg)}
+    .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:10030;display:none;padding:24px;overflow-y:auto;-webkit-overflow-scrolling:touch}
+    .modal-overlay>.modal,.modal{z-index:10031}
+    .modal-overlay.show{display:flex;align-items:safe center;justify-content:center;min-height:100%}
+    .modal{background:#fff;border-radius:var(--radius-lg);max-width:920px;width:100%;margin:auto;box-shadow:var(--shadow-lg);max-height:none;flex-shrink:0}
     .modal.modal-lg{max-width:1100px}
     .modal .modal-header{padding:22px 28px}
     .modal .modal-body{padding:24px 28px 28px}
     .modal .modal-footer{padding:18px 28px}
-    .modal-title{font-size:20px!important;font-weight:700}
+    .modal-title{font-size:var(--fs-2xl)!important;font-weight:700}
     .modal-header{padding:18px 22px;border-bottom:1px solid var(--gray-100);display:flex;align-items:center;justify-content:space-between}
     .modal-title{font-size:var(--fs-lg);font-weight:700;color:var(--gray-800);display:flex;align-items:center;gap:8px}
     .modal-body{padding:22px}
@@ -254,9 +335,9 @@
     .solve-option.selected .solve-option-num{background:var(--primary);color:#fff}
     .solve-option.correct .solve-option-num{background:var(--success);color:#fff}
     .solve-option.wrong .solve-option-num{background:var(--accent);color:#fff}
-    .solve-option-text{font-size:17px;color:var(--gray-700);font-weight:500}
+    .solve-option-text{font-size:var(--fs-lg);color:var(--gray-700);font-weight:500}
     .solve-explain{margin-top:22px;padding:20px 22px;background:var(--primary-light);border-radius:var(--radius-md);font-size:var(--fs-md);color:var(--gray-700);line-height:1.7;border-left:5px solid var(--primary)}
-    .solve-explain strong{font-size:17px}
+    .solve-explain strong{font-size:var(--fs-lg)}
     .clear-top3{margin-top:14px;padding:12px 16px;background:#FFF9E6;border-radius:var(--radius-md);font-size:var(--fs-base);color:var(--gray-700);border-left:4px solid var(--warning)}
     .clear-top3{margin-top:12px;padding:10px 14px;background:var(--warning-light);border-radius:var(--radius-md);font-size:var(--fs-xs);color:#7A5100;display:flex;align-items:center;gap:10px}
     .clear-top3 .medal{font-size:var(--fs-lg)}
@@ -283,12 +364,12 @@
     /* ===== Diagnosis Tab ===== */
     .diag-intro{text-align:center;padding:40px 20px;background:#fff;border-radius:var(--radius-lg);box-shadow:var(--shadow-sm)}
     .diag-intro-icon{width:88px;height:88px;border-radius:50%;background:linear-gradient(135deg,var(--warning),#FF9500);display:flex;align-items:center;justify-content:center;font-size:36px;color:#fff;margin:0 auto 20px}
-    .diag-intro h2{font-size:20px;font-weight:700;margin-bottom:10px;color:var(--gray-800)}
-    .diag-intro p{font-size:13.5px;color:var(--gray-500);margin-bottom:6px;max-width:480px;margin-left:auto;margin-right:auto}
+    .diag-intro h2{font-size:var(--fs-2xl);font-weight:700;margin-bottom:10px;color:var(--gray-800)}
+    .diag-intro p{font-size:var(--fs-sm);color:var(--gray-500);margin-bottom:6px;max-width:480px;margin-left:auto;margin-right:auto}
     .diag-config{background:var(--gray-50);border-radius:var(--radius-md);padding:22px;max-width:520px;margin:24px auto 0;text-align:left}
     .diag-config .form-group{margin-bottom:14px}
-    .diag-config label{display:block;font-size:12.5px;font-weight:700;color:var(--gray-600);margin-bottom:6px}
-    .diag-config select,.diag-config input{width:100%;padding:10px 12px;border:1px solid var(--gray-200);border-radius:var(--radius-sm);font-size:13.5px;font-family:inherit}
+    .diag-config label{display:block;font-size:var(--fs-xs);font-weight:700;color:var(--gray-600);margin-bottom:6px}
+    .diag-config select,.diag-config input{width:100%;padding:10px 12px;border:1px solid var(--gray-200);border-radius:var(--radius-sm);font-size:var(--fs-sm);font-family:inherit}
 
     .diag-running{display:grid;grid-template-columns:280px 1fr;gap:16px}
     .diag-sidebar{background:#fff;border-radius:var(--radius-lg);padding:18px;box-shadow:var(--shadow-sm)}
@@ -303,7 +384,7 @@
     .diag-stat-row{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px}
     .diag-stat{padding:8px;border-radius:var(--radius-sm);text-align:center;background:var(--gray-50)}
     .diag-stat .v{font-size:var(--fs-xl);font-weight:700}
-    .diag-stat .l{font-size:10.5px;color:var(--gray-500);margin-top:2px}
+    .diag-stat .l{font-size:var(--fs-xs);color:var(--gray-500);margin-top:2px}
 
     /* ===== Learning Path Tab ===== */
     .path-container{background:#fff;border-radius:var(--radius-lg);padding:24px;box-shadow:var(--shadow-sm)}
@@ -320,7 +401,7 @@
     .path-step.in_progress{background:var(--warning-light);border-color:var(--warning)}
     .step-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
     .step-order{font-size:var(--fs-xs);font-weight:700;color:var(--gray-500)}
-    .step-status-tag{font-size:10.5px;font-weight:700;padding:2px 8px;border-radius:10px}
+    .step-status-tag{font-size:var(--fs-xs);font-weight:700;padding:2px 8px;border-radius:10px}
     .step-status-tag.completed{background:var(--success);color:#fff}
     .step-status-tag.in_progress{background:var(--warning);color:var(--gray-800)}
     .step-status-tag.locked{background:var(--gray-200);color:var(--gray-600)}
@@ -367,7 +448,7 @@
     .rank-score{font-size:var(--fs-sm);font-weight:700;color:var(--primary)}
 
     /* Toast */
-    .toast{position:fixed;bottom:30px;left:50%;transform:translateX(-50%);background:var(--gray-800);color:#fff;padding:12px 22px;border-radius:var(--radius-md);font-size:13.5px;z-index:5000;display:flex;align-items:center;gap:8px;box-shadow:var(--shadow-lg);animation:toastIn .3s ease}
+    .toast{position:fixed;bottom:30px;left:50%;transform:translateX(-50%);background:var(--gray-800);color:#fff;padding:12px 22px;border-radius:var(--radius-md);font-size:var(--fs-sm);z-index:10040;display:flex;align-items:center;gap:8px;box-shadow:var(--shadow-lg);animation:toastIn .3s ease}
     @keyframes toastIn{from{opacity:0;transform:translate(-50%,20px)}to{opacity:1;transform:translate(-50%,0)}}
 
     /* Spinner */
@@ -393,15 +474,125 @@
     .empty-state p{font-size:var(--fs-base)}
     .empty-state .hint{font-size:var(--fs-xs);color:var(--gray-400)}
 
+    /* ===== §3.2 Drawer header upgrade: back button + breadcrumb ===== */
+    .drawer-head-row{display:flex;align-items:center;gap:10px;margin-bottom:8px;min-height:36px}
+    .drawer-back-btn{display:none;align-items:center;gap:6px;height:32px;padding:0 12px;border-radius:16px;background:#F9FAFB;border:1px solid #E5E7EB;color:#374151;font-size:var(--fs-sm);font-weight:600;cursor:pointer;font-family:inherit;white-space:nowrap;flex-shrink:0}
+    .drawer-back-btn i{font-size:var(--fs-xs)}
+    .drawer-back-btn:hover{background:#EEF2FF;border-color:#C7D2FE;color:#1D4ED8}
+    .drawer-back-btn:focus-visible{outline:2px solid #2563eb;outline-offset:2px}
+    .drawer.lesson-mode .drawer-back-btn{display:inline-flex}
+    .drawer-breadcrumb{display:none;font-size:var(--fs-xs);color:#6B7280;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:calc(100% - 160px)}
+    .drawer.lesson-mode .drawer-breadcrumb{display:block}
+
+    /* ===== §3.5 Pre/Post learning sections ===== */
+    .rel-section{margin-bottom:16px}
+    .rel-section-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;gap:8px}
+    .rel-section-label{font-size:var(--fs-sm);font-weight:600;color:#4B5563}
+    .rel-warn-badge{display:inline-flex;align-items:center;gap:4px;font-size:var(--fs-sm);background:#FEF3C7;color:#92400E;border-radius:10px;padding:2px 8px;font-weight:600}
+    .rel-list{display:flex;flex-direction:column;gap:6px;overflow:hidden;transition:max-height 240ms ease}
+    .rel-card{position:relative;display:flex;align-items:center;gap:8px;min-height:44px;min-width:180px;padding:10px 14px 10px 18px;border-radius:10px;border:1px solid #E5E7EB;background:#F1F5FF;cursor:pointer;transition:transform 140ms ease,box-shadow 140ms ease}
+    .rel-card:hover{transform:translateY(-1px);box-shadow:0 4px 12px rgba(37,99,235,0.08)}
+    .rel-card:focus-visible{outline:2px solid #2563eb;outline-offset:2px}
+    .rel-card::before{content:'';position:absolute;left:0;top:0;bottom:0;width:4px;border-radius:10px 0 0 10px;background:#94a3b8}
+    .rel-card.is-next{background:#EEF2FF}
+    .rel-card.is-next::before{background:#2563eb}
+    .rel-card .rel-dir{font-size:var(--fs-base);color:#6B7280;width:14px;text-align:center;flex-shrink:0}
+    .rel-card.is-next .rel-dir{color:#2563eb}
+    .rel-card .rel-body{display:flex;flex-direction:column;min-width:0;flex:1;gap:2px}
+    .rel-card .rel-title{font-size:var(--fs-md);font-weight:600;color:#1F2937;line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+    .rel-card .rel-sub{font-size:var(--fs-xs);color:#6B7280;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .rel-badge{width:16px;height:16px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:var(--fs-xs);font-weight:700;flex-shrink:0;margin-left:4px}
+    .rel-badge.not_started,.rel-badge.available,.rel-badge.locked{border:1px solid #D1D5DB;background:transparent;color:transparent}
+    .rel-badge.in_progress{background:#FEF3C7;color:#92400E}
+    .rel-badge.in_progress::before{content:'●';font-size:8px}
+    .rel-badge.completed,.rel-badge.mastered,.rel-badge.video_watched,.rel-badge.problem_solved{background:#10B981;color:#fff}
+    .rel-badge.completed::before,.rel-badge.mastered::before,.rel-badge.video_watched::before,.rel-badge.problem_solved::before{content:'✓';font-size:var(--fs-xs);font-weight:700}
+    .rel-more-btn{align-self:flex-start;background:none;border:1px dashed #C7D2FE;color:#2563eb;font-size:var(--fs-sm);font-weight:600;padding:6px 10px;border-radius:8px;cursor:pointer;margin-top:4px;font-family:inherit}
+    .rel-more-btn:hover{background:#EEF2FF}
+    .rel-empty{font-size:var(--fs-xs);color:#6B7280}
+
+    /* ===== §3.1 Unit lesson cards (enhanced) ===== */
+    .lesson-card-v2{position:relative;display:flex;align-items:center;gap:12px;padding:14px 16px;border-radius:12px;background:#fff;border:1px solid #E5E7EB;cursor:pointer;transition:.15s;margin-bottom:8px}
+    .lesson-card-v2:hover{background:#F3F6FF;border-left:3px solid #2563eb;padding-left:13px}
+    .lesson-card-v2 .lc-body{flex:1;min-width:0}
+    .lesson-card-v2 .lc-title{font-size:var(--fs-md);font-weight:600;color:#1F2937;line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;margin-bottom:6px}
+    .lesson-card-v2 .lc-badges{display:flex;gap:6px;flex-wrap:wrap}
+    .lc-badge{display:inline-flex;align-items:center;gap:4px;height:22px;padding:3px 10px;border-radius:11px;font-size:var(--fs-xs);font-weight:600;line-height:1}
+    .lc-badge.video{background:#EEF2FF;color:#3730A3}
+    .lc-badge.prob{background:#FEF3C7;color:#92400E}
+    .lc-badge.status-not_started,.lc-badge.status-available,.lc-badge.status-locked{background:#F3F4F6;color:#6B7280}
+    .lc-badge.status-in_progress{background:#DBEAFE;color:#1E3A8A}
+    .lc-badge.status-completed,.lc-badge.status-video_watched{background:#D1FAE5;color:#065F46}
+    .lc-badge.status-mastered,.lc-badge.status-problem_solved{background:#FAE8FF;color:#6B21A8}
+    .lesson-card-v2 .lc-chev{color:#9CA3AF;font-size:var(--fs-xs);flex-shrink:0}
+    .lc-ring{position:absolute;top:10px;right:10px;width:24px;height:24px}
+    .lc-ring svg{width:24px;height:24px;transform:rotate(-90deg)}
+    .lc-ring .lc-ring-pct{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:var(--fs-xs);font-weight:700;color:#2563eb;transform:none}
+
+    /* ===== §3.3 Video cards v2 ===== */
+    .video-grid-v2{display:flex;flex-direction:column;gap:10px}
+    .video-card-v2{display:flex;align-items:center;gap:12px;padding:12px;border:1px solid #E5E7EB;border-radius:12px;background:#fff;transition:.15s;cursor:pointer}
+    .video-card-v2:hover{border-color:#93C5FD;box-shadow:0 2px 8px rgba(37,99,235,.08)}
+    .video-card-v2 .vc-thumb{position:relative;width:160px;height:90px;background:#111827;border-radius:8px;display:flex;align-items:center;justify-content:center;color:rgba(255,255,255,.8);font-size:28px;flex-shrink:0;overflow:hidden}
+    .video-card-v2 .vc-dur{position:absolute;left:6px;bottom:6px;background:rgba(0,0,0,.55);color:#fff;font-size:var(--fs-xs);padding:3px 6px;border-radius:4px;font-weight:600}
+    .video-card-v2 .vc-info{flex:1;min-width:0;display:flex;flex-direction:column;gap:4px}
+    .video-card-v2 .vc-title{font-size:var(--fs-md);font-weight:600;color:#1F2937;line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+    .video-card-v2 .vc-meta{display:flex;align-items:center;gap:8px;font-size:var(--fs-sm);color:#6B7280;margin-top:2px}
+    .video-card-v2 .vc-bar{width:100%;height:4px;background:#E5E7EB;border-radius:2px;overflow:hidden;margin-top:4px}
+    .video-card-v2 .vc-bar-fill{height:100%;background:#2563eb;border-radius:2px;transition:width 250ms ease-out}
+    .video-card-v2 .vc-bar-fill.done{background:#10B981}
+    .video-card-v2 .vc-pct{font-size:var(--fs-sm);color:#374151;text-align:right}
+    .video-card-v2 .vc-play-btn{height:40px;min-width:40px;padding:0 14px;border-radius:20px;background:#2563eb;color:#fff;border:none;font-size:var(--fs-base);font-weight:600;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:6px;flex-shrink:0}
+    .video-card-v2 .vc-play-btn:hover{background:#1D4ED8}
+    .video-card-v2 .vc-play-btn:disabled{background:#9CA3AF;cursor:not-allowed}
+
+    /* ===== §3.4 Problem cards v2 ===== */
+    .problem-list-v2{display:flex;flex-direction:column;gap:8px}
+    .problem-card-v2{padding:14px 16px;border:1px solid #E5E7EB;border-radius:12px;background:#fff}
+    .problem-card-v2 .pc-head{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+    .problem-card-v2 .pc-num{font-size:var(--fs-sm);color:#6B7280;font-weight:600}
+    .pc-diff{display:inline-flex;align-items:center;height:22px;padding:3px 10px;border-radius:11px;font-size:var(--fs-xs);font-weight:600;line-height:1}
+    .pc-diff.easy{background:#D1FAE5;color:#065F46}
+    .pc-diff.medium{background:#DBEAFE;color:#1E3A8A}
+    .pc-diff.hard{background:#FEE2E2;color:#991B1B}
+    .problem-card-v2 .pc-stem{font-size:var(--fs-base);color:#1F2937;line-height:1.55;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;margin-bottom:8px}
+    .problem-card-v2 .pc-foot{display:flex;align-items:center;justify-content:space-between;gap:8px}
+    .problem-card-v2 .pc-status{font-size:var(--fs-sm);color:#6B7280;display:flex;align-items:center;gap:6px}
+    .problem-card-v2 .pc-status.correct{color:#10B981;font-weight:600}
+    .pc-solve-btn{height:32px;padding:0 14px;border-radius:16px;background:#2563eb;color:#fff;border:none;font-size:var(--fs-sm);font-weight:600;cursor:pointer;font-family:inherit}
+    .pc-solve-btn:hover{background:#1D4ED8}
+
+    /* ===== Empty state box (drawer-scoped) ===== */
+    .drawer-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:40px 20px;color:#6B7280;gap:6px;text-align:center}
+    .drawer-empty i{font-size:32px;color:#9CA3AF}
+    .drawer-empty .de-title{font-size:var(--fs-md);color:#374151;font-weight:600}
+    .drawer-empty .de-sub{font-size:var(--fs-sm);color:#6B7280}
+
+    /* ===== Pulse animation ===== */
+    @keyframes labelPulse{0%{transform:scale(1);box-shadow:0 0 0 0 rgba(37,99,235,.35)}50%{transform:scale(1.12);box-shadow:0 0 0 4px rgba(37,99,235,.25)}100%{transform:scale(1);box-shadow:0 0 0 0 rgba(37,99,235,0)}}
+    .pulse-fx{animation:labelPulse 300ms ease-out}
+
+    /* Error toast variant */
+    .toast.toast-error{background:#FEE2E2;color:#991B1B}
+
+    /* Progress ring small (tab area) */
+    .drawer-tab-ring{display:inline-flex;align-items:center;gap:6px;margin-left:auto;padding-right:4px;color:#2563eb;font-size:var(--fs-xs);font-weight:700}
+    .drawer-tabs{align-items:center}
+
+    @media (max-width:768px){
+      .drawer-back-btn{padding:0;width:32px;height:32px;border-radius:50%;justify-content:center}
+      .drawer-back-btn .dbb-label{display:none}
+      .drawer-breadcrumb{font-size:var(--fs-xs);max-width:calc(100% - 100px)}
+      .video-card-v2{flex-direction:column;align-items:stretch}
+      .video-card-v2 .vc-thumb{width:100%;height:auto;aspect-ratio:16/9}
+    }
+
     /* Responsive */
     @media (max-width:1200px){
-      .map-layout{grid-template-columns:260px 1fr}
       .record-stats{grid-template-columns:repeat(3,1fr)}
     }
     @media (max-width:1024px){
       .dashboard-grid{grid-template-columns:repeat(2,1fr)}
-      .map-layout{grid-template-columns:1fr}
-      .filter-sidebar{position:static;max-height:none}
       .diag-running{grid-template-columns:1fr}
       .record-stats{grid-template-columns:repeat(2,1fr)}
     }
@@ -468,13 +659,16 @@
       <button class="tab-btn" data-tab="diagnosis"><i class="fas fa-stethoscope"></i> 진단평가</button>
       <button class="tab-btn" data-tab="path"><i class="fas fa-route"></i> 학습경로</button>
       <button class="tab-btn" data-tab="record"><i class="fas fa-chart-bar"></i> 나의 기록</button>
+      <button class="tab-btn" data-tab="ranking"><i class="fas fa-trophy"></i> 학습 랭킹</button>
     </div>
 
     <!-- ===== Tab: Learning Map ===== -->
     <div class="tab-panel active" id="tab-map">
-      <div class="map-layout">
-        <!-- Filter Sidebar -->
+      <div class="map-layout" id="mapLayout">
+        <div class="filter-backdrop" onclick="toggleFilterSidebar(false)"></div>
+        <!-- Filter Sidebar (팝업) -->
         <aside class="filter-sidebar">
+          <button type="button" class="filter-toggle-btn" id="filterToggleBtn" onclick="toggleFilterSidebar(false)" title="필터 닫기" aria-label="필터 닫기"><i class="fas fa-times"></i></button>
           <h3><i class="fas fa-sliders-h"></i> 학습맵 필터</h3>
 
           <!-- Continue card -->
@@ -483,18 +677,22 @@
           <div id="llistCard"></div>
 
           <div class="filter-group">
-            <label class="filter-label">학교급</label>
-            <div class="radio-row" id="schoolRadio">
+            <label class="filter-label">학년군</label>
+            <div class="checkbox-group" id="gradeBandChecks" aria-label="학년군 선택(복수 선택 가능)">
+              <label class="cbx-label"><input type="checkbox" class="gb-cbx" value="E12"> 초 1~2학년</label>
+              <label class="cbx-label"><input type="checkbox" class="gb-cbx" value="E34"> 초 3~4학년</label>
+              <label class="cbx-label"><input type="checkbox" class="gb-cbx" value="E56" checked> 초 5~6학년</label>
+              <label class="cbx-label"><input type="checkbox" class="gb-cbx" value="M"> 중 1~3학년</label>
+              <label class="cbx-label"><input type="checkbox" class="gb-cbx" value="H1"> 고 1학년</label>
+            </div>
+            <!-- hidden legacy controls for backward compat with existing code paths -->
+            <select id="gradeBandSelect" style="display:none"><option value="E56" selected></option></select>
+            <div id="schoolRadio" style="display:none">
               <button class="radio-btn active" data-val="초등">초</button>
               <button class="radio-btn" data-val="중등">중</button>
               <button class="radio-btn" data-val="고등">고</button>
             </div>
-          </div>
-          <div class="filter-group">
-            <label class="filter-label">학년</label>
-            <select class="filter-select" id="gradeSelect">
-              <option value="">전체</option>
-            </select>
+            <select id="gradeSelect" style="display:none"><option value="">전체</option></select>
           </div>
           <div class="filter-group">
             <label class="filter-label">학기</label>
@@ -505,25 +703,22 @@
             </div>
           </div>
           <div class="filter-group">
-            <label class="filter-label">과목(영역)</label>
-            <select class="filter-select" id="areaSelect">
+            <label class="filter-label">영역</label>
+            <div class="checkbox-group" id="areaChecks">
+              <div style="color:var(--gray-500);font-size:var(--fs-xs)">영역을 불러오는 중…</div>
+            </div>
+            <!-- hidden legacy select for backward-compat with existing code paths -->
+            <select class="filter-select" id="areaSelect" style="display:none">
               <option value="">전체</option>
-              <option value="국어">국어</option>
-              <option value="수학">수학</option>
-              <option value="영어">영어</option>
-              <option value="과학">과학</option>
-              <option value="사회">사회</option>
-              <option value="도덕">도덕</option>
             </select>
           </div>
           <div class="filter-group">
-            <label class="filter-label">상태</label>
-            <div class="checkbox-group" id="statusChecks">
-              <label class="cbx-label"><input type="checkbox" value="completed" checked> 완료</label>
-              <label class="cbx-label"><input type="checkbox" value="in_progress" checked> 진행중</label>
-              <label class="cbx-label"><input type="checkbox" value="diagnosing" checked> 진단중</label>
-              <label class="cbx-label"><input type="checkbox" value="available" checked> 학습가능</label>
-              <label class="cbx-label"><input type="checkbox" value="locked" checked> 잠김</label>
+            <label class="filter-label">상태 범례</label>
+            <div class="status-legend" id="statusLegend">
+              <div class="legend-item"><span class="legend-dot st-completed"></span><span>완료</span></div>
+              <div class="legend-item"><span class="legend-dot st-in_progress"></span><span>진행중</span></div>
+              <div class="legend-item"><span class="legend-dot st-diagnosing"></span><span>진단중</span></div>
+              <div class="legend-item"><span class="legend-dot st-available"></span><span>학습가능</span></div>
             </div>
           </div>
           <div class="filter-group">
@@ -535,6 +730,7 @@
         <!-- Map Main -->
         <section class="map-main">
           <div class="map-toolbar">
+            <button type="button" class="filter-open-btn" onclick="toggleFilterSidebar(true)" title="필터 열기"><i class="fas fa-sliders-h"></i> 필터</button>
             <div class="mini-toggle" id="nodeDisplayToggle">
               <button class="active" data-val="unit">단원</button>
               <button data-val="lesson">차시</button>
@@ -554,14 +750,17 @@
           <div class="map-legend">
             <div class="legend-item"><div class="legend-dot" style="background:var(--success-light);border-color:var(--success)"></div> 완료</div>
             <div class="legend-item"><div class="legend-dot" style="background:var(--warning-light);border-color:var(--warning)"></div> 진행중</div>
-            <div class="legend-item"><div class="legend-dot" style="background:#FFF8E8;border-color:#F59E0B"></div> 진단중</div>
+            <div class="legend-item"><div class="legend-dot" style="background:#FAE8FF;border-color:#D946EF"></div> 진단중</div>
             <div class="legend-item"><div class="legend-dot" style="background:#fff;border-color:var(--secondary)"></div> 학습목록</div>
-            <div class="legend-item"><div class="legend-dot" style="background:#F8FAFC;border-color:var(--gray-300)"></div> 잠김/기본</div>
+            <div class="legend-item"><div class="legend-dot" style="background:#F8FAFC;border-color:var(--gray-300)"></div> 학습가능</div>
           </div>
 
           <div class="map-canvas" id="mapCanvas">
             <div class="spinner"><i class="fas fa-spinner"></i><p style="margin-top:8px">학습맵 로딩 중...</p></div>
           </div>
+          <button id="hlCloseBtn" class="hl-close-btn" title="하이라이트 해제" style="display:none" onclick="clearHighlight()">
+            <i class="fas fa-times"></i> 하이라이트 해제
+          </button>
         </section>
       </div>
     </div>
@@ -612,17 +811,19 @@
       </div>
     </div>
 
-    <!-- Ranking -->
-    <div class="rank-section">
-      <div class="rank-head">
-        <div class="rank-title"><i class="fas fa-trophy" style="color:var(--warning)"></i> 학습 랭킹</div>
-        <div class="rank-period" id="rankPeriod">
-          <button class="active" data-p="weekly">주간</button>
-          <button data-p="monthly">월간</button>
-          <button data-p="total">전체</button>
+    <!-- ===== Tab: Ranking ===== -->
+    <div class="tab-panel" id="tab-ranking">
+      <div class="rank-section">
+        <div class="rank-head">
+          <div class="rank-title"><i class="fas fa-trophy" style="color:var(--warning)"></i> 학습 랭킹</div>
+          <div class="rank-period" id="rankPeriod">
+            <button class="active" data-p="weekly">주간</button>
+            <button data-p="monthly">월간</button>
+            <button data-p="total">전체</button>
+          </div>
         </div>
+        <ul class="rank-list" id="rankList"></ul>
       </div>
-      <ul class="rank-list" id="rankList"></ul>
     </div>
 
   </div>
@@ -633,6 +834,12 @@
 <div class="drawer" id="nodeDrawer">
   <div class="drawer-header">
     <div class="drawer-head-info">
+      <div class="drawer-head-row">
+        <button class="drawer-back-btn" id="drawerBackBtn" onclick="drawerGoBack()" aria-label="차시 목록으로 돌아가기">
+          <i class="fas fa-arrow-left"></i><span class="dbb-label">차시 목록으로</span>
+        </button>
+        <div class="drawer-breadcrumb" id="drawerBreadcrumb"></div>
+      </div>
       <div class="drawer-badges" id="drawerBadges"></div>
       <div class="drawer-title" id="drawerTitle">-</div>
       <div class="drawer-subtitle" id="drawerSubtitle"></div>
@@ -657,6 +864,18 @@
     </div>
     <div class="modal-body" id="solveBody"></div>
     <div class="modal-actions" id="solveActions"></div>
+  </div>
+</div>
+
+<!-- ===== Video Player Modal ===== -->
+<div class="modal-overlay" id="videoPlayerModal">
+  <div class="modal" style="max-width:820px">
+    <div class="modal-header">
+      <div class="modal-title"><i class="fas fa-play-circle" style="color:var(--primary)"></i> <span id="videoPlayerTitle">학습 영상</span></div>
+      <button class="drawer-close" onclick="closeVideoPlayer()" aria-label="영상 재생 닫기"><i class="fas fa-times"></i></button>
+    </div>
+    <div class="modal-body" id="videoPlayerBody" style="padding:0;background:#000;min-height:360px;display:flex;align-items:center;justify-content:center"></div>
+    <div class="modal-actions" id="videoPlayerActions"></div>
   </div>
 </div>
 
@@ -703,6 +922,10 @@ let currentReportTarget = null; // {contentId, contentType}
 let rankingPeriod = 'weekly';
 let viewMode = 'map';
 let nodeDisplayMode = 'unit';
+// §2 drawer history stack: [{nodeId, scrollTop, currentDrawerTab}]
+let drawerHistoryStack = [];
+// 현재 단원 컨텍스트 (breadcrumb용)
+let currentUnitContext = null; // {id, name}
 // 페이지 로드 직후 드로어 자동 오픈 방지 — 이어하기 카드는 표시만, 클릭시에만 오픈
 let userInteracted = false;
 document.addEventListener('click', () => { userInteracted = true; }, { once: true, capture: true });
@@ -711,11 +934,64 @@ document.addEventListener('click', () => { userInteracted = true; }, { once: tru
 const filters = {
   school: '초등',
   grade: '',
+  gradeBand: 'E56',   // 학년군 단일(레거시): E12|E34|E56|M|H1
+  gradeBands: new Set(['E56']), // 학년군 복수 선택
+  grades: [5,6],      // 학년군 전개: 학년 숫자 배열
   semester: '',
   area: '',
-  status: new Set(['completed','in_progress','diagnosing','available','locked']),
+  areas: new Set(), // 선택된 영역 체크박스(빈 Set=전체)
+  status: new Set(['completed','in_progress','diagnosing','available']),
   keyword: ''
 };
+// 학년군 매핑: code → {school, grades}
+const GRADE_BANDS = {
+  'E12': { school: '초등', grades: [1,2] },
+  'E34': { school: '초등', grades: [3,4] },
+  'E56': { school: '초등', grades: [5,6] },
+  'M':   { school: '중등', grades: [1,2,3] },
+  'H1':  { school: '고등', grades: [1] }
+};
+function applyGradeBand(code) {
+  // 레거시 단일 선택용 — 체크박스 체계에서는 applyGradeBands([code]) 선호
+  const band = GRADE_BANDS[code];
+  if (!band) { filters.gradeBand = ''; filters.gradeBands = new Set(); filters.grades = []; return; }
+  filters.gradeBand = code;
+  filters.gradeBands = new Set([code]);
+  filters.school = band.school;
+  filters.grades = band.grades.slice();
+  document.querySelectorAll('#schoolRadio .radio-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.val === filters.school);
+  });
+  // 체크박스 UI 동기화
+  document.querySelectorAll('#gradeBandChecks .gb-cbx').forEach(cb => { cb.checked = (cb.value === code); });
+}
+function applyGradeBands(codes) {
+  // codes: Array<string> 예) ['E56','M']
+  const arr = Array.isArray(codes) ? codes.filter(c => GRADE_BANDS[c]) : [];
+  filters.gradeBands = new Set(arr);
+  if (arr.length === 0) {
+    filters.gradeBand = '';
+    filters.grades = [];
+    return;
+  }
+  // 모든 선택 밴드의 학년 합집합
+  const gradeSet = new Set();
+  let lastSchool = '';
+  for (const c of arr) {
+    const b = GRADE_BANDS[c];
+    if (!b) continue;
+    b.grades.forEach(g => gradeSet.add(g));
+    lastSchool = b.school;
+  }
+  filters.grades = Array.from(gradeSet).sort((a,b)=>a-b);
+  filters.gradeBand = arr[0]; // 단일 레거시 참조용(첫 번째)
+  filters.school = lastSchool || filters.school;
+  document.querySelectorAll('#schoolRadio .radio-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.val === filters.school);
+  });
+  document.querySelectorAll('#gradeBandChecks .gb-cbx').forEach(cb => { cb.checked = arr.includes(cb.value); });
+}
+let availableAreas = [];   // 로드된 노드로부터 distinct 영역 목록
 
 // Map state (pan & zoom)
 const mapState = { scale: 0.7, x: 50, y: 30, dragging: false, sx: 0, sy: 0, lastX: 0, lastY: 0 };
@@ -765,6 +1041,33 @@ function normalizeSubjectArea(node) {
   return node?.area || node?.subject || '';
 }
 
+// 영역별 색상 팔레트 (테두리 색)
+const AREA_COLOR_FIXED = {
+  '수와 연산': '#3B82F6',      // 파랑
+  '변화와 관계': '#8B5CF6',    // 보라
+  '도형과 측정': '#10B981',    // 녹색
+  '자료와 가능성': '#F59E0B',  // 주황
+  '문자와 식': '#EC4899',      // 핑크
+  '함수': '#06B6D4',           // 청록
+  '기하': '#14B8A6',           // 틸
+  '확률과 통계': '#EAB308',    // 노랑
+  '미적분': '#EF4444',          // 빨강
+  '기타': '#94A3B8'             // 회색
+};
+const AREA_PALETTE = ['#3B82F6','#8B5CF6','#10B981','#F59E0B','#EC4899','#06B6D4','#14B8A6','#EAB308','#EF4444','#6366F1','#84CC16','#F97316'];
+const _areaColorCache = {};
+function getAreaColor(area) {
+  if (!area) return '#94A3B8';
+  if (AREA_COLOR_FIXED[area]) return AREA_COLOR_FIXED[area];
+  if (_areaColorCache[area]) return _areaColorCache[area];
+  // 간단 해시
+  let h = 0;
+  for (let i = 0; i < area.length; i++) h = (h * 31 + area.charCodeAt(i)) >>> 0;
+  const color = AREA_PALETTE[h % AREA_PALETTE.length];
+  _areaColorCache[area] = color;
+  return color;
+}
+
 /* =========================================================
    Init: wait for user
    ========================================================= */
@@ -783,6 +1086,17 @@ window.addEventListener('dacheim:user-loaded', async (e) => {
     });
     if (currentUser?.subject) { filters.area = currentUser.subject; }
     if (currentUser?.grade != null) { filters.grade = String(currentUser.grade); }
+    // 로그인 사용자의 학교급·학년으로 학년군 기본값 자동 선택
+    try {
+      const g = parseInt(currentUser?.grade);
+      let band = 'E56';
+      if (filters.school === '초등') {
+        band = g <= 2 ? 'E12' : (g <= 4 ? 'E34' : 'E56');
+      } else if (filters.school === '중등') { band = 'M'; }
+      else if (filters.school === '고등') { band = 'H1'; }
+      applyGradeBand(band);
+      const sel = $('gradeBandSelect'); if (sel) sel.value = band;
+    } catch(_) {}
   } catch(e) {}
 
   // URL params
@@ -790,10 +1104,12 @@ window.addEventListener('dacheim:user-loaded', async (e) => {
   if (p.get('subject')) { filters.area = p.get('subject'); }
 
   bindUI();
-  populateGradeOptions();
   // 셀렉트 UI 동기화
   if (filters.area) $('areaSelect').value = filters.area;
-  if (filters.grade) $('gradeSelect').value = filters.grade;
+  if (!filters.gradeBand) {
+    applyGradeBand('E56');
+    const sel = $('gradeBandSelect'); if (sel) sel.value = 'E56';
+  }
 
   await Promise.all([
     loadDashboard(),
@@ -815,7 +1131,11 @@ setTimeout(() => {
       if (d && (d.user || d.username)) {
         currentUser = d.user || d;
         $('mainContent').style.display = 'flex';
-        bindUI(); populateGradeOptions();
+        bindUI();
+        if (!filters.gradeBand) {
+          applyGradeBand('E56');
+          const sel = $('gradeBandSelect'); if (sel) sel.value = 'E56';
+        }
         loadDashboard(); loadMap(); loadLearningList(); loadLastActivity(); loadRanking();
         renderSidebarCards();
       }
@@ -840,21 +1160,30 @@ function bindUI() {
     });
   });
 
-  // School radio
-  document.querySelectorAll('#schoolRadio .radio-btn').forEach(b => {
-    b.addEventListener('click', () => {
-      document.querySelectorAll('#schoolRadio .radio-btn').forEach(x => x.classList.remove('active'));
-      b.classList.add('active');
-      filters.school = b.dataset.val;
-      populateGradeOptions();
+  // 학년군 체크박스 (복수 선택)
+  document.querySelectorAll('#gradeBandChecks .gb-cbx').forEach(cb => {
+    cb.addEventListener('change', () => {
+      const checked = Array.from(document.querySelectorAll('#gradeBandChecks .gb-cbx:checked')).map(x => x.value);
+      // 최소 1개는 선택되어야 함 — 마지막 하나 해제 시 자동 복원
+      if (checked.length === 0) { cb.checked = true; return; }
+      applyGradeBands(checked);
       filters.grade = '';
-      $('gradeSelect').value = '';
+      allNodes = [];
       loadMap();
     });
   });
-
-  // Grade select
-  $('gradeSelect').addEventListener('change', (e) => { filters.grade = e.target.value; loadMap(); });
+  // 학년군 레거시 select (히든) 호환
+  const gbSel = $('gradeBandSelect');
+  if (gbSel) {
+    gbSel.addEventListener('change', (e) => {
+      const code = e.target.value;
+      if (!code) { filters.gradeBand = ''; filters.gradeBands = new Set(); filters.grades = []; }
+      else { applyGradeBand(code); }
+      filters.grade = '';
+      allNodes = [];
+      loadMap();
+    });
+  }
 
   // Semester buttons
   document.querySelectorAll('.sem-btn').forEach(b => {
@@ -866,24 +1195,20 @@ function bindUI() {
     });
   });
 
-  // Area select
-  $('areaSelect').addEventListener('change', (e) => { filters.area = e.target.value; loadMap(); });
+  // Area select (legacy hidden) — still supported for URL compat
+  if ($('areaSelect')) {
+    $('areaSelect').addEventListener('change', (e) => { filters.area = e.target.value; loadMap(); });
+  }
 
-  // Status checkboxes
-  document.querySelectorAll('#statusChecks input').forEach(cb => {
-    cb.addEventListener('change', () => {
-      if (cb.checked) filters.status.add(cb.value);
-      else filters.status.delete(cb.value);
-      renderMap();
-    });
-  });
+  // 상태는 범례(legend)로 변경 — 필터 기능 제거. filters.status는 항상 모든 상태 포함.
+  filters.status = new Set(['completed','in_progress','diagnosing','available','mastered','video_watched','problem_solved','not_started']);
 
   // Keyword search
   let ki;
   $('keywordInput').addEventListener('input', (e) => {
     filters.keyword = e.target.value.trim();
     clearTimeout(ki);
-    ki = setTimeout(renderMap, 200);
+    ki = setTimeout(renderMap, 300);
   });
 
   // Node display & view mode toggles
@@ -892,7 +1217,8 @@ function bindUI() {
       document.querySelectorAll('#nodeDisplayToggle button').forEach(x => x.classList.remove('active'));
       b.classList.add('active');
       nodeDisplayMode = b.dataset.val;
-      renderMap();
+      allNodes = [];
+      loadMap();
     });
   });
   document.querySelectorAll('#viewModeToggle button').forEach(b => {
@@ -948,14 +1274,53 @@ function resetFilters() {
   filters.grade = '';
   filters.semester = '';
   filters.area = '';
+  filters.areas = new Set();
   filters.keyword = '';
-  filters.status = new Set(['completed','in_progress','diagnosing','available','locked']);
+  filters.status = new Set(['completed','in_progress','diagnosing','available','mastered','video_watched','problem_solved','not_started']);
+  applyGradeBand('E56');
+  if ($('gradeBandSelect')) $('gradeBandSelect').value = 'E56';
   if ($('gradeSelect')) $('gradeSelect').value = '';
   if ($('areaSelect')) $('areaSelect').value = '';
   if ($('keywordInput')) $('keywordInput').value = '';
   document.querySelectorAll('.sem-btn').forEach(b => b.classList.toggle('active', b.dataset.sem === ''));
   document.querySelectorAll('#statusChecks input').forEach(cb => cb.checked = true);
+  document.querySelectorAll('#areaChecks input').forEach(cb => cb.checked = false);
+  allNodes = [];
   loadMap();
+}
+
+/* 영역(area) 체크박스 목록 렌더링. 로드된 노드의 distinct area 값으로 채운다. */
+function renderAreaChecks() {
+  const host = $('areaChecks');
+  if (!host) return;
+  const set = new Set();
+  allNodes.forEach(n => { const a = normalizeSubjectArea(n); if (a) set.add(a); });
+  availableAreas = Array.from(set).sort((a,b)=>String(a).localeCompare(String(b),'ko'));
+  if (!availableAreas.length) {
+    host.innerHTML = '<div style="color:var(--gray-500);font-size:var(--fs-xs)">영역 정보가 없습니다.</div>';
+    return;
+  }
+  // 기본: 현재 보이는 영역은 모두 체크 (사용자가 해제한 항목만 제외)
+  const prev = new Set(filters.areas);
+  const userTouched = host.dataset.userTouched === '1';
+  host.innerHTML = availableAreas.map(a => {
+    const id = 'area_' + encodeURIComponent(a).replace(/%/g,'_');
+    const checked = userTouched ? (prev.has(a) ? 'checked' : '') : 'checked';
+    const color = getAreaColor(a);
+    return `<label class="cbx-label"><input type="checkbox" id="${id}" value="${escHtml(a)}" ${checked}> <span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${color};margin-right:4px;vertical-align:middle"></span>${escHtml(a)}</label>`;
+  }).join('');
+  // 기본값을 filters.areas에 반영 (사용자 미조작 시 전체 체크 상태)
+  if (!userTouched) {
+    filters.areas = new Set(availableAreas);
+  }
+  host.querySelectorAll('input[type=checkbox]').forEach(cb => {
+    cb.addEventListener('change', () => {
+      host.dataset.userTouched = '1';
+      if (cb.checked) filters.areas.add(cb.value);
+      else filters.areas.delete(cb.value);
+      renderMap();
+    });
+  });
 }
 
 function populateGradeOptions() {
@@ -999,14 +1364,37 @@ async function loadMap() {
 
   const q = new URLSearchParams();
   if (filters.area) q.set('subject', filters.area);
+  if (filters.grades && filters.grades.length > 0) q.set('grades', filters.grades.join(','));
   if (filters.grade) q.set('grade', filters.grade);
+  // 학년군이 여러 학교급을 동시에 포함하면 schoolLevel 필터 생략 (grades만으로는 E/M/H 구분 불가 → schoolLevels CSV 전달)
+  const bandsArr = Array.from(filters.gradeBands || []);
+  const schoolSet = new Set(bandsArr.map(c => GRADE_BANDS[c] && GRADE_BANDS[c].school).filter(Boolean));
+  if (schoolSet.size > 1) {
+    const schoolMap = { '초등': 'elementary', '중등': 'middle', '고등': 'high' };
+    const csv = Array.from(schoolSet).map(s => schoolMap[s]).filter(Boolean).join(',');
+    if (csv) q.set('schoolLevels', csv);
+  } else if (filters.school) {
+    const schoolMap = { '초등': 'elementary', '중등': 'middle', '고등': 'high' };
+    const sl = schoolMap[filters.school];
+    if (sl) q.set('schoolLevel', sl);
+  }
   if (filters.semester) q.set('semester', filters.semester);
   if (filters.keyword) q.set('keyword', filters.keyword);
-  const qs = q.toString() ? '?' + q.toString() : '';
+
+  // 노드 표시 모드에 따라 레벨/엣지 타입 분기
+  const nq = new URLSearchParams(q);
+  const eq = new URLSearchParams(q);
+  if (nodeDisplayMode === 'unit') {
+    nq.set('nodeLevel', '2');
+    nq.set('includeGroups', 'true');
+    eq.set('edgeType', 'unit');
+  } else {
+    // 차시 모드 - 기본 동작 (node_level=3, prerequisite edges)
+  }
 
   const [nodesD, edgesD, statusD] = await Promise.all([
-    fetchApi('/api/self-learn/map/nodes' + qs),
-    fetchApi('/api/self-learn/map/edges' + qs),
+    fetchApi('/api/self-learn/map/nodes?' + nq.toString()),
+    fetchApi('/api/self-learn/map/edges?' + eq.toString()),
     fetchApi('/api/self-learn/map/user-status')
   ]);
 
@@ -1015,7 +1403,7 @@ async function loadMap() {
   const statuses = (statusD && statusD.statuses) || [];
 
   userStatuses = {};
-  const statusRemap = { not_started: 'available', in_progress: 'in_progress', completed: 'completed', diagnosing: 'diagnosing', locked: 'locked', available: 'available' };
+  const statusRemap = { not_started: 'available', in_progress: 'in_progress', completed: 'completed', diagnosing: 'diagnosing', available: 'available' };
   statuses.forEach(s => { userStatuses[s.node_id || s.nodeId || s.id] = statusRemap[s.status] || s.status || 'available'; });
 
   // Build indexing
@@ -1027,12 +1415,15 @@ async function loadMap() {
     n._title = n.title || n.name || n.lesson_name || n.unit_name || id;
     // fallback: use user_status if present
     if (n.user_status && !userStatuses[id]) {
-      const map = { not_started: 'available', in_progress: 'in_progress', completed: 'completed', diagnosing: 'diagnosing', locked: 'locked' };
+      const map = { not_started: 'available', in_progress: 'in_progress', completed: 'completed', diagnosing: 'diagnosing' };
       userStatuses[id] = map[n.user_status] || 'available';
     }
     n._status = inferStatus(id);
     nodeById[id] = n;
   });
+
+  // 영역 체크박스 재구성 (현재 로드된 노드 기준 distinct)
+  renderAreaChecks();
 
   // Layout
   layoutNodes();
@@ -1041,7 +1432,8 @@ async function loadMap() {
 
 function layoutNodes() {
   // Topological-ish layout using prereq edges (edges: {from, to} or {source, target})
-  const W = 220, H = 130, GX = 70, GY = 30;
+  const W = 220, H = 130, GX = 60, GY = 30;
+
   const prereqMap = {}; // id -> [prereqIds]
   allNodes.forEach(n => { prereqMap[n._id] = []; });
   allEdges.forEach(e => {
@@ -1065,25 +1457,68 @@ function layoutNodes() {
   }
   allNodes.forEach(n => getDepth(n._id));
 
-  // Column grouping by depth; sort within column by area -> grade -> title
+  // Column grouping by depth; cluster same-area nodes at similar Y across columns
   const cols = {};
   allNodes.forEach(n => {
     const d = depth[n._id] || 0;
     if (!cols[d]) cols[d] = [];
     cols[d].push(n);
   });
+
+  // 영역 순서 결정: 등장 영역 수집 후 고정 순서로 정렬
+  const areaOrder = [];
+  const areaSeen = {};
+  allNodes.forEach(n => {
+    const a = normalizeSubjectArea(n) || '기타';
+    if (!areaSeen[a]) { areaSeen[a] = true; areaOrder.push(a); }
+  });
+  const AREA_FIXED_ORDER = ['수와 연산','변화와 관계','도형과 측정','자료와 가능성'];
+  areaOrder.sort((a, b) => {
+    const ia = AREA_FIXED_ORDER.indexOf(a);
+    const ib = AREA_FIXED_ORDER.indexOf(b);
+    if (ia !== -1 && ib !== -1) return ia - ib;
+    if (ia !== -1) return -1;
+    if (ib !== -1) return 1;
+    return a.localeCompare(b, 'ko');
+  });
+  // 압축 레이아웃: 영역별 베이스 행은 "컬럼별 최대 개수"의 누적으로 결정 (전체 개수 X)
+  // 예) 수와 연산이 총 8개여도 한 컬럼에 최대 3개면 3행만 점유
+  const areaMaxPerCol = {};
+  Object.keys(cols).forEach(k => {
+    const countsInCol = {};
+    cols[k].forEach(n => {
+      const a = normalizeSubjectArea(n) || '기타';
+      countsInCol[a] = (countsInCol[a] || 0) + 1;
+    });
+    Object.keys(countsInCol).forEach(a => {
+      areaMaxPerCol[a] = Math.max(areaMaxPerCol[a] || 0, countsInCol[a]);
+    });
+  });
+  const AREA_GAP_ROWS = 1; // 영역 사이 빈 행
+  const areaBaseRow = {};
+  let cumRow = 0;
+  areaOrder.forEach(a => {
+    areaBaseRow[a] = cumRow;
+    cumRow += (areaMaxPerCol[a] || 1) + AREA_GAP_ROWS;
+  });
+
   Object.keys(cols).forEach(k => {
     const col = cols[k];
+    // 영역 순서 -> 영역 내부는 id순
     col.sort((a, b) => {
-      const aa = normalizeSubjectArea(a); const bb = normalizeSubjectArea(b);
-      if (aa !== bb) return String(aa).localeCompare(String(bb));
-      const ag = (a.grade || 0); const bg = (b.grade || 0);
-      if (ag !== bg) return ag - bg;
-      return String(a._title || '').localeCompare(String(b._title || ''));
+      const aa = normalizeSubjectArea(a) || '기타';
+      const bb = normalizeSubjectArea(b) || '기타';
+      if (aa !== bb) return (areaBaseRow[aa] ?? 0) - (areaBaseRow[bb] ?? 0);
+      return String(a._id || '').localeCompare(String(b._id || ''));
     });
-    col.forEach((n, i) => {
-      n._x = parseInt(k) * (W + GX) + 20;
-      n._y = i * (H + GY) + 20;
+    // 같은 영역 내 상대 인덱스 계산
+    const areaLocalIdx = {};
+    col.forEach(n => {
+      const a = normalizeSubjectArea(n) || '기타';
+      areaLocalIdx[a] = (areaLocalIdx[a] ?? -1) + 1;
+      const row = (areaBaseRow[a] ?? 0) + areaLocalIdx[a];
+      n._x = parseInt(k) * (W + GX) + 50;
+      n._y = row * (H + GY) + 50;
     });
   });
 
@@ -1120,6 +1555,11 @@ function getFilteredNodes() {
   return allNodes.filter(n => {
     // status checkbox
     if (!filters.status.has(n._status)) return false;
+    // 영역 체크박스 (빈 Set = 전체)
+    if (filters.areas && filters.areas.size > 0) {
+      const a = normalizeSubjectArea(n);
+      if (!filters.areas.has(a)) return false;
+    }
     // keyword (client-side too)
     if (filters.keyword) {
       const k = filters.keyword.toLowerCase();
@@ -1158,21 +1598,57 @@ function renderMap() {
   }
 
   if (viewMode === 'list') {
+    const isUnitModeList = (nodeDisplayMode === 'unit');
     let html = '<div class="list-view">';
     nodes.forEach(n => {
       const status = n._status;
       const area = normalizeSubjectArea(n);
-      const prog = n.progress || (status === 'completed' ? 100 : status === 'in_progress' ? 50 : 0);
-      html += `
-        <div class="list-card status-${status}" onclick="openDrawer('${n._id}')">
-          <div class="list-card-header">
-            <span class="drawer-badge area">${escHtml(area || '전체')}</span>
-            <span class="svg-node-status ${status}">${statusLabel(status)}</span>
-          </div>
-          <div class="list-card-title">${escHtml(n._title)}</div>
-          <div class="list-card-meta">${escHtml(n.code || n._id)}${n.grade ? ' · ' + n.grade + '학년' : ''}</div>
-          <div class="list-card-progress"><div class="list-card-progress-fill" style="width:${prog}%"></div></div>
-        </div>`;
+      const prog = n.progress != null ? n.progress : (status === 'completed' ? 100 : status === 'in_progress' ? 50 : 0);
+      const inList = learningList.has(n._id);
+      const listCls = inList ? ' in-learning-list' : '';
+      const gradeLabel = n.grade ? n.grade + '학년' : '';
+      const semLabel = n.semester ? n.semester + '학기' : '';
+      if (isUnitModeList) {
+        const lessonCount = n.lesson_count ?? n.lessonCount ?? (Array.isArray(n.lessons) ? n.lessons.length : 0);
+        const stage1 = n.stage1 || n.stage_1 || '';
+        const descBits = [stage1, `📚 ${lessonCount}개 차시`].filter(Boolean).join(' · ');
+        html += `
+          <div class="list-card status-${status}${listCls}" data-node-id="${escHtml(n._id)}" onclick="openDrawer('${n._id}', {skipHighlightGate:true})">
+            <div class="list-card-header">
+              ${gradeLabel ? `<span class="drawer-badge grade">${escHtml(gradeLabel)}${semLabel ? ' · ' + escHtml(semLabel) : ''}</span>` : ''}
+              <span class="drawer-badge area">${escHtml(area || '전체')}</span>
+              ${inList ? '<span class="drawer-badge" style="background:#f3e8ff;color:#7c3aed">📋 학습목록</span>' : ''}
+            </div>
+            <div class="list-card-title">${escHtml(n._title)}</div>
+            ${descBits ? `<div class="list-card-desc">${escHtml(descBits)}</div>` : ''}
+            <div class="list-card-footer">
+              <div class="list-card-progress"><div class="list-card-progress-fill" style="width:${prog}%"></div></div>
+              <span style="font-weight:700;color:#2563eb">${prog}%</span>
+            </div>
+          </div>`;
+      } else {
+        const videos = n.video_count ?? n.videoCount ?? (Array.isArray(n.videos) ? n.videos.length : 0);
+        const problems = n.problem_count ?? n.problemCount ?? (Array.isArray(n.problems) ? n.problems.length : 0);
+        const solved = n.solved ?? n.solved_count ?? 0;
+        const code = n.code || n._id;
+        const unitName = n.unit_name || n.unitName || '';
+        html += `
+          <div class="list-card status-${status}${listCls}" data-node-id="${escHtml(n._id)}" onclick="openDrawer('${n._id}', {skipHighlightGate:true})">
+            <div class="list-card-header">
+              ${gradeLabel ? `<span class="drawer-badge grade">${escHtml(gradeLabel)}</span>` : ''}
+              <span class="drawer-badge area">${escHtml(area || '전체')}</span>
+              <span class="svg-node-status ${status}">${statusLabel(status)}</span>
+              ${inList ? '<span class="drawer-badge" style="background:#f3e8ff;color:#7c3aed">📋 학습목록</span>' : ''}
+            </div>
+            <div class="list-card-title">[${escHtml(code)}] ${escHtml(n._title)}</div>
+            ${unitName ? `<div class="list-card-desc">${escHtml(unitName)}</div>` : ''}
+            <div class="list-card-footer">
+              <span>📹${videos} 📝${solved}/${problems}</span>
+              <div class="list-card-progress"><div class="list-card-progress-fill" style="width:${prog}%"></div></div>
+              <span style="font-weight:700;color:#2563eb">${prog}%</span>
+            </div>
+          </div>`;
+      }
     });
     html += '</div>';
     canvas.innerHTML = html;
@@ -1187,22 +1663,58 @@ function renderMap() {
 
   // Edges as SVG lines (only between filtered nodes)
   const filteredIds = new Set(nodes.map(n => n._id));
+  const isUnitMode = nodeDisplayMode === 'unit';
   let svg = `<svg class="map-svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
     <defs>
-      <marker id="arrow" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="6" markerHeight="6" orient="auto">
-        <path d="M0,0 L10,5 L0,10 Z" fill="#94A3B8"/>
+      <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+        <path d="M0,0 L10,5 L0,10 Z" fill="#94a3b8"/>
       </marker>
     </defs>`;
-  allEdges.forEach(e => {
+
+  // 1) dedup + filter edges (dcu30 parity)
+  const _seenEK = new Set();
+  const visibleEdges = [];
+  (allEdges || []).forEach(e => {
     const from = e.from_node_id || e.from || e.source || e.prereq_id;
     const to = e.to_node_id || e.to || e.target || e.next_id;
     if (!filteredIds.has(from) || !filteredIds.has(to)) return;
-    const a = nodeById[from], b = nodeById[to];
-    if (!a || !b) return;
-    const x1 = a._x + 220, y1 = a._y + 65;
-    const x2 = b._x, y2 = b._y + 65;
+    if (!nodeById[from] || !nodeById[to]) return;
+    const k = from + '->' + to;
+    if (_seenEK.has(k)) return;
+    _seenEK.add(k);
+    visibleEdges.push({ _from: from, _to: to });
+  });
+
+  // 2) pre-pass: count in/out per node, then assign per-edge index
+  const outTotal = new Map(), inTotal = new Map();
+  visibleEdges.forEach(e => {
+    outTotal.set(e._from, (outTotal.get(e._from) || 0) + 1);
+    inTotal.set(e._to, (inTotal.get(e._to) || 0) + 1);
+  });
+  const outSeen = new Map(), inSeen = new Map();
+  visibleEdges.forEach(e => {
+    const oi = outSeen.get(e._from) || 0; outSeen.set(e._from, oi + 1); e._outIdx = oi;
+    const ii = inSeen.get(e._to) || 0;    inSeen.set(e._to, ii + 1);    e._inIdx = ii;
+  });
+
+  // 3) render dashed bezier — unit mode: center-fixed; lesson mode: weak fan (±12)
+  const NODE_H = 130;
+  const SPAN = isUnitMode ? 0 : 24; // unit 모드 fan 끔, lesson 모드 ±12px
+  function endpointY(nodeY, idx, n) {
+    if (SPAN === 0 || n <= 1) return nodeY + NODE_H / 2;
+    const step = SPAN / (n - 1);
+    return nodeY + NODE_H / 2 - SPAN / 2 + idx * step;
+  }
+  visibleEdges.forEach(e => {
+    const a = nodeById[e._from], b = nodeById[e._to];
+    const fromOutN = outTotal.get(e._from) || 1;
+    const toInN = inTotal.get(e._to) || 1;
+    const y1 = endpointY(a._y, e._outIdx, fromOutN);
+    const y2 = endpointY(b._y, e._inIdx, toInN);
+    const x1 = a._x + 220, x2 = b._x;
     const mx = (x1 + x2) / 2;
-    svg += `<path d="M${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}" stroke="#94A3B8" stroke-width="1.5" fill="none" marker-end="url(#arrow)" opacity=".6"/>`;
+    const op = (toInN > 3) ? 0.55 : 0.9;
+    svg += `<path class="edge-line" data-from="${escHtml(e._from)}" data-to="${escHtml(e._to)}" d="M${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}" stroke="#cbd5e1" stroke-width="${isUnitMode ? 3 : 2}" stroke-dasharray="${isUnitMode ? '8 4' : '6 4'}" fill="none" marker-end="url(#arrow)" opacity="${op}"/>`;
   });
   svg += '</svg>';
 
@@ -1214,35 +1726,83 @@ function renderMap() {
     const inList = learningList.has(n._id);
     const extraCls = inList ? ' status-in-learning-list' : '';
     const ariaLabel = `${n.unit_name || area || '학습'} ${n._title} ${statusLabel(status)}`;
+    const progress = n.progress != null ? n.progress : (status === 'completed' ? 100 : status === 'in_progress' ? 50 : 0);
+    const isUnitCard = (nodeDisplayMode === 'unit');
+    const lessonCount = n.lesson_count ?? n.lessonCount ?? (Array.isArray(n.lessons) ? n.lessons.length : 0);
+    const videos = n.video_count ?? n.videoCount ?? (Array.isArray(n.videos) ? n.videos.length : 0);
+    const problems = n.problem_count ?? n.problemCount ?? (Array.isArray(n.problems) ? n.problems.length : 0);
+    const solved = n.solved ?? n.solved_count ?? 0;
+    const gradeLabel = n.grade ? n.grade + '학년' : '';
+    const semLabel = n.semester ? n.semester + '학기' : '';
+    const headerRight = [area || '', semLabel].filter(Boolean).join(' · ');
+    const footerLeft = isUnitCard
+      ? `📚 ${lessonCount}개 차시`
+      : `📹${videos} 📝${solved}/${problems}`;
+    const _areaColor = getAreaColor(normalizeSubjectArea(n));
     nodesHtml += `
-      <div class="svg-node status-${status}${extraCls}" style="left:${n._x}px;top:${n._y}px"
+      <div class="svg-node status-${status}${extraCls}" data-node-id="${escHtml(n._id)}" data-area="${escHtml(normalizeSubjectArea(n) || '')}" style="left:${n._x}px;top:${n._y}px;--node-area-color:${_areaColor}"
            tabindex="0" role="button" aria-label="${escHtml(ariaLabel)}"
            onclick="openDrawer('${n._id}')" ondblclick="openDrawer('${n._id}')"
            onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openDrawer('${n._id}')}">
-        <div class="svg-node-top">
-          <span class="svg-node-area">${escHtml(area || '공통')}</span>
-          <span class="svg-node-grade">${n.grade ? n.grade + '학년' : ''}${n.semester ? ' ' + n.semester + '학기' : ''}</span>
+        <div class="svg-node-header">
+          <span>${escHtml(gradeLabel)}</span>
+          <span>${escHtml(headerRight)}</span>
         </div>
-        <div class="svg-node-title">${escHtml(n._title)}</div>
-        <div class="svg-node-footer">
-          <span class="svg-node-status ${status}" aria-hidden="true">${statusLabel(status)}</span>
-          ${inList ? '<span class="svg-node-bookmark" aria-label="학습목록에 담김"><i class="fas fa-bookmark"></i></span>' : ''}
+        <div class="svg-node-body">
+          <div class="svg-node-title">${escHtml(n._title)}</div>
+          <div class="svg-node-progress"><div style="width:${progress}%"></div></div>
+          <div class="svg-node-meta">
+            <span>${escHtml(footerLeft)}</span>
+            <span>${statusLabel(status)}</span>
+          </div>
         </div>
       </div>`;
   });
 
-  canvas.innerHTML = `<div class="map-world" id="mapWorld" style="width:${W}px;height:${H}px">${svg}${nodesHtml}</div>`;
+  // 단원/차시 모두 깊이(prereq)-컬럼 레이아웃 사용 — 영역 헤더 제거 (프로토타입과 동일)
+  let areaHeadersHtml = '';
+
+  canvas.innerHTML = `<div class="map-world" id="mapWorld" style="width:${W}px;height:${H}px">${svg}${areaHeadersHtml}${nodesHtml}</div>`;
   // 최초 렌더 시 자동 맞춤 — 잘림 방지
   if (!mapState._fitted) {
     mapState._fitted = true;
     requestAnimationFrame(() => fitView());
+    // ResizeObserver: canvas 실제 크기가 확정된 뒤 1회 재fit (최초 크기 0 등 케이스 보정)
+    if (typeof ResizeObserver !== 'undefined' && !mapState._ro) {
+      try {
+        const ro = new ResizeObserver(() => {
+          if (mapState._rofitted) return;
+          if (canvas.clientWidth > 0 && canvas.clientHeight > 0) {
+            mapState._rofitted = true;
+            requestAnimationFrame(() => fitView());
+          }
+        });
+        ro.observe(canvas);
+        mapState._ro = ro;
+      } catch (_) {}
+    }
   } else {
     updateMapTransform();
   }
+  // 재렌더 후 기존 하이라이트 재적용
+  try { if (typeof _highlightedNodeId !== 'undefined' && _highlightedNodeId) highlightNodeNeighbors(_highlightedNodeId); } catch(_){}
 }
 
 function statusLabel(s) {
-  return { locked:'잠김', available:'학습가능', in_progress:'진행중', diagnosing:'진단중', completed:'완료' }[s] || s;
+  const map = {
+    locked:'시작 전',
+    available:'학습가능',
+    not_started:'학습가능',
+    in_progress:'진행중',
+    diagnosing:'진단중',
+    completed:'완료',
+    video_watched:'영상 시청 완료',
+    problem_attempted:'문제 풀이 중',
+    problem_solved:'문제 완료'
+  };
+  if (map[s]) return map[s];
+  // 알 수 없는 내부 상태코드는 사용자에게 그대로 노출하지 않음
+  return '학습가능';
 }
 
 function updateMapTransform() {
@@ -1268,6 +1828,20 @@ function zoomAt(px, py, f) {
 }
 
 function resetView() { mapState.scale = 0.7; mapState.x = 50; mapState.y = 30; updateMapTransform(); }
+
+function toggleFilterSidebar(force) {
+  const layout = document.getElementById('mapLayout');
+  if (!layout) return;
+  const open = (typeof force === 'boolean') ? force : !layout.classList.contains('filter-open');
+  // 드로어·필터 동시 오픈 방지: 필터를 여는 중이면 드로어 먼저 닫기
+  if (open) {
+    const drawer = document.getElementById('nodeDrawer');
+    if (drawer && drawer.classList.contains('show')) {
+      try { closeDrawer(); } catch (_) {}
+    }
+  }
+  layout.classList.toggle('filter-open', open);
+}
 function fitView() {
   const nodes = getFilteredNodes();
   if (!nodes.length) return;
@@ -1283,7 +1857,7 @@ function fitView() {
   const sByH = ch / nh;
   const sByW = cw / nw;
   // 가독성을 위해 최소 0.5 보장 — 너무 작으면 가로 스크롤 가능
-  const s = Math.max(0.5, Math.min(2.0, Math.min(sByW, sByH)));
+  const s = Math.max(0.3, Math.min(2.0, Math.min(sByW, sByH)));
   mapState.scale = s;
   mapState.x = -minX * s + 40;
   mapState.y = -minY * s + 20;
@@ -1293,23 +1867,166 @@ function fitView() {
 /* =========================================================
    Drawer (node detail)
    ========================================================= */
+// §3.x 노드 클릭 하이라이트 — 선행/후속 이웃 노드 + 엣지 강조
+let _highlightedNodeId = null;
+
+function getAdjacent(nodeId) {
+  const prereqs = [], downs = [];
+  (allEdges || []).forEach(e => {
+    const from = e.from_node_id || e.from || e.source || e.prereq_id;
+    const to   = e.to_node_id   || e.to   || e.target || e.next_id;
+    if (!from || !to) return;
+    if (to === nodeId) prereqs.push(from);
+    if (from === nodeId) downs.push(to);
+  });
+  return { prereqs, downs };
+}
+
+function getConnectedChain(nodeId) {
+  const ups = new Set(), downs = new Set();
+  const bfs = (start, dir) => {
+    const q = [start]; const seen = new Set([start]);
+    while (q.length) {
+      const cur = q.shift();
+      const { prereqs, downs: d } = getAdjacent(cur);
+      const next = dir === 'up' ? prereqs : d;
+      next.forEach(n => {
+        if (!seen.has(n)) {
+          seen.add(n);
+          (dir === 'up' ? ups : downs).add(n);
+          q.push(n);
+        }
+      });
+    }
+  };
+  bfs(nodeId, 'up');
+  bfs(nodeId, 'down');
+  return { ups, downs, all: new Set([nodeId, ...ups, ...downs]) };
+}
+
+function highlightNodeNeighbors(nodeId) {
+  const world = document.getElementById('mapWorld') || document.querySelector('.map-world');
+  if (!world) return;
+  clearHighlight();
+  if (!nodeId) return;
+  const chain = getConnectedChain(nodeId);
+  const related = chain.all;
+  _highlightedNodeId = nodeId;
+  world.classList.add('highlight-mode');
+  const btn = document.getElementById('hlCloseBtn'); if (btn) btn.style.display = 'flex';
+  world.querySelectorAll('.svg-node').forEach(el => {
+    const id = el.getAttribute('data-node-id');
+    if (id === nodeId) el.classList.add('hl-center');
+    else if (related.has(id)) el.classList.add('hl-target');
+  });
+  world.querySelectorAll('.map-svg path.edge-line').forEach(p => {
+    const f = p.getAttribute('data-from'), t = p.getAttribute('data-to');
+    if (related.has(f) && related.has(t)) p.classList.add('hl-edge');
+  });
+  return related;
+}
+
+function focusOnChain(relatedSet) {
+  if (!relatedSet || !relatedSet.size) return;
+  const canvas = document.getElementById('mapCanvas');
+  const world = document.getElementById('mapWorld');
+  if (!canvas || !world) return;
+  const NODE_W = 220, NODE_H = 130, PAD = 60;
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  const nodesArr = (typeof allNodes !== 'undefined' && Array.isArray(allNodes)) ? allNodes : [];
+  let count = 0;
+  nodesArr.forEach(n => {
+    if (!relatedSet.has(n._id)) return;
+    if (typeof n._x !== 'number' || typeof n._y !== 'number') return;
+    count++;
+    if (n._x < minX) minX = n._x;
+    if (n._y < minY) minY = n._y;
+    if (n._x + NODE_W > maxX) maxX = n._x + NODE_W;
+    if (n._y + NODE_H > maxY) maxY = n._y + NODE_H;
+  });
+  if (!count || !isFinite(minX)) return;
+  minX -= PAD; minY -= PAD; maxX += PAD; maxY += PAD;
+  const bboxW = maxX - minX, bboxH = maxY - minY;
+  const cw = canvas.clientWidth || 800, ch = canvas.clientHeight || 600;
+  let scale = Math.min(cw / bboxW, ch / bboxH, 1.1);
+  if (!isFinite(scale) || scale <= 0) scale = 0.7;
+  scale = Math.max(0.5, Math.min(1.1, scale));
+  const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
+  mapState.scale = scale;
+  mapState.x = cw / 2 - cx * scale;
+  mapState.y = ch / 2 - cy * scale;
+  world.classList.add('smooth-transform');
+  updateMapTransform();
+  clearTimeout(focusOnChain._t);
+  focusOnChain._t = setTimeout(() => {
+    try { world.classList.remove('smooth-transform'); } catch (_) {}
+  }, 420);
+}
+
+function highlightAndFocus(nodeId) {
+  const related = highlightNodeNeighbors(nodeId);
+  if (related) focusOnChain(related);
+}
+
+function clearHighlight() {
+  _highlightedNodeId = null;
+  const btn = document.getElementById('hlCloseBtn'); if (btn) btn.style.display = 'none';
+  const world = document.getElementById('mapWorld') || document.querySelector('.map-world');
+  if (!world) return;
+  world.classList.remove('highlight-mode');
+  world.querySelectorAll('.svg-node.hl-center, .svg-node.hl-target').forEach(el => {
+    el.classList.remove('hl-center', 'hl-target');
+  });
+  world.querySelectorAll('.map-svg path.edge-line.hl-edge').forEach(p => p.classList.remove('hl-edge'));
+}
+
 async function openDrawer(nodeId, opts) {
+  opts = opts || {};
   // 사용자 클릭 전 자동 호출이면 무시 (이어하기 자동 오픈 방지)
-  if (!userInteracted && !(opts && opts.force)) {
+  if (!userInteracted && !opts.force) {
     console.info('[drawer] 자동 오픈 차단:', nodeId);
     return;
   }
+  // 2단계 게이트: 하이라이트 비활성 상태에서 첫 클릭 시 하이라이트+포커스만 수행, 드로어는 열지 않음
+  // 하이라이트 활성 중에는 어느 노드를 클릭해도 바로 드로어를 연다
+  if (!opts.force && !opts.skipHighlightGate && !_highlightedNodeId) {
+    try { highlightAndFocus(nodeId); } catch (_) {}
+    return;
+  }
+  // 노드 이웃 하이라이트 (부가 동작) — 재오픈 시 체인 유지
+  try { highlightNodeNeighbors(nodeId); } catch (_) {}
+  // §2: 히스토리 스택 push — 이미 열려 있는 드로어 상태 저장
+  const drawerBodyEl = $('drawerBody');
+  if (opts.pushHistory !== false && currentDrawerNode && currentDrawerNode._id && currentDrawerNode._id !== nodeId) {
+    drawerHistoryStack.push({
+      nodeId: currentDrawerNode._id,
+      scrollTop: drawerBodyEl ? drawerBodyEl.scrollTop : 0,
+      currentDrawerTab: currentDrawerTab,
+      unitContext: currentUnitContext ? { ...currentUnitContext } : null
+    });
+  } else if (opts.pushHistory === false) {
+    // 복원(pop) 경로: 스택 그대로 둠
+  } else if (!currentDrawerNode) {
+    // 첫 오픈: 스택 초기화
+    drawerHistoryStack = [];
+    currentUnitContext = null;
+  }
+
   currentDrawerNode = null;
   currentDrawerTab = 'overview';
   document.querySelectorAll('.drawer-tab').forEach(t => t.classList.toggle('active', t.dataset.dt === 'overview'));
 
   $('drawerOverlay').classList.add('show');
   $('nodeDrawer').classList.add('show');
+  // 드로어·필터 동시 오픈 방지: 드로어가 열리면 필터 팝업을 닫는다.
+  { const _lay = document.getElementById('mapLayout'); if (_lay) _lay.classList.remove('filter-open'); }
   $('drawerTitle').textContent = '로딩 중...';
   $('drawerSubtitle').textContent = '';
   $('drawerBadges').innerHTML = '';
   $('drawerBody').innerHTML = '<div class="spinner"><i class="fas fa-spinner"></i></div>';
   $('drawerFooter').innerHTML = '';
+  // 단원 차시 리스트 렌더 상태 초기화
+  currentUnitLessons = null;
 
   const data = await fetchApi('/api/self-learn/map/nodes/' + encodeURIComponent(nodeId));
   const node = data?.node || data || {};
@@ -1320,8 +2037,36 @@ async function openDrawer(nodeId, opts) {
   node.prerequisites = data?.prerequisites || node.prerequisites || [];
   node.nexts = data?.nexts || node.next_nodes || node.nexts || [];
   node.achievement = data?.achievement || node.achievement || node.achievement_standard || '';
+  // node_level: 2=단원, 3=차시 (백엔드 스펙)
+  node._level = Number(data?.node_level ?? node.node_level ?? node.level ?? (nodeById[nodeId]?.node_level) ?? 3);
 
   currentDrawerNode = node;
+  // 단원이면 영상/문제 탭 숨기기, 차시면 표시
+  applyDrawerTabsForLevel(node._level);
+
+  // §2: lesson-mode class for back button/breadcrumb visibility
+  const drawerEl = $('nodeDrawer');
+  const isLesson = Number(node._level) === 3;
+  drawerEl.classList.toggle('lesson-mode', isLesson && drawerHistoryStack.length > 0);
+  // 단원 컨텍스트 갱신
+  if (Number(node._level) === 2) {
+    currentUnitContext = { id: node._id, name: (node.title || node.name || node.unit_name || '단원') };
+  }
+  // breadcrumb 계산
+  const bcEl = $('drawerBreadcrumb');
+  if (bcEl) {
+    if (isLesson && currentUnitContext) {
+      bcEl.textContent = currentUnitContext.name + ' · ' + (node.title || node.name || node.lesson_name || '차시');
+    } else {
+      bcEl.textContent = '';
+    }
+  }
+  // 복원: pop된 스크롤 위치가 opts로 주어지면 적용
+  if (opts.restoreScrollTop != null) {
+    requestAnimationFrame(() => {
+      const b = $('drawerBody'); if (b) b.scrollTop = opts.restoreScrollTop;
+    });
+  }
 
   const area = normalizeSubjectArea(node);
   const status = node._status;
@@ -1341,6 +2086,364 @@ async function openDrawer(nodeId, opts) {
 function closeDrawer() {
   $('drawerOverlay').classList.remove('show');
   $('nodeDrawer').classList.remove('show');
+  $('nodeDrawer').classList.remove('lesson-mode');
+  // 렌더링 상태 초기화
+  currentDrawerNode = null;
+  currentDrawerTab = 'overview';
+  currentUnitLessons = null;
+  drawerHistoryStack = [];
+  currentUnitContext = null;
+  document.querySelectorAll('.drawer-tab').forEach(t => t.classList.toggle('active', t.dataset.dt === 'overview'));
+  document.querySelectorAll('.drawer-tab').forEach(t => t.style.display = '');
+}
+
+// §2: 뒤로가기 - 히스토리 pop & 이전 상태 복원
+async function drawerGoBack() {
+  if (!drawerHistoryStack.length) { closeDrawer(); return; }
+  const prev = drawerHistoryStack.pop();
+  // 단원 컨텍스트는 prev에 저장된 걸로 복원(pop된 상태의 unitContext)
+  currentUnitContext = prev.unitContext || null;
+  await openDrawer(prev.nodeId, { pushHistory: false, force: true, restoreScrollTop: prev.scrollTop });
+  // 탭 복원
+  if (prev.currentDrawerTab && prev.currentDrawerTab !== 'overview') {
+    currentDrawerTab = prev.currentDrawerTab;
+    document.querySelectorAll('.drawer-tab').forEach(t => t.classList.toggle('active', t.dataset.dt === currentDrawerTab));
+    renderDrawerBody();
+  }
+}
+
+// ESC: 모달 → 드로어 → 필터 순으로 최상위 하나만 닫는다.
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  // 1) 모달 최우선 (이미 각 모달이 자체 처리하면 여기선 양보)
+  if (document.querySelector('.modal-overlay.show')) return;
+  // 2) 드로어
+  const drawer = document.getElementById('nodeDrawer');
+  if (drawer && drawer.classList.contains('show')) {
+    if (drawerHistoryStack.length) drawerGoBack();
+    else closeDrawer();
+    return;
+  }
+  // 3) 필터 팝업
+  const layout = document.getElementById('mapLayout');
+  if (layout && layout.classList.contains('filter-open')) {
+    toggleFilterSidebar(false);
+    return;
+  }
+});
+
+/* =========================================================
+   §4.1 낙관적 업데이트 (markNodeInProgress)
+   ========================================================= */
+async function markNodeInProgress(nodeId) {
+  if (!nodeId) return;
+  const prevStatus = userStatuses[nodeId];
+  if (prevStatus === 'in_progress' || prevStatus === 'completed' || prevStatus === 'mastered' || prevStatus === 'video_watched') {
+    // 이미 상위/진행 상태 — 그대로 서버에 알림만
+    fetchApi('/api/self-learn/map/nodes/' + encodeURIComponent(nodeId) + '/start', { method: 'POST' })
+      .catch(() => {});
+    // 부모 단원은 아직 시작 전일 수 있음 → 전파 (클라 + 서버)
+    try {
+      const parentUnitId = (currentUnitContext && currentUnitContext.id && currentUnitContext.id !== nodeId) ? currentUnitContext.id : null;
+      if (parentUnitId) {
+        const us = userStatuses[parentUnitId];
+        if (us !== 'in_progress' && us !== 'completed' && us !== 'mastered') {
+          userStatuses[parentUnitId] = 'in_progress';
+          applyStatusToNodeUI(parentUnitId, 'in_progress', { pulse: true });
+          fetchApi('/api/self-learn/map/nodes/' + encodeURIComponent(parentUnitId) + '/start', { method: 'POST' }).catch(() => {});
+        }
+      }
+    } catch(_) {}
+    return;
+  }
+  // 낙관적 UI 갱신
+  userStatuses[nodeId] = 'in_progress';
+  applyStatusToNodeUI(nodeId, 'in_progress', { pulse: true });
+  // 차시(lesson) → 단원(unit) 전파: 맵이 단원 모드이면 부모 단원도 진행중으로 표시 (클라 + 서버)
+  try {
+    const parentUnitId = (currentUnitContext && currentUnitContext.id && currentUnitContext.id !== nodeId) ? currentUnitContext.id : null;
+    if (parentUnitId) {
+      const unitStatus = userStatuses[parentUnitId];
+      if (unitStatus !== 'in_progress' && unitStatus !== 'completed' && unitStatus !== 'mastered') {
+        userStatuses[parentUnitId] = 'in_progress';
+        applyStatusToNodeUI(parentUnitId, 'in_progress', { pulse: true });
+        fetchApi('/api/self-learn/map/nodes/' + encodeURIComponent(parentUnitId) + '/start', { method: 'POST' }).catch(() => {});
+      }
+    }
+  } catch(_) {}
+
+  // 서버 호출
+  try {
+    const res = await fetch('/api/self-learn/map/nodes/' + encodeURIComponent(nodeId) + '/start', {
+      method: 'POST', credentials: 'include',
+      headers: { 'Content-Type': 'application/json' }
+    });
+    if (!res.ok) {
+      if (res.status === 404 || res.status === 501) {
+        // Backend endpoint missing → graceful: UI 유지, 로그만
+        console.info('[markNodeInProgress] endpoint unavailable — graceful fallback');
+        return;
+      }
+      // 병렬 백엔드 개발 중 일시적 500도 graceful
+      const txt = await res.text().catch(() => '');
+      if (/서버 오류|route|not found|unknown/i.test(txt)) {
+        console.info('[markNodeInProgress] graceful fallback (likely unimplemented):', res.status);
+        return;
+      }
+      throw new Error('start API failed: ' + res.status);
+    }
+    const data = await res.json().catch(() => null);
+    if (data && data.status) {
+      userStatuses[nodeId] = data.status;
+      applyStatusToNodeUI(nodeId, data.status);
+    }
+  } catch (e) {
+    // 롤백
+    if (prevStatus) userStatuses[nodeId] = prevStatus;
+    else delete userStatuses[nodeId];
+    applyStatusToNodeUI(nodeId, prevStatus || 'available');
+    showToast('상태 업데이트에 실패했어요. 다시 시도해 주세요', 'fa-exclamation-circle');
+    // 에러 toast 스타일 적용
+    const t = document.querySelector('.toast');
+    if (t) t.classList.add('toast-error');
+  }
+}
+
+// 노드 UI(list-card, svg-node, drawer header badge)에 상태 클래스 전파
+function applyStatusToNodeUI(nodeId, status, opts) {
+  opts = opts || {};
+  // svg-node / list-card 갱신
+  document.querySelectorAll(`.svg-node[data-node-id="${CSS.escape(nodeId)}"], .list-card[data-node-id="${CSS.escape(nodeId)}"]`).forEach(el => {
+    ['status-not_started','status-available','status-locked','status-in_progress','status-completed','status-mastered','status-diagnosing','status-video_watched','status-problem_solved'].forEach(c => el.classList.remove(c));
+    el.classList.add('status-' + status);
+    if (opts.pulse) { el.classList.remove('pulse-fx'); void el.offsetWidth; el.classList.add('pulse-fx'); }
+  });
+  // 단원 내 현재 오픈된 차시 카드(.lesson-card-v2)
+  document.querySelectorAll(`.lesson-card-v2[data-node-id="${CSS.escape(nodeId)}"] .lc-badge[data-status-badge]`).forEach(el => {
+    el.className = 'lc-badge status-' + status;
+    el.setAttribute('data-status-badge','');
+    el.textContent = statusLabelShort(status);
+    if (opts.pulse) { el.classList.remove('pulse-fx'); void el.offsetWidth; el.classList.add('pulse-fx'); }
+  });
+  // 드로어 헤더 status 뱃지 (현재 오픈 노드와 일치 시)
+  if (currentDrawerNode && currentDrawerNode._id === nodeId) {
+    currentDrawerNode._status = status;
+    const badge = document.querySelector('#drawerBadges .drawer-badge.status');
+    if (badge) {
+      badge.className = 'drawer-badge status ' + status;
+      badge.textContent = statusLabel(status);
+      if (opts.pulse) { badge.classList.remove('pulse-fx'); void badge.offsetWidth; badge.classList.add('pulse-fx'); }
+    }
+  }
+}
+
+function statusLabelShort(s) {
+  const map = { not_started:'시작 전', available:'시작 전', locked:'시작 전', in_progress:'학습 중', completed:'완료', mastered:'숙달', video_watched:'영상 완료', problem_solved:'문제 완료' };
+  return map[s] || '시작 전';
+}
+
+// 단원(level=2) 드로어에서 영상/문제 탭을 숨기고, 차시(level=3)에서는 노출
+function applyDrawerTabsForLevel(level) {
+  const isUnit = Number(level) === 2;
+  document.querySelectorAll('.drawer-tab').forEach(t => {
+    const dt = t.dataset.dt;
+    if (dt === 'videos' || dt === 'problems') {
+      t.style.display = isUnit ? 'none' : '';
+    }
+  });
+  // 단원에서 현재 탭이 영상/문제면 개요로 복귀
+  if (isUnit && (currentDrawerTab === 'videos' || currentDrawerTab === 'problems')) {
+    currentDrawerTab = 'overview';
+    document.querySelectorAll('.drawer-tab').forEach(x => x.classList.toggle('active', x.dataset.dt === 'overview'));
+  }
+}
+
+// 단원 드로어: 이 단원의 차시 섹션
+let currentUnitLessons = null; // [{node_id, lesson_name, videos_count, problems_count, status}, ...]
+async function loadUnitLessonsInto(container, unitId) {
+  container.innerHTML = '<div class="drawer-text" style="padding:10px 0;color:var(--gray-500)"><i class="fas fa-spinner fa-spin"></i> 차시 목록을 불러오는 중…</div>';
+  const data = await fetchApi('/api/self-learn/map/nodes/' + encodeURIComponent(unitId) + '/lessons');
+  const lessons = data?.lessons || data?.data || data || [];
+  currentUnitLessons = Array.isArray(lessons) ? lessons : [];
+  if (!currentUnitLessons.length) {
+    container.innerHTML = '<div class="drawer-text" style="padding:10px 0;color:var(--gray-500)">이 단원에 등록된 차시가 아직 없습니다.</div>';
+    return;
+  }
+  container.innerHTML = currentUnitLessons.map(l => {
+    const lid = l.node_id || l.id || l._id;
+    const title = l.lesson_name || l.node_name || l.title || l.name || '학습 노드';
+    const vc = l.videos_count ?? l.video_count ?? 0;
+    const qc = l.problems_count ?? l.question_count ?? 0;
+    const st = l.status || l.my_status || inferStatus(lid) || 'not_started';
+    const pct = Math.max(0, Math.min(100, parseInt(l.progress_percent ?? l.progressPercent ?? 0) || 0));
+    const ringDash = 2 * Math.PI * 9;
+    const ringOffset = ringDash * (1 - pct/100);
+    const ringHtml = pct > 0 ? `<div class="lc-ring" aria-hidden="true">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="#E5E7EB" stroke-width="3"/><circle cx="12" cy="12" r="9" fill="none" stroke="#2563eb" stroke-width="3" stroke-linecap="round" stroke-dasharray="${ringDash.toFixed(2)}" stroke-dashoffset="${ringOffset.toFixed(2)}"/></svg>
+        <span class="lc-ring-pct">${pct}</span>
+      </div>` : '';
+    return `<div class="lesson-card-v2" data-node-id="${escHtml(lid)}" tabindex="0" onclick="handleLessonCardClick('${lid}', ${JSON.stringify(title).replace(/"/g,'&quot;')})" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();handleLessonCardClick('${lid}', ${JSON.stringify(title).replace(/"/g,'&quot;')})}">
+      ${ringHtml}
+      <div class="lc-body">
+        <div class="lc-title">${escHtml(title)}</div>
+        <div class="lc-badges">
+          <span class="lc-badge video"><i class="fas fa-video"></i> 영상 ${vc}</span>
+          <span class="lc-badge prob"><i class="fas fa-clipboard-question"></i> 문제 ${qc}</span>
+          <span class="lc-badge status-${st}" data-status-badge>${statusLabelShort(st)}</span>
+        </div>
+      </div>
+      <i class="fas fa-chevron-right lc-chev"></i>
+    </div>`;
+  }).join('');
+}
+
+// 차시 카드 클릭: 단원 컨텍스트 보존하며 openDrawer
+function handleLessonCardClick(lessonId, lessonTitle) {
+  // 현재 단원이 열려있다면 currentUnitContext로 확보
+  if (currentDrawerNode && Number(currentDrawerNode._level) === 2) {
+    currentUnitContext = { id: currentDrawerNode._id, name: currentDrawerNode.title || currentDrawerNode.name || currentDrawerNode.unit_name || '단원' };
+  }
+  openDrawer(lessonId, { force: true });
+}
+
+// §3.5 이전/후속 학습 렌더 헬퍼
+// 드로어의 이전/이어지는 학습 목록은 allEdges(getAdjacent) 기반의 1-hop 이웃 전체를 보여준다.
+// 현재 맵 필터에 의해 nodeById에 없는 노드라도, 백엔드 상세(n.prerequisites / n.nexts)에서
+// 제목/영역/학년 정보를 복원해서 표시한다. 어느 쪽에도 없을 때도 id 만으로 스텁을 만들어
+// 절대 드롭하지 않는다.
+function renderRelatedLearningSections(n) {
+  const nid = n && n._id;
+  let prereqs = [];
+  let nexts = [];
+  if (nid && typeof getAdjacent === 'function') {
+    const adj = getAdjacent(nid) || { prereqs: [], downs: [] };
+    const findInDetail = (arr, id) => {
+      if (!Array.isArray(arr)) return null;
+      return arr.find(p => p && (p.id === id || p.node_id === id || p._id === id)) || null;
+    };
+    const resolveId = (id, detailArr) => {
+      // 1) 현재 맵에 렌더된 노드 우선
+      const mapNode = nodeById[id];
+      if (mapNode) return mapNode;
+      // 2) 백엔드 상세에서 찾기 (필터 밖 노드도 정보 보존)
+      const d = findInDetail(detailArr, id);
+      if (d) {
+        return {
+          _id: id,
+          id: d.id || d.node_id || d._id || id,
+          title: d.title || d.name || d.lesson_name || d.unit_name,
+          name: d.name,
+          lesson_name: d.lesson_name,
+          unit_name: d.unit_name,
+          area: d.area || d.subject,
+          subject: d.subject || d.area,
+          grade: d.grade,
+          status: d.status,
+          user_status: d.user_status,
+        };
+      }
+      // 3) 최소 스텁 — 드롭하지 않음
+      return { _id: id, id, title: '(알 수 없음)' };
+    };
+    prereqs = (adj.prereqs || []).map(id => resolveId(id, n && n.prerequisites));
+    nexts = (adj.downs || []).map(id => resolveId(id, n && n.nexts));
+  }
+  let html = '';
+  html += renderRelList(prereqs, 'prev', n);
+  html += renderRelList(nexts, 'next', n);
+  return html;
+}
+
+function renderRelList(items, kind, parentNode) {
+  const label = kind === 'prev' ? '이전 학습' : '이어지는 학습';
+  const arrow = kind === 'prev' ? '←' : '→';
+  const isNext = kind === 'next';
+  const N = items.length;
+  if (!N) {
+    return `<div class="rel-section">
+      <div class="rel-section-head"><span class="rel-section-label">${label} · 0</span></div>
+      <div class="rel-empty">${kind === 'prev' ? '이전 학습 없음' : '이어지는 학습 없음'}</div>
+    </div>`;
+  }
+  // 선행 미완료 카운트
+  let warnHtml = '';
+  if (kind === 'prev') {
+    const incomplete = items.filter(p => {
+      const pid = p.id || p.node_id || p;
+      const st = (p.user_status || p.status || inferStatus(pid) || 'not_started');
+      return !(st === 'completed' || st === 'mastered');
+    }).length;
+    if (incomplete > 0) {
+      warnHtml = `<span class="rel-warn-badge"><i class="fas fa-exclamation-triangle"></i> 이전 학습 ${incomplete}개 미완료</span>`;
+    }
+  }
+  const collapseThreshold = 3;
+  const shouldCollapse = N > collapseThreshold;
+  const secId = 'rel-' + kind + '-' + Math.random().toString(36).slice(2, 8);
+  const cardsHtml = items.map((p, idx) => {
+    const pid = p.id || p.node_id || p;
+    const title = resolveRelLabel(p, pid);
+    const st = (p.user_status || p.status || inferStatus(pid) || 'not_started');
+    const subject = p.area || p.subject || (nodeById[pid]?.area) || (nodeById[pid]?.subject) || '';
+    const grade = p.grade ?? (nodeById[pid]?.grade);
+    const subParts = [];
+    if (subject) subParts.push(subject);
+    if (grade != null && grade !== '') subParts.push(grade + '학년');
+    const sub = subParts.join(' · ');
+    const hiddenStyle = shouldCollapse && idx >= collapseThreshold ? 'style="display:none" data-rel-hidden' : '';
+    return `<div class="rel-card ${isNext ? 'is-next' : ''}" data-node-id="${escHtml(pid)}" ${hiddenStyle} tabindex="0" onclick="handleRelClick('${escHtml(pid)}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();handleRelClick('${escHtml(pid)}')}" title="${escHtml(title)}">
+      <span class="rel-dir" aria-hidden="true">${arrow}</span>
+      <div class="rel-body">
+        <div class="rel-title">${escHtml(title)}</div>
+        ${sub ? `<div class="rel-sub">${escHtml(sub)}</div>` : ''}
+      </div>
+      <span class="rel-badge ${st}" aria-label="${escHtml(statusLabelShort(st))}"></span>
+    </div>`;
+  }).join('');
+  const moreBtn = shouldCollapse ? `<button class="rel-more-btn" onclick="toggleRelMore(this, '${secId}')" data-expanded="0">+${N - collapseThreshold} 더보기</button>` : '';
+  return `<div class="rel-section" id="${secId}">
+    <div class="rel-section-head">
+      <span class="rel-section-label">${label} · ${N}</span>
+      ${warnHtml}
+    </div>
+    <div class="rel-list">${cardsHtml}</div>
+    ${moreBtn}
+  </div>`;
+}
+
+function resolveRelLabel(p, pid) {
+  const unitMode = (typeof viewMode !== 'undefined' && viewMode === 'unit');
+  const preferred = unitMode
+    ? (p.unit_name || p.lesson_name || p.title || p.name)
+    : (p.lesson_name || p.unit_name || p.title || p.name);
+  if (preferred && preferred !== pid) return preferred;
+  const fromMap = nodeById[pid];
+  if (fromMap) {
+    if (unitMode) return fromMap.unit_name || fromMap.lesson_name || fromMap._title || fromMap.title || fromMap.name || '학습 노드';
+    return fromMap.lesson_name || fromMap.unit_name || fromMap._title || fromMap.title || fromMap.name || '학습 노드';
+  }
+  return '학습 노드';
+}
+
+function toggleRelMore(btn, secId) {
+  const sec = document.getElementById(secId); if (!sec) return;
+  const expanded = btn.getAttribute('data-expanded') === '1';
+  const hiddenCards = sec.querySelectorAll('[data-rel-hidden]');
+  if (!expanded) {
+    hiddenCards.forEach(c => c.style.display = '');
+    btn.textContent = '접기';
+    btn.setAttribute('data-expanded','1');
+  } else {
+    hiddenCards.forEach(c => c.style.display = 'none');
+    const totalMatch = sec.querySelector('.rel-section-label')?.textContent.match(/·\s*(\d+)/);
+    const total = totalMatch ? parseInt(totalMatch[1]) : 0;
+    btn.textContent = '+' + (total - 3) + ' 더보기';
+    btn.setAttribute('data-expanded','0');
+  }
+}
+
+function handleRelClick(pid) {
+  openDrawer(pid, { force: true });
 }
 
 function renderDrawerBody() {
@@ -1350,7 +2453,35 @@ function renderDrawerBody() {
 
   if (currentDrawerTab === 'overview') {
     const prog = n.progress ?? (n._status === 'completed' ? 100 : n._status === 'in_progress' ? 50 : 0);
+    const isUnit = Number(n._level) === 2;
     let html = '';
+    // 차시 드로어: 영상 썸네일 + 문항 목록을 최상단에 즉시 노출
+    if (!isUnit) {
+      html += `<div class="drawer-section">
+        <div class="drawer-section-label"><i class="fas fa-video"></i> 학습 영상 (${(n.videos||[]).length})</div>
+        ${renderVideosHtml(n)}
+      </div>`;
+      html += `<div class="drawer-section">
+        <div class="drawer-section-label"><i class="fas fa-clipboard-question"></i> 연습 문제 (${(n.problems||[]).length})</div>
+        ${renderProblemsHtml(n)}
+      </div>`;
+    }
+    // 단원 드로어: 차시 목록 + 진행률을 최상단에 노출 (스크롤 없이 즉시 확인)
+    if (isUnit) {
+      html += `<div class="drawer-section">
+        <div class="drawer-section-label">이 단원의 차시</div>
+        <div id="unitLessonsList"></div>
+      </div>`;
+      html += `<div class="drawer-section">
+        <div class="drawer-section-label">진행률</div>
+        <div class="progress-row">
+          <div class="progress-bar"><div class="progress-fill" style="width:${prog}%"></div></div>
+          <div class="progress-text">${prog}%</div>
+        </div>
+      </div>`;
+    }
+    // §3.5 선행/후속 학습 블록
+    html += renderRelatedLearningSections(n);
     if (n.achievement) {
       html += `<div class="drawer-section">
         <div class="drawer-section-label">성취기준</div>
@@ -1363,54 +2494,37 @@ function renderDrawerBody() {
         <div class="drawer-text">${escHtml(n.description)}</div>
       </div>`;
     }
-    html += `<div class="drawer-section">
-      <div class="drawer-section-label">진행률</div>
-      <div class="progress-row">
-        <div class="progress-bar"><div class="progress-fill" style="width:${prog}%"></div></div>
-        <div class="progress-text">${prog}%</div>
-      </div>
-    </div>`;
+    // 차시(비단원)는 진행률을 여기서 렌더
+    if (!isUnit) {
+      html += `<div class="drawer-section">
+        <div class="drawer-section-label">진행률</div>
+        <div class="progress-row">
+          <div class="progress-bar"><div class="progress-fill" style="width:${prog}%"></div></div>
+          <div class="progress-text">${prog}%</div>
+        </div>
+      </div>`;
+    }
     // 단원명/차시명 해결: 현재 보기 모드(viewMode)에 맞는 이름으로 표시
     const resolveLabel = (p) => {
       const pid = p.id || p.node_id || p;
-      const fromPayload = p.title || p.name || p.lesson_name || p.unit_name;
+      // 보기 모드에 맞춰 단원/차시 이름 우선 선택
+      const unitMode = (typeof viewMode !== 'undefined' && viewMode === 'unit');
+      const preferred = unitMode
+        ? (p.unit_name || p.lesson_name || p.title || p.name)
+        : (p.lesson_name || p.unit_name || p.title || p.name);
+      if (preferred && preferred !== pid) return preferred;
       const fromMap = nodeById[pid];
-      if (fromPayload && fromPayload !== pid) return fromPayload;
       if (fromMap) {
-        // viewMode 가 'unit'이면 단원명 우선, 그 외엔 차시명/기본 타이틀
-        if (typeof viewMode !== 'undefined' && viewMode === 'unit') {
-          return fromMap.unit_name || fromMap._title || fromMap.title || fromMap.name || pid;
+        if (unitMode) {
+          return fromMap.unit_name || fromMap.lesson_name || fromMap._title || fromMap.title || fromMap.name || '학습 노드';
         }
-        return fromMap.lesson_name || fromMap._title || fromMap.title || fromMap.name || fromMap.unit_name || pid;
+        return fromMap.lesson_name || fromMap.unit_name || fromMap._title || fromMap.title || fromMap.name || '학습 노드';
       }
-      return pid;
+      // 최후 fallback - 내부 ID 대신 사람이 읽을 수 있는 문구
+      return '학습 노드';
     };
-    if (n.prerequisites && n.prerequisites.length) {
-      html += `<div class="drawer-section">
-        <div class="drawer-section-label">선행 학습</div>
-        <div style="display:flex;flex-wrap:wrap;gap:6px">
-          ${n.prerequisites.map(p => {
-            const pid = p.id || p.node_id || p;
-            const pt = resolveLabel(p);
-            const st = inferStatus(pid);
-            return `<span class="svg-node-status ${st}" style="cursor:pointer;padding:4px 10px" onclick="openDrawer('${pid}')" title="${escHtml(pid)}"><i class="fas fa-arrow-left"></i> ${escHtml(pt)}</span>`;
-          }).join('')}
-        </div>
-      </div>`;
-    }
-    if (n.nexts && n.nexts.length) {
-      html += `<div class="drawer-section">
-        <div class="drawer-section-label">후속 학습</div>
-        <div style="display:flex;flex-wrap:wrap;gap:6px">
-          ${n.nexts.map(p => {
-            const pid = p.id || p.node_id || p;
-            const pt = resolveLabel(p);
-            const st = inferStatus(pid);
-            return `<span class="svg-node-status ${st}" style="cursor:pointer;padding:4px 10px" onclick="openDrawer('${pid}')" title="${escHtml(pid)}">${escHtml(pt)} <i class="fas fa-arrow-right"></i></span>`;
-          }).join('')}
-        </div>
-      </div>`;
-    }
+    // 선행/후속은 상단 §3.5 섹션에서 렌더되므로 여기선 제외
+    // (차시 목록은 이제 단원 드로어 최상단에서 렌더됨)
     // Legacy "contents chip" fallback
     if ((!n.videos || !n.videos.length) && (!n.problems || !n.problems.length) && n.contents && n.contents.length) {
       html += `<div class="drawer-section">
@@ -1421,95 +2535,159 @@ function renderDrawerBody() {
       </div>`;
     }
     body.innerHTML = html || '<div class="drawer-text" style="padding:20px 0;color:var(--gray-500)">표시할 상세 정보가 없습니다.</div>';
+    // 단원이면 차시 목록을 비동기 로드하여 주입
+    if (Number(n._level) === 2) {
+      const listEl = document.getElementById('unitLessonsList');
+      if (listEl) loadUnitLessonsInto(listEl, n._id);
+    }
   }
   else if (currentDrawerTab === 'videos') {
-    const vids = n.videos || [];
-    if (!vids.length) {
-      body.innerHTML = '<div class="drawer-text" style="padding:20px 0;color:var(--gray-500)">등록된 학습 영상이 아직 없습니다.</div>';
-      return;
-    }
-    let html = '<div class="video-grid">';
-    vids.forEach(v => {
-      const id = v.id || v.content_id || v.contentId;
-      const title = v.title || v.name || '학습 영상';
-      const dur = v.duration_sec ?? v.duration ?? 0;
-      const durLabel = dur ? Math.floor(dur/60) + ':' + String(dur%60).padStart(2,'0') : '-';
-      const watched = v.position_sec ?? v.watched_sec ?? 0;
-      const pct = dur ? Math.round(watched/dur*100) : 0;
-      html += `
-        <div class="video-card" onclick="playVideo('${id}')">
-          <div class="video-thumb">
-            <i class="fas fa-play-circle"></i>
-            <span class="video-duration">${durLabel}</span>
-            <div class="video-progress-bar"><div style="width:${pct}%"></div></div>
-          </div>
-          <div class="video-title">${escHtml(title)}</div>
-          <div class="video-meta">
-            <span><i class="fas fa-eye"></i> 시청률 ${v.view_rate ?? v.viewRate ?? '-'}%</span>
-            <span>${pct > 0 ? '이어보기 ' + pct + '%' : ''}</span>
-          </div>
-          <div class="video-actions">
-            <button class="mini-btn" onclick="event.stopPropagation();addToProblemSet('${id}','video')"><i class="fas fa-plus"></i> 문제집 담기</button>
-          </div>
-        </div>`;
-    });
-    html += '</div>';
-    body.innerHTML = html;
+    body.innerHTML = renderVideosHtml(n);
   }
   else if (currentDrawerTab === 'problems') {
-    const probs = n.problems || [];
-    if (!probs.length) {
-      body.innerHTML = '<div class="drawer-text" style="padding:20px 0;color:var(--gray-500)">등록된 문제가 아직 없습니다.</div>';
-      return;
-    }
-    let html = '<div class="problem-list">';
-    probs.forEach((p, i) => {
-      const id = p.id || p.content_id || p.contentId;
-      const title = p.title || p.name || ('문제 ' + (i+1));
-      const diff = (p.difficulty || 'medium').toLowerCase();
-      const diffKo = { easy:'하', medium:'중', hard:'상' }[diff] || '중';
-      const acc = p.accuracy ?? '-';
-      const myAttempts = p.my_attempts ?? p.myAttempts ?? 0;
-      html += `
-        <div class="problem-row">
-          <div class="problem-info">
-            <div class="problem-title">${escHtml(title)}</div>
-            <div class="problem-meta">
-              <span class="diff-badge ${diff}">난이도 ${diffKo}</span>
-              <span><i class="fas fa-percent"></i> 정답률 ${acc}${typeof acc === 'number' ? '%' : ''}</span>
-              <span><i class="fas fa-redo"></i> 내 시도 ${myAttempts}회</span>
-            </div>
-          </div>
-          <div class="problem-actions">
-            <button class="btn-mini primary" onclick='openSolve(${JSON.stringify({id, title, difficulty: diff, options: p.options || p.choices, question: p.question || p.text || p.content, answer: p.answer || p.correct_answer, explanation: p.explanation, clear_top3: p.clear_top3 || p.clearTop3}).replace(/"/g,"&quot;")})'>풀기</button>
-            <button class="btn-mini ghost" onclick="addToProblemSet('${id}','problem')"><i class="fas fa-plus"></i></button>
-            <button class="btn-mini report" onclick="openReport('${id}','problem')"><i class="fas fa-flag"></i></button>
-          </div>
-        </div>`;
-    });
-    html += '</div>';
-    body.innerHTML = html;
+    body.innerHTML = renderProblemsHtml(n);
   }
+}
+
+// 영상 썸네일 그리드 HTML 생성 (재사용)
+function renderVideosHtml(n) {
+  const vids = n.videos || [];
+  if (!vids.length) {
+    return `<div class="drawer-empty">
+      <i class="fas fa-video-slash"></i>
+      <div class="de-title">등록된 영상이 없어요</div>
+      <div class="de-sub">선생님께 영상 업로드를 요청해 보세요.</div>
+    </div>`;
+  }
+  let html = '<div class="video-grid-v2">';
+  vids.forEach((v, vi) => {
+    const id = v.id || v.content_id || v.contentId;
+    const title = v.title || v.name || '학습 영상';
+    const dur = v.duration_sec ?? v.duration ?? 0;
+    const durLabel = dur ? Math.floor(dur/60) + ':' + String(dur%60).padStart(2,'0') : '-';
+    const watched = v.position_sec ?? v.watched_sec ?? 0;
+    const ratio = Number(v.watch_ratio ?? (dur ? watched/dur : 0)) || 0;
+    const pct = Math.max(0, Math.min(100, Math.round(ratio * 100)));
+    const isDone = pct >= 80;
+    const statusLabel = isDone ? '영상 완료' : (pct > 0 ? '진행 중' : '미시청');
+    html += `
+      <div class="video-card-v2" data-content-id="${escHtml(id)}" onclick="handleVideoCardClick(${vi})">
+        <div class="vc-thumb"><i class="fas fa-play-circle"></i><span class="vc-dur">${durLabel}</span></div>
+        <div class="vc-info">
+          <div class="vc-title">${escHtml(title)}</div>
+          <div class="vc-meta"><span>${durLabel}</span><span>· ${escHtml(statusLabel)}</span></div>
+          <div class="vc-bar"><div class="vc-bar-fill ${isDone ? 'done' : ''}" style="width:${pct}%"></div></div>
+          <div class="vc-pct">${pct}%</div>
+        </div>
+        <button class="vc-play-btn" onclick="event.stopPropagation();handleVideoCardClick(${vi})"><i class="fas fa-play"></i><span>재생</span></button>
+      </div>`;
+  });
+  html += '</div>';
+  return html;
+}
+
+// 문제 목록 HTML 생성 (재사용)
+function renderProblemsHtml(n) {
+  const probs = n.problems || [];
+  if (!probs.length) {
+    return `<div class="drawer-empty">
+      <i class="fas fa-clipboard-list"></i>
+      <div class="de-title">등록된 문제가 없어요</div>
+      <div class="de-sub">선생님이 추가하시면 여기에 표시됩니다.</div>
+    </div>`;
+  }
+  let html = '<div class="problem-list-v2">';
+  probs.forEach((p, i) => {
+    const id = p.id || p.content_id || p.contentId;
+    const title = p.title || p.name || ('문제 ' + (i+1));
+    const diffRaw = p.difficulty == null ? 'medium' : p.difficulty;
+    const diff = String(diffRaw).toLowerCase();
+    const numericDiff = { '1':'easy','2':'medium','3':'hard','하':'easy','중':'medium','상':'hard' }[diff] || diff;
+    const myAttempts = p.my_attempts ?? p.myAttempts ?? 0;
+    const diffLabel = { easy:'쉬움', medium:'보통', hard:'어려움' }[numericDiff] || '보통';
+    const stem = p.question || p.text || p.content || p.stem || '';
+    const lastCorrect = p.last_correct;
+    let statusTxt = '미풀이';
+    let statusCls = '';
+    if (myAttempts > 0) statusTxt = lastCorrect === true ? '정답' : (lastCorrect === false ? '오답' : '풀이 중');
+    if (lastCorrect === true) statusCls = 'correct';
+    html += `
+      <div class="problem-card-v2">
+        <div class="pc-head">
+          <span class="pc-num">문항 ${i+1}</span>
+          <span class="pc-diff ${numericDiff}">${diffLabel}</span>
+        </div>
+        <div class="pc-stem">${escHtml(stem || ('문제 ' + (i+1)))}</div>
+        <div class="pc-foot">
+          <div class="pc-status ${statusCls}">${lastCorrect === true ? '<i class="fas fa-check-circle"></i> ' : ''}${escHtml(statusTxt)}</div>
+          <button class="pc-solve-btn" onclick='handleProblemSolveClick(${JSON.stringify({id, title, difficulty: diff, options: p.options || p.choices, question: stem, answer: p.answer || p.correct_answer, explanation: p.explanation, clear_top3: p.clear_top3 || p.clearTop3}).replace(/"/g,"&quot;")})'>풀기</button>
+        </div>
+      </div>`;
+  });
+  html += '</div>';
+  return html;
+}
+
+// §4.1 영상 카드 클릭: 낙관적 상태 승격 후 재생
+function handleVideoCardClick(vi) {
+  const v = currentDrawerNode?.videos?.[vi];
+  if (!v) return;
+  const nodeId = currentDrawerNode?._id;
+  if (nodeId) markNodeInProgress(nodeId);
+  playVideo(v);
+}
+
+// §4.1 문제 "풀기" 클릭: 낙관적 상태 승격 후 openSolve
+function handleProblemSolveClick(problem) {
+  const nodeId = currentDrawerNode?._id;
+  if (nodeId) markNodeInProgress(nodeId);
+  openSolve(problem);
 }
 
 function renderDrawerFooter() {
   const n = currentDrawerNode; if (!n) return;
   const inList = learningList.has(n._id);
+  const isUnit = Number(n._level) === 2;
+  const directLabel = isUnit ? '📖 첫 차시 바로 학습' : '📖 바로 학습하기';
+  const directCall = isUnit ? `startUnitFirstLesson('${n._id}')` : `startDirectLearning('${n._id}')`;
   $('drawerFooter').innerHTML = `
     <button class="dual-btn diag" onclick="startDiagnosisFromNode('${n._id}')">🔍 진단하기</button>
-    <button class="dual-btn direct" onclick="startDirectLearning('${n._id}')">📖 바로 학습하기</button>
+    <button class="dual-btn direct" onclick="${directCall}">${directLabel}</button>
     <button class="dual-btn bookmark ${inList ? 'active' : ''}" onclick="toggleLearningList('${n._id}')">
       <i class="fas ${inList ? 'fa-bookmark' : 'fa-bookmark'}"></i> ${inList ? '목록에서 제거' : '학습목록 추가'}
     </button>`;
 }
 
+// 단원에서 "첫 차시 바로 학습": 콘텐츠 있는 첫 차시로 전환 후 startDirectLearning
+async function startUnitFirstLesson(unitId) {
+  let lessons = currentUnitLessons;
+  if (!lessons) {
+    const data = await fetchApi('/api/self-learn/map/nodes/' + encodeURIComponent(unitId) + '/lessons');
+    lessons = data?.lessons || data?.data || data || [];
+  }
+  if (!Array.isArray(lessons) || !lessons.length) {
+    showToast('이 단원에 등록된 차시가 없습니다.', 'fa-info-circle');
+    return;
+  }
+  const target = lessons.find(l => (l.videos_count ?? 0) + (l.problems_count ?? 0) > 0) || lessons[0];
+  const lid = target.node_id || target.id || target._id;
+  await openDrawer(lid, { force: true });
+  await startDirectLearning(lid);
+}
+
 /* =========================================================
    Learning List / Last Activity / Sidebar cards
    ========================================================= */
+let learningListItems = {}; // id → {lesson_name, unit_name, ...}
 async function loadLearningList() {
   const d = await fetchApi('/api/self-learn/learning-list');
   const items = d?.items || d?.learning_list || [];
   learningList = new Set(items.map(i => i.node_id || i.nodeId || i.id));
+  learningListItems = {};
+  items.forEach(i => {
+    const id = i.node_id || i.nodeId || i.id;
+    learningListItems[id] = i;
+  });
   renderSidebarCards();
 }
 
@@ -1554,9 +2732,12 @@ function renderSidebarCards() {
   if (ids.length) {
     const rows = ids.slice(0, 5).map(id => {
       const n = nodeById[id];
-      const title = n ? (n._title || id) : id;
+      const li = learningListItems[id];
+      const title = (li && (li.title || li.lesson_name || li.unit_name))
+        || (n && (n._title || n.lesson_name || n.unit_name))
+        || '삭제된 학습 노드';
       const shortT = title.length > 16 ? title.slice(0, 16) + '…' : title;
-      return `<div class="llist-row" onclick="openDrawer('${id}')"><span class="dot"></span>${escHtml(shortT)}</div>`;
+      return `<div class="llist-row" onclick="openDrawer('${id}', {skipHighlightGate:true})"><span class="dot"></span>${escHtml(shortT)}</div>`;
     }).join('');
     ll.innerHTML = `
       <div class="llist-card">
@@ -1572,7 +2753,7 @@ function renderSidebarCards() {
 function goToLastActivity() {
   if (!lastActivity) return;
   const id = lastActivity.node_id || lastActivity.nodeId;
-  if (id) openDrawer(id);
+  if (id) openDrawer(id, {skipHighlightGate:true});
 }
 
 /* =========================================================
@@ -1584,11 +2765,27 @@ function openSolve(problem) {
   currentSolveNodeId = currentDrawerNode ? currentDrawerNode._id : null;
   solveStart = Date.now();
   $('solveTitle').textContent = problem.title || '문제 풀이';
-  const opts = problem.options || problem.choices || ['보기1', '보기2', '보기3', '보기4'];
+  // 보기(options)는 배열 또는 JSON 문자열일 수 있음 — 파싱 시도
+  let rawOpts = problem.options || problem.choices;
+  if (typeof rawOpts === 'string') {
+    const s = rawOpts.trim();
+    if (s.startsWith('[') || s.startsWith('{')) {
+      try { rawOpts = JSON.parse(s); } catch(_) { rawOpts = s.split(/\s*[|;,\n]\s*/).filter(Boolean); }
+    } else if (s) {
+      rawOpts = s.split(/\s*[|;,\n]\s*/).filter(Boolean);
+    }
+  }
+  if (rawOpts && !Array.isArray(rawOpts) && typeof rawOpts === 'object') {
+    // {1:'..',2:'..'} 혹은 {a:'..'} 형태 대응
+    rawOpts = Object.keys(rawOpts).sort().map(k => rawOpts[k]);
+  }
+  const opts = (Array.isArray(rawOpts) && rawOpts.length) ? rawOpts : ['보기1', '보기2', '보기3', '보기4'];
+  // 질문 문자열 — question/text/content/stem 순으로 탐색
+  const questionText = problem.question || problem.text || problem.content || problem.stem || '';
   const labels = ['①', '②', '③', '④', '⑤'];
 
   $('solveBody').innerHTML = `
-    <div class="solve-question">${escHtml(problem.question || '문항 내용이 제공되지 않았습니다. 보기 중 하나를 선택해보세요.')}</div>
+    <div class="solve-question">${escHtml(questionText || '문항 내용이 제공되지 않았습니다. 보기 중 하나를 선택해보세요.')}</div>
     <div class="solve-options" id="solveOpts">
       ${opts.map((opt, i) => {
         const t = typeof opt === 'string' ? opt : (opt.text || opt.label || opt.content || '보기' + (i+1));
@@ -1630,9 +2827,18 @@ async function submitSolve() {
 
   // Submit to server (defensive)
   const timeTaken = Math.round((Date.now() - solveStart) / 1000);
-  fetchApi(`/api/self-learn/contents/${encodeURIComponent(p.id)}/attempt`, {
+  fetchApi('/api/self-learn/problem-attempt', {
     method: 'POST',
-    body: JSON.stringify({ isCorrect, selectedAnswer: idx + 1, timeTaken, nodeId: currentSolveNodeId })
+    body: JSON.stringify({ contentId: p.id, isCorrect, selectedAnswer: idx + 1, timeTaken, nodeId: currentSolveNodeId })
+  }).then(data => {
+    // §4.2: 서버가 숙달 승격 신호 반환 시 즉시 UI 반영
+    if (data && (data.newStatus || data.status) && currentSolveNodeId) {
+      const ns = data.newStatus || data.status;
+      if (ns === 'mastered' || ns === 'completed' || ns === 'problem_solved') {
+        userStatuses[currentSolveNodeId] = ns;
+        applyStatusToNodeUI(currentSolveNodeId, ns, { pulse: true });
+      }
+    }
   });
 
   // Show explanation
@@ -1654,7 +2860,18 @@ async function submitSolve() {
     isCorrect = (idx + 1) === displayAnswer;
   }
   const body = $('solveBody');
-  let footer = `<div class="solve-explain"><strong>${isCorrect ? '✅ 정답입니다!' : '❌ 아쉬워요. 정답은 ' + (displayAnswer || '?') + '번입니다.'}</strong><br>${escHtml(expText || '해설이 준비되면 이 자리에 표시됩니다.')}</div>`;
+  // 정답 번호 → 실제 보기 텍스트 매핑 (가능한 경우 자연어로 노출)
+  let answerText = '';
+  try {
+    const optEls = document.querySelectorAll('#solveOpts .solve-option');
+    if (displayAnswer && optEls[displayAnswer - 1]) {
+      answerText = optEls[displayAnswer - 1].querySelector('.solve-option-text')?.textContent?.trim() || '';
+    }
+  } catch(_) {}
+  const answerLabel = answerText
+    ? `${displayAnswer}번 "${answerText}"`
+    : (displayAnswer ? `${displayAnswer}번` : '?');
+  let footer = `<div class="solve-explain"><strong>${isCorrect ? '✅ 정답입니다!' : '❌ 아쉬워요. 정답은 ' + answerLabel + ' 입니다.'}</strong><br>${escHtml(expText || '해설이 준비되면 이 자리에 표시됩니다.')}</div>`;
   if (p.clear_top3 && p.clear_top3.length) {
     footer += `<div class="clear-top3"><span class="medal">🏆</span> 클리어 TOP3: ${p.clear_top3.map((u, i) => ['🥇','🥈','🥉'][i] + ' ' + escHtml(u.name || u.username || '익명')).join(' · ')}</div>`;
   }
@@ -1701,12 +2918,128 @@ function addToProblemSet(contentId, contentType) {
   }).then(() => showToast('문제집에 담았습니다!', 'fa-plus'));
 }
 
-function playVideo(id) {
-  fetchApi(`/api/self-learn/contents/${encodeURIComponent(id)}/video-progress`, {
-    method: 'POST',
-    body: JSON.stringify({ positionSec: 0, durationSec: 0, nodeId: currentDrawerNode?._id })
-  });
-  showToast('영상 재생 시작 (데모)', 'fa-play');
+/* =========================================================
+   Video Player
+   ========================================================= */
+let videoPlayerState = null; // { video, nodeId, intervalId, startPos }
+
+function findVideoObject(videoIdOrObj) {
+  if (videoIdOrObj && typeof videoIdOrObj === 'object') return videoIdOrObj;
+  const id = videoIdOrObj;
+  const list = currentDrawerNode?.videos || [];
+  return list.find(v => String(v.id || v.content_id || v.contentId) === String(id)) || null;
+}
+
+function resolveVideoSource(v) {
+  const url = v.content_url || v.contentUrl || v.url || v.file_path || v.filePath || '';
+  if (!url) return { kind: 'none', url: '' };
+  const u = String(url).trim();
+  const lower = u.toLowerCase();
+  // YouTube
+  const ytMatch = lower.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([a-z0-9_-]{6,})/i);
+  if (ytMatch) return { kind: 'iframe', url: `https://www.youtube.com/embed/${ytMatch[1]}?autoplay=1&rel=0` };
+  // Vimeo
+  const vmMatch = lower.match(/vimeo\.com\/(?:video\/)?(\d+)/);
+  if (vmMatch) return { kind: 'iframe', url: `https://player.vimeo.com/video/${vmMatch[1]}?autoplay=1` };
+  // Direct file
+  if (/^https?:\/\//i.test(u) && /\.(mp4|webm|ogg|m4v|mov)(\?|#|$)/i.test(u)) return { kind: 'video', url: u };
+  // Local path
+  if (/\.(mp4|webm|ogg|m4v|mov)(\?|#|$)/i.test(u) && !/^https?:/i.test(u)) return { kind: 'video', url: u };
+  // External link
+  return { kind: 'external', url: u };
+}
+
+async function reportVideoProgress() {
+  const st = videoPlayerState;
+  if (!st) return;
+  const el = document.querySelector('#videoPlayerBody video');
+  const positionSec = el && !isNaN(el.currentTime) ? Math.floor(el.currentTime) : (st.video.position_sec || 0);
+  const durationSec = el && !isNaN(el.duration) ? Math.floor(el.duration) : (st.video.duration_sec || st.video.duration || 0);
+  const contentId = st.video.id || st.video.content_id || st.video.contentId;
+  try {
+    const data = await fetchApi('/api/self-learn/video-progress', {
+      method: 'POST',
+      body: JSON.stringify({ contentId, nodeId: st.nodeId, positionSec, durationSec })
+    });
+    // 80% 도달 시 상태 즉시 반영
+    if (data && (data.newStatus || data.status) && st.nodeId) {
+      const ns = data.newStatus || data.status;
+      if (ns === 'video_watched' || ns === 'completed' || ns === 'mastered') {
+        userStatuses[st.nodeId] = ns;
+        applyStatusToNodeUI(st.nodeId, ns, { pulse: true });
+      }
+    } else if (durationSec > 0 && positionSec / durationSec >= 0.8 && st.nodeId) {
+      // 서버 응답 없어도 클라에서 video_watched로 표기
+      if ((userStatuses[st.nodeId] || 'not_started') !== 'completed' && userStatuses[st.nodeId] !== 'mastered') {
+        userStatuses[st.nodeId] = 'video_watched';
+        applyStatusToNodeUI(st.nodeId, 'video_watched', { pulse: true });
+      }
+    }
+  } catch (e) { /* silent */ }
+}
+
+function playVideo(videoIdOrObj) {
+  const v = findVideoObject(videoIdOrObj);
+  if (!v) { showToast('영상 정보를 찾을 수 없습니다.', 'fa-exclamation-circle'); return; }
+  const src = resolveVideoSource(v);
+  const title = v.title || v.name || '학습 영상';
+  const nodeId = currentDrawerNode?._id || v.node_id || v.nodeId || null;
+  const resumeAt = Number(v.position_sec ?? v.watched_sec ?? v.positionSec ?? 0) || 0;
+
+  $('videoPlayerTitle').textContent = title;
+  const body = $('videoPlayerBody');
+  const actions = $('videoPlayerActions');
+
+  if (src.kind === 'none') {
+    showToast('영상 파일이 아직 등록되지 않았습니다.', 'fa-exclamation-circle');
+    return;
+  }
+
+  if (src.kind === 'video') {
+    body.innerHTML = `<video id="vpVideoEl" controls autoplay playsinline style="width:100%;max-height:70vh;background:#000" preload="metadata" src="${escHtml(src.url)}"></video>`;
+    actions.innerHTML = `<button class="btn btn-ghost" onclick="closeVideoPlayer()">닫기</button>`;
+  } else if (src.kind === 'iframe') {
+    body.innerHTML = `<iframe id="vpVideoEl" src="${escHtml(src.url)}" style="width:100%;aspect-ratio:16/9;border:0;background:#000" allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen></iframe>`;
+    actions.innerHTML = `<button class="btn btn-ghost" onclick="closeVideoPlayer()">닫기</button>`;
+  } else {
+    body.innerHTML = `<div style="padding:40px;background:#fff;color:var(--gray-700);text-align:center;width:100%">
+      <i class="fas fa-external-link-alt" style="font-size:36px;color:var(--primary);margin-bottom:12px"></i>
+      <p style="margin-bottom:16px">이 영상은 외부 사이트에서 제공됩니다.</p>
+      <a class="btn btn-primary" href="${escHtml(src.url)}" target="_blank" rel="noopener"><i class="fas fa-external-link-alt"></i> 외부 링크로 열기</a>
+    </div>`;
+    actions.innerHTML = `<button class="btn btn-ghost" onclick="closeVideoPlayer()">닫기</button>`;
+  }
+
+  $('videoPlayerModal').classList.add('show');
+
+  videoPlayerState = { video: v, nodeId, intervalId: null, startPos: resumeAt };
+
+  if (src.kind === 'video') {
+    const el = document.getElementById('vpVideoEl');
+    if (el) {
+      el.addEventListener('loadedmetadata', () => {
+        if (resumeAt > 0 && resumeAt < (el.duration || Infinity)) {
+          try { el.currentTime = resumeAt; } catch(e) {}
+        }
+      }, { once: true });
+      el.addEventListener('ended', reportVideoProgress);
+    }
+  }
+  // 30초 간격 진행도 저장
+  videoPlayerState.intervalId = setInterval(reportVideoProgress, 30000);
+}
+
+function closeVideoPlayer() {
+  try {
+    const el = document.querySelector('#videoPlayerBody video');
+    if (el) { try { el.pause(); } catch(e){} }
+  } catch(e) {}
+  // 마지막 진행도 저장
+  reportVideoProgress();
+  if (videoPlayerState?.intervalId) clearInterval(videoPlayerState.intervalId);
+  videoPlayerState = null;
+  $('videoPlayerModal').classList.remove('show');
+  $('videoPlayerBody').innerHTML = '';
 }
 
 /* =========================================================
@@ -1718,7 +3051,7 @@ function renderDiagIntro() {
       <div class="diag-intro-icon"><i class="fas fa-stethoscope"></i></div>
       <h2>AI 진단평가 (CAT)</h2>
       <p>현재 학습 수준을 진단해 맞춤형 학습 경로를 추천해 드립니다.</p>
-      <p style="font-size:12.5px;color:var(--gray-400)">목표 노드를 학습맵에서 더블클릭하거나, 과목/학년을 선택해 바로 시작하세요.</p>
+      <p style="font-size:var(--fs-xs);color:var(--gray-400)">목표 노드를 학습맵에서 더블클릭하거나, 과목/학년을 선택해 바로 시작하세요.</p>
       <div class="diag-config">
         <div class="form-group">
           <label><i class="fas fa-book"></i> 과목</label>
@@ -1861,7 +3194,7 @@ function renderDiagRunning() {
       <div class="diag-main">
         <div class="diag-progress-header">
           <div style="font-size:var(--fs-xs);color:var(--gray-500);margin-bottom:4px">현재 노드</div>
-          <div style="font-size:17px;font-weight:700;color:var(--gray-800)">${escHtml(s.currentNode?.title || s.currentNode?.name || '진단 시작')}</div>
+          <div style="font-size:var(--fs-lg);font-weight:700;color:var(--gray-800)">${escHtml(s.currentNode?.title || s.currentNode?.name || '진단 시작')}</div>
         </div>
         ${(q && opts.length) ? `
           <div style="font-size:var(--fs-md);font-weight:600;color:var(--gray-800);line-height:1.55;margin-bottom:16px;padding:14px;background:var(--gray-50);border-radius:var(--radius-md);border-left:4px solid var(--primary)">
@@ -2026,7 +3359,7 @@ function renderDiagResult() {
     <div class="diag-main" style="max-width:720px;margin:0 auto">
       <div style="text-align:center;margin-bottom:20px">
         <div style="width:90px;height:90px;margin:0 auto 14px;border-radius:50%;background:linear-gradient(135deg,var(--success),var(--primary));display:flex;align-items:center;justify-content:center;color:#fff;font-size:36px"><i class="fas fa-flag-checkered"></i></div>
-        <h2 style="font-size:20px;font-weight:700">진단 완료!</h2>
+        <h2 style="font-size:var(--fs-2xl);font-weight:700">진단 완료!</h2>
         <p style="font-size:var(--fs-sm);color:var(--gray-500);margin-top:6px">${total}개 노드 중 ${passed}개 통과, ${failed}개 보완 필요</p>
       </div>
       <div style="margin-bottom:20px">${rowsHtml}</div>
@@ -2067,20 +3400,49 @@ async function addFailedToList() {
   showToast(`${failedIds.length}개 노드를 학습목록에 추가했습니다!`, 'fa-bookmark');
 }
 
-function startDirectLearning(nodeId) {
-  closeDrawer();
-  showToast('바로 학습하기 세션을 시작합니다 (데모)', 'fa-play');
-  // In a full build, we'd open the first problem/video in solve modal
-  const n = nodeById[nodeId];
-  if (n && n.problems && n.problems.length) {
-    openSolve(n.problems[0]);
+async function startDirectLearning(nodeId) {
+  showToast('학습 콘텐츠를 불러오는 중입니다...', 'fa-spinner');
+  // 진단 완료 기록 (실패해도 학습 진행)
+  try {
+    fetchApi('/api/self-learn/map/nodes/' + encodeURIComponent(nodeId) + '/diagnose-complete', { method: 'POST' })
+      .catch(() => {});
+  } catch(e) { /* silent */ }
+
+  // 항상 최신 detail 재조회 (캐시 사용 금지)
+  const detail = await fetchApi('/api/self-learn/map/nodes/' + encodeURIComponent(nodeId) + '?_=' + Date.now());
+  const videos = detail?.videos || [];
+  const problems = detail?.problems || [];
+
+  // currentDrawerNode 가 없거나 다른 노드면 최소 정보 주입 (playVideo가 참조)
+  if (!currentDrawerNode || currentDrawerNode._id !== nodeId) {
+    currentDrawerNode = Object.assign({}, nodeById[nodeId] || {}, detail || {}, { _id: nodeId, videos, problems });
   } else {
-    // open first problem via drawer fetch
-    fetchApi('/api/self-learn/map/nodes/' + encodeURIComponent(nodeId)).then(d => {
-      const probs = d?.problems || [];
-      if (probs.length) openSolve(probs[0]);
-    });
+    currentDrawerNode.videos = videos;
+    currentDrawerNode.problems = problems;
   }
+
+  if (videos.length) {
+    playVideo(videos[0]);
+    closeDrawer();
+    return;
+  }
+  if (problems.length) {
+    currentSolveNodeId = nodeId;
+    const p = problems[0];
+    openSolve({
+      id: p.id || p.content_id || p.contentId,
+      title: p.title || p.name || '문제 풀이',
+      difficulty: p.difficulty,
+      options: p.options || p.choices,
+      question: p.question || p.text || p.content,
+      answer: p.answer || p.correct_answer,
+      explanation: p.explanation,
+      clear_top3: p.clear_top3 || p.clearTop3
+    });
+    closeDrawer();
+    return;
+  }
+  showToast('아직 등록된 학습 콘텐츠가 없습니다.', 'fa-info-circle');
 }
 
 /* =========================================================
@@ -2120,7 +3482,7 @@ async function loadPath() {
       <div class="step-title">${escHtml(title)}</div>
       <div class="step-subject">${escHtml(subject)}${st.grade ? ' · ' + st.grade + '학년' : ''}</div>
       <div style="margin-top:8px">
-        <button class="btn-mini primary" onclick="openDrawer('${id}')">상세 보기</button>
+        <button class="btn-mini primary" onclick="openDrawer('${id}', {skipHighlightGate:true})">상세 보기</button>
       </div>
     </div>`;
   });
