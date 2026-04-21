@@ -4,6 +4,8 @@ const { requireAuth } = require('../middleware/auth');
 const lessonDb = require('../db/lesson');
 const classDb = require('../db/class');
 const { logLearningActivity } = require('../db/learning-log-helper');
+const { extractLogContext } = require('../lib/log-context');
+const { ensureTodayAttendance } = require('../db/attendance');
 
 function requireClassMember(req, res, next) {
   const classId = parseInt(req.params.classId);
@@ -112,6 +114,7 @@ router.get('/:classId/:lessonId', requireAuth, requireClassMember, (req, res) =>
     const attachments = lessonDb.getAttachments(lesson.id);
     const contents = lessonDb.getLessonContents(lesson.id);
     const progress = lessonDb.getLessonProgress(req.user.id, lesson.id);
+    try { ensureTodayAttendance(req.classId, req.user.id, 'lesson_view'); } catch (e) {}
     res.json({ success: true, lesson, attachments, contents, progress });
   } catch (err) {
     res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
@@ -164,10 +167,13 @@ router.get('/:classId/:lessonId/students', requireAuth, requireClassMember, (req
 // POST /api/lesson/:classId/:lessonId/progress - 학습 진도 업데이트
 router.post('/:classId/:lessonId/progress', requireAuth, requireClassMember, (req, res) => {
   try {
-    const { content_id, progress_percent, completed, last_position } = req.body;
+    const { content_id, progress_percent, completed, last_position, duration_sec } = req.body;
     if (content_id) {
       lessonDb.updateContentProgress(req.user.id, content_id, parseInt(req.params.lessonId), { progress_percent, completed, last_position });
     }
+    // 수업 메타 조회하여 교과/성취기준 연동
+    let lessonMeta = null;
+    try { lessonMeta = lessonDb.getLessonById(parseInt(req.params.lessonId)); } catch (_) {}
     logLearningActivity({
       userId: req.user.id,
       activityType: 'lesson_progress',
@@ -177,6 +183,11 @@ router.post('/:classId/:lessonId/progress', requireAuth, requireClassMember, (re
       verb: progress_percent >= 100 ? 'completed' : 'progressed',
       sourceService: 'class',
       resultScore: progress_percent ? progress_percent / 100 : null,
+      achievementCode: lessonMeta ? lessonMeta.achievement_code : null,
+      subjectCode: lessonMeta ? lessonMeta.subject_code : null,
+      gradeGroup: lessonMeta ? lessonMeta.grade_group : null,
+      durationSec: duration_sec ? parseInt(duration_sec) : null,
+      ...extractLogContext(req),
       metadata: { contentId: content_id, progress: progress_percent }
     });
     res.json({ success: true });

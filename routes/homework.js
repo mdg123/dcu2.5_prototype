@@ -4,6 +4,8 @@ const { requireAuth } = require('../middleware/auth');
 const homeworkDb = require('../db/homework');
 const classDb = require('../db/class');
 const { logLearningActivity } = require('../db/learning-log-helper');
+const { extractLogContext } = require('../lib/log-context');
+const { ensureTodayAttendance } = require('../db/attendance');
 
 function requireClassMember(req, res, next) {
   const classId = parseInt(req.params.classId);
@@ -76,6 +78,7 @@ router.get('/:classId/:homeworkId', requireAuth, requireClassMember, (req, res) 
         }));
       }
     }
+    try { ensureTodayAttendance(req.classId, req.user.id, 'homework_view'); } catch (e) {}
     res.json({ success: true, homework: hw, submission, submissions, myRole: req.myRole });
   } catch (err) {
     res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
@@ -129,11 +132,16 @@ router.post('/:classId/:homeworkId/submit', requireAuth, requireClassMember, (re
       sourceService: 'class',
       resultSuccess: 1,
       objectType: hw ? hw.title : '과제',
+      achievementCode: hw ? hw.achievement_code : null,
+      subjectCode: hw ? hw.subject_code : null,
+      gradeGroup: hw ? hw.grade_group : null,
+      ...extractLogContext(req),
       metadata: {
         subject: hw ? hw.subject_code : null,
         className: hw ? hw.class_name : null
       }
     });
+    try { ensureTodayAttendance(parseInt(req.params.classId), req.user.id, 'homework_submit'); } catch (e) {}
     res.json({ success: true, message: result.updated ? '과제가 수정되었습니다.' : '과제가 제출되었습니다.' });
   } catch (err) {
     res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
@@ -167,6 +175,11 @@ router.post('/:classId/:homeworkId/grade/:submissionId', requireAuth, requireCla
         resultScore: normalizedScore,
         resultSuccess: normalizedScore >= 0.6 ? 1 : 0,
         objectType: hw ? hw.title : '과제',
+        achievementCode: hw ? hw.achievement_code : null,
+        subjectCode: hw ? hw.subject_code : null,
+        gradeGroup: hw ? hw.grade_group : null,
+        // 채점자(교사) 요청이므로 학생 세션/디바이스는 알 수 없어 기본값만 전달
+        ...extractLogContext(req),
         metadata: { subject: hw ? hw.subject_code : null, feedback }
       });
     }

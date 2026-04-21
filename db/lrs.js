@@ -1,17 +1,63 @@
 const db = require('./index');
+const { logLearningActivity } = require('./learning-log-helper');
 
-// 학습 로그 기록
+// 학습 로그 기록 (레거시 진입점 — 내부적으로 logLearningActivity 래핑)
 function logActivity(userId, data) {
-  const info = db.prepare(`
-    INSERT INTO learning_logs (user_id, class_id, activity_type, activity_id, verb, object_type, object_id, result, duration, metadata)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
-    userId, data.class_id || null, data.activity_type, data.activity_id || null,
-    data.verb, data.object_type || null, data.object_id || null,
-    data.result ? JSON.stringify(data.result) : null,
-    data.duration || null, data.metadata ? JSON.stringify(data.metadata) : null
-  );
-  return db.prepare('SELECT * FROM learning_logs WHERE id = ?').get(info.lastInsertRowid);
+  // 레거시 필드를 Phase 2 필드로 정규화
+  const targetType = data.target_type || data.object_type || 'Activity';
+  const targetId = data.target_id != null ? data.target_id
+                 : (data.activity_id != null ? data.activity_id
+                 : (data.object_id != null ? data.object_id : null));
+
+  // result 객체가 있다면 분해
+  let resultScore = data.result_score !== undefined ? data.result_score : null;
+  let resultSuccess = data.result_success !== undefined ? data.result_success : null;
+  let resultDuration = data.result_duration !== undefined ? data.result_duration : null;
+  if (data.result && typeof data.result === 'object') {
+    if (data.result.score !== undefined && resultScore === null) {
+      resultScore = typeof data.result.score === 'object' ? data.result.score.scaled : data.result.score;
+    }
+    if (data.result.success !== undefined && resultSuccess === null) {
+      resultSuccess = data.result.success ? 1 : 0;
+    }
+    if (data.result.duration !== undefined && resultDuration === null) {
+      resultDuration = String(data.result.duration);
+    }
+  }
+
+  const ret = logLearningActivity({
+    userId,
+    activityType: data.activity_type,
+    targetType,
+    targetId,
+    classId: data.class_id || null,
+    verb: data.verb || 'completed',
+    objectType: data.object_type || 'Activity',
+    objectId: data.object_id || null,
+    resultScore,
+    resultSuccess,
+    resultDuration: resultDuration || (data.duration != null ? String(data.duration) : null),
+    sourceService: data.source_service || 'class',
+    achievementCode: data.achievement_code || null,
+    metadata: data.metadata || null,
+    sessionId: data.session_id || null,
+    durationSec: data.duration_sec != null ? data.duration_sec : (data.duration != null ? data.duration : null),
+    deviceType: data.device_type || null,
+    platform: data.platform || null,
+    retryCount: data.retry_count || 0,
+    correctCount: data.correct_count || null,
+    totalItems: data.total_items || null,
+    achievementLevel: data.achievement_level || null,
+    parentStatementId: data.parent_statement_id || null,
+    subjectCode: data.subject_code || null,
+    gradeGroup: data.grade_group || null
+  });
+
+  const insertedId = ret && ret.id;
+  if (insertedId) {
+    return db.prepare('SELECT * FROM learning_logs WHERE id = ?').get(insertedId);
+  }
+  return null;
 }
 
 // 사용자별 활동 로그
@@ -31,24 +77,27 @@ function getUserLogs(userId, { classId, activityType, page = 1, limit = 20, star
 
 // 대시보드 통계
 function getDashboardStats(userId) {
+  // duration_sec 우선, legacy duration/result_duration 보조 (C-4)
+  const DUR_EXPR = "COALESCE(duration_sec, duration, CAST(REPLACE(REPLACE(COALESCE(result_duration,''),'PT',''),'S','') AS INTEGER), 0)";
+
   // 전체 통계
   const totalActivities = db.prepare('SELECT COUNT(*) as cnt FROM learning_logs WHERE user_id = ?').get(userId).cnt;
-  const totalDuration = db.prepare('SELECT COALESCE(SUM(duration), 0) as total FROM learning_logs WHERE user_id = ?').get(userId).total;
+  const totalDuration = db.prepare(`SELECT COALESCE(SUM(${DUR_EXPR}), 0) as total FROM learning_logs WHERE user_id = ?`).get(userId).total;
 
   // 오늘 통계
   const today = new Date().toISOString().slice(0, 10);
   const todayActivities = db.prepare("SELECT COUNT(*) as cnt FROM learning_logs WHERE user_id = ? AND DATE(created_at) = ?").get(userId, today).cnt;
-  const todayDuration = db.prepare("SELECT COALESCE(SUM(duration), 0) as total FROM learning_logs WHERE user_id = ? AND DATE(created_at) = ?").get(userId, today).total;
+  const todayDuration = db.prepare(`SELECT COALESCE(SUM(${DUR_EXPR}), 0) as total FROM learning_logs WHERE user_id = ? AND DATE(created_at) = ?`).get(userId, today).total;
 
   // 활동 유형별
   const byType = db.prepare(`
-    SELECT activity_type, COUNT(*) as cnt, COALESCE(SUM(duration), 0) as total_duration
+    SELECT activity_type, COUNT(*) as cnt, COALESCE(SUM(${DUR_EXPR}), 0) as total_duration
     FROM learning_logs WHERE user_id = ? GROUP BY activity_type ORDER BY cnt DESC
   `).all(userId);
 
   // 최근 30일 일별 활동
   const dailyActivity = db.prepare(`
-    SELECT DATE(created_at) as date, COUNT(*) as cnt, COALESCE(SUM(duration), 0) as duration
+    SELECT DATE(created_at) as date, COUNT(*) as cnt, COALESCE(SUM(${DUR_EXPR}), 0) as duration
     FROM learning_logs WHERE user_id = ? AND created_at >= DATE('now', '-30 days')
     GROUP BY DATE(created_at) ORDER BY date
   `).all(userId);
@@ -73,10 +122,10 @@ function getDashboardStats(userId) {
 function getClassLrsStats(classId) {
   const totalLogs = db.prepare('SELECT COUNT(*) as cnt FROM learning_logs WHERE class_id = ?').get(classId).cnt;
 
-  // 학생별 활동 통계
+  // 학생별 활동 통계 — duration_sec 우선 (C-4)
   const byStudent = db.prepare(`
     SELECT ll.user_id, u.display_name, COUNT(*) as activity_count,
-           COALESCE(SUM(ll.duration), 0) as total_duration
+           COALESCE(SUM(COALESCE(ll.duration_sec, ll.duration, CAST(REPLACE(REPLACE(COALESCE(ll.result_duration,''),'PT',''),'S','') AS INTEGER), 0)), 0) as total_duration
     FROM learning_logs ll JOIN users u ON ll.user_id = u.id
     WHERE ll.class_id = ?
     GROUP BY ll.user_id ORDER BY activity_count DESC

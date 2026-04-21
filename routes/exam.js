@@ -7,8 +7,10 @@ const { v4: uuidv4 } = require('uuid');
 const { requireAuth } = require('../middleware/auth');
 const examDb = require('../db/exam');
 const classDb = require('../db/class');
-const { logLearningActivity } = require('../db/learning-log-helper');
+const { logLearningActivity, computeAchievementLevel } = require('../db/learning-log-helper');
+const { extractLogContext } = require('../lib/log-context');
 const cbtExtDb = require('../db/cbt-extended');
+const { ensureTodayAttendance } = require('../db/attendance');
 const initSocket = require('../socket');
 
 // ─── PDF 업로드 설정 ────────────────────────────────────────────────────────
@@ -364,6 +366,7 @@ router.post('/:classId/:examId/start', requireAuth, requireClassMember, (req, re
 
     // 학생에게 문제 전송 (정답 제외)
     const questions = exam.questions.map(q => ({ ...q, answer: undefined }));
+    try { ensureTodayAttendance(parseInt(req.params.classId), req.user.id, 'exam_take'); } catch (e) {}
     res.json({ success: true, exam: { ...exam, questions }, message: '시험이 시작되었습니다.' });
   } catch (err) {
     res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
@@ -397,13 +400,16 @@ router.post('/:classId/:examId/submit', requireAuth, requireClassMember, (req, r
     const { answers } = req.body;
     // 자동 채점
     let score = 0;
+    let correctCount = 0;
     const questions = exam.questions;
+    const totalItems = Array.isArray(questions) ? questions.length : 0;
     if (answers && questions) {
       for (let i = 0; i < questions.length; i++) {
         const q = questions[i];
         const a = answers[i];
         if (q.answer !== undefined && (String(a) === String(q.answer) || Number(a) === Number(q.answer))) {
           score += (q.points || (100 / questions.length));
+          correctCount += 1;
         }
       }
     }
@@ -413,6 +419,15 @@ router.post('/:classId/:examId/submit', requireAuth, requireClassMember, (req, r
     const existing = examDb.getStudentExam(exam.id, req.user.id);
     if (!existing) examDb.startExam(exam.id, req.user.id);
     examDb.submitExam(exam.id, req.user.id, answers || [], score);
+    // 재응시 횟수 집계 (기존 submission 이 있었다면 +1)
+    const retryCount = existingSubmission ? 1 : 0;
+    const scaledScore = score / 100;
+    const achievementLevel = computeAchievementLevel(
+      // 단일 시도라도 점수 기반 레벨 산출을 위해 attempts=3 이상으로 전달하되
+      // retry 가 있으면 그대로 반영
+      3 + retryCount,
+      scaledScore
+    );
     logLearningActivity({
       userId: req.user.id,
       activityType: 'exam_complete',
@@ -421,8 +436,16 @@ router.post('/:classId/:examId/submit', requireAuth, requireClassMember, (req, r
       classId: parseInt(req.params.classId),
       verb: 'completed',
       sourceService: 'cbt',
-      resultScore: score / 100,
-      resultSuccess: score >= 60 ? 1 : 0
+      resultScore: scaledScore,
+      resultSuccess: score >= 60 ? 1 : 0,
+      achievementCode: exam.achievement_code || null,
+      subjectCode: exam.subject_code || exam.subject || null,
+      gradeGroup: exam.grade_group || null,
+      correctCount,
+      totalItems,
+      retryCount,
+      achievementLevel,
+      ...extractLogContext(req)
     });
 
     // 오답 자동 저장 (스스로채움 오답노트 연동)

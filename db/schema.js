@@ -439,6 +439,29 @@ function initSchema() {
       result TEXT,
       duration INTEGER,
       metadata TEXT,
+      -- xAPI 확장 (Phase 1)
+      target_type VARCHAR(50),
+      target_id VARCHAR(200),
+      result_score REAL,
+      result_success INTEGER,
+      result_duration VARCHAR(30),
+      context_registration VARCHAR(100),
+      source_service VARCHAR(30),
+      achievement_code VARCHAR(50),
+      statement_json TEXT,
+      -- Phase 2 확장 (세션/디바이스/성취수준/교과)
+      session_id VARCHAR(40),
+      duration_sec INTEGER,
+      device_type VARCHAR(20),
+      platform VARCHAR(30),
+      retry_count INTEGER DEFAULT 0,
+      correct_count INTEGER,
+      total_items INTEGER,
+      achievement_level VARCHAR(10),
+      parent_statement_id INTEGER,
+      subject_code VARCHAR(20),
+      grade_group INTEGER,
+      metadata_json TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (user_id) REFERENCES users(id)
     );
@@ -989,7 +1012,61 @@ function initSchema() {
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (student_id) REFERENCES users(id)
     );
+
+    CREATE TABLE IF NOT EXISTS gallery_comments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      gallery_id INTEGER NOT NULL,
+      user_id INTEGER NOT NULL,
+      content TEXT NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (gallery_id) REFERENCES student_gallery(id) ON DELETE CASCADE,
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_gallery_comments_gallery ON gallery_comments(gallery_id);
+
+    CREATE TABLE IF NOT EXISTS gallery_likes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      gallery_id INTEGER NOT NULL,
+      user_id INTEGER NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(gallery_id, user_id),
+      FOREIGN KEY (gallery_id) REFERENCES student_gallery(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_gallery_likes_gallery ON gallery_likes(gallery_id);
+
+    CREATE TABLE IF NOT EXISTS gallery_views (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      gallery_id INTEGER NOT NULL,
+      user_id INTEGER,
+      view_date TEXT NOT NULL,
+      UNIQUE(gallery_id, user_id, view_date)
+    );
+
+    CREATE TABLE IF NOT EXISTS gallery_reports (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      gallery_id INTEGER NOT NULL,
+      user_id INTEGER NOT NULL,
+      reason TEXT,
+      status TEXT DEFAULT 'pending',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (gallery_id) REFERENCES student_gallery(id) ON DELETE CASCADE,
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_gallery_reports_gallery ON gallery_reports(gallery_id);
   `);
+
+  // 마이그레이션: gallery_reports 중복 제거 후 UNIQUE INDEX 부여
+  try {
+    db.exec(`
+      DELETE FROM gallery_reports
+      WHERE id NOT IN (
+        SELECT MIN(id) FROM gallery_reports GROUP BY gallery_id, user_id
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_gallery_reports_unique ON gallery_reports(gallery_id, user_id);
+    `);
+  } catch (e) {
+    console.error('[다채움] gallery_reports UNIQUE 마이그레이션 실패:', e.message);
+  }
 
   // 마이그레이션: attendance 테이블에 감정 컬럼 추가 (SFR-031)
   try {
@@ -1006,7 +1083,19 @@ function initSchema() {
     if (!attCols.includes('emotion_score')) {
       db.exec("ALTER TABLE attendance ADD COLUMN emotion_score REAL");
     }
+    if (!attCols.includes('checkin_source')) {
+      db.exec("ALTER TABLE attendance ADD COLUMN checkin_source TEXT");
+    }
   } catch (e) { /* 테이블이 아직 없으면 무시 */ }
+
+  // 마이그레이션: users 테이블에 parent_id 컬럼 추가 (M-1: LRS 학부모 digest)
+  try {
+    const uCols = db.prepare("PRAGMA table_info(users)").all().map(c => c.name);
+    if (!uCols.includes('parent_id')) {
+      db.exec("ALTER TABLE users ADD COLUMN parent_id INTEGER");
+      db.exec("CREATE INDEX IF NOT EXISTS idx_users_parent ON users(parent_id);");
+    }
+  } catch (e) { /* 무시 */ }
 
   // 마이그레이션: wrong_answers 테이블 확장
   try {
@@ -1062,6 +1151,87 @@ function initSchema() {
       db.exec("ALTER TABLE learning_logs ADD COLUMN statement_json TEXT");
     }
   } catch (e) { /* 테이블이 아직 없으면 무시 */ }
+
+  // 마이그레이션: learning_logs Phase 2 확장 (세션/디바이스/성취수준/교과)
+  try {
+    const llCols2 = db.prepare("PRAGMA table_info(learning_logs)").all().map(c => c.name);
+    const addCol = (name, sql) => {
+      if (!llCols2.includes(name)) {
+        try { db.exec(sql); } catch (_) {}
+      }
+    };
+    addCol('session_id',            "ALTER TABLE learning_logs ADD COLUMN session_id VARCHAR(40)");
+    addCol('duration_sec',          "ALTER TABLE learning_logs ADD COLUMN duration_sec INTEGER");
+    addCol('device_type',           "ALTER TABLE learning_logs ADD COLUMN device_type VARCHAR(20)");
+    addCol('platform',              "ALTER TABLE learning_logs ADD COLUMN platform VARCHAR(30)");
+    addCol('retry_count',           "ALTER TABLE learning_logs ADD COLUMN retry_count INTEGER DEFAULT 0");
+    addCol('correct_count',         "ALTER TABLE learning_logs ADD COLUMN correct_count INTEGER");
+    addCol('total_items',           "ALTER TABLE learning_logs ADD COLUMN total_items INTEGER");
+    addCol('achievement_level',     "ALTER TABLE learning_logs ADD COLUMN achievement_level VARCHAR(10)");
+    addCol('parent_statement_id',   "ALTER TABLE learning_logs ADD COLUMN parent_statement_id INTEGER");
+    addCol('subject_code',          "ALTER TABLE learning_logs ADD COLUMN subject_code VARCHAR(20)");
+    addCol('grade_group',           "ALTER TABLE learning_logs ADD COLUMN grade_group INTEGER");
+    addCol('metadata_json',         "ALTER TABLE learning_logs ADD COLUMN metadata_json TEXT");
+  } catch (e) { /* 테이블이 아직 없으면 무시 */ }
+
+  // 마이그레이션: Phase 2 신규 집계 3종
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS lrs_achievement_stats (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        achievement_code VARCHAR(50) NOT NULL,
+        subject_code VARCHAR(20),
+        attempt_count INTEGER DEFAULT 0,
+        success_count INTEGER DEFAULT 0,
+        avg_score REAL,
+        last_level VARCHAR(10),
+        last_attempt_at DATETIME,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(user_id, achievement_code)
+      );
+    `);
+    db.exec("CREATE INDEX IF NOT EXISTS idx_las_user ON lrs_achievement_stats(user_id);");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_las_code ON lrs_achievement_stats(achievement_code);");
+
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS lrs_session_stats (
+        session_id VARCHAR(40) PRIMARY KEY,
+        user_id INTEGER NOT NULL,
+        class_id INTEGER,
+        started_at DATETIME,
+        ended_at DATETIME,
+        duration_sec INTEGER,
+        activity_count INTEGER DEFAULT 0,
+        services_touched TEXT,
+        device_type VARCHAR(20),
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+    db.exec("CREATE INDEX IF NOT EXISTS idx_lss_user_date ON lrs_session_stats(user_id, started_at);");
+
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS lrs_user_daily (
+        user_id INTEGER NOT NULL,
+        stat_date TEXT NOT NULL,
+        activity_count INTEGER DEFAULT 0,
+        duration_sec INTEGER DEFAULT 0,
+        avg_score REAL,
+        subjects_touched TEXT,
+        PRIMARY KEY(user_id, stat_date)
+      );
+    `);
+  } catch (e) { console.error('[DB] Phase 2 LRS 집계 테이블 생성 실패:', e.message); }
+
+  // 마이그레이션: Phase 2 learning_logs 신규 인덱스 6개
+  try {
+    db.exec("CREATE INDEX IF NOT EXISTS idx_ll_user_date     ON learning_logs(user_id, created_at DESC);");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_ll_achv          ON learning_logs(achievement_code, result_success);");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_ll_subject_date  ON learning_logs(subject_code, created_at);");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_ll_session       ON learning_logs(session_id);");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_ll_class_date    ON learning_logs(class_id, created_at);");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_ll_service_verb  ON learning_logs(source_service, verb);");
+  } catch (e) { /* 무시 */ }
 
   // 마이그레이션: 기존 learning_logs(result_success=1) → portfolio_items 일괄 추가
   try {
@@ -1358,7 +1528,136 @@ function initSchema() {
     if (!sgCols.includes('approved_at')) {
       db.exec("ALTER TABLE student_gallery ADD COLUMN approved_at DATETIME");
     }
+    if (!sgCols.includes('type')) db.exec("ALTER TABLE student_gallery ADD COLUMN type TEXT DEFAULT 'image'");
+    if (!sgCols.includes('tags')) db.exec("ALTER TABLE student_gallery ADD COLUMN tags TEXT");
+    if (!sgCols.includes('view_count')) db.exec("ALTER TABLE student_gallery ADD COLUMN view_count INTEGER DEFAULT 0");
+    if (!sgCols.includes('reject_reason')) db.exec("ALTER TABLE student_gallery ADD COLUMN reject_reason TEXT");
+    if (!sgCols.includes('media_url')) db.exec("ALTER TABLE student_gallery ADD COLUMN media_url TEXT");
   } catch (e) { /* 테이블이 아직 없으면 무시 */ }
+
+  // 갤러리 이벤트 게시판
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS gallery_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      title TEXT NOT NULL,
+      description TEXT,
+      category TEXT CHECK(category IN ('art','music','video','literature','etc')) DEFAULT 'etc',
+      start_date TEXT NOT NULL,
+      end_date TEXT NOT NULL,
+      location TEXT,
+      host_user_id INTEGER NOT NULL,
+      thumbnail_url TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (host_user_id) REFERENCES users(id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_gallery_events_dates ON gallery_events(start_date, end_date);
+
+    CREATE TABLE IF NOT EXISTS gallery_event_participants (
+      event_id INTEGER NOT NULL,
+      user_id INTEGER NOT NULL,
+      joined_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (event_id, user_id),
+      FOREIGN KEY (event_id) REFERENCES gallery_events(id) ON DELETE CASCADE,
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    );
+  `);
+
+  // 갤러리 이벤트 시드 (비어있을 때만)
+  try {
+    const evCount = db.prepare('SELECT COUNT(*) AS cnt FROM gallery_events').get().cnt;
+    if (evCount === 0) {
+      const admin = db.prepare("SELECT id FROM users WHERE role='admin' ORDER BY id ASC LIMIT 1").get();
+      const hostId = admin ? admin.id : 1;
+      const insEv = db.prepare(`INSERT INTO gallery_events (title, description, category, start_date, end_date, location, host_user_id, thumbnail_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`);
+      // 날짜는 오늘 기준 상대값(동적 계산)으로 삽입 — 데모 시나리오에서 '참여가능' 필터에 정상 노출되도록
+      const d = (days) => { const t = new Date(); t.setDate(t.getDate() + days); return t.toISOString().slice(0, 10); };
+      insEv.run('전국 학생 사생대회', '전국의 초·중학생이 참여하는 야외 사생대회입니다. 자연을 주제로 자유롭게 그려보세요.', 'art', d(14), d(14), '올림픽공원', hostId, null);
+      insEv.run('청소년 음악제', '학생들이 갈고닦은 음악 실력을 뽐내는 음악제. 독주·합주·성악 부문.', 'music', d(33), d(33), '예술의전당', hostId, null);
+      insEv.run('학생 영상 예술제', '짧은 영상으로 이야기하는 예술제. 창의적인 영상 작품을 기다립니다.', 'video', d(27), d(27), '상암DMC', hostId, null);
+      insEv.run('전국 미술 공모전', '회화·조소·디자인 전 분야를 아우르는 전국 공모전.', 'art', d(50), d(50), '국립현대미술관', hostId, null);
+      insEv.run('청소년 문학상', '시·소설·수필 부문의 글쓰기 대회. 청소년의 빛나는 문장을 기다립니다.', 'literature', d(45), d(45), '국립중앙도서관', hostId, null);
+      console.log('[DB] gallery_events 시드 5건 삽입 완료');
+    }
+  } catch (e) { console.error('[DB] gallery_events 시드 실패:', e.message); }
+
+  // 마이그레이션: 기존 시드의 과거 날짜를 오늘 기준 미래로 이동 (한 번만)
+  try {
+    const past = db.prepare("SELECT id, title FROM gallery_events WHERE end_date < date('now') AND title IN ('전국 학생 사생대회','청소년 음악제','학생 영상 예술제','전국 미술 공모전','청소년 문학상')").all();
+    if (past.length > 0) {
+      const d = (days) => { const t = new Date(); t.setDate(t.getDate() + days); return t.toISOString().slice(0, 10); };
+      const offsets = { '전국 학생 사생대회': 14, '학생 영상 예술제': 27, '청소년 음악제': 33, '청소년 문학상': 45, '전국 미술 공모전': 50 };
+      const upd = db.prepare('UPDATE gallery_events SET start_date=?, end_date=? WHERE id=?');
+      for (const ev of past) {
+        const off = offsets[ev.title];
+        if (off != null) upd.run(d(off), d(off), ev.id);
+      }
+      console.log(`[DB] gallery_events 시드 날짜 현재 기준으로 이동: ${past.length}건`);
+    }
+  } catch (e) { console.error('[DB] gallery_events 날짜 마이그레이션 실패:', e.message); }
+
+  // ============ v4: gallery_events 확장 마이그레이션 (idempotent) ============
+  try {
+    const geCols = db.prepare("PRAGMA table_info(gallery_events)").all().map(c => c.name);
+    if (!geCols.includes('event_type')) {
+      db.exec("ALTER TABLE gallery_events ADD COLUMN event_type TEXT NOT NULL DEFAULT 'apply'");
+    }
+    if (!geCols.includes('submission_visibility')) {
+      db.exec("ALTER TABLE gallery_events ADD COLUMN submission_visibility TEXT");
+    }
+    if (!geCols.includes('target_school_levels')) {
+      db.exec("ALTER TABLE gallery_events ADD COLUMN target_school_levels TEXT");
+    }
+    if (!geCols.includes('target_school_only')) {
+      db.exec("ALTER TABLE gallery_events ADD COLUMN target_school_only INTEGER NOT NULL DEFAULT 0");
+    }
+    if (!geCols.includes('target_grades')) {
+      db.exec("ALTER TABLE gallery_events ADD COLUMN target_grades TEXT");
+    }
+    if (!geCols.includes('host_school_name')) {
+      // users 테이블에 school_id가 없으므로 school_name을 주최 학교 식별자로 사용
+      db.exec("ALTER TABLE gallery_events ADD COLUMN host_school_name TEXT");
+    }
+    if (!geCols.includes('publish_to_gallery')) {
+      db.exec("ALTER TABLE gallery_events ADD COLUMN publish_to_gallery INTEGER NOT NULL DEFAULT 1");
+    }
+    if (!geCols.includes('closed_at')) {
+      db.exec("ALTER TABLE gallery_events ADD COLUMN closed_at DATETIME");
+    }
+    if (!geCols.includes('closed_by_user_id')) {
+      db.exec("ALTER TABLE gallery_events ADD COLUMN closed_by_user_id INTEGER");
+    }
+  } catch (e) { console.error('[DB] gallery_events v4 마이그레이션 실패:', e.message); }
+
+  // gallery_event_submissions 신규 테이블 + 인덱스
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS gallery_event_submissions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        event_id INTEGER NOT NULL,
+        user_id INTEGER NOT NULL,
+        title TEXT NOT NULL,
+        description TEXT,
+        image_url TEXT,
+        is_published_to_gallery INTEGER NOT NULL DEFAULT 0,
+        gallery_item_id INTEGER,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (event_id) REFERENCES gallery_events(id) ON DELETE CASCADE,
+        FOREIGN KEY (user_id) REFERENCES users(id),
+        FOREIGN KEY (gallery_item_id) REFERENCES student_gallery(id) ON DELETE SET NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_ges_event ON gallery_event_submissions(event_id, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_ges_user ON gallery_event_submissions(user_id);
+    `);
+  } catch (e) { console.error('[DB] gallery_event_submissions 생성 실패:', e.message); }
+
+  // student_gallery에 source 컬럼 (이벤트 출처 구분) 추가
+  try {
+    const sgCols2 = db.prepare("PRAGMA table_info(student_gallery)").all().map(c => c.name);
+    if (!sgCols2.includes('source')) {
+      db.exec("ALTER TABLE student_gallery ADD COLUMN source TEXT");
+    }
+  } catch (e) { /* 무시 */ }
 
   // 콘텐츠 댓글 테이블
   db.exec(`
@@ -1959,4 +2258,4 @@ function seedDummyData(db) {
   console.log('[DB] 더미 클래스 및 교육 데이터 시딩 완료');
 }
 
-module.exports = { initSchema };
+module.exports = { initSchema, init: initSchema };

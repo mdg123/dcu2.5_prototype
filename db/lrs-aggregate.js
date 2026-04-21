@@ -18,6 +18,8 @@ function rebuildAllAggregates() {
       DELETE FROM lrs_content_summary;
       DELETE FROM lrs_class_summary;
       DELETE FROM lrs_service_stats;
+      DELETE FROM lrs_achievement_stats;
+      DELETE FROM lrs_user_daily;
     `);
 
     // 2. lrs_daily_stats 재집계
@@ -31,7 +33,7 @@ function rebuildAllAggregates() {
         COUNT(*) as activity_count,
         COUNT(DISTINCT user_id) as unique_users,
         AVG(result_score) as avg_score,
-        COALESCE(SUM(CAST(result_duration AS INTEGER)), 0) as total_duration
+        COALESCE(SUM(CAST(REPLACE(REPLACE(COALESCE(result_duration,''),'PT',''),'S','') AS INTEGER)), 0) as total_duration
       FROM learning_logs
       GROUP BY DATE(created_at), activity_type, COALESCE(source_service,''), COALESCE(class_id,0)
     `);
@@ -43,7 +45,7 @@ function rebuildAllAggregates() {
         user_id,
         activity_type,
         COUNT(*) as total_count,
-        COALESCE(SUM(CAST(result_duration AS INTEGER)), 0) as total_duration,
+        COALESCE(SUM(CAST(REPLACE(REPLACE(COALESCE(result_duration,''),'PT',''),'S','') AS INTEGER)), 0) as total_duration,
         AVG(result_score) as avg_score,
         MAX(created_at) as last_activity_at
       FROM learning_logs
@@ -92,6 +94,46 @@ function rebuildAllAggregates() {
       GROUP BY COALESCE(source_service, 'unknown'), verb
     `);
 
+    // 7. lrs_achievement_stats 재집계 (D1: 0-1/0-100 스케일 혼재 방어)
+    //    result_score > 1 이면 0-100 스케일로 보고 maxScore=100 기준 비율로 환산.
+    //    avg_ratio >= 0.80 → 상, >= 0.50 → 중, < 0.50 → 하, 시도 < 3 → 미도달
+    db.exec(`
+      INSERT INTO lrs_achievement_stats (user_id, achievement_code, subject_code, attempt_count, success_count, avg_score, last_level, last_attempt_at, updated_at)
+      SELECT
+        user_id,
+        achievement_code,
+        MAX(subject_code) as subject_code,
+        COUNT(*) as attempt_count,
+        SUM(CASE WHEN result_success = 1 THEN 1 ELSE 0 END) as success_count,
+        AVG(result_score) as avg_score,
+        CASE
+          WHEN COUNT(*) < 3 THEN '미도달'
+          WHEN AVG(CASE WHEN result_score > 1 THEN result_score/100.0 ELSE result_score END) >= 0.80 THEN '상'
+          WHEN AVG(CASE WHEN result_score > 1 THEN result_score/100.0 ELSE result_score END) >= 0.50 THEN '중'
+          WHEN AVG(result_score) IS NULL THEN '미도달'
+          ELSE '하'
+        END as last_level,
+        MAX(created_at) as last_attempt_at,
+        CURRENT_TIMESTAMP as updated_at
+      FROM learning_logs
+      WHERE achievement_code IS NOT NULL
+      GROUP BY user_id, achievement_code
+    `);
+
+    // 8. lrs_user_daily 재집계
+    db.exec(`
+      INSERT INTO lrs_user_daily (user_id, stat_date, activity_count, duration_sec, avg_score, subjects_touched)
+      SELECT
+        user_id,
+        DATE(created_at) as stat_date,
+        COUNT(*) as activity_count,
+        COALESCE(SUM(COALESCE(duration_sec, CAST(REPLACE(REPLACE(COALESCE(result_duration,''),'PT',''),'S','') AS INTEGER))), 0) as duration_sec,
+        AVG(result_score) as avg_score,
+        GROUP_CONCAT(DISTINCT subject_code) as subjects_touched
+      FROM learning_logs
+      GROUP BY user_id, DATE(created_at)
+    `);
+
     // 결과 요약
     const counts = {
       daily: db.prepare('SELECT COUNT(*) as cnt FROM lrs_daily_stats').get().cnt,
@@ -99,6 +141,8 @@ function rebuildAllAggregates() {
       content: db.prepare('SELECT COUNT(*) as cnt FROM lrs_content_summary').get().cnt,
       class: db.prepare('SELECT COUNT(*) as cnt FROM lrs_class_summary').get().cnt,
       service: db.prepare('SELECT COUNT(*) as cnt FROM lrs_service_stats').get().cnt,
+      achievement: db.prepare('SELECT COUNT(*) as cnt FROM lrs_achievement_stats').get().cnt,
+      userDaily: db.prepare('SELECT COUNT(*) as cnt FROM lrs_user_daily').get().cnt,
       totalLogs: db.prepare('SELECT COUNT(*) as cnt FROM learning_logs').get().cnt
     };
 

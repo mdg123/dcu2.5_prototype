@@ -3,6 +3,7 @@ const router = express.Router();
 const { requireAuth } = require('../middleware/auth');
 const contentDb = require('../db/content');
 const { logLearningActivity } = require('../db/learning-log-helper');
+const { extractLogContext } = require('../lib/log-context');
 
 // ===== 내자료 폴더 =====
 router.get('/folders', requireAuth, (req, res) => {
@@ -284,7 +285,11 @@ router.get('/:id', requireAuth, (req, res) => {
       targetType: 'content',
       targetId: req.params.id,
       verb: 'accessed',
-      sourceService: 'content'
+      sourceService: 'content',
+      achievementCode: content.achievement_code || null,
+      subjectCode: content.subject_code || null,
+      gradeGroup: content.grade_group || null,
+      ...extractLogContext(req)
     });
     const isCollected = contentDb.isInCollection(req.user.id, content.id);
     res.json({ success: true, content, isCollected });

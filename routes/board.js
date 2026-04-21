@@ -4,6 +4,8 @@ const { requireAuth } = require('../middleware/auth');
 const boardDb = require('../db/board');
 const classDb = require('../db/class');
 const { logLearningActivity } = require('../db/learning-log-helper');
+const { extractLogContext } = require('../lib/log-context');
+const { ensureTodayAttendance } = require('../db/attendance');
 
 function requireMember(req, res, next) {
   const classId = parseInt(req.params.classId);
@@ -106,7 +108,8 @@ router.post('/:classId', requireAuth, requireMember, (req, res) => {
       targetId: post ? post.id : 0,
       classId: req.classId,
       verb: 'created',
-      sourceService: 'class'
+      sourceService: 'class',
+      ...extractLogContext(req)
     });
     // 나도예술가 공유 옵션: 갤러리 게시글을 student_gallery에도 등록
     if (req.body.shareToGallery && req.body.image_url && post) {
@@ -132,6 +135,7 @@ router.get('/:classId/:postId', requireAuth, requireMember, (req, res) => {
     if (!post || post.class_id !== req.classId) return res.status(404).json({ success: false, message: '게시글을 찾을 수 없습니다.' });
     boardDb.incrementViewCount(post.id);
     const comments = boardDb.getComments(post.id);
+    try { ensureTodayAttendance(req.classId, req.user.id, 'post_read'); } catch (e) {}
     res.json({ success: true, post: { ...post, view_count: post.view_count + 1 }, comments });
   } catch (err) { res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' }); }
 });
@@ -170,6 +174,7 @@ router.post('/:classId/:postId/comments', requireAuth, requireMember, (req, res)
       return res.status(403).json({ success: false, message: '이 게시글은 댓글이 비활성화되어 있습니다.' });
     }
     const comment = boardDb.createComment(parseInt(req.params.postId), req.user.id, req.body.content, req.body.parent_id || null);
+    try { ensureTodayAttendance(req.classId, req.user.id, 'comment_write'); } catch (e) {}
     res.status(201).json({ success: true, comment });
   } catch (err) { res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' }); }
 });

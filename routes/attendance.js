@@ -4,7 +4,7 @@ const { requireAuth } = require('../middleware/auth');
 const attendanceDb = require('../db/attendance');
 const classDb = require('../db/class');
 const { logLearningActivity } = require('../db/learning-log-helper');
-const emotionDb = require('../db/emotion-extended');
+const { extractLogContext } = require('../lib/log-context');
 
 // 클래스 멤버 확인 미들웨어
 function requireMember(req, res, next) {
@@ -16,11 +16,11 @@ function requireMember(req, res, next) {
   next();
 }
 
-// POST /api/attendance/:classId/checkin - 출석 체크
+// POST /api/attendance/:classId/checkin - 출석 체크 (감정 필드 제거)
 router.post('/:classId/checkin', requireAuth, requireMember, (req, res) => {
   try {
-    const { comment, emotion, emotionReason, emotion_reason, emotion_reason_type } = req.body;
-    const result = attendanceDb.checkIn(req.classId, req.user.id, comment, emotion, emotionReason || emotion_reason, emotion_reason_type);
+    const { comment } = req.body;
+    const result = attendanceDb.checkIn(req.classId, req.user.id, comment, 'manual');
     if (!result.success) {
       return res.status(409).json({ success: false, message: '오늘 이미 출석했습니다.' });
     }
@@ -37,7 +37,8 @@ router.post('/:classId/checkin', requireAuth, requireMember, (req, res) => {
       targetId: result.id || 0,
       classId: req.classId,
       verb: 'attended',
-      sourceService: 'class'
+      sourceService: 'class',
+      ...extractLogContext(req)
     });
     res.json({ success: true, message: '출석 완료!', ...stats });
   } catch (err) {
@@ -46,7 +47,7 @@ router.post('/:classId/checkin', requireAuth, requireMember, (req, res) => {
   }
 });
 
-// GET /api/attendance/:classId/status - 오늘 출석 상태 + 통계
+// GET /api/attendance/:classId/status - 오늘 출석 상태 + 통계 (next_badge, 주/월 출석률 포함)
 router.get('/:classId/status', requireAuth, requireMember, (req, res) => {
   try {
     const checked = attendanceDb.isCheckedIn(req.classId, req.user.id);
@@ -61,7 +62,6 @@ router.get('/:classId/status', requireAuth, requireMember, (req, res) => {
 router.get('/:classId/ranking', requireAuth, requireMember, (req, res) => {
   try {
     const ranking = attendanceDb.getRanking(req.classId);
-    // 각 학생의 스트릭도 계산
     const enriched = ranking.map((r, idx) => ({
       ...r,
       rank: idx + 1,
@@ -87,7 +87,7 @@ router.get('/:classId/class-stats', requireAuth, requireMember, (req, res) => {
   }
 });
 
-// GET /api/attendance/:classId/table - 기간별 출석 테이블 (교사용)
+// GET /api/attendance/:classId/table - 기간별 출석 테이블 (교사용, source 포함)
 router.get('/:classId/table', requireAuth, requireMember, (req, res) => {
   try {
     const myRole = classDb.getMemberRole(req.classId, req.user.id);
@@ -143,65 +143,5 @@ function getMonthStart() {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`;
 }
-
-// ===== 감정출석부 확장 (SFR-031) =====
-
-// PUT /:classId/emotion/:attendanceId — 감정 저장
-router.put('/:classId/emotion/:attendanceId', requireAuth, requireMember, (req, res) => {
-  try {
-    emotionDb.saveEmotion(parseInt(req.params.attendanceId), req.body);
-    res.json({ success: true });
-  } catch (err) { res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' }); }
-});
-
-// GET /:classId/emotion-stats — 감정 통계 (교사용)
-router.get('/:classId/emotion-stats', requireAuth, requireMember, (req, res) => {
-  try {
-    const stats = emotionDb.getEmotionStats(req.classId, req.query);
-    res.json({ success: true, ...stats });
-  } catch (err) { res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' }); }
-});
-
-// GET /:classId/emotion-respondents?emotion=xxx — 특정 감정에 응답한 학생+날짜
-router.get('/:classId/emotion-respondents', requireAuth, requireMember, (req, res) => {
-  try {
-    const emotion = req.query.emotion;
-    if (!emotion) return res.status(400).json({ success: false, message: 'emotion 파라미터가 필요합니다.' });
-    const respondents = emotionDb.getEmotionRespondents(req.classId, emotion, req.query);
-    res.json({ success: true, respondents });
-  } catch (err) { res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' }); }
-});
-
-// GET /:classId/emotion-timeline — 감정 타임라인
-router.get('/:classId/emotion-timeline', requireAuth, requireMember, (req, res) => {
-  try {
-    const timeline = emotionDb.getEmotionTimeline(req.classId, req.query.userId ? parseInt(req.query.userId) : req.user.id, req.query);
-    res.json({ success: true, timeline });
-  } catch (err) { res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' }); }
-});
-
-// POST /:classId/emotion-reflection — 감정 회고
-router.post('/:classId/emotion-reflection', requireAuth, requireMember, (req, res) => {
-  try {
-    const result = emotionDb.createReflection(req.user.id, req.classId, req.body);
-    res.json({ success: true, ...result });
-  } catch (err) { res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' }); }
-});
-
-// GET /:classId/emotion-reflections — 감정 회고 목록
-router.get('/:classId/emotion-reflections', requireAuth, requireMember, (req, res) => {
-  try {
-    const reflections = emotionDb.getReflections(req.user.id, req.classId, req.query);
-    res.json({ success: true, reflections });
-  } catch (err) { res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' }); }
-});
-
-// POST /:classId/emotion-feedback — 교사 감정 피드백
-router.post('/:classId/emotion-feedback', requireAuth, requireMember, (req, res) => {
-  try {
-    const result = emotionDb.createEmotionFeedback(req.user.id, { ...req.body, classId: req.classId });
-    res.json({ success: true, ...result });
-  } catch (err) { res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' }); }
-});
 
 module.exports = router;

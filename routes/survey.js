@@ -4,6 +4,8 @@ const { requireAuth } = require('../middleware/auth');
 const surveyDb = require('../db/survey');
 const classDb = require('../db/class');
 const { logLearningActivity } = require('../db/learning-log-helper');
+const { extractLogContext } = require('../lib/log-context');
+const { ensureTodayAttendance } = require('../db/attendance');
 
 function requireMember(req, res, next) {
   const classId = parseInt(req.params.classId);
@@ -77,8 +79,10 @@ router.post('/:classId/:surveyId/submit', requireAuth, requireMember, (req, res)
       targetId: req.params.surveyId,
       classId: parseInt(req.params.classId),
       verb: 'responded',
-      sourceService: 'class'
+      sourceService: 'class',
+      ...extractLogContext(req)
     });
+    try { ensureTodayAttendance(parseInt(req.params.classId), req.user.id, 'survey_respond'); } catch (e) {}
     res.json({ success: true, message: '설문이 제출되었습니다.' });
   } catch (err) { res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' }); }
 });
