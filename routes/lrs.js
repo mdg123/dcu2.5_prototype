@@ -7,6 +7,25 @@ const lrsDb = require('../db/lrs');
 const classDb = require('../db/class');
 const { rebuildAllAggregates } = require('../db/lrs-aggregate');
 const { logLearningActivity } = require('../db/learning-log-helper');
+const { LRS_CONFIG } = require('../lib/lrs-config');
+
+/**
+ * CSV 셀 injection 방어 — 값이 수식/명령 프리픽스(=, +, -, @, TAB, CR)로 시작하면
+ * 작은따옴표를 앞에 붙여 Excel/Sheets가 수식으로 해석하지 못하게 한다.
+ * 콤마/따옴표/개행은 기존대로 RFC 4180 quoting 적용.
+ */
+function csvEscapeCell(v) {
+  if (v == null) return '';
+  let s = String(v);
+  // CSV injection 방어 (OWASP): 첫 글자가 =, +, -, @, 탭, CR 이면 ' 로 prefix
+  if (/^[=+\-@\t\r]/.test(s)) {
+    s = "'" + s;
+  }
+  if (s.includes(',') || s.includes('"') || s.includes('\n')) {
+    return '"' + s.replace(/"/g, '""') + '"';
+  }
+  return s;
+}
 
 // /log 화이트리스트: student 역할은 서버 산출/민감 필드 주입 금지
 const LOG_STUDENT_FIELDS = new Set([
@@ -47,6 +66,10 @@ function resolvePeriod(req) {
     }
   }
   if (from || to) {
+    // from > to 검증: 두 값 모두 주어졌고 역전된 경우 invalid 마킹
+    if (from && to && String(from) > String(to)) {
+      return { fromDate: from, toDate: to, label: 'custom', invalid: true, reason: 'from > to' };
+    }
     return { fromDate: from || null, toDate: to || null, label: 'custom' };
   }
   // 레거시 days 파라미터 지원
@@ -64,11 +87,17 @@ function resolvePeriod(req) {
 
 function dateRangeWhere(req, col = 'created_at', alias = '') {
   const c = alias ? `${alias}.${col}` : col;
-  const { fromDate, toDate } = resolvePeriod(req);
+  const period = resolvePeriod(req);
+  const { fromDate, toDate, invalid, reason } = period;
   let where = ''; const params = [];
   if (fromDate) { where += ` AND DATE(${c}) >= ?`; params.push(fromDate); }
   if (toDate)   { where += ` AND DATE(${c}) <= ?`; params.push(toDate); }
-  return { where, params, hasRange: !!(fromDate || toDate), fromDate, toDate };
+  return { where, params, hasRange: !!(fromDate || toDate), fromDate, toDate, invalid: !!invalid, reason };
+}
+
+/** 공통 400 응답: resolvePeriod 가 invalid=true 를 반환했을 때. */
+function sendInvalidPeriod(res, reason) {
+  return res.status(400).json({ success: false, message: `잘못된 기간 파라미터: ${reason || 'from > to'}` });
 }
 
 /** 역할 가드: 본인이거나 teacher/admin만 허용 */
@@ -136,6 +165,7 @@ router.get('/logs', requireAuth, (req, res) => {
 router.get('/dashboard', requireAuth, (req, res) => {
   try {
     const r = dateRangeWhere(req, 'created_at');
+    if (r.invalid) return sendInvalidPeriod(res, r.reason);
     if (r.hasRange) {
       const userId = req.user.id;
       let where = 'WHERE user_id = ?' + r.where;
@@ -213,6 +243,7 @@ router.get('/statements', requireAuth, (req, res) => {
     const { service, verb, page = 1, limit = 20 } = req.query;
     // 두 쿼리 분리: 합계는 ll 별칭 없이, 상세는 별칭 포함
     const rPlain = dateRangeWhere(req, 'created_at');
+    if (rPlain.invalid) return sendInvalidPeriod(res, rPlain.reason);
     const rAliased = dateRangeWhere(req, 'created_at', 'll');
     const plainParams = [...rPlain.params];
     const aliasedParams = [...rAliased.params];
@@ -266,6 +297,7 @@ router.get('/statements/:id', requireAuth, (req, res) => {
 router.get('/stats/by-service', requireAuth, (req, res) => {
   try {
     const r = dateRangeWhere(req, 'created_at', 'll');
+    if (r.invalid) return sendInvalidPeriod(res, r.reason);
     const role = req.query.role;
     let join = '';
     let where = `WHERE ll.source_service IS NOT NULL ${r.where}`;
@@ -291,6 +323,7 @@ router.get('/stats/by-service', requireAuth, (req, res) => {
 router.get('/stats/by-achievement', requireAuth, (req, res) => {
   try {
     const r = dateRangeWhere(req);
+    if (r.invalid) return sendInvalidPeriod(res, r.reason);
     const { user_id, subject_code } = req.query;
     let where = 'WHERE achievement_code IS NOT NULL' + r.where;
     const params = [...r.params];
@@ -332,6 +365,7 @@ router.get('/dataset-coverage', requireAuth, (req, res) => {
       FROM users
     `).get();
     const r = dateRangeWhere(req);
+    if (r.invalid) return sendInvalidPeriod(res, r.reason);
     const types = db.prepare(`SELECT activity_type, COUNT(*) as count FROM learning_logs WHERE 1=1 ${r.where} GROUP BY activity_type`).all(...r.params);
     const verbs = db.prepare(`SELECT verb, COUNT(*) as count FROM learning_logs WHERE 1=1 ${r.where} GROUP BY verb`).all(...r.params);
     const services = db.prepare(`SELECT source_service, COUNT(*) as count FROM learning_logs WHERE source_service IS NOT NULL ${r.where} GROUP BY source_service`).all(...r.params);
@@ -382,10 +416,11 @@ router.get('/export', requireAuth, (req, res) => {
     }
     const { format = 'csv', service } = req.query;
     const r = dateRangeWhere(req, 'created_at');
+    if (r.invalid) return sendInvalidPeriod(res, r.reason);
     let sql = `SELECT id, user_id, activity_type, target_type, target_id, class_id, verb, source_service, result_score, result_success, duration_sec, result_duration, achievement_code, subject_code, session_id, created_at FROM learning_logs WHERE 1=1` + r.where;
     const params = [...r.params];
     if (service) { sql += ` AND source_service = ?`; params.push(service); }
-    sql += ` ORDER BY created_at DESC LIMIT 10000`;
+    sql += ` ORDER BY created_at DESC LIMIT ${LRS_CONFIG.csvExportLimit}`;
 
     const rows = db.prepare(sql).all(...params);
 
@@ -393,16 +428,9 @@ router.get('/export', requireAuth, (req, res) => {
 
     if (format === 'csv' || format === 'excel' || format === 'xlsx') {
       // SEP=, 지시자 + UTF-8 BOM을 추가하면 Excel 한글 정상 표시
+      // csvEscapeCell 은 CSV injection 방어까지 포함 (=, +, -, @, TAB, CR prefix → ')
       const header = cols.join(',') + '\n';
-      const escapeCell = (v) => {
-        if (v == null) return '';
-        const s = String(v);
-        if (s.includes(',') || s.includes('"') || s.includes('\n')) {
-          return '"' + s.replace(/"/g, '""') + '"';
-        }
-        return s;
-      };
-      const csv = header + rows.map(r => cols.map(c => escapeCell(r[c])).join(',')).join('\n');
+      const csv = header + rows.map(r => cols.map(c => csvEscapeCell(r[c])).join(',')).join('\n');
       const filename = (format === 'excel' || format === 'xlsx') ? 'lrs_export.csv' : 'lrs_export.csv';
       const prefix = (format === 'excel' || format === 'xlsx') ? 'sep=,\n' : '';
       res.setHeader('Content-Type', 'text/csv; charset=utf-8');
@@ -433,6 +461,7 @@ router.get('/stats/daily', requireAuth, (req, res) => {
   try {
     const { activity_type, class_id, role, subject } = req.query;
     const r = dateRangeWhere(req, 'created_at', 'll');
+    if (r.invalid) return sendInvalidPeriod(res, r.reason);
     let where = 'WHERE 1=1' + r.where;
     const params = [...r.params];
     if (activity_type) { where += ' AND ll.activity_type = ?'; params.push(activity_type); }
@@ -465,7 +494,9 @@ router.get('/stats/daily', requireAuth, (req, res) => {
 // GET /api/lrs/stats/by-subject
 router.get('/stats/by-subject', requireAuth, (req, res) => {
   try {
-    const { fromDate: from, toDate: to } = resolvePeriod(req);
+    const period = resolvePeriod(req);
+    if (period.invalid) return sendInvalidPeriod(res, period.reason);
+    const { fromDate: from, toDate: to } = period;
     const buildDate = (col) => {
       let w = ''; const p = [];
       if (from) { w += ` AND DATE(${col}) >= ?`; p.push(from); }
@@ -506,6 +537,7 @@ router.get('/stats/by-class', requireAuth, (req, res) => {
       return res.status(403).json({ success: false, message: '권한이 없습니다.' });
     }
     const r = dateRangeWhere(req, 'created_at', 'll');
+    if (r.invalid) return sendInvalidPeriod(res, r.reason);
     const stats = db.prepare(`
       SELECT ll.class_id, c.name as class_name, ll.activity_type,
         COUNT(*) as total_count, COUNT(DISTINCT ll.user_id) as unique_users,
@@ -529,6 +561,7 @@ router.get('/stats/user-summary', requireAuth, (req, res) => {
       return res.status(403).json({ success: false, message: '권한이 없습니다.' });
     }
     const r = dateRangeWhere(req);
+    if (r.invalid) return sendInvalidPeriod(res, r.reason);
     const summary = db.prepare(`
       SELECT activity_type, COUNT(*) as total_count,
         COALESCE(SUM(COALESCE(duration_sec, CAST(REPLACE(REPLACE(COALESCE(result_duration,''),'PT',''),'S','') AS INTEGER), 0)), 0) as total_duration_sec,
@@ -644,7 +677,7 @@ router.get('/insights/:userId', requireAuth, (req, res) => {
       snapshot: {
         streakDays,
         weeklyDurationMin: Math.round((weekly.dur || 0) / 60),
-        weeklyTarget: 300,
+        weeklyTarget: LRS_CONFIG.weeklyTargetMin,
         weeklyScoreAvg: weekly.avg_score,
         engagementIndex: streakDays >= 7 ? 0.9 : (streakDays / 7)
       },
@@ -781,6 +814,7 @@ router.get('/parent/:childId/digest', requireAuth, (req, res) => {
     }
 
     const r = dateRangeWhere(req, 'created_at');
+    if (r.invalid) return sendInvalidPeriod(res, r.reason);
 
     // 총 학습량
     const totals = db.prepare(`
@@ -846,7 +880,8 @@ router.get('/parent/:childId/digest', requireAuth, (req, res) => {
 // 5. POST /api/lrs/session/start
 router.post('/session/start', requireAuth, (req, res) => {
   try {
-    const sessionId = crypto.randomBytes(16).toString('hex');
+    // session_id 는 VARCHAR(40) 수용. hex 32자(16 bytes)로 충분.
+    const sessionId = crypto.randomBytes(LRS_CONFIG.sessionIdBytes).toString('hex');
     const { classId, deviceType, platform } = req.body || {};
     db.prepare(`
       INSERT INTO lrs_session_stats (session_id, user_id, class_id, started_at, activity_count, device_type)

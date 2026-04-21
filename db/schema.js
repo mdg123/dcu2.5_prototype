@@ -2033,11 +2033,12 @@ function initSchema() {
   // 관리자 기본 계정
   const admin = db.prepare('SELECT id FROM users WHERE username = ?').get('admin');
   if (!admin) {
-    const hash = bcrypt.hashSync('0000', 10);
+    // Phase 5 P2: 문서와 코드 통일 — admin 기본 비밀번호는 1234 (qa-report / expert-review 합의)
+    const hash = bcrypt.hashSync('1234', 10);
     db.prepare(
       'INSERT INTO users (username, password, display_name, role) VALUES (?, ?, ?, ?)'
     ).run('admin', hash, '관리자', 'admin');
-    console.log('[DB] 관리자 기본 계정 생성 (admin / 0000)');
+    console.log('[DB] 관리자 기본 계정 생성 (admin / 1234)');
   }
 
   // 더미 사용자 계정 (개발용)

@@ -24,6 +24,7 @@
 const path = require('path');
 const db = require(path.join(__dirname, '..', 'db'));
 const { rebuildAllAggregates } = require(path.join(__dirname, '..', 'db', 'lrs-aggregate'));
+const { logLearningActivity } = require(path.join(__dirname, '..', 'db', 'learning-log-helper'));
 
 // ─────────────────────────── CLI 파싱 ───────────────────────────
 const args = process.argv.slice(2);
@@ -187,27 +188,49 @@ for (const h of [13, 14]) HOUR_DIST.push([h, 30 / 2]);
 for (const h of [19, 20]) HOUR_DIST.push([h, 20 / 2]);
 
 // ─────────────────────────── 리셋 ───────────────────────────
+function tableExists(n) {
+  return !!db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name=?").get(n);
+}
 if (flags.reset) {
   const before = db.prepare('SELECT COUNT(*) c FROM learning_logs').get().c;
   db.prepare('DELETE FROM learning_logs').run();
-  console.log(`[seed-lrs-realistic] --reset: learning_logs ${before}건 삭제`);
+  // Phase 2: 세션 스냅샷도 초기화해야 새 세션과 일치
+  if (tableExists('lrs_session_stats')) db.prepare('DELETE FROM lrs_session_stats').run();
+  // 집계 테이블도 초기화 (UPSERT 경로는 누적이므로 재빌드 전에 비움)
+  for (const t of ['lrs_daily_stats','lrs_user_summary','lrs_content_summary','lrs_class_summary','lrs_service_stats','lrs_user_daily','lrs_achievement_stats']) {
+    if (tableExists(t)) db.prepare(`DELETE FROM ${t}`).run();
+  }
+  console.log(`[seed-lrs-realistic] --reset: learning_logs ${before}건 + 세션/집계 삭제`);
 }
 
-// ─────────────────────────── INSERT 준비 ───────────────────────────
-const insertCols = REQUIRED_BASE.slice(); // user_id..created_at
-for (const c of OPTIONAL_PHASE2) if (hasCol(c)) insertCols.push(c);
-const placeholders = insertCols.map(() => '?').join(', ');
-const insertSql = `INSERT INTO learning_logs (${insertCols.join(', ')}) VALUES (${placeholders})`;
-const insertStmt = db.prepare(insertSql);
+// ─────────────────────────── lrs_session_stats 선(先) 생성 ───────────────────────────
+// helper.logLearningActivity 가 session activity_count 를 increment 하므로
+// 세션 행이 먼저 있어야 FK-like 정합성이 유지된다. (D3 해결 포인트)
+const hasSessionStats = tableExists('lrs_session_stats');
+function createSessionRow({ sessionId, userId, classId, deviceType, startedAtIso }) {
+  if (!hasSessionStats) return;
+  try {
+    db.prepare(`
+      INSERT INTO lrs_session_stats (session_id, user_id, class_id, started_at, activity_count, device_type)
+      VALUES (?, ?, ?, ?, 0, ?)
+      ON CONFLICT(session_id) DO NOTHING
+    `).run(sessionId, userId, classId || null, startedAtIso, deviceType || null);
+  } catch (_) {
+    // ON CONFLICT 미지원/스키마 차이 fallback
+    try {
+      db.prepare(`INSERT OR IGNORE INTO lrs_session_stats (session_id, user_id, class_id, started_at, activity_count, device_type) VALUES (?, ?, ?, ?, 0, ?)`)
+        .run(sessionId, userId, classId || null, startedAtIso, deviceType || null);
+    } catch (_) {}
+  }
+}
 
-// 레코드 빌드 함수
-function buildRecord({ userId, classId, activityType, verb, targetType, sourceService, hasScore, profile, subjectCode, gradeGroup, achievementCode, createdAtIso, durationSec, device }) {
+// ─────────────────────────── 단일 로그 기록 래퍼 ───────────────────────────
+function seedOneLog({ userId, classId, activityType, verb, targetType, sourceService, hasScore, profile, subjectCode, gradeGroup, achievementCode, createdAtIso, durationSec, device }) {
   const targetId = String(randInt(1, 500));
   const objectId = `urn:dacheum:${targetType}:${targetId}`;
 
   let score = null, success = null, correct = null, total = null, achvLevel = null, retry = 0;
   if (hasScore) {
-    // 프로필 평균 ± 변동
     const base = profile.avgScore + rand(-15, 15);
     score = Math.max(0, Math.min(100, Math.round(base)));
     success = score >= 60 ? 1 : 0;
@@ -219,48 +242,33 @@ function buildRecord({ userId, classId, activityType, verb, targetType, sourceSe
     achvLevel = score >= 90 ? 'A' : score >= 75 ? 'B' : score >= 60 ? 'C' : score >= 40 ? 'D' : 'E';
   }
 
-  const statement = {
-    actor: { account: { name: String(userId) } },
-    verb: { id: `http://adlnet.gov/expapi/verbs/${verb}`, display: { 'ko-KR': verb } },
-    object: { id: objectId, objectType: 'Activity' },
-    result: {
-      score: score !== null ? { scaled: score / 100, raw: score } : undefined,
-      success: success !== null ? !!success : undefined,
-      duration: `PT${durationSec}S`
-    },
-    context: { extensions: { sourceService, achievementCode, subjectCode, gradeGroup } },
-    timestamp: createdAtIso
-  };
-
-  const meta = { seed: 'lrs-realistic', tier: profile.tier };
-  if (subjectCode) meta.subject = subjectCode;
-
-  const base = [
-    userId, activityType, targetType, targetId, classId || null,
-    verb, 'Activity', objectId, score, success,
-    `PT${durationSec}S`, sourceService, achievementCode,
-    JSON.stringify(meta), JSON.stringify(statement), createdAtIso
-  ];
-
-  const extras = [];
-  for (const c of OPTIONAL_PHASE2) {
-    if (!hasCol(c)) continue;
-    switch (c) {
-      case 'duration_sec':   extras.push(durationSec); break;
-      case 'subject_code':   extras.push(subjectCode); break;
-      case 'grade_group':    extras.push(gradeGroup); break;
-      case 'achievement_level': extras.push(achvLevel); break;
-      case 'session_id':     extras.push(device.sessionId); break;
-      case 'device_type':    extras.push(device.type); break;
-      case 'platform':       extras.push(PLATFORM_BY_DEVICE[device.type] || device.type); break;
-      case 'retry_count':    extras.push(retry); break;
-      case 'correct_count':  extras.push(correct); break;
-      case 'total_items':    extras.push(total); break;
-      case 'parent_statement_id': extras.push(null); break;
-      default: extras.push(null);
-    }
-  }
-  return [...base, ...extras];
+  return logLearningActivity({
+    userId,
+    activityType,
+    targetType,
+    targetId,
+    classId: classId || null,
+    verb,
+    objectType: 'Activity',
+    objectId,
+    resultScore: score,
+    resultSuccess: success, // 1/0/null — SQLite bind 호환
+    resultDuration: `PT${durationSec}S`,
+    sourceService,
+    achievementCode,
+    metadata: { seed: 'lrs-realistic', tier: profile.tier, subject: subjectCode || undefined },
+    sessionId: device.sessionId,
+    durationSec,
+    deviceType: device.type,
+    platform: PLATFORM_BY_DEVICE[device.type] || device.type,
+    retryCount: retry,
+    correctCount: correct,
+    totalItems: total,
+    achievementLevel: achvLevel,
+    subjectCode,
+    gradeGroup,
+    createdAt: createdAtIso
+  });
 }
 
 // ─────────────────────────── 메인 루프 ───────────────────────────
@@ -268,11 +276,7 @@ const now = new Date();
 const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
 let totalInserted = 0;
-const insertMany = db.transaction((rows) => {
-  for (const r of rows) insertStmt.run(...r);
-});
 
-const batch = [];
 for (const student of students) {
   const profile = profiles[student.id];
   const gradeGroup = gradeToGroup(student.grade);
@@ -299,7 +303,13 @@ for (const student of students) {
     const sessions = [];
     for (let s = 0; s < numSessions; s++) {
       const dev = pickWeighted(DEVICE_DIST);
-      sessions.push({ sessionId: uuid(), type: dev });
+      const sid = uuid();
+      sessions.push({ sessionId: sid, type: dev });
+      // lrs_session_stats 에 세션 행 선행 등록 (started_at = 해당 날짜 오전)
+      const startDate = new Date(day);
+      startDate.setHours(8, 0, 0, 0);
+      const startedAtIso = startDate.toISOString().replace('T', ' ').substring(0, 19);
+      createSessionRow({ sessionId: sid, userId: student.id, classId: (myClasses.length ? myClasses[0].class_id : null), deviceType: dev, startedAtIso });
     }
 
     for (let i = 0; i < dailyCount; i++) {
@@ -352,7 +362,7 @@ for (const student of students) {
 
       const device = pick(sessions);
 
-      batch.push(buildRecord({
+      const ret = seedOneLog({
         userId: student.id,
         classId: classIdForLog,
         activityType, verb, targetType, sourceService,
@@ -364,16 +374,11 @@ for (const student of students) {
         createdAtIso,
         durationSec,
         device
-      }));
+      });
+      if (ret && ret.id) totalInserted++;
     }
   }
-
-  // 학생마다 flush
-  if (batch.length >= 2000) {
-    insertMany(batch.splice(0));
-  }
 }
-if (batch.length) insertMany(batch);
 
 totalInserted = db.prepare('SELECT COUNT(*) c FROM learning_logs').get().c;
 console.log(`[seed-lrs-realistic] learning_logs 총 ${totalInserted}건`);

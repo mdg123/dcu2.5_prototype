@@ -228,7 +228,9 @@ function logLearningActivity({
   achievementLevel = null,
   parentStatementId = null,
   subjectCode = null,
-  gradeGroup = null
+  gradeGroup = null,
+  // 시드/백필 전용: 주어지면 learning_logs.created_at 을 이 값으로 덮어씀 (ISO 'YYYY-MM-DD HH:MM:SS')
+  createdAt = null
 }) {
   try {
     const stmts = getStmts();
@@ -290,6 +292,16 @@ function logLearningActivity({
       metadata ? JSON.stringify(metadata) : null
     );
     const insertedId = info.lastInsertRowid;
+
+    // 시드/백필 모드: created_at 과 statement.timestamp 를 전달받은 값으로 맞춤
+    if (createdAt) {
+      try {
+        db.prepare('UPDATE learning_logs SET created_at = ? WHERE id = ?').run(createdAt, insertedId);
+        // statement_json.timestamp 도 동기화
+        const patched = { ...statement, timestamp: new Date(createdAt.replace(' ', 'T') + 'Z').toISOString() };
+        db.prepare('UPDATE learning_logs SET statement_json = ? WHERE id = ?').run(JSON.stringify(patched), insertedId);
+      } catch (_) {}
+    }
 
     // 3. 집계 테이블 갱신
     try {
