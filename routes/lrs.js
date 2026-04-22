@@ -45,6 +45,39 @@ function maskDigestScore(val) {
 }
 
 // ─────────────────────────────────────────────────────────
+// 서비스/교과 코드 → 한글 표시명 매핑 (UI 범례용)
+// 알려지지 않은 코드는 원본 코드를 그대로 label로 사용 (폴백)
+// ─────────────────────────────────────────────────────────
+const SERVICE_LABELS = {
+  'class': '채움클래스',
+  'content': '채움콘텐츠',
+  'exam': '채움평가',
+  'self-learn': '스스로채움',
+  'growth': '성장기록',
+  'cbt': '채움성장',
+  'lrs': '학습분석',
+  'homework': '과제',
+  'attendance': '출결',
+  'board': '알림장',
+  'survey': '설문',
+  'lesson': '수업',
+  'external': '외부연계'
+};
+const SUBJECT_LABELS = {
+  'KOR': '국어', 'MAT': '수학', 'ENG': '영어',
+  'SCI': '과학', 'SOC': '사회', 'ART': '예술',
+  'PE': '체육', 'MUS': '음악', 'MOR': '도덕', 'PRA': '실과'
+};
+function serviceLabel(code) {
+  if (code == null) return '';
+  return SERVICE_LABELS[code] || String(code);
+}
+function subjectLabel(code, fallback) {
+  if (code == null) return fallback || '';
+  return SUBJECT_LABELS[code] || fallback || String(code);
+}
+
+// ─────────────────────────────────────────────────────────
 // 공용 헬퍼
 // ─────────────────────────────────────────────────────────
 
@@ -107,6 +140,60 @@ function canViewUser(req, targetUserId) {
   return req.user.role === 'teacher' || req.user.role === 'admin';
 }
 
+/**
+ * scope 파라미터 해석 헬퍼 (역할 스위처 대응).
+ *  - scope=mine  : user_id = 본인
+ *  - scope=class : 교사 소유 반 집합(owner_id=본인)의 class_id IN (...)
+ *  - scope=all   : admin 전용 (전체)
+ * 미전달 시 기존 동작: admin → all, teacher → class, 그 외 → mine.
+ * 권한 미달 시 mine 으로 다운그레이드.
+ * colAlias: 'll' 처럼 별칭을 쓰면 user_id / class_id 앞에 붙여 반환.
+ */
+function resolveScopeFilter(req, colAlias) {
+  const prefix = colAlias ? `${colAlias}.` : '';
+  const requested = String(req.query.scope || '').toLowerCase();
+  const role = req.user && req.user.role;
+  let scope = requested;
+  if (scope === 'all' && role !== 'admin') scope = 'mine';
+  if (scope === 'class' && role !== 'teacher' && role !== 'admin') scope = 'mine';
+  if (!scope) {
+    scope = role === 'admin' ? 'all' : (role === 'teacher' ? 'class' : 'mine');
+  }
+
+  if (scope === 'all') {
+    return { where: '', params: [], scope, downgraded: requested && requested !== scope };
+  }
+  if (scope === 'mine') {
+    return {
+      where: ` AND ${prefix}user_id = ?`,
+      params: [req.user.id],
+      scope,
+      downgraded: requested && requested !== scope
+    };
+  }
+  // class
+  let classIds = [];
+  try {
+    classIds = db.prepare('SELECT id FROM classes WHERE owner_id = ?').all(req.user.id).map(r => r.id);
+  } catch (_) { classIds = []; }
+  if (!classIds.length) {
+    // 폴백: 소유한 반이 없으면 mine 으로 다운그레이드
+    return {
+      where: ` AND ${prefix}user_id = ?`,
+      params: [req.user.id],
+      scope: 'mine',
+      downgraded: true
+    };
+  }
+  const placeholders = classIds.map(() => '?').join(',');
+  return {
+    where: ` AND ${prefix}class_id IN (${placeholders})`,
+    params: classIds,
+    scope,
+    downgraded: requested && requested !== scope
+  };
+}
+
 /** 클래스 소유자/교사/관리자만 허용 */
 function canViewClass(req, classId) {
   if (!req.user) return false;
@@ -166,16 +253,33 @@ router.get('/dashboard', requireAuth, (req, res) => {
   try {
     const r = dateRangeWhere(req, 'created_at');
     if (r.invalid) return sendInvalidPeriod(res, r.reason);
-    if (r.hasRange) {
-      const userId = req.user.id;
-      let where = 'WHERE user_id = ?' + r.where;
-      const params = [userId, ...r.params];
+    const isAdmin = req.user.role === 'admin';
+    // scope 파라미터 수신: 명시되면 scope 필터로 분기.
+    const hasScope = typeof req.query.scope === 'string' && req.query.scope.length > 0;
+    if (r.hasRange || hasScope) {
+      const sf = resolveScopeFilter(req);
+      // 범위 미지정 + scope만 지정된 경우를 위해 기본 30일은 dateRangeWhere에서 이미 처리됨
+      const where = 'WHERE 1=1' + r.where + sf.where;
+      const params = [...r.params, ...sf.params];
       const totalActivities = db.prepare(`SELECT COUNT(*) cnt FROM learning_logs ${where}`).get(...params).cnt;
       const byType = db.prepare(`SELECT activity_type, COUNT(*) cnt FROM learning_logs ${where} GROUP BY activity_type ORDER BY cnt DESC`).all(...params);
-      return res.json({ success: true, stats: { totalActivities, byType } });
+      const byVerb = db.prepare(`SELECT verb, COUNT(*) cnt FROM learning_logs ${where} GROUP BY verb ORDER BY cnt DESC LIMIT 10`).all(...params);
+      const uniqueUsers = db.prepare(`SELECT COUNT(DISTINCT user_id) cnt FROM learning_logs ${where}`).get(...params).cnt;
+      const totalDurationSec = db.prepare(`SELECT COALESCE(SUM(COALESCE(duration_sec, result_duration, 0)),0) s FROM learning_logs ${where}`).get(...params).s;
+      const todayActivities = db.prepare(`SELECT COUNT(*) cnt FROM learning_logs ${where} AND date(created_at) = date('now','localtime')`).get(...params).cnt;
+      const dailyActivity = db.prepare(`SELECT date(created_at) date, COUNT(*) count, COUNT(DISTINCT user_id) users FROM learning_logs ${where} GROUP BY date(created_at) ORDER BY date`).all(...params);
+      return res.json({ success: true, scope: sf.scope, stats: {
+        totalActivities,
+        totalDurationMinutes: Math.round(totalDurationSec/60),
+        todayActivities,
+        uniqueUsers,
+        byType: byType.map(r=>({ activity_type:r.activity_type, count:r.cnt })),
+        byVerb: byVerb.map(r=>({ verb:r.verb, count:r.cnt })),
+        dailyActivity
+      }});
     }
-    const stats = lrsDb.getDashboardStats(req.user.id);
-    res.json({ success: true, stats });
+    const stats = isAdmin ? lrsDb.getDashboardStats(null) : lrsDb.getDashboardStats(req.user.id);
+    res.json({ success: true, scope: isAdmin ? 'all' : 'mine', stats });
   } catch (err) {
     console.error('[LRS] dashboard error:', err);
     res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
@@ -299,21 +403,31 @@ router.get('/stats/by-service', requireAuth, (req, res) => {
     const r = dateRangeWhere(req, 'created_at', 'll');
     if (r.invalid) return sendInvalidPeriod(res, r.reason);
     const role = req.query.role;
+    const sf = resolveScopeFilter(req, 'll');
     let join = '';
-    let where = `WHERE ll.source_service IS NOT NULL ${r.where}`;
-    const params = [...r.params];
+    let where = `WHERE ll.source_service IS NOT NULL ${r.where}${sf.where}`;
+    const params = [...r.params, ...sf.params];
     if (role) {
       join = 'JOIN users u ON ll.user_id = u.id';
       where += ' AND u.role = ?'; params.push(role);
     }
-    const stats = db.prepare(`
-      SELECT ll.source_service, COUNT(*) as count, AVG(ll.result_score) as avg_score,
-        COUNT(DISTINCT ll.user_id) as unique_users
+    const rawStats = db.prepare(`
+      SELECT ll.source_service,
+        COUNT(*) as count,
+        AVG(ll.result_score) as avg_score,
+        COUNT(DISTINCT ll.user_id) as unique_users,
+        COALESCE(SUM(COALESCE(ll.duration_sec, CAST(REPLACE(REPLACE(COALESCE(ll.result_duration,''),'PT',''),'S','') AS INTEGER), 0)), 0) as total_duration_sec
       FROM learning_logs ll ${join}
       ${where}
       GROUP BY ll.source_service ORDER BY count DESC
     `).all(...params);
-    res.json({ success: true, stats });
+    // 하위 호환: source_service 유지 + service/service_label 병기
+    const stats = rawStats.map(row => ({
+      ...row,
+      service: row.source_service,
+      service_label: serviceLabel(row.source_service)
+    }));
+    res.json({ success: true, scope: sf.scope, stats });
   } catch (err) {
     res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
   }
@@ -327,15 +441,22 @@ router.get('/stats/by-achievement', requireAuth, (req, res) => {
     const { user_id, subject_code } = req.query;
     let where = 'WHERE achievement_code IS NOT NULL' + r.where;
     const params = [...r.params];
+    let appliedScope = null;
     if (user_id) {
       const uid = parseInt(user_id);
       if (!canViewUser(req, uid)) {
         return res.status(403).json({ success: false, message: '권한이 없습니다.' });
       }
       where += ' AND user_id = ?'; params.push(uid);
+      appliedScope = req.user.id === uid ? 'mine' : 'user';
+    } else {
+      const sf = resolveScopeFilter(req);
+      where += sf.where;
+      params.push(...sf.params);
+      appliedScope = sf.scope;
     }
     if (subject_code) { where += ' AND subject_code = ?'; params.push(subject_code); }
-    const stats = db.prepare(`
+    const rawStats = db.prepare(`
       SELECT achievement_code, subject_code, COUNT(*) as count,
         AVG(result_score) as avg_score,
         SUM(CASE WHEN result_success = 1 THEN 1 ELSE 0 END) as success_count
@@ -343,7 +464,29 @@ router.get('/stats/by-achievement', requireAuth, (req, res) => {
       ${where}
       GROUP BY achievement_code ORDER BY count DESC
     `).all(...params);
-    res.json({ success: true, stats });
+    // achievement_label JOIN: learning_map_nodes 에서 lesson_name/achievement_text 를 가져와 폴백
+    let labelMap = {};
+    try {
+      const codes = rawStats.map(s => s.achievement_code).filter(Boolean);
+      if (codes.length) {
+        const placeholders = codes.map(() => '?').join(',');
+        const rows = db.prepare(`
+          SELECT achievement_code,
+            COALESCE(MAX(lesson_name), MAX(achievement_text)) as label
+          FROM learning_map_nodes
+          WHERE achievement_code IN (${placeholders})
+          GROUP BY achievement_code
+        `).all(...codes);
+        for (const row of rows) {
+          if (row.achievement_code && row.label) labelMap[row.achievement_code] = row.label;
+        }
+      }
+    } catch (_) { /* learning_map_nodes 없거나 에러 → code 그대로 폴백 */ }
+    const stats = rawStats.map(row => ({
+      ...row,
+      achievement_label: labelMap[row.achievement_code] || row.achievement_code || ''
+    }));
+    res.json({ success: true, scope: appliedScope, stats });
   } catch (err) {
     res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
   }
@@ -462,8 +605,9 @@ router.get('/stats/daily', requireAuth, (req, res) => {
     const { activity_type, class_id, role, subject } = req.query;
     const r = dateRangeWhere(req, 'created_at', 'll');
     if (r.invalid) return sendInvalidPeriod(res, r.reason);
-    let where = 'WHERE 1=1' + r.where;
-    const params = [...r.params];
+    const sf = resolveScopeFilter(req, 'll');
+    let where = 'WHERE 1=1' + r.where + sf.where;
+    const params = [...r.params, ...sf.params];
     if (activity_type) { where += ' AND ll.activity_type = ?'; params.push(activity_type); }
     if (class_id) { where += ' AND ll.class_id = ?'; params.push(parseInt(class_id)); }
     if (subject) { where += ' AND ll.subject_code = ?'; params.push(subject); }
@@ -484,7 +628,7 @@ router.get('/stats/daily', requireAuth, (req, res) => {
       ${where}
       GROUP BY DATE(ll.created_at) ORDER BY stat_date ASC
     `).all(...params);
-    res.json({ success: true, data, period: r.fromDate && r.toDate ? { from: r.fromDate, to: r.toDate } : null });
+    res.json({ success: true, scope: sf.scope, data, period: r.fromDate && r.toDate ? { from: r.fromDate, to: r.toDate } : null });
   } catch (err) {
     console.error('[LRS] /stats/daily error:', err);
     res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
@@ -503,28 +647,57 @@ router.get('/stats/by-subject', requireAuth, (req, res) => {
       if (to)   { w += ` AND DATE(${col}) <= ?`; p.push(to); }
       return { w, p };
     };
-    const dl = buildDate('l.created_at');
+    // scope: lessons/homework/exams 는 user_id 없음. mine=본인 소유(teacher_id/owner_id),
+    //        class=교사 소유 반의 class_id IN (...).  학생이 mine 요청 시 자신이 속한 class 의 자료 노출은 피하고 빈 결과 폴백.
+    const sfRaw = resolveScopeFilter(req);
+    const role = req.user.role;
+    const buildScope = (alias, ownerCol) => {
+      if (sfRaw.scope === 'all') return { w: '', p: [] };
+      if (sfRaw.scope === 'class') {
+        // class_id IN (교사 소유 반). sfRaw.params 에 이미 class id 목록 보유.
+        const placeholders = sfRaw.params.map(() => '?').join(',');
+        return { w: ` AND ${alias}.class_id IN (${placeholders})`, p: [...sfRaw.params] };
+      }
+      // mine: 교사/관리자면 본인 소유, 그 외(학생)면 빈 결과
+      if (role === 'teacher' || role === 'admin') {
+        return { w: ` AND ${alias}.${ownerCol} = ?`, p: [req.user.id] };
+      }
+      return { w: ' AND 1=0', p: [] };
+    };
+    const dl = buildDate('l.created_at'); const sl = buildScope('l', 'teacher_id');
     const lessonStats = db.prepare(`
       SELECT l.subject_code, s.name as subject_name, COUNT(*) as lesson_count
       FROM lessons l JOIN subjects s ON l.subject_code = s.code
-      WHERE l.subject_code IS NOT NULL ${dl.w}
+      WHERE l.subject_code IS NOT NULL ${dl.w}${sl.w}
       GROUP BY l.subject_code ORDER BY lesson_count DESC
-    `).all(...dl.p);
-    const dh = buildDate('h.created_at');
+    `).all(...dl.p, ...sl.p);
+    const dh = buildDate('h.created_at'); const sh = buildScope('h', 'teacher_id');
     const homeworkStats = db.prepare(`
       SELECT h.subject_code, s.name as subject_name, COUNT(*) as hw_count
       FROM homework h JOIN subjects s ON h.subject_code = s.code
-      WHERE h.subject_code IS NOT NULL ${dh.w}
+      WHERE h.subject_code IS NOT NULL ${dh.w}${sh.w}
       GROUP BY h.subject_code ORDER BY hw_count DESC
-    `).all(...dh.p);
-    const de = buildDate('e.created_at');
+    `).all(...dh.p, ...sh.p);
+    const de = buildDate('e.created_at'); const se = buildScope('e', 'owner_id');
     const examStats = db.prepare(`
       SELECT e.subject_code, s.name as subject_name, COUNT(*) as exam_count
       FROM exams e JOIN subjects s ON e.subject_code = s.code
-      WHERE e.subject_code IS NOT NULL ${de.w}
+      WHERE e.subject_code IS NOT NULL ${de.w}${se.w}
       GROUP BY e.subject_code ORDER BY exam_count DESC
-    `).all(...de.p);
-    res.json({ success: true, lessonStats, homeworkStats, examStats });
+    `).all(...de.p, ...se.p);
+    // 일관된 키 병기: subject_code 유지 + subject_label 추가 (한글명 / subject_name 폴백)
+    const enrich = (rows, countKey) => rows.map(r => ({
+      ...r,
+      subject_label: subjectLabel(r.subject_code, r.subject_name),
+      count: r[countKey]
+    }));
+    res.json({
+      success: true,
+      scope: sfRaw.scope,
+      lessonStats: enrich(lessonStats, 'lesson_count'),
+      homeworkStats: enrich(homeworkStats, 'hw_count'),
+      examStats: enrich(examStats, 'exam_count')
+    });
   } catch (err) {
     res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
   }
@@ -538,16 +711,24 @@ router.get('/stats/by-class', requireAuth, (req, res) => {
     }
     const r = dateRangeWhere(req, 'created_at', 'll');
     if (r.invalid) return sendInvalidPeriod(res, r.reason);
-    const stats = db.prepare(`
+    // teacher: 기본 class scope(자기반만). admin: 기본 all. scope 파라미터로 덮어쓰기 가능.
+    const sf = resolveScopeFilter(req, 'll');
+    const rawStats = db.prepare(`
       SELECT ll.class_id, c.name as class_name, ll.activity_type,
         COUNT(*) as total_count, COUNT(DISTINCT ll.user_id) as unique_users,
         AVG(ll.result_score) as avg_score
       FROM learning_logs ll JOIN classes c ON ll.class_id = c.id
-      WHERE ll.class_id IS NOT NULL ${r.where}
+      WHERE ll.class_id IS NOT NULL ${r.where}${sf.where}
       GROUP BY ll.class_id, ll.activity_type
       ORDER BY total_count DESC LIMIT 50
-    `).all(...r.params);
-    res.json({ success: true, stats });
+    `).all(...r.params, ...sf.params);
+    // 하위 호환: total_count 유지 + count / unique_students 병기
+    const stats = rawStats.map(row => ({
+      ...row,
+      count: row.total_count,
+      unique_students: row.unique_users
+    }));
+    res.json({ success: true, scope: sf.scope, stats });
   } catch (err) {
     res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
   }

@@ -101,7 +101,51 @@ const state = {
   from: null,
   to:   null,
   charts: [],
+  classId: null,            // teacher's resolved class_id (lazy)
+  scope: 'mine',            // 'mine' | 'class' | 'all' — 역할에 따라 자동 계산
 };
+
+/* ---- 역할 → 데이터 스코프 계산 ---- */
+function computeScope(){
+  if (state.role === 'student') return 'mine';
+  if (state.role === 'teacher') return 'class';
+  if (state.role === 'admin')   return 'all';
+  return 'mine';
+}
+
+/* ---- scope 자동 부착 대상 엔드포인트 판별 ---- */
+function _shouldAttachScope(path){
+  if (!path) return false;
+  return /^\/api\/lrs\/(stats\/|dashboard|warnings\/)/.test(path);
+}
+
+/* ---- 공통 포맷 헬퍼 ---- */
+function toMinutes(sec){ return Math.round((Number(sec)||0)/60); }
+function fmtDate(s){
+  if (!s) return '-';
+  const str = String(s);
+  // 'YYYY-MM-DD' 그대로 있으면 뒷 5글자(MM-DD) 사용
+  const m = str.match(/\d{4}-(\d{2}-\d{2})/);
+  return m ? m[1] : str;
+}
+
+/* ---- 교사 class_id 해석 (fallback 1) ---- */
+async function resolveClassId(){
+  if (state.classId) return state.classId;
+  // 실제 prefix: /api/class (single)
+  for (const path of ['/api/class/my', '/api/classes/my']){
+    try {
+      const r = await fetch(path, { credentials:'include' });
+      if (r.ok){
+        const j = await r.json();
+        const list = (j && j.classes) || [];
+        if (list.length){ state.classId = list[0].id; return state.classId; }
+      }
+    } catch(_){}
+  }
+  state.classId = (state.me && (state.me.class_id || state.me.classId)) || 1;
+  return state.classId;
+}
 
 /* ---- 메뉴 정의 (역할별) ---- */
 const MENUS = {
@@ -127,13 +171,18 @@ const MENUS = {
 };
 
 /* ---- API 헬퍼 ---- */
-function rangeQS(extra){
+function rangeQS(extra, path){
   const params = new URLSearchParams();
   if (state.period === 'custom') {
     if (state.from) params.set('from', state.from);
     if (state.to)   params.set('to',   state.to);
   } else {
     params.set('period', state.period);
+  }
+  // scope 자동 부착: stats/*, dashboard, warnings/*
+  if (path === undefined || _shouldAttachScope(path)){
+    const sc = state.scope || computeScope();
+    if (sc) params.set('scope', sc);
   }
   if (extra) Object.entries(extra).forEach(([k,v])=>{ if(v!=null) params.set(k,v); });
   const qs = params.toString();
@@ -142,7 +191,7 @@ function rangeQS(extra){
 
 async function apiGet(path, extra){
   try {
-    const r = await fetch(path + rangeQS(extra), { credentials:'include' });
+    const r = await fetch(path + rangeQS(extra, path), { credentials:'include' });
     if (!r.ok) throw new Error('HTTP '+r.status);
     return await r.json();
   } catch (e) {
@@ -177,11 +226,74 @@ function tplError(msg, onRetry){
 /* ---- 차트 라이프사이클 ---- */
 function destroyCharts(){ state.charts.forEach(c=>{ try{c.destroy();}catch(_){} }); state.charts = []; }
 
+/* CSS 변수 → 실제 색 해석 (Chart.js는 var(--..) 문자열을 인식 못함) */
+const CHART_FALLBACK = ['#2563eb','#10b981','#f59e0b','#ef4444','#8b5cf6','#06b6d4','#ec4899','#14b8a6','#f97316','#6366f1'];
+function _resolveCssVar(str){
+  if (typeof str !== 'string') return str;
+  const m = str.match(/^\s*var\(\s*(--[\w-]+)\s*(?:,\s*([^)]+))?\)\s*$/);
+  if (!m) return str;
+  try {
+    const v = getComputedStyle(document.documentElement).getPropertyValue(m[1]).trim();
+    if (v) return v;
+  } catch(_){}
+  return m[2] ? m[2].trim() : str;
+}
+function _resolveColorField(val, idx){
+  if (Array.isArray(val)) return val.map((v,i)=> _resolveColorField(v, i));
+  const r = _resolveCssVar(val);
+  if (typeof r === 'string' && /^\s*var\(/.test(r)) return CHART_FALLBACK[(idx||0) % CHART_FALLBACK.length];
+  return r;
+}
+function _resolveDatasetColors(data){
+  if (!data || !Array.isArray(data.datasets)) return data;
+  data.datasets.forEach((ds, i)=>{
+    ['backgroundColor','borderColor','hoverBackgroundColor','hoverBorderColor','pointBackgroundColor','pointBorderColor'].forEach(k=>{
+      if (ds[k] !== undefined) ds[k] = _resolveColorField(ds[k], i);
+    });
+  });
+  return data;
+}
+
+/* ---- 라벨 후보 키 헬퍼 (API 응답 필드명 다양성에 방어) ---- */
+function pickLabel(row, keys, fallback){
+  if (!row) return fallback || '(미분류)';
+  for (const k of keys){
+    if (row[k] != null && String(row[k]).trim() !== '') return String(row[k]);
+  }
+  return fallback || '(미분류)';
+}
+
+/* ---- 도넛 차트용 범례 옵션 (라벨 + 값 병기) ---- */
+function donutLegendOpts(unit){
+  const u = unit || '건';
+  return {
+    plugins: {
+      legend: {
+        position: 'right',
+        labels: {
+          font: { size: 12 }, padding: 12, boxWidth: 14, boxHeight: 14,
+          generateLabels: (chart) => {
+            const data = chart.data;
+            const ds = (data.datasets && data.datasets[0]) || {};
+            return (data.labels||[]).map((lbl, i) => ({
+              text: `${lbl} — ${(Number(ds.data && ds.data[i])||0).toLocaleString()}${u}`,
+              fillStyle: Array.isArray(ds.backgroundColor) ? ds.backgroundColor[i] : ds.backgroundColor,
+              strokeStyle: 'transparent',
+              hidden: false, index: i
+            }));
+          }
+        }
+      }
+    }
+  };
+}
+
 function mkChart(canvas, type, data, opts){
   if (!canvas) return null;
+  _resolveDatasetColors(data);
   const base = {
     responsive:true, maintainAspectRatio:false,
-    plugins:{ legend:{ position:'bottom', labels:{ font:{size:11}, usePointStyle:true, padding:10 } } },
+    plugins:{ legend:{ position:'bottom', labels:{ font:{size:12}, usePointStyle:true, boxWidth:14, padding:10 } } },
     animation:{ duration:600, easing:'easeOutCubic' },
   };
   const chart = new Chart(canvas, { type, data, options: Object.assign(base, opts||{}) });
@@ -402,13 +514,32 @@ const VIEWS = {};
 VIEWS['s-home'] = async function(root){
   root.innerHTML = tplLoading(4);
   const uid = state.me && state.me.id;
-  const [insights, daily] = await Promise.all([
+  const [insights, daily, dash] = await Promise.all([
     uid ? apiGet(`/api/lrs/insights/${uid}`) : Promise.resolve(null),
-    apiGet('/api/lrs/stats/daily')
+    apiGet('/api/lrs/stats/daily'),
+    apiGet('/api/lrs/dashboard')
   ]);
 
-  const summary = (insights && insights.data && insights.data.summary) || {};
-  const weakList = (insights && insights.data && insights.data.weak) || [];
+  // API shape: {snapshot:{streakDays, weeklyDurationMin, weeklyTarget, weeklyScoreAvg, engagementIndex}, weaknesses:[...]}
+  const snap = (insights && insights.snapshot) || {};
+  const weakList = (insights && insights.weaknesses) || [];
+  const dashStats = (dash && dash.stats) || {};
+  const totalMinutes = snap.weeklyDurationMin != null
+    ? Number(snap.weeklyDurationMin)
+    : (dashStats.totalDurationMinutes || 0);
+  const avgScore = Math.round(Number(snap.weeklyScoreAvg || 0) * 10) / 10;
+  const streakDays = snap.streakDays || 0;
+  const doneTasks = dashStats.totalActivities || 0;
+  const summary = { total_minutes: totalMinutes, done_tasks: doneTasks, avg_score: avgScore, streak_days: streakDays };
+
+  // 관리자 계정이 학생 뷰 (scope=mine) 로 볼 때 전부 0이면 안내
+  const allZero = !totalMinutes && !doneTasks && !avgScore && !streakDays;
+  const isAdminAsStudent = (state.me && state.me.role === 'admin') && state.role === 'student';
+  const adminHintHtml = (allZero && isAdminAsStudent) ? `
+    <div class="dc-state-panel" role="status" style="border-left:4px solid var(--lrs-primary);background:rgba(37,99,235,.06);margin-bottom:12px;">
+      <i class="fas fa-lightbulb" aria-hidden="true"></i>
+      <p>관리자 계정의 개인 학습 데이터가 없습니다. 실제 학생 화면을 보려면 학생 계정으로 로그인하거나 <button type="button" class="btn" id="sHomeSampleBtn" style="margin-left:6px;"><i class="fas fa-user-magnifying-glass"></i> 샘플 학생 보기</button> 버튼을 클릭하세요.</p>
+    </div>` : '';
 
   const kpiHtml = `
     <div class="dc-kpi-grid">
@@ -430,23 +561,37 @@ VIEWS['s-home'] = async function(root){
       <div id="sWeakCards"></div>
     </section>`;
 
-  root.innerHTML = kpiHtml + chartsHtml;
+  root.innerHTML = adminHintHtml + kpiHtml + chartsHtml;
+
+  // 샘플 학생 보기 버튼 바인딩 (관리자-as-학생 힌트)
+  const sampleBtn = document.getElementById('sHomeSampleBtn');
+  if (sampleBtn){
+    sampleBtn.addEventListener('click', async (e) => {
+      e.preventDefault();
+      setRole('teacher');
+      await setView('t-drill');
+      setTimeout(() => {
+        const first = (LRS._warnCache||[])[0];
+        if (first) LRS.openDrilldown(first);
+      }, 300);
+    });
+  }
 
   // 게이지 (학습시간 목표 대비 달성률) — 기본 목표치: 7d 60분*7일, 30d 60*30 등
-  const targetMin = (state.period==='7d'?420: state.period==='30d'?1800: state.period==='90d'?5400: 1800);
+  const targetMin = Number(snap.weeklyTarget) || (state.period==='7d'?420: state.period==='30d'?1800: state.period==='90d'?5400: 1800);
   renderGauge(document.getElementById('sHomeGauge'), summary.total_minutes||0, targetMin, '목표 대비');
 
   // 일별 추이 차트
   const dailyData = (daily && daily.data) || [];
-  // 스파크라인: 최근 7일 완료 과제(없으면 활동 건수) 추이
-  const sparkVals = dailyData.slice(-7).map(d => d.done_tasks || d.count || d.total_count || 0);
+  // 스파크라인: 최근 7일 활동 건수 추이
+  const sparkVals = dailyData.slice(-7).map(d => d.count || 0);
   renderSparkline(document.getElementById('sHomeSpark'), sparkVals);
   if (dailyData.length) {
     mkChart(document.getElementById('sHomeDaily'), 'line', {
-      labels: dailyData.map(d => d.date),
+      labels: dailyData.map(d => fmtDate(d.stat_date)),
       datasets: [{
         label:'학습시간(분)',
-        data: dailyData.map(d => Math.round((d.total_duration||d.duration_sec||0)/60)),
+        data: dailyData.map(d => toMinutes(d.total_duration_sec || d.total_duration)),
         borderColor: 'var(--chart-1)', backgroundColor:'rgba(37,99,235,.12)',
         tension:.3, fill:true
       }]
@@ -456,26 +601,26 @@ VIEWS['s-home'] = async function(root){
       `<header><h2>일별 학습시간 추이</h2></header>` + tplEmpty('선택한 기간의 데이터가 없어요');
   }
 
-  // 약점 차트
+  // 약점 차트 (weaknesses:[{achievement_code, attempt_count, success_count, avg_score, last_level}])
   if (weakList.length) {
     mkChart(document.getElementById('sHomeWeak'), 'bar', {
-      labels: weakList.slice(0,5).map(w=>w.achievement_code||w.label||'-'),
+      labels: weakList.slice(0,5).map(w=>w.achievement_code||'-'),
       datasets:[{
-        label:'정답률(%)',
-        data: weakList.slice(0,5).map(w=>w.accuracy||w.rate||0),
+        label:'시도 횟수',
+        data: weakList.slice(0,5).map(w => Number(w.attempt_count)||0),
         backgroundColor:'var(--chart-4)'
       }]
-    }, { indexAxis:'y', scales:{ x:{ max:100 } } });
+    }, { indexAxis:'y', scales:{ x:{ beginAtZero:true } } });
 
     // 약점 카드 → self-learn 딥링크
     document.getElementById('sWeakCards').innerHTML = weakList.slice(0,5).map(w=>{
       const code = w.achievement_code||'';
-      const accuracy = w.accuracy||w.rate||0;
-      const attempts = w.attempts||'-';
+      const accuracy = (w.avg_score != null ? w.avg_score : (w.last_level||'미도달'));
+      const attempts = w.attempt_count || '-';
       const href = '/self-learn/?achievement_code=' + encodeURIComponent(code);
       return `<div class="dc-warning-card" data-severity="medium">
         <h3>${escapeHtml(code||'성취기준')}</h3>
-        <p>정답률 ${escapeHtml(accuracy)}% · 최근 시도 ${escapeHtml(attempts)}회</p>
+        <p>평균 ${escapeHtml(accuracy)} · 시도 ${escapeHtml(attempts)}회</p>
         <div class="actions">
           <a role="button" href="${escapeAttr(href)}" class="dc-badge dc-badge--primary" style="text-decoration:none;">
             <i class="fas fa-book-open-reader"></i> 맞춤학습으로 이동
@@ -493,33 +638,126 @@ VIEWS['s-home'] = async function(root){
 
 VIEWS['s-achieve'] = async function(root){
   root.innerHTML = tplLoading(2);
-  const r = await apiGet('/api/lrs/achievement-progress', { userId: state.me && state.me.id });
-  const rows = (r && r.data) || [];
-  if (!rows.length) { root.innerHTML = tplEmpty('성취 데이터가 집계되지 않았어요'); return; }
-  root.innerHTML = chartWrap('sAchBar','교과별 성취수준 분포 (상/중/하)','누적 막대');
-  const subjects = [...new Set(rows.map(r=>r.subject_code||'기타'))];
-  const ds = [
-    { label:'우수', data:subjects.map(s => rows.filter(r=>(r.subject_code||'기타')===s&&r.level==='상').reduce((a,b)=>a+(b.count||0),0)), backgroundColor:'var(--lvl-high)' },
-    { label:'보통', data:subjects.map(s => rows.filter(r=>(r.subject_code||'기타')===s&&r.level==='중').reduce((a,b)=>a+(b.count||0),0)), backgroundColor:'var(--lvl-mid)' },
-    { label:'미흡', data:subjects.map(s => rows.filter(r=>(r.subject_code||'기타')===s&&r.level==='하').reduce((a,b)=>a+(b.count||0),0)), backgroundColor:'var(--lvl-low)' },
-  ];
-  mkChart(document.getElementById('sAchBar'),'bar',{ labels:subjects, datasets:ds },
-    { scales:{ x:{stacked:true}, y:{stacked:true} } });
+  const uid = state.me && state.me.id;
+  // 실제 응답: {standards:[{code, subject_code, attempts, success, avg_score, level, lastAt}]}
+  const cid = await resolveClassId();
+  const r = await apiGet('/api/lrs/achievement-progress', { userId: uid, classId: cid });
+  const standards = (r && (r.standards || r.byAchievement)) || [];
+
+  if (!standards.length) {
+    // 역할 전환 힌트 + 샘플 학생 보기 버튼
+    const isAdmin = state.me && state.me.role === 'admin';
+    const hint = isAdmin
+      ? '관리자 계정에는 개인 성취 데이터가 없어요. 학생 계정으로 로그인하거나, 상단 역할 스위처로 <b>교사</b>로 전환 후 "학생 드릴다운"에서 학생을 선택하세요.'
+      : '아직 진단 결과가 충분하지 않아요. 학습을 진행하면 성취 데이터가 집계됩니다.';
+    root.innerHTML = `
+      <div class="dc-state-panel" role="status">
+        <i class="fas fa-award" aria-hidden="true"></i>
+        <p>${hint}</p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin-top:12px;">
+          ${isAdmin ? `<button type="button" class="btn" id="sAchGotoDrill"><i class="fas fa-user-magnifying-glass"></i> 샘플 학생 보기</button>` : ''}
+          <a class="btn" href="/self-learn/"><i class="fas fa-book-open-reader"></i> 스스로채움</a>
+        </div>
+      </div>`;
+    const go = document.getElementById('sAchGotoDrill');
+    if (go) go.addEventListener('click', async () => {
+      // 교사로 전환 후 t-drill → 첫 학생 drawer 자동 오픈
+      setRole('teacher');
+      await setView('t-drill');
+      setTimeout(() => {
+        const first = (LRS._warnCache||[])[0];
+        if (first) LRS.openDrilldown(first);
+      }, 300);
+    });
+    return;
+  }
+
+  // 레벨별 카운트 집계
+  const levelMap = { '상':0, '중':0, '하':0, '미도달':0 };
+  standards.forEach(s => {
+    const lv = s.level || s.last_level || '미도달';
+    if (levelMap[lv] != null) levelMap[lv]++; else levelMap['미도달']++;
+  });
+
+  // KPI 계산
+  const reached = (levelMap['상']||0) + (levelMap['중']||0) + (levelMap['하']||0);
+  let accSum=0, accN=0;
+  standards.forEach(s => {
+    const v = Number(s.avg_score);
+    if (!isNaN(v) && v >= 0){ accSum += v; accN++; }
+  });
+  const avgAcc = accN ? (accSum/accN) : 0;
+  // 약점: avg_score < 60 또는 level === '미도달'/'하'
+  const weaknesses = standards.filter(s => {
+    const v = Number(s.avg_score);
+    const lv = s.level || s.last_level;
+    return (isFinite(v) && v < 60) || lv === '미도달' || lv === '하';
+  });
+
+  root.innerHTML = `
+    <div class="dc-kpi-grid">
+      ${kpiCard('도달 성취기준', reached, '개', {dir:'flat',text:'상/중/하 합계'}, 'success')}
+      ${kpiCard('평균 정답률',   avgAcc.toFixed(1), '%', {dir:'flat',text:'성취기준 전체 평균'}, 'primary')}
+      ${kpiCard('약점 성취기준', weaknesses.length, '개', {dir:weaknesses.length?'down':'flat', text:'60점 미만/미도달'}, weaknesses.length?'danger':'primary')}
+    </div>
+    <div class="grid-2">
+      ${chartWrap('sAchDist','성취수준 분포','상/중/하/미도달 비율')}
+      ${chartWrap('sAchBar','성취기준별 평균 점수','상위 15개')}
+    </div>
+    <section class="dc-chart-wrapper">
+      <header><h2>약점 Top 5</h2><div class="subtitle">평균점수 낮은 순</div></header>
+      <div id="sAchWeakTable"></div>
+    </section>`;
+
+  mkChart(document.getElementById('sAchDist'),'doughnut',{
+    labels:['상','중','하','미도달'],
+    datasets:[{
+      data:[levelMap['상'], levelMap['중'], levelMap['하'], levelMap['미도달']],
+      backgroundColor:['var(--lvl-high)','var(--lvl-mid)','var(--lvl-low)','var(--gray-300)']
+    }]
+  }, donutLegendOpts('개'));
+
+  const top = standards.slice().sort((a,b)=> (Number(b.avg_score)||0)-(Number(a.avg_score)||0)).slice(0,15);
+  mkChart(document.getElementById('sAchBar'),'bar',{
+    labels: top.map(s => s.code || s.achievement_code || '-'),
+    datasets:[{
+      label:'평균 점수',
+      data: top.map(s => Number(s.avg_score)||0),
+      backgroundColor:'var(--chart-2)'
+    }]
+  }, { indexAxis:'y', scales:{ x:{ beginAtZero:true, max:100 } } });
+
+  const weakTop5 = weaknesses.slice().sort((a,b)=> (Number(a.avg_score)||0)-(Number(b.avg_score)||0)).slice(0,5);
+  if (weakTop5.length){
+    renderDataTable(document.getElementById('sAchWeakTable'), {
+      columns: [
+        { key:'achievement_code', label:'성취기준', format:(_,r)=>escapeHtml(r.code||r.achievement_code||'-') },
+        { key:'avg_score',        label:'평균점수', align:'right', format:v=>escapeHtml(v==null?'-':Number(v).toFixed(1)) },
+        { key:'attempts',         label:'시도횟수', align:'right', format:(_,r)=>escapeHtml(Number(r.attempts||r.attempt_count||0).toLocaleString()) }
+      ],
+      rows: weakTop5,
+      initialSort:'avg_score', initialDir:'asc'
+    });
+  } else {
+    document.getElementById('sAchWeakTable').innerHTML = `<p style="color:var(--gray-600);padding:12px 0;">약점 성취기준이 없습니다. 좋은 페이스를 유지하세요!</p>`;
+  }
 };
 
 VIEWS['s-trend'] = async function(root){
   root.innerHTML = tplLoading(1);
-  const daily = await apiGet('/api/lrs/stats/daily');
+  // 학생 추이는 90일 고정 요청
+  const daily = await apiGet('/api/lrs/stats/daily', { period:'90d' });
   const rows = (daily && daily.data) || [];
   if (!rows.length) { root.innerHTML = tplEmpty('추이 데이터가 없어요'); return; }
-  root.innerHTML = chartWrap('sTrendLine','월간 학습 추이');
+  root.innerHTML = chartWrap('sTrendLine','학습 추이 (최근 90일)','학습시간·활동건수·평균점수');
   mkChart(document.getElementById('sTrendLine'),'line',{
-    labels: rows.map(r=>r.date),
+    labels: rows.map(r=>fmtDate(r.stat_date)),
     datasets:[
-      { label:'학습시간(분)', data: rows.map(r=>Math.round((r.total_duration||0)/60)), borderColor:'var(--chart-1)', tension:.3 },
-      { label:'활동 건수',    data: rows.map(r=>r.count||r.total_count||0),               borderColor:'var(--chart-5)', tension:.3, yAxisID:'y2' }
+      { label:'학습시간(분)', data: rows.map(r=>toMinutes(r.total_duration_sec || r.total_duration)), borderColor:'var(--chart-1)', tension:.3 },
+      { label:'활동 건수',    data: rows.map(r=>r.count||0),                   borderColor:'var(--chart-5)', tension:.3, yAxisID:'y2' },
+      { label:'평균 점수',    data: rows.map(r=>Number(r.avg_score)||0),       borderColor:'var(--chart-3)', tension:.3, yAxisID:'y2' }
     ]
-  }, { scales:{ y:{title:{display:true,text:'분'}}, y2:{position:'right', title:{display:true,text:'건'}, grid:{drawOnChartArea:false}} }});
+  }, { scales:{ y:{title:{display:true,text:'분'}}, y2:{position:'right', title:{display:true,text:'건/점'}, grid:{drawOnChartArea:false}} }});
 };
 
 VIEWS['s-compare'] = async function(root){
@@ -527,24 +765,83 @@ VIEWS['s-compare'] = async function(root){
     ${tplEmpty('비교 집계 API 준비 중입니다 (Phase 2 후속).', {href:'/lrs/#s-home', label:'내 학습 요약으로'})}</section>`;
 };
 
+/* ===== 교사 경고 응답 → 통합 목록 변환 =====
+ * 입력: {inactive:[], noData:[], consecutiveWrong:[], weakAchievements:[], summary:{...}}
+ * 출력: [{user_id, name, severity, reason, achievement_code?, last_active?, _kind}]
+ */
+function flattenWarnings(w){
+  if (!w) return { all:[], summary:{inactiveCount:0,noDataCount:0,wrongCount:0,weakCount:0} };
+  const raw = w.summary || {};
+  const summary = {
+    inactiveCount: raw.inactiveCount != null ? raw.inactiveCount : (w.inactive||[]).length,
+    noDataCount:   raw.noDataCount   != null ? raw.noDataCount   : (w.noData||[]).length,
+    wrongCount:    raw.wrongCount    != null ? raw.wrongCount    : (raw.consecutiveWrongCount != null ? raw.consecutiveWrongCount : (w.consecutiveWrong||[]).length),
+    weakCount:     raw.weakCount     != null ? raw.weakCount     : (w.weakAchievements||[]).length
+  };
+  // 공통 helper: 다양한 필드명 허용 (user_id|userId|id), (name|displayName|student_name)
+  const uidOf = x => x.user_id || x.userId || x.id || '';
+  const nameOf = x => x.name || x.displayName || x.student_name || ('학생 #'+uidOf(x));
+  const all = [];
+  (w.inactive||[]).forEach(x => all.push({
+    user_id: uidOf(x), name: nameOf(x), severity: x.severity||'medium',
+    reason: `미접속 ${x.daysInactive||'-'}일 (최근: ${x.lastActivityDate||'-'})`,
+    last_active: x.lastActivityDate||'-', _kind:'inactive'
+  }));
+  (w.consecutiveWrong||[]).forEach(x => all.push({
+    user_id: uidOf(x), name: nameOf(x), severity: x.severity||'high',
+    reason: `연속 오답 ${x.wrongStreak||x.streak||'-'}회`, _kind:'wrong'
+  }));
+  // weakAchievements: 학생별로 items 배열 — 각 item당 한 행
+  (w.weakAchievements||[]).forEach(x => {
+    const items = x.items || [{ achievement_code: x.achievement_code, avg_score: x.avg_score, last_level: x.last_level, attempt_count: x.attempt_count }];
+    items.forEach(it => all.push({
+      user_id: uidOf(x), name: nameOf(x),
+      severity: it.severity || (it.avg_score != null && it.avg_score < 50 ? 'high' : 'medium'),
+      reason: `${it.achievement_code||'-'} · ${it.last_level||'미도달'}${it.avg_score!=null?` (평균 ${it.avg_score})`:''} · ${it.attempt_count||'-'}회 시도`,
+      achievement_code: it.achievement_code, _kind:'weak'
+    }));
+  });
+  (w.noData||[]).forEach(x => all.push({
+    user_id: uidOf(x), name: nameOf(x), severity:'low',
+    reason:'학습 데이터 없음', _kind:'noData'
+  }));
+  return { all, summary, raw: w };
+}
+
 /* ===== 교사: 우리반 현황 ===== */
 VIEWS['t-home'] = async function(root){
   root.innerHTML = tplLoading(4);
+  const cid = await resolveClassId();
   const [dash, warnings, daily] = await Promise.all([
-    apiGet('/api/lrs/dashboard', { role:'teacher' }),
-    apiGet('/api/lrs/warnings/0'),
-    apiGet('/api/lrs/stats/daily', { role:'teacher' })
+    apiGet('/api/lrs/dashboard'),
+    apiGet('/api/lrs/warnings/' + encodeURIComponent(cid)),
+    apiGet('/api/lrs/stats/daily')
   ]);
 
-  const d = (dash && (dash.data||dash)) || {};
-  const warns = (warnings && warnings.data) || (Array.isArray(warnings)?warnings:[]);
+  const stats = (dash && dash.stats) || {};
+  const wf = flattenWarnings(warnings);
+  const warns = wf.all;
+  const summary = wf.summary;
+
+  // 평균성취: stats/daily의 avg_score·count 가중평균
+  const drowsRaw = (daily && daily.data) || [];
+  let wSum = 0, wCnt = 0;
+  drowsRaw.forEach(r => {
+    const s = Number(r.avg_score)||0, c = Number(r.count)||0;
+    if (s > 0 && c > 0){ wSum += s*c; wCnt += c; }
+  });
+  const avgScore = wCnt ? Math.round((wSum/wCnt)*10)/10 : 0;
+
+  const totalActs = stats.totalActivities || 0;
+  const totalHours = Math.round((stats.totalDurationMinutes||0)/60);
+  const warnCount = (summary.inactiveCount||0) + (summary.wrongCount||0) + (summary.weakCount||0);
 
   root.innerHTML = `
     <div class="dc-kpi-grid">
-      ${kpiCard('학급 평균 성취', d.avg_score||0,              '점', {dir:'flat', text:'이번 기간'}, 'primary')}
-      ${kpiCard('주간 활동량',    Math.round((d.total_duration||0)/3600), '시간', {dir:'up', text:'지난 기간 대비'}, 'success')}
-      ${kpiCard('경고 학생',      warns.length||0,              '명', {dir:warns.length?'down':'flat', text:'주의 필요'}, warns.length?'danger':'primary')}
-      ${kpiCard('미제출 과제',    d.pending_tasks||0,           '건', {dir:'flat', text:''}, 'warning')}
+      ${kpiCard('학급 평균 성취', avgScore,      '점', {dir:'flat', text:'이번 기간'}, 'primary')}
+      ${kpiCard('총 활동',        totalActs.toLocaleString(), '건', {dir:'up', text:'기간 누적'}, 'success')}
+      ${kpiCard('총 학습시간',    totalHours,    '시간', {dir:'flat', text:''}, 'primary')}
+      ${kpiCard('경고 학생',      warnCount,     '건', {dir:warnCount?'down':'flat', text:`미접속 ${summary.inactiveCount||0}·연속오답 ${summary.wrongCount||0}·약점 ${summary.weakCount||0}`}, warnCount?'danger':'primary')}
     </div>
 
     <div class="grid-2">
@@ -555,11 +852,11 @@ VIEWS['t-home'] = async function(root){
       </section>
     </div>`;
 
-  const drows = (daily && daily.data) || [];
+  const drows = drowsRaw;
   if (drows.length) {
     mkChart(document.getElementById('tHomeDaily'),'bar',{
-      labels: drows.map(r=>r.date),
-      datasets:[{ label:'활동 건수', data: drows.map(r=>r.count||r.total_count||0), backgroundColor:'var(--chart-1)' }]
+      labels: drows.map(r=>fmtDate(r.stat_date)),
+      datasets:[{ label:'활동 건수', data: drows.map(r=>Number(r.count)||0), backgroundColor:'var(--chart-1)' }]
     });
   } else {
     document.getElementById('tHomeDaily').closest('.dc-chart-wrapper').innerHTML =
@@ -572,9 +869,9 @@ VIEWS['t-home'] = async function(root){
   } else {
     LRS._warnCache = warns;
     warnListEl.innerHTML = warns.slice(0,6).map((w, idx)=>{
-      const name = w.name || w.student_name || ('학생 #'+(w.user_id||w.id||'?'));
-      const reason = w.reason || w.description || '연속 미학습 또는 낮은 정답률';
-      const uid = w.user_id||w.id||'';
+      const name = w.name || ('학생 #'+(w.user_id||'?'));
+      const reason = w.reason || '연속 미학습 또는 낮은 정답률';
+      const uid = w.user_id||'';
       const code = w.achievement_code || '';
       return `<div class="dc-warning-card" data-severity="${escapeAttr(w.severity||'medium')}">
         <h3>${escapeHtml(name)}</h3>
@@ -594,8 +891,10 @@ VIEWS['t-home'] = async function(root){
 VIEWS['t-drill'] = async function(root){
   root.innerHTML = tplLoading(2);
   // 경고 API를 학생 목록으로 재활용 (학급 전체 학생 API가 없는 경우 best-effort)
-  const w = await apiGet('/api/lrs/warnings/0');
-  const list = (w && (w.data||w)) || [];
+  const cid = await resolveClassId();
+  const w = await apiGet('/api/lrs/warnings/' + encodeURIComponent(cid));
+  const wf = flattenWarnings(w);
+  const list = wf.all;
   if (!list.length){
     root.innerHTML = `<section class="dc-chart-wrapper">
       <header><h2>학생 드릴다운</h2><div class="subtitle">학생을 선택하면 상세 드로어가 열립니다</div></header>
@@ -625,11 +924,22 @@ VIEWS['t-drill'] = async function(root){
 
 VIEWS['t-warnings'] = async function(root){
   root.innerHTML = tplLoading(3);
-  const w = await apiGet('/api/lrs/warnings/0');
-  const list = (w && (w.data||w)) || [];
+  const cid = await resolveClassId();
+  const w = await apiGet('/api/lrs/warnings/' + encodeURIComponent(cid));
+  const wf = flattenWarnings(w);
+  const list = wf.all;
+  const s = wf.summary;
   if (!list.length) { root.innerHTML = tplEmpty('현재 경고가 없어요'); return; }
   root.innerHTML = `<section class="dc-chart-wrapper">
-    <header><h2>경고 학생 리스트</h2><div class="subtitle">부진/미학습 ${escapeHtml(list.length)}건</div></header>
+    <header>
+      <h2>경고 학생 리스트</h2>
+      <div class="subtitle">
+        미접속 ${escapeHtml(s.inactiveCount||0)}명 ·
+        연속오답 ${escapeHtml(s.wrongCount||0)}명 ·
+        약점 ${escapeHtml(s.weakCount||0)}건 ·
+        데이터 없음 ${escapeHtml(s.noDataCount||0)}명
+      </div>
+    </header>
     <div id="warnTable"></div>
     <h3 style="margin-top:24px;font-size:var(--fs-h2);color:var(--gray-800);">카드 뷰</h3>
     <div id="warnGrid"></div>
@@ -675,7 +985,7 @@ VIEWS['t-warnings'] = async function(root){
   // 카드 뷰
   const grid = document.getElementById('warnGrid');
   grid.innerHTML = list.map((x, idx) => {
-    const name = x.name||x.student_name||('학생 #'+(x.user_id||x.id||'?'));
+    const name = x.name||('학생 #'+(x.user_id||'?'));
     const reason = x.reason||'기준 미달';
     const uid = x.user_id||'';
     const code = x.achievement_code||'';
@@ -711,109 +1021,671 @@ VIEWS['t-usage'] = async function(root){
     </div>`;
   if (rows.length){
     mkChart(document.getElementById('tUsagePie'),'doughnut',{
-      labels: rows.map(r=>r.service||r.service_name||'-'),
+      labels: rows.map(r=>pickLabel(r, ['service_label','service','source_service','service_key','service_name'], '(미분류)')),
       datasets:[{ data: rows.map(r=>r.count||0), backgroundColor:['var(--chart-1)','var(--chart-2)','var(--chart-3)','var(--chart-4)','var(--chart-5)','var(--chart-6)'] }]
-    });
+    }, donutLegendOpts('건'));
   } else {
     document.getElementById('tUsagePie').closest('.dc-chart-wrapper').innerHTML =
       `<header><h2>서비스별 수업 활용 비중</h2></header>` + tplEmpty();
   }
   if (drows.length){
-    renderHeatmap(document.getElementById('tUsageHeat'), drows);
+    // stat_date → date 필드 정규화(히트맵이 r.date 사용)
+    renderHeatmap(document.getElementById('tUsageHeat'), drows.map(r => Object.assign({}, r, { date: r.stat_date || r.date })));
   } else {
     document.getElementById('tUsageHeat').innerHTML = tplEmpty('히트맵 데이터가 없습니다');
   }
 };
 
 VIEWS['t-subject'] = async function(root){
-  root.innerHTML = tplLoading(1);
+  root.innerHTML = tplLoading(2);
+  // 응답: { lessonStats:[], homeworkStats:[], examStats:[] }  — 또는 구버전 { stats:[] }
   const s = await apiGet('/api/lrs/stats/by-subject');
-  const rows = (s && (s.stats||s.data)) || [];
-  if (!rows.length) { root.innerHTML = tplEmpty(); return; }
-  root.innerHTML = chartWrap('tSubjBar','교과별 활동량 & 평균 성취');
-  mkChart(document.getElementById('tSubjBar'),'bar',{
-    labels: rows.map(r=>r.subject||r.subject_code||'-'),
+  const lessonStats   = (s && s.lessonStats)   || [];
+  const homeworkStats = (s && s.homeworkStats) || [];
+  const examStats     = (s && s.examStats)     || [];
+  const legacyRows    = (s && (s.stats || s.data)) || [];
+
+  // legacy 응답 fallback: 3갈래로 분리 불가 → 단일 chart만 표시 후 종료
+  if (!lessonStats.length && !homeworkStats.length && !examStats.length && legacyRows.length){
+    root.innerHTML = chartWrap('tSubjBar','교과별 활동량 & 평균 성취');
+    mkChart(document.getElementById('tSubjBar'),'bar',{
+      labels: legacyRows.map(r=>pickLabel(r, ['subject_label','subject','subject_code','subject_name'], '(교과 미지정)')),
+      datasets:[
+        { label:'활동 건수', data:legacyRows.map(r=>r.count||0), backgroundColor:'var(--chart-1)' },
+        { label:'평균 성취(%)', data:legacyRows.map(r=>r.avg_score||0), backgroundColor:'var(--chart-2)', yAxisID:'y2' }
+      ]
+    }, { scales:{ y2:{ position:'right', max:100, grid:{drawOnChartArea:false} } } });
+    return;
+  }
+
+  if (!lessonStats.length && !homeworkStats.length && !examStats.length){
+    root.innerHTML = tplEmpty('교과별 집계 데이터가 없어요');
+    return;
+  }
+
+  // 교과 라벨 통합 (세 배열의 subject_code/label 합집합)
+  const _sKey = r => r.subject_code || r.subject || r.subject_name || '(미지정)';
+  const _sLabel = r => pickLabel(r, ['subject_label','subject_name','subject','subject_code'], '(교과 미지정)');
+  const codeToLabel = {};
+  [lessonStats, homeworkStats, examStats].forEach(arr => {
+    arr.forEach(r => { const k=_sKey(r); if(!codeToLabel[k]) codeToLabel[k]=_sLabel(r); });
+  });
+  const codes = Object.keys(codeToLabel);
+
+  const mapL = Object.fromEntries(lessonStats.map(r=>[_sKey(r), Number(r.count)||0]));
+  const mapH = Object.fromEntries(homeworkStats.map(r=>[_sKey(r), Number(r.count)||0]));
+  const mapE = Object.fromEntries(examStats.map(r=>[_sKey(r), Number(r.count)||0]));
+
+  // 정렬: 합계 내림차순
+  codes.sort((a,b) => ((mapL[b]||0)+(mapH[b]||0)+(mapE[b]||0)) - ((mapL[a]||0)+(mapH[a]||0)+(mapE[a]||0)));
+
+  const tableRows = codes.map(c => ({
+    subject: codeToLabel[c],
+    lesson:   mapL[c]||0,
+    homework: mapH[c]||0,
+    exam:     mapE[c]||0,
+    total:   (mapL[c]||0)+(mapH[c]||0)+(mapE[c]||0)
+  }));
+
+  root.innerHTML = `
+    <div class="dc-kpi-grid">
+      ${kpiCard('수업 교과 수', lessonStats.length,   '과', {dir:'flat',text:'진도/차시'}, 'primary')}
+      ${kpiCard('과제 교과 수', homeworkStats.length, '과', {dir:'flat',text:'부과된 과제'}, 'success')}
+      ${kpiCard('평가 교과 수', examStats.length,     '과', {dir:'flat',text:'진단/형성'}, 'warning')}
+    </div>
+    ${chartWrap('tSubjStack','교과별 수업·과제·평가 통합', '스택 Bar')}
+    <section class="dc-chart-wrapper">
+      <header><h2>교과별 상세 (정렬 가능)</h2><div class="subtitle">열 제목 클릭으로 정렬</div></header>
+      <div id="tSubjTable"></div>
+    </section>`;
+
+  mkChart(document.getElementById('tSubjStack'),'bar',{
+    labels: codes.map(c => codeToLabel[c]),
     datasets:[
-      { label:'활동 건수', data:rows.map(r=>r.count||0), backgroundColor:'var(--chart-1)' },
-      { label:'평균 성취(%)', data:rows.map(r=>r.avg_score||0), backgroundColor:'var(--chart-2)', yAxisID:'y2' }
+      { label:'수업', data: codes.map(c => mapL[c]||0), backgroundColor:'var(--chart-1)' },
+      { label:'과제', data: codes.map(c => mapH[c]||0), backgroundColor:'var(--chart-2)' },
+      { label:'평가', data: codes.map(c => mapE[c]||0), backgroundColor:'var(--chart-3)' }
     ]
-  }, { scales:{ y2:{ position:'right', max:100, grid:{drawOnChartArea:false} } } });
+  }, { scales:{ x:{stacked:true}, y:{stacked:true, beginAtZero:true} } });
+
+  renderDataTable(document.getElementById('tSubjTable'), {
+    columns: [
+      { key:'subject',  label:'교과', format:v=>escapeHtml(v||'-') },
+      { key:'lesson',   label:'수업건수', align:'right', format:v=>escapeHtml((Number(v)||0).toLocaleString()) },
+      { key:'homework', label:'과제건수', align:'right', format:v=>escapeHtml((Number(v)||0).toLocaleString()) },
+      { key:'exam',     label:'평가건수', align:'right', format:v=>escapeHtml((Number(v)||0).toLocaleString()) },
+      { key:'total',    label:'합계',     align:'right', format:v=>escapeHtml((Number(v)||0).toLocaleString()) }
+    ],
+    rows: tableRows,
+    initialSort:'total', initialDir:'desc'
+  });
 };
 
 /* ===== 관리자 ===== */
+
+// 관리자 views 공통: period 파라미터 붙여 호출 (apiGet은 state.period 자동 부착)
+async function adminFetchWithPeriod(path, period){
+  try {
+    const params = new URLSearchParams();
+    if (period) params.set('period', period);
+    if (_shouldAttachScope(path)){
+      const sc = state.scope || computeScope();
+      if (sc) params.set('scope', sc);
+    }
+    const qs = params.toString();
+    const r = await fetch(path + (qs?'?'+qs:''), { credentials:'include' });
+    if (!r.ok) return null;
+    return await r.json();
+  } catch(_){ return null; }
+}
+
 VIEWS['a-overview'] = async function(root){
   root.innerHTML = tplLoading(4);
-  const [dash, svc, daily] = await Promise.all([
+  const [dash, svc, daily, subj, cls, ach] = await Promise.all([
     apiGet('/api/lrs/dashboard'),
     apiGet('/api/lrs/stats/by-service'),
-    apiGet('/api/lrs/stats/daily')
+    apiGet('/api/lrs/stats/daily'),
+    apiGet('/api/lrs/stats/by-subject'),
+    apiGet('/api/lrs/stats/by-class'),
+    apiGet('/api/lrs/stats/by-achievement')
   ]);
-  const d = (dash && (dash.data||dash)) || {};
+  const stats = (dash && dash.stats) || {};
+  const byType = stats.byType || [];
+  const drowsAll = (daily && daily.data) || [];
+  const srows = (svc && (svc.stats||svc.data)) || [];
+  const subjRows = (subj && (subj.stats||subj.data)) || [];
+  const clsRows  = (cls  && (cls.stats ||cls.data )) || [];
+  const achRows  = (ach  && (ach.stats ||ach.data )) || [];
+
+  // 전체 집계 기반 KPI 계산
+  const totalActivitiesAll = drowsAll.reduce((s,r)=>s+(Number(r.count)||0),0);
+  const totalDurationSecAll = drowsAll.reduce((s,r)=>s+(Number(r.total_duration_sec)||0),0);
+  // 가중 평균 점수
+  let weightedScoreSum = 0, weightedCount = 0;
+  drowsAll.forEach(r => { if (r.avg_score != null && r.count){ weightedScoreSum += Number(r.avg_score)*Number(r.count); weightedCount += Number(r.count); } });
+  const avgScoreAll = weightedCount ? (weightedScoreSum/weightedCount) : 0;
+  // 활성 사용자: stats/daily의 users(일별 distinct) 합계는 실제 distinct가 아니므로 max로 근사
+  const uniqueUsersApprox = drowsAll.reduce((m,r)=>Math.max(m, Number(r.users)||0), 0)
+    || (stats.uniqueUsers||0);
+  const today = new Date().toISOString().slice(0,10);
+  const todayRow = drowsAll.find(r => (r.stat_date||'').slice(0,10) === today);
+  const todayCount = todayRow ? Number(todayRow.count)||0 : (stats.todayActivities||0);
+
   root.innerHTML = `
     <div class="dc-kpi-grid">
-      ${kpiCard('MAU',        d.mau||0, '명', {dir:'up',   text:'지난기간 대비'}, 'primary')}
-      ${kpiCard('DAU',        d.dau||0, '명', {dir:'flat', text:'일평균'}, 'primary')}
-      ${kpiCard('총 활동',    (d.total_count||0).toLocaleString(), '건', {dir:'up', text:'기간 누적'}, 'success')}
-      ${kpiCard('활용 학급',  d.active_classes||0, '개', {dir:'flat', text:''}, 'primary')}
+      ${kpiCard('총 활동',      totalActivitiesAll.toLocaleString(), '건', {dir:'up', text:'전체 기간 누적'}, 'success')}
+      ${kpiCard('총 학습시간',  Math.round(totalDurationSecAll/3600).toLocaleString(), '시간', {dir:'flat', text:''}, 'primary')}
+      ${kpiCard('활성 사용자',  uniqueUsersApprox.toLocaleString(), '명', {dir:'flat', text:'일별 최대'}, 'primary')}
+      ${kpiCard('오늘 활동',    todayCount.toLocaleString(), '건', {dir:'flat', text:today}, 'warning')}
+    </div>
+    <div class="dc-kpi-grid">
+      ${kpiCard('평균 성취점수', (avgScoreAll).toFixed(1), '점', {dir:'flat', text:'가중 평균'}, 'success')}
+      ${kpiCard('활동 유형',     byType.length, '종', {dir:'flat', text:''}, 'primary')}
+      ${kpiCard('참여 학급',     clsRows.length, '개', {dir:'flat', text:''}, 'primary')}
+      ${kpiCard('서비스 수',     srows.length, '종', {dir:'flat', text:''}, 'primary')}
     </div>
     <div class="grid-2">
-      ${chartWrap('aDaily','일별 전체 활동량')}
-      ${chartWrap('aSvc',  '서비스별 활용 비중')}
+      ${chartWrap('aDaily','일별 활동량 · 사용자수', '이중 축 라인 차트')}
+      ${chartWrap('aSvc',  '서비스별 활용 비중', '서비스별 집계')}
+    </div>
+    <section class="dc-chart-wrapper">
+      <header><h2>서비스별 건수·시간·평균점수</h2></header>
+      <div id="aSvcTable"></div>
+    </section>
+    <div class="grid-2">
+      ${chartWrap('aType','활동 유형별 분포')}
+      ${chartWrap('aVerb','학습 행위 분포 (상위 8)')}
+    </div>
+    <div class="grid-2">
+      <section class="dc-chart-wrapper">
+        <header><h2>학급별 상위 10개</h2><div class="subtitle">활동량 기준</div></header>
+        <div id="aClassTable"></div>
+      </section>
+      <section class="dc-chart-wrapper">
+        <header><h2>교과별 상위 10개</h2><div class="subtitle">건수 기준</div></header>
+        <div id="aSubjTable"></div>
+      </section>
     </div>`;
-  const drows = (daily && daily.data) || [];
-  if (drows.length) mkChart(document.getElementById('aDaily'),'line',{
-    labels:drows.map(r=>r.date),
-    datasets:[{ label:'활동 건수', data:drows.map(r=>r.count||r.total_count||0), borderColor:'var(--chart-1)', tension:.3, fill:true, backgroundColor:'rgba(37,99,235,.1)' }]
-  });
-  const srows = (svc && svc.stats) || [];
-  if (srows.length) mkChart(document.getElementById('aSvc'),'doughnut',{
-    labels:srows.map(r=>r.service||'-'),
-    datasets:[{ data:srows.map(r=>r.count||0), backgroundColor:['var(--chart-1)','var(--chart-2)','var(--chart-3)','var(--chart-4)','var(--chart-5)','var(--chart-6)','var(--chart-7)'] }]
-  });
+
+  // 일별 이중 축 라인
+  if (drowsAll.length) {
+    mkChart(document.getElementById('aDaily'),'line',{
+      labels: drowsAll.map(r=>fmtDate(r.stat_date)),
+      datasets:[
+        { label:'활동 건수', data:drowsAll.map(r=>Number(r.count)||0), borderColor:'var(--chart-1)', backgroundColor:'rgba(37,99,235,.1)', tension:.3, fill:true, yAxisID:'y' },
+        { label:'사용자 수', data:drowsAll.map(r=>Number(r.users)||0), borderColor:'var(--chart-5)', tension:.3, yAxisID:'y2' }
+      ]
+    }, { scales:{ y:{ position:'left' }, y2:{ position:'right', grid:{drawOnChartArea:false} } } });
+  } else {
+    document.getElementById('aDaily').closest('.dc-chart-wrapper').innerHTML = `<header><h2>일별 활동량</h2></header>` + tplEmpty();
+  }
+
+  // 서비스별 도넛
+  if (srows.length) {
+    mkChart(document.getElementById('aSvc'),'doughnut',{
+      labels:srows.map(r=>pickLabel(r, ['service_label','service','source_service','service_key','service_name'], '(미분류)')),
+      datasets:[{ data:srows.map(r=>Number(r.count)||0), backgroundColor:['var(--chart-1)','var(--chart-2)','var(--chart-3)','var(--chart-4)','var(--chart-5)','var(--chart-6)','var(--chart-7)'] }]
+    }, donutLegendOpts('건'));
+    renderDataTable(document.getElementById('aSvcTable'), {
+      columns: [
+        { key:'service', label:'서비스', format:(_,r)=>escapeHtml(pickLabel(r, ['service_label','service','source_service','service_key','service_name'], '(미분류)')) },
+        { key:'count',   label:'건수', align:'right', format:v=>escapeHtml((Number(v)||0).toLocaleString()) },
+        { key:'dur',     label:'학습시간(분)', align:'right', format:(_,r)=>escapeHtml(toMinutes(r.total_duration_sec).toLocaleString()) },
+        { key:'avg_score', label:'평균점수', align:'right', format:v=>escapeHtml(v==null?'-':Number(v).toFixed(1)) }
+      ],
+      rows: srows, initialSort:'count', initialDir:'desc'
+    });
+  } else {
+    document.getElementById('aSvc').closest('.dc-chart-wrapper').innerHTML = `<header><h2>서비스별 활용 비중</h2></header>` + tplEmpty();
+    document.getElementById('aSvcTable').innerHTML = tplEmpty();
+  }
+
+  // 활동 유형 bar
+  if (byType.length) {
+    mkChart(document.getElementById('aType'),'bar',{
+      labels: byType.map(r=>r.activity_type||'-'),
+      datasets:[{ label:'건수', data: byType.map(r=>Number(r.count)||0), backgroundColor:'var(--chart-3)' }]
+    });
+  } else {
+    document.getElementById('aType').closest('.dc-chart-wrapper').innerHTML = `<header><h2>활동 유형별 분포</h2></header>` + tplEmpty();
+  }
+
+  // Verb bar
+  const byVerb = (stats.byVerb||[]).slice(0,8);
+  if (byVerb.length) {
+    mkChart(document.getElementById('aVerb'),'bar',{
+      labels: byVerb.map(r=>r.verb||'-'),
+      datasets:[{ label:'건수', data: byVerb.map(r=>Number(r.count)||0), backgroundColor:'var(--chart-5)' }]
+    }, { indexAxis:'y' });
+  } else {
+    document.getElementById('aVerb').closest('.dc-chart-wrapper').innerHTML = `<header><h2>학습 행위 분포</h2></header>` + tplEmpty();
+  }
+
+  // 학급 TOP 10
+  const clsTop = clsRows.slice().sort((a,b)=>(Number(b.count)||0)-(Number(a.count)||0)).slice(0,10);
+  if (clsTop.length) {
+    renderDataTable(document.getElementById('aClassTable'), {
+      columns: [
+        { key:'class_name', label:'학급', format:(_,r)=>escapeHtml(pickLabel(r, ['class_name','class_label','name'], '학급 #'+(r.class_id||'?'))) },
+        { key:'count',      label:'활동', align:'right', format:v=>escapeHtml((Number(v)||0).toLocaleString()) },
+        { key:'unique_students', label:'학생', align:'right', format:v=>escapeHtml(Number(v)||0) },
+        { key:'avg_score',  label:'평균점수', align:'right', format:v=>escapeHtml(v==null?'-':Number(v).toFixed(1)) }
+      ],
+      rows: clsTop, initialSort:'count', initialDir:'desc'
+    });
+  } else { document.getElementById('aClassTable').innerHTML = tplEmpty(); }
+
+  // 교과 TOP 10
+  const subjTop = subjRows.slice().sort((a,b)=>(Number(b.count)||0)-(Number(a.count)||0)).slice(0,10);
+  if (subjTop.length) {
+    renderDataTable(document.getElementById('aSubjTable'), {
+      columns: [
+        { key:'subject_code', label:'교과', format:(_,r)=>escapeHtml(pickLabel(r, ['subject_label','subject','subject_code','subject_name'], '(교과 미지정)')) },
+        { key:'count',        label:'건수', align:'right', format:v=>escapeHtml((Number(v)||0).toLocaleString()) },
+        { key:'avg_score',    label:'평균점수', align:'right', format:v=>escapeHtml(v==null?'-':Number(v).toFixed(1)) }
+      ],
+      rows: subjTop, initialSort:'count', initialDir:'desc'
+    });
+  } else { document.getElementById('aSubjTable').innerHTML = tplEmpty(); }
 };
 
 VIEWS['a-compare'] = async function(root){
-  root.innerHTML = `<section class="dc-chart-wrapper"><header><h2>기간 비교</h2><div class="subtitle">동일 기간 길이로 이전 구간과 대조</div></header>
-    ${tplEmpty('기간 비교 API 준비 중 (Phase 2 후속).')}</section>`;
+  root.innerHTML = tplLoading(2);
+  const periodA = state.period === 'custom' ? '30d' : state.period;
+  const periodB = periodA === '7d' ? '30d' : (periodA === '30d' ? '90d' : '90d');
+
+  // daily / by-service 를 각 period로 2번 호출
+  async function fetchPack(period){
+    const [daily, svc, dash] = await Promise.all([
+      adminFetchWithPeriod('/api/lrs/stats/daily', period),
+      adminFetchWithPeriod('/api/lrs/stats/by-service', period),
+      adminFetchWithPeriod('/api/lrs/dashboard', period)
+    ]);
+    return {
+      daily: (daily && daily.data) || [],
+      svc:   (svc && (svc.stats||svc.data)) || [],
+      stats: (dash && dash.stats) || {}
+    };
+  }
+  const [packA, packB] = await Promise.all([fetchPack(periodA), fetchPack(periodB)]);
+
+  function aggregate(pack){
+    const totalActivities = pack.daily.reduce((s,r)=>s+(Number(r.count)||0),0);
+    const totalDurationSec = pack.daily.reduce((s,r)=>s+(Number(r.total_duration_sec)||0),0);
+    let ws=0, wc=0;
+    pack.daily.forEach(r => { if (r.avg_score != null && r.count){ ws += Number(r.avg_score)*Number(r.count); wc += Number(r.count); } });
+    const avgScore = wc ? ws/wc : 0;
+    const activeUsers = pack.daily.reduce((m,r)=>Math.max(m, Number(r.users)||0), 0);
+    return { totalActivities, totalDurationSec, avgScore, activeUsers };
+  }
+  const aggA = aggregate(packA);
+  const aggB = aggregate(packB);
+
+  // 전체 로그 기간(최소~최대 stat_date) 확인 → 짧으면 배너 노출
+  const allDates = [...packA.daily, ...packB.daily]
+    .map(r => (r.stat_date||'').slice(0,10))
+    .filter(Boolean)
+    .sort();
+  const minD = allDates[0] || null;
+  const maxD = allDates[allDates.length-1] || null;
+  let dataDays = 0;
+  if (minD && maxD){
+    const ms = new Date(maxD).getTime() - new Date(minD).getTime();
+    dataDays = Math.max(1, Math.round(ms/86400000) + 1);
+  }
+  const SHORT_THRESHOLD = 14; // 2주 미만이면 A/B 비교 유의미성 낮음
+  const shortData = dataDays > 0 && dataDays < SHORT_THRESHOLD;
+
+  function delta(a,b){
+    if (!b) return { dir:'flat', text:'-' };
+    // 값이 동일하면 데이터 부족 힌트
+    if (a === b){
+      return { dir:'flat', text: shortData ? '동일(데이터 기간 부족)' : '동일' };
+    }
+    const pct = ((a-b)/b)*100;
+    const dir = pct>0.5?'up':pct<-0.5?'down':'flat';
+    const arrow = dir==='up'?'▲':dir==='down'?'▼':'·';
+    return { dir, text: arrow + ' ' + (pct>=0?'+':'') + pct.toFixed(1) + '%' };
+  }
+
+  const shortBanner = shortData ? `
+    <div class="dc-state-panel warning" role="status" style="border-left:4px solid var(--lrs-warning, #f59e0b);background:rgba(245,158,11,.08);">
+      <i class="fas fa-circle-info" aria-hidden="true"></i>
+      <p>현재 수집된 로그 기간이 짧아 A/B 비교가 유의미하지 않을 수 있습니다. (수집 범위: ${escapeHtml(minD)} ~ ${escapeHtml(maxD)}, ${dataDays}일)</p>
+    </div>` : '';
+
+  root.innerHTML = `
+    ${shortBanner}
+    <section class="dc-chart-wrapper">
+      <header>
+        <h2>기간 비교</h2>
+        <div class="subtitle">A기간: <strong>${escapeHtml(periodA)}</strong> · B기간: <strong>${escapeHtml(periodB)}</strong></div>
+      </header>
+      <div class="dc-kpi-grid">
+        ${kpiCard('총 활동(A기간)', aggA.totalActivities.toLocaleString(), '건', delta(aggA.totalActivities, aggB.totalActivities), 'primary')}
+        ${kpiCard('총 활동(B기간)', aggB.totalActivities.toLocaleString(), '건', {dir:'flat',text:'기준'}, 'primary')}
+        ${kpiCard('학습시간(A기간)', Math.round(aggA.totalDurationSec/3600).toLocaleString(), '시간', delta(aggA.totalDurationSec, aggB.totalDurationSec), 'success')}
+        ${kpiCard('학습시간(B기간)', Math.round(aggB.totalDurationSec/3600).toLocaleString(), '시간', {dir:'flat',text:'기준'}, 'success')}
+      </div>
+      <div class="dc-kpi-grid">
+        ${kpiCard('활성 사용자(A기간)', aggA.activeUsers.toLocaleString(), '명', delta(aggA.activeUsers, aggB.activeUsers), 'primary')}
+        ${kpiCard('활성 사용자(B기간)', aggB.activeUsers.toLocaleString(), '명', {dir:'flat',text:'기준'}, 'primary')}
+        ${kpiCard('평균 성취(A기간)', aggA.avgScore.toFixed(1), '점', delta(aggA.avgScore, aggB.avgScore), 'warning')}
+        ${kpiCard('평균 성취(B기간)', aggB.avgScore.toFixed(1), '점', {dir:'flat',text:'기준'}, 'warning')}
+      </div>
+    </section>
+
+    <section class="dc-chart-wrapper">
+      <header><h2>일별 활동량 비교 (정규화: 1일차..N일차)</h2></header>
+      <div class="chart-body"><canvas id="aCmp" role="img" aria-label="기간 비교 라인 차트"></canvas></div>
+    </section>
+
+    <section class="dc-chart-wrapper">
+      <header><h2>서비스별 비교 (A기간 vs B기간)</h2></header>
+      <div class="chart-body"><canvas id="aCmpSvc" role="img" aria-label="서비스별 비교 스택바"></canvas></div>
+    </section>`;
+
+  // 일별 라인 (Day 1..N 정규화)
+  const maxLen = Math.max(packA.daily.length, packB.daily.length);
+  if (maxLen) {
+    mkChart(document.getElementById('aCmp'),'line',{
+      labels: Array.from({length:maxLen},(_,i)=>`${i+1}일차`),
+      datasets:[
+        { label:`A기간 (${periodA})`, data:packA.daily.map(r=>Number(r.count)||0), borderColor:'var(--chart-1)', backgroundColor:'rgba(37,99,235,.1)', tension:.3, fill:false },
+        { label:`B기간 (${periodB})`, data:packB.daily.map(r=>Number(r.count)||0), borderColor:'var(--chart-5)', tension:.3, fill:false, borderDash:[6,4] }
+      ]
+    });
+  } else {
+    document.getElementById('aCmp').closest('.dc-chart-wrapper').innerHTML = `<header><h2>일별 활동량 비교</h2></header>` + tplEmpty();
+  }
+
+  // 서비스별 스택바 (A vs B): 서비스 라벨 merge
+  const _svcKey = r => pickLabel(r, ['service_label','service','source_service','service_key','service_name'], '(미분류)');
+  const svcLabels = Array.from(new Set([
+    ...packA.svc.map(_svcKey),
+    ...packB.svc.map(_svcKey)
+  ]));
+  if (svcLabels.length) {
+    const mapA = Object.fromEntries(packA.svc.map(r=>[_svcKey(r), Number(r.count)||0]));
+    const mapB = Object.fromEntries(packB.svc.map(r=>[_svcKey(r), Number(r.count)||0]));
+    mkChart(document.getElementById('aCmpSvc'),'bar',{
+      labels: svcLabels,
+      datasets:[
+        { label:`A기간 (${periodA})`, data: svcLabels.map(s=>mapA[s]||0), backgroundColor:'var(--chart-1)' },
+        { label:`B기간 (${periodB})`, data: svcLabels.map(s=>mapB[s]||0), backgroundColor:'var(--chart-5)' }
+      ]
+    }, { scales:{ x:{ stacked:false }, y:{ stacked:false } } });
+  } else {
+    document.getElementById('aCmpSvc').closest('.dc-chart-wrapper').innerHTML = `<header><h2>서비스별 비교</h2></header>` + tplEmpty();
+  }
 };
 
 VIEWS['a-quality'] = async function(root){
-  root.innerHTML = tplLoading(1);
-  const cov = await apiGet('/api/lrs/dataset-coverage');
+  root.innerHTML = tplLoading(2);
+  const [cov, svc, ach] = await Promise.all([
+    apiGet('/api/lrs/dataset-coverage'),
+    apiGet('/api/lrs/stats/by-service'),
+    apiGet('/api/lrs/stats/by-achievement')
+  ]);
   const d = (cov && (cov.data||cov)) || {};
+  const missAch = Number(d.missing_achievement_rate||0);
+  const missDur = Number(d.missing_duration_rate||0);
+  const missSub = Number(d.missing_subject_rate||0);
+  const missSes = Number(d.missing_session_rate||0);
+  const perService = Array.isArray(d.per_service) ? d.per_service : null;
+  const srows = (svc && (svc.stats||svc.data)) || [];
+  const achRows = (ach && (ach.stats||ach.data)) || [];
+
+  function tone(rate){ return rate>20 ? 'danger' : rate>10 ? 'warning' : 'success'; }
+
   root.innerHTML = `
     <div class="dc-kpi-grid">
-      ${kpiCard('로그 총 건수',    (d.total_logs||0).toLocaleString(), '건', {dir:'flat',text:''}, 'primary')}
-      ${kpiCard('achievement_code 결측률', (d.missing_achievement_rate||0), '%', {dir:(d.missing_achievement_rate||0)>20?'down':'up', text:'낮을수록 좋음'}, (d.missing_achievement_rate||0)>20?'danger':'success')}
-      ${kpiCard('duration 결측률', (d.missing_duration_rate||0), '%', {dir:(d.missing_duration_rate||0)>20?'down':'up', text:''}, (d.missing_duration_rate||0)>20?'warning':'success')}
-      ${kpiCard('최근 수집',       d.last_synced||'-', '',  {dir:'flat', text:''}, 'primary')}
+      ${kpiCard('로그 총 건수', (d.total_logs||0).toLocaleString(), '건', {dir:'flat',text:''}, 'primary')}
+      ${kpiCard('성취기준 결측률', missAch.toFixed(1), '%', {dir:missAch>20?'down':'up', text:'낮을수록 좋음'}, tone(missAch))}
+      ${kpiCard('학습시간 결측률', missDur.toFixed(1), '%', {dir:missDur>20?'down':'up', text:''}, tone(missDur))}
+      ${kpiCard('최근 동기화', d.last_synced||'-', '', {dir:'flat',text:''}, 'primary')}
     </div>
-    <section class="dc-chart-wrapper"><header><h2>데이터 품질 노트</h2></header>
+    <div class="dc-kpi-grid">
+      ${kpiCard('교과 결측률', missSub.toFixed(1), '%', {dir:missSub>20?'down':'up', text:d.missing_subject_rate==null?'제공 안됨':''}, tone(missSub))}
+      ${kpiCard('세션 결측률', missSes.toFixed(1), '%', {dir:missSes>20?'down':'up', text:d.missing_session_rate==null?'제공 안됨':''}, tone(missSes))}
+      ${kpiCard('서비스 수', srows.length, '종', {dir:'flat',text:''}, 'primary')}
+      ${kpiCard('성취 매핑 수', achRows.length, '개', {dir:'flat',text:''}, 'primary')}
+    </div>
+
+    <section class="dc-chart-wrapper">
+      <header>
+        <h2>서비스별 결측률</h2>
+        <div class="subtitle">${perService ? '서비스별 상세 결측 집계' : '서비스별 집계 기반 추정 (로그 수만 표기)'}</div>
+      </header>
+      <div id="aQSvcTable"></div>
+    </section>
+
+    <section class="dc-chart-wrapper">
+      <header>
+        <h2>성취기준 미매핑 샘플</h2>
+        <div class="subtitle">성취기준 코드가 비어 있는 집계 행</div>
+      </header>
+      <div id="aQAchTable"></div>
+    </section>
+
+    <section class="dc-chart-wrapper">
+      <header><h2>집계 재빌드</h2><div class="subtitle">원시 로그 → 일별/서비스별/학급별 집계 테이블 재계산</div></header>
       <p style="color:var(--gray-600);font-size:var(--fs-sm);line-height:1.7;">
-      Phase 2에서 <code>duration_sec</code> 컬럼을 신설했습니다. 기존 <code>result_duration</code>만 채워진 로그는 자동 fallback 됩니다.
-      achievement_code 결측률이 20% 이상이면 서비스 로거 풍부화(T-C)를 확인하세요.</p></section>`;
+        결측률이 개선되지 않거나 일별 집계가 어긋날 때 실행하세요. 서버 부하가 있을 수 있습니다.
+      </p>
+      <button id="btnRebuildAgg" type="button" class="dc-badge dc-badge--primary"
+        style="padding:10px 18px;border:0;cursor:pointer;font-size:var(--fs-body);">
+        <i class="fas fa-rotate"></i> 집계 재빌드 실행
+      </button>
+      <div id="aQRebuildMsg" style="margin-top:var(--space-3);font-size:var(--fs-sm);color:var(--gray-600);"></div>
+    </section>
+
+    <section class="dc-chart-wrapper">
+      <header><h2>데이터 품질 노트</h2></header>
+      <p style="color:var(--gray-600);font-size:var(--fs-sm);line-height:1.7;">
+        2단계에서 학습시간(<code>duration_sec</code>) 컬럼을 신설했습니다. 기존 <code>result_duration</code>만 채워진 로그는 자동으로 대체 처리됩니다.
+        성취기준 결측률이 20% 이상이면 서비스 로거 풍부화(T-C)를 확인하세요.
+      </p>
+    </section>`;
+
+  // 서비스별 결측률 테이블
+  const qSvcBox = document.getElementById('aQSvcTable');
+  if (perService && perService.length){
+    renderDataTable(qSvcBox, {
+      columns: [
+        { key:'service', label:'서비스', format:(_,r)=>escapeHtml(pickLabel(r, ['service_label','service','source_service','service_key','service_name'], '(미분류)')) },
+        { key:'total',   label:'로그', align:'right', format:v=>escapeHtml((Number(v)||0).toLocaleString()) },
+        { key:'missing_achievement', label:'성취기준 결측', align:'right',
+          format:(v,r)=>{ const t=Number(r.total)||0; const m=Number(v)||0; const rate=t?(m/t*100):0; return escapeHtml(m.toLocaleString()+' ('+rate.toFixed(1)+'%)'); } },
+        { key:'missing_duration', label:'시간 결측', align:'right',
+          format:(v,r)=>{ const t=Number(r.total)||0; const m=Number(v)||0; const rate=t?(m/t*100):0; return escapeHtml(m.toLocaleString()+' ('+rate.toFixed(1)+'%)'); } }
+      ],
+      rows: perService, initialSort:'total', initialDir:'desc'
+    });
+  } else if (srows.length) {
+    renderDataTable(qSvcBox, {
+      columns: [
+        { key:'service', label:'서비스', format:(_,r)=>escapeHtml(pickLabel(r, ['service_label','service','source_service','service_key','service_name'], '(미분류)')) },
+        { key:'count',   label:'로그', align:'right', format:v=>escapeHtml((Number(v)||0).toLocaleString()) },
+        { key:'avg_score', label:'평균점수', align:'right', format:v=>escapeHtml(v==null?'-':Number(v).toFixed(1)) },
+        { key:'_note',   label:'비고', format:()=>'<span style="color:var(--gray-500);font-size:var(--fs-sm);">per_service 결측 데이터 미제공</span>' }
+      ],
+      rows: srows, initialSort:'count', initialDir:'desc'
+    });
+  } else {
+    qSvcBox.innerHTML = tplEmpty();
+  }
+
+  // 성취코드 미매핑 샘플 (null/empty)
+  const missingAch = achRows.filter(r => !r.achievement_code || String(r.achievement_code).trim() === '');
+  const qAchBox = document.getElementById('aQAchTable');
+  if (missingAch.length){
+    renderDataTable(qAchBox, {
+      columns: [
+        { key:'achievement_code', label:'코드', format:v=>escapeHtml(v||'(빈 값)') },
+        { key:'count',            label:'건수', align:'right', format:v=>escapeHtml((Number(v)||0).toLocaleString()) },
+        { key:'avg_score',        label:'평균점수', align:'right', format:v=>escapeHtml(v==null?'-':Number(v).toFixed(1)) }
+      ],
+      rows: missingAch, initialSort:'count', initialDir:'desc'
+    });
+  } else {
+    qAchBox.innerHTML = `<p style="color:var(--gray-600);font-size:var(--fs-sm);padding:12px 0;">모든 성취기준이 매핑되어 있습니다.</p>`;
+  }
+
+  // 집계 재빌드 버튼
+  const btn = document.getElementById('btnRebuildAgg');
+  const msg = document.getElementById('aQRebuildMsg');
+  if (btn){
+    btn.addEventListener('click', async () => {
+      if (!confirm('집계 테이블을 재빌드하시겠습니까? 대용량 로그의 경우 수 분 소요될 수 있습니다.')) return;
+      btn.disabled = true;
+      msg.textContent = '재빌드 진행 중…';
+      msg.style.color = 'var(--gray-600)';
+      try {
+        const r = await fetch('/api/lrs/rebuild-aggregates', { method:'POST', credentials:'include' });
+        if (!r.ok) throw new Error('HTTP '+r.status);
+        const j = await r.json().catch(()=>({}));
+        msg.textContent = '재빌드 완료' + (j && j.duration_ms ? ' (' + j.duration_ms + 'ms)' : '');
+        msg.style.color = 'var(--lrs-success)';
+      } catch(e){
+        msg.textContent = '재빌드 실패: ' + e.message;
+        msg.style.color = 'var(--lrs-danger)';
+      } finally {
+        btn.disabled = false;
+      }
+    });
+  }
 };
 
 VIEWS['a-export'] = async function(root){
+  root.innerHTML = tplLoading(1);
+  const [cov, daily] = await Promise.all([
+    apiGet('/api/lrs/dataset-coverage'),
+    apiGet('/api/lrs/stats/daily')
+  ]);
+  const d = (cov && (cov.data||cov)) || {};
+  const drows = (daily && daily.data) || [];
+  const dailySum = drows.reduce((s,r)=>s+(Number(r.count)||0),0);
+  const totalLogs = Number(d.total_logs||0) || dailySum;
+
+  // 필터 요약
+  const periodLabel = state.period === 'custom'
+    ? ((state.from||'?') + ' ~ ' + (state.to||'?'))
+    : state.period;
+
+  // LocalStorage 이력
+  let hist = [];
+  try { hist = JSON.parse(localStorage.getItem('lrs_export_hist')||'[]'); } catch(_){}
+
   root.innerHTML = `
     <section class="dc-chart-wrapper">
-      <header><h2>데이터 내보내기</h2><div class="subtitle">현재 필터 적용 범위로 즉시 내보내기</div></header>
-      <div style="display:flex;gap:var(--space-3);flex-wrap:wrap;" id="exportBtns">
-        <button type="button" class="dc-badge dc-badge--primary" style="padding:10px 18px;border:0;cursor:pointer;font-size:var(--fs-body);"
-                data-export="csv"><i class="fas fa-file-csv"></i> CSV 내보내기</button>
-        <button type="button" class="dc-badge dc-badge--success" style="padding:10px 18px;border:0;cursor:pointer;font-size:var(--fs-body);"
-                data-export="xlsx"><i class="fas fa-file-excel"></i> Excel 내보내기</button>
+      <header><h2>데이터 내보내기</h2><div class="subtitle">상단 기간 필터가 export API에 전달됩니다</div></header>
+
+      <h3 style="font-size:var(--fs-h3);margin:var(--space-4) 0 var(--space-2);">1. 현재 필터</h3>
+      <div class="dc-kpi-grid" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));">
+        ${kpiCard('기간', periodLabel, '', {dir:'flat',text:''}, 'primary')}
+        ${kpiCard('역할', state.role, '', {dir:'flat',text:''}, 'primary')}
+        ${kpiCard('현재 뷰', state.view||'-', '', {dir:'flat',text:''}, 'primary')}
+        ${kpiCard('총 로그(추정)', totalLogs.toLocaleString(), '건', {dir:'flat',text:'전체'}, 'success')}
       </div>
-      <p style="margin-top:var(--space-4);color:var(--gray-500);font-size:var(--fs-sm);">
-        /api/lrs/export?format=csv|xlsx 엔드포인트를 호출합니다. 기간 필터는 상단 공통 필터를 따릅니다.</p>
+
+      <h3 style="font-size:var(--fs-h3);margin:var(--space-4) 0 var(--space-2);">2. 내보낼 범위</h3>
+      <div id="exScope" role="radiogroup" style="display:flex;flex-wrap:wrap;gap:var(--space-2);">
+        <label class="chip" style="cursor:pointer;"><input type="radio" name="exScope" value="all" checked style="margin-right:6px;">전체 원시 로그</label>
+        <label class="chip" style="cursor:pointer;"><input type="radio" name="exScope" value="daily" style="margin-right:6px;">일별 집계</label>
+        <label class="chip" style="cursor:pointer;"><input type="radio" name="exScope" value="service" style="margin-right:6px;">서비스별 집계</label>
+        <label class="chip" style="cursor:pointer;"><input type="radio" name="exScope" value="class" style="margin-right:6px;">학급별 집계</label>
+        <label class="chip" style="cursor:pointer;"><input type="radio" name="exScope" value="subject" style="margin-right:6px;">교과별 집계</label>
+      </div>
+
+      <h3 style="font-size:var(--fs-h3);margin:var(--space-4) 0 var(--space-2);">3. 형식</h3>
+      <div id="exFormat" role="radiogroup" style="display:flex;gap:var(--space-2);">
+        <label class="chip" style="cursor:pointer;"><input type="radio" name="exFormat" value="csv" checked style="margin-right:6px;">CSV</label>
+        <label class="chip" style="cursor:pointer;"><input type="radio" name="exFormat" value="xlsx" style="margin-right:6px;">Excel(xlsx)</label>
+      </div>
+
+      <h3 style="font-size:var(--fs-h3);margin:var(--space-4) 0 var(--space-2);">4. 예상 행 수</h3>
+      <p id="exEstimate" style="color:var(--gray-700);font-size:var(--fs-body);margin:0 0 var(--space-3);">-</p>
+
+      <div style="display:flex;gap:var(--space-3);flex-wrap:wrap;margin-top:var(--space-4);">
+        <button id="btnExportDo" type="button" class="dc-badge dc-badge--primary"
+                style="padding:10px 22px;border:0;cursor:pointer;font-size:var(--fs-body);">
+          <i class="fas fa-download"></i> 다운로드
+        </button>
+        <button id="btnExportCsvQuick" type="button" class="dc-badge dc-badge--success"
+                style="padding:10px 18px;border:0;cursor:pointer;font-size:var(--fs-body);">
+          <i class="fas fa-file-csv"></i> 전체 CSV 즉시
+        </button>
+        <button id="btnExportXlsxQuick" type="button" class="dc-badge dc-badge--warning"
+                style="padding:10px 18px;border:0;cursor:pointer;font-size:var(--fs-body);">
+          <i class="fas fa-file-excel"></i> 전체 Excel 즉시
+        </button>
+      </div>
+      <p style="margin-top:var(--space-3);color:var(--gray-500);font-size:var(--fs-sm);">
+        엔드포인트: <code>/api/lrs/export?format=csv|xlsx&amp;scope=...</code> · 기간 파라미터 자동 부착
+      </p>
+    </section>
+
+    <section class="dc-chart-wrapper">
+      <header><h2>최근 다운로드 이력</h2><div class="subtitle">브라우저 LocalStorage · 최대 10건</div></header>
+      <div id="exHist"></div>
     </section>`;
-  const box = document.getElementById('exportBtns');
-  if (box){
-    box.addEventListener('click', (ev) => {
-      const btn = ev.target.closest('button[data-export]');
-      if (btn) LRS.exportData(btn.getAttribute('data-export'));
+
+  function currentScope(){
+    const el = root.querySelector('input[name="exScope"]:checked');
+    return el ? el.value : 'all';
+  }
+  function currentFormat(){
+    const el = root.querySelector('input[name="exFormat"]:checked');
+    return el ? el.value : 'csv';
+  }
+  function updateEstimate(){
+    const sc = currentScope();
+    const est = document.getElementById('exEstimate');
+    if (!est) return;
+    let n = 0, label = '';
+    if (sc === 'all')      { n = totalLogs; label = '원시 로그'; }
+    else if (sc === 'daily')   { n = drows.length; label = '일별 집계 행'; }
+    else if (sc === 'service') { n = 10; label = '서비스 집계 행(대략)'; }
+    else if (sc === 'class')   { n = 30; label = '학급 집계 행(대략)'; }
+    else if (sc === 'subject') { n = 20; label = '교과 집계 행(대략)'; }
+    est.innerHTML = `약 <strong>${n.toLocaleString()}</strong>행 (${escapeHtml(label)}) · 형식 <strong>${escapeHtml(currentFormat().toUpperCase())}</strong>`;
+  }
+  root.querySelectorAll('input[name="exScope"],input[name="exFormat"]').forEach(el => {
+    el.addEventListener('change', updateEstimate);
+  });
+  updateEstimate();
+
+  function renderHist(){
+    const box = document.getElementById('exHist');
+    if (!hist.length){ box.innerHTML = tplEmpty('다운로드 이력이 없습니다'); return; }
+    renderDataTable(box, {
+      columns: [
+        { key:'at',     label:'시각', format:v=>escapeHtml(new Date(v).toLocaleString('ko-KR')) },
+        { key:'scope',  label:'범위' },
+        { key:'fmt',    label:'형식', format:v=>escapeHtml(String(v).toUpperCase()) },
+        { key:'period', label:'기간' }
+      ],
+      rows: hist, initialSort:'at', initialDir:'desc'
     });
   }
+  renderHist();
+
+  document.getElementById('btnExportDo').addEventListener('click', () => {
+    LRS.exportData(currentFormat(), currentScope());
+    try { hist = JSON.parse(localStorage.getItem('lrs_export_hist')||'[]'); } catch(_){ hist = []; }
+    renderHist();
+  });
+  document.getElementById('btnExportCsvQuick').addEventListener('click', () => {
+    LRS.exportData('csv', 'all');
+    try { hist = JSON.parse(localStorage.getItem('lrs_export_hist')||'[]'); } catch(_){ hist = []; }
+    renderHist();
+  });
+  document.getElementById('btnExportXlsxQuick').addEventListener('click', () => {
+    LRS.exportData('xlsx', 'all');
+    try { hist = JSON.parse(localStorage.getItem('lrs_export_hist')||'[]'); } catch(_){ hist = []; }
+    renderHist();
+  });
 };
 
 /* =====================================================================
@@ -825,6 +1697,9 @@ function setRole(role){
                  : ['student'];
   if (!allowed.includes(role)) role = allowed[allowed.length-1];
   state.role = role;
+  state.scope = computeScope();
+  // 이전 역할의 view id가 남아 있으면 새 역할 랜딩 뷰 전환 판정이 어긋나므로 리셋
+  state.view = null;
 
   document.querySelectorAll('.dc-role-switcher button').forEach(b=>{
     const r = b.dataset.role;
@@ -860,10 +1735,14 @@ async function setView(id){
   const cur = items.find(it=>it.id===id);
   document.getElementById('bcPage').textContent = cur ? cur.label : '—';
   renderSideMenu();
-  location.hash = id;
+  // hashchange 리스너 루프 방지: 현재 해시와 다를 때만 replaceState
+  if (('#'+id) !== location.hash) {
+    try { history.replaceState(null, '', '#'+id); } catch(_) { location.hash = id; }
+  }
 
   destroyCharts();
   const root = document.getElementById('viewRoot');
+  // 클릭 즉시 로딩 표시가 보이도록 프레임 양보 없이 바로 갱신
   root.innerHTML = tplLoading(3);
   try {
     const fn = VIEWS[id] || (r => { r.innerHTML = tplEmpty('준비 중인 화면입니다'); });
@@ -938,13 +1817,17 @@ const LRS = window.LRS = {
       const target = document.getElementById('drawerActivity');
       if (!target) return;
       if (!rows.length){ target.innerHTML = '<em style="color:var(--gray-500);">최근 활동 데이터가 없습니다</em>'; return; }
+      // 가능한 필드: stat_date(집계) 또는 created_at(원시 이벤트)
       renderDataTable(target, {
         columns: [
-          { key:'date', label:'일자' },
-          { key:'service', label:'서비스' },
+          { key:'date', label:'일자',
+            format:(v,row) => escapeHtml(fmtDate(row.stat_date||row.date||row.created_at||'-')) },
+          { key:'service', label:'서비스',
+            format:(_,row) => escapeHtml(pickLabel(row, ['service_label','service','source_service','service_key','service_name','activity_type'], '(미분류)')) },
           { key:'duration_min', label:'학습(분)', align:'right',
-            format:(v,row) => escapeHtml(v!=null?v:Math.round((row.total_duration||row.duration_sec||0)/60)) },
-          { key:'score', label:'점수', align:'right' }
+            format:(v,row) => escapeHtml(v!=null?v:toMinutes(row.total_duration||row.duration_sec||0)) },
+          { key:'score', label:'점수', align:'right',
+            format:(v,row) => escapeHtml(v!=null?v:(row.avg_score||'-')) }
         ],
         rows,
         initialSort:'date', initialDir:'desc'
@@ -963,7 +1846,7 @@ const LRS = window.LRS = {
       alert('학생 ID를 확인할 수 없습니다.');
       return;
     }
-    const classId = (state.me && (state.me.class_id || state.me.classId)) || '';
+    const classId = state.classId || (state.me && (state.me.class_id || state.me.classId)) || '';
     const cp = (k,v) => (v?('&'+k+'='+encodeURIComponent(v)):'');
     const classQ = classId ? ('classId='+encodeURIComponent(classId)) : '';
     const sid = encodeURIComponent(uid);
@@ -977,8 +1860,16 @@ const LRS = window.LRS = {
       console.warn('[LRS] unknown teacherAction:', kind);
     }
   },
-  exportData(fmt){
-    const qs = rangeQS({ format: fmt });
+  exportData(fmt, scope){
+    const extra = { format: fmt };
+    if (scope) extra.scope = scope;
+    const qs = rangeQS(extra);
+    // 다운로드 이력 LocalStorage 기록 (a-export 뷰에서 사용)
+    try {
+      const hist = JSON.parse(localStorage.getItem('lrs_export_hist')||'[]');
+      hist.unshift({ fmt, scope: scope||'all', at: new Date().toISOString(), period: state.period });
+      localStorage.setItem('lrs_export_hist', JSON.stringify(hist.slice(0,10)));
+    } catch(_){}
     window.location.href = '/api/lrs/export' + qs;
   }
 };
@@ -1000,7 +1891,12 @@ async function boot(){
   document.getElementById('lrsRoot').hidden = false;
 
   document.querySelectorAll('.dc-role-switcher button').forEach(b=>{
-    b.onclick = ()=> setRole(b.dataset.role);
+    b.onclick = ()=> {
+      const r = b.dataset.role;
+      if (!r) return;
+      if (state.role === r) return; // 같은 역할이면 무시
+      setRole(r);
+    };
   });
 
   bindPeriodPicker();
