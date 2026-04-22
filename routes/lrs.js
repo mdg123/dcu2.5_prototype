@@ -1217,4 +1217,325 @@ router.get('/warnings/:classId', requireAuth, (req, res) => {
 
 // 8. /api/lrs/export — 위에서 이미 format=csv|excel|xlsx|jsonld|xapi|json 지원
 
+// ─────────────────────────────────────────────────────────
+// Phase B 신규 엔드포인트: perform / custom / teacher-index / daily-snapshot
+// ─────────────────────────────────────────────────────────
+
+/** 테이블 존재 확인 헬퍼 */
+function _tableExists(name){
+  try {
+    const row = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name = ?").get(name);
+    return !!row;
+  } catch (_) { return false; }
+}
+
+// (1) GET /api/lrs/stats/perform
+router.get('/stats/perform', requireAuth, (req, res) => {
+  try {
+    const r = dateRangeWhere(req, 'created_at', 'll');
+    if (r.invalid) return sendInvalidPeriod(res, r.reason);
+    const sf = resolveScopeFilter(req, 'll');
+    const perfTypes = ['exam_complete', 'homework_submit', 'self_learn'];
+    const typePH = perfTypes.map(()=>'?').join(',');
+    const baseWhere = `WHERE ll.activity_type IN (${typePH}) ${r.where} ${sf.where}`;
+    const baseParams = [...perfTypes, ...r.params, ...sf.params];
+
+    // summary
+    const sumRow = db.prepare(`
+      SELECT
+        SUM(CASE WHEN ll.activity_type='exam_complete' THEN 1 ELSE 0 END) exam_cnt,
+        AVG(CASE WHEN ll.activity_type='exam_complete' THEN ll.result_score END) exam_avg,
+        SUM(CASE WHEN ll.activity_type='exam_complete' AND ll.result_success=1 THEN 1 ELSE 0 END) exam_ok,
+        SUM(CASE WHEN ll.activity_type='homework_submit' THEN 1 ELSE 0 END) hw_cnt,
+        SUM(CASE WHEN ll.activity_type='homework_submit' AND ll.result_success=1 THEN 1 ELSE 0 END) hw_ok,
+        SUM(CASE WHEN ll.activity_type='self_learn' THEN 1 ELSE 0 END) self_cnt,
+        AVG(CASE WHEN ll.activity_type='self_learn' THEN ll.result_score END) self_avg,
+        COUNT(*) total_acts
+      FROM learning_logs ll
+      ${baseWhere}
+    `).get(...baseParams);
+
+    const summary = {
+      examCount: sumRow.exam_cnt || 0,
+      examAvgScore: sumRow.exam_avg != null ? Math.round(sumRow.exam_avg*10)/10 : null,
+      examCompletionRate: sumRow.exam_cnt ? Math.round((sumRow.exam_ok||0)*1000/sumRow.exam_cnt)/10 : null,
+      homeworkCount: sumRow.hw_cnt || 0,
+      homeworkSubmitRate: sumRow.hw_cnt ? Math.round((sumRow.hw_ok||0)*1000/sumRow.hw_cnt)/10 : null,
+      selfLearnCount: sumRow.self_cnt || 0,
+      selfLearnAvgScore: sumRow.self_avg != null ? Math.round(sumRow.self_avg*10)/10 : null,
+      totalActs: sumRow.total_acts || 0
+    };
+
+    // byType
+    const typeLabels = { exam_complete:'평가 완료', homework_submit:'과제 제출', self_learn:'자기주도 학습' };
+    const byType = db.prepare(`
+      SELECT ll.activity_type,
+             COUNT(*) cnt,
+             AVG(ll.result_score) avg_score,
+             AVG(COALESCE(ll.duration_sec, ll.result_duration, 0)) avg_dur_sec
+      FROM learning_logs ll
+      ${baseWhere}
+      GROUP BY ll.activity_type
+    `).all(...baseParams).map(row => ({
+      activity_type: row.activity_type,
+      label: typeLabels[row.activity_type] || row.activity_type,
+      count: row.cnt || 0,
+      avgScore: row.avg_score != null ? Math.round(row.avg_score*10)/10 : null,
+      avgDurationMin: row.avg_dur_sec ? Math.round(row.avg_dur_sec/60*10)/10 : 0
+    }));
+
+    // byStudent (mine이 아닐 때만)
+    let byStudent = [];
+    if (sf.scope !== 'mine') {
+      byStudent = db.prepare(`
+        SELECT ll.user_id,
+               COALESCE(u.display_name, u.username) name,
+               SUM(CASE WHEN ll.activity_type='exam_complete' THEN 1 ELSE 0 END) exam_cnt,
+               SUM(CASE WHEN ll.activity_type='homework_submit' THEN 1 ELSE 0 END) homework_cnt,
+               SUM(CASE WHEN ll.activity_type='self_learn' THEN 1 ELSE 0 END) self_cnt,
+               COUNT(*) total_cnt,
+               AVG(ll.result_score) avg_score
+        FROM learning_logs ll
+        LEFT JOIN users u ON u.id = ll.user_id
+        ${baseWhere}
+        GROUP BY ll.user_id
+        ORDER BY total_cnt DESC
+        LIMIT 100
+      `).all(...baseParams).map(r => ({
+        user_id: r.user_id,
+        name: r.name || ('#'+r.user_id),
+        exam_cnt: r.exam_cnt || 0,
+        homework_cnt: r.homework_cnt || 0,
+        self_cnt: r.self_cnt || 0,
+        total_cnt: r.total_cnt || 0,
+        avg_score: r.avg_score != null ? Math.round(r.avg_score*10)/10 : null
+      }));
+    }
+
+    // trend
+    const trend = db.prepare(`
+      SELECT DATE(ll.created_at) date,
+             SUM(CASE WHEN ll.activity_type='exam_complete' THEN 1 ELSE 0 END) exam_cnt,
+             SUM(CASE WHEN ll.activity_type='homework_submit' THEN 1 ELSE 0 END) homework_cnt,
+             SUM(CASE WHEN ll.activity_type='self_learn' THEN 1 ELSE 0 END) self_cnt
+      FROM learning_logs ll
+      ${baseWhere}
+      GROUP BY DATE(ll.created_at)
+      ORDER BY date
+    `).all(...baseParams);
+
+    res.json({ success:true, scope: sf.scope, summary, byType, byStudent, trend });
+  } catch (err) {
+    console.error('[LRS] /stats/perform error:', err);
+    res.status(500).json({ success:false, message:'서버 오류가 발생했습니다.' });
+  }
+});
+
+// (2) GET /api/lrs/stats/custom
+router.get('/stats/custom', requireAuth, (req, res) => {
+  try {
+    const r = dateRangeWhere(req, 'created_at', 'll');
+    if (r.invalid) return sendInvalidPeriod(res, r.reason);
+    const sf = resolveScopeFilter(req, 'll');
+    const baseWhere = `WHERE ll.source_service='self-learn' ${r.where} ${sf.where}`;
+    const baseParams = [...r.params, ...sf.params];
+
+    const sumRow = db.prepare(`
+      SELECT COUNT(*) recommended,
+             SUM(CASE WHEN ll.result_success=1 THEN 1 ELSE 0 END) completed,
+             AVG(ll.result_score) avg_score,
+             COUNT(DISTINCT ll.user_id) uniq_learners
+      FROM learning_logs ll
+      ${baseWhere}
+    `).get(...baseParams);
+
+    const summary = {
+      recommendedCount: sumRow.recommended || 0,
+      completedCount: sumRow.completed || 0,
+      completionRate: sumRow.recommended ? Math.round((sumRow.completed||0)*1000/sumRow.recommended)/10 : null,
+      avgScore: sumRow.avg_score != null ? Math.round(sumRow.avg_score*10)/10 : null,
+      uniqueLearners: sumRow.uniq_learners || 0
+    };
+
+    const byDay = db.prepare(`
+      SELECT DATE(ll.created_at) date,
+             COUNT(*) recommended,
+             SUM(CASE WHEN ll.result_success=1 THEN 1 ELSE 0 END) completed
+      FROM learning_logs ll
+      ${baseWhere}
+      GROUP BY DATE(ll.created_at)
+      ORDER BY date
+    `).all(...baseParams);
+
+    const weakTargets = db.prepare(`
+      SELECT ll.achievement_code,
+             COUNT(*) attempts,
+             AVG(ll.result_score) avg_score,
+             MAX(ll.created_at) last_at
+      FROM learning_logs ll
+      ${baseWhere} AND ll.achievement_code IS NOT NULL AND ll.achievement_code != ''
+      GROUP BY ll.achievement_code
+      HAVING attempts >= 1
+      ORDER BY avg_score ASC NULLS LAST
+      LIMIT 10
+    `).all(...baseParams).map(w => ({
+      achievement_code: w.achievement_code,
+      attempts: w.attempts,
+      avg_score: w.avg_score != null ? Math.round(w.avg_score*10)/10 : null,
+      last_at: w.last_at
+    }));
+
+    res.json({ success:true, scope: sf.scope, summary, byDay, weakTargets });
+  } catch (err) {
+    console.error('[LRS] /stats/custom error:', err);
+    res.status(500).json({ success:false, message:'서버 오류가 발생했습니다.' });
+  }
+});
+
+// (3) GET /api/lrs/stats/teacher-index
+router.get('/stats/teacher-index', requireAuth, (req, res) => {
+  try {
+    const r = dateRangeWhere(req, 'created_at');
+    if (r.invalid) return sendInvalidPeriod(res, r.reason);
+    const role = req.user && req.user.role;
+    const requestedScope = String(req.query.scope || '').toLowerCase();
+    // scope 결정
+    let scope = requestedScope;
+    if (scope === 'all' && role !== 'admin') scope = 'mine';
+    if (!scope) scope = (role === 'admin') ? 'all' : 'mine';
+
+    let teacherIds = [];
+    if (scope === 'all') {
+      teacherIds = db.prepare("SELECT id FROM users WHERE role='teacher'").all().map(u => u.id);
+    } else if (scope === 'class') {
+      // class scope: 본인만 (교사 본인)
+      teacherIds = [req.user.id];
+    } else {
+      if (role === 'teacher') teacherIds = [req.user.id];
+      else teacherIds = [];
+    }
+
+    const hasContents = _tableExists('contents');
+    const hasHomeworkFeedback = _tableExists('homework_feedback');
+    const hasExams = _tableExists('exams');
+
+    const teachers = teacherIds.map(tid => {
+      const u = db.prepare('SELECT id, COALESCE(display_name, username) name FROM users WHERE id = ?').get(tid) || { id: tid, name: '#'+tid };
+      let classCount = 0;
+      try { classCount = db.prepare('SELECT COUNT(*) c FROM classes WHERE owner_id = ?').get(tid).c; } catch (_){}
+      let contentsAuthored = 0;
+      if (hasContents) {
+        try { contentsAuthored = db.prepare('SELECT COUNT(*) c FROM contents WHERE creator_id = ?').get(tid).c; } catch (_){}
+      }
+      let lessonsHeld = 0;
+      try {
+        lessonsHeld = db.prepare(`SELECT COUNT(*) c FROM learning_logs WHERE user_id = ? AND activity_type='lesson_view' ${r.where}`).get(tid, ...r.params).c;
+      } catch (_){}
+      let examsOpened = 0;
+      if (hasExams) {
+        try { examsOpened = db.prepare('SELECT COUNT(*) c FROM exams WHERE owner_id = ?').get(tid).c; } catch (_){}
+      }
+      let feedbackCount = 0;
+      if (hasHomeworkFeedback) {
+        try { feedbackCount = db.prepare('SELECT COUNT(*) c FROM homework_feedback WHERE author_id = ?').get(tid).c; } catch (_){}
+      }
+      // 가중합 지수: c*2 + l + e*2 + f, 최대값으로 정규화 (100점 만점)
+      const raw = contentsAuthored*2 + lessonsHeld + examsOpened*2 + feedbackCount;
+      return {
+        user_id: u.id, name: u.name || ('#'+u.id),
+        class_count: classCount,
+        contents_authored: contentsAuthored,
+        lessons_held: lessonsHeld,
+        exams_opened: examsOpened,
+        feedback_count: feedbackCount,
+        _raw: raw,
+        utilization_score: 0
+      };
+    });
+
+    // 정규화
+    const maxRaw = teachers.reduce((m,t)=> t._raw>m?t._raw:m, 0);
+    teachers.forEach(t => {
+      t.utilization_score = maxRaw>0 ? Math.round((t._raw/maxRaw)*100) : 0;
+      delete t._raw;
+    });
+    teachers.sort((a,b)=> b.utilization_score - a.utilization_score);
+
+    let myIndex = null;
+    if (role === 'teacher') {
+      myIndex = teachers.find(t => t.user_id === req.user.id) || null;
+      if (!myIndex) {
+        // 본인 데이터 개별 계산
+        const u = db.prepare('SELECT id, COALESCE(display_name, username) name FROM users WHERE id = ?').get(req.user.id);
+        myIndex = { user_id: req.user.id, name: u ? u.name : '나', class_count: 0,
+          contents_authored: 0, lessons_held: 0, exams_opened: 0, feedback_count: 0, utilization_score: 0 };
+      }
+    }
+
+    res.json({ success:true, scope, teachers, myIndex });
+  } catch (err) {
+    console.error('[LRS] /stats/teacher-index error:', err);
+    res.status(500).json({ success:false, message:'서버 오류가 발생했습니다.' });
+  }
+});
+
+// (4) GET /api/lrs/stats/daily-snapshot
+router.get('/stats/daily-snapshot', requireAuth, (req, res) => {
+  try {
+    const sf = resolveScopeFilter(req, 'll');
+
+    function snapshot(dateIso) {
+      const where = `WHERE DATE(ll.created_at) = ? ${sf.where}`;
+      const params = [dateIso, ...sf.params];
+      const sumRow = db.prepare(`
+        SELECT COUNT(*) total_acts,
+               COUNT(DISTINCT ll.user_id) uniq_users,
+               COALESCE(SUM(COALESCE(ll.duration_sec, ll.result_duration, 0)),0) dur_sec
+        FROM learning_logs ll ${where}
+      `).get(...params);
+      const byServiceRows = db.prepare(`
+        SELECT ll.source_service, COUNT(*) cnt
+        FROM learning_logs ll ${where}
+        GROUP BY ll.source_service
+        ORDER BY cnt DESC
+      `).all(...params);
+      const byHourRows = db.prepare(`
+        SELECT CAST(strftime('%H', ll.created_at, 'localtime') AS INTEGER) hour, COUNT(*) cnt
+        FROM learning_logs ll ${where}
+        GROUP BY hour
+      `).all(...params);
+      const hourMap = new Map(byHourRows.map(r => [r.hour, r.cnt]));
+      const byHour = [];
+      for (let h=0; h<24; h++) byHour.push({ hour: h, count: hourMap.get(h) || 0 });
+      return {
+        date: dateIso,
+        totalActs: sumRow.total_acts || 0,
+        uniqueUsers: sumRow.uniq_users || 0,
+        durationMin: Math.round((sumRow.dur_sec||0)/60),
+        byService: byServiceRows.map(row => ({
+          source_service: row.source_service,
+          count: row.cnt,
+          label: serviceLabel(row.source_service)
+        })),
+        byHour
+      };
+    }
+
+    // 오늘/어제 계산
+    const nowRow = db.prepare("SELECT DATE('now','localtime') today, DATE('now','-1 day','localtime') yesterday").get();
+    const today = snapshot(nowRow.today);
+    const yesterday = snapshot(nowRow.yesterday);
+    const delta = {
+      totalActs: today.totalActs - yesterday.totalActs,
+      uniqueUsers: today.uniqueUsers - yesterday.uniqueUsers,
+      durationMin: today.durationMin - yesterday.durationMin
+    };
+
+    res.json({ success:true, scope: sf.scope, today, yesterday, delta });
+  } catch (err) {
+    console.error('[LRS] /stats/daily-snapshot error:', err);
+    res.status(500).json({ success:false, message:'서버 오류가 발생했습니다.' });
+  }
+});
+
 module.exports = router;
