@@ -1538,4 +1538,227 @@ router.get('/stats/daily-snapshot', requireAuth, (req, res) => {
   }
 });
 
+/* =====================================================================
+ * Admin aggregate endpoints (C안 IA Phase 2)
+ * - 개인 식별 금지, 집계/분포만 반환
+ * - 데이터 부족 시 빈 배열/0 반환 (UI 측 n<10 guard가 마스킹)
+ * ===================================================================== */
+
+function _adminOnly(req, res){
+  if (!req.user || req.user.role !== 'admin') {
+    res.status(403).json({ success:false, message:'관리자 권한이 필요합니다.' });
+    return false;
+  }
+  return true;
+}
+
+// (A) GET /api/lrs/stats/teacher-index-dist — 교사 실행지수 분포
+router.get('/stats/teacher-index-dist', requireAuth, (req, res) => {
+  try {
+    if (!_adminOnly(req, res)) return;
+    const r = dateRangeWhere(req, 'created_at');
+    if (r.invalid) return sendInvalidPeriod(res, r.reason);
+    const level = String(req.query.level || '').trim();
+    const region = String(req.query.region || '').trim();
+
+    let where = "role='teacher'";
+    const params = [];
+    if (region) { where += ' AND school_name LIKE ?'; params.push('%'+region+'%'); }
+    // level 필터: school_name suffix 기반 휴리스틱 (초/중/고)
+    if (level === '초등') { where += " AND school_name LIKE '%초등%'"; }
+    else if (level === '중학') { where += " AND school_name LIKE '%중학%'"; }
+    else if (level === '고등') { where += " AND school_name LIKE '%고등%'"; }
+
+    const teacherIds = db.prepare(`SELECT id, school_name FROM users WHERE ${where}`).all(...params);
+    const hasContents = _tableExists('contents');
+    const hasExams = _tableExists('exams');
+    const hasHomeworkFeedback = _tableExists('homework_feedback');
+
+    const scores = [];
+    const byLevel = {};
+    teacherIds.forEach(u => {
+      let raw = 0;
+      try { raw += (db.prepare('SELECT COUNT(*) c FROM classes WHERE owner_id=?').get(u.id).c||0)*1; } catch(_){}
+      if (hasContents) { try { raw += (db.prepare('SELECT COUNT(*) c FROM contents WHERE creator_id=?').get(u.id).c||0)*2; } catch(_){} }
+      try { raw += (db.prepare(`SELECT COUNT(*) c FROM learning_logs WHERE user_id=? ${r.where}`).get(u.id, ...r.params).c||0); } catch(_){}
+      if (hasExams) { try { raw += (db.prepare('SELECT COUNT(*) c FROM exams WHERE owner_id=?').get(u.id).c||0)*2; } catch(_){} }
+      if (hasHomeworkFeedback) { try { raw += (db.prepare('SELECT COUNT(*) c FROM homework_feedback WHERE author_id=?').get(u.id).c||0); } catch(_){} }
+      const score = Math.min(100, raw);
+      scores.push(score);
+      const sn = u.school_name || '';
+      const lv = sn.includes('초등') ? '초등' : sn.includes('중학') ? '중학' : sn.includes('고등') ? '고등' : '미분류';
+      (byLevel[lv] = byLevel[lv] || []).push(score);
+    });
+    Object.values(byLevel).forEach(arr => arr.sort((a,b)=>a-b));
+    res.json({ success:true, n: scores.length, scores, byLevel });
+  } catch (err) {
+    console.error('[LRS] /stats/teacher-index-dist error:', err);
+    res.status(500).json({ success:false, message:'서버 오류가 발생했습니다.' });
+  }
+});
+
+// (B) GET /api/lrs/stats/school-warnings — 학교 단위 경고 집계
+router.get('/stats/school-warnings', requireAuth, (req, res) => {
+  try {
+    if (!_adminOnly(req, res)) return;
+    const r = dateRangeWhere(req, 'created_at', 'll');
+    if (r.invalid) return sendInvalidPeriod(res, r.reason);
+    // 학교별 학생 집계 + 학습로그 부족(=경고) 산정
+    const schools = db.prepare(`
+      SELECT school_name,
+             COUNT(*) students
+      FROM users
+      WHERE role='student' AND school_name IS NOT NULL AND school_name <> ''
+      GROUP BY school_name
+    `).all();
+
+    const rows = schools.map((s,i) => {
+      let activeUsers = 0;
+      try {
+        activeUsers = db.prepare(`
+          SELECT COUNT(DISTINCT ll.user_id) c
+          FROM learning_logs ll JOIN users u ON u.id=ll.user_id
+          WHERE u.school_name=? ${r.where}
+        `).get(s.school_name, ...r.params).c || 0;
+      } catch(_){}
+      const inactive = Math.max(0, s.students - activeUsers);
+      const riskRate = s.students>0 ? inactive / s.students : 0;
+      return {
+        schoolId: 'sch-'+i,
+        schoolName: s.school_name,
+        level: (s.school_name||'').includes('초등')?'초등':(s.school_name||'').includes('중학')?'중학':(s.school_name||'').includes('고등')?'고등':'미분류',
+        region: (s.school_name||'').split(' ')[0] || '미분류',
+        students: s.students,
+        warnCount: inactive,
+        riskRate: Math.round(riskRate*1000)/1000,
+        trend: 0
+      };
+    });
+    res.json({ success:true, schools: rows });
+  } catch (err) {
+    console.error('[LRS] /stats/school-warnings error:', err);
+    res.status(500).json({ success:false, message:'서버 오류가 발생했습니다.' });
+  }
+});
+
+// (C) GET /api/lrs/stats/region-drilldown — 지역/학교급/학년 드릴다운
+router.get('/stats/region-drilldown', requireAuth, (req, res) => {
+  try {
+    if (!_adminOnly(req, res)) return;
+    const r = dateRangeWhere(req, 'created_at', 'll');
+    if (r.invalid) return sendInvalidPeriod(res, r.reason);
+    const level = String(req.query.level || 'region').trim(); // region | eduoffice | school | grade
+    const parentId = String(req.query.parent || '').trim();
+
+    let groupCol = null;
+    let filterSql = "u.role='student' AND u.school_name IS NOT NULL AND u.school_name <> ''";
+    const params = [];
+    if (level === 'region') {
+      groupCol = "SUBSTR(u.school_name,1,INSTR(u.school_name||' ',' ')-1)";
+    } else if (level === 'eduoffice' || level === 'school') {
+      groupCol = 'u.school_name';
+      if (parentId) { filterSql += ' AND u.school_name LIKE ?'; params.push('%'+parentId+'%'); }
+    } else if (level === 'grade') {
+      groupCol = 'u.grade';
+      if (parentId) { filterSql += ' AND u.school_name = ?'; params.push(parentId); }
+    } else {
+      return res.json({ success:true, level, children: [] });
+    }
+
+    const rows = db.prepare(`
+      SELECT ${groupCol} id, COUNT(*) n
+      FROM users u
+      WHERE ${filterSql}
+      GROUP BY ${groupCol}
+    `).all(...params);
+
+    const children = rows.map(row => {
+      let active = 0;
+      try {
+        active = db.prepare(`
+          SELECT COUNT(DISTINCT ll.user_id) c
+          FROM learning_logs ll JOIN users u ON u.id=ll.user_id
+          WHERE ${filterSql.replace(/\?/g, '?')} AND ${groupCol}=? ${r.where}
+        `).get(...params, row.id, ...r.params).c || 0;
+      } catch(_){}
+      const inactive = Math.max(0, row.n - active);
+      return {
+        id: String(row.id||''),
+        label: String(row.id||'미분류'),
+        level: level==='region'?'eduoffice':level==='eduoffice'?'school':level==='school'?'grade':'grade',
+        n: row.n,
+        avgScore: 0,
+        riskRate: row.n>0 ? Math.round((inactive/row.n)*1000)/1000 : 0
+      };
+    });
+    res.json({ success:true, level, children });
+  } catch (err) {
+    console.error('[LRS] /stats/region-drilldown error:', err);
+    res.status(500).json({ success:false, message:'서버 오류가 발생했습니다.' });
+  }
+});
+
+// (D) GET /api/lrs/stats/period-compare — 기간 비교
+router.get('/stats/period-compare', requireAuth, (req, res) => {
+  try {
+    if (!_adminOnly(req, res)) return;
+    // 기준 기간 vs 비교 기간
+    const daysParam = Math.max(1, Math.min(365, parseInt(req.query.days || '30', 10)));
+    const level = String(req.query.level || '').trim();
+    const region = String(req.query.region || '').trim();
+
+    const today = db.prepare("SELECT DATE('now','localtime') d").get().d;
+    const curStart = db.prepare("SELECT DATE(?, ?) d").get(today, `-${daysParam-1} days`).d;
+    const prevEnd = db.prepare("SELECT DATE(?, '-1 days') d").get(curStart).d;
+    const prevStart = db.prepare("SELECT DATE(?, ?) d").get(prevEnd, `-${daysParam-1} days`).d;
+
+    function buildWhere(start, end){
+      let where = "DATE(ll.created_at)>=? AND DATE(ll.created_at)<=? AND u.role='student'";
+      const params = [start, end];
+      if (region) { where += ' AND u.school_name LIKE ?'; params.push('%'+region+'%'); }
+      if (level === '초등') where += " AND u.school_name LIKE '%초등%'";
+      else if (level === '중학') where += " AND u.school_name LIKE '%중학%'";
+      else if (level === '고등') where += " AND u.school_name LIKE '%고등%'";
+      return { where, params };
+    }
+    function metricsFor(start, end){
+      try {
+        const w = buildWhere(start, end);
+        const rows = db.prepare(`
+          SELECT u.school_name label,
+                 COUNT(DISTINCT ll.user_id) activeUsers,
+                 COUNT(*) acts
+          FROM learning_logs ll JOIN users u ON u.id=ll.user_id
+          WHERE ${w.where}
+          GROUP BY u.school_name
+          LIMIT 50
+        `).all(...w.params);
+        return rows.map(r => ({ label: r.label||'미분류', activeUsers: r.activeUsers||0, acts: r.acts||0 }));
+      } catch(_) { return []; }
+    }
+
+    const current = metricsFor(curStart, today);
+    const previous = metricsFor(prevStart, prevEnd);
+
+    // 두 기간 레이블 합집합으로 페어 구성
+    const labels = Array.from(new Set([...current.map(x=>x.label), ...previous.map(x=>x.label)]));
+    const byLabel = (arr, l) => arr.find(x=>x.label===l) || { activeUsers:0, acts:0 };
+    const pairs = labels.map(l => ({
+      label: l,
+      current: byLabel(current, l),
+      previous: byLabel(previous, l)
+    }));
+
+    res.json({
+      success:true,
+      days: daysParam,
+      period: { current: { from:curStart, to:today }, previous: { from:prevStart, to:prevEnd } },
+      pairs
+    });
+  } catch (err) {
+    console.error('[LRS] /stats/period-compare error:', err);
+    res.status(500).json({ success:false, message:'서버 오류가 발생했습니다.' });
+  }
+});
+
 module.exports = router;

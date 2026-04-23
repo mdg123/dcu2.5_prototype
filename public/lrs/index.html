@@ -11,6 +11,20 @@
   <style>
     body { font-family:var(--font-sans); background:var(--gray-50); color:var(--gray-800); margin:0; }
     .toolbar { display:flex; align-items:center; gap:var(--space-3); flex-wrap:wrap; }
+    /* ── 트리맵(간이·CSS) & 드릴다운 브레드크럼 ─────────────────── */
+    .dc-treemap { display:flex; flex-wrap:wrap; gap:2px; padding:4px; background:var(--gray-100); border-radius:6px; min-height:260px; }
+    .dc-treemap .cell { position:relative; flex-grow:1; min-width:60px; min-height:44px; border-radius:4px;
+      padding:6px 8px; color:#fff; font-size:var(--fs-cap); line-height:1.3; overflow:hidden; cursor:default;
+      display:flex; flex-direction:column; justify-content:space-between; }
+    .dc-treemap .cell b { font-size:var(--fs-sm); font-weight:600; display:block; white-space:nowrap; text-overflow:ellipsis; overflow:hidden; }
+    .dc-treemap .cell small { opacity:.85; }
+    .dc-treemap .cell.masked { background:repeating-linear-gradient(45deg,#94a3b8,#94a3b8 6px,#64748b 6px,#64748b 12px); color:#fff; }
+    .dc-drill-bc { display:flex; flex-wrap:wrap; gap:6px; align-items:center; font-size:var(--fs-body); margin:4px 0 12px; }
+    .dc-drill-bc button { background:transparent; border:1px solid var(--gray-300); border-radius:14px; padding:4px 10px; font-size:var(--fs-h3); cursor:pointer; color:var(--gray-700); }
+    .dc-drill-bc button[aria-current="page"] { background:var(--lrs-primary,#2563eb); color:#fff; border-color:var(--lrs-primary,#2563eb); }
+    .dc-drill-bc .sep { color:var(--gray-400); }
+    .dc-dumbbell-legend { display:flex; gap:12px; font-size:var(--fs-sm); color:var(--gray-600); margin:0 0 8px; }
+    .dc-dumbbell-legend .swatch { display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:4px; vertical-align:middle; }
   </style>
 </head>
 <body>
@@ -20,7 +34,7 @@
   <div id="lrsRoot" class="lrs-shell" hidden>
     <!-- 좌측 서브메뉴 (역할별 동적) -->
     <aside class="lrs-sidemenu" aria-label="LRS 서브메뉴">
-      <h3 id="roleMenuTitle">메뉴</h3>
+      <h3 id="roleMenuTitle" hidden>메뉴</h3>
       <nav id="roleMenu" role="navigation" aria-live="polite"></nav>
     </aside>
 
@@ -28,7 +42,7 @@
       <!-- 상단: 브레드크럼 + 롤스위처 + 기간 -->
       <div class="lrs-topbar">
         <div class="breadcrumb" aria-label="현재 위치">
-          LRS &rsaquo; <span id="bcRole">—</span> &rsaquo; <strong id="bcPage">—</strong>
+          LRS &rsaquo; <span id="bcRole">—</span> &rsaquo; <span id="bcMenu">—</span> &rsaquo; <strong id="bcPage">—</strong>
         </div>
         <div class="toolbar">
           <div class="dc-role-switcher" role="group" aria-label="역할 전환">
@@ -147,50 +161,117 @@ async function resolveClassId(){
   return state.classId;
 }
 
-/* ---- 메뉴 정의 (역할별) ---- */
+/* ---- C안 계층형 IA: 2차 메뉴 카테고리 정의 ---- */
+const CATEGORIES = [
+  { key:'home',       label:'홈',        roles:['student','teacher','admin'] },
+  { key:'analytics',  label:'현황 분석', roles:['student','teacher','admin'] },
+  { key:'activities', label:'학습 활동', roles:['student','teacher','admin'] },
+  { key:'operations', label:'운영',      roles:['teacher','admin'] },
+  { key:'reports',    label:'리포트',    roles:['admin'] },
+];
+const ROLE_CATEGORIES = {
+  student: ['home','analytics','activities'],
+  teacher: ['home','analytics','activities','operations'],
+  admin:   ['home','analytics','activities','operations','reports'],
+};
+
+/* ---- 메뉴 정의 (역할별, category 필드 부여) ---- */
 const MENUS = {
   student: [
-    { id:'s-home',       label:'내 학습 요약', icon:'fa-house' },
-    { id:'s-achieve',    label:'내 성취',      icon:'fa-award' },
-    { id:'s-trend',      label:'내 추이',      icon:'fa-chart-line' },
-    { id:'s-compare',    label:'비교',         icon:'fa-people-group' },
-    { id:'s-perform',    label:'학습수행',     icon:'fa-tasks' },
-    { id:'s-custom',     label:'맞춤학습',     icon:'fa-compass' },
-    { id:'s-daily',      label:'일일현황',     icon:'fa-calendar-day' },
+    { id:'s-home',       label:'홈',              icon:'fa-house',         group:'나의 학습',  category:'home' },
+    { id:'s-trend',      label:'활용 현황',       icon:'fa-chart-line',    group:'분석',       category:'analytics' },
+    { id:'s-achieve',    label:'성취 분석',       icon:'fa-award',         group:'분석',       category:'analytics' },
+    { id:'s-compare',    label:'비교',            icon:'fa-people-group',  group:'분석',       category:'analytics' },
+    { id:'s-perform',    label:'과제·평가 수행',  icon:'fa-tasks',         group:'학습 활동',  category:'activities' },
+    { id:'s-custom',     label:'맞춤학습',        icon:'fa-compass',       group:'학습 활동',  category:'activities' },
+    { id:'s-daily',      label:'일일현황',        icon:'fa-calendar-day',  group:'학습 활동',  category:'activities' },
   ],
   teacher: [
-    { id:'t-home',       label:'우리반 현황',      icon:'fa-gauge' },
-    { id:'t-drill',      label:'학생 드릴다운',    icon:'fa-user-magnifying-glass' },
-    { id:'t-warnings',   label:'경고',             icon:'fa-triangle-exclamation' },
-    { id:'t-usage',      label:'수업 활용도',      icon:'fa-chalkboard' },
-    { id:'t-subject',    label:'교과별 진단',      icon:'fa-book' },
-    { id:'t-perform',    label:'학습수행',         icon:'fa-tasks' },
-    { id:'t-custom',     label:'맞춤학습 관리',    icon:'fa-compass' },
-    { id:'t-teacher-idx',label:'교사활용지수',     icon:'fa-chalkboard-teacher' },
-    { id:'t-daily',      label:'일일현황',         icon:'fa-calendar-day' },
+    { id:'t-home',       label:'홈',              icon:'fa-gauge',                 group:'우리반',        category:'home' },
+    { id:'t-usage',      label:'활용 현황',        icon:'fa-chalkboard',            group:'분석',         category:'analytics' },
+    { id:'t-subject',    label:'성취 분석',        icon:'fa-book',                  group:'분석',         category:'analytics' },
+    { id:'t-perform',    label:'과제·평가 수행',  icon:'fa-tasks',                 group:'학습 활동',     category:'activities' },
+    { id:'t-custom',     label:'맞춤학습 관리',    icon:'fa-compass',               group:'학습 활동',     category:'activities' },
+    { id:'t-daily',      label:'일일현황',        icon:'fa-calendar-day',          group:'학습 활동',     category:'activities' },
+    { id:'t-warnings',   label:'경고',            icon:'fa-triangle-exclamation',  group:'학습 활동',     category:'activities' },
+    { id:'t-drill',      label:'학생 드릴다운',    icon:'fa-user-magnifying-glass', group:'학습 활동',     category:'activities' },
+    { id:'t-teacher-idx',label:'교사 활용지수',    icon:'fa-chalkboard-teacher',    group:'운영',         category:'operations' },
   ],
   admin: [
-    { id:'a-overview',   label:'전체 통계',    icon:'fa-globe' },
-    { id:'a-compare',    label:'기간 비교',    icon:'fa-code-compare' },
-    { id:'a-quality',    label:'데이터 품질',  icon:'fa-shield-halved' },
-    { id:'a-export',     label:'내보내기',     icon:'fa-download' },
-    { id:'a-perform',    label:'학습수행',     icon:'fa-tasks' },
-    { id:'a-custom',     label:'맞춤학습',     icon:'fa-compass' },
-    { id:'a-teacher-idx',label:'교사활용지수', icon:'fa-chalkboard-teacher' },
-    { id:'a-daily',      label:'일일현황',     icon:'fa-calendar-day' },
+    { id:'a-home',       label:'홈',              icon:'fa-globe',                 group:'홈',             category:'home' },
+    { id:'a-usage',      label:'활용 현황',        icon:'fa-chart-line',            group:'분석',           category:'analytics' },
+    { id:'a-achieve',    label:'성취 분석',        icon:'fa-award',                 group:'분석',           category:'analytics' },
+    { id:'a-overview',   label:'전체 통계',        icon:'fa-layer-group',           group:'분석',           category:'analytics' },
+    { id:'a-perform',    label:'과제·평가 수행',  icon:'fa-tasks',                 group:'학습 활동',       category:'activities' },
+    { id:'a-custom',     label:'맞춤학습',        icon:'fa-compass',               group:'학습 활동',       category:'activities' },
+    { id:'a-daily',      label:'일일현황',        icon:'fa-calendar-day',          group:'학습 활동',       category:'activities' },
+    { id:'a-warnings',   label:'학교 경고 집계',   icon:'fa-triangle-exclamation',  group:'학습 활동',       category:'activities' },
+    { id:'a-drill',      label:'지역 드릴다운',    icon:'fa-layer-group',           group:'학습 활동',       category:'activities' },
+    { id:'a-teacher-idx',label:'교사 실행지수',    icon:'fa-chalkboard-teacher',    group:'운영',           category:'operations' },
+    { id:'a-quality',    label:'데이터 품질',      icon:'fa-shield-halved',         group:'운영',           category:'operations' },
+    { id:'a-compare',    label:'기간 비교',        icon:'fa-code-compare',          group:'리포트',         category:'reports' },
+    { id:'a-export',     label:'내보내기',        icon:'fa-download',              group:'리포트',         category:'reports' },
   ]
 };
 
-/* ---- common-nav ?menu= → 역할별 실제 view id 매핑 ---- */
-const MENU_TO_VIEW = {
-  home:    { student:'s-home',    teacher:'t-home',    admin:'a-overview' },
-  usage:   { student:'s-trend',   teacher:'t-usage',   admin:'a-overview' },
-  achieve: { student:'s-achieve', teacher:'t-subject', admin:'a-quality' },
-  perform: { student:'s-perform', teacher:'t-perform', admin:'a-perform' },
-  custom:  { student:'s-custom',  teacher:'t-custom',  admin:'a-custom' },
-  teacher: { student:null,        teacher:'t-teacher-idx', admin:'a-teacher-idx' },
-  daily:   { student:'s-daily',   teacher:'t-daily',   admin:'a-daily' },
+/* ---- 카테고리 → 기본 뷰 (role별 첫 항목) ---- */
+function defaultViewForCategory(role, cat){
+  const items = MENUS[role] || [];
+  const found = items.find(it => it.category === cat);
+  return found ? found.id : null;
+}
+
+/* ---- 뷰 → 카테고리 ---- */
+function categoryForView(role, viewId){
+  const items = MENUS[role] || [];
+  const found = items.find(it => it.id === viewId);
+  return found ? found.category : null;
+}
+
+/* ---- 상단 2차메뉴 라벨 (브레드크럼 & 배너용) ---- */
+const MENU_LABELS = {
+  home:'홈', analytics:'현황 분석', activities:'학습 활동', operations:'운영', reports:'리포트'
 };
+
+/* ---- common-nav ?menu=<category> → 역할별 카테고리 기본 뷰 매핑 ---- */
+const MENU_TO_VIEW = {
+  home:       { student:'s-home',    teacher:'t-home',    admin:'a-home' },
+  analytics:  { student:'s-trend',   teacher:'t-usage',   admin:'a-usage' },
+  activities: { student:'s-perform', teacher:'t-perform', admin:'a-perform' },
+  operations: { student:null,        teacher:'t-teacher-idx', admin:'a-teacher-idx' },
+  reports:    { student:null,        teacher:null,        admin:'a-compare' },
+};
+
+/* ---- 레거시 URL 호환: 구 뷰 키 또는 뷰 id → 카테고리 ---- */
+const LEGACY_MENU_TO_CATEGORY = {
+  usage:'analytics', achieve:'analytics', perform:'activities', custom:'activities',
+  daily:'activities', teacher:'operations', quality:'operations',
+  // 구 뷰 id도 수용
+  's-home':'home','s-trend':'analytics','s-achieve':'analytics','s-compare':'analytics',
+  's-perform':'activities','s-custom':'activities','s-daily':'activities',
+  't-home':'home','t-usage':'analytics','t-subject':'analytics',
+  't-perform':'activities','t-custom':'activities','t-daily':'activities',
+  't-warnings':'activities','t-drill':'activities','t-teacher-idx':'operations',
+  'a-home':'home','a-usage':'analytics','a-achieve':'analytics','a-overview':'analytics',
+  'a-perform':'activities','a-custom':'activities','a-daily':'activities',
+  'a-warnings':'activities','a-drill':'activities',
+  'a-teacher-idx':'operations','a-quality':'operations',
+  'a-compare':'reports','a-export':'reports',
+};
+
+/* ---- view id → ?menu= 역매핑 (카테고리 기반) ---- */
+function viewToMenu(viewId){
+  // 1순위: MENUS에서 해당 view의 category 사용
+  const cat = categoryForView(state.role, viewId);
+  if (cat) return cat;
+  // 2순위: 다른 역할의 MENUS 탐색 (역할 스위칭 중간 상태 방어)
+  for (const role of Object.keys(MENUS)){
+    const found = MENUS[role].find(it => it.id === viewId);
+    if (found) return found.category;
+  }
+  // 3순위: 레거시 매핑
+  return LEGACY_MENU_TO_CATEGORY[viewId] || null;
+}
 
 /* ---- API 헬퍼 ---- */
 function rangeQS(extra, path){
@@ -285,6 +366,9 @@ function pickLabel(row, keys, fallback){
   return fallback || '(미분류)';
 }
 
+/* ---- Chart.js 공통 폰트 크기 (토큰 --fs-sm = 12px와 정합) ---- */
+const LRS_CHART_FONT_SIZE = 12;
+
 /* ---- 도넛 차트용 범례 옵션 (라벨 + 값 병기) ---- */
 function donutLegendOpts(unit){
   const u = unit || '건';
@@ -293,7 +377,7 @@ function donutLegendOpts(unit){
       legend: {
         position: 'right',
         labels: {
-          font: { size: 12 }, padding: 12, boxWidth: 14, boxHeight: 14,
+          font: { size: LRS_CHART_FONT_SIZE }, padding: 12, boxWidth: 14, boxHeight: 14,
           generateLabels: (chart) => {
             const data = chart.data;
             const ds = (data.datasets && data.datasets[0]) || {};
@@ -315,7 +399,7 @@ function mkChart(canvas, type, data, opts){
   _resolveDatasetColors(data);
   const base = {
     responsive:true, maintainAspectRatio:false,
-    plugins:{ legend:{ position:'bottom', labels:{ font:{size:12}, usePointStyle:true, boxWidth:14, padding:10 } } },
+    plugins:{ legend:{ position:'bottom', labels:{ font:{size:LRS_CHART_FONT_SIZE}, usePointStyle:true, boxWidth:14, padding:10 } } },
     animation:{ duration:600, easing:'easeOutCubic' },
   };
   const chart = new Chart(canvas, { type, data, options: Object.assign(base, opts||{}) });
@@ -780,39 +864,510 @@ VIEWS['t-teacher-idx'] = async function(root){
   });
 };
 
-/* ======== a-teacher-idx ======== */
+/* =====================================================================
+ * 관리자 분석 헬퍼 (집계·분포 전용, 개인식별 금지)
+ * ===================================================================== */
+// URL test-hook: ?aIdxN=1234 등으로 게이트 경계값 수동 주입
+function _adminTestHook(key){
+  try { const v = new URLSearchParams(location.search).get(key); return v==null? null : v; } catch(_){ return null; }
+}
+
+// 최소표본 가드: n<threshold → 차단 패널 렌더하고 false 반환
+function _minSampleGuard(root, n, threshold, label){
+  if (Number(n) >= Number(threshold)) return true;
+  root.innerHTML = `<div class="dc-state-panel" role="status" style="border-left:4px solid #64748b;background:#f1f5f9;">
+    <i class="fas fa-lock" aria-hidden="true" style="color:#64748b;">🔒</i>
+    <p><strong>표본 부족 — 개인 식별 방지</strong></p>
+    <p style="font-size:var(--fs-sm);color:var(--gray-600);line-height:1.6;">
+      ${escapeHtml(label||'선택한 범위')}의 표본 수가 ${n}건으로 최소 기준(${threshold}) 미만입니다.
+      개인이 식별될 수 있어 결과를 표시하지 않습니다. 기간이나 범위를 더 넓게 선택하세요.
+    </p>
+  </div>`;
+  return false;
+}
+
+// 행 단위 셀 마스킹: n<threshold 행의 민감 컬럼을 '***'로 치환 (원본 n/비율만 유지)
+function _cellSuppress(rows, opts){
+  opts = opts || {};
+  const nKey = opts.nKey || 'n';
+  const threshold = opts.threshold || 5;
+  const maskKeys = opts.maskKeys || [];
+  return rows.map(r => {
+    if (Number(r[nKey]) < threshold) {
+      const out = Object.assign({}, r, { _masked: true });
+      maskKeys.forEach(k => { out[k] = '***'; });
+      return out;
+    }
+    return r;
+  });
+}
+
+// 퍼센타일 (0-100)
+function _percentile(sorted, p){
+  if (!sorted || !sorted.length) return 0;
+  const idx = (sorted.length - 1) * (p/100);
+  const lo = Math.floor(idx), hi = Math.ceil(idx);
+  if (lo === hi) return sorted[lo];
+  return sorted[lo] + (sorted[hi]-sorted[lo]) * (idx-lo);
+}
+
+// 시드드 PRNG (deterministic mock)
+function _mulberry32(seed){
+  return function(){
+    let t = seed += 0x6D2B79F5;
+    t = Math.imul(t ^ (t>>>15), t | 1);
+    t ^= t + Math.imul(t ^ (t>>>7), t | 61);
+    return ((t ^ (t>>>14)) >>> 0) / 4294967296;
+  };
+}
+
+// 정규분포 근사 (Box-Muller)
+function _gaussian(rng, mean, sd){
+  const u = Math.max(1e-9, rng()), v = Math.max(1e-9, rng());
+  return mean + sd * Math.sqrt(-2*Math.log(u)) * Math.cos(2*Math.PI*v);
+}
+
+/* ---- 충북 스케일 상수 ---- */
+const CB_REGIONS = ['청주교육지원청','충주교육지원청','제천교육지원청','보은교육지원청','옥천교육지원청','영동교육지원청','증평교육지원청','진천교육지원청','괴산교육지원청','음성교육지원청','단양교육지원청'];
+const CB_SCHOOL_LEVELS = ['초등학교','중학교','고등학교'];
+
+/* ---- Mock 교사 분포 (충북 ≈ 11,000명) ---- */
+// Phase 2: /api/stats/teacher-index-dist?level=&region=&period= 연결 예정
+function _mockTeacherIdxDist(filters){
+  const n = Number(_adminTestHook('aIdxN')) || 11042;
+  const rng = _mulberry32(20260422 + (filters.level==='초등학교'?1:filters.level==='중학교'?2:filters.level==='고등학교'?3:0));
+  const scores = [];
+  for (let i=0;i<n;i++){
+    let v = _gaussian(rng, 62, 14);
+    if (v<0) v=0; if (v>100) v=100;
+    scores.push(Math.round(v*10)/10);
+  }
+  scores.sort((a,b)=>a-b);
+  // 학교급별 교사분포
+  const byLevel = {};
+  CB_SCHOOL_LEVELS.forEach((lv,idx)=>{
+    const cnt = Math.round(n * [0.55,0.28,0.17][idx]);
+    const arr = [];
+    const rng2 = _mulberry32(99 + idx*17);
+    for (let i=0;i<cnt;i++){
+      let v = _gaussian(rng2, 60+idx*3, 13);
+      if (v<0) v=0; if (v>100) v=100;
+      arr.push(v);
+    }
+    arr.sort((a,b)=>a-b);
+    byLevel[lv] = arr;
+  });
+  return { n, scores, byLevel };
+}
+
+/* ---- Mock 학교별 경고 집계 (충북 ≈ 480개교) ---- */
+// Phase 2: /api/stats/school-warnings?period=&region= 연결 예정
+function _mockSchoolWarnings(){
+  const rng = _mulberry32(7);
+  const schools = [];
+  const totalSchools = 478;
+  for (let i=0;i<totalSchools;i++){
+    const region = CB_REGIONS[Math.floor(rng()*CB_REGIONS.length)];
+    const level = CB_SCHOOL_LEVELS[Math.floor(rng()*CB_SCHOOL_LEVELS.length)];
+    // 학생수: 소규모~대규모 skewed
+    let students = Math.round(40 + Math.pow(rng(), 2.2) * 1200);
+    // 마스킹 대상 비율 ~10% : students<10 상태로 몇 개
+    if (rng() < 0.08) students = 3 + Math.floor(rng()*2); // <5 학생
+    // 위험률
+    const base = 0.06 + rng()*0.18;
+    const warn = Math.round(students * base);
+    schools.push({
+      schoolId: 'S'+String(1000+i),
+      schoolName: `${['남','북','동','서','중앙'][i%5]}${['초','중','고'][CB_SCHOOL_LEVELS.indexOf(level)]}`+`${i+1}`,
+      region, level, students,
+      warnCount: warn, riskRate: students>0? warn/students : 0,
+      trend: (rng()-0.5)*0.04
+    });
+  }
+  // 마스킹 주입
+  const maskForce = Number(_adminTestHook('aWarnMaskCount'));
+  if (!isNaN(maskForce) && maskForce>0){
+    for (let i=0;i<Math.min(maskForce, schools.length);i++) schools[i].students = 3;
+  }
+  return schools;
+}
+
+/* =====================================================================
+ * A. a-teacher-idx — 교사 실행지수 분포 (개인 랭킹 제거)
+ * ===================================================================== */
 VIEWS['a-teacher-idx'] = async function(root){
   root.innerHTML = tplLoading(3);
-  const d = await apiGet('/api/lrs/stats/teacher-index');
-  if (!d || !d.success) { root.innerHTML = tplEmpty('교사활용지수 데이터를 불러오지 못했습니다'); return; }
-  const teachers = d.teachers || [];
-  if (!teachers.length) { root.innerHTML = tplEmpty('교사 데이터가 없습니다'); return; }
-  const top5 = teachers.slice(0,5);
-  root.innerHTML = `
+
+  // 필터 상태 보관
+  state._aIdxLevel  = state._aIdxLevel  || '';
+  state._aIdxRegion = state._aIdxRegion || '';
+
+  // 실 API 우선, n<10이면 mock fallback (프로토타입 단계 데모용)
+  let dist = null;
+  try {
+    const qs = new URLSearchParams();
+    if (state._aIdxLevel) qs.set('level', state._aIdxLevel);
+    if (state._aIdxRegion) qs.set('region', state._aIdxRegion);
+    const r = await fetch('/api/lrs/stats/teacher-index-dist?' + qs.toString(), { credentials:'include' });
+    if (r.ok) {
+      const d = await r.json();
+      if (d && d.success && d.n >= 10) dist = { n:d.n, scores:d.scores, byLevel:d.byLevel };
+    }
+  } catch(_){}
+  if (!dist) dist = _mockTeacherIdxDist({ level: state._aIdxLevel, region: state._aIdxRegion });
+  const n = dist.n;
+
+  // 필터 UI(셀렉트)
+  const filterBar = `
+    <section class="dc-filter-bar" aria-label="교사 분포 필터" style="margin-bottom:12px;">
+      <label>학교급
+        <select id="aIdxLevel">
+          <option value="">전체</option>
+          ${CB_SCHOOL_LEVELS.map(l=>`<option value="${escapeAttr(l)}" ${state._aIdxLevel===l?'selected':''}>${escapeHtml(l)}</option>`).join('')}
+        </select>
+      </label>
+      <label style="margin-left:12px;">지역
+        <select id="aIdxRegion">
+          <option value="">전체</option>
+          ${CB_REGIONS.map(r=>`<option value="${escapeAttr(r)}" ${state._aIdxRegion===r?'selected':''}>${escapeHtml(r)}</option>`).join('')}
+        </select>
+      </label>
+    </section>`;
+
+  root.innerHTML = filterBar + '<div id="aIdxBody"></div>';
+  document.getElementById('aIdxLevel').onchange = e => { state._aIdxLevel = e.target.value; VIEWS['a-teacher-idx'](root); };
+  document.getElementById('aIdxRegion').onchange = e => { state._aIdxRegion = e.target.value; VIEWS['a-teacher-idx'](root); };
+
+  const body = document.getElementById('aIdxBody');
+  if (!_minSampleGuard(body, n, 10, '교사 분포')) return;
+
+  // 퍼센타일
+  const scores = dist.scores;
+  const p10 = _percentile(scores,10), p25 = _percentile(scores,25),
+        p50 = _percentile(scores,50), p75 = _percentile(scores,75),
+        p90 = _percentile(scores,90), p95 = _percentile(scores,95);
+  const mean = scores.reduce((s,v)=>s+v,0)/scores.length;
+
+  // 히스토그램 빈(10개, 빈당 n≥10 보장용 기본 width=10)
+  const binWidth = 10;
+  const bins = Array.from({length:10}, (_,i)=>({ lo:i*10, hi:(i+1)*10, count:0 }));
+  scores.forEach(v=>{
+    const i = Math.min(9, Math.floor(v/binWidth));
+    bins[i].count += 1;
+  });
+  // 빈당 n<10이면 마스킹
+  const histLabels = bins.map(b => `${b.lo}-${b.hi}`);
+  const histData   = bins.map(b => b.count>=10 ? b.count : 0);
+  const maskedBins = bins.filter(b => b.count>0 && b.count<10).length;
+
+  // 학교급별 박스플롯 데이터 (min/p25/p50/p75/max), 학교별 n<5 마스킹 (여기서는 학교급 셀)
+  const boxData = CB_SCHOOL_LEVELS.map(lv => {
+    const arr = dist.byLevel[lv];
+    if (!arr || arr.length < 5) return { lv, masked:true };
+    return {
+      lv,
+      min: arr[0],
+      p25: _percentile(arr,25),
+      p50: _percentile(arr,50),
+      p75: _percentile(arr,75),
+      max: arr[arr.length-1],
+      n: arr.length
+    };
+  });
+
+  body.innerHTML = `
     <section class="dc-kpi-grid">
-      ${kpiCard('교사 수', teachers.length, '명', {dir:'flat',text:'집계 대상'}, 'primary')}
-      ${kpiCard('최고 지수', top5[0]?top5[0].utilization_score:0, '점', {dir:'flat',text:top5[0]?top5[0].name:''}, 'success')}
-      ${kpiCard('평균 지수', Math.round(teachers.reduce((s,t)=>s+(t.utilization_score||0),0)/teachers.length), '점', {dir:'flat',text:'전체 평균'}, 'warning')}
+      ${kpiCard('교사 n',      n.toLocaleString(),        '명', {dir:'flat',text:'집계 대상'},   'primary')}
+      ${kpiCard('중위값 p50',  p50.toFixed(1),            '점', {dir:'flat',text:'분포 중심'},   'primary')}
+      ${kpiCard('상위 p90',    p90.toFixed(1),            '점', {dir:'flat',text:'상위 10%'},    'success')}
+      ${kpiCard('평균',        mean.toFixed(1),           '점', {dir:'flat',text:`p10=${p10.toFixed(1)} · p95=${p95.toFixed(1)}`}, 'warning')}
     </section>
     <section class="dc-chart-grid">
-      ${chartWrap('aIdxTop','상위 5 교사 지수','막대 차트')}
+      ${chartWrap('aIdxHist','실행지수 분포 (히스토그램)',`빈 폭 ${binWidth}점 · p10/p50/p90 기준선`,`중위값 ${p50.toFixed(1)}점, 상위 10% 기준 ${p90.toFixed(1)}점`)}
+      ${chartWrap('aIdxBox','학교급별 박스플롯','p25·중위·p75 구간 (학교별 교사<5 셀은 마스킹)')}
     </section>
-    <section><h2 style="margin:16px 0 8px;">교사별 활용지수 비교</h2><div id="aIdxTable"></div></section>`;
-  mkChart(document.getElementById('aIdxTop'),'bar', {
-    labels: top5.map(t=>t.name),
-    datasets:[{ label:'활용지수', data: top5.map(t=>t.utilization_score||0), backgroundColor:'#2563eb' }]
+    ${maskedBins>0? `<p style="font-size:var(--fs-sm);color:var(--gray-600);margin-top:8px;">🔒 빈당 교사<10인 구간 ${maskedBins}개는 개인 식별 방지를 위해 숨겼습니다.</p>`:''}
+    <section class="dc-state-panel" role="status" style="margin-top:12px;background:#eff6ff;border-left:4px solid #2563eb;">
+      <p style="font-size:var(--fs-sm);color:var(--gray-700);line-height:1.6;">
+        본 화면은 <strong>집계·분포</strong>만 제공합니다. 개별 교사 식별·랭킹·Top-K 표는 제공하지 않습니다 (개인정보 보호).
+      </p>
+    </section>`;
+
+  // 히스토그램 + 기준선
+  const lineAt = (val, color, label) => ({
+    type:'line', xMin:val/binWidth - 0.5, xMax:val/binWidth - 0.5,
+    borderColor:color, borderWidth:2, borderDash:[4,3], label:{display:true, content:label, color}
   });
-  renderDataTable(document.getElementById('aIdxTable'), {
+  mkChart(document.getElementById('aIdxHist'),'bar',{
+    labels: histLabels,
+    datasets:[{ label:'교사 수', data: histData, backgroundColor:'#2563eb' }]
+  }, {
+    plugins:{ legend:{display:false},
+      tooltip:{ callbacks:{ label:(ctx)=> `${ctx.parsed.y.toLocaleString()}명 (${bins[ctx.dataIndex].lo}-${bins[ctx.dataIndex].hi}점)` } } },
+    scales:{ y:{ beginAtZero:true, title:{display:true,text:'교사 수'} }, x:{ title:{display:true,text:'실행지수 구간'} } }
+  });
+
+  // 박스플롯: Chart.js 기본만 사용 → floating bar (p25~p75) + p50 별도 점 datasets
+  const labels = boxData.map(b=>b.lv);
+  const boxes = boxData.map(b => b.masked ? [null,null] : [b.p25, b.p75]);
+  const medians = boxData.map(b => b.masked ? null : b.p50);
+  const mins = boxData.map(b => b.masked ? null : b.min);
+  const maxs = boxData.map(b => b.masked ? null : b.max);
+  mkChart(document.getElementById('aIdxBox'),'bar',{
+    labels,
+    datasets:[
+      { label:'p25~p75', data: boxes, backgroundColor:'rgba(37,99,235,.35)', borderColor:'#2563eb', borderWidth:1, borderSkipped:false, barPercentage:.4 },
+      { label:'중위(p50)', data: medians, type:'line', borderColor:'#ef4444', borderWidth:3, pointRadius:8, pointHoverRadius:9, pointBackgroundColor:'#ef4444', showLine:false },
+      { label:'최소', data: mins, type:'line', borderColor:'#64748b', pointStyle:'triangle', pointRadius:6, showLine:false, backgroundColor:'#64748b' },
+      { label:'최대', data: maxs, type:'line', borderColor:'#64748b', pointStyle:'rectRot', pointRadius:6, showLine:false, backgroundColor:'#64748b' }
+    ]
+  }, { indexAxis:'y', scales:{ x:{ min:0, max:100, title:{display:true,text:'실행지수'} } },
+       plugins:{ tooltip:{ callbacks:{ label:(ctx)=> {
+         const b = boxData[ctx.dataIndex]; if (b.masked) return '🔒 n<5 마스킹';
+         return `${ctx.dataset.label}: ${Array.isArray(ctx.raw)? ctx.raw.join('–') : Number(ctx.raw).toFixed(1)}점 (n=${b.n})`;
+       } } } } });
+};
+
+/* =====================================================================
+ * B. a-warnings — 학교 단위 경고 집계 (개인 비노출)
+ * ===================================================================== */
+VIEWS['a-warnings'] = async function(root){
+  root.innerHTML = tplLoading(3);
+  // 실 API 우선, 학교 표본 <10이면 mock fallback
+  let schools = null;
+  try {
+    const r = await fetch('/api/lrs/stats/school-warnings', { credentials:'include' });
+    if (r.ok) {
+      const d = await r.json();
+      if (d && d.success && Array.isArray(d.schools) && d.schools.length >= 10) schools = d.schools;
+    }
+  } catch(_){}
+  if (!schools) schools = _mockSchoolWarnings();
+  const totalN = schools.length;
+
+  // 전체 게이트 n<10 (학교 표본이 10개 미만이면 전면 차단)
+  if (!_minSampleGuard(root, totalN, 10, '학교 집계')) return;
+
+  // 마스킹 처리 (학교 내 학생 n<5 → 절대수 숨김, 비율만)
+  const rows = _cellSuppress(schools, { nKey:'students', threshold:5, maskKeys:['warnCount'] });
+  const maskedCount = rows.filter(r => r._masked).length;
+  const visibleRows = rows.filter(r => !r._masked);
+  const highRiskCount = visibleRows.filter(r => r.riskRate > 0.15).length;
+  const avgRisk = visibleRows.length
+    ? visibleRows.reduce((s,r)=>s+r.riskRate,0)/visibleRows.length
+    : 0;
+
+  root.innerHTML = `
+    <section class="dc-kpi-grid">
+      ${kpiCard('집계 학교 수', totalN.toLocaleString(),      '개', {dir:'flat',text:'전체'},                  'primary')}
+      ${kpiCard('고위험 학교',  highRiskCount.toLocaleString(),'개', {dir:highRiskCount?'down':'flat',text:'위험률 > 15%'}, highRiskCount?'danger':'primary')}
+      ${kpiCard('평균 위험률',  (avgRisk*100).toFixed(1),      '%', {dir:'flat',text:'학교 평균'},             'warning')}
+      ${kpiCard('마스킹 학교',  maskedCount.toLocaleString(),  '개', {dir:'flat',text:'학생 n<5 → 절대수 숨김'}, 'primary')}
+    </section>
+    <section class="dc-chart-wrapper">
+      <header><h2>학교 위험도 트리맵</h2><div class="subtitle">칸 크기 = 학생 수 · 색 = 위험률</div></header>
+      <div class="dc-treemap" id="aWarnTreemap" role="img" aria-label="학교 위험도 트리맵"></div>
+    </section>
+    <section class="dc-chart-wrapper">
+      <header><h2>학교별 상세 집계</h2><div class="subtitle">행 클릭 시 지역 드릴다운으로 이동</div></header>
+      <div id="aWarnTable"></div>
+    </section>`;
+
+  // 간이 트리맵: 상위 60개교를 flex-grow 비례로 배치
+  const top = visibleRows.slice().sort((a,b)=> b.students - a.students).slice(0,60);
+  const tm = document.getElementById('aWarnTreemap');
+  const colorFor = rate => {
+    if (rate > 0.20) return '#dc2626';
+    if (rate > 0.15) return '#f97316';
+    if (rate > 0.10) return '#f59e0b';
+    if (rate > 0.05) return '#10b981';
+    return '#2563eb';
+  };
+  tm.innerHTML = top.map(s => {
+    const size = Math.max(1, Math.round(s.students / 50));
+    return `<div class="cell" style="flex-grow:${size};flex-basis:${size*20}px;background:${colorFor(s.riskRate)};"
+      title="${escapeAttr(s.schoolName)} · ${s.students}명 · 위험 ${(s.riskRate*100).toFixed(1)}%">
+      <b>${escapeHtml(s.schoolName)}</b>
+      <small>${s.students}명 · ${(s.riskRate*100).toFixed(1)}%</small>
+    </div>`;
+  }).join('') + rows.filter(r=>r._masked).slice(0,6).map(()=>`<div class="cell masked" style="flex-grow:1;flex-basis:80px;"><b>🔒 마스킹</b><small>n&lt;5</small></div>`).join('');
+
+  renderDataTable(document.getElementById('aWarnTable'), {
     columns:[
-      {key:'name',label:'교사'},
-      {key:'class_count',label:'학급',align:'right'},
-      {key:'contents_authored',label:'콘텐츠',align:'right'},
-      {key:'lessons_held',label:'수업',align:'right'},
-      {key:'exams_opened',label:'평가',align:'right'},
-      {key:'feedback_count',label:'피드백',align:'right'},
-      {key:'utilization_score',label:'지수',align:'right'}
+      { key:'region',     label:'교육지원청' },
+      { key:'schoolName', label:'학교',
+        format:(v,r)=> r._masked ? `🔒 ${escapeHtml(v)}` : escapeHtml(v) },
+      { key:'level',      label:'학교급' },
+      { key:'students',   label:'학생수', align:'right',
+        format:(v,r)=> r._masked ? '***' : Number(v).toLocaleString() },
+      { key:'warnCount',  label:'위험수', align:'right',
+        format:(v,r)=> r._masked ? '***' : Number(v).toLocaleString() },
+      { key:'riskRate',   label:'위험률', align:'right',
+        format:(v)=> (Number(v)*100).toFixed(1) + '%' },
+      { key:'trend',      label:'추이',  align:'right',
+        format:(v)=> (v>0?'▲':'▼') + ' ' + (Math.abs(v)*100).toFixed(1) + '%p' }
     ],
-    rows: teachers, initialSort:'utilization_score', initialDir:'desc'
+    rows, initialSort:'riskRate', initialDir:'desc',
+    onRowClick:(row) => {
+      if (row._masked) return;
+      state._drillPath = [
+        { level:'region',    id:row.region,     label:row.region },
+        { level:'school',    id:row.schoolId,   label:row.schoolName }
+      ];
+      state.drillSchoolId = row.schoolId;
+      location.hash = 'a-drill';
+    }
+  });
+};
+
+/* =====================================================================
+ * C. a-drill — 지역 드릴다운 (개인 비노출)
+ * ===================================================================== */
+// Phase 2: adminFetchWithPeriod('/api/stats/region-drilldown', state.period) 연결 예정
+function _mockDrillChildren(level, parentId){
+  const rng = _mulberry32((parentId||'root').split('').reduce((s,c)=>s+c.charCodeAt(0),0) + (level==='grade'?99:0));
+  if (level === 'region'){
+    return CB_REGIONS.map(r => ({
+      id:r, label:r, level:'eduoffice',
+      n: Math.round(1000 + rng()*18000),
+      avgScore: Math.round((55+rng()*20)*10)/10,
+      riskRate: Math.round((0.06+rng()*0.12)*1000)/1000,
+      acts: Math.round(10000 + rng()*80000)
+    }));
+  }
+  if (level === 'eduoffice'){
+    const cnt = 20 + Math.floor(rng()*30);
+    return Array.from({length:cnt}, (_,i) => ({
+      id:`${parentId}-S${i}`, label:`${['남','북','동','서','중앙'][i%5]}${['초','중','고'][i%3]}${i+1}`, level:'school',
+      n: Math.round(40 + rng()*900),
+      avgScore: Math.round((55+rng()*20)*10)/10,
+      riskRate: Math.round((0.06+rng()*0.15)*1000)/1000,
+      acts: Math.round(200 + rng()*6000)
+    }));
+  }
+  if (level === 'school'){
+    const grades = ['1학년','2학년','3학년','4학년','5학년','6학년'];
+    return grades.map(g => ({
+      id:`${parentId}-${g}`, label:g, level:'grade',
+      n: Math.round(20 + rng()*140),
+      avgScore: Math.round((55+rng()*20)*10)/10,
+      riskRate: Math.round((0.06+rng()*0.15)*1000)/1000,
+      acts: Math.round(100 + rng()*1200)
+    }));
+  }
+  return [];
+}
+
+VIEWS['a-drill'] = async function(root){
+  root.innerHTML = tplLoading(2);
+
+  if (!state._drillPath) state._drillPath = [];
+  // test-hook
+  const forceLevel = _adminTestHook('aDrillLevel');
+  if (forceLevel === 'region') state._drillPath = [];
+  else if (forceLevel === 'eduoffice') state._drillPath = [{ level:'region', id:'청주교육지원청', label:'청주교육지원청' }];
+  else if (forceLevel === 'school') state._drillPath = [{ level:'region', id:'청주교육지원청', label:'청주교육지원청' },{ level:'eduoffice', id:'청주-OFF', label:'청주-오피스' }];
+  else if (forceLevel === 'grade') state._drillPath = [{ level:'region', id:'청주교육지원청', label:'청주교육지원청' },{ level:'eduoffice', id:'청주-OFF', label:'청주-오피스' },{ level:'school', id:'S1001', label:'청주남초1' },{ level:'grade', id:'S1001-3학년', label:'3학년' }];
+
+  const path = state._drillPath;
+  const cur = path[path.length-1];
+  const curLevel = cur ? (cur.level==='region'?'eduoffice':cur.level==='eduoffice'?'school':cur.level==='school'?'grade':'done') : 'region';
+  const parentId = cur ? cur.id : 'root';
+
+  // 브레드크럼
+  const bc = [`<button type="button" data-idx="-1">충북</button>`]
+    .concat(path.map((p,i)=> `<span class="sep">▸</span><button type="button" data-idx="${i}" ${i===path.length-1?'aria-current="page"':''}>${escapeHtml(p.label)}</button>`))
+    .join('');
+
+  root.innerHTML = `
+    <nav class="dc-drill-bc" id="aDrillBc" aria-label="드릴다운 경로">${bc}</nav>
+    <div id="aDrillBody"></div>`;
+  root.querySelectorAll('#aDrillBc button').forEach(btn => {
+    btn.onclick = () => {
+      const idx = Number(btn.dataset.idx);
+      state._drillPath = idx < 0 ? [] : state._drillPath.slice(0, idx+1);
+      VIEWS['a-drill'](root);
+    };
+  });
+
+  const body = document.getElementById('aDrillBody');
+
+  // 경계(학년) 도달
+  if (cur && cur.level === 'grade'){
+    body.innerHTML = `<div class="dc-state-panel" role="status" style="border-left:4px solid #64748b;background:#f1f5f9;">
+      <span style="font-size:var(--fs-display);">🔒</span>
+      <p><strong>개인 식별 보호 — 학년 단위까지만 제공됩니다</strong></p>
+      <p style="font-size:var(--fs-sm);color:var(--gray-600);line-height:1.6;">
+        ${escapeHtml(path.map(p=>p.label).join(' ▸ '))} ▸ ${escapeHtml(cur.label)}의 하위 단위(학급·개인)는 개인정보 보호 원칙에 따라 표시하지 않습니다.
+      </p>
+    </div>`;
+    return;
+  }
+
+  // 실 API 우선, 자식 <1 또는 모두 n<10이면 mock fallback
+  let children = null;
+  try {
+    const qs = new URLSearchParams({ level: cur ? cur.level : 'region', parent: parentId });
+    const r = await fetch('/api/lrs/stats/region-drilldown?' + qs.toString(), { credentials:'include' });
+    if (r.ok) {
+      const d = await r.json();
+      if (d && d.success && Array.isArray(d.children) && d.children.filter(c=>c.n>=10).length >= 1) {
+        children = d.children.map(c => ({ ...c, acts: c.n*10 }));
+      }
+    }
+  } catch(_){}
+  if (!children) children = _mockDrillChildren(cur ? cur.level : 'region', parentId);
+  children = children.filter(c => c.n >= 10); // 모든 셀 n≥10 강제
+  if (!children.length) { body.innerHTML = tplEmpty('하위 집계가 n≥10 기준을 충족하지 않습니다'); return; }
+
+  const totalStu = children.reduce((s,c)=>s+c.n,0);
+  const wAvg = children.reduce((s,c)=>s+c.avgScore*c.n,0) / Math.max(1,totalStu);
+  const wRisk = children.reduce((s,c)=>s+c.riskRate*c.n,0) / Math.max(1,totalStu);
+  const totalActs = children.reduce((s,c)=>s+c.acts,0);
+
+  body.innerHTML = `
+    <section class="dc-kpi-grid">
+      ${kpiCard('학생 수', totalStu.toLocaleString(),           '명', {dir:'flat',text:`하위 단위 ${children.length}개`}, 'primary')}
+      ${kpiCard('평균 지수', wAvg.toFixed(1),                   '점', {dir:'flat',text:'가중 평균'},                   'success')}
+      ${kpiCard('위험률',   (wRisk*100).toFixed(1),             '%', {dir:wRisk>0.15?'down':'flat',text:''},           wRisk>0.15?'danger':'warning')}
+      ${kpiCard('활동량',   totalActs.toLocaleString(),         '건', {dir:'flat',text:'누적'},                        'primary')}
+    </section>
+    <section class="dc-chart-wrapper">
+      <header><h2>하위 단위 지수 비교</h2><div class="subtitle">바 클릭 시 드릴다운</div></header>
+      <div class="chart-body"><canvas id="aDrillBar" role="img" aria-label="하위 단위 지수 바차트"></canvas></div>
+    </section>
+    <section class="dc-chart-wrapper">
+      <header><h2>하위 단위 상세</h2></header>
+      <div id="aDrillTable"></div>
+    </section>`;
+
+  const chart = mkChart(document.getElementById('aDrillBar'),'bar',{
+    labels: children.map(c=>c.label),
+    datasets:[{ label:'평균 지수', data: children.map(c=>c.avgScore), backgroundColor:'#2563eb' }]
+  }, { onClick:(evt, els) => {
+      if (!els || !els.length) return;
+      const c = children[els[0].index];
+      if (c.level === 'grade') { // 학년까지만 push, 이후 경계표시는 재렌더가 처리
+        state._drillPath = state._drillPath.concat([{ level:'grade', id:c.id, label:c.label }]);
+      } else {
+        state._drillPath = state._drillPath.concat([{ level:c.level, id:c.id, label:c.label }]);
+      }
+      VIEWS['a-drill'](root);
+    } });
+
+  renderDataTable(document.getElementById('aDrillTable'), {
+    columns:[
+      { key:'label',    label:'단위' },
+      { key:'n',        label:'학생수',  align:'right', format:v=>Number(v).toLocaleString() },
+      { key:'avgScore', label:'평균지수',align:'right', format:v=>Number(v).toFixed(1) },
+      { key:'riskRate', label:'위험률',  align:'right', format:v=>(Number(v)*100).toFixed(1)+'%' },
+      { key:'acts',     label:'활동량',  align:'right', format:v=>Number(v).toLocaleString() }
+    ],
+    rows: children, initialSort:'n', initialDir:'desc',
+    onRowClick:(row) => {
+      state._drillPath = state._drillPath.concat([{ level:row.level, id:row.id, label:row.label }]);
+      VIEWS['a-drill'](root);
+    }
   });
 };
 
@@ -1044,6 +1599,7 @@ VIEWS['s-home'] = async function(root){
       tplEmpty('아직 진단 결과가 충분하지 않아요', {href:'/self-learn/', label:'스스로채움 시작하기'});
     document.getElementById('sWeakCards').innerHTML = '';
   }
+  await renderDodMini(root);
 };
 
 VIEWS['s-achieve'] = async function(root){
@@ -1296,6 +1852,7 @@ VIEWS['t-home'] = async function(root){
     }).join('');
     bindWarningActions(warnListEl);
   }
+  await renderDodMini(root);
 };
 
 VIEWS['t-drill'] = async function(root){
@@ -1549,6 +2106,281 @@ async function adminFetchWithPeriod(path, period){
   } catch(_){ return null; }
 }
 
+/* ---- 홈 공용: DoD(어제 대비 오늘) 미니 위젯 ---- */
+async function renderDodMini(root){
+  try {
+    const dd = await apiGet('/api/lrs/stats/daily-snapshot');
+    if (!dd || !dd.success) return;
+    const t = dd.today || {};
+    const y = dd.yesterday || {};
+    const deltaActs = (Number(t.totalActs)||0) - (Number(y.totalActs)||0);
+    const deltaUsers = (Number(t.uniqueUsers)||0) - (Number(y.uniqueUsers)||0);
+    const deltaDur = (Number(t.durationMin)||0) - (Number(y.durationMin)||0);
+    const colorOf = v => (v>=0?'var(--lrs-success, #10b981)':'var(--lrs-danger, #ef4444)');
+    const arrow = v => (v>0?'▲':(v<0?'▼':'■'));
+    const html = `
+      <section class="dc-dod-mini" aria-label="어제 대비 오늘 요약"
+        style="display:flex;flex-wrap:wrap;gap:12px;margin-bottom:16px;padding:12px 14px;background:var(--gray-50);border-radius:8px;border:1px solid var(--gray-100);">
+        <div style="min-width:140px;">
+          <span class="label" style="font-size:var(--fs-cap);color:var(--gray-500);">오늘 활동</span>
+          <strong style="font-size:var(--fs-h2);display:block;">${(Number(t.totalActs)||0).toLocaleString()}건</strong>
+          <span style="font-size:var(--fs-sm);color:${colorOf(deltaActs)};">${arrow(deltaActs)} 어제 대비 ${deltaActs>=0?'+':''}${deltaActs}</span>
+        </div>
+        <div style="min-width:140px;">
+          <span class="label" style="font-size:var(--fs-cap);color:var(--gray-500);">활성 사용자</span>
+          <strong style="font-size:var(--fs-h2);display:block;">${(Number(t.uniqueUsers)||0).toLocaleString()}명</strong>
+          <span style="font-size:var(--fs-sm);color:${colorOf(deltaUsers)};">${arrow(deltaUsers)} 어제 ${(Number(y.uniqueUsers)||0)}명 → ${deltaUsers>=0?'+':''}${deltaUsers}</span>
+        </div>
+        <div style="min-width:140px;">
+          <span class="label" style="font-size:var(--fs-cap);color:var(--gray-500);">학습시간</span>
+          <strong style="font-size:var(--fs-h2);display:block;">${(Number(t.durationMin)||0).toLocaleString()}분</strong>
+          <span style="font-size:var(--fs-sm);color:${colorOf(deltaDur)};">${arrow(deltaDur)} 어제 대비 ${deltaDur>=0?'+':''}${deltaDur}분</span>
+        </div>
+      </section>`;
+    root.insertAdjacentHTML('afterbegin', html);
+  } catch(e) { console.warn('[LRS] DoD mini 렌더 실패', e); }
+}
+
+/* ===== 관리자: 홈 (신설) ===== */
+VIEWS['a-home'] = async function(root){
+  root.innerHTML = tplLoading(3);
+  const [dash, daily] = await Promise.all([
+    apiGet('/api/lrs/dashboard', { period:'1d' }),
+    apiGet('/api/lrs/stats/daily')
+  ]);
+  const stats = (dash && dash.stats) || {};
+  const drows = (daily && daily.data) || [];
+  const totalActs = drows.reduce((s,r)=>s+(Number(r.count)||0),0);
+  const totalDurHour = Math.round(drows.reduce((s,r)=>s+(Number(r.total_duration_sec)||0),0)/3600);
+  let ws=0, wc=0;
+  drows.forEach(r => { if (r.avg_score != null && r.count){ ws += Number(r.avg_score)*Number(r.count); wc += Number(r.count); } });
+  const avgScore = wc ? (ws/wc) : 0;
+  const activeUsers = drows.reduce((m,r)=>Math.max(m, Number(r.users)||0), 0);
+
+  // 주간 추이용 최근 7일만
+  const last7 = drows.slice(-7);
+
+  root.innerHTML = `
+    <div class="dc-kpi-grid">
+      ${kpiCard('기간 활동',      totalActs.toLocaleString(),       '건',   {dir:'up', text:'전체'}, 'success')}
+      ${kpiCard('총 학습시간',    totalDurHour.toLocaleString(),    '시간', {dir:'flat',text:''}, 'primary')}
+      ${kpiCard('최대 활성자',    activeUsers.toLocaleString(),     '명',   {dir:'flat',text:'일별 max'}, 'primary')}
+      ${kpiCard('평균 성취점수',  avgScore.toFixed(1),              '점',   {dir:'flat',text:'가중 평균'}, 'warning')}
+    </div>
+    <div class="grid-2">
+      ${chartWrap('aHomeWeek','주간 활동 추이','최근 7일')}
+      <section class="dc-chart-wrapper">
+        <header><h2>최근 활동 이벤트</h2><div class="subtitle">오늘 데이터 요약</div></header>
+        <div id="aHomeTodayList"></div>
+      </section>
+    </div>`;
+
+  if (last7.length){
+    mkChart(document.getElementById('aHomeWeek'),'line',{
+      labels: last7.map(r=>fmtDate(r.stat_date)),
+      datasets:[{ label:'활동 건수', data: last7.map(r=>Number(r.count)||0), borderColor:'var(--chart-1)', backgroundColor:'rgba(37,99,235,.1)', fill:true, tension:.3 }]
+    });
+  } else {
+    document.getElementById('aHomeWeek').closest('.dc-chart-wrapper').innerHTML =
+      `<header><h2>주간 활동 추이</h2></header>` + tplEmpty();
+  }
+
+  const today = new Date().toISOString().slice(0,10);
+  const todayRow = drows.find(r => (r.stat_date||'').slice(0,10) === today);
+  const todayListEl = document.getElementById('aHomeTodayList');
+  if (todayRow){
+    todayListEl.innerHTML = `
+      <ul style="list-style:none;padding:0;margin:0;font-size:var(--fs-body);">
+        <li style="padding:8px 0;border-bottom:1px solid var(--gray-100);">오늘 활동: <strong>${(Number(todayRow.count)||0).toLocaleString()}건</strong></li>
+        <li style="padding:8px 0;border-bottom:1px solid var(--gray-100);">오늘 사용자: <strong>${(Number(todayRow.users)||0).toLocaleString()}명</strong></li>
+        <li style="padding:8px 0;">오늘 학습시간: <strong>${Math.round((Number(todayRow.total_duration_sec)||0)/60).toLocaleString()}분</strong></li>
+      </ul>`;
+  } else {
+    todayListEl.innerHTML = tplEmpty('오늘 집계가 아직 없습니다');
+  }
+
+  await renderDodMini(root);
+};
+
+/* ===== 관리자: 활용 현황 (신설) ===== */
+VIEWS['a-usage'] = async function(root){
+  root.innerHTML = tplLoading(3);
+  const [svc, daily, cls] = await Promise.all([
+    apiGet('/api/lrs/stats/by-service'),
+    apiGet('/api/lrs/stats/daily'),
+    apiGet('/api/lrs/stats/by-class')
+  ]);
+  const srows = (svc && (svc.stats||svc.data)) || [];
+  const drows = (daily && daily.data) || [];
+  const clsRows = (cls && (cls.stats || cls.data)) || [];
+
+  const totalActs = drows.reduce((s,r)=>s+(Number(r.count)||0),0);
+  const totalServices = srows.length;
+  const totalClasses = clsRows.length;
+  const activeUsers = drows.reduce((m,r)=>Math.max(m, Number(r.users)||0), 0);
+
+  root.innerHTML = `
+    <div class="dc-kpi-grid">
+      ${kpiCard('기간 총 활동', totalActs.toLocaleString(), '건', {dir:'up',text:'집계 기반'}, 'primary')}
+      ${kpiCard('활성 사용자',   activeUsers.toLocaleString(), '명', {dir:'flat',text:'일별 최대'}, 'success')}
+      ${kpiCard('서비스 수',     totalServices, '종', {dir:'flat',text:''}, 'primary')}
+      ${kpiCard('활동 학급 수',  totalClasses, '개', {dir:'flat',text:''}, 'warning')}
+    </div>
+    <div class="grid-2">
+      ${chartWrap('aUsagePie','서비스별 활용 비중')}
+      ${chartWrap('aUsageDaily','일별 활동 추이','기간 전체')}
+    </div>
+    <section class="dc-chart-wrapper">
+      <header><h2>반별 활동량 Top 10</h2><div class="subtitle">활동 건수 기준</div></header>
+      <div id="aUsageClassTable"></div>
+    </section>`;
+
+  if (srows.length){
+    mkChart(document.getElementById('aUsagePie'),'doughnut',{
+      labels: srows.map(r=>pickLabel(r, ['service_label','service','source_service','service_key','service_name'], '(미분류)')),
+      datasets:[{ data: srows.map(r=>Number(r.count)||0), backgroundColor:['var(--chart-1)','var(--chart-2)','var(--chart-3)','var(--chart-4)','var(--chart-5)','var(--chart-6)','var(--chart-7)'] }]
+    }, donutLegendOpts('건'));
+  } else {
+    document.getElementById('aUsagePie').closest('.dc-chart-wrapper').innerHTML =
+      `<header><h2>서비스별 활용 비중</h2></header>` + tplEmpty();
+  }
+
+  if (drows.length){
+    mkChart(document.getElementById('aUsageDaily'),'line',{
+      labels: drows.map(r=>fmtDate(r.stat_date)),
+      datasets:[{ label:'활동 건수', data: drows.map(r=>Number(r.count)||0), borderColor:'var(--chart-2)', backgroundColor:'rgba(16,185,129,.1)', fill:true, tension:.3 }]
+    });
+  } else {
+    document.getElementById('aUsageDaily').closest('.dc-chart-wrapper').innerHTML =
+      `<header><h2>일별 활동 추이</h2></header>` + tplEmpty();
+  }
+
+  const clsTop = clsRows.slice().sort((a,b)=>(Number(b.count)||0)-(Number(a.count)||0)).slice(0,10);
+  if (clsTop.length){
+    renderDataTable(document.getElementById('aUsageClassTable'), {
+      columns: [
+        { key:'class_name', label:'학급', format:(_,r)=>escapeHtml(pickLabel(r, ['class_name','class_label','name'], '학급 #'+(r.class_id||'?'))) },
+        { key:'count',      label:'활동', align:'right', format:v=>escapeHtml((Number(v)||0).toLocaleString()) },
+        { key:'unique_students', label:'학생', align:'right', format:v=>escapeHtml(Number(v)||0) },
+        { key:'avg_score',  label:'평균점수', align:'right', format:v=>escapeHtml(v==null?'-':Number(v).toFixed(1)) }
+      ],
+      rows: clsTop, initialSort:'count', initialDir:'desc'
+    });
+  } else {
+    document.getElementById('aUsageClassTable').innerHTML = tplEmpty();
+  }
+};
+
+/* ===== 관리자: 성취 분석 (신설) ===== */
+VIEWS['a-achieve'] = async function(root){
+  root.innerHTML = tplLoading(3);
+  const [ach, subj, daily] = await Promise.all([
+    apiGet('/api/lrs/stats/by-achievement'),
+    apiGet('/api/lrs/stats/by-subject'),
+    apiGet('/api/lrs/stats/daily')
+  ]);
+  const achRows = (ach && (ach.stats || ach.data)) || [];
+  const subjRowsLegacy = (subj && (subj.stats || subj.data)) || [];
+  const lessonStats = (subj && subj.lessonStats) || [];
+  const subjRows = subjRowsLegacy.length ? subjRowsLegacy : lessonStats;
+  const drows = (daily && daily.data) || [];
+
+  // 가중 평균 성취
+  let ws=0, wc=0;
+  drows.forEach(r => { if (r.avg_score != null && r.count){ ws += Number(r.avg_score)*Number(r.count); wc += Number(r.count); } });
+  const avgScoreAll = wc ? (ws/wc) : 0;
+
+  // weak / strong top 5 (achRows 기반, count>0)
+  const scored = achRows.filter(r => r.avg_score != null);
+  const weakTop = scored.slice().sort((a,b)=>(Number(a.avg_score)||0)-(Number(b.avg_score)||0)).slice(0,5);
+  const strongTop = scored.slice().sort((a,b)=>(Number(b.avg_score)||0)-(Number(a.avg_score)||0)).slice(0,5);
+
+  // 성취 도달(70점 이상) 비율
+  const withScore = scored.length;
+  const reachedCount = scored.filter(r => Number(r.avg_score)>=70).length;
+  const reachRate = withScore ? Math.round(reachedCount*100/withScore) : 0;
+
+  root.innerHTML = `
+    <div class="dc-kpi-grid">
+      ${kpiCard('평균 성취점수',   avgScoreAll.toFixed(1), '점', {dir:'flat', text:'가중 평균'}, 'success')}
+      ${kpiCard('도달 성취기준',   reachedCount, '건', {dir:'up', text:`전체 ${withScore}건 중`}, 'primary')}
+      ${kpiCard('도달률',          reachRate, '%', {dir:'flat', text:'70점 기준'}, 'primary')}
+      ${kpiCard('분석 성취기준',   achRows.length, '건', {dir:'flat', text:''}, 'warning')}
+    </div>
+    <div class="grid-2">
+      ${chartWrap('aAchSubject','교과별 활동량','Top 교과')}
+      <section class="dc-chart-wrapper">
+        <header><h2>약점 Top 5 성취기준</h2><div class="subtitle">평균점수 낮은 순</div></header>
+        <div id="aAchWeak"></div>
+      </section>
+    </div>
+    <div class="grid-2">
+      <section class="dc-chart-wrapper">
+        <header><h2>강점 Top 5 성취기준</h2><div class="subtitle">평균점수 높은 순</div></header>
+        <div id="aAchStrong"></div>
+      </section>
+      <section class="dc-chart-wrapper">
+        <header><h2>성취기준 상세</h2><div class="subtitle">전체 목록 (정렬 가능)</div></header>
+        <div id="aAchAll"></div>
+      </section>
+    </div>`;
+
+  // 교과 bar
+  const subjTop = subjRows.slice().sort((a,b)=>(Number(b.count)||0)-(Number(a.count)||0)).slice(0,10);
+  if (subjTop.length){
+    mkChart(document.getElementById('aAchSubject'),'bar',{
+      labels: subjTop.map(r=>pickLabel(r, ['subject_label','subject_name','subject','subject_code'], '(교과 미지정)')),
+      datasets:[
+        { label:'건수', data: subjTop.map(r=>Number(r.count)||0), backgroundColor:'var(--chart-1)' },
+        { label:'평균점수', data: subjTop.map(r=>Number(r.avg_score)||0), backgroundColor:'var(--chart-2)', yAxisID:'y2' }
+      ]
+    }, { scales:{ y2:{ position:'right', max:100, grid:{drawOnChartArea:false} } } });
+  } else {
+    document.getElementById('aAchSubject').closest('.dc-chart-wrapper').innerHTML =
+      `<header><h2>교과별 활동량</h2></header>` + tplEmpty();
+  }
+
+  function achRowFmt(v, r){
+    return escapeHtml(pickLabel(r, ['achievement_label','achievement_name','achievement_code','code'], '(미지정)'));
+  }
+  const weakEl = document.getElementById('aAchWeak');
+  if (weakTop.length){
+    renderDataTable(weakEl, {
+      columns: [
+        { key:'code', label:'성취기준', format: achRowFmt },
+        { key:'avg_score', label:'평균', align:'right', format:v=>escapeHtml(v==null?'-':Number(v).toFixed(1)) },
+        { key:'count',     label:'건수', align:'right', format:v=>escapeHtml((Number(v)||0).toLocaleString()) }
+      ],
+      rows: weakTop, initialSort:'avg_score', initialDir:'asc'
+    });
+  } else { weakEl.innerHTML = tplEmpty(); }
+
+  const strongEl = document.getElementById('aAchStrong');
+  if (strongTop.length){
+    renderDataTable(strongEl, {
+      columns: [
+        { key:'code', label:'성취기준', format: achRowFmt },
+        { key:'avg_score', label:'평균', align:'right', format:v=>escapeHtml(v==null?'-':Number(v).toFixed(1)) },
+        { key:'count',     label:'건수', align:'right', format:v=>escapeHtml((Number(v)||0).toLocaleString()) }
+      ],
+      rows: strongTop, initialSort:'avg_score', initialDir:'desc'
+    });
+  } else { strongEl.innerHTML = tplEmpty(); }
+
+  const allEl = document.getElementById('aAchAll');
+  if (achRows.length){
+    renderDataTable(allEl, {
+      columns: [
+        { key:'code', label:'성취기준', format: achRowFmt },
+        { key:'count',     label:'건수', align:'right', format:v=>escapeHtml((Number(v)||0).toLocaleString()) },
+        { key:'avg_score', label:'평균점수', align:'right', format:v=>escapeHtml(v==null?'-':Number(v).toFixed(1)) },
+        { key:'total_duration_sec', label:'학습(분)', align:'right', format:v=>escapeHtml(Math.round((Number(v)||0)/60).toLocaleString()) }
+      ],
+      rows: achRows, initialSort:'count', initialDir:'desc'
+    });
+  } else { allEl.innerHTML = tplEmpty(); }
+};
+
 VIEWS['a-overview'] = async function(root){
   root.innerHTML = tplLoading(4);
   const [dash, svc, daily, subj, cls, ach] = await Promise.all([
@@ -1699,7 +2531,152 @@ VIEWS['a-overview'] = async function(root){
   } else { document.getElementById('aSubjTable').innerHTML = tplEmpty(); }
 };
 
+/* =====================================================================
+ * D. a-compare — 지역·학교급 세분화 비교 (덤벨 + 바)
+ * ===================================================================== */
+// Phase 2: adminFetchWithPeriod('/api/stats/period-compare', {periodA, periodB, level, region}) 연결 예정
+function _mockCompareCells(periodA, periodB, filters){
+  const rng = _mulberry32(42 + (filters.level?filters.level.length:0));
+  const cells = [];
+  const regions = filters.region ? [filters.region] : CB_REGIONS;
+  const levels  = filters.level  ? [filters.level]  : CB_SCHOOL_LEVELS;
+  regions.forEach(r => levels.forEach(lv => {
+    const nA = Math.round(400 + rng()*5000);
+    const nB = Math.round(400 + rng()*5000);
+    const vA = Math.round((55+rng()*18)*10)/10;
+    const vB = Math.round((55+rng()*18)*10)/10;
+    cells.push({ region:r, level:lv, nA, nB, vA, vB, delta: vB-vA, ci:Math.round(rng()*8)/10 });
+  }));
+  return cells;
+}
+
 VIEWS['a-compare'] = async function(root){
+  root.innerHTML = tplLoading(2);
+
+  state._aCmpPeriodA = state._aCmpPeriodA || '30d';
+  state._aCmpPeriodB = state._aCmpPeriodB || '90d';
+  state._aCmpLevel   = state._aCmpLevel   || '';
+  state._aCmpRegion  = state._aCmpRegion  || '';
+
+  const filterBar = `
+    <section class="dc-filter-bar" aria-label="비교 필터" style="margin-bottom:12px;">
+      <label>기간 A
+        <select id="aCmpA">
+          ${['7d','30d','90d'].map(p=>`<option value="${p}" ${state._aCmpPeriodA===p?'selected':''}>${p}</option>`).join('')}
+        </select>
+      </label>
+      <label style="margin-left:8px;">기간 B
+        <select id="aCmpB">
+          ${['7d','30d','90d'].map(p=>`<option value="${p}" ${state._aCmpPeriodB===p?'selected':''}>${p}</option>`).join('')}
+        </select>
+      </label>
+      <label style="margin-left:12px;">학교급
+        <select id="aCmpLevel"><option value="">전체</option>${CB_SCHOOL_LEVELS.map(l=>`<option value="${escapeAttr(l)}" ${state._aCmpLevel===l?'selected':''}>${escapeHtml(l)}</option>`).join('')}</select>
+      </label>
+      <label style="margin-left:8px;">지역
+        <select id="aCmpRegion"><option value="">전체</option>${CB_REGIONS.map(r=>`<option value="${escapeAttr(r)}" ${state._aCmpRegion===r?'selected':''}>${escapeHtml(r)}</option>`).join('')}</select>
+      </label>
+    </section>`;
+  root.innerHTML = filterBar + '<div id="aCmpBody"></div>';
+  const rerender = () => VIEWS['a-compare'](root);
+  document.getElementById('aCmpA').onchange = e => { state._aCmpPeriodA = e.target.value; rerender(); };
+  document.getElementById('aCmpB').onchange = e => { state._aCmpPeriodB = e.target.value; rerender(); };
+  document.getElementById('aCmpLevel').onchange = e => { state._aCmpLevel = e.target.value; rerender(); };
+  document.getElementById('aCmpRegion').onchange = e => { state._aCmpRegion = e.target.value; rerender(); };
+
+  const body = document.getElementById('aCmpBody');
+  // 실 API 우선, pairs<5면 mock fallback
+  let cells = null;
+  try {
+    const days = state._aCmpPeriodB==='7d'?7:state._aCmpPeriodB==='90d'?90:30;
+    const qs = new URLSearchParams({ days: String(days) });
+    if (state._aCmpLevel) qs.set('level', state._aCmpLevel);
+    if (state._aCmpRegion) qs.set('region', state._aCmpRegion);
+    const r = await fetch('/api/lrs/stats/period-compare?' + qs.toString(), { credentials:'include' });
+    if (r.ok) {
+      const d = await r.json();
+      if (d && d.success && Array.isArray(d.pairs) && d.pairs.length >= 5) {
+        cells = d.pairs.map(p => ({
+          region: (p.label||'').split(' ')[0] || '미분류',
+          level:  state._aCmpLevel || '전체',
+          nA: p.previous.activeUsers*10, nB: p.current.activeUsers*10,
+          vA: p.previous.acts, vB: p.current.acts,
+          delta: p.current.acts - p.previous.acts,
+          ci: 0.5
+        }));
+      }
+    }
+  } catch(_){}
+  if (!cells) cells = _mockCompareCells(state._aCmpPeriodA, state._aCmpPeriodB, { level:state._aCmpLevel, region:state._aCmpRegion });
+
+  // 게이트: 양 기간 모두 n≥20 (test-hook으로 전체 n 주입 가능)
+  const forceN = Number(_adminTestHook('aCmpN'));
+  if (!isNaN(forceN) && forceN>0) { cells.forEach(c => { c.nA = forceN; c.nB = forceN; }); }
+  const minN = cells.reduce((m,c)=> Math.min(m, c.nA, c.nB), Infinity);
+  if (!_minSampleGuard(body, minN, 20, '기간 A/B 최소 표본')) return;
+
+  // 덤벨차트용 정렬 (|delta| 큰 순)
+  const sorted = cells.slice().sort((a,b)=> Math.abs(b.delta)-Math.abs(a.delta)).slice(0, 20);
+  body.innerHTML = `
+    <section class="dc-kpi-grid">
+      ${kpiCard('비교 셀 수', cells.length.toLocaleString(), '개', {dir:'flat',text:'지역 × 학교급'}, 'primary')}
+      ${kpiCard('평균 변화', (cells.reduce((s,c)=>s+c.delta,0)/cells.length).toFixed(2), '점', {dir:'flat',text:'B-A'}, 'warning')}
+      ${kpiCard('A기간', state._aCmpPeriodA, '', {dir:'flat',text:''}, 'primary')}
+      ${kpiCard('B기간', state._aCmpPeriodB, '', {dir:'flat',text:''}, 'success')}
+    </section>
+    <section class="dc-chart-wrapper">
+      <header><h2>덤벨차트 (지역×학교급 변화)</h2><div class="subtitle">변화량 |Δ| 상위 20셀 · CI는 ±값으로 표시</div></header>
+      <div class="dc-dumbbell-legend">
+        <span><span class="swatch" style="background:#94a3b8;"></span>A기간</span>
+        <span><span class="swatch" style="background:#2563eb;"></span>B기간</span>
+      </div>
+      <div class="chart-body" style="height:${Math.max(320, sorted.length*22)}px;"><canvas id="aCmpDumbbell" role="img" aria-label="덤벨차트"></canvas></div>
+    </section>
+    <section class="dc-chart-wrapper">
+      <header><h2>학교급별 평균 비교 (바차트)</h2></header>
+      <div class="chart-body"><canvas id="aCmpBar" role="img" aria-label="학교급별 비교 바차트"></canvas></div>
+    </section>`;
+
+  // 덤벨차트: 수평 라인 + A(회색)·B(파랑) 포인트
+  const labels = sorted.map(c => `${c.region.replace('교육지원청','')} · ${c.level}`);
+  mkChart(document.getElementById('aCmpDumbbell'),'bar',{
+    labels,
+    datasets:[
+      // A~B 범위를 floating bar로 그려 '라인' 역할
+      { label:'변화 범위', data: sorted.map(c => [Math.min(c.vA,c.vB), Math.max(c.vA,c.vB)]),
+        backgroundColor:'rgba(148,163,184,.35)', borderColor:'#cbd5e1', borderWidth:1, barPercentage:.25, borderSkipped:false },
+      { label:`A기간 (${state._aCmpPeriodA})`, type:'line', data: sorted.map(c=>c.vA),
+        pointBackgroundColor:'#94a3b8', pointBorderColor:'#64748b', pointRadius:6, showLine:false },
+      { label:`B기간 (${state._aCmpPeriodB})`, type:'line', data: sorted.map(c=>c.vB),
+        pointBackgroundColor:'#2563eb', pointBorderColor:'#1d4ed8', pointRadius:6, showLine:false }
+    ]
+  }, { indexAxis:'y', scales:{ x:{ min:40, max:90, title:{display:true,text:'실행지수'} } },
+       plugins:{ tooltip:{ callbacks:{ label:(ctx)=> {
+         const c = sorted[ctx.dataIndex];
+         return `${ctx.dataset.label}: ${Array.isArray(ctx.raw)?ctx.raw.map(v=>v.toFixed(1)).join(' ~ '):Number(ctx.raw).toFixed(1)} (Δ${c.delta>=0?'+':''}${c.delta.toFixed(1)} ± ${c.ci})`;
+       } } } } });
+
+  // 바차트: 학교급별 평균 비교
+  const levelAgg = CB_SCHOOL_LEVELS.map(lv => {
+    const sub = cells.filter(c => c.level === lv);
+    const nA = sub.reduce((s,c)=>s+c.nA,0), nB = sub.reduce((s,c)=>s+c.nB,0);
+    return {
+      lv,
+      a: nA ? sub.reduce((s,c)=>s+c.vA*c.nA,0)/nA : 0,
+      b: nB ? sub.reduce((s,c)=>s+c.vB*c.nB,0)/nB : 0
+    };
+  });
+  mkChart(document.getElementById('aCmpBar'),'bar',{
+    labels: levelAgg.map(x=>x.lv),
+    datasets:[
+      { label:`A기간 (${state._aCmpPeriodA})`, data: levelAgg.map(x=>+x.a.toFixed(1)), backgroundColor:'#94a3b8' },
+      { label:`B기간 (${state._aCmpPeriodB})`, data: levelAgg.map(x=>+x.b.toFixed(1)), backgroundColor:'#2563eb' }
+    ]
+  }, { scales:{ y:{ beginAtZero:false, min:40, max:90, title:{display:true,text:'실행지수'} } } });
+};
+
+/* legacy a-compare (api 연결 경로, 사용 안 함) --- 보존용 주석 처리 */
+VIEWS['__a-compare-legacy'] = async function(root){
   root.innerHTML = tplLoading(2);
   const periodA = state.period === 'custom' ? '30d' : state.period;
   const periodB = periodA === '7d' ? '30d' : (periodA === '30d' ? '90d' : '90d');
@@ -2115,23 +3092,61 @@ function setRole(role){
     const r = b.dataset.role;
     b.setAttribute('aria-pressed', r===role ? 'true':'false');
     b.disabled = !allowed.includes(r);
+    if (!allowed.includes(r)) {
+      b.title = '이 계정에는 해당 역할 보기 권한이 없습니다';
+      b.setAttribute('aria-disabled','true');
+    } else {
+      b.removeAttribute('title');
+      b.removeAttribute('aria-disabled');
+    }
   });
 
-  renderSideMenu();
-  const firstId = MENUS[role][0].id;
+  // 역할 전환 시 현재 카테고리가 해당 역할에서 지원되지 않으면 home으로 되돌림
+  if (!ROLE_CATEGORIES[role].includes(state.category || 'home')) {
+    state.category = 'home';
+  }
+  renderSideMenu(state.category || 'home');
+  const firstId = defaultViewForCategory(role, state.category || 'home') || MENUS[role][0].id;
   setView(firstId);
 }
 
-function renderSideMenu(){
-  const items = MENUS[state.role] || [];
-  document.getElementById('roleMenuTitle').textContent =
-    state.role==='student'?'학생':state.role==='teacher'?'교사':'관리자';
-  document.getElementById('roleMenu').innerHTML = items.map(it=>`
-    <button class="menu-item" type="button" data-view="${it.id}"
-      ${state.view===it.id?'aria-current="page"':''}
-      aria-label="${it.label}로 이동">
-      <i class="fas ${it.icon}" aria-hidden="true"></i><span class="label">${it.label}</span>
-    </button>`).join('');
+function renderSideMenu(cat){
+  const useCat = cat || state.category || 'home';
+  state.category = useCat;
+  const aside = document.querySelector('.lrs-sidemenu');
+  const allItems = MENUS[state.role] || [];
+  // 홈 카테고리: 사이드바 전체 숨김 (빈 pill 금지)
+  if (useCat === 'home'){
+    if (aside) aside.setAttribute('data-hidden', 'true');
+    const m = document.getElementById('roleMenu'); if (m) m.innerHTML = '';
+    document.getElementById('bcRole').textContent =
+      state.role==='student'?'학생':state.role==='teacher'?'교사':'관리자';
+    return;
+  }
+  if (aside) aside.setAttribute('data-hidden', 'false');
+
+  const items = allItems.filter(it => it.category === useCat);
+  document.getElementById('roleMenuTitle').textContent = MENU_LABELS[useCat] || '메뉴';
+
+  // group 필드로 묶어 헤더 삽입
+  const groups = [];
+  const seen = new Map();
+  items.forEach(it => {
+    const g = it.group || '기타';
+    if (!seen.has(g)){ seen.set(g, groups.length); groups.push({ name:g, items:[] }); }
+    groups[seen.get(g)].items.push(it);
+  });
+  const catLabel = MENU_LABELS[useCat] || '';
+  document.getElementById('roleMenu').innerHTML = groups.map(g => `
+    <div class="dc-sidemenu-group">
+      ${(groups.length>1 && g.name !== catLabel) ? `<div class="dc-sidemenu-group-title">${escapeHtml(g.name)}</div>` : ''}
+      ${g.items.map(it=>`
+        <button class="menu-item" type="button" data-view="${escapeAttr(it.id)}"
+          ${state.view===it.id?'aria-current="page"':''}
+          aria-label="${escapeAttr(it.label)}로 이동">
+          <i class="fas ${escapeAttr(it.icon)}" aria-hidden="true"></i><span class="label">${escapeHtml(it.label)}</span>
+        </button>`).join('')}
+    </div>`).join('');
   document.getElementById('roleMenu').querySelectorAll('button').forEach(b=>{
     b.onclick = ()=> setView(b.dataset.view);
   });
@@ -2144,10 +3159,36 @@ async function setView(id){
   const items = MENUS[state.role] || [];
   const cur = items.find(it=>it.id===id);
   document.getElementById('bcPage').textContent = cur ? cur.label : '—';
-  renderSideMenu();
-  // hashchange 리스너 루프 방지: 현재 해시와 다를 때만 replaceState
-  if (('#'+id) !== location.hash) {
-    try { history.replaceState(null, '', '#'+id); } catch(_) { location.hash = id; }
+  const menuKey = viewToMenu(id);
+  state.category = menuKey || state.category || 'home';
+  const bcMenuEl = document.getElementById('bcMenu');
+  // 브레드크럼: 홈 카테고리면 "역할 > 홈" 3단, 그 외 4단
+  const isHome = state.category === 'home';
+  if (bcMenuEl) {
+    if (isHome) {
+      bcMenuEl.textContent = '';
+      bcMenuEl.setAttribute('hidden','');
+      // 홈에서는 bcPage만 "홈"으로
+      document.getElementById('bcPage').textContent = '홈';
+    } else {
+      bcMenuEl.removeAttribute('hidden');
+      bcMenuEl.textContent = MENU_LABELS[state.category] || '—';
+    }
+  }
+  renderSideMenu(state.category);
+  // URL 동기화: hash + ?menu= 둘 다 갱신
+  try {
+    const url = new URL(location.href);
+    url.hash = id;
+    if (menuKey) url.searchParams.set('menu', menuKey);
+    const next = url.pathname + url.search + url.hash;
+    const curr = location.pathname + location.search + location.hash;
+    if (next !== curr) {
+      history.replaceState(null, '', next);
+      try { window.dispatchEvent(new CustomEvent('dacheum:menu-changed', { detail: { menu: menuKey, view: id } })); } catch(_){}
+    }
+  } catch(_) {
+    if (('#'+id) !== location.hash) { try { location.hash = id; } catch(__){} }
   }
 
   destroyCharts();
@@ -2190,6 +3231,9 @@ function bindPeriodPicker(){
  * ===================================================================== */
 const LRS = window.LRS = {
   _warnCache: [],
+  // 관리자 분석 공용 헬퍼 (n<threshold 차단·행 마스킹)
+  minSampleGuard: _minSampleGuard,
+  cellSuppress:   _cellSuppress,
   openDrilldown(student){
     student = student || {};
     const overlay = document.getElementById('drawerOverlay');
@@ -2313,8 +3357,23 @@ async function boot(){
 
   // 쿼리/해시 기반 초기 뷰
   const urlParams = new URLSearchParams(location.search);
-  const menuParam = urlParams.get('menu');
+  let menuParam = urlParams.get('menu');
   const hash = (location.hash||'').replace('#','');
+
+  // 레거시 URL 정규화: 구 뷰 키(usage/achieve/...) 또는 구 뷰 id(a-usage, t-warnings...)를 카테고리로 보정
+  let legacyHashOverride = null;
+  if (menuParam && !MENU_TO_VIEW[menuParam] && LEGACY_MENU_TO_CATEGORY[menuParam]) {
+    const mappedCat = LEGACY_MENU_TO_CATEGORY[menuParam];
+    // 구 뷰 id였다면 해당 뷰로 진입, 카테고리 키였다면 카테고리 기본 뷰로 진입
+    if (VIEWS[menuParam] && !location.hash) {
+      legacyHashOverride = menuParam;
+      try { history.replaceState(null, '', '/lrs/index.html?menu=' + mappedCat + '#' + menuParam); } catch(_) {}
+    } else {
+      try { history.replaceState(null, '', '/lrs/index.html?menu=' + mappedCat); } catch(_) {}
+    }
+    menuParam = mappedCat;
+    urlParams.set('menu', mappedCat);
+  }
 
   // 초기 역할 결정: 해시 prefix 우선, 없으면 user.role
   const roleByHash = hash.startsWith('s-')?'student':hash.startsWith('t-')?'teacher':hash.startsWith('a-')?'admin':null;
@@ -2322,7 +3381,13 @@ async function boot(){
 
   // ?menu= 우선 결정 — setRole의 기본 setView와 레이스 방지를 위해 한 번만 setView 호출
   let overrideViewId = null;
-  if (menuParam && MENU_TO_VIEW[menuParam]) {
+  let denied403Menu = null;
+  if (legacyHashOverride && VIEWS[legacyHashOverride]) {
+    overrideViewId = legacyHashOverride;
+  } else if (hash && VIEWS[hash]) {
+    // 사용자 지정 hash가 있으면 최우선 (카테고리 default 무시)
+    overrideViewId = hash;
+  } else if (menuParam && MENU_TO_VIEW[menuParam]) {
     // 역할 권한 확정 (setRole의 허용 로직 복제)
     const allowed = user.role === 'admin' ? ['student','teacher','admin']
                   : user.role === 'teacher' ? ['student','teacher']
@@ -2330,7 +3395,8 @@ async function boot(){
     const effRole = allowed.includes(initialRole) ? initialRole : allowed[allowed.length-1];
     overrideViewId = MENU_TO_VIEW[menuParam][effRole];
     if (!overrideViewId) {
-      // 권한 없는 메뉴(예: 학생이 ?menu=teacher) → 홈으로 안내
+      // 권한 없는 메뉴(예: 학생이 ?menu=teacher) → 홈으로 안내 + 배너
+      denied403Menu = menuParam;
       overrideViewId = MENU_TO_VIEW.home[effRole];
     }
     if (overrideViewId && !VIEWS[overrideViewId]) overrideViewId = null;
@@ -2351,11 +3417,34 @@ async function boot(){
       const r = b.dataset.role;
       b.setAttribute('aria-pressed', r===effRole ? 'true':'false');
       b.disabled = !allowed.includes(r);
+      if (!allowed.includes(r)) {
+        b.title = '이 계정에는 해당 역할 보기 권한이 없습니다';
+        b.setAttribute('aria-disabled','true');
+      } else {
+        b.removeAttribute('title');
+        b.removeAttribute('aria-disabled');
+      }
     });
     renderSideMenu();
-    setView(overrideViewId);
+    await setView(overrideViewId);
   } else {
     setRole(initialRole);
+  }
+
+  // 권한 없는 ?menu= 접근 시 인라인 403 배너
+  if (denied403Menu) {
+    try {
+      const banner = document.createElement('div');
+      banner.className = 'dc-state-panel';
+      banner.setAttribute('role','alert');
+      banner.style.cssText = 'background:#FFF3CD;color:var(--gray-800);margin:12px 0;padding:12px 16px;border-radius:8px;border-left:4px solid #F59E0B;';
+      banner.innerHTML = '<strong>접근 권한 없음:</strong> 요청하신 "'
+        + escapeHtml(MENU_LABELS[denied403Menu]||denied403Menu)
+        + '" 메뉴는 현재 역할에서 이용할 수 없습니다. 홈 화면으로 이동했습니다.';
+      const rootEl = document.getElementById('viewRoot');
+      if (rootEl) rootEl.insertBefore(banner, rootEl.firstChild);
+      setTimeout(()=>{ try{ banner.remove(); }catch(_){} }, 6000);
+    } catch(_){}
   }
 
   document.addEventListener('keydown', e => { if (e.key === 'Escape') LRS.closeDrawer(); });

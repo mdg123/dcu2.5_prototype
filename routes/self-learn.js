@@ -183,13 +183,113 @@ router.delete('/daily/sets/:setId/items/:itemId', requireAuth, (req, res) => {
 // ========== AI 맞춤학습 ==========
 
 // GET /map/nodes — 학습맵 노드 목록 (확장: schoolLevel, semester, area, status, keyword)
+// 기본: node_level=3만 반환. includeGroups=true이면 2단계까지 포함
 router.get('/map/nodes', requireAuth, (req, res) => {
   try {
-    const nodes = selfLearnDb.getMapNodes({ ...req.query, userId: req.user.id });
+    let nodes = selfLearnDb.getMapNodes({ ...req.query, userId: req.user.id });
+    const includeGroups = String(req.query.includeGroups || '').toLowerCase() === 'true';
+    const parentNodeId = req.query.parentNodeId ? String(req.query.parentNodeId).trim() : '';
+    const nodeLevelQ = req.query.nodeLevel ? parseInt(req.query.nodeLevel) : null;
+    if (parentNodeId) {
+      nodes = nodes.filter(n => n.parent_node_id === parentNodeId);
+    } else if (nodeLevelQ === 2) {
+      nodes = nodes.filter(n => n.node_level === 2);
+    } else if (nodeLevelQ === 3) {
+      nodes = nodes.filter(n => n.node_level === 3 || n.node_level == null);
+    } else if (!includeGroups) {
+      nodes = nodes.filter(n => n.node_level === 3 || n.node_level == null);
+    } else {
+      nodes = nodes.filter(n => n.node_level == null || n.node_level === 2 || n.node_level === 3);
+    }
     res.json({ success: true, nodes });
   } catch (err) {
     console.error('[SELF-LEARN] map/nodes error:', err);
     res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// GET /map/nodes/:unitId/lessons — 단원(level=2) 노드의 자식 차시(level=3) 목록
+// 각 차시의 videos_count, problems_count, user_status 를 포함 (공개 승인된 콘텐츠만 카운트)
+router.get('/map/nodes/:unitId/lessons', requireAuth, (req, res) => {
+  try {
+    const path = require('path');
+    const db = require('better-sqlite3')(path.join(__dirname, '..', 'data', 'dacheum.db'));
+    const unitId = req.params.unitId;
+    const unit = db.prepare('SELECT * FROM learning_map_nodes WHERE node_id = ?').get(unitId);
+    if (!unit) {
+      return res.status(404).json({ success: false, message: '단원을 찾을 수 없습니다.' });
+    }
+    const lessons = db.prepare(`
+      SELECT n.node_id, n.subject, n.grade, n.semester, n.unit_name, n.lesson_name,
+             n.achievement_code, n.node_level, n.parent_node_id, n.sort_order,
+             (SELECT COUNT(*) FROM node_contents nc
+                JOIN contents c ON nc.content_id = c.id
+                WHERE nc.node_id = n.node_id
+                  AND c.content_type = 'video'
+                  AND c.is_public = 1 AND c.status = 'approved') AS videos_count,
+             (SELECT COUNT(*) FROM node_contents nc
+                JOIN contents c ON nc.content_id = c.id
+                WHERE nc.node_id = n.node_id
+                  AND c.content_type IN ('quiz','exam','problem','question','assessment')
+                  AND c.is_public = 1 AND c.status = 'approved') AS problems_count,
+             COALESCE(uns.status, 'not_started') AS user_status,
+             uns.correct_rate AS correct_rate
+      FROM learning_map_nodes n
+      LEFT JOIN user_node_status uns ON uns.node_id = n.node_id AND uns.user_id = ?
+      WHERE n.parent_node_id = ? AND n.node_level = 3
+      ORDER BY n.sort_order, n.node_id
+    `).all(req.user.id, unitId);
+
+    // progress_percent 계산 (영상 0.5 + 문제 0.5 가중)
+    const videoIdsStmt = db.prepare(`
+      SELECT c.id FROM node_contents nc JOIN contents c ON nc.content_id = c.id
+      WHERE nc.node_id = ? AND c.content_type = 'video'
+        AND c.is_public = 1 AND c.status = 'approved'
+    `);
+    const problemIdsStmt = db.prepare(`
+      SELECT c.id FROM node_contents nc JOIN contents c ON nc.content_id = c.id
+      WHERE nc.node_id = ?
+        AND c.content_type IN ('quiz','exam','problem','question','assessment')
+        AND c.is_public = 1 AND c.status = 'approved'
+    `);
+    const videoRatioStmt = db.prepare(`
+      SELECT watch_ratio FROM user_content_progress WHERE user_id = ? AND content_id = ?
+    `);
+    const problemCorrectStmt = db.prepare(`
+      SELECT MAX(is_correct) AS ok FROM problem_attempts WHERE user_id = ? AND content_id = ?
+    `);
+    for (const lesson of lessons) {
+      const videoIds = videoIdsStmt.all(lesson.node_id).map(r => r.id);
+      const problemIds = problemIdsStmt.all(lesson.node_id).map(r => r.id);
+      const totalV = videoIds.length;
+      const totalP = problemIds.length;
+      let watchedV = 0, solvedP = 0;
+      for (const vid of videoIds) {
+        const p = videoRatioStmt.get(req.user.id, vid);
+        if (p && (p.watch_ratio || 0) >= 0.8) watchedV++;
+      }
+      for (const pid of problemIds) {
+        const p = problemCorrectStmt.get(req.user.id, pid);
+        if (p && p.ok === 1) solvedP++;
+      }
+      let progress;
+      if (totalV === 0 && totalP === 0) {
+        if (lesson.user_status === 'completed' || lesson.user_status === 'mastered') progress = 100;
+        else if (lesson.user_status === 'in_progress') progress = 30;
+        else progress = 0;
+      } else if (totalV === 0) {
+        progress = Math.round((solvedP / totalP) * 100);
+      } else if (totalP === 0) {
+        progress = Math.round((watchedV / totalV) * 100);
+      } else {
+        progress = Math.round((watchedV / totalV) * 50 + (solvedP / totalP) * 50);
+      }
+      lesson.progress_percent = Math.max(0, Math.min(100, progress));
+    }
+    res.json({ success: true, unit, lessons });
+  } catch (err) {
+    console.error('[SELF-LEARN] map/nodes/:unitId/lessons error:', err && (err.stack || err.message || err));
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.', debug: String(err && (err.message || err)) });
   }
 });
 
@@ -208,7 +308,16 @@ router.get('/map/nodes/:nodeId', requireAuth, (req, res) => {
 // GET /map/edges — 노드 간 관계
 router.get('/map/edges', requireAuth, (req, res) => {
   try {
-    const edges = selfLearnDb.getMapEdges(req.query);
+    let edges = selfLearnDb.getMapEdges(req.query);
+    const edgeType = String(req.query.edgeType || '').toLowerCase();
+    if (edgeType === 'unit') {
+      edges = edges.filter(e => e.edge_type === 'unit_prerequisite');
+    } else if (edgeType === 'all') {
+      // 전부
+    } else {
+      // 기본: 차시(prerequisite)만
+      edges = edges.filter(e => e.edge_type === 'prerequisite' || e.edge_type == null);
+    }
     res.json({ success: true, edges });
   } catch (err) {
     res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
@@ -221,6 +330,119 @@ router.get('/map/user-status', requireAuth, (req, res) => {
     const statuses = selfLearnDb.getUserNodeStatuses(req.user.id);
     res.json({ success: true, statuses });
   } catch (err) {
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// POST /map/nodes/:nodeId/start — 차시 학습 시작 (status 승격)
+router.post('/map/nodes/:nodeId/start', requireAuth, (req, res) => {
+  try {
+    const nodeId = req.params.nodeId;
+    const path = require('path');
+    const db = require('better-sqlite3')(path.join(__dirname, '..', 'data', 'dacheum.db'));
+
+    const node = db.prepare('SELECT node_id FROM learning_map_nodes WHERE node_id = ?').get(nodeId);
+    if (!node) {
+      db.close();
+      return res.status(404).json({ success: false, message: '노드를 찾을 수 없습니다.' });
+    }
+
+    // 교사 세션은 no-op
+    if (req.user.role === 'teacher') {
+      const existing = db.prepare('SELECT status FROM user_node_status WHERE user_id = ? AND node_id = ?').get(req.user.id, nodeId);
+      const prevStatus = existing ? existing.status : 'not_started';
+      db.close();
+      return res.json({ success: true, status: prevStatus, prevStatus, changed: false });
+    }
+
+    const existing = db.prepare('SELECT status FROM user_node_status WHERE user_id = ? AND node_id = ?').get(req.user.id, nodeId);
+    const prevStatus = existing ? existing.status : 'not_started';
+    const terminal = new Set(['in_progress', 'completed', 'mastered']);
+
+    let nextStatus = prevStatus;
+    let changed = false;
+    if (!existing || prevStatus === 'not_started' || prevStatus === 'available') {
+      nextStatus = 'in_progress';
+      db.prepare(`
+        INSERT INTO user_node_status (user_id, node_id, status, last_accessed_at)
+        VALUES (?, ?, 'in_progress', CURRENT_TIMESTAMP)
+        ON CONFLICT(user_id, node_id) DO UPDATE SET
+          status = 'in_progress',
+          last_accessed_at = CURRENT_TIMESTAMP
+      `).run(req.user.id, nodeId);
+      changed = true;
+    } else if (terminal.has(prevStatus)) {
+      // no-op
+      console.log(`[self-learn] /map/nodes/${nodeId}/start no-op (prevStatus=${prevStatus}, user=${req.user.id})`);
+    }
+
+    db.close();
+    res.json({ success: true, status: nextStatus, prevStatus, changed });
+  } catch (err) {
+    console.error('[SELF-LEARN] map/nodes/start error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// POST /map/nodes/:nodeId/diagnose-complete — 노드 클릭 시 간이 진단 완료 처리
+router.post('/map/nodes/:nodeId/diagnose-complete', requireAuth, (req, res) => {
+  try {
+    const nodeId = req.params.nodeId;
+    const db = require('better-sqlite3')('data/dacheum.db');
+
+    const node = db.prepare('SELECT node_id FROM learning_map_nodes WHERE node_id = ?').get(nodeId);
+    if (!node) {
+      db.close();
+      return res.status(404).json({ success: false, message: '노드를 찾을 수 없습니다.' });
+    }
+
+    const existing = db.prepare('SELECT status FROM user_node_status WHERE user_id = ? AND node_id = ?').get(req.user.id, nodeId);
+    const terminalStates = new Set(['completed', 'diagnosed', 'mastered']);
+
+    let finalStatus;
+    if (existing && terminalStates.has(existing.status)) {
+      // 이미 완료된 노드면 덮어쓰지 않음
+      finalStatus = existing.status;
+    } else {
+      finalStatus = 'diagnosed';
+      db.prepare(`
+        INSERT INTO user_node_status (user_id, node_id, status, last_accessed_at)
+        VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT(user_id, node_id) DO UPDATE SET
+          status = excluded.status,
+          last_accessed_at = CURRENT_TIMESTAMP
+      `).run(req.user.id, nodeId, finalStatus);
+
+      // 간단한 진단 세션 기록 (mode='quick')
+      try {
+        db.prepare(`
+          INSERT INTO diagnosis_sessions
+            (user_id, target_node_id, diagnosis_type, status, total_questions, correct_count, completed_at)
+          VALUES (?, ?, 'quick', 'completed', 0, 0, CURRENT_TIMESTAMP)
+        `).run(req.user.id, nodeId);
+      } catch (e) {
+        // 세션 기록 실패는 무시 (상태 갱신이 주 목적)
+      }
+    }
+
+    const videosCount = db.prepare(`
+      SELECT COUNT(*) AS cnt FROM node_contents nc JOIN contents c ON nc.content_id = c.id
+      WHERE nc.node_id = ? AND c.content_type = 'video'
+    `).get(nodeId).cnt;
+    const problemsCount = db.prepare(`
+      SELECT COUNT(*) AS cnt FROM node_contents nc JOIN contents c ON nc.content_id = c.id
+      WHERE nc.node_id = ? AND c.content_type IN ('quiz','exam','problem','assessment','question')
+    `).get(nodeId).cnt;
+
+    db.close();
+    res.json({
+      success: true,
+      status: finalStatus,
+      videos_count: videosCount,
+      problems_count: problemsCount
+    });
+  } catch (err) {
+    console.error('[SELF-LEARN] map/nodes/diagnose-complete error:', err);
     res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
   }
 });
@@ -482,6 +704,27 @@ router.get('/problem-sets/:id', requireAuth, (req, res) => {
   }
 });
 
+// POST /problem-sets/default/add — "기타(미지정)" 문제집에 자동 추가 (없으면 생성)
+router.post('/problem-sets/default/add', requireAuth, (req, res) => {
+  try {
+    const DEFAULT_TITLE = '기타(미지정)';
+    const contentId = parseInt(req.body.contentId);
+    if (!contentId) return res.status(400).json({ success: false, message: 'contentId가 필요합니다.' });
+    const sets = selfLearnDb.getProblemSets(req.user.id);
+    let target = sets.find(s => s.title === DEFAULT_TITLE);
+    if (!target) {
+      const created = selfLearnDb.createProblemSet(req.user.id, { title: DEFAULT_TITLE, description: '바로 풀기로 자동 추가된 문항 모음' });
+      target = { id: created.id, title: DEFAULT_TITLE };
+    }
+    const addResult = selfLearnDb.addProblemSetItem(target.id, contentId);
+    // 이미 있었으면 addResult.success === false 지만 오류는 아님
+    res.json({ success: true, problemSetId: target.id, added: addResult.success === true, alreadyExists: addResult.success === false });
+  } catch (err) {
+    console.error('default add error:', err);
+    res.status(500).json({ success: false, message: '서버 오류' });
+  }
+});
+
 // POST /problem-sets/:id/items — 문제집에 문항 추가
 router.post('/problem-sets/:id/items', requireAuth, (req, res) => {
   try {
@@ -539,6 +782,46 @@ router.post('/problem-sets/:id/reorder', requireAuth, (req, res) => {
 });
 
 // ========== P0: 문제 시도 / 영상 진행도 / 학습목록 / 이어하기 / 오류신고 ==========
+
+// POST /problem-attempt — 문제 풀이 시도 기록 (별칭, body에 contentId 포함)
+router.post('/problem-attempt', requireAuth, (req, res) => {
+  try {
+    const { contentId, content_id, isCorrect, is_correct, selectedAnswer, userAnswer, user_answer, answer, questionId, question_id, timeTaken, time_taken, nodeId, node_id } = req.body || {};
+    const cid = parseInt(contentId || content_id);
+    if (!cid) return res.status(400).json({ success: false, message: 'contentId 필요' });
+    const result = selfLearnDb.recordProblemAttempt(req.user.id, cid, {
+      isCorrect: !!(isCorrect ?? is_correct),
+      selectedAnswer: selectedAnswer ?? user_answer ?? userAnswer,
+      userAnswer: userAnswer ?? user_answer,
+      answer,
+      questionId: questionId || question_id,
+      timeTaken: timeTaken || time_taken,
+      nodeId: nodeId || node_id
+    });
+    res.json({ success: true, ...result });
+  } catch (err) {
+    console.error('[SELF-LEARN] problem-attempt error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// POST /video-progress — 영상 진행도 저장 (별칭, body에 contentId 포함)
+router.post('/video-progress', requireAuth, (req, res) => {
+  try {
+    const { contentId, content_id, positionSec, position_sec, durationSec, duration_sec, nodeId, node_id } = req.body || {};
+    const cid = parseInt(contentId || content_id);
+    if (!cid) return res.status(400).json({ success: false, message: 'contentId 필요' });
+    const result = selfLearnDb.recordVideoProgress(req.user.id, cid, {
+      positionSec: parseInt(positionSec ?? position_sec) || 0,
+      durationSec: parseInt(durationSec ?? duration_sec) || 0,
+      nodeId: nodeId || node_id
+    });
+    res.json({ success: true, ...result });
+  } catch (err) {
+    console.error('[SELF-LEARN] video-progress error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
 
 // POST /contents/:contentId/attempt — 문제 풀이 시도 기록
 router.post('/contents/:contentId/attempt', requireAuth, (req, res) => {

@@ -552,4 +552,121 @@ router.get('/channels/subscriptions/list', requireAuth, (req, res) => {
   }
 });
 
+// ===== 콘텐츠 풀이 시도 기록 (문항/평가지) =====
+const Database = require('better-sqlite3');
+function _attemptsDb() { return new Database('data/dacheum.db'); }
+
+// POST /api/contents/:id/attempts - 풀이 결과 기록
+router.post('/:id/attempts', requireAuth, (req, res) => {
+  try {
+    const contentId = parseInt(req.params.id);
+    const { total_questions = 0, correct_count = 0, score_percent = 0, answers = null } = req.body || {};
+    const db = _attemptsDb();
+    try {
+      const stmt = db.prepare(`INSERT INTO content_attempts (content_id, user_id, total_questions, correct_count, score_percent, answers) VALUES (?, ?, ?, ?, ?, ?)`);
+      const info = stmt.run(contentId, req.user.id, total_questions, correct_count, score_percent, answers ? JSON.stringify(answers) : null);
+      res.json({ success: true, id: info.lastInsertRowid });
+    } finally { db.close(); }
+  } catch (err) {
+    console.error('content attempts insert error:', err);
+    res.status(500).json({ success: false, message: '기록 저장 실패' });
+  }
+});
+
+// GET /api/contents/:id/my-stats - 내 풀이 통계
+router.get('/:id/my-stats', requireAuth, (req, res) => {
+  try {
+    const contentId = parseInt(req.params.id);
+    const db = _attemptsDb();
+    try {
+      const row = db.prepare(`SELECT COUNT(*) AS attempt_count, MAX(score_percent) AS best_score_percent, MAX(attempted_at) AS last_attempted_at FROM content_attempts WHERE content_id = ? AND user_id = ?`).get(contentId, req.user.id);
+      const last = db.prepare(`SELECT score_percent AS last_score_percent, correct_count AS last_correct, total_questions AS last_total FROM content_attempts WHERE content_id = ? AND user_id = ? ORDER BY attempted_at DESC LIMIT 1`).get(contentId, req.user.id);
+      res.json({ success: true, stats: { ...(row || {}), ...(last || {}) } });
+    } finally { db.close(); }
+  } catch (err) {
+    res.status(500).json({ success: false, message: '통계 조회 실패' });
+  }
+});
+
+// POST /api/contents/my-stats-bulk - 여러 콘텐츠의 내 풀이 통계 일괄 조회
+router.post('/my-stats-bulk', requireAuth, (req, res) => {
+  try {
+    const ids = Array.isArray(req.body.ids) ? req.body.ids.map(x => parseInt(x)).filter(Boolean) : [];
+    if (!ids.length) return res.json({ success: true, stats: {} });
+    const db = _attemptsDb();
+    try {
+      const placeholders = ids.map(() => '?').join(',');
+      const rows = db.prepare(`SELECT content_id, COUNT(*) AS attempt_count, MAX(score_percent) AS best_score_percent, MAX(attempted_at) AS last_attempted_at FROM content_attempts WHERE user_id = ? AND content_id IN (${placeholders}) GROUP BY content_id`).all(req.user.id, ...ids);
+      const stats = {};
+      rows.forEach(r => { stats[r.content_id] = r; });
+      res.json({ success: true, stats });
+    } finally { db.close(); }
+  } catch (err) {
+    res.status(500).json({ success: false, message: '통계 조회 실패' });
+  }
+});
+
+// POST /api/contents/aggregate-stats-bulk - 여러 콘텐츠의 전체 사용자 풀이 통계 일괄 조회
+router.post('/aggregate-stats-bulk', (req, res) => {
+  try {
+    const ids = Array.isArray(req.body.ids) ? req.body.ids.map(x => parseInt(x)).filter(Boolean) : [];
+    if (!ids.length) return res.json({ success: true, stats: {} });
+    const db = _attemptsDb();
+    try {
+      const placeholders = ids.map(() => '?').join(',');
+      const rows = db.prepare(`SELECT
+        content_id,
+        COUNT(*) AS total_attempts,
+        COUNT(DISTINCT user_id) AS unique_solvers,
+        AVG(score_percent) AS avg_score_percent,
+        SUM(correct_count) AS total_correct,
+        SUM(total_questions) AS total_questions
+      FROM content_attempts
+      WHERE content_id IN (${placeholders})
+      GROUP BY content_id`).all(...ids);
+      const stats = {};
+      rows.forEach(r => {
+        stats[r.content_id] = {
+          total_attempts: r.total_attempts || 0,
+          unique_solvers: r.unique_solvers || 0,
+          avg_score_percent: r.avg_score_percent != null ? Math.round(r.avg_score_percent) : null,
+          correct_rate: (r.total_questions > 0) ? Math.round((r.total_correct / r.total_questions) * 100) : null
+        };
+      });
+      res.json({ success: true, stats });
+    } finally { db.close(); }
+  } catch (err) {
+    res.status(500).json({ success: false, message: '집계 통계 조회 실패' });
+  }
+});
+
+// GET /api/contents/:id/aggregate-stats - 단일 콘텐츠 전체 통계
+router.get('/:id/aggregate-stats', (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (!id) return res.status(400).json({ success: false });
+    const db = _attemptsDb();
+    try {
+      const r = db.prepare(`SELECT
+        COUNT(*) AS total_attempts,
+        COUNT(DISTINCT user_id) AS unique_solvers,
+        AVG(score_percent) AS avg_score_percent,
+        SUM(correct_count) AS total_correct,
+        SUM(total_questions) AS total_questions
+      FROM content_attempts WHERE content_id = ?`).get(id);
+      res.json({
+        success: true,
+        aggregate: {
+          total_attempts: r?.total_attempts || 0,
+          unique_solvers: r?.unique_solvers || 0,
+          avg_score_percent: (r && r.avg_score_percent != null) ? Math.round(r.avg_score_percent) : null,
+          correct_rate: (r && r.total_questions > 0) ? Math.round((r.total_correct / r.total_questions) * 100) : null
+        }
+      });
+    } finally { db.close(); }
+  } catch (err) {
+    res.status(500).json({ success: false, message: '집계 통계 조회 실패' });
+  }
+});
+
 module.exports = router;

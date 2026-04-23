@@ -884,6 +884,21 @@ function initSchema() {
       FOREIGN KEY (user_id) REFERENCES users(id)
     );
 
+    -- ============ 콘텐츠 풀이 시도 기록 (문항/평가지 플레이어) ============
+    CREATE TABLE IF NOT EXISTS content_attempts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      content_id INTEGER NOT NULL,
+      user_id INTEGER NOT NULL,
+      total_questions INTEGER DEFAULT 0,
+      correct_count INTEGER DEFAULT 0,
+      score_percent REAL DEFAULT 0,
+      answers TEXT,
+      attempted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (content_id) REFERENCES contents(id),
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_content_attempts_user ON content_attempts(user_id, content_id);
+
     -- ============ CBT 확장 (SFR-032) ============
     CREATE TABLE IF NOT EXISTS exam_autosaves (
       id INTEGER PRIMARY KEY AUTOINCREMENT,

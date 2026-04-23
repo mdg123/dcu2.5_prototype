@@ -73,13 +73,11 @@
       id: 'lrsAnalytics', label: 'LRS 학습분석',
       defaultUrl: '/lrs/index.html?menu=home',
       sub: [
-        { label: '홈', url: '/lrs/index.html?menu=home', roles: ['teacher', 'admin'] },
-        { label: '학습현황', url: '/lrs/index.html?menu=usage', roles: ['teacher', 'admin'] },
-        { label: '학업성취', url: '/lrs/index.html?menu=achieve', roles: ['teacher', 'admin'] },
-        { label: '학습수행', url: '/lrs/index.html?menu=perform', roles: ['teacher', 'admin'] },
-        { label: '맞춤학습', url: '/lrs/index.html?menu=custom', roles: ['teacher', 'admin'] },
-        { label: '교사활용지수', url: '/lrs/index.html?menu=teacher', roles: ['teacher', 'admin'] },
-        { label: '일일현황', url: '/lrs/index.html?menu=daily', roles: ['teacher', 'admin'] }
+        { label: '🏠 홈',        url: '/lrs/index.html?menu=home',       roles: ['student','teacher','admin'] },
+        { label: '현황 분석',    url: '/lrs/index.html?menu=analytics',  roles: ['student','teacher','admin'] },
+        { label: '학습 활동',    url: '/lrs/index.html?menu=activities', roles: ['student','teacher','admin'] },
+        { label: '운영',         url: '/lrs/index.html?menu=operations', roles: ['teacher','admin'] },
+        { label: '리포트',       url: '/lrs/index.html?menu=reports',    roles: ['admin'] }
       ]
     }
   ];
@@ -114,6 +112,17 @@
   function detectActiveSub(menu) {
     if (!menu || !menu.sub) return null;
     const full = location.pathname + location.search + (location.hash.split('?')[0] || '');
+    // menu= 파라미터 기반 매칭 (LRS 등 ?menu=xxx 패턴 우선)
+    try {
+      const curMenu = new URL(location.href).searchParams.get('menu');
+      if (curMenu){
+        for (const sub of menu.sub){
+          if (sub.divider) continue;
+          const subMenu = new URL(sub.url, location.origin).searchParams.get('menu');
+          if (subMenu && subMenu === curMenu) return sub.url;
+        }
+      }
+    } catch(_){}
     for (const sub of menu.sub) {
       if (sub.divider) continue;
       if (full === sub.url) return sub.url;
@@ -176,6 +185,7 @@
         <i class="fas fa-envelope"></i>
         <span id="gnbUnreadBadge" style="display:none;position:absolute;top:-4px;right:-6px;background:#EF4444;color:#fff;border-radius:50%;min-width:16px;height:16px;font-size:0.65rem;font-weight:700;line-height:16px;text-align:center;padding:0 3px;"></span>
       </a>
+      ${user.role === 'admin' ? `<a href="/admin/index.html" class="gnb-admin-btn" title="관리자 페이지" style="display:inline-flex;align-items:center;gap:4px;padding:4px 10px;background:#4F46E5;color:#fff;border-radius:6px;font-size:0.75rem;font-weight:600;text-decoration:none;margin-right:4px;"><i class="fas fa-cog"></i> 관리자 페이지</a>` : ''}
       <span class="gnb-user-role">${roleBadge[user.role] || user.role}</span>
       <span class="gnb-user-name">${user.display_name}</span>
       <button class="gnb-logout-btn" id="gnbLogoutBtn">로그아웃</button>
@@ -207,13 +217,17 @@
 
     document.body.prepend(wrapper);
 
-    // hash 변경 시 2차 메뉴 active 상태 갱신
-    window.addEventListener('hashchange', () => {
+    // hash 변경 또는 ?menu= 변경 시 2차 메뉴 active 상태 갱신
+    function refreshNav2Active(){
       const newActiveSub = detectActiveSub(activeMenu);
       document.querySelectorAll('.gnb-nav2-item').forEach(item => {
         item.classList.toggle('active', item.getAttribute('href') === newActiveSub);
       });
-    });
+    }
+    window.addEventListener('hashchange', refreshNav2Active);
+    window.addEventListener('popstate', refreshNav2Active);
+    // LRS 내부 setView가 history.replaceState로 URL을 갱신할 때 호출
+    window.addEventListener('dacheum:menu-changed', refreshNav2Active);
 
     // 2차 바 왼쪽 정렬: 1차 메뉴 첫 항목 위치에 맞춤
     requestAnimationFrame(() => {

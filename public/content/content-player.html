@@ -1,0 +1,738 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>콘텐츠 플레이어 - 다채움</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css">
+  <script defer src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.js"></script>
+  <script defer src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/contrib/auto-render.min.js"></script>
+  <style>
+    :root{--primary:#2563eb;--primary-dark:#1d4ed8;--primary-light:#eff6ff;--success:#10b981;--warning:#f59e0b;--danger:#ef4444;--gray-50:#F9FAFB;--gray-100:#F3F4F6;--gray-200:#E5E7EB;--gray-300:#D1D5DB;--gray-400:#9CA3AF;--gray-500:#6B7280;--gray-600:#4B5563;--gray-700:#374151;--gray-800:#1F2937;}
+    *{margin:0;padding:0;box-sizing:border-box;}
+    body{font-family:'Pretendard','Noto Sans KR',system-ui,sans-serif;background:#F5F7FA;height:100vh;overflow:hidden;color:var(--gray-800);}
+
+    /* 헤더 */
+    .player-header{position:fixed;top:0;left:0;right:0;height:56px;background:#fff;border-bottom:1px solid var(--gray-200);display:flex;align-items:center;justify-content:space-between;padding:0 20px;z-index:100;}
+    .header-left{display:flex;align-items:center;gap:12px;}
+    .header-center{display:flex;align-items:center;gap:16px;}
+    .header-right{display:flex;align-items:center;gap:8px;}
+    .player-title{font-size:15px;font-weight:700;color:var(--gray-800);max-width:420px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+    .type-badge{display:inline-block;padding:3px 10px;border-radius:6px;font-size:11px;font-weight:700;background:var(--primary-light);color:var(--primary);}
+    .progress-text{font-size:13px;color:var(--gray-500);}
+    .btn{padding:8px 16px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;border:none;font-family:inherit;display:inline-flex;align-items:center;gap:6px;}
+    .btn-back{background:none;color:var(--gray-500);}.btn-back:hover{background:var(--gray-100);}
+    .btn-primary{background:var(--primary);color:#fff;}.btn-primary:hover{background:var(--primary-dark);}
+    .btn-success{background:var(--success);color:#fff;}
+    .btn-outline{background:#fff;color:var(--gray-600);border:1.5px solid var(--gray-300);}
+    .btn-outline:hover{background:var(--gray-50);}
+    .btn:disabled{opacity:.45;cursor:not-allowed;}
+
+    /* 레이아웃 */
+    .player-container{display:flex;height:calc(100vh - 56px);margin-top:56px;}
+    .sidebar{width:240px;background:#fff;border-right:1px solid var(--gray-200);display:flex;flex-direction:column;flex-shrink:0;}
+    .sidebar-header{padding:16px;border-bottom:1px solid var(--gray-100);font-size:13px;font-weight:700;color:var(--gray-700);}
+    .q-nav{flex:1;overflow-y:auto;padding:12px;}
+    .q-nav-item{width:40px;height:40px;border-radius:10px;display:inline-flex;align-items:center;justify-content:center;font-size:13px;font-weight:600;margin:4px;cursor:pointer;border:2px solid var(--gray-200);background:#fff;color:var(--gray-600);transition:all .15s;}
+    .q-nav-item:hover{border-color:var(--primary);color:var(--primary);}
+    .q-nav-item.active{background:var(--primary);color:#fff;border-color:var(--primary);}
+    .q-nav-item.answered{background:var(--primary-light);color:var(--primary);border-color:var(--primary);}
+    .q-nav-item.review-correct{background:#dcfce7;color:#16a34a;border-color:#86efac;}
+    .q-nav-item.review-wrong{background:#fef2f2;color:#ef4444;border-color:#fca5a5;}
+    .q-nav-item.review-unanswered{background:#fef3c7;color:#d97706;border-color:#fde68a;}
+    .q-nav-item.review-pending{background:#eff6ff;color:var(--primary);border-color:#93c5fd;}
+    .sidebar-footer{padding:12px 16px;border-top:1px solid var(--gray-100);font-size:13px;color:var(--gray-500);}
+    .sidebar-footer .count{font-weight:700;color:var(--primary);}
+
+    /* 문항 영역 */
+    .question-area{flex:1;overflow-y:auto;padding:40px;display:flex;justify-content:center;}
+    .question-card{max-width:720px;width:100%;}
+    .q-header-row{display:flex;align-items:center;gap:10px;margin-bottom:8px;flex-wrap:wrap;}
+    .q-number{font-size:13px;font-weight:700;color:var(--primary);}
+    .q-type-badge{display:inline-flex;align-items:center;padding:3px 10px;border-radius:6px;font-size:11px;font-weight:700;}
+    .q-type-badge.choice{background:#dbeafe;color:#1e40af;}
+    .q-type-badge.short{background:#d1fae5;color:#065f46;}
+    .q-type-badge.essay{background:#ede9fe;color:#5b21b6;}
+    .q-points{font-size:12px;color:var(--gray-500);}
+    .q-text{font-size:17px;font-weight:600;color:var(--gray-800);margin-bottom:24px;line-height:1.75;}
+    .option-list{display:flex;flex-direction:column;gap:10px;}
+    .option-item{display:flex;align-items:center;gap:12px;padding:14px 18px;border:2px solid var(--gray-200);border-radius:12px;cursor:pointer;transition:all .15s;background:#fff;}
+    .option-item:hover{border-color:var(--primary);background:var(--primary-light);}
+    .option-item.selected{border-color:var(--primary);background:var(--primary-light);}
+    .option-num{width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;background:var(--gray-100);color:var(--gray-600);flex-shrink:0;}
+    .option-item.selected .option-num{background:var(--primary);color:#fff;}
+    .option-text{font-size:15px;color:var(--gray-700);line-height:1.6;}
+    .short-input{width:100%;padding:14px 16px;border:2px solid var(--gray-200);border-radius:12px;font-size:15px;font-family:inherit;}
+    .short-input:focus{border-color:var(--primary);outline:none;}
+    .essay-input{width:100%;min-height:160px;padding:14px 16px;border:2px solid var(--gray-200);border-radius:12px;font-size:15px;font-family:inherit;resize:vertical;line-height:1.6;}
+    .essay-input:focus{border-color:var(--primary);outline:none;}
+    .nav-buttons{display:flex;justify-content:space-between;margin-top:32px;gap:12px;}
+
+    /* 리뷰 모드 */
+    .review-banner{background:linear-gradient(135deg,#ecfdf5,#d1fae5);border-bottom:2px solid #6ee7b7;padding:10px 20px;text-align:center;font-size:14px;font-weight:700;color:#16a34a;}
+    .review-banner i{margin-right:6px;}
+    .option-item.review-correct{border-color:#22c55e;background:#f0fdf4;}
+    .option-item.review-correct .option-num{background:#22c55e;color:#fff;}
+    .option-item.review-wrong{border-color:#ef4444;background:#fef2f2;}
+    .option-item.review-wrong .option-num{background:#ef4444;color:#fff;}
+    .option-item.review-neutral{opacity:.7;}
+    .q-result-badge{display:inline-flex;align-items:center;gap:4px;padding:4px 12px;border-radius:20px;font-size:13px;font-weight:700;}
+    .q-result-badge.correct{background:#dcfce7;color:#16a34a;}
+    .q-result-badge.wrong{background:#fef2f2;color:#ef4444;}
+    .q-result-badge.unanswered{background:#fef3c7;color:#d97706;}
+    .q-result-badge.pending{background:#dbeafe;color:#1e40af;}
+    .q-feedback{margin-top:16px;padding:14px 18px;background:var(--primary-light);border-radius:10px;font-size:14px;color:var(--gray-700);line-height:1.6;border-left:3px solid var(--primary);}
+    .q-feedback .fb-label{font-weight:700;color:var(--primary);margin-bottom:4px;display:flex;align-items:center;gap:6px;}
+    .q-feedback.correct{background:#f0fdf4;border-left-color:#22c55e;}
+    .q-feedback.correct .fb-label{color:#16a34a;}
+    .q-feedback.wrong{background:#fef2f2;border-left-color:#ef4444;}
+    .q-feedback.wrong .fb-label{color:#dc2626;}
+    .q-explanation{margin-top:12px;padding:12px 16px;background:#fafafa;border-radius:8px;font-size:13px;color:var(--gray-600);line-height:1.6;border-left:3px solid var(--gray-300);}
+    .q-explanation .ex-label{font-weight:700;color:var(--gray-700);margin-bottom:4px;display:flex;align-items:center;gap:6px;}
+
+    .review-score-summary{text-align:center;padding:16px;border-bottom:1px solid var(--gray-100);}
+    .review-score-big{font-size:36px;font-weight:800;margin:4px 0;}
+    .review-score-big.high{color:#16a34a;}.review-score-big.mid{color:#d97706;}.review-score-big.low{color:#ef4444;}
+    .review-score-label{font-size:12px;color:var(--gray-500);}
+
+    /* 결과 오버레이 */
+    .result-overlay{position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:9000;display:none;align-items:center;justify-content:center;}
+    .result-overlay.show{display:flex;}
+    .result-card{background:#fff;border-radius:20px;padding:40px 36px;text-align:center;max-width:440px;width:90%;box-shadow:0 20px 60px rgba(0,0,0,.2);}
+    .result-icon{font-size:56px;margin-bottom:12px;}
+    .result-title{font-size:22px;font-weight:800;color:var(--gray-800);margin-bottom:12px;}
+    .result-score{font-size:56px;font-weight:900;margin:8px 0;color:var(--primary);}
+    .result-sub{font-size:14px;color:var(--gray-500);margin-bottom:24px;}
+    .result-actions{display:flex;gap:10px;justify-content:center;}
+
+    .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--gray-800);color:#fff;padding:12px 24px;border-radius:10px;font-size:14px;z-index:9999;display:none;}
+
+    @media (max-width: 768px){
+      .player-container{flex-direction:column;overflow-y:auto;}
+      .sidebar{width:100%;height:auto;flex-shrink:0;border-right:none;border-bottom:1px solid var(--gray-200);}
+      .q-nav{display:flex;flex-wrap:wrap;justify-content:center;padding:8px;}
+      .q-nav-item{width:32px;height:32px;font-size:11px;margin:2px;}
+      .sidebar-header,.sidebar-footer{padding:8px 12px;}
+      .question-area{padding:20px 16px;}
+      body{overflow:auto;}
+      .player-title{max-width:180px;}
+    }
+  </style>
+</head>
+<body>
+  <div class="player-header">
+    <div class="header-left">
+      <button class="btn btn-back" onclick="exitPlayer()"><i class="fas fa-arrow-left"></i> 나가기</button>
+      <span class="type-badge" id="typeBadge">콘텐츠</span>
+      <span class="player-title" id="playerTitle">로딩 중…</span>
+    </div>
+    <div class="header-center">
+      <span class="progress-text" id="progressText">0 / 0 문항</span>
+    </div>
+    <div class="header-right">
+      <button class="btn btn-outline" onclick="saveToCollectionFromPlayer()" title="내 자료에 담기"><i class="fas fa-bookmark"></i> 내 자료에 추가</button>
+      <button class="btn btn-outline" onclick="addToProblemSetFromPlayer()" title="내 문제집에 추가"><i class="fas fa-book-medical"></i> 내 문제집에 추가</button>
+      <button class="btn btn-outline" onclick="quickPlayFromPlayer()" style="color:var(--gray-500);" title="기타(미지정) 문제집에 자동 추가"><i class="fas fa-play-circle"></i> 바로 풀기</button>
+    </div>
+  </div>
+
+  <div id="modeNotice" style="display:none;position:fixed;top:56px;left:0;right:0;z-index:90;padding:10px 20px;background:#fef9c3;border-bottom:1px solid #fde68a;color:#854d0e;font-size:13px;line-height:1.5;"></div>
+
+  <div class="player-container">
+    <div class="sidebar">
+      <div class="sidebar-header">문항 번호</div>
+      <div class="review-score-summary" id="reviewScoreSummary" style="display:none;">
+        <div class="review-score-label">채점 결과</div>
+        <div class="review-score-big" id="reviewScoreBig">-</div>
+        <div class="review-score-label" id="reviewScoreDetail">-</div>
+      </div>
+      <div class="q-nav" id="qNav"></div>
+      <div class="sidebar-footer">응답: <span class="count" id="answeredCount">0</span> / <span id="totalCount">0</span></div>
+    </div>
+
+    <div class="question-area" id="questionArea">
+      <div class="question-card" id="questionCard">
+        <div style="text-align:center;padding:60px;color:var(--gray-400);">
+          <i class="fas fa-spinner fa-spin" style="font-size:32px;"></i>
+          <p style="margin-top:12px;">콘텐츠를 불러오는 중...</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 채점 결과 오버레이 -->
+  <div class="result-overlay" id="resultOverlay">
+    <div class="result-card">
+      <div class="result-icon" id="resultIcon">🎉</div>
+      <div class="result-title" id="resultTitle">채점 완료</div>
+      <div class="result-score" id="resultScore">0</div>
+      <div class="result-sub" id="resultSub">0 / 0 점</div>
+      <div class="result-actions">
+        <button class="btn btn-outline" onclick="closeResultOverlay(false)"><i class="fas fa-list"></i> 결과 보기</button>
+        <button class="btn btn-primary" onclick="closeResultOverlay(true)"><i class="fas fa-redo"></i> 다시 풀기</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script>
+    const params = new URLSearchParams(location.search);
+    const contentId = params.get('id');
+
+    let content = null;
+    let questions = [];
+    let answers = [];      // 사용자 응답: choice=idx, short/essay=string
+    let currentQ = 0;
+    let graded = false;
+    let results = [];      // [{correct: true/false/null, score, maxScore}]
+    let reviewBanner = null;
+    // 풀이 모드: auto=1 또는 solve=1 파라미터가 있어야 제출 가능 (공개콘텐츠 미리보기 차단)
+    let solveMode = params.get('auto') === '1' || params.get('solve') === '1';
+
+    function escHtml(s){
+      return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    }
+
+    function showToast(msg){
+      const t = document.getElementById('toast');
+      t.textContent = msg;
+      t.style.display = 'block';
+      setTimeout(() => t.style.display = 'none', 2200);
+    }
+
+    // 자동 채점 가능한 문항(객관식/주관식) 유무
+    function hasGradableQuestion(){
+      return questions.some(q => {
+        const t = q.question_type || 'choice';
+        return t === 'choice' || t === 'short';
+      });
+    }
+
+    function countEssay(){
+      return questions.filter(q => (q.question_type || 'choice') === 'essay').length;
+    }
+
+    function updateModeNotice(){
+      const el = document.getElementById('modeNotice');
+      if (!el) return;
+      const msgs = [];
+      const essay = countEssay();
+      const gradable = hasGradableQuestion();
+      if (!gradable){
+        msgs.push('<i class="fas fa-exclamation-triangle"></i> <strong>제출 불가:</strong> 서술형 문항만 포함되어 있어 자동 채점이 불가능합니다. 객관식/주관식 문항이 있어야 제출할 수 있습니다.');
+      } else if (essay > 0){
+        msgs.push(`<i class="fas fa-info-circle"></i> 서술형 ${essay}문항은 자동 채점되지 않으며 제출해도 선생님의 채점이 필요합니다. <strong>객관식·주관식 문항만 자동 채점됩니다.</strong>`);
+      }
+      if (!solveMode){
+        msgs.push('<i class="fas fa-eye"></i> <strong>미리보기 모드</strong> — 제출하려면 우측 상단의 <strong>바로 풀기</strong>를 누르거나 <strong>내 문제집</strong>에 담아 풀이 모드로 진입하세요.');
+      }
+      const container = document.querySelector('.player-container');
+      if (msgs.length === 0){
+        el.style.display = 'none';
+        if (container){ container.style.marginTop = '56px'; container.style.height = 'calc(100vh - 56px)'; }
+        return;
+      }
+      el.innerHTML = msgs.map(m => `<div>${m}</div>`).join('');
+      el.style.display = 'block';
+      // 배너 높이만큼 컨테이너 밀기
+      requestAnimationFrame(() => {
+        const h = el.getBoundingClientRect().height;
+        if (container){
+          container.style.marginTop = (56 + h) + 'px';
+          container.style.height = `calc(100vh - ${56 + h}px)`;
+        }
+      });
+    }
+
+    function exitPlayer(){
+      if (!graded && solveMode && answers.some(a => a != null && a !== '')){
+        if (!confirm('아직 제출하지 않았습니다. 나가시겠습니까?')) return;
+      }
+      history.length > 1 ? history.back() : (location.href = '/content/index.html');
+    }
+
+    async function init(){
+      if (!contentId){ showToast('잘못된 접근입니다.'); return; }
+      try {
+        const res = await fetch('/api/contents/' + contentId);
+        const data = await res.json();
+        if (!data.success || !data.content){ showToast('콘텐츠를 불러올 수 없습니다.'); return; }
+        content = data.content;
+
+        const type = content.content_type || '';
+        if (type !== 'quiz' && type !== 'exam' && type !== 'assessment'){
+          showToast('문항/평가지 콘텐츠만 플레이할 수 있습니다.');
+          setTimeout(() => location.href = '/content/index.html', 1500);
+          return;
+        }
+
+        questions = Array.isArray(content.questions) ? content.questions
+                  : (typeof content.questions === 'string' ? JSON.parse(content.questions || '[]') : []);
+        if (!questions.length){ showToast('등록된 문항이 없습니다.'); return; }
+
+        // 문항 정렬 & 기본값 보정
+        questions.sort((a, b) => (a.question_number || 0) - (b.question_number || 0));
+        // question_type 정규화: multiple_choice→choice, short_answer→short, essay 유지
+        questions.forEach(q => {
+          const t = (q.question_type || '').toLowerCase();
+          if (t === 'multiple_choice' || t === 'multiple' || t === 'mc') q.question_type = 'choice';
+          else if (t === 'short_answer' || t === 'short-answer' || t === 'fill') q.question_type = 'short';
+          else if (t === 'essay' || t === 'long' || t === 'written' || t === 'long_answer') q.question_type = 'essay';
+          else if (!t) q.question_type = 'choice';
+        });
+        answers = questions.map(() => null);
+        results = questions.map(q => ({correct: null, score: 0, maxScore: Number(q.points) || 1}));
+
+        const typeLabel = { quiz: '문항', exam: '평가지', assessment: '평가지' }[type] || '콘텐츠';
+        document.getElementById('typeBadge').textContent = typeLabel;
+        document.getElementById('playerTitle').textContent = content.title || '';
+        document.title = (content.title || '콘텐츠 플레이어') + ' - 다채움';
+        document.getElementById('totalCount').textContent = questions.length;
+
+        updateModeNotice();
+        renderNav();
+        showQuestion(0);
+
+        // auto=1 파라미터가 있으면 "기타(미지정)" 문제집에 자동 추가
+        if (params.get('auto') === '1') {
+          autoAddToDefaultProblemSet();
+        }
+      } catch (e){
+        console.error(e);
+        showToast('오류가 발생했습니다.');
+      }
+    }
+
+    async function autoAddToDefaultProblemSet() {
+      try {
+        const res = await fetch('/api/self-learn/problem-sets/default/add', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ contentId: parseInt(contentId) })
+        }).then(r => r.json());
+        if (res.success) {
+          showToast(res.added ? '"기타(미지정)" 문제집에 자동 추가됨' : '이미 문제집에 있습니다');
+        }
+      } catch {}
+    }
+
+    // ===== 내 자료에 추가 (담기) =====
+    async function saveToCollectionFromPlayer() {
+      if (!contentId) return;
+      try {
+        const res = await fetch('/api/contents/collection/' + contentId, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}'
+        }).then(r => r.json());
+        showToast(res.message || (res.success ? '내 자료(담은자료)에 추가됨' : '추가 실패'));
+      } catch { showToast('오류가 발생했습니다.'); }
+    }
+
+    // ===== 바로 풀기 (기타(미지정)에 자동 추가) =====
+    async function quickPlayFromPlayer() {
+      if (!contentId) return;
+      try {
+        const res = await fetch('/api/self-learn/problem-sets/default/add', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ contentId: parseInt(contentId) })
+        }).then(r => r.json());
+        if (res.success) {
+          showToast((res.added ? '"기타(미지정)" 문제집에 추가됨' : '이미 "기타(미지정)" 문제집에 있습니다') + ' · 풀이 모드로 전환');
+        } else {
+          showToast(res.message || '추가 실패');
+        }
+        // 풀이 모드로 전환: 제출하기 버튼 활성화
+        solveMode = true;
+        try {
+          const u = new URL(location.href);
+          u.searchParams.set('solve', '1');
+          history.replaceState(null, '', u.toString());
+        } catch {}
+        updateModeNotice();
+        showQuestion(currentQ);
+      } catch { showToast('오류가 발생했습니다.'); }
+    }
+
+    // ===== 내 문제집에 추가 (컨텐츠 타입별 동작 분기) =====
+    async function addToProblemSetFromPlayer() {
+      if (!contentId) return;
+      const type = content?.content_type;
+      // 평가지/평가: 바로 새 문제집 생성(제목=평가지 제목) + 자기 자신 1개 아이템으로 추가
+      if (type === 'exam' || type === 'assessment') {
+        try {
+          const title = content.title || '평가지';
+          const created = await fetch('/api/self-learn/problem-sets', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ title, description: '평가지로부터 생성된 문제집' })
+          }).then(r => r.json());
+          const newId = created.id || created.problemSet?.id;
+          if (!newId) { showToast('문제집 생성 실패'); return; }
+          await fetch('/api/self-learn/problem-sets/' + newId + '/items', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ contentId: parseInt(contentId) })
+          });
+          showToast(`"${title}" 문제집이 생성되었습니다`);
+        } catch { showToast('추가 중 오류'); }
+        return;
+      }
+      // 문항(quiz): 기존 picker 모달 표시
+      openProblemSetPicker();
+    }
+
+    // ===== 문항용: 문제집 선택 모달 =====
+    let _psSelectOverlay = null;
+    async function openProblemSetPicker() {
+      if (!contentId) return;
+      if (_psSelectOverlay) { _psSelectOverlay.remove(); _psSelectOverlay = null; }
+      const overlay = document.createElement('div');
+      overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:20000;display:flex;align-items:center;justify-content:center;';
+      overlay.onclick = (e) => { if (e.target === overlay) { overlay.remove(); _psSelectOverlay = null; } };
+      overlay.innerHTML = `
+        <div style="background:#fff;border-radius:14px;width:92vw;max-width:520px;max-height:80vh;display:flex;flex-direction:column;overflow:hidden;" onclick="event.stopPropagation()">
+          <div style="padding:16px 20px;border-bottom:1px solid #E5E7EB;display:flex;justify-content:space-between;align-items:center;">
+            <h3 style="font-size:16px;font-weight:700;"><i class="fas fa-book-medical" style="color:#7c3aed;margin-right:6px;"></i>내 문제집에 추가</h3>
+            <button style="background:none;border:none;font-size:22px;cursor:pointer;color:#9CA3AF;" onclick="this.closest('[data-ps-overlay]')?.remove() || this.parentElement.parentElement.parentElement.remove()">&times;</button>
+          </div>
+          <div data-ps-list style="padding:16px 20px;overflow-y:auto;flex:1;">
+            <div style="text-align:center;color:#9CA3AF;font-size:12px;padding:20px;"><i class="fas fa-spinner fa-spin"></i> 불러오는 중...</div>
+          </div>
+          <div style="padding:14px 20px;border-top:1px dashed #E5E7EB;display:flex;gap:6px;">
+            <input type="text" data-ps-new placeholder="+ 새 문제집 이름" style="flex:1;padding:8px 12px;border:2px solid #E5E7EB;border-radius:8px;font-size:13px;outline:none;font-family:inherit;">
+            <button style="padding:8px 14px;border-radius:8px;font-size:12px;background:#7c3aed;color:#fff;border:none;font-weight:700;cursor:pointer;" onclick="createNewPsFromPlayer(this)"><i class="fas fa-plus"></i> 만들기</button>
+          </div>
+        </div>`;
+      overlay.setAttribute('data-ps-overlay', '1');
+      document.body.appendChild(overlay);
+      _psSelectOverlay = overlay;
+      try {
+        const res = await fetch('/api/self-learn/problem-sets').then(r => r.json());
+        const sets = res.problemSets || res.sets || [];
+        const list = overlay.querySelector('[data-ps-list]');
+        if (!sets.length) {
+          list.innerHTML = '<div style="text-align:center;color:#9CA3AF;font-size:12px;padding:16px;">문제집이 없습니다. 아래에서 새로 만들어주세요.</div>';
+          return;
+        }
+        list.innerHTML = sets.map(ps => `
+          <div onclick="addToPsFromPlayer(${ps.id}, this)" style="padding:12px 14px;border:2px solid #E5E7EB;border-radius:10px;cursor:pointer;transition:all .15s;display:flex;align-items:center;gap:10px;margin-bottom:8px;" onmouseenter="this.style.borderColor='#a78bfa';this.style.background='#f5f3ff'" onmouseleave="this.style.borderColor='#E5E7EB';this.style.background=''">
+            <i class="fas fa-book" style="color:#7c3aed;font-size:18px;"></i>
+            <div style="flex:1;min-width:0;">
+              <div style="font-size:13px;font-weight:700;">${escHtml(ps.title || ps.name || '제목 없음')}</div>
+              <div style="font-size:11px;color:#9CA3AF;margin-top:2px;">${ps.item_count || 0}문항</div>
+            </div>
+            <i class="fas fa-chevron-right" style="color:#D1D5DB;"></i>
+          </div>`).join('');
+      } catch {
+        overlay.querySelector('[data-ps-list]').innerHTML = '<div style="color:#ef4444;font-size:12px;padding:16px;">문제집을 불러올 수 없습니다.</div>';
+      }
+    }
+
+    async function addToPsFromPlayer(psId, el) {
+      try {
+        const res = await fetch('/api/self-learn/problem-sets/' + psId + '/items', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ contentId: parseInt(contentId) })
+        }).then(r => r.json());
+        if (res.success !== false) {
+          showToast('문제집에 추가되었습니다!');
+          if (_psSelectOverlay) { _psSelectOverlay.remove(); _psSelectOverlay = null; }
+        } else {
+          showToast(res.message || '추가 실패');
+        }
+      } catch {
+        showToast('추가 중 오류가 발생했습니다.');
+      }
+    }
+
+    async function createNewPsFromPlayer(btn) {
+      const input = btn.previousElementSibling;
+      const name = (input.value || '').trim();
+      if (!name) { showToast('문제집 이름을 입력하세요.'); return; }
+      try {
+        const res = await fetch('/api/self-learn/problem-sets', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title: name, name: name })
+        }).then(r => r.json());
+        const newId = res.id || res.problemSet?.id;
+        if (!newId) { showToast('생성 실패'); return; }
+        input.value = '';
+        await addToPsFromPlayer(newId);
+      } catch {
+        showToast('문제집 생성 중 오류');
+      }
+    }
+
+    function showQuestion(idx){
+      if (idx < 0 || idx >= questions.length) return;
+      currentQ = idx;
+      const q = questions[idx];
+      const qType = q.question_type || 'choice';
+      const qText = q.question_text || q.text || '';
+      const points = Number(q.points) || 1;
+      const typeLabel = qType === 'choice' ? '객관식' : qType === 'short' ? '주관식' : '서술형';
+
+      let bodyHtml = '';
+      if (qType === 'choice'){
+        const opts = Array.isArray(q.options) ? q.options
+                   : (typeof q.options === 'string' ? (function(){ try { return JSON.parse(q.options); } catch(_){ return []; } })() : []);
+        bodyHtml = `<div class="option-list">${opts.map((o, j) => {
+          const selected = String(answers[idx]) === String(j);
+          const reviewCls = graded ? reviewOptionClass(idx, j) : '';
+          return `<div class="option-item ${selected ? 'selected' : ''} ${reviewCls}" onclick="${graded ? '' : `selectChoice(${idx}, ${j})`}">
+            <div class="option-num">${j + 1}</div>
+            <div class="option-text">${escHtml(o)}</div>
+          </div>`;
+        }).join('')}</div>`;
+      } else if (qType === 'short'){
+        const val = answers[idx] == null ? '' : String(answers[idx]);
+        bodyHtml = `<input type="text" class="short-input" id="shortInput-${idx}" value="${escHtml(val)}"
+          placeholder="답을 입력하세요" oninput="updateShort(${idx}, this.value)" ${graded ? 'disabled' : ''}>`;
+      } else {
+        const val = answers[idx] == null ? '' : String(answers[idx]);
+        bodyHtml = `<textarea class="essay-input" id="essayInput-${idx}"
+          placeholder="답을 서술하세요" oninput="updateShort(${idx}, this.value)" ${graded ? 'disabled' : ''}>${escHtml(val)}</textarea>`;
+      }
+
+      let feedbackHtml = '';
+      if (graded){
+        feedbackHtml = buildFeedback(idx, q);
+      }
+
+      document.getElementById('questionCard').innerHTML = `
+        <div class="q-header-row">
+          <span class="q-number">문항 ${idx + 1} / ${questions.length}</span>
+          <span class="q-type-badge ${qType}">${typeLabel}</span>
+          <span class="q-points">${points}점</span>
+          ${graded ? resultBadge(idx) : ''}
+        </div>
+        <div class="q-text">${escHtml(qText)}</div>
+        ${bodyHtml}
+        ${feedbackHtml}
+        <div class="nav-buttons">
+          <button class="btn btn-outline" ${idx === 0 ? 'disabled' : ''} onclick="showQuestion(${idx - 1})">
+            <i class="fas fa-chevron-left"></i> 이전
+          </button>
+          ${idx === questions.length - 1
+            ? (graded
+                ? `<button class="btn btn-outline" onclick="exitPlayer()"><i class="fas fa-check"></i> 완료</button>`
+                : (hasGradableQuestion()
+                    ? (solveMode
+                        ? `<button class="btn btn-success" onclick="gradeAnswers()"><i class="fas fa-paper-plane"></i> 제출하기</button>`
+                        : `<button class="btn btn-success" disabled title="바로 풀기 모드에서만 제출할 수 있습니다" style="opacity:0.5;cursor:not-allowed;"><i class="fas fa-paper-plane"></i> 제출하기</button>`)
+                    : `<button class="btn btn-success" disabled title="자동 채점 가능한 문항이 없습니다 (객관식/주관식만 제출 가능)" style="opacity:0.5;cursor:not-allowed;"><i class="fas fa-paper-plane"></i> 제출하기</button>`))
+            : `<button class="btn btn-primary" onclick="showQuestion(${idx + 1})">다음 <i class="fas fa-chevron-right"></i></button>`}
+        </div>
+      `;
+      document.getElementById('progressText').textContent = `${idx + 1} / ${questions.length} 문항`;
+      renderNav();
+      renderMath();
+    }
+
+    function reviewOptionClass(qIdx, optIdx){
+      const q = questions[qIdx];
+      const correctIdx = Number(q.answer);
+      const userIdx = Number(answers[qIdx]);
+      if (optIdx === correctIdx) return 'review-correct';
+      if (optIdx === userIdx && userIdx !== correctIdx) return 'review-wrong';
+      return 'review-neutral';
+    }
+
+    function resultBadge(idx){
+      const r = results[idx];
+      if (r.correct === true) return `<span class="q-result-badge correct"><i class="fas fa-check"></i> 정답</span>`;
+      if (r.correct === false) return `<span class="q-result-badge wrong"><i class="fas fa-times"></i> 오답</span>`;
+      if (r.correct === null && (answers[idx] == null || answers[idx] === '')) return `<span class="q-result-badge unanswered"><i class="fas fa-minus"></i> 미응답</span>`;
+      return `<span class="q-result-badge pending"><i class="fas fa-pen"></i> 채점 보류</span>`;
+    }
+
+    function buildFeedback(idx, q){
+      const qType = q.question_type || 'choice';
+      const r = results[idx];
+      let fbHtml = '';
+      if (qType === 'choice' || qType === 'short'){
+        const correctDisplay = qType === 'choice'
+          ? (Array.isArray(q.options) && q.options[q.answer] != null ? `${Number(q.answer)+1}번 — ${escHtml(q.options[q.answer])}` : `${Number(q.answer)+1}번`)
+          : escHtml(q.answer == null ? '' : q.answer);
+        if (r.correct === true){
+          fbHtml = `<div class="q-feedback correct"><div class="fb-label"><i class="fas fa-check-circle"></i> 정답입니다!</div>${points_text(r)}</div>`;
+        } else if (r.correct === false){
+          fbHtml = `<div class="q-feedback wrong"><div class="fb-label"><i class="fas fa-times-circle"></i> 오답입니다</div>정답: <strong>${correctDisplay}</strong>${points_text(r)}</div>`;
+        } else {
+          fbHtml = `<div class="q-feedback"><div class="fb-label"><i class="fas fa-info-circle"></i> 미응답</div>정답: <strong>${correctDisplay}</strong></div>`;
+        }
+      } else {
+        // 서술형: 자동 채점 불가
+        fbHtml = `<div class="q-feedback"><div class="fb-label"><i class="fas fa-pen"></i> 서술형 문항</div>서술형은 자동 채점되지 않습니다. 선생님의 채점이 필요합니다.</div>`;
+        if (q.answer){
+          fbHtml += `<div class="q-explanation"><div class="ex-label"><i class="fas fa-lightbulb"></i> 예시 답안</div>${escHtml(q.answer)}</div>`;
+        }
+      }
+      if (q.explanation){
+        fbHtml += `<div class="q-explanation"><div class="ex-label"><i class="fas fa-book-open"></i> 해설</div>${escHtml(q.explanation)}</div>`;
+      }
+      return fbHtml;
+    }
+
+    function points_text(r){
+      return ` <span style="margin-left:8px;color:var(--gray-500);font-weight:600;">(${r.score} / ${r.maxScore}점)</span>`;
+    }
+
+    function selectChoice(qIdx, optIdx){
+      if (graded) return;
+      answers[qIdx] = optIdx;
+      showQuestion(qIdx);
+    }
+
+    function updateShort(qIdx, val){
+      if (graded) return;
+      answers[qIdx] = val;
+      updateAnsweredCount();
+      renderNav();
+    }
+
+    function updateAnsweredCount(){
+      const cnt = answers.filter(a => a != null && a !== '').length;
+      document.getElementById('answeredCount').textContent = cnt;
+    }
+
+    function renderNav(){
+      const nav = document.getElementById('qNav');
+      nav.innerHTML = questions.map((q, i) => {
+        let cls = 'q-nav-item';
+        if (graded){
+          const r = results[i];
+          if (r.correct === true) cls += ' review-correct';
+          else if (r.correct === false) cls += ' review-wrong';
+          else if (answers[i] == null || answers[i] === '') cls += ' review-unanswered';
+          else cls += ' review-pending';
+        } else if (i === currentQ){
+          cls += ' active';
+        } else if (answers[i] != null && answers[i] !== ''){
+          cls += ' answered';
+        }
+        if (i === currentQ && !graded) cls += ' active';
+        return `<div class="${cls}" onclick="showQuestion(${i})">${i + 1}</div>`;
+      }).join('');
+      updateAnsweredCount();
+    }
+
+    function resetAnswers(){
+      if (!confirm('답안을 모두 지우고 다시 시작할까요?')) return;
+      answers = questions.map(() => null);
+      results = questions.map(q => ({correct: null, score: 0, maxScore: Number(q.points) || 1}));
+      graded = false;
+      document.getElementById('reviewScoreSummary').style.display = 'none';
+      const _gb=document.getElementById('gradeBtn');if(_gb)_gb.style.display='';
+      const _rb=document.getElementById('resetBtn');if(_rb)_rb.style.display='';
+      currentQ = 0;
+      showQuestion(0);
+    }
+
+    function gradeAnswers(){
+      const unanswered = answers.filter(a => a == null || a === '').length;
+      if (unanswered > 0){
+        if (!confirm(`미응답 ${unanswered}문항이 있습니다. 제출할까요?`)) return;
+      }
+      let totalScore = 0;
+      let maxTotal = 0;
+      let autoScored = 0;
+      results = questions.map((q, i) => {
+        const maxScore = Number(q.points) || 1;
+        maxTotal += maxScore;
+        const a = answers[i];
+        if (a == null || a === '') return {correct: null, score: 0, maxScore};
+        const qType = q.question_type || 'choice';
+        if (qType === 'choice'){
+          const ok = String(a) === String(q.answer);
+          if (ok) totalScore += maxScore;
+          autoScored += maxScore;
+          return {correct: ok, score: ok ? maxScore : 0, maxScore};
+        } else if (qType === 'short'){
+          const expected = (q.answer == null ? '' : String(q.answer)).trim();
+          const got = String(a).trim();
+          // 관대한 비교: 공백/대소문자 무시
+          const ok = expected !== '' && normalize(got) === normalize(expected);
+          if (ok) totalScore += maxScore;
+          autoScored += maxScore;
+          return {correct: ok, score: ok ? maxScore : 0, maxScore};
+        } else {
+          // 서술형: 자동 채점 보류
+          return {correct: null, score: 0, maxScore};
+        }
+      });
+      graded = true;
+      const pctBase = autoScored > 0 ? autoScored : maxTotal;
+      const pct = pctBase > 0 ? Math.round((totalScore / pctBase) * 100) : 0;
+
+      // 사이드바 점수 요약
+      document.getElementById('reviewScoreSummary').style.display = '';
+      const big = document.getElementById('reviewScoreBig');
+      big.textContent = pct + '%';
+      big.className = 'review-score-big ' + (pct >= 80 ? 'high' : pct >= 60 ? 'mid' : 'low');
+      document.getElementById('reviewScoreDetail').textContent = `${totalScore} / ${pctBase}점` + (autoScored < maxTotal ? ` (서술 ${maxTotal - autoScored}점 별도)` : '');
+
+      const _gb2=document.getElementById('gradeBtn');if(_gb2)_gb2.style.display='none';
+
+      // 결과 오버레이
+      document.getElementById('resultScore').textContent = pct + '%';
+      document.getElementById('resultSub').textContent = `${totalScore} / ${pctBase}점` + (autoScored < maxTotal ? ` · 서술 ${maxTotal - autoScored}점은 별도 채점` : '');
+      document.getElementById('resultTitle').textContent = pct >= 80 ? '훌륭해요!' : pct >= 60 ? '잘했어요' : '다시 도전해봐요';
+      document.getElementById('resultIcon').textContent = pct >= 80 ? '🎉' : pct >= 60 ? '👍' : '💪';
+      document.getElementById('resultOverlay').classList.add('show');
+
+      // 서버에 풀이 시도 기록
+      try {
+        const correctCount = results.filter(r => r.correct === true).length;
+        const contentId = new URLSearchParams(location.search).get('id');
+        if (contentId) {
+          fetch('/api/contents/' + contentId + '/attempts', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              total_questions: questions.length,
+              correct_count: correctCount,
+              score_percent: pct,
+              answers: answers
+            })
+          }).catch(() => {});
+        }
+      } catch {}
+
+      showQuestion(currentQ);
+    }
+
+    function normalize(s){
+      return String(s).replace(/\s+/g, '').toLowerCase();
+    }
+
+    function closeResultOverlay(reset){
+      document.getElementById('resultOverlay').classList.remove('show');
+      if (reset) resetAnswers();
+    }
+
+    function renderMath(){
+      try {
+        if (window.renderMathInElement){
+          renderMathInElement(document.getElementById('questionCard'), {
+            delimiters: [
+              {left: '$$', right: '$$', display: true},
+              {left: '$',  right: '$',  display: false},
+              {left: '\\(', right: '\\)', display: false},
+              {left: '\\[', right: '\\]', display: true}
+            ]
+          });
+        }
+      } catch (e){}
+    }
+
+    document.addEventListener('DOMContentLoaded', init);
+    document.addEventListener('keydown', (e) => {
+      if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
+      if (e.key === 'ArrowLeft') showQuestion(currentQ - 1);
+      else if (e.key === 'ArrowRight') showQuestion(currentQ + 1);
+    });
+  </script>
+</body>
+</html>

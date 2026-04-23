@@ -125,6 +125,18 @@
     /* Main Canvas area */
     .map-main{position:relative;background:#fff;border-radius:var(--radius-lg);box-shadow:var(--shadow-sm);overflow:hidden;display:flex;flex-direction:column;height:calc(100vh - var(--map-top-chrome));min-height:560px;width:100%}
     .map-toolbar{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--gray-100);flex-wrap:wrap}
+    .grade-jump-bar{display:flex;gap:4px;flex-wrap:wrap;flex:1;justify-content:center;min-width:0}
+    .grade-jump-btn{padding:4px 10px;border:1px solid var(--gray-200);background:#fff;border-radius:999px;font-size:0.75rem;font-weight:600;color:var(--gray-700);cursor:pointer;transition:all 0.15s;white-space:nowrap}
+    .grade-jump-btn:hover{background:var(--primary);color:#fff;border-color:var(--primary)}
+    .grade-jump-btn.active{background:var(--primary);color:#fff;border-color:var(--primary)}
+    .grade-jump-btn.lv-cho{border-color:#DBEAFE;color:#1E40AF}
+    .grade-jump-btn.lv-cho:hover,.grade-jump-btn.lv-cho.active{background:#1E40AF;color:#fff;border-color:#1E40AF}
+    .grade-jump-btn.lv-jung{border-color:#FEF3C7;color:#92400E}
+    .grade-jump-btn.lv-jung:hover,.grade-jump-btn.lv-jung.active{background:#92400E;color:#fff;border-color:#92400E}
+    .grade-jump-btn.lv-go{border-color:#FCE7F3;color:#9D174D}
+    .grade-jump-btn.lv-go:hover,.grade-jump-btn.lv-go.active{background:#9D174D;color:#fff;border-color:#9D174D}
+    @keyframes gradeFlash{0%,100%{box-shadow:0 0 0 0 rgba(79,70,229,0)}50%{box-shadow:0 0 0 6px rgba(79,70,229,0.35)}}
+    .svg-node.grade-flash{animation:gradeFlash 0.75s ease-in-out 2}
     .mini-toggle{display:flex;background:var(--gray-100);border-radius:var(--radius-sm);padding:3px}
     .mini-toggle button{padding:5px 12px;border:none;background:none;font-size:var(--fs-xs);font-weight:600;color:var(--gray-500);cursor:pointer;border-radius:4px;font-family:inherit}
     .mini-toggle button.active{background:#fff;color:var(--primary);box-shadow:var(--shadow-sm)}
@@ -739,6 +751,7 @@
               <button class="active" data-val="map"><i class="fas fa-project-diagram"></i> 맵</button>
               <button data-val="list"><i class="fas fa-list"></i> 리스트</button>
             </div>
+            <div class="grade-jump-bar" id="gradeJumpBar" role="toolbar" aria-label="학년별 이동"></div>
             <div class="zoom-ctrl">
               <button class="zoom-btn" onclick="zoomBy(1.25)" title="확대" aria-label="맵 확대"><i class="fas fa-plus"></i></button>
               <button class="zoom-btn" onclick="zoomBy(0.8)" title="축소" aria-label="맵 축소"><i class="fas fa-minus"></i></button>
@@ -1430,6 +1443,74 @@ async function loadMap() {
   // Layout
   layoutNodes();
   renderMap();
+  renderGradeJumpBar();
+}
+
+// 통합 학년 순서: 초1~초6 → 중1~중3 → 고1~고3
+const _LEVEL_OFFSET_GLOBAL = { '초': 0, '중': 6, '고': 9 };
+function getNormGrade(n){
+  if (!n) return 0;
+  const lv = n.grade_level || '';
+  const base = (_LEVEL_OFFSET_GLOBAL[lv] != null) ? _LEVEL_OFFSET_GLOBAL[lv] : 0;
+  return base + (parseInt(n.grade) || 0);
+}
+function getGradeLabel(ng){
+  if (ng >= 10) return '고' + (ng - 9);
+  if (ng >= 7)  return '중' + (ng - 6);
+  if (ng >= 1)  return '초' + ng;
+  return '';
+}
+function getGradeLevelClass(ng){
+  if (ng >= 10) return 'lv-go';
+  if (ng >= 7)  return 'lv-jung';
+  if (ng >= 1)  return 'lv-cho';
+  return '';
+}
+
+function renderGradeJumpBar(){
+  const bar = document.getElementById('gradeJumpBar');
+  if (!bar) return;
+  // 현재 allNodes 기준 등장 학년만 표시
+  const presents = [...new Set((allNodes||[]).map(n => getNormGrade(n)).filter(x => x > 0))].sort((a,b)=>a-b);
+  if (!presents.length) { bar.innerHTML = ''; return; }
+  bar.innerHTML = presents.map(ng => {
+    const label = getGradeLabel(ng);
+    const cls = getGradeLevelClass(ng);
+    return `<button type="button" class="grade-jump-btn ${cls}" onclick="jumpToGrade(${ng})" title="${label}학년으로 이동">${label}</button>`;
+  }).join('');
+}
+
+function jumpToGrade(ng){
+  const targets = (allNodes||[]).filter(n => getNormGrade(n) === ng && n._x != null);
+  if (!targets.length) return;
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  targets.forEach(n => {
+    if (n._x < minX) minX = n._x;
+    if (n._y < minY) minY = n._y;
+    if (n._x + 220 > maxX) maxX = n._x + 220;
+    if (n._y + 130 > maxY) maxY = n._y + 130;
+  });
+  const canvas = document.getElementById('mapCanvas');
+  if (!canvas) return;
+  const cw = canvas.clientWidth, ch = canvas.clientHeight;
+  const s = mapState.scale;
+  // 해당 학년 영역이 좌상단 40/20 패딩 위치에 오도록 팬
+  mapState.x = -minX * s + 40;
+  mapState.y = Math.min(30, -minY * s + 20);
+  updateMapTransform();
+  // 활성 버튼 강조
+  document.querySelectorAll('.grade-jump-btn').forEach(b => b.classList.remove('active'));
+  const ev = window.event && window.event.target;
+  if (ev && ev.classList) ev.classList.add('active');
+  // 시각적 하이라이트: 해당 학년 노드 잠시 펄스
+  document.querySelectorAll('.svg-node').forEach(el => el.classList.remove('grade-flash'));
+  const ids = new Set(targets.map(n => n._id));
+  document.querySelectorAll('.svg-node').forEach(el => {
+    if (ids.has(el.getAttribute('data-node-id'))) el.classList.add('grade-flash');
+  });
+  setTimeout(() => {
+    document.querySelectorAll('.svg-node.grade-flash').forEach(el => el.classList.remove('grade-flash'));
+  }, 1500);
 }
 
 function layoutNodes() {
@@ -1444,25 +1525,63 @@ function layoutNodes() {
     if (from && to && prereqMap[to]) prereqMap[to].push(from);
   });
 
-  const depth = {};
-  function getDepth(id, visited) {
-    if (depth[id] !== undefined) return depth[id];
+  // 통합 학년 순서: 초1~초6 → 중1~중3 → 고1~고3 (grade_level + grade 조합)
+  const LEVEL_OFFSET = { '초': 0, '중': 6, '고': 9 };
+  const normGrade = (n) => {
+    if (!n) return 0;
+    const lv = n.grade_level || '';
+    const base = (LEVEL_OFFSET[lv] != null) ? LEVEL_OFFSET[lv] : 0;
+    const g = parseInt(n.grade) || 0;
+    return base + g;
+  };
+  // 학년 내부에서만 prereq depth 계산 → 루트(선수 없음)는 해당 학년 시작 컬럼에 위치
+  const gradeOf = (id) => {
+    const n = nodeById[id];
+    return normGrade(n);
+  };
+  const localDepth = {};
+  function getLocalDepth(id, visited) {
+    if (localDepth[id] !== undefined) return localDepth[id];
     if (!visited) visited = new Set();
     if (visited.has(id)) return 0;
     visited.add(id);
-    const prs = prereqMap[id] || [];
-    if (!prs.length) { depth[id] = 0; return 0; }
+    const myGrade = gradeOf(id);
+    const prs = (prereqMap[id] || []).filter(p => nodeById[p] && gradeOf(p) === myGrade);
+    if (!prs.length) { localDepth[id] = 0; return 0; }
     let m = 0;
-    prs.forEach(p => { if (nodeById[p]) m = Math.max(m, getDepth(p, visited) + 1); });
-    depth[id] = m;
+    prs.forEach(p => { m = Math.max(m, getLocalDepth(p, visited) + 1); });
+    localDepth[id] = m;
     return m;
   }
-  allNodes.forEach(n => getDepth(n._id));
+  allNodes.forEach(n => getLocalDepth(n._id));
 
-  // Column grouping by depth; cluster same-area nodes at similar Y across columns
+  // 학년별 최대 depth → 학년 베이스 컬럼 (저학년 좌측, 고학년 우측)
+  const gradesPresent = [...new Set(allNodes.map(n => normGrade(n)))].sort((a,b) => a - b);
+  const GRADE_GAP_COLS = 1;
+  const maxDepthByGrade = {};
+  gradesPresent.forEach(g => { maxDepthByGrade[g] = 0; });
+  allNodes.forEach(n => {
+    const g = normGrade(n);
+    maxDepthByGrade[g] = Math.max(maxDepthByGrade[g] || 0, localDepth[n._id] || 0);
+  });
+  const gradeBaseCol = {};
+  let baseAcc = 0;
+  gradesPresent.forEach(g => {
+    gradeBaseCol[g] = baseAcc;
+    baseAcc += (maxDepthByGrade[g] + 1) + GRADE_GAP_COLS;
+  });
+
+  // 최종 컬럼 = 학년 베이스 + 학년 내부 depth
+  const colOf = {};
+  allNodes.forEach(n => {
+    const g = normGrade(n);
+    colOf[n._id] = (gradeBaseCol[g] || 0) + (localDepth[n._id] || 0);
+  });
+
+  // Column grouping; cluster same-area nodes at similar Y across columns
   const cols = {};
   allNodes.forEach(n => {
-    const d = depth[n._id] || 0;
+    const d = colOf[n._id] || 0;
     if (!cols[d]) cols[d] = [];
     cols[d].push(n);
   });
@@ -1608,7 +1727,7 @@ function renderMap() {
       const prog = n.progress != null ? n.progress : (status === 'completed' ? 100 : status === 'in_progress' ? 50 : 0);
       const inList = learningList.has(n._id);
       const listCls = inList ? ' in-learning-list' : '';
-      const gradeLabel = n.grade ? n.grade + '학년' : '';
+      const gradeLabel = n.grade ? (n.grade_level || '') + n.grade + '학년' : '';
       const semLabel = n.semester ? n.semester + '학기' : '';
       if (isUnitModeList) {
         const lessonCount = n.lesson_count ?? n.lessonCount ?? (Array.isArray(n.lessons) ? n.lessons.length : 0);
@@ -1734,7 +1853,7 @@ function renderMap() {
     const videos = n.video_count ?? n.videoCount ?? (Array.isArray(n.videos) ? n.videos.length : 0);
     const problems = n.problem_count ?? n.problemCount ?? (Array.isArray(n.problems) ? n.problems.length : 0);
     const solved = n.solved ?? n.solved_count ?? 0;
-    const gradeLabel = n.grade ? n.grade + '학년' : '';
+    const gradeLabel = n.grade ? (n.grade_level || '') + n.grade + '학년' : '';
     const semLabel = n.semester ? n.semester + '학기' : '';
     const headerRight = [area || '', semLabel].filter(Boolean).join(' · ');
     const footerLeft = isUnitCard
@@ -2074,11 +2193,11 @@ async function openDrawer(nodeId, opts) {
   const status = node._status;
   const displayTitle = node.title || node.name || node.lesson_name || node.unit_name || nodeById[nodeId]?._title || '학습 노드';
   $('drawerTitle').textContent = displayTitle;
-  $('drawerSubtitle').textContent = (node.achievement_code || node.code ? '[' + (node.achievement_code || node.code) + '] ' : '') + (area || '') + (node.grade ? ' · ' + node.grade + '학년' : '') + (node.semester ? ' ' + node.semester + '학기' : '');
+  $('drawerSubtitle').textContent = (node.achievement_code || node.code ? '[' + (node.achievement_code || node.code) + '] ' : '') + (area || '') + (node.grade ? ' · ' + (node.grade_level || '') + node.grade + '학년' : '') + (node.semester ? ' ' + node.semester + '학기' : '');
 
   $('drawerBadges').innerHTML = `
     ${area ? `<span class="drawer-badge area">${escHtml(area)}</span>` : ''}
-    ${node.grade ? `<span class="drawer-badge grade">${escHtml(node.grade)}학년</span>` : ''}
+    ${node.grade ? `<span class="drawer-badge grade">${escHtml((node.grade_level || '') + node.grade)}학년</span>` : ''}
     <span class="drawer-badge status ${status}">${statusLabel(status)}</span>`;
 
   renderDrawerBody();
@@ -2390,7 +2509,8 @@ function renderRelList(items, kind, parentNode) {
     const grade = p.grade ?? (nodeById[pid]?.grade);
     const subParts = [];
     if (subject) subParts.push(subject);
-    if (grade != null && grade !== '') subParts.push(grade + '학년');
+    const gradeLv = p.grade_level ?? (nodeById[pid]?.grade_level) ?? '';
+    if (grade != null && grade !== '') subParts.push(gradeLv + grade + '학년');
     const sub = subParts.join(' · ');
     const hiddenStyle = shouldCollapse && idx >= collapseThreshold ? 'style="display:none" data-rel-hidden' : '';
     return `<div class="rel-card ${isNext ? 'is-next' : ''}" data-node-id="${escHtml(pid)}" ${hiddenStyle} tabindex="0" onclick="handleRelClick('${escHtml(pid)}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();handleRelClick('${escHtml(pid)}')}" title="${escHtml(title)}">
@@ -3482,7 +3602,7 @@ async function loadPath() {
         <span class="step-status-tag ${status}">${statusLabel(status)}</span>
       </div>
       <div class="step-title">${escHtml(title)}</div>
-      <div class="step-subject">${escHtml(subject)}${st.grade ? ' · ' + st.grade + '학년' : ''}</div>
+      <div class="step-subject">${escHtml(subject)}${st.grade ? ' · ' + (st.grade_level || '') + st.grade + '학년' : ''}</div>
       <div style="margin-top:8px">
         <button class="btn-mini primary" onclick="openDrawer('${id}', {skipHighlightGate:true})">상세 보기</button>
       </div>

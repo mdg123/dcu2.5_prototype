@@ -378,18 +378,33 @@ function removeDailyItem(itemId) {
 
 // ========== AI 맞춤학습 (학습맵) ==========
 
-function getMapNodes({ subject, gradeLevel, grade, schoolLevel, semester, area, keyword, status, userId } = {}) {
+function getMapNodes({ subject, gradeLevel, grade, grades, schoolLevel, schoolLevels, semester, area, keyword, status, userId } = {}) {
   let where = 'WHERE 1=1';
   const params = [];
   if (subject) { where += ' AND subject = ?'; params.push(subject); }
   if (gradeLevel) { where += ' AND grade_level = ?'; params.push(gradeLevel); }
   if (grade) { where += ' AND grade = ?'; params.push(parseInt(grade)); }
+  // grades: 학년군 (comma-separated list of grades, optionally paired with gradeLevel)
+  if (grades) {
+    const arr = String(grades).split(',').map(x => parseInt(x)).filter(x => !isNaN(x));
+    if (arr.length) {
+      where += ' AND grade IN (' + arr.map(() => '?').join(',') + ')';
+      params.push(...arr);
+    }
+  }
   if (semester) { where += ' AND semester = ?'; params.push(parseInt(semester)); }
   if (area) { where += ' AND area = ?'; params.push(area); }
-  // schoolLevel elementary(1~6) | middle(7~9) | high(10~12)
-  if (schoolLevel === 'elementary') { where += ' AND grade BETWEEN 1 AND 6'; }
-  else if (schoolLevel === 'middle') { where += ' AND grade BETWEEN 7 AND 9'; }
-  else if (schoolLevel === 'high') { where += ' AND grade BETWEEN 10 AND 12'; }
+  // schoolLevels (CSV 복수): 'elementary,middle,high' 등 복수 학교급 필터
+  if (schoolLevels) {
+    const mapSL = { elementary: '초', middle: '중', high: '고', '초': '초', '중': '중', '고': '고' };
+    const arr = String(schoolLevels).split(',').map(s => mapSL[s.trim()]).filter(Boolean);
+    if (arr.length) {
+      where += ' AND grade_level IN (' + arr.map(() => '?').join(',') + ')';
+      params.push(...arr);
+    }
+  } else if (schoolLevel === 'elementary' || schoolLevel === '초') { where += " AND grade_level = '초'"; }
+  else if (schoolLevel === 'middle' || schoolLevel === '중') { where += " AND grade_level = '중'"; }
+  else if (schoolLevel === 'high' || schoolLevel === '고') { where += " AND grade_level = '고'"; }
   if (keyword) {
     where += ' AND (unit_name LIKE ? OR lesson_name LIKE ? OR achievement_code LIKE ? OR achievement_text LIKE ?)';
     const kw = `%${keyword}%`;
@@ -412,33 +427,80 @@ function getMapNodeDetail(nodeId, userId = null) {
   const node = db.prepare('SELECT * FROM learning_map_nodes WHERE node_id = ?').get(nodeId);
   if (!node) return null;
 
-  // 선수/후속
-  const prerequisites = db.prepare('SELECT from_node_id FROM learning_map_edges WHERE to_node_id = ?').all(nodeId).map(r => r.from_node_id);
-  const nextNodes = db.prepare('SELECT to_node_id FROM learning_map_edges WHERE from_node_id = ?').all(nodeId).map(r => r.to_node_id);
+  // 선수/후속 — 사람이 읽을 수 있는 이름(lesson_name / unit_name)을 함께 포함
+  const prerequisites = db.prepare(`
+    SELECT e.from_node_id AS id, n.node_level, n.unit_name, n.lesson_name, n.achievement_code
+    FROM learning_map_edges e
+    LEFT JOIN learning_map_nodes n ON n.node_id = e.from_node_id
+    WHERE e.to_node_id = ?
+  `).all(nodeId).map(r => ({
+    id: r.id,
+    node_id: r.id,
+    node_level: r.node_level,
+    unit_name: r.unit_name,
+    lesson_name: r.lesson_name,
+    title: r.lesson_name || r.unit_name || r.id,
+    name: r.lesson_name || r.unit_name || r.id
+  }));
+  const nextNodes = db.prepare(`
+    SELECT e.to_node_id AS id, n.node_level, n.unit_name, n.lesson_name, n.achievement_code
+    FROM learning_map_edges e
+    LEFT JOIN learning_map_nodes n ON n.node_id = e.to_node_id
+    WHERE e.from_node_id = ?
+  `).all(nodeId).map(r => ({
+    id: r.id,
+    node_id: r.id,
+    node_level: r.node_level,
+    unit_name: r.unit_name,
+    lesson_name: r.lesson_name,
+    title: r.lesson_name || r.unit_name || r.id,
+    name: r.lesson_name || r.unit_name || r.id
+  }));
 
   // node_contents와 contents JOIN, content_type으로 video / problem 분리
   const contents = db.prepare(`
     SELECT nc.id as nc_id, nc.sort_order, nc.content_role,
            c.id as content_id, c.title, c.content_type, c.content_url, c.file_path,
-           c.description, c.difficulty, c.estimated_minutes, c.view_count
+           c.thumbnail_url, c.description, c.difficulty, c.estimated_minutes, c.view_count
     FROM node_contents nc
     JOIN contents c ON nc.content_id = c.id
     WHERE nc.node_id = ?
-    ORDER BY nc.sort_order
+    ORDER BY nc.sort_order ASC, nc.id ASC
   `).all(nodeId);
 
   // 비디오: content_type in ('video')
   const videos = contents.filter(c => c.content_type === 'video').map(c => {
-    let myViews = 0, myRatio = 0, watched = false;
+    let myViews = 0, myRatio = 0, watched = false, myPosition = 0, myDuration = 0;
     if (userId) {
-      const p = db.prepare('SELECT view_count, watch_ratio FROM user_content_progress WHERE user_id = ? AND content_id = ?').get(userId, c.content_id);
-      if (p) { myViews = p.view_count || 0; myRatio = p.watch_ratio || 0; watched = (p.watch_ratio || 0) >= 0.9; }
+      const p = db.prepare('SELECT view_count, watch_ratio, position_sec, duration_sec FROM user_content_progress WHERE user_id = ? AND content_id = ?').get(userId, c.content_id);
+      if (p) {
+        myViews = p.view_count || 0;
+        myRatio = p.watch_ratio || 0;
+        myPosition = p.position_sec || 0;
+        myDuration = p.duration_sec || 0;
+        watched = (p.watch_ratio || 0) >= 0.8;
+      }
     }
+    const durationSec = myDuration || (c.estimated_minutes ? c.estimated_minutes * 60 : null);
     return {
       id: c.content_id,
+      content_id: c.content_id,
       title: c.title,
+      file_path: c.file_path || null,
+      content_url: c.content_url || null,
+      thumbnail_url: c.thumbnail_url || null,
+      duration_sec: durationSec,
       duration_min: c.estimated_minutes || null,
+      view_count: c.view_count || 0,
       total_views: c.view_count || 0,
+      sort_order: c.sort_order,
+      user_progress: {
+        position_sec: myPosition,
+        watch_ratio: myRatio,
+        view_count: myViews,
+        watched
+      },
+      // 하위 호환
       my_views: myViews,
       watch_ratio: myRatio,
       watched
@@ -446,7 +508,7 @@ function getMapNodeDetail(nodeId, userId = null) {
   });
 
   // 문제: content_type in ('quiz','exam','problem','assessment')
-  const problemTypes = new Set(['quiz', 'exam', 'problem', 'assessment']);
+  const problemTypes = new Set(['quiz', 'exam', 'problem', 'assessment', 'question']);
   const problems = contents.filter(c => problemTypes.has(c.content_type)).map(c => {
     const agg = db.prepare(`
       SELECT COUNT(*) as total_attempts,
@@ -457,11 +519,15 @@ function getMapNodeDetail(nodeId, userId = null) {
     const total = agg.total_attempts || 0;
     const correct = agg.correct_cnt || 0;
     const correctRate = total > 0 ? Math.round((correct / total) * 100) : 0;
-    let myAttempts = 0, cleared = false;
+    let myAttempts = 0, cleared = false, lastCorrect = null;
     if (userId) {
       const mine = db.prepare('SELECT COUNT(*) as c, SUM(is_correct) as ok FROM problem_attempts WHERE user_id = ? AND content_id = ?').get(userId, c.content_id) || {};
       myAttempts = mine.c || 0;
       cleared = (mine.ok || 0) > 0;
+      if (myAttempts > 0) {
+        const lastRow = db.prepare('SELECT is_correct FROM problem_attempts WHERE user_id = ? AND content_id = ? ORDER BY submitted_at DESC, id DESC LIMIT 1').get(userId, c.content_id);
+        lastCorrect = lastRow ? !!lastRow.is_correct : null;
+      }
     }
     // 클리어 TOP3: 정답자 중 time_taken 짧은 순
     const top = db.prepare(`
@@ -481,24 +547,31 @@ function getMapNodeDetail(nodeId, userId = null) {
     }));
     // 문항 내용 (content_questions 에서 1개)
     const qRow = db.prepare(`
-      SELECT question_text, options, answer, explanation, difficulty as q_difficulty
+      SELECT id as question_id, question_text, options, answer, explanation, difficulty as q_difficulty
       FROM content_questions WHERE content_id = ? ORDER BY question_number LIMIT 1
     `).get(c.content_id);
     let qOpts = [];
     if (qRow?.options) {
-      try { qOpts = JSON.parse(qRow.options); } catch { qOpts = []; }
+      try {
+        const parsed = JSON.parse(qRow.options);
+        qOpts = Array.isArray(parsed) ? parsed : (parsed ? [parsed] : []);
+      } catch { qOpts = []; }
     }
     return {
       id: c.content_id,
       content_id: c.content_id,
       contentId: c.content_id,
+      question_id: qRow?.question_id || null,
       title: c.title,
-      difficulty: c.difficulty || 'medium',
+      sort_order: c.sort_order,
+      difficulty: qRow?.q_difficulty || c.difficulty || 'medium',
       correct_rate: correctRate,
       accuracy: correctRate,
       total_attempts: total,
       distinct_users: agg.distinct_users || 0,
       my_attempts: myAttempts,
+      attempts_count: myAttempts,
+      last_correct: lastCorrect,
       cleared,
       top_clearers: top,
       clear_top3: top,
@@ -548,7 +621,12 @@ function getMapEdges({ subject, gradeLevel } = {}) {
 }
 
 function getUserNodeStatuses(userId) {
-  return db.prepare('SELECT * FROM user_node_status WHERE user_id = ?').all(userId);
+  // learning_map_nodes에 존재하지 않는 node_id 참조는 자동 무시 (에러 방지)
+  return db.prepare(`
+    SELECT uns.* FROM user_node_status uns
+    WHERE uns.user_id = ?
+      AND EXISTS (SELECT 1 FROM learning_map_nodes lmn WHERE lmn.node_id = uns.node_id)
+  `).all(userId);
 }
 
 function startDiagnosis(userId, { nodeId, subject, type } = {}) {
@@ -1304,14 +1382,21 @@ function recordProblemAttempt(userId, contentId, { isCorrect, selectedAnswer, us
   // questionId 없으면 content 단위 제출로 간주하여 기존 client isCorrect 유지 (호환성)
   const submittedAnswer = selectedAnswer ?? userAnswer ?? answer ?? null;
   let finalIsCorrect;
+  let questionExplanation = null;
+  let correctAnswer = null;
   if (questionId) {
-    const q = db.prepare('SELECT answer FROM content_questions WHERE id = ?').get(questionId);
+    const q = db.prepare('SELECT answer, explanation FROM content_questions WHERE id = ?').get(questionId);
     if (q) {
       finalIsCorrect = String(q.answer).trim() === String(submittedAnswer || '').trim() ? 1 : 0;
+      questionExplanation = q.explanation || null;
+      correctAnswer = q.answer;
     } else {
       finalIsCorrect = isCorrect ? 1 : 0;
     }
   } else {
+    // questionId 없을 때 content 단위 대표 문항에서 해설만 조회
+    const q = db.prepare('SELECT answer, explanation FROM content_questions WHERE content_id = ? ORDER BY question_number LIMIT 1').get(contentId);
+    if (q) { questionExplanation = q.explanation || null; correctAnswer = q.answer; }
     finalIsCorrect = isCorrect ? 1 : 0;
   }
 
@@ -1345,7 +1430,34 @@ function recordProblemAttempt(userId, contentId, { isCorrect, selectedAnswer, us
     if (isCorrect) awardPoints(userId, { source: 'problem_attempt', sourceId: contentId, points: 2, description: '문제 정답' });
   } catch (e) {}
 
-  return { attemptId: info.lastInsertRowid, correctRate, top_clearers: topClearers };
+  // 노드별 사용자 correct_rate 갱신 (해당 노드 범위의 내 시도 기준)
+  if (nodeId) {
+    try {
+      const mine = db.prepare(`
+        SELECT COUNT(*) as t, SUM(is_correct) as c
+        FROM problem_attempts WHERE user_id = ? AND node_id = ?
+      `).get(userId, nodeId);
+      const myRate = mine.t > 0 ? Math.round((mine.c / mine.t) * 100) : 0;
+      db.prepare(`
+        INSERT INTO user_node_status (user_id, node_id, status, correct_rate, last_accessed_at)
+        VALUES (?, ?, 'in_progress', ?, CURRENT_TIMESTAMP)
+        ON CONFLICT(user_id, node_id) DO UPDATE SET
+          correct_rate = excluded.correct_rate,
+          last_accessed_at = CURRENT_TIMESTAMP
+      `).run(userId, nodeId, myRate);
+    } catch (e) { /* 노드 상태 갱신 실패 무시 */ }
+  }
+
+  return {
+    attemptId: info.lastInsertRowid,
+    attempt_id: info.lastInsertRowid,
+    correct: !!finalIsCorrect,
+    isCorrect: !!finalIsCorrect,
+    correctAnswer,
+    explanation: questionExplanation,
+    correctRate,
+    top_clearers: topClearers
+  };
 }
 
 function recordVideoProgress(userId, contentId, { positionSec, durationSec, nodeId }) {
@@ -1365,12 +1477,30 @@ function recordVideoProgress(userId, contentId, { positionSec, durationSec, node
   const ct = db.prepare('SELECT title FROM contents WHERE id = ?').get(contentId);
   _upsertLastActivity(userId, { activity_type: 'video', node_id: nodeId, content_id: contentId, title: ct?.title });
 
-  return { watch_ratio: ratio };
+  // 시청 완료 임계(0.8) 달성 시 노드 상태 갱신 (terminal 상태는 보존)
+  let nodeCompleted = false;
+  if (nodeId && ratio >= 0.8) {
+    const existing = db.prepare('SELECT status FROM user_node_status WHERE user_id = ? AND node_id = ?').get(userId, nodeId);
+    const terminal = new Set(['completed', 'mastered']);
+    if (!existing || !terminal.has(existing.status)) {
+      db.prepare(`
+        INSERT INTO user_node_status (user_id, node_id, status, last_accessed_at)
+        VALUES (?, ?, 'video_watched', CURRENT_TIMESTAMP)
+        ON CONFLICT(user_id, node_id) DO UPDATE SET
+          status = CASE WHEN user_node_status.status IN ('completed','mastered')
+                        THEN user_node_status.status ELSE 'video_watched' END,
+          last_accessed_at = CURRENT_TIMESTAMP
+      `).run(userId, nodeId);
+      nodeCompleted = true;
+    }
+  }
+
+  return { watch_ratio: ratio, position_sec: positionSec || 0, duration_sec: durationSec || 0, node_watched: nodeCompleted };
 }
 
 // 학습목록
 function getLearningList(userId) {
-  return db.prepare(`
+  const rows = db.prepare(`
     SELECT ull.id, ull.node_id, ull.added_at,
       n.subject, n.grade, n.semester, n.unit_name, n.lesson_name, n.achievement_code,
       COALESCE(s.status, 'not_started') as user_status, s.correct_rate
@@ -1380,6 +1510,12 @@ function getLearningList(userId) {
     WHERE ull.user_id = ?
     ORDER BY ull.added_at DESC
   `).all(userId);
+  // 사용자에게 내부 ID가 노출되지 않도록 제목(title) 필드를 보강
+  return rows.map(r => ({
+    ...r,
+    title: r.lesson_name || r.unit_name || '삭제된 학습 노드',
+    orphan: !r.unit_name && !r.lesson_name
+  }));
 }
 
 function addLearningList(userId, nodeId) {
