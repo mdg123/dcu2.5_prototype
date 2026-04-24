@@ -182,6 +182,7 @@ const MENUS = {
     { id:'s-trend',      label:'활용 현황',       icon:'fa-chart-line',    group:'분석',       category:'analytics' },
     { id:'s-achieve',    label:'성취 분석',       icon:'fa-award',         group:'분석',       category:'analytics' },
     { id:'s-compare',    label:'비교',            icon:'fa-people-group',  group:'분석',       category:'analytics' },
+    { id:'s-xapi',       label:'표준체계 분석',    icon:'fa-diagram-project',group:'분석',      category:'analytics' },
     { id:'s-perform',    label:'과제·평가 수행',  icon:'fa-tasks',         group:'학습 활동',  category:'activities' },
     { id:'s-custom',     label:'맞춤학습',        icon:'fa-compass',       group:'학습 활동',  category:'activities' },
     { id:'s-daily',      label:'일일현황',        icon:'fa-calendar-day',  group:'학습 활동',  category:'activities' },
@@ -190,6 +191,7 @@ const MENUS = {
     { id:'t-home',       label:'홈',              icon:'fa-gauge',                 group:'우리반',        category:'home' },
     { id:'t-usage',      label:'활용 현황',        icon:'fa-chalkboard',            group:'분석',         category:'analytics' },
     { id:'t-subject',    label:'성취 분석',        icon:'fa-book',                  group:'분석',         category:'analytics' },
+    { id:'t-xapi',       label:'표준체계 분석',    icon:'fa-diagram-project',       group:'분석',         category:'analytics' },
     { id:'t-perform',    label:'과제·평가 수행',  icon:'fa-tasks',                 group:'학습 활동',     category:'activities' },
     { id:'t-custom',     label:'맞춤학습 관리',    icon:'fa-compass',               group:'학습 활동',     category:'activities' },
     { id:'t-daily',      label:'일일현황',        icon:'fa-calendar-day',          group:'학습 활동',     category:'activities' },
@@ -202,6 +204,7 @@ const MENUS = {
     { id:'a-usage',      label:'활용 현황',        icon:'fa-chart-line',            group:'분석',           category:'analytics' },
     { id:'a-achieve',    label:'성취 분석',        icon:'fa-award',                 group:'분석',           category:'analytics' },
     { id:'a-overview',   label:'전체 통계',        icon:'fa-layer-group',           group:'분석',           category:'analytics' },
+    { id:'a-xapi',       label:'표준체계 분석',    icon:'fa-diagram-project',       group:'분석',           category:'analytics' },
     { id:'a-perform',    label:'과제·평가 수행',  icon:'fa-tasks',                 group:'학습 활동',       category:'activities' },
     { id:'a-custom',     label:'맞춤학습',        icon:'fa-compass',               group:'학습 활동',       category:'activities' },
     { id:'a-daily',      label:'일일현황',        icon:'fa-calendar-day',          group:'학습 활동',       category:'activities' },
@@ -247,7 +250,7 @@ const LEGACY_MENU_TO_CATEGORY = {
   usage:'analytics', achieve:'analytics', perform:'activities', custom:'activities',
   daily:'activities', teacher:'operations', quality:'operations',
   // 구 뷰 id도 수용
-  's-home':'home','s-trend':'analytics','s-achieve':'analytics','s-compare':'analytics',
+  's-home':'home','s-trend':'analytics','s-achieve':'analytics','s-compare':'analytics','s-xapi':'analytics','t-xapi':'analytics','a-xapi':'analytics',
   's-perform':'activities','s-custom':'activities','s-daily':'activities',
   't-home':'home','t-usage':'analytics','t-subject':'analytics',
   't-perform':'activities','t-custom':'activities','t-daily':'activities',
@@ -2943,6 +2946,161 @@ VIEWS['a-quality'] = async function(root){
     });
   }
 };
+
+/* ======== xAPI 표준체계 분석 (Phase E) ======== */
+async function _renderXapiAnalysis(root, scope) {
+  root.innerHTML = tplLoading(5);
+  const qs = scope ? `?scope=${encodeURIComponent(scope)}` : '';
+  const [ov, heat, dist, area, recent] = await Promise.all([
+    apiGet(`/api/lrs/xapi/overview${qs}`),
+    apiGet(`/api/lrs/xapi/std-heatmap${qs}${qs?'&':'?'}depth=2`),
+    apiGet(`/api/lrs/xapi/achievement-distribution${qs}`),
+    apiGet(`/api/lrs/xapi/area-breakdown${qs}${qs?'&':'?'}days=7`),
+    apiGet(`/api/lrs/xapi/recent-events${qs}${qs?'&':'?'}limit=20`),
+  ]);
+  if (!ov || !ov.success) { root.innerHTML = tplEmpty('xAPI 수집 데이터를 불러오지 못했습니다'); return; }
+
+  // 1) 수집 현황 KPI
+  const kpiHtml = `
+    <div class="dc-kpi-grid" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));">
+      ${kpiCard('총 xAPI 수집', (ov.total||0).toLocaleString(), '건', {dir:'flat',text:`최근 24시간 ${ov.recent24h||0}건`}, 'primary')}
+      ${kpiCard('최근 7일', (ov.recent7d||0).toLocaleString(), '건', {dir:'flat',text:'수집 누적'}, 'success')}
+      ${kpiCard('허브 송신 대기', (ov.unsent||0).toLocaleString(), '건', {dir:'flat',text:`송신 완료 ${ov.sent||0}`}, 'warning')}
+      ${kpiCard('영역 수', String((ov.byArea||[]).length), '개', {dir:'flat',text:'AIDT 10영역 중'}, 'primary')}
+    </div>`;
+
+  // 2) 영역별 분포 막대
+  const maxArea = Math.max(1, ...((ov.byArea||[]).map(a=>a.cnt||0)));
+  const areaHtml = `
+    <section class="dc-chart-wrapper" style="margin-top:var(--space-4);">
+      <header><h2>영역별 수집 분포</h2><div class="subtitle">xAPI 10개 AIDT 영역</div></header>
+      <div style="display:flex;flex-direction:column;gap:6px;">
+        ${(ov.byArea||[]).map(a => `
+          <div style="display:flex;align-items:center;gap:10px;">
+            <span style="width:110px;font-size:var(--fs-caption);color:var(--gray-700);">${a.area}</span>
+            <div style="flex:1;background:var(--gray-100);border-radius:4px;overflow:hidden;height:18px;">
+              <div style="width:${((a.cnt/maxArea)*100).toFixed(1)}%;background:var(--primary);height:100%;"></div>
+            </div>
+            <span style="width:70px;text-align:right;font-size:var(--fs-caption);font-variant-numeric:tabular-nums;">${(a.cnt||0).toLocaleString()}</span>
+          </div>`).join('') || '<div class="empty">수집된 데이터가 없습니다.</div>'}
+      </div>
+    </section>`;
+
+  // 3) 성취수준 분포
+  const distLevels = ['A','B','C','D','E'];
+  const distMap = Object.fromEntries((dist && dist.distribution || []).map(r=>[r.level,r.cnt]));
+  const distTotal = distLevels.reduce((s,l)=>s+(distMap[l]||0),0) || 1;
+  const distHtml = `
+    <section class="dc-chart-wrapper" style="margin-top:var(--space-4);">
+      <header><h2>성취수준 분포</h2><div class="subtitle">초 A~C · 중·고 A~E</div></header>
+      <div style="display:flex;gap:8px;">
+        ${distLevels.map(l => {
+          const c = distMap[l]||0;
+          const pct = ((c/distTotal)*100).toFixed(1);
+          return `<div style="flex:1;text-align:center;padding:var(--space-3);background:var(--gray-50);border-radius:6px;">
+            <div style="font-size:var(--fs-h2);font-weight:700;color:var(--primary);">${l}</div>
+            <div style="font-size:var(--fs-h3);margin-top:4px;">${c.toLocaleString()}</div>
+            <div style="font-size:var(--fs-caption);color:var(--gray-600);">${pct}%</div>
+          </div>`;
+        }).join('')}
+      </div>
+    </section>`;
+
+  // 4) 표준체계 히트맵 (상위 20)
+  const heatRows = (heat && heat.nodes || []).slice(0,20);
+  const heatMax = Math.max(1, ...heatRows.map(r=>r.attempts||0));
+  const heatHtml = `
+    <section class="dc-chart-wrapper" style="margin-top:var(--space-4);">
+      <header><h2>표준체계 노드 히트맵 (Top 20)</h2><div class="subtitle">내용 체계 항목별 학습 빈도 · 정답률</div></header>
+      <div style="overflow:auto;">
+      <table style="width:100%;border-collapse:collapse;font-size:var(--fs-caption);">
+        <thead><tr style="background:var(--gray-100);">
+          <th style="text-align:left;padding:8px;">노드</th>
+          <th style="text-align:left;padding:8px;">레이블</th>
+          <th style="text-align:right;padding:8px;">학습자</th>
+          <th style="text-align:right;padding:8px;">시도</th>
+          <th style="text-align:right;padding:8px;">정답률</th>
+          <th style="padding:8px;">빈도</th>
+        </tr></thead>
+        <tbody>
+        ${heatRows.length ? heatRows.map(n => {
+          const rate = n.attempts > 0 ? ((n.correct/n.attempts)*100).toFixed(0) : '-';
+          const barW = ((n.attempts/heatMax)*100).toFixed(1);
+          const rateColor = n.attempts === 0 ? 'var(--gray-400)'
+            : (n.correct/n.attempts) >= 0.8 ? 'var(--success)'
+            : (n.correct/n.attempts) >= 0.6 ? 'var(--primary)'
+            : 'var(--warning)';
+          return `<tr style="border-top:1px solid var(--gray-200);">
+            <td style="padding:6px 8px;font-family:monospace;">${n.node_id}</td>
+            <td style="padding:6px 8px;">${n.label || '-'}</td>
+            <td style="padding:6px 8px;text-align:right;">${n.learners||0}</td>
+            <td style="padding:6px 8px;text-align:right;">${n.attempts||0}</td>
+            <td style="padding:6px 8px;text-align:right;color:${rateColor};font-weight:600;">${rate}${rate!=='-'?'%':''}</td>
+            <td style="padding:6px 8px;width:120px;">
+              <div style="background:var(--gray-100);border-radius:3px;height:10px;overflow:hidden;">
+                <div style="width:${barW}%;background:${rateColor};height:100%;"></div>
+              </div>
+            </td>
+          </tr>`;
+        }).join('') : '<tr><td colspan="6" style="padding:16px;text-align:center;color:var(--gray-500);">수집된 표준체계 데이터가 없습니다.</td></tr>'}
+        </tbody>
+      </table>
+      </div>
+    </section>`;
+
+  // 5) 최근 이벤트
+  const events = (recent && recent.events) || [];
+  const recentHtml = `
+    <section class="dc-chart-wrapper" style="margin-top:var(--space-4);">
+      <header><h2>최근 수집 이벤트</h2><div class="subtitle">최신 ${events.length}건</div></header>
+      <div style="overflow:auto;max-height:400px;">
+      <table style="width:100%;border-collapse:collapse;font-size:var(--fs-caption);">
+        <thead><tr style="background:var(--gray-100);position:sticky;top:0;">
+          <th style="text-align:left;padding:6px;">시각</th>
+          <th style="text-align:left;padding:6px;">사용자</th>
+          <th style="text-align:left;padding:6px;">영역</th>
+          <th style="text-align:left;padding:6px;">동사</th>
+          <th style="text-align:left;padding:6px;">표준ID</th>
+          <th style="text-align:left;padding:6px;">교과</th>
+          <th style="text-align:left;padding:6px;">수준</th>
+        </tr></thead>
+        <tbody>
+        ${events.length ? events.map(e => `
+          <tr style="border-top:1px solid var(--gray-200);">
+            <td style="padding:4px 6px;white-space:nowrap;">${(e.event_timestamp||'').slice(5,16).replace('T',' ')}</td>
+            <td style="padding:4px 6px;">${e.display_name || `user-${e.user_id}`}</td>
+            <td style="padding:4px 6px;"><span class="chip">${e.area}</span></td>
+            <td style="padding:4px 6px;font-family:monospace;">${e.verb}</td>
+            <td style="padding:4px 6px;font-family:monospace;font-size:11px;">${e.primary_std_id||'-'}</td>
+            <td style="padding:4px 6px;">${e.subject_code||'-'}</td>
+            <td style="padding:4px 6px;">${e.achievement_level||'-'}</td>
+          </tr>`).join('') : '<tr><td colspan="7" style="padding:16px;text-align:center;color:var(--gray-500);">이벤트가 없습니다.</td></tr>'}
+        </tbody>
+      </table>
+      </div>
+    </section>`;
+
+  root.innerHTML = `
+    <section class="dc-chart-wrapper">
+      <header>
+        <h2>xAPI 표준체계 분석</h2>
+        <div class="subtitle">AIDT 기술규격 v2.2 기반 수집 데이터 · 교육부 학습데이터허브 포맷 정합</div>
+      </header>
+      ${kpiHtml}
+    </section>
+    ${areaHtml}
+    ${distHtml}
+    ${heatHtml}
+    ${recentHtml}
+  `;
+}
+
+VIEWS['s-xapi'] = async function(root) { await _renderXapiAnalysis(root, 'me'); };
+VIEWS['t-xapi'] = async function(root) {
+  const cid = state.classId || state.class_id;
+  await _renderXapiAnalysis(root, cid ? `class:${cid}` : null);
+};
+VIEWS['a-xapi'] = async function(root) { await _renderXapiAnalysis(root, 'school'); };
 
 VIEWS['a-export'] = async function(root){
   root.innerHTML = tplLoading(1);

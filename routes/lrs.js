@@ -1761,4 +1761,187 @@ router.get('/stats/period-compare', requireAuth, (req, res) => {
   }
 });
 
+// ═══════════════════════════════════════════════════════════════════
+// xAPI 표준체계 분석 엔드포인트 (Phase E)
+//   Phase B에서 수집한 xapi_statement_spool + lrs_std_node_stats 기반.
+//   scope 파라미터: 'me' (학생 본인), 'class:<id>' (교사), 'school' (admin)
+// ═══════════════════════════════════════════════════════════════════
+
+/** scope 파라미터 → user_id IN (...) 조건 구성 */
+function _xapiScopeUserIds(req, scope) {
+  if (scope === 'me' || !scope) return [req.user.id];
+  if (scope === 'school' && req.user.role === 'admin') return null; // null = 전체
+  if (scope.startsWith('class:')) {
+    const classId = parseInt(scope.slice(6));
+    if (!classId) return [req.user.id];
+    try {
+      const members = db.prepare(
+        'SELECT user_id FROM class_members WHERE class_id = ?'
+      ).all(classId).map(r => r.user_id);
+      // 교사면 자기 학급 허용, 학생이면 본인만
+      const role = classDb.getMemberRole(classId, req.user.id);
+      if (role === 'owner' || req.user.role === 'admin') return members;
+      return [req.user.id];
+    } catch { return [req.user.id]; }
+  }
+  return [req.user.id];
+}
+
+function _xapiUserFilter(userIds) {
+  if (userIds === null) return { clause: '', params: [] };
+  if (!userIds.length) return { clause: ' AND 1=0', params: [] };
+  return { clause: ` AND user_id IN (${userIds.map(() => '?').join(',')})`, params: userIds };
+}
+
+// GET /api/lrs/xapi/overview — 수집 현황 (영역별 건수)
+router.get('/xapi/overview', requireAuth, (req, res) => {
+  try {
+    const userIds = _xapiScopeUserIds(req, req.query.scope);
+    const f = _xapiUserFilter(userIds);
+    const byArea = db.prepare(`
+      SELECT area, COUNT(*) as cnt
+      FROM xapi_statement_spool
+      WHERE 1=1 ${f.clause}
+      GROUP BY area
+      ORDER BY cnt DESC
+    `).all(...f.params);
+    const recent24h = db.prepare(`
+      SELECT COUNT(*) as cnt FROM xapi_statement_spool
+      WHERE event_timestamp >= datetime('now','-1 day') ${f.clause}
+    `).get(...f.params).cnt;
+    const recent7d = db.prepare(`
+      SELECT COUNT(*) as cnt FROM xapi_statement_spool
+      WHERE event_timestamp >= datetime('now','-7 day') ${f.clause}
+    `).get(...f.params).cnt;
+    const total = byArea.reduce((s, r) => s + r.cnt, 0);
+    const sent = db.prepare(`
+      SELECT COUNT(*) as cnt FROM xapi_statement_spool
+      WHERE sent_at IS NOT NULL ${f.clause}
+    `).get(...f.params).cnt;
+    res.json({
+      success: true,
+      total, sent, unsent: total - sent,
+      recent24h, recent7d,
+      byArea,
+    });
+  } catch (err) {
+    console.error('[LRS] /xapi/overview error:', err);
+    res.status(500).json({ success: false, message: '서버 오류' });
+  }
+});
+
+// GET /api/lrs/xapi/std-heatmap — 표준체계 노드별 학습량 히트맵
+//   쿼리: scope, subject_code, grade_group, depth (0~3)
+router.get('/xapi/std-heatmap', requireAuth, (req, res) => {
+  try {
+    const userIds = _xapiScopeUserIds(req, req.query.scope);
+    const f = _xapiUserFilter(userIds);
+    const subject = req.query.subject_code || null;
+    const grade = req.query.grade_group ? parseInt(req.query.grade_group) : null;
+    const depth = req.query.depth != null ? parseInt(req.query.depth) : null;
+
+    const where = [`s.user_id IS NOT NULL`];
+    const params = [];
+    if (depth != null) { where.push('s.depth = ?'); params.push(depth); }
+    if (subject) { where.push('n.subject_code = ?'); params.push(subject); }
+    if (grade != null) { where.push('n.grade_group = ?'); params.push(grade); }
+    if (userIds) {
+      where.push(`s.user_id IN (${userIds.map(() => '?').join(',')})`);
+      params.push(...userIds);
+    }
+    const rows = db.prepare(`
+      SELECT s.node_id,
+             COALESCE(n.label, s.node_id) as label,
+             n.subject_code, n.grade_group, s.depth,
+             SUM(s.attempts) as attempts,
+             SUM(s.correct) as correct,
+             COUNT(DISTINCT s.user_id) as learners
+      FROM lrs_std_node_stats s
+      LEFT JOIN curriculum_content_nodes n ON s.node_id = n.id
+      WHERE ${where.join(' AND ')}
+      GROUP BY s.node_id
+      ORDER BY attempts DESC
+      LIMIT 200
+    `).all(...params);
+    res.json({ success: true, nodes: rows });
+  } catch (err) {
+    console.error('[LRS] /xapi/std-heatmap error:', err);
+    res.status(500).json({ success: false, message: '서버 오류' });
+  }
+});
+
+// GET /api/lrs/xapi/achievement-distribution — 성취수준 분포
+router.get('/xapi/achievement-distribution', requireAuth, (req, res) => {
+  try {
+    const userIds = _xapiScopeUserIds(req, req.query.scope);
+    const f = _xapiUserFilter(userIds);
+    const subject = req.query.subject_code || null;
+    const extra = subject ? ' AND subject_code = ?' : '';
+    const params = [...f.params];
+    if (subject) params.push(subject);
+    const rows = db.prepare(`
+      SELECT achievement_level as level, COUNT(*) as cnt
+      FROM xapi_statement_spool
+      WHERE achievement_level IS NOT NULL ${f.clause} ${extra}
+      GROUP BY achievement_level
+      ORDER BY level
+    `).all(...params);
+    // 영역(과목)별 분포도 함께
+    const bySubject = db.prepare(`
+      SELECT subject_code, achievement_level as level, COUNT(*) as cnt
+      FROM xapi_statement_spool
+      WHERE achievement_level IS NOT NULL AND subject_code IS NOT NULL ${f.clause}
+      GROUP BY subject_code, achievement_level
+      ORDER BY subject_code, level
+    `).all(...f.params);
+    res.json({ success: true, distribution: rows, bySubject });
+  } catch (err) {
+    console.error('[LRS] /xapi/achievement-distribution error:', err);
+    res.status(500).json({ success: false, message: '서버 오류' });
+  }
+});
+
+// GET /api/lrs/xapi/area-breakdown — 영역별 일별 추이
+router.get('/xapi/area-breakdown', requireAuth, (req, res) => {
+  try {
+    const userIds = _xapiScopeUserIds(req, req.query.scope);
+    const f = _xapiUserFilter(userIds);
+    const days = Math.min(parseInt(req.query.days) || 7, 90);
+    const rows = db.prepare(`
+      SELECT date(event_timestamp) as d, area, COUNT(*) as cnt
+      FROM xapi_statement_spool
+      WHERE event_timestamp >= datetime('now', ?) ${f.clause}
+      GROUP BY d, area
+      ORDER BY d ASC, area
+    `).all(`-${days} day`, ...f.params);
+    res.json({ success: true, days, rows });
+  } catch (err) {
+    console.error('[LRS] /xapi/area-breakdown error:', err);
+    res.status(500).json({ success: false, message: '서버 오류' });
+  }
+});
+
+// GET /api/lrs/xapi/recent-events — 최근 이벤트 (live feed)
+router.get('/xapi/recent-events', requireAuth, (req, res) => {
+  try {
+    const userIds = _xapiScopeUserIds(req, req.query.scope);
+    const f = _xapiUserFilter(userIds);
+    const limit = Math.min(parseInt(req.query.limit) || 30, 200);
+    const rows = db.prepare(`
+      SELECT s.id, s.area, s.verb, s.primary_std_id, s.subject_code,
+             s.object_type, s.object_id, s.success, s.achievement_level,
+             s.event_timestamp, s.user_id, u.display_name
+      FROM xapi_statement_spool s
+      LEFT JOIN users u ON s.user_id = u.id
+      WHERE 1=1 ${f.clause}
+      ORDER BY s.event_timestamp DESC
+      LIMIT ?
+    `).all(...f.params, limit);
+    res.json({ success: true, events: rows });
+  } catch (err) {
+    console.error('[LRS] /xapi/recent-events error:', err);
+    res.status(500).json({ success: false, message: '서버 오류' });
+  }
+});
+
 module.exports = router;
