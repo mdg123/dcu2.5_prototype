@@ -6,6 +6,18 @@
 (function() {
   'use strict';
 
+  // === 교육과정 표준체계 Web Components 자동 로드 ===
+  // 어느 페이지든 common-nav.js를 포함하면 <std-smart-search>, <std-picker>를 사용할 수 있다.
+  (function loadStdComponents() {
+    const files = ['/js/components/std-smart-search.js', '/js/components/std-picker.js'];
+    files.forEach(src => {
+      if (document.querySelector('script[src="' + src + '"]')) return;
+      const s = document.createElement('script');
+      s.src = src; s.defer = true;
+      document.head.appendChild(s);
+    });
+  })();
+
   const MENU = [
     {
       id: 'chaeumClass', label: '채움클래스',
