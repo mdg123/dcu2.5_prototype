@@ -190,6 +190,18 @@
     let reviewBanner = null;
     // 풀이 모드: auto=1 또는 solve=1 파라미터가 있어야 제출 가능 (공개콘텐츠 미리보기 차단)
     let solveMode = params.get('auto') === '1' || params.get('solve') === '1';
+    // 임베드 모드: 오늘의 학습 등 상위 페이지에서 iframe으로 삽입된 경우
+    const embedMode = params.get('embed') === '1';
+    if (embedMode) {
+      solveMode = true;
+      document.addEventListener('DOMContentLoaded', () => {
+        const hdr = document.querySelector('.player-header'); if (hdr) hdr.style.display = 'none';
+        const notice = document.getElementById('modeNotice'); if (notice) notice.style.display = 'none';
+        const container = document.querySelector('.player-container');
+        if (container){ container.style.marginTop = '0'; container.style.height = '100vh'; }
+        document.body.style.background = 'transparent';
+      });
+    }
 
     function escHtml(s){
       return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -699,6 +711,43 @@
           }).catch(() => {});
         }
       } catch {}
+
+      // 임베드 모드: 상위 페이지(오늘의 학습 등)에 채점 결과 전달
+      if (embedMode && window.parent && window.parent !== window){
+        try {
+          const correctCount = results.filter(r => r.correct === true).length;
+          const wrongCount = results.filter(r => r.correct === false).length;
+          const detail = questions.map((q, i) => {
+            const r = results[i];
+            const qType = q.question_type || 'choice';
+            const opts = Array.isArray(q.options) ? q.options : [];
+            const myA = answers[i];
+            const corA = q.answer;
+            const myText = qType === 'choice'
+              ? (typeof myA === 'number' ? (opts[myA] || String(myA)) : '')
+              : String(myA ?? '');
+            const corText = qType === 'choice'
+              ? (opts[Number(corA)] || String(corA))
+              : String(corA ?? '');
+            return {
+              questionNumber: q.question_number || (i+1),
+              questionText: q.question_text || q.text || `문제 ${i+1}`,
+              options: opts,
+              myAnswer: myA, myAnswerText: myText,
+              correctAnswer: corA, correctAnswerText: corText,
+              isCorrect: r.correct === true,
+              explanation: q.explanation || null
+            };
+          });
+          window.parent.postMessage({
+            type: 'dacheum:quiz-graded',
+            contentId: Number(contentId),
+            score: pct, totalScore, maxTotal,
+            correct: correctCount, wrong: wrongCount, totalQ: questions.length,
+            answers, detail
+          }, '*');
+        } catch(e){ console.warn('postMessage fail', e); }
+      }
 
       showQuestion(currentQ);
     }

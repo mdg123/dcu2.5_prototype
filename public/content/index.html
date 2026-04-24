@@ -101,6 +101,9 @@
     .content-card:hover { box-shadow: 0 8px 24px rgba(37,99,235,.1); border-color: var(--blue-200); transform: translateY(-3px); }
     .card-thumb { height: 160px; position: relative; display: flex; align-items: center; justify-content: center; }
     .card-thumb i { font-size: 36px; opacity: .3; }
+    /* 썸네일 이미지가 있으면 기본 폴백 아이콘 숨기고, img onerror로 thumb-broken이 붙으면 다시 보이게 */
+    .card-thumb .thumb-fallback-icon { display: none; }
+    .card-thumb.thumb-broken .thumb-fallback-icon { display: inline-block; }
     .card-thumb .type-badge { position: absolute; top: 8px; right: 8px; }
     .card-thumb .badge { position: absolute; top: 8px; left: 8px; }
     .card-body { padding: 14px; }
@@ -1500,12 +1503,15 @@
         </div>`;
       }
 
-      const thumbBg = cardThumbUrl ? `style="background-image:url('${cardThumbUrl}');background-size:cover;background-position:center;"` : '';
       const isQuizLike = ['quiz','exam','assessment'].includes(type);
       const cardClickHandler = isQuizLike ? `openContentPlayer(${item.id})` : `openContentDetail(${item.id})`;
+      // 썸네일 로드 실패 시 아이콘 폴백: img onerror로 부모에 data 속성 마킹 → CSS로 아이콘 표시
+      const thumbInner = cardThumbUrl
+        ? `<img src="${cardThumbUrl}" alt="" style="width:100%;height:100%;object-fit:cover;display:block;" onerror="this.style.display='none';this.parentElement.classList.add('thumb-broken');"><i class="fas ${icon} thumb-fallback-icon" style="position:absolute;font-size:36px;opacity:.3;"></i>`
+        : `<i class="fas ${icon}"></i>`;
       return `<div class="content-card" onclick="${cardClickHandler}">
-        <div class="card-thumb ${thumbCls}" ${thumbBg}>
-          ${cardThumbUrl ? '' : `<i class="fas ${icon}"></i>`}
+        <div class="card-thumb ${thumbCls}" style="overflow:hidden;">
+          ${thumbInner}
           ${showStatus ? statusBadge(item.status) : ''}
           ${typeBadge(type)}
         </div>

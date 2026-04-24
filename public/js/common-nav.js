@@ -46,6 +46,8 @@
     {
       id: 'growthRecord', label: '성장기록',
       defaultUrl: '/growth/class-dashboard.html',
+      // 학생은 학급 대시보드 접근 불가 → 성장 리포트로 진입
+      defaultUrlByRole: { student: '/growth/student-report.html' },
       sub: [
         { label: '마음채움', url: '/growth/emotion-monitor.html', roles: ['teacher', 'admin'] },
         { label: '학습분석', url: '/growth/class-dashboard.html', roles: ['teacher', 'admin'] },
@@ -167,7 +169,8 @@
     MENU.forEach(m => {
       if (!m.sub) return;
       const a = document.createElement('a');
-      a.href = m.defaultUrl || '#';
+      const roleUrl = m.defaultUrlByRole && m.defaultUrlByRole[user.role];
+      a.href = roleUrl || m.defaultUrl || '#';
       a.className = 'gnb-nav1-item';
       if (m.id === activeMenuId) a.classList.add('active');
       a.textContent = m.label;

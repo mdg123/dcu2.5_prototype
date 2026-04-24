@@ -62,6 +62,13 @@ app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 // 정적 파일 서빙
 app.use(express.static(path.join(__dirname, 'public')));
+// 워크트리에서 실행될 때 부모 저장소의 uploads 폴더도 서빙 (fallback)
+{
+  const parentUploads = path.resolve(__dirname, '..', '..', '..', 'public', 'uploads');
+  if (require('fs').existsSync(parentUploads)) {
+    app.use('/uploads', express.static(parentUploads));
+  }
+}
 
 // Socket.IO에 세션 공유
 io.use((socket, next) => {

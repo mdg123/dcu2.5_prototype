@@ -474,7 +474,7 @@ router.get('/emotion-today', requireAuth, (req, res) => {
   try {
     const today = new Date().toISOString().slice(0, 10);
     const record = require('../db/index').prepare(
-      'SELECT emotion, emotion_reason, emotion_score FROM attendance WHERE user_id = ? AND attendance_date = ? AND emotion IS NOT NULL ORDER BY id DESC LIMIT 1'
+      'SELECT emotion, emotion_reason, emotion_score FROM emotion_checkins WHERE user_id = ? AND checkin_date = ? LIMIT 1'
     ).get(req.user.id, today);
     res.json({ success: true, hasChecked: !!record, emotion: record?.emotion || null, reason: record?.emotion_reason || null, emotionScore: record?.emotion_score != null ? record.emotion_score : null });
   } catch (err) {
@@ -487,11 +487,12 @@ router.get('/emotion-history', requireAuth, (req, res) => {
   try {
     const db = require('../db/index');
     const limit = parseInt(req.query.limit) || 30;
+    // 감정 체크인 내역 (emotion_checkins: user-level, class-independent, 날짜당 1행)
     const records = db.prepare(`
-      SELECT attendance_date, emotion, emotion_reason, emotion_score
-      FROM attendance
-      WHERE user_id = ? AND emotion IS NOT NULL
-      ORDER BY attendance_date DESC
+      SELECT checkin_date AS attendance_date, emotion, emotion_reason, emotion_score
+      FROM emotion_checkins
+      WHERE user_id = ?
+      ORDER BY checkin_date DESC
       LIMIT ?
     `).all(req.user.id, limit);
 
@@ -501,20 +502,20 @@ router.get('/emotion-history', requireAuth, (req, res) => {
     const weekStart = weekAgo.toISOString().slice(0, 10);
     const weekStats = db.prepare(`
       SELECT emotion, COUNT(*) as cnt
-      FROM attendance
-      WHERE user_id = ? AND emotion IS NOT NULL AND attendance_date >= ?
+      FROM emotion_checkins
+      WHERE user_id = ? AND checkin_date >= ?
       GROUP BY emotion ORDER BY cnt DESC
     `).all(req.user.id, weekStart);
 
     // 총 체크인 수 + 연속 체크인 일수
     const totalCheckins = db.prepare(
-      'SELECT COUNT(DISTINCT attendance_date) as cnt FROM attendance WHERE user_id = ? AND emotion IS NOT NULL'
+      'SELECT COUNT(*) as cnt FROM emotion_checkins WHERE user_id = ?'
     ).get(req.user.id).cnt;
 
     // 연속일수 계산
     const dates = db.prepare(
-      'SELECT DISTINCT attendance_date FROM attendance WHERE user_id = ? AND emotion IS NOT NULL ORDER BY attendance_date DESC'
-    ).all(req.user.id).map(r => r.attendance_date);
+      'SELECT checkin_date FROM emotion_checkins WHERE user_id = ? ORDER BY checkin_date DESC'
+    ).all(req.user.id).map(r => r.checkin_date);
     let streak = 0;
     const today = new Date().toISOString().slice(0, 10);
     for (let i = 0; i < dates.length; i++) {
@@ -560,20 +561,23 @@ router.get('/emotion-monitor/:classId', requireAuth, (req, res) => {
     const isRange = !!(qStart && qEnd);
 
     // 1. 해당 기간 감정 기록한 학생별 목록
+    // 감정 체크인은 emotion_checkins (학생 단위) + class_members JOIN 으로 해당 클래스 소속 학생만 조회
     let dateWhere, dateParams;
     if (isRange) {
-      dateWhere = 'a.attendance_date BETWEEN ? AND ?';
+      dateWhere = 'ec.checkin_date BETWEEN ? AND ?';
       dateParams = [classId, qStart, qEnd];
     } else {
-      dateWhere = 'a.attendance_date = ?';
+      dateWhere = 'ec.checkin_date = ?';
       dateParams = [classId, filterDate];
     }
 
     const periodEmotions = db.prepare(`
-      SELECT a.user_id, u.display_name, a.emotion, a.emotion_reason, a.attendance_date
-      FROM attendance a JOIN users u ON a.user_id = u.id
-      WHERE a.class_id = ? AND a.emotion IS NOT NULL AND ${dateWhere}
-      ORDER BY a.attendance_date DESC, a.id DESC
+      SELECT ec.user_id, u.display_name, ec.emotion, ec.emotion_reason, ec.checkin_date AS attendance_date
+      FROM emotion_checkins ec
+      JOIN class_members cm ON cm.user_id = ec.user_id AND cm.status = 'active'
+      JOIN users u ON u.id = ec.user_id
+      WHERE cm.class_id = ? AND ${dateWhere}
+      ORDER BY ec.checkin_date DESC, ec.id DESC
     `).all(...dateParams);
 
     // 중복 제거 (같은 학생 여러 기록 중 최신만)
@@ -602,10 +606,12 @@ router.get('/emotion-monitor/:classId', requireAuth, (req, res) => {
     }
 
     const recentEmotions = db.prepare(`
-      SELECT a.user_id, u.display_name, a.emotion, a.attendance_date, a.checked_at, a.emotion_score
-      FROM attendance a JOIN users u ON a.user_id = u.id
-      WHERE a.class_id = ? AND a.emotion IS NOT NULL AND a.attendance_date >= ? AND a.attendance_date <= ?
-      ORDER BY a.attendance_date ASC
+      SELECT ec.user_id, u.display_name, ec.emotion, ec.checkin_date AS attendance_date, ec.checked_at, ec.emotion_score
+      FROM emotion_checkins ec
+      JOIN class_members cm ON cm.user_id = ec.user_id AND cm.status = 'active'
+      JOIN users u ON u.id = ec.user_id
+      WHERE cm.class_id = ? AND ec.checkin_date >= ? AND ec.checkin_date <= ?
+      ORDER BY ec.checkin_date ASC
     `).all(classId, startDate, endDate);
 
     // 5. 학생별 감정 통계 (주의 학생 파악)

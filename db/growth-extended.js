@@ -246,10 +246,11 @@ function getClassDashboard(classId, teacherId, { period, startDate, endDate } = 
     WHERE class_id = ? AND emotion IS NOT NULL ${emotionDateFilter}
     GROUP BY weekday ORDER BY weekday
   `).all(...emotionDateParams);
-  const weekdayPositiveRates = [0, 0, 0, 0, 0]; // 월~금
+  const weekdayPositiveRates = [0, 0, 0, 0, 0, 0, 0]; // 월~일
   weekdayEmotionRows.forEach(w => {
-    const idx = w.weekday - 1;
-    if (idx >= 0 && idx < 5 && w.total > 0) {
+    // sqlite %w: 0=일, 1=월, ..., 6=토 → 배열 인덱스: 0=월, ..., 5=토, 6=일
+    const idx = (w.weekday + 6) % 7;
+    if (idx >= 0 && idx < 7 && w.total > 0) {
       weekdayPositiveRates[idx] = Math.round(w.positive_count / w.total * 100);
     }
   });
@@ -463,8 +464,13 @@ function getStudentReport(studentId, { classId, startDate, endDate } = {}) {
     ? diagnoses.reduce((s, d) => s + (d.correct_count && d.total_questions ? d.correct_count / d.total_questions * 100 : 0), 0) / diagnoses.length
     : 0;
 
+  // result_score는 저장 방식이 혼재(0~1 또는 0~100). 1 이하는 비율로 보고 ×100, 1 초과는 이미 백분위로 간주. 최종 0~100 클램프.
   const learnAvg = learningStats.length > 0
-    ? learningStats.reduce((s, l) => s + (l.avg_score ? l.avg_score * 100 : 0), 0) / learningStats.length
+    ? Math.min(100, learningStats.reduce((s, l) => {
+        const v = l.avg_score;
+        if (v == null) return s;
+        return s + (v <= 1 ? v * 100 : v);
+      }, 0) / learningStats.length)
     : 0;
 
   const dailyRate = dailyStats && dailyStats.total > 0
@@ -987,68 +993,38 @@ function ingestLearningLog(data) {
  */
 function ingestEmotion(data) {
   const date = data.date || new Date().toISOString().slice(0, 10);
-  const explicitClassId = data.classId ? parseInt(data.classId) : null;
-
+  // 마음채움 감정 체크인은 학생 단위 상태 — 클래스 출석부와 독립.
+  // emotion_checkins 테이블에 (user_id, date) UNIQUE 로 1행만 UPSERT 한다.
   const upsertStmt = db.prepare(`
-    INSERT INTO attendance (class_id, user_id, attendance_date, status, emotion, emotion_reason, emotion_score)
-    VALUES (?, ?, ?, 'present', ?, ?, ?)
-    ON CONFLICT(class_id, user_id, attendance_date) DO UPDATE SET
+    INSERT INTO emotion_checkins (user_id, checkin_date, emotion, emotion_reason, emotion_reason_type, emotion_score, checkin_source)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(user_id, checkin_date) DO UPDATE SET
       emotion = excluded.emotion,
       emotion_reason = excluded.emotion_reason,
+      emotion_reason_type = excluded.emotion_reason_type,
       emotion_score = excluded.emotion_score,
-      status = 'present',
-      checked_at = CURRENT_TIMESTAMP
+      checkin_source = excluded.checkin_source,
+      updated_at = CURRENT_TIMESTAMP
   `);
   const findRowStmt = db.prepare(
-    'SELECT id FROM attendance WHERE class_id = ? AND user_id = ? AND attendance_date = ?'
+    'SELECT id FROM emotion_checkins WHERE user_id = ? AND checkin_date = ?'
   );
 
-  const upsertOne = (cid) => {
-    const info = upsertStmt.run(cid, data.userId, date, data.emotion, data.emotionReason || null, data.emotionScore != null ? data.emotionScore : null);
-    let id = info.lastInsertRowid;
-    if (!id) {
-      const row = findRowStmt.get(cid, data.userId, date);
-      id = row ? row.id : null;
-    }
-    return id;
-  };
-
-  // 1) 명시적 classId 제공 + 해당 학생이 그 클래스 소속이면 단일 UPSERT
-  if (explicitClassId && explicitClassId > 0) {
-    const member = db.prepare(
-      "SELECT 1 FROM class_members WHERE user_id = ? AND class_id = ? AND status = 'active' LIMIT 1"
-    ).get(data.userId, explicitClassId);
-    if (member) {
-      const id = upsertOne(explicitClassId);
-      return { id, source: 'ingest', classCount: 1 };
-    }
-    // 유효하지 않으면 아래 멀티 인서트 경로로 폴백
+  const info = upsertStmt.run(
+    data.userId,
+    date,
+    data.emotion,
+    data.emotionReason || null,
+    data.emotionReasonType || 'text',
+    data.emotionScore != null ? data.emotionScore : null,
+    data.source || 'ingest'
+  );
+  let id = info.lastInsertRowid;
+  if (!id) {
+    const row = findRowStmt.get(data.userId, date);
+    id = row ? row.id : null;
   }
-
-  // 2) 학생이 속한 모든 활성 클래스에 UPSERT
-  const memberships = db.prepare(
-    "SELECT class_id FROM class_members WHERE user_id = ? AND status = 'active' ORDER BY id ASC"
-  ).all(data.userId);
-
-  if (memberships.length > 0) {
-    let firstId = null;
-    const tx = db.transaction(() => {
-      for (const m of memberships) {
-        const id = upsertOne(m.class_id);
-        if (firstId == null) firstId = id;
-      }
-    });
-    tx();
-    return { id: firstId, source: 'ingest', classCount: memberships.length };
-  }
-
-  // 3) 폴백: 멤버십이 전혀 없으면 가장 오래된 클래스에 기록 (데이터 소실 방지)
-  const anyClass = db.prepare('SELECT id FROM classes ORDER BY id ASC LIMIT 1').get();
-  if (!anyClass) {
-    throw new Error('유효한 클래스를 찾을 수 없습니다.');
-  }
-  const id = upsertOne(anyClass.id);
-  return { id, source: 'ingest', classCount: 1 };
+  return { id, source: 'ingest', classCount: 0 };
 }
 
 /**

@@ -1083,7 +1083,7 @@ function initSchema() {
     console.error('[다채움] gallery_reports UNIQUE 마이그레이션 실패:', e.message);
   }
 
-  // 마이그레이션: attendance 테이블에 감정 컬럼 추가 (SFR-031)
+  // 마이그레이션: attendance 테이블에 감정 컬럼 추가 (SFR-031, legacy)
   try {
     const attCols = db.prepare("PRAGMA table_info(attendance)").all().map(c => c.name);
     if (!attCols.includes('emotion')) {
@@ -1102,6 +1102,43 @@ function initSchema() {
       db.exec("ALTER TABLE attendance ADD COLUMN checkin_source TEXT");
     }
   } catch (e) { /* 테이블이 아직 없으면 무시 */ }
+
+  // 마음채움 감정 체크인은 클래스 출석부와 분리된 학생 단위 상태로 관리한다.
+  // 여러 클래스에 속한 학생이라도 1일 1행만 저장되며, 클래스 출석 기록과 독립적이다.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS emotion_checkins (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        checkin_date DATE NOT NULL,
+        emotion VARCHAR(30) NOT NULL,
+        emotion_reason TEXT,
+        emotion_reason_type VARCHAR(10) DEFAULT 'text',
+        emotion_score REAL,
+        checkin_source TEXT,
+        checked_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(user_id, checkin_date),
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+      );
+      CREATE INDEX IF NOT EXISTS idx_emotion_checkins_user_date ON emotion_checkins(user_id, checkin_date DESC);
+      CREATE INDEX IF NOT EXISTS idx_emotion_checkins_date ON emotion_checkins(checkin_date);
+    `);
+
+    // 1회성 백필: 기존 attendance 감정 데이터를 emotion_checkins로 이관 (날짜당 최신 1행)
+    const backfillDone = db.prepare("SELECT COUNT(*) AS cnt FROM emotion_checkins").get().cnt > 0;
+    if (!backfillDone) {
+      db.exec(`
+        INSERT OR IGNORE INTO emotion_checkins (user_id, checkin_date, emotion, emotion_reason, emotion_reason_type, emotion_score, checkin_source, checked_at)
+        SELECT user_id, attendance_date, emotion, emotion_reason, emotion_reason_type, emotion_score, checkin_source, MAX(checked_at)
+        FROM attendance
+        WHERE emotion IS NOT NULL
+        GROUP BY user_id, attendance_date
+      `);
+    }
+  } catch (e) {
+    console.warn('[다채움] emotion_checkins 초기화 실패:', e.message);
+  }
 
   // 마이그레이션: users 테이블에 parent_id 컬럼 추가 (M-1: LRS 학부모 digest)
   try {

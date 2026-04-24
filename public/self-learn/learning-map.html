@@ -1481,7 +1481,17 @@ function renderGradeJumpBar(){
 }
 
 function jumpToGrade(ng){
-  const targets = (allNodes||[]).filter(n => getNormGrade(n) === ng && n._x != null);
+  // 하이라이트 활성 시: 하이라이트 체인에 속한 노드 중 해당 학년 노드로만 한정
+  let related = null;
+  if (_highlightedNodeId) {
+    try { related = getConnectedChain(_highlightedNodeId).all; } catch(_) {}
+  }
+  let targets = (allNodes||[]).filter(n => getNormGrade(n) === ng && n._x != null);
+  if (related && related.size) {
+    const inChain = targets.filter(n => related.has(n._id));
+    if (inChain.length) targets = inChain;
+    // 해당 학년에 하이라이트 노드가 없으면 하이라이트를 유지한 채 전체 학년 노드로 폴백
+  }
   if (!targets.length) return;
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   targets.forEach(n => {
@@ -1494,9 +1504,16 @@ function jumpToGrade(ng){
   if (!canvas) return;
   const cw = canvas.clientWidth, ch = canvas.clientHeight;
   const s = mapState.scale;
-  // 해당 학년 영역이 좌상단 40/20 패딩 위치에 오도록 팬
-  mapState.x = -minX * s + 40;
-  mapState.y = Math.min(30, -minY * s + 20);
+  if (related && related.size) {
+    // 하이라이트 모드: 해당 학년 내 하이라이트 노드의 중앙이 화면 중앙에 오도록 팬
+    const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
+    mapState.x = cw / 2 - cx * s;
+    mapState.y = ch / 2 - cy * s;
+  } else {
+    // 해당 학년 영역이 좌상단 40/20 패딩 위치에 오도록 팬
+    mapState.x = -minX * s + 40;
+    mapState.y = Math.min(30, -minY * s + 20);
+  }
   updateMapTransform();
   // 활성 버튼 강조
   document.querySelectorAll('.grade-jump-btn').forEach(b => b.classList.remove('active'));
