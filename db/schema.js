@@ -1140,6 +1140,123 @@ function initSchema() {
     console.warn('[다채움] emotion_checkins 초기화 실패:', e.message);
   }
 
+  // ============================================================
+  // 교육과정 표준체계 + AIDT xAPI (Phase A2)
+  //  - 엑셀 "교육과정표준체계_최종산출물_202412"로부터 노드 트리 / 성취기준 매핑 / 성취수준을 적재
+  //  - AIDT 기술규격(v2.2)에 정합하는 xAPI statement 스풀링
+  //  - 기존 curriculum_standards / achievement_code CSV 컬럼은 그대로 유지 (Coexist)
+  // ============================================================
+  try {
+    db.exec(`
+      -- 내용체계 트리 (영역=0 / 1단계=1 / 2단계=2 / 3단계=3), self-FK
+      CREATE TABLE IF NOT EXISTS curriculum_content_nodes (
+        id            TEXT PRIMARY KEY,          -- 엑셀 표준체계 ID (E4KORA01B01C01 등)
+        subject_code  TEXT NOT NULL,             -- subjects.code 참조 (korean-e 등)
+        school_level  TEXT NOT NULL,             -- '초' / '중' / '고'
+        grade_group   INTEGER NOT NULL,          -- 2 / 4 / 6 / 9 / 10
+        depth         INTEGER NOT NULL,          -- 0=영역 ~ 3=3단계
+        parent_id     TEXT,                      -- self-FK
+        label         TEXT NOT NULL,             -- 영역명 / 단계 요소 문장
+        sort_order    INTEGER DEFAULT 0,
+        source        TEXT,                      -- 'KICE' | 'KOFAC' | 'CB_MATH'
+        version       TEXT,                      -- 엑셀 버전 (예: '2412')
+        created_at    DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_ccn_scope  ON curriculum_content_nodes(subject_code, grade_group, depth);
+      CREATE INDEX IF NOT EXISTS idx_ccn_parent ON curriculum_content_nodes(parent_id);
+
+      -- 성취기준 ↔ 내용요소 노드 매핑 (N:N)
+      CREATE TABLE IF NOT EXISTS curriculum_standard_nodes (
+        standard_code TEXT NOT NULL,             -- '[4국01-01]'
+        node_id       TEXT NOT NULL,             -- curriculum_content_nodes.id
+        PRIMARY KEY (standard_code, node_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_csn_node ON curriculum_standard_nodes(node_id);
+
+      -- 성취수준 (교과별 A~C 또는 A~E)
+      CREATE TABLE IF NOT EXISTS curriculum_standard_levels (
+        standard_code TEXT NOT NULL,
+        level_code    TEXT NOT NULL,             -- 'A' ~ 'E'
+        description   TEXT NOT NULL,
+        PRIMARY KEY (standard_code, level_code)
+      );
+
+      -- 성취기준 코드 ↔ 표준체계 ID 매핑 (양방향 resolve)
+      CREATE TABLE IF NOT EXISTS curriculum_std_id_map (
+        standard_code TEXT NOT NULL,             -- '[4수01-01]'
+        std_id        TEXT NOT NULL,             -- 'E4MATA01B01C01'
+        subject_code  TEXT NOT NULL,
+        grade_group   INTEGER NOT NULL,
+        PRIMARY KEY (standard_code, std_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_csim_std_id ON curriculum_std_id_map(std_id);
+
+      -- 자손 사전계산 (재귀 CTE 대체, 검색 성능)
+      CREATE TABLE IF NOT EXISTS curriculum_node_descendants (
+        ancestor_id   TEXT NOT NULL,
+        descendant_id TEXT NOT NULL,
+        depth_diff    INTEGER NOT NULL,          -- 0=자기자신, 1=직계자식, ...
+        PRIMARY KEY (ancestor_id, descendant_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_cnd_desc ON curriculum_node_descendants(descendant_id);
+
+      -- AIDT xAPI statement 스풀 (배치 송신 대기/완료 이력)
+      CREATE TABLE IF NOT EXISTS xapi_statement_spool (
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_uuid       TEXT NOT NULL,           -- AIDT UUID v5
+        area            TEXT NOT NULL,           -- 'media'|'assessment'|'assignment'|'navigation'|'objective'|'query'|'social'|'survey'|'annotation'|'teaching'
+        verb            TEXT NOT NULL,           -- 'played','submitted','gave','finished','viewed',...
+        statement_json  TEXT NOT NULL,           -- 완성된 xAPI Statement
+        event_timestamp DATETIME NOT NULL,
+        sent_at         DATETIME,                -- NULL = 미전송
+        sent_status     TEXT,                    -- 'ok'|'error'|'skipped'
+        error_message   TEXT,
+        retry_count     INTEGER DEFAULT 0,
+        created_at      DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_xapi_spool_unsent    ON xapi_statement_spool(sent_at) WHERE sent_at IS NULL;
+      CREATE INDEX IF NOT EXISTS idx_xapi_spool_user      ON xapi_statement_spool(user_uuid, event_timestamp);
+      CREATE INDEX IF NOT EXISTS idx_xapi_spool_area_verb ON xapi_statement_spool(area, verb);
+
+      -- 표준체계 노드 기반 로컬 LRS 집계 (리프 + 조상 체인 모두 누적)
+      CREATE TABLE IF NOT EXISTS lrs_std_node_stats (
+        user_id     INTEGER NOT NULL,
+        node_id     TEXT NOT NULL,
+        depth       INTEGER NOT NULL,
+        attempts    INTEGER DEFAULT 0,
+        correct     INTEGER DEFAULT 0,
+        last_level  TEXT,                        -- 'A'~'E'
+        updated_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (user_id, node_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_lsns_node ON lrs_std_node_stats(node_id);
+    `);
+
+    // curriculum_standards 확장
+    const csCols = db.prepare("PRAGMA table_info(curriculum_standards)").all().map(c => c.name);
+    if (!csCols.includes('std_source')) {
+      db.exec("ALTER TABLE curriculum_standards ADD COLUMN std_source TEXT");
+    }
+    if (!csCols.includes('primary_node_id')) {
+      db.exec("ALTER TABLE curriculum_standards ADD COLUMN primary_node_id TEXT");
+    }
+
+    // 콘텐츠성 테이블에 AIDT 표준체계 ID 배열(CSV) 컬럼 추가
+    // 기존 achievement_code(CSV, 레거시) 는 그대로 두고 추가만.
+    const addStdIds = (table) => {
+      try {
+        const cols = db.prepare(`PRAGMA table_info(${table})`).all().map(c => c.name);
+        if (!cols.includes('curriculum_standard_ids')) {
+          db.exec(`ALTER TABLE ${table} ADD COLUMN curriculum_standard_ids TEXT`);
+        }
+      } catch (e) { /* 테이블이 아직 없으면 무시 */ }
+    };
+    ['contents','lessons','homework','exams','content_questions','problem_sets','wrong_answers','learning_logs']
+      .forEach(addStdIds);
+  } catch (e) {
+    console.warn('[다채움] 교육과정 표준체계/xAPI 스키마 초기화 실패:', e.message);
+  }
+
   // 마이그레이션: users 테이블에 parent_id 컬럼 추가 (M-1: LRS 학부모 digest)
   try {
     const uCols = db.prepare("PRAGMA table_info(users)").all().map(c => c.name);

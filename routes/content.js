@@ -39,7 +39,7 @@ router.post('/move-to-folder', requireAuth, (req, res) => {
 // GET /api/contents - 공개 콘텐츠 검색
 router.get('/', requireAuth, (req, res) => {
   try {
-    const { keyword, subject, grade, content_type, page, limit, sort, achievement_codes } = req.query;
+    const { keyword, subject, grade, content_type, page, limit, sort, achievement_codes, curriculum_standard_ids } = req.query;
     const result = contentDb.searchPublicContents({
       keyword, subject,
       grade: grade ? parseInt(grade) : null,
@@ -47,7 +47,8 @@ router.get('/', requireAuth, (req, res) => {
       page: parseInt(page) || 1,
       limit: parseInt(limit) || 12,
       sort,
-      achievement_codes: achievement_codes ? achievement_codes.split(',').filter(Boolean) : null
+      achievement_codes: achievement_codes ? achievement_codes.split(',').filter(Boolean) : null,
+      curriculum_standard_ids: curriculum_standard_ids ? curriculum_standard_ids.split(',').filter(Boolean) : null
     });
     res.json({ success: true, ...result });
   } catch (err) {

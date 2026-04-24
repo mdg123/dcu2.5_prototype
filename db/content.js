@@ -73,7 +73,7 @@ function incrementViewCount(id) {
 }
 
 // 공개 콘텐츠 검색
-function searchPublicContents({ keyword, subject, grade, content_type, page = 1, limit = 12, sort = 'latest', achievement_codes } = {}) {
+function searchPublicContents({ keyword, subject, grade, content_type, page = 1, limit = 12, sort = 'latest', achievement_codes, curriculum_standard_ids } = {}) {
   const join = ' JOIN users u ON c.creator_id = u.id';
   let where = " WHERE c.is_public = 1 AND c.status = 'approved'";
   const params = [];
@@ -89,6 +89,18 @@ function searchPublicContents({ keyword, subject, grade, content_type, page = 1,
     const aConds = achievement_codes.map(() => 'c.achievement_code LIKE ?');
     where += ' AND (' + aConds.join(' OR ') + ')';
     achievement_codes.forEach(code => params.push(`%${code}%`));
+  }
+  if (curriculum_standard_ids && curriculum_standard_ids.length > 0) {
+    // 새 표준체계 ID(CSV) 필터 — curriculum_standard_ids 컬럼 또는
+    // std_id_map 경유로 achievement_code(legacy) 매핑 모두 지원
+    const idConds = [];
+    curriculum_standard_ids.forEach(sid => {
+      idConds.push('c.curriculum_standard_ids LIKE ?');
+      params.push(`%${sid}%`);
+      idConds.push(`c.achievement_code IN (SELECT standard_code FROM curriculum_std_id_map WHERE std_id = ?)`);
+      params.push(sid);
+    });
+    where += ' AND (' + idConds.join(' OR ') + ')';
   }
 
   const total = db.prepare('SELECT COUNT(*) as cnt FROM contents c' + join + where).get(...params).cnt;
