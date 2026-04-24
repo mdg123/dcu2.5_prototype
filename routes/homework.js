@@ -6,6 +6,13 @@ const classDb = require('../db/class');
 const { logLearningActivity } = require('../db/learning-log-helper');
 const { extractLogContext } = require('../lib/log-context');
 const { ensureTodayAttendance } = require('../db/attendance');
+const buildAssignment = require('../lib/xapi/builders/assignment');
+const xapiSpool = require('../lib/xapi/spool');
+
+function _hwSchoolLevel(sc) {
+  const s = String(sc || '');
+  return s.endsWith('-e') ? '초' : s.endsWith('-m') ? '중' : s.endsWith('-h') ? '고' : null;
+}
 
 function requireClassMember(req, res, next) {
   const classId = parseInt(req.params.classId);
@@ -41,6 +48,19 @@ router.post('/:classId', requireAuth, requireClassMember, (req, res) => {
       subject_code, grade_group, achievement_code,
       public_submissions: public_submissions ? 1 : 0
     });
+    // xAPI: 과제 출제 assignment.gave (교사)
+    try {
+      xapiSpool.record('assignment', buildAssignment, { userId: req.user.id, classId: req.classId }, {
+        verb: 'gave',
+        assignment_id: hw.id,
+        title: hw.title,
+        due_at: due_date || null,
+        subject_code: subject_code || null,
+        grade_group: grade_group || null,
+        school_level: _hwSchoolLevel(subject_code),
+        achievement_codes: achievement_code || null,
+      });
+    } catch (_) {}
     res.status(201).json({ success: true, homework: hw });
   } catch (err) {
     res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
@@ -142,6 +162,19 @@ router.post('/:classId/:homeworkId/submit', requireAuth, requireClassMember, (re
       }
     });
     try { ensureTodayAttendance(parseInt(req.params.classId), req.user.id, 'homework_submit'); } catch (e) {}
+    // xAPI: 과제 제출 assignment.finished (학생)
+    try {
+      xapiSpool.record('assignment', buildAssignment, { userId: req.user.id, classId: parseInt(req.params.classId) }, {
+        verb: 'finished',
+        assignment_id: parseInt(req.params.homeworkId),
+        title: hw ? hw.title : '과제',
+        subject_code: hw ? hw.subject_code : null,
+        grade_group: hw ? hw.grade_group : null,
+        school_level: _hwSchoolLevel(hw && hw.subject_code),
+        achievement_codes: hw ? hw.achievement_code : null,
+        submission: { content, file_path: file_path || file_url || null },
+      });
+    } catch (_) {}
     res.json({ success: true, message: result.updated ? '과제가 수정되었습니다.' : '과제가 제출되었습니다.' });
   } catch (err) {
     res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
@@ -182,6 +215,20 @@ router.post('/:classId/:homeworkId/grade/:submissionId', requireAuth, requireCla
         ...extractLogContext(req),
         metadata: { subject: hw ? hw.subject_code : null, feedback }
       });
+      // xAPI: 과제 채점 assignment.finished (채점 결과 포함, 학생 명의로)
+      try {
+        xapiSpool.record('assignment', buildAssignment, { userId: submission.student_id, classId: parseInt(req.params.classId) }, {
+          verb: 'finished',
+          assignment_id: parseInt(req.params.homeworkId),
+          title: hw ? hw.title : '과제',
+          subject_code: hw ? hw.subject_code : null,
+          grade_group: hw ? hw.grade_group : null,
+          school_level: _hwSchoolLevel(hw && hw.subject_code),
+          achievement_codes: hw ? hw.achievement_code : null,
+          submission: { score: normalizedScore, max_score: maxScore, feedback, graded: true },
+          success: normalizedScore >= 0.6,
+        });
+      } catch (_) {}
     }
     res.json({ success: true, message: '채점이 완료되었습니다.' });
   } catch (err) {

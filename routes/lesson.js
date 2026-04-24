@@ -6,6 +6,9 @@ const classDb = require('../db/class');
 const { logLearningActivity } = require('../db/learning-log-helper');
 const { extractLogContext } = require('../lib/log-context');
 const { ensureTodayAttendance } = require('../db/attendance');
+const buildNavigation = require('../lib/xapi/builders/navigation');
+const buildMedia = require('../lib/xapi/builders/media');
+const xapiSpool = require('../lib/xapi/spool');
 
 function requireClassMember(req, res, next) {
   const classId = parseInt(req.params.classId);
@@ -190,6 +193,38 @@ router.post('/:classId/:lessonId/progress', requireAuth, requireClassMember, (re
       ...extractLogContext(req),
       metadata: { contentId: content_id, progress: progress_percent }
     });
+    // xAPI: 수업 진도 (navigation + media)
+    try {
+      const sl = (lessonMeta && lessonMeta.subject_code || '').endsWith('-e') ? '초'
+        : (lessonMeta && lessonMeta.subject_code || '').endsWith('-m') ? '중'
+        : (lessonMeta && lessonMeta.subject_code || '').endsWith('-h') ? '고' : null;
+      const commonStd = {
+        subject_code: lessonMeta ? lessonMeta.subject_code : null,
+        grade_group: lessonMeta ? lessonMeta.grade_group : null,
+        school_level: sl,
+        achievement_codes: lessonMeta ? lessonMeta.achievement_code : null,
+        curriculum_standard_ids: lessonMeta ? lessonMeta.curriculum_standard_ids : null,
+      };
+      xapiSpool.record('navigation', buildNavigation, { userId: req.user.id, classId: parseInt(req.params.classId) }, {
+        verb: completed || progress_percent >= 100 ? 'finished' : 'did',
+        lesson_id: parseInt(req.params.lessonId),
+        title: lessonMeta ? lessonMeta.title : '수업',
+        progress_percent: progress_percent || null,
+        duration_sec: duration_sec ? parseInt(duration_sec) : null,
+        ...commonStd,
+      });
+      if (content_id) {
+        xapiSpool.record('media', buildMedia, { userId: req.user.id, classId: parseInt(req.params.classId) }, {
+          verb: completed ? 'finished' : 'played',
+          content_id: content_id,
+          title: lessonMeta ? lessonMeta.title : null,
+          progress_percent: progress_percent || null,
+          duration_sec: duration_sec ? parseInt(duration_sec) : null,
+          last_position: last_position || null,
+          ...commonStd,
+        });
+      }
+    } catch (_) {}
     res.json({ success: true });
   } catch (err) {
     console.error('[lesson progress]', err.message);

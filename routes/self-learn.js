@@ -5,6 +5,26 @@ const { requireAuth } = require('../middleware/auth');
 const selfLearnDb = require('../db/self-learn-extended');
 const { logLearningActivity } = require('../db/learning-log-helper');
 const { awardPoints } = require('../db/point-helper');
+const buildNavigation = require('../lib/xapi/builders/navigation');
+const buildAssessment = require('../lib/xapi/builders/assessment');
+const buildAnnotation = require('../lib/xapi/builders/annotation');
+const xapiSpool = require('../lib/xapi/spool');
+
+// 학습맵 노드 → 표준체계 컨텍스트 조회 헬퍼
+function _nodeStdContext(nodeId) {
+  try {
+    const mainDb = require('../db');
+    const n = mainDb.prepare('SELECT id, subject_code, grade_group, school_level, label FROM curriculum_content_nodes WHERE id = ?').get(nodeId);
+    if (!n) return {};
+    return {
+      curriculum_standard_ids: n.id,
+      subject_code: n.subject_code || null,
+      grade_group: n.grade_group || null,
+      school_level: n.school_level || null,
+      label: n.label,
+    };
+  } catch { return {}; }
+}
 
 // ========== 학습 설정 ==========
 
@@ -377,6 +397,17 @@ router.post('/map/nodes/:nodeId/start', requireAuth, (req, res) => {
     }
 
     db.close();
+    // xAPI: AI 맞춤학습 차시 노드 진입 navigation.did
+    try {
+      const ctxN = _nodeStdContext(nodeId);
+      xapiSpool.record('navigation', buildNavigation, { userId: req.user.id }, {
+        verb: changed ? 'did' : 'viewed',
+        lesson_id: nodeId,
+        title: ctxN.label || `차시 ${nodeId}`,
+        source: 'ai_custom_learning',
+        ...ctxN,
+      });
+    } catch (_) {}
     res.json({ success: true, status: nextStatus, prevStatus, changed });
   } catch (err) {
     console.error('[SELF-LEARN] map/nodes/start error:', err);
@@ -665,6 +696,28 @@ router.post('/wrong-notes/:id/retry', requireAuth, (req, res) => {
   try {
     const result = selfLearnDb.retryWrongNote(parseInt(req.params.id), req.user.id, req.body);
     if (!result) return res.status(404).json({ success: false, message: '오답을 찾을 수 없습니다.' });
+    // xAPI: 오답 재도전 annotation.annotated + assessment.submitted
+    try {
+      const correct = req.body && req.body.is_correct ? 1 : 0;
+      xapiSpool.record('annotation', buildAnnotation, { userId: req.user.id }, {
+        verb: 'annotated',
+        annotation_id: parseInt(req.params.id),
+        target_type: 'wrong_note',
+        target_id: parseInt(req.params.id),
+        annotation_kind: 'retry',
+        response: req.body && (req.body.note || req.body.answer) || null,
+      });
+      xapiSpool.record('assessment', buildAssessment, { userId: req.user.id }, {
+        verb: 'submitted',
+        assessment_id: parseInt(req.params.id),
+        title: '오답 재도전',
+        assessment_type: 'self_check',
+        target_kind: 'quiz',
+        score: { raw: correct, max: 1 },
+        success: !!correct,
+        source: 'wrong_note_retry',
+      });
+    } catch (_) {}
     res.json({ success: true, ...result });
   } catch (err) {
     res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
@@ -759,6 +812,21 @@ router.post('/problem-sets/:id/start', requireAuth, (req, res) => {
 router.post('/problem-sets/:id/submit', requireAuth, (req, res) => {
   try {
     const result = selfLearnDb.submitProblemSet(parseInt(req.params.id), req.user.id, req.body);
+    // xAPI: 나의 문제집 제출 assessment.submitted
+    try {
+      const raw = (result && (result.correct_count || 0)) || 0;
+      const max = (result && (result.total_questions || 0)) || 0;
+      xapiSpool.record('assessment', buildAssessment, { userId: req.user.id }, {
+        verb: 'submitted',
+        assessment_id: parseInt(req.params.id),
+        title: (result && result.title) || '나의 문제집',
+        assessment_type: 'self_check',
+        target_kind: 'quiz',
+        score: { raw, max },
+        success: max > 0 && (raw / max) >= 0.6,
+        source: 'my_problem_set',
+      });
+    } catch (_) {}
     res.json({ success: true, ...result });
   } catch (err) {
     res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });

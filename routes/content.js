@@ -4,6 +4,9 @@ const { requireAuth } = require('../middleware/auth');
 const contentDb = require('../db/content');
 const { logLearningActivity } = require('../db/learning-log-helper');
 const { extractLogContext } = require('../lib/log-context');
+const buildAssessment = require('../lib/xapi/builders/assessment');
+const buildQuery = require('../lib/xapi/builders/query');
+const xapiSpool = require('../lib/xapi/spool');
 
 // ===== 내자료 폴더 =====
 router.get('/folders', requireAuth, (req, res) => {
@@ -50,6 +53,20 @@ router.get('/', requireAuth, (req, res) => {
       achievement_codes: achievement_codes ? achievement_codes.split(',').filter(Boolean) : null,
       curriculum_standard_ids: curriculum_standard_ids ? curriculum_standard_ids.split(',').filter(Boolean) : null
     });
+    // xAPI: 공개콘텐츠 검색 query.searched
+    try {
+      xapiSpool.record('query', buildQuery, { userId: req.user.id }, {
+        verb: 'searched',
+        query_id: 'public-content-search',
+        query_text: keyword || '',
+        subject_code: subject || null,
+        grade_group: grade ? parseInt(grade) : null,
+        curriculum_standard_ids,
+        achievement_codes,
+        filters: { content_type: content_type || null, sort: sort || 'latest' },
+        result_count: (result && (result.total || (result.contents && result.contents.length))) || 0,
+      });
+    } catch (_) {}
     res.json({ success: true, ...result });
   } catch (err) {
     console.error('[CONTENT] search error:', err);
@@ -566,6 +583,29 @@ router.post('/:id/attempts', requireAuth, (req, res) => {
     try {
       const stmt = db.prepare(`INSERT INTO content_attempts (content_id, user_id, total_questions, correct_count, score_percent, answers) VALUES (?, ?, ?, ?, ?, ?)`);
       const info = stmt.run(contentId, req.user.id, total_questions, correct_count, score_percent, answers ? JSON.stringify(answers) : null);
+      // xAPI: 바로 풀기 assessment.submitted (콘텐츠 표준체계 해소)
+      try {
+        const mainDb = require('../db');
+        const c = mainDb.prepare('SELECT id, title, content_type, subject, grade, curriculum_standard_ids, achievement_code FROM contents WHERE id = ?').get(contentId);
+        if (c) {
+          const schoolLevel = (c.subject || '').endsWith('-e') ? '초' : (c.subject || '').endsWith('-m') ? '중' : (c.subject || '').endsWith('-h') ? '고' : null;
+          xapiSpool.record('assessment', buildAssessment, { userId: req.user.id }, {
+            verb: 'submitted',
+            assessment_id: contentId,
+            title: c.title,
+            assessment_type: c.content_type === 'exam' ? 'practice' : 'self_check',
+            target_kind: c.content_type === 'exam' ? 'exam' : 'quiz',
+            subject_code: c.subject || null,
+            grade_group: c.grade || null,
+            school_level: schoolLevel,
+            curriculum_standard_ids: c.curriculum_standard_ids || null,
+            achievement_codes: c.achievement_code || null,
+            score: { raw: correct_count, max: total_questions },
+            success: total_questions > 0 && (correct_count / total_questions) >= 0.6,
+            source: 'public_content_try',
+          });
+        }
+      } catch (_) {}
       res.json({ success: true, id: info.lastInsertRowid });
     } finally { db.close(); }
   } catch (err) {

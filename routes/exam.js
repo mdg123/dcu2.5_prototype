@@ -10,6 +10,8 @@ const classDb = require('../db/class');
 const { logLearningActivity, computeAchievementLevel } = require('../db/learning-log-helper');
 const { extractLogContext } = require('../lib/log-context');
 const cbtExtDb = require('../db/cbt-extended');
+const buildAssessment = require('../lib/xapi/builders/assessment');
+const xapiSpool = require('../lib/xapi/spool');
 const { ensureTodayAttendance } = require('../db/attendance');
 const initSocket = require('../socket');
 
@@ -480,6 +482,27 @@ router.post('/:classId/:examId/submit', requireAuth, requireClassMember, (req, r
         submittedAt: new Date().toISOString()
       });
     } catch (e) { console.error('[EXAM] socket notify error:', e); }
+
+    // xAPI: 평가 제출 assessment.submitted
+    try {
+      const schoolLevel = (exam.subject_code || exam.subject || '').endsWith('-e') ? '초'
+        : (exam.subject_code || exam.subject || '').endsWith('-m') ? '중'
+        : (exam.subject_code || exam.subject || '').endsWith('-h') ? '고' : null;
+      xapiSpool.record('assessment', buildAssessment, { userId: req.user.id, classId: parseInt(req.params.classId) }, {
+        verb: 'submitted',
+        assessment_id: exam.id,
+        title: exam.title,
+        assessment_type: exam.assessment_type || 'formative',
+        target_kind: 'exam',
+        subject_code: exam.subject_code || exam.subject || null,
+        grade_group: exam.grade_group || null,
+        school_level: schoolLevel,
+        curriculum_standard_ids: exam.curriculum_standard_ids || null,
+        achievement_codes: exam.achievement_code || null,
+        score: { raw: correctCount, max: totalItems },
+        success: score >= 60,
+      });
+    } catch (_) {}
 
     res.json({ success: true, message: '제출되었습니다.', score });
   } catch (err) {

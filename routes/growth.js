@@ -4,6 +4,8 @@ const { requireAuth } = require('../middleware/auth');
 const growthDb = require('../db/growth');
 const classDb = require('../db/class');
 const growthExtDb = require('../db/growth-extended');
+const buildSurvey = require('../lib/xapi/builders/survey');
+const xapiSpool = require('../lib/xapi/spool');
 
 // ===== 포트폴리오 =====
 
@@ -462,6 +464,16 @@ router.post('/emotion-checkin', requireAuth, (req, res) => {
       emotionScore: score,
       date: new Date().toISOString().slice(0, 10)
     });
+    // xAPI: 감정 출석부 survey.submitted (표준체계 없음)
+    try {
+      xapiSpool.record('survey', buildSurvey, { userId: req.user.id, classId: classId ? parseInt(classId) : null }, {
+        verb: 'submitted',
+        survey_id: result.id,
+        title: '감정 출석부',
+        survey_kind: 'emotion_attendance',
+        emotion: { primary: emotion, intensity: score, reason: emotionReason || null },
+      });
+    } catch (_) {}
     res.json({ success: true, id: result.id, classCount: result.classCount });
   } catch (err) {
     console.error('[GROWTH] emotion-checkin error:', err);
