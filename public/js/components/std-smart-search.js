@@ -64,12 +64,73 @@
         display:flex; flex-wrap:wrap; gap:4px;
         margin-top:6px;
       }
-      .tag {
-        display:inline-flex; align-items:center; gap:4px;
-        background:#eff6ff; color:#2563eb;
-        padding:3px 10px; border-radius:12px;
-        font-size:11px; font-weight:600;
+      .tags { display:flex; flex-direction:column; gap:10px; margin-top:6px; }
+      .std-card {
+        border:1.5px solid #dbeafe; border-radius:12px;
+        padding:10px 12px; background:#f8fafc;
+        display:flex; flex-direction:column; gap:8px;
       }
+      .std-card .hdr {
+        display:flex; align-items:center; gap:8px; flex-wrap:wrap;
+      }
+      .std-card .code-main {
+        background:#2563eb; color:#fff;
+        padding:3px 8px; border-radius:8px;
+        font-size:11px; font-weight:700; letter-spacing:.3px;
+      }
+      .std-card .content-text {
+        flex:1; color:#374151; font-size:12px;
+        line-height:1.4; min-width:0;
+      }
+      .std-card .remove-btn {
+        background:none; border:none; cursor:pointer;
+        color:#9ca3af; font-size:15px; padding:0 4px; line-height:1;
+      }
+      .std-card .remove-btn:hover { color:#ef4444; }
+      .std-card .chain {
+        display:flex; align-items:center; gap:6px; flex-wrap:wrap;
+        padding:4px 0 2px; font-size:11px;
+      }
+      .std-card .chain-label {
+        color:#6b7280; font-weight:700; font-size:10px;
+        margin-right:2px;
+      }
+      .std-card .chain-seg {
+        background:#e0e7ff; color:#4338ca;
+        padding:2px 8px; border-radius:6px;
+        font-size:10px; font-weight:600;
+      }
+      .std-card .chain-sep { color:#9ca3af; font-size:10px; }
+      .std-card .leaf-list {
+        display:flex; flex-direction:column; gap:4px;
+        padding:6px 0 0;
+        border-top:1px dashed #e5e7eb;
+      }
+      .std-card .leaf-hdr {
+        font-size:10px; font-weight:700; color:#6b7280;
+        padding-bottom:2px;
+      }
+      .std-card .leaf-row {
+        display:flex; align-items:flex-start; gap:8px;
+        padding:4px 6px; border-radius:6px;
+        cursor:pointer; transition:background .1s;
+      }
+      .std-card .leaf-row:hover { background:#eff6ff; }
+      .std-card .leaf-row input[type="checkbox"] {
+        margin-top:3px; flex-shrink:0;
+        width:14px; height:14px; cursor:pointer;
+        accent-color:#3b82f6;
+      }
+      .std-card .leaf-row .leaf-id {
+        background:#f3e8ff; color:#7c3aed;
+        padding:1px 5px; border-radius:4px;
+        font-size:9px; font-weight:700; flex-shrink:0;
+      }
+      .std-card .leaf-row .leaf-text {
+        flex:1; color:#374151; font-size:11px; line-height:1.35;
+      }
+      .std-card .leaf-row.checked { background:#eff6ff; }
+      .std-card .loading-chain { color:#9ca3af; font-size:11px; padding:4px 0; }
       .tag button {
         background:none; border:none; cursor:pointer;
         color:#93c5fd; font-size:13px; padding:0; line-height:1;
@@ -123,18 +184,20 @@
     }
 
     // ===== public API =====
+    //   _selected items: { code, label, chain[{id,depth,label}], leaves[{id,label,checked}] }
     get value() {
+      const std_ids = [];
+      this._selected.forEach(s => (s.leaves || []).forEach(l => { if (l.checked) std_ids.push(l.id); }));
       return {
         codes: this._selected.map(s => s.code),
-        std_ids: this._selected.filter(s => s.std_id).map(s => s.std_id),
-        items: this._selected.slice(),
+        std_ids,
+        items: this._selected.map(s => ({
+          code: s.code,
+          label: s.label,
+          chain: (s.chain || []).slice(),
+          leaves: (s.leaves || []).map(l => ({ ...l })),
+        })),
       };
-    }
-    set value(arr) {
-      if (!Array.isArray(arr)) return;
-      this._selected = arr.slice();
-      this._renderTags();
-      this._emit();
     }
     clear() {
       this._selected = [];
@@ -253,16 +316,44 @@
       }
     }
 
-    _select(code, std_id, label) {
-      if (this.dataset.multiple === 'false') {
-        this._selected = [{ code, std_id, label }];
-      } else {
-        if (this._selected.some(s => s.code === code)) return;
-        this._selected.push({ code, std_id, label });
-      }
+    async _select(code, std_id, label) {
+      if (this.dataset.multiple === 'false') this._selected = [];
+      else if (this._selected.some(s => s.code === code)) return;
+
+      const item = { code, label, chain: [], leaves: [], _loading: true };
+      this._selected.push(item);
+
       const input = this.shadowRoot.querySelector('.search-input');
       input.value = '';
       this.shadowRoot.querySelector('.dropdown').style.display = 'none';
+      this._renderTags();
+
+      // 비동기로 성취기준↔내용요소 트리 로드
+      try {
+        // 1) 성취기준에 매핑된 내용요소 노드들 (depth 2 leaf)
+        const nodesRes = await fetch('/api/curriculum/standards/' + encodeURIComponent(code) + '/nodes').then(r => r.json()).catch(() => ({}));
+        const leafNodes = (nodesRes && nodesRes.data) || [];
+
+        // 2) 각 leaf의 조상 체인 병렬 조회
+        const chains = await Promise.all(leafNodes.map(n =>
+          fetch('/api/curriculum/content-nodes/' + encodeURIComponent(n.id) + '/ancestors')
+            .then(r => r.json()).catch(() => ({ data: [] }))
+        ));
+
+        // 3) 공통 ancestors(depth 0,1) 추출 — 모든 leaf가 공유하는 조상
+        const ancestorMap = new Map();
+        chains.forEach(c => {
+          (c.data || []).filter(a => a.depth < (leafNodes[0]?.depth ?? 2)).forEach(a => {
+            if (!ancestorMap.has(a.id)) ancestorMap.set(a.id, a);
+          });
+        });
+        item.chain = Array.from(ancestorMap.values()).sort((a, b) => a.depth - b.depth);
+        item.leaves = leafNodes.map(n => ({ id: n.id, label: n.label, depth: n.depth, checked: true }));
+      } catch (_) {
+        // fallback: 최소한 std_id 하나라도
+        if (std_id) item.leaves = [{ id: std_id, label: label, depth: 2, checked: true }];
+      }
+      item._loading = false;
       this._renderTags();
       this._emit();
     }
@@ -270,13 +361,9 @@
     _renderTags() {
       const tagsEl = this.shadowRoot.querySelector('.tags');
       if (!this._selected.length) { tagsEl.innerHTML = ''; return; }
-      tagsEl.innerHTML = this._selected.map((s, i) => `
-        <span class="tag" title="${this._esc(s.label || '')}">
-          ${this._esc(s.code)}${s.std_id ? ` · ${this._esc(s.std_id)}` : ''}
-          <button data-i="${i}" aria-label="제거">&times;</button>
-        </span>
-      `).join('');
-      tagsEl.querySelectorAll('button').forEach(btn => {
+      tagsEl.innerHTML = this._selected.map((s, i) => this._renderCard(s, i)).join('');
+
+      tagsEl.querySelectorAll('.remove-btn').forEach(btn => {
         btn.addEventListener('click', () => {
           const i = parseInt(btn.dataset.i);
           this._selected.splice(i, 1);
@@ -284,6 +371,63 @@
           this._emit();
         });
       });
+      tagsEl.querySelectorAll('.leaf-row').forEach(row => {
+        const i = parseInt(row.dataset.i);
+        const j = parseInt(row.dataset.j);
+        const cb = row.querySelector('input[type="checkbox"]');
+        const toggle = () => {
+          this._selected[i].leaves[j].checked = !this._selected[i].leaves[j].checked;
+          cb.checked = this._selected[i].leaves[j].checked;
+          row.classList.toggle('checked', cb.checked);
+          this._emit();
+        };
+        row.addEventListener('click', (e) => {
+          if (e.target.tagName === 'INPUT') return; // checkbox own click
+          toggle();
+        });
+        cb.addEventListener('change', () => {
+          this._selected[i].leaves[j].checked = cb.checked;
+          row.classList.toggle('checked', cb.checked);
+          this._emit();
+        });
+        row.addEventListener('keydown', (e) => {
+          if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); toggle(); }
+        });
+      });
+    }
+
+    _renderCard(s, i) {
+      const chainHtml = s.chain && s.chain.length
+        ? `<div class="chain"><span class="chain-label">내용요소</span>${
+            s.chain.map((c, k) =>
+              (k > 0 ? '<span class="chain-sep">›</span>' : '') +
+              `<span class="chain-seg" title="depth ${c.depth} · ${this._esc(c.id)}">${k === 0 ? '1단계 ' : '2단계 '}${this._esc(c.label || c.id)}</span>`
+            ).join('')
+          }</div>`
+        : (s._loading ? '<div class="loading-chain">내용요소 체인 로드 중...</div>' : '');
+
+      const leavesHtml = s.leaves && s.leaves.length
+        ? `<div class="leaf-list">
+            <div class="leaf-hdr">3단계 내용요소 (세부 선택 · 클릭 또는 Space)</div>
+            ${s.leaves.map((l, j) => `
+              <div class="leaf-row ${l.checked ? 'checked' : ''}" data-i="${i}" data-j="${j}" tabindex="0" role="checkbox" aria-checked="${l.checked}">
+                <input type="checkbox" ${l.checked ? 'checked' : ''} tabindex="-1">
+                <span class="leaf-id">${this._esc(l.id)}</span>
+                <span class="leaf-text">${this._esc(l.label || '')}</span>
+              </div>
+            `).join('')}
+          </div>`
+        : '';
+
+      return `<div class="std-card">
+        <div class="hdr">
+          <span class="code-main">${this._esc(s.code)}</span>
+          <span class="content-text">${this._esc((s.label || '').substring(0, 80))}</span>
+          <button class="remove-btn" data-i="${i}" aria-label="제거">&times;</button>
+        </div>
+        ${chainHtml}
+        ${leavesHtml}
+      </div>`;
     }
 
     _emit() {

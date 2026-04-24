@@ -116,6 +116,26 @@ router.get('/content-nodes', requireAuth, (req, res) => {
   }
 });
 
+// GET /api/curriculum/content-nodes/:id/ancestors
+//   특정 노드의 조상 체인(자신 포함) — depth 오름차순
+router.get('/content-nodes/:id/ancestors', requireAuth, (req, res) => {
+  try {
+    const id = req.params.id;
+    const rows = db.prepare(`
+      SELECT n.id, n.subject_code, n.school_level, n.grade_group, n.depth,
+             n.parent_id, n.label, n.sort_order, n.source, d.depth_diff
+      FROM curriculum_node_descendants d
+      JOIN curriculum_content_nodes n ON n.id = d.ancestor_id
+      WHERE d.descendant_id = ?
+      ORDER BY n.depth
+    `).all(id);
+    res.json({ success: true, data: rows, total: rows.length });
+  } catch (err) {
+    console.error('[교육과정] ancestors error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
 // GET /api/curriculum/content-nodes/:id/descendants
 //   특정 노드의 자손 전체 (closure 테이블 활용)
 router.get('/content-nodes/:id/descendants', requireAuth, (req, res) => {
