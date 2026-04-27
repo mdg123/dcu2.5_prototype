@@ -27,8 +27,9 @@ function requireClassMember(req, res, next) {
 // GET /api/homework/:classId - 과제 목록
 router.get('/:classId', requireAuth, requireClassMember, (req, res) => {
   try {
-    const { status, page } = req.query;
-    const result = homeworkDb.getHomeworkByClass(req.classId, { status, page: parseInt(page) || 1, userId: req.user.id });
+    const { status, page, std_ids } = req.query;
+    const stdIdsArr = std_ids ? String(std_ids).split(',').map(s => s.trim()).filter(Boolean) : null;
+    const result = homeworkDb.getHomeworkByClass(req.classId, { status, page: parseInt(page) || 1, userId: req.user.id, std_ids: stdIdsArr });
     res.json({ success: true, ...result });
   } catch (err) {
     res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
@@ -41,12 +42,13 @@ router.post('/:classId', requireAuth, requireClassMember, (req, res) => {
     if (req.myRole !== 'owner' && req.user.role !== 'admin') {
       return res.status(403).json({ success: false, message: '개설자만 과제를 생성할 수 있습니다.' });
     }
-    const { title, description, content, due_date, max_score, status, subject_code, grade_group, achievement_code, public_submissions } = req.body;
+    const { title, description, content, due_date, max_score, status, subject_code, grade_group, achievement_code, public_submissions, std_ids } = req.body;
     if (!title) return res.status(400).json({ success: false, message: '과제 제목을 입력하세요.' });
     const hw = homeworkDb.createHomework(req.classId, req.user.id, {
       title, description, content, due_date, max_score, status,
       subject_code, grade_group, achievement_code,
-      public_submissions: public_submissions ? 1 : 0
+      public_submissions: public_submissions ? 1 : 0,
+      std_ids: Array.isArray(std_ids) ? std_ids : null
     });
     // xAPI: 과제 출제 assignment.gave (교사)
     try {

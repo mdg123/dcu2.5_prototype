@@ -9,7 +9,25 @@ function createLesson(classId, teacherId, data) {
     data.estimated_minutes || 0, data.lesson_order || null, data.status || 'draft',
     data.subject_code || null, data.grade_group || null, data.achievement_code || null,
     data.school_level || null, data.tags || null, data.theme || null, data.classify_mode || 'curriculum');
-  return getLessonById(info.lastInsertRowid);
+  const lessonId = info.lastInsertRowid;
+  if (Array.isArray(data.std_ids) && data.std_ids.length > 0) {
+    setLessonStdIds(lessonId, data.std_ids);
+  }
+  return getLessonById(lessonId);
+}
+
+function setLessonStdIds(lessonId, stdIds) {
+  const ids = Array.from(new Set((stdIds || []).filter(Boolean).map(String)));
+  const tx = db.transaction((lid, list) => {
+    db.prepare('DELETE FROM lesson_content_nodes WHERE lesson_id = ?').run(lid);
+    const ins = db.prepare('INSERT OR IGNORE INTO lesson_content_nodes (lesson_id, std_id) VALUES (?, ?)');
+    for (const sid of list) ins.run(lid, sid);
+  });
+  tx(lessonId, ids);
+}
+
+function getLessonStdIds(lessonId) {
+  return db.prepare('SELECT std_id FROM lesson_content_nodes WHERE lesson_id = ? ORDER BY created_at').all(lessonId).map(r => r.std_id);
 }
 
 function getLessonById(id) {
@@ -20,10 +38,22 @@ function getLessonById(id) {
   `).get(id) || null;
 }
 
-function getLessonsByClass(classId, { status, page = 1, limit = 20 } = {}) {
+function getLessonsByClass(classId, { status, page = 1, limit = 20, std_ids } = {}) {
   let where = 'WHERE l.class_id = ?';
   const params = [classId];
   if (status) { where += ' AND l.status = ?'; params.push(status); }
+
+  // std_ids 필터 (closure table 활용: 상위 노드 선택 시 자손 std도 매칭)
+  const stdList = Array.isArray(std_ids) ? std_ids.filter(Boolean) : [];
+  if (stdList.length > 0) {
+    const ph = stdList.map(() => '?').join(',');
+    where += ` AND l.id IN (
+      SELECT lcn.lesson_id FROM lesson_content_nodes lcn
+      WHERE lcn.std_id IN (${ph})
+         OR lcn.std_id IN (SELECT descendant_id FROM curriculum_node_descendants WHERE ancestor_id IN (${ph}))
+    )`;
+    params.push(...stdList, ...stdList);
+  }
 
   const total = db.prepare(`SELECT COUNT(*) as cnt FROM lessons l ${where}`).get(...params).cnt;
   const lessons = db.prepare(`
@@ -168,8 +198,9 @@ function getClassCompletionStats(classId, userId) {
 }
 
 // 수업 목록에 각 수업별 이수율 포함하여 반환
-function getLessonsByClassWithProgress(classId, userId, { status, page = 1, limit = 20 } = {}) {
-  const result = getLessonsByClass(classId, { status, page, limit });
+function getLessonsByClassWithProgress(classId, userId, { status, page = 1, limit = 20, std_ids } = {}) {
+  const result = getLessonsByClass(classId, { status, page, limit, std_ids });
+  result.lessons.forEach(l => { try { l.std_ids = getLessonStdIds(l.id); } catch { l.std_ids = []; } });
   result.lessons = result.lessons.map(lesson => {
     const totalContents = db.prepare('SELECT COUNT(*) as cnt FROM lesson_contents WHERE lesson_id = ?').get(lesson.id).cnt;
     let completedContents = 0;
@@ -331,6 +362,7 @@ module.exports = {
   createLesson, getLessonById, getLessonsByClass, updateLesson, deleteLesson,
   addAttachment, getAttachments,
   addContentToLesson, removeContentFromLesson, getLessonContents,
+  setLessonStdIds, getLessonStdIds,
   getContentProgress, updateContentProgress, getLessonProgress,
   getLessonCompletionRate, getClassCompletionStats, getLessonsByClassWithProgress,
   getLessonBoardStats, getLessonBoardList, getLessonStudentProgress

@@ -52,10 +52,12 @@ router.get('/:classId/board', requireAuth, requireClassMember, (req, res) => {
 // GET /api/lesson/:classId - 수업 목록 (이수율 포함)
 router.get('/:classId', requireAuth, requireClassMember, (req, res) => {
   try {
-    const { status, page } = req.query;
+    const { status, page, std_ids } = req.query;
+    const stdList = std_ids ? String(std_ids).split(',').map(s => s.trim()).filter(Boolean) : [];
     const result = lessonDb.getLessonsByClassWithProgress(req.classId, req.user.id, {
       status: req.myRole === 'owner' ? status : 'published',
-      page: parseInt(page) || 1
+      page: parseInt(page) || 1,
+      std_ids: stdList
     });
     res.json({ success: true, ...result });
   } catch (err) {
@@ -92,9 +94,9 @@ router.post('/:classId', requireAuth, requireClassMember, (req, res) => {
     if (req.myRole !== 'owner' && req.user.role !== 'admin') {
       return res.status(403).json({ success: false, message: '개설자만 수업을 생성할 수 있습니다.' });
     }
-    const { title, content, description, lesson_date, start_date, end_date, estimated_minutes, lesson_order, status, content_ids, subject_code, grade_group, achievement_code, school_level, tags, theme, classify_mode } = req.body;
+    const { title, content, description, lesson_date, start_date, end_date, estimated_minutes, lesson_order, status, content_ids, subject_code, grade_group, achievement_code, school_level, tags, theme, classify_mode, std_ids } = req.body;
     if (!title) return res.status(400).json({ success: false, message: '수업 제목을 입력하세요.' });
-    const lesson = lessonDb.createLesson(req.classId, req.user.id, { title, content, description, lesson_date, start_date, end_date, estimated_minutes, lesson_order, status, subject_code, grade_group, achievement_code, school_level, tags, theme, classify_mode });
+    const lesson = lessonDb.createLesson(req.classId, req.user.id, { title, content, description, lesson_date, start_date, end_date, estimated_minutes, lesson_order, status, subject_code, grade_group, achievement_code, school_level, tags, theme, classify_mode, std_ids });
     // 콘텐츠 연결
     if (content_ids && Array.isArray(content_ids)) {
       content_ids.forEach((cid, i) => lessonDb.addContentToLesson(lesson.id, cid, i));
@@ -117,8 +119,9 @@ router.get('/:classId/:lessonId', requireAuth, requireClassMember, (req, res) =>
     const attachments = lessonDb.getAttachments(lesson.id);
     const contents = lessonDb.getLessonContents(lesson.id);
     const progress = lessonDb.getLessonProgress(req.user.id, lesson.id);
+    const std_ids = lessonDb.getLessonStdIds(lesson.id);
     try { ensureTodayAttendance(req.classId, req.user.id, 'lesson_view'); } catch (e) {}
-    res.json({ success: true, lesson, attachments, contents, progress });
+    res.json({ success: true, lesson, attachments, contents, progress, std_ids });
   } catch (err) {
     res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
   }
@@ -239,8 +242,11 @@ router.put('/:classId/:lessonId', requireAuth, requireClassMember, (req, res) =>
       return res.status(403).json({ success: false, message: '권한이 없습니다.' });
     }
     const lessonId = parseInt(req.params.lessonId);
-    const { content_ids, ...lessonData } = req.body;
+    const { content_ids, std_ids, ...lessonData } = req.body;
     const lesson = lessonDb.updateLesson(lessonId, lessonData);
+    if (Array.isArray(std_ids)) {
+      lessonDb.setLessonStdIds(lessonId, std_ids);
+    }
 
     // content_ids가 전달되면 기존 콘텐츠를 모두 제거 후 새로 연결
     if (content_ids && Array.isArray(content_ids)) {

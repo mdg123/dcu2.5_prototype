@@ -21,7 +21,25 @@ function createContent(creatorId, data) {
     data.difficulty || null,
     data.estimated_minutes || null
   );
-  return getContentById(info.lastInsertRowid);
+  const cId = info.lastInsertRowid;
+  if (Array.isArray(data.std_ids) && data.std_ids.length > 0) {
+    setContentStdIds(cId, data.std_ids);
+  }
+  return getContentById(cId);
+}
+
+function setContentStdIds(contentId, stdIds) {
+  const ids = Array.from(new Set((stdIds || []).filter(Boolean).map(String)));
+  const tx = db.transaction((cid, list) => {
+    db.prepare('DELETE FROM content_content_nodes WHERE content_id = ?').run(cid);
+    const ins = db.prepare('INSERT OR IGNORE INTO content_content_nodes (content_id, std_id) VALUES (?, ?)');
+    for (const sid of list) ins.run(cid, sid);
+  });
+  tx(contentId, ids);
+}
+
+function getContentStdIds(contentId) {
+  return db.prepare('SELECT std_id FROM content_content_nodes WHERE content_id = ? ORDER BY created_at').all(contentId).map(r => r.std_id);
 }
 
 function getContentById(id) {
@@ -42,6 +60,9 @@ function getContentById(id) {
   if (c && (c.content_type === 'bundle' || c.content_type === 'package')) {
     try { c.bundle_items = getBundleItems(id); } catch { c.bundle_items = []; }
   }
+  if (c) {
+    try { c.std_ids = getContentStdIds(id); } catch { c.std_ids = []; }
+  }
   return c;
 }
 
@@ -58,9 +79,13 @@ function updateContent(id, data) {
       params.push(JSON.stringify(val));
     }
   }
-  if (fields.length === 0) return getContentById(id);
+  if (fields.length === 0) {
+    if (Array.isArray(data.std_ids)) setContentStdIds(id, data.std_ids);
+    return getContentById(id);
+  }
   params.push(id);
   db.prepare(`UPDATE contents SET ${fields.join(', ')} WHERE id = ?`).run(...params);
+  if (Array.isArray(data.std_ids)) setContentStdIds(id, data.std_ids);
   return getContentById(id);
 }
 
@@ -73,7 +98,7 @@ function incrementViewCount(id) {
 }
 
 // 공개 콘텐츠 검색
-function searchPublicContents({ keyword, subject, grade, content_type, page = 1, limit = 12, sort = 'latest', achievement_codes, curriculum_standard_ids } = {}) {
+function searchPublicContents({ keyword, subject, grade, content_type, page = 1, limit = 12, sort = 'latest', achievement_codes, curriculum_standard_ids, std_ids } = {}) {
   const join = ' JOIN users u ON c.creator_id = u.id';
   let where = " WHERE c.is_public = 1 AND c.status = 'approved'";
   const params = [];
@@ -89,6 +114,16 @@ function searchPublicContents({ keyword, subject, grade, content_type, page = 1,
     const aConds = achievement_codes.map(() => 'c.achievement_code LIKE ?');
     where += ' AND (' + aConds.join(' OR ') + ')';
     achievement_codes.forEach(code => params.push(`%${code}%`));
+  }
+  const stdList = Array.isArray(std_ids) ? std_ids.filter(Boolean) : [];
+  if (stdList.length > 0) {
+    const ph = stdList.map(() => '?').join(',');
+    where += ` AND c.id IN (
+      SELECT ccn.content_id FROM content_content_nodes ccn
+      WHERE ccn.std_id IN (${ph})
+         OR ccn.std_id IN (SELECT descendant_id FROM curriculum_node_descendants WHERE ancestor_id IN (${ph}))
+    )`;
+    params.push(...stdList, ...stdList);
   }
   if (curriculum_standard_ids && curriculum_standard_ids.length > 0) {
     // 새 표준체계 ID(CSV) 필터 — curriculum_standard_ids 컬럼 또는
@@ -115,7 +150,10 @@ function searchPublicContents({ keyword, subject, grade, content_type, page = 1,
     where + orderBy + ' LIMIT ? OFFSET ?'
   ).all(...params, limit, (page - 1) * limit);
 
-  contents.forEach(c => { if (c.tags) { try { c.tags = JSON.parse(c.tags); } catch { c.tags = []; } } });
+  contents.forEach(c => {
+    if (c.tags) { try { c.tags = JSON.parse(c.tags); } catch { c.tags = []; } }
+    try { c.std_ids = getContentStdIds(c.id); } catch { c.std_ids = []; }
+  });
   return { contents, total, totalPages };
 }
 
@@ -539,6 +577,7 @@ function getContentCommentCount(contentId) {
 
 module.exports = {
   createContent, getContentById, updateContent, deleteContent, incrementViewCount,
+  setContentStdIds, getContentStdIds,
   searchPublicContents, getMyContents, searchContentsForLesson,
   addToCollection, removeFromCollection, getCollection, getCollectionFolders, isInCollection,
   createChannel, getChannelById, getUserChannel, updateChannel, getPopularChannels,

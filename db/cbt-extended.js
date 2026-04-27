@@ -34,6 +34,18 @@ function importFromContent(contentId, classId, userId, opts = {}) {
     VALUES (?, ?, ?, ?, ?, ?, 'draft', ?, ?, ?, ?, ?)
   `).run(examId, classId || null, title, desc, answers, qCount, userId, contentId, timeLimit, startDate, endDate);
 
+  // std_ids 저장: opts.std_ids 우선, 없으면 원본 content의 std_ids 상속
+  let stdIds = Array.isArray(opts.std_ids) ? opts.std_ids : null;
+  if (!stdIds) {
+    try {
+      stdIds = db.prepare('SELECT std_id FROM content_content_nodes WHERE content_id = ?').all(contentId).map(r => r.std_id);
+    } catch (e) { stdIds = []; }
+  }
+  if (stdIds && stdIds.length > 0) {
+    const ins = db.prepare('INSERT OR IGNORE INTO exam_content_nodes (exam_id, std_id) VALUES (?, ?)');
+    for (const sid of stdIds) { try { ins.run(examId, String(sid)); } catch(e) {} }
+  }
+
   return { examId, title };
 }
 

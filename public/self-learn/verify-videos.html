@@ -1,0 +1,127 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>영상 임베드 일괄 검증</title>
+<style>
+  body { font-family: system-ui; padding: 16px; background: #f5f5f5; }
+  table { border-collapse: collapse; width: 100%; background: #fff; }
+  th, td { border: 1px solid #ddd; padding: 6px 10px; text-align: left; font-size: 13px; }
+  th { background: #4F46E5; color: #fff; }
+  .ok { color: #059669; font-weight: 600; }
+  .bad { color: #DC2626; font-weight: 600; }
+  .pending { color: #6B7280; }
+  #log { margin: 8px 0; font-family: monospace; font-size: 12px; }
+</style></head><body>
+<h2>YouTube 영상 임베드 일괄 검증</h2>
+<button id="run">검증 시작</button>
+<button id="copyBad">차단된 영상 ID 복사</button>
+<div id="log"></div>
+<table id="result"><thead><tr><th>id</th><th>학년</th><th>제목</th><th>VideoID</th><th>상태</th></tr></thead><tbody></tbody></table>
+<div id="hidden" style="position:fixed;top:-9999px;left:-9999px"></div>
+
+<script src="https://www.youtube.com/iframe_api"></script>
+<script>
+let videos = [];
+let results = [];
+
+document.getElementById('run').onclick = run;
+document.getElementById('copyBad').onclick = () => {
+  const bad = results.filter(r => r.status !== 'ok').map(r => r.video_id).join(',');
+  navigator.clipboard.writeText(bad);
+  alert('차단된 ID 복사: ' + bad.split(',').length + '개');
+};
+
+async function run() {
+  const r = await fetch('/api/contents?type=video&keyword=youtube&perPage=500');
+  const d = await r.json();
+  videos = (d.contents || []).filter(c => c.content_url && c.content_url.includes('youtube'));
+  document.getElementById('log').textContent = `검증 대상: ${videos.length}개`;
+
+  const tbody = document.querySelector('#result tbody');
+  tbody.innerHTML = videos.map(v => {
+    const m = (v.content_url || '').match(/v=([a-zA-Z0-9_-]+)|embed\/([a-zA-Z0-9_-]+)|youtu\.be\/([a-zA-Z0-9_-]+)/);
+    const vid = m ? (m[1] || m[2] || m[3]) : '';
+    return `<tr id="r-${v.id}"><td>${v.id}</td><td>${v.grade || ''}</td><td>${v.title.slice(0,60)}</td><td>${vid}</td><td class="pending">대기</td></tr>`;
+  }).join('');
+
+  // YT API 대기
+  if (!window.YT || !window.YT.Player) {
+    await new Promise(resolve => { window.onYouTubeIframeAPIReady = resolve; });
+  }
+
+  for (const v of videos) {
+    const m = (v.content_url || '').match(/v=([a-zA-Z0-9_-]+)|embed\/([a-zA-Z0-9_-]+)|youtu\.be\/([a-zA-Z0-9_-]+)/);
+    const vid = m ? (m[1] || m[2] || m[3]) : null;
+    if (!vid) {
+      results.push({ id: v.id, video_id: '', status: 'noid' });
+      updateRow(v.id, 'noid', 'bad');
+      continue;
+    }
+
+    const status = await testEmbed(vid);
+    results.push({ id: v.id, video_id: vid, status });
+    updateRow(v.id, status, status === 'ok' ? 'ok' : 'bad');
+  }
+
+  const okCount = results.filter(r => r.status === 'ok').length;
+  const badCount = results.length - okCount;
+  document.getElementById('log').textContent = `완료: ${okCount}개 OK, ${badCount}개 차단/실패`;
+
+  // 결과를 서버로 전송
+  await fetch('/api/_admin_save_video_check', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify(results)
+  }).catch(()=>{});
+
+  // localStorage 저장
+  localStorage.setItem('videoCheckResult', JSON.stringify(results));
+  console.log('결과:', results);
+}
+
+function updateRow(id, status, klass) {
+  const cell = document.querySelector(`#r-${id} td:last-child`);
+  if (cell) { cell.textContent = status; cell.className = klass; }
+}
+
+function testEmbed(vid) {
+  return new Promise(resolve => {
+    const div = document.createElement('div');
+    div.id = 'yt-' + vid + '-' + Math.random().toString(36).slice(2,8);
+    document.getElementById('hidden').appendChild(div);
+
+    let resolved = false;
+    const finish = (status) => { if (!resolved) { resolved = true; div.remove(); resolve(status); } };
+    const timeout = setTimeout(() => finish('timeout'), 6000);
+
+    try {
+      const player = new YT.Player(div.id, {
+        height: 100, width: 160, videoId: vid,
+        playerVars: { autoplay: 0, controls: 0 },
+        events: {
+          onReady: () => {
+            // 실제 재생 시도
+            try { player.playVideo(); } catch(e){}
+            // 2초 후 상태 확인
+            setTimeout(() => {
+              try {
+                const state = player.getPlayerState();
+                // -1=시작전, 0=종료, 1=재생, 2=일시정지, 3=버퍼링, 5=큐
+                if (state === 1 || state === 3 || state === 2 || state === 5) {
+                  clearTimeout(timeout); finish('ok');
+                } else {
+                  clearTimeout(timeout); finish('blocked_state' + state);
+                }
+              } catch(e) { clearTimeout(timeout); finish('exception'); }
+            }, 2500);
+          },
+          onError: (e) => {
+            clearTimeout(timeout);
+            finish('error_' + e.data);  // 101/150 = 임베딩 차단
+          }
+        }
+      });
+    } catch(e) {
+      clearTimeout(timeout); finish('exception');
+    }
+  });
+}
+</script>
+</body></html>

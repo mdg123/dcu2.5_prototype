@@ -12,7 +12,24 @@ function createExam(classId, ownerId, data) {
     data.status || 'waiting', ownerId, data.time_limit || null,
     data.subject_code || null, data.grade_group || null, data.achievement_code || null,
     data.start_date || null, data.end_date || null);
+  if (Array.isArray(data.std_ids) && data.std_ids.length > 0) {
+    setExamStdIds(id, data.std_ids);
+  }
   return getExamById(id);
+}
+
+function setExamStdIds(examId, stdIds) {
+  const ids = Array.from(new Set((stdIds || []).filter(Boolean).map(String)));
+  const tx = db.transaction((eid, list) => {
+    db.prepare('DELETE FROM exam_content_nodes WHERE exam_id = ?').run(eid);
+    const ins = db.prepare('INSERT OR IGNORE INTO exam_content_nodes (exam_id, std_id) VALUES (?, ?)');
+    for (const sid of list) ins.run(eid, sid);
+  });
+  tx(examId, ids);
+}
+
+function getExamStdIds(examId) {
+  return db.prepare('SELECT std_id FROM exam_content_nodes WHERE exam_id = ? ORDER BY created_at').all(examId).map(r => r.std_id);
 }
 
 function getExamById(id) {
@@ -24,13 +41,25 @@ function getExamById(id) {
   `).get(id);
   if (!exam) return null;
   try { exam.questions = JSON.parse(exam.answers || '[]'); } catch { exam.questions = []; }
+  exam.std_ids = getExamStdIds(id);
   return exam;
 }
 
-function getExamsByClass(classId, { status, page = 1, limit = 20 } = {}) {
+function getExamsByClass(classId, { status, page = 1, limit = 20, std_ids } = {}) {
   let where = 'WHERE e.class_id = ?';
   const params = [classId];
   if (status) { where += ' AND e.status = ?'; params.push(status); }
+
+  const stdList = Array.isArray(std_ids) ? std_ids.filter(Boolean) : [];
+  if (stdList.length > 0) {
+    const ph = stdList.map(() => '?').join(',');
+    where += ` AND e.id IN (
+      SELECT ecn.exam_id FROM exam_content_nodes ecn
+      WHERE ecn.std_id IN (${ph})
+         OR ecn.std_id IN (SELECT descendant_id FROM curriculum_node_descendants WHERE ancestor_id IN (${ph}))
+    )`;
+    params.push(...stdList, ...stdList);
+  }
 
   const total = db.prepare(`SELECT COUNT(*) as cnt FROM exams e ${where}`).get(...params).cnt;
   const exams = db.prepare(`
@@ -62,9 +91,13 @@ function updateExam(id, data) {
     if (key === 'status' && val === 'active' && !data.started_at) { fields.push('started_at = CURRENT_TIMESTAMP'); }
     if (key === 'status' && val === 'ended') { fields.push('ended_at = CURRENT_TIMESTAMP'); }
   }
-  if (fields.length === 0) return getExamById(id);
+  if (fields.length === 0) {
+    if (Array.isArray(data.std_ids)) setExamStdIds(id, data.std_ids);
+    return getExamById(id);
+  }
   params.push(id);
   db.prepare(`UPDATE exams SET ${fields.join(', ')} WHERE id = ?`).run(...params);
+  if (Array.isArray(data.std_ids)) setExamStdIds(id, data.std_ids);
   return getExamById(id);
 }
 
@@ -131,6 +164,7 @@ function updateLeaveTime(examId, userId, seconds) {
 
 module.exports = {
   createExam, getExamById, getExamsByClass, updateExam, deleteExam,
+  setExamStdIds, getExamStdIds,
   startExam, submitExam, getStudentExam, getExamStudents,
   recordTabLeave, updateLeaveTime
 };

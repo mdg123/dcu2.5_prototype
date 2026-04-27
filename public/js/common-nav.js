@@ -18,6 +18,25 @@
     });
   })();
 
+  // === 공통 타이포그래피 — 11px 이하 글자를 12-13px로 끌어올려 가독성 향상 ===
+  (function injectCommonTypography() {
+    if (document.getElementById('dacheim-common-typography')) return;
+    const style = document.createElement('style');
+    style.id = 'dacheim-common-typography';
+    style.textContent = `
+      /* 작은 정보 텍스트(시간/카운트/메타) 가독성 보정 — 레이아웃 영향 최소화 */
+      .text-xs { font-size: 12px; }
+      .badge:not(.badge-fixed) { font-size: 12px; }
+      .type-badge:not(.type-badge-fixed) { font-size: 12px; }
+      .card-meta, .card-meta .card-date, .list-row-meta { font-size: 12px; }
+      .sidebar-title, .filter-label, .section-label { font-size: 13px; }
+      .folder-count, .stat-card-label, .stat-card-change { font-size: 12px; }
+      .status-btn, .period-btn, .metric-btn, .bundle-type-btn { font-size: 13px; }
+      .link-sm, .keyword-tag, .dismiss-btn { font-size: 13px; }
+    `;
+    (document.head || document.documentElement).appendChild(style);
+  })();
+
   const MENU = [
     {
       id: 'chaeumClass', label: '채움클래스',

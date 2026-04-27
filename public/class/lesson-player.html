@@ -366,13 +366,52 @@
     body.light-mode { background: #f1f5f9; color: #1e293b; }
     body.light-mode .viewer-header { background: #fff; border-bottom-color: #e2e8f0; }
     body.light-mode .viewer-header * { color: #334155; }
-    body.light-mode .sidebar { background: #fff; border-right-color: #e2e8f0; }
+    /* 수업 목차: 회색 사이드바 + 진한 텍스트 */
+    body.light-mode .sidebar { background: #f1f5f9; border-right-color: #e2e8f0; }
     body.light-mode .sidebar * { color: #334155; }
+    body.light-mode .sidebar-title { color: #0f172a; }
+    body.light-mode .sidebar-header { border-bottom-color: #e2e8f0; }
+    body.light-mode .overall-bar { background: #e2e8f0; }
+    body.light-mode .step-item { background: #fff; border: 1px solid #e2e8f0; }
+    body.light-mode .step-item:hover { background: #eef2ff; }
+    body.light-mode .step-item.active { background: #dbeafe; border-color: #93c5fd; }
+    body.light-mode .step-item.drag-over { border-top: 2px solid #2563eb; background: #dbeafe; }
+    body.light-mode .step-num { background: #e2e8f0; color: #475569; }
+    body.light-mode .step-item.active .step-num { background: #2563eb; color: #fff; }
+    body.light-mode .step-item.done .step-num { background: #10b981; color: #fff; }
+    body.light-mode .sidebar-toggle-btn { background: #f1f5f9; color: #475569; border-color: #e2e8f0; }
+    body.light-mode .sidebar-toggle-btn:hover { background: #e2e8f0; color: #1e293b; }
+    body.light-mode .sidebar-content::-webkit-scrollbar-thumb { background: #cbd5e1; }
+    /* 콘텐츠 뷰어: 흰색 */
+    body.light-mode .player-viewport { background: #fff; color: #1e293b; }
+    body.light-mode .player-viewport * { color: inherit; }
     body.light-mode .controls-bar { background: #fff; border-top-color: #e2e8f0; }
     body.light-mode .controls-bar * { color: #334155; }
-    body.light-mode .player-viewport { background: #f8fafc; }
     body.light-mode .toolbar { background: #fff; border-color: #e2e8f0; }
     body.light-mode .toolbar-btn { color: #64748b; }
+    /* 상단 헤더 버튼/배지 텍스트 대비 */
+    body.light-mode .btn-back { background: #f1f5f9; color: #475569; }
+    body.light-mode .btn-back:hover { background: #e2e8f0; color: #1e293b; }
+    body.light-mode .progress-badge { background: #f1f5f9; color: #475569; }
+    body.light-mode .header-btn-ghost { background: #f1f5f9; color: #475569; }
+    body.light-mode .header-btn-ghost:hover { background: #e2e8f0; color: #1e293b; }
+    /* 사이드바 콘텐츠 추가/URL/파일 버튼: 회색 배경에서 가독성 확보 */
+    body.light-mode #addContentBtn { border-top-color: #e2e8f0 !important; }
+    body.light-mode #addContentBtn > button:first-child {
+      background: #dbeafe !important; color: #1d4ed8 !important;
+      border-color: #93c5fd !important;
+    }
+    body.light-mode #addContentBtn > button:first-child:hover { background: #bfdbfe !important; }
+    body.light-mode #addContentBtn > div > button:nth-child(1) {
+      background: #ede9fe !important; color: #6d28d9 !important;
+      border-color: #c4b5fd !important;
+    }
+    body.light-mode #addContentBtn > div > button:nth-child(1):hover { background: #ddd6fe !important; }
+    body.light-mode #addContentBtn > div > button:nth-child(2) {
+      background: #fef3c7 !important; color: #b45309 !important;
+      border-color: #fcd34d !important;
+    }
+    body.light-mode #addContentBtn > div > button:nth-child(2):hover { background: #fde68a !important; }
 
     /* ===== Font sizes ===== */
     body.font-small { font-size: 14px; }
@@ -388,8 +427,9 @@
       .toolbar { display: none; }
     }
   </style>
+  <script defer src="/js/components/std-smart-search.js"></script>
 </head>
-<body>
+<body class="light-mode">
   <!-- Header -->
   <header class="viewer-header">
     <div class="header-left">
@@ -968,7 +1008,7 @@
 
       const btn = document.getElementById('completeBtn');
       const isOwner = currentUser && lessonData && currentUser.id === lessonData.teacher_id;
-      btn.style.display = (isOwner || isPreviewMode) ? 'none' : 'flex';
+      btn.style.display = (isOwner || isPreviewMode || isCreatorMode || isEditMode) ? 'none' : 'flex';
       if (isDone) {
         btn.className = 'complete-btn completed';
         btn.innerHTML = '<i class="fas fa-check-circle"></i> 학습 완료됨';
@@ -1238,7 +1278,19 @@
       const done = contents.filter(c => progressMap[c.id]?.completed).length;
       const percent = total > 0 ? Math.round((done / total) * 100) : 0;
       document.getElementById('overallPercent').textContent = percent + '%';
-      document.getElementById('overallBar').style.width = percent + '%';
+      const bar = document.getElementById('overallBar');
+      bar.style.width = percent + '%';
+      // 진도별 색상: 0~25 빨강 / 26~50 주황 / 51~75 노랑 / 76~99 청록 / 100 초록
+      let grad;
+      if (percent === 0)        grad = 'linear-gradient(90deg,#ef4444,#f87171)';
+      else if (percent <= 25)   grad = 'linear-gradient(90deg,#ef4444,#f97316)';
+      else if (percent <= 50)   grad = 'linear-gradient(90deg,#f97316,#f59e0b)';
+      else if (percent <= 75)   grad = 'linear-gradient(90deg,#f59e0b,#eab308)';
+      else if (percent < 100)   grad = 'linear-gradient(90deg,#14b8a6,#22d3ee)';
+      else                      grad = 'linear-gradient(90deg,#10b981,#22c55e)';
+      bar.style.background = grad;
+      document.getElementById('overallPercent').style.color =
+        percent >= 100 ? '#16a34a' : percent >= 51 ? '#0891b2' : percent >= 26 ? '#d97706' : '#dc2626';
     }
 
     // ============================================================
@@ -1544,9 +1596,10 @@
     let addContentType = '';
 
     function showAddButton() {
-      if (!currentUser || !lessonData) return;
-      const isOwner = currentUser.id === lessonData.teacher_id;
-      if (isOwner) {
+      if (!lessonData) return;
+      const isOwner = currentUser && currentUser.id === lessonData.teacher_id;
+      // creator/edit 모드에서는 currentUser 로드 여부와 무관하게 표시
+      if (isOwner || isCreatorMode || isEditMode) {
         document.getElementById('addContentBtn').style.display = 'block';
         // 개설자 편집 모드: 학습 완료/채팅/손들기/나가기 숨김
         const completeBtn = document.getElementById('completeBtn');
@@ -2274,14 +2327,10 @@
       document.getElementById('clmEndDate').value = _weekLater.toISOString().slice(0, 10);
       document.getElementById('clmStatus').value = 'published';
       document.getElementById('clmTags').value = '';
-      // 성취기준 초기화
-      _clmSmart.selectedStds = [];
-      _clmSmart.results = [];
-      _clmSmart.query = '';
-      _clmSmart.activeIdx = -1;
-      document.getElementById('clmAchievementSearch').value = '';
+      // 성취기준 초기화 (std-smart-search 컴포넌트)
+      const _stdSmart = document.getElementById('clmStdSmart');
+      if (_stdSmart && typeof _stdSmart.clear === 'function') _stdSmart.clear();
       document.getElementById('clmAchievementCode').value = '';
-      document.getElementById('clmSelectedStds').innerHTML = '';
       // 탭 초기화
       clmSwitchTab('curriculum');
       // 체크박스 초기화
@@ -2294,7 +2343,6 @@
 
     function closeClassLessonMeta() {
       document.getElementById('classLessonMetaOverlay').style.display = 'none';
-      document.getElementById('clmAchievementResults').style.display = 'none';
     }
 
     // 탭 전환
@@ -2543,16 +2591,20 @@
       // 교육과정/테마 메타
       let achievement_code = null, subject_code = null, grade_group = null;
       let school_level = null, theme = null;
+      let std_ids = [];
       const classify_mode = _clmClassifyMode;
 
       if (_clmClassifyMode === 'curriculum') {
-        achievement_code = document.getElementById('clmAchievementCode').value || null;
-        // 성취기준에서 과목/학년 자동 추출
-        if (_clmSmart.selectedStds.length > 0) {
-          const first = _clmSmart.selectedStds[0];
+        // std-smart-search 컴포넌트 값 읽기
+        const _stdSmart = document.getElementById('clmStdSmart');
+        const stdVal = _stdSmart && _stdSmart.value ? _stdSmart.value : { codes: [], items: [], std_ids: [] };
+        achievement_code = (stdVal.codes && stdVal.codes.length) ? stdVal.codes.join(',') : null;
+        std_ids = Array.isArray(stdVal.std_ids) ? stdVal.std_ids : [];
+        if (stdVal.items && stdVal.items.length > 0) {
+          const first = stdVal.items[0];
           if (first.subject_name) subject_code = first.subject_name;
           if (first.grade_label) {
-            const gMatch = first.grade_label.match(/(\d)/);
+            const gMatch = String(first.grade_label).match(/(\d)/);
             if (gMatch) grade_group = parseInt(gMatch[1]);
           }
           if (first.school_level) school_level = first.school_level;
@@ -2602,6 +2654,7 @@
             school_level,
             theme,
             classify_mode,
+            std_ids,
             content_ids: nonWb.map(c => c.id)
           })
         }).then(r => r.json());
@@ -2717,7 +2770,7 @@
 
   <!-- 수업 등록 메타정보 모달 -->
   <div id="classLessonMetaOverlay" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.6);z-index:20000;align-items:center;justify-content:center;backdrop-filter:blur(4px);" onclick="if(event.target===this)closeClassLessonMeta()">
-    <div style="background:#fff;border-radius:16px;width:85vw;max-width:780px;max-height:90vh;overflow-y:auto;padding:0;color:#1f2937;box-shadow:0 20px 60px rgba(0,0,0,.2);" onclick="event.stopPropagation()">
+    <div style="background:#fff;border-radius:16px;width:92vw;max-width:1014px;max-height:90vh;overflow-y:auto;padding:0;color:#1f2937;box-shadow:0 20px 60px rgba(0,0,0,.2);" onclick="event.stopPropagation()">
       <!-- 헤더 -->
       <div style="display:flex;align-items:center;justify-content:space-between;padding:20px 28px 16px;border-bottom:1px solid #f3f4f6;position:sticky;top:0;background:#fff;z-index:1;border-radius:16px 16px 0 0;">
         <h3 style="font-size:18px;font-weight:800;display:flex;align-items:center;gap:8px;margin:0;"><i class="fas fa-chalkboard-teacher" style="color:#2563eb;"></i> 수업 정보 입력</h3>
@@ -2753,18 +2806,8 @@
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
               <label style="font-weight:700;color:#1d4ed8;font-size:13px;">🎯 교육과정 성취기준 연결</label>
             </div>
-            <div style="position:relative;" id="clmSmartWrap">
-              <i class="fas fa-search" style="position:absolute;left:14px;top:50%;transform:translateY(-50%);color:#3b82f6;font-size:14px;pointer-events:none;z-index:1;"></i>
-              <input type="text" id="clmAchievementSearch" autocomplete="off"
-                placeholder="예: 수학 3학년 분수, 6수01-06"
-                oninput="clmSmartInput(this.value)"
-                onkeydown="clmSmartKeydown(event)"
-                onfocus="clmSmartFocus()"
-                style="width:100%;padding:12px 80px 12px 40px;border:2px solid #e5e7eb;border-radius:10px;font-size:14px;font-family:inherit;outline:none;transition:all .2s;box-sizing:border-box;">
-              <span style="position:absolute;right:12px;top:50%;transform:translateY(-50%);font-size:10px;color:#d1d5db;pointer-events:none;">↑↓ · Enter</span>
-              <div id="clmAchievementResults" style="display:none;position:fixed;background:#fff;border:1px solid #e5e7eb;border-radius:12px;box-shadow:0 12px 36px rgba(0,0,0,0.15);z-index:20002;max-height:350px;overflow-y:auto;"></div>
-            </div>
-            <div id="clmSelectedStds" style="margin-top:10px;"></div>
+            <div style="font-size:11px;color:#6b7280;margin-bottom:6px;">학교급·학년·교과·성취기준 코드·키워드 무엇이든 한 줄로 입력하면 매칭됩니다 (예: "초3 수학 분수", "[4수01-09]")</div>
+            <std-smart-search id="clmStdSmart" data-multiple="true" data-placeholder="성취기준 키워드 검색 (예: 분수, 듣기, 6수01-06)"></std-smart-search>
             <input type="hidden" id="clmAchievementCode">
             <input type="hidden" id="clmSubject">
             <input type="hidden" id="clmGrade">

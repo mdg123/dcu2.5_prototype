@@ -413,6 +413,18 @@ function getMapNodes({ subject, gradeLevel, grade, grades, schoolLevel, schoolLe
 
   let rows = db.prepare(`SELECT * FROM learning_map_nodes ${where} ORDER BY grade, semester, sort_order`).all(...params);
 
+  // 단원(level=2)에 대해 자식 차시(level=3) 개수를 lesson_count 로 주입
+  try {
+    const cntStmt = db.prepare('SELECT COUNT(*) AS c FROM learning_map_nodes WHERE parent_node_id = ? AND node_level = 3');
+    rows = rows.map(r => {
+      if (r.node_level === 2) {
+        const c = cntStmt.get(r.node_id);
+        return { ...r, lesson_count: (c && c.c) || 0 };
+      }
+      return r;
+    });
+  } catch (_) {}
+
   // userId 기반 status 주입 + status 필터
   if (userId) {
     const statuses = db.prepare('SELECT node_id, status FROM user_node_status WHERE user_id = ?').all(userId);

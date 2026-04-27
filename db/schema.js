@@ -984,6 +984,46 @@ function initSchema() {
 
     CREATE INDEX IF NOT EXISTS idx_lesson_contents_lesson ON lesson_contents(lesson_id);
 
+    -- ============ 수업 ↔ 표준체계 내용요소(std_id) 매핑 ============
+    CREATE TABLE IF NOT EXISTS lesson_content_nodes (
+      lesson_id INTEGER NOT NULL,
+      std_id    TEXT NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (lesson_id, std_id),
+      FOREIGN KEY (lesson_id) REFERENCES lessons(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_lcn_std ON lesson_content_nodes(std_id);
+
+    -- ============ 과제 ↔ 표준체계 내용요소(std_id) 매핑 ============
+    CREATE TABLE IF NOT EXISTS homework_content_nodes (
+      homework_id INTEGER NOT NULL,
+      std_id      TEXT NOT NULL,
+      created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (homework_id, std_id),
+      FOREIGN KEY (homework_id) REFERENCES homework(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_hcn_std ON homework_content_nodes(std_id);
+
+    -- ============ 평가 ↔ 표준체계 내용요소(std_id) 매핑 ============
+    CREATE TABLE IF NOT EXISTS exam_content_nodes (
+      exam_id    TEXT NOT NULL,
+      std_id     TEXT NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (exam_id, std_id),
+      FOREIGN KEY (exam_id) REFERENCES exams(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_ecn_std ON exam_content_nodes(std_id);
+
+    -- ============ 콘텐츠 ↔ 표준체계 내용요소(std_id) 매핑 ============
+    CREATE TABLE IF NOT EXISTS content_content_nodes (
+      content_id INTEGER NOT NULL,
+      std_id     TEXT NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (content_id, std_id),
+      FOREIGN KEY (content_id) REFERENCES contents(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_ccn_std ON content_content_nodes(std_id);
+
     -- ============ 학습 진도 (콘텐츠 열람 추적) ============
     CREATE TABLE IF NOT EXISTS content_progress (
       id INTEGER PRIMARY KEY AUTOINCREMENT,

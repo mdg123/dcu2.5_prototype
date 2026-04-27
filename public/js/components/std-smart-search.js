@@ -23,13 +23,15 @@
       .wrap { position:relative; }
       .search-input {
         width:100%; box-sizing:border-box;
+        height:42px;
         padding:10px 14px 10px 36px;
         border:2px solid #dbeafe; border-radius:10px;
-        font-size:13px; outline:none;
-        background:#eff6ff;
+        font-size:15px; line-height:1.4; outline:none;
+        background:#fff;
         font-family:inherit;
       }
-      .search-input:focus { border-color:#3b82f6; }
+      .search-input::placeholder { font-size:15px; color:#9ca3af; }
+      .search-input:focus { border-color:#3b82f6; background:#fff; }
       .icon {
         position:absolute; left:12px; top:12px;
         color:#3b82f6; font-size:13px; pointer-events:none;
@@ -37,11 +39,11 @@
       }
       .dropdown {
         display:none;
-        position:absolute; top:100%; left:0; right:0;
-        max-height:260px; overflow-y:auto;
+        position:fixed;
+        max-height:320px; overflow-y:auto;
         background:#fff; border:1px solid #e5e7eb; border-radius:10px;
-        box-shadow:0 8px 24px rgba(0,0,0,.12);
-        z-index:100; margin-top:4px;
+        box-shadow:0 12px 32px rgba(0,0,0,.18);
+        z-index:21000;
       }
       .dd-item {
         padding:10px 14px; cursor:pointer;
@@ -70,6 +72,38 @@
         padding:10px 12px; background:#f8fafc;
         display:flex; flex-direction:column; gap:8px;
       }
+      /* 본문(leaf) + 오른쪽 사이드 팝업 레이아웃 */
+      .std-card .body-row {
+        display:flex; flex-direction:row; gap:10px; align-items:flex-start;
+      }
+      .std-card .body-row .leaf-wrap { flex:1; min-width:0; }
+      /* 1,2단계 내용요소 오른쪽 사이드 팝업 */
+      .std-card .chain-popup {
+        flex:0 0 200px; width:200px; align-self:flex-start;
+        position:sticky; top:6px;
+        background:#fff; border:1.5px solid #c7d2fe; border-radius:10px;
+        padding:10px 12px; box-shadow:0 4px 12px rgba(49,46,129,.08);
+      }
+      .std-card .chain-popup .cp-hdr {
+        font-size:10px; font-weight:700; color:#4338ca;
+        margin-bottom:6px; letter-spacing:.3px;
+      }
+      .std-card .chain-popup .cp-item {
+        display:flex; flex-direction:column; gap:2px;
+        padding:6px 8px; margin-bottom:4px;
+        border-left:3px solid #818cf8; background:#eef2ff;
+        border-radius:0 6px 6px 0;
+      }
+      .std-card .chain-popup .cp-item .cp-level {
+        font-size:9px; font-weight:700; color:#6366f1; letter-spacing:.5px;
+      }
+      .std-card .chain-popup .cp-item .cp-label {
+        font-size:13px; font-weight:600; color:#1e1b4b;
+      }
+      @media (max-width: 640px) {
+        .std-card .body-row { flex-direction:column-reverse; }
+        .std-card .chain-popup { width:auto; flex-basis:auto; }
+      }
       .std-card .hdr {
         display:flex; align-items:center; gap:8px; flex-wrap:wrap;
       }
@@ -79,7 +113,7 @@
         font-size:11px; font-weight:700; letter-spacing:.3px;
       }
       .std-card .content-text {
-        flex:1; color:#374151; font-size:12px;
+        flex:1; color:#374151; font-size:13px;
         line-height:1.4; min-width:0;
       }
       .std-card .remove-btn {
@@ -107,7 +141,7 @@
         border-top:1px dashed #e5e7eb;
       }
       .std-card .leaf-hdr {
-        font-size:10px; font-weight:700; color:#6b7280;
+        font-size:12px; font-weight:700; color:#6b7280;
         padding-bottom:2px;
       }
       .std-card .leaf-row {
@@ -127,9 +161,10 @@
         font-size:9px; font-weight:700; flex-shrink:0;
       }
       .std-card .leaf-row .leaf-text {
-        flex:1; color:#374151; font-size:11px; line-height:1.35;
+        flex:1; color:#374151; font-size:13px; line-height:1.4;
       }
       .std-card .leaf-row.checked { background:#eff6ff; }
+      .std-card .leaf-row.active { outline:2px solid #6366f1; outline-offset:-2px; background:#eef2ff; }
       .std-card .loading-chain { color:#9ca3af; font-size:11px; padding:4px 0; }
       .tag button {
         background:none; border:none; cursor:pointer;
@@ -171,6 +206,7 @@
       });
       input.addEventListener('focus', () => {
         if (input.value.trim()) this._search(input.value.trim());
+        else this._showRecent();
       });
       input.addEventListener('blur', () => {
         setTimeout(() => { dd.style.display = 'none'; }, 200);
@@ -204,12 +240,36 @@
       this._renderTags();
       this._emit();
     }
+    async setCodes(codes, stdIds) {
+      this._selected = [];
+      this._renderTags();
+      const list = (codes || []).map(c => String(c).trim()).filter(Boolean);
+      if (list.length === 0) { this._emit(); return; }
+      // 각 code를 _select로 추가 — leaves까지 자동 로드됨
+      for (const code of list) {
+        try { await this._select(code, '', code); } catch (_) {}
+      }
+      // stdIds가 주어지면 해당 leaf들을 체크 상태로 마킹
+      const idSet = new Set((stdIds || []).map(String));
+      if (idSet.size > 0) {
+        this._selected.forEach(s => {
+          (s.leaves || []).forEach(l => { if (idSet.has(String(l.id))) l.checked = true; });
+        });
+        this._renderTags();
+        this._emit();
+      }
+    }
 
     // ===== internal =====
     async _search(query) {
       const dd = this.shadowRoot.querySelector('.dropdown');
       if (!query || query.length < 1) { dd.style.display = 'none'; return; }
       this._activeIdx = -1;
+      const inp = this.shadowRoot.querySelector('.search-input');
+      const rect = inp.getBoundingClientRect();
+      dd.style.left = rect.left + 'px';
+      dd.style.top = (rect.bottom + 4) + 'px';
+      dd.style.width = rect.width + 'px';
       dd.style.display = 'block';
       dd.innerHTML = '<div class="loading">검색 중...</div>';
       try {
@@ -238,11 +298,10 @@
 
         dd.innerHTML = stds.map((s, i) => {
           const stdId = stdIdByCode[s.code] || '';
-          const label = (s.subject_name || '') + ' ' + (s.content || '').substring(0, 60);
+          const label = (s.subject_name || '') + ' ' + (s.content || '');
           return `<div class="dd-item" data-i="${i}" data-code="${this._esc(s.code)}" data-std-id="${this._esc(stdId)}" data-label="${this._esc(label)}">
             <span class="code-chip">${this._esc(s.code)}</span>
-            ${stdId ? `<span class="std-id-chip">${this._esc(stdId)}</span>` : ''}
-            <span class="content-text">${this._esc((s.content || '').substring(0, 80))}</span>
+            <span class="content-text">${this._esc(s.content || '')}</span>
           </div>`;
         }).join('');
         dd.querySelectorAll('.dd-item').forEach(el => {
@@ -273,7 +332,7 @@
           items.push({
             code,
             std_id: m ? m.std_id : '',
-            label: s ? ((s.subject_name || '') + ' ' + (s.content || '').substring(0, 40)) : code,
+            label: s ? ((s.subject_name || '') + ' ' + (s.content || '')) : code,
           });
         } catch (_) {
           items.push({ code, std_id: '', label: code });
@@ -286,7 +345,14 @@
 
     _onKey(e) {
       const dd = this.shadowRoot.querySelector('.dropdown');
-      if (dd.style.display === 'none') return;
+      // 드롭다운이 닫혀있고 ↓ 누르면 → 첫 leaf-row로 진입
+      if (dd.style.display === 'none') {
+        if (e.key === 'ArrowDown') {
+          const firstLeaf = this.shadowRoot.querySelector('.leaf-row');
+          if (firstLeaf) { e.preventDefault(); firstLeaf.focus(); }
+        }
+        return;
+      }
       const items = dd.querySelectorAll('.dd-item');
       if (!items.length) return;
       if (e.key === 'ArrowDown') {
@@ -316,9 +382,53 @@
       }
     }
 
+    _saveRecent(code, label) {
+      try {
+        const k = 'stdSmartRecent';
+        let arr = JSON.parse(localStorage.getItem(k) || '[]');
+        arr = arr.filter(r => r.code !== code);
+        arr.unshift({ code, label, ts: Date.now() });
+        if (arr.length > 10) arr = arr.slice(0, 10);
+        localStorage.setItem(k, JSON.stringify(arr));
+      } catch (_) {}
+    }
+
+    _getRecent() {
+      try { return JSON.parse(localStorage.getItem('stdSmartRecent') || '[]'); }
+      catch { return []; }
+    }
+
+    _showRecent() {
+      const recents = this._getRecent();
+      if (!recents.length) return;
+      const dd = this.shadowRoot.querySelector('.dropdown');
+      const inp = this.shadowRoot.querySelector('.search-input');
+      const rect = inp.getBoundingClientRect();
+      dd.style.left = rect.left + 'px';
+      dd.style.top = (rect.bottom + 4) + 'px';
+      dd.style.width = rect.width + 'px';
+      dd.style.display = 'block';
+      dd.innerHTML = `
+        <div style="padding:8px 12px;font-size:11px;font-weight:700;color:#6b7280;border-bottom:1px solid #f3f4f6;">
+          <i class="fas fa-history" style="color:#60a5fa;"></i> 최근 선택한 성취기준
+        </div>
+        ${recents.map((r, i) => `
+          <div class="dd-item" data-recent-i="${i}" data-code="${this._esc(r.code)}" data-label="${this._esc(r.label || '')}">
+            <span class="code-chip">${this._esc(r.code)}</span>
+            <span class="content-text">${this._esc(r.label || '')}</span>
+          </div>`).join('')}`;
+      dd.querySelectorAll('.dd-item').forEach(el => {
+        el.addEventListener('mousedown', (e) => {
+          e.preventDefault();
+          this._select(el.dataset.code, '', el.dataset.label);
+        });
+      });
+    }
+
     async _select(code, std_id, label) {
       if (this.dataset.multiple === 'false') this._selected = [];
       else if (this._selected.some(s => s.code === code)) return;
+      this._saveRecent(code, label);
 
       const item = { code, label, chain: [], leaves: [], _loading: true };
       this._selected.push(item);
@@ -330,32 +440,39 @@
 
       // 비동기로 성취기준↔내용요소 트리 로드
       try {
-        // 1) 성취기준에 매핑된 내용요소 노드들 (depth 2 leaf)
+        // 1) 성취기준에 매핑된 내용요소 노드들 (가장 깊은 leaf — 수학:depth3=3단계, 그 외:depth2=2단계)
         const nodesRes = await fetch('/api/curriculum/standards/' + encodeURIComponent(code) + '/nodes').then(r => r.json()).catch(() => ({}));
-        const leafNodes = (nodesRes && nodesRes.data) || [];
+        const rawNodes = (nodesRes && nodesRes.data) || [];
 
-        // 2) 각 leaf의 조상 체인 병렬 조회
-        const chains = await Promise.all(leafNodes.map(n =>
+        // 2) 각 leaf의 조상 체인 병렬 조회 — leaf별로 따로 보관 (공유 X)
+        const chains = await Promise.all(rawNodes.map(n =>
           fetch('/api/curriculum/content-nodes/' + encodeURIComponent(n.id) + '/ancestors')
             .then(r => r.json()).catch(() => ({ data: [] }))
         ));
 
-        // 3) 공통 ancestors(depth 0,1) 추출 — 모든 leaf가 공유하는 조상
-        const ancestorMap = new Map();
-        chains.forEach(c => {
-          (c.data || []).filter(a => a.depth < (leafNodes[0]?.depth ?? 2)).forEach(a => {
-            if (!ancestorMap.has(a.id)) ancestorMap.set(a.id, a);
-          });
+        item.leaves = rawNodes.map((n, idx) => {
+          const myChain = (chains[idx]?.data || [])
+            .filter(a => a.depth < n.depth)
+            .sort((a, b) => a.depth - b.depth);
+          return { id: n.id, label: n.label, depth: n.depth, checked: false, chain: myChain };
         });
-        item.chain = Array.from(ancestorMap.values()).sort((a, b) => a.depth - b.depth);
-        item.leaves = leafNodes.map(n => ({ id: n.id, label: n.label, depth: n.depth, checked: true }));
+        // 활성 leaf(우측 chain-popup 대상) — 기본 첫 번째
+        item.activeLeafIdx = item.leaves.length ? 0 : -1;
       } catch (_) {
-        // fallback: 최소한 std_id 하나라도
-        if (std_id) item.leaves = [{ id: std_id, label: label, depth: 2, checked: true }];
+        // 표준체계 매핑이 없으면 leaves/chain 없이 성취기준만 카드로 노출
+        item.leaves = [];
+        item.activeLeafIdx = -1;
       }
       item._loading = false;
       this._renderTags();
       this._emit();
+
+      // 방금 추가한 카드의 첫 leaf-row로 포커스 이동 (키보드로 ↑↓ 탐색·Space 체크 가능)
+      const newCardIdx = this._selected.indexOf(item);
+      if (newCardIdx >= 0) {
+        const firstLeaf = this.shadowRoot.querySelector(`.leaf-row[data-i="${newCardIdx}"][data-j="0"]`);
+        if (firstLeaf) firstLeaf.focus();
+      }
     }
 
     _renderTags() {
@@ -375,58 +492,98 @@
         const i = parseInt(row.dataset.i);
         const j = parseInt(row.dataset.j);
         const cb = row.querySelector('input[type="checkbox"]');
+        const refocus = () => {
+          const el = this.shadowRoot.querySelector(`.leaf-row[data-i="${i}"][data-j="${j}"]`);
+          if (el) el.focus();
+        };
+        const setActive = () => {
+          if (this._selected[i].activeLeafIdx !== j) {
+            this._selected[i].activeLeafIdx = j;
+            this._renderTags(); // 우측 chain-popup 갱신
+            refocus();
+          }
+        };
         const toggle = () => {
           this._selected[i].leaves[j].checked = !this._selected[i].leaves[j].checked;
-          cb.checked = this._selected[i].leaves[j].checked;
-          row.classList.toggle('checked', cb.checked);
+          this._selected[i].activeLeafIdx = j;
+          this._renderTags();
           this._emit();
+          refocus();
         };
         row.addEventListener('click', (e) => {
-          if (e.target.tagName === 'INPUT') return; // checkbox own click
-          toggle();
+          if (e.target.tagName === 'INPUT') { setActive(); return; }
+          setActive();
         });
         cb.addEventListener('change', () => {
           this._selected[i].leaves[j].checked = cb.checked;
-          row.classList.toggle('checked', cb.checked);
+          this._selected[i].activeLeafIdx = j;
+          this._renderTags();
           this._emit();
         });
         row.addEventListener('keydown', (e) => {
-          if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); toggle(); }
+          if (e.key === ' ') { e.preventDefault(); toggle(); }
+          else if (e.key === 'Enter') { e.preventDefault(); setActive(); }
+          else if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            const next = this.shadowRoot.querySelector(`.leaf-row[data-i="${i}"][data-j="${j+1}"]`);
+            if (next) next.focus();
+          } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            const prev = this.shadowRoot.querySelector(`.leaf-row[data-i="${i}"][data-j="${j-1}"]`);
+            if (prev) prev.focus();
+            else this.shadowRoot.querySelector('.search-input')?.focus();
+          }
         });
+        row.addEventListener('focus', setActive);
       });
     }
 
     _renderCard(s, i) {
-      const chainHtml = s.chain && s.chain.length
-        ? `<div class="chain"><span class="chain-label">내용요소</span>${
-            s.chain.map((c, k) =>
-              (k > 0 ? '<span class="chain-sep">›</span>' : '') +
-              `<span class="chain-seg" title="depth ${c.depth} · ${this._esc(c.id)}">${k === 0 ? '1단계 ' : '2단계 '}${this._esc(c.label || c.id)}</span>`
-            ).join('')
-          }</div>`
+      const activeLeaf = (s.leaves && s.activeLeafIdx >= 0) ? s.leaves[s.activeLeafIdx] : null;
+      // 단계 = DB depth와 1:1. depth 0(영역)은 별도 라벨 "영역"으로 노출 (단계 X)
+      const activeChainAll = activeLeaf && activeLeaf.chain ? activeLeaf.chain : [];
+      const areaNode = activeChainAll.find(c => c.depth === 0);
+      const stageNodes = activeChainAll.filter(c => c.depth >= 1);
+      const chainHtml = (areaNode || stageNodes.length)
+        ? `<div class="chain-popup">
+             <div class="cp-hdr">📎 내용요소 상위 계층</div>
+             ${areaNode ? `
+               <div class="cp-item" style="border-left-color:#f59e0b;background:#fef3c7;">
+                 <span class="cp-level" style="color:#b45309;">영역</span>
+                 <span class="cp-label">${this._esc(areaNode.label || areaNode.id)}</span>
+               </div>` : ''}
+             ${stageNodes.map(c => `
+               <div class="cp-item">
+                 <span class="cp-level">${c.depth}단계</span>
+                 <span class="cp-label">${this._esc(c.label || c.id)}</span>
+               </div>
+             `).join('')}
+           </div>`
         : (s._loading ? '<div class="loading-chain">내용요소 체인 로드 중...</div>' : '');
 
+      const leafDepth = (s.leaves && s.leaves[0] && s.leaves[0].depth != null) ? s.leaves[0].depth : null;
       const leavesHtml = s.leaves && s.leaves.length
         ? `<div class="leaf-list">
-            <div class="leaf-hdr">3단계 내용요소 (세부 선택 · 클릭 또는 Space)</div>
+            <div class="leaf-hdr">${leafDepth}단계 내용요소 (클릭 시 우측 상위계층 갱신 · Space 체크)</div>
             ${s.leaves.map((l, j) => `
-              <div class="leaf-row ${l.checked ? 'checked' : ''}" data-i="${i}" data-j="${j}" tabindex="0" role="checkbox" aria-checked="${l.checked}">
+              <div class="leaf-row ${l.checked ? 'checked' : ''} ${j === s.activeLeafIdx ? 'active' : ''}" data-i="${i}" data-j="${j}" tabindex="0" role="checkbox" aria-checked="${l.checked}">
                 <input type="checkbox" ${l.checked ? 'checked' : ''} tabindex="-1">
-                <span class="leaf-id">${this._esc(l.id)}</span>
                 <span class="leaf-text">${this._esc(l.label || '')}</span>
               </div>
             `).join('')}
           </div>`
-        : '';
+        : (s._loading ? '' : '<div style="font-size:11px;color:#9ca3af;padding:6px 0;">표준체계 매핑 없음 — 성취기준만 선택됩니다</div>');
 
       return `<div class="std-card">
         <div class="hdr">
           <span class="code-main">${this._esc(s.code)}</span>
-          <span class="content-text">${this._esc((s.label || '').substring(0, 80))}</span>
+          <span class="content-text">${this._esc(s.label || '')}</span>
           <button class="remove-btn" data-i="${i}" aria-label="제거">&times;</button>
         </div>
-        ${chainHtml}
-        ${leavesHtml}
+        <div class="body-row">
+          <div class="leaf-wrap">${leavesHtml}</div>
+          ${chainHtml}
+        </div>
       </div>`;
     }
 

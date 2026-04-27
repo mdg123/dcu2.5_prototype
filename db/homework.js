@@ -8,22 +8,54 @@ function createHomework(classId, teacherId, data) {
     data.due_date || null, data.max_score || 100, data.status || 'published',
     data.subject_code || null, data.grade_group || null, data.achievement_code || null,
     data.public_submissions ? 1 : 0);
-  return getHomeworkById(info.lastInsertRowid);
+  const hwId = info.lastInsertRowid;
+  if (Array.isArray(data.std_ids) && data.std_ids.length > 0) {
+    setHomeworkStdIds(hwId, data.std_ids);
+  }
+  return getHomeworkById(hwId);
+}
+
+function setHomeworkStdIds(homeworkId, stdIds) {
+  const ids = Array.from(new Set((stdIds || []).filter(Boolean).map(String)));
+  const tx = db.transaction((hid, list) => {
+    db.prepare('DELETE FROM homework_content_nodes WHERE homework_id = ?').run(hid);
+    const ins = db.prepare('INSERT OR IGNORE INTO homework_content_nodes (homework_id, std_id) VALUES (?, ?)');
+    for (const sid of list) ins.run(hid, sid);
+  });
+  tx(homeworkId, ids);
+}
+
+function getHomeworkStdIds(homeworkId) {
+  return db.prepare('SELECT std_id FROM homework_content_nodes WHERE homework_id = ? ORDER BY created_at').all(homeworkId).map(r => r.std_id);
 }
 
 function getHomeworkById(id) {
-  return db.prepare(`
+  const hw = db.prepare(`
     SELECT h.*, u.display_name as author_name,
     (SELECT COUNT(*) FROM homework_submissions WHERE homework_id = h.id) as submission_count
     FROM homework h JOIN users u ON h.teacher_id = u.id
     WHERE h.id = ?
-  `).get(id) || null;
+  `).get(id);
+  if (!hw) return null;
+  hw.std_ids = getHomeworkStdIds(id);
+  return hw;
 }
 
-function getHomeworkByClass(classId, { status, page = 1, limit = 20, userId = null } = {}) {
+function getHomeworkByClass(classId, { status, page = 1, limit = 20, userId = null, std_ids } = {}) {
   let where = 'WHERE h.class_id = ?';
   const params = [classId];
   if (status) { where += ' AND h.status = ?'; params.push(status); }
+
+  const stdList = Array.isArray(std_ids) ? std_ids.filter(Boolean) : [];
+  if (stdList.length > 0) {
+    const ph = stdList.map(() => '?').join(',');
+    where += ` AND h.id IN (
+      SELECT hcn.homework_id FROM homework_content_nodes hcn
+      WHERE hcn.std_id IN (${ph})
+         OR hcn.std_id IN (SELECT descendant_id FROM curriculum_node_descendants WHERE ancestor_id IN (${ph}))
+    )`;
+    params.push(...stdList, ...stdList);
+  }
 
   const total = db.prepare(`SELECT COUNT(*) as cnt FROM homework h ${where}`).get(...params).cnt;
   const mySubSelect = userId
@@ -49,10 +81,14 @@ function updateHomework(id, data) {
       params.push(key === 'public_submissions' ? (val ? 1 : 0) : val);
     }
   }
-  if (fields.length === 0) return getHomeworkById(id);
+  if (fields.length === 0) {
+    if (Array.isArray(data.std_ids)) setHomeworkStdIds(id, data.std_ids);
+    return getHomeworkById(id);
+  }
   fields.push('updated_at = CURRENT_TIMESTAMP');
   params.push(id);
   db.prepare(`UPDATE homework SET ${fields.join(', ')} WHERE id = ?`).run(...params);
+  if (Array.isArray(data.std_ids)) setHomeworkStdIds(id, data.std_ids);
   return getHomeworkById(id);
 }
 
@@ -131,6 +167,7 @@ function addFeedback(submissionId, authorId, content) {
 
 module.exports = {
   createHomework, getHomeworkById, getHomeworkByClass, updateHomework, deleteHomework,
+  setHomeworkStdIds, getHomeworkStdIds,
   submitHomework, getSubmission, getSubmissionById, getSubmissions, gradeSubmission,
   getFeedback, addFeedback
 };

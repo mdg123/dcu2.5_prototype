@@ -116,8 +116,8 @@ router.get('/my', requireAuth, (req, res) => {
 // POST /import-from-content — 콘텐츠에서 시험 가져오기 (must be before /:classId routes)
 router.post('/import-from-content', requireAuth, (req, res) => {
   try {
-    const { contentId, classId: cId, title, description, time_limit, start_date, end_date } = req.body;
-    const result = cbtExtDb.importFromContent(contentId, cId, req.user.id, { title, description, time_limit, start_date, end_date });
+    const { contentId, classId: cId, title, description, time_limit, start_date, end_date, std_ids } = req.body;
+    const result = cbtExtDb.importFromContent(contentId, cId, req.user.id, { title, description, time_limit, start_date, end_date, std_ids: Array.isArray(std_ids) ? std_ids : null });
     if (!result) return res.status(404).json({ success: false, message: '콘텐츠를 찾을 수 없습니다.' });
     res.json({ success: true, ...result });
   } catch (err) { res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' }); }
@@ -126,8 +126,9 @@ router.post('/import-from-content', requireAuth, (req, res) => {
 // GET /api/exam/:classId - 평가 목록
 router.get('/:classId', requireAuth, requireClassMember, (req, res) => {
   try {
-    const { status, page } = req.query;
-    const result = examDb.getExamsByClass(req.classId, { status, page: parseInt(page) || 1 });
+    const { status, page, std_ids } = req.query;
+    const stdIdsArr = std_ids ? String(std_ids).split(',').map(s => s.trim()).filter(Boolean) : null;
+    const result = examDb.getExamsByClass(req.classId, { status, page: parseInt(page) || 1, std_ids: stdIdsArr });
     // 현재 사용자의 응시 점수 추가
     const db = require('../db/index');
     result.exams = result.exams.map(exam => {
@@ -148,7 +149,7 @@ router.post('/:classId', requireAuth, requireClassMember, (req, res) => {
     if (req.myRole !== 'owner' && req.user.role !== 'admin') {
       return res.status(403).json({ success: false, message: '개설자만 평가를 생성할 수 있습니다.' });
     }
-    const { title, description, exam_type, questions, time_limit, start_time, end_time, status, settings, start_date, end_date, start_mode, tab_detection, allow_retry } = req.body;
+    const { title, description, exam_type, questions, time_limit, start_time, end_time, status, settings, start_date, end_date, start_mode, tab_detection, allow_retry, std_ids } = req.body;
     if (!title) return res.status(400).json({ success: false, message: '평가 제목을 입력하세요.' });
     // start_mode에 따른 status 결정
     let finalStatus = status;
@@ -158,7 +159,8 @@ router.post('/:classId', requireAuth, requireClassMember, (req, res) => {
       finalStatus = 'waiting';
     }
     const exam = examDb.createExam(req.classId, req.user.id, {
-      title, description, exam_type, questions, time_limit, start_time, end_time, status: finalStatus, settings, start_date, end_date
+      title, description, exam_type, questions, time_limit, start_time, end_time, status: finalStatus, settings, start_date, end_date,
+      std_ids: Array.isArray(std_ids) ? std_ids : null
     });
     // 추가 설정 저장
     try {

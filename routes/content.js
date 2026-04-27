@@ -42,7 +42,7 @@ router.post('/move-to-folder', requireAuth, (req, res) => {
 // GET /api/contents - 공개 콘텐츠 검색
 router.get('/', requireAuth, (req, res) => {
   try {
-    const { keyword, subject, grade, content_type, page, limit, sort, achievement_codes, curriculum_standard_ids } = req.query;
+    const { keyword, subject, grade, content_type, page, limit, sort, achievement_codes, curriculum_standard_ids, std_ids } = req.query;
     const result = contentDb.searchPublicContents({
       keyword, subject,
       grade: grade ? parseInt(grade) : null,
@@ -51,7 +51,8 @@ router.get('/', requireAuth, (req, res) => {
       limit: parseInt(limit) || 12,
       sort,
       achievement_codes: achievement_codes ? achievement_codes.split(',').filter(Boolean) : null,
-      curriculum_standard_ids: curriculum_standard_ids ? curriculum_standard_ids.split(',').filter(Boolean) : null
+      curriculum_standard_ids: curriculum_standard_ids ? curriculum_standard_ids.split(',').filter(Boolean) : null,
+      std_ids: std_ids ? String(std_ids).split(',').map(s => s.trim()).filter(Boolean) : null
     });
     // xAPI: 공개콘텐츠 검색 query.searched
     try {

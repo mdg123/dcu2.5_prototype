@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>수업 편집 - 다채움</title>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <script defer src="/js/components/std-smart-search.js"></script>
   <style>
     :root {
       --primary: #0066FF;
@@ -331,45 +332,9 @@
 
         <div class="form-section">
           <div class="form-section-title">📚 교육과정 연결</div>
-          <div class="form-row">
-            <div class="form-group">
-              <label class="form-label">학교급</label>
-              <select class="form-input" id="saveSchoolLevel" onchange="onSchoolLevelChange()">
-                <option value="">선택 안 함</option>
-                <option value="초">초등</option>
-                <option value="중">중등</option>
-                <option value="고">고등</option>
-              </select>
-            </div>
-            <div class="form-group">
-              <label class="form-label">교과</label>
-              <select class="form-input" id="saveSubjectCode" onchange="onSubjectChange()" disabled>
-                <option value="">학교급을 먼저 선택</option>
-              </select>
-            </div>
-          </div>
-          <div class="form-row">
-            <div class="form-group">
-              <label class="form-label">학년군</label>
-              <select class="form-input" id="saveGradeGroup" onchange="onGradeGroupChange()" disabled>
-                <option value="">교과를 먼저 선택</option>
-              </select>
-            </div>
-            <div class="form-group">
-              <label class="form-label">영역</label>
-              <select class="form-input" id="saveArea" onchange="onAreaChange()" disabled>
-                <option value="">학년군을 먼저 선택</option>
-              </select>
-            </div>
-          </div>
           <div class="form-group">
-            <label class="form-label">성취기준</label>
-            <div style="position:relative;">
-              <input type="text" class="form-input" id="saveAchievementSearch" placeholder="키워드로 검색 (예: 분수, 곱셈)" oninput="searchStandards()" disabled>
-              <div id="achievementDropdown" style="position:absolute;top:100%;left:0;right:0;max-height:200px;overflow-y:auto;background:#fff;border:1px solid var(--gray-200);border-radius:0 0 8px 8px;display:none;z-index:10;box-shadow:0 4px 12px rgba(0,0,0,0.1);"></div>
-            </div>
-            <div id="selectedAchievement" style="margin-top:6px;font-size:12px;color:var(--gray-500);"></div>
-            <input type="hidden" id="saveAchievementCode">
+            <label class="form-label">성취기준 <span style="font-size:11px;color:#6b7280;font-weight:400;">— 키워드만 입력해도 검색됩니다 (↑↓ 키보드로 탐색 · 학교급/교과/학년군/영역은 선택시 자동 추출)</span></label>
+            <std-smart-search id="saveStdSmart" data-multiple="false" data-placeholder="성취기준 키워드 검색 (예: 분수, 곱셈, 듣기)"></std-smart-search>
           </div>
         </div>
 
@@ -1001,9 +966,11 @@
         end_date: document.getElementById('saveEndDate')?.value || null,
         estimated_minutes: parseInt(document.getElementById('saveMinutes')?.value) || 45,
         lesson_order: parseInt(document.getElementById('saveLessonOrder')?.value) || null,
-        subject_code: document.getElementById('saveSubjectCode')?.value || null,
-        grade_group: parseInt(document.getElementById('saveGradeGroup')?.value) || null,
-        achievement_code: document.getElementById('saveAchievementCode')?.value || null,
+        // 성취기준 선택 시 chain의 최상위 노드에서 subject_code/grade_group 자동 추출
+        subject_code: (document.getElementById('saveStdSmart')?.value?.items?.[0]?.chain?.[0]?.subject_code) || null,
+        grade_group: (document.getElementById('saveStdSmart')?.value?.items?.[0]?.chain?.[0]?.grade_group) || null,
+        achievement_code: (document.getElementById('saveStdSmart')?.value?.codes?.[0]) || null,
+        std_ids: (document.getElementById('saveStdSmart')?.value?.std_ids) || [],
         status: status || 'draft',
         content_ids: steps.filter(s => s.contentId).map(s => s.contentId)
       };
