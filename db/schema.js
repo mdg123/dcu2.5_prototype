@@ -625,6 +625,14 @@ function initSchema() {
       sort_order INTEGER DEFAULT 0,
       FOREIGN KEY (content_id) REFERENCES contents(id)
     );
+    -- 관리자 매핑 UI 핵심 인덱스 (B-P0-1)
+    CREATE INDEX IF NOT EXISTS idx_node_contents_node_id ON node_contents(node_id);
+    CREATE INDEX IF NOT EXISTS idx_node_contents_content_id ON node_contents(content_id);
+    CREATE INDEX IF NOT EXISTS idx_node_contents_node_role ON node_contents(node_id, content_role);
+    CREATE INDEX IF NOT EXISTS idx_node_contents_node_sort ON node_contents(node_id, sort_order);
+    CREATE INDEX IF NOT EXISTS idx_lmn_node_level ON learning_map_nodes(node_level);
+    CREATE INDEX IF NOT EXISTS idx_lmn_subject_grade ON learning_map_nodes(subject, grade, semester);
+    CREATE INDEX IF NOT EXISTS idx_lmn_parent ON learning_map_nodes(parent_node_id);
 
     CREATE TABLE IF NOT EXISTS user_node_status (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1023,6 +1031,7 @@ function initSchema() {
       FOREIGN KEY (content_id) REFERENCES contents(id) ON DELETE CASCADE
     );
     CREATE INDEX IF NOT EXISTS idx_ccn_std ON content_content_nodes(std_id);
+    CREATE INDEX IF NOT EXISTS idx_ccn_content ON content_content_nodes(content_id);
 
     -- ============ 학습 진도 (콘텐츠 열람 추적) ============
     CREATE TABLE IF NOT EXISTS content_progress (

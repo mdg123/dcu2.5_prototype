@@ -256,6 +256,9 @@ router.get('/learning-map/nodes', ...adminOnly, (req, res) => {
     const { subject, grade, semester, area, keyword } = req.query;
     const page = Math.max(1, parseInt(req.query.page) || 1);
     const limit = Math.min(200, Math.max(1, parseInt(req.query.limit) || 20));
+    const nodeLevel = req.query.nodeLevel ? parseInt(req.query.nodeLevel) : null;
+    // mappingFilter: empty_video | empty_problem | empty_all | mapped (videos_count/problems_count 기반 필터)
+    const mappingFilter = (req.query.mappingFilter || '').toString().trim();
 
     let where = 'WHERE 1=1';
     const params = [];
@@ -263,13 +266,32 @@ router.get('/learning-map/nodes', ...adminOnly, (req, res) => {
     if (grade) { where += ' AND n.grade = ?'; params.push(parseInt(grade)); }
     if (semester) { where += ' AND n.semester = ?'; params.push(parseInt(semester)); }
     if (area) { where += ' AND n.area = ?'; params.push(area); }
+    if (nodeLevel) { where += ' AND n.node_level = ?'; params.push(nodeLevel); }
     if (keyword) {
       where += ' AND (n.unit_name LIKE ? OR n.lesson_name LIKE ? OR n.achievement_code LIKE ? OR n.achievement_text LIKE ? OR n.node_id LIKE ?)';
       const kw = `%${keyword}%`;
       params.push(kw, kw, kw, kw, kw);
     }
 
-    const total = db.prepare(`SELECT COUNT(*) as cnt FROM learning_map_nodes n ${where}`).get(...params).cnt;
+    // mappingFilter 처리 (HAVING 절)
+    let having = '';
+    if (mappingFilter === 'empty_video') having = 'HAVING videos_count = 0';
+    else if (mappingFilter === 'empty_problem') having = 'HAVING problems_count = 0';
+    else if (mappingFilter === 'empty_all') having = 'HAVING videos_count = 0 AND problems_count = 0';
+    else if (mappingFilter === 'mapped') having = 'HAVING (videos_count + problems_count) > 0';
+
+    // total 계산: HAVING이 있으면 서브쿼리로 감싸야 정확
+    const totalSql = having
+      ? `SELECT COUNT(*) AS cnt FROM (
+           SELECT n.node_id,
+             (SELECT COUNT(*) FROM node_contents nc JOIN contents c ON nc.content_id=c.id
+               WHERE nc.node_id=n.node_id AND c.content_type='video') AS videos_count,
+             (SELECT COUNT(*) FROM node_contents nc JOIN contents c ON nc.content_id=c.id
+               WHERE nc.node_id=n.node_id AND c.content_type IN ${PROBLEM_TYPES_SQL}) AS problems_count
+           FROM learning_map_nodes n ${where} ${having}
+         )`
+      : `SELECT COUNT(*) as cnt FROM learning_map_nodes n ${where}`;
+    const total = db.prepare(totalSql).get(...params).cnt;
     const nodes = db.prepare(`
       SELECT n.*,
         (SELECT COUNT(*) FROM node_contents nc JOIN contents c ON nc.content_id = c.id
@@ -278,6 +300,7 @@ router.get('/learning-map/nodes', ...adminOnly, (req, res) => {
           WHERE nc.node_id = n.node_id AND c.content_type IN ${PROBLEM_TYPES_SQL}) AS problems_count
       FROM learning_map_nodes n
       ${where}
+      ${having}
       ORDER BY n.subject, n.grade, n.semester, n.sort_order
       LIMIT ? OFFSET ?
     `).all(...params, limit, (page - 1) * limit);
@@ -410,6 +433,18 @@ router.get('/contents/public-search', ...adminOnly, (req, res) => {
       const kw = `%${keyword}%`;
       params.push(kw, kw, kw);
     }
+    // B-P0-4: 노드 컨텍스트 필터 (학년/교과/성취기준코드)
+    const subject = (req.query.subject || '').toString().trim();
+    const grade = req.query.grade ? parseInt(req.query.grade) : null;
+    const achievementCode = (req.query.achievement_code || '').toString().trim();
+    if (subject) {
+      // '수학' / '수학과' 정규화 — 두 표기 모두 매칭
+      const norm = subject.replace(/과$/, '');
+      where += ` AND (c.subject = ? OR c.subject = ?)`;
+      params.push(norm, norm + '과');
+    }
+    if (grade) { where += ` AND c.grade = ?`; params.push(grade); }
+    if (achievementCode) { where += ` AND c.achievement_code = ?`; params.push(achievementCode); }
 
     const rows = db.prepare(`
       SELECT c.id, c.title, c.content_type, c.subject, c.grade, c.unit_name,
@@ -525,7 +560,8 @@ router.get('/contents/pickable', ...adminOnly, (req, res) => {
     const page = Math.max(1, parseInt(req.query.page) || 1);
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
 
-    let where = "WHERE c.status = 'published'";
+    // B-P0-3: DB 실 상태값은 'approved'. 'published'는 0건 — 상수 수정.
+    let where = "WHERE c.status = 'approved'";
     const params = [];
     if (type === 'video') {
       where += ' AND c.content_type = ?';
@@ -537,12 +573,17 @@ router.get('/contents/pickable', ...adminOnly, (req, res) => {
       params.push(type);
     }
     if (keyword) {
-      where += ' AND (c.title LIKE ? OR c.description LIKE ?)';
+      where += ' AND (c.title LIKE ? OR c.description LIKE ? OR c.tags LIKE ?)';
       const kw = `%${keyword}%`;
-      params.push(kw, kw);
+      params.push(kw, kw, kw);
     }
     if (subject) { where += ' AND c.subject = ?'; params.push(subject); }
     if (grade) { where += ' AND c.grade = ?'; params.push(parseInt(grade)); }
+    // B-P0-4: achievement_code 필터 (노드 컨텍스트 기반 자동 추천)
+    if (req.query.achievement_code) {
+      where += ' AND c.achievement_code = ?';
+      params.push(req.query.achievement_code);
+    }
 
     const total = db.prepare(`SELECT COUNT(*) AS cnt FROM contents c ${where}`).get(...params).cnt;
     const contents = db.prepare(`
@@ -558,6 +599,210 @@ router.get('/contents/pickable', ...adminOnly, (req, res) => {
   } catch (err) {
     console.error('[ADMIN] contents/pickable error:', err);
     res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// ======== 매핑 통계 + 자동 매핑 + 일괄 + CSV ========
+
+// GET /api/admin/learning-map/mapping-stats — 매핑률·영상·문항·고립 통계
+router.get('/learning-map/mapping-stats', ...adminOnly, (req, res) => {
+  try {
+    const totalLessons = db.prepare("SELECT COUNT(*) AS c FROM learning_map_nodes WHERE node_level = 3").get().c;
+    const mappedLessons = db.prepare(`
+      SELECT COUNT(DISTINCT n.node_id) AS c
+      FROM learning_map_nodes n JOIN node_contents nc ON nc.node_id = n.node_id
+      WHERE n.node_level = 3
+    `).get().c;
+    const isolatedLessons = totalLessons - mappedLessons;
+    const videoMappings = db.prepare(`
+      SELECT COUNT(*) AS c FROM node_contents nc JOIN contents c ON c.id = nc.content_id
+      WHERE c.content_type = 'video'
+    `).get().c;
+    const quizMappings = db.prepare(`
+      SELECT COUNT(*) AS c FROM node_contents nc JOIN contents c ON c.id = nc.content_id
+      WHERE c.content_type IN ${PROBLEM_TYPES_SQL}
+    `).get().c;
+    res.json({
+      success: true,
+      totalLessons, mappedLessons, isolatedLessons,
+      mappingRatePct: totalLessons ? Math.round((mappedLessons / totalLessons) * 100) : 0,
+      videoMappings, quizMappings
+    });
+  } catch (err) {
+    console.error('[ADMIN] mapping-stats error:', err);
+    res.status(500).json({ success: false, message: '서버 오류' });
+  }
+});
+
+// GET /api/admin/learning-map/isolated-nodes — 고립(미매핑) 차시 노드 목록
+router.get('/learning-map/isolated-nodes', ...adminOnly, (req, res) => {
+  try {
+    const grade = parseIntOrNull(req.query.grade);
+    const subject = req.query.subject || null;
+    const area = req.query.area || null;
+    const type = req.query.type; // 'video' | 'quiz' — 부재 콘텐츠 타입 기준 필터
+    const limit = Math.min(500, parseInt(req.query.limit) || 100);
+
+    let condTypeJoin = '';
+    if (type === 'video') {
+      condTypeJoin = `AND NOT EXISTS (
+        SELECT 1 FROM node_contents nc JOIN contents c ON c.id = nc.content_id
+        WHERE nc.node_id = n.node_id AND c.content_type = 'video')`;
+    } else if (type === 'quiz' || type === 'question') {
+      condTypeJoin = `AND NOT EXISTS (
+        SELECT 1 FROM node_contents nc JOIN contents c ON c.id = nc.content_id
+        WHERE nc.node_id = n.node_id AND c.content_type IN ${PROBLEM_TYPES_SQL})`;
+    } else {
+      condTypeJoin = `AND NOT EXISTS (SELECT 1 FROM node_contents nc WHERE nc.node_id = n.node_id)`;
+    }
+
+    let where = `WHERE n.node_level = 3 ${condTypeJoin}`;
+    const params = [];
+    if (grade) { where += ' AND n.grade = ?'; params.push(grade); }
+    if (subject) { where += ' AND n.subject = ?'; params.push(subject); }
+    if (area) { where += ' AND n.area = ?'; params.push(area); }
+
+    const nodes = db.prepare(`
+      SELECT n.node_id, n.lesson_name, n.unit_name, n.area, n.subject, n.grade, n.achievement_code
+      FROM learning_map_nodes n
+      ${where}
+      ORDER BY n.grade, n.unit_name, n.sort_order
+      LIMIT ?
+    `).all(...params, limit);
+    res.json({ success: true, nodes, count: nodes.length });
+  } catch (err) {
+    console.error('[ADMIN] isolated-nodes error:', err);
+    res.status(500).json({ success: false, message: '서버 오류' });
+  }
+});
+
+// GET /api/admin/learning-map/auto-suggest?nodeId=...&type=video|quiz — AI 추천
+router.get('/learning-map/auto-suggest', ...adminOnly, (req, res) => {
+  try {
+    const nodeId = req.query.nodeId;
+    const type = req.query.type || 'quiz';
+    if (!nodeId) return res.status(400).json({ success: false, message: 'nodeId 필요' });
+
+    const node = db.prepare('SELECT node_id, lesson_name, unit_name, area, subject, grade, achievement_code FROM learning_map_nodes WHERE node_id = ?').get(nodeId);
+    if (!node) return res.status(404).json({ success: false, message: '노드 없음' });
+
+    // 1) 같은 std_id로 매핑된 후보 (가장 신뢰)
+    // 2) 같은 학년·교과·achievement_code 매칭
+    // 3) lesson_name 키워드(공백 분할) 콘텐츠 title/tags 매칭
+
+    const tokens = (node.lesson_name || '').split(/[\s\-·,()]+/).filter(t => t && t.length >= 2);
+    const tokenScore = tokens.length;
+
+    let typeFilter = '';
+    if (type === 'video') typeFilter = "AND c.content_type = 'video'";
+    else typeFilter = `AND c.content_type IN ${PROBLEM_TYPES_SQL}`;
+
+    // 이미 매핑된 콘텐츠는 제외
+    const candidates = db.prepare(`
+      SELECT c.id, c.title, c.content_type, c.subject, c.grade, c.achievement_code, c.tags,
+        CASE WHEN c.achievement_code = ? THEN 50 ELSE 0 END AS code_match,
+        CASE WHEN c.subject = ? THEN 10 ELSE 0 END AS subject_match,
+        CASE WHEN c.grade = ? THEN 10 ELSE 0 END AS grade_match
+      FROM contents c
+      WHERE c.status = 'approved' AND c.is_public = 1
+        ${typeFilter}
+        AND NOT EXISTS (SELECT 1 FROM node_contents nc WHERE nc.node_id = ? AND nc.content_id = c.id)
+      LIMIT 500
+    `).all(node.achievement_code || '', node.subject || '', node.grade || 0, nodeId);
+
+    // lesson_name 토큰 매칭 점수 추가
+    const scored = candidates.map(c => {
+      const blob = `${c.title || ''} ${c.tags || ''}`;
+      let tokMatched = 0;
+      for (const t of tokens) if (blob.includes(t)) tokMatched++;
+      const tokScore = tokenScore > 0 ? Math.round((tokMatched / tokenScore) * 30) : 0;
+      const total = c.code_match + c.subject_match + c.grade_match + tokScore;
+      // 정확도 % 환산: 100 만점
+      const accuracy = Math.min(100, total);
+      return { id: c.id, title: c.title, content_type: c.content_type, accuracy, code_match: !!c.code_match, tok_matched: tokMatched, tok_total: tokenScore };
+    }).sort((a, b) => b.accuracy - a.accuracy).slice(0, 30);
+
+    const high = scored.filter(s => s.accuracy >= 80);
+    const mid = scored.filter(s => s.accuracy >= 60 && s.accuracy < 80);
+    const low = scored.filter(s => s.accuracy < 60);
+
+    res.json({ success: true, node, suggestions: { high, mid, low }, total: scored.length });
+  } catch (err) {
+    console.error('[ADMIN] auto-suggest error:', err);
+    res.status(500).json({ success: false, message: '서버 오류' });
+  }
+});
+
+// POST /api/admin/learning-map/mappings/bulk — 일괄 매핑 추가
+router.post('/learning-map/mappings/bulk', ...adminOnly, (req, res) => {
+  try {
+    const { mappings, dryRun } = req.body || {};
+    if (!Array.isArray(mappings) || !mappings.length) {
+      return res.status(400).json({ success: false, message: 'mappings 배열 필요' });
+    }
+    const ins = db.prepare(`
+      INSERT OR IGNORE INTO node_contents (node_id, content_id, content_role, sort_order)
+      VALUES (?, ?, ?, ?)
+    `);
+    const checkNode = db.prepare('SELECT 1 FROM learning_map_nodes WHERE node_id = ?');
+    const checkContent = db.prepare("SELECT 1 FROM contents WHERE id = ? AND status = 'approved'");
+
+    let inserted = 0, skipped = 0;
+    const errors = [];
+
+    if (dryRun) {
+      for (const m of mappings) {
+        const { nodeId, contentId } = m;
+        if (!checkNode.get(nodeId)) { errors.push({ nodeId, contentId, reason: 'node_not_found' }); continue; }
+        if (!checkContent.get(contentId)) { errors.push({ nodeId, contentId, reason: 'content_not_approved' }); continue; }
+        const exists = db.prepare('SELECT 1 FROM node_contents WHERE node_id=? AND content_id=?').get(nodeId, contentId);
+        if (exists) skipped++; else inserted++;
+      }
+      return res.json({ success: true, dryRun: true, willInsert: inserted, willSkip: skipped, errors });
+    }
+
+    const tx = db.transaction(() => {
+      for (const m of mappings) {
+        const { nodeId, contentId, role = 'practice', sortOrder = 0 } = m;
+        if (!checkNode.get(nodeId)) { errors.push({ nodeId, contentId, reason: 'node_not_found' }); continue; }
+        if (!checkContent.get(contentId)) { errors.push({ nodeId, contentId, reason: 'content_not_approved' }); continue; }
+        const r = ins.run(nodeId, parseInt(contentId), role, sortOrder);
+        if (r.changes > 0) inserted++; else skipped++;
+      }
+    });
+    tx();
+    res.json({ success: true, inserted, skipped, errors });
+  } catch (err) {
+    console.error('[ADMIN] mappings/bulk error:', err);
+    res.status(500).json({ success: false, message: '서버 오류' });
+  }
+});
+
+// GET /api/admin/learning-map/mappings/export — CSV 내보내기
+router.get('/learning-map/mappings/export', ...adminOnly, (req, res) => {
+  try {
+    const rows = db.prepare(`
+      SELECT nc.node_id, n.lesson_name, n.unit_name, n.subject, n.grade, n.area,
+             nc.content_id, c.title, c.content_type, nc.content_role, nc.sort_order
+      FROM node_contents nc
+      JOIN learning_map_nodes n ON n.node_id = nc.node_id
+      JOIN contents c ON c.id = nc.content_id
+      ORDER BY n.grade, n.unit_name, nc.node_id, nc.sort_order
+    `).all();
+    const header = 'node_id,lesson_name,unit_name,subject,grade,area,content_id,title,content_type,role,sort_order\n';
+    const escape = (v) => {
+      if (v == null) return '';
+      const s = String(v).replace(/"/g, '""');
+      return /[,"\n]/.test(s) ? `"${s}"` : s;
+    };
+    const body = rows.map(r => [r.node_id, r.lesson_name, r.unit_name, r.subject, r.grade, r.area, r.content_id, r.title, r.content_type, r.content_role, r.sort_order].map(escape).join(',')).join('\n');
+    const csv = '﻿' + header + body;  // BOM for Excel UTF-8
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="node-content-mappings.csv"');
+    res.send(csv);
+  } catch (err) {
+    console.error('[ADMIN] mappings/export error:', err);
+    res.status(500).json({ success: false, message: '서버 오류' });
   }
 });
 
@@ -950,6 +1195,379 @@ router.post('/learning-map/cleanup-orphans', ...adminOnly, (req, res) => {
     console.error('[ADMIN] learning-map/cleanup-orphans error:', err);
     res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
   }
+});
+
+// ======== B-P0-5: 매핑 순서 swap (단일 트랜잭션) ========
+// PUT /api/admin/learning-map/nodes/:nodeId/contents/swap
+// body: { contentIdA, contentIdB } — 두 매핑의 sort_order를 원자적으로 교환
+router.put('/learning-map/nodes/:nodeId/contents/swap', ...adminOnly, (req, res) => {
+  try {
+    const nodeId = req.params.nodeId;
+    const { contentIdA, contentIdB } = req.body || {};
+    const a = parseInt(contentIdA), b = parseInt(contentIdB);
+    if (!a || !b || a === b) return res.status(400).json({ success: false, message: 'contentIdA, contentIdB 필요' });
+
+    const get = db.prepare('SELECT id, sort_order FROM node_contents WHERE node_id = ? AND content_id = ?');
+    const upd = db.prepare('UPDATE node_contents SET sort_order = ? WHERE node_id = ? AND content_id = ?');
+    const run = db.transaction(() => {
+      const ra = get.get(nodeId, a);
+      const rb = get.get(nodeId, b);
+      if (!ra || !rb) throw Object.assign(new Error('매핑을 찾을 수 없습니다.'), { status: 404 });
+      upd.run(rb.sort_order, nodeId, a);
+      upd.run(ra.sort_order, nodeId, b);
+      return { a: { content_id: a, sort_order: rb.sort_order }, b: { content_id: b, sort_order: ra.sort_order } };
+    });
+    const result = run();
+    res.json({ success: true, ...result });
+  } catch (err) {
+    const status = err.status || 500;
+    if (status !== 404) console.error('[ADMIN] mapping swap error:', err);
+    res.status(status).json({ success: false, message: err.message || '서버 오류가 발생했습니다.' });
+  }
+});
+
+// ======== B-P0-6: 일괄 매핑 추가 (트랜잭션) ========
+// POST /api/admin/learning-map/mappings/bulk?dryRun=1
+// body: { mappings: [{ nodeId, contentId, role?, sortOrder? }, ...] }
+router.post('/learning-map/mappings/bulk', ...adminOnly, (req, res) => {
+  try {
+    const dryRun = req.query.dryRun === '1' || req.query.dryRun === 'true' || req.body?.dry_run === true;
+    const items = Array.isArray(req.body?.mappings) ? req.body.mappings : [];
+    if (items.length === 0) return res.status(400).json({ success: false, message: 'mappings 배열 필요' });
+    if (items.length > 5000) return res.status(400).json({ success: false, message: '한 번에 최대 5000건까지 처리합니다.' });
+
+    const stats = { total: items.length, inserted: 0, skipped_duplicate: 0, skipped_invalid_node: 0,
+                    skipped_invalid_content: 0, skipped_non_lesson: 0, errors: [] };
+    const inserted = [];
+
+    const getNode = db.prepare('SELECT node_id, node_level FROM learning_map_nodes WHERE node_id = ?');
+    const getContent = db.prepare('SELECT id, content_type FROM contents WHERE id = ?');
+    const getDup = db.prepare('SELECT id FROM node_contents WHERE node_id = ? AND content_id = ?');
+    const getMaxOrder = db.prepare('SELECT COALESCE(MAX(sort_order),0) AS mx FROM node_contents WHERE node_id = ?');
+    const insert = db.prepare('INSERT INTO node_contents (node_id, content_id, content_role, sort_order) VALUES (?, ?, ?, ?)');
+
+    const run = db.transaction(() => {
+      for (let i = 0; i < items.length; i++) {
+        const it = items[i] || {};
+        const nodeId = String(it.nodeId || it.node_id || '').trim();
+        const cid = parseInt(it.contentId || it.content_id);
+        if (!nodeId || !cid) { stats.errors.push(`#${i}: nodeId/contentId 누락`); continue; }
+
+        const node = getNode.get(nodeId);
+        if (!node) { stats.skipped_invalid_node++; continue; }
+        if (node.node_level !== 3) { stats.skipped_non_lesson++; continue; }
+
+        const content = getContent.get(cid);
+        if (!content) { stats.skipped_invalid_content++; continue; }
+
+        const dup = getDup.get(nodeId, cid);
+        if (dup) { stats.skipped_duplicate++; continue; }
+
+        let role = it.role || it.content_role;
+        if (!role) {
+          role = content.content_type === 'video' ? 'video'
+               : PROBLEM_TYPES.includes(content.content_type) ? 'problem' : 'learn';
+        }
+        let order = it.sortOrder ?? it.sort_order;
+        if (order === undefined || order === null || order === '') {
+          order = (getMaxOrder.get(nodeId).mx || 0) + 1;
+        }
+
+        if (!dryRun) {
+          const info = insert.run(nodeId, cid, role, parseInt(order));
+          inserted.push({ id: info.lastInsertRowid, node_id: nodeId, content_id: cid, content_role: role, sort_order: parseInt(order) });
+        } else {
+          inserted.push({ node_id: nodeId, content_id: cid, content_role: role, sort_order: parseInt(order), dry_run: true });
+        }
+        stats.inserted++;
+      }
+      if (dryRun) {
+        // 트랜잭션 롤백을 위해 의도적으로 throw — better-sqlite3 transaction 은 throw 시 자동 롤백
+        const e = new Error('__DRY_RUN_ROLLBACK__'); e.__dry = true; throw e;
+      }
+    });
+    try { run(); }
+    catch (e) { if (!e.__dry) throw e; }
+
+    res.json({ success: true, dry_run: dryRun, stats, inserted });
+  } catch (err) {
+    console.error('[ADMIN] mappings/bulk error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// DELETE /api/admin/learning-map/mappings/bulk - 일괄 삭제
+// body: { ids: [mapping_id, ...] } 또는 { pairs: [{nodeId, contentId}, ...] }
+router.delete('/learning-map/mappings/bulk', ...adminOnly, (req, res) => {
+  try {
+    const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(n => parseInt(n)).filter(Boolean) : [];
+    const pairs = Array.isArray(req.body?.pairs) ? req.body.pairs : [];
+    if (ids.length === 0 && pairs.length === 0) return res.status(400).json({ success: false, message: 'ids 또는 pairs 필요' });
+
+    const delById = db.prepare('DELETE FROM node_contents WHERE id = ?');
+    const delByPair = db.prepare('DELETE FROM node_contents WHERE node_id = ? AND content_id = ?');
+    let deleted = 0;
+    const run = db.transaction(() => {
+      for (const id of ids) deleted += delById.run(id).changes;
+      for (const p of pairs) {
+        const nodeId = String(p.nodeId || p.node_id || '');
+        const cid = parseInt(p.contentId || p.content_id);
+        if (nodeId && cid) deleted += delByPair.run(nodeId, cid).changes;
+      }
+    });
+    run();
+    res.json({ success: true, deleted });
+  } catch (err) {
+    console.error('[ADMIN] mappings/bulk DELETE error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// ======== B-P0-7: AI 자동 매핑 추천 ========
+// GET /api/admin/learning-map/auto-suggest?nodeId=X&type=video|question&limit=10
+//  - 노드의 lesson_name / unit_name / achievement_code 토큰화 후 contents.title/tags/achievement_code 매칭 점수화
+//  - 응답: { suggestions: [{contentId, score, reason, ...}], node }
+const _STOP_TOKENS = new Set(['의','을','를','이','가','은','는','와','과','에','로','으로','및','등','한','하기','알기','구하기','이해','이해하기']);
+function tokenize(text) {
+  if (!text) return [];
+  return String(text)
+    .replace(/[\(\)\[\]\{\}<>"'`~!@#$%^&*+=|\\\/?,.;:]/g, ' ')
+    .split(/\s+/)
+    .map(s => s.trim())
+    .filter(s => s.length >= 2 && !_STOP_TOKENS.has(s));
+}
+
+router.get('/learning-map/auto-suggest', ...adminOnly, (req, res) => {
+  try {
+    const nodeId = (req.query.nodeId || '').toString().trim();
+    const type = (req.query.type || '').toString().trim().toLowerCase();
+    const limit = Math.min(50, Math.max(1, parseInt(req.query.limit) || 10));
+    if (!nodeId) return res.status(400).json({ success: false, message: 'nodeId 필요' });
+
+    const node = db.prepare('SELECT * FROM learning_map_nodes WHERE node_id = ?').get(nodeId);
+    if (!node) return res.status(404).json({ success: false, message: '노드를 찾을 수 없습니다.' });
+
+    const tokens = Array.from(new Set([
+      ...tokenize(node.lesson_name),
+      ...tokenize(node.unit_name),
+      ...tokenize(node.achievement_text)
+    ])).slice(0, 10);
+
+    let typeWhere = '';
+    if (type === 'video') typeWhere = ` AND c.content_type = 'video'`;
+    else if (type === 'question' || type === 'problem') typeWhere = ` AND c.content_type IN ${PROBLEM_TYPES_SQL}`;
+
+    // 이미 매핑된 콘텐츠는 제외
+    const candidates = db.prepare(`
+      SELECT c.id, c.title, c.content_type, c.subject, c.grade, c.tags, c.achievement_code, c.thumbnail_url, c.description, c.view_count
+      FROM contents c
+      WHERE c.is_public = 1 AND c.status = 'approved'
+        ${typeWhere}
+        AND c.id NOT IN (SELECT content_id FROM node_contents WHERE node_id = ?)
+        ${node.subject ? 'AND (c.subject = ? OR c.subject = ?)' : ''}
+        ${node.grade ? 'AND c.grade = ?' : ''}
+      LIMIT 500
+    `).all(...[
+      nodeId,
+      ...(node.subject ? [node.subject.replace(/과$/, ''), node.subject.replace(/과$/, '') + '과'] : []),
+      ...(node.grade ? [node.grade] : [])
+    ]);
+
+    // 점수화: achievement_code 정확 일치 +5, lesson_name 토큰 매칭 +1/토큰, tags 매칭 +0.5/토큰
+    const suggestions = [];
+    for (const c of candidates) {
+      let score = 0;
+      const reasons = [];
+      if (node.achievement_code && c.achievement_code === node.achievement_code) {
+        score += 5;
+        reasons.push(`성취기준 일치(${node.achievement_code})`);
+      }
+      const titleLow = (c.title || '').toLowerCase();
+      const tagsLow = (c.tags || '').toLowerCase();
+      const matched = [];
+      for (const t of tokens) {
+        const tl = t.toLowerCase();
+        if (titleLow.includes(tl)) { score += 1; matched.push(t); }
+        else if (tagsLow.includes(tl)) { score += 0.5; matched.push(t + '(tag)'); }
+      }
+      if (matched.length) reasons.push('키워드 ' + matched.join(','));
+      if (score > 0) suggestions.push({
+        contentId: c.id,
+        score: Number(score.toFixed(2)),
+        reason: reasons.join(' | '),
+        title: c.title,
+        content_type: c.content_type,
+        thumbnail_url: c.thumbnail_url,
+        achievement_code: c.achievement_code,
+        view_count: c.view_count
+      });
+    }
+    suggestions.sort((a, b) => b.score - a.score);
+    res.json({
+      success: true,
+      node: { node_id: node.node_id, lesson_name: node.lesson_name, unit_name: node.unit_name, achievement_code: node.achievement_code },
+      tokens,
+      suggestions: suggestions.slice(0, limit),
+      total_candidates: candidates.length
+    });
+  } catch (err) {
+    console.error('[ADMIN] auto-suggest error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// ======== B-P0-8: 매핑 CSV export / import ========
+function csvEscape(v) {
+  if (v === null || v === undefined) return '';
+  const s = String(v);
+  if (/[",\n\r]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
+  return s;
+}
+function parseCsv(text) {
+  // 단순 RFC4180 파서 (필드 따옴표 + 이스케이프 지원)
+  const rows = [];
+  let row = [], field = '', inQuote = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (inQuote) {
+      if (ch === '"') {
+        if (text[i + 1] === '"') { field += '"'; i++; }
+        else inQuote = false;
+      } else field += ch;
+    } else {
+      if (ch === '"') inQuote = true;
+      else if (ch === ',') { row.push(field); field = ''; }
+      else if (ch === '\n') { row.push(field); rows.push(row); row = []; field = ''; }
+      else if (ch === '\r') { /* skip */ }
+      else field += ch;
+    }
+  }
+  if (field.length > 0 || row.length > 0) { row.push(field); rows.push(row); }
+  return rows.filter(r => r.some(c => c && c.length > 0));
+}
+
+// GET /api/admin/learning-map/mappings/export.csv?subject=&grade=
+router.get('/learning-map/mappings/export.csv', ...adminOnly, (req, res) => {
+  try {
+    const { subject, grade } = req.query;
+    let where = 'WHERE 1=1';
+    const params = [];
+    if (subject) { where += ' AND n.subject = ?'; params.push(subject); }
+    if (grade) { where += ' AND n.grade = ?'; params.push(parseInt(grade)); }
+
+    const rows = db.prepare(`
+      SELECT nc.id AS mapping_id, nc.node_id, n.subject, n.grade, n.semester, n.unit_name, n.lesson_name,
+             nc.content_id, c.content_type, c.title, nc.content_role, nc.sort_order
+      FROM node_contents nc
+      JOIN learning_map_nodes n ON nc.node_id = n.node_id
+      JOIN contents c ON nc.content_id = c.id
+      ${where}
+      ORDER BY n.subject, n.grade, n.semester, n.sort_order, nc.sort_order
+    `).all(...params);
+
+    const header = ['mapping_id','node_id','subject','grade','semester','unit_name','lesson_name','content_id','content_type','title','content_role','sort_order'];
+    const lines = [header.join(',')];
+    for (const r of rows) lines.push(header.map(h => csvEscape(r[h])).join(','));
+    const body = '﻿' + lines.join('\r\n'); // UTF-8 BOM (Excel 호환)
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="learning-map-mappings-${Date.now()}.csv"`);
+    res.send(body);
+  } catch (err) {
+    console.error('[ADMIN] mappings/export.csv error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// POST /api/admin/learning-map/mappings/import (multipart: file=csv, mode=append|replace, dryRun=1)
+router.post('/learning-map/mappings/import', ...adminOnly, (req, res, next) => {
+  learningMapUpload.single('file')(req, res, (err) => {
+    if (err) return res.status(400).json({ success: false, message: err.message });
+
+    try {
+      const dryRun = req.query.dryRun === '1' || req.body.dryRun === '1' || req.body.dry_run === 'true';
+      const mode = (req.body.mode || 'append').toLowerCase() === 'replace' ? 'replace' : 'append';
+
+      let rowsRaw;
+      if (req.file && /\.(xlsx|xls)$/i.test(req.file.originalname)) {
+        const wb = xlsx.read(req.file.buffer, { type: 'buffer' });
+        const sheet = wb.Sheets[wb.SheetNames[0]];
+        rowsRaw = xlsx.utils.sheet_to_json(sheet, { defval: null });
+      } else if (req.file) {
+        const text = req.file.buffer.toString('utf8').replace(/^﻿/, '');
+        const csv = parseCsv(text);
+        if (csv.length < 2) return res.status(400).json({ success: false, message: 'CSV 헤더와 1행 이상 필요' });
+        const header = csv[0].map(h => h.trim());
+        rowsRaw = csv.slice(1).map(arr => {
+          const o = {}; header.forEach((h, i) => o[h] = arr[i]); return o;
+        });
+      } else {
+        return res.status(400).json({ success: false, message: '파일이 없습니다.' });
+      }
+
+      // node_id, content_id 컬럼 필수
+      const stats = { total: rowsRaw.length, inserted: 0, replaced_groups: 0,
+                      skipped_duplicate: 0, skipped_invalid_node: 0,
+                      skipped_invalid_content: 0, skipped_non_lesson: 0, errors: [] };
+
+      const getNode = db.prepare('SELECT node_id, node_level FROM learning_map_nodes WHERE node_id = ?');
+      const getContent = db.prepare('SELECT id, content_type FROM contents WHERE id = ?');
+      const getDup = db.prepare('SELECT id FROM node_contents WHERE node_id = ? AND content_id = ?');
+      const insert = db.prepare('INSERT INTO node_contents (node_id, content_id, content_role, sort_order) VALUES (?, ?, ?, ?)');
+      const deleteByNode = db.prepare('DELETE FROM node_contents WHERE node_id = ?');
+
+      // replace 모드: import 안에서 등장하는 node_id 별로 기존 매핑을 일괄 삭제 후 재삽입
+      const touchedNodes = new Set();
+
+      const run = db.transaction(() => {
+        if (mode === 'replace') {
+          for (const r of rowsRaw) {
+            const nid = String(r.node_id || r.nodeId || '').trim();
+            if (nid) touchedNodes.add(nid);
+          }
+          if (!dryRun) {
+            for (const nid of touchedNodes) {
+              const info = deleteByNode.run(nid);
+              if (info.changes > 0) stats.replaced_groups++;
+            }
+          } else {
+            stats.replaced_groups = touchedNodes.size;
+          }
+        }
+
+        for (let i = 0; i < rowsRaw.length; i++) {
+          const r = rowsRaw[i];
+          const nodeId = String(r.node_id || r.nodeId || '').trim();
+          const cid = parseInt(r.content_id || r.contentId);
+          if (!nodeId || !cid) { stats.errors.push(`row ${i+2}: node_id/content_id 누락`); continue; }
+          const node = getNode.get(nodeId);
+          if (!node) { stats.skipped_invalid_node++; continue; }
+          if (node.node_level !== 3) { stats.skipped_non_lesson++; continue; }
+          const content = getContent.get(cid);
+          if (!content) { stats.skipped_invalid_content++; continue; }
+          if (mode === 'append' && getDup.get(nodeId, cid)) { stats.skipped_duplicate++; continue; }
+          let role = (r.content_role || r.role || '').toString().trim();
+          if (!role) {
+            role = content.content_type === 'video' ? 'video'
+                 : PROBLEM_TYPES.includes(content.content_type) ? 'problem' : 'learn';
+          }
+          const order = parseInt(r.sort_order) || ((i % 1000) + 1);
+          if (!dryRun) insert.run(nodeId, cid, role, order);
+          stats.inserted++;
+        }
+
+        if (dryRun) {
+          const e = new Error('__DRY_RUN_ROLLBACK__'); e.__dry = true; throw e;
+        }
+      });
+      try { run(); } catch (e) { if (!e.__dry) throw e; }
+
+      res.json({ success: true, dry_run: dryRun, mode, stats });
+    } catch (err) {
+      console.error('[ADMIN] mappings/import error:', err);
+      res.status(500).json({ success: false, message: '서버 오류: ' + err.message });
+    }
+  });
 });
 
 module.exports = router;
