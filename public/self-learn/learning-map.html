@@ -4725,53 +4725,80 @@ async function loadRecord() {
    Ranking
    ========================================================= */
 async function loadRanking() {
-  const d = await fetchApi('/api/self-learn/ranking?period=' + encodeURIComponent(rankingPeriod));
+  // F-P1-A (감리 RES-003): 대시보드 rank 카드 ↔ 랭킹 탭 데이터 소스 통일.
+  // 두 화면 모두 `/api/self-learn/dashboard` 응답을 단일 소스로 참조한다.
+  //  - 대시보드 카드: loadDashboard() 가 dashboardCache 에 저장 → 카드에 rank/total_users 표시
+  //  - 랭킹 탭: 동일 dashboardCache.rank/total_users/cohort 를 우선 사용,
+  //    추가 행 정보는 /api/self-learn/ranking 으로 보조(2등 이하 표시용).
+  // → "대시보드 1위 / 랭킹 탭 데이터 없음" 모순 영구 해소.
   const list = $('rankList');
-  let rankings = d?.rankings || [];
-  // F-P0-NEW-3: 대시보드 카드("1위")와 랭킹 탭 일관성 — ranking API가 비어 있어도
-  // dashboardCache 의 rank/total_users 가 있으면 최소한 본인 1행은 노출하여
-  // "대시보드 1위 ↔ 랭킹 데이터 없음" 모순을 해소한다.
+  // 1) 대시보드 캐시 확보 — 단일 소스의 진실(rank, total_users)
+  if (!dashboardCache) {
+    try { await loadDashboard(); } catch (_) {}
+  }
+  const dc = dashboardCache || {};
+  const myRank = dc.rank;
+  const totalUsers = dc.total_users || 0;
+  const myScore = dc.total_solved ?? dc.completedNodes ?? dc.completed_nodes ?? 0;
+
+  // 2) 보조 데이터: 랭킹 API (있으면 2~10등 표시에 활용)
+  const d = await fetchApi('/api/self-learn/ranking?period=' + encodeURIComponent(rankingPeriod));
+  let rankings = (d?.rankings || []).slice();
   const allZero = rankings.length > 0 && rankings.every(r => (r.score ?? r.points ?? r.completed_nodes ?? r.solved ?? 0) === 0);
-  if (!rankings.length || allZero) {
-    const dc = dashboardCache;
-    if (dc && dc.rank && dc.rank > 0 && currentUser) {
-      // 대시보드 데이터로 본인 행 1개 구성 — 점수는 total_solved 로 표시
-      rankings = [{
-        user_id: currentUser.id,
-        username: currentUser.username,
-        display_name: currentUser.display_name || currentUser.name || currentUser.username,
-        score: dc.total_solved ?? dc.completedNodes ?? 0,
-        _placeholder: true
-      }];
+
+  // 3) 단일 소스 강제: dashboardCache.rank 가 유효하면 본인 행을 명시 삽입(또는 보정)
+  if (myRank && myRank > 0 && currentUser) {
+    const meIdx = rankings.findIndex(r => r.user_id === currentUser.id || r.username === currentUser.username);
+    const meRow = {
+      user_id: currentUser.id,
+      username: currentUser.username,
+      display_name: currentUser.display_name || currentUser.name || currentUser.username,
+      score: myScore,
+      _fromDashboard: true
+    };
+    if (meIdx >= 0) {
+      // 기존 행이 있으면 score만 dashboardCache 기준으로 보정
+      rankings[meIdx] = { ...rankings[meIdx], ...meRow };
+    } else if (rankings.length === 0 || allZero) {
+      // API 비었거나 전부 0점 → dashboardCache 기준 단독 행
+      rankings = [meRow];
     } else {
-      list.innerHTML = `<li style="list-style:none;padding:0">
-        <div class="ranking-empty">
-          <div class="re-icon"><i class="fas fa-trophy"></i></div>
-          <div class="re-title">아직 데이터가 부족해요</div>
-          <div class="re-desc">진단평가나 차시 학습을 완료하면 점수가 쌓이고 순위가 나타나요.</div>
-          <button class="re-cta" onclick="document.querySelector('.tab-btn[data-tab=\\'diag\\']')?.click() || (location.hash='#diag')">
-            <i class="fas fa-play-circle"></i> 첫 문항 풀러 가기
-          </button>
-        </div>
-      </li>`;
-      return;
+      // API 데이터는 있으나 본인 행 없음 → dashboardCache.rank 위치에 삽입
+      const insertAt = Math.min(Math.max(myRank - 1, 0), rankings.length);
+      rankings.splice(insertAt, 0, meRow);
     }
   }
+
+  // 4) 빈 상태 처리 — dashboardCache 도 비어있고 API 도 비어있는 경우만
+  if (!rankings.length) {
+    list.innerHTML = `<li style="list-style:none;padding:0">
+      <div class="ranking-empty">
+        <div class="re-icon"><i class="fas fa-trophy"></i></div>
+        <div class="re-title">아직 데이터가 부족해요</div>
+        <div class="re-desc">진단평가나 차시 학습을 완료하면 점수가 쌓이고 순위가 나타나요.</div>
+        <button class="re-cta" onclick="document.querySelector('.tab-btn[data-tab=\\'diag\\']')?.click() || (location.hash='#diag')">
+          <i class="fas fa-play-circle"></i> 첫 문항 풀러 가기
+        </button>
+      </div>
+    </li>`;
+    return;
+  }
+
   list.innerHTML = rankings.slice(0, 10).map((r, i) => {
     const rc = i === 0 ? 'gold' : i === 1 ? 'silver' : i === 2 ? 'bronze' : 'normal';
     const isMe = currentUser && (r.user_id === currentUser.id || r.username === currentUser.username);
+    // 본인 행은 dashboardCache.rank 를 위치 기준으로 표시
+    const displayRank = (isMe && myRank && myRank > 0) ? myRank : (i + 1);
     return `<li class="rank-item ${isMe ? 'me' : ''}">
-      <div class="rank-num ${rc}">${i + 1}</div>
+      <div class="rank-num ${rc}">${displayRank}</div>
       <span class="rank-name">${escHtml(r.display_name || r.username || '사용자')}${isMe ? ' <span style="font-size:var(--fs-xs);color:var(--primary)">(나)</span>' : ''}</span>
       <span class="rank-score">${r.score ?? r.points ?? r.completed_nodes ?? r.solved ?? 0}점</span>
     </li>`;
   }).join('');
 
-  // Update dashboard rank
-  if (currentUser) {
-    const myIdx = rankings.findIndex(r => r.user_id === currentUser.id || r.username === currentUser.username);
-    if (myIdx >= 0) { $('dashRank').textContent = (myIdx + 1) + '위'; $('dashRankSub').textContent = rankings.length + '명 중'; }
-  }
+  // 5) 대시보드 카드 동기화 — dashboardCache 가 단일 소스이므로 별도 덮어쓰기는 하지 않는다.
+  //    (이전에는 ranking API findIndex 로 dashRank 를 덮어써서 두 소스가 충돌했음)
+  //    dashboardCache.rank 기반으로 loadDashboard() 가 이미 카드에 정확한 값 표시.
 }
 </script>
 </body>

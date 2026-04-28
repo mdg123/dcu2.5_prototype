@@ -254,4 +254,133 @@ router.post('/:classId/visit', requireAuth, (req, res) => {
   }
 });
 
+// GET /api/class/:classId/students/self-learn-summary
+// [교사·관리자] 클래스 학생들의 AI 맞춤학습 진도 요약
+router.get('/:classId/students/self-learn-summary', requireAuth, (req, res) => {
+  try {
+    const classId = parseInt(req.params.classId);
+    const myRole = classDb.getMemberRole(classId, req.user.id);
+    const isOwner = myRole === 'owner';
+    const isAdmin = req.user.role === 'admin';
+    const isTeacher = req.user.role === 'teacher' || req.user.role === 'admin';
+
+    // 권한: 클래스 owner(교사) 또는 관리자만
+    if (!(isOwner || isAdmin) || (!isTeacher && !isAdmin)) {
+      return res.status(403).json({ success: false, message: '교사·관리자만 접근 가능합니다.' });
+    }
+
+    const db = require('../db/index');
+    // 클래스 학생 목록 (role=student)
+    const students = db.prepare(`
+      SELECT u.id, u.username, u.display_name
+      FROM class_members cm
+      JOIN users u ON cm.user_id = u.id
+      WHERE cm.class_id = ? AND cm.status = 'active' AND u.role = 'student'
+      ORDER BY u.display_name
+    `).all(classId);
+
+    const completedNodesStmt = db.prepare(`
+      SELECT COUNT(*) AS cnt FROM user_node_status
+      WHERE user_id = ? AND status IN ('completed','mastered')
+    `);
+    const inProgressStmt = db.prepare(`
+      SELECT COUNT(*) AS cnt FROM user_node_status
+      WHERE user_id = ? AND status = 'in_progress'
+    `);
+    const attemptsStmt = db.prepare(`
+      SELECT COUNT(*) AS total,
+             SUM(CASE WHEN is_correct = 1 THEN 1 ELSE 0 END) AS correct
+      FROM problem_attempts WHERE user_id = ?
+    `);
+    const videoTimeStmt = db.prepare(`
+      SELECT COALESCE(SUM(position_sec), 0) AS sec FROM user_content_progress WHERE user_id = ?
+    `);
+    const dailyTimeStmt = db.prepare(`
+      SELECT COALESCE(SUM(time_spent_seconds), 0) AS sec FROM daily_learning_progress WHERE user_id = ?
+    `);
+    const lastActivityStmt = db.prepare(`
+      SELECT MAX(accessed_at) AS at FROM user_last_activity WHERE user_id = ?
+    `);
+    const distinctDaysStmt = db.prepare(`
+      SELECT DISTINCT DATE(accessed_at) AS d FROM user_last_activity
+      WHERE user_id = ? AND accessed_at >= DATE('now', '-30 days')
+      ORDER BY d DESC
+    `);
+    const areaCorrectStmt = db.prepare(`
+      SELECT n.subject AS area,
+             COUNT(*) AS total,
+             SUM(CASE WHEN pa.is_correct = 1 THEN 1 ELSE 0 END) AS correct
+      FROM problem_attempts pa
+      LEFT JOIN learning_map_nodes n ON n.node_id = pa.node_id
+      WHERE pa.user_id = ?
+      GROUP BY n.subject
+    `);
+
+    function calcStreak(days) {
+      if (!days || !days.length) return 0;
+      // 오늘부터 연속된 일자
+      const set = new Set(days.map(r => r.d));
+      let streak = 0;
+      const cur = new Date();
+      for (let i = 0; i < 30; i++) {
+        const ymd = cur.toISOString().slice(0, 10);
+        if (set.has(ymd)) { streak++; cur.setDate(cur.getDate() - 1); }
+        else if (i === 0) { cur.setDate(cur.getDate() - 1); } // 오늘 미활동 허용 (어제부터)
+        else break;
+      }
+      return streak;
+    }
+
+    const rows = students.map(s => {
+      const completed = completedNodesStmt.get(s.id).cnt || 0;
+      const inProgress = inProgressStmt.get(s.id).cnt || 0;
+      const att = attemptsStmt.get(s.id) || { total: 0, correct: 0 };
+      const totalSolved = att.total || 0;
+      const avgAccuracy = totalSolved ? Math.round((att.correct / totalSolved) * 100) : 0;
+      const videoSec = videoTimeStmt.get(s.id).sec || 0;
+      const dailySec = dailyTimeStmt.get(s.id).sec || 0;
+      const totalMinutes = Math.round((videoSec + dailySec) / 60);
+      const lastAt = (lastActivityStmt.get(s.id) || {}).at || null;
+      const days = distinctDaysStmt.all(s.id);
+      const streak = calcStreak(days);
+      const areas = areaCorrectStmt.all(s.id).filter(a => a.area).map(a => ({
+        area: a.area,
+        total: a.total,
+        correct: a.correct,
+        accuracy: a.total ? Math.round((a.correct / a.total) * 100) : 0
+      }));
+      return {
+        user_id: s.id,
+        username: s.username,
+        name: s.display_name,
+        completed_nodes: completed,
+        in_progress_nodes: inProgress,
+        total_solved: totalSolved,
+        correct_count: att.correct || 0,
+        avg_accuracy: avgAccuracy,
+        total_time_minutes: totalMinutes,
+        streak,
+        last_activity_at: lastAt,
+        areas
+      };
+    });
+
+    // 클래스 평균
+    const n = rows.length || 1;
+    const summary = {
+      student_count: rows.length,
+      avg_completed_nodes: Math.round(rows.reduce((s, r) => s + r.completed_nodes, 0) / n * 10) / 10,
+      avg_accuracy: Math.round(rows.reduce((s, r) => s + r.avg_accuracy, 0) / n),
+      avg_time_minutes: Math.round(rows.reduce((s, r) => s + r.total_time_minutes, 0) / n),
+      total_solved: rows.reduce((s, r) => s + r.total_solved, 0),
+      active_students: rows.filter(r => r.total_solved > 0 || r.completed_nodes > 0).length
+    };
+
+    res.json({ success: true, classId, students: rows, summary });
+  } catch (err) {
+    console.error('[CLASS] self-learn-summary error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.', detail: String(err && err.message || err) });
+  }
+});
+
 module.exports = router;

@@ -558,6 +558,17 @@
       const circ = 2 * Math.PI * 50;
       document.getElementById('goalCircle').style.strokeDashoffset = circ - (pct / 100 * circ);
 
+      // F-P1-B 부가: 통계 영역 0 상태 — 안내 라벨로 "0/0 (학습 시작 전)" 노출
+      // (DOM 구조는 유지하면서 title 속성 추가, 시각적으로는 grayout)
+      const goalPctEl = document.getElementById('goalPct');
+      if (totalAll === 0) {
+        goalPctEl.title = '학습이 배정되거나 시작되면 달성률이 표시됩니다';
+        goalPctEl.style.color = 'var(--gray-400)';
+      } else {
+        goalPctEl.title = '';
+        goalPctEl.style.color = '';
+      }
+
       document.getElementById('goalDailyBig').innerHTML = completedSets + ' / ' + totalSets + '<span class="goal-unit">개</span>';
       document.getElementById('goalDaily').style.width = (totalSets ? completedSets / totalSets * 100 : 0) + '%';
       document.getElementById('goalAIBig').innerHTML = aiCompleted + ' / ' + aiTotal + '<span class="goal-unit">회</span>';
@@ -681,10 +692,30 @@
       }
 
       if (!filteredSets.length) {
-        grid.innerHTML = `<div style="grid-column:1/-1;text-align:center;padding:40px;color:var(--gray-400);">
-          <i class="fas fa-clipboard-list" style="font-size:36px;margin-bottom:8px;"></i>
-          <div>${selectedDate ? selectedDate + '에 배정된 학습이 없습니다.' : '배정된 학습이 없습니다.'}</div>
-          ${selectedDate ? '<button onclick="selectedDate=null;renderWeekly();renderLearnCards();" style="margin-top:12px;padding:6px 16px;background:var(--primary);color:#fff;border:none;border-radius:8px;font-size:var(--fs-xs);cursor:pointer;font-family:inherit;">전체 보기</button>' : ''}
+        // F-P1-B (감리 RES-004): 빈 데이터 UX 보강
+        // 친절한 안내 + 학습맵/오답노트로 이어지는 CTA 2종 제공.
+        // 모바일/태블릿/데스크탑 모두 grid-column:1/-1 + flex column 으로 반응형.
+        const headLine = selectedDate
+          ? `${selectedDate.slice(5).replace('-','/')}에는 배정된 학습이 없어요`
+          : '오늘 학습할 항목이 아직 없어요';
+        const subLine = selectedDate
+          ? '다른 날짜를 선택하거나, 아래에서 직접 학습을 시작할 수 있어요.'
+          : 'AI 맞춤학습 또는 최근 풀이로 이어서 학습해 보세요.';
+        grid.innerHTML = `<div class="today-empty" style="grid-column:1/-1;background:#fff;border:1px dashed #E5E7EB;border-radius:12px;padding:36px 20px;text-align:center;display:flex;flex-direction:column;align-items:center;gap:10px;">
+          <div style="width:64px;height:64px;border-radius:50%;background:#EFF6FF;display:flex;align-items:center;justify-content:center;">
+            <i class="fas fa-clipboard-list" style="font-size:30px;color:#2563EB;"></i>
+          </div>
+          <div style="font-size:var(--fs-lg);font-weight:700;color:#111827;">${headLine}</div>
+          <div style="font-size:var(--fs-sm);color:#6B7280;line-height:1.5;max-width:420px;">${subLine}</div>
+          <div style="display:flex;flex-wrap:wrap;justify-content:center;gap:10px;margin-top:6px;">
+            <a href="/self-learn/learning-map.html" style="display:inline-flex;align-items:center;gap:6px;padding:10px 18px;background:#2563EB;color:#fff;border-radius:10px;font-size:var(--fs-sm);font-weight:600;text-decoration:none;">
+              <i class="fas fa-map"></i> 학습목록 추가하러 가기
+            </a>
+            <a href="/self-learn/wrong-note.html" style="display:inline-flex;align-items:center;gap:6px;padding:10px 18px;background:#fff;color:#2563EB;border:1.5px solid #2563EB;border-radius:10px;font-size:var(--fs-sm);font-weight:600;text-decoration:none;">
+              <i class="fas fa-redo"></i> 최근 풀이로 이어서
+            </a>
+            ${selectedDate ? '<button onclick="selectedDate=null;renderWeekly();renderLearnCards();" style="display:inline-flex;align-items:center;gap:6px;padding:10px 18px;background:#F3F4F6;color:#374151;border:1px solid #E5E7EB;border-radius:10px;font-size:var(--fs-sm);font-weight:600;cursor:pointer;font-family:inherit;"><i class="fas fa-list"></i> 전체 보기</button>' : ''}
+          </div>
         </div>`;
         return;
       }

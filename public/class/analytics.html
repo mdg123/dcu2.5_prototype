@@ -301,6 +301,7 @@
             <button class="tab-btn active" onclick="switchAnalyticsTab(this,'overview')">📊 종합 분석</button>
             <button class="tab-btn" onclick="switchAnalyticsTab(this,'students')">👥 학생별 분석</button>
             <button class="tab-btn" onclick="switchAnalyticsTab(this,'alerts')">⚠️ 관심 학생</button>
+            <button class="tab-btn" onclick="switchAnalyticsTab(this,'selfLearn')">🎯 AI 맞춤학습</button>
           </div>
 
           <!-- 종합 분석 탭 -->
@@ -416,11 +417,24 @@
               `).join('')}
             </div>` : ''}
           </div>
+
+          <!-- AI 맞춤학습 탭 -->
+          <div id="tabSelfLearn" class="tab-content">
+            <div id="selfLearnSection">
+              <div class="section-box">
+                <div class="empty-state">
+                  <i class="fas fa-spinner fa-spin"></i>
+                  <h3>AI 맞춤학습 데이터 로드 중…</h3>
+                </div>
+              </div>
+            </div>
+          </div>
         `;
 
         // 차트 렌더링
         renderCharts(stats, students, avgActivity);
         renderStudentTable(students, avgActivity);
+        loadSelfLearnSummary(classId);
       } catch(err) {
         container.innerHTML = '<div class="section-box"><div class="empty-state"><i class="fas fa-exclamation-circle"></i><h3>데이터 로드 실패</h3><p>' + err.message + '</p></div></div>';
       }
@@ -515,6 +529,186 @@
             </tr>
           `;
         }).join('');
+    }
+
+    // ===== AI 맞춤학습 (Self-Learn) =====
+    let _selfLearnState = { rows: [], summary: null, sortKey: 'completed_nodes', sortDir: 'desc' };
+
+    async function loadSelfLearnSummary(classId) {
+      const root = document.getElementById('selfLearnSection');
+      try {
+        const res = await fetch(`/api/class/${classId}/students/self-learn-summary`).then(r => r.json());
+        if (!res.success) {
+          root.innerHTML = `<div class="section-box"><div class="empty-state"><i class="fas fa-lock"></i><h3>접근 권한이 없습니다</h3><p>${escHtml(res.message || '')}</p></div></div>`;
+          return;
+        }
+        _selfLearnState.rows = res.students || [];
+        _selfLearnState.summary = res.summary || {};
+        renderSelfLearn();
+      } catch (err) {
+        root.innerHTML = `<div class="section-box"><div class="empty-state"><i class="fas fa-exclamation-circle"></i><h3>데이터 로드 실패</h3><p>${escHtml(err.message || '')}</p></div></div>`;
+      }
+    }
+
+    function setSelfLearnSort(key) {
+      if (_selfLearnState.sortKey === key) {
+        _selfLearnState.sortDir = _selfLearnState.sortDir === 'desc' ? 'asc' : 'desc';
+      } else {
+        _selfLearnState.sortKey = key;
+        _selfLearnState.sortDir = 'desc';
+      }
+      renderSelfLearn();
+    }
+
+    function renderSelfLearn() {
+      const root = document.getElementById('selfLearnSection');
+      const { rows, summary, sortKey, sortDir } = _selfLearnState;
+      const sorted = [...rows].sort((a, b) => {
+        const va = a[sortKey] ?? 0, vb = b[sortKey] ?? 0;
+        if (typeof va === 'string') return sortDir === 'desc' ? vb.localeCompare(va) : va.localeCompare(vb);
+        return sortDir === 'desc' ? (vb - va) : (va - vb);
+      });
+      const arrow = (k) => sortKey === k ? (sortDir === 'desc' ? ' ▼' : ' ▲') : '';
+      const fmtDate = (s) => {
+        if (!s) return '<span style="color:var(--gray-400)">활동 없음</span>';
+        const d = new Date(s);
+        if (isNaN(d)) return escHtml(s);
+        const diff = (Date.now() - d.getTime()) / (1000 * 60 * 60 * 24);
+        if (diff < 1) return '오늘';
+        if (diff < 2) return '어제';
+        if (diff < 7) return `${Math.floor(diff)}일 전`;
+        return d.toISOString().slice(5, 10).replace('-', '/');
+      };
+      const accColor = (a) => a >= 80 ? 'var(--success)' : a >= 60 ? 'var(--warning)' : 'var(--danger)';
+
+      root.innerHTML = `
+        <!-- 클래스 평균 요약 -->
+        <div class="section-box">
+          <div class="section-header">
+            <h3 class="section-title"><i class="fas fa-bullseye"></i> 클래스 평균 — AI 맞춤학습</h3>
+          </div>
+          <div class="summary-grid" style="grid-template-columns: repeat(5,1fr);">
+            <div class="summary-item">
+              <div class="sum-val" style="color:var(--primary)">${summary.student_count || 0}</div>
+              <div class="sum-lbl">학생 수</div>
+            </div>
+            <div class="summary-item">
+              <div class="sum-val" style="color:var(--success)">${summary.avg_completed_nodes || 0}</div>
+              <div class="sum-lbl">평균 완료노드</div>
+            </div>
+            <div class="summary-item">
+              <div class="sum-val" style="color:${accColor(summary.avg_accuracy || 0)}">${summary.avg_accuracy || 0}%</div>
+              <div class="sum-lbl">평균 정답률</div>
+            </div>
+            <div class="summary-item">
+              <div class="sum-val" style="color:var(--warning)">${summary.avg_time_minutes || 0}<span style="font-size:14px">분</span></div>
+              <div class="sum-lbl">평균 학습시간</div>
+            </div>
+            <div class="summary-item">
+              <div class="sum-val" style="color:var(--purple)">${summary.active_students || 0}</div>
+              <div class="sum-lbl">활성 학습자</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 학생별 상세 -->
+        <div class="section-box">
+          <div class="section-header">
+            <h3 class="section-title"><i class="fas fa-users"></i> 학생별 AI 맞춤학습 진도</h3>
+            <div style="font-size:12px;color:var(--gray-500);">행 클릭 시 영역별 정답률 상세</div>
+          </div>
+          ${sorted.length === 0 ? '<div class="empty-state"><i class="fas fa-user-slash"></i><h3>학생이 없습니다</h3></div>' : `
+          <div style="overflow-x:auto;">
+            <table class="data-table">
+              <thead><tr>
+                <th>학생</th>
+                <th style="text-align:center;cursor:pointer;" onclick="setSelfLearnSort('completed_nodes')">완료노드${arrow('completed_nodes')}</th>
+                <th style="text-align:center;cursor:pointer;" onclick="setSelfLearnSort('total_solved')">풀이수${arrow('total_solved')}</th>
+                <th style="text-align:center;cursor:pointer;" onclick="setSelfLearnSort('avg_accuracy')">정답률${arrow('avg_accuracy')}</th>
+                <th style="text-align:center;cursor:pointer;" onclick="setSelfLearnSort('total_time_minutes')">학습시간${arrow('total_time_minutes')}</th>
+                <th style="text-align:center;cursor:pointer;" onclick="setSelfLearnSort('streak')">연속학습${arrow('streak')}</th>
+                <th style="text-align:center;cursor:pointer;" onclick="setSelfLearnSort('last_activity_at')">최근활동${arrow('last_activity_at')}</th>
+              </tr></thead>
+              <tbody>
+                ${sorted.map((s, i) => {
+                  const avatarColors = ['#2563eb','#10b981','#f59e0b','#ef4444','#8b5cf6','#ec4899','#06b6d4','#f97316'];
+                  const ac = accColor(s.avg_accuracy);
+                  const completedPct = Math.min(100, Math.round((s.completed_nodes / 30) * 100));
+                  return `
+                    <tr style="cursor:pointer;" onclick="showStudentSelfLearnDetail(${s.user_id})">
+                      <td><div style="display:flex;align-items:center;gap:8px;">
+                        <div class="student-avatar" style="background:${avatarColors[i%avatarColors.length]}">${escHtml((s.name||'?').charAt(0))}</div>
+                        <div><strong>${escHtml(s.name)}</strong><div style="font-size:11px;color:var(--gray-500);">${escHtml(s.username)}</div></div>
+                      </div></td>
+                      <td style="text-align:center;">
+                        <div style="display:flex;align-items:center;gap:8px;justify-content:center;">
+                          <div class="progress-bar-bg" style="width:60px;"><div class="progress-bar-fill" style="width:${completedPct}%;background:var(--success);"></div></div>
+                          <strong>${s.completed_nodes}</strong>
+                          ${s.in_progress_nodes ? `<span style="font-size:11px;color:var(--gray-500);">+${s.in_progress_nodes} 진행</span>` : ''}
+                        </div>
+                      </td>
+                      <td style="text-align:center;">${s.total_solved}<span style="color:var(--gray-500);font-size:11px;">문</span></td>
+                      <td style="text-align:center;">
+                        <span style="padding:3px 10px;border-radius:12px;font-size:12px;font-weight:600;color:${ac};background:${ac}15;">${s.avg_accuracy}%</span>
+                      </td>
+                      <td style="text-align:center;">${s.total_time_minutes}<span style="color:var(--gray-500);font-size:11px;">분</span></td>
+                      <td style="text-align:center;">${s.streak >= 3 ? '🔥' : ''}${s.streak}<span style="color:var(--gray-500);font-size:11px;">일</span></td>
+                      <td style="text-align:center;font-size:12px;color:var(--gray-600);">${fmtDate(s.last_activity_at)}</td>
+                    </tr>
+                  `;
+                }).join('')}
+              </tbody>
+            </table>
+          </div>`}
+          <div class="insight-box" style="margin-top:16px;">
+            <strong>📋 AI 맞춤학습 데이터 안내</strong>
+            • 완료노드: 학습맵에서 완료/숙달 처리된 차시 수<br>
+            • 풀이수/정답률: 모든 풀이 시도 누적 (자기학습·진단·문제집 포함)<br>
+            • 학습시간: 영상 시청 + 일일학습 누적 시간<br>
+            • 연속학습: 최근 30일 내 학습 활동이 있던 연속된 일자
+          </div>
+        </div>
+      `;
+    }
+
+    function showStudentSelfLearnDetail(userId) {
+      const s = _selfLearnState.rows.find(r => r.user_id === userId);
+      if (!s) return;
+      // 모달
+      let modal = document.getElementById('selfLearnDetailModal');
+      if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'selfLearnDetailModal';
+        modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;z-index:10000;';
+        modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
+        document.body.appendChild(modal);
+      }
+      const accColor = (a) => a >= 80 ? '#10b981' : a >= 60 ? '#f59e0b' : '#ef4444';
+      modal.innerHTML = `
+        <div style="background:white;border-radius:16px;padding:28px;max-width:600px;width:90%;max-height:80vh;overflow:auto;box-shadow:0 10px 40px rgba(0,0,0,0.2);">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
+            <h2 style="font-size:20px;font-weight:700;">🎯 ${escHtml(s.name)} — AI 맞춤학습 상세</h2>
+            <button onclick="document.getElementById('selfLearnDetailModal').remove()" style="background:none;border:none;font-size:24px;cursor:pointer;color:#666;">×</button>
+          </div>
+          <div class="summary-grid" style="grid-template-columns:repeat(4,1fr);">
+            <div class="summary-item"><div class="sum-val" style="color:#10b981">${s.completed_nodes}</div><div class="sum-lbl">완료노드</div></div>
+            <div class="summary-item"><div class="sum-val" style="color:${accColor(s.avg_accuracy)}">${s.avg_accuracy}%</div><div class="sum-lbl">정답률</div></div>
+            <div class="summary-item"><div class="sum-val" style="color:#f59e0b">${s.total_time_minutes}분</div><div class="sum-lbl">학습시간</div></div>
+            <div class="summary-item"><div class="sum-val" style="color:#8b5cf6">${s.streak}일</div><div class="sum-lbl">연속학습</div></div>
+          </div>
+          <h3 style="font-size:14px;font-weight:600;margin:20px 0 10px;">영역별 정답률</h3>
+          ${(s.areas && s.areas.length) ? s.areas.map(a => `
+            <div style="margin-bottom:10px;">
+              <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px;">
+                <strong>${escHtml(a.area || '미분류')}</strong>
+                <span style="color:${accColor(a.accuracy)};font-weight:600;">${a.accuracy}% (${a.correct}/${a.total})</span>
+              </div>
+              <div class="progress-bar-bg" style="width:100%;height:10px;"><div class="progress-bar-fill" style="width:${a.accuracy}%;background:${accColor(a.accuracy)};"></div></div>
+            </div>
+          `).join('') : '<p style="color:#888;font-size:13px;">아직 풀이 기록이 없습니다.</p>'}
+          <p style="margin-top:16px;font-size:12px;color:#888;">최근 활동: ${s.last_activity_at ? new Date(s.last_activity_at).toLocaleString('ko-KR') : '없음'}</p>
+        </div>
+      `;
     }
 
     function switchAnalyticsTab(btn, tabId) {
