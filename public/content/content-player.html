@@ -188,6 +188,7 @@
     let graded = false;
     let results = [];      // [{correct: true/false/null, score, maxScore}]
     let reviewBanner = null;
+    let solveStartTime = null; // 풀이 시작 시각(epoch ms)
     // 풀이 모드: auto=1 또는 solve=1 파라미터가 있어야 제출 가능 (공개콘텐츠 미리보기 차단)
     let solveMode = params.get('auto') === '1' || params.get('solve') === '1';
     // 임베드 모드: 오늘의 학습 등 상위 페이지에서 iframe으로 삽입된 경우
@@ -306,6 +307,8 @@
         updateModeNotice();
         renderNav();
         showQuestion(0);
+        // 풀이 시작 시각 기록 (시간 측정용)
+        solveStartTime = Date.now();
 
         // auto=1 파라미터가 있으면 "기타(미지정)" 문제집에 자동 추가
         if (params.get('auto') === '1') {
@@ -739,12 +742,14 @@
               explanation: q.explanation || null
             };
           });
+          const timeTakenSec = solveStartTime ? Math.round((Date.now() - solveStartTime) / 1000) : 0;
           window.parent.postMessage({
             type: 'dacheum:quiz-graded',
             contentId: Number(contentId),
             score: pct, totalScore, maxTotal,
             correct: correctCount, wrong: wrongCount, totalQ: questions.length,
-            answers, detail
+            answers, detail,
+            timeTakenSec
           }, '*');
         } catch(e){ console.warn('postMessage fail', e); }
       }

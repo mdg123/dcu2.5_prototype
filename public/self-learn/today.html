@@ -1889,6 +1889,20 @@
       btn.textContent = btn.dataset.period === 'weekly' ? '주간' : '월간';
     }
 
+    // P1 보완(F-P1-1): 페르소나 자동 전환 방지 — 학생 시점 보장
+    // common-nav가 /api/auth/me를 캐시 무효화 후 로드하지만, 페이지 진입 시점에
+    // 다른 role 데이터가 일시 표출되지 않도록 한 번 더 강제 검증한다.
+    (async () => {
+      try {
+        const r = await fetch('/api/auth/me', { cache: 'no-store', headers: { 'Cache-Control': 'no-cache' } });
+        const j = await r.json();
+        if (!j.success || !j.user) {
+          window.location.replace('/login.html');
+          return;
+        }
+        window.dacheumUser = j.user;
+      } catch (e) { /* 네트워크 오류 시 진행 */ }
+    })();
     loadData();
 
     // ===== 감정 체크 상태 표시 (별도 페이지로 분리됨) =====

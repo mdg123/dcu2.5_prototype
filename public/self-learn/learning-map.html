@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="ko">
 <head>
   <meta charset="UTF-8">
@@ -28,8 +28,27 @@
       --status-available-ink:var(--gray-400,#94a3b8);
       /* ===== 공통 UI 글자 크기 (today.html 과 동일한 스케일) ===== */
       --fs-xs:12px; --fs-sm:13px; --fs-base:14px; --fs-md:15px; --fs-lg:16px; --fs-xl:18px; --fs-2xl:22px; --fs-3xl:28px;
+      /* P1 보완: KPI 전용 토큰 — h1(28-30) 정렬 */
+      --fs-kpi:28px;
       /* Legacy 호환 */
       --font-xs:var(--fs-xs); --font-sm:var(--fs-sm); --font-base:var(--fs-base); --font-md:var(--fs-lg); --font-lg:var(--fs-2xl); --font-xl:var(--fs-3xl);
+
+      /* P1 보완: 영역색 4종(스펙 §F-P1-3) */
+      --c-area-num:#2563eb;   /* 수와 연산 */
+      --c-area-rel:#8b5cf6;   /* 변화와 관계 */
+      --c-area-geo:#10b981;   /* 도형과 측정 */
+      --c-area-data:#f59e0b;  /* 자료와 가능성 */
+
+      /* 차시 진행률 4상태 (스펙 §F-P1-3) */
+      --c-lesson-pending:#9ca3af;  /* 시작 전 회색 */
+      --c-lesson-progress:#f59e0b; /* 진행 중 주황 */
+      --c-lesson-low:#ef4444;      /* 정답률 < 60% 빨강 */
+      --c-lesson-pass:#10b981;     /* 정답률 ≥ 60% 초록 */
+
+      /* 모달 z-index 표준 (CLAUDE.md ≥10000) */
+      --z-modal:11000;
+      --z-modal-backdrop:10999;
+      --z-drawer:10800;
 
       /* Legacy tokens (호환) */
       --primary:#4A7CFF; --primary-light:#E8F0FF; --primary-dark:#3A5FCC;
@@ -59,10 +78,12 @@
 
     /* ===== Dashboard Cards ===== */
     .dashboard-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:18px}
-    .dash-card{background:#fff;border-radius:var(--radius-lg);padding:16px 18px;box-shadow:var(--shadow-sm);display:flex;align-items:center;gap:14px}
-    .dash-icon{width:44px;height:44px;border-radius:var(--radius-md);display:flex;align-items:center;justify-content:center;font-size:var(--fs-xl);color:#fff;flex-shrink:0}
-    .dash-label{font-size:var(--fs-xs);color:var(--gray-500);margin-bottom:3px}
-    .dash-value{font-size:24px;font-weight:700;line-height:1.1}
+    .dash-card{background:#fff;border-radius:var(--radius-lg);padding:18px 20px;box-shadow:var(--shadow-sm);display:flex;align-items:center;gap:14px}
+    .dash-icon{width:48px;height:48px;border-radius:var(--radius-md);display:flex;align-items:center;justify-content:center;font-size:var(--fs-xl);color:#fff;flex-shrink:0}
+    .dash-label{font-size:var(--fs-sm);color:var(--gray-500);margin-bottom:3px;font-weight:500}
+    /* P1 보완: KPI 28px (h1 정렬) — 24px → 28px */
+    .dash-value{font-size:var(--fs-kpi);font-weight:700;line-height:1.15;color:#111827;letter-spacing:-0.02em}
+    .dash-value--empty{color:#9ca3af;font-weight:600}
     .dash-sub{font-size:var(--fs-xs);color:var(--gray-400);margin-top:2px}
 
     /* ===== Top Tabs ===== */
@@ -267,8 +288,9 @@
     /* Drawer → Center Modal */
     .drawer-overlay{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:10020;display:none;backdrop-filter:blur(2px)}
     .drawer-overlay.show{display:block}
-    .drawer{position:fixed;top:24px;left:50%;width:calc(100% - 48px);max-width:940px;height:calc(100vh - 48px);max-height:calc(100vh - 48px);background:#fff;border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.25);z-index:10021;opacity:0;pointer-events:none;transform:translateX(-50%) scale(.95);transition:opacity .2s ease,transform .2s ease;display:flex;flex-direction:column;overflow:hidden;border-top:4px solid var(--primary)}
-    .drawer.show{opacity:1;pointer-events:auto;transform:translateX(-50%) scale(1)}
+    /* F-P0-NEW-1 fix: translateX(-50%) + scale() 조합이 일부 환경에서 left 위치 손실을 유발 → translate-x를 분리하지 않고 left/right margin auto로 가운데 정렬 */
+    .drawer{position:fixed;top:24px;left:0;right:0;margin-left:auto;margin-right:auto;width:calc(100% - 48px);max-width:940px;height:calc(100vh - 48px);max-height:calc(100vh - 48px);background:#fff;border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.25);z-index:10021;opacity:0;pointer-events:none;transform:scale(.95);transform-origin:center top;transition:opacity .2s ease,transform .2s ease;display:flex;flex-direction:column;overflow:hidden;border-top:4px solid var(--primary)}
+    .drawer.show{opacity:1;pointer-events:auto;transform:scale(1)}
     .drawer-header{padding:18px 22px 14px;display:flex;align-items:flex-start;justify-content:space-between;gap:16px;border-bottom:1px solid var(--gray-100)}
     .drawer-head-info{flex:1}
     .drawer-badges{display:flex;gap:6px;margin-bottom:6px;flex-wrap:wrap}
@@ -283,8 +305,18 @@
     .drawer-badge.status.completed{background:var(--success)}
     .drawer-title{font-size:22px;font-weight:700;color:var(--gray-800);margin-bottom:6px}
     .drawer-subtitle{font-size:13px;color:var(--gray-500)}
-    .drawer-close{width:34px;height:34px;background:var(--gray-100);border:none;border-radius:50%;cursor:pointer;color:var(--gray-600);display:flex;align-items:center;justify-content:center;font-size:var(--fs-base);flex-shrink:0}
+    /* P1 보완(F-P1-5): 32px 안전영역 + 좌측 8px 여백 + 배지 겹침 금지 */
+    .drawer-close{width:34px;height:34px;background:var(--gray-100);border:none;border-radius:50%;cursor:pointer;color:var(--gray-600);display:flex;align-items:center;justify-content:center;font-size:var(--fs-base);flex-shrink:0;margin-left:8px;position:relative;z-index:1}
     .drawer-close:hover{background:var(--gray-200)}
+    .drawer-close:focus-visible{outline:2px solid #2563eb;outline-offset:2px}
+    /* 공통 모달 × 안전영역(F-P1-5): 모든 모달 우상단 32px, 좌측 40px 안에 배지 금지 */
+    .modal-close-safe{position:absolute;top:12px;right:12px;width:32px;height:32px;border-radius:8px;display:grid;place-items:center;color:#6B7280;background:transparent;border:0;cursor:pointer;z-index:2}
+    .modal-close-safe:hover{background:#F3F4F6;color:#111827}
+    .modal-close-safe:focus-visible{outline:2px solid #2563eb;outline-offset:2px}
+    /* z-index 표준 (CLAUDE.md ≥10000) */
+    #diagModal{z-index:var(--z-modal)!important}
+    #cpIframeModal{z-index:var(--z-modal)!important}
+    .drawer{z-index:var(--z-drawer)}
     .drawer-tabs{display:flex;gap:4px;padding:10px 22px;border-bottom:1px solid var(--gray-100);background:var(--gray-50)}
     .drawer-tab{padding:8px 18px;border:none;background:none;font-size:14px;font-weight:600;color:var(--gray-500);cursor:pointer;border-radius:var(--radius-sm);font-family:inherit;display:flex;align-items:center;gap:5px}
     .drawer-tab.active{background:#fff;color:var(--primary);font-weight:600;box-shadow:var(--shadow-sm)}
@@ -326,14 +358,24 @@
     .btn-mini.ghost{background:var(--gray-100);color:var(--gray-600)}
     .btn-mini.report{background:#fff;color:var(--accent);border:1px solid var(--accent-light)}
 
-    .drawer-footer{padding:14px 22px;border-top:1px solid var(--gray-100);background:#fff;display:flex;gap:10px}
-    .dual-btn{flex:1;padding:14px 16px;border:2px solid;border-radius:var(--radius-md);font-size:15px;font-weight:700;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:8px;transition:.15s}
-    .dual-btn.diag{border-color:var(--warning);background:linear-gradient(135deg,#FFF8E0,#FFE8B0);color:#8B6200}
-    .dual-btn.diag:hover{background:linear-gradient(135deg,#FFE8B0,#FFD880)}
-    .dual-btn.direct{border-color:var(--primary);background:linear-gradient(135deg,#E8F0FF,#D0DFFF);color:var(--primary-dark)}
-    .dual-btn.direct:hover{background:linear-gradient(135deg,#D0DFFF,#B8CFFF)}
-    .dual-btn.bookmark{border-color:var(--secondary);background:#fff;color:var(--secondary);flex:0 0 auto;padding:14px 18px}
-    .dual-btn.bookmark.active{background:var(--secondary);color:#fff}
+    /* P1 보완(F-P1-4): CTA 위계 — Primary 1개만 강조, 좌측 link, 우측 outline + solid */
+    .drawer-footer{padding:14px 22px;border-top:1px solid var(--gray-100);background:#fff;display:flex;gap:10px;align-items:center;justify-content:space-between}
+    .dual-btn{padding:12px 18px;border:1.5px solid;border-radius:var(--radius-md);font-size:var(--fs-lg);font-weight:600;cursor:pointer;font-family:inherit;display:inline-flex;align-items:center;justify-content:center;text-align:center;gap:8px;transition:.15s;line-height:1.3;white-space:nowrap}
+    .dual-btn > * { display:inline-flex; align-items:center; justify-content:center; }
+    /* Secondary outline — 진단하기 (노랑은 "주의/진단 중" 의미로 한정, CTA에는 outline) */
+    .dual-btn.diag{border-color:#2563eb;background:#fff;color:#2563eb}
+    .dual-btn.diag:hover{background:#eff6ff;transform:translateY(-1px)}
+    /* Primary solid — 첫 차시 바로 학습(한 화면 강한 컬러 1개) */
+    .dual-btn.direct{border-color:#2563eb;background:#2563eb;color:#fff;box-shadow:0 1px 2px rgba(37,99,235,.18)}
+    .dual-btn.direct:hover{background:#1d4ed8;border-color:#1d4ed8;transform:translateY(-1px);box-shadow:0 4px 12px rgba(37,99,235,.25)}
+    /* Tertiary link — 학습목록 추가 */
+    .dual-btn.bookmark{border-color:transparent;background:transparent;color:#2563eb;flex:0 0 auto;padding:8px 4px;font-size:var(--fs-md);font-weight:500;margin-right:auto}
+    .dual-btn.bookmark:hover{color:#1d4ed8;text-decoration:underline}
+    .dual-btn.bookmark.active{color:#7C4DFF}
+    .dual-btn.bookmark.active:hover{color:#6B3FC7}
+    .dual-btn:focus-visible{outline:2px solid #2563eb;outline-offset:2px}
+    /* 우측 그룹(진단하기 + 첫 차시) */
+    .drawer-footer .footer-cta-group{display:flex;gap:10px;align-items:center}
 
     /* Modal (problems, report, diag start picker) */
     .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:10030;display:none;padding:24px;overflow-y:auto;-webkit-overflow-scrolling:touch}
@@ -466,6 +508,13 @@
     .rank-list{list-style:none;display:flex;flex-direction:column;gap:6px}
     .rank-item{display:flex;align-items:center;gap:12px;padding:10px 14px;background:var(--gray-50);border-radius:var(--radius-sm)}
     .rank-item.me{background:var(--primary-light);border:1px solid var(--primary)}
+    /* P1 보완(F-P1-6): 학습 랭킹 빈 상태 카드 */
+    .ranking-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:56px 24px;background:#fff;border:1px dashed #E5E7EB;border-radius:var(--radius-lg);text-align:center;gap:10px}
+    .ranking-empty .re-icon{font-size:56px;color:#FBBF24;margin-bottom:6px}
+    .ranking-empty .re-title{font-size:var(--fs-xl);font-weight:700;color:#111827}
+    .ranking-empty .re-desc{font-size:var(--fs-md);color:#6B7280;line-height:1.5;max-width:360px}
+    .ranking-empty .re-cta{margin-top:8px;display:inline-flex;align-items:center;gap:6px;padding:10px 18px;border:1.5px solid #2563eb;background:#fff;color:#2563eb;border-radius:10px;font-size:var(--fs-lg);font-weight:600;cursor:pointer;font-family:inherit}
+    .ranking-empty .re-cta:hover{background:#eff6ff;transform:translateY(-1px)}
     .rank-num{width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:var(--fs-sm);font-weight:700;flex-shrink:0}
     .rank-num.gold{background:linear-gradient(135deg,#FFD700,#FFA500);color:#fff}
     .rank-num.silver{background:linear-gradient(135deg,#C0C0C0,#A0A0A0);color:#fff}
@@ -1073,12 +1122,12 @@ function normalizeSubjectArea(node) {
   return node?.area || node?.subject || '';
 }
 
-// 영역별 색상 팔레트 (테두리 색)
+// 영역별 색상 팔레트 (테두리 색) — P1 보완(F-P1-3): CSS variable과 동일 값
 const AREA_COLOR_FIXED = {
-  '수와 연산': '#3B82F6',      // 파랑
-  '변화와 관계': '#8B5CF6',    // 보라
-  '도형과 측정': '#10B981',    // 녹색
-  '자료와 가능성': '#F59E0B',  // 주황
+  '수와 연산': '#2563eb',      // 파랑 (--c-area-num)
+  '변화와 관계': '#8b5cf6',    // 보라 (--c-area-rel)
+  '도형과 측정': '#10b981',    // 녹색 (--c-area-geo)
+  '자료와 가능성': '#f59e0b',  // 주황 (--c-area-data)
   '문자와 식': '#EC4899',      // 핑크
   '함수': '#06B6D4',           // 청록
   '기하': '#14B8A6',           // 틸
@@ -1380,15 +1429,39 @@ async function loadDashboard() {
   if (!d) return;
   dashboardCache = d;
   // 공통 필드 정규화 — 두 화면이 같은 소스를 참조
-  const completed = d.completed_nodes ?? d.completedNodes ?? 0;
-  const totalNodes = d.total_nodes ?? d.totalNodes ?? 0;
-  const pct = totalNodes ? Math.round(completed / totalNodes * 100) : (d.progress_pct ?? 0);
-  $('dashCompleted').textContent = completed;
-  $('dashCompletedSub').textContent = `전체 ${totalNodes}개`;
-  $('dashProgress').textContent = pct + '%';
-  $('dashProgressSub').textContent = `${d.in_progress_nodes ?? d.inProgressNodes ?? 0}개 진행 중`;
-  $('dashTime').textContent = (d.total_time_minutes ?? d.totalTimeMinutes ?? 0) + '분';
-  if (d.rank) { $('dashRank').textContent = d.rank + '위'; }
+  const completed = d.completedNodes ?? d.completed_nodes ?? 0;
+  const totalNodes = d.totalNodes ?? d.total_nodes ?? 0;
+  const pct = (typeof d.progressPercent === 'number' ? d.progressPercent
+              : (typeof d.progress_percent === 'number' ? d.progress_percent
+              : (totalNodes ? Math.round(completed / totalNodes * 100) : 0)));
+  const inProg = d.inProgressNodes ?? d.in_progress_nodes ?? 0;
+  const minutes = d.total_time_minutes ?? d.totalTimeMinutes ?? 0;
+  const rank = d.rank;
+  const totalUsers = d.total_users || 0;
+
+  // P1 보완: 빈 상태(0/null)는 em-dash + 안내 sub로 통일
+  const setKpi = (id, val, isEmpty, subId, subText) => {
+    const el = $(id); const sub = document.getElementById(subId);
+    el.textContent = isEmpty ? '—' : val;
+    el.classList.toggle('dash-value--empty', !!isEmpty);
+    if (sub) sub.textContent = subText;
+  };
+  setKpi('dashCompleted', completed, !completed, 'dashCompletedSub',
+    totalNodes ? `전체 ${totalNodes}개` : '기록이 쌓이면 표시됩니다');
+  setKpi('dashProgress', pct + '%', !pct, 'dashProgressSub',
+    inProg ? `${inProg}개 진행 중` : '학습 시작 전');
+  // 시간
+  let timeStr = '0분';
+  if (minutes >= 60) { const h = Math.floor(minutes / 60); const m = minutes % 60; timeStr = `${h}시간 ${m}분`; }
+  else if (minutes > 0) timeStr = minutes + '분';
+  setKpi('dashTime', timeStr, !minutes, 'dashTimeSub',
+    minutes ? '이번 주' : '기록이 쌓이면 표시됩니다');
+  // 랭킹: 응답에 있으면 N위, 없으면 em-dash
+  if (rank && rank > 0) {
+    setKpi('dashRank', rank + '위', false, 'dashRankSub', totalUsers > 0 ? `전체 ${totalUsers}명` : '순위');
+  } else {
+    setKpi('dashRank', '—', true, 'dashRankSub', '아직 데이터가 없어요');
+  }
 }
 
 /* =========================================================
@@ -2569,11 +2642,20 @@ async function loadUnitLessonsInto(container, unitId) {
     const qc = l.problems_count ?? l.question_count ?? 0;
     const st = l.status || l.my_status || inferStatus(lid) || 'not_started';
     const pct = Math.max(0, Math.min(100, parseInt(l.progress_percent ?? l.progressPercent ?? 0) || 0));
-    // 상태별 색상
-    const statusColor = st === 'completed' || st === 'mastered' ? '#10B981'
-                       : st === 'in_progress' || st === 'video_watched' || st === 'problem_solved' ? '#F59E0B'
-                       : '#9CA3AF';
-    const barFillColor = pct >= 100 ? '#10B981' : pct > 0 ? '#3B82F6' : '#E5E7EB';
+    // P1 보완(F-P1-3): 차시 진행률 4상태 색 코딩
+    //   시작 전(회색) / 진행 중(주황) / 정답률<60% (빨강) / 정답률≥60% (초록)
+    const accRaw = l.accuracy ?? l.correct_rate ?? l.avg_accuracy;
+    const accPct = accRaw == null ? null : (accRaw <= 1 ? Math.round(accRaw * 100) : Math.round(accRaw));
+    let lessonColor;
+    if (st === 'completed' || st === 'mastered' || pct >= 100) {
+      lessonColor = (accPct != null && accPct < 60) ? '#ef4444' : '#10b981';
+    } else if (pct > 0 || st === 'in_progress' || st === 'video_watched' || st === 'problem_solved') {
+      lessonColor = (accPct != null && accPct < 60) ? '#ef4444' : '#f59e0b';
+    } else {
+      lessonColor = '#9ca3af';
+    }
+    const statusColor = lessonColor;
+    const barFillColor = pct > 0 ? lessonColor : '#E5E7EB';
     const statusLabel = statusLabelShort(st);
     const titleEsc = JSON.stringify(title).replace(/"/g,'&quot;');
     return `<div class="lesson-card-v3" data-node-id="${escHtml(lid)}" tabindex="0"
@@ -2961,8 +3043,10 @@ function renderProblemsHtml(n) {
     const lastCorrect = p.last_correct;
     const totalAttempts = p.total_attempts ?? 0;
     const distinctUsers = p.distinct_users ?? 0;
-    const accuracy = Math.round((p.correct_rate ?? p.accuracy ?? 0) * 100) / 100;
-    const accuracyPct = accuracy <= 1 ? Math.round(accuracy * 100) : Math.round(accuracy);
+    // correct_rate는 백엔드 0~1 비율로 통일됨(레거시 0~100 호환).
+    const rawRate = Number(p.correct_rate ?? p.accuracy ?? 0);
+    const accuracyPct = rawRate <= 1 ? Math.round(rawRate * 100) : Math.round(rawRate);
+    const accuracy = rawRate;
 
     let statusTxt = '미풀이';
     let statusCls = '';
@@ -3020,15 +3104,46 @@ function handleProblemSolveClick(problem) {
 }
 
 // 채움콘텐츠의 content-player.html을 iframe 모달로 표시
+// F-P0-NEW-4: 호출부가 (url, title) 잘못된 순서로 호출하는 케이스 방어 —
+//   - 첫 인자가 URL/경로 문자열이면 id 파라미터 추출 시도
+//   - 숫자/숫자형 문자열만 contentId 로 인정, 그 외는 경고 후 중단
+//   - 두 번째 인자가 객체이면 problem 으로 처리 (nodeId 미지정으로 간주)
 function openContentPlayerModal(contentId, nodeId, problem) {
+  // 인자 정규화
+  if (typeof contentId === 'string' && (contentId.indexOf('/') >= 0 || contentId.indexOf('?') >= 0)) {
+    try {
+      const u = new URL(contentId, location.origin);
+      const idParam = u.searchParams.get('id');
+      if (idParam) contentId = idParam;
+      else { console.warn('[openContentPlayerModal] URL에서 id 추출 실패:', contentId); return; }
+    } catch (e) {
+      console.warn('[openContentPlayerModal] 잘못된 contentId(URL 파싱 실패):', contentId);
+      return;
+    }
+  }
+  // 두 번째 인자가 객체이면 problem 으로 간주 (옛 시그니처 호환)
+  if (nodeId && typeof nodeId === 'object' && !problem) {
+    problem = nodeId;
+    nodeId = problem.nodeId || problem._nodeId || null;
+  }
+  // contentId 가 객체면 id 추출
+  if (contentId && typeof contentId === 'object') {
+    const obj = contentId;
+    contentId = obj.id || obj.content_id || obj.contentId;
+    if (!problem) problem = obj;
+  }
+  if (!contentId || (typeof contentId !== 'number' && !/^\d+$/.test(String(contentId)))) {
+    console.warn('[openContentPlayerModal] 유효하지 않은 contentId:', contentId);
+    return;
+  }
   // 모달이 이미 있으면 재사용
   let modal = document.getElementById('cpIframeModal');
   if (!modal) {
     modal = document.createElement('div');
     modal.id = 'cpIframeModal';
-    modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.65);z-index:10100;display:flex;align-items:center;justify-content:center;padding:20px';
+    modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.65);z-index:10100;display:flex;align-items:center;justify-content:center';
     modal.innerHTML = `
-      <div style="background:#fff;width:100%;max-width:1100px;height:calc(100vh - 40px);border-radius:14px;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,0.4)">
+      <div style="background:#fff;width:90vw;height:90vh;border-radius:14px;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,0.4)">
         <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 18px;border-bottom:1px solid #E5E7EB;background:#F9FAFB;flex-shrink:0">
           <div style="display:flex;align-items:center;gap:10px">
             <i class="fas fa-clipboard-question" style="color:#4F46E5;font-size:18px"></i>
@@ -3044,8 +3159,8 @@ function openContentPlayerModal(contentId, nodeId, problem) {
   const titleEl = document.getElementById('cpIframeTitle');
   if (titleEl) titleEl.textContent = problem?.title || '문제 풀기';
   const iframe = document.getElementById('cpIframe');
-  // nodeId 전달 — 플레이어가 풀이 결과를 self-learn에 매핑할 수 있게
-  const params = new URLSearchParams({ id: String(contentId) });
+  // nodeId 전달 + auto=1(바로 풀기) + embed=1(임베드 모드, 부가 버튼 숨김)
+  const params = new URLSearchParams({ id: String(contentId), auto: '1', embed: '1' });
   if (nodeId) params.set('nodeId', nodeId);
   iframe.src = '/content/content-player.html?' + params.toString();
   modal.style.display = 'flex';
@@ -3062,6 +3177,9 @@ function openContentPlayerModal(contentId, nodeId, problem) {
           fetchApi('/api/self-learn/problem-attempt', {
             method: 'POST',
             body: JSON.stringify({ contentId: cid, isCorrect, selectedAnswer: null, timeTaken: 0, nodeId: curNodeId })
+          }).then(() => {
+            // F-P0-NEW-2: 풀이 후 대시보드 카드/랭킹 즉시 갱신
+            try { dashboardCache = null; loadDashboard(); loadRanking(); } catch(_){}
           });
         } catch(_){}
         // 드로어 카드 낙관적 갱신
@@ -3096,6 +3214,8 @@ function closeContentPlayerModal() {
     const iframe = document.getElementById('cpIframe');
     if (iframe) iframe.src = '';
   }
+  // F-P0-NEW-2: 콘텐츠 플레이어 닫을 때 대시보드 갱신 (postMessage 누락 케이스 fallback)
+  try { dashboardCache = null; loadDashboard(); loadRanking(); } catch(_){}
 }
 
 function renderDrawerFooter() {
@@ -3104,12 +3224,15 @@ function renderDrawerFooter() {
   const isUnit = Number(n._level) === 2;
   const directLabel = isUnit ? '📖 첫 차시 바로 학습' : '📖 바로 학습하기';
   const directCall = isUnit ? `startUnitFirstLesson('${n._id}')` : `startDirectLearning('${n._id}')`;
+  // P1 보완(F-P1-4): CTA 위계 — 좌측 link(학습목록), 우측 outline(진단)+primary(바로 학습)
   $('drawerFooter').innerHTML = `
-    <button class="dual-btn diag" onclick="startDiagnosisFromNode('${n._id}')">🔍 진단하기</button>
-    <button class="dual-btn direct" onclick="${directCall}">${directLabel}</button>
     <button class="dual-btn bookmark ${inList ? 'active' : ''}" onclick="toggleLearningList('${n._id}')">
-      <i class="fas ${inList ? 'fa-bookmark' : 'fa-bookmark'}"></i> ${inList ? '목록에서 제거' : '학습목록 추가'}
-    </button>`;
+      <i class="fas fa-bookmark"></i> ${inList ? '목록에서 제거' : '학습목록 추가'}
+    </button>
+    <div class="footer-cta-group">
+      <button class="dual-btn diag" onclick="startDiagnosisFromNode('${n._id}')">🔍 진단하기</button>
+      <button class="dual-btn direct" onclick="${directCall}">${directLabel} <i class="fas fa-arrow-right" style="font-size:13px"></i></button>
+    </div>`;
 }
 
 // 단원에서 "첫 차시 바로 학습": 콘텐츠 있는 첫 차시로 전환 후 startDirectLearning
@@ -3293,6 +3416,8 @@ async function submitSolve() {
         applyStatusToNodeUI(currentSolveNodeId, ns, { pulse: true });
       }
     }
+    // F-P0-NEW-2: 대시보드 카드/랭킹 즉시 갱신 — 캐시 무효화 후 재로드
+    try { dashboardCache = null; loadDashboard(); loadRanking(); } catch(_){}
   });
 
   // §4.3: 드로어 카드 즉시 낙관적 업데이트 (서버 응답 기다리지 않음)
@@ -3661,26 +3786,470 @@ async function startDiagnosisBySubject() {
   renderDiagRunning();
 }
 
+// =========================================================================
+// 진단하기 — 새 흐름 (2025-04 결정사항 반영)
+// • 노드당 2문항, 통과 2/2
+// • 종료: 연속 2회 정답 OR 최대 3단계
+// • 실패 시: 가장 깊이 통과한 노드부터 학습 + 학습목록 자동 추가
+// • 선수: prerequisites 관계, 문항: EBS 2개 중 무작위
+// =========================================================================
+let diagSession = null;
+
 async function startDiagnosisFromNode(nodeId) {
-  closeDrawer();
-  const node = nodeById[nodeId] || {};
-  let data = await fetchApi('/api/self-learn/diagnosis/start', {
-    method: 'POST',
-    body: JSON.stringify({ targetNodeId: nodeId, subject: normalizeSubjectArea(node), grade: node.grade })
-  });
-  if (!data) {
-    // Fallback: build synthetic diag state from local prereqs (no placeholder questions)
-    data = { sessionId: Date.now(), targetNode: node, queue: (node.prerequisites || []).map(p => ({ id: p.id || p, title: p.title || p.name || p })), question: null };
-    showToast('서버 진단 세션 생성 실패, 대기 상태로 진입합니다.', 'fa-info-circle');
+  const targetNode = await loadNodeForDiag(nodeId);
+  if (!targetNode) { showToast('노드 정보를 불러올 수 없습니다.', 'fa-exclamation-circle'); return; }
+  diagSession = {
+    targetNodeId: nodeId,
+    targetNode,
+    currentNodeId: nodeId,           // 진단 중인 노드
+    currentDepth: 0,                 // 현재 진단 깊이 (0=목표, 1=직속선수, 2=선수의선수, 3=최대)
+    history: [],                     // [{nodeId, title, score (0~2), passed}]
+    correctChain: 0,                 // 연속 정답 카운터 (전체 흐름)
+    questionsInNode: [],             // 현재 노드의 문항 풀
+    currentQuestionIdx: 0,           // 현재 노드 내 문항 인덱스
+    nodeCorrectCount: 0,             // 현재 노드 정답 수
+    finished: false
+  };
+  showDiagIntroModal();
+}
+
+async function loadNodeForDiag(nodeId) {
+  const data = await fetchApi('/api/self-learn/map/nodes/' + encodeURIComponent(nodeId));
+  return data?.node ? Object.assign({ _id: nodeId }, data, data.node) : null;
+}
+
+function showDiagIntroModal() {
+  ensureDiagModal();
+  diagResetBodyStyle();
+  const target = diagSession.targetNode;
+  const title = target.title || target.lesson_name || target.unit_name || '학습 노드';
+  $('diagModalBody').innerHTML = `
+    <div style="text-align:center;padding:24px 16px">
+      <div style="width:80px;height:80px;border-radius:50%;background:linear-gradient(135deg,#FEF3C7,#FDE68A);display:flex;align-items:center;justify-content:center;margin:0 auto 20px;font-size:36px">🔍</div>
+      <h2 style="font-size:22px;font-weight:800;color:#0F172A;margin:0 0 12px">학습 준비도 진단</h2>
+      <p style="font-size:15px;color:#475569;line-height:1.6;margin:0 0 8px">
+        <b style="color:#0F172A">"${escHtml(title)}"</b>을(를)<br>학습할 준비가 됐는지 진단합니다.
+      </p>
+      <p style="font-size:14px;color:#6B7280;margin:0 0 24px">
+        선수학습 노드에서 문제를 풀어 학습 출발점을 찾아드려요.
+      </p>
+      <div style="background:#F8FAFC;border:1px solid #E2E8F0;border-radius:12px;padding:14px 18px;text-align:left;font-size:13px;color:#475569;line-height:1.7;margin-bottom:24px">
+        <div><i class="fas fa-clipboard-check" style="color:#4F46E5;margin-right:6px"></i> 노드당 <b>2문항</b> · 모두 정답이면 통과</div>
+        <div><i class="fas fa-stairs" style="color:#10B981;margin-right:6px"></i> 막히면 한 단계 더 내려가서 진단 (최대 3단계)</div>
+        <div><i class="fas fa-clock" style="color:#F59E0B;margin-right:6px"></i> 약 3~6분 소요</div>
+      </div>
+    </div>
+  `;
+  $('diagModalActions').innerHTML = `
+    <button class="btn btn-ghost" onclick="closeDiagModal()">취소</button>
+    <button class="btn btn-primary" onclick="diagBeginAtCurrentNode()" style="min-width:140px;display:inline-flex;align-items:center;justify-content:center;gap:6px"><i class="fas fa-play"></i> 진단 시작</button>
+  `;
+  openDiagModal();
+}
+
+function ensureDiagModal() {
+  if (document.getElementById('diagModal')) return;
+  const m = document.createElement('div');
+  m.id = 'diagModal';
+  m.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,0.65);z-index:10100;display:none;align-items:center;justify-content:center';
+  m.innerHTML = `
+    <div style="background:#fff;width:90vw;height:90vh;border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.4);display:flex;flex-direction:column;overflow:hidden;position:relative">
+      <div id="diagModalHeader" style="display:flex;align-items:center;justify-content:space-between;padding:14px 20px;border-bottom:1px solid #E5E7EB;background:#F9FAFB;flex-shrink:0">
+        <div style="display:flex;align-items:center;gap:10px">
+          <i class="fas fa-stethoscope" style="color:#4F46E5;font-size:18px"></i>
+          <span style="font-size:15px;font-weight:700;color:#0F172A">진단하기</span>
+          <span id="diagModalProgress" style="font-size:12px;color:#6B7280;background:#EEF2FF;padding:2px 8px;border-radius:6px;display:none"></span>
+        </div>
+        <button onclick="closeDiagModal()" style="border:0;background:none;width:36px;height:36px;border-radius:8px;cursor:pointer;color:#6B7280;font-size:18px"><i class="fas fa-times"></i></button>
+      </div>
+      <div id="diagModalBody" style="flex:1;overflow-y:auto;padding:20px"></div>
+      <div id="diagModalActions" style="padding:12px 20px;border-top:1px solid #E5E7EB;background:#F9FAFB;flex-shrink:0;display:flex;justify-content:flex-end;gap:8px"></div>
+    </div>`;
+  document.body.appendChild(m);
+}
+
+function openDiagModal() { ensureDiagModal(); document.getElementById('diagModal').style.display = 'flex'; }
+// 진단 모달 body의 인라인 스타일을 기본(스크롤+패딩)으로 원복
+function diagResetBodyStyle() {
+  const body = document.getElementById('diagModalBody');
+  if (body) body.style.cssText = 'flex:1;overflow-y:auto;padding:20px';
+}
+function closeDiagModal() {
+  const m = document.getElementById('diagModal');
+  if (m) m.style.display = 'none';
+  // 메시지 리스너 정리
+  if (window._diagMsgListener) {
+    window.removeEventListener('message', window._diagMsgListener);
+    window._diagMsgListener = null;
   }
-  initDiagState(data, nodeId);
-  // 현재 노드가 비어 있으면 타겟 노드를 currentNode로 승격
-  if (!diagState.currentNode) diagState.currentNode = { id: nodeId, title: node._title || node.title || node.name };
-  switchToDiagnosis();
-  renderDiagRunning();
-  // 서버가 첫 문항을 주지 않았다면 자동으로 문항을 요청 (placeholder는 만들지 않음)
-  if (!diagState.question) {
-    fetchNextDiagQuestion();
+  diagSession = null;
+}
+
+async function diagBeginAtCurrentNode() {
+  // 현재 노드의 직속 선수 1개 선택해서 진단 시작
+  const node = diagSession.targetNode;
+  const prereqs = node.prerequisites || [];
+  if (!prereqs.length) {
+    // 선수가 없으면 → 목표 노드 자체에서 진단 (깊이 1로 자기 자신 검증)
+    await diagEnterNode(diagSession.targetNodeId, 1);
+    return;
+  }
+  // 첫 번째 선수로 진입
+  const firstPrereqId = prereqs[0].id || prereqs[0].node_id || prereqs[0];
+  await diagEnterNode(firstPrereqId, 1);
+}
+
+async function diagEnterNode(nodeId, depth, _hopChain) {
+  _hopChain = _hopChain || [];
+  if (depth > 3 + _hopChain.length) {
+    // 깊이 한도 초과 — 진단할 문항이 있는 노드를 못 찾음
+    showDiagResult({
+      canStart: false,
+      startNodeId: nodeId,
+      startNodeTitle: '진단 문항을 가진 선수 노드를 찾지 못함',
+      recommendNodes: [{ nodeId: diagSession.targetNodeId, title: diagSession.targetNode.title || diagSession.targetNode.lesson_name }],
+      reason: 'no_questions_anywhere'
+    });
+    return;
+  }
+  const nodeData = await loadNodeForDiag(nodeId);
+  if (!nodeData) { showToast('노드 정보를 불러올 수 없습니다.', 'fa-exclamation-circle'); return; }
+  const probs = nodeData.problems || [];
+  if (!probs.length) {
+    // 문항이 없는 노드는 건너뛰고 그 노드의 선수로 자동 이동 (한 번만 토스트)
+    if (_hopChain.length === 0) {
+      showToast('진단 문항이 있는 선수 노드를 찾는 중...', 'fa-info-circle');
+    }
+    const next = nodeData.prerequisites || [];
+    if (next.length) {
+      const nextId = next[0].id || next[0].node_id || next[0];
+      _hopChain.push(nodeId);
+      // 같은 깊이 유지 (건너뛴 것이므로)
+      await diagEnterNode(nextId, depth, _hopChain);
+      return;
+    }
+    // 더 이상 갈 곳 없으면 — 목표 노드 자체로 fallback
+    if (nodeId !== diagSession.targetNodeId) {
+      const targetData = await loadNodeForDiag(diagSession.targetNodeId);
+      if (targetData?.problems?.length) {
+        showToast('선수 노드에 문항이 없어 목표 노드 자체로 진단합니다.', 'fa-info-circle');
+        const shuffled = targetData.problems.slice().sort(() => Math.random() - 0.5);
+        diagSession.currentNodeId = diagSession.targetNodeId;
+        diagSession.currentDepth = depth;
+        diagSession.currentNodeData = targetData;
+        diagSession.questionsInNode = shuffled.slice(0, 2);
+        diagSession.currentQuestionIdx = 0;
+        diagSession.nodeCorrectCount = 0;
+        diagShowQuestion();
+        return;
+      }
+    }
+    // 정말 진단할 문항이 어디에도 없으면 안내 후 종료
+    showDiagResult({
+      canStart: true,
+      startNodeId: diagSession.targetNodeId,
+      startNodeTitle: diagSession.targetNode.title || diagSession.targetNode.lesson_name,
+      recommendNodes: [],
+      reason: 'no_questions_in_chain'
+    });
+    return;
+  }
+  // 무작위 2문항 (혹은 가능한 만큼)
+  const shuffled = probs.slice().sort(() => Math.random() - 0.5);
+  diagSession.currentNodeId = nodeId;
+  diagSession.currentDepth = depth;
+  diagSession.currentNodeData = nodeData;
+  diagSession.questionsInNode = shuffled.slice(0, 2);
+  diagSession.currentQuestionIdx = 0;
+  diagSession.nodeCorrectCount = 0;
+  diagShowQuestion();
+}
+
+function diagShowQuestion() {
+  const s = diagSession;
+  const q = s.questionsInNode[s.currentQuestionIdx];
+  if (!q) { diagOnNodeFinished(); return; }
+  const nodeTitle = s.currentNodeData?.title || s.currentNodeData?.lesson_name || '진단 노드';
+  const contentId = q.id || q.content_id || q.contentId;
+  if (!contentId) {
+    showToast('이 문항의 콘텐츠 정보를 찾을 수 없어요.', 'fa-exclamation-circle');
+    diagOnNodeFinished();
+    return;
+  }
+
+  const progressLabel = `단계 ${s.currentDepth}/3`;
+  const progBar = document.getElementById('diagModalProgress');
+  if (progBar) { progBar.textContent = progressLabel; progBar.style.display = 'inline-block'; }
+
+  // modal body를 flex 컬럼으로 만들어 iframe이 전체 영역을 채우도록
+  const body = $('diagModalBody');
+  body.style.cssText = 'flex:1;overflow:hidden;padding:14px 20px 0;display:flex;flex-direction:column;gap:10px;min-height:0';
+  body.innerHTML = `
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;flex-shrink:0">
+      <span style="font-size:11px;font-weight:700;background:#EEF2FF;color:#4F46E5;padding:3px 10px;border-radius:6px">선수학습</span>
+      <span style="font-size:14px;font-weight:700;color:#0F172A">${escHtml(nodeTitle)}</span>
+      <span style="font-size:12px;color:#6B7280">· 문제 ${s.currentQuestionIdx + 1} / 2</span>
+    </div>
+    <div style="flex:1;border:1px solid #E5E7EB;border-radius:12px;overflow:hidden;background:#fff;min-height:0;display:flex">
+      <iframe id="diagPlayerIframe" src="/content/content-player.html?id=${contentId}&auto=1&embed=1"
+        style="flex:1;width:100%;border:0;background:#fff;display:block" allow="autoplay"></iframe>
+    </div>
+  `;
+  $('diagModalActions').innerHTML = `
+    <button class="btn btn-ghost" onclick="closeDiagModal()">중단</button>
+    <span style="flex:1;font-size:13px;color:#6B7280;text-align:right;align-self:center">문제를 풀고 제출하면 자동으로 다음으로 진행됩니다</span>
+  `;
+
+  // 채움콘텐츠 플레이어가 채점 결과를 postMessage로 보내면 처리
+  if (!window._diagMsgListener) {
+    window._diagMsgListener = (e) => {
+      if (!e.data || typeof e.data !== 'object') return;
+      if (e.data.type === 'dacheum:quiz-graded') {
+        const isCorrect = (e.data.correct || 0) > 0 && (e.data.wrong || 0) === 0;
+        const timeTakenSec = Number(e.data.timeTakenSec) || 0;
+        diagOnAnswerGraded(isCorrect, timeTakenSec);
+      }
+    };
+    window.addEventListener('message', window._diagMsgListener);
+  }
+}
+
+function diagOnAnswerGraded(isCorrect, timeTakenSec) {
+  const s = diagSession;
+  if (!s) return;
+
+  if (isCorrect) s.nodeCorrectCount++;
+  s.totalTimeSec = (s.totalTimeSec || 0) + (timeTakenSec || 0);
+  s.history.push({
+    nodeId: s.currentNodeId,
+    nodeTitle: s.currentNodeData?.title || s.currentNodeData?.lesson_name,
+    questionIdx: s.currentQuestionIdx,
+    correct: isCorrect,
+    timeTakenSec: timeTakenSec || 0
+  });
+
+  // 결과 안내(짧게) 후 다음 단계로
+  const banner = document.createElement('div');
+  banner.style.cssText = `position:absolute;left:50%;bottom:80px;transform:translateX(-50%);background:${isCorrect ? '#10B981' : '#EF4444'};color:#fff;padding:10px 20px;border-radius:10px;font-weight:700;font-size:14px;z-index:10101;box-shadow:0 4px 16px rgba(0,0,0,0.2);display:flex;align-items:center;gap:8px`;
+  banner.innerHTML = `<i class="fas ${isCorrect ? 'fa-check-circle' : 'fa-times-circle'}"></i> ${isCorrect ? '정답입니다!' : '오답입니다'}`;
+  document.getElementById('diagModal')?.appendChild(banner);
+  setTimeout(() => banner.remove(), 1200);
+
+  setTimeout(() => {
+    s.currentQuestionIdx++;
+    // 첫 문항 정답 → 두 번째 문항으로 / 첫 문항 오답이면 바로 노드 종료
+    if (s.currentQuestionIdx < s.questionsInNode.length && s.nodeCorrectCount === s.currentQuestionIdx) {
+      diagShowQuestion();
+    } else {
+      diagOnNodeFinished();
+    }
+  }, 1200);
+}
+
+function diagOnNodeFinished() {
+  const s = diagSession;
+  const passed = s.nodeCorrectCount >= 2;
+  const nodeData = s.currentNodeData;
+  if (passed) {
+    diagOnNodePassed(s.currentNodeId, nodeData);
+  } else {
+    diagOnNodeFailed(s.currentNodeId, nodeData);
+  }
+}
+
+function diagOnNodePassed(nodeId, nodeData) {
+  // 통과! 이 노드 위로 학습하면 됨 → 진단 종료
+  const s = diagSession;
+  s.history.push({ nodeId, nodeTitle: nodeData?.title || nodeData?.lesson_name, passed: true });
+  // 통과한 노드의 바로 위(=학습 출발점)는 진단 질문이 시작된 노드 또는 그 위
+  // 단순화: 통과한 선수 노드 자체가 출발점이 아니라, 그 다음(목표 노드 또는 통과 노드 직후 학습) 으로
+  showDiagResult({
+    canStart: true,
+    startNodeId: nodeId,
+    startNodeTitle: nodeData?.title || nodeData?.lesson_name,
+    recommendNodes: [],
+    reason: 'passed_at_depth_' + s.currentDepth
+  });
+}
+
+async function diagOnNodeFailed(nodeId, nodeData) {
+  const s = diagSession;
+  s.history.push({ nodeId, nodeTitle: nodeData?.title || nodeData?.lesson_name, passed: false });
+
+  // 최대 깊이 도달 → 종료
+  if (s.currentDepth >= 3) {
+    showDiagResult({
+      canStart: false,
+      startNodeId: nodeId,
+      startNodeTitle: nodeData?.title || nodeData?.lesson_name,
+      recommendNodes: collectFailedNodes(),
+      reason: 'max_depth_reached'
+    });
+    return;
+  }
+
+  // 더 깊이 갈지 묻기
+  diagResetBodyStyle();
+  $('diagModalBody').innerHTML = `
+    <div style="text-align:center;padding:20px 12px">
+      <div style="width:64px;height:64px;border-radius:50%;background:#FEF2F2;display:flex;align-items:center;justify-content:center;margin:0 auto 16px;color:#EF4444;font-size:28px"><i class="fas fa-stairs"></i></div>
+      <h3 style="font-size:18px;font-weight:700;color:#0F172A;margin:0 0 10px">선수학습이 더 필요해요</h3>
+      <p style="font-size:14px;color:#475569;line-height:1.6;margin:0 0 20px">
+        <b style="color:#0F172A">${escHtml(nodeData?.title || nodeData?.lesson_name || '이 노드')}</b>가 아직 어려운 것 같아요.<br>한 단계 더 내려가서 진단을 계속할까요?
+      </p>
+      <div style="background:#F8FAFC;border-radius:10px;padding:12px 16px;font-size:13px;color:#6B7280;display:inline-block">
+        현재 진단 깊이: ${s.currentDepth}/3
+      </div>
+    </div>
+  `;
+  $('diagModalActions').innerHTML = `
+    <button class="btn btn-ghost" onclick="diagStopAndUseFailed()">여기서 학습 시작</button>
+    <button class="btn btn-primary" onclick="diagGoDeeper()" style="min-width:160px">더 내려가서 진단 <i class="fas fa-chevron-down"></i></button>
+  `;
+}
+
+async function diagGoDeeper() {
+  const s = diagSession;
+  const nextDepth = s.currentDepth + 1;
+  // 현재 노드의 prerequisites 가져와서 첫 번째로
+  const prereqs = s.currentNodeData?.prerequisites || [];
+  if (!prereqs.length) {
+    // 더 내려갈 곳 없음
+    showDiagResult({
+      canStart: false,
+      startNodeId: s.currentNodeId,
+      startNodeTitle: s.currentNodeData?.title || s.currentNodeData?.lesson_name,
+      recommendNodes: collectFailedNodes(),
+      reason: 'no_more_prerequisites'
+    });
+    return;
+  }
+  const nextId = prereqs[0].id || prereqs[0].node_id || prereqs[0];
+  await diagEnterNode(nextId, nextDepth);
+}
+
+function diagStopAndUseFailed() {
+  const s = diagSession;
+  showDiagResult({
+    canStart: false,
+    startNodeId: s.currentNodeId,
+    startNodeTitle: s.currentNodeData?.title || s.currentNodeData?.lesson_name,
+    recommendNodes: collectFailedNodes(),
+    reason: 'user_stopped'
+  });
+}
+
+function collectFailedNodes() {
+  const seen = new Set();
+  const list = [];
+  // history를 역순으로(가장 깊은 곳부터) 모음 — 학습 경로 구성용
+  const failed = (diagSession.history || []).filter(h => h.passed === false);
+  for (const f of failed) {
+    if (seen.has(f.nodeId)) continue;
+    seen.add(f.nodeId);
+    list.push({ nodeId: f.nodeId, title: f.nodeTitle });
+  }
+  return list;
+}
+
+function showDiagResult(result) {
+  diagSession.finished = true;
+  const targetTitle = diagSession.targetNode.title || diagSession.targetNode.lesson_name || '목표 차시';
+  const startTitle = result.startNodeTitle || '학습 출발점';
+  const totalSec = Math.round(diagSession.totalTimeSec || 0);
+  const totalMin = Math.floor(totalSec / 60);
+  const remSec = totalSec % 60;
+  const timeLabel = totalSec > 0 ? `${totalMin > 0 ? totalMin + '분 ' : ''}${remSec}초` : '';
+
+  diagResetBodyStyle();
+  const progBar = document.getElementById('diagModalProgress');
+  if (progBar) progBar.style.display = 'none';
+
+  // 결정사항 #4: 진단 실패 시 추천 노드 학습목록 자동 추가
+  let autoAddedCount = 0;
+  if (!result.canStart && Array.isArray(result.recommendNodes) && result.recommendNodes.length) {
+    result.recommendNodes.forEach(n => {
+      try { if (!learningList.has(n.nodeId)) { learningList.add(n.nodeId); autoAddedCount++; } } catch(_){}
+    });
+    try { saveLearningListToServer && saveLearningListToServer(); } catch(_){}
+  }
+
+  let bodyHtml = '';
+  if (result.canStart) {
+    bodyHtml = `
+      <div style="text-align:center;padding:20px 12px">
+        <div style="width:80px;height:80px;border-radius:50%;background:#ECFDF5;display:flex;align-items:center;justify-content:center;margin:0 auto 16px;color:#10B981;font-size:36px"><i class="fas fa-check-circle"></i></div>
+        <h2 style="font-size:22px;font-weight:800;color:#0F172A;margin:0 0 12px">학습 준비 완료!</h2>
+        <p style="font-size:15px;color:#475569;line-height:1.6;margin:0 0 16px">
+          선수학습이 잘 되어 있어요.<br><b style="color:#0F172A">"${escHtml(targetTitle)}"</b>을(를) 바로 학습할 수 있어요.
+        </p>
+        ${timeLabel ? `<div style="display:inline-flex;align-items:center;gap:6px;padding:6px 14px;background:#F1F5F9;color:#475569;border-radius:8px;font-size:13px;margin-bottom:16px"><i class="fas fa-clock" style="color:#64748B"></i> 총 풀이 시간 ${timeLabel}</div>` : ''}
+      </div>`;
+  } else {
+    const recList = result.recommendNodes.length
+      ? result.recommendNodes.slice().reverse().map((n, i) =>
+          `<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:${i === 0 ? '#FEF3C7' : '#F8FAFC'};border:1px solid ${i === 0 ? '#FDE68A' : '#E2E8F0'};border-radius:10px;margin-bottom:6px">
+            <span style="display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;background:${i === 0 ? '#F59E0B' : '#94A3B8'};color:#fff;font-size:12px;font-weight:700">${i + 1}</span>
+            <span style="flex:1;font-size:14px;font-weight:600;color:#0F172A">${escHtml(n.title || '학습 노드')}</span>
+            ${i === 0 ? '<span style="font-size:11px;font-weight:700;color:#F59E0B">먼저 학습</span>' : ''}
+          </div>`
+        ).join('')
+      : `<div style="font-size:13px;color:#6B7280;text-align:center;padding:14px">${escHtml(startTitle)}부터 다시 학습하세요.</div>`;
+    bodyHtml = `
+      <div style="text-align:center;padding:8px 12px 0">
+        <div style="width:72px;height:72px;border-radius:50%;background:#FEF3C7;display:flex;align-items:center;justify-content:center;margin:0 auto 14px;color:#F59E0B;font-size:32px"><i class="fas fa-route"></i></div>
+        <h2 style="font-size:20px;font-weight:800;color:#0F172A;margin:0 0 8px">학습 출발점을 찾았어요</h2>
+        <p style="font-size:14px;color:#475569;line-height:1.6;margin:0 0 12px">
+          아래 순서로 학습하면 <b style="color:#0F172A">"${escHtml(targetTitle)}"</b>을(를) 잘 풀 수 있어요.
+        </p>
+        ${timeLabel ? `<div style="display:inline-flex;align-items:center;gap:6px;padding:6px 14px;background:#F1F5F9;color:#475569;border-radius:8px;font-size:13px;margin-bottom:14px"><i class="fas fa-clock" style="color:#64748B"></i> 총 풀이 시간 ${timeLabel}</div>` : ''}
+      </div>
+      <div style="margin:0 8px 18px">
+        <div style="font-size:12px;font-weight:700;color:#64748B;margin-bottom:8px;text-transform:uppercase;letter-spacing:0.4px">추천 학습 경로</div>
+        ${recList}
+        <div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:#EEF2FF;border:1px solid #C7D2FE;border-radius:10px;margin-top:6px">
+          <span style="display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;background:#4F46E5;color:#fff;font-size:11px;font-weight:700"><i class="fas fa-flag"></i></span>
+          <span style="flex:1;font-size:14px;font-weight:700;color:#4F46E5">${escHtml(targetTitle)} (목표)</span>
+        </div>
+        ${autoAddedCount > 0 ? `<div style="margin-top:14px;padding:10px 14px;background:#F0FDF4;border:1px solid #BBF7D0;border-radius:10px;font-size:13px;color:#166534;display:flex;align-items:center;gap:8px"><i class="fas fa-bookmark" style="color:#16A34A"></i><span>추천 노드 ${autoAddedCount}개를 <b>학습목록에 자동 추가</b>했습니다.</span></div>` : ''}
+      </div>`;
+  }
+
+  $('diagModalBody').innerHTML = bodyHtml;
+  $('diagModalActions').innerHTML = `
+    <button class="btn btn-ghost" onclick="closeDiagModal()">닫기</button>
+    ${!result.canStart && result.recommendNodes.length ? `<button class="btn btn-secondary" onclick='diagAddRecommendsToList()'>📑 학습목록에 모두 추가</button>` : ''}
+    <button class="btn btn-primary" style="display:inline-flex;align-items:center;justify-content:center;gap:6px" onclick='diagStartLearning(${JSON.stringify(result).replace(/'/g, "&apos;")})'><i class="fas fa-play"></i> ${result.canStart ? '바로 학습 시작' : '추천 노드부터 학습'}</button>
+  `;
+}
+
+function diagAddRecommendsToList() {
+  const recs = collectFailedNodes();
+  recs.forEach(n => { try { learningList.add(n.nodeId); } catch(_){} });
+  try { saveLearningListToServer && saveLearningListToServer(); } catch(_){}
+  showToast(`${recs.length}개 노드를 학습목록에 추가했습니다.`, 'fa-bookmark');
+}
+
+function diagStartLearning(result) {
+  // 추천 노드를 먼저 결정 (closeDiagModal이 diagSession을 null로 만들기 전)
+  let openId = result.startNodeId;
+  let openTitle = result.startNodeTitle;
+  if (!result.canStart) {
+    // result.recommendNodes는 이미 collectFailedNodes()의 결과로 전달됨
+    const recs = Array.isArray(result.recommendNodes) ? result.recommendNodes : [];
+    const first = recs.length ? recs[recs.length - 1] : null; // 가장 깊은(가장 기초) 노드부터
+    if (first) {
+      openId = first.nodeId;
+      openTitle = first.title;
+      try { learningList.add(first.nodeId); saveLearningListToServer && saveLearningListToServer(); } catch(_){}
+    }
+  }
+  closeDiagModal();
+  if (openId) {
+    userInteracted = true;
+    openDrawer(openId, { force: true });
+  } else {
+    showToast('이동할 노드를 찾지 못했어요. 학습맵에서 직접 선택해 주세요.', 'fa-info-circle');
   }
 }
 
@@ -3803,15 +4372,37 @@ async function submitDiagAnswer() {
     else if (i === s.selected && !isCorrect) o.classList.add('wrong');
   });
 
-  // Server call
+  // Server call — questionId 필수(서버가 정답 판정), answer는 사용자 선택지 번호(1-base)
+  const userAnswer = String(s.selected + 1);
   const data = await fetchApi(`/api/self-learn/diagnosis/${encodeURIComponent(s.sessionId)}/answer`, {
     method: 'POST',
-    body: JSON.stringify({ contentId: q?.id || q?.content_id, isCorrect, selected: s.selected + 1 })
+    body: JSON.stringify({
+      contentId: q?.contentId || q?.content_id || q?.id,
+      questionId: q?.questionId || q?.question_id,
+      nodeId: q?.nodeId || q?.node_id || s.currentNode?.id,
+      answer: userAnswer,
+      selected: s.selected + 1
+    })
   });
+
+  // 서버 판정 우선 — 클라이언트 추정값(isCorrect)은 시각 피드백용으로만 사용
+  const serverCorrect = (typeof data?.isCorrect === 'boolean') ? data.isCorrect : isCorrect;
 
   setTimeout(() => {
     if (data && data.finished) {
-      s.finished = true; s.results = data.results || data;
+      s.finished = true;
+      // 서버가 noeResults/addedToLearningList 반환 시 활용
+      s.results = data;
+      if (data.nodeResults) {
+        s.diagnosed = {};
+        data.nodeResults.forEach(r => {
+          s.diagnosed[r.nodeId] = {
+            passed: r.passed,
+            correct: r.correctCount,
+            total: r.totalCount
+          };
+        });
+      }
       renderDiagResult();
       return;
     }
@@ -3820,17 +4411,24 @@ async function submitDiagAnswer() {
     if (cur) {
       if (!s.diagnosed[cur.id]) s.diagnosed[cur.id] = { passed: false, correct: 0, total: 0 };
       s.diagnosed[cur.id].total++;
-      if (isCorrect) s.diagnosed[cur.id].correct++;
+      if (serverCorrect) s.diagnosed[cur.id].correct++;
     }
-    if (data?.next_question || data?.question) {
-      s.question = data.next_question || data.question;
+    if (data?.nextQuestion || data?.next_question || data?.question) {
+      s.question = data.nextQuestion || data.next_question || data.question;
       s.selected = null;
-      if (data.current_node) s.currentNode = data.current_node;
+      // 서버에서 다음 노드가 바뀐 경우 currentNode 갱신
+      if (data.nextNodeId && data.nextNodeId !== (s.currentNode?.id)) {
+        s.currentNode = (window.nodeById && nodeById[data.nextNodeId]) || { id: data.nextNodeId };
+      } else if (data.current_node) {
+        s.currentNode = data.current_node;
+      }
       renderDiagRunning();
     } else {
       // move to next node in queue
       if (cur) {
-        s.diagnosed[cur.id].passed = s.diagnosed[cur.id].correct >= Math.ceil(s.diagnosed[cur.id].total * 0.6);
+        // 결정사항 D2: 통과 = 2/2 정답 (모든 문항 정답)
+        const d = s.diagnosed[cur.id];
+        d.passed = d.total > 0 && d.correct === d.total;
       }
       if (s.queue && s.queue.length) {
         s.currentNode = s.queue.shift();
@@ -4129,10 +4727,35 @@ async function loadRecord() {
 async function loadRanking() {
   const d = await fetchApi('/api/self-learn/ranking?period=' + encodeURIComponent(rankingPeriod));
   const list = $('rankList');
-  const rankings = d?.rankings || [];
-  if (!rankings.length) {
-    list.innerHTML = '<li class="rank-item" style="justify-content:center;color:var(--gray-400)">랭킹 데이터가 없습니다</li>';
-    return;
+  let rankings = d?.rankings || [];
+  // F-P0-NEW-3: 대시보드 카드("1위")와 랭킹 탭 일관성 — ranking API가 비어 있어도
+  // dashboardCache 의 rank/total_users 가 있으면 최소한 본인 1행은 노출하여
+  // "대시보드 1위 ↔ 랭킹 데이터 없음" 모순을 해소한다.
+  const allZero = rankings.length > 0 && rankings.every(r => (r.score ?? r.points ?? r.completed_nodes ?? r.solved ?? 0) === 0);
+  if (!rankings.length || allZero) {
+    const dc = dashboardCache;
+    if (dc && dc.rank && dc.rank > 0 && currentUser) {
+      // 대시보드 데이터로 본인 행 1개 구성 — 점수는 total_solved 로 표시
+      rankings = [{
+        user_id: currentUser.id,
+        username: currentUser.username,
+        display_name: currentUser.display_name || currentUser.name || currentUser.username,
+        score: dc.total_solved ?? dc.completedNodes ?? 0,
+        _placeholder: true
+      }];
+    } else {
+      list.innerHTML = `<li style="list-style:none;padding:0">
+        <div class="ranking-empty">
+          <div class="re-icon"><i class="fas fa-trophy"></i></div>
+          <div class="re-title">아직 데이터가 부족해요</div>
+          <div class="re-desc">진단평가나 차시 학습을 완료하면 점수가 쌓이고 순위가 나타나요.</div>
+          <button class="re-cta" onclick="document.querySelector('.tab-btn[data-tab=\\'diag\\']')?.click() || (location.hash='#diag')">
+            <i class="fas fa-play-circle"></i> 첫 문항 풀러 가기
+          </button>
+        </div>
+      </li>`;
+      return;
+    }
   }
   list.innerHTML = rankings.slice(0, 10).map((r, i) => {
     const rc = i === 0 ? 'gold' : i === 1 ? 'silver' : i === 2 ? 'bronze' : 'normal';

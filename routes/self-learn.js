@@ -481,6 +481,10 @@ router.post('/map/nodes/:nodeId/diagnose-complete', requireAuth, (req, res) => {
 // POST /diagnosis/start — 진단 시작 (CAT: targetNodeId 있으면 BFS+난이도 조절 모드)
 router.post('/diagnosis/start', requireAuth, (req, res) => {
   try {
+    // 교사·관리자는 학생 기록을 만들지 않음 — 데모/시연용 응답만 반환
+    if (req.user.role === 'teacher' || req.user.role === 'admin') {
+      return res.json({ success: true, skipped: true, reason: 'teacher_no_record', sessionId: null, queue: [], targetNode: null, question: null });
+    }
     const { targetNodeId, nodeId, mode } = req.body || {};
     // targetNodeId 또는 mode='cat'일 경우 CAT 시작
     if (targetNodeId || mode === 'cat') {
@@ -514,9 +518,10 @@ router.post('/diagnosis/:sessionId/answer', requireAuth, (req, res) => {
     res.json({ success: true, ...result });
   } catch (err) {
     console.error('[SELF-LEARN] diagnosis/answer error:', err);
-    res.status(500).json({
+    const status = err && err.statusCode ? err.statusCode : 500;
+    res.status(status).json({
       success: false,
-      message: '진단 응답 처리 중 오류가 발생했습니다.',
+      message: status === 400 ? '필수 파라미터가 누락되었습니다.' : '진단 응답 처리 중 오류가 발생했습니다.',
       detail: String(err && err.message || err)
     });
   }
@@ -854,6 +859,10 @@ router.post('/problem-sets/:id/reorder', requireAuth, (req, res) => {
 // POST /problem-attempt — 문제 풀이 시도 기록 (별칭, body에 contentId 포함)
 router.post('/problem-attempt', requireAuth, (req, res) => {
   try {
+    // 교사·관리자는 학생 기록(content_question_attempts/problem_attempts)에 누적하지 않음
+    if (req.user.role === 'teacher' || req.user.role === 'admin') {
+      return res.json({ success: true, skipped: true, reason: 'teacher_no_record' });
+    }
     const { contentId, content_id, isCorrect, is_correct, selectedAnswer, userAnswer, user_answer, answer, questionId, question_id, timeTaken, time_taken, nodeId, node_id } = req.body || {};
     const cid = parseInt(contentId || content_id);
     if (!cid) return res.status(400).json({ success: false, message: 'contentId 필요' });

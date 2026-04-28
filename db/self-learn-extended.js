@@ -530,7 +530,8 @@ function getMapNodeDetail(nodeId, userId = null) {
     `).get(c.content_id) || {};
     const total = agg.total_attempts || 0;
     const correct = agg.correct_cnt || 0;
-    const correctRate = total > 0 ? Math.round((correct / total) * 100) : 0;
+    // 0~1 단위로 통일 (UI에서 ×100 해서 % 표시)
+    const correctRate = total > 0 ? (correct / total) : 0;
     let myAttempts = 0, cleared = false, lastCorrect = null;
     if (userId) {
       const mine = db.prepare('SELECT COUNT(*) as c, SUM(is_correct) as ok FROM problem_attempts WHERE user_id = ? AND content_id = ?').get(userId, c.content_id) || {};
@@ -701,6 +702,98 @@ function resolveValidContentId(rawContentId, questionId) {
   return any ? any.id : 1;
 }
 
+/**
+ * 정답 판정 헬퍼 — content_questions.answer 형식 다양성 흡수.
+ *
+ * DB 사정:
+ *   - content_questions.answer 는 대부분(95%+) **0-based index** 문자열 ("0"~"4"),
+ *     일부는 정답 텍스트 자체("27","서울","사과") 형태로 저장됨.
+ *   - content-player.html 클라이언트는 `opts[Number(corA)]` 로 정답 텍스트를 산출 →
+ *     DB의 answer를 0-based index로 취급함이 정설.
+ *
+ * 클라이언트가 보내는 selectedAnswer 형식:
+ *   - 자기주도학습 직접풀이(line 3378): `idx + 1` (1-based 정수, 예: 1~5)
+ *   - 콘텐츠 플레이어 채점(line 3148): null (이 경로는 isCorrect를 신뢰)
+ *   - 진단 응답 페이로드: 옵션 텍스트 또는 1-based index 문자열
+ *
+ * 본 헬퍼는 다음 모두를 정답으로 인정한다:
+ *   1) 0-based index (q.answer 자체) 와 동일
+ *   2) 1-based index (q.answer + 1) 와 동일
+ *   3) options 배열에서 q.answer가 가리키는 항목의 텍스트와 동일
+ *      (① 등 prefix 문자 정규화 포함)
+ *   4) q.answer 자체가 텍스트인 경우 options 무관 직접 일치
+ */
+function _normalizeAnswerText(s) {
+  return String(s == null ? '' : s)
+    .replace(/^[①②③④⑤⑥⑦⑧⑨⑩]/, '')          // 원숫자 prefix 제거
+    .replace(/^\s*\d+[\)\.\s]\s*/, '')         // "1) ", "1. " prefix 제거
+    .replace(/\s+/g, '')
+    .toLowerCase();
+}
+
+function judgeQuestionAnswer(question, submitted) {
+  // question: { answer, options(JSON or array) }
+  if (!question) return false;
+  const rawAnswer = question.answer == null ? '' : String(question.answer).trim();
+  const userRaw = submitted == null ? '' : String(submitted).trim();
+  if (userRaw === '') return false;
+
+  // 1) 직접 문자열 일치 (q.answer가 텍스트 정답일 때 또는 사용자가 같은 index 보낼 때)
+  if (rawAnswer === userRaw) return true;
+
+  // options 파싱
+  let opts = null;
+  if (Array.isArray(question.options)) opts = question.options;
+  else if (typeof question.options === 'string') {
+    try { const j = JSON.parse(question.options); if (Array.isArray(j)) opts = j; } catch (_) {}
+  }
+
+  // 2) q.answer가 0-based index로 보일 때 — 1-based / 텍스트 매핑 고려
+  const ansIdx = Number(rawAnswer);
+  if (opts && Number.isInteger(ansIdx) && ansIdx >= 0 && ansIdx < opts.length) {
+    // 2-a) 사용자가 1-based index를 보낸 경우
+    const userNum = Number(userRaw);
+    if (Number.isInteger(userNum)) {
+      if (userNum === ansIdx) return true;          // 둘 다 0-based 일치
+      if (userNum - 1 === ansIdx) return true;      // user 1-based → 0-based 변환
+    }
+    // 2-b) 사용자가 옵션 텍스트를 보낸 경우
+    const correctText = _normalizeAnswerText(opts[ansIdx]);
+    const userText = _normalizeAnswerText(userRaw);
+    if (correctText && correctText === userText) return true;
+  }
+
+  // 3) q.answer가 텍스트인 경우 — 정규화 비교
+  const ansNorm = _normalizeAnswerText(rawAnswer);
+  const userNorm = _normalizeAnswerText(userRaw);
+  if (ansNorm && ansNorm === userNorm) return true;
+
+  // 4) options에서 사용자 텍스트 위치를 찾아 q.answer(인덱스)와 비교
+  if (opts && Number.isInteger(ansIdx)) {
+    const userNorm2 = _normalizeAnswerText(userRaw);
+    const matchedIdx = opts.findIndex(o => _normalizeAnswerText(o) === userNorm2);
+    if (matchedIdx >= 0 && matchedIdx === ansIdx) return true;
+  }
+
+  return false;
+}
+
+// 정답을 사용자에게 보여줄 텍스트 형태로 반환 (q.answer가 0-based index일 때 옵션 텍스트로 변환)
+function resolveCorrectAnswerText(question) {
+  if (!question) return null;
+  const raw = question.answer == null ? '' : String(question.answer);
+  let opts = null;
+  if (Array.isArray(question.options)) opts = question.options;
+  else if (typeof question.options === 'string') {
+    try { const j = JSON.parse(question.options); if (Array.isArray(j)) opts = j; } catch (_) {}
+  }
+  const n = Number(raw);
+  if (opts && Number.isInteger(n) && n >= 0 && n < opts.length) {
+    return String(opts[n]);
+  }
+  return raw;
+}
+
 function submitDiagnosisAnswer(sessionId, payload = {}) {
   // snake_case/camelCase 모두 지원 (QA curl이 content_id 전송하는 케이스 대응)
   const nodeId = payload.nodeId || payload.node_id;
@@ -712,14 +805,20 @@ function submitDiagnosisAnswer(sessionId, payload = {}) {
   const session = db.prepare('SELECT target_node_id, current_node_id FROM diagnosis_sessions WHERE id = ?').get(sessionId);
   const resolvedNodeId = nodeId || (session && (session.current_node_id || session.target_node_id)) || 'unknown';
 
-  // 서버 정답 판정: questionId 있으면 DB로, 없으면 random fallback
-  let isCorrect = 0;
-  if (questionId) {
-    const q = db.prepare('SELECT answer FROM content_questions WHERE id = ?').get(questionId);
-    if (q && String(q.answer) === String(answer)) isCorrect = 1;
-  } else {
-    isCorrect = Math.random() > 0.3 ? 1 : 0;
+  // 서버 정답 판정: questionId 필수 — 누락 시 호출자 오류
+  if (!questionId) {
+    const err = new Error('questionId is required');
+    err.statusCode = 400;
+    throw err;
   }
+  let isCorrect = 0;
+  const q = db.prepare('SELECT answer, options FROM content_questions WHERE id = ?').get(questionId);
+  if (!q) {
+    const err = new Error('questionId not found');
+    err.statusCode = 400;
+    throw err;
+  }
+  if (judgeQuestionAnswer(q, answer)) isCorrect = 1;
 
   // FK 방어: contents.id에 있는 값만 허용 (contentId NOT NULL + FK → contents(id))
   const safeContentId = resolveValidContentId(rawContentId, questionId);
@@ -973,7 +1072,8 @@ function completeNode(userId, nodeId) {
 }
 
 function getLearningDashboard(userId) {
-  const totalNodes = db.prepare('SELECT COUNT(*) as cnt FROM learning_map_nodes WHERE node_level = 2').get().cnt;
+  // 진단/실패 보고서 반영 — 분모를 차시(level=3)로 통일 (이전: level=2 단원 vs level 무관 완료 → 불일치)
+  const totalNodes = db.prepare('SELECT COUNT(*) as cnt FROM learning_map_nodes WHERE node_level = 3').get().cnt;
   const completedNodes = db.prepare("SELECT COUNT(*) as cnt FROM user_node_status WHERE user_id = ? AND status = 'completed'").get(userId).cnt;
   const inProgressNodes = db.prepare("SELECT COUNT(*) as cnt FROM user_node_status WHERE user_id = ? AND status = 'in_progress'").get(userId).cnt;
   const currentPath = getCurrentPath(userId);
@@ -1087,6 +1187,53 @@ function getLearningDashboard(userId) {
     progressPercent = Math.round((completedNodes / totalNodes) * 100);
   }
 
+  // 총 학습 시간(분) — problem_attempts.time_taken(초) 합산. 영상 시청 시간은 video_progress 등에서 보정
+  const timeAgg = db.prepare(`
+    SELECT COALESCE(SUM(time_taken), 0) as total_sec
+    FROM problem_attempts WHERE user_id = ? AND time_taken IS NOT NULL
+  `).get(userId);
+  const total_time_minutes = Math.round((timeAgg.total_sec || 0) / 60);
+
+  // 학습 랭킹 — 같은 학년 우선, 없으면 전체. (avg_accuracy * total_solved + streak*2) 점수 기반.
+  let rank = null;
+  let total_users = 0;
+  try {
+    const myRow = db.prepare(`SELECT grade FROM users WHERE id = ?`).get(userId);
+    const myGrade = myRow?.grade || null;
+    const myScore = (avg_accuracy || 0) * (total_solved || 0) + (streak || 0) * 2;
+    // 같은 학년 학생만 / 해당 학년 학생이 1명뿐이면 전체 학생 cohort로 fallback
+    let cohort = [];
+    if (myGrade) {
+      cohort = db.prepare(`
+        SELECT u.id,
+          COALESCE((SELECT COUNT(*) FROM problem_attempts WHERE user_id = u.id AND is_correct = 1), 0) as correct_cnt,
+          COALESCE((SELECT COUNT(*) FROM problem_attempts WHERE user_id = u.id), 0) as total_cnt
+        FROM users u
+        WHERE u.role = 'student' AND u.grade = ?
+      `).all(myGrade);
+    }
+    if (cohort.length < 2) {
+      cohort = db.prepare(`
+        SELECT u.id,
+          COALESCE((SELECT COUNT(*) FROM problem_attempts WHERE user_id = u.id AND is_correct = 1), 0) as correct_cnt,
+          COALESCE((SELECT COUNT(*) FROM problem_attempts WHERE user_id = u.id), 0) as total_cnt
+        FROM users u
+        WHERE u.role = 'student'
+      `).all();
+    }
+    total_users = cohort.length;
+    if (total_users > 0) {
+      const ranked = cohort.map(r => ({
+        userId: r.id,
+        score: r.total_cnt > 0 ? Math.round((r.correct_cnt / r.total_cnt) * 100) * r.total_cnt : 0
+      })).sort((a, b) => b.score - a.score);
+      const idx = ranked.findIndex(r => r.userId === userId);
+      rank = idx >= 0 ? idx + 1 : null;
+    }
+  } catch (e) {
+    rank = null;
+  }
+
   return {
     totalNodes, completedNodes, inProgressNodes, currentPath, recentDiagnosis,
     // 확장 필드 — 나의 기록 탭과 상단 카드가 같은 소스(problem_attempts + user_node_status) 사용
@@ -1097,7 +1244,11 @@ function getLearningDashboard(userId) {
     progressPercent,
     streak,
     area_stats,
-    recent_problems
+    recent_problems,
+    // P0 추가 필드 — 대시보드 4-grid 누락 보완
+    total_time_minutes,
+    rank,
+    total_users
   };
 }
 
@@ -1397,18 +1548,18 @@ function recordProblemAttempt(userId, contentId, { isCorrect, selectedAnswer, us
   let questionExplanation = null;
   let correctAnswer = null;
   if (questionId) {
-    const q = db.prepare('SELECT answer, explanation FROM content_questions WHERE id = ?').get(questionId);
+    const q = db.prepare('SELECT answer, options, explanation FROM content_questions WHERE id = ?').get(questionId);
     if (q) {
-      finalIsCorrect = String(q.answer).trim() === String(submittedAnswer || '').trim() ? 1 : 0;
+      finalIsCorrect = judgeQuestionAnswer(q, submittedAnswer) ? 1 : 0;
       questionExplanation = q.explanation || null;
-      correctAnswer = q.answer;
+      correctAnswer = resolveCorrectAnswerText(q);  // 사용자 노출용: 0-based index → 옵션 텍스트
     } else {
       finalIsCorrect = isCorrect ? 1 : 0;
     }
   } else {
     // questionId 없을 때 content 단위 대표 문항에서 해설만 조회
-    const q = db.prepare('SELECT answer, explanation FROM content_questions WHERE content_id = ? ORDER BY question_number LIMIT 1').get(contentId);
-    if (q) { questionExplanation = q.explanation || null; correctAnswer = q.answer; }
+    const q = db.prepare('SELECT answer, options, explanation FROM content_questions WHERE content_id = ? ORDER BY question_number LIMIT 1').get(contentId);
+    if (q) { questionExplanation = q.explanation || null; correctAnswer = resolveCorrectAnswerText(q); }
     finalIsCorrect = isCorrect ? 1 : 0;
   }
 
@@ -1449,7 +1600,8 @@ function recordProblemAttempt(userId, contentId, { isCorrect, selectedAnswer, us
         SELECT COUNT(*) as t, SUM(is_correct) as c
         FROM problem_attempts WHERE user_id = ? AND node_id = ?
       `).get(userId, nodeId);
-      const myRate = mine.t > 0 ? Math.round((mine.c / mine.t) * 100) : 0;
+      // correct_rate는 0~1 단위로 통일 (UI에서 ×100 해서 % 표시)
+      const myRate = mine.t > 0 ? (mine.c / mine.t) : 0;
       db.prepare(`
         INSERT INTO user_node_status (user_id, node_id, status, correct_rate, last_accessed_at)
         VALUES (?, ?, 'in_progress', ?, CURRENT_TIMESTAMP)
@@ -1676,32 +1828,47 @@ function startDiagnosisCAT(userId, { targetNodeId, subject, type }) {
 }
 
 function submitDiagnosisAnswerCAT(sessionId, payload = {}) {
+  // 결정사항 정합화(2026-04 PM 합의):
+  //   D1. 노드당 2문항
+  //   D2. 통과 조건 = 2/2 정답
+  //   D3. 종료 = 연속 2회 정답(=2/2 노드가 연속 2번) OR 최대 3단계(노드)
+  //   D4. 실패 시 가장 깊이 미통과 노드 + 학습목록 자동 추가
+  //   D5. 선수 = DB prerequisites (queue 활용)
+  //   D6. 문항 = EBS/자동생성 2개 중 무작위 (_pickQuestionForNode)
+  //
+  // 난이도 적응형(easy/medium/hard) 제거. 'medium' 고정.
+
+  const NODE_QUESTIONS = 2;       // D1
+  const MAX_NODE_STEPS = 3;       // D3 — 최대 3단계
+  const CONSEC_PASS_TARGET = 2;   // D3 — 연속 2회 정답 노드
+
   // snake_case/camelCase 모두 지원
   const contentId = payload.contentId != null ? payload.contentId : payload.content_id;
   const questionId = payload.questionId != null ? payload.questionId : payload.question_id;
   const answer = payload.answer;
   const nodeId = payload.nodeId || payload.node_id;
-  const clientIsCorrect = payload.isCorrect !== undefined ? payload.isCorrect : payload.is_correct;
 
   const session = db.prepare('SELECT * FROM diagnosis_sessions WHERE id = ?').get(sessionId);
   if (!session) throw new Error('세션 없음');
-  if (session.status === 'completed') return { sessionComplete: true };
+  if (session.status === 'completed') return { sessionComplete: true, finished: true };
 
-  // 서버 정답 판정 (DB의 정답과 비교) — clientIsCorrect는 신뢰하지 않음
-  let isCorrect = false;
-  if (questionId) {
-    const q = db.prepare('SELECT answer FROM content_questions WHERE id = ?').get(questionId);
-    if (q && String(q.answer).trim() === String(answer || '').trim()) isCorrect = true;
-  } else if (clientIsCorrect !== undefined) {
-    // 호환성: questionId 없이 client가 판정한 경우만 fallback
-    isCorrect = !!clientIsCorrect;
+  // questionId 필수 — clientIsCorrect 신뢰 금지(데이터 무결성)
+  if (!questionId) {
+    const err = new Error('questionId is required');
+    err.statusCode = 400;
+    throw err;
   }
+  const q = db.prepare('SELECT answer, options FROM content_questions WHERE id = ?').get(questionId);
+  if (!q) {
+    const err = new Error('questionId not found');
+    err.statusCode = 400;
+    throw err;
+  }
+  const isCorrect = judgeQuestionAnswer(q, answer);
 
-  // current_node_id 누락 방어 (null이면 nodeId 파라미터 → target_node_id 순으로 보강)
   const curNode = session.current_node_id || nodeId || session.target_node_id || 'unknown';
-  const curDiff = session.current_difficulty || 'medium';
 
-  // 답안 기록 — FK 방어 (contents.id에 있는 값으로 보정)
+  // 답안 기록 — FK 방어
   const safeContentId = resolveValidContentId(contentId, questionId);
   try {
     db.prepare(`
@@ -1726,107 +1893,134 @@ function submitDiagnosisAnswerCAT(sessionId, payload = {}) {
     db.prepare('UPDATE diagnosis_sessions SET total_questions = total_questions + 1 WHERE id = ?').run(sessionId);
   }
 
-  // per_node_answers 업데이트 (노드별 최근 응답 이력)
+  // per_node_answers — 노드별 응답
   let perNodeAnswers = {};
   try { perNodeAnswers = JSON.parse(session.per_node_answers || '{}'); } catch {}
   if (!perNodeAnswers[curNode]) perNodeAnswers[curNode] = [];
-  perNodeAnswers[curNode].push({ correct: isCorrect ? 1 : 0, difficulty: curDiff });
+  perNodeAnswers[curNode].push({ correct: isCorrect ? 1 : 0 });
 
-  // 난이도 경로
-  let difficultyPath = [];
-  try { difficultyPath = JSON.parse(session.difficulty_path || '[]'); } catch {}
-  difficultyPath.push({ node: curNode, difficulty: curDiff, correct: isCorrect ? 1 : 0 });
+  // 노드 진행 경로(D3 종료조건 판정용) — node 단위 통과/실패 누적
+  let nodePath = [];
+  try { nodePath = JSON.parse(session.difficulty_path || '[]'); } catch {}
 
-  // 연속 2정답→hard, 연속 2오답→easy
-  const nodeHist = perNodeAnswers[curNode];
-  let nextDiff = curDiff;
-  const last2 = nodeHist.slice(-2);
-  if (last2.length === 2) {
-    if (last2.every(a => a.correct === 1)) {
-      nextDiff = curDiff === 'easy' ? 'medium' : 'hard';
-    } else if (last2.every(a => a.correct === 0)) {
-      nextDiff = curDiff === 'hard' ? 'medium' : 'easy';
-    }
-  }
-
-  // 노드당 3~5문항 후 통과/실패 판정
+  // 큐
   let queue = [];
   try { queue = JSON.parse(session.queue_nodes || '[]'); } catch {}
 
+  // D1·D2: 노드당 2문항·2/2 정답이면 통과
+  const nodeHist = perNodeAnswers[curNode];
   let nodeFinished = false;
   let nodePassed = null;
-  if (nodeHist.length >= 3) {
+  if (nodeHist.length >= NODE_QUESTIONS) {
     const correct = nodeHist.filter(a => a.correct === 1).length;
-    const rate = correct / nodeHist.length;
-    if (nodeHist.length >= 5 || rate >= 0.8 || rate <= 0.2) {
-      nodeFinished = true;
-      nodePassed = rate >= 0.6;
-    }
+    nodeFinished = true;
+    nodePassed = correct === NODE_QUESTIONS; // 2/2
   }
 
   let nextNodeId = curNode;
   let nextQuestion = null;
   let sessionComplete = false;
+  let endReason = null;
 
   if (nodeFinished) {
-    // 노드 상태 저장
+    const correct = nodeHist.filter(a => a.correct === 1).length;
+    const correctRate = correct / nodeHist.length; // 0~1로 통일
+    // 노드 상태 저장 (correct_rate: 0~1)
     db.prepare(`
       INSERT OR REPLACE INTO user_node_status (user_id, node_id, status, diagnosis_result, correct_rate, last_accessed_at)
       VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
     `).run(session.user_id, curNode,
       nodePassed ? 'completed' : 'in_progress',
       nodePassed ? 'mastered' : 'needs_review',
-      nodeHist.filter(a => a.correct === 1).length / nodeHist.length);
+      correctRate);
 
-    // 큐에서 현재 제거하고 다음 노드
-    queue = queue.filter(q => q !== curNode);
-    if (queue.length === 0) {
+    // 노드 진행 경로 누적 (단계 = 처리한 노드 수)
+    nodePath.push({ node: curNode, passed: nodePassed ? 1 : 0, correct, total: nodeHist.length });
+
+    // D3 종료조건 판정
+    // (a) 연속 2회 정답 = 마지막 2개 노드가 모두 통과
+    const lastTwo = nodePath.slice(-CONSEC_PASS_TARGET);
+    const consecPassed = lastTwo.length >= CONSEC_PASS_TARGET && lastTwo.every(p => p.passed === 1);
+    // (b) 최대 단계
+    const maxStepsReached = nodePath.length >= MAX_NODE_STEPS;
+
+    // 큐에서 현재 노드 제거
+    queue = queue.filter(qn => qn !== curNode);
+
+    if (consecPassed) {
       sessionComplete = true;
+      endReason = 'consecutive_pass';
+    } else if (maxStepsReached) {
+      sessionComplete = true;
+      endReason = 'max_steps';
+    } else if (queue.length === 0) {
+      sessionComplete = true;
+      endReason = 'queue_empty';
     } else {
-      nextNodeId = queue[0];
-      nextDiff = 'medium';
-      nextQuestion = _pickQuestionForNode(nextNodeId, nextDiff);
+      // 다음 노드로 진행 — 문항이 있는 첫 노드 탐색
+      while (queue.length > 0) {
+        const nn = queue[0];
+        const cand = _pickQuestionForNode(nn, 'medium');
+        if (cand) { nextNodeId = nn; nextQuestion = cand; break; }
+        queue.shift(); // 문항 없으면 skip
+      }
+      if (!nextQuestion) {
+        sessionComplete = true;
+        endReason = 'no_question';
+      }
     }
   } else {
-    // 같은 노드 계속 — 다음 난이도 문항
-    nextQuestion = _pickQuestionForNode(curNode, nextDiff);
+    // 같은 노드 계속 (난이도 고정 medium)
+    nextQuestion = _pickQuestionForNode(curNode, 'medium');
+    if (!nextQuestion) {
+      // 문항 풀 고갈 → 노드 미완 종료 처리
+      sessionComplete = true;
+      endReason = 'no_question';
+    }
   }
 
-  // 세션 갱신
+  // 세션 갱신 (current_difficulty는 항상 medium)
   db.prepare(`
     UPDATE diagnosis_sessions SET
-      queue_nodes = ?, current_node_id = ?, current_difficulty = ?,
+      queue_nodes = ?, current_node_id = ?, current_difficulty = 'medium',
       difficulty_path = ?, per_node_answers = ?,
       status = CASE WHEN ? = 1 THEN 'completed' ELSE status END,
       completed_at = CASE WHEN ? = 1 THEN CURRENT_TIMESTAMP ELSE completed_at END
     WHERE id = ?
-  `).run(JSON.stringify(queue), nextNodeId, nextDiff,
-    JSON.stringify(difficultyPath), JSON.stringify(perNodeAnswers),
+  `).run(JSON.stringify(queue), nextNodeId,
+    JSON.stringify(nodePath), JSON.stringify(perNodeAnswers),
     sessionComplete ? 1 : 0, sessionComplete ? 1 : 0, sessionId);
 
-  // 세션 완료 시 노드별 결과 집계 (프론트 결과 화면용)
+  // D4: 세션 완료 시 미통과 노드를 학습목록 자동 추가
   let nodeResults = null;
+  let addedToLearningList = [];
   if (sessionComplete) {
-    nodeResults = Object.keys(perNodeAnswers).map(nodeId => {
-      const hist = perNodeAnswers[nodeId] || [];
-      const correct = hist.filter(a => a.correct === 1).length;
-      const total = hist.length;
-      const rate = total > 0 ? correct / total : 0;
-      const passed = rate >= 0.6;
-      // Hydrate node title
-      const nodeInfo = db.prepare('SELECT unit_name, lesson_name, area, grade FROM learning_map_nodes WHERE node_id = ?').get(nodeId) || {};
+    nodeResults = nodePath.map(p => {
+      const rate = p.total > 0 ? p.correct / p.total : 0;
+      const nodeInfo = db.prepare('SELECT unit_name, lesson_name, area, grade FROM learning_map_nodes WHERE node_id = ?').get(p.node) || {};
       return {
-        nodeId,
-        node_id: nodeId,
-        title: nodeInfo.lesson_name || nodeInfo.unit_name || nodeId,
+        nodeId: p.node,
+        node_id: p.node,
+        title: nodeInfo.lesson_name || nodeInfo.unit_name || p.node,
         area: nodeInfo.area,
         grade: nodeInfo.grade,
-        passed,
-        correctCount: correct,
-        totalCount: total,
-        correctRate: Math.round(rate * 100)
+        passed: !!p.passed,
+        correctCount: p.correct,
+        totalCount: p.total,
+        correctRate: rate // 0~1
       };
     });
+
+    // D4: 미통과 노드 학습목록 자동 추가
+    for (const r of nodeResults) {
+      if (!r.passed) {
+        try {
+          db.prepare('INSERT OR IGNORE INTO user_learning_list (user_id, node_id) VALUES (?, ?)')
+            .run(session.user_id, r.nodeId);
+          addedToLearningList.push(r.nodeId);
+        } catch (e) { /* 무시 */ }
+      }
+    }
   }
 
   return {
@@ -1834,13 +2028,15 @@ function submitDiagnosisAnswerCAT(sessionId, payload = {}) {
     nodeFinished,
     nodePassed,
     nextNodeId,
-    nextDifficulty: nextDiff,
-    question: nextQuestion,          // 하위 호환
-    nextQuestion: nextQuestion,      // 프론트 신규 필드
-    finished: sessionComplete,       // 프론트 호환 (data.finished 체크)
+    nextDifficulty: 'medium',
+    question: nextQuestion,
+    nextQuestion: nextQuestion,
+    finished: sessionComplete,
     sessionComplete,
     queueRemaining: queue.length,
-    nodeResults                      // 완료 시 노드별 통과/실패 집계
+    nodeResults,
+    addedToLearningList,
+    endReason
   };
 }
 
@@ -1922,5 +2118,7 @@ module.exports = {
   // P0 추가
   recordProblemAttempt, recordVideoProgress,
   getLearningList, addLearningList, removeLearningList,
-  getLastActivity, reportContent
+  getLastActivity, reportContent,
+  // 정답 판정 헬퍼 (테스트/외부 사용)
+  judgeQuestionAnswer, resolveCorrectAnswerText
 };
