@@ -736,7 +736,10 @@ router.get('/learning-map/auto-suggest', ...adminOnly, (req, res) => {
 // POST /api/admin/learning-map/mappings/bulk — 일괄 매핑 추가
 router.post('/learning-map/mappings/bulk', ...adminOnly, (req, res) => {
   try {
-    const { mappings, dryRun } = req.body || {};
+    const { mappings } = req.body || {};
+    // dryRun: query string(?dryRun=1) 또는 body.dryRun 둘 다 지원 (감리 footgun 수정)
+    const dryRun = req.body?.dryRun === true || req.body?.dryRun === 'true' || req.body?.dryRun === 1
+                || req.query?.dryRun === '1' || req.query?.dryRun === 'true';
     if (!Array.isArray(mappings) || !mappings.length) {
       return res.status(400).json({ success: false, message: 'mappings 배열 필요' });
     }

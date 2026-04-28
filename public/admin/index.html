@@ -327,46 +327,6 @@
       <section id="sec-learning-map" class="admin-section">
         <div class="page-title"><i class="fas fa-sitemap"></i> 학습맵 관리</div>
 
-        <!-- 매핑 통계 칩 4개 (P0 — 사용자 요청 "맵핑을 편리하게") -->
-        <div id="lmMappingStats" style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:18px">
-          <div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:14px 16px">
-            <div style="font-size:12px;color:#6b7280;font-weight:600;margin-bottom:4px">매핑률</div>
-            <div style="display:flex;align-items:baseline;gap:6px">
-              <span id="lmStatRate" style="font-size:24px;font-weight:800;color:#2563eb">—</span>
-              <span style="font-size:13px;color:#6b7280">%</span>
-            </div>
-            <div id="lmStatRateBar" style="height:4px;background:#e5e7eb;border-radius:2px;margin-top:8px;overflow:hidden">
-              <div id="lmStatRateBarFill" style="height:100%;width:0%;background:#2563eb;transition:width .3s"></div>
-            </div>
-          </div>
-          <div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:14px 16px">
-            <div style="font-size:12px;color:#6b7280;font-weight:600;margin-bottom:4px"><i class="fas fa-video" style="color:#7c3aed"></i> 영상 매핑</div>
-            <div style="display:flex;align-items:baseline;gap:6px">
-              <span id="lmStatVideo" style="font-size:24px;font-weight:800;color:#0f172a">—</span>
-              <span style="font-size:13px;color:#6b7280">건</span>
-            </div>
-            <div style="font-size:12px;color:#9ca3af;margin-top:6px">전체 영상 콘텐츠</div>
-          </div>
-          <div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:14px 16px">
-            <div style="font-size:12px;color:#6b7280;font-weight:600;margin-bottom:4px"><i class="fas fa-clipboard-question" style="color:#10b981"></i> 문항 매핑</div>
-            <div style="display:flex;align-items:baseline;gap:6px">
-              <span id="lmStatQuiz" style="font-size:24px;font-weight:800;color:#0f172a">—</span>
-              <span style="font-size:13px;color:#6b7280">건</span>
-            </div>
-            <div style="font-size:12px;color:#9ca3af;margin-top:6px">전체 문항 콘텐츠</div>
-          </div>
-          <div style="background:#fff;border:1px solid #fcd34d;border-radius:12px;padding:14px 16px;cursor:pointer;transition:.15s" onclick="showIsolatedNodes()" onmouseenter="this.style.borderColor='#f59e0b';this.style.boxShadow='0 4px 12px rgba(245,158,11,0.15)'" onmouseleave="this.style.borderColor='#fcd34d';this.style.boxShadow=''">
-            <div style="font-size:12px;color:#92400e;font-weight:600;margin-bottom:4px"><i class="fas fa-triangle-exclamation"></i> 고립 노드</div>
-            <div style="display:flex;align-items:baseline;justify-content:space-between">
-              <div>
-                <span id="lmStatIsolated" style="font-size:24px;font-weight:800;color:#f59e0b">—</span>
-                <span style="font-size:13px;color:#92400e">개</span>
-              </div>
-              <span style="font-size:12px;color:#92400e;font-weight:700">열기 →</span>
-            </div>
-          </div>
-        </div>
-
         <div class="stat-grid" id="learningMapStats"></div>
         <div class="card">
           <h3 style="font-size:16px;font-weight:600;margin-bottom:14px;"><i class="fas fa-file-excel" style="color:#10b981;"></i> 학습맵 Excel 업로드</h3>
@@ -407,6 +367,7 @@
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px;">
             <h3 style="font-size:16px;font-weight:600;"><i class="fas fa-link" style="color:#7c3aed;"></i> 노드-콘텐츠 매핑</h3>
             <div class="lm-toolbar" style="margin-bottom:0;">
+              <button class="lm-tool-btn primary" onclick="runAiAutoMap()" title="고립 차시 노드에 대해 AI 추천을 일괄 적용"><i class="fas fa-robot"></i> AI 자동 매핑</button>
               <button class="lm-tool-btn" onclick="exportMappingsCsv()"><i class="fas fa-file-export"></i> 내보내기</button>
               <button class="lm-tool-btn" onclick="openImportCsvDialog()"><i class="fas fa-file-import"></i> 가져오기</button>
               <input type="file" id="lmCsvFileInput" accept=".csv" style="display:none;" onchange="handleCsvFileSelected(event)">
@@ -1163,11 +1124,16 @@
         const res = await fetch('/api/admin/learning-map/mapping-stats', { credentials: 'include' });
         const d = await res.json();
         if (!d.success) return;
-        document.getElementById('lmStatRate').textContent = d.mappingRatePct;
-        document.getElementById('lmStatRateBarFill').style.width = d.mappingRatePct + '%';
-        document.getElementById('lmStatVideo').textContent = d.videoMappings.toLocaleString();
-        document.getElementById('lmStatQuiz').textContent = d.quizMappings.toLocaleString();
-        document.getElementById('lmStatIsolated').textContent = d.isolatedLessons.toLocaleString();
+        const setText = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+        const setStyle = (id, k, v) => { const el = document.getElementById(id); if (el) el.style[k] = v; };
+        setText('lmStatRate', d.mappingRatePct + '%');
+        setStyle('lmStatProgress', 'width', d.mappingRatePct + '%');
+        setText('lmStatRateSub', `${(d.mappedLessons||0).toLocaleString()} / ${(d.totalLessons||0).toLocaleString()}`);
+        setText('lmStatVideo', (d.videoMappings||0).toLocaleString());
+        setText('lmStatVideoSub', `평균 ${((d.videoMappings||0) / Math.max(1, d.totalLessons||1)).toFixed(1)}건/차시`);
+        setText('lmStatQuestion', (d.quizMappings||0).toLocaleString());
+        setText('lmStatQuestionSub', `평균 ${((d.quizMappings||0) / Math.max(1, d.totalLessons||1)).toFixed(1)}건/차시`);
+        setText('lmStatOrphan', (d.isolatedLessons||0).toLocaleString());
       } catch (e) { console.error('mapping-stats:', e); }
     }
 
@@ -1418,6 +1384,30 @@
 
     async function loadLmNodes(reset) {
       if (reset) { lmNodePage = 1; }
+      const onlyOrphan = !!document.getElementById('lmOnlyOrphan')?.checked;
+      const listEl = document.getElementById('lmNodeList');
+      if (reset) listEl.innerHTML = '<div style="color:#9ca3af;font-size:13px;padding:12px;">불러오는 중...</div>';
+      // "미매핑만 보기" → /isolated-nodes API 사용
+      if (onlyOrphan && reset) {
+        try {
+          const res = await fetch('/api/admin/learning-map/isolated-nodes?type=all&limit=200', { credentials: 'include' });
+          const d = await res.json();
+          if (!d.success) { listEl.innerHTML = `<div style="color:#ef4444;font-size:13px;padding:12px;">고립 노드 조회 실패</div>`; return; }
+          const nodes = (d.nodes || []).map(n => ({ ...n, node_level: 3, videos_count: 0, problems_count: 0 }));
+          listEl.innerHTML = '';
+          window._lmNodeCache = [];
+          if (!nodes.length) {
+            listEl.innerHTML = '<div style="color:#10b981;font-size:13px;padding:12px;text-align:center;"><i class="fas fa-check-circle"></i> 고립 노드가 없습니다!</div>';
+            return;
+          }
+          renderLmNodeList(nodes, true);
+          const moreBtn = document.getElementById('lmLoadMoreBtn');
+          if (moreBtn) moreBtn.style.display = 'none';
+        } catch (err) {
+          listEl.innerHTML = `<div style="color:#ef4444;font-size:13px;padding:12px;">네트워크 오류: ${escHtml(err.message||'')}</div>`;
+        }
+        return;
+      }
       const params = new URLSearchParams();
       const subj = document.getElementById('lmFilterSubject').value;
       const grade = document.getElementById('lmFilterGrade').value;
@@ -1431,8 +1421,6 @@
       params.set('nodeLevel', lv);
       params.set('page', String(lmNodePage));
       params.set('limit', String(lmNodeLimit));
-      const listEl = document.getElementById('lmNodeList');
-      if (reset) listEl.innerHTML = '<div style="color:#9ca3af;font-size:13px;padding:12px;">불러오는 중...</div>';
       try {
         const res = await fetch('/api/admin/learning-map/nodes?' + params.toString(), { credentials: 'include' });
         const data = await res.json();
@@ -1450,40 +1438,82 @@
       }
     }
 
+    // 매핑수 → 배지 클래스 (0=zero, 1~3=low, 4~9=mid, 10+=high)
+    function lmMapBadgeClass(total) {
+      if (!total || total <= 0) return 'zero';
+      if (total <= 3) return 'low';
+      if (total <= 9) return 'mid';
+      return 'high';
+    }
+
+    // 노드 캐시 (rerender용)
+    window._lmNodeCache = window._lmNodeCache || [];
+
     function renderLmNodeList(nodes, reset) {
       const listEl = document.getElementById('lmNodeList');
+      if (reset) window._lmNodeCache = [];
       if (reset && !nodes.length) {
         listEl.innerHTML = '<div style="color:#9ca3af;font-size:13px;padding:12px;">결과가 없습니다.</div>';
         return;
       }
+      window._lmNodeCache = window._lmNodeCache.concat(nodes);
+      const highlightEmpty = !!document.getElementById('lmHighlightEmpty')?.checked;
       nodes.forEach(n => {
         const card = document.createElement('div');
-        card.className = 'lm-node-card';
-        card.dataset.nodeId = n.node_id || n.id;
         const lv = Number(n.node_level ?? n.level ?? 3);
+        const vc = n.videos_count ?? 0;
+        const qc = n.problems_count ?? 0;
+        const total = vc + qc;
+        let statusClass = '';
+        if (lv === 3) {
+          if (total === 0) statusClass = 'empty';
+          else if (vc > 0 && qc > 0) statusClass = 'full';
+          else statusClass = 'partial';
+        }
+        // "미매핑 강조" 체크 해제 시 empty 시각만 끔
+        if (statusClass === 'empty' && !highlightEmpty) statusClass = '';
+        card.className = 'lm-node-card' + (statusClass ? ' ' + statusClass : '');
+        card.dataset.nodeId = n.node_id || n.id;
         card.dataset.nodeLevel = String(lv);
+        card.dataset.mapTotal = String(total);
         const unit = n.unit_name || n.parent_name || '';
-        // 레벨에 따라 단원명/차시명 우선. 빈 경우만 '학습 노드' fallback
         const title = (lv === 2
           ? (n.unit_name || n.node_name || n.lesson_name || n.name)
           : (n.lesson_name || n.node_name || n.unit_name || n.name)) || '학습 노드';
         const code = n.achievement_code || '';
-        const vc = n.videos_count ?? 0;
-        const qc = n.problems_count ?? 0;
         const levelBadge = lv === 2
           ? `<span class="badge" style="background:#ede9fe;color:#7c3aed;">단원</span>`
           : `<span class="badge" style="background:#dbeafe;color:#1d4ed8;">차시</span>`;
+        const mapBadge = lv === 3
+          ? `<span class="lm-mapcount-badge ${lmMapBadgeClass(total)}" title="매핑 ${total}건 (영상 ${vc} · 문항 ${qc})">${total}</span>`
+          : '';
         card.innerHTML = `
-          <div class="lm-node-title">${escHtml(title)}</div>
+          <div class="lm-node-title" style="display:flex;align-items:center;gap:6px;">
+            ${mapBadge}
+            <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;">${escHtml(title)}</span>
+          </div>
           <div class="lm-node-meta">
             ${levelBadge}
             ${unit && lv === 3 ? `<span>[${escHtml(unit)}]</span>` : ''}
             ${code ? `<span style="color:#7c3aed;">${escHtml(code)}</span>` : ''}
-            ${lv === 3 ? `<span class="badge badge-student">영상 ${vc}</span><span class="badge badge-teacher">문항 ${qc}</span>` : ''}
+            ${lv === 3 ? `<span style="color:#3b82f6;">▶ ${vc}</span><span style="color:#10b981;">✎ ${qc}</span>` : ''}
           </div>`;
         card.addEventListener('click', () => selectLmNode(card.dataset.nodeId, card, lv));
         listEl.appendChild(card);
       });
+    }
+
+    // "미매핑 강조" 토글 — 캐시에서 다시 그림
+    function rerenderNodeList() {
+      const listEl = document.getElementById('lmNodeList');
+      const cache = (window._lmNodeCache || []).slice();
+      listEl.innerHTML = '';
+      window._lmNodeCache = [];
+      if (!cache.length) {
+        listEl.innerHTML = '<div style="color:#9ca3af;font-size:13px;padding:12px;">필터를 선택하고 검색하세요.</div>';
+        return;
+      }
+      renderLmNodeList(cache, false);
     }
 
     async function selectLmNode(nodeId, cardEl, nodeLevel) {
@@ -1502,6 +1532,9 @@
       }
       currentNodeId = nodeId;
       await loadLmNodeContents(nodeId);
+      // 노드 선택 → 우측 패널이 자동으로 추천 콘텐츠 로드
+      switchSideMode('rec');
+      loadAutoSuggest(nodeId);
     }
 
     async function renderUnitDrilldown(unitId) {
@@ -1591,6 +1624,10 @@
       currentLmTab = type;
       document.querySelectorAll('.lm-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === type));
       if (window._lmMapCache) renderLmMappings(type, window._lmMapCache[type] || []);
+      // 탭 전환 시 추천도 해당 타입으로 새로 로드
+      if (currentNodeId && document.getElementById('lmModeRec')?.classList.contains('active')) {
+        loadAutoSuggest(currentNodeId);
+      }
     }
 
     function renderLmMappings(type, items) {
@@ -1622,24 +1659,18 @@
       });
     }
 
+    // 모달 폐기 — 사이드패널로 마이그레이션 (호환 stub)
     function openAddContentModal(type) {
-      if (!currentNodeId) { alert('먼저 차시 노드를 선택하세요.'); return; }
+      if (!currentNodeId) { lmShowToast('먼저 차시 노드를 선택하세요.', '#ef4444'); return; }
       currentLmTab = type;
-      document.getElementById('lmAddModalTitle').innerHTML = `<i class="fas fa-plus-circle"></i> ${type==='video'?'영상':'문항'} 추가`;
-      document.getElementById('lmPickKeyword').value = '';
-      document.getElementById('lmPickList').innerHTML = '<div style="color:#9ca3af;font-size:13px;padding:10px;">검색어를 입력하고 검색하세요.</div>';
-      const byIdInput = document.getElementById('lmByIdInput'); if (byIdInput) byIdInput.value = '';
-      const roleSel = document.getElementById('lmByIdRole'); if (roleSel) roleSel.value = (type === 'video' ? 'video' : 'question');
-      const resEl = document.getElementById('lmByIdResult'); if (resEl) resEl.textContent = '';
-      switchAddContentTab('search');
-      document.getElementById('lmAddContentModal').classList.add('active');
+      switchSideMode('search');
+      const sel = document.getElementById('lmSearchType'); if (sel) sel.value = (type === 'video' ? 'video' : 'question');
+      const kw = document.getElementById('lmPickKeyword'); if (kw) kw.focus();
     }
-
     function switchAddContentTab(tab) {
-      document.querySelectorAll('#lmAddContentModal .lm-tab[data-addtab]').forEach(t => t.classList.toggle('active', t.dataset.addtab === tab));
-      document.getElementById('lmAddTab-search').style.display = tab === 'search' ? '' : 'none';
-      document.getElementById('lmAddTab-byid').style.display = tab === 'byid' ? '' : 'none';
+      switchSideMode(tab === 'byid' ? 'id' : 'search');
     }
+    function closeLmAddContentModal() { /* 모달 폐기 — no-op */ }
 
     async function addContentById() {
       if (!currentNodeId) { alert('먼저 차시 노드를 선택하세요.'); return; }
@@ -1684,9 +1715,7 @@
       }
     }
 
-    function closeLmAddContentModal() {
-      document.getElementById('lmAddContentModal').classList.remove('active');
-    }
+    /* closeLmAddContentModal — 위에서 정의됨 (모달 폐기 stub) */
 
     async function searchPickableContents() {
       const kw = document.getElementById('lmPickKeyword').value.trim();
@@ -1784,6 +1813,387 @@
         if (!d1.success || !d2.success) { alert('순서 변경 실패'); return; }
         await loadLmNodeContents(currentNodeId);
       } catch (err) { alert('네트워크 오류: ' + err.message); }
+    }
+
+    // ======== F-P1: 사이드 패널 모드 전환 ========
+    function switchSideMode(mode) {
+      const panels = { rec: 'lmSidePanelRec', search: 'lmSidePanelSearch', id: 'lmSidePanelId' };
+      const btns = { rec: 'lmModeRec', search: 'lmModeSearch', id: 'lmModeId' };
+      Object.entries(panels).forEach(([k, id]) => {
+        const el = document.getElementById(id);
+        if (el) el.style.display = (k === mode) ? '' : 'none';
+      });
+      Object.entries(btns).forEach(([k, id]) => {
+        const el = document.getElementById(id);
+        if (el) el.classList.toggle('active', k === mode);
+      });
+    }
+
+    // ======== F-P1-1: AI 추천 자동 로드 ========
+    async function loadAutoSuggest(nodeId) {
+      const listEl = document.getElementById('lmRecList');
+      const countEl = document.getElementById('lmRecCount');
+      const applyAllBtn = document.getElementById('lmApplyAllBtn');
+      if (!listEl) return;
+      listEl.innerHTML = '<div style="color:#9ca3af;font-size:13px;padding:14px;text-align:center;"><i class="fas fa-spinner fa-spin"></i> AI 추천 분석 중…</div>';
+      try {
+        const type = currentLmTab === 'video' ? 'video' : 'quiz';
+        const res = await fetch(`/api/admin/learning-map/auto-suggest?nodeId=${encodeURIComponent(nodeId)}&type=${type}`, { credentials: 'include' });
+        const data = await res.json();
+        if (!data.success) {
+          listEl.innerHTML = `<div class="lm-empty"><p>${escHtml(data.message || '추천을 가져오지 못했어요.')}</p></div>`;
+          countEl.textContent = '(—)';
+          return;
+        }
+        const sug = data.suggestions || { high: [], mid: [], low: [] };
+        window._lmAutoSuggest = sug;
+        const totalCount = (sug.high||[]).length + (sug.mid||[]).length + (sug.low||[]).length;
+        countEl.textContent = `(${totalCount})`;
+        applyAllBtn.style.display = (sug.high && sug.high.length > 0) ? '' : 'none';
+        if (totalCount === 0) {
+          listEl.innerHTML = `<div class="lm-empty"><p>이 노드와 매칭되는 추천 콘텐츠가 없어요.<br><small style="color:#9ca3af;">검색 또는 ID로 직접 추가해 보세요.</small></p></div>`;
+          return;
+        }
+        const renderSection = (label, color, items, klass) => {
+          if (!items || !items.length) return '';
+          return `<div style="margin:10px 0 6px;font-size:11px;font-weight:700;color:${color};letter-spacing:.05em;">★ ${label} (${items.length})</div>` +
+            items.map(it => {
+              const acc = it.accuracy || 0;
+              const accClass = acc >= 80 ? 'high' : (acc >= 60 ? 'mid' : 'low');
+              const reason = (it.code_match ? '성취기준 일치 · ' : '') + (it.tok_total ? `키워드 ${it.tok_matched}/${it.tok_total}` : '');
+              return `<div class="lm-rec-card ${klass}" data-cid="${it.id}">
+                <div class="meta"><span class="accuracy ${accClass}">정확도 ${acc}%</span> · ${escHtml(it.content_type || '')}</div>
+                <div class="title">${escHtml(it.title || '(제목없음)')}</div>
+                <div class="meta">${escHtml(reason)}</div>
+                <div class="actions">
+                  <button class="add" onclick="applyRecMapping(${it.id}, '${escHtml(it.content_type || 'video')}')"><i class="fas fa-plus"></i> 매핑</button>
+                </div>
+              </div>`;
+            }).join('');
+        };
+        listEl.innerHTML =
+          renderSection('정확도 ≥ 80%', '#16a34a', sug.high, 'high') +
+          renderSection('정확도 60~80%', '#f59e0b', sug.mid, 'mid') +
+          renderSection('정확도 < 60%', '#9ca3af', sug.low, 'low');
+      } catch (err) {
+        listEl.innerHTML = `<div class="lm-empty"><p style="color:#ef4444;">네트워크 오류: ${escHtml(err.message)}</p></div>`;
+      }
+    }
+
+    // 추천 카드 [매핑] 버튼 — 1클릭 적용
+    async function applyRecMapping(contentId, contentType) {
+      if (!currentNodeId) { lmShowToast('노드를 먼저 선택하세요.', '#ef4444'); return; }
+      const role = (contentType === 'video') ? 'video' : 'question';
+      try {
+        const res = await fetch(`/api/admin/learning-map/nodes/${encodeURIComponent(currentNodeId)}/contents`, {
+          method: 'POST', credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ content_id: contentId, content_role: role, sort_order: 99 })
+        });
+        const data = await res.json();
+        if (!data.success) { lmShowToast('추가 실패: ' + (data.message || ''), '#ef4444'); return; }
+        lmShowToast('매핑 추가 완료');
+        // 우측 패널 유지 — 카드만 비활성화
+        const card = document.querySelector(`.lm-rec-card[data-cid="${contentId}"]`);
+        if (card) {
+          const btn = card.querySelector('button.add');
+          if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-check"></i> 추가됨'; }
+          card.style.opacity = '0.6';
+        }
+        await loadLmNodeContents(currentNodeId);
+        await loadMappingStats();
+      } catch (err) { lmShowToast('네트워크 오류: ' + err.message, '#ef4444'); }
+    }
+
+    // ≥80% 일괄 매핑
+    async function applyAllHighRecommendations() {
+      if (!currentNodeId || !window._lmAutoSuggest) return;
+      const high = window._lmAutoSuggest.high || [];
+      if (!high.length) { lmShowToast('정확도 ≥ 80% 추천이 없습니다.'); return; }
+      if (!confirm(`정확도 ≥ 80% 추천 ${high.length}건을 모두 매핑하시겠습니까?`)) return;
+      const mappings = high.map((it, i) => ({
+        nodeId: currentNodeId, contentId: it.id,
+        role: it.content_type === 'video' ? 'video' : 'question',
+        sortOrder: 100 + i
+      }));
+      try {
+        const res = await fetch('/api/admin/learning-map/mappings/bulk', {
+          method: 'POST', credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ mappings })
+        });
+        const data = await res.json();
+        if (!data.success) { lmShowToast('일괄 매핑 실패', '#ef4444'); return; }
+        lmShowToast(`삽입 ${data.inserted}건 / 스킵 ${data.skipped}건`);
+        await loadLmNodeContents(currentNodeId);
+        await loadAutoSuggest(currentNodeId);
+        await loadMappingStats();
+      } catch (err) { lmShowToast('네트워크 오류: ' + err.message, '#ef4444'); }
+    }
+
+    // ======== F-P1-4: 미매핑만 보기 (통계칩 클릭) ========
+    function filterOrphanNodes() {
+      const cb = document.getElementById('lmOnlyOrphan');
+      if (cb) { cb.checked = true; loadLmNodes(true); }
+      const wrap = document.querySelector('.lm-mapping-wrap');
+      if (wrap) wrap.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
+    // ======== F-P1-2: CSV 내보내기 ========
+    async function exportMappingsCsv() {
+      try {
+        const url = '/api/admin/learning-map/mappings/export';
+        // 인증 쿠키와 함께 다운로드 → fetch 후 blob 변환
+        const res = await fetch(url, { credentials: 'include' });
+        if (!res.ok) { lmShowToast('내보내기 실패', '#ef4444'); return; }
+        const blob = await res.blob();
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `node-content-mappings-${new Date().toISOString().slice(0,10)}.csv`;
+        document.body.appendChild(a); a.click(); a.remove();
+        lmShowToast('CSV 다운로드 완료');
+      } catch (err) { lmShowToast('네트워크 오류: ' + err.message, '#ef4444'); }
+    }
+
+    // ======== F-P1-2: CSV 가져오기 ========
+    function openImportCsvDialog() {
+      const input = document.getElementById('lmCsvFileInput');
+      if (input) { input.value = ''; input.click(); }
+    }
+
+    function parseCsv(text) {
+      // BOM 제거
+      const t = text.replace(/^﻿/, '').trim();
+      const lines = t.split(/\r?\n/);
+      if (!lines.length) return [];
+      const header = splitCsvLine(lines[0]).map(h => h.trim().toLowerCase());
+      const idx = {
+        node_id: header.indexOf('node_id'),
+        content_id: header.indexOf('content_id'),
+        role: header.indexOf('role'),
+        sort_order: header.indexOf('sort_order')
+      };
+      if (idx.node_id < 0 || idx.content_id < 0) {
+        throw new Error('CSV 헤더에 node_id, content_id가 필요합니다.');
+      }
+      const rows = [];
+      for (let i = 1; i < lines.length; i++) {
+        const line = lines[i]; if (!line.trim()) continue;
+        const cols = splitCsvLine(line);
+        rows.push({
+          nodeId: (cols[idx.node_id] || '').trim(),
+          contentId: Number((cols[idx.content_id] || '').trim()),
+          role: idx.role >= 0 ? ((cols[idx.role] || 'practice').trim() || 'practice') : 'practice',
+          sortOrder: idx.sort_order >= 0 ? (Number(cols[idx.sort_order] || 0) || 0) : 0
+        });
+      }
+      return rows;
+    }
+
+    function splitCsvLine(line) {
+      const out = []; let cur = ''; let inQ = false;
+      for (let i = 0; i < line.length; i++) {
+        const c = line[i];
+        if (c === '"') {
+          if (inQ && line[i+1] === '"') { cur += '"'; i++; }
+          else inQ = !inQ;
+        } else if (c === ',' && !inQ) { out.push(cur); cur = ''; }
+        else cur += c;
+      }
+      out.push(cur);
+      return out;
+    }
+
+    async function handleCsvFileSelected(ev) {
+      const file = ev.target.files && ev.target.files[0];
+      if (!file) return;
+      let mappings;
+      try {
+        const text = await file.text();
+        mappings = parseCsv(text);
+      } catch (err) {
+        alert('CSV 파싱 실패: ' + err.message);
+        return;
+      }
+      if (!mappings.length) { alert('CSV에 데이터 행이 없습니다.'); return; }
+      // 드라이런
+      try {
+        const res = await fetch('/api/admin/learning-map/mappings/bulk?dryRun=1', {
+          method: 'POST', credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ mappings, dryRun: true })
+        });
+        const data = await res.json();
+        if (!data.success) { alert('드라이런 실패: ' + (data.message || '')); return; }
+        showImportPreview(mappings, data);
+      } catch (err) { alert('네트워크 오류: ' + err.message); }
+    }
+
+    function showImportPreview(mappings, dry) {
+      const errors = dry.errors || [];
+      const insN = dry.willInsert ?? 0;
+      const skN = dry.willSkip ?? 0;
+      const errN = errors.length;
+      const html = `
+        <div id="lmImportOverlay" style="position:fixed;inset:0;background:rgba(15,23,42,.6);z-index:10100;display:flex;align-items:center;justify-content:center" onclick="if(event.target===this)document.getElementById('lmImportOverlay').remove()">
+          <div style="background:#fff;width:90vw;max-width:720px;max-height:85vh;border-radius:14px;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.4)">
+            <div style="padding:16px 20px;border-bottom:1px solid #e5e7eb;display:flex;justify-content:space-between;align-items:center;background:#f9fafb">
+              <div style="font-size:16px;font-weight:700;color:#0f172a"><i class="fas fa-file-import" style="color:#7c3aed"></i> CSV 가져오기 미리보기</div>
+              <button onclick="document.getElementById('lmImportOverlay').remove()" style="border:0;background:none;font-size:18px;cursor:pointer;color:#6b7280;width:32px;height:32px;border-radius:6px"><i class="fas fa-times"></i></button>
+            </div>
+            <div style="padding:16px 20px;border-bottom:1px solid #e5e7eb;display:grid;grid-template-columns:repeat(3,1fr);gap:10px">
+              <div style="padding:12px;background:#ecfdf5;border:1px solid #a7f3d0;border-radius:8px"><div style="font-size:11px;color:#065f46;font-weight:600">삽입 예정</div><div style="font-size:22px;font-weight:800;color:#10b981">${insN}</div></div>
+              <div style="padding:12px;background:#fff7ed;border:1px solid #fdba74;border-radius:8px"><div style="font-size:11px;color:#9a3412;font-weight:600">스킵 (중복)</div><div style="font-size:22px;font-weight:800;color:#f59e0b">${skN}</div></div>
+              <div style="padding:12px;background:${errN ? '#fef2f2' : '#f3f4f6'};border:1px solid ${errN ? '#fca5a5' : '#e5e7eb'};border-radius:8px"><div style="font-size:11px;color:${errN ? '#991b1b' : '#6b7280'};font-weight:600">오류</div><div style="font-size:22px;font-weight:800;color:${errN ? '#ef4444' : '#9ca3af'}">${errN}</div></div>
+            </div>
+            <div style="flex:1;overflow-y:auto;padding:14px 20px">
+              ${errN ? `<div style="font-size:13px;font-weight:700;color:#991b1b;margin-bottom:8px;">오류 항목 (적용 시 제외됨)</div>` +
+                errors.slice(0, 50).map(e => `<div style="padding:6px 10px;background:#fff;border:1px solid #fecaca;border-radius:6px;margin-bottom:4px;font-size:12px;color:#7f1d1d"><b>${escHtml(String(e.nodeId))}</b> · 콘텐츠 ${escHtml(String(e.contentId))} → ${escHtml(e.reason)}</div>`).join('') +
+                (errors.length > 50 ? `<div style="font-size:11px;color:#6b7280;padding:6px">… 외 ${errors.length - 50}건</div>` : '')
+                : `<div style="font-size:13px;color:#10b981;text-align:center;padding:20px"><i class="fas fa-check-circle" style="font-size:24px;margin-bottom:8px"></i><br>오류 없이 검증되었습니다.</div>`}
+            </div>
+            <div style="padding:14px 20px;border-top:1px solid #e5e7eb;display:flex;gap:10px;justify-content:flex-end;background:#fafbfc">
+              <button onclick="document.getElementById('lmImportOverlay').remove()" style="padding:10px 18px;border:1px solid #d1d5db;background:#fff;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer">취소</button>
+              <button id="lmImportConfirmBtn" style="padding:10px 18px;border:0;background:#7c3aed;color:#fff;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer"><i class="fas fa-check"></i> 확정 적용 (${insN}건)</button>
+            </div>
+          </div>
+        </div>`;
+      document.body.insertAdjacentHTML('beforeend', html);
+      document.getElementById('lmImportConfirmBtn').onclick = async () => {
+        const btn = document.getElementById('lmImportConfirmBtn');
+        btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 적용 중...';
+        try {
+          const res = await fetch('/api/admin/learning-map/mappings/bulk', {
+            method: 'POST', credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ mappings })
+          });
+          const data = await res.json();
+          if (!data.success) { lmShowToast('적용 실패: ' + (data.message || ''), '#ef4444'); return; }
+          document.getElementById('lmImportOverlay').remove();
+          lmShowToast(`삽입 ${data.inserted}건 / 스킵 ${data.skipped}건 / 오류 ${(data.errors||[]).length}건`);
+          await loadMappingStats();
+          if (currentNodeId) await loadLmNodeContents(currentNodeId);
+        } catch (err) { lmShowToast('네트워크 오류: ' + err.message, '#ef4444'); }
+      };
+    }
+
+    // ======== F-P1-3: AI 자동 매핑 (1클릭) ========
+    async function runAiAutoMap() {
+      const html = `
+        <div id="lmAiMapOverlay" style="position:fixed;inset:0;background:rgba(15,23,42,.6);z-index:10100;display:flex;align-items:center;justify-content:center">
+          <div style="background:#fff;width:90vw;max-width:680px;border-radius:14px;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.4)">
+            <div style="padding:16px 20px;border-bottom:1px solid #e5e7eb;background:linear-gradient(135deg,#7c3aed,#5b21b6);color:#fff;display:flex;justify-content:space-between;align-items:center">
+              <div style="font-size:16px;font-weight:700"><i class="fas fa-robot"></i> AI 자동 매핑</div>
+              <button id="lmAiMapClose" style="border:0;background:rgba(255,255,255,.2);font-size:18px;cursor:pointer;color:#fff;width:32px;height:32px;border-radius:6px"><i class="fas fa-times"></i></button>
+            </div>
+            <div id="lmAiMapBody" style="padding:20px"></div>
+            <div id="lmAiMapFooter" style="padding:14px 20px;border-top:1px solid #e5e7eb;display:flex;gap:10px;justify-content:flex-end;background:#fafbfc"></div>
+          </div>
+        </div>`;
+      document.body.insertAdjacentHTML('beforeend', html);
+      document.getElementById('lmAiMapClose').onclick = () => document.getElementById('lmAiMapOverlay').remove();
+      const body = document.getElementById('lmAiMapBody');
+      const footer = document.getElementById('lmAiMapFooter');
+
+      // Step 1: 고립 차시 노드 조회
+      body.innerHTML = `<div style="text-align:center;padding:24px"><i class="fas fa-spinner fa-spin" style="font-size:24px;color:#7c3aed"></i><div style="margin-top:14px;font-size:14px;color:#374151">단계 1/3 — 고립 차시 노드 조회 중…</div></div>`;
+      let isolated = [];
+      try {
+        const res = await fetch('/api/admin/learning-map/isolated-nodes?type=all&limit=200', { credentials: 'include' });
+        const d = await res.json();
+        if (!d.success) { body.innerHTML = `<div style="color:#ef4444">고립 노드 조회 실패</div>`; return; }
+        isolated = (d.nodes || []).filter(n => n.node_id);
+      } catch (err) { body.innerHTML = `<div style="color:#ef4444">네트워크 오류: ${escHtml(err.message)}</div>`; return; }
+
+      if (!isolated.length) {
+        body.innerHTML = `<div style="text-align:center;padding:24px;color:#10b981"><i class="fas fa-check-circle" style="font-size:32px"></i><div style="margin-top:10px;font-size:14px;color:#065f46">고립 차시 노드가 없습니다. 모든 노드에 매핑이 존재합니다.</div></div>`;
+        footer.innerHTML = `<button onclick="document.getElementById('lmAiMapOverlay').remove()" style="padding:10px 18px;border:1px solid #d1d5db;background:#fff;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer">닫기</button>`;
+        return;
+      }
+
+      // Step 2: 각 노드별 추천 분석 (병렬, 동시 8개)
+      const targetNodes = isolated.slice(0, 100); // 한 번에 최대 100노드
+      body.innerHTML = `
+        <div style="font-size:14px;color:#374151;margin-bottom:12px">단계 2/3 — ${targetNodes.length}개 노드의 AI 추천 분석</div>
+        <div style="height:8px;background:#e5e7eb;border-radius:4px;overflow:hidden"><div id="lmAiProgress" style="height:100%;width:0%;background:linear-gradient(90deg,#7c3aed,#a78bfa);transition:width .15s"></div></div>
+        <div id="lmAiProgressText" style="font-size:12px;color:#6b7280;margin-top:6px">0 / ${targetNodes.length}</div>`;
+
+      const results = []; // {nodeId, candidates: [{contentId, type, accuracy}]}
+      let done = 0;
+      const concurrency = 6;
+      const queue = targetNodes.slice();
+      async function worker() {
+        while (queue.length) {
+          const n = queue.shift();
+          try {
+            const [vRes, qRes] = await Promise.all([
+              fetch(`/api/admin/learning-map/auto-suggest?nodeId=${encodeURIComponent(n.node_id)}&type=video`, { credentials: 'include' }).then(r => r.json()).catch(() => ({})),
+              fetch(`/api/admin/learning-map/auto-suggest?nodeId=${encodeURIComponent(n.node_id)}&type=quiz`, { credentials: 'include' }).then(r => r.json()).catch(() => ({}))
+            ]);
+            const high = [];
+            ((vRes.suggestions && vRes.suggestions.high) || []).forEach(s => high.push({ contentId: s.id, type: 'video', accuracy: s.accuracy }));
+            ((qRes.suggestions && qRes.suggestions.high) || []).forEach(s => high.push({ contentId: s.id, type: 'question', accuracy: s.accuracy }));
+            results.push({ nodeId: n.node_id, lessonName: n.lesson_name, candidates: high });
+          } catch (e) { results.push({ nodeId: n.node_id, candidates: [] }); }
+          done++;
+          const pct = Math.round((done / targetNodes.length) * 100);
+          const pBar = document.getElementById('lmAiProgress'); if (pBar) pBar.style.width = pct + '%';
+          const pTxt = document.getElementById('lmAiProgressText'); if (pTxt) pTxt.textContent = `${done} / ${targetNodes.length}`;
+        }
+      }
+      await Promise.all(Array.from({ length: concurrency }, worker));
+
+      // Step 3: 결과 요약
+      const autoCandidates = []; // ≥80% (자동 적용 가능)
+      let nodesWithAuto = 0, nodesWithoutAuto = 0;
+      results.forEach(r => {
+        if (r.candidates.length) {
+          nodesWithAuto++;
+          // 노드별 영상 1개 + 문항 최대 2개 (과도한 매핑 방지)
+          const vids = r.candidates.filter(c => c.type === 'video').slice(0, 1);
+          const qs = r.candidates.filter(c => c.type === 'question').slice(0, 2);
+          [...vids, ...qs].forEach((c, i) => {
+            autoCandidates.push({ nodeId: r.nodeId, contentId: c.contentId, role: c.type, sortOrder: i + 1 });
+          });
+        } else {
+          nodesWithoutAuto++;
+        }
+      });
+
+      body.innerHTML = `
+        <div style="font-size:14px;color:#374151;margin-bottom:14px">단계 3/3 — 분석 결과</div>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px">
+          <div style="padding:14px;background:#ecfdf5;border:1px solid #a7f3d0;border-radius:10px"><div style="font-size:11px;color:#065f46;font-weight:600">자동 매핑 후보</div><div style="font-size:24px;font-weight:800;color:#10b981">${autoCandidates.length}</div><div style="font-size:11px;color:#065f46">정확도 ≥ 80%</div></div>
+          <div style="padding:14px;background:#fff7ed;border:1px solid #fdba74;border-radius:10px"><div style="font-size:11px;color:#9a3412;font-weight:600">검수 큐</div><div style="font-size:24px;font-weight:800;color:#f59e0b">${nodesWithAuto}</div><div style="font-size:11px;color:#9a3412">노드 (적용 대상)</div></div>
+          <div style="padding:14px;background:#f3f4f6;border:1px solid #e5e7eb;border-radius:10px"><div style="font-size:11px;color:#6b7280;font-weight:600">미적용 노드</div><div style="font-size:24px;font-weight:800;color:#9ca3af">${nodesWithoutAuto}</div><div style="font-size:11px;color:#6b7280">추천 부족</div></div>
+        </div>
+        <div style="font-size:12px;color:#6b7280;line-height:1.6;background:#f9fafb;padding:10px 14px;border-radius:8px;border:1px solid #e5e7eb">
+          정확도 ≥ 80%인 후보만 자동 적용합니다. 노드당 영상 1개 · 문항 최대 2개로 제한됩니다.
+        </div>`;
+      footer.innerHTML = `
+        <button onclick="document.getElementById('lmAiMapOverlay').remove()" style="padding:10px 18px;border:1px solid #d1d5db;background:#fff;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer">닫기</button>
+        <button id="lmAiMapApplyBtn" ${autoCandidates.length === 0 ? 'disabled style="opacity:.5;cursor:not-allowed"' : ''} style="padding:10px 18px;border:0;background:#7c3aed;color:#fff;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer"><i class="fas fa-bolt"></i> ≥80% 모두 매핑하기 (${autoCandidates.length}건)</button>`;
+
+      const applyBtn = document.getElementById('lmAiMapApplyBtn');
+      if (applyBtn && autoCandidates.length) {
+        applyBtn.onclick = async () => {
+          applyBtn.disabled = true; applyBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 적용 중…';
+          try {
+            const res = await fetch('/api/admin/learning-map/mappings/bulk', {
+              method: 'POST', credentials: 'include',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ mappings: autoCandidates })
+            });
+            const data = await res.json();
+            if (!data.success) { lmShowToast('일괄 적용 실패: ' + (data.message || ''), '#ef4444'); return; }
+            document.getElementById('lmAiMapOverlay').remove();
+            lmShowToast(`AI 자동 매핑 완료 — 삽입 ${data.inserted}건 / 스킵 ${data.skipped}건 / 오류 ${(data.errors||[]).length}건`);
+            await loadMappingStats();
+            await loadLmNodes(true);
+          } catch (err) { lmShowToast('네트워크 오류: ' + err.message, '#ef4444'); }
+        };
+      }
     }
 
     // 초기화
