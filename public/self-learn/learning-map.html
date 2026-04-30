@@ -378,8 +378,8 @@
     .drawer-footer .footer-cta-group{display:flex;gap:10px;align-items:center}
 
     /* Modal (problems, report, diag start picker) */
-    .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:10030;display:none;padding:24px;overflow-y:auto;-webkit-overflow-scrolling:touch}
-    .modal-overlay>.modal,.modal{z-index:10031}
+    .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:var(--z-modal);display:none;padding:24px;overflow-y:auto;-webkit-overflow-scrolling:touch}
+    .modal-overlay>.modal,.modal{z-index:calc(var(--z-modal) + 1)}
     .modal-overlay.show{display:flex;align-items:safe center;justify-content:center;min-height:100%}
     .modal{background:#fff;border-radius:var(--radius-lg);max-width:920px;width:100%;margin:auto;box-shadow:var(--shadow-lg);max-height:none;flex-shrink:0}
     .modal.modal-lg{max-width:1100px}
@@ -950,13 +950,13 @@
 
 <!-- ===== Video Player Modal ===== -->
 <div class="modal-overlay" id="videoPlayerModal">
-  <div class="modal" style="max-width:1020px;width:calc(100vw - 48px)">
-    <div class="modal-header">
+  <div class="modal" style="width:90vw;max-width:none;height:90vh;max-height:90vh;display:flex;flex-direction:column;border-radius:14px;overflow:hidden">
+    <div class="modal-header" style="flex-shrink:0">
       <div class="modal-title"><i class="fas fa-play-circle" style="color:var(--primary)"></i> <span id="videoPlayerTitle">학습 영상</span></div>
       <button class="drawer-close" onclick="closeVideoPlayer()" aria-label="영상 재생 닫기"><i class="fas fa-times"></i></button>
     </div>
-    <div class="modal-body" id="videoPlayerBody" style="padding:0;background:#000;min-height:480px;display:flex;flex-direction:column;align-items:stretch;justify-content:center"></div>
-    <div class="modal-actions" id="videoPlayerActions"></div>
+    <div class="modal-body" id="videoPlayerBody" style="padding:0;background:#000;flex:1;min-height:0;display:flex;flex-direction:column;align-items:stretch;justify-content:center"></div>
+    <div class="modal-actions" id="videoPlayerActions" style="flex-shrink:0"></div>
   </div>
 </div>
 
@@ -1666,7 +1666,7 @@ function jumpToArea(area, btnEl){
   document.querySelectorAll('.svg-node').forEach(el => {
     if (ids.has(el.dataset.nodeId)) el.classList.add('grade-flash');
   });
-  setTimeout(() => document.querySelectorAll('.svg-node').forEach(el => el.classList.remove('grade-flash')), 3600);
+  setTimeout(() => document.querySelectorAll('.svg-node').forEach(el => el.classList.remove('grade-flash')), 5000);
 }
 
 function jumpToGrade(ng){
@@ -1732,7 +1732,7 @@ function jumpToGrade(ng){
   });
   setTimeout(() => {
     document.querySelectorAll('.svg-node.grade-flash').forEach(el => el.classList.remove('grade-flash'));
-  }, 3600);
+  }, 5000);
 }
 
 function layoutNodes() {
@@ -2733,8 +2733,21 @@ function renderRelatedLearningSections(n) {
       // 3) 최소 스텁 — 드롭하지 않음
       return { _id: id, id, title: '(알 수 없음)' };
     };
-    prereqs = (adj.prereqs || []).map(id => resolveId(id, n && n.prerequisites));
-    nexts = (adj.downs || []).map(id => resolveId(id, n && n.nexts));
+    // [FIX] allEdges 1-hop + 백엔드 detail의 prerequisites/nexts(next_nodes) 합집합
+    // — allEdges에 차시 간 edge가 누락돼도 detail에서 보강하여 "이전/이어지는 학습 0" 오표시 방지
+    const mergeIds = (edgeIds, detailArr) => {
+      const out = [...(edgeIds || [])];
+      const seen = new Set(out);
+      (Array.isArray(detailArr) ? detailArr : []).forEach(p => {
+        const pid = (typeof p === 'string' || typeof p === 'number') ? p : (p && (p.node_id || p.id || p._id));
+        if (pid && !seen.has(pid)) { out.push(pid); seen.add(pid); }
+      });
+      return out;
+    };
+    const prereqIds = mergeIds(adj.prereqs, n && n.prerequisites);
+    const nextIds   = mergeIds(adj.downs,   n && n.nexts);
+    prereqs = prereqIds.map(id => resolveId(id, n && n.prerequisites));
+    nexts   = nextIds.map(id => resolveId(id, n && n.nexts));
   }
   let html = '';
   html += renderRelList(prereqs, 'prev', n);
@@ -3545,8 +3558,8 @@ function resolveVideoSource(v) {
   if (!url) return { kind: 'none', url: '' };
   const u = String(url).trim();
   const lower = u.toLowerCase();
-  // YouTube
-  const ytMatch = lower.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([a-z0-9_-]{6,})/i);
+  // YouTube — [FIX] videoId는 대소문자 구분(예: 2-bPbdJ-cRU). 원본 u에서 추출하고, 도메인만 lower 매칭.
+  const ytMatch = u.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([a-zA-Z0-9_-]{6,})/i);
   if (ytMatch) return { kind: 'youtube', videoId: ytMatch[1], watchUrl: `https://www.youtube.com/watch?v=${ytMatch[1]}` };
   // Vimeo
   const vmMatch = lower.match(/vimeo\.com\/(?:video\/)?(\d+)/);
@@ -3606,24 +3619,22 @@ function playVideo(videoIdOrObj) {
   }
 
   if (src.kind === 'video') {
-    body.innerHTML = `<video id="vpVideoEl" controls autoplay playsinline style="width:100%;max-height:70vh;background:#000" preload="metadata" src="${escHtml(src.url)}"></video>`;
+    body.innerHTML = `<video id="vpVideoEl" controls autoplay playsinline style="width:100%;height:100%;flex:1;background:#000;object-fit:contain" preload="metadata" src="${escHtml(src.url)}"></video>`;
     actions.innerHTML = `<button class="btn btn-ghost" onclick="closeVideoPlayer()">닫기</button>`;
   } else if (src.kind === 'youtube') {
     // IFrame Player API로 동적 로드 — onError로 차단 영상 자동 감지
     const ytPlayerDivId = 'ytPlayer_' + Date.now();
     body.innerHTML = `
-      <div style="position:relative;width:100%;background:#000;flex:1">
-        <div style="position:relative;width:100%;padding-top:56.25%">
-          <div id="${ytPlayerDivId}" style="position:absolute;inset:0"></div>
-          <div id="yt-fallback" style="display:none;position:absolute;inset:0;background:#111;flex-direction:column;align-items:center;justify-content:center;gap:16px;color:#fff;text-align:center;padding:24px">
-            <i class="fab fa-youtube" style="font-size:56px;color:#FF0000"></i>
-            <p style="margin:0;font-size:16px;font-weight:600">이 영상은 현재 창에서 재생할 수 없습니다.</p>
-            <p style="margin:0;font-size:13px;color:#999">채널 설정에 의해 외부 사이트 임베딩이 차단되었습니다.</p>
-            <a href="${escHtml(src.watchUrl)}" target="_blank" rel="noopener"
-              style="display:inline-flex;align-items:center;gap:8px;padding:12px 28px;background:#FF0000;color:#fff;border-radius:10px;font-weight:700;text-decoration:none;font-size:15px">
-              <i class="fab fa-youtube"></i> YouTube에서 직접 보기
-            </a>
-          </div>
+      <div style="position:relative;width:100%;height:100%;background:#000;flex:1;min-height:0">
+        <div id="${ytPlayerDivId}" style="position:absolute;inset:0;width:100%;height:100%"></div>
+        <div id="yt-fallback" style="display:none;position:absolute;inset:0;background:#111;flex-direction:column;align-items:center;justify-content:center;gap:16px;color:#fff;text-align:center;padding:24px">
+          <i class="fab fa-youtube" style="font-size:56px;color:#FF0000"></i>
+          <p style="margin:0;font-size:16px;font-weight:600">이 영상은 현재 창에서 재생할 수 없습니다.</p>
+          <p style="margin:0;font-size:13px;color:#999">채널 설정에 의해 외부 사이트 임베딩이 차단되었습니다.</p>
+          <a href="${escHtml(src.watchUrl)}" target="_blank" rel="noopener"
+            style="display:inline-flex;align-items:center;gap:8px;padding:12px 28px;background:#FF0000;color:#fff;border-radius:10px;font-weight:700;text-decoration:none;font-size:15px">
+            <i class="fab fa-youtube"></i> YouTube에서 직접 보기
+          </a>
         </div>
       </div>
       <div style="padding:10px 16px;background:#1a1a1a;display:flex;align-items:center;justify-content:flex-end;gap:12px">
@@ -3634,11 +3645,20 @@ function playVideo(videoIdOrObj) {
         </a>
       </div>`;
     // YT API 로드 후 플레이어 생성
+    // [FIX] youtube-nocookie.com (privacy-enhanced 모드)으로 임베드 정책 회피 시도
+    //       일부 채널이 일반 youtube.com 임베드만 차단하고 nocookie는 허용하는 케이스가 있음
     const createPlayer = () => {
       try {
         new YT.Player(ytPlayerDivId, {
+          host: 'https://www.youtube-nocookie.com',
           height: '100%', width: '100%', videoId: src.videoId,
-          playerVars: { autoplay: 1, rel: 0, modestbranding: 1 },
+          playerVars: {
+            autoplay: 1,
+            rel: 0,
+            modestbranding: 1,
+            playsinline: 1,
+            origin: window.location.origin
+          },
           events: {
             onError: (e) => {
               // 101, 150 = 임베딩 비허용 / 100 = 영상 없음 / 5 = HTML5 에러
@@ -3662,7 +3682,7 @@ function playVideo(videoIdOrObj) {
     }
     actions.innerHTML = `<button class="btn btn-ghost" onclick="closeVideoPlayer()">닫기</button>`;
   } else if (src.kind === 'iframe') {
-    body.innerHTML = `<iframe id="vpVideoEl" src="${escHtml(src.url)}" style="width:100%;aspect-ratio:16/9;border:0;background:#000" allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen></iframe>`;
+    body.innerHTML = `<iframe id="vpVideoEl" src="${escHtml(src.url)}" style="width:100%;height:100%;flex:1;border:0;background:#000" allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen></iframe>`;
     actions.innerHTML = `<button class="btn btn-ghost" onclick="closeVideoPlayer()">닫기</button>`;
   } else {
     body.innerHTML = `<div style="padding:40px;background:#fff;color:var(--gray-700);text-align:center;width:100%">
