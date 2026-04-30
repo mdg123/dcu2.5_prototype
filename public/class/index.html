@@ -196,7 +196,11 @@ body { font-family: 'Pretendard Variable', -apple-system, sans-serif; background
 .content-item:last-child { border-bottom: none; }
 .content-item:hover { background: var(--bg); }
 .content-item-title { font-size: 0.9375rem; font-weight: 500; margin-bottom: 0.25rem; display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; }
-.content-item-meta { font-size: 0.8125rem; color: var(--text-muted); display: flex; gap: 0.75rem; flex-wrap: wrap; }
+.content-item-meta { font-size: 0.8125rem; color: var(--text-muted); display: flex; gap: 0.625rem; flex-wrap: wrap; align-items: center; }
+.content-item-meta .meta-class { color: var(--text); font-weight: 500; }
+.content-item-meta .meta-class::after { content: '·'; margin-left: 0.625rem; color: var(--text-muted); }
+.content-item-meta .meta-date { color: var(--text-muted); }
+.content-item-meta .meta-due { color: #DC2626; font-weight: 500; }
 
 /* 활동 내역 */
 .activity-list { display: flex; flex-direction: column; gap: 12px; margin-top: 16px; }
@@ -679,14 +683,14 @@ function renderClassShortcuts() {
     const isOwner = cls.my_role === 'owner';
     const summary = classSummaryFor(cls.id);
 
-    // 종류별 칩 (0건은 비표시)
+    // 종류별 칩 (0건은 비표시) — 텍스트 라벨 + 색상 구분, 이모지 제거로 가독성 우선
     const chips = [];
-    if (nc.notices) chips.push(`<span class="cls-chip notice" title="새 공지 ${nc.notices}건">📣 ${nc.notices}</span>`);
-    if (nc.homework) chips.push(`<span class="cls-chip homework" title="새 과제 ${nc.homework}건">📋 ${nc.homework}</span>`);
-    if (nc.exams) chips.push(`<span class="cls-chip exam" title="새 평가 ${nc.exams}건">⭐ ${nc.exams}</span>`);
-    if (nc.posts) chips.push(`<span class="cls-chip post" title="새 게시글 ${nc.posts}건">💬 ${nc.posts}</span>`);
+    if (nc.notices) chips.push(`<span class="cls-chip notice" title="새 공지 ${nc.notices}건">공지 ${nc.notices}</span>`);
+    if (nc.homework) chips.push(`<span class="cls-chip homework" title="새 과제 ${nc.homework}건">과제 ${nc.homework}</span>`);
+    if (nc.exams) chips.push(`<span class="cls-chip exam" title="새 평가 ${nc.exams}건">평가 ${nc.exams}</span>`);
+    if (nc.posts) chips.push(`<span class="cls-chip post" title="새 게시글 ${nc.posts}건">게시글 ${nc.posts}</span>`);
 
-    // D-Day (가장 가까운 마감)
+    // D-Day (가장 가까운 마감) — 색상으로 긴급도 구분
     let isUrgent = false;
     if (summary.dDayMin !== null && summary.dDayMin !== undefined) {
       const dd = summary.dDayMin;
@@ -694,13 +698,13 @@ function renderClassShortcuts() {
       if (dd <= 1) { cls_name = 'dday-near'; isUrgent = dd <= 1; label = dd === 0 ? 'D-Day' : (dd < 0 ? `D+${-dd}` : `D-${dd}`); }
       else if (dd <= 7) { cls_name = 'dday-mid'; label = `D-${dd}`; }
       else { cls_name = 'dday-far'; label = `D-${dd}`; }
-      chips.push(`<span class="cls-chip ${cls_name}" title="가장 가까운 마감">⏰ ${label}</span>`);
+      chips.push(`<span class="cls-chip ${cls_name}" title="가장 가까운 마감">${label}</span>`);
     }
 
-    // 개설자 전용 추가 칩
+    // 개설자 전용 추가 칩 — 라벨 텍스트로 충분
     if (isOwner) {
-      if (summary.ungraded > 0) chips.push(`<span class="cls-chip ungraded" title="미채점 과제">✏️ 미채점 ${summary.ungraded}</span>`);
-      if (summary.missing > 0) chips.push(`<span class="cls-chip missing" title="미제출 학생">👥 미제출 ${summary.missing}</span>`);
+      if (summary.ungraded > 0) chips.push(`<span class="cls-chip ungraded" title="미채점 과제">미채점 ${summary.ungraded}</span>`);
+      if (summary.missing > 0) chips.push(`<span class="cls-chip missing" title="미제출 학생">미제출 ${summary.missing}</span>`);
     }
 
     // 새글 총합 배지 (모든 카드)
@@ -983,23 +987,23 @@ function renderTodayBanner(roleStats) {
 
   const items = [];
   if (role === 'student') {
-    if (roleStats.todayDueHw) items.push(`<span class="item">📋 마감 과제 ${roleStats.todayDueHw}건</span>`);
-    if (roleStats.pendingExams) items.push(`<span class="item">⭐ 미응시 평가 ${roleStats.pendingExams}건</span>`);
-    if (roleStats.unreadNotices) items.push(`<span class="item">📣 새 알림 ${roleStats.unreadNotices}건</span>`);
+    if (roleStats.todayDueHw) items.push(`<span class="item">마감 과제 ${roleStats.todayDueHw}건</span>`);
+    if (roleStats.pendingExams) items.push(`<span class="item">미응시 평가 ${roleStats.pendingExams}건</span>`);
+    if (roleStats.unreadNotices) items.push(`<span class="item">새 알림 ${roleStats.unreadNotices}건</span>`);
   } else if (role === 'parent') {
-    if (roleStats.todayDueHw) items.push(`<span class="item">👶 자녀 마감 ${roleStats.todayDueHw}건</span>`);
-    if (roleStats.unconfirmedContents) items.push(`<span class="item">📁 미확인 콘텐츠 ${roleStats.unconfirmedContents}개</span>`);
-    if (roleStats.unreadNotices) items.push(`<span class="item">📣 새 알림 ${roleStats.unreadNotices}건</span>`);
+    if (roleStats.todayDueHw) items.push(`<span class="item">자녀 마감 ${roleStats.todayDueHw}건</span>`);
+    if (roleStats.unconfirmedContents) items.push(`<span class="item">미확인 콘텐츠 ${roleStats.unconfirmedContents}개</span>`);
+    if (roleStats.unreadNotices) items.push(`<span class="item">새 알림 ${roleStats.unreadNotices}건</span>`);
   } else if (role === 'staff') {
-    if (roleStats.unreadNotices) items.push(`<span class="item">🏛 미확인 공지 ${roleStats.unreadNotices}건</span>`);
-    if (roleStats.weeklyEvents) items.push(`<span class="item">📅 이번 주 학사 ${roleStats.weeklyEvents}건</span>`);
-    if (roleStats.memberTotal) items.push(`<span class="item">👥 관리 멤버 ${roleStats.memberTotal}명</span>`);
+    if (roleStats.unreadNotices) items.push(`<span class="item">미확인 공지 ${roleStats.unreadNotices}건</span>`);
+    if (roleStats.weeklyEvents) items.push(`<span class="item">이번 주 학사 ${roleStats.weeklyEvents}건</span>`);
+    if (roleStats.memberTotal) items.push(`<span class="item">관리 멤버 ${roleStats.memberTotal}명</span>`);
   } else {
     // 교사/관리자
-    if (roleStats.ungraded) items.push(`<span class="item">✏️ 채점 대기 ${roleStats.ungraded}건</span>`);
-    if (roleStats.missingSubs) items.push(`<span class="item">⏰ 미제출 학생 ${roleStats.missingSubs}명</span>`);
-    if (roleStats.todayLessons) items.push(`<span class="item">📚 오늘 수업 ${roleStats.todayLessons}교시</span>`);
-    if (roleStats.examsDueSoon) items.push(`<span class="item">⭐ 마감 임박 평가 ${roleStats.examsDueSoon}건</span>`);
+    if (roleStats.ungraded) items.push(`<span class="item">채점 대기 ${roleStats.ungraded}건</span>`);
+    if (roleStats.missingSubs) items.push(`<span class="item">미제출 학생 ${roleStats.missingSubs}명</span>`);
+    if (roleStats.todayLessons) items.push(`<span class="item">오늘 수업 ${roleStats.todayLessons}교시</span>`);
+    if (roleStats.examsDueSoon) items.push(`<span class="item">마감 임박 평가 ${roleStats.examsDueSoon}건</span>`);
   }
 
   if (items.length === 0) {
@@ -1020,14 +1024,12 @@ function renderContentList(elId, items, type) {
     const href = type==='lesson' ? `/class/lesson-view.html?classId=${item.classId}&id=${item.id}` :
                  type==='homework' ? `/class/homework-view.html?classId=${item.classId}&id=${item.id}` :
                  `/class/class-home.html?id=${item.classId}`;
-    const icon = type==='lesson' ? '📖' : type==='homework' ? '✏️' : '🔔';
-    const clsIcon = type==='lesson' ? '🏫' : type==='homework' ? '📂' : '📢';
     return `<div class="content-item" onclick="location.href='${href}'">
-      <div class="content-item-title">${icon} ${escHtml(item.title)}</div>
+      <div class="content-item-title">${escHtml(item.title)}</div>
       <div class="content-item-meta">
-        <span>${clsIcon} ${escHtml(item.className)}</span>
-        <span>📅 ${(item.created_at||'').slice(0,10)}</span>
-        ${item.due_date ? `<span>⏰ ~${item.due_date.slice(0,10)}</span>` : ''}
+        <span class="meta-class">${escHtml(item.className)}</span>
+        <span class="meta-date">${(item.created_at||'').slice(0,10)}</span>
+        ${item.due_date ? `<span class="meta-due">~${item.due_date.slice(0,10)} 마감</span>` : ''}
       </div>
     </div>`;
   }).join('');
@@ -1130,7 +1132,7 @@ function renderActivityList() {
           <span>${labels[item.type]}</span>
         </div>
         <div class="activity-title">${escHtml(item.title)} ${isUrgent ? '<span class="d-day-badge">D-Day</span>' : daysLeft !== null && daysLeft <= 3 && daysLeft > 0 ? `<span class="d-day-badge" style="background:#f59e0b;">D-${daysLeft}</span>` : ''}</div>
-        <div class="activity-date">📅 ${(item.date||'').slice(0,10)} ${item.dueDate ? '~ '+item.dueDate.slice(0,10) : ''}</div>
+        <div class="activity-date">${(item.date||'').slice(0,10)}${item.dueDate ? ' ~ '+item.dueDate.slice(0,10)+' 마감' : ''}</div>
       </div>
       ${item.submitted !== undefined && item.myRole === 'owner' ? `
         <div class="activity-progress">
