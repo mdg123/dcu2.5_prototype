@@ -583,6 +583,11 @@ function setClassFilter(filter) {
   });
   renderClassShortcuts();
   renderActivityList();
+  // [FIX] 필터에 따라 4슬롯 통계와 오늘 할 일 배너도 즉시 갱신
+  if (window._lastRoleStats) {
+    renderStatsGrid(window._lastRoleStats);
+    renderTodayBanner(window._lastRoleStats);
+  }
 }
 
 // ===== 클래스 로드 =====
@@ -894,7 +899,10 @@ async function loadDashboardData() {
     if (d >= now && d <= weekEnd) roleStats.weeklyEvents++;
   });
 
-  // 통계 카드 렌더 (역할별 분기)
+  // 필터 변경 시 재사용을 위해 roleStats 캐시
+  window._lastRoleStats = roleStats;
+
+  // 통계 카드 렌더 (역할 + 필터 분기)
   renderStatsGrid(roleStats);
 
   // 오늘 할 일 배너
@@ -916,11 +924,26 @@ async function loadDashboardData() {
   renderClassShortcuts();
 }
 
-// 역할별 4슬롯 라벨 매핑
+// 역할별 4슬롯 라벨 매핑 — currentFilter에 따라 개설자/멤버 시각 강제
 function getStatSlotsForRole(roleStats) {
   const role = getUserRole();
-  // 학생
-  if (role === 'student') {
+  // 필터가 명시적이면 그 시각으로 강제 (참여=멤버, 개설=개설자)
+  // 필터=전체일 때는 본인 기본 역할 기준 (교사·교직원·관리자=개설자, 학생·학부모=멤버)
+  const viewMode = currentFilter === 'owner' ? 'owner'
+                 : currentFilter === 'member' ? 'member'
+                 : (role === 'teacher' || role === 'staff' || role === 'admin') ? 'owner' : 'member';
+
+  // 멤버 시각 (참여 클래스 입장)
+  if (viewMode === 'member') {
+    if (role === 'parent') {
+      return [
+        { title: '미확인 콘텐츠', value: roleStats.unconfirmedContents, unit: '개', icon: '📁', iconBg: '#DBEAFE', bar: 'blue', footer: '자녀가 안 본 수업' },
+        { title: '곧 마감', value: roleStats.todayDueHw, unit: '건', icon: '⏰', iconBg: '#FEF3C7', bar: 'orange', footer: '오늘 마감 과제' },
+        { title: '새 알림', value: roleStats.unreadNotices, unit: '건', icon: '📣', iconBg: '#D1FAE5', bar: 'green', footer: '최근 7일' },
+        { title: '자녀 출결', value: 1, unit: '명 출석', icon: '👶', iconBg: '#EDE9FE', bar: 'purple', footer: '오늘 출결' }
+      ];
+    }
+    // 학생/교사·교직원이 멤버 입장으로 볼 때 공통 — 학생형 슬롯
     return [
       { title: '오늘 마감', value: roleStats.todayDueHw, unit: '건', icon: '📋', iconBg: '#FEF3C7', bar: 'orange', footer: '오늘 안에 내야 해요' },
       { title: '미응시 평가', value: roleStats.pendingExams, unit: '건', icon: '⭐', iconBg: '#EDE9FE', bar: 'purple', footer: '진행 중 평가' },
@@ -928,16 +951,8 @@ function getStatSlotsForRole(roleStats) {
       { title: '미확인 콘텐츠', value: roleStats.unconfirmedContents, unit: '개', icon: '📁', iconBg: '#D1FAE5', bar: 'green', footer: '아직 안 본 수업' }
     ];
   }
-  // 학부모
-  if (role === 'parent') {
-    return [
-      { title: '미확인 콘텐츠', value: roleStats.unconfirmedContents, unit: '개', icon: '📁', iconBg: '#DBEAFE', bar: 'blue', footer: '자녀가 안 본 수업' },
-      { title: '곧 마감', value: roleStats.todayDueHw, unit: '건', icon: '⏰', iconBg: '#FEF3C7', bar: 'orange', footer: '오늘 마감 과제' },
-      { title: '새 알림', value: roleStats.unreadNotices, unit: '건', icon: '📣', iconBg: '#D1FAE5', bar: 'green', footer: '최근 7일' },
-      { title: '자녀 출결', value: 1, unit: '명 출석', icon: '👶', iconBg: '#EDE9FE', bar: 'purple', footer: '오늘 출결' }
-    ];
-  }
-  // 교직원
+
+  // 개설자 시각 (개설 클래스 입장)
   if (role === 'staff') {
     return [
       { title: '미확인 공지', value: roleStats.unreadNotices, unit: '건', icon: '🏛', iconBg: '#DBEAFE', bar: 'blue', footer: '최근 7일' },
@@ -946,7 +961,7 @@ function getStatSlotsForRole(roleStats) {
       { title: '안내 완료율', value: 100, unit: '%', icon: '✅', iconBg: '#EDE9FE', bar: 'purple', footer: '시범 데이터' }
     ];
   }
-  // 교사·관리자 (개설 입장 우선)
+  // 교사·관리자·학생개설자·학부모개설자 — 개설자형 슬롯
   return [
     { title: '채점 대기', value: roleStats.ungraded, unit: '건', icon: '✏️', iconBg: '#FEE2E2', bar: 'orange', footer: '아직 채점 안 한 과제' },
     { title: '미제출 학생', value: roleStats.missingSubs, unit: '명', icon: '👥', iconBg: '#FEF3C7', bar: 'orange', footer: '진행 중 과제 합계' },
@@ -985,25 +1000,35 @@ function renderTodayBanner(roleStats) {
   const role = getUserRole();
   titleEl.textContent = `오늘 할 일 · ${formatBannerDate()}`;
 
+  // [FIX] currentFilter에 따라 개설자/멤버 시각 분기 (4슬롯과 동일 로직)
+  const viewMode = currentFilter === 'owner' ? 'owner'
+                 : currentFilter === 'member' ? 'member'
+                 : (role === 'teacher' || role === 'staff' || role === 'admin') ? 'owner' : 'member';
+
   const items = [];
-  if (role === 'student') {
-    if (roleStats.todayDueHw) items.push(`<span class="item">마감 과제 ${roleStats.todayDueHw}건</span>`);
-    if (roleStats.pendingExams) items.push(`<span class="item">미응시 평가 ${roleStats.pendingExams}건</span>`);
-    if (roleStats.unreadNotices) items.push(`<span class="item">새 알림 ${roleStats.unreadNotices}건</span>`);
-  } else if (role === 'parent') {
-    if (roleStats.todayDueHw) items.push(`<span class="item">자녀 마감 ${roleStats.todayDueHw}건</span>`);
-    if (roleStats.unconfirmedContents) items.push(`<span class="item">미확인 콘텐츠 ${roleStats.unconfirmedContents}개</span>`);
-    if (roleStats.unreadNotices) items.push(`<span class="item">새 알림 ${roleStats.unreadNotices}건</span>`);
-  } else if (role === 'staff') {
-    if (roleStats.unreadNotices) items.push(`<span class="item">미확인 공지 ${roleStats.unreadNotices}건</span>`);
-    if (roleStats.weeklyEvents) items.push(`<span class="item">이번 주 학사 ${roleStats.weeklyEvents}건</span>`);
-    if (roleStats.memberTotal) items.push(`<span class="item">관리 멤버 ${roleStats.memberTotal}명</span>`);
+  if (viewMode === 'member') {
+    // 멤버(참여) 시각
+    if (role === 'parent') {
+      if (roleStats.todayDueHw) items.push(`<span class="item">자녀 마감 ${roleStats.todayDueHw}건</span>`);
+      if (roleStats.unconfirmedContents) items.push(`<span class="item">미확인 콘텐츠 ${roleStats.unconfirmedContents}개</span>`);
+      if (roleStats.unreadNotices) items.push(`<span class="item">새 알림 ${roleStats.unreadNotices}건</span>`);
+    } else {
+      if (roleStats.todayDueHw) items.push(`<span class="item">마감 과제 ${roleStats.todayDueHw}건</span>`);
+      if (roleStats.pendingExams) items.push(`<span class="item">미응시 평가 ${roleStats.pendingExams}건</span>`);
+      if (roleStats.unreadNotices) items.push(`<span class="item">새 알림 ${roleStats.unreadNotices}건</span>`);
+    }
   } else {
-    // 교사/관리자
-    if (roleStats.ungraded) items.push(`<span class="item">채점 대기 ${roleStats.ungraded}건</span>`);
-    if (roleStats.missingSubs) items.push(`<span class="item">미제출 학생 ${roleStats.missingSubs}명</span>`);
-    if (roleStats.todayLessons) items.push(`<span class="item">오늘 수업 ${roleStats.todayLessons}교시</span>`);
-    if (roleStats.examsDueSoon) items.push(`<span class="item">마감 임박 평가 ${roleStats.examsDueSoon}건</span>`);
+    // 개설자 시각
+    if (role === 'staff') {
+      if (roleStats.unreadNotices) items.push(`<span class="item">미확인 공지 ${roleStats.unreadNotices}건</span>`);
+      if (roleStats.weeklyEvents) items.push(`<span class="item">이번 주 학사 ${roleStats.weeklyEvents}건</span>`);
+      if (roleStats.memberTotal) items.push(`<span class="item">관리 멤버 ${roleStats.memberTotal}명</span>`);
+    } else {
+      if (roleStats.ungraded) items.push(`<span class="item">채점 대기 ${roleStats.ungraded}건</span>`);
+      if (roleStats.missingSubs) items.push(`<span class="item">미제출 학생 ${roleStats.missingSubs}명</span>`);
+      if (roleStats.todayLessons) items.push(`<span class="item">오늘 수업 ${roleStats.todayLessons}교시</span>`);
+      if (roleStats.examsDueSoon) items.push(`<span class="item">마감 임박 평가 ${roleStats.examsDueSoon}건</span>`);
+    }
   }
 
   if (items.length === 0) {
