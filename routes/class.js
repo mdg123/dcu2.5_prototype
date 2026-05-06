@@ -275,8 +275,10 @@ router.post('/:classId/visit', requireAuth, (req, res) => {
   }
 });
 
-// GET /api/class/:classId/owner-summary?type=ungraded|missing
+// GET /api/class/:classId/owner-summary?type=ungraded|missing|counts
 // [개설자 전용] 클래스 카드 칩 클릭 시 표시할 미채점/미제출 상세 목록
+// 응답에는 미채점/미제출뿐 아니라 제출자·채점 완료자 명단도 함께 포함되어
+// 모달에서 해당 과제의 종합 현황(미제출/제출/채점완료)을 한눈에 볼 수 있음.
 router.get('/:classId/owner-summary', requireAuth, (req, res) => {
   try {
     const classId = parseInt(req.params.classId);
@@ -337,55 +339,83 @@ router.get('/:classId/owner-summary', requireAuth, (req, res) => {
 
     if (type === 'ungraded') {
       // 미채점: 제출은 했으나 score IS NULL 인 항목
-      // 과제별 제출 학생 정보 + 과제 메타
-      const rows = db.prepare(`
-        SELECT hs.id as submission_id, hs.homework_id, hs.student_id, hs.submitted_at, hs.status,
-               h.title as homework_title, h.due_date, h.max_score,
-               u.display_name as student_name, u.username as student_username
-        FROM homework_submissions hs
-        JOIN homework h ON h.id = hs.homework_id
-        JOIN users u ON u.id = hs.student_id
+      // ★ 확장: 채점 완료 제출자, 미제출 학생도 함께 반환하여 모달에서 종합 현황 제공
+      // 미채점 제출이 1건 이상 있는 과제만 대상으로 한다.
+
+      // 1) 미채점 제출이 1건 이상 있는 homework 목록
+      const targetHomeworks = db.prepare(`
+        SELECT DISTINCT h.id, h.title, h.due_date, h.max_score
+        FROM homework h
+        JOIN homework_submissions hs ON hs.homework_id = h.id
         WHERE h.class_id = ?
           AND (h.status IS NULL OR h.status = 'published')
           AND hs.score IS NULL
-        ORDER BY hs.submitted_at ASC
+        ORDER BY h.due_date ASC, h.id ASC
       `).all(classId);
 
-      // 과제 단위로 그룹화
-      const map = new Map();
-      rows.forEach(r => {
-        if (!map.has(r.homework_id)) {
-          map.set(r.homework_id, {
-            homework_id: r.homework_id,
-            title: r.homework_title,
-            due_date: r.due_date,
-            max_score: r.max_score,
-            submissions: []
-          });
+      const memberMap = new Map(members.map(m => [m.id, m]));
+      const groups = [];
+      let totalUngradedCount = 0;
+
+      for (const hw of targetHomeworks) {
+        const subs = db.prepare(`
+          SELECT hs.id as submission_id, hs.student_id, hs.submitted_at, hs.status, hs.score,
+                 u.display_name as student_name, u.username as student_username
+          FROM homework_submissions hs
+          JOIN users u ON u.id = hs.student_id
+          WHERE hs.homework_id = ?
+          ORDER BY hs.submitted_at ASC
+        `).all(hw.id);
+
+        const ungraded_submissions = [];
+        const graded_submissions = [];
+        const submittedIds = new Set();
+        for (const s of subs) {
+          submittedIds.add(s.student_id);
+          const row = {
+            submission_id: s.submission_id,
+            student_id: s.student_id,
+            student_name: s.student_name,
+            student_username: s.student_username,
+            submitted_at: s.submitted_at,
+            status: s.status,
+            score: s.score
+          };
+          if (s.score === null || s.score === undefined) ungraded_submissions.push(row);
+          else graded_submissions.push(row);
         }
-        map.get(r.homework_id).submissions.push({
-          submission_id: r.submission_id,
-          student_id: r.student_id,
-          student_name: r.student_name,
-          student_username: r.student_username,
-          submitted_at: r.submitted_at,
-          status: r.status
+
+        // 미제출 멤버
+        const missing_members = members
+          .filter(m => !submittedIds.has(m.id))
+          .map(m => ({
+            student_id: m.id,
+            student_name: m.display_name,
+            student_username: m.username
+          }));
+
+        totalUngradedCount += ungraded_submissions.length;
+
+        groups.push({
+          homework_id: hw.id,
+          title: hw.title,
+          due_date: hw.due_date,
+          max_score: hw.max_score,
+          total_members: members.length,
+          ungraded_submissions,
+          graded_submissions,
+          missing_members,
+          // 하위 호환: 기존 클라이언트가 submissions(미채점)만 참조했음
+          submissions: ungraded_submissions
         });
-      });
+      }
 
-      const groups = Array.from(map.values()).sort((a, b) => {
-        // 마감일 가까운 순(없으면 뒤로)
-        const da = a.due_date ? new Date(a.due_date).getTime() : Infinity;
-        const db = b.due_date ? new Date(b.due_date).getTime() : Infinity;
-        return da - db;
-      });
-
-      const totalCount = rows.length;
-      return res.json({ success: true, type, groups, totalCount });
+      return res.json({ success: true, type, groups, totalCount: totalUngradedCount, totalMembers: members.length });
     }
 
     if (type === 'missing') {
-      // 미제출: 과제(published & due_date 존재) 와 평가(active|waiting) 에서 멤버 중 미제출/미응시
+      // 미제출: 과제(published) 와 평가(active|waiting) 에서 멤버 중 미제출/미응시
+      // ★ 확장: 미제출자뿐 아니라 제출자(채점 상태 포함)도 함께 반환해 종합 현황 표시
       // -- 과제 미제출
       const homeworks = db.prepare(`
         SELECT id, title, due_date, max_score, status
@@ -397,23 +427,45 @@ router.get('/:classId/owner-summary', requireAuth, (req, res) => {
       const homeworkGroups = [];
       let homeworkMissingCount = 0;
       for (const hw of homeworks) {
-        const submitted = db.prepare(
-          'SELECT student_id FROM homework_submissions WHERE homework_id = ?'
-        ).all(hw.id);
-        const submittedSet = new Set(submitted.map(s => s.student_id));
+        const subs = db.prepare(`
+          SELECT hs.student_id, hs.submitted_at, hs.status, hs.score,
+                 u.display_name as student_name, u.username as student_username
+          FROM homework_submissions hs
+          JOIN users u ON u.id = hs.student_id
+          WHERE hs.homework_id = ?
+          ORDER BY hs.submitted_at ASC
+        `).all(hw.id);
+        const submittedSet = new Set(subs.map(s => s.student_id));
         const missing = members.filter(m => !submittedSet.has(m.id));
-        if (missing.length === 0) continue;
+        if (missing.length === 0) continue; // 미제출 0인 과제는 모달에 노출하지 않음
         homeworkMissingCount += missing.length;
+
+        const submitted_members = subs.map(s => ({
+          student_id: s.student_id,
+          student_name: s.student_name,
+          student_username: s.student_username,
+          submitted_at: s.submitted_at,
+          status: s.status,
+          score: s.score,
+          graded: !(s.score === null || s.score === undefined)
+        }));
+        const graded_count = submitted_members.filter(s => s.graded).length;
+        const ungraded_count = submitted_members.length - graded_count;
+
         homeworkGroups.push({
           item_id: hw.id,
           item_type: 'homework',
           title: hw.title,
           due_date: hw.due_date,
+          total_members: members.length,
           missing_members: missing.map(m => ({
             student_id: m.id,
             student_name: m.display_name,
             student_username: m.username
-          }))
+          })),
+          submitted_members,
+          graded_count,
+          ungraded_count
         });
       }
 
@@ -428,24 +480,47 @@ router.get('/:classId/owner-summary', requireAuth, (req, res) => {
       const examGroups = [];
       let examMissingCount = 0;
       for (const ex of exams) {
-        // 응시 완료 학생 (submitted)
-        const submitted = db.prepare(
-          "SELECT user_id FROM exam_students WHERE exam_id = ? AND status = 'submitted'"
-        ).all(ex.id);
-        const submittedSet = new Set(submitted.map(s => s.user_id));
+        // 응시 학생 전체(상태 포함) — 모달에 응시 명단 표시용
+        const examStudents = db.prepare(`
+          SELECT es.user_id, es.status, es.submitted_at, es.total_score,
+                 u.display_name as student_name, u.username as student_username
+          FROM exam_students es
+          JOIN users u ON u.id = es.user_id
+          WHERE es.exam_id = ?
+        `).all(ex.id);
+        const submittedSet = new Set(
+          examStudents.filter(s => s.status === 'submitted').map(s => s.user_id)
+        );
         const missing = members.filter(m => !submittedSet.has(m.id));
         if (missing.length === 0) continue;
         examMissingCount += missing.length;
+
+        const submitted_members = examStudents
+          .filter(s => s.status === 'submitted')
+          .map(s => ({
+            student_id: s.user_id,
+            student_name: s.student_name,
+            student_username: s.student_username,
+            submitted_at: s.submitted_at,
+            status: s.status,
+            score: s.total_score,
+            graded: !(s.total_score === null || s.total_score === undefined)
+          }));
+
         examGroups.push({
           item_id: ex.id,
           item_type: 'exam',
           title: ex.title,
           due_date: ex.end_date,
+          total_members: members.length,
           missing_members: missing.map(m => ({
             student_id: m.id,
             student_name: m.display_name,
             student_username: m.username
-          }))
+          })),
+          submitted_members,
+          graded_count: submitted_members.filter(s => s.graded).length,
+          ungraded_count: submitted_members.filter(s => !s.graded).length
         });
       }
 
@@ -456,7 +531,8 @@ router.get('/:classId/owner-summary', requireAuth, (req, res) => {
         groups: { homework: homeworkGroups, exam: examGroups },
         totalCount,
         homeworkMissingCount,
-        examMissingCount
+        examMissingCount,
+        totalMembers: members.length
       });
     }
 
