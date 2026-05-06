@@ -155,11 +155,10 @@
     .today-action-item[data-severity="urgent"] .count-badge { background: rgba(239,68,68,0.12); color: var(--danger); }
     .today-action-item[data-severity="warning"] .count-badge { background: rgba(245,158,11,0.16); color: #B45309; }
 
-    /* ===== 퀵메뉴 + 대시보드 ===== */
+    /* ===== 퀵메뉴 (1줄 풀와이드) + 대시보드 (별도 줄) ===== */
     .top-section {
-      display: grid; grid-template-columns: 1fr 2fr; gap: 24px; margin-bottom: 24px;
+      display: flex; flex-direction: column; gap: 24px; margin-bottom: 24px;
     }
-    @media (max-width: 1024px) { .top-section { grid-template-columns: 1fr; } }
 
     .quick-menu-card {
       background: white; border-radius: var(--radius-lg); padding: 20px; box-shadow: var(--shadow);
@@ -182,6 +181,15 @@
     .quick-menu-grid.cols-3 { grid-template-columns: repeat(3, 1fr); }
     .quick-menu-grid.cols-4 { grid-template-columns: repeat(4, 1fr); }
     .quick-menu-grid.cols-5 { grid-template-columns: repeat(5, 1fr); }
+    .quick-menu-grid.cols-6 { grid-template-columns: repeat(6, 1fr); }
+    .quick-menu-grid.cols-7 { grid-template-columns: repeat(7, 1fr); }
+    .quick-menu-grid.cols-8 { grid-template-columns: repeat(8, 1fr); }
+    @media (max-width: 1024px) {
+      .quick-menu-grid.cols-6, .quick-menu-grid.cols-7, .quick-menu-grid.cols-8 { grid-template-columns: repeat(4, 1fr); }
+    }
+    @media (max-width: 640px) {
+      .quick-menu-grid { grid-template-columns: repeat(3, 1fr) !important; }
+    }
 
     .quick-menu-item {
       display: flex; flex-direction: column; align-items: center; gap: 8px;
@@ -543,7 +551,7 @@
       width: 44px; height: 44px; border-radius: 12px;
       display: flex; align-items: center; justify-content: center; font-size: 1.2rem; color: white;
     }
-    .all-service-name { font-size: 16px; font-weight: 600; color: var(--gray-800); }
+    .all-service-name { font-size: 16px; font-weight: 600; color: var(--gray-800); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
     .all-service-rec-badge { font-size: 13px; font-weight: 700; padding: 4px 12px; background: #FDE68A; color: #B45309; border-radius: 8px; margin-left: 6px; }
     .all-service-external { font-size: 13px; color: var(--gray-400); margin-left: 4px; }
 
@@ -1154,11 +1162,10 @@
     function renderQuickMenu() {
       const grid = document.getElementById('quickMenuGrid');
       const count = selectedQuickKeys.length;
-      let cols = 3;
-      if (count <= 4) cols = 2;
-      else if (count <= 9) cols = 3;
-      else if (count <= 12) cols = 4;
-      else cols = 5;
+      // 항상 1줄 풀와이드 (사용자 요구) — 카드 갯수만큼 가로로 배치
+      // 8개를 초과하면 5열로 한 줄 + 다음 줄로 자연스럽게 흐름
+      let cols = Math.min(count, 8);
+      if (cols < 2) cols = 2;
       grid.className = 'quick-menu-grid cols-' + cols;
 
       grid.innerHTML = selectedQuickKeys.map(key => {
@@ -1186,9 +1193,9 @@
         if (role === 'parent' && i === 0) return `자녀 ${values[0]}명`;
         return cfg.label;
       });
-      // 학부모 슬롯 4: 출결률 % 표기
+      // 학부모 슬롯 4: 출결률 % 표기 ('-' 데이터 없음 시 그대로 노출)
       const displayValues = values.map((v, i) => {
-        if (role === 'parent' && i === 3) return `${v}%`;
+        if (role === 'parent' && i === 3) return v === '-' ? '-' : `${v}%`;
         if (role === 'parent' && i === 0) return v; // 라벨이 N명이라 숫자 그대로
         return v;
       });
