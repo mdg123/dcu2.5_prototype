@@ -1525,6 +1525,81 @@ function initSchema() {
     console.error('[DB] portfolio_items 마이그레이션 실패:', e.message);
   }
 
+  // 마이그레이션: portfolio_items 컬럼 보강 (기획서 §7-2)
+  try {
+    const piCols = db.prepare("PRAGMA table_info(portfolio_items)").all().map(c => c.name);
+    if (!piCols.includes('teacher_comment')) {
+      db.exec('ALTER TABLE portfolio_items ADD COLUMN teacher_comment TEXT');
+    }
+    if (!piCols.includes('content_image_url')) {
+      db.exec('ALTER TABLE portfolio_items ADD COLUMN content_image_url TEXT');
+    }
+    if (!piCols.includes('semester')) {
+      db.exec('ALTER TABLE portfolio_items ADD COLUMN semester VARCHAR(10)');
+    }
+    if (!piCols.includes('school_level')) {
+      db.exec('ALTER TABLE portfolio_items ADD COLUMN school_level VARCHAR(20)');
+    }
+  } catch (e) { /* 무시 */ }
+
+  // 마이그레이션: users.school_level 컬럼 + 자동 채우기 (기획서 §7-2)
+  try {
+    const userCols = db.prepare("PRAGMA table_info(users)").all().map(c => c.name);
+    if (!userCols.includes('school_level')) {
+      db.exec("ALTER TABLE users ADD COLUMN school_level TEXT");
+      // grade 기반 자동 채우기 (1~6 초등, 7~9 중등, 10~12 고등)
+      db.exec(`
+        UPDATE users SET school_level = CASE
+          WHEN grade BETWEEN 1 AND 6   THEN 'elementary'
+          WHEN grade BETWEEN 7 AND 9   THEN 'middle'
+          WHEN grade BETWEEN 10 AND 12 THEN 'high'
+          ELSE NULL
+        END WHERE role = 'student' AND school_level IS NULL
+      `);
+      db.exec('CREATE INDEX IF NOT EXISTS idx_users_school_level ON users(school_level)');
+    }
+  } catch (e) {
+    console.error('[DB] users.school_level 마이그레이션 실패:', e.message);
+  }
+
+  // 마이그레이션: portfolio_reports 신규 테이블 (기획서 §7-2 / Backend 미션)
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS portfolio_reports (
+        id TEXT PRIMARY KEY,
+        user_id INTEGER NOT NULL,
+        title TEXT,
+        period_from TEXT,
+        period_to TEXT,
+        school_level TEXT,
+        options_json TEXT,
+        item_ids_json TEXT,
+        file_path TEXT,
+        file_size_kb INTEGER,
+        page_count INTEGER,
+        item_count INTEGER,
+        cover_note TEXT,
+        status TEXT DEFAULT 'ready',
+        share_token TEXT,
+        created_at TEXT DEFAULT (datetime('now', 'localtime')),
+        expires_at TEXT,
+        FOREIGN KEY (user_id) REFERENCES users(id)
+      );
+    `);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_pr_user ON portfolio_reports(user_id, created_at DESC);');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_pr_token ON portfolio_reports(share_token);');
+    // 기존 테이블 보강 (idempotent)
+    const prCols = db.prepare("PRAGMA table_info(portfolio_reports)").all().map(c => c.name);
+    if (!prCols.includes('item_count')) {
+      db.exec('ALTER TABLE portfolio_reports ADD COLUMN item_count INTEGER');
+    }
+    if (!prCols.includes('cover_note')) {
+      db.exec('ALTER TABLE portfolio_reports ADD COLUMN cover_note TEXT');
+    }
+  } catch (e) {
+    console.error('[DB] portfolio_reports 테이블 생성 실패:', e.message);
+  }
+
   // 마이그레이션: contents 테이블 확장
   try {
     const ctCols = db.prepare("PRAGMA table_info(contents)").all().map(c => c.name);
