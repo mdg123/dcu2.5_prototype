@@ -539,10 +539,19 @@
     }
     .content-item { cursor: pointer; }
     .content-item:hover { background: white; border-color: var(--gray-300); transform: translateY(-2px); box-shadow: var(--shadow-sm); }
+    /* 16:9 비율 썸네일 (실제 이미지 + 아이콘 폴백) */
     .content-thumb {
-      width: 52px; height: 52px; border-radius: 14px;
+      width: 96px; aspect-ratio: 16/9; border-radius: 10px;
       display: flex; align-items: center; justify-content: center;
       color: white; font-size: 1.4rem; flex-shrink: 0;
+      overflow: hidden; position: relative;
+      background-size: cover; background-position: center;
+      background-color: var(--gray-200);
+    }
+    .content-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .content-thumb .thumb-icon {
+      position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+      font-size: 1.4rem; color: white;
     }
     .content-info { flex: 1; min-width: 0; }
     .content-name { font-size: 16px; font-weight: 600; color: var(--gray-800); margin-bottom: 5px; line-height: 1.5; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
@@ -1682,7 +1691,7 @@
         const res = await fetch(`/api/contents/recommendations?${qs.toString()}`);
         const data = await res.json();
         if (data.success && data.contents && data.contents.length > 0) {
-          // 단색 4종 아이콘 + ❓ 폐기 (학습 의미 명확화)
+          // 콘텐츠 type별 단색 아이콘 (썸네일 fallback 용도)
           const TYPE_STYLE = {
             video:    { icon: '🎬', color: '#EF4444', label: '영상' },
             document: { icon: '📄', color: '#3B82F6', label: '문서' },
@@ -1693,11 +1702,19 @@
             package:  { icon: '📦', color: '#0EA5E9', label: '꾸러미' }
           };
           window._popularContents = data.contents.slice(0, 6);
+          // YouTube ID 추출 → 자동 썸네일 URL 생성 (서버 thumbnail_url이 우선)
+          const ytIdOf = (url) => { const m = String(url || '').match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?v=|embed\/|shorts\/))([\w-]{11})/); return m ? m[1] : null; };
           grid.innerHTML = data.contents.slice(0, 6).map((c, i) => {
             const st = TYPE_STYLE[c.content_type] || { icon: '📁', color: '#6B7280', label: '기타' };
+            const ytId = c.content_type === 'video' ? ytIdOf(c.content_url) : null;
+            const thumbUrl = c.thumbnail_url || (ytId ? `https://img.youtube.com/vi/${ytId}/hqdefault.jpg` : null);
+            // 썸네일 있으면 <img>로, 실패 시 onerror로 type 아이콘 fallback
+            const thumbInner = thumbUrl
+              ? `<img src="${thumbUrl}" alt="" onerror="this.parentElement.style.background='${st.color}';this.parentElement.innerHTML='<span class=\\'thumb-icon\\'>${st.icon}</span>';">`
+              : `<span class="thumb-icon" style="background:${st.color};">${st.icon}</span>`;
             return `
               <div class="content-item" onclick="openContentDetailModal(${i})" role="button" tabindex="0">
-                <div class="content-thumb" style="background:${st.color}">${st.icon}</div>
+                <div class="content-thumb">${thumbInner}</div>
                 <div class="content-info">
                   <div class="content-name">${c.title || '콘텐츠'}</div>
                   <div class="content-meta">
@@ -1950,8 +1967,8 @@
       const title = document.getElementById('modalTitleText');
       const list = document.getElementById('modalList');
 
-      const typeNames = { video:'영상', document:'문서', image:'이미지', quiz:'문항', exam:'평가지', package:'수업꾸러미' };
-      const typeIcons = { video:'🎬', document:'📄', image:'🖼️', quiz:'❓', exam:'📋', package:'📦' };
+      const typeNames = { video:'영상', document:'문서', image:'이미지', link:'링크', quiz:'문항', exam:'평가지', assessment:'평가지', package:'수업꾸러미' };
+      const typeIcons = { video:'🎬', document:'📄', image:'🖼', link:'🔗', quiz:'✏️', exam:'📝', assessment:'📝', package:'📦' };
 
       icon.textContent = typeIcons[c.content_type] || '📁';
       title.textContent = '콘텐츠 상세';
