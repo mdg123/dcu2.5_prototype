@@ -90,6 +90,52 @@
       border: 1px solid rgba(255,255,255,0.25);
     }
 
+    /* ===== 게스트(비로그인) 히어로 ===== */
+    .hero-compact[data-role="guest"] {
+      background: linear-gradient(135deg, #4A7CFF 0%, #7C5CFC 100%);
+      height: auto; min-height: 160px; padding: 28px 32px;
+    }
+    .guest-hero-cta {
+      position: relative; z-index: 1;
+      display: flex; gap: 10px; flex-shrink: 0;
+    }
+    .guest-hero-cta .btn-login,
+    .guest-hero-cta .btn-signup {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 12px 22px; border-radius: 10px;
+      font-size: 16px; font-weight: 700;
+      text-decoration: none; transition: all 0.2s;
+      white-space: nowrap;
+    }
+    .guest-hero-cta .btn-login {
+      background: white; color: #4A7CFF;
+      box-shadow: 0 4px 14px rgba(0,0,0,0.12);
+    }
+    .guest-hero-cta .btn-login:hover { transform: translateY(-2px); box-shadow: 0 6px 18px rgba(0,0,0,0.18); }
+    .guest-hero-cta .btn-signup {
+      background: rgba(255,255,255,0.18); color: white;
+      border: 1.5px solid rgba(255,255,255,0.5); backdrop-filter: blur(6px);
+    }
+    .guest-hero-cta .btn-signup:hover { background: rgba(255,255,255,0.28); }
+
+    /* 비로그인 안내 카드 */
+    .guest-info-card {
+      background: white; border-radius: var(--radius-lg);
+      padding: 18px 22px; box-shadow: var(--shadow);
+      border-left: 4px solid var(--primary);
+      margin-bottom: 24px;
+      display: flex; align-items: center; gap: 16px;
+    }
+    .guest-info-card .ico {
+      width: 44px; height: 44px; border-radius: 12px;
+      background: rgba(74,124,255,0.12); color: var(--primary);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 18px; flex-shrink: 0;
+    }
+    .guest-info-card .body { flex: 1; min-width: 0; }
+    .guest-info-card .ttl { font-size: 17px; font-weight: 700; color: var(--gray-800); margin-bottom: 3px; }
+    .guest-info-card .desc { font-size: 15px; color: var(--gray-600); line-height: 1.5; }
+
     /* ===== 오늘 할 일 카드 (히어로 1순위) ===== */
     .today-action-card {
       background: white; border-radius: var(--radius-lg);
@@ -677,6 +723,12 @@
       body { font-size: 16px; }
       .main-container { padding: 16px; }
       .hero-compact { height: 110px; padding: 18px 22px; }
+      .hero-compact[data-role="guest"] {
+        flex-direction: column; align-items: flex-start; gap: 14px;
+        height: auto; min-height: 0; padding: 20px 22px;
+      }
+      .guest-hero-cta { width: 100%; }
+      .guest-hero-cta .btn-login, .guest-hero-cta .btn-signup { flex: 1; justify-content: center; padding: 10px 16px; font-size: 15px; }
       .hero-greeting { font-size: 22px; }
       .hero-desc { font-size: 14px; }
       .hero-role-badge { font-size: 13px; padding: 6px 12px; }
@@ -934,6 +986,27 @@
       currentUser = e.detail;
       document.getElementById('portalContent').style.display = 'block';
 
+      if (!currentUser) {
+        // ──────── 비로그인(게스트) 모드 ────────
+        renderGuestHero();
+        // 개인화 영역 전부 숨김 (오늘 할 일·바로가기·4슬롯·활동 요약·독서·체인지·추천)
+        document.getElementById('todayActionCard').style.display = 'none';
+        document.getElementById('topSection').style.display = 'none';
+        document.getElementById('activitySummary').style.display = 'none';
+        // 두 column-grid: 독서+공지, 체인지+추천 — 전체 숨김 (개인화 의존)
+        const twoCols = document.querySelectorAll('.two-column-grid');
+        twoCols.forEach(g => g.style.display = 'none');
+        // 친절 안내 카드 노출
+        renderGuestInfoCard();
+        // 공개 영역만 로드 (인기 콘텐츠/클래스/명예의 전당/모든 서비스)
+        loadHallPreview();
+        loadPopularClasses();
+        loadPopularContents();
+        renderAllServices();
+        return;
+      }
+
+      // ──────── 로그인 모드 (기존 동작) ────────
       // 실제 API에서 데이터 가져오기
       await loadRealStats();
 
@@ -954,6 +1027,40 @@
       // 추가 API 로드 (비동기)
       loadTrendingPosts();
     });
+
+    // ==================== 게스트 헤더 / 안내 ====================
+    function renderGuestHero() {
+      const hero = document.getElementById('heroCompact');
+      hero.dataset.role = 'guest';
+      const redirectQs = '?redirect=' + encodeURIComponent('/');
+      hero.innerHTML = `
+        <div class="hero-bg-shapes"><div class="shape shape-1"></div><div class="shape shape-2"></div></div>
+        <div class="hero-content">
+          <div class="hero-greeting">다채움에 오신 것을 환영합니다</div>
+          <div class="hero-desc">로그인하면 내 클래스·과제·성장 기록을 한눈에 볼 수 있어요</div>
+        </div>
+        <div class="guest-hero-cta">
+          <a href="/login.html${redirectQs}" class="btn-login"><i class="fas fa-sign-in-alt"></i> 로그인</a>
+          <a href="/login.html#signup" class="btn-signup"><i class="fas fa-user-plus"></i> 회원가입</a>
+        </div>
+      `;
+    }
+
+    function renderGuestInfoCard() {
+      const card = document.createElement('section');
+      card.className = 'guest-info-card';
+      card.innerHTML = `
+        <div class="ico"><i class="fas fa-info-circle"></i></div>
+        <div class="body">
+          <div class="ttl">아래 인기 콘텐츠와 클래스는 누구나 둘러볼 수 있어요</div>
+          <div class="desc">학습을 시작하려면 로그인하거나 회원가입을 해주세요. 학생/교사/학부모 모두 환영합니다.</div>
+        </div>
+      `;
+      // 헤더 바로 아래 삽입
+      const hero = document.getElementById('heroCompact');
+      hero.parentNode.insertBefore(card, hero.nextSibling);
+    }
+
 
     // ==================== API 로드 ====================
     // 역할별 4개 슬롯 — 기획서 §2.2 정확 매핑
@@ -1606,7 +1713,7 @@
 
     // ==================== 추천 서비스 ====================
     function renderRecommend() {
-      const role = currentUser?.role || 'teacher';
+      const role = currentUser?.role || 'student';
       const recommended = ROLE_RECOMMEND[role] || ROLE_RECOMMEND.teacher;
       const roleLabelMap = { teacher: '선생님', student: '학생', parent: '학부모', staff: '교직원', admin: '관리자' };
       document.getElementById('recommendTitle').innerHTML = `<i class="fas fa-star" style="color:#F59E0B;"></i> ${roleLabelMap[role] || ''} 추천 서비스`;
@@ -1634,7 +1741,7 @@
     // ==================== 전체 서비스 ====================
     function renderAllServices() {
       const grid = document.getElementById('allServicesGrid');
-      const role = currentUser?.role || 'teacher';
+      const role = currentUser?.role || 'student';
       const order = ROLE_SERVICE_ORDER[role] || ROLE_SERVICE_ORDER.teacher;
       const recommended = ROLE_RECOMMEND[role] || [];
 
@@ -1764,6 +1871,7 @@
     }
 
     async function likeContent(contentId) {
+      if (!currentUser) { location.href = '/login.html?redirect=' + encodeURIComponent('/'); return; }
       try {
         const res = await fetch('/api/contents/' + contentId + '/like', { method: 'POST', headers: {'Content-Type':'application/json'} });
         const data = await res.json();
@@ -1772,6 +1880,7 @@
     }
 
     async function saveToCollection(contentId) {
+      if (!currentUser) { location.href = '/login.html?redirect=' + encodeURIComponent('/'); return; }
       try {
         const res = await fetch('/api/contents/collection/' + contentId, {
           method: 'POST', headers: {'Content-Type':'application/json'},
@@ -1802,13 +1911,17 @@
       icon.textContent = icons[index % icons.length];
       title.textContent = '클래스 소개';
 
-      // Check if user is already a member
+      // Check if user is already a member (비로그인 시 호출 생략)
       let isMember = false;
-      try {
-        const myRes = await fetch('/api/class/my');
-        const myData = await myRes.json();
-        isMember = (myData.classes || []).some(c => c.id === cls.id);
-      } catch {}
+      if (currentUser) {
+        try {
+          const myRes = await fetch('/api/class/my');
+          if (myRes.ok) {
+            const myData = await myRes.json();
+            isMember = (myData.classes || []).some(c => c.id === cls.id);
+          }
+        } catch {}
+      }
 
       list.innerHTML = `
         <div class="class-detail-header">
@@ -1839,6 +1952,11 @@
     }
 
     async function joinClass(classId, code) {
+      // 비로그인 시: 로그인 페이지로 redirect 매개변수 전달
+      if (!currentUser) {
+        location.href = '/login.html?redirect=' + encodeURIComponent('/');
+        return;
+      }
       try {
         const res = await fetch('/api/class/' + classId + '/join', {
           method: 'POST', headers: {'Content-Type':'application/json'},
