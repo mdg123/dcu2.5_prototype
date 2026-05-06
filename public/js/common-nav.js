@@ -117,13 +117,22 @@
 
   let currentUser = null;
 
+  // 비로그인 진입이 허용된 페이지(포털 메인 등) — 로그인 페이지로 강제 리다이렉트하지 않는다
+  function isPublicPage() {
+    const p = location.pathname;
+    return p === '/' || p === '/index.html';
+  }
+
   async function loadUser() {
     try {
       const res = await fetch('/api/auth/me');
       const data = await res.json();
       if (data.success && data.user) { currentUser = data.user; return data.user; }
     } catch (e) {}
-    window.location.href = '/login.html';
+    // 공개 페이지는 비로그인 상태로 통과 — null 반환 시 게스트 GNB 렌더
+    if (isPublicPage()) return null;
+    // 보호 페이지는 기존 동작 유지 — 로그인 페이지로 이동
+    window.location.href = '/login.html?redirect=' + encodeURIComponent(location.pathname + location.search);
     return null;
   }
 
@@ -176,7 +185,8 @@
   }
 
   function buildGNB(user) {
-    const activeMenuId = detectActiveMenu();
+    const isGuest = !user;
+    const activeMenuId = isGuest ? null : detectActiveMenu();
     const activeMenu = MENU.find(m => m.id === activeMenuId);
     const activeSubUrl = detectActiveSub(activeMenu);
 
@@ -194,13 +204,13 @@
     logo.innerHTML = '<span class="gnb-logo-icon">📚</span><span class="gnb-logo-text">다채움</span>';
     bar1.appendChild(logo);
 
-    // 1차 메뉴
+    // 1차 메뉴 — 비로그인은 클릭 시 login redirect (서버 측 requireAuth가 자체 처리)
     const nav1 = document.createElement('nav');
     nav1.className = 'gnb-nav1';
     MENU.forEach(m => {
       if (!m.sub) return;
       const a = document.createElement('a');
-      const roleUrl = m.defaultUrlByRole && m.defaultUrlByRole[user.role];
+      const roleUrl = (!isGuest && m.defaultUrlByRole && m.defaultUrlByRole[user.role]);
       a.href = roleUrl || m.defaultUrl || '#';
       a.className = 'gnb-nav1-item';
       if (m.id === activeMenuId) a.classList.add('active');
@@ -213,17 +223,26 @@
     const userArea = document.createElement('div');
     userArea.className = 'gnb-user';
     const roleBadge = { student: '학생', teacher: '교사', parent: '학부모', staff: '교직원', admin: '관리자' };
-    userArea.innerHTML = `
-      <button onclick="window.dacheumSearch && window.dacheumSearch.open()" class="gnb-icon-btn" title="통합 검색"><i class="fas fa-search"></i></button>
-      <a href="/message/index.html" class="gnb-icon-btn" title="소통쪽지" style="position:relative;text-decoration:none;">
-        <i class="fas fa-envelope"></i>
-        <span id="gnbUnreadBadge" style="display:none;position:absolute;top:-4px;right:-6px;background:#EF4444;color:#fff;border-radius:10px;min-width:18px;height:18px;font-size:13px;font-weight:700;line-height:18px;text-align:center;padding:0 5px;"></span>
-      </a>
-      ${user.role === 'admin' ? `<a href="/admin/index.html" class="gnb-admin-btn" title="관리자 페이지" style="display:inline-flex;align-items:center;gap:6px;padding:6px 12px;background:#4F46E5;color:#fff;border-radius:6px;font-size:14px;font-weight:600;text-decoration:none;margin-right:4px;"><i class="fas fa-cog"></i> 관리자 페이지</a>` : ''}
-      <span class="gnb-user-role">${roleBadge[user.role] || user.role}</span>
-      <span class="gnb-user-name">${user.display_name}</span>
-      <button class="gnb-logout-btn" id="gnbLogoutBtn">로그아웃</button>
-    `;
+    if (isGuest) {
+      // 비로그인: 로그인 / 회원가입 버튼만 노출
+      const redirectQs = '?redirect=' + encodeURIComponent(location.pathname + location.search);
+      userArea.innerHTML = `
+        <a href="/login.html${redirectQs}" class="gnb-login-btn" style="display:inline-flex;align-items:center;gap:6px;padding:8px 18px;background:#4A7CFF;color:#fff;border-radius:8px;font-size:14px;font-weight:600;text-decoration:none;"><i class="fas fa-sign-in-alt"></i> 로그인</a>
+        <a href="/login.html#signup" class="gnb-register-btn" style="display:inline-flex;align-items:center;gap:6px;padding:8px 18px;background:#fff;color:#4A7CFF;border:1px solid #4A7CFF;border-radius:8px;font-size:14px;font-weight:600;text-decoration:none;"><i class="fas fa-user-plus"></i> 회원가입</a>
+      `;
+    } else {
+      userArea.innerHTML = `
+        <button onclick="window.dacheumSearch && window.dacheumSearch.open()" class="gnb-icon-btn" title="통합 검색"><i class="fas fa-search"></i></button>
+        <a href="/message/index.html" class="gnb-icon-btn" title="소통쪽지" style="position:relative;text-decoration:none;">
+          <i class="fas fa-envelope"></i>
+          <span id="gnbUnreadBadge" style="display:none;position:absolute;top:-4px;right:-6px;background:#EF4444;color:#fff;border-radius:10px;min-width:18px;height:18px;font-size:13px;font-weight:700;line-height:18px;text-align:center;padding:0 5px;"></span>
+        </a>
+        ${user.role === 'admin' ? `<a href="/admin/index.html" class="gnb-admin-btn" title="관리자 페이지" style="display:inline-flex;align-items:center;gap:6px;padding:6px 12px;background:#4F46E5;color:#fff;border-radius:6px;font-size:14px;font-weight:600;text-decoration:none;margin-right:4px;"><i class="fas fa-cog"></i> 관리자 페이지</a>` : ''}
+        <span class="gnb-user-role">${roleBadge[user.role] || user.role}</span>
+        <span class="gnb-user-name">${user.display_name}</span>
+        <button class="gnb-logout-btn" id="gnbLogoutBtn">로그아웃</button>
+      `;
+    }
     bar1.appendChild(userArea);
     wrapper.appendChild(bar1);
 
@@ -277,11 +296,14 @@
     const hasBar2 = activeMenu && activeMenu.sub;
     document.body.style.paddingTop = hasBar2 ? '96px' : '52px';
 
-    // 로그아웃
-    document.getElementById('gnbLogoutBtn').addEventListener('click', async () => {
-      await fetch('/api/auth/logout', { method: 'POST' });
-      window.location.href = '/login.html';
-    });
+    // 로그아웃 (로그인 상태일 때만)
+    const logoutBtn = document.getElementById('gnbLogoutBtn');
+    if (logoutBtn) {
+      logoutBtn.addEventListener('click', async () => {
+        await fetch('/api/auth/logout', { method: 'POST' });
+        window.location.href = '/login.html';
+      });
+    }
 
     // 통합 검색
     const s = document.createElement('script');
@@ -316,6 +338,11 @@
         document.querySelectorAll('.student-only-menu').forEach(el => el.style.display = 'none');
       }
       window.dispatchEvent(new CustomEvent('dacheim:user-loaded', { detail: user }));
+    } else if (isPublicPage()) {
+      // 비로그인 + 공개 페이지: 게스트 GNB 렌더 + 게스트 이벤트 디스패치
+      buildGNB(null);
+      window.dacheumUser = null;
+      window.dispatchEvent(new CustomEvent('dacheim:user-loaded', { detail: null }));
     }
   }
 })();
