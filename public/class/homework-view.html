@@ -502,17 +502,68 @@
     }
 
     async function gradeSubmission(subId) {
-      const score = parseInt(document.getElementById('grade_' + subId).value);
-      if (isNaN(score)) return alert('점수를 입력하세요.');
+      const inputEl = document.getElementById('grade_' + subId);
+      const raw = (inputEl?.value || '').trim();
+      if (raw === '') { showToast('점수를 입력해 주세요.', 'warning'); inputEl?.focus(); return; }
+      const score = parseInt(raw, 10);
+      if (isNaN(score)) { showToast('숫자만 입력할 수 있어요.', 'warning'); inputEl?.focus(); return; }
+      const max = (hwData && hwData.max_score) || 100;
+      if (score < 0 || score > max) { showToast(`점수는 0~${max} 사이여야 해요.`, 'warning'); inputEl?.focus(); return; }
+
       const feedbackEl = document.getElementById('feedback_' + subId);
       const feedback = feedbackEl ? feedbackEl.value.trim() : '';
-      const res = await fetch(`/api/homework/${classId}/${homeworkId}/grade/${subId}`, {
-        method: 'POST', headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({ score, feedback })
-      });
-      const data = await res.json();
-      if (data.success) { alert('채점 완료!'); loadHomework(); }
-      else alert(data.message);
+
+      // 채점 버튼 로딩 상태
+      const btn = inputEl?.parentElement?.querySelector('button');
+      const origLabel = btn?.innerHTML;
+      if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 저장 중'; }
+
+      try {
+        const res = await fetch(`/api/homework/${classId}/${homeworkId}/grade/${subId}`, {
+          method: 'POST', headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({ score, feedback })
+        });
+        const data = await res.json();
+        if (data.success) {
+          showToast(`채점 완료 — ${score}점이 저장되었습니다.`, 'success');
+          await loadHomework();
+        } else {
+          showToast(data.message || '채점 저장에 실패했어요.', 'error');
+        }
+      } catch (err) {
+        showToast('네트워크 오류로 저장하지 못했습니다.', 'error');
+      } finally {
+        if (btn) { btn.disabled = false; btn.innerHTML = origLabel; }
+      }
+    }
+
+    // ===== Toast (alert 대체) =====
+    function showToast(msg, kind = 'info') {
+      const colors = {
+        success: { bg: '#10B981', icon: 'fa-circle-check' },
+        error:   { bg: '#EF4444', icon: 'fa-circle-exclamation' },
+        warning: { bg: '#F59E0B', icon: 'fa-triangle-exclamation' },
+        info:    { bg: '#3B82F6', icon: 'fa-circle-info' }
+      };
+      const c = colors[kind] || colors.info;
+      let host = document.getElementById('toastHost');
+      if (!host) {
+        host = document.createElement('div');
+        host.id = 'toastHost';
+        host.style.cssText = 'position:fixed;top:88px;right:24px;display:flex;flex-direction:column;gap:8px;z-index:11500;pointer-events:none;';
+        document.body.appendChild(host);
+      }
+      const t = document.createElement('div');
+      t.style.cssText = `pointer-events:auto;background:${c.bg};color:#fff;padding:14px 20px;border-radius:12px;
+        font-size:15px;font-weight:600;box-shadow:0 8px 20px rgba(0,0,0,0.18);display:flex;align-items:center;gap:10px;
+        min-width:220px;max-width:420px;transform:translateX(20px);opacity:0;transition:all .25s ease;`;
+      t.innerHTML = `<i class="fas ${c.icon}"></i><span>${msg}</span>`;
+      host.appendChild(t);
+      requestAnimationFrame(() => { t.style.transform = 'translateX(0)'; t.style.opacity = '1'; });
+      setTimeout(() => {
+        t.style.transform = 'translateX(20px)'; t.style.opacity = '0';
+        setTimeout(() => t.remove(), 280);
+      }, 2400);
     }
 
     window.addEventListener('dacheim:user-loaded', (e) => {
