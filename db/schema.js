@@ -2353,6 +2353,63 @@ function initSchema() {
     }
   }
 
+  // ============ 추천콘텐츠 큐레이션 (관리자 직접 기획) ============
+  // spec_admin_featured_curation.md A항 — featured_sections / featured_section_items
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS featured_sections (
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        key          TEXT    NOT NULL UNIQUE,
+        title        TEXT    NOT NULL,
+        subtitle     TEXT,
+        layout       TEXT    NOT NULL DEFAULT 'card-grid',
+        item_type    TEXT    NOT NULL DEFAULT 'content',
+        sort_order   INTEGER NOT NULL DEFAULT 0,
+        is_active    INTEGER NOT NULL DEFAULT 1,
+        fallback_enabled INTEGER NOT NULL DEFAULT 1,
+        max_items    INTEGER NOT NULL DEFAULT 8,
+        updated_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_by   INTEGER,
+        CHECK(key IN ('planning','recommend','channels','new')),
+        CHECK(layout IN ('card-grid','channel-row','list')),
+        CHECK(item_type IN ('content','channel'))
+      );
+      CREATE INDEX IF NOT EXISTS idx_featured_sections_active_sort
+        ON featured_sections(is_active, sort_order);
+
+      CREATE TABLE IF NOT EXISTS featured_section_items (
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        section_id   INTEGER NOT NULL,
+        item_type    TEXT    NOT NULL,
+        item_id      INTEGER NOT NULL,
+        sort_order   INTEGER NOT NULL DEFAULT 0,
+        badge_label  TEXT,
+        note         TEXT,
+        created_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
+        created_by   INTEGER,
+        FOREIGN KEY (section_id) REFERENCES featured_sections(id) ON DELETE CASCADE,
+        CHECK(item_type IN ('content','channel'))
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_featured_items_section_item
+        ON featured_section_items(section_id, item_type, item_id);
+      CREATE INDEX IF NOT EXISTS idx_featured_items_section_sort
+        ON featured_section_items(section_id, sort_order);
+    `);
+
+    // 시드 4행 (idempotent — INSERT OR IGNORE)
+    const seedSection = db.prepare(`
+      INSERT OR IGNORE INTO featured_sections
+        (key, title, subtitle, layout, item_type, sort_order, is_active, fallback_enabled, max_items)
+      VALUES (?, ?, ?, ?, ?, ?, 1, 1, ?)
+    `);
+    seedSection.run('planning',  '2026학년도 1학기 추천 자료', '교과 연구회가 직접 고른 콘텐츠', 'card-grid',   'content', 10, 8);
+    seedSection.run('recommend', '맞춤 추천 콘텐츠',         '역할·키워드 기반 큐레이션',     'card-grid',   'content', 20, 8);
+    seedSection.run('channels',  '인기 채널',                 '구독자가 많은 우수 채널',        'channel-row', 'channel', 30, 8);
+    seedSection.run('new',       '새로 올라온 맞춤 자료',     '최근 등록된 신규 자료',          'card-grid',   'content', 40, 8);
+  } catch (e) {
+    console.warn('[DB] featured_sections 마이그레이션 경고:', e.message);
+  }
+
   // 관리자 기본 계정
   const admin = db.prepare('SELECT id FROM users WHERE username = ?').get('admin');
   if (!admin) {

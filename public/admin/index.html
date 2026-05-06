@@ -6,6 +6,7 @@
   <title>다채움 - 관리자</title>
   <link rel="stylesheet" href="/css/common-nav.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: 'Pretendard','Noto Sans KR',system-ui,sans-serif; background: #F5F7FA; color: #1A1A2E; }
@@ -197,6 +198,143 @@
       .admin-sidebar { display: none; }
       .stat-grid { grid-template-columns: repeat(2, 1fr); }
     }
+
+    /* ============================================================ */
+    /*  추천콘텐츠 큐레이션 — spec_admin_featured_curation.md         */
+    /* ============================================================ */
+    .fc-wrap { display: grid; grid-template-columns: 360px 1fr; gap: 18px; align-items: flex-start; }
+    @media (max-width: 1024px) { .fc-wrap { grid-template-columns: 1fr; } }
+
+    /* 좌측 섹션 리스트 */
+    .fc-left { display: flex; flex-direction: column; gap: 12px; }
+    .fc-section-card { background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; padding: 16px 18px; cursor: pointer; transition: box-shadow .15s, border-color .15s, background .15s; position: relative; display: flex; gap: 12px; align-items: flex-start; }
+    .fc-section-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,.08); }
+    .fc-section-card.selected { border-color: #2563eb; background: #eff6ff; box-shadow: inset 4px 0 0 #2563eb; padding-left: 22px; }
+    .fc-section-card.inactive { opacity: 0.65; }
+    .fc-drag-handle { color: #9ca3af; font-size: 14px; cursor: grab; padding-top: 4px; flex-shrink: 0; }
+    .fc-drag-handle:hover { color: #1d4ed8; }
+    .fc-section-card.sortable-ghost { opacity: 0.4; background: #f3f4f6; }
+    .fc-section-card.sortable-chosen { box-shadow: 0 4px 12px rgba(37,99,235,.18); }
+    .fc-section-body { flex: 1; min-width: 0; }
+    .fc-section-title { font-size: 17px; font-weight: 700; color: #1A1A2E; line-height: 1.4; margin-bottom: 4px; word-break: break-all; }
+    .fc-section-subtitle { font-size: 14px; color: #6B7280; margin-bottom: 8px; line-height: 1.5; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+    .fc-section-meta { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 13px; color: #9ca3af; }
+    .fc-meta-chip { background: #f3f4f6; color: #4b5563; padding: 2px 9px; border-radius: 6px; font-weight: 600; font-size: 12px; }
+    .fc-meta-chip.active { background: #dcfce7; color: #16a34a; }
+    .fc-meta-chip.inactive { background: #fee2e2; color: #dc2626; }
+    .fc-section-toggles { display: flex; flex-direction: column; gap: 8px; align-items: flex-end; flex-shrink: 0; }
+
+    /* 토글 스위치 */
+    .fc-toggle { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; user-select: none; font-size: 13px; color: #6B7280; }
+    .fc-toggle input { display: none; }
+    .fc-toggle .fc-track { width: 36px; height: 20px; background: #cbd5e1; border-radius: 999px; position: relative; transition: background .15s; }
+    .fc-toggle .fc-track::after { content: ''; position: absolute; left: 2px; top: 2px; width: 16px; height: 16px; background: #fff; border-radius: 50%; transition: left .15s; box-shadow: 0 1px 2px rgba(0,0,0,.2); }
+    .fc-toggle input:checked + .fc-track { background: #16a34a; }
+    .fc-toggle input:checked + .fc-track::after { left: 18px; }
+
+    /* 우측 슬롯 편집 */
+    .fc-right { display: flex; flex-direction: column; gap: 16px; }
+    .fc-section-header { background: #fff; border: 1px solid #e5e7eb; border-radius: 14px; padding: 24px 28px; }
+    .fc-edit-row { display: grid; grid-template-columns: 100px 1fr; gap: 14px 16px; align-items: center; margin-bottom: 12px; }
+    .fc-edit-row:last-child { margin-bottom: 0; }
+    .fc-edit-label { font-size: 14px; color: #6B7280; font-weight: 600; }
+    .fc-edit-input, .fc-edit-textarea, .fc-edit-select { width: 100%; padding: 10px 14px; border: 1.5px solid #d1d5db; border-radius: 8px; font-size: 16px; font-family: inherit; background: #fff; color: #1A1A2E; outline: none; transition: border-color .15s; }
+    .fc-edit-input:focus, .fc-edit-textarea:focus, .fc-edit-select:focus { border-color: #2563eb; }
+    .fc-edit-input.title { font-size: 19px; font-weight: 700; }
+    .fc-edit-input.subtitle { font-size: 16px; }
+    .fc-edit-controls { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+    .fc-edit-controls .fc-edit-select { width: auto; min-width: 140px; }
+    .fc-fallback-row { display: flex; align-items: center; gap: 10px; padding: 12px 14px; background: #f9fafb; border-radius: 8px; margin-top: 8px; }
+    .fc-fallback-row label { font-size: 15px; color: #374151; cursor: pointer; user-select: none; }
+    .fc-fallback-row .hint { font-size: 13px; color: #6B7280; }
+
+    .fc-slot-section { background: #fff; border: 1px solid #e5e7eb; border-radius: 14px; padding: 20px 24px; }
+    .fc-slot-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; gap: 12px; flex-wrap: wrap; }
+    .fc-slot-title { font-size: 17px; font-weight: 700; color: #1A1A2E; }
+    .fc-slot-count { font-size: 13px; color: #6B7280; }
+    .fc-slot-list { display: flex; flex-direction: column; gap: 10px; min-height: 60px; }
+    .fc-slot-card { display: flex; gap: 14px; align-items: center; padding: 12px 16px; border: 1px solid #e5e7eb; border-radius: 12px; background: #fff; transition: border-color .15s, box-shadow .15s; }
+    .fc-slot-card:hover { border-color: #cbd5e1; box-shadow: 0 1px 4px rgba(0,0,0,.05); }
+    .fc-slot-card.invisible { opacity: 0.55; }
+    .fc-slot-card.sortable-ghost { opacity: 0.4; background: #f3f4f6; }
+    .fc-slot-thumb { width: 100px; height: 72px; border-radius: 8px; background: #f3f4f6; flex-shrink: 0; object-fit: cover; display: flex; align-items: center; justify-content: center; color: #9ca3af; font-size: 24px; }
+    .fc-slot-avatar { width: 80px; height: 80px; border-radius: 50%; background: linear-gradient(135deg, #dbeafe, #ede9fe); flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 28px; font-weight: 700; color: #2563eb; }
+    .fc-slot-body { flex: 1; min-width: 0; }
+    .fc-slot-card-title { font-size: 16px; font-weight: 700; color: #1A1A2E; line-height: 1.4; margin-bottom: 4px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+    .fc-slot-card-meta { font-size: 14px; color: #6B7280; }
+    .fc-slot-card-meta2 { font-size: 13px; color: #9ca3af; margin-top: 2px; }
+    .fc-slot-warning { background: #fee2e2; color: #dc2626; padding: 2px 8px; border-radius: 6px; font-size: 12px; font-weight: 600; margin-left: 6px; }
+    .fc-slot-actions { display: flex; gap: 6px; align-items: center; flex-shrink: 0; }
+    .fc-slot-remove { width: 32px; height: 32px; border: none; background: transparent; color: #dc2626; cursor: pointer; border-radius: 6px; font-size: 14px; transition: background .15s; }
+    .fc-slot-remove:hover { background: #fee2e2; }
+    .fc-slot-grip { color: #9ca3af; font-size: 16px; cursor: grab; padding: 0 6px; }
+    .fc-slot-grip:hover { color: #2563eb; }
+    .fc-slot-empty { padding: 32px 20px; text-align: center; border: 1.5px dashed #d1d5db; border-radius: 12px; background: #fafbfc; color: #6B7280; font-size: 16px; line-height: 1.6; }
+    .fc-slot-empty.warning { background: #fef2f2; border-color: #fecaca; color: #b91c1c; }
+    .fc-add-btn { width: 100%; padding: 14px; border: 2px dashed #cbd5e1; background: #fff; color: #2563eb; font-size: 16px; font-weight: 600; border-radius: 12px; cursor: pointer; font-family: inherit; transition: all .15s; margin-top: 14px; }
+    .fc-add-btn:hover { border-color: #2563eb; background: #eff6ff; }
+
+    /* 큐레이션 추가 모달 */
+    .fc-modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.55); z-index: 11000; align-items: center; justify-content: center; padding: 20px; }
+    .fc-modal.active { display: flex; }
+    .fc-modal-box { background: #fff; width: 90vw; height: 90vh; border-radius: 14px; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 20px 60px rgba(0,0,0,.3); }
+    .fc-modal-head { display: flex; justify-content: space-between; align-items: center; padding: 18px 28px; border-bottom: 1px solid #e5e7eb; gap: 16px; min-height: 64px; }
+    .fc-modal-head h3 { font-size: 19px; font-weight: 700; color: #1A1A2E; padding-right: 56px; }
+    .fc-modal-close { width: 40px; height: 40px; border: none; background: #f3f4f6; color: #4b5563; border-radius: 8px; cursor: pointer; font-size: 18px; flex-shrink: 0; transition: background .15s; }
+    .fc-modal-close:hover { background: #e5e7eb; color: #1A1A2E; }
+    .fc-modal-search { display: flex; gap: 10px; padding: 16px 28px; border-bottom: 1px solid #e5e7eb; flex-wrap: wrap; align-items: center; }
+    .fc-modal-search-input { flex: 1; min-width: 200px; padding: 12px 14px; border: 1.5px solid #d1d5db; border-radius: 8px; font-size: 16px; font-family: inherit; outline: none; }
+    .fc-modal-search-input:focus { border-color: #2563eb; }
+    .fc-modal-search select { padding: 8px 12px; border: 1.5px solid #d1d5db; border-radius: 8px; font-size: 15px; font-family: inherit; width: auto !important; min-width: 130px; flex-shrink: 0; }
+    .fc-modal-search-btn { padding: 12px 22px; background: #2563eb; color: #fff; border: none; border-radius: 8px; font-size: 16px; font-weight: 600; cursor: pointer; font-family: inherit; }
+    .fc-modal-search-btn:hover { background: #1d4ed8; }
+    .fc-modal-body { flex: 1; overflow-y: auto; padding: 20px 28px; }
+    .fc-result-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+    @media (max-width: 1199px) { .fc-result-grid { grid-template-columns: repeat(2, 1fr); } }
+    @media (max-width: 767px) { .fc-result-grid { grid-template-columns: 1fr; } }
+    .fc-result-card { background: #fff; border: 1.5px solid #e5e7eb; border-radius: 10px; overflow: hidden; transition: all .15s; display: flex; flex-direction: column; }
+    .fc-result-card:hover { border-color: #2563eb; transform: translateY(-2px); box-shadow: 0 6px 16px rgba(37,99,235,.12); }
+    .fc-result-thumb { width: 100%; aspect-ratio: 16/10; background: #f3f4f6; display: flex; align-items: center; justify-content: center; color: #9ca3af; font-size: 32px; }
+    .fc-result-channel-thumb { width: 100%; aspect-ratio: 16/10; display: flex; align-items: center; justify-content: center; background: linear-gradient(135deg, #dbeafe, #ede9fe); color: #2563eb; font-size: 36px; font-weight: 700; }
+    .fc-result-body { padding: 12px 14px; flex: 1; display: flex; flex-direction: column; gap: 8px; }
+    .fc-result-title { font-size: 16px; font-weight: 700; color: #1A1A2E; line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; min-height: 44px; }
+    .fc-result-meta { font-size: 14px; color: #6B7280; }
+    .fc-result-add-btn { padding: 8px 12px; background: #2563eb; color: #fff; border: none; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer; font-family: inherit; transition: background .15s; }
+    .fc-result-add-btn:hover { background: #1d4ed8; }
+    .fc-result-add-btn:disabled, .fc-result-add-btn.added { background: #9ca3af; cursor: not-allowed; }
+    .fc-modal-foot { padding: 14px 28px; border-top: 1px solid #e5e7eb; display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .fc-pagination { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+    .fc-pg-btn { padding: 6px 12px; background: #fff; border: 1px solid #d1d5db; border-radius: 6px; cursor: pointer; font-family: inherit; font-size: 14px; }
+    .fc-pg-btn:hover:not(:disabled) { background: #f3f4f6; }
+    .fc-pg-btn:disabled { color: #d1d5db; cursor: not-allowed; }
+    .fc-pg-info { font-size: 14px; color: #6B7280; padding: 0 6px; }
+    .fc-modal-loading { padding: 60px; text-align: center; color: #6B7280; font-size: 15px; }
+
+    /* 토스트 (top-center, 2.4s) */
+    .fc-toast { position: fixed; top: 88px; left: 50%; transform: translateX(-50%); padding: 12px 20px; border-radius: 8px; font-size: 15px; font-weight: 600; color: #fff; z-index: 12000; box-shadow: 0 6px 20px rgba(0,0,0,.18); display: flex; align-items: center; gap: 8px; max-width: 480px; opacity: 0; transition: opacity .2s, transform .2s; pointer-events: none; }
+    .fc-toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+    .fc-toast.success { background: #16a34a; }
+    .fc-toast.error { background: #dc2626; }
+    .fc-toast.warning { background: #f59e0b; }
+    .fc-toast.info { background: #2563eb; }
+
+    /* 커스텀 확인 모달 (브라우저 confirm 대체) */
+    .fc-confirm-overlay { position: fixed; inset: 0; background: rgba(15,23,42,.55); z-index: 12500; display: flex; align-items: center; justify-content: center; padding: 24px; opacity: 0; transition: opacity .15s; }
+    .fc-confirm-overlay.show { opacity: 1; }
+    .fc-confirm-box { background: #fff; border-radius: 14px; padding: 28px 32px 22px; min-width: 360px; max-width: 480px; box-shadow: 0 20px 60px rgba(0,0,0,.28); transform: translateY(8px); transition: transform .15s; }
+    .fc-confirm-overlay.show .fc-confirm-box { transform: translateY(0); }
+    .fc-confirm-icon { width: 44px; height: 44px; border-radius: 50%; background: #FEE2E2; color: #DC2626; display: flex; align-items: center; justify-content: center; font-size: 20px; margin-bottom: 14px; }
+    .fc-confirm-icon.info { background: #DBEAFE; color: #2563EB; }
+    .fc-confirm-title { font-size: 18px; font-weight: 700; color: #1A1A2E; margin-bottom: 8px; }
+    .fc-confirm-msg { font-size: 16px; color: #475569; line-height: 1.65; margin-bottom: 22px; }
+    .fc-confirm-actions { display: flex; gap: 8px; justify-content: flex-end; }
+    .fc-confirm-btn { padding: 10px 20px; border-radius: 8px; border: 0; cursor: pointer; font-size: 15px; font-weight: 600; transition: background .15s; }
+    .fc-confirm-cancel { background: #F1F5F9; color: #475569; }
+    .fc-confirm-cancel:hover { background: #E2E8F0; }
+    .fc-confirm-ok { background: #ef4444; color: #fff; }
+    .fc-confirm-ok:hover { background: #dc2626; }
+    .fc-confirm-ok.info { background: #2563EB; }
+    .fc-confirm-ok.info:hover { background: #1D4ED8; }
   </style>
 </head>
 <body>
@@ -208,6 +346,7 @@
         <li class="active" data-section="dashboard"><i class="fas fa-chart-pie"></i> 대시보드</li>
         <li data-section="users"><i class="fas fa-users"></i> 사용자 관리</li>
         <li data-section="contents"><i class="fas fa-file-alt"></i> 콘텐츠 관리</li>
+        <li data-section="featured"><i class="fas fa-star"></i> 추천콘텐츠 큐레이션</li>
         <li data-section="lessons"><i class="fas fa-chalkboard-teacher"></i> 수업 관리</li>
         <li data-section="learning"><i class="fas fa-book-reader"></i> 학습 배포</li>
         <li data-section="learning-map"><i class="fas fa-sitemap"></i> 학습맵 관리</li>
@@ -259,6 +398,27 @@
             <thead><tr><th>ID</th><th>썸네일</th><th>제목</th><th>유형</th><th>작성자</th><th>상태</th><th>생성일</th><th>관리</th></tr></thead>
             <tbody id="contentTableBody"></tbody>
           </table>
+        </div>
+      </section>
+
+      <!-- 추천콘텐츠 큐레이션 -->
+      <section id="sec-featured" class="admin-section">
+        <div class="page-title"><i class="fas fa-star" style="color:#f59e0b;"></i> 추천콘텐츠 큐레이션</div>
+        <div style="font-size:14px;color:#6B7280;line-height:1.6;margin-bottom:18px;">
+          학생·교사·비로그인 포털의 추천콘텐츠 페이지에 노출되는 4개 섹션의 타이틀과 콘텐츠 배치를 직접 편집합니다. 슬롯이 비어 있으면 자동 추천으로 채워집니다.
+          <a href="/content/index.html?view=recommend" target="_blank" style="margin-left:10px;color:#2563eb;font-weight:600;text-decoration:none;"><i class="fas fa-external-link-alt"></i> 미리보기 새 탭</a>
+        </div>
+        <div class="fc-wrap">
+          <!-- 좌측 섹션 리스트 -->
+          <div class="fc-left" id="fcLeftList">
+            <div style="color:#9ca3af;font-size:14px;text-align:center;padding:20px;">불러오는 중...</div>
+          </div>
+          <!-- 우측 슬롯 편집 패널 -->
+          <div class="fc-right" id="fcRightPanel">
+            <div class="fc-section-header" style="text-align:center;color:#9ca3af;font-size:15px;padding:60px 28px;">
+              왼쪽에서 편집할 섹션을 선택하세요
+            </div>
+          </div>
         </div>
       </section>
 
@@ -629,6 +789,49 @@
   <!-- 통일된 알림 토스트 컨테이너 -->
   <div id="lmToastContainer" style="position:fixed;bottom:30px;left:50%;transform:translateX(-50%);z-index:20000;display:flex;flex-direction:column;gap:8px;align-items:center;pointer-events:none;"></div>
 
+  <!-- 추천콘텐츠 큐레이션 — 콘텐츠/채널 추가 모달 -->
+  <div class="fc-modal" id="fcAddModal" onclick="if(event.target===this)closeCurationAddModal()">
+    <div class="fc-modal-box" role="dialog" aria-modal="true" aria-labelledby="fcAddModalTitle">
+      <div class="fc-modal-head">
+        <h3 id="fcAddModalTitle"><i class="fas fa-plus-circle" style="color:#2563eb;"></i> <span id="fcAddModalLabel">콘텐츠 추가</span> <span style="font-size:14px;color:#6B7280;font-weight:500;margin-left:8px;" id="fcAddModalSubLabel"></span></h3>
+        <button class="fc-modal-close" onclick="closeCurationAddModal()" aria-label="닫기"><i class="fas fa-times"></i></button>
+      </div>
+      <div class="fc-modal-search">
+        <input type="text" class="fc-modal-search-input" id="fcSearchKeyword" placeholder="제목·키워드·작성자로 검색">
+        <select class="fc-edit-select" id="fcSearchSubject" style="display:none;">
+          <option value="">전체 교과</option>
+          <option value="국어">국어</option>
+          <option value="수학">수학</option>
+          <option value="사회">사회</option>
+          <option value="과학">과학</option>
+          <option value="영어">영어</option>
+          <option value="음악">음악</option>
+          <option value="미술">미술</option>
+          <option value="체육">체육</option>
+          <option value="실과">실과</option>
+          <option value="도덕">도덕</option>
+        </select>
+        <select class="fc-edit-select" id="fcSearchGrade" style="display:none;">
+          <option value="">전체 학년</option>
+          <option value="1">1학년</option>
+          <option value="2">2학년</option>
+          <option value="3">3학년</option>
+          <option value="4">4학년</option>
+          <option value="5">5학년</option>
+          <option value="6">6학년</option>
+        </select>
+        <button class="fc-modal-search-btn" onclick="runCurationSearch(1)"><i class="fas fa-search"></i> 검색</button>
+      </div>
+      <div class="fc-modal-body" id="fcSearchResults">
+        <div class="fc-modal-loading">검색어를 입력하고 검색 버튼을 눌러주세요.</div>
+      </div>
+      <div class="fc-modal-foot">
+        <div class="fc-pg-info" id="fcSearchTotal"></div>
+        <div class="fc-pagination" id="fcSearchPagination"></div>
+      </div>
+    </div>
+  </div>
+
   <!-- 미리보기 모달 -->
   <div class="modal-overlay" id="previewModal" onclick="if(event.target===this)closePreviewModal()">
     <div class="modal-box">
@@ -657,7 +860,673 @@
         if (li.dataset.section === 'learning') loadLearningSection();
         if (li.dataset.section === 'learning-map') { loadLearningMapSummary(); loadMappingStats(); }
         if (li.dataset.section === 'gallery') loadGallery();
+        if (li.dataset.section === 'featured') loadFeaturedCuration();
       });
+    });
+
+    // ============================================================
+    //  추천콘텐츠 큐레이션 — spec_admin_featured_curation.md
+    // ============================================================
+    const FC = {
+      sections: [],         // [{id,key,title,subtitle,layout,item_type,is_active,fallback_enabled,max_items,sort_order,item_count}]
+      selectedId: null,     // 현재 선택된 섹션 id
+      items: [],            // 선택된 섹션의 슬롯 목록
+      sortableLeft: null,
+      sortableRight: null,
+      saveTimers: {},       // 디바운스용
+      // 모달 상태
+      modalSectionId: null,
+      modalItemType: 'content',
+      modalCurrentPage: 1,
+      modalTotalPages: 1
+    };
+
+    function showAdminToast(msg, type) {
+      type = type || 'success';
+      const t = document.createElement('div');
+      t.className = 'fc-toast ' + type;
+      const icon = type === 'success' ? 'check-circle' : (type === 'error' ? 'exclamation-circle' : (type === 'warning' ? 'exclamation-triangle' : 'info-circle'));
+      t.innerHTML = `<i class="fas fa-${icon}"></i> ${escHtml(msg)}`;
+      document.body.appendChild(t);
+      requestAnimationFrame(() => t.classList.add('show'));
+      setTimeout(() => {
+        t.classList.remove('show');
+        setTimeout(() => t.remove(), 250);
+      }, 2400);
+    }
+
+    /**
+     * 브라우저 confirm() 대체 — 커스텀 확인 모달
+     * @param {object|string} opts - { title, message, okLabel, cancelLabel, danger } 또는 메시지 문자열
+     * @returns {Promise<boolean>}
+     */
+    function adminConfirm(opts) {
+      if (typeof opts === 'string') opts = { message: opts };
+      const { title = '확인', message = '진행하시겠습니까?', okLabel = '확인', cancelLabel = '취소', danger = true } = opts || {};
+      return new Promise((resolve) => {
+        const overlay = document.createElement('div');
+        overlay.className = 'fc-confirm-overlay';
+        overlay.innerHTML = `
+          <div class="fc-confirm-box" role="dialog" aria-modal="true" aria-labelledby="fcConfirmTitle">
+            <div class="fc-confirm-icon ${danger ? '' : 'info'}"><i class="fas fa-${danger ? 'exclamation-triangle' : 'question-circle'}"></i></div>
+            <div class="fc-confirm-title" id="fcConfirmTitle">${escHtml(title)}</div>
+            <div class="fc-confirm-msg">${escHtml(message)}</div>
+            <div class="fc-confirm-actions">
+              <button class="fc-confirm-btn fc-confirm-cancel" type="button">${escHtml(cancelLabel)}</button>
+              <button class="fc-confirm-btn fc-confirm-ok ${danger ? '' : 'info'}" type="button">${escHtml(okLabel)}</button>
+            </div>
+          </div>`;
+        document.body.appendChild(overlay);
+        requestAnimationFrame(() => overlay.classList.add('show'));
+        const close = (val) => {
+          overlay.classList.remove('show');
+          document.removeEventListener('keydown', onKey);
+          setTimeout(() => overlay.remove(), 150);
+          resolve(val);
+        };
+        const onKey = (e) => {
+          if (e.key === 'Escape') { e.preventDefault(); close(false); }
+          else if (e.key === 'Enter') { e.preventDefault(); close(true); }
+        };
+        overlay.querySelector('.fc-confirm-cancel').onclick = () => close(false);
+        overlay.querySelector('.fc-confirm-ok').onclick = () => close(true);
+        overlay.addEventListener('click', (e) => { if (e.target === overlay) close(false); });
+        document.addEventListener('keydown', onKey);
+        // 포커스를 OK 버튼에 두어 Enter 즉시 확정 가능
+        setTimeout(() => overlay.querySelector('.fc-confirm-ok').focus(), 50);
+      });
+    }
+
+    async function loadFeaturedCuration() {
+      const left = document.getElementById('fcLeftList');
+      left.innerHTML = '<div style="color:#9ca3af;font-size:14px;text-align:center;padding:20px;"><i class="fas fa-spinner fa-spin"></i> 불러오는 중...</div>';
+      try {
+        const res = await fetch('/api/admin/featured/sections', { credentials: 'include' });
+        const data = await res.json();
+        if (!data.success) {
+          left.innerHTML = '<div style="color:#dc2626;font-size:14px;padding:20px;">섹션을 불러오지 못했습니다.</div>';
+          showAdminToast('섹션 목록 로드 실패', 'error');
+          return;
+        }
+        FC.sections = data.sections || [];
+        renderCurationLeft();
+        // 첫 진입 시 첫 섹션 선택
+        if (!FC.selectedId && FC.sections.length > 0) {
+          selectFcSection(FC.sections[0].id);
+        } else if (FC.selectedId) {
+          // 기존 선택 유지 - 우측 다시 그리기
+          const cur = FC.sections.find(s => s.id === FC.selectedId);
+          if (cur) renderCurationRight(FC.selectedId);
+        }
+      } catch (err) {
+        console.error('[FC] loadFeaturedCuration error:', err);
+        left.innerHTML = '<div style="color:#dc2626;font-size:14px;padding:20px;">네트워크 오류</div>';
+        showAdminToast('네트워크 오류: ' + err.message, 'error');
+      }
+    }
+
+    function renderCurationLeft() {
+      const left = document.getElementById('fcLeftList');
+      if (!FC.sections.length) {
+        left.innerHTML = '<div style="color:#9ca3af;font-size:14px;padding:20px;text-align:center;">섹션이 없습니다.</div>';
+        return;
+      }
+      left.innerHTML = FC.sections.map(s => {
+        const cls = ['fc-section-card'];
+        if (s.id === FC.selectedId) cls.push('selected');
+        if (!s.is_active) cls.push('inactive');
+        const itemTypeLabel = s.item_type === 'channel' ? '채널' : '콘텐츠';
+        return `
+          <div class="${cls.join(' ')}" data-section-id="${s.id}">
+            <div class="fc-drag-handle" title="드래그하여 순서 변경"><i class="fas fa-grip-vertical"></i></div>
+            <div class="fc-section-body" data-action="select">
+              <div class="fc-section-title">${escHtml(s.title)}</div>
+              <div class="fc-section-subtitle">${escHtml(s.subtitle || '부제 없음')}</div>
+              <div class="fc-section-meta">
+                <span class="fc-meta-chip">${itemTypeLabel} ${s.item_count || 0} / ${s.max_items}</span>
+                <span class="fc-meta-chip ${s.is_active ? 'active' : 'inactive'}">${s.is_active ? '노출' : '숨김'}</span>
+                ${s.fallback_enabled ? '<span class="fc-meta-chip">자동 추천</span>' : ''}
+              </div>
+            </div>
+            <div class="fc-section-toggles">
+              <label class="fc-toggle" title="섹션 노출/숨김" onclick="event.stopPropagation();">
+                <input type="checkbox" data-action="toggle-active" ${s.is_active ? 'checked' : ''}>
+                <span class="fc-track"></span>
+              </label>
+              <label class="fc-toggle" title="자동 추천(폴백) 사용" onclick="event.stopPropagation();" style="font-size:12px;">
+                <input type="checkbox" data-action="toggle-fallback" ${s.fallback_enabled ? 'checked' : ''}>
+                <span class="fc-track" style="width:30px;height:16px;"></span>
+              </label>
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      // 이벤트 위임
+      left.onclick = (e) => {
+        const card = e.target.closest('.fc-section-card');
+        if (!card) return;
+        const id = parseInt(card.dataset.sectionId, 10);
+        const action = e.target.closest('[data-action]')?.dataset.action;
+        if (action === 'toggle-active' || action === 'toggle-fallback') return; // input change handler 처리
+        // body 클릭 시 선택
+        selectFcSection(id);
+      };
+      left.onchange = (e) => {
+        const target = e.target;
+        const action = target.dataset.action;
+        if (!action) return;
+        const card = target.closest('.fc-section-card');
+        const id = parseInt(card.dataset.sectionId, 10);
+        if (action === 'toggle-active') {
+          patchSection(id, { is_active: target.checked ? 1 : 0 });
+        } else if (action === 'toggle-fallback') {
+          patchSection(id, { fallback_enabled: target.checked ? 1 : 0 });
+        }
+      };
+
+      // SortableJS 적용 (드래그 핸들로만 드래그)
+      if (FC.sortableLeft) { try { FC.sortableLeft.destroy(); } catch (e) {} FC.sortableLeft = null; }
+      if (window.Sortable) {
+        FC.sortableLeft = new Sortable(left, {
+          handle: '.fc-drag-handle',
+          animation: 150,
+          ghostClass: 'sortable-ghost',
+          chosenClass: 'sortable-chosen',
+          onEnd: () => {
+            const order = Array.from(left.querySelectorAll('.fc-section-card')).map((el, idx) => ({
+              id: parseInt(el.dataset.sectionId, 10),
+              sort_order: (idx + 1) * 10
+            }));
+            reorderSections(order);
+          }
+        });
+      }
+    }
+
+    function selectFcSection(id) {
+      FC.selectedId = id;
+      // 좌측 selected 표시 갱신
+      document.querySelectorAll('#fcLeftList .fc-section-card').forEach(c => {
+        const cid = parseInt(c.dataset.sectionId, 10);
+        c.classList.toggle('selected', cid === id);
+      });
+      renderCurationRight(id);
+      loadSectionItems(id);
+    }
+
+    async function loadSectionItems(sectionId) {
+      const slotList = document.getElementById('fcSlotList');
+      if (!slotList) return;
+      slotList.innerHTML = '<div style="color:#9ca3af;font-size:14px;padding:20px;text-align:center;"><i class="fas fa-spinner fa-spin"></i> 불러오는 중...</div>';
+      try {
+        const res = await fetch(`/api/admin/featured/sections/${sectionId}/items`, { credentials: 'include' });
+        const data = await res.json();
+        if (!data.success) {
+          slotList.innerHTML = '<div style="color:#dc2626;font-size:14px;padding:20px;">슬롯을 불러오지 못했습니다.</div>';
+          return;
+        }
+        FC.items = data.items || [];
+        renderSlotList();
+        // 좌측 카드 item_count 갱신
+        const sec = FC.sections.find(s => s.id === sectionId);
+        if (sec) {
+          sec.item_count = FC.items.length;
+          renderCurationLeft();
+        }
+      } catch (err) {
+        console.error('[FC] loadSectionItems error:', err);
+        slotList.innerHTML = '<div style="color:#dc2626;font-size:14px;padding:20px;">네트워크 오류</div>';
+      }
+    }
+
+    function renderCurationRight(sectionId) {
+      const right = document.getElementById('fcRightPanel');
+      const s = FC.sections.find(x => x.id === sectionId);
+      if (!s) {
+        right.innerHTML = '<div class="fc-section-header" style="text-align:center;color:#9ca3af;padding:60px 28px;">섹션이 없습니다.</div>';
+        return;
+      }
+      const itemTypeLabel = s.item_type === 'channel' ? '채널' : '콘텐츠';
+      right.innerHTML = `
+        <!-- 섹션 헤더 편집 영역 -->
+        <div class="fc-section-header">
+          <div class="fc-edit-row">
+            <div class="fc-edit-label">시스템 키</div>
+            <div style="font-size:14px;color:#9ca3af;">
+              <code style="background:#f3f4f6;padding:2px 8px;border-radius:4px;">${escHtml(s.key)}</code>
+              · 타입 <code style="background:#f3f4f6;padding:2px 8px;border-radius:4px;">${escHtml(s.item_type)}</code>
+              <span style="margin-left:8px;font-size:12px;">(시스템 고정 — 변경 불가)</span>
+            </div>
+          </div>
+          <div class="fc-edit-row">
+            <div class="fc-edit-label">타이틀</div>
+            <input type="text" class="fc-edit-input title" id="fcEditTitle" value="${escHtml(s.title)}" maxlength="60">
+          </div>
+          <div class="fc-edit-row">
+            <div class="fc-edit-label">부제</div>
+            <input type="text" class="fc-edit-input subtitle" id="fcEditSubtitle" value="${escHtml(s.subtitle || '')}" maxlength="80" placeholder="(선택) 섹션 설명">
+          </div>
+          <div class="fc-edit-row">
+            <div class="fc-edit-label">표시 옵션</div>
+            <div class="fc-edit-controls">
+              <select class="fc-edit-select" id="fcEditLayout">
+                <option value="card-grid" ${s.layout === 'card-grid' ? 'selected' : ''}>카드 그리드</option>
+                <option value="channel-row" ${s.layout === 'channel-row' ? 'selected' : ''}>채널 가로</option>
+                <option value="list" ${s.layout === 'list' ? 'selected' : ''}>리스트</option>
+              </select>
+              <select class="fc-edit-select" id="fcEditMaxItems">
+                ${[4,6,8,12].map(n => `<option value="${n}" ${s.max_items === n ? 'selected' : ''}>최대 ${n}개</option>`).join('')}
+              </select>
+              <label class="fc-toggle">
+                <input type="checkbox" id="fcEditActive" ${s.is_active ? 'checked' : ''}>
+                <span class="fc-track"></span>
+                <span style="margin-left:4px;">${s.is_active ? '노출' : '숨김'}</span>
+              </label>
+            </div>
+          </div>
+          <div class="fc-fallback-row">
+            <input type="checkbox" id="fcEditFallback" ${s.fallback_enabled ? 'checked' : ''} style="width:18px;height:18px;accent-color:#2563eb;">
+            <label for="fcEditFallback"><strong>자동 추천으로 채움</strong> <span class="hint">— 슬롯이 비거나 부족할 때 시스템 추천 알고리즘으로 자동 보충</span></label>
+          </div>
+        </div>
+
+        <!-- 슬롯 리스트 -->
+        <div class="fc-slot-section">
+          <div class="fc-slot-header">
+            <div class="fc-slot-title">슬롯 (드래그하여 순서 변경)</div>
+            <div class="fc-slot-count" id="fcSlotCount"></div>
+          </div>
+          <div class="fc-slot-list" id="fcSlotList"></div>
+          <button class="fc-add-btn" onclick="openCurationAddModal(${s.id})">
+            <i class="fas fa-plus-circle"></i> ${itemTypeLabel} 추가
+          </button>
+        </div>
+      `;
+
+      // 헤더 입력 이벤트
+      const titleEl = document.getElementById('fcEditTitle');
+      const subtitleEl = document.getElementById('fcEditSubtitle');
+      const layoutEl = document.getElementById('fcEditLayout');
+      const maxItemsEl = document.getElementById('fcEditMaxItems');
+      const activeEl = document.getElementById('fcEditActive');
+      const fallbackEl = document.getElementById('fcEditFallback');
+
+      const onDebounceSave = (key, value) => {
+        clearTimeout(FC.saveTimers[key]);
+        FC.saveTimers[key] = setTimeout(() => patchSection(s.id, { [key]: value }), 400);
+      };
+      titleEl.addEventListener('input', () => onDebounceSave('title', titleEl.value.trim() || s.title));
+      subtitleEl.addEventListener('input', () => onDebounceSave('subtitle', subtitleEl.value.trim()));
+      layoutEl.addEventListener('change', () => patchSection(s.id, { layout: layoutEl.value }));
+      maxItemsEl.addEventListener('change', () => patchSection(s.id, { max_items: parseInt(maxItemsEl.value, 10) }));
+      activeEl.addEventListener('change', () => patchSection(s.id, { is_active: activeEl.checked ? 1 : 0 }));
+      fallbackEl.addEventListener('change', () => patchSection(s.id, { fallback_enabled: fallbackEl.checked ? 1 : 0 }));
+    }
+
+    function renderSlotList() {
+      const slotList = document.getElementById('fcSlotList');
+      const slotCount = document.getElementById('fcSlotCount');
+      const sec = FC.sections.find(s => s.id === FC.selectedId);
+      if (!slotList || !sec) return;
+
+      if (!FC.items.length) {
+        const emptyClass = sec.fallback_enabled ? '' : 'warning';
+        slotList.innerHTML = `
+          <div class="fc-slot-empty ${emptyClass}">
+            <i class="fas fa-inbox" style="font-size:36px;display:block;margin-bottom:10px;color:${sec.fallback_enabled ? '#cbd5e1' : '#fca5a5'};"></i>
+            슬롯이 비어 있습니다.
+            ${sec.fallback_enabled
+              ? '<br><span style="font-size:14px;">자동 추천이 켜져 있어 시스템 추천이 자동으로 표시됩니다.</span>'
+              : '<br><span style="font-size:14px;">자동 추천이 꺼져 있어 페이지에 빈 상태로 노출됩니다.</span>'
+            }
+          </div>
+        `;
+      } else {
+        slotList.innerHTML = FC.items.map((it, idx) => renderSlotCard(it, idx, sec)).join('');
+      }
+      // 카운트 업데이트
+      const fbText = sec.fallback_enabled
+        ? (FC.items.length < sec.max_items ? ` · 자동 추천 ${sec.max_items - FC.items.length}개 보충` : '')
+        : ' · 자동 추천 OFF';
+      slotCount.innerHTML = `현재 ${FC.items.length} / ${sec.max_items}${fbText}`;
+
+      // 이벤트 위임
+      slotList.onclick = async (e) => {
+        const removeBtn = e.target.closest('[data-action="remove"]');
+        if (removeBtn) {
+          const itemId = parseInt(removeBtn.dataset.itemId, 10);
+          const ok = await adminConfirm({
+            title: '슬롯 제거',
+            message: '선택한 콘텐츠를 추천 슬롯에서 제거하시겠습니까?',
+            okLabel: '제거',
+            cancelLabel: '취소',
+            danger: true
+          });
+          if (ok) removeSlotItem(itemId);
+        }
+      };
+
+      // SortableJS for slots — destroy 시 try/catch로 보호
+      if (FC.sortableRight) { try { FC.sortableRight.destroy(); } catch (e) {} FC.sortableRight = null; }
+      if (window.Sortable && FC.items.length > 0) {
+        FC.sortableRight = new Sortable(slotList, {
+          handle: '.fc-slot-grip',
+          animation: 150,
+          ghostClass: 'sortable-ghost',
+          onEnd: () => {
+            const order = Array.from(slotList.querySelectorAll('.fc-slot-card')).map((el, idx) => ({
+              id: parseInt(el.dataset.itemId, 10),
+              sort_order: (idx + 1) * 10
+            }));
+            reorderItems(FC.selectedId, order);
+          }
+        });
+      }
+    }
+
+    function renderSlotCard(it, idx, section) {
+      const snap = it.snapshot || {};
+      const visible = snap.is_visible !== false;
+      const cls = ['fc-slot-card'];
+      if (!visible) cls.push('invisible');
+      const isOverMax = idx >= section.max_items;
+      if (it.item_type === 'channel') {
+        const initial = (snap.name || '?').charAt(0);
+        return `
+          <div class="${cls.join(' ')}" data-item-id="${it.id}" ${!visible ? 'title="비공개로 전환되어 노출되지 않습니다"' : ''}>
+            <div class="fc-slot-grip"><i class="fas fa-grip-vertical"></i></div>
+            <div class="fc-slot-avatar">${escHtml(initial)}</div>
+            <div class="fc-slot-body">
+              <div class="fc-slot-card-title">${escHtml(snap.name || '(삭제됨)')} ${!visible ? '<span class="fc-slot-warning">숨김</span>' : ''} ${isOverMax ? '<span class="fc-slot-warning" style="background:#fef3c7;color:#d97706;">최대 초과</span>' : ''}</div>
+              <div class="fc-slot-card-meta">${escHtml(snap.owner_name || '')}</div>
+              <div class="fc-slot-card-meta2">구독 ${snap.subscriber_count || 0} · 콘텐츠 ${snap.content_count || 0}</div>
+            </div>
+            <div class="fc-slot-actions">
+              <button class="fc-slot-remove" data-action="remove" data-item-id="${it.id}" title="제거"><i class="fas fa-times"></i></button>
+            </div>
+          </div>
+        `;
+      }
+      // 콘텐츠
+      const thumb = snap.thumbnail_url
+        ? `<img src="${escHtml(snap.thumbnail_url)}" class="fc-slot-thumb" alt="" onerror="this.outerHTML='<div class=\\'fc-slot-thumb\\'><i class=\\'fas fa-image\\'></i></div>'">`
+        : `<div class="fc-slot-thumb"><i class="fas fa-${snap.content_type === 'video' ? 'video' : (snap.content_type === 'quiz' ? 'question-circle' : 'file-alt')}"></i></div>`;
+      return `
+        <div class="${cls.join(' ')}" data-item-id="${it.id}" ${!visible ? 'title="비공개·삭제로 전환되어 노출되지 않습니다"' : ''}>
+          <div class="fc-slot-grip"><i class="fas fa-grip-vertical"></i></div>
+          ${thumb}
+          <div class="fc-slot-body">
+            <div class="fc-slot-card-title">${escHtml(snap.title || '(삭제됨)')} ${!visible ? '<span class="fc-slot-warning">숨김</span>' : ''} ${isOverMax ? '<span class="fc-slot-warning" style="background:#fef3c7;color:#d97706;">최대 초과</span>' : ''}</div>
+            <div class="fc-slot-card-meta">${escHtml(snap.subject || '-')}${snap.grade ? ` · ${snap.grade}학년` : ''} · ${escHtml(snap.creator_name || '')}</div>
+            <div class="fc-slot-card-meta2">조회 ${snap.view_count || 0} · 좋아요 ${snap.like_count || 0}</div>
+          </div>
+          <div class="fc-slot-actions">
+            <button class="fc-slot-remove" data-action="remove" data-item-id="${it.id}" title="제거"><i class="fas fa-times"></i></button>
+          </div>
+        </div>
+      `;
+    }
+
+    async function patchSection(id, payload) {
+      try {
+        const res = await fetch(`/api/admin/featured/sections/${id}`, {
+          method: 'PATCH',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (!data.success) {
+          showAdminToast(data.message || '저장 실패', 'error');
+          return;
+        }
+        // FC.sections 갱신
+        const sec = FC.sections.find(s => s.id === id);
+        if (sec && data.section) Object.assign(sec, data.section);
+        // 좌측 다시 그리기 (선택 유지)
+        renderCurationLeft();
+        showAdminToast('저장됨', 'success');
+      } catch (err) {
+        console.error('[FC] patchSection error:', err);
+        showAdminToast('네트워크 오류: ' + err.message, 'error');
+      }
+    }
+
+    async function reorderSections(order) {
+      try {
+        const res = await fetch('/api/admin/featured/sections/reorder', {
+          method: 'PATCH',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ order })
+        });
+        const data = await res.json();
+        if (!data.success) {
+          showAdminToast(data.message || '순서 변경 실패', 'error');
+          loadFeaturedCuration();
+          return;
+        }
+        // 로컬 sort_order 갱신
+        order.forEach(o => {
+          const sec = FC.sections.find(s => s.id === o.id);
+          if (sec) sec.sort_order = o.sort_order;
+        });
+        FC.sections.sort((a,b) => a.sort_order - b.sort_order);
+        showAdminToast('섹션 순서를 변경했습니다', 'success');
+      } catch (err) {
+        showAdminToast('네트워크 오류', 'error');
+      }
+    }
+
+    async function reorderItems(sectionId, order) {
+      try {
+        const res = await fetch('/api/admin/featured/items/reorder', {
+          method: 'PATCH',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ section_id: sectionId, order })
+        });
+        const data = await res.json();
+        if (!data.success) {
+          showAdminToast(data.message || '슬롯 순서 변경 실패', 'error');
+          loadSectionItems(sectionId);
+          return;
+        }
+        showAdminToast('슬롯 순서를 변경했습니다', 'success');
+      } catch (err) {
+        showAdminToast('네트워크 오류', 'error');
+      }
+    }
+
+    async function removeSlotItem(itemId) {
+      try {
+        const res = await fetch(`/api/admin/featured/items/${itemId}`, {
+          method: 'DELETE',
+          credentials: 'include'
+        });
+        const data = await res.json();
+        if (!data.success) {
+          showAdminToast(data.message || '제거 실패', 'error');
+          return;
+        }
+        showAdminToast('슬롯을 제거했습니다', 'success');
+        loadSectionItems(FC.selectedId);
+      } catch (err) {
+        showAdminToast('네트워크 오류', 'error');
+      }
+    }
+
+    // ----- 추가 모달 -----
+    function openCurationAddModal(sectionId) {
+      const sec = FC.sections.find(s => s.id === sectionId);
+      if (!sec) return;
+      FC.modalSectionId = sectionId;
+      FC.modalItemType = sec.item_type;
+      FC.modalCurrentPage = 1;
+      const modal = document.getElementById('fcAddModal');
+      const label = document.getElementById('fcAddModalLabel');
+      const subLabel = document.getElementById('fcAddModalSubLabel');
+      label.textContent = sec.item_type === 'channel' ? '채널 추가' : '콘텐츠 추가';
+      subLabel.textContent = `(섹션: ${sec.title} · 현재 ${FC.items.length}/${sec.max_items})`;
+      // 콘텐츠일 때만 교과·학년 셀렉트 노출
+      document.getElementById('fcSearchSubject').style.display = sec.item_type === 'content' ? '' : 'none';
+      document.getElementById('fcSearchGrade').style.display = sec.item_type === 'content' ? '' : 'none';
+      document.getElementById('fcSearchKeyword').value = '';
+      document.getElementById('fcSearchSubject').value = '';
+      document.getElementById('fcSearchGrade').value = '';
+      document.getElementById('fcSearchResults').innerHTML = '<div class="fc-modal-loading">검색어를 입력하고 검색 버튼을 눌러주세요. 비워두면 전체 결과가 표시됩니다.</div>';
+      document.getElementById('fcSearchTotal').textContent = '';
+      document.getElementById('fcSearchPagination').innerHTML = '';
+      modal.classList.add('active');
+      // 자동으로 첫 페이지 로드
+      runCurationSearch(1);
+      // 키 핸들러
+      setTimeout(() => document.getElementById('fcSearchKeyword').focus(), 100);
+    }
+
+    function closeCurationAddModal() {
+      document.getElementById('fcAddModal').classList.remove('active');
+      FC.modalSectionId = null;
+      // 모달 닫힐 때 슬롯 새로고침 (이미 추가된 항목 반영)
+      if (FC.selectedId) loadSectionItems(FC.selectedId);
+    }
+
+    async function runCurationSearch(page) {
+      if (!FC.modalSectionId) return;
+      page = page || 1;
+      FC.modalCurrentPage = page;
+      const q = document.getElementById('fcSearchKeyword').value.trim();
+      const subject = document.getElementById('fcSearchSubject').value;
+      const grade = document.getElementById('fcSearchGrade').value;
+      const params = new URLSearchParams({
+        type: FC.modalItemType,
+        q,
+        page: String(page),
+        pageSize: '12',
+        section_id: String(FC.modalSectionId)
+      });
+      if (subject) params.set('subject', subject);
+      if (grade) params.set('grade', grade);
+
+      const results = document.getElementById('fcSearchResults');
+      results.innerHTML = '<div class="fc-modal-loading"><i class="fas fa-spinner fa-spin"></i> 불러오는 중...</div>';
+      try {
+        const res = await fetch('/api/admin/featured/search?' + params.toString(), { credentials: 'include' });
+        const data = await res.json();
+        if (!data.success) {
+          results.innerHTML = '<div class="fc-modal-loading" style="color:#dc2626;">검색 실패</div>';
+          return;
+        }
+        FC.modalTotalPages = data.totalPages || 1;
+        renderSearchResults(data.items || []);
+        document.getElementById('fcSearchTotal').textContent = `총 ${data.total}개 결과 · ${data.page} / ${data.totalPages} 페이지`;
+        renderSearchPagination(data.page, data.totalPages);
+      } catch (err) {
+        console.error('[FC] runCurationSearch error:', err);
+        results.innerHTML = '<div class="fc-modal-loading" style="color:#dc2626;">네트워크 오류</div>';
+      }
+    }
+
+    function renderSearchResults(items) {
+      const results = document.getElementById('fcSearchResults');
+      if (!items.length) {
+        results.innerHTML = '<div class="fc-modal-loading">검색 결과가 없습니다.</div>';
+        return;
+      }
+      if (FC.modalItemType === 'channel') {
+        results.innerHTML = `<div class="fc-result-grid">${items.map(it => `
+          <div class="fc-result-card">
+            <div class="fc-result-channel-thumb">${escHtml((it.name || '?').charAt(0))}</div>
+            <div class="fc-result-body">
+              <div class="fc-result-title">${escHtml(it.name || '(이름 없음)')}</div>
+              <div class="fc-result-meta">${escHtml(it.owner_name || '')} · 구독 ${it.subscriber_count || 0}</div>
+              <button class="fc-result-add-btn ${it.already_in_section ? 'added' : ''}"
+                      data-action="add-item" data-id="${it.id}" data-type="channel"
+                      ${it.already_in_section ? 'disabled' : ''}>
+                ${it.already_in_section ? '<i class="fas fa-check"></i> 이미 추가됨' : '<i class="fas fa-plus"></i> 추가'}
+              </button>
+            </div>
+          </div>
+        `).join('')}</div>`;
+      } else {
+        results.innerHTML = `<div class="fc-result-grid">${items.map(it => {
+          const thumb = it.thumbnail_url
+            ? `<div class="fc-result-thumb" style="background:#000;"><img src="${escHtml(it.thumbnail_url)}" style="width:100%;height:100%;object-fit:cover;" onerror="this.outerHTML='<i class=\\'fas fa-image\\'></i>'"></div>`
+            : `<div class="fc-result-thumb"><i class="fas fa-${it.content_type === 'video' ? 'video' : (it.content_type === 'quiz' ? 'question-circle' : 'file-alt')}"></i></div>`;
+          return `
+            <div class="fc-result-card">
+              ${thumb}
+              <div class="fc-result-body">
+                <div class="fc-result-title">${escHtml(it.title || '(제목 없음)')}</div>
+                <div class="fc-result-meta">${escHtml(it.subject || '-')}${it.grade ? ` · ${it.grade}학년` : ''} · ${escHtml(it.creator_name || '')}</div>
+                <button class="fc-result-add-btn ${it.already_in_section ? 'added' : ''}"
+                        data-action="add-item" data-id="${it.id}" data-type="content"
+                        ${it.already_in_section ? 'disabled' : ''}>
+                  ${it.already_in_section ? '<i class="fas fa-check"></i> 이미 추가됨' : '<i class="fas fa-plus"></i> 추가'}
+                </button>
+              </div>
+            </div>
+          `;
+        }).join('')}</div>`;
+      }
+      // 이벤트 위임
+      results.onclick = (e) => {
+        const btn = e.target.closest('[data-action="add-item"]');
+        if (!btn || btn.disabled) return;
+        addItemToSection(parseInt(btn.dataset.id, 10), btn.dataset.type, btn);
+      };
+    }
+
+    function renderSearchPagination(curPage, totalPages) {
+      const pg = document.getElementById('fcSearchPagination');
+      if (totalPages <= 1) { pg.innerHTML = ''; return; }
+      let html = `<button class="fc-pg-btn" ${curPage <= 1 ? 'disabled' : ''} data-pg="${curPage - 1}"><i class="fas fa-chevron-left"></i></button>`;
+      html += `<span class="fc-pg-info">${curPage} / ${totalPages}</span>`;
+      html += `<button class="fc-pg-btn" ${curPage >= totalPages ? 'disabled' : ''} data-pg="${curPage + 1}"><i class="fas fa-chevron-right"></i></button>`;
+      pg.innerHTML = html;
+      pg.onclick = (e) => {
+        const btn = e.target.closest('.fc-pg-btn');
+        if (!btn || btn.disabled) return;
+        runCurationSearch(parseInt(btn.dataset.pg, 10));
+      };
+    }
+
+    async function addItemToSection(itemId, itemType, btn) {
+      if (!FC.modalSectionId) return;
+      btn.disabled = true;
+      const orig = btn.innerHTML;
+      btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 추가 중';
+      try {
+        const res = await fetch(`/api/admin/featured/sections/${FC.modalSectionId}/items`, {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ item_type: itemType, item_id: itemId })
+        });
+        const data = await res.json();
+        if (!data.success) {
+          btn.disabled = false;
+          btn.innerHTML = orig;
+          showAdminToast(data.message || '추가 실패', data.code === 'DUPLICATE' ? 'warning' : 'error');
+          return;
+        }
+        btn.classList.add('added');
+        btn.innerHTML = '<i class="fas fa-check"></i> 추가됨';
+        showAdminToast('슬롯에 추가했습니다', 'success');
+      } catch (err) {
+        btn.disabled = false;
+        btn.innerHTML = orig;
+        showAdminToast('네트워크 오류', 'error');
+      }
+    }
+
+    // ESC = 닫기, Enter = 검색
+    document.addEventListener('keydown', (e) => {
+      const modal = document.getElementById('fcAddModal');
+      if (!modal || !modal.classList.contains('active')) return;
+      if (e.key === 'Escape') closeCurationAddModal();
+      else if (e.key === 'Enter' && e.target.id === 'fcSearchKeyword') runCurationSearch(1);
     });
 
     // 대시보드
@@ -2196,14 +3065,19 @@
       }
     }
 
-    // 초기화
+    // 초기화 — 1회만 검증, alert 없이 silent redirect
+    let __adminGuardVerified = false;
     window.addEventListener('dacheim:user-loaded', (e) => {
-      if (e.detail.role !== 'admin') {
-        alert('관리자만 접근 가능합니다.');
-        location.href = '/';
+      if (__adminGuardVerified) return; // 이후 재dispatch 무시 (bfcache·중복 호출 방어)
+      const role = e.detail && e.detail.role;
+      if (role !== 'admin') {
+        // 비로그인 또는 비관리자: 조용히 포털로 이동
+        location.replace('/');
         return;
       }
-      document.getElementById('adminLayout').style.display = 'grid';
+      __adminGuardVerified = true;
+      const layout = document.getElementById('adminLayout');
+      if (layout) layout.style.display = 'grid';
       loadStats();
     });
   </script>

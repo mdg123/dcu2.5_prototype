@@ -2148,16 +2148,115 @@
       injectCardStats(document.getElementById('pubGrid'));
     }
 
-    // ===== Recommend =====
+    // ===== Recommend (큐레이션 분기 함수) =====
+    // spec_admin_featured_curation.md C — 단일 API + layout별 분기
+    function renderFeaturedSection(s, ctx = {}) {
+      const items = s.items || [];
+      const isRecommend = s.key === 'recommend';
+      // recommend 섹션 위에 키워드 박스(기존 UX 보존)
+      const keywordHtml = isRecommend ? `
+        <div class="keyword-area">
+          <div class="text-xs text-gray mb-8">맞춤 키워드 <span style="color:var(--gray-400);font-weight:400;">(최근 선택한 성취기준 기반)</span></div>
+          <div class="flex-row flex-wrap gap-8">
+            ${(ctx.recentKws && ctx.recentKws.length)
+              ? ctx.recentKws.map(k => `<span class="keyword-tag">${escHtml(k)}</span>`).join('')
+              : '<span style="font-size:11px;color:var(--gray-400);">성취기준을 선택하면 맞춤 키워드가 표시됩니다.</span>'}
+          </div>
+        </div>
+      ` : '';
+
+      // 빈 상태
+      if (!items.length) {
+        return `
+          <div style="margin-bottom:32px">
+            <div class="mb-12">
+              ${s.key === 'planning' ? '<span class="section-badge">기획</span>' : ''}
+              <span class="section-title">${escHtml(s.title || '')}</span>
+            </div>
+            ${s.subtitle ? `<div class="text-xs text-gray mb-12">${escHtml(s.subtitle)}</div>` : ''}
+            ${keywordHtml}
+            <div class="empty-state"><i class="fas fa-inbox"></i><p>이 섹션은 준비 중입니다.</p></div>
+          </div>
+        `;
+      }
+
+      const body = (() => {
+        switch (s.layout) {
+          case 'channel-row': return renderChannelRow(items);
+          case 'list':        return renderListSection(items);
+          case 'card-grid':
+          default:            return renderCardGrid(items);
+        }
+      })();
+
+      return `
+        <div style="margin-bottom:32px">
+          <div class="mb-12">
+            ${s.key === 'planning' ? '<span class="section-badge">기획</span>' : ''}
+            <span class="section-title">${escHtml(s.title || '')}</span>
+          </div>
+          ${s.subtitle ? `<div class="text-xs text-gray mb-12">${escHtml(s.subtitle)}</div>` : ''}
+          ${keywordHtml}
+          ${body}
+        </div>
+      `;
+    }
+
+    // 카드 그리드 (콘텐츠/채널 혼합 가능)
+    function renderCardGrid(items) {
+      return `<div class="grid-4">${items.map(it => {
+        if (it.type === 'channel') return renderChannelCard(it);
+        return renderContentCard(it);
+      }).join('')}</div>`;
+    }
+
+    // 채널 가로 슬라이더 (grid-4 재활용)
+    function renderChannelRow(items) {
+      return `<div class="grid-4">${items.map(it => {
+        if (it.type === 'content') return renderContentCard(it);
+        return renderChannelCard(it);
+      }).join('')}</div>`;
+    }
+
+    // 채널 카드 — 기존 마크업 재활용
+    function renderChannelCard(ch) {
+      return `
+        <div class="channel-card" onclick="viewChannel(${ch.id})">
+          <div class="channel-card-avatar">${escHtml((ch.name || '?')[0])}</div>
+          <div style="font-size:13px;font-weight:700;">${escHtml(ch.name || '')}</div>
+          <div style="font-size:11px;color:var(--gray-400);margin-top:2px;">${escHtml(ch.owner_name || '')}</div>
+          <div style="display:flex;gap:12px;margin-top:8px;font-size:11px;color:var(--gray-400);justify-content:center;">
+            <span><i class="fas fa-users"></i> ${ch.subscriber_count || 0}</span>
+            <span>콘텐츠 ${ch.content_count || 0}</span>
+          </div>
+        </div>
+      `;
+    }
+
+    // 리스트 섹션 (예비)
+    function renderListSection(items) {
+      return `<div class="flex-col gap-8">${items.map(it => {
+        if (it.type === 'channel') return renderChannelCard(it);
+        return renderListRow(it);
+      }).join('')}</div>`;
+    }
+
     async function renderRecommend(c) {
-      const [recRes, chRes] = await Promise.all([
-        fetch('/api/contents/recommendations?limit=8&keywords=' + encodeURIComponent(getRecentKeywords())).then(r => r.json()),
-        fetch('/api/contents/channels/list?limit=8').then(r => r.json())
-      ]);
-      const recs = recRes.contents || [];
-      const channels = chRes.channels || [];
       const userName = currentUser ? currentUser.name : '';
       const roleDesc = currentUser?.role === 'teacher' ? '교사' : '학생';
+
+      // 단일 호출 — 관리자가 큐레이션한 섹션 + 폴백 자동 적용
+      let sections = [];
+      try {
+        const res = await fetch('/api/contents/featured').then(r => r.json());
+        sections = res.sections || [];
+      } catch (err) {
+        console.error('[recommend] /api/contents/featured 실패:', err);
+        sections = [];
+      }
+
+      // 키워드 영역(맞춤 키워드)을 recommend 섹션 위에 노출하기 위해 별도 처리
+      const recentKws = getRecentKeywords().split(',').filter(Boolean).slice(0, 6);
 
       c.innerHTML = `
         <div class="section-title mb-16"><i class="fas fa-star" style="color:var(--amber-500)"></i> 추천콘텐츠</div>
@@ -2202,54 +2301,7 @@
         <div id="pubGrid"></div>
         <div id="pubLoading" style="display:none;text-align:center;padding:24px;color:var(--gray-400);font-size:13px;"><i class="fas fa-spinner fa-spin"></i> 불러오는 중...</div>
 
-        ${recs.length > 0 ? `
-        <div style="margin-bottom:32px">
-          <div class="mb-12"><span class="section-badge">기획</span><span class="section-title">${(() => {
-            const now = new Date();
-            const y = now.getFullYear();
-            const m = now.getMonth() + 1;
-            const semester = (m >= 3 && m <= 7) ? '1학기' : (m >= 9 || m <= 1) ? '2학기' : '방학';
-            return `${y}학년도 ${semester} 추천 자료`;
-          })()}</span></div>
-          <div class="grid-4">${recs.slice(0, 4).map(x => renderContentCard(x)).join('')}</div>
-        </div>` : ''}
-
-        <div style="margin-bottom:32px">
-          <div class="section-title mb-4">🎯 ${escHtml(userName)}님을 위한 맞춤 콘텐츠</div>
-          <div class="text-xs text-gray mb-12">${roleDesc} 역할 기반 추천</div>
-          <div class="keyword-area">
-            <div class="text-xs text-gray mb-8">맞춤 키워드 <span style="color:var(--gray-400);font-weight:400;">(최근 선택한 성취기준 기반)</span></div>
-            <div class="flex-row flex-wrap gap-8">
-              ${(() => {
-                const kws = getRecentKeywords().split(',').filter(Boolean).slice(0, 6);
-                return kws.length
-                  ? kws.map(k => `<span class="keyword-tag">${escHtml(k)}</span>`).join('')
-                  : '<span style="font-size:11px;color:var(--gray-400);">성취기준을 선택하면 맞춤 키워드가 표시됩니다.</span>';
-              })()}
-            </div>
-          </div>
-          <div class="grid-4">${recs.slice(0, 4).map(x => `<div class="content-relative">${renderContentCard(x)}<button class="dismiss-btn" onclick="event.stopPropagation();this.parentElement.style.display='none'">관심없음</button></div>`).join('')}</div>
-        </div>
-
-        <div style="margin-bottom:32px">
-          <div class="section-title mb-12">🌟 인기 채널</div>
-          <div class="grid-4">${channels.map(ch => `
-            <div class="channel-card" onclick="viewChannel(${ch.id})">
-              <div class="channel-card-avatar">${escHtml((ch.name || '?')[0])}</div>
-              <div style="font-size:13px;font-weight:700;">${escHtml(ch.name)}</div>
-              <div style="font-size:11px;color:var(--gray-400);margin-top:2px;">${escHtml(ch.owner_name || '')}</div>
-              <div style="display:flex;gap:12px;margin-top:8px;font-size:11px;color:var(--gray-400);justify-content:center;">
-                <span><i class="fas fa-users"></i> ${ch.subscriber_count}</span>
-                <span>콘텐츠 ${ch.content_count}</span>
-              </div>
-            </div>
-          `).join('') || '<div class="empty-state" style="grid-column:1/-1"><p>채널이 없습니다.</p></div>'}</div>
-        </div>
-
-        <div>
-          <div class="section-title mb-12">🆕 새로 올라온 맞춤 자료</div>
-          <div class="grid-4">${recs.slice(4, 8).map(x => renderContentCard(x)).join('') || recs.slice(0, 4).map(x => renderContentCard(x)).join('')}</div>
-        </div>
+        ${sections.map((s, idx) => renderFeaturedSection(s, { idx, userName, roleDesc, recentKws })).join('')}
       `;
       // std-smart-search 컴포넌트 변경 시 자동 검색 (공개콘텐츠와 동일)
       const stdSmartRec = document.getElementById('pubStdSmart');

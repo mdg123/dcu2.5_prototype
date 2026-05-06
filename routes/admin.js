@@ -1573,4 +1573,144 @@ router.post('/learning-map/mappings/import', ...adminOnly, (req, res, next) => {
   });
 });
 
+// ============================================================================
+//  추천콘텐츠 큐레이션 — spec_admin_featured_curation.md D-2
+// ============================================================================
+const featuredDb = require('../db/featured');
+
+// GET /api/admin/featured/sections — 섹션 목록 + 슬롯 갯수
+router.get('/featured/sections', ...adminOnly, (req, res) => {
+  try {
+    const activeOnly = req.query.activeOnly === '1' || req.query.activeOnly === 'true';
+    const sections = featuredDb.listSections({ activeOnly });
+    res.json({ success: true, sections });
+  } catch (err) {
+    console.error('[ADMIN] featured/sections list error:', err);
+    res.status(500).json({ success: false, code: 'SERVER_ERROR', message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// PATCH /api/admin/featured/sections/reorder — 섹션 순서 일괄 갱신 (** 동적 :id 보다 위에 두어야 함 **)
+router.patch('/featured/sections/reorder', ...adminOnly, (req, res) => {
+  try {
+    const { order } = req.body || {};
+    if (!Array.isArray(order)) {
+      return res.status(400).json({ success: false, code: 'INVALID_PAYLOAD', message: '요청 본문이 올바르지 않습니다.' });
+    }
+    const r = featuredDb.reorderSections(order, req.user.id);
+    if (!r.ok) return res.status(400).json({ success: false, code: r.code || 'INVALID_PAYLOAD', message: '요청을 처리하지 못했습니다.' });
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[ADMIN] featured/sections/reorder error:', err);
+    res.status(500).json({ success: false, code: 'SERVER_ERROR', message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// PATCH /api/admin/featured/sections/:id — 부분 갱신
+router.patch('/featured/sections/:id', ...adminOnly, (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!id) return res.status(400).json({ success: false, code: 'INVALID_PAYLOAD', message: 'id가 올바르지 않습니다.' });
+
+    const r = featuredDb.updateSection(id, req.body || {}, req.user.id);
+    if (!r.ok) {
+      if (r.code === 'NOT_FOUND') return res.status(404).json({ success: false, code: 'NOT_FOUND', message: '섹션이 존재하지 않습니다.' });
+      if (r.code === 'STALE_UPDATE') return res.status(409).json({ success: false, code: 'STALE_UPDATE', message: '다른 관리자가 먼저 수정했습니다. 새로고침 후 다시 시도해주세요.' });
+      return res.status(400).json({ success: false, code: r.code || 'INVALID_PAYLOAD', message: '요청을 처리하지 못했습니다.' });
+    }
+    res.json({ success: true, section: r.section });
+  } catch (err) {
+    console.error('[ADMIN] featured/sections PATCH error:', err);
+    res.status(500).json({ success: false, code: 'SERVER_ERROR', message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// GET /api/admin/featured/sections/:id/items — 섹션 슬롯 목록 (admin 뷰)
+router.get('/featured/sections/:id/items', ...adminOnly, (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const section = featuredDb.getSection(id);
+    if (!section) return res.status(404).json({ success: false, code: 'NOT_FOUND', message: '섹션이 존재하지 않습니다.' });
+    const items = featuredDb.listSectionItems(id);
+    res.json({ success: true, section, items });
+  } catch (err) {
+    console.error('[ADMIN] featured/sections/:id/items error:', err);
+    res.status(500).json({ success: false, code: 'SERVER_ERROR', message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// POST /api/admin/featured/sections/:id/items — 슬롯 추가 (끝에 붙임)
+router.post('/featured/sections/:id/items', ...adminOnly, (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const { item_type, item_id, badge_label, note } = req.body || {};
+    if (!item_type || !item_id) {
+      return res.status(400).json({ success: false, code: 'INVALID_PAYLOAD', message: 'item_type과 item_id가 필요합니다.' });
+    }
+    const r = featuredDb.addSectionItem(id, item_type, parseInt(item_id, 10), { badge_label, note }, req.user.id);
+    if (!r.ok) {
+      const status = r.code === 'DUPLICATE' ? 409 : (r.code === 'NOT_FOUND' ? 404 : 400);
+      return res.status(status).json({ success: false, code: r.code || 'INVALID_PAYLOAD', message: r.message || '요청을 처리하지 못했습니다.' });
+    }
+    res.status(201).json({ success: true, item: r.item });
+  } catch (err) {
+    console.error('[ADMIN] featured/sections/:id/items POST error:', err);
+    res.status(500).json({ success: false, code: 'SERVER_ERROR', message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// PATCH /api/admin/featured/items/reorder — 슬롯 순서 일괄 갱신
+router.patch('/featured/items/reorder', ...adminOnly, (req, res) => {
+  try {
+    const { section_id, order } = req.body || {};
+    if (!section_id || !Array.isArray(order)) {
+      return res.status(400).json({ success: false, code: 'INVALID_PAYLOAD', message: 'section_id와 order가 필요합니다.' });
+    }
+    const r = featuredDb.reorderItems(parseInt(section_id, 10), order);
+    if (!r.ok) {
+      return res.status(400).json({ success: false, code: r.code || 'INVALID_PAYLOAD', message: r.message || '요청을 처리하지 못했습니다.' });
+    }
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[ADMIN] featured/items/reorder error:', err);
+    res.status(500).json({ success: false, code: 'SERVER_ERROR', message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// DELETE /api/admin/featured/items/:itemId — 슬롯 제거
+router.delete('/featured/items/:itemId', ...adminOnly, (req, res) => {
+  try {
+    const itemId = parseInt(req.params.itemId, 10);
+    const r = featuredDb.removeSectionItem(itemId);
+    if (!r.ok) {
+      if (r.code === 'NOT_FOUND') return res.status(404).json({ success: false, code: 'NOT_FOUND', message: '슬롯이 존재하지 않습니다.' });
+      return res.status(400).json({ success: false, code: r.code || 'INVALID_PAYLOAD', message: '요청을 처리하지 못했습니다.' });
+    }
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[ADMIN] featured/items DELETE error:', err);
+    res.status(500).json({ success: false, code: 'SERVER_ERROR', message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// GET /api/admin/featured/search — 큐레이션 모달용 검색 (콘텐츠/채널)
+router.get('/featured/search', ...adminOnly, (req, res) => {
+  try {
+    const result = featuredDb.searchForCuration({
+      type: req.query.type || 'content',
+      q: req.query.q || '',
+      subject: req.query.subject || null,
+      grade: req.query.grade ? parseInt(req.query.grade, 10) : null,
+      content_type: req.query.content_type || null,
+      page: parseInt(req.query.page, 10) || 1,
+      pageSize: parseInt(req.query.pageSize, 10) || 12,
+      section_id: req.query.section_id ? parseInt(req.query.section_id, 10) : null
+    });
+    res.json(result);
+  } catch (err) {
+    console.error('[ADMIN] featured/search error:', err);
+    res.status(500).json({ success: false, code: 'SERVER_ERROR', message: '서버 오류가 발생했습니다.' });
+  }
+});
+
 module.exports = router;

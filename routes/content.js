@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { requireAuth, optionalAuth } = require('../middleware/auth');
 const contentDb = require('../db/content');
+const featuredDb = require('../db/featured');
 const { logLearningActivity } = require('../db/learning-log-helper');
 const { extractLogContext } = require('../lib/log-context');
 const buildAssessment = require('../lib/xapi/builders/assessment');
@@ -145,6 +146,19 @@ router.get('/recommendations', optionalAuth, (req, res) => {
     res.json({ success: true, contents, applied: opts });
   } catch (err) {
     console.error('[CONTENT] recommendations error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// GET /api/contents/featured - 추천콘텐츠 페이지(뷰어) 통합 응답
+// spec_admin_featured_curation.md D-1
+// 활성 섹션 + 슬롯 + 폴백 적용 → 단일 호출로 4섹션 모두 반환
+router.get('/featured', optionalAuth, (req, res) => {
+  try {
+    const data = featuredDb.getFeaturedForViewer({ user: req.user || null });
+    res.json(data);
+  } catch (err) {
+    console.error('[CONTENT] featured error:', err);
     res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
   }
 });
