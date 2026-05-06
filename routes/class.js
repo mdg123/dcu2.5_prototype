@@ -481,13 +481,14 @@ router.get('/:classId/owner-summary', requireAuth, (req, res) => {
       let examMissingCount = 0;
       for (const ex of exams) {
         // 응시 학생 전체(상태 포함) — 모달에 응시 명단 표시용
+        // exam_students.exam_id 가 TEXT 인 점에 주의 (필요시 String 변환)
         const examStudents = db.prepare(`
-          SELECT es.user_id, es.status, es.submitted_at, es.total_score,
+          SELECT es.user_id, es.status, es.submitted_at, es.score,
                  u.display_name as student_name, u.username as student_username
           FROM exam_students es
           JOIN users u ON u.id = es.user_id
           WHERE es.exam_id = ?
-        `).all(ex.id);
+        `).all(String(ex.id));
         const submittedSet = new Set(
           examStudents.filter(s => s.status === 'submitted').map(s => s.user_id)
         );
@@ -503,8 +504,8 @@ router.get('/:classId/owner-summary', requireAuth, (req, res) => {
             student_username: s.student_username,
             submitted_at: s.submitted_at,
             status: s.status,
-            score: s.total_score,
-            graded: !(s.total_score === null || s.total_score === undefined)
+            score: s.score,
+            graded: !(s.score === null || s.score === undefined)
           }));
 
         examGroups.push({
