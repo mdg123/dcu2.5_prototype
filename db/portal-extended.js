@@ -170,51 +170,98 @@ function getTrendingPosts(userId, { limit = 10 } = {}) {
   return { popular, latest, surveys };
 }
 
-function getMyDashboardSummary(userId) {
-  const classCount = db.prepare('SELECT COUNT(*) as cnt FROM class_members WHERE user_id = ?').get(userId).cnt;
+// ====================================================================
+// my-summary 역할별 헬퍼 (포털 메인 재설계 — spec_portal_main_redesign.md)
+// ====================================================================
+function _getUserRole(userId) {
+  const u = db.prepare('SELECT role FROM users WHERE id = ?').get(userId);
+  return u ? u.role : 'student';
+}
 
-  // 미완료 과제
-  const classIds = db.prepare('SELECT class_id FROM class_members WHERE user_id = ?').all(userId).map(r => r.class_id);
+function _getChildIds(parentId) {
+  // users.parent_id 기반 자녀 목록
+  try {
+    return db.prepare('SELECT id FROM users WHERE parent_id = ? AND role = ?').all(parentId, 'student').map(r => r.id);
+  } catch { return []; }
+}
+
+function _safeCount(sql, ...args) {
+  try { return db.prepare(sql).get(...args).cnt || 0; } catch { return 0; }
+}
+
+// 학생 4슬롯 + 오늘 할 일 데이터
+function _studentSummary(userId) {
+  const classCount = _safeCount('SELECT COUNT(*) as cnt FROM class_members WHERE user_id = ? AND status = ?', userId, 'active');
+
+  // 오늘 마감 과제 (todayDueHw): 오늘이 마감일인 과제 중 미제출
+  const classIds = db.prepare('SELECT class_id FROM class_members WHERE user_id = ? AND status = ?').all(userId, 'active').map(r => r.class_id);
+  let todayDueHw = 0;
   let pendingHomework = 0;
   if (classIds.length > 0) {
-    const placeholders = classIds.map(() => '?').join(',');
-    const hwIds = db.prepare(`SELECT id FROM homework WHERE class_id IN (${placeholders}) AND status = 'published' AND due_date >= DATE('now')`).all(...classIds).map(r => r.id);
+    const ph = classIds.map(() => '?').join(',');
+    // 오늘 마감 (D-day)
+    const todayHwIds = db.prepare(`SELECT id FROM homework WHERE class_id IN (${ph}) AND status = 'published' AND DATE(due_date) = DATE('now')`).all(...classIds).map(r => r.id);
+    if (todayHwIds.length > 0) {
+      const hp = todayHwIds.map(() => '?').join(',');
+      const submitted = _safeCount(`SELECT COUNT(*) as cnt FROM homework_submissions WHERE homework_id IN (${hp}) AND student_id = ?`, ...todayHwIds, userId);
+      todayDueHw = todayHwIds.length - submitted;
+    }
+    // 향후 마감 (전체 미제출)
+    const hwIds = db.prepare(`SELECT id FROM homework WHERE class_id IN (${ph}) AND status = 'published' AND DATE(due_date) >= DATE('now')`).all(...classIds).map(r => r.id);
     if (hwIds.length > 0) {
-      const hwPlaceholders = hwIds.map(() => '?').join(',');
-      const submitted = db.prepare(`SELECT COUNT(*) as cnt FROM homework_submissions WHERE homework_id IN (${hwPlaceholders}) AND student_id = ?`).get(...hwIds, userId).cnt;
-      pendingHomework = hwIds.length - submitted;
+      const hp2 = hwIds.map(() => '?').join(',');
+      const sub2 = _safeCount(`SELECT COUNT(*) as cnt FROM homework_submissions WHERE homework_id IN (${hp2}) AND student_id = ?`, ...hwIds, userId);
+      pendingHomework = hwIds.length - sub2;
     }
   }
 
-  // 읽지 않은 알림
-  const unreadNotifications = db.prepare('SELECT COUNT(*) as cnt FROM notifications WHERE user_id = ? AND is_read = 0').get(userId).cnt;
+  // 미응시 평가 (pendingExams) — 본인이 속한 클래스의 active/published 평가 중 본인이 제출 안 한 것
+  let pendingExams = 0;
+  if (classIds.length > 0) {
+    const ph = classIds.map(() => '?').join(',');
+    try {
+      pendingExams = _safeCount(`
+        SELECT COUNT(*) as cnt FROM exams e
+        WHERE e.class_id IN (${ph})
+          AND e.status IN ('active','published','waiting')
+          AND (e.end_date IS NULL OR DATE(e.end_date) >= DATE('now'))
+          AND NOT EXISTS (
+            SELECT 1 FROM exam_students es
+            WHERE es.exam_id = e.id AND es.user_id = ? AND es.submitted_at IS NOT NULL
+          )
+      `, ...classIds, userId);
+    } catch {}
+  }
+
+  // 미확인 알림장 (unreadNotices)
+  let unreadNotices = 0;
+  if (classIds.length > 0) {
+    const ph = classIds.map(() => '?').join(',');
+    unreadNotices = _safeCount(`
+      SELECT COUNT(*) as cnt FROM notices n
+      WHERE n.class_id IN (${ph})
+        AND NOT EXISTS (SELECT 1 FROM notice_reads nr WHERE nr.notice_id = n.id AND nr.user_id = ?)
+    `, ...classIds, userId);
+  }
+
+  // 새 알림 (notifications, 읽지 않은 시스템 알림)
+  const unreadNotifications = _safeCount('SELECT COUNT(*) as cnt FROM notifications WHERE user_id = ? AND is_read = 0', userId);
 
   // 오늘의 학습 현황
   const today = new Date().toISOString().slice(0, 10);
-  const dailyProgress = db.prepare(`
-    SELECT COUNT(*) as total,
-      SUM(CASE WHEN p.status = 'completed' THEN 1 ELSE 0 END) as completed
-    FROM daily_learning_progress p
-    JOIN daily_learning_items i ON p.item_id = i.id
-    JOIN daily_learning_sets s ON i.set_id = s.id
-    WHERE p.user_id = ? AND s.target_date = ?
-  `).get(userId, today);
-
-  // 총 포인트
-  const totalPoints = db.prepare('SELECT COALESCE(SUM(points), 0) as total FROM user_points WHERE user_id = ?').get(userId).total;
-
-  // 교사용: 예정 평가 — 본인이 소유한 클래스의 published/active/waiting 상태 평가 중 end_date 미도래
-  let upcomingExams = 0;
+  let dailyProgress = { total: 0, completed: 0 };
   try {
-    upcomingExams = db.prepare(`
-      SELECT COUNT(*) as cnt FROM exams
-      WHERE owner_id = ?
-        AND status IN ('active','waiting','published')
-        AND (end_date IS NULL OR end_date >= DATE('now'))
-    `).get(userId).cnt;
+    dailyProgress = db.prepare(`
+      SELECT COUNT(*) as total,
+        SUM(CASE WHEN p.status = 'completed' THEN 1 ELSE 0 END) as completed
+      FROM daily_learning_progress p
+      JOIN daily_learning_items i ON p.item_id = i.id
+      JOIN daily_learning_sets s ON i.set_id = s.id
+      WHERE p.user_id = ? AND s.target_date = ?
+    `).get(userId, today) || dailyProgress;
   } catch {}
 
-  // 학생용: 이번 주(월~일) 완료 학습 수
+  // 이번 주(월~일) 완료 학습 수
   let weekCompleted = 0;
   try {
     const now = new Date();
@@ -223,32 +270,300 @@ function getMyDashboardSummary(userId) {
     const sunday = new Date(monday); sunday.setDate(monday.getDate() + 6);
     const monStr = monday.toISOString().slice(0, 10);
     const sunStr = sunday.toISOString().slice(0, 10);
-    weekCompleted = db.prepare(`
+    weekCompleted = _safeCount(`
       SELECT COUNT(*) as cnt FROM daily_learning_progress
       WHERE user_id = ? AND status='completed' AND DATE(completed_at) BETWEEN ? AND ?
-    `).get(userId, monStr, sunStr).cnt;
+    `, userId, monStr, sunStr);
   } catch {}
 
-  // 담은 자료(보관함) 수
+  // 담은 자료
   let collectionCount = 0;
   try {
-    collectionCount = db.prepare('SELECT COUNT(*) as cnt FROM content_collection WHERE user_id = ?').get(userId).cnt;
-  } catch {
-    try {
-      collectionCount = db.prepare('SELECT COUNT(*) as cnt FROM content_collections WHERE user_id = ?').get(userId).cnt;
-    } catch {}
-  }
+    collectionCount = _safeCount('SELECT COUNT(*) as cnt FROM content_collections WHERE user_id = ?', userId);
+  } catch {}
+
+  // 총 포인트
+  const totalPoints = (() => {
+    try { return db.prepare('SELECT COALESCE(SUM(points), 0) as total FROM user_points WHERE user_id = ?').get(userId).total || 0; } catch { return 0; }
+  })();
 
   return {
     classCount,
+    todayDueHw,
     pendingHomework: Math.max(0, pendingHomework),
+    pendingExams,
+    unreadNotices,
     unreadNotifications,
-    dailyLearning: dailyProgress,
-    totalPoints,
-    upcomingExams,
+    dailyLearning: { total: dailyProgress.total || 0, completed: dailyProgress.completed || 0 },
     weekCompleted,
-    collectionCount
+    collectionCount,
+    totalPoints
   };
+}
+
+function _teacherSummary(userId) {
+  // 내가 만든 클래스
+  const ownedClassIds = db.prepare("SELECT id FROM classes WHERE owner_id = ? AND status = 'active'").all(userId).map(r => r.id);
+  const classCount = ownedClassIds.length;
+
+  // 미채점 과제 (ungraded)
+  let ungraded = 0;
+  if (ownedClassIds.length > 0) {
+    const ph = ownedClassIds.map(() => '?').join(',');
+    try {
+      ungraded = _safeCount(`
+        SELECT COUNT(*) as cnt FROM homework_submissions hs
+        JOIN homework h ON hs.homework_id = h.id
+        WHERE h.class_id IN (${ph})
+          AND hs.status = 'submitted'
+      `, ...ownedClassIds);
+    } catch {}
+  }
+
+  // 승인 대기 (pendingApprovals): 가입 신청 + 갤러리 신고/대기
+  let pendingApprovals = 0;
+  if (ownedClassIds.length > 0) {
+    const ph = ownedClassIds.map(() => '?').join(',');
+    // 가입 invited 상태
+    pendingApprovals += _safeCount(`SELECT COUNT(*) as cnt FROM class_members WHERE class_id IN (${ph}) AND status = 'invited'`, ...ownedClassIds);
+    // 갤러리 신고 pending (전역 — 교사가 처리할 신고)
+    try {
+      pendingApprovals += _safeCount("SELECT COUNT(*) as cnt FROM gallery_reports WHERE status = 'pending'");
+    } catch {}
+  }
+
+  // 마감 임박 평가 (examsDueSoon): 본인 소유, 향후 7일 내 마감
+  let examsDueSoon = 0;
+  try {
+    examsDueSoon = _safeCount(`
+      SELECT COUNT(*) as cnt FROM exams
+      WHERE owner_id = ?
+        AND status IN ('active','waiting','published')
+        AND end_date IS NOT NULL
+        AND DATE(end_date) BETWEEN DATE('now') AND DATE('now', '+7 days')
+    `, userId);
+  } catch {}
+
+  // 오늘 수업 (todayLessons): 본인 클래스에서 오늘 날짜의 published 수업
+  let todayLessons = 0;
+  if (ownedClassIds.length > 0) {
+    const ph = ownedClassIds.map(() => '?').join(',');
+    todayLessons = _safeCount(`
+      SELECT COUNT(*) as cnt FROM lessons
+      WHERE class_id IN (${ph}) AND status = 'published' AND DATE(lesson_date) = DATE('now')
+    `, ...ownedClassIds);
+  }
+
+  // 미제출 학생 명단 수 (missingSubs): 마감일 지난/오늘 마감 과제 미제출 합계
+  let missingSubs = 0;
+  if (ownedClassIds.length > 0) {
+    const ph = ownedClassIds.map(() => '?').join(',');
+    try {
+      const hwList = db.prepare(`
+        SELECT id, class_id FROM homework
+        WHERE class_id IN (${ph}) AND status = 'published'
+          AND DATE(due_date) <= DATE('now', '+1 day')
+      `).all(...ownedClassIds);
+      for (const hw of hwList) {
+        const total = _safeCount(`SELECT COUNT(*) as cnt FROM class_members WHERE class_id = ? AND status='active' AND role='member'`, hw.class_id);
+        const submitted = _safeCount(`SELECT COUNT(*) as cnt FROM homework_submissions WHERE homework_id = ?`, hw.id);
+        missingSubs += Math.max(0, total - submitted);
+      }
+    } catch {}
+  }
+
+  // 학생용 공통 필드도 포함 (대시보드 호환성)
+  const unreadNotifications = _safeCount('SELECT COUNT(*) as cnt FROM notifications WHERE user_id = ? AND is_read = 0', userId);
+
+  return {
+    classCount,
+    ungraded,
+    pendingApprovals,
+    examsDueSoon,
+    todayLessons,
+    missingSubs,
+    unreadNotifications
+  };
+}
+
+function _parentSummary(userId) {
+  const childIds = _getChildIds(userId);
+  const childrenCount = childIds.length;
+
+  // 자녀 합산 미제출 과제 (todayDueHw — 학부모 시각: 자녀 미제출 과제 N건 — 향후 마감 분 통합)
+  let todayDueHw = 0;
+  let unconfirmedContents = 0;
+  if (childIds.length > 0) {
+    for (const cid of childIds) {
+      const ccls = db.prepare('SELECT class_id FROM class_members WHERE user_id = ? AND status = ?').all(cid, 'active').map(r => r.class_id);
+      if (ccls.length > 0) {
+        const ph = ccls.map(() => '?').join(',');
+        const hwIds = db.prepare(`SELECT id FROM homework WHERE class_id IN (${ph}) AND status = 'published' AND DATE(due_date) >= DATE('now')`).all(...ccls).map(r => r.id);
+        if (hwIds.length > 0) {
+          const hp = hwIds.map(() => '?').join(',');
+          const sub = _safeCount(`SELECT COUNT(*) as cnt FROM homework_submissions WHERE homework_id IN (${hp}) AND student_id = ?`, ...hwIds, cid);
+          todayDueHw += Math.max(0, hwIds.length - sub);
+        }
+      }
+      // 미확인 콘텐츠 (자녀 새 알림장)
+      const cclsIds = ccls;
+      if (cclsIds.length > 0) {
+        const ph = cclsIds.map(() => '?').join(',');
+        unconfirmedContents += _safeCount(`
+          SELECT COUNT(*) as cnt FROM notices n
+          WHERE n.class_id IN (${ph})
+            AND NOT EXISTS (SELECT 1 FROM notice_reads nr WHERE nr.notice_id = n.id AND nr.user_id = ?)
+        `, ...cclsIds, cid);
+      }
+    }
+  }
+
+  // 자녀 출결 (childAttendance): 오늘 자녀 출석 상태 요약
+  let childAttendance = { total: childrenCount, present: 0, absent: 0, late: 0 };
+  if (childIds.length > 0) {
+    for (const cid of childIds) {
+      try {
+        const att = db.prepare(`
+          SELECT status FROM attendance
+          WHERE user_id = ? AND attendance_date = DATE('now')
+          ORDER BY checked_at DESC LIMIT 1
+        `).get(cid);
+        if (att) {
+          if (att.status === 'present') childAttendance.present++;
+          else if (att.status === 'absent') childAttendance.absent++;
+          else if (att.status === 'late') childAttendance.late++;
+        }
+      } catch {}
+    }
+  }
+
+  // 새 교사 메시지 (unreadTeacherMsgs): messages 중 읽지 않음 + 발신자 role=teacher
+  let unreadTeacherMsgs = 0;
+  try {
+    unreadTeacherMsgs = _safeCount(`
+      SELECT COUNT(*) as cnt FROM messages m
+      JOIN message_room_members mrm ON m.room_id = mrm.room_id AND mrm.user_id = ?
+      JOIN users u ON m.sender_id = u.id
+      WHERE m.is_read = 0 AND m.sender_id != ? AND u.role = 'teacher'
+    `, userId, userId);
+  } catch {}
+
+  // 시스템 알림
+  const unreadNotifications = _safeCount('SELECT COUNT(*) as cnt FROM notifications WHERE user_id = ? AND is_read = 0', userId);
+
+  return {
+    childrenCount,
+    childIds,
+    todayDueHw,
+    childAttendance,
+    unreadTeacherMsgs,
+    unconfirmedContents,
+    unreadNotifications
+  };
+}
+
+function _staffSummary(userId) {
+  // 미확인 공지 (unreadNotices) — 본인이 속한 클래스/전역 공지 중 미열람
+  const classIds = db.prepare('SELECT class_id FROM class_members WHERE user_id = ? AND status = ?').all(userId, 'active').map(r => r.class_id);
+  let unreadNotices = 0;
+  if (classIds.length > 0) {
+    const ph = classIds.map(() => '?').join(',');
+    unreadNotices = _safeCount(`
+      SELECT COUNT(*) as cnt FROM notices n
+      WHERE n.class_id IN (${ph})
+        AND NOT EXISTS (SELECT 1 FROM notice_reads nr WHERE nr.notice_id = n.id AND nr.user_id = ?)
+    `, ...classIds, userId);
+  }
+
+  // 이번 주 학사 일정 (weeklyEvents): 향후 7일간 lessons/homework/exams/surveys 합계
+  let weeklyEvents = 0;
+  try {
+    if (classIds.length > 0) {
+      const ph = classIds.map(() => '?').join(',');
+      weeklyEvents += _safeCount(`SELECT COUNT(*) as cnt FROM lessons WHERE class_id IN (${ph}) AND DATE(lesson_date) BETWEEN DATE('now') AND DATE('now','+7 days') AND status='published'`, ...classIds);
+      weeklyEvents += _safeCount(`SELECT COUNT(*) as cnt FROM homework WHERE class_id IN (${ph}) AND DATE(due_date) BETWEEN DATE('now') AND DATE('now','+7 days') AND status='published'`, ...classIds);
+    }
+  } catch {}
+
+  // 멤버 합계 (memberTotal): 전체 활성 사용자 수 (학교 단위 운영 통계)
+  const memberTotal = _safeCount("SELECT COUNT(*) as cnt FROM users WHERE status = 'active'");
+
+  // 결재 대기 (pendingApprovals): 운영 클래스 가입 대기 + 콘텐츠 pending
+  let pendingApprovals = 0;
+  // 본인이 운영하는 클래스
+  const ownedClassIds = db.prepare("SELECT id FROM classes WHERE owner_id = ? AND status = 'active'").all(userId).map(r => r.id);
+  if (ownedClassIds.length > 0) {
+    const ph = ownedClassIds.map(() => '?').join(',');
+    pendingApprovals += _safeCount(`SELECT COUNT(*) as cnt FROM class_members WHERE class_id IN (${ph}) AND status = 'invited'`, ...ownedClassIds);
+  }
+  try {
+    pendingApprovals += _safeCount("SELECT COUNT(*) as cnt FROM contents WHERE status IN ('pending','review')");
+  } catch {}
+
+  const ownedClassCount = ownedClassIds.length;
+  const unreadNotifications = _safeCount('SELECT COUNT(*) as cnt FROM notifications WHERE user_id = ? AND is_read = 0', userId);
+
+  return {
+    unreadNotices,
+    weeklyEvents,
+    memberTotal,
+    pendingApprovals,
+    ownedClassCount,
+    unreadNotifications
+  };
+}
+
+function _adminSummary(userId) {
+  const totalUsers = _safeCount("SELECT COUNT(*) as cnt FROM users WHERE status = 'active'");
+  const classCount = _safeCount("SELECT COUNT(*) as cnt FROM classes WHERE status = 'active'");
+  // 오늘 활동 로그
+  let logToday = 0;
+  try {
+    logToday = _safeCount("SELECT COUNT(*) as cnt FROM learning_logs WHERE DATE(created_at) = DATE('now')");
+  } catch {}
+  // 결재/승인 합산
+  let pendingTotal = 0;
+  try {
+    pendingTotal += _safeCount("SELECT COUNT(*) as cnt FROM contents WHERE status IN ('pending','review')");
+  } catch {}
+  try {
+    pendingTotal += _safeCount("SELECT COUNT(*) as cnt FROM gallery_reports WHERE status = 'pending'");
+  } catch {}
+  pendingTotal += _safeCount("SELECT COUNT(*) as cnt FROM class_members WHERE status = 'invited'");
+
+  // 시스템 알림 (admin 전용 알림 — notifications 중 type='system' 또는 본인 미열람)
+  const systemAlerts = _safeCount('SELECT COUNT(*) as cnt FROM notifications WHERE user_id = ? AND is_read = 0', userId);
+
+  return {
+    totalUsers,
+    classCount,
+    logToday,
+    pendingTotal,
+    systemAlerts
+  };
+}
+
+function getMyDashboardSummary(userId) {
+  const role = _getUserRole(userId);
+  let summary = {};
+  if (role === 'teacher') summary = _teacherSummary(userId);
+  else if (role === 'parent') summary = _parentSummary(userId);
+  else if (role === 'staff') summary = _staffSummary(userId);
+  else if (role === 'admin') summary = _adminSummary(userId);
+  else summary = _studentSummary(userId);
+
+  // 호환성: 학생 키들도 항상 포함 (기존 my-summary 사용처 보존)
+  if (role !== 'student') {
+    // 다른 역할이라도 일부 공통 키(classCount/unreadNotifications/dailyLearning/totalPoints)를 채워둠
+    if (summary.classCount === undefined) {
+      summary.classCount = _safeCount('SELECT COUNT(*) as cnt FROM class_members WHERE user_id = ? AND status = ?', userId, 'active');
+    }
+    if (summary.unreadNotifications === undefined) {
+      summary.unreadNotifications = _safeCount('SELECT COUNT(*) as cnt FROM notifications WHERE user_id = ? AND is_read = 0', userId);
+    }
+  }
+
+  return { role, summary, ...summary };
 }
 
 function getRecentActivities(userId, { limit = 20 } = {}) {
