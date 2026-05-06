@@ -61,4 +61,16 @@ router.get('/my-summary', requireAuth, (req, res) => {
   }
 });
 
+// GET /today-action — 역할별 "오늘 할 일" 통합 카드 데이터
+router.get('/today-action', requireAuth, (req, res) => {
+  try {
+    const role = req.query.role && /^(student|teacher|parent|staff|admin)$/.test(req.query.role) ? req.query.role : null;
+    const data = portalDb.getTodayAction(req.user.id, role);
+    res.json({ success: true, ...data });
+  } catch (err) {
+    console.error('[PORTAL] today-action error:', err);
+    res.status(500).json({ success: false, items: [], message: '데이터를 불러오지 못했어요. 잠시 후 다시 시도해 주세요.' });
+  }
+});
+
 module.exports = router;

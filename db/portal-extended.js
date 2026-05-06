@@ -566,6 +566,103 @@ function getMyDashboardSummary(userId) {
   return { role, summary, ...summary };
 }
 
+// ====================================================================
+// "오늘 할 일" 카드용 데이터 (포털 메인 재설계 4.2.1)
+// ====================================================================
+function getTodayAction(userId, requestedRole) {
+  const role = requestedRole || _getUserRole(userId);
+  const items = [];
+  const empty = (msg) => ({ items, role, message: msg });
+
+  if (role === 'student') {
+    const s = _studentSummary(userId);
+    if (s.todayDueHw > 0) {
+      items.push({ label: '오늘 마감 과제', count: s.todayDueHw, href: '/class/index.html?filter=due', severity: 'urgent' });
+    }
+    if (s.pendingExams > 0) {
+      items.push({ label: '미응시 평가', count: s.pendingExams, href: '/cbt/index.html?filter=pending', severity: 'warning' });
+    }
+    if (s.unreadNotices > 0) {
+      items.push({ label: '새 알림장', count: s.unreadNotices, href: '/class/index.html?tab=notice', severity: 'info' });
+    }
+    if (s.unreadNotifications > 0 && items.length < 3) {
+      items.push({ label: '새 알림', count: s.unreadNotifications, href: '/notifications.html', severity: 'info' });
+    }
+    if (items.length === 0) return empty('오늘 할 일이 없어요! 여유 있게 활동을 즐겨보세요 🎉');
+    return { items: items.slice(0, 3), role };
+  }
+
+  if (role === 'teacher') {
+    const t = _teacherSummary(userId);
+    if (t.ungraded > 0) {
+      items.push({ label: '미채점 과제', count: t.ungraded, href: '/class/index.html?filter=ungraded', severity: 'urgent' });
+    }
+    if (t.pendingApprovals > 0) {
+      items.push({ label: '승인 대기', count: t.pendingApprovals, href: '/class/index.html?filter=pending', severity: 'warning' });
+    }
+    if (t.examsDueSoon > 0) {
+      items.push({ label: '마감 임박 평가', count: t.examsDueSoon, href: '/cbt/index.html?filter=upcoming', severity: 'warning' });
+    }
+    if (t.todayLessons > 0 && items.length < 3) {
+      items.push({ label: '오늘 수업', count: t.todayLessons, href: '/class/index.html?filter=today', severity: 'info' });
+    }
+    if (items.length === 0) return empty('오늘 할 일이 없어요! 모든 채점·승인을 완료하셨습니다 👍');
+    return { items: items.slice(0, 3), role };
+  }
+
+  if (role === 'parent') {
+    const p = _parentSummary(userId);
+    if (p.todayDueHw > 0) {
+      items.push({ label: '자녀 미제출 과제', count: p.todayDueHw, href: '/class/index.html?role=parent&filter=overdue', severity: 'urgent' });
+    }
+    if (p.childAttendance && p.childAttendance.absent > 0) {
+      items.push({ label: '자녀 결석', count: p.childAttendance.absent, href: '/growth/index.html?tab=attendance', severity: 'urgent' });
+    }
+    if (p.unreadTeacherMsgs > 0) {
+      items.push({ label: '새 교사 메시지', count: p.unreadTeacherMsgs, href: '/message/index.html', severity: 'warning' });
+    }
+    if (p.unconfirmedContents > 0 && items.length < 3) {
+      items.push({ label: '새 알림장', count: p.unconfirmedContents, href: '/class/index.html?role=parent&tab=notice', severity: 'info' });
+    }
+    if (items.length === 0) return empty('자녀 모두 잘 지내고 있어요. 평안한 하루 되세요 😊');
+    return { items: items.slice(0, 3), role };
+  }
+
+  if (role === 'staff') {
+    const st = _staffSummary(userId);
+    if (st.unreadNotices > 0) {
+      items.push({ label: '미확인 공지', count: st.unreadNotices, href: '/notice', severity: 'urgent' });
+    }
+    if (st.weeklyEvents > 0) {
+      items.push({ label: '이번 주 학사 일정', count: st.weeklyEvents, href: '/calendar?role=staff', severity: 'info' });
+    }
+    if (st.pendingApprovals > 0) {
+      items.push({ label: '결재 대기', count: st.pendingApprovals, href: '/admin/approval', severity: 'warning' });
+    }
+    if (items.length === 0) return empty('오늘은 처리할 학사가 없어요!');
+    return { items: items.slice(0, 3), role };
+  }
+
+  if (role === 'admin') {
+    const a = _adminSummary(userId);
+    if (a.pendingTotal > 0) {
+      items.push({ label: '미승인 항목', count: a.pendingTotal, href: '/admin/approval', severity: 'urgent' });
+    }
+    if (a.systemAlerts > 0) {
+      items.push({ label: '시스템 알림', count: a.systemAlerts, href: '/admin/notifications', severity: 'warning' });
+    }
+    // 오늘 가입한 사용자
+    const todayJoin = _safeCount("SELECT COUNT(*) as cnt FROM users WHERE DATE(created_at) = DATE('now')");
+    if (todayJoin > 0) {
+      items.push({ label: '오늘 가입자', count: todayJoin, href: '/admin/users', severity: 'info' });
+    }
+    if (items.length === 0) return empty('오늘은 운영 알림이 없어요!');
+    return { items: items.slice(0, 3), role };
+  }
+
+  return empty('오늘 할 일이 없어요!');
+}
+
 function getRecentActivities(userId, { limit = 20 } = {}) {
   return db.prepare(`
     SELECT ll.*, u.display_name,
@@ -587,4 +684,11 @@ function getRecentActivities(userId, { limit = 20 } = {}) {
   `).all(userId, limit);
 }
 
-module.exports = { getHallOfFame, getCalendarEvents, getTrendingPosts, getMyDashboardSummary, getRecentActivities };
+module.exports = {
+  getHallOfFame,
+  getCalendarEvents,
+  getTrendingPosts,
+  getMyDashboardSummary,
+  getRecentActivities,
+  getTodayAction
+};
