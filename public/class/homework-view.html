@@ -173,6 +173,21 @@
 
   </div>
 
+  <!-- 제출 내용 상세 모달 -->
+  <div class="fb-modal-overlay" id="submissionDetailModal" onclick="if(event.target===this)closeSubmissionDetail()">
+    <div class="fb-modal" style="max-width:720px;">
+      <div class="fb-header">
+        <div>
+          <h3 id="sdModalTitle">제출 내용</h3>
+          <div class="sub" id="sdModalSub"></div>
+        </div>
+        <button class="fb-close" onclick="closeSubmissionDetail()" aria-label="닫기"><i class="fas fa-times"></i></button>
+      </div>
+      <div class="fb-body" id="sdModalBody" style="padding:20px 24px;font-size:16px;line-height:1.7;color:#1F2937;white-space:pre-wrap;word-break:break-word;"></div>
+      <div class="fb-footer" id="sdModalFooter" style="display:flex;justify-content:flex-end;gap:8px;padding:14px 20px;"></div>
+    </div>
+  </div>
+
   <!-- 교사용 피드백 채팅 모달 -->
   <div class="fb-modal-overlay" id="feedbackModal">
     <div class="fb-modal">
@@ -236,6 +251,7 @@
         // 교사 뷰: 제출 현황
         document.getElementById('teacherSubmissionsCard').style.display = 'block';
         const subs = data.submissions || [];
+        window._allSubmissions = subs;  // 제출 내용 상세 모달용 캐시
         const graded = subs.filter(s => s.score !== null).length;
         document.getElementById('submissionStats').innerHTML = `
           <div class="mini-stat"><div class="val">${subs.length}</div><div class="lbl">제출</div></div>
@@ -248,8 +264,8 @@
             <tr>
               <td>${escHtml(s.display_name)}</td>
               <td>
-                <div style="max-width:200px;font-size:12px;color:#374151;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"
-                  title="${escHtml(s.content || '')}" onclick="alert('📝 ${escHtml(s.display_name)}의 제출 내용:\\n\\n' + '${escHtml((s.content || '내용 없음').replace(/'/g, "\\'"))}')">
+                <div style="max-width:240px;font-size:14px;color:#374151;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-decoration:underline;text-decoration-color:#cbd5e1;text-underline-offset:2px;"
+                  title="제출 내용 자세히 보기" onclick="openSubmissionDetail(${s.id})">
                   ${escHtml((s.content || '내용 없음').substring(0, 40))}${(s.content || '').length > 40 ? '...' : ''}
                 </div>
                 ${s.file_path ? '<a href="'+s.file_path+'" target="_blank" style="font-size:11px;color:#2563eb;"><i class="fas fa-paperclip"></i> 첨부파일</a>' : ''}
@@ -353,6 +369,35 @@
       // 스크롤 최하단
       el.scrollTop = el.scrollHeight;
     }
+
+    // 제출 내용 상세 모달
+    function openSubmissionDetail(subId) {
+      const sub = (window._allSubmissions || []).find(s => s.id === subId);
+      if (!sub) return;
+      const titleEl = document.getElementById('sdModalTitle');
+      const subEl = document.getElementById('sdModalSub');
+      const bodyEl = document.getElementById('sdModalBody');
+      const footerEl = document.getElementById('sdModalFooter');
+      titleEl.textContent = (sub.display_name || '학생') + '님의 제출 내용';
+      const submittedAt = sub.submitted_at ? sub.submitted_at.slice(0, 16) : '-';
+      const scoreInfo = sub.score !== null ? `점수 ${sub.score} / ${(hwData && hwData.max_score) || '-'}` : '미채점';
+      subEl.textContent = `제출 ${submittedAt} · ${scoreInfo}`;
+      bodyEl.textContent = sub.content || '내용 없음';
+      const att = sub.file_path ? `<a class="btn btn-outline btn-sm" href="${sub.file_path}" target="_blank" style="text-decoration:none;"><i class="fas fa-paperclip"></i> 첨부파일 열기</a>` : '';
+      footerEl.innerHTML = `${att}
+        <button class="btn-feedback" onclick="closeSubmissionDetail();openFeedbackModal(${sub.id}, '${escHtml(sub.display_name).replace(/'/g, "\\'")}')"><i class="fas fa-comment-dots"></i> 피드백 보기</button>
+        <button class="btn btn-outline btn-sm" onclick="closeSubmissionDetail()">닫기</button>`;
+      document.getElementById('submissionDetailModal').classList.add('active');
+    }
+    function closeSubmissionDetail() {
+      document.getElementById('submissionDetailModal').classList.remove('active');
+    }
+    // ESC 키 닫기
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        closeSubmissionDetail();
+      }
+    });
 
     // 교사: 제출물별 피드백 모달 열기
     async function openFeedbackModal(subId, studentName) {
