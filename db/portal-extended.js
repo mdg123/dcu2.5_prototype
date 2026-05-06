@@ -19,12 +19,16 @@ function getHallOfFame(month, period) {
     contentDateFilter = ` AND ct.created_at >= DATE('now', '-30 days')`;
   }
 
-  // 최다활동 클래스
+  // 최다활동 클래스 — owner_name·cover_image_url 포함 (포털 미리보기 카드용)
   const topClasses = db.prepare(`
-    SELECT c.id, c.name, c.school_name, COUNT(*) as activity_count,
+    SELECT c.id, c.name, c.school_name, c.owner_id, c.cover_image_url,
+      u.display_name as owner_name,
+      COUNT(*) as activity_count,
       (SELECT COUNT(DISTINCT cm.user_id) FROM class_members cm WHERE cm.class_id = c.id AND cm.status='active') as member_count
-    FROM learning_logs ll JOIN classes c ON ll.class_id = c.id
-    WHERE ll.class_id IS NOT NULL ${dateFilter}
+    FROM learning_logs ll
+    JOIN classes c ON ll.class_id = c.id
+    LEFT JOIN users u ON c.owner_id = u.id
+    WHERE ll.class_id IS NOT NULL AND c.status = 'active' ${dateFilter}
     GROUP BY c.id ORDER BY activity_count DESC LIMIT 20
   `).all(...(useMonth ? [month] : []));
 
@@ -664,11 +668,18 @@ function getTodayAction(userId, requestedRole) {
 }
 
 // ====================================================================
-// "명예의 전당 미리보기" — 본인/자녀/우리반 등재 표시 포함
+// "명예의 전당 미리보기" — 클래스/크리에이터 2개 섹션 분리 응답
 // ====================================================================
 function getPortalHighlights(userId) {
   const role = _getUserRole(userId);
-  const halls = getHallOfFame(null, 'weekly');
+  // 최근 7일 우선 + 빈 섹션은 최근 30일로 개별 폴백 (포털 미리보기는 가능한 한 카드를 채워서 보여줌)
+  const weekly = getHallOfFame(null, 'weekly');
+  const monthly = getHallOfFame(null, 'monthly');
+  const halls = {
+    topClasses:  (weekly.topClasses  || []).length ? weekly.topClasses  : (monthly.topClasses  || []),
+    topCreators: (weekly.topCreators || []).length ? weekly.topCreators : (monthly.topCreators || []),
+    topLearners: (weekly.topLearners || []).length ? weekly.topLearners : (monthly.topLearners || [])
+  };
 
   // 우리반 학생 ID 집합 (교사 시) / 자녀 ID 집합 (학부모 시)
   const myClassmateIds = (() => {
@@ -683,8 +694,79 @@ function getPortalHighlights(userId) {
   })();
   const childIds = role === 'parent' ? new Set(_getChildIds(userId)) : new Set();
 
+  // 본인이 속한(가입한) 클래스 ID 집합 — 학생/학부모/교사 모두 적용 가능
+  const myJoinedClassIds = (() => {
+    if (!userId) return new Set();
+    try {
+      const ids = db.prepare(`SELECT class_id FROM class_members WHERE user_id = ? AND status = 'active'`).all(userId).map(r => r.class_id);
+      return new Set(ids);
+    } catch { return new Set(); }
+  })();
+
+  // 자녀가 가입한 클래스 ID 집합 (학부모 시)
+  const childJoinedClassIds = (() => {
+    if (role !== 'parent' || childIds.size === 0) return new Set();
+    try {
+      const cids = Array.from(childIds);
+      const ph = cids.map(() => '?').join(',');
+      const ids = db.prepare(`SELECT DISTINCT class_id FROM class_members WHERE user_id IN (${ph}) AND status = 'active'`).all(...cids).map(r => r.class_id);
+      return new Set(ids);
+    } catch { return new Set(); }
+  })();
+
+  // -------- 클래스 명예의 전당 (Top 3) --------
+  const classes = (halls.topClasses || []).slice(0, 3).map((c, idx) => {
+    const isMine = !!userId && c.owner_id === userId; // 본인이 개설자
+    const isJoined = myJoinedClassIds.has(c.id);
+    const isChildClass = childJoinedClassIds.has(c.id);
+    let highlightBadge = null;
+    if (isMine) highlightBadge = '내 클래스';
+    else if (isChildClass) highlightBadge = '자녀 클래스';
+    else if (isJoined) highlightBadge = '참여 중';
+    return {
+      id: c.id,
+      rank: idx + 1,
+      name: c.name || '클래스',
+      owner_name: c.owner_name || '',
+      school_name: c.school_name || '',
+      member_count: c.member_count || 0,
+      activity_count: c.activity_count || 0,
+      thumbnail: c.cover_image_url || null,
+      isMine,
+      isJoined,
+      isChildClass,
+      highlightBadge
+    };
+  });
+
+  // -------- 콘텐츠 크리에이터 명예의 전당 (Top 3) --------
+  const creators = (halls.topCreators || []).slice(0, 3).map((u, idx) => {
+    const isMine = !!userId && u.id === userId;
+    const isClassmate = myClassmateIds.has(u.id);
+    const isChild = childIds.has(u.id);
+    let highlightBadge = null;
+    if (isMine) highlightBadge = '나';
+    else if (isChild) highlightBadge = '자녀';
+    else if (isClassmate) highlightBadge = '우리반';
+    return {
+      id: u.id,
+      rank: idx + 1,
+      name: u.display_name || '크리에이터',
+      role: u.role || 'student',
+      school_name: u.school_name || '',
+      content_count: u.content_count || 0,
+      total_views: u.total_views || 0,
+      total_likes: u.total_likes || 0,
+      avatar: null,
+      isMine,
+      isClassmate,
+      isChild,
+      highlightBadge
+    };
+  });
+
+  // 하위 호환: 기존 items 배열도 유지 (학습자 + 크리에이터 보조)
   const items = [];
-  // 1. Top 학습자 우선
   const learners = (halls.topLearners || []).slice(0, 3);
   learners.forEach((u, idx) => {
     const isMine = (role === 'student' && u.id === userId);
@@ -698,37 +780,12 @@ function getPortalHighlights(userId) {
       author: u.school_name ? (u.school_name + (u.grade ? ` ${u.grade}학년` : '')) : '',
       meta: `학습 ${u.learning_count || 0}회`,
       thumbnail: null,
-      isMine,
-      isClassmate,
-      isChild,
+      isMine, isClassmate, isChild,
       highlightBadge: isMine ? '나' : (isChild ? '자녀' : (isClassmate ? '우리반' : null))
     });
   });
 
-  // 2. 부족하면 콘텐츠 크리에이터 보강
-  if (items.length < 3) {
-    const creators = (halls.topCreators || []).slice(0, 3 - items.length);
-    creators.forEach((u) => {
-      const isMine = u.id === userId;
-      const isClassmate = myClassmateIds.has(u.id);
-      const isChild = childIds.has(u.id);
-      items.push({
-        id: u.id,
-        rank: items.length + 1,
-        type: 'creator',
-        title: u.display_name || '크리에이터',
-        author: u.school_name || '',
-        meta: `콘텐츠 ${u.content_count || 0}건`,
-        thumbnail: null,
-        isMine,
-        isClassmate,
-        isChild,
-        highlightBadge: isMine ? '나' : (isChild ? '자녀' : (isClassmate ? '우리반' : null))
-      });
-    });
-  }
-
-  return { items, role };
+  return { items, classes, creators, role };
 }
 
 function getRecentActivities(userId, { limit = 20 } = {}) {
