@@ -217,9 +217,9 @@
       <button onclick="window.dacheumSearch && window.dacheumSearch.open()" class="gnb-icon-btn" title="통합 검색"><i class="fas fa-search"></i></button>
       <a href="/message/index.html" class="gnb-icon-btn" title="소통쪽지" style="position:relative;text-decoration:none;">
         <i class="fas fa-envelope"></i>
-        <span id="gnbUnreadBadge" style="display:none;position:absolute;top:-4px;right:-6px;background:#EF4444;color:#fff;border-radius:50%;min-width:16px;height:16px;font-size:0.65rem;font-weight:700;line-height:16px;text-align:center;padding:0 3px;"></span>
+        <span id="gnbUnreadBadge" style="display:none;position:absolute;top:-4px;right:-6px;background:#EF4444;color:#fff;border-radius:10px;min-width:18px;height:18px;font-size:13px;font-weight:700;line-height:18px;text-align:center;padding:0 5px;"></span>
       </a>
-      ${user.role === 'admin' ? `<a href="/admin/index.html" class="gnb-admin-btn" title="관리자 페이지" style="display:inline-flex;align-items:center;gap:4px;padding:4px 10px;background:#4F46E5;color:#fff;border-radius:6px;font-size:0.75rem;font-weight:600;text-decoration:none;margin-right:4px;"><i class="fas fa-cog"></i> 관리자 페이지</a>` : ''}
+      ${user.role === 'admin' ? `<a href="/admin/index.html" class="gnb-admin-btn" title="관리자 페이지" style="display:inline-flex;align-items:center;gap:6px;padding:6px 12px;background:#4F46E5;color:#fff;border-radius:6px;font-size:14px;font-weight:600;text-decoration:none;margin-right:4px;"><i class="fas fa-cog"></i> 관리자 페이지</a>` : ''}
       <span class="gnb-user-role">${roleBadge[user.role] || user.role}</span>
       <span class="gnb-user-name">${user.display_name}</span>
       <button class="gnb-logout-btn" id="gnbLogoutBtn">로그아웃</button>
