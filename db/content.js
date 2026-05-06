@@ -399,23 +399,49 @@ function getAllReviewContents({ page = 1, limit = 50, status } = {}) {
 }
 
 // 추천 콘텐츠 (인기순 + 최신)
-function getRecommendations(userId, limit = 12, keywords = []) {
+// opts: { role, grade, subject } — 포털 메인 재설계용 역할/학년/교과 필터
+function getRecommendations(userId, limit = 12, keywords = [], opts = {}) {
   let contents = [];
   const existIds = new Set();
+  const { role, grade, subject } = opts || {};
+
+  // 0순위 (선택): 역할/학년/교과 매칭 콘텐츠 우선
+  // - 학생/자녀: 본인 학년 일치 우선
+  // - 교사: 본인 교과·학년 일치 우선
+  // - 학부모: 자녀 학년 (호출자가 grade 파라미터로 전달)
+  const matchClauses = [];
+  const matchParams = [];
+  if (grade) { matchClauses.push('c.grade = ?'); matchParams.push(parseInt(grade)); }
+  if (subject) { matchClauses.push('c.subject = ?'); matchParams.push(subject); }
+  if (matchClauses.length > 0) {
+    try {
+      const where = ` WHERE c.is_public = 1 AND c.status = 'approved' AND c.creator_id != ? AND ${matchClauses.join(' AND ')}`;
+      const sql = `
+        SELECT c.*, u.display_name AS creator_name
+        FROM contents c JOIN users u ON c.creator_id = u.id
+        ${where}
+        ORDER BY c.view_count DESC, c.created_at DESC LIMIT ?
+      `;
+      const matched = db.prepare(sql).all(userId, ...matchParams, limit);
+      matched.forEach(c => { if (!existIds.has(c.id)) { contents.push(c); existIds.add(c.id); } });
+    } catch {}
+  }
 
   // 1순위: 구독 크리에이터의 최신 콘텐츠 (본인 제외)
-  try {
-    const sub = db.prepare(`
-      SELECT c.*, u.display_name AS creator_name
-      FROM contents c
-      JOIN users u ON c.creator_id = u.id
-      JOIN channel_subscribers cs ON cs.user_id = ?
-      JOIN channels ch ON ch.id = cs.channel_id AND ch.user_id = c.creator_id
-      WHERE c.is_public = 1 AND c.status = 'approved' AND c.creator_id != ?
-      ORDER BY c.created_at DESC LIMIT ?
-    `).all(userId, userId, limit);
-    sub.forEach(c => { contents.push(c); existIds.add(c.id); });
-  } catch {}
+  if (contents.length < limit) {
+    try {
+      const sub = db.prepare(`
+        SELECT c.*, u.display_name AS creator_name
+        FROM contents c
+        JOIN users u ON c.creator_id = u.id
+        JOIN channel_subscribers cs ON cs.user_id = ?
+        JOIN channels ch ON ch.id = cs.channel_id AND ch.user_id = c.creator_id
+        WHERE c.is_public = 1 AND c.status = 'approved' AND c.creator_id != ?
+        ORDER BY c.created_at DESC LIMIT ?
+      `).all(userId, userId, limit - contents.length);
+      sub.forEach(c => { if (!existIds.has(c.id)) { contents.push(c); existIds.add(c.id); } });
+    } catch {}
+  }
 
   // 2순위: 최근 검색 키워드/성취기준 관련 콘텐츠
   if (contents.length < limit && keywords.length > 0) {
@@ -435,7 +461,7 @@ function getRecommendations(userId, limit = 12, keywords = []) {
     } catch {}
   }
 
-  // 3순위: 인기 콘텐츠로 보충
+  // 3순위 (fallback): 인기 콘텐츠로 보충 — 빈 결과 방지
   if (contents.length < limit) {
     const excl = existIds.size ? 'AND c.id NOT IN (' + Array.from(existIds).join(',') + ')' : '';
     const pop = db.prepare(`
@@ -444,7 +470,7 @@ function getRecommendations(userId, limit = 12, keywords = []) {
       WHERE c.is_public = 1 AND c.status = 'approved' AND c.creator_id != ? ${excl}
       ORDER BY c.view_count DESC, c.like_count DESC LIMIT ?
     `).all(userId, limit - contents.length);
-    pop.forEach(c => contents.push(c));
+    pop.forEach(c => { if (!existIds.has(c.id)) { contents.push(c); existIds.add(c.id); } });
   }
 
   contents.forEach(c => { if (c.tags) { try { c.tags = JSON.parse(c.tags); } catch { c.tags = []; } } });

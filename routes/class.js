@@ -41,15 +41,35 @@ router.get('/my', requireAuth, (req, res) => {
 });
 
 // GET /api/class/search - 공개 클래스 검색
+// query.excludeOwnerId 지정 시 해당 사용자가 개설자인 클래스 제외 (포털 메인 인기 클래스용)
 router.get('/search', requireAuth, (req, res) => {
   try {
-    const { keyword, subject, grade, page, limit } = req.query;
+    const { keyword, subject, grade, page, limit, excludeOwnerId } = req.query;
     const result = classDb.searchPublicClasses({
       keyword, subject, grade: grade ? parseInt(grade) : null,
-      page: parseInt(page) || 1, limit: parseInt(limit) || 12
+      page: parseInt(page) || 1, limit: parseInt(limit) || 12,
+      excludeOwnerId: excludeOwnerId ? parseInt(excludeOwnerId) : null
     });
     res.json({ success: true, ...result });
   } catch (err) {
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// GET /api/class/popular - 인기 클래스 (member_count DESC, 본인 소유 자동 제외)
+// query.excludeSelf=1 (default) — 본인 소유 클래스 제외, 0이면 포함
+// query.limit (default 5)
+router.get('/popular', requireAuth, (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit) || 5;
+    const excludeSelf = req.query.excludeSelf !== '0';
+    const result = classDb.searchPublicClasses({
+      page: 1, limit,
+      excludeOwnerId: excludeSelf ? req.user.id : null
+    });
+    res.json({ success: true, ...result });
+  } catch (err) {
+    console.error('[CLASS] popular error:', err);
     res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
   }
 });

@@ -117,12 +117,28 @@ router.get('/popular-tags', requireAuth, (req, res) => {
 });
 
 // GET /api/contents/recommendations - 추천 콘텐츠
+// query: keywords (CSV), limit, role (student|teacher|parent|staff|admin), grade, subject
+//   role/grade/subject 미지정 시 본인 user 정보 기반 자동 적용 (학생/교사 한정)
 router.get('/recommendations', requireAuth, (req, res) => {
   try {
     const keywords = req.query.keywords ? req.query.keywords.split(',').filter(Boolean) : [];
-    const contents = contentDb.getRecommendations(req.user.id, parseInt(req.query.limit) || 12, keywords);
-    res.json({ success: true, contents });
+    const limit = parseInt(req.query.limit) || 12;
+
+    // 우선 query 파라미터 적용, 없으면 user 프로필에서 자동 보강
+    let { role, grade, subject } = req.query;
+    if (!role) role = req.user.role;
+    if (role === 'student' && !grade && req.user.grade) grade = req.user.grade;
+    if (role === 'teacher' && !grade && req.user.grade) grade = req.user.grade;
+
+    const opts = {
+      role: role || null,
+      grade: grade ? parseInt(grade) : null,
+      subject: subject || null
+    };
+    const contents = contentDb.getRecommendations(req.user.id, limit, keywords, opts);
+    res.json({ success: true, contents, applied: opts });
   } catch (err) {
+    console.error('[CONTENT] recommendations error:', err);
     res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
   }
 });

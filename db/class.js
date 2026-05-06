@@ -64,12 +64,14 @@ function getUserClasses(userId) {
 }
 
 // 공개 클래스 검색
-function searchPublicClasses({ keyword, subject, grade, page = 1, limit = 20 } = {}) {
+// opts.excludeOwnerId 지정 시 해당 사용자가 개설자(owner)인 클래스는 결과에서 제외
+function searchPublicClasses({ keyword, subject, grade, page = 1, limit = 20, excludeOwnerId } = {}) {
   let where = ' WHERE c.is_public = 1 AND c.status = \'active\'';
   const params = [];
   if (keyword) { where += ' AND (c.name LIKE ? OR c.description LIKE ?)'; params.push(`%${keyword}%`, `%${keyword}%`); }
   if (subject) { where += ' AND c.subject = ?'; params.push(subject); }
   if (grade) { where += ' AND c.grade = ?'; params.push(grade); }
+  if (excludeOwnerId) { where += ' AND c.owner_id != ?'; params.push(parseInt(excludeOwnerId)); }
 
   const countSql = 'SELECT COUNT(*) as cnt FROM classes c' + where;
   const total = db.prepare(countSql).get(...params).cnt;
