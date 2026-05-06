@@ -150,7 +150,12 @@
     /* 본문: 좌우 분할 */
     /* 본문(메인) → 채점(컴팩트) 세로 흐름. 피드백은 별도 모달로 분리 */
     .sd-body { flex:1; min-height:0; display:flex; flex-direction:column; overflow:hidden; }
-    .sd-left { flex:1; min-height:0; padding:20px 28px; overflow-y:auto; border-bottom:1px solid #E5E7EB; }
+    /* sd-left 내부 본문(메인 flex:1) → 첨부 하단(컴팩트 flex:0 0 auto) */
+    .sd-left { flex:1; min-height:0; padding:0; overflow:hidden; border-bottom:1px solid #E5E7EB; display:flex; flex-direction:column; }
+    .sd-left .sd-section.sd-section-content { flex:1; min-height:0; padding:20px 28px 8px; overflow-y:auto; }
+    .sd-left .sd-section.sd-section-attach { flex:0 0 auto; padding:10px 28px 12px; border-top:1px solid #F1F5F9; background:#FAFBFC; max-height:140px; overflow-y:auto; }
+    .sd-left .sd-section.sd-section-attach .sd-empty-card { padding:8px 12px; font-size:13px; color:#9CA3AF; background:transparent; border:none; }
+    .sd-left .sd-section.sd-section-attach .sd-empty-card i { font-size:14px; }
     .sd-right { flex:0 0 auto; display:flex; flex-direction:column; overflow:hidden; background:#FAFBFC; }
 
     .sd-sec-label { font-size:13px; font-weight:700; color:#6B7280; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:10px; display:flex; align-items:center; gap:8px; }
@@ -368,11 +373,11 @@
       <!-- 본문: 좌우 분할 -->
       <div class="sd-body">
         <div class="sd-left" id="sdLeft">
-          <div class="sd-section">
+          <div class="sd-section sd-section-content">
             <div class="sd-sec-label">본문</div>
             <div id="sdContent" class="sd-content"></div>
           </div>
-          <div class="sd-section" id="sdAttachSection">
+          <div class="sd-section sd-section-attach" id="sdAttachSection">
             <div class="sd-sec-label">첨부 파일</div>
             <div id="sdAttachBody"></div>
           </div>
@@ -848,38 +853,21 @@
       const isImg = ['png','jpg','jpeg','gif','webp','bmp','svg'].includes(ext);
       const isPdf = ext === 'pdf';
 
-      // 모든 첨부 클릭 시 통합 미리보기 모달 (사용자 요구: 다운로드 안 해도 미리보기)
-      if (isImg) {
-        wrap.innerHTML = `
-          <div class="sd-attach-grid">
-            <div class="sd-attach-img" onclick="openSdAttach('${escHtml(file)}', '${escHtml(fname)}')" tabindex="0" role="button" aria-label="이미지 미리보기">
-              <img src="${escHtml(file)}" alt="${escHtml(fname)}" loading="lazy">
-            </div>
+      // 모든 첨부를 하단 컴팩트 카드 리스트로 통일 (사용자 요구: 본문 메인 / 첨부 하단)
+      // 클릭 시 통합 미리보기 모달 (다운로드 안 해도 미리보기)
+      const iconMap = { doc:'fa-file-word', docx:'fa-file-word', xls:'fa-file-excel', xlsx:'fa-file-excel', ppt:'fa-file-powerpoint', pptx:'fa-file-powerpoint', zip:'fa-file-zipper', rar:'fa-file-zipper', txt:'fa-file-lines', hwp:'fa-file-lines', pdf:'fa-file-pdf', jpg:'fa-file-image', jpeg:'fa-file-image', png:'fa-file-image', gif:'fa-file-image', webp:'fa-file-image', mp4:'fa-file-video', webm:'fa-file-video', mp3:'fa-file-audio', wav:'fa-file-audio' };
+      const icon = iconMap[ext] || 'fa-file';
+      const iconBg = isImg ? 'background:#DBEAFE;color:#2563EB;' : isPdf ? 'background:#FEE2E2;color:#EF4444;' : 'background:#EFF6FF;color:#2563EB;';
+      const typeLabel = isImg ? '이미지' : isPdf ? 'PDF' : (ext.toUpperCase() || '파일');
+      wrap.innerHTML = `
+        <div class="sd-attach-file" onclick="openSdAttach('${escHtml(file)}', '${escHtml(fname)}')" style="cursor:pointer;" tabindex="0" role="button" aria-label="${escHtml(fname)} 미리보기">
+          <div class="sd-attach-file-icon" style="${iconBg}"><i class="fas ${icon}"></i></div>
+          <div class="sd-attach-file-info">
+            <div class="sd-attach-file-name">${escHtml(fname)}</div>
+            <div class="sd-attach-file-meta">${typeLabel} · 클릭하면 미리보기</div>
           </div>
-          <div style="margin-top:10px;font-size:13px;color:#6B7280;">${escHtml(fname)} · 클릭하면 크게 볼 수 있어요</div>`;
-      } else if (isPdf) {
-        wrap.innerHTML = `
-          <div class="sd-attach-file" onclick="openSdAttach('${escHtml(file)}', '${escHtml(fname)}')" style="cursor:pointer;" tabindex="0" role="button" aria-label="PDF 미리보기">
-            <div class="sd-attach-file-icon" style="background:#FEE2E2;color:#EF4444;"><i class="fas fa-file-pdf"></i></div>
-            <div class="sd-attach-file-info">
-              <div class="sd-attach-file-name">${escHtml(fname)}</div>
-              <div class="sd-attach-file-meta">PDF · 클릭하면 미리보기</div>
-            </div>
-            <span class="sd-attach-file-dl" style="background:#2563EB;">미리보기</span>
-          </div>`;
-      } else {
-        const iconMap = { doc:'fa-file-word', docx:'fa-file-word', xls:'fa-file-excel', xlsx:'fa-file-excel', ppt:'fa-file-powerpoint', pptx:'fa-file-powerpoint', zip:'fa-file-zipper', rar:'fa-file-zipper', txt:'fa-file-lines', hwp:'fa-file-lines' };
-        const icon = iconMap[ext] || 'fa-file';
-        wrap.innerHTML = `
-          <div class="sd-attach-file" onclick="openSdAttach('${escHtml(file)}', '${escHtml(fname)}')" style="cursor:pointer;" tabindex="0" role="button" aria-label="파일 미리보기">
-            <div class="sd-attach-file-icon"><i class="fas ${icon}"></i></div>
-            <div class="sd-attach-file-info">
-              <div class="sd-attach-file-name">${escHtml(fname)}</div>
-              <div class="sd-attach-file-meta">${ext.toUpperCase() || '파일'} · 클릭하면 미리보기</div>
-            </div>
-            <span class="sd-attach-file-dl">미리보기</span>
-          </div>`;
-      }
+          <span class="sd-attach-file-dl">미리보기 <i class="fas fa-eye" style="margin-left:4px;"></i></span>
+        </div>`;
     }
 
     // 라이트박스
