@@ -5,10 +5,12 @@ const db = require('./index');
 try { db.exec('ALTER TABLE contents ADD COLUMN bookmark_count INTEGER DEFAULT 0'); } catch(e) {}
 
 function getHallOfFame(month, period) {
-  // period: 'weekly' = 최근 7일, 'monthly' = 해당 월 또는 최근 30일
+  // period: 'weekly'|'week' = 최근 7일, 'monthly'|'month' = 해당 월 또는 최근 30일
+  // 축약형(week/month)도 허용하여 호출자 실수에 방어적으로 대응
   let dateFilter, contentDateFilter;
   const useMonth = month && /^\d{4}-\d{2}$/.test(month);
-  if (period === 'weekly') {
+  const isWeekly = period === 'weekly' || period === 'week';
+  if (isWeekly) {
     dateFilter = ` AND ll.created_at >= DATE('now', '-7 days')`;
     contentDateFilter = ` AND ct.created_at >= DATE('now', '-7 days')`;
   } else if (useMonth) {
@@ -669,6 +671,12 @@ function getTodayAction(userId, requestedRole) {
 
 // ====================================================================
 // "명예의 전당 미리보기" — 클래스/크리에이터 2개 섹션 분리 응답
+// 채움클래스 명예의 전당 페이지(/class/hall-of-fame.html)와 **동일한**
+// getHallOfFame() 결과를 사용. 메트릭은 hall-of-fame 페이지와 1:1 일치
+//  - 클래스: name, owner_name, school_name, member_count, activity_count
+//  - 크리에이터: display_name, role, content_count, total_views, all_content_count
+// 학습자(topLearners)는 명예의 전당 페이지가 노출하지 않으므로
+// 포털 미리보기에서도 제외한다 ("학습 N회"가 크리에이터 메트릭으로 오인되는 사고 방지).
 // ====================================================================
 function getPortalHighlights(userId) {
   const role = _getUserRole(userId);
@@ -677,8 +685,7 @@ function getPortalHighlights(userId) {
   const monthly = getHallOfFame(null, 'monthly');
   const halls = {
     topClasses:  (weekly.topClasses  || []).length ? weekly.topClasses  : (monthly.topClasses  || []),
-    topCreators: (weekly.topCreators || []).length ? weekly.topCreators : (monthly.topCreators || []),
-    topLearners: (weekly.topLearners || []).length ? weekly.topLearners : (monthly.topLearners || [])
+    topCreators: (weekly.topCreators || []).length ? weekly.topCreators : (monthly.topCreators || [])
   };
 
   // 우리반 학생 ID 집합 (교사 시) / 자녀 ID 집합 (학부모 시)
@@ -740,6 +747,8 @@ function getPortalHighlights(userId) {
   });
 
   // -------- 콘텐츠 크리에이터 명예의 전당 (Top 3) --------
+  // 메트릭은 채움클래스 명예의 전당 페이지와 동일:
+  //  content_count = 기간 내 공개 콘텐츠 수, all_content_count = 누적, total_views = 총 조회수
   const creators = (halls.topCreators || []).slice(0, 3).map((u, idx) => {
     const isMine = !!userId && u.id === userId;
     const isClassmate = myClassmateIds.has(u.id);
@@ -755,6 +764,7 @@ function getPortalHighlights(userId) {
       role: u.role || 'student',
       school_name: u.school_name || '',
       content_count: u.content_count || 0,
+      all_content_count: u.all_content_count || 0,
       total_views: u.total_views || 0,
       total_likes: u.total_likes || 0,
       avatar: null,
@@ -765,27 +775,9 @@ function getPortalHighlights(userId) {
     };
   });
 
-  // 하위 호환: 기존 items 배열도 유지 (학습자 + 크리에이터 보조)
-  const items = [];
-  const learners = (halls.topLearners || []).slice(0, 3);
-  learners.forEach((u, idx) => {
-    const isMine = (role === 'student' && u.id === userId);
-    const isClassmate = myClassmateIds.has(u.id);
-    const isChild = childIds.has(u.id);
-    items.push({
-      id: u.id,
-      rank: idx + 1,
-      type: 'learner',
-      title: u.display_name || '학습자',
-      author: u.school_name ? (u.school_name + (u.grade ? ` ${u.grade}학년` : '')) : '',
-      meta: `학습 ${u.learning_count || 0}회`,
-      thumbnail: null,
-      isMine, isClassmate, isChild,
-      highlightBadge: isMine ? '나' : (isChild ? '자녀' : (isClassmate ? '우리반' : null))
-    });
-  });
-
-  return { items, classes, creators, role };
+  // 학습자(topLearners) 데이터는 명예의 전당 페이지에 없으므로 포털 미리보기에서도 제외.
+  // 하위 호환을 위해 items 배열은 항상 빈 배열로 유지. ("학습 N회" 메트릭 오인 차단)
+  return { classes, creators, items: [], role };
 }
 
 function getRecentActivities(userId, { limit = 20 } = {}) {

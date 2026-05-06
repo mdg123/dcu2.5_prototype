@@ -1582,7 +1582,7 @@
             <div class="hall-row-meta">${meta || '크리에이터'}</div>
           </div>
           <div class="hall-row-stats">
-            <span><strong>${c.content_count || 0}</strong>건</span>
+            <span><strong>${c.content_count || 0}</strong>개</span>
             <span>조회 <strong>${views}</strong></span>
           </div>
         </a>`;
@@ -1591,20 +1591,22 @@
       const classList = document.getElementById('hallClassList');
       const creatorList = document.getElementById('hallCreatorList');
       try {
-        const res = await fetch('/api/portal/highlights');
+        // 채움클래스 명예의 전당 페이지(/class/hall-of-fame.html)와 동일한 데이터 사용.
+        // /api/portal/highlights는 내부적으로 getHallOfFame()을 호출하므로 Top 3가 일치한다.
+        const res = await fetch('/api/portal/highlights', { cache: 'no-store' });
         const data = await res.json();
         if (!data.success) throw new Error('failed');
         const classes = Array.isArray(data.classes) ? data.classes : [];
         const creators = Array.isArray(data.creators) ? data.creators : [];
 
         if (classes.length === 0) {
-          classList.innerHTML = renderHallEmpty('이번 주 등재된 클래스가 없어요', '활동이 쌓이면 명예의 전당에 등재됩니다');
+          classList.innerHTML = renderHallEmpty('아직 등재된 클래스가 없어요', '활동이 쌓이면 명예의 전당에 등재됩니다');
         } else {
           classList.innerHTML = classes.map(renderClassRow).join('');
         }
 
         if (creators.length === 0) {
-          creatorList.innerHTML = renderHallEmpty('이번 주 등재된 크리에이터가 없어요', '콘텐츠를 공개하고 명예의 전당에 도전해 보세요');
+          creatorList.innerHTML = renderHallEmpty('아직 등재된 크리에이터가 없어요', '콘텐츠를 공개하고 명예의 전당에 도전해 보세요');
         } else {
           creatorList.innerHTML = creators.map(renderCreatorRow).join('');
         }
