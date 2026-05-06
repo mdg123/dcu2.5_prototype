@@ -73,4 +73,15 @@ router.get('/today-action', requireAuth, (req, res) => {
   }
 });
 
+// GET /highlights — 명예의 전당 Top3 미리보기 (본인/자녀/우리반 등재 강조 포함)
+router.get('/highlights', requireAuth, (req, res) => {
+  try {
+    const data = portalDb.getPortalHighlights(req.user.id);
+    res.json({ success: true, ...data });
+  } catch (err) {
+    console.error('[PORTAL] highlights error:', err);
+    res.status(500).json({ success: false, items: [] });
+  }
+});
+
 module.exports = router;

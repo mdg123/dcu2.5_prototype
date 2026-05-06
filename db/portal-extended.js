@@ -663,6 +663,74 @@ function getTodayAction(userId, requestedRole) {
   return empty('오늘 할 일이 없어요!');
 }
 
+// ====================================================================
+// "명예의 전당 미리보기" — 본인/자녀/우리반 등재 표시 포함
+// ====================================================================
+function getPortalHighlights(userId) {
+  const role = _getUserRole(userId);
+  const halls = getHallOfFame(null, 'weekly');
+
+  // 우리반 학생 ID 집합 (교사 시) / 자녀 ID 집합 (학부모 시)
+  const myClassmateIds = (() => {
+    if (role !== 'teacher') return new Set();
+    try {
+      const owned = db.prepare("SELECT id FROM classes WHERE owner_id = ? AND status='active'").all(userId).map(r => r.id);
+      if (owned.length === 0) return new Set();
+      const ph = owned.map(() => '?').join(',');
+      const ids = db.prepare(`SELECT DISTINCT user_id FROM class_members WHERE class_id IN (${ph}) AND status='active' AND role='member'`).all(...owned).map(r => r.user_id);
+      return new Set(ids);
+    } catch { return new Set(); }
+  })();
+  const childIds = role === 'parent' ? new Set(_getChildIds(userId)) : new Set();
+
+  const items = [];
+  // 1. Top 학습자 우선
+  const learners = (halls.topLearners || []).slice(0, 3);
+  learners.forEach((u, idx) => {
+    const isMine = (role === 'student' && u.id === userId);
+    const isClassmate = myClassmateIds.has(u.id);
+    const isChild = childIds.has(u.id);
+    items.push({
+      id: u.id,
+      rank: idx + 1,
+      type: 'learner',
+      title: u.display_name || '학습자',
+      author: u.school_name ? (u.school_name + (u.grade ? ` ${u.grade}학년` : '')) : '',
+      meta: `학습 ${u.learning_count || 0}회`,
+      thumbnail: null,
+      isMine,
+      isClassmate,
+      isChild,
+      highlightBadge: isMine ? '나' : (isChild ? '자녀' : (isClassmate ? '우리반' : null))
+    });
+  });
+
+  // 2. 부족하면 콘텐츠 크리에이터 보강
+  if (items.length < 3) {
+    const creators = (halls.topCreators || []).slice(0, 3 - items.length);
+    creators.forEach((u) => {
+      const isMine = u.id === userId;
+      const isClassmate = myClassmateIds.has(u.id);
+      const isChild = childIds.has(u.id);
+      items.push({
+        id: u.id,
+        rank: items.length + 1,
+        type: 'creator',
+        title: u.display_name || '크리에이터',
+        author: u.school_name || '',
+        meta: `콘텐츠 ${u.content_count || 0}건`,
+        thumbnail: null,
+        isMine,
+        isClassmate,
+        isChild,
+        highlightBadge: isMine ? '나' : (isChild ? '자녀' : (isClassmate ? '우리반' : null))
+      });
+    });
+  }
+
+  return { items, role };
+}
+
 function getRecentActivities(userId, { limit = 20 } = {}) {
   return db.prepare(`
     SELECT ll.*, u.display_name,
@@ -690,5 +758,6 @@ module.exports = {
   getTrendingPosts,
   getMyDashboardSummary,
   getRecentActivities,
-  getTodayAction
+  getTodayAction,
+  getPortalHighlights
 };
