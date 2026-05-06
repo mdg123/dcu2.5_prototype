@@ -327,10 +327,12 @@ router.get('/:classId/owner-summary', requireAuth, (req, res) => {
         SELECT id FROM exams
         WHERE class_id = ? AND status IN ('waiting','active')
       `).all(classId);
+      // [FIX] 평가 응시자를 해당 클래스 멤버로만 한정 (비클래스 응시자 제외)
+      const memberIdSetForCounts = new Set(memberIds);
       for (const ex of exams) {
         const submitted = db.prepare(
           "SELECT user_id FROM exam_students WHERE exam_id = ? AND status = 'submitted'"
-        ).all(ex.id).map(s => s.user_id);
+        ).all(ex.id).map(s => s.user_id).filter(uid => memberIdSetForCounts.has(uid));
         const submittedSet = new Set(submitted);
         for (const mid of memberIds) if (!submittedSet.has(mid)) missingCnt++;
       }
@@ -479,6 +481,8 @@ router.get('/:classId/owner-summary', requireAuth, (req, res) => {
 
       const examGroups = [];
       let examMissingCount = 0;
+      // [FIX] 평가 응시 명단을 해당 클래스 멤버로만 한정 (다른 클래스 학생/교사 응시 제외)
+      const memberIdSet = new Set(members.map(m => m.id));
       for (const ex of exams) {
         // 응시 학생 전체(상태 포함) — 모달에 응시 명단 표시용
         // exam_students.exam_id 가 TEXT 인 점에 주의 (필요시 String 변환)
@@ -488,7 +492,8 @@ router.get('/:classId/owner-summary', requireAuth, (req, res) => {
           FROM exam_students es
           JOIN users u ON u.id = es.user_id
           WHERE es.exam_id = ?
-        `).all(String(ex.id));
+        `).all(String(ex.id))
+          .filter(s => memberIdSet.has(s.user_id));  // 클래스 멤버만 통계 대상
         const submittedSet = new Set(
           examStudents.filter(s => s.status === 'submitted').map(s => s.user_id)
         );
