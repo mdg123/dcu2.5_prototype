@@ -98,13 +98,11 @@ app.use('/api/curriculum', require('./routes/curriculum'));
 app.use('/api/search', require('./routes/search'));
 app.use('/api/upload', require('./routes/upload'));
 
-// 루트 경로: 로그인 여부에 따라 분기
+// 루트 경로: 비로그인 사용자도 포털 진입 가능 (공개 영역만 표출)
+// — 로그인 시: 개인화된 대시보드 (오늘 할 일·4슬롯·활동 요약)
+// — 비로그인: 환영 헤더 + 공개 콘텐츠/클래스/명예의 전당 + 로그인/회원가입 CTA
 app.get('/', (req, res) => {
-  if (req.session && req.session.userId) {
-    res.sendFile(path.join(__dirname, 'public', 'index.html'));
-  } else {
-    res.redirect('/login.html');
-  }
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
 // Socket.IO 초기화

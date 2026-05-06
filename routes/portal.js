@@ -1,7 +1,7 @@
 // routes/portal.js
 const express = require('express');
 const router = express.Router();
-const { requireAuth } = require('../middleware/auth');
+const { requireAuth, optionalAuth } = require('../middleware/auth');
 const portalDb = require('../db/portal-extended');
 
 // GET /hall-of-fame — 명예의 전당
@@ -74,9 +74,11 @@ router.get('/today-action', requireAuth, (req, res) => {
 });
 
 // GET /highlights — 명예의 전당 Top3 미리보기 (본인/자녀/우리반 등재 강조 포함)
-router.get('/highlights', requireAuth, (req, res) => {
+// 비로그인 포털에서도 Top3 노출. 비로그인 시 userId=0 → 본인 매칭 강조 없음.
+router.get('/highlights', optionalAuth, (req, res) => {
   try {
-    const data = portalDb.getPortalHighlights(req.user.id);
+    const userId = req.user ? req.user.id : 0;
+    const data = portalDb.getPortalHighlights(userId);
     res.json({ success: true, ...data });
   } catch (err) {
     console.error('[PORTAL] highlights error:', err);

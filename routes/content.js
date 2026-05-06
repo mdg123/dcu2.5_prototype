@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { requireAuth } = require('../middleware/auth');
+const { requireAuth, optionalAuth } = require('../middleware/auth');
 const contentDb = require('../db/content');
 const { logLearningActivity } = require('../db/learning-log-helper');
 const { extractLogContext } = require('../lib/log-context');
@@ -117,25 +117,31 @@ router.get('/popular-tags', requireAuth, (req, res) => {
 });
 
 // GET /api/contents/recommendations - 추천 콘텐츠
+// 비로그인 포털에서도 인기 콘텐츠 노출이 가능하도록 optionalAuth 적용.
+//   - 로그인 시: 역할/학년/교과 기반 개인화 추천
+//   - 비로그인: 인기/조회수 상위 공개 콘텐츠 (3순위 fallback이 자동 처리)
 // query: keywords (CSV), limit, role (student|teacher|parent|staff|admin), grade, subject
-//   role/grade/subject 미지정 시 본인 user 정보 기반 자동 적용 (학생/교사 한정)
-router.get('/recommendations', requireAuth, (req, res) => {
+router.get('/recommendations', optionalAuth, (req, res) => {
   try {
     const keywords = req.query.keywords ? req.query.keywords.split(',').filter(Boolean) : [];
     const limit = parseInt(req.query.limit) || 12;
 
-    // 우선 query 파라미터 적용, 없으면 user 프로필에서 자동 보강
+    // 우선 query 파라미터 적용, 없으면 user 프로필에서 자동 보강 (로그인 시에만)
     let { role, grade, subject } = req.query;
-    if (!role) role = req.user.role;
-    if (role === 'student' && !grade && req.user.grade) grade = req.user.grade;
-    if (role === 'teacher' && !grade && req.user.grade) grade = req.user.grade;
+    if (req.user) {
+      if (!role) role = req.user.role;
+      if (role === 'student' && !grade && req.user.grade) grade = req.user.grade;
+      if (role === 'teacher' && !grade && req.user.grade) grade = req.user.grade;
+    }
 
     const opts = {
       role: role || null,
       grade: grade ? parseInt(grade) : null,
       subject: subject || null
     };
-    const contents = contentDb.getRecommendations(req.user.id, limit, keywords, opts);
+    // 비로그인 시 userId=0 — creator_id != 0 필터는 모든 콘텐츠 통과시킴
+    const userId = req.user ? req.user.id : 0;
+    const contents = contentDb.getRecommendations(userId, limit, keywords, opts);
     res.json({ success: true, contents, applied: opts });
   } catch (err) {
     console.error('[CONTENT] recommendations error:', err);

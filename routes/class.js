@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { requireAuth, requireRole } = require('../middleware/auth');
+const { requireAuth, requireRole, optionalAuth } = require('../middleware/auth');
 const classDb = require('../db/class');
 
 // POST /api/class - 클래스 생성 (누구나 가능)
@@ -57,15 +57,16 @@ router.get('/search', requireAuth, (req, res) => {
 });
 
 // GET /api/class/popular - 인기 클래스 (member_count DESC, 본인 소유 자동 제외)
-// query.excludeSelf=1 (default) — 본인 소유 클래스 제외, 0이면 포함
+// 비로그인 사용자도 포털 메인에서 공개 인기 클래스를 볼 수 있도록 optionalAuth 적용
+// query.excludeSelf=1 (default) — 본인 소유 클래스 제외, 0이면 포함 (로그인 시에만 의미)
 // query.limit (default 5)
-router.get('/popular', requireAuth, (req, res) => {
+router.get('/popular', optionalAuth, (req, res) => {
   try {
     const limit = parseInt(req.query.limit) || 5;
     const excludeSelf = req.query.excludeSelf !== '0';
     const result = classDb.searchPublicClasses({
       page: 1, limit,
-      excludeOwnerId: excludeSelf ? req.user.id : null
+      excludeOwnerId: (excludeSelf && req.user) ? req.user.id : null
     });
     res.json({ success: true, ...result });
   } catch (err) {
