@@ -148,11 +148,10 @@
     .sd-close-btn:hover { background:#F3F4F6; color:#1F2937; }
 
     /* 본문: 좌우 분할 */
-    /* 본문(위) → 채점·피드백(아래) 세로 흐름 (사용자 요구) */
-    /* 피드백 영역 확장: 본문 30%, 채점·피드백 70% (피드백이 메인) */
+    /* 본문(메인) → 채점(컴팩트) 세로 흐름. 피드백은 별도 모달로 분리 */
     .sd-body { flex:1; min-height:0; display:flex; flex-direction:column; overflow:hidden; }
-    .sd-left { flex:0 0 30%; min-height:0; padding:18px 28px; overflow-y:auto; border-bottom:1px solid #E5E7EB; }
-    .sd-right { flex:1; min-height:0; display:flex; flex-direction:column; overflow:hidden; background:#FAFBFC; }
+    .sd-left { flex:1; min-height:0; padding:20px 28px; overflow-y:auto; border-bottom:1px solid #E5E7EB; }
+    .sd-right { flex:0 0 auto; display:flex; flex-direction:column; overflow:hidden; background:#FAFBFC; }
 
     .sd-sec-label { font-size:13px; font-weight:700; color:#6B7280; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:10px; display:flex; align-items:center; gap:8px; }
     .sd-sec-label i { font-size:13px; color:#9CA3AF; }
@@ -394,24 +393,46 @@
               </div>
             </div>
             <div class="sd-grade-actions">
+              <button class="sd-btn sd-btn-outline" onclick="openSdFeedback()" id="sdBtnFeedback" type="button" style="background:#fff;color:#374151;border:1px solid #D1D5DB;"><i class="fas fa-comments"></i> 피드백 <span id="sdFeedbackCount" style="background:#EF4444;color:#fff;font-size:12px;font-weight:700;padding:2px 8px;border-radius:10px;margin-left:4px;display:none;">0</span></button>
               <button class="sd-btn sd-btn-save" onclick="saveSdGrade(false)" id="sdBtnSave"><i class="fas fa-check"></i> 채점 저장</button>
               <button class="sd-btn sd-btn-next" onclick="saveSdGrade(true)" id="sdBtnSaveNext" title="Ctrl+Shift+Enter">저장 후 다음 <i class="fas fa-chevron-right"></i></button>
             </div>
           </div>
-          <!-- 피드백 채팅 -->
-          <div class="sd-feedback-wrap">
-            <div class="sd-feedback-head"><i class="fas fa-comments"></i> 피드백</div>
-            <div class="sd-feedback-body" id="sdFeedbackBody"></div>
-            <div class="sd-feedback-footer">
-              <textarea id="sdFeedbackInput" placeholder="피드백을 작성해 주세요... (Ctrl+Enter 전송)" onkeydown="if(event.ctrlKey && event.key==='Enter'){sendSdFeedback();}"></textarea>
-              <button class="fb-send" onclick="sendSdFeedback()" aria-label="피드백 전송"><i class="fas fa-paper-plane"></i></button>
+        </div>
+      </div>
+
+      <!-- 피드백 모달 (제출 모달 위에 덮어 표시) -->
+      <div id="sdFeedbackOverlay" onclick="if(event.target===this)closeSdFeedback()" style="display:none;position:fixed;inset:0;background:rgba(15,23,42,0.55);z-index:11500;align-items:center;justify-content:center;padding:24px;">
+        <div style="background:#fff;border-radius:14px;width:760px;max-width:92vw;height:640px;max-height:88vh;display:flex;flex-direction:column;box-shadow:0 24px 64px rgba(0,0,0,0.28);overflow:hidden;">
+          <div style="padding:16px 24px;border-bottom:1px solid #E5E7EB;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;">
+            <div>
+              <div style="font-size:19px;font-weight:700;color:#111827;"><i class="fas fa-comments" style="color:#2563EB;margin-right:6px;"></i> 피드백</div>
+              <div style="font-size:14px;color:#6B7280;margin-top:2px;" id="sdFbModalSub">학생과 1:1 메시지</div>
+            </div>
+            <button onclick="closeSdFeedback()" style="width:36px;height:36px;border:none;border-radius:8px;background:#F3F4F6;color:#374151;cursor:pointer;font-size:16px;" aria-label="닫기"><i class="fas fa-times"></i></button>
+          </div>
+          <div id="sdFbModalBody" style="flex:1;padding:16px 24px;overflow-y:auto;background:#F9FAFB;font-size:16px;line-height:1.6;display:flex;flex-direction:column;gap:8px;"></div>
+          <div style="padding:12px 16px;border-top:1px solid #E5E7EB;background:#fff;display:flex;gap:8px;flex-shrink:0;">
+            <textarea id="sdFbModalInput" placeholder="피드백을 작성해 주세요... (Ctrl+Enter 전송)" style="flex:1;padding:12px 14px;border:1.5px solid #D1D5DB;border-radius:10px;font-size:16px;font-family:inherit;resize:none;outline:none;min-height:48px;max-height:120px;" onkeydown="if(event.ctrlKey&&event.key==='Enter')sendSdFbModal()"></textarea>
+            <button onclick="sendSdFbModal()" style="padding:12px 18px;background:#2563EB;color:#fff;border:none;border-radius:10px;font-size:16px;font-weight:600;cursor:pointer;font-family:inherit;flex-shrink:0;" aria-label="전송"><i class="fas fa-paper-plane"></i> 전송</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 첨부 미리보기 모달 (이미지/PDF/파일) -->
+      <div id="sdAttachOverlay" onclick="if(event.target===this)closeSdAttach()" style="display:none;position:fixed;inset:0;background:rgba(15,23,42,0.7);z-index:11600;align-items:center;justify-content:center;padding:24px;">
+        <div style="background:#fff;border-radius:14px;width:90vw;max-width:none;height:90vh;max-height:90vh;display:flex;flex-direction:column;box-shadow:0 24px 64px rgba(0,0,0,0.32);overflow:hidden;">
+          <div style="padding:14px 24px;border-bottom:1px solid #E5E7EB;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;background:#fff;">
+            <div style="font-size:17px;font-weight:600;color:#111827;display:flex;align-items:center;gap:10px;min-width:0;">
+              <i class="fas fa-paperclip" style="color:#2563EB;"></i>
+              <span id="sdAttachTitle" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">첨부파일</span>
+            </div>
+            <div style="display:flex;gap:8px;">
+              <a id="sdAttachDownload" href="#" download style="padding:8px 14px;background:#F3F4F6;color:#374151;border:1px solid #D1D5DB;border-radius:8px;font-size:14px;font-weight:600;text-decoration:none;display:inline-flex;align-items:center;gap:6px;"><i class="fas fa-download"></i> 다운로드</a>
+              <button onclick="closeSdAttach()" style="width:36px;height:36px;border:none;border-radius:8px;background:#F3F4F6;color:#374151;cursor:pointer;font-size:16px;" aria-label="닫기"><i class="fas fa-times"></i></button>
             </div>
           </div>
-          <!-- 채점 가이드 -->
-          <details class="sd-guide">
-            <summary class="sd-guide-summary">채점 가이드</summary>
-            <ul class="sd-guide-list" id="sdGuideList"></ul>
-          </details>
+          <div id="sdAttachBody" style="flex:1;background:#0F172A;display:flex;align-items:center;justify-content:center;overflow:auto;"></div>
         </div>
       </div>
 
@@ -790,12 +811,28 @@
         hwData?.due_date ? `마감 ${hwData.due_date}${dueText}` : '마감 일정 없음',
         `미채점 ${ungraded}명 / ${total}명`,
       ];
-      document.getElementById('sdGuideList').innerHTML = guide.map(g => `<li>• ${escHtml(g)}</li>`).join('');
+      // 채점 가이드는 폐기 (인라인 — 채점 박스 옆에 학급평균 이미 표시)
+      const guideEl = document.getElementById('sdGuideList');
+      if (guideEl) guideEl.innerHTML = guide.map(g => `<li>• ${escHtml(g)}</li>`).join('');
 
-      // ---- 우측: 피드백 채팅 ----
-      document.getElementById('sdFeedbackInput').value = '';
-      document.getElementById('sdFeedbackBody').innerHTML = '<div class="fb-empty"><i class="fas fa-spinner fa-spin"></i> 불러오는 중…</div>';
-      loadSdFeedback();
+      // 피드백 카운트 갱신 (별도 모달로 분리됨)
+      refreshSdFeedbackCount();
+    }
+
+    async function refreshSdFeedbackCount() {
+      const subs = window._allSubmissions || [];
+      const sub = subs[sdCurrentIndex];
+      if (!sub) return;
+      try {
+        const res = await fetch(`/api/homework/${classId}/${homeworkId}/submissions/${sub.id}/feedback`);
+        const data = await res.json();
+        const cnt = document.getElementById('sdFeedbackCount');
+        const n = (data.feedback || []).length;
+        if (cnt) {
+          cnt.textContent = n;
+          cnt.style.display = n > 0 ? 'inline-block' : 'none';
+        }
+      } catch (_) {}
     }
 
     // 첨부 인라인 렌더 (이미지 / PDF / 파일 / 빈 상태)
@@ -811,34 +848,36 @@
       const isImg = ['png','jpg','jpeg','gif','webp','bmp','svg'].includes(ext);
       const isPdf = ext === 'pdf';
 
+      // 모든 첨부 클릭 시 통합 미리보기 모달 (사용자 요구: 다운로드 안 해도 미리보기)
       if (isImg) {
         wrap.innerHTML = `
           <div class="sd-attach-grid">
-            <div class="sd-attach-img" onclick="openLightbox('${escHtml(file)}')" tabindex="0" role="button" aria-label="이미지 확대">
+            <div class="sd-attach-img" onclick="openSdAttach('${escHtml(file)}', '${escHtml(fname)}')" tabindex="0" role="button" aria-label="이미지 미리보기">
               <img src="${escHtml(file)}" alt="${escHtml(fname)}" loading="lazy">
             </div>
           </div>
           <div style="margin-top:10px;font-size:13px;color:#6B7280;">${escHtml(fname)} · 클릭하면 크게 볼 수 있어요</div>`;
       } else if (isPdf) {
         wrap.innerHTML = `
-          <div class="sd-attach-pdf-wrap">
-            <div class="sd-attach-pdf-head">
-              <span><i class="fas fa-file-pdf" style="color:#EF4444;margin-right:6px;"></i>${escHtml(fname)}</span>
-              <a href="${escHtml(file)}" target="_blank" rel="noopener">새 탭에서 열기 <i class="fas fa-external-link-alt"></i></a>
+          <div class="sd-attach-file" onclick="openSdAttach('${escHtml(file)}', '${escHtml(fname)}')" style="cursor:pointer;" tabindex="0" role="button" aria-label="PDF 미리보기">
+            <div class="sd-attach-file-icon" style="background:#FEE2E2;color:#EF4444;"><i class="fas fa-file-pdf"></i></div>
+            <div class="sd-attach-file-info">
+              <div class="sd-attach-file-name">${escHtml(fname)}</div>
+              <div class="sd-attach-file-meta">PDF · 클릭하면 미리보기</div>
             </div>
-            <iframe class="sd-attach-pdf" src="${escHtml(file)}" title="${escHtml(fname)}"></iframe>
+            <span class="sd-attach-file-dl" style="background:#2563EB;">미리보기</span>
           </div>`;
       } else {
         const iconMap = { doc:'fa-file-word', docx:'fa-file-word', xls:'fa-file-excel', xlsx:'fa-file-excel', ppt:'fa-file-powerpoint', pptx:'fa-file-powerpoint', zip:'fa-file-zipper', rar:'fa-file-zipper', txt:'fa-file-lines', hwp:'fa-file-lines' };
         const icon = iconMap[ext] || 'fa-file';
         wrap.innerHTML = `
-          <div class="sd-attach-file">
+          <div class="sd-attach-file" onclick="openSdAttach('${escHtml(file)}', '${escHtml(fname)}')" style="cursor:pointer;" tabindex="0" role="button" aria-label="파일 미리보기">
             <div class="sd-attach-file-icon"><i class="fas ${icon}"></i></div>
             <div class="sd-attach-file-info">
               <div class="sd-attach-file-name">${escHtml(fname)}</div>
-              <div class="sd-attach-file-meta">${ext.toUpperCase() || '파일'}</div>
+              <div class="sd-attach-file-meta">${ext.toUpperCase() || '파일'} · 클릭하면 미리보기</div>
             </div>
-            <a class="sd-attach-file-dl" href="${escHtml(file)}" target="_blank" rel="noopener" download>다운로드</a>
+            <span class="sd-attach-file-dl">미리보기</span>
           </div>`;
       }
     }
@@ -949,10 +988,67 @@
     }
 
     async function sendSdFeedback() {
+      // (deprecated) 인라인 피드백 wrap 제거됨 — 별도 모달로 이전
+      return openSdFeedback();
+    }
+
+    // ===== 피드백 별도 모달 =====
+    function openSdFeedback() {
       const subs = window._allSubmissions || [];
       const sub = subs[sdCurrentIndex];
       if (!sub) return;
-      const input = document.getElementById('sdFeedbackInput');
+      const sub2 = document.getElementById('sdFbModalSub');
+      if (sub2) sub2.textContent = (sub.display_name || '학생') + '님과의 1:1 피드백';
+      document.getElementById('sdFeedbackOverlay').style.display = 'flex';
+      document.getElementById('sdFbModalInput').value = '';
+      loadSdFbModal();
+      setTimeout(() => document.getElementById('sdFbModalInput').focus(), 50);
+    }
+    function closeSdFeedback() {
+      document.getElementById('sdFeedbackOverlay').style.display = 'none';
+    }
+    async function loadSdFbModal() {
+      const subs = window._allSubmissions || [];
+      const sub = subs[sdCurrentIndex];
+      if (!sub) return;
+      const body = document.getElementById('sdFbModalBody');
+      body.innerHTML = '<div style="color:#9CA3AF;text-align:center;padding:20px;">불러오는 중...</div>';
+      try {
+        const res = await fetch(`/api/homework/${classId}/${homeworkId}/submissions/${sub.id}/feedback`);
+        const data = await res.json();
+        if (!data.success) { body.innerHTML = `<div style="color:#EF4444;text-align:center;padding:20px;">${escHtml(data.message || '불러오기 실패')}</div>`; return; }
+        const list = data.feedback || [];
+        // 카운트 갱신
+        const cnt = document.getElementById('sdFeedbackCount');
+        if (cnt) { cnt.textContent = list.length; cnt.style.display = list.length ? 'inline-block' : 'none'; }
+        if (list.length === 0) {
+          body.innerHTML = '<div style="color:#9CA3AF;text-align:center;padding:40px 20px;"><i class="fas fa-comments" style="font-size:36px;color:#E5E7EB;display:block;margin-bottom:10px;"></i>첫 피드백을 남겨보세요.<br>학생에게 큰 힘이 됩니다.</div>';
+          return;
+        }
+        body.innerHTML = list.map(f => {
+          const isMe = f.author_id === currentUser?.id;
+          const align = isMe ? 'flex-end' : 'flex-start';
+          const bg = isMe ? '#2563EB' : '#fff';
+          const color = isMe ? '#fff' : '#1F2937';
+          const border = isMe ? 'none' : '1px solid #E5E7EB';
+          return `<div style="display:flex;justify-content:${align};">
+            <div style="max-width:70%;background:${bg};color:${color};border:${border};padding:10px 14px;border-radius:12px;font-size:15px;line-height:1.6;">
+              <div style="font-size:12px;opacity:0.85;margin-bottom:4px;font-weight:600;">${escHtml(f.author_name || '')}</div>
+              ${escHtml(f.content || '')}
+              <div style="font-size:11px;opacity:0.7;margin-top:4px;">${(f.created_at||'').slice(5,16)}</div>
+            </div>
+          </div>`;
+        }).join('');
+        body.scrollTop = body.scrollHeight;
+      } catch (err) {
+        body.innerHTML = '<div style="color:#EF4444;text-align:center;padding:20px;">불러오기 실패</div>';
+      }
+    }
+    async function sendSdFbModal() {
+      const subs = window._allSubmissions || [];
+      const sub = subs[sdCurrentIndex];
+      if (!sub) return;
+      const input = document.getElementById('sdFbModalInput');
       const content = input.value.trim();
       if (!content) return;
       input.disabled = true;
@@ -962,18 +1058,71 @@
           body: JSON.stringify({ content })
         });
         const data = await res.json();
-        if (data.success) {
-          input.value = '';
-          await loadSdFeedback();
-        } else {
-          showToast(data.message || '메시지를 보내지 못했어요.', 'error');
-        }
-      } catch (err) {
-        showToast('메시지를 보내지 못했어요. 잠시 후 다시 시도해 주세요.', 'error');
-      } finally {
-        input.disabled = false; input.focus();
-      }
+        if (data.success) { input.value = ''; await loadSdFbModal(); }
+        else showToast(data.message || '메시지를 보내지 못했어요.', 'error');
+      } catch (err) { showToast('메시지를 보내지 못했어요.', 'error'); }
+      finally { input.disabled = false; input.focus(); }
     }
+
+    // ===== 첨부 미리보기 모달 =====
+    function openSdAttach(url, name) {
+      const overlay = document.getElementById('sdAttachOverlay');
+      const body = document.getElementById('sdAttachBody');
+      const title = document.getElementById('sdAttachTitle');
+      const dl = document.getElementById('sdAttachDownload');
+      const fileName = name || (url || '').split('/').pop().split('?')[0] || '첨부파일';
+      title.textContent = fileName;
+      dl.href = url;
+      dl.setAttribute('download', fileName);
+      const lower = (url || '').toLowerCase();
+      const isImage = /\.(png|jpe?g|gif|webp|bmp|svg)(\?|$)/.test(lower);
+      const isPdf = /\.pdf(\?|$)/.test(lower);
+      const isVideo = /\.(mp4|webm|ogg|mov)(\?|$)/.test(lower);
+      const isAudio = /\.(mp3|wav|ogg|m4a)(\?|$)/.test(lower);
+      const isOffice = /\.(docx?|xlsx?|pptx?|hwp|hwpx)(\?|$)/.test(lower);
+      if (isImage) {
+        body.innerHTML = `<img src="${url}" alt="${escHtml(fileName)}" style="max-width:100%;max-height:100%;object-fit:contain;background:#0F172A;">`;
+      } else if (isPdf) {
+        body.innerHTML = `<iframe src="${url}" style="width:100%;height:100%;border:0;background:#fff;"></iframe>`;
+      } else if (isVideo) {
+        body.innerHTML = `<video src="${url}" controls autoplay style="max-width:100%;max-height:100%;background:#000;"></video>`;
+      } else if (isAudio) {
+        body.innerHTML = `<div style="padding:40px;background:#fff;border-radius:12px;"><audio src="${url}" controls style="width:480px;max-width:100%;"></audio></div>`;
+      } else if (isOffice) {
+        // Office 파일은 Google Docs Viewer로 미리보기 (외부 URL이어야 동작)
+        const isExternalUrl = /^https?:\/\//.test(url);
+        if (isExternalUrl) {
+          body.innerHTML = `<iframe src="https://docs.google.com/gview?url=${encodeURIComponent(url)}&embedded=true" style="width:100%;height:100%;border:0;background:#fff;"></iframe>`;
+        } else {
+          body.innerHTML = `<div style="color:#fff;text-align:center;padding:40px;font-size:16px;">
+            <i class="fas fa-file" style="font-size:64px;opacity:0.6;display:block;margin-bottom:16px;"></i>
+            이 형식은 브라우저에서 미리보기를 지원하지 않아요.<br>
+            <span style="opacity:0.8;font-size:14px;">우상단 [다운로드]에서 파일을 받아 열어 주세요.</span>
+          </div>`;
+        }
+      } else {
+        body.innerHTML = `<div style="color:#fff;text-align:center;padding:40px;font-size:16px;">
+          <i class="fas fa-file" style="font-size:64px;opacity:0.6;display:block;margin-bottom:16px;"></i>
+          이 파일은 브라우저에서 미리보기를 지원하지 않아요.<br>
+          <span style="opacity:0.8;font-size:14px;">우상단 [다운로드]에서 받아 열어 주세요.</span>
+        </div>`;
+      }
+      overlay.style.display = 'flex';
+    }
+    function closeSdAttach() {
+      const body = document.getElementById('sdAttachBody');
+      const overlay = document.getElementById('sdAttachOverlay');
+      // 비디오·오디오 정지를 위해 본문 비우기
+      body.innerHTML = '';
+      overlay.style.display = 'none';
+    }
+    // ESC 글로벌 핸들러
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        if (document.getElementById('sdAttachOverlay')?.style.display === 'flex') return closeSdAttach();
+        if (document.getElementById('sdFeedbackOverlay')?.style.display === 'flex') return closeSdFeedback();
+      }
+    });
 
     // 키보드 단축키 (모달 활성 시)
     document.addEventListener('keydown', (e) => {
