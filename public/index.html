@@ -439,8 +439,11 @@
 
     /* ===== 컨텐츠 그리드 ===== */
     .content-grid {
-      display: grid; grid-template-columns: 2fr 1fr; gap: 24px; margin-bottom: 24px; align-items: start;
+      display: grid; grid-template-columns: 2fr 1fr; gap: 24px; margin-bottom: 24px; align-items: stretch;
     }
+    .content-grid > .card { display: flex; flex-direction: column; }
+    .content-grid > .card .content-grid-items,
+    .content-grid > .card .popular-class-list { flex: 1; }
     @media (max-width: 1024px) { .content-grid { grid-template-columns: 1fr; } }
 
     .two-column-grid {
@@ -448,8 +451,9 @@
     }
     @media (max-width: 768px) { .two-column-grid { grid-template-columns: 1fr; } }
 
-    /* 인기 클래스 */
-    .popular-class-list { display: flex; flex-direction: column; gap: 14px; }
+    /* 인기 클래스 — 카드 갯수가 적을 때도 컨테이너를 균등 분포로 채움 */
+    .popular-class-list { display: flex; flex-direction: column; gap: 14px; justify-content: space-between; }
+    .popular-class-list .class-item { flex: 1; }
     .class-item {
       display: flex; align-items: center; gap: 14px; padding: 14px;
       background: var(--gray-50); border-radius: var(--radius);
@@ -584,22 +588,25 @@
     }
     .collapse-toggle:hover { background: var(--gray-200); }
     .all-services-grid {
-      display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 14px;
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px;
     }
     .all-service-item {
-      display: flex; align-items: center; gap: 12px; padding: 16px;
+      display: flex; align-items: center; gap: 12px; padding: 14px;
       background: var(--gray-50); border-radius: 12px; cursor: pointer;
       transition: all 0.2s; border: 1px solid transparent; text-decoration: none; color: inherit;
+      min-width: 0;
     }
     .all-service-item:hover { background: white; border-color: var(--gray-300); transform: translateY(-2px); box-shadow: var(--shadow-sm); }
     .all-service-item.recommended { background: #FFFBEB; border-color: #FDE68A; }
     .all-service-icon {
-      width: 44px; height: 44px; border-radius: 12px;
+      width: 40px; height: 40px; border-radius: 12px; flex-shrink: 0;
       display: flex; align-items: center; justify-content: center; font-size: 1.2rem; color: white;
     }
-    .all-service-name { font-size: 16px; font-weight: 600; color: var(--gray-800); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
-    .all-service-rec-badge { font-size: 13px; font-weight: 700; padding: 4px 12px; background: #FDE68A; color: #B45309; border-radius: 8px; margin-left: 6px; }
-    .all-service-external { font-size: 13px; color: var(--gray-400); margin-left: 4px; }
+    /* 카드 텍스트 영역: 한 줄 유지 + 잘림 방지(자동 폭 + 배지 nowrap) */
+    .all-service-text { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; }
+    .all-service-name { font-size: 16px; font-weight: 600; color: var(--gray-800); white-space: nowrap; flex-shrink: 0; }
+    .all-service-rec-badge { font-size: 13px; font-weight: 700; padding: 3px 10px; background: #FDE68A; color: #B45309; border-radius: 8px; white-space: nowrap; flex-shrink: 0; }
+    .all-service-external { font-size: 13px; color: var(--gray-400); white-space: nowrap; flex-shrink: 0; }
 
     /* 모달 */
     .modal-overlay {
@@ -1514,8 +1521,8 @@
         const role = currentUser?.role || 'student';
         const myId = currentUser?.id;
         const url = (role === 'teacher' || role === 'staff') && myId
-          ? `/api/class/popular?excludeSelf=1&limit=5`
-          : `/api/class/popular?limit=5`;
+          ? `/api/class/popular?excludeSelf=1&limit=6`
+          : `/api/class/popular?limit=6`;
         const res = await fetch(url);
         const data = await res.json();
         if (data.success && data.classes && data.classes.length > 0) {
@@ -1523,8 +1530,8 @@
           const icons = ['📚','📐','🎮','🔤','🌿','💻'];
           const bgs = ['#4F46E5','#A855F7','#059669','#D97706','#14B8A6','#EC4899'];
           // Store for click handler
-          window._popularClasses = data.classes.slice(0, 5);
-          list.innerHTML = data.classes.slice(0, 5).map((cls, i) => `
+          window._popularClasses = data.classes.slice(0, 6);
+          list.innerHTML = data.classes.slice(0, 6).map((cls, i) => `
             <div class="class-item" onclick="openClassDetailModal(${i})" style="cursor:pointer;">
               <div class="class-rank ${rankColors[i] || ''}">${i + 1}</div>
               <div class="class-thumb" style="background:${bgs[i % bgs.length]}15">${icons[i % icons.length]}</div>
@@ -1756,8 +1763,11 @@
         const recTag = isRec ? '<span class="all-service-rec-badge">추천</span>' : '';
         return `<a href="${href}" class="all-service-item ${isRec ? 'recommended' : ''}"${onclick}>
           <div class="all-service-icon" style="background:${svc.color}">${svc.icon}</div>
-          <span class="all-service-name">${svc.name}${externalTag}</span>
-          ${recTag}
+          <span class="all-service-text">
+            <span class="all-service-name">${svc.name}</span>
+            ${externalTag}
+            ${recTag}
+          </span>
         </a>`;
       }).join('');
 
