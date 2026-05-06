@@ -2382,6 +2382,22 @@ function initSchema() {
   if (!existingClass) {
     seedDummyData(db);
   }
+
+  // 학부모-자녀 매핑 시드 (idempotent — 매번 실행되어도 안전)
+  // parent1 → student1, student2 의 학부모로 매핑하여 학부모 대시보드 데이터 노출
+  try {
+    const parent1 = db.prepare("SELECT id FROM users WHERE username='parent1'").get();
+    const student1 = db.prepare("SELECT id, parent_id FROM users WHERE username='student1'").get();
+    const student2 = db.prepare("SELECT id, parent_id FROM users WHERE username='student2'").get();
+    if (parent1 && student1 && !student1.parent_id) {
+      db.prepare("UPDATE users SET parent_id = ? WHERE id = ?").run(parent1.id, student1.id);
+      console.log('[DB] 학부모-자녀 매핑: parent1 → student1');
+    }
+    if (parent1 && student2 && !student2.parent_id) {
+      db.prepare("UPDATE users SET parent_id = ? WHERE id = ?").run(parent1.id, student2.id);
+      console.log('[DB] 학부모-자녀 매핑: parent1 → student2');
+    }
+  } catch (e) { /* 무시 */ }
 }
 
 function seedDummyData(db) {
