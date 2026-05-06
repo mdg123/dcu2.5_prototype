@@ -7,6 +7,8 @@
   <link rel="stylesheet" href="/css/common-nav.css">
   <link href="https://cdnjs.cloudflare.com/ajax/libs/pretendard/1.3.9/static/pretendard.min.css" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
   <style>
     :root {
       --primary-50: #eff6ff; --primary-100: #dbeafe; --primary-200: #bfdbfe;
@@ -314,6 +316,175 @@
       .content-wrapper { grid-template-columns: 1fr !important; }
       .list-item { break-inside: avoid; box-shadow: none; border: 1px solid var(--gray-200); }
     }
+
+    /* ===== PAGE HEADER (with PDF CTA) ===== */
+    .page-title-row { display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; flex-wrap: wrap; gap:12px; }
+    .page-title { font-size: 28px; font-weight: 800; color: var(--gray-900); display:flex; align-items:center; gap:10px; }
+    .page-title i { color: var(--primary); }
+    .pdf-cta-btn { display:inline-flex; align-items:center; gap:10px; padding: 14px 24px; background: var(--primary); color: white; border:none; border-radius: 12px; font-size: 16px; font-weight: 700; cursor:pointer; box-shadow: 0 4px 12px rgba(37,99,235,.25); transition: all 0.2s; font-family: inherit; }
+    .pdf-cta-btn:hover { background: var(--primary-600); transform: translateY(-1px); box-shadow: 0 6px 16px rgba(37,99,235,.35); }
+    .pdf-cta-btn:disabled { opacity: 0.5; cursor: not-allowed; box-shadow:none; transform:none; }
+    .pdf-cta-btn i { font-size: 20px; }
+
+    /* 학교급 토글 */
+    .level-toggle { display:flex; background: var(--gray-100); border-radius: 8px; padding: 3px; gap:0; }
+    .level-toggle button { border:none; background: transparent; padding: 6px 12px; cursor: pointer; border-radius: 6px; font-size: 13px; font-weight: 600; color: var(--gray-500); font-family: inherit; transition: all 0.15s; }
+    .level-toggle button.active { background: white; color: var(--primary); box-shadow: 0 1px 2px rgba(0,0,0,0.06); }
+
+    /* ===== PDF WIZARD MODAL (z-index 10001) ===== */
+    .pdf-wizard-overlay { position: fixed; inset: 0; background: rgba(15,23,42,0.6); display:none; align-items:center; justify-content:center; z-index: 10001; padding: 5vh 5vw; }
+    .pdf-wizard-overlay.show { display:flex; }
+    .pdf-wizard { background: white; border-radius: 16px; width: 90vw; max-width: 1200px; height: 90vh; max-height: 920px; display:flex; flex-direction:column; overflow:hidden; box-shadow: 0 24px 60px rgba(0,0,0,0.25); }
+    .pdf-wizard-header { padding: 20px 28px 16px; border-bottom: 1px solid var(--gray-200); display:flex; align-items:center; justify-content:space-between; gap:24px; }
+    .pdf-wizard-title { font-size: 20px; font-weight: 800; color: var(--gray-900); display:flex; align-items:center; gap:10px; }
+    .pdf-wizard-title i { color: var(--primary); }
+    .pdf-wizard-close { width: 36px; height: 36px; border:none; background: var(--gray-100); border-radius: 50%; cursor: pointer; font-size: 18px; color: var(--gray-600); display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+    .pdf-wizard-close:hover { background: var(--gray-200); color: var(--gray-900); }
+
+    /* Step indicator */
+    .wizard-steps { padding: 12px 28px 20px; display:flex; align-items:center; gap:12px; border-bottom: 1px solid var(--gray-100); }
+    .wizard-step { display:flex; align-items:center; gap:8px; font-size: 13px; color: var(--gray-400); font-weight: 600; }
+    .wizard-step .step-num { width: 28px; height: 28px; border-radius: 50%; background: var(--gray-200); color: white; display:flex; align-items:center; justify-content:center; font-size: 13px; font-weight: 700; transition: all 0.2s; }
+    .wizard-step.active { color: var(--gray-900); }
+    .wizard-step.active .step-num { background: var(--primary); }
+    .wizard-step.done .step-num { background: var(--success); }
+    .wizard-step.done { color: var(--success); }
+    .wizard-step-divider { flex: 1; height: 2px; background: var(--gray-200); border-radius: 1px; }
+    .wizard-step.done + .wizard-step-divider, .wizard-step.active + .wizard-step-divider { background: var(--primary-200); }
+
+    /* Body */
+    .wizard-body { flex: 1; overflow-y: auto; padding: 24px 28px; }
+    .wizard-step-pane { display:none; }
+    .wizard-step-pane.active { display:block; }
+    .wizard-pane-title { font-size: 19px; font-weight: 700; color: var(--gray-900); margin-bottom: 6px; }
+    .wizard-pane-sub { font-size: 14px; color: var(--gray-500); margin-bottom: 20px; }
+
+    .wizard-form-row { margin-bottom: 18px; }
+    .wizard-form-row > label { display:block; font-size: 14px; font-weight: 600; color: var(--gray-700); margin-bottom: 8px; }
+    .wizard-form-row .field-help { font-size: 12px; color: var(--gray-400); margin-top: 4px; }
+    .wizard-input { width: 100%; padding: 11px 14px; border: 1.5px solid var(--gray-200); border-radius: 10px; font-size: 15px; font-family: inherit; outline: none; }
+    .wizard-input:focus { border-color: var(--primary); }
+    .wizard-date-range { display:flex; gap:10px; align-items:center; }
+    .wizard-date-range .wizard-input { flex: 1; }
+    .wizard-quick-chips { display:flex; flex-wrap:wrap; gap:8px; margin-top: 8px; }
+    .wizard-chip { padding: 6px 14px; border: 1.5px solid var(--gray-200); border-radius: 999px; background: white; cursor: pointer; font-size: 13px; color: var(--gray-600); font-family: inherit; transition: all 0.15s; }
+    .wizard-chip:hover { border-color: var(--primary); color: var(--primary); }
+    .wizard-chip.active { background: var(--primary); color: white; border-color: var(--primary); }
+
+    .wizard-include-grid { display:grid; grid-template-columns: repeat(2, 1fr); gap:10px; }
+    .wizard-include-item { display:flex; align-items:center; gap:10px; padding: 10px 14px; background: var(--gray-50); border-radius: 8px; cursor: pointer; font-size: 14px; color: var(--gray-700); user-select:none; }
+    .wizard-include-item:hover { background: var(--primary-50); }
+    .wizard-include-item input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--primary); }
+
+    /* Step 2 — items list */
+    .wizard-filter-summary { background: var(--primary-50); border: 1px solid var(--primary-100); border-radius: 10px; padding: 12px 16px; font-size: 14px; color: var(--primary-700); display:flex; align-items:center; gap:10px; margin-bottom:16px; flex-wrap: wrap; }
+    .wizard-filter-summary i { color: var(--primary); }
+    .wizard-quick-select { display:flex; gap:8px; margin-bottom: 14px; flex-wrap: wrap; }
+    .wizard-items-list { display:flex; flex-direction: column; gap: 8px; max-height: 50vh; overflow-y:auto; padding: 4px; }
+    .wizard-item-row { display:flex; align-items:center; gap: 12px; padding: 12px 14px; border: 1.5px solid var(--gray-200); border-radius: 10px; cursor: pointer; transition: all 0.15s; background:white; }
+    .wizard-item-row:hover { border-color: var(--primary-200); background: var(--primary-50); }
+    .wizard-item-row.checked { border-color: var(--primary); background: var(--primary-50); }
+    .wizard-item-row input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--primary); flex-shrink:0; }
+    .wizard-item-row .wii-icon { width: 36px; height: 36px; border-radius: 8px; display:flex; align-items:center; justify-content:center; flex-shrink:0; font-size: 14px; }
+    .wizard-item-row .wii-info { flex:1; min-width:0; }
+    .wizard-item-row .wii-title { font-size: 14px; font-weight: 600; color: var(--gray-900); margin-bottom: 2px; }
+    .wizard-item-row .wii-meta { font-size: 12px; color: var(--gray-500); }
+    .wizard-item-row .wii-life { color: var(--primary); font-size: 13px; }
+
+    /* Step 3 — preview */
+    .wizard-preview-grid { display:grid; grid-template-columns: 180px 1fr; gap: 16px; height: 100%; }
+    .wizard-thumb-list { display:flex; flex-direction: column; gap: 8px; max-height: 60vh; overflow-y:auto; padding-right: 4px; }
+    .wizard-thumb { width: 160px; height: 226px; border: 2px solid var(--gray-200); border-radius: 8px; background: white; cursor: pointer; padding: 12px 10px; font-size: 9px; color: var(--gray-700); overflow:hidden; position: relative; transition: all 0.15s; }
+    .wizard-thumb:hover { border-color: var(--primary-200); }
+    .wizard-thumb.active { border-color: var(--primary); box-shadow: 0 4px 12px rgba(37,99,235,.15); }
+    .wizard-thumb .thumb-num { position: absolute; bottom: 4px; right: 6px; font-size: 9px; color: var(--gray-400); }
+    .wizard-preview-area { background: var(--gray-100); border-radius: 12px; padding: 16px; overflow:auto; display:flex; align-items:flex-start; justify-content:center; }
+    .wizard-preview-page { background: white; width: 595px; min-height: 842px; padding: 40px 50px; box-shadow: 0 4px 12px rgba(0,0,0,0.08); position: relative; font-size: 12pt; color: var(--gray-700); line-height: 1.6; }
+    .wizard-preview-info { font-size: 13px; color: var(--gray-500); margin-bottom: 12px; padding: 10px 14px; background: white; border-radius: 8px; border: 1px solid var(--gray-200); }
+
+    /* Step 4 — generation */
+    .wizard-generate-area { padding: 40px; text-align: center; }
+    .wizard-progress-bar { width: 100%; height: 12px; background: var(--gray-200); border-radius: 6px; overflow: hidden; margin: 24px 0; }
+    .wizard-progress-fill { height: 100%; background: linear-gradient(90deg, var(--primary), var(--primary-300)); border-radius: 6px; transition: width 0.3s ease; }
+    .wizard-progress-label { font-size: 14px; color: var(--gray-600); margin-top: 8px; }
+    .wizard-success-icon { width: 80px; height: 80px; background: #ecfdf5; border-radius: 50%; display:flex; align-items:center; justify-content:center; margin: 0 auto 16px; color: var(--success); font-size: 40px; }
+    .wizard-history-list { display:flex; flex-direction:column; gap:8px; margin-top:24px; max-height: 280px; overflow-y:auto; }
+    .wizard-history-item { display:flex; align-items:center; gap:12px; padding: 10px 14px; background: var(--gray-50); border-radius: 8px; }
+    .wizard-history-item .wh-info { flex:1; text-align:left; }
+    .wizard-history-item .wh-title { font-size: 14px; font-weight: 600; color: var(--gray-900); }
+    .wizard-history-item .wh-meta { font-size: 12px; color: var(--gray-500); }
+
+    /* Footer */
+    .wizard-footer { padding: 16px 28px; border-top: 1px solid var(--gray-200); display:flex; align-items:center; justify-content:space-between; gap:12px; background: var(--gray-50); }
+    .wizard-btn { display:inline-flex; align-items:center; gap:8px; padding: 12px 24px; border-radius: 10px; font-size: 16px; font-weight: 600; cursor: pointer; transition: all 0.15s; border: none; font-family: inherit; }
+    .wizard-btn-prev { background: white; border: 1.5px solid var(--gray-300); color: var(--gray-700); }
+    .wizard-btn-prev:hover { background: var(--gray-100); }
+    .wizard-btn-next { background: var(--primary); color: white; padding: 14px 32px; font-weight: 700; }
+    .wizard-btn-next:hover { background: var(--primary-600); }
+    .wizard-btn-next:disabled { opacity:0.5; cursor:not-allowed; }
+    .wizard-counter { font-size: 13px; color: var(--gray-500); }
+
+    /* Hidden PDF render container */
+    .pdf-render-container { position: fixed; left: -10000px; top: 0; width: 794px; background: white; }
+    .pdf-page { width: 794px; min-height: 1123px; padding: 60px 65px 50px; background: white; box-sizing: border-box; font-family: 'Pretendard', 'Noto Sans KR', sans-serif; color: #1a1a2e; page-break-after: always; position: relative; }
+    .pdf-page-footer { position: absolute; bottom: 30px; left: 65px; right: 65px; display:flex; justify-content:space-between; font-size: 10pt; color: #94a3b8; border-top: 1px solid #e2e8f0; padding-top: 10px; }
+    .pdf-cover { display:flex; flex-direction: column; align-items:center; justify-content:center; min-height: 1000px; }
+    .pdf-cover .cover-logo { font-size: 14pt; color: #2563eb; font-weight: 700; margin-bottom: 60px; }
+    .pdf-cover .cover-avatar { width: 200px; height: 200px; border-radius: 50%; background: linear-gradient(135deg, #2563eb, #8b5cf6); display:flex; align-items:center; justify-content:center; color: white; font-size: 64px; font-weight: 700; margin-bottom: 32px; box-shadow: 0 8px 24px rgba(37,99,235,.25); }
+    .pdf-cover .cover-title { font-size: 32pt; font-weight: 800; margin-bottom: 18px; text-align: center; color: #1a1a2e; }
+    .pdf-cover .cover-school { font-size: 18pt; font-weight: 500; color: #334155; margin-bottom: 16px; }
+    .pdf-cover .cover-period { font-size: 14pt; color: #64748b; margin-bottom: 30px; }
+    .pdf-cover .cover-meta-bar { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 10px 24px; font-size: 12pt; color: #475569; font-weight: 600; margin-bottom: 60px; }
+    .pdf-cover .cover-issue { font-size: 11pt; color: #94a3b8; margin-top: auto; }
+
+    .pdf-section-title { font-size: 22pt; font-weight: 800; color: #1a1a2e; margin-bottom: 20px; border-left: 4px solid #2563eb; padding-left: 14px; }
+    .pdf-toc-list { list-style: none; padding: 0; margin: 24px 0; }
+    .pdf-toc-list li { display:flex; justify-content:space-between; padding: 10px 0; border-bottom: 1px dashed #e2e8f0; font-size: 13pt; color: #334155; }
+    .pdf-summary-cards { display:grid; grid-template-columns: repeat(2, 1fr); gap: 16px; margin-top: 24px; }
+    .pdf-summary-card { background: #f8fafc; border-radius: 12px; padding: 18px; text-align:center; border: 1px solid #e2e8f0; }
+    .pdf-summary-card .num { font-size: 28pt; font-weight: 800; color: #2563eb; }
+    .pdf-summary-card .lbl { font-size: 11pt; color: #64748b; margin-top: 4px; }
+    .pdf-summary-quote { background: #eff6ff; border-left: 4px solid #2563eb; padding: 14px 18px; border-radius: 8px; font-size: 13pt; color: #1e40af; margin-bottom: 20px; line-height: 1.7; }
+
+    /* Radar (scaled SVG) */
+    .pdf-radar-wrap { display:flex; justify-content:center; margin: 30px 0; }
+    .pdf-bar-list { display:flex; flex-direction:column; gap: 14px; margin-top: 20px; }
+    .pdf-bar-item { display:flex; align-items:center; gap: 12px; }
+    .pdf-bar-name { width: 100px; font-size: 12pt; color: #334155; font-weight: 600; }
+    .pdf-bar-track { flex: 1; height: 18px; background: #f1f5f9; border-radius: 9px; overflow: hidden; }
+    .pdf-bar-fill { height: 100%; background: linear-gradient(90deg, #2563eb, #60a5fa); border-radius: 9px; }
+    .pdf-bar-score { width: 40px; text-align: right; font-size: 12pt; font-weight: 700; color: #2563eb; }
+
+    /* Activity page */
+    .pdf-activity-header { background: linear-gradient(90deg, #eff6ff, white); border-left: 4px solid #2563eb; padding: 12px 18px; margin-bottom: 14px; border-radius: 0 8px 8px 0; }
+    .pdf-activity-cat { font-size: 11pt; color: #2563eb; font-weight: 700; }
+    .pdf-activity-title { font-size: 20pt; font-weight: 800; color: #1a1a2e; margin: 8px 0 6px; }
+    .pdf-activity-meta { font-size: 11pt; color: #64748b; margin-bottom: 18px; }
+    .pdf-activity-content { background: #f8fafc; border-radius: 8px; padding: 16px; margin-bottom: 16px; font-size: 12pt; color: #334155; line-height: 1.7; min-height: 100px; }
+    .pdf-activity-quote { border-left: 4px solid #2563eb; padding: 12px 18px; background: #eff6ff; border-radius: 0 8px 8px 0; font-size: 12pt; color: #1e40af; margin-bottom: 16px; line-height: 1.7; }
+    .pdf-activity-reflection { background: #fef3c7; border-radius: 8px; padding: 14px 18px; font-size: 12pt; color: #78350f; margin-bottom: 14px; line-height: 1.7; }
+    .pdf-activity-tags { display:flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+    .pdf-tag { background: #eff6ff; color: #2563eb; padding: 4px 10px; border-radius: 999px; font-size: 10pt; font-weight: 600; }
+
+    /* Timeline page */
+    .pdf-timeline-list { display:flex; flex-direction:column; gap: 12px; padding: 8px; }
+    .pdf-timeline-row { display:flex; gap: 12px; align-items: center; padding: 8px 12px; background: #f8fafc; border-radius: 8px; border-left: 3px solid #2563eb; }
+    .pdf-timeline-date { font-size: 11pt; color: #64748b; width: 80px; }
+    .pdf-timeline-title { font-size: 12pt; color: #1a1a2e; font-weight: 600; flex: 1; }
+    .pdf-timeline-subj { font-size: 10pt; color: #2563eb; }
+
+    /* Final page */
+    .pdf-message-box { background: #f8fafc; border-radius: 12px; padding: 18px 22px; margin-bottom: 18px; border: 1px solid #e2e8f0; }
+    .pdf-message-label { font-size: 12pt; font-weight: 700; color: #2563eb; margin-bottom: 8px; }
+    .pdf-message-text { font-size: 12pt; color: #334155; line-height: 1.8; min-height: 60px; }
+    .pdf-signature-row { display:flex; gap: 40px; margin-top: 40px; padding-top: 24px; border-top: 1px solid #e2e8f0; font-size: 11pt; color: #64748b; }
+    .pdf-signature-row > div { flex: 1; }
+
+    @media (max-width: 1199px) {
+      .wizard-preview-grid { grid-template-columns: 1fr; }
+      .wizard-thumb-list { flex-direction: row; max-height: 80px; overflow-x: auto; }
+      .wizard-thumb { min-width: 60px; height: 84px; flex-shrink: 0; }
+    }
   </style>
 </head>
 <body>
@@ -362,6 +533,14 @@
         <div class="student-name" id="viewingStudentName"></div>
         <div class="student-label">학생 포트폴리오</div>
       </div>
+    </div>
+
+    <!-- ===== PAGE HEADER + PDF CTA ===== -->
+    <div class="page-title-row">
+      <div class="page-title"><i class="fas fa-folder-open"></i> 나의 포트폴리오</div>
+      <button class="pdf-cta-btn" id="topPdfCtaBtn" onclick="window._openPdfWizard()">
+        <i class="fas fa-file-pdf"></i> 종합 PDF 다운로드
+      </button>
     </div>
 
     <!-- ===== 5 STAT CARDS ===== -->
@@ -428,6 +607,21 @@
     <!-- ===== CONTROLS BAR ===== -->
     <div class="controls-bar">
       <div class="controls-row">
+        <div class="filter-group">
+          <span class="filter-label">기간</span>
+          <input type="date" id="dateFromFilter" class="form-input" style="padding:7px 10px;font-size:13px;width:140px;">
+          <span style="color:var(--gray-400);">~</span>
+          <input type="date" id="dateToFilter" class="form-input" style="padding:7px 10px;font-size:13px;width:140px;">
+        </div>
+        <div class="filter-group">
+          <span class="filter-label">학교급</span>
+          <div class="level-toggle" id="schoolLevelToggle">
+            <button data-level="" class="active">전체</button>
+            <button data-level="elementary">초</button>
+            <button data-level="middle">중</button>
+            <button data-level="high">고</button>
+          </div>
+        </div>
         <div class="filter-group">
           <span class="filter-label">학년</span>
           <select id="gradeFilter"><option value="all">전체</option><option value="1">1학년</option><option value="2">2학년</option><option value="3">3학년</option><option value="4">4학년</option><option value="5">5학년</option><option value="6">6학년</option></select>
@@ -537,13 +731,13 @@
         <div class="sidebar-card">
           <div class="sidebar-card-title"><i class="fas fa-bolt"></i> 빠른 실행</div>
           <div class="quick-actions">
-            <button class="quick-btn" onclick="alert('준비 중입니다.')">
+            <button class="quick-btn" id="quickPdfBtn" onclick="window._openPdfWizard()">
               <div class="qicon" style="background:#eff6ff;color:#2563eb;"><i class="fas fa-file-pdf"></i></div>
-              <div><div class="qlabel">PDF 내보내기</div><div class="qdesc">포트폴리오 PDF 다운로드</div></div>
+              <div><div class="qlabel">종합 PDF 다운로드</div><div class="qdesc">9페이지 포트폴리오 보고서</div></div>
             </button>
             <button class="quick-btn" onclick="window._openReportModal()">
               <div class="qicon" style="background:#ecfdf5;color:#10b981;"><i class="fas fa-file-alt"></i></div>
-              <div><div class="qlabel">포트폴리오 보고서 생성</div><div class="qdesc">템플릿 기반 보고서</div></div>
+              <div><div class="qlabel">간이 보고서 생성</div><div class="qdesc">선택한 활동만 빠른 정리</div></div>
             </button>
             <button class="quick-btn" onclick="window._openShareModal()">
               <div class="qicon" style="background:#f0f9ff;color:#0284c7;"><i class="fas fa-share-alt"></i></div>
@@ -709,30 +903,30 @@
     <div class="modal-body">
       <div class="form-group">
         <label class="form-label">활동 유형</label>
-        <select class="form-input" style="padding:12px 16px;">
-          <option>동아리 활동</option>
-          <option>봉사 활동</option>
-          <option>대회/공모전</option>
-          <option>자격증/인증</option>
-          <option>독서 활동</option>
-          <option>기타</option>
+        <select class="form-input" id="addActType" style="padding:12px 16px;">
+          <option value="동아리">동아리 활동</option>
+          <option value="봉사">봉사 활동</option>
+          <option value="대회">대회/공모전</option>
+          <option value="자격증">자격증/인증</option>
+          <option value="독서">독서 활동</option>
+          <option value="기타">기타</option>
         </select>
       </div>
       <div class="form-group">
-        <label class="form-label">활동명</label>
-        <input type="text" class="form-input" placeholder="예: 과학탐구 동아리, 지역사회 봉사활동 등">
+        <label class="form-label">활동명 <span style="color:var(--error);">*</span></label>
+        <input type="text" class="form-input" id="addActName" placeholder="예: 과학탐구 동아리, 지역사회 봉사활동 등">
       </div>
       <div class="form-group">
         <label class="form-label">활동 기간</label>
         <div style="display:flex;gap:12px;align-items:center;">
-          <input type="date" class="form-input">
+          <input type="date" class="form-input" id="addActStart">
           <span>~</span>
-          <input type="date" class="form-input">
+          <input type="date" class="form-input" id="addActEnd">
         </div>
       </div>
       <div class="form-group">
         <label class="form-label">활동 내용</label>
-        <textarea class="form-input" placeholder="활동 내용을 상세히 작성해주세요..."></textarea>
+        <textarea class="form-input" id="addActContent" placeholder="활동 내용을 상세히 작성해주세요..."></textarea>
       </div>
       <div class="form-group">
         <label class="form-label">증빙자료 첨부</label>
@@ -745,10 +939,150 @@
     </div>
     <div class="modal-footer">
       <button class="btn btn-outline" onclick="window._closeModal('addActivityModal')">취소</button>
-      <button class="btn btn-primary" onclick="window._closeModal('addActivityModal');window._showToast('비교과 활동이 추가되었습니다','success');"><i class="fas fa-plus"></i> 활동 추가</button>
+      <button class="btn btn-primary" id="addActivitySubmitBtn"><i class="fas fa-plus"></i> 활동 추가</button>
     </div>
   </div>
 </div>
+
+<!-- ===== PDF WIZARD MODAL ===== -->
+<div class="pdf-wizard-overlay" id="pdfWizardOverlay">
+  <div class="pdf-wizard">
+    <div class="pdf-wizard-header">
+      <div class="pdf-wizard-title"><i class="fas fa-file-pdf"></i> 종합 포트폴리오 PDF 만들기</div>
+      <button class="pdf-wizard-close" onclick="window._closePdfWizard()" aria-label="닫기">&times;</button>
+    </div>
+    <div class="wizard-steps" role="progressbar" aria-valuemin="1" aria-valuemax="4" aria-valuenow="1" id="wizardStepsBar">
+      <div class="wizard-step active" data-step="1"><span class="step-num">1</span> 옵션 설정</div>
+      <div class="wizard-step-divider"></div>
+      <div class="wizard-step" data-step="2"><span class="step-num">2</span> 과제 선택</div>
+      <div class="wizard-step-divider"></div>
+      <div class="wizard-step" data-step="3"><span class="step-num">3</span> 미리보기</div>
+      <div class="wizard-step-divider"></div>
+      <div class="wizard-step" data-step="4"><span class="step-num">4</span> 다운로드</div>
+    </div>
+    <div class="wizard-body">
+      <!-- Step 1 -->
+      <div class="wizard-step-pane active" data-step="1" id="wizPane1">
+        <div class="wizard-pane-title">기본 정보를 정해볼까요?</div>
+        <div class="wizard-pane-sub">보고서 제목, 기간, 학교급, 그리고 어떤 페이지를 담을지 골라주세요.</div>
+
+        <div class="wizard-form-row">
+          <label for="wizTitle">보고서 제목</label>
+          <input type="text" class="wizard-input" id="wizTitle" placeholder="2026학년도 1학기 포트폴리오">
+        </div>
+
+        <div class="wizard-form-row">
+          <label>기간 (필수)</label>
+          <div class="wizard-date-range">
+            <input type="date" class="wizard-input" id="wizDateFrom">
+            <span style="color:var(--gray-400);">~</span>
+            <input type="date" class="wizard-input" id="wizDateTo">
+          </div>
+          <div class="wizard-quick-chips" id="wizPeriodChips">
+            <button class="wizard-chip" data-period="semester">이번 학기</button>
+            <button class="wizard-chip" data-period="year">이번 학년</button>
+            <button class="wizard-chip" data-period="3m">최근 3개월</button>
+            <button class="wizard-chip" data-period="all">전체</button>
+          </div>
+        </div>
+
+        <div class="wizard-form-row">
+          <label>학교급 (필수)</label>
+          <div class="level-toggle" id="wizSchoolLevel" style="display:inline-flex;">
+            <button data-level="elementary" class="active">초등</button>
+            <button data-level="middle">중등</button>
+            <button data-level="high">고등</button>
+          </div>
+          <div class="field-help">현재 학년 기준 자동 선택됩니다. 다른 학교급으로 만들려면 클릭하세요.</div>
+        </div>
+
+        <div class="wizard-form-row">
+          <label>포함할 페이지</label>
+          <div class="wizard-include-grid">
+            <label class="wizard-include-item"><input type="checkbox" id="wizIncCover" checked> 표지</label>
+            <label class="wizard-include-item"><input type="checkbox" id="wizIncToc" checked> 목차</label>
+            <label class="wizard-include-item"><input type="checkbox" id="wizIncSummary" checked> 요약</label>
+            <label class="wizard-include-item"><input type="checkbox" id="wizIncCompetency" checked> 6대 핵심역량 차트</label>
+            <label class="wizard-include-item"><input type="checkbox" id="wizIncGrowth" checked> 6대 성장영역</label>
+            <label class="wizard-include-item"><input type="checkbox" id="wizIncActivities" checked> 과제별 페이지</label>
+            <label class="wizard-include-item"><input type="checkbox" id="wizIncTimeline" checked> 활동 타임라인</label>
+            <label class="wizard-include-item"><input type="checkbox" id="wizIncFinal" checked> 마무리 한 마디</label>
+          </div>
+        </div>
+
+        <div class="wizard-form-row">
+          <label for="wizStudentNote">학생 한 마디 <span style="color:var(--gray-400);font-weight:400;">(마무리 페이지에 들어갑니다, 200자 이내)</span></label>
+          <textarea class="wizard-input" id="wizStudentNote" maxlength="200" placeholder="이번 학기를 마치며 든 생각이나 다음에 도전하고 싶은 것을 적어보세요" style="min-height:90px;resize:vertical;"></textarea>
+          <div class="field-help"><span id="wizNoteCount">0</span>/200</div>
+        </div>
+      </div>
+
+      <!-- Step 2 -->
+      <div class="wizard-step-pane" data-step="2" id="wizPane2">
+        <div class="wizard-pane-title">어떤 활동을 담을까요?</div>
+        <div class="wizard-pane-sub">기간/학교급 필터로 좁힌 후보입니다. 인생 과제와 최근 활동이 기본 선택되어 있어요.</div>
+        <div class="wizard-filter-summary" id="wizFilterSummary">
+          <i class="fas fa-filter"></i> <span id="wizFilterSummaryText">필터를 적용 중…</span>
+        </div>
+        <div class="wizard-quick-select">
+          <button class="wizard-chip" data-quick="all">전체 선택</button>
+          <button class="wizard-chip" data-quick="life">인생 과제만</button>
+          <button class="wizard-chip" data-quick="recent5">최근 5건</button>
+          <button class="wizard-chip" data-quick="none">선택 해제</button>
+        </div>
+        <div class="wizard-items-list" id="wizItemsList">
+          <div class="empty-state"><i class="fas fa-spinner fa-spin"></i><p>활동 불러오는 중…</p></div>
+        </div>
+      </div>
+
+      <!-- Step 3 -->
+      <div class="wizard-step-pane" data-step="3" id="wizPane3">
+        <div class="wizard-pane-title">이렇게 만들어집니다</div>
+        <div class="wizard-pane-sub">표지부터 마무리까지 페이지를 미리 살펴보세요.</div>
+        <div class="wizard-preview-info" id="wizPreviewInfo">총 페이지: -, 예상 크기: -</div>
+        <div class="wizard-preview-grid">
+          <div class="wizard-thumb-list" id="wizThumbList"></div>
+          <div class="wizard-preview-area" id="wizPreviewArea"></div>
+        </div>
+      </div>
+
+      <!-- Step 4 -->
+      <div class="wizard-step-pane" data-step="4" id="wizPane4">
+        <div class="wizard-pane-title">PDF 만들기 & 다운로드</div>
+        <div class="wizard-pane-sub">완료되면 자동으로 다운로드됩니다.</div>
+        <div class="wizard-generate-area" id="wizGenerateArea">
+          <i class="fas fa-file-pdf" style="font-size: 60px; color: var(--primary); margin-bottom: 16px;"></i>
+          <h3 style="font-size:18px;color:var(--gray-900);margin-bottom:8px;">준비가 끝났습니다</h3>
+          <p style="font-size:14px;color:var(--gray-500);">아래 버튼을 누르면 PDF가 만들어지고 자동으로 다운로드됩니다.</p>
+          <button class="wizard-btn wizard-btn-next" id="wizGenerateBtn" style="margin-top: 24px;"><i class="fas fa-magic"></i> PDF 만들기</button>
+          <div id="wizProgressWrap" style="display:none;margin-top:24px;">
+            <div class="wizard-progress-bar"><div class="wizard-progress-fill" id="wizProgressFill" style="width:0%;"></div></div>
+            <div class="wizard-progress-label" id="wizProgressLabel">시작 중…</div>
+          </div>
+          <div id="wizDoneBox" style="display:none;margin-top:24px;">
+            <div class="wizard-success-icon"><i class="fas fa-check"></i></div>
+            <h3 style="font-size:18px;color:var(--gray-900);margin-bottom:8px;">포트폴리오 PDF가 만들어졌어요!</h3>
+            <p style="font-size:14px;color:var(--gray-500);" id="wizDoneSummary"></p>
+            <button class="wizard-btn wizard-btn-prev" onclick="window._wizRestart()" style="margin-top: 16px;"><i class="fas fa-redo"></i> 다시 만들기</button>
+            <button class="wizard-btn wizard-btn-next" id="wizReDownloadBtn" style="margin-top: 16px;"><i class="fas fa-download"></i> 다시 다운로드</button>
+          </div>
+        </div>
+        <div id="wizHistoryWrap" style="margin-top: 24px;">
+          <div style="font-size:14px;color:var(--gray-700);font-weight:600;margin-bottom:8px;">내 포트폴리오 보고서 이력</div>
+          <div class="wizard-history-list" id="wizHistoryList"><div style="font-size:13px;color:var(--gray-400);padding:8px 0;">아직 만든 보고서가 없습니다.</div></div>
+        </div>
+      </div>
+    </div>
+    <div class="wizard-footer">
+      <button class="wizard-btn wizard-btn-prev" id="wizPrevBtn" disabled><i class="fas fa-arrow-left"></i> 이전</button>
+      <div class="wizard-counter">현재 <span id="wizStepCounter">1</span>단계 / 4단계</div>
+      <button class="wizard-btn wizard-btn-next" id="wizNextBtn">다음 <i class="fas fa-arrow-right"></i></button>
+    </div>
+  </div>
+</div>
+
+<!-- Hidden PDF render container -->
+<div class="pdf-render-container" id="pdfRenderContainer" aria-hidden="true"></div>
 
 <!-- Toast -->
 <div class="toast-container">
@@ -793,10 +1127,14 @@
   let currentCategory = 'all';
   let currentSource = '';
   let currentDateFilter = '';
+  let currentSchoolLevel = ''; // BUG: '' = all, 'elementary' / 'middle' / 'high'
+  let currentDateFrom = '';
+  let currentDateTo = '';
   let hasMore = false;
   let currentItemId = null;
   let allItems = [];
   let currentView = 'list';
+  let competencyData = null; // BUG-4: 실제 데이터 캐시
 
   const CATEGORY_COLORS = {
     '과제': { bg: 'linear-gradient(135deg, #2563eb, #3b82f6)', color: '#2563eb', icon: 'fas fa-file-alt', iconBg: '#eff6ff' },
@@ -855,9 +1193,18 @@
       loadPortfolioClasses();
     } else {
       targetUserId = currentUser.id;
+      // 학생 학년 기반 학교급 자동 추정
+      try {
+        var g = parseInt(currentUser.grade || currentUser.grade_level || 0, 10);
+        if (g >= 1 && g <= 6) currentSchoolLevel = 'elementary';
+        else if (g >= 7 && g <= 9) currentSchoolLevel = 'middle';
+        else if (g >= 10 && g <= 12) currentSchoolLevel = 'high';
+      } catch (e) {}
       loadStats();
       loadGoals();
       loadItems();
+      loadCompetencyStats(); // BUG-4
+      loadReportHistory();
     }
   }
 
@@ -1007,11 +1354,21 @@
       if (currentCategory !== 'all') url += '&category=' + encodeURIComponent(currentCategory);
       if (currentSource) url += '&source=' + encodeURIComponent(currentSource);
       if (currentDateFilter) url += '&dateRange=' + encodeURIComponent(currentDateFilter);
+      // BUG-3 fix: 학년/학기/과목/유형/기간/학교급 모두 query에 반영
+      var grade = document.getElementById('gradeFilter').value;
+      if (grade !== 'all') url += '&grade=' + encodeURIComponent(grade);
+      var sem = document.getElementById('semesterFilter').value;
+      if (sem !== 'all') url += '&semester=' + encodeURIComponent(sem);
       var subj = document.getElementById('subjectFilter').value;
       if (subj !== 'all') url += '&subject=' + encodeURIComponent(subj);
       var type = document.getElementById('typeFilter').value;
       if (type === 'starred') url += '&lifeTask=1';
       else if (type === 'team') url += '&team=1';
+      // 기간 datepicker
+      if (currentDateFrom) url += '&from=' + encodeURIComponent(currentDateFrom);
+      if (currentDateTo) url += '&to=' + encodeURIComponent(currentDateTo);
+      // 학교급
+      if (currentSchoolLevel) url += '&schoolLevel=' + encodeURIComponent(currentSchoolLevel);
       var res = await fetchWithAuth(url);
       var data = await res.json();
       if (!data.success) { container.innerHTML = '<div class="empty-state"><p>데이터를 불러올 수 없습니다.</p></div>'; return; }
@@ -1044,9 +1401,10 @@
       var isLifeTask = item.isLifeTask || item.is_life_task;
       var isTeamProject = item.isTeamProject || item.is_team_project;
       var scoreBadge = getScoreBadge(item);
-      var title = escapeHtml(item.title || '');
+      // BUG-1 fix: title 폴백 강화 — activity_name / activityName / title 모두 시도
+      var title = escapeHtml(item.title || item.activity_name || item.activityName || item.name || '제목 없음');
       var subject = escapeHtml(item.subject || item.category || '');
-      var date = formatDate(item.created_at || item.createdAt);
+      var date = formatDate(item.activity_date || item.activityDate || item.created_at || item.createdAt);
       var source = escapeHtml(toKoSource(item.source) || '');
       return '<div class="list-item" data-id="' + item.id + '" data-idx="' + idx + '">' +
         '<input type="checkbox" class="item-checkbox" onclick="event.stopPropagation();window._updateSelection();">' +
@@ -1082,7 +1440,7 @@
     // Group by year-month
     var groups = {};
     items.forEach(function(item) {
-      var d = new Date(item.created_at || item.createdAt);
+      var d = new Date(item.activity_date || item.activityDate || item.created_at || item.createdAt);
       var key = isNaN(d.getTime()) ? '기타' : d.getFullYear() + '년 ' + (d.getMonth() + 1) + '월';
       if (!groups[key]) groups[key] = [];
       groups[key].push(item);
@@ -1092,7 +1450,7 @@
       html += '<div class="timeline-month"><div class="timeline-month-header"><i class="fas fa-calendar-alt"></i> ' + month + '</div><div class="timeline-items">';
       groups[month].forEach(function(item) {
         var isLifeTask = item.isLifeTask || item.is_life_task;
-        var d = new Date(item.created_at || item.createdAt);
+        var d = new Date(item.activity_date || item.activityDate || item.created_at || item.createdAt);
         var dateStr = isNaN(d.getTime()) ? '' : (d.getMonth() + 1) + '월 ' + d.getDate() + '일';
         var subject = escapeHtml(item.subject || item.category || '');
         var source = escapeHtml(toKoSource(item.source) || '');
@@ -1100,7 +1458,7 @@
           '<div class="timeline-date">' + dateStr + '</div>' +
           '<div class="timeline-title">' +
           (isLifeTask ? '<i class="fas fa-star" style="color:#2563eb;font-size:0.75rem;"></i> ' : '') +
-          escapeHtml(item.title || '') + '</div>' +
+          escapeHtml(item.title || item.activity_name || item.activityName || '제목 없음') + '</div>' +
           '<div class="timeline-subject">' + subject + (source ? ' &middot; ' + source : '') + '</div>' +
           '</div>';
       });
@@ -1176,7 +1534,8 @@
   };
 
   function renderDetail(item) {
-    document.getElementById('modalTitle').textContent = item.title || '활동 상세';
+    var displayTitle = item.title || item.activity_name || item.activityName || '활동 상세';
+    document.getElementById('modalTitle').textContent = displayTitle;
     var style = getSubjectStyle(item);
     var isLifeTask = item.isLifeTask || item.is_life_task;
 
@@ -1187,11 +1546,11 @@
 
     // Subject & title
     document.getElementById('detailSubject').textContent = (item.subject || item.category || '') + (item.source ? ' \u00B7 ' + toKoSource(item.source) : '');
-    document.getElementById('detailTitleText').textContent = item.title || '';
+    document.getElementById('detailTitleText').textContent = displayTitle;
 
     // Meta
     document.getElementById('modalMeta').innerHTML =
-      '<span><i class="fas fa-calendar"></i> ' + formatDate(item.created_at || item.createdAt) + '</span>' +
+      '<span><i class="fas fa-calendar"></i> ' + formatDate(item.activity_date || item.activityDate || item.created_at || item.createdAt) + '</span>' +
       (item.teacher ? '<span><i class="fas fa-user"></i> ' + escapeHtml(item.teacher) + '</span>' : '') +
       (isLifeTask ? '<span><i class="fas fa-star" style="color:#2563eb;"></i> 인생 과제</span>' : '') +
       (item.score != null ? '<span><i class="fas fa-award" style="color:var(--warning);"></i> ' + item.score + '점</span>' : '');
@@ -1339,7 +1698,7 @@
         if (!item) return;
         var row = document.createElement('div');
         row.className = 'selected-item-row';
-        row.innerHTML = '<i class="fas fa-check"></i><span class="item-name">' + escapeHtml(item.title) + '</span><span class="item-subject">' + escapeHtml(item.subject || item.category || '') + ' \u00B7 ' + formatDate(item.created_at || item.createdAt) + '</span>';
+        row.innerHTML = '<i class="fas fa-check"></i><span class="item-name">' + escapeHtml(item.title || item.activity_name || '제목 없음') + '</span><span class="item-subject">' + escapeHtml(item.subject || item.category || '') + ' \u00B7 ' + formatDate(item.activity_date || item.activityDate || item.created_at || item.createdAt) + '</span>';
         list.appendChild(row);
       });
     } else {

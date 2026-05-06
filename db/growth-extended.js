@@ -1,37 +1,174 @@
 // db/growth-extended.js
 const db = require('./index');
+const fs = require('fs');
+const path = require('path');
+const crypto = require('crypto');
 
 // 서비스 미제공 영역 — 실제 데이터가 없을 때만 점수 0 처리 (데이터가 있으면 정상 표시)
 const NO_SERVICE_AREAS = [];
 
+// 학교급 매핑 (학년 → 학교급)
+function gradeToSchoolLevel(grade) {
+  const g = parseInt(grade, 10);
+  if (!g || isNaN(g)) return null;
+  if (g >= 1 && g <= 6) return 'elementary';
+  if (g >= 7 && g <= 9) return 'middle';
+  if (g >= 10 && g <= 12) return 'high';
+  return null;
+}
+
+function schoolLevelToGradeRange(level) {
+  if (level === 'elementary') return [1, 6];
+  if (level === 'middle') return [7, 9];
+  if (level === 'high') return [10, 12];
+  return null;
+}
+
+function schoolLevelLabel(level) {
+  const map = { elementary: '초등', middle: '중등', high: '고등' };
+  return map[level] || '';
+}
+
 // ========== 포트폴리오 아카이브 ==========
 
-function getPortfolioItems(userId, { grade, subject, type, keyword, lifeTaskOnly, page = 1, limit = 20 } = {}) {
+function getPortfolioItems(userId, opts = {}) {
+  const {
+    grade, subject, type, keyword, lifeTaskOnly,
+    semester, from, to, schoolLevel, source, dateRange, category, team, lifeTask,
+    page = 1, limit = 20
+  } = opts;
+
   let where = 'WHERE pi.user_id = ?';
   const params = [userId];
-  if (grade) { where += ' AND pi.grade_year = ?'; params.push(grade); }
+  if (grade) { where += ' AND pi.grade_year = ?'; params.push(String(grade)); }
+  if (semester) { where += ' AND pi.semester = ?'; params.push(String(semester)); }
   if (subject) { where += ' AND pi.subject = ?'; params.push(subject); }
   if (type) { where += ' AND pi.source_type = ?'; params.push(type); }
+  if (source) { where += ' AND pi.source_type = ?'; params.push(source); }
+  if (category && category !== 'all') {
+    where += ' AND (pi.subject = ? OR pi.activity_type = ?)';
+    params.push(category, category);
+  }
   if (keyword) { where += ' AND (pi.activity_name LIKE ? OR pi.subject LIKE ?)'; params.push(`%${keyword}%`, `%${keyword}%`); }
-  if (lifeTaskOnly) { where += ' AND pi.is_life_task = 1'; }
+  const lt = lifeTaskOnly || lifeTask;
+  if (lt && lt !== '0' && lt !== 'false') { where += ' AND pi.is_life_task = 1'; }
+  if (team && team !== '0' && team !== 'false') { where += " AND (pi.activity_type = 'team' OR pi.source_type = 'team')"; }
+
+  // 기간 필터 (활동일 기준; 활동일 없으면 created_at 사용)
+  if (from) { where += ' AND COALESCE(pi.activity_date, DATE(pi.created_at)) >= ?'; params.push(from); }
+  if (to) { where += ' AND COALESCE(pi.activity_date, DATE(pi.created_at)) <= ?'; params.push(to); }
+
+  // dateRange 단순 별칭 (week/month/year)
+  if (dateRange && !from && !to) {
+    const today = new Date();
+    let start = null;
+    if (dateRange === 'week') { start = new Date(today); start.setDate(today.getDate() - 7); }
+    else if (dateRange === 'month') { start = new Date(today); start.setMonth(today.getMonth() - 1); }
+    else if (dateRange === 'year') { start = new Date(today); start.setFullYear(today.getFullYear() - 1); }
+    if (start) {
+      where += ' AND COALESCE(pi.activity_date, DATE(pi.created_at)) >= ?';
+      params.push(start.toISOString().slice(0, 10));
+    }
+  }
+
+  // 학교급 필터
+  if (schoolLevel) {
+    const range = schoolLevelToGradeRange(schoolLevel);
+    if (range) {
+      // school_level 직접 매칭 또는 grade_year(예: '5') 가 학년 범위 안에 들어가는 경우
+      where += ` AND (pi.school_level = ? OR (pi.grade_year IS NOT NULL AND CAST(pi.grade_year AS INTEGER) BETWEEN ? AND ?))`;
+      params.push(schoolLevel, range[0], range[1]);
+    }
+  }
 
   const total = db.prepare(`SELECT COUNT(*) as cnt FROM portfolio_items pi ${where}`).get(...params).cnt;
+  const offset = (page - 1) * limit;
   const items = db.prepare(`
     SELECT pi.* FROM portfolio_items pi ${where}
-    ORDER BY pi.activity_date DESC, pi.created_at DESC LIMIT ? OFFSET ?
-  `).all(...params, limit, (page - 1) * limit);
+    ORDER BY COALESCE(pi.activity_date, DATE(pi.created_at)) DESC, pi.created_at DESC LIMIT ? OFFSET ?
+  `).all(...params, limit, offset);
 
   items.forEach(item => {
     if (item.competency_tags) { try { item.competency_tags = JSON.parse(item.competency_tags); } catch { item.competency_tags = []; } }
+    // BUG-1 fix: title alias 추가 (프론트가 item.title 을 참조)
+    item.title = item.activity_name || item.title || '';
+    item.isLifeTask = !!item.is_life_task;
+    item.isPublic = !!item.is_public;
   });
 
-  return { items, total, totalPages: Math.ceil(total / limit) || 1 };
+  const hasMore = offset + items.length < total;
+  return { items, total, totalPages: Math.ceil(total / limit) || 1, page, hasMore };
+}
+
+// 직접 활동 추가 (BUG-2 fix) — camelCase, snake_case 모두 허용
+function createPortfolioItem(userId, data) {
+  const d = data || {};
+  // camelCase / snake_case 양쪽에서 끌어온다
+  const title = d.title;
+  const activityName = d.activityName || d.activity_name;
+  const subject = d.subject;
+  const category = d.category;
+  const activityType = d.activityType || d.activity_type;
+  const source = d.source || d.source_type;
+  const activityDate = d.activityDate || d.activity_date;
+  const dateStart = d.dateStart || d.date_start || d.period_start;
+  const content = d.content || d.evidence_url || null;
+  const description = d.description;
+  const reflection = d.reflection;
+  const classId = d.classId || d.class_id;
+  const gradeYear = d.gradeYear || d.grade_year || d.grade;
+  const semester = d.semester;
+  const schoolLevel = d.schoolLevel || d.school_level;
+  const score = d.score;
+  const isLifeTask = d.isLifeTask !== undefined ? d.isLifeTask : d.is_life_task;
+  const isPublic = d.isPublic !== undefined ? d.isPublic : d.is_public;
+  const competencyTags = d.competencyTags || d.competency_tags;
+  const teacherComment = d.teacherComment || d.teacher_comment;
+  const contentImageUrl = d.contentImageUrl || d.content_image_url || d.evidence_url;
+
+  const name = (activityName || title || '').trim();
+  if (!name) throw new Error('활동명을 입력하세요.');
+
+  const u = db.prepare('SELECT grade FROM users WHERE id = ?').get(userId);
+  const inferredLevel = schoolLevel || (u ? gradeToSchoolLevel(u.grade) : null);
+
+  const info = db.prepare(`
+    INSERT INTO portfolio_items
+      (user_id, source_type, source_id, class_id,
+       activity_name, subject, activity_date, score, result_type, activity_type,
+       is_life_task, is_public, competency_tags, reflection,
+       grade_year, semester, school_level, teacher_comment, content_image_url, created_at)
+    VALUES (?, ?, NULL, ?, ?, ?, ?, ?, 'completed', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+  `).run(
+    userId,
+    source || 'custom',
+    classId || null,
+    name,
+    subject || category || null,
+    activityDate || dateStart || new Date().toISOString().slice(0, 10),
+    score != null ? String(score) : null,
+    activityType || category || 'custom',
+    isLifeTask ? 1 : 0,
+    isPublic === false ? 0 : 1,
+    competencyTags ? (typeof competencyTags === 'string' ? competencyTags : JSON.stringify(competencyTags)) : null,
+    reflection || description || content || null,
+    gradeYear ? String(gradeYear) : (u && u.grade ? String(u.grade) : null),
+    semester ? String(semester) : null,
+    inferredLevel,
+    teacherComment || null,
+    contentImageUrl || null
+  );
+  return { id: info.lastInsertRowid, activityName: name };
 }
 
 function getPortfolioItemDetail(id) {
   const item = db.prepare('SELECT * FROM portfolio_items WHERE id = ?').get(id);
   if (!item) return null;
   if (item.competency_tags) { try { item.competency_tags = JSON.parse(item.competency_tags); } catch { item.competency_tags = []; } }
+  // BUG-1 fix: title alias 추가
+  item.title = item.activity_name || '';
+  item.isLifeTask = !!item.is_life_task;
+  item.isPublic = !!item.is_public;
   const attachments = db.prepare('SELECT * FROM portfolio_attachments WHERE portfolio_item_id = ?').all(id);
   return { item, attachments };
 }
@@ -60,7 +197,302 @@ function getPortfolioStats(userId) {
   const goalCount = db.prepare('SELECT COUNT(*) as cnt FROM growth_goals WHERE user_id = ?').get(userId).cnt;
   const bySubject = db.prepare('SELECT subject, COUNT(*) as cnt FROM portfolio_items WHERE user_id = ? AND subject IS NOT NULL GROUP BY subject').all(userId);
   const byType = db.prepare('SELECT source_type, COUNT(*) as cnt FROM portfolio_items WHERE user_id = ? GROUP BY source_type').all(userId);
-  return { total, lifeTaskCount, reflectionCount, goalCount, bySubject, byType };
+  return { total, totalItems: total, lifeTaskCount, reflectionCount, goalCount, bySubject, byType };
+}
+
+// ========== 6대 핵심역량 통계 (BUG-4) ==========
+// portfolio_items.competency_tags 누적 + 활동량/회고/인생과제 가산점으로 100점 만점 환산
+function getCompetencyStats(userId, { startDate, endDate, gradeLevel } = {}) {
+  let where = 'WHERE user_id = ?';
+  const params = [userId];
+  if (startDate) { where += ' AND activity_date >= ?'; params.push(startDate); }
+  if (endDate) { where += ' AND activity_date <= ?'; params.push(endDate); }
+  const items = db.prepare(`SELECT competency_tags, reflection, is_life_task, score FROM portfolio_items ${where}`).all(...params);
+
+  const KEYS = [
+    { key: 'self',          label: '자기관리',     keywords: ['자기관리', '자기 관리', '자기주도'] },
+    { key: 'knowledge',     label: '지식정보처리', keywords: ['지식정보처리', '지식 정보 처리', '정보처리'] },
+    { key: 'creative',      label: '창의적 사고',  keywords: ['창의적사고', '창의적 사고', '창의'] },
+    { key: 'aesthetic',     label: '심미적 감성',  keywords: ['심미적감성', '심미적 감성', '심미'] },
+    { key: 'communication', label: '협력적 소통',  keywords: ['협력적소통', '협력적 소통', '소통', '협력'] },
+    { key: 'community',     label: '공동체',       keywords: ['공동체'] }
+  ];
+
+  const tagCount = Object.fromEntries(KEYS.map(k => [k.key, 0]));
+  let totalTags = 0;
+  let reflectionCount = 0;
+  let lifeTaskCount = 0;
+
+  items.forEach(it => {
+    let tags = [];
+    if (it.competency_tags) {
+      try { tags = typeof it.competency_tags === 'string' ? JSON.parse(it.competency_tags) : it.competency_tags; } catch { tags = []; }
+    }
+    if (Array.isArray(tags)) {
+      tags.forEach(t => {
+        const tagStr = String(t || '').trim();
+        if (!tagStr) return;
+        KEYS.forEach(k => {
+          if (k.keywords.some(kw => tagStr.includes(kw))) { tagCount[k.key]++; totalTags++; }
+        });
+      });
+    }
+    if (it.reflection && it.reflection.trim()) reflectionCount++;
+    if (it.is_life_task) lifeTaskCount++;
+  });
+
+  // 활동량 기반 베이스 점수 (활동이 5건 이상이면 베이스 70점)
+  const activityCount = items.length;
+  const baseScore = Math.min(70, 40 + activityCount * 4);
+  const reflectionBonus = Math.min(15, reflectionCount * 2);
+  const lifeTaskBonus = Math.min(10, lifeTaskCount * 3);
+
+  return KEYS.map(k => {
+    // 태그 비중 (0~15점) — 같은 역량 태그가 자주 나오면 더 높게
+    const tagBonus = totalTags > 0 ? Math.min(15, Math.round((tagCount[k.key] / Math.max(1, totalTags)) * 60)) : Math.floor(Math.random() * 6);
+    const score = Math.max(0, Math.min(100, baseScore + reflectionBonus + lifeTaskBonus + tagBonus));
+    return { key: k.key, label: k.label, score, tagCount: tagCount[k.key] };
+  });
+}
+
+// ========== PDF 보고서 메타데이터 + 파일 저장 ==========
+// 신규 ID 생성: rpt_YYYYMMDD_xxxxxx
+function generateReportId() {
+  const ts = new Date();
+  const ymd = ts.getFullYear() +
+    String(ts.getMonth() + 1).padStart(2, '0') +
+    String(ts.getDate()).padStart(2, '0');
+  const rand = crypto.randomBytes(4).toString('hex');
+  return `rpt_${ymd}_${rand}`;
+}
+
+function reportsDirFor(userId) {
+  // 미션 명세: uploads/portfolio-reports/<studentId>-<timestamp>.pdf
+  const baseDir = path.join(process.cwd(), 'uploads', 'portfolio-reports');
+  if (!fs.existsSync(baseDir)) fs.mkdirSync(baseDir, { recursive: true });
+  return baseDir;
+}
+
+// 메타데이터만 저장 (파일은 추후 PUT 또는 saveGeneratedReport 로 채움)
+function createPortfolioReport(userId, body) {
+  const id = generateReportId();
+  const title = body.title || '포트폴리오 보고서';
+  const opts = body.options || {};
+  const itemIds = Array.isArray(body.itemIds) ? body.itemIds : [];
+  const periodFrom = body.periodFrom || (body.period && body.period.from) || opts.periodStart || opts.from || null;
+  const periodTo = body.periodTo || (body.period && body.period.to) || opts.periodEnd || opts.to || null;
+  const schoolLevel = body.schoolLevel || opts.schoolLevel || null;
+  const status = body.status || 'pending';
+  const expires = body.expiresAt || null;
+  const coverNote = body.coverNote || opts.coverNote || opts.studentNote || null;
+
+  db.prepare(`
+    INSERT INTO portfolio_reports
+      (id, user_id, title, period_from, period_to, school_level,
+       options_json, item_ids_json, file_path, file_size_kb, page_count,
+       item_count, cover_note,
+       status, share_token, created_at, expires_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'), ?)
+  `).run(
+    id, userId, title, periodFrom, periodTo, schoolLevel,
+    JSON.stringify(opts), JSON.stringify(itemIds),
+    null, body.fileSizeKb || null, body.pageCount || null,
+    itemIds.length || null, coverNote,
+    status, body.shareToken || null, expires
+  );
+  return getPortfolioReportById(id);
+}
+
+// 서버 사이드 PDF 파일을 직접 저장 (filePath 명시 가능)
+function saveGeneratedReport(userId, reportId, { buffer, pageCount, filePath, itemCount, coverNote }) {
+  const row = db.prepare('SELECT * FROM portfolio_reports WHERE id = ? AND user_id = ?').get(reportId, userId);
+  if (!row) {
+    const e = new Error('보고서를 찾을 수 없습니다.'); e.status = 404; throw e;
+  }
+  let outPath = filePath;
+  if (!outPath) {
+    const baseDir = reportsDirFor(userId);
+    outPath = path.join(baseDir, `${reportId}.pdf`);
+  }
+  fs.writeFileSync(outPath, buffer);
+  const sizeKb = Math.max(1, Math.round(buffer.length / 1024));
+  db.prepare(`
+    UPDATE portfolio_reports SET
+      file_path = ?, file_size_kb = ?,
+      page_count = COALESCE(?, page_count),
+      item_count = COALESCE(?, item_count),
+      cover_note = COALESCE(?, cover_note),
+      status = 'ready'
+    WHERE id = ? AND user_id = ?
+  `).run(outPath, sizeKb, pageCount || null, itemCount || null, coverNote || null, reportId, userId);
+  return getPortfolioReportById(reportId);
+}
+
+// PDF 파일 attach + 메타 갱신 (page_count/fileSize)
+function attachPortfolioReportFile(userId, reportId, { buffer, pageCount, options, itemIds, title, periodFrom, periodTo, schoolLevel }) {
+  const row = db.prepare('SELECT * FROM portfolio_reports WHERE id = ? AND user_id = ?').get(reportId, userId);
+  if (!row) {
+    const e = new Error('보고서를 찾을 수 없습니다.'); e.status = 404; throw e;
+  }
+  const baseDir = reportsDirFor(userId);
+  const filePath = path.join(baseDir, `${reportId}.pdf`);
+  fs.writeFileSync(filePath, buffer);
+  const sizeKb = Math.max(1, Math.round(buffer.length / 1024));
+  db.prepare(`
+    UPDATE portfolio_reports SET
+      file_path = ?, file_size_kb = ?, page_count = COALESCE(?, page_count),
+      title = COALESCE(?, title),
+      period_from = COALESCE(?, period_from),
+      period_to = COALESCE(?, period_to),
+      school_level = COALESCE(?, school_level),
+      options_json = COALESCE(?, options_json),
+      item_ids_json = COALESCE(?, item_ids_json),
+      status = 'ready'
+    WHERE id = ? AND user_id = ?
+  `).run(
+    filePath, sizeKb, pageCount || null,
+    title || null, periodFrom || null, periodTo || null, schoolLevel || null,
+    options ? JSON.stringify(options) : null,
+    itemIds ? JSON.stringify(itemIds) : null,
+    reportId, userId
+  );
+  return getPortfolioReportById(reportId);
+}
+
+function getPortfolioReportById(reportId) {
+  const row = db.prepare('SELECT * FROM portfolio_reports WHERE id = ?').get(reportId);
+  if (!row) return null;
+  try { row.options = row.options_json ? JSON.parse(row.options_json) : null; } catch { row.options = null; }
+  try { row.itemIds = row.item_ids_json ? JSON.parse(row.item_ids_json) : []; } catch { row.itemIds = []; }
+  return row;
+}
+
+function getPortfolioReports(userId) {
+  return db.prepare(`
+    SELECT id, user_id, title, period_from, period_to, school_level,
+           file_size_kb, page_count, status, created_at, expires_at
+    FROM portfolio_reports
+    WHERE user_id = ?
+    ORDER BY created_at DESC
+    LIMIT 100
+  `).all(userId);
+}
+
+function deletePortfolioReport(userId, reportId) {
+  const row = db.prepare('SELECT file_path FROM portfolio_reports WHERE id = ? AND user_id = ?').get(reportId, userId);
+  if (!row) return null;
+  if (row.file_path && fs.existsSync(row.file_path)) {
+    try { fs.unlinkSync(row.file_path); } catch (_) {}
+  }
+  db.prepare('DELETE FROM portfolio_reports WHERE id = ? AND user_id = ?').run(reportId, userId);
+  return { deleted: true };
+}
+
+// ========== 보고서 데이터 조립 (기획서 §7-1) ==========
+function getPortfolioReportData(studentId, { from, to, schoolLevel, itemIds } = {}) {
+  // 1) 학생 정보
+  const student = db.prepare(`
+    SELECT id, username, display_name, grade, class_number, school_name, profile_image_url
+    FROM users WHERE id = ?
+  `).get(studentId);
+  if (!student) return null;
+
+  // 학생의 학교급 (DB grade 기반)
+  const studentLevel = gradeToSchoolLevel(student.grade);
+  const effectiveLevel = schoolLevel || studentLevel || null;
+
+  // 2) 통계 / 활동
+  const itemsRes = getPortfolioItems(studentId, {
+    from: from || null,
+    to: to || null,
+    schoolLevel: schoolLevel || null,
+    page: 1,
+    limit: 500
+  });
+  let items = itemsRes.items || [];
+  if (Array.isArray(itemIds) && itemIds.length > 0) {
+    const idSet = new Set(itemIds.map(x => parseInt(x, 10)));
+    items = items.filter(it => idSet.has(it.id));
+  }
+
+  // 3) 통계 카드
+  const totalActivities = items.length;
+  const lifeTaskCount = items.filter(i => i.is_life_task).length;
+  const reflectionCount = items.filter(i => i.reflection && String(i.reflection).trim()).length;
+  const dateSet = new Set();
+  items.forEach(i => { const d = i.activity_date || (i.created_at ? String(i.created_at).slice(0, 10) : null); if (d) dateSet.add(d); });
+  const activeDays = dateSet.size;
+
+  // 4) 6대 핵심역량 (실데이터 집계)
+  const competencies = getCompetencyStats(studentId, { startDate: from, endDate: to });
+
+  // 5) 6대 성장영역 (기존 student-report 활용)
+  const reportObj = getStudentReport(studentId, { startDate: from, endDate: to });
+  const growthAreas = ['정서발달', '기초학력', '학습역량', '오늘의학습', '독서활동', '진로탐색'].map(name => ({
+    name,
+    score: reportObj.areas?.[name]?.score ?? 0,
+    hasData: !!reportObj.areas?.[name]?.hasData
+  }));
+
+  // 6) 타임라인 (월별 점)
+  const timeline = items.map(i => ({
+    id: i.id,
+    date: i.activity_date || (i.created_at ? String(i.created_at).slice(0, 10) : null),
+    subject: i.subject || '',
+    title: i.activity_name || '',
+    isLifeTask: !!i.is_life_task
+  })).filter(t => t.date).sort((a, b) => a.date.localeCompare(b.date));
+
+  // 7) 메시지 (마무리 페이지)
+  const observations = db.prepare('SELECT observation_text FROM teacher_observations WHERE student_id = ? ORDER BY observation_date DESC LIMIT 1').get(studentId);
+  const teacherNote = observations ? observations.observation_text : null;
+
+  // 8) competencyTop3 라벨
+  const sortedComps = [...competencies].sort((a, b) => b.score - a.score);
+  const competencyTop3 = sortedComps.slice(0, 3).map(c => c.label);
+
+  // 기간 라벨
+  const periodLabel = (from && to)
+    ? `${from} ~ ${to}`
+    : (from ? `${from} ~ ` : (to ? ` ~ ${to}` : '전체 기간'));
+
+  return {
+    success: true,
+    student: {
+      id: student.id,
+      username: student.username,
+      displayName: student.display_name,
+      school: student.school_name || '',
+      grade: student.grade || null,
+      classroom: student.class_number ? `${student.class_number}반` : '',
+      avatarUrl: student.profile_image_url || null,
+      avatarInitial: (student.display_name || '학').slice(0, 1),
+      schoolLevel: studentLevel
+    },
+    period: {
+      label: periodLabel,
+      from: from || null,
+      to: to || null,
+      schoolLevel: effectiveLevel,
+      schoolLevelLabel: schoolLevelLabel(effectiveLevel)
+    },
+    summary: {
+      totalActivities,
+      lifeTaskCount,
+      reflectionCount,
+      activeDays,
+      competencyTop3
+    },
+    competencies,
+    growthAreas,
+    items,
+    timeline,
+    messages: {
+      studentNote: null,
+      teacherNote,
+      parentNote: null
+    }
+  };
 }
 
 function getGrowthGoals(userId) {
@@ -1048,6 +1480,13 @@ module.exports = {
   autoAddPortfolioItem,
   getPortfolioItems, getPortfolioItemDetail, toggleLifeTask, saveReflection, updatePrivacy,
   getPortfolioStats, getGrowthGoals, createGrowthGoal, updateGrowthGoalProgress,
+  createPortfolioItem, getCompetencyStats,
+  // PDF 보고서
+  createPortfolioReport, attachPortfolioReportFile, saveGeneratedReport,
+  getPortfolioReportById, getPortfolioReports, deletePortfolioReport,
+  getPortfolioReportData,
+  // 학교급 helper
+  gradeToSchoolLevel, schoolLevelLabel, schoolLevelToGradeRange,
   getClassDashboard, getStudentReport, getStudentReportArea, getClassDailyLearning,
   createObservation, getObservations,
   getReadingLogs, addReadingLog, updateReadingLog, deleteReadingLog,

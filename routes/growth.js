@@ -1,11 +1,37 @@
 const express = require('express');
 const router = express.Router();
+const fs = require('fs');
+const path = require('path');
+const multer = require('multer');
 const { requireAuth } = require('../middleware/auth');
 const growthDb = require('../db/growth');
 const classDb = require('../db/class');
 const growthExtDb = require('../db/growth-extended');
 const buildSurvey = require('../lib/xapi/builders/survey');
 const xapiSpool = require('../lib/xapi/spool');
+const { generatePortfolioReport } = require('../lib/portfolio-pdf');
+
+// PDF 업로드용 multer (메모리 저장 — DB는 file_path 만 보유)
+const pdfUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 30 * 1024 * 1024 }, // 30MB
+  fileFilter: (_req, file, cb) => {
+    if (file.mimetype === 'application/pdf' || /\.pdf$/i.test(file.originalname)) cb(null, true);
+    else cb(new Error('PDF 파일만 업로드할 수 있습니다.'), false);
+  }
+});
+
+// 학생-교사 동일 클래스 검사 (보고서 권한)
+function teacherSharesClassWithStudent(teacherId, studentId) {
+  const db = require('../db/index');
+  const row = db.prepare(`
+    SELECT 1 FROM class_members tm
+    JOIN class_members sm ON sm.class_id = tm.class_id
+    WHERE tm.user_id = ? AND tm.role = 'owner' AND sm.user_id = ? AND sm.status = 'active'
+    LIMIT 1
+  `).get(teacherId, studentId);
+  return !!row;
+}
 
 // ===== 포트폴리오 =====
 
@@ -36,7 +62,10 @@ router.post('/portfolios', requireAuth, (req, res) => {
 });
 
 // GET /api/growth/portfolios/:id
-router.get('/portfolios/:id', requireAuth, (req, res) => {
+// 'reports', 'report'는 별도 라우트(아래)에서 매칭. 여기서 들어오면 숫자 id가 아닐 시 404.
+router.get('/portfolios/:id', requireAuth, (req, res, next) => {
+  // 문자열 라우트(예약어)는 다음 라우터에 위임
+  if (['reports', 'report'].includes(req.params.id)) return next('route');
   try {
     const portfolio = growthDb.getPortfolioById(parseInt(req.params.id));
     if (!portfolio) return res.status(404).json({ success: false, message: '포트폴리오를 찾을 수 없습니다.' });
@@ -47,7 +76,8 @@ router.get('/portfolios/:id', requireAuth, (req, res) => {
 });
 
 // PUT /api/growth/portfolios/:id
-router.put('/portfolios/:id', requireAuth, (req, res) => {
+router.put('/portfolios/:id', requireAuth, (req, res, next) => {
+  if (['reports', 'report'].includes(req.params.id)) return next('route');
   try {
     const portfolio = growthDb.getPortfolioById(parseInt(req.params.id));
     if (!portfolio) return res.status(404).json({ success: false, message: '포트폴리오를 찾을 수 없습니다.' });
@@ -62,7 +92,8 @@ router.put('/portfolios/:id', requireAuth, (req, res) => {
 });
 
 // DELETE /api/growth/portfolios/:id
-router.delete('/portfolios/:id', requireAuth, (req, res) => {
+router.delete('/portfolios/:id', requireAuth, (req, res, next) => {
+  if (['reports', 'report'].includes(req.params.id)) return next('route');
   try {
     const portfolio = growthDb.getPortfolioById(parseInt(req.params.id));
     if (!portfolio) return res.status(404).json({ success: false, message: '포트폴리오를 찾을 수 없습니다.' });
@@ -170,14 +201,308 @@ router.post('/gallery/:id/reject', requireAuth, (req, res) => {
 
 // ===== 포트폴리오 아카이브 (확장) =====
 
+// GET /api/growth/portfolio/items
+// 쿼리: page, limit, grade, semester, subject, type, source, category,
+//       keyword, lifeTask, team, dateRange, from, to, schoolLevel, userId(교사/관리자만)
+// BUG-1: 응답 items 에 title alias 포함 (db 함수에서 매핑)
+// BUG-3: 학년/학기/과목/유형/기간/학교급 필터 동작
 router.get('/portfolio/items', requireAuth, (req, res) => {
   try {
     const userId = (req.user.role === 'teacher' || req.user.role === 'admin') && req.query.userId
       ? parseInt(req.query.userId)
       : req.user.id;
-    const result = growthExtDb.getPortfolioItems(userId, req.query);
+    const opts = {
+      page: parseInt(req.query.page) || 1,
+      limit: parseInt(req.query.limit) || 20,
+      grade: req.query.grade || null,
+      semester: req.query.semester || null,
+      subject: req.query.subject && req.query.subject !== 'all' ? req.query.subject : null,
+      type: req.query.type && req.query.type !== 'all' ? req.query.type : null,
+      source: req.query.source || null,
+      category: req.query.category && req.query.category !== 'all' ? req.query.category : null,
+      keyword: req.query.keyword || req.query.q || null,
+      lifeTask: req.query.lifeTask || null,
+      team: req.query.team || null,
+      dateRange: req.query.dateRange || null,
+      from: req.query.from || null,
+      to: req.query.to || null,
+      schoolLevel: req.query.schoolLevel || null
+    };
+    const result = growthExtDb.getPortfolioItems(userId, opts);
     res.json({ success: true, ...result });
-  } catch (err) { res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' }); }
+  } catch (err) {
+    console.error('[GROWTH] portfolio items error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// POST /api/growth/portfolio/items — 비교과 활동 직접 등록 (BUG-2)
+router.post('/portfolio/items', requireAuth, (req, res) => {
+  try {
+    const result = growthExtDb.createPortfolioItem(req.user.id, req.body || {});
+    res.status(201).json({ success: true, ...result });
+  } catch (err) {
+    const status = err.status || 500;
+    console.error('[GROWTH] portfolio create error:', err.message);
+    res.status(status).json({ success: false, message: err.message || '서버 오류가 발생했습니다.' });
+  }
+});
+
+// GET /api/growth/portfolio/competency-stats — 6대 핵심역량 (BUG-4)
+router.get('/portfolio/competency-stats', requireAuth, (req, res) => {
+  try {
+    const userId = (req.user.role === 'teacher' || req.user.role === 'admin') && req.query.userId
+      ? parseInt(req.query.userId)
+      : req.user.id;
+    const competencies = growthExtDb.getCompetencyStats(userId, {
+      startDate: req.query.from || req.query.startDate || null,
+      endDate: req.query.to || req.query.endDate || null
+    });
+    res.json({ success: true, competencies });
+  } catch (err) {
+    console.error('[GROWTH] competency-stats error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// ===== PDF 보고서 (포트폴리오) =====
+
+// 권한 helper: 본인 / 같은 클래스 교사 / admin
+function canAccessStudentReport(req, studentId) {
+  if (req.user.role === 'admin') return true;
+  if (req.user.id === studentId) return true;
+  if (req.user.role === 'teacher' && teacherSharesClassWithStudent(req.user.id, studentId)) return true;
+  return false;
+}
+
+// GET /api/growth/portfolios/:studentId/report-data
+// 보고서 1회 조립용 종합 페이로드 (기획서 §7-1)
+router.get('/portfolios/:studentId/report-data', requireAuth, (req, res) => {
+  try {
+    const studentId = parseInt(req.params.studentId);
+    if (!canAccessStudentReport(req, studentId)) {
+      return res.status(403).json({ success: false, message: '접근 권한이 없습니다.' });
+    }
+    const itemIds = req.query.itemIds
+      ? String(req.query.itemIds).split(',').map(s => parseInt(s.trim(), 10)).filter(Boolean)
+      : null;
+    const data = growthExtDb.getPortfolioReportData(studentId, {
+      from: req.query.from || null,
+      to: req.query.to || null,
+      schoolLevel: req.query.schoolLevel || null,
+      itemIds
+    });
+    if (!data) return res.status(404).json({ success: false, message: '학생을 찾을 수 없습니다.' });
+    res.json(data);
+  } catch (err) {
+    console.error('[GROWTH] report-data error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// POST /api/growth/portfolios/report
+// 서버 사이드에서 PDF 직접 생성 후 uploads/portfolio-reports 에 저장.
+// body: { studentId, period: {from, to}, schoolLevel, itemIds, coverNote?, includeReflection?, title? }
+// 응답: { success, reportId, downloadUrl, fileName, sizeBytes, generatedAt }
+router.post('/portfolios/report', requireAuth, async (req, res) => {
+  try {
+    const studentId = parseInt(req.body.studentId) || req.user.id;
+    // 본인 또는 admin
+    if (req.user.id !== studentId && req.user.role !== 'admin') {
+      return res.status(403).json({ success: false, message: '본인 보고서만 생성할 수 있습니다.' });
+    }
+
+    const opts = req.body.options || {};
+    const periodFrom = (req.body.period && req.body.period.from) || opts.periodStart || opts.from || req.body.from || null;
+    const periodTo = (req.body.period && req.body.period.to) || opts.periodEnd || opts.to || req.body.to || null;
+    const schoolLevel = req.body.schoolLevel || opts.schoolLevel || null;
+    const itemIds = Array.isArray(req.body.itemIds) ? req.body.itemIds.map(x => parseInt(x, 10)).filter(Boolean) : [];
+    const coverNote = req.body.coverNote || opts.coverNote || opts.studentNote || null;
+    const includeReflection = req.body.includeReflection !== false;
+    const title = req.body.title || opts.title || '포트폴리오 보고서';
+
+    // 필수 필터 검증 (코드 1006)
+    if (!periodFrom || !periodTo || !schoolLevel) {
+      return res.status(400).json({
+        success: false,
+        code: 1006,
+        message: '기간(from/to)과 학교급(schoolLevel)은 필수입니다.'
+      });
+    }
+
+    // 데이터 조립 (이때 schoolLevel/from/to 1차 필터)
+    const data = growthExtDb.getPortfolioReportData(studentId, {
+      from: periodFrom, to: periodTo, schoolLevel, itemIds: itemIds.length ? itemIds : null
+    });
+    if (!data) return res.status(404).json({ success: false, message: '학생을 찾을 수 없습니다.' });
+
+    // 서버 측 itemIds 재검증: data.items 안에 있는 ID 만 통과 (위변조 차단)
+    const validIds = new Set(data.items.map(it => it.id));
+    const verifiedIds = itemIds.filter(id => validIds.has(id));
+    if (itemIds.length > 0 && verifiedIds.length === 0) {
+      return res.status(400).json({
+        success: false, code: 1007,
+        message: '선택한 활동이 기간/학교급 조합에 없습니다.'
+      });
+    }
+    // verifiedIds 로 다시 좁히기 (선택한 게 있으면)
+    if (verifiedIds.length > 0) {
+      const verifiedSet = new Set(verifiedIds);
+      data.items = data.items.filter(it => verifiedSet.has(it.id));
+    }
+
+    // 메타 INSERT (status: pending)
+    const report = growthExtDb.createPortfolioReport(studentId, {
+      title, periodFrom, periodTo, schoolLevel,
+      options: opts, itemIds: verifiedIds.length ? verifiedIds : itemIds,
+      coverNote,
+      status: 'pending'
+    });
+
+    // PDF 생성
+    const buffer = await generatePortfolioReport(data, { coverNote, includeReflection, title });
+
+    // 미션 명세 파일명: <studentId>-<timestamp>.pdf
+    const ts = Date.now();
+    const baseDir = path.join(process.cwd(), 'uploads', 'portfolio-reports');
+    if (!fs.existsSync(baseDir)) fs.mkdirSync(baseDir, { recursive: true });
+    const fileName = `${studentId}-${ts}.pdf`;
+    const filePath = path.join(baseDir, fileName);
+
+    const updated = growthExtDb.saveGeneratedReport(studentId, report.id, {
+      buffer,
+      filePath,
+      pageCount: null,  // pdfkit에서 정확한 페이지수는 stream 기반 — 별도 산출 시 보강
+      itemCount: data.items.length,
+      coverNote
+    });
+
+    // xAPI 로그 (생성 verb)
+    try {
+      xapiSpool.enqueue({
+        actor: { id: req.user.id, name: req.user.display_name || req.user.username },
+        verb: { id: 'http://activitystrea.ms/schema/1.0/generated', display: '생성' },
+        object: { id: `portfolio_report:${report.id}`, type: 'portfolio_report', name: title },
+        timestamp: new Date().toISOString()
+      });
+    } catch (_) { /* 비차단 */ }
+
+    res.status(201).json({
+      success: true,
+      reportId: updated.id,
+      downloadUrl: `/api/growth/portfolios/report/${updated.id}/download`,
+      previewUrl: `/api/growth/portfolios/report/${updated.id}/download`,
+      fileName,
+      sizeBytes: buffer.length,
+      fileSizeKB: updated.file_size_kb,
+      pageCount: updated.page_count || null,
+      itemCount: updated.item_count || data.items.length,
+      generatedAt: updated.created_at,
+      title: updated.title,
+      periodFrom: updated.period_from,
+      periodTo: updated.period_to,
+      schoolLevel: updated.school_level,
+      coverNote: updated.cover_note || null
+    });
+  } catch (err) {
+    console.error('[GROWTH] generate report error:', err);
+    res.status(500).json({ success: false, message: err.message || 'PDF 생성 중 오류가 발생했습니다.' });
+  }
+});
+
+// PUT /api/growth/portfolios/report/:id/upload — Frontend가 jsPDF로 만든 PDF 업로드
+router.put('/portfolios/report/:id/upload', requireAuth, pdfUpload.single('file'), (req, res) => {
+  try {
+    const reportId = req.params.id;
+    const row = growthExtDb.getPortfolioReportById(reportId);
+    if (!row) return res.status(404).json({ success: false, message: '보고서를 찾을 수 없습니다.' });
+    if (row.user_id !== req.user.id && req.user.role !== 'admin') {
+      return res.status(403).json({ success: false, message: '권한이 없습니다.' });
+    }
+    if (!req.file || !req.file.buffer) {
+      return res.status(400).json({ success: false, message: 'PDF 파일이 첨부되지 않았습니다.' });
+    }
+    const pageCount = parseInt(req.body.pageCount) || null;
+    const updated = growthExtDb.attachPortfolioReportFile(row.user_id, reportId, {
+      buffer: req.file.buffer,
+      pageCount
+    });
+    res.json({
+      success: true,
+      reportId: updated.id,
+      pageCount: updated.page_count,
+      fileSizeKB: updated.file_size_kb,
+      downloadUrl: `/api/growth/portfolios/report/${updated.id}/download`,
+      status: updated.status
+    });
+  } catch (err) {
+    console.error('[GROWTH] upload report file error:', err);
+    res.status(500).json({ success: false, message: err.message || '서버 오류가 발생했습니다.' });
+  }
+});
+
+// GET /api/growth/portfolios/reports — 학생의 PDF 이력 (본인 + admin 가능)
+router.get('/portfolios/reports', requireAuth, (req, res) => {
+  try {
+    const studentId = (req.user.role === 'admin' && req.query.userId)
+      ? parseInt(req.query.userId)
+      : req.user.id;
+    if (req.user.id !== studentId && req.user.role !== 'admin') {
+      return res.status(403).json({ success: false, message: '본인 이력만 조회 가능합니다.' });
+    }
+    const reports = growthExtDb.getPortfolioReports(studentId);
+    res.json({ success: true, reports });
+  } catch (err) {
+    console.error('[GROWTH] get reports error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// GET /api/growth/portfolios/report/:id/download — PDF 다운로드
+router.get('/portfolios/report/:id/download', requireAuth, (req, res) => {
+  try {
+    const reportId = req.params.id;
+    const row = growthExtDb.getPortfolioReportById(reportId);
+    if (!row) return res.status(404).json({ success: false, message: '보고서를 찾을 수 없습니다.' });
+
+    const owner = row.user_id;
+    const isOwner = req.user.id === owner;
+    const isAdmin = req.user.role === 'admin';
+    const isTeacherWithAccess = req.user.role === 'teacher' && teacherSharesClassWithStudent(req.user.id, owner);
+    if (!isOwner && !isAdmin && !isTeacherWithAccess) {
+      return res.status(403).json({ success: false, message: '접근 권한이 없습니다.' });
+    }
+
+    if (!row.file_path || !fs.existsSync(row.file_path)) {
+      return res.status(404).json({ success: false, message: 'PDF 파일이 아직 준비되지 않았습니다.' });
+    }
+    // 한글 안전 파일명 (RFC 5987)
+    const baseName = (row.title || 'portfolio') + '.pdf';
+    const encoded = encodeURIComponent(baseName);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="report.pdf"; filename*=UTF-8''${encoded}`);
+    fs.createReadStream(row.file_path).pipe(res);
+  } catch (err) {
+    console.error('[GROWTH] download report error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// DELETE /api/growth/portfolios/report/:id — 보고서 삭제
+router.delete('/portfolios/report/:id', requireAuth, (req, res) => {
+  try {
+    const row = growthExtDb.getPortfolioReportById(req.params.id);
+    if (!row) return res.status(404).json({ success: false, message: '보고서를 찾을 수 없습니다.' });
+    if (row.user_id !== req.user.id && req.user.role !== 'admin') {
+      return res.status(403).json({ success: false, message: '권한이 없습니다.' });
+    }
+    const result = growthExtDb.deletePortfolioReport(row.user_id, req.params.id);
+    if (!result) return res.status(404).json({ success: false, message: '보고서를 찾을 수 없습니다.' });
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[GROWTH] delete report error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
 });
 
 router.get('/portfolio/items/:id', requireAuth, (req, res) => {
