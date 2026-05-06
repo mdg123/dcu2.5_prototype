@@ -342,6 +342,40 @@ body { font-family: 'Pretendard Variable', -apple-system, sans-serif; background
 .owner-detail-row .student-info .student-meta { font-size: 14px; color: #64748b; }
 .owner-detail-row .row-action { font-size: 14px; padding: 6px 14px; }
 
+/* 그룹 내 통계 요약 바 — 미제출/제출/채점완료 한눈에 보기 */
+.owner-detail-stat-bar { display: flex; gap: 8px; padding: 10px 20px; background: #fff; border-bottom: 1px solid #f1f5f9; flex-wrap: wrap; align-items: center; }
+.owner-detail-stat-bar .stat-pill { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 999px; font-size: 14px; font-weight: 600; }
+.owner-detail-stat-bar .stat-pill .stat-num { font-weight: 700; }
+.owner-detail-stat-bar .stat-pill.total { background: #eff6ff; color: #1e40af; }
+.owner-detail-stat-bar .stat-pill.missing { background: #fef2f2; color: #991b1b; }
+.owner-detail-stat-bar .stat-pill.submitted { background: #ecfdf5; color: #065f46; }
+.owner-detail-stat-bar .stat-pill.graded { background: #ede9fe; color: #5b21b6; }
+.owner-detail-stat-bar .stat-pill.ungraded { background: #fff7ed; color: #9a3412; }
+
+/* 그룹 내 섹션(미제출/제출 분리) */
+.owner-detail-section { padding: 14px 20px 6px; border-bottom: 1px solid #f1f5f9; }
+.owner-detail-section:last-child { border-bottom: none; }
+.owner-detail-section.missing-section { background: #fffbfb; }
+.owner-detail-section.submitted-section { background: #fafffd; }
+.owner-detail-section-title { font-size: 15px; font-weight: 700; color: #1e293b; margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
+.owner-detail-section-title .section-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.owner-detail-section.missing-section .section-dot { background: #ef4444; }
+.owner-detail-section.submitted-section .section-dot { background: #10b981; }
+.owner-detail-section-title .section-count { font-size: 13px; color: #64748b; font-weight: 500; }
+.owner-detail-section .owner-detail-row { padding: 10px 0; border-bottom: 1px dashed #e2e8f0; }
+.owner-detail-section .owner-detail-row:last-child { border-bottom: none; }
+
+/* 학생 행 상태 뱃지 */
+.student-status-badge { font-size: 12px; font-weight: 700; padding: 3px 10px; border-radius: 999px; flex-shrink: 0; letter-spacing: -0.2px; }
+.student-status-badge.missing { background: #fee2e2; color: #991b1b; }
+.student-status-badge.submitted { background: #d1fae5; color: #065f46; }
+.student-status-badge.ungraded { background: #fed7aa; color: #9a3412; }
+.student-status-badge.graded { background: #ddd6fe; color: #5b21b6; }
+.student-score-chip { font-size: 13px; font-weight: 700; color: #5b21b6; background: #ede9fe; padding: 3px 10px; border-radius: 6px; }
+
+/* 빈 섹션 안내 */
+.section-empty-note { font-size: 14px; color: #94a3b8; padding: 8px 0 12px; font-style: normal; }
+
 /* 스크롤바 */
 ::-webkit-scrollbar { width: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
@@ -1645,8 +1679,8 @@ async function openOwnerDetail(classId, className, type) {
   const titleEl = document.getElementById('ownerDetailTitle');
   const body = document.getElementById('ownerDetailBody');
   titleEl.textContent = (type === 'ungraded')
-    ? `${className} · 미채점 과제`
-    : `${className} · 미제출/미응시`;
+    ? `${className} · 미채점 현황`
+    : `${className} · 미제출/미응시 현황`;
   body.innerHTML = '<div style="text-align:center;color:var(--text-muted);padding:2rem;">불러오는 중...</div>';
   modal.classList.add('active');
   // 모달 열림 → 첫 닫기 버튼에 포커스 (접근성)
@@ -1678,6 +1712,65 @@ function _ownerDetailDueLabel(dueStr) {
   return `<span>${dateLabel} 마감 (D-${days})</span>`;
 }
 
+// 학생 한 행 렌더 — 상태 뱃지(미제출/제출/채점완료/미채점) + 점수 표시
+function _ownerDetailStudentRow(student, opts) {
+  const name = escHtml(student.student_name || student.student_username || '학생');
+  const kind = (opts && opts.kind) || 'homework'; // 'homework' | 'exam'
+  const role = (opts && opts.role) || 'missing';  // 'missing' | 'submitted' | 'graded' | 'ungraded'
+
+  let badge = '';
+  let metaText = '';
+  let scoreChip = '';
+
+  if (role === 'missing') {
+    badge = `<span class="student-status-badge missing">${kind === 'homework' ? '미제출' : '미응시'}</span>`;
+    metaText = kind === 'homework' ? '아직 제출하지 않았습니다' : '아직 응시하지 않았습니다';
+  } else {
+    const submittedAt = (student.submitted_at || '').slice(0, 16).replace('T', ' ');
+    const reSub = student.status === 'resubmitted' ? ' · 재제출' : '';
+    metaText = (kind === 'homework' ? '제출' : '응시') + (submittedAt ? ': ' + submittedAt : '') + reSub;
+    if (student.graded) {
+      badge = `<span class="student-status-badge graded">채점 완료</span>`;
+      if (student.score !== null && student.score !== undefined) {
+        scoreChip = `<span class="student-score-chip">${student.score}점</span>`;
+      }
+    } else {
+      badge = `<span class="student-status-badge ungraded">미채점</span>`;
+    }
+  }
+
+  return `
+    <div class="owner-detail-row">
+      <div class="student-info">
+        ${badge}
+        <span class="student-name">${name}</span>
+        <span class="student-meta">${metaText}</span>
+        ${scoreChip}
+      </div>
+    </div>
+  `;
+}
+
+// 통계 요약 바 (전체/미제출/제출/채점완료 등)
+function _ownerDetailStatBar(g, kind) {
+  const total = g.total_members || 0;
+  const missing = (g.missing_members || []).length;
+  const submitted = (g.submitted_members || []).length;
+  const graded = g.graded_count || 0;
+  const ungraded = g.ungraded_count || 0;
+  const verb = kind === 'homework' ? '제출' : '응시';
+  const missVerb = kind === 'homework' ? '미제출' : '미응시';
+  return `
+    <div class="owner-detail-stat-bar" aria-label="제출 현황 요약">
+      <span class="stat-pill total">전체 <span class="stat-num">${total}</span>명</span>
+      <span class="stat-pill missing">${missVerb} <span class="stat-num">${missing}</span>명</span>
+      <span class="stat-pill submitted">${verb} <span class="stat-num">${submitted}</span>명</span>
+      ${graded > 0 ? `<span class="stat-pill graded">채점완료 <span class="stat-num">${graded}</span>명</span>` : ''}
+      ${ungraded > 0 ? `<span class="stat-pill ungraded">미채점 <span class="stat-num">${ungraded}</span>명</span>` : ''}
+    </div>
+  `;
+}
+
 function renderOwnerDetail() {
   const ctx = _ownerDetailContext;
   if (!ctx) return;
@@ -1690,10 +1783,25 @@ function renderOwnerDetail() {
       body.innerHTML = `<div class="owner-detail-empty"><div class="empty-icon">✅</div><div>미채점 과제가 없어요.</div></div>`;
       return;
     }
-    const totalLabel = `총 <b>${data.totalCount}</b>건의 미채점 제출물 (과제 ${groups.length}개)`;
+    const totalLabel = `총 <b>${data.totalCount}</b>건의 미채점 제출물 · 과제 <b>${groups.length}</b>개 · 클래스 멤버 <b>${data.totalMembers || 0}</b>명`;
     const html = `
       <div style="font-size:14px;color:#475569;margin-bottom:14px;">${totalLabel}</div>
-      ${groups.map(g => `
+      ${groups.map(g => {
+        const ungraded = g.ungraded_submissions || g.submissions || [];
+        const graded = g.graded_submissions || [];
+        const missing = g.missing_members || [];
+        // ungraded view 에서는 채점이 필요한 항목이 핵심 → 미채점 우선 표시
+        const ungradedHtml = ungraded.length
+          ? ungraded.map(s => _ownerDetailStudentRow(s, { kind: 'homework', role: 'ungraded' })).join('')
+          : `<div class="section-empty-note">미채점 제출물이 없습니다.</div>`;
+        const gradedHtml = graded.length
+          ? graded.map(s => _ownerDetailStudentRow(s, { kind: 'homework', role: 'graded' })).join('')
+          : `<div class="section-empty-note">채점 완료된 제출물이 없습니다.</div>`;
+        const missingHtml = missing.length
+          ? missing.map(m => _ownerDetailStudentRow(m, { kind: 'homework', role: 'missing' })).join('')
+          : `<div class="section-empty-note">모든 학생이 제출했습니다.</div>`;
+
+        return `
         <div class="owner-detail-group">
           <div class="owner-detail-group-header">
             <div class="owner-detail-group-title">
@@ -1702,24 +1810,31 @@ function renderOwnerDetail() {
             </div>
             <div class="owner-detail-group-meta">
               ${_ownerDetailDueLabel(g.due_date)}
-              <span>·</span>
-              <span>미채점 <b>${g.submissions.length}</b>건</span>
             </div>
             <button class="btn btn-primary owner-detail-group-action" onclick="location.href='/class/homework-view.html?classId=${classId}&id=${g.homework_id}'">채점하러 가기</button>
           </div>
-          <div class="owner-detail-list">
-            ${g.submissions.map(s => `
-              <div class="owner-detail-row">
-                <div class="student-info">
-                  <span class="student-name">${escHtml(s.student_name || s.student_username || '학생')}</span>
-                  <span class="student-meta">제출: ${(s.submitted_at || '').slice(0,16).replace('T',' ')}${s.status === 'resubmitted' ? ' · 재제출' : ''}</span>
-                </div>
-                <button class="btn btn-outline row-action" onclick="location.href='/class/homework-view.html?classId=${classId}&id=${g.homework_id}'">제출물 보기</button>
-              </div>
-            `).join('')}
+          ${_ownerDetailStatBar({
+            total_members: g.total_members,
+            missing_members: g.missing_members,
+            submitted_members: [...(g.ungraded_submissions||[]), ...(g.graded_submissions||[])],
+            graded_count: graded.length,
+            ungraded_count: ungraded.length
+          }, 'homework')}
+          <div class="owner-detail-section">
+            <div class="owner-detail-section-title"><span class="section-dot" style="background:#f59e0b;"></span>미채점 제출 <span class="section-count">${ungraded.length}건</span></div>
+            ${ungradedHtml}
+          </div>
+          <div class="owner-detail-section submitted-section">
+            <div class="owner-detail-section-title"><span class="section-dot"></span>채점 완료 <span class="section-count">${graded.length}건</span></div>
+            ${gradedHtml}
+          </div>
+          <div class="owner-detail-section missing-section">
+            <div class="owner-detail-section-title"><span class="section-dot"></span>미제출 <span class="section-count">${missing.length}명</span></div>
+            ${missingHtml}
           </div>
         </div>
-      `).join('')}
+        `;
+      }).join('')}
     `;
     body.innerHTML = html;
     return;
@@ -1736,7 +1851,19 @@ function renderOwnerDetail() {
       if (groups.length === 0) {
         return `<div class="owner-detail-empty"><div class="empty-icon">✅</div><div>${kind === 'homework' ? '미제출 과제가 없어요.' : '미응시 평가가 없어요.'}</div></div>`;
       }
-      return groups.map(g => `
+      const verb = kind === 'homework' ? '제출' : '응시';
+      const missVerb = kind === 'homework' ? '미제출' : '미응시';
+      return groups.map(g => {
+        const submitted = g.submitted_members || [];
+        const missing = g.missing_members || [];
+        const submittedHtml = submitted.length
+          ? submitted.map(s => _ownerDetailStudentRow(s, { kind, role: 'submitted' })).join('')
+          : `<div class="section-empty-note">아직 ${verb}한 학생이 없습니다.</div>`;
+        const missingHtml = missing.length
+          ? missing.map(m => _ownerDetailStudentRow(m, { kind, role: 'missing' })).join('')
+          : `<div class="section-empty-note">모든 학생이 ${verb}했습니다.</div>`;
+
+        return `
         <div class="owner-detail-group">
           <div class="owner-detail-group-header">
             <div class="owner-detail-group-title">
@@ -1745,29 +1872,27 @@ function renderOwnerDetail() {
             </div>
             <div class="owner-detail-group-meta">
               ${_ownerDetailDueLabel(g.due_date)}
-              <span>·</span>
-              <span>${kind === 'homework' ? '미제출' : '미응시'} <b>${g.missing_members.length}</b>명</span>
             </div>
             <button class="btn btn-primary owner-detail-group-action" onclick="location.href='/class/${kind === 'homework' ? 'homework-view' : 'exam-view'}.html?classId=${classId}&id=${g.item_id}'">${kind === 'homework' ? '과제 보기' : '평가 보기'}</button>
           </div>
-          <div class="owner-detail-list">
-            ${g.missing_members.map(m => `
-              <div class="owner-detail-row">
-                <div class="student-info">
-                  <span class="student-name">${escHtml(m.student_name || m.student_username || '학생')}</span>
-                  <span class="student-meta">${kind === 'homework' ? '아직 제출하지 않았습니다' : '아직 응시하지 않았습니다'}</span>
-                </div>
-              </div>
-            `).join('')}
+          ${_ownerDetailStatBar(g, kind)}
+          <div class="owner-detail-section missing-section">
+            <div class="owner-detail-section-title"><span class="section-dot"></span>${missVerb} <span class="section-count">${missing.length}명</span></div>
+            ${missingHtml}
+          </div>
+          <div class="owner-detail-section submitted-section">
+            <div class="owner-detail-section-title"><span class="section-dot"></span>${verb} <span class="section-count">${submitted.length}명</span></div>
+            ${submittedHtml}
           </div>
         </div>
-      `).join('');
+        `;
+      }).join('');
     };
 
     const tab = ctx.activeTab || (hwCount >= examCount ? 'homework' : 'exam');
     ctx.activeTab = tab;
     body.innerHTML = `
-      <div style="font-size:14px;color:#475569;margin-bottom:10px;">총 <b>${total}</b>건 (과제 미제출 ${hwCount}건, 평가 미응시 ${examCount}건)</div>
+      <div style="font-size:14px;color:#475569;margin-bottom:10px;">총 <b>${total}</b>건 (과제 미제출 ${hwCount}건, 평가 미응시 ${examCount}건) · 클래스 멤버 <b>${data.totalMembers || 0}</b>명</div>
       <div class="owner-detail-tabs" role="tablist">
         <button class="owner-detail-tab ${tab === 'homework' ? 'active' : ''}" onclick="_ownerDetailContext.activeTab='homework';renderOwnerDetail();" role="tab">과제 미제출 <span class="tab-count">${hwCount}</span></button>
         <button class="owner-detail-tab ${tab === 'exam' ? 'active' : ''}" onclick="_ownerDetailContext.activeTab='exam';renderOwnerDetail();" role="tab">평가 미응시 <span class="tab-count">${examCount}</span></button>
