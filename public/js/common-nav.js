@@ -24,14 +24,14 @@
     const style = document.createElement('style');
     style.id = 'dacheim-common-typography';
     style.textContent = `
-      /* 작은 정보 텍스트(시간/카운트/메타) 가독성 보정 — 레이아웃 영향 최소화 */
-      .text-xs { font-size: 12px; }
-      .badge:not(.badge-fixed) { font-size: 12px; }
-      .type-badge:not(.type-badge-fixed) { font-size: 12px; }
-      .card-meta, .card-meta .card-date, .list-row-meta { font-size: 12px; }
-      .sidebar-title, .filter-label, .section-label { font-size: 13px; }
-      .folder-count, .stat-card-label, .stat-card-change { font-size: 12px; }
-      .status-btn, .period-btn, .metric-btn, .bundle-type-btn { font-size: 13px; }
+      /* CLAUDE.md 공통 UI 스케일 정렬 — 메타 보조/시간 13px, 뱃지 13px */
+      .text-xs { font-size: 13px; }
+      .badge:not(.badge-fixed) { font-size: 13px; }
+      .type-badge:not(.type-badge-fixed) { font-size: 13px; }
+      .card-meta, .card-meta .card-date, .list-row-meta { font-size: 13px; }
+      .sidebar-title, .filter-label, .section-label { font-size: 14px; }
+      .folder-count, .stat-card-label, .stat-card-change { font-size: 13px; }
+      .status-btn, .period-btn, .metric-btn, .bundle-type-btn { font-size: 14px; }
       .link-sm, .keyword-tag, .dismiss-btn { font-size: 13px; }
     `;
     (document.head || document.documentElement).appendChild(style);
