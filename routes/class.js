@@ -275,6 +275,198 @@ router.post('/:classId/visit', requireAuth, (req, res) => {
   }
 });
 
+// GET /api/class/:classId/owner-summary?type=ungraded|missing
+// [개설자 전용] 클래스 카드 칩 클릭 시 표시할 미채점/미제출 상세 목록
+router.get('/:classId/owner-summary', requireAuth, (req, res) => {
+  try {
+    const classId = parseInt(req.params.classId);
+    const type = String(req.query.type || 'ungraded'); // ungraded | missing
+    const myRole = classDb.getMemberRole(classId, req.user.id);
+    if (myRole !== 'owner' && req.user.role !== 'admin') {
+      return res.status(403).json({ success: false, message: '개설자만 접근 가능합니다.' });
+    }
+
+    const db = require('../db/index');
+
+    // 클래스 학생 목록 (역할: student 또는 일반 멤버)
+    const members = db.prepare(`
+      SELECT u.id, u.username, u.display_name, u.role
+      FROM class_members cm JOIN users u ON cm.user_id = u.id
+      WHERE cm.class_id = ? AND cm.status = 'active' AND cm.role = 'member'
+      ORDER BY u.display_name
+    `).all(classId);
+    const memberIds = members.map(m => m.id);
+
+    if (type === 'counts') {
+      // 카드 칩용 정확한 카운트만 (목록 없이)
+      const ungradedCnt = db.prepare(`
+        SELECT COUNT(*) as cnt
+        FROM homework_submissions hs
+        JOIN homework h ON h.id = hs.homework_id
+        WHERE h.class_id = ? AND (h.status IS NULL OR h.status = 'published')
+          AND hs.score IS NULL
+      `).get(classId).cnt;
+
+      // 미제출 (과제 + 평가)
+      const homeworks = db.prepare(`
+        SELECT id FROM homework
+        WHERE class_id = ? AND (status IS NULL OR status = 'published')
+      `).all(classId);
+      let missingCnt = 0;
+      const memberSet = new Set(memberIds);
+      for (const hw of homeworks) {
+        const submitted = db.prepare(
+          'SELECT student_id FROM homework_submissions WHERE homework_id = ?'
+        ).all(hw.id).map(s => s.student_id);
+        const submittedSet = new Set(submitted);
+        for (const mid of memberIds) if (!submittedSet.has(mid)) missingCnt++;
+      }
+      const exams = db.prepare(`
+        SELECT id FROM exams
+        WHERE class_id = ? AND status IN ('waiting','active')
+      `).all(classId);
+      for (const ex of exams) {
+        const submitted = db.prepare(
+          "SELECT user_id FROM exam_students WHERE exam_id = ? AND status = 'submitted'"
+        ).all(ex.id).map(s => s.user_id);
+        const submittedSet = new Set(submitted);
+        for (const mid of memberIds) if (!submittedSet.has(mid)) missingCnt++;
+      }
+      return res.json({ success: true, type, ungraded: ungradedCnt, missing: missingCnt });
+    }
+
+    if (type === 'ungraded') {
+      // 미채점: 제출은 했으나 score IS NULL 인 항목
+      // 과제별 제출 학생 정보 + 과제 메타
+      const rows = db.prepare(`
+        SELECT hs.id as submission_id, hs.homework_id, hs.student_id, hs.submitted_at, hs.status,
+               h.title as homework_title, h.due_date, h.max_score,
+               u.display_name as student_name, u.username as student_username
+        FROM homework_submissions hs
+        JOIN homework h ON h.id = hs.homework_id
+        JOIN users u ON u.id = hs.student_id
+        WHERE h.class_id = ?
+          AND (h.status IS NULL OR h.status = 'published')
+          AND hs.score IS NULL
+        ORDER BY hs.submitted_at ASC
+      `).all(classId);
+
+      // 과제 단위로 그룹화
+      const map = new Map();
+      rows.forEach(r => {
+        if (!map.has(r.homework_id)) {
+          map.set(r.homework_id, {
+            homework_id: r.homework_id,
+            title: r.homework_title,
+            due_date: r.due_date,
+            max_score: r.max_score,
+            submissions: []
+          });
+        }
+        map.get(r.homework_id).submissions.push({
+          submission_id: r.submission_id,
+          student_id: r.student_id,
+          student_name: r.student_name,
+          student_username: r.student_username,
+          submitted_at: r.submitted_at,
+          status: r.status
+        });
+      });
+
+      const groups = Array.from(map.values()).sort((a, b) => {
+        // 마감일 가까운 순(없으면 뒤로)
+        const da = a.due_date ? new Date(a.due_date).getTime() : Infinity;
+        const db = b.due_date ? new Date(b.due_date).getTime() : Infinity;
+        return da - db;
+      });
+
+      const totalCount = rows.length;
+      return res.json({ success: true, type, groups, totalCount });
+    }
+
+    if (type === 'missing') {
+      // 미제출: 과제(published & due_date 존재) 와 평가(active|waiting) 에서 멤버 중 미제출/미응시
+      // -- 과제 미제출
+      const homeworks = db.prepare(`
+        SELECT id, title, due_date, max_score, status
+        FROM homework
+        WHERE class_id = ? AND (status IS NULL OR status = 'published')
+        ORDER BY due_date ASC
+      `).all(classId);
+
+      const homeworkGroups = [];
+      let homeworkMissingCount = 0;
+      for (const hw of homeworks) {
+        const submitted = db.prepare(
+          'SELECT student_id FROM homework_submissions WHERE homework_id = ?'
+        ).all(hw.id);
+        const submittedSet = new Set(submitted.map(s => s.student_id));
+        const missing = members.filter(m => !submittedSet.has(m.id));
+        if (missing.length === 0) continue;
+        homeworkMissingCount += missing.length;
+        homeworkGroups.push({
+          item_id: hw.id,
+          item_type: 'homework',
+          title: hw.title,
+          due_date: hw.due_date,
+          missing_members: missing.map(m => ({
+            student_id: m.id,
+            student_name: m.display_name,
+            student_username: m.username
+          }))
+        });
+      }
+
+      // -- 평가 미응시 (active|waiting 상태)
+      const exams = db.prepare(`
+        SELECT id, title, status, start_date, end_date, created_at
+        FROM exams
+        WHERE class_id = ? AND status IN ('waiting','active')
+        ORDER BY end_date ASC, created_at DESC
+      `).all(classId);
+
+      const examGroups = [];
+      let examMissingCount = 0;
+      for (const ex of exams) {
+        // 응시 완료 학생 (submitted)
+        const submitted = db.prepare(
+          "SELECT user_id FROM exam_students WHERE exam_id = ? AND status = 'submitted'"
+        ).all(ex.id);
+        const submittedSet = new Set(submitted.map(s => s.user_id));
+        const missing = members.filter(m => !submittedSet.has(m.id));
+        if (missing.length === 0) continue;
+        examMissingCount += missing.length;
+        examGroups.push({
+          item_id: ex.id,
+          item_type: 'exam',
+          title: ex.title,
+          due_date: ex.end_date,
+          missing_members: missing.map(m => ({
+            student_id: m.id,
+            student_name: m.display_name,
+            student_username: m.username
+          }))
+        });
+      }
+
+      const totalCount = homeworkMissingCount + examMissingCount;
+      return res.json({
+        success: true,
+        type,
+        groups: { homework: homeworkGroups, exam: examGroups },
+        totalCount,
+        homeworkMissingCount,
+        examMissingCount
+      });
+    }
+
+    return res.status(400).json({ success: false, message: '잘못된 type 값입니다.' });
+  } catch (err) {
+    console.error('[CLASS] owner-summary error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.', detail: String(err && err.message || err) });
+  }
+});
+
 // GET /api/class/:classId/students/self-learn-summary
 // [교사·관리자] 클래스 학생들의 AI 맞춤학습 진도 요약
 router.get('/:classId/students/self-learn-summary', requireAuth, (req, res) => {
