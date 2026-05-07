@@ -300,6 +300,7 @@
 </head>
 <body>
   <script src="/js/common-nav.js"></script>
+  <script src="/js/class-ui.js"></script>
   <div class="container" id="mainContent" style="display:none;">
     <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;">
       <button class="btn btn-outline" onclick="location.href='/class/class-home.html?id='+classId+'&tab=homework'" style="padding:8px 14px;font-size:14px;"><i class="fas fa-arrow-left"></i> 목록으로</button>
@@ -727,7 +728,7 @@
 
       const res = await fetch(`/api/homework/${classId}/${homeworkId}`);
       const data = await res.json();
-      if (!data.success) { alert(data.message); history.back(); return; }
+      if (!data.success) { classToast(data.message || '과제를 찾을 수 없습니다.', 'error'); setTimeout(() => history.back(), 1200); return; }
 
       hwData = data.homework;
       document.title = `다채움 - ${hwData.title}`;
@@ -1501,10 +1502,10 @@
           input.value = '';
           await loadStudentFeedback();
         } else {
-          alert(data.message || '전송 실패');
+          classToast(data.message || '전송 실패', 'error');
         }
       } catch (e) {
-        alert('네트워크 오류로 전송하지 못했습니다.');
+        classToast('네트워크 오류로 전송하지 못했습니다.', 'error');
       } finally {
         input.disabled = false;
         if (sendBtn) sendBtn.disabled = false;
@@ -1563,8 +1564,8 @@
         body: JSON.stringify({ content, file_url: uploadedFileUrl })
       });
       const data = await res.json();
-      if (data.success) { alert(data.message); loadHomework(); }
-      else alert(data.message);
+      if (data.success) { classToast(data.message || '제출되었습니다.', 'success'); loadHomework(); }
+      else classToast(data.message || '제출 실패', 'error');
     }
 
     async function gradeSubmission(subId) {

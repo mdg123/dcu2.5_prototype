@@ -163,6 +163,7 @@
 </head>
 <body>
   <script src="/js/common-nav.js"></script>
+  <script src="/js/class-ui.js"></script>
   <div class="container" id="mainContent" style="display:none;">
     <div class="page-header">
       <h1 class="page-title">클래스 설정</h1>
@@ -526,7 +527,7 @@
     }
 
     async function deleteBoardConfirm(boardId, name) {
-      if (!confirm(`"${name}" 게시판을 삭제하시겠습니까?\n기존 게시글은 보존됩니다.`)) return;
+      if (!await classConfirm({ title:'게시판 삭제', message:`"${name}" 게시판을 삭제하시겠습니까?\n기존 게시글은 보존됩니다.`, okLabel:'삭제', danger:true })) return;
       const res = await fetch(`/api/board/${classId}/boards/${boardId}`, { method: 'DELETE' });
       const data = await res.json();
       if (data.success) { showToast('게시판이 삭제되었습니다.'); loadBoards(); }
@@ -657,7 +658,7 @@
       const msg = newRole === 'owner'
         ? `${name}님에게 개설자 권한을 부여하시겠습니까?\n수업, 과제, 평가, 알림장 등록이 가능해집니다.`
         : `${name}님의 개설자 권한을 회수하시겠습니까?`;
-      if (!confirm(msg)) return;
+      if (!await classConfirm({ title:'권한 변경', message:msg, okLabel:'확인', danger:false })) return;
       try {
         const res = await fetch(`/api/class/${classId}/members/${userId}/role`, {
           method: 'PUT',
@@ -677,7 +678,7 @@
     }
 
     async function removeMember(userId, name) {
-      if (!confirm(`${name}님을 클래스에서 제거하시겠습니까?`)) return;
+      if (!await classConfirm({ title:'멤버 제거', message:`${name}님을 클래스에서 제거하시겠습니까?`, okLabel:'제거', danger:true })) return;
       try {
         const res = await fetch(`/api/class/${classId}/members/${userId}`, { method: 'DELETE' });
         const data = await res.json();
@@ -693,8 +694,8 @@
     }
 
     async function deleteClass() {
-      if (!confirm('정말로 이 클래스를 삭제하시겠습니까?\n모든 수업, 과제, 평가 데이터가 영구 삭제됩니다.')) return;
-      if (!confirm('⚠️ 마지막 확인: 되돌릴 수 없습니다. 계속하시겠습니까?')) return;
+      if (!await classConfirm({ title:'클래스 삭제', message:'정말로 이 클래스를 삭제하시겠습니까?\n모든 수업, 과제, 평가 데이터가 영구 삭제됩니다.', okLabel:'삭제', danger:true })) return;
+      if (!await classConfirm({ title:'마지막 확인', message:'⚠️ 마지막 확인: 되돌릴 수 없습니다. 계속하시겠습니까?', okLabel:'영구 삭제', danger:true })) return;
       try {
         const res = await fetch(`/api/class/${classId}`, { method: 'DELETE' });
         const data = await res.json();

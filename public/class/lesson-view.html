@@ -78,6 +78,7 @@
 </head>
 <body>
   <script src="/js/common-nav.js"></script>
+  <script src="/js/class-ui.js"></script>
   <div class="container" id="mainContent" style="display:none;">
     <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;">
       <button class="btn btn-outline" onclick="goBackToList()" style="padding:8px 14px;font-size:14px;"><i class="fas fa-arrow-left"></i> 목록으로</button>
@@ -186,8 +187,8 @@
       const res = await fetch(`/api/lesson/${classId}/${lessonId}`);
       const data = await res.json();
       if (!data.success) {
-        alert(data.message || '수업을 찾을 수 없습니다.');
-        history.back();
+        classToast(data.message || '수업을 찾을 수 없습니다.', 'error');
+        setTimeout(() => history.back(), 1200);
         return;
       }
 
@@ -199,8 +200,8 @@
         const _today = new Date().toISOString().slice(0, 10);
         const _sd = lessonData.start_date || lessonData.lesson_date;
         if (_sd && _today < _sd) {
-          alert('아직 시작되지 않은 수업입니다.');
-          location.href = `/class/class-home.html?id=${classId}&tab=lesson`;
+          classToast('아직 시작되지 않은 수업입니다.', 'warning');
+          setTimeout(() => { location.href = `/class/class-home.html?id=${classId}&tab=lesson`; }, 1200);
           return;
         }
       }
@@ -477,16 +478,16 @@
         })
       });
       const data = await res.json();
-      if (data.success) { closeEditModal(); loadLesson(); }
-      else alert(data.message);
+      if (data.success) { closeEditModal(); loadLesson(); classToast('수업이 수정되었습니다.', 'success'); }
+      else classToast(data.message || '수정 실패', 'error');
     }
 
     async function deleteLesson() {
-      if (!confirm('이 수업을 삭제하시겠습니까?')) return;
+      if (!await classConfirm({ title:'수업 삭제', message:'이 수업을 삭제하시겠습니까?', okLabel:'삭제', danger:true })) return;
       const res = await fetch(`/api/lesson/${classId}/${lessonId}`, { method: 'DELETE' });
       const data = await res.json();
       if (data.success) { location.href = `/class/class-home.html?id=${classId}&tab=lesson`; }
-      else alert(data.message);
+      else classToast(data.message || '삭제 실패', 'error');
     }
 
     window.addEventListener('dacheim:user-loaded', () => {

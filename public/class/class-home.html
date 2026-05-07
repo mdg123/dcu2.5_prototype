@@ -240,6 +240,7 @@
 </head>
 <body>
   <script src="/js/common-nav.js"></script>
+  <script src="/js/class-ui.js"></script>
   <div class="container" id="mainContent" style="display:none;">
     <div class="class-header" id="classHeader">
       <h2 id="classTitle">로딩 중...</h2>
@@ -1187,7 +1188,7 @@
     async function loadClass() {
       const res = await fetch(`/api/class/${classId}`);
       const data = await res.json();
-      if (!data.success) { alert(data.message); location.href = '/class/index.html'; return; }
+      if (!data.success) { classToast(data.message || '클래스를 찾을 수 없습니다.', 'error'); setTimeout(() => { location.href = '/class/index.html'; }, 1200); return; }
 
       classData = data.class;
       myRole = data.myRole;
@@ -1254,7 +1255,7 @@
     }
 
     function showQRModal() {
-      alert('클래스 코드: ' + classData.code + '\n\n이 코드를 학생들에게 공유하세요.');
+      classToast('클래스 코드: ' + classData.code + '\n이 코드를 학생들에게 공유하세요.', 'info');
     }
 
     async function loadHomeTab() {
@@ -1592,7 +1593,7 @@
         const orderStyle = isComplete ? 'background:#D1FAE5;color:#10B981;' : myComplete ? 'background:#D1FAE5;color:#10B981;' : studentBlocked ? 'background:#f3f4f6;color:#9ca3af;' : '';
         const titleStyle = isComplete ? 'color:#6B7280;' : studentBlocked ? 'color:#9ca3af;' : '';
         return `
-          <div class="lesson-card-item" style="${studentBlocked ? 'opacity:.6;cursor:default;' : ''}" onclick="${studentBlocked ? "alert('아직 시작되지 않은 수업입니다.')" : "location.href='/class/lesson-view.html?classId=" + classId + "&id=" + l.id + "'"}">
+          <div class="lesson-card-item" style="${studentBlocked ? 'opacity:.6;cursor:default;' : ''}" onclick="${studentBlocked ? "classToast('아직 시작되지 않은 수업입니다.','warning')" : "location.href='/class/lesson-view.html?classId=" + classId + "&id=" + l.id + "'"}">
             <div class="lesson-card-main">
               <div class="lesson-order" style="${orderStyle}">${isComplete ? '✓' : myComplete ? '✓' : i + 1}</div>
               <div class="lesson-card-body" style="flex:1;min-width:0;">
@@ -2138,7 +2139,7 @@
     }
 
     async function importLessonPublicContent(contentId, title, contentType) {
-      if (!confirm(`"${title}"을(를) 수업으로 가져오시겠습니까?`)) return;
+      if (!await classConfirm({ title:'수업 가져오기', message:`"${title}"을(를) 수업으로 가져오시겠습니까?`, okLabel:'가져오기' })) return;
       try {
         const res = await fetch(`/api/lesson/${classId}`, {
           method: 'POST', headers: {'Content-Type':'application/json'},
@@ -2149,14 +2150,14 @@
             content_ids: [contentId]
           })
         }).then(r => r.json());
-        if (res.success) { alert('수업이 생성되었습니다.'); closeLessonModal(); loadLessons(); }
-        else alert(res.message || '가져오기 실패');
-      } catch(e) { alert('서버 오류'); }
+        if (res.success) { classToast('수업이 생성되었습니다.', 'success'); closeLessonModal(); loadLessons(); }
+        else classToast(res.message || '가져오기 실패', 'error');
+      } catch(e) { classToast('서버 오류', 'error'); }
     }
 
     async function saveLesson() {
       const title = document.getElementById('lessonTitle').value.trim();
-      if (!title) return alert('제목을 입력하세요.');
+      if (!title) { classToast('제목을 입력하세요.', 'warning'); return; }
       const res = await fetch(`/api/lesson/${classId}`, {
         method: 'POST', headers: {'Content-Type':'application/json'},
         body: JSON.stringify({
@@ -2168,7 +2169,7 @@
         })
       });
       const data = await res.json();
-      if (data.success) { closeLessonModal(); loadLessons(); } else alert(data.message);
+      if (data.success) { closeLessonModal(); loadLessons(); classToast('수업이 저장되었습니다.', 'success'); } else classToast(data.message || '저장 실패', 'error');
     }
 
     // ===== 과제 =====
@@ -2283,7 +2284,7 @@
     async function editHomework(id) {
       try {
         const res = await fetch(`/api/homework/${classId}/${id}`).then(r => r.json());
-        if (!res.success) return alert(res.message || '불러오기 실패');
+        if (!res.success) { classToast(res.message || '불러오기 실패', 'error'); return; }
         const h = res.homework;
         editingHwId = id;
         hwFileUrl = null;
@@ -2308,16 +2309,16 @@
         const saveBtn = document.querySelector('#homeworkModal .modal-actions .btn-primary');
         if (saveBtn) saveBtn.textContent = '수정 저장';
         document.getElementById('homeworkModal').classList.add('active');
-      } catch(e) { alert('불러오기 실패'); }
+      } catch(e) { classToast('불러오기 실패', 'error'); }
     }
 
     async function deleteHomework(id) {
-      if (!confirm('이 과제를 삭제하시겠습니까? 제출물도 함께 삭제됩니다.')) return;
+      if (!await classConfirm({ title:'과제 삭제', message:'이 과제를 삭제하시겠습니까?\n제출물도 함께 삭제됩니다.', okLabel:'삭제', danger:true })) return;
       try {
         const res = await fetch(`/api/homework/${classId}/${id}`, { method: 'DELETE' }).then(r => r.json());
-        if (res.success) { loadHomeworks(); }
-        else alert(res.message || '삭제 실패');
-      } catch(e) { alert('서버 오류'); }
+        if (res.success) { loadHomeworks(); classToast('삭제되었습니다.', 'success'); }
+        else classToast(res.message || '삭제 실패', 'error');
+      } catch(e) { classToast('서버 오류', 'error'); }
     }
 
     async function uploadHwFile(input) {
@@ -2332,13 +2333,13 @@
           hwFileUrl = data.file.url;
           document.getElementById('hwFileInfo').textContent = `✓ ${file.name} 업로드 완료`;
           document.getElementById('hwFileInfo').style.color = '#10b981';
-        } else alert('파일 업로드 실패');
-      } catch (e) { alert('파일 업로드 중 오류가 발생했습니다.'); }
+        } else classToast('파일 업로드 실패', 'error');
+      } catch (e) { classToast('파일 업로드 중 오류가 발생했습니다.', 'error'); }
     }
 
     async function saveHomework() {
       const title = document.getElementById('hwTitle').value.trim();
-      if (!title) return alert('제목을 입력하세요.');
+      if (!title) { classToast('제목을 입력하세요.', 'warning'); return; }
       const stdVal = document.getElementById('hwStdSmart')?.value || { codes: [], std_ids: [], items: [] };
       const firstItem = (stdVal.items && stdVal.items[0]) || null;
       let gradeGroupNum = null;
@@ -2365,7 +2366,7 @@
         body: JSON.stringify(body)
       });
       const data = await res.json();
-      if (data.success) { closeHomeworkModal(); loadHomeworks(); } else alert(data.message);
+      if (data.success) { closeHomeworkModal(); loadHomeworks(); classToast(editingHwId ? '과제가 수정되었습니다.' : '과제가 등록되었습니다.', 'success'); } else classToast(data.message || '저장 실패', 'error');
     }
 
     // ===== 평가 =====
@@ -2438,7 +2439,7 @@
         const studentBlocked = myRole !== 'owner' && isScheduled;
 
         return `
-          <div class="lesson-card-item" style="${studentBlocked ? 'opacity:.6;cursor:default;' : ''}" onclick="${studentBlocked ? "alert('아직 시작되지 않은 평가입니다.')" : "location.href='/class/exam-view.html?classId=" + classId + "&id=" + e.id + "'"}">
+          <div class="lesson-card-item" style="${studentBlocked ? 'opacity:.6;cursor:default;' : ''}" onclick="${studentBlocked ? "classToast('아직 시작되지 않은 평가입니다.','warning')" : "location.href='/class/exam-view.html?classId=" + classId + "&id=" + e.id + "'"}">
             <div class="lesson-card-main">
               <div class="lesson-order" style="background:#ede9fe;color:#8b5cf6;">${e.my_submitted ? '✓' : i + 1}</div>
               <div class="lesson-card-body" style="flex:1;min-width:0;">
@@ -3419,7 +3420,7 @@
       currentNoticeId = id;
       const res = await fetch(`/api/notice/${classId}/${id}`);
       const data = await res.json();
-      if (!data.success) return alert(data.message);
+      if (!data.success) { classToast(data.message || '불러오기 실패', 'error'); return; }
       const n = data.notice;
       document.getElementById('noticeDetailPinned').innerHTML = n.is_pinned ? '<span style="display:inline-block;background:#fef3c7;color:#d97706;padding:3px 10px;border-radius:6px;font-size:11px;font-weight:600;margin-bottom:8px;"><i class="fas fa-thumbtack"></i> 고정 알림</span>' : '';
       document.getElementById('noticeDetailTitle').textContent = n.title;
@@ -3436,10 +3437,11 @@
     }
 
     async function deleteNotice() {
-      if (!currentNoticeId || !confirm('이 알림을 삭제하시겠습니까?')) return;
+      if (!currentNoticeId) return;
+      if (!await classConfirm({ title:'알림 삭제', message:'이 알림을 삭제하시겠습니까?', okLabel:'삭제', danger:true })) return;
       const res = await fetch(`/api/notice/${classId}/${currentNoticeId}`, { method: 'DELETE' });
       const data = await res.json();
-      if (data.success) { closeNoticeDetail(); loadNotices(); } else alert(data.message);
+      if (data.success) { closeNoticeDetail(); loadNotices(); classToast('삭제되었습니다.', 'success'); } else classToast(data.message || '삭제 실패', 'error');
     }
 
     async function editNotice() {
@@ -3455,7 +3457,7 @@
         body: JSON.stringify({ title: newTitle, content: newContent })
       });
       const data = await res.json();
-      if (data.success) { openNotice(currentNoticeId); } else alert(data.message);
+      if (data.success) { openNotice(currentNoticeId); classToast('알림이 수정되었습니다.', 'success'); } else classToast(data.message || '수정 실패', 'error');
     }
 
     let noticeFileUrl = null;
@@ -3478,13 +3480,13 @@
           noticeFileUrl = data.file.url;
           document.getElementById('noticeFileInfo').textContent = `✓ ${file.name} 업로드 완료`;
           document.getElementById('noticeFileInfo').style.color = '#10b981';
-        } else alert('파일 업로드 실패');
-      } catch (e) { alert('파일 업로드 중 오류가 발생했습니다.'); }
+        } else classToast('파일 업로드 실패', 'error');
+      } catch (e) { classToast('파일 업로드 중 오류가 발생했습니다.', 'error'); }
     }
 
     async function saveNotice() {
       const title = document.getElementById('noticeTitle').value.trim();
-      if (!title) return alert('제목을 입력하세요.');
+      if (!title) { classToast('제목을 입력하세요.', 'warning'); return; }
       let content = document.getElementById('noticeContent').value;
       if (noticeFileUrl) {
         content += `\n\n📎 첨부파일: ${noticeFileUrl.split('/').pop()}\n${noticeFileUrl}`;
@@ -3501,7 +3503,8 @@
         document.getElementById('noticePinned').checked = false;
         noticeFileUrl = null;
         loadNotices();
-      } else alert(data.message);
+        classToast('알림이 등록되었습니다.', 'success');
+      } else classToast(data.message || '등록 실패', 'error');
     }
 
     // ===== 게시판 =====
@@ -3697,7 +3700,7 @@
     async function approvePost(postId) {
       const res = await fetch(`/api/board/${classId}/${postId}/approve`, { method: 'POST' });
       const data = await res.json();
-      if (data.success) { loadBoard(true); } else alert(data.message);
+      if (data.success) { loadBoard(true); classToast('승인되었습니다.', 'success'); } else classToast(data.message || '승인 실패', 'error');
     }
 
     async function rejectPost(postId) {
@@ -3708,7 +3711,7 @@
         body: JSON.stringify({ reason })
       });
       const data = await res.json();
-      if (data.success) { loadBoard(true); } else alert(data.message);
+      if (data.success) { loadBoard(true); classToast('반려되었습니다.', 'success'); } else classToast(data.message || '반려 실패', 'error');
     }
 
     function renderBoardList(posts) {
@@ -3775,7 +3778,7 @@
       currentPostId = postId;
       const res = await fetch(`/api/board/${classId}/${postId}`);
       const data = await res.json();
-      if (!data.success) return alert(data.message);
+      if (!data.success) { classToast(data.message || '게시글을 불러오지 못했습니다.', 'error'); return; }
       const p = data.post;
       document.getElementById('postDetailTitle').textContent = p.title;
       document.getElementById('postDetailMeta').innerHTML = `
@@ -3909,11 +3912,12 @@
     }
 
     async function deleteComment(commentId) {
-      if (!currentPostId || !confirm('댓글을 삭제하시겠습니까?')) return;
+      if (!currentPostId) return;
+      if (!await classConfirm({ title:'댓글 삭제', message:'댓글을 삭제하시겠습니까?', okLabel:'삭제', danger:true })) return;
       const res = await fetch(`/api/board/${classId}/${currentPostId}/comments/${commentId}`, { method: 'DELETE' });
       const data = await res.json();
       if (data.success) openPost(currentPostId);
-      else alert(data.message);
+      else classToast(data.message || '삭제 실패', 'error');
     }
 
     async function addComment() {
@@ -3944,14 +3948,15 @@
       });
       const data = await res.json();
       if (data.success) openPost(currentPostId);
-      else alert(data.message);
+      else classToast(data.message || '댓글 등록 실패', 'error');
     }
 
     async function deletePost() {
-      if (!currentPostId || !confirm('이 게시글을 삭제하시겠습니까?')) return;
+      if (!currentPostId) return;
+      if (!await classConfirm({ title:'게시글 삭제', message:'이 게시글을 삭제하시겠습니까?', okLabel:'삭제', danger:true })) return;
       const res = await fetch(`/api/board/${classId}/${currentPostId}`, { method: 'DELETE' });
       const data = await res.json();
-      if (data.success) { closeBoardDetail(); loadBoard(true); } else alert(data.message);
+      if (data.success) { closeBoardDetail(); loadBoard(true); classToast('삭제되었습니다.', 'success'); } else classToast(data.message || '삭제 실패', 'error');
     }
 
     // Quill 에디터 초기화
@@ -4130,7 +4135,7 @@
     function closePostModal() { document.getElementById('postModal').classList.remove('active'); }
     async function savePost() {
       const title = document.getElementById('postTitle').value.trim();
-      if (!title) return alert('제목을 입력하세요.');
+      if (!title) { classToast('제목을 입력하세요.', 'warning'); return; }
       const category = document.getElementById('postCategory').value;
 
       // 갤러리 타입이면 이미지 업로드
@@ -4143,7 +4148,7 @@
           const uploadRes = await fetch('/api/upload?type=board', { method: 'POST', body: formData });
           const uploadData = await uploadRes.json();
           if (uploadData.success) imageUrl = uploadData.file.url;
-          else return alert('이미지 업로드 실패: ' + uploadData.message);
+          else { classToast('이미지 업로드 실패: ' + uploadData.message, 'error'); return; }
         }
       }
 
@@ -4165,7 +4170,7 @@
         body: JSON.stringify(body)
       });
       const data = await res.json();
-      if (data.success) { closePostModal(); document.getElementById('postTitle').value = ''; document.getElementById('postContent').value = ''; loadBoard(true); } else alert(data.message);
+      if (data.success) { closePostModal(); document.getElementById('postTitle').value = ''; document.getElementById('postContent').value = ''; loadBoard(true); classToast('게시글이 등록되었습니다.', 'success'); } else classToast(data.message || '등록 실패', 'error');
     }
 
     // ===== 소통쪽지 =====
@@ -4264,15 +4269,15 @@
     async function sendNewMessage() {
       const targetUserId = parseInt(document.getElementById('msgTargetUser').value);
       const content = document.getElementById('msgNewContent').value.trim();
-      if (!targetUserId) return alert('받는 사람을 선택하세요.');
-      if (!content) return alert('메시지를 입력하세요.');
+      if (!targetUserId) { classToast('받는 사람을 선택하세요.', 'warning'); return; }
+      if (!content) { classToast('메시지를 입력하세요.', 'warning'); return; }
       // 1:1 방 생성 or 기존 방 열기
       const roomRes = await fetch('/api/message/rooms', {
         method: 'POST', headers: {'Content-Type':'application/json'},
         body: JSON.stringify({ classId: parseInt(classId), targetUserId })
       });
       const roomData = await roomRes.json();
-      if (!roomData.success) return alert(roomData.message);
+      if (!roomData.success) { classToast(roomData.message || '방을 만들 수 없습니다.', 'error'); return; }
       // 메시지 전송
       await fetch(`/api/message/rooms/${roomData.room.id}/messages`, {
         method: 'POST', headers: {'Content-Type':'application/json'},
@@ -4323,7 +4328,7 @@
       currentSurveyId = surveyId;
       const res = await fetch(`/api/survey/${classId}/${surveyId}`);
       const data = await res.json();
-      if (!data.success) return alert(data.message);
+      if (!data.success) { classToast(data.message || '설문을 불러오지 못했습니다.', 'error'); return; }
       const s = data.survey;
       document.getElementById('surveyDetailTitle').textContent = s.title;
       document.getElementById('surveyDetailDesc').textContent = s.description || '';
@@ -4487,10 +4492,10 @@
       });
       const data = await res.json();
       if (data.success) {
-        alert('설문이 제출되었습니다!');
+        classToast('설문이 제출되었습니다!', 'success');
         openSurvey(currentSurveyId);
       } else {
-        alert(data.message);
+        classToast(data.message || '제출 실패', 'error');
       }
     }
 
@@ -4527,7 +4532,7 @@
 
     async function saveSurvey() {
       const title = document.getElementById('surveyTitle').value.trim();
-      if (!title) return alert('제목을 입력하세요.');
+      if (!title) { classToast('제목을 입력하세요.', 'warning'); return; }
       const questions = [];
       document.querySelectorAll('#questionItems > div').forEach(div => {
         const text = div.querySelector('.q-text').value.trim();
@@ -4553,11 +4558,11 @@
         })
       });
       const data = await res.json();
-      if (data.success) { closeSurveyModal(); loadSurveys(); } else alert(data.message);
+      if (data.success) { closeSurveyModal(); loadSurveys(); classToast('설문이 등록되었습니다.', 'success'); } else classToast(data.message || '등록 실패', 'error');
     }
 
     function copyCode(code) {
-      navigator.clipboard.writeText(code).then(() => alert('클래스 코드가 복사되었습니다: ' + code));
+      navigator.clipboard.writeText(code).then(() => classToast('클래스 코드가 복사되었습니다: ' + code, 'success'));
     }
 
     function escHtml(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
