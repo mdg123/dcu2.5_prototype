@@ -494,7 +494,9 @@ function createSection(payload = {}, userId = null) {
   const subtitle = payload.subtitle ? String(payload.subtitle) : null;
   const sort_order = parseInt(payload.sort_order, 10) || 0;
   const is_active = (payload.is_active === undefined || payload.is_active === null) ? 1 : (payload.is_active ? 1 : 0);
-  const fallback_enabled = (payload.fallback_enabled === undefined || payload.fallback_enabled === null) ? 1 : (payload.fallback_enabled ? 1 : 0);
+  // 정책(2026-05-07): 새로 추가하는 발행은 자동추천(폴백) 기본 OFF.
+  // 시드 4행만 폴백 ON으로 운영 (관리자가 슬롯을 채우지 않을 때 시스템 추천으로 보충).
+  const fallback_enabled = (payload.fallback_enabled === undefined || payload.fallback_enabled === null) ? 0 : (payload.fallback_enabled ? 1 : 0);
   const max_items = parseInt(payload.max_items, 10) || 8;
 
   const info = db.prepare(`

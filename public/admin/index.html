@@ -1223,12 +1223,13 @@
               <div class="fc-section-subtitle">${escHtml(s.subtitle || '부제 없음')}</div>
               <div class="fc-section-meta">
                 <span class="fc-meta-chip">${itemTypeLabel} ${s.item_count || 0} / ${s.max_items}</span>
-                <span class="fc-meta-chip fc-chip-toggle ${s.is_active ? 'active' : 'inactive'}" data-action="toggle-active" title="클릭하면 노출/숨김 전환">
-                  ${s.is_active ? '<i class="fas fa-eye"></i> 노출' : '<i class="fas fa-eye-slash"></i> 숨김'}
+                <span class="fc-meta-chip fc-chip-toggle ${s.is_active ? 'active' : 'inactive'}" data-action="toggle-active" title="클릭하면 사용자 화면 공개/비공개 전환">
+                  ${s.is_active ? '<i class="fas fa-eye"></i> 공개' : '<i class="fas fa-eye-slash"></i> 비공개'}
                 </span>
-                <span class="fc-meta-chip fc-chip-toggle ${s.fallback_enabled ? 'fb-on' : 'fb-off'}" data-action="toggle-fallback" title="클릭하면 자동 추천(폴백) 켜기/끄기">
-                  ${s.fallback_enabled ? '<i class="fas fa-magic"></i> 자동추천' : '<i class="fas fa-magic"></i> 자동추천 OFF'}
-                </span>
+                ${isSeed ? `
+                  <span class="fc-meta-chip fc-chip-toggle ${s.fallback_enabled ? 'fb-on' : 'fb-off'}" data-action="toggle-fallback" title="시드 섹션의 자동 추천(폴백) — 등록 슬롯이 부족하면 시스템 추천으로 채움">
+                    ${s.fallback_enabled ? '<i class="fas fa-magic"></i> 자동추천' : '<i class="fas fa-magic"></i> 자동추천 OFF'}
+                  </span>` : ''}
               </div>
               <div class="fc-card-meta2">
                 <span class="fc-status-chip ${status}">${escHtml(statusLabel)}</span>
@@ -1573,14 +1574,15 @@
               <label class="fc-toggle">
                 <input type="checkbox" id="fcEditActive" ${s.is_active ? 'checked' : ''}>
                 <span class="fc-track"></span>
-                <span style="margin-left:4px;">${s.is_active ? '노출' : '숨김'}</span>
+                <span style="margin-left:4px;">${s.is_active ? '공개' : '비공개'}</span>
               </label>
             </div>
           </div>
+          ${[1,2,3,4].includes(s.id) ? `
           <div class="fc-fallback-row">
             <input type="checkbox" id="fcEditFallback" ${s.fallback_enabled ? 'checked' : ''} style="width:18px;height:18px;accent-color:#2563eb;">
-            <label for="fcEditFallback"><strong>자동 추천으로 채움</strong> <span class="hint">— 슬롯이 비거나 부족할 때 시스템 추천 알고리즘으로 자동 보충</span></label>
-          </div>
+            <label for="fcEditFallback"><strong>자동 추천으로 채움</strong> <span class="hint">— 시드 섹션 전용. 슬롯이 비거나 부족할 때 시스템 추천 알고리즘으로 자동 보충</span></label>
+          </div>` : ''}
         </div>
 
         <!-- 배포 대상 -->
@@ -1646,8 +1648,16 @@
       subtitleEl.addEventListener('input', () => onDebounceSave('subtitle', subtitleEl.value.trim()));
       layoutEl.addEventListener('change', () => patchSection(s.id, { layout: layoutEl.value }));
       maxItemsEl.addEventListener('change', () => patchSection(s.id, { max_items: parseInt(maxItemsEl.value, 10) }));
-      activeEl.addEventListener('change', () => patchSection(s.id, { is_active: activeEl.checked ? 1 : 0 }));
-      fallbackEl.addEventListener('change', () => patchSection(s.id, { fallback_enabled: fallbackEl.checked ? 1 : 0 }));
+      activeEl.addEventListener('change', () => {
+        patchSection(s.id, { is_active: activeEl.checked ? 1 : 0 });
+        // "공개"/"비공개" 라벨 즉시 갱신
+        const lbl = activeEl.closest('label')?.querySelector('span:last-child');
+        if (lbl) lbl.textContent = activeEl.checked ? '공개' : '비공개';
+      });
+      // fallbackEl은 시드 4행만 존재 (시드 외에는 마크업 자체가 없음)
+      if (fallbackEl) {
+        fallbackEl.addEventListener('change', () => patchSection(s.id, { fallback_enabled: fallbackEl.checked ? 1 : 0 }));
+      }
 
       // 멀티콤보 4개 — 자동저장 (디바운스 300ms)
       const debouncedPatch = (key, val) => {
@@ -1893,13 +1903,9 @@
             chip.textContent = FC_STATUS_LABEL[newStatus] || newStatus;
           });
         }
-        if (overlap) {
-          showAdminToast('기간이 겹치는 발행이 있습니다', 'warning');
-        }
-
         // 좌측 다시 그리기 (선택 유지)
         renderCurationLeft();
-        if (!overlap) showAdminToast('저장됨', 'success');
+        showAdminToast('저장됨', 'success');
       } catch (err) {
         console.error('[FC] patchSection error:', err);
         showAdminToast('네트워크 오류: ' + err.message, 'error');
