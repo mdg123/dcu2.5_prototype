@@ -260,26 +260,9 @@ function listSections({ activeOnly = false, includeWarnings = false } = {}) {
   const serialized = rows.map(r => _serializeSection(r, now));
 
   if (includeWarnings) {
-    // 사전 PERIOD_OVERLAP 검출 — 같은 key의 다른 활성 행과 게시기간이 겹치는지
-    return serialized.map(s => {
-      const warnings = [];
-      if (s.is_active === 1) {
-        const overlaps = findPeriodOverlaps(s.id, s.key, s.publish_start, s.publish_end, {
-          school_levels: s.target_school_levels,
-          roles:         s.target_roles,
-          grades:        s.target_grades,
-          subjects:      s.target_subjects,
-        });
-        if (overlaps.length > 0) {
-          warnings.push({
-            code: 'PERIOD_OVERLAP',
-            overlap_with: overlaps.map(o => o.id),
-            message: `같은 섹션 키(${s.key})를 가진 다른 활성 행과 게시 기간·배포 대상이 겹칩니다.`
-          });
-        }
-      }
-      return { ...s, warnings };
-    });
+    // 정책 변경(2026-05-07): 같은 key의 여러 발행은 "스택처럼" sort_order 순으로
+    // 모두 노출되는 게 정책. 중복(PERIOD_OVERLAP)을 경고하지 않음.
+    return serialized.map(s => ({ ...s, warnings: [] }));
   }
   return serialized;
 }
@@ -373,32 +356,8 @@ function updateSection(id, payload = {}, userId = null) {
   if (info.changes === 0) return { ok: false, code: 'NOT_FOUND' };
   invalidateFeaturedCache();
 
-  // 기간/타깃팅 중첩 검출 (publish_start/end · is_active · target_* 변경 시)
-  const warnings = [];
-  const overlapTriggers = ['publish_start', 'publish_end', 'is_active',
-    'target_school_levels', 'target_roles', 'target_grades', 'target_subjects'];
-  const periodChanged = overlapTriggers.some(k => k in payload);
-  if (periodChanged) {
-    const updated = db.prepare(`SELECT id, key, publish_start, publish_end, is_active,
-      target_school_levels, target_roles, target_grades, target_subjects
-      FROM featured_sections WHERE id = ?`).get(id);
-    if (updated && updated.is_active === 1) {
-      const overlaps = findPeriodOverlaps(updated.id, updated.key, updated.publish_start, updated.publish_end, {
-        school_levels: parseJsonArray(updated.target_school_levels),
-        roles:         parseJsonArray(updated.target_roles),
-        grades:        parseJsonArray(updated.target_grades),
-        subjects:      parseJsonArray(updated.target_subjects),
-      });
-      if (overlaps.length > 0) {
-        warnings.push({
-          code: 'PERIOD_OVERLAP',
-          overlap_with: overlaps.map(o => o.id),
-          message: `같은 섹션 키(${updated.key})를 가진 다른 활성 행과 게시 기간·배포 대상이 겹칩니다.`
-        });
-      }
-    }
-  }
-  return { ok: true, section: getSection(id), warnings };
+  // 정책(2026-05-07): PERIOD_OVERLAP 경고 폐기. 같은 key 여러 발행은 sort_order 순으로 모두 노출.
+  return { ok: true, section: getSection(id), warnings: [] };
 }
 
 /**
@@ -554,24 +513,8 @@ function createSection(payload = {}, userId = null) {
   const newId = info.lastInsertRowid;
   const section = getSection(newId);
 
-  // 기간 중첩 사전 검출
-  const warnings = [];
-  if (is_active === 1) {
-    const overlaps = findPeriodOverlaps(newId, key, ps, pe, {
-      school_levels: parseJsonArray(target_school_levels),
-      roles:         parseJsonArray(target_roles),
-      grades:        parseJsonArray(target_grades),
-      subjects:      parseJsonArray(target_subjects),
-    });
-    if (overlaps.length > 0) {
-      warnings.push({
-        code: 'PERIOD_OVERLAP',
-        overlap_with: overlaps.map(o => o.id),
-        message: `같은 섹션 키(${key})를 가진 다른 활성 행과 게시 기간·배포 대상이 겹칩니다.`
-      });
-    }
-  }
-  return { ok: true, section, warnings };
+  // 정책(2026-05-07): PERIOD_OVERLAP 경고 폐기. 같은 key 여러 발행은 sort_order 순으로 모두 노출.
+  return { ok: true, section, warnings: [] };
 }
 
 /**
@@ -600,8 +543,8 @@ function reorderSections(order = [], userId = null) {
 }
 
 /**
- * 섹션 삭제 — POST로 추가된 발행 row만 삭제 가능.
- * 시드 4행(id 1~4)은 보호 (DELETE 불가, 폴백 기준 보존).
+ * 섹션 삭제 — 시드 4행(planning/recommend/channels/new)은 보호.
+ * 활성/비활성은 시드도 자유롭게 토글 가능. 삭제만 새 발행에 한함.
  */
 const PROTECTED_SECTION_IDS = [1, 2, 3, 4];
 function deleteSection(id) {

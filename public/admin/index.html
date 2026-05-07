@@ -1208,7 +1208,7 @@
         const statusLabel = FC_STATUS_LABEL[status] || status;
         const periodTxt = formatShortPeriod(s.publish_start, s.publish_end);
         const targetTxt = formatShortTarget(s);
-        const hasOverlap = (s.warnings || []).some(w => w && w.code === 'PERIOD_OVERLAP');
+        const hasOverlap = false; // 정책 변경(2026-05-07): PERIOD_OVERLAP 경고 폐기
         const isSeed = PROTECTED_SEED_IDS.includes(s.id);
         const deleteBtn = isSeed ? '' : `
               <button type="button" class="fc-card-delete" data-action="delete-publication" title="이 발행 삭제" aria-label="발행 삭제">
@@ -1528,7 +1528,7 @@
       const itemTypeLabel = s.item_type === 'channel' ? '채널' : '콘텐츠';
       const status = s.status_derived || (s.is_active ? 'published' : 'inactive');
       const statusLabel = FC_STATUS_LABEL[status] || status;
-      const overlapWarn = (s.warnings || []).find(w => w && w.code === 'PERIOD_OVERLAP');
+      const overlapWarn = null; // 정책 변경(2026-05-07): PERIOD_OVERLAP 경고 폐기
 
       // 시드 4행(id 1~4) 보호 — 삭제 버튼 자체를 숨김
       const isSeed = [1,2,3,4].includes(s.id);
@@ -1882,13 +1882,10 @@
         const sec = FC.sections.find(s => s.id === id);
         if (sec && data.section) Object.assign(sec, data.section);
 
-        // warnings 처리 (PERIOD_OVERLAP)
-        const warnings = Array.isArray(data.warnings) ? data.warnings : [];
-        const overlap = warnings.find(w => w && w.code === 'PERIOD_OVERLAP');
-        // 우측 패널이 현재 이 섹션이면 경고 박스 갱신 + 상태 칩 갱신
+        // 정책 변경(2026-05-07): PERIOD_OVERLAP 경고 폐기
         if (FC.selectedId === id) {
           const slot = document.getElementById('fcWarnSlot');
-          if (slot) slot.innerHTML = overlap ? renderOverlapWarn(overlap) : '';
+          if (slot) slot.innerHTML = '';
           // 상태 칩 갱신 (헤더 + 게시 기간 박스 양쪽)
           const newStatus = (sec && sec.status_derived) || (sec && sec.is_active ? 'published' : 'inactive');
           document.querySelectorAll('#fcRightPanel .fc-status-chip').forEach(chip => {
@@ -1944,12 +1941,9 @@
           return;
         }
         const newId = data.section && data.section.id;
-        const warnings = Array.isArray(data.warnings) ? data.warnings : [];
-        const overlap = warnings.find(w => w && w.code === 'PERIOD_OVERLAP');
-
+        // 정책 변경(2026-05-07): PERIOD_OVERLAP 경고 폐기 — 항상 success 토스트
         closeAddPublicationModal();
-        if (overlap) showAdminToast('기간이 겹치는 발행이 있습니다', 'warning');
-        else showAdminToast('새 발행을 추가했습니다', 'success');
+        showAdminToast('새 발행을 추가했습니다', 'success');
 
         // 목록 새로고침 후 새 행 자동 선택
         await loadFeaturedCuration();
