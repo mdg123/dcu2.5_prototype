@@ -118,30 +118,60 @@ function getDashboardStats(userId) {
   };
 }
 
+// ISO YYYY-MM-DD 날짜 검증 (잘못된 형식이면 null 반환)
+function _validIsoDate(s) {
+  return typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null;
+}
+
 // 클래스 LRS 통계 (교사용)
-function getClassLrsStats(classId) {
-  const totalLogs = db.prepare('SELECT COUNT(*) as cnt FROM learning_logs WHERE class_id = ?').get(classId).cnt;
+// opts: { startDate?: 'YYYY-MM-DD', endDate?: 'YYYY-MM-DD' }
+function getClassLrsStats(classId, opts = {}) {
+  const startDate = _validIsoDate(opts.startDate);
+  const endDate = _validIsoDate(opts.endDate);
+
+  // 공통 WHERE 절 빌더 (테이블 별칭 옵션)
+  function buildWhere(alias) {
+    const a = alias ? alias + '.' : '';
+    const conds = [`${a}class_id = ?`];
+    const params = [classId];
+    if (startDate) { conds.push(`${a}created_at >= ?`); params.push(startDate + ' 00:00:00'); }
+    if (endDate)   { conds.push(`${a}created_at <= ?`); params.push(endDate + ' 23:59:59'); }
+    return { sql: conds.join(' AND '), params };
+  }
+
+  const wTot = buildWhere();
+  const totalLogs = db.prepare(`SELECT COUNT(*) as cnt FROM learning_logs WHERE ${wTot.sql}`).get(...wTot.params).cnt;
 
   // 학생별 활동 통계 — duration_sec 우선 (C-4)
+  const wByS = buildWhere('ll');
   const byStudent = db.prepare(`
     SELECT ll.user_id, u.display_name, COUNT(*) as activity_count,
            COALESCE(SUM(COALESCE(ll.duration_sec, ll.duration, CAST(REPLACE(REPLACE(COALESCE(ll.result_duration,''),'PT',''),'S','') AS INTEGER), 0)), 0) as total_duration
     FROM learning_logs ll JOIN users u ON ll.user_id = u.id
-    WHERE ll.class_id = ?
+    WHERE ${wByS.sql}
     GROUP BY ll.user_id ORDER BY activity_count DESC
-  `).all(classId);
+  `).all(...wByS.params);
 
   // 활동 유형별
-  const byType = db.prepare(`
-    SELECT activity_type, COUNT(*) as cnt FROM learning_logs WHERE class_id = ? GROUP BY activity_type ORDER BY cnt DESC
-  `).all(classId);
+  const wType = buildWhere();
+  const byType = db.prepare(
+    `SELECT activity_type, COUNT(*) as cnt FROM learning_logs WHERE ${wType.sql} GROUP BY activity_type ORDER BY cnt DESC`
+  ).all(...wType.params);
 
-  // 최근 7일 추이
-  const dailyTrend = db.prepare(`
-    SELECT DATE(created_at) as date, COUNT(*) as cnt
-    FROM learning_logs WHERE class_id = ? AND created_at >= DATE('now', '-7 days')
-    GROUP BY DATE(created_at) ORDER BY date
-  `).all(classId);
+  // 일별 추이 — 기간 미지정 시 종전대로 최근 7일, 지정 시 해당 구간 전체
+  let dailyTrend;
+  if (startDate || endDate) {
+    const wTrend = buildWhere();
+    dailyTrend = db.prepare(
+      `SELECT DATE(created_at) as date, COUNT(*) as cnt FROM learning_logs WHERE ${wTrend.sql} GROUP BY DATE(created_at) ORDER BY date`
+    ).all(...wTrend.params);
+  } else {
+    dailyTrend = db.prepare(`
+      SELECT DATE(created_at) as date, COUNT(*) as cnt
+      FROM learning_logs WHERE class_id = ? AND created_at >= DATE('now', '-7 days')
+      GROUP BY DATE(created_at) ORDER BY date
+    `).all(classId);
+  }
 
   return { totalLogs, byStudent, byType, dailyTrend };
 }

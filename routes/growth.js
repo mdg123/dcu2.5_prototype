@@ -127,7 +127,10 @@ router.get('/class/:classId', requireAuth, (req, res) => {
     if (myRole !== 'owner' && req.user.role !== 'admin') {
       return res.status(403).json({ success: false, message: '개설자만 접근 가능합니다.' });
     }
-    const overview = growthDb.getClassGrowthOverview(classId);
+    const overview = growthDb.getClassGrowthOverview(classId, {
+      startDate: req.query.startDate,
+      endDate: req.query.endDate
+    });
     res.json({ success: true, overview });
   } catch (err) {
     res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });

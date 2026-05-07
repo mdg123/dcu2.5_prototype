@@ -293,7 +293,10 @@ router.get('/class/:classId', requireAuth, (req, res) => {
     if (!canViewClass(req, classId)) {
       return res.status(403).json({ success: false, message: '권한이 없습니다.' });
     }
-    const stats = lrsDb.getClassLrsStats(classId);
+    const stats = lrsDb.getClassLrsStats(classId, {
+      startDate: req.query.startDate,
+      endDate: req.query.endDate
+    });
     res.json({ success: true, stats });
   } catch (err) {
     res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });

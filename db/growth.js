@@ -103,7 +103,12 @@ function getStudentGrowthSummary(studentId) {
 }
 
 // 클래스 내 학생들의 성장 현황 (교사용)
-function getClassGrowthOverview(classId) {
+// opts: { startDate?: 'YYYY-MM-DD', endDate?: 'YYYY-MM-DD' }
+function getClassGrowthOverview(classId, opts = {}) {
+  const isIso = (s) => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s);
+  const startDate = isIso(opts.startDate) ? opts.startDate : null;
+  const endDate = isIso(opts.endDate) ? opts.endDate : null;
+
   const members = db.prepare(`
     SELECT cm.user_id, u.display_name, u.username
     FROM class_members cm JOIN users u ON cm.user_id = u.id
@@ -111,18 +116,39 @@ function getClassGrowthOverview(classId) {
     ORDER BY u.display_name
   `).all(classId);
 
+  // learning_logs 용 기간 필터 (created_at 기준)
+  function logsRange(extraParams) {
+    const conds = ['user_id = ?', 'class_id = ?'];
+    const params = [...extraParams];
+    if (startDate) { conds.push('created_at >= ?'); params.push(startDate + ' 00:00:00'); }
+    if (endDate)   { conds.push('created_at <= ?'); params.push(endDate + ' 23:59:59'); }
+    return { sql: conds.join(' AND '), params };
+  }
+
+  // portfolios 용 기간 필터 (created_at 기준)
+  function pfRange(extraParams) {
+    const conds = ['student_id = ?', 'class_id = ?'];
+    const params = [...extraParams];
+    if (startDate) { conds.push('created_at >= ?'); params.push(startDate + ' 00:00:00'); }
+    if (endDate)   { conds.push('created_at <= ?'); params.push(endDate + ' 23:59:59'); }
+    return { sql: conds.join(' AND '), params };
+  }
+
   const studentStats = members.map(m => {
+    const w1 = logsRange([m.user_id, classId]);
     const activityCount = db.prepare(
-      'SELECT COUNT(*) as cnt FROM learning_logs WHERE user_id = ? AND class_id = ?'
-    ).get(m.user_id, classId).cnt;
+      `SELECT COUNT(*) as cnt FROM learning_logs WHERE ${w1.sql}`
+    ).get(...w1.params).cnt;
 
+    const w2 = logsRange([m.user_id, classId]);
     const totalTime = db.prepare(
-      'SELECT COALESCE(SUM(CAST(result_duration AS INTEGER)), 0) as total FROM learning_logs WHERE user_id = ? AND class_id = ?'
-    ).get(m.user_id, classId).total;
+      `SELECT COALESCE(SUM(CAST(result_duration AS INTEGER)), 0) as total FROM learning_logs WHERE ${w2.sql}`
+    ).get(...w2.params).total;
 
+    const w3 = pfRange([m.user_id, classId]);
     const portfolioCount = db.prepare(
-      'SELECT COUNT(*) as cnt FROM portfolios WHERE student_id = ? AND class_id = ?'
-    ).get(m.user_id, classId).cnt;
+      `SELECT COUNT(*) as cnt FROM portfolios WHERE ${w3.sql}`
+    ).get(...w3.params).cnt;
 
     return {
       ...m,

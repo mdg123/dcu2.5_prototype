@@ -333,7 +333,10 @@
     let isWaiting = true; // 시작 전까지는 대기 상태 (탭 이탈 기록 방지)
     let examStarted = false;
     let isSubmitted = false;
-    let isIntroShown = false; // 안내 화면이 노출 중이면 소켓 자동 시작 차단
+    // 안내 화면 차단 플래그: loadExam() 진입 즉시 true → loadExam이 분기 결정 후 필요 시 false
+    // 페이지 로드~loadExam 진입 직전 사이에 도착한 소켓 이벤트가 자동 beginExam() 못 하게 차단
+    let isIntroShown = true;
+    let isLoaded = false; // exam 데이터 로드 완료 여부 — 소켓 race 방지
     let alertBarTimer = null;
 
     document.addEventListener('dacheim:user-loaded', (e) => { currentUser = e.detail; init(); });
@@ -363,8 +366,11 @@
           if (data && data.startedAt) {
             if (exam) exam._startedAt = data.startedAt;
           }
-          // 안내 화면이 노출 중이면 학생이 직접 "시작하기"를 눌러야 시작 (자동 진입 금지)
-          if (isWaiting && !examStarted && !isIntroShown) {
+          // 가드: exam 미로드 / 인트로 노출 중 / 이미 시작·제출됨이면 자동 진입 차단
+          if (!isLoaded || !exam) return;
+          if (isIntroShown || isSubmitted) return;
+          // 안내 화면 노출 중이 아니고 대기실에서 기다리는 경우에만 자동 시작
+          if (isWaiting && !examStarted) {
             document.getElementById('waitingRoom').style.display = 'none';
             beginExam();
           }
@@ -372,7 +378,10 @@
 
         // 시험 상태 확인
         socket.on('exam:status', (data) => {
-          if (data.status === 'active' && isWaiting && !examStarted && !isIntroShown) {
+          // 가드: exam 미로드 / 인트로 노출 중이면 자동 진입 차단
+          if (!isLoaded || !exam) return;
+          if (isIntroShown || isSubmitted) return;
+          if (data.status === 'active' && isWaiting && !examStarted) {
             document.getElementById('waitingRoom').style.display = 'none';
             beginExam();
           }
@@ -407,6 +416,7 @@
       try {
         // 안내 화면이 뜰 때까지 소켓 자동 시작 차단 (loadExam 진입 시점부터 막음)
         isIntroShown = true;
+        isLoaded = false;
         // 시험 데이터 로드
         const res = await fetch(`/api/exam/${classId}/${examId}`);
         const data = await res.json();
@@ -428,9 +438,10 @@
           });
         };
 
-        // 리뷰 모드
+        // 리뷰 모드 (URL ?review=true)
         if (isReviewMode && data.studentExam) {
           isIntroShown = false;
+          isLoaded = true;
           correctAnswers = questions.map(q => q.answer);
           const myAns = normalizeServerAnswers(data.studentExam.answers);
           myAns.forEach((a, i) => { if (i < answers.length) answers[i] = (a === undefined ? null : a); });
@@ -447,6 +458,7 @@
         // 이미 제출했는지 확인 → 리뷰 모드로 자동 전환
         if (data.studentExam && data.studentExam.status === 'submitted') {
           isIntroShown = false;
+          isLoaded = true;
           correctAnswers = questions.map(q => q.answer);
           const myAns = normalizeServerAnswers(data.studentExam.answers);
           myAns.forEach((a, i) => { if (i < answers.length) answers[i] = (a === undefined ? null : a); });
@@ -454,6 +466,24 @@
           enterReviewMode();
           return;
         }
+
+        // 이미 시작된 응시 기록(started/in_progress)이 있으면 안내 건너뛰고 바로 진행 (이전 진도 복원)
+        const studentStatus = data.studentExam ? String(data.studentExam.status || '').toLowerCase() : null;
+        const isAlreadyStarted = studentStatus === 'started' || studentStatus === 'in_progress' || studentStatus === 'active';
+        if (isAlreadyStarted) {
+          // 이미 시작된 응시 — 인트로 건너뛰고 즉시 시험 진행
+          if (data.studentExam && data.studentExam.answers) {
+            const myAns = normalizeServerAnswers(data.studentExam.answers);
+            myAns.forEach((a, i) => { if (i < answers.length && a !== undefined) answers[i] = a; });
+          }
+          await restoreSavedAnswers();
+          isIntroShown = false;
+          isLoaded = true;
+          beginExam();
+          return;
+        }
+
+        isLoaded = true;
 
         // 시험 상태 및 start_mode에 따른 분기
         if (exam.start_mode === 'direct' || exam.status === 'active') {
@@ -523,6 +553,11 @@
 
     function beginExam() {
       if (examStarted) return; // 중복 호출 방지
+      // 안전 가드: exam이 아직 로드되지 않았으면 진입 금지 (소켓 race로 인한 crash 방지)
+      if (!exam || !Array.isArray(questions)) {
+        console.warn('beginExam: exam not yet loaded, aborting');
+        return;
+      }
       isWaiting = false;
       examStarted = true;
       // 시험 시작 API 호출

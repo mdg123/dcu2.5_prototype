@@ -565,6 +565,23 @@ router.get('/:classId/students/self-learn-summary', requireAuth, (req, res) => {
     }
 
     const db = require('../db/index');
+
+    // 기간 필터 (옵션) — ISO YYYY-MM-DD만 허용, 잘못되면 무시(전체 범위)
+    const isIso = (s) => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s);
+    const startDate = isIso(req.query.startDate) ? req.query.startDate : null;
+    const endDate = isIso(req.query.endDate) ? req.query.endDate : null;
+    const startTs = startDate ? startDate + ' 00:00:00' : null;
+    const endTs = endDate ? endDate + ' 23:59:59' : null;
+
+    // 컬럼별 기간 절 빌더 (테이블별 시간 컬럼이 다름)
+    function rangeClause(col) {
+      const parts = [];
+      const params = [];
+      if (startTs) { parts.push(`${col} >= ?`); params.push(startTs); }
+      if (endTs)   { parts.push(`${col} <= ?`); params.push(endTs); }
+      return { sql: parts.length ? ' AND ' + parts.join(' AND ') : '', params };
+    }
+
     // 클래스 학생 목록 (role=student)
     const students = db.prepare(`
       SELECT u.id, u.username, u.display_name
@@ -574,40 +591,60 @@ router.get('/:classId/students/self-learn-summary', requireAuth, (req, res) => {
       ORDER BY u.display_name
     `).all(classId);
 
-    const completedNodesStmt = db.prepare(`
-      SELECT COUNT(*) AS cnt FROM user_node_status
-      WHERE user_id = ? AND status IN ('completed','mastered')
-    `);
-    const inProgressStmt = db.prepare(`
-      SELECT COUNT(*) AS cnt FROM user_node_status
-      WHERE user_id = ? AND status = 'in_progress'
-    `);
+    // user_node_status: status IN(completed,mastered) → completed_at 기준
+    const cnRange = rangeClause('completed_at');
+    const completedNodesStmt = db.prepare(
+      `SELECT COUNT(*) AS cnt FROM user_node_status WHERE user_id = ? AND status IN ('completed','mastered')${cnRange.sql}`
+    );
+    // user_node_status: in_progress → last_accessed_at 기준
+    const ipRange = rangeClause('last_accessed_at');
+    const inProgressStmt = db.prepare(
+      `SELECT COUNT(*) AS cnt FROM user_node_status WHERE user_id = ? AND status = 'in_progress'${ipRange.sql}`
+    );
+    // problem_attempts: submitted_at 기준
+    const paRange = rangeClause('submitted_at');
     const attemptsStmt = db.prepare(`
       SELECT COUNT(*) AS total,
              SUM(CASE WHEN is_correct = 1 THEN 1 ELSE 0 END) AS correct
-      FROM problem_attempts WHERE user_id = ?
+      FROM problem_attempts WHERE user_id = ?${paRange.sql}
     `);
-    const videoTimeStmt = db.prepare(`
-      SELECT COALESCE(SUM(position_sec), 0) AS sec FROM user_content_progress WHERE user_id = ?
-    `);
-    const dailyTimeStmt = db.prepare(`
-      SELECT COALESCE(SUM(time_spent_seconds), 0) AS sec FROM daily_learning_progress WHERE user_id = ?
-    `);
+    // user_content_progress: updated_at 기준
+    const ucpRange = rangeClause('updated_at');
+    const videoTimeStmt = db.prepare(
+      `SELECT COALESCE(SUM(position_sec), 0) AS sec FROM user_content_progress WHERE user_id = ?${ucpRange.sql}`
+    );
+    // daily_learning_progress: started_at 기준 (시작 시점 기준 누적)
+    const dlpRange = rangeClause('started_at');
+    const dailyTimeStmt = db.prepare(
+      `SELECT COALESCE(SUM(time_spent_seconds), 0) AS sec FROM daily_learning_progress WHERE user_id = ?${dlpRange.sql}`
+    );
+    // user_last_activity: 단일 user별 1행이라 기간 무시 (마지막 활동시각 자체)
     const lastActivityStmt = db.prepare(`
       SELECT MAX(accessed_at) AS at FROM user_last_activity WHERE user_id = ?
     `);
-    const distinctDaysStmt = db.prepare(`
-      SELECT DISTINCT DATE(accessed_at) AS d FROM user_last_activity
-      WHERE user_id = ? AND accessed_at >= DATE('now', '-30 days')
-      ORDER BY d DESC
-    `);
+    // 스트릭 계산용 — 기간 미지정 시 종전대로 최근 30일, 지정 시 해당 구간
+    let distinctDaysStmt;
+    if (startTs || endTs) {
+      const ulaRange = rangeClause('accessed_at');
+      distinctDaysStmt = db.prepare(
+        `SELECT DISTINCT DATE(accessed_at) AS d FROM user_last_activity WHERE user_id = ?${ulaRange.sql} ORDER BY d DESC`
+      );
+    } else {
+      distinctDaysStmt = db.prepare(`
+        SELECT DISTINCT DATE(accessed_at) AS d FROM user_last_activity
+        WHERE user_id = ? AND accessed_at >= DATE('now', '-30 days')
+        ORDER BY d DESC
+      `);
+    }
+    // 영역별 정답률 — problem_attempts.submitted_at 기준
+    const acRange = rangeClause('pa.submitted_at');
     const areaCorrectStmt = db.prepare(`
       SELECT n.subject AS area,
              COUNT(*) AS total,
              SUM(CASE WHEN pa.is_correct = 1 THEN 1 ELSE 0 END) AS correct
       FROM problem_attempts pa
       LEFT JOIN learning_map_nodes n ON n.node_id = pa.node_id
-      WHERE pa.user_id = ?
+      WHERE pa.user_id = ?${acRange.sql}
       GROUP BY n.subject
     `);
 
@@ -627,18 +664,21 @@ router.get('/:classId/students/self-learn-summary', requireAuth, (req, res) => {
     }
 
     const rows = students.map(s => {
-      const completed = completedNodesStmt.get(s.id).cnt || 0;
-      const inProgress = inProgressStmt.get(s.id).cnt || 0;
-      const att = attemptsStmt.get(s.id) || { total: 0, correct: 0 };
+      const completed = completedNodesStmt.get(s.id, ...cnRange.params).cnt || 0;
+      const inProgress = inProgressStmt.get(s.id, ...ipRange.params).cnt || 0;
+      const att = attemptsStmt.get(s.id, ...paRange.params) || { total: 0, correct: 0 };
       const totalSolved = att.total || 0;
       const avgAccuracy = totalSolved ? Math.round((att.correct / totalSolved) * 100) : 0;
-      const videoSec = videoTimeStmt.get(s.id).sec || 0;
-      const dailySec = dailyTimeStmt.get(s.id).sec || 0;
+      const videoSec = videoTimeStmt.get(s.id, ...ucpRange.params).sec || 0;
+      const dailySec = dailyTimeStmt.get(s.id, ...dlpRange.params).sec || 0;
       const totalMinutes = Math.round((videoSec + dailySec) / 60);
       const lastAt = (lastActivityStmt.get(s.id) || {}).at || null;
-      const days = distinctDaysStmt.all(s.id);
+      // distinctDaysStmt는 기간 지정 여부에 따라 추가 파라미터 유무가 달라짐
+      const days = (startTs || endTs)
+        ? distinctDaysStmt.all(s.id, ...(startTs ? [startTs] : []), ...(endTs ? [endTs] : []))
+        : distinctDaysStmt.all(s.id);
       const streak = calcStreak(days);
-      const areas = areaCorrectStmt.all(s.id).filter(a => a.area).map(a => ({
+      const areas = areaCorrectStmt.all(s.id, ...acRange.params).filter(a => a.area).map(a => ({
         area: a.area,
         total: a.total,
         correct: a.correct,
