@@ -7,6 +7,7 @@
   <link rel="stylesheet" href="/css/common-nav.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
+  <script defer src="/js/components/std-smart-search.js"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: 'Pretendard','Noto Sans KR',system-ui,sans-serif; background: #F5F7FA; color: #1A1A2E; }
@@ -974,14 +975,30 @@
         <h3 id="fcAddModalTitle"><i class="fas fa-plus-circle" style="color:#2563eb;"></i> <span id="fcAddModalLabel">콘텐츠 추가</span> <span style="font-size:14px;color:#6B7280;font-weight:500;margin-left:8px;" id="fcAddModalSubLabel"></span></h3>
         <button class="fc-modal-close" onclick="closeCurationAddModal()" aria-label="닫기"><i class="fas fa-times"></i></button>
       </div>
-      <!-- 1행: 키워드 + 체크 + 검색 + 정렬 + 뷰토글 -->
+      <!-- 검색 영역: (1) 키워드 + 성취기준 상하 배치 + 우측 검색 버튼 (2) 교집합 안내 (3) 콘텐츠 유형 칩 + 정렬 + 뷰토글 -->
       <div class="fc-modal-search">
-        <div class="fc-search-row">
-          <label class="fc-kw-check" title="검색 시 키워드 활용">
-            <input type="checkbox" id="fcSearchKwCheck" checked>
-            <span>키워드</span>
-          </label>
-          <input type="text" id="fcSearchKeyword" placeholder="제목·키워드·작성자명으로 검색">
+        <!-- 1행: 키워드 + 성취기준 상하 배치 (좌) / 우측 통합 검색 버튼 -->
+        <div class="fc-search-row" style="align-items:stretch;">
+          <div style="flex:1;display:flex;flex-direction:column;gap:8px;min-width:0;">
+            <!-- 키워드 입력 + 체크박스 -->
+            <div style="display:flex;align-items:center;gap:8px;">
+              <label class="fc-kw-check" title="검색 시 키워드 활용" style="flex-shrink:0;">
+                <input type="checkbox" id="fcSearchKwCheck" checked onchange="runCurationSearch(1)">
+                <span>키워드</span>
+              </label>
+              <input type="text" id="fcSearchKeyword" placeholder="제목·키워드·작성자명으로 검색" style="flex:1;min-width:0;" oninput="updateFcSearchModeInfo()">
+            </div>
+            <!-- 성취기준 스마트검색 + 체크박스 (콘텐츠일 때만 노출) -->
+            <div id="fcStdRow" style="display:flex;align-items:center;gap:8px;">
+              <label class="fc-kw-check" title="검색 시 성취기준 활용" style="flex-shrink:0;">
+                <input type="checkbox" id="fcStdCheck" onchange="runCurationSearch(1)">
+                <span>성취기준</span>
+              </label>
+              <div style="flex:1;min-width:0;">
+                <std-smart-search id="fcStdSmart" data-multiple="true" data-placeholder="성취기준 검색 (학년, 교과, 영역, 코드 등)"></std-smart-search>
+              </div>
+            </div>
+          </div>
           <select id="fcSearchSubject" style="display:none;">
             <option value="">전체 교과</option>
             <option value="국어">국어</option>
@@ -1004,7 +1021,17 @@
             <option value="5">5학년</option>
             <option value="6">6학년</option>
           </select>
-          <button class="fc-modal-search-btn" onclick="runCurationSearch(1)"><i class="fas fa-search"></i> 검색</button>
+          <button class="fc-modal-search-btn" onclick="runCurationSearch(1)" style="align-self:stretch;flex-shrink:0;"><i class="fas fa-search"></i> 검색</button>
+        </div>
+        <!-- 교집합 안내 -->
+        <div id="fcSearchModeInfo" style="display:none;padding:6px 12px;background:#eff6ff;border-radius:8px;font-size:13px;color:#1d4ed8;font-weight:600;">
+          <i class="fas fa-info-circle"></i> 키워드 + 성취기준 교집합 검색 중
+        </div>
+        <!-- 콘텐츠 유형 칩 8개 + 정렬 + 뷰토글 -->
+        <div class="fc-search-row" style="gap:6px;">
+          <div class="fc-type-chips" id="fcTypeChips" style="display:none;flex:1;">
+            <span class="fc-chip-label">유형</span>
+          </div>
           <div class="fc-search-tools">
             <select id="fcSearchSort" onchange="runCurationSearch(1)" title="정렬">
               <option value="latest">최신순</option>
@@ -1016,10 +1043,6 @@
               <button type="button" class="view-btn" data-view="list" onclick="setCurationViewMode('list')" title="리스트 뷰"><i class="fas fa-list"></i></button>
             </div>
           </div>
-        </div>
-        <!-- 2행: 콘텐츠 유형 칩 8개 (콘텐츠일 때만 노출) -->
-        <div class="fc-type-chips" id="fcTypeChips" style="display:none;">
-          <span class="fc-chip-label">유형</span>
         </div>
       </div>
       <div class="fc-modal-body" id="fcSearchResults">
@@ -2051,6 +2074,40 @@
     FC.modalLastPage = 1;            // 가장 마지막으로 로드된 page
     FC.modalEnd = false;             // totalPages 도달
     FC.modalAlreadyIds = new Set();  // 이미 슬롯에 들어가 있는 콘텐츠/채널 id (Set<number>)
+    FC.modalStdCodes = [];           // std-smart-search 선택 코드 (string[])
+    FC.modalStdIds = [];             // std-smart-search 선택 표준체계 노드 id (string[])
+
+    /**
+     * 검색 모드 안내(교집합) 토글 — 키워드+성취기준 둘 다 활성일 때만 노출
+     */
+    function updateFcSearchModeInfo() {
+      const info = document.getElementById('fcSearchModeInfo');
+      if (!info) return;
+      const kwOn = document.getElementById('fcSearchKwCheck')?.checked !== false;
+      const kwVal = (document.getElementById('fcSearchKeyword')?.value || '').trim();
+      const stdOn = document.getElementById('fcStdCheck')?.checked === true;
+      const hasStd = (FC.modalStdIds && FC.modalStdIds.length > 0) || (FC.modalStdCodes && FC.modalStdCodes.length > 0);
+      const isContent = FC.modalItemType !== 'channel';
+      info.style.display = (isContent && kwOn && kwVal && stdOn && hasStd) ? '' : 'none';
+    }
+
+    /**
+     * std-smart-search 컴포넌트 change 이벤트 바인딩 (1회)
+     */
+    function bindFcStdSmart() {
+      const stdSmart = document.getElementById('fcStdSmart');
+      if (!stdSmart || stdSmart.__fcBound) return;
+      stdSmart.addEventListener('change', (e) => {
+        const v = e.detail || {};
+        FC.modalStdCodes = Array.isArray(v.codes) ? v.codes : [];
+        FC.modalStdIds = Array.isArray(v.std_ids) ? v.std_ids : [];
+        const stdCheck = document.getElementById('fcStdCheck');
+        if (stdCheck) stdCheck.checked = (FC.modalStdIds.length > 0 || FC.modalStdCodes.length > 0);
+        updateFcSearchModeInfo();
+        runCurationSearch(1);
+      });
+      stdSmart.__fcBound = true;
+    }
 
     function renderTypeChips() {
       const wrap = document.getElementById('fcTypeChips');
@@ -2120,11 +2177,13 @@
       label.textContent = sec.item_type === 'channel' ? '채널 추가' : '콘텐츠 추가';
       subLabel.textContent = `(섹션: ${sec.title} · 현재 ${FC.items.length}/${sec.max_items})`;
 
-      // 콘텐츠일 때만 교과·학년 셀렉트 + 유형 칩 노출
+      // 콘텐츠일 때만 교과·학년 셀렉트 + 유형 칩 + 성취기준 검색 노출 (채널은 의미 없으므로 hide)
       const isContent = sec.item_type === 'content';
       document.getElementById('fcSearchSubject').style.display = isContent ? '' : 'none';
       document.getElementById('fcSearchGrade').style.display = isContent ? '' : 'none';
       document.getElementById('fcTypeChips').style.display = isContent ? '' : 'none';
+      const stdRow = document.getElementById('fcStdRow');
+      if (stdRow) stdRow.style.display = isContent ? 'flex' : 'none';
       // 정렬·뷰토글은 항상 노출
       document.getElementById('fcSearchKeyword').value = '';
       document.getElementById('fcSearchSubject').value = '';
@@ -2132,6 +2191,22 @@
       document.getElementById('fcSearchSort').value = 'latest';
       const kwCheck = document.getElementById('fcSearchKwCheck');
       if (kwCheck) kwCheck.checked = true;
+      // 성취기준 초기화
+      FC.modalStdCodes = [];
+      FC.modalStdIds = [];
+      const stdCheck = document.getElementById('fcStdCheck');
+      if (stdCheck) stdCheck.checked = false;
+      const stdSmart = document.getElementById('fcStdSmart');
+      if (stdSmart) {
+        // Web Component 내부 초기화 — 값/UI 모두 리셋
+        try {
+          if (typeof stdSmart.clear === 'function') stdSmart.clear();
+          else if (typeof stdSmart.setValue === 'function') stdSmart.setValue('');
+          else stdSmart.setAttribute('data-value', '');
+        } catch (e) { /* noop */ }
+      }
+      bindFcStdSmart();
+      updateFcSearchModeInfo();
       // 유형 필터 초기화 + 칩 렌더
       FC.typeFilters = new Set();
       if (isContent) renderTypeChips();
@@ -2194,9 +2269,12 @@
 
       const q = document.getElementById('fcSearchKeyword').value.trim();
       const kwOn = document.getElementById('fcSearchKwCheck')?.checked !== false;
+      const stdOn = document.getElementById('fcStdCheck')?.checked === true;
       const subject = document.getElementById('fcSearchSubject').value;
       const grade = document.getElementById('fcSearchGrade').value;
       const sort = document.getElementById('fcSearchSort')?.value || 'latest';
+      // 검색 모드 안내 갱신
+      updateFcSearchModeInfo();
 
       const results = document.getElementById('fcSearchResults');
       const totalEl = document.getElementById('fcSearchTotal');
@@ -2244,6 +2322,11 @@
           if (FC.typeFilters.size > 0) params.set('content_type', [...FC.typeFilters].join(','));
           if (subject) params.set('subject', subject);
           if (grade) params.set('grade', grade);
+          // 성취기준 — std_ids 우선, 없으면 achievement_codes (공개콘텐츠와 동일 규약)
+          if (stdOn) {
+            if (FC.modalStdIds && FC.modalStdIds.length > 0) params.set('std_ids', FC.modalStdIds.join(','));
+            else if (FC.modalStdCodes && FC.modalStdCodes.length > 0) params.set('achievement_codes', FC.modalStdCodes.join(','));
+          }
           const res = await fetch('/api/contents?' + params.toString(), { credentials: 'include' });
           const r = await res.json();
           if (!r.success) throw new Error(r.message || '검색 실패');
