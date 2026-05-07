@@ -30,10 +30,29 @@
     .mini-stat .val { font-size: 24px; font-weight: 700; color: #10b981; }
     .mini-stat .lbl { font-size: 13px; color: #6B7280; margin-top: 4px; }
 
-    .submit-form textarea { width: 100%; padding: 12px 14px; border: 1.5px solid #d1d5db; border-radius: 8px; font-size: 16px; font-family: inherit; resize: vertical; }
-    .submit-form textarea:focus { border-color: #10b981; outline: none; }
+    /* 학생 제출 입력 영역 — 시원하게 키워서 자유롭게 작성 가능 */
+    .submit-form { display:flex; flex-direction:column; gap:14px; }
+    .submit-form .submit-input-wrap { position:relative; }
+    .submit-form textarea {
+      width: 100%; padding: 16px 18px; border: 1.5px solid #d1d5db; border-radius: 12px;
+      font-size: 16px; font-family: inherit; line-height: 1.7; color:#1A1A2E;
+      resize: vertical; min-height: 320px; background:#fff;
+      transition: border-color 0.15s, box-shadow 0.15s;
+    }
+    .submit-form textarea:focus {
+      border-color: #10b981; outline: none;
+      box-shadow: 0 0 0 3px rgba(16,185,129,0.12);
+    }
+    .submit-form textarea::placeholder { color:#9CA3AF; }
+    .submit-form .submit-counter {
+      position:absolute; right:14px; bottom:12px;
+      font-size:13px; color:#9CA3AF; background:rgba(255,255,255,0.85);
+      padding:2px 8px; border-radius:6px; pointer-events:none;
+    }
+    .submit-form .submit-actions { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+    .submit-form .submit-actions .submit-hint { font-size:13px; color:#6B7280; margin-left:auto; }
 
-    .file-upload { margin: 12px 0; }
+    .file-upload { margin: 0; }
     .file-upload label { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; background: #f3f4f6; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 500; }
     .file-upload label:hover { background: #e5e7eb; }
     .file-upload input[type="file"] { display: none; }
@@ -302,12 +321,18 @@
       <h3><i class="fas fa-paper-plane"></i> 과제 제출</h3>
       <div id="submissionStatus"></div>
       <div class="submit-form" id="submitForm">
-        <textarea id="submitContent" rows="4" placeholder="과제 내용을 입력하세요..."></textarea>
-        <div class="file-upload">
-          <label><i class="fas fa-paperclip"></i> 파일 첨부 <input type="file" id="submitFile" onchange="onFileSelect(this)"></label>
-          <div class="file-name" id="fileName"></div>
+        <div class="submit-input-wrap">
+          <textarea id="submitContent" rows="14"
+            placeholder="과제 풀이·감상·답안을 자유롭게 입력하세요. 줄바꿈도 그대로 보여요."
+            oninput="updateSubmitCounter()"></textarea>
+          <div class="submit-counter" id="submitCounter">0자</div>
         </div>
-        <div style="margin-top:12px;">
+        <div class="submit-actions">
+          <div class="file-upload">
+            <label><i class="fas fa-paperclip"></i> 파일 첨부 <input type="file" id="submitFile" onchange="onFileSelect(this)"></label>
+            <div class="file-name" id="fileName"></div>
+          </div>
+          <span class="submit-hint">제출 후에도 다시 수정할 수 있어요.</span>
           <button class="btn btn-primary" onclick="submitHomework()"><i class="fas fa-check"></i> 제출하기</button>
         </div>
       </div>
@@ -323,14 +348,9 @@
       </table>
     </div>
 
-    <!-- 학생: 나의 피드백 영역 (1:1 채팅) -->
+    <!-- 학생: 나의 피드백 영역은 별도 레이어 팝업(stuFeedbackOverlay)으로 분리됨 -->
     <div class="card" id="studentFeedbackCard" style="display:none;">
-      <h3><i class="fas fa-comments"></i> 선생님과의 피드백</h3>
-      <div id="studentFeedbackBody" class="fb-body" style="border-radius:10px;"></div>
-      <div class="fb-footer" style="border:1px solid #E5E7EB;border-top:none;border-radius:0 0 10px 10px;">
-        <textarea id="studentFeedbackInput" placeholder="선생님께 메시지를 남겨보세요..." onkeydown="if(event.ctrlKey && event.key==='Enter'){sendStudentFeedback();}"></textarea>
-        <button class="fb-send" onclick="sendStudentFeedback()"><i class="fas fa-paper-plane"></i> 전송</button>
-      </div>
+      <div id="studentFeedbackBody" class="fb-body" style="display:none;"></div>
     </div>
 
     <!-- 학생: 공개 제출물 영역 -->
@@ -456,6 +476,232 @@
     <img id="sdLightboxImg" src="" alt="첨부 이미지">
   </div>
 
+  <!-- 포트폴리오 등록 모달 (학생 본인 전용) -->
+  <style>
+    #portfolioAddOverlay .pa-card{
+      background:#fff;border-radius:16px;width:min(720px,90vw);max-height:85vh;
+      display:flex;flex-direction:column;box-shadow:0 24px 64px rgba(0,0,0,0.28);overflow:hidden;
+    }
+    #portfolioAddOverlay .pa-header{
+      padding:22px 32px;border-bottom:1px solid #E5E7EB;
+      display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-shrink:0;
+    }
+    #portfolioAddOverlay .pa-title{
+      font-size:24px;font-weight:700;color:#111827;display:flex;align-items:center;gap:10px;
+    }
+    #portfolioAddOverlay .pa-subtitle{
+      font-size:15px;color:#6B7280;margin-top:6px;line-height:1.5;
+    }
+    #portfolioAddOverlay .pa-close{
+      width:40px;height:40px;border:none;border-radius:10px;background:#F3F4F6;color:#374151;
+      cursor:pointer;font-size:18px;flex-shrink:0;display:inline-flex;align-items:center;justify-content:center;
+    }
+    #portfolioAddOverlay .pa-close:hover{background:#E5E7EB;}
+    #portfolioAddOverlay .pa-body{
+      padding:28px 32px;overflow-y:auto;flex:1;
+    }
+    #portfolioAddOverlay .pa-prefill-grid{
+      display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:24px;
+    }
+    #portfolioAddOverlay .pa-cell{
+      background:#F9FAFB;border:1px solid #E5E7EB;border-radius:12px;padding:14px 18px;
+    }
+    #portfolioAddOverlay .pa-cell .lbl{
+      font-size:13px;font-weight:600;color:#6B7280;margin-bottom:6px;letter-spacing:0.02em;
+    }
+    #portfolioAddOverlay .pa-cell .val{
+      font-size:17px;font-weight:600;color:#111827;line-height:1.4;word-break:break-word;
+    }
+    #portfolioAddOverlay .pa-reflect-head{
+      display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;gap:12px;
+    }
+    #portfolioAddOverlay .pa-label{
+      font-size:15px;font-weight:600;color:#374151;display:flex;align-items:center;gap:6px;
+    }
+    #portfolioAddOverlay .pa-label .opt{font-weight:400;color:#9CA3AF;font-size:14px;}
+    #portfolioAddOverlay .pa-counter{font-size:13px;color:#9CA3AF;}
+    #portfolioAddOverlay textarea#paReflection{
+      width:100%;padding:14px 16px;border:1.5px solid #D1D5DB;border-radius:12px;
+      font-size:16px;font-family:inherit;resize:vertical;outline:none;line-height:1.7;
+      min-height:200px;color:#111827;background:#fff;
+    }
+    #portfolioAddOverlay textarea#paReflection:focus{
+      border-color:#2563eb;box-shadow:0 0 0 3px rgba(37,99,235,0.12);
+    }
+    #portfolioAddOverlay .pa-footer{
+      padding:18px 32px;border-top:1px solid #E5E7EB;background:#fff;
+      display:flex;gap:12px;justify-content:flex-end;flex-shrink:0;
+    }
+    #portfolioAddOverlay .pa-btn{
+      font-size:16px;font-weight:600;cursor:pointer;font-family:inherit;border-radius:10px;
+      display:inline-flex;align-items:center;gap:8px;line-height:1;
+    }
+    #portfolioAddOverlay .pa-btn-cancel{
+      padding:12px 22px;background:#F3F4F6;color:#374151;border:1px solid #D1D5DB;
+    }
+    #portfolioAddOverlay .pa-btn-cancel:hover{background:#E5E7EB;}
+    #portfolioAddOverlay .pa-btn-submit{
+      padding:12px 24px;background:#2563eb;color:#fff;border:none;
+      box-shadow:0 2px 6px rgba(37,99,235,0.25);
+    }
+    #portfolioAddOverlay .pa-btn-submit:hover{background:#1d4ed8;}
+    #portfolioAddOverlay .pa-btn-submit:disabled{opacity:0.7;cursor:not-allowed;}
+    @media (max-width:768px){
+      #portfolioAddOverlay{padding:16px;}
+      #portfolioAddOverlay .pa-header{padding:18px 22px;}
+      #portfolioAddOverlay .pa-title{font-size:21px;}
+      #portfolioAddOverlay .pa-subtitle{font-size:14px;}
+      #portfolioAddOverlay .pa-body{padding:20px 22px;}
+      #portfolioAddOverlay .pa-prefill-grid{grid-template-columns:1fr;gap:10px;margin-bottom:20px;}
+      #portfolioAddOverlay .pa-cell{padding:12px 14px;}
+      #portfolioAddOverlay .pa-cell .val{font-size:16px;}
+      #portfolioAddOverlay textarea#paReflection{min-height:160px;}
+      #portfolioAddOverlay .pa-footer{padding:14px 22px;}
+    }
+  </style>
+  <div id="portfolioAddOverlay"
+       onclick="if(event.target===this)closeAddToPortfolioModal()"
+       style="display:none;position:fixed;inset:0;background:rgba(15,23,42,0.55);z-index:11500;align-items:center;justify-content:center;padding:24px;">
+    <div class="pa-card" role="dialog" aria-modal="true" aria-labelledby="paTitle">
+      <div class="pa-header">
+        <div style="min-width:0;flex:1;">
+          <div class="pa-title" id="paTitle">
+            <i class="fas fa-folder-plus" style="color:#2563eb;"></i>
+            <span>포트폴리오에 등록</span>
+          </div>
+          <div class="pa-subtitle">이 활동을 성장기록 포트폴리오에 등록합니다.</div>
+        </div>
+        <button class="pa-close" onclick="closeAddToPortfolioModal()" aria-label="닫기">
+          <i class="fas fa-times"></i>
+        </button>
+      </div>
+      <div class="pa-body">
+        <div class="pa-prefill-grid">
+          <div class="pa-cell">
+            <div class="lbl">활동명</div>
+            <div id="paName" class="val">-</div>
+          </div>
+          <div class="pa-cell">
+            <div class="lbl">클래스</div>
+            <div id="paClass" class="val">-</div>
+          </div>
+          <div class="pa-cell">
+            <div class="lbl">점수</div>
+            <div id="paScore" class="val">-</div>
+          </div>
+          <div class="pa-cell">
+            <div class="lbl">제출일</div>
+            <div id="paDate" class="val">-</div>
+          </div>
+        </div>
+        <div>
+          <div class="pa-reflect-head">
+            <label for="paReflection" class="pa-label">
+              회고 <span class="opt">(선택)</span>
+            </label>
+            <div id="paReflectionCount" class="pa-counter">0 / 200</div>
+          </div>
+          <textarea id="paReflection" maxlength="200"
+                    placeholder="이번 활동에서 무엇을 배웠나요? (선택, 200자)"></textarea>
+        </div>
+      </div>
+      <div class="pa-footer">
+        <button class="pa-btn pa-btn-cancel" onclick="closeAddToPortfolioModal()" type="button">취소</button>
+        <button id="paSubmitBtn" class="pa-btn pa-btn-submit" onclick="submitAddToPortfolio()" type="button">
+          <i class="fas fa-folder-plus"></i> 등록
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 학생용: 선생님 피드백 레이어 팝업 (z-index 11500, GNB 위) -->
+  <style>
+    #stuFeedbackOverlay {
+      display:none; position:fixed; inset:0; background:rgba(15,23,42,0.55);
+      z-index:11500; align-items:center; justify-content:center; padding:24px;
+    }
+    #stuFeedbackOverlay.active { display:flex; }
+    #stuFeedbackOverlay .sfb-card {
+      background:#fff; border-radius:16px;
+      width:min(720px, 90vw); height:auto; max-height:80vh;
+      display:flex; flex-direction:column;
+      box-shadow:0 24px 64px rgba(0,0,0,0.28); overflow:hidden;
+    }
+    #stuFeedbackOverlay .sfb-header {
+      padding:20px 26px; border-bottom:1px solid #E5E7EB;
+      display:flex; align-items:flex-start; justify-content:space-between; gap:16px; flex-shrink:0;
+      background:linear-gradient(135deg,#3B82F6,#2563EB); color:#fff;
+    }
+    #stuFeedbackOverlay .sfb-title {
+      font-size:20px; font-weight:700; display:flex; align-items:center; gap:10px;
+    }
+    #stuFeedbackOverlay .sfb-sub {
+      font-size:14px; color:rgba(255,255,255,0.9); margin-top:6px; line-height:1.5;
+    }
+    #stuFeedbackOverlay .sfb-close {
+      width:36px; height:36px; border:none; border-radius:10px;
+      background:rgba(255,255,255,0.2); color:#fff; cursor:pointer; font-size:16px;
+      display:inline-flex; align-items:center; justify-content:center; flex-shrink:0;
+    }
+    #stuFeedbackOverlay .sfb-close:hover { background:rgba(255,255,255,0.32); }
+    #stuFeedbackOverlay .sfb-body {
+      flex:1; min-height:240px; padding:18px 24px; overflow-y:auto; background:#F9FAFB;
+    }
+    #stuFeedbackOverlay .sfb-footer {
+      padding:14px 18px; border-top:1px solid #E5E7EB; background:#fff;
+      display:flex; gap:10px; align-items:flex-end; flex-shrink:0;
+    }
+    #stuFeedbackOverlay .sfb-footer textarea {
+      flex:1; padding:12px 14px; border:1.5px solid #D1D5DB; border-radius:10px;
+      font-size:16px; font-family:inherit; resize:none; outline:none;
+      min-height:48px; max-height:140px; line-height:1.5;
+    }
+    #stuFeedbackOverlay .sfb-footer textarea:focus { border-color:#2563EB; }
+    #stuFeedbackOverlay .sfb-send {
+      padding:12px 18px; background:#2563EB; color:#fff; border:none; border-radius:10px;
+      font-size:16px; font-weight:600; cursor:pointer; font-family:inherit; flex-shrink:0;
+      display:inline-flex; align-items:center; gap:6px;
+    }
+    #stuFeedbackOverlay .sfb-send:hover { background:#1D4ED8; }
+    #stuFeedbackOverlay .sfb-send:disabled { background:#9CA3AF; cursor:not-allowed; }
+    @media (max-width:768px) {
+      #stuFeedbackOverlay { padding:0; align-items:flex-end; }
+      #stuFeedbackOverlay .sfb-card {
+        width:100vw; max-width:100vw; max-height:90vh; border-radius:16px 16px 0 0;
+      }
+      #stuFeedbackOverlay .sfb-header { padding:16px 20px; }
+      #stuFeedbackOverlay .sfb-title { font-size:18px; }
+      #stuFeedbackOverlay .sfb-body { padding:14px 18px; }
+    }
+  </style>
+  <div id="stuFeedbackOverlay"
+       onclick="if(event.target===this)closeStudentFeedbackModal()"
+       role="dialog" aria-modal="true" aria-labelledby="sfbTitle">
+    <div class="sfb-card">
+      <div class="sfb-header">
+        <div style="min-width:0;flex:1;">
+          <div class="sfb-title" id="sfbTitle">
+            <i class="fas fa-comments"></i>
+            <span>선생님 피드백</span>
+          </div>
+          <div class="sfb-sub" id="sfbSubtitle">담당 선생님과 1:1 메시지로 이야기 나눠 보세요.</div>
+        </div>
+        <button class="sfb-close" onclick="closeStudentFeedbackModal()" aria-label="닫기">
+          <i class="fas fa-times"></i>
+        </button>
+      </div>
+      <div class="sfb-body fb-body" id="stuFbModalBody"></div>
+      <div class="sfb-footer">
+        <textarea id="stuFbModalInput"
+                  placeholder="선생님께 답글이나 궁금한 점을 남겨보세요. (Ctrl+Enter 전송)"
+                  onkeydown="if(event.ctrlKey && event.key==='Enter') sendStudentFeedbackModal();"></textarea>
+        <button class="sfb-send" onclick="sendStudentFeedbackModal()">
+          <i class="fas fa-paper-plane"></i> 전송
+        </button>
+      </div>
+    </div>
+  </div>
+
   <script>
     const params = new URLSearchParams(location.search);
     const classId = params.get('classId');
@@ -471,7 +717,10 @@
     async function loadHomework() {
       const classRes = await fetch(`/api/class/${classId}`);
       const classData = await classRes.json();
-      if (classData.success) myRole = classData.myRole;
+      if (classData.success) {
+        myRole = classData.myRole;
+        _className = classData.class && classData.class.name ? classData.class.name : null;
+      }
 
       document.getElementById('breadcrumb').innerHTML =
         `<a href="/class/index.html">나의 클래스</a> &gt; <a href="/class/class-home.html?id=${classId}">${escHtml(classData.class?.name || '클래스')}</a> &gt; 과제`;
@@ -536,19 +785,44 @@
         document.getElementById('studentSubmitCard').style.display = 'block';
         if (data.submission) {
           mySubmissionId = data.submission.id;
+          window._lastSubmission = data.submission;
+          const scoreHtml = data.submission.score !== null ? `<span style="margin-left:8px;font-size:18px;font-weight:700;">${data.submission.score}/${hwData.max_score}점</span>` : '';
+          const fbHtml = data.submission.feedback ? `<div style="margin-top:8px;font-size:13px;color:#374151;">${escHtml(data.submission.feedback)}</div>` : '';
           document.getElementById('submissionStatus').innerHTML = `
             <div class="submission-status ${data.submission.score !== null ? 'status-graded' : 'status-submitted'}">
-              <strong>${data.submission.score !== null ? '채점 완료' : '제출 완료'}</strong>
-              ${data.submission.score !== null ? `<span style="margin-left:8px;font-size:18px;font-weight:700;">${data.submission.score}/${hwData.max_score}점</span>` : ''}
-              ${data.submission.feedback ? `<div style="margin-top:8px;font-size:13px;color:#374151;">${escHtml(data.submission.feedback)}</div>` : ''}
-              <div style="font-size:12px;color:#6B7280;margin-top:4px;">제출: ${data.submission.submitted_at ? data.submission.submitted_at.slice(0,16) : ''}</div>
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+                <div style="flex:1;min-width:0;">
+                  <strong>${data.submission.score !== null ? '채점 완료' : '제출 완료'}</strong>
+                  ${scoreHtml}
+                  ${fbHtml}
+                  <div style="font-size:12px;color:#6B7280;margin-top:4px;">제출: ${data.submission.submitted_at ? data.submission.submitted_at.slice(0,16) : ''}</div>
+                </div>
+                <div style="display:flex;gap:10px;align-items:center;flex-shrink:0;flex-wrap:wrap;">
+                  <button id="openFeedbackBtn" type="button"
+                          onclick="openStudentFeedbackModal()"
+                          style="position:relative;background:#3B82F6;color:#fff;border:none;border-radius:10px;padding:10px 18px;font-size:16px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:8px;font-family:inherit;box-shadow:0 2px 6px rgba(59,130,246,0.28);">
+                    <i class="fas fa-comments"></i>
+                    <span>선생님 피드백</span>
+                    <span id="openFeedbackBadge" style="display:none;position:absolute;top:-4px;right:-4px;width:12px;height:12px;border-radius:50%;background:#EF4444;border:2px solid #fff;"></span>
+                  </button>
+                  <button id="addToPortfolioBtn" type="button"
+                          onclick="openAddToPortfolioModal()"
+                          style="background:#8B5CF6;color:#fff;border:none;border-radius:10px;padding:10px 18px;font-size:16px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:8px;font-family:inherit;box-shadow:0 2px 6px rgba(139,92,246,0.25);">
+                    <i class="fas fa-folder-plus"></i>
+                    <span id="addToPortfolioBtnLabel">포트폴리오에 추가</span>
+                  </button>
+                </div>
+              </div>
             </div>
           `;
           document.getElementById('submitContent').value = data.submission.content || '';
+          if (typeof updateSubmitCounter === 'function') updateSubmitCounter();
 
-          // 제출물이 있으면 피드백 영역 표시
-          document.getElementById('studentFeedbackCard').style.display = 'block';
+          // 제출물이 있으면 피드백을 미리 로드 (모달 열기 전 카운트 갱신)
           loadStudentFeedback();
+
+          // 포트폴리오 등록 여부 확인 (중복 방지)
+          checkPortfolioRegistered();
         }
 
         // 공개 과제인 경우 다른 학생들 제출물 표시
@@ -1149,24 +1423,74 @@
       try { loadHomework(); } catch (e) {}
     };
 
-    // 학생: 자기 제출물 피드백
+    // 학생: 자기 제출물 피드백 (레이어 팝업으로 표시)
+    let _stuFeedbackCache = [];
     async function loadStudentFeedback() {
       if (!mySubmissionId) return;
       currentFeedbackSubId = mySubmissionId;
-      const res = await fetch(`/api/homework/${classId}/${homeworkId}/submissions/${mySubmissionId}/feedback`);
-      const data = await res.json();
-      if (!data.success) {
-        document.getElementById('studentFeedbackBody').innerHTML = `<div class="fb-empty" style="color:#ef4444;">${escHtml(data.message || '불러오기 실패')}</div>`;
-        return;
+      try {
+        const res = await fetch(`/api/homework/${classId}/${homeworkId}/submissions/${mySubmissionId}/feedback`);
+        const data = await res.json();
+        if (!data.success) {
+          _stuFeedbackCache = [];
+        } else {
+          _stuFeedbackCache = Array.isArray(data.feedback) ? data.feedback : [];
+        }
+      } catch (e) {
+        _stuFeedbackCache = [];
       }
-      renderFeedbackList('studentFeedbackBody', data.feedback);
+      // 모달이 열려 있다면 본문 갱신
+      if (document.getElementById('stuFeedbackOverlay').classList.contains('active')) {
+        renderFeedbackList('stuFbModalBody', _stuFeedbackCache);
+      }
+      // 진입 버튼/배지 갱신
+      updateFeedbackEntryBadge();
     }
-    async function sendStudentFeedback() {
+
+    function updateFeedbackEntryBadge() {
+      const btn = document.getElementById('openFeedbackBtn');
+      const badge = document.getElementById('openFeedbackBadge');
+      if (!btn || !badge) return;
+      const hasAny = _stuFeedbackCache && _stuFeedbackCache.length > 0;
+      // 피드백이 1건이라도 있으면 빨간 점 표시 (간단한 시각 단서)
+      badge.style.display = hasAny ? 'block' : 'none';
+    }
+
+    function openStudentFeedbackModal() {
+      const overlay = document.getElementById('stuFeedbackOverlay');
+      overlay.classList.add('active');
+      document.body.style.overflow = 'hidden';
+      // 부제: 담당 교사명 + 채점일 (있으면)
+      try {
+        const sub = window._lastSubmission || {};
+        const teacherName = (hwData && hwData.author_name) ? hwData.author_name : '담당 선생님';
+        const gradedAt = (sub.score !== null && sub.submitted_at)
+          ? `· 제출: ${sub.submitted_at.slice(0,16)}` : '';
+        document.getElementById('sfbSubtitle').textContent =
+          `${teacherName} 선생님과 1:1 메시지 ${gradedAt}`;
+      } catch (e) {}
+      renderFeedbackList('stuFbModalBody', _stuFeedbackCache);
+      // 입력 포커스
+      setTimeout(() => {
+        const ta = document.getElementById('stuFbModalInput');
+        if (ta) ta.focus();
+      }, 80);
+    }
+
+    function closeStudentFeedbackModal() {
+      const overlay = document.getElementById('stuFeedbackOverlay');
+      overlay.classList.remove('active');
+      document.body.style.overflow = '';
+    }
+
+    async function sendStudentFeedbackModal() {
       if (!currentFeedbackSubId) return;
-      const input = document.getElementById('studentFeedbackInput');
+      const input = document.getElementById('stuFbModalInput');
+      const sendBtn = document.querySelector('#stuFeedbackOverlay .sfb-send');
       const content = input.value.trim();
       if (!content) return;
       input.disabled = true;
+      if (sendBtn) sendBtn.disabled = true;
       try {
         const res = await fetch(`/api/homework/${classId}/${homeworkId}/submissions/${currentFeedbackSubId}/feedback`, {
           method: 'POST', headers: {'Content-Type':'application/json'},
@@ -1176,8 +1500,43 @@
         if (data.success) {
           input.value = '';
           await loadStudentFeedback();
-        } else alert(data.message);
-      } finally { input.disabled = false; input.focus(); }
+        } else {
+          alert(data.message || '전송 실패');
+        }
+      } catch (e) {
+        alert('네트워크 오류로 전송하지 못했습니다.');
+      } finally {
+        input.disabled = false;
+        if (sendBtn) sendBtn.disabled = false;
+        input.focus();
+      }
+    }
+
+    // 호환용: 이전 코드 호출처가 남아있을 가능성에 대비
+    async function sendStudentFeedback() { return sendStudentFeedbackModal(); }
+
+    // ESC: 피드백 모달 닫기 (다른 모달 키 핸들러보다 먼저 잡지 않음)
+    document.addEventListener('keydown', function(e) {
+      if (e.key !== 'Escape') return;
+      const overlay = document.getElementById('stuFeedbackOverlay');
+      if (overlay && overlay.classList.contains('active')) {
+        // textarea 포커스 중이면 blur만, 아니면 닫기
+        if (document.activeElement && document.activeElement.tagName === 'TEXTAREA') {
+          document.activeElement.blur();
+        } else {
+          e.stopPropagation();
+          closeStudentFeedbackModal();
+        }
+      }
+    }, true);
+
+    // 글자수 카운터
+    function updateSubmitCounter() {
+      const ta = document.getElementById('submitContent');
+      const c = document.getElementById('submitCounter');
+      if (!ta || !c) return;
+      const n = ta.value.length;
+      c.textContent = n.toLocaleString() + '자';
     }
 
     function onFileSelect(input) {
@@ -1243,6 +1602,140 @@
         if (btn) { btn.disabled = false; btn.innerHTML = origLabel; }
       }
     }
+
+    // ===== 포트폴리오 등록 (학생 본인 전용) =====
+    let _portfolioRegistered = false;
+    let _portfolioCheckedOnce = false;
+    let _className = null;
+
+    function _markPortfolioRegistered() {
+      _portfolioRegistered = true;
+      const btn = document.getElementById('addToPortfolioBtn');
+      if (!btn) return;
+      btn.disabled = true;
+      btn.style.background = '#E5E7EB';
+      btn.style.color = '#6B7280';
+      btn.style.cursor = 'not-allowed';
+      btn.style.boxShadow = 'none';
+      btn.innerHTML = '<i class="fas fa-check"></i> <span>포트폴리오에 등록됨</span>';
+      btn.title = '이미 포트폴리오에 등록된 과제입니다.';
+    }
+
+    async function checkPortfolioRegistered() {
+      if (_portfolioCheckedOnce) return;
+      _portfolioCheckedOnce = true;
+      try {
+        // 본인의 포트폴리오 항목 중 source=homework 만 조회
+        // 여러 항목이 있을 수 있으니 큰 페이지로 조회 후 클라이언트 매칭
+        const url = '/api/growth/portfolio/items?source=homework&limit=200';
+        const res = await fetch(url, { credentials: 'same-origin' });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!data || !data.success || !Array.isArray(data.items)) return;
+        const target = (hwData && hwData.title || '').trim();
+        const cid = Number(classId);
+        const hit = data.items.some(it => {
+          const sameTitle = ((it.activity_name || it.title || '').trim() === target);
+          const sameClass = (it.class_id == null) || (Number(it.class_id) === cid);
+          return sameTitle && sameClass && (it.source_type === 'homework');
+        });
+        if (hit) _markPortfolioRegistered();
+      } catch (e) {
+        // 조회 실패는 조용히 무시 (등록 시도에는 영향 없음)
+        console.warn('[portfolio] check failed', e);
+      }
+    }
+
+    function openAddToPortfolioModal() {
+      if (_portfolioRegistered) {
+        showToast('이미 포트폴리오에 등록된 과제입니다.', 'info');
+        return;
+      }
+      if (!hwData) return;
+      const sub = (window._lastSubmission || null);
+      // pre-fill 정보 채우기
+      document.getElementById('paName').textContent = hwData.title || '과제';
+      document.getElementById('paClass').textContent = _className || ('클래스 #' + classId);
+      const score = (sub && sub.score != null) ? (sub.score + ' / ' + hwData.max_score + '점') : '미채점';
+      document.getElementById('paScore').textContent = score;
+      const date = sub && sub.submitted_at ? sub.submitted_at.slice(0, 16).replace('T', ' ') : '-';
+      document.getElementById('paDate').textContent = date;
+      document.getElementById('paReflection').value = '';
+      document.getElementById('paReflectionCount').textContent = '0 / 200';
+      document.getElementById('portfolioAddOverlay').style.display = 'flex';
+      setTimeout(() => {
+        const ta = document.getElementById('paReflection');
+        if (ta) ta.focus();
+      }, 60);
+    }
+
+    function closeAddToPortfolioModal() {
+      const ov = document.getElementById('portfolioAddOverlay');
+      if (ov) ov.style.display = 'none';
+    }
+
+    async function submitAddToPortfolio() {
+      if (_portfolioRegistered) { closeAddToPortfolioModal(); return; }
+      if (!hwData) return;
+      const btn = document.getElementById('paSubmitBtn');
+      const sub = window._lastSubmission || null;
+      const reflection = (document.getElementById('paReflection').value || '').trim().slice(0, 200);
+      const today = new Date().toISOString().slice(0, 10);
+      const submittedAt = sub && sub.submitted_at ? String(sub.submitted_at).slice(0, 10) : today;
+      const body = {
+        source: 'homework',
+        activity_type: 'homework',
+        activity_name: hwData.title || '과제 제출',
+        subject: hwData.subject || null,
+        category: '과제',
+        class_id: Number(classId),
+        activity_date: submittedAt,
+        score: (sub && sub.score != null) ? (sub.score + '/' + hwData.max_score) : null,
+        content: (sub && sub.content) ? String(sub.content).slice(0, 500) : null,
+        reflection: reflection || (sub && sub.content ? String(sub.content).slice(0, 200) : null)
+      };
+      btn.disabled = true;
+      const orig = btn.innerHTML;
+      btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 등록 중...';
+      try {
+        const res = await fetch('/api/growth/portfolio/items', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body)
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok && data && data.success) {
+          showToast('포트폴리오에 추가되었습니다.', 'success');
+          closeAddToPortfolioModal();
+          _markPortfolioRegistered();
+        } else {
+          showToast((data && data.message) || '등록에 실패했습니다.', 'error');
+          btn.disabled = false;
+          btn.innerHTML = orig;
+        }
+      } catch (err) {
+        console.error('[portfolio] submit error', err);
+        showToast('네트워크 오류로 등록하지 못했습니다.', 'error');
+        btn.disabled = false;
+        btn.innerHTML = orig;
+      }
+    }
+
+    // 모달 회고 글자수 카운터 + ESC 닫기
+    document.addEventListener('input', (e) => {
+      if (e.target && e.target.id === 'paReflection') {
+        const n = (e.target.value || '').length;
+        const cnt = document.getElementById('paReflectionCount');
+        if (cnt) cnt.textContent = n + ' / 200';
+      }
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        const ov = document.getElementById('portfolioAddOverlay');
+        if (ov && ov.style.display !== 'none') closeAddToPortfolioModal();
+      }
+    });
 
     // ===== Toast (alert 대체) =====
     function showToast(msg, kind = 'info') {
