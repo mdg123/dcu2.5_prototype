@@ -1708,6 +1708,22 @@ router.delete('/featured/items/:itemId', ...adminOnly, (req, res) => {
   }
 });
 
+// DELETE /api/admin/featured/sections/:id — 발행(섹션 row) 삭제 (시드 4행 보호)
+router.delete('/featured/sections/:id', ...adminOnly, (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const r = featuredDb.deleteSection(id);
+    if (!r.ok) {
+      const status = r.code === 'NOT_FOUND' ? 404 : (r.code === 'PROTECTED_SEED' ? 403 : 400);
+      return res.status(status).json({ success: false, code: r.code, message: r.message });
+    }
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[ADMIN] featured/sections DELETE error:', err);
+    res.status(500).json({ success: false, code: 'SERVER_ERROR', message: '서버 오류가 발생했습니다.' });
+  }
+});
+
 // GET /api/admin/featured/sections/:id/preview-audience — 현재 설정 기준 노출 대상 사용자 수 추정
 router.get('/featured/sections/:id/preview-audience', ...adminOnly, (req, res) => {
   try {

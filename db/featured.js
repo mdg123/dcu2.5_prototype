@@ -599,6 +599,28 @@ function reorderSections(order = [], userId = null) {
   return { ok: true };
 }
 
+/**
+ * 섹션 삭제 — POST로 추가된 발행 row만 삭제 가능.
+ * 시드 4행(id 1~4)은 보호 (DELETE 불가, 폴백 기준 보존).
+ */
+const PROTECTED_SECTION_IDS = [1, 2, 3, 4];
+function deleteSection(id) {
+  const sid = parseInt(id, 10);
+  if (!sid) return { ok: false, code: 'INVALID_PAYLOAD', message: 'id가 올바르지 않습니다.' };
+  if (PROTECTED_SECTION_IDS.includes(sid)) {
+    return { ok: false, code: 'PROTECTED_SEED', message: '기본 시드 섹션은 삭제할 수 없습니다 (비활성화로 노출 제어 가능).' };
+  }
+  const exists = db.prepare('SELECT id FROM featured_sections WHERE id = ?').get(sid);
+  if (!exists) return { ok: false, code: 'NOT_FOUND', message: '섹션을 찾을 수 없습니다.' };
+  const tx = db.transaction(() => {
+    db.prepare('DELETE FROM featured_section_items WHERE section_id = ?').run(sid);
+    db.prepare('DELETE FROM featured_sections WHERE id = ?').run(sid);
+  });
+  tx();
+  invalidateFeaturedCache();
+  return { ok: true };
+}
+
 // =====================================================================
 //  슬롯 (items) 조회/수정
 // =====================================================================
@@ -1037,6 +1059,7 @@ module.exports = {
   updateSection,
   createSection,
   reorderSections,
+  deleteSection,
   findPeriodOverlaps,
   // items
   listSectionItems,
