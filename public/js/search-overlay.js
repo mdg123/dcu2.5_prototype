@@ -21,7 +21,7 @@
   function createOverlay() {
     overlay = document.createElement('div');
     overlay.id = 'searchOverlay';
-    overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.6);z-index:9999;display:none;align-items:flex-start;justify-content:center;padding-top:8vh;backdrop-filter:blur(4px);';
+    overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.6);z-index:10001;display:none;align-items:flex-start;justify-content:center;padding-top:8vh;backdrop-filter:blur(4px);';
     overlay.onclick = function(e) { if (e.target === overlay) close(); };
 
     overlay.innerHTML = `

@@ -29,10 +29,22 @@
     .page-title::before { content: ''; width: 6px; height: 32px; background: linear-gradient(180deg, var(--primary) 0%, var(--purple) 100%); border-radius: var(--radius-full); }
 
     /* 필터 영역 */
-    .filter-area { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px; margin-bottom: 24px; background: white; padding: 18px 24px; border-radius: var(--radius-lg); box-shadow: var(--shadow); }
+    .filter-area { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px; margin-bottom: 16px; background: white; padding: 18px 24px; border-radius: var(--radius-lg); box-shadow: var(--shadow); }
     .filter-group { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-    .filter-label { font-size: 14px; font-weight: 600; color: var(--gray-700); display: flex; align-items: center; gap: 6px; }
-    .filter-select { padding: 9px 14px; border: 1.5px solid var(--gray-200); border-radius: var(--radius-sm); font-size: 13px; font-family: inherit; outline: none; min-width: 160px; background: #fff; }
+    .filter-label { font-size: 15px; font-weight: 600; color: var(--gray-700); display: flex; align-items: center; gap: 6px; }
+    .filter-select { padding: 10px 14px; border: 1.5px solid var(--gray-200); border-radius: var(--radius-sm); font-size: 16px; font-family: inherit; outline: none; min-width: 160px; background: #fff; }
+
+    /* 기간 필터 칩 */
+    .period-area { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 24px; background: #fff; padding: 14px 20px; border-radius: var(--radius-lg); box-shadow: var(--shadow); }
+    .period-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+    .period-chip { padding: 7px 14px; border: 1.5px solid var(--gray-200); background: #fff; border-radius: var(--radius-full); font-size: 14px; font-weight: 500; color: var(--gray-600); cursor: pointer; font-family: inherit; transition: all 0.18s; }
+    .period-chip:hover { border-color: var(--primary); color: var(--primary); }
+    .period-chip.active { background: var(--primary); border-color: var(--primary); color: #fff; box-shadow: 0 2px 6px rgba(37,99,235,0.25); }
+    .period-custom { display: none; align-items: center; gap: 8px; padding-left: 8px; border-left: 1px solid var(--gray-200); margin-left: 4px; }
+    .period-custom.active { display: inline-flex; flex-wrap: wrap; }
+    .period-custom input[type="date"] { padding: 7px 10px; border: 1.5px solid var(--gray-200); border-radius: var(--radius-sm); font-size: 14px; font-family: inherit; outline: none; }
+    .period-custom input[type="date"]:focus { border-color: var(--primary); }
+    .period-meta { font-size: 13px; color: var(--gray-500); margin-left: auto; }
     .btn { display: inline-flex; align-items: center; gap: 6px; padding: 9px 18px; border: none; border-radius: var(--radius-sm); font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit; transition: all 0.2s; }
     .btn-primary { background: var(--primary); color: #fff; }
     .btn-primary:hover { background: var(--primary-dark); }
@@ -154,6 +166,25 @@
       </div>
     </div>
 
+    <!-- 기간 필터 -->
+    <div class="period-area">
+      <span class="filter-label"><i class="fas fa-calendar-alt"></i> 기간:</span>
+      <div class="period-chips" id="periodChips" role="tablist">
+        <button class="period-chip" data-period="week">이번 주</button>
+        <button class="period-chip" data-period="month">이번 달</button>
+        <button class="period-chip active" data-period="last30">최근 30일</button>
+        <button class="period-chip" data-period="semester">이번 학기</button>
+        <button class="period-chip" data-period="custom">사용자 지정</button>
+      </div>
+      <div class="period-custom" id="periodCustom">
+        <input type="date" id="periodStart" aria-label="시작일">
+        <span style="color:var(--gray-400);">~</span>
+        <input type="date" id="periodEnd" aria-label="종료일">
+        <button class="btn btn-primary btn-sm" onclick="applyCustomPeriod()" type="button"><i class="fas fa-check"></i> 적용</button>
+      </div>
+      <span class="period-meta" id="periodMeta"></span>
+    </div>
+
     <div id="analyticsContent">
       <div class="section-box">
         <div class="empty-state">
@@ -174,7 +205,94 @@
     let dailyChartInstance = null, typeChartInstance = null, studentBarChart = null;
     let lessonDonut = null, homeworkDonut = null, evalDonut = null;
 
+    // 기간 필터 상태 (기본: 최근 30일)
+    let _periodState = { type: 'last30', startDate: null, endDate: null };
+
     function escHtml(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+    function fmtYmd(d) {
+      const y = d.getFullYear(), m = String(d.getMonth()+1).padStart(2,'0'), day = String(d.getDate()).padStart(2,'0');
+      return `${y}-${m}-${day}`;
+    }
+    function fmtKoDate(s) {
+      if (!s) return '';
+      return s.replace(/^\d{4}-/, '').replace('-', '/');
+    }
+
+    // 기간 타입 → {startDate, endDate} 계산
+    function computePeriodRange(type) {
+      const today = new Date();
+      const end = fmtYmd(today);
+      let start = null;
+      if (type === 'week') {
+        const dow = today.getDay(); // 0=일
+        const monOffset = (dow === 0 ? 6 : dow - 1);
+        const monday = new Date(today); monday.setDate(today.getDate() - monOffset);
+        start = fmtYmd(monday);
+      } else if (type === 'month') {
+        start = fmtYmd(new Date(today.getFullYear(), today.getMonth(), 1));
+      } else if (type === 'last30') {
+        const d = new Date(today); d.setDate(today.getDate() - 29);
+        start = fmtYmd(d);
+      } else if (type === 'semester') {
+        // 학기: 3~8월(1학기), 9~다음해 2월(2학기)
+        const m = today.getMonth() + 1; // 1~12
+        if (m >= 3 && m <= 8) {
+          start = fmtYmd(new Date(today.getFullYear(), 2, 1)); // 3월 1일
+        } else if (m >= 9) {
+          start = fmtYmd(new Date(today.getFullYear(), 8, 1)); // 9월 1일
+        } else {
+          start = fmtYmd(new Date(today.getFullYear() - 1, 8, 1));
+        }
+      }
+      return { startDate: start, endDate: end };
+    }
+
+    function setPeriod(type) {
+      _periodState.type = type;
+      const customWrap = document.getElementById('periodCustom');
+      document.querySelectorAll('#periodChips .period-chip').forEach(c => c.classList.toggle('active', c.dataset.period === type));
+      if (type === 'custom') {
+        customWrap.classList.add('active');
+        // 기본 날짜 채우기 (최근 30일)
+        if (!document.getElementById('periodStart').value) {
+          const r = computePeriodRange('last30');
+          document.getElementById('periodStart').value = r.startDate;
+          document.getElementById('periodEnd').value = r.endDate;
+        }
+        // 사용자 지정은 적용 버튼 누르기 전에는 fetch 보류 — meta만 갱신
+        updatePeriodMeta();
+        return;
+      }
+      customWrap.classList.remove('active');
+      const r = computePeriodRange(type);
+      _periodState.startDate = r.startDate;
+      _periodState.endDate = r.endDate;
+      updatePeriodMeta();
+      if (document.getElementById('classSelect').value) loadAnalytics();
+    }
+
+    function applyCustomPeriod() {
+      const s = document.getElementById('periodStart').value;
+      const e = document.getElementById('periodEnd').value;
+      if (!s || !e) { showToast('시작일과 종료일을 모두 선택하세요'); return; }
+      if (s > e) { showToast('시작일이 종료일보다 늦습니다'); return; }
+      _periodState.type = 'custom';
+      _periodState.startDate = s;
+      _periodState.endDate = e;
+      updatePeriodMeta();
+      if (document.getElementById('classSelect').value) loadAnalytics();
+    }
+
+    function updatePeriodMeta() {
+      const meta = document.getElementById('periodMeta');
+      if (!meta) return;
+      if (_periodState.startDate && _periodState.endDate) {
+        meta.textContent = `${fmtKoDate(_periodState.startDate)} ~ ${fmtKoDate(_periodState.endDate)}`;
+      } else {
+        meta.textContent = '';
+      }
+    }
 
     async function loadClasses() {
       try {
@@ -206,9 +324,13 @@
       const container = document.getElementById('analyticsContent');
 
       try {
+        const qs = new URLSearchParams();
+        if (_periodState.startDate) qs.set('startDate', _periodState.startDate);
+        if (_periodState.endDate) qs.set('endDate', _periodState.endDate);
+        const qstr = qs.toString() ? `?${qs.toString()}` : '';
         const [lrsRes, growthRes] = await Promise.all([
-          fetch(`/api/lrs/class/${classId}`).then(r => r.json()),
-          fetch(`/api/growth/class/${classId}`).then(r => r.json())
+          fetch(`/api/lrs/class/${classId}${qstr}`).then(r => r.json()),
+          fetch(`/api/growth/class/${classId}${qstr}`).then(r => r.json())
         ]);
 
         if (!lrsRes.success || !growthRes.success) {
@@ -538,7 +660,11 @@
     async function loadSelfLearnSummary(classId) {
       const root = document.getElementById('selfLearnSection');
       try {
-        const res = await fetch(`/api/class/${classId}/students/self-learn-summary`).then(r => r.json());
+        const qs = new URLSearchParams();
+        if (_periodState.startDate) qs.set('startDate', _periodState.startDate);
+        if (_periodState.endDate) qs.set('endDate', _periodState.endDate);
+        const qstr = qs.toString() ? `?${qs.toString()}` : '';
+        const res = await fetch(`/api/class/${classId}/students/self-learn-summary${qstr}`).then(r => r.json());
         if (!res.success) {
           root.innerHTML = `<div class="section-box"><div class="empty-state"><i class="fas fa-lock"></i><h3>접근 권한이 없습니다</h3><p>${escHtml(res.message || '')}</p></div></div>`;
           return;
@@ -726,6 +852,17 @@
       setTimeout(() => toast.classList.remove('show'), 3000);
     }
 
+    function initPeriodChips() {
+      // 기본 활성 칩(last30) 기준으로 기간값 세팅
+      const r = computePeriodRange(_periodState.type);
+      _periodState.startDate = r.startDate;
+      _periodState.endDate = r.endDate;
+      updatePeriodMeta();
+      document.querySelectorAll('#periodChips .period-chip').forEach(chip => {
+        chip.addEventListener('click', () => setPeriod(chip.dataset.period));
+      });
+    }
+
     window.addEventListener('dacheim:user-loaded', (e) => {
       if (!['teacher', 'admin'].includes(e.detail.role)) {
         classToast('교사만 접근 가능합니다.', 'warning');
@@ -733,6 +870,7 @@
         return;
       }
       document.getElementById('mainContent').style.display = 'block';
+      initPeriodChips();
       loadClasses();
     });
   </script>
