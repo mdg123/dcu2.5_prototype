@@ -1578,14 +1578,29 @@ router.post('/learning-map/mappings/import', ...adminOnly, (req, res, next) => {
 // ============================================================================
 const featuredDb = require('../db/featured');
 
-// GET /api/admin/featured/sections — 섹션 목록 + 슬롯 갯수
+// GET /api/admin/featured/sections — 섹션 목록 + 슬롯 갯수 + PERIOD_OVERLAP 경고
 router.get('/featured/sections', ...adminOnly, (req, res) => {
   try {
     const activeOnly = req.query.activeOnly === '1' || req.query.activeOnly === 'true';
-    const sections = featuredDb.listSections({ activeOnly });
+    // includeWarnings=true 로 사전 PERIOD_OVERLAP 검출 결과를 각 row에 포함
+    const sections = featuredDb.listSections({ activeOnly, includeWarnings: true });
     res.json({ success: true, sections });
   } catch (err) {
     console.error('[ADMIN] featured/sections list error:', err);
+    res.status(500).json({ success: false, code: 'SERVER_ERROR', message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// POST /api/admin/featured/sections — 같은 key에 새 발행 row 생성 (다중 발행 허용)
+router.post('/featured/sections', ...adminOnly, (req, res) => {
+  try {
+    const r = featuredDb.createSection(req.body || {}, req.user.id);
+    if (!r.ok) {
+      return res.status(400).json({ success: false, code: r.code || 'INVALID_PAYLOAD', message: r.message || '요청을 처리하지 못했습니다.' });
+    }
+    res.status(201).json({ success: true, section: r.section, warnings: r.warnings || [] });
+  } catch (err) {
+    console.error('[ADMIN] featured/sections POST error:', err);
     res.status(500).json({ success: false, code: 'SERVER_ERROR', message: '서버 오류가 발생했습니다.' });
   }
 });
@@ -1616,9 +1631,9 @@ router.patch('/featured/sections/:id', ...adminOnly, (req, res) => {
     if (!r.ok) {
       if (r.code === 'NOT_FOUND') return res.status(404).json({ success: false, code: 'NOT_FOUND', message: '섹션이 존재하지 않습니다.' });
       if (r.code === 'STALE_UPDATE') return res.status(409).json({ success: false, code: 'STALE_UPDATE', message: '다른 관리자가 먼저 수정했습니다. 새로고침 후 다시 시도해주세요.' });
-      return res.status(400).json({ success: false, code: r.code || 'INVALID_PAYLOAD', message: '요청을 처리하지 못했습니다.' });
+      return res.status(400).json({ success: false, code: r.code || 'INVALID_PAYLOAD', message: r.message || '요청을 처리하지 못했습니다.' });
     }
-    res.json({ success: true, section: r.section });
+    res.json({ success: true, section: r.section, warnings: r.warnings || [] });
   } catch (err) {
     console.error('[ADMIN] featured/sections PATCH error:', err);
     res.status(500).json({ success: false, code: 'SERVER_ERROR', message: '서버 오류가 발생했습니다.' });
@@ -1689,6 +1704,50 @@ router.delete('/featured/items/:itemId', ...adminOnly, (req, res) => {
     res.json({ success: true });
   } catch (err) {
     console.error('[ADMIN] featured/items DELETE error:', err);
+    res.status(500).json({ success: false, code: 'SERVER_ERROR', message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// GET /api/admin/featured/sections/:id/preview-audience — 현재 설정 기준 노출 대상 사용자 수 추정
+router.get('/featured/sections/:id/preview-audience', ...adminOnly, (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const section = featuredDb.getSection(id);
+    if (!section) return res.status(404).json({ success: false, code: 'NOT_FOUND', message: '섹션이 존재하지 않습니다.' });
+
+    const db = require('../db/index');
+    const tRoles = section.target_roles;     // 'all' or array
+    const tLevels = section.target_school_levels;
+
+    const where = [];
+    const params = [];
+    if (tRoles === 'all') {
+      // 전체 역할 — 추가 조건 없음
+    } else if (Array.isArray(tRoles) && tRoles.length > 0) {
+      const ph = tRoles.map(() => '?').join(',');
+      where.push(`role IN (${ph})`);
+      params.push(...tRoles);
+    }
+    if (tLevels === 'all') {
+      // 전체 학교급 — 추가 조건 없음
+    } else if (Array.isArray(tLevels) && tLevels.length > 0) {
+      const ph = tLevels.map(() => '?').join(',');
+      where.push(`(school_level IN (${ph}))`);
+      params.push(...tLevels);
+    }
+    const whereSql = where.length > 0 ? `WHERE ${where.join(' AND ')}` : '';
+    const row = db.prepare(`SELECT COUNT(*) AS cnt FROM users ${whereSql}`).get(...params);
+    res.json({
+      success: true,
+      section_id: id,
+      audience_estimate: row?.cnt || 0,
+      target_roles: tRoles,
+      target_school_levels: tLevels,
+      status_derived: section.status_derived,
+      isPublishedNow: section.isPublishedNow
+    });
+  } catch (err) {
+    console.error('[ADMIN] featured/sections/:id/preview-audience error:', err);
     res.status(500).json({ success: false, code: 'SERVER_ERROR', message: '서버 오류가 발생했습니다.' });
   }
 });

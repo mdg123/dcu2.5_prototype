@@ -2410,6 +2410,23 @@ function initSchema() {
     console.warn('[DB] featured_sections 마이그레이션 경고:', e.message);
   }
 
+  // ============ 추천콘텐츠 타깃팅·게시기간·예약발행 (idempotent) ============
+  // featured_sections 확장: target_school_levels / target_roles / publish_start / publish_end
+  try {
+    migrateFeaturedSectionsTargeting(db);
+  } catch (e) {
+    console.warn('[DB] featured_sections 타깃팅 마이그레이션 경고:', e.message);
+  }
+
+  // ============ 추천콘텐츠 학년·교과 타깃팅 + UNIQUE(key) 제거 (idempotent) ============
+  // featured_sections 확장: target_grades / target_subjects
+  // + UNIQUE(key) 제거 → 같은 key에 다중 발행 row 허용
+  try {
+    migrateFeaturedSectionsGradeSubject(db);
+  } catch (e) {
+    console.warn('[DB] featured_sections 학년·교과 마이그레이션 경고:', e.message);
+  }
+
   // 관리자 기본 계정
   const admin = db.prepare('SELECT id FROM users WHERE username = ?').get('admin');
   if (!admin) {
@@ -2655,4 +2672,158 @@ function seedDummyData(db) {
   console.log('[DB] 더미 클래스 및 교육 데이터 시딩 완료');
 }
 
-module.exports = { initSchema, init: initSchema };
+/**
+ * featured_sections 테이블에 타깃팅·게시기간·예약발행 컬럼을 추가한다 (멱등).
+ * - target_school_levels TEXT NULL — JSON 배열 / 'all' / NULL
+ * - target_roles         TEXT NULL — JSON 배열 / 'all' / NULL
+ * - publish_start        TEXT NULL — ISO datetime (예약 발행 시작)
+ * - publish_end          TEXT NULL — ISO datetime (게시 종료)
+ *
+ * 모두 NULL 허용 / 기본값 NULL → 기존 4행은 변경 없이 모든 사용자에게 노출 (회귀 0).
+ * PRAGMA table_info로 컬럼 존재 여부를 사전 검사하여 멱등성을 확보.
+ */
+function migrateFeaturedSectionsTargeting(db) {
+  // 표가 없을 수도 있는 환경(과거 백업 DB) 방어
+  const tableExists = db.prepare(
+    "SELECT name FROM sqlite_master WHERE type='table' AND name='featured_sections'"
+  ).get();
+  if (!tableExists) return;
+
+  const cols = db.prepare("PRAGMA table_info(featured_sections)").all().map(c => c.name);
+  const additions = [
+    { name: 'target_school_levels', ddl: 'ALTER TABLE featured_sections ADD COLUMN target_school_levels TEXT' },
+    { name: 'target_roles',         ddl: 'ALTER TABLE featured_sections ADD COLUMN target_roles TEXT' },
+    { name: 'publish_start',        ddl: 'ALTER TABLE featured_sections ADD COLUMN publish_start TEXT' },
+    { name: 'publish_end',          ddl: 'ALTER TABLE featured_sections ADD COLUMN publish_end TEXT' }
+  ];
+  let added = 0;
+  for (const a of additions) {
+    if (!cols.includes(a.name)) {
+      try { db.exec(a.ddl); added++; }
+      catch (e) {
+        // 동시성/이미존재 등 — 무시(멱등)
+        if (!String(e.message || '').toLowerCase().includes('duplicate column')) {
+          console.warn(`[DB] featured_sections.${a.name} 추가 실패:`, e.message);
+        }
+      }
+    }
+  }
+  if (added > 0) {
+    console.log(`[DB] featured_sections 타깃팅 컬럼 ${added}개 추가 완료 (target_school_levels, target_roles, publish_start, publish_end)`);
+  }
+  // 게시기간 비교용 인덱스 (선택 — 4행짜리 테이블이므로 사실상 무의미하지만 명세 일관성)
+  try {
+    db.exec('CREATE INDEX IF NOT EXISTS idx_featured_sections_publish ON featured_sections(publish_start, publish_end)');
+  } catch (_) { /* 무시 */ }
+}
+
+/**
+ * featured_sections 테이블에 학년·교과 타깃팅 컬럼을 추가하고,
+ * UNIQUE(key) 제약을 제거하여 같은 key에 다중 발행 row를 허용한다 (멱등).
+ *
+ * 1) 컬럼 추가:
+ *    - target_grades   TEXT NULL — JSON 배열 (1~12 정수) / 'all' / NULL
+ *    - target_subjects TEXT NULL — JSON 배열 (다채움 표준 교과 11종) / 'all' / NULL
+ *
+ * 2) UNIQUE(key) 제거:
+ *    SQLite는 ALTER로 UNIQUE 제거가 안 되므로 표 재생성 패턴 사용.
+ *    - PRAGMA index_list로 'sqlite_autoindex_featured_sections_1' (UNIQUE on key) 존재 여부 검사
+ *    - 있으면 transaction 안에서:
+ *        a) featured_sections_new (UNIQUE 없이) 생성
+ *        b) INSERT INTO ... SELECT 로 데이터 복사
+ *        c) 자식 FK 제약을 안전히 유지하기 위해 PRAGMA foreign_keys=OFF (트랜잭션 외부에서)
+ *        d) DROP TABLE featured_sections; ALTER TABLE featured_sections_new RENAME TO featured_sections
+ *        e) 인덱스 재생성
+ *
+ * 시드된 4행(planning/recommend/channels/new)은 PK·데이터 그대로 보존.
+ */
+function migrateFeaturedSectionsGradeSubject(db) {
+  // 1) 표 존재 확인
+  const tableExists = db.prepare(
+    "SELECT name FROM sqlite_master WHERE type='table' AND name='featured_sections'"
+  ).get();
+  if (!tableExists) return;
+
+  // 2) target_grades / target_subjects 컬럼 추가 (멱등)
+  const cols = db.prepare("PRAGMA table_info(featured_sections)").all().map(c => c.name);
+  const additions = [
+    { name: 'target_grades',   ddl: 'ALTER TABLE featured_sections ADD COLUMN target_grades TEXT' },
+    { name: 'target_subjects', ddl: 'ALTER TABLE featured_sections ADD COLUMN target_subjects TEXT' }
+  ];
+  let addedCols = 0;
+  for (const a of additions) {
+    if (!cols.includes(a.name)) {
+      try { db.exec(a.ddl); addedCols++; }
+      catch (e) {
+        if (!String(e.message || '').toLowerCase().includes('duplicate column')) {
+          console.warn(`[DB] featured_sections.${a.name} 추가 실패:`, e.message);
+        }
+      }
+    }
+  }
+  if (addedCols > 0) {
+    console.log(`[DB] featured_sections 학년·교과 컬럼 ${addedCols}개 추가 완료 (target_grades, target_subjects)`);
+  }
+
+  // 3) UNIQUE(key) 제약 제거 — 자동 인덱스(sqlite_autoindex_featured_sections_1)가 있으면 표 재생성
+  const indexes = db.prepare("PRAGMA index_list('featured_sections')").all();
+  const hasUniqueOnKey = indexes.some(idx => {
+    if (!idx.unique) return false;
+    // 인덱스 이름이 자동(sqlite_autoindex_*)이거나, 컬럼이 정확히 [key]
+    if (String(idx.name).startsWith('sqlite_autoindex_')) {
+      // 컬럼 정보까지 확인
+      const info = db.prepare(`PRAGMA index_info('${idx.name}')`).all();
+      return info.length === 1 && info[0].name === 'key';
+    }
+    return false;
+  });
+
+  if (hasUniqueOnKey) {
+    // FK 무결성 보호: 외래키 OFF → 표 재생성 → ON
+    db.pragma('foreign_keys = OFF');
+    const tx = db.transaction(() => {
+      // 현재 컬럼 목록을 그대로 사용 (신규 컬럼 포함)
+      const allCols = db.prepare("PRAGMA table_info(featured_sections)").all();
+      const colDefs = allCols.map(c => {
+        const notNull = c.notnull ? ' NOT NULL' : '';
+        const dflt = (c.dflt_value !== null && c.dflt_value !== undefined) ? ` DEFAULT ${c.dflt_value}` : '';
+        const pk = c.pk ? ' PRIMARY KEY AUTOINCREMENT' : '';
+        return `${c.name} ${c.type || 'TEXT'}${pk}${notNull}${dflt}`;
+      }).join(',\n        ');
+      const colList = allCols.map(c => c.name).join(', ');
+
+      db.exec(`
+        CREATE TABLE featured_sections_new (
+          ${colDefs},
+          CHECK(key IN ('planning','recommend','channels','new')),
+          CHECK(layout IN ('card-grid','channel-row','list')),
+          CHECK(item_type IN ('content','channel'))
+        );
+      `);
+      db.exec(`INSERT INTO featured_sections_new (${colList}) SELECT ${colList} FROM featured_sections;`);
+      db.exec(`DROP TABLE featured_sections;`);
+      db.exec(`ALTER TABLE featured_sections_new RENAME TO featured_sections;`);
+
+      // 인덱스 재생성 (신규 + 기존 비-UNIQUE)
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_featured_sections_active_sort ON featured_sections(is_active, sort_order);`);
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_featured_sections_publish ON featured_sections(publish_start, publish_end);`);
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_featured_sections_key ON featured_sections(key);`);
+    });
+    try {
+      tx();
+      console.log('[DB] featured_sections UNIQUE(key) 제약 제거 완료 — 같은 key 다중 발행 행 허용');
+    } catch (e) {
+      console.error('[DB] featured_sections UNIQUE 제거 실패:', e.message);
+      throw e;
+    } finally {
+      db.pragma('foreign_keys = ON');
+    }
+  } else {
+    // UNIQUE 이미 제거됨 → 보조 인덱스만 멱등 보장
+    try {
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_featured_sections_key ON featured_sections(key);`);
+    } catch (_) { /* 무시 */ }
+  }
+}
+
+module.exports = { initSchema, init: initSchema, migrateFeaturedSectionsTargeting, migrateFeaturedSectionsGradeSubject };

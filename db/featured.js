@@ -9,22 +9,234 @@ const db = require('./index');
 const contentDb = require('./content');
 
 // =====================================================================
-//  In-memory 캐시 (뷰어 응답 5분 TTL — 스펙 F-3)
+//  In-memory 캐시 (뷰어 응답)
+//  타깃팅·게시기간 도입 후 응답이 (login, role, school_level) 별로 달라지므로
+//  캐시 비활성화 (단순화 — 향후 사용자 세그먼트 단위 캐시로 확장 가능).
 // =====================================================================
-const VIEWER_CACHE_TTL_MS = 5 * 60 * 1000;
-const _cache = { key: 'featured:v1', value: null, expiresAt: 0 };
+function invalidateFeaturedCache() { /* no-op (캐시 비활성화) */ }
 
-function invalidateFeaturedCache() {
-  _cache.value = null;
-  _cache.expiresAt = 0;
+// =====================================================================
+//  타깃팅 헬퍼
+// =====================================================================
+const ALLOWED_SCHOOL_LEVELS = ['elementary', 'middle', 'high'];
+const ALLOWED_ROLES = ['student', 'teacher', 'parent', 'staff', 'admin'];
+// 다채움 표준 교과 11종 (contents.subject 와 동일 화이트리스트)
+const ALLOWED_SUBJECTS = ['국어', '수학', '사회', '과학', '영어', '음악', '미술', '체육', '실과', '도덕', '통합'];
+// 학년 1~12 정수 (초1~6 / 중1~3 / 고1~3 통합 표기)
+const ALLOWED_GRADES_RANGE = { min: 1, max: 12 };
+// 시드된 4종 key — POST 신규 발행 시 허용 화이트리스트
+const ALLOWED_SECTION_KEYS = ['planning', 'recommend', 'channels', 'new'];
+
+/**
+ * DB에 저장된 타깃팅 컬럼(JSON 배열 문자열 / 'all' / NULL / 빈값)을
+ * 자바스크립트 배열 또는 'all'로 정규화.
+ * 반환값:
+ *   - 'all'  → 전체 노출
+ *   - []     → 빈 배열(전체 노출로 간주)
+ *   - ['x',] → 매칭 필요
+ */
+function parseJsonArray(raw) {
+  if (raw === null || raw === undefined) return 'all';
+  if (raw === 'all') return 'all';
+  if (typeof raw !== 'string') return 'all';
+  const s = raw.trim();
+  if (!s || s.toLowerCase() === 'all') return 'all';
+  try {
+    const arr = JSON.parse(s);
+    if (Array.isArray(arr)) {
+      if (arr.length === 0) return 'all';
+      return arr.map(String);
+    }
+    return 'all';
+  } catch (_) {
+    return 'all';
+  }
 }
-function _readFeaturedCache() {
-  if (_cache.value && _cache.expiresAt > Date.now()) return _cache.value;
+
+/**
+ * 입력값을 DB 저장 형식으로 직렬화.
+ * 입력:
+ *   - 'all' / null / undefined / 빈 배열 → null (= 전체)
+ *   - 배열 → 화이트리스트 통과한 값만 JSON.stringify
+ * @param {Array<string>} allowed — 화이트리스트
+ */
+function stringifyJsonArray(value, allowed) {
+  if (value === null || value === undefined) return null;
+  if (value === 'all') return 'all';
+  if (Array.isArray(value)) {
+    if (value.length === 0) return null;
+    const filtered = value
+      .map(v => String(v).trim())
+      .filter(v => v.length > 0 && (!allowed || allowed.includes(v)));
+    if (filtered.length === 0) return null;
+    return JSON.stringify(filtered);
+  }
   return null;
 }
-function _writeFeaturedCache(value) {
-  _cache.value = value;
-  _cache.expiresAt = Date.now() + VIEWER_CACHE_TTL_MS;
+
+/**
+ * 학년 정수 배열 직렬화 (1~12 정수만 허용).
+ * 'all' / null / undefined / 빈 배열 → null
+ * 잘못된 값 포함 시 false 반환 (호출부에서 INVALID_PAYLOAD 처리)
+ */
+function stringifyGradesArray(value) {
+  if (value === null || value === undefined) return null;
+  if (value === 'all') return 'all';
+  if (Array.isArray(value)) {
+    if (value.length === 0) return null;
+    const ints = [];
+    for (const v of value) {
+      const n = Number(v);
+      if (!Number.isInteger(n)) return false;
+      if (n < ALLOWED_GRADES_RANGE.min || n > ALLOWED_GRADES_RANGE.max) return false;
+      ints.push(n);
+    }
+    // 중복 제거 + 정렬
+    const uniq = Array.from(new Set(ints)).sort((a, b) => a - b);
+    if (uniq.length === 0) return null;
+    return JSON.stringify(uniq);
+  }
+  return false;
+}
+
+/**
+ * 학년 컬럼 파싱 (정수 배열 / 'all' / NULL → 'all' or 정수 배열)
+ */
+function parseGradesArray(raw) {
+  const v = parseJsonArray(raw);
+  if (v === 'all') return 'all';
+  // parseJsonArray는 String() 으로 매핑하므로 정수로 다시 캐스팅
+  if (Array.isArray(v)) {
+    const ints = v.map(x => parseInt(x, 10)).filter(x => Number.isInteger(x));
+    return ints.length === 0 ? 'all' : ints;
+  }
+  return 'all';
+}
+
+/**
+ * ISO datetime 가벼운 검증.
+ * 허용:
+ *   - null / undefined / '' → null
+ *   - 'YYYY-MM-DDTHH:MM[:SS][.sss][Z|±HH:MM]' 형식
+ * 반환: 유효하면 ISO 문자열, 무효하면 false
+ */
+function _normalizeIsoDatetime(value) {
+  if (value === null || value === undefined || value === '') return null;
+  if (typeof value !== 'string') return false;
+  const s = value.trim();
+  if (!s) return null;
+  const d = new Date(s);
+  if (isNaN(d.getTime())) return false;
+  // 형식 가벼운 검증: 'YYYY-MM-DDT' 시작
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(s)) return false;
+  return s;
+}
+
+/**
+ * 섹션의 status_derived 산출.
+ * - 'inactive'  : is_active = 0
+ * - 'scheduled' : publish_start > now
+ * - 'expired'   : publish_end < now
+ * - 'published' : 그 외(현재 게시 중)
+ */
+function _deriveStatus(section, nowMs = Date.now()) {
+  if (!section || section.is_active === 0) return 'inactive';
+  const startMs = section.publish_start ? Date.parse(section.publish_start) : NaN;
+  const endMs = section.publish_end ? Date.parse(section.publish_end) : NaN;
+  if (!isNaN(startMs) && startMs > nowMs) return 'scheduled';
+  if (!isNaN(endMs) && endMs < nowMs) return 'expired';
+  return 'published';
+}
+
+/**
+ * 게시 기간 [publish_start, publish_end] 범위에 현재 시각이 들어있는지.
+ * NULL → 무한대로 간주.
+ */
+function _isWithinPublishWindow(section, nowMs = Date.now()) {
+  if (section.publish_start) {
+    const ms = Date.parse(section.publish_start);
+    if (!isNaN(ms) && ms > nowMs) return false; // 아직 시작 안 됨
+  }
+  if (section.publish_end) {
+    const ms = Date.parse(section.publish_end);
+    if (!isNaN(ms) && ms < nowMs) return false; // 종료
+  }
+  return true;
+}
+
+/**
+ * 섹션의 target_school_levels 가 사용자 학교급에 매칭되는지.
+ * - 'all' → 통과
+ * - 배열 → user.school_level 가 포함되면 통과
+ *   - user 없거나 school_level 미상이면 'all' 만 통과 (배열은 미통과)
+ */
+function _matchSchoolLevel(targetParsed, user) {
+  if (targetParsed === 'all') return true;
+  if (!user || !user.school_level) return false;
+  return targetParsed.includes(user.school_level);
+}
+
+/**
+ * 섹션의 target_roles 가 사용자 역할에 매칭되는지.
+ * - 'all' → 통과
+ * - 배열 → user.role 이 포함되면 통과
+ *   - 비로그인(user==null): 'all' 또는 배열에 'guest' 가 있으면 통과
+ *   - (현재 ALLOWED_ROLES에 'guest' 미포함이므로 사실상 비로그인은 'all' 만 통과)
+ */
+function _matchRole(targetParsed, user) {
+  if (targetParsed === 'all') return true;
+  if (!user) return targetParsed.includes('guest');
+  return targetParsed.includes(user.role);
+}
+
+/**
+ * 섹션의 target_grades 가 사용자 학년에 매칭되는지.
+ * - 'all' → 통과
+ * - 배열 → user.grade(정수) 가 포함되면 통과
+ *   - user 없거나 grade 미상(NULL): 'all' 만 통과 (grade 필터 적용된 섹션은 미노출)
+ *
+ * 정책 설명: grade 정보는 학생만 정확. 교사/학부모/교직원/관리자는 grade 미상이거나 직무용 grade라 매칭에서 의미 약함.
+ *           단순화: grade 필터가 켜진(배열) 섹션은 grade가 명확한 학생에게만 노출.
+ */
+function _matchGrade(targetParsed, user) {
+  if (targetParsed === 'all') return true;
+  if (!user || user.grade === null || user.grade === undefined) return false;
+  const g = parseInt(user.grade, 10);
+  if (!Number.isInteger(g)) return false;
+  return targetParsed.includes(g);
+}
+
+/**
+ * 섹션의 target_subjects 매칭.
+ * 정책: 사용자 매칭은 적용하지 않음 (라벨링 목적).
+ * 사용자 스키마에 subject 필드가 없고, 교사 담당교과 데이터가 존재하지 않으므로
+ * "이 섹션이 다루는 교과"의 표시 라벨로만 사용한다. → 항상 통과.
+ *
+ * 향후 users.subject 또는 teacher_subjects 테이블이 추가되면 여기에 매칭 로직 적용 예정.
+ */
+function _matchSubject(_targetParsed, _user) {
+  return true;
+}
+
+/**
+ * DB row → 응답용 섹션 객체 (직렬화 + derived)
+ */
+function _serializeSection(row, nowMs = Date.now()) {
+  if (!row) return row;
+  const target_school_levels = parseJsonArray(row.target_school_levels);
+  const target_roles = parseJsonArray(row.target_roles);
+  const target_grades = parseGradesArray(row.target_grades);
+  const target_subjects = parseJsonArray(row.target_subjects);
+  const status_derived = _deriveStatus(row, nowMs);
+  return {
+    ...row,
+    target_school_levels,
+    target_roles,
+    target_grades,
+    target_subjects,
+    status_derived,
+    isPublishedNow: status_derived === 'published'
+  };
 }
 
 // =====================================================================
@@ -35,23 +247,46 @@ function _writeFeaturedCache(value) {
  * 모든 섹션 + 슬롯 갯수 (관리자 화면용)
  * @param {{activeOnly?: boolean}} options
  */
-function listSections({ activeOnly = false } = {}) {
+function listSections({ activeOnly = false, includeWarnings = false } = {}) {
   const where = activeOnly ? 'WHERE s.is_active = 1' : '';
-  return db.prepare(`
+  const rows = db.prepare(`
     SELECT s.*,
       (SELECT COUNT(*) FROM featured_section_items i WHERE i.section_id = s.id) AS item_count
     FROM featured_sections s
     ${where}
     ORDER BY s.sort_order ASC, s.id ASC
   `).all();
+  const now = Date.now();
+  const serialized = rows.map(r => _serializeSection(r, now));
+
+  if (includeWarnings) {
+    // 사전 PERIOD_OVERLAP 검출 — 같은 key의 다른 활성 행과 게시기간이 겹치는지
+    return serialized.map(s => {
+      const warnings = [];
+      if (s.is_active === 1) {
+        const overlaps = findPeriodOverlaps(s.id, s.key, s.publish_start, s.publish_end);
+        if (overlaps.length > 0) {
+          warnings.push({
+            code: 'PERIOD_OVERLAP',
+            overlap_with: overlaps.map(o => o.id),
+            message: `같은 섹션 키(${s.key})를 가진 다른 활성 행과 게시 기간이 겹칩니다.`
+          });
+        }
+      }
+      return { ...s, warnings };
+    });
+  }
+  return serialized;
 }
 
 function getSection(id) {
-  return db.prepare(`SELECT * FROM featured_sections WHERE id = ?`).get(id);
+  const row = db.prepare(`SELECT * FROM featured_sections WHERE id = ?`).get(id);
+  return row ? _serializeSection(row) : row;
 }
 
 function getSectionByKey(key) {
-  return db.prepare(`SELECT * FROM featured_sections WHERE key = ?`).get(key);
+  const row = db.prepare(`SELECT * FROM featured_sections WHERE key = ?`).get(key);
+  return row ? _serializeSection(row) : row;
 }
 
 /**
@@ -62,20 +297,58 @@ function getSectionByKey(key) {
  * @returns {object} { ok, code?, section? }
  */
 function updateSection(id, payload = {}, userId = null) {
-  const allowed = ['title', 'subtitle', 'layout', 'sort_order', 'is_active', 'fallback_enabled', 'max_items'];
+  const allowed = [
+    'title', 'subtitle', 'layout', 'sort_order', 'is_active',
+    'fallback_enabled', 'max_items',
+    // 타깃팅·게시기간·예약발행
+    'target_school_levels', 'target_roles', 'publish_start', 'publish_end',
+    // 신규: 학년·교과 타깃팅
+    'target_grades', 'target_subjects'
+  ];
   const fields = [];
   const params = [];
   for (const key of allowed) {
     if (payload[key] === undefined) continue;
     let v = payload[key];
-    if (key === 'is_active' || key === 'fallback_enabled') v = v ? 1 : 0;
-    if (key === 'sort_order' || key === 'max_items') v = parseInt(v, 10) || 0;
+    if (key === 'is_active' || key === 'fallback_enabled') {
+      v = v ? 1 : 0;
+    } else if (key === 'sort_order' || key === 'max_items') {
+      v = parseInt(v, 10) || 0;
+    } else if (key === 'target_school_levels') {
+      v = stringifyJsonArray(v, ALLOWED_SCHOOL_LEVELS);
+    } else if (key === 'target_roles') {
+      v = stringifyJsonArray(v, ALLOWED_ROLES);
+    } else if (key === 'target_grades') {
+      const norm = stringifyGradesArray(v);
+      if (norm === false) {
+        return { ok: false, code: 'INVALID_PAYLOAD', message: 'target_grades 값이 올바르지 않습니다 (1~12 정수 배열).' };
+      }
+      v = norm;
+    } else if (key === 'target_subjects') {
+      // 'all' / null / [] 는 stringifyJsonArray가 그대로 처리
+      // 잘못된 교과명 포함 시 화이트리스트로 자동 제거 → 결과가 빈 배열이면 null로 떨어짐
+      // 사용자가 명시적으로 잘못된 값만 보낸 경우(예: ['수학팝송']) 어떤 처리도 안 됐는지 확인 필요
+      if (Array.isArray(v) && v.length > 0) {
+        const cleaned = v.map(x => String(x).trim()).filter(x => x);
+        const invalid = cleaned.filter(x => !ALLOWED_SUBJECTS.includes(x));
+        if (invalid.length > 0) {
+          return { ok: false, code: 'INVALID_PAYLOAD', message: `target_subjects 값이 올바르지 않습니다 (허용: ${ALLOWED_SUBJECTS.join(', ')}).` };
+        }
+      }
+      v = stringifyJsonArray(v, ALLOWED_SUBJECTS);
+    } else if (key === 'publish_start' || key === 'publish_end') {
+      const norm = _normalizeIsoDatetime(v);
+      if (norm === false) {
+        return { ok: false, code: 'INVALID_PAYLOAD', message: `${key} 형식이 올바르지 않습니다 (ISO 8601 datetime 필요).` };
+      }
+      v = norm;
+    }
     fields.push(`${key} = ?`);
     params.push(v);
   }
   if (fields.length === 0) {
     const section = getSection(id);
-    return section ? { ok: true, section } : { ok: false, code: 'NOT_FOUND' };
+    return section ? { ok: true, section, warnings: [] } : { ok: false, code: 'NOT_FOUND' };
   }
 
   // 낙관적 동시성 검사 (선택)
@@ -94,7 +367,148 @@ function updateSection(id, payload = {}, userId = null) {
   const info = db.prepare(`UPDATE featured_sections SET ${fields.join(', ')} WHERE id = ?`).run(...params);
   if (info.changes === 0) return { ok: false, code: 'NOT_FOUND' };
   invalidateFeaturedCache();
-  return { ok: true, section: getSection(id) };
+
+  // 기간 중첩 검출 (publish_start/end 또는 is_active 토글 시)
+  const warnings = [];
+  const periodChanged = ('publish_start' in payload) || ('publish_end' in payload) || ('is_active' in payload);
+  if (periodChanged) {
+    const updated = db.prepare('SELECT id, key, publish_start, publish_end, is_active FROM featured_sections WHERE id = ?').get(id);
+    if (updated && updated.is_active === 1) {
+      const overlaps = findPeriodOverlaps(updated.id, updated.key, updated.publish_start, updated.publish_end);
+      if (overlaps.length > 0) {
+        warnings.push({
+          code: 'PERIOD_OVERLAP',
+          overlap_with: overlaps.map(o => o.id),
+          message: `같은 섹션 키(${updated.key})를 가진 다른 활성 행과 게시 기간이 겹칩니다.`
+        });
+      }
+    }
+  }
+  return { ok: true, section: getSection(id), warnings };
+}
+
+/**
+ * 같은 key를 가진 다른 활성(is_active=1) 행 중 publish 기간이 [start, end]와 겹치는 row 목록.
+ * - NULL은 ±∞로 간주
+ * - 두 구간 [a1,a2] [b1,b2] 가 겹치는 조건: a1 ≤ b2 && b1 ≤ a2
+ * - 자기자신(sectionId) 제외
+ *
+ * @param {number} sectionId — 자기자신 제외용
+ * @param {string} key       — 동일 섹션 키만 비교
+ * @param {string|null} start — ISO datetime or NULL
+ * @param {string|null} end   — ISO datetime or NULL
+ * @returns {Array<{id:number, publish_start:string|null, publish_end:string|null}>}
+ */
+function findPeriodOverlaps(sectionId, key, start, end) {
+  if (!key) return [];
+  const others = db.prepare(`
+    SELECT id, key, publish_start, publish_end
+    FROM featured_sections
+    WHERE key = ? AND id != ? AND is_active = 1
+  `).all(key, sectionId);
+
+  const aStartMs = start ? Date.parse(start) : -Infinity;
+  const aEndMs = end ? Date.parse(end) : Infinity;
+  // 무효 일자는 ±∞로 폴백
+  const a1 = isNaN(aStartMs) ? -Infinity : aStartMs;
+  const a2 = isNaN(aEndMs) ? Infinity : aEndMs;
+
+  return others.filter(o => {
+    const bStartMs = o.publish_start ? Date.parse(o.publish_start) : -Infinity;
+    const bEndMs = o.publish_end ? Date.parse(o.publish_end) : Infinity;
+    const b1 = isNaN(bStartMs) ? -Infinity : bStartMs;
+    const b2 = isNaN(bEndMs) ? Infinity : bEndMs;
+    // 겹침 조건: a1 ≤ b2 && b1 ≤ a2
+    return a1 <= b2 && b1 <= a2;
+  });
+}
+
+/**
+ * 새 발행 행 생성 — 같은 key에 여러 row 허용.
+ * 시드된 4개 key만 허용 (UNIQUE 제거됐어도 CHECK(key IN ...) 제약은 유지).
+ *
+ * @param {object} payload
+ * @param {number} userId
+ * @returns {{ok:boolean, code?:string, message?:string, section?:object, warnings?:Array}}
+ */
+function createSection(payload = {}, userId = null) {
+  const key = (payload.key || '').toString().trim();
+  if (!key) return { ok: false, code: 'INVALID_PAYLOAD', message: 'key 가 필요합니다.' };
+  if (!ALLOWED_SECTION_KEYS.includes(key)) {
+    return { ok: false, code: 'INVALID_PAYLOAD', message: `key는 [${ALLOWED_SECTION_KEYS.join(', ')}] 중 하나여야 합니다.` };
+  }
+  const title = (payload.title || '').toString().trim();
+  if (!title) return { ok: false, code: 'INVALID_PAYLOAD', message: 'title 이 필요합니다.' };
+
+  // 같은 key의 기본 행에서 layout/item_type 상속 (안 보낸 경우)
+  const seed = db.prepare('SELECT layout, item_type FROM featured_sections WHERE key = ? ORDER BY id ASC LIMIT 1').get(key);
+  const layout = payload.layout || seed?.layout || 'card-grid';
+  const item_type = payload.item_type || seed?.item_type || 'content';
+
+  // 검증
+  if (!['card-grid', 'channel-row', 'list'].includes(layout)) {
+    return { ok: false, code: 'INVALID_PAYLOAD', message: 'layout 값이 올바르지 않습니다.' };
+  }
+  if (!['content', 'channel'].includes(item_type)) {
+    return { ok: false, code: 'INVALID_PAYLOAD', message: 'item_type 값이 올바르지 않습니다.' };
+  }
+
+  // 타깃팅·기간 정규화
+  const target_school_levels = stringifyJsonArray(payload.target_school_levels, ALLOWED_SCHOOL_LEVELS);
+  const target_roles = stringifyJsonArray(payload.target_roles, ALLOWED_ROLES);
+  const target_grades = stringifyGradesArray(payload.target_grades);
+  if (target_grades === false) {
+    return { ok: false, code: 'INVALID_PAYLOAD', message: 'target_grades 값이 올바르지 않습니다 (1~12 정수 배열).' };
+  }
+  if (Array.isArray(payload.target_subjects) && payload.target_subjects.length > 0) {
+    const invalid = payload.target_subjects.map(x => String(x).trim())
+      .filter(x => x && !ALLOWED_SUBJECTS.includes(x));
+    if (invalid.length > 0) {
+      return { ok: false, code: 'INVALID_PAYLOAD', message: `target_subjects 값이 올바르지 않습니다 (허용: ${ALLOWED_SUBJECTS.join(', ')}).` };
+    }
+  }
+  const target_subjects = stringifyJsonArray(payload.target_subjects, ALLOWED_SUBJECTS);
+
+  const ps = _normalizeIsoDatetime(payload.publish_start);
+  if (ps === false) return { ok: false, code: 'INVALID_PAYLOAD', message: 'publish_start 형식이 올바르지 않습니다 (ISO 8601 datetime 필요).' };
+  const pe = _normalizeIsoDatetime(payload.publish_end);
+  if (pe === false) return { ok: false, code: 'INVALID_PAYLOAD', message: 'publish_end 형식이 올바르지 않습니다 (ISO 8601 datetime 필요).' };
+
+  const subtitle = payload.subtitle ? String(payload.subtitle) : null;
+  const sort_order = parseInt(payload.sort_order, 10) || 0;
+  const is_active = (payload.is_active === undefined || payload.is_active === null) ? 1 : (payload.is_active ? 1 : 0);
+  const fallback_enabled = (payload.fallback_enabled === undefined || payload.fallback_enabled === null) ? 1 : (payload.fallback_enabled ? 1 : 0);
+  const max_items = parseInt(payload.max_items, 10) || 8;
+
+  const info = db.prepare(`
+    INSERT INTO featured_sections
+      (key, title, subtitle, layout, item_type, sort_order, is_active, fallback_enabled, max_items,
+       target_school_levels, target_roles, target_grades, target_subjects,
+       publish_start, publish_end, updated_by)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    key, title, subtitle, layout, item_type, sort_order, is_active, fallback_enabled, max_items,
+    target_school_levels, target_roles, target_grades, target_subjects,
+    ps, pe, userId
+  );
+  invalidateFeaturedCache();
+
+  const newId = info.lastInsertRowid;
+  const section = getSection(newId);
+
+  // 기간 중첩 사전 검출
+  const warnings = [];
+  if (is_active === 1) {
+    const overlaps = findPeriodOverlaps(newId, key, ps, pe);
+    if (overlaps.length > 0) {
+      warnings.push({
+        code: 'PERIOD_OVERLAP',
+        overlap_with: overlaps.map(o => o.id),
+        message: `같은 섹션 키(${key})를 가진 다른 활성 행과 게시 기간이 겹칩니다.`
+      });
+    }
+  }
+  return { ok: true, section, warnings };
 }
 
 /**
@@ -322,14 +736,33 @@ function reorderItems(sectionId, order = []) {
  * @param {{user?: object}} ctx — 로그인 사용자(선택)
  */
 function getFeaturedForViewer({ user = null } = {}) {
-  // 캐시 (응답이 역할별로 다르지 않으므로 단일 키 사용 — 단, fallback이 user 의존이라 user 단위로 분리)
-  // 단순화를 위해 캐시는 비로그인 응답에만 적용
-  if (!user) {
-    const cached = _readFeaturedCache();
-    if (cached) return cached;
+  // 캐시: 타깃팅·게시기간 도입으로 응답이 사용자 컨텍스트에 따라 달라지므로 비활성화.
+  const nowMs = Date.now();
+  const allActive = listSections({ activeOnly: true });
+
+  // user.school_level / grade 보강 — 인증 미들웨어가 SELECT에 포함하지 않을 수 있음
+  let viewer = user;
+  if (user && user.id && (user.school_level === undefined || user.grade === undefined)) {
+    try {
+      const row = db.prepare('SELECT school_level, grade FROM users WHERE id = ?').get(user.id);
+      viewer = {
+        ...user,
+        school_level: row ? row.school_level : null,
+        grade: row ? row.grade : null
+      };
+    } catch (_) { viewer = { ...user, school_level: null, grade: null }; }
   }
 
-  const sections = listSections({ activeOnly: true });
+  // 타깃팅·게시기간 필터링 (4차원: 학교급 / 역할 / 학년 / 교과)
+  const sections = allActive.filter(s => {
+    if (!_isWithinPublishWindow(s, nowMs)) return false;
+    if (!_matchSchoolLevel(s.target_school_levels, viewer)) return false;
+    if (!_matchRole(s.target_roles, viewer)) return false;
+    if (!_matchGrade(s.target_grades, viewer)) return false;
+    if (!_matchSubject(s.target_subjects, viewer)) return false; // 항상 true (라벨링 정책)
+    return true;
+  });
+
   const result = sections.map(s => {
     const max = s.max_items || 8;
     let items = _listVisibleSectionItems(s.id, max);
@@ -343,7 +776,7 @@ function getFeaturedForViewer({ user = null } = {}) {
         : true;                        // channels / new 는 항상 부족분 보충
 
     if (needsFallback && allowFallback) {
-      const fallbackItems = _buildFallback(s, max - items.length, user, items);
+      const fallbackItems = _buildFallback(s, max - items.length, viewer, items);
       if (fallbackItems.length > 0) {
         items = items.concat(fallbackItems);
         isFallback = items.every(it => it._fallback) || items.length === fallbackItems.length;
@@ -365,7 +798,6 @@ function getFeaturedForViewer({ user = null } = {}) {
   });
 
   const payload = { success: true, sections: result };
-  if (!user) _writeFeaturedCache(payload);
   return payload;
 }
 
@@ -540,7 +972,9 @@ module.exports = {
   getSection,
   getSectionByKey,
   updateSection,
+  createSection,
   reorderSections,
+  findPeriodOverlaps,
   // items
   listSectionItems,
   addSectionItem,
@@ -551,5 +985,10 @@ module.exports = {
   // search
   searchForCuration,
   // cache
-  invalidateFeaturedCache
+  invalidateFeaturedCache,
+  // 화이트리스트 (외부 노출 — 프론트엔드 옵션 표시용)
+  ALLOWED_SCHOOL_LEVELS,
+  ALLOWED_ROLES,
+  ALLOWED_SUBJECTS,
+  ALLOWED_SECTION_KEYS
 };
