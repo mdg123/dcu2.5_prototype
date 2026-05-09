@@ -42,7 +42,8 @@
     .sidebar-menu li.active { background: var(--primary-light); color: var(--primary); font-weight: 600; border-right: 3px solid var(--primary); }
     .sidebar-menu li i { width: 18px; text-align: center; }
     .sidebar-menu li a { text-decoration: none; color: inherit; display: flex; align-items: center; gap: 10px; width: 100%; }
-    .page-main { flex: 1; padding: 24px; max-width: 1440px; }
+    /* .page-main 자체 max-width / padding 제거 — page-shell--reading 토큰으로 위임 */
+    .page-main { flex: 1; }
 
     /* ===== STATS GRID (5 cards, centered text) ===== */
     .stats-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 16px; margin-bottom: 24px; }
@@ -85,8 +86,16 @@
     .selection-bar .btn-deselect:hover { background: white; }
 
     /* ===== SELECT ALL ROW ===== */
-    .select-all-row { display: flex; align-items: center; gap: 12px; padding: 10px 20px; margin-bottom: 8px; }
-    .select-all-row label { display: flex; align-items: center; gap: 8px; font-size: 0.875rem; color: var(--gray-600); cursor: pointer; font-weight: 500; }
+    /* 선택 헤더 — list-item 과 동일한 카드 스타일·padding 으로 통일 (체크박스 수직 정렬 일치) */
+    .select-all-row {
+      display: flex; align-items: center; gap: 16px;
+      background: #fff; border-radius: var(--radius-md);
+      padding: 12px 20px; box-shadow: var(--shadow-sm);
+      border: 2px solid transparent;
+    }
+    .select-all-row label { display: flex; align-items: center; gap: 12px; font-size: 0.875rem; color: var(--gray-600); cursor: pointer; font-weight: 600; }
+    .select-all-row label input[type="checkbox"] { width: 18px; height: 18px; cursor: pointer; accent-color: var(--primary, #2563eb); margin: 0; }
+    .select-all-row .select-all-meta { margin-left: auto; font-size: 0.8rem; color: var(--gray-400); font-weight: 500; }
 
     /* ===== LIST VIEW ===== */
     .portfolio-list { display: flex; flex-direction: column; gap: 12px; }
@@ -317,10 +326,7 @@
       .list-item { break-inside: avoid; box-shadow: none; border: 1px solid var(--gray-200); }
     }
 
-    /* ===== PAGE HEADER (with PDF CTA) ===== */
-    .page-title-row { display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; flex-wrap: wrap; gap:12px; }
-    .page-title { font-size: 28px; font-weight: 800; color: var(--gray-900); display:flex; align-items:center; gap:10px; }
-    .page-title i { color: var(--primary); }
+    /* ===== PAGE HEADER — dacheum-common.css 의 .page-header 표준 사용 ===== */
     .pdf-cta-btn { display:inline-flex; align-items:center; gap:10px; padding: 14px 24px; background: var(--primary); color: white; border:none; border-radius: 12px; font-size: 16px; font-weight: 700; cursor:pointer; box-shadow: 0 4px 12px rgba(37,99,235,.25); transition: all 0.2s; font-family: inherit; }
     .pdf-cta-btn:hover { background: var(--primary-600); transform: translateY(-1px); box-shadow: 0 6px 16px rgba(37,99,235,.35); }
     .pdf-cta-btn:disabled { opacity: 0.5; cursor: not-allowed; box-shadow:none; transform:none; }
@@ -501,7 +507,23 @@
 </head>
 <body>
 <div class="app-layout">
-  <main class="page-main" style="padding:24px;max-width:1400px;margin:0 auto;">
+  <main class="page-main page-shell">
+    <!-- ===== 표준 페이지 헤더 (역할 무관 항상 노출) ===== -->
+    <header class="page-header">
+      <div class="page-header__main">
+        <div class="page-header__title-row">
+          <span class="page-header__icon" aria-hidden="true">📁</span>
+          <h1 class="page-header__title">나의 포트폴리오</h1>
+        </div>
+        <p class="page-header__subtitle">학습 결과물과 성장 기록을 모았어요.</p>
+      </div>
+      <div class="page-header__actions">
+        <button class="pdf-cta-btn" id="topPdfCtaBtn" onclick="window._openPdfWizard()" style="display:none;">
+          <i class="fas fa-file-pdf"></i> 종합 PDF 다운로드
+        </button>
+      </div>
+    </header>
+
     <!-- ===== 교사용: 클래스 선택 + 학생 포트폴리오 목록 ===== -->
     <div id="teacherPortfolioView" style="display:none;">
       <div class="class-selector">
@@ -547,13 +569,7 @@
       </div>
     </div>
 
-    <!-- ===== PAGE HEADER + PDF CTA ===== -->
-    <div class="page-title-row">
-      <div class="page-title"><i class="fas fa-folder-open"></i> 나의 포트폴리오</div>
-      <button class="pdf-cta-btn" id="topPdfCtaBtn" onclick="window._openPdfWizard()">
-        <i class="fas fa-file-pdf"></i> 종합 PDF 다운로드
-      </button>
-    </div>
+    <!-- ===== PAGE HEADER (이전 위치) — 페이지 상단 단일 헤더로 통합 ===== -->
 
     <!-- ===== 5 STAT CARDS ===== -->
     <div class="stats-grid" id="statsGrid">
@@ -675,6 +691,7 @@
         <div class="portfolio-list" id="listView">
           <div class="select-all-row">
             <label><input type="checkbox" id="selectAllCheckbox" onchange="window._toggleSelectAll(this)"> 전체 선택</label>
+            <span class="select-all-meta" id="selectAllMeta"></span>
           </div>
           <div id="portfolioListItems">
             <div class="empty-state"><i class="fas fa-spinner fa-spin"></i><p>로딩 중...</p></div>
@@ -1192,6 +1209,9 @@
       loadPortfolioClasses();
     } else {
       targetUserId = currentUser.id;
+      // 학생 본인 진입 시 상단 PDF 다운로드 버튼 노출
+      var topPdfBtn = document.getElementById('topPdfCtaBtn');
+      if (topPdfBtn) topPdfBtn.style.display = '';
       // 학생 학년 기반 학교급 자동 추정 (목록 필터 + 위저드 디폴트)
       try {
         var g = parseInt(currentUser.grade || currentUser.grade_level || 0, 10);
@@ -1453,6 +1473,9 @@
         window._openDetail(id);
       });
     });
+
+    // 헤더 메타(총 N개) 초기 동기화
+    if (typeof updateSelection === 'function') updateSelection();
   }
 
   function renderTimeline(items) {
@@ -1529,6 +1552,16 @@
     var selectAll = document.getElementById('selectAllCheckbox');
     selectAll.checked = visible.length > 0 && checkedVisible.length === visible.length;
     selectAll.indeterminate = checkedVisible.length > 0 && checkedVisible.length < visible.length;
+
+    // 헤더 우측 메타 — 총 N개 / 선택 시 "X / N 선택"
+    var metaEl = document.getElementById('selectAllMeta');
+    if (metaEl) {
+      if (checkedVisible.length > 0) {
+        metaEl.textContent = checkedVisible.length + ' / ' + visible.length + ' 선택';
+      } else {
+        metaEl.textContent = '총 ' + visible.length + '개';
+      }
+    }
   }
 
   window._deselectAll = function() {

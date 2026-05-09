@@ -1618,6 +1618,10 @@ function initSchema() {
     if (!ctCols.includes('estimated_minutes')) {
       db.exec("ALTER TABLE contents ADD COLUMN estimated_minutes INTEGER DEFAULT 10");
     }
+    // 출처(외부 사이트·기관·자료실) — 상세 검색 6항목 중 "출처" 매칭 컬럼
+    if (!ctCols.includes('source')) {
+      db.exec("ALTER TABLE contents ADD COLUMN source TEXT");
+    }
   } catch (e) { /* 테이블이 아직 없으면 무시 */ }
 
   // 마이그레이션: exams 테이블 확장

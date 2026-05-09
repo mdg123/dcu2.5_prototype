@@ -29,7 +29,12 @@ router.get('/:classId', requireAuth, requireClassMember, (req, res) => {
   try {
     const { status, page, std_ids } = req.query;
     const stdIdsArr = std_ids ? String(std_ids).split(',').map(s => s.trim()).filter(Boolean) : null;
-    const result = homeworkDb.getHomeworkByClass(req.classId, { status, page: parseInt(page) || 1, userId: req.user.id, std_ids: stdIdsArr });
+    // G5: 학생/일반 사용자 → 시작일 도달한 과제만 노출. 교사(owner)·관리자 → 전체 + is_scheduled 표기
+    const isOwner = req.myRole === 'owner' || req.user.role === 'admin';
+    const result = homeworkDb.getHomeworkByClass(req.classId, {
+      status, page: parseInt(page) || 1, userId: req.user.id, std_ids: stdIdsArr,
+      hideScheduled: !isOwner
+    });
     res.json({ success: true, ...result });
   } catch (err) {
     res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
@@ -42,13 +47,18 @@ router.post('/:classId', requireAuth, requireClassMember, (req, res) => {
     if (req.myRole !== 'owner' && req.user.role !== 'admin') {
       return res.status(403).json({ success: false, message: '개설자만 과제를 생성할 수 있습니다.' });
     }
-    const { title, description, content, due_date, max_score, status, subject_code, grade_group, achievement_code, public_submissions, std_ids } = req.body;
+    const { title, description, content, due_date, max_score, status, subject_code, grade_group, achievement_code, public_submissions, std_ids, start_date, attachments, display_mode } = req.body;
     if (!title) return res.status(400).json({ success: false, message: '과제 제목을 입력하세요.' });
+    // 표시 모드 검증: 'list' | 'comment' 외 값은 'list'로 폴백
+    const safeDisplayMode = (display_mode === 'comment') ? 'comment' : 'list';
     const hw = homeworkDb.createHomework(req.classId, req.user.id, {
       title, description, content, due_date, max_score, status,
       subject_code, grade_group, achievement_code,
       public_submissions: public_submissions ? 1 : 0,
-      std_ids: Array.isArray(std_ids) ? std_ids : null
+      std_ids: Array.isArray(std_ids) ? std_ids : null,
+      start_date: start_date || null,                                  // G5
+      attachments: Array.isArray(attachments) ? attachments : null,    // G3
+      display_mode: safeDisplayMode                                     // 표시 모드: 리스트형/댓글형
     });
     // xAPI: 과제 출제 assignment.gave (교사)
     try {
@@ -77,32 +87,89 @@ router.get('/:classId/:homeworkId', requireAuth, requireClassMember, (req, res) 
       return res.status(404).json({ success: false, message: '과제를 찾을 수 없습니다.' });
     }
 
+    const isOwner = req.myRole === 'owner' || req.user.role === 'admin';
+
+    // G5: 예약 과제 — 학생/일반 사용자가 시작일 전 진입 시 차단
+    if (!isOwner && hw.start_date) {
+      const todayKst = (() => {
+        const d = new Date();
+        d.setHours(d.getHours() + 9);
+        return d.toISOString().slice(0, 10);
+      })();
+      if (hw.start_date > todayKst) {
+        return res.json({
+          success: false,
+          scheduled: true,
+          start_date: hw.start_date,
+          message: `이 과제는 ${hw.start_date}에 공개됩니다.`
+        });
+      }
+    }
+
+    // G5: 교사 응답에는 is_scheduled 표기
+    if (isOwner) {
+      const todayKst = (() => {
+        const d = new Date();
+        d.setHours(d.getHours() + 9);
+        return d.toISOString().slice(0, 10);
+      })();
+      hw.is_scheduled = !!(hw.start_date && hw.start_date > todayKst);
+    }
+
     let submission = null;
     let submissions = null;
-    if (req.myRole === 'owner') {
+    if (isOwner) {
       submissions = homeworkDb.getSubmissions(hw.id);
     } else {
       submission = homeworkDb.getSubmission(hw.id, req.user.id);
-      // 공개 설정이 ON인 과제는 다른 학생 제출물도 함께 제공 (본인 제출물 제외)
+      // 공개 설정이 ON인 과제는 다른 학생 제출물도 함께 제공
+      // 정책: 본인 항목은 점수·피드백 포함, 다른 학생 항목은 점수·피드백·채점일·채점상태 마스킹
       if (hw.public_submissions) {
         const all = homeworkDb.getSubmissions(hw.id);
-        submissions = all.map(s => ({
-          id: s.id,
-          student_id: s.student_id,
-          display_name: s.display_name,
-          username: s.username,
-          content: s.content,
-          file_path: s.file_path,
-          file_name: s.file_name,
-          submitted_at: s.submitted_at,
-          status: s.status,
-          isMe: s.student_id === req.user.id
-        }));
+        submissions = all.map(s => {
+          const isMe = s.student_id === req.user.id;
+          const base = {
+            id: s.id,
+            student_id: s.student_id,
+            display_name: s.display_name,
+            username: s.username,
+            content: s.content,
+            file_path: s.file_path,
+            file_name: s.file_name,
+            attachments: s.attachments,                  // G2: 멀티미디어 통합
+            submitted_at: s.submitted_at,
+            isMe
+          };
+          if (isMe) {
+            // 본인 항목 — 채점 결과 그대로 노출
+            base.score = s.score;
+            base.feedback = s.feedback;
+            base.graded_at = s.graded_at;
+            base.status = s.status;
+          } else {
+            // 다른 학생 항목 — 채점 결과 마스킹
+            base.score = null;
+            base.feedback = null;
+            base.graded_at = null;
+            // status 표준화: 'graded'/'returned'/'resubmitted' 등 채점 결과 노출 단어 가리기
+            base.status = 'submitted';
+          }
+          return base;
+        });
       }
     }
+
+    // G6: 제출률 통계 — 학생/교사 모두에 부여
+    try {
+      hw.submission_stats = homeworkDb.getSubmissionStats(hw.id, req.classId);
+    } catch (e) {
+      hw.submission_stats = { total_students: 0, submitted_count: 0, percent: 0 };
+    }
+
     try { ensureTodayAttendance(req.classId, req.user.id, 'homework_view'); } catch (e) {}
     res.json({ success: true, homework: hw, submission, submissions, myRole: req.myRole });
   } catch (err) {
+    console.error('homework detail error:', err);
     res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
   }
 });
@@ -113,7 +180,12 @@ router.put('/:classId/:homeworkId', requireAuth, requireClassMember, (req, res) 
     if (req.myRole !== 'owner') {
       return res.status(403).json({ success: false, message: '권한이 없습니다.' });
     }
-    const hw = homeworkDb.updateHomework(parseInt(req.params.homeworkId), req.body);
+    // 표시 모드 검증: 명시 전달된 경우 'list' | 'comment' 외 값은 'list'로 폴백
+    const body = { ...req.body };
+    if ('display_mode' in body) {
+      body.display_mode = (body.display_mode === 'comment') ? 'comment' : 'list';
+    }
+    const hw = homeworkDb.updateHomework(parseInt(req.params.homeworkId), body);
     res.json({ success: true, homework: hw });
   } catch (err) {
     res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
@@ -133,14 +205,57 @@ router.delete('/:classId/:homeworkId', requireAuth, requireClassMember, (req, re
   }
 });
 
+// POST /api/homework/:classId/:homeworkId/draft - 임시저장 (학생 전용, G1)
+router.post('/:classId/:homeworkId/draft', requireAuth, requireClassMember, (req, res) => {
+  try {
+    // 교사(개설자)·관리자는 임시저장 대상이 아님
+    if (req.myRole === 'owner') {
+      return res.status(403).json({ success: false, message: '임시저장은 학생 전용입니다.' });
+    }
+    const homeworkId = parseInt(req.params.homeworkId);
+    const hw = homeworkDb.getHomeworkById(homeworkId);
+    if (!hw || hw.class_id !== req.classId) {
+      return res.status(404).json({ success: false, message: '과제를 찾을 수 없습니다.' });
+    }
+    // G5: 시작일 전 임시저장 차단
+    if (hw.start_date) {
+      const todayKst = (() => {
+        const d = new Date();
+        d.setHours(d.getHours() + 9);
+        return d.toISOString().slice(0, 10);
+      })();
+      if (hw.start_date > todayKst) {
+        return res.status(403).json({ success: false, message: `이 과제는 ${hw.start_date}에 공개됩니다.` });
+      }
+    }
+    const { content, attachments } = req.body;
+    if (Array.isArray(attachments) && attachments.length > 20) {
+      return res.status(400).json({ success: false, message: '첨부 항목은 최대 20개까지 가능합니다.' });
+    }
+    const draft = homeworkDb.saveDraft(homeworkId, req.user.id, {
+      content: typeof content === 'string' ? content : null,
+      attachments: Array.isArray(attachments) ? attachments : null
+    });
+    res.json({ success: true, draft });
+  } catch (err) {
+    console.error('homework draft error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
 // POST /api/homework/:classId/:homeworkId/submit - 과제 제출
 router.post('/:classId/:homeworkId/submit', requireAuth, requireClassMember, (req, res) => {
   try {
-    const { content, file_url, file_path, file_name } = req.body;
+    const { content, file_url, file_path, file_name, attachments } = req.body;
+    // G2: attachments 배열 길이 제한 (사진10·영상1·링크N·파일N 합산 ≤ 20)
+    if (Array.isArray(attachments) && attachments.length > 20) {
+      return res.status(400).json({ success: false, message: '첨부 항목은 최대 20개까지 가능합니다.' });
+    }
     const result = homeworkDb.submitHomework(parseInt(req.params.homeworkId), req.user.id, {
       content,
       file_path: file_path || file_url || null,
-      file_name: file_name || (file_url ? file_url.split('/').pop() : null)
+      file_name: file_name || (file_url ? file_url.split('/').pop() : null),
+      attachments: Array.isArray(attachments) ? attachments : null    // G2
     });
     // 과제 정보 조회하여 메타데이터 보강
     const hw = homeworkDb.getHomeworkById(parseInt(req.params.homeworkId));

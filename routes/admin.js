@@ -1788,4 +1788,795 @@ router.get('/featured/search', ...adminOnly, (req, res) => {
   }
 });
 
+// =========================================================================
+// 채움콘텐츠 추천 키워드 관리 (관리자 전용 CRUD)
+// 공개 GET 엔드포인트는 routes/content.js 의 GET /api/contents/suggested-keywords
+// =========================================================================
+
+function _normalizeKw(s) {
+  return typeof s === 'string' ? s.trim() : '';
+}
+
+// 추천 키워드 대상별 노출 화이트리스트
+// (featured_sections 패턴과 동일 — db/featured.js 의 ALLOWED_* 상수와 동치)
+const SK_ALLOWED_SCHOOL_LEVELS = ['elementary', 'middle', 'high'];
+const SK_ALLOWED_ROLES = ['student', 'teacher', 'parent', 'staff', 'admin'];
+const SK_ALLOWED_SUBJECTS = ['국어', '수학', '사회', '과학', '영어', '음악', '미술', '체육', '실과', '도덕', '통합'];
+
+/**
+ * 입력값을 정규화 → JSON 문자열(저장용) 또는 NULL 반환.
+ * - undefined: undefined 반환 (= 변경 없음 — 호출자가 처리)
+ * - null / 'all' / [] : null 반환 (= 전체 대상)
+ * - 배열: 화이트리스트로 정제 후 JSON.stringify, 빈 배열 되면 null
+ * - 잘못된 값: { error: '메시지' } 반환
+ */
+function _stringifyTargetArray(value, allowed, fieldLabel, opts = {}) {
+  if (value === undefined) return undefined;
+  if (value === null || value === 'all') return null;
+  if (Array.isArray(value)) {
+    if (value.length === 0) return null;
+    const cleaned = [];
+    const invalid = [];
+    for (const raw of value) {
+      const v = opts.parseInt ? parseInt(raw, 10) : (typeof raw === 'string' ? raw.trim() : raw);
+      if (opts.parseInt) {
+        if (!Number.isInteger(v) || v < 1 || v > 12) {
+          invalid.push(String(raw));
+          continue;
+        }
+        cleaned.push(v);
+      } else {
+        if (!allowed.includes(v)) {
+          invalid.push(String(raw));
+          continue;
+        }
+        cleaned.push(v);
+      }
+    }
+    if (invalid.length > 0) {
+      return { error: `${fieldLabel} 값이 올바르지 않습니다 (허용: ${opts.parseInt ? '1~12 정수' : allowed.join(', ')}).` };
+    }
+    if (cleaned.length === 0) return null;
+    // 중복 제거
+    const uniq = Array.from(new Set(cleaned));
+    return JSON.stringify(uniq);
+  }
+  return { error: `${fieldLabel} 값은 배열이어야 합니다.` };
+}
+
+/**
+ * DB row 의 target_* TEXT(JSON 또는 NULL) → JS 배열(또는 빈 배열)로 변환.
+ * 응답 직렬화 용.
+ */
+function _parseTargetArray(text) {
+  if (text === null || text === undefined || text === '') return [];
+  try {
+    const v = JSON.parse(text);
+    return Array.isArray(v) ? v : [];
+  } catch {
+    return [];
+  }
+}
+
+/** suggested_keyword row 직렬화 — 4개 target_* 컬럼을 JS 배열로 변환해서 추가 */
+function _serializeKeyword(row) {
+  if (!row) return row;
+  return {
+    ...row,
+    target_school_levels: _parseTargetArray(row.target_school_levels),
+    target_roles:         _parseTargetArray(row.target_roles),
+    target_grades:        _parseTargetArray(row.target_grades),
+    target_subjects:      _parseTargetArray(row.target_subjects),
+  };
+}
+
+/**
+ * 입력 카테고리 이름이 마스터에 없으면 자동 생성하고, 마스터에 있으면 그대로 사용.
+ * (suggested_kw_categories 테이블이 존재하지 않으면 no-op — 마이그레이션 미적용 환경 폴백)
+ *
+ * 정확히 일치하는 name 이 마스터에 있으면 그대로 반환.
+ * 없으면 INSERT (slug 자동 생성, 디폴트 색·아이콘) 후 반환.
+ */
+function _ensureCategoryMasterRow(categoryName, createdBy) {
+  if (!categoryName) return;
+  // 테이블 존재 확인 (없으면 no-op)
+  const tbl = db.prepare(
+    `SELECT name FROM sqlite_master WHERE type='table' AND name='suggested_kw_categories'`
+  ).get();
+  if (!tbl) return;
+
+  const found = db.prepare('SELECT id, name FROM suggested_kw_categories WHERE name = ?').get(categoryName);
+  if (found) return; // 이미 있음
+
+  // 자동 생성
+  let slug = (() => {
+    const s = String(categoryName || '')
+      .toLowerCase()
+      .replace(/\s+/g, '-')
+      .replace(/[^a-z0-9-]/g, '')
+      .replace(/-+/g, '-')
+      .replace(/^-|-$/g, '');
+    return s;
+  })();
+  if (!slug) slug = 'cat-' + Date.now();
+
+  // slug 충돌 시 suffix
+  let suffix = 0;
+  let trySlug = slug;
+  while (db.prepare('SELECT id FROM suggested_kw_categories WHERE slug = ?').get(trySlug)) {
+    suffix++;
+    trySlug = `${slug}-${suffix}`;
+    if (suffix > 50) break;
+  }
+  slug = trySlug;
+
+  const last = db.prepare(`SELECT MAX(display_order) AS m FROM suggested_kw_categories`).get();
+  const displayOrder = ((last && last.m) || 0) + 100;
+
+  try {
+    db.prepare(`
+      INSERT INTO suggested_kw_categories
+        (name, slug, description, display_order, color, icon, is_active, created_by, created_at, updated_at)
+      VALUES (?, ?, NULL, ?, '#2563eb', 'fa-bookmark', 1, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+    `).run(categoryName, slug, displayOrder, createdBy || null);
+  } catch (e) {
+    // 동시성으로 인해 그 사이 들어왔다면 무시
+    console.warn('[ADMIN] _ensureCategoryMasterRow insert skipped:', e.message);
+  }
+}
+
+// GET /api/admin/suggested-keywords — 전체 목록(비활성 포함)
+router.get('/suggested-keywords', ...adminOnly, (req, res) => {
+  try {
+    const rows = db.prepare(`
+      SELECT id, keyword, COALESCE(category, '기타') AS category,
+             search_query, description, display_order, is_active,
+             target_school_levels, target_roles, target_grades, target_subjects,
+             created_by, created_at, updated_at
+      FROM suggested_keywords
+      ORDER BY is_active DESC, display_order ASC, id ASC
+    `).all();
+    const serialized = rows.map(_serializeKeyword);
+    res.json({ success: true, keywords: serialized, total: serialized.length });
+  } catch (err) {
+    console.error('[ADMIN] suggested-keywords list error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// POST /api/admin/suggested-keywords — 신규 추가
+router.post('/suggested-keywords', ...adminOnly, (req, res) => {
+  try {
+    const keyword = _normalizeKw(req.body.keyword);
+    const category = _normalizeKw(req.body.category) || '기타';
+    const searchQuery = _normalizeKw(req.body.search_query) || keyword;
+    const description = typeof req.body.description === 'string' ? req.body.description.trim() : null;
+    const displayOrderRaw = req.body.display_order;
+    const isActiveRaw = req.body.is_active;
+
+    if (!keyword) {
+      return res.status(400).json({ success: false, message: '키워드를 입력하세요.' });
+    }
+    if (keyword.length > 60) {
+      return res.status(400).json({ success: false, message: '키워드는 60자 이내로 입력하세요.' });
+    }
+    if (category.length > 40) {
+      return res.status(400).json({ success: false, message: '카테고리는 40자 이내로 입력하세요.' });
+    }
+
+    // display_order 미지정 시 같은 카테고리 마지막 순서 + 10
+    let displayOrder;
+    if (displayOrderRaw !== undefined && displayOrderRaw !== null && displayOrderRaw !== '') {
+      displayOrder = parseInt(displayOrderRaw, 10);
+      if (Number.isNaN(displayOrder)) displayOrder = 0;
+    } else {
+      const last = db.prepare(
+        `SELECT MAX(display_order) AS m FROM suggested_keywords WHERE category = ?`
+      ).get(category);
+      displayOrder = ((last && last.m) || 0) + 10;
+    }
+
+    const isActive = (isActiveRaw === 0 || isActiveRaw === '0' || isActiveRaw === false) ? 0 : 1;
+
+    // 대상별 노출 4개 컬럼 (모두 선택사항 — 미지정/null/[]/['all']은 NULL=전체)
+    const tLevels   = _stringifyTargetArray(req.body.target_school_levels, SK_ALLOWED_SCHOOL_LEVELS, 'target_school_levels');
+    if (tLevels && typeof tLevels === 'object' && tLevels.error) {
+      return res.status(400).json({ success: false, message: tLevels.error });
+    }
+    const tRoles    = _stringifyTargetArray(req.body.target_roles, SK_ALLOWED_ROLES, 'target_roles');
+    if (tRoles && typeof tRoles === 'object' && tRoles.error) {
+      return res.status(400).json({ success: false, message: tRoles.error });
+    }
+    const tGrades   = _stringifyTargetArray(req.body.target_grades, null, 'target_grades', { parseInt: true });
+    if (tGrades && typeof tGrades === 'object' && tGrades.error) {
+      return res.status(400).json({ success: false, message: tGrades.error });
+    }
+    const tSubjects = _stringifyTargetArray(req.body.target_subjects, SK_ALLOWED_SUBJECTS, 'target_subjects');
+    if (tSubjects && typeof tSubjects === 'object' && tSubjects.error) {
+      return res.status(400).json({ success: false, message: tSubjects.error });
+    }
+    // undefined → null (신규 생성 시 미지정은 NULL=전체)
+    const finalLevels   = tLevels   === undefined ? null : tLevels;
+    const finalRoles    = tRoles    === undefined ? null : tRoles;
+    const finalGrades   = tGrades   === undefined ? null : tGrades;
+    const finalSubjects = tSubjects === undefined ? null : tSubjects;
+
+    // 카테고리 마스터에 없으면 자동 생성 (기획서 섹션 4: 정합성)
+    _ensureCategoryMasterRow(category, req.user.id);
+
+    let info;
+    try {
+      info = db.prepare(`
+        INSERT INTO suggested_keywords
+          (keyword, category, search_query, description, display_order, is_active,
+           target_school_levels, target_roles, target_grades, target_subjects,
+           created_by, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      `).run(
+        keyword, category, searchQuery, description, displayOrder, isActive,
+        finalLevels, finalRoles, finalGrades, finalSubjects,
+        req.user.id
+      );
+    } catch (e) {
+      if (String(e.message || '').includes('UNIQUE')) {
+        return res.status(409).json({ success: false, message: '이미 등록된 키워드입니다.' });
+      }
+      throw e;
+    }
+
+    const createdRow = db.prepare('SELECT * FROM suggested_keywords WHERE id = ?').get(info.lastInsertRowid);
+    res.status(201).json({ success: true, keyword: _serializeKeyword(createdRow) });
+  } catch (err) {
+    console.error('[ADMIN] suggested-keywords create error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// PUT /api/admin/suggested-keywords/:id — 수정
+router.put('/suggested-keywords/:id', ...adminOnly, (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!id) return res.status(400).json({ success: false, message: '잘못된 요청입니다.' });
+
+    const existing = db.prepare('SELECT * FROM suggested_keywords WHERE id = ?').get(id);
+    if (!existing) return res.status(404).json({ success: false, message: '키워드를 찾을 수 없습니다.' });
+
+    const fields = [];
+    const params = [];
+
+    if (req.body.keyword !== undefined) {
+      const kw = _normalizeKw(req.body.keyword);
+      if (!kw) return res.status(400).json({ success: false, message: '키워드를 입력하세요.' });
+      if (kw.length > 60) return res.status(400).json({ success: false, message: '키워드는 60자 이내로 입력하세요.' });
+      fields.push('keyword = ?'); params.push(kw);
+    }
+    if (req.body.category !== undefined) {
+      const cat = _normalizeKw(req.body.category) || '기타';
+      if (cat.length > 40) return res.status(400).json({ success: false, message: '카테고리는 40자 이내로 입력하세요.' });
+      // 카테고리 마스터에 없으면 자동 생성 (기획서 섹션 4: 정합성)
+      _ensureCategoryMasterRow(cat, req.user.id);
+      fields.push('category = ?'); params.push(cat);
+    }
+    if (req.body.search_query !== undefined) {
+      const sq = _normalizeKw(req.body.search_query);
+      fields.push('search_query = ?'); params.push(sq || null);
+    }
+    if (req.body.description !== undefined) {
+      const desc = typeof req.body.description === 'string' ? req.body.description.trim() : null;
+      fields.push('description = ?'); params.push(desc);
+    }
+    if (req.body.display_order !== undefined && req.body.display_order !== null && req.body.display_order !== '') {
+      const ord = parseInt(req.body.display_order, 10);
+      if (Number.isNaN(ord)) return res.status(400).json({ success: false, message: '정렬 순서는 정수여야 합니다.' });
+      fields.push('display_order = ?'); params.push(ord);
+    }
+    if (req.body.is_active !== undefined) {
+      const v = req.body.is_active;
+      const isActive = (v === 0 || v === '0' || v === false) ? 0 : 1;
+      fields.push('is_active = ?'); params.push(isActive);
+    }
+
+    // 대상별 노출 4개 컬럼 — 명시적으로 보낸 경우만 갱신
+    const targetSpecs = [
+      { key: 'target_school_levels', allowed: SK_ALLOWED_SCHOOL_LEVELS, label: 'target_school_levels', opts: {} },
+      { key: 'target_roles',         allowed: SK_ALLOWED_ROLES,         label: 'target_roles',         opts: {} },
+      { key: 'target_grades',        allowed: null,                     label: 'target_grades',        opts: { parseInt: true } },
+      { key: 'target_subjects',      allowed: SK_ALLOWED_SUBJECTS,      label: 'target_subjects',      opts: {} },
+    ];
+    for (const spec of targetSpecs) {
+      if (req.body[spec.key] === undefined) continue;
+      const norm = _stringifyTargetArray(req.body[spec.key], spec.allowed, spec.label, spec.opts);
+      if (norm && typeof norm === 'object' && norm.error) {
+        return res.status(400).json({ success: false, message: norm.error });
+      }
+      // norm: null(=전체) 또는 JSON 문자열
+      fields.push(`${spec.key} = ?`);
+      params.push(norm === undefined ? null : norm);
+    }
+
+    if (fields.length === 0) {
+      return res.json({ success: true, keyword: _serializeKeyword(existing), message: '변경 사항이 없습니다.' });
+    }
+
+    fields.push('updated_at = CURRENT_TIMESTAMP');
+    params.push(id);
+
+    try {
+      db.prepare(`UPDATE suggested_keywords SET ${fields.join(', ')} WHERE id = ?`).run(...params);
+    } catch (e) {
+      if (String(e.message || '').includes('UNIQUE')) {
+        return res.status(409).json({ success: false, message: '이미 등록된 키워드입니다.' });
+      }
+      throw e;
+    }
+
+    const updatedRow = db.prepare('SELECT * FROM suggested_keywords WHERE id = ?').get(id);
+    res.json({ success: true, keyword: _serializeKeyword(updatedRow) });
+  } catch (err) {
+    console.error('[ADMIN] suggested-keywords update error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// DELETE /api/admin/suggested-keywords/:id — 삭제 (기본 hard delete, soft=1 시 비활성화)
+router.delete('/suggested-keywords/:id', ...adminOnly, (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!id) return res.status(400).json({ success: false, message: '잘못된 요청입니다.' });
+
+    const existing = db.prepare('SELECT id FROM suggested_keywords WHERE id = ?').get(id);
+    if (!existing) return res.status(404).json({ success: false, message: '키워드를 찾을 수 없습니다.' });
+
+    const soft = req.query.soft === '1' || req.body?.soft === true || req.body?.soft === 1;
+    if (soft) {
+      db.prepare(`UPDATE suggested_keywords SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(id);
+      return res.json({ success: true, deleted: false, deactivated: true });
+    }
+    db.prepare(`DELETE FROM suggested_keywords WHERE id = ?`).run(id);
+    res.json({ success: true, deleted: true });
+  } catch (err) {
+    console.error('[ADMIN] suggested-keywords delete error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// POST /api/admin/suggested-keywords/reorder — 순서 변경 (id 배열 순으로 10단위 재부여)
+// body: { ids: [id1, id2, ...], category?: string, base?: number, step?: number }
+router.post('/suggested-keywords/reorder', ...adminOnly, (req, res) => {
+  try {
+    const ids = Array.isArray(req.body.ids) ? req.body.ids.map(v => parseInt(v, 10)).filter(Number.isInteger) : null;
+    if (!ids || ids.length === 0) {
+      return res.status(400).json({ success: false, message: 'ids 배열이 필요합니다.' });
+    }
+    const base = Number.isInteger(parseInt(req.body.base, 10)) ? parseInt(req.body.base, 10) : 10;
+    const step = Number.isInteger(parseInt(req.body.step, 10)) ? parseInt(req.body.step, 10) : 10;
+    const category = typeof req.body.category === 'string' ? req.body.category.trim() : null;
+
+    const updateStmt = db.prepare(`
+      UPDATE suggested_keywords
+      SET display_order = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ? ${category ? 'AND category = ?' : ''}
+    `);
+
+    let updated = 0;
+    const tx = db.transaction((list) => {
+      list.forEach((id, idx) => {
+        const order = base + idx * step;
+        const args = category ? [order, id, category] : [order, id];
+        const r = updateStmt.run(...args);
+        if (r.changes > 0) updated++;
+      });
+    });
+    tx(ids);
+
+    res.json({ success: true, updated, total: ids.length });
+  } catch (err) {
+    console.error('[ADMIN] suggested-keywords reorder error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// =========================================================================
+// 추천 키워드 카테고리 마스터 (관리자 전용 CRUD)
+// 기획서: 작업지시서/추천키워드_카테고리CRUD_및_다줄노출_기획서.md (섹션 A·B.8)
+// 라우트 경로: /api/admin/kw-categories
+// =========================================================================
+
+// 색상 hex (#RRGGBB) 검증 — 6자리 hex 만 허용
+const SKC_COLOR_RE = /^#[0-9a-fA-F]{6}$/;
+// slug — 영문 소문자·숫자·하이픈만 (1~30자)
+const SKC_SLUG_RE = /^[a-z0-9-]{1,30}$/;
+// Font Awesome 클래스명 — `fa-` 접두 + 영문 소문자·숫자·하이픈
+const SKC_ICON_RE = /^fa-[a-z0-9-]+$/;
+
+/** 입력 name 으로부터 ASCII slug 추정 — 공백 → 하이픈, 소문자, 영문/숫자/하이픈 외 제거 */
+function _autoSlugFromName(name) {
+  const s = String(name || '')
+    .toLowerCase()
+    .replace(/\s+/g, '-')
+    .replace(/[^a-z0-9-]/g, '')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '');
+  return s;
+}
+
+/** 카테고리 row 직렬화 — target_* 4컬럼을 JS 배열로 변환 */
+function _serializeCategory(row) {
+  if (!row) return row;
+  return {
+    ...row,
+    target_school_levels: _parseTargetArray(row.target_school_levels),
+    target_roles:         _parseTargetArray(row.target_roles),
+    target_grades:        _parseTargetArray(row.target_grades),
+    target_subjects:      _parseTargetArray(row.target_subjects),
+  };
+}
+
+// GET /api/admin/kw-categories — 전체 목록(비활성 포함) + 카테고리별 키워드 수
+router.get('/kw-categories', ...adminOnly, (req, res) => {
+  try {
+    const rows = db.prepare(`
+      SELECT c.id, c.name, c.slug, c.description, c.display_order, c.color, c.icon, c.is_active,
+             c.target_school_levels, c.target_roles, c.target_grades, c.target_subjects,
+             c.created_by, c.created_at, c.updated_at,
+             (SELECT COUNT(*) FROM suggested_keywords k WHERE k.category = c.name) AS keyword_count
+      FROM suggested_kw_categories c
+      ORDER BY c.is_active DESC, c.display_order ASC, c.id ASC
+    `).all();
+    const serialized = rows.map(_serializeCategory);
+    res.json({ success: true, categories: serialized, total: serialized.length });
+  } catch (err) {
+    console.error('[ADMIN] kw-categories list error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// POST /api/admin/kw-categories — 신규 추가
+router.post('/kw-categories', ...adminOnly, (req, res) => {
+  try {
+    const name = _normalizeKw(req.body.name);
+    if (!name) {
+      return res.status(400).json({ success: false, message: '카테고리 이름을 입력해 주세요.' });
+    }
+    if (name.length < 1 || name.length > 30) {
+      return res.status(400).json({ success: false, message: '카테고리 이름은 1~30자로 입력해 주세요.' });
+    }
+
+    // slug — 미입력 시 name으로부터 자동 생성. 단, 한글 등 비-ASCII 문자가
+    // 포함된 경우 ASCII 추출 결과가 무의미하므로 cat-{ts} 폴백 사용 (기획서 L-1).
+    let slug = _normalizeKw(req.body.slug);
+    if (!slug) {
+      const hasNonAscii = /[^\x00-\x7F]/.test(name || '');
+      if (hasNonAscii) {
+        slug = 'cat-' + Date.now();
+      } else {
+        slug = _autoSlugFromName(name);
+        if (!slug) slug = 'cat-' + Date.now();
+      }
+    }
+    if (!SKC_SLUG_RE.test(slug)) {
+      return res.status(400).json({ success: false, message: 'Slug는 영문 소문자·숫자·하이픈(-)만 쓸 수 있어요.' });
+    }
+
+    const description = typeof req.body.description === 'string' ? req.body.description.trim() : null;
+
+    let color = typeof req.body.color === 'string' ? req.body.color.trim() : '#2563eb';
+    if (!SKC_COLOR_RE.test(color)) {
+      return res.status(400).json({ success: false, message: '색상은 #RRGGBB 형식의 hex로 입력해 주세요.' });
+    }
+    color = color.toLowerCase();
+
+    let icon = typeof req.body.icon === 'string' ? req.body.icon.trim() : 'fa-bookmark';
+    if (!icon) icon = 'fa-bookmark';
+    if (!SKC_ICON_RE.test(icon)) {
+      return res.status(400).json({ success: false, message: '아이콘은 fa-xxx 형식의 Font Awesome 클래스명으로 입력해 주세요.' });
+    }
+
+    // display_order 미지정 시 MAX + 100 (기획서 B.3)
+    let displayOrder;
+    const ordRaw = req.body.display_order;
+    if (ordRaw !== undefined && ordRaw !== null && ordRaw !== '') {
+      displayOrder = parseInt(ordRaw, 10);
+      if (Number.isNaN(displayOrder)) {
+        return res.status(400).json({ success: false, message: '정렬 순서는 정수여야 합니다.' });
+      }
+    } else {
+      const last = db.prepare(`SELECT MAX(display_order) AS m FROM suggested_kw_categories`).get();
+      displayOrder = ((last && last.m) || 0) + 100;
+    }
+
+    const isActiveRaw = req.body.is_active;
+    const isActive = (isActiveRaw === 0 || isActiveRaw === '0' || isActiveRaw === false) ? 0 : 1;
+
+    // 노출 대상 4컬럼 (키워드와 동일 패턴)
+    const tLevels   = _stringifyTargetArray(req.body.target_school_levels, SK_ALLOWED_SCHOOL_LEVELS, 'target_school_levels');
+    if (tLevels && typeof tLevels === 'object' && tLevels.error) {
+      return res.status(400).json({ success: false, message: tLevels.error });
+    }
+    const tRoles    = _stringifyTargetArray(req.body.target_roles, SK_ALLOWED_ROLES, 'target_roles');
+    if (tRoles && typeof tRoles === 'object' && tRoles.error) {
+      return res.status(400).json({ success: false, message: tRoles.error });
+    }
+    const tGrades   = _stringifyTargetArray(req.body.target_grades, null, 'target_grades', { parseInt: true });
+    if (tGrades && typeof tGrades === 'object' && tGrades.error) {
+      return res.status(400).json({ success: false, message: tGrades.error });
+    }
+    const tSubjects = _stringifyTargetArray(req.body.target_subjects, SK_ALLOWED_SUBJECTS, 'target_subjects');
+    if (tSubjects && typeof tSubjects === 'object' && tSubjects.error) {
+      return res.status(400).json({ success: false, message: tSubjects.error });
+    }
+    const finalLevels   = tLevels   === undefined ? null : tLevels;
+    const finalRoles    = tRoles    === undefined ? null : tRoles;
+    const finalGrades   = tGrades   === undefined ? null : tGrades;
+    const finalSubjects = tSubjects === undefined ? null : tSubjects;
+
+    let info;
+    try {
+      info = db.prepare(`
+        INSERT INTO suggested_kw_categories
+          (name, slug, description, display_order, color, icon, is_active,
+           target_school_levels, target_roles, target_grades, target_subjects,
+           created_by, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      `).run(
+        name, slug, description, displayOrder, color, icon, isActive,
+        finalLevels, finalRoles, finalGrades, finalSubjects,
+        req.user.id
+      );
+    } catch (e) {
+      const msg = String(e.message || '');
+      if (msg.includes('UNIQUE') && msg.includes('name')) {
+        return res.status(409).json({ success: false, message: '같은 이름의 카테고리가 이미 있어요. 다른 이름을 써 주세요.' });
+      }
+      if (msg.includes('UNIQUE') && msg.includes('slug')) {
+        return res.status(409).json({ success: false, message: '같은 slug의 카테고리가 이미 있어요. 다른 slug를 써 주세요.' });
+      }
+      throw e;
+    }
+
+    const created = db.prepare('SELECT * FROM suggested_kw_categories WHERE id = ?').get(info.lastInsertRowid);
+    res.status(201).json({ success: true, category: _serializeCategory(created) });
+  } catch (err) {
+    console.error('[ADMIN] kw-categories create error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// PUT /api/admin/kw-categories/:id — 수정
+// 이름이 바뀌면 트랜잭션으로 suggested_keywords.category 일괄 update.
+router.put('/kw-categories/:id', ...adminOnly, (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!id) return res.status(400).json({ success: false, message: '잘못된 요청입니다.' });
+
+    const existing = db.prepare('SELECT * FROM suggested_kw_categories WHERE id = ?').get(id);
+    if (!existing) return res.status(404).json({ success: false, message: '카테고리를 찾을 수 없습니다.' });
+
+    const fields = [];
+    const params = [];
+    let nameChanged = null; // { from, to }
+
+    if (req.body.name !== undefined) {
+      const nm = _normalizeKw(req.body.name);
+      if (!nm) return res.status(400).json({ success: false, message: '카테고리 이름을 입력해 주세요.' });
+      if (nm.length < 1 || nm.length > 30) {
+        return res.status(400).json({ success: false, message: '카테고리 이름은 1~30자로 입력해 주세요.' });
+      }
+      if (nm !== existing.name) {
+        nameChanged = { from: existing.name, to: nm };
+      }
+      fields.push('name = ?'); params.push(nm);
+    }
+    if (req.body.slug !== undefined) {
+      const sl = _normalizeKw(req.body.slug);
+      if (!sl || !SKC_SLUG_RE.test(sl)) {
+        return res.status(400).json({ success: false, message: 'Slug는 영문 소문자·숫자·하이픈(-)만 쓸 수 있어요.' });
+      }
+      fields.push('slug = ?'); params.push(sl);
+    }
+    if (req.body.description !== undefined) {
+      const desc = typeof req.body.description === 'string' ? req.body.description.trim() : null;
+      fields.push('description = ?'); params.push(desc);
+    }
+    if (req.body.display_order !== undefined && req.body.display_order !== null && req.body.display_order !== '') {
+      const ord = parseInt(req.body.display_order, 10);
+      if (Number.isNaN(ord)) return res.status(400).json({ success: false, message: '정렬 순서는 정수여야 합니다.' });
+      fields.push('display_order = ?'); params.push(ord);
+    }
+    if (req.body.color !== undefined) {
+      const col = String(req.body.color || '').trim().toLowerCase();
+      if (!SKC_COLOR_RE.test(col)) {
+        return res.status(400).json({ success: false, message: '색상은 #RRGGBB 형식의 hex로 입력해 주세요.' });
+      }
+      fields.push('color = ?'); params.push(col);
+    }
+    if (req.body.icon !== undefined) {
+      const ic = String(req.body.icon || '').trim();
+      if (!SKC_ICON_RE.test(ic)) {
+        return res.status(400).json({ success: false, message: '아이콘은 fa-xxx 형식의 Font Awesome 클래스명으로 입력해 주세요.' });
+      }
+      fields.push('icon = ?'); params.push(ic);
+    }
+    if (req.body.is_active !== undefined) {
+      const v = req.body.is_active;
+      const isActive = (v === 0 || v === '0' || v === false) ? 0 : 1;
+      fields.push('is_active = ?'); params.push(isActive);
+    }
+
+    // 노출 대상 4컬럼
+    const targetSpecs = [
+      { key: 'target_school_levels', allowed: SK_ALLOWED_SCHOOL_LEVELS, label: 'target_school_levels', opts: {} },
+      { key: 'target_roles',         allowed: SK_ALLOWED_ROLES,         label: 'target_roles',         opts: {} },
+      { key: 'target_grades',        allowed: null,                     label: 'target_grades',        opts: { parseInt: true } },
+      { key: 'target_subjects',      allowed: SK_ALLOWED_SUBJECTS,      label: 'target_subjects',      opts: {} },
+    ];
+    for (const spec of targetSpecs) {
+      if (req.body[spec.key] === undefined) continue;
+      const norm = _stringifyTargetArray(req.body[spec.key], spec.allowed, spec.label, spec.opts);
+      if (norm && typeof norm === 'object' && norm.error) {
+        return res.status(400).json({ success: false, message: norm.error });
+      }
+      fields.push(`${spec.key} = ?`);
+      params.push(norm === undefined ? null : norm);
+    }
+
+    if (fields.length === 0) {
+      return res.json({ success: true, category: _serializeCategory(existing), message: '변경 사항이 없습니다.' });
+    }
+
+    fields.push('updated_at = CURRENT_TIMESTAMP');
+    params.push(id);
+
+    // 트랜잭션: 카테고리 update + 이름 바뀌면 suggested_keywords.category 일괄 update
+    const updateCatStmt = db.prepare(`UPDATE suggested_kw_categories SET ${fields.join(', ')} WHERE id = ?`);
+    const updateKwStmt = db.prepare(`
+      UPDATE suggested_keywords
+      SET category = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE category = ?
+    `);
+
+    let cascadedKeywords = 0;
+    try {
+      const tx = db.transaction(() => {
+        updateCatStmt.run(...params);
+        if (nameChanged) {
+          const r = updateKwStmt.run(nameChanged.to, nameChanged.from);
+          cascadedKeywords = r.changes;
+        }
+      });
+      tx();
+    } catch (e) {
+      const msg = String(e.message || '');
+      if (msg.includes('UNIQUE') && msg.includes('name')) {
+        return res.status(409).json({ success: false, message: '같은 이름의 카테고리가 이미 있어요. 다른 이름을 써 주세요.' });
+      }
+      if (msg.includes('UNIQUE') && msg.includes('slug')) {
+        return res.status(409).json({ success: false, message: '같은 slug의 카테고리가 이미 있어요. 다른 slug를 써 주세요.' });
+      }
+      throw e;
+    }
+
+    const updated = db.prepare('SELECT * FROM suggested_kw_categories WHERE id = ?').get(id);
+    res.json({
+      success: true,
+      category: _serializeCategory(updated),
+      cascaded_keywords: cascadedKeywords,
+      ...(nameChanged ? { message: `이름이 변경되어 ${cascadedKeywords}건의 키워드 카테고리도 함께 갱신했어요.` } : {})
+    });
+  } catch (err) {
+    console.error('[ADMIN] kw-categories update error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// DELETE /api/admin/kw-categories/:id — 삭제
+// 키워드 1건 이상이면 409 + { error, keyword_count, code:'CATEGORY_HAS_KEYWORDS' }
+router.delete('/kw-categories/:id', ...adminOnly, (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!id) return res.status(400).json({ success: false, message: '잘못된 요청입니다.' });
+
+    const existing = db.prepare('SELECT id, name FROM suggested_kw_categories WHERE id = ?').get(id);
+    if (!existing) return res.status(404).json({ success: false, message: '카테고리를 찾을 수 없습니다.' });
+
+    const cnt = db.prepare(
+      `SELECT COUNT(*) AS c FROM suggested_keywords WHERE category = ?`
+    ).get(existing.name).c;
+
+    if (cnt > 0) {
+      return res.status(409).json({
+        success: false,
+        code: 'CATEGORY_HAS_KEYWORDS',
+        keyword_count: cnt,
+        error: `이 카테고리에 키워드 ${cnt}개가 있어요. 먼저 다른 카테고리로 옮기거나 비활성화해 주세요.`,
+        message: `이 카테고리에 키워드 ${cnt}개가 있어요. 먼저 다른 카테고리로 옮기거나 비활성화해 주세요.`,
+      });
+    }
+
+    db.prepare(`DELETE FROM suggested_kw_categories WHERE id = ?`).run(id);
+    res.json({ success: true, deleted: true });
+  } catch (err) {
+    console.error('[ADMIN] kw-categories delete error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// POST /api/admin/kw-categories/reorder — id 배열 순서로 display_order 10단위 재부여
+// body: { ids: [...] }
+router.post('/kw-categories/reorder', ...adminOnly, (req, res) => {
+  try {
+    const ids = Array.isArray(req.body.ids) ? req.body.ids.map(v => parseInt(v, 10)).filter(Number.isInteger) : null;
+    if (!ids || ids.length === 0) {
+      return res.status(400).json({ success: false, message: 'ids 배열이 필요합니다.' });
+    }
+    const base = Number.isInteger(parseInt(req.body.base, 10)) ? parseInt(req.body.base, 10) : 10;
+    const step = Number.isInteger(parseInt(req.body.step, 10)) ? parseInt(req.body.step, 10) : 10;
+
+    const updateStmt = db.prepare(`
+      UPDATE suggested_kw_categories
+      SET display_order = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `);
+
+    let updated = 0;
+    const tx = db.transaction((list) => {
+      list.forEach((id, idx) => {
+        const order = base + idx * step;
+        const r = updateStmt.run(order, id);
+        if (r.changes > 0) updated++;
+      });
+    });
+    tx(ids);
+
+    res.json({ success: true, updated, total: ids.length });
+  } catch (err) {
+    console.error('[ADMIN] kw-categories reorder error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// POST /api/admin/kw-categories/:id/migrate-keywords
+// body: { target_id: <other category id> }
+// — 해당 카테고리의 모든 키워드를 다른 카테고리로 일괄 이동 (삭제 전 안전 이동 용도)
+router.post('/kw-categories/:id/migrate-keywords', ...adminOnly, (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const targetId = parseInt(req.body.target_id, 10);
+    if (!id || !targetId) {
+      return res.status(400).json({ success: false, message: '잘못된 요청입니다. (id 와 target_id 필수)' });
+    }
+    if (id === targetId) {
+      return res.status(400).json({ success: false, message: '같은 카테고리로는 이동할 수 없어요.' });
+    }
+    const src = db.prepare('SELECT id, name FROM suggested_kw_categories WHERE id = ?').get(id);
+    const dst = db.prepare('SELECT id, name FROM suggested_kw_categories WHERE id = ?').get(targetId);
+    if (!src) return res.status(404).json({ success: false, message: '원본 카테고리를 찾을 수 없습니다.' });
+    if (!dst) return res.status(404).json({ success: false, message: '이동할 카테고리를 찾을 수 없습니다.' });
+
+    const updateKw = db.prepare(`
+      UPDATE suggested_keywords
+      SET category = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE category = ?
+    `);
+
+    let moved = 0;
+    const tx = db.transaction(() => {
+      const r = updateKw.run(dst.name, src.name);
+      moved = r.changes;
+    });
+    tx();
+
+    res.json({
+      success: true,
+      moved,
+      from: { id: src.id, name: src.name },
+      to: { id: dst.id, name: dst.name },
+      message: `${moved}건의 키워드를 [${src.name}] → [${dst.name}] 로 옮겼어요.`
+    });
+  } catch (err) {
+    console.error('[ADMIN] kw-categories migrate-keywords error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
 module.exports = router;

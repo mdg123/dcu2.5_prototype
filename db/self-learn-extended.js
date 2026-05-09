@@ -1071,6 +1071,153 @@ function completeNode(userId, nodeId) {
   return { success: true };
 }
 
+/**
+ * BE-01: 노드의 학습 완료 조건 평가 후 자동 격상.
+ *
+ * 격상 조건 (PM 결정):
+ *   - 노드의 영상 중 watch_ratio ≥ 0.8 인 영상 비율이 ≥ 0.8 (80% 이상의 영상이 80% 이상 시청됨)
+ *   - 노드의 문제 중 마지막 시도가 정답인 문제 비율이 ≥ 0.6 (정답률 60%+)
+ *   - 영상 0개면 영상 조건 자동 PASS, 문제 0개면 문제 조건 자동 PASS
+ *   - 영상 0 + 문제 0이면 격상 안 함 (학습할 게 없는 노드)
+ *   - 이미 'completed'/'mastered'면 변경 안 함 (idempotent)
+ *   - 격상은 only-up — 정답률 떨어져도 강등 안 함
+ *
+ * @param {number} userId
+ * @param {string} nodeId
+ * @returns {boolean} 이번 호출에서 completed로 격상되었으면 true
+ */
+function evaluateNodeCompletion(userId, nodeId) {
+  if (!userId || !nodeId) return false;
+
+  // 이미 종료 상태인지 먼저 확인 (불필요한 작업 회피)
+  const existing = db.prepare(
+    'SELECT status FROM user_node_status WHERE user_id = ? AND node_id = ?'
+  ).get(userId, nodeId);
+  if (existing && (existing.status === 'completed' || existing.status === 'mastered')) {
+    return false;
+  }
+
+  // 노드에 매핑된 영상/문제 콘텐츠 ID 수집 (is_public/status 필터 — _evaluateNodeCompletion 동일 정책)
+  const videoIds = db.prepare(`
+    SELECT c.id
+    FROM node_contents nc
+    JOIN contents c ON nc.content_id = c.id
+    WHERE nc.node_id = ?
+      AND c.content_type = 'video'
+      AND COALESCE(c.is_public, 1) = 1
+      AND COALESCE(c.status, 'approved') = 'approved'
+  `).all(nodeId).map(r => r.id);
+
+  const problemIds = db.prepare(`
+    SELECT c.id
+    FROM node_contents nc
+    JOIN contents c ON nc.content_id = c.id
+    WHERE nc.node_id = ?
+      AND c.content_type IN ('quiz','exam','problem','question','assessment')
+      AND COALESCE(c.is_public, 1) = 1
+      AND COALESCE(c.status, 'approved') = 'approved'
+  `).all(nodeId).map(r => r.id);
+
+  const totalV = videoIds.length;
+  const totalP = problemIds.length;
+
+  // 영상도 문제도 없는 노드는 자동 격상 대상 아님
+  if (totalV === 0 && totalP === 0) return false;
+
+  // 영상 조건: 영상 중 watch_ratio ≥ 0.8 인 영상의 비율 ≥ 0.8
+  let videoPass = true; // 영상 0개면 자동 PASS
+  if (totalV > 0) {
+    let watchedV = 0;
+    for (const vid of videoIds) {
+      const p = db.prepare(
+        'SELECT watch_ratio FROM user_content_progress WHERE user_id = ? AND content_id = ?'
+      ).get(userId, vid);
+      if (p && (p.watch_ratio || 0) >= 0.8) watchedV++;
+    }
+    videoPass = (watchedV / totalV) >= 0.8;
+  }
+
+  // 문제 조건: 문제 중 사용자의 마지막 시도가 정답인 문제 비율 ≥ 0.6
+  let problemPass = true; // 문제 0개면 자동 PASS
+  if (totalP > 0) {
+    let solvedP = 0;
+    for (const pid of problemIds) {
+      // "마지막 시도" 기준 정답 여부
+      const last = db.prepare(`
+        SELECT is_correct
+        FROM problem_attempts
+        WHERE user_id = ? AND content_id = ?
+        ORDER BY id DESC
+        LIMIT 1
+      `).get(userId, pid);
+      if (last && last.is_correct === 1) solvedP++;
+    }
+    problemPass = (solvedP / totalP) >= 0.6;
+  }
+
+  if (!videoPass || !problemPass) return false;
+
+  // 격상 실행
+  db.prepare(`
+    INSERT INTO user_node_status (user_id, node_id, status, last_accessed_at, completed_at)
+    VALUES (?, ?, 'completed', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+    ON CONFLICT(user_id, node_id) DO UPDATE SET
+      status = 'completed',
+      completed_at = COALESCE(user_node_status.completed_at, CURRENT_TIMESTAMP),
+      last_accessed_at = CURRENT_TIMESTAMP
+  `).run(userId, nodeId);
+
+  // 학습로그 + 포인트 (completeNode와 동일한 부수 효과)
+  try {
+    logLearningActivity({
+      userId, activityType: 'node_complete', targetType: 'learning_node',
+      targetId: nodeId, verb: 'completed', sourceService: 'self-learn'
+    });
+  } catch (_) {}
+  try {
+    const { awardPoints } = require('./point-helper');
+    awardPoints(userId, {
+      source: 'node_complete', sourceId: nodeId, points: 10,
+      description: '학습노드 자동 완료 포인트'
+    });
+  } catch (_) {}
+
+  // 활성 학습 경로의 진행도도 함께 갱신 (completeNode와 동일)
+  try {
+    const path = db.prepare(
+      "SELECT * FROM learning_paths WHERE user_id = ? AND status = 'active' ORDER BY created_at DESC LIMIT 1"
+    ).get(userId);
+    if (path) {
+      const nodes = JSON.parse(path.path_nodes || '[]');
+      const idx = nodes.indexOf(nodeId);
+      if (idx >= 0 && idx === path.current_index) {
+        db.prepare('UPDATE learning_paths SET current_index = current_index + 1 WHERE id = ?').run(path.id);
+        if (idx + 1 >= nodes.length) {
+          db.prepare("UPDATE learning_paths SET status = 'completed' WHERE id = ?").run(path.id);
+        }
+      }
+    }
+  } catch (_) {}
+
+  return true;
+}
+
+/**
+ * BE-04: contentId만 들어오고 nodeId가 누락되었을 때 node_contents에서 추론.
+ * @returns {string|null}
+ */
+function inferNodeIdFromContent(contentId) {
+  if (!contentId) return null;
+  try {
+    const r = db.prepare(
+      'SELECT node_id FROM node_contents WHERE content_id = ? LIMIT 1'
+    ).get(contentId);
+    return r && r.node_id ? r.node_id : null;
+  } catch (_) {
+    return null;
+  }
+}
+
 function getLearningDashboard(userId) {
   // 진단/실패 보고서 반영 — 분모를 차시(level=3)로 통일 (이전: level=2 단원 vs level 무관 완료 → 불일치)
   const totalNodes = db.prepare('SELECT COUNT(*) as cnt FROM learning_map_nodes WHERE node_level = 3').get().cnt;
@@ -1175,7 +1322,9 @@ function getLearningDashboard(userId) {
     node_title: r.node_title
   }));
 
-  // 진행률: 경로가 있으면 경로 기준, 없으면 전체 노드 중 완료 비율
+  // 진행률: 경로가 있으면 경로 기준, 없으면 "내가 시작한 차시(engaged) 중 완료" 비율
+  // 분모를 전체 차시(수백~수천)로 두면 22문제 풀어도 항상 0%가 되어 사용자 체감 진척도 표시 불가.
+  // 따라서 학습을 시작한 노드(in_progress / completed / mastered / diagnosed / video_watched) 기준으로 계산.
   let progressPercent = 0;
   if (currentPath && Array.isArray(currentPath.path_nodes) && currentPath.path_nodes.length > 0) {
     const pathCompleted = db.prepare(`
@@ -1183,16 +1332,30 @@ function getLearningDashboard(userId) {
       WHERE user_id = ? AND status = 'completed' AND node_id IN (${currentPath.path_nodes.map(() => '?').join(',')})
     `).get(userId, ...currentPath.path_nodes).cnt;
     progressPercent = Math.round((pathCompleted / currentPath.path_nodes.length) * 100);
-  } else if (totalNodes > 0) {
-    progressPercent = Math.round((completedNodes / totalNodes) * 100);
+  } else {
+    const engagedNodes = db.prepare(`
+      SELECT COUNT(*) as cnt FROM user_node_status
+      WHERE user_id = ?
+        AND status IN ('in_progress','completed','mastered','diagnosed','video_watched')
+    `).get(userId).cnt;
+    if (engagedNodes > 0) {
+      progressPercent = Math.round((completedNodes / engagedNodes) * 100);
+    } else if (totalNodes > 0) {
+      // 학습 시작 이력이 전혀 없는 신규 학생: 전체 분모 fallback (대부분 0%)
+      progressPercent = Math.round((completedNodes / totalNodes) * 100);
+    }
   }
 
-  // 총 학습 시간(분) — problem_attempts.time_taken(초) 합산. 영상 시청 시간은 video_progress 등에서 보정
+  // 총 학습 시간(분) — problem_attempts.time_taken(초) + user_content_progress.position_sec(영상 시청 시간) 합산
   const timeAgg = db.prepare(`
     SELECT COALESCE(SUM(time_taken), 0) as total_sec
     FROM problem_attempts WHERE user_id = ? AND time_taken IS NOT NULL
   `).get(userId);
-  const total_time_minutes = Math.round((timeAgg.total_sec || 0) / 60);
+  const videoTimeAgg = db.prepare(`
+    SELECT COALESCE(SUM(position_sec), 0) as total_sec
+    FROM user_content_progress WHERE user_id = ?
+  `).get(userId);
+  const total_time_minutes = Math.round(((timeAgg.total_sec || 0) + (videoTimeAgg.total_sec || 0)) / 60);
 
   // 학습 랭킹 — 같은 학년 우선, 없으면 전체. (avg_accuracy * total_solved + streak*2) 점수 기반.
   let rank = null;
@@ -1563,6 +1726,12 @@ function recordProblemAttempt(userId, contentId, { isCorrect, selectedAnswer, us
     finalIsCorrect = isCorrect ? 1 : 0;
   }
 
+  // BE-04: nodeId가 누락되면 node_contents에서 추론 (하나만 매핑된 경우 자동 보강)
+  if (!nodeId) {
+    const inferred = inferNodeIdFromContent(contentId);
+    if (inferred) nodeId = inferred;
+  }
+
   const info = db.prepare(`
     INSERT INTO problem_attempts (user_id, content_id, node_id, is_correct, selected_answer, time_taken)
     VALUES (?, ?, ?, ?, ?, ?)
@@ -1594,6 +1763,7 @@ function recordProblemAttempt(userId, contentId, { isCorrect, selectedAnswer, us
   } catch (e) {}
 
   // 노드별 사용자 correct_rate 갱신 (해당 노드 범위의 내 시도 기준)
+  let nodePromoted = false;
   if (nodeId) {
     try {
       const mine = db.prepare(`
@@ -1610,6 +1780,11 @@ function recordProblemAttempt(userId, contentId, { isCorrect, selectedAnswer, us
           last_accessed_at = CURRENT_TIMESTAMP
       `).run(userId, nodeId, myRate);
     } catch (e) { /* 노드 상태 갱신 실패 무시 */ }
+
+    // BE-01: 영상 80%+ AND 정답률 60%+ 시 자동 completed 격상
+    try {
+      nodePromoted = evaluateNodeCompletion(userId, nodeId);
+    } catch (e) { /* 격상 평가 실패는 응답에 영향 없음 */ }
   }
 
   return {
@@ -1620,11 +1795,18 @@ function recordProblemAttempt(userId, contentId, { isCorrect, selectedAnswer, us
     correctAnswer,
     explanation: questionExplanation,
     correctRate,
-    top_clearers: topClearers
+    top_clearers: topClearers,
+    node_completed: nodePromoted
   };
 }
 
 function recordVideoProgress(userId, contentId, { positionSec, durationSec, nodeId }) {
+  // BE-04: nodeId 누락 시 node_contents에서 추론
+  if (!nodeId) {
+    const inferred = inferNodeIdFromContent(contentId);
+    if (inferred) nodeId = inferred;
+  }
+
   const ratio = durationSec && durationSec > 0 ? Math.min(1, positionSec / durationSec) : 0;
   db.prepare(`
     INSERT INTO user_content_progress (user_id, content_id, node_id, position_sec, duration_sec, watch_ratio, view_count, updated_at)
@@ -1659,7 +1841,21 @@ function recordVideoProgress(userId, contentId, { positionSec, durationSec, node
     }
   }
 
-  return { watch_ratio: ratio, position_sec: positionSec || 0, duration_sec: durationSec || 0, node_watched: nodeCompleted };
+  // BE-01: 영상 80%+ AND 문제 정답률 60%+ 시 자동 completed 격상
+  let nodePromoted = false;
+  if (nodeId) {
+    try {
+      nodePromoted = evaluateNodeCompletion(userId, nodeId);
+    } catch (e) { /* 격상 평가 실패는 응답에 영향 없음 */ }
+  }
+
+  return {
+    watch_ratio: ratio,
+    position_sec: positionSec || 0,
+    duration_sec: durationSec || 0,
+    node_watched: nodeCompleted,
+    node_completed: nodePromoted
+  };
 }
 
 // 학습목록
@@ -2110,7 +2306,8 @@ module.exports = {
   startDiagnosis, submitDiagnosisAnswer, finishDiagnosis, getDiagnosisResult,
   startDiagnosisCAT, submitDiagnosisAnswerCAT, drillDownDiagnosis, getDiagnosisState,
   getNextDiagnosisQuestion,
-  generateLearningPath, getCurrentPath, completeNode, getLearningDashboard, getRanking,
+  generateLearningPath, getCurrentPath, completeNode, evaluateNodeCompletion, inferNodeIdFromContent,
+  getLearningDashboard, getRanking,
   getWrongNotesExtended, getWrongNoteDashboard, getTeacherWrongNoteDashboard,
   addManualWrongNote, updateWrongNoteTags, retryWrongNote,
   getProblemSets, createProblemSet, getProblemSetDetail,

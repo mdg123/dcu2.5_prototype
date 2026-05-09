@@ -142,7 +142,26 @@
       }
       .std-card .leaf-hdr {
         font-size:12px; font-weight:700; color:#6b7280;
-        padding-bottom:2px;
+        padding-bottom:4px;
+        display:flex; align-items:center; gap:10px;
+      }
+      .std-card .leaf-select-all {
+        display:inline-flex; align-items:center; gap:6px;
+        padding:3px 8px; border-radius:6px;
+        background:#f1f5f9; cursor:pointer;
+        transition:background .12s;
+      }
+      .std-card .leaf-select-all:hover { background:#e0e7ff; }
+      .std-card .leaf-select-all input[type="checkbox"] {
+        width:14px; height:14px; cursor:pointer; accent-color:#3b82f6; margin:0;
+      }
+      .std-card .leaf-select-all .leaf-all-label {
+        font-size:12px; font-weight:700; color:#1e3a8a;
+      }
+      .std-card .leaf-hdr-text { color:#6b7280; }
+      .std-card .leaf-hdr-count {
+        margin-left:6px; padding:1px 6px; border-radius:10px;
+        background:#dbeafe; color:#1d4ed8; font-size:11px; font-weight:700;
       }
       .std-card .leaf-row {
         display:flex; align-items:flex-start; gap:8px;
@@ -536,6 +555,26 @@
         });
         row.addEventListener('focus', setActive);
       });
+
+      // 전체 선택 체크박스 — leaf 전체 toggle + indeterminate 상태 동기화
+      tagsEl.querySelectorAll('.leaf-all-chk').forEach(allCb => {
+        const i = parseInt(allCb.dataset.i);
+        const card = this._selected[i];
+        if (!card || !card.leaves || !card.leaves.length) return;
+        const checkedCount = card.leaves.filter(l => l.checked).length;
+        const allChecked = checkedCount === card.leaves.length;
+        const someChecked = checkedCount > 0 && !allChecked;
+        // indeterminate 는 속성으로 안 되고 property 로만 가능
+        allCb.indeterminate = someChecked;
+        allCb.addEventListener('change', () => {
+          const turnOn = allCb.checked; // 클릭 후 상태
+          card.leaves.forEach(l => { l.checked = turnOn; });
+          this._renderTags();
+          this._emit();
+        });
+        // label 클릭 시 ripple 방지(체크박스가 자체로 toggle됨)
+      });
+      // "전체" 라벨 영역(체크박스 외) 클릭으로도 토글되도록 (label 동작은 input 으로 위임됨 → 추가 핸들러 불필요)
     }
 
     _renderCard(s, i) {
@@ -562,10 +601,20 @@
         : (s._loading ? '<div class="loading-chain">내용요소 체인 로드 중...</div>' : '');
 
       const leafDepth = (s.leaves && s.leaves[0] && s.leaves[0].depth != null) ? s.leaves[0].depth : null;
-      const leavesHtml = s.leaves && s.leaves.length
+      const leavesAll = s.leaves || [];
+      const checkedCount = leavesAll.filter(l => l.checked).length;
+      const allChecked = leavesAll.length > 0 && checkedCount === leavesAll.length;
+      const someChecked = checkedCount > 0 && !allChecked;
+      const leavesHtml = leavesAll.length
         ? `<div class="leaf-list">
-            <div class="leaf-hdr">${leafDepth}단계 내용요소 (클릭 시 우측 상위계층 갱신 · Space 체크)</div>
-            ${s.leaves.map((l, j) => `
+            <div class="leaf-hdr">
+              <label class="leaf-select-all" data-i="${i}" title="전체 선택/해제">
+                <input type="checkbox" class="leaf-all-chk" data-i="${i}" ${allChecked ? 'checked' : ''} aria-label="전체 선택">
+                <span class="leaf-all-label">전체</span>
+              </label>
+              <span class="leaf-hdr-text">${leafDepth}단계 내용요소 <span class="leaf-hdr-count">${checkedCount}/${leavesAll.length}</span></span>
+            </div>
+            ${leavesAll.map((l, j) => `
               <div class="leaf-row ${l.checked ? 'checked' : ''} ${j === s.activeLeafIdx ? 'active' : ''}" data-i="${i}" data-j="${j}" tabindex="0" role="checkbox" aria-checked="${l.checked}">
                 <input type="checkbox" ${l.checked ? 'checked' : ''} tabindex="-1">
                 <span class="leaf-text">${this._esc(l.label || '')}</span>

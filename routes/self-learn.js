@@ -304,6 +304,10 @@ router.get('/map/nodes/:unitId/lessons', requireAuth, (req, res) => {
       } else {
         progress = Math.round((watchedV / totalV) * 50 + (solvedP / totalP) * 50);
       }
+      lesson.videos_watched = watchedV;
+      lesson.videos_total = totalV;
+      lesson.problems_solved = solvedP;
+      lesson.problems_total = totalP;
       lesson.progress_percent = Math.max(0, Math.min(100, progress));
     }
     res.json({ success: true, unit, lessons });
@@ -624,21 +628,70 @@ router.post('/node/:nodeId/complete', requireAuth, (req, res) => {
 });
 
 // GET /dashboard — 학습 대시보드
+// 빈 상태/null KPI 정규화: 프론트가 "—" 대신 "0개/0%/0분/-위" 친화 표기로 분기 가능
 router.get('/dashboard', requireAuth, (req, res) => {
   try {
-    const dashboard = selfLearnDb.getLearningDashboard(req.user.id);
-    res.json({ success: true, ...dashboard });
+    const d = selfLearnDb.getLearningDashboard(req.user.id) || {};
+    const totalSolved = d.total_solved || 0;
+    const totalUsers = d.total_users || 0;
+    const safe = {
+      ...d,
+      // 숫자 필드 null → 0 정규화
+      totalNodes: d.totalNodes || 0,
+      completedNodes: d.completedNodes || 0,
+      inProgressNodes: d.inProgressNodes || 0,
+      total_solved: totalSolved,
+      total_attempts: d.total_attempts || totalSolved,
+      avg_accuracy: d.avg_accuracy || 0,
+      progress_percent: d.progress_percent || 0,
+      progressPercent: d.progressPercent || 0,
+      streak: d.streak || 0,
+      total_time_minutes: d.total_time_minutes || 0,
+      // rank는 의미상 null 유지 (미정의), 표시용 텍스트 별도 제공
+      rank: d.rank ?? null,
+      rank_display: d.rank ? `${d.rank}위` : '아직 순위 없음',
+      total_users: totalUsers,
+      area_stats: d.area_stats || [],
+      recent_problems: d.recent_problems || [],
+      // 빈 상태 분기 메타 (프론트에서 "—" 대신 안내 메시지 분기)
+      has_attempts: totalSolved > 0,
+      has_video_watched: (d.total_time_minutes || 0) > 0,
+      has_completed_nodes: (d.completedNodes || 0) > 0,
+      has_ranking_data: totalUsers >= 2,
+      empty_message: totalSolved === 0
+        ? '아직 학습 활동이 없어요. 첫 문제를 풀어보세요!'
+        : null
+    };
+    res.json({ success: true, ...safe });
   } catch (err) {
+    console.error('[SELF-LEARN] dashboard error:', err);
     res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
   }
 });
 
 // GET /ranking — 랭킹
+// 빈 결과 시 명확한 안내 메시지 + 본인 순위(myRank) 함께 반환
 router.get('/ranking', requireAuth, (req, res) => {
   try {
-    const rankings = selfLearnDb.getRanking(req.query);
-    res.json({ success: true, rankings });
+    const rankings = selfLearnDb.getRanking(req.query) || [];
+    const myIndex = rankings.findIndex(r => r.id === req.user.id);
+    const myRank = myIndex >= 0 ? myIndex + 1 : null;
+    const total = rankings.length;
+    let message = null;
+    if (total === 0) message = '아직 랭킹 데이터가 없어요. 첫 학습을 시작해보세요!';
+    else if (total === 1) message = '함께 학습하는 친구가 더 생기면 랭킹이 풍부해져요!';
+    res.json({
+      success: true,
+      rankings,
+      total,
+      myRank,
+      myRank_display: myRank ? `${myRank}위` : '아직 순위 없음',
+      period: req.query.period || 'all',
+      empty: total === 0,
+      message
+    });
   } catch (err) {
+    console.error('[SELF-LEARN] ranking error:', err);
     res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
   }
 });

@@ -14,7 +14,7 @@
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: 'Pretendard','Noto Sans KR',system-ui,sans-serif; background: #F5F7FA; color: #1A1A2E; font-size: 17px; }
-    .container { max-width: 100%; margin: 0 auto; padding: 32px 48px; }
+    /* .container 자체 max-width / padding 정의 제거 — page-shell 토큰으로 위임 */
     /* 전역 폰트 스케일 업 */
     .stat-card .stat-label, .ls-label, .alert-label { font-size: 16px !important; }
     .stat-card .stat-value, .ls-value, .alert-value { font-size: 32px !important; }
@@ -47,16 +47,15 @@
     .hw-card .hw-desc, .exam-card .exam-desc, .notice-card .notice-preview,
     .board-card .board-preview, .survey-card .survey-desc { font-size: 16px !important; }
 
-    .class-header { background: linear-gradient(135deg, #2563eb, #1d4ed8); border-radius: 16px; padding: 40px 52px; color: #fff; margin-bottom: 28px; }
-    .class-header h2 { font-size: 34px; font-weight: 700; margin-bottom: 10px; }
-    .class-header .class-info { display: flex; gap: 22px; font-size: 17px; opacity: 0.85; flex-wrap: wrap; }
-    .class-header .class-info span { display: flex; align-items: center; gap: 5px; }
-    .class-header .code-copy { background: rgba(255,255,255,0.2); padding: 5px 14px; border-radius: 6px; cursor: pointer; font-family: monospace; letter-spacing: 2px; font-size: 14px; }
-    .class-header .code-copy:hover { background: rgba(255,255,255,0.3); }
-    .class-header .class-desc { font-size: 14px; opacity: 0.9; margin-top: 6px; }
-    .class-header .header-actions-row { display: flex; gap: 10px; margin-top: 14px; }
-    .class-header .header-actions-row .btn-header { padding: 10px 22px; border-radius: 8px; background: rgba(255,255,255,0.15); color: #fff; border: 1px solid rgba(255,255,255,0.3); font-size: 16px; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 6px; transition: background 0.15s; }
-    .class-header .header-actions-row .btn-header:hover { background: rgba(255,255,255,0.25); }
+    /* .class-header 폐기 → page-header.page-header--class 변형 사용. class-info/code-copy/header-actions 만 유지 */
+    .page-header--class .class-info { display: flex; gap: 22px; font-size: 15px; opacity: 0.95; flex-wrap: wrap; margin-top: 8px; }
+    .page-header--class .class-info span { display: flex; align-items: center; gap: 5px; }
+    .page-header--class .code-copy { background: rgba(255,255,255,0.2); padding: 5px 14px; border-radius: 6px; cursor: pointer; font-family: monospace; letter-spacing: 2px; font-size: 14px; }
+    .page-header--class .code-copy:hover { background: rgba(255,255,255,0.3); }
+    .page-header--class .class-desc { font-size: 14px; opacity: 0.9; margin-top: 6px; }
+    .page-header--class .header-actions-row { display: flex; gap: 10px; flex-wrap: wrap; }
+    .page-header--class .header-actions-row .btn-header { padding: 10px 18px; border-radius: 8px; background: rgba(255,255,255,0.15); color: #fff; border: 1px solid rgba(255,255,255,0.3); font-size: 14px; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 6px; transition: background 0.15s; }
+    .page-header--class .header-actions-row .btn-header:hover { background: rgba(255,255,255,0.25); }
 
     /* 알림 카드 */
     .alert-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 20px; }
@@ -105,7 +104,7 @@
     .content-area { display: grid; grid-template-columns: minmax(0,1fr) 300px; gap: 24px; transition: grid-template-columns .2s ease; }
     .content-area:not([data-active-tab="home"]) { grid-template-columns: minmax(0,1fr); }
     .content-area:not([data-active-tab="home"]) .sidebar { display: none; }
-    .main-content { min-width: 0; max-width: 1240px; margin: 0 auto; width: 100%; }
+    .content-area .main-content { min-width: 0; max-width: 1240px; margin: 0 auto; width: 100%; padding: 0; }
     .content-area[data-active-tab="home"] .main-content { max-width: none; }
     /* 홈 외 탭에서는 사이드바가 숨겨지므로 본문 폭을 헤더/탭바와 동일하게 확장 */
     .content-area:not([data-active-tab="home"]) .main-content { max-width: none; }
@@ -225,6 +224,10 @@
     .form-group input:focus, .form-group select:focus, .form-group textarea:focus { border-color: #2563eb; }
     .modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 16px; }
 
+    /* 표시 방식 라디오 (과제 등록 모달) */
+    .dm-radio input:checked + .dm-card { border-color:#2563eb !important; background:#EFF6FF !important; box-shadow:0 0 0 3px rgba(37,99,235,0.08); }
+    .dm-radio:hover .dm-card { border-color:#93C5FD; }
+
     @media (max-width: 768px) {
       .content-area { grid-template-columns: 1fr !important; }
       .content-area .sidebar { display: block; }
@@ -241,18 +244,23 @@
 <body>
   <script src="/js/common-nav.js"></script>
   <script src="/js/class-ui.js"></script>
-  <div class="container" id="mainContent" style="display:none;">
-    <div class="class-header" id="classHeader">
-      <h2 id="classTitle">로딩 중...</h2>
-      <div class="class-desc" id="classDesc"></div>
-      <div class="class-info" id="classInfo"></div>
-      <div class="header-actions-row" id="headerActions" style="display:none;">
+  <div class="container page-shell" id="mainContent" style="display:none;">
+    <header class="page-header page-header--class" id="classHeader">
+      <div class="page-header__main">
+        <div class="page-header__title-row">
+          <span class="page-header__icon" aria-hidden="true">🎓</span>
+          <h1 class="page-header__title" id="classTitle">로딩 중...</h1>
+        </div>
+        <p class="page-header__subtitle class-desc" id="classDesc">함께 배우고 성장하는 우리 클래스</p>
+        <div class="class-info" id="classInfo"></div>
+      </div>
+      <div class="page-header__actions header-actions-row" id="headerActions" style="display:none;">
         <button class="btn-header" onclick="location.href='/class/manage.html?id='+classId"><i class="fas fa-cog"></i> 클래스 설정</button>
         <button class="btn-header" onclick="location.href='/class/analytics.html?classId='+classId"><i class="fas fa-chart-line"></i> 학습분석</button>
         <button class="btn-header" onclick="location.href='/class/manage.html?id='+classId"><i class="fas fa-users-cog"></i> 멤버관리</button>
         <button class="btn-header" onclick="showQRModal()"><i class="fas fa-qrcode"></i> QR코드</button>
       </div>
-    </div>
+    </header>
 
     <div class="tabs" id="tabBar">
       <button class="tab-btn active" data-tab="home">홈</button>
@@ -799,7 +807,17 @@
       <h3>과제 등록</h3>
       <div class="form-group"><label>제목</label><input type="text" id="hwTitle" required></div>
       <div class="form-group"><label>설명</label><textarea id="hwDesc" rows="4" placeholder="과제 설명을 입력하세요"></textarea></div>
-      <div class="form-group"><label>마감일</label><input type="date" id="hwDueDate"></div>
+      <div class="form-group" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+        <div>
+          <label>시작일 <span style="font-weight:400;color:#9CA3AF;font-size:12px;">(선택)</span></label>
+          <input type="date" id="hwStartDate" title="비우면 즉시 공개됩니다.">
+          <div style="font-size:11px;color:#9CA3AF;margin-top:4px;">비우면 즉시 공개돼요. 입력 시 그날부터 학생에게 보여요.</div>
+        </div>
+        <div>
+          <label>마감일</label>
+          <input type="date" id="hwDueDate">
+        </div>
+      </div>
       <div class="form-group"><label>만점</label><input type="number" id="hwMaxScore" value="100" min="1"></div>
       <div class="form-group">
         <label>교육과정 성취기준</label>
@@ -809,6 +827,28 @@
         <label>첨부파일</label>
         <input type="file" id="hwFile" onchange="uploadHwFile(this)">
         <div id="hwFileInfo" style="font-size:12px;color:#6B7280;margin-top:4px;"></div>
+      </div>
+      <!-- 표시 방식: 사용자 새 사양에 따라 사용자(학생/교사)가 페이지 상단에서 상시 토글하므로 과제별 고정값은 미사용. 코드는 보존(추후 "기본 모드" 설정으로 재활용 가능). -->
+      <div class="form-group" style="display:none;" aria-hidden="true">
+        <label class="form-label" style="display:block;margin-bottom:8px;font-weight:600;">표시 방식 (미사용 — 사용자 토글)</label>
+        <div class="display-mode-group" style="display:flex;gap:12px;">
+          <label class="dm-radio" style="flex:1;cursor:pointer;">
+            <input type="radio" name="hw_display_mode" value="list" checked style="display:none;">
+            <div class="dm-card" style="padding:14px;border:2px solid #E5E7EB;border-radius:12px;text-align:center;transition:.15s;background:#fff;">
+              <div class="dm-icon" style="font-size:28px;margin-bottom:6px;">📋</div>
+              <div class="dm-title" style="font-size:15px;font-weight:700;color:#1f2937;margin-bottom:4px;">리스트형</div>
+              <div class="dm-desc" style="font-size:12px;color:#6B7280;">정형 제출, 표·카드 형태로 채점</div>
+            </div>
+          </label>
+          <label class="dm-radio" style="flex:1;cursor:pointer;">
+            <input type="radio" name="hw_display_mode" value="comment" style="display:none;">
+            <div class="dm-card" style="padding:14px;border:2px solid #E5E7EB;border-radius:12px;text-align:center;transition:.15s;background:#fff;">
+              <div class="dm-icon" style="font-size:28px;margin-bottom:6px;">💬</div>
+              <div class="dm-title" style="font-size:15px;font-weight:700;color:#1f2937;margin-bottom:4px;">댓글형</div>
+              <div class="dm-desc" style="font-size:12px;color:#6B7280;">SNS 댓글처럼 가볍게 답·소감 나눔</div>
+            </div>
+          </label>
+        </div>
       </div>
       <div class="form-group" style="background:#F8FAFC;border:1px solid #E5E7EB;border-radius:10px;padding:12px 14px;">
         <label style="display:flex;align-items:center;gap:10px;cursor:pointer;margin:0;">
@@ -1215,12 +1255,10 @@
         </li>
       `).join('');
 
-      // 역할 라벨 표시
+      // 역할 라벨 표시 (h1 안이 아니라 title-row 옆에 칩으로 노출)
       const roleTag = document.createElement('span');
-      roleTag.style.cssText = 'display:inline-flex;align-items:center;gap:4px;padding:4px 12px;border-radius:20px;font-size:12px;font-weight:600;margin-left:8px;';
+      roleTag.style.cssText = 'display:inline-flex;align-items:center;gap:4px;padding:4px 12px;border-radius:20px;font-size:13px;font-weight:600;background:rgba(255,255,255,0.22);color:#fff;border:1px solid rgba(255,255,255,0.3);';
       if (myRole === 'owner') {
-        roleTag.style.background = 'rgba(37,99,235,0.15)';
-        roleTag.style.color = '#2563eb';
         roleTag.innerHTML = '<i class="fas fa-chalkboard-teacher"></i> 개설자';
         document.getElementById('manageCard').style.display = 'block';
         document.getElementById('headerActions').style.display = 'flex';
@@ -1228,13 +1266,13 @@
         document.querySelectorAll('.owner-only-tab').forEach(el => el.style.display = '');
         document.querySelectorAll('.member-only-tab').forEach(el => el.style.display = 'none');
       } else {
-        roleTag.style.background = 'rgba(16,185,129,0.15)';
-        roleTag.style.color = '#10b981';
         roleTag.innerHTML = '<i class="fas fa-user-graduate"></i> 학생';
         document.querySelectorAll('.owner-only-tab').forEach(el => el.style.display = 'none');
         document.querySelectorAll('.member-only-tab').forEach(el => el.style.display = '');
       }
-      document.getElementById('classTitle').appendChild(roleTag);
+      // h1 옆 같은 줄에 칩 추가
+      const titleRow = document.querySelector('#classHeader .page-header__title-row');
+      if (titleRow) titleRow.appendChild(roleTag);
 
       // 탭 관리: enabled_tabs에 따라 비활성 탭 숨기기
       if (classData.enabled_tabs) {
@@ -2263,10 +2301,16 @@
       // 폼 초기화
       document.getElementById('hwTitle').value = '';
       document.getElementById('hwDesc').value = '';
+      const _hwStart = document.getElementById('hwStartDate'); if (_hwStart) _hwStart.value = '';
       document.getElementById('hwDueDate').value = '';
       document.getElementById('hwMaxScore').value = 100;
       const pub = document.getElementById('hwPublicSubmissions');
       if (pub) pub.checked = false;
+      // 표시 방식 라디오 초기화 (기본: 리스트형)
+      try {
+        const dmList = document.querySelector('#homeworkModal input[name="hw_display_mode"][value="list"]');
+        if (dmList) dmList.checked = true;
+      } catch(_) {}
       try { document.getElementById('hwStdSmart')?.clear?.(); } catch(_) {}
       // 모달 제목 & 저장 버튼
       const h3 = document.querySelector('#homeworkModal h3');
@@ -2292,10 +2336,18 @@
         document.getElementById('hwTitle').value = h.title || '';
         // 설명: description이 있으면 사용, 없으면 content에서 텍스트만 추출
         document.getElementById('hwDesc').value = h.description || (h.content ? String(h.content).replace(/<[^>]*>/g,'').trim() : '');
+        const _hwStart2 = document.getElementById('hwStartDate');
+        if (_hwStart2) _hwStart2.value = h.start_date ? String(h.start_date).slice(0,10) : '';
         document.getElementById('hwDueDate').value = h.due_date ? String(h.due_date).slice(0,10) : '';
         document.getElementById('hwMaxScore').value = h.max_score || 100;
         const pub = document.getElementById('hwPublicSubmissions');
         if (pub) pub.checked = !!h.public_submissions;
+        // 표시 방식 라디오: 'comment' / 'list' (없으면 'list' 폴백)
+        try {
+          const wantMode = (h.display_mode === 'comment') ? 'comment' : 'list';
+          const dmRadio = document.querySelector(`#homeworkModal input[name="hw_display_mode"][value="${wantMode}"]`);
+          if (dmRadio) dmRadio.checked = true;
+        } catch(_) {}
         // 성취기준 — std-smart-search 컴포넌트에 초기값 설정
         const stdEl = document.getElementById('hwStdSmart');
         if (stdEl) {
@@ -2347,10 +2399,20 @@
         const m = String(firstItem.grade_label).match(/\d/);
         if (m) gradeGroupNum = parseInt(m[0]);
       }
+      const _startDate = document.getElementById('hwStartDate')?.value || null;
+      const _dueDate = document.getElementById('hwDueDate').value || null;
+      // 시작일 > 마감일 가드
+      if (_startDate && _dueDate && new Date(_startDate) > new Date(_dueDate)) {
+        classToast('시작일은 마감일보다 빨라야 해요.', 'warning');
+        return;
+      }
+      // 표시 방식(display_mode): 사용자 새 사양에 따라 과제별 고정 X — 사용자가 페이지 상단에서 상시 토글.
+      // body에 display_mode를 보내지 않음 (Backend default 'list' 적용). 라디오 코드는 추후 재활용을 위해 보존.
       const body = {
         title,
         description: document.getElementById('hwDesc').value,
-        due_date: document.getElementById('hwDueDate').value || null,
+        start_date: _startDate,
+        due_date: _dueDate,
         max_score: parseInt(document.getElementById('hwMaxScore').value) || 100,
         subject_code: firstItem?.subject_name || null,
         grade_group: gradeGroupNum,

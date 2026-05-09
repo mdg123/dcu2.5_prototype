@@ -69,7 +69,7 @@
         { label: '오늘의 학습', url: '/self-learn/today.html' },
         { label: 'AI 맞춤학습', url: '/self-learn/learning-map.html' },
         { label: '오답노트', url: '/self-learn/wrong-note.html' },
-        { label: '나의 문제집', url: '/self-learn/problem-sets.html' },
+        { label: '내 문제집', url: '/self-learn/problem-sets.html' },
         { label: '학습 배포 관리', url: '/admin/daily-learning.html', roles: ['admin'] },
         { label: '마음채움', url: '/self-learn/emotion-checkin.html', roles: ['student'] }
       ]
@@ -292,8 +292,11 @@
       }
     });
 
-    // body padding
+    // body padding — dacheum-common.css의 글로벌 `body { padding-top: var(--gnb-h) !important }` 규칙과 정합화.
+    //   GNB 1단만(52) vs 2단까지(96) 페이지마다 다르므로 --gnb-h 토큰 자체를 동적 설정한다.
     const hasBar2 = activeMenu && activeMenu.sub;
+    document.documentElement.style.setProperty('--gnb-h', hasBar2 ? '96px' : '52px');
+    // 폴백: dacheum-common.css 미로드 환경에서도 동작하도록 inline padding도 함께 설정
     document.body.style.paddingTop = hasBar2 ? '96px' : '52px';
 
     // 로그아웃 (로그인 상태일 때만)

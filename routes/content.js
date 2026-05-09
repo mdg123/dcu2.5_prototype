@@ -41,9 +41,21 @@ router.post('/move-to-folder', requireAuth, (req, res) => {
 });
 
 // GET /api/contents - 공개 콘텐츠 검색
+// 상세 검색 6항목(adv_*): adv_title, adv_keywords(공백/쉼표로 분리), adv_author, adv_source, adv_from, adv_to
 router.get('/', requireAuth, (req, res) => {
   try {
-    const { keyword, subject, grade, content_type, page, limit, sort, achievement_codes, curriculum_standard_ids, std_ids } = req.query;
+    const { keyword, subject, grade, content_type, page, limit, sort, achievement_codes, curriculum_standard_ids, std_ids,
+            adv_title, adv_keywords, adv_author, adv_source, adv_from, adv_to } = req.query;
+
+    const adv = (adv_title || adv_keywords || adv_author || adv_source || adv_from || adv_to) ? {
+      title: adv_title || null,
+      keywords: adv_keywords ? String(adv_keywords).split(/[\s,]+/).map(s => s.trim()).filter(Boolean) : [],
+      author: adv_author || null,
+      source: adv_source || null,
+      dateFrom: adv_from || null,
+      dateTo: adv_to || null
+    } : null;
+
     const result = contentDb.searchPublicContents({
       keyword, subject,
       grade: grade ? parseInt(grade) : null,
@@ -53,7 +65,8 @@ router.get('/', requireAuth, (req, res) => {
       sort,
       achievement_codes: achievement_codes ? achievement_codes.split(',').filter(Boolean) : null,
       curriculum_standard_ids: curriculum_standard_ids ? curriculum_standard_ids.split(',').filter(Boolean) : null,
-      std_ids: std_ids ? String(std_ids).split(',').map(s => s.trim()).filter(Boolean) : null
+      std_ids: std_ids ? String(std_ids).split(',').map(s => s.trim()).filter(Boolean) : null,
+      adv
     });
     // xAPI: 공개콘텐츠 검색 query.searched
     try {
@@ -113,6 +126,162 @@ router.get('/popular-tags', requireAuth, (req, res) => {
     const tags = contentDb.getPopularTags(limit);
     res.json({ success: true, tags });
   } catch (err) {
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// GET /api/contents/suggested-keywords - 관리자 등록 추천 키워드 (카테고리별 그룹화)
+// 공개: 비로그인 포털에서도 안내 칩으로 노출 가능 → optionalAuth
+// 응답:
+//   {
+//     success,
+//     categories: [
+//       { id, name, slug, color, icon, display_order,
+//         keywords: [{ id, keyword, search_query, description, ... }] }
+//     ],
+//     total
+//   }
+//
+// 카테고리 마스터(suggested_kw_categories)가 있으면 그 메타로 그룹화·정렬,
+// 없으면(미마이그레이션) 기존 자유 텍스트 카테고리만으로 그룹화 + 폴백 메타 부여.
+//
+// 대상별 노출 필터(2026-05-08):
+//   카테고리 단위 target_* 와 키워드 단위 target_* 를 AND 로 적용 (기획서 A.1).
+router.get('/suggested-keywords', optionalAuth, (req, res) => {
+  try {
+    const db = require('../db/index');
+
+    // ----- 카테고리 마스터 존재 여부 -----
+    const masterTableExists = !!db.prepare(
+      `SELECT name FROM sqlite_master WHERE type='table' AND name='suggested_kw_categories'`
+    ).get();
+
+    // ----- 키워드 행 (활성만) -----
+    const kwRows = db.prepare(`
+      SELECT id, keyword, COALESCE(category, '기타') AS category,
+             COALESCE(search_query, keyword) AS search_query,
+             description, display_order,
+             target_school_levels, target_roles, target_grades, target_subjects
+      FROM suggested_keywords
+      WHERE is_active = 1
+      ORDER BY display_order ASC, id ASC
+    `).all();
+
+    // ----- 카테고리 마스터 (활성만) — 미존재 시 빈 배열 -----
+    const catRows = masterTableExists ? db.prepare(`
+      SELECT id, name, slug, color, icon, display_order,
+             target_school_levels, target_roles, target_grades, target_subjects
+      FROM suggested_kw_categories
+      WHERE is_active = 1
+      ORDER BY display_order ASC, id ASC
+    `).all() : [];
+
+    // ----- 대상별 노출 필터 헬퍼 -----
+    function parseArr(text) {
+      if (text === null || text === undefined || text === '') return null;
+      try {
+        const v = JSON.parse(text);
+        if (!Array.isArray(v) || v.length === 0) return null;
+        return v;
+      } catch { return null; }
+    }
+    const user = req.user || null;
+    function matchesTarget(row) {
+      const levels = parseArr(row.target_school_levels);
+      const roles  = parseArr(row.target_roles);
+      const grades = parseArr(row.target_grades);
+      // 비로그인 — 어떤 차원이라도 비어있지 않으면 미노출 (안전)
+      if (!user) {
+        return levels === null && roles === null && grades === null;
+      }
+      if (levels !== null) {
+        if (!user.school_level || !levels.includes(user.school_level)) return false;
+      }
+      if (roles !== null) {
+        if (!user.role || !roles.includes(user.role)) return false;
+      }
+      if (grades !== null) {
+        const g = parseInt(user.grade, 10);
+        if (!Number.isInteger(g) || !grades.includes(g)) return false;
+      }
+      return true;
+    }
+
+    // ----- 카테고리 단위 1차 필터 -----
+    const allowedCatNames = new Set();
+    const catMetaByName = new Map(); // name -> { id, slug, color, icon, display_order }
+    for (const c of catRows) {
+      if (!matchesTarget(c)) continue;
+      allowedCatNames.add(c.name);
+      catMetaByName.set(c.name, {
+        id: c.id,
+        name: c.name,
+        slug: c.slug,
+        color: c.color,
+        icon: c.icon,
+        display_order: c.display_order,
+      });
+    }
+
+    // ----- 키워드 단위 2차 필터 + 카테고리 1차 필터 적용 -----
+    const filtered = kwRows.filter(row => {
+      // 키워드 노출 대상 필터
+      if (!matchesTarget(row)) return false;
+      // 마스터가 존재하는데 해당 카테고리가 마스터에 없거나 비활성/노출대상 미부합이면 제외
+      if (masterTableExists) {
+        if (!allowedCatNames.has(row.category)) return false;
+      }
+      return true;
+    });
+
+    // ----- 그룹화 -----
+    const grouped = new Map(); // name -> { meta, keywords[] }
+    for (const r of filtered) {
+      let meta = catMetaByName.get(r.category);
+      if (!meta) {
+        // 마스터 미존재 또는 마스터에 없는 카테고리 (마스터 미마이그레이션 폴백 경로)
+        meta = {
+          id: null,
+          name: r.category,
+          slug: null,
+          color: '#2563eb',
+          icon: 'fa-bookmark',
+          display_order: 9999,
+        };
+      }
+      if (!grouped.has(r.category)) {
+        grouped.set(r.category, { meta, keywords: [] });
+      }
+      grouped.get(r.category).keywords.push({
+        id: r.id,
+        keyword: r.keyword,
+        search_query: r.search_query,
+        description: r.description || null,
+        display_order: r.display_order,
+      });
+    }
+
+    // ----- 카테고리 정렬: 마스터 display_order ASC, 폴백은 뒤로 -----
+    const categories = Array.from(grouped.values())
+      .sort((a, b) => {
+        const oa = (a.meta.display_order ?? 9999);
+        const ob = (b.meta.display_order ?? 9999);
+        if (oa !== ob) return oa - ob;
+        return String(a.meta.name).localeCompare(String(b.meta.name), 'ko');
+      })
+      .map(({ meta, keywords }) => ({
+        id: meta.id,
+        name: meta.name,
+        slug: meta.slug,
+        color: meta.color,
+        icon: meta.icon,
+        display_order: meta.display_order,
+        keywords,
+      }));
+
+    res.json({ success: true, categories, total: filtered.length });
+  } catch (err) {
+    console.error('[CONTENT] suggested-keywords error:', err);
     res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
   }
 });

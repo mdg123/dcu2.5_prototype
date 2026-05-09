@@ -4,8 +4,8 @@ const db = require('./index');
 
 function createContent(creatorId, data) {
   const info = db.prepare(`
-    INSERT INTO contents (creator_id, title, description, content_type, content_url, file_path, thumbnail_url, subject, grade, tags, is_public, status, allow_comments, achievement_code, school_level, unit_name, difficulty, estimated_minutes, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, DATETIME('now'))
+    INSERT INTO contents (creator_id, title, description, content_type, content_url, file_path, thumbnail_url, subject, grade, tags, is_public, status, allow_comments, achievement_code, school_level, unit_name, difficulty, estimated_minutes, theme, copyright, download_allow, official_tag, source, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, DATETIME('now'))
   `).run(
     creatorId, data.title, data.description || null,
     data.content_type || 'document', data.content_url || null,
@@ -19,7 +19,12 @@ function createContent(creatorId, data) {
     data.school_level || null,
     data.unit_name || null,
     data.difficulty || null,
-    data.estimated_minutes || null
+    data.estimated_minutes || null,
+    data.theme || null,
+    data.copyright || null,
+    data.download_allow !== undefined ? (data.download_allow ? 1 : 0) : 0,
+    data.official_tag || null,
+    data.source || null
   );
   const cId = info.lastInsertRowid;
   if (Array.isArray(data.std_ids) && data.std_ids.length > 0) {
@@ -70,7 +75,7 @@ function updateContent(id, data) {
   const fields = [];
   const params = [];
   for (const [key, val] of Object.entries(data)) {
-    if (['title', 'description', 'content_type', 'content_url', 'file_path', 'thumbnail_url', 'subject', 'grade', 'is_public', 'status', 'reject_reason', 'achievement_code', 'school_level', 'unit_name', 'difficulty', 'estimated_minutes', 'allow_comments', 'theme', 'copyright', 'download_allow'].includes(key)) {
+    if (['title', 'description', 'content_type', 'content_url', 'file_path', 'thumbnail_url', 'subject', 'grade', 'is_public', 'status', 'reject_reason', 'achievement_code', 'school_level', 'unit_name', 'difficulty', 'estimated_minutes', 'allow_comments', 'theme', 'copyright', 'download_allow', 'official_tag', 'source'].includes(key)) {
       fields.push(`${key} = ?`);
       params.push(val);
     }
@@ -98,17 +103,40 @@ function incrementViewCount(id) {
 }
 
 // 공개 콘텐츠 검색
-function searchPublicContents({ keyword, subject, grade, content_type, page = 1, limit = 12, sort = 'latest', achievement_codes, curriculum_standard_ids, std_ids } = {}) {
+// adv: 상세 검색 6항목 — { title, keywords, author, source, dateFrom, dateTo }
+function searchPublicContents({ keyword, subject, grade, content_type, page = 1, limit = 12, sort = 'latest', achievement_codes, curriculum_standard_ids, std_ids, adv } = {}) {
   const join = ' JOIN users u ON c.creator_id = u.id';
   let where = " WHERE c.is_public = 1 AND c.status = 'approved'";
   const params = [];
-  if (keyword) { where += ' AND (c.title LIKE ? OR c.description LIKE ? OR c.tags LIKE ? OR u.display_name LIKE ? OR c.achievement_code LIKE ?)'; params.push(`%${keyword}%`, `%${keyword}%`, `%${keyword}%`, `%${keyword}%`, `%${keyword}%`); }
+  if (keyword) { where += ' AND (c.title LIKE ? OR c.description LIKE ? OR c.tags LIKE ? OR u.display_name LIKE ? OR u.username LIKE ? OR c.achievement_code LIKE ? OR c.source LIKE ?)'; params.push(`%${keyword}%`, `%${keyword}%`, `%${keyword}%`, `%${keyword}%`, `%${keyword}%`, `%${keyword}%`, `%${keyword}%`); }
   if (subject) { where += ' AND c.subject = ?'; params.push(subject); }
   if (grade) { where += ' AND c.grade = ?'; params.push(grade); }
   if (content_type) {
     const types = content_type.split(',').map(t => t.trim()).filter(Boolean);
     if (types.length === 1) { where += ' AND c.content_type = ?'; params.push(types[0]); }
     else if (types.length > 1) { where += ' AND c.content_type IN (' + types.map(() => '?').join(',') + ')'; types.forEach(t => params.push(t)); }
+  }
+  // ===== 상세 검색 6항목 (서버측 매칭) =====
+  if (adv && typeof adv === 'object') {
+    if (adv.title) { where += ' AND c.title LIKE ?'; params.push(`%${adv.title}%`); }
+    if (Array.isArray(adv.keywords) && adv.keywords.length > 0) {
+      // 모든 키워드가 (title/description/tags) 중 하나라도 매칭 (AND 매칭)
+      adv.keywords.forEach(tok => {
+        where += ' AND (c.title LIKE ? OR c.description LIKE ? OR c.tags LIKE ?)';
+        params.push(`%${tok}%`, `%${tok}%`, `%${tok}%`);
+      });
+    }
+    if (adv.author) {
+      where += ' AND (u.display_name LIKE ? OR u.username LIKE ?)';
+      params.push(`%${adv.author}%`, `%${adv.author}%`);
+    }
+    if (adv.source) {
+      // 출처: source 컬럼 + content_url(외부 URL) 폴백
+      where += ' AND (c.source LIKE ? OR c.content_url LIKE ?)';
+      params.push(`%${adv.source}%`, `%${adv.source}%`);
+    }
+    if (adv.dateFrom) { where += " AND DATE(c.created_at) >= DATE(?)"; params.push(adv.dateFrom); }
+    if (adv.dateTo)   { where += " AND DATE(c.created_at) <= DATE(?)"; params.push(adv.dateTo); }
   }
   if (achievement_codes && achievement_codes.length > 0) {
     const aConds = achievement_codes.map(() => 'c.achievement_code LIKE ?');
