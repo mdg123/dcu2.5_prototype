@@ -7,6 +7,7 @@ const { requireAuth } = require('../middleware/auth');
 const growthDb = require('../db/growth');
 const classDb = require('../db/class');
 const growthExtDb = require('../db/growth-extended');
+const notifDb = require('../db/notifications');
 const buildSurvey = require('../lib/xapi/builders/survey');
 const xapiSpool = require('../lib/xapi/spool');
 const { generatePortfolioReport } = require('../lib/portfolio-pdf');
@@ -18,6 +19,46 @@ const pdfUpload = multer({
   fileFilter: (_req, file, cb) => {
     if (file.mimetype === 'application/pdf' || /\.pdf$/i.test(file.originalname)) cb(null, true);
     else cb(new Error('PDF 파일만 업로드할 수 있습니다.'), false);
+  }
+});
+
+// ─── 갤러리 멀티미디어/콘테스트 썸네일 업로드 multer ─────────────────────────
+const galleryUploadDir = path.join(__dirname, '..', 'public', 'uploads', 'gallery');
+if (!fs.existsSync(galleryUploadDir)) fs.mkdirSync(galleryUploadDir, { recursive: true });
+
+const galleryStorage = multer.diskStorage({
+  destination: (_req, _file, cb) => cb(null, galleryUploadDir),
+  filename: (_req, file, cb) => {
+    const ext = path.extname(file.originalname) || '';
+    const baseRaw = path.basename(file.originalname, ext);
+    const base = baseRaw.replace(/[^a-zA-Z0-9가-힣_-]/g, '_').slice(0, 40) || 'file';
+    const uniq = Date.now() + '-' + Math.round(Math.random() * 1e4);
+    cb(null, `${base}-${uniq}${ext.toLowerCase()}`);
+  }
+});
+
+// 작품 미디어 업로드 — 이미지/음원 (20MB)
+const galleryMediaUpload = multer({
+  storage: galleryStorage,
+  limits: { fileSize: 20 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const mt = String(file.mimetype || '').toLowerCase();
+    if (mt.startsWith('image/') || mt.startsWith('audio/')) {
+      cb(null, true);
+    } else {
+      cb(new Error('이미지 또는 음원 파일만 업로드할 수 있습니다.'), false);
+    }
+  }
+});
+
+// 콘테스트 썸네일 업로드 — 이미지 전용 (5MB)
+const eventThumbUpload = multer({
+  storage: galleryStorage,
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const mt = String(file.mimetype || '').toLowerCase();
+    if (mt.startsWith('image/')) cb(null, true);
+    else cb(new Error('이미지 파일만 업로드할 수 있습니다.'), false);
   }
 });
 
@@ -139,66 +180,673 @@ router.get('/class/:classId', requireAuth, (req, res) => {
 
 // ===== 갤러리 =====
 
+// 유틸: 정수 파싱
+function pInt(v, def = null) {
+  const n = parseInt(v, 10);
+  return isNaN(n) ? def : n;
+}
+
 // GET /api/growth/gallery - 갤러리 목록
+// 쿼리:
+//   mine=true                   본인 작품만 (pending 포함)
+//   category, page, limit
+//   includeAll(teacher/admin)   pending/rejected 포함
+//   sort=latest|likes|views|comments|popular (기본 latest)
+//   q=<keyword>
+//   school=ours                 본인 school_name과 동일한 작성자
+//   school_name=<문자열>        특정 학교
+//   school_level=elementary|middle|high
+//   period=today|week|month|year (created_at 기준)
+//   from=YYYY-MM-DD, to=YYYY-MM-DD
 router.get('/gallery', requireAuth, (req, res) => {
   try {
+    const sortRaw = String(req.query.sort || 'latest').toLowerCase();
+    const sort = ['latest', 'likes', 'views', 'comments', 'popular'].includes(sortRaw) ? sortRaw : 'latest';
+    const mine = req.query.mine === 'true';
+
+    // school=ours → 본인 school_name 자동 매핑
+    let schoolName = req.query.school_name || null;
+    if (req.query.school === 'ours' && req.user.school_name) {
+      schoolName = req.user.school_name;
+    }
+    const schoolLevelRaw = req.query.school_level ? String(req.query.school_level).toLowerCase() : null;
+    const schoolLevel = ['elementary', 'middle', 'high'].includes(schoolLevelRaw) ? schoolLevelRaw : null;
+    const periodRaw = req.query.period ? String(req.query.period).toLowerCase() : null;
+    const period = ['today', 'week', 'month', 'year'].includes(periodRaw) ? periodRaw : null;
+    const dateRe = /^\d{4}-\d{2}-\d{2}$/;
+    const periodFrom = dateRe.test(String(req.query.from || '')) ? req.query.from : null;
+    const periodTo   = dateRe.test(String(req.query.to || '')) ? req.query.to : null;
+
     const result = growthDb.getGalleryItems({
-      studentId: req.query.mine === 'true' ? req.user.id : null,
+      studentId: mine ? req.user.id : null,
       category: req.query.category,
       page: parseInt(req.query.page) || 1,
       limit: parseInt(req.query.limit) || 20,
-      includeAll: req.query.includeAll === 'true' && ['teacher', 'admin'].includes(req.user.role)
+      includeAll: req.query.includeAll === 'true' && ['teacher', 'admin'].includes(req.user.role),
+      sort,
+      q: req.query.q || null,
+      viewerId: req.user.id,
+      showMine: mine,
+      schoolName,
+      schoolLevel,
+      period,
+      periodFrom,
+      periodTo
     });
     res.json({ success: true, ...result });
   } catch (err) {
+    console.error('[GROWTH] gallery list error:', err);
     res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
   }
 });
 
-// POST /api/growth/gallery - 갤러리 작품 등록
+// GET /api/growth/gallery/popular?period=week|month|all&limit=6
+// 좋아요*3 + 조회수*1 가중치 정렬
+router.get('/gallery/popular', requireAuth, (req, res) => {
+  try {
+    const periodRaw = String(req.query.period || 'week').toLowerCase();
+    const period = ['week', 'month', 'all'].includes(periodRaw) ? periodRaw : 'week';
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 6, 1), 50);
+    const items = growthDb.getPopularGalleryItems({ period, limit, viewerId: req.user.id });
+    res.json({ success: true, items });
+  } catch (err) {
+    console.error('[GROWTH] gallery popular error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// POST /api/growth/gallery - 갤러리 작품 등록 (멀티미디어 + body_text 지원)
+// body: { title, category?, description?, body_text?, attachments?: [{type, url, mime?, file_name?, file_size?, sort_order?}] }
+// - attachments 또는 body_text 중 하나 이상 필수
+// - attachments 10개 제한, body_text 1000자 제한
+// - 항상 approval_status='pending' 으로 저장 (학생 작품 승인 후 공개 원칙)
 router.post('/gallery', requireAuth, (req, res) => {
   try {
-    if (!req.body.title) return res.status(400).json({ success: false, message: '제목을 입력하세요.' });
-    const item = growthDb.createGalleryItem(req.user.id, req.body);
+    const title = String(req.body.title || '').trim();
+    if (!title) return res.status(400).json({ success: false, message: '제목을 입력하세요.' });
+    if (title.length > 100) return res.status(400).json({ success: false, message: '제목은 100자 이하로 입력하세요.' });
+
+    const hasAttachments = Array.isArray(req.body.attachments);
+    const hasBodyText = req.body.body_text != null && String(req.body.body_text).length > 0;
+
+    let item;
+    if (hasAttachments || hasBodyText) {
+      // 신규: 멀티미디어 + 트랜잭션
+      item = growthDb.createGalleryItemWithAttachments(req.user.id, { ...req.body, title });
+    } else {
+      // 레거시: 단일 image_url 만 — 기존 경로 유지 (하위 호환)
+      item = growthDb.createGalleryItem(req.user.id, { ...req.body, title });
+    }
     res.status(201).json({ success: true, item });
   } catch (err) {
+    const status = err.status || 500;
+    if (status === 500) console.error('[GROWTH] gallery create error:', err);
+    res.status(status).json({ success: false, message: err.message || '서버 오류가 발생했습니다.' });
+  }
+});
+
+// POST /api/growth/gallery/upload-media - 작품 미디어 파일 업로드 (이미지/음원)
+// 응답: { success, url, type, mime, file_name, file_size }
+router.post('/gallery/upload-media', requireAuth, (req, res, next) => {
+  galleryMediaUpload.single('file')(req, res, (err) => {
+    if (err) {
+      if (err instanceof multer.MulterError && err.code === 'LIMIT_FILE_SIZE') {
+        return res.status(400).json({ success: false, message: '파일 크기가 20MB를 초과합니다.' });
+      }
+      return res.status(400).json({ success: false, message: err.message || '업로드 실패' });
+    }
+    if (!req.file) {
+      return res.status(400).json({ success: false, message: '파일이 선택되지 않았습니다.' });
+    }
+    const mt = String(req.file.mimetype || '').toLowerCase();
+    const type = mt.startsWith('image/') ? 'image' : (mt.startsWith('audio/') ? 'audio' : 'image');
+    const url = `/uploads/gallery/${req.file.filename}`;
+    res.status(201).json({
+      success: true,
+      url,
+      type,
+      mime: req.file.mimetype,
+      file_name: req.file.originalname,
+      file_size: req.file.size
+    });
+  });
+});
+
+// PUT /api/growth/gallery/:id - 본인 작품 수정 (본인 또는 admin만)
+// attachments 가 포함되면 전체 교체. body_text 갱신 지원.
+router.put('/gallery/:id', requireAuth, (req, res) => {
+  try {
+    const id = pInt(req.params.id);
+    if (!id) return res.status(400).json({ success: false, message: '잘못된 요청입니다.' });
+    const current = growthDb.getGalleryItemById(id, req.user.id);
+    if (!current) return res.status(404).json({ success: false, message: '작품을 찾을 수 없습니다.' });
+    if (current.student_id !== req.user.id && req.user.role !== 'admin') {
+      return res.status(403).json({ success: false, message: '권한이 없습니다.' });
+    }
+    if (req.body.title !== undefined) {
+      const t = String(req.body.title || '').trim();
+      if (!t) return res.status(400).json({ success: false, message: '제목을 입력하세요.' });
+      if (t.length > 100) return res.status(400).json({ success: false, message: '제목은 100자 이하로 입력하세요.' });
+      req.body.title = t;
+    }
+
+    const hasAttachments = Array.isArray(req.body.attachments);
+    const hasBodyText = req.body.body_text !== undefined;
+
+    let updated;
+    if (hasAttachments || hasBodyText) {
+      updated = growthDb.updateGalleryItemWithAttachments(id, req.body);
+    } else {
+      updated = growthDb.updateGalleryItem(id, req.body);
+    }
+
+    // rejected 상태에서 수정 시 자동 pending 복귀 (재제출)
+    if (current.approval_status === 'rejected' && req.user.id === current.student_id) {
+      const dbIdx = require('../db/index');
+      dbIdx.prepare("UPDATE student_gallery SET approval_status = 'pending', reject_reason = NULL WHERE id = ?").run(id);
+      updated = growthDb.getGalleryItemWithAttachments(id, req.user.id);
+    }
+
+    res.json({ success: true, item: updated });
+  } catch (err) {
+    const status = err.status || 500;
+    if (status === 500) console.error('[GROWTH] gallery update error:', err);
+    res.status(status).json({ success: false, message: err.message || '서버 오류가 발생했습니다.' });
+  }
+});
+
+// GET /api/growth/gallery/:id - 단건 조회 (attachments + body_text 포함)
+// 본인 또는 admin/teacher가 아니면 approved 작품만 노출
+router.get('/gallery/:id', requireAuth, (req, res, next) => {
+  // 예약어 라우트는 다음 라우터에 위임 (popular, upload-media 등)
+  if (['popular', 'upload-media'].includes(req.params.id)) return next('route');
+  try {
+    const id = pInt(req.params.id);
+    if (!id) return res.status(400).json({ success: false, message: '잘못된 요청입니다.' });
+    const item = growthDb.getGalleryItemWithAttachments(id, req.user.id);
+    if (!item) return res.status(404).json({ success: false, message: '작품을 찾을 수 없습니다.' });
+
+    const isOwner = item.student_id === req.user.id;
+    const isStaff = req.user.role === 'admin' || req.user.role === 'teacher';
+    if (!isOwner && !isStaff && item.approval_status && item.approval_status !== 'approved') {
+      return res.status(404).json({ success: false, message: '작품을 찾을 수 없습니다.' });
+    }
+
+    res.json({ success: true, item });
+  } catch (err) {
+    console.error('[GROWTH] gallery detail error:', err);
     res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
   }
 });
 
-// POST /api/growth/gallery/:id/like - 좋아요
+// DELETE /api/growth/gallery/:id - 본인 또는 admin/teacher (soft delete)
+router.delete('/gallery/:id', requireAuth, (req, res) => {
+  try {
+    const id = pInt(req.params.id);
+    if (!id) return res.status(400).json({ success: false, message: '잘못된 요청입니다.' });
+    const current = growthDb.getGalleryItemById(id, req.user.id);
+    if (!current) return res.status(404).json({ success: false, message: '작품을 찾을 수 없습니다.' });
+    const isOwner = current.student_id === req.user.id;
+    const isStaff = req.user.role === 'admin' || req.user.role === 'teacher';
+    if (!isOwner && !isStaff) {
+      return res.status(403).json({ success: false, message: '권한이 없습니다.' });
+    }
+    const ok = growthDb.deleteGalleryItem(id);
+    if (!ok) return res.status(404).json({ success: false, message: '작품을 찾을 수 없습니다.' });
+    res.json({ success: true, message: '삭제되었습니다.' });
+  } catch (err) {
+    console.error('[GROWTH] gallery delete error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// POST /api/growth/gallery/:id/like - 좋아요 토글
 router.post('/gallery/:id/like', requireAuth, (req, res) => {
   try {
-    const item = growthDb.likeGalleryItem(parseInt(req.params.id));
-    res.json({ success: true, like_count: item.like_count });
+    const id = pInt(req.params.id);
+    if (!id) return res.status(400).json({ success: false, message: '잘못된 요청입니다.' });
+    const item = growthDb.getGalleryItemById(id, req.user.id);
+    if (!item) return res.status(404).json({ success: false, message: '작품을 찾을 수 없습니다.' });
+    const result = growthDb.toggleGalleryLike(id, req.user.id);
+    res.json({ success: true, liked: result.liked, like_count: result.like_count });
   } catch (err) {
+    console.error('[GROWTH] gallery like error:', err);
     res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
   }
 });
 
-// POST /api/growth/gallery/:id/approve - 작품 승인
+// POST /api/growth/gallery/:id/view - 조회수 +1 (idempotent: 같은 사용자 같은 날 1회만)
+// 자기 자신 작품 조회는 카운트 제외.
+router.post('/gallery/:id/view', requireAuth, (req, res) => {
+  try {
+    const id = pInt(req.params.id);
+    if (!id) return res.status(400).json({ success: false, message: '잘못된 요청입니다.' });
+    const item = growthDb.getGalleryItemById(id, req.user.id);
+    if (!item) return res.status(404).json({ success: false, message: '작품을 찾을 수 없습니다.' });
+    // 자기 작품은 카운트 제외
+    if (item.student_id === req.user.id) {
+      return res.json({ success: true, counted: false, view_count: item.view_count || 0 });
+    }
+    const result = growthDb.recordGalleryView(id, req.user.id);
+    res.json({ success: true, counted: result.counted, view_count: result.view_count });
+  } catch (err) {
+    console.error('[GROWTH] gallery view error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// ===== 댓글 =====
+
+// GET /api/growth/gallery/:id/comments?page=1&limit=30
+router.get('/gallery/:id/comments', requireAuth, (req, res) => {
+  try {
+    const id = pInt(req.params.id);
+    if (!id) return res.status(400).json({ success: false, message: '잘못된 요청입니다.' });
+    const item = growthDb.getGalleryItemById(id, req.user.id);
+    if (!item) return res.status(404).json({ success: false, message: '작품을 찾을 수 없습니다.' });
+    const page = parseInt(req.query.page) || 1;
+    const limit = Math.min(parseInt(req.query.limit) || 30, 100);
+    const result = growthDb.listGalleryComments(id, { page, limit });
+    res.json({ success: true, ...result });
+  } catch (err) {
+    console.error('[GROWTH] gallery comments list error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// POST /api/growth/gallery/:id/comments  body: { content }
+router.post('/gallery/:id/comments', requireAuth, (req, res) => {
+  try {
+    const id = pInt(req.params.id);
+    if (!id) return res.status(400).json({ success: false, message: '잘못된 요청입니다.' });
+    const content = String(req.body.content || '').trim();
+    if (!content) return res.status(400).json({ success: false, message: '내용을 입력하세요.' });
+    if (content.length > 500) return res.status(400).json({ success: false, message: '댓글은 500자 이하로 입력하세요.' });
+    const item = growthDb.getGalleryItemById(id, req.user.id);
+    if (!item) return res.status(404).json({ success: false, message: '작품을 찾을 수 없습니다.' });
+    const comment = growthDb.createGalleryComment(id, req.user.id, content);
+    res.status(201).json({ success: true, comment });
+  } catch (err) {
+    console.error('[GROWTH] gallery comment create error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// DELETE /api/growth/gallery/:id/comments/:commentId  (본인/admin/teacher)
+router.delete('/gallery/:id/comments/:commentId', requireAuth, (req, res) => {
+  try {
+    const galleryId = pInt(req.params.id);
+    const commentId = pInt(req.params.commentId);
+    if (!galleryId || !commentId) return res.status(400).json({ success: false, message: '잘못된 요청입니다.' });
+    const comment = growthDb.getGalleryCommentById(commentId);
+    if (!comment || comment.gallery_id !== galleryId) {
+      return res.status(404).json({ success: false, message: '댓글을 찾을 수 없습니다.' });
+    }
+    const isOwner = comment.user_id === req.user.id;
+    const isStaff = req.user.role === 'admin' || req.user.role === 'teacher';
+    if (!isOwner && !isStaff) {
+      return res.status(403).json({ success: false, message: '권한이 없습니다.' });
+    }
+    const ok = growthDb.deleteGalleryComment(commentId);
+    if (!ok) return res.status(404).json({ success: false, message: '댓글을 찾을 수 없습니다.' });
+    res.json({ success: true, message: '삭제되었습니다.' });
+  } catch (err) {
+    console.error('[GROWTH] gallery comment delete error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// POST /api/growth/gallery/:id/approve - 작품 승인 + 작성자 알림
 router.post('/gallery/:id/approve', requireAuth, (req, res) => {
   try {
     if (req.user.role !== 'teacher' && req.user.role !== 'admin') {
       return res.status(403).json({ success: false, message: '교사만 승인할 수 있습니다.' });
     }
-    growthDb.approveGalleryItem(parseInt(req.params.id), req.user.id);
+    const galleryId = parseInt(req.params.id);
+    if (!galleryId) return res.status(400).json({ success: false, message: '잘못된 요청입니다.' });
+    const item = growthDb.getGalleryItemById(galleryId, req.user.id);
+    if (!item) return res.status(404).json({ success: false, message: '작품을 찾을 수 없습니다.' });
+
+    growthDb.approveGalleryItem(galleryId, req.user.id);
+
+    // 작성자에게 알림
+    try {
+      notifDb.createNotification({
+        userId: item.student_id,
+        type: 'gallery_approved',
+        title: '작품이 승인되었어요',
+        message: `${item.title || '작품'}이(가) 갤러리에 공개되었습니다.`,
+        link: `/plus/gallery.html?open=${galleryId}`
+      });
+    } catch (_) { /* 알림 실패는 비차단 */ }
+
     res.json({ success: true, message: '승인되었습니다.' });
   } catch (err) {
+    console.error('[GROWTH] gallery approve error:', err);
     res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
   }
 });
 
-// POST /api/growth/gallery/:id/reject - 작품 반려
+// POST /api/growth/gallery/:id/reject - 작품 반려 + 작성자 알림 (사유 포함)
 router.post('/gallery/:id/reject', requireAuth, (req, res) => {
   try {
     if (req.user.role !== 'teacher' && req.user.role !== 'admin') {
       return res.status(403).json({ success: false, message: '교사만 반려할 수 있습니다.' });
     }
-    growthDb.rejectGalleryItem(parseInt(req.params.id));
+    const galleryId = parseInt(req.params.id);
+    if (!galleryId) return res.status(400).json({ success: false, message: '잘못된 요청입니다.' });
+    const item = growthDb.getGalleryItemById(galleryId, req.user.id);
+    if (!item) return res.status(404).json({ success: false, message: '작품을 찾을 수 없습니다.' });
+
+    const reason = req.body && req.body.reason ? String(req.body.reason).slice(0, 200) : null;
+    growthDb.rejectGalleryItem(galleryId, reason);
+
+    // 작성자에게 알림 (사유 포함)
+    try {
+      const msg = reason
+        ? `${item.title || '작품'}이(가) 반려되었습니다. 사유: ${reason}`
+        : `${item.title || '작품'}이(가) 반려되었습니다.`;
+      notifDb.createNotification({
+        userId: item.student_id,
+        type: 'gallery_rejected',
+        title: '작품이 반려되었어요',
+        message: msg,
+        link: `/plus/gallery.html?open=${galleryId}`
+      });
+    } catch (_) { /* 알림 실패는 비차단 */ }
+
     res.json({ success: true, message: '반려되었습니다.' });
   } catch (err) {
+    console.error('[GROWTH] gallery reject error:', err);
     res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// ============ 관리자 신고 대시보드 ============
+
+// GET /api/growth/admin/gallery-reports?status=pending|resolved|dismissed&limit=50
+router.get('/admin/gallery-reports', requireAuth, (req, res) => {
+  try {
+    if (req.user.role !== 'admin' && req.user.role !== 'teacher') {
+      return res.status(403).json({ success: false, message: '관리자/교사만 접근할 수 있습니다.' });
+    }
+    const statusRaw = String(req.query.status || 'pending').toLowerCase();
+    const status = ['pending', 'resolved', 'dismissed'].includes(statusRaw) ? statusRaw : 'pending';
+    const limit = Math.min(parseInt(req.query.limit, 10) || 50, 200);
+    const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
+    const result = growthDb.listGalleryReports({ status, limit, offset });
+    res.json({ success: true, ...result });
+  } catch (err) {
+    console.error('[GROWTH] admin reports list error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// POST /api/growth/admin/gallery-reports/:reportId/resolve
+// body: { action: 'takedown'|'dismiss', reason? }
+router.post('/admin/gallery-reports/:reportId/resolve', requireAuth, (req, res) => {
+  try {
+    if (req.user.role !== 'admin' && req.user.role !== 'teacher') {
+      return res.status(403).json({ success: false, message: '관리자/교사만 접근할 수 있습니다.' });
+    }
+    const reportId = parseInt(req.params.reportId, 10);
+    if (!reportId) return res.status(400).json({ success: false, message: '잘못된 요청입니다.' });
+    const action = String(req.body.action || '').toLowerCase();
+    if (!['takedown', 'dismiss'].includes(action)) {
+      return res.status(400).json({ success: false, message: '처리 액션은 takedown 또는 dismiss 이어야 합니다.' });
+    }
+    const reason = req.body.reason ? String(req.body.reason).slice(0, 300) : null;
+
+    // 처리 전 신고 조회 (작성자/신고자 알림용)
+    const before = growthDb.getGalleryReportById(reportId);
+    if (!before) return res.status(404).json({ success: false, message: '신고를 찾을 수 없습니다.' });
+
+    const updated = growthDb.resolveGalleryReport(reportId, action, req.user.id, reason);
+
+    // 알림 발송
+    try {
+      if (action === 'takedown' && before.author_id) {
+        notifDb.createNotification({
+          userId: before.author_id,
+          type: 'gallery_takedown',
+          title: '작품이 내려갔습니다',
+          message: reason
+            ? `${before.gallery_title || '작품'}이(가) 신고에 따라 비공개 처리되었습니다. 사유: ${reason}`
+            : `${before.gallery_title || '작품'}이(가) 신고에 따라 비공개 처리되었습니다.`,
+          link: `/plus/gallery.html`
+        });
+      } else if (action === 'dismiss') {
+        notifDb.createNotification({
+          userId: before.reporter_id,
+          type: 'gallery_report_dismissed',
+          title: '신고가 검토되었습니다',
+          message: reason
+            ? `신고하신 작품을 검토했습니다. 결과: ${reason}`
+            : '신고하신 작품을 검토한 결과 문제가 없는 것으로 확인되었습니다.',
+          link: `/plus/gallery.html?open=${before.gallery_id}`
+        });
+      }
+    } catch (_) { /* 알림 실패는 비차단 */ }
+
+    res.json({ success: true, report: updated });
+  } catch (err) {
+    const status = err.status || 500;
+    if (status === 500) console.error('[GROWTH] admin report resolve error:', err);
+    res.status(status).json({ success: false, message: err.message || '서버 오류가 발생했습니다.' });
+  }
+});
+
+// POST /api/growth/admin/gallery/:id/takedown  body: { reason }
+// 신고가 없어도 admin/teacher가 직접 작품 내림 + 작성자 알림
+router.post('/admin/gallery/:id/takedown', requireAuth, (req, res) => {
+  try {
+    if (req.user.role !== 'admin' && req.user.role !== 'teacher') {
+      return res.status(403).json({ success: false, message: '관리자/교사만 접근할 수 있습니다.' });
+    }
+    const galleryId = parseInt(req.params.id, 10);
+    if (!galleryId) return res.status(400).json({ success: false, message: '잘못된 요청입니다.' });
+    const reason = req.body && req.body.reason ? String(req.body.reason).slice(0, 300) : null;
+    if (!reason) return res.status(400).json({ success: false, message: '내림 사유를 입력해 주세요.' });
+
+    // soft delete 전에 작성자/제목 확보
+    const before = require('../db/index').prepare('SELECT id, student_id, title FROM student_gallery WHERE id = ?').get(galleryId);
+    if (!before) return res.status(404).json({ success: false, message: '작품을 찾을 수 없습니다.' });
+
+    growthDb.takedownGalleryItemDirect(galleryId, req.user.id, reason);
+
+    // 작성자 알림
+    try {
+      notifDb.createNotification({
+        userId: before.student_id,
+        type: 'gallery_takedown',
+        title: '작품이 내려갔습니다',
+        message: `${before.title || '작품'}이(가) 비공개 처리되었습니다. 사유: ${reason}`,
+        link: `/plus/gallery.html`
+      });
+    } catch (_) {}
+
+    res.json({ success: true, message: '작품을 내렸습니다.' });
+  } catch (err) {
+    const status = err.status || 500;
+    if (status === 500) console.error('[GROWTH] admin takedown error:', err);
+    res.status(status).json({ success: false, message: err.message || '서버 오류가 발생했습니다.' });
+  }
+});
+
+// POST /api/growth/gallery/:id/report - 작품 신고
+router.post('/gallery/:id/report', requireAuth, (req, res) => {
+  try {
+    const galleryId = parseInt(req.params.id);
+    if (!galleryId) return res.status(400).json({ success: false, message: '잘못된 요청입니다.' });
+    const reason = (req.body && typeof req.body.reason === 'string') ? req.body.reason.trim().slice(0, 300) : '';
+    if (!reason) return res.status(400).json({ success: false, message: '신고 사유를 입력해 주세요.' });
+    const db = require('../db');
+    // 대상 작품 존재 확인
+    const target = db.prepare('SELECT id FROM student_gallery WHERE id = ?').get(galleryId);
+    if (!target) return res.status(404).json({ success: false, message: '작품을 찾을 수 없습니다.' });
+    // UNIQUE(gallery_id, user_id) — 중복 신고 시 IGNORE
+    const r = db.prepare(`
+      INSERT OR IGNORE INTO gallery_reports (gallery_id, user_id, reason, status)
+      VALUES (?, ?, ?, 'pending')
+    `).run(galleryId, req.user.id, reason);
+    if (r.changes === 0) {
+      return res.json({ success: true, message: '이미 신고하신 작품입니다.', alreadyReported: true });
+    }
+    res.json({ success: true, message: '신고가 접수되었습니다.' });
+  } catch (err) {
+    console.error('[gallery/report]', err.message);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// ===== 콘테스트 (gallery_events) =====
+
+// GET /api/growth/events?status=upcoming|active|past&limit=10
+router.get('/events', requireAuth, (req, res) => {
+  try {
+    const statusRaw = req.query.status ? String(req.query.status).toLowerCase() : null;
+    const status = ['upcoming', 'active', 'past'].includes(statusRaw) ? statusRaw : null;
+    const limit = Math.min(parseInt(req.query.limit) || 10, 50);
+    const result = growthDb.listGalleryEvents({ status, limit });
+    res.json({ success: true, ...result });
+  } catch (err) {
+    console.error('[GROWTH] events list error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// GET /api/growth/events/:id
+router.get('/events/:id', requireAuth, (req, res) => {
+  try {
+    const id = pInt(req.params.id);
+    if (!id) return res.status(400).json({ success: false, message: '잘못된 요청입니다.' });
+    const event = growthDb.getGalleryEventById(id);
+    if (!event) return res.status(404).json({ success: false, message: '콘테스트를 찾을 수 없습니다.' });
+    res.json({ success: true, event });
+  } catch (err) {
+    console.error('[GROWTH] event detail error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// POST /api/growth/events - 신규 콘테스트 작성 (admin/teacher)
+router.post('/events', requireAuth, (req, res) => {
+  try {
+    if (req.user.role !== 'admin' && req.user.role !== 'teacher') {
+      return res.status(403).json({ success: false, message: '관리자 또는 교사만 콘테스트를 작성할 수 있습니다.' });
+    }
+    const event = growthDb.createGalleryEvent(req.user.id, req.body || {});
+    res.status(201).json({ success: true, event });
+  } catch (err) {
+    const status = err.status || 500;
+    if (status === 500) console.error('[GROWTH] event create error:', err);
+    res.status(status).json({ success: false, message: err.message || '서버 오류가 발생했습니다.' });
+  }
+});
+
+// PUT /api/growth/events/:id - 콘테스트 수정 (admin·teacher, host_user_id 본인 또는 admin)
+router.put('/events/:id', requireAuth, (req, res) => {
+  try {
+    if (req.user.role !== 'admin' && req.user.role !== 'teacher') {
+      return res.status(403).json({ success: false, message: '관리자 또는 교사만 수정할 수 있습니다.' });
+    }
+    const id = pInt(req.params.id);
+    if (!id) return res.status(400).json({ success: false, message: '잘못된 요청입니다.' });
+    const before = growthDb.getGalleryEventById(id);
+    if (!before) return res.status(404).json({ success: false, message: '콘테스트를 찾을 수 없습니다.' });
+    if (req.user.role !== 'admin' && before.host_user_id !== req.user.id) {
+      return res.status(403).json({ success: false, message: '본인이 작성한 콘테스트만 수정할 수 있습니다.' });
+    }
+    const event = growthDb.updateGalleryEvent(id, req.body || {});
+    res.json({ success: true, event });
+  } catch (err) {
+    const status = err.status || 500;
+    if (status === 500) console.error('[GROWTH] event update error:', err);
+    res.status(status).json({ success: false, message: err.message || '서버 오류가 발생했습니다.' });
+  }
+});
+
+// DELETE /api/growth/events/:id - 콘테스트 soft delete (작성자 또는 admin)
+router.delete('/events/:id', requireAuth, (req, res) => {
+  try {
+    if (req.user.role !== 'admin' && req.user.role !== 'teacher') {
+      return res.status(403).json({ success: false, message: '관리자 또는 교사만 삭제할 수 있습니다.' });
+    }
+    const id = pInt(req.params.id);
+    if (!id) return res.status(400).json({ success: false, message: '잘못된 요청입니다.' });
+    const before = growthDb.getGalleryEventById(id);
+    if (!before) return res.status(404).json({ success: false, message: '콘테스트를 찾을 수 없습니다.' });
+    if (req.user.role !== 'admin' && before.host_user_id !== req.user.id) {
+      return res.status(403).json({ success: false, message: '본인이 작성한 콘테스트만 삭제할 수 있습니다.' });
+    }
+    growthDb.softDeleteGalleryEvent(id);
+    res.json({ success: true, message: '삭제되었습니다.' });
+  } catch (err) {
+    const status = err.status || 500;
+    if (status === 500) console.error('[GROWTH] event delete error:', err);
+    res.status(status).json({ success: false, message: err.message || '서버 오류가 발생했습니다.' });
+  }
+});
+
+// GET /api/growth/events/:id/submissions - 응모작 목록 (host 또는 admin·teacher)
+router.get('/events/:id/submissions', requireAuth, (req, res) => {
+  try {
+    if (req.user.role !== 'admin' && req.user.role !== 'teacher') {
+      return res.status(403).json({ success: false, message: '관리자 또는 교사만 응모작을 조회할 수 있습니다.' });
+    }
+    const id = pInt(req.params.id);
+    if (!id) return res.status(400).json({ success: false, message: '잘못된 요청입니다.' });
+    const event = growthDb.getGalleryEventById(id);
+    if (!event) return res.status(404).json({ success: false, message: '콘테스트를 찾을 수 없습니다.' });
+    // teacher는 host 본인이거나 admin만 접근 (보안 단순화: admin/teacher 전체 허용은 위에서 통과)
+    const sort = ['latest', 'likes'].includes(String(req.query.sort)) ? String(req.query.sort) : 'latest';
+    const page = parseInt(req.query.page, 10) || 1;
+    const limit = parseInt(req.query.limit, 10) || 50;
+    const result = growthDb.listEventSubmissions(id, { sort, page, limit });
+    res.json({ success: true, event_id: id, ...result });
+  } catch (err) {
+    console.error('[GROWTH] event submissions error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// POST /api/growth/events/upload-thumbnail - 콘테스트 썸네일 업로드 (admin·teacher, 5MB)
+router.post('/events/upload-thumbnail', requireAuth, (req, res) => {
+  if (req.user.role !== 'admin' && req.user.role !== 'teacher') {
+    return res.status(403).json({ success: false, message: '관리자 또는 교사만 업로드할 수 있습니다.' });
+  }
+  eventThumbUpload.single('file')(req, res, (err) => {
+    if (err) {
+      if (err instanceof multer.MulterError && err.code === 'LIMIT_FILE_SIZE') {
+        return res.status(400).json({ success: false, message: '파일 크기가 5MB를 초과합니다.' });
+      }
+      return res.status(400).json({ success: false, message: err.message || '업로드 실패' });
+    }
+    if (!req.file) {
+      return res.status(400).json({ success: false, message: '파일이 선택되지 않았습니다.' });
+    }
+    const url = `/uploads/gallery/${req.file.filename}`;
+    res.status(201).json({ success: true, url });
+  });
+});
+
+// POST /api/growth/events/:id/submit  body: { title, description, image_url }
+router.post('/events/:id/submit', requireAuth, (req, res) => {
+  try {
+    const id = pInt(req.params.id);
+    if (!id) return res.status(400).json({ success: false, message: '잘못된 요청입니다.' });
+    const title = String(req.body.title || '').trim();
+    if (!title) return res.status(400).json({ success: false, message: '작품 제목을 입력하세요.' });
+    if (title.length > 100) return res.status(400).json({ success: false, message: '제목은 100자 이하로 입력하세요.' });
+    const description = req.body.description ? String(req.body.description).slice(0, 2000) : null;
+    const image_url = req.body.image_url ? String(req.body.image_url).slice(0, 500) : null;
+
+    const result = growthDb.submitGalleryEvent(id, req.user.id, { title, description, image_url });
+    res.status(201).json({ success: true, submission: result.submission, galleryItemId: result.galleryItemId });
+  } catch (err) {
+    const status = err.status || 500;
+    if (status === 500) console.error('[GROWTH] event submit error:', err);
+    res.status(status).json({ success: false, message: err.message || '서버 오류가 발생했습니다.' });
   }
 });
 

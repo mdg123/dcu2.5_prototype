@@ -277,4 +277,93 @@ router.delete('/:classId/:lessonId', requireAuth, requireClassMember, (req, res)
   }
 });
 
+// ============ 수업 셀프체크 (이해도·집중도) — RFP SFR-019 ============
+
+// POST /api/lesson/:classId/:lessonId/self-check - 학생 응답 저장/수정 (UPSERT)
+router.post('/:classId/:lessonId/self-check', requireAuth, requireClassMember, (req, res) => {
+  try {
+    const classId = req.classId;
+    const lessonId = parseInt(req.params.lessonId);
+    // 수업이 해당 클래스 소속인지 확인
+    const lesson = lessonDb.getLessonById(lessonId);
+    if (!lesson || lesson.class_id !== classId) {
+      return res.status(404).json({ success: false, message: '수업을 찾을 수 없습니다.' });
+    }
+    // 학생만 응답 가능 (개설자/관리자 차단)
+    if (req.myRole === 'owner' || req.user.role === 'admin') {
+      return res.status(403).json({ success: false, message: '학생만 셀프체크에 응답할 수 있습니다.' });
+    }
+
+    const { understanding, focus, comment } = req.body || {};
+    const u = parseInt(understanding);
+    const f = parseInt(focus);
+    if (!Number.isInteger(u) || u < 1 || u > 5) {
+      return res.status(400).json({ success: false, message: '이해도는 1~5 사이의 정수여야 합니다.' });
+    }
+    if (!Number.isInteger(f) || f < 1 || f > 5) {
+      return res.status(400).json({ success: false, message: '집중도는 1~5 사이의 정수여야 합니다.' });
+    }
+    let trimmedComment = null;
+    if (comment !== undefined && comment !== null && String(comment).length > 0) {
+      trimmedComment = String(comment).trim();
+      if (trimmedComment.length > 100) {
+        return res.status(400).json({ success: false, message: '한마디는 100자 이내로 작성해 주세요.' });
+      }
+    }
+
+    let result;
+    try {
+      result = lessonDb.upsertSelfCheck({
+        lessonId, userId: req.user.id, classId,
+        understanding: u, focus: f, comment: trimmedComment
+      });
+    } catch (e) {
+      if (e && e.code === 'EDIT_WINDOW_EXPIRED') {
+        return res.status(403).json({ success: false, message: '응답 수정 가능 시간(24시간)이 지났습니다.' });
+      }
+      throw e;
+    }
+
+    res.json({ success: true, mode: result.mode, record: result.record });
+  } catch (err) {
+    console.error('[LESSON] self-check upsert error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// GET /api/lesson/:classId/:lessonId/self-check - 응답 조회
+// - 학생: 본인 응답 1건
+// - 교사(owner)/관리자: 전체 응답 + 미응답자 명단
+router.get('/:classId/:lessonId/self-check', requireAuth, requireClassMember, (req, res) => {
+  try {
+    const classId = req.classId;
+    const lessonId = parseInt(req.params.lessonId);
+    const lesson = lessonDb.getLessonById(lessonId);
+    if (!lesson || lesson.class_id !== classId) {
+      return res.status(404).json({ success: false, message: '수업을 찾을 수 없습니다.' });
+    }
+
+    const isOwnerOrAdmin = req.myRole === 'owner' || req.user.role === 'admin';
+    if (isOwnerOrAdmin) {
+      const responses = lessonDb.getSelfChecksByLesson(lessonId);
+      const nonRespondents = lessonDb.getClassNonRespondents(classId, lessonId);
+      const totalMembers = classDb.getClassMembers(classId).filter(m => m.role === 'member').length;
+      return res.json({
+        success: true,
+        responses,
+        non_respondents: nonRespondents,
+        total_members: totalMembers,
+        respondent_count: responses.length
+      });
+    }
+
+    // 일반 학생: 본인 응답만
+    const record = lessonDb.getSelfCheck(lessonId, req.user.id);
+    return res.json({ success: true, record: record || null });
+  } catch (err) {
+    console.error('[LESSON] self-check get error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
 module.exports = router;

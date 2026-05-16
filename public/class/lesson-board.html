@@ -202,6 +202,16 @@
     let myRole = null;
     let currentStatus = 'all';
     let currentPage = 1;
+    let classMembersCache = []; // 멤버 목록 (학생 수 산출용)
+
+    // 학생 수 (개설자 제외) 산출
+    function getStudentTotal(lesson) {
+      if (Array.isArray(classMembersCache) && classMembersCache.length > 0) {
+        return classMembersCache.filter(m => m.role === 'member').length;
+      }
+      // 폴백: Backend의 member_count (이 값은 모든 멤버 포함일 수 있음)
+      return lesson?.member_count || 0;
+    }
 
     // URL에서 classId 가져오기
     const params = new URLSearchParams(location.search);
@@ -292,7 +302,11 @@
             ? `📅 ${lesson.start_date} ~ ${lesson.end_date}`
             : lesson.lesson_date ? `📅 ${lesson.lesson_date}` : '';
           const timeStr = lesson.estimated_minutes ? `⏱ ${lesson.estimated_minutes}분` : '';
-          const completionStr = `👥 이수 ${lesson.completed_students || 0}/${lesson.member_count || 0}명`;
+          const studentTotal = getStudentTotal(lesson);
+          const completedStudents = lesson.completed_students || 0;
+          const completionStr = studentTotal > 0
+            ? `👥 ${studentTotal}명 중 ${completedStudents}명 이수`
+            : `👥 멤버 없음`;
 
           return `<div class="lesson-card" onclick="goLesson(${lesson.id})">
             <div class="lesson-card-top">
@@ -403,6 +417,7 @@
         const data = await res.json();
         if (data.success) {
           myRole = data.myRole;
+          classMembersCache = Array.isArray(data.members) ? data.members : [];
           if (myRole === 'owner' || currentUser.role === 'admin') {
             document.getElementById('btnCreate').style.display = 'inline-flex';
             document.getElementById('btnCreate').href = `/class/lesson-create.html?classId=${classId}`;

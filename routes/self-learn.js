@@ -322,6 +322,20 @@ router.get('/map/nodes/:nodeId', requireAuth, (req, res) => {
   try {
     const detail = selfLearnDb.getMapNodeDetail(req.params.nodeId, req.user.id);
     if (!detail) return res.status(404).json({ success: false, message: '노드를 찾을 수 없습니다.' });
+
+    // 진단 흐름용 폴백: problems가 비어 있고 ?withFallbackProblems=1이면 자식/closure로 보충
+    const wantFallback = String(req.query.withFallbackProblems || '') === '1';
+    if (wantFallback && (!detail.problems || detail.problems.length === 0)) {
+      try {
+        const fallback = selfLearnDb.collectFallbackProblems
+          ? selfLearnDb.collectFallbackProblems(req.params.nodeId, req.user.id, 10)
+          : null;
+        if (Array.isArray(fallback) && fallback.length) {
+          detail.problems = fallback;
+          detail.problems_source = 'fallback';
+        }
+      } catch (_) { /* 폴백 실패 시 그대로 진행 */ }
+    }
     res.json({ success: true, ...detail });
   } catch (err) {
     console.error('[SELF-LEARN] map/nodes/:id error:', err);
@@ -483,6 +497,39 @@ router.post('/map/nodes/:nodeId/diagnose-complete', requireAuth, (req, res) => {
 });
 
 // POST /diagnosis/start — 진단 시작 (CAT: targetNodeId 있으면 BFS+난이도 조절 모드)
+// GET /diagnosis/history?nodeId=... — 본인의 해당 노드 진단 이력 (최근 5건 + 가장 최근 완료 결과)
+router.get('/diagnosis/history', requireAuth, (req, res) => {
+  try {
+    const nodeId = req.query.nodeId;
+    if (!nodeId) return res.status(400).json({ success: false, message: 'nodeId 필수' });
+    const path = require('path');
+    const sqlite = require('better-sqlite3');
+    const dbPath = path.join(__dirname, '..', 'data', 'dacheum.db');
+    const db = sqlite(dbPath);
+    const recent = db.prepare(`
+      SELECT id, target_node_id, status, total_questions, correct_count,
+             started_at, completed_at, result, diagnosis_type
+      FROM diagnosis_sessions
+      WHERE user_id = ? AND target_node_id = ?
+      ORDER BY id DESC LIMIT 5
+    `).all(req.user.id, nodeId);
+    const lastCompleted = recent.find(r => r.status === 'completed');
+    const lastInProgress = recent.find(r => r.status === 'in_progress');
+    db.close();
+    res.json({
+      success: true,
+      sessions: recent,
+      lastCompleted: lastCompleted || null,
+      lastInProgress: lastInProgress || null,
+      hasAnyHistory: recent.length > 0,
+      hasCompleted: !!lastCompleted
+    });
+  } catch (err) {
+    console.error('[SELF-LEARN] diagnosis/history error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
 router.post('/diagnosis/start', requireAuth, (req, res) => {
   try {
     // 교사·관리자는 학생 기록을 만들지 않음 — 데모/시연용 응답만 반환

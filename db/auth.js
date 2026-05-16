@@ -1,8 +1,9 @@
 const db = require('./index');
 const bcrypt = require('bcryptjs');
 
-const stmtFindByUsername = db.prepare('SELECT * FROM users WHERE username = ?');
-const stmtFindById = db.prepare('SELECT id, username, display_name, role, school_name, grade, class_number, email, profile_image_url, created_at, last_login_at FROM users WHERE id = ?');
+// 인증 조회 시 소프트 삭제된 사용자(deleted_at IS NOT NULL)는 제외 — BUG-A-02
+const stmtFindByUsername = db.prepare('SELECT * FROM users WHERE username = ? AND deleted_at IS NULL');
+const stmtFindById = db.prepare('SELECT id, username, display_name, role, school_name, grade, class_number, email, profile_image_url, created_at, last_login_at FROM users WHERE id = ? AND deleted_at IS NULL');
 const stmtCreateUser = db.prepare('INSERT INTO users (username, password, display_name, role, school_name, grade, class_number) VALUES (?, ?, ?, ?, ?, ?, ?)');
 const stmtUpdateLastLogin = db.prepare('UPDATE users SET last_login_at = CURRENT_TIMESTAMP WHERE id = ?');
 
@@ -28,9 +29,9 @@ function updateLastLogin(userId) {
   stmtUpdateLastLogin.run(userId);
 }
 
-// 관리자용: 전체 사용자 목록
+// 관리자용: 전체 사용자 목록 (소프트 삭제된 사용자는 기본 제외)
 function getAllUsers({ role, status, page = 1, limit = 20 } = {}) {
-  let sql = 'SELECT id, username, display_name, role, school_name, grade, class_number, status, created_at, last_login_at FROM users WHERE 1=1';
+  let sql = 'SELECT id, username, display_name, role, school_name, grade, class_number, status, created_at, last_login_at FROM users WHERE deleted_at IS NULL';
   const params = [];
   if (role) { sql += ' AND role = ?'; params.push(role); }
   if (status) { sql += ' AND status = ?'; params.push(status); }
@@ -40,7 +41,7 @@ function getAllUsers({ role, status, page = 1, limit = 20 } = {}) {
 }
 
 function getUserCount({ role, status } = {}) {
-  let sql = 'SELECT COUNT(*) as count FROM users WHERE 1=1';
+  let sql = 'SELECT COUNT(*) as count FROM users WHERE deleted_at IS NULL';
   const params = [];
   if (role) { sql += ' AND role = ?'; params.push(role); }
   if (status) { sql += ' AND status = ?'; params.push(status); }

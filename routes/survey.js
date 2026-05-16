@@ -21,7 +21,8 @@ router.get('/:classId', requireAuth, requireMember, (req, res) => {
   try {
     const result = surveyDb.getSurveysByClass(req.classId, {
       status: req.myRole === 'owner' ? req.query.status : 'active',
-      page: parseInt(req.query.page) || 1
+      page: parseInt(req.query.page) || 1,
+      userId: req.user.id
     });
     res.json({ success: true, ...result });
   } catch (err) { res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' }); }

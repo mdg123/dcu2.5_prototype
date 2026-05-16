@@ -201,6 +201,10 @@ function getClassCompletionStats(classId, userId) {
 function getLessonsByClassWithProgress(classId, userId, { status, page = 1, limit = 20, std_ids } = {}) {
   const result = getLessonsByClass(classId, { status, page, limit, std_ids });
   result.lessons.forEach(l => { try { l.std_ids = getLessonStdIds(l.id); } catch { l.std_ids = []; } });
+  // 클래스 멤버 학생 수 (role='member' & status='active') — 모든 lesson에 공통값
+  const memberCount = db.prepare(
+    "SELECT COUNT(*) as cnt FROM class_members WHERE class_id = ? AND role = 'member' AND status = 'active'"
+  ).get(classId).cnt;
   result.lessons = result.lessons.map(lesson => {
     const totalContents = db.prepare('SELECT COUNT(*) as cnt FROM lesson_contents WHERE lesson_id = ?').get(lesson.id).cnt;
     let completedContents = 0;
@@ -217,13 +221,37 @@ function getLessonsByClassWithProgress(classId, userId, { status, page = 1, limi
       JOIN contents c ON lc.content_id = c.id
       WHERE lc.lesson_id = ?
     `).all(lesson.id).map(r => r.content_type);
+    // 수업 콘텐츠를 모두 완료한 학생 수 (member 역할 한정)
+    // 콘텐츠가 0개면 0명. 콘텐츠가 있으면 학생별 완료 콘텐츠 수가 lesson의 총 콘텐츠 수 이상인 학생 카운트
+    let completedStudents = 0;
+    if (totalContents > 0 && memberCount > 0) {
+      const row = db.prepare(`
+        SELECT COUNT(*) as cnt FROM (
+          SELECT cp.user_id
+            FROM content_progress cp
+            JOIN class_members cm ON cm.user_id = cp.user_id
+                                  AND cm.class_id = ?
+                                  AND cm.role = 'member'
+                                  AND cm.status = 'active'
+            JOIN lesson_contents lc ON lc.lesson_id = cp.lesson_id
+                                    AND lc.content_id = cp.content_id
+           WHERE cp.lesson_id = ?
+             AND cp.completed = 1
+           GROUP BY cp.user_id
+          HAVING COUNT(DISTINCT cp.content_id) >= ?
+        )
+      `).get(classId, lesson.id, totalContents);
+      completedStudents = row ? row.cnt : 0;
+    }
     return {
       ...lesson,
       completion_rate: completionRate,
       content_count: totalContents,
       my_completed: completedContents,
       my_total: totalContents,
-      content_types: contentTypes
+      content_types: contentTypes,
+      completed_students: completedStudents,
+      member_count: memberCount
     };
   });
   return result;
@@ -358,6 +386,202 @@ function getLessonStudentProgress(lessonId, classId) {
   });
 }
 
+// ============ 수업 셀프체크 (이해도·집중도) — RFP SFR-019 ============
+
+// 24시간 (ms) — 응답 수정 가능 윈도우
+const SELF_CHECK_EDIT_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+function getSelfCheck(lessonId, userId) {
+  return db.prepare(
+    'SELECT * FROM lesson_self_check WHERE lesson_id = ? AND user_id = ?'
+  ).get(lessonId, userId) || null;
+}
+
+function getSelfChecksByLesson(lessonId) {
+  return db.prepare(`
+    SELECT lsc.*, u.display_name, u.username
+    FROM lesson_self_check lsc
+    JOIN users u ON lsc.user_id = u.id
+    WHERE lsc.lesson_id = ?
+    ORDER BY lsc.created_at DESC
+  `).all(lessonId);
+}
+
+/**
+ * 셀프체크 UPSERT
+ * - 최초: INSERT, mode='created'
+ * - 24시간 이내(created_at 기준): UPDATE, mode='updated'
+ * - 24시간 초과: throw Error('EDIT_WINDOW_EXPIRED')
+ */
+function upsertSelfCheck({ lessonId, userId, classId, understanding, focus, comment }) {
+  const existing = getSelfCheck(lessonId, userId);
+  if (existing) {
+    // created_at은 SQLite의 CURRENT_TIMESTAMP(UTC) 문자열로 저장됨 → 'Z' 보정
+    const createdMs = Date.parse(existing.created_at.replace(' ', 'T') + 'Z');
+    const ageMs = Date.now() - createdMs;
+    if (Number.isFinite(createdMs) && ageMs > SELF_CHECK_EDIT_WINDOW_MS) {
+      const err = new Error('EDIT_WINDOW_EXPIRED');
+      err.code = 'EDIT_WINDOW_EXPIRED';
+      throw err;
+    }
+    db.prepare(`
+      UPDATE lesson_self_check
+         SET understanding = ?, focus = ?, comment = ?, updated_at = CURRENT_TIMESTAMP
+       WHERE id = ?
+    `).run(understanding, focus, comment || null, existing.id);
+    return { mode: 'updated', record: getSelfCheck(lessonId, userId) };
+  }
+  db.prepare(`
+    INSERT INTO lesson_self_check (lesson_id, user_id, class_id, understanding, focus, comment)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(lessonId, userId, classId, understanding, focus, comment || null);
+  return { mode: 'created', record: getSelfCheck(lessonId, userId) };
+}
+
+/**
+ * 클래스 셀프체크 집계 (대시보드용)
+ * @param {number} classId
+ * @param {object} opts { startDate?: 'YYYY-MM-DD', endDate?: 'YYYY-MM-DD', lessonId?: number }
+ */
+function getClassSelfCheckAggregate(classId, { startDate, endDate, lessonId } = {}) {
+  // 대상 수업 선정 (status='published'만 — 통계 일관성)
+  let where = "WHERE l.class_id = ? AND l.status = 'published'";
+  const params = [classId];
+  if (lessonId) {
+    where += ' AND l.id = ?';
+    params.push(parseInt(lessonId));
+  }
+  // 기간 필터: lesson_date 우선, 없으면 created_at(등록일)
+  if (startDate) {
+    where += " AND COALESCE(l.lesson_date, DATE(l.created_at)) >= ?";
+    params.push(startDate);
+  }
+  if (endDate) {
+    where += " AND COALESCE(l.lesson_date, DATE(l.created_at)) <= ?";
+    params.push(endDate);
+  }
+  const lessons = db.prepare(`
+    SELECT l.id, l.title, l.lesson_date, l.created_at
+    FROM lessons l
+    ${where}
+    ORDER BY COALESCE(l.lesson_date, DATE(l.created_at)) ASC, l.id ASC
+  `).all(...params);
+
+  // 클래스 학생 수 (member 역할만)
+  const totalMembers = db.prepare(`
+    SELECT COUNT(*) as cnt FROM class_members
+    WHERE class_id = ? AND status = 'active' AND role = 'member'
+  `).get(classId).cnt;
+
+  // 클래스 멤버(학생) 명단 조회 — rosters용
+  const classMembers = db.prepare(`
+    SELECT u.id, u.display_name, u.username
+    FROM class_members cm
+    JOIN users u ON u.id = cm.user_id
+    WHERE cm.class_id = ? AND cm.status = 'active' AND cm.role = 'member'
+    ORDER BY u.display_name
+  `).all(classId);
+  const memberMap = new Map(classMembers.map(m => [m.id, m]));
+
+  let sumU = 0, sumF = 0, respondTotal = 0, lessonRespondRateSum = 0;
+
+  const lessonRows = lessons.map(lesson => {
+    const responses = db.prepare(`
+      SELECT user_id, understanding, focus, comment, updated_at
+      FROM lesson_self_check
+      WHERE lesson_id = ? AND class_id = ?
+    `).all(lesson.id, classId);
+
+    const u_dist = [0, 0, 0, 0, 0, 0]; // 1..5, none(미응답)
+    const f_dist = [0, 0, 0, 0, 0, 0];
+    let uSum = 0, fSum = 0;
+
+    // rosters: 각 단계별 학생 명단 (이름·id·시각)
+    const rosters = {
+      understanding: { '1': [], '2': [], '3': [], '4': [], '5': [], none: [] },
+      focus:         { '1': [], '2': [], '3': [], '4': [], '5': [], none: [] }
+    };
+    const respondedIds = new Set();
+
+    responses.forEach(r => {
+      const m = memberMap.get(r.user_id);
+      const display = m ? m.display_name : `User ${r.user_id}`;
+      const entry = { user_id: r.user_id, display_name: display, updated_at: r.updated_at };
+      respondedIds.add(r.user_id);
+      if (r.understanding >= 1 && r.understanding <= 5) {
+        u_dist[r.understanding - 1] += 1;
+        uSum += r.understanding;
+        rosters.understanding[String(r.understanding)].push(entry);
+      }
+      if (r.focus >= 1 && r.focus <= 5) {
+        f_dist[r.focus - 1] += 1;
+        fSum += r.focus;
+        rosters.focus[String(r.focus)].push(entry);
+      }
+    });
+
+    // 미응답 학생 명단
+    const nonRespondList = classMembers
+      .filter(m => !respondedIds.has(m.id))
+      .map(m => ({ user_id: m.id, display_name: m.display_name }));
+    rosters.understanding.none = nonRespondList;
+    rosters.focus.none = nonRespondList;
+
+    const respondentCount = responses.length;
+    const nonRespond = nonRespondList.length;
+    u_dist[5] = nonRespond;
+    f_dist[5] = nonRespond;
+
+    const avgU = respondentCount > 0 ? Math.round((uSum / respondentCount) * 10) / 10 : null;
+    const avgF = respondentCount > 0 ? Math.round((fSum / respondentCount) * 10) / 10 : null;
+
+    sumU += uSum;
+    sumF += fSum;
+    respondTotal += respondentCount;
+    if (totalMembers > 0) {
+      lessonRespondRateSum += respondentCount / totalMembers;
+    }
+
+    return {
+      lesson_id: lesson.id,
+      lesson_title: lesson.title,
+      registered_at: lesson.lesson_date || (lesson.created_at ? String(lesson.created_at).slice(0, 10) : null),
+      understanding_dist: u_dist,
+      focus_dist: f_dist,
+      respondent_count: respondentCount,
+      total_members: totalMembers,
+      avg_understanding: avgU,
+      avg_focus: avgF,
+      rosters
+    };
+  });
+
+  const totalLessons = lessonRows.length;
+  const classSummary = {
+    total_lessons: totalLessons,
+    avg_understanding: respondTotal > 0 ? Math.round((sumU / respondTotal) * 10) / 10 : null,
+    avg_focus: respondTotal > 0 ? Math.round((sumF / respondTotal) * 10) / 10 : null,
+    response_rate: totalLessons > 0
+      ? Math.round((lessonRespondRateSum / totalLessons) * 100) / 100
+      : 0
+  };
+
+  return { lessons: lessonRows, class_summary: classSummary };
+}
+
+function getClassNonRespondents(classId, lessonId) {
+  return db.prepare(`
+    SELECT u.id as user_id, u.display_name, u.username
+    FROM class_members cm
+    JOIN users u ON cm.user_id = u.id
+    WHERE cm.class_id = ? AND cm.status = 'active' AND cm.role = 'member'
+      AND u.id NOT IN (
+        SELECT user_id FROM lesson_self_check WHERE lesson_id = ?
+      )
+    ORDER BY u.display_name
+  `).all(classId, lessonId);
+}
+
 module.exports = {
   createLesson, getLessonById, getLessonsByClass, updateLesson, deleteLesson,
   addAttachment, getAttachments,
@@ -365,5 +589,9 @@ module.exports = {
   setLessonStdIds, getLessonStdIds,
   getContentProgress, updateContentProgress, getLessonProgress,
   getLessonCompletionRate, getClassCompletionStats, getLessonsByClassWithProgress,
-  getLessonBoardStats, getLessonBoardList, getLessonStudentProgress
+  getLessonBoardStats, getLessonBoardList, getLessonStudentProgress,
+  // 셀프체크
+  getSelfCheck, getSelfChecksByLesson, upsertSelfCheck,
+  getClassSelfCheckAggregate, getClassNonRespondents,
+  SELF_CHECK_EDIT_WINDOW_MS
 };

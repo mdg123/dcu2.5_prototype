@@ -97,11 +97,27 @@ function getHomeworkByClass(classId, { status, page = 1, limit = 20, userId = nu
 
   const total = db.prepare(`SELECT COUNT(*) as cnt FROM homework h ${where}`).get(...params).cnt;
   const mySubSelect = userId
-    ? `, (SELECT hs.id FROM homework_submissions hs WHERE hs.homework_id = h.id AND hs.student_id = ${Number(userId)} AND COALESCE(hs.is_draft,0) = 0) as my_submission`
+    ? `, (SELECT hs.id FROM homework_submissions hs WHERE hs.homework_id = h.id AND hs.student_id = ${Number(userId)} AND COALESCE(hs.is_draft,0) = 0) as my_submission
+       , (SELECT hs.submitted_at FROM homework_submissions hs WHERE hs.homework_id = h.id AND hs.student_id = ${Number(userId)} AND COALESCE(hs.is_draft,0) = 0) as my_submitted_at
+       , (SELECT hs.status FROM homework_submissions hs WHERE hs.homework_id = h.id AND hs.student_id = ${Number(userId)} AND COALESCE(hs.is_draft,0) = 0) as my_submission_status
+       , (SELECT hs.score FROM homework_submissions hs WHERE hs.homework_id = h.id AND hs.student_id = ${Number(userId)} AND COALESCE(hs.is_draft,0) = 0) as my_score`
     : '';
   const list = db.prepare(`
     SELECT h.*, u.display_name as author_name,
-    (SELECT COUNT(*) FROM homework_submissions WHERE homework_id = h.id AND COALESCE(is_draft,0) = 0) as submission_count
+    (SELECT COUNT(*) FROM homework_submissions WHERE homework_id = h.id AND COALESCE(is_draft,0) = 0) as submission_count,
+    (SELECT COUNT(DISTINCT hs.student_id) FROM homework_submissions hs
+      JOIN class_members cm ON cm.user_id = hs.student_id
+                           AND cm.class_id = h.class_id
+                           AND cm.role = 'member'
+                           AND cm.status = 'active'
+      WHERE hs.homework_id = h.id AND COALESCE(hs.is_draft,0) = 0) as submitted_count,
+    (SELECT COUNT(DISTINCT hs.student_id) FROM homework_submissions hs
+      JOIN class_members cm ON cm.user_id = hs.student_id
+                           AND cm.class_id = h.class_id
+                           AND cm.role = 'member'
+                           AND cm.status = 'active'
+      WHERE hs.homework_id = h.id AND COALESCE(hs.is_draft,0) = 0 AND hs.status = 'graded') as graded_count,
+    (SELECT COUNT(*) FROM class_members cm2 WHERE cm2.class_id = h.class_id AND cm2.role = 'member' AND cm2.status = 'active') as member_count
     ${mySubSelect}
     FROM homework h JOIN users u ON h.teacher_id = u.id
     ${where} ORDER BY h.due_date DESC, h.created_at DESC LIMIT ? OFFSET ?

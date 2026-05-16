@@ -718,4 +718,43 @@ router.get('/:classId/students/self-learn-summary', requireAuth, (req, res) => {
   }
 });
 
+// GET /api/class/:classId/lessons/self-check/aggregate - 수업 셀프체크 집계 (대시보드용) — RFP SFR-019
+// 권한: owner(개설자/공동개설자) 또는 admin. 학생 차단.
+// 쿼리: startDate=YYYY-MM-DD, endDate=YYYY-MM-DD, lessonId=숫자(선택)
+router.get('/:classId/lessons/self-check/aggregate', requireAuth, (req, res) => {
+  try {
+    const classId = parseInt(req.params.classId);
+    if (!Number.isInteger(classId)) {
+      return res.status(400).json({ success: false, message: '잘못된 클래스 ID입니다.' });
+    }
+    const myRole = classDb.getMemberRole(classId, req.user.id);
+    const isOwner = myRole === 'owner';
+    const isAdmin = req.user.role === 'admin';
+    if (!isOwner && !isAdmin) {
+      return res.status(403).json({ success: false, message: '클래스 개설자/관리자만 접근할 수 있습니다.' });
+    }
+
+    const { startDate, endDate, lessonId } = req.query;
+    // 날짜 형식 가벼운 검증 (YYYY-MM-DD)
+    const datePat = /^\d{4}-\d{2}-\d{2}$/;
+    if (startDate && !datePat.test(String(startDate))) {
+      return res.status(400).json({ success: false, message: 'startDate 형식은 YYYY-MM-DD 입니다.' });
+    }
+    if (endDate && !datePat.test(String(endDate))) {
+      return res.status(400).json({ success: false, message: 'endDate 형식은 YYYY-MM-DD 입니다.' });
+    }
+
+    const lessonDb = require('../db/lesson');
+    const result = lessonDb.getClassSelfCheckAggregate(classId, {
+      startDate: startDate || undefined,
+      endDate: endDate || undefined,
+      lessonId: lessonId ? parseInt(lessonId) : undefined
+    });
+    res.json({ success: true, lessons: result.lessons, class_summary: result.class_summary });
+  } catch (err) {
+    console.error('[CLASS] self-check aggregate error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
 module.exports = router;

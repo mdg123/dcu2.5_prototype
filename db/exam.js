@@ -67,7 +67,24 @@ function getExamsByClass(classId, { status, page = 1, limit = 20, std_ids } = {}
            e.time_limit, e.created_at, e.started_at, e.ended_at,
            e.start_date, e.end_date,
            u.display_name as author_name,
-           (SELECT COUNT(*) FROM exam_students WHERE exam_id = e.id) as student_count
+           (SELECT COUNT(*) FROM exam_students WHERE exam_id = e.id) as student_count,
+           (SELECT COUNT(DISTINCT es.user_id) FROM exam_students es
+             JOIN class_members cm ON cm.user_id = es.user_id
+                                  AND cm.class_id = e.class_id
+                                  AND cm.role = 'member'
+                                  AND cm.status = 'active'
+             WHERE es.exam_id = e.id) as participated_count,
+           (SELECT COUNT(DISTINCT es.user_id) FROM exam_students es
+             JOIN class_members cm ON cm.user_id = es.user_id
+                                  AND cm.class_id = e.class_id
+                                  AND cm.role = 'member'
+                                  AND cm.status = 'active'
+             WHERE es.exam_id = e.id
+               AND (es.submitted_at IS NOT NULL OR es.status IN ('submitted','graded','completed'))) as submitted_count,
+           (SELECT COUNT(*) FROM class_members cm2
+             WHERE cm2.class_id = e.class_id
+               AND cm2.role = 'member'
+               AND cm2.status = 'active') as member_count
     FROM exams e JOIN users u ON e.owner_id = u.id
     ${where} ORDER BY e.created_at DESC LIMIT ? OFFSET ?
   `).all(...params, limit, (page - 1) * limit);

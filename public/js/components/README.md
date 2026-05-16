@@ -87,6 +87,66 @@ std-smart-search와 동일 (`value`, `clear()`, `change` 이벤트).
 - **바닐라** — 프레임워크 의존 없음, 어디든 붙여 쓸 수 있음
 - **API 재사용** — 기존 `/api/curriculum/*` 엔드포인트만 호출, 신규 백엔드 변경 없음
 
+## `DacheumSearch` (검색 인터페이스 공통 컴포넌트)
+
+> Phase 1 — 채움콘텐츠 공개콘텐츠 검색바를 동일 마크업/스타일로 추출. 
+> `common-nav.js` 로딩 페이지에서 `window.DacheumSearch` 가 자동 등록된다.
+
+### 사용 예 (회귀 0 전환: legacy ID 호환 모드 + 호스트 글로벌 함수 위임)
+
+```html
+<div id="searchHost"></div>
+<script>
+  const ctrl = DacheumSearch.mount(document.getElementById('searchHost'), {
+    mode: 'content',
+    sources: ['public'],
+    typeFilters: ['video','document','image','quiz','exam','activity','package','recipe'],
+    initialTypeFilters: Array.from(typeFilters),
+    initialViewMode: viewMode,
+    legacyIds: true,           // pubKeyword/pafTitle 등 기존 ID 유지
+    enableStdSearch: true,
+    enableViewToggle: true,
+    showAdvanced: true,
+    placeholder: '제목, 키워드, 저작자명으로 검색',
+    hooks: {
+      onSearch:         (page) => searchPublic(page),
+      onKeywordInput:   () => updateSearchCheckboxes(),
+      onAdvToggle:      () => togglePubAdvSearch(),
+      onAdvReset:       () => resetPubAdvSearch(),
+      onToggleType:     (t) => toggleTypeFilter(t),
+      onMonthQuick:     (v) => applyPafMonthQuick(v),
+      onYearQuick:      (v) => applyPafYearQuick(v),
+      onViewModeChange: (m) => { viewMode = m; searchPublic(1); }
+    }
+  });
+</script>
+```
+
+### 옵션
+
+| 옵션 | 기본값 | 설명 |
+|------|--------|------|
+| `mode` | `content` | `content` / `question` / `exam` — placeholder·라벨 분기 |
+| `sources` | `['public']` | 표시할 소스 탭 (단일이면 탭 미노출) |
+| `typeFilters` | 8종 | 노출할 유형 칩 키 목록 |
+| `typeNames` | 8종 한국어 | 칩 라벨 매핑 |
+| `enableStdSearch` | `true` | 상세 검색 폼에 `<std-smart-search>` 노출 |
+| `enableViewToggle` | `true` | 카드/리스트 토글 노출 |
+| `showAdvanced` | `true` | 상세 검색 토글 노출 |
+| `enableDateRange` | `true` | 등록 기간 입력 노출 |
+| `legacyIds` | `true` | 기존 DOM ID(`pubKeyword`, `pafTitle` 등) 유지 (회귀 0) |
+
+### 컨트롤러 반환값
+
+- `refresh(page)` / `setQuery(q)` / `setSource(s)` / `getState()` / `getSelectedFilters()` / `destroy()`
+
+### Phase 2~4 마이그레이션 매트릭스
+
+기획서 `작업지시서/검색_인터페이스_공통_컴포넌트_기획서.md` §3 의 마이그레이션 표 참조.
+Phase 2 = 수업 모듈, Phase 3 = 평가/문항, Phase 4 = 관리자/기타.
+
+---
+
 ## 기존 인라인 구현과의 관계
 
 다음 페이지는 자체 성취기준 UI를 이미 가지고 있음:

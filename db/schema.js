@@ -1002,6 +1002,24 @@ function initSchema() {
     );
     CREATE INDEX IF NOT EXISTS idx_lcn_std ON lesson_content_nodes(std_id);
 
+    -- ============ 수업 셀프체크 (이해도·집중도) — RFP SFR-019 ============
+    CREATE TABLE IF NOT EXISTS lesson_self_check (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      lesson_id INTEGER NOT NULL,
+      user_id INTEGER NOT NULL,
+      class_id INTEGER NOT NULL,
+      understanding INTEGER NOT NULL CHECK(understanding BETWEEN 1 AND 5),
+      focus INTEGER NOT NULL CHECK(focus BETWEEN 1 AND 5),
+      comment TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (lesson_id) REFERENCES lessons(id) ON DELETE CASCADE,
+      FOREIGN KEY (user_id) REFERENCES users(id),
+      UNIQUE(lesson_id, user_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_lsc_lesson ON lesson_self_check(lesson_id);
+    CREATE INDEX IF NOT EXISTS idx_lsc_class ON lesson_self_check(class_id);
+
     -- ============ 과제 ↔ 표준체계 내용요소(std_id) 매핑 ============
     CREATE TABLE IF NOT EXISTS homework_content_nodes (
       homework_id INTEGER NOT NULL,
@@ -1132,6 +1150,26 @@ function initSchema() {
     console.error('[다채움] gallery_reports UNIQUE 마이그레이션 실패:', e.message);
   }
 
+  // 마이그레이션: gallery_reports 처리 메타 컬럼 (resolved_action, resolved_by, resolved_at) — 신고 대시보드용
+  try {
+    const grCols = db.prepare("PRAGMA table_info(gallery_reports)").all().map(c => c.name);
+    if (!grCols.includes('resolved_action')) {
+      db.exec("ALTER TABLE gallery_reports ADD COLUMN resolved_action TEXT");
+    }
+    if (!grCols.includes('resolved_by')) {
+      db.exec("ALTER TABLE gallery_reports ADD COLUMN resolved_by INTEGER");
+    }
+    if (!grCols.includes('resolved_at')) {
+      db.exec("ALTER TABLE gallery_reports ADD COLUMN resolved_at DATETIME");
+    }
+    if (!grCols.includes('resolution_reason')) {
+      db.exec("ALTER TABLE gallery_reports ADD COLUMN resolution_reason TEXT");
+    }
+    db.exec("CREATE INDEX IF NOT EXISTS idx_gallery_reports_status ON gallery_reports(status, created_at DESC)");
+  } catch (e) {
+    console.error('[다채움] gallery_reports 처리 메타 컬럼 마이그레이션 실패:', e.message);
+  }
+
   // 마이그레이션: attendance 테이블에 감정 컬럼 추가 (SFR-031, legacy)
   try {
     const attCols = db.prepare("PRAGMA table_info(attendance)").all().map(c => c.name);
@@ -1151,6 +1189,23 @@ function initSchema() {
       db.exec("ALTER TABLE attendance ADD COLUMN checkin_source TEXT");
     }
   } catch (e) { /* 테이블이 아직 없으면 무시 */ }
+
+  // 마이그레이션: attendance_settings에 알림 설정 컬럼 추가 (도메인 전문가 권고, SFR-017 보강)
+  try {
+    const settingsCols = db.prepare("PRAGMA table_info(attendance_settings)").all().map(c => c.name);
+    if (!settingsCols.includes('notify_absent')) {
+      db.exec("ALTER TABLE attendance_settings ADD COLUMN notify_absent INTEGER DEFAULT 0");
+    }
+    if (!settingsCols.includes('notify_time')) {
+      db.exec("ALTER TABLE attendance_settings ADD COLUMN notify_time TEXT DEFAULT '09:30'");
+    }
+  } catch (e) { /* 테이블이 아직 없으면 무시 */ }
+
+  // 마이그레이션: attendance 테이블에 잘못 저장된 emotion='manual' 정리
+  // (이전 routes/attendance.js의 시그니처 불일치 버그로 emotion 컬럼에 'manual' 문자열이 들어간 데이터 클린업)
+  try {
+    db.prepare("UPDATE attendance SET emotion = NULL WHERE emotion = 'manual'").run();
+  } catch (e) { /* 무시 */ }
 
   // 마음채움 감정 체크인은 클래스 출석부와 분리된 학생 단위 상태로 관리한다.
   // 여러 클래스에 속한 학생이라도 1일 1행만 저장되며, 클래스 출석 기록과 독립적이다.
@@ -1860,7 +1915,42 @@ function initSchema() {
     if (!sgCols.includes('view_count')) db.exec("ALTER TABLE student_gallery ADD COLUMN view_count INTEGER DEFAULT 0");
     if (!sgCols.includes('reject_reason')) db.exec("ALTER TABLE student_gallery ADD COLUMN reject_reason TEXT");
     if (!sgCols.includes('media_url')) db.exec("ALTER TABLE student_gallery ADD COLUMN media_url TEXT");
+    // 나도예술가 P1: soft delete 컬럼 (idempotent)
+    if (!sgCols.includes('deleted_at')) db.exec("ALTER TABLE student_gallery ADD COLUMN deleted_at DATETIME");
   } catch (e) { /* 테이블이 아직 없으면 무시 */ }
+
+  // 나도예술가: 댓글·뷰 인덱스 보강 (idempotent)
+  try {
+    db.exec("CREATE INDEX IF NOT EXISTS idx_gallery_comments_created ON gallery_comments(gallery_id, created_at DESC)");
+    // gallery_views는 (gallery_id, user_id, view_date) UNIQUE 제약이 이미 존재 → 추가 UNIQUE INDEX 불필요
+    db.exec("CREATE INDEX IF NOT EXISTS idx_gallery_views_gallery_user ON gallery_views(gallery_id, user_id, view_date)");
+    // soft delete + 정렬 성능을 위한 보조 인덱스
+    db.exec("CREATE INDEX IF NOT EXISTS idx_student_gallery_status_created ON student_gallery(approval_status, created_at DESC)");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_student_gallery_like_count ON student_gallery(like_count DESC)");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_student_gallery_view_count ON student_gallery(view_count DESC)");
+  } catch (e) { console.error('[DB] gallery 인덱스 보강 실패:', e.message); }
+
+  // 좋아요 토글 도입에 따른 like_count 보정 (1회만 실행)
+  // 기존 like_count는 단순 INCREMENT 누적값이라 gallery_likes 실제 행 수와 일치하지 않을 수 있음.
+  // 다만 기존 누적값이 더 큰 경우 보존하지 않고 정확한 값으로 통일한다(토글 UX 정합성 우선).
+  try {
+    db.exec(`CREATE TABLE IF NOT EXISTS _migrations (name TEXT PRIMARY KEY, applied_at TEXT DEFAULT (DATETIME('now')))`);
+    const migDone = db.prepare("SELECT 1 FROM _migrations WHERE name = 'gallery_like_count_normalized_2026_05_13'").get();
+    if (!migDone) {
+      const info = db.prepare(`
+        UPDATE student_gallery
+        SET like_count = (SELECT COUNT(*) FROM gallery_likes WHERE gallery_likes.gallery_id = student_gallery.id)
+        WHERE like_count IS NULL
+           OR like_count != (SELECT COUNT(*) FROM gallery_likes WHERE gallery_likes.gallery_id = student_gallery.id)
+      `).run();
+      db.prepare("INSERT INTO _migrations (name) VALUES ('gallery_like_count_normalized_2026_05_13')").run();
+      if (info && info.changes > 0) {
+        console.log(`[DB] student_gallery.like_count 정상화 마이그레이션 완료 (${info.changes}건)`);
+      } else {
+        console.log('[DB] student_gallery.like_count 정상화: 변경 없음');
+      }
+    }
+  } catch (e) { console.error('[DB] gallery like_count 정상화 실패:', e.message); }
 
   // 갤러리 이벤트 게시판
   db.exec(`
@@ -2400,16 +2490,17 @@ function initSchema() {
         ON featured_section_items(section_id, sort_order);
     `);
 
-    // 시드 4행 (idempotent — INSERT OR IGNORE)
+    // 시드 4행 — UNIQUE(key) 제약이 후속 마이그레이션에서 제거되므로, 직접 EXISTS 체크로 idempotent 보장
     const seedSection = db.prepare(`
-      INSERT OR IGNORE INTO featured_sections
+      INSERT INTO featured_sections
         (key, title, subtitle, layout, item_type, sort_order, is_active, fallback_enabled, max_items)
-      VALUES (?, ?, ?, ?, ?, ?, 1, 1, ?)
+      SELECT ?, ?, ?, ?, ?, ?, 1, 1, ?
+      WHERE NOT EXISTS (SELECT 1 FROM featured_sections WHERE key = ?)
     `);
-    seedSection.run('planning',  '2026학년도 1학기 추천 자료', '교과 연구회가 직접 고른 콘텐츠', 'card-grid',   'content', 10, 8);
-    seedSection.run('recommend', '맞춤 추천 콘텐츠',         '역할·키워드 기반 큐레이션',     'card-grid',   'content', 20, 8);
-    seedSection.run('channels',  '인기 채널',                 '구독자가 많은 우수 채널',        'channel-row', 'channel', 30, 8);
-    seedSection.run('new',       '새로 올라온 맞춤 자료',     '최근 등록된 신규 자료',          'card-grid',   'content', 40, 8);
+    seedSection.run('planning',  '2026학년도 1학기 추천 자료', '교과 연구회가 직접 고른 콘텐츠', 'card-grid',   'content', 10, 8, 'planning');
+    seedSection.run('recommend', '맞춤 추천 콘텐츠',         '역할·키워드 기반 큐레이션',     'card-grid',   'content', 20, 8, 'recommend');
+    seedSection.run('channels',  '인기 채널',                 '구독자가 많은 우수 채널',        'channel-row', 'channel', 30, 8, 'channels');
+    seedSection.run('new',       '새로 올라온 맞춤 자료',     '최근 등록된 신규 자료',          'card-grid',   'content', 40, 8, 'new');
   } catch (e) {
     console.warn('[DB] featured_sections 마이그레이션 경고:', e.message);
   }
@@ -2429,6 +2520,87 @@ function initSchema() {
     migrateFeaturedSectionsGradeSubject(db);
   } catch (e) {
     console.warn('[DB] featured_sections 학년·교과 마이그레이션 경고:', e.message);
+  }
+
+  // ============ users.deleted_at 컬럼 추가 (idempotent) — BUG-A-02 ============
+  // 사용자 소프트 삭제 지원. NULL이면 정상, 시각이 설정되면 삭제된 사용자.
+  // FK 제약 위반(클래스·과제·게시글 등 참조 다수)을 피하면서 활동 기록은 유지.
+  try { db.exec('ALTER TABLE users ADD COLUMN deleted_at DATETIME'); } catch(e) { /* 컬럼이 이미 있으면 무시 */ }
+
+  // ============ 알림장 기능 강화 (Backend Phase 1) — idempotent ============
+  // notices 컬럼 확장 + 리액션/북마크/댓글/임시저장 신규 테이블
+  try {
+    const noticeCols = db.prepare("PRAGMA table_info(notices)").all().map(c => c.name);
+    if (!noticeCols.includes('attachments')) {
+      db.exec("ALTER TABLE notices ADD COLUMN attachments TEXT"); // JSON 문자열로 저장
+    }
+    if (!noticeCols.includes('auto_date')) {
+      db.exec("ALTER TABLE notices ADD COLUMN auto_date INTEGER DEFAULT 0");
+    }
+    // theme 컬럼은 이미 생성 SQL에 포함되어 있음 (DEFAULT 'classic') — 안전 확인만
+    if (!noticeCols.includes('theme')) {
+      db.exec("ALTER TABLE notices ADD COLUMN theme TEXT DEFAULT 'classic'");
+    }
+  } catch (e) {
+    console.warn('[DB] notices 컬럼 확장 마이그레이션 경고:', e.message);
+  }
+
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS notice_reactions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        notice_id INTEGER NOT NULL,
+        user_id INTEGER NOT NULL,
+        kind TEXT NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (notice_id) REFERENCES notices(id) ON DELETE CASCADE,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+        UNIQUE(notice_id, user_id, kind)
+      );
+      CREATE INDEX IF NOT EXISTS idx_notice_reactions_notice ON notice_reactions(notice_id);
+
+      CREATE TABLE IF NOT EXISTS notice_bookmarks (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        notice_id INTEGER NOT NULL,
+        user_id INTEGER NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (notice_id) REFERENCES notices(id) ON DELETE CASCADE,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+        UNIQUE(notice_id, user_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_notice_bookmarks_user ON notice_bookmarks(user_id);
+
+      CREATE TABLE IF NOT EXISTS notice_comments (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        notice_id INTEGER NOT NULL,
+        user_id INTEGER NOT NULL,
+        parent_id INTEGER,
+        content TEXT NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        deleted_at DATETIME,
+        FOREIGN KEY (notice_id) REFERENCES notices(id) ON DELETE CASCADE,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+        FOREIGN KEY (parent_id) REFERENCES notice_comments(id) ON DELETE CASCADE
+      );
+      CREATE INDEX IF NOT EXISTS idx_notice_comments_notice_parent ON notice_comments(notice_id, parent_id);
+
+      CREATE TABLE IF NOT EXISTS notice_drafts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        class_id INTEGER NOT NULL,
+        user_id INTEGER NOT NULL,
+        title TEXT,
+        content TEXT,
+        theme TEXT DEFAULT 'classic',
+        attachments TEXT, -- JSON
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (class_id) REFERENCES classes(id) ON DELETE CASCADE,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+        UNIQUE(class_id, user_id)
+      );
+    `);
+  } catch (e) {
+    console.warn('[DB] 알림장 강화 테이블 생성 경고:', e.message);
   }
 
   // 관리자 기본 계정
@@ -2476,6 +2648,62 @@ function initSchema() {
       console.log('[DB] 학부모-자녀 매핑: parent1 → student2');
     }
   } catch (e) { /* 무시 */ }
+
+  // ============ 나도예술가 멀티미디어 + 콘테스트 관리 마이그레이션 (2026-05-13) ============
+  try {
+    // 1) student_gallery.body_text 컬럼 추가 (글 본문)
+    const sgCols3 = db.prepare("PRAGMA table_info(student_gallery)").all().map(c => c.name);
+    if (!sgCols3.includes('body_text')) {
+      db.exec("ALTER TABLE student_gallery ADD COLUMN body_text TEXT");
+    }
+
+    // 2) gallery_events.deleted_at 컬럼 추가 (soft delete)
+    const geCols2 = db.prepare("PRAGMA table_info(gallery_events)").all().map(c => c.name);
+    if (!geCols2.includes('deleted_at')) {
+      db.exec("ALTER TABLE gallery_events ADD COLUMN deleted_at DATETIME");
+    }
+
+    // 3) gallery_attachments 신규 테이블 (멀티미디어 첨부 정규화)
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS gallery_attachments (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        gallery_id INTEGER NOT NULL,
+        type TEXT NOT NULL CHECK (type IN ('image','video','audio','youtube')),
+        url TEXT NOT NULL,
+        mime TEXT,
+        file_name TEXT,
+        file_size INTEGER,
+        sort_order INTEGER DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (gallery_id) REFERENCES student_gallery(id) ON DELETE CASCADE
+      );
+      CREATE INDEX IF NOT EXISTS idx_gallery_attachments_gid ON gallery_attachments(gallery_id, sort_order);
+      CREATE INDEX IF NOT EXISTS idx_gallery_attachments_type ON gallery_attachments(type);
+    `);
+
+    // 4) 기존 image_url 데이터 이주 (1회 실행)
+    db.exec(`CREATE TABLE IF NOT EXISTS _migrations (name TEXT PRIMARY KEY, applied_at TEXT DEFAULT (DATETIME('now')))`);
+    const migAttachDone = db.prepare("SELECT 1 FROM _migrations WHERE name = 'gallery_attachments_seed_from_image_url_2026_05_13'").get();
+    if (!migAttachDone) {
+      const info = db.prepare(`
+        INSERT INTO gallery_attachments (gallery_id, type, url, sort_order)
+        SELECT g.id, 'image', g.image_url, 0
+        FROM student_gallery g
+        WHERE g.image_url IS NOT NULL
+          AND g.image_url != ''
+          AND g.image_url != '/images/placeholder.png'
+          AND NOT EXISTS (
+            SELECT 1 FROM gallery_attachments a WHERE a.gallery_id = g.id
+          )
+      `).run();
+      db.prepare("INSERT INTO _migrations (name) VALUES ('gallery_attachments_seed_from_image_url_2026_05_13')").run();
+      if (info && info.changes > 0) {
+        console.log(`[DB] gallery_attachments 기존 이미지 이주: ${info.changes}건`);
+      } else {
+        console.log('[DB] gallery_attachments 기존 이미지 이주: 대상 없음');
+      }
+    }
+  } catch (e) { console.error('[DB] 갤러리 멀티미디어 마이그레이션 실패:', e.message); }
 }
 
 function seedDummyData(db) {
@@ -2535,9 +2763,34 @@ function seedDummyData(db) {
 
   // 알림장 시딩
   const insertNotice = db.prepare('INSERT INTO notices (class_id, author_id, title, content, is_pinned) VALUES (1, ?, ?, ?, ?)');
-  insertNotice.run(teacherId, '내일 현장학습 안내', '내일 오전 9시까지 학교 운동장에 집합합니다.\n\n준비물: 도시락, 물통, 모자, 필기도구\n복장: 체육복\n\n우천 시 일정이 변경될 수 있습니다.', 1);
-  insertNotice.run(teacherId, '3월 독서기록장 제출 안내', '3월 독서기록장을 25일(화)까지 제출해 주세요.\n최소 2권 이상의 독서 기록이 필요합니다.', 0);
-  insertNotice.run(teacherId, '수학 보충학습 안내', '분수 단원 보충학습이 필요한 학생은 방과후 수학교실에 참가해 주세요.\n일시: 매주 화, 목 15:00~16:00', 0);
+  const n1 = insertNotice.run(teacherId, '내일 현장학습 안내', '내일 오전 9시까지 학교 운동장에 집합합니다.\n\n준비물: 도시락, 물통, 모자, 필기도구\n복장: 체육복\n\n우천 시 일정이 변경될 수 있습니다.', 1);
+  const n2 = insertNotice.run(teacherId, '3월 독서기록장 제출 안내', '3월 독서기록장을 25일(화)까지 제출해 주세요.\n최소 2권 이상의 독서 기록이 필요합니다.', 0);
+  const n3 = insertNotice.run(teacherId, '수학 보충학습 안내', '분수 단원 보충학습이 필요한 학생은 방과후 수학교실에 참가해 주세요.\n일시: 매주 화, 목 15:00~16:00', 0);
+
+  // 알림장 리액션/댓글 더미 시딩 (Backend Phase 1 — idempotent: 시드는 최초 1회만 실행됨)
+  try {
+    const insertReact = db.prepare('INSERT OR IGNORE INTO notice_reactions (notice_id, user_id, kind) VALUES (?, ?, ?)');
+    const insertComment = db.prepare('INSERT INTO notice_comments (notice_id, user_id, parent_id, content) VALUES (?, ?, ?, ?)');
+    // 현장학습 안내: 학생들이 다양한 리액션 + 댓글
+    insertReact.run(n1.lastInsertRowid, student1Id, 'check');
+    insertReact.run(n1.lastInsertRowid, student1Id, 'like');
+    insertReact.run(n1.lastInsertRowid, student2Id, 'check');
+    insertReact.run(n1.lastInsertRowid, student2Id, 'love');
+    const cmt1 = insertComment.run(n1.lastInsertRowid, student1Id, null, '도시락은 김밥으로 준비할게요!');
+    insertComment.run(n1.lastInsertRowid, teacherId, cmt1.lastInsertRowid, '좋아요. 도시락 잘 챙겨오세요.');
+    insertComment.run(n1.lastInsertRowid, student2Id, null, '우천 시 일정 변경되면 미리 알려주세요.');
+
+    // 독서기록장: 확인 표시 + 1댓글
+    insertReact.run(n2.lastInsertRowid, student1Id, 'check');
+    insertReact.run(n2.lastInsertRowid, student2Id, 'check');
+    insertComment.run(n2.lastInsertRowid, student1Id, null, '벌써 3권 읽었어요!');
+
+    // 수학 보충학습: 좋아요 + 북마크 1건
+    insertReact.run(n3.lastInsertRowid, student1Id, 'like');
+    db.prepare('INSERT OR IGNORE INTO notice_bookmarks (notice_id, user_id) VALUES (?, ?)').run(n3.lastInsertRowid, student1Id);
+  } catch (e) {
+    console.warn('[DB] 알림장 리액션/댓글 시딩 경고:', e.message);
+  }
 
   // 게시판 시딩
   const insertPost = db.prepare('INSERT INTO posts (class_id, author_id, title, content, image_url, category) VALUES (1, ?, ?, ?, ?, ?)');
@@ -2574,62 +2827,16 @@ function seedDummyData(db) {
 
   // 채움콘텐츠: 더미 데이터 없음 (사용자가 직접 등록)
 
-  // === AI 맞춤학습 더미 데이터 ===
-  const mapNodes = [
-    // 초4 수학
-    { node_id: 'M-E4-1-01', subject: '수학', grade_level: '초', grade: 4, semester: 1, area: '수와 연산', unit_name: '큰 수', lesson_name: '만 단위의 수', achievement_code: '[4수01-01]', node_level: 2, sort_order: 1 },
-    { node_id: 'M-E4-1-02', subject: '수학', grade_level: '초', grade: 4, semester: 1, area: '수와 연산', unit_name: '큰 수', lesson_name: '억과 조', achievement_code: '[4수01-02]', node_level: 2, sort_order: 2 },
-    { node_id: 'M-E4-1-03', subject: '수학', grade_level: '초', grade: 4, semester: 1, area: '수와 연산', unit_name: '곱셈과 나눗셈', lesson_name: '세 자리 수의 곱셈', achievement_code: '[4수01-03]', node_level: 2, sort_order: 3 },
-    { node_id: 'M-E4-1-04', subject: '수학', grade_level: '초', grade: 4, semester: 1, area: '수와 연산', unit_name: '곱셈과 나눗셈', lesson_name: '세 자리 수의 나눗셈', achievement_code: '[4수01-04]', node_level: 2, sort_order: 4 },
-    { node_id: 'M-E4-1-05', subject: '수학', grade_level: '초', grade: 4, semester: 1, area: '도형', unit_name: '각도', lesson_name: '각도의 이해', achievement_code: '[4수02-01]', node_level: 2, sort_order: 5 },
-    { node_id: 'M-E4-1-06', subject: '수학', grade_level: '초', grade: 4, semester: 1, area: '도형', unit_name: '각도', lesson_name: '각도의 합과 차', achievement_code: '[4수02-02]', node_level: 2, sort_order: 6 },
-    { node_id: 'M-E4-1-07', subject: '수학', grade_level: '초', grade: 4, semester: 1, area: '규칙성', unit_name: '규칙 찾기', lesson_name: '수의 배열에서 규칙 찾기', achievement_code: '[4수05-01]', node_level: 2, sort_order: 7 },
-    // 초5 수학
-    { node_id: 'M-E5-1-01', subject: '수학', grade_level: '초', grade: 5, semester: 1, area: '수와 연산', unit_name: '자연수의 혼합 계산', lesson_name: '덧셈과 뺄셈의 혼합', achievement_code: '[5수01-01]', node_level: 2, sort_order: 1 },
-    { node_id: 'M-E5-1-02', subject: '수학', grade_level: '초', grade: 5, semester: 1, area: '수와 연산', unit_name: '약수와 배수', lesson_name: '약수와 배수의 관계', achievement_code: '[5수01-02]', node_level: 2, sort_order: 2 },
-    { node_id: 'M-E5-1-03', subject: '수학', grade_level: '초', grade: 5, semester: 1, area: '수와 연산', unit_name: '약수와 배수', lesson_name: '최대공약수와 최소공배수', achievement_code: '[5수01-03]', node_level: 2, sort_order: 3 },
-    { node_id: 'M-E5-1-04', subject: '수학', grade_level: '초', grade: 5, semester: 1, area: '수와 연산', unit_name: '분수의 덧셈과 뺄셈', lesson_name: '약분과 통분', achievement_code: '[5수01-04]', node_level: 2, sort_order: 4 },
-    { node_id: 'M-E5-1-05', subject: '수학', grade_level: '초', grade: 5, semester: 1, area: '도형', unit_name: '다각형의 넓이', lesson_name: '평행사변형의 넓이', achievement_code: '[5수02-01]', node_level: 2, sort_order: 5 },
-    // 초6 수학
-    { node_id: 'M-E6-1-01', subject: '수학', grade_level: '초', grade: 6, semester: 1, area: '수와 연산', unit_name: '분수의 나눗셈', lesson_name: '분수÷자연수', achievement_code: '[6수01-01]', node_level: 2, sort_order: 1 },
-    { node_id: 'M-E6-1-02', subject: '수학', grade_level: '초', grade: 6, semester: 1, area: '수와 연산', unit_name: '소수의 나눗셈', lesson_name: '소수÷자연수', achievement_code: '[6수01-02]', node_level: 2, sort_order: 2 },
-    { node_id: 'M-E6-1-03', subject: '수학', grade_level: '초', grade: 6, semester: 1, area: '도형', unit_name: '원의 넓이', lesson_name: '원주율과 원의 넓이', achievement_code: '[6수02-01]', node_level: 2, sort_order: 3 },
-    { node_id: 'M-E6-1-04', subject: '수학', grade_level: '초', grade: 6, semester: 1, area: '측정', unit_name: '비와 비율', lesson_name: '비의 개념', achievement_code: '[6수04-01]', node_level: 2, sort_order: 4 },
-    { node_id: 'M-E6-1-05', subject: '수학', grade_level: '초', grade: 6, semester: 1, area: '측정', unit_name: '비와 비율', lesson_name: '백분율', achievement_code: '[6수04-02]', node_level: 2, sort_order: 5 },
-    // 단원 레벨 노드
-    { node_id: 'M-E4-1-U01', subject: '수학', grade_level: '초', grade: 4, semester: 1, area: '수와 연산', unit_name: '큰 수', lesson_name: null, achievement_code: null, node_level: 1, sort_order: 0 },
-    { node_id: 'M-E4-1-U02', subject: '수학', grade_level: '초', grade: 4, semester: 1, area: '수와 연산', unit_name: '곱셈과 나눗셈', lesson_name: null, achievement_code: null, node_level: 1, sort_order: 0 },
-    { node_id: 'M-E5-1-U01', subject: '수학', grade_level: '초', grade: 5, semester: 1, area: '수와 연산', unit_name: '자연수의 혼합 계산', lesson_name: null, achievement_code: null, node_level: 1, sort_order: 0 },
-  ];
-
-  const insertNode = db.prepare(`
-    INSERT OR IGNORE INTO learning_map_nodes (node_id, subject, grade_level, grade, semester, area, unit_name, lesson_name, achievement_code, achievement_text, node_level, parent_node_id, sort_order)
-    VALUES (@node_id, @subject, @grade_level, @grade, @semester, @area, @unit_name, @lesson_name, @achievement_code, @achievement_text, @node_level, @parent_node_id, @sort_order)
-  `);
-  for (const node of mapNodes) {
-    insertNode.run({ ...node, achievement_text: null, parent_node_id: null });
-  }
-
-  // 노드 간 선후관계 (간선)
-  const edges = [
-    { from: 'M-E4-1-01', to: 'M-E4-1-02' },
-    { from: 'M-E4-1-02', to: 'M-E4-1-03' },
-    { from: 'M-E4-1-03', to: 'M-E4-1-04' },
-    { from: 'M-E4-1-04', to: 'M-E5-1-01' },
-    { from: 'M-E4-1-05', to: 'M-E4-1-06' },
-    { from: 'M-E5-1-01', to: 'M-E5-1-02' },
-    { from: 'M-E5-1-02', to: 'M-E5-1-03' },
-    { from: 'M-E5-1-03', to: 'M-E5-1-04' },
-    { from: 'M-E5-1-04', to: 'M-E6-1-01' },
-    { from: 'M-E5-1-05', to: 'M-E6-1-03' },
-    { from: 'M-E6-1-01', to: 'M-E6-1-02' },
-    { from: 'M-E6-1-04', to: 'M-E6-1-05' },
-    { from: 'M-E4-1-03', to: 'M-E5-1-02' },
-    { from: 'M-E5-1-04', to: 'M-E6-1-01' },
-    { from: 'M-E4-1-06', to: 'M-E5-1-05' },
-  ];
-  const insertEdge = db.prepare('INSERT OR IGNORE INTO learning_map_edges (from_node_id, to_node_id) VALUES (?, ?)');
-  for (const e of edges) { insertEdge.run(e.from, e.to); }
+  // === AI 맞춤학습 학습맵 노드/엣지 ===
+  // ⚠ 학습맵 노드(`learning_map_nodes`)와 엣지(`learning_map_edges`)는 더 이상 schema.js 에서 시드하지 않는다.
+  // 진실의 원천은 **공식 엑셀 계통도**(`통합_학습맵_계통도_연결_완성.xlsx`) 이며,
+  // 아래 두 경로로 일괄 임포트한다:
+  //   1) 노드/엣지 일괄: 관리자 UI → 학습맵 엑셀 업로드 (routes/admin.js)
+  //   2) 엣지 재시드(공식 계통도 기준): `node scripts/import-learning-map-edges.mjs --truncate`
+  //
+  // 과거에 여기에 있던 `M-E4-1-01` 류의 가짜 ID 더미 18개(노드 21 + 엣지 15)는
+  // 엑셀 표준(`E2MATA01B01C01D01` 등)과 충돌하므로 2026-05-12 자로 제거되었다.
+  // 참고: git blame schema.js (이 영역) → 이전 커밋의 더미 정의 확인 가능.
 
   // 오늘의 학습 세트 더미 데이터
   db.exec(`
@@ -2672,6 +2879,26 @@ function seedDummyData(db) {
   insertCareer.run(3, student2Id, '직업탐구', '수의사가 하는 일', '동물병원에서 수의사가 하는 일을 조사했습니다.', '동물/의료', '아픈 동물을 치료해주는 일을 하고 싶어요.', '2026-03-07');
   // student3
   if (student3Id) insertCareer.run(4, student3Id, '체험활동', '요리 체험학습', '제과제빵 체험을 했습니다.', '요리/식품', '빵 만들기가 정말 재미있었어요!', '2026-03-10');
+
+  // === 수업 셀프체크 시드 (이해도·집중도) — RFP SFR-019 ===
+  // 클래스 1의 published 수업에 student1, student2가 응답한 것으로 시드
+  try {
+    const publishedLessons = db.prepare(
+      "SELECT id FROM lessons WHERE class_id = 1 AND status = 'published' ORDER BY id"
+    ).all();
+    const insertSc = db.prepare(`
+      INSERT OR IGNORE INTO lesson_self_check (lesson_id, user_id, class_id, understanding, focus, comment)
+      VALUES (?, ?, 1, ?, ?, ?)
+    `);
+    // student1: 두 개 수업에 응답 (이해도 4/5, 집중도 5/4)
+    if (publishedLessons[0]) insertSc.run(publishedLessons[0].id, student1Id, 4, 5, '리듬 부분이 흥미로웠어요.');
+    if (publishedLessons[1]) insertSc.run(publishedLessons[1].id, student1Id, 5, 4, '쉬웠어요!');
+    // student2: 첫 수업에만 응답 (이해도 3, 집중도 3)
+    if (publishedLessons[0]) insertSc.run(publishedLessons[0].id, student2Id, 3, 3, '보통이었습니다.');
+    if (publishedLessons[1]) insertSc.run(publishedLessons[1].id, student2Id, 2, 3, '조금 어려웠어요.');
+    // student3: 첫 수업에 응답 (이해도 5, 집중도 5)
+    if (student3Id && publishedLessons[0]) insertSc.run(publishedLessons[0].id, student3Id, 5, 5, '재미있었어요!');
+  } catch (e) { /* idempotent: 이미 시드된 경우 무시 */ }
 
   console.log('[DB] 더미 클래스 및 교육 데이터 시딩 완료');
 }

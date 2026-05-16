@@ -8,6 +8,9 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
   <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+  <!-- Phase 2: 검색 인터페이스 공통 컴포넌트 (window.DacheumSearch) + std-smart-search -->
+  <script defer src="/js/components/std-smart-search.js"></script>
+  <script defer src="/js/components/dacheum-search.js"></script>
   <style>
     :root {
       --primary: #0066FF;
@@ -348,19 +351,105 @@
     .toast.success { background: #10b981; border-color: #059669; }
     @keyframes toastIn { from { opacity:0; transform:translateY(20px); } to { opacity:1; transform:translateY(0); } }
 
-    /* ===== Completion Overlay ===== */
-    .completion-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 200; display: flex; align-items: center; justify-content: center; opacity: 0; visibility: hidden; transition: all .3s; }
+    /* ===== Completion Overlay (v2: 2-step + sticky CTA + light card) ===== */
+    .completion-overlay {
+      position: fixed; inset: 0; background: rgba(15,23,42,0.55);
+      z-index: 10000; display: flex; align-items: center; justify-content: center;
+      opacity: 0; visibility: hidden; transition: opacity .25s ease, visibility .25s ease;
+      padding: 24px 16px;
+    }
     .completion-overlay.show { opacity: 1; visibility: visible; }
-    .completion-card { background: #1e293b; border-radius: 20px; padding: 40px; text-align: center; max-width: 440px; border: 1px solid rgba(255,255,255,0.1); }
-    .completion-icon { font-size: 64px; margin-bottom: 16px; }
-    .completion-title { font-size: 20px; font-weight: 700; margin-bottom: 8px; }
-    .completion-desc { font-size: 14px; color: #94a3b8; margin-bottom: 12px; }
-    .completion-stats { display: grid; grid-template-columns: repeat(2,1fr); gap: 12px; margin-bottom: 24px; text-align: center; }
-    .completion-stat { background: rgba(255,255,255,0.05); border-radius: 10px; padding: 12px; }
-    .completion-stat-value { font-size: 20px; font-weight: 700; color: #3b82f6; }
-    .completion-stat-label { font-size: 11px; color: #64748b; margin-top: 4px; }
-    .completion-btn { padding: 12px 32px; background: #3b82f6; color: #fff; border: none; border-radius: 10px; font-size: 14px; font-weight: 600; cursor: pointer; font-family: inherit; }
-    .completion-btn:hover { background: #2563eb; }
+    /* v2 카드: 라이트 단일 카드 + sticky CTA */
+    .completion-card-v2 {
+      background: #fff; color: #1A1A2E;
+      border-radius: 20px; padding: 0;
+      width: 100%; max-width: 520px;
+      max-height: 90vh; min-height: 0;
+      display: flex; flex-direction: column;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+      overflow: hidden; position: relative;
+      animation: cardIn .25s ease;
+    }
+    .completion-card-v2 { max-width: 560px; }
+    @keyframes cardIn { from { opacity: 0; transform: translateY(8px) scale(.98); } to { opacity: 1; transform: none; } }
+    /* v3: 통합 헤더(축하+통계) + 구분선 + 셀프체크 본문 */
+    .completion-header { text-align: center; padding: 8px 0 14px; }
+    .completion-header .completion-icon { font-size: 44px; margin-bottom: 6px; }
+    .completion-header .completion-title { font-size: 20px; font-weight: 800; color: #0f172a; margin-bottom: 4px; letter-spacing: -.01em; }
+    .completion-header .completion-desc { font-size: 14px; color: #475569; margin-bottom: 12px; line-height: 1.5; }
+    .section-divider {
+      height: 1px; background: #e5e7eb;
+      margin: 4px -28px 4px; /* 카드 좌우 padding 만큼 늘려 풀폭 구분선 */
+    }
+    /* 우상단 닫기 */
+    .overlay-close {
+      position: absolute; top: 14px; right: 16px;
+      width: 36px; height: 36px; border-radius: 50%;
+      background: rgba(15,23,42,0.04); color: #475569;
+      border: none; cursor: pointer;
+      font-size: 22px; line-height: 1; font-family: inherit;
+      display: flex; align-items: center; justify-content: center;
+      transition: background .15s, color .15s;
+      z-index: 5;
+    }
+    .overlay-close:hover { background: rgba(15,23,42,0.1); color: #0f172a; }
+    .overlay-close:focus { outline: 3px solid #2563eb; outline-offset: 2px; }
+    /* 단계 컨테이너 */
+    .completion-step {
+      display: flex; flex-direction: column; flex: 1; min-height: 0;
+    }
+    .completion-step[hidden] { display: none; }
+    /* 스크롤 영역 */
+    .step-body {
+      overflow-y: auto; padding: 28px 28px 12px; flex: 1; min-height: 0;
+      text-align: left;
+    }
+    .step-body::-webkit-scrollbar { width: 6px; }
+    .step-body::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+    /* (구) step별 분기 — v3 통합 화면에서는 사용 안 함. .completion-header가 헤더 스타일 담당 */
+    .completion-icon { font-size: 44px; line-height: 1; }
+    .completion-title { font-size: 20px; font-weight: 800; color: #0f172a; letter-spacing: -.01em; }
+    .completion-desc { font-size: 14px; color: #475569; line-height: 1.5; }
+    /* 통계 칩 (가로 1줄, 자동 줄바꿈) */
+    .completion-chips {
+      display: flex; flex-wrap: wrap; gap: 8px; justify-content: center;
+      margin-bottom: 8px;
+    }
+    .completion-chip {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 6px 12px; background: #f3f4f6; color: #1f2937;
+      border-radius: 99px; font-size: 13px; font-weight: 500;
+      border: 1px solid #e5e7eb; white-space: nowrap;
+    }
+    .completion-chip .chip-icon { font-size: 14px; line-height: 1; }
+    .completion-chip.chip-accent { background: #dbeafe; color: #1d4ed8; border-color: #bfdbfe; }
+    /* sticky CTA (단계 공통) */
+    .sticky-cta {
+      position: sticky; bottom: 0; left: 0; right: 0;
+      background: #fff; border-top: 1px solid #e5e7eb;
+      padding: 14px 24px; display: flex; gap: 10px; justify-content: flex-end;
+      z-index: 2;
+    }
+    .sticky-cta .btn-primary,
+    .sticky-cta .btn-secondary {
+      padding: 12px 22px; font-size: 16px; font-weight: 600;
+      border-radius: 10px; cursor: pointer; font-family: inherit;
+      border: 1.5px solid transparent; transition: all .15s;
+      min-height: 44px;
+    }
+    .sticky-cta .btn-primary { background: #2563eb; color: #fff; }
+    .sticky-cta .btn-primary:hover:not(:disabled) { background: #1d4ed8; }
+    .sticky-cta .btn-primary:disabled { background: #cbd5e1; cursor: not-allowed; opacity: .7; }
+    .sticky-cta .btn-secondary { background: #f3f4f6; color: #374151; border-color: #e5e7eb; }
+    .sticky-cta .btn-secondary:hover { background: #e5e7eb; }
+    /* step2 돌아가기 행 */
+    .step-back-row { padding: 14px 20px 0; }
+    .step-back {
+      background: none; border: none; padding: 6px 8px;
+      color: #2563eb; font-size: 14px; font-weight: 600;
+      cursor: pointer; font-family: inherit; border-radius: 6px;
+    }
+    .step-back:hover { background: #eff6ff; }
 
     /* ===== Dark/Light mode ===== */
     body.light-mode { background: #f1f5f9; color: #1e293b; }
@@ -417,6 +506,96 @@
     body.font-small { font-size: 14px; }
     body.font-medium { font-size: 16px; }
     body.font-large { font-size: 18px; }
+
+    /* ===== Self-Check (step2 안 — 카드 외곽 없이 본문 직접 배치) ===== */
+    .selfcheck-block { text-align: left; }
+    .selfcheck-title { font-size: 20px; font-weight: 700; color: #0f172a; margin-bottom: 4px; }
+    .selfcheck-subtitle { font-size: 14px; color: #6b7280; margin-bottom: 18px; line-height: 1.5; }
+    .selfcheck-question { font-size: 16px; font-weight: 600; color: #0f172a; margin: 18px 0 12px; }
+    .selfcheck-options {
+      display: flex; justify-content: space-between; gap: 8px; flex-wrap: nowrap;
+    }
+    .sc-opt {
+      flex: 1 1 0; min-width: 0;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: 4px;
+      width: 88px; height: 88px;
+      background: #f9fafb; border: 2px solid #e5e7eb; border-radius: 14px;
+      cursor: pointer; transition: all 0.15s ease;
+      padding: 4px 2px; user-select: none;
+      font-family: inherit;
+    }
+    .sc-opt .sc-emoji { font-size: 32px; line-height: 1; }
+    .sc-opt .sc-label { font-size: 12px; color: #4b5563; font-weight: 500; text-align: center; line-height: 1.2; }
+    .sc-opt:hover { border-color: #9ca3af; transform: translateY(-2px); }
+    .sc-opt:focus { outline: 3px solid #2563eb; outline-offset: 2px; }
+    .sc-opt.sel-1 { background: #fee2e2; border-color: #ef4444; }
+    .sc-opt.sel-1 .sc-label { color: #b91c1c; font-weight: 600; }
+    .sc-opt.sel-2 { background: #fef3c7; border-color: #f59e0b; }
+    .sc-opt.sel-2 .sc-label { color: #b45309; font-weight: 600; }
+    .sc-opt.sel-3 { background: #fef9c3; border-color: #eab308; }
+    .sc-opt.sel-3 .sc-label { color: #a16207; font-weight: 600; }
+    .sc-opt.sel-4 { background: #dbeafe; border-color: #60a5fa; }
+    .sc-opt.sel-4 .sc-label { color: #1d4ed8; font-weight: 600; }
+    .sc-opt.sel-5 { background: #d1fae5; border-color: #10b981; }
+    .sc-opt.sel-5 .sc-label { color: #047857; font-weight: 600; }
+
+    .selfcheck-comment-wrap { margin-top: 18px; }
+    .selfcheck-comment-label { font-size: 14px; color: #374151; font-weight: 500; margin-bottom: 6px; display: block; }
+    .selfcheck-comment {
+      width: 100%; min-height: 60px; padding: 12px 14px;
+      font-size: 16px; font-family: inherit;
+      border: 1.5px solid #e5e7eb; border-radius: 8px;
+      resize: vertical; box-sizing: border-box; color: #1A1A2E; background: #fff;
+    }
+    .selfcheck-comment:focus { outline: none; border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37,99,235,0.12); }
+    .selfcheck-counter { font-size: 12px; color: #6b7280; text-align: right; margin-top: 4px; }
+
+    /* 읽기 전용 모드 (재진입 시) */
+    .selfcheck-readonly .sc-opt { cursor: default; opacity: 0.55; }
+    .selfcheck-readonly .sc-opt.is-selected { opacity: 1; }
+    .selfcheck-edit-link {
+      background: none; border: none; color: #2563eb; font-size: 14px;
+      font-weight: 600; cursor: pointer; padding: 6px 0; text-decoration: underline;
+      font-family: inherit;
+    }
+    .selfcheck-readonly-note { font-size: 13px; color: #6b7280; margin-top: 8px; }
+
+    /* 태블릿/모바일 분기 */
+    @media (max-width: 768px) {
+      .completion-card-v2,
+      .completion-card-v2[data-active-step="2"] { max-width: 100%; }
+      .step-body { padding: 22px 18px 12px; }
+      .sticky-cta { padding: 12px 18px; }
+      .sc-opt { width: auto; height: 72px; }
+      .sc-opt .sc-emoji { font-size: 26px; }
+      .sc-opt .sc-label { font-size: 11px; }
+      .selfcheck-question { font-size: 15px; }
+      .selfcheck-title { font-size: 18px; }
+    }
+    @media (max-width: 480px) {
+      .completion-overlay { padding: 12px 8px; }
+      .completion-card-v2 { border-radius: 16px; max-height: 94vh; }
+      .step-body { padding: 18px 14px 10px; }
+      .sticky-cta { padding: 10px 14px; gap: 8px; }
+      .sticky-cta .btn-primary,
+      .sticky-cta .btn-secondary { padding: 11px 14px; font-size: 15px; min-height: 44px; flex: 1; justify-content: center; display: inline-flex; align-items: center; }
+      .completion-icon { font-size: 44px; }
+      .completion-title { font-size: 20px; }
+      .completion-chip { font-size: 12px; padding: 5px 10px; }
+      /* 5단계 가로 유지, 줄어들도록 */
+      .selfcheck-options { gap: 6px; }
+      .sc-opt {
+        flex: 0 0 calc(20% - 6px); min-width: 56px;
+        height: 64px; padding: 4px 2px;
+      }
+      .sc-opt .sc-emoji { font-size: 22px; }
+      .sc-opt .sc-label { font-size: 10px; }
+      .overlay-close { top: 10px; right: 10px; width: 32px; height: 32px; font-size: 20px; }
+    }
+    @media (max-width: 360px) {
+      #selfcheckSlot .selfcheck-options { overflow-x: auto; padding-bottom: 4px; }
+    }
 
     @media (max-width: 768px) {
       .viewer-container { flex-direction: column; }
@@ -611,14 +790,32 @@
     </div>
   </div>
 
-  <!-- Completion Overlay -->
-  <div class="completion-overlay" id="completionOverlay">
-    <div class="completion-card">
-      <div class="completion-icon">🎉</div>
-      <div class="completion-title">수업 완료!</div>
-      <div class="completion-desc" id="completionDesc">모든 학습 콘텐츠를 완료했습니다.</div>
-      <div class="completion-stats" id="completionStats"></div>
-      <button class="completion-btn" onclick="closeCompletion()">확인</button>
+  <!-- Completion Overlay (v3: single unified card — 통계 + 셀프체크 한 화면) -->
+  <div class="completion-overlay" id="completionOverlay" role="dialog" aria-modal="true" aria-labelledby="completionTitleText">
+    <div class="completion-card-v2" id="completionCardV2">
+      <button class="overlay-close" type="button" onclick="closeCompletion()" aria-label="닫기" title="닫기">×</button>
+
+      <div class="step-body">
+        <!-- 상단: 완료 축하 + 통계 칩 (요약 영역) -->
+        <div class="completion-header">
+          <div class="completion-icon" aria-hidden="true">🎉</div>
+          <div class="completion-title" id="completionTitleText">수업 완료!</div>
+          <div class="completion-desc" id="completionDesc">모든 학습 콘텐츠를 완료했습니다.</div>
+          <div class="completion-chips" id="completionChips" aria-label="수업 결과 요약"></div>
+        </div>
+
+        <!-- 구분선 -->
+        <div class="section-divider" aria-hidden="true"></div>
+
+        <!-- 하단: 셀프체크 본문 -->
+        <div id="selfcheckSlot"></div>
+      </div>
+
+      <!-- 단일 sticky CTA — 셀프체크 상태에 따라 동적 갱신 -->
+      <div class="sticky-cta" id="completionStickyCta">
+        <button type="button" class="btn-secondary" id="completionLaterBtn" onclick="onSelfCheckLater()">나중에</button>
+        <button type="button" class="btn-primary" id="selfcheckSubmitBtn" disabled onclick="submitSelfCheck()">응답 제출 →</button>
+      </div>
     </div>
   </div>
 
@@ -847,6 +1044,9 @@
         initCanvas();
         const firstUndone = contents.findIndex(c => !progressMap[c.id]?.completed);
         selectContent(firstUndone >= 0 ? firstUndone : 0);
+
+        // 셀프체크 초기화: pending 재전송 + 본인 응답 프리페치 (학생 한정, 비동기)
+        initSelfCheckOnLoad().catch(() => {});
       } catch (err) {
         console.error('Load error:', err);
         showToast('수업을 불러올 수 없습니다');
@@ -1295,17 +1495,25 @@
     }
 
     // ============================================================
-    // Completion
+    // Completion v2 (2-step: 완료 축하 → 셀프체크)
     // ============================================================
-    function showCompletionOverlay() {
+    function escHtmlSafe(s) {
+      try { return (typeof escHtml === 'function') ? escHtml(String(s)) : String(s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
+      catch(e) { return String(s); }
+    }
+
+    function computeCompletionStats() {
+      // 인자 우선, 없으면 전역 contents/quizAnswers에서 계산
       const total = contents.length;
       const quizzes = contents.filter(c => c.content_type === 'quiz' || c._quiz);
       let correctCount = 0;
+      let scoreDenom = 0;
       quizzes.forEach(c => {
         const quiz = c._quiz || {};
         const saved = quizAnswers[c.id];
         if (!saved || !saved.submitted) return;
-        if (quiz.questionType === 'essay') return;
+        if (quiz.questionType === 'essay') return; // 서술형 점수 제외
+        scoreDenom++;
         if (quiz.questionType === 'subjective') {
           if (saved.answer && quiz.answer && saved.answer.trim().toLowerCase() === String(quiz.answer).trim().toLowerCase()) correctCount++;
         } else {
@@ -1314,18 +1522,369 @@
           if (correct.length === userAns.length && correct.every(a => userAns.includes(a))) correctCount++;
         }
       });
-
-      document.getElementById('completionDesc').textContent = `${total}개 콘텐츠를 모두 학습 완료했습니다!`;
-      document.getElementById('completionStats').innerHTML = `
-        <div class="completion-stat"><div class="completion-stat-value">${total}</div><div class="completion-stat-label">전체 콘텐츠</div></div>
-        <div class="completion-stat"><div class="completion-stat-value">${quizzes.length > 0 ? Math.round((correctCount/quizzes.length)*100)+'%' : '-'}</div><div class="completion-stat-label">퀴즈 정답률</div></div>
-        <div class="completion-stat"><div class="completion-stat-value">${quizzes.filter(q => quizAnswers[q.id]?.submitted && (q._quiz?.questionType === 'essay')).length}</div><div class="completion-stat-label">서술형 답안</div></div>
-        <div class="completion-stat"><div class="completion-stat-value">-</div><div class="completion-stat-label">학습 시간</div></div>
-      `;
-      document.getElementById('completionOverlay').classList.add('show');
+      const essayCount = quizzes.filter(q => quizAnswers[q.id]?.submitted && (q._quiz?.questionType === 'essay')).length;
+      const quizScore = scoreDenom > 0 ? Math.round((correctCount / scoreDenom) * 100) : null;
+      return { contentCount: total, quizScore, essayCount, timeMinutes: null };
     }
 
-    function closeCompletion() { document.getElementById('completionOverlay').classList.remove('show'); }
+    function renderCompletionChips(stats) {
+      const el = document.getElementById('completionChips');
+      if (!el) return;
+      const chips = [];
+      if (stats.contentCount != null) chips.push({ icon: '📦', text: `${stats.contentCount}개 콘텐츠 완료`, accent: true });
+      if (stats.quizScore != null) chips.push({ icon: '✅', text: `정답률 ${stats.quizScore}%` });
+      if (stats.essayCount != null && stats.essayCount > 0) chips.push({ icon: '📝', text: `서술형 ${stats.essayCount}개` });
+      if (stats.timeMinutes != null && stats.timeMinutes > 0) chips.push({ icon: '⏱', text: `${stats.timeMinutes}분 학습` });
+      el.innerHTML = chips.map(c => `<span class="completion-chip${c.accent ? ' chip-accent' : ''}"><span class="chip-icon" aria-hidden="true">${c.icon}</span>${escHtmlSafe(c.text)}</span>`).join('');
+    }
+
+    /**
+     * 수업 완료 오버레이 표시
+     * @param {Object} [override] - 통계 인자 (없으면 자동 계산)
+     *   contentCount, quizScore, essayCount, timeMinutes
+     */
+    function showCompletionOverlay(override) {
+      const auto = computeCompletionStats();
+      const stats = Object.assign({}, auto, override || {});
+
+      const descEl = document.getElementById('completionDesc');
+      if (descEl) descEl.textContent = `${stats.contentCount}개 콘텐츠를 모두 학습 완료했습니다!`;
+      renderCompletionChips(stats);
+
+      document.getElementById('completionOverlay').classList.add('show');
+
+      // 셀프체크 카드는 학생일 때만 렌더 (renderSelfCheckCard 내부에서 분기)
+      if (canShowSelfCheck()) {
+        renderSelfCheckCard();
+      } else {
+        const slot = document.getElementById('selfcheckSlot');
+        if (slot) slot.innerHTML = '';
+        // 비학생: 셀프체크/구분선 영역 숨김 + sticky CTA를 "확인" 단독으로
+        const divider = document.querySelector('#completionOverlay .section-divider');
+        if (divider) divider.style.display = 'none';
+        renderCompletionStickyCta('confirm-only');
+      }
+
+      // 첫 포커스: 학생이면 첫 옵션, 아니면 확인 버튼
+      setTimeout(() => {
+        const target = canShowSelfCheck()
+          ? document.querySelector('#selfcheckSlot .sc-opt[data-kind="understanding"]')
+          : document.querySelector('#completionStickyCta .btn-primary');
+        try { target && target.focus(); } catch(e) {}
+      }, 50);
+    }
+
+    function closeCompletion() {
+      document.getElementById('completionOverlay').classList.remove('show');
+    }
+
+    // v3 호환: 외부 호출자가 있을 수 있어 noop 유지 (단일 화면이라 전환 불필요)
+    function goToSelfcheckStep() { /* v3: no-op (single screen) */ }
+    function goToCompletionStep() { /* v3: no-op (single screen) */ }
+
+    // ESC 핸들러: 단일 화면이므로 항상 닫기
+    document.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape') return;
+      const overlay = document.getElementById('completionOverlay');
+      if (!overlay || !overlay.classList.contains('show')) return;
+      closeCompletion();
+      e.preventDefault();
+    });
+
+    // ============================================================
+    // Self-Check (수업이해도 · 집중도 5단계 리커트) — RFP SFR-019
+    // ============================================================
+    const SELFCHECK_OPTIONS = {
+      understanding: [
+        { v: 1, emoji: '😣', label: '매우어려움' },
+        { v: 2, emoji: '😕', label: '어려움' },
+        { v: 3, emoji: '🙂', label: '보통' },
+        { v: 4, emoji: '😄', label: '쉬움' },
+        { v: 5, emoji: '🤩', label: '매우쉬움' }
+      ],
+      focus: [
+        { v: 1, emoji: '😴', label: '집중불가' },
+        { v: 2, emoji: '😪', label: '집중어려움' },
+        { v: 3, emoji: '🙂', label: '보통' },
+        { v: 4, emoji: '🎯', label: '집중' },
+        { v: 5, emoji: '🔥', label: '매우집중' }
+      ]
+    };
+    let selfCheckState = { understanding: null, focus: null, comment: '', existing: null, readonly: false };
+    const SELFCHECK_PENDING_KEY = () => `selfcheck-pending-${lessonId}`;
+
+    // 학생 전용. 개설자/편집/미리보기 모드에서는 렌더 안 함.
+    function canShowSelfCheck() {
+      if (isCreatorMode || isEditMode || isPreviewMode) return false;
+      if (!classId || !lessonId) return false;
+      // owner(교사 본인)도 제외
+      if (lessonData && currentUser && lessonData.teacher_id === currentUser.id) return false;
+      return true;
+    }
+
+    async function fetchSelfCheck() {
+      if (!canShowSelfCheck()) return null;
+      try {
+        const res = await fetch(`/api/lesson/${classId}/${lessonId}/self-check`, { credentials: 'same-origin' });
+        if (!res.ok) return null;
+        const json = await res.json();
+        if (json && json.success && json.record) return json.record;
+      } catch (e) { /* noop */ }
+      return null;
+    }
+
+    async function trySubmitPending() {
+      try {
+        const raw = localStorage.getItem(SELFCHECK_PENDING_KEY());
+        if (!raw) return;
+        const pending = JSON.parse(raw);
+        if (!pending || pending.understanding == null || pending.focus == null) {
+          localStorage.removeItem(SELFCHECK_PENDING_KEY());
+          return;
+        }
+        const res = await fetch(`/api/lesson/${classId}/${lessonId}/self-check`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          body: JSON.stringify({
+            understanding: pending.understanding,
+            focus: pending.focus,
+            comment: pending.comment || ''
+          })
+        });
+        if (res.ok) {
+          const json = await res.json();
+          if (json && json.success) {
+            localStorage.removeItem(SELFCHECK_PENDING_KEY());
+            showToast('이전 응답이 서버에 저장되었습니다 ✓', 'success');
+          }
+        }
+      } catch (e) { /* keep pending for next visit */ }
+    }
+
+    function buildOptionsHtml(kind, selected, readonly) {
+      return SELFCHECK_OPTIONS[kind].map(o => {
+        const isSel = selected === o.v;
+        const cls = isSel ? `sc-opt sel-${o.v} is-selected` : 'sc-opt';
+        return `<button type="button" class="${cls}" data-kind="${kind}" data-v="${o.v}"
+          ${readonly ? 'disabled aria-disabled="true"' : `onclick="selectSelfCheck('${kind}', ${o.v})" onkeydown="onSelfCheckKey(event, '${kind}', ${o.v})"`}>
+          <span class="sc-emoji">${o.emoji}</span>
+          <span class="sc-label">${o.label}</span>
+        </button>`;
+      }).join('');
+    }
+
+    // v3: 단일 sticky CTA 갱신 — 셀프체크 상태에 따라 버튼 구성 자동 전환
+    // mode 명시 시: 'confirm-only'(비학생/콘텐츠 없음). 미지정 시: 셀프체크 카드 상태로 자동 판단
+    function renderCompletionStickyCta(mode) {
+      const cta = document.getElementById('completionStickyCta');
+      if (!cta) return;
+      const slot = document.getElementById('selfcheckSlot');
+      const hasInput = !mode && slot && slot.querySelector('.selfcheck-block:not(.selfcheck-readonly)');
+      const hasReadonly = !mode && slot && slot.querySelector('.selfcheck-block.selfcheck-readonly');
+
+      if (hasInput) {
+        // 응답 입력 중 — 나중에 + 응답 제출
+        const canSubmit = (selfCheckState.understanding != null && selfCheckState.focus != null);
+        cta.innerHTML = `
+          <button type="button" class="btn-secondary" onclick="onSelfCheckLater()">나중에</button>
+          <button type="button" class="btn-primary" id="selfcheckSubmitBtn" ${canSubmit ? '' : 'disabled'} onclick="submitSelfCheck()">응답 제출 →</button>
+        `;
+      } else {
+        // readonly 또는 비학생/콘텐츠 없음 — 단일 "확인" 버튼
+        cta.innerHTML = `
+          <button type="button" class="btn-primary" onclick="closeCompletion()">확인</button>
+        `;
+      }
+    }
+    // 기존 함수명 호환 (renderSelfCheckCard 내부에서 호출)
+    function updateCompletionConfirmBtn() { renderCompletionStickyCta(); }
+
+    function renderSelfCheckCard() {
+      const slot = document.getElementById('selfcheckSlot');
+      if (!slot) return;
+      if (!canShowSelfCheck()) { slot.innerHTML = ''; updateCompletionConfirmBtn(); return; }
+
+      const existing = selfCheckState.existing;
+      // 읽기 전용 판정: 응답 있음 + 24h 경과
+      let readonly = false;
+      let editable24h = false;
+      if (existing) {
+        const created = new Date(existing.created_at || existing.createdAt || Date.now());
+        const ageHours = (Date.now() - created.getTime()) / (1000 * 60 * 60);
+        if (ageHours >= 24) { readonly = true; editable24h = false; }
+        else { readonly = true; editable24h = true; }
+        // state 채워두기 (수정 모드 전환 시 사용)
+        selfCheckState.understanding = existing.understanding;
+        selfCheckState.focus = existing.focus;
+        selfCheckState.comment = existing.comment || '';
+      }
+      // 수정 모드 토글 시 readonly=false (selfCheckState.readonly 강제)
+      if (selfCheckState.readonly === false && existing && editable24h) readonly = false;
+
+      const u = selfCheckState.understanding;
+      const f = selfCheckState.focus;
+      const c = selfCheckState.comment || '';
+
+      // step2 안 본문: 카드 외곽 없이 직접 배치
+      slot.innerHTML = `
+        <div class="selfcheck-block ${readonly ? 'selfcheck-readonly' : ''}" id="selfcheckCard">
+          <div class="selfcheck-title">📝 오늘의 수업, 어땠나요?</div>
+          <div class="selfcheck-subtitle">${readonly ? (editable24h ? '응답이 저장되었습니다. 24시간 이내에는 수정할 수 있어요.' : '응답이 통계에 반영되었습니다.') : '응답은 통계에만 사용되며, 개별 응답은 익명 처리됩니다.'}</div>
+
+          <div class="selfcheck-question">① 오늘 수업 내용을 얼마나 이해했나요?</div>
+          <div class="selfcheck-options" role="radiogroup" aria-label="수업이해도">
+            ${buildOptionsHtml('understanding', u, readonly)}
+          </div>
+
+          <div class="selfcheck-question">② 오늘 수업에 얼마나 집중했나요?</div>
+          <div class="selfcheck-options" role="radiogroup" aria-label="수업집중도">
+            ${buildOptionsHtml('focus', f, readonly)}
+          </div>
+
+          ${readonly ? `
+            ${c ? `<div class="selfcheck-comment-wrap"><span class="selfcheck-comment-label">💬 한마디</span>
+              <div style="padding:10px 14px;background:#f9fafb;border-radius:8px;font-size:15px;color:#1A1A2E;">${escHtmlSafe(c)}</div></div>` : ''}
+            <div class="selfcheck-comment-wrap" style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:18px;">
+              ${editable24h ? `<button type="button" class="selfcheck-edit-link" onclick="enterSelfCheckEdit()">수정</button>` : `<div class="selfcheck-readonly-note">응답이 통계에 반영되었습니다</div>`}
+            </div>
+          ` : `
+            <div class="selfcheck-comment-wrap">
+              <label class="selfcheck-comment-label" for="selfcheckComment">💬 한마디 (선택, 100자)</label>
+              <textarea id="selfcheckComment" class="selfcheck-comment" maxlength="100" placeholder="오늘 수업에 대한 짧은 한마디"
+                oninput="onSelfCheckCommentInput(event)">${escHtmlSafe(c)}</textarea>
+              <div class="selfcheck-counter"><span id="selfcheckCommentCount">${c.length}</span>/100</div>
+            </div>
+          `}
+        </div>
+      `;
+      updateCompletionConfirmBtn();
+    }
+
+    function selectSelfCheck(kind, v) {
+      selfCheckState[kind] = v;
+      // 활성 옵션 UI만 효율적으로 갱신
+      const card = document.getElementById('selfcheckCard');
+      if (!card) return;
+      card.querySelectorAll(`.sc-opt[data-kind="${kind}"]`).forEach(btn => {
+        const bv = Number(btn.getAttribute('data-v'));
+        btn.classList.remove('sel-1','sel-2','sel-3','sel-4','sel-5','is-selected');
+        if (bv === v) { btn.classList.add(`sel-${v}`, 'is-selected'); }
+      });
+      const submitBtn = document.getElementById('selfcheckSubmitBtn');
+      if (submitBtn) submitBtn.disabled = !(selfCheckState.understanding != null && selfCheckState.focus != null);
+    }
+
+    function onSelfCheckKey(e, kind, v) {
+      // 1~5 즉시 선택
+      if (e.key >= '1' && e.key <= '5') {
+        e.preventDefault();
+        selectSelfCheck(kind, Number(e.key));
+        const target = document.querySelector(`.sc-opt[data-kind="${kind}"][data-v="${e.key}"]`);
+        if (target) target.focus();
+        return;
+      }
+      // 좌우 화살표
+      if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+        e.preventDefault();
+        const dir = e.key === 'ArrowRight' ? 1 : -1;
+        let next = v + dir;
+        if (next < 1) next = 1; if (next > 5) next = 5;
+        const target = document.querySelector(`.sc-opt[data-kind="${kind}"][data-v="${next}"]`);
+        if (target) { target.focus(); }
+      }
+    }
+
+    function onSelfCheckCommentInput(e) {
+      const v = (e.target.value || '').slice(0, 100);
+      selfCheckState.comment = v;
+      const cnt = document.getElementById('selfcheckCommentCount');
+      if (cnt) cnt.textContent = v.length;
+    }
+
+    function onSelfCheckLater() {
+      // 응답 없이 닫기: completion overlay만 닫고 다음 진입 안내는 init 단계에서 처리
+      try { sessionStorage.setItem(`selfcheck-later-${lessonId}`, '1'); } catch(e) {}
+      closeCompletion();
+    }
+
+    function enterSelfCheckEdit() {
+      selfCheckState.readonly = false;
+      renderSelfCheckCard();
+    }
+
+    async function submitSelfCheck() {
+      const u = selfCheckState.understanding;
+      const f = selfCheckState.focus;
+      const comment = (selfCheckState.comment || '').slice(0, 100);
+      if (u == null || f == null) return;
+
+      const payload = { understanding: u, focus: f, comment };
+      const submitBtn = document.getElementById('selfcheckSubmitBtn');
+      if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = '저장 중...'; }
+
+      try {
+        const res = await fetch(`/api/lesson/${classId}/${lessonId}/self-check`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          body: JSON.stringify(payload)
+        });
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const json = await res.json();
+        if (!json || !json.success) throw new Error(json && json.message || '저장 실패');
+
+        // 성공: 읽기 전용으로 전환
+        selfCheckState.existing = json.record || { ...payload, created_at: new Date().toISOString() };
+        selfCheckState.readonly = true;
+        try { localStorage.removeItem(SELFCHECK_PENDING_KEY()); } catch(e) {}
+        showToast('응답이 저장되었습니다 ✓', 'success');
+        renderSelfCheckCard();
+      } catch (err) {
+        // 네트워크 또는 서버 실패 → localStorage 폴백
+        try {
+          localStorage.setItem(SELFCHECK_PENDING_KEY(), JSON.stringify({
+            understanding: u, focus: f, comment, createdAt: new Date().toISOString()
+          }));
+          showToast('이전 응답이 저장되었습니다. 다음 접속 시 재전송됩니다.', 'success');
+          // UI는 임시 읽기전용 처리 (서버 미반영 표시)
+          selfCheckState.existing = { understanding: u, focus: f, comment, created_at: new Date().toISOString(), _pending: true };
+          selfCheckState.readonly = true;
+          renderSelfCheckCard();
+        } catch (e2) {
+          showToast('저장에 실패했습니다. 잠시 후 다시 시도해 주세요.');
+          if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = '응답 제출 →'; }
+        }
+      }
+    }
+
+    // 페이지 진입 시: pending 재전송 + 기존 응답 프리페치
+    async function initSelfCheckOnLoad() {
+      if (!canShowSelfCheck()) return;
+      // 1) localStorage pending 재전송 시도
+      await trySubmitPending();
+      // 2) 본인 응답 조회 (성공 시 selfCheckState.existing 채우기)
+      const rec = await fetchSelfCheck();
+      if (rec) {
+        selfCheckState.existing = rec;
+        selfCheckState.readonly = true;
+      }
+      // 3) "나중에" 닫고 재진입 시 가벼운 안내 (1회)
+      try {
+        const later = sessionStorage.getItem(`selfcheck-later-${lessonId}`);
+        if (later && !rec) {
+          // 같은 세션에서는 중복 안내 방지 (sessionStorage 이므로 새 세션에만 노출)
+          sessionStorage.removeItem(`selfcheck-later-${lessonId}`);
+        } else if (!rec) {
+          // 첫 진입 후 응답 없음 → 안내 toast 1회
+          const k = `selfcheck-hint-${lessonId}`;
+          if (!sessionStorage.getItem(k)) {
+            // 너무 시끄럽지 않게 init 시점에는 띄우지 않고, 완료 오버레이에서 자연스럽게 노출
+            sessionStorage.setItem(k, '1');
+          }
+        }
+      } catch(e) {}
+    }
 
     // ============================================================
     // Sidebar Toggle
@@ -1595,6 +2154,8 @@
     // ============================================================
     let addContentSrc = 'public';
     let addContentType = '';
+    let _addSearchCtrl = null;
+    let _addSearchInited = false;
 
     function showAddButton() {
       if (!lessonData) return;
@@ -1624,6 +2185,7 @@
 
     function openAddContentModal() {
       document.getElementById('addContentOverlay').style.display = 'flex';
+      initAddContentSearch();
       searchAddContent();
     }
 
@@ -1631,16 +2193,56 @@
       document.getElementById('addContentOverlay').style.display = 'none';
     }
 
+    // Phase 2: DacheumSearch 공통 컴포넌트 마운트
+    function initAddContentSearch() {
+      if (_addSearchInited) return;
+      const host = document.getElementById('addContentSearchHost');
+      if (!host || !window.DacheumSearch) return;
+      _addSearchCtrl = window.DacheumSearch.mount(host, {
+        mode: 'content',
+        sources: ['public', 'my', 'saved'],
+        defaultSource: 'public',
+        typeFilters: ['video','document','image','quiz','exam','activity','package','recipe'],
+        enableStdSearch: true,
+        enableViewToggle: true,
+        showAdvanced: true,
+        legacyIds: false,
+        initialViewMode: addViewMode,
+        placeholder: '제목·키워드·저작자명으로 검색',
+        hooks: {
+          onSearch:         () => searchAddContent(),
+          onSourceChange:   (s) => { addContentSrc = s; searchAddContent(); },
+          onToggleType:     (t, checked, set) => {
+            // 컴포넌트 다중 선택 → 호스트는 단일 type 유지(첫번째 선택 또는 빈값)
+            addContentType = (Array.from(set)[0] || '');
+            searchAddContent();
+          },
+          onViewModeChange: (m) => { addViewMode = m; if (_addLastItems.length) renderAddItems(_addLastItems); }
+        }
+      });
+      _addSearchInited = true;
+      // std-smart-search 칩이 변경되면 자체적으로 change 이벤트를 발생시킴 → 안전을 위해 polling으로 다시 검색
+      try {
+        const ssEl = host.querySelector('std-smart-search');
+        if (ssEl) {
+          ssEl.addEventListener('change', () => {
+            try {
+              const codes = (ssEl.selectedCodes || ssEl.getSelected?.() || []).map(s => typeof s === 'string' ? s : s.code).filter(Boolean);
+              addSelectedStdCodes = codes;
+              searchAddContent();
+            } catch(_) {}
+          });
+        }
+      } catch(_) {}
+    }
+
     function switchAddSrc(btn, src) {
-      document.querySelectorAll('.add-src-tab').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
+      // Phase 2: 컴포넌트 탭을 통해 호출되지만, 레거시 onClick(있을 경우) 호환 유지
       addContentSrc = src;
       searchAddContent();
     }
 
     function filterAddType(btn, type) {
-      document.querySelectorAll('.add-type-btn').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
       addContentType = type;
       searchAddContent();
     }
@@ -1763,7 +2365,15 @@
     }
 
     async function searchAddContent() {
-      const keyword = document.getElementById('addSearchInput')?.value?.trim() || '';
+      // Phase 2: 키워드/소스/타입은 컴포넌트 상태가 단일 진실 — 폴백으로 기존 legacy input도 시도
+      let keyword = '';
+      if (_addSearchCtrl) {
+        const st = _addSearchCtrl.getState();
+        keyword = (st.keyword || '').trim();
+        addContentSrc = st.source || addContentSrc;
+      } else {
+        keyword = document.getElementById('addSearchInput')?.value?.trim() || '';
+      }
       const container = document.getElementById('addSearchResults');
       if (!container) return;
 
@@ -2717,37 +3327,10 @@
         <button onclick="closeAddContentModal()" style="background:none;border:none;font-size:20px;cursor:pointer;color:#9ca3af;padding:4px 8px;border-radius:6px;" onmouseenter="this.style.background='#f3f4f6'" onmouseleave="this.style.background=''">&times;</button>
       </div>
       <div style="padding:16px 24px;border-bottom:1px solid #f3f4f6;">
-        <!-- 소스 탭 -->
-        <div style="display:flex;gap:6px;margin-bottom:12px;">
-          <button class="add-src-tab active" onclick="switchAddSrc(this,'public')" style="padding:7px 16px;border:1.5px solid #e5e7eb;border-radius:8px;background:#3b82f6;color:#fff;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;border-color:#3b82f6;">공개콘텐츠</button>
-          <button class="add-src-tab" onclick="switchAddSrc(this,'my')" style="padding:7px 16px;border:1.5px solid #e5e7eb;border-radius:8px;background:#fff;color:#6b7280;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;">내자료</button>
-          <button class="add-src-tab" onclick="switchAddSrc(this,'saved')" style="padding:7px 16px;border:1.5px solid #e5e7eb;border-radius:8px;background:#fff;color:#6b7280;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;">담은자료</button>
-        </div>
-        <!-- 검색 영역: 유형필터 + 일반검색 + 성취기준 검색 -->
-        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-          <!-- 유형 필터 -->
-          <div style="display:flex;gap:4px;">
-            <button class="add-type-btn active" onclick="filterAddType(this,'')" style="padding:4px 10px;border:1px solid #e5e7eb;border-radius:6px;background:#374151;color:#fff;font-size:11px;cursor:pointer;font-family:inherit;">전체</button>
-            <button class="add-type-btn" onclick="filterAddType(this,'video')" style="padding:4px 10px;border:1px solid #e5e7eb;border-radius:6px;background:#fff;color:#6b7280;font-size:11px;cursor:pointer;font-family:inherit;">영상</button>
-            <button class="add-type-btn" onclick="filterAddType(this,'document')" style="padding:4px 10px;border:1px solid #e5e7eb;border-radius:6px;background:#fff;color:#6b7280;font-size:11px;cursor:pointer;font-family:inherit;">문서</button>
-            <button class="add-type-btn" onclick="filterAddType(this,'quiz')" style="padding:4px 10px;border:1px solid #e5e7eb;border-radius:6px;background:#fff;color:#6b7280;font-size:11px;cursor:pointer;font-family:inherit;">문항</button>
-            <button class="add-type-btn" onclick="filterAddType(this,'exam')" style="padding:4px 10px;border:1px solid #e5e7eb;border-radius:6px;background:#fff;color:#6b7280;font-size:11px;cursor:pointer;font-family:inherit;">평가지</button>
-            <button class="add-type-btn" onclick="filterAddType(this,'image')" style="padding:4px 10px;border:1px solid #e5e7eb;border-radius:6px;background:#fff;color:#6b7280;font-size:11px;cursor:pointer;font-family:inherit;">이미지</button>
-          </div>
-          <!-- 일반 검색 -->
-          <div style="flex:1;position:relative;min-width:200px;">
-            <input type="text" id="addSearchInput" placeholder="제목, 키워드, 저작자명 검색..." style="width:100%;padding:8px 14px 8px 34px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:13px;outline:none;font-family:inherit;" onfocus="this.style.borderColor='#3b82f6'" onblur="this.style.borderColor='#e5e7eb'" oninput="searchAddContent()">
-            <i class="fas fa-search" style="position:absolute;left:12px;top:10px;color:#d1d5db;font-size:12px;"></i>
-          </div>
-          <!-- 성취기준 검색 -->
-          <div style="flex:1;position:relative;min-width:200px;" id="addStdSearchWrap">
-            <input type="text" id="addStdSearchInput" placeholder="🎯 성취기준 검색 (학년, 교과, 키워드...)" style="width:100%;padding:8px 14px 8px 34px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:13px;outline:none;font-family:inherit;background:#eff6ff;" onfocus="this.style.borderColor='#6366f1';clearTimeout(window._addStdBlurTimer);" onblur="window._addStdBlurTimer=setTimeout(()=>{document.getElementById('addStdDropdown').style.display='none'},300)" oninput="clearTimeout(window._addStdBlurTimer);searchAddStandard(this.value)">
-            <i class="fas fa-graduation-cap" style="position:absolute;left:12px;top:10px;color:#818cf8;font-size:12px;"></i>
-            <div id="addStdDropdown" style="display:none;position:absolute;top:100%;left:0;right:0;background:#fff;border:1.5px solid #c7d2fe;border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.12);z-index:100;max-height:250px;overflow-y:auto;margin-top:4px;"></div>
-          </div>
-        </div>
-        <!-- 선택된 성취기준 태그 -->
-        <div id="addSelectedStds" style="display:none;margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;"></div>
+        <!-- Phase 2: DacheumSearch 공통 컴포넌트 마운트 호스트 -->
+        <div id="addContentSearchHost"></div>
+        <!-- 선택된 성취기준 태그 (컴포넌트 std-smart-search가 자체 칩으로 표시하지만, 컴포넌트 외부 코드 호환을 위해 유지) -->
+        <div id="addSelectedStds" style="display:none;margin-top:8px;gap:6px;flex-wrap:wrap;"></div>
       </div>
       <div id="addSearchResults" style="flex:1;overflow-y:auto;padding:16px 24px;"></div>
       <div style="padding:12px 24px;border-top:1px solid #e5e7eb;display:flex;justify-content:space-between;align-items:center;background:#f9fafb;">

@@ -9,7 +9,12 @@
   // === 교육과정 표준체계 Web Components 자동 로드 ===
   // 어느 페이지든 common-nav.js를 포함하면 <std-smart-search>, <std-picker>를 사용할 수 있다.
   (function loadStdComponents() {
-    const files = ['/js/components/std-smart-search.js', '/js/components/std-picker.js'];
+    const files = [
+      '/js/components/std-smart-search.js',
+      '/js/components/std-picker.js',
+      // 검색 인터페이스 공통 컴포넌트 (window.DacheumSearch) — Phase 1
+      '/js/components/dacheum-search.js'
+    ];
     files.forEach(src => {
       if (document.querySelector('script[src="' + src + '"]')) return;
       const s = document.createElement('script');

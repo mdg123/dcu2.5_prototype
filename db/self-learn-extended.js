@@ -1908,11 +1908,72 @@ function reportContent(userId, contentId, { reason, details, contentType }) {
 function _pickQuestionForNode(nodeId, difficulty) {
   // node_contents에서 problem 타입 content 중 난이도 맞는 것 선택
   const problemTypes = "('quiz','exam','problem','assessment')";
-  const candidates = db.prepare(`
+  let candidates = db.prepare(`
     SELECT c.id as content_id, c.title, c.difficulty
     FROM node_contents nc JOIN contents c ON nc.content_id = c.id
     WHERE nc.node_id = ? AND c.content_type IN ${problemTypes}
   `).all(nodeId);
+
+  // 폴백 1: 자손 노드의 매핑된 문항 검색 (closure table)
+  if (candidates.length === 0) {
+    try {
+      candidates = db.prepare(`
+        SELECT c.id as content_id, c.title, c.difficulty
+        FROM curriculum_node_descendants d
+        JOIN node_contents nc ON nc.node_id = d.descendant_id
+        JOIN contents c ON nc.content_id = c.id
+        WHERE d.ancestor_id = ? AND c.content_type IN ${problemTypes}
+        LIMIT 30
+      `).all(nodeId);
+    } catch (_) { /* closure 테이블 없을 수 있음 */ }
+  }
+
+  // 폴백 2: 같은 학년·과목 풀에서 무작위 문항 (노드 코드의 학년·과목 prefix 추출)
+  if (candidates.length === 0) {
+    // E4MATA01... → 4학년 수학. U62... 같은 익명 단원은 매핑되지 않으므로 같은 학년의 노드 풀에서 보충
+    const node = db.prepare('SELECT subject, grade FROM learning_map_nodes WHERE node_id = ?').get(nodeId);
+    if (node && node.subject) {
+      candidates = db.prepare(`
+        SELECT c.id as content_id, c.title, c.difficulty
+        FROM learning_map_nodes lmn
+        JOIN node_contents nc ON nc.node_id = lmn.node_id
+        JOIN contents c ON nc.content_id = c.id
+        WHERE lmn.subject = ? ${node.grade ? 'AND lmn.grade = ?' : ''} AND c.content_type IN ${problemTypes}
+        LIMIT 30
+      `).all(...(node.grade ? [node.subject, node.grade] : [node.subject]));
+    }
+  }
+
+  // 폴백 3: 같은 노드 코드 prefix(예: U62...의 자식 = E2MAT...)에서 추정
+  // U* 익명 단원은 자손이 없을 수 있어 prefix 패턴 매칭으로 같은 학년·교과 노드 풀에서 보충
+  if (candidates.length === 0) {
+    try {
+      candidates = db.prepare(`
+        SELECT c.id as content_id, c.title, c.difficulty
+        FROM contents c
+        JOIN content_questions cq ON cq.content_id = c.id
+        WHERE c.content_type IN ${problemTypes}
+          AND (c.grade IS NULL OR c.grade <= 6)
+          AND (c.subject IS NULL OR c.subject LIKE '%수학%' OR c.subject LIKE '%math%')
+        GROUP BY c.id
+        HAVING COUNT(cq.id) > 0
+        ORDER BY RANDOM() LIMIT 10
+      `).all();
+    } catch (_) { /* contents에 grade/subject 컬럼 없을 수 있음 */ }
+  }
+
+  // 폴백 4: 정말 모든 풀에서 무작위 (마지막 수단)
+  if (candidates.length === 0) {
+    candidates = db.prepare(`
+      SELECT c.id as content_id, c.title, c.difficulty
+      FROM contents c
+      JOIN content_questions cq ON cq.content_id = c.id
+      WHERE c.content_type IN ${problemTypes}
+      GROUP BY c.id HAVING COUNT(cq.id) > 0
+      ORDER BY RANDOM() LIMIT 10
+    `).all();
+  }
+
   if (candidates.length === 0) return null;
 
   // 난이도 매칭 우선
@@ -2297,12 +2358,91 @@ function getDiagnosisState(sessionId) {
   };
 }
 
+// 진단용 폴백 problems: 노드 직접 매핑이 없을 때 자손/같은 단원 차시/같은 학년·과목에서 보충
+function collectFallbackProblems(nodeId, userId, limit = 10) {
+  const problemTypes = "('quiz','exam','problem','assessment','question')";
+  let rows = [];
+
+  // 폴백 1: closure 자손 노드에 매핑된 quiz
+  try {
+    rows = db.prepare(`
+      SELECT c.id AS content_id, c.title, c.content_type, c.difficulty, c.estimated_minutes
+      FROM curriculum_node_descendants d
+      JOIN node_contents nc ON nc.node_id = d.descendant_id
+      JOIN contents c ON nc.content_id = c.id
+      WHERE d.ancestor_id = ? AND c.content_type IN ${problemTypes}
+      LIMIT ?
+    `).all(nodeId, limit);
+  } catch (_) { rows = []; }
+
+  // 폴백 2: 같은 단원(parent)의 차시 quiz
+  if (rows.length === 0) {
+    try {
+      const node = db.prepare('SELECT parent_id, subject, grade FROM learning_map_nodes WHERE node_id = ?').get(nodeId);
+      if (node && node.parent_id) {
+        rows = db.prepare(`
+          SELECT c.id AS content_id, c.title, c.content_type, c.difficulty, c.estimated_minutes
+          FROM learning_map_nodes lmn
+          JOIN node_contents nc ON nc.node_id = lmn.node_id
+          JOIN contents c ON nc.content_id = c.id
+          WHERE lmn.parent_id = ? AND c.content_type IN ${problemTypes}
+          LIMIT ?
+        `).all(node.parent_id, limit);
+      }
+      // 폴백 3: 같은 학년·과목 풀
+      if (rows.length === 0 && node && node.subject) {
+        rows = db.prepare(`
+          SELECT c.id AS content_id, c.title, c.content_type, c.difficulty, c.estimated_minutes
+          FROM learning_map_nodes lmn
+          JOIN node_contents nc ON nc.node_id = lmn.node_id
+          JOIN contents c ON nc.content_id = c.id
+          WHERE lmn.subject = ? ${node.grade ? 'AND lmn.grade = ?' : ''} AND c.content_type IN ${problemTypes}
+          ORDER BY RANDOM()
+          LIMIT ?
+        `).all(...(node.grade ? [node.subject, node.grade, limit] : [node.subject, limit]));
+      }
+    } catch (_) { /* skip */ }
+  }
+
+  // 폴백 4: 전체 풀에서 랜덤
+  if (rows.length === 0) {
+    rows = db.prepare(`
+      SELECT c.id AS content_id, c.title, c.content_type, c.difficulty, c.estimated_minutes
+      FROM contents c WHERE c.content_type IN ${problemTypes}
+      ORDER BY RANDOM() LIMIT ?
+    `).all(limit);
+  }
+
+  // problems 형태로 매핑 (questions 포함)
+  return rows.map(c => {
+    let questions = [];
+    try {
+      questions = db.prepare(`
+        SELECT id, question_number, question_text, options, answer, explanation, difficulty, points
+        FROM content_questions WHERE content_id = ? ORDER BY question_number LIMIT 5
+      `).all(c.content_id).map(q => {
+        let opts = []; try { opts = q.options ? JSON.parse(q.options) : []; } catch {}
+        return { id: q.id, question_number: q.question_number, question_text: q.question_text,
+                 options: opts, answer: q.answer, explanation: q.explanation,
+                 difficulty: q.difficulty, points: q.points };
+      });
+    } catch (_) {}
+    return {
+      id: c.content_id, content_id: c.content_id,
+      title: c.title, content_type: c.content_type,
+      difficulty: c.difficulty || 'medium',
+      questions, _fallback: true
+    };
+  });
+}
+
 module.exports = {
   init,
   getDailySets, getDailySetDetail, startDailyItem, completeDailyItem, getDailyStats,
   getDailyItemResult,
   createDailySet, updateDailySet, addDailyItem, removeDailyItem,
   getMapNodes, getMapNodeDetail, getMapEdges, getUserNodeStatuses,
+  collectFallbackProblems,
   startDiagnosis, submitDiagnosisAnswer, finishDiagnosis, getDiagnosisResult,
   startDiagnosisCAT, submitDiagnosisAnswerCAT, drillDownDiagnosis, getDiagnosisState,
   getNextDiagnosisQuestion,

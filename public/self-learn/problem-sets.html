@@ -135,29 +135,8 @@
         <button onclick="closeAddItemModal()" style="background:none;border:none;font-size:22px;cursor:pointer;color:#94a3b8;">&times;</button>
       </div>
       <div style="padding:16px 24px;border-bottom:1px solid #f1f5f9;">
-        <!-- 유형 필터 -->
-        <div style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap;">
-          <button class="ai-type-btn active" onclick="setAIType('',this)" style="padding:5px 14px;border:1.5px solid #e2e8f0;border-radius:8px;font-size:12px;cursor:pointer;font-family:inherit;background:#4A7CFF;color:#fff;">전체</button>
-          <button class="ai-type-btn" onclick="setAIType('quiz',this)" style="padding:5px 14px;border:1.5px solid #e2e8f0;border-radius:8px;font-size:12px;cursor:pointer;font-family:inherit;background:#fff;color:#475569;">문항</button>
-          <button class="ai-type-btn" onclick="setAIType('exam',this)" style="padding:5px 14px;border:1.5px solid #e2e8f0;border-radius:8px;font-size:12px;cursor:pointer;font-family:inherit;background:#fff;color:#475569;">평가지</button>
-          <button class="ai-type-btn" onclick="setAIType('video',this)" style="padding:5px 14px;border:1.5px solid #e2e8f0;border-radius:8px;font-size:12px;cursor:pointer;font-family:inherit;background:#fff;color:#475569;">영상</button>
-          <button class="ai-type-btn" onclick="setAIType('document',this)" style="padding:5px 14px;border:1.5px solid #e2e8f0;border-radius:8px;font-size:12px;cursor:pointer;font-family:inherit;background:#fff;color:#475569;">문서</button>
-        </div>
-        <!-- 검색 2열 -->
-        <div style="display:flex;gap:8px;align-items:flex-start;">
-          <!-- 일반검색 -->
-          <div style="flex:1;position:relative;">
-            <i class="fas fa-search" style="position:absolute;left:12px;top:10px;color:#94a3b8;font-size:12px;"></i>
-            <input type="text" id="aiKeyword" placeholder="제목, 키워드, 저작자명..." style="width:100%;padding:9px 14px 9px 32px;border:1.5px solid #e2e8f0;border-radius:8px;font-size:13px;font-family:inherit;" onkeydown="if(event.key==='Enter')searchItems()">
-          </div>
-          <!-- 성취기준 검색 -->
-          <div style="flex:1;position:relative;" id="aiStdWrap">
-            <i class="fas fa-graduation-cap" style="position:absolute;left:12px;top:10px;color:#818cf8;font-size:12px;"></i>
-            <input type="text" id="aiStdSearch" placeholder="성취기준 검색 (학년, 교과...)" style="width:100%;padding:9px 14px 9px 32px;border:1.5px solid #e2e8f0;border-radius:8px;font-size:13px;font-family:inherit;" oninput="searchStdForPS(this.value)" onfocus="this.style.borderColor='#6366f1'" onkeydown="stdKeydown(event)">
-          </div>
-          <button onclick="searchItems()" style="padding:9px 18px;background:#4A7CFF;color:#fff;border:none;border-radius:8px;font-size:13px;cursor:pointer;font-family:inherit;font-weight:600;white-space:nowrap;"><i class="fas fa-search"></i> 검색</button>
-        </div>
-        <div id="aiSelectedStd" style="margin-top:6px;"></div>
+        <!-- Phase 3: DacheumSearch 공통 컴포넌트 호스트 -->
+        <div id="psSearchHost"></div>
       </div>
       <div id="aiResults" style="flex:1;overflow-y:auto;padding:16px 24px;">
         <div style="text-align:center;padding:30px;color:#94a3b8;font-size:13px;">검색어를 입력하세요</div>
@@ -314,131 +293,81 @@
       else showToast(res.message || '생성 실패');
     }
 
-    let _aiType = '';
-    let _aiSelectedStd = null;
+    // ===== Phase 3: DacheumSearch 공통 컴포넌트 통합 =====
+    // 호스트 상태(컴포넌트 위임 모드) — 컴포넌트 hooks 가 값을 동기화한다.
+    let _aiType = '';            // 컴포넌트의 다중 typeFilters Set에서 첫 항목만 호스트에 유지(기존 단일 type 동작 보존)
+    let _aiSelectedStdCodes = [];// 컴포넌트의 std-smart-search 칩 codes 목록
+    let _psSearchCtrl = null;
+    let _psSearchInited = false;
 
-    function setAIType(type, btn) {
-      _aiType = type;
-      document.querySelectorAll('.ai-type-btn').forEach(b => { b.style.background = '#fff'; b.style.color = '#475569'; b.classList.remove('active'); });
-      btn.style.background = '#4A7CFF'; btn.style.color = '#fff'; btn.classList.add('active');
-      // 검색어나 성취기준이 있으면 자동 재검색
-      if (document.getElementById('aiKeyword').value.trim() || _aiSelectedStd) searchItems();
-    }
-
-    let _stdSearchTimer = null;
-    let _stdResults = [];
-    let _stdHighlight = -1;
-
-    function getStdDropdown() {
-      let dd = document.getElementById('aiStdDropdownFixed');
-      if (!dd) {
-        dd = document.createElement('div');
-        dd.id = 'aiStdDropdownFixed';
-        dd.style.cssText = 'display:none;position:fixed;background:#fff;border:1.5px solid #e2e8f0;border-radius:10px;max-height:250px;overflow-y:auto;z-index:30000;box-shadow:0 12px 30px rgba(0,0,0,.15);';
-        document.body.appendChild(dd);
-      }
-      return dd;
-    }
-
-    function positionStdDropdown() {
-      const input = document.getElementById('aiStdSearch');
-      const dd = getStdDropdown();
-      const rect = input.getBoundingClientRect();
-      dd.style.left = rect.left + 'px';
-      dd.style.top = (rect.bottom + 4) + 'px';
-      dd.style.width = rect.width + 'px';
-    }
-
-    async function searchStdForPS(query) {
-      clearTimeout(_stdSearchTimer);
-      const dd = getStdDropdown();
-      if (!query || query.length < 1) { dd.style.display = 'none'; _stdResults = []; return; }
-      _stdSearchTimer = setTimeout(async () => {
-        try {
-          const res = await fetch('/api/curriculum/standards?search=' + encodeURIComponent(query) + '&limit=10').then(r => r.json());
-          _stdResults = res.data || [];
-          _stdHighlight = -1;
-          if (!_stdResults.length) { dd.innerHTML = '<div style="padding:14px;font-size:13px;color:#94a3b8;text-align:center;">결과 없음</div>'; }
-          else { renderStdDropdown(); }
-          positionStdDropdown();
-          dd.style.display = 'block';
-        } catch { dd.style.display = 'none'; }
-      }, 250);
-    }
-
-    function renderStdDropdown() {
-      const dd = getStdDropdown();
-      dd.innerHTML = _stdResults.map((s, i) => `
-        <div class="std-dd-item" data-idx="${i}" onmousedown="event.preventDefault();selectStdForPS('${s.code}','${escHtml(s.content?.substring(0,30)).replace(/'/g,"&#39;")}')" style="padding:10px 14px;font-size:12px;cursor:pointer;border-bottom:1px solid #f8fafc;background:${i===_stdHighlight?'#f0f4ff':''};" onmouseenter="this.style.background='#f0f4ff'" onmouseleave="this.style.background='${i===_stdHighlight?'#f0f4ff':''}'">
-          <span style="background:#818cf820;color:#6366f1;padding:2px 8px;border-radius:4px;font-size:10px;font-weight:700;margin-right:6px;">${s.code}</span>
-          <span style="color:#334155;">${escHtml(s.content?.substring(0,50))}</span>
-          <div style="font-size:10px;color:#94a3b8;margin-top:2px;">${s.subject_name||''} · ${s.grade_label||''} · ${s.area||''}</div>
-        </div>
-      `).join('');
-    }
-
-    function stdKeydown(e) {
-      const dd = getStdDropdown();
-      if (dd.style.display === 'none' || !_stdResults.length) return;
-      if (e.key === 'ArrowDown') {
-        e.preventDefault();
-        _stdHighlight = Math.min(_stdHighlight + 1, _stdResults.length - 1);
-        renderStdDropdown();
-        // 스크롤 따라가기
-        const active = dd.querySelector(`[data-idx="${_stdHighlight}"]`);
-        if (active) active.scrollIntoView({ block: 'nearest' });
-      }
-      else if (e.key === 'ArrowUp') {
-        e.preventDefault();
-        _stdHighlight = Math.max(_stdHighlight - 1, 0);
-        renderStdDropdown();
-        const active = dd.querySelector(`[data-idx="${_stdHighlight}"]`);
-        if (active) active.scrollIntoView({ block: 'nearest' });
-      }
-      else if (e.key === 'Enter' && _stdHighlight >= 0) {
-        e.preventDefault();
-        const s = _stdResults[_stdHighlight];
-        selectStdForPS(s.code, s.content?.substring(0, 30));
-      }
-      else if (e.key === 'Escape') { dd.style.display = 'none'; }
-    }
-
-    // 외부 클릭으로 닫기
-    document.addEventListener('mousedown', (e) => {
-      const dd = getStdDropdown();
-      const input = document.getElementById('aiStdSearch');
-      if (dd.style.display !== 'none' && !dd.contains(e.target) && e.target !== input) {
-        dd.style.display = 'none';
-      }
-    });
-
-    function selectStdForPS(code, label) {
-      _aiSelectedStd = code;
-      getStdDropdown().style.display = 'none';
-      document.getElementById('aiStdSearch').value = '';
-      document.getElementById('aiSelectedStd').innerHTML = `<span style="display:inline-flex;align-items:center;gap:4px;padding:4px 10px;background:#ede9fe;color:#6366f1;border-radius:6px;font-size:11px;font-weight:600;">
-        ${code} — ${escHtml(label)} <button onclick="_aiSelectedStd=null;document.getElementById('aiSelectedStd').innerHTML=''" style="background:none;border:none;cursor:pointer;color:#6366f1;font-size:12px;margin-left:4px;">&times;</button>
-      </span>`;
-      searchItems();
+    function initPSSearch() {
+      if (_psSearchInited) return;
+      const host = document.getElementById('psSearchHost');
+      if (!host || !window.DacheumSearch) return;
+      _psSearchCtrl = window.DacheumSearch.mount(host, {
+        mode: 'question',
+        // 문제집은 단일 소스(공개콘텐츠 검색 결과에서 담음) — 탭 미노출
+        sources: ['public'],
+        defaultSource: 'public',
+        // 유형 필터: 전체(빈 set) / 문항 / 평가지 / 영상 / 문서 — 기존 5개 동작 보존
+        typeFilters: ['quiz','exam','video','document'],
+        enableStdSearch: true,
+        enableViewToggle: false,
+        showAdvanced: true,
+        advancedFields: ['title','keyword','standard'],
+        enableDateRange: false,
+        legacyIds: false,
+        placeholder: '제목, 키워드, 저작자명...',
+        hooks: {
+          onSearch: () => searchItems(),
+          onToggleType: (t, checked, set) => {
+            // 컴포넌트 다중 선택 → 호스트는 단일 type 유지(첫번째 선택 또는 빈값=전체)
+            _aiType = (Array.from(set)[0] || '');
+            searchItems();
+          }
+        }
+      });
+      _psSearchInited = true;
+      // std-smart-search 칩 변경 감지 → _aiSelectedStdCodes 동기화 + 재검색
+      try {
+        const ssEl = host.querySelector('std-smart-search');
+        if (ssEl) {
+          ssEl.addEventListener('change', () => {
+            try {
+              const v = ssEl.value || {};
+              _aiSelectedStdCodes = Array.isArray(v.codes) ? v.codes : [];
+              searchItems();
+            } catch(_) {}
+          });
+        }
+      } catch(_) {}
     }
 
     function addItemFromContent() {
-      document.getElementById('aiKeyword').value = '';
+      // 검색 결과 영역 초기 안내
       document.getElementById('aiResults').innerHTML = '<div style="text-align:center;padding:30px;color:#94a3b8;font-size:13px;">제목, 키워드, 성취기준으로 문항을 검색하세요</div>';
       document.getElementById('addItemModal').style.display = 'flex';
+      // 컴포넌트 마운트는 모달이 열려 사이즈가 잡힌 시점에서 1회 수행
+      initPSSearch();
     }
     function closeAddItemModal() { document.getElementById('addItemModal').style.display = 'none'; }
 
     async function searchItems() {
-      const keyword = document.getElementById('aiKeyword').value.trim();
-      if (!keyword && !_aiSelectedStd) { showToast('검색어 또는 성취기준을 입력하세요'); return; }
+      // 컴포넌트 state에서 키워드를 읽어옴 (legacyIds:false이므로 호스트의 #aiKeyword는 없음)
+      const st = _psSearchCtrl ? _psSearchCtrl.getState() : { keyword: '' };
+      const keyword = (st.keyword || '').trim();
+      if (!keyword && !_aiSelectedStdCodes.length) {
+        // 빈 검색은 안내만 표시 (toast spam 방지)
+        document.getElementById('aiResults').innerHTML = '<div style="text-align:center;padding:30px;color:#94a3b8;font-size:13px;">제목, 키워드, 성취기준으로 문항을 검색하세요</div>';
+        return;
+      }
       const container = document.getElementById('aiResults');
       container.innerHTML = '<div style="text-align:center;padding:20px;"><i class="fas fa-spinner fa-spin" style="color:#94a3b8;"></i></div>';
       try {
         const params = new URLSearchParams({ limit: '20' });
         if (_aiType) params.set('content_type', _aiType);
         if (keyword) params.set('keyword', keyword);
-        if (_aiSelectedStd) params.set('achievement_code', _aiSelectedStd);
+        if (_aiSelectedStdCodes.length) params.set('achievement_codes', _aiSelectedStdCodes.join(','));
         const res = await fetch('/api/contents?' + params.toString()).then(r => r.json());
         const contents = res.data || res.contents || [];
         if (!contents.length) { container.innerHTML = '<div style="text-align:center;padding:30px;color:#94a3b8;font-size:13px;">검색 결과가 없습니다.</div>'; return; }

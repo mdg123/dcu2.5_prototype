@@ -989,19 +989,20 @@
               <!-- 검색 패널 -->
               <div id="lmSidePanelSearch" style="display:none;">
                 <div class="lm-side-title"><span class="label"><i class="fas fa-search"></i> 콘텐츠 검색</span></div>
-                <div style="display:flex;gap:6px;margin-bottom:8px;">
-                  <select id="lmSearchType" style="padding:7px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;">
+                <!-- 유형(현재 탭) + 노드 컨텍스트 토글 (학습맵 매핑 전용 옵션) -->
+                <div style="display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap;align-items:center;">
+                  <select id="lmSearchType" style="padding:8px 10px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:13px;font-family:inherit;background:#fff;">
                     <option value="video">영상</option>
                     <option value="question">문항</option>
                   </select>
-                  <input type="text" id="lmPickKeyword" placeholder="제목 키워드" style="flex:1;padding:7px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;font-family:inherit;" onkeydown="if(event.key==='Enter')searchPickableContents();">
-                </div>
-                <div style="display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap;">
-                  <label class="lm-filter-toggle" style="font-size:11px;padding:4px 8px;">
+                  <label class="lm-filter-toggle" style="font-size:12px;padding:4px 8px;">
                     <input type="checkbox" id="lmSearchUseContext" checked> 노드 컨텍스트 적용
                   </label>
-                  <button class="btn btn-view" style="padding:6px 10px;font-size:11px;" onclick="searchPickableContents()"><i class="fas fa-search"></i> 검색</button>
                 </div>
+                <!-- Phase 4: DacheumSearch 공통 컴포넌트 마운트 호스트 (키워드 검색만 통일) -->
+                <div id="lmPickSearchHost" style="margin-bottom:8px;"></div>
+                <!-- 폴백 입력(legacyIds=true 호환 + DacheumSearch 미로딩 시 fallback) — DacheumSearch 마운트 시 hidden -->
+                <input type="hidden" id="lmPickKeyword" value="">
                 <div id="lmPickList" style="max-height:520px;overflow-y:auto;">
                   <div style="color:#9ca3af;font-size:12px;padding:10px;">검색어를 입력하세요.</div>
                 </div>
@@ -1029,27 +1030,112 @@
       <!-- 나도예술가 관리 -->
       <section id="sec-gallery" class="admin-section">
         <div class="page-title"><i class="fas fa-palette"></i> 나도예술가 관리</div>
-        <div class="filter-bar">
-          <select id="galleryStatusFilter" onchange="loadGallery()">
-            <option value="pending">승인 대기</option>
-            <option value="">전체 상태</option>
-            <option value="approved">공개</option>
-            <option value="rejected">거절</option>
-          </select>
-          <select id="galleryCategoryFilter" onchange="loadGallery()">
-            <option value="">전체 카테고리</option>
-            <option value="art">미술</option>
-            <option value="music">음악</option>
-            <option value="writing">글쓰기</option>
-            <option value="video">영상</option>
-            <option value="other">기타</option>
-          </select>
+
+        <!-- 서브탭: 작품 승인 | 콘테스트 관리 -->
+        <div class="skw-tabs" id="galleryAdminTabs" role="tablist">
+          <button type="button" class="skw-tab active" data-gtab="approval" onclick="switchGalleryAdminTab('approval')">
+            <i class="fas fa-check-circle"></i> 작품 승인 · 신고
+          </button>
+          <button type="button" class="skw-tab" data-gtab="contests" onclick="switchGalleryAdminTab('contests')">
+            <i class="fas fa-trophy"></i> 콘테스트 관리 <span class="skw-tab-count" id="contestCountBadge">0</span>
+          </button>
         </div>
-        <div class="card">
-          <table>
-            <thead><tr><th>ID</th><th>썸네일</th><th>제목</th><th>카테고리</th><th>작성자</th><th>학교</th><th>상태</th><th>생성일</th><th>관리</th></tr></thead>
-            <tbody id="galleryTableBody"></tbody>
-          </table>
+
+        <!-- 작품 승인 패널 -->
+        <div id="galleryApprovalPanel" data-gpanel="approval">
+          <div class="filter-bar">
+            <select id="galleryStatusFilter" onchange="loadGallery()">
+              <option value="pending">승인 대기</option>
+              <option value="">전체 상태</option>
+              <option value="approved">공개</option>
+              <option value="rejected">거절</option>
+            </select>
+            <select id="galleryCategoryFilter" onchange="loadGallery()">
+              <option value="">전체 카테고리</option>
+              <option value="art">미술</option>
+              <option value="music">음악</option>
+              <option value="writing">글쓰기</option>
+              <option value="video">영상</option>
+              <option value="other">기타</option>
+            </select>
+          </div>
+          <div class="card">
+            <table>
+              <thead><tr><th>ID</th><th>썸네일</th><th>제목</th><th>카테고리</th><th>작성자</th><th>학교</th><th>상태</th><th>생성일</th><th>관리</th></tr></thead>
+              <tbody id="galleryTableBody"></tbody>
+            </table>
+          </div>
+
+          <!-- 신고 처리 카드 (관리자/교사) -->
+          <div class="card" style="margin-top:20px;">
+            <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid var(--gray-200);">
+              <h3 style="font-size:18px;font-weight:700;margin:0;display:inline-flex;align-items:center;gap:8px;">
+                <i class="fas fa-flag" style="color:#ef4444;"></i> 신고 처리
+                <span id="galleryReportPendingBadge" style="background:#ef4444;color:#fff;border-radius:99px;padding:2px 10px;font-size:13px;font-weight:600;display:none;">0</span>
+              </h3>
+              <div style="display:flex;gap:8px;align-items:center;">
+                <select id="reportStatusFilter" onchange="loadGalleryReports()" style="padding:8px 12px;border:1.5px solid var(--gray-200);border-radius:8px;font-size:14px;">
+                  <option value="pending">처리 대기</option>
+                  <option value="resolved">처리됨(내림)</option>
+                  <option value="dismissed">기각됨</option>
+                  <option value="">전체</option>
+                </select>
+                <button type="button" class="btn" onclick="loadGalleryReports()" style="padding:8px 14px;font-size:14px;"><i class="fas fa-sync"></i> 새로고침</button>
+              </div>
+            </div>
+            <table id="galleryReportsTable">
+              <thead><tr>
+                <th style="width:60px;">신고ID</th>
+                <th style="width:80px;">썸네일</th>
+                <th>작품 제목·작성자</th>
+                <th style="width:140px;">신고자</th>
+                <th>신고 사유</th>
+                <th style="width:130px;">신고일</th>
+                <th style="width:240px;">관리</th>
+              </tr></thead>
+              <tbody id="galleryReportsTableBody">
+                <tr><td colspan="7" style="text-align:center;padding:30px;color:var(--gray-500);">로딩 중...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- 콘테스트 관리 패널 -->
+        <div id="galleryContestsPanel" data-gpanel="contests" style="display:none;">
+          <div class="filter-bar" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+            <select id="contestStatusFilter" onchange="loadContestAdmin()">
+              <option value="">전체 상태</option>
+              <option value="upcoming">예정</option>
+              <option value="active">진행중</option>
+              <option value="closed">종료</option>
+            </select>
+            <select id="contestCategoryFilter" onchange="loadContestAdmin()">
+              <option value="">전체 카테고리</option>
+              <option value="art">미술</option>
+              <option value="music">음악</option>
+              <option value="literature">문학</option>
+              <option value="video">영상</option>
+              <option value="etc">기타</option>
+            </select>
+            <button type="button" class="btn btn-approve" style="margin-left:auto;padding:8px 16px;" onclick="openContestEditModal()">
+              <i class="fas fa-plus"></i> 새 콘테스트
+            </button>
+          </div>
+          <div class="card" style="overflow-x:hidden;">
+            <table id="contestAdminTable">
+              <thead><tr>
+                <th style="width:50px;">ID</th>
+                <th style="width:72px;">썸네일</th>
+                <th>제목·카테고리</th>
+                <th style="width:180px;">기간</th>
+                <th style="width:80px;">D-day</th>
+                <th style="width:80px;">응모수</th>
+                <th style="width:90px;">상태</th>
+                <th style="width:240px;">관리</th>
+              </tr></thead>
+              <tbody id="contestAdminTableBody"></tbody>
+            </table>
+          </div>
         </div>
       </section>
 
@@ -1116,6 +1202,159 @@
     </main>
   </div>
 
+  <!-- 콘테스트 작성/수정 모달 -->
+  <div class="modal-overlay" id="contestEditModal" onclick="if(event.target===this)closeContestEditModal()">
+    <div class="modal-box" style="max-width:760px;">
+      <div class="modal-head">
+        <h3 id="contestEditModalTitle"><i class="fas fa-trophy" style="color:#f59e0b;"></i> 새 콘테스트</h3>
+        <button class="modal-close" onclick="closeContestEditModal()" aria-label="닫기"><i class="fas fa-times"></i></button>
+      </div>
+      <div class="modal-body" style="padding:22px 28px;">
+        <input type="hidden" id="contestEditId" value="">
+        <!-- 섹션 1: 기본 정보 -->
+        <div style="font-size:15px;font-weight:700;color:#374151;margin:0 0 12px;">▶ 기본 정보</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px;">
+          <div style="grid-column:1 / -1;">
+            <label style="display:block;font-size:14px;font-weight:600;color:#4b5563;margin-bottom:6px;">제목 <span style="color:#ef4444;">*</span></label>
+            <input type="text" id="contestTitle" maxlength="100" placeholder="예: 전국 학생 사생대회"
+              style="width:100%;padding:11px 13px;border:1.5px solid #e5e7eb;border-radius:10px;font-size:16px;font-family:inherit;">
+            <div id="contestTitleError" style="font-size:13px;color:#ef4444;margin-top:4px;display:none;">제목을 입력하세요.</div>
+          </div>
+          <div style="grid-column:1 / -1;">
+            <label style="display:block;font-size:14px;font-weight:600;color:#4b5563;margin-bottom:6px;">부제</label>
+            <input type="text" id="contestSubtitle" maxlength="100" placeholder="짧은 설명 (선택)"
+              style="width:100%;padding:11px 13px;border:1.5px solid #e5e7eb;border-radius:10px;font-size:16px;font-family:inherit;">
+          </div>
+          <div>
+            <label style="display:block;font-size:14px;font-weight:600;color:#4b5563;margin-bottom:6px;">카테고리 <span style="color:#ef4444;">*</span></label>
+            <select id="contestCategory"
+              style="width:100%;padding:11px 13px;border:1.5px solid #e5e7eb;border-radius:10px;font-size:16px;font-family:inherit;background:#fff;">
+              <option value="art">🎨 미술</option>
+              <option value="music">🎵 음악</option>
+              <option value="literature">📝 문학</option>
+              <option value="video">🎬 영상</option>
+              <option value="etc">✨ 기타</option>
+            </select>
+          </div>
+          <div>
+            <label style="display:block;font-size:14px;font-weight:600;color:#4b5563;margin-bottom:6px;">유형</label>
+            <select id="contestEventType"
+              style="width:100%;padding:11px 13px;border:1.5px solid #e5e7eb;border-radius:10px;font-size:16px;font-family:inherit;background:#fff;">
+              <option value="apply">참가신청</option>
+              <option value="contest">공모전</option>
+              <option value="festival">페스티벌</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- 섹션 2: 기간 & 장소 -->
+        <div style="font-size:15px;font-weight:700;color:#374151;margin:18px 0 12px;">▶ 기간 &amp; 장소</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px;">
+          <div>
+            <label style="display:block;font-size:14px;font-weight:600;color:#4b5563;margin-bottom:6px;">시작일 <span style="color:#ef4444;">*</span></label>
+            <input type="date" id="contestStartDate"
+              style="width:100%;padding:11px 13px;border:1.5px solid #e5e7eb;border-radius:10px;font-size:16px;font-family:inherit;">
+          </div>
+          <div>
+            <label style="display:block;font-size:14px;font-weight:600;color:#4b5563;margin-bottom:6px;">종료일 <span style="color:#ef4444;">*</span></label>
+            <input type="date" id="contestEndDate"
+              style="width:100%;padding:11px 13px;border:1.5px solid #e5e7eb;border-radius:10px;font-size:16px;font-family:inherit;">
+            <div id="contestDateError" style="font-size:13px;color:#ef4444;margin-top:4px;display:none;">종료일은 시작일 이후여야 합니다.</div>
+          </div>
+          <div>
+            <label style="display:block;font-size:14px;font-weight:600;color:#4b5563;margin-bottom:6px;">장소</label>
+            <input type="text" id="contestLocation" maxlength="100" placeholder="온라인 / 학교명 등"
+              style="width:100%;padding:11px 13px;border:1.5px solid #e5e7eb;border-radius:10px;font-size:16px;font-family:inherit;">
+          </div>
+          <div>
+            <label style="display:block;font-size:14px;font-weight:600;color:#4b5563;margin-bottom:6px;">주최 학교</label>
+            <input type="text" id="contestHostSchool" maxlength="100" placeholder="예: 충북교육청"
+              style="width:100%;padding:11px 13px;border:1.5px solid #e5e7eb;border-radius:10px;font-size:16px;font-family:inherit;">
+          </div>
+        </div>
+
+        <!-- 섹션 3: 대상 -->
+        <div style="font-size:15px;font-weight:700;color:#374151;margin:18px 0 12px;">▶ 대상</div>
+        <div style="margin-bottom:14px;">
+          <label style="display:block;font-size:14px;font-weight:600;color:#4b5563;margin-bottom:8px;">학교급</label>
+          <div style="display:flex;gap:18px;flex-wrap:wrap;font-size:14px;">
+            <label style="display:inline-flex;gap:6px;align-items:center;cursor:pointer;"><input type="checkbox" class="contest-level" value="elementary"> 초등</label>
+            <label style="display:inline-flex;gap:6px;align-items:center;cursor:pointer;"><input type="checkbox" class="contest-level" value="middle"> 중등</label>
+            <label style="display:inline-flex;gap:6px;align-items:center;cursor:pointer;"><input type="checkbox" class="contest-level" value="high"> 고등</label>
+          </div>
+        </div>
+        <div style="margin-bottom:14px;">
+          <label style="display:block;font-size:14px;font-weight:600;color:#4b5563;margin-bottom:8px;">학년</label>
+          <div style="display:flex;gap:14px;flex-wrap:wrap;font-size:14px;">
+            <label style="display:inline-flex;gap:6px;align-items:center;cursor:pointer;"><input type="checkbox" class="contest-grade" value="1"> 1</label>
+            <label style="display:inline-flex;gap:6px;align-items:center;cursor:pointer;"><input type="checkbox" class="contest-grade" value="2"> 2</label>
+            <label style="display:inline-flex;gap:6px;align-items:center;cursor:pointer;"><input type="checkbox" class="contest-grade" value="3"> 3</label>
+            <label style="display:inline-flex;gap:6px;align-items:center;cursor:pointer;"><input type="checkbox" class="contest-grade" value="4"> 4</label>
+            <label style="display:inline-flex;gap:6px;align-items:center;cursor:pointer;"><input type="checkbox" class="contest-grade" value="5"> 5</label>
+            <label style="display:inline-flex;gap:6px;align-items:center;cursor:pointer;"><input type="checkbox" class="contest-grade" value="6"> 6</label>
+          </div>
+        </div>
+        <div style="margin-bottom:14px;">
+          <label style="display:inline-flex;gap:8px;align-items:center;cursor:pointer;font-size:14px;color:#4b5563;font-weight:600;">
+            <input type="checkbox" id="contestSchoolOnly"> 우리 학교 학생만 응모 가능
+          </label>
+        </div>
+
+        <!-- 섹션 4: 갤러리 노출 -->
+        <div style="font-size:15px;font-weight:700;color:#374151;margin:18px 0 12px;">▶ 갤러리 노출</div>
+        <div style="margin-bottom:14px;">
+          <label style="display:inline-flex;gap:8px;align-items:center;cursor:pointer;font-size:14px;color:#4b5563;font-weight:600;">
+            <input type="checkbox" id="contestPublishToGallery" checked> 응모작을 갤러리에 자동 공개 (작가 승인 후)
+          </label>
+        </div>
+
+        <!-- 섹션 5: 썸네일 -->
+        <div style="font-size:15px;font-weight:700;color:#374151;margin:18px 0 12px;">▶ 썸네일</div>
+        <div style="display:flex;gap:14px;align-items:center;margin-bottom:14px;">
+          <div id="contestThumbnailPreview" style="width:120px;height:80px;border-radius:10px;background:#f3f4f6;display:flex;align-items:center;justify-content:center;color:#9ca3af;font-size:28px;overflow:hidden;flex-shrink:0;">🏆</div>
+          <div style="flex:1;">
+            <input type="file" id="contestThumbnailFile" accept="image/*" style="display:none;" onchange="handleContestThumbnailSelect(this)">
+            <input type="hidden" id="contestThumbnailUrl" value="">
+            <button type="button" class="btn btn-view" style="padding:8px 14px;" onclick="document.getElementById('contestThumbnailFile').click()">
+              <i class="fas fa-upload"></i> 이미지 업로드
+            </button>
+            <button type="button" class="btn" style="padding:8px 14px;background:#f3f4f6;margin-left:6px;" onclick="clearContestThumbnail()">
+              지우기
+            </button>
+            <div style="font-size:13px;color:#6b7280;margin-top:6px;">이미지 5MB 이하 권장. 미선택 시 카테고리 이모지로 표시됩니다.</div>
+          </div>
+        </div>
+
+        <!-- 섹션 6: 설명 -->
+        <div style="font-size:15px;font-weight:700;color:#374151;margin:18px 0 12px;">▶ 설명</div>
+        <textarea id="contestDescription" rows="5" maxlength="2000" placeholder="콘테스트 개요·참가 방법·심사 기준 등"
+          style="width:100%;padding:11px 13px;border:1.5px solid #e5e7eb;border-radius:10px;font-size:15px;font-family:inherit;line-height:1.6;resize:vertical;"></textarea>
+      </div>
+      <div class="modal-foot">
+        <button class="btn" style="background:#f3f4f6;padding:8px 16px;" onclick="closeContestEditModal()">취소</button>
+        <button id="contestSaveBtn" class="btn btn-approve" style="padding:8px 18px;" onclick="submitContestEdit()">
+          <i class="fas fa-check"></i> 저장
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 응모작 보기 모달 -->
+  <div class="modal-overlay" id="contestSubmissionsModal" onclick="if(event.target===this)closeContestSubmissionsModal()">
+    <div class="modal-box" style="max-width:880px;">
+      <div class="modal-head">
+        <h3 id="contestSubmissionsTitle"><i class="fas fa-list"></i> 응모작</h3>
+        <button class="modal-close" onclick="closeContestSubmissionsModal()" aria-label="닫기"><i class="fas fa-times"></i></button>
+      </div>
+      <div class="modal-body" id="contestSubmissionsBody" style="padding:18px 24px;">
+        불러오는 중...
+      </div>
+      <div class="modal-foot">
+        <button class="btn" style="background:#f3f4f6;padding:8px 16px;" onclick="closeContestSubmissionsModal()">닫기</button>
+      </div>
+    </div>
+  </div>
+
   <!-- CSV 가져오기 모달 -->
   <div class="modal-overlay" id="lmCsvImportModal" onclick="if(event.target===this)closeCsvImportModal()">
     <div class="modal-box">
@@ -1147,75 +1386,21 @@
         <h3 id="fcAddModalTitle"><i class="fas fa-plus-circle" style="color:#2563eb;"></i> <span id="fcAddModalLabel">콘텐츠 추가</span> <span style="font-size:14px;color:#6B7280;font-weight:500;margin-left:8px;" id="fcAddModalSubLabel"></span></h3>
         <button class="fc-modal-close" onclick="closeCurationAddModal()" aria-label="닫기"><i class="fas fa-times"></i></button>
       </div>
-      <!-- 검색 영역: (1) 키워드 + 성취기준 상하 배치 + 우측 검색 버튼 (2) 교집합 안내 (3) 콘텐츠 유형 칩 + 정렬 + 뷰토글 -->
+      <!-- Phase 4: DacheumSearch 공통 컴포넌트 호스트 — 공개콘텐츠·수업꾸러미·평가지와 동일 시각 토큰 -->
       <div class="fc-modal-search">
-        <!-- 1행: 키워드 + 성취기준 상하 배치 (좌) / 우측 통합 검색 버튼 -->
-        <div class="fc-search-row" style="align-items:stretch;">
-          <div style="flex:1;display:flex;flex-direction:column;gap:8px;min-width:0;">
-            <!-- 키워드 입력 + 체크박스 -->
-            <div style="display:flex;align-items:center;gap:8px;">
-              <label class="fc-kw-check" title="검색 시 키워드 활용" style="flex-shrink:0;">
-                <input type="checkbox" id="fcSearchKwCheck" checked onchange="runCurationSearch(1)">
-                <span>키워드</span>
-              </label>
-              <input type="text" id="fcSearchKeyword" placeholder="제목·키워드·작성자명으로 검색" style="flex:1;min-width:0;" oninput="updateFcSearchModeInfo()">
-            </div>
-            <!-- 성취기준 스마트검색 + 체크박스 (콘텐츠일 때만 노출) -->
-            <div id="fcStdRow" style="display:flex;align-items:center;gap:8px;">
-              <label class="fc-kw-check" title="검색 시 성취기준 활용" style="flex-shrink:0;">
-                <input type="checkbox" id="fcStdCheck" onchange="runCurationSearch(1)">
-                <span>성취기준</span>
-              </label>
-              <div style="flex:1;min-width:0;">
-                <std-smart-search id="fcStdSmart" data-multiple="true" data-placeholder="성취기준 검색 (학년, 교과, 영역, 코드 등)"></std-smart-search>
-              </div>
-            </div>
-          </div>
-          <select id="fcSearchSubject" style="display:none;">
-            <option value="">전체 교과</option>
-            <option value="국어">국어</option>
-            <option value="수학">수학</option>
-            <option value="사회">사회</option>
-            <option value="과학">과학</option>
-            <option value="영어">영어</option>
-            <option value="음악">음악</option>
-            <option value="미술">미술</option>
-            <option value="체육">체육</option>
-            <option value="실과">실과</option>
-            <option value="도덕">도덕</option>
-          </select>
-          <select id="fcSearchGrade" style="display:none;">
-            <option value="">전체 학년</option>
-            <option value="1">1학년</option>
-            <option value="2">2학년</option>
-            <option value="3">3학년</option>
-            <option value="4">4학년</option>
-            <option value="5">5학년</option>
-            <option value="6">6학년</option>
-          </select>
-          <button class="fc-modal-search-btn" onclick="runCurationSearch(1)" style="align-self:stretch;flex-shrink:0;"><i class="fas fa-search"></i> 검색</button>
-        </div>
-        <!-- 교집합 안내 -->
+        <!-- 교집합 안내 (DacheumSearch 위) — 키워드 + 성취기준 둘 다 있을 때만 표시 -->
         <div id="fcSearchModeInfo" style="display:none;padding:6px 12px;background:#eff6ff;border-radius:8px;font-size:13px;color:#1d4ed8;font-weight:600;">
           <i class="fas fa-info-circle"></i> 키워드 + 성취기준 교집합 검색 중
         </div>
-        <!-- 콘텐츠 유형 칩 8개 + 정렬 + 뷰토글 -->
-        <div class="fc-search-row" style="gap:6px;">
-          <div class="fc-type-chips" id="fcTypeChips" style="display:none;flex:1;">
-            <span class="fc-chip-label">유형</span>
-          </div>
-          <div class="fc-search-tools">
-            <select id="fcSearchSort" onchange="runCurationSearch(1)" title="정렬">
-              <option value="latest">최신순</option>
-              <option value="popular">인기순</option>
-              <option value="likes">좋아요순</option>
-            </select>
-            <div class="view-toggle" id="fcViewToggle">
-              <button type="button" class="view-btn active" data-view="card" onclick="setCurationViewMode('card')" title="카드 뷰"><i class="fas fa-th-large"></i></button>
-              <button type="button" class="view-btn" data-view="list" onclick="setCurationViewMode('list')" title="리스트 뷰"><i class="fas fa-list"></i></button>
-            </div>
-          </div>
-        </div>
+        <!-- DacheumSearch 마운트 호스트 (콘텐츠/채널 공통) -->
+        <div id="fcSearchHost"></div>
+        <!-- 교과·학년 hidden — 컴포넌트 외부 백워드 호환 (현재 미사용, 향후 paramsMapper 확장용) -->
+        <select id="fcSearchSubject" style="display:none;">
+          <option value="">전체 교과</option>
+        </select>
+        <select id="fcSearchGrade" style="display:none;">
+          <option value="">전체 학년</option>
+        </select>
       </div>
       <div class="fc-modal-body" id="fcSearchResults">
         <div class="fc-modal-loading">검색어를 입력하고 검색 버튼을 눌러주세요.</div>
@@ -3634,78 +3819,105 @@
     FC.modalStdCodes = [];           // std-smart-search 선택 코드 (string[])
     FC.modalStdIds = [];             // std-smart-search 선택 표준체계 노드 id (string[])
 
+    // Phase 4: DacheumSearch 공통 컴포넌트 컨트롤러 (큐레이션 모달 전용)
+    let _fcSearchCtrl = null;          // DacheumSearch.mount 반환값
+    let _fcSearchMode = 'content';     // 'content' | 'channel' — openCurationAddModal 에서 설정
+    let _fcCurrentKeyword = '';        // DacheumSearch 입력값 캐시 (info 갱신용)
+
     /**
-     * 검색 모드 안내(교집합) 토글 — 키워드+성취기준 둘 다 활성일 때만 노출
+     * 검색 모드 안내(교집합) 토글 — 키워드+성취기준 둘 다 있을 때만 노출
+     * Phase 4: kwCheck/stdCheck 폐기 (항상 활성), DacheumSearch 상태에서 keyword 읽음
      */
     function updateFcSearchModeInfo() {
       const info = document.getElementById('fcSearchModeInfo');
       if (!info) return;
-      const kwOn = document.getElementById('fcSearchKwCheck')?.checked !== false;
-      const kwVal = (document.getElementById('fcSearchKeyword')?.value || '').trim();
-      const stdOn = document.getElementById('fcStdCheck')?.checked === true;
+      const kwVal = (_fcCurrentKeyword || '').trim();
       const hasStd = (FC.modalStdIds && FC.modalStdIds.length > 0) || (FC.modalStdCodes && FC.modalStdCodes.length > 0);
       const isContent = FC.modalItemType !== 'channel';
-      info.style.display = (isContent && kwOn && kwVal && stdOn && hasStd) ? '' : 'none';
+      info.style.display = (isContent && kwVal && hasStd) ? '' : 'none';
     }
 
     /**
-     * std-smart-search 컴포넌트 change 이벤트 바인딩 (1회)
+     * DacheumSearch 내부에 마운트된 std-smart-search 의 change 이벤트 바인딩 (마운트당 1회)
      */
     function bindFcStdSmart() {
-      const stdSmart = document.getElementById('fcStdSmart');
+      const host = document.getElementById('fcSearchHost');
+      if (!host) return;
+      const stdSmart = host.querySelector('std-smart-search');
       if (!stdSmart || stdSmart.__fcBound) return;
       stdSmart.addEventListener('change', (e) => {
         const v = e.detail || {};
         FC.modalStdCodes = Array.isArray(v.codes) ? v.codes : [];
         FC.modalStdIds = Array.isArray(v.std_ids) ? v.std_ids : [];
-        const stdCheck = document.getElementById('fcStdCheck');
-        if (stdCheck) stdCheck.checked = (FC.modalStdIds.length > 0 || FC.modalStdCodes.length > 0);
         updateFcSearchModeInfo();
         runCurationSearch(1);
       });
       stdSmart.__fcBound = true;
     }
 
-    function renderTypeChips() {
-      const wrap = document.getElementById('fcTypeChips');
-      if (!wrap) return;
-      // 라벨 + 8개 칩
-      wrap.innerHTML = '<span class="fc-chip-label">유형</span>' +
-        FC_CONTENT_TYPES.map(t => `
-          <label class="filter-check ${FC.typeFilters.has(t.key) ? 'active' : ''}" data-type="${t.key}">
-            <input type="checkbox" ${FC.typeFilters.has(t.key) ? 'checked' : ''}>
-            <span>${t.label}</span>
-          </label>
-        `).join('');
-      // 위임 핸들러
-      wrap.onclick = (e) => {
-        const lbl = e.target.closest('.filter-check');
-        if (!lbl) return;
-        const cb = lbl.querySelector('input');
-        // 라벨 자체 클릭은 input change를 자동 트리거하므로, 수동 처리는 input의 change에서
-      };
-      wrap.onchange = (e) => {
-        const cb = e.target.closest('input[type="checkbox"]');
-        if (!cb) return;
-        const lbl = cb.closest('.filter-check');
-        const key = lbl.dataset.type;
-        if (cb.checked) FC.typeFilters.add(key); else FC.typeFilters.delete(key);
-        lbl.classList.toggle('active', cb.checked);
-        runCurationSearch(1);
-      };
+    /**
+     * Phase 4: DacheumSearch.mount 컨트롤러 (큐레이션 모달)
+     * - 콘텐츠 섹션: typeFilters 8종 + std-smart-search + 정렬 + 뷰토글
+     * - 채널 섹션:  키워드 + 정렬만 (type/std/view 비활성)
+     */
+    function mountFcSearchHost(isContent) {
+      const host = document.getElementById('fcSearchHost');
+      if (!host || !window.DacheumSearch) return;
+      // 매 모달 오픈마다 깨끗하게 재마운트 (콘텐츠/채널 분기 + 상태 초기화)
+      if (_fcSearchCtrl && typeof _fcSearchCtrl.destroy === 'function') {
+        try { _fcSearchCtrl.destroy(); } catch (e) { /* noop */ }
+        _fcSearchCtrl = null;
+      }
+      _fcSearchMode = isContent ? 'content' : 'channel';
+      _fcCurrentKeyword = '';
+
+      _fcSearchCtrl = window.DacheumSearch.mount(host, {
+        mode: 'content',
+        sources: ['public'],
+        defaultSource: 'public',
+        placeholder: isContent ? '제목·키워드·작성자명으로 검색' : '채널명으로 검색',
+        // 콘텐츠일 때만 유형 칩·고급검색(성취기준)·뷰토글 노출 (채널은 빈 배열로 칩 영역 자체 숨김)
+        typeFilters: isContent ? FC_CONTENT_TYPES.map(t => t.key) : [],
+        typeFilterLabel: '유형',
+        typeNames: Object.fromEntries(FC_CONTENT_TYPES.map(t => [t.key, t.label])),
+        initialTypeFilters: [],
+        enableStdSearch: isContent,
+        enableViewToggle: isContent,
+        showAdvanced: isContent,
+        advancedFields: isContent ? ['standard'] : [],
+        enableDateRange: false,
+        legacyIds: false,
+        initialViewMode: 'card',
+        sortOptions: [
+          { value: 'latest',  label: '최신순' },
+          { value: 'popular', label: '인기순' },
+          { value: 'likes',   label: '좋아요순' }
+        ],
+        hooks: {
+          onSearch: () => runCurationSearch(1),
+          onKeywordInput: (kw) => { _fcCurrentKeyword = kw; updateFcSearchModeInfo(); },
+          onToggleType: (t, checked) => {
+            if (checked) FC.typeFilters.add(t); else FC.typeFilters.delete(t);
+            runCurationSearch(1);
+          },
+          onViewModeChange: (m) => {
+            FC.viewMode = m === 'list' ? 'list' : 'card';
+            if (Array.isArray(FC._cumItems)) renderCurationResults(FC._cumItems, false);
+            else runCurationSearch(1);
+          }
+        }
+      });
+
+      // std-smart-search 바인딩 (콘텐츠 모드에서만 존재)
+      if (isContent) bindFcStdSmart();
     }
 
+    // Phase 4: 외부 호출 호환용 (기존 view-btn data-view onclick 보존 X — 컴포넌트가 처리하므로 호출자 없음)
     function setCurationViewMode(mode) {
       FC.viewMode = mode === 'list' ? 'list' : 'card';
-      document.querySelectorAll('#fcViewToggle .view-btn').forEach(b => {
-        b.classList.toggle('active', b.dataset.view === FC.viewMode);
-      });
-      // 결과만 다시 렌더 (재요청 X) — 단, 캐시된 누적 items로 재렌더
-      if (Array.isArray(FC._cumItems)) {
-        renderCurationResults(FC._cumItems, /*append*/ false);
-      } else {
-        runCurationSearch(1);
-      }
+      if (_fcSearchCtrl && _fcSearchCtrl.setViewMode) _fcSearchCtrl.setViewMode(FC.viewMode);
+      if (Array.isArray(FC._cumItems)) renderCurationResults(FC._cumItems, false);
+      else runCurationSearch(1);
     }
 
     function openCurationAddModal(sectionId) {
@@ -3734,44 +3946,18 @@
       label.textContent = sec.item_type === 'channel' ? '채널 추가' : '콘텐츠 추가';
       subLabel.textContent = `(섹션: ${sec.title} · 현재 ${FC.items.length}/${sec.max_items})`;
 
-      // 콘텐츠일 때만 교과·학년 셀렉트 + 유형 칩 + 성취기준 검색 노출 (채널은 의미 없으므로 hide)
+      // 콘텐츠일 때만 유형 칩 + 성취기준 검색 노출 (채널은 의미 없으므로 hide)
       const isContent = sec.item_type === 'content';
-      document.getElementById('fcSearchSubject').style.display = isContent ? '' : 'none';
-      document.getElementById('fcSearchGrade').style.display = isContent ? '' : 'none';
-      document.getElementById('fcTypeChips').style.display = isContent ? '' : 'none';
-      const stdRow = document.getElementById('fcStdRow');
-      if (stdRow) stdRow.style.display = isContent ? 'flex' : 'none';
-      // 정렬·뷰토글은 항상 노출
-      document.getElementById('fcSearchKeyword').value = '';
-      document.getElementById('fcSearchSubject').value = '';
-      document.getElementById('fcSearchGrade').value = '';
-      document.getElementById('fcSearchSort').value = 'latest';
-      const kwCheck = document.getElementById('fcSearchKwCheck');
-      if (kwCheck) kwCheck.checked = true;
-      // 성취기준 초기화
+      // 상태 초기화
       FC.modalStdCodes = [];
       FC.modalStdIds = [];
-      const stdCheck = document.getElementById('fcStdCheck');
-      if (stdCheck) stdCheck.checked = false;
-      const stdSmart = document.getElementById('fcStdSmart');
-      if (stdSmart) {
-        // Web Component 내부 초기화 — 값/UI 모두 리셋
-        try {
-          if (typeof stdSmart.clear === 'function') stdSmart.clear();
-          else if (typeof stdSmart.setValue === 'function') stdSmart.setValue('');
-          else stdSmart.setAttribute('data-value', '');
-        } catch (e) { /* noop */ }
-      }
-      bindFcStdSmart();
-      updateFcSearchModeInfo();
-      // 유형 필터 초기화 + 칩 렌더
       FC.typeFilters = new Set();
-      if (isContent) renderTypeChips();
-      // 뷰 토글 리셋
       FC.viewMode = 'card';
-      document.querySelectorAll('#fcViewToggle .view-btn').forEach(b => {
-        b.classList.toggle('active', b.dataset.view === 'card');
-      });
+      _fcCurrentKeyword = '';
+
+      // Phase 4: DacheumSearch 마운트 (콘텐츠/채널 분기)
+      mountFcSearchHost(isContent);
+      updateFcSearchModeInfo();
 
       document.getElementById('fcSearchResults').innerHTML = '<div class="fc-modal-loading">검색을 시작합니다...</div>';
       document.getElementById('fcSearchTotal').textContent = '';
@@ -3781,8 +3967,12 @@
       runCurationSearch(1);
       // 무한 스크롤 바인딩 (모달 본문)
       bindCurationInfiniteScroll();
-      // 키 핸들러
-      setTimeout(() => document.getElementById('fcSearchKeyword').focus(), 100);
+      // 키 핸들러 — DacheumSearch 가 렌더한 입력에 포커스
+      setTimeout(() => {
+        const host = document.getElementById('fcSearchHost');
+        const inp = host && host.querySelector('.dcs-search-main input[type="text"]');
+        if (inp) inp.focus();
+      }, 100);
     }
 
     function closeCurationAddModal() {
@@ -3824,12 +4014,17 @@
       }
       FC.modalCurrentPage = page;
 
-      const q = document.getElementById('fcSearchKeyword').value.trim();
-      const kwOn = document.getElementById('fcSearchKwCheck')?.checked !== false;
-      const stdOn = document.getElementById('fcStdCheck')?.checked === true;
-      const subject = document.getElementById('fcSearchSubject').value;
-      const grade = document.getElementById('fcSearchGrade').value;
-      const sort = document.getElementById('fcSearchSort')?.value || 'latest';
+      // Phase 4: DacheumSearch 컨트롤러에서 상태 읽음
+      const st = _fcSearchCtrl ? _fcSearchCtrl.getState() : { keyword: '', sort: 'latest' };
+      const q = (st.keyword || '').trim();
+      const sort = st.sort || 'latest';
+      const subject = document.getElementById('fcSearchSubject')?.value || '';
+      const grade = document.getElementById('fcSearchGrade')?.value || '';
+      // 키워드/성취기준 활성 토글 — Phase 4: 항상 활성 (값이 있으면 적용)
+      const kwOn = true;
+      const stdOn = (FC.modalStdIds && FC.modalStdIds.length > 0) || (FC.modalStdCodes && FC.modalStdCodes.length > 0);
+      // 컴포넌트 입력 캐시 동기화 (info 갱신용)
+      _fcCurrentKeyword = q;
       // 검색 모드 안내 갱신
       updateFcSearchModeInfo();
 
@@ -4157,7 +4352,7 @@
       const modal = document.getElementById('fcAddModal');
       if (!modal || !modal.classList.contains('active')) return;
       if (e.key === 'Escape') closeCurationAddModal();
-      else if (e.key === 'Enter' && e.target.id === 'fcSearchKeyword') runCurationSearch(1);
+      // Phase 4: Enter 검색은 DacheumSearch 가 내부적으로 처리
     });
 
     // 대시보드
@@ -4207,21 +4402,24 @@
 
     async function changeUserRole(userId, role) {
       if (!role) return;
-      if (!confirm(`이 사용자의 역할을 "${role}"(으)로 변경하시겠습니까?`)) return;
+      const ok = await adminConfirm({ title: '역할 변경', message: `이 사용자의 역할을 "${role}"(으)로 변경하시겠습니까?`, okLabel: '변경', danger: false });
+      if (!ok) return;
       const res = await fetch(`/api/admin/users/${userId}`, {
         method: 'PUT', headers: {'Content-Type':'application/json'},
         body: JSON.stringify({ role })
       });
       const data = await res.json();
-      if (data.success) loadUsers();
-      else alert(data.message);
+      if (data.success) { showAdminToast('역할이 변경되었습니다.', 'success'); loadUsers(); }
+      else showAdminToast(data.message || '역할 변경에 실패했습니다.', 'error');
     }
 
     async function deleteUser(userId, name) {
-      if (!confirm(`"${name}" 사용자를 삭제하시겠습니까? 이 작업은 취소할 수 없습니다.`)) return;
+      const ok = await adminConfirm({ title: '사용자 삭제', message: `"${name}" 사용자를 삭제하시겠습니까? 이 작업은 취소할 수 없습니다.`, okLabel: '삭제', danger: true });
+      if (!ok) return;
       const res = await fetch(`/api/admin/users/${userId}`, { method: 'DELETE' });
       const data = await res.json();
-      if (data.success) { loadUsers(); loadStats(); } else alert(data.message);
+      if (data.success) { showAdminToast('사용자가 삭제되었습니다.', 'success'); loadUsers(); loadStats(); }
+      else showAdminToast(data.message || '사용자 삭제에 실패했습니다.', 'error');
     }
 
     // 콘텐츠 관리
@@ -4262,24 +4460,30 @@
     }
 
     async function approveContent(id) {
-      if (!confirm('이 콘텐츠를 승인하시겠습니까?')) return;
+      const ok = await adminConfirm({ title: '콘텐츠 승인', message: '이 콘텐츠를 승인하시겠습니까?', okLabel: '승인', danger: false });
+      if (!ok) return;
       const res = await fetch(`/api/admin/contents/${id}/approve`, { method: 'PUT' });
       const data = await res.json();
-      if (data.success) { loadContents(); loadStats(); } else alert(data.message);
+      if (data.success) { showAdminToast('콘텐츠가 승인되었습니다.', 'success'); loadContents(); loadStats(); }
+      else showAdminToast(data.message || '승인에 실패했습니다.', 'error');
     }
 
     async function rejectContent(id) {
-      if (!confirm('이 콘텐츠를 거절하시겠습니까?')) return;
+      const ok = await adminConfirm({ title: '콘텐츠 거절', message: '이 콘텐츠를 거절하시겠습니까?', okLabel: '거절', danger: true });
+      if (!ok) return;
       const res = await fetch(`/api/admin/contents/${id}/reject`, { method: 'PUT' });
       const data = await res.json();
-      if (data.success) { loadContents(); loadStats(); } else alert(data.message);
+      if (data.success) { showAdminToast('콘텐츠가 거절되었습니다.', 'success'); loadContents(); loadStats(); }
+      else showAdminToast(data.message || '거절에 실패했습니다.', 'error');
     }
 
     async function deleteContent(id) {
-      if (!confirm('이 콘텐츠를 삭제하시겠습니까? 이 작업은 취소할 수 없습니다.')) return;
+      const ok = await adminConfirm({ title: '콘텐츠 삭제', message: '이 콘텐츠를 삭제하시겠습니까? 이 작업은 취소할 수 없습니다.', okLabel: '삭제', danger: true });
+      if (!ok) return;
       const res = await fetch(`/api/admin/contents/${id}`, { method: 'DELETE' });
       const data = await res.json();
-      if (data.success) { loadContents(); loadStats(); } else alert(data.message);
+      if (data.success) { showAdminToast('콘텐츠가 삭제되었습니다.', 'success'); loadContents(); loadStats(); }
+      else showAdminToast(data.message || '삭제에 실패했습니다.', 'error');
     }
 
     // ======== 미리보기 ========
@@ -4412,24 +4616,30 @@
     }
 
     async function approveLesson(id) {
-      if (!confirm('이 수업을 승인하시겠습니까?')) return;
+      const ok = await adminConfirm({ title: '수업 승인', message: '이 수업을 승인하시겠습니까?', okLabel: '승인', danger: false });
+      if (!ok) return;
       const res = await fetch(`/api/admin/lessons/${id}/approve`, { method: 'PUT' });
       const data = await res.json();
-      if (data.success) { loadLessons(); loadStats(); } else alert(data.message);
+      if (data.success) { showAdminToast('수업이 승인되었습니다.', 'success'); loadLessons(); loadStats(); }
+      else showAdminToast(data.message || '승인에 실패했습니다.', 'error');
     }
 
     async function rejectLesson(id) {
-      if (!confirm('이 수업을 거절하시겠습니까?')) return;
+      const ok = await adminConfirm({ title: '수업 거절', message: '이 수업을 거절하시겠습니까?', okLabel: '거절', danger: true });
+      if (!ok) return;
       const res = await fetch(`/api/admin/lessons/${id}/reject`, { method: 'PUT' });
       const data = await res.json();
-      if (data.success) { loadLessons(); loadStats(); } else alert(data.message);
+      if (data.success) { showAdminToast('수업이 거절되었습니다.', 'success'); loadLessons(); loadStats(); }
+      else showAdminToast(data.message || '거절에 실패했습니다.', 'error');
     }
 
     async function deleteLesson(id) {
-      if (!confirm('이 수업을 삭제하시겠습니까? 이 작업은 취소할 수 없습니다.')) return;
+      const ok = await adminConfirm({ title: '수업 삭제', message: '이 수업을 삭제하시겠습니까? 이 작업은 취소할 수 없습니다.', okLabel: '삭제', danger: true });
+      if (!ok) return;
       const res = await fetch(`/api/admin/lessons/${id}`, { method: 'DELETE' });
       const data = await res.json();
-      if (data.success) { loadLessons(); loadStats(); } else alert(data.message);
+      if (data.success) { showAdminToast('수업이 삭제되었습니다.', 'success'); loadLessons(); loadStats(); }
+      else showAdminToast(data.message || '삭제에 실패했습니다.', 'error');
     }
 
     // ======== 나도예술가 관리 ========
@@ -4481,7 +4691,7 @@
     async function previewGallery(id) {
       const res = await fetch(`/api/growth/gallery/${id}`);
       const data = await res.json();
-      if (!data.success) { alert(data.message || '불러올 수 없습니다'); return; }
+      if (!data.success) { showAdminToast(data.message || '불러올 수 없습니다.', 'error'); return; }
       const g = data.item || data.gallery || data;
       const catLabel = { art:'미술', music:'음악', writing:'글쓰기', video:'영상', other:'기타' };
       const statusLabel = { pending:'승인 대기', approved:'공개', rejected:'거절' };
@@ -4518,24 +4728,460 @@
     }
 
     async function approveGallery(id, fromModal) {
-      if (!confirm('이 게시물을 승인하시겠습니까?')) return;
+      const ok = await adminConfirm({ title: '게시물 승인', message: '이 게시물을 승인하시겠습니까?', okLabel: '승인', danger: false });
+      if (!ok) return;
       const res = await fetch(`/api/growth/gallery/${id}/approve`, { method: 'POST' });
       const data = await res.json();
-      if (data.success) { if (fromModal) closePreviewModal(); loadGallery(); } else alert(data.message);
+      if (data.success) { showAdminToast('게시물이 승인되었습니다.', 'success'); if (fromModal) closePreviewModal(); loadGallery(); }
+      else showAdminToast(data.message || '승인에 실패했습니다.', 'error');
     }
 
     async function rejectGallery(id, fromModal) {
-      if (!confirm('이 게시물을 거절하시겠습니까?')) return;
+      const ok = await adminConfirm({ title: '게시물 거절', message: '이 게시물을 거절하시겠습니까?', okLabel: '거절', danger: true });
+      if (!ok) return;
       const res = await fetch(`/api/growth/gallery/${id}/reject`, { method: 'POST' });
       const data = await res.json();
-      if (data.success) { if (fromModal) closePreviewModal(); loadGallery(); } else alert(data.message);
+      if (data.success) { showAdminToast('게시물이 거절되었습니다.', 'success'); if (fromModal) closePreviewModal(); loadGallery(); }
+      else showAdminToast(data.message || '거절에 실패했습니다.', 'error');
     }
 
     async function deleteGallery(id) {
-      if (!confirm('이 게시물을 삭제하시겠습니까? 이 작업은 취소할 수 없습니다.')) return;
+      const ok = await adminConfirm({ title: '게시물 삭제', message: '이 게시물을 삭제하시겠습니까? 이 작업은 취소할 수 없습니다.', okLabel: '삭제', danger: true });
+      if (!ok) return;
       const res = await fetch(`/api/growth/gallery/${id}`, { method: 'DELETE' });
       const data = await res.json();
-      if (data.success) loadGallery(); else alert(data.message || '삭제 실패');
+      if (data.success) { showAdminToast('게시물이 삭제되었습니다.', 'success'); loadGallery(); }
+      else showAdminToast(data.message || '삭제에 실패했습니다.', 'error');
+    }
+
+    // ======== 나도예술가 — 서브탭 (작품 승인 / 콘테스트 관리) ========
+    function switchGalleryAdminTab(tab) {
+      document.querySelectorAll('#galleryAdminTabs .skw-tab').forEach(b => {
+        b.classList.toggle('active', b.dataset.gtab === tab);
+      });
+      document.querySelectorAll('[data-gpanel]').forEach(p => {
+        p.style.display = p.dataset.gpanel === tab ? '' : 'none';
+      });
+      if (tab === 'contests') loadContestAdmin();
+      if (tab === 'approval') loadGalleryReports();
+    }
+
+    // ======== 갤러리 신고 처리 ========
+    function escAdm(s) { if (s == null) return ''; const d = document.createElement('div'); d.textContent = String(s); return d.innerHTML; }
+
+    async function loadGalleryReports() {
+      const tbody = document.getElementById('galleryReportsTableBody');
+      const badge = document.getElementById('galleryReportPendingBadge');
+      const status = document.getElementById('reportStatusFilter')?.value || 'pending';
+      if (!tbody) return;
+      tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:30px;color:var(--gray-500);">로딩 중...</td></tr>';
+      try {
+        const qs = status ? '?status=' + encodeURIComponent(status) + '&limit=50' : '?limit=50';
+        const res = await fetch('/api/growth/admin/gallery-reports' + qs);
+        const data = await res.json();
+        if (!data.success) {
+          tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:30px;color:#ef4444;">' + escAdm(data.message || '불러올 수 없습니다.') + '</td></tr>';
+          return;
+        }
+        const items = data.items || data.reports || [];
+        // pending 카운트 배지 (현재 필터가 pending이 아니어도 별도 호출)
+        if (status === 'pending') {
+          if (items.length > 0) { badge.textContent = items.length; badge.style.display = 'inline-flex'; }
+          else { badge.style.display = 'none'; }
+        }
+        if (items.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:30px;color:var(--gray-500);">' + (status === 'pending' ? '대기 중인 신고가 없습니다.' : '해당 상태의 신고가 없습니다.') + '</td></tr>';
+          return;
+        }
+        tbody.innerHTML = items.map(r => renderGalleryReportRow(r)).join('');
+      } catch (e) {
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:30px;color:#ef4444;">네트워크 오류</td></tr>';
+      }
+    }
+
+    function renderGalleryReportRow(r) {
+      const reportId = r.report_id || r.id;
+      const galleryId = r.gallery_id;
+      const thumbUrl = r.gallery_image_url || r.image_url;
+      const title = r.gallery_title || r.title || '(제목 없음)';
+      const author = r.gallery_author_name || r.author_name || r.student_name || '익명';
+      const reporter = r.reporter_name || r.user_name || r.reporter_display_name || '익명';
+      const reason = r.reason || '';
+      const createdAt = (r.created_at || '').slice(0, 16).replace('T', ' ');
+      const status = r.status || 'pending';
+      let actions = '';
+      if (status === 'pending') {
+        actions = `
+          <button class="btn" style="padding:6px 10px;font-size:13px;" onclick="viewReportedWork(${galleryId})"><i class="fas fa-eye"></i> 작품 보기</button>
+          <button class="btn" style="padding:6px 10px;font-size:13px;background:#ef4444;color:#fff;border-color:#ef4444;" onclick="takedownReportedWork(${reportId}, ${galleryId})"><i class="fas fa-trash-alt"></i> 작품 내림</button>
+          <button class="btn" style="padding:6px 10px;font-size:13px;background:var(--gray-100);" onclick="dismissReportItem(${reportId})"><i class="fas fa-times"></i> 기각</button>`;
+      } else {
+        const label = status === 'resolved' ? '내림 처리됨' : (status === 'dismissed' ? '기각됨' : status);
+        const color = status === 'resolved' ? '#16a34a' : '#6b7280';
+        actions = `<span style="font-size:13px;color:${color};font-weight:600;">${label}</span>`;
+      }
+      const thumbHtml = thumbUrl
+        ? `<img src="${escAdm(thumbUrl)}" alt="${escAdm(title)}" style="width:60px;height:60px;object-fit:cover;border-radius:6px;" onerror="this.style.display='none'">`
+        : `<div style="width:60px;height:60px;border-radius:6px;background:var(--gray-100);display:flex;align-items:center;justify-content:center;font-size:24px;color:var(--gray-400);">🎨</div>`;
+      return `<tr>
+        <td>${reportId}</td>
+        <td>${thumbHtml}</td>
+        <td><div style="font-weight:600;">${escAdm(title)}</div><div style="font-size:13px;color:var(--gray-500);">by ${escAdm(author)}</div></td>
+        <td>${escAdm(reporter)}</td>
+        <td style="font-size:14px;color:var(--gray-700);">${escAdm(reason)}</td>
+        <td style="font-size:13px;color:var(--gray-500);">${escAdm(createdAt)}</td>
+        <td><div style="display:flex;gap:6px;flex-wrap:wrap;">${actions}</div></td>
+      </tr>`;
+    }
+
+    function viewReportedWork(galleryId) {
+      window.open('/plus/gallery.html?open=' + galleryId, '_blank');
+    }
+
+    async function takedownReportedWork(reportId, galleryId) {
+      const reason = prompt('작품 내림 사유를 입력하세요 (작성자에게 알림으로 전달됩니다):');
+      if (!reason || !reason.trim()) return;
+      if (!confirm(`작품 #${galleryId}을(를) 내림 처리할까요? (작성자에게 알림이 전송됩니다)`)) return;
+      try {
+        const res = await fetch(`/api/growth/admin/gallery-reports/${reportId}/resolve`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'takedown', reason: reason.trim() })
+        });
+        const data = await res.json();
+        if (data.success) {
+          showAdminToast('작품이 내림 처리되었습니다.', 'success');
+          loadGalleryReports();
+          if (typeof loadGallery === 'function') loadGallery();
+        } else {
+          showAdminToast(data.message || '처리 실패', 'error');
+        }
+      } catch (e) { showAdminToast('네트워크 오류', 'error'); }
+    }
+
+    async function dismissReportItem(reportId) {
+      if (!confirm('이 신고를 기각할까요?')) return;
+      try {
+        const res = await fetch(`/api/growth/admin/gallery-reports/${reportId}/resolve`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'dismiss' })
+        });
+        const data = await res.json();
+        if (data.success) {
+          showAdminToast('신고가 기각되었습니다.', 'success');
+          loadGalleryReports();
+        } else {
+          showAdminToast(data.message || '처리 실패', 'error');
+        }
+      } catch (e) { showAdminToast('네트워크 오류', 'error'); }
+    }
+
+    // ======== 콘테스트 관리 ========
+    const CONTEST_CAT_LABEL = { art:'미술', music:'음악', literature:'문학', video:'영상', etc:'기타' };
+    const CONTEST_CAT_EMOJI = { art:'🎨', music:'🎵', literature:'📝', video:'🎬', etc:'✨' };
+
+    function calcContestDDay(endDate) {
+      if (!endDate) return { label: '-', cls: 'safe' };
+      const end = new Date((endDate.length > 10 ? endDate : endDate + 'T23:59:59').replace(' ', 'T'));
+      const now = new Date();
+      const diff = end - now;
+      const days = Math.ceil(diff / (1000*60*60*24));
+      if (days < 0) return { label: '종료', cls: 'closed' };
+      if (days === 0) return { label: '오늘', cls: 'danger' };
+      if (days <= 3) return { label: `D-${days}`, cls: 'danger' };
+      if (days <= 7) return { label: `D-${days}`, cls: 'warn' };
+      return { label: `D-${days}`, cls: 'safe' };
+    }
+
+    function getContestStatus(ev) {
+      if (ev.deleted_at) return 'deleted';
+      const now = new Date();
+      const start = ev.start_date ? new Date(ev.start_date.length>10 ? ev.start_date : ev.start_date+'T00:00:00') : null;
+      const end = ev.end_date ? new Date(ev.end_date.length>10 ? ev.end_date : ev.end_date+'T23:59:59') : null;
+      if (end && end < now) return 'closed';
+      if (start && start > now) return 'upcoming';
+      return 'active';
+    }
+
+    async function loadContestAdmin() {
+      const body = document.getElementById('contestAdminTableBody');
+      if (!body) return;
+      body.innerHTML = `<tr><td colspan="8" style="text-align:center;color:#9ca3af;padding:24px;">불러오는 중...</td></tr>`;
+      const statusFilter = document.getElementById('contestStatusFilter')?.value || '';
+      const catFilter = document.getElementById('contestCategoryFilter')?.value || '';
+      try {
+        const params = new URLSearchParams();
+        params.set('limit', '100');
+        params.set('includeAll', 'true');
+        if (statusFilter) params.set('status', statusFilter);
+        if (catFilter) params.set('category', catFilter);
+        const res = await fetch(`/api/growth/events?${params.toString()}`);
+        const data = await res.json();
+        if (!data.success) { body.innerHTML = `<tr><td colspan="8" style="text-align:center;color:#9ca3af;">불러올 수 없습니다</td></tr>`; return; }
+        const items = (data.items || data.events || []).filter(ev => !ev.deleted_at);
+        const badge = document.getElementById('contestCountBadge');
+        if (badge) badge.textContent = items.length;
+        if (!items.length) {
+          body.innerHTML = `<tr><td colspan="8" style="text-align:center;color:#9ca3af;padding:24px;">콘테스트가 없습니다. <button class="btn btn-approve btn-sm" style="margin-left:8px;padding:6px 12px;" onclick="openContestEditModal()"><i class="fas fa-plus"></i> 새 콘테스트</button></td></tr>`;
+          return;
+        }
+        body.innerHTML = items.map(ev => {
+          const dd = calcContestDDay(ev.end_date);
+          const st = getContestStatus(ev);
+          const stLabel = { upcoming:'예정', active:'진행중', closed:'종료' }[st] || '-';
+          const stColor = { upcoming:'#1d4ed8', active:'#16a34a', closed:'#6b7280' }[st] || '#6b7280';
+          const stBg = { upcoming:'#dbeafe', active:'#dcfce7', closed:'#f3f4f6' }[st] || '#f3f4f6';
+          const ddColor = { safe:'#6b7280', warn:'#f59e0b', danger:'#ef4444', closed:'#9ca3af' }[dd.cls];
+          const period = (ev.start_date && ev.end_date) ? `${ev.start_date.slice(0,10)} ~ ${ev.end_date.slice(0,10)}` : (ev.end_date ? `~ ${ev.end_date.slice(0,10)}` : '-');
+          const thumb = ev.thumbnail_url
+            ? `<img src="${escHtml(ev.thumbnail_url)}" style="width:60px;height:40px;object-fit:cover;border-radius:6px;border:1px solid #e5e7eb;">`
+            : `<div style="width:60px;height:40px;background:#f3f4f6;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:22px;">${CONTEST_CAT_EMOJI[ev.category]||'🏆'}</div>`;
+          const subs = ev.participant_count ?? ev.submission_count ?? 0;
+          return `
+            <tr>
+              <td>${ev.id}</td>
+              <td>${thumb}</td>
+              <td>
+                <div style="font-weight:600;color:#111827;font-size:14px;">${escHtml(ev.title || '-')}</div>
+                <div style="font-size:13px;color:#6b7280;margin-top:2px;">${CONTEST_CAT_EMOJI[ev.category]||''} ${CONTEST_CAT_LABEL[ev.category]||ev.category||'-'}</div>
+              </td>
+              <td style="font-size:13px;color:#4b5563;">${period}</td>
+              <td><span style="color:${ddColor};font-weight:700;font-size:13px;">${dd.label}</span></td>
+              <td style="text-align:center;font-weight:600;">${subs}</td>
+              <td><span style="display:inline-block;padding:3px 10px;border-radius:99px;background:${stBg};color:${stColor};font-size:13px;font-weight:700;">${stLabel}</span></td>
+              <td style="white-space:nowrap;">
+                <button class="btn btn-view btn-sm" onclick="showContestSubmissions(${ev.id}, '${escHtml((ev.title||'').replace(/'/g,'&#39;'))}')"><i class="fas fa-list"></i> 응모작</button>
+                <button class="btn btn-sm" style="background:#f59e0b;color:#fff;" onclick="openContestEditModal(${ev.id})"><i class="fas fa-pen"></i></button>
+                <button class="btn btn-reject btn-sm" onclick="deleteContest(${ev.id}, '${escHtml((ev.title||'').replace(/'/g,'&#39;'))}')"><i class="fas fa-trash"></i></button>
+              </td>
+            </tr>`;
+        }).join('');
+      } catch(e) {
+        body.innerHTML = `<tr><td colspan="8" style="text-align:center;color:#ef4444;">네트워크 오류</td></tr>`;
+      }
+    }
+
+    // 콘테스트 작성/수정 모달
+    async function openContestEditModal(id) {
+      document.getElementById('contestEditId').value = id || '';
+      document.getElementById('contestEditModalTitle').innerHTML = id
+        ? '<i class="fas fa-pen" style="color:#f59e0b;"></i> 콘테스트 수정'
+        : '<i class="fas fa-trophy" style="color:#f59e0b;"></i> 새 콘테스트';
+      // 초기화
+      ['contestTitle','contestSubtitle','contestLocation','contestHostSchool','contestStartDate','contestEndDate','contestDescription','contestThumbnailUrl'].forEach(k => {
+        const el = document.getElementById(k); if (el) el.value = '';
+      });
+      document.getElementById('contestCategory').value = 'art';
+      document.getElementById('contestEventType').value = 'apply';
+      document.getElementById('contestSchoolOnly').checked = false;
+      document.getElementById('contestPublishToGallery').checked = true;
+      document.querySelectorAll('.contest-level').forEach(cb => cb.checked = false);
+      document.querySelectorAll('.contest-grade').forEach(cb => cb.checked = false);
+      document.getElementById('contestTitleError').style.display = 'none';
+      document.getElementById('contestDateError').style.display = 'none';
+      document.getElementById('contestThumbnailPreview').innerHTML = '🏆';
+
+      if (id) {
+        try {
+          const r = await fetch(`/api/growth/events/${id}`);
+          const d = await r.json();
+          if (d && d.success) {
+            const ev = d.event || d.item || d;
+            document.getElementById('contestTitle').value = ev.title || '';
+            document.getElementById('contestSubtitle').value = ev.subtitle || '';
+            document.getElementById('contestCategory').value = ev.category || 'art';
+            document.getElementById('contestEventType').value = ev.event_type || 'apply';
+            document.getElementById('contestStartDate').value = (ev.start_date || '').slice(0,10);
+            document.getElementById('contestEndDate').value = (ev.end_date || '').slice(0,10);
+            document.getElementById('contestLocation').value = ev.location || '';
+            document.getElementById('contestHostSchool').value = ev.host_school_name || '';
+            document.getElementById('contestDescription').value = ev.description || '';
+            document.getElementById('contestSchoolOnly').checked = !!ev.target_school_only;
+            document.getElementById('contestPublishToGallery').checked = ev.publish_to_gallery !== 0 && ev.publish_to_gallery !== false;
+            document.getElementById('contestThumbnailUrl').value = ev.thumbnail_url || '';
+            if (ev.thumbnail_url) {
+              document.getElementById('contestThumbnailPreview').innerHTML = `<img src="${escHtml(ev.thumbnail_url)}" style="width:100%;height:100%;object-fit:cover;">`;
+            }
+            // 학교급·학년 — 문자열 또는 배열 호환
+            const levels = parseListField(ev.target_school_levels);
+            const grades = parseListField(ev.target_grades);
+            document.querySelectorAll('.contest-level').forEach(cb => { cb.checked = levels.includes(cb.value); });
+            document.querySelectorAll('.contest-grade').forEach(cb => { cb.checked = grades.includes(cb.value) || grades.includes(parseInt(cb.value)); });
+          }
+        } catch(e) { showAdminToast('정보를 불러오지 못했습니다.', 'error'); }
+      }
+      document.getElementById('contestEditModal').classList.add('active');
+    }
+
+    function parseListField(v) {
+      if (!v) return [];
+      if (Array.isArray(v)) return v.map(String);
+      if (typeof v === 'string') {
+        try {
+          const j = JSON.parse(v);
+          if (Array.isArray(j)) return j.map(String);
+        } catch(e) {}
+        return v.split(',').map(s => s.trim()).filter(Boolean);
+      }
+      return [];
+    }
+
+    function closeContestEditModal() {
+      document.getElementById('contestEditModal').classList.remove('active');
+    }
+
+    async function handleContestThumbnailSelect(input) {
+      const file = input.files[0];
+      input.value = '';
+      if (!file) return;
+      if (file.size > 5 * 1024 * 1024) { showAdminToast('썸네일은 5MB 이하로 선택해주세요.', 'error'); return; }
+      // 즉시 로컬 미리보기
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        document.getElementById('contestThumbnailPreview').innerHTML = `<img src="${e.target.result}" style="width:100%;height:100%;object-fit:cover;">`;
+      };
+      reader.readAsDataURL(file);
+      try {
+        const fd = new FormData();
+        fd.append('file', file);
+        const r = await fetch('/api/growth/events/upload-thumbnail', { method: 'POST', body: fd });
+        const d = await r.json();
+        if (d && d.success) {
+          document.getElementById('contestThumbnailUrl').value = d.url;
+        } else {
+          showAdminToast(d.message || '썸네일 업로드 실패', 'error');
+        }
+      } catch(e) {
+        showAdminToast('썸네일 업로드 오류', 'error');
+      }
+    }
+
+    function clearContestThumbnail() {
+      document.getElementById('contestThumbnailUrl').value = '';
+      document.getElementById('contestThumbnailPreview').innerHTML = '🏆';
+    }
+
+    async function submitContestEdit() {
+      const id = document.getElementById('contestEditId').value;
+      const title = document.getElementById('contestTitle').value.trim();
+      const start = document.getElementById('contestStartDate').value;
+      const end = document.getElementById('contestEndDate').value;
+      let ok = true;
+      // 검증
+      const titleErr = document.getElementById('contestTitleError');
+      titleErr.style.display = title ? 'none' : 'block';
+      if (!title) ok = false;
+      const dateErr = document.getElementById('contestDateError');
+      if (start && end && start > end) { dateErr.style.display = 'block'; ok = false; }
+      else dateErr.style.display = 'none';
+      if (!ok) return;
+      const levels = Array.from(document.querySelectorAll('.contest-level:checked')).map(c => c.value);
+      const grades = Array.from(document.querySelectorAll('.contest-grade:checked')).map(c => parseInt(c.value));
+      const body = {
+        title, subtitle: document.getElementById('contestSubtitle').value.trim(),
+        description: document.getElementById('contestDescription').value,
+        category: document.getElementById('contestCategory').value,
+        event_type: document.getElementById('contestEventType').value,
+        start_date: start || null, end_date: end || null,
+        location: document.getElementById('contestLocation').value.trim(),
+        host_school_name: document.getElementById('contestHostSchool').value.trim(),
+        target_school_levels: levels, target_grades: grades,
+        target_school_only: document.getElementById('contestSchoolOnly').checked ? 1 : 0,
+        publish_to_gallery: document.getElementById('contestPublishToGallery').checked ? 1 : 0,
+        thumbnail_url: document.getElementById('contestThumbnailUrl').value || null
+      };
+      const url = id ? `/api/growth/events/${id}` : '/api/growth/events';
+      const method = id ? 'PUT' : 'POST';
+      try {
+        const r = await fetch(url, { method, headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
+        const d = await r.json();
+        if (d && d.success) {
+          showAdminToast(id ? '콘테스트가 수정되었습니다.' : '콘테스트가 등록되었습니다.', 'success');
+          closeContestEditModal();
+          loadContestAdmin();
+        } else {
+          showAdminToast(d.message || '저장 실패', 'error');
+        }
+      } catch(e) {
+        showAdminToast('네트워크 오류', 'error');
+      }
+    }
+
+    async function deleteContest(id, title) {
+      const ok = await adminConfirm({
+        title: '콘테스트 삭제',
+        message: `"${title || '콘테스트'}"을(를) 삭제할까요?\n응모된 작품은 갤러리에는 남지만 콘테스트 출처는 사라집니다.`,
+        okLabel: '삭제하기', danger: true
+      });
+      if (!ok) return;
+      try {
+        const r = await fetch(`/api/growth/events/${id}`, { method: 'DELETE' });
+        const d = await r.json();
+        if (d && d.success) {
+          showAdminToast('콘테스트가 삭제되었습니다.', 'success');
+          loadContestAdmin();
+        } else {
+          showAdminToast(d.message || '삭제 실패', 'error');
+        }
+      } catch(e) { showAdminToast('네트워크 오류', 'error'); }
+    }
+
+    // 응모작 보기
+    async function showContestSubmissions(id, title) {
+      document.getElementById('contestSubmissionsTitle').innerHTML = `<i class="fas fa-list"></i> ${escHtml(title || '응모작')}`;
+      document.getElementById('contestSubmissionsBody').innerHTML = '불러오는 중...';
+      document.getElementById('contestSubmissionsModal').classList.add('active');
+      try {
+        const r = await fetch(`/api/growth/events/${id}/submissions?limit=100`);
+        const d = await r.json();
+        if (!d.success) {
+          document.getElementById('contestSubmissionsBody').innerHTML = '<div style="color:#9ca3af;text-align:center;padding:30px;">불러올 수 없습니다.</div>';
+          return;
+        }
+        const items = d.items || d.submissions || [];
+        if (!items.length) {
+          document.getElementById('contestSubmissionsBody').innerHTML = '<div style="color:#9ca3af;text-align:center;padding:30px;">아직 응모작이 없습니다.</div>';
+          return;
+        }
+        document.getElementById('contestSubmissionsBody').innerHTML = `
+          <table style="width:100%;border-collapse:collapse;">
+            <thead><tr style="border-bottom:1px solid #e5e7eb;">
+              <th style="text-align:left;padding:8px;font-size:13px;color:#374151;">#</th>
+              <th style="text-align:left;padding:8px;font-size:13px;color:#374151;">썸네일</th>
+              <th style="text-align:left;padding:8px;font-size:13px;color:#374151;">작품 제목</th>
+              <th style="text-align:left;padding:8px;font-size:13px;color:#374151;">응모자</th>
+              <th style="text-align:left;padding:8px;font-size:13px;color:#374151;">제출일</th>
+              <th style="text-align:center;padding:8px;font-size:13px;color:#374151;">갤러리</th>
+            </tr></thead>
+            <tbody>
+              ${items.map((s, i) => {
+                const thumb = s.image_url
+                  ? `<img src="${escHtml(s.image_url)}" style="width:48px;height:48px;object-fit:cover;border-radius:6px;border:1px solid #e5e7eb;">`
+                  : '<div style="width:48px;height:48px;background:#f3f4f6;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:18px;">🖼️</div>';
+                const pub = (s.is_published_to_gallery === 1 || s.is_published_to_gallery === true)
+                  ? '<span style="color:#16a34a;font-weight:700;font-size:13px;">공개중</span>'
+                  : '<span style="color:#9ca3af;font-size:13px;">대기</span>';
+                const dateStr = (s.created_at || '').slice(0,10);
+                return `<tr style="border-bottom:1px solid #f3f4f6;">
+                  <td style="padding:10px 8px;font-size:14px;">${i+1}</td>
+                  <td style="padding:10px 8px;">${thumb}</td>
+                  <td style="padding:10px 8px;font-size:14px;font-weight:600;color:#111827;">${escHtml(s.title || '-')}</td>
+                  <td style="padding:10px 8px;font-size:14px;">${escHtml(s.student_name || s.user_name || '-')}</td>
+                  <td style="padding:10px 8px;font-size:13px;color:#6b7280;">${dateStr}</td>
+                  <td style="padding:10px 8px;text-align:center;">${pub}</td>
+                </tr>`;
+              }).join('')}
+            </tbody>
+          </table>
+        `;
+      } catch(e) {
+        document.getElementById('contestSubmissionsBody').innerHTML = '<div style="color:#ef4444;text-align:center;padding:30px;">네트워크 오류</div>';
+      }
+    }
+
+    function closeContestSubmissionsModal() {
+      document.getElementById('contestSubmissionsModal').classList.remove('active');
     }
 
     // 학습 배포
@@ -4588,7 +5234,7 @@
 
     async function distributeAssignment() {
       const title = document.getElementById('assignTitle').value.trim();
-      if (!title) return alert('제목을 입력하세요.');
+      if (!title) { showAdminToast('제목을 입력하세요.', 'warning'); return; }
       const goalsText = document.getElementById('assignGoals').value.trim();
       const goals = goalsText ? goalsText.split('\n').filter(Boolean).map(g => ({ text: g.trim(), completed: false })) : [];
       const body = {
@@ -4607,13 +5253,13 @@
       const res = await fetch(url, { method, headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
       const data = await res.json();
       if (data.success) {
-        alert(data.message || '배포 완료!');
+        showAdminToast(data.message || '배포 완료!', 'success');
         document.getElementById('assignTitle').value = '';
         document.getElementById('assignDesc').value = '';
         document.getElementById('assignGoals').value = '';
         loadAssignHistory();
       } else {
-        alert(data.message);
+        showAdminToast(data.message || '배포에 실패했습니다.', 'error');
       }
     }
 
@@ -4643,7 +5289,7 @@
       try {
         const res = await fetch(`/api/admin/learning-map/isolated-nodes?type=${t}&limit=200`, { credentials: 'include' });
         const d = await res.json();
-        if (!d.success) { alert('고립 노드 조회 실패'); return; }
+        if (!d.success) { showAdminToast('고립 노드 조회에 실패했습니다.', 'error'); return; }
         const html = `
           <div id="isolatedModalOverlay" style="position:fixed;inset:0;background:rgba(15,23,42,.65);z-index:10100;display:flex;align-items:center;justify-content:center" onclick="if(event.target===this)document.getElementById('isolatedModalOverlay').remove()">
             <div style="background:#fff;width:90vw;max-width:780px;max-height:90vh;border-radius:14px;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.4)">
@@ -4673,7 +5319,7 @@
             </div>
           </div>`;
         document.body.insertAdjacentHTML('beforeend', html);
-      } catch (e) { console.error('isolated:', e); alert('오류: ' + e.message); }
+      } catch (e) { console.error('isolated:', e); showAdminToast('오류: ' + e.message, 'error'); }
     }
 
     // 노드 클릭 시 매핑 영역으로 이동 (선택 노드 = 클릭한 노드)
@@ -4764,16 +5410,17 @@
       const statusEl = document.getElementById('lmUploadStatus');
       const resultEl = document.getElementById('lmUploadResult');
       if (!fileInput.files || fileInput.files.length === 0) {
-        alert('Excel 파일을 선택하세요.');
+        showAdminToast('Excel 파일을 선택하세요.', 'warning');
         return;
       }
       const mode = document.querySelector('input[name="lmMode"]:checked')?.value || 'merge';
       const cascade = document.getElementById('lmCascade')?.checked ?? true;
       if (mode === 'replace') {
         const msg = cascade
-          ? '전체 교체(cascade) 모드로 진행하시겠습니까?\n기존 학습맵 노드/엣지 + 진행 상태/매핑/진단 세션이 모두 삭제됩니다.'
-          : '전체 교체 모드로 진행하시겠습니까?\n기존 학습맵 노드/엣지가 삭제됩니다 (참조 데이터는 유지 — 고아 발생 가능).';
-        if (!confirm(msg)) return;
+          ? '전체 교체(cascade) 모드로 진행하시겠습니까? 기존 학습맵 노드/엣지 + 진행 상태/매핑/진단 세션이 모두 삭제됩니다.'
+          : '전체 교체 모드로 진행하시겠습니까? 기존 학습맵 노드/엣지가 삭제됩니다 (참조 데이터는 유지 — 고아 발생 가능).';
+        const ok = await adminConfirm({ title: '학습맵 전체 교체', message: msg, okLabel: '교체', danger: true });
+        if (!ok) return;
       }
 
       const fd = new FormData();
@@ -4843,7 +5490,13 @@
           return;
         }
         const summary = `매핑 ${d.node_contents}건, 진행상태 ${d.user_node_status}건, 진단세션 ${d.diagnosis_sessions}건, 진단답변 ${d.diagnosis_answers}건, 학습경로 ${d.learning_paths}건, 엣지 ${d.edges}건`;
-        if (!confirm(`고아 데이터 총 ${total}건 (${summary}) 정리하시겠습니까?\n되돌릴 수 없습니다.`)) {
+        const okOrphan = await adminConfirm({
+          title: '고아 데이터 정리',
+          message: `고아 데이터 총 ${total}건 (${summary}) 정리하시겠습니까? 되돌릴 수 없습니다.`,
+          okLabel: '정리',
+          danger: true
+        });
+        if (!okOrphan) {
           statusEl.innerHTML = '<span style="color:#6b7280;">취소됨.</span>';
           return;
         }
@@ -4924,7 +5577,7 @@
       try {
         const res = await fetch('/api/admin/learning-map/nodes?' + params.toString(), { credentials: 'include' });
         const data = await res.json();
-        if (!data.success) { alert('노드 목록 로드 실패: ' + (data.message || '')); return; }
+        if (!data.success) { showAdminToast('노드 목록 로드 실패: ' + (data.message || ''), 'error'); return; }
         const nodes = data.nodes || data.data || [];
         const total = data.total || data.pagination?.total || nodes.length;
         if (reset) listEl.innerHTML = '';
@@ -5173,7 +5826,7 @@
     function closeLmAddContentModal() { /* 모달 폐기 — no-op */ }
 
     async function addContentById() {
-      if (!currentNodeId) { alert('먼저 차시 노드를 선택하세요.'); return; }
+      if (!currentNodeId) { showAdminToast('먼저 차시 노드를 선택하세요.', 'warning'); return; }
       const raw = document.getElementById('lmByIdInput').value.trim();
       const role = document.getElementById('lmByIdRole').value;
       const resEl = document.getElementById('lmByIdResult');
@@ -5217,8 +5870,38 @@
 
     /* closeLmAddContentModal — 위에서 정의됨 (모달 폐기 stub) */
 
+    // Phase 4: 학습맵 콘텐츠 검색 — DacheumSearch 공통 컴포넌트 마운트 (키워드 검색만)
+    let _lmPickSearchCtrl = null;
+    function ensureLmPickSearchMounted() {
+      if (_lmPickSearchCtrl) return _lmPickSearchCtrl;
+      const host = document.getElementById('lmPickSearchHost');
+      if (!host || !window.DacheumSearch) return null;
+      _lmPickSearchCtrl = window.DacheumSearch.mount(host, {
+        mode: 'content',
+        sources: ['public'],
+        placeholder: '제목 키워드로 검색',
+        typeFilters: [],              // 유형 칩 미사용 (탭이 type 결정)
+        enableStdSearch: false,
+        showAdvanced: false,
+        enableViewToggle: false,
+        sortOptions: [{ value: 'latest', label: '최신순' }],
+        legacyIds: false,
+        hooks: {
+          onSearch: () => searchPickableContents()
+        }
+      });
+      return _lmPickSearchCtrl;
+    }
+
     async function searchPickableContents() {
-      const kw = document.getElementById('lmPickKeyword').value.trim();
+      // Phase 4: DacheumSearch 컨트롤러에서 키워드 읽음 (없으면 hidden 폴백 사용)
+      ensureLmPickSearchMounted();
+      let kw = '';
+      if (_lmPickSearchCtrl && typeof _lmPickSearchCtrl.getState === 'function') {
+        kw = (_lmPickSearchCtrl.getState().keyword || '').trim();
+      } else {
+        kw = (document.getElementById('lmPickKeyword')?.value || '').trim();
+      }
       const listEl = document.getElementById('lmPickList');
       listEl.innerHTML = '<div style="color:#9ca3af;font-size:13px;padding:10px;">검색 중...</div>';
       try {
@@ -5267,25 +5950,26 @@
           body: JSON.stringify({ content_id: contentId, content_role: role, sort_order })
         });
         const data = await res.json();
-        if (!data.success) { alert('추가 실패: ' + (data.message || '')); return; }
+        if (!data.success) { showAdminToast('추가 실패: ' + (data.message || ''), 'error'); return; }
         lmShowToast('추가 완료');
         await loadLmNodeContents(currentNodeId);
         await searchPickableContents();
-      } catch (err) { alert('네트워크 오류: ' + err.message); }
+      } catch (err) { showAdminToast('네트워크 오류: ' + err.message, 'error'); }
     }
 
     async function removeContentFromNode(contentId) {
       if (!currentNodeId) return;
-      if (!confirm('이 콘텐츠 매핑을 제거하시겠습니까?')) return;
+      const ok = await adminConfirm({ title: '매핑 제거', message: '이 콘텐츠 매핑을 제거하시겠습니까?', okLabel: '제거', danger: true });
+      if (!ok) return;
       try {
         const res = await fetch(`/api/admin/learning-map/nodes/${encodeURIComponent(currentNodeId)}/contents/${encodeURIComponent(contentId)}`, {
           method: 'DELETE', credentials: 'include'
         });
         const data = await res.json();
-        if (!data.success) { alert('제거 실패: ' + (data.message || '')); return; }
+        if (!data.success) { showAdminToast('제거 실패: ' + (data.message || ''), 'error'); return; }
         lmShowToast('제거 완료', '#ef4444');
         await loadLmNodeContents(currentNodeId);
-      } catch (err) { alert('네트워크 오류: ' + err.message); }
+      } catch (err) { showAdminToast('네트워크 오류: ' + err.message, 'error'); }
     }
 
     async function moveContentOrder(contentId, dir) {
@@ -5310,9 +5994,9 @@
           body: JSON.stringify({ sort_order: aSort })
         });
         const d1 = await r1.json(); const d2 = await r2.json();
-        if (!d1.success || !d2.success) { alert('순서 변경 실패'); return; }
+        if (!d1.success || !d2.success) { showAdminToast('순서 변경에 실패했습니다.', 'error'); return; }
         await loadLmNodeContents(currentNodeId);
-      } catch (err) { alert('네트워크 오류: ' + err.message); }
+      } catch (err) { showAdminToast('네트워크 오류: ' + err.message, 'error'); }
     }
 
     // ======== F-P1: 사이드 패널 모드 전환 ========
@@ -5327,6 +6011,10 @@
         const el = document.getElementById(id);
         if (el) el.classList.toggle('active', k === mode);
       });
+      // Phase 4: 검색 패널 첫 진입 시 DacheumSearch 마운트
+      if (mode === 'search') {
+        setTimeout(() => { try { ensureLmPickSearchMounted(); } catch (e) { /* noop */ } }, 0);
+      }
     }
 
     // ======== F-P1-1: AI 추천 자동 로드 ========
@@ -5410,7 +6098,8 @@
       if (!currentNodeId || !window._lmAutoSuggest) return;
       const high = window._lmAutoSuggest.high || [];
       if (!high.length) { lmShowToast('정확도 ≥ 80% 추천이 없습니다.'); return; }
-      if (!confirm(`정확도 ≥ 80% 추천 ${high.length}건을 모두 매핑하시겠습니까?`)) return;
+      const ok = await adminConfirm({ title: '일괄 매핑', message: `정확도 ≥ 80% 추천 ${high.length}건을 모두 매핑하시겠습니까?`, okLabel: '매핑', danger: false });
+      if (!ok) return;
       const mappings = high.map((it, i) => ({
         nodeId: currentNodeId, contentId: it.id,
         role: it.content_type === 'video' ? 'video' : 'question',
@@ -5512,10 +6201,10 @@
         const text = await file.text();
         mappings = parseCsv(text);
       } catch (err) {
-        alert('CSV 파싱 실패: ' + err.message);
+        showAdminToast('CSV 파싱 실패: ' + err.message, 'error');
         return;
       }
-      if (!mappings.length) { alert('CSV에 데이터 행이 없습니다.'); return; }
+      if (!mappings.length) { showAdminToast('CSV에 데이터 행이 없습니다.', 'warning'); return; }
       // 드라이런
       try {
         const res = await fetch('/api/admin/learning-map/mappings/bulk?dryRun=1', {
@@ -5524,9 +6213,9 @@
           body: JSON.stringify({ mappings, dryRun: true })
         });
         const data = await res.json();
-        if (!data.success) { alert('드라이런 실패: ' + (data.message || '')); return; }
+        if (!data.success) { showAdminToast('드라이런 실패: ' + (data.message || ''), 'error'); return; }
         showImportPreview(mappings, data);
-      } catch (err) { alert('네트워크 오류: ' + err.message); }
+      } catch (err) { showAdminToast('네트워크 오류: ' + err.message, 'error'); }
     }
 
     function showImportPreview(mappings, dry) {

@@ -60,6 +60,39 @@ app.use(sessionMiddleware);
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
+// ============ 관리자 HTML 접근 가드 (BUG-A-03) ============
+// /admin/*.html 정적 파일은 express.static 이전에 세션·역할을 검증한다.
+// - 미로그인 → /login.html?from=... 로 302 리다이렉트
+// - 비-admin 역할 → 403 한국어 안내 페이지
+const authDbForGuard = require('./db/auth');
+app.use((req, res, next) => {
+  // /admin/ 이하의 HTML 또는 디렉터리(/admin, /admin/) 요청만 가드.
+  // /api/admin/* 는 라우트 단의 adminOnly 미들웨어가 처리하므로 건드리지 않는다.
+  if (!req.path.startsWith('/admin')) return next();
+  if (req.path.startsWith('/admin/') === false && req.path !== '/admin') return next();
+  // HTML 또는 확장자 없는 디렉터리 진입만 검사 (정적 자원 .js/.css/.png 등은 통과)
+  const looksLikeHtml = req.path === '/admin' || req.path === '/admin/' ||
+                        req.path.endsWith('.html') ||
+                        !/\.[a-zA-Z0-9]{1,5}$/.test(req.path);
+  if (!looksLikeHtml) return next();
+
+  const sessionUserId = req.session && req.session.userId;
+  if (!sessionUserId) {
+    const from = encodeURIComponent(req.originalUrl || req.path);
+    return res.redirect(`/login.html?from=${from}`);
+  }
+  const user = authDbForGuard.findUserById(sessionUserId);
+  if (!user) {
+    const from = encodeURIComponent(req.originalUrl || req.path);
+    return res.redirect(`/login.html?from=${from}`);
+  }
+  if (user.role !== 'admin') {
+    res.status(403).type('html').send(`<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>접근 권한 없음 — 다채움</title><style>body{font-family:Pretendard,system-ui,sans-serif;background:#F5F7FA;color:#1A1A2E;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0}.card{background:#fff;padding:40px 48px;border-radius:14px;box-shadow:0 10px 30px rgba(0,0,0,.06);max-width:480px;text-align:center}.icon{font-size:48px;margin-bottom:12px}h1{font-size:22px;margin:8px 0 6px}p{color:#6B7280;font-size:16px;line-height:1.7;margin:6px 0 20px}.btn{display:inline-block;padding:12px 22px;background:#2563eb;color:#fff;border-radius:10px;text-decoration:none;font-size:16px}.btn.secondary{background:#fff;color:#2563eb;border:1px solid #2563eb;margin-left:8px}</style></head><body><div class="card"><div class="icon">🔒</div><h1>접근 권한이 없습니다</h1><p>이 페이지는 관리자만 접근할 수 있습니다.<br>관리자 계정으로 로그인하거나 포털로 돌아가세요.</p><a class="btn" href="/">포털로 가기</a><a class="btn secondary" href="/login.html">로그인</a></div></body></html>`);
+    return;
+  }
+  next();
+});
+
 // 정적 파일 서빙
 app.use(express.static(path.join(__dirname, 'public')));
 // 워크트리에서 실행될 때 부모 저장소의 uploads 폴더도 서빙 (fallback)
@@ -97,6 +130,7 @@ app.use('/api/portal', require('./routes/portal'));
 app.use('/api/curriculum', require('./routes/curriculum'));
 app.use('/api/search', require('./routes/search'));
 app.use('/api/upload', require('./routes/upload'));
+app.use('/api/notifications', require('./routes/notifications'));
 
 // 루트 경로: 비로그인 사용자도 포털 진입 가능 (공개 영역만 표출)
 // — 로그인 시: 개인화된 대시보드 (오늘 할 일·4슬롯·활동 요약)

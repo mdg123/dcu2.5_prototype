@@ -226,6 +226,34 @@
     </div>
   </div>
 
+  <!-- 작품 상세 모달 (나도예술가) -->
+  <div class="modal-overlay" id="artDetailModal">
+    <div class="modal" style="width:90vw;max-width:720px;max-height:90vh;padding:0;overflow:hidden;overflow-y:auto;position:relative;">
+      <button onclick="closeModal('artDetailModal')" aria-label="닫기"
+        style="position:absolute;top:14px;right:14px;z-index:10;width:38px;height:38px;border-radius:50%;border:none;background:rgba(0,0,0,0.45);color:#fff;font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(4px);transition:background .2s;"
+        onmouseover="this.style.background='rgba(0,0,0,0.65)'" onmouseout="this.style.background='rgba(0,0,0,0.45)'">
+        <i class="fas fa-times"></i>
+      </button>
+      <div id="artDetailMedia" style="width:100%;height:340px;display:flex;align-items:center;justify-content:center;color:rgba(255,255,255,.85);font-size:72px;background:linear-gradient(135deg,#ffecd2,#fcb69f);"></div>
+      <div style="padding:24px 28px 20px;">
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:14px;margin-bottom:12px;">
+          <h3 id="artDetailTitle" style="font-size:20px;font-weight:700;margin:0;line-height:1.4;flex:1;min-width:0;word-break:break-word;"></h3>
+          <span id="artDetailCat" style="flex-shrink:0;padding:5px 14px;border-radius:999px;font-size:12px;font-weight:600;background:var(--gray-100);color:var(--gray-700);"></span>
+        </div>
+        <div style="display:flex;align-items:center;gap:16px;font-size:13px;color:var(--gray-500);margin-bottom:18px;flex-wrap:wrap;">
+          <span><i class="fas fa-user"></i> <span id="artDetailAuthor"></span></span>
+          <span><i class="fas fa-calendar"></i> <span id="artDetailDate"></span></span>
+          <span><i class="fas fa-heart" style="color:var(--danger)"></i> <span id="artDetailLikes"></span></span>
+        </div>
+        <p id="artDetailDesc" style="font-size:14px;line-height:1.75;color:var(--gray-700);margin-bottom:22px;white-space:pre-wrap;word-break:break-word;"></p>
+        <div class="modal-actions">
+          <button class="btn btn-outline" onclick="closeModal('artDetailModal')">닫기</button>
+          <button class="btn btn-primary" onclick="likeArtFromDetail()"><i class="fas fa-heart"></i> 좋아요</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <script>
     let currentPage = 'dashboard';
     let currentUser = null;
@@ -537,13 +565,19 @@
 
     // ===== 나도예술가 (갤러리) =====
     let galleryCat = null;
+    let galleryItemsCache = [];
+    const GALLERY_CAT_GRADS = { art: 'linear-gradient(135deg,#f093fb,#f5576c)', music: 'linear-gradient(135deg,#667eea,#764ba2)', writing: 'linear-gradient(135deg,#a18cd1,#fbc2eb)', video: 'linear-gradient(135deg,#ff6b6b,#ee5a24)', other: 'linear-gradient(135deg,#4facfe,#00f2fe)' };
+    const GALLERY_CAT_NAMES = { art: '미술', music: '음악', writing: '문학', video: '영상', other: '기타' };
+    const GALLERY_CAT_ICONS = { art: 'fa-paint-brush', music: 'fa-music', writing: 'fa-pen-fancy', video: 'fa-video', other: 'fa-star' };
+
     async function renderGallery(c) {
       const params = galleryCat ? '?category=' + galleryCat : '';
       const res = await fetch('/api/growth/gallery' + params).then(r => r.json());
       const items = res.items || [];
-      const catGrads = { art: 'linear-gradient(135deg,#f093fb,#f5576c)', music: 'linear-gradient(135deg,#667eea,#764ba2)', writing: 'linear-gradient(135deg,#a18cd1,#fbc2eb)', video: 'linear-gradient(135deg,#ff6b6b,#ee5a24)', other: 'linear-gradient(135deg,#4facfe,#00f2fe)' };
-      const catNames = { art: '미술', music: '음악', writing: '문학', video: '영상', other: '기타' };
-      const catIcons = { art: 'fa-paint-brush', music: 'fa-music', writing: 'fa-pen-fancy', video: 'fa-video', other: 'fa-star' };
+      galleryItemsCache = items;
+      const catGrads = GALLERY_CAT_GRADS;
+      const catNames = GALLERY_CAT_NAMES;
+      const catIcons = GALLERY_CAT_ICONS;
 
       c.innerHTML = `
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
@@ -559,7 +593,7 @@
         </div>
         <div class="gallery-grid">
           ${items.length ? items.map(g => `
-            <div class="gallery-card">
+            <div class="gallery-card" style="cursor:pointer" onclick="openArtDetail(${g.id})">
               <div class="gallery-thumb" style="background:${catGrads[g.category] || catGrads.other}">
                 <i class="fas ${catIcons[g.category] || 'fa-image'}"></i>
               </div>
@@ -568,7 +602,7 @@
                 ${g.description ? `<div style="font-size:11px;color:var(--gray-400);margin-bottom:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escHtml(g.description)}</div>` : ''}
                 <div class="meta">
                   <span>${escHtml(g.student_name)}</span>
-                  <span style="cursor:pointer" onclick="likeArt(${g.id})"><i class="fas fa-heart" style="color:var(--danger)"></i> ${g.like_count}</span>
+                  <span style="cursor:pointer" onclick="event.stopPropagation();likeArt(${g.id})"><i class="fas fa-heart" style="color:var(--danger)"></i> ${g.like_count}</span>
                 </div>
               </div>
             </div>
@@ -581,6 +615,55 @@
       await fetch(`/api/growth/gallery/${id}/like`, { method: 'POST' });
       showToast('좋아요를 눌렀습니다!', 'fa-heart');
       renderPage();
+    }
+
+    let artDetailId = null;
+    function openArtDetail(id) {
+      const item = galleryItemsCache.find(x => x.id === id);
+      if (!item) return;
+      artDetailId = id;
+      const media = document.getElementById('artDetailMedia');
+      const grad = GALLERY_CAT_GRADS[item.category] || GALLERY_CAT_GRADS.other;
+      if (item.image_url) {
+        media.style.background = '#000';
+        media.innerHTML = `<img src="${item.image_url}" alt="${escHtml(item.title)}" style="width:100%;height:100%;object-fit:contain;" onerror="this.parentElement.style.background='${grad}';this.parentElement.innerHTML='<i class=\\'fas ${GALLERY_CAT_ICONS[item.category] || 'fa-image'}\\'></i>';">`;
+      } else {
+        media.style.background = grad;
+        media.innerHTML = `<i class="fas ${GALLERY_CAT_ICONS[item.category] || 'fa-image'}"></i>`;
+      }
+      document.getElementById('artDetailTitle').textContent = item.title || '';
+      document.getElementById('artDetailCat').textContent = GALLERY_CAT_NAMES[item.category] || item.category || '기타';
+      document.getElementById('artDetailAuthor').textContent = item.student_name || '익명';
+      document.getElementById('artDetailDate').textContent = item.created_at ? item.created_at.slice(0, 10) : '';
+      document.getElementById('artDetailLikes').textContent = item.like_count || 0;
+      const descEl = document.getElementById('artDetailDesc');
+      const desc = (item.description || '').trim();
+      if (!desc) {
+        descEl.textContent = '설명이 없습니다.';
+        descEl.style.color = 'var(--gray-400)';
+      } else {
+        descEl.textContent = desc;
+        descEl.style.color = 'var(--gray-700)';
+      }
+      openModal('artDetailModal');
+    }
+
+    async function likeArtFromDetail() {
+      if (!artDetailId) return;
+      try {
+        const r = await fetch(`/api/growth/gallery/${artDetailId}/like`, { method: 'POST' });
+        const data = await r.json();
+        const item = galleryItemsCache.find(x => x.id === artDetailId);
+        if (item && typeof data.like_count === 'number') {
+          item.like_count = data.like_count;
+        } else if (item) {
+          item.like_count = (item.like_count || 0) + 1;
+        }
+        document.getElementById('artDetailLikes').textContent = item ? item.like_count : 0;
+        showToast('좋아요를 눌렀습니다!', 'fa-heart');
+      } catch (e) {
+        showToast('좋아요 처리에 실패했습니다.', 'fa-exclamation-circle');
+      }
     }
 
     // ===== 학급 현황 (교사 전용) =====

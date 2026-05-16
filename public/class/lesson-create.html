@@ -6,6 +6,8 @@
   <title>수업 편집 - 다채움</title>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   <script defer src="/js/components/std-smart-search.js"></script>
+  <!-- Phase 2: 검색 인터페이스 공통 컴포넌트 (window.DacheumSearch) -->
+  <script defer src="/js/components/dacheum-search.js"></script>
   <style>
     :root {
       --primary: #0066FF;
@@ -441,20 +443,19 @@
     </div>
   </div>
 
-  <!-- Content Search Modal -->
+  <!-- Content Search Modal (Phase 2: DacheumSearch 표준 컴포넌트 사용) -->
   <div class="modal-overlay" id="modal-contentSearch">
-    <div class="modal-card" style="width:640px;">
+    <div class="modal-card" style="width:92vw;max-width:1080px;max-height:85vh;display:flex;flex-direction:column;">
       <div class="modal-header">
         <h3>🔍 콘텐츠에서 검색</h3>
         <button class="close-btn" onclick="closeModal('contentSearch')">✕</button>
       </div>
-      <div class="modal-body">
-        <div class="search-input-wrap">
-          <i class="fas fa-search"></i>
-          <input type="text" id="contentSearchInput" placeholder="콘텐츠 검색..." oninput="debounceContentSearch()">
-        </div>
-        <div class="search-list" id="contentSearchList">
-          <div class="empty-search">검색어를 입력하세요</div>
+      <div class="modal-body" style="display:flex;flex-direction:column;overflow:hidden;flex:1;min-height:0;">
+        <!-- DacheumSearch 마운트 호스트 -->
+        <div id="lcContentSearchHost" style="flex-shrink:0;"></div>
+        <!-- 검색 결과 -->
+        <div class="search-list" id="contentSearchList" style="flex:1;min-height:300px;overflow-y:auto;margin-top:8px;">
+          <div class="empty-search">검색어를 입력하면 결과가 표시됩니다</div>
         </div>
       </div>
     </div>
@@ -681,6 +682,10 @@
       if (el) {
         el.classList.add('show');
         if (name === 'myArchive') loadMyArchive();
+        if (name === 'contentSearch') {
+          // Phase 2: DacheumSearch 공통 컴포넌트 마운트 + 초기 빈 결과 영역
+          setTimeout(() => initLcContentSearch(), 0);
+        }
       }
     }
 
@@ -880,37 +885,86 @@
     }
 
     // ============================================================
-    // Content Search
+    // Content Search — Phase 2: DacheumSearch 공통 컴포넌트로 통합
     // ============================================================
-    function debounceContentSearch() {
-      clearTimeout(contentSearchTimer);
-      contentSearchTimer = setTimeout(doContentSearch, 300);
+    let _lcSearchCtrl = null;
+    let _lcSearchInited = false;
+    let _lcLastSource = 'public';
+    let _lcLastTypeFilter = '';
+
+    function debounceContentSearch() { /* 컴포넌트 내장 Enter/검색버튼 사용 — 호환 보존용 빈 함수 */ }
+
+    function initLcContentSearch() {
+      if (_lcSearchInited) return;
+      const host = document.getElementById('lcContentSearchHost');
+      if (!host || !window.DacheumSearch) return;
+      _lcSearchCtrl = window.DacheumSearch.mount(host, {
+        mode: 'content',
+        sources: ['public', 'my', 'saved'],
+        defaultSource: 'public',
+        typeFilters: ['video','document','image','quiz','exam','activity','package','recipe'],
+        enableStdSearch: false,
+        enableViewToggle: false,
+        enableInfiniteScroll: false,
+        showAdvanced: false,
+        legacyIds: false,
+        placeholder: '제목·키워드·저작자명으로 검색',
+        hooks: {
+          onSearch:      () => lcRunSearch(),
+          onSourceChange:(s) => { _lcLastSource = s; lcRunSearch(); },
+          onToggleType:  (t, checked, set) => { _lcLastTypeFilter = (Array.from(set)[0] || ''); lcRunSearch(); }
+        }
+      });
+      _lcSearchInited = true;
     }
 
-    async function doContentSearch() {
-      const keyword = document.getElementById('contentSearchInput').value.trim();
+    async function lcRunSearch() {
       const list = document.getElementById('contentSearchList');
-      if (!keyword) { list.innerHTML = '<div class="empty-search">검색어를 입력하세요</div>'; return; }
-      list.innerHTML = '<div class="loading-text">검색 중...</div>';
+      if (!list || !_lcSearchCtrl) return;
+      const st = _lcSearchCtrl.getState();
+      const keyword = (st.keyword || '').trim();
+      const source = st.source || 'public';
+      const typeArr = st.typeFilters || [];
+
+      list.innerHTML = '<div class="loading-text" style="padding:30px;text-align:center;color:#9ca3af;font-size:13px;"><i class="fas fa-spinner fa-spin"></i> 검색 중...</div>';
+
+      let url;
+      if (source === 'public') {
+        let params = `page=1&limit=50&sort=latest`;
+        if (keyword) params += '&keyword=' + encodeURIComponent(keyword);
+        if (typeArr.length === 1) params += '&content_type=' + typeArr[0];
+        url = `/api/contents?${params}`;
+      } else if (source === 'my') {
+        url = '/api/contents/my';
+      } else {
+        url = '/api/contents/collection/list';
+      }
+
       try {
-        const res = await fetch(`/api/contents/search-for-lesson?keyword=${encodeURIComponent(keyword)}`);
-        const data = await res.json();
-        if (data.success && data.contents && data.contents.length > 0) {
-          list.innerHTML = data.contents.map(c => `
-            <div class="search-item">
-              <div class="search-item-icon">${typeIcons[c.content_type] || '📄'}</div>
-              <div class="search-item-info">
-                <div class="search-item-title">${escHtml(c.title)}</div>
-                <div class="search-item-meta">${typeLabels[c.content_type] || c.content_type} · ${c.creator_name || ''}</div>
-              </div>
-              <button class="search-item-select" onclick="selectSearchContent(${c.id}, '${escHtml(c.title).replace(/'/g,"\\'")}', '${c.content_type}', '${escHtml(c.file_path||'').replace(/'/g,"\\'")}')">선택</button>
-            </div>
-          `).join('');
-        } else {
-          list.innerHTML = '<div class="empty-search">검색 결과가 없습니다</div>';
+        const res = await fetch(url).then(r => r.json());
+        let items = res.data || res.contents || [];
+        if (source !== 'public') {
+          if (typeArr.length) items = items.filter(c => typeArr.includes(c.content_type));
+          if (keyword) items = items.filter(c => c.title?.toLowerCase().includes(keyword.toLowerCase()));
+        } else if (typeArr.length > 1) {
+          items = items.filter(c => typeArr.includes(c.content_type));
         }
+        if (!items.length) {
+          list.innerHTML = '<div class="empty-search" style="padding:40px;text-align:center;color:#9ca3af;">검색 결과가 없습니다</div>';
+          return;
+        }
+        list.innerHTML = items.map(c => `
+          <div class="search-item">
+            <div class="search-item-icon">${typeIcons[c.content_type] || '📄'}</div>
+            <div class="search-item-info">
+              <div class="search-item-title">${escHtml(c.title)}</div>
+              <div class="search-item-meta">${typeLabels[c.content_type] || c.content_type} · ${c.creator_name || ''}</div>
+            </div>
+            <button class="search-item-select" onclick="selectSearchContent(${c.id}, '${escHtml(c.title).replace(/'/g,"\\'")}', '${c.content_type}', '${escHtml(c.file_path||'').replace(/'/g,"\\'")}')">선택</button>
+          </div>
+        `).join('');
       } catch (err) {
-        list.innerHTML = '<div class="empty-search">검색 중 오류 발생</div>';
+        list.innerHTML = '<div class="empty-search" style="padding:40px;text-align:center;color:#ef4444;">검색 중 오류가 발생했습니다</div>';
       }
     }
 

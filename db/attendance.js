@@ -1,17 +1,17 @@
 const db = require('./index');
 
 // 출석 체크 (1클릭)
-function checkIn(classId, userId, comment = null, emotion = null, emotionReason = null) {
+function checkIn(classId, userId, comment = null, emotion = null, emotionReason = null, checkinSource = 'manual') {
   const today = new Date().toISOString().slice(0, 10);
   try {
-    db.prepare(`
-      INSERT INTO attendance (class_id, user_id, attendance_date, status, comment, emotion, emotion_reason)
-      VALUES (?, ?, ?, 'present', ?, ?, ?)
-    `).run(classId, userId, today, comment || null, emotion || null, emotionReason || null);
+    const info = db.prepare(`
+      INSERT INTO attendance (class_id, user_id, attendance_date, status, comment, emotion, emotion_reason, checkin_source)
+      VALUES (?, ?, ?, 'present', ?, ?, ?, ?)
+    `).run(classId, userId, today, comment || null, emotion || null, emotionReason || null, checkinSource || 'manual');
 
     // 뱃지 확인
     checkAndAwardBadges(classId, userId);
-    return { success: true, date: today };
+    return { success: true, date: today, id: info.lastInsertRowid };
   } catch (e) {
     if (e.message.includes('UNIQUE')) {
       return { success: false, already: true };
@@ -213,8 +213,10 @@ function getSettings(classId) {
 function updateSettings(classId, data) {
   const fields = [];
   const params = [];
+  // 허용 컬럼: 기존 5종 + notify_absent / notify_time (도메인 전문가 보강, SFR-017)
+  const allowed = ['is_public', 'show_ranking', 'allow_comments', 'include_weekends', 'class_goal', 'notify_absent', 'notify_time'];
   for (const [key, val] of Object.entries(data)) {
-    if (['is_public', 'show_ranking', 'allow_comments', 'include_weekends', 'class_goal'].includes(key)) {
+    if (allowed.includes(key)) {
       fields.push(`${key} = ?`);
       params.push(val);
     }
@@ -235,9 +237,9 @@ function getAttendanceTable(classId, startDate, endDate, includeWeekends = false
     ORDER BY u.display_name
   `).all(classId);
 
-  // 출석 데이터
+  // 출석 데이터 (checkin_source, emotion, emotion_reason 포함 — 4팀 통합 보고서·교사 테이블 노출용)
   const records = db.prepare(`
-    SELECT user_id, attendance_date, status, comment
+    SELECT user_id, attendance_date, status, comment, checkin_source, emotion, emotion_reason, checked_at
     FROM attendance
     WHERE class_id = ? AND attendance_date BETWEEN ? AND ?
   `).all(classId, startDate, endDate);

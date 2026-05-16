@@ -1659,11 +1659,7 @@
     // Navigation
     document.querySelectorAll('.sidebar-nav li').forEach(li => {
       li.addEventListener('click', () => {
-        document.querySelectorAll('.sidebar-nav li').forEach(l => l.classList.remove('active'));
-        li.classList.add('active');
-        currentPage = li.dataset.page;
-        viewMode = 'card'; typeFilters = new Set(); statusFilter = '전체'; selectedFolder = null;
-        renderPage();
+        switchPage(li.dataset.page);
       });
     });
 
@@ -1889,10 +1885,10 @@
     // 표준 페이지 헤더 동적 갱신 (탭별 아이콘/제목/서브타이틀/액션)
     function updatePageHeader(page) {
       const map = {
-        dashboard:    { icon: '🗂️', title: '나의 보관함 대시보드', sub: '내가 만들고 담은 콘텐츠를 한눈에', actions: '<button class="btn btn-primary" onclick="openCreateModal()"><i class=\"fas fa-plus\"></i> 새로 만들기</button>' },
-        mydata:       { icon: '📁', title: '내자료', sub: '내가 만든 자료를 관리하세요.', actions: '<button class="btn btn-primary" onclick="openCreateModal()"><i class=\"fas fa-plus\"></i> 새로 만들기</button>' },
+        dashboard:    { icon: '🗂️', title: '나의 보관함 대시보드', sub: '내가 만들고 담은 콘텐츠를 한눈에', actions: '<button class="btn btn-primary" onclick="openModal(\'createModal\')"><i class=\"fas fa-plus\"></i> 새로 만들기</button>' },
+        mydata:       { icon: '📁', title: '내자료', sub: '내가 만든 자료를 관리하세요.', actions: '<button class="btn btn-primary" onclick="openModal(\'createModal\')"><i class=\"fas fa-plus\"></i> 새로 만들기</button>' },
         saved:        { icon: '🔖', title: '담은자료', sub: '담아둔 콘텐츠를 모아 봤어요.', actions: '' },
-        public:       { icon: '🌐', title: '공개콘텐츠', sub: '다른 선생님과 학생이 공유한 콘텐츠를 둘러보세요.', actions: '<button class="btn btn-primary" onclick="openCreateModal()"><i class=\"fas fa-plus\"></i> 새로 만들기</button>' },
+        public:       { icon: '🌐', title: '공개콘텐츠', sub: '다른 선생님과 학생이 공유한 콘텐츠를 둘러보세요.', actions: '<button class="btn btn-primary" onclick="openModal(\'createModal\')"><i class=\"fas fa-plus\"></i> 새로 만들기</button>' },
         recommend:    { icon: '✨', title: '추천콘텐츠', sub: '관심 분야의 추천을 받아보세요.', actions: '' },
         subscriptions:{ icon: '🔔', title: '구독 채널', sub: '구독 중인 채널의 새 콘텐츠를 확인하세요.', actions: '' },
         mychannel:    { icon: '📡', title: '내 채널 관리', sub: '채널을 만들고 구독자를 관리하세요.', actions: '' },
@@ -2121,11 +2117,15 @@
 
     // ===== Public =====
     async function renderPublic(c) {
+      // Phase 1: 검색 UI 공통 컴포넌트 (DacheumSearch) 적용 — 회귀 0 목표
+      //  - 컴포넌트는 동일 DOM(pubKeyword, pafTitle, pubAdvForm ...)을 렌더
+      //  - 호스트 글로벌 함수(searchPublic, togglePubAdvSearch, toggleTypeFilter ...) 는 그대로 동작
+      //  - DacheumSearch 미로드 시 기존 렌더러 폴백
+      const useComponent = !!(window.DacheumSearch && typeof window.DacheumSearch.mount === 'function');
       c.innerHTML = `
         <!-- 통합 검색 영역 -->
         <div style="background:#fff;border-radius:14px;padding:16px 20px;margin-bottom:16px;box-shadow:0 1px 4px rgba(0,0,0,.06);">
-          ${renderPubSearchBar()}
-          ${renderPubAdvForm()}
+          ${useComponent ? `<div id="pubSearchHost"></div>` : `${renderPubSearchBar()}${renderPubAdvForm()}`}
           <!-- 교집합 안내 -->
           <div id="pubSearchModeInfo" style="display:none;margin-bottom:8px;padding:6px 12px;background:var(--blue-50);border-radius:8px;font-size:11px;color:var(--blue-600);font-weight:600;">
             <i class="fas fa-info-circle"></i> 키워드 + 성취기준 교집합 검색 중
@@ -2138,6 +2138,36 @@
         <div id="pubLoading" style="display:none;text-align:center;padding:24px;color:var(--gray-400);font-size:13px;"><i class="fas fa-spinner fa-spin"></i> 불러오는 중...</div>
       `;
       pubCurrentPage = 1; pubTotalPages = 1;
+
+      if (useComponent) {
+        // 컴포넌트 마운트 — 호스트 글로벌 함수에 위임 (legacy ID 호환 모드: 동일 DOM ID 유지)
+        const host = document.getElementById('pubSearchHost');
+        window._dacheumPubSearch = window.DacheumSearch.mount(host, {
+          mode: 'content',
+          sources: ['public'],
+          typeFilters: CONTENT_TYPES,
+          typeNames: typeNames,
+          initialTypeFilters: Array.from(typeFilters),
+          initialViewMode: viewMode,
+          initialKeyword: '',
+          legacyIds: true,
+          enableStdSearch: true,
+          enableViewToggle: true,
+          showAdvanced: true,
+          placeholder: '제목, 키워드, 저작자명으로 검색',
+          hooks: {
+            onSearch:        (p) => searchPublic(p),
+            onKeywordInput:  () => updateSearchCheckboxes(),
+            onAdvToggle:     () => togglePubAdvSearch(),
+            onAdvReset:      () => resetPubAdvSearch(),
+            onToggleType:    (t) => { toggleTypeFilter(t); },
+            onMonthQuick:    (v) => applyPafMonthQuick(v),
+            onYearQuick:     (v) => applyPafYearQuick(v),
+            onViewModeChange:(m) => { viewMode = m; searchPublic(1); }
+          }
+        });
+      }
+
       bindPubStdSmart('pubStdSmart');
       bindPubStdSmart('pafStdSmart');
       restorePubAdvSearchState();

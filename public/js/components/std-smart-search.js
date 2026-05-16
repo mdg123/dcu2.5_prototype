@@ -531,7 +531,8 @@
         };
         row.addEventListener('click', (e) => {
           if (e.target.tagName === 'INPUT') { setActive(); return; }
-          setActive();
+          // row(라벨·내용요소 텍스트) 클릭 시 체크박스도 함께 토글 — 사용자 친화 UX
+          toggle();
         });
         cb.addEventListener('change', () => {
           this._selected[i].leaves[j].checked = cb.checked;

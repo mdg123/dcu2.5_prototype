@@ -154,13 +154,16 @@
     .area-jump-btn:hover::before{background:#fff}
     .area-jump-btn.active{background:var(--btn-area-color,var(--primary));color:#fff}
     .area-jump-btn.active::before{background:#fff}
-    .area-jump-btn.disabled{opacity:.35;cursor:not-allowed;background:var(--gray-50);color:var(--gray-400)!important;border-color:var(--gray-200)!important;filter:grayscale(.6)}
-    .area-jump-btn.disabled::before{background:var(--gray-300)!important}
+    .area-jump-btn.disabled,.area-jump-btn.is-disabled,.area-jump-btn:disabled{opacity:.35;cursor:not-allowed;background:var(--gray-50);color:var(--gray-400)!important;border-color:var(--gray-200)!important;filter:grayscale(.6);pointer-events:none}
+    .area-jump-btn.disabled::before,.area-jump-btn.is-disabled::before,.area-jump-btn:disabled::before{background:var(--gray-300)!important}
+    .area-jump-btn.is-disabled:hover{background:var(--gray-50)!important;color:var(--gray-400)!important;transform:none;box-shadow:none}
     .area-jump-btn.disabled:hover{background:var(--gray-50);color:var(--gray-400)!important;transform:none;box-shadow:none}
     .jump-bar-wrap{display:flex;flex-direction:column;gap:6px;flex:1;min-width:0}
     /* 리스트 모드일 때는 상단 학년/영역 점프바·줌 컨트롤 숨김 — 리스트 자체 필터바와 중복 */
     .map-toolbar[data-view="list"] .jump-bar-wrap,
-    .map-toolbar[data-view="list"] .zoom-ctrl{display:none !important}
+    .map-toolbar[data-view="list"] .zoom-ctrl,
+    .map-toolbar[data-view="list"] ~ * #hlCloseBtn,
+    .map-toolbar[data-view="list"] #hlCloseBtn{display:none !important}
     .jump-bar-row{display:flex;gap:6px;flex-wrap:wrap;align-items:center;justify-content:center;min-width:0}
     .jump-bar-label{font-size:11px;font-weight:700;color:var(--gray-400);letter-spacing:.04em;flex-shrink:0;margin-right:2px}
     .grade-jump-btn:hover{background:var(--primary);color:#fff;border-color:var(--primary)}
@@ -233,13 +236,14 @@
     .svg-node-status.completed{background:var(--success)}
     .svg-node-bookmark{color:var(--secondary);font-size:13px}
 
-    /* 노드 클릭 하이라이트 — 이웃 노드/엣지 강조, 나머지 dim */
-    .map-world.highlight-mode .svg-node{opacity:.25;filter:grayscale(.4);transition:opacity .2s ease, filter .2s ease, box-shadow .2s ease, transform .15s}
+    /* 노드 클릭 하이라이트 — 이웃 노드/엣지 강조, 나머지 dim
+       페이드 마스크는 .svg-node / .edge-line 에만 적용 — GNB·헤더·KPI·필터바는 영향 없음 */
+    .map-world.highlight-mode .svg-node{opacity:.15;filter:grayscale(.5);transition:opacity .35s ease, filter .35s ease, box-shadow .2s ease, transform .15s}
     /* 하이라이트 모드에서 비활성 노드는 클릭/포커스 불가 — 드래그 팬은 그대로 통과 */
     .map-world.highlight-mode .svg-node:not(.hl-target):not(.hl-center){cursor:default;pointer-events:none}
     .map-world.highlight-mode .svg-node.hl-target{opacity:1;filter:none;box-shadow:0 0 0 3px rgba(37,99,235,.35), var(--shadow-md)}
     .map-world.highlight-mode .svg-node.hl-center{opacity:1;filter:none;box-shadow:0 0 0 4px var(--primary), 0 8px 20px rgba(37,99,235,.25);transform:translateY(-2px)}
-    .map-world.highlight-mode .map-svg path.edge-line{opacity:.12;transition:opacity .2s ease, stroke .2s ease, stroke-width .2s ease}
+    .map-world.highlight-mode .map-svg path.edge-line{opacity:.12;transition:opacity .35s ease, stroke .2s ease, stroke-width .2s ease}
     @keyframes hlEdgePulse {
       0%   { stroke-opacity: 1;   stroke-width: 2.5; }
       50%  { stroke-opacity: .55; stroke-width: 3.5; }
@@ -262,20 +266,391 @@
       filter: drop-shadow(0 0 4px rgba(37,99,235,.45));
     }
     .map-world.highlight-mode .svg-node.hl-center{ animation: hlCenterBreath 1.8s ease-in-out infinite; }
-    .map-world.smooth-transform{ transition: transform .35s ease; }
+    .map-world.smooth-transform{ transition: transform .42s cubic-bezier(.4,0,.2,1); }
 
     .hl-close-btn{
       position:absolute; top:104px; right:16px; z-index:50;
       display:flex; align-items:center; gap:6px;
-      padding:8px 14px; border-radius:999px;
+      padding:9px 16px; border-radius:999px;
       background:#fff; color:var(--primary);
       border:2px solid var(--primary);
-      font-size:13px; font-weight:600; cursor:pointer;
-      box-shadow:0 4px 12px rgba(37,99,235,.18);
+      font-size:14px; font-weight:700; cursor:pointer;
+      box-shadow:0 4px 14px rgba(37,99,235,.22);
       transition:all .15s ease;
     }
-    .hl-close-btn:hover{ background:var(--primary); color:#fff; transform:translateY(-1px); }
+    .hl-close-btn:hover{ background:var(--primary); color:#fff; transform:translateY(-1px); box-shadow:0 6px 18px rgba(37,99,235,.32); }
+    .hl-close-btn:focus-visible{ outline:3px solid rgba(37,99,235,.35); outline-offset:2px; }
     .hl-close-btn i{ font-size:12px; }
+
+    /* ==== 드로어 상단 미니 연결 다이어그램 (전체 BFS 체인 압축 표시) ==== */
+    .mini-link-section{
+      padding:12px 14px;
+      background:#F8FAFC;
+      border:1px solid #E5E7EB;
+      border-radius:10px;
+      margin-bottom:14px;
+    }
+    .mini-link-title{
+      display:flex; align-items:center; gap:8px;
+      font-size:13px; font-weight:700; color:#374151;
+      margin-bottom:8px; letter-spacing:.02em;
+    }
+    .mini-link-title i{ color:#2563eb; font-size:12px; }
+    .mini-link-title .mini-link-count{
+      margin-left:auto; font-size:11px; font-weight:600; color:#6B7280;
+      background:#E0E7FF; color:#1d4ed8;
+      padding:2px 8px; border-radius:999px; letter-spacing:0;
+    }
+    /* 가로 흐름 컨테이너 — 좌→우 학습 연결 */
+    .mini-link-flow{
+      position:relative;
+      width:100%;
+      overflow-x:auto; overflow-y:hidden;
+      padding:6px 2px 8px;
+      scrollbar-width:thin;
+      scroll-behavior:smooth;
+    }
+    .mini-link-flow::-webkit-scrollbar{ height:8px; }
+    .mini-link-flow::-webkit-scrollbar-track{ background:transparent; }
+    .mini-link-flow::-webkit-scrollbar-thumb{ background:#CBD5E1; border-radius:4px; }
+    .mini-link-flow::-webkit-scrollbar-thumb:hover{ background:#94A3B8; }
+    /* 스크롤 가능 힌트(우측 페이드) */
+    .mini-link-flow::after{
+      content:''; position:absolute; top:0; right:0; bottom:8px; width:24px;
+      background:linear-gradient(to right, rgba(248,250,252,0), rgba(248,250,252,.95));
+      pointer-events:none;
+    }
+    /* 한 행 — 컬럼·화살표 가로 정렬 */
+    .mini-link-row{
+      display:inline-flex; flex-direction:row; align-items:stretch;
+      gap:0; padding:0 4px;
+    }
+    /* 컬럼(같은 레벨 카드 묶음) */
+    .mini-col{
+      display:flex; flex-direction:column; align-items:center;
+      gap:6px; flex:0 0 auto;
+      min-width:76px;
+    }
+    .mini-col-label{
+      font-size:10px; font-weight:600; color:#6B7280;
+      letter-spacing:.02em; white-space:nowrap;
+      margin-bottom:2px;
+    }
+    .mini-col.is-current .mini-col-label{ color:#1d4ed8; }
+    .mini-col-cards{
+      display:flex; flex-direction:column; align-items:center; gap:6px;
+    }
+    /* 컬럼 사이 화살표 — 가로 흐름 표시 (첫 카드 중앙에 정렬) */
+    .mini-col-arrow{
+      color:#94A3B8; font-size:18px; line-height:1; font-weight:700;
+      user-select:none;
+      align-self:flex-start;
+      padding:0 8px;
+      /* 라벨(약 18px) + 카드 절반(23px) = 41px 만큼 내려 첫 카드 중앙 정렬 */
+      margin-top:41px;
+    }
+    .mini-link-card{
+      flex:0 0 auto; position:relative;
+      width:96px; height:46px; padding:5px 8px 5px 11px;
+      border-radius:8px; background:#fff;
+      border:1px solid #E5E7EB;
+      cursor:pointer; transition:transform .15s ease, box-shadow .15s ease, border-color .15s ease;
+      display:flex; align-items:center;
+      overflow:hidden;
+    }
+    .mini-link-card::before{
+      content:''; position:absolute; left:0; top:5px; bottom:5px; width:3px;
+      border-radius:2px; background:#94A3B8;
+    }
+    .mini-link-card[data-area="수학"]::before{ background:#2563eb; }
+    .mini-link-card[data-area="국어"]::before{ background:#16a34a; }
+    .mini-link-card[data-area="영어"]::before{ background:#f59e0b; }
+    .mini-link-card[data-area="사회"]::before{ background:#8b5cf6; }
+    .mini-link-card[data-area="과학"]::before{ background:#06b6d4; }
+    .mini-link-card:hover{ transform:translateY(-1px); box-shadow:0 4px 10px rgba(0,0,0,.10); border-color:#2563eb; }
+    .mini-link-card:focus-visible{ outline:2px solid #2563eb; outline-offset:2px; }
+    .mini-link-card.is-current{
+      width:112px; height:52px;
+      border:2px solid #2563eb;
+      box-shadow:0 0 0 3px rgba(37,99,235,.18), 0 4px 12px rgba(37,99,235,.22);
+      background:#EFF6FF;
+      cursor:default;
+    }
+    .mini-link-card.is-current:hover{ transform:none; }
+    .mini-link-card .mlc-title{
+      font-size:12px; font-weight:600; line-height:1.2; color:#111827;
+      display:-webkit-box; -webkit-line-clamp:1; -webkit-box-orient:vertical;
+      overflow:hidden; word-break:keep-all; text-overflow:ellipsis;
+      white-space:nowrap;
+    }
+    .mini-link-card.is-current .mlc-title{
+      color:#1d4ed8; font-weight:700;
+      -webkit-line-clamp:2; white-space:normal;
+    }
+    .mini-link-card .mlc-dot{
+      position:absolute; top:4px; right:5px;
+      width:6px; height:6px; border-radius:50%;
+      background:#CBD5E1; box-shadow:0 0 0 1.5px #fff;
+    }
+    .mini-link-empty{
+      color:#94A3B8; font-size:12px; font-weight:500;
+      padding:8px 12px;
+    }
+    .mini-link-empty-row{
+      width:100%; text-align:center;
+      border:1px dashed #CBD5E1; border-radius:8px; background:#fff;
+    }
+    /* 그래프 노드 펄스 (미니 카드 호버 시) */
+    .svg-node.mlc-pulse{
+      animation: mlcPulse .9s ease-out 1;
+    }
+    @keyframes mlcPulse{
+      0%   { filter: drop-shadow(0 0 0 rgba(37,99,235,0)); }
+      40%  { filter: drop-shadow(0 0 14px rgba(37,99,235,.95)); }
+      100% { filter: drop-shadow(0 0 0 rgba(37,99,235,0)); }
+    }
+    @media (max-width: 767px){
+      .mini-link-card{ width:84px; height:42px; }
+      .mini-link-card.is-current{ width:100px; height:48px; }
+      .mini-link-card .mlc-title{ font-size:11px; }
+      .mini-col{ min-width:68px; }
+      .mini-col-arrow{ padding:0 6px; font-size:16px; margin-top:16px; }
+    }
+
+    /* ============================================================
+       Chain Graph Modal — 단원 노드 1번 클릭 시 풀스크린 연결 보기
+       (사용자 피드백: 모달·카드·폰트 1.5배 확대, z-index ≥10500)
+       ============================================================ */
+    .modal-overlay.chain-graph-overlay{
+      background:rgba(15,23,42,.85);
+      z-index:10500;
+      padding:0;
+      align-items:center;
+      justify-content:center;
+    }
+    .modal.chain-graph-modal{
+      width:95vw; height:92vh;
+      max-width:1800px; max-height:1200px;
+      min-height:600px;
+      border-radius:18px;
+      display:flex; flex-direction:column;
+      overflow:hidden;
+      box-shadow:0 24px 80px rgba(0,0,0,.45);
+      background:#fff;
+    }
+    .chain-graph-header{
+      flex-shrink:0;
+      padding:18px 24px 16px !important;
+      border-bottom:1px solid #E5E7EB;
+      display:flex; align-items:center; justify-content:space-between;
+      gap:16px;
+    }
+    .cgm-titlewrap{ display:flex; flex-direction:column; gap:4px; min-width:0; flex:1; }
+    .chain-graph-title{
+      font-size:20px !important; font-weight:700; color:#111827;
+      display:flex; align-items:center; gap:10px;
+      line-height:1.2;
+    }
+    .chain-graph-subtitle{
+      font-size:14px; color:#6B7280; font-weight:500;
+      white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+      max-width:680px;
+    }
+    .cgm-actions{ display:flex; align-items:center; gap:10px; flex-shrink:0; }
+    .chain-graph-cta{
+      font-size:15px; font-weight:700; padding:10px 18px;
+      border-radius:10px; background:#2563eb; color:#fff; border:none;
+      cursor:pointer; transition:all .15s ease;
+      display:inline-flex; align-items:center; gap:6px;
+      box-shadow:0 2px 6px rgba(37,99,235,.25);
+    }
+    .chain-graph-cta:hover{ background:#1d4ed8; transform:translateY(-1px); box-shadow:0 4px 10px rgba(37,99,235,.35); }
+    .chain-graph-cta:focus-visible{ outline:2px solid #1d4ed8; outline-offset:2px; }
+    .chain-graph-close{ width:38px; height:38px; }
+    .chain-graph-body{
+      flex:1; min-height:0;
+      padding:24px 28px !important;
+      overflow-x:auto; overflow-y:auto;
+      background:linear-gradient(180deg, #FAFBFE 0%, #F4F7FB 100%);
+      display:flex; align-items:flex-start;
+      scroll-behavior:smooth;
+    }
+    .chain-graph-body::-webkit-scrollbar{ height:12px; }
+    .chain-graph-body::-webkit-scrollbar-track{ background:transparent; }
+    .chain-graph-body::-webkit-scrollbar-thumb{ background:#CBD5E1; border-radius:6px; }
+    .chain-graph-body::-webkit-scrollbar-thumb:hover{ background:#94A3B8; }
+    .chain-graph-footer{
+      flex-shrink:0;
+      padding:12px 24px !important;
+      border-top:1px solid #E5E7EB;
+      background:#F8FAFC;
+      display:flex; align-items:center; justify-content:space-between;
+      gap:16px;
+    }
+    .cgm-hint{ font-size:13px; color:#6B7280; font-weight:500; display:inline-flex; align-items:center; gap:6px; }
+    .cgm-hint i{ color:#94A3B8; }
+    .cgm-hint-key kbd{
+      display:inline-block; padding:2px 7px; margin:0 2px;
+      background:#fff; border:1px solid #CBD5E1; border-bottom-width:2px;
+      border-radius:5px; font-size:12px; font-family:monospace; color:#475569;
+      line-height:1.4;
+    }
+    /* 그래프 row — 큰 카드 + 굵은 화살표 (1.5배 스케일) */
+    .cgm-row{
+      display:inline-flex; flex-direction:row; align-items:stretch;
+      gap:0; padding:12px 6px; min-width:100%;
+    }
+    .cgm-col{
+      display:flex; flex-direction:column; align-items:center;
+      gap:18px; flex:0 0 auto;
+      min-width:240px;
+    }
+    .cgm-col-label{
+      font-size:16px; font-weight:700; color:#334155;
+      letter-spacing:.01em; white-space:nowrap;
+      margin-bottom:8px;
+      padding:7px 16px; background:#fff; border:1px solid #E5E7EB; border-radius:18px;
+      display:inline-flex; align-items:center; gap:8px;
+      line-height:1.2;
+    }
+    .cgm-col-label--empty{ color:#94A3B8; font-weight:600; }
+    .cgm-col-label-badge{
+      display:inline-block; padding:2px 8px; border-radius:10px;
+      background:rgba(255,255,255,.22); color:#fff; font-size:12px; font-weight:700;
+      line-height:1.4;
+    }
+    .cgm-col.is-current .cgm-col-label{
+      color:#fff; background:#2563eb; border-color:#2563eb;
+      box-shadow:0 2px 8px rgba(37,99,235,.35);
+    }
+    .cgm-col-cards{
+      display:flex; flex-direction:column; align-items:center; gap:14px;
+    }
+    .cgm-col-arrow{
+      color:#64748b; font-weight:700;
+      user-select:none;
+      align-self:flex-start;
+      padding:0 18px;
+      margin-top:82px;  /* 1.5배 카드 중앙 정렬 (84*1.5 / 2 + label space) */
+      display:flex; align-items:center; justify-content:center;
+    }
+    .cgm-col-arrow svg{ display:block; }
+    .cgm-card{
+      flex:0 0 auto; position:relative;
+      width:240px; height:126px; padding:14px 18px 14px 24px;
+      border-radius:14px; background:#fff;
+      border:1.5px solid #E5E7EB;
+      cursor:pointer; transition:transform .15s ease, box-shadow .15s ease, border-color .15s ease;
+      display:flex; flex-direction:column; justify-content:center; gap:10px;
+      overflow:hidden;
+      box-shadow:0 1px 3px rgba(0,0,0,.04);
+    }
+    .cgm-card::before{
+      content:''; position:absolute; left:0; top:14px; bottom:14px; width:6px;
+      border-radius:3px; background:#94A3B8;
+    }
+    .cgm-card[data-area="수학"]::before, .cgm-card[data-area="수와 연산"]::before{ background:#2563eb; }
+    .cgm-card[data-area="국어"]::before{ background:#16a34a; }
+    .cgm-card[data-area="영어"]::before{ background:#f59e0b; }
+    .cgm-card[data-area="사회"]::before{ background:#8b5cf6; }
+    .cgm-card[data-area="과학"]::before{ background:#06b6d4; }
+    .cgm-card[data-area="변화와 관계"]::before{ background:#8b5cf6; }
+    .cgm-card[data-area="도형과 측정"]::before{ background:#10b981; }
+    .cgm-card[data-area="자료와 가능성"]::before{ background:#f59e0b; }
+    .cgm-card:hover{
+      transform:translateY(-2px) scale(1.02);
+      box-shadow:0 6px 16px rgba(37,99,235,.18);
+      border-color:#2563eb;
+    }
+    .cgm-card:focus-visible{ outline:2px solid #2563eb; outline-offset:2px; }
+    .cgm-card.is-current{
+      width:270px; height:144px;
+      border:3px solid #2563eb;
+      box-shadow:0 0 0 5px rgba(37,99,235,.18), 0 6px 22px rgba(37,99,235,.35);
+      background:linear-gradient(135deg, #EFF6FF 0%, #DBEAFE 100%);
+      cursor:pointer;
+    }
+    .cgm-card.is-current:hover{ transform:translateY(-2px); }
+    .cgm-card-title{
+      font-size:18px; font-weight:600; line-height:1.35; color:#111827;
+      display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical;
+      overflow:hidden; word-break:keep-all; text-overflow:ellipsis;
+    }
+    .cgm-card.is-current .cgm-card-title{
+      color:#1d4ed8; font-weight:700; font-size:20px;
+    }
+    .cgm-card-meta{ display:flex; align-items:center; gap:8px; flex-shrink:0; }
+    .cgm-card-area{
+      display:inline-block; padding:3px 10px; border-radius:10px;
+      font-size:14px; font-weight:600; line-height:1.4;
+      background:#F3F4F6; color:#475569;
+      max-width:150px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+    }
+    .cgm-card-dot{
+      width:12px; height:12px; border-radius:50%;
+      background:#CBD5E1; box-shadow:0 0 0 2px #fff;
+      flex-shrink:0;
+    }
+    .cgm-current-cta{
+      position:absolute; bottom:-26px; left:50%; transform:translateX(-50%);
+      font-size:14px; color:#1d4ed8; font-weight:700;
+      white-space:nowrap; pointer-events:none;
+      opacity:0; transition:opacity .2s ease;
+    }
+    .cgm-card.is-current:hover .cgm-current-cta{ opacity:1; }
+    .cgm-empty{
+      width:100%; text-align:center;
+      padding:40px 20px;
+      color:#94A3B8; font-size:15px; font-weight:500;
+    }
+    .cgm-empty-row{
+      display:inline-flex; flex-direction:column; align-items:center; gap:8px;
+      padding:18px 24px; border:1.5px dashed #CBD5E1; border-radius:12px; background:#fff;
+      color:#64748b; font-size:13px; font-weight:600;
+    }
+    @media (max-width: 1400px){
+      .modal.chain-graph-modal{ width:97vw; height:94vh; }
+      .cgm-card{ width:200px; height:108px; padding:12px 14px 12px 20px; }
+      .cgm-card.is-current{ width:224px; height:122px; }
+      .cgm-card-title{ font-size:16px; }
+      .cgm-card.is-current .cgm-card-title{ font-size:18px; }
+      .cgm-col{ min-width:200px; }
+      .cgm-col-arrow{ margin-top:70px; }
+      .cgm-col-arrow svg{ width:40px; height:28px; }
+    }
+    @media (max-width: 767px){
+      .modal.chain-graph-modal{ width:100vw; height:100vh; max-width:none; max-height:none; border-radius:0; }
+      .chain-graph-body{ padding:16px !important; }
+      .chain-graph-header{ padding:14px 16px !important; }
+      .chain-graph-title{ font-size:17px !important; }
+      .chain-graph-subtitle{ font-size:12px; max-width:none; }
+      .chain-graph-cta{ font-size:13px; padding:8px 12px; }
+      .chain-graph-cta .fa-arrow-right{ display:none; }
+      .cgm-card{ width:160px; height:84px; padding:10px 12px 10px 16px; }
+      .cgm-card.is-current{ width:180px; height:96px; }
+      .cgm-card-title{ font-size:14px; line-height:1.3; }
+      .cgm-card.is-current .cgm-card-title{ font-size:15px; }
+      .cgm-card-area{ font-size:11px; padding:2px 7px; max-width:100px; }
+      .cgm-card-dot{ width:8px; height:8px; }
+      .cgm-col{ min-width:160px; gap:12px; }
+      .cgm-col-label{ font-size:13px; padding:4px 12px; }
+      .cgm-col-arrow{ padding:0 10px; margin-top:54px; }
+      .cgm-col-arrow svg{ width:24px; height:20px; }
+      .cgm-hint-key{ display:none; }
+      .chain-graph-footer{ padding:10px 14px !important; }
+    }
+
+    /* 드로어 내 "연결 보기 다시 열기" 버튼 (단원 드로어 상단) */
+    .drawer-chain-reopen-row{ margin:0 0 8px; }
+    .btn-link-chain{
+      display:inline-flex; align-items:center; gap:8px;
+      padding:8px 14px; border:1px solid #DBEAFE; background:#EFF6FF; color:#1d4ed8;
+      border-radius:10px; font-size:14px; font-weight:600; cursor:pointer;
+      transition:all .15s ease;
+    }
+    .btn-link-chain:hover{ background:#DBEAFE; border-color:#2563eb; }
+    .btn-link-chain:focus-visible{ outline:2px solid #2563eb; outline-offset:2px; }
+    .btn-link-chain i{ color:#2563eb; }
 
     .map-empty{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;color:var(--gray-400);gap:8px}
     .map-empty i{font-size:44px;color:var(--gray-300)}
@@ -399,6 +774,72 @@
     }
     .lcv-progress-text i{font-size:11px;color:#9CA3AF}
 
+    /* === List 아코디언 (리스트 뷰 한정) ============================== */
+    /* 아코디언 래퍼: 카드 헤더 + 펼침 본문을 한 묶음으로 그림자/border 처리 */
+    .list-accordion{
+      background:#fff;border:1px solid #E5E7EB;border-radius:14px;
+      margin-bottom:12px;overflow:hidden;transition:border-color .15s, box-shadow .15s;
+      flex-shrink:0;flex-grow:0;
+    }
+    .list-accordion:hover{border-color:#3B82F6;box-shadow:0 4px 12px rgba(37,99,235,.08)}
+    .list-accordion.active{
+      border-color:#2563eb;border-width:1.5px;
+      box-shadow:0 6px 20px rgba(37,99,235,.14);
+    }
+    /* 아코디언 안 카드: 외곽 마진/그림자 제거 (래퍼가 담당) */
+    .list-accordion > .list-card-v2{
+      margin-bottom:0;border:0;border-radius:0;
+      box-shadow:none !important;
+    }
+    .list-accordion > .list-card-v2:hover{transform:none;box-shadow:none}
+    /* 화살표 칩 (진행률 영역 우측에 추가) */
+    .lcv-chevron{
+      display:inline-flex;align-items:center;justify-content:center;
+      width:24px;height:24px;border-radius:50%;
+      color:#94a3b8;font-size:12px;
+      transition:transform .25s ease, color .15s;
+      flex-shrink:0;margin-left:4px;
+    }
+    .list-accordion.active .lcv-chevron{
+      color:#2563eb;transform:rotate(180deg);
+    }
+    /* 아코디언 본문 슬롯 */
+    .lcv-accordion-body{
+      max-height:0;overflow:hidden;
+      background:#FAFBFC;
+      transition:max-height .3s ease;
+    }
+    .list-accordion.active > .lcv-accordion-body{
+      max-height:9999px;
+      border-top:1px solid #E5E7EB;
+    }
+    .lcv-accordion-inner{
+      padding:20px 24px;
+    }
+    .lcv-accordion-inner .drawer-section{margin-bottom:18px}
+    .lcv-accordion-inner .drawer-section:last-child{margin-bottom:0}
+    .lcv-accordion-inner .drawer-section-label{
+      font-size:14px;font-weight:700;color:#475569;margin-bottom:10px;
+      letter-spacing:.2px;display:flex;align-items:center;gap:6px;
+    }
+    .lcv-accordion-inner .drawer-section-label i{color:#94a3b8;font-size:13px}
+    /* 아코디언 액션 바 (footer 대체) */
+    .lcv-accordion-actions{
+      display:flex;flex-wrap:wrap;align-items:center;gap:12px;
+      padding-top:14px;margin-top:14px;border-top:1px dashed #E5E7EB;
+    }
+    .lcv-accordion-actions .dual-btn.bookmark{margin-right:auto}
+    .lcv-accordion-actions .footer-cta-group{
+      display:inline-flex;gap:10px;flex-wrap:wrap;
+    }
+    /* 로딩 스피너 */
+    .lcv-accordion-loading{
+      display:flex;align-items:center;justify-content:center;gap:8px;
+      padding:32px 0;color:#94a3b8;font-size:14px;
+    }
+    .lcv-accordion-loading i{animation:lcvSpin 1s linear infinite}
+    @keyframes lcvSpin{to{transform:rotate(360deg)}}
+
     /* 빈 상태 */
     .list-empty{
       text-align:center;padding:60px 24px;color:#6B7280;
@@ -428,6 +869,8 @@
       }
       .lcv-progress-bar{flex:1;height:6px}
       .lcv-progress-text{flex-shrink:0}
+      .lcv-accordion-inner{padding:16px 18px}
+      .lcv-accordion-actions{gap:8px}
     }
     @media (max-width:480px){
       .list-filter-bar{padding:10px 12px;flex-direction:column;align-items:stretch;gap:8px}
@@ -437,11 +880,12 @@
     }
 
     /* Drawer → Center Modal */
-    .drawer-overlay{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:10020;display:none;backdrop-filter:blur(2px)}
+    .drawer-overlay{position:fixed;inset:0;background:rgba(15,23,42,.85);z-index:10020;display:none;backdrop-filter:blur(2px)}
     .drawer-overlay.show{display:block}
     /* F-P0-NEW-1 fix: translateX(-50%) + scale() 조합이 일부 환경에서 left 위치 손실을 유발 → translate-x를 분리하지 않고 left/right margin auto로 가운데 정렬 */
-    .drawer{position:fixed;top:24px;left:0;right:0;margin-left:auto;margin-right:auto;width:calc(100% - 48px);max-width:940px;height:calc(100vh - 48px);max-height:calc(100vh - 48px);background:#fff;border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.25);z-index:10021;opacity:0;pointer-events:none;transform:scale(.95);transform-origin:center top;transition:opacity .2s ease,transform .2s ease;display:flex;flex-direction:column;overflow:hidden;border-top:4px solid var(--primary)}
-    .drawer.show{opacity:1;pointer-events:auto;transform:scale(1)}
+    /* drawer 사이즈 — 학습 연결 한눈에 보기 모달과 동일 (95vw × 92vh, max 1800×1200) */
+    .drawer{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%) scale(.95);width:95vw;max-width:1800px;height:92vh;max-height:1200px;background:#fff;border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.3);z-index:10021;opacity:0;pointer-events:none;transform-origin:center;transition:opacity .2s ease,transform .2s ease;display:flex;flex-direction:column;overflow:hidden;border-top:4px solid var(--primary)}
+    .drawer.show{opacity:1;pointer-events:auto;transform:translate(-50%,-50%) scale(1)}
     .drawer-header{padding:18px 22px 14px;display:flex;align-items:flex-start;justify-content:space-between;gap:16px;border-bottom:1px solid var(--gray-100)}
     .drawer-head-info{flex:1}
     .drawer-badges{display:flex;gap:6px;margin-bottom:6px;flex-wrap:wrap}
@@ -709,6 +1153,9 @@
     .drawer-back-btn:hover{background:#EEF2FF;border-color:#C7D2FE;color:#1D4ED8}
     .drawer-back-btn:focus-visible{outline:2px solid #2563eb;outline-offset:2px}
     .drawer.lesson-mode .drawer-back-btn{display:inline-flex}
+    /* 학습 연결 모달에서 진입한 경우 — chain-mode 클래스로 학습 연결 back 버튼만 표시 */
+    .drawer.chain-mode #drawerBackToChainBtn{display:inline-flex}
+    .drawer.chain-mode #drawerBackBtn{display:none !important}
     .drawer-breadcrumb{display:none;font-size:var(--fs-xs);color:#6B7280;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:calc(100% - 160px)}
     .drawer.lesson-mode .drawer-breadcrumb{display:block}
 
@@ -866,6 +1313,151 @@
     @media (max-width:640px){
       .record-stats{grid-template-columns:1fr}
     }
+
+    /* ============================================================
+       노드 클릭 카운트다운 가이드 (UX_node_guide_spec.md §3, §4)
+       - 노드 클릭 → 카운트다운 카드 → 자동 진행 흐름
+       - chainGraphModal 안내 배너 + CTA pulse
+       ============================================================ */
+    .node-guide-overlay{
+      position:fixed; top:88px; right:32px;
+      z-index:10025; pointer-events:none;
+    }
+    .node-guide-overlay[hidden]{ display:none !important; }
+    .node-guide-card{
+      width:340px; padding:22px 26px; border-radius:16px;
+      background:rgba(255,255,255,0.96);
+      backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px);
+      box-shadow:0 12px 32px rgba(15,23,42,0.18), 0 2px 8px rgba(15,23,42,0.08);
+      border:1px solid rgba(37,99,235,0.12);
+      pointer-events:auto;
+      animation:ng-card-in 220ms ease-out;
+    }
+    .node-guide-overlay.is-closing .node-guide-card{ animation:ng-card-out 180ms ease-in forwards; }
+    @keyframes ng-card-in{
+      from{ opacity:0; transform:translateY(-8px); }
+      to{ opacity:1; transform:translateY(0); }
+    }
+    @keyframes ng-card-out{
+      from{ opacity:1; transform:translateY(0); }
+      to{ opacity:0; transform:translateY(-8px); }
+    }
+    .node-guide-headline{
+      font-size:16px; font-weight:500; line-height:1.5;
+      color:#4B5563; letter-spacing:-0.01em;
+    }
+    .node-guide-counter{
+      font-size:48px; font-weight:800; line-height:1.0;
+      color:var(--primary, #2563eb);
+      margin:14px 0 12px;
+      text-align:center;
+      transition:transform 200ms ease-out, opacity 200ms ease-out;
+    }
+    .node-guide-counter.is-tick{
+      animation:ng-tick 200ms ease-out;
+    }
+    @keyframes ng-tick{
+      0%{ transform:scale(1); opacity:0.6; }
+      50%{ transform:scale(1.15); opacity:1; }
+      100%{ transform:scale(1); opacity:1; }
+    }
+    .node-guide-progress{
+      height:4px; background:#E5E7EB; border-radius:999px; overflow:hidden;
+    }
+    .node-guide-progress-bar{
+      height:100%; width:100%;
+      background:var(--primary, #2563eb);
+      border-radius:999px;
+      transition:width 100ms linear;
+    }
+    .node-guide-actions{
+      display:flex; gap:12px; justify-content:center;
+      margin-top:16px;
+    }
+    .ng-btn{
+      font-size:15px; font-weight:600;
+      padding:8px 20px; border-radius:10px;
+      min-width:96px; cursor:pointer;
+      transition:background 0.15s ease, box-shadow 0.15s ease, transform 0.1s ease, border-color 0.15s ease;
+      font-family:inherit;
+    }
+    .ng-btn:focus-visible{ outline:2px solid #2563eb; outline-offset:2px; }
+    .ng-btn:active{ transform:scale(0.98); }
+    .ng-btn-ghost{
+      background:transparent; border:1.5px solid #D1D5DB; color:#6B7280;
+    }
+    .ng-btn-ghost:hover{ background:#F3F4F6; border-color:#9CA3AF; color:#4B5563; }
+    .ng-btn-ghost:active{ background:#E5E7EB; }
+    .node-guide-keyhint{
+      font-size:13px; font-weight:400; color:#9CA3AF;
+      margin-top:10px; text-align:right;
+    }
+    .node-guide-keyhint kbd{
+      display:inline-block; padding:1px 6px; margin:0 1px;
+      background:#fff; border:1px solid #D1D5DB; border-bottom-width:2px;
+      border-radius:4px; font-size:12px; font-family:monospace; color:#4B5563;
+    }
+    /* 반응형 — 중형 */
+    @media (max-width:1199px){
+      .node-guide-overlay{ top:80px; right:24px; }
+      .node-guide-card{ width:320px; }
+      .node-guide-counter{ font-size:44px; }
+    }
+    /* 반응형 — 모바일 */
+    @media (max-width:767px){
+      .node-guide-overlay{
+        top:auto; right:auto;
+        left:50%; bottom:24px;
+        transform:translateX(-50%);
+      }
+      .node-guide-card{
+        width:90vw; max-width:340px;
+        animation:ng-card-in-mobile 220ms ease-out;
+      }
+      .node-guide-overlay.is-closing .node-guide-card{
+        animation:ng-card-out-mobile 180ms ease-in forwards;
+      }
+      @keyframes ng-card-in-mobile{
+        from{ opacity:0; transform:translateY(8px); }
+        to{ opacity:1; transform:translateY(0); }
+      }
+      @keyframes ng-card-out-mobile{
+        from{ opacity:1; transform:translateY(0); }
+        to{ opacity:0; transform:translateY(8px); }
+      }
+      .node-guide-counter{ font-size:36px; }
+      .node-guide-keyhint{ display:none; }
+    }
+    /* 모션 민감 사용자 — pulse·등장 모션 제거, 카운트다운 자체는 유지 */
+    @media (prefers-reduced-motion: reduce){
+      .node-guide-card,
+      .node-guide-overlay.is-closing .node-guide-card{ animation:none; }
+      .node-guide-counter.is-tick{ animation:none; }
+      .chain-graph-cta.is-onboarding{ animation:none; }
+    }
+
+    /* chainGraphModal — 상단 안내 배너 (모달 body 최상단) */
+    .chain-graph-guide-banner{
+      flex:0 0 auto;
+      display:flex; align-items:center; gap:10px;
+      padding:12px 16px; border-radius:12px;
+      background:#EFF6FF; color:#374151;
+      font-size:15px; font-weight:500; line-height:1.5;
+      margin:0 0 16px 0;
+      width:100%; box-sizing:border-box;
+    }
+    .chain-graph-guide-banner i{ color:#2563eb; flex-shrink:0; }
+    .chain-graph-guide-banner strong{ color:#2563eb; font-weight:700; }
+
+    /* chainGraphModal CTA pulse — 카운트다운 진입 시 1.2초간 */
+    @keyframes cgm-cta-pulse{
+      0%   { box-shadow:0 0 0 0 rgba(37, 99, 235, 0.55), 0 4px 12px rgba(37, 99, 235, 0.25); }
+      60%  { box-shadow:0 0 0 14px rgba(37, 99, 235, 0), 0 4px 12px rgba(37, 99, 235, 0.25); }
+      100% { box-shadow:0 0 0 0 rgba(37, 99, 235, 0), 0 4px 12px rgba(37, 99, 235, 0.25); }
+    }
+    .chain-graph-cta.is-onboarding{
+      animation:cgm-cta-pulse 0.6s ease-out 2;
+    }
   </style>
 </head>
 <body>
@@ -1017,8 +1609,6 @@
               <button class="zoom-btn" onclick="zoomBy(1.25)" title="확대" aria-label="맵 확대"><i class="fas fa-plus"></i></button>
               <button class="zoom-btn" onclick="zoomBy(0.8)" title="축소" aria-label="맵 축소"><i class="fas fa-minus"></i></button>
               <div class="zoom-level" id="zoomLevel" aria-live="polite">70%</div>
-              <button class="zoom-btn" onclick="resetView()" title="리셋" aria-label="맵 리셋"><i class="fas fa-expand"></i></button>
-              <button class="zoom-btn" onclick="fitView()" title="맞춤" aria-label="화면에 맞춤"><i class="fas fa-compress"></i></button>
             </div>
           </div>
           <div class="map-legend">
@@ -1032,8 +1622,8 @@
           <div class="map-canvas" id="mapCanvas">
             <div class="spinner"><i class="fas fa-spinner"></i><p style="margin-top:8px">학습맵 로딩 중...</p></div>
           </div>
-          <button id="hlCloseBtn" class="hl-close-btn" title="하이라이트 해제" style="display:none" onclick="clearHighlight()">
-            <i class="fas fa-times"></i> 하이라이트 해제
+          <button id="hlCloseBtn" class="hl-close-btn" title="하이라이트 해제하고 학습맵 전체 표시 (Esc)" aria-label="하이라이트 해제하고 학습맵 전체 표시" style="display:none" onclick="clearFocusMode()">
+            <i class="fas fa-xmark"></i> 하이라이트 해제
           </button>
         </section>
       </div>
@@ -1112,6 +1702,9 @@
         <button class="drawer-back-btn" id="drawerBackBtn" onclick="drawerGoBack()" aria-label="학습 목록으로 돌아가기">
           <i class="fas fa-arrow-left"></i><span class="dbb-label">학습 목록으로</span>
         </button>
+        <button class="drawer-back-btn" id="drawerBackToChainBtn" onclick="drawerBackToChainGraph()" aria-label="학습 연결 한눈에 보기로 돌아가기">
+          <i class="fas fa-arrow-left"></i><span class="dbb-label">학습 연결 보기로</span>
+        </button>
         <div class="drawer-breadcrumb" id="drawerBreadcrumb"></div>
       </div>
       <div class="drawer-badges" id="drawerBadges"></div>
@@ -1153,6 +1746,52 @@
   </div>
 </div>
 
+<!-- ===== Chain Graph Modal (학습 연결 한눈에 보기 — 풀스크린) ===== -->
+<div class="modal-overlay chain-graph-overlay" id="chainGraphModal" onclick="if(event.target===this)closeChainGraphModal()" role="dialog" aria-modal="true" aria-labelledby="chainGraphTitle" tabindex="-1">
+  <div class="modal chain-graph-modal" role="document">
+    <div class="modal-header chain-graph-header">
+      <div class="cgm-titlewrap">
+        <div class="modal-title chain-graph-title" id="chainGraphTitle"><i class="fas fa-project-diagram" style="color:#2563eb"></i> 학습 연결 한눈에 보기</div>
+        <div class="chain-graph-subtitle" id="chainGraphSubtitle"></div>
+      </div>
+      <div class="cgm-actions">
+        <button class="btn btn-primary chain-graph-cta" id="chainGraphOpenDrawer" onclick="proceedToDrawerFromChain()" type="button">
+          <i class="fas fa-list"></i> 학습 목록 보기 <i class="fas fa-arrow-right" style="margin-left:4px"></i>
+        </button>
+        <button class="drawer-close chain-graph-close" onclick="closeChainGraphModal()" aria-label="연결 보기 닫기"><i class="fas fa-times"></i></button>
+      </div>
+    </div>
+    <div class="chain-graph-guide-banner" id="chainGraphGuideBanner" style="margin:16px 24px 0 24px;">
+      <i class="fas fa-info-circle"></i>
+      <span>단원의 학습 흐름을 확인했다면 우측 상단 <strong>'학습 목록 보기'</strong>를 눌러 학습을 시작하세요.</span>
+    </div>
+    <div class="modal-body chain-graph-body" id="chainGraphBody">
+      <div class="spinner"><i class="fas fa-spinner"></i></div>
+    </div>
+    <div class="modal-actions chain-graph-footer">
+      <span class="cgm-hint"><i class="fas fa-mouse-pointer"></i> 카드 클릭 → 해당 학습으로 이동 · 현재 카드 클릭 → 학습 목록 열기</span>
+      <span class="cgm-hint cgm-hint-key"><kbd>ESC</kbd> 닫기 · <kbd>←</kbd>/<kbd>→</kbd> 가로 스크롤</span>
+    </div>
+  </div>
+</div>
+
+<!-- ===== 노드 클릭 카운트다운 가이드 (UX_node_guide_spec.md §3) ===== -->
+<div id="nodeGuideOverlay" class="node-guide-overlay" role="status" aria-live="polite" hidden>
+  <div class="node-guide-card">
+    <div class="node-guide-headline">잠시 후 학습 안내가 열려요</div>
+    <div class="node-guide-counter" id="nodeGuideCounter" aria-hidden="true">3</div>
+    <div class="node-guide-progress">
+      <div class="node-guide-progress-bar" id="nodeGuideProgressBar"></div>
+    </div>
+    <div class="node-guide-actions">
+      <button type="button" class="ng-btn ng-btn-ghost" id="nodeGuideCancel" aria-label="안내 취소 (Esc 키와 동일)">취소</button>
+    </div>
+    <div class="node-guide-keyhint">
+      <kbd>Esc</kbd> 취소
+    </div>
+  </div>
+</div>
+
 <!-- ===== Report Modal ===== -->
 <div class="modal-overlay" id="reportModal">
   <div class="modal" style="max-width:520px">
@@ -1186,6 +1825,9 @@ let allNodes = [];
 let allEdges = [];
 let userStatuses = {};      // nodeId -> status
 let nodeById = {};          // nodeId -> node object
+// 전체 노드 라벨 캐시 (필터 밖 노드 라벨 보강용) — 페이지 진입 시 1회 fetch
+let allNodesById = {};      // nodeId -> { id, title, lesson_name, unit_name, area, grade, node_level }
+let _allNodesByIdLoading = null; // Promise (중복 호출 방지)
 let learningList = new Set();
 let lastActivity = null;
 let currentDrawerNode = null;
@@ -1200,6 +1842,9 @@ let nodeDisplayMode = 'unit';
 let drawerHistoryStack = [];
 // 현재 단원 컨텍스트 (breadcrumb용)
 let currentUnitContext = null; // {id, name}
+// 리스트 뷰 아코디언 상태 (리스트 뷰 한정 — 드로어 대체)
+let _currentListAccordionId = null;
+let _listAccordionFetchSeq = 0;
 // 페이지 로드 직후 드로어 자동 오픈 방지 — 이어하기 카드는 표시만, 클릭시에만 오픈
 let userInteracted = false;
 document.addEventListener('click', () => { userInteracted = true; }, { once: true, capture: true });
@@ -1505,9 +2150,21 @@ function bindUI() {
       document.querySelectorAll('#viewModeToggle button').forEach(x => x.classList.remove('active'));
       b.classList.add('active');
       viewMode = b.dataset.val;
+      // 뷰 모드가 바뀌면 펼친 아코디언 상태 해제 (DOM이 새로 렌더링되므로)
+      _currentListAccordionId = null;
       // 툴바에 현재 뷰 모드를 표시 — 리스트 모드일 때 상단 점프바/줌 컨트롤 숨김 처리
       const toolbar = document.querySelector('.map-toolbar');
       if (toolbar) toolbar.setAttribute('data-view', viewMode);
+      // 리스트 뷰는 SVG 맵이 없으니 하이라이트 해제 버튼도 숨김
+      // 맵 뷰로 복귀 시 활성 하이라이트가 있으면 다시 노출
+      const hlBtn = document.getElementById('hlCloseBtn');
+      if (hlBtn) {
+        if (viewMode === 'list') {
+          hlBtn.style.display = 'none';
+        } else if (_highlightedNodeId) {
+          hlBtn.style.display = 'flex';
+        }
+      }
       renderMap();
     });
   });
@@ -1671,7 +2328,61 @@ async function loadDashboard() {
 /* =========================================================
    Map loading + render
    ========================================================= */
+/**
+ * 전체 노드 라벨 캐시 빌드 (필터 밖 노드 — 다른 학교급/학년/영역의 prereq·후속 노드 라벨 확보).
+ * 페이지 진입 시 1회 백그라운드 fetch. 중복 호출은 Promise 공유로 방지.
+ * 미니 다이어그램의 "노드 #XXXXX" 폴백을 거의 0%로 줄이는 것이 목적.
+ */
+async function ensureAllNodesById() {
+  if (_allNodesByIdLoading) return _allNodesByIdLoading;
+  _allNodesByIdLoading = (async () => {
+    try {
+      // 초·중·고 + 단원(level=2) + 차시(level=3) 모두 수집
+      // includeGroups=true 로 level=2,3 한꺼번에. schoolLevel 별로 병렬 호출.
+      const schools = ['elementary', 'middle', 'high'];
+      const reqs = schools.map(sl =>
+        fetchApi(`/api/self-learn/map/nodes?schoolLevel=${sl}&includeGroups=true`).catch(() => null)
+      );
+      const results = await Promise.all(reqs);
+      const acc = {};
+      results.forEach(d => {
+        const arr = (d && d.nodes) || [];
+        arr.forEach(n => {
+          const id = n.node_id || n.id;
+          if (!id) return;
+          // 이미 있으면 더 풍부한 쪽 유지
+          const prev = acc[id];
+          const candTitle = n.title || n.name || n.lesson_name || n.unit_name;
+          if (!prev || (!prev.title && candTitle)) {
+            acc[id] = {
+              id,
+              title: n.title || null,
+              name: n.name || null,
+              lesson_name: n.lesson_name || null,
+              unit_name: n.unit_name || null,
+              area: n.area || n.subject || null,
+              subject: n.subject || n.area || null,
+              grade: n.grade ?? null,
+              semester: n.semester ?? null,
+              school_level: n.school_level || null,
+              grade_level: n.grade_level || null,
+              node_level: n.node_level ?? null,
+            };
+          }
+        });
+      });
+      allNodesById = acc;
+      try { console.log('[learning-map] allNodesById 라벨 캐시 빌드:', Object.keys(acc).length, '개'); } catch(_) {}
+    } catch (err) {
+      console.warn('[learning-map] allNodesById 빌드 실패 — 폴백 사용:', err);
+    }
+  })();
+  return _allNodesByIdLoading;
+}
+
 async function loadMap() {
+  // 전체 노드 라벨 캐시 빌드 트리거 (await 하지 않음 — 백그라운드)
+  try { ensureAllNodesById(); } catch(_) {}
   const canvas = $('mapCanvas');
   if (!allNodes.length) canvas.innerHTML = '<div class="spinner"><i class="fas fa-spinner"></i><p style="margin-top:8px">학습맵 로딩 중...</p></div>';
 
@@ -1791,8 +2502,13 @@ function renderAreaJumpBar(){
   const bar = document.getElementById('areaJumpBar');
   if (!bar) return;
   const AREA_ORDER = ['수와 연산','변화와 관계','도형과 측정','자료와 가능성'];
-  // 영역 점프바는 항상 활성 — 영역 클릭 시 해당 영역의 노드로 점프.
-  // 활성 학년에 그 영역이 없는 경우는 jumpToArea 함수가 토스트로 안내한다.
+  // 현재 활성 학년 확인
+  const activeGradeBtn = document.querySelector('#gradeJumpBar .grade-jump-btn.active');
+  const activeGrade = activeGradeBtn ? activeGradeBtn.textContent.trim() : null;
+  // 학년이 선택되었으면 그 학년의 영역만 활성. 미선택이면 전체 활성
+  const areasInActiveGrade = activeGrade
+    ? new Set((allNodes||[]).filter(n => getGradeLabel(getNormGrade(n)) === activeGrade).map(n => normalizeSubjectArea(n)).filter(Boolean))
+    : null;
   const areas = [...new Set((allNodes||[]).map(n => normalizeSubjectArea(n)).filter(Boolean))]
     .sort((a, b) => {
       const ia = AREA_ORDER.indexOf(a);
@@ -1812,8 +2528,16 @@ function renderAreaJumpBar(){
     btn.style.setProperty('--btn-area-color', color);
     btn.textContent = a;
     btn.dataset.area = a;
-    btn.title = `${a} 영역으로 이동`;
-    btn.addEventListener('click', () => jumpToArea(a, btn));
+    const isAvailable = !areasInActiveGrade || areasInActiveGrade.has(a);
+    if (!isAvailable) {
+      btn.disabled = true;
+      btn.classList.add('is-disabled');
+      btn.title = `${activeGrade}학년에 "${a}" 영역이 없습니다`;
+      btn.setAttribute('aria-disabled', 'true');
+    } else {
+      btn.title = `${a} 영역으로 이동`;
+      btn.addEventListener('click', () => jumpToArea(a, btn));
+    }
     bar.appendChild(btn);
   });
 }
@@ -2367,24 +3091,30 @@ function renderListCard(n){
   metaBits.push(`<span class="lcv-meta-chip status ${status}">${statusLabel(status)}</span>`);
   if (inList) metaBits.push(`<span class="lcv-meta-chip bookmark"><i class="fas fa-bookmark"></i> 학습목록</span>`);
 
+  const safeNodeId = String(n._id).replace(/'/g, "\\'");
   return `
-    <div class="list-card-v2 status-${status}${inListCls}" data-node-id="${escHtml(n._id)}" tabindex="0" role="button" aria-label="${escHtml(n._title)} 상세 열기" onclick="openDrawer('${n._id}', {skipHighlightGate:true})" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openDrawer('${n._id}', {skipHighlightGate:true})}">
-      <div class="lcv-area-bar" style="background:${areaColor}"></div>
-      <div class="lcv-body">
-        <div class="lcv-meta">${metaBits.join('')}</div>
-        <div class="lcv-title">${titleHtml}</div>
-        ${statsHtml}
+    <div class="list-accordion" data-accordion-id="${escHtml(n._id)}">
+      <div class="list-card-v2 status-${status}${inListCls}" data-node-id="${escHtml(n._id)}" tabindex="0" role="button" aria-expanded="false" aria-label="${escHtml(n._title)} 상세 펼치기" onclick="toggleListAccordion('${safeNodeId}', this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleListAccordion('${safeNodeId}', this)}">
+        <div class="lcv-area-bar" style="background:${areaColor}"></div>
+        <div class="lcv-body">
+          <div class="lcv-meta">${metaBits.join('')}</div>
+          <div class="lcv-title">${titleHtml}</div>
+          ${statsHtml}
+        </div>
+        <div class="lcv-progress-area" aria-label="진행률 ${stats.progress}%">
+          <div class="lcv-progress-text"><span style="color:${progressColor}">${stats.progress}%</span><span class="lcv-chevron" aria-hidden="true"><i class="fas fa-chevron-down"></i></span></div>
+          <div class="lcv-progress-bar"><div class="lcv-progress-fill" style="width:${stats.progress}%;background:${progressColor}"></div></div>
+        </div>
       </div>
-      <div class="lcv-progress-area" aria-label="진행률 ${stats.progress}%">
-        <div class="lcv-progress-text"><span style="color:${progressColor}">${stats.progress}%</span><i class="fas fa-chevron-right"></i></div>
-        <div class="lcv-progress-bar"><div class="lcv-progress-fill" style="width:${stats.progress}%;background:${progressColor}"></div></div>
-      </div>
+      <div class="lcv-accordion-body" id="lcvAccBody-${escHtml(n._id)}" onclick="event.stopPropagation()"></div>
     </div>
   `;
 }
 
 function renderListView(nodes){
   const canvas = $('mapCanvas');
+  // 리스트가 새로 그려지므로 펼친 아코디언 상태 해제 (DOM 재생성됨)
+  _currentListAccordionId = null;
   const filtered = applyListFilterToNodes(nodes);
   let html = '<div class="list-view">';
   html += renderListFilterBar();
@@ -2402,6 +3132,206 @@ function renderListView(nodes){
   html += '</div>';
   canvas.innerHTML = html;
   bindListFilterBar();
+}
+
+/* =========================================================
+   List view — 카드 아코디언 (리스트 뷰 한정)
+   - 카드 클릭 시 우측 드로어 대신 카드 아래로 펼침
+   - 한 번에 1개 펼침. 동일 카드 재클릭 → 접힘.
+   - 진단·바로 학습·학습목록 액션은 드로어와 동일 함수 재사용.
+   ========================================================= */
+// (state vars _currentListAccordionId / _listAccordionFetchSeq declared near top)
+
+async function toggleListAccordion(nodeId, cardEl) {
+  if (!nodeId) return;
+  const accEl = cardEl?.closest ? cardEl.closest('.list-accordion') : document.querySelector(`.list-accordion[data-accordion-id="${CSS.escape(nodeId)}"]`);
+  if (!accEl) return;
+  const bodyEl = accEl.querySelector('.lcv-accordion-body');
+  const isActive = accEl.classList.contains('active');
+
+  // 다른 카드가 펼쳐져 있으면 먼저 접기
+  if (_currentListAccordionId && _currentListAccordionId !== nodeId) {
+    const prev = document.querySelector(`.list-accordion[data-accordion-id="${CSS.escape(_currentListAccordionId)}"]`);
+    if (prev) {
+      prev.classList.remove('active');
+      const prevCard = prev.querySelector('.list-card-v2');
+      if (prevCard) prevCard.setAttribute('aria-expanded', 'false');
+      const prevBody = prev.querySelector('.lcv-accordion-body');
+      if (prevBody) prevBody.innerHTML = '';
+    }
+  }
+
+  // 같은 카드 재클릭 → 접기
+  if (isActive) {
+    accEl.classList.remove('active');
+    cardEl?.setAttribute('aria-expanded', 'false');
+    if (bodyEl) bodyEl.innerHTML = '';
+    _currentListAccordionId = null;
+    return;
+  }
+
+  // 펼치기
+  accEl.classList.add('active');
+  cardEl?.setAttribute('aria-expanded', 'true');
+  _currentListAccordionId = nodeId;
+  bodyEl.innerHTML = `<div class="lcv-accordion-inner"><div class="lcv-accordion-loading"><i class="fas fa-spinner"></i> 학습 정보를 불러오는 중...</div></div>`;
+
+  // 비동기 fetch + 경합 가드
+  const seq = ++_listAccordionFetchSeq;
+  let data;
+  try {
+    data = await fetchApi('/api/self-learn/map/nodes/' + encodeURIComponent(nodeId));
+  } catch (err) {
+    if (seq !== _listAccordionFetchSeq) return;
+    bodyEl.innerHTML = `<div class="lcv-accordion-inner"><div class="drawer-empty"><i class="fas fa-exclamation-triangle"></i><div class="de-title">정보를 불러오지 못했어요</div><div class="de-sub">잠시 후 다시 시도해 주세요.</div></div></div>`;
+    return;
+  }
+  if (seq !== _listAccordionFetchSeq) return; // 사용자가 다른 카드로 전환
+
+  // 노드 객체 합성 (drawer 동일 패턴)
+  const node = data?.node || data || {};
+  node._id = nodeId;
+  node._status = inferStatus(nodeId);
+  node.videos = data?.videos || node.videos || node.contents?.filter(c => (c.type === 'video' || c.content_type === 'video')) || [];
+  node.problems = data?.problems || node.problems || node.contents?.filter(c => (c.type === 'problem' || c.content_type === 'problem')) || [];
+  node.prerequisites = data?.prerequisites || node.prerequisites || [];
+  node.nexts = data?.nexts || node.next_nodes || node.nexts || [];
+  node.achievement = data?.achievement || node.achievement || node.achievement_standard || '';
+  node._level = Number(data?.node_level ?? node.node_level ?? node.level ?? (nodeById[nodeId]?.node_level) ?? 3);
+
+  bodyEl.innerHTML = renderListAccordionBody(node);
+
+  // 단원이면 차시 목록 비동기 로드
+  if (Number(node._level) === 2) {
+    const listEl = bodyEl.querySelector('.lcv-unit-lessons-list');
+    if (listEl) loadUnitLessonsInto(listEl, node._id);
+  }
+
+  // 펼친 카드를 뷰포트 안으로 부드럽게 스크롤 (헤더에 가려지지 않도록 헤더만 보이게)
+  try {
+    requestAnimationFrame(() => {
+      const r = cardEl.getBoundingClientRect();
+      const list = document.querySelector('.list-view');
+      if (list && r.top < 80) {
+        cardEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    });
+  } catch (_) {}
+}
+
+function renderListAccordionBody(n) {
+  // renderDrawerBody (overview)와 동일한 본문 구성 — drawer는 사용하지 않음
+  const probs = n.problems || [];
+  let attemptedCount = 0, correctCount = 0;
+  probs.forEach(p => {
+    const my = p.my_attempts ?? p.myAttempts ?? p.attempts_count ?? 0;
+    if (my > 0) { attemptedCount++; if (p.last_correct === true) correctCount++; }
+  });
+  const prog = attemptedCount > 0 ? Math.round((correctCount / attemptedCount) * 100) : 0;
+  const progDetail = attemptedCount > 0 ? ` (${correctCount}/${attemptedCount})` : '';
+  const isUnit = Number(n._level) === 2;
+  let html = '<div class="lcv-accordion-inner">';
+
+  // 차시: 영상 + 문제 우선 노출
+  if (!isUnit) {
+    html += `<div class="drawer-section">
+      <div class="drawer-section-label"><i class="fas fa-video"></i> 학습 영상 (${(n.videos||[]).length})</div>
+      ${renderVideosHtml(n)}
+    </div>`;
+    html += `<div class="drawer-section">
+      <div class="drawer-section-label"><i class="fas fa-clipboard-question"></i> 연습 문제 (${(n.problems||[]).length})</div>
+      ${renderProblemsHtml(n)}
+    </div>`;
+  }
+  // 단원: 차시 목록 + 진행률
+  if (isUnit) {
+    html += `<div class="drawer-section">
+      <div class="drawer-section-label">이 단원의 학습 목록</div>
+      <div class="lcv-unit-lessons-list"></div>
+    </div>`;
+    html += `<div class="drawer-section">
+      <div class="drawer-section-label">진행률</div>
+      <div class="progress-row">
+        <div class="progress-bar"><div class="progress-fill" style="width:${prog}%"></div></div>
+        <div class="progress-text">${prog}%</div>
+      </div>
+    </div>`;
+  }
+  // 선행/후속
+  html += renderRelatedLearningSections(n);
+  if (n.achievement) {
+    html += `<div class="drawer-section">
+      <div class="drawer-section-label">성취기준</div>
+      <div class="drawer-text">${escHtml(n.achievement)}</div>
+    </div>`;
+  }
+  if (n.description) {
+    html += `<div class="drawer-section">
+      <div class="drawer-section-label">설명</div>
+      <div class="drawer-text">${escHtml(n.description)}</div>
+    </div>`;
+  }
+  if (!isUnit) {
+    html += `<div class="drawer-section">
+      <div class="drawer-section-label">정답률${progDetail}</div>
+      <div class="progress-row">
+        <div class="progress-bar"><div class="progress-fill" style="width:${prog}%"></div></div>
+        <div class="progress-text">${prog}%</div>
+      </div>
+    </div>`;
+  }
+
+  // 액션 바 (drawerFooter와 동일 버튼/핸들러)
+  const inList = learningList.has(n._id);
+  const safeId = String(n._id).replace(/'/g, "\\'");
+  const directBtnHtml = isUnit
+    ? ''
+    : `<button class="dual-btn direct" onclick="event.stopPropagation();startDirectLearning('${safeId}')">📖 바로 학습하기 <i class="fas fa-arrow-right" style="font-size:13px"></i></button>`;
+  html += `<div class="lcv-accordion-actions">
+    <button class="dual-btn bookmark ${inList ? 'active' : ''}" onclick="event.stopPropagation();toggleLearningListFromAccordion('${safeId}')">
+      <i class="fas fa-bookmark"></i> ${inList ? '목록에서 제거' : '학습목록 추가'}
+    </button>
+    <div class="footer-cta-group">
+      <button class="dual-btn diag" onclick="event.stopPropagation();startDiagnosisFromNode('${safeId}')">🔍 진단하기</button>
+      ${directBtnHtml}
+    </div>
+  </div>`;
+
+  html += '</div>';
+  return html;
+}
+
+// 아코디언 컨텍스트에서 학습목록 토글 — drawer가 아닌 카드만 갱신
+async function toggleLearningListFromAccordion(nodeId) {
+  try {
+    if (learningList.has(nodeId)) {
+      await fetchApi('/api/self-learn/learning-list/' + encodeURIComponent(nodeId), { method: 'DELETE' });
+      learningList.delete(nodeId);
+      showToast('학습목록에서 제거했습니다', 'fa-bookmark');
+    } else {
+      await fetchApi('/api/self-learn/learning-list', { method: 'POST', body: JSON.stringify({ nodeId }) });
+      learningList.add(nodeId);
+      showToast('학습목록에 추가했습니다', 'fa-bookmark');
+    }
+    await loadLearningList();
+    // 카드 메타·액션바만 부분 갱신 — 전체 renderMap은 펼친 상태 손상시킴
+    const acc = document.querySelector(`.list-accordion[data-accordion-id="${CSS.escape(nodeId)}"]`);
+    if (!acc) return;
+    const card = acc.querySelector('.list-card-v2');
+    if (card) {
+      if (learningList.has(nodeId)) card.classList.add('in-learning-list');
+      else card.classList.remove('in-learning-list');
+    }
+    // 액션 바의 북마크 버튼만 갱신
+    const bm = acc.querySelector('.lcv-accordion-actions .dual-btn.bookmark');
+    if (bm) {
+      const has = learningList.has(nodeId);
+      bm.classList.toggle('active', has);
+      bm.innerHTML = `<i class="fas fa-bookmark"></i> ${has ? '목록에서 제거' : '학습목록 추가'}`;
+    }
+  } catch (err) {
+    console.warn('[accordion] toggle learning list failed', err);
+  }
 }
 
 function renderMap() {
@@ -2530,8 +3460,8 @@ function renderMap() {
     nodesHtml += `
       <div class="svg-node status-${status}${extraCls}" data-node-id="${escHtml(n._id)}" data-area="${escHtml(normalizeSubjectArea(n) || '')}" style="left:${n._x}px;top:${n._y}px;--node-area-color:${_areaColor}"
            tabindex="0" role="button" aria-label="${escHtml(ariaLabel)}"
-           onclick="openDrawer('${n._id}')" ondblclick="openDrawer('${n._id}')"
-           onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openDrawer('${n._id}')}">
+           onclick="handleSvgNodeClick('${n._id}')" ondblclick="handleSvgNodeClick('${n._id}')"
+           onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();handleSvgNodeClick('${n._id}')}">
         <div class="svg-node-header">
           <span>${escHtml(gradeLabel)}</span>
           <span>${escHtml(headerRight)}</span>
@@ -2572,8 +3502,8 @@ function renderMap() {
   } else {
     updateMapTransform();
   }
-  // 재렌더 후 기존 하이라이트 재적용
-  try { if (typeof _highlightedNodeId !== 'undefined' && _highlightedNodeId) highlightNodeNeighbors(_highlightedNodeId); } catch(_){}
+  // 재렌더 후 기존 하이라이트 재적용 (전체 BFS 체인 기준)
+  try { if (typeof _highlightedNodeId !== 'undefined' && _highlightedNodeId && typeof highlightFullChain === 'function') highlightFullChain(_highlightedNodeId); } catch(_){}
 }
 
 function statusLabel(s) {
@@ -2755,12 +3685,146 @@ function focusOnChain(relatedSet, centerNodeId) {
   clearTimeout(focusOnChain._t);
   focusOnChain._t = setTimeout(() => {
     try { world.classList.remove('smooth-transform'); } catch (_) {}
-  }, 420);
+  }, 460);
 }
 
+/* =========================================================
+   전체 BFS 체인 압축 표시 (재구현)
+   - getOneHopNeighbors: 1-hop만 (호환용, 미니 다이어그램 레벨 구성에서 사용)
+   - getChainByLevel: BFS 레벨별 노드 ID 그룹화 (선수 N..선수 1, 현재, 후속 1..후속 N)
+   - focusNodeWithConnections: 전체 BFS 체인 bounding box fit-zoom (clamp 0.10~1.1)
+   - highlightFullChain: 전체 체인 강조 (.hl-center, .hl-target, .hl-edge)
+   - clearFocusMode: 하이라이트 해제 + 원래 보기로 복귀
+   ========================================================= */
+function getOneHopNeighbors(nodeId) {
+  const { prereqs, downs } = getAdjacent(nodeId);
+  return { prereqs, downs, all: new Set([nodeId, ...prereqs, ...downs]) };
+}
+
+/**
+ * BFS 레벨별 노드 ID 그룹화.
+ * 반환: { ups: [[lvl1 ids],[lvl2 ids],...], downs: [[lvl1 ids],[lvl2 ids],...], all: Set }
+ * ups[0] = 직계 선수, ups[1] = 선수의 선수, ...
+ * downs[0] = 직계 후속, downs[1] = 후속의 후속, ...
+ */
+function getChainByLevel(nodeId) {
+  const visited = new Set([nodeId]);
+  const ups = [];
+  const downs = [];
+  // 선수 방향 BFS
+  let frontier = [nodeId];
+  while (frontier.length) {
+    const nextLevel = [];
+    frontier.forEach(cur => {
+      const { prereqs } = getAdjacent(cur);
+      prereqs.forEach(p => {
+        if (!visited.has(p)) {
+          visited.add(p);
+          nextLevel.push(p);
+        }
+      });
+    });
+    if (!nextLevel.length) break;
+    ups.push(nextLevel);
+    frontier = nextLevel;
+  }
+  // 후속 방향 BFS — 선수에서 이미 본 노드는 건너뜀
+  frontier = [nodeId];
+  const seenDown = new Set([nodeId]);
+  while (frontier.length) {
+    const nextLevel = [];
+    frontier.forEach(cur => {
+      const { downs: d } = getAdjacent(cur);
+      d.forEach(x => {
+        if (!seenDown.has(x) && !visited.has(x)) {
+          seenDown.add(x);
+          visited.add(x);
+          nextLevel.push(x);
+        }
+      });
+    });
+    if (!nextLevel.length) break;
+    downs.push(nextLevel);
+    frontier = nextLevel;
+  }
+  return { ups, downs, all: visited };
+}
+
+function focusNodeWithConnections(nodeId) {
+  const canvas = document.getElementById('mapCanvas');
+  const world  = document.getElementById('mapWorld');
+  if (!canvas || !world) return;
+  // 전체 BFS 체인 — 1-hop이 아니라 도달 가능한 모든 노드
+  const { all } = getConnectedChain(nodeId);
+  const NODE_W = 220, NODE_H = 130, PAD = 80;
+  const nodesArr = (Array.isArray(allNodes) ? allNodes : []);
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  let count = 0;
+  nodesArr.forEach(n => {
+    if (!all.has(n._id)) return;
+    if (typeof n._x !== 'number' || typeof n._y !== 'number') return;
+    count++;
+    if (n._x < minX) minX = n._x;
+    if (n._y < minY) minY = n._y;
+    if (n._x + NODE_W > maxX) maxX = n._x + NODE_W;
+    if (n._y + NODE_H > maxY) maxY = n._y + NODE_H;
+  });
+  if (!count || !isFinite(minX)) return;
+  const cw = canvas.clientWidth || 800, ch = canvas.clientHeight || 600;
+  const bboxW = (maxX - minX) + PAD * 2;
+  const bboxH = (maxY - minY) + PAD * 2;
+  // fit-zoom 계산: 양 축 모두 들어가게, 큰 체인도 fit되도록 0.10~1.1 클램프
+  const fitScale = Math.min(cw / bboxW, ch / bboxH);
+  const scale = Math.max(0.10, Math.min(1.1, fitScale));
+  const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
+  // 이전 상태(원래 보기 복귀용)를 1회만 저장
+  if (!mapState._beforeFocus) {
+    mapState._beforeFocus = { scale: mapState.scale, x: mapState.x, y: mapState.y };
+  }
+  mapState.scale = scale;
+  mapState.x = cw / 2 - cx * scale;
+  mapState.y = ch / 2 - cy * scale;
+  world.classList.add('smooth-transform');
+  updateMapTransform();
+  clearTimeout(focusNodeWithConnections._t);
+  focusNodeWithConnections._t = setTimeout(() => {
+    try { world.classList.remove('smooth-transform'); } catch (_) {}
+  }, 520);
+}
+
+/**
+ * 전체 BFS 체인 강조 + fit-zoom 통합.
+ * 클릭 노드(.hl-center) + 전체 체인(.hl-target) + 체인 내부 엣지(.hl-edge).
+ */
+function highlightFullChain(nodeId) {
+  const world = document.getElementById('mapWorld') || document.querySelector('.map-world');
+  if (!world) return null;
+  clearHighlight();
+  if (!nodeId) return null;
+  const chain = getConnectedChain(nodeId);
+  const all = chain.all;
+  _highlightedNodeId = nodeId;
+  world.classList.add('highlight-mode');
+  const btn = document.getElementById('hlCloseBtn'); if (btn) btn.style.display = 'flex';
+  world.querySelectorAll('.svg-node').forEach(el => {
+    const id = el.getAttribute('data-node-id');
+    if (id === nodeId) el.classList.add('hl-center');
+    else if (all.has(id)) el.classList.add('hl-target');
+  });
+  world.querySelectorAll('.map-svg path.edge-line').forEach(p => {
+    const f = p.getAttribute('data-from'), t = p.getAttribute('data-to');
+    if (all.has(f) && all.has(t)) p.classList.add('hl-edge');
+  });
+  return { all, ups: chain.ups, downs: chain.downs };
+}
+
+// 호환용: 일부 호출부에서 highlightOneHop이라는 이름을 그대로 쓰고 있어 alias 제공.
+function highlightOneHop(nodeId) { return highlightFullChain(nodeId); }
+
 function highlightAndFocus(nodeId) {
-  const related = highlightNodeNeighbors(nodeId);
-  if (related) focusOnChain(related, nodeId);
+  // 전체 BFS 체인 강조 + 전체 체인 fit-zoom
+  const related = highlightFullChain(nodeId);
+  if (related) focusNodeWithConnections(nodeId);
 }
 
 function clearHighlight() {
@@ -2775,6 +3839,296 @@ function clearHighlight() {
   world.querySelectorAll('.map-svg path.edge-line.hl-edge').forEach(p => p.classList.remove('hl-edge'));
 }
 
+/**
+ * "하이라이트 해제" 버튼/ESC 처리.
+ * 노드 강조·페이드 해제 + (직전 포커스 진입 전) 줌·팬으로 복원.
+ */
+function clearFocusMode() {
+  clearHighlight();
+  const world = document.getElementById('mapWorld');
+  if (mapState._beforeFocus && world) {
+    const prev = mapState._beforeFocus;
+    mapState.scale = prev.scale;
+    mapState.x = prev.x;
+    mapState.y = prev.y;
+    world.classList.add('smooth-transform');
+    updateMapTransform();
+    setTimeout(() => { try { world.classList.remove('smooth-transform'); } catch (_) {} }, 480);
+  } else if (typeof fitView === 'function') {
+    try { fitView(); } catch (_) {}
+  }
+  mapState._beforeFocus = null;
+}
+
+/* ============================================================
+   노드 클릭 카운트다운 가이드 (UX_node_guide_spec.md §3,§5)
+   - SVG 노드(.svg-node) 클릭 → 카운트다운(3→2→1) → 자동 진행
+   - level=2 → openChainGraphModal, level=3 → openDrawer
+   - 다른 진입경로(URL, history, 드로어 추천카드 등)는 우회
+   ============================================================ */
+const NODE_GUIDE_DURATION_MS = 3000;
+let _nodeGuideState = null;
+// { nodeId, level, startTs, rafId, tickTimeoutId, autoTimeoutId, prevFocus, keyHandler, lastSecond }
+
+function _ngEl(id){ return document.getElementById(id); }
+
+function _ngResolveLevel(nodeId){
+  // node_level 우선, 없으면 nodeDisplayMode/캐시 기반
+  try {
+    const cached = (typeof nodeById !== 'undefined' && nodeById[nodeId])
+      || (typeof allNodesById !== 'undefined' && allNodesById && allNodesById[nodeId])
+      || null;
+    const lvl = Number(cached?.node_level || 0);
+    if (lvl) return lvl;
+  } catch(_) {}
+  // 폴백: nodeDisplayMode 단원 모드면 2, 차시 모드면 3
+  try { return (typeof nodeDisplayMode !== 'undefined' && nodeDisplayMode === 'unit') ? 2 : 3; } catch(_) {}
+  return 3;
+}
+
+function _ngCleanupCard(){
+  const overlay = _ngEl('nodeGuideOverlay');
+  if (!overlay) return;
+  // 퇴장 애니메이션 후 hidden
+  overlay.classList.add('is-closing');
+  setTimeout(() => {
+    try {
+      overlay.classList.remove('is-closing');
+      overlay.hidden = true;
+    } catch(_) {}
+  }, 180);
+}
+
+function _ngCleanupCardImmediate(){
+  // 모달 진입 전 fade-out 완료 (P1 자동 진행 시)
+  const overlay = _ngEl('nodeGuideOverlay');
+  if (!overlay) return;
+  overlay.classList.add('is-closing');
+  // 180ms 후 hidden (호출자가 그 다음 모달 open)
+}
+
+function _ngClearTimers(){
+  if (!_nodeGuideState) return;
+  if (_nodeGuideState.rafId) cancelAnimationFrame(_nodeGuideState.rafId);
+  if (_nodeGuideState.tickTimeoutId) clearTimeout(_nodeGuideState.tickTimeoutId);
+  if (_nodeGuideState.autoTimeoutId) clearTimeout(_nodeGuideState.autoTimeoutId);
+  _nodeGuideState.rafId = null;
+  _nodeGuideState.tickTimeoutId = null;
+  _nodeGuideState.autoTimeoutId = null;
+}
+
+function _ngDetachKeys(){
+  if (_nodeGuideState && _nodeGuideState.keyHandler){
+    document.removeEventListener('keydown', _nodeGuideState.keyHandler, true);
+    _nodeGuideState.keyHandler = null;
+  }
+}
+
+function _ngTickProgress(){
+  if (!_nodeGuideState) return;
+  const elapsed = Date.now() - _nodeGuideState.startTs;
+  const remain = Math.max(0, NODE_GUIDE_DURATION_MS - elapsed);
+  const pct = (remain / NODE_GUIDE_DURATION_MS) * 100;
+  const bar = _ngEl('nodeGuideProgressBar');
+  if (bar) bar.style.width = pct + '%';
+  // 숫자: 0~1초="3", 1~2초="2", 2~3초="1"
+  const secondsLeft = Math.max(1, Math.ceil(remain / 1000));
+  const counter = _ngEl('nodeGuideCounter');
+  if (counter && _nodeGuideState.lastSecond !== secondsLeft){
+    _nodeGuideState.lastSecond = secondsLeft;
+    counter.textContent = String(secondsLeft);
+    counter.classList.remove('is-tick');
+    // 강제 reflow로 애니메이션 재시작
+    void counter.offsetWidth;
+    counter.classList.add('is-tick');
+  }
+  if (remain > 0){
+    _nodeGuideState.rafId = requestAnimationFrame(_ngTickProgress);
+  }
+}
+
+function startNodeGuideCountdown(nodeId, level){
+  if (!nodeId) return;
+  // 이미 같은 노드 진행 중이면 즉시 진행(빠른 학습자 배려)
+  if (_nodeGuideState && _nodeGuideState.nodeId === nodeId){
+    proceedNodeGuide();
+    return;
+  }
+  // 이미 다른 노드 카운트다운 중이면 리셋
+  if (_nodeGuideState){
+    resetNodeGuide(nodeId, level);
+    return;
+  }
+  // 하이라이트 + fit-zoom (기존 함수 재사용)
+  try { highlightFullChain(nodeId); } catch(_) {}
+  try { focusNodeWithConnections(nodeId); } catch(_) {}
+
+  const overlay = _ngEl('nodeGuideOverlay');
+  if (!overlay){
+    // DOM 없으면 즉시 진행 폴백
+    _ngProceed(nodeId, level);
+    return;
+  }
+  const prevFocus = document.activeElement;
+  _nodeGuideState = {
+    nodeId: nodeId,
+    level: level,
+    startTs: Date.now(),
+    rafId: null,
+    tickTimeoutId: null,
+    autoTimeoutId: null,
+    prevFocus: prevFocus,
+    keyHandler: null,
+    lastSecond: null
+  };
+  // UI 초기화
+  const counter = _ngEl('nodeGuideCounter');
+  if (counter){ counter.textContent = '3'; counter.classList.remove('is-tick'); }
+  const bar = _ngEl('nodeGuideProgressBar');
+  if (bar) bar.style.width = '100%';
+  overlay.hidden = false;
+  overlay.classList.remove('is-closing');
+
+  // 진행바·숫자 갱신 시작
+  _nodeGuideState.rafId = requestAnimationFrame(_ngTickProgress);
+  // 자동 종료
+  _nodeGuideState.autoTimeoutId = setTimeout(() => {
+    proceedNodeGuide();
+  }, NODE_GUIDE_DURATION_MS);
+
+  // 키바인드 (Esc=취소만, 자동 진행이 기본이므로 Enter 단축키 불필요)
+  const handler = function(e){
+    if (!_nodeGuideState) return;
+    if (e.key === 'Escape'){
+      e.preventDefault(); e.stopPropagation();
+      cancelNodeGuide();
+    }
+  };
+  _nodeGuideState.keyHandler = handler;
+  document.addEventListener('keydown', handler, true);
+
+  // 자동 포커스 — "취소" 버튼 (단일 액션)
+  setTimeout(() => {
+    try { _ngEl('nodeGuideCancel')?.focus({ preventScroll: true }); } catch(_) {}
+  }, 30);
+}
+
+function cancelNodeGuide(){
+  if (!_nodeGuideState) return;
+  _ngClearTimers();
+  _ngDetachKeys();
+  _ngCleanupCard();
+  // 하이라이트 해제 + 학습맵 원위치 (C1: 카운트다운 중단)
+  try { clearFocusMode(); } catch(_) { try { clearHighlight(); } catch(__) {} }
+  // 포커스 복귀
+  const prev = _nodeGuideState.prevFocus;
+  _nodeGuideState = null;
+  try { if (prev && typeof prev.focus === 'function') prev.focus({ preventScroll: true }); } catch(_) {}
+}
+
+function resetNodeGuide(newNodeId, newLevel){
+  // 기존 타이머·키핸들러만 정리, 카드는 유지(같은 자리에 새 카운트다운)
+  if (!_nodeGuideState){
+    startNodeGuideCountdown(newNodeId, newLevel);
+    return;
+  }
+  _ngClearTimers();
+  _ngDetachKeys();
+  const overlay = _ngEl('nodeGuideOverlay');
+  if (!overlay){ startNodeGuideCountdown(newNodeId, newLevel); return; }
+  // 새 노드 하이라이트
+  try { highlightFullChain(newNodeId); } catch(_) {}
+  try { focusNodeWithConnections(newNodeId); } catch(_) {}
+  // 상태 재설정
+  const prevFocus = _nodeGuideState.prevFocus;
+  _nodeGuideState = {
+    nodeId: newNodeId,
+    level: newLevel,
+    startTs: Date.now(),
+    rafId: null,
+    tickTimeoutId: null,
+    autoTimeoutId: null,
+    prevFocus: prevFocus,
+    keyHandler: null,
+    lastSecond: null
+  };
+  const counter = _ngEl('nodeGuideCounter');
+  if (counter){ counter.textContent = '3'; counter.classList.remove('is-tick'); }
+  const bar = _ngEl('nodeGuideProgressBar');
+  if (bar) bar.style.width = '100%';
+  overlay.hidden = false;
+  overlay.classList.remove('is-closing');
+  _nodeGuideState.rafId = requestAnimationFrame(_ngTickProgress);
+  _nodeGuideState.autoTimeoutId = setTimeout(() => { proceedNodeGuide(); }, NODE_GUIDE_DURATION_MS);
+  const handler = function(e){
+    if (!_nodeGuideState) return;
+    if (e.key === 'Escape'){ e.preventDefault(); e.stopPropagation(); cancelNodeGuide(); }
+  };
+  _nodeGuideState.keyHandler = handler;
+  document.addEventListener('keydown', handler, true);
+}
+
+function _ngProceed(nodeId, level){
+  // 카드 즉시 닫기 (지연된 setTimeout 콜백이 누락되면 카드가 1에서 멈추는 사고가 있어
+  //  fade-out 대기를 제거. 모달/드로어가 곧 화면을 덮으므로 시각적 위화감 없음)
+  const overlay = _ngEl('nodeGuideOverlay');
+  if (overlay){
+    overlay.hidden = true;
+    overlay.classList.remove('is-closing');
+  }
+  try {
+    if (level === 2){
+      // chainGraphModal 진입 + 1.2s pulse
+      openChainGraphModal(nodeId, { fromNodeGuide: true });
+      setTimeout(() => {
+        const cta = document.getElementById('chainGraphOpenDrawer');
+        if (cta){
+          cta.classList.add('is-onboarding');
+          setTimeout(() => { try { cta.classList.remove('is-onboarding'); } catch(_) {} }, 1200);
+        }
+      }, 50);
+    } else {
+      // 차시 노드 (level 3) — 드로어 직행, 하이라이트 게이트 통과
+      openDrawer(nodeId, { skipHighlightGate: true });
+    }
+  } catch(_) {}
+}
+
+function proceedNodeGuide(){
+  if (!_nodeGuideState) return;
+  const nodeId = _nodeGuideState.nodeId;
+  const level = _nodeGuideState.level;
+  _ngClearTimers();
+  _ngDetachKeys();
+  _nodeGuideState = null;
+  _ngProceed(nodeId, level);
+}
+
+// SVG 노드 클릭 핸들러 — 기존 inline onclick에서 호출 (openDrawer 대신)
+function handleSvgNodeClick(nodeId){
+  if (!nodeId) return;
+  // 사용자 상호작용 마킹 (자동 호출 차단 회피)
+  try { userInteracted = true; } catch(_) {}
+  // T3/T4: 모달·드로어 이미 열려있으면 카운트다운 우회
+  try {
+    const chainOpen = document.getElementById('chainGraphModal')?.classList.contains('show');
+    const drawerOpen = document.getElementById('nodeDrawer')?.classList.contains('show');
+    if (chainOpen || drawerOpen){
+      // 빠른 탐색 — 카운트다운 우회, 기존 게이트 동작 그대로
+      openDrawer(nodeId);
+      return;
+    }
+  } catch(_) {}
+  const level = _ngResolveLevel(nodeId);
+  startNodeGuideCountdown(nodeId, level);
+}
+
+// 카운트다운 카드 버튼 핸들러 — DOMContentLoaded 시 한 번 바인딩
+document.addEventListener('DOMContentLoaded', function(){
+  const cancelBtn = document.getElementById('nodeGuideCancel');
+  if (cancelBtn) cancelBtn.addEventListener('click', function(e){ e.preventDefault(); cancelNodeGuide(); });
+});
+
 async function openDrawer(nodeId, opts) {
   opts = opts || {};
   // 사용자 클릭 전 자동 호출이면 무시 (이어하기 자동 오픈 방지)
@@ -2788,8 +4142,25 @@ async function openDrawer(nodeId, opts) {
     try { highlightAndFocus(nodeId); } catch (_) {}
     return;
   }
-  // 노드 이웃 하이라이트 (부가 동작) — 재오픈 시 체인 유지
-  try { highlightNodeNeighbors(nodeId); } catch (_) {}
+  // 노드 강조 (전체 BFS 체인) — 재오픈 시 강조 갱신 + fit-zoom
+  try {
+    highlightFullChain(nodeId);
+    // 드로어가 열려있는 동안에도 강조 노드를 가시 영역으로 유지
+    if (!opts.skipFocus) focusNodeWithConnections(nodeId);
+  } catch (_) {}
+  // [NEW] 단원 노드 클릭은 드로어 대신 풀스크린 연결 그래프 모달을 먼저 띄움.
+  //  - skipChainGraph 옵션이 설정된 경우(모달 내 "학습 목록 보기" 또는 차시 fallback)에는 건너뜀.
+  //  - 차시 노드(level 3)는 기존대로 드로어 직행.
+  //  - 드로어가 이미 열려 있는 상태에서 다른 단원 카드를 클릭하면(force=true) 그래프 모달로 교체.
+  if (!opts.skipChainGraph) {
+    const cachedLevel = Number(nodeById[nodeId]?.node_level || allNodesById?.[nodeId]?.node_level || 0);
+    if (cachedLevel === 2) {
+      // 드로어가 열려 있으면 닫고 그래프 모달로 전환
+      try { if ($('nodeDrawer')?.classList.contains('show')) closeDrawer(); } catch(_) {}
+      openChainGraphModal(nodeId);
+      return;
+    }
+  }
   // §2: 히스토리 스택 push — 이미 열려 있는 드로어 상태 저장
   const drawerBodyEl = $('drawerBody');
   if (opts.pushHistory !== false && currentDrawerNode && currentDrawerNode._id && currentDrawerNode._id !== nodeId) {
@@ -2810,6 +4181,12 @@ async function openDrawer(nodeId, opts) {
   currentDrawerNode = null;
   currentDrawerTab = 'overview';
   document.querySelectorAll('.drawer-tab').forEach(t => t.classList.toggle('active', t.dataset.dt === 'overview'));
+
+  // 학습 연결 모달에서 진입한 경우 drawer에 chain-mode 클래스 → 학습 연결 back 버튼 표시
+  try {
+    const drawerEl = document.getElementById('nodeDrawer');
+    if (drawerEl) drawerEl.classList.toggle('chain-mode', !!opts.fromChainGraph);
+  } catch (_) {}
 
   // 도메인 P0-4: 드로어 열기 직전 마지막 포커스 저장 (닫힐 때 복귀용)
   if (!_lastFocusBeforeDrawer) _lastFocusBeforeDrawer = document.activeElement;
@@ -2897,6 +4274,7 @@ function closeDrawer() {
   $('drawerOverlay').classList.remove('show');
   $('nodeDrawer').classList.remove('show');
   $('nodeDrawer').classList.remove('lesson-mode');
+  $('nodeDrawer').classList.remove('chain-mode');
   // 렌더링 상태 초기화
   currentDrawerNode = null;
   currentDrawerTab = 'overview';
@@ -2955,6 +4333,27 @@ document.addEventListener('keydown', (e) => {
   const layout = document.getElementById('mapLayout');
   if (layout && layout.classList.contains('filter-open')) {
     toggleFilterSidebar(false);
+    return;
+  }
+  // 4) 강조(포커스) 모드 — 전체 보기로 복귀
+  if (_highlightedNodeId) {
+    try { clearFocusMode(); } catch (_) {}
+    return;
+  }
+  // 5) 리스트 뷰 아코디언 (펼친 카드가 있으면 접기)
+  if (_currentListAccordionId) {
+    const acc = document.querySelector(`.list-accordion[data-accordion-id="${CSS.escape(_currentListAccordionId)}"]`);
+    if (acc) {
+      const card = acc.querySelector('.list-card-v2');
+      acc.classList.remove('active');
+      if (card) {
+        card.setAttribute('aria-expanded', 'false');
+        try { card.focus({ preventScroll: true }); } catch (_) { card.focus(); }
+      }
+      const bodyEl = acc.querySelector('.lcv-accordion-body');
+      if (bodyEl) bodyEl.innerHTML = '';
+    }
+    _currentListAccordionId = null;
     return;
   }
 });
@@ -3187,6 +4586,613 @@ function handleLessonCardClick(lessonId, lessonTitle) {
 }
 
 // §3.5 이전/후속 학습 렌더 헬퍼
+/* =========================================================
+   드로어 상단 미니 연결 다이어그램 (1-hop 압축 표시 — B안)
+   [선수 카드들] → [현재 강조] → [후속 카드들]
+   ========================================================= */
+function renderMiniLinkDiagram(n) {
+  if (!n || !n._id) return '';
+  const nid = n._id;
+
+  // 전체 BFS 레벨 (선수 N..선수 1 / 현재 / 후속 1..후속 N)
+  let levels;
+  try {
+    levels = (typeof getChainByLevel === 'function') ? getChainByLevel(nid) : { ups: [], downs: [], all: new Set([nid]) };
+  } catch (_) { levels = { ups: [], downs: [], all: new Set([nid]) }; }
+
+  // 1-hop 보강: allEdges에 없을 수 있는 직계 prereq/next를 백엔드 detail로 메움
+  try {
+    const adj = (typeof getAdjacent === 'function') ? getAdjacent(nid) : { prereqs: [], downs: [] };
+    const detailIds = (detailArr) => {
+      const out = [];
+      (Array.isArray(detailArr) ? detailArr : []).forEach(p => {
+        const pid = (typeof p === 'string' || typeof p === 'number') ? p : (p && (p.node_id || p.id || p._id));
+        if (pid) out.push(pid);
+      });
+      return out;
+    };
+    const seenAll = new Set(levels.all);
+    // 직계 선수 보강
+    const prevSet = new Set([...(adj.prereqs || []), ...detailIds(n.prerequisites)]);
+    const lvl0Up = levels.ups[0] ? new Set(levels.ups[0]) : new Set();
+    const addUps = [];
+    prevSet.forEach(p => {
+      if (p === nid) return;
+      if (!lvl0Up.has(p) && !seenAll.has(p)) { addUps.push(p); seenAll.add(p); }
+    });
+    if (addUps.length) {
+      if (levels.ups[0]) addUps.forEach(p => levels.ups[0].push(p));
+      else levels.ups[0] = addUps;
+    }
+    // 직계 후속 보강
+    const nextSet = new Set([...(adj.downs || []), ...detailIds(n.nexts)]);
+    const lvl0Down = levels.downs[0] ? new Set(levels.downs[0]) : new Set();
+    const addDowns = [];
+    nextSet.forEach(p => {
+      if (p === nid) return;
+      if (!lvl0Down.has(p) && !seenAll.has(p)) { addDowns.push(p); seenAll.add(p); }
+    });
+    if (addDowns.length) {
+      if (levels.downs[0]) addDowns.forEach(p => levels.downs[0].push(p));
+      else levels.downs[0] = addDowns;
+    }
+    levels.all = seenAll;
+  } catch (_) {}
+
+  const findInDetail = (arr, id) => {
+    if (!Array.isArray(arr)) return null;
+    return arr.find(p => p && (p.id === id || p.node_id === id || p._id === id)) || null;
+  };
+  const resolveLabel = (id) => {
+    const m = nodeById[id];
+    const g = allNodesById && allNodesById[id]; // 필터 밖 노드 — 전체 캐시 폴백
+    const d = findInDetail(n.prerequisites, id) || findInDetail(n.nexts, id);
+    const unitMode = (typeof viewMode !== 'undefined' && viewMode === 'unit');
+    const label = unitMode
+      ? ((d && (d.unit_name || d.lesson_name || d.title || d.name))
+          || (m && (m.unit_name || m.lesson_name || m._title || m.title || m.name))
+          || (g && (g.unit_name || g.lesson_name || g.title || g.name)))
+      : ((d && (d.lesson_name || d.unit_name || d.title || d.name))
+          || (m && (m.lesson_name || m.unit_name || m._title || m.title || m.name))
+          || (g && (g.lesson_name || g.unit_name || g.title || g.name)));
+    if (label) return label;
+    // 캐시 빌드 전이거나 미상인 경우 — 짧은 식별 표기 (최후의 폴백)
+    if (typeof id === 'string' && id.length > 6) {
+      return `노드 #${id.slice(1, 6).toUpperCase()}`;
+    }
+    return '연결 학습';
+  };
+  const resolveArea = (id) => {
+    const m = nodeById[id];
+    const g = allNodesById && allNodesById[id];
+    const d = findInDetail(n.prerequisites, id) || findInDetail(n.nexts, id);
+    return (d && (d.area || d.subject))
+        || (m && (m.area || m.subject))
+        || (g && (g.area || g.subject))
+        || '';
+  };
+  const dotColorFor = (id) => {
+    const d = findInDetail(n.prerequisites, id) || findInDetail(n.nexts, id);
+    const st = (d && (d.user_status || d.status))
+            || (typeof inferStatus === 'function' ? inferStatus(id) : null)
+            || 'not_started';
+    if (st === 'completed' || st === 'mastered') return '#16a34a';
+    if (st === 'in_progress' || st === 'diagnosing') return '#f59e0b';
+    return '#CBD5E1';
+  };
+
+  const currentTitle = (n.title || n.name || n.lesson_name || n.unit_name || '학습 노드');
+  const currentArea  = (n.area || n.subject || nodeById[nid]?.area || '');
+  const currentColor = (() => {
+    const st = n._status || (typeof inferStatus === 'function' ? inferStatus(nid) : 'not_started');
+    if (st === 'completed' || st === 'mastered') return '#16a34a';
+    if (st === 'in_progress' || st === 'diagnosing') return '#f59e0b';
+    return '#CBD5E1';
+  })();
+
+  const card = (id) => {
+    const title = resolveLabel(id);
+    const area = resolveArea(id);
+    const dot = dotColorFor(id);
+    return `<div class="mini-link-card" data-node-id="${escHtml(id)}" data-area="${escHtml(area)}"
+              role="button" tabindex="0"
+              title="${escHtml(title)}"
+              onclick="handleMiniLinkClick('${escHtml(id)}')"
+              onmouseenter="pulseMapNode('${escHtml(id)}')"
+              onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();handleMiniLinkClick('${escHtml(id)}')}">
+              <span class="mlc-dot" style="background:${dot}"></span>
+              <div class="mlc-title">${escHtml(title)}</div>
+            </div>`;
+  };
+  const currentCard = `<div class="mini-link-card is-current" data-area="${escHtml(currentArea)}" aria-current="true" title="${escHtml(currentTitle)}">
+              <span class="mlc-dot" style="background:${currentColor}"></span>
+              <div class="mlc-title">${escHtml(currentTitle)}</div>
+            </div>`;
+
+  // 가로 컬럼 빌더: 같은 레벨의 카드들 → 한 컬럼(세로 스택). 컬럼 헤더에 단계 라벨.
+  const buildColumn = (ids, levelLabel, kindClass, isCurrent) => {
+    if (!ids || !ids.length) return '';
+    const cards = ids.map(id => (isCurrent ? id : card(id))).join(isCurrent ? '' : '');
+    const inner = isCurrent ? ids.join('') : ids.map(id => card(id)).join('');
+    return `<div class="mini-col ${kindClass}${isCurrent ? ' is-current' : ''}">
+      <div class="mini-col-label">${escHtml(levelLabel)}</div>
+      <div class="mini-col-cards">${inner}</div>
+    </div>`;
+  };
+
+  const rightArrow = () => `<div class="mini-col-arrow" aria-hidden="true">→</div>`;
+
+  // 표시 순서(가로 좌→우): 가장 먼 선수 → ... → 직계 선수 → 현재 → 직계 후속 → ... → 가장 먼 후속
+  const upsRev = (levels.ups || []).slice().reverse(); // 가장 먼 레벨이 가장 왼쪽
+  const downsArr = levels.downs || [];
+
+  let cols = '';
+  // 선수 컬럼들
+  upsRev.forEach((ids, idx) => {
+    const distance = upsRev.length - idx; // 1: 직계 선수, ...
+    const label = distance === 1 ? '직계 선수' : `선수 -${distance}`;
+    cols += buildColumn(ids, label, 'is-up', false);
+    cols += rightArrow();
+  });
+  // 현재 (currentCard 그대로 inner에 주입)
+  cols += `<div class="mini-col is-current">
+    <div class="mini-col-label">현재</div>
+    <div class="mini-col-cards">${currentCard}</div>
+  </div>`;
+  // 후속 컬럼들
+  downsArr.forEach((ids, idx) => {
+    cols += rightArrow();
+    const distance = idx + 1;
+    const label = distance === 1 ? '직계 후속' : `후속 +${distance}`;
+    cols += buildColumn(ids, label, 'is-down', false);
+  });
+
+  // 선수/후속이 둘 다 없으면 안내(현재만 표시)
+  const totalLinked = (upsRev.reduce((s, a) => s + a.length, 0)) + (downsArr.reduce((s, a) => s + a.length, 0));
+  const emptyHint = (totalLinked === 0)
+    ? `<div class="mini-link-empty mini-link-empty-row">연결된 이전/후속 학습이 없습니다</div>`
+    : '';
+
+  const chainSize = levels.all.size;
+  return `<div class="mini-link-section" aria-label="학습 연결 미니 다이어그램">
+    <div class="mini-link-title">
+      <i class="fas fa-project-diagram"></i>
+      <span>학습 연결 한눈에 보기</span>
+      <span class="mini-link-count">전체 ${chainSize}개 노드</span>
+    </div>
+    <div class="mini-link-flow" id="miniLinkFlow">
+      <div class="mini-link-row">${cols}</div>
+      ${emptyHint}
+    </div>
+  </div>`;
+}
+
+/**
+ * 미니 다이어그램이 DOM에 들어간 직후, 현재 카드를 가로 스크롤 중앙으로 정렬.
+ * renderRelatedLearningSections 호출 후 drawer가 innerHTML 업데이트되면 자동 호출.
+ */
+function centerMiniLinkFlow() {
+  const flow = document.getElementById('miniLinkFlow');
+  if (!flow) return;
+  const curCol = flow.querySelector('.mini-col.is-current');
+  if (!curCol) return;
+  // 현재 컬럼을 가로 스크롤 중앙으로
+  const flowRect = flow.getBoundingClientRect();
+  const curRect = curCol.getBoundingClientRect();
+  const target = (curRect.left - flowRect.left) - (flow.clientWidth / 2) + (curCol.offsetWidth / 2);
+  flow.scrollLeft = Math.max(0, target);
+}
+
+/**
+ * 미니 카드 호버 → 그래프 해당 노드 펄스 (시각 피드백).
+ */
+function pulseMapNode(id) {
+  if (!id) return;
+  const el = document.querySelector(`.svg-node[data-node-id="${CSS.escape(id)}"]`);
+  if (!el) return;
+  el.classList.remove('mlc-pulse');
+  // 다음 프레임에 다시 붙여 애니메이션 재생
+  requestAnimationFrame(() => {
+    el.classList.add('mlc-pulse');
+    setTimeout(() => { try { el.classList.remove('mlc-pulse'); } catch(_){} }, 900);
+  });
+}
+
+// 미니 다이어그램 카드 클릭 → 해당 노드로 점프 (highlight 게이트 우회)
+function handleMiniLinkClick(pid) {
+  if (!pid) return;
+  // 드로어가 열려 있는 동안 점프 → force로 바로 드로어 교체 + 1-hop 강조 갱신
+  openDrawer(pid, { force: true });
+}
+
+/* ===========================================================================
+   풀스크린 학습 연결 그래프 모달 (#chainGraphModal) — 단원 노드 1번 클릭 시 표시
+   ---------------------------------------------------------------------------
+   사용자 피드백 반영:
+   - 노드 카드 2배+ 크기 (160×84, 현재 180×96), 굵은 SVG 화살표(3px)
+   - 90vw × 85vh 큰 모달, 학습 목록·차시·진단은 표시하지 않음
+   - "학습 목록 보기" 버튼 또는 현재 카드 클릭 → 드로어로 진입(skipChainGraph)
+   - 다른 카드 클릭 → 그 노드로 그래프 재렌더 (current 변경)
+   - ESC 닫기, ←/→ 가로 스크롤
+   =========================================================================== */
+let _chainGraphCurrentNodeId = null;     // 모달이 현재 표시 중인 노드 id
+let _chainGraphCachedDetail = {};        // 단원별 백엔드 detail 캐시 (재진입 빠르게)
+let _chainGraphPrevFocus = null;         // 모달 열기 직전 포커스 (닫힐 때 복귀)
+let _chainGraphScrollHandler = null;     // ←/→ 키 핸들러 참조
+
+async function openChainGraphModal(nodeId, opts = {}) {
+  if (!nodeId) return;
+  _chainGraphCurrentNodeId = nodeId;
+  const overlay = document.getElementById('chainGraphModal');
+  if (!overlay) return;
+  _chainGraphPrevFocus = document.activeElement;
+
+  // 헤더 부제: 노드 라벨
+  const cached = nodeById[nodeId] || (allNodesById && allNodesById[nodeId]) || null;
+  const titleGuess = cached && (cached.unit_name || cached.title || cached.name || cached._title) || '단원 학습';
+  const areaGuess = cached && (cached.area || cached.subject || '') || '';
+  const sub = document.getElementById('chainGraphSubtitle');
+  if (sub) sub.textContent = (areaGuess ? `[${areaGuess}] ` : '') + titleGuess;
+
+  // 잔재 inline display:none 이 있으면 .show 클래스가 무력화되므로 먼저 해제
+  if (overlay.style.display) overlay.style.display = '';
+  overlay.classList.add('show');
+  const body = document.getElementById('chainGraphBody');
+  if (body) body.innerHTML = '<div class="spinner" style="margin:auto"><i class="fas fa-spinner"></i></div>';
+
+  // 노드 강조·줌은 처음 진입 시에만 (모달 안 카드 클릭은 SVG 흔들지 않음)
+  if (!opts.skipMapSync) {
+    try { highlightFullChain(nodeId); } catch (_) {}
+    try { focusNodeWithConnections(nodeId); } catch (_) {}
+  }
+
+  // 백엔드에서 prerequisites/nexts 라벨/영역 보강 (캐시)
+  let detail = _chainGraphCachedDetail[nodeId];
+  if (!detail) {
+    try {
+      detail = await fetchApi('/api/self-learn/map/nodes/' + encodeURIComponent(nodeId));
+      _chainGraphCachedDetail[nodeId] = detail;
+    } catch (_) {
+      detail = null;
+    }
+  }
+  // 모달이 도중에 닫히거나 다른 노드로 바뀐 경우 무시
+  if (_chainGraphCurrentNodeId !== nodeId) return;
+
+  // detail 기반의 가상 노드 객체 — renderMiniLinkDiagram과 동일 시그니처
+  const node = Object.assign({}, cached || {}, detail?.node || detail || {}, {
+    _id: nodeId,
+    title: (detail?.node?.title || detail?.node?.unit_name || titleGuess),
+    area: (detail?.node?.area || detail?.node?.subject || areaGuess),
+    prerequisites: detail?.prerequisites || detail?.node?.prerequisites || [],
+    nexts: detail?.nexts || detail?.node?.next_nodes || detail?.node?.nexts || [],
+  });
+  node._status = (typeof inferStatus === 'function' ? inferStatus(nodeId) : 'not_started');
+
+  // 부제 최신화 (백엔드 라벨로 정확화)
+  if (sub) sub.textContent = (node.area ? `[${node.area}] ` : '') + (node.title || '단원');
+
+  if (body) body.innerHTML = renderChainGraph(node);
+  // 스크롤 처리:
+  //  - 첫 진입(skipMapSync 없음): 현재 카드를 가로 스크롤 중앙으로
+  //  - 모달 안 카드 클릭(skipMapSync=true): 클릭한 카드의 화면 내 위치(anchorOffset) 유지 → 새 current가 그 자리에 오게
+  requestAnimationFrame(() => {
+    if (!body) return;
+    const cur = body.querySelector('.cgm-card.is-current');
+    if (!cur) return;
+    if (opts.skipMapSync && opts.anchorOffset !== undefined && opts.anchorOffset !== null) {
+      // 사용자가 클릭한 카드가 보이던 위치에 새 current 카드가 오도록
+      const target = cur.offsetLeft - opts.anchorOffset;
+      const maxScroll = Math.max(0, body.scrollWidth - body.clientWidth);
+      body.scrollLeft = Math.max(0, Math.min(target, maxScroll));
+    } else {
+      // 첫 진입: 현재 카드 중앙으로
+      const target = (cur.offsetLeft + cur.offsetWidth / 2) - (body.clientWidth / 2);
+      body.scrollLeft = Math.max(0, target);
+    }
+  });
+
+  // ESC + ←/→ 가로 스크롤 키보드 핸들러
+  if (_chainGraphScrollHandler) document.removeEventListener('keydown', _chainGraphScrollHandler);
+  _chainGraphScrollHandler = function(e) {
+    if (!document.getElementById('chainGraphModal')?.classList.contains('show')) return;
+    if (e.key === 'Escape') { e.preventDefault(); closeChainGraphModal(); return; }
+    const bodyEl = document.getElementById('chainGraphBody');
+    if (!bodyEl) return;
+    if (e.key === 'ArrowRight') { e.preventDefault(); bodyEl.scrollBy({ left: 200, behavior: 'smooth' }); }
+    else if (e.key === 'ArrowLeft') { e.preventDefault(); bodyEl.scrollBy({ left: -200, behavior: 'smooth' }); }
+  };
+  document.addEventListener('keydown', _chainGraphScrollHandler);
+
+  // 첫 포커스 → "학습 목록 보기" 버튼
+  setTimeout(() => {
+    try { document.getElementById('chainGraphOpenDrawer')?.focus({ preventScroll: true }); } catch(_) {}
+  }, 80);
+}
+
+function closeChainGraphModal() {
+  const overlay = document.getElementById('chainGraphModal');
+  if (!overlay) return;
+  overlay.classList.remove('show');
+  if (_chainGraphScrollHandler) {
+    document.removeEventListener('keydown', _chainGraphScrollHandler);
+    _chainGraphScrollHandler = null;
+  }
+  const nid = _chainGraphCurrentNodeId;
+  _chainGraphCurrentNodeId = null;
+  // 포커스 복귀
+  try {
+    if (_chainGraphPrevFocus && typeof _chainGraphPrevFocus.focus === 'function') {
+      _chainGraphPrevFocus.focus({ preventScroll: true });
+    } else if (nid) {
+      const el = document.querySelector(`.svg-node[data-node-id="${CSS.escape(nid)}"]`);
+      if (el && el.focus) el.focus({ preventScroll: true });
+    }
+  } catch (_) {}
+  _chainGraphPrevFocus = null;
+}
+
+// 학습 연결 모달에서 drawer로 진입한 노드 ID (뒤로가기용)
+let _chainGraphLastReturnNodeId = null;
+
+// "학습 목록 보기" 버튼 → 현재 노드의 드로어 오픈 (그래프 단계 건너뜀)
+function proceedToDrawerFromChain() {
+  const nid = _chainGraphCurrentNodeId;
+  if (!nid) { closeChainGraphModal(); return; }
+  _chainGraphLastReturnNodeId = nid;
+  closeChainGraphModal();
+  openDrawer(nid, { force: true, skipChainGraph: true, skipHighlightGate: true, fromChainGraph: true });
+}
+
+// 모든 카드 클릭 → 모달 닫고 그 노드의 학습 목록(드로어) 바로 열기
+function handleChainGraphCardClick(targetId) {
+  if (!targetId) return;
+  _chainGraphLastReturnNodeId = _chainGraphCurrentNodeId || targetId;
+  closeChainGraphModal();
+  setTimeout(() => {
+    try {
+      openDrawer(targetId, { skipChainGraph: true, skipHighlightGate: true, force: true, fromChainGraph: true });
+    } catch (_) {}
+  }, 80);
+}
+
+// drawer "학습 연결 보기로" 뒤로가기 버튼 → drawer 닫고 학습 연결 모달 재오픈
+function drawerBackToChainGraph() {
+  const nid = _chainGraphLastReturnNodeId;
+  try { smartCloseDrawer(); } catch(_) {}
+  setTimeout(() => {
+    if (nid) openChainGraphModal(nid);
+  }, 100);
+}
+
+/* ---- 그래프 본문 렌더 (대형 카드 + SVG 굵은 화살표) ---------------------- */
+function renderChainGraph(n) {
+  if (!n || !n._id) return '<div class="cgm-empty">표시할 노드 정보가 없습니다.</div>';
+  const nid = n._id;
+
+  // 레벨 묶음: renderMiniLinkDiagram과 동일 로직 — 재사용 가능한 부분은 그대로 활용
+  let levels;
+  try {
+    levels = (typeof getChainByLevel === 'function') ? getChainByLevel(nid) : { ups: [], downs: [], all: new Set([nid]) };
+  } catch (_) { levels = { ups: [], downs: [], all: new Set([nid]) }; }
+  // 1-hop 보강
+  try {
+    const adj = (typeof getAdjacent === 'function') ? getAdjacent(nid) : { prereqs: [], downs: [] };
+    const detailIds = (detailArr) => {
+      const out = [];
+      (Array.isArray(detailArr) ? detailArr : []).forEach(p => {
+        const pid = (typeof p === 'string' || typeof p === 'number') ? p : (p && (p.node_id || p.id || p._id));
+        if (pid) out.push(pid);
+      });
+      return out;
+    };
+    const seenAll = new Set(levels.all);
+    const prevSet = new Set([...(adj.prereqs || []), ...detailIds(n.prerequisites)]);
+    const lvl0Up = levels.ups[0] ? new Set(levels.ups[0]) : new Set();
+    const addUps = [];
+    prevSet.forEach(p => { if (p === nid) return; if (!lvl0Up.has(p) && !seenAll.has(p)) { addUps.push(p); seenAll.add(p); } });
+    if (addUps.length) { if (levels.ups[0]) addUps.forEach(p => levels.ups[0].push(p)); else levels.ups[0] = addUps; }
+    const nextSet = new Set([...(adj.downs || []), ...detailIds(n.nexts)]);
+    const lvl0Down = levels.downs[0] ? new Set(levels.downs[0]) : new Set();
+    const addDowns = [];
+    nextSet.forEach(p => { if (p === nid) return; if (!lvl0Down.has(p) && !seenAll.has(p)) { addDowns.push(p); seenAll.add(p); } });
+    if (addDowns.length) { if (levels.downs[0]) addDowns.forEach(p => levels.downs[0].push(p)); else levels.downs[0] = addDowns; }
+    levels.all = seenAll;
+  } catch (_) {}
+
+  const findInDetail = (arr, id) => {
+    if (!Array.isArray(arr)) return null;
+    return arr.find(p => p && (p.id === id || p.node_id === id || p._id === id)) || null;
+  };
+  const resolveLabel = (id) => {
+    const m = nodeById[id];
+    const g = allNodesById && allNodesById[id];
+    const d = findInDetail(n.prerequisites, id) || findInDetail(n.nexts, id);
+    const unitMode = (typeof viewMode !== 'undefined' && viewMode === 'unit');
+    const label = unitMode
+      ? ((d && (d.unit_name || d.lesson_name || d.title || d.name))
+          || (m && (m.unit_name || m.lesson_name || m._title || m.title || m.name))
+          || (g && (g.unit_name || g.lesson_name || g.title || g.name)))
+      : ((d && (d.lesson_name || d.unit_name || d.title || d.name))
+          || (m && (m.lesson_name || m.unit_name || m._title || m.title || m.name))
+          || (g && (g.lesson_name || g.unit_name || g.title || g.name)));
+    if (label) return label;
+    if (typeof id === 'string' && id.length > 6) return `노드 #${id.slice(1, 6).toUpperCase()}`;
+    return '연결 학습';
+  };
+  const resolveArea = (id) => {
+    const m = nodeById[id];
+    const g = allNodesById && allNodesById[id];
+    const d = findInDetail(n.prerequisites, id) || findInDetail(n.nexts, id);
+    return (d && (d.area || d.subject))
+        || (m && (m.area || m.subject))
+        || (g && (g.area || g.subject))
+        || '';
+  };
+  const dotColorFor = (id) => {
+    const d = findInDetail(n.prerequisites, id) || findInDetail(n.nexts, id);
+    const st = (d && (d.user_status || d.status))
+            || (typeof inferStatus === 'function' ? inferStatus(id) : null)
+            || 'not_started';
+    if (st === 'completed' || st === 'mastered') return '#16a34a';
+    if (st === 'in_progress' || st === 'diagnosing') return '#f59e0b';
+    return '#CBD5E1';
+  };
+
+  /* ---- 학년-학기 라벨 변환 -----------------------------------------------
+     컬럼 라벨을 "초3-1학기" 형식으로 표시. "선수/후속" 단계 표기 제거.
+     - school_level: 'elementary'→'초', 'middle'→'중', 'high'→'고'
+     - grade_level: '초'/'중'/'고' 직접값도 지원
+     - 같은 학년 내 학기 섞이면 "·" (예: "초4-1·2학기")
+     - 여러 학년 섞이면 ", " (최대 2개 표시, 초과 시 "외 N")
+  -------------------------------------------------------------------- */
+  const SCHOOL_KO = { elementary:'초', middle:'중', high:'고', '초':'초', '중':'중', '고':'고', '초등':'초', '중등':'중', '고등':'고' };
+  const resolveGradeSemester = (id) => {
+    const m = nodeById[id];
+    const g = allNodesById && allNodesById[id];
+    const d = findInDetail(n.prerequisites, id) || findInDetail(n.nexts, id);
+    const pick = (k) => (d && d[k] != null && d[k] !== '') ? d[k]
+                     : (m && m[k] != null && m[k] !== '') ? m[k]
+                     : (g && g[k] != null && g[k] !== '') ? g[k]
+                     : null;
+    const sl = pick('school_level') || pick('grade_level');
+    const grade = pick('grade');
+    const sem = pick('semester');
+    const slKo = sl ? (SCHOOL_KO[sl] || '') : '';
+    return { school: slKo, grade: (grade != null ? String(grade) : ''), semester: (sem != null ? String(sem) : '') };
+  };
+  const buildColLabel = (ids) => {
+    if (!ids || !ids.length) return '';
+    const sgMap = new Map(); // "초3" -> Set of semesters
+    ids.forEach(id => {
+      const r = resolveGradeSemester(id);
+      const head = (r.school + r.grade).trim();
+      if (!head) return;
+      if (!sgMap.has(head)) sgMap.set(head, new Set());
+      if (r.semester) sgMap.get(head).add(r.semester);
+    });
+    if (!sgMap.size) return '기타';
+    const order = { '초':0, '중':1, '고':2 };
+    const entries = Array.from(sgMap.entries()).sort((a,b) => {
+      const sa = order[a[0][0]] ?? 9, sb = order[b[0][0]] ?? 9;
+      if (sa !== sb) return sa - sb;
+      return parseInt(a[0].slice(1)||'0') - parseInt(b[0].slice(1)||'0');
+    });
+    const parts = entries.map(([head, semSet]) => {
+      const sems = Array.from(semSet).sort((a,b)=>parseInt(a)-parseInt(b));
+      return sems.length ? `${head}-${sems.join('·')}학기` : head;
+    });
+    if (parts.length <= 2) return parts.join(', ');
+    return `${parts.slice(0,2).join(', ')} 외 ${parts.length-2}`;
+  };
+  // 현재 노드의 학년-학기 라벨 (current 컬럼용) + "(현재)" 배지 텍스트는 별도 처리
+  const currentGSLabel = (() => {
+    const r = resolveGradeSemester(nid);
+    const head = (r.school + r.grade).trim();
+    if (!head) return '';
+    return r.semester ? `${head}-${r.semester}학기` : head;
+  })();
+
+  const currentTitle = (n.title || n.name || n.lesson_name || n.unit_name || '학습 노드');
+  const currentArea  = (n.area || n.subject || nodeById[nid]?.area || '');
+  const currentDot = (() => {
+    const st = n._status || (typeof inferStatus === 'function' ? inferStatus(nid) : 'not_started');
+    if (st === 'completed' || st === 'mastered') return '#16a34a';
+    if (st === 'in_progress' || st === 'diagnosing') return '#f59e0b';
+    return '#CBD5E1';
+  })();
+
+  const card = (id, isCurrent) => {
+    const title = isCurrent ? currentTitle : resolveLabel(id);
+    const area = isCurrent ? currentArea : resolveArea(id);
+    const dot = isCurrent ? currentDot : dotColorFor(id);
+    const cls = isCurrent ? 'cgm-card is-current' : 'cgm-card';
+    const aria = isCurrent ? 'aria-current="true"' : `role="button"`;
+    const click = `onclick="handleChainGraphCardClick('${escHtml(id)}')"`;
+    const hover = `onmouseenter="pulseMapNode('${escHtml(id)}')"`;
+    const kbd = `onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();handleChainGraphCardClick('${escHtml(id)}')}"`;
+    return `<div class="${cls}" data-node-id="${escHtml(id)}" data-area="${escHtml(area)}" tabindex="0" title="${escHtml(title)}" ${aria} ${click} ${hover} ${kbd}>
+      <div class="cgm-card-title">${escHtml(title)}</div>
+      <div class="cgm-card-meta">
+        <span class="cgm-card-dot" style="background:${dot}"></span>
+        ${area ? `<span class="cgm-card-area">${escHtml(area)}</span>` : ''}
+      </div>
+      ${isCurrent ? `<span class="cgm-current-cta">학습 목록 열기 →</span>` : ''}
+    </div>`;
+  };
+
+  // 굵은 화살표 (SVG, 1.5배 — 48×32 viewport, stroke 4px)
+  const arrowSvg = `<div class="cgm-col-arrow" aria-hidden="true">
+    <svg width="48" height="32" viewBox="0 0 48 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path d="M3 16 H39" stroke="#64748b" stroke-width="4" stroke-linecap="round"/>
+      <path d="M33 7 L42 16 L33 25" stroke="#64748b" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+    </svg>
+  </div>`;
+
+  const buildCol = (ids, levelLabel, isCurrent) => {
+    if (!ids || !ids.length) return '';
+    const inner = ids.map(id => card(id, !!isCurrent)).join('');
+    const labelHtml = levelLabel
+      ? `<div class="cgm-col-label">${escHtml(levelLabel)}</div>`
+      : `<div class="cgm-col-label cgm-col-label--empty">기타</div>`;
+    return `<div class="cgm-col${isCurrent ? ' is-current' : ''}">
+      ${labelHtml}
+      <div class="cgm-col-cards">${inner}</div>
+    </div>`;
+  };
+
+  const upsRev = (levels.ups || []).slice().reverse();
+  const downsArr = levels.downs || [];
+
+  let cols = '';
+  upsRev.forEach((ids) => {
+    const label = buildColLabel(ids) || '기타';
+    cols += buildCol(ids, label, false);
+    cols += arrowSvg;
+  });
+  // 현재 — 항상 표시. 학년-학기 라벨 + (현재) 배지
+  const currentLabelHtml = currentGSLabel
+    ? `${escHtml(currentGSLabel)} <span class="cgm-col-label-badge">현재</span>`
+    : '현재';
+  cols += `<div class="cgm-col is-current">
+    <div class="cgm-col-label">${currentLabelHtml}</div>
+    <div class="cgm-col-cards">${card(nid, true)}</div>
+  </div>`;
+  downsArr.forEach((ids) => {
+    cols += arrowSvg;
+    const label = buildColLabel(ids) || '기타';
+    cols += buildCol(ids, label, false);
+  });
+
+  const totalLinked = (upsRev.reduce((s, a) => s + a.length, 0)) + (downsArr.reduce((s, a) => s + a.length, 0));
+  if (totalLinked === 0) {
+    cols += `<div class="cgm-empty-row" style="margin-left:24px;align-self:center"><i class="fas fa-info-circle"></i> 연결된 이전·후속 학습이 없습니다</div>`;
+  }
+
+  return `<div class="cgm-row" id="cgmRow">${cols}</div>`;
+}
+
+// +N 더보기 클릭 — 기존 renderRelatedLearningSections의 "+N 더보기" 영역으로 스크롤
+function expandMiniLinkMore(kind) {
+  const body = document.getElementById('drawerBody');
+  if (!body) return;
+  // 같은 종류의 rel-section을 찾아 펼치고 스크롤
+  const sections = body.querySelectorAll('.rel-section');
+  let target = null;
+  sections.forEach(sec => {
+    const label = sec.querySelector('.rel-section-label')?.textContent || '';
+    if (kind === 'prev' && label.indexOf('이전 학습') === 0) target = sec;
+    if (kind === 'next' && label.indexOf('이어지는 학습') === 0) target = sec;
+  });
+  if (!target) return;
+  // 접혀 있는 카드 펼치기
+  const moreBtn = target.querySelector('.rel-more-btn');
+  if (moreBtn && moreBtn.getAttribute('data-expanded') !== '1') {
+    moreBtn.click();
+  }
+  target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
 // 드로어의 이전/이어지는 학습 목록은 allEdges(getAdjacent) 기반의 1-hop 이웃 전체를 보여준다.
 // 현재 맵 필터에 의해 nodeById에 없는 노드라도, 백엔드 상세(n.prerequisites / n.nexts)에서
 // 제목/영역/학년 정보를 복원해서 표시한다. 어느 쪽에도 없을 때도 id 만으로 스텁을 만들어
@@ -3337,6 +5343,20 @@ function toggleRelMore(btn, secId) {
 }
 
 function handleRelClick(pid) {
+  // 리스트 뷰에서 선행/후속 카드 클릭 → 해당 노드의 아코디언으로 점프 (드로어 대신)
+  if (viewMode === 'list') {
+    const target = document.querySelector(`.list-accordion[data-accordion-id="${CSS.escape(pid)}"]`);
+    if (target) {
+      const card = target.querySelector('.list-card-v2');
+      if (card) {
+        card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        // 약간의 딜레이 후 토글 (스크롤 완료 대기)
+        setTimeout(() => toggleListAccordion(pid, card), 350);
+      }
+      return;
+    }
+    // 리스트에 카드가 없으면(필터 외) 드로어로 fallback
+  }
   openDrawer(pid, { force: true });
 }
 
@@ -3361,6 +5381,20 @@ function renderDrawerBody() {
     const progDetail = attemptedCount > 0 ? ` (${correctCount}/${attemptedCount})` : '';
     const isUnit = Number(n._level) === 2;
     let html = '';
+    // [REMOVED 2026-05-12] 드로어 내 미니 연결 다이어그램 제거.
+    //   사용자 피드백: "노드도 너무 작고, 관계성도 제대로 안 보이고 / 너무 작은 화면에 보여주네 /
+    //   해당 단원의 학습목록은 여기서 보여주지 마 / 한 번 더 클릭하면 보여주는 것으로 하자"
+    //   → 단원 노드 1번 클릭 = 풀스크린 #chainGraphModal,
+    //     모달 안 "학습 목록 보기" / 현재 카드 클릭 = 드로어 오픈.
+    //   드로어에서 다시 보고 싶으면 헤더의 "연결 보기" 버튼으로 모달 재오픈.
+    // 단원 드로어: 헤더 우상단에 "연결 보기" 미니 버튼 추가 (모달 재오픈)
+    if (Number(n._level) === 2) {
+      html += `<div class="drawer-section drawer-chain-reopen-row">
+        <button class="btn-link-chain" type="button" onclick="openChainGraphModal('${escHtml(n._id)}')" aria-label="학습 연결 한눈에 보기 다시 열기">
+          <i class="fas fa-project-diagram"></i> 학습 연결 한눈에 보기 다시 열기
+        </button>
+      </div>`;
+    }
     // 차시 드로어: 영상 썸네일 + 문항 목록을 최상단에 즉시 노출
     if (!isUnit) {
       html += `<div class="drawer-section">
@@ -3441,6 +5475,8 @@ function renderDrawerBody() {
       </div>`;
     }
     body.innerHTML = html || '<div class="drawer-text" style="padding:20px 0;color:var(--gray-500)">표시할 상세 정보가 없습니다.</div>';
+    // 미니 다이어그램이 그려졌으면 현재 카드를 가로 스크롤 중앙으로
+    try { requestAnimationFrame(() => centerMiniLinkFlow()); } catch(_) {}
     // 단원이면 차시 목록을 비동기 로드하여 주입
     if (Number(n._level) === 2) {
       const listEl = document.getElementById('unitLessonsList');
@@ -4317,20 +6353,149 @@ async function startDiagnosisFromNode(nodeId) {
   diagSession = {
     targetNodeId: nodeId,
     targetNode,
-    currentNodeId: nodeId,           // 진단 중인 노드
-    currentDepth: 0,                 // 현재 진단 깊이 (0=목표, 1=직속선수, 2=선수의선수, 3=최대)
-    history: [],                     // [{nodeId, title, score (0~2), passed}]
-    correctChain: 0,                 // 연속 정답 카운터 (전체 흐름)
-    questionsInNode: [],             // 현재 노드의 문항 풀
-    currentQuestionIdx: 0,           // 현재 노드 내 문항 인덱스
-    nodeCorrectCount: 0,             // 현재 노드 정답 수
+    currentNodeId: nodeId,
+    currentDepth: 0,
+    history: [],
+    correctChain: 0,
+    questionsInNode: [],
+    currentQuestionIdx: 0,
+    nodeCorrectCount: 0,
     finished: false
   };
+  // 이전 진단 이력 조회 → 있으면 분기 모달, 없으면 바로 진단 인트로
+  try {
+    const histRes = await fetchApi('/api/self-learn/diagnosis/history?nodeId=' + encodeURIComponent(nodeId));
+    if (histRes && histRes.success && histRes.hasAnyHistory) {
+      showDiagHistoryModal(histRes);
+      return;
+    }
+  } catch (_) { /* 이력 조회 실패는 무시하고 진단 시작 흐름으로 */ }
   showDiagIntroModal();
 }
 
+// 이전 진단 이력 안내 모달 — 사용자가 결과 보기 / 다시 진단 / 취소 중 선택
+function showDiagHistoryModal(histData) {
+  ensureDiagModal();
+  diagResetBodyStyle();
+  const target = diagSession.targetNode;
+  const title = target.title || target.lesson_name || target.unit_name || '학습 노드';
+  const last = histData.lastCompleted;
+  const inProg = histData.lastInProgress;
+  const fmtDate = (s) => {
+    if (!s) return '';
+    try {
+      const d = new Date(s.replace(' ', 'T') + 'Z');
+      const now = Date.now();
+      const diffH = Math.round((now - d.getTime()) / (1000*60*60));
+      if (diffH < 1) return '방금 전';
+      if (diffH < 24) return `${diffH}시간 전`;
+      const diffD = Math.round(diffH / 24);
+      if (diffD < 7) return `${diffD}일 전`;
+      return d.toLocaleDateString('ko-KR', { year:'numeric', month:'long', day:'numeric' });
+    } catch (_) { return s; }
+  };
+  const scorePct = (r) => {
+    const total = r.total_questions || 0;
+    if (!total) return null;
+    return Math.round((r.correct_count || 0) / total * 100);
+  };
+
+  let html = `
+    <div style="text-align:center;padding:28px 16px;max-width:560px;margin:0 auto">
+      <div style="width:80px;height:80px;border-radius:50%;background:#EFF6FF;display:flex;align-items:center;justify-content:center;margin:0 auto 20px;font-size:36px">📋</div>
+      <h2 style="font-size:28px;font-weight:800;color:#0F172A;margin:0 0 16px;letter-spacing:-.01em">진단 이력이 있어요</h2>
+      <p style="font-size:17px;color:#475569;line-height:1.7;margin:0 0 24px">
+        <b style="color:#0F172A">"${escHtml(title)}"</b> 진단을 이미 진행한 적이 있어요.
+      </p>`;
+
+  if (last) {
+    const pct = scorePct(last);
+    const passed = pct !== null && pct >= 70;
+    html += `
+      <div style="background:#F8FAFC;border:1.5px solid #E2E8F0;border-radius:12px;padding:20px 24px;text-align:left;margin-bottom:16px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+          <span style="font-size:14px;color:#64748B;font-weight:600">최근 완료한 진단</span>
+          ${pct !== null ? `<span style="font-size:13px;font-weight:700;color:${passed ? '#10b981' : '#f59e0b'};background:${passed ? '#ecfdf5' : '#fef3c7'};padding:4px 12px;border-radius:99px">${passed ? '통과' : '복습 필요'}</span>` : ''}
+        </div>
+        <div style="display:flex;justify-content:space-between;gap:16px;font-size:16px">
+          <div><div style="color:#94A3B8;font-size:13px;margin-bottom:4px;font-weight:500">진단일</div><div style="color:#0F172A;font-weight:700">${fmtDate(last.completed_at || last.started_at)}</div></div>
+          <div><div style="color:#94A3B8;font-size:13px;margin-bottom:4px;font-weight:500">정답률</div><div style="color:#0F172A;font-weight:700">${pct !== null ? pct + '%' : '-'}</div></div>
+          <div><div style="color:#94A3B8;font-size:13px;margin-bottom:4px;font-weight:500">문항</div><div style="color:#0F172A;font-weight:700">${last.correct_count || 0} / ${last.total_questions || 0}</div></div>
+        </div>
+      </div>`;
+  } else if (inProg) {
+    html += `
+      <div style="background:#FEF3C7;border:1.5px solid #FDE68A;border-radius:12px;padding:16px 20px;text-align:left;margin-bottom:16px;font-size:16px;color:#92400E;line-height:1.6">
+        <i class="fas fa-info-circle" style="margin-right:8px"></i>
+        <b>진행 중인 진단</b>이 있어요 (${fmtDate(inProg.started_at)} 시작). 다시 시작하면 이전 진행이 취소됩니다.
+      </div>`;
+  }
+
+  html += `</div>`;
+  $('diagModalBody').innerHTML = html;
+  $('diagModalActions').innerHTML = `
+    <button class="btn btn-ghost" onclick="closeDiagModal()" style="font-size:16px;padding:12px 22px">취소</button>
+    ${last ? `<button class="btn btn-ghost" onclick="viewLastDiagResult(${last.id})" style="min-width:120px;font-size:16px;padding:12px 22px"><i class="fas fa-eye"></i> 결과 보기</button>` : ''}
+    <button class="btn btn-primary" onclick="showDiagIntroModal()" style="min-width:140px;display:inline-flex;align-items:center;justify-content:center;gap:6px;font-size:16px;padding:12px 22px"><i class="fas fa-redo"></i> ${last ? '다시 진단' : '진단 이어가기'}</button>
+  `;
+  openDiagModal();
+}
+
+async function viewLastDiagResult(sessionId) {
+  try {
+    const r = await fetchApi('/api/self-learn/diagnosis/' + sessionId + '/result');
+    if (r && r.success) {
+      // API 응답 구조: { success, session: { completed_at, correct_count, total_questions, target_node_id, result, ... }, answers: [] }
+      const s = r.session || r;
+      const correct = s.correct_count || 0;
+      const total = s.total_questions || 0;
+      const pct = total ? Math.round(correct / total * 100) : 0;
+      const passed = pct >= 70;
+      const targetTitle = diagSession?.targetNode?.title || diagSession?.targetNode?.lesson_name || diagSession?.targetNode?.unit_name || s.target_node_id || '-';
+      const fmtDateTime = (d) => {
+        if (!d) return '-';
+        try {
+          const dt = new Date(d.replace(' ', 'T') + 'Z');
+          return dt.toLocaleString('ko-KR', { year:'numeric', month:'long', day:'numeric', hour:'2-digit', minute:'2-digit' });
+        } catch (_) { return d; }
+      };
+      $('diagModalBody').innerHTML = `
+        <div style="text-align:center;padding:28px 16px;max-width:560px;margin:0 auto">
+          <div style="width:80px;height:80px;border-radius:50%;background:${passed ? '#ECFDF5' : '#FEF3C7'};display:flex;align-items:center;justify-content:center;margin:0 auto 20px;font-size:36px;color:${passed ? '#10B981' : '#F59E0B'}"><i class="fas fa-${passed ? 'check-circle' : 'clipboard-list'}"></i></div>
+          <h2 style="font-size:28px;font-weight:800;color:#0F172A;margin:0 0 16px;letter-spacing:-.01em">진단 결과</h2>
+          <div style="font-size:48px;font-weight:800;color:${passed ? '#10B981' : '#F59E0B'};margin:0 0 8px;line-height:1">${pct}%</div>
+          <div style="font-size:17px;color:#475569;margin:0 0 24px">${correct} / ${total} 문항 정답</div>
+          <div style="background:#F8FAFC;border-radius:12px;padding:18px 22px;font-size:16px;color:#475569;text-align:left;line-height:1.8;border:1px solid #E2E8F0">
+            <div style="display:flex;justify-content:space-between;align-items:center"><span style="color:#94A3B8;font-weight:500">완료 시각</span><span style="color:#0F172A;font-weight:600">${fmtDateTime(s.completed_at)}</span></div>
+            <div style="display:flex;justify-content:space-between;align-items:center"><span style="color:#94A3B8;font-weight:500">진단 노드</span><span style="color:#0F172A;font-weight:600">${escHtml(targetTitle)}</span></div>
+            ${s.result ? `<div style="display:flex;justify-content:space-between;align-items:center"><span style="color:#94A3B8;font-weight:500">판정</span><span style="color:${passed ? '#10B981' : '#F59E0B'};font-weight:700">${s.result === 'needs_review' ? '복습 필요' : s.result === 'passed' ? '통과' : s.result}</span></div>` : ''}
+          </div>
+        </div>`;
+      $('diagModalActions').innerHTML = `
+        <button class="btn btn-ghost" onclick="closeDiagModal()" style="font-size:16px;padding:12px 22px">닫기</button>
+        <button class="btn btn-primary" onclick="showDiagIntroModal()" style="font-size:16px;padding:12px 22px;display:inline-flex;align-items:center;gap:6px"><i class="fas fa-redo"></i> 다시 진단</button>
+      `;
+    } else {
+      showToast('진단 결과를 불러올 수 없습니다.', 'fa-exclamation-circle');
+    }
+  } catch (_) {
+    showToast('진단 결과를 불러올 수 없습니다.', 'fa-exclamation-circle');
+  }
+}
+
+// ESC 키로 진단 모달 닫기 (BUG-02 수정)
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  const m = document.getElementById('diagModal');
+  if (m && m.style.display === 'flex') {
+    closeDiagModal();
+    e.preventDefault();
+  }
+});
+
 async function loadNodeForDiag(nodeId) {
-  const data = await fetchApi('/api/self-learn/map/nodes/' + encodeURIComponent(nodeId));
+  // 진단 흐름에서는 폴백 problems 자동 활성화 (직접 매핑 없을 시 자손/같은단원/같은학년·과목 풀에서 보충)
+  const data = await fetchApi('/api/self-learn/map/nodes/' + encodeURIComponent(nodeId) + '?withFallbackProblems=1');
   return data?.node ? Object.assign({ _id: nodeId }, data, data.node) : null;
 }
 
@@ -4340,25 +6505,25 @@ function showDiagIntroModal() {
   const target = diagSession.targetNode;
   const title = target.title || target.lesson_name || target.unit_name || '학습 노드';
   $('diagModalBody').innerHTML = `
-    <div style="text-align:center;padding:24px 16px">
+    <div style="text-align:center;padding:28px 16px;max-width:560px;margin:0 auto">
       <div style="width:80px;height:80px;border-radius:50%;background:linear-gradient(135deg,#FEF3C7,#FDE68A);display:flex;align-items:center;justify-content:center;margin:0 auto 20px;font-size:36px">🔍</div>
-      <h2 style="font-size:22px;font-weight:800;color:#0F172A;margin:0 0 12px">학습 준비도 진단</h2>
-      <p style="font-size:15px;color:#475569;line-height:1.6;margin:0 0 8px">
+      <h2 style="font-size:28px;font-weight:800;color:#0F172A;margin:0 0 16px;letter-spacing:-.01em">학습 준비도 진단</h2>
+      <p style="font-size:17px;color:#475569;line-height:1.7;margin:0 0 8px">
         <b style="color:#0F172A">"${escHtml(title)}"</b>을(를)<br>학습할 준비가 됐는지 진단합니다.
       </p>
-      <p style="font-size:14px;color:#6B7280;margin:0 0 24px">
+      <p style="font-size:16px;color:#6B7280;line-height:1.6;margin:0 0 24px">
         선수학습 노드에서 문제를 풀어 학습 출발점을 찾아드려요.
       </p>
-      <div style="background:#F8FAFC;border:1px solid #E2E8F0;border-radius:12px;padding:14px 18px;text-align:left;font-size:13px;color:#475569;line-height:1.7;margin-bottom:24px">
-        <div><i class="fas fa-clipboard-check" style="color:#4F46E5;margin-right:6px"></i> 노드당 <b>2문항</b> · 모두 정답이면 통과</div>
-        <div><i class="fas fa-stairs" style="color:#10B981;margin-right:6px"></i> 막히면 한 단계 더 내려가서 진단 (최대 3단계)</div>
-        <div><i class="fas fa-clock" style="color:#F59E0B;margin-right:6px"></i> 약 3~6분 소요</div>
+      <div style="background:#F8FAFC;border:1px solid #E2E8F0;border-radius:12px;padding:18px 22px;text-align:left;font-size:16px;color:#475569;line-height:2;margin-bottom:24px">
+        <div><i class="fas fa-clipboard-check" style="color:#4F46E5;margin-right:8px"></i> 노드당 <b>2문항</b> · 모두 정답이면 통과</div>
+        <div><i class="fas fa-stairs" style="color:#10B981;margin-right:8px"></i> 막히면 한 단계 더 내려가서 진단 (최대 3단계)</div>
+        <div><i class="fas fa-clock" style="color:#F59E0B;margin-right:8px"></i> 약 3~6분 소요</div>
       </div>
     </div>
   `;
   $('diagModalActions').innerHTML = `
-    <button class="btn btn-ghost" onclick="closeDiagModal()">취소</button>
-    <button class="btn btn-primary" onclick="diagBeginAtCurrentNode()" style="min-width:140px;display:inline-flex;align-items:center;justify-content:center;gap:6px"><i class="fas fa-play"></i> 진단 시작</button>
+    <button class="btn btn-ghost" onclick="closeDiagModal()" style="font-size:16px;padding:12px 22px">취소</button>
+    <button class="btn btn-primary" onclick="diagBeginAtCurrentNode()" style="min-width:140px;display:inline-flex;align-items:center;justify-content:center;gap:6px;font-size:16px;padding:12px 22px"><i class="fas fa-play"></i> 진단 시작</button>
   `;
   openDiagModal();
 }
@@ -4367,32 +6532,43 @@ function ensureDiagModal() {
   if (document.getElementById('diagModal')) return;
   const m = document.createElement('div');
   m.id = 'diagModal';
-  m.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,0.65);z-index:10100;display:none;align-items:center;justify-content:center';
+  // overlay 더 진하게(0.85) + 모달 자체 z-index 충돌 방지(공통 GNB 9999 위)
+  m.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,0.85);z-index:10500;display:none;align-items:center;justify-content:center;padding:20px';
   m.innerHTML = `
-    <div style="background:#fff;width:90vw;height:90vh;border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.4);display:flex;flex-direction:column;overflow:hidden;position:relative">
-      <div id="diagModalHeader" style="display:flex;align-items:center;justify-content:space-between;padding:14px 20px;border-bottom:1px solid #E5E7EB;background:#F9FAFB;flex-shrink:0">
-        <div style="display:flex;align-items:center;gap:10px">
-          <i class="fas fa-stethoscope" style="color:#4F46E5;font-size:18px"></i>
-          <span style="font-size:15px;font-weight:700;color:#0F172A">진단하기</span>
-          <span id="diagModalProgress" style="font-size:12px;color:#6B7280;background:#EEF2FF;padding:2px 8px;border-radius:6px;display:none"></span>
+    <div style="background:#fff;width:90vw;height:90vh;max-width:1280px;border-radius:16px;box-shadow:0 24px 64px rgba(0,0,0,.5);display:flex;flex-direction:column;overflow:hidden;position:relative">
+      <div id="diagModalHeader" style="display:flex;align-items:center;justify-content:space-between;padding:16px 24px;border-bottom:1px solid #E5E7EB;background:#F9FAFB;flex-shrink:0">
+        <div style="display:flex;align-items:center;gap:12px">
+          <i class="fas fa-stethoscope" style="color:#4F46E5;font-size:20px"></i>
+          <span style="font-size:19px;font-weight:700;color:#0F172A">진단하기</span>
+          <span id="diagModalProgress" style="font-size:13px;color:#4F46E5;background:#EEF2FF;padding:4px 12px;border-radius:8px;display:none;font-weight:600"></span>
         </div>
-        <button onclick="closeDiagModal()" style="border:0;background:none;width:36px;height:36px;border-radius:8px;cursor:pointer;color:#6B7280;font-size:18px"><i class="fas fa-times"></i></button>
+        <button onclick="closeDiagModal()" style="border:0;background:none;width:40px;height:40px;border-radius:8px;cursor:pointer;color:#6B7280;font-size:20px"><i class="fas fa-times"></i></button>
       </div>
-      <div id="diagModalBody" style="flex:1;overflow-y:auto;padding:20px"></div>
-      <div id="diagModalActions" style="padding:12px 20px;border-top:1px solid #E5E7EB;background:#F9FAFB;flex-shrink:0;display:flex;justify-content:flex-end;gap:8px"></div>
+      <div id="diagModalBody" style="flex:1;overflow-y:auto;padding:24px 28px"></div>
+      <div id="diagModalActions" style="padding:16px 24px;border-top:1px solid #E5E7EB;background:#F9FAFB;flex-shrink:0;display:flex;justify-content:flex-end;gap:10px"></div>
     </div>`;
   document.body.appendChild(m);
 }
 
-function openDiagModal() { ensureDiagModal(); document.getElementById('diagModal').style.display = 'flex'; }
+function openDiagModal() {
+  ensureDiagModal();
+  // 진단 모달 진입 시 뒷면 drawer 자동 닫기 (반투명 뒷면에 비치는 잡 UI 제거)
+  try {
+    const drawer = document.getElementById('nodeDrawer');
+    if (drawer) drawer.classList.remove('open');
+    document.body.style.overflow = 'hidden';
+  } catch(_) {}
+  document.getElementById('diagModal').style.display = 'flex';
+}
 // 진단 모달 body의 인라인 스타일을 기본(스크롤+패딩)으로 원복
 function diagResetBodyStyle() {
   const body = document.getElementById('diagModalBody');
-  if (body) body.style.cssText = 'flex:1;overflow-y:auto;padding:20px';
+  if (body) body.style.cssText = 'flex:1;overflow-y:auto;padding:24px 28px';
 }
 function closeDiagModal() {
   const m = document.getElementById('diagModal');
   if (m) m.style.display = 'none';
+  document.body.style.overflow = '';
   // 메시지 리스너 정리
   if (window._diagMsgListener) {
     window.removeEventListener('message', window._diagMsgListener);

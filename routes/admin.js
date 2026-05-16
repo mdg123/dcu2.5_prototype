@@ -31,33 +31,95 @@ router.get('/users', ...adminOnly, (req, res) => {
   }
 });
 
+// 보호 대상 seed 계정 — 시드 데이터 무결성을 위해 삭제·역할 변경 금지 (BUG-A-02)
+const PROTECTED_USERNAMES = new Set(['admin', 'teacher1', 'student1', 'student2', 'student3', 'parent1', 'staff1']);
+function isProtectedUser(userId) {
+  try {
+    const row = db.prepare('SELECT username FROM users WHERE id = ?').get(userId);
+    if (!row) return false;
+    return PROTECTED_USERNAMES.has(row.username);
+  } catch (e) {
+    return false;
+  }
+}
+function applyUserUpdate(userId, body) {
+  const { role, status } = body || {};
+  const fields = [];
+  const params = [];
+  if (role) {
+    if (!['student', 'teacher', 'parent', 'staff', 'admin'].includes(role)) {
+      return { ok: false, code: 400, message: '허용되지 않는 역할입니다.' };
+    }
+    fields.push('role = ?'); params.push(role);
+  }
+  if (status) {
+    if (!['active', 'inactive', 'suspended', 'deleted'].includes(status)) {
+      return { ok: false, code: 400, message: '허용되지 않는 상태입니다.' };
+    }
+    fields.push('status = ?'); params.push(status);
+  }
+  if (fields.length === 0) return { ok: true, message: '변경 사항이 없습니다.' };
+  fields.push('updated_at = CURRENT_TIMESTAMP');
+  params.push(userId);
+  db.prepare(`UPDATE users SET ${fields.join(', ')} WHERE id = ?`).run(...params);
+  return { ok: true, user: authDb.findUserById(userId) };
+}
+
 // PUT /api/admin/users/:id - 사용자 정보 수정 (역할, 상태)
 router.put('/users/:id', ...adminOnly, (req, res) => {
   try {
     const userId = parseInt(req.params.id);
-    const { role, status } = req.body;
-    const fields = [];
-    const params = [];
-    if (role) { fields.push('role = ?'); params.push(role); }
-    if (status) { fields.push('status = ?'); params.push(status); }
-    if (fields.length === 0) return res.json({ success: true, message: '변경 사항이 없습니다.' });
-    params.push(userId);
-    db.prepare(`UPDATE users SET ${fields.join(', ')} WHERE id = ?`).run(...params);
-    const user = authDb.findUserById(userId);
-    res.json({ success: true, user });
+    if (isProtectedUser(userId) && req.body && req.body.role) {
+      return res.status(403).json({ success: false, message: '기본 계정의 역할은 변경할 수 없습니다.' });
+    }
+    const result = applyUserUpdate(userId, req.body);
+    if (!result.ok) return res.status(result.code || 400).json({ success: false, message: result.message });
+    res.json({ success: true, user: result.user, message: result.message });
   } catch (err) {
     res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
   }
 });
 
-// DELETE /api/admin/users/:id - 사용자 삭제
+// PUT /api/admin/users/:id/role - 사용자 역할만 변경 (UI 별칭 라우트, BUG-T-06)
+router.put('/users/:id/role', ...adminOnly, (req, res) => {
+  try {
+    const userId = parseInt(req.params.id);
+    const { role } = req.body || {};
+    if (!role) return res.status(400).json({ success: false, message: '역할(role)을 지정해야 합니다.' });
+    if (isProtectedUser(userId)) {
+      return res.status(403).json({ success: false, message: '기본 계정의 역할은 변경할 수 없습니다.' });
+    }
+    const result = applyUserUpdate(userId, { role });
+    if (!result.ok) return res.status(result.code || 400).json({ success: false, message: result.message });
+    res.json({ success: true, user: result.user, message: '역할이 변경되었습니다.' });
+  } catch (err) {
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// DELETE /api/admin/users/:id - 사용자 삭제 (소프트 삭제, BUG-A-02)
+// FK 제약 위반을 피하기 위해 row 삭제 대신 deleted_at 시각을 설정.
+// 인증·목록 조회에서 자동으로 제외되며, 과거 활동 기록(작성 글·로그 등)은 그대로 보존.
 router.delete('/users/:id', ...adminOnly, (req, res) => {
   try {
     const userId = parseInt(req.params.id);
-    if (userId === req.user.id) return res.status(400).json({ success: false, message: '자기 자신은 삭제할 수 없습니다.' });
-    db.prepare('DELETE FROM users WHERE id = ?').run(userId);
+    if (!userId) return res.status(400).json({ success: false, message: '잘못된 사용자 ID입니다.' });
+    if (userId === req.user.id) {
+      return res.status(400).json({ success: false, message: '자기 자신은 삭제할 수 없습니다.' });
+    }
+    const target = db.prepare('SELECT id, username, deleted_at FROM users WHERE id = ?').get(userId);
+    if (!target) return res.status(404).json({ success: false, message: '사용자를 찾을 수 없습니다.' });
+    if (PROTECTED_USERNAMES.has(target.username)) {
+      return res.status(403).json({ success: false, message: '기본 계정(admin·teacher1·student1 등)은 삭제할 수 없습니다.' });
+    }
+    if (target.deleted_at) {
+      return res.json({ success: true, message: '이미 삭제된 사용자입니다.' });
+    }
+    db.prepare("UPDATE users SET deleted_at = CURRENT_TIMESTAMP, status = 'deleted', updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+      .run(userId);
     res.json({ success: true, message: '삭제되었습니다.' });
   } catch (err) {
+    console.error('[admin] 사용자 삭제 실패:', err);
     res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
   }
 });
@@ -125,7 +187,7 @@ router.get('/contents', ...adminOnly, (req, res) => {
 // PUT /api/admin/contents/:id/approve - 콘텐츠 승인
 router.put('/contents/:id/approve', ...adminOnly, (req, res) => {
   try {
-    db.prepare("UPDATE contents SET status = 'published' WHERE id = ?").run(parseInt(req.params.id));
+    db.prepare("UPDATE contents SET status = 'approved' WHERE id = ?").run(parseInt(req.params.id));
     res.json({ success: true, message: '승인되었습니다.' });
   } catch (err) {
     res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
@@ -1062,30 +1124,34 @@ router.post('/learning-map/upload', ...adminOnly, (req, res, next) => {
           }
         });
 
-        // 3차 패스: 차시 엣지 (선수학습ID → 현재 3단계ID) + 파생된 단원 엣지
+        // 3차 패스: 차시 엣지 (선수학습ID·후속학습ID 양방향) + 파생된 단원 엣지
         const unitEdgeSeen = new Set(); // "unitA->unitB"
+        const addLessonEdge = (fromId, toId) => {
+          if (!fromId || !toId || fromId === toId) return;
+          const info = insertEdge.run(fromId, toId);
+          if (info.changes > 0) stats.inserted_lesson_edges++;
+          // 단원 엣지 파생
+          const unitA = lessonToUnit.get(fromId);
+          const unitB = lessonToUnit.get(toId);
+          if (unitA && unitB && unitA !== unitB) {
+            const key = `${unitA}->${unitB}`;
+            if (!unitEdgeSeen.has(key)) {
+              unitEdgeSeen.add(key);
+              const uinfo = insertUnitEdge.run(unitA, unitB);
+              if (uinfo.changes > 0) stats.inserted_unit_edges++;
+            }
+          }
+        };
         rows.forEach((row, idx) => {
           try {
-            const toId = row['3단계ID'] ? String(row['3단계ID']).trim() : '';
-            if (!toId) return;
+            const currentId = row['3단계ID'] ? String(row['3단계ID']).trim() : '';
+            if (!currentId) return;
+            // 선수학습ID → 현재 3단계ID
             const prereqs = splitIds(row['선수학습ID']);
-            prereqs.forEach(fromId => {
-              if (fromId === toId) return;
-              const info = insertEdge.run(fromId, toId);
-              if (info.changes > 0) stats.inserted_lesson_edges++;
-
-              // 단원 엣지 파생
-              const unitA = lessonToUnit.get(fromId);
-              const unitB = lessonToUnit.get(toId);
-              if (unitA && unitB && unitA !== unitB) {
-                const key = `${unitA}->${unitB}`;
-                if (!unitEdgeSeen.has(key)) {
-                  unitEdgeSeen.add(key);
-                  const uinfo = insertUnitEdge.run(unitA, unitB);
-                  if (uinfo.changes > 0) stats.inserted_unit_edges++;
-                }
-              }
-            });
+            prereqs.forEach(fromId => addLessonEdge(fromId, currentId));
+            // 현재 3단계ID → 후속학습ID (엑셀 후속학습ID 컬럼은 본행이 선수가 됨)
+            const nexts = splitIds(row['후속학습ID']);
+            nexts.forEach(toId => addLessonEdge(currentId, toId));
           } catch (e) {
             if (stats.errors.length < 20) stats.errors.push(`edge row ${idx + 2}: ${e.message}`);
           }

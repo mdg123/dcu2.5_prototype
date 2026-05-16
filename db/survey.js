@@ -23,17 +23,33 @@ function getSurveyById(id) {
   return s;
 }
 
-function getSurveysByClass(classId, { status, page = 1, limit = 20 } = {}) {
+function getSurveysByClass(classId, { status, page = 1, limit = 20, userId = null } = {}) {
   let where = 'WHERE s.class_id = ?';
   const params = [classId];
   if (status) { where += ' AND s.status = ?'; params.push(status); }
 
   const total = db.prepare(`SELECT COUNT(*) as cnt FROM surveys s ${where}`).get(...params).cnt;
+  // 본인 응답 정보 (학생/멤버 본인 표시용)
+  const myRespondedSelect = userId
+    ? `, (SELECT sr.id FROM survey_responses sr WHERE sr.survey_id = s.id AND sr.user_id = ${Number(userId)} LIMIT 1) as my_response,
+         (SELECT sr.submitted_at FROM survey_responses sr WHERE sr.survey_id = s.id AND sr.user_id = ${Number(userId)} LIMIT 1) as my_responded_at`
+    : '';
   const surveys = db.prepare(`
     SELECT s.id, s.class_id, s.author_id, s.title, s.description, s.status,
            s.start_date, s.end_date, s.is_anonymous, s.created_at,
            u.display_name as author_name,
-           (SELECT COUNT(*) FROM survey_responses WHERE survey_id = s.id) as response_count
+           (SELECT COUNT(*) FROM survey_responses WHERE survey_id = s.id) as response_count,
+           (SELECT COUNT(DISTINCT sr.user_id) FROM survey_responses sr
+             JOIN class_members cm ON cm.user_id = sr.user_id
+                                  AND cm.class_id = s.class_id
+                                  AND cm.role = 'member'
+                                  AND cm.status = 'active'
+             WHERE sr.survey_id = s.id) as respondent_count,
+           (SELECT COUNT(*) FROM class_members cm2
+             WHERE cm2.class_id = s.class_id
+               AND cm2.role = 'member'
+               AND cm2.status = 'active') as member_count
+           ${myRespondedSelect}
     FROM surveys s JOIN users u ON s.author_id = u.id
     ${where} ORDER BY s.created_at DESC LIMIT ? OFFSET ?
   `).all(...params, limit, (page - 1) * limit);
