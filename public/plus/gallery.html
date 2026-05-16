@@ -866,6 +866,36 @@
       .carousel-track { transition: none !important; }
       .expanded-grid--contest, .expanded-grid--popular { animation: none; }
     }
+    /* ─── 섹션 접기/펼치기 ─── */
+    .section-actions { display: flex; gap: 8px; align-items: center; }
+    .section-collapse-btn {
+      padding: 8px 14px; border-radius: 999px;
+      font-size: 14px; font-weight: 700; cursor: pointer;
+      white-space: nowrap; min-width: 92px;
+      display: inline-flex; align-items: center; gap: 6px;
+      transition: all 0.15s;
+      border: 1.5px solid transparent;
+      background: #fff;
+    }
+    .contest-section .section-collapse-btn { color: #92400e; border-color: #f59e0b; }
+    .contest-section .section-collapse-btn:hover { background: rgba(245,158,11,0.12); }
+    .popular-section .section-collapse-btn { color: #9a3412; border-color: #ea580c; }
+    .popular-section .section-collapse-btn:hover { background: rgba(234,88,12,0.12); }
+    .section-collapse-btn:focus-visible { outline: 2px solid var(--brand-1); outline-offset: 2px; }
+    /* 접힌 상태 — 본문/카운트뱃지/서브타이틀/전체보기 버튼 모두 숨김, 헤더 최소화 */
+    .contest-section.is-collapsed .carousel-shell,
+    .contest-section.is-collapsed .expanded-grid--contest,
+    .contest-section.is-collapsed .back-to-carousel-btn,
+    .contest-section.is-collapsed .contest-toggle,
+    .popular-section.is-collapsed .carousel-shell,
+    .popular-section.is-collapsed .expanded-grid--popular,
+    .popular-section.is-collapsed .back-to-carousel-btn,
+    .popular-section.is-collapsed .popular-toggle {
+      display: none !important;
+    }
+    .contest-section.is-collapsed, .popular-section.is-collapsed { padding-bottom: 14px; }
+    .contest-section.is-collapsed .contest-head,
+    .popular-section.is-collapsed .popular-head { margin-bottom: 0; }
     @media (max-width: 1199px) {
       /* 중형: 두 카드 동일 220×280 유지 (변경 없음) */
     }
@@ -1157,10 +1187,16 @@
             <span id="contestCountBadge" style="font-size:14px;color:#92400e;font-weight:600;margin-left:4px;padding:3px 10px;background:rgba(245,158,11,0.15);border-radius:99px;"></span>
             <span style="font-size:13px;color:#92400e;font-weight:500;margin-left:8px;">— 우리 학교 친구들과 함께 응모해요!</span>
           </h3>
-          <button class="contest-toggle" type="button" onclick="toggleExpandedView('contestSection')" aria-expanded="false">
-            <i class="fas fa-th-large" id="contestToggleIcon"></i>
-            <span id="contestToggleLabel">전체 보기</span>
-          </button>
+          <div class="section-actions">
+            <button class="contest-toggle" type="button" onclick="toggleExpandedView('contestSection')" aria-expanded="false">
+              <i class="fas fa-th-large" id="contestToggleIcon"></i>
+              <span id="contestToggleLabel">전체 보기</span>
+            </button>
+            <button type="button" class="section-collapse-btn" onclick="toggleSectionCollapse('contestSection')" aria-expanded="true" aria-label="이번 달 콘테스트 섹션 접기/펼치기">
+              <i class="fas fa-chevron-up" id="contestCollapseIcon"></i>
+              <span id="contestCollapseLabel">접기</span>
+            </button>
+          </div>
         </div>
         <!-- 자동 캐러셀 영역 -->
         <div class="carousel-shell" id="contestCarouselShell">
@@ -1185,10 +1221,16 @@
             인기 작품 Top 100
             <span class="popular-sub" id="popularSub">친구들이 가장 많이 본 작품</span>
           </h3>
-          <button type="button" class="popular-toggle" onclick="toggleExpandedView('popularSection')" aria-expanded="false">
-            <i class="fas fa-th-large" id="popularToggleIcon"></i>
-            <span id="popularToggleLabel">전체 보기</span>
-          </button>
+          <div class="section-actions">
+            <button type="button" class="popular-toggle" onclick="toggleExpandedView('popularSection')" aria-expanded="false">
+              <i class="fas fa-th-large" id="popularToggleIcon"></i>
+              <span id="popularToggleLabel">전체 보기</span>
+            </button>
+            <button type="button" class="section-collapse-btn" onclick="toggleSectionCollapse('popularSection')" aria-expanded="true" aria-label="인기 작품 섹션 접기/펼치기">
+              <i class="fas fa-chevron-up" id="popularCollapseIcon"></i>
+              <span id="popularCollapseLabel">접기</span>
+            </button>
+          </div>
         </div>
         <!-- 자동 캐러셀 영역 -->
         <div class="carousel-shell" id="popularCarouselShell">
@@ -3126,6 +3168,28 @@
             requestAnimationFrame(() => track.classList.remove('no-anim'));
           });
         }
+        startAutoScroll(sectionId);
+      }
+    }
+    // 섹션 전체 접기/펼치기 — 캐러셀·grid·복귀버튼·전체보기 버튼 모두 숨김, 헤더만 노출
+    function toggleSectionCollapse(sectionId) {
+      const sec = document.getElementById(sectionId);
+      if (!sec) return;
+      const isCollapsed = sec.classList.toggle('is-collapsed');
+      const labelEl = document.getElementById(sectionId === 'contestSection' ? 'contestCollapseLabel' : 'popularCollapseLabel');
+      const iconEl = document.getElementById(sectionId === 'contestSection' ? 'contestCollapseIcon' : 'popularCollapseIcon');
+      if (labelEl) labelEl.textContent = isCollapsed ? '펼치기' : '접기';
+      if (iconEl) iconEl.className = isCollapsed ? 'fas fa-chevron-down' : 'fas fa-chevron-up';
+      const btn = sec.querySelector('.section-collapse-btn');
+      if (btn) btn.setAttribute('aria-expanded', String(!isCollapsed));
+      // 접힘 시 자동 회전 정지 / 펼침 시 (확장 모드 아니면) 재개
+      const st = carouselState[sectionId];
+      if (!st) return;
+      if (isCollapsed) {
+        if (st.intervalId) { clearInterval(st.intervalId); st.intervalId = null; }
+        st.paused = true;
+      } else if (!st.expanded) {
+        st.paused = false;
         startAutoScroll(sectionId);
       }
     }
