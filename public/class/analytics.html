@@ -210,7 +210,15 @@
     .analytics-bar-section { margin-bottom: 20px; background: #fff; border-radius: 12px; padding: 22px 24px; border: 1px solid var(--gray-200); }
     .analytics-bar-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; flex-wrap: wrap; gap: 8px; }
     .analytics-bar-head .section-title { font-size: 18px; font-weight: 700; display: inline-flex; align-items: center; gap: 8px; margin: 0; }
+    /* 항목이 많을 때 페이지가 끝없이 길어지지 않도록 스크롤 컨테이너로 제한 (RFP: 스크롤로 모든 항목 표시) */
+    .analytics-bar-scroll { position: relative; max-height: 520px; overflow-y: auto; overflow-x: hidden; border-radius: 8px; scrollbar-gutter: stable; }
+    .analytics-bar-scroll::-webkit-scrollbar { width: 10px; }
+    .analytics-bar-scroll::-webkit-scrollbar-track { background: transparent; }
+    .analytics-bar-scroll::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.18); border-radius: 8px; border: 2px solid transparent; background-clip: padding-box; }
+    .analytics-bar-scroll::-webkit-scrollbar-thumb:hover { background: rgba(0,0,0,0.32); background-clip: padding-box; }
     .analytics-bar-canvas-wrap { position: relative; }
+    .analytics-bar-scroll-hint { font-size: 12px; color: var(--gray-500); margin-top: 6px; text-align: right; display: none; }
+    .analytics-bar-scroll-hint.is-visible { display: block; }
     .analytics-bar-empty { text-align: center; padding: 36px 20px; color: var(--gray-500); font-size: 15px; background: var(--gray-50); border-radius: 10px; }
 
     /* 명단 모달 — 셀프체크 모달 패턴 재활용 */
@@ -1120,7 +1128,10 @@
                 <h3 class="section-title"><i class="fas fa-chalkboard-teacher" style="color:#10b981"></i> 수업 이수율 분석</h3>
                 <span id="lessonAnalysisCount" style="font-size:14px;color:var(--gray-500);font-weight:600"></span>
               </div>
-              <div class="analytics-bar-canvas-wrap" id="lessonBarWrap" style="height:240px"><canvas id="lessonBarChart"></canvas></div>
+              <div class="analytics-bar-scroll" id="lessonBarScroll">
+                <div class="analytics-bar-canvas-wrap" id="lessonBarWrap" style="height:240px"><canvas id="lessonBarChart"></canvas></div>
+              </div>
+              <div id="lessonAnalysisScrollHint" class="analytics-bar-scroll-hint"><i class="fas fa-arrows-alt-v"></i> 스크롤하여 모든 수업 보기</div>
               <div id="lessonAnalysisEmpty" class="analytics-bar-empty" style="display:none">해당 기간에 등록된 수업이 없습니다.</div>
               <div id="lessonAnalysisInsight" style="margin-top:14px"></div>
             </div>
@@ -1131,7 +1142,10 @@
                 <h3 class="section-title"><i class="fas fa-file-alt" style="color:#2563eb"></i> 과제 제출률 분석</h3>
                 <span id="homeworkAnalysisCount" style="font-size:14px;color:var(--gray-500);font-weight:600"></span>
               </div>
-              <div class="analytics-bar-canvas-wrap" id="homeworkBarWrap" style="height:240px"><canvas id="homeworkBarChart"></canvas></div>
+              <div class="analytics-bar-scroll" id="homeworkBarScroll">
+                <div class="analytics-bar-canvas-wrap" id="homeworkBarWrap" style="height:240px"><canvas id="homeworkBarChart"></canvas></div>
+              </div>
+              <div id="homeworkAnalysisScrollHint" class="analytics-bar-scroll-hint"><i class="fas fa-arrows-alt-v"></i> 스크롤하여 모든 과제 보기</div>
               <div id="homeworkAnalysisEmpty" class="analytics-bar-empty" style="display:none">해당 기간에 등록된 과제가 없습니다.</div>
               <div id="homeworkAnalysisInsight" style="margin-top:14px"></div>
 
@@ -1165,7 +1179,10 @@
                 <h3 class="section-title"><i class="fas fa-clipboard-check" style="color:#f59e0b"></i> 평가 참여율·정답률 분석</h3>
                 <span id="examAnalysisCount" style="font-size:14px;color:var(--gray-500);font-weight:600"></span>
               </div>
-              <div class="analytics-bar-canvas-wrap" id="examBarWrap" style="height:240px"><canvas id="examBarChart"></canvas></div>
+              <div class="analytics-bar-scroll" id="examBarScroll">
+                <div class="analytics-bar-canvas-wrap" id="examBarWrap" style="height:240px"><canvas id="examBarChart"></canvas></div>
+              </div>
+              <div id="examAnalysisScrollHint" class="analytics-bar-scroll-hint"><i class="fas fa-arrows-alt-v"></i> 스크롤하여 모든 평가 보기</div>
               <div id="examAnalysisEmpty" class="analytics-bar-empty" style="display:none">해당 기간에 등록된 평가가 없습니다.</div>
               <div id="examAnalysisInsight" style="margin-top:14px"></div>
 
@@ -1394,15 +1411,21 @@
       const items = _analyticsBarData.lessons;
       const wrap = document.getElementById('lessonBarWrap');
       const empty = document.getElementById('lessonAnalysisEmpty');
+      const hint = document.getElementById('lessonAnalysisScrollHint');
       document.getElementById('lessonAnalysisCount').textContent = items.length ? `· ${items.length}개 수업` : '';
       if (lessonBarChart) { lessonBarChart.destroy(); lessonBarChart = null; }
       if (!items.length) {
         empty.style.display = 'block'; wrap.style.display = 'none';
+        if (hint) hint.classList.remove('is-visible');
         renderAnalyticsInsightInto('#lessonAnalysisInsight', 'lesson', { completionRate: 0 });
         return;
       }
       empty.style.display = 'none'; wrap.style.display = 'block';
-      wrap.style.height = Math.max(140, items.length * 36) + 'px';
+      // 차트 자체 높이는 항목 수 비례 (실제 막대 모두 그림). 스크롤 컨테이너 .analytics-bar-scroll(max-height:520px)이 잘라서 표시
+      const innerHeight = Math.max(140, items.length * 36);
+      wrap.style.height = innerHeight + 'px';
+      // 항목 수가 14개 초과면 (520/36 ≈ 14) 스크롤 힌트 노출
+      if (hint) hint.classList.toggle('is-visible', items.length > 14);
       lessonBarChart = new Chart(document.getElementById('lessonBarChart').getContext('2d'), {
         type: 'bar',
         data: {
@@ -1442,15 +1465,18 @@
       const items = _analyticsBarData.homework;
       const wrap = document.getElementById('homeworkBarWrap');
       const empty = document.getElementById('homeworkAnalysisEmpty');
+      const hint = document.getElementById('homeworkAnalysisScrollHint');
       document.getElementById('homeworkAnalysisCount').textContent = items.length ? `· ${items.length}개 과제` : '';
       if (homeworkBarChart) { homeworkBarChart.destroy(); homeworkBarChart = null; }
       if (!items.length) {
         empty.style.display = 'block'; wrap.style.display = 'none';
+        if (hint) hint.classList.remove('is-visible');
         renderAnalyticsInsightInto('#homeworkAnalysisInsight', 'homework', { submitRate: 0, avgScore: 0 });
         return;
       }
       empty.style.display = 'none'; wrap.style.display = 'block';
       wrap.style.height = Math.max(140, items.length * 36) + 'px';
+      if (hint) hint.classList.toggle('is-visible', items.length > 14);
       homeworkBarChart = new Chart(document.getElementById('homeworkBarChart').getContext('2d'), {
         type: 'bar',
         data: {
@@ -1492,15 +1518,18 @@
       const items = _analyticsBarData.exams;
       const wrap = document.getElementById('examBarWrap');
       const empty = document.getElementById('examAnalysisEmpty');
+      const hint = document.getElementById('examAnalysisScrollHint');
       document.getElementById('examAnalysisCount').textContent = items.length ? `· ${items.length}개 평가` : '';
       if (examBarChart) { examBarChart.destroy(); examBarChart = null; }
       if (!items.length) {
         empty.style.display = 'block'; wrap.style.display = 'none';
+        if (hint) hint.classList.remove('is-visible');
         renderAnalyticsInsightInto('#examAnalysisInsight', 'exam', { avgScore: 0, participateRate: 0 });
         return;
       }
       empty.style.display = 'none'; wrap.style.display = 'block';
       wrap.style.height = Math.max(140, items.length * 36) + 'px';
+      if (hint) hint.classList.toggle('is-visible', items.length > 14);
       // 막대(참여율) + 라인(정답률) 혼합
       examBarChart = new Chart(document.getElementById('examBarChart').getContext('2d'), {
         type: 'bar',
