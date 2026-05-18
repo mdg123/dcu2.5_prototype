@@ -234,7 +234,19 @@
             ${has('source') ? `
               <div class="paf-row">
                 <label for="${ID.pafSource}">출처</label>
-                <div class="paf-input-wrap"><input type="text" id="${ID.pafSource}" placeholder="외부 사이트·기관·자료실"></div>
+                <div class="paf-input-wrap">
+                  <select id="${ID.pafSource}" style="width:100%;padding:9px 12px;border:1px solid #E5E7EB;border-radius:8px;font-size:13px;background:#fff;outline:none;font-family:inherit;box-sizing:border-box;">
+                    <option value="">전체</option>
+                    <option value="미래교육추진단">미래교육추진단</option>
+                    <option value="유초등교육과">유초등교육과</option>
+                    <option value="중등교육과">중등교육과</option>
+                    <option value="인성시민과">인성시민과</option>
+                    <option value="체육건강안전과">체육건강안전과</option>
+                    <option value="창의특수교육과">창의특수교육과</option>
+                    <option value="출처없음">출처없음</option>
+                    <option value="기타">기타</option>
+                  </select>
+                </div>
               </div>` : ''}
             ${has('standard') && opts.enableStdSearch ? `
               <div class="paf-row paf-row-full">
