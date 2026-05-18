@@ -767,42 +767,51 @@
     .carousel-track > .popular-card .popular-card-body { padding: 12px 14px 14px; }
 
     /* ─────── 자동 가로 캐러셀 공통 ─────── */
-    /* 좌·우 padding은 fade(32px)+nav(36+8px=44) 영역 침범 방지 + 카드 hover 그림자/translateY 잘림 방지
-       padding-bottom은 카드 하단 응모하기 버튼·box-shadow가 잘리지 않도록 충분히 확보 */
+    /* 핵심: shell은 좌우 padding 영역을 클리핑 밖으로 노출(overflow:visible)하여 카드 좌·우측 잘림 인식 제거.
+       track 클리핑은 별도 .carousel-clip 컨테이너에서 처리하고, 그 클립 가장자리에 mask-image로
+       자연스러운 alpha 페이드 적용 → 카드가 회전 중 흘러도 잘림이 아닌 부드러운 페이드로 사라짐.
+       nav·fade 엘리먼트는 shell 좌우 padding 영역(클립 밖)에 배치되어 카드와 시각적으로 분리됨. */
     .carousel-shell {
-      position: relative; overflow: hidden; padding: 10px 48px 20px;
+      position: relative; overflow: visible; padding: 14px 56px 24px;
+    }
+    .carousel-clip {
+      position: relative; overflow: hidden;
+      /* 클립 가장자리 16px 영역에 alpha 마스크: 카드가 양 끝에서 자연스럽게 페이드 인/아웃 */
+      -webkit-mask-image: linear-gradient(to right, rgba(0,0,0,0) 0, #000 16px, #000 calc(100% - 16px), rgba(0,0,0,0) 100%);
+              mask-image: linear-gradient(to right, rgba(0,0,0,0) 0, #000 16px, #000 calc(100% - 16px), rgba(0,0,0,0) 100%);
     }
     .carousel-track {
       display: flex; gap: 12px; will-change: transform;
       transition: transform 0.55s cubic-bezier(0.4, 0, 0.2, 1);
     }
     .carousel-track.no-anim { transition: none; }
+    /* fade 엘리먼트: 백그라운드 자연 연결용 보조 그라디언트. 카드 클립 밖(padding 영역)에 위치 */
     .carousel-fade {
-      position: absolute; top: 0; bottom: 0; width: 32px;
+      position: absolute; top: 14px; bottom: 24px; width: 24px;
       pointer-events: none; z-index: 2;
     }
-    .carousel-fade.left { left: 0; }
-    .carousel-fade.right { right: 0; }
-    /* 콘테스트 섹션 그라디언트 페이드 (#fef3c7 톤) */
+    .carousel-fade.left { left: 32px; }
+    .carousel-fade.right { right: 32px; }
+    /* 콘테스트 섹션 그라디언트 페이드 (#fef3c7 톤) — 카드→배경 자연 전환 */
     .contest-section .carousel-fade.left {
-      background: linear-gradient(to right, #fef3c7 0%, rgba(254,243,199,0) 100%);
+      background: linear-gradient(to right, rgba(254,243,199,0) 0%, rgba(254,243,199,0.85) 60%, #fef3c7 100%);
     }
     .contest-section .carousel-fade.right {
-      background: linear-gradient(to left, #fef3c7 0%, rgba(254,243,199,0) 100%);
+      background: linear-gradient(to left, rgba(254,243,199,0) 0%, rgba(254,243,199,0.85) 60%, #fef3c7 100%);
     }
     /* 인기 작품 섹션 그라디언트 페이드 (#fff7ed 톤) */
     .popular-section .carousel-fade.left {
-      background: linear-gradient(to right, #fff7ed 0%, rgba(255,247,237,0) 100%);
+      background: linear-gradient(to right, rgba(255,247,237,0) 0%, rgba(255,247,237,0.85) 60%, #fff7ed 100%);
     }
     .popular-section .carousel-fade.right {
-      background: linear-gradient(to left, #fff7ed 0%, rgba(255,247,237,0) 100%);
+      background: linear-gradient(to left, rgba(255,247,237,0) 0%, rgba(255,247,237,0.85) 60%, #fff7ed 100%);
     }
     .carousel-nav {
       position: absolute; top: 50%; transform: translateY(-50%);
       width: 36px; height: 36px; border-radius: 50%;
-      background: rgba(255,255,255,0.92);
-      box-shadow: 0 2px 8px rgba(0,0,0,0.12);
-      border: none; cursor: pointer; z-index: 3;
+      background: rgba(255,255,255,0.95);
+      box-shadow: 0 2px 8px rgba(0,0,0,0.14);
+      border: none; cursor: pointer; z-index: 4;
       display: flex; align-items: center; justify-content: center;
       color: var(--gray-700); font-size: 14px;
       transition: background 0.18s, box-shadow 0.18s, color 0.18s;
@@ -814,8 +823,8 @@
     .carousel-nav:focus-visible {
       outline: 2px solid var(--brand-1); outline-offset: 2px;
     }
-    .carousel-nav.prev { left: 8px; }
-    .carousel-nav.next { right: 8px; }
+    .carousel-nav.prev { left: 10px; }
+    .carousel-nav.next { right: 10px; }
 
     /* 전체 보기 (grid) 모드 — 각 섹션의 expanded grid */
     .expanded-grid--contest {
@@ -903,8 +912,10 @@
     }
     @media (max-width: 767px) {
       .carousel-nav { display: none; }
-      .carousel-fade { width: 20px; }
-      .carousel-shell { padding: 8px 24px 16px; }
+      .carousel-fade { width: 16px; top: 10px; bottom: 18px; left: auto; right: auto; }
+      .carousel-fade.left { left: 12px; }
+      .carousel-fade.right { right: 12px; }
+      .carousel-shell { padding: 10px 28px 18px; }
       /* 모바일: 두 카드 동일 78vw 폭, 높이는 280px 유지 */
       .carousel-track > .contest-card,
       .carousel-track > .popular-card {
@@ -1203,10 +1214,12 @@
         </div>
         <!-- 자동 캐러셀 영역 -->
         <div class="carousel-shell" id="contestCarouselShell">
-          <div class="carousel-fade left"></div>
           <button type="button" class="carousel-nav prev" aria-label="이전" onclick="moveCarousel('contestSection', -1)"><i class="fas fa-chevron-left"></i></button>
-          <div class="carousel-track" id="contestCarouselTrack"></div>
+          <div class="carousel-clip">
+            <div class="carousel-track" id="contestCarouselTrack"></div>
+          </div>
           <button type="button" class="carousel-nav next" aria-label="다음" onclick="moveCarousel('contestSection', 1)"><i class="fas fa-chevron-right"></i></button>
+          <div class="carousel-fade left"></div>
           <div class="carousel-fade right"></div>
         </div>
         <!-- 전체 보기 grid 영역 -->
@@ -1237,10 +1250,12 @@
         </div>
         <!-- 자동 캐러셀 영역 -->
         <div class="carousel-shell" id="popularCarouselShell">
-          <div class="carousel-fade left"></div>
           <button type="button" class="carousel-nav prev" aria-label="이전" onclick="moveCarousel('popularSection', -1)"><i class="fas fa-chevron-left"></i></button>
-          <div class="carousel-track" id="popularCarouselTrack"></div>
+          <div class="carousel-clip">
+            <div class="carousel-track" id="popularCarouselTrack"></div>
+          </div>
           <button type="button" class="carousel-nav next" aria-label="다음" onclick="moveCarousel('popularSection', 1)"><i class="fas fa-chevron-right"></i></button>
+          <div class="carousel-fade left"></div>
           <div class="carousel-fade right"></div>
         </div>
         <!-- 전체 보기 grid 영역 -->
