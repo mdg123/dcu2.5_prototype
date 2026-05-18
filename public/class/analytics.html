@@ -1703,6 +1703,12 @@
       if (!sel) return;
       const items = _analyticsBarData.homework || [];
       sel.innerHTML = '<option value="">과제 선택…</option>' + items.map(it => `<option value="${it.homework_id}">${escHtml((it.title||'').slice(0,40))} (제출 ${it.submitted_count}건)</option>`).join('');
+      // 기본값: 제출자가 가장 많은 과제 자동 선택 + 표절검사 실행
+      if (items.length > 0) {
+        const best = [...items].sort((a, b) => (b.submitted_count||0) - (a.submitted_count||0))[0];
+        sel.value = best.homework_id;
+        loadPlagiarismCheck(best.homework_id);
+      }
     }
 
     // ===== P1: 평가지별 상세 분석 (점수 분포 + 난이도별 정답률 5단계 + 제일 많이 틀린 TOP) =====
@@ -1930,12 +1936,24 @@
       if (!sel) return;
       const items = _analyticsBarData.exams || [];
       sel.innerHTML = '<option value="">평가지 선택…</option>' + items.map(it => `<option value="${escHtml(it.exam_id)}">${escHtml((it.title||'').slice(0,40))} (${(it.registered_at||'').slice(5,10)})</option>`).join('');
+      // 기본값: 응시자가 가장 많은 평가지 자동 선택 + 상세 로드
+      if (items.length > 0) {
+        const best = [...items].sort((a, b) => (b.submitted_count||0) - (a.submitted_count||0))[0];
+        sel.value = best.exam_id;
+        loadExamDetail(best.exam_id);
+      }
     }
     function _populateHomeworkSubmitTimePicker() {
       const sel = document.getElementById('homeworkSubmitTimePicker');
       if (!sel) return;
       const items = _analyticsBarData.homework || [];
       sel.innerHTML = '<option value="">과제 선택…</option>' + items.map(it => `<option value="${it.homework_id}">${escHtml((it.title||'').slice(0,40))} (마감 ${(it.due_date||'').slice(0,10)})</option>`).join('');
+      // 기본값: 제출자가 가장 많은 과제 자동 선택 + 로드
+      if (items.length > 0) {
+        const best = [...items].sort((a, b) => (b.submitted_count||0) - (a.submitted_count||0))[0];
+        sel.value = best.homework_id;
+        loadHomeworkSubmitTime(best.homework_id);
+      }
     }
 
     // ===== P1: 게시판 분석 (분석 대시보드 + 게시판별 활동 + 인기 게시글 TOP5 + 활발한 멤버 TOP5 + 설문 응답) =====
