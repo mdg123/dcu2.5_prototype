@@ -827,6 +827,32 @@
             </div>
           </div>
         </div>
+        <div class="card" style="margin-bottom:20px;background:linear-gradient(135deg,#eff6ff,#dbeafe);border:1.5px solid #93c5fd;">
+          <h3 style="font-size:16px;font-weight:600;margin-bottom:8px;color:#1e40af;"><i class="fas fa-layer-group" style="color:#2563eb;"></i> 학년별 일괄 배포 (채움콘텐츠 자동 매칭)</h3>
+          <p style="margin:0 0 14px;font-size:13px;color:#1e3a8a;">초3~고1 학년에 대해 채움콘텐츠 영상·퀴즈를 자동 매핑하여 daily_learning_sets에 일괄 배포합니다. 멱등 (재실행 시 중복 0).</p>
+          <div style="display:grid;gap:12px;">
+            <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;">
+              <div>
+                <label style="display:block;font-size:13px;font-weight:600;color:#1e40af;margin-bottom:4px;">시작일</label>
+                <input type="date" id="bulkStartDate" value="2026-04-01" style="padding:10px 12px;border:1.5px solid #93c5fd;border-radius:8px;font-size:14px;font-family:inherit;background:#fff;">
+              </div>
+              <div>
+                <label style="display:block;font-size:13px;font-weight:600;color:#1e40af;margin-bottom:4px;">종료일</label>
+                <input type="date" id="bulkEndDate" value="2026-05-31" style="padding:10px 12px;border:1.5px solid #93c5fd;border-radius:8px;font-size:14px;font-family:inherit;background:#fff;">
+              </div>
+              <div>
+                <label style="display:block;font-size:13px;font-weight:600;color:#1e40af;margin-bottom:4px;">대상 학년</label>
+                <select id="bulkGradeScope" style="padding:10px 12px;border:1.5px solid #93c5fd;border-radius:8px;font-size:14px;font-family:inherit;background:#fff;">
+                  <option value="all">전체 (초3~고1)</option>
+                  <option value="elementary">초등 (초3~초6)</option>
+                  <option value="middle-high">중·고 (중1~고1)</option>
+                </select>
+              </div>
+              <button class="btn btn-approve" style="padding:10px 20px;font-size:14px;background:#2563eb;" onclick="bulkDistributeDaily()"><i class="fas fa-paper-plane"></i> 일괄 배포 실행</button>
+            </div>
+            <div id="bulkDistributeResult" style="font-size:13px;color:#1e40af;line-height:1.6;display:none;background:#fff;border:1px solid #93c5fd;border-radius:8px;padding:12px 14px;"></div>
+          </div>
+        </div>
         <div class="card">
           <h3 style="font-size:16px;font-weight:600;margin-bottom:14px;"><i class="fas fa-history" style="color:#2563eb;"></i> 배포 이력</h3>
           <div id="assignHistoryList" style="color:#9ca3af;font-size:13px;">불러오는 중...</div>
@@ -5229,6 +5255,33 @@
           </table>`;
       } catch (err) {
         box.innerHTML = '<div style="padding:14px;text-align:center;color:#ef4444;">이력 로드 실패</div>';
+      }
+    }
+
+    // ===== 학년별 일괄 배포 (channel: 채움콘텐츠 영상·퀴즈 자동 매핑) =====
+    async function bulkDistributeDaily() {
+      const startDate = document.getElementById('bulkStartDate').value;
+      const endDate = document.getElementById('bulkEndDate').value;
+      const scope = document.getElementById('bulkGradeScope').value;
+      if (!startDate || !endDate) { showAdminToast('시작일·종료일을 모두 입력하세요.', 'warning'); return; }
+      if (endDate < startDate) { showAdminToast('종료일이 시작일보다 빨라요.', 'warning'); return; }
+      const resBox = document.getElementById('bulkDistributeResult');
+      resBox.style.display = 'block';
+      resBox.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 배포 중...';
+      try {
+        const r = await fetch('/api/admin/daily-learning/bulk-distribute', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ startDate, endDate, scope })
+        });
+        const d = await r.json();
+        if (!d.success) { resBox.innerHTML = '<i class="fas fa-exclamation-circle" style="color:#dc2626"></i> ' + (d.message || '배포 실패'); return; }
+        const summary = d.summary || {};
+        resBox.innerHTML = `<i class="fas fa-check-circle" style="color:#10b981"></i> <strong>배포 완료</strong><br>
+          ${Object.entries(summary).map(([grade, cnt]) => `· 학년 ${grade}: <strong>${cnt}</strong>세트`).join('<br>')}<br>
+          <span style="color:#6b7280">총 ${d.totalCreated || 0}세트 신규 / 중복 ${d.totalSkipped || 0}건 스킵</span>`;
+        showAdminToast('일괄 배포 완료', 'success');
+      } catch (e) {
+        resBox.innerHTML = '<i class="fas fa-exclamation-circle" style="color:#dc2626"></i> 네트워크 오류';
       }
     }
 

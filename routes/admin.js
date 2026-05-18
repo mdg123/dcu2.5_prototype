@@ -2645,4 +2645,110 @@ router.post('/kw-categories/:id/migrate-keywords', ...adminOnly, (req, res) => {
   }
 });
 
+// ============================================================================
+// 오늘의 학습 학년별 일괄 배포 — 채움콘텐츠 영상·퀴즈 자동 매핑
+// ============================================================================
+router.post('/daily-learning/bulk-distribute', adminOnly, (req, res) => {
+  try {
+    const { startDate, endDate, scope = 'all' } = req.body || {};
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
+      return res.status(400).json({ success: false, message: '날짜 형식이 올바르지 않습니다 (YYYY-MM-DD).' });
+    }
+    if (endDate < startDate) return res.status(400).json({ success: false, message: '종료일이 시작일보다 빠릅니다.' });
+
+    const db = require('../db/index');
+
+    // 학년 매핑: scope에 따라 elementary 3~6 + middle 1~3 + high 1
+    // contents 식별: school_level + grade 조합
+    const gradeDefs = {
+      elementary: [
+        { tg: 3, levels: ['elementary','초등학교'], g: 3 },
+        { tg: 4, levels: ['elementary','초등학교'], g: 4 },
+        { tg: 5, levels: ['elementary','초등학교'], g: 5 },
+        { tg: 6, levels: ['elementary','초등학교'], g: 6 },
+      ],
+      middleHigh: [
+        { tg: 7, levels: ['middle','중학교'], g: 1 },
+        { tg: 8, levels: ['middle','중학교'], g: 2 },
+        { tg: 9, levels: ['middle','중학교'], g: 3 },
+        { tg: 10, levels: ['고등학교','high'], g: 1, fallbackVideoFrom: { levels: ['middle','중학교'], g: 3 } },
+      ],
+    };
+    let grades = [];
+    if (scope === 'elementary') grades = gradeDefs.elementary;
+    else if (scope === 'middle-high') grades = gradeDefs.middleHigh;
+    else grades = [...gradeDefs.elementary, ...gradeDefs.middleHigh];
+
+    // PRNG
+    const mulberry32 = (seed) => () => {
+      let t = (seed += 0x6d2b79f5);
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+    const shuffle = (arr, rng) => { const a = arr.slice(); for (let i=a.length-1;i>0;i--){const j=Math.floor(rng()*(i+1));[a[i],a[j]]=[a[j],a[i]];} return a; };
+    const eachDate = (s, e) => { const out=[],cur=new Date(s),last=new Date(e); while(cur<=last){out.push(cur.toISOString().slice(0,10));cur.setDate(cur.getDate()+1);} return out; };
+
+    const dates = eachDate(startDate, endDate);
+    const summary = {};
+    let totalCreated = 0, totalSkipped = 0;
+
+    const loadPool = (levels, g) => {
+      const placeholders = levels.map(() => '?').join(',');
+      const videos = db.prepare(`SELECT id, title FROM contents WHERE school_level IN (${placeholders}) AND grade = ? AND content_type='video' AND status='approved'`).all(...levels, g);
+      const quizzes = db.prepare(`SELECT id, title FROM contents WHERE school_level IN (${placeholders}) AND grade = ? AND content_type='quiz' AND status='approved'`).all(...levels, g);
+      return { videos, quizzes };
+    };
+    const checkExists = db.prepare(`SELECT id FROM daily_learning_sets WHERE target_date=? AND target_grade=? AND title=?`);
+    const insSet = db.prepare(`INSERT INTO daily_learning_sets (teacher_id, title, description, target_date, target_grade, target_subject, difficulty, thumbnail_url, is_active, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, datetime('now'))`);
+    const insItem = db.prepare(`INSERT INTO daily_learning_items (set_id, source_type, content_id, item_title, sort_order, point_value) VALUES (?, 'content', ?, ?, ?, 10)`);
+    const getThumb = db.prepare(`SELECT thumbnail_url FROM contents WHERE id=?`);
+
+    const gradeLabel = (tg) => tg <= 6 ? `초${tg}` : (tg <= 9 ? `중${tg-6}` : '고1');
+
+    const tx = db.transaction(() => {
+      for (const def of grades) {
+        const { tg, levels, g } = def;
+        const pool = loadPool(levels, g);
+        // 고1 fallback (video 풀 없으면 다른 학년에서)
+        if (pool.videos.length === 0 && def.fallbackVideoFrom) {
+          const fb = loadPool(def.fallbackVideoFrom.levels, def.fallbackVideoFrom.g);
+          pool.videos = fb.videos;
+        }
+        if (pool.videos.length === 0 && pool.quizzes.length === 0) {
+          summary[gradeLabel(tg)] = 0;
+          continue;
+        }
+        let created = 0, skipped = 0;
+        dates.forEach((date, dayIdx) => {
+          const title = `${date} ${gradeLabel(tg)} 오늘의 학습 (수학)`;
+          if (checkExists.get(date, tg, title)) { skipped++; return; }
+          const rng = mulberry32(tg * 1000 + dayIdx);
+          const videoCount = pool.videos.length ? Math.min(pool.videos.length, 1 + Math.floor(rng() * 3)) : 0;
+          const quizCount = pool.quizzes.length ? Math.min(pool.quizzes.length, 1 + Math.floor(rng() * 2)) : 0;
+          const items = [
+            ...shuffle(pool.videos, rng).slice(0, videoCount),
+            ...shuffle(pool.quizzes, rng).slice(0, quizCount)
+          ];
+          if (items.length === 0) { skipped++; return; }
+          const thumb = items[0] ? getThumb.get(items[0].id)?.thumbnail_url : null;
+          const difficulty = tg <= 4 ? '쉬움' : tg <= 7 ? '보통' : '어려움';
+          const setId = insSet.run(1, title, `${gradeLabel(tg)} 수학 학습 ${items.length}개 자료`, date, tg, '수학', difficulty, thumb).lastInsertRowid;
+          items.forEach((it, idx) => insItem.run(setId, it.id, it.title, idx + 1));
+          created++;
+        });
+        summary[gradeLabel(tg)] = created;
+        totalCreated += created;
+        totalSkipped += skipped;
+      }
+    });
+    tx();
+
+    res.json({ success: true, summary, totalCreated, totalSkipped, dateRange: { startDate, endDate } });
+  } catch (err) {
+    console.error('[ADMIN] daily-learning bulk-distribute error:', err);
+    res.status(500).json({ success: false, message: '서버 오류: ' + err.message });
+  }
+});
+
 module.exports = router;

@@ -688,9 +688,20 @@
     // ===== 학습 카드 =====
     function renderLearnCards() {
       const grid = document.getElementById('learnGrid');
-      // 날짜 필터 적용: 항상 target_date 기준으로 필터
+      // 날짜 + 학년 필터 적용: 학생 본인 학년(target_grade)에 해당하는 세트만 표시
+      // 매핑: elementary 3~6 → 3~6, middle 1~3 → 7~9, 고등학교/high 1 → 10
       const filterDate = selectedDate || new Date().toISOString().slice(0, 10);
+      const u = window.dacheumUser || {};
+      let myGrade = null;
+      if (u.role === 'student' && u.grade) {
+        const lvl = String(u.school_level || '').toLowerCase();
+        const g = Number(u.grade);
+        if (lvl.includes('middle') || lvl.includes('중')) myGrade = g + 6;       // 중1→7, 중2→8, 중3→9
+        else if (lvl.includes('high') || lvl.includes('고')) myGrade = g + 9;     // 고1→10
+        else myGrade = g;                                                          // 초등 그대로
+      }
       let filteredSets = dailySets.filter(s => s.target_date === filterDate);
+      if (myGrade != null) filteredSets = filteredSets.filter(s => s.target_grade === myGrade);
       const label = document.getElementById('learnDateLabel');
       const totalItemCount = filteredSets.reduce((s, x) => s + (x.items?.length || 0), 0);
       const completedItemCount = filteredSets.reduce((s, x) => s + ((x.items||[]).filter(it=>it.status==='completed').length), 0);
