@@ -144,10 +144,16 @@
     .legend-color.lv4 { background: #60a5fa; }
     .legend-color.lv5 { background: #10b981; }
     .legend-color.lv-none { background: #e5e7eb; }
-    .stack-bar-list { list-style: none; padding: 0; margin: 0; }
-    .stack-bar-item { padding: 12px 0; border-bottom: 1px solid var(--gray-100); cursor: pointer; transition: all 0.18s; }
+    /* 수업 이해도/집중도 리스트 — 수업 많을 때 페이지 끝없이 길어지지 않도록 max-height + 스크롤 (RFP 명시) */
+    .stack-bar-list { list-style: none; padding: 0; margin: 0; max-height: 520px; overflow-y: auto; overflow-x: hidden; scrollbar-gutter: stable; }
+    .stack-bar-list::-webkit-scrollbar { width: 10px; }
+    .stack-bar-list::-webkit-scrollbar-track { background: transparent; }
+    .stack-bar-list::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.18); border-radius: 8px; border: 2px solid transparent; background-clip: padding-box; }
+    .stack-bar-list::-webkit-scrollbar-thumb:hover { background: rgba(0,0,0,0.32); background-clip: padding-box; }
+    .stack-bar-item { padding: 12px 4px 12px 0; border-bottom: 1px solid var(--gray-100); cursor: pointer; transition: all 0.18s; }
     .stack-bar-item:last-child { border-bottom: none; }
     .stack-bar-item:hover { background: var(--gray-50); }
+    .stack-bar-scroll-hint { font-size: 12px; color: var(--gray-500); margin-top: 6px; text-align: right; }
     .stack-bar-label { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 8px; flex-wrap: wrap; }
     .stack-bar-label .lesson-date { font-size: 13px; color: var(--gray-500); font-weight: 500; margin-right: 8px; }
     .stack-bar-label .lesson-title { font-size: 14px; color: var(--gray-800); font-weight: 600; }
@@ -604,14 +610,22 @@
         ? `<div class="insight-comment ${insight.tone}">${insight.html}</div>`
         : '';
 
+      const visibleLessonCount = lessons.filter(l => {
+        const d = safeDist(l[distKey]);
+        return (d[0]+d[1]+d[2]+d[3]+d[4]+d[5]) > 0;
+      }).length;
+      const scrollHint = visibleLessonCount > 14
+        ? `<div class="stack-bar-scroll-hint"><i class="fas fa-arrows-alt-v"></i> 스크롤하여 모든 수업 보기 (${visibleLessonCount}개)</div>`
+        : '';
       return `
         <section class="section-box">
           <div class="section-header">
             <h3 class="section-title">${title}</h3>
-            <span style="font-size:12px;color:var(--gray-500);">막대 클릭 → 응답별 명단</span>
+            <span style="font-size:13px;color:var(--gray-500);">막대 클릭 → 응답별 명단</span>
           </div>
           ${legend}
           <ul class="stack-bar-list">${rows}</ul>
+          ${scrollHint}
           ${insightHtml}
         </section>
       `;
