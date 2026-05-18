@@ -839,11 +839,30 @@ router.get('/:classId/analytics/lessons', requireAuth, (req, res) => {
     const completedStmt = db.prepare(
       `SELECT COUNT(DISTINCT user_id) AS c FROM lesson_self_check WHERE lesson_id = ? AND class_id = ?`
     );
+    // 수업에 포함된 quiz contents (수업꾸러미 문항)
+    const quizContentsStmt = db.prepare(
+      `SELECT c.id FROM lesson_contents lc JOIN contents c ON c.id = lc.content_id
+       WHERE lc.lesson_id = ? AND c.content_type IN ('quiz', 'exam')`
+    );
+    // 해당 quiz contents의 학생별 평균 정답수
+    const avgCorrectStmt = db.prepare(
+      `SELECT AVG(correct_count) AS avg_correct, COUNT(*) AS attempt_count
+       FROM content_attempts WHERE content_id IN (SELECT value FROM json_each(?))`
+    );
 
     const items = lessons.map(l => {
       const completed = completedStmt.get(l.lesson_id, classId).c || 0;
       const completionRate = totalMembers > 0
         ? Math.round((completed / totalMembers) * 1000) / 10 : 0;
+      // 수업꾸러미 문항 평균 정답수
+      let avgCorrect = null;
+      const quizIds = quizContentsStmt.all(l.lesson_id).map(r => r.id);
+      if (quizIds.length > 0) {
+        try {
+          const r = avgCorrectStmt.get(JSON.stringify(quizIds));
+          if (r && r.attempt_count > 0) avgCorrect = Math.round((r.avg_correct || 0) * 10) / 10;
+        } catch(_) { /* json_each 미지원 환경 fallback */ }
+      }
       return {
         lesson_id: l.lesson_id,
         title: l.title,
@@ -851,7 +870,8 @@ router.get('/:classId/analytics/lessons', requireAuth, (req, res) => {
         total_members: totalMembers,
         completed_count: completed,
         completion_rate: completionRate,
-        avg_correct: null  // P1 — 수업꾸러미 문항 정답률은 추후 구현
+        avg_correct: avgCorrect,
+        quiz_count: quizIds.length
       };
     });
 

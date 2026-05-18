@@ -961,6 +961,19 @@
         const evalRate = students.length && totalPortfolio > 0 ? Math.min(100, Math.round(totalPortfolio / students.length * 20)) : 0;
 
         container.innerHTML = `
+          <!-- 자동 생성 리포트 알림 (이번 주/이번 달 미확인 시 New 배지) -->
+          <div id="autoReportBanner" style="display:none;background:linear-gradient(135deg,#fff7ed,#fef3c7);border:1.5px solid #f59e0b;border-radius:12px;padding:14px 18px;margin-bottom:18px;align-items:center;gap:14px;cursor:pointer;transition:transform 0.15s,box-shadow 0.15s" onmouseenter="this.style.transform='translateY(-2px)';this.style.boxShadow='0 4px 12px rgba(245,158,11,0.18)'" onmouseleave="this.style.transform='translateY(0)';this.style.boxShadow='none'">
+            <div style="font-size:24px"><i class="fas fa-newspaper" style="color:#f59e0b"></i></div>
+            <div style="flex:1">
+              <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+                <strong id="autoReportTitle" style="font-size:15px;color:#92400e">자동 리포트 알림</strong>
+                <span style="display:inline-block;padding:2px 10px;border-radius:99px;background:#ef4444;color:#fff;font-size:11px;font-weight:800;letter-spacing:0.5px">NEW</span>
+              </div>
+              <div id="autoReportDesc" style="font-size:13px;color:#92400e;margin-top:2px">새로운 학습분석 리포트가 생성되었습니다.</div>
+            </div>
+            <div style="font-size:14px;color:var(--primary);font-weight:700;white-space:nowrap"><i class="fas fa-arrow-right"></i> 보기</div>
+          </div>
+
           <!-- AI 학습분석 리포트 -->
           <div class="ai-report">
             <div class="ai-report-header">
@@ -1131,6 +1144,18 @@
                   </select>
                 </div>
                 <div id="homeworkSubmitTimeBody" style="background:var(--gray-50);border-radius:10px;padding:16px 18px;min-height:80px;color:var(--gray-500);font-size:14px;text-align:center">과제를 선택하면 마감 기준 제출 시간 분포가 표시됩니다.</div>
+              </div>
+
+              <!-- P1: 표절검사 현황 (시뮬레이션 인터페이스 — 외부 연동 전 단계) -->
+              <div style="margin-top:18px;padding-top:18px;border-top:1.5px dashed var(--gray-200)">
+                <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px">
+                  <h4 style="margin:0;font-size:16px;font-weight:700;color:var(--gray-800)"><i class="fas fa-fingerprint" style="color:#dc2626"></i> 표절검사 현황</h4>
+                  <select id="plagiarismPicker" onchange="loadPlagiarismCheck(this.value)" style="padding:6px 10px;border-radius:6px;border:1.5px solid var(--gray-200);font-size:14px;background:#fff;min-width:200px">
+                    <option value="">과제 선택…</option>
+                  </select>
+                  <span style="font-size:12px;color:var(--gray-400);font-style:italic">※ 외부 표절검사 서비스 연동 전 시뮬레이션 데이터</span>
+                </div>
+                <div id="plagiarismBody" style="background:var(--gray-50);border-radius:10px;padding:16px 18px;min-height:80px;color:var(--gray-500);font-size:14px;text-align:center">과제를 선택하면 표절률·의심 명단이 표시됩니다.</div>
               </div>
             </div>
 
@@ -1317,6 +1342,8 @@
         loadBarAnalysis(classId, _periodState.startDate, _periodState.endDate);
         // P1: 게시판 분석 탭 데이터 로드
         loadBoardAnalytics(classId, _periodState.startDate, _periodState.endDate);
+        // P1: 자동 리포트 알림 (이번 주/이번 달 미확인 시 New 배너 노출)
+        renderAutoReportBanner(classId);
       } catch(err) {
         container.innerHTML = '<div class="section-box"><div class="empty-state"><i class="fas fa-exclamation-circle"></i><h3>데이터 로드 실패</h3><p>' + err.message + '</p></div></div>';
       }
@@ -1344,6 +1371,7 @@
         // P1: 드롭다운 채우기 (평가/과제 상세 분석용)
         _populateExamDetailPicker();
         _populateHomeworkSubmitTimePicker();
+        _populatePlagiarismPicker();
       } catch (e) { console.warn('[bar-analysis] load failed', e); }
     }
 
@@ -1394,7 +1422,9 @@
             tooltip: { callbacks: { label: ctx => {
               const it = items[ctx.dataIndex];
               const lines = [`이수율: ${it.completion_rate}% (${it.completed_count}/${it.total_members}명)`];
-              if (it.avg_correct != null) lines.push(`평균 정답: ${it.avg_correct}문항`);
+              if (it.quiz_count > 0) {
+                lines.push(it.avg_correct != null ? `평균 정답: ${it.avg_correct}문항 (꾸러미 ${it.quiz_count}건)` : `수업꾸러미 ${it.quiz_count}문항 (응시 없음)`);
+              }
               lines.push('막대 클릭 → 명단 보기');
               return lines;
             }}}
@@ -1600,6 +1630,81 @@
       } catch(e) { body.innerHTML = '네트워크 오류'; }
     }
 
+    // ===== P1: 표절검사 (외부 연동 전 시뮬레이션 인터페이스) =====
+    // Deterministic 유사도 시뮬레이션 — student_id+homework_id 해시 기반으로 0~100% 산출
+    function _simSimilarity(studentId, homeworkId) {
+      const s = String(studentId) + ':' + String(homeworkId);
+      let h = 0;
+      for (let i = 0; i < s.length; i++) { h = ((h << 5) - h) + s.charCodeAt(i); h |= 0; }
+      const v = Math.abs(h % 100);
+      return v; // 0~99
+    }
+    async function loadPlagiarismCheck(hwId) {
+      const body = document.getElementById('plagiarismBody');
+      if (!hwId) { body.innerHTML = '과제를 선택하면 표절률·의심 명단이 표시됩니다.'; return; }
+      const classId = _analyticsBarData.classId;
+      body.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 불러오는 중…';
+      try {
+        const r = await fetch(`/api/class/${classId}/analytics/homework/${encodeURIComponent(hwId)}/roster`);
+        const d = await r.json();
+        if (!d.success) { body.innerHTML = '데이터를 불러오지 못했습니다.'; return; }
+        const submitters = d.participants || [];
+        // 시뮬레이션 유사도 산출
+        const rows = submitters.map(p => ({ name: p.name, user_id: p.user_id, similarity: _simSimilarity(p.user_id, hwId) }))
+          .sort((a, b) => b.similarity - a.similarity);
+        const high = rows.filter(r => r.similarity >= 60);
+        const mid = rows.filter(r => r.similarity >= 30 && r.similarity < 60);
+        const low = rows.filter(r => r.similarity < 30);
+        const total = rows.length;
+        const avgSim = total ? Math.round(rows.reduce((s,r)=>s+r.similarity,0)/total) : 0;
+        body.innerHTML = `
+          <div style="text-align:left">
+            <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:14px">
+              <div style="background:#fff;border:1.5px solid var(--gray-200);border-radius:8px;padding:10px 12px;text-align:center"><div style="font-size:20px;font-weight:700;color:var(--gray-800)">${total}</div><div style="font-size:12px;color:var(--gray-500);margin-top:2px">검사 대상</div></div>
+              <div style="background:#fef2f2;border:1.5px solid #fecaca;border-radius:8px;padding:10px 12px;text-align:center"><div style="font-size:20px;font-weight:700;color:#dc2626">${high.length}</div><div style="font-size:12px;color:#991b1b;margin-top:2px">⚠️ 의심 (≥60%)</div></div>
+              <div style="background:#fffbeb;border:1.5px solid #fde68a;border-radius:8px;padding:10px 12px;text-align:center"><div style="font-size:20px;font-weight:700;color:#d97706">${mid.length}</div><div style="font-size:12px;color:#92400e;margin-top:2px">주의 (30~59%)</div></div>
+              <div style="background:#f0fdf4;border:1.5px solid #bbf7d0;border-radius:8px;padding:10px 12px;text-align:center"><div style="font-size:20px;font-weight:700;color:#16a34a">${low.length}</div><div style="font-size:12px;color:#166534;margin-top:2px">정상 (&lt;30%)</div></div>
+            </div>
+            <table style="width:100%;border-collapse:collapse;font-size:14px;max-height:300px">
+              <thead><tr style="background:var(--gray-100)">
+                <th style="padding:8px;text-align:center;width:50px">#</th>
+                <th style="padding:8px;text-align:left">학생</th>
+                <th style="padding:8px;text-align:right;width:120px">유사도</th>
+                <th style="padding:8px;text-align:center;width:90px">판정</th>
+                <th style="padding:8px;text-align:center;width:120px">상세</th>
+              </tr></thead>
+              <tbody>${rows.map((r, i) => {
+                const c = r.similarity >= 60 ? '#dc2626' : (r.similarity >= 30 ? '#d97706' : '#16a34a');
+                const tag = r.similarity >= 60 ? '의심' : (r.similarity >= 30 ? '주의' : '정상');
+                return `<tr style="border-bottom:1px solid var(--gray-100)">
+                  <td style="padding:8px;text-align:center">${i+1}</td>
+                  <td style="padding:8px;font-weight:600">${escHtml(r.name)}</td>
+                  <td style="padding:8px;text-align:right">
+                    <div style="display:flex;align-items:center;gap:8px;justify-content:flex-end">
+                      <div style="width:80px;background:var(--gray-200);height:8px;border-radius:4px;overflow:hidden"><div style="height:100%;width:${r.similarity}%;background:${c}"></div></div>
+                      <strong style="color:${c};min-width:35px">${r.similarity}%</strong>
+                    </div>
+                  </td>
+                  <td style="padding:8px;text-align:center"><span style="padding:2px 10px;border-radius:99px;background:${c}1a;color:${c};font-weight:700;font-size:12px">${tag}</span></td>
+                  <td style="padding:8px;text-align:center"><a href="javascript:void(0)" onclick="alert('상세 표절 보고서는 외부 표절검사 서비스 연동 후 활성화됩니다.')" style="color:var(--primary);font-size:13px;text-decoration:none;font-weight:600"><i class="fas fa-search"></i> 보고서</a></td>
+                </tr>`;
+              }).join('')}</tbody>
+            </table>
+            <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--gray-200);font-size:13px;color:var(--gray-700)">
+              ${high.length > 0 ? `⚠️ 의심 ${high.length}명 — 표절 우려가 있는 과제가 있습니다. 상세 보고서 확인을 권장합니다.` :
+                (mid.length > total/2 ? `📊 주의 단계가 많습니다 (평균 ${avgSim}%). 학생들에게 유사 표현 줄이기를 안내해주세요.` :
+                `✅ 평균 유사도 ${avgSim}% — 학생들이 독창적인 답안을 제출하고 있습니다.`)}
+            </div>
+          </div>`;
+      } catch(e) { body.innerHTML = '네트워크 오류'; }
+    }
+    function _populatePlagiarismPicker() {
+      const sel = document.getElementById('plagiarismPicker');
+      if (!sel) return;
+      const items = _analyticsBarData.homework || [];
+      sel.innerHTML = '<option value="">과제 선택…</option>' + items.map(it => `<option value="${it.homework_id}">${escHtml((it.title||'').slice(0,40))} (제출 ${it.submitted_count}건)</option>`).join('');
+    }
+
     // ===== P1: 평가지별 상세 분석 (점수 분포 + 난이도별 정답률 5단계 + 제일 많이 틀린 TOP) =====
     async function loadExamDetail(examId) {
       const body = document.getElementById('examDetailBody');
@@ -1678,6 +1783,61 @@
         }
         body.innerHTML = `<div style="text-align:left"><div style="margin-bottom:14px;font-size:14px;color:var(--gray-700)"><strong style="color:var(--gray-900)">${escHtml(examTitle)}</strong> 상세 분석</div>${distHtml}${difficultyHtml}${wrongHtml}</div>`;
       } catch(e) { body.innerHTML = '네트워크 오류'; }
+    }
+
+    // ===== P1: 자동 리포트 + New 라벨 (주별/월별 새 리포트 생성 알림) =====
+    function _currentWeekKey() {
+      const d = new Date();
+      const firstDay = new Date(d.getFullYear(), d.getMonth(), 1);
+      const dayOfWeek = firstDay.getDay() === 0 ? 7 : firstDay.getDay();
+      const startOfFirstWeek = new Date(firstDay);
+      startOfFirstWeek.setDate(firstDay.getDate() - (dayOfWeek - 1));
+      const diffDays = Math.floor((d - startOfFirstWeek) / (24*3600*1000));
+      const week = Math.floor(diffDays / 7) + 1;
+      return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-W${week}`;
+    }
+    function _currentMonthKey() {
+      const d = new Date();
+      return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+    }
+    function renderAutoReportBanner(classId) {
+      const banner = document.getElementById('autoReportBanner');
+      if (!banner) return;
+      const weekKey = _currentWeekKey();
+      const monthKey = _currentMonthKey();
+      const lastSeenWeek = localStorage.getItem(`analytics:lastSeenWeek:${classId}`) || '';
+      const lastSeenMonth = localStorage.getItem(`analytics:lastSeenMonth:${classId}`) || '';
+      let label = null, periodType = null;
+      if (lastSeenWeek !== weekKey) {
+        label = `이번 주 (${weekKey.split('-W')[1]}주차) 리포트`;
+        periodType = 'weekly';
+      } else if (lastSeenMonth !== monthKey) {
+        label = `${monthKey.split('-')[0]}년 ${parseInt(monthKey.split('-')[1])}월 월간 리포트`;
+        periodType = 'monthly';
+      }
+      if (!label) { banner.style.display = 'none'; return; }
+      document.getElementById('autoReportTitle').textContent = `${label} 자동 생성됨`;
+      document.getElementById('autoReportDesc').textContent = '클릭 시 해당 기간 분석으로 이동하고 알림이 사라집니다.';
+      banner.style.display = 'flex';
+      banner.onclick = () => {
+        // localStorage 먼저 갱신 (loadAnalytics가 호출되며 renderAutoReportBanner 재실행 시 이미 lastSeen 반영됨)
+        if (periodType === 'weekly') {
+          localStorage.setItem(`analytics:lastSeenWeek:${classId}`, weekKey);
+          const today = new Date();
+          const y = today.getFullYear(), m = today.getMonth()+1;
+          const wnum = parseInt(weekKey.split('-W')[1]);
+          const setSel = (id, val) => { const s = document.getElementById(id); if (s) s.value = String(val); };
+          setSel('periodYear', y); setSel('periodMonth', m); setSel('periodWeek', wnum);
+          if (typeof applyWeeklyPeriod === 'function') { try { applyWeeklyPeriod(); } catch(_) {} }
+        } else {
+          localStorage.setItem(`analytics:lastSeenMonth:${classId}`, monthKey);
+          const [y, m] = monthKey.split('-');
+          const setSel = (id, val) => { const s = document.getElementById(id); if (s) s.value = String(val); };
+          setSel('periodYearM', y); setSel('periodMonthM', parseInt(m));
+          if (typeof applyMonthlyPeriod === 'function') { try { applyMonthlyPeriod(); } catch(_) {} }
+        }
+        banner.style.display = 'none';
+      };
     }
 
     // ===== REWORK 5/6/7: 평가 점수분포 명단 모달 + 난이도 문항 목록 + 문항 뷰어 =====
