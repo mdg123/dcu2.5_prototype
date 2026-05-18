@@ -91,7 +91,8 @@
     .learn-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); border-color: var(--gray-300); }
     .learn-card.completed { border-top: 3px solid var(--success); }
     .learn-card.in-progress { border-top: 3px solid var(--primary); }
-    .learn-card-thumb { height: 88px; display: flex; align-items: center; justify-content: center; position: relative; background: var(--gray-50); border-bottom: 1px solid var(--gray-100); }
+    /* 실제 영상 썸네일이 잘 보이도록 충분한 높이 + 16:9 비율 + cover */
+    .learn-card-thumb { aspect-ratio: 16 / 9; min-height: 140px; display: flex; align-items: center; justify-content: center; position: relative; background: var(--gray-50); border-bottom: 1px solid var(--gray-100); background-size: cover; background-position: center; }
     .learn-card-thumb i { font-size: 32px; color: var(--gray-400); }
     .learn-card-badge { position: absolute; top: 8px; right: 8px; padding: 3px 10px; border-radius: 12px; font-size: var(--fs-xs); font-weight: 700; }
     .learn-card-badge.done { background: var(--success-light); color: #059669; }
@@ -749,9 +750,16 @@
         const btnClass = allComplete ? 'review' : inProgress ? 'resume' : 'start';
         const btnText = allComplete ? '재학습' : inProgress ? '이어하기' : '학습하기';
 
-        const thumbStyle = set.thumbnail_url
-          ? `background:url('${set.thumbnail_url}') center/cover;overflow:hidden;`
-          : `background:linear-gradient(135deg, ${subjColor}22 0%, ${subjColor}0D 55%, ${subjColor}1C 100%);overflow:hidden;`;
+        // 썸네일: img 태그로 렌더하여 깨질 경우 onerror로 mqdefault → default 폴백, 최종 실패 시 그라디언트
+        const thumbStyle = `background:linear-gradient(135deg, ${subjColor}22 0%, ${subjColor}0D 55%, ${subjColor}1C 100%);overflow:hidden;`;
+        const buildFallback = (orig) => {
+          if (!orig) return '';
+          // YouTube hqdefault.jpg → mqdefault.jpg → default.jpg
+          if (orig.includes('hqdefault')) return orig.replace('hqdefault', 'mqdefault');
+          if (orig.includes('mqdefault')) return orig.replace('mqdefault', 'default');
+          return '';
+        };
+        const thumbImg = set.thumbnail_url ? `<img src="${escHtml(set.thumbnail_url)}" alt="" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:0;" onerror="(function(img){var fb='${buildFallback(set.thumbnail_url)}';if(fb&&img.src!==fb){img.src=fb;}else{img.remove();}})(this)">` : '';
 
         const thumbDeco = set.thumbnail_url ? '' : `
           <span style="position:absolute;top:-26px;right:-22px;width:86px;height:86px;border-radius:50%;background:${subjColor}22;"></span>
@@ -764,8 +772,9 @@
 
         return `<div class="learn-card ${statusClass}" onclick="openPlayer(${origIdx})">
           <div class="learn-card-thumb" style="${thumbStyle}">
+            ${thumbImg}
             ${thumbDeco}
-            <span class="learn-card-badge ${badgeClass}">${badgeText}</span>
+            <span class="learn-card-badge ${badgeClass}" style="position:absolute;z-index:2;">${badgeText}</span>
           </div>
           <div class="learn-card-body">
             <div class="learn-card-tags">
