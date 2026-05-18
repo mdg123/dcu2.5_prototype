@@ -3,7 +3,7 @@ const bcrypt = require('bcryptjs');
 
 // 인증 조회 시 소프트 삭제된 사용자(deleted_at IS NOT NULL)는 제외 — BUG-A-02
 const stmtFindByUsername = db.prepare('SELECT * FROM users WHERE username = ? AND deleted_at IS NULL');
-const stmtFindById = db.prepare('SELECT id, username, display_name, role, school_name, grade, class_number, email, profile_image_url, created_at, last_login_at FROM users WHERE id = ? AND deleted_at IS NULL');
+const stmtFindById = db.prepare('SELECT id, username, display_name, role, school_name, school_level, grade, class_number, email, profile_image_url, created_at, last_login_at FROM users WHERE id = ? AND deleted_at IS NULL');
 const stmtCreateUser = db.prepare('INSERT INTO users (username, password, display_name, role, school_name, grade, class_number) VALUES (?, ?, ?, ?, ?, ?, ?)');
 const stmtUpdateLastLogin = db.prepare('UPDATE users SET last_login_at = CURRENT_TIMESTAMP WHERE id = ?');
 
