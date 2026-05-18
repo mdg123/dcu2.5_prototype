@@ -1096,9 +1096,19 @@
           </div>
           <!-- 출처 -->
           <div class="form-group">
-            <label style="font-weight:600;font-size:13px;">출처 <span style="color:var(--gray-400);font-size:11px;font-weight:400;">(외부 사이트·기관·자료실)</span></label>
-            <input type="text" id="cSource" placeholder="예: EBS 사이언스, 충북교육청 자료실, KOCW"
-              style="padding:10px 12px;border:2px solid var(--gray-200);border-radius:8px;font-size:13px;width:100%;">
+            <label style="font-weight:600;font-size:13px;">출처 <span style="color:var(--gray-400);font-size:13px;font-weight:400;">(부서·기관)</span></label>
+            <select id="cSource" onchange="document.getElementById('cSourceEtc').style.display=this.value==='기타'?'block':'none'" style="padding:10px 12px;border:2px solid var(--gray-200);border-radius:8px;font-size:14px;width:100%;background:#fff;">
+              <option value="">선택하세요</option>
+              <option value="미래교육추진단">미래교육추진단</option>
+              <option value="유초등교육과">유초등교육과</option>
+              <option value="중등교육과">중등교육과</option>
+              <option value="인성시민과">인성시민과</option>
+              <option value="체육건강안전과">체육건강안전과</option>
+              <option value="창의특수교육과">창의특수교육과</option>
+              <option value="출처없음">출처없음</option>
+              <option value="기타">기타</option>
+            </select>
+            <input type="text" id="cSourceEtc" placeholder="기타 출처를 직접 입력하세요" style="display:none;margin-top:8px;padding:10px 12px;border:2px solid var(--gray-200);border-radius:8px;font-size:14px;width:100%;">
           </div>
           <!-- 태그 -->
           <!-- 공개 옵션 -->
@@ -1229,8 +1239,19 @@
           <input type="text" id="eTags" placeholder="예: 분수, 도형, 4학년" style="width:100%;padding:10px 12px;border:1px solid var(--gray-200);border-radius:8px;font-size:14px;font-family:inherit;">
         </div>
         <div class="form-group" style="margin-bottom:14px;">
-          <label style="font-size:13px;font-weight:600;color:var(--gray-600);display:block;margin-bottom:6px;">출처 <span style="color:var(--gray-400);font-weight:400;">(외부 사이트·기관·자료실)</span></label>
-          <input type="text" id="eSource" placeholder="예: EBS 사이언스, 충북교육청 자료실, KOCW" style="width:100%;padding:10px 12px;border:1px solid var(--gray-200);border-radius:8px;font-size:14px;font-family:inherit;">
+          <label style="font-size:13px;font-weight:600;color:var(--gray-600);display:block;margin-bottom:6px;">출처 <span style="color:var(--gray-400);font-weight:400;">(부서·기관)</span></label>
+          <select id="eSource" onchange="document.getElementById('eSourceEtc').style.display=this.value==='기타'?'block':'none'" style="width:100%;padding:10px 12px;border:1px solid var(--gray-200);border-radius:8px;font-size:14px;font-family:inherit;background:#fff;">
+            <option value="">선택하세요</option>
+            <option value="미래교육추진단">미래교육추진단</option>
+            <option value="유초등교육과">유초등교육과</option>
+            <option value="중등교육과">중등교육과</option>
+            <option value="인성시민과">인성시민과</option>
+            <option value="체육건강안전과">체육건강안전과</option>
+            <option value="창의특수교육과">창의특수교육과</option>
+            <option value="출처없음">출처없음</option>
+            <option value="기타">기타</option>
+          </select>
+          <input type="text" id="eSourceEtc" placeholder="기타 출처를 직접 입력하세요" style="display:none;margin-top:8px;width:100%;padding:10px 12px;border:1px solid var(--gray-200);border-radius:8px;font-size:14px;font-family:inherit;">
         </div>
         <div class="form-group" style="margin-bottom:14px;">
           <label style="font-size:13px;font-weight:600;color:var(--gray-600);display:block;margin-bottom:8px;">공개 설정</label>
@@ -3693,7 +3714,15 @@
         document.getElementById('eGrade').value = (ct.grade && /^\d+$/.test(String(ct.grade))) ? String(ct.grade) : '';
         const tags = Array.isArray(ct.tags) ? ct.tags : (typeof ct.tags === 'string' ? (() => { try { return JSON.parse(ct.tags); } catch { return []; } })() : []);
         document.getElementById('eTags').value = tags.join(', ');
-        const _eSrc = document.getElementById('eSource'); if (_eSrc) _eSrc.value = ct.source || '';
+        // 출처 prefill: 옵션 목록에 있는 값이면 select, 아니면 "기타" + input 노출
+        const _eSrc = document.getElementById('eSource'); const _eSrcEtc = document.getElementById('eSourceEtc');
+        if (_eSrc) {
+          const srcVal = (ct.source || '').trim();
+          const opts = Array.from(_eSrc.options).map(o => o.value);
+          if (!srcVal) { _eSrc.value = ''; if (_eSrcEtc) { _eSrcEtc.value = ''; _eSrcEtc.style.display = 'none'; } }
+          else if (opts.includes(srcVal)) { _eSrc.value = srcVal; if (_eSrcEtc) { _eSrcEtc.value = ''; _eSrcEtc.style.display = 'none'; } }
+          else { _eSrc.value = '기타'; if (_eSrcEtc) { _eSrcEtc.value = srcVal; _eSrcEtc.style.display = 'block'; } }
+        }
         const isPublic = ct.is_public === 1 || ct.is_public === true;
         document.querySelector(`input[name="eVisibility"][value="${isPublic ? 'public' : 'private'}"]`).checked = true;
         document.getElementById('eAllowComments').checked = ct.allow_comments === 1 || ct.allow_comments === true;
@@ -3751,7 +3780,7 @@
         title,
         description: document.getElementById('eDesc').value.trim() || null,
         tags,
-        source: (document.getElementById('eSource')?.value || '').trim() || null,
+        source: (() => { const sv = (document.getElementById('eSource')?.value || '').trim(); if (sv === '기타') { const etc = (document.getElementById('eSourceEtc')?.value || '').trim(); return etc || '기타'; } return sv || null; })(),
         is_public: visibility === 'public' ? 1 : 0,
         allow_comments: document.getElementById('eAllowComments').checked ? 1 : 0
       };
@@ -4303,7 +4332,7 @@
         copyright: document.querySelector('input[name="cCopyright"]:checked')?.value || 'CC-BY',
         download_allow: document.querySelector('input[name="cDownload"]:checked')?.value === 'allow',
         official_tag: document.getElementById('cOfficialTag')?.value || null,
-        source: document.getElementById('cSource')?.value.trim() || null,
+        source: (() => { const sv = (document.getElementById('cSource')?.value || '').trim(); if (sv === '기타') { const etc = (document.getElementById('cSourceEtc')?.value || '').trim(); return etc || '기타'; } return sv || null; })(),
         questions: questions,
         quiz_content_ids: quizContentIds,
         bundle_items: contentType === 'bundle' ? bundleItems.map((b, i) => ({ content_id: b.id, sort_order: i + 1 })) : undefined
@@ -4321,6 +4350,7 @@
           document.getElementById('cUrl').value = '';
           document.getElementById('cTags').value = '';
           const _cSrc = document.getElementById('cSource'); if (_cSrc) _cSrc.value = '';
+          const _cSrcEtc = document.getElementById('cSourceEtc'); if (_cSrcEtc) { _cSrcEtc.value = ''; _cSrcEtc.style.display = 'none'; }
           fileInput.value = '';
           document.getElementById('cFileInfo').style.display = 'none';
           autoThumbnailBlob = null;
@@ -4621,6 +4651,7 @@
         document.getElementById('cUrl').value = '';
         document.getElementById('cTags').value = '';
         const _cSrc2 = document.getElementById('cSource'); if (_cSrc2) _cSrc2.value = '';
+        const _cSrc2Etc = document.getElementById('cSourceEtc'); if (_cSrc2Etc) { _cSrc2Etc.value = ''; _cSrc2Etc.style.display = 'none'; }
         document.getElementById('cFile').value = '';
         document.getElementById('cFileInfo').style.display = 'none';
         document.getElementById('cPublic').checked = false;
