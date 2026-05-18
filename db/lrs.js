@@ -173,7 +173,107 @@ function getClassLrsStats(classId, opts = {}) {
     `).all(classId);
   }
 
-  return { totalLogs, byStudent, byType, dailyTrend };
+  // ====== summary 5지표 (RFP P0 — 클래스별 학습분석) ======
+  // 기간 절을 임의 컬럼/타입에 맞게 생성하는 헬퍼
+  function rangeFor(col) {
+    const parts = [];
+    const params = [];
+    if (startDate) { parts.push(`${col} >= ?`); params.push(startDate + ' 00:00:00'); }
+    if (endDate)   { parts.push(`${col} <= ?`); params.push(endDate + ' 23:59:59'); }
+    return { sql: parts.length ? ' AND ' + parts.join(' AND ') : '', params };
+  }
+
+  // 활동 멤버 수 (status='active', role='member' — 학생만)
+  const memberCount = db.prepare(
+    `SELECT COUNT(*) AS cnt FROM class_members cm
+     JOIN users u ON u.id = cm.user_id
+     WHERE cm.class_id = ? AND cm.status = 'active' AND u.role = 'student'`
+  ).get(classId).cnt || 0;
+
+  // 수업 수 (published 만 — 학생에게 노출된 것만 분모로)
+  const lessonRange = rangeFor('created_at');
+  const lessonCount = db.prepare(
+    `SELECT COUNT(*) AS cnt FROM lessons WHERE class_id = ? AND status = 'published'${lessonRange.sql}`
+  ).get(classId, ...lessonRange.params).cnt || 0;
+
+  // 수업 이수 — lesson_self_check 작성을 이수로 간주 (RFP P1 진행도 트래킹 부재 시 표준 대용)
+  const lscRange = rangeFor('lsc.created_at');
+  const completedLessonsRow = db.prepare(
+    `SELECT COUNT(DISTINCT lsc.lesson_id || '_' || lsc.user_id) AS cnt
+     FROM lesson_self_check lsc
+     JOIN lessons l ON l.id = lsc.lesson_id
+     WHERE lsc.class_id = ? AND l.status = 'published'${lscRange.sql}`
+  ).get(classId, ...lscRange.params);
+  const completedLessons = (completedLessonsRow && completedLessonsRow.cnt) || 0;
+  const lessonDenom = lessonCount * memberCount;
+  const lessonCompletionRate = lessonDenom > 0
+    ? Math.round((completedLessons / lessonDenom) * 1000) / 10 : 0;
+
+  // 과제 수 (published 만)
+  const hwRange = rangeFor('created_at');
+  const homeworkCount = db.prepare(
+    `SELECT COUNT(*) AS cnt FROM homework WHERE class_id = ? AND status = 'published'${hwRange.sql}`
+  ).get(classId, ...hwRange.params).cnt || 0;
+
+  // 과제 제출 수 (학생이 제출한 row — is_draft != 1 또는 NULL, submitted_at NOT NULL)
+  const hwsRange = rangeFor('hs.submitted_at');
+  const homeworkSubmitted = db.prepare(
+    `SELECT COUNT(*) AS cnt FROM homework_submissions hs
+     JOIN homework h ON h.id = hs.homework_id
+     WHERE h.class_id = ? AND h.status = 'published'
+       AND hs.submitted_at IS NOT NULL
+       AND COALESCE(hs.is_draft, 0) = 0${hwsRange.sql}`
+  ).get(classId, ...hwsRange.params).cnt || 0;
+  const hwDenom = homeworkCount * memberCount;
+  const homeworkSubmitRate = hwDenom > 0
+    ? Math.round((homeworkSubmitted / hwDenom) * 1000) / 10 : 0;
+
+  // 평가 수 (waiting/active/ended 모두 — 학생 응시 대상)
+  const exRange = rangeFor('created_at');
+  const examCount = db.prepare(
+    `SELECT COUNT(*) AS cnt FROM exams WHERE class_id = ?${exRange.sql}`
+  ).get(classId, ...exRange.params).cnt || 0;
+
+  // 평가 제출자 수
+  const esRange = rangeFor('es.submitted_at');
+  const examSubmitted = db.prepare(
+    `SELECT COUNT(*) AS cnt FROM exam_students es
+     JOIN exams e ON e.id = es.exam_id
+     WHERE e.class_id = ? AND es.submitted_at IS NOT NULL${esRange.sql}`
+  ).get(classId, ...esRange.params).cnt || 0;
+  const exDenom = examCount * memberCount;
+  const examSubmitRate = exDenom > 0
+    ? Math.round((examSubmitted / exDenom) * 1000) / 10 : 0;
+
+  // 평가 평균 점수 (제출자 한정)
+  const avgScoreRow = db.prepare(
+    `SELECT AVG(es.score) AS avg FROM exam_students es
+     JOIN exams e ON e.id = es.exam_id
+     WHERE e.class_id = ? AND es.submitted_at IS NOT NULL AND es.score IS NOT NULL${esRange.sql}`
+  ).get(classId, ...esRange.params);
+  const avgScore = (avgScoreRow && avgScoreRow.avg != null)
+    ? Math.round(avgScoreRow.avg * 10) / 10 : 0;
+
+  // 게시판 글 수 (approved 또는 approval_status NULL — 일반 글 포함)
+  const postRange = rangeFor('created_at');
+  const communityPostCount = db.prepare(
+    `SELECT COUNT(*) AS cnt FROM posts WHERE class_id = ?
+     AND (approval_status IS NULL OR approval_status = 'approved')${postRange.sql}`
+  ).get(classId, ...postRange.params).cnt || 0;
+
+  const summary = {
+    lessonCompletionRate,
+    homeworkSubmitRate,
+    examSubmitRate,
+    avgScore,
+    communityPostCount,
+    lessonCount,
+    homeworkCount,
+    examCount,
+    memberCount
+  };
+
+  return { totalLogs, byStudent, byType, dailyTrend, summary };
 }
 
 module.exports = { logActivity, getUserLogs, getDashboardStats, getClassLrsStats };

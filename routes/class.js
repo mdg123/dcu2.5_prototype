@@ -757,4 +757,1196 @@ router.get('/:classId/lessons/self-check/aggregate', requireAuth, (req, res) => 
   }
 });
 
+// ============================================================================
+// 클래스별 학습분석 (RFP P0) — 수업/과제/평가 항목별 + 멤버 종합
+// 모든 엔드포인트: 권한 = 클래스 owner 또는 admin (학생 차단)
+// 공통 쿼리: startDate=YYYY-MM-DD, endDate=YYYY-MM-DD (옵션, 미지정 시 전체)
+// ============================================================================
+
+// 권한 체크 + 클래스 ID 검증 공통 헬퍼
+function _checkAnalyticsAuth(req, res) {
+  const classId = parseInt(req.params.classId);
+  if (!Number.isInteger(classId)) {
+    res.status(400).json({ success: false, message: '잘못된 클래스 ID입니다.' });
+    return null;
+  }
+  const myRole = classDb.getMemberRole(classId, req.user.id);
+  // RFP: 클래스 개설자(owner) + 매니저(manager) + 시스템 관리자(admin)만 접근.
+  // owner는 학생/교사 누구나 될 수 있음 (사용자 누구나 클래스 개설 가능).
+  const isOwnerOrManager = (myRole === 'owner' || myRole === 'manager');
+  const isAdmin = req.user.role === 'admin';
+  if (!isOwnerOrManager && !isAdmin) {
+    res.status(403).json({ success: false, message: '클래스 개설자/관리자만 접근할 수 있습니다.' });
+    return null;
+  }
+  return classId;
+}
+
+// ISO 날짜 + 기간 절 빌더
+function _parseRange(req) {
+  const isIso = (s) => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s);
+  const startDate = isIso(req.query.startDate) ? req.query.startDate : null;
+  const endDate = isIso(req.query.endDate) ? req.query.endDate : null;
+  return {
+    startDate,
+    endDate,
+    startTs: startDate ? startDate + ' 00:00:00' : null,
+    endTs: endDate ? endDate + ' 23:59:59' : null,
+    clause(col) {
+      const parts = [];
+      const params = [];
+      if (this.startTs) { parts.push(`${col} >= ?`); params.push(this.startTs); }
+      if (this.endTs)   { parts.push(`${col} <= ?`); params.push(this.endTs); }
+      return { sql: parts.length ? ' AND ' + parts.join(' AND ') : '', params };
+    }
+  };
+}
+
+// 클래스의 활동 학생 멤버 목록 (id, name, class_number)
+function _getClassStudents(db, classId) {
+  return db.prepare(`
+    SELECT u.id AS user_id, u.display_name AS name, u.class_number
+    FROM class_members cm
+    JOIN users u ON u.id = cm.user_id
+    WHERE cm.class_id = ? AND cm.status = 'active' AND u.role = 'student'
+    ORDER BY u.class_number, u.display_name
+  `).all(classId);
+}
+
+// ----------------------------------------------------------------------------
+// B-1. GET /:classId/analytics/lessons — 수업별 이수율 목록
+// ----------------------------------------------------------------------------
+router.get('/:classId/analytics/lessons', requireAuth, (req, res) => {
+  try {
+    const classId = _checkAnalyticsAuth(req, res);
+    if (classId === null) return;
+    const range = _parseRange(req);
+    const db = require('../db/index');
+
+    const totalMembers = db.prepare(
+      `SELECT COUNT(*) AS c FROM class_members cm JOIN users u ON u.id = cm.user_id
+       WHERE cm.class_id = ? AND cm.status = 'active' AND u.role = 'student'`
+    ).get(classId).c || 0;
+
+    const lr = range.clause('l.created_at');
+    const lessons = db.prepare(`
+      SELECT l.id AS lesson_id, l.title, l.created_at AS registered_at, l.status
+      FROM lessons l
+      WHERE l.class_id = ? AND l.status = 'published'${lr.sql}
+      ORDER BY l.created_at DESC
+    `).all(classId, ...lr.params);
+
+    const completedStmt = db.prepare(
+      `SELECT COUNT(DISTINCT user_id) AS c FROM lesson_self_check WHERE lesson_id = ? AND class_id = ?`
+    );
+
+    const items = lessons.map(l => {
+      const completed = completedStmt.get(l.lesson_id, classId).c || 0;
+      const completionRate = totalMembers > 0
+        ? Math.round((completed / totalMembers) * 1000) / 10 : 0;
+      return {
+        lesson_id: l.lesson_id,
+        title: l.title,
+        registered_at: l.registered_at,
+        total_members: totalMembers,
+        completed_count: completed,
+        completion_rate: completionRate,
+        avg_correct: null  // P1 — 수업꾸러미 문항 정답률은 추후 구현
+      };
+    });
+
+    res.json({ success: true, items });
+  } catch (err) {
+    console.error('[CLASS] analytics/lessons error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// ----------------------------------------------------------------------------
+// B-2. GET /:classId/analytics/lessons/:lessonId/roster — 수업별 참여/미참여 명단
+// ----------------------------------------------------------------------------
+router.get('/:classId/analytics/lessons/:lessonId/roster', requireAuth, (req, res) => {
+  try {
+    const classId = _checkAnalyticsAuth(req, res);
+    if (classId === null) return;
+    const lessonId = parseInt(req.params.lessonId);
+    if (!Number.isInteger(lessonId)) {
+      return res.status(400).json({ success: false, message: '잘못된 수업 ID입니다.' });
+    }
+    const db = require('../db/index');
+
+    // 수업이 해당 클래스에 속하는지 검증
+    const lesson = db.prepare(`SELECT id FROM lessons WHERE id = ? AND class_id = ?`).get(lessonId, classId);
+    if (!lesson) {
+      return res.status(404).json({ success: false, message: '수업을 찾을 수 없습니다.' });
+    }
+
+    const students = _getClassStudents(db, classId);
+    // self_check: 한 학생당 한 row만 있다고 가정. correct_count는 P1 — 현재 셀프체크 점수로 대체 X (null)
+    const checkStmt = db.prepare(`
+      SELECT created_at, updated_at, understanding, focus
+      FROM lesson_self_check WHERE lesson_id = ? AND user_id = ? AND class_id = ?
+    `);
+
+    const participants = [];
+    const absentees = [];
+    students.forEach(s => {
+      const sc = checkStmt.get(lessonId, s.user_id, classId);
+      if (sc) {
+        participants.push({
+          user_id: s.user_id,
+          name: s.name,
+          correct_count: null,    // P1
+          time_minutes: null,     // P1 — 수업 체류 시간 트래킹 미구현
+          completed_at: sc.updated_at || sc.created_at
+        });
+      } else {
+        absentees.push({ user_id: s.user_id, name: s.name });
+      }
+    });
+
+    res.json({ success: true, participants, absentees });
+  } catch (err) {
+    console.error('[CLASS] analytics/lessons/:id/roster error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// ----------------------------------------------------------------------------
+// B-3. GET /:classId/analytics/homework — 과제별 제출/채점 현황
+// ----------------------------------------------------------------------------
+router.get('/:classId/analytics/homework', requireAuth, (req, res) => {
+  try {
+    const classId = _checkAnalyticsAuth(req, res);
+    if (classId === null) return;
+    const range = _parseRange(req);
+    const db = require('../db/index');
+
+    const totalMembers = db.prepare(
+      `SELECT COUNT(*) AS c FROM class_members cm JOIN users u ON u.id = cm.user_id
+       WHERE cm.class_id = ? AND cm.status = 'active' AND u.role = 'student'`
+    ).get(classId).c || 0;
+
+    const hr = range.clause('h.created_at');
+    const homeworks = db.prepare(`
+      SELECT h.id AS homework_id, h.title, h.created_at AS registered_at,
+             h.due_date, h.status
+      FROM homework h
+      WHERE h.class_id = ? AND h.status = 'published'${hr.sql}
+      ORDER BY h.created_at DESC
+    `).all(classId, ...hr.params);
+
+    // 과제별 집계 statement
+    const aggStmt = db.prepare(`
+      SELECT
+        SUM(CASE WHEN submitted_at IS NOT NULL AND COALESCE(is_draft,0)=0 THEN 1 ELSE 0 END) AS submitted_count,
+        SUM(CASE WHEN status = 'graded' THEN 1 ELSE 0 END) AS graded_count,
+        AVG(CASE WHEN status = 'graded' AND score IS NOT NULL THEN score END) AS avg_score,
+        SUM(CASE WHEN submitted_at IS NOT NULL AND ? IS NOT NULL AND DATE(submitted_at) > DATE(?) THEN 1 ELSE 0 END) AS late_count
+      FROM homework_submissions
+      WHERE homework_id = ?
+    `);
+
+    const today = new Date().toISOString().slice(0, 10);
+
+    const items = homeworks.map(h => {
+      const due = h.due_date ? String(h.due_date).slice(0, 10) : null;
+      const agg = aggStmt.get(due, due, h.homework_id) || {};
+      const submitted = agg.submitted_count || 0;
+      const graded = agg.graded_count || 0;
+      const submitRate = totalMembers > 0
+        ? Math.round((submitted / totalMembers) * 1000) / 10 : 0;
+      const avg = agg.avg_score != null ? Math.round(agg.avg_score * 10) / 10 : null;
+      // 상태: submit_rate==100 → completed, 마감 지났으면 deadline, 아니면 in_progress
+      let status = 'in_progress';
+      if (submitRate >= 100) status = 'completed';
+      else if (due && due < today) status = 'deadline';
+      return {
+        homework_id: h.homework_id,
+        title: h.title,
+        registered_at: h.registered_at,
+        due_date: h.due_date,
+        total_members: totalMembers,
+        submitted_count: submitted,
+        submit_rate: submitRate,
+        avg_score: avg,
+        graded_count: graded,
+        late_count: agg.late_count || 0,
+        status
+      };
+    });
+
+    res.json({ success: true, items });
+  } catch (err) {
+    console.error('[CLASS] analytics/homework error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// ----------------------------------------------------------------------------
+// B-4. GET /:classId/analytics/homework/:homeworkId/roster — 과제별 멤버 명단
+// ----------------------------------------------------------------------------
+router.get('/:classId/analytics/homework/:homeworkId/roster', requireAuth, (req, res) => {
+  try {
+    const classId = _checkAnalyticsAuth(req, res);
+    if (classId === null) return;
+    const homeworkId = parseInt(req.params.homeworkId);
+    if (!Number.isInteger(homeworkId)) {
+      return res.status(400).json({ success: false, message: '잘못된 과제 ID입니다.' });
+    }
+    const db = require('../db/index');
+
+    const hw = db.prepare(`SELECT id, due_date FROM homework WHERE id = ? AND class_id = ?`).get(homeworkId, classId);
+    if (!hw) {
+      return res.status(404).json({ success: false, message: '과제를 찾을 수 없습니다.' });
+    }
+    const due = hw.due_date ? String(hw.due_date).slice(0, 10) : null;
+
+    const students = _getClassStudents(db, classId);
+    const subStmt = db.prepare(`
+      SELECT score, status, submitted_at, is_draft
+      FROM homework_submissions
+      WHERE homework_id = ? AND student_id = ?
+    `);
+
+    const participants = [];
+    const absentees = [];
+    students.forEach(s => {
+      const sub = subStmt.get(homeworkId, s.user_id);
+      const submitted = sub && sub.submitted_at && !sub.is_draft;
+      if (submitted) {
+        const submittedDate = String(sub.submitted_at).slice(0, 10);
+        const late = !!(due && submittedDate > due);
+        participants.push({
+          user_id: s.user_id,
+          name: s.name,
+          graded: sub.status === 'graded',
+          score: sub.score != null ? sub.score : null,
+          submitted_at: sub.submitted_at,
+          late
+        });
+      } else {
+        absentees.push({ user_id: s.user_id, name: s.name });
+      }
+    });
+
+    res.json({ success: true, participants, absentees });
+  } catch (err) {
+    console.error('[CLASS] analytics/homework/:id/roster error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// ----------------------------------------------------------------------------
+// B-5. GET /:classId/analytics/exams — 평가별 응시 현황
+// ----------------------------------------------------------------------------
+router.get('/:classId/analytics/exams', requireAuth, (req, res) => {
+  try {
+    const classId = _checkAnalyticsAuth(req, res);
+    if (classId === null) return;
+    const range = _parseRange(req);
+    const db = require('../db/index');
+
+    const totalMembers = db.prepare(
+      `SELECT COUNT(*) AS c FROM class_members cm JOIN users u ON u.id = cm.user_id
+       WHERE cm.class_id = ? AND cm.status = 'active' AND u.role = 'student'`
+    ).get(classId).c || 0;
+
+    const er = range.clause('e.created_at');
+    const exams = db.prepare(`
+      SELECT e.id AS exam_id, e.title, e.created_at AS registered_at, e.question_count
+      FROM exams e
+      WHERE e.class_id = ?${er.sql}
+      ORDER BY e.created_at DESC
+    `).all(classId, ...er.params);
+
+    const aggStmt = db.prepare(`
+      SELECT COUNT(*) AS submitted_count, AVG(score) AS avg_score
+      FROM exam_students
+      WHERE exam_id = ? AND submitted_at IS NOT NULL AND score IS NOT NULL
+    `);
+
+    const items = exams.map(e => {
+      const agg = aggStmt.get(e.exam_id) || {};
+      const submitted = agg.submitted_count || 0;
+      const participateRate = totalMembers > 0
+        ? Math.round((submitted / totalMembers) * 1000) / 10 : 0;
+      const avgScore = agg.avg_score != null ? Math.round(agg.avg_score * 10) / 10 : 0;
+      return {
+        exam_id: e.exam_id,
+        title: e.title,
+        registered_at: e.registered_at,
+        total_members: totalMembers,
+        submitted_count: submitted,
+        participate_rate: participateRate,
+        avg_score: avgScore,
+        avg_correct_rate: avgScore   // 점수가 100점 만점 % → 동일치 사용
+      };
+    });
+
+    res.json({ success: true, items });
+  } catch (err) {
+    console.error('[CLASS] analytics/exams error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// ----------------------------------------------------------------------------
+// B-6. GET /:classId/analytics/exams/:examId/roster — 평가별 응시자 명단
+// ----------------------------------------------------------------------------
+router.get('/:classId/analytics/exams/:examId/roster', requireAuth, (req, res) => {
+  try {
+    const classId = _checkAnalyticsAuth(req, res);
+    if (classId === null) return;
+    const examId = String(req.params.examId);
+    const db = require('../db/index');
+
+    const exam = db.prepare(`SELECT id, question_count FROM exams WHERE id = ? AND class_id = ?`).get(examId, classId);
+    if (!exam) {
+      return res.status(404).json({ success: false, message: '평가를 찾을 수 없습니다.' });
+    }
+    const totalQ = exam.question_count || 0;
+
+    const students = _getClassStudents(db, classId);
+    const subStmt = db.prepare(`
+      SELECT score, joined_at, submitted_at
+      FROM exam_students WHERE exam_id = ? AND user_id = ? AND submitted_at IS NOT NULL
+    `);
+
+    // 점수 순위 계산용 — 제출자 점수 내림차순
+    const rankRows = db.prepare(`
+      SELECT user_id, score FROM exam_students
+      WHERE exam_id = ? AND submitted_at IS NOT NULL AND score IS NOT NULL
+      ORDER BY score DESC, submitted_at ASC
+    `).all(examId);
+    const rankMap = new Map();
+    rankRows.forEach((r, i) => rankMap.set(r.user_id, i + 1));
+
+    const participants = [];
+    const absentees = [];
+    students.forEach(s => {
+      const sub = subStmt.get(examId, s.user_id);
+      if (sub) {
+        // time_minutes: joined_at → submitted_at 차이 (초 → 분)
+        let timeMin = null;
+        if (sub.joined_at && sub.submitted_at) {
+          const a = new Date(sub.joined_at).getTime();
+          const b = new Date(sub.submitted_at).getTime();
+          if (!isNaN(a) && !isNaN(b) && b > a) timeMin = Math.round((b - a) / 60000);
+        }
+        // correct_count = score % × question_count / 100
+        const correctCount = (sub.score != null && totalQ > 0)
+          ? Math.round((sub.score / 100) * totalQ) : null;
+        participants.push({
+          user_id: s.user_id,
+          name: s.name,
+          score: sub.score != null ? sub.score : null,
+          time_minutes: timeMin,
+          rank: rankMap.get(s.user_id) || null,
+          correct_count: correctCount,
+          total_count: totalQ
+        });
+      } else {
+        absentees.push({ user_id: s.user_id, name: s.name });
+      }
+    });
+
+    res.json({ success: true, participants, absentees });
+  } catch (err) {
+    console.error('[CLASS] analytics/exams/:id/roster error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// ----------------------------------------------------------------------------
+// B-7. GET /:classId/analytics/members — 멤버별 종합 활동/성취 집계
+// ----------------------------------------------------------------------------
+router.get('/:classId/analytics/members', requireAuth, (req, res) => {
+  try {
+    const classId = _checkAnalyticsAuth(req, res);
+    if (classId === null) return;
+    const range = _parseRange(req);
+    const db = require('../db/index');
+
+    const students = _getClassStudents(db, classId);
+
+    // 분모: 클래스 published 수업/과제, 전체 평가 수 (기간 적용)
+    const lr = range.clause('created_at');
+    const lessonCount = db.prepare(
+      `SELECT COUNT(*) AS c FROM lessons WHERE class_id = ? AND status = 'published'${lr.sql}`
+    ).get(classId, ...lr.params).c || 0;
+
+    const hr = range.clause('created_at');
+    const homeworkCount = db.prepare(
+      `SELECT COUNT(*) AS c FROM homework WHERE class_id = ? AND status = 'published'${hr.sql}`
+    ).get(classId, ...hr.params).c || 0;
+
+    const er = range.clause('created_at');
+    const examCount = db.prepare(
+      `SELECT COUNT(*) AS c FROM exams WHERE class_id = ?${er.sql}`
+    ).get(classId, ...er.params).c || 0;
+
+    // 학생별 statement
+    // 활동 수 / 학습 시간 (learning_logs)
+    const llRange = range.clause('ll.created_at');
+    const activityStmt = db.prepare(`
+      SELECT COUNT(*) AS cnt,
+             COALESCE(SUM(COALESCE(ll.duration_sec, ll.duration, 0)), 0) AS dur_sec
+      FROM learning_logs ll
+      WHERE ll.user_id = ? AND ll.class_id = ?${llRange.sql}
+    `);
+
+    // 수업 이수 (lesson_self_check 작성 수)
+    const lscRange = range.clause('lsc.created_at');
+    const lessonDoneStmt = db.prepare(`
+      SELECT COUNT(DISTINCT lsc.lesson_id) AS c
+      FROM lesson_self_check lsc
+      JOIN lessons l ON l.id = lsc.lesson_id AND l.status = 'published'
+      WHERE lsc.user_id = ? AND lsc.class_id = ?${lscRange.sql}
+    `);
+
+    // 과제 제출/평균
+    const hwsRange = range.clause('hs.submitted_at');
+    const hwSubStmt = db.prepare(`
+      SELECT COUNT(*) AS submitted_cnt,
+             AVG(CASE WHEN hs.status='graded' AND hs.score IS NOT NULL THEN hs.score END) AS avg_score
+      FROM homework_submissions hs
+      JOIN homework h ON h.id = hs.homework_id
+      WHERE hs.student_id = ? AND h.class_id = ? AND h.status = 'published'
+        AND hs.submitted_at IS NOT NULL AND COALESCE(hs.is_draft,0)=0${hwsRange.sql}
+    `);
+
+    // 평가 응시/평균
+    const esRange = range.clause('es.submitted_at');
+    const exSubStmt = db.prepare(`
+      SELECT COUNT(*) AS submitted_cnt,
+             AVG(CASE WHEN es.score IS NOT NULL THEN es.score END) AS avg_score
+      FROM exam_students es
+      JOIN exams e ON e.id = es.exam_id
+      WHERE es.user_id = ? AND e.class_id = ? AND es.submitted_at IS NOT NULL${esRange.sql}
+    `);
+
+    // 이해도/집중도 (lesson_self_check)
+    const fbRange = range.clause('lsc.created_at');
+    const checkAvgStmt = db.prepare(`
+      SELECT AVG(lsc.understanding) AS u, AVG(lsc.focus) AS f
+      FROM lesson_self_check lsc
+      WHERE lsc.user_id = ? AND lsc.class_id = ?${fbRange.sql}
+    `);
+
+    const members = students.map(s => {
+      const act = activityStmt.get(s.user_id, classId, ...llRange.params) || { cnt: 0, dur_sec: 0 };
+      const lessonDone = (lessonDoneStmt.get(s.user_id, classId, ...lscRange.params) || {}).c || 0;
+      const hw = hwSubStmt.get(s.user_id, classId, ...hwsRange.params) || { submitted_cnt: 0, avg_score: null };
+      const ex = exSubStmt.get(s.user_id, classId, ...esRange.params) || { submitted_cnt: 0, avg_score: null };
+      const chk = checkAvgStmt.get(s.user_id, classId, ...fbRange.params) || { u: null, f: null };
+
+      const lessonRate = lessonCount > 0 ? Math.round((lessonDone / lessonCount) * 1000) / 10 : 0;
+      const hwRate = homeworkCount > 0 ? Math.round((hw.submitted_cnt / homeworkCount) * 1000) / 10 : 0;
+      const exRate = examCount > 0 ? Math.round((ex.submitted_cnt / examCount) * 1000) / 10 : 0;
+      const hwAvg = hw.avg_score != null ? Math.round(hw.avg_score * 10) / 10 : null;
+      const exAvg = ex.avg_score != null ? Math.round(ex.avg_score * 10) / 10 : null;
+      const understandingAvg = chk.u != null ? Math.round(chk.u * 10) / 10 : null;
+      const focusAvg = chk.f != null ? Math.round(chk.f * 10) / 10 : null;
+
+      // 상태 분류
+      let status = 'normal';
+      const exAvgNum = exAvg != null ? exAvg : 0;
+      if (lessonRate >= 80 && hwRate >= 80 && exAvgNum >= 80) {
+        status = 'good';
+      } else if (lessonRate < 50 || hwRate < 50 || act.cnt === 0) {
+        status = 'warn';
+      }
+
+      return {
+        user_id: s.user_id,
+        name: s.name,
+        student_no: s.class_number != null ? s.class_number : null,
+        activity_count: act.cnt || 0,
+        study_minutes: Math.round((act.dur_sec || 0) / 60),
+        lesson_completion_rate: lessonRate,
+        homework_submit_rate: hwRate,
+        homework_avg_score: hwAvg,
+        exam_submit_rate: exRate,
+        exam_avg_score: exAvg,
+        understanding_avg: understandingAvg,
+        focus_avg: focusAvg,
+        status
+      };
+    });
+
+    res.json({ success: true, members });
+  } catch (err) {
+    console.error('[CLASS] analytics/members error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// ============================================================================
+// 클래스별 학습분석 (RFP P1) — 평가 상세 분석 / 과제 제출 시간 분포 / 게시판 분석
+// 권한: P0과 동일하게 owner + admin (class_members.role은 owner/member 2단계)
+// ============================================================================
+
+// --- 공통 헬퍼: 0~100 클램프 + 1자리 반올림 ---
+function _pct(num, den) {
+  if (!den || den <= 0) return 0;
+  const v = (num / den) * 100;
+  return Math.max(0, Math.min(100, Math.round(v * 10) / 10));
+}
+
+// --- exams.answers JSON 파싱 → 문항 메타 배열 ---
+// 두 가지 포맷 지원:
+//  A) [{question, options, answer:idx}]
+//  B) [{number, text, type, options, answer:'문자열', points}]
+function _parseExamAnswers(rawJson) {
+  if (!rawJson) return [];
+  let arr;
+  try { arr = JSON.parse(rawJson); } catch { return []; }
+  if (!Array.isArray(arr)) return [];
+  return arr.map((q, idx) => {
+    const stem = q.question || q.text || q.title || `문항 ${idx + 1}`;
+    return {
+      question_no: q.number || (idx + 1),
+      stem: String(stem).slice(0, 200),
+      type: q.type || (Array.isArray(q.options) ? 'choice' : 'short'),
+      options: Array.isArray(q.options) ? q.options : null,
+      correct_answer: q.answer  // 인덱스(숫자) 또는 문자열
+    };
+  });
+}
+
+// --- 학생 응답을 (questionIndex → 답) Map으로 정규화 ---
+// 지원 포맷:
+//  A) [{questionId:1, answer:'3/4'}] — 1-based id
+//  B) [2, 1, 2] — 선택지 인덱스 배열
+//  C) {"0":"답"} — 0-based 객체
+function _parseStudentAnswers(rawJson) {
+  if (!rawJson) return new Map();
+  let v;
+  try { v = JSON.parse(rawJson); } catch { return new Map(); }
+  const map = new Map();
+  if (Array.isArray(v)) {
+    v.forEach((item, i) => {
+      if (item && typeof item === 'object' && 'questionId' in item) {
+        const qid = parseInt(item.questionId);
+        if (Number.isInteger(qid)) map.set(qid - 1, item.answer);
+      } else {
+        // 단일 값(인덱스 또는 문자열)
+        map.set(i, item);
+      }
+    });
+  } else if (v && typeof v === 'object') {
+    Object.keys(v).forEach(k => {
+      const ki = parseInt(k);
+      if (Number.isInteger(ki)) map.set(ki, v[k]);
+    });
+  }
+  return map;
+}
+
+// --- 한 문항에 대해 학생 답이 정답인지 판정 ---
+// DB 포맷 다양성 대응:
+//  - correct: 숫자(0-based 인덱스) 또는 문자열(텍스트)
+//  - studentAnswer: 숫자(0-based 또는 1-based 가능), 문자열(텍스트/숫자)
+function _isCorrectAnswer(question, studentAnswer) {
+  if (studentAnswer == null || studentAnswer === '') return false;
+  const correct = question.correct_answer;
+  if (correct == null) return false;
+  const opts = Array.isArray(question.options) ? question.options : null;
+
+  // 학생 답을 숫자로 변환 시도
+  let sNum = null;
+  if (typeof studentAnswer === 'number') sNum = studentAnswer;
+  else if (typeof studentAnswer === 'string') {
+    const t = studentAnswer.trim();
+    if (/^\d+$/.test(t)) sNum = parseInt(t);
+  }
+
+  if (typeof correct === 'number') {
+    // correct는 0-based 인덱스
+    if (sNum != null) {
+      // 0-based 동일 또는 1-based 입력(sNum-1) 둘 다 허용
+      if (correct === sNum || correct === sNum - 1) return true;
+    }
+    if (typeof studentAnswer === 'string' && opts) {
+      const idx = opts.findIndex(o => String(o).trim() === studentAnswer.trim());
+      if (idx >= 0 && idx === correct) return true;
+    }
+    return false;
+  }
+
+  // correct가 문자열
+  const cs = String(correct).trim();
+  if (sNum != null && opts) {
+    // 인덱스로 옵션 텍스트 조회 (0-based 우선, 안 되면 1-based 시도)
+    const o0 = opts[sNum];
+    if (o0 != null && String(o0).trim() === cs) return true;
+    const o1 = opts[sNum - 1];
+    if (o1 != null && String(o1).trim() === cs) return true;
+  }
+  return String(studentAnswer).trim() === cs;
+}
+
+// --- 정답률 → 난이도 5단계 자동 분류 ---
+function _classifyDifficulty(correctRatePct) {
+  if (correctRatePct >= 90) return 'veryeasy';
+  if (correctRatePct >= 70) return 'easy';
+  if (correctRatePct >= 50) return 'medium';
+  if (correctRatePct >= 30) return 'hard';
+  return 'veryhard';
+}
+
+// ----------------------------------------------------------------------------
+// P1-B1. GET /:classId/analytics/exams/:examId/distribution
+//        점수별 응시자 분포 + 5단계 점수 구간 + 명단
+// ----------------------------------------------------------------------------
+router.get('/:classId/analytics/exams/:examId/distribution', requireAuth, (req, res) => {
+  try {
+    const classId = _checkAnalyticsAuth(req, res);
+    if (classId === null) return;
+    const examId = String(req.params.examId);
+    const db = require('../db/index');
+
+    const exam = db.prepare(`SELECT id FROM exams WHERE id = ? AND class_id = ?`).get(examId, classId);
+    if (!exam) {
+      return res.status(404).json({ success: false, message: '평가를 찾을 수 없습니다.' });
+    }
+
+    // 제출자 + 점수 + 풀이시간 + 이름
+    const rows = db.prepare(`
+      SELECT es.user_id, u.display_name AS name, es.score, es.joined_at, es.submitted_at
+      FROM exam_students es
+      JOIN users u ON u.id = es.user_id
+      WHERE es.exam_id = ? AND es.submitted_at IS NOT NULL AND es.score IS NOT NULL
+      ORDER BY es.score DESC, es.submitted_at ASC
+    `).all(examId);
+
+    const scores = rows.map((r, i) => {
+      let timeMin = null;
+      if (r.joined_at && r.submitted_at) {
+        const a = new Date(r.joined_at).getTime();
+        const b = new Date(r.submitted_at).getTime();
+        if (!isNaN(a) && !isNaN(b) && b > a) timeMin = Math.round((b - a) / 60000);
+      }
+      return {
+        user_id: r.user_id,
+        name: r.name,
+        score: r.score,
+        time_minutes: timeMin,
+        rank: i + 1
+      };
+    });
+
+    // 5단계 점수 구간
+    const bucketDefs = [
+      { label: '0-20점',   min: 0,  max: 20 },
+      { label: '21-40점',  min: 21, max: 40 },
+      { label: '41-60점',  min: 41, max: 60 },
+      { label: '61-80점',  min: 61, max: 80 },
+      { label: '81-100점', min: 81, max: 100 }
+    ];
+    const buckets = bucketDefs.map(b => ({ label: b.label, count: 0, members: [] }));
+    scores.forEach(s => {
+      const i = bucketDefs.findIndex(b => s.score >= b.min && s.score <= b.max);
+      if (i >= 0) {
+        buckets[i].count++;
+        buckets[i].members.push({ user_id: s.user_id, name: s.name, score: s.score });
+      }
+    });
+
+    res.json({ success: true, scores, buckets });
+  } catch (err) {
+    console.error('[CLASS] analytics/exams/:id/distribution error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// ----------------------------------------------------------------------------
+// P1-B2. GET /:classId/analytics/exams/:examId/questions
+//        평가지 문항별 정답률 + 난이도 + 평균 풀이시간 + 정·오답 명단
+// ----------------------------------------------------------------------------
+router.get('/:classId/analytics/exams/:examId/questions', requireAuth, (req, res) => {
+  try {
+    const classId = _checkAnalyticsAuth(req, res);
+    if (classId === null) return;
+    const examId = String(req.params.examId);
+    const db = require('../db/index');
+
+    const exam = db.prepare(
+      `SELECT id, answers, question_count FROM exams WHERE id = ? AND class_id = ?`
+    ).get(examId, classId);
+    if (!exam) {
+      return res.status(404).json({ success: false, message: '평가를 찾을 수 없습니다.' });
+    }
+
+    const questions = _parseExamAnswers(exam.answers);
+    if (questions.length === 0) {
+      return res.json({ success: true, questions: [], difficultyGroups: {} });
+    }
+
+    // 제출자 + 답안 + 풀이시간
+    const subs = db.prepare(`
+      SELECT es.user_id, u.display_name AS name, es.answers, es.joined_at, es.submitted_at
+      FROM exam_students es
+      JOIN users u ON u.id = es.user_id
+      WHERE es.exam_id = ? AND es.submitted_at IS NOT NULL
+    `).all(examId);
+
+    // 평균 풀이시간(전체) — 문항별 개별 시간 트래킹 없으므로 전체시간/문항수로 분배
+    let avgPerQuestionSec = null;
+    if (subs.length > 0) {
+      const durs = subs.map(s => {
+        if (!s.joined_at || !s.submitted_at) return null;
+        const a = new Date(s.joined_at).getTime();
+        const b = new Date(s.submitted_at).getTime();
+        if (isNaN(a) || isNaN(b) || b <= a) return null;
+        return (b - a) / 1000;
+      }).filter(v => v != null);
+      if (durs.length > 0) {
+        const avgTotal = durs.reduce((a, b) => a + b, 0) / durs.length;
+        avgPerQuestionSec = Math.round(avgTotal / questions.length);
+      }
+    }
+
+    // 학생별 답안 파싱
+    const parsedSubs = subs.map(s => ({
+      user_id: s.user_id,
+      name: s.name,
+      answers: _parseStudentAnswers(s.answers)
+    }));
+
+    // 문항별 집계
+    const result = questions.map((q, qi) => {
+      const correctUsers = [];
+      const wrongUsers = [];
+      parsedSubs.forEach(p => {
+        if (!p.answers.has(qi)) return;
+        const ans = p.answers.get(qi);
+        if (_isCorrectAnswer(q, ans)) {
+          correctUsers.push({ user_id: p.user_id, name: p.name });
+        } else {
+          wrongUsers.push({ user_id: p.user_id, name: p.name });
+        }
+      });
+      const total = correctUsers.length + wrongUsers.length;
+      const correctRate = _pct(correctUsers.length, total);
+      return {
+        question_id: qi + 1,
+        question_no: q.question_no,
+        stem: q.stem,
+        difficulty: _classifyDifficulty(correctRate),
+        correct_rate: correctRate,
+        avg_time_seconds: avgPerQuestionSec,
+        correct_count: correctUsers.length,
+        wrong_count: wrongUsers.length,
+        correct_users: correctUsers,
+        wrong_users: wrongUsers
+      };
+    });
+
+    // 난이도 그룹 집계
+    const groupOrder = ['veryeasy', 'easy', 'medium', 'hard', 'veryhard'];
+    const difficultyGroups = {};
+    groupOrder.forEach(g => {
+      const items = result.filter(r => r.difficulty === g);
+      if (items.length > 0) {
+        const avg = items.reduce((s, r) => s + r.correct_rate, 0) / items.length;
+        difficultyGroups[g] = {
+          count: items.length,
+          avg_correct_rate: Math.round(avg * 10) / 10
+        };
+      } else {
+        difficultyGroups[g] = { count: 0, avg_correct_rate: 0 };
+      }
+    });
+
+    res.json({ success: true, questions: result, difficultyGroups });
+  } catch (err) {
+    console.error('[CLASS] analytics/exams/:id/questions error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// ----------------------------------------------------------------------------
+// P1-B3. GET /:classId/analytics/exams/:examId/wrong-questions?limit=10
+//        제일 많이 틀린 문항 TOP N
+// ----------------------------------------------------------------------------
+router.get('/:classId/analytics/exams/:examId/wrong-questions', requireAuth, (req, res) => {
+  try {
+    const classId = _checkAnalyticsAuth(req, res);
+    if (classId === null) return;
+    const examId = String(req.params.examId);
+    const limit = Math.max(1, Math.min(parseInt(req.query.limit) || 10, 50));
+    const db = require('../db/index');
+
+    const exam = db.prepare(`SELECT id, answers FROM exams WHERE id = ? AND class_id = ?`).get(examId, classId);
+    if (!exam) {
+      return res.status(404).json({ success: false, message: '평가를 찾을 수 없습니다.' });
+    }
+
+    const questions = _parseExamAnswers(exam.answers);
+    if (questions.length === 0) return res.json({ success: true, items: [] });
+
+    const subs = db.prepare(`
+      SELECT es.user_id, es.answers
+      FROM exam_students es
+      WHERE es.exam_id = ? AND es.submitted_at IS NOT NULL
+    `).all(examId);
+
+    const parsedSubs = subs.map(s => _parseStudentAnswers(s.answers));
+
+    const stats = questions.map((q, qi) => {
+      let correct = 0, wrong = 0;
+      parsedSubs.forEach(p => {
+        if (!p.has(qi)) return;
+        if (_isCorrectAnswer(q, p.get(qi))) correct++;
+        else wrong++;
+      });
+      const total = correct + wrong;
+      return {
+        question_id: qi + 1,
+        question_no: q.question_no,
+        stem: q.stem,
+        wrong_count: wrong,
+        correct_rate: _pct(correct, total)
+      };
+    });
+
+    // 오답 수 내림차순, 정답률 오름차순
+    stats.sort((a, b) => (b.wrong_count - a.wrong_count) || (a.correct_rate - b.correct_rate));
+    const items = stats.filter(s => s.wrong_count > 0).slice(0, limit);
+    res.json({ success: true, items });
+  } catch (err) {
+    console.error('[CLASS] analytics/exams/:id/wrong-questions error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// ----------------------------------------------------------------------------
+// P1-B4. GET /:classId/analytics/homework/:homeworkId/submit-time-distribution
+//        과제 마감 시점 기준 제출 시간대 분포
+// ----------------------------------------------------------------------------
+router.get('/:classId/analytics/homework/:homeworkId/submit-time-distribution', requireAuth, (req, res) => {
+  try {
+    const classId = _checkAnalyticsAuth(req, res);
+    if (classId === null) return;
+    const homeworkId = parseInt(req.params.homeworkId);
+    if (!Number.isInteger(homeworkId)) {
+      return res.status(400).json({ success: false, message: '잘못된 과제 ID입니다.' });
+    }
+    const db = require('../db/index');
+
+    const hw = db.prepare(`SELECT id, due_date FROM homework WHERE id = ? AND class_id = ?`).get(homeworkId, classId);
+    if (!hw) {
+      return res.status(404).json({ success: false, message: '과제를 찾을 수 없습니다.' });
+    }
+
+    const subs = db.prepare(`
+      SELECT submitted_at
+      FROM homework_submissions
+      WHERE homework_id = ? AND submitted_at IS NOT NULL AND COALESCE(is_draft,0)=0
+    `).all(homeworkId);
+
+    const bucketDefs = [
+      { label: '마감 1일 전 이상' },
+      { label: '마감 당일' },
+      { label: '마감 직전(1시간 이내)' },
+      { label: '지각 제출' }
+    ];
+    const buckets = bucketDefs.map(b => ({ label: b.label, count: 0, ratio: 0 }));
+
+    // due_date 없으면 전부 0
+    if (hw.due_date) {
+      const dueMs = new Date(hw.due_date).getTime();
+      if (!isNaN(dueMs)) {
+        const ONE_HOUR = 60 * 60 * 1000;
+        const ONE_DAY = 24 * ONE_HOUR;
+        subs.forEach(s => {
+          const sm = new Date(s.submitted_at).getTime();
+          if (isNaN(sm)) return;
+          if (sm <= dueMs - ONE_DAY) buckets[0].count++;
+          else if (sm <= dueMs - ONE_HOUR) buckets[1].count++;
+          else if (sm <= dueMs) buckets[2].count++;
+          else buckets[3].count++;
+        });
+      }
+    }
+
+    const total = subs.length;
+    buckets.forEach(b => { b.ratio = _pct(b.count, total); });
+
+    res.json({ success: true, buckets, totalSubmitted: total });
+  } catch (err) {
+    console.error('[CLASS] analytics/homework/:id/submit-time-distribution error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// ----------------------------------------------------------------------------
+// P1-B5. GET /:classId/analytics/board?startDate&endDate
+//        게시판 통합 분석 대시보드 (게시글/알림장/설문)
+// ----------------------------------------------------------------------------
+router.get('/:classId/analytics/board', requireAuth, (req, res) => {
+  try {
+    const classId = _checkAnalyticsAuth(req, res);
+    if (classId === null) return;
+    const range = _parseRange(req);
+    const db = require('../db/index');
+
+    // 학생 멤버 수 (알림장 읽음율/설문 응답률 분모)
+    const totalMembers = db.prepare(
+      `SELECT COUNT(*) AS c FROM class_members cm JOIN users u ON u.id = cm.user_id
+       WHERE cm.class_id = ? AND cm.status = 'active' AND u.role = 'student'`
+    ).get(classId).c || 0;
+
+    // posts (일반 게시글) — view_count는 컬럼, 좋아요 테이블 없음 → 0
+    const pr = range.clause('created_at');
+    const postStats = db.prepare(`
+      SELECT COUNT(*) AS post_count, COALESCE(SUM(view_count),0) AS view_count
+      FROM posts WHERE class_id = ?${pr.sql}
+    `).get(classId, ...pr.params) || {};
+    const postCommentRange = range.clause('c.created_at');
+    const postComments = db.prepare(`
+      SELECT COUNT(*) AS c FROM comments c
+      JOIN posts p ON p.id = c.post_id
+      WHERE p.class_id = ? AND c.post_id IS NOT NULL${postCommentRange.sql}
+    `).get(classId, ...postCommentRange.params).c || 0;
+
+    // notices (알림장) — view_count 컬럼 없음, notice_reads로 추정
+    const nr = range.clause('created_at');
+    const noticeStats = db.prepare(`
+      SELECT COUNT(*) AS post_count
+      FROM notices WHERE class_id = ?${nr.sql}
+    `).get(classId, ...nr.params) || {};
+    const noticeIds = db.prepare(
+      `SELECT id FROM notices WHERE class_id = ?${nr.sql}`
+    ).all(classId, ...nr.params).map(r => r.id);
+
+    let noticeReadCount = 0, noticeCommentCount = 0, noticeReactionCount = 0;
+    if (noticeIds.length > 0) {
+      const ph = noticeIds.map(() => '?').join(',');
+      noticeReadCount = db.prepare(
+        `SELECT COUNT(*) AS c FROM notice_reads WHERE notice_id IN (${ph})`
+      ).get(...noticeIds).c || 0;
+      noticeCommentCount = db.prepare(
+        `SELECT COUNT(*) AS c FROM notice_comments WHERE notice_id IN (${ph}) AND deleted_at IS NULL`
+      ).get(...noticeIds).c || 0;
+      noticeReactionCount = db.prepare(
+        `SELECT COUNT(*) AS c FROM notice_reactions WHERE notice_id IN (${ph})`
+      ).get(...noticeIds).c || 0;
+    }
+    // 알림장 읽음률 = 전체 (알림장 수 × 학생 수) 분의 실제 읽은 row
+    const noticeReadDen = (noticeStats.post_count || 0) * totalMembers;
+    const noticeReadRate = _pct(noticeReadCount, noticeReadDen);
+
+    // surveys + 응답률
+    const sr = range.clause('created_at');
+    const surveyStats = db.prepare(`
+      SELECT COUNT(*) AS post_count
+      FROM surveys WHERE class_id = ?${sr.sql}
+    `).get(classId, ...sr.params) || {};
+    const surveyIds = db.prepare(
+      `SELECT id FROM surveys WHERE class_id = ?${sr.sql}`
+    ).all(classId, ...sr.params).map(r => r.id);
+
+    let surveyResponseCount = 0;
+    if (surveyIds.length > 0) {
+      const ph = surveyIds.map(() => '?').join(',');
+      surveyResponseCount = db.prepare(
+        `SELECT COUNT(*) AS c FROM survey_responses WHERE survey_id IN (${ph})`
+      ).get(...surveyIds).c || 0;
+    }
+    const surveyRespDen = (surveyStats.post_count || 0) * totalMembers;
+    const surveyResponseRate = _pct(surveyResponseCount, surveyRespDen);
+
+    const totalPosts = (postStats.post_count || 0) + (noticeStats.post_count || 0) + (surveyStats.post_count || 0);
+    const totalComments = postComments + noticeCommentCount + surveyResponseCount;
+    // 좋아요: 일반게시글 좋아요 테이블 없음 — 알림장 reactions만 합산
+    const totalLikes = noticeReactionCount;
+
+    res.json({
+      success: true,
+      summary: {
+        totalPosts,
+        totalComments,
+        totalLikes,
+        noticeReadRate,
+        surveyResponseRate
+      },
+      byBoard: [
+        {
+          type: 'notice',
+          label: '알림장',
+          post_count: noticeStats.post_count || 0,
+          comment_count: noticeCommentCount,
+          view_count: noticeReadCount   // 읽음 수를 조회로 매핑
+        },
+        {
+          type: 'post',
+          label: '일반게시판',
+          post_count: postStats.post_count || 0,
+          comment_count: postComments,
+          view_count: postStats.view_count || 0
+        },
+        {
+          type: 'survey',
+          label: '설문',
+          post_count: surveyStats.post_count || 0,
+          comment_count: surveyResponseCount,
+          view_count: surveyResponseCount
+        }
+      ]
+    });
+  } catch (err) {
+    console.error('[CLASS] analytics/board error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// ----------------------------------------------------------------------------
+// P1-B6. GET /:classId/analytics/board/top-posts?limit=5
+//        인기 게시글 TOP N (조회수+댓글+좋아요 가중치)
+// ----------------------------------------------------------------------------
+router.get('/:classId/analytics/board/top-posts', requireAuth, (req, res) => {
+  try {
+    const classId = _checkAnalyticsAuth(req, res);
+    if (classId === null) return;
+    const limit = Math.max(1, Math.min(parseInt(req.query.limit) || 5, 50));
+    const range = _parseRange(req);
+    const db = require('../db/index');
+
+    // 일반 게시글: view*1 + comment*3 + like(0)*5 → comment+view 기반 가중치
+    const pr = range.clause('p.created_at');
+    const posts = db.prepare(`
+      SELECT p.id AS post_id, p.title, p.author_id, u.display_name AS author_name,
+             COALESCE(p.view_count,0) AS view_count,
+             (SELECT COUNT(*) FROM comments c WHERE c.post_id = p.id) AS comment_count,
+             0 AS like_count, p.created_at, 'post' AS board_type
+      FROM posts p
+      JOIN users u ON u.id = p.author_id
+      WHERE p.class_id = ?${pr.sql}
+    `).all(classId, ...pr.params);
+
+    // 알림장: 읽음=조회수, 댓글=notice_comments, 좋아요=reactions
+    const nr = range.clause('n.created_at');
+    const notices = db.prepare(`
+      SELECT n.id AS post_id, n.title, n.author_id, u.display_name AS author_name,
+             (SELECT COUNT(*) FROM notice_reads WHERE notice_id = n.id) AS view_count,
+             (SELECT COUNT(*) FROM notice_comments WHERE notice_id = n.id AND deleted_at IS NULL) AS comment_count,
+             (SELECT COUNT(*) FROM notice_reactions WHERE notice_id = n.id) AS like_count,
+             n.created_at, 'notice' AS board_type
+      FROM notices n
+      JOIN users u ON u.id = n.author_id
+      WHERE n.class_id = ?${nr.sql}
+    `).all(classId, ...nr.params);
+
+    const all = [...posts, ...notices].map(r => ({
+      ...r,
+      _weight: (r.view_count || 0) + (r.comment_count || 0) * 3 + (r.like_count || 0) * 5
+    }));
+
+    all.sort((a, b) =>
+      (b._weight - a._weight) ||
+      (b.view_count - a.view_count) ||
+      (new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+    );
+    const items = all.slice(0, limit).map(({ _weight, ...rest }) => rest);
+    res.json({ success: true, items });
+  } catch (err) {
+    console.error('[CLASS] analytics/board/top-posts error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// ----------------------------------------------------------------------------
+// P1-B7. GET /:classId/analytics/board/top-members?limit=5
+//        활발한 멤버 TOP N (게시글+댓글 합산)
+// ----------------------------------------------------------------------------
+router.get('/:classId/analytics/board/top-members', requireAuth, (req, res) => {
+  try {
+    const classId = _checkAnalyticsAuth(req, res);
+    if (classId === null) return;
+    const limit = Math.max(1, Math.min(parseInt(req.query.limit) || 5, 50));
+    const range = _parseRange(req);
+    const db = require('../db/index');
+
+    // posts 작성 + comments 작성(클래스 소속 글에 한해) + notice_comments 작성 — 모두 기간 필터 적용
+    const pp = range.clause('p.created_at');
+    const cc = range.clause('c.created_at');
+    const ncc = range.clause('nc.created_at');
+    const rows = db.prepare(`
+      SELECT u.id AS user_id, u.display_name AS name,
+             (SELECT COUNT(*) FROM posts p WHERE p.class_id = ? AND p.author_id = u.id${pp.sql}) AS post_count,
+             (
+               (SELECT COUNT(*) FROM comments c JOIN posts p ON p.id = c.post_id
+                  WHERE p.class_id = ? AND c.author_id = u.id${cc.sql})
+             + (SELECT COUNT(*) FROM notice_comments nc JOIN notices n ON n.id = nc.notice_id
+                  WHERE n.class_id = ? AND nc.user_id = u.id AND nc.deleted_at IS NULL${ncc.sql})
+             ) AS comment_count
+      FROM users u
+      JOIN class_members cm ON cm.user_id = u.id
+      WHERE cm.class_id = ? AND cm.status = 'active'
+    `).all(classId, ...pp.params, classId, ...cc.params, classId, ...ncc.params, classId);
+
+    const items = rows
+      .map(r => ({
+        user_id: r.user_id,
+        name: r.name,
+        post_count: r.post_count || 0,
+        comment_count: r.comment_count || 0,
+        total_activity: (r.post_count || 0) + (r.comment_count || 0)
+      }))
+      .filter(r => r.total_activity > 0)
+      .sort((a, b) => (b.total_activity - a.total_activity) || (b.post_count - a.post_count))
+      .slice(0, limit);
+
+    res.json({ success: true, items });
+  } catch (err) {
+    console.error('[CLASS] analytics/board/top-members error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// ----------------------------------------------------------------------------
+// P1-B8. GET /:classId/analytics/surveys
+//        설문 응답 현황 목록
+// ----------------------------------------------------------------------------
+router.get('/:classId/analytics/surveys', requireAuth, (req, res) => {
+  try {
+    const classId = _checkAnalyticsAuth(req, res);
+    if (classId === null) return;
+    const range = _parseRange(req);
+    const db = require('../db/index');
+
+    const totalMembers = db.prepare(
+      `SELECT COUNT(*) AS c FROM class_members cm JOIN users u ON u.id = cm.user_id
+       WHERE cm.class_id = ? AND cm.status = 'active' AND u.role = 'student'`
+    ).get(classId).c || 0;
+
+    const sr = range.clause('s.created_at');
+    const surveys = db.prepare(`
+      SELECT s.id AS survey_id, s.title, s.status, s.end_date AS deadline,
+             (SELECT COUNT(*) FROM survey_responses WHERE survey_id = s.id) AS response_count
+      FROM surveys s
+      WHERE s.class_id = ?${sr.sql}
+      ORDER BY s.created_at DESC
+    `).all(classId, ...sr.params);
+
+    const items = surveys.map(s => ({
+      survey_id: s.survey_id,
+      title: s.title,
+      status: s.status || 'active',
+      response_count: s.response_count || 0,
+      total_members: totalMembers,
+      response_rate: _pct(s.response_count || 0, totalMembers),
+      deadline: s.deadline ? String(s.deadline).slice(0, 10) : null
+    }));
+
+    res.json({ success: true, items });
+  } catch (err) {
+    console.error('[CLASS] analytics/surveys error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
 module.exports = router;
