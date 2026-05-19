@@ -503,11 +503,27 @@ router.post('/map/nodes/:nodeId/diagnose-complete', requireAuth, (req, res) => {
 });
 
 // POST /diagnosis/start — 진단 시작 (CAT: targetNodeId 있으면 BFS+난이도 조절 모드)
-// GET /diagnosis/history?nodeId=... — 본인의 해당 노드 진단 이력 (최근 5건 + 가장 최근 완료 결과)
+// GET /diagnosis/history
+//   ?nodeId=...              → 본인의 해당 노드 진단 이력 (최근 5건 + 가장 최근 완료 결과) — 기존 호환
+//   ?all=1[&subject=&grade=] → 본인의 최근 진단 10건 (학생 친화 결과 화면용, B4)
 router.get('/diagnosis/history', requireAuth, (req, res) => {
   try {
     const nodeId = req.query.nodeId;
-    if (!nodeId) return res.status(400).json({ success: false, message: 'nodeId 필수' });
+    const allMode = String(req.query.all || '') === '1'
+      || !!req.query.subject || !!req.query.grade;
+
+    // B4: ?all=1 (또는 subject/grade) — 사용자의 최근 진단 10건 + 한글 라벨 + 상대시간
+    if (allMode) {
+      const list = selfLearnDb.listDiagnosisHistory(req.user.id, {
+        subject: req.query.subject || null,
+        grade: req.query.grade ? Number(req.query.grade) : null,
+        limit: req.query.limit ? Number(req.query.limit) : 10
+      });
+      return res.json({ success: true, history: list });
+    }
+
+    // 기존 호환: nodeId 단일 노드 이력
+    if (!nodeId) return res.status(400).json({ success: false, message: 'nodeId 또는 all=1 필요' });
     const path = require('path');
     const sqlite = require('better-sqlite3');
     const dbPath = path.join(__dirname, '..', 'data', 'dacheum.db');

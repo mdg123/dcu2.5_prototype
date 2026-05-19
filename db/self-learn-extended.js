@@ -906,11 +906,139 @@ function finishDiagnosis(sessionId) {
   return { sessionId, result, correctRate, correctCount: session.correct_count, totalQuestions: session.total_questions };
 }
 
+// B4: 사용자의 최근 진단 이력 조회 — 학생 친화 결과 화면용
+//   opts.all = true        → 사용자의 최근 N건 (subject/grade 필터 옵션)
+//   opts.subject, opts.grade → 추가 필터 (target_node_id의 노드 메타 기준)
+//   opts.limit             → 기본 10
+function listDiagnosisHistory(userId, opts = {}) {
+  const limit = Math.max(1, Math.min(50, Number(opts.limit) || 10));
+  const filters = [];
+  const params = [userId];
+  let sql = `
+    SELECT ds.id, ds.user_id, ds.target_node_id, ds.status,
+           ds.total_questions, ds.correct_count,
+           ds.started_at, ds.completed_at, ds.result, ds.diagnosis_type,
+           ds.difficulty_path,
+           lmn.unit_name, lmn.lesson_name, lmn.area, lmn.subject, lmn.grade
+    FROM diagnosis_sessions ds
+    LEFT JOIN learning_map_nodes lmn ON lmn.node_id = ds.target_node_id
+    WHERE ds.user_id = ?
+  `;
+  if (opts.subject) {
+    filters.push('lmn.subject = ?');
+    params.push(opts.subject);
+  }
+  if (opts.grade) {
+    filters.push('lmn.grade = ?');
+    params.push(Number(opts.grade));
+  }
+  if (filters.length) sql += ' AND ' + filters.join(' AND ');
+  sql += ' ORDER BY ds.id DESC LIMIT ?';
+  params.push(limit);
+  const rows = db.prepare(sql).all(...params);
+
+  return rows.map(r => {
+    // CAT 세션은 difficulty_path 합산 / 비-CAT은 세션 컬럼 사용
+    let totalQuestions = r.total_questions || 0;
+    let correctCount = r.correct_count || 0;
+    try {
+      const path = JSON.parse(r.difficulty_path || '[]');
+      if (Array.isArray(path) && path.length > 0) {
+        const sumT = path.reduce((s, p) => s + (Number(p.total) || 0), 0);
+        const sumC = path.reduce((s, p) => s + (Number(p.correct) || 0), 0);
+        if (sumT > 0) { totalQuestions = sumT; correctCount = sumC; }
+      }
+    } catch {}
+    const correctRate = totalQuestions > 0 ? correctCount / totalQuestions : 0;
+    return {
+      id: r.id,
+      subject: r.subject || null,
+      targetNodeId: r.target_node_id,
+      targetTitle: r.lesson_name || r.unit_name || '이전 단원',
+      area: r.area || null,
+      grade: r.grade || null,
+      correctCount,
+      totalQuestions,
+      correctRate,
+      status: r.status,
+      result: r.result || null,
+      resultLabel: _resolveResultLabel(r.result),
+      diagnosisType: r.diagnosis_type || null,
+      startedAt: r.started_at,
+      completedAt: r.completed_at,
+      relativeTime: _formatRelativeTime(r.completed_at || r.started_at)
+    };
+  });
+}
+
 function getDiagnosisResult(sessionId) {
   const session = db.prepare('SELECT * FROM diagnosis_sessions WHERE id = ?').get(sessionId);
   if (!session) return null;
   const answers = db.prepare('SELECT * FROM diagnosis_answers WHERE session_id = ? ORDER BY answered_at').all(sessionId);
-  return { session, answers };
+
+  // B2: CAT 세션의 nodeResults 재구성 — difficulty_path(노드 단위 진행 경로)에서 복원
+  let nodeResults = [];
+  let nodePath = [];
+  try { nodePath = JSON.parse(session.difficulty_path || '[]'); } catch {}
+  if (Array.isArray(nodePath) && nodePath.length > 0) {
+    nodeResults = nodePath.map(p => {
+      const rate = (p.total || 0) > 0 ? (p.correct || 0) / p.total : 0;
+      const nodeInfo = db.prepare(
+        'SELECT unit_name, lesson_name, area, grade, subject FROM learning_map_nodes WHERE node_id = ?'
+      ).get(p.node) || {};
+      return {
+        nodeId: p.node,
+        node_id: p.node,
+        // B3: 노드 ID 노출 금지 — fallback은 '이전 단원'
+        title: nodeInfo.lesson_name || nodeInfo.unit_name || '이전 단원',
+        area: nodeInfo.area || null,
+        grade: nodeInfo.grade || null,
+        subject: nodeInfo.subject || null,
+        passed: !!p.passed,
+        correctCount: p.correct || 0,
+        totalCount: p.total || 0,
+        correctRate: rate
+      };
+    });
+  } else if (session.target_node_id && session.total_questions > 0) {
+    // 비-CAT(=일반 진단) fallback — 단일 노드를 한 묶음으로
+    const nodeInfo = db.prepare(
+      'SELECT unit_name, lesson_name, area, grade, subject FROM learning_map_nodes WHERE node_id = ?'
+    ).get(session.target_node_id) || {};
+    const total = session.total_questions || 0;
+    const correct = session.correct_count || 0;
+    const rate = total > 0 ? correct / total : 0;
+    nodeResults = [{
+      nodeId: session.target_node_id,
+      node_id: session.target_node_id,
+      title: nodeInfo.lesson_name || nodeInfo.unit_name || '이전 단원',
+      area: nodeInfo.area || null,
+      grade: nodeInfo.grade || null,
+      subject: nodeInfo.subject || null,
+      passed: rate >= 0.9,
+      correctCount: correct,
+      totalCount: total,
+      correctRate: rate
+    }];
+  }
+
+  // B1/B2 동일 구조 보강
+  const { summary, areaStats, recommendNodes, targetNode } = _buildResultEnrichment(session, nodeResults);
+
+  // B5: 빈 진단 케이스 — endReason 결정 (세션에 별도 컬럼 없음 → 응답 기반 추정)
+  let endReason = null;
+  if (!nodeResults.length) endReason = 'no_question';
+
+  return {
+    session,
+    answers,
+    nodeResults,
+    summary,
+    areaStats,
+    recommendNodes,
+    targetNode,
+    endReason
+  };
 }
 
 function generateLearningPath(userId, opts = {}) {
@@ -2149,9 +2277,10 @@ function _hydrateDiagNodes(nodeIds) {
   const byId = {};
   rows.forEach(r => { byId[r.node_id] = r; });
   // 입력 순서 보존 + 누락된 노드도 graceful 처리
+  // B3: 노드 ID 노출 금지 — fallback은 '이전 단원'으로 통일
   return nodeIds.map(nid => {
     const r = byId[nid];
-    const title = r ? (r.lesson_name || r.unit_name || nid) : nid;
+    const title = r ? (r.lesson_name || r.unit_name || '이전 단원') : '이전 단원';
     return {
       id: nid,
       nodeId: nid,
@@ -2164,6 +2293,150 @@ function _hydrateDiagNodes(nodeIds) {
       grade: r?.grade || null
     };
   });
+}
+
+// ============================================================
+// 진단 결과 보강 헬퍼 (B1/B2/B4 공용)
+// ============================================================
+
+// 결과 enum → 한글 라벨
+function _resolveResultLabel(result) {
+  switch (result) {
+    case 'mastered': return '완전 이해';
+    case 'proficient': return '잘함';
+    case 'developing': return '더 봐야 함';
+    case 'needs_review': return '다시 도전';
+    default: return '결과 미정';
+  }
+}
+
+// 상대 시간 포맷 (KST 기준 — DB는 CURRENT_TIMESTAMP UTC 저장 가정)
+function _formatRelativeTime(timestamp) {
+  if (!timestamp) return '';
+  // SQLite TIMESTAMP는 'YYYY-MM-DD HH:MM:SS' (UTC) 또는 ISO 형식
+  // Date 파싱 시 공백 구분이면 UTC로 간주
+  const s = String(timestamp).trim();
+  const iso = s.includes('T') ? s : s.replace(' ', 'T') + 'Z';
+  const t = new Date(iso).getTime();
+  if (!Number.isFinite(t)) return '';
+  const diffSec = Math.max(0, Math.floor((Date.now() - t) / 1000));
+  if (diffSec < 60) return '방금 전';
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) return `${diffMin}분 전`;
+  const diffHour = Math.floor(diffMin / 60);
+  if (diffHour < 24) return `${diffHour}시간 전`;
+  const diffDay = Math.floor(diffHour / 24);
+  if (diffDay < 7) return `${diffDay}일 전`;
+  if (diffDay < 30) return `${Math.floor(diffDay / 7)}주 전`;
+  // 그 외: YYYY-MM-DD (KST)
+  const d = new Date(t + 9 * 60 * 60 * 1000); // UTC+9
+  const yyyy = d.getUTCFullYear();
+  const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const dd = String(d.getUTCDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+// nodeResults 배열에서 summary + areaStats 동시 산출
+function _calculateSummary(nodeResults) {
+  const summary = {
+    correctRate: 0,
+    totalCorrect: 0,
+    totalQuestions: 0,
+    passedNodes: 0,
+    failedNodes: 0,
+    totalNodes: 0,
+    totalTimeSec: 0
+  };
+  const areaStats = [];
+  if (!Array.isArray(nodeResults) || nodeResults.length === 0) {
+    return { summary, areaStats };
+  }
+  summary.totalNodes = nodeResults.length;
+  const areaMap = new Map();
+  for (const r of nodeResults) {
+    const c = Number(r.correctCount || 0);
+    const t = Number(r.totalCount || 0);
+    summary.totalCorrect += c;
+    summary.totalQuestions += t;
+    if (r.passed) summary.passedNodes++;
+    else summary.failedNodes++;
+    const areaKey = r.area || '기타';
+    if (!areaMap.has(areaKey)) {
+      areaMap.set(areaKey, { area: areaKey, correctCount: 0, totalCount: 0, rate: 0 });
+    }
+    const a = areaMap.get(areaKey);
+    a.correctCount += c;
+    a.totalCount += t;
+  }
+  summary.correctRate = summary.totalQuestions > 0
+    ? summary.totalCorrect / summary.totalQuestions
+    : 0;
+  for (const a of areaMap.values()) {
+    a.rate = a.totalCount > 0 ? a.correctCount / a.totalCount : 0;
+    areaStats.push(a);
+  }
+  return { summary, areaStats };
+}
+
+// 세션의 응답 전·후 시각 차로 총 소요시간 계산 (초)
+function _calculateTotalTime(sessionId) {
+  try {
+    const row = db.prepare(`
+      SELECT (julianday(MAX(answered_at)) - julianday(MIN(answered_at))) * 86400 AS sec,
+             COUNT(*) AS cnt
+      FROM diagnosis_answers WHERE session_id = ?
+    `).get(sessionId);
+    if (!row || !row.cnt) return 0;
+    return Math.max(0, Math.round(row.sec || 0));
+  } catch {
+    return 0;
+  }
+}
+
+// 실패 노드 중심 추천 노드 + 학습목록 등록 여부
+function _buildRecommendNodes(nodeResults, userId) {
+  if (!Array.isArray(nodeResults) || nodeResults.length === 0) return [];
+  const failed = nodeResults.filter(r => !r.passed);
+  if (failed.length === 0) return [];
+  // correctRate 오름차순 (가장 낮은 정답률부터)
+  failed.sort((a, b) => (a.correctRate || 0) - (b.correctRate || 0));
+  // 사용자의 학습목록 일괄 조회 (등록 여부)
+  let learningList = new Set();
+  try {
+    const rows = db.prepare('SELECT node_id FROM user_learning_list WHERE user_id = ?').all(userId);
+    learningList = new Set(rows.map(r => r.node_id));
+  } catch {}
+  return failed.map(r => ({
+    nodeId: r.nodeId,
+    title: r.title,
+    area: r.area || null,
+    reason: (r.correctRate || 0) < 0.5 ? '기초가 더 필요해요' : '한 번 더 풀어보면 좋아요',
+    addedToLearningList: learningList.has(r.nodeId)
+  }));
+}
+
+// 진단 결과 응답 보강 공용 — 세션 + nodeResults → summary/areaStats/recommendNodes/targetNode
+function _buildResultEnrichment(session, nodeResults) {
+  const safeNodeResults = Array.isArray(nodeResults) ? nodeResults : [];
+  const { summary, areaStats } = _calculateSummary(safeNodeResults);
+  summary.totalTimeSec = _calculateTotalTime(session.id);
+  const recommendNodes = _buildRecommendNodes(safeNodeResults, session.user_id);
+  // targetNode hydration (B1/B2 공용)
+  let targetNode = null;
+  if (session.target_node_id) {
+    const t = db.prepare(`
+      SELECT node_id, unit_name, lesson_name, area, subject, grade
+      FROM learning_map_nodes WHERE node_id = ?
+    `).get(session.target_node_id);
+    targetNode = {
+      id: session.target_node_id,
+      title: t ? (t.lesson_name || t.unit_name || '이전 단원') : '이전 단원',
+      area: t?.area || null,
+      subject: t?.subject || null,
+      grade: t?.grade || null
+    };
+  }
+  return { summary, areaStats, recommendNodes, targetNode };
 }
 
 function submitDiagnosisAnswerCAT(sessionId, payload = {}) {
@@ -2340,7 +2613,8 @@ function submitDiagnosisAnswerCAT(sessionId, payload = {}) {
       return {
         nodeId: p.node,
         node_id: p.node,
-        title: nodeInfo.lesson_name || nodeInfo.unit_name || p.node,
+        // B3: 노드 ID 노출 금지 — fallback은 '이전 단원'
+        title: nodeInfo.lesson_name || nodeInfo.unit_name || '이전 단원',
         area: nodeInfo.area,
         grade: nodeInfo.grade,
         passed: !!p.passed,
@@ -2372,6 +2646,22 @@ function submitDiagnosisAnswerCAT(sessionId, payload = {}) {
   const queueNodesHydrated = _hydrateDiagNodes(responseQueue);
   const nextNodeHydrated = nextNodeId ? (_hydrateDiagNodes([nextNodeId])[0] || { id: nextNodeId }) : null;
 
+  // B1/B5: 세션 완료 시 학생 친화 결과 화면용 필드(summary/areaStats/recommendNodes/targetNode) 보강
+  let summary = null;
+  let areaStats = null;
+  let recommendNodes = null;
+  let targetNode = null;
+  if (sessionComplete) {
+    const sessionRow = db.prepare('SELECT id, user_id, target_node_id FROM diagnosis_sessions WHERE id = ?').get(sessionId);
+    if (sessionRow) {
+      const enrichment = _buildResultEnrichment(sessionRow, nodeResults || []);
+      summary = enrichment.summary;
+      areaStats = enrichment.areaStats;
+      recommendNodes = enrichment.recommendNodes;
+      targetNode = enrichment.targetNode;
+    }
+  }
+
   return {
     isCorrect,
     nodeFinished,
@@ -2388,7 +2678,12 @@ function submitDiagnosisAnswerCAT(sessionId, payload = {}) {
     queueNodesHydrated,
     nodeResults,
     addedToLearningList,
-    endReason
+    endReason,
+    // B1: 학생 친화 결과 화면용 필드 — sessionComplete=true 일 때만 채워짐
+    summary,
+    areaStats,
+    recommendNodes,
+    targetNode
   };
 }
 
@@ -2547,7 +2842,7 @@ module.exports = {
   collectFallbackProblems,
   startDiagnosis, submitDiagnosisAnswer, finishDiagnosis, getDiagnosisResult,
   startDiagnosisCAT, submitDiagnosisAnswerCAT, drillDownDiagnosis, getDiagnosisState,
-  getNextDiagnosisQuestion,
+  getNextDiagnosisQuestion, listDiagnosisHistory,
   generateLearningPath, getCurrentPath, completeNode, evaluateNodeCompletion, inferNodeIdFromContent,
   getLearningDashboard, getRanking,
   getWrongNotesExtended, getWrongNoteDashboard, getTeacherWrongNoteDashboard,
