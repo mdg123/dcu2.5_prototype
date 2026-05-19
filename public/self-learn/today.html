@@ -229,7 +229,7 @@
         </div>
       </div>
       <div class="goal-details">
-        <h2>🎯 학습 목표 달성률 <button onclick="toggleGoalPeriod(this)" style="font-size:var(--fs-xs);padding:3px 10px;border:1px solid var(--gray-200);border-radius:6px;background:#fff;cursor:pointer;font-family:inherit;margin-left:8px;" data-period="weekly">주간</button></h2>
+        <h2 style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;">🎯 학습 목표 달성률 <button onclick="toggleGoalPeriod(this)" style="font-size:var(--fs-xs);padding:3px 10px;border:1px solid var(--gray-200);border-radius:6px;background:#fff;cursor:pointer;font-family:inherit;" data-period="weekly">주간</button><span id="goalPeriodLabel" style="font-size:13px;color:#6B7280;font-weight:500;line-height:1.4;"></span></h2>
         <div class="goal-row">
           <div class="goal-row-icon" style="background:var(--primary);"><i class="fas fa-book-open"></i></div>
           <div class="goal-row-info">
@@ -541,6 +541,26 @@
       }
     }
 
+    // ===== 목표 달성률 기간 라벨 (주간/월간 시작~종료 날짜) =====
+    function renderGoalPeriodLabel() {
+      const labelEl = document.getElementById('goalPeriodLabel');
+      if (!labelEl) return;
+      const btn = document.querySelector('button[data-period]');
+      const period = btn ? btn.dataset.period : 'weekly';
+      const fmt = (d) => (d.getMonth() + 1) + '/' + d.getDate();
+      if (period === 'weekly') {
+        const base = new Date();
+        base.setDate(base.getDate() + (weekOffset || 0) * 7);
+        const dow = base.getDay();
+        const mon = new Date(base); mon.setDate(base.getDate() - (dow === 0 ? 6 : dow - 1));
+        const sun = new Date(mon); sun.setDate(mon.getDate() + 6);
+        labelEl.textContent = fmt(mon) + ' ~ ' + fmt(sun);
+      } else {
+        const now = new Date();
+        labelEl.textContent = now.getFullYear() + '년 ' + (now.getMonth() + 1) + '월';
+      }
+    }
+
     // ===== 목표 달성률 (선택된 주 세트 기준, weekOffset 반영) =====
     function renderGoal() {
       // 주간 뷰이므로 선택한 주(월~일)에 배포된 세트만 카운트
@@ -595,6 +615,9 @@
       document.getElementById('expFill').style.width = exp + '%';
       document.getElementById('expText').textContent = exp + '/100';
       document.getElementById('totalPoints').textContent = points.toLocaleString();
+
+      // 기간 라벨 동기 업데이트
+      renderGoalPeriodLabel();
     }
 
     // ===== 주간 달력 =====
@@ -1988,6 +2011,7 @@
       const cur = btn.dataset.period;
       btn.dataset.period = cur === 'weekly' ? 'monthly' : 'weekly';
       btn.textContent = btn.dataset.period === 'weekly' ? '주간' : '월간';
+      renderGoalPeriodLabel();
     }
 
     // P1 보완(F-P1-1): 페르소나 자동 전환 방지 — 학생 시점 보장
