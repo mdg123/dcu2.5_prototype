@@ -2093,7 +2093,7 @@ function bindUI() {
       $('tab-' + b.dataset.tab).classList.add('active');
       if (b.dataset.tab === 'path') loadPath();
       if (b.dataset.tab === 'record') loadRecord();
-      if (b.dataset.tab === 'diagnosis' && !diagState) renderDiagIntro();
+      if (b.dataset.tab === 'diagnosis') handleDiagnosisTabEnter();
     });
   });
 
@@ -2452,7 +2452,8 @@ async function loadMap() {
   const statuses = (statusD && statusD.statuses) || [];
 
   userStatuses = {};
-  const statusRemap = { not_started: 'available', in_progress: 'in_progress', completed: 'completed', diagnosing: 'diagnosing', available: 'available' };
+  // F3: 'diagnosed' 상태도 'diagnosing' 색상으로 매핑 (DB가 'diagnosed'로 저장하는 케이스 호환)
+  const statusRemap = { not_started: 'available', in_progress: 'in_progress', completed: 'completed', diagnosing: 'diagnosing', diagnosed: 'diagnosing', available: 'available' };
   statuses.forEach(s => { userStatuses[s.node_id || s.nodeId || s.id] = statusRemap[s.status] || s.status || 'available'; });
 
   // Build indexing
@@ -2464,7 +2465,7 @@ async function loadMap() {
     n._title = n.title || n.name || n.lesson_name || n.unit_name || id;
     // fallback: use user_status if present
     if (n.user_status && !userStatuses[id]) {
-      const map = { not_started: 'available', in_progress: 'in_progress', completed: 'completed', diagnosing: 'diagnosing' };
+      const map = { not_started: 'available', in_progress: 'in_progress', completed: 'completed', diagnosing: 'diagnosing', diagnosed: 'diagnosing' };
       userStatuses[id] = map[n.user_status] || 'available';
     }
     n._status = inferStatus(id);
@@ -6298,6 +6299,33 @@ window.addEventListener('message', (e) => {
 /* =========================================================
    Diagnosis (CAT-like)
    ========================================================= */
+// F2: 진단 탭 진입 시 상태 정합화 — 깨진 in_progress(큐 비고 currentNode 없음)는 인트로로 자연 복귀
+function handleDiagnosisTabEnter() {
+  try {
+    const s = diagState;
+    if (!s) { renderDiagIntro(); return; }
+    if (s.finished) {
+      // 완료된 결과가 살아있으면 결과 화면 재렌더 (상단에 "다시 진단" 강조 유지)
+      renderDiagResult();
+      return;
+    }
+    // 진행 중인데 큐도 비어 있고 현재 노드도 없으면 좀비 상태 → 리셋
+    const queueEmpty = !s.queue || s.queue.length === 0;
+    const noCurrent = !s.currentNode;
+    if (queueEmpty && noCurrent) {
+      diagState = null;
+      renderDiagIntro();
+      return;
+    }
+    // 정상 진행 중 → 그대로 진행 화면 재렌더 (상태 유지)
+    renderDiagRunning();
+  } catch (e) {
+    console.warn('[diag] handleDiagnosisTabEnter error, fallback to intro:', e);
+    diagState = null;
+    renderDiagIntro();
+  }
+}
+
 function renderDiagIntro() {
   $('diagnosisContent').innerHTML = `
     <div class="diag-intro">
@@ -6353,9 +6381,10 @@ function renderDiagIntro() {
 async function startDiagnosisBySubject() {
   const subject = $('diagSubject').value;
   const grade = $('diagGrade').value;
+  // F1: CAT 모드로 시작 — 큐+문항+hydration이 함께 응답되어 정상 진행 가능
   const data = await fetchApi('/api/self-learn/diagnosis/start', {
     method: 'POST',
-    body: JSON.stringify({ subject, grade })
+    body: JSON.stringify({ subject, grade, mode: 'cat' })
   });
   if (!data) { showToast('진단평가 시작에 실패했습니다.', 'fa-exclamation-circle'); return; }
   initDiagState(data, null);
@@ -6976,17 +7005,124 @@ function switchToDiagnosis() {
 }
 
 function initDiagState(data, targetNodeId) {
+  // F1: 큐 hydration — 서버가 queueNodesHydrated([{id, title, unit_name, ...}, ...])를 보내주면 그대로 사용,
+  // 없으면 queueNodes(string array)를 nodeById 캐시로 hydrate, 그것도 없으면 legacy testNodes로 폴백
+  const rawQueue = data.queueNodesHydrated
+    || data.queue
+    || (Array.isArray(data.queueNodes) ? data.queueNodes : null)
+    || (Array.isArray(data.testNodes) ? data.testNodes : null)
+    || data.queue_nodes
+    || [];
+  const queue = rawQueue.map(item => hydrateDiagQueueItem(item));
+
+  // currentNode hydration — 서버 hydration 우선, 없으면 currentNodeId 문자열을 hydrate
+  let currentNode = null;
+  if (data.currentNode && typeof data.currentNode === 'object' && (data.currentNode.title || data.currentNode.unit_name || data.currentNode.id)) {
+    currentNode = hydrateDiagQueueItem(data.currentNode);
+  } else if (data.currentNodeId) {
+    currentNode = hydrateDiagQueueItem(data.currentNodeId);
+  } else if (queue.length > 0) {
+    currentNode = queue[0];
+  }
+
   diagState = {
     sessionId: data.sessionId || data.session_id || Date.now(),
     targetNode: data.targetNode || nodeById[targetNodeId] || { title: '진단평가' },
-    queue: data.queue || data.queue_nodes || [],
+    queue,
     diagnosed: {},    // nodeId -> { passed, correct, total }
-    currentNode: data.currentNode || (data.queue?.[0]) || null,
+    currentNode,
     question: data.question || data.first_question || null,
     selected: null,
     finished: false,
     results: null
   };
+
+  // R3 (Phase 1 REWORK): 진단 세션 진입 시 1회만 hydration dump.
+  // 기존: renderDiagRunning 호출마다 2회 warn → 시나리오 검증 중 48줄+ 누적.
+  // TODO(Phase 1 검증 종료 후 제거)
+  try {
+    console.warn('[diag dev] queue nodes hydration check:', JSON.stringify((diagState.queue || []).slice(0,5)));
+    console.warn('[diag dev] currentNode:', JSON.stringify(diagState.currentNode));
+  } catch (_) {}
+}
+
+// F1: 진단 큐 노드 캐시 lookup — 현재 필터의 nodeById 우선, 폴백으로 전체 allNodesById
+function _diagLookupNode(nid) {
+  if (!nid) return null;
+  if (typeof nodeById !== 'undefined' && nodeById && nodeById[nid]) return nodeById[nid];
+  if (typeof allNodesById !== 'undefined' && allNodesById && allNodesById[nid]) return allNodesById[nid];
+  return null;
+}
+
+// F1: 진단 큐/현재 노드 라벨 추출 — 어떤 형식이든 가장 적합한 표시 라벨로 변환
+function diagNodeLabel(item) {
+  if (item == null) return '';
+  // 문자열이면 캐시 lookup 후 ID 폴백
+  if (typeof item === 'string' || typeof item === 'number') {
+    const nid = String(item);
+    const cached = _diagLookupNode(nid);
+    return cached?._title
+      || cached?.lesson_name
+      || cached?.unit_name
+      || cached?.title
+      || (nid ? `노드 ${nid.length > 8 ? nid.slice(0,8) + '…' : nid}` : '단원 로딩 중');
+  }
+  // 객체
+  const nid = item.id || item.nodeId || item.node_id || '';
+  const cached = _diagLookupNode(nid);
+  return item.lesson_name
+    || item.unit_name
+    || item.title
+    || item.name
+    || cached?._title
+    || cached?.lesson_name
+    || cached?.unit_name
+    || cached?.title
+    || (nid ? `노드 ${String(nid).length > 8 ? String(nid).slice(0,8) + '…' : nid}` : '단원 로딩 중');
+}
+
+// F1: 진단 큐 노드 한 개 항목을 표시 가능한 객체로 hydrate
+// 입력: 노드 ID 문자열 | hydrated 객체 | {nodeId|node_id|id} 객체
+function hydrateDiagQueueItem(item) {
+  if (item == null) return { id: '', title: '단원 로딩 중' };
+  // 문자열 노드ID
+  if (typeof item === 'string' || typeof item === 'number') {
+    const nid = String(item);
+    const cached = _diagLookupNode(nid);
+    const title = cached?._title
+      || cached?.lesson_name
+      || cached?.unit_name
+      || cached?.title
+      || cached?.name
+      || (nid ? `노드 ${nid.length > 8 ? nid.slice(0,8) + '…' : nid}` : '단원 로딩 중');
+    return {
+      id: nid,
+      nodeId: nid,
+      title,
+      unit_name: cached?.unit_name || null,
+      lesson_name: cached?.lesson_name || null,
+      area: cached?.area || null
+    };
+  }
+  // 객체
+  const nid = item.id || item.nodeId || item.node_id || '';
+  const cached = nid ? _diagLookupNode(nid) : null;
+  const title = item.lesson_name
+    || item.unit_name
+    || item.title
+    || item.name
+    || cached?._title
+    || cached?.lesson_name
+    || cached?.unit_name
+    || (nid ? `노드 ${String(nid).length > 8 ? String(nid).slice(0,8) + '…' : nid}` : '단원 로딩 중');
+  return Object.assign({}, item, {
+    id: nid || item.id || '',
+    nodeId: nid,
+    title,
+    unit_name: item.unit_name || cached?.unit_name || null,
+    lesson_name: item.lesson_name || cached?.lesson_name || null,
+    area: item.area || cached?.area || null
+  });
 }
 
 function renderDiagRunning() {
@@ -6994,22 +7130,27 @@ function renderDiagRunning() {
   if (!s) return;
   if (s.finished) { renderDiagResult(); return; }
 
+  // R3 (Phase 1 REWORK): hydration dump는 initDiagState에서 1회만.
+  // renderDiagRunning는 매 응답마다 호출되므로 여기서는 dump 제거.
+
   const passed = Object.values(s.diagnosed).filter(r => r.passed).length;
   const failed = Object.values(s.diagnosed).filter(r => !r.passed).length;
 
   // Sidebar queue
   let queueHtml = '';
   Object.entries(s.diagnosed).forEach(([id, r]) => {
-    const title = nodeById[id]?._title || id;
+    const title = nodeById[id]?._title || nodeById[id]?.lesson_name || nodeById[id]?.unit_name || (id ? `노드 ${String(id).slice(0,8)}` : '단원');
     const cls = r.passed ? 'done' : 'failed';
     const icon = r.passed ? 'fa-check' : 'fa-times';
     queueHtml += `<div class="diag-node-item ${cls}"><i class="fas ${icon}"></i> ${escHtml(title)}</div>`;
   });
   if (s.currentNode) {
-    queueHtml += `<div class="diag-node-item current"><i class="fas fa-play"></i> ${escHtml(s.currentNode.title || s.currentNode.name || '진단 중')}</div>`;
+    const curTitle = diagNodeLabel(s.currentNode) || '진단 중';
+    queueHtml += `<div class="diag-node-item current"><i class="fas fa-play"></i> ${escHtml(curTitle)}</div>`;
   }
   (s.queue || []).forEach(n => {
-    queueHtml += `<div class="diag-node-item queued"><i class="fas fa-clock"></i> ${escHtml(n.title || n.name || n.id)}</div>`;
+    const label = diagNodeLabel(n);
+    queueHtml += `<div class="diag-node-item queued"><i class="fas fa-clock"></i> ${escHtml(label)}</div>`;
   });
 
   // Question
@@ -7031,7 +7172,7 @@ function renderDiagRunning() {
       <div class="diag-main">
         <div class="diag-progress-header">
           <div style="font-size:var(--fs-xs);color:var(--gray-500);margin-bottom:4px">현재 노드</div>
-          <div style="font-size:var(--fs-lg);font-weight:700;color:var(--gray-800)">${escHtml(s.currentNode?.title || s.currentNode?.name || '진단 시작')}</div>
+          <div style="font-size:var(--fs-lg);font-weight:700;color:var(--gray-800)">${escHtml(diagNodeLabel(s.currentNode) || '진단 시작')}</div>
         </div>
         ${(q && opts.length) ? `
           <div style="font-size:var(--fs-md);font-weight:600;color:var(--gray-800);line-height:1.55;margin-bottom:16px;padding:14px;background:var(--gray-50);border-radius:var(--radius-md);border-left:4px solid var(--primary)">
@@ -7133,11 +7274,19 @@ async function submitDiagAnswer() {
     if (data?.nextQuestion || data?.next_question || data?.question) {
       s.question = data.nextQuestion || data.next_question || data.question;
       s.selected = null;
+      // F1: 큐 hydration 갱신 — 서버 응답으로 큐 라벨도 최신화
+      if (Array.isArray(data.queueNodesHydrated)) {
+        s.queue = data.queueNodesHydrated.map(it => hydrateDiagQueueItem(it));
+      } else if (Array.isArray(data.queueNodes)) {
+        s.queue = data.queueNodes.map(it => hydrateDiagQueueItem(it));
+      }
       // 서버에서 다음 노드가 바뀐 경우 currentNode 갱신
-      if (data.nextNodeId && data.nextNodeId !== (s.currentNode?.id)) {
-        s.currentNode = (window.nodeById && nodeById[data.nextNodeId]) || { id: data.nextNodeId };
+      if (data.nextNode && (data.nextNode.title || data.nextNode.unit_name || data.nextNode.id)) {
+        s.currentNode = hydrateDiagQueueItem(data.nextNode);
+      } else if (data.nextNodeId && data.nextNodeId !== (s.currentNode?.id)) {
+        s.currentNode = hydrateDiagQueueItem(data.nextNodeId);
       } else if (data.current_node) {
-        s.currentNode = data.current_node;
+        s.currentNode = hydrateDiagQueueItem(data.current_node);
       }
       renderDiagRunning();
     } else {
@@ -7148,7 +7297,7 @@ async function submitDiagAnswer() {
         d.passed = d.total > 0 && d.correct === d.total;
       }
       if (s.queue && s.queue.length) {
-        s.currentNode = s.queue.shift();
+        s.currentNode = hydrateDiagQueueItem(s.queue.shift());
         s.question = null;
         s.selected = null;
         fetchNextDiagQuestion();
@@ -7179,7 +7328,7 @@ async function fetchNextDiagQuestion() {
   }
   showToast('이 노드에 등록된 문항이 없습니다. 다른 노드로 진행합니다.', 'fa-info-circle');
   if (s.queue && s.queue.length) {
-    s.currentNode = s.queue.shift();
+    s.currentNode = hydrateDiagQueueItem(s.queue.shift());
     s.question = null;
     s.selected = null;
     renderDiagRunning();
@@ -7232,7 +7381,7 @@ function renderDiagResult() {
       <div style="display:flex;gap:10px;justify-content:center">
         ${failed ? `<button class="btn btn-secondary" onclick="drillDownFailed()"><i class="fas fa-chevron-down"></i> 추가 진단(하위 선수노드)</button>` : ''}
         <button class="btn btn-primary" onclick="addFailedToList()"><i class="fas fa-bookmark"></i> 보완 노드 학습목록에 추가</button>
-        <button class="btn btn-outline" onclick="renderDiagIntro();diagState=null"><i class="fas fa-redo"></i> 다시</button>
+        <button class="btn btn-outline" onclick="diagState=null; renderDiagIntro()"><i class="fas fa-redo"></i> 다시</button>
       </div>
     </div>`;
   loadDashboard(); loadMap();

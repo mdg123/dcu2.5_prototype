@@ -678,11 +678,38 @@ function startDiagnosis(userId, { nodeId, subject, type } = {}) {
   const totalQuestions = testNodes.length;
 
   const info = db.prepare(`
-    INSERT INTO diagnosis_sessions (user_id, target_node_id, diagnosis_type, status, total_questions)
-    VALUES (?, ?, ?, 'in_progress', ?)
-  `).run(userId, nodeId, type || 'standard', totalQuestions);
+    INSERT INTO diagnosis_sessions (user_id, target_node_id, diagnosis_type, status, total_questions, queue_nodes, current_node_id)
+    VALUES (?, ?, ?, 'in_progress', ?, ?, ?)
+  `).run(userId, nodeId, type || 'standard', totalQuestions, JSON.stringify(testNodes), nodeId);
 
-  return { sessionId: info.lastInsertRowid, testNodes, totalQuestions };
+  // F1: 프론트가 라벨을 표시할 수 있도록 hydration 정보를 함께 반환
+  // 첫 노드의 문항도 함께 시도 (legacy 흐름에서도 즉시 풀이 진입 가능)
+  let firstQuestion = null;
+  let startNodeId = nodeId;
+  for (const qn of testNodes) {
+    try {
+      const cand = _pickQuestionForNode(qn, 'medium');
+      if (cand) { firstQuestion = cand; startNodeId = qn; break; }
+    } catch (_) { /* 무시 */ }
+  }
+  if (startNodeId !== nodeId) {
+    db.prepare('UPDATE diagnosis_sessions SET current_node_id = ? WHERE id = ?')
+      .run(startNodeId, info.lastInsertRowid);
+  }
+  // R1 (Phase 1 REWORK): 응답용 큐에서 startNodeId 제외 — 중복 렌더링 방지
+  const responseQueue = testNodes.filter(n => n !== startNodeId);
+  const queueHydrated = _hydrateDiagNodes(responseQueue);
+  const currentNodeHydrated = _hydrateDiagNodes([startNodeId])[0] || { id: startNodeId };
+  return {
+    sessionId: info.lastInsertRowid,
+    testNodes: responseQueue,
+    totalQuestions,
+    queueNodes: responseQueue,
+    queueNodesHydrated: queueHydrated,
+    currentNodeId: startNodeId,
+    currentNode: currentNodeHydrated,
+    question: firstQuestion
+  };
 }
 
 // rawContentId / questionId 중 유효한 contents.id 값을 확정 (없으면 첫 번째 contents.id 폴백)
@@ -2015,11 +2042,23 @@ function _pickQuestionForNode(nodeId, difficulty) {
   };
 }
 
-function startDiagnosisCAT(userId, { targetNodeId, subject, type }) {
+function startDiagnosisCAT(userId, { targetNodeId, subject, grade, type }) {
   // targetNodeId 지정 시 BFS로 직전 선수노드 큐 생성
   let nodeId = targetNodeId;
   if (!nodeId && subject) {
-    const first = db.prepare('SELECT node_id FROM learning_map_nodes WHERE subject = ? ORDER BY grade, semester, sort_order LIMIT 1').get(subject);
+    // 학년 필터(있을 때만) — 초/중/고 표기를 정수로 정규화
+    let gradeNum = null;
+    if (grade != null && grade !== '') {
+      const m = String(grade).match(/(\d+)/);
+      if (m) gradeNum = parseInt(m[1], 10);
+    }
+    let first;
+    if (gradeNum != null && Number.isFinite(gradeNum)) {
+      first = db.prepare('SELECT node_id FROM learning_map_nodes WHERE subject = ? AND grade = ? ORDER BY semester, sort_order LIMIT 1').get(subject, gradeNum);
+    }
+    if (!first) {
+      first = db.prepare('SELECT node_id FROM learning_map_nodes WHERE subject = ? ORDER BY grade, semester, sort_order LIMIT 1').get(subject);
+    }
     nodeId = first?.node_id;
   }
   if (!nodeId) {
@@ -2076,13 +2115,55 @@ function startDiagnosisCAT(userId, { targetNodeId, subject, type }) {
       .run(startNodeId, info.lastInsertRowid);
   }
 
+  // R1 (Phase 1 REWORK): 큐 응답에서 startNodeId(=currentNodeId)를 제외하여
+  // 프론트가 current + queue 를 중복 렌더링하지 않도록 한다.
+  // DB에 저장되는 queue_nodes(fullQueue)는 시작 노드를 포함한 채 유지하되,
+  // 클라이언트 응답용 queueNodes/queueNodesHydrated는 startNodeId를 빼고 보낸다.
+  const responseQueue = fullQueue.filter(n => n !== startNodeId);
+
+  // F1: 큐 노드 라벨 hydration — 프론트가 string array를 받아 라벨을 못 그리는 문제 해결
+  const queueNodesHydrated = _hydrateDiagNodes(responseQueue);
+  const currentNodeHydrated = _hydrateDiagNodes([startNodeId])[0] || { id: startNodeId };
+
   return {
     sessionId: info.lastInsertRowid,
     currentNodeId: startNodeId,
+    currentNode: currentNodeHydrated,
     currentDifficulty: 'medium',
-    queueNodes: fullQueue,
+    queueNodes: responseQueue,
+    queueNodesHydrated,
     question // null 가능 — 프론트에서 데모 문항으로 합성
   };
+}
+
+// 진단 큐 노드 정보 hydration — 라벨 표시용 단원/차시/영역 정보를 일괄 조회
+function _hydrateDiagNodes(nodeIds) {
+  if (!Array.isArray(nodeIds) || nodeIds.length === 0) return [];
+  // SQLite IN(?,?,?,...) 안전 바인딩
+  const placeholders = nodeIds.map(() => '?').join(',');
+  const rows = db.prepare(`
+    SELECT node_id, unit_name, lesson_name, area, subject, grade
+    FROM learning_map_nodes
+    WHERE node_id IN (${placeholders})
+  `).all(...nodeIds);
+  const byId = {};
+  rows.forEach(r => { byId[r.node_id] = r; });
+  // 입력 순서 보존 + 누락된 노드도 graceful 처리
+  return nodeIds.map(nid => {
+    const r = byId[nid];
+    const title = r ? (r.lesson_name || r.unit_name || nid) : nid;
+    return {
+      id: nid,
+      nodeId: nid,
+      node_id: nid,
+      title,
+      unit_name: r?.unit_name || null,
+      lesson_name: r?.lesson_name || null,
+      area: r?.area || null,
+      subject: r?.subject || null,
+      grade: r?.grade || null
+    };
+  });
 }
 
 function submitDiagnosisAnswerCAT(sessionId, payload = {}) {
@@ -2281,17 +2362,30 @@ function submitDiagnosisAnswerCAT(sessionId, payload = {}) {
     }
   }
 
+  // R1 (Phase 1 REWORK): 응답용 큐에서 nextNodeId(=새 currentNode) 제외 — 중복 렌더링 방지
+  // DB의 queue_nodes는 진행 추적용으로 nextNodeId를 포함한 채 그대로 유지(이미 위에서 curNode만 필터됨).
+  const responseQueue = (nextNodeId && !sessionComplete)
+    ? queue.filter(qn => qn !== nextNodeId)
+    : queue;
+
+  // F1: 큐 + nextNode hydration (프론트가 라벨을 그릴 수 있도록 단원/차시/영역 정보 첨부)
+  const queueNodesHydrated = _hydrateDiagNodes(responseQueue);
+  const nextNodeHydrated = nextNodeId ? (_hydrateDiagNodes([nextNodeId])[0] || { id: nextNodeId }) : null;
+
   return {
     isCorrect,
     nodeFinished,
     nodePassed,
     nextNodeId,
+    nextNode: nextNodeHydrated,
     nextDifficulty: 'medium',
     question: nextQuestion,
     nextQuestion: nextQuestion,
     finished: sessionComplete,
     sessionComplete,
-    queueRemaining: queue.length,
+    queueRemaining: responseQueue.length,
+    queueNodes: responseQueue,
+    queueNodesHydrated,
     nodeResults,
     addedToLearningList,
     endReason
@@ -2344,13 +2438,20 @@ function getDiagnosisState(sessionId) {
   try { queue = JSON.parse(s.queue_nodes || '[]'); } catch {}
   try { perNode = JSON.parse(s.per_node_answers || '{}'); } catch {}
   try { path = JSON.parse(s.difficulty_path || '[]'); } catch {}
+
+  // R1 (Phase 1 REWORK): 응답용 큐에서 currentNodeId 제외 — 프론트 중복 렌더링 방지
+  const curId = s.current_node_id;
+  const responseQueue = curId ? queue.filter(qn => qn !== curId) : queue;
+
   return {
     sessionId: s.id,
     status: s.status,
-    currentNodeId: s.current_node_id,
+    currentNodeId: curId,
+    currentNode: curId ? (_hydrateDiagNodes([curId])[0] || { id: curId }) : null,
     currentDifficulty: s.current_difficulty,
-    queueNodes: queue,
-    queueRemaining: queue.length,
+    queueNodes: responseQueue,
+    queueNodesHydrated: _hydrateDiagNodes(responseQueue),
+    queueRemaining: responseQueue.length,
     perNodeAnswers: perNode,
     difficultyPath: path,
     totalQuestions: s.total_questions,
