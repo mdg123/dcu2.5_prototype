@@ -67,9 +67,15 @@ router.put('/settings', requireAuth, (req, res) => {
 // ========== 오늘의 학습 ==========
 
 // GET /daily — 오늘의 학습 세트 목록
+//   학생이면 기본적으로 본인 학년 세트만 반환 (다른 학년 세트 노출 방지).
+//   교사/관리자는 필터 없이 전체 조회 허용. 명시적으로 grade를 넘기면 그 값을 우선.
 router.get('/daily', requireAuth, (req, res) => {
   try {
-    const sets = selfLearnDb.getDailySets(req.user.id, req.query);
+    const q = { ...req.query };
+    if (!q.grade && req.user.role === 'student' && req.user.grade != null) {
+      q.grade = req.user.grade;
+    }
+    const sets = selfLearnDb.getDailySets(req.user.id, q);
     res.json({ success: true, sets });
   } catch (err) {
     console.error('[SELF-LEARN] daily list error:', err);
