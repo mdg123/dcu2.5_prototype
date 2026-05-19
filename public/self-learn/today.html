@@ -229,7 +229,7 @@
         </div>
       </div>
       <div class="goal-details">
-        <h2 style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;">🎯 학습 목표 달성률 <button onclick="toggleGoalPeriod(this)" style="font-size:var(--fs-xs);padding:3px 10px;border:1px solid var(--gray-200);border-radius:6px;background:#fff;cursor:pointer;font-family:inherit;" data-period="weekly">주간</button><span id="goalPeriodLabel" style="font-size:13px;color:#6B7280;font-weight:500;line-height:1.4;"></span></h2>
+        <h2 style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;">🎯 학습 목표 달성률 <button onclick="toggleGoalPeriod(this)" style="font-size:var(--fs-xs);padding:3px 10px;border:1px solid var(--gray-200);border-radius:6px;background:#fff;cursor:pointer;font-family:inherit;" data-period="weekly">주간</button><span id="goalPeriodLabel" style="font-size:13px;color:#6B7280;font-weight:500;line-height:1.4;"></span><span id="userIdentityChip" style="display:none;font-size:13px;font-weight:600;padding:3px 10px;border-radius:6px;background:#EFF6FF;color:#2563EB;line-height:1.4;white-space:nowrap;" title="내 학교급 · 학년 (다른 학년 자료는 표시되지 않습니다)"></span></h2>
         <div class="goal-row">
           <div class="goal-row-icon" style="background:var(--primary);"><i class="fas fa-book-open"></i></div>
           <div class="goal-row-info">
@@ -618,6 +618,8 @@
 
       // 기간 라벨 동기 업데이트
       renderGoalPeriodLabel();
+      // 사용자 학교급/학년 칩 동기 업데이트 (Race condition 안전망)
+      renderUserIdentityChip();
     }
 
     // ===== 주간 달력 =====
@@ -2014,6 +2016,38 @@
       renderGoalPeriodLabel();
     }
 
+    // ===== 사용자 학교급/학년 칩 표시 (학생만, 다른 학년 자료 비노출 시각 단서) =====
+    function renderUserIdentityChip() {
+      const chip = document.getElementById('userIdentityChip');
+      if (!chip) return;
+      const u = window.dacheumUser || {};
+      // 학생 + 학교급/학년 정보가 있는 경우에만 표시
+      if (u.role !== 'student' || !u.school_level || !u.grade) {
+        chip.style.display = 'none';
+        chip.textContent = '';
+        return;
+      }
+      const lvl = String(u.school_level).toLowerCase();
+      let schoolLabel = '';
+      if (lvl.includes('middle') || lvl === '중') schoolLabel = '중학교';
+      else if (lvl.includes('high') || lvl === '고') schoolLabel = '고등학교';
+      else schoolLabel = '초등학교';
+      const grade = Number(u.grade);
+      // 표기: "금성초등학교 · 4학년 1반" (반 정보가 있을 때) 또는 "초등학교 4학년"
+      const schoolName = u.school_name && String(u.school_name).trim();
+      const classNo = u.class_number != null && u.class_number !== '' ? Number(u.class_number) : null;
+      let text = '';
+      if (schoolName) {
+        text = schoolName + ' · ' + grade + '학년';
+        if (classNo) text += ' ' + classNo + '반';
+      } else {
+        text = schoolLabel + ' ' + grade + '학년';
+      }
+      chip.innerHTML = '<i class="fas fa-user-graduate" style="font-size:11px;margin-right:4px;opacity:.8;"></i>' + text;
+      chip.style.display = 'inline-flex';
+      chip.style.alignItems = 'center';
+    }
+
     // P1 보완(F-P1-1): 페르소나 자동 전환 방지 — 학생 시점 보장
     // common-nav가 /api/auth/me를 캐시 무효화 후 로드하지만, 페이지 진입 시점에
     // 다른 role 데이터가 일시 표출되지 않도록 한 번 더 강제 검증한다.
@@ -2026,6 +2060,7 @@
           return;
         }
         window.dacheumUser = j.user;
+        renderUserIdentityChip();
       } catch (e) { /* 네트워크 오류 시 진행 */ }
     })();
     loadData();
