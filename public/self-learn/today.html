@@ -710,6 +710,46 @@
       renderLearnCards();
     }
 
+    // ===== 학습 카드: 제목 합성 (F-P2-A) =====
+    // 사용자 의견(2026-05-19): 날짜·학년·"오늘의 학습" 워딩 불필요 → 과목 + 주제만 표시
+    // theme 결정 4단계 폴백:
+    //   1) set.items[0].content_unit_name (contents.unit_name)
+    //   2) set.items[0].content_theme (contents.theme — '기초'·'심화' 등)
+    //   3) item_title/content_title 에서 단원명 추출 ("…1단원 큰 수…" → "큰 수", "…분수의 덧셈…" → "분수의 덧셈")
+    //   4) 폴백 — subject 단독 (예: "수학")
+    function computeSetDisplayTitle(set, subject) {
+      const items = set?.items || [];
+      const first = items[0] || {};
+      // 1) contents.unit_name 우선
+      let theme = (first.content_unit_name || '').trim();
+      // 2) contents.theme (단, 'general'·'기본'·null 이면 스킵)
+      if (!theme) {
+        const cat = (first.content_theme || '').trim();
+        if (cat && !/^(general|기본|null|undefined)$/i.test(cat)) theme = cat;
+      }
+      // 3) item_title 또는 content_title 에서 단원명 추출
+      if (!theme) {
+        const raw = (first.item_title || first.content_title || first.title || '').trim();
+        if (raw) {
+          // 패턴 A: "…N단원 단원명 - …" 또는 "…N단원 단원명을 …"
+          let m = raw.match(/\d+\s*단원\s+([^\-—\s][^\-—]*?)(?:\s*[-—]|을\s|를\s|에\s|로\s|$)/);
+          if (m && m[1]) theme = m[1].trim();
+          // 패턴 B: "초등수학 4학년 1학기 1단원 큰 수" → 마지막 공백 토큰 그룹
+          if (!theme) {
+            m = raw.match(/\d+\s*단원\s+(.+)$/);
+            if (m && m[1]) theme = m[1].trim().split(/\s*[-—]\s*/)[0].trim();
+          }
+          // 패턴 C: " - " 뒤 첫 토막 ("…1단원 큰 수 - 억과 조를 알아보기" → "억과 조를 알아보기" 는 너무 길어 제외)
+          // 폴백 — 그래도 없으면 raw 앞 12자 사용
+          if (!theme) theme = raw.length > 14 ? raw.slice(0, 14) + '…' : raw;
+        }
+      }
+      // 합성
+      const sub = subject || set?.target_subject || '학습';
+      if (theme && theme !== sub) return `${sub} · ${theme}`;
+      return sub;
+    }
+
     // ===== 학습 카드 =====
     function renderLearnCards() {
       const grid = document.getElementById('learnGrid');
@@ -785,6 +825,9 @@
         const badgeText = allComplete ? '완료' : inProgress ? '진행중' : '미참여';
         const btnClass = allComplete ? 'review' : inProgress ? 'resume' : 'start';
         const btnText = allComplete ? '재학습' : inProgress ? '이어하기' : '학습하기';
+        // F-P2-A: 카드 제목 재구성 — 날짜·학년·"오늘의 학습" 워딩 제거, 과목 + 주제만 표시
+        // theme 우선순위: 첫 아이템 content_unit_name → content_category → item_title/content_title에서 단원명 추출
+        const displayTitle = computeSetDisplayTitle(set, subject);
 
         // 썸네일: img 태그로 렌더하여 깨질 경우 onerror로 mqdefault → default 폴백, 최종 실패 시 그라디언트
         const thumbStyle = `background:linear-gradient(135deg, ${subjColor}22 0%, ${subjColor}0D 55%, ${subjColor}1C 100%);overflow:hidden;`;
@@ -813,10 +856,7 @@
             <span class="learn-card-badge ${badgeClass}" style="position:absolute;z-index:2;">${badgeText}</span>
           </div>
           <div class="learn-card-body">
-            <div class="learn-card-tags">
-              <span style="background:${subjectColors[subject] || '#6B7280'}20;color:${subjectColors[subject] || '#6B7280'}">${escHtml(subject)}</span>
-            </div>
-            <div class="learn-card-title">${escHtml(set.title || '학습 세트')}</div>
+            <div class="learn-card-title" title="${escHtml(displayTitle)}">${escHtml(displayTitle)}</div>
             <div class="learn-card-progress-bar"><div class="learn-card-progress-fill ${allComplete?'done':''}" style="width:${progressPct}%;"></div></div>
             <div class="learn-card-footer">
               <div class="learn-card-points">${allComplete ? '✅ +' + earnedPoints + 'P 획득' : (earnedPoints>0 ? '⭐ '+earnedPoints+'/'+points+'P' : '⭐ ' + points + 'P')}</div>

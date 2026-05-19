@@ -100,7 +100,8 @@ function getDailySets(userId, { date, grade, subject } = {}) {
   // 각 세트에 items 포함
   const getItems = db.prepare(`
     SELECT i.*, p.status as progress_status, p.score, p.started_at, p.completed_at,
-      c.title as content_title, c.content_type, c.content_url, c.file_path, c.description as content_desc
+      c.title as content_title, c.content_type, c.content_url, c.file_path, c.description as content_desc,
+      c.unit_name as content_unit_name, c.theme as content_theme
     FROM daily_learning_items i
     LEFT JOIN daily_learning_progress p ON p.item_id = i.id AND p.user_id = ?
     LEFT JOIN contents c ON i.content_id = c.id
