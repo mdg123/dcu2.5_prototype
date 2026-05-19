@@ -1603,8 +1603,8 @@
               <button data-val="lesson">차시</button>
             </div>
             <div class="mini-toggle" id="viewModeToggle">
-              <button class="active" data-val="map"><i class="fas fa-project-diagram"></i> 맵</button>
-              <button data-val="list"><i class="fas fa-list"></i> 리스트</button>
+              <button data-val="map"><i class="fas fa-project-diagram"></i> 맵</button>
+              <button class="active" data-val="list"><i class="fas fa-list"></i> 리스트</button>
             </div>
             <div class="jump-bar-wrap">
               <div class="jump-bar-row" id="gradeJumpBar" role="toolbar" aria-label="학년별 이동"><span class="jump-bar-label">학년</span></div>
@@ -1841,7 +1841,18 @@ let currentSolveProblem = null;
 let currentSolveNodeId = null;
 let currentReportTarget = null; // {contentId, contentType}
 let rankingPeriod = 'weekly';
-let viewMode = 'map';
+// 초기 뷰 모드: URL ?view=map|list > localStorage('learningMap.viewMode') > 기본 'list'
+let viewMode = (function _initialViewMode(){
+  try {
+    const qp = new URLSearchParams(location.search).get('view');
+    if (qp === 'map' || qp === 'list') return qp;
+  } catch(_){}
+  try {
+    const ls = localStorage.getItem('learningMap.viewMode');
+    if (ls === 'map' || ls === 'list') return ls;
+  } catch(_){}
+  return 'list';
+})();
 let nodeDisplayMode = 'unit';
 // §2 drawer history stack: [{nodeId, scrollTop, currentDrawerTab}]
 let drawerHistoryStack = [];
@@ -2155,6 +2166,8 @@ function bindUI() {
       document.querySelectorAll('#viewModeToggle button').forEach(x => x.classList.remove('active'));
       b.classList.add('active');
       viewMode = b.dataset.val;
+      // 사용자가 마지막으로 선택한 뷰 모드 저장 — 다음 진입 시 우선 적용
+      try { localStorage.setItem('learningMap.viewMode', viewMode); } catch(_){}
       // 뷰 모드가 바뀌면 펼친 아코디언 상태 해제 (DOM이 새로 렌더링되므로)
       _currentListAccordionId = null;
       // 툴바에 현재 뷰 모드를 표시 — 리스트 모드일 때 상단 점프바/줌 컨트롤 숨김 처리
@@ -2173,10 +2186,17 @@ function bindUI() {
       renderMap();
     });
   });
-  // 초기 진입 시 현재 viewMode 를 툴바에 반영
+  // 초기 진입 시 현재 viewMode 를 툴바·토글 active 상태에 반영
   (function _initToolbarViewAttr(){
     const toolbar = document.querySelector('.map-toolbar');
-    if (toolbar) toolbar.setAttribute('data-view', viewMode || 'map');
+    if (toolbar) toolbar.setAttribute('data-view', viewMode || 'list');
+    // 토글 버튼 active 동기화 (HTML 기본값과 viewMode가 다를 수 있음 — URL/localStorage 우선 시)
+    document.querySelectorAll('#viewModeToggle button').forEach(b => {
+      b.classList.toggle('active', b.dataset.val === viewMode);
+    });
+    // 리스트 모드 진입 시 하이라이트 해제 버튼 숨김 처리
+    const hlBtn = document.getElementById('hlCloseBtn');
+    if (hlBtn && viewMode === 'list') hlBtn.style.display = 'none';
   })();
 
   // Ranking period
