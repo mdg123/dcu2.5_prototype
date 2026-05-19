@@ -1267,7 +1267,6 @@
       }
       if (_saveProgressTimer) { clearInterval(_saveProgressTimer); _saveProgressTimer = null; }
       if (_ytCheckInterval) { clearInterval(_ytCheckInterval); _ytCheckInterval = null; }
-      if (_ytReadyTimeout) { clearTimeout(_ytReadyTimeout); _ytReadyTimeout = null; }
       if (_ytPlayer) { try { _ytPlayer.destroy(); } catch {} _ytPlayer = null; }
       document.getElementById('playerOverlay').classList.remove('active');
       document.body.style.overflow = '';
@@ -1525,7 +1524,6 @@
     // ===== YouTube IFrame API =====
     let _ytPlayer = null;
     let _ytCheckInterval = null;
-    let _ytReadyTimeout = null; // 재생 불가 판정용 타임아웃
 
     // YouTube API 로드 (한 번만)
     if (!window.YT) {
@@ -1534,11 +1532,12 @@
       document.head.appendChild(tag);
     }
 
-    // 재생 불가 시 강제 완료 버튼을 띄움
+    // 강제 완료 버튼 — 실제 onError 가 발생했을 때만 표시.
+    // 타임아웃·자동재생 차단 등으로는 표시하지 않음(정상 영상에서도 떴던 false positive 차단).
     function showForceCompleteBtn(reason) {
       const btn = document.getElementById('forceCompleteBtn');
       if (btn) btn.style.display = '';
-      console.warn('[player] 재생 불가:', reason || '(timeout)');
+      if (reason) console.warn('[player] 재생 불가:', reason);
     }
     function hideForceCompleteBtn() {
       const btn = document.getElementById('forceCompleteBtn');
@@ -1547,7 +1546,6 @@
 
     function initYouTubePlayer(videoId) {
       if (_ytCheckInterval) { clearInterval(_ytCheckInterval); _ytCheckInterval = null; }
-      if (_ytReadyTimeout) { clearTimeout(_ytReadyTimeout); _ytReadyTimeout = null; }
       if (_ytPlayer) { try { _ytPlayer.destroy(); } catch {} _ytPlayer = null; }
 
       const container = document.getElementById('ytPlayerContainer');
@@ -1568,10 +1566,6 @@
             onError: onYTError
           }
         });
-        // 8초 안에 PLAYING 상태로 전환 안 되면 재생 불가로 판정
-        _ytReadyTimeout = setTimeout(() => {
-          showForceCompleteBtn('PLAYING 미진입 (8s timeout)');
-        }, 8000);
       }
 
       if (window.YT && window.YT.Player) {
@@ -1582,18 +1576,19 @@
     }
 
     function onYTReady() {
-      // onReady만으로는 임베드 가능 여부 확정 못 함. PLAYING 진입을 기준으로 판정.
+      // 플레이어가 정상 로드됨 — 자동재생 차단되어도 사용자 클릭으로 재생 가능.
+      // 강제 완료 버튼 노출 불필요.
+      hideForceCompleteBtn();
     }
     function onYTError(event) {
-      // 100: 영상 없음, 101/150: 임베드 차단, 2: invalid id, 5: HTML5 오류
-      if (_ytReadyTimeout) { clearTimeout(_ytReadyTimeout); _ytReadyTimeout = null; }
+      // 100: 영상 없음/비공개, 101/150: 임베드 차단, 2: invalid id, 5: HTML5 오류
+      // 이 경우에만 강제 완료 버튼 노출.
       showForceCompleteBtn('YT error ' + (event && event.data));
     }
 
     function onYTStateChange(event) {
       if (event.data === YT.PlayerState.PLAYING) {
-        // 정상 재생 — 타임아웃 해제, 버튼 숨김
-        if (_ytReadyTimeout) { clearTimeout(_ytReadyTimeout); _ytReadyTimeout = null; }
+        // 정상 재생 — 버튼 숨김(에러 후 사용자가 재시도해서 살아난 케이스 방어)
         hideForceCompleteBtn();
         if (!_ytCheckInterval) {
           _ytCheckInterval = setInterval(() => {
