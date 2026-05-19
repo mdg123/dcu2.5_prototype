@@ -342,12 +342,13 @@
           <div style="font-size:24px;margin-bottom:4px;">🏅</div>
           <div class="points-val" id="totalPoints">0</div>
           <div class="points-label">채움포인트</div>
+          <div style="font-size:13px;color:var(--gray-500);margin-top:4px;line-height:1.4;">전체 누적</div>
         </div>
 
         <!-- 랭킹 -->
         <div class="side-card">
-          <div class="side-card-title" style="display:flex;justify-content:space-between;align-items:center;">
-            <span>🏆 학습 랭킹</span>
+          <div class="side-card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px;">
+            <span>🏆 학습 랭킹 <span id="rankingPeriodLabel" style="font-size:13px;font-weight:500;color:var(--gray-500);margin-left:2px;">(최근 7일)</span></span>
             <div style="display:flex;gap:4px;">
               <button class="rank-tab active" onclick="loadRanking('weekly',this)">주간</button>
               <button class="rank-tab" onclick="loadRanking('monthly',this)">월간</button>
@@ -1329,6 +1330,11 @@
         btn.parentElement.querySelectorAll('.rank-tab').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
       }
+      // 기간 라벨 갱신 (사용자가 채움포인트와 랭킹 점수 차이를 즉시 이해할 수 있도록)
+      const periodLabel = document.getElementById('rankingPeriodLabel');
+      if (periodLabel) {
+        periodLabel.textContent = period === 'monthly' ? '(최근 30일)' : '(최근 7일)';
+      }
       const container = document.getElementById('rankingList');
       try {
         const [res, meRes] = await Promise.all([
@@ -1775,8 +1781,14 @@
       btn.style.opacity = _canComplete ? '1' : '.5';
     }
     // 영상 재생 불가 / YouTube 비공개 시 학생이 직접 강제 완료 가능
-    function forceCompleteItem() {
-      if (!confirm('영상이 정상 재생되지 않나요? 강제로 학습 완료 처리합니다.\n(이후 다른 영상에 영향은 없습니다)')) return;
+    async function forceCompleteItem() {
+      const ok = await showConfirmModal({
+        icon: 'fa-triangle-exclamation', iconBg: '#FEF3C7', iconColor: '#F59E0B',
+        title: '영상이 정상 재생되지 않나요?',
+        message: '강제로 <strong>학습 완료</strong> 처리합니다.<br><span style="font-size:13px;color:#6b7280;">이후 다른 영상에 영향은 없습니다.</span>',
+        cancelText: '취소', okText: '완료 처리', okColor: '#F59E0B'
+      });
+      if (!ok) return;
       _canComplete = true;
       updateCompleteBtn();
       completeCurrentItem({ forceCompleted: true });
