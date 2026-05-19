@@ -21,10 +21,16 @@ try {
 } catch(e) {}
 
 // DB 초기화
-const { initSchema } = require('./db/schema');
-initSchema();
+// ⚠️ 순서 중요: initCurriculum()가 curriculum_standards 테이블을 생성한 뒤,
+//   initSchema()의 마이그레이션 블록(primary_node_id / std_source ALTER 등)이
+//   해당 테이블에 안전하게 컬럼을 추가하도록 한다.
+//   (반대 순서일 경우 신규 DB에서 ALTER가 무성공으로 흡수되고,
+//    이후 db/curriculum.js의 CREATE TABLE IF NOT EXISTS 가
+//    primary_node_id 없는 테이블을 만들어 라우트 prepare 단계에서 종료됨.)
 const { initCurriculum } = require('./db/curriculum');
 initCurriculum();
+const { initSchema } = require('./db/schema');
+initSchema();
 
 const app = express();
 const server = http.createServer(app);

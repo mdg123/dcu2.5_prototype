@@ -151,6 +151,26 @@ router.post('/:classId', requireAuth, requireClassMember, (req, res) => {
     }
     const { title, description, exam_type, questions, time_limit, start_time, end_time, status, settings, start_date, end_date, start_mode, tab_detection, allow_retry, std_ids } = req.body;
     if (!title) return res.status(400).json({ success: false, message: '평가 제목을 입력하세요.' });
+    // ─── B04: 외부 임포트/자동 출제 입력 정규화 ─────────────────────────────
+    // 일부 외부 API가 정답 필드를 correct_index / correctIndex / answer_index 로
+    // 보내는 경우가 있어 silent 0점 채점을 막기 위해 alias 를 answer 로 통일한다.
+    const normalizedQuestions = (Array.isArray(questions) ? questions : []).map((q, idx) => {
+      const safeQ = (q && typeof q === 'object') ? q : {};
+      const ans = safeQ.answer ?? safeQ.correct_index ?? safeQ.correctIndex ?? safeQ.answer_index;
+      return { ...safeQ, answer: ans, _qIdx: idx };
+    });
+    // 객관식인데 정답이 없으면 명시적 400 (silent 0점 채점 방지)
+    const invalid = normalizedQuestions.filter(q =>
+      (q.type === 'multiple' || q.type === 'choice') && (q.answer == null || q.answer === '')
+    );
+    if (invalid.length) {
+      return res.status(400).json({
+        success: false,
+        message: `정답이 누락된 객관식 문항이 ${invalid.length}개 있습니다 (문항 ${invalid.map(q => q._qIdx + 1).join(', ')})`
+      });
+    }
+    // 내부용 _qIdx 제거 후 저장
+    const cleanQuestions = normalizedQuestions.map(({ _qIdx, ...rest }) => rest);
     // start_mode에 따른 status 결정
     let finalStatus = status;
     if (start_mode === 'direct' && (!status || status === 'draft')) {
@@ -159,7 +179,7 @@ router.post('/:classId', requireAuth, requireClassMember, (req, res) => {
       finalStatus = 'waiting';
     }
     const exam = examDb.createExam(req.classId, req.user.id, {
-      title, description, exam_type, questions, time_limit, start_time, end_time, status: finalStatus, settings, start_date, end_date,
+      title, description, exam_type, questions: cleanQuestions, time_limit, start_time, end_time, status: finalStatus, settings, start_date, end_date,
       std_ids: Array.isArray(std_ids) ? std_ids : null
     });
     // 추가 설정 저장

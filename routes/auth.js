@@ -102,7 +102,12 @@ router.get('/me', (req, res) => {
     // 세션의 user_id가 DB에 없으면 세션 정리
     req.session.destroy(() => {});
   }
-  res.json({ success: false, user: null });
+  // B06: 미인증 상태는 HTTP 401 로 명확히 신호한다.
+  // 전체 호출자(login.html, lrs/index.html, emotion-board.html, attendance.html,
+  // notice-board.html, lesson-player.html, today.html, learning-map.html,
+  // js/auth.js, js/common-nav.js)가 모두 401에서도 body JSON 을 정상 처리하거나
+  // 자동으로 /login.html 로 리다이렉트하도록 구현되어 있음을 확인했다.
+  res.status(401).json({ success: false, user: null });
 });
 
 module.exports = router;

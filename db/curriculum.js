@@ -19,6 +19,9 @@ function initCurriculum() {
   `);
 
   // ── 성취기준 테이블 ──
+  // primary_node_id, std_source 는 lib/xapi/std-resolver.js 가 prepare 시점에 참조하므로
+  // CREATE TABLE 단계에서 포함시켜 신규 DB·기존 DB 모두 안전하게 한다.
+  // (기존 DB에는 db/schema.js의 ALTER 마이그레이션이 이미 추가했을 수 있으므로 IF NOT EXISTS 만으로 충분)
   db.exec(`
     CREATE TABLE IF NOT EXISTS curriculum_standards (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -30,11 +33,26 @@ function initCurriculum() {
       area TEXT NOT NULL,
       content TEXT NOT NULL,
       sort_order INTEGER DEFAULT 0,
+      primary_node_id TEXT,
+      std_source TEXT,
       FOREIGN KEY (subject_code) REFERENCES subjects(code)
     );
     CREATE INDEX IF NOT EXISTS idx_curriculum_subject ON curriculum_standards(subject_code, grade_group);
     CREATE INDEX IF NOT EXISTS idx_curriculum_grade ON curriculum_standards(school_level, grade_group);
   `);
+
+  // 정합성 보정: 과거에 두 컬럼이 빠진 채로 생성된 DB가 있다면 여기서 idempotent ALTER로 보강.
+  try {
+    const csCols = db.prepare("PRAGMA table_info(curriculum_standards)").all().map(c => c.name);
+    if (!csCols.includes('primary_node_id')) {
+      db.exec("ALTER TABLE curriculum_standards ADD COLUMN primary_node_id TEXT");
+    }
+    if (!csCols.includes('std_source')) {
+      db.exec("ALTER TABLE curriculum_standards ADD COLUMN std_source TEXT");
+    }
+  } catch (e) {
+    console.warn('[다채움] curriculum_standards 컬럼 보정 실패:', e.message);
+  }
 
   // ── 교과 시드 데이터 ──
   const insertSubject = db.prepare(`

@@ -1679,6 +1679,27 @@ function initSchema() {
     }
   } catch (e) { /* 테이블이 아직 없으면 무시 */ }
 
+  // 콘텐츠 등록 정책·메타 컬럼 (댓글 허용, 주제, 저작권, 다운로드 허용, 공식 태그)
+  // routes/contents.js 의 INSERT/UPDATE 가 항상 이 컬럼을 사용하므로 신규 DB에서도 반드시 존재해야 함.
+  try {
+    const ctCols2 = db.prepare("PRAGMA table_info(contents)").all().map(c => c.name);
+    if (!ctCols2.includes('allow_comments')) db.exec("ALTER TABLE contents ADD COLUMN allow_comments INTEGER DEFAULT 1");
+    if (!ctCols2.includes('theme'))          db.exec("ALTER TABLE contents ADD COLUMN theme TEXT");
+    if (!ctCols2.includes('copyright'))      db.exec("ALTER TABLE contents ADD COLUMN copyright TEXT");
+    if (!ctCols2.includes('download_allow')) db.exec("ALTER TABLE contents ADD COLUMN download_allow INTEGER DEFAULT 0");
+    if (!ctCols2.includes('official_tag'))   db.exec("ALTER TABLE contents ADD COLUMN official_tag TEXT");
+  } catch (e) {
+    console.warn('[schema] contents policy migration:', e.message);
+  }
+
+  // 오늘의 학습 세트 썸네일 (학년별 카드 UI 표시용)
+  try {
+    const dsCols = db.prepare("PRAGMA table_info(daily_learning_sets)").all().map(c => c.name);
+    if (!dsCols.includes('thumbnail_url')) db.exec("ALTER TABLE daily_learning_sets ADD COLUMN thumbnail_url TEXT");
+  } catch (e) {
+    console.warn('[schema] daily_learning_sets migration:', e.message);
+  }
+
   // 마이그레이션: exams 테이블 확장
   try {
     const exCols = db.prepare("PRAGMA table_info(exams)").all().map(c => c.name);
@@ -1737,6 +1758,27 @@ function initSchema() {
       db.exec("ALTER TABLE homework ADD COLUMN public_submissions INTEGER DEFAULT 0");
     }
   } catch (e) {}
+
+  // 마이그레이션: homework G1/G2/G3/G5 컬럼 통합
+  // (과거에는 scripts/migrate_homework_*.js 가 개별 실행되었으나,
+  //  서버 부팅 시 항상 적용되도록 schema 측에 흡수)
+  try {
+    const hwCols2 = db.prepare("PRAGMA table_info(homework)").all().map(c => c.name);
+    if (!hwCols2.includes('start_date'))   db.exec("ALTER TABLE homework ADD COLUMN start_date TEXT");
+    if (!hwCols2.includes('attachments'))  db.exec("ALTER TABLE homework ADD COLUMN attachments TEXT");
+    if (!hwCols2.includes('display_mode')) db.exec("ALTER TABLE homework ADD COLUMN display_mode TEXT DEFAULT 'list'");
+
+    const hsCols = db.prepare("PRAGMA table_info(homework_submissions)").all().map(c => c.name);
+    if (!hsCols.includes('is_draft'))          db.exec("ALTER TABLE homework_submissions ADD COLUMN is_draft INTEGER DEFAULT 0");
+    if (!hsCols.includes('draft_content'))     db.exec("ALTER TABLE homework_submissions ADD COLUMN draft_content TEXT");
+    if (!hsCols.includes('draft_attachments')) db.exec("ALTER TABLE homework_submissions ADD COLUMN draft_attachments TEXT");
+    if (!hsCols.includes('draft_updated_at'))  db.exec("ALTER TABLE homework_submissions ADD COLUMN draft_updated_at TEXT");
+    if (!hsCols.includes('attachments'))       db.exec("ALTER TABLE homework_submissions ADD COLUMN attachments TEXT");
+
+    db.exec("CREATE INDEX IF NOT EXISTS idx_homework_start_date ON homework(class_id, start_date)");
+  } catch (e) {
+    console.warn('[schema] homework extended migration:', e.message);
+  }
 
   // 과제 피드백 (교사-학생 1:1 채팅) 테이블
   try {

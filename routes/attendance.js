@@ -309,14 +309,57 @@ router.get('/:classId/emotion/reflections', requireAuth, requireMember, (req, re
 });
 
 // POST /api/attendance/:classId/emotion/reflections - 회고 작성
+//
+// B07: start_date 친화 자동 보정
+//  - 클라이언트가 { period, content } 만 보내도 KST 기준 이번 주(월~일) 또는
+//    이번 달(1일~말일) 로 자동 계산하여 저장한다.
+//  - 명시적으로 start_date 가 들어오면 그대로 사용한다.
 router.post('/:classId/emotion/reflections', requireAuth, requireMember, (req, res) => {
   try {
-    const { period, start_date, end_date, question, content, answer } = req.body || {};
+    let { period, start_date, end_date, question, content, answer } = req.body || {};
     const reflectionType = period === 'monthly' ? 'monthly' : 'weekly';
+
+    // KST(UTC+9) 기준 자동 보정 함수
+    function autoStartEndKST(p) {
+      const now = new Date(Date.now() + 9 * 3600 * 1000); // UTC → KST 로 9시간 시프트
+      const today = now.toISOString().slice(0, 10);
+      if (p === 'weekly') {
+        const dow = now.getUTCDay(); // 시프트된 시간 기준 요일 (0=일, 1=월, ...)
+        const monday = new Date(now);
+        monday.setUTCDate(now.getUTCDate() - (dow === 0 ? 6 : dow - 1));
+        const sunday = new Date(monday);
+        sunday.setUTCDate(monday.getUTCDate() + 6);
+        return {
+          start_date: monday.toISOString().slice(0, 10),
+          end_date: sunday.toISOString().slice(0, 10)
+        };
+      }
+      if (p === 'monthly') {
+        const y = now.getUTCFullYear();
+        const m = now.getUTCMonth();
+        const first = new Date(Date.UTC(y, m, 1));
+        const last = new Date(Date.UTC(y, m + 1, 0)); // 다음달 0일 = 이번 달 마지막 날
+        return {
+          start_date: first.toISOString().slice(0, 10),
+          end_date: last.toISOString().slice(0, 10)
+        };
+      }
+      return { start_date: today, end_date: today };
+    }
+
+    // start_date/end_date 어느 하나라도 빠지면 자동 보정 적용
+    if (!start_date || !end_date) {
+      const auto = autoStartEndKST(reflectionType);
+      start_date = start_date || auto.start_date;
+      end_date = end_date || auto.end_date;
+    }
+
+    // 자동 보정 이후에도 비어 있으면 명시적 400 (이론상 발생 어려움)
     if (!start_date) {
       return res.status(400).json({ success: false, message: 'start_date는 필수입니다.' });
     }
-    // end_date 미지정 시 자동 계산 (weekly=+6, monthly=+29)
+
+    // end_date 미지정 시 자동 계산 (weekly=+6, monthly=+29) — 레거시 호환
     const computeEnd = (s) => {
       const d = new Date(s);
       d.setDate(d.getDate() + (reflectionType === 'monthly' ? 29 : 6));
@@ -334,7 +377,13 @@ router.post('/:classId/emotion/reflections', requireAuth, requireMember, (req, r
       question: question || null,
       answer: answerText.trim()
     });
-    res.json({ success: true, id: result.id, period: reflectionType });
+    res.json({
+      success: true,
+      id: result.id,
+      period: reflectionType,
+      start_date,
+      end_date: periodEnd
+    });
   } catch (err) {
     console.error('[ATTENDANCE] reflections POST error:', err);
     res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
