@@ -94,6 +94,9 @@
     /* 실제 영상 썸네일이 잘 보이도록 충분한 높이 + 16:9 비율 + cover */
     .learn-card-thumb { aspect-ratio: 16 / 9; min-height: 140px; display: flex; align-items: center; justify-content: center; position: relative; background: var(--gray-50); border-bottom: 1px solid var(--gray-100); background-size: cover; background-position: center; }
     .learn-card-thumb i { font-size: 32px; color: var(--gray-400); }
+    /* ▶ 영상 오버레이: 호버 시 확대 + 그림자 강조 */
+    .learn-card:hover .learn-card-play { transform: translate(-50%, -50%) scale(1.12); background: rgba(0,0,0,.75); box-shadow: 0 6px 18px rgba(0,0,0,.35); }
+    /* 썸네일 img 로드 실패 → .thumb-fallback 클래스가 붙어 그라데이션이 자연스럽게 노출됨 (배경은 inline style로 이미 적용됨) */
     .learn-card-badge { position: absolute; top: 8px; right: 8px; padding: 3px 10px; border-radius: 12px; font-size: var(--fs-xs); font-weight: 700; }
     .learn-card-badge.done { background: var(--success-light); color: #059669; }
     .learn-card-badge.progress { background: var(--primary-light); color: var(--primary); }
@@ -710,6 +713,43 @@
       renderLearnCards();
     }
 
+    // ===== YouTube ID 추출 & 첫 영상 썸네일 (F-P2-B, 2026-05-19) =====
+    // 지원 URL 4종:
+    //   - https://www.youtube.com/watch?v=ABC123 (param)
+    //   - https://youtu.be/ABC123
+    //   - https://www.youtube.com/embed/ABC123
+    //   - https://www.youtube.com/shorts/ABC123
+    // YouTube ID는 11자리 [A-Za-z0-9_-] 정규 형식. 매칭 실패 시 null 반환.
+    function extractYouTubeId(url) {
+      if (!url || typeof url !== 'string') return null;
+      // 1) v= 쿼리 (watch?v=...)
+      let m = url.match(/[?&]v=([A-Za-z0-9_-]{11})(?:[^A-Za-z0-9_-]|$)/);
+      if (m) return m[1];
+      // 2) youtu.be/{ID}
+      m = url.match(/youtu\.be\/([A-Za-z0-9_-]{11})(?:[^A-Za-z0-9_-]|$)/);
+      if (m) return m[1];
+      // 3) /embed/{ID}
+      m = url.match(/\/embed\/([A-Za-z0-9_-]{11})(?:[^A-Za-z0-9_-]|$)/);
+      if (m) return m[1];
+      // 4) /shorts/{ID}
+      m = url.match(/\/shorts\/([A-Za-z0-9_-]{11})(?:[^A-Za-z0-9_-]|$)/);
+      if (m) return m[1];
+      return null;
+    }
+    // items 중 첫 번째 video 타입 + YouTube URL 아이템에서 썸네일 URL 추출
+    // 반환: 'https://img.youtube.com/vi/{ID}/hqdefault.jpg' 또는 null
+    function extractFirstYouTubeThumb(items) {
+      if (!Array.isArray(items)) return null;
+      for (const it of items) {
+        const ctype = (it.content_type || '').toLowerCase();
+        if (ctype !== 'video') continue;
+        const url = it.content_url || '';
+        const id = extractYouTubeId(url);
+        if (id) return `https://img.youtube.com/vi/${id}/hqdefault.jpg`;
+      }
+      return null;
+    }
+
     // ===== 학습 카드: 제목 합성 (F-P2-A) =====
     // 사용자 의견(2026-05-19): 날짜·학년·"오늘의 학습" 워딩 불필요 → 과목 + 주제만 표시
     // theme 결정 4단계 폴백:
@@ -829,7 +869,14 @@
         // theme 우선순위: 첫 아이템 content_unit_name → content_category → item_title/content_title에서 단원명 추출
         const displayTitle = computeSetDisplayTitle(set, subject);
 
-        // 썸네일: img 태그로 렌더하여 깨질 경우 onerror로 mqdefault → default 폴백, 최종 실패 시 그라디언트
+        // ===== 썸네일 우선순위 (F-P2-B, 2026-05-19) =====
+        // 1) set.items 첫 번째 video 타입 + YouTube URL → img.youtube.com/vi/{ID}/hqdefault.jpg
+        // 2) set.thumbnail_url (DB 컬럼)
+        // 3) 그라데이션 + 과목 아이콘 (폴백)
+        // 이미지 로드 실패 시 onerror로 mqdefault → default → img 제거 후 그라데이션 노출
+        const ytThumb = extractFirstYouTubeThumb(items);
+        const thumbSrc = ytThumb || set.thumbnail_url || '';
+        const isVideoThumb = !!ytThumb; // ▶ 오버레이 표시 여부
         const thumbStyle = `background:linear-gradient(135deg, ${subjColor}22 0%, ${subjColor}0D 55%, ${subjColor}1C 100%);overflow:hidden;`;
         const buildFallback = (orig) => {
           if (!orig) return '';
@@ -838,9 +885,16 @@
           if (orig.includes('mqdefault')) return orig.replace('mqdefault', 'default');
           return '';
         };
-        const thumbImg = set.thumbnail_url ? `<img src="${escHtml(set.thumbnail_url)}" alt="" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:0;" onerror="(function(img){var fb='${buildFallback(set.thumbnail_url)}';if(fb&&img.src!==fb){img.src=fb;}else{img.remove();}})(this)">` : '';
+        const thumbImg = thumbSrc ? `<img src="${escHtml(thumbSrc)}" alt="" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:0;display:block;" onerror="(function(img){var fb='${buildFallback(thumbSrc)}';if(fb&&img.src!==fb){img.src=fb;}else{img.parentNode&&img.parentNode.classList.add('thumb-fallback');img.remove();}})(this)">` : '';
 
-        const thumbDeco = set.thumbnail_url ? '' : `
+        // ▶ 비디오 오버레이 (YouTube 썸네일일 때만)
+        const playOverlay = isVideoThumb ? `
+          <span class="learn-card-play" aria-hidden="true" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);z-index:1;display:inline-flex;align-items:center;justify-content:center;width:48px;height:48px;border-radius:50%;background:rgba(0,0,0,.55);color:#fff;font-size:18px;backdrop-filter:blur(2px);box-shadow:0 4px 12px rgba(0,0,0,.25);transition:transform .2s, background .2s;">
+            <i class="fas fa-play" style="margin-left:3px;"></i>
+          </span>` : '';
+
+        // 그라데이션 + 아이콘 데코 (썸네일 이미지가 없을 때만 표시)
+        const thumbDeco = thumbSrc ? '' : `
           <span style="position:absolute;top:-26px;right:-22px;width:86px;height:86px;border-radius:50%;background:${subjColor}22;"></span>
           <span style="position:absolute;bottom:-18px;left:-14px;width:54px;height:54px;border-radius:50%;background:${subjColor}18;"></span>
           <span style="position:absolute;top:14px;left:18px;width:6px;height:6px;border-radius:50%;background:${subjColor}55;"></span>
@@ -852,6 +906,7 @@
         return `<div class="learn-card ${statusClass}" onclick="openPlayer(${origIdx})">
           <div class="learn-card-thumb" style="${thumbStyle}">
             ${thumbImg}
+            ${playOverlay}
             ${thumbDeco}
             <span class="learn-card-badge ${badgeClass}" style="position:absolute;z-index:2;">${badgeText}</span>
           </div>
