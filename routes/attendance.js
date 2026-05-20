@@ -70,6 +70,11 @@ router.post('/:classId/checkin', requireAuth, requireMember, (req, res) => {
       const { awardPoints } = require('../db/point-helper');
       awardPoints(req.user.id, { source: 'attendance', sourceId: result.id || null, points: 10, description: '출석 포인트' });
     } catch (e) {}
+    // 클래스 마일리지 자동 지급 (출석 체크인 — daily_limit=1)
+    try {
+      const { awardClassMileage } = require('../db/class-mileage');
+      awardClassMileage(req.classId, req.user.id, 'attendance', result.id || null);
+    } catch (e) {}
     const stats = attendanceDb.getUserStats(req.classId, req.user.id);
     logLearningActivity({
       userId: req.user.id,

@@ -125,6 +125,13 @@ router.post('/:classId', requireAuth, requireMember, (req, res) => {
         });
       } catch (e) { console.error('[BOARD] gallery share error:', e); }
     }
+    // 클래스 마일리지 자동 지급 — 게시글 작성 (daily_limit=3)
+    try {
+      if (post && post.id) {
+        const { awardClassMileage } = require('../db/class-mileage');
+        awardClassMileage(req.classId, req.user.id, 'board_post', post.id);
+      }
+    } catch (_) {}
     res.status(201).json({ success: true, post });
   } catch (err) { res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' }); }
 });
@@ -175,6 +182,13 @@ router.post('/:classId/:postId/comments', requireAuth, requireMember, (req, res)
     }
     const comment = boardDb.createComment(parseInt(req.params.postId), req.user.id, req.body.content, req.body.parent_id || null);
     try { ensureTodayAttendance(req.classId, req.user.id, 'comment_write'); } catch (e) {}
+    // 클래스 마일리지 자동 지급 — 댓글 작성 (daily_limit=10)
+    try {
+      if (comment && comment.id) {
+        const { awardClassMileage } = require('../db/class-mileage');
+        awardClassMileage(req.classId, req.user.id, 'board_comment', comment.id);
+      }
+    } catch (_) {}
     res.status(201).json({ success: true, comment });
   } catch (err) { res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' }); }
 });

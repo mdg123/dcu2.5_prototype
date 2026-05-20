@@ -1117,6 +1117,7 @@
             <button class="tab-btn" onclick="switchAnalyticsTab(this,'alerts')">⚠️ 관심 학생</button>
             <!-- AI 맞춤학습 탭 제거: 개인 성장 영역(성장기록)에서 다룸. 클래스별 학습분석은 클래스 내 활동만 다룸. -->
             <button class="tab-btn" onclick="switchAnalyticsTab(this,'board')">💬 게시판 분석</button>
+            <button class="tab-btn" onclick="switchAnalyticsTab(this,'mileage')">🎯 마일리지 현황</button>
           </div>
 
           <!-- 종합 분석 탭 -->
@@ -1343,6 +1344,18 @@
               </div>
             </div>
           </div>
+
+          <!-- 🎯 마일리지 현황 탭 -->
+          <div id="tabMileage" class="tab-content">
+            <div id="mileageAnalyticsSection">
+              <div class="section-box">
+                <div class="empty-state">
+                  <i class="fas fa-spinner fa-spin"></i>
+                  <h3>마일리지 데이터 로드 중…</h3>
+                </div>
+              </div>
+            </div>
+          </div>
         `;
 
         // 차트 렌더링 (AI 맞춤학습은 성장기록 영역으로 이전 — 클래스별 학습분석은 클래스 내 활동만)
@@ -1373,6 +1386,8 @@
         loadBarAnalysis(classId, _periodState.startDate, _periodState.endDate);
         // P1: 게시판 분석 탭 데이터 로드
         loadBoardAnalytics(classId, _periodState.startDate, _periodState.endDate);
+        // 🎯 마일리지 현황 탭 데이터 로드
+        loadMileageAnalytics(classId, _periodState.startDate, _periodState.endDate);
         // P1: 자동 리포트 알림 (이번 주/이번 달 미확인 시 New 배너 노출)
         renderAutoReportBanner(classId);
       } catch(err) {
@@ -3034,6 +3049,517 @@
       // 행 제한 적용
       applyTableLimit('memberStatus');
     }
+
+    // ===========================================================================
+    // ===== 🎯 마일리지 현황 탭 (Phase 2) ========================================
+    // ===========================================================================
+    let _mileageAnalyticsChart = null;
+    let _mileageAnalyticsState = {
+      classId: null,
+      startDate: null,
+      endDate: null,
+      summary: null,
+      ranking: [],
+      members: [],
+      trend: { daily: null, weekly: null, monthly: null },
+      logs: [],
+      logsTotal: 0,
+      logsPage: 1,
+      logsLimit: 20,
+      logsFilters: { userId: '', reason: '', q: '' },
+      activeTrendPeriod: 'daily',
+      memberFilter: ''
+    };
+
+    function _mileageReasonLabel(code) {
+      const map = {
+        manual_award: '수동 부여',
+        manual_deduct: '수동 차감',
+        revoke: '취소 처리',
+        lesson_complete: '수업 이수',
+        homework_submit: '과제 제출',
+        exam_complete: '평가 응시',
+        board_post: '게시글 작성',
+        board_comment: '댓글 작성',
+        attendance: '출석 체크인',
+        notice_read: '알림장 확인',
+        survey_submit: '설문 참여'
+      };
+      return map[code] || code || '활동';
+    }
+
+    // 출처(source_type) → 한글 라벨. 학습분석 이력 테이블/CSV에 사용.
+    function _mileageSourceLabel(code) {
+      const map = {
+        manual: '수동',
+        revoke: '취소',
+        lesson_complete: '수업',
+        homework_submit: '과제',
+        exam_complete: '평가',
+        board_post: '게시글',
+        board_comment: '댓글',
+        attendance: '출석',
+        notice_read: '알림장',
+        survey_submit: '설문'
+      };
+      return map[code] || code || '-';
+    }
+
+    async function loadMileageAnalytics(classId, startDate, endDate) {
+      _mileageAnalyticsState.classId = classId;
+      _mileageAnalyticsState.startDate = startDate;
+      _mileageAnalyticsState.endDate = endDate;
+      const qs = (startDate && endDate)
+        ? `?from=${encodeURIComponent(startDate)}&to=${encodeURIComponent(endDate)}`
+        : '';
+      const section = document.getElementById('mileageAnalyticsSection');
+      if (!section) return;
+
+      try {
+        const [membersRes, rulesRes, rankingRes, trendDailyRes, logsRes] = await Promise.all([
+          fetch(`/api/class/${classId}/mileage/members${qs}`).then(r => r.ok ? r.json() : null).catch(() => null),
+          fetch(`/api/class/${classId}/mileage/rules`).then(r => r.ok ? r.json() : null).catch(() => null),
+          fetch(`/api/class/${classId}/mileage/ranking?period=all&limit=10`).then(r => r.ok ? r.json() : null).catch(() => null),
+          fetch(`/api/class/${classId}/mileage/trend?period=daily${qs ? '&' + qs.slice(1) : ''}`).then(r => r.ok ? r.json() : null).catch(() => null),
+          fetch(`/api/class/${classId}/mileage/logs?page=1&limit=20${qs ? '&' + qs.slice(1) : ''}`).then(r => r.ok ? r.json() : null).catch(() => null)
+        ]);
+
+        // 데이터 파싱 — 개설자(owner)는 분석 대상에서 제외 (학생만 표시)
+        const members = (membersRes?.members || membersRes?.data || [])
+          .filter(m => (m.role || 'member') !== 'owner')
+          .map(m => ({
+            userId: m.user_id || m.userId || m.id,
+            name: m.display_name || m.name,
+            balance: Number(m.balance ?? m.points ?? 0),
+            earned: Number(m.earned ?? m.total_earned ?? 0),
+            deducted: Number(m.deducted ?? m.total_deducted ?? 0)
+          }));
+        // 개설자 제외: members 리스트에서 owner를 제거한 후 ranking에서 동일 user_id만 통과
+        const ownerIds = new Set((membersRes?.members || membersRes?.data || []).filter(m => (m.role || 'member') === 'owner').map(m => Number(m.user_id || m.userId || m.id)));
+        const ranking = (rankingRes?.ranking || rankingRes?.data || [])
+          .filter(x => !ownerIds.has(Number(x.user_id || x.userId)))
+          .map((x, i) => ({
+            userId: x.user_id || x.userId,
+            name: x.display_name || x.name,
+            balance: Number(x.balance ?? x.points ?? 0),
+            rank: i + 1 // 필터 후 재계산
+          }));
+        const trendDaily = trendDailyRes?.trend || trendDailyRes?.data || null;
+        const logs = (logsRes?.logs || logsRes?.data || []).map(l => ({
+          id: l.id,
+          userId: l.user_id || l.userId,
+          userName: l.user_name || l.display_name || '',
+          points: Number(l.delta ?? l.points ?? 0),
+          // 사유: 사용자 메모 note 우선, 없으면 reason/event_type (예: manual_award → "수동 부여")
+          reason: l.note || _mileageReasonLabel(l.reason || l.event_type || ''),
+          eventType: l.event_type || l.eventType || l.reason || '',
+          sourceType: l.source_type || l.sourceType || '',
+          awardedById: l.awarded_by || l.awardedBy || null,
+          awardedByName: l.awarded_by_name || l.awardedByName || '',
+          createdAt: l.created_at || l.createdAt
+        }));
+        const logsTotal = Number(logsRes?.total || logsRes?.count || logs.length);
+        const activeRulesCount = (rulesRes?.rules || rulesRes?.data || []).filter(r => (r.is_enabled ?? r.isEnabled) ? 1 : 0).length;
+
+        _mileageAnalyticsState.members = members;
+        _mileageAnalyticsState.ranking = ranking.length ? ranking : [...members].sort((a,b) => b.balance - a.balance).slice(0, 10).map((m,i) => ({...m, rank: i+1}));
+        _mileageAnalyticsState.trend.daily = trendDaily;
+        _mileageAnalyticsState.logs = logs;
+        _mileageAnalyticsState.logsTotal = logsTotal;
+
+        // 데이터 없음 처리
+        const noData = members.length === 0 && logs.length === 0 && !trendDaily;
+        if (noData && !rulesRes && !membersRes) {
+          section.innerHTML = `
+            <div class="section-box">
+              <div class="empty-state">
+                <i class="fas fa-exclamation-circle" style="color:#9CA3AF;"></i>
+                <h3>마일리지 데이터를 불러올 수 없습니다</h3>
+                <p>Backend API가 아직 준비되지 않았거나 통신에 문제가 있습니다.</p>
+              </div>
+            </div>`;
+          return;
+        }
+
+        const totalAwarded = members.reduce((s, m) => s + m.earned, 0);
+        const avgBalance = members.length ? Math.round(members.reduce((s,m)=>s+m.balance,0) / members.length) : 0;
+        const maxBalance = members.length ? Math.max(...members.map(m=>m.balance)) : 0;
+        const minBalance = members.length ? Math.min(...members.map(m=>m.balance)) : 0;
+        const rulesTotal = (rulesRes?.rules || rulesRes?.data || []).length || 7;
+
+        renderMileageAnalyticsLayout(section, {
+          totalAwarded, avgBalance, maxBalance, minBalance,
+          activeRulesCount, rulesTotal, members
+        });
+
+        renderMileageChart('daily');
+        renderMileageRankingChart();
+        renderMileageMembersChart();
+        renderMileageLogsTable();
+      } catch (e) {
+        console.warn('[mileage-analytics] load 실패', e);
+        section.innerHTML = `
+          <div class="section-box">
+            <div class="empty-state">
+              <i class="fas fa-exclamation-circle"></i>
+              <h3>마일리지 데이터 로드 실패</h3>
+              <p>${e.message}</p>
+            </div>
+          </div>`;
+      }
+    }
+
+    function renderMileageAnalyticsLayout(container, data) {
+      const { totalAwarded, avgBalance, maxBalance, minBalance, activeRulesCount, rulesTotal, members } = data;
+      const memberOpts = ['<option value="">전체 멤버</option>']
+        .concat(members.map(m => `<option value="${m.userId}">${escHtml(m.name)}</option>`)).join('');
+
+      container.innerHTML = `
+        <!-- 마일리지 KPI 4 -->
+        <div class="dashboard-grid" style="margin-bottom:20px;">
+          <div class="dash-card">
+            <div class="icon" style="background:#8B5CF6;">🎯</div>
+            <div class="value" style="color:#8B5CF6;">${totalAwarded.toLocaleString()}</div>
+            <div class="label">총 발급 마일리지</div>
+            <div class="trend">누적 부여 합계</div>
+          </div>
+          <div class="dash-card">
+            <div class="icon" style="background:#2563eb;"><i class="fas fa-chart-line"></i></div>
+            <div class="value" style="color:#2563eb;">${avgBalance}</div>
+            <div class="label">평균 잔액</div>
+            <div class="trend">멤버 1인당</div>
+          </div>
+          <div class="dash-card">
+            <div class="icon" style="background:#10b981;"><i class="fas fa-arrow-up"></i></div>
+            <div class="value" style="color:#10b981;">${maxBalance}</div>
+            <div class="label">최고 잔액</div>
+            <div class="trend">최고 멤버</div>
+          </div>
+          <div class="dash-card">
+            <div class="icon" style="background:#f59e0b;"><i class="fas fa-shield-alt"></i></div>
+            <div class="value" style="color:#f59e0b;">${activeRulesCount}/${rulesTotal}</div>
+            <div class="label">활성 규칙</div>
+            <div class="trend">자동 지급 규칙</div>
+          </div>
+        </div>
+
+        <!-- 추이 차트 -->
+        <div class="section-box">
+          <div class="section-header">
+            <h3 class="section-title"><i class="fas fa-chart-line" style="color:#8B5CF6"></i> 마일리지 추이</h3>
+            <div style="display:flex;gap:6px;">
+              <button class="btn btn-sm mileage-trend-chip active" data-period="daily" onclick="renderMileageChart('daily', this)">일간</button>
+              <button class="btn btn-sm mileage-trend-chip" data-period="weekly" onclick="renderMileageChart('weekly', this)">주간</button>
+              <button class="btn btn-sm mileage-trend-chip" data-period="monthly" onclick="renderMileageChart('monthly', this)">월간</button>
+            </div>
+          </div>
+          <div class="chart-container" style="height:300px;"><canvas id="mileageTrendChart"></canvas></div>
+          <div class="insight-box" style="border-left-color:#8B5CF6;">
+            <strong>📋 추이 분석</strong>
+            발급(녹색)·차감(빨강)·순증(보라) 3선으로 일자별 마일리지 흐름을 확인할 수 있습니다.
+          </div>
+        </div>
+
+        <!-- 클래스 랭킹 (가로 막대 TOP 10) -->
+        <div class="section-box">
+          <div class="section-header">
+            <h3 class="section-title"><i class="fas fa-trophy" style="color:#f59e0b"></i> 클래스 랭킹 TOP 10</h3>
+          </div>
+          <div class="chart-container" style="height:340px;"><canvas id="mileageRankingChart"></canvas></div>
+        </div>
+
+        <!-- 멤버별 상세 (잔액·획득·차감 가로 막대 분할) -->
+        <div class="section-box">
+          <div class="section-header">
+            <h3 class="section-title"><i class="fas fa-users" style="color:#2563eb"></i> 멤버별 상세 (획득 vs 차감)</h3>
+          </div>
+          <div class="chart-container" style="height:${Math.max(220, members.length * 32)}px;"><canvas id="mileageMembersChart"></canvas></div>
+        </div>
+
+        <!-- 이력 테이블 -->
+        <div class="section-box">
+          <div class="section-header" style="flex-wrap:wrap;gap:10px;">
+            <h3 class="section-title"><i class="fas fa-history" style="color:#6B7280"></i> 마일리지 이력</h3>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+              <input type="text" id="mileageLogsSearch" placeholder="사유 검색…" style="padding:7px 12px;border:1.5px solid #d1d5db;border-radius:8px;font-size:13px;outline:none;width:160px;" oninput="mileageLogsFilterChanged()">
+              <select id="mileageLogsUserFilter" onchange="mileageLogsFilterChanged()" style="padding:7px 12px;border:1.5px solid #d1d5db;border-radius:8px;font-size:13px;background:#fff;font-family:inherit;">${memberOpts}</select>
+              <select id="mileageLogsReasonFilter" onchange="mileageLogsFilterChanged()" style="padding:7px 12px;border:1.5px solid #d1d5db;border-radius:8px;font-size:13px;background:#fff;font-family:inherit;">
+                <option value="">전체 구분</option>
+                <option value="award">부여</option>
+                <option value="deduct">차감</option>
+              </select>
+              <button class="btn" style="background:#8B5CF6;color:#fff;" onclick="exportMileageCSV()"><i class="fas fa-file-download"></i> CSV 내보내기</button>
+            </div>
+          </div>
+          <div id="mileageLogsTableWrap" style="overflow-x:auto;">
+            <div style="text-align:center;padding:24px;color:#9CA3AF;font-size:13px;">로드 중...</div>
+          </div>
+          <div id="mileageLogsPager" style="margin-top:12px;display:flex;justify-content:center;gap:6px;"></div>
+        </div>
+      `;
+    }
+
+    function renderMileageChart(period, btn) {
+      _mileageAnalyticsState.activeTrendPeriod = period;
+      // 칩 활성화
+      document.querySelectorAll('.mileage-trend-chip').forEach(b => b.classList.remove('active'));
+      if (btn) btn.classList.add('active'); else {
+        document.querySelectorAll('.mileage-trend-chip').forEach(b => {
+          if (b.dataset.period === period) b.classList.add('active');
+        });
+      }
+      const canvas = document.getElementById('mileageTrendChart');
+      if (!canvas) return;
+
+      // 다른 기간일 때 추가 fetch
+      let trend = _mileageAnalyticsState.trend[period];
+      if (!trend && period !== 'daily') {
+        const classId = _mileageAnalyticsState.classId;
+        const startDate = _mileageAnalyticsState.startDate;
+        const endDate = _mileageAnalyticsState.endDate;
+        const qs = (startDate && endDate) ? `&from=${encodeURIComponent(startDate)}&to=${encodeURIComponent(endDate)}` : '';
+        fetch(`/api/class/${classId}/mileage/trend?period=${period}${qs}`)
+          .then(r => r.ok ? r.json() : null).catch(() => null)
+          .then(res => {
+            _mileageAnalyticsState.trend[period] = res?.trend || res?.data || { labels: [], earned: [], deducted: [], net: [] };
+            renderMileageChart(period, btn);
+          });
+        return;
+      }
+
+      // 데이터 없을 때 mock (멤버 데이터 기반 7일 시뮬)
+      if (!trend || !trend.labels || trend.labels.length === 0) {
+        trend = _mockMileageTrend(period);
+      }
+
+      if (_mileageAnalyticsChart) { _mileageAnalyticsChart.destroy(); _mileageAnalyticsChart = null; }
+      _mileageAnalyticsChart = new Chart(canvas.getContext('2d'), {
+        type: 'line',
+        data: {
+          labels: trend.labels || [],
+          datasets: [
+            { label: '발급', data: trend.earned || [], borderColor: '#10b981', backgroundColor: 'rgba(16,185,129,0.1)', tension: 0.3, borderWidth: 2.5 },
+            { label: '차감', data: trend.deducted || [], borderColor: '#ef4444', backgroundColor: 'rgba(239,68,68,0.1)', tension: 0.3, borderWidth: 2.5 },
+            { label: '순증', data: trend.net || [], borderColor: '#8B5CF6', backgroundColor: 'rgba(139,92,246,0.15)', tension: 0.3, borderWidth: 3, fill: true }
+          ]
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { position: 'top' } },
+          scales: { y: { beginAtZero: true } }
+        }
+      });
+    }
+
+    function _mockMileageTrend(period) {
+      const cnt = period === 'monthly' ? 6 : period === 'weekly' ? 8 : 7;
+      const labels = [];
+      const earned = [];
+      const deducted = [];
+      const net = [];
+      const today = new Date();
+      for (let i = cnt - 1; i >= 0; i--) {
+        const d = new Date(today);
+        if (period === 'daily') d.setDate(today.getDate() - i);
+        else if (period === 'weekly') d.setDate(today.getDate() - i * 7);
+        else d.setMonth(today.getMonth() - i);
+        const fmt = period === 'monthly' ? `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}` : `${d.getMonth()+1}/${d.getDate()}`;
+        labels.push(fmt);
+        const e = 0, dd = 0;
+        earned.push(e); deducted.push(dd); net.push(e - dd);
+      }
+      return { labels, earned, deducted, net };
+    }
+
+    let _mileageRankingChart = null;
+    function renderMileageRankingChart() {
+      const canvas = document.getElementById('mileageRankingChart');
+      if (!canvas) return;
+      const top = _mileageAnalyticsState.ranking.slice(0, 10);
+      if (_mileageRankingChart) { _mileageRankingChart.destroy(); _mileageRankingChart = null; }
+      if (top.length === 0) {
+        const ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = '#9CA3AF';
+        ctx.font = '14px Pretendard';
+        ctx.textAlign = 'center';
+        ctx.fillText('랭킹 데이터가 없습니다', canvas.width / 2, 80);
+        return;
+      }
+      _mileageRankingChart = new Chart(canvas.getContext('2d'), {
+        type: 'bar',
+        data: {
+          labels: top.map((m, i) => `${i+1}위 ${m.name}`),
+          datasets: [{
+            label: '마일리지 잔액',
+            data: top.map(m => m.balance),
+            backgroundColor: top.map((m, i) => i === 0 ? '#f59e0b' : i === 1 ? '#9CA3AF' : i === 2 ? '#b45309' : '#8B5CF6'),
+            borderRadius: 6,
+            barThickness: 22
+          }]
+        },
+        options: {
+          indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { display: false } },
+          scales: { x: { beginAtZero: true } }
+        }
+      });
+    }
+
+    let _mileageMembersChart = null;
+    function renderMileageMembersChart() {
+      const canvas = document.getElementById('mileageMembersChart');
+      if (!canvas) return;
+      const members = [..._mileageAnalyticsState.members].sort((a,b) => b.earned - a.earned);
+      if (_mileageMembersChart) { _mileageMembersChart.destroy(); _mileageMembersChart = null; }
+      if (members.length === 0) return;
+
+      _mileageMembersChart = new Chart(canvas.getContext('2d'), {
+        type: 'bar',
+        data: {
+          labels: members.map(m => m.name),
+          datasets: [
+            { label: '획득(+)', data: members.map(m => m.earned), backgroundColor: '#10b981', borderRadius: 4 },
+            { label: '차감(−)', data: members.map(m => -m.deducted), backgroundColor: '#ef4444', borderRadius: 4 }
+          ]
+        },
+        options: {
+          indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { position: 'top' } },
+          scales: {
+            x: { stacked: true, beginAtZero: true },
+            y: { stacked: true }
+          }
+        }
+      });
+    }
+
+    function renderMileageLogsTable() {
+      const wrap = document.getElementById('mileageLogsTableWrap');
+      const pager = document.getElementById('mileageLogsPager');
+      if (!wrap) return;
+      const logs = _mileageAnalyticsState.logs;
+      // 멤버(학생) 화이트리스트로 owner 제외 — 멤버에 없는 user_id는 표시하지 않음
+      const memberIds = new Set(_mileageAnalyticsState.members.map(m => Number(m.userId)));
+      // 클라이언트 필터링 (Backend가 안 받는 경우 대비)
+      const f = _mileageAnalyticsState.logsFilters;
+      const filtered = logs.filter(l => {
+        if (memberIds.size > 0 && !memberIds.has(Number(l.userId))) return false;
+        if (f.userId && Number(l.userId) !== Number(f.userId)) return false;
+        if (f.reason === 'award' && l.points <= 0) return false;
+        if (f.reason === 'deduct' && l.points >= 0) return false;
+        if (f.q && !(l.reason || '').toLowerCase().includes(f.q.toLowerCase())) return false;
+        return true;
+      });
+
+      if (filtered.length === 0) {
+        wrap.innerHTML = '<div style="text-align:center;padding:24px;color:#9CA3AF;font-size:13px;">조건에 맞는 이력이 없습니다.</div>';
+        pager.innerHTML = '';
+        return;
+      }
+
+      wrap.innerHTML = `
+        <table class="data-table" style="width:100%;">
+          <thead>
+            <tr>
+              <th>날짜</th>
+              <th>멤버</th>
+              <th style="text-align:center;width:70px;">±</th>
+              <th>사유</th>
+              <th style="width:90px;">출처</th>
+              <th style="width:110px;">부여자</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${filtered.map(l => {
+              const isPlus = l.points >= 0;
+              const dt = l.createdAt ? new Date(l.createdAt) : null;
+              const dtStr = dt ? `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')} ${String(dt.getHours()).padStart(2,'0')}:${String(dt.getMinutes()).padStart(2,'0')}` : '-';
+              const sign = isPlus ? '+' : '';
+              const grantor = l.awardedByName
+                ? escHtml(l.awardedByName)
+                : '<span style="color:#9CA3AF;font-style:normal;">자동</span>';
+              return `
+                <tr>
+                  <td style="font-size:13px;color:#6B7280;">${dtStr}</td>
+                  <td style="font-weight:600;">${escHtml(l.userName || '-')}</td>
+                  <td style="text-align:center;font-weight:700;color:${isPlus ? '#10b981' : '#ef4444'};">${sign}${l.points}</td>
+                  <td style="font-size:13px;">${escHtml(l.reason || '-')}</td>
+                  <td style="font-size:13px;color:#374151;">${escHtml(_mileageSourceLabel(l.sourceType || l.eventType || ''))}</td>
+                  <td style="font-size:13px;">${grantor}</td>
+                </tr>
+              `;
+            }).join('')}
+          </tbody>
+        </table>
+      `;
+      pager.innerHTML = `<span style="color:#6B7280;font-size:13px;">총 ${filtered.length}건${_mileageAnalyticsState.logsTotal > filtered.length ? ` (전체 ${_mileageAnalyticsState.logsTotal}건)` : ''}</span>`;
+    }
+
+    function mileageLogsFilterChanged() {
+      const q = document.getElementById('mileageLogsSearch')?.value || '';
+      const userId = document.getElementById('mileageLogsUserFilter')?.value || '';
+      const reason = document.getElementById('mileageLogsReasonFilter')?.value || '';
+      _mileageAnalyticsState.logsFilters = { q, userId, reason };
+      renderMileageLogsTable();
+    }
+
+    function exportMileageCSV() {
+      const classId = _mileageAnalyticsState.classId;
+      const startDate = _mileageAnalyticsState.startDate;
+      const endDate = _mileageAnalyticsState.endDate;
+      const qs = (startDate && endDate) ? `?from=${encodeURIComponent(startDate)}&to=${encodeURIComponent(endDate)}` : '';
+
+      // 1순위: 백엔드 export 엔드포인트로 다이렉트 다운로드
+      try {
+        const url = `/api/class/${classId}/mileage/export.csv${qs}`;
+        // HEAD로 존재 여부 확인 후 location 이동. 실패 시 클라이언트 생성 fallback.
+        fetch(url, { method: 'HEAD' }).then(r => {
+          if (r.ok) {
+            const a = document.createElement('a');
+            a.href = url; a.download = `클래스마일리지_이력_${new Date().toISOString().slice(0,10)}.csv`;
+            document.body.appendChild(a); a.click(); a.remove();
+          } else {
+            _exportMileageCSVClientSide();
+          }
+        }).catch(() => _exportMileageCSVClientSide());
+      } catch (e) {
+        _exportMileageCSVClientSide();
+      }
+    }
+
+    function _exportMileageCSVClientSide() {
+      const logs = _mileageAnalyticsState.logs || [];
+      if (!logs.length) { showToast('내보낼 이력이 없습니다.'); return; }
+      const headers = ['날짜', '멤버', '±', '사유', '출처', '부여자'];
+      const rows = logs.map(l => {
+        const dt = l.createdAt ? new Date(l.createdAt) : null;
+        const dtStr = dt ? `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')} ${String(dt.getHours()).padStart(2,'0')}:${String(dt.getMinutes()).padStart(2,'0')}` : '';
+        const sign = l.points >= 0 ? '+' : '';
+        return [dtStr, l.userName || '', `${sign}${l.points}`, l.reason || '', _mileageSourceLabel(l.sourceType || l.eventType || ''), l.awardedByName || '자동'];
+      });
+      const csv = [headers, ...rows].map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n');
+      // UTF-8 BOM for Excel 한글
+      const blob = new Blob([new Uint8Array([0xEF, 0xBB, 0xBF]), csv], { type: 'text/csv;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const ts = new Date().toISOString().slice(0,10);
+      a.href = url; a.download = `클래스마일리지_이력_${ts}.csv`;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      showToast('CSV 파일을 다운로드합니다.');
+    }
+
+    // ===== 마일리지 추이 칩 스타일 =====
+    (function injectMileageChipStyle() {
+      const s = document.createElement('style');
+      s.textContent = `
+        .mileage-trend-chip { background: #fff; border: 1.5px solid #d1d5db; color: #6B7280; padding: 6px 14px; border-radius: 99px; font-size: 13px; font-weight: 600; cursor: pointer; }
+        .mileage-trend-chip:hover { border-color: #8B5CF6; color: #8B5CF6; }
+        .mileage-trend-chip.active { background: #8B5CF6; border-color: #8B5CF6; color: #fff; }
+      `;
+      document.head.appendChild(s);
+    })();
 
     document.addEventListener('click', (e) => {
       if (e.target.closest('#memberCsvBtn')) {

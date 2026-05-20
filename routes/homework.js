@@ -292,6 +292,13 @@ router.post('/:classId/:homeworkId/submit', requireAuth, requireClassMember, (re
         submission: { content, file_path: file_path || file_url || null },
       });
     } catch (_) {}
+    // 클래스 마일리지 자동 지급 — 과제 "최초" 제출에만 (재제출 제외, UNIQUE 제약으로도 보장)
+    try {
+      if (!result.updated) {
+        const { awardClassMileage } = require('../db/class-mileage');
+        awardClassMileage(parseInt(req.params.classId), req.user.id, 'homework_submit', parseInt(req.params.homeworkId));
+      }
+    } catch (_) {}
     res.json({ success: true, message: result.updated ? '과제가 수정되었습니다.' : '과제가 제출되었습니다.' });
   } catch (err) {
     res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });

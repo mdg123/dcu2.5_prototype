@@ -27,6 +27,40 @@ function initSocket(io) {
     const userId = session.userId;
     socket.join(`user:${userId}`);
 
+    // ─── 클래스 룸 입장 (마일리지 실시간 갱신·향후 클래스 단위 이벤트 공용) ─────
+    // 클라이언트가 자신이 속한 class id를 알려주면 그 룸으로 join.
+    // 권한 검증: class_members(status='active') 인지 확인 → 외부 클래스 잠입 방지.
+    socket.on('join:class', ({ classId }) => {
+      try {
+        const cid = parseInt(classId);
+        if (!cid) return;
+        const member = db.prepare(
+          "SELECT id FROM class_members WHERE class_id = ? AND user_id = ? AND status = 'active'"
+        ).get(cid, userId);
+        if (!member) return;
+        socket.join(`class:${cid}`);
+      } catch (e) { /* silent */ }
+    });
+
+    socket.on('leave:class', ({ classId }) => {
+      try {
+        const cid = parseInt(classId);
+        if (!cid) return;
+        socket.leave(`class:${cid}`);
+      } catch (e) { /* silent */ }
+    });
+
+    // 자동 join — 사용자가 속한 모든 active 클래스에 자동 입장
+    // (학생/교사 양쪽 모두 잔액 위젯·랭킹 실시간 갱신을 위함)
+    try {
+      const rows = db.prepare(
+        "SELECT class_id FROM class_members WHERE user_id = ? AND status = 'active'"
+      ).all(userId);
+      for (const r of rows) {
+        socket.join(`class:${r.class_id}`);
+      }
+    } catch (e) { /* silent */ }
+
     // ─── 학생 시험방 입장 ──────────────────────────────────────────────
     socket.on('exam:join', ({ examId, classId }) => {
       if (!examId) return;

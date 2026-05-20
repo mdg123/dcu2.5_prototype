@@ -130,6 +130,13 @@ router.post('/:classId', requireAuth, requireMember, requireOwner, (req, res) =>
 router.get('/:classId/:noticeId', requireAuth, requireMember, loadNotice, (req, res) => {
   try {
     noticeDb.markRead(req.noticeId, req.user.id);
+    // 클래스 마일리지 자동 지급 — 알림장 1건 읽음 (daily_limit=20)
+    // UNIQUE(class_id, user_id, source_type='notice_read', source_id=noticeId, reason)으로
+    // 같은 알림장 재방문 시 중복 지급 자연 차단.
+    try {
+      const { awardClassMileage } = require('../db/class-mileage');
+      awardClassMileage(req.classId, req.user.id, 'notice_read', req.noticeId);
+    } catch (_) {}
     // 읽음 표시 직후 다시 조회하여 viewerId 메타까지 반영
     const notice = noticeDb.getNoticeById(req.noticeId, req.user.id);
     let extra = {};

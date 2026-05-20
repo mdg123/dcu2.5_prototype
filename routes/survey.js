@@ -84,6 +84,11 @@ router.post('/:classId/:surveyId/submit', requireAuth, requireMember, (req, res)
       ...extractLogContext(req)
     });
     try { ensureTodayAttendance(parseInt(req.params.classId), req.user.id, 'survey_respond'); } catch (e) {}
+    // 클래스 마일리지 자동 지급 — 설문 참여 (1회만, UNIQUE로 중복 차단)
+    try {
+      const { awardClassMileage } = require('../db/class-mileage');
+      awardClassMileage(parseInt(req.params.classId), req.user.id, 'survey_submit', parseInt(req.params.surveyId));
+    } catch (e) { console.error('[mileage:survey_submit]', e.message); }
     res.json({ success: true, message: '설문이 제출되었습니다.' });
   } catch (err) { res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' }); }
 });

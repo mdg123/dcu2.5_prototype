@@ -117,6 +117,15 @@ io.use((socket, next) => {
 // 라우트
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/class', require('./routes/class'));
+// 클래스 마일리지 시스템 (자동 지급 + 교사 수동 운영)
+// — /api/class/:classId/mileage/* 로 마운트 (mergeParams로 :classId 전달)
+{
+  const { requireAuth } = require('./middleware/auth');
+  const classMileageRoutes = require('./routes/class-mileage');
+  app.use('/api/class/:classId/mileage', requireAuth, classMileageRoutes);
+  // Socket.IO 인스턴스를 마일리지 DB 모듈에 주입 (실시간 잔액 갱신 emit용)
+  try { require('./db/class-mileage').setIo(io); } catch (_) {}
+}
 app.use('/api/admin', require('./routes/admin'));
 app.use('/api/attendance', require('./routes/attendance'));
 app.use('/api/lesson', require('./routes/lesson'));

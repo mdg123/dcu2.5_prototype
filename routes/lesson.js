@@ -228,6 +228,13 @@ router.post('/:classId/:lessonId/progress', requireAuth, requireClassMember, (re
         });
       }
     } catch (_) {}
+    // 클래스 마일리지 자동 지급 — 수업 100% 이수 시에만 (daily_limit=5)
+    try {
+      if (completed || (typeof progress_percent === 'number' && progress_percent >= 100)) {
+        const { awardClassMileage } = require('../db/class-mileage');
+        awardClassMileage(parseInt(req.params.classId), req.user.id, 'lesson_complete', parseInt(req.params.lessonId));
+      }
+    } catch (_) {}
     res.json({ success: true });
   } catch (err) {
     console.error('[lesson progress]', err.message);

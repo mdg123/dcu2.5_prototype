@@ -11,6 +11,7 @@
   <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js" onload="window._katexReady=true;"></script>
   <script src="https://cdn.quilljs.com/1.3.7/quill.min.js"></script>
+  <script src="/socket.io/socket.io.js"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: 'Pretendard','Noto Sans KR',system-ui,sans-serif; background: #F5F7FA; color: #1A1A2E; font-size: 17px; }
@@ -110,7 +111,7 @@
     .content-area:not([data-active-tab="home"]) .main-content { max-width: none; }
     .sidebar { position: sticky; top: 16px; align-self: start; }
 
-    @media (max-width: 1200px) {
+    @media (max-width: 1280px) {
       .content-area[data-active-tab="home"] { grid-template-columns: minmax(0,1fr); }
       .content-area[data-active-tab="home"] .sidebar { display: none; }
     }
@@ -238,6 +239,106 @@
       .lesson-stats-bar { flex-wrap: wrap; }
       .lesson-stat { min-width: calc(50% - 8px); }
       .lesson-card-main { flex-wrap: wrap; }
+    }
+
+    /* ===== 클래스 마일리지 위젯 (보라 #8B5CF6 · 🎯) ===== */
+    .mileage-card { background: #fff; border-radius: 12px; padding: 18px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); border: 1.5px solid #EDE9FE; }
+    .mileage-card-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 14px; }
+    .mileage-card-head h4 { font-size: 16px; font-weight: 700; color: #1A1A2E; display: flex; align-items: center; gap: 6px; }
+    .mileage-card-head h4 .mileage-emoji { font-size: 18px; }
+    .mileage-card-head .mileage-scope-tag { font-size: 13px; padding: 3px 10px; background: #EDE9FE; color: #7c3aed; border-radius: 999px; font-weight: 600; }
+    .mileage-rules-btn { background: none; border: 1.5px solid #d1d5db; border-radius: 8px; padding: 6px 12px; font-size: 13px; color: #374151; cursor: pointer; font-family: inherit; font-weight: 600; display: inline-flex; align-items: center; gap: 4px; }
+    .mileage-rules-btn:hover { border-color: #8B5CF6; color: #8B5CF6; }
+
+    /* 학생 잔액 */
+    .mileage-balance { text-align: center; padding: 14px 8px 18px; border-bottom: 1px solid #F3F4F6; margin-bottom: 14px; }
+    .mileage-balance .mb-value { font-size: 36px; font-weight: 800; color: #8B5CF6; line-height: 1.1; letter-spacing: -0.5px; }
+    .mileage-balance .mb-value .mb-unit { font-size: 18px; font-weight: 700; margin-left: 4px; color: #8B5CF6; }
+    .mileage-balance .mb-cumulative { font-size: 13px; color: #6B7280; margin-top: 6px; }
+    .mileage-balance .mb-cumulative .plus { color: #10b981; font-weight: 600; }
+    .mileage-balance .mb-cumulative .minus { color: #ef4444; font-weight: 600; }
+
+    .mileage-rank-row { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; background: #FAFAFA; border-radius: 10px; margin-bottom: 14px; cursor: pointer; transition: background 0.15s; font-size: 14px; }
+    .mileage-rank-row:hover { background: #F3F4F6; }
+    .mileage-rank-row .mr-label { display: flex; align-items: center; gap: 6px; color: #374151; font-weight: 600; }
+    .mileage-rank-row .mr-value { font-weight: 700; color: #8B5CF6; }
+
+    .mileage-recent-title { font-size: 14px; font-weight: 700; color: #374151; margin-bottom: 8px; }
+    .mileage-recent-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
+    .mileage-recent-item { display: flex; align-items: center; gap: 8px; padding: 8px 4px; font-size: 13px; border-bottom: 1px solid #F9FAFB; }
+    .mileage-recent-item:last-child { border-bottom: none; }
+    .mileage-recent-item .mri-icon { width: 22px; text-align: center; }
+    .mileage-recent-item .mri-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #374151; }
+    .mileage-recent-item .mri-points { font-weight: 700; flex-shrink: 0; }
+    .mileage-recent-item .mri-points.plus { color: #10b981; }
+    .mileage-recent-item .mri-points.minus { color: #ef4444; }
+    .mileage-recent-item .mri-time { font-size: 13px; color: #9CA3AF; flex-shrink: 0; }
+
+    .mileage-card-foot { display: flex; gap: 8px; }
+    .mileage-card-foot button { flex: 1; padding: 9px 12px; border-radius: 8px; font-size: 13px; font-weight: 600; font-family: inherit; cursor: pointer; border: 1.5px solid #d1d5db; background: #fff; color: #374151; }
+    .mileage-card-foot button:hover { border-color: #8B5CF6; color: #8B5CF6; }
+    .mileage-card-foot .btn-mileage-primary { border-color: #8B5CF6; background: #8B5CF6; color: #fff; }
+    .mileage-card-foot .btn-mileage-primary:hover { background: #7c3aed; border-color: #7c3aed; color: #fff; }
+
+    /* 교사 멤버 마일리지 */
+    .mileage-summary-row { display: flex; gap: 10px; padding: 10px 0; border-bottom: 1px solid #F3F4F6; margin-bottom: 10px; font-size: 13px; color: #6B7280; }
+    .mileage-summary-row .ms-num { font-weight: 700; color: #1A1A2E; }
+    .mileage-member-list { display: flex; flex-direction: column; gap: 4px; max-height: 340px; overflow-y: auto; margin-bottom: 12px; }
+    .mileage-member-item { display: flex; align-items: center; gap: 8px; padding: 8px 6px; border-radius: 8px; font-size: 13px; transition: background 0.15s; }
+    .mileage-member-item:hover { background: #F9FAFB; }
+    .mileage-member-item .mm-rank { width: 28px; font-weight: 700; color: #6B7280; flex-shrink: 0; text-align: center; }
+    .mileage-member-item .mm-rank.top1 { color: #f59e0b; }
+    .mileage-member-item .mm-rank.top2 { color: #6B7280; }
+    .mileage-member-item .mm-rank.top3 { color: #b45309; }
+    .mileage-member-item .mm-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; color: #1A1A2E; }
+    .mileage-member-item .mm-points { font-weight: 700; color: #8B5CF6; flex-shrink: 0; min-width: 42px; text-align: right; }
+    .mileage-member-item .mm-actions { display: flex; gap: 4px; flex-shrink: 0; }
+    .mileage-member-item .mm-act-btn { width: 24px; height: 24px; border-radius: 6px; border: 1px solid #d1d5db; background: #fff; cursor: pointer; font-size: 13px; font-weight: 700; display: flex; align-items: center; justify-content: center; padding: 0; font-family: inherit; }
+    .mileage-member-item .mm-act-btn.plus { color: #10b981; border-color: #d1fae5; }
+    .mileage-member-item .mm-act-btn.plus:hover { background: #d1fae5; }
+    .mileage-member-item .mm-act-btn.minus { color: #ef4444; border-color: #fee2e2; }
+    .mileage-member-item .mm-act-btn.minus:hover { background: #fee2e2; }
+
+    /* 마일리지 모달 — 멤버 칩 */
+    .mileage-modal .form-group label { font-size: 14px; }
+    .mileage-member-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; max-height: 180px; overflow-y: auto; padding: 4px; }
+    .mileage-chip { display: inline-flex; align-items: center; gap: 4px; padding: 6px 12px; border-radius: 999px; background: #F3F4F6; border: 1.5px solid #E5E7EB; cursor: pointer; font-size: 13px; user-select: none; transition: all 0.15s; }
+    .mileage-chip:hover { border-color: #8B5CF6; }
+    .mileage-chip.selected { background: #EDE9FE; border-color: #8B5CF6; color: #7c3aed; font-weight: 600; }
+    .mileage-chip-toolbar { display: flex; gap: 8px; margin-bottom: 6px; }
+    .mileage-chip-toolbar button { padding: 4px 10px; background: #fff; border: 1px solid #d1d5db; border-radius: 6px; font-size: 12px; cursor: pointer; font-family: inherit; color: #374151; }
+    .mileage-chip-toolbar button:hover { border-color: #8B5CF6; color: #8B5CF6; }
+
+    /* 규칙 모달 */
+    .mileage-rules-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    .mileage-rules-table th { text-align: left; padding: 10px 8px; background: #F9FAFB; border-bottom: 2px solid #E5E7EB; font-weight: 700; color: #374151; font-size: 13px; }
+    .mileage-rules-table td { padding: 10px 8px; border-bottom: 1px solid #F3F4F6; vertical-align: middle; }
+    .mileage-rules-table input[type="number"] { width: 64px; padding: 6px 8px; border: 1.5px solid #d1d5db; border-radius: 6px; font-size: 14px; outline: none; font-family: inherit; text-align: right; }
+    .mileage-rules-table input[type="number"]:focus { border-color: #8B5CF6; }
+    .mileage-rules-table .mileage-input-wrap { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; vertical-align: middle; }
+    .mileage-rules-table .mileage-unit { font-size: 14px; color: #6B7280; line-height: 1; }
+    /* iOS-style toggle */
+    .mileage-toggle { display: inline-block; position: relative; width: 40px; height: 22px; }
+    .mileage-toggle input { display: none; }
+    .mileage-toggle .slider { position: absolute; inset: 0; background: #d1d5db; border-radius: 999px; cursor: pointer; transition: background 0.2s; }
+    .mileage-toggle .slider::before { content: ''; position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; background: #fff; border-radius: 50%; transition: transform 0.2s; box-shadow: 0 1px 3px rgba(0,0,0,0.2); }
+    .mileage-toggle input:checked + .slider { background: #8B5CF6; }
+    .mileage-toggle input:checked + .slider::before { transform: translateX(18px); }
+
+    /* 랭킹 모달 */
+    .mileage-ranking-list { display: flex; flex-direction: column; gap: 6px; max-height: 60vh; overflow-y: auto; }
+    .mileage-ranking-item { display: flex; align-items: center; gap: 12px; padding: 10px 14px; background: #F9FAFB; border-radius: 10px; font-size: 14px; }
+    .mileage-ranking-item.me { background: #EDE9FE; border: 1.5px solid #8B5CF6; }
+    .mileage-ranking-item .mri-rank-num { width: 30px; font-weight: 800; font-size: 16px; text-align: center; }
+    .mileage-ranking-item .mri-rank-num.top1 { color: #f59e0b; }
+    .mileage-ranking-item .mri-rank-num.top2 { color: #6B7280; }
+    .mileage-ranking-item .mri-rank-num.top3 { color: #b45309; }
+    .mileage-ranking-item .mri-rank-name { flex: 1; font-weight: 600; }
+    .mileage-ranking-item .mri-rank-points { font-weight: 800; color: #8B5CF6; font-size: 16px; }
+
+    @media (max-width: 1280px) {
+      /* 사이드바 위젯을 홈탭 본문 최상단으로 이동 (JS에서 처리) */
+      .mileage-card.in-main { margin-bottom: 16px; }
     }
   </style>
 </head>
@@ -609,6 +710,16 @@
       </div>
 
       <div class="sidebar">
+        <!-- 클래스 마일리지 위젯 (역할별 동적 렌더) -->
+        <div class="mileage-card" id="mileageWidget" style="display:none;">
+          <div id="mileageWidgetBody">
+            <div style="text-align:center;padding:20px 8px;color:#9CA3AF;font-size:13px;">
+              <i class="fas fa-spinner fa-spin" style="font-size:20px;margin-bottom:8px;display:block;color:#8B5CF6;"></i>
+              마일리지 데이터를 불러오는 중...
+            </div>
+          </div>
+        </div>
+
         <div class="card">
           <h3><i class="fas fa-users"></i>멤버 (<span id="memberCount">0</span>)</h3>
           <ul class="member-list" id="memberList"></ul>
@@ -1104,6 +1215,100 @@
       <div class="modal-actions">
         <button class="btn btn-outline" onclick="closeNewMessageModal()">취소</button>
         <button class="btn btn-primary" onclick="sendNewMessage()">보내기</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== 마일리지 부여/차감 모달 (교사 전용) ===== -->
+  <div class="modal-overlay mileage-modal" id="mileageAwardModal" onclick="if(event.target===this)closeMileageAwardModal()">
+    <div class="modal" style="max-width:560px;position:relative;padding-right:60px;">
+      <button class="modal-close-btn" type="button" onclick="closeMileageAwardModal()" aria-label="닫기"
+              style="position:absolute;top:16px;right:16px;width:36px;height:36px;border-radius:50%;border:none;background:transparent;color:#9ca3af;font-size:20px;cursor:pointer;display:flex;align-items:center;justify-content:center;font-family:inherit;transition:background 0.15s, color 0.15s;"
+              onmouseenter="this.style.background='#F3F4F6';this.style.color='#374151';"
+              onmouseleave="this.style.background='transparent';this.style.color='#9ca3af';">
+        <i class="fas fa-times"></i>
+      </button>
+      <h3 id="mileageAwardTitle" style="padding-right:24px;">🎯 마일리지 부여</h3>
+      <p style="color:#6B7280;font-size:13px;margin-bottom:14px;" id="mileageAwardSubtitle">멤버에게 클래스 마일리지를 부여합니다.</p>
+
+      <div class="form-group">
+        <label>대상 멤버 <span id="mileageAwardSelectedCount" style="color:#8B5CF6;font-weight:700;margin-left:6px;">(0명 선택)</span></label>
+        <div class="mileage-chip-toolbar">
+          <button type="button" onclick="mileageChipsSelectAll()">전체 선택</button>
+          <button type="button" onclick="mileageChipsClear()">선택 해제</button>
+        </div>
+        <div class="mileage-member-chips" id="mileageAwardChips">
+          <div style="color:#9CA3AF;font-size:13px;padding:8px;">멤버 로드 중...</div>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label>점수 <span style="color:#9CA3AF;font-size:12px;font-weight:400;">(1 ~ 1000)</span></label>
+        <input type="number" id="mileageAwardPoints" min="1" max="1000" value="10" style="font-size:16px;">
+      </div>
+
+      <div class="form-group">
+        <label>사유 <span style="color:#9CA3AF;font-size:12px;font-weight:400;">(선택)</span></label>
+        <input type="text" id="mileageAwardNote" placeholder="예: 단원평가 만점, 발표 우수 등" maxlength="200">
+      </div>
+
+      <div class="modal-actions">
+        <button class="btn btn-outline" onclick="closeMileageAwardModal()">취소</button>
+        <button class="btn" id="mileageAwardSubmitBtn" style="background:#8B5CF6;color:#fff;" onclick="submitMileageAward()">부여하기</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== 마일리지 규칙 설정 모달 (교사 전용) ===== -->
+  <div class="modal-overlay mileage-modal" id="mileageRulesModal" onclick="if(event.target===this)closeMileageRulesModal()">
+    <div class="modal" style="max-width:720px;position:relative;padding-right:60px;">
+      <button class="modal-close-btn" type="button" onclick="closeMileageRulesModal()" aria-label="닫기"
+              style="position:absolute;top:16px;right:16px;width:36px;height:36px;border-radius:50%;border:none;background:transparent;color:#9ca3af;font-size:20px;cursor:pointer;display:flex;align-items:center;justify-content:center;font-family:inherit;transition:background 0.15s, color 0.15s;"
+              onmouseenter="this.style.background='#F3F4F6';this.style.color='#374151';"
+              onmouseleave="this.style.background='transparent';this.style.color='#9ca3af';">
+        <i class="fas fa-times"></i>
+      </button>
+      <h3 style="padding-right:24px;">⚙ 마일리지 규칙 설정</h3>
+      <p style="color:#6B7280;font-size:13px;margin-bottom:14px;">활동별 자동 지급 점수와 일일 한도를 설정합니다. 일일 한도는 비워두면 무제한으로 적립됩니다.</p>
+
+      <table class="mileage-rules-table" id="mileageRulesTable">
+        <thead>
+          <tr>
+            <th style="width:60px;">활성</th>
+            <th>활동</th>
+            <th style="width:100px;text-align:right;">점수</th>
+            <th style="width:120px;text-align:right;">일일 한도</th>
+          </tr>
+        </thead>
+        <tbody id="mileageRulesTbody">
+          <!-- JS에서 동적 렌더 -->
+        </tbody>
+      </table>
+
+      <div class="modal-actions">
+        <button class="btn btn-outline" onclick="restoreMileageRulesDefault()" style="margin-right:auto;">기본값 복원</button>
+        <button class="btn btn-outline" onclick="closeMileageRulesModal()">취소</button>
+        <button class="btn" style="background:#8B5CF6;color:#fff;" onclick="saveMileageRules()">저장</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== 마일리지 랭킹 모달 (공통) ===== -->
+  <div class="modal-overlay mileage-modal" id="mileageRankingModal" onclick="if(event.target===this)closeMileageRankingModal()">
+    <div class="modal" style="max-width:560px;position:relative;padding-right:60px;">
+      <button class="modal-close-btn" type="button" onclick="closeMileageRankingModal()" aria-label="닫기"
+              style="position:absolute;top:16px;right:16px;width:36px;height:36px;border-radius:50%;border:none;background:transparent;color:#9ca3af;font-size:20px;cursor:pointer;display:flex;align-items:center;justify-content:center;font-family:inherit;transition:background 0.15s, color 0.15s;"
+              onmouseenter="this.style.background='#F3F4F6';this.style.color='#374151';"
+              onmouseleave="this.style.background='transparent';this.style.color='#9ca3af';">
+        <i class="fas fa-times"></i>
+      </button>
+      <h3 style="padding-right:24px;">🏆 클래스 마일리지 랭킹</h3>
+      <p style="color:#6B7280;font-size:13px;margin-bottom:14px;">우리 클래스 누적 마일리지 순위입니다.</p>
+      <div class="mileage-ranking-list" id="mileageRankingList">
+        <div style="text-align:center;color:#9CA3AF;padding:20px;font-size:13px;">로드 중...</div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-outline" onclick="closeMileageRankingModal()">닫기</button>
       </div>
     </div>
   </div>
@@ -5059,6 +5264,519 @@
         }
       });
     });
+
+    // ==========================================================================
+    // ===== 클래스 마일리지 시스템 (Phase 1+2) ================================
+    // ==========================================================================
+    // 색상: #8B5CF6 (보라) / 아이콘: 🎯 (채움포인트 #F59E0B ⭐ 와 구분)
+    // ==========================================================================
+
+    const MILEAGE_DEFAULT_RULES = [
+      { eventType: 'lesson_complete', label: '수업 이수', icon: '📚', points: 10, isEnabled: 1, dailyLimit: 0 },
+      { eventType: 'homework_submit', label: '과제 제출', icon: '📝', points: 20, isEnabled: 1, dailyLimit: 0 },
+      { eventType: 'exam_complete',   label: '평가 응시', icon: '✅', points: 30, isEnabled: 1, dailyLimit: 0 },
+      { eventType: 'board_post',      label: '게시글 작성', icon: '✍️', points: 5,  isEnabled: 1, dailyLimit: 20 },
+      { eventType: 'board_comment',   label: '댓글 작성', icon: '💬', points: 2,  isEnabled: 1, dailyLimit: 10 },
+      { eventType: 'attendance',      label: '출석 체크인', icon: '🙋', points: 5,  isEnabled: 1, dailyLimit: 5 },
+      { eventType: 'notice_read',     label: '알림장 확인', icon: '🔔', points: 1,  isEnabled: 0, dailyLimit: 3 },
+      { eventType: 'survey_submit',   label: '설문 참여', icon: '📋', points: 5,  isEnabled: 1, dailyLimit: 0 }
+    ];
+
+    let mileageState = {
+      myBalance: null,
+      myEarned: 0,
+      myDeducted: 0,
+      myRank: null,
+      myTotalMembers: 0,
+      recentLogs: [],
+      members: [],
+      rules: [...MILEAGE_DEFAULT_RULES],
+      apiOk: false
+    };
+
+    function mileageEscHtml(s) {
+      if (s == null) return '';
+      return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    }
+    function mileageFmtTime(iso) {
+      if (!iso) return '';
+      try {
+        const d = new Date(iso);
+        const now = new Date();
+        const diff = (now - d) / 1000;
+        if (diff < 60) return '방금';
+        if (diff < 3600) return Math.floor(diff/60) + '분 전';
+        if (diff < 86400) return Math.floor(diff/3600) + '시간 전';
+        if (diff < 172800) return '어제';
+        return (d.getMonth()+1) + '/' + d.getDate();
+      } catch(e) { return ''; }
+    }
+
+    async function fetchMileage() {
+      if (!classId) return;
+      try {
+        if (myRole === 'owner') {
+          // 교사: 전체 멤버 + 규칙
+          const [mRes, rRes] = await Promise.all([
+            fetch(`/api/class/${classId}/mileage/members`).then(r => r.ok ? r.json() : null).catch(() => null),
+            fetch(`/api/class/${classId}/mileage/rules`).then(r => r.ok ? r.json() : null).catch(() => null)
+          ]);
+          if (mRes && mRes.success !== false) {
+            // 개설자(owner)는 마일리지 대상에서 제외 — 학생만 표시
+            mileageState.members = (mRes.members || mRes.data || [])
+              .filter(m => (m.role || 'member') !== 'owner')
+              .map(m => ({
+                userId: m.user_id || m.userId || m.id,
+                name: m.display_name || m.name || m.username,
+                balance: Number(m.balance ?? m.points ?? 0),
+                earned: Number(m.earned ?? m.total_earned ?? 0),
+                deducted: Number(m.deducted ?? m.total_deducted ?? 0)
+              }));
+            mileageState.apiOk = true;
+          }
+          if (rRes && rRes.success !== false && Array.isArray(rRes.rules || rRes.data)) {
+            const apiRules = rRes.rules || rRes.data;
+            // 7개 기본 이벤트와 머지
+            mileageState.rules = MILEAGE_DEFAULT_RULES.map(def => {
+              const found = apiRules.find(r => (r.event_type || r.eventType) === def.eventType);
+              if (!found) return { ...def };
+              return {
+                ...def,
+                points: Number(found.points ?? def.points),
+                isEnabled: Number(found.is_enabled ?? found.isEnabled ?? def.isEnabled),
+                dailyLimit: Number(found.daily_limit ?? found.dailyLimit ?? def.dailyLimit)
+              };
+            });
+          }
+        } else {
+          // 학생: 본인 잔액·이력·랭킹
+          const res = await fetch(`/api/class/${classId}/mileage/me`).then(r => r.ok ? r.json() : null).catch(() => null);
+          if (res && res.success !== false) {
+            mileageState.myBalance = Number(res.balance ?? res.points ?? 0);
+            mileageState.myEarned = Number(res.earned ?? res.total_earned ?? 0);
+            mileageState.myDeducted = Number(res.deducted ?? res.total_deducted ?? 0);
+            mileageState.myRank = res.rank ?? null;
+            // 학생 본인 제외한 멤버 수 + 본인 1명
+            mileageState.myTotalMembers = res.total_members ?? (classMembers ? classMembers.filter(m => m.role !== 'owner').length : 0);
+            mileageState.recentLogs = (res.recent || res.recent_logs || res.recentLogs || res.logs || []).slice(0, 5);
+            mileageState.apiOk = true;
+          }
+        }
+      } catch (e) {
+        console.warn('[mileage] fetch 실패', e);
+        mileageState.apiOk = false;
+      }
+      renderMileageWidget();
+    }
+
+    function renderMileageWidget() {
+      const wrap = document.getElementById('mileageWidget');
+      const body = document.getElementById('mileageWidgetBody');
+      if (!wrap || !body) return;
+      wrap.style.display = 'block';
+
+      if (!mileageState.apiOk) {
+        body.innerHTML = `
+          <div class="mileage-card-head">
+            <h4><span class="mileage-emoji">🎯</span> 클래스 마일리지</h4>
+            <span class="mileage-scope-tag">클래스 한정</span>
+          </div>
+          <div style="text-align:center;padding:20px 8px;color:#9CA3AF;font-size:13px;">
+            <i class="fas fa-exclamation-circle" style="font-size:20px;margin-bottom:8px;display:block;color:#9CA3AF;"></i>
+            마일리지 기능을 사용할 수 없습니다.<br>
+            <span style="font-size:12px;">잠시 후 다시 시도해주세요.</span>
+          </div>`;
+        return;
+      }
+
+      if (myRole === 'owner') {
+        renderMileageTeacherWidget(body);
+      } else {
+        renderMileageStudentWidget(body);
+      }
+    }
+
+    function renderMileageStudentWidget(body) {
+      const bal = mileageState.myBalance ?? 0;
+      const rankText = (mileageState.myRank != null && mileageState.myTotalMembers > 0)
+        ? `${mileageState.myRank}위 / ${mileageState.myTotalMembers}명`
+        : '집계 중';
+      const logs = mileageState.recentLogs || [];
+      const reasonLabel = (code) => ({
+        manual_award:'수동 부여', manual_deduct:'수동 차감', revoke:'취소 처리',
+        lesson_complete:'수업 이수', homework_submit:'과제 제출', exam_complete:'평가 응시',
+        board_post:'게시글 작성', board_comment:'댓글 작성', attendance:'출석 체크인',
+        notice_read:'알림장 확인', survey_submit:'설문 참여'
+      })[code] || code || '활동';
+      const logsHtml = logs.length === 0
+        ? '<div style="color:#9CA3AF;font-size:13px;text-align:center;padding:12px;">아직 활동 기록이 없어요</div>'
+        : logs.map(l => {
+            const pts = Number(l.delta ?? l.points ?? 0);
+            const isPlus = pts >= 0;
+            const reason = l.note || reasonLabel(l.reason || l.event_label || l.event_type);
+            const time = mileageFmtTime(l.created_at || l.createdAt);
+            return `
+              <div class="mileage-recent-item">
+                <span class="mri-icon">${isPlus ? '✨' : '⛔'}</span>
+                <span class="mri-label">${mileageEscHtml(reason)}</span>
+                <span class="mri-points ${isPlus ? 'plus' : 'minus'}">${isPlus ? '+' : ''}${pts}</span>
+                <span class="mri-time">${time}</span>
+              </div>`;
+          }).join('');
+
+      body.innerHTML = `
+        <div class="mileage-card-head">
+          <h4><span class="mileage-emoji">🎯</span> 내 마일리지</h4>
+          <span class="mileage-scope-tag">클래스 한정</span>
+        </div>
+        <div class="mileage-balance">
+          <div class="mb-value">${bal}<span class="mb-unit">점</span></div>
+          <div class="mb-cumulative">
+            <span class="plus">누적 +${mileageState.myEarned}</span>
+            &nbsp;·&nbsp;
+            <span class="minus">누적 −${mileageState.myDeducted}</span>
+          </div>
+        </div>
+        <div class="mileage-rank-row" onclick="openMileageRankingModal()">
+          <span class="mr-label">🏆 클래스 랭킹</span>
+          <span class="mr-value">${rankText}</span>
+        </div>
+        <div class="mileage-recent-title">최근 활동</div>
+        <div class="mileage-recent-list">${logsHtml}</div>
+        <div class="mileage-card-foot">
+          <button onclick="openMileageRankingModal()">전체 이력 보기</button>
+        </div>`;
+    }
+
+    function renderMileageTeacherWidget(body) {
+      const members = [...mileageState.members].sort((a, b) => b.balance - a.balance);
+      const total = members.reduce((s, m) => s + m.balance, 0);
+      const avg = members.length > 0 ? Math.round(total / members.length) : 0;
+      const rankIcon = (i) => i === 0 ? '👑' : i === 1 ? '🥈' : i === 2 ? '🥉' : '';
+      const rankClass = (i) => i === 0 ? 'top1' : i === 1 ? 'top2' : i === 2 ? 'top3' : '';
+
+      const top = members.slice(0, 6);
+      const listHtml = top.length === 0
+        ? '<div style="color:#9CA3AF;font-size:13px;text-align:center;padding:12px;">멤버가 없습니다</div>'
+        : top.map((m, i) => `
+            <div class="mileage-member-item">
+              <span class="mm-rank ${rankClass(i)}">${i+1}위</span>
+              <span class="mm-name">${rankIcon(i)} ${mileageEscHtml(m.name)}</span>
+              <span class="mm-points">${m.balance}</span>
+              <div class="mm-actions">
+                <button class="mm-act-btn plus" title="부여" onclick="openMileageAwardModal('award',${m.userId})">+</button>
+                <button class="mm-act-btn minus" title="차감" onclick="openMileageAwardModal('deduct',${m.userId})">−</button>
+              </div>
+            </div>`).join('');
+
+      body.innerHTML = `
+        <div class="mileage-card-head">
+          <h4><span class="mileage-emoji">🎯</span> 멤버 마일리지</h4>
+          <button class="mileage-rules-btn" onclick="openMileageRulesModal()" title="규칙 설정">
+            <i class="fas fa-cog"></i> 규칙
+          </button>
+        </div>
+        <div class="mileage-summary-row">
+          <span>발급 합계 <span class="ms-num">${total.toLocaleString()}</span>점</span>
+          <span>·</span>
+          <span>평균 <span class="ms-num">${avg}</span>점</span>
+        </div>
+        <div class="mileage-member-list">${listHtml}</div>
+        <div class="mileage-card-foot">
+          <button onclick="openMileageRankingModal()">전체 보기</button>
+          <button class="btn-mileage-primary" onclick="openMileageAwardModal('award')">일괄 부여</button>
+        </div>`;
+    }
+
+    // ===== 부여/차감 모달 =====
+    let _mileageAwardMode = 'award';
+    let _mileageAwardSelectedIds = new Set();
+
+    function openMileageAwardModal(mode, preselectUserId) {
+      _mileageAwardMode = mode || 'award';
+      _mileageAwardSelectedIds = new Set();
+      if (preselectUserId) _mileageAwardSelectedIds.add(Number(preselectUserId));
+
+      const isAward = _mileageAwardMode === 'award';
+      document.getElementById('mileageAwardTitle').textContent = isAward ? '🎯 마일리지 부여' : '🎯 마일리지 차감';
+      document.getElementById('mileageAwardSubtitle').textContent = isAward
+        ? '멤버에게 클래스 마일리지를 부여합니다.'
+        : '멤버에게서 클래스 마일리지를 차감합니다.';
+      const btn = document.getElementById('mileageAwardSubmitBtn');
+      btn.textContent = isAward ? '부여하기' : '차감하기';
+      btn.style.background = isAward ? '#8B5CF6' : '#EF4444';
+
+      // 멤버 칩 렌더
+      const targets = (classMembers || []).filter(m => m.role !== 'owner');
+      const chipsEl = document.getElementById('mileageAwardChips');
+      if (targets.length === 0) {
+        chipsEl.innerHTML = '<div style="color:#9CA3AF;font-size:13px;padding:8px;">대상 멤버가 없습니다.</div>';
+      } else {
+        chipsEl.innerHTML = targets.map(m => {
+          const uid = m.user_id || m.userId || m.id;
+          const sel = _mileageAwardSelectedIds.has(Number(uid));
+          return `<div class="mileage-chip ${sel ? 'selected' : ''}" data-uid="${uid}" onclick="toggleMileageChip(this,${uid})">${mileageEscHtml(m.display_name || m.username)}</div>`;
+        }).join('');
+      }
+      updateMileageSelectedCount();
+
+      document.getElementById('mileageAwardPoints').value = 10;
+      document.getElementById('mileageAwardNote').value = '';
+      document.getElementById('mileageAwardModal').classList.add('active');
+    }
+
+    function closeMileageAwardModal() {
+      document.getElementById('mileageAwardModal').classList.remove('active');
+    }
+
+    function toggleMileageChip(el, uid) {
+      uid = Number(uid);
+      if (_mileageAwardSelectedIds.has(uid)) {
+        _mileageAwardSelectedIds.delete(uid);
+        el.classList.remove('selected');
+      } else {
+        _mileageAwardSelectedIds.add(uid);
+        el.classList.add('selected');
+      }
+      updateMileageSelectedCount();
+    }
+
+    function mileageChipsSelectAll() {
+      document.querySelectorAll('#mileageAwardChips .mileage-chip').forEach(el => {
+        const uid = Number(el.dataset.uid);
+        _mileageAwardSelectedIds.add(uid);
+        el.classList.add('selected');
+      });
+      updateMileageSelectedCount();
+    }
+    function mileageChipsClear() {
+      _mileageAwardSelectedIds.clear();
+      document.querySelectorAll('#mileageAwardChips .mileage-chip').forEach(el => el.classList.remove('selected'));
+      updateMileageSelectedCount();
+    }
+    function updateMileageSelectedCount() {
+      const el = document.getElementById('mileageAwardSelectedCount');
+      if (el) el.textContent = `(${_mileageAwardSelectedIds.size}명 선택)`;
+    }
+
+    async function submitMileageAward() {
+      const userIds = Array.from(_mileageAwardSelectedIds);
+      const points = parseInt(document.getElementById('mileageAwardPoints').value, 10);
+      const note = (document.getElementById('mileageAwardNote').value || '').trim();
+
+      if (userIds.length === 0) { classToast('대상 멤버를 1명 이상 선택해주세요.', 'warning'); return; }
+      if (!points || points < 1 || points > 1000) { classToast('점수는 1 ~ 1000 사이여야 합니다.', 'warning'); return; }
+
+      const url = _mileageAwardMode === 'award'
+        ? `/api/class/${classId}/mileage/award`
+        : `/api/class/${classId}/mileage/deduct`;
+
+      try {
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userIds, points, note })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || data.success === false) {
+          classToast(data.message || '처리 실패. 잠시 후 다시 시도해주세요.', 'error');
+          return;
+        }
+        classToast(_mileageAwardMode === 'award' ? `${userIds.length}명에게 +${points}점 부여 완료` : `${userIds.length}명 −${points}점 차감 완료`, 'success');
+        closeMileageAwardModal();
+        fetchMileage();
+      } catch (e) {
+        classToast('네트워크 오류로 처리하지 못했습니다.', 'error');
+      }
+    }
+
+    function awardMileage(userId, points, note) { // 외부 호출용 헬퍼
+      return submitMileageAwardDirect('award', [userId], points, note);
+    }
+    function deductMileage(userId, points, note) {
+      return submitMileageAwardDirect('deduct', [userId], points, note);
+    }
+    async function submitMileageAwardDirect(mode, userIds, points, note) {
+      const url = `/api/class/${classId}/mileage/${mode}`;
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userIds, points, note: note || '' })
+      });
+      return res.json().catch(() => ({}));
+    }
+
+    // ===== 규칙 모달 =====
+    function openMileageRulesModal() {
+      renderMileageRulesTable();
+      document.getElementById('mileageRulesModal').classList.add('active');
+    }
+    function closeMileageRulesModal() {
+      document.getElementById('mileageRulesModal').classList.remove('active');
+    }
+    function renderMileageRulesTable() {
+      const tbody = document.getElementById('mileageRulesTbody');
+      tbody.innerHTML = mileageState.rules.map((r, i) => `
+        <tr data-event="${r.eventType}">
+          <td style="text-align:center;">
+            <label class="mileage-toggle">
+              <input type="checkbox" ${r.isEnabled ? 'checked' : ''} onchange="mileageState.rules[${i}].isEnabled = this.checked ? 1 : 0;">
+              <span class="slider"></span>
+            </label>
+          </td>
+          <td><span style="margin-right:4px;">${r.icon}</span>${mileageEscHtml(r.label)}</td>
+          <td style="text-align:right;">
+            <span class="mileage-input-wrap">
+              <input type="number" min="0" max="1000" value="${r.points}" onchange="mileageState.rules[${i}].points = Math.max(0, Math.min(1000, parseInt(this.value)||0));">
+              <span class="mileage-unit">점</span>
+            </span>
+          </td>
+          <td style="text-align:right;">
+            <span class="mileage-input-wrap">
+              <input type="number" min="0" max="100" value="${r.dailyLimit > 0 ? r.dailyLimit : ''}" placeholder="무제한" title="비워두면 무제한" style="width:84px;" oninput="mileageState.rules[${i}].dailyLimit = this.value === '' ? 0 : Math.max(0, Math.min(100, parseInt(this.value)||0));">
+              <span class="mileage-unit">회</span>
+            </span>
+          </td>
+        </tr>
+      `).join('');
+    }
+    function restoreMileageRulesDefault() {
+      mileageState.rules = MILEAGE_DEFAULT_RULES.map(r => ({ ...r }));
+      renderMileageRulesTable();
+      classToast('기본값으로 복원되었습니다. (저장 버튼을 눌러야 반영됩니다)', 'info');
+    }
+    async function saveMileageRules() {
+      const rules = mileageState.rules.map(r => ({
+        eventType: r.eventType,
+        points: r.points,
+        isEnabled: r.isEnabled ? 1 : 0,
+        dailyLimit: r.dailyLimit
+      }));
+      try {
+        const res = await fetch(`/api/class/${classId}/mileage/rules`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ rules })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || data.success === false) {
+          classToast(data.message || '저장 실패. 잠시 후 다시 시도해주세요.', 'error');
+          return;
+        }
+        classToast('규칙이 저장되었습니다.', 'success');
+        closeMileageRulesModal();
+      } catch (e) {
+        classToast('네트워크 오류로 저장하지 못했습니다.', 'error');
+      }
+    }
+
+    // ===== 랭킹 모달 =====
+    async function openMileageRankingModal() {
+      const modal = document.getElementById('mileageRankingModal');
+      const list = document.getElementById('mileageRankingList');
+      list.innerHTML = '<div style="text-align:center;color:#9CA3AF;padding:20px;font-size:13px;"><i class="fas fa-spinner fa-spin"></i> 로드 중...</div>';
+      modal.classList.add('active');
+
+      let items = [];
+      try {
+        const r = await fetch(`/api/class/${classId}/mileage/ranking?period=all&limit=50`).then(r => r.ok ? r.json() : null);
+        if (r && (r.ranking || r.data)) {
+          // 개설자 제외: classMembers에서 owner user_id 추출 후 ranking에서 동일 ID 필터
+          const ownerIds = new Set((classMembers || []).filter(m => (m.role || 'member') === 'owner').map(m => Number(m.user_id || m.userId)));
+          items = (r.ranking || r.data)
+            .filter(x => !ownerIds.has(Number(x.user_id || x.userId)))
+            .map((x, i) => ({
+              userId: x.user_id || x.userId,
+              name: x.display_name || x.name,
+              balance: Number(x.balance ?? x.points ?? 0),
+              rank: i + 1
+            }));
+        }
+      } catch (e) {}
+
+      // Fallback: 교사 시점에서 멤버 데이터로 클라이언트 랭킹 산정
+      if (items.length === 0 && mileageState.members && mileageState.members.length) {
+        items = [...mileageState.members].sort((a, b) => b.balance - a.balance).map((m, i) => ({
+          ...m, rank: i + 1
+        }));
+      }
+
+      if (items.length === 0) {
+        list.innerHTML = '<div style="text-align:center;color:#9CA3AF;padding:20px;font-size:13px;">랭킹 데이터가 없습니다.</div>';
+        return;
+      }
+
+      const myUserId = currentUser?.id;
+      const rankClass = (i) => i === 0 ? 'top1' : i === 1 ? 'top2' : i === 2 ? 'top3' : '';
+      list.innerHTML = items.map((it, i) => {
+        const r = it.rank || (i + 1);
+        const isMe = myUserId && Number(it.userId) === Number(myUserId);
+        return `
+          <div class="mileage-ranking-item ${isMe ? 'me' : ''}">
+            <span class="mri-rank-num ${rankClass(r-1)}">${r}</span>
+            <span class="mri-rank-name">${mileageEscHtml(it.name)} ${isMe ? '<span style="font-size:12px;color:#8B5CF6;">(나)</span>' : ''}</span>
+            <span class="mri-rank-points">${it.balance}점</span>
+          </div>`;
+      }).join('');
+    }
+    function closeMileageRankingModal() {
+      document.getElementById('mileageRankingModal').classList.remove('active');
+    }
+
+    // ===== Socket.IO 실시간 갱신 =====
+    function setupMileageSocket() {
+      try {
+        if (typeof io === 'undefined') return; // socket.io 미로드 시 skip
+        if (window._mileageSocket) return;
+        const sock = io({ withCredentials: true });
+        window._mileageSocket = sock;
+
+        // 연결·재연결마다 명시적으로 join 요청 (서버는 자동 join도 처리하지만 안전망)
+        const doJoin = () => { try { sock.emit('join:class', { classId: Number(classId) }); } catch (_) {} };
+        sock.on('connect', doJoin);
+        sock.on('reconnect', doJoin);
+
+        sock.on('class:mileage:update', (payload) => {
+          if (!payload) return;
+          // 같은 사용자가 여러 클래스에 속한 경우를 대비해 classId가 실리면 검증.
+          // (서버가 항상 보내지만 안전 차원에서 누락 시에는 허용)
+          if (payload.classId != null && Number(payload.classId) !== Number(classId)) return;
+          // 위젯/랭킹 새로고침 — 본인·타인 이벤트 모두 갱신해야 랭킹/교사용 뷰가 최신
+          try { fetchMileage(); } catch (_) {}
+        });
+      } catch (e) { /* socket.io 미로드 시 무시 */ }
+    }
+
+    // ===== 반응형: <=1280px 에서 사이드바 위젯을 본문 최상단으로 이동 =====
+    // (CSS의 max-width:1280px 미디어쿼리와 임계값 동기화)
+    function applyMileageResponsive() {
+      const widget = document.getElementById('mileageWidget');
+      const mainTab = document.getElementById('tab-home');
+      if (!widget || !mainTab) return;
+      const isNarrow = window.innerWidth <= 1280;
+      if (isNarrow && widget.parentElement?.classList?.contains('sidebar')) {
+        widget.classList.add('in-main');
+        mainTab.insertBefore(widget, mainTab.firstChild);
+      } else if (!isNarrow && widget.classList.contains('in-main')) {
+        widget.classList.remove('in-main');
+        const sidebar = document.querySelector('.sidebar');
+        if (sidebar) sidebar.insertBefore(widget, sidebar.firstChild);
+      }
+    }
+    window.addEventListener('resize', () => { applyMileageResponsive(); });
+
+    // ===== 초기화 훅 =====
+    // loadClass()는 myRole/classMembers 세팅 후 loadHomeTab() 호출. 그 다음 마일리지 초기화.
+    (function attachMileageInit() {
+      const tryInit = () => {
+        if (myRole == null || !classData) { setTimeout(tryInit, 200); return; }
+        fetchMileage();
+        applyMileageResponsive();
+        setupMileageSocket();
+      };
+      // loadClass 완료를 대기. 첫 메인 시도는 약 500ms 후.
+      setTimeout(tryInit, 600);
+    })();
   </script>
 
   <!-- 맨 위로 플로팅 버튼 -->

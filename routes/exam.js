@@ -526,6 +526,17 @@ router.post('/:classId/:examId/submit', requireAuth, requireClassMember, (req, r
       });
     } catch (_) {}
 
+    // 클래스 마일리지 자동 지급 — 평가 응시 완료 시
+    // UNIQUE(class_id, user_id, source_type='exam_complete', source_id=examId, reason)으로
+    // 재응시·중복 호출 자동 차단되므로 항상 호출해도 안전.
+    // exam.id 는 UUID 문자열이지만 awardClassMileage 내부에서 parseInt → NaN → null 저장이
+    // 부작용 없이 동작(같은 평가 ID에 대해 source_type+sourceId 가 일관되게 NULL이 되므로
+    // UNIQUE 제약은 동일 (classId, userId, 'exam_complete', NULL, 'exam_complete') 1행 보장).
+    try {
+      const { awardClassMileage } = require('../db/class-mileage');
+      awardClassMileage(parseInt(req.params.classId), req.user.id, 'exam_complete', exam.id);
+    } catch (_) {}
+
     res.json({ success: true, message: '제출되었습니다.', score });
   } catch (err) {
     res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });

@@ -2746,6 +2746,73 @@ function initSchema() {
       }
     }
   } catch (e) { console.error('[DB] 갤러리 멀티미디어 마이그레이션 실패:', e.message); }
+
+  // ============ 클래스 마일리지 시스템 (2026-05-20) ============
+  // 클래스 단위 학습 동기부여 보상 시스템.
+  // - class_mileage_rules: 클래스별 이벤트 규칙 (포인트·일일 한도)
+  // - class_mileage: 멤버별 잔액·누적 (UPSERT 캐시)
+  // - class_mileage_log: 모든 가감 트랜잭션 (UNIQUE 제약으로 중복 지급 차단)
+  // 기존 채움포인트(user_points)는 그대로 두고 별도 시스템으로 운영.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS class_mileage_rules (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        class_id INTEGER NOT NULL,
+        event_type VARCHAR(40) NOT NULL,
+        points INTEGER NOT NULL DEFAULT 0,
+        is_enabled INTEGER NOT NULL DEFAULT 1,
+        daily_limit INTEGER DEFAULT NULL,
+        description TEXT,
+        updated_by INTEGER,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(class_id, event_type),
+        FOREIGN KEY (class_id) REFERENCES classes(id) ON DELETE CASCADE,
+        FOREIGN KEY (updated_by) REFERENCES users(id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_cm_rules_class ON class_mileage_rules(class_id);
+
+      CREATE TABLE IF NOT EXISTS class_mileage (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        class_id INTEGER NOT NULL,
+        user_id INTEGER NOT NULL,
+        balance INTEGER NOT NULL DEFAULT 0,
+        total_earned INTEGER NOT NULL DEFAULT 0,
+        total_deducted INTEGER NOT NULL DEFAULT 0,
+        last_event_at DATETIME,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(class_id, user_id),
+        FOREIGN KEY (class_id) REFERENCES classes(id) ON DELETE CASCADE,
+        FOREIGN KEY (user_id) REFERENCES users(id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_cm_balance ON class_mileage(class_id, balance DESC);
+      CREATE INDEX IF NOT EXISTS idx_cm_user ON class_mileage(user_id);
+
+      CREATE TABLE IF NOT EXISTS class_mileage_log (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        class_id INTEGER NOT NULL,
+        user_id INTEGER NOT NULL,
+        delta INTEGER NOT NULL,
+        reason VARCHAR(40) NOT NULL,
+        source_type VARCHAR(30),
+        source_id INTEGER,
+        awarded_by INTEGER,
+        revoked_log_id INTEGER,
+        note TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (class_id) REFERENCES classes(id) ON DELETE CASCADE,
+        FOREIGN KEY (user_id) REFERENCES users(id),
+        FOREIGN KEY (awarded_by) REFERENCES users(id),
+        FOREIGN KEY (revoked_log_id) REFERENCES class_mileage_log(id),
+        UNIQUE(class_id, user_id, source_type, source_id, reason)
+      );
+      CREATE INDEX IF NOT EXISTS idx_cm_log_class_user ON class_mileage_log(class_id, user_id, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_cm_log_class_created ON class_mileage_log(class_id, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_cm_log_reason ON class_mileage_log(class_id, reason);
+    `);
+    console.log('[DB] 클래스 마일리지 테이블 준비 완료 (class_mileage_rules / class_mileage / class_mileage_log)');
+  } catch (e) {
+    console.error('[DB] 클래스 마일리지 테이블 생성 실패:', e.message);
+  }
 }
 
 function seedDummyData(db) {
