@@ -382,6 +382,7 @@ function getRanking(classId, opts = {}) {
 
   let rows;
   if (period === 'all') {
+    // 학생 랭킹 — owner/teacher/co_teacher 제외 (P1 fix: API 계층에서 안전하게 차단)
     rows = db.prepare(`
       SELECT cm.user_id, u.display_name, u.username, u.profile_image_url,
              cm.balance, cm.total_earned, cm.total_deducted, cm.last_event_at
@@ -389,11 +390,12 @@ function getRanking(classId, opts = {}) {
       JOIN users u ON u.id = cm.user_id
       JOIN class_members m ON m.class_id = cm.class_id AND m.user_id = cm.user_id AND m.status = 'active'
       WHERE cm.class_id = ?
+        AND m.role NOT IN ('owner', 'teacher', 'co_teacher')
       ORDER BY cm.balance DESC, cm.last_event_at ASC
       LIMIT ?
     `).all(classId, limit);
   } else {
-    // 기간 합계 (week=7일, month=30일)
+    // 기간 합계 (week=7일, month=30일) — owner/teacher/co_teacher 제외
     const days = period === 'week' ? 7 : 30;
     rows = db.prepare(`
       SELECT u.id AS user_id, u.display_name, u.username, u.profile_image_url,
@@ -403,6 +405,7 @@ function getRanking(classId, opts = {}) {
              MAX(l.created_at) AS last_event_at
       FROM users u
       JOIN class_members m ON m.user_id = u.id AND m.class_id = ? AND m.status = 'active'
+        AND m.role NOT IN ('owner', 'teacher', 'co_teacher')
       LEFT JOIN class_mileage_log l
         ON l.user_id = u.id AND l.class_id = ?
         AND l.created_at >= datetime('now', ?)
