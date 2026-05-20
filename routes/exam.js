@@ -11,7 +11,17 @@ const { logLearningActivity, computeAchievementLevel } = require('../db/learning
 const { extractLogContext } = require('../lib/log-context');
 const cbtExtDb = require('../db/cbt-extended');
 const buildAssessment = require('../lib/xapi/builders/assessment');
+const buildAssignment = require('../lib/xapi/builders/assignment');
 const xapiSpool = require('../lib/xapi/spool');
+
+// subject_code 끝자리로 학교급 추정 (-e/-m/-h)
+function _examSchoolLevel(sc) {
+  const s = String(sc || '');
+  if (s.endsWith('-e')) return '초';
+  if (s.endsWith('-m')) return '중';
+  if (s.endsWith('-h')) return '고';
+  return null;
+}
 const { ensureTodayAttendance } = require('../db/attendance');
 const initSocket = require('../socket');
 
@@ -188,6 +198,22 @@ router.post('/:classId', requireAuth, requireClassMember, (req, res) => {
       db.prepare('UPDATE exams SET start_mode = ?, tab_detection = ?, allow_retry = ? WHERE id = ?')
         .run(start_mode || 'direct', tab_detection != null ? tab_detection : 1, allow_retry || 0, exam.id);
     } catch (e) { console.error('[EXAM] settings save error:', e); }
+    // xAPI: 평가지 생성 → assignment(gave) — 출제 시점
+    try {
+      xapiSpool.record('assignment', buildAssignment, { userId: req.user.id, classId: req.classId }, {
+        verb: 'gave',
+        assignment_id: exam.id,
+        title: exam.title,
+        due_at: end_date || end_time || null,
+        gave_at: new Date().toISOString(),
+        target_user_ids: [],  // 평가지는 클래스 단위 — 개별 대상 없음
+        subject_code: exam.subject_code || null,
+        grade_group: exam.grade_group || null,
+        school_level: _examSchoolLevel(exam.subject_code),
+        achievement_codes: exam.achievement_code || null,
+        curriculum_standard_ids: Array.isArray(exam.std_ids) && exam.std_ids.length ? exam.std_ids : null,
+      });
+    } catch (e) { console.error('[xapi:exam_gave]', e.message); }
     res.status(201).json({ success: true, exam });
   } catch (err) {
     console.error('[EXAM] create error:', err);

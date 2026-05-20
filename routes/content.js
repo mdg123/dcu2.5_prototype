@@ -7,7 +7,21 @@ const { logLearningActivity } = require('../db/learning-log-helper');
 const { extractLogContext } = require('../lib/log-context');
 const buildAssessment = require('../lib/xapi/builders/assessment');
 const buildQuery = require('../lib/xapi/builders/query');
+const buildNavigation = require('../lib/xapi/builders/navigation');
+const buildMedia = require('../lib/xapi/builders/media');
 const xapiSpool = require('../lib/xapi/spool');
+
+// 콘텐츠 메타 → AIDT 표준 컨텍스트 변환 헬퍼
+// 주의: contents 스키마 컬럼명: subject / grade / school_level / achievement_code / curriculum_standard_ids
+function _contentXapiCtx(content) {
+  if (!content) return {};
+  return {
+    subject_code: content.subject || null,
+    school_level: content.school_level || null,
+    achievement_codes: content.achievement_code || null,
+    curriculum_standard_ids: content.curriculum_standard_ids || null,
+  };
+}
 
 // ===== 내자료 폴더 =====
 router.get('/folders', requireAuth, (req, res) => {
@@ -515,6 +529,17 @@ router.get('/:id', requireAuth, (req, res) => {
       gradeGroup: content.grade_group || null,
       ...extractLogContext(req)
     });
+    // xAPI: 콘텐츠 상세 조회 → navigation(viewed) — content_type 에 따라 image/document/practice/etc-content 자동 분기
+    try {
+      const stdCtx = _contentXapiCtx(content);
+      xapiSpool.record('navigation', buildNavigation, { userId: req.user.id }, {
+        verb: 'viewed',
+        content_id: content.id,
+        title: content.title,
+        content_type: content.content_type || null,
+        ...stdCtx,
+      });
+    } catch (e) { console.error('[xapi:content_view]', e.message); }
     const isCollected = contentDb.isInCollection(req.user.id, content.id);
     res.json({ success: true, content, isCollected });
   } catch (err) {

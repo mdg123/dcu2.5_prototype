@@ -4,6 +4,9 @@ const { requireAuth } = require('../middleware/auth');
 const noticeDb = require('../db/notice');
 const classDb = require('../db/class');
 const initSocket = require('../socket'); // initSocket._io 접근용
+const buildNavigation = require('../lib/xapi/builders/navigation');
+const buildSocial = require('../lib/xapi/builders/social');
+const xapiSpool = require('../lib/xapi/spool');
 
 // ─────────────────────────────────────────────────────────
 // 공통 미들웨어
@@ -137,6 +140,15 @@ router.get('/:classId/:noticeId', requireAuth, requireMember, loadNotice, (req, 
       const { awardClassMileage } = require('../db/class-mileage');
       awardClassMileage(req.classId, req.user.id, 'notice_read', req.noticeId);
     } catch (_) {}
+    // xAPI: 알림장 읽음 → navigation(read)
+    try {
+      xapiSpool.record('navigation', buildNavigation, { userId: req.user.id, classId: req.classId }, {
+        verb: 'read',
+        target_id: req.noticeId,
+        target_title: req.notice && req.notice.title || `알림장 ${req.noticeId}`,
+        content_type: 'document',
+      });
+    } catch (e) { console.error('[xapi:notice_read]', e.message); }
     // 읽음 표시 직후 다시 조회하여 viewerId 메타까지 반영
     const notice = noticeDb.getNoticeById(req.noticeId, req.user.id);
     let extra = {};
@@ -181,6 +193,21 @@ router.post('/:classId/:noticeId/reactions', requireAuth, requireMember, loadNot
       return res.status(400).json({ success: false, message: '허용되지 않는 리액션입니다.' });
     }
     const result = noticeDb.toggleReaction(req.noticeId, req.user.id, kind);
+    // xAPI: 알림장 공감(리액션) → social(participated) like-cnt=1 (toggle-on 시에만 적재)
+    // 감리 REWORK: noticeDb.toggleReaction은 { reactions, my_reactions }만 반환.
+    // toggle-on은 my_reactions 배열에 해당 kind 포함 여부로 판정.
+    try {
+      const isOn = result && Array.isArray(result.my_reactions) && result.my_reactions.includes(kind);
+      if (isOn) {
+        xapiSpool.record('social', buildSocial, { userId: req.user.id, classId: req.classId }, {
+          verb: 'liked',
+          board_id: `notice-${req.noticeId}`,
+          board_kind: 'other',  // 알림장은 게시판 분류상 기타(E)
+          board_title: req.notice && req.notice.title || null,
+          counts: { like: 1 },
+        });
+      }
+    } catch (e) { console.error('[xapi:notice_reaction]', e.message); }
     res.json({ success: true, ...result });
   } catch (err) {
     console.error('[notice reaction]', err);
@@ -222,6 +249,17 @@ router.post('/:classId/:noticeId/comments', requireAuth, requireMember, loadNoti
     const parent_id = req.body && req.body.parent_id ? parseInt(req.body.parent_id) : null;
     const comment = noticeDb.addComment(req.noticeId, req.user.id, { content, parent_id });
     if (!comment) return res.status(400).json({ success: false, message: '댓글을 작성하지 못했습니다.' });
+    // xAPI: 알림장 댓글 → social(participated) comment-cnt=1
+    try {
+      xapiSpool.record('social', buildSocial, { userId: req.user.id, classId: req.classId }, {
+        verb: 'commented',
+        board_id: `notice-${req.noticeId}`,
+        board_kind: 'other',
+        board_title: req.notice && req.notice.title || null,
+        parent_comment_id: parent_id || null,
+        counts: { comment: 1 },
+      });
+    } catch (e) { console.error('[xapi:notice_comment]', e.message); }
     res.status(201).json({ success: true, comment });
   } catch (err) {
     console.error('[notice comments POST]', err);

@@ -6,6 +6,17 @@ const classDb = require('../db/class');
 const { logLearningActivity } = require('../db/learning-log-helper');
 const { extractLogContext } = require('../lib/log-context');
 const { ensureTodayAttendance } = require('../db/attendance');
+const buildSocial = require('../lib/xapi/builders/social');
+const xapiSpool = require('../lib/xapi/spool');
+
+// 게시판 카테고리 → AIDT board_kind (C/G/E) 매핑용
+function _resolveBoardKind(post, classDb) {
+  const cat = String(post && post.category || '').toLowerCase();
+  if (cat === 'gallery') return 'other';     // → E (기타)
+  if (cat === 'group') return 'group';       // → G
+  // 학급 일반 게시글은 학급 게시판 (C)
+  return 'class';
+}
 
 function requireMember(req, res, next) {
   const classId = parseInt(req.params.classId);
@@ -132,6 +143,21 @@ router.post('/:classId', requireAuth, requireMember, (req, res) => {
         awardClassMileage(req.classId, req.user.id, 'board_post', post.id);
       }
     } catch (_) {}
+    // xAPI: 게시글 작성 → social(participated) — post-cnt=1
+    try {
+      if (post && post.id) {
+        const boardKind = _resolveBoardKind(post);
+        xapiSpool.record('social', buildSocial, { userId: req.user.id, classId: req.classId }, {
+          verb: 'shared',
+          board_id: post.board_id != null ? `board-${post.board_id}` : `class-${req.classId}`,
+          board_kind: boardKind,
+          board_title: post.title || null,
+          post_id: post.id,
+          post_title: post.title || null,
+          counts: { post: 1 },
+        });
+      }
+    } catch (e) { console.error('[xapi:board_post]', e.message); }
     res.status(201).json({ success: true, post });
   } catch (err) { res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' }); }
 });
@@ -189,6 +215,21 @@ router.post('/:classId/:postId/comments', requireAuth, requireMember, (req, res)
         awardClassMileage(req.classId, req.user.id, 'board_comment', comment.id);
       }
     } catch (_) {}
+    // xAPI: 댓글 작성 → social(participated) — comment-cnt=1
+    try {
+      if (comment && comment.id) {
+        const boardKind = _resolveBoardKind(post);
+        xapiSpool.record('social', buildSocial, { userId: req.user.id, classId: req.classId }, {
+          verb: 'commented',
+          board_id: post && post.board_id != null ? `board-${post.board_id}` : `class-${req.classId}`,
+          board_kind: boardKind,
+          board_title: post ? post.title : null,
+          post_id: parseInt(req.params.postId),
+          parent_comment_id: req.body.parent_id || null,
+          counts: { comment: 1 },
+        });
+      }
+    } catch (e) { console.error('[xapi:board_comment]', e.message); }
     res.status(201).json({ success: true, comment });
   } catch (err) { res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' }); }
 });

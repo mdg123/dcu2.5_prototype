@@ -104,10 +104,43 @@ router.get('/daily/:setId', requireAuth, (req, res) => {
   }
 });
 
+// 오늘의 학습 항목 + 콘텐츠 메타 조회 헬퍼 (xAPI 컨텍스트용)
+// 주의: contents 스키마는 subject_code/grade_group 가 아니라 subject/grade/school_level 사용
+function _loadDailyItemMeta(itemId) {
+  try {
+    const mainDb = require('../db');
+    return mainDb.prepare(`
+      SELECT i.id AS item_id, i.set_id, i.content_id,
+             c.title, c.content_type, c.subject, c.grade, c.school_level,
+             c.achievement_code, c.curriculum_standard_ids
+      FROM daily_learning_items i
+      LEFT JOIN contents c ON c.id = i.content_id
+      WHERE i.id = ?
+    `).get(itemId);
+  } catch { return null; }
+}
+
 // POST /daily/:itemId/start — 학습 시작
 router.post('/daily/:itemId/start', requireAuth, (req, res) => {
   try {
-    selfLearnDb.startDailyItem(parseInt(req.params.itemId), req.user.id);
+    const itemId = parseInt(req.params.itemId);
+    selfLearnDb.startDailyItem(itemId, req.user.id);
+    // xAPI: 오늘의 학습 시작 → navigation(did)
+    try {
+      const meta = _loadDailyItemMeta(itemId);
+      if (meta) {
+        xapiSpool.record('navigation', buildNavigation, { userId: req.user.id }, {
+          verb: 'did',
+          target_id: meta.item_id,
+          target_title: meta.title || `학습 항목 ${meta.item_id}`,
+          content_type: meta.content_type || null,
+          subject_code: meta.subject || null,
+          school_level: meta.school_level || null,
+          achievement_codes: meta.achievement_code || null,
+          curriculum_standard_ids: meta.curriculum_standard_ids || null,
+        });
+      }
+    } catch (e) { console.error('[xapi:daily_start]', e.message); }
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
@@ -117,7 +150,46 @@ router.post('/daily/:itemId/start', requireAuth, (req, res) => {
 // POST /daily/:itemId/complete — 학습 완료
 router.post('/daily/:itemId/complete', requireAuth, (req, res) => {
   try {
-    selfLearnDb.completeDailyItem(parseInt(req.params.itemId), req.user.id, req.body);
+    const itemId = parseInt(req.params.itemId);
+    selfLearnDb.completeDailyItem(itemId, req.user.id, req.body);
+    // xAPI: 오늘의 학습 완료 → navigation(learned). 항목이 평가형(quiz/practice)이면 assessment(submitted) 도 함께 적재
+    try {
+      const meta = _loadDailyItemMeta(itemId);
+      if (meta) {
+        const ct = String(meta.content_type || '').toLowerCase();
+        const isAssessmentLike = ['quiz', 'exercise', 'practice', 'i', 'p', 'e'].includes(ct);
+        const stdCtx = {
+          subject_code: meta.subject || null,
+          school_level: meta.school_level || null,
+          achievement_codes: meta.achievement_code || null,
+          curriculum_standard_ids: meta.curriculum_standard_ids || null,
+        };
+        xapiSpool.record('navigation', buildNavigation, { userId: req.user.id }, {
+          verb: 'learned',
+          target_id: meta.item_id,
+          target_title: meta.title || `학습 항목 ${meta.item_id}`,
+          content_type: meta.content_type || null,
+          completed: true,
+          progress_percent: 100,
+          duration_sec: Number(req.body && req.body.duration_seconds) || 0,
+          ...stdCtx,
+        });
+        if (isAssessmentLike) {
+          const correct = Number(req.body && (req.body.correct_count != null ? req.body.correct_count : req.body.score)) || 0;
+          const total = Number(req.body && (req.body.total_questions != null ? req.body.total_questions : req.body.max_score)) || 0;
+          xapiSpool.record('assessment', buildAssessment, { userId: req.user.id }, {
+            verb: 'submitted',
+            assessment_id: meta.item_id,
+            assessment_type: 'practice',  // → 'E' (기타)
+            title: meta.title || `학습 항목 ${meta.item_id}`,
+            total_score: correct,
+            max_score: total,
+            duration_seconds: Number(req.body && req.body.duration_seconds) || 0,
+            ...stdCtx,
+          });
+        }
+      }
+    } catch (e) { console.error('[xapi:daily_complete]', e.message); }
     res.json({ success: true, message: '학습이 완료되었습니다!' });
   } catch (err) {
     res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
@@ -147,6 +219,35 @@ router.post('/daily/:itemId/save-progress', requireAuth, (req, res) => {
       WHERE item_id = ? AND user_id = ?`
     ).run(videoPosition || 0, videoDuration || 0, watchRatio || 0, itemId, req.user.id);
     db.close();
+    // xAPI: 영상 진행 → media(played) — duration 초, completion %
+    try {
+      const mainDb = require('../db');
+      // contents 테이블 컬럼: subject (subject_code 아님), grade, school_level, achievement_code, curriculum_standard_ids
+      const meta = mainDb.prepare(`
+        SELECT i.set_id, i.content_id,
+               c.title, c.content_type, c.subject, c.grade, c.school_level,
+               c.achievement_code, c.curriculum_standard_ids
+        FROM daily_learning_items i
+        LEFT JOIN contents c ON c.id = i.content_id
+        WHERE i.id = ?
+      `).get(itemId);
+      if (meta && meta.content_id) {
+        const completionPct = Math.max(0, Math.min(100, Math.round(Number(watchRatio) * 100) || 0));
+        xapiSpool.record('media', require('../lib/xapi/builders/media'), { userId: req.user.id }, {
+          verb: 'played',
+          content_id: meta.content_id,
+          title: meta.title || null,
+          content_type: meta.content_type || 'video',
+          duration_seconds: Number(videoDuration) || 0,
+          completion_percent: completionPct,
+          completed: completionPct >= 100,
+          subject_code: meta.subject || null,
+          school_level: meta.school_level || null,
+          achievement_codes: meta.achievement_code || null,
+          curriculum_standard_ids: meta.curriculum_standard_ids || null,
+        });
+      }
+    } catch (e) { console.error('[xapi:daily_save_progress]', e.message); }
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ success: false, message: '서버 오류' });
@@ -643,8 +744,47 @@ router.get('/diagnosis/:sessionId/state', requireAuth, (req, res) => {
 // POST /diagnosis/:sessionId/finish — 진단 완료
 router.post('/diagnosis/:sessionId/finish', requireAuth, (req, res) => {
   try {
-    const result = selfLearnDb.finishDiagnosis(parseInt(req.params.sessionId));
+    const sessionId = parseInt(req.params.sessionId);
+    const result = selfLearnDb.finishDiagnosis(sessionId);
     if (!result) return res.status(404).json({ success: false, message: '진단 세션을 찾을 수 없습니다.' });
+    // xAPI: 진단평가 완료 → assessment(submitted) + assessment-type='D'
+    try {
+      const mainDb = require('../db');
+      const sess = mainDb.prepare(`
+        SELECT ds.id, ds.user_id, ds.target_node_id, ds.total_questions, ds.correct_count, ds.started_at, ds.completed_at,
+               lmn.lesson_name, lmn.unit_name, lmn.subject, lmn.grade
+        FROM diagnosis_sessions ds
+        LEFT JOIN learning_map_nodes lmn ON lmn.node_id = ds.target_node_id
+        WHERE ds.id = ?
+      `).get(sessionId);
+      if (sess) {
+        const stdCtx = _nodeStdContext(sess.target_node_id);
+        const total = sess.total_questions || result.totalQuestions || 0;
+        const correct = sess.correct_count || result.correctCount || 0;
+        // 시작/종료 시간 차이로 duration 산정 (없으면 0)
+        let durationSec = 0;
+        try {
+          if (sess.started_at) {
+            const start = new Date(sess.started_at).getTime();
+            const end = sess.completed_at ? new Date(sess.completed_at).getTime() : Date.now();
+            durationSec = Math.max(0, Math.round((end - start) / 1000));
+          }
+        } catch {}
+        xapiSpool.record('assessment', buildAssessment, { userId: req.user.id }, {
+          verb: 'submitted',
+          assessment_id: sessionId,
+          assessment_type: 'diagnostic',  // → 'D'
+          title: '진단평가' + (sess.lesson_name ? ` — ${sess.lesson_name}` : ''),
+          total_score: correct,
+          max_score: total,
+          duration_seconds: durationSec,
+          curriculum_standard_ids: sess.target_node_id || stdCtx.curriculum_standard_ids || null,
+          subject_code: stdCtx.subject_code || null,
+          grade_group: stdCtx.grade_group || null,
+          school_level: stdCtx.school_level || null,
+        });
+      }
+    } catch (e) { console.error('[xapi:diagnosis_finish]', e.message); }
     res.json({ success: true, ...result });
   } catch (err) {
     res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });

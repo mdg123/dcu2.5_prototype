@@ -9,6 +9,9 @@ const classDb = require('../db/class');
 const growthExtDb = require('../db/growth-extended');
 const notifDb = require('../db/notifications');
 const buildSurvey = require('../lib/xapi/builders/survey');
+const buildSocial = require('../lib/xapi/builders/social');
+const buildTeaching = require('../lib/xapi/builders/teaching');
+const buildNavigation = require('../lib/xapi/builders/navigation');
 const xapiSpool = require('../lib/xapi/spool');
 const { generatePortfolioReport } = require('../lib/portfolio-pdf');
 
@@ -277,6 +280,21 @@ router.post('/gallery', requireAuth, (req, res) => {
       // 레거시: 단일 image_url 만 — 기존 경로 유지 (하위 호환)
       item = growthDb.createGalleryItem(req.user.id, { ...req.body, title });
     }
+    // xAPI: 갤러리 작품 업로드 → social(participated) post-cnt=1 (board_kind='other' → E)
+    try {
+      if (item && item.id) {
+        xapiSpool.record('social', buildSocial, { userId: req.user.id }, {
+          verb: 'shared',
+          board_id: `gallery-${item.id}`,
+          board_kind: 'other',
+          board_title: title,
+          post_id: item.id,
+          post_title: title,
+          approval_status: 'pending',  // 학생 작품 승인 후 공개 원칙
+          counts: { post: 1 },
+        });
+      }
+    } catch (e) { console.error('[xapi:gallery_upload]', e.message); }
     res.status(201).json({ success: true, item });
   } catch (err) {
     const status = err.status || 500;
@@ -520,6 +538,20 @@ router.post('/gallery/:id/approve', requireAuth, (req, res) => {
       });
     } catch (_) { /* 알림 실패는 비차단 */ }
 
+    // xAPI: 작품 승인 → teaching(gave) + feedback-info (피드백 대상=학생, 결과=approved)
+    try {
+      xapiSpool.record('teaching', buildTeaching, { userId: req.user.id }, {
+        verb: 'gave',
+        kind: 'gallery_approval',
+        feedback_id: `gallery-approve-${galleryId}`,
+        content_id: galleryId,
+        target_id: galleryId,
+        target_user_ids: item.student_id ? [item.student_id] : [],
+        message: `작품 "${item.title || ''}" 승인`,
+        approval_status: 'approved',
+      });
+    } catch (e) { console.error('[xapi:gallery_approve]', e.message); }
+
     res.json({ success: true, message: '승인되었습니다.' });
   } catch (err) {
     console.error('[GROWTH] gallery approve error:', err);
@@ -554,6 +586,21 @@ router.post('/gallery/:id/reject', requireAuth, (req, res) => {
         link: `/plus/gallery.html?open=${galleryId}`
       });
     } catch (_) { /* 알림 실패는 비차단 */ }
+
+    // xAPI: 작품 반려 → teaching(gave) + feedback-info (결과=rejected, 사유 포함)
+    try {
+      xapiSpool.record('teaching', buildTeaching, { userId: req.user.id }, {
+        verb: 'gave',
+        kind: 'gallery_rejection',
+        feedback_id: `gallery-reject-${galleryId}`,
+        content_id: galleryId,
+        target_id: galleryId,
+        target_user_ids: item.student_id ? [item.student_id] : [],
+        message: `작품 "${item.title || ''}" 반려`,
+        reason,
+        approval_status: 'rejected',
+      });
+    } catch (e) { console.error('[xapi:gallery_reject]', e.message); }
 
     res.json({ success: true, message: '반려되었습니다.' });
   } catch (err) {
@@ -1028,13 +1075,18 @@ router.post('/portfolios/report', requireAuth, async (req, res) => {
       coverNote
     });
 
-    // xAPI 로그 (생성 verb)
+    // xAPI: 포트폴리오 보고서 생성 → navigation(learned) etc-content (option a: builder 위임)
+    //   이전 코드는 spool.enqueue 에 평탄 객체를 넘겨 항상 invalid 처리되었음 → builder 호출로 교정.
     try {
-      xapiSpool.enqueue({
-        actor: { id: req.user.id, name: req.user.display_name || req.user.username },
-        verb: { id: 'http://activitystrea.ms/schema/1.0/generated', display: '생성' },
-        object: { id: `portfolio_report:${report.id}`, type: 'portfolio_report', name: title },
-        timestamp: new Date().toISOString()
+      xapiSpool.record('navigation', buildNavigation, { userId: req.user.id, displayName: req.user.display_name || req.user.username }, {
+        verb: 'learned',
+        target_id: report.id,
+        target_title: title || '포트폴리오 보고서',
+        nav_slug: 'etc-content',
+        content_type: 'document',
+        completed: true,
+        progress_percent: 100,
+        duration_sec: 0,
       });
     } catch (_) { /* 비차단 */ }
 

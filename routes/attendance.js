@@ -7,6 +7,8 @@ const emotionDb = require('../db/emotion-extended');
 const classDb = require('../db/class');
 const { logLearningActivity } = require('../db/learning-log-helper');
 const { extractLogContext } = require('../lib/log-context');
+const buildNavigation = require('../lib/xapi/builders/navigation');
+const xapiSpool = require('../lib/xapi/spool');
 const XLSX = require('xlsx');
 
 // 감정 숫자(1~5) ↔ 감정 키워드 매핑 (DB는 VARCHAR(30) 문자열 저장)
@@ -86,6 +88,17 @@ router.post('/:classId/checkin', requireAuth, requireMember, (req, res) => {
       sourceService: 'class',
       ...extractLogContext(req)
     });
+    // xAPI: 출석 체크인 → navigation(did) activity-type='etc-content'
+    //   AIDT 표준상 출석은 별도 영역이 없어 navigation 의 기타 콘텐츠로 표현
+    try {
+      xapiSpool.record('navigation', buildNavigation, { userId: req.user.id, classId: req.classId }, {
+        verb: 'did',
+        target_id: result.id || `attend-${req.classId}-${req.user.id}-${Date.now()}`,
+        target_title: '출석 체크인',
+        nav_slug: 'etc-content',
+        content_type: 'other',
+      });
+    } catch (e) { console.error('[xapi:attendance_checkin]', e.message); }
     res.json({ success: true, message: '출석 완료!', ...stats });
   } catch (err) {
     console.error('[ATTENDANCE] checkin error:', err);

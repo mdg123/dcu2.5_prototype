@@ -6,6 +6,8 @@ const classDb = require('../db/class');
 const { logLearningActivity } = require('../db/learning-log-helper');
 const { extractLogContext } = require('../lib/log-context');
 const { ensureTodayAttendance } = require('../db/attendance');
+const buildSurvey = require('../lib/xapi/builders/survey');
+const xapiSpool = require('../lib/xapi/spool');
 
 function requireMember(req, res, next) {
   const classId = parseInt(req.params.classId);
@@ -89,6 +91,36 @@ router.post('/:classId/:surveyId/submit', requireAuth, requireMember, (req, res)
       const { awardClassMileage } = require('../db/class-mileage');
       awardClassMileage(parseInt(req.params.classId), req.user.id, 'survey_submit', parseInt(req.params.surveyId));
     } catch (e) { console.error('[mileage:survey_submit]', e.message); }
+    // xAPI: 설문 응답 → survey(responded) — comprehension-survey (기본 일반 설문)
+    try {
+      const surveyId = parseInt(req.params.surveyId);
+      const survey = surveyDb.getSurveyById(surveyId);
+      // 응답 정규화: { questionId, answer } 또는 { score } 형태 모두 수용
+      const answers = req.body.answers;
+      let responses = [];
+      if (Array.isArray(answers)) {
+        responses = answers.map((a, idx) => ({
+          question_id: a.question_id != null ? a.question_id : (a.questionId != null ? a.questionId : (idx + 1)),
+          question_type: a.question_type || 'likert',
+          answer: typeof a.answer === 'number' ? a.answer : (typeof a.value === 'number' ? a.value : null),
+          score: typeof a.score === 'number' ? a.score : (typeof a.answer === 'number' ? a.answer : null),
+        }));
+      } else if (answers && typeof answers === 'object') {
+        responses = Object.entries(answers).map(([k, v]) => ({
+          question_id: k,
+          question_type: 'likert',
+          answer: typeof v === 'number' ? v : null,
+          score: typeof v === 'number' ? v : null,
+        }));
+      }
+      xapiSpool.record('survey', buildSurvey, { userId: req.user.id, classId: parseInt(req.params.classId) }, {
+        verb: 'responded',
+        survey_id: surveyId,
+        survey_kind: 'comprehension',
+        title: survey && survey.title || null,
+        responses,
+      });
+    } catch (e) { console.error('[xapi:survey_submit]', e.message); }
     res.json({ success: true, message: '설문이 제출되었습니다.' });
   } catch (err) { res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' }); }
 });
