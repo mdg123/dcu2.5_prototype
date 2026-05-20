@@ -1381,11 +1381,16 @@ function initSchema() {
     if (!spoolCols.includes('achievement_level')) {
       db.exec("ALTER TABLE xapi_statement_spool ADD COLUMN achievement_level TEXT"); // A~E
     }
+    // AIDT Phase 1: xAPI Statement UUID id (idempotency dedup용)
+    if (!spoolCols.includes('statement_id')) {
+      db.exec("ALTER TABLE xapi_statement_spool ADD COLUMN statement_id TEXT");
+    }
     db.exec(`
       CREATE INDEX IF NOT EXISTS idx_xss_std     ON xapi_statement_spool(primary_std_id, event_timestamp);
       CREATE INDEX IF NOT EXISTS idx_xss_subject ON xapi_statement_spool(subject_code, event_timestamp);
       CREATE INDEX IF NOT EXISTS idx_xss_object  ON xapi_statement_spool(object_type, object_id);
       CREATE INDEX IF NOT EXISTS idx_xss_userid  ON xapi_statement_spool(user_id, event_timestamp DESC);
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_xapi_statement_id ON xapi_statement_spool(statement_id) WHERE statement_id IS NOT NULL;
     `);
   } catch (e) {
     console.warn('[다채움] 교육과정 표준체계/xAPI 스키마 초기화 실패:', e.message);
