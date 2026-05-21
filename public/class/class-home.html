@@ -1379,6 +1379,14 @@
     let myRole = null;
     let currentUser = null;
 
+    // 클래스 관리 권한을 가진 역할 목록
+    // 현재는 'owner'만, 향후 'co_teacher'(부담임/공동교사) 등 추가 시 이 배열에만 등록.
+    const MANAGE_ROLES = ['owner'];
+    // 클래스 관리 권한 검사 (수업/과제/평가 생성·삭제, 채점 정보 열람 등)
+    function canManage() {
+      return MANAGE_ROLES.includes(myRole);
+    }
+
     const tabPages = {};
     const tabLazy = {
       attendance: () => {
@@ -1444,7 +1452,7 @@
       // 역할 라벨 표시 (h1 안이 아니라 title-row 옆에 칩으로 노출)
       const roleTag = document.createElement('span');
       roleTag.style.cssText = 'display:inline-flex;align-items:center;gap:4px;padding:4px 12px;border-radius:20px;font-size:13px;font-weight:600;background:rgba(255,255,255,0.22);color:#fff;border:1px solid rgba(255,255,255,0.3);';
-      if (myRole === 'owner') {
+      if (canManage()) {
         roleTag.innerHTML = '<i class="fas fa-chalkboard-teacher"></i> 개설자';
         document.getElementById('manageCard').style.display = 'block';
         document.getElementById('headerActions').style.display = 'flex';
@@ -1518,7 +1526,7 @@
       let hwPct = hwTotal > 0 ? Math.round((hwSubmitted / hwTotal) * 100) : 0;
       let examPctVal = examTotal > 0 ? Math.round((examParticipated / examTotal) * 100) : 0;
       // 교사: 전체 학생 평균으로 표시
-      if (myRole === 'owner') {
+      if (canManage()) {
         try {
           const membersRes = await fetch(`/api/class/${classId}/members`).then(r=>r.json());
           const students = (membersRes.members||[]).filter(m=>m.role==='member');
@@ -1552,7 +1560,7 @@
 
       // 알림 카드 (역할별)
       const alertGrid = document.getElementById('alertGrid');
-      if (myRole === 'owner') {
+      if (canManage()) {
         alertGrid.innerHTML = `
           <div class="alert-card orange" onclick="document.querySelector('[data-tab=homework]').click()">
             <div class="alert-value">${hwActive}</div><div class="alert-label">진행 중 과제</div>
@@ -1586,7 +1594,7 @@
 
       // 퀵 액션 (역할별)
       const qaEl = document.getElementById('quickActions');
-      if (myRole === 'owner') {
+      if (canManage()) {
         qaEl.innerHTML = `
           <div class="quick-action" onclick="showLessonModal()">
             <div class="qa-icon" style="background:linear-gradient(135deg,#2563eb,#3b82f6);"><i class="fas fa-book"></i></div>
@@ -1705,7 +1713,7 @@
             <div class="item-icon" style="background:#10b981;"><i class="fas fa-tasks"></i></div>
             <div class="item-body">
               <div class="item-title">${escHtml(h.title)}</div>
-              <div class="item-meta">마감: ${h.due_date || '없음'}${myRole === 'owner' ? ` · 제출 ${h.submission_count || 0}건` : ''}</div>
+              <div class="item-meta">마감: ${h.due_date || '없음'}${canManage() ? ` · 제출 ${h.submission_count || 0}건` : ''}</div>
             </div>
             <span class="item-badge badge-active">진행중</span>
           </div>
@@ -1762,7 +1770,7 @@
       const search = (document.getElementById('lessonSearchInput')?.value || '').toLowerCase();
       let filtered = allLessons;
       // 학생에게 임시저장(draft) 수업 숨기기
-      if (myRole !== 'owner') filtered = filtered.filter(l => l.status !== 'draft');
+      if (!canManage()) filtered = filtered.filter(l => l.status !== 'draft');
       // 날짜 기반 필터
       if (lessonFilter === 'ongoing') filtered = filtered.filter(l => getLessonDateStatus(l) === 'ongoing');
       else if (lessonFilter === 'closed') filtered = filtered.filter(l => getLessonDateStatus(l) === 'closed');
@@ -1811,9 +1819,9 @@
         const isComplete = l.status === 'completed';
         const myDone = l.my_completed || 0;
         const myTotal = l.my_total || 0;
-        const myComplete = myRole !== 'owner' && myTotal > 0 && myDone >= myTotal;
+        const myComplete = !canManage() && myTotal > 0 && myDone >= myTotal;
         const isScheduled = st.label === '예정';
-        const studentBlocked = myRole !== 'owner' && isScheduled;
+        const studentBlocked = !canManage() && isScheduled;
         const orderStyle = isComplete ? 'background:#D1FAE5;color:#10B981;' : myComplete ? 'background:#D1FAE5;color:#10B981;' : studentBlocked ? 'background:#f3f4f6;color:#9ca3af;' : '';
         const titleStyle = isComplete ? 'color:#6B7280;' : studentBlocked ? 'color:#9ca3af;' : '';
         return `
@@ -1834,7 +1842,7 @@
                 <span class="${st.cls}">${st.label}</span>
               </div>
             </div>
-            ${myRole === 'owner' ? (() => {
+            ${canManage() ? (() => {
               const studentTotal = getClassStudentCount(l);
               const completedStudents = Number.isFinite(l.completed_students) ? l.completed_students : 0;
               const hasContent = (l.content_count || 0) > 0;
@@ -2515,7 +2523,7 @@
         const urgentLabel = isOverdue ? '<span style="color:#dc2626;font-size:13px;font-weight:600;">마감됨</span>' :
           daysLeft !== null && daysLeft <= 3 ? `<span style="color:#ef4444;font-size:13px;font-weight:600;">${daysLeft}일 남음</span>` :
           daysLeft !== null ? `<span style="color:#6B7280;font-size:13px;">${daysLeft}일 남음</span>` : '';
-        const isOwner = myRole === 'owner';
+        const isOwner = canManage();
         // 학생 본인 제출 상태
         const mySubmitted = !!h.my_submission;
         const myGraded = mySubmitted && h.my_submission_status === 'graded';
@@ -2784,7 +2792,7 @@
     function renderExamList() {
       let filtered = allExamsData;
       // 학생에게 임시저장(draft) 평가 숨기기
-      if (myRole !== 'owner') filtered = filtered.filter(e => e.status !== 'draft' && e.status !== 'waiting');
+      if (!canManage()) filtered = filtered.filter(e => e.status !== 'draft' && e.status !== 'waiting');
       // 필터 적용
       if (examFilter === 'active') filtered = filtered.filter(e => getExamDateStatus(e) === 'ongoing');
       else if (examFilter === 'closed') filtered = filtered.filter(e => getExamDateStatus(e) === 'closed');
@@ -2817,21 +2825,21 @@
         const pct = studentTotal > 0 ? Math.min(Math.round((participatedCount / studentTotal) * 100), 100) : 0;
         const fillColor = progressFillColor(pct);
         const isScheduled = dateStatus === 'upcoming';
-        const studentBlocked = myRole !== 'owner' && isScheduled;
+        const studentBlocked = !canManage() && isScheduled;
 
         // 학생 본인 응시 상태 — 점수가 있으면 채점완료, 없으면 응시완료
         const myExamSubmitted = !!e.my_submitted;
         const myExamScored = myExamSubmitted && e.my_score !== null && e.my_score !== undefined;
-        const examCompleteBadge = (myRole !== 'owner' && myExamSubmitted)
+        const examCompleteBadge = (!canManage() && myExamSubmitted)
           ? ` <span style="display:inline-block;background:#D1FAE5;color:#059669;font-size:11px;font-weight:700;padding:2px 8px;border-radius:4px;margin-left:8px;vertical-align:middle;">${myExamScored ? '채점완료 ' + e.my_score + '점' : '응시완료'}</span>`
           : '';
-        const examOrderStyle = (myRole !== 'owner' && myExamSubmitted)
+        const examOrderStyle = (!canManage() && myExamSubmitted)
           ? 'background:#D1FAE5;color:#10B981;'
           : (studentBlocked ? 'background:#f3f4f6;color:#9ca3af;' : 'background:#ede9fe;color:#8b5cf6;');
         return `
           <div class="lesson-card-item" style="${studentBlocked ? 'opacity:.6;cursor:default;' : ''}" onclick="${studentBlocked ? "classToast('아직 시작되지 않은 평가입니다.','warning')" : "location.href='/class/exam-view.html?classId=" + classId + "&id=" + e.id + "'"}">
             <div class="lesson-card-main">
-              <div class="lesson-order" style="${examOrderStyle}">${myExamSubmitted && myRole !== 'owner' ? '✓' : i + 1}</div>
+              <div class="lesson-order" style="${examOrderStyle}">${myExamSubmitted && !canManage() ? '✓' : i + 1}</div>
               <div class="lesson-card-body" style="flex:1;min-width:0;">
                 <div class="lc-title">${escHtml(e.title)}${examCompleteBadge}</div>
                 <div class="lc-meta">
@@ -2847,7 +2855,7 @@
                 <span class="${st.cls}">${st.label}</span>
               </div>
             </div>
-            ${myRole === 'owner' ? (() => {
+            ${canManage() ? (() => {
               let participantLabel;
               if (studentTotal === 0) {
                 participantLabel = '<span style="font-size:13px;color:#9ca3af;">멤버 없음</span>';
@@ -4048,7 +4056,7 @@
       const navEl = document.getElementById('boardNavTabs');
       if (!classBoards.length) {
         navEl.innerHTML = `<span style="color:#6B7280;font-size:13px;">게시판이 없습니다.</span>
-          ${myRole === 'owner' ? `<a href="/class/manage.html?id=${classId}" style="font-size:12px;color:#2563eb;margin-left:8px;">+ 게시판 추가</a>` : ''}`;
+          ${canManage() ? `<a href="/class/manage.html?id=${classId}" style="font-size:12px;color:#2563eb;margin-left:8px;">+ 게시판 추가</a>` : ''}`;
         return;
       }
       navEl.innerHTML = classBoards.map((b, i) => `
@@ -4058,7 +4066,7 @@
             font-size:16px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:8px;transition:all .2s;">
           ${b.board_type === 'gallery' ? '🎨' : '📋'} ${escHtml(b.name)}
         </button>
-      `).join('') + (myRole === 'owner' ? `<a href="/class/manage.html?id=${classId}" style="font-size:14px;color:#6B7280;margin-left:6px;display:inline-flex;align-items:center;gap:6px;padding:10px 18px;border:1.5px dashed #d1d5db;border-radius:99px;text-decoration:none;"><i class="fas fa-plus"></i> 게시판 추가</a>` : '');
+      `).join('') + (canManage() ? `<a href="/class/manage.html?id=${classId}" style="font-size:14px;color:#6B7280;margin-left:6px;display:inline-flex;align-items:center;gap:6px;padding:10px 18px;border:1.5px dashed #d1d5db;border-radius:99px;text-decoration:none;"><i class="fas fa-plus"></i> 게시판 추가</a>` : '');
       // 첫 번째 게시판 선택
       if (classBoards.length > 0) switchBoardTab(classBoards[0].id);
     }
@@ -4097,7 +4105,7 @@
       }
 
       loadBoard(true);
-      if (myRole === 'owner' && currentBoardType === 'gallery') loadPendingPosts();
+      if (canManage() && currentBoardType === 'gallery') loadPendingPosts();
     }
 
     function setBoardViewStyle(mode) {
@@ -4152,7 +4160,7 @@
         document.getElementById('boardList').innerHTML = '<div style="text-align:center;padding:20px;color:#9ca3af;"><i class="fas fa-spinner fa-spin"></i> 로딩 중...</div>';
       }
       await loadBoardPage();
-      if (myRole === 'owner') loadPendingPosts();
+      if (canManage()) loadPendingPosts();
     }
 
     async function loadBoardPage() {
@@ -4343,7 +4351,7 @@
         likeBtn.style.cssText = 'padding:10px 22px;font-size:16px;display:inline-flex;align-items:center;gap:8px;border:1.5px solid #d1d5db;border-radius:8px;background:#fff;color:#374151;transition:all .15s;cursor:pointer;';
       }
       // 본인 글이면 삭제 가능 (익명이어도 author_id는 서버에서 전달됨)
-      if (p.author_id === currentUser.id || myRole === 'owner') {
+      if (p.author_id === currentUser.id || canManage()) {
         document.getElementById('deletePostBtn').style.display = '';
       } else {
         document.getElementById('deletePostBtn').style.display = 'none';
@@ -4511,7 +4519,7 @@
     }
 
     function renderOneComment(c, isReply) {
-      const canDelete = window.dacheumUser && (c.author_id === window.dacheumUser.id || myRole === 'owner');
+      const canDelete = window.dacheumUser && (c.author_id === window.dacheumUser.id || canManage());
       const deleteBtn = canDelete ? `<button onclick="deleteComment(${c.id})" style="background:none;border:none;color:#d1d5db;cursor:pointer;font-size:13px;margin-left:8px;" title="삭제"><i class="fas fa-trash"></i></button>` : '';
       const replyBtn = isReply ? '' : `<button onclick="setReply(${c.id}, '${escHtml(c.author_name)}')" style="background:none;border:none;color:#9ca3af;cursor:pointer;font-size:13px;margin-left:8px;"><i class="fas fa-reply"></i> 답글</button>`;
       const indent = isReply ? 'margin-left:44px;background:#f9fafb;border-radius:10px;padding:10px 14px;' : '';
@@ -4921,7 +4929,7 @@
         return;
       }
       // 학생 본인 응답 상태 보강 — 서버가 my_response를 안 내려주는 구버전 빌드에서도 작동
-      if (myRole !== 'owner') {
+      if (!canManage()) {
         const needsFetch = data.surveys.filter(s => s.my_response === undefined);
         if (needsFetch.length > 0) {
           await Promise.all(needsFetch.map(async s => {
@@ -4946,7 +4954,7 @@
         // 학생 본인 응답 상태
         const myResponded = !!s.my_response;
         const myRespondedDate = s.my_responded_at ? String(s.my_responded_at).slice(0, 10) : null;
-        const isOwner = myRole === 'owner';
+        const isOwner = canManage();
         // 학생 뷰 완료 뱃지
         const surveyCompleteBadge = (!isOwner && myResponded)
           ? ` <span style="display:inline-block;background:#D1FAE5;color:#059669;font-size:11px;font-weight:700;padding:2px 8px;border-radius:4px;margin-left:8px;vertical-align:middle;">응답완료</span>`
@@ -5066,7 +5074,7 @@
       }
 
       // 교사: 응답 현황 (시각화)
-      if (data.responses && myRole === 'owner') {
+      if (data.responses && canManage()) {
         respArea.style.display = 'block';
         // 멤버 수 기반 응답률
         const memberCount = classData?.member_count || data.responses.length || 1;
@@ -5475,7 +5483,7 @@
     async function fetchMileage() {
       if (!classId) return;
       try {
-        if (myRole === 'owner') {
+        if (canManage()) {
           // 교사: 전체 멤버 + 규칙
           const [mRes, rRes] = await Promise.all([
             fetch(`/api/class/${classId}/mileage/members`).then(r => r.ok ? r.json() : null).catch(() => null),
@@ -5549,7 +5557,7 @@
         return;
       }
 
-      if (myRole === 'owner') {
+      if (canManage()) {
         renderMileageTeacherWidget(body);
       } else {
         renderMileageStudentWidget(body);
