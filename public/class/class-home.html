@@ -622,7 +622,7 @@
             </div>
             <h3 id="postDetailTitle" style="font-size:18px;margin-bottom:8px;"></h3>
             <div id="postDetailMeta" style="font-size:12px;color:#6B7280;margin-bottom:16px;display:flex;gap:12px;"></div>
-            <div id="postDetailImage" style="display:none;margin-bottom:16px;text-align:center;"><img style="max-width:100%;max-height:400px;border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,.1);" /></div>
+            <div id="postDetailImage" style="display:none;margin-bottom:16px;min-height:240px;background:#f3f4f6;border-radius:12px;padding:20px;align-items:center;justify-content:center;"><img style="max-width:100%;max-height:520px;border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,.1);cursor:zoom-in;" onclick="openImageLightbox(this.src)" /></div>
             <div id="postDetailContent" style="font-size:15px;line-height:1.8;padding-bottom:16px;border-bottom:1px solid #e5e7eb;margin-bottom:16px;"></div>
             <!-- 좋아요 액션 영역 -->
             <div id="postActionsBar" style="display:flex;justify-content:center;gap:10px;padding:12px 0 20px;border-bottom:1px solid #e5e7eb;margin-bottom:16px;">
@@ -4318,7 +4318,7 @@
       const imgEl = document.getElementById('postDetailImage');
       if (p.image_url) {
         imgEl.querySelector('img').src = p.image_url;
-        imgEl.style.display = '';
+        imgEl.style.display = 'flex';
       } else {
         imgEl.style.display = 'none';
       }
@@ -4417,6 +4417,35 @@
         }
         classToast('좋아요 처리 중 오류가 발생했습니다.', 'error');
       }
+    }
+
+    // 이미지 라이트박스: 게시글 상세 이미지 클릭 시 풀스크린 확대
+    function openImageLightbox(src) {
+      if (!src) return;
+      let lb = document.getElementById('imageLightbox');
+      if (!lb) {
+        lb = document.createElement('div');
+        lb.id = 'imageLightbox';
+        lb.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.88);z-index:10500;display:flex;align-items:center;justify-content:center;padding:32px;cursor:zoom-out;';
+        lb.innerHTML = `
+          <img id="imageLightboxImg" style="width:min(60vw,560px);max-height:80vh;height:auto;object-fit:contain;border-radius:8px;box-shadow:0 8px 32px rgba(0,0,0,.5);background:#fff;" />
+          <button id="imageLightboxClose" style="position:absolute;top:20px;right:24px;background:rgba(255,255,255,.15);border:none;color:#fff;width:44px;height:44px;border-radius:50%;font-size:22px;cursor:pointer;display:flex;align-items:center;justify-content:center;" title="닫기">&times;</button>
+        `;
+        lb.addEventListener('click', (e) => {
+          if (e.target.id === 'imageLightboxImg') return;
+          closeImageLightbox();
+        });
+        document.body.appendChild(lb);
+        document.addEventListener('keydown', (e) => {
+          if (e.key === 'Escape' && document.getElementById('imageLightbox')?.style.display === 'flex') closeImageLightbox();
+        });
+      }
+      document.getElementById('imageLightboxImg').src = src;
+      lb.style.display = 'flex';
+    }
+    function closeImageLightbox() {
+      const lb = document.getElementById('imageLightbox');
+      if (lb) lb.style.display = 'none';
     }
 
     function previewCommentImage(input) {
