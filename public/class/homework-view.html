@@ -1141,6 +1141,21 @@
       };
       return map[kind] || map.file;
     }
+    // due_date 안전 파서 — 'YYYY-MM-DD' (date-only)는 그날 끝(23:59:59),
+    // 'YYYY-MM-DD HH:MM[:SS]' (datetime)은 해당 시각 그대로. 둘 다 잘못된 경우 null.
+    // 기존 코드가 무조건 + 'T23:59:59' 를 붙여 datetime 형식에서 invalid Date(NaN) 발생 → 본 헬퍼 경유.
+    function parseDueDate(s) {
+      if (!s) return null;
+      const str = String(s).trim();
+      if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return new Date(str + 'T23:59:59');
+      if (/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}/.test(str)) {
+        const d = new Date(str.replace(' ', 'T'));
+        return isNaN(d.getTime()) ? null : d;
+      }
+      const d = new Date(str);
+      return isNaN(d.getTime()) ? null : d;
+    }
+
     function formatSize(bytes) {
       if (bytes == null || isNaN(bytes)) return '';
       const kb = bytes / 1024;
@@ -1385,7 +1400,7 @@
     async function saveDraft(showToastMsg, isAuto) {
       // 마감 후엔 임시저장 불필요
       if (hwData?.due_date) {
-        const dueAt = new Date(hwData.due_date + 'T23:59:59');
+        const dueAt = parseDueDate(hwData.due_date);
         if (dueAt < new Date()) return;
       }
       const content = (typeof getSubmitHtml === 'function' ? getSubmitHtml() : (document.getElementById('submitContent')?.value || '')).trim();
@@ -1469,7 +1484,7 @@
             : '<i class="fas fa-paper-plane"></i> 댓글 등록';
         }
         if (submitHint) {
-          const _hwIsOverdue2 = hwData.due_date && new Date(hwData.due_date + 'T23:59:59') < new Date();
+          const _hwIsOverdue2 = hwData.due_date && parseDueDate(hwData.due_date) < new Date();
           if (!_hwIsOverdue2) {
             submitHint.textContent = (submitBtn && submitBtn.classList.contains('btn-secondary'))
               ? '마감 전까지 댓글을 수정·삭제할 수 있어요.'
@@ -1495,7 +1510,7 @@
             : '<i class="fas fa-check"></i> 제출하기';
         }
         if (submitHint) {
-          const _hwIsOverdue2 = hwData.due_date && new Date(hwData.due_date + 'T23:59:59') < new Date();
+          const _hwIsOverdue2 = hwData.due_date && parseDueDate(hwData.due_date) < new Date();
           if (!_hwIsOverdue2) {
             submitHint.textContent = (submitBtn && submitBtn.classList.contains('btn-secondary'))
               ? '마감 전까지 다시 수정할 수 있어요.'
@@ -1559,7 +1574,7 @@
         noteEl.style.display = 'none';
       }
 
-      const isOverdue = hwData.due_date && new Date(hwData.due_date) < new Date();
+      const isOverdue = hwData.due_date && parseDueDate(hwData.due_date) < new Date();
       const pubChip = hwData.public_submissions
         ? '<span class="public-chip"><i class="fas fa-globe"></i> 제출물 공개</span>'
         : '<span class="public-chip" style="background:rgba(255,255,255,0.12);"><i class="fas fa-lock"></i> 비공개</span>';
@@ -1625,7 +1640,7 @@
         // 댓글형 + 마감 전 + 제출함일 때 버튼 라벨 "댓글 수정"으로
         // (아래 4상태 분기 안에서 재정의)
         // 4상태 분기: 마감 전/후 × 제출/미제출
-        const _hwIsOverdue = hwData.due_date && new Date(hwData.due_date + 'T23:59:59') < new Date();
+        const _hwIsOverdue = hwData.due_date && parseDueDate(hwData.due_date) < new Date();
         const _hwHasSubmission = !!data.submission && !data.submission.is_draft;
         const _hwHasDraft = !!data.submission && !!data.submission.is_draft;
         const _btn = document.getElementById('submitBtn');
@@ -1915,7 +1930,7 @@
     function _cmtIsLate(sub) {
       if (!sub || !sub.submitted_at || !hwData?.due_date) return false;
       try {
-        const due = new Date(hwData.due_date + 'T23:59:59');
+        const due = parseDueDate(hwData.due_date);
         const t = new Date(String(sub.submitted_at).replace(' ', 'T'));
         return !isNaN(due.getTime()) && !isNaN(t.getTime()) && t > due;
       } catch (_) { return false; }
@@ -1966,7 +1981,7 @@
         return;
       }
 
-      const isOverdue = hwData?.due_date && new Date(hwData.due_date + 'T23:59:59') < new Date();
+      const isOverdue = hwData?.due_date && parseDueDate(hwData.due_date) < new Date();
       const myId = currentUser ? currentUser.id : null;
 
       list.innerHTML = sorted.map(s => {
@@ -2055,7 +2070,7 @@
     async function deleteMyComment() {
       // 마감 후 차단
       if (hwData?.due_date) {
-        const dueAt = new Date(hwData.due_date + 'T23:59:59');
+        const dueAt = parseDueDate(hwData.due_date);
         if (dueAt < new Date()) {
           classToast('마감되어 삭제할 수 없어요.', 'error');
           return;
@@ -2164,7 +2179,7 @@
     function calcLate(sub) {
       if (!sub.submitted_at || !hwData?.due_date) return { late: false, days: 0 };
       const submit = new Date(sub.submitted_at.replace(' ', 'T'));
-      const due = new Date(hwData.due_date + 'T23:59:59');
+      const due = parseDueDate(hwData.due_date);
       if (submit <= due) return { late: false, days: 0 };
       const diff = Math.ceil((submit - due) / (1000 * 60 * 60 * 24));
       return { late: true, days: diff };
@@ -2264,7 +2279,7 @@
       let dueText = '';
       if (hwData?.due_date) {
         const today = new Date();
-        const due = new Date(hwData.due_date + 'T23:59:59');
+        const due = parseDueDate(hwData.due_date);
         const diff = Math.ceil((due - today) / (1000 * 60 * 60 * 24));
         if (diff > 0) dueText = ` · 마감까지 ${diff}일`;
         else if (diff === 0) dueText = ' · 오늘 마감';
@@ -3116,7 +3131,7 @@
     async function submitHomework() {
       // 마감 검증: 마감 후에는 제출/수정 차단
       if (hwData?.due_date) {
-        const dueAt = new Date(hwData.due_date + 'T23:59:59');
+        const dueAt = parseDueDate(hwData.due_date);
         if (dueAt < new Date()) {
           classToast('마감되어 제출/수정할 수 없어요.', 'error');
           return;
