@@ -6,6 +6,8 @@
   <title>다채움 - 과제 상세</title>
   <link rel="stylesheet" href="/css/common-nav.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <link href="https://cdn.quilljs.com/1.3.7/quill.snow.css" rel="stylesheet">
+  <script src="https://cdn.quilljs.com/1.3.7/quill.min.js"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: 'Pretendard','Noto Sans KR',system-ui,sans-serif; background: #F5F7FA; color: #1A1A2E; font-size: 17px; }
@@ -51,6 +53,72 @@
     }
     .submit-form .submit-actions { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
     .submit-form .submit-actions .submit-hint { font-size:13px; color:#6B7280; margin-left:auto; }
+
+    /* === Quill 위지윅 에디터 (학생 제출란) === */
+    .submit-editor-wrap { position: relative; }
+    #submitEditorToolbar {
+      border: 1.5px solid #d1d5db; border-bottom: none;
+      border-radius: 10px 10px 0 0; background: #f9fafb;
+      padding: 6px 8px;
+    }
+    #submitEditorToolbar.ql-toolbar.ql-snow { border-color: #d1d5db; }
+    #submitEditor {
+      border: 1.5px solid #d1d5db; border-top: none;
+      border-radius: 0 0 10px 10px;
+      min-height: 320px; background: #fff;
+      transition: border-color 0.15s, box-shadow 0.15s;
+    }
+    #submitEditor.ql-container.ql-snow { border-color: #d1d5db; }
+    #submitEditor:focus-within { border-color: #10b981; box-shadow: 0 0 0 3px rgba(16,185,129,0.12); }
+    #submitEditor .ql-editor {
+      min-height: 300px; font-size: 16px; line-height: 1.8;
+      font-family: 'Pretendard','Noto Sans KR',system-ui,sans-serif;
+      color: #1A1A2E;
+    }
+    #submitEditor .ql-editor.ql-blank::before {
+      font-style: normal; color: #9CA3AF; font-size: 16px;
+    }
+    #submitEditor .ql-editor img {
+      max-width: 100%; height: auto; border-radius: 8px;
+      margin: 6px 0;
+    }
+    #submitEditor .ql-editor iframe,
+    #submitEditor .ql-editor .ql-video {
+      max-width: 100%; width: 100%; max-height: 360px; min-height: 280px;
+      border-radius: 8px; border: 0; margin: 8px 0;
+    }
+    #submitHtmlEditor {
+      width: 100%; min-height: 320px;
+      border: 1.5px solid #d1d5db; border-top: none;
+      border-radius: 0 0 10px 10px;
+      padding: 14px 16px;
+      font-family: 'D2Coding','Consolas','Menlo',monospace;
+      font-size: 13px; line-height: 1.7; color: #1f2937;
+      background: #fafafa; resize: vertical;
+    }
+    #submitHtmlEditor:focus { outline: none; border-color: #10b981; box-shadow: 0 0 0 3px rgba(16,185,129,0.12); }
+    .submit-editor-wrap.html-mode #submitEditor { display: none; }
+    .submit-editor-wrap.html-mode #submitHtmlEditor { display: block !important; }
+    .submit-editor-wrap .submit-counter {
+      position: absolute; right: 14px; bottom: 12px;
+      font-size: 13px; color: #9CA3AF;
+      background: rgba(255,255,255,0.85);
+      padding: 2px 8px; border-radius: 6px; pointer-events: none;
+      z-index: 2;
+    }
+    #submitHtmlModeBtn {
+      background: #fff; border: 1px solid #d1d5db; border-radius: 6px;
+      cursor: pointer; color: #374151; padding: 4px 10px;
+      font-size: 12px; font-weight: 600; font-family: inherit;
+      display: inline-flex; align-items: center; gap: 4px;
+      transition: all 0.15s;
+    }
+    #submitHtmlModeBtn:hover { background: #f3f4f6; border-color: #10b981; color: #10b981; }
+    #submitHtmlModeBtn.active { background: #10b981; border-color: #10b981; color: #fff; }
+    /* 읽기 전용(마감 후 제출함) — Quill 편집 영역 잠금 */
+    #submitEditor.is-readonly .ql-editor { background: #f9fafb; color: #6B7280; cursor: not-allowed; }
+    .submit-editor-wrap.is-readonly #submitEditorToolbar { display: none; }
+    .submit-editor-wrap.is-readonly #submitEditor { border-top: 1.5px solid #d1d5db; border-radius: 10px; }
 
     .file-upload { margin: 0; }
     .file-upload label { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; background: #f3f4f6; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 500; }
@@ -500,10 +568,55 @@
         <span id="draftBannerText">임시저장된 내용을 불러왔어요.</span>
       </div>
       <div class="submit-form" id="submitForm">
-        <div class="submit-input-wrap">
-          <textarea id="submitContent" rows="14"
-            placeholder="과제 풀이·감상·답안을 자유롭게 입력하세요. 줄바꿈도 그대로 보여요."
-            oninput="updateSubmitCounter();onContentChanged();"></textarea>
+        <!-- Quill 위지윅 에디터 + HTML 모드 토글 -->
+        <div class="submit-editor-wrap" id="submitEditorWrap">
+          <div id="submitEditorToolbar">
+            <span class="ql-formats">
+              <select class="ql-header">
+                <option value="1"></option>
+                <option value="2"></option>
+                <option value="3"></option>
+                <option selected></option>
+              </select>
+            </span>
+            <span class="ql-formats">
+              <button class="ql-bold" title="굵게"></button>
+              <button class="ql-italic" title="기울임"></button>
+              <button class="ql-underline" title="밑줄"></button>
+              <button class="ql-strike" title="취소선"></button>
+            </span>
+            <span class="ql-formats">
+              <select class="ql-color" title="글자 색"></select>
+              <select class="ql-background" title="배경 색"></select>
+            </span>
+            <span class="ql-formats">
+              <button class="ql-list" value="ordered" title="번호 목록"></button>
+              <button class="ql-list" value="bullet" title="글머리 목록"></button>
+              <button class="ql-blockquote" title="인용"></button>
+            </span>
+            <span class="ql-formats">
+              <select class="ql-align" title="정렬"></select>
+            </span>
+            <span class="ql-formats">
+              <button class="ql-link" title="링크"></button>
+              <button class="ql-image" title="이미지 (클립보드 붙여넣기도 가능)"></button>
+              <button class="ql-video" title="동영상 (YouTube URL)"></button>
+            </span>
+            <span class="ql-formats">
+              <button class="ql-clean" title="서식 지우기"></button>
+            </span>
+            <span class="ql-formats" style="float:right;margin-right:0;">
+              <button type="button" id="submitHtmlModeBtn" onclick="toggleSubmitHtmlMode()" title="HTML 소스 보기/편집">
+                <i class="fas fa-code"></i> HTML
+              </button>
+            </span>
+          </div>
+          <div id="submitEditor"></div>
+          <textarea id="submitHtmlEditor" style="display:none;"
+            placeholder="<p>HTML 소스를 직접 편집할 수 있어요.</p>"
+            oninput="onHtmlEditorInput()"></textarea>
+          <!-- 호환용 hidden 텍스트영역 (제출 처리에서 참조될 수 있어 유지) -->
+          <textarea id="submitContent" style="display:none;"></textarea>
           <div class="submit-counter" id="submitCounter">0자</div>
         </div>
 
@@ -1262,7 +1375,7 @@
         const dueAt = new Date(hwData.due_date + 'T23:59:59');
         if (dueAt < new Date()) return;
       }
-      const content = (document.getElementById('submitContent')?.value || '').trim();
+      const content = (typeof getSubmitHtml === 'function' ? getSubmitHtml() : (document.getElementById('submitContent')?.value || '')).trim();
       const attachments = window._submitAttachments || [];
       const draftBtn = document.getElementById('draftBtn');
       if (draftBtn && showToastMsg) {
@@ -1514,6 +1627,7 @@
           if (_hint) _hint.textContent = '마감되어 수정할 수 없어요.';
           if (_content) _content.disabled = true;
           if (_file) _file.disabled = true;
+          if (typeof setSubmitEditorReadOnly === 'function') setSubmitEditorReadOnly(true);
           setAttachInputsDisabled(true);
         } else if (_hwHasSubmission && !_hwIsOverdue) {
           // 마감 전 + 제출함: 버튼 "수정하기"로 변경, 임시저장은 숨김(이미 정식 제출)
@@ -1531,6 +1645,7 @@
             : '마감 전까지 다시 수정할 수 있어요.';
           if (_content) _content.disabled = false;
           if (_file) _file.disabled = false;
+          if (typeof setSubmitEditorReadOnly === 'function') setSubmitEditorReadOnly(false);
           setAttachInputsDisabled(false);
         } else if (!_hwHasSubmission && _hwIsOverdue) {
           // 마감 후 + 미제출: 미제출 배지 + 폼 비활성, 버튼 숨김
@@ -1539,6 +1654,7 @@
           if (_hint) _hint.textContent = '마감되어 더 이상 제출할 수 없어요.';
           if (_content) _content.disabled = true;
           if (_file) _file.disabled = true;
+          if (typeof setSubmitEditorReadOnly === 'function') setSubmitEditorReadOnly(true);
           setAttachInputsDisabled(true);
           document.getElementById('submissionStatus').innerHTML = `
             <div class="submission-status" style="background:#FEE2E2;border:1px solid #FECACA;color:#B91C1C;padding:14px 16px;border-radius:10px;margin-bottom:14px;">
@@ -1562,16 +1678,21 @@
             : '임시저장은 작성 중인 내용을 보관만 해요. 정식 제출은 [제출하기]를 눌러주세요.';
           if (_content) _content.disabled = false;
           if (_file) _file.disabled = false;
+          if (typeof setSubmitEditorReadOnly === 'function') setSubmitEditorReadOnly(false);
           setAttachInputsDisabled(false);
         }
 
         // G1 — 임시저장 자동 로드 (정식 제출이 없을 때만)
         if (!_hwHasSubmission && _hwHasDraft && !_hwIsOverdue) {
           const draft = data.submission;
-          // textarea 채우기
-          if (_content && draft.draft_content) {
-            _content.value = draft.draft_content;
-            if (typeof updateSubmitCounter === 'function') updateSubmitCounter();
+          // Quill 위지윅 에디터에 임시저장 본문 복원
+          if (draft.draft_content) {
+            if (typeof setSubmitHtml === 'function') {
+              setSubmitHtml(draft.draft_content);
+            } else if (_content) {
+              _content.value = draft.draft_content;
+              if (typeof updateSubmitCounter === 'function') updateSubmitCounter();
+            }
           }
           // 첨부 복원
           let draftAttachs = [];
@@ -1642,8 +1763,13 @@
               </div>
             </div>
           `;
-          document.getElementById('submitContent').value = data.submission.content || '';
-          if (typeof updateSubmitCounter === 'function') updateSubmitCounter();
+          // Quill 위지윅 에디터에 기존 제출/임시저장 내용 복원
+          if (typeof setSubmitHtml === 'function') {
+            setSubmitHtml(data.submission.content || '');
+          } else {
+            document.getElementById('submitContent').value = data.submission.content || '';
+            if (typeof updateSubmitCounter === 'function') updateSubmitCounter();
+          }
 
           // 제출물이 있으면 피드백을 미리 로드 (모달 열기 전 카운트 갱신)
           loadStudentFeedback();
@@ -1891,15 +2017,23 @@
       }).join('');
     }
 
-    // 본인 댓글 수정 — 입력 카드로 스크롤·포커스 (기존 textarea·첨부 그대로 활용)
+    // 본인 댓글 수정 — 입력 카드로 스크롤·포커스 (Quill 에디터 끝으로 커서 이동)
     function editMyComment() {
       const card = document.getElementById('studentSubmitCard');
-      const ta = document.getElementById('submitContent');
       if (card) {
         try { card.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch(_) { card.scrollIntoView(); }
       }
       setTimeout(() => {
-        if (ta && !ta.disabled) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }
+        try {
+          if (submitHtmlMode) {
+            const hta = document.getElementById('submitHtmlEditor');
+            if (hta && !hta.disabled) { hta.focus(); hta.setSelectionRange(hta.value.length, hta.value.length); }
+          } else if (submitQuill && !_submitQuillReadOnly) {
+            submitQuill.focus();
+            const len = submitQuill.getLength();
+            submitQuill.setSelection(len, 0);
+          }
+        } catch (_) {}
       }, 350);
       try { showToast('내용·첨부를 고쳐서 [댓글 수정]을 누르면 댓글이 갱신돼요.', 'info'); } catch(_) {}
     }
@@ -1929,9 +2063,13 @@
         const data = await res.json();
         if (data.success) {
           classToast('댓글을 삭제했어요.', 'success');
-          // 입력 카드 초기화
-          const ta = document.getElementById('submitContent');
-          if (ta) { ta.value = ''; if (typeof updateSubmitCounter === 'function') updateSubmitCounter(); }
+          // 입력 카드 초기화 — Quill 위지윅 에디터 비우기
+          if (typeof setSubmitHtml === 'function') {
+            setSubmitHtml('');
+          } else {
+            const ta = document.getElementById('submitContent');
+            if (ta) { ta.value = ''; if (typeof updateSubmitCounter === 'function') updateSubmitCounter(); }
+          }
           window._submitAttachments = [];
           if (typeof renderAttachLists === 'function') renderAttachLists();
           loadHomework();
@@ -2682,12 +2820,181 @@
       }
     }, true);
 
-    // 글자수 카운터
-    function updateSubmitCounter() {
+    // ===========================================================
+    // Quill 위지윅 에디터 — 학생 제출란
+    //  - 이미지 클립보드 붙여넣기 (Quill 기본 지원, base64 인라인)
+    //  - 유튜브 URL 자동 임베드 (붙여넣기 + HTML 모드 복귀 시)
+    //  - HTML 소스 편집 모드 토글
+    // ===========================================================
+    let submitQuill = null;
+    let submitHtmlMode = false;
+    let _submitQuillReadOnly = false;
+
+    function initSubmitEditor() {
+      if (submitQuill) return submitQuill;
+      const el = document.getElementById('submitEditor');
+      if (!el || typeof Quill === 'undefined') return null;
+      submitQuill = new Quill('#submitEditor', {
+        modules: {
+          toolbar: '#submitEditorToolbar',
+          clipboard: { matchVisual: false }
+        },
+        theme: 'snow',
+        placeholder: '과제 풀이·감상·답안을 자유롭게 입력하세요. 이미지·동영상도 붙여넣을 수 있어요.'
+      });
+      // 내용 변경 → 카운터 + 임시저장 디바운스 + hidden textarea 동기화
+      submitQuill.on('text-change', () => {
+        try {
+          const html = submitQuill.root.innerHTML;
+          const ta = document.getElementById('submitContent');
+          if (ta) ta.value = html;
+        } catch (_) {}
+        updateSubmitCounter();
+        if (typeof onContentChanged === 'function') onContentChanged();
+      });
+
+      // 텍스트 붙여넣기 시 유튜브 URL 자동 임베드 (Quill clipboard matcher)
+      try {
+        submitQuill.clipboard.addMatcher(Node.TEXT_NODE, (node, delta) => {
+          const text = node.data || '';
+          const m = text.match(/^\s*((?:https?:\/\/)?(?:www\.)?(?:youtube\.com\/watch\?v=|youtu\.be\/)([\w-]{6,}))(?:\S*)?\s*$/);
+          if (m && m[2]) {
+            const vid = m[2];
+            const Delta = Quill.import('delta');
+            return new Delta().insertEmbed(0, 'video', `https://www.youtube.com/embed/${vid}`);
+          }
+          return delta;
+        });
+      } catch (_) {}
+
+      return submitQuill;
+    }
+
+    // 페이지 로드 시 에디터 초기화 (학생 카드는 처음엔 숨김이지만 미리 init 해두면 안전)
+    document.addEventListener('DOMContentLoaded', () => {
+      // class-home의 init 시점과 충돌 없도록 살짝 지연
+      setTimeout(() => { try { initSubmitEditor(); } catch (_) {} }, 50);
+    });
+
+    // 현재 모드 기준 HTML 가져오기 (제출/임시저장에서 사용)
+    function getSubmitHtml() {
+      if (submitHtmlMode) {
+        return (document.getElementById('submitHtmlEditor')?.value || '').trim();
+      }
+      if (submitQuill) return submitQuill.root.innerHTML.trim();
+      return (document.getElementById('submitContent')?.value || '').trim();
+    }
+
+    // 현재 콘텐츠를 에디터에 채우기 (서버에서 받아온 HTML)
+    function setSubmitHtml(html) {
+      const safe = html || '';
+      initSubmitEditor();
+      if (submitQuill) {
+        // 유튜브 URL 자동 임베드 후 주입
+        submitQuill.root.innerHTML = embedYouTubeUrls(safe);
+      }
       const ta = document.getElementById('submitContent');
+      if (ta) ta.value = safe;
+      const hta = document.getElementById('submitHtmlEditor');
+      if (hta) hta.value = safe;
+      updateSubmitCounter();
+    }
+
+    // 에디터 readonly 설정
+    function setSubmitEditorReadOnly(ro) {
+      _submitQuillReadOnly = !!ro;
+      initSubmitEditor();
+      if (submitQuill) submitQuill.enable(!ro);
+      const wrap = document.getElementById('submitEditorWrap');
+      const ed = document.getElementById('submitEditor');
+      if (wrap) wrap.classList.toggle('is-readonly', !!ro);
+      if (ed) ed.classList.toggle('is-readonly', !!ro);
+      const hta = document.getElementById('submitHtmlEditor');
+      if (hta) hta.disabled = !!ro;
+      const btn = document.getElementById('submitHtmlModeBtn');
+      if (btn) btn.disabled = !!ro;
+    }
+
+    // HTML 모드 ↔ 위지윅 모드 토글
+    function toggleSubmitHtmlMode() {
+      const wrap = document.getElementById('submitEditorWrap');
+      const html = document.getElementById('submitHtmlEditor');
+      const btn = document.getElementById('submitHtmlModeBtn');
+      if (!wrap || !html) return;
+      initSubmitEditor();
+      if (!submitHtmlMode) {
+        // 위지윅 → HTML
+        html.value = submitQuill ? submitQuill.root.innerHTML : '';
+        wrap.classList.add('html-mode');
+        submitHtmlMode = true;
+        if (btn) {
+          btn.innerHTML = '<i class="fas fa-eye"></i> 미리보기';
+          btn.classList.add('active');
+        }
+      } else {
+        // HTML → 위지윅 (유튜브 URL 자동 변환)
+        const raw = html.value || '';
+        if (submitQuill) submitQuill.root.innerHTML = embedYouTubeUrls(raw);
+        wrap.classList.remove('html-mode');
+        submitHtmlMode = false;
+        if (btn) {
+          btn.innerHTML = '<i class="fas fa-code"></i> HTML';
+          btn.classList.remove('active');
+        }
+      }
+      updateSubmitCounter();
+      // 호환용 hidden textarea도 동기화
+      const ta = document.getElementById('submitContent');
+      if (ta) ta.value = getSubmitHtml();
+    }
+
+    // HTML 모드에서 직접 편집 시 — 카운터/디바운스/숨김 textarea 동기화
+    function onHtmlEditorInput() {
+      const v = document.getElementById('submitHtmlEditor')?.value || '';
+      const ta = document.getElementById('submitContent');
+      if (ta) ta.value = v;
+      updateSubmitCounter();
+      if (typeof onContentChanged === 'function') onContentChanged();
+    }
+
+    // 유튜브 URL → iframe 변환 (HTML 문자열 기준)
+    //  - <p>https://youtu.be/xxx</p> 처럼 단독 줄에 있는 URL을 iframe으로 교체
+    //  - 이미 iframe 내부/링크 텍스트의 URL은 휴리스틱으로 건너뜀
+    function embedYouTubeUrls(html) {
+      if (!html) return '';
+      // 1) <p>로 감싸진 단독 URL
+      let out = html.replace(
+        /<p>\s*((?:https?:\/\/)?(?:www\.)?(?:youtube\.com\/watch\?v=|youtu\.be\/)([\w-]{6,}))(?:[^\s<]*)?\s*<\/p>/g,
+        (m, _u, vid) => `<p><iframe class="ql-video" src="https://www.youtube.com/embed/${vid}" frameborder="0" allowfullscreen></iframe></p>`
+      );
+      // 2) 줄바꿈/공백 단독 URL (HTML 모드에서 입력한 케이스)
+      out = out.replace(
+        /(^|\n|\s)((?:https?:\/\/)?(?:www\.)?(?:youtube\.com\/watch\?v=|youtu\.be\/)([\w-]{6,}))(?=$|\n|\s|<)/g,
+        (m, lead, _u, vid) => `${lead}<iframe class="ql-video" src="https://www.youtube.com/embed/${vid}" frameborder="0" allowfullscreen></iframe>`
+      );
+      return out;
+    }
+
+    // 글자수 카운터 — 텍스트 길이 기준 (HTML 태그 제외)
+    function updateSubmitCounter() {
       const c = document.getElementById('submitCounter');
-      if (!ta || !c) return;
-      const n = ta.value.length;
+      if (!c) return;
+      let n = 0;
+      if (submitHtmlMode) {
+        const html = document.getElementById('submitHtmlEditor')?.value || '';
+        // 태그 제거 + 공백 정리
+        const text = html.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').trim();
+        n = text.length;
+      } else if (submitQuill) {
+        // Quill getText는 끝에 \n 포함 — trim
+        n = submitQuill.getText().trim().length;
+      } else {
+        const ta = document.getElementById('submitContent');
+        if (ta) {
+          const text = (ta.value || '').replace(/<[^>]*>/g, '').trim();
+          n = text.length;
+        }
+      }
       c.textContent = n.toLocaleString() + '자';
     }
 
@@ -2706,11 +3013,14 @@
           return;
         }
       }
-      const content = document.getElementById('submitContent').value.trim();
+      // Quill HTML 본문 또는 HTML 모드 텍스트영역 값 — 빈값 검사는 태그 제거 후 텍스트로
+      const content = (typeof getSubmitHtml === 'function' ? getSubmitHtml() : document.getElementById('submitContent').value).trim();
+      const plainText = content.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').trim();
+      const hasMedia = /<(img|iframe|video|audio)\b/i.test(content);
       const attachments = window._submitAttachments || [];
 
-      // 빈 제출 방지
-      if (!content && attachments.length === 0) {
+      // 빈 제출 방지 — 텍스트도 미디어도 첨부도 없으면 차단
+      if (!plainText && !hasMedia && attachments.length === 0) {
         classToast('내용을 작성하거나 첨부물을 추가해 주세요.', 'warning');
         return;
       }
