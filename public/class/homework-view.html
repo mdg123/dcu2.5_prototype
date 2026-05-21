@@ -8,6 +8,8 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   <link href="https://cdn.quilljs.com/1.3.7/quill.snow.css" rel="stylesheet">
   <script src="https://cdn.quilljs.com/1.3.7/quill.min.js"></script>
+  <!-- XSS 방어: DOMPurify (학생 제출 HTML 표시 전 sanitize) -->
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.6/dist/purify.min.js"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: 'Pretendard','Noto Sans KR',system-ui,sans-serif; background: #F5F7FA; color: #1A1A2E; font-size: 17px; }
@@ -249,7 +251,18 @@
     .sd-sec-label i { font-size:13px; color:#9CA3AF; }
     .sd-section + .sd-section { margin-top:24px; }
 
-    .sd-content { font-size:17px; line-height:1.75; color:#1A1A2E; white-space:pre-wrap; word-break:break-word; }
+    .sd-content { font-size:17px; line-height:1.75; color:#1A1A2E; word-break:break-word; }
+    /* 제출 표시 영역 공통 — 위지윅 HTML 미디어 보강 */
+    .sd-content img, .pub-sub-content img, .cmt-content img { max-width:100%; height:auto; border-radius:8px; display:block; margin:8px 0; background:#f3f4f6; min-height:40px; }
+    .sd-content img:not([src]), .pub-sub-content img:not([src]), .cmt-content img:not([src]),
+    .sd-content img[src=""], .pub-sub-content img[src=""], .cmt-content img[src=""] { display:inline-block; min-height:auto; padding:4px 10px; background:#fef2f2; color:#b91c1c; font-size:12px; border:1px dashed #fca5a5; border-radius:6px; }
+    .sd-content iframe, .pub-sub-content iframe, .cmt-content iframe { width:100%; max-width:640px; aspect-ratio:16/9; height:auto; border:0; border-radius:8px; margin:8px 0; display:block; }
+    .sd-content p, .pub-sub-content p, .cmt-content p { margin:0 0 0.6em 0; }
+    .sd-content p:last-child, .pub-sub-content p:last-child, .cmt-content p:last-child { margin-bottom:0; }
+    .sd-content ul, .sd-content ol, .pub-sub-content ul, .pub-sub-content ol, .cmt-content ul, .cmt-content ol { margin:0.4em 0 0.6em 1.5em; padding-left:0; }
+    .sd-content a, .pub-sub-content a, .cmt-content a { color:#2563eb; text-decoration:underline; word-break:break-all; }
+    .sd-content blockquote, .pub-sub-content blockquote, .cmt-content blockquote { margin:0.6em 0; padding:8px 14px; border-left:4px solid #d1d5db; background:#f9fafb; color:#4b5563; }
+    .sd-content pre, .pub-sub-content pre, .cmt-content pre { background:#f3f4f6; padding:10px 14px; border-radius:8px; overflow-x:auto; font-size:13px; }
     .sd-empty-card { padding:24px; background:#F9FAFB; border:1px dashed #E5E7EB; border-radius:10px; text-align:center; color:#9CA3AF; font-size:14px; line-height:1.6; }
     .sd-empty-card i { font-size:28px; color:#D1D5DB; display:block; margin-bottom:8px; }
 
@@ -1827,7 +1840,7 @@
             </div>
             <span class="pub-sub-time">${s.submitted_at ? s.submitted_at.slice(0,16) : ''}</span>
           </div>
-          <div class="pub-sub-content">${escHtml(s.content || '(내용 없음)')}</div>
+          <div class="pub-sub-content">${s.content ? sanitizeForDisplay(s.content) : '(내용 없음)'}</div>
           ${s.file_path ? `<div style="margin-top:6px;"><a href="${s.file_path}" target="_blank" style="font-size:12px;color:#2563eb;"><i class="fas fa-paperclip"></i> 첨부파일</a></div>` : ''}
         </div>
       `).join('');
@@ -2007,7 +2020,7 @@
             <div class="cmt-avatar" style="background:${avatarColor}">${escHtml(avatarChar)}</div>
             <div class="cmt-body">
               <div class="cmt-head">${headChips}</div>
-              <div class="cmt-content">${escHtml(s.content || '')}</div>
+              <div class="cmt-content">${sanitizeForDisplay(s.content || '')}</div>
               ${attachmentsHtml}
               ${ownerActions}
               ${teacherActions}
@@ -2270,7 +2283,8 @@
       // ---- 좌측: 본문 ----
       const contentEl = document.getElementById('sdContent');
       if (sub.content && sub.content.trim()) {
-        contentEl.textContent = sub.content;
+        // 학생 제출 HTML은 sanitize 후 HTML 렌더링 (XSS 방어)
+        contentEl.innerHTML = sanitizeForDisplay(sub.content);
         contentEl.style.color = '#1A1A2E';
       } else {
         contentEl.innerHTML = '<div class="sd-empty-card"><i class="fas fa-file-lines"></i>텍스트 본문 없이 첨부 파일만 제출했어요.</div>';
@@ -2821,14 +2835,107 @@
     }, true);
 
     // ===========================================================
+    // XSS 방어 — 학생 제출 HTML을 표시(innerHTML)하기 전에 sanitize
+    //  - 입력 모드(Quill 에디터/HTML textarea)는 raw 그대로 유지(편집 중인 자기 데이터)
+    //  - 표시 모드(다른 학생/교사가 보는 영역)는 반드시 이 헬퍼 경유
+    //  - DOMPurify CDN 미로드 시 안전하게 텍스트로 폴백
+    // ===========================================================
+    function sanitizeForDisplay(html) {
+      if (!html) return '';
+      if (typeof DOMPurify === 'undefined') {
+        // CDN 로드 실패 시 — 태그 제거 후 텍스트로만 표시(가장 안전한 폴백)
+        const div = document.createElement('div');
+        div.textContent = String(html).replace(/<[^>]*>/g, '');
+        return div.innerHTML;
+      }
+      return DOMPurify.sanitize(String(html), {
+        ALLOWED_TAGS: ['p','br','strong','em','u','s','span','div','h1','h2','h3','h4','ul','ol','li','a','img','iframe','blockquote','pre','code','b','i'],
+        ALLOWED_ATTR: ['href','src','alt','title','class','style','frameborder','allowfullscreen','width','height','target','rel','allow'],
+        ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto|tel|data):|[^a-z]|[a-z+.-]+(?:[^a-z+.\-:]|$))/i,
+        ADD_TAGS: ['iframe'],
+        ADD_ATTR: ['allow','target']
+      });
+    }
+
+    // ===========================================================
     // Quill 위지윅 에디터 — 학생 제출란
     //  - 이미지 클립보드 붙여넣기 (Quill 기본 지원, base64 인라인)
     //  - 유튜브 URL 자동 임베드 (붙여넣기 + HTML 모드 복귀 시)
     //  - HTML 소스 편집 모드 토글
+    //  - 큰 base64 이미지(100KB 초과)는 자동으로 /api/upload 로 승격해 URL로 교체
     // ===========================================================
     let submitQuill = null;
     let submitHtmlMode = false;
     let _submitQuillReadOnly = false;
+
+    // ===========================================================
+    // base64 이미지 자동 업로드 승격
+    //  - paste/toolbar로 들어온 큰 이미지(100KB 초과 base64)는
+    //    multipart로 /api/upload?type=homework 업로드 후 응답 URL로 src 교체
+    //  - 작은 이미지(<100KB)는 base64 유지(서버 부담·요청 수 최소화)
+    //  - text-change 800ms 디바운스로 호출
+    // ===========================================================
+    const BASE64_PROMOTE_LIMIT_BYTES = 100 * 1024;
+    async function promoteBase64Images() {
+      if (!submitQuill) return;
+      const editor = submitQuill.root;
+      if (!editor) return;
+      const imgs = editor.querySelectorAll('img[src^="data:image/"]');
+      for (const img of imgs) {
+        const src = img.getAttribute('src') || '';
+        const commaIdx = src.indexOf(',');
+        if (commaIdx < 0) continue;
+        // base64 추정 크기 = 페이로드 길이 * 0.75
+        const sizeBytes = (src.length - commaIdx - 1) * 0.75;
+        if (sizeBytes < BASE64_PROMOTE_LIMIT_BYTES) continue;
+        if (img.dataset.uploading === '1') continue;
+        img.dataset.uploading = '1';
+        try {
+          const matches = src.match(/^data:(image\/[^;]+);base64,(.+)$/);
+          if (!matches) { delete img.dataset.uploading; continue; }
+          const mime = matches[1];
+          const b64 = matches[2];
+          const bin = atob(b64);
+          const arr = new Uint8Array(bin.length);
+          for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+          const ext = (mime.split('/')[1] || 'png').replace(/[^a-z0-9]/gi, '') || 'png';
+          const blob = new Blob([arr], { type: mime });
+          const file = new File([blob], `paste-${Date.now()}.${ext}`, { type: mime });
+          const fd = new FormData();
+          fd.append('file', file);
+          const r = await fetch('/api/upload?type=homework', { method: 'POST', body: fd, credentials: 'same-origin' });
+          const data = await r.json();
+          const newUrl = data && data.success && data.file && data.file.url;
+          if (newUrl) {
+            img.setAttribute('src', newUrl);
+            delete img.dataset.uploading;
+            // hidden textarea 동기화 (text-change 이미 동기화하지만 안전망)
+            try {
+              const ta = document.getElementById('submitContent');
+              if (ta) ta.value = submitQuill.root.innerHTML;
+            } catch (_) {}
+          } else {
+            delete img.dataset.uploading;
+            console.warn('[base64-promote] upload failed', data);
+          }
+        } catch (e) {
+          try { delete img.dataset.uploading; } catch (_) {}
+          console.warn('[base64-promote] error', e);
+        }
+      }
+    }
+    let _b64PromoteTimer = null;
+    function schedulePromoteBase64() {
+      clearTimeout(_b64PromoteTimer);
+      _b64PromoteTimer = setTimeout(() => { promoteBase64Images(); }, 800);
+    }
+    // 디버그·검증용 전역 노출 (E2E 프리뷰 eval 컨텍스트에서 접근하기 위함)
+    try {
+      window.sanitizeForDisplay = sanitizeForDisplay;
+      window.schedulePromoteBase64 = schedulePromoteBase64;
+      window.promoteBase64Images = promoteBase64Images;
+      window.__getSubmitQuill = () => submitQuill;
+    } catch (_) {}
 
     function initSubmitEditor() {
       if (submitQuill) return submitQuill;
@@ -2842,7 +2949,7 @@
         theme: 'snow',
         placeholder: '과제 풀이·감상·답안을 자유롭게 입력하세요. 이미지·동영상도 붙여넣을 수 있어요.'
       });
-      // 내용 변경 → 카운터 + 임시저장 디바운스 + hidden textarea 동기화
+      // 내용 변경 → 카운터 + 임시저장 디바운스 + hidden textarea 동기화 + base64 자동 승격
       submitQuill.on('text-change', () => {
         try {
           const html = submitQuill.root.innerHTML;
@@ -2851,6 +2958,8 @@
         } catch (_) {}
         updateSubmitCounter();
         if (typeof onContentChanged === 'function') onContentChanged();
+        // 큰 base64 이미지 자동 업로드 승격 (800ms 디바운스)
+        schedulePromoteBase64();
       });
 
       // 텍스트 붙여넣기 시 유튜브 URL 자동 임베드 (Quill clipboard matcher)
