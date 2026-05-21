@@ -16,19 +16,52 @@ router.get('/rooms', requireAuth, (req, res) => {
   } catch (err) { res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' }); }
 });
 
-// POST /api/message/rooms - 채팅방 생성
+// POST /api/message/rooms - 채팅방 생성 (1:1 + 다자(그룹) 지원)
 router.post('/rooms', requireAuth, (req, res) => {
   try {
-    const { classId, targetUserId, name, type } = req.body;
-    const memberIds = [req.user.id];
-    if (targetUserId) {
-      // 1:1 대화 - 기존 방 확인
-      const existing = messageDb.findDirectRoom(req.user.id, targetUserId);
-      if (existing) return res.json({ success: true, room: messageDb.getRoomById(existing.id), existed: true });
-      memberIds.push(targetUserId);
+    const { classId, targetUserId, name } = req.body;
+    let { memberIds } = req.body;
+
+    // 1) memberIds 우선, 없으면 targetUserId → [targetUserId] 로 변환 (1:1 호환)
+    if (!Array.isArray(memberIds) || memberIds.length === 0) {
+      if (targetUserId !== undefined && targetUserId !== null && targetUserId !== '') {
+        memberIds = [targetUserId];
+      } else {
+        memberIds = [];
+      }
     }
-    const room = messageDb.createRoom(classId || null, type || 'direct', name || null, memberIds);
-    res.status(201).json({ success: true, room });
+
+    // 정수 변환 + 유효값만 통과
+    memberIds = memberIds
+      .map(v => parseInt(v, 10))
+      .filter(v => Number.isInteger(v) && v > 0);
+
+    // 2) 자기 자신 자동 포함 + 중복 제거 (Set)
+    const meId = req.user.id;
+    const uniqueOthers = Array.from(new Set(memberIds.filter(v => v !== meId)));
+
+    // 다른 멤버가 0명이면 400
+    if (uniqueOthers.length === 0) {
+      return res.status(400).json({ success: false, message: '받는 사람을 선택하세요.' });
+    }
+
+    const finalMemberIds = [meId, ...uniqueOthers];
+
+    // 3) 다른 멤버 1명 → direct + findDirectRoom 재사용
+    if (uniqueOthers.length === 1) {
+      const otherId = uniqueOthers[0];
+      const existing = messageDb.findDirectRoom(meId, otherId);
+      if (existing) {
+        return res.json({ success: true, room: messageDb.getRoomById(existing.id), existed: true });
+      }
+      const room = messageDb.createRoom(classId || null, 'direct', null, finalMemberIds);
+      return res.status(201).json({ success: true, room, existed: false });
+    }
+
+    // 4) 다른 멤버 2명 이상 → group (항상 신규 방)
+    const groupName = (typeof name === 'string' && name.trim()) ? name.trim() : null;
+    const room = messageDb.createRoom(classId || null, 'group', groupName, finalMemberIds);
+    return res.status(201).json({ success: true, room, existed: false });
   } catch (err) { res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' }); }
 });
 

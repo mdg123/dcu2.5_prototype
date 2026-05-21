@@ -65,14 +65,19 @@ function createPost(classId, authorId, data) {
   return getPostById(info.lastInsertRowid);
 }
 
-function getPostById(id) {
+function getPostById(id, viewerId = null) {
   const post = db.prepare(`
     SELECT p.*, u.display_name as author_name,
-    (SELECT COUNT(*) FROM comments WHERE post_id = p.id) as comment_count
+    (SELECT COUNT(*) FROM comments WHERE post_id = p.id) as comment_count,
+    COALESCE(p.like_count, 0) as like_count,
+    CASE WHEN ? IS NULL THEN 0
+      ELSE (SELECT COUNT(*) FROM post_likes WHERE post_id = p.id AND user_id = ?)
+    END as liked
     FROM posts p JOIN users u ON p.author_id = u.id WHERE p.id = ?
-  `).get(id) || null;
-  if (post && post.is_anonymous) {
-    post.author_name = '익명';
+  `).get(viewerId, viewerId, id) || null;
+  if (post) {
+    post.liked = !!post.liked;
+    if (post.is_anonymous) post.author_name = '익명';
   }
   return post;
 }
@@ -91,7 +96,8 @@ function getPostsByClass(classId, { category, boardId, page = 1, limit = 20, use
   const total = db.prepare(`SELECT COUNT(*) as cnt FROM posts p ${where}`).get(...params).cnt;
   const posts = db.prepare(`
     SELECT p.*, u.display_name as author_name,
-    (SELECT COUNT(*) FROM comments WHERE post_id = p.id) as comment_count
+    (SELECT COUNT(*) FROM comments WHERE post_id = p.id) as comment_count,
+    COALESCE(p.like_count, 0) as like_count
     FROM posts p JOIN users u ON p.author_id = u.id
     ${where} ORDER BY p.is_pinned DESC, p.created_at DESC LIMIT ? OFFSET ?
   `).all(...params, limit, (page - 1) * limit);
@@ -163,11 +169,30 @@ function getComments(postId) {
 
 function deleteComment(id) { db.prepare('DELETE FROM comments WHERE id = ?').run(id); }
 
+// 좋아요 토글: post_likes (post_id, user_id) UNIQUE 활용
+// 반환: { liked: boolean, like_count: number }
+function togglePostLike(postId, userId) {
+  const exists = db.prepare('SELECT 1 FROM post_likes WHERE post_id = ? AND user_id = ?').get(postId, userId);
+  const tx = db.transaction(() => {
+    if (exists) {
+      db.prepare('DELETE FROM post_likes WHERE post_id = ? AND user_id = ?').run(postId, userId);
+      db.prepare('UPDATE posts SET like_count = MAX(0, COALESCE(like_count, 0) - 1) WHERE id = ?').run(postId);
+    } else {
+      db.prepare('INSERT INTO post_likes (post_id, user_id) VALUES (?, ?)').run(postId, userId);
+      db.prepare('UPDATE posts SET like_count = COALESCE(like_count, 0) + 1 WHERE id = ?').run(postId);
+    }
+  });
+  tx();
+  const row = db.prepare('SELECT like_count FROM posts WHERE id = ?').get(postId);
+  return { liked: !exists, like_count: row ? (row.like_count || 0) : 0 };
+}
+
 module.exports = {
   // 게시판 관리
   getBoardsByClass, getBoardById, createBoard, updateBoard, deleteBoard, reorderBoards,
   // 게시글
   createPost, getPostById, getPostsByClass, updatePost, deletePost, incrementViewCount,
   createComment, getCommentById, getComments, deleteComment,
-  approvePost, rejectPost, getPendingPosts
+  approvePost, rejectPost, getPendingPosts,
+  togglePostLike
 };

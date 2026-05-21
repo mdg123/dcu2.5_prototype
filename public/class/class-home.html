@@ -624,6 +624,14 @@
             <div id="postDetailMeta" style="font-size:12px;color:#6B7280;margin-bottom:16px;display:flex;gap:12px;"></div>
             <div id="postDetailImage" style="display:none;margin-bottom:16px;text-align:center;"><img style="max-width:100%;max-height:400px;border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,.1);" /></div>
             <div id="postDetailContent" style="font-size:15px;line-height:1.8;padding-bottom:16px;border-bottom:1px solid #e5e7eb;margin-bottom:16px;"></div>
+            <!-- 좋아요 액션 영역 -->
+            <div id="postActionsBar" style="display:flex;justify-content:center;gap:10px;padding:12px 0 20px;border-bottom:1px solid #e5e7eb;margin-bottom:16px;">
+              <button id="postLikeBtn" class="btn btn-outline" onclick="togglePostLike()" style="padding:10px 22px;font-size:16px;display:inline-flex;align-items:center;gap:8px;transition:all .15s;">
+                <i id="postLikeIcon" class="far fa-heart" style="font-size:18px;width:20px;text-align:center;"></i>
+                <span>좋아요</span>
+                <span id="postLikeCount" style="font-weight:700;">0</span>
+              </button>
+            </div>
             <div id="commentSection">
               <h4 style="font-size:17px;font-weight:600;margin-bottom:14px;"><i class="fas fa-comment" style="color:#2563eb;margin-right:6px;"></i>댓글 <span id="commentCount">0</span></h4>
               <!-- 댓글 입력창 (상단) -->
@@ -4182,12 +4190,13 @@
         if (p.approval_status === 'pending') tags.push('<span style="color:#f59e0b;font-size:11px;margin-right:4px;">[승인대기]</span>');
         if (p.approval_status === 'rejected') tags.push('<span style="color:#ef4444;font-size:11px;margin-right:4px;">[반려됨]</span>');
         const commentInfo = p.allow_comments === 0 ? '' : ` · 댓글 ${p.comment_count || 0}`;
+        const likeInfo = ` · <i class="fas fa-heart" style="color:#ef4444;font-size:12px;"></i> ${p.like_count || 0}`;
         return `
         <div class="list-item" onclick="openPost(${p.id})">
           <div class="item-icon" style="background:${p.category === 'gallery' ? '#f97316' : p.is_anonymous ? '#8b5cf6' : '#6366f1'};"><i class="fas ${p.category === 'gallery' ? 'fa-image' : p.is_anonymous ? 'fa-user-secret' : 'fa-comment-dots'}"></i></div>
           <div class="item-body">
             <div class="item-title">${tags.join('')}${escHtml(p.title)}</div>
-            <div class="item-meta">${escHtml(p.author_name)} · ${p.created_at ? p.created_at.slice(0,10) : ''} · 조회 ${p.view_count || 0}${commentInfo}</div>
+            <div class="item-meta">${escHtml(p.author_name)} · ${p.created_at ? p.created_at.slice(0,10) : ''} · 조회 ${p.view_count || 0}${commentInfo}${likeInfo}</div>
           </div>
           ${(p.image_url || extractFirstImage(p.content)) ? `<img src="${p.image_url || extractFirstImage(p.content)}" style="width:56px;height:56px;object-fit:cover;border-radius:8px;margin-left:8px;" onerror="this.style.display='none'">` : ''}
         </div>`;
@@ -4225,7 +4234,7 @@
                 <div style="font-size:15px;font-weight:700;margin-bottom:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escHtml(p.title)}</div>
                 <div style="font-size:13px;color:#6B7280;display:flex;justify-content:space-between;align-items:center;">
                   <span><i class="fas fa-user" style="margin-right:4px;"></i>${escHtml(p.author_name)}</span>
-                  <span><i class="fas fa-eye"></i> ${p.view_count || 0}${p.allow_comments !== 0 ? ` · <i class="fas fa-comment"></i> ${p.comment_count || 0}` : ''}</span>
+                  <span><i class="fas fa-eye"></i> ${p.view_count || 0} · <i class="fas fa-heart" style="color:#ef4444;"></i> ${p.like_count || 0}${p.allow_comments !== 0 ? ` · <i class="fas fa-comment"></i> ${p.comment_count || 0}` : ''}</span>
                 </div>
               </div>
             </div>
@@ -4261,6 +4270,20 @@
       postHtml = postHtml.replace(/(?:https?:\/\/)?(?:www\.)?(?:youtube\.com\/watch\?v=|youtu\.be\/)([\w-]+)/g,
         '<div style="margin:12px 0;"><iframe width="100%" height="360" src="https://www.youtube.com/embed/$1" frameborder="0" allowfullscreen style="border-radius:8px;max-width:640px;"></iframe></div>');
       document.getElementById('postDetailContent').innerHTML = postHtml;
+      // 좋아요 상태 반영
+      const liked = !!p.liked;
+      const likeBtn = document.getElementById('postLikeBtn');
+      const likeIcon = document.getElementById('postLikeIcon');
+      document.getElementById('postLikeCount').textContent = p.like_count || 0;
+      if (liked) {
+        likeIcon.className = 'fas fa-heart';
+        likeBtn.className = '';
+        likeBtn.style.cssText = 'padding:10px 22px;font-size:16px;display:inline-flex;align-items:center;gap:8px;background:#fef2f2;border:1.5px solid #ef4444;color:#ef4444;border-radius:8px;transition:all .15s;cursor:pointer;';
+      } else {
+        likeIcon.className = 'far fa-heart';
+        likeBtn.className = 'btn btn-outline';
+        likeBtn.style.cssText = 'padding:10px 22px;font-size:16px;display:inline-flex;align-items:center;gap:8px;border:1.5px solid #d1d5db;border-radius:8px;background:#fff;color:#374151;transition:all .15s;cursor:pointer;';
+      }
       // 본인 글이면 삭제 가능 (익명이어도 author_id는 서버에서 전달됨)
       if (p.author_id === currentUser.id || myRole === 'owner') {
         document.getElementById('deletePostBtn').style.display = '';
@@ -4286,6 +4309,56 @@
       currentPostId = null;
       document.getElementById('boardDetailCard').style.display = 'none';
       document.getElementById('boardListCard').style.display = 'block';
+    }
+
+    async function togglePostLike() {
+      if (!currentPostId) return;
+      const btn = document.getElementById('postLikeBtn');
+      const icon = document.getElementById('postLikeIcon');
+      const cnt = document.getElementById('postLikeCount');
+      // 낙관적 토글
+      const wasLiked = icon.classList.contains('fas');
+      const prevCount = parseInt(cnt.textContent || '0');
+      const optimisticCount = Math.max(0, prevCount + (wasLiked ? -1 : 1));
+      cnt.textContent = optimisticCount;
+      if (wasLiked) {
+        icon.className = 'far fa-heart';
+        btn.className = 'btn btn-outline';
+        btn.style.cssText = 'padding:10px 22px;font-size:16px;display:inline-flex;align-items:center;gap:8px;border:1.5px solid #d1d5db;border-radius:8px;background:#fff;color:#374151;transition:all .15s;cursor:pointer;';
+      } else {
+        icon.className = 'fas fa-heart';
+        btn.className = '';
+        btn.style.cssText = 'padding:10px 22px;font-size:16px;display:inline-flex;align-items:center;gap:8px;background:#fef2f2;border:1.5px solid #ef4444;color:#ef4444;border-radius:8px;transition:all .15s;cursor:pointer;';
+      }
+      // 서버 동기화
+      try {
+        const res = await fetch(`/api/board/${classId}/${currentPostId}/like`, { method: 'POST' });
+        const data = await res.json();
+        if (!data.success) throw new Error(data.message || '오류');
+        cnt.textContent = data.like_count;
+        if (data.liked) {
+          icon.className = 'fas fa-heart';
+          btn.className = '';
+          btn.style.cssText = 'padding:10px 22px;font-size:16px;display:inline-flex;align-items:center;gap:8px;background:#fef2f2;border:1.5px solid #ef4444;color:#ef4444;border-radius:8px;transition:all .15s;cursor:pointer;';
+        } else {
+          icon.className = 'far fa-heart';
+          btn.className = 'btn btn-outline';
+          btn.style.cssText = 'padding:10px 22px;font-size:16px;display:inline-flex;align-items:center;gap:8px;border:1.5px solid #d1d5db;border-radius:8px;background:#fff;color:#374151;transition:all .15s;cursor:pointer;';
+        }
+      } catch (e) {
+        // 롤백
+        cnt.textContent = prevCount;
+        if (wasLiked) {
+          icon.className = 'fas fa-heart';
+          btn.className = '';
+          btn.style.cssText = 'padding:10px 22px;font-size:16px;display:inline-flex;align-items:center;gap:8px;background:#fef2f2;border:1.5px solid #ef4444;color:#ef4444;border-radius:8px;transition:all .15s;cursor:pointer;';
+        } else {
+          icon.className = 'far fa-heart';
+          btn.className = 'btn btn-outline';
+          btn.style.cssText = 'padding:10px 22px;font-size:16px;display:inline-flex;align-items:center;gap:8px;border:1.5px solid #d1d5db;border-radius:8px;background:#fff;color:#374151;transition:all .15s;cursor:pointer;';
+        }
+        classToast('좋아요 처리 중 오류가 발생했습니다.', 'error');
+      }
     }
 
     function previewCommentImage(input) {

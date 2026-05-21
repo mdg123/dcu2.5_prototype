@@ -164,13 +164,44 @@ router.post('/:classId', requireAuth, requireMember, (req, res) => {
 
 router.get('/:classId/:postId', requireAuth, requireMember, (req, res) => {
   try {
-    const post = boardDb.getPostById(parseInt(req.params.postId));
+    const post = boardDb.getPostById(parseInt(req.params.postId), req.user.id);
     if (!post || post.class_id !== req.classId) return res.status(404).json({ success: false, message: '게시글을 찾을 수 없습니다.' });
     boardDb.incrementViewCount(post.id);
     const comments = boardDb.getComments(post.id);
     try { ensureTodayAttendance(req.classId, req.user.id, 'post_read'); } catch (e) {}
     res.json({ success: true, post: { ...post, view_count: post.view_count + 1 }, comments });
   } catch (err) { res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' }); }
+});
+
+// 게시글 좋아요 토글
+router.post('/:classId/:postId/like', requireAuth, requireMember, (req, res) => {
+  try {
+    const postId = parseInt(req.params.postId);
+    const post = boardDb.getPostById(postId);
+    if (!post || post.class_id !== req.classId) {
+      return res.status(404).json({ success: false, message: '게시글을 찾을 수 없습니다.' });
+    }
+    const result = boardDb.togglePostLike(postId, req.user.id);
+    // xAPI: 좋아요 추가시에만 호출 (취소시는 노이즈 방지를 위해 호출 안 함)
+    if (result.liked) {
+      try {
+        const boardKind = _resolveBoardKind(post);
+        xapiSpool.record('social', buildSocial, { userId: req.user.id, classId: req.classId }, {
+          verb: 'liked',
+          board_id: post.board_id != null ? `board-${post.board_id}` : `class-${req.classId}`,
+          board_kind: boardKind,
+          board_title: post.title || null,
+          post_id: postId,
+          post_title: post.title || null,
+          counts: { like: 1 },
+        });
+      } catch (e) { console.error('[xapi:board_like]', e.message); }
+    }
+    res.json({ success: true, liked: result.liked, like_count: result.like_count });
+  } catch (err) {
+    console.error('[BOARD] like error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
 });
 
 router.put('/:classId/:postId', requireAuth, requireMember, (req, res) => {

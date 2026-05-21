@@ -67,17 +67,41 @@
     /* 새 쪽지 모달 */
     .modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:10001;align-items:center;justify-content:center;}
     .modal-overlay.active{display:flex;}
-    .modal-card{background:#fff;border-radius:16px;width:90%;max-width:440px;padding:0;}
+    .modal-card{background:#fff;border-radius:16px;width:90%;max-width:480px;padding:0;}
     .modal-header{display:flex;align-items:center;justify-content:space-between;padding:18px 24px;border-bottom:1px solid var(--gray-100);}
-    .modal-header h3{font-size:16px;font-weight:700;}
-    .modal-close{background:none;border:none;font-size:18px;cursor:pointer;color:var(--gray-400);padding:4px 8px;border-radius:6px;}
+    .modal-header h3{font-size:19px;font-weight:700;}
+    .modal-close{background:none;border:none;font-size:20px;cursor:pointer;color:var(--gray-400);padding:4px 8px;border-radius:6px;}
     .modal-close:hover{background:var(--gray-100);}
     .modal-body{padding:20px 24px;}
     .modal-footer{display:flex;justify-content:flex-end;gap:8px;padding:14px 24px;border-top:1px solid var(--gray-100);}
     .form-group{margin-bottom:14px;}
-    .form-label{display:block;font-size:12px;font-weight:600;color:var(--gray-600);margin-bottom:4px;}
-    .form-select,.form-input{width:100%;padding:9px 12px;border:1.5px solid var(--gray-300);border-radius:8px;font-size:13px;font-family:inherit;}
+    .form-label{display:block;font-size:14px;font-weight:600;color:var(--gray-600);margin-bottom:6px;}
+    .form-select,.form-input{width:100%;padding:9px 12px;border:1.5px solid var(--gray-300);border-radius:8px;font-size:14px;font-family:inherit;}
     .form-select:focus,.form-input:focus{border-color:var(--primary);outline:none;}
+
+    /* 멤버 체크박스 리스트 (다자 쪽지방) */
+    .member-list-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;}
+    .member-list-counter{font-size:13px;color:var(--primary);font-weight:600;}
+    .member-list-clear{font-size:12px;color:var(--gray-500);background:none;border:none;cursor:pointer;padding:2px 6px;border-radius:4px;font-family:inherit;}
+    .member-list-clear:hover{background:var(--gray-100);color:var(--gray-700);}
+    .member-search{width:100%;padding:8px 12px;border:1.5px solid var(--gray-200);border-radius:8px;font-size:13px;font-family:inherit;margin-bottom:6px;outline:none;}
+    .member-search:focus{border-color:var(--primary);}
+    .member-check-list{border:1.5px solid var(--gray-200);border-radius:10px;min-height:200px;max-height:260px;overflow-y:auto;background:#fff;}
+    .member-check-list .empty-state{padding:30px 12px;text-align:center;color:var(--gray-400);font-size:13px;}
+    .member-row{display:flex;align-items:center;gap:10px;padding:10px 12px;cursor:pointer;border-bottom:1px solid var(--gray-50);transition:background .12s;}
+    .member-row:last-child{border-bottom:none;}
+    .member-row:hover{background:var(--gray-50);}
+    .member-row.is-checked{background:var(--primary-light);}
+    .member-row input[type="checkbox"]{width:18px;height:18px;accent-color:var(--primary);cursor:pointer;flex-shrink:0;margin:0;}
+    .member-row .member-name{font-size:14px;color:var(--gray-800);font-weight:500;}
+    .member-row .member-role{font-size:12px;color:var(--gray-500);margin-left:4px;}
+    .member-row:focus-within{border-left:3px solid var(--primary);}
+
+    /* 그룹방 아바타 (보라 톤) */
+    .room-avatar-group{background:#ede9fe !important;color:#7c3aed !important;}
+    .room-avatar-wrap{position:relative;flex-shrink:0;}
+    .room-member-count{position:absolute;right:-4px;bottom:-4px;font-size:10px;padding:1px 5px;border-radius:8px;background:var(--gray-700);color:#fff;font-weight:600;line-height:1.4;}
+    .chat-header-name .group-icon{margin-right:6px;color:#7c3aed;font-size:13px;}
 
     .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--gray-800);color:#fff;padding:12px 24px;border-radius:10px;font-size:13px;z-index:9999;display:none;}
     @media(max-width:768px){.room-list-panel{width:280px;}}
@@ -123,8 +147,18 @@
         <select class="form-select" id="newMsgClass" onchange="loadClassMembers()"><option value="">클래스를 선택하세요</option></select>
       </div>
       <div class="form-group">
-        <label class="form-label">받는 사람</label>
-        <select class="form-select" id="newMsgTarget"><option value="">멤버를 선택하세요</option></select>
+        <div class="member-list-header">
+          <label class="form-label" style="margin-bottom:0;">받는 사람 <span class="member-list-counter" id="memberCounter">0명 선택됨</span></label>
+          <button type="button" class="member-list-clear" id="memberClearBtn" onclick="clearMemberSelection()">모두 해제</button>
+        </div>
+        <input class="member-search" id="memberSearchInput" placeholder="이름으로 검색" oninput="filterMemberList()" style="display:none;">
+        <div class="member-check-list" id="memberCheckList">
+          <div class="empty-state">클래스를 선택하면 멤버가 표시됩니다</div>
+        </div>
+      </div>
+      <div class="form-group" id="newMsgRoomNameGroup" style="display:none;">
+        <label class="form-label">방 이름 (선택)</label>
+        <input class="form-input" id="newMsgRoomName" placeholder="예: 영어 발표 조 — 비워두면 멤버 이름으로 자동 표시">
       </div>
       <div class="form-group">
         <label class="form-label">첫 메시지</label>
@@ -133,7 +167,7 @@
     </div>
     <div class="modal-footer">
       <button class="btn btn-outline" onclick="closeModal()">취소</button>
-      <button class="btn btn-primary" onclick="createRoom()"><i class="fas fa-paper-plane"></i> 보내기</button>
+      <button class="btn btn-primary" id="newMsgSendBtn" onclick="createRoom()" disabled style="opacity:.5;cursor:not-allowed;"><i class="fas fa-paper-plane"></i> 보내기</button>
     </div>
   </div>
 </div>
@@ -174,21 +208,92 @@
 
   async function loadClassMembers() {
     const classId = document.getElementById('newMsgClass').value;
-    const sel = document.getElementById('newMsgTarget');
-    sel.innerHTML = '<option value="">멤버를 선택하세요</option>';
-    if (!classId) return;
+    const list = document.getElementById('memberCheckList');
+    const searchInput = document.getElementById('memberSearchInput');
+    list.innerHTML = '<div class="empty-state">로딩 중...</div>';
+    if (!classId) {
+      list.innerHTML = '<div class="empty-state">클래스를 선택하면 멤버가 표시됩니다</div>';
+      searchInput.style.display = 'none';
+      updateNewMsgState();
+      return;
+    }
     try {
       const res = await fetch(`/api/class/${classId}/members`);
       const data = await res.json();
       if (data.success) {
-        (data.members || []).filter(m => m.user_id !== currentUser.id).forEach(m => {
-          const o = document.createElement('option');
-          o.value = m.user_id;
-          o.textContent = m.display_name || m.username;
-          sel.appendChild(o);
-        });
+        const others = (data.members || []).filter(m => m.user_id !== currentUser.id);
+        if (others.length === 0) {
+          list.innerHTML = '<div class="empty-state">받는 사람으로 선택할 수 있는 멤버가 없습니다</div>';
+          searchInput.style.display = 'none';
+        } else {
+          // 멤버 10명 이상이면 검색 인풋 노출
+          searchInput.style.display = others.length >= 10 ? 'block' : 'none';
+          searchInput.value = '';
+          list.innerHTML = others.map(m => {
+            const name = escHtml(m.display_name || m.username);
+            const ur = m.user_role || m.role || '';
+            const role = ur === 'teacher' ? '교사' : (ur === 'student' ? '학생' : (ur === 'admin' ? '관리자' : ''));
+            return `<label class="member-row" data-name="${name.toLowerCase()}">
+              <input type="checkbox" value="${m.user_id}" onchange="onMemberToggle(this)">
+              <span class="member-name">${name}</span>
+              <span class="member-role">${escHtml(role)}</span>
+            </label>`;
+          }).join('');
+        }
+      } else {
+        list.innerHTML = '<div class="empty-state">멤버 로드 실패</div>';
       }
-    } catch (e) {}
+    } catch (e) {
+      list.innerHTML = '<div class="empty-state">멤버 로드 실패</div>';
+    }
+    updateNewMsgState();
+  }
+
+  function onMemberToggle(input) {
+    const row = input.closest('.member-row');
+    if (input.checked) row.classList.add('is-checked');
+    else row.classList.remove('is-checked');
+    updateNewMsgState();
+  }
+
+  function clearMemberSelection() {
+    document.querySelectorAll('#memberCheckList input[type="checkbox"]:checked').forEach(cb => {
+      cb.checked = false;
+      const row = cb.closest('.member-row');
+      if (row) row.classList.remove('is-checked');
+    });
+    updateNewMsgState();
+  }
+
+  function filterMemberList() {
+    const q = (document.getElementById('memberSearchInput').value || '').toLowerCase().trim();
+    document.querySelectorAll('#memberCheckList .member-row').forEach(row => {
+      const name = row.getAttribute('data-name') || '';
+      row.style.display = (!q || name.includes(q)) ? '' : 'none';
+    });
+  }
+
+  function updateNewMsgState() {
+    const checked = document.querySelectorAll('#memberCheckList input[type="checkbox"]:checked');
+    const n = checked.length;
+    const counter = document.getElementById('memberCounter');
+    if (counter) counter.textContent = `${n}명 선택됨`;
+    // 방 이름 입력은 2명 이상일 때만 표시
+    const nameGroup = document.getElementById('newMsgRoomNameGroup');
+    if (nameGroup) nameGroup.style.display = n >= 2 ? '' : 'none';
+    // 보내기 버튼 활성/비활성
+    const btn = document.getElementById('newMsgSendBtn');
+    if (btn) {
+      if (n === 0) {
+        btn.setAttribute('disabled', '');
+        btn.style.opacity = '.5';
+        btn.style.cursor = 'not-allowed';
+      } else {
+        btn.removeAttribute('disabled');
+        btn.style.opacity = '';
+        btn.style.cursor = '';
+      }
+    }
   }
 
   async function loadRooms(silent) {
@@ -217,12 +322,19 @@
 
     container.innerHTML = filtered.map(r => {
       const name = getRoomName(r);
-      const initial = name.charAt(0);
+      const isGroup = r.type === 'group';
+      const memberCount = (r.members || []).length;
+      const avatarHtml = isGroup
+        ? `<div class="room-avatar-wrap">
+             <div class="room-avatar room-avatar-group"><i class="fas fa-users"></i></div>
+             <span class="room-member-count">+${memberCount}</span>
+           </div>`
+        : `<div class="room-avatar">${escHtml(name.charAt(0))}</div>`;
       const preview = r.last_message || '대화를 시작하세요';
       const time = r.last_message_at ? formatTime(r.last_message_at) : '';
       const unread = r.unread_count || 0;
       return `<div class="room-item ${selectedRoomId === r.id ? 'active' : ''}" onclick="selectRoom(${r.id})">
-        <div class="room-avatar">${initial}</div>
+        ${avatarHtml}
         <div class="room-info">
           <div class="room-name">${escHtml(name)}</div>
           <div class="room-preview">${escHtml(preview)}</div>
@@ -251,9 +363,28 @@
     chatView.style.display = 'flex';
 
     const room = rooms.find(r => r.id === roomId);
-    document.getElementById('chatName').textContent = getRoomName(room);
-    const members = (room?.members || []).map(m => m.display_name || m.username).join(', ');
-    document.getElementById('chatSub').textContent = members;
+    const name = getRoomName(room);
+    const isGroup = room?.type === 'group';
+    const members = (room?.members || []);
+    const others = members.filter(m => m.user_id !== currentUser.id);
+
+    const chatName = document.getElementById('chatName');
+    if (chatName) {
+      chatName.innerHTML = (isGroup ? '<i class="fas fa-users group-icon"></i>' : '') + escHtml(name);
+    }
+
+    const chatSub = document.getElementById('chatSub');
+    if (chatSub) {
+      if (isGroup) {
+        const names = others.slice(0, 3).map(m => m.display_name || m.username).join(', ');
+        const extra = others.length > 3 ? ` 외 ${others.length - 3}명` : '';
+        chatSub.textContent = `멤버 ${members.length}명 · ${names}${extra}`;
+        chatSub.style.display = '';
+      } else {
+        chatSub.textContent = others.map(m => m.display_name || m.username).join(', ');
+        chatSub.style.display = '';
+      }
+    }
 
     await loadMessages(roomId);
   }
@@ -310,28 +441,38 @@
 
   async function createRoom() {
     const classId = document.getElementById('newMsgClass').value;
-    const targetUserId = document.getElementById('newMsgTarget').value;
+    const checked = Array.from(document.querySelectorAll('#memberCheckList input[type="checkbox"]:checked'));
+    const memberIds = checked.map(cb => parseInt(cb.value, 10)).filter(v => Number.isInteger(v) && v > 0);
+    const roomName = (document.getElementById('newMsgRoomName')?.value || '').trim();
     const content = document.getElementById('newMsgContent').value.trim();
-    if (!targetUserId) { showToast('받는 사람을 선택하세요.'); return; }
+    if (memberIds.length === 0) { showToast('받는 사람을 선택하세요.'); return; }
     if (!content) { showToast('메시지를 입력하세요.'); return; }
 
     try {
+      const body = {
+        classId: classId ? parseInt(classId) : null,
+        memberIds,
+      };
+      if (memberIds.length >= 2 && roomName) body.name = roomName;
       const res = await fetch('/api/message/rooms', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ classId: classId ? parseInt(classId) : null, targetUserId: parseInt(targetUserId) })
+        body: JSON.stringify(body)
       });
       const data = await res.json();
       if (data.success && data.room) {
-        // 첫 메시지 전송
         await fetch(`/api/message/rooms/${data.room.id}/messages`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ content })
         });
         closeModal();
         document.getElementById('newMsgContent').value = '';
+        document.getElementById('newMsgRoomName').value = '';
+        clearMemberSelection();
         await loadRooms();
         selectRoom(data.room.id);
-      } else { showToast(data.message || '생성 실패'); }
+      } else {
+        showToast(data.message || '생성 실패');
+      }
     } catch (e) { showToast('오류가 발생했습니다.'); }
   }
 

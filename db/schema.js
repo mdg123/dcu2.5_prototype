@@ -1942,6 +1942,31 @@ function initSchema() {
     }
   } catch (e) { /* 무시 */ }
 
+  // 마이그레이션: posts 테이블에 like_count 컬럼 추가
+  try {
+    const postCols3 = db.prepare("PRAGMA table_info(posts)").all().map(c => c.name);
+    if (!postCols3.includes('like_count')) {
+      db.exec("ALTER TABLE posts ADD COLUMN like_count INTEGER DEFAULT 0");
+    }
+  } catch (e) { /* 무시 */ }
+
+  // 마이그레이션: post_likes 테이블 (gallery_likes 패턴 동일)
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS post_likes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        post_id INTEGER NOT NULL,
+        user_id INTEGER NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(post_id, user_id),
+        FOREIGN KEY (post_id) REFERENCES posts(id) ON DELETE CASCADE,
+        FOREIGN KEY (user_id) REFERENCES users(id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_post_likes_post ON post_likes(post_id);
+      CREATE INDEX IF NOT EXISTS idx_post_likes_user ON post_likes(user_id);
+    `);
+  } catch (e) { console.error('[DB] post_likes 마이그레이션 실패:', e.message); }
+
   // 마이그레이션: student_gallery 테이블에 승인 관련 컬럼 추가
   try {
     const sgCols = db.prepare("PRAGMA table_info(student_gallery)").all().map(c => c.name);
