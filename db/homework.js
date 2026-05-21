@@ -120,7 +120,7 @@ function getHomeworkByClass(classId, { status, page = 1, limit = 20, userId = nu
     (SELECT COUNT(*) FROM class_members cm2 WHERE cm2.class_id = h.class_id AND cm2.role = 'member' AND cm2.status = 'active') as member_count
     ${mySubSelect}
     FROM homework h JOIN users u ON h.teacher_id = u.id
-    ${where} ORDER BY h.due_date DESC, h.created_at DESC LIMIT ? OFFSET ?
+    ${where} ORDER BY (h.due_date IS NULL) ASC, h.due_date DESC, h.created_at DESC LIMIT ? OFFSET ?
   `).all(...params, limit, (page - 1) * limit);
 
   // G3: 각 항목의 attachments JSON parse + G5: is_scheduled 플래그

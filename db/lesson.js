@@ -59,7 +59,7 @@ function getLessonsByClass(classId, { status, page = 1, limit = 20, std_ids } = 
   const lessons = db.prepare(`
     SELECT l.*, u.display_name as author_name
     FROM lessons l JOIN users u ON l.teacher_id = u.id
-    ${where} ORDER BY l.lesson_date DESC, l.created_at DESC LIMIT ? OFFSET ?
+    ${where} ORDER BY (l.lesson_date IS NULL) ASC, l.lesson_date DESC, l.created_at DESC LIMIT ? OFFSET ?
   `).all(...params, limit, (page - 1) * limit);
 
   return { lessons, total, totalPages: Math.ceil(total / limit) || 1 };

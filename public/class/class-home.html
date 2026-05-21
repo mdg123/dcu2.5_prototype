@@ -784,7 +784,14 @@
         <!-- 기본 정보 -->
         <div style="display:flex;gap:12px;margin-bottom:12px;flex-wrap:wrap;">
           <div class="form-group" style="flex:2;min-width:200px;margin:0;"><label>제목</label><input type="text" id="lessonTitle" placeholder="수업 제목" required></div>
-          <div class="form-group" style="flex:0.7;min-width:120px;margin:0;"><label>날짜</label><input type="date" id="lessonDate"></div>
+          <div class="form-group" style="flex:0.7;min-width:120px;margin:0;">
+            <label>날짜</label>
+            <input type="date" id="lessonDate">
+            <label style="display:inline-flex;align-items:center;gap:6px;font-size:13px;color:#6B7280;margin-top:6px;cursor:pointer;">
+              <input type="checkbox" id="lessonNoDate" onchange="onLessonNoDateChange(this)" style="width:16px;height:16px;cursor:pointer;accent-color:#2563eb;">
+              <span>기한 없음 (상시 운영)</span>
+            </label>
+          </div>
           <div class="form-group" style="flex:0.5;min-width:100px;margin:0;"><label>상태</label>
             <select id="lessonStatus"><option value="draft">임시저장</option><option value="published">공개</option></select>
           </div>
@@ -921,6 +928,10 @@
         <div>
           <label>마감일</label>
           <input type="date" id="hwDueDate">
+          <label style="display:inline-flex;align-items:center;gap:6px;font-size:13px;color:#6B7280;margin-top:6px;cursor:pointer;">
+            <input type="checkbox" id="hwNoDueDate" onchange="onHwNoDueDateChange(this)" style="width:16px;height:16px;cursor:pointer;accent-color:#2563eb;">
+            <span>기한 없음 (상시 제출 가능)</span>
+          </label>
         </div>
       </div>
       <div class="form-group"><label>만점</label><input type="number" id="hwMaxScore" value="100" min="1"></div>
@@ -1117,7 +1128,14 @@
           <div style="display:flex;gap:12px;margin-bottom:14px;flex-wrap:wrap;">
             <div class="form-group" style="flex:2;min-width:200px;margin:0;"><label>제목</label><input type="text" id="examImportTitle" placeholder="평가 제목" required></div>
             <div class="form-group" style="flex:0.7;min-width:120px;margin:0;"><label>시작일</label><input type="date" id="examImportStartDate"></div>
-            <div class="form-group" style="flex:0.7;min-width:120px;margin:0;"><label>종료일</label><input type="date" id="examImportEndDate"></div>
+            <div class="form-group" style="flex:0.7;min-width:120px;margin:0;">
+              <label>종료일</label>
+              <input type="date" id="examImportEndDate">
+              <label style="display:inline-flex;align-items:center;gap:6px;font-size:13px;color:#6B7280;margin-top:6px;cursor:pointer;">
+                <input type="checkbox" id="examNoEndDate" onchange="onExamNoEndDateChange(this)" style="width:16px;height:16px;cursor:pointer;accent-color:#2563eb;">
+                <span>기한 없음 (상시 응시)</span>
+              </label>
+            </div>
             <div class="form-group" style="flex:0.5;min-width:100px;margin:0;"><label>제한 시간 (분)</label><input type="number" id="examImportTime" min="1" placeholder="없음"></div>
           </div>
           <div class="form-group" style="margin:0;"><label>설명</label><textarea id="examImportDesc" rows="3" placeholder="평가 설명 (선택)"></textarea></div>
@@ -1687,7 +1705,7 @@
             <div class="item-icon" style="background:#10b981;"><i class="fas fa-tasks"></i></div>
             <div class="item-body">
               <div class="item-title">${escHtml(h.title)}</div>
-              <div class="item-meta">마감: ${h.due_date || '없음'} · 제출 ${h.submission_count || 0}건</div>
+              <div class="item-meta">마감: ${h.due_date || '없음'}${myRole === 'owner' ? ` · 제출 ${h.submission_count || 0}건` : ''}</div>
             </div>
             <span class="item-badge badge-active">진행중</span>
           </div>
@@ -1806,7 +1824,7 @@
                 <div class="lc-title" style="${titleStyle}">${isComplete ? '[완료] ' : ''}${escHtml(l.title)}${myComplete ? ' <span style="display:inline-block;background:#D1FAE5;color:#059669;font-size:11px;font-weight:700;padding:2px 8px;border-radius:4px;margin-left:8px;vertical-align:middle;">학습완료</span>' : ''}</div>
                 <div class="lc-meta">
                   <span><i class="fas fa-user"></i> ${escHtml(l.author_name || '')}</span>
-                  ${l.start_date || l.lesson_date ? `<span><i class="fas fa-calendar"></i> ${l.start_date || l.lesson_date}${l.end_date ? ' ~ ' + l.end_date : ''}</span>` : ''}
+                  ${l.start_date || l.lesson_date ? `<span><i class="fas fa-calendar"></i> ${l.start_date || l.lesson_date}${l.end_date ? ' ~ ' + l.end_date : ''}</span>` : `<span style="display:inline-flex;align-items:center;gap:4px;background:#f3f4f6;color:#6B7280;padding:2px 10px;border-radius:6px;font-size:12px;font-weight:600;"><i class="fas fa-infinity" style="font-size:10px;"></i> 상시 운영</span>`}
                   <span><i class="fas fa-clock"></i> ${l.created_at ? l.created_at.slice(0, 10) : ''}</span>
                   ${cc > 0 ? `<span><i class="fas fa-cubes"></i> 콘텐츠 ${cc}개</span>` : ''}
                 </div>
@@ -1904,6 +1922,9 @@
         document.getElementById('lessonContent').value = '';
         document.getElementById('lessonDate').value = '';
         document.getElementById('lessonStatus').value = 'draft';
+        // 기한 없음 초기화
+        const _lnd = document.getElementById('lessonNoDate');
+        if (_lnd) { _lnd.checked = false; onLessonNoDateChange(_lnd); }
         document.getElementById('lessonSaveBtn').style.display = '';
       }
 
@@ -2403,15 +2424,34 @@
       } catch(e) { classToast('서버 오류', 'error'); }
     }
 
+    // ===== "기한 없음" 토글 핸들러 =====
+    function onLessonNoDateChange(cb) {
+      const input = document.getElementById('lessonDate');
+      if (cb.checked) { input.value = ''; input.disabled = true; input.style.background = '#f3f4f6'; input.style.color = '#9ca3af'; }
+      else { input.disabled = false; input.style.background = ''; input.style.color = ''; }
+    }
+    function onHwNoDueDateChange(cb) {
+      const input = document.getElementById('hwDueDate');
+      if (cb.checked) { input.value = ''; input.disabled = true; input.style.background = '#f3f4f6'; input.style.color = '#9ca3af'; }
+      else { input.disabled = false; input.style.background = ''; input.style.color = ''; }
+    }
+    function onExamNoEndDateChange(cb) {
+      const input = document.getElementById('examImportEndDate');
+      if (cb.checked) { input.value = ''; input.disabled = true; input.style.background = '#f3f4f6'; input.style.color = '#9ca3af'; }
+      else { input.disabled = false; input.style.background = ''; input.style.color = ''; }
+    }
+
     async function saveLesson() {
       const title = document.getElementById('lessonTitle').value.trim();
       if (!title) { classToast('제목을 입력하세요.', 'warning'); return; }
+      const noLessonDate = document.getElementById('lessonNoDate')?.checked;
+      const lessonDateVal = noLessonDate ? null : (document.getElementById('lessonDate').value || null);
       const res = await fetch(`/api/lesson/${classId}`, {
         method: 'POST', headers: {'Content-Type':'application/json'},
         body: JSON.stringify({
           title,
           content: document.getElementById('lessonContent').value,
-          lesson_date: document.getElementById('lessonDate').value || null,
+          lesson_date: lessonDateVal,
           status: document.getElementById('lessonStatus').value,
           content_ids: selectedContentIds
         })
@@ -2535,9 +2575,11 @@
               ` : ''}
             </div>
             <div class="hw-info">
-              <span><i class="fas fa-calendar-alt"></i> 마감: ${h.due_date || '없음'}</span>
-              <span><i class="fas fa-file-upload"></i> 제출 ${submittedCount}건</span>
-              <span><i class="fas fa-star"></i> ${h.max_score || 100}점</span>
+              ${h.due_date
+                ? `<span><i class="fas fa-calendar-alt"></i> 마감: ${h.due_date}</span>`
+                : `<span style="display:inline-flex;align-items:center;gap:4px;background:#f3f4f6;color:#6B7280;padding:2px 10px;border-radius:6px;font-size:12px;font-weight:600;"><i class="fas fa-infinity" style="font-size:10px;"></i> 기한 없음</span>`}
+              ${isOwner ? `<span><i class="fas fa-file-upload"></i> 제출 ${submittedCount}건</span>` : ''}
+              ${isOwner ? `<span><i class="fas fa-star"></i> 만점 ${h.max_score || 100}점</span>` : ''}
               ${urgentLabel}
             </div>
             ${isOwner ? `
@@ -2564,6 +2606,9 @@
       document.getElementById('hwDesc').value = '';
       const _hwStart = document.getElementById('hwStartDate'); if (_hwStart) _hwStart.value = '';
       document.getElementById('hwDueDate').value = '';
+      // 기한 없음 초기화
+      const _hwNd = document.getElementById('hwNoDueDate');
+      if (_hwNd) { _hwNd.checked = false; onHwNoDueDateChange(_hwNd); }
       document.getElementById('hwMaxScore').value = 100;
       const pub = document.getElementById('hwPublicSubmissions');
       if (pub) pub.checked = false;
@@ -2600,6 +2645,9 @@
         const _hwStart2 = document.getElementById('hwStartDate');
         if (_hwStart2) _hwStart2.value = h.start_date ? String(h.start_date).slice(0,10) : '';
         document.getElementById('hwDueDate').value = h.due_date ? String(h.due_date).slice(0,10) : '';
+        // 기한 없음 체크박스: due_date가 null/빈값이면 체크
+        const _hwNdEdit = document.getElementById('hwNoDueDate');
+        if (_hwNdEdit) { _hwNdEdit.checked = !h.due_date; onHwNoDueDateChange(_hwNdEdit); }
         document.getElementById('hwMaxScore').value = h.max_score || 100;
         const pub = document.getElementById('hwPublicSubmissions');
         if (pub) pub.checked = !!h.public_submissions;
@@ -2661,7 +2709,8 @@
         if (m) gradeGroupNum = parseInt(m[0]);
       }
       const _startDate = document.getElementById('hwStartDate')?.value || null;
-      const _dueDate = document.getElementById('hwDueDate').value || null;
+      const _hwNoDue = document.getElementById('hwNoDueDate')?.checked;
+      const _dueDate = _hwNoDue ? null : (document.getElementById('hwDueDate').value || null);
       // 시작일 > 마감일 가드
       if (_startDate && _dueDate && new Date(_startDate) > new Date(_dueDate)) {
         classToast('시작일은 마감일보다 빨라야 해요.', 'warning');
@@ -2787,7 +2836,9 @@
                 <div class="lc-title">${escHtml(e.title)}${examCompleteBadge}</div>
                 <div class="lc-meta">
                   <span><i class="fas fa-user"></i> ${escHtml(e.author_name || '')}</span>
-                  ${e.start_date || e.end_date ? `<span><i class="fas fa-calendar"></i> ${e.start_date || ''}${e.end_date ? ' ~ ' + e.end_date : ''}</span>` : ''}
+                  ${e.start_date || e.end_date
+                    ? `<span><i class="fas fa-calendar"></i> ${e.start_date || ''}${e.end_date ? ' ~ ' + e.end_date : ' ~ <span style=\"color:#6B7280;font-weight:600;\">기한 없음</span>'}</span>`
+                    : `<span style="display:inline-flex;align-items:center;gap:4px;background:#f3f4f6;color:#6B7280;padding:2px 10px;border-radius:6px;font-size:12px;font-weight:600;"><i class="fas fa-infinity" style="font-size:10px;"></i> 상시 운영</span>`}
                   <span><i class="fas fa-question-circle"></i> ${e.question_count || 0}문항</span>
                   ${e.time_limit ? `<span><i class="fas fa-clock"></i> ${e.time_limit}분</span>` : ''}
                 </div>
@@ -3367,6 +3418,9 @@
       document.getElementById('examImportStartDate').value = today.toISOString().slice(0, 10);
       const nextWeek = new Date(today); nextWeek.setDate(nextWeek.getDate() + 7);
       document.getElementById('examImportEndDate').value = nextWeek.toISOString().slice(0, 10);
+      // 기한 없음 초기화
+      const _exNd1 = document.getElementById('examNoEndDate');
+      if (_exNd1) { _exNd1.checked = false; onExamNoEndDateChange(_exNd1); }
       document.getElementById('examImportTime').value = '';
 
       // 버튼 초기화
@@ -3408,6 +3462,9 @@
         document.getElementById('examImportStartDate').value = today.toISOString().slice(0, 10);
         const nextWeek = new Date(today); nextWeek.setDate(nextWeek.getDate() + 7);
         document.getElementById('examImportEndDate').value = nextWeek.toISOString().slice(0, 10);
+        // 기한 없음 초기화
+        const _exNd2 = document.getElementById('examNoEndDate');
+        if (_exNd2) { _exNd2.checked = false; onExamNoEndDateChange(_exNd2); }
         document.getElementById('examImportTime').value = '';
         const btn = document.getElementById('examImportBtn');
         btn.disabled = false;
@@ -3439,7 +3496,8 @@
       const desc = document.getElementById('examImportDesc').value;
       const timeLimit = parseInt(document.getElementById('examImportTime').value) || null;
       const startDate = document.getElementById('examImportStartDate').value || null;
-      const endDate = document.getElementById('examImportEndDate').value || null;
+      const _examNoEnd = document.getElementById('examNoEndDate')?.checked;
+      const endDate = _examNoEnd ? null : (document.getElementById('examImportEndDate').value || null);
 
       // std_ids: 현재 모드의 DacheumSearch 호스트 내 std-smart-search 컴포넌트 값에서 추출
       const examStdHost = currentExamMode === 'direct'
