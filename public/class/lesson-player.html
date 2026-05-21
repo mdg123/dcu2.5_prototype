@@ -1237,43 +1237,65 @@
       const questions = content.questions || [];
       const typeBadges = { choice: { label: '객관식', color: '#3b82f6' }, short: { label: '주관식', color: '#10b981' }, essay: { label: '서술형', color: '#8b5cf6' } };
 
+      const isLight = document.body.classList.contains('light-mode');
+      const C = isLight ? {
+        headerText: '#1f2937', metaText: '#6b7280',
+        cardBg: '#f9fafb', cardHoverBg: '#e5e7eb',
+        qText: '#111827',
+        optBg: '#f3f4f6', optText: '#374151',
+        optAnsBg: '#dcfce7', optAnsText: '#15803d',
+        shortBg: '#dcfce7', shortText: '#15803d',
+        essayBg: '#ede9fe', essayText: '#6d28d9',
+        explBg: '#dbeafe', explText: '#1e40af',
+      } : {
+        headerText: '#fff', metaText: '#94a3b8',
+        cardBg: 'rgba(255,255,255,0.05)', cardHoverBg: 'rgba(255,255,255,0.1)',
+        qText: '#f1f5f9',
+        optBg: 'rgba(255,255,255,0.05)', optText: '#cbd5e1',
+        optAnsBg: 'rgba(16,185,129,0.15)', optAnsText: '#34d399',
+        shortBg: 'rgba(16,185,129,0.1)', shortText: '#34d399',
+        essayBg: 'rgba(139,92,246,0.1)', essayText: '#a78bfa',
+        explBg: 'rgba(59,130,246,0.1)', explText: '#93c5fd',
+      };
+
       let html = `<div style="width:100%;padding:32px 48px;overflow-y:auto;max-height:100%;scrollbar-width:none;-webkit-overflow-scrolling:touch;">
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:24px;">
           <span style="background:#3b82f6;color:#fff;padding:4px 12px;border-radius:8px;font-size:13px;font-weight:700;">${content.content_type === 'exam' ? '📋 평가지' : '❓ 문항'}</span>
-          <span style="font-size:18px;font-weight:700;color:#fff;">${escHtml(content.title)}</span>
-          <span style="font-size:13px;color:#94a3b8;">(${questions.length}문항)</span>
+          <span style="font-size:18px;font-weight:700;color:${C.headerText};">${escHtml(content.title)}</span>
+          <span style="font-size:13px;color:${C.metaText};">(${questions.length}문항)</span>
         </div>`;
 
       questions.forEach((q, i) => {
         const tb = typeBadges[q.question_type] || typeBadges.choice;
         const optionLabels = ['①', '②', '③', '④', '⑤'];
 
-        html += `<div style="background:rgba(255,255,255,0.05);border-radius:12px;padding:20px;margin-bottom:16px;border-left:3px solid ${tb.color};">
+        html += `<div style="background:${C.cardBg};border-radius:12px;padding:20px;margin-bottom:16px;border-left:3px solid ${tb.color};">
           <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
             <span style="background:${tb.color};color:#fff;padding:2px 10px;border-radius:6px;font-size:11px;font-weight:700;">${tb.label}</span>
-            <span style="font-size:12px;color:#64748b;">${q.points || 1}점</span>
+            <span style="font-size:12px;color:${C.metaText};">${q.points || 1}점</span>
           </div>
-          <div style="font-size:15px;font-weight:600;color:#f1f5f9;margin-bottom:12px;">Q${q.question_number}. ${escHtml(q.question_text)}</div>`;
+          <div style="font-size:15px;font-weight:600;color:${C.qText};margin-bottom:12px;">Q${q.question_number}. ${escHtml(q.question_text)}</div>`;
 
         if (q.options && Array.isArray(q.options)) {
           html += '<div style="display:flex;flex-direction:column;gap:6px;">';
           q.options.forEach((opt, oi) => {
             const isAnswer = String(oi + 1) === String(q.answer);
-            html += `<div style="padding:8px 14px;border-radius:8px;font-size:14px;cursor:pointer;transition:all .15s;
-              ${isAnswer ? 'background:rgba(16,185,129,0.15);color:#34d399;font-weight:600;' : 'background:rgba(255,255,255,0.05);color:#cbd5e1;'}
-              " onmouseenter="this.style.background='rgba(255,255,255,0.1)'" onmouseleave="this.style.background='${isAnswer ? 'rgba(16,185,129,0.15)' : 'rgba(255,255,255,0.05)'}'">
+            const ansBg = isAnswer ? C.optAnsBg : C.optBg;
+            const ansText = isAnswer ? C.optAnsText : C.optText;
+            html += `<div style="padding:8px 14px;border-radius:8px;font-size:14px;cursor:pointer;transition:all .15s;background:${ansBg};color:${ansText};${isAnswer ? 'font-weight:600;' : ''}"
+              onmouseenter="this.style.background='${C.cardHoverBg}'" onmouseleave="this.style.background='${ansBg}'">
               ${optionLabels[oi] || (oi+1)} ${escHtml(opt)} ${isAnswer ? '<i class="fas fa-check" style="float:right;"></i>' : ''}
             </div>`;
           });
           html += '</div>';
         } else if (q.question_type === 'short') {
-          html += `<div style="padding:8px 14px;background:rgba(16,185,129,0.1);border-radius:8px;color:#34d399;font-size:14px;font-weight:500;">정답: ${escHtml(q.answer || '-')}</div>`;
+          html += `<div style="padding:8px 14px;background:${C.shortBg};border-radius:8px;color:${C.shortText};font-size:14px;font-weight:500;">정답: ${escHtml(q.answer || '-')}</div>`;
         } else {
-          html += `<div style="padding:8px 14px;background:rgba(139,92,246,0.1);border-radius:8px;color:#a78bfa;font-size:13px;">서술형 문항입니다.</div>`;
+          html += `<div style="padding:8px 14px;background:${C.essayBg};border-radius:8px;color:${C.essayText};font-size:13px;">서술형 문항입니다.</div>`;
         }
 
         if (q.explanation) {
-          html += `<div style="margin-top:10px;padding:8px 12px;background:rgba(59,130,246,0.1);border-radius:8px;font-size:12px;color:#93c5fd;"><i class="fas fa-lightbulb" style="margin-right:4px;color:#fbbf24;"></i>${escHtml(q.explanation)}</div>`;
+          html += `<div style="margin-top:10px;padding:8px 12px;background:${C.explBg};border-radius:8px;font-size:12px;color:${C.explText};"><i class="fas fa-lightbulb" style="margin-right:4px;color:#fbbf24;"></i>${escHtml(q.explanation)}</div>`;
         }
         html += '</div>';
       });
