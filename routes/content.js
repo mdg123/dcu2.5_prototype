@@ -492,7 +492,7 @@ router.post('/', requireAuth, (req, res) => {
           q.question_text || q.text || '',
           q.question_type || q.type || 'multiple_choice',
           typeof q.options === 'string' ? q.options : JSON.stringify(q.options || []),
-          q.answer !== undefined ? q.answer : (q.answer_index !== undefined ? q.answer_index : 0),
+          (q.answer ?? q.correct_index ?? q.correctIndex ?? q.answer_index ?? 0),
           q.explanation || '',
           q.points || 10,
           q.difficulty || 3,

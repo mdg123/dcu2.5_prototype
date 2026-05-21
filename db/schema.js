@@ -2138,6 +2138,9 @@ function initSchema() {
   `);
 
   // 마이그레이션: contents 테이블 CHECK 제약 제거 (새 콘텐츠 유형 지원)
+  // 동적 컬럼 마이그레이션 — PRAGMA table_info 로 현재 컬럼을 그대로 보존하여
+  // fix(qa-daily) 이후 추가된 신규 컬럼(allow_comments, theme, copyright, download_allow,
+  // official_tag, folder_id, curriculum_standard_ids, bookmark_count, source 등)이 drop 되지 않도록 한다.
   try {
     // 기존 CHECK 제약이 있으면 테스트 삽입으로 감지 후 재생성
     const testStmt = db.prepare("INSERT INTO contents (creator_id, title, content_type) VALUES (?, ?, ?)");
@@ -2147,38 +2150,33 @@ function initSchema() {
       db.exec("ROLLBACK TO check_test");
       db.exec("RELEASE check_test");
     } catch (checkErr) {
-      db.exec("ROLLBACK TO check_test");
-      db.exec("RELEASE check_test");
+      try { db.exec("ROLLBACK TO check_test"); db.exec("RELEASE check_test"); } catch(e2){}
       if (checkErr.message.includes('CHECK')) {
         console.log('[DB] contents 테이블 CHECK 제약 재생성 중...');
+        const existingCols = db.prepare("PRAGMA table_info(contents)").all();
+        const colDefs = existingCols.map(c => {
+          if (c.name === 'id') return 'id INTEGER PRIMARY KEY AUTOINCREMENT';
+          if (c.name === 'creator_id') return 'creator_id INTEGER NOT NULL';
+          if (c.name === 'title') return 'title TEXT NOT NULL';
+          if (c.name === 'status') return "status TEXT DEFAULT 'approved'";
+          // PRAGMA 결과의 원본 타입 보존(없으면 TEXT). 신규 컬럼 정의 유실 방지.
+          const t = (c.type && String(c.type).trim()) ? c.type : 'TEXT';
+          return `${c.name} ${t}`;
+        }).join(',\n            ');
+        const colNames = existingCols.map(c => c.name).join(',');
+        db.pragma('foreign_keys = OFF');
         db.exec(`
           CREATE TABLE IF NOT EXISTS contents_new (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            creator_id INTEGER NOT NULL,
-            title TEXT NOT NULL,
-            description TEXT,
-            content_type TEXT DEFAULT 'document',
-            content_url TEXT,
-            file_path TEXT,
-            thumbnail_url TEXT,
-            subject TEXT,
-            grade INTEGER,
-            tags TEXT,
-            is_public INTEGER DEFAULT 0,
-            status TEXT DEFAULT 'approved',
-            reject_reason TEXT,
-            view_count INTEGER DEFAULT 0,
-            like_count INTEGER DEFAULT 0,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (creator_id) REFERENCES users(id),
+            ${colDefs},
             CHECK(status IN ('draft', 'pending', 'review', 'hold', 'approved', 'rejected'))
           );
-          INSERT INTO contents_new SELECT * FROM contents;
+          INSERT INTO contents_new (${colNames}) SELECT ${colNames} FROM contents;
           DROP TABLE contents;
           ALTER TABLE contents_new RENAME TO contents;
           CREATE INDEX IF NOT EXISTS idx_contents_creator ON contents(creator_id);
           CREATE INDEX IF NOT EXISTS idx_contents_public ON contents(is_public, status);
         `);
+        db.pragma('foreign_keys = ON');
         console.log('[DB] contents 테이블 재생성 완료 (확장된 콘텐츠 유형 지원)');
       }
     }
