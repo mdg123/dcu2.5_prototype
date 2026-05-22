@@ -521,10 +521,30 @@
       setTimeout(() => { t.style.opacity = '0'; setTimeout(() => t.remove(), 300); }, 2500);
     }
 
+    // 학습 설정의 (school_level, grade)을 절대 학년으로 변환 — 세트의 target_grade와 매칭
+    //  초 1~6 → 1~6, 중 1~3 → 7~9, 고 1~3 → 10~12
+    function _absGradeFromSettings(s) {
+      if (!s || s.grade == null) return null;
+      const g = parseInt(s.grade);
+      if (!Number.isFinite(g)) return null;
+      const lvl = s.school_level;
+      if (lvl === '중' || lvl === 'middle') return 6 + g;
+      if (lvl === '고' || lvl === 'high')   return 9 + g;
+      return g; // 초 or 미지정
+    }
+
     async function loadData() {
       try {
+        // 학습 설정의 학교급·학년을 daily 호출에 반영 (모든 역할)
+        let dailyUrl = '/api/self-learn/daily';
+        try {
+          const settingsRes = await fetch('/api/self-learn/settings').then(r => r.json());
+          const abs = _absGradeFromSettings(settingsRes && settingsRes.settings);
+          if (abs) dailyUrl += '?grade=' + abs;
+        } catch (_) { /* settings 실패해도 기본 호출로 진행 */ }
+
         const [setsRes, statsRes, psRes, wrongRes] = await Promise.all([
-          fetch('/api/self-learn/daily').then(r => r.json()),
+          fetch(dailyUrl).then(r => r.json()),
           fetch('/api/self-learn/daily/stats').then(r => r.json()),
           fetch('/api/self-learn/problem-sets').then(r => r.json()).catch(() => ({ sets: [] })),
           fetch('/api/self-learn/wrong-notes').then(r => r.json()).catch(() => ({ notes: [] }))
