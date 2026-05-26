@@ -6,12 +6,25 @@ const classDb = require('../db/class');
 // POST /api/class - 클래스 생성 (누구나 가능)
 router.post('/', requireAuth, (req, res) => {
   try {
-    const { name, description, class_type, is_public } = req.body;
+    const {
+      name, description, class_type, is_public,
+      subject, grade, school_name, class_number, semester, academic_year
+    } = req.body;
     if (!name || !name.trim()) {
       return res.status(400).json({ success: false, message: '클래스 이름을 입력하세요.' });
     }
+    const gradeNum = grade !== undefined && grade !== null && grade !== ''
+      ? parseInt(grade, 10) : null;
+    const classNumNum = class_number !== undefined && class_number !== null && class_number !== ''
+      ? parseInt(class_number, 10) : null;
     const cls = classDb.createClass(req.user.id, {
-      name: name.trim(), description, class_type, is_public
+      name: name.trim(), description, class_type, is_public,
+      subject: subject || null,
+      grade: Number.isFinite(gradeNum) ? gradeNum : null,
+      school_name: school_name || null,
+      class_number: Number.isFinite(classNumNum) ? classNumNum : null,
+      semester: semester || null,
+      academic_year: academic_year || null
     });
     res.status(201).json({ success: true, message: '클래스가 생성되었습니다.', class: cls });
   } catch (err) {

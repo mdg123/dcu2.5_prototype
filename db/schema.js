@@ -1901,6 +1901,10 @@ function initSchema() {
     if (!cols.includes('approval_status')) {
       db.exec("ALTER TABLE posts ADD COLUMN approval_status TEXT DEFAULT 'approved'");
     }
+    if (!cols.includes('rejection_reason')) {
+      // 게시글 반려 사유 (board.js reject EP에서 사용)
+      db.exec("ALTER TABLE posts ADD COLUMN rejection_reason TEXT");
+    }
   } catch (e) { /* 테이블이 아직 없으면 무시 */ }
 
   // 마이그레이션: class_boards 테이블 생성 (다중 게시판 지원)

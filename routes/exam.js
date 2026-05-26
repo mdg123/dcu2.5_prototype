@@ -7,6 +7,7 @@ const { v4: uuidv4 } = require('uuid');
 const { requireAuth } = require('../middleware/auth');
 const examDb = require('../db/exam');
 const classDb = require('../db/class');
+const notifDb = require('../db/notifications');
 const { logLearningActivity, computeAchievementLevel } = require('../db/learning-log-helper');
 const { extractLogContext } = require('../lib/log-context');
 const cbtExtDb = require('../db/cbt-extended');
@@ -214,6 +215,18 @@ router.post('/:classId', requireAuth, requireClassMember, (req, res) => {
         curriculum_standard_ids: Array.isArray(exam.std_ids) && exam.std_ids.length ? exam.std_ids : null,
       });
     } catch (e) { console.error('[xapi:exam_gave]', e.message); }
+    // 알림: 활성/대기 상태 평가만 학생에게 즉시 알림 (draft 제외)
+    try {
+      if (exam && exam.id && finalStatus && finalStatus !== 'draft') {
+        notifDb.notifyClassMembers(req.classId, {
+          type: 'exam_new',
+          title: '새 평가가 등록되었습니다',
+          message: exam.title,
+          link: `/class/class-evaluation.html?classId=${req.classId}&examId=${exam.id}`,
+          excludeUserId: req.user.id
+        });
+      }
+    } catch (e) { console.error('[EXAM] notify error:', e.message); }
     res.status(201).json({ success: true, exam });
   } catch (err) {
     console.error('[EXAM] create error:', err);

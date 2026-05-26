@@ -1,18 +1,97 @@
 const db = require('./index');
 
-function createLesson(classId, teacherId, data) {
+// ============================================================
+// 콘텐츠 공개정책 1단계 — 수업↔그림자 contents 동기화 헬퍼
+// (routes 사양: contents.source = 'lesson_<id>' 로 그림자 표시,
+//  is_public=0, status='approved', content_type='lesson_bundle')
+// ============================================================
+function _gradeToInt(data) {
+  // contents.grade 는 INTEGER. grade_group/school_level 텍스트는 매핑 불가하므로
+  // 숫자(또는 '3' 같은 문자열 숫자)만 받아들이고, 그렇지 않으면 NULL 로 저장.
+  const raw = data.grade_group || data.school_level || null;
+  if (raw === null || raw === undefined) return null;
+  const n = parseInt(raw);
+  return Number.isFinite(n) ? n : null;
+}
+
+function _shadowInsert(lessonId, teacherId, data) {
+  const linkedSource = `lesson_${lessonId}`;
+  // 기존 그림자가 있으면 중복 방지 (이전 백필/이중 호출 대비)
+  const existed = db.prepare(
+    "SELECT id FROM contents WHERE source = ? AND creator_id = ?"
+  ).get(linkedSource, teacherId);
+  if (existed) return existed.id;
   const info = db.prepare(`
-    INSERT INTO lessons (class_id, teacher_id, title, description, content, lesson_date, start_date, end_date, estimated_minutes, lesson_order, status, subject_code, grade_group, achievement_code, school_level, tags, theme, classify_mode)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(classId, teacherId, data.title, data.description || null, data.content || null,
-    data.lesson_date || null, data.start_date || null, data.end_date || null,
-    data.estimated_minutes || 0, data.lesson_order || null, data.status || 'draft',
-    data.subject_code || null, data.grade_group || null, data.achievement_code || null,
-    data.school_level || null, data.tags || null, data.theme || null, data.classify_mode || 'curriculum');
-  const lessonId = info.lastInsertRowid;
-  if (Array.isArray(data.std_ids) && data.std_ids.length > 0) {
-    setLessonStdIds(lessonId, data.std_ids);
+    INSERT INTO contents
+      (creator_id, title, description, content_type, subject, grade,
+       is_public, status, source, created_at)
+    VALUES (?, ?, ?, 'lesson_bundle', ?, ?, 0, 'approved', ?, datetime('now'))
+  `).run(
+    teacherId,
+    data.title,
+    data.description || data.content || null,
+    data.subject_code || null,
+    _gradeToInt(data),
+    linkedSource
+  );
+  return info.lastInsertRowid;
+}
+
+function _shadowUpdate(lessonId, data) {
+  const linkedSource = `lesson_${lessonId}`;
+  const fields = [];
+  const params = [];
+  if (data.title !== undefined) { fields.push('title = ?'); params.push(data.title); }
+  if (data.description !== undefined || data.content !== undefined) {
+    fields.push('description = ?');
+    params.push(data.description !== undefined ? data.description : (data.content || null));
   }
+  if (data.subject_code !== undefined) { fields.push('subject = ?'); params.push(data.subject_code || null); }
+  if (data.grade_group !== undefined || data.school_level !== undefined) {
+    fields.push('grade = ?');
+    params.push(_gradeToInt(data));
+  }
+  if (fields.length === 0) return;
+  params.push(linkedSource);
+  db.prepare(
+    `UPDATE contents SET ${fields.join(', ')} WHERE source = ?`
+  ).run(...params);
+}
+
+function _shadowDelete(lessonId) {
+  const linkedSource = `lesson_${lessonId}`;
+  // 비공개 그림자(is_public=0)는 함께 삭제
+  db.prepare(
+    "DELETE FROM contents WHERE source = ? AND is_public = 0"
+  ).run(linkedSource);
+  // 공개·승인된 그림자(is_public=1)는 다른 사용자 보관함에 있을 수 있어 보존하되 원본 끊기
+  db.prepare(
+    "UPDATE contents SET source = ? WHERE source = ? AND is_public = 1"
+  ).run(`lesson_deleted_${lessonId}`, linkedSource);
+}
+
+function createLesson(classId, teacherId, data) {
+  // 1단계 정책: 사용자가 명시적으로 'draft'를 지정하지 않으면 기본 'published'
+  // (비공개여도 클래스 학생에게 즉시 노출되어야 한다는 정책 반영)
+  const status = data.status || 'published';
+  const tx = db.transaction(() => {
+    const info = db.prepare(`
+      INSERT INTO lessons (class_id, teacher_id, title, description, content, lesson_date, start_date, end_date, estimated_minutes, lesson_order, status, subject_code, grade_group, achievement_code, school_level, tags, theme, classify_mode)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(classId, teacherId, data.title, data.description || null, data.content || null,
+      data.lesson_date || null, data.start_date || null, data.end_date || null,
+      data.estimated_minutes || 0, data.lesson_order || null, status,
+      data.subject_code || null, data.grade_group || null, data.achievement_code || null,
+      data.school_level || null, data.tags || null, data.theme || null, data.classify_mode || 'curriculum');
+    const lessonId = info.lastInsertRowid;
+    if (Array.isArray(data.std_ids) && data.std_ids.length > 0) {
+      setLessonStdIds(lessonId, data.std_ids);
+    }
+    // 그림자 contents INSERT (실패 시 트랜잭션 롤백)
+    _shadowInsert(lessonId, teacherId, data);
+    return lessonId;
+  });
+  const lessonId = tx();
   return getLessonById(lessonId);
 }
 
@@ -75,14 +154,31 @@ function updateLesson(id, data) {
     }
   }
   if (fields.length === 0) return getLessonById(id);
-  fields.push('updated_at = CURRENT_TIMESTAMP');
-  params.push(id);
-  db.prepare(`UPDATE lessons SET ${fields.join(', ')} WHERE id = ?`).run(...params);
+  const tx = db.transaction(() => {
+    const sets = fields.slice();
+    const ps = params.slice();
+    sets.push('updated_at = CURRENT_TIMESTAMP');
+    ps.push(id);
+    db.prepare(`UPDATE lessons SET ${sets.join(', ')} WHERE id = ?`).run(...ps);
+    // 그림자 contents 동기화 (제목·설명·교과·학년만, is_public/status는 마켓플레이스 흐름 독립)
+    try {
+      _shadowUpdate(id, data);
+    } catch (e) {
+      console.error('[SYNC] lesson→content update', e.message);
+      throw e;
+    }
+  });
+  tx();
   return getLessonById(id);
 }
 
 function deleteLesson(id) {
-  db.prepare('DELETE FROM lessons WHERE id = ?').run(id);
+  const tx = db.transaction(() => {
+    // 그림자 contents 먼저 정리(비공개는 삭제, 공개·승인은 보존하되 원본 링크 끊기)
+    _shadowDelete(id);
+    db.prepare('DELETE FROM lessons WHERE id = ?').run(id);
+  });
+  tx();
 }
 
 function addAttachment(lessonId, data) {

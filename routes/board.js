@@ -123,18 +123,30 @@ router.post('/:classId', requireAuth, requireMember, (req, res) => {
       ...extractLogContext(req)
     });
     // 나도예술가 공유 옵션: 갤러리 게시글을 student_gallery에도 등록
-    if (req.body.shareToGallery && req.body.image_url && post) {
+    // 트리거 조건 (둘 중 하나):
+    //   (1) shareToGallery=true (사용자 명시적 옵션)
+    //   (2) 갤러리 게시판(board_type='gallery')에 작성된 게시글 → 자동 동기화
+    // image_url이 없어도 placeholder로 row를 생성해야 승인/반려 시 동기화가 가능
+    const shouldShareToGallery = (req.body.shareToGallery === true)
+      || (postData.category === 'gallery');
+    if (shouldShareToGallery && post) {
       try {
         const growthDb = require('../db/growth');
-        growthDb.createGalleryItem(req.user.id, {
+        const created = growthDb.createGalleryItem(req.user.id, {
           title: req.body.title,
           description: req.body.content || '',
-          image_url: req.body.image_url,
+          image_url: req.body.image_url || '/images/placeholder.png',
           category: req.body.galleryCategory || 'art',
           approval_status: 'pending',
-          source_post_id: post.id
+          source_post_id: post.id,
+          source: 'board'
         });
-      } catch (e) { console.error('[BOARD] gallery share error:', e); }
+        if (!created || !created.id) {
+          console.error('[BOARD] gallery share: createGalleryItem returned empty', { post_id: post.id });
+        }
+      } catch (e) {
+        console.error('[BOARD] gallery share error:', e && e.message, 'post_id=', post.id);
+      }
     }
     // 클래스 마일리지 자동 지급 — 게시글 작성 (daily_limit=3)
     try {
@@ -292,17 +304,47 @@ router.post('/:classId/:postId/approve', requireAuth, requireMember, (req, res) 
     if (req.myRole !== 'owner') return res.status(403).json({ success: false, message: '개설자만 승인할 수 있습니다.' });
     const post = boardDb.approvePost(parseInt(req.params.postId));
     if (!post) return res.status(404).json({ success: false, message: '게시글을 찾을 수 없습니다.' });
-    // 연결된 student_gallery 항목도 승인 처리
+    // 연결된 student_gallery 항목 동기화 — row가 없으면 새로 INSERT (UPSERT 패턴)
     try {
-      const growthDb = require('../db/growth');
       const db = require('../db/index');
-      db.prepare(`
-        UPDATE student_gallery SET approval_status = 'approved', approved_by = ?, approved_at = CURRENT_TIMESTAMP
-        WHERE source_post_id = ?
-      `).run(req.user.id, post.id);
-    } catch (e) {}
+      const existing = db.prepare('SELECT id FROM student_gallery WHERE source_post_id = ?').get(post.id);
+      if (existing) {
+        const upd = db.prepare(`
+          UPDATE student_gallery SET approval_status = 'approved', approved_by = ?, approved_at = CURRENT_TIMESTAMP
+          WHERE source_post_id = ?
+        `).run(req.user.id, post.id);
+        if (!upd.changes) {
+          console.error('[BOARD] approve: gallery UPDATE no-op', { post_id: post.id });
+        }
+      } else if (post.category === 'gallery') {
+        // 갤러리 카테고리 게시글인데 student_gallery row가 없는 경우 — 누락 보정
+        const growthDb = require('../db/growth');
+        const created = growthDb.createGalleryItem(post.author_id, {
+          title: post.title,
+          description: post.content || '',
+          image_url: post.image_url || '/images/placeholder.png',
+          category: 'art',
+          approval_status: 'approved',
+          source_post_id: post.id,
+          source: 'board'
+        });
+        if (created && created.id) {
+          db.prepare(`
+            UPDATE student_gallery SET approved_by = ?, approved_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+          `).run(req.user.id, created.id);
+        } else {
+          console.error('[BOARD] approve: gallery backfill INSERT failed', { post_id: post.id });
+        }
+      }
+    } catch (e) {
+      console.error('[BOARD] approve gallery sync error:', e && e.message, 'post_id=', post.id);
+    }
     res.json({ success: true, post, message: '승인되었습니다.' });
-  } catch (err) { res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' }); }
+  } catch (err) {
+    console.error('[BOARD] approve error:', err && err.message);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
 });
 
 // 게시물 반려
@@ -314,10 +356,19 @@ router.post('/:classId/:postId/reject', requireAuth, requireMember, (req, res) =
     // 연결된 student_gallery 항목도 반려
     try {
       const db = require('../db/index');
-      db.prepare("UPDATE student_gallery SET approval_status = 'rejected' WHERE source_post_id = ?").run(post.id);
-    } catch (e) {}
+      const upd = db.prepare("UPDATE student_gallery SET approval_status = 'rejected', reject_reason = ? WHERE source_post_id = ?")
+        .run(req.body.reason || null, post.id);
+      if (!upd.changes && post.category === 'gallery') {
+        console.error('[BOARD] reject: no student_gallery row to sync', { post_id: post.id });
+      }
+    } catch (e) {
+      console.error('[BOARD] reject gallery sync error:', e && e.message, 'post_id=', post.id);
+    }
     res.json({ success: true, post, message: '반려되었습니다.' });
-  } catch (err) { res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' }); }
+  } catch (err) {
+    console.error('[BOARD] reject error:', err && err.message);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
 });
 
 module.exports = router;

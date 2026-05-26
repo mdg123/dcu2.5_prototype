@@ -107,12 +107,22 @@ router.post('/portfolios', requireAuth, (req, res) => {
 
 // GET /api/growth/portfolios/:id
 // 'reports', 'report'는 별도 라우트(아래)에서 매칭. 여기서 들어오면 숫자 id가 아닐 시 404.
+// 권한: 본인 OR 관리자 OR (포트폴리오가 클래스에 속한 경우) 해당 클래스 개설자 OR is_public=1 공개
 router.get('/portfolios/:id', requireAuth, (req, res, next) => {
   // 문자열 라우트(예약어)는 다음 라우터에 위임
   if (['reports', 'report'].includes(req.params.id)) return next('route');
   try {
     const portfolio = growthDb.getPortfolioById(parseInt(req.params.id));
     if (!portfolio) return res.status(404).json({ success: false, message: '포트폴리오를 찾을 수 없습니다.' });
+    const isOwner = portfolio.student_id === req.user.id;
+    const isAdmin = req.user.role === 'admin';
+    const isClassOwner = portfolio.class_id
+      ? classDb.getMemberRole(portfolio.class_id, req.user.id) === 'owner'
+      : false;
+    const isPublic = portfolio.is_public === 1 || portfolio.is_public === true;
+    if (!isOwner && !isAdmin && !isClassOwner && !isPublic) {
+      return res.status(403).json({ success: false, message: '접근 권한이 없습니다.' });
+    }
     res.json({ success: true, portfolio });
   } catch (err) {
     res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });

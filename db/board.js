@@ -112,7 +112,9 @@ function approvePost(postId) {
 }
 
 function rejectPost(postId, reason) {
-  db.prepare("UPDATE posts SET approval_status = 'rejected' WHERE id = ?").run(postId);
+  // rejection_reason 컬럼은 schema.js 마이그레이션에서 추가됨 (idempotent ALTER)
+  db.prepare("UPDATE posts SET approval_status = 'rejected', rejection_reason = ? WHERE id = ?")
+    .run(reason != null ? String(reason).slice(0, 500) : null, postId);
   return getPostById(postId);
 }
 

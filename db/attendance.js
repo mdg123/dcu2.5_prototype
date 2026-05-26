@@ -184,7 +184,7 @@ function getClassStats(classId) {
   ).get(classId, today).cnt;
 
   const totalMembers = db.prepare(
-    "SELECT COUNT(*) as cnt FROM class_members WHERE class_id = ? AND status = 'active' AND role IN ('student', 'owner', 'teacher')"
+    "SELECT COUNT(*) as cnt FROM class_members WHERE class_id = ? AND status = 'active' AND role IN ('student', 'owner', 'teacher', 'member')"
   ).get(classId).cnt;
 
   // 이번 주 출석 현황
@@ -197,7 +197,50 @@ function getClassStats(classId) {
     ORDER BY attendance_date
   `).all(classId, weekStart);
 
-  return { todayCount, totalMembers, weekAttendance };
+  // ─── 게이미피케이션 통계 (RFP SFR-017) ────────────────────────────
+  // 학생 멤버(role='member') 대상으로 연속 출석·뱃지 집계
+  const studentMembers = db.prepare(
+    "SELECT user_id FROM class_members WHERE class_id = ? AND status = 'active' AND role = 'member'"
+  ).all(classId);
+
+  let maxStreak = 0;
+  let sumStreak = 0;
+  for (const m of studentMembers) {
+    const s = getStreak(classId, m.user_id) || 0;
+    if (s > maxStreak) maxStreak = s;
+    sumStreak += s;
+  }
+  const avgStreak = studentMembers.length > 0
+    ? Math.round((sumStreak / studentMembers.length) * 10) / 10
+    : 0;
+
+  // 뱃지: badge_type별 획득자 수 집계 + 총 발급 수
+  const badgeRows = db.prepare(`
+    SELECT badge_type,
+           COUNT(*) AS total_awarded,
+           COUNT(DISTINCT user_id) AS unique_users
+    FROM attendance_badges
+    WHERE class_id = ?
+    GROUP BY badge_type
+    ORDER BY total_awarded DESC
+  `).all(classId);
+  const totalBadges = badgeRows.reduce((acc, b) => acc + (b.total_awarded || 0), 0);
+
+  // totalStreak: 클래스 멤버 전체의 연속 출석일 집계 (최대치 강조)
+  const totalStreak = {
+    max: maxStreak,
+    avg: avgStreak,
+    sum: sumStreak,
+    memberCount: studentMembers.length
+  };
+
+  // badges: 뱃지별 획득자 + 합산
+  const badges = {
+    total: totalBadges,
+    byType: badgeRows
+  };
+
+  return { todayCount, totalMembers, weekAttendance, totalStreak, badges };
 }
 
 // 출석부 설정

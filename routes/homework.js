@@ -3,6 +3,7 @@ const router = express.Router();
 const { requireAuth } = require('../middleware/auth');
 const homeworkDb = require('../db/homework');
 const classDb = require('../db/class');
+const notifDb = require('../db/notifications');
 const { logLearningActivity } = require('../db/learning-log-helper');
 const { extractLogContext } = require('../lib/log-context');
 const { ensureTodayAttendance } = require('../db/attendance');
@@ -73,6 +74,19 @@ router.post('/:classId', requireAuth, requireClassMember, (req, res) => {
         achievement_codes: achievement_code || null,
       });
     } catch (_) {}
+    // 알림: 클래스 학생 전원에게 새 과제 알림 (예약 출제가 아닐 때만)
+    try {
+      const isScheduled = start_date && new Date(start_date) > new Date();
+      if (!isScheduled && hw && hw.id) {
+        notifDb.notifyClassMembers(req.classId, {
+          type: 'homework_new',
+          title: '새 과제가 등록되었습니다',
+          message: hw.title,
+          link: `/class/class-homework.html?classId=${req.classId}&homeworkId=${hw.id}`,
+          excludeUserId: req.user.id
+        });
+      }
+    } catch (e) { console.error('[HOMEWORK] notify error:', e.message); }
     res.status(201).json({ success: true, homework: hw });
   } catch (err) {
     res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });

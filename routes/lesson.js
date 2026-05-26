@@ -96,7 +96,10 @@ router.post('/:classId', requireAuth, requireClassMember, (req, res) => {
     }
     const { title, content, description, lesson_date, start_date, end_date, estimated_minutes, lesson_order, status, content_ids, subject_code, grade_group, achievement_code, school_level, tags, theme, classify_mode, std_ids } = req.body;
     if (!title) return res.status(400).json({ success: false, message: '수업 제목을 입력하세요.' });
-    const lesson = lessonDb.createLesson(req.classId, req.user.id, { title, content, description, lesson_date, start_date, end_date, estimated_minutes, lesson_order, status, subject_code, grade_group, achievement_code, school_level, tags, theme, classify_mode, std_ids });
+    // 콘텐츠 공개정책 1단계: status 미지정 시 'published' — 클래스 학생에게 즉시 노출.
+    // (마켓플레이스 공개는 별개 — 그림자 contents.is_public 으로 관리)
+    const effectiveStatus = status || 'published';
+    const lesson = lessonDb.createLesson(req.classId, req.user.id, { title, content, description, lesson_date, start_date, end_date, estimated_minutes, lesson_order, status: effectiveStatus, subject_code, grade_group, achievement_code, school_level, tags, theme, classify_mode, std_ids });
     // 콘텐츠 연결
     if (content_ids && Array.isArray(content_ids)) {
       content_ids.forEach((cid, i) => lessonDb.addContentToLesson(lesson.id, cid, i));

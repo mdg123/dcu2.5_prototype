@@ -3,6 +3,7 @@ const router = express.Router();
 const { requireAuth } = require('../middleware/auth');
 const noticeDb = require('../db/notice');
 const classDb = require('../db/class');
+const notifDb = require('../db/notifications');
 const initSocket = require('../socket'); // initSocket._io 접근용
 const buildNavigation = require('../lib/xapi/builders/navigation');
 const buildSocial = require('../lib/xapi/builders/social');
@@ -120,6 +121,18 @@ router.post('/:classId', requireAuth, requireMember, requireOwner, (req, res) =>
         notice: { id: notice.id, title: notice.title, author_name: notice.author_name }
       });
     } catch {}
+    // 알림: 클래스 학생 전원에게 새 알림장 알림
+    try {
+      if (notice && notice.id) {
+        notifDb.notifyClassMembers(req.classId, {
+          type: 'notice_new',
+          title: '새 알림장이 등록되었습니다',
+          message: notice.title,
+          link: `/class/class-notice.html?classId=${req.classId}&noticeId=${notice.id}`,
+          excludeUserId: req.user.id
+        });
+      }
+    } catch (e) { console.error('[NOTICE] notify error:', e.message); }
     res.status(201).json({ success: true, notice });
   } catch (err) {
     console.error('[notice POST]', err);

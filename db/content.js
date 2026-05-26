@@ -448,7 +448,7 @@ function getRecommendations(userId, limit = 12, keywords = [], opts = {}) {
         SELECT c.*, u.display_name AS creator_name
         FROM contents c JOIN users u ON c.creator_id = u.id
         ${where}
-        ORDER BY c.view_count DESC, c.created_at DESC LIMIT ?
+        ORDER BY CASE WHEN c.content_type IN ('quiz','exam') THEN 1 ELSE 0 END, c.view_count DESC, c.created_at DESC LIMIT ?
       `;
       const matched = db.prepare(sql).all(userId, ...matchParams, limit);
       matched.forEach(c => { if (!existIds.has(c.id)) { contents.push(c); existIds.add(c.id); } });
@@ -465,7 +465,7 @@ function getRecommendations(userId, limit = 12, keywords = [], opts = {}) {
         JOIN channel_subscribers cs ON cs.user_id = ?
         JOIN channels ch ON ch.id = cs.channel_id AND ch.user_id = c.creator_id
         WHERE c.is_public = 1 AND c.status = 'approved' AND c.creator_id != ?
-        ORDER BY c.created_at DESC LIMIT ?
+        ORDER BY CASE WHEN c.content_type IN ('quiz','exam') THEN 1 ELSE 0 END, c.created_at DESC LIMIT ?
       `).all(userId, userId, limit - contents.length);
       sub.forEach(c => { if (!existIds.has(c.id)) { contents.push(c); existIds.add(c.id); } });
     } catch {}
@@ -483,7 +483,7 @@ function getRecommendations(userId, limit = 12, keywords = [], opts = {}) {
         FROM contents c JOIN users u ON c.creator_id = u.id
         WHERE c.is_public = 1 AND c.status = 'approved' AND c.creator_id != ?
         AND (${likeConds})
-        ORDER BY c.created_at DESC LIMIT ?
+        ORDER BY CASE WHEN c.content_type IN ('quiz','exam') THEN 1 ELSE 0 END, c.created_at DESC LIMIT ?
       `).all(userId, ...params, limit - contents.length);
       kw.forEach(c => { if (!existIds.has(c.id)) { contents.push(c); existIds.add(c.id); } });
     } catch {}
@@ -496,7 +496,7 @@ function getRecommendations(userId, limit = 12, keywords = [], opts = {}) {
       SELECT c.*, u.display_name AS creator_name
       FROM contents c JOIN users u ON c.creator_id = u.id
       WHERE c.is_public = 1 AND c.status = 'approved' AND c.creator_id != ? ${excl}
-      ORDER BY c.view_count DESC, c.like_count DESC LIMIT ?
+      ORDER BY CASE WHEN c.content_type IN ('quiz','exam') THEN 1 ELSE 0 END, c.view_count DESC, c.like_count DESC LIMIT ?
     `).all(userId, limit - contents.length);
     pop.forEach(c => { if (!existIds.has(c.id)) { contents.push(c); existIds.add(c.id); } });
   }

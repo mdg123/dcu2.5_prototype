@@ -44,8 +44,45 @@ function markAllRead(userId) {
   return info.changes;
 }
 
+// 클래스 멤버 일괄 알림 — 과제/평가/알림장 발행 시 사용
+// excludeUserId: 작성자(교사) 본인은 제외
+// memberRoles: 기본 ['member'] — class_members.role CHECK = ('owner', 'member')
+//              교사 owner 포함하려면 ['member','owner'] 전달
+function notifyClassMembers(classId, { type, title, message = null, link = null, excludeUserId = null, memberRoles = ['member'] } = {}) {
+  if (!classId || !type || !title) return 0;
+  const placeholders = memberRoles.map(() => '?').join(',');
+  const members = db.prepare(
+    `SELECT user_id FROM class_members
+     WHERE class_id = ? AND status = 'active' AND role IN (${placeholders})`
+  ).all(classId, ...memberRoles);
+
+  const ins = db.prepare(`
+    INSERT INTO notifications (user_id, type, title, message, link)
+    VALUES (?, ?, ?, ?, ?)
+  `);
+  const titleStr = String(title).slice(0, 200);
+  const msgStr = message != null ? String(message).slice(0, 1000) : null;
+  const linkStr = link != null ? String(link).slice(0, 500) : null;
+
+  let count = 0;
+  const tx = db.transaction(() => {
+    for (const m of members) {
+      if (excludeUserId && m.user_id === excludeUserId) continue;
+      ins.run(m.user_id, String(type), titleStr, msgStr, linkStr);
+      count++;
+    }
+  });
+  try {
+    tx();
+  } catch (err) {
+    console.error('[NOTIF] notifyClassMembers tx error:', err);
+  }
+  return count;
+}
+
 module.exports = {
   createNotification,
+  notifyClassMembers,
   listNotifications,
   countUnread,
   markRead,
