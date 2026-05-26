@@ -189,9 +189,17 @@ router.post('/:classId', requireAuth, requireClassMember, (req, res) => {
     } else if (start_mode === 'waiting') {
       finalStatus = 'waiting';
     }
+    // 콘텐츠 공개정책 2단계: 직접 만들기(start_mode='direct') 또는 미지정(기본 direct)인 경우
+    // 그림자 contents 등록 — 공개콘텐츠/보관함 가져오기 모드는 제외 (원본 contents 이미 존재)
+    const effectiveStartMode = start_mode || 'direct';
+    const shouldShadow = (effectiveStartMode === 'direct');
     const exam = examDb.createExam(req.classId, req.user.id, {
       title, description, exam_type, questions: cleanQuestions, time_limit, start_time, end_time, status: finalStatus, settings, start_date, end_date,
-      std_ids: Array.isArray(std_ids) ? std_ids : null
+      subject_code: req.body.subject_code || null,
+      grade_group: req.body.grade_group || null,
+      achievement_code: req.body.achievement_code || null,
+      std_ids: Array.isArray(std_ids) ? std_ids : null,
+      _shadow: shouldShadow
     });
     // 추가 설정 저장
     try {
@@ -274,6 +282,7 @@ router.post('/:classId/create-pdf', requireAuth, requireClassMember, pdfUpload.s
     const pdfStartMode = start_mode || 'waiting';
     const pdfStatus = pdfStartMode === 'direct' ? 'active' : 'waiting';
 
+    // PDF 업로드 평가도 직접 만들기 흐름 → 그림자 contents 등록
     const exam = examDb.createExam(req.classId, req.user.id, {
       title,
       description: description || '',
@@ -281,7 +290,10 @@ router.post('/:classId/create-pdf', requireAuth, requireClassMember, pdfUpload.s
       questions,
       question_count: qCount,
       time_limit: parseInt(time_limit) || 30,
-      status: pdfStatus
+      status: pdfStatus,
+      subject_code: req.body.subject_code || null,
+      grade_group: req.body.grade_group || null,
+      _shadow: true
     });
 
     // exam_mode 및 추가 설정 저장

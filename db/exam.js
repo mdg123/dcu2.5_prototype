@@ -1,20 +1,109 @@
 const db = require('./index');
 const { v4: uuidv4 } = require('uuid');
 
+// ============================================================
+// 콘텐츠 공개정책 2단계 — 평가↔그림자 contents 동기화 헬퍼
+// (정책: 직접 만들기(start_mode='direct')로 평가를 만들면
+//  내 보관함에 비공개(is_public=0, status='approved')로 그림자 등록.
+//  학생은 평가 메뉴에서 즉시 응시 가능.
+//  공개콘텐츠/보관함 가져오기 모드는 원본 contents가 이미 있으니 그림자 생성 불필요.)
+//
+// contents.source = 'exam_<id>' 로 그림자 표시,
+// content_type='exam_paper'
+// ============================================================
+function _examGradeToInt(data) {
+  // contents.grade 는 INTEGER. grade_group/school_level 텍스트는 매핑 불가하므로
+  // 숫자(또는 '3' 같은 문자열 숫자)만 받아들이고, 그렇지 않으면 NULL 로 저장.
+  const raw = data.grade_group || data.school_level || null;
+  if (raw === null || raw === undefined) return null;
+  const n = parseInt(raw);
+  return Number.isFinite(n) ? n : null;
+}
+
+function _examShadowInsert(examId, ownerId, data) {
+  const linkedSource = `exam_${examId}`;
+  // 기존 그림자가 있으면 중복 방지 (이전 백필/이중 호출 대비)
+  const existed = db.prepare(
+    "SELECT id FROM contents WHERE source = ? AND creator_id = ?"
+  ).get(linkedSource, ownerId);
+  if (existed) return existed.id;
+  const info = db.prepare(`
+    INSERT INTO contents
+      (creator_id, title, description, content_type, subject, grade,
+       is_public, status, source, created_at)
+    VALUES (?, ?, ?, 'exam_paper', ?, ?, 0, 'approved', ?, datetime('now'))
+  `).run(
+    ownerId,
+    data.title,
+    data.description || null,
+    data.subject_code || null,
+    _examGradeToInt(data),
+    linkedSource
+  );
+  return info.lastInsertRowid;
+}
+
+function _examShadowUpdate(examId, data) {
+  const linkedSource = `exam_${examId}`;
+  const fields = [];
+  const params = [];
+  if (data.title !== undefined) { fields.push('title = ?'); params.push(data.title); }
+  if (data.description !== undefined) {
+    fields.push('description = ?');
+    params.push(data.description || null);
+  }
+  if (data.subject_code !== undefined) { fields.push('subject = ?'); params.push(data.subject_code || null); }
+  if (data.grade_group !== undefined || data.school_level !== undefined) {
+    fields.push('grade = ?');
+    params.push(_examGradeToInt(data));
+  }
+  if (fields.length === 0) return;
+  params.push(linkedSource);
+  // 그림자(원본 contents)가 없으면 WHERE 매칭이 0행이라 자동 no-op (가져오기 모드 평가는 영향 없음)
+  db.prepare(
+    `UPDATE contents SET ${fields.join(', ')} WHERE source = ?`
+  ).run(...params);
+}
+
+function _examShadowDelete(examId) {
+  const linkedSource = `exam_${examId}`;
+  // 비공개 그림자(is_public=0)는 함께 삭제
+  db.prepare(
+    "DELETE FROM contents WHERE source = ? AND is_public = 0"
+  ).run(linkedSource);
+  // 공개·승인된 그림자(is_public=1)는 다른 사용자 보관함에 있을 수 있어 보존하되 원본 끊기
+  db.prepare(
+    "UPDATE contents SET source = ? WHERE source = ? AND is_public = 1"
+  ).run(`exam_deleted_${examId}`, linkedSource);
+}
+
 function createExam(classId, ownerId, data) {
   const id = uuidv4();
-  db.prepare(`
-    INSERT INTO exams (id, class_id, title, description, pdf_file, answers, question_count, status, owner_id, time_limit, subject_code, grade_group, achievement_code, start_date, end_date)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(id, classId, data.title, data.description || null, data.pdf_file || null,
-    JSON.stringify(data.answers || data.questions || []),
-    data.question_count || (data.questions ? data.questions.length : 0),
-    data.status || 'waiting', ownerId, data.time_limit || null,
-    data.subject_code || null, data.grade_group || null, data.achievement_code || null,
-    data.start_date || null, data.end_date || null);
-  if (Array.isArray(data.std_ids) && data.std_ids.length > 0) {
-    setExamStdIds(id, data.std_ids);
-  }
+  const tx = db.transaction(() => {
+    db.prepare(`
+      INSERT INTO exams (id, class_id, title, description, pdf_file, answers, question_count, status, owner_id, time_limit, subject_code, grade_group, achievement_code, start_date, end_date)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(id, classId, data.title, data.description || null, data.pdf_file || null,
+      JSON.stringify(data.answers || data.questions || []),
+      data.question_count || (data.questions ? data.questions.length : 0),
+      data.status || 'waiting', ownerId, data.time_limit || null,
+      data.subject_code || null, data.grade_group || null, data.achievement_code || null,
+      data.start_date || null, data.end_date || null);
+    if (Array.isArray(data.std_ids) && data.std_ids.length > 0) {
+      setExamStdIds(id, data.std_ids);
+    }
+    // 그림자 contents INSERT — direct 모드(직접 만들기)일 때만 라우터에서 _shadow=true 명시
+    // 공개콘텐츠 검색('public')·보관함 가져오기('storage') 모드는 원본 contents가 이미 있으므로 그림자 미생성
+    if (data._shadow === true) {
+      try {
+        _examShadowInsert(id, ownerId, data);
+      } catch (e) {
+        console.error('[SYNC] exam→content insert', e.message);
+        throw e;
+      }
+    }
+  });
+  tx();
   return getExamById(id);
 }
 
@@ -96,7 +185,7 @@ function updateExam(id, data) {
   const fields = [];
   const params = [];
   for (const [key, val] of Object.entries(data)) {
-    if (['title', 'description', 'pdf_file', 'question_count', 'status', 'time_limit', 'start_date', 'end_date', 'started_at', 'start_mode', 'tab_detection', 'allow_retry'].includes(key)) {
+    if (['title', 'description', 'pdf_file', 'question_count', 'status', 'time_limit', 'start_date', 'end_date', 'started_at', 'start_mode', 'tab_detection', 'allow_retry', 'subject_code', 'grade_group', 'achievement_code'].includes(key)) {
       fields.push(`${key} = ?`);
       params.push(val);
     }
@@ -110,16 +199,33 @@ function updateExam(id, data) {
   }
   if (fields.length === 0) {
     if (Array.isArray(data.std_ids)) setExamStdIds(id, data.std_ids);
+    // 메타 변경이 없더라도 그림자 동기화 시도 (subject/grade 만 들어온 경우 등)
+    try { _examShadowUpdate(id, data); } catch (e) { console.error('[SYNC] exam→content update', e.message); }
     return getExamById(id);
   }
-  params.push(id);
-  db.prepare(`UPDATE exams SET ${fields.join(', ')} WHERE id = ?`).run(...params);
-  if (Array.isArray(data.std_ids)) setExamStdIds(id, data.std_ids);
+  const tx = db.transaction(() => {
+    params.push(id);
+    db.prepare(`UPDATE exams SET ${fields.join(', ')} WHERE id = ?`).run(...params);
+    if (Array.isArray(data.std_ids)) setExamStdIds(id, data.std_ids);
+    // 그림자 contents 동기화 (제목·설명·교과·학년만 — 그림자가 없으면 WHERE 매칭 0행 → no-op)
+    try {
+      _examShadowUpdate(id, data);
+    } catch (e) {
+      console.error('[SYNC] exam→content update', e.message);
+      throw e;
+    }
+  });
+  tx();
   return getExamById(id);
 }
 
 function deleteExam(id) {
-  db.prepare('DELETE FROM exams WHERE id = ?').run(id);
+  const tx = db.transaction(() => {
+    // 그림자 contents 먼저 정리(비공개는 삭제, 공개·승인은 보존하되 원본 링크 끊기)
+    _examShadowDelete(id);
+    db.prepare('DELETE FROM exams WHERE id = ?').run(id);
+  });
+  tx();
 }
 
 // 학생 시험 참여
