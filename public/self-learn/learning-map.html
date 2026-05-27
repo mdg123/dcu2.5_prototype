@@ -915,6 +915,8 @@
     .modal-close-safe:focus-visible{outline:2px solid #2563eb;outline-offset:2px}
     /* z-index 표준 (CLAUDE.md ≥10000) */
     #diagModal{z-index:var(--z-modal)!important}
+    /* v2: 진단 큐 사이드바 현재 단원 펄스 */
+    @keyframes diagPulse{0%,100%{box-shadow:0 0 0 0 rgba(79,70,229,0.4)}50%{box-shadow:0 0 0 6px rgba(79,70,229,0)}}
     #cpIframeModal{z-index:var(--z-modal)!important}
     #videoPlayerModal{z-index:var(--z-modal)!important}
     /* 영상 플레이어 모달: 90vw × 90vh, 화면 중앙, 좌우 균등 여백 (CLAUDE.md 플레이어 모달 표준) */
@@ -6856,9 +6858,34 @@ async function startDiagnosisBySubject() {
 // =========================================================================
 let diagSession = null;
 
+// v2: 학년-학기-영역 라벨 ("초등 3학년 2학기 · 수와 연산")
+function _formatGradeSemester(nodeMeta) {
+  if (!nodeMeta) return '';
+  const lvl = nodeMeta.grade_level || nodeMeta.school_level || '';
+  const lvlMap = { '초': '초등', '중': '중등', '고': '고등', 'elem': '초등', 'elementary': '초등', 'mid': '중등', 'middle': '중등', 'high': '고등' };
+  const lvlText = lvlMap[lvl] || lvl || '';
+  const grade = (nodeMeta.grade != null && nodeMeta.grade !== '') ? `${nodeMeta.grade}학년` : '';
+  const sem = (nodeMeta.semester != null && nodeMeta.semester !== '') ? `${nodeMeta.semester}학기` : '';
+  const area = nodeMeta.area ? `· ${nodeMeta.area}` : '';
+  const left = [lvlText, grade, sem].filter(Boolean).join(' ');
+  return [left, area].filter(Boolean).join(' ').trim();
+}
+
+// v2: 같은 노드에서 누적된 문항별 ✓/✗ 도트 (마지막 시도 기준)
+function _renderQuestionDots(nodeId) {
+  const s = diagSession;
+  if (!s) return '';
+  const items = (s.history || [])
+    .filter(h => h.nodeId === nodeId && typeof h.questionIdx === 'number')
+    .sort((a, b) => a.questionIdx - b.questionIdx);
+  if (!items.length) return '';
+  return items.map(h => `<span style="display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:50%;background:${h.correct ? '#ECFDF5' : '#FEF2F2'};border:1.5px solid ${h.correct ? '#10B981' : '#EF4444'};color:${h.correct ? '#10B981' : '#EF4444'};font-size:13px;font-weight:700;margin-right:6px">${h.correct ? '✓' : '✗'}</span>`).join('');
+}
+
 async function startDiagnosisFromNode(nodeId) {
   const targetNode = await loadNodeForDiag(nodeId);
   if (!targetNode) { showToast('단원 정보를 불러올 수 없습니다.', 'fa-exclamation-circle'); return; }
+  // v2: 우선순위 큐(priorityQueue), 완료 목록(completedNodes), 진행 깊이(currentDepth는 통계용)
   diagSession = {
     targetNodeId: nodeId,
     targetNode,
@@ -6869,17 +6896,43 @@ async function startDiagnosisFromNode(nodeId) {
     questionsInNode: [],
     currentQuestionIdx: 0,
     nodeCorrectCount: 0,
-    finished: false
+    finished: false,
+    // v2 신규
+    priorityQueue: [],     // [{nodeId, title, gradeLabel}]
+    completedNodes: [],    // [{nodeId, title, passed, correctRate, correct, total}]
+    sheetSizeMax: 5,
+    retryCount: {},        // nodeId -> 재진단 횟수
+    queueInitialized: false
   };
-  // 이전 진단 이력 조회 → 있으면 분기 모달, 없으면 바로 진단 인트로
+  // 이전 진단 이력 조회 → 있으면 분기 모달, 없으면 v2 사전 고지 모달
   try {
     const histRes = await fetchApi('/api/self-learn/diagnosis/history?nodeId=' + encodeURIComponent(nodeId));
     if (histRes && histRes.success && histRes.hasAnyHistory) {
       showDiagHistoryModal(histRes);
       return;
     }
-  } catch (_) { /* 이력 조회 실패는 무시하고 진단 시작 흐름으로 */ }
-  showDiagIntroModal();
+  } catch (_) { /* 이력 조회 실패는 무시 */ }
+  // v2: 사전 고지 모달을 먼저 — 선수 단원 큐 미리보기
+  await diagShowPrereqIntro();
+}
+
+// v2: 사전 고지 모달 진입 (백엔드가 큐를 줄 때까지는 클라이언트가 직접 직속 선수만 사용)
+async function diagShowPrereqIntro() {
+  const target = diagSession.targetNode;
+  const prereqs = target.prerequisites || [];
+  // 큐 hydration — 학년 라벨도 함께
+  const queueOrder = [];
+  for (const p of prereqs) {
+    const pid = p.id || p.node_id || p;
+    const ptitle = p.title || p.lesson_name || p.unit_name || '학습 단원';
+    const grade = p.grade != null ? p.grade : null;
+    const semester = p.semester != null ? p.semester : null;
+    const gradeLabel = (grade != null && semester != null) ? `${grade}학년 ${semester}학기` : (p.gradeLabel || '');
+    queueOrder.push({ nodeId: pid, title: ptitle, gradeLabel });
+  }
+  diagSession.priorityQueue = queueOrder.slice();
+  diagSession.queueInitialized = true;
+  showDiagPrereqIntroModal(queueOrder);
 }
 
 // 이전 진단 이력 안내 모달 — 사용자가 결과 보기 / 다시 진단 / 취소 중 선택
@@ -7024,15 +7077,66 @@ function showDiagIntroModal() {
         선수학습 단원에서 문제를 풀어 학습 출발점을 찾아드려요.
       </p>
       <div style="background:#F8FAFC;border:1px solid #E2E8F0;border-radius:12px;padding:18px 22px;text-align:left;font-size:16px;color:#475569;line-height:2;margin-bottom:24px">
-        <div><i class="fas fa-clipboard-check" style="color:#4F46E5;margin-right:8px"></i> 단원당 <b>2문항</b> · 모두 정답이면 통과</div>
-        <div><i class="fas fa-stairs" style="color:#10B981;margin-right:8px"></i> 막히면 한 단계 더 내려가서 진단 (최대 3단계)</div>
-        <div><i class="fas fa-clock" style="color:#F59E0B;margin-right:8px"></i> 약 3~6분 소요</div>
+        <div><i class="fas fa-clipboard-check" style="color:#4F46E5;margin-right:8px"></i> 단원당 <b>최대 5문항</b> · 정답률 <b>60% 이상이면 통과</b></div>
+        <div><i class="fas fa-stairs" style="color:#10B981;margin-right:8px"></i> 막히면 더 아래 단원으로 자동 안내</div>
+        <div><i class="fas fa-clock" style="color:#F59E0B;margin-right:8px"></i> 약 5~10분 소요</div>
       </div>
     </div>
   `;
   $('diagModalActions').innerHTML = `
     <button class="btn btn-ghost" onclick="closeDiagModal()" style="font-size:16px;padding:12px 22px">취소</button>
-    <button class="btn btn-primary" onclick="diagBeginAtCurrentNode()" style="min-width:140px;display:inline-flex;align-items:center;justify-content:center;gap:6px;font-size:16px;padding:12px 22px"><i class="fas fa-play"></i> 진단 시작</button>
+    <button class="btn btn-primary" onclick="diagBeginAtCurrentNode()" style="min-width:140px;display:inline-flex;align-items:center;justify-content:center;gap:6px;font-size:16px;padding:12px 22px"><i class="fas fa-play"></i> 다음</button>
+  `;
+  openDiagModal();
+}
+
+// v2: 사전 고지 모달 — 선수 단원 N개 미리보기
+function showDiagPrereqIntroModal(queueOrder) {
+  ensureDiagModal();
+  diagResetBodyStyle();
+  const target = diagSession.targetNode;
+  const title = target.title || target.lesson_name || target.unit_name || '학습 단원';
+  const prereqCount = Array.isArray(queueOrder) ? queueOrder.length : 0;
+
+  const queueHtml = prereqCount === 0
+    ? `<div style="background:#FEF3C7;border:1px solid #FDE68A;border-radius:10px;padding:14px 18px;font-size:15px;color:#92400E;text-align:left;line-height:1.6">
+        <i class="fas fa-info-circle" style="margin-right:6px"></i>
+        선수 단원이 따로 없어요. 이 단원 자체에서 진단할게요.
+      </div>`
+    : queueOrder.map((q, i) => `
+        <div style="display:flex;align-items:center;gap:12px;padding:12px 16px;background:${i === 0 ? '#EEF2FF' : '#F8FAFC'};border:1.5px solid ${i === 0 ? '#C7D2FE' : '#E2E8F0'};border-radius:10px;margin-bottom:8px">
+          <span style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:50%;background:${i === 0 ? '#4F46E5' : '#94A3B8'};color:#fff;font-size:14px;font-weight:700;flex-shrink:0">${i + 1}</span>
+          <div style="flex:1;text-align:left">
+            <div style="font-size:16px;font-weight:700;color:#0F172A;line-height:1.4">${escHtml(q.title || q.nodeTitle || '학습 단원')}</div>
+            ${q.gradeLabel ? `<div style="font-size:13px;color:#64748B;margin-top:2px">${escHtml(q.gradeLabel)}</div>` : ''}
+          </div>
+          ${i === 0 ? '<span style="font-size:12px;font-weight:700;color:#4F46E5;background:#fff;padding:4px 10px;border-radius:99px;border:1px solid #C7D2FE">먼저</span>' : ''}
+        </div>
+      `).join('');
+
+  $('diagModalBody').innerHTML = `
+    <div style="padding:24px 16px;max-width:600px;margin:0 auto">
+      <div style="text-align:center;margin-bottom:20px">
+        <div style="width:72px;height:72px;border-radius:50%;background:linear-gradient(135deg,#EEF2FF,#C7D2FE);display:flex;align-items:center;justify-content:center;margin:0 auto 14px;font-size:32px">🧭</div>
+        <h2 style="font-size:24px;font-weight:800;color:#0F172A;margin:0 0 12px;letter-spacing:-.01em">진단을 시작해요</h2>
+        <p style="font-size:16px;color:#475569;line-height:1.7;margin:0">
+          <b style="color:#0F172A">"${escHtml(title)}"</b>을(를) 학습하기 전에<br>
+          ${prereqCount > 0 ? `연결된 선수 단원 <b style="color:#4F46E5">${prereqCount}개</b>를 먼저 진단해볼게요.` : '이 단원에서 바로 진단을 시작할게요.'}
+        </p>
+      </div>
+      ${prereqCount > 0 ? `<div style="margin-bottom:18px">
+        <div style="font-size:13px;font-weight:700;color:#64748B;margin-bottom:10px;letter-spacing:0.3px">진단 순서</div>
+        ${queueHtml}
+      </div>` : `<div style="margin-bottom:18px">${queueHtml}</div>`}
+      <div style="background:#F1F5F9;border-radius:10px;padding:14px 18px;font-size:14px;color:#475569;line-height:1.6;display:flex;align-items:flex-start;gap:8px">
+        <i class="fas fa-info-circle" style="color:#64748B;margin-top:3px"></i>
+        <span>진단 결과에 따라 단원이 추가되거나 순서가 바뀔 수 있어요.</span>
+      </div>
+    </div>
+  `;
+  $('diagModalActions').innerHTML = `
+    <button class="btn btn-ghost" onclick="closeDiagModal()" style="font-size:16px;padding:12px 22px">취소</button>
+    <button class="btn btn-primary" onclick="diagBeginAtCurrentNode()" style="min-width:160px;display:inline-flex;align-items:center;justify-content:center;gap:6px;font-size:16px;padding:12px 22px"><i class="fas fa-play"></i> 진단 시작</button>
   `;
   openDiagModal();
 }
@@ -7087,23 +7191,19 @@ function closeDiagModal() {
 }
 
 async function diagBeginAtCurrentNode() {
-  // 현재 노드의 직속 선수 1개 선택해서 진단 시작
-  const node = diagSession.targetNode;
-  const prereqs = node.prerequisites || [];
-  if (!prereqs.length) {
-    // 선수가 없으면 → 목표 노드 자체에서 진단 (깊이 1로 자기 자신 검증)
+  // v2: 우선순위 큐에서 첫 단원 꺼내기. 큐가 비어 있으면 목표 노드 자체에서.
+  if (!diagSession.priorityQueue || diagSession.priorityQueue.length === 0) {
     await diagEnterNode(diagSession.targetNodeId, 1);
     return;
   }
-  // 첫 번째 선수로 진입
-  const firstPrereqId = prereqs[0].id || prereqs[0].node_id || prereqs[0];
-  await diagEnterNode(firstPrereqId, 1);
+  const first = diagSession.priorityQueue.shift();
+  await diagEnterNode(first.nodeId, 1);
 }
 
 async function diagEnterNode(nodeId, depth, _hopChain) {
   _hopChain = _hopChain || [];
-  if (depth > 3 + _hopChain.length) {
-    // 깊이 한도 초과 — 진단할 문항이 있는 노드를 못 찾음
+  // v2: 단계 상한 제거. 단, 무한 hop(문항 없는 단원 연쇄)은 안전을 위해 8단계로 제한.
+  if (_hopChain.length > 8) {
     showDiagResult({
       canStart: false,
       startNodeId: nodeId,
@@ -7117,19 +7217,26 @@ async function diagEnterNode(nodeId, depth, _hopChain) {
   if (!nodeData) { showToast('단원 정보를 불러올 수 없습니다.', 'fa-exclamation-circle'); return; }
   const probs = nodeData.problems || [];
   if (!probs.length) {
-    // 문항이 없는 단원은 건너뛰고 그 단원의 선수로 자동 이동 (한 번만 토스트)
+    // 문항이 없는 단원은 큐에서 다음 단원을 시도, 큐도 비면 자식 선수로 hop
     if (_hopChain.length === 0) {
       showToast('진단 문항이 있는 선수 단원을 찾는 중...', 'fa-info-circle');
     }
+    // 큐에 다음 단원이 있으면 그쪽으로
+    if (diagSession.priorityQueue && diagSession.priorityQueue.length > 0) {
+      const nxt = diagSession.priorityQueue.shift();
+      _hopChain.push(nodeId);
+      await diagEnterNode(nxt.nodeId, depth, _hopChain);
+      return;
+    }
+    // 큐가 비었으면 이 단원의 직속 선수로 hop
     const next = nodeData.prerequisites || [];
     if (next.length) {
       const nextId = next[0].id || next[0].node_id || next[0];
       _hopChain.push(nodeId);
-      // 같은 깊이 유지 (건너뛴 것이므로)
       await diagEnterNode(nextId, depth, _hopChain);
       return;
     }
-    // 더 이상 갈 곳 없으면 — 목표 노드 자체로 fallback
+    // 더 갈 곳 없음 — 목표 노드 fallback
     if (nodeId !== diagSession.targetNodeId) {
       const targetData = await loadNodeForDiag(diagSession.targetNodeId);
       if (targetData?.problems?.length) {
@@ -7138,14 +7245,13 @@ async function diagEnterNode(nodeId, depth, _hopChain) {
         diagSession.currentNodeId = diagSession.targetNodeId;
         diagSession.currentDepth = depth;
         diagSession.currentNodeData = targetData;
-        diagSession.questionsInNode = shuffled.slice(0, 2);
+        diagSession.questionsInNode = shuffled.slice(0, Math.min(diagSession.sheetSizeMax || 5, shuffled.length));
         diagSession.currentQuestionIdx = 0;
         diagSession.nodeCorrectCount = 0;
         diagShowQuestion();
         return;
       }
     }
-    // 정말 진단할 문항이 어디에도 없으면 안내 후 종료
     showDiagResult({
       canStart: true,
       startNodeId: diagSession.targetNodeId,
@@ -7155,12 +7261,13 @@ async function diagEnterNode(nodeId, depth, _hopChain) {
     });
     return;
   }
-  // 무작위 2문항 (혹은 가능한 만큼)
+  // v2: 진단지 최대 5문항 (문항 풀이 부족하면 가능한 만큼)
+  const sheetMax = diagSession.sheetSizeMax || 5;
   const shuffled = probs.slice().sort(() => Math.random() - 0.5);
   diagSession.currentNodeId = nodeId;
   diagSession.currentDepth = depth;
   diagSession.currentNodeData = nodeData;
-  diagSession.questionsInNode = shuffled.slice(0, 2);
+  diagSession.questionsInNode = shuffled.slice(0, Math.min(sheetMax, shuffled.length));
   diagSession.currentQuestionIdx = 0;
   diagSession.nodeCorrectCount = 0;
   diagShowQuestion();
@@ -7178,22 +7285,32 @@ function diagShowQuestion() {
     return;
   }
 
-  const progressLabel = `단계 ${s.currentDepth}/3`;
+  // v2: 진단 진행 라벨 — "단원 진단 (n/총)"
+  const totalInSheet = s.questionsInNode.length || 0;
+  const progressLabel = `${escHtml(nodeTitle)} 진단 (${s.currentQuestionIdx + 1}/${totalInSheet})`;
   const progBar = document.getElementById('diagModalProgress');
   if (progBar) { progBar.textContent = progressLabel; progBar.style.display = 'inline-block'; }
+
+  // 큐 사이드바 HTML
+  const queueSidebarHtml = diagBuildQueueSidebarHtml();
 
   // modal body를 flex 컬럼으로 만들어 iframe이 전체 영역을 채우도록
   const body = $('diagModalBody');
   body.style.cssText = 'flex:1;overflow:hidden;padding:14px 20px 0;display:flex;flex-direction:column;gap:10px;min-height:0';
   body.innerHTML = `
-    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;flex-shrink:0">
-      <span style="font-size:11px;font-weight:700;background:#EEF2FF;color:#4F46E5;padding:3px 10px;border-radius:6px">선수학습</span>
-      <span style="font-size:14px;font-weight:700;color:#0F172A">${escHtml(nodeTitle)}</span>
-      <span style="font-size:12px;color:#6B7280">· 문제 ${s.currentQuestionIdx + 1} / 2</span>
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;flex-shrink:0">
+      <span style="font-size:12px;font-weight:700;background:#EEF2FF;color:#4F46E5;padding:4px 12px;border-radius:6px">선수학습 진단</span>
+      <span style="font-size:15px;font-weight:700;color:#0F172A">${escHtml(nodeTitle)}</span>
+      <span style="font-size:13px;color:#6B7280">· 문제 ${s.currentQuestionIdx + 1} / ${totalInSheet}</span>
+      <span style="flex:1"></span>
+      <span style="font-size:12px;color:#94A3B8">통과 기준 60%</span>
     </div>
-    <div style="flex:1;border:1px solid #E5E7EB;border-radius:12px;overflow:hidden;background:#fff;min-height:0;display:flex">
-      <iframe id="diagPlayerIframe" src="/content/content-player.html?id=${contentId}&auto=1&embed=1"
-        style="flex:1;width:100%;border:0;background:#fff;display:block" allow="autoplay"></iframe>
+    <div style="flex:1;display:flex;gap:12px;min-height:0">
+      ${queueSidebarHtml}
+      <div style="flex:1;border:1px solid #E5E7EB;border-radius:12px;overflow:hidden;background:#fff;min-height:0;display:flex">
+        <iframe id="diagPlayerIframe" src="/content/content-player.html?id=${contentId}&auto=1&embed=1"
+          style="flex:1;width:100%;border:0;background:#fff;display:block" allow="autoplay"></iframe>
+      </div>
     </div>
   `;
   $('diagModalActions').innerHTML = `
@@ -7213,6 +7330,52 @@ function diagShowQuestion() {
     };
     window.addEventListener('message', window._diagMsgListener);
   }
+}
+
+// v2: 큐 사이드바 — 완료/현재/대기 시각화
+function diagBuildQueueSidebarHtml() {
+  const s = diagSession;
+  if (!s) return '';
+  const completed = (s.completedNodes || []).map(c => {
+    const pct = c.total > 0 ? Math.round(c.correctRate * 100) : null;
+    const color = c.passed ? '#10B981' : '#EF4444';
+    const bg = c.passed ? '#ECFDF5' : '#FEF2F2';
+    const icon = c.passed ? 'fa-check-circle' : 'fa-times-circle';
+    return `<div style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:${bg};border-radius:8px;border:1px solid ${c.passed ? '#A7F3D0' : '#FECACA'}">
+      <i class="fas ${icon}" style="color:${color};font-size:14px;flex-shrink:0"></i>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:13px;font-weight:700;color:#0F172A;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(c.title)}</div>
+        ${pct !== null ? `<div style="font-size:11px;color:${color};font-weight:600">${pct}% (${c.correct}/${c.total})</div>` : ''}
+      </div>
+    </div>`;
+  }).join('');
+
+  const currentTitle = s.currentNodeData?.title || s.currentNodeData?.lesson_name || '진단 중';
+  const currentHtml = `<div style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:#EEF2FF;border-radius:8px;border:1.5px solid #4F46E5;animation:diagPulse 1.8s ease-in-out infinite">
+      <i class="fas fa-play-circle" style="color:#4F46E5;font-size:14px;flex-shrink:0"></i>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:13px;font-weight:700;color:#0F172A;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(currentTitle)}</div>
+        <div style="font-size:11px;color:#4F46E5;font-weight:600">진단 중 · ${s.currentQuestionIdx + 1}/${s.questionsInNode.length}</div>
+      </div>
+    </div>`;
+
+  const waiting = (s.priorityQueue || []).map((q, i) => `
+    <div style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:#F8FAFC;border-radius:8px;border:1px solid #E2E8F0">
+      <span style="display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;background:#CBD5E1;color:#fff;font-size:10px;font-weight:700;flex-shrink:0">${i + 1}</span>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:13px;font-weight:600;color:#475569;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(q.title)}</div>
+        ${q.gradeLabel ? `<div style="font-size:11px;color:#94A3B8">${escHtml(q.gradeLabel)}</div>` : ''}
+      </div>
+    </div>
+  `).join('');
+
+  return `<aside id="diagQueueSidebar" style="width:200px;flex-shrink:0;background:#FBFCFD;border:1px solid #E5E7EB;border-radius:12px;padding:12px;overflow-y:auto;display:flex;flex-direction:column;gap:6px">
+    <div style="font-size:11px;font-weight:700;color:#64748B;letter-spacing:0.4px;text-transform:uppercase;margin-bottom:4px">진단 진행</div>
+    ${completed}
+    ${currentHtml}
+    ${waiting}
+    ${(s.completedNodes?.length || 0) + 1 + (s.priorityQueue?.length || 0) === 1 && !completed && !waiting ? '<div style="font-size:12px;color:#94A3B8;text-align:center;padding:8px">큐 없음</div>' : ''}
+  </aside>`;
 }
 
 function diagOnAnswerGraded(isCorrect, timeTakenSec) {
@@ -7238,8 +7401,8 @@ function diagOnAnswerGraded(isCorrect, timeTakenSec) {
 
   setTimeout(() => {
     s.currentQuestionIdx++;
-    // 첫 문항 정답 → 두 번째 문항으로 / 첫 문항 오답이면 바로 노드 종료
-    if (s.currentQuestionIdx < s.questionsInNode.length && s.nodeCorrectCount === s.currentQuestionIdx) {
+    // v2: 5문항 끝까지 모두 풀이 (오답이어도 계속), 끝나면 노드 종료
+    if (s.currentQuestionIdx < s.questionsInNode.length) {
       diagShowQuestion();
     } else {
       diagOnNodeFinished();
@@ -7249,84 +7412,253 @@ function diagOnAnswerGraded(isCorrect, timeTakenSec) {
 
 function diagOnNodeFinished() {
   const s = diagSession;
-  const passed = s.nodeCorrectCount >= 2;
+  const total = s.questionsInNode.length || 0;
+  const correct = s.nodeCorrectCount || 0;
+  const rate = total > 0 ? (correct / total) : 0;
+  const passed = rate >= 0.60; // v2: 60% 통과 기준
   const nodeData = s.currentNodeData;
-  if (passed) {
-    diagOnNodePassed(s.currentNodeId, nodeData);
-  } else {
-    diagOnNodeFailed(s.currentNodeId, nodeData);
-  }
-}
-
-function diagOnNodePassed(nodeId, nodeData) {
-  // 통과! 이 노드 위로 학습하면 됨 → 진단 종료
-  const s = diagSession;
-  s.history.push({ nodeId, nodeTitle: nodeData?.title || nodeData?.lesson_name, passed: true });
-  // 통과한 노드의 바로 위(=학습 출발점)는 진단 질문이 시작된 노드 또는 그 위
-  // 단순화: 통과한 선수 노드 자체가 출발점이 아니라, 그 다음(목표 노드 또는 통과 노드 직후 학습) 으로
-  showDiagResult({
-    canStart: true,
-    startNodeId: nodeId,
-    startNodeTitle: nodeData?.title || nodeData?.lesson_name,
-    recommendNodes: [],
-    reason: 'passed_at_depth_' + s.currentDepth
+  // 완료 목록에 적재 (큐 사이드바용 + 최종 결과 카드용)
+  s.completedNodes = s.completedNodes || [];
+  s.completedNodes.push({
+    nodeId: s.currentNodeId,
+    title: nodeData?.title || nodeData?.lesson_name || '단원',
+    passed,
+    correct,
+    total,
+    correctRate: rate,
+    // v2: 결과 카드에서 학년-학기-영역 표시용 메타 + 문항별 ✓/✗ 스냅샷
+    gradeLabel: _formatGradeSemester(nodeData),
+    grade_level: nodeData?.grade_level || null,
+    grade: nodeData?.grade ?? null,
+    semester: nodeData?.semester ?? null,
+    area: nodeData?.area || null,
+    dotsHtml: _renderQuestionDots(s.currentNodeId)
   });
+  if (passed) {
+    diagOnNodePassed(s.currentNodeId, nodeData, rate);
+  } else {
+    diagOnNodeFailed(s.currentNodeId, nodeData, rate);
+  }
 }
 
-async function diagOnNodeFailed(nodeId, nodeData) {
+function diagOnNodePassed(nodeId, nodeData, rate) {
+  // v2: 통과 → 결과 분석 카드 표시 + 사용자 클릭으로 다음 단원/결과 진행 (자동 진행 X)
   const s = diagSession;
-  s.history.push({ nodeId, nodeTitle: nodeData?.title || nodeData?.lesson_name, passed: false });
+  s.history.push({ nodeId, nodeTitle: nodeData?.title || nodeData?.lesson_name, passed: true, correctRate: rate });
+  const pct = Math.round((rate || 0) * 100);
+  const total = s.questionsInNode.length || 0;
+  const correct = s.nodeCorrectCount || 0;
+  const title = nodeData?.title || nodeData?.lesson_name || '단원';
+  const gradeLabel = _formatGradeSemester(nodeData);
+  const dotsHtml = _renderQuestionDots(nodeId);
+  const hasNext = !!(s.priorityQueue && s.priorityQueue.length > 0);
+  const nextTitle = hasNext ? (s.priorityQueue[0].title || '다음 단원') : '';
 
-  // 최대 깊이 도달 → 종료
-  if (s.currentDepth >= 3) {
-    showDiagResult({
-      canStart: false,
-      startNodeId: nodeId,
-      startNodeTitle: nodeData?.title || nodeData?.lesson_name,
-      recommendNodes: collectFailedNodes(),
-      reason: 'max_depth_reached'
-    });
-    return;
-  }
-
-  // 더 깊이 갈지 묻기
   diagResetBodyStyle();
   $('diagModalBody').innerHTML = `
-    <div style="text-align:center;padding:20px 12px">
-      <div style="width:64px;height:64px;border-radius:50%;background:#FEF3C7;display:flex;align-items:center;justify-content:center;margin:0 auto 16px;color:#F59E0B;font-size:28px"><i class="fas fa-stairs"></i></div>
-      <h3 style="font-size:18px;font-weight:700;color:#0F172A;margin:0 0 10px">한 단계만 더 내려가서 풀어볼까요?</h3>
-      <p style="font-size:14px;color:#475569;line-height:1.6;margin:0 0 20px">
-        <b style="color:#0F172A">${escHtml(nodeData?.title || nodeData?.lesson_name || '이 단원')}</b>은 한 번 더 봐도 좋겠어요.<br>조금 더 쉬운 단원에서 다시 풀어보면 출발점을 정확히 찾을 수 있어요.
-      </p>
-      <div style="background:#F8FAFC;border-radius:10px;padding:12px 16px;font-size:13px;color:#6B7280;display:inline-block">
-        현재 진단 깊이: ${s.currentDepth}/3
+    <div style="padding:24px 12px;max-width:620px;margin:0 auto">
+      <div style="text-align:center;margin-bottom:20px">
+        <div style="width:80px;height:80px;border-radius:50%;background:#ECFDF5;display:flex;align-items:center;justify-content:center;margin:0 auto 14px;color:#10B981;font-size:38px"><i class="fas fa-check-circle"></i></div>
+        <h2 style="font-size:24px;font-weight:800;color:#0F172A;margin:0 0 8px;letter-spacing:-.01em">통과!</h2>
+        ${gradeLabel ? `<div style="display:inline-block;font-size:13px;font-weight:700;color:#0F766E;background:#CCFBF1;border:1px solid #99F6E4;padding:4px 12px;border-radius:99px;margin-bottom:8px">${escHtml(gradeLabel)}</div>` : ''}
+        <div style="font-size:18px;font-weight:700;color:#0F172A;margin:6px 0 0">"${escHtml(title)}"</div>
+      </div>
+
+      <div style="background:#F0FDF4;border:1.5px solid #BBF7D0;border-radius:14px;padding:18px 22px;margin-bottom:16px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+          <span style="font-size:14px;font-weight:700;color:#166534;letter-spacing:0.3px;text-transform:uppercase">결과 분석</span>
+          <span style="font-size:13px;font-weight:700;color:#10B981;background:#fff;border:1px solid #BBF7D0;padding:4px 12px;border-radius:99px">PASS</span>
+        </div>
+        <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:10px">
+          <span style="font-size:34px;font-weight:800;color:#10B981;line-height:1">${pct}%</span>
+          <span style="font-size:16px;font-weight:600;color:#166534">정답률 (${correct}/${total})</span>
+        </div>
+        ${dotsHtml ? `<div style="display:flex;flex-wrap:wrap;align-items:center;margin-top:8px">${dotsHtml}</div>` : ''}
+      </div>
+
+      <div style="background:#EFF6FF;border:1px solid #BFDBFE;border-radius:10px;padding:12px 16px;font-size:15px;color:#1E40AF;display:flex;align-items:center;gap:10px;line-height:1.5">
+        <i class="fas fa-lightbulb" style="color:#3B82F6"></i>
+        <span>잘 알고 있어요. ${hasNext ? `다음 단원 <b>"${escHtml(nextTitle)}"</b>을(를) 진단해 볼까요?` : '진단을 마칠 준비가 됐어요.'}</span>
       </div>
     </div>
   `;
   $('diagModalActions').innerHTML = `
-    <button class="btn btn-ghost" onclick="diagStopAndUseFailed()">여기서 학습 시작</button>
-    <button class="btn btn-primary" onclick="diagGoDeeper()" style="min-width:160px">더 내려가서 진단 <i class="fas fa-chevron-down"></i></button>
+    <button class="btn btn-ghost" onclick="diagFinalizeFromPassed()" style="font-size:16px;padding:12px 22px">진단 종료</button>
+    ${hasNext
+      ? `<button class="btn btn-primary" onclick="diagAdvanceFromPassed()" style="font-size:16px;padding:12px 24px;display:inline-flex;align-items:center;gap:8px"><i class="fas fa-arrow-right"></i> 다음 단원 진단하기</button>`
+      : `<button class="btn btn-primary" onclick="diagFinalizeFromPassed()" style="font-size:16px;padding:12px 24px;display:inline-flex;align-items:center;gap:8px"><i class="fas fa-flag-checkered"></i> 최종 결과 보기</button>`
+    }
   `;
 }
 
-async function diagGoDeeper() {
+// v2: 통과 카드에서 "다음 단원 진단하기" 클릭
+function diagAdvanceFromPassed() {
   const s = diagSession;
-  const nextDepth = s.currentDepth + 1;
-  // 현재 노드의 prerequisites 가져와서 첫 번째로
-  const prereqs = s.currentNodeData?.prerequisites || [];
-  if (!prereqs.length) {
-    // 더 내려갈 곳 없음
-    showDiagResult({
-      canStart: false,
-      startNodeId: s.currentNodeId,
-      startNodeTitle: s.currentNodeData?.title || s.currentNodeData?.lesson_name,
-      recommendNodes: collectFailedNodes(),
-      reason: 'no_more_prerequisites'
-    });
+  if (!s) return;
+  if (s.priorityQueue && s.priorityQueue.length > 0) {
+    const nxt = s.priorityQueue.shift();
+    diagEnterNode(nxt.nodeId, s.currentDepth + 1);
+  } else {
+    diagFinalizeFromPassed();
+  }
+}
+
+// v2: 통과 카드에서 "진단 종료/최종 결과 보기" 클릭
+function diagFinalizeFromPassed() {
+  const s = diagSession;
+  if (!s) return;
+  showDiagResult({
+    canStart: true,
+    startNodeId: s.targetNodeId,
+    startNodeTitle: s.targetNode?.title || s.targetNode?.lesson_name,
+    recommendNodes: collectFailedNodes(),
+    reason: 'queue_empty_all_passed'
+  });
+}
+
+async function diagOnNodeFailed(nodeId, nodeData, rate) {
+  // v2: 실패 → 3옵션 모달 (다시 진단 / 더 아래 진단 / 바로 학습)
+  const s = diagSession;
+  s.history.push({ nodeId, nodeTitle: nodeData?.title || nodeData?.lesson_name, passed: false, correctRate: rate });
+
+  const pct = Math.round((rate || 0) * 100);
+  const total = s.questionsInNode.length || 0;
+  const correct = s.nodeCorrectCount || 0;
+  const title = nodeData?.title || nodeData?.lesson_name || '이 단원';
+
+  // 직속 선수 hydration — drill-down 옵션 활성화 여부
+  const prereqsOfFailed = (s.currentNodeData?.prerequisites || []);
+  const hasDeeper = prereqsOfFailed.length > 0;
+  const retried = (s.retryCount && s.retryCount[nodeId]) || 0;
+
+  // 문항별 ✓/✗ 시각화
+  const dotsHtml = (s.history || [])
+    .filter(h => h.nodeId === nodeId && typeof h.questionIdx === 'number')
+    .sort((a, b) => a.questionIdx - b.questionIdx)
+    .map((h, i) => `<span style="display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:50%;background:${h.correct ? '#ECFDF5' : '#FEF2F2'};border:1.5px solid ${h.correct ? '#10B981' : '#EF4444'};color:${h.correct ? '#10B981' : '#EF4444'};font-size:13px;font-weight:700;margin-right:6px">${h.correct ? '✓' : '✗'}</span>`)
+    .join('');
+
+  diagResetBodyStyle();
+  $('diagModalBody').innerHTML = `
+    <div style="padding:24px 12px;max-width:620px;margin:0 auto">
+      <div style="text-align:center;margin-bottom:22px">
+        <div style="width:80px;height:80px;border-radius:50%;background:#FEF3C7;display:flex;align-items:center;justify-content:center;margin:0 auto 16px;color:#F59E0B;font-size:36px"><i class="fas fa-chart-pie"></i></div>
+        ${(() => { const gl = _formatGradeSemester(nodeData); return gl ? `<div style="display:inline-block;font-size:13px;font-weight:700;color:#92400E;background:#FEF3C7;border:1px solid #FDE68A;padding:4px 12px;border-radius:99px;margin-bottom:8px">${escHtml(gl)}</div>` : ''; })()}
+        <h2 style="font-size:22px;font-weight:800;color:#0F172A;margin:0 0 8px;letter-spacing:-.01em">${correct} / ${total} · ${pct}%</h2>
+        <p style="font-size:16px;color:#475569;line-height:1.6;margin:0">
+          <b style="color:#0F172A">"${escHtml(title)}"</b>에 대한 진단 결과예요.<br>조금 더 살펴볼까요?
+        </p>
+        ${dotsHtml ? `<div style="margin-top:14px">${dotsHtml}</div>` : ''}
+      </div>
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <button onclick="diagRetryNode()" ${retried >= 2 ? 'disabled' : ''} style="display:flex;align-items:center;gap:14px;padding:16px 20px;background:${retried >= 2 ? '#F1F5F9' : '#fff'};border:1.5px solid #E2E8F0;border-radius:12px;cursor:${retried >= 2 ? 'not-allowed' : 'pointer'};text-align:left;transition:all .15s;font-family:inherit" onmouseover="if(!this.disabled){this.style.borderColor='#4F46E5';this.style.background='#F5F3FF'}" onmouseout="if(!this.disabled){this.style.borderColor='#E2E8F0';this.style.background='#fff'}">
+          <div style="width:44px;height:44px;border-radius:50%;background:#EEF2FF;display:flex;align-items:center;justify-content:center;color:#4F46E5;font-size:20px;flex-shrink:0"><i class="fas fa-redo"></i></div>
+          <div style="flex:1">
+            <div style="font-size:16px;font-weight:700;color:#0F172A;margin-bottom:3px">🔄 다시 진단하기 ${retried > 0 ? `(${retried}/2회 사용)` : ''}</div>
+            <div style="font-size:14px;color:#64748B;line-height:1.5">같은 단원을 새 문제로 한 번 더 풀어요.</div>
+          </div>
+          <i class="fas fa-chevron-right" style="color:#94A3B8;font-size:14px"></i>
+        </button>
+        <button onclick="diagGoDeeper()" ${!hasDeeper ? 'disabled' : ''} style="display:flex;align-items:center;gap:14px;padding:16px 20px;background:${hasDeeper ? '#fff' : '#F1F5F9'};border:1.5px solid ${hasDeeper ? '#4F46E5' : '#E2E8F0'};border-radius:12px;cursor:${hasDeeper ? 'pointer' : 'not-allowed'};text-align:left;transition:all .15s;font-family:inherit;position:relative" onmouseover="if(!this.disabled){this.style.background='#EEF2FF'}" onmouseout="if(!this.disabled){this.style.background='#fff'}">
+          ${hasDeeper ? '<span style="position:absolute;top:-9px;right:14px;background:#4F46E5;color:#fff;font-size:11px;font-weight:700;padding:3px 10px;border-radius:99px">권장</span>' : ''}
+          <div style="width:44px;height:44px;border-radius:50%;background:${hasDeeper ? '#EEF2FF' : '#F1F5F9'};display:flex;align-items:center;justify-content:center;color:${hasDeeper ? '#4F46E5' : '#94A3B8'};font-size:20px;flex-shrink:0"><i class="fas fa-arrow-down"></i></div>
+          <div style="flex:1">
+            <div style="font-size:16px;font-weight:700;color:#0F172A;margin-bottom:3px">🔽 더 아래로 내려가서 진단</div>
+            <div style="font-size:14px;color:#64748B;line-height:1.5">${hasDeeper ? `이 단원의 선수 단원(${prereqsOfFailed.length}개)을 먼저 진단해요.` : '더 내려갈 선수 단원이 없어요.'}</div>
+          </div>
+          <i class="fas fa-chevron-right" style="color:#94A3B8;font-size:14px"></i>
+        </button>
+        <button onclick="diagLearnHere()" style="display:flex;align-items:center;gap:14px;padding:16px 20px;background:#fff;border:1.5px solid #E2E8F0;border-radius:12px;cursor:pointer;text-align:left;transition:all .15s;font-family:inherit" onmouseover="this.style.borderColor='#10B981';this.style.background='#F0FDF4'" onmouseout="this.style.borderColor='#E2E8F0';this.style.background='#fff'">
+          <div style="width:44px;height:44px;border-radius:50%;background:#ECFDF5;display:flex;align-items:center;justify-content:center;color:#10B981;font-size:20px;flex-shrink:0"><i class="fas fa-book-open"></i></div>
+          <div style="flex:1">
+            <div style="font-size:16px;font-weight:700;color:#0F172A;margin-bottom:3px">📖 이 단원에서 바로 학습 시작</div>
+            <div style="font-size:14px;color:#64748B;line-height:1.5"><b>"${escHtml(title)}"</b>부터 학습을 시작해요.</div>
+          </div>
+          <i class="fas fa-chevron-right" style="color:#94A3B8;font-size:14px"></i>
+        </button>
+      </div>
+      ${retried >= 2 ? '<div style="margin-top:14px;padding:10px 14px;background:#FEF3C7;border:1px solid #FDE68A;border-radius:8px;font-size:13px;color:#92400E;display:flex;align-items:center;gap:8px"><i class="fas fa-info-circle"></i> 같은 단원은 2회까지만 재진단 가능해요. 더 아래로 내려가거나 학습을 시작해 보세요.</div>' : ''}
+    </div>
+  `;
+  $('diagModalActions').innerHTML = `
+    <button class="btn btn-ghost" onclick="closeDiagModal()" style="font-size:16px;padding:12px 22px">중단</button>
+  `;
+}
+
+// v2: 다시 진단 — 같은 노드 새 문항으로
+async function diagRetryNode() {
+  const s = diagSession;
+  if (!s) return;
+  const nodeId = s.currentNodeId;
+  s.retryCount = s.retryCount || {};
+  s.retryCount[nodeId] = (s.retryCount[nodeId] || 0) + 1;
+  if (s.retryCount[nodeId] > 2) {
+    showToast('같은 단원은 2회까지만 재진단 가능합니다.', 'fa-info-circle');
     return;
   }
-  const nextId = prereqs[0].id || prereqs[0].node_id || prereqs[0];
-  await diagEnterNode(nextId, nextDepth);
+  // 마지막 실패 결과는 history/completedNodes에서 제외 (재진단 결과로 교체)
+  if (s.completedNodes && s.completedNodes.length > 0) {
+    const last = s.completedNodes[s.completedNodes.length - 1];
+    if (last && last.nodeId === nodeId && !last.passed) {
+      s.completedNodes.pop();
+    }
+  }
+  if (s.history && s.history.length > 0) {
+    // 같은 nodeId에서 발생한 직전 응답 기록 제거 (다음 응답이 새 진단지)
+    s.history = s.history.filter(h => !(h.nodeId === nodeId));
+  }
+  showToast('같은 단원을 새 문제로 다시 진단합니다.', 'fa-redo');
+  await diagEnterNode(nodeId, s.currentDepth);
+}
+
+// v2: 더 아래로 내려가기 — 현재 노드의 직속 선수를 큐에 prepend → 첫 선수 진단 시작
+async function diagGoDeeper() {
+  const s = diagSession;
+  if (!s) return;
+  const prereqs = s.currentNodeData?.prerequisites || [];
+  if (!prereqs.length) {
+    showToast('더 내려갈 선수 단원이 없어요.', 'fa-info-circle');
+    return;
+  }
+  // 직속 선수를 큐 앞쪽에 추가 (학년 기준 정렬 — target에 가까운 학년부터)
+  const targetGrade = (s.targetNode?.grade != null) ? Number(s.targetNode.grade) : null;
+  const targetSemester = (s.targetNode?.semester != null) ? Number(s.targetNode.semester) : 1;
+  const targetAbs = targetGrade != null ? (targetGrade * 2 + (targetSemester - 1)) : null;
+  const newItems = prereqs.map(p => {
+    const pid = p.id || p.node_id || p;
+    const grade = (p.grade != null) ? Number(p.grade) : null;
+    const semester = (p.semester != null) ? Number(p.semester) : 1;
+    const gradeAbs = grade != null ? (grade * 2 + (semester - 1)) : null;
+    const distance = (targetAbs != null && gradeAbs != null) ? Math.abs(targetAbs - gradeAbs) : 999;
+    const gradeLabel = (grade != null) ? `${grade}학년 ${semester}학기` : (p.gradeLabel || '');
+    return {
+      nodeId: pid,
+      title: p.title || p.lesson_name || p.unit_name || '학습 단원',
+      gradeLabel,
+      distance
+    };
+  });
+  // 기존 큐와 머지 후 distance 오름차순 정렬
+  const merged = (s.priorityQueue || []).map(q => Object.assign({ distance: 999 }, q)).concat(newItems);
+  merged.sort((a, b) => (a.distance || 999) - (b.distance || 999));
+  s.priorityQueue = merged;
+  showToast(`${newItems.length}개 단원을 큐에 추가했습니다.`, 'fa-arrow-down');
+  // 큐의 첫 단원으로 진입
+  const next = s.priorityQueue.shift();
+  await diagEnterNode(next.nodeId, s.currentDepth + 1);
+}
+
+// v2: 바로 학습 — 현재 단원부터 학습 시작
+function diagLearnHere() {
+  const s = diagSession;
+  if (!s) return;
+  showDiagResult({
+    canStart: false,
+    startNodeId: s.currentNodeId,
+    startNodeTitle: s.currentNodeData?.title || s.currentNodeData?.lesson_name,
+    recommendNodes: collectFailedNodes(),
+    reason: 'user_decided_to_learn'
+  });
 }
 
 function diagStopAndUseFailed() {
@@ -7356,6 +7688,7 @@ function collectFailedNodes() {
 function showDiagResult(result) {
   diagSession.finished = true;
   const targetTitle = diagSession.targetNode.title || diagSession.targetNode.lesson_name || '목표 학습';
+  const targetGradeLabel = _formatGradeSemester(diagSession.targetNode);
   const startTitle = result.startNodeTitle || '학습 출발점';
   const totalSec = Math.round(diagSession.totalTimeSec || 0);
   const totalMin = Math.floor(totalSec / 60);
@@ -7373,6 +7706,65 @@ function showDiagResult(result) {
       try { if (!learningList.has(n.nodeId)) { learningList.add(n.nodeId); autoAddedCount++; } } catch(_){}
     });
     try { saveLearningListToServer && saveLearningListToServer(); } catch(_){}
+  }
+
+  // v2: 누적 단원별 결과 카드 — 모든 결과 화면에 공통으로 노출
+  const completed = (diagSession.completedNodes || []);
+  let analysisHtml = '';
+  if (completed.length > 0) {
+    const totalNodes = completed.length;
+    const passedNodes = completed.filter(c => c.passed).length;
+    const failedNodes = totalNodes - passedNodes;
+    const totalCorrect = completed.reduce((a, c) => a + (c.correct || 0), 0);
+    const totalQuestions = completed.reduce((a, c) => a + (c.total || 0), 0);
+    const avgPct = totalQuestions > 0 ? Math.round(totalCorrect / totalQuestions * 100) : 0;
+
+    const itemsHtml = completed.map(c => {
+      const pct = c.total > 0 ? Math.round((c.correctRate || 0) * 100) : 0;
+      const passed = !!c.passed;
+      const color = passed ? '#10B981' : '#EF4444';
+      const bg = passed ? '#F0FDF4' : '#FEF2F2';
+      const border = passed ? '#BBF7D0' : '#FECACA';
+      const icon = passed ? 'fa-check-circle' : 'fa-times-circle';
+      const label = passed ? '통과' : '복습 필요';
+      const gradeLabel = c.gradeLabel || _formatGradeSemester(c) || '';
+      const dots = c.dotsHtml || '';
+      return `
+        <div style="background:${bg};border:1.5px solid ${border};border-radius:12px;padding:14px 16px;margin-bottom:10px">
+          <div style="display:flex;align-items:flex-start;gap:12px;margin-bottom:${dots ? '10px' : '0'}">
+            <i class="fas ${icon}" style="color:${color};font-size:22px;margin-top:2px;flex-shrink:0"></i>
+            <div style="flex:1;min-width:0">
+              <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:4px">
+                <span style="font-size:16px;font-weight:700;color:#0F172A">${escHtml(c.title || '단원')}</span>
+                ${gradeLabel ? `<span style="font-size:12px;font-weight:600;color:#475569;background:#fff;border:1px solid #E2E8F0;padding:2px 8px;border-radius:99px">${escHtml(gradeLabel)}</span>` : ''}
+              </div>
+              <div style="font-size:14px;color:#475569;font-weight:600">
+                <span style="color:${color};font-weight:800">${label}</span>
+                <span style="color:#CBD5E1;margin:0 6px">·</span>
+                <span>${c.correct || 0}/${c.total || 0} 문항 · ${pct}%</span>
+              </div>
+            </div>
+          </div>
+          ${dots ? `<div style="display:flex;flex-wrap:wrap;align-items:center;padding-left:34px">${dots}</div>` : ''}
+        </div>
+      `;
+    }).join('');
+
+    analysisHtml = `
+      <div style="margin:0 8px 18px">
+        <div style="background:#F8FAFC;border:1px solid #E2E8F0;border-radius:12px;padding:14px 18px;margin-bottom:14px">
+          <div style="font-size:12px;font-weight:700;color:#64748B;letter-spacing:0.4px;text-transform:uppercase;margin-bottom:10px">전체 요약</div>
+          <div style="display:flex;flex-wrap:wrap;gap:14px;font-size:14px">
+            <div><span style="color:#64748B;font-weight:500">진단 단원</span> <b style="color:#0F172A;margin-left:4px">${totalNodes}개</b></div>
+            <div><span style="color:#10B981;font-weight:600">통과</span> <b style="color:#0F172A;margin-left:4px">${passedNodes}개</b></div>
+            <div><span style="color:#EF4444;font-weight:600">복습 필요</span> <b style="color:#0F172A;margin-left:4px">${failedNodes}개</b></div>
+            <div><span style="color:#64748B;font-weight:500">평균 정답률</span> <b style="color:#0F172A;margin-left:4px">${avgPct}%</b> <span style="color:#94A3B8;font-size:13px">(${totalCorrect}/${totalQuestions})</span></div>
+          </div>
+        </div>
+        <div style="font-size:12px;font-weight:700;color:#64748B;margin-bottom:8px;letter-spacing:0.4px;text-transform:uppercase">단원별 결과</div>
+        ${itemsHtml}
+      </div>
+    `;
   }
 
   let bodyHtml = '';
@@ -7435,7 +7827,8 @@ function diagStartLearning(result) {
   // 추천 노드를 먼저 결정 (closeDiagModal이 diagSession을 null로 만들기 전)
   let openId = result.startNodeId;
   let openTitle = result.startNodeTitle;
-  if (!result.canStart) {
+  // v2: user_decided_to_learn은 startNodeId(현재 단원)를 그대로 사용. recommendNodes로 덮어쓰지 않음.
+  if (!result.canStart && result.reason !== 'user_decided_to_learn') {
     // result.recommendNodes는 이미 collectFailedNodes()의 결과로 전달됨
     const recs = Array.isArray(result.recommendNodes) ? result.recommendNodes : [];
     const first = recs.length ? recs[recs.length - 1] : null; // 가장 깊은(가장 기초) 노드부터
@@ -7444,6 +7837,9 @@ function diagStartLearning(result) {
       openTitle = first.title;
       try { learningList.add(first.nodeId); saveLearningListToServer && saveLearningListToServer(); } catch(_){}
     }
+  } else if (result.reason === 'user_decided_to_learn' && openId) {
+    // 바로 학습 선택 시 — 그 단원도 학습목록에 추가
+    try { learningList.add(openId); saveLearningListToServer && saveLearningListToServer(); } catch(_){}
   }
   closeDiagModal();
   if (openId) {

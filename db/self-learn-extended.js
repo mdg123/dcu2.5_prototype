@@ -941,12 +941,29 @@ function listDiagnosisHistory(userId, opts = {}) {
     // CAT 세션은 difficulty_path 합산 / 비-CAT은 세션 컬럼 사용
     let totalQuestions = r.total_questions || 0;
     let correctCount = r.correct_count || 0;
+    let perNode = [];  // v2: 노드별 통과 여부
     try {
       const path = JSON.parse(r.difficulty_path || '[]');
       if (Array.isArray(path) && path.length > 0) {
         const sumT = path.reduce((s, p) => s + (Number(p.total) || 0), 0);
         const sumC = path.reduce((s, p) => s + (Number(p.correct) || 0), 0);
         if (sumT > 0) { totalQuestions = sumT; correctCount = sumC; }
+        // 노드별 요약
+        perNode = path.map(p => {
+          const nodeInfo = db.prepare(
+            'SELECT unit_name, lesson_name FROM learning_map_nodes WHERE node_id = ?'
+          ).get(p.node) || {};
+          const rate = (p.total || 0) > 0 ? (p.correct || 0) / p.total : 0;
+          return {
+            nodeId: p.node,
+            title: nodeInfo.lesson_name || nodeInfo.unit_name || '이전 단원',
+            passed: !!p.passed,
+            correctCount: p.correct || 0,
+            totalCount: p.total || 0,
+            correctRate: rate,
+            sheetSize: p.sheetMeta?.sheetSize || (p.total || 0)
+          };
+        });
       }
     } catch {}
     const correctRate = totalQuestions > 0 ? correctCount / totalQuestions : 0;
@@ -966,7 +983,9 @@ function listDiagnosisHistory(userId, opts = {}) {
       diagnosisType: r.diagnosis_type || null,
       startedAt: r.started_at,
       completedAt: r.completed_at,
-      relativeTime: _formatRelativeTime(r.completed_at || r.started_at)
+      relativeTime: _formatRelativeTime(r.completed_at || r.started_at),
+      // v2 — 노드별 통과 여부
+      perNode
     };
   });
 }
@@ -2170,8 +2189,97 @@ function _pickQuestionForNode(nodeId, difficulty) {
   };
 }
 
+// ============================================================
+// 진단평가 정책 v2 — 우선순위 큐 헬퍼 (설계서 §2.1)
+// ============================================================
+
+// 절대학기: 초→중→고를 연속된 정수로 매핑하여 거리 비교에 사용.
+// 데이터 컬럼은 grade_level('초'/'중'/'고')과 grade(1..). semester(1|2)
+function _gradeAbs(gradeLevel, grade, semester) {
+  const g = Number(grade) || 0;
+  const s = Number(semester) || 1;
+  const lv = String(gradeLevel || '').trim();
+  // 초: 1-1=2, 6-2=13
+  // 중: 7-1(=중1-1) → 14, 9-2 → 19
+  // 고: 10-1 → 20, 12-2 → 25
+  if (lv === '중' || lv === 'mid' || lv === 'middle') return 14 + (g - 1) * 2 + (s - 1);
+  if (lv === '고' || lv === 'high') return 20 + (g - 1) * 2 + (s - 1);
+  // 초/elem/기본
+  return g * 2 + (s - 1);
+}
+
+// 노드 메타 일괄 조회 (정렬/거리 계산용)
+function _fetchNodeMetaMany(nodeIds) {
+  if (!Array.isArray(nodeIds) || nodeIds.length === 0) return [];
+  const placeholders = nodeIds.map(() => '?').join(',');
+  const rows = db.prepare(`
+    SELECT node_id, subject, grade, semester, grade_level, sort_order, unit_name, lesson_name, node_level
+    FROM learning_map_nodes
+    WHERE node_id IN (${placeholders})
+  `).all(...nodeIds);
+  const byId = new Map(rows.map(r => [r.node_id, r]));
+  // 입력 순서로 반환 (누락은 빈 메타로)
+  return nodeIds.map(nid => byId.get(nid) || { node_id: nid, subject: null, grade: 0, semester: 1, grade_level: null, sort_order: 0 });
+}
+
+// 우선순위 정렬: 목표 학년-학기와의 거리 오름차순 → subject(ko) → sort_order → node_id
+// targetMeta: { grade_level, grade, semester } 직접 받아 일관성 유지
+function _sortQueueByPriority(nodeIds, targetMeta) {
+  if (!Array.isArray(nodeIds) || nodeIds.length <= 1) return [...(nodeIds || [])];
+  const targetAbs = _gradeAbs(targetMeta.grade_level, targetMeta.grade, targetMeta.semester);
+  const metas = _fetchNodeMetaMany(nodeIds);
+  return metas
+    .map(m => ({ ...m, _distance: Math.abs(_gradeAbs(m.grade_level, m.grade, m.semester) - targetAbs) }))
+    .sort((a, b) => {
+      if (a._distance !== b._distance) return a._distance - b._distance;
+      const sa = a.subject || '';
+      const sb = b.subject || '';
+      const cmp = sa.localeCompare(sb, 'ko');
+      if (cmp !== 0) return cmp;
+      if ((a.sort_order || 0) !== (b.sort_order || 0)) return (a.sort_order || 0) - (b.sort_order || 0);
+      return String(a.node_id).localeCompare(String(b.node_id));
+    })
+    .map(m => m.node_id);
+}
+
+// 진단지 조립 (설계서 §3.3)
+//   - node_level=2(단원)의 자식 차시(node_level=3) 조회
+//   - 0개: 단원 자체에서 1문항
+//   - 1~5개: 모두
+//   - 6개 이상: sort_order 역순 5개
+// 반환: [{ lessonId, lessonName, question(_pickQuestionForNode 결과) }, ...]  (길이 0~5)
+function _buildDiagnosticSheet(unitNodeId) {
+  const lessons = db.prepare(`
+    SELECT node_id, lesson_name, sort_order
+    FROM learning_map_nodes
+    WHERE parent_node_id = ? AND node_level = 3
+    ORDER BY sort_order ASC
+  `).all(unitNodeId);
+
+  let picked;
+  if (!lessons || lessons.length === 0) {
+    const q = _pickQuestionForNode(unitNodeId, 'medium');
+    if (!q) return [];
+    return [{ lessonId: unitNodeId, lessonName: null, question: q, ...q }];
+  }
+  if (lessons.length <= 5) {
+    picked = lessons;
+  } else {
+    // sort_order 역순 5개 (단원 후반부일수록 핵심 도달 목표에 가깝다 — §3.2)
+    picked = [...lessons].reverse().slice(0, 5);
+  }
+  const sheet = [];
+  for (const l of picked) {
+    const q = _pickQuestionForNode(l.node_id, 'medium');
+    if (q) sheet.push({ lessonId: l.node_id, lessonName: l.lesson_name, question: q, ...q });
+  }
+  return sheet;
+}
+
+// ============================================================
+
 function startDiagnosisCAT(userId, { targetNodeId, subject, grade, type }) {
-  // targetNodeId 지정 시 BFS로 직전 선수노드 큐 생성
+  // targetNodeId 지정 시 직속 선수노드만 큐 구성 (v2 — BFS 전체 펼침 폐기)
   let nodeId = targetNodeId;
   if (!nodeId && subject) {
     // 학년 필터(있을 때만) — 초/중/고 표기를 정수로 정규화
@@ -2195,27 +2303,25 @@ function startDiagnosisCAT(userId, { targetNodeId, subject, grade, type }) {
   }
   if (!nodeId) throw new Error('진단 가능한 노드가 없습니다.');
 
-  // BFS: 직전 선수노드 큐 (bottom-up)
-  const queue = [];
-  const visited = new Set([nodeId]);
-  let frontier = [nodeId];
-  while (frontier.length > 0) {
-    const nextFrontier = [];
-    for (const cur of frontier) {
-      const edges = db.prepare('SELECT from_node_id FROM learning_map_edges WHERE to_node_id = ?').all(cur);
-      for (const e of edges) {
-        if (!visited.has(e.from_node_id)) {
-          visited.add(e.from_node_id);
-          queue.push(e.from_node_id);
-          nextFrontier.push(e.from_node_id);
-        }
-      }
-    }
-    frontier = nextFrontier;
-    if (queue.length > 10) break; // 상한
+  // 타깃 노드 메타 (우선순위 거리 계산 기준)
+  const targetMeta = db.prepare(`
+    SELECT node_id, subject, grade, semester, grade_level, unit_name, lesson_name, sort_order
+    FROM learning_map_nodes WHERE node_id = ?
+  `).get(nodeId) || { node_id: nodeId, grade_level: '초', grade: 0, semester: 1 };
+
+  // v2: 직속 선수만 (한 단계). frontier 1회.
+  const directPrereqs = db.prepare(
+    'SELECT from_node_id FROM learning_map_edges WHERE to_node_id = ?'
+  ).all(nodeId).map(r => r.from_node_id);
+
+  // 직속 선수가 있으면 큐는 [선수들] (우선순위 정렬). 타깃 자체는 큐에 포함하지 않음.
+  // 직속 선수가 없으면 타깃 자체를 큐에 넣어 진단 진행.
+  let priorityQueue;
+  if (directPrereqs.length === 0) {
+    priorityQueue = [nodeId];
+  } else {
+    priorityQueue = _sortQueueByPriority(directPrereqs, targetMeta);
   }
-  // 큐: [targetNodeId, ...선수노드들] — 타겟부터 풀어나가되 실패 시 drill down
-  const fullQueue = [nodeId, ...queue];
 
   const difficultyPath = [];
   const perNodeAnswers = {};
@@ -2226,32 +2332,45 @@ function startDiagnosisCAT(userId, { targetNodeId, subject, grade, type }) {
        queue_nodes, current_node_id, current_difficulty, difficulty_path, per_node_answers)
     VALUES (?, ?, ?, 'in_progress', 0, ?, ?, 'medium', ?, ?)
   `).run(userId, nodeId, type || 'cat',
-    JSON.stringify(fullQueue), nodeId,
+    JSON.stringify(priorityQueue), priorityQueue[0],
     JSON.stringify(difficultyPath),
     JSON.stringify(perNodeAnswers));
 
-  // 큐 상의 노드 중 문항이 있는 첫 노드 탐색
-  let question = null;
-  let startNodeId = nodeId;
-  for (const qn of fullQueue) {
-    const cand = _pickQuestionForNode(qn, 'medium');
-    if (cand) { question = cand; startNodeId = qn; break; }
+  // 큐의 첫 노드에서 진단지 조립 — 문항이 0개면 다음 큐 노드로 skip
+  let startNodeId = priorityQueue[0];
+  let sheet = [];
+  for (let i = 0; i < priorityQueue.length; i++) {
+    const nn = priorityQueue[i];
+    const s = _buildDiagnosticSheet(nn);
+    if (s.length > 0) {
+      startNodeId = nn;
+      sheet = s;
+      break;
+    }
   }
-  // 탐색 결과 시작 노드가 바뀌면 current_node_id 갱신
-  if (startNodeId !== nodeId) {
+  if (startNodeId !== priorityQueue[0]) {
     db.prepare('UPDATE diagnosis_sessions SET current_node_id = ? WHERE id = ?')
       .run(startNodeId, info.lastInsertRowid);
   }
 
-  // R1 (Phase 1 REWORK): 큐 응답에서 startNodeId(=currentNodeId)를 제외하여
-  // 프론트가 current + queue 를 중복 렌더링하지 않도록 한다.
-  // DB에 저장되는 queue_nodes(fullQueue)는 시작 노드를 포함한 채 유지하되,
-  // 클라이언트 응답용 queueNodes/queueNodesHydrated는 startNodeId를 빼고 보낸다.
-  const responseQueue = fullQueue.filter(n => n !== startNodeId);
-
-  // F1: 큐 노드 라벨 hydration — 프론트가 string array를 받아 라벨을 못 그리는 문제 해결
+  // 응답용 큐는 currentNodeId 제외 (프론트가 current + queue 중복 렌더링하지 않도록)
+  const responseQueue = priorityQueue.filter(n => n !== startNodeId);
   const queueNodesHydrated = _hydrateDiagNodes(responseQueue);
   const currentNodeHydrated = _hydrateDiagNodes([startNodeId])[0] || { id: startNodeId };
+
+  // 사전 고지용 — 정렬된 전체 순서(현재 노드 포함, rank/gradeLabel 표기)
+  const allOrder = [startNodeId, ...responseQueue];
+  const allOrderMeta = _fetchNodeMetaMany(allOrder);
+  const queueOrder = allOrderMeta.map((m, idx) => ({
+    rank: idx + 1,
+    nodeId: m.node_id,
+    title: m.lesson_name || m.unit_name || '이전 단원',
+    gradeLabel: (m.grade && m.semester) ? `${m.grade}-${m.semester}` : null,
+    subject: m.subject || null
+  }));
+
+  // 첫 문항(하위호환 — v1 응답 형태) 보존
+  const firstQuestion = sheet.length > 0 ? sheet[0].question : null;
 
   return {
     sessionId: info.lastInsertRowid,
@@ -2260,7 +2379,14 @@ function startDiagnosisCAT(userId, { targetNodeId, subject, grade, type }) {
     currentDifficulty: 'medium',
     queueNodes: responseQueue,
     queueNodesHydrated,
-    question // null 가능 — 프론트에서 데모 문항으로 합성
+    // v2 신규
+    prereqCount: directPrereqs.length,
+    queueOrder,              // 사전 고지 모달용
+    queueOrderHydrated: queueOrder,  // alias
+    sheet,                   // 첫 단원의 진단지 (0~5문항)
+    sheetSize: sheet.length,
+    // 하위호환
+    question: firstQuestion
   };
 }
 
@@ -2440,19 +2566,17 @@ function _buildResultEnrichment(session, nodeResults) {
 }
 
 function submitDiagnosisAnswerCAT(sessionId, payload = {}) {
-  // 결정사항 정합화(2026-04 PM 합의):
-  //   D1. 노드당 2문항
-  //   D2. 통과 조건 = 2/2 정답
-  //   D3. 종료 = 연속 2회 정답(=2/2 노드가 연속 2번) OR 최대 3단계(노드)
-  //   D4. 실패 시 가장 깊이 미통과 노드 + 학습목록 자동 추가
-  //   D5. 선수 = DB prerequisites (queue 활용)
-  //   D6. 문항 = EBS/자동생성 2개 중 무작위 (_pickQuestionForNode)
+  // 진단평가 정책 v2 (2026-05-26 설계서):
+  //   - 노드당 진단지는 1~5문항(차시 수 기반, _buildDiagnosticSheet)
+  //   - 통과 조건 = 정답률 ≥ 0.60
+  //   - 종료 = queue_empty | user_decided_to_learn | no_questions_anywhere
+  //   - 단계 상한(MAX_NODE_STEPS=3) 및 연속 통과(CONSEC_PASS_TARGET=2) 제거
+  //   - 실패 시 자동 종료/자동 drill-down 금지 — 응답에 recommendActions 3옵션 포함, 사용자 선택
   //
-  // 난이도 적응형(easy/medium/hard) 제거. 'medium' 고정.
+  // 본 함수는 "단일 문항" 단위 응답 호환을 유지하되, 시트 종료 시점에 v2 통과 판정을 수행한다.
+  // 시트 단위 일괄 제출은 submitDiagnosisSheet(신규)를 사용.
 
-  const NODE_QUESTIONS = 2;       // D1
-  const MAX_NODE_STEPS = 3;       // D3 — 최대 3단계
-  const CONSEC_PASS_TARGET = 2;   // D3 — 연속 2회 정답 노드
+  const PASS_THRESHOLD = 0.60;
 
   // snake_case/camelCase 모두 지원
   const contentId = payload.contentId != null ? payload.contentId : payload.content_id;
@@ -2519,75 +2643,89 @@ function submitDiagnosisAnswerCAT(sessionId, payload = {}) {
   let queue = [];
   try { queue = JSON.parse(session.queue_nodes || '[]'); } catch {}
 
-  // D1·D2: 노드당 2문항·2/2 정답이면 통과
-  const nodeHist = perNodeAnswers[curNode];
-  let nodeFinished = false;
+  // v2: 노드 종료는 호출자가 payload.sheetDone=true 로 알려주거나
+  //      sheetTotal 메타가 함께 들어왔을 때 nodeHist 길이 ≥ sheetTotal 이면 종료.
+  //      그 외에는 단일 문항 누적만 수행(시트 종료 판정은 submit-sheet에서).
+  // 감리 REWORK fix: nodeHist 변수 명시 선언 (perNodeAnswers[curNode] 그대로 참조)
+  const nodeHist = perNodeAnswers[curNode] || [];
+  const sheetTotal = Number(payload.sheetTotal || 0);
+  const sheetDone = !!payload.sheetDone || (sheetTotal > 0 && nodeHist.length >= sheetTotal);
+  const nodeFinished = sheetDone && nodeHist.length > 0;
   let nodePassed = null;
-  if (nodeHist.length >= NODE_QUESTIONS) {
+  if (nodeFinished) {
     const correct = nodeHist.filter(a => a.correct === 1).length;
-    nodeFinished = true;
-    nodePassed = correct === NODE_QUESTIONS; // 2/2
+    nodePassed = (correct / nodeHist.length) >= PASS_THRESHOLD;
   }
 
   let nextNodeId = curNode;
   let nextQuestion = null;
   let sessionComplete = false;
   let endReason = null;
+  let recommendActions = null;
+  let drillDownPrereqCount = 0;
 
   if (nodeFinished) {
     const correct = nodeHist.filter(a => a.correct === 1).length;
-    const correctRate = correct / nodeHist.length; // 0~1로 통일
-    // 노드 상태 저장 (correct_rate: 0~1)
+    const correctRate = correct / nodeHist.length; // 0~1
+    // 노드 상태 저장
     db.prepare(`
       INSERT OR REPLACE INTO user_node_status (user_id, node_id, status, diagnosis_result, correct_rate, last_accessed_at)
       VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
     `).run(session.user_id, curNode,
       nodePassed ? 'completed' : 'in_progress',
-      nodePassed ? 'mastered' : 'needs_review',
+      nodePassed
+        ? (correctRate >= 0.80 ? 'mastered' : 'proficient')
+        : (correctRate >= 0.40 ? 'developing' : 'needs_review'),
       correctRate);
 
-    // 노드 진행 경로 누적 (단계 = 처리한 노드 수)
-    nodePath.push({ node: curNode, passed: nodePassed ? 1 : 0, correct, total: nodeHist.length });
-
-    // D3 종료조건 판정
-    // (a) 연속 2회 정답 = 마지막 2개 노드가 모두 통과
-    const lastTwo = nodePath.slice(-CONSEC_PASS_TARGET);
-    const consecPassed = lastTwo.length >= CONSEC_PASS_TARGET && lastTwo.every(p => p.passed === 1);
-    // (b) 최대 단계
-    const maxStepsReached = nodePath.length >= MAX_NODE_STEPS;
+    nodePath.push({
+      node: curNode,
+      passed: nodePassed ? 1 : 0,
+      correct,
+      total: nodeHist.length,
+      rate: correctRate,
+      endedAt: new Date().toISOString()
+    });
 
     // 큐에서 현재 노드 제거
     queue = queue.filter(qn => qn !== curNode);
 
-    if (consecPassed) {
-      sessionComplete = true;
-      endReason = 'consecutive_pass';
-    } else if (maxStepsReached) {
-      sessionComplete = true;
-      endReason = 'max_steps';
-    } else if (queue.length === 0) {
-      sessionComplete = true;
-      endReason = 'queue_empty';
-    } else {
-      // 다음 노드로 진행 — 문항이 있는 첫 노드 탐색
+    if (nodePassed) {
+      // 자동 다음 노드 진행 — 문항/진단지가 있는 첫 노드 탐색
       while (queue.length > 0) {
         const nn = queue[0];
-        const cand = _pickQuestionForNode(nn, 'medium');
-        if (cand) { nextNodeId = nn; nextQuestion = cand; break; }
-        queue.shift(); // 문항 없으면 skip
+        const candSheet = _buildDiagnosticSheet(nn);
+        if (candSheet && candSheet.length > 0) {
+          nextNodeId = nn;
+          nextQuestion = candSheet[0].question;
+          break;
+        }
+        queue.shift();
       }
       if (!nextQuestion) {
         sessionComplete = true;
-        endReason = 'no_question';
+        endReason = queue.length === 0 ? 'queue_empty' : 'no_questions_anywhere';
       }
+    } else {
+      // 실패 — 자동 진행/자동 drill-down 금지. 3옵션 후보 반환.
+      drillDownPrereqCount = db.prepare(
+        'SELECT COUNT(1) AS cnt FROM learning_map_edges WHERE to_node_id = ?'
+      ).get(curNode)?.cnt || 0;
+      recommendActions = [
+        { id: 'retry',      label: '다시 진단하기' },
+        { id: 'drill_down', label: '더 아래 단원 진단하기', prereqCount: drillDownPrereqCount, disabled: drillDownPrereqCount === 0 },
+        { id: 'learn_here', label: '바로 학습하기' }
+      ];
+      // 응답 단계에서는 세션을 종료하지 않음. 사용자 선택을 기다림.
+      // 큐는 이미 curNode를 제외한 상태로 저장 → 사용자가 retry/drill_down 요청 시 재구성.
     }
   } else {
-    // 같은 노드 계속 (난이도 고정 medium)
+    // 시트 진행 중 — 다음 문항(같은 노드)을 단순히 1개 추가 제공
     nextQuestion = _pickQuestionForNode(curNode, 'medium');
     if (!nextQuestion) {
-      // 문항 풀 고갈 → 노드 미완 종료 처리
+      // 문항 풀 고갈 → 시트 중단 종료
       sessionComplete = true;
-      endReason = 'no_question';
+      endReason = 'no_questions_anywhere';
     }
   }
 
@@ -2662,10 +2800,28 @@ function submitDiagnosisAnswerCAT(sessionId, payload = {}) {
     }
   }
 
+  // v2: nextAction 분기 — 사용자 선택을 명시
+  let nextAction = null;
+  if (sessionComplete) {
+    nextAction = { type: 'complete' };
+  } else if (nodeFinished && nodePassed) {
+    nextAction = { type: 'auto_next' };
+  } else if (nodeFinished && !nodePassed) {
+    nextAction = { type: 'choose', options: recommendActions };
+  } else {
+    nextAction = { type: 'continue_sheet' };
+  }
+
+  // 현재 노드의 누적 정답률 (시트 진행 중에도 노출)
+  const curCorrect = nodeHist.filter(a => a.correct === 1).length;
+  const curTotal = nodeHist.length;
+  const curRate = curTotal > 0 ? curCorrect / curTotal : 0;
+
   return {
     isCorrect,
     nodeFinished,
     nodePassed,
+    correctRate: nodeFinished ? curRate : null,  // v2 — 노드 종료 시 정답률
     nextNodeId,
     nextNode: nextNodeHydrated,
     nextDifficulty: 'medium',
@@ -2676,9 +2832,13 @@ function submitDiagnosisAnswerCAT(sessionId, payload = {}) {
     queueRemaining: responseQueue.length,
     queueNodes: responseQueue,
     queueNodesHydrated,
+    queueOrderHydrated: queueNodesHydrated,  // alias
     nodeResults,
     addedToLearningList,
     endReason,
+    // v2 신규
+    nextAction,
+    recommendActions,  // 실패 시 3옵션, 통과/진행 중에는 null
     // B1: 학생 친화 결과 화면용 필드 — sessionComplete=true 일 때만 채워짐
     summary,
     areaStats,
@@ -2687,25 +2847,404 @@ function submitDiagnosisAnswerCAT(sessionId, payload = {}) {
   };
 }
 
-function drillDownDiagnosis(sessionId, failedNodeId) {
+// ============================================================
+// 진단평가 정책 v2 — 시트 단위 일괄 제출 (신규)
+// ============================================================
+// 한 노드의 진단지(1~5문항) 응답을 한 번에 제출하여 통과/실패 + 다음 액션을 한 응답에 담는다.
+// 프론트는 시트의 모든 문항에 답한 뒤 본 EP를 호출한다.
+//
+// payload: { answers: [{ questionId, lessonId, userAnswer, contentId? }, ...] }
+// 응답: { nodeFinished, nodePassed, correctRate, results[], nextAction, queueRemainingHydrated, ... }
+function submitDiagnosisSheet(sessionId, payload = {}) {
+  const PASS_THRESHOLD = 0.60;
+
   const session = db.prepare('SELECT * FROM diagnosis_sessions WHERE id = ?').get(sessionId);
-  if (!session) throw new Error('세션 없음');
+  if (!session) {
+    const err = new Error('세션 없음');
+    err.statusCode = 404;
+    throw err;
+  }
+  if (session.status === 'completed') {
+    return { sessionComplete: true, finished: true, nextAction: { type: 'complete' } };
+  }
+  const answers = Array.isArray(payload.answers) ? payload.answers : [];
+  if (answers.length === 0) {
+    const err = new Error('answers 배열이 비어 있습니다.');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const curNode = session.current_node_id || session.target_node_id;
+  if (!curNode) {
+    const err = new Error('현재 진단 노드를 확인할 수 없습니다.');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  let perNodeAnswers = {};
+  try { perNodeAnswers = JSON.parse(session.per_node_answers || '{}'); } catch {}
+  if (!perNodeAnswers[curNode]) perNodeAnswers[curNode] = [];
+
+  let queue = [];
+  try { queue = JSON.parse(session.queue_nodes || '[]'); } catch {}
+  let nodePath = [];
+  try { nodePath = JSON.parse(session.difficulty_path || '[]'); } catch {}
+
+  const results = [];
+  let sessTotalDelta = 0;
+  let sessCorrectDelta = 0;
+
+  for (const a of answers) {
+    const questionId = a.questionId != null ? a.questionId : a.question_id;
+    if (!questionId) continue;
+    const q = db.prepare('SELECT id, answer, options FROM content_questions WHERE id = ?').get(questionId);
+    if (!q) {
+      results.push({ questionId, lessonId: a.lessonId || null, isCorrect: false, skipped: true, reason: 'question_not_found' });
+      continue;
+    }
+    const isCorrect = judgeQuestionAnswer(q, a.userAnswer != null ? a.userAnswer : a.answer);
+    const contentId = a.contentId != null ? a.contentId : a.content_id;
+    const safeContentId = resolveValidContentId(contentId, questionId);
+    const recordNodeId = a.lessonId || curNode; // 분석 시 차시 단위 정답률 — §8.3-1
+    try {
+      db.prepare(`
+        INSERT INTO diagnosis_answers (session_id, node_id, content_id, user_answer, is_correct)
+        VALUES (?, ?, ?, ?, ?)
+      `).run(sessionId, recordNodeId, safeContentId, String(a.userAnswer != null ? a.userAnswer : (a.answer || '')), isCorrect ? 1 : 0);
+    } catch (e) {
+      if (String(e.message).includes('FOREIGN KEY')) {
+        const anyContent = db.prepare('SELECT id FROM contents ORDER BY id LIMIT 1').get();
+        db.prepare(`
+          INSERT INTO diagnosis_answers (session_id, node_id, content_id, user_answer, is_correct)
+          VALUES (?, ?, ?, ?, ?)
+        `).run(sessionId, recordNodeId, anyContent ? anyContent.id : 1, String(a.userAnswer || ''), isCorrect ? 1 : 0);
+      } else { throw e; }
+    }
+    perNodeAnswers[curNode].push({ correct: isCorrect ? 1 : 0, lessonId: a.lessonId || null, questionId });
+    results.push({ questionId, lessonId: a.lessonId || null, isCorrect });
+    sessTotalDelta += 1;
+    if (isCorrect) sessCorrectDelta += 1;
+  }
+
+  if (sessTotalDelta > 0) {
+    db.prepare(`
+      UPDATE diagnosis_sessions
+        SET total_questions = total_questions + ?, correct_count = correct_count + ?
+       WHERE id = ?
+    `).run(sessTotalDelta, sessCorrectDelta, sessionId);
+  }
+
+  // 통과 판정
+  const correct = results.filter(r => r.isCorrect).length;
+  const total = results.length;
+  const correctRate = total > 0 ? correct / total : 0;
+  const nodePassed = correctRate >= PASS_THRESHOLD;
+
+  // user_node_status 갱신
+  db.prepare(`
+    INSERT OR REPLACE INTO user_node_status (user_id, node_id, status, diagnosis_result, correct_rate, last_accessed_at)
+    VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+  `).run(session.user_id, curNode,
+    nodePassed ? 'completed' : 'in_progress',
+    nodePassed ? (correctRate >= 0.80 ? 'mastered' : 'proficient') : (correctRate >= 0.40 ? 'developing' : 'needs_review'),
+    correctRate);
+
+  // nodePath 누적 + sheetMeta 보존
+  nodePath.push({
+    node: curNode,
+    passed: nodePassed ? 1 : 0,
+    correct, total,
+    rate: correctRate,
+    sheetMeta: { sheetSize: total, answeredCount: total },
+    endedAt: new Date().toISOString()
+  });
+
+  // 큐에서 curNode 제거 (이미 진단 완료한 노드)
+  queue = queue.filter(qn => qn !== curNode);
+
+  let nextNodeId = null;
+  let nextSheet = [];
+  let sessionComplete = false;
+  let endReason = null;
+  let recommendActions = null;
+  let drillDownPrereqCount = 0;
+  let nextAction = null;
+
+  if (nodePassed) {
+    // 자동 다음 노드 — 진단지 조립 가능한 첫 노드까지 skip
+    while (queue.length > 0) {
+      const nn = queue[0];
+      const s = _buildDiagnosticSheet(nn);
+      if (s && s.length > 0) {
+        nextNodeId = nn;
+        nextSheet = s;
+        break;
+      }
+      queue.shift();
+    }
+    if (!nextNodeId) {
+      sessionComplete = true;
+      endReason = 'queue_empty';
+      nextAction = { type: 'complete' };
+    } else {
+      nextAction = { type: 'auto_next' };
+    }
+  } else {
+    // 실패 — 자동 종료 금지. 3옵션.
+    drillDownPrereqCount = db.prepare(
+      'SELECT COUNT(1) AS cnt FROM learning_map_edges WHERE to_node_id = ?'
+    ).get(curNode)?.cnt || 0;
+    recommendActions = [
+      { id: 'retry',      label: '다시 진단하기' },
+      { id: 'drill_down', label: '더 아래 단원 진단하기', prereqCount: drillDownPrereqCount, disabled: drillDownPrereqCount === 0 },
+      { id: 'learn_here', label: '바로 학습하기' }
+    ];
+    nextAction = { type: 'choose', options: recommendActions };
+  }
+
+  // 세션 갱신
+  db.prepare(`
+    UPDATE diagnosis_sessions SET
+      queue_nodes = ?, current_node_id = ?, current_difficulty = 'medium',
+      difficulty_path = ?, per_node_answers = ?,
+      status = CASE WHEN ? = 1 THEN 'completed' ELSE status END,
+      completed_at = CASE WHEN ? = 1 THEN CURRENT_TIMESTAMP ELSE completed_at END
+    WHERE id = ?
+  `).run(
+    JSON.stringify(queue),
+    nextNodeId || curNode,
+    JSON.stringify(nodePath),
+    JSON.stringify(perNodeAnswers),
+    sessionComplete ? 1 : 0,
+    sessionComplete ? 1 : 0,
+    sessionId
+  );
+
+  // 세션 완료 시 결과 enrichment
+  let nodeResults = null;
+  let summary = null, areaStats = null, recommendNodes = null, targetNode = null;
+  let addedToLearningList = [];
+  if (sessionComplete) {
+    nodeResults = nodePath.map(p => {
+      const rate = (p.total || 0) > 0 ? (p.correct || 0) / p.total : 0;
+      const nodeInfo = db.prepare('SELECT unit_name, lesson_name, area, grade FROM learning_map_nodes WHERE node_id = ?').get(p.node) || {};
+      return {
+        nodeId: p.node, node_id: p.node,
+        title: nodeInfo.lesson_name || nodeInfo.unit_name || '이전 단원',
+        area: nodeInfo.area, grade: nodeInfo.grade,
+        passed: !!p.passed,
+        correctCount: p.correct, totalCount: p.total,
+        correctRate: rate
+      };
+    });
+    for (const r of nodeResults) {
+      if (!r.passed) {
+        try {
+          db.prepare('INSERT OR IGNORE INTO user_learning_list (user_id, node_id) VALUES (?, ?)')
+            .run(session.user_id, r.nodeId);
+          addedToLearningList.push(r.nodeId);
+        } catch {}
+      }
+    }
+    const sessionRow = db.prepare('SELECT id, user_id, target_node_id FROM diagnosis_sessions WHERE id = ?').get(sessionId);
+    if (sessionRow) {
+      const enrichment = _buildResultEnrichment(sessionRow, nodeResults);
+      summary = enrichment.summary;
+      areaStats = enrichment.areaStats;
+      recommendNodes = enrichment.recommendNodes;
+      targetNode = enrichment.targetNode;
+    }
+  }
+
+  // 큐 hydration
+  const queueRemainingHydrated = _hydrateDiagNodes(queue);
+  const nextNodeHydrated = nextNodeId ? (_hydrateDiagNodes([nextNodeId])[0] || { id: nextNodeId }) : null;
+
+  return {
+    nodeFinished: true,
+    nodePassed,
+    correctRate,
+    results,
+    nextAction,
+    recommendActions,
+    // 다음 진행
+    nextNodeId,
+    nextNode: nextNodeHydrated,
+    sheet: nextSheet,                 // 자동 진행 시 다음 단원 진단지
+    sheetSize: nextSheet.length,
+    queueRemaining: queue.length,
+    queueRemainingHydrated,
+    queueNodesHydrated: queueRemainingHydrated, // alias (호환)
+    queueOrderHydrated: queueRemainingHydrated, // alias
+    // 종료 시
+    sessionComplete,
+    finished: sessionComplete,
+    endReason,
+    nodeResults,
+    summary,
+    areaStats,
+    recommendNodes,
+    targetNode,
+    addedToLearningList
+  };
+}
+
+// ============================================================
+// 진단평가 정책 v2 — 노드 재진단 (신규)
+// ============================================================
+// 같은 노드를 새 문항으로 다시 푼다. per_node_answers의 해당 노드 키를 초기화하고
+// _buildDiagnosticSheet으로 새 진단지를 다시 조립한다.
+function retryDiagnosisNode(sessionId) {
+  const session = db.prepare('SELECT * FROM diagnosis_sessions WHERE id = ?').get(sessionId);
+  if (!session) {
+    const err = new Error('세션 없음');
+    err.statusCode = 404;
+    throw err;
+  }
+  if (session.status === 'completed') {
+    const err = new Error('완료된 세션은 재진단할 수 없습니다.');
+    err.statusCode = 400;
+    throw err;
+  }
+  const curNode = session.current_node_id;
+  if (!curNode) {
+    const err = new Error('현재 진단 노드가 없습니다.');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  // per_node_answers 초기화
+  let perNodeAnswers = {};
+  try { perNodeAnswers = JSON.parse(session.per_node_answers || '{}'); } catch {}
+  perNodeAnswers[curNode] = [];
+
+  // difficulty_path에서 마지막 동일 노드 항목 제거 (재진단이므로 직전 실패 기록은 빼고 새로 누적)
+  let nodePath = [];
+  try { nodePath = JSON.parse(session.difficulty_path || '[]'); } catch {}
+  if (nodePath.length > 0 && nodePath[nodePath.length - 1].node === curNode) {
+    nodePath.pop();
+  }
+
+  // 큐에 curNode가 없으면 다시 맨 앞에 추가 (이전 submit으로 제거되었음)
+  let queue = [];
+  try { queue = JSON.parse(session.queue_nodes || '[]'); } catch {}
+  if (!queue.includes(curNode)) queue.unshift(curNode);
+
+  // 새 진단지 조립
+  const sheet = _buildDiagnosticSheet(curNode);
+  if (!sheet || sheet.length === 0) {
+    const err = new Error('재진단할 문항이 없습니다.');
+    err.statusCode = 422;
+    throw err;
+  }
+
+  db.prepare(`
+    UPDATE diagnosis_sessions
+       SET per_node_answers = ?, difficulty_path = ?, queue_nodes = ?
+     WHERE id = ?
+  `).run(JSON.stringify(perNodeAnswers), JSON.stringify(nodePath), JSON.stringify(queue), sessionId);
+
+  const responseQueue = queue.filter(n => n !== curNode);
+  const currentNodeHydrated = _hydrateDiagNodes([curNode])[0] || { id: curNode };
+  return {
+    currentNodeId: curNode,
+    currentNode: currentNodeHydrated,
+    sheet,
+    sheetSize: sheet.length,
+    queueRemaining: responseQueue.length,
+    queueRemainingHydrated: _hydrateDiagNodes(responseQueue),
+    queueOrderHydrated: _hydrateDiagNodes([curNode, ...responseQueue])
+  };
+}
+
+function drillDownDiagnosis(sessionId, failedNodeId) {
+  // v2: 실패 노드의 직속 선수를 큐에 추가하고, 기존 큐 전체와 함께 _sortQueueByPriority로 재정렬.
+  //     응답에 다음 노드 진단지(sheet)와 정렬된 queueOrderHydrated 포함.
+  const session = db.prepare('SELECT * FROM diagnosis_sessions WHERE id = ?').get(sessionId);
+  if (!session) {
+    const err = new Error('세션 없음');
+    err.statusCode = 404;
+    throw err;
+  }
+  if (session.status === 'completed') {
+    const err = new Error('완료된 세션은 drill-down 불가');
+    err.statusCode = 400;
+    throw err;
+  }
+  const fNodeId = failedNodeId || session.current_node_id;
+  if (!fNodeId) {
+    const err = new Error('failedNodeId 또는 current_node_id 필요');
+    err.statusCode = 400;
+    throw err;
+  }
+
   let queue = [];
   try { queue = JSON.parse(session.queue_nodes || '[]'); } catch {}
 
-  // 실패 노드의 직전 선수노드를 큐 앞에 추가
-  const prereqs = db.prepare('SELECT from_node_id FROM learning_map_edges WHERE to_node_id = ?').all(failedNodeId).map(r => r.from_node_id);
+  // 실패 노드의 직속 선수노드
+  const prereqs = db.prepare('SELECT from_node_id FROM learning_map_edges WHERE to_node_id = ?')
+    .all(fNodeId).map(r => r.from_node_id);
   const added = [];
   for (const p of prereqs) {
-    if (!queue.includes(p)) {
-      queue.unshift(p);
+    if (!queue.includes(p) && p !== fNodeId) {
+      queue.push(p);
       added.push(p);
     }
   }
+
+  // 타깃 노드 메타 기준으로 큐 전체 우선순위 재정렬
+  const targetMeta = db.prepare(`
+    SELECT node_id, subject, grade, semester, grade_level
+    FROM learning_map_nodes WHERE node_id = ?
+  `).get(session.target_node_id) || { grade_level: '초', grade: 0, semester: 1 };
+  queue = _sortQueueByPriority(queue, targetMeta);
+
+  // 새 current는 큐의 첫 노드. 진단지 조립 가능한 첫 노드까지 skip.
+  let currentNodeId = null;
+  let sheet = [];
+  for (let i = 0; i < queue.length; i++) {
+    const nn = queue[i];
+    const s = _buildDiagnosticSheet(nn);
+    if (s && s.length > 0) {
+      currentNodeId = nn;
+      sheet = s;
+      break;
+    }
+  }
+  if (!currentNodeId && queue.length > 0) {
+    currentNodeId = queue[0]; // 문항이 없어도 일단 첫 노드로 (UI에서 안내)
+  }
+
   db.prepare('UPDATE diagnosis_sessions SET queue_nodes = ?, current_node_id = ?, current_difficulty = ? WHERE id = ?')
-    .run(JSON.stringify(queue), queue[0], 'medium', sessionId);
-  const q = _pickQuestionForNode(queue[0], 'medium');
-  return { addedNodes: added, currentNodeId: queue[0], question: q, queueRemaining: queue.length };
+    .run(JSON.stringify(queue), currentNodeId, 'medium', sessionId);
+
+  const responseQueue = currentNodeId ? queue.filter(n => n !== currentNodeId) : queue;
+  const currentNodeHydrated = currentNodeId ? (_hydrateDiagNodes([currentNodeId])[0] || { id: currentNodeId }) : null;
+  const queueRemainingHydrated = _hydrateDiagNodes(responseQueue);
+  // 사전 고지/사이드바용 — 현재 노드 포함 정렬 순서 + rank/gradeLabel
+  const allOrder = currentNodeId ? [currentNodeId, ...responseQueue] : responseQueue;
+  const allOrderMeta = _fetchNodeMetaMany(allOrder);
+  const queueOrderHydrated = allOrderMeta.map((m, idx) => ({
+    rank: idx + 1,
+    nodeId: m.node_id,
+    title: m.lesson_name || m.unit_name || '이전 단원',
+    gradeLabel: (m.grade && m.semester) ? `${m.grade}-${m.semester}` : null,
+    subject: m.subject || null
+  }));
+
+  return {
+    addedNodes: added,
+    addedCount: added.length,
+    currentNodeId,
+    currentNode: currentNodeHydrated,
+    sheet,
+    sheetSize: sheet.length,
+    queueRemaining: responseQueue.length,
+    queueRemainingHydrated,
+    queueOrderHydrated,
+    // 하위호환
+    question: sheet.length > 0 ? sheet[0].question : null
+  };
 }
 
 function getNextDiagnosisQuestion(sessionId) {
@@ -2843,6 +3382,8 @@ module.exports = {
   startDiagnosis, submitDiagnosisAnswer, finishDiagnosis, getDiagnosisResult,
   startDiagnosisCAT, submitDiagnosisAnswerCAT, drillDownDiagnosis, getDiagnosisState,
   getNextDiagnosisQuestion, listDiagnosisHistory,
+  // 진단평가 정책 v2 신규
+  submitDiagnosisSheet, retryDiagnosisNode,
   generateLearningPath, getCurrentPath, completeNode, evaluateNodeCompletion, inferNodeIdFromContent,
   getLearningDashboard, getRanking,
   getWrongNotesExtended, getWrongNoteDashboard, getTeacherWrongNoteDashboard,

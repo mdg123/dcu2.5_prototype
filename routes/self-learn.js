@@ -725,7 +725,65 @@ router.post('/diagnosis/:sessionId/drill-down', requireAuth, (req, res) => {
     res.json({ success: true, ...result });
   } catch (err) {
     console.error('[SELF-LEARN] diagnosis/drill-down error:', err);
-    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+    const status = err && err.statusCode ? err.statusCode : 500;
+    res.status(status).json({ success: false, message: status === 400 ? '필수 파라미터가 누락되었습니다.' : '서버 오류가 발생했습니다.', detail: String(err && err.message || err) });
+  }
+});
+
+// POST /diagnosis/:sessionId/submit-sheet — 진단지(시트) 단위 일괄 응답 (v2 신규)
+//   body: { answers: [{ questionId, lessonId, userAnswer, contentId? }, ...] }
+//   응답: { nodePassed, correctRate, results, nextAction, sheet(자동 다음 단원), recommendActions, queueRemainingHydrated, ... }
+router.post('/diagnosis/:sessionId/submit-sheet', requireAuth, (req, res) => {
+  try {
+    const sessionId = parseInt(req.params.sessionId);
+    if (!Number.isFinite(sessionId)) {
+      return res.status(400).json({ success: false, message: 'sessionId 형식 오류' });
+    }
+    const session = require('../db/index').prepare(
+      'SELECT user_id FROM diagnosis_sessions WHERE id = ?'
+    ).get(sessionId);
+    if (!session) return res.status(404).json({ success: false, message: '진단 세션을 찾을 수 없습니다.' });
+    if (session.user_id !== req.user.id && req.user.role !== 'admin') {
+      return res.status(403).json({ success: false, message: '본인 세션이 아닙니다.' });
+    }
+    const result = selfLearnDb.submitDiagnosisSheet(sessionId, req.body || {});
+    res.json({ success: true, ...result });
+  } catch (err) {
+    console.error('[SELF-LEARN] diagnosis/submit-sheet error:', err);
+    const status = err && err.statusCode ? err.statusCode : 500;
+    res.status(status).json({
+      success: false,
+      message: status === 400 ? '필수 파라미터가 누락되었습니다.' : '진단지 제출 처리 중 오류가 발생했습니다.',
+      detail: String(err && err.message || err)
+    });
+  }
+});
+
+// POST /diagnosis/:sessionId/retry-node — 현재 노드를 새 진단지로 다시 진단 (v2 신규)
+//   응답: { currentNodeId, sheet, sheetSize, queueRemainingHydrated, queueOrderHydrated }
+router.post('/diagnosis/:sessionId/retry-node', requireAuth, (req, res) => {
+  try {
+    const sessionId = parseInt(req.params.sessionId);
+    if (!Number.isFinite(sessionId)) {
+      return res.status(400).json({ success: false, message: 'sessionId 형식 오류' });
+    }
+    const session = require('../db/index').prepare(
+      'SELECT user_id FROM diagnosis_sessions WHERE id = ?'
+    ).get(sessionId);
+    if (!session) return res.status(404).json({ success: false, message: '진단 세션을 찾을 수 없습니다.' });
+    if (session.user_id !== req.user.id && req.user.role !== 'admin') {
+      return res.status(403).json({ success: false, message: '본인 세션이 아닙니다.' });
+    }
+    const result = selfLearnDb.retryDiagnosisNode(sessionId);
+    res.json({ success: true, ...result });
+  } catch (err) {
+    console.error('[SELF-LEARN] diagnosis/retry-node error:', err);
+    const status = err && err.statusCode ? err.statusCode : 500;
+    res.status(status).json({
+      success: false,
+      message: status === 400 ? '필수 파라미터가 누락되었습니다.' : '재진단 처리 중 오류가 발생했습니다.',
+      detail: String(err && err.message || err)
+    });
   }
 });
 
@@ -742,11 +800,28 @@ router.get('/diagnosis/:sessionId/state', requireAuth, (req, res) => {
 });
 
 // POST /diagnosis/:sessionId/finish — 진단 완료
+//   v2: body로 endReason ('user_decided_to_learn' 등) 받아 difficulty_path 마지막 항목에 보존
 router.post('/diagnosis/:sessionId/finish', requireAuth, (req, res) => {
   try {
     const sessionId = parseInt(req.params.sessionId);
+    const endReason = (req.body && req.body.endReason) || null;
+    if (endReason) {
+      // difficulty_path JSON 끝에 종료 사유 메타 추가 (마이그레이션 없이 보존)
+      try {
+        const mainDb = require('../db/index');
+        const row = mainDb.prepare('SELECT difficulty_path FROM diagnosis_sessions WHERE id = ?').get(sessionId);
+        if (row) {
+          let path = [];
+          try { path = JSON.parse(row.difficulty_path || '[]'); } catch {}
+          path.push({ _endReason: endReason, _at: new Date().toISOString() });
+          mainDb.prepare('UPDATE diagnosis_sessions SET difficulty_path = ? WHERE id = ?')
+            .run(JSON.stringify(path), sessionId);
+        }
+      } catch (e) { console.error('[diagnosis/finish] endReason 저장 실패', e.message); }
+    }
     const result = selfLearnDb.finishDiagnosis(sessionId);
     if (!result) return res.status(404).json({ success: false, message: '진단 세션을 찾을 수 없습니다.' });
+    if (endReason) result.endReason = endReason;
     // xAPI: 진단평가 완료 → assessment(submitted) + assessment-type='D'
     try {
       const mainDb = require('../db');
