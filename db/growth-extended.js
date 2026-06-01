@@ -7,6 +7,28 @@ const crypto = require('crypto');
 // 서비스 미제공 영역 — 실제 데이터가 없을 때만 점수 0 처리 (데이터가 있으면 정상 표시)
 const NO_SERVICE_AREAS = [];
 
+// ========== 감정 어휘 정본화 — 읽기 시점 방어적 정규화 (정본화 스펙 §2-1·§7-4) ==========
+// 출석부 라이브 UI(attendance.html)가 5단계 척도(very_bad/bad/soso/good/great)로 입력하므로
+// 1~3단계(very_bad/bad/soso) 또는 과거 시드 잔재(okay/focused/bored)가 attendance.emotion에 유입될 수 있다.
+// DB는 이미 1회 remap으로 정합 상태이나, 향후 라이브 유입·외부 import 재오염을 막기 위해
+// 집계 결과를 읽는 시점에 항상 정본 10키(happy/excited/great/good/calm/tired/sad/angry/anxious/frustrated)로 환원한다.
+const EMOTION_NORMALIZE = {
+  very_bad: 'sad',  bad: 'sad',   soso: 'calm',          // 출석부 5단계 라이브 입력
+  okay: 'calm',     focused: 'good', bored: 'tired'      // 과거 시드 잔재(방어선)
+};
+function normEmotion(e) { return e ? (EMOTION_NORMALIZE[e] || e) : e; }
+
+// [{emotion, cnt}] 행 배열을 정본키로 정규화 + 동일 정본키 합산 + cnt desc 재정렬
+function normalizeEmotionCounts(rows) {
+  const merged = new Map();
+  for (const r of rows) {
+    const key = normEmotion(r.emotion);
+    merged.set(key, (merged.get(key) || 0) + r.cnt);
+  }
+  return Array.from(merged, ([emotion, cnt]) => ({ emotion, cnt }))
+    .sort((a, b) => b.cnt - a.cnt);
+}
+
 // 학교급 매핑 (학년 → 학교급)
 function gradeToSchoolLevel(grade) {
   const g = parseInt(grade, 10);
@@ -426,9 +448,9 @@ function getPortfolioReportData(studentId, { from, to, schoolLevel, itemIds } = 
   // 4) 6대 핵심역량 (실데이터 집계)
   const competencies = getCompetencyStats(studentId, { startDate: from, endDate: to });
 
-  // 5) 6대 성장영역 (기존 student-report 활용)
+  // 5) 6대 성장영역 (기존 student-report 활용 — 6축 재편본)
   const reportObj = getStudentReport(studentId, { startDate: from, endDate: to });
-  const growthAreas = ['정서발달', '기초학력', '학습역량', '오늘의학습', '독서활동', '진로탐색'].map(name => ({
+  const growthAreas = ['정서발달', '참여도', '성취수준', '진로탐색', '독서활동', '콘텐츠활용'].map(name => ({
     name,
     score: reportObj.areas?.[name]?.score ?? 0,
     hasData: !!reportObj.areas?.[name]?.hasData
@@ -560,6 +582,7 @@ function getClassDashboard(classId, teacherId, { period, startDate, endDate } = 
   `).all(classId, classId, classId, classId);
 
   // 각 학생의 6대 영역 점수 계산
+  // (오늘의학습 요약은 하단 '오늘의 학습 현황'(getClassDailyLearning)을 그대로 사용하므로 별도 집계 불필요)
   const students = members.map(m => {
     const report = getStudentReport(m.id, { classId, startDate, endDate });
     return {
@@ -571,7 +594,9 @@ function getClassDashboard(classId, teacherId, { period, startDate, endDate } = 
       class_number: m.class_number,
       attendance_count: m.attendance_count,
       activity_count: m.activity_count,
-      latest_emotion: m.latest_emotion,
+      // 최신 감정을 정본키로 정규화 (스펙 §7-4). alert 판정(L628·635)·FE 감정뱃지 분류가 정규화된 값을 보게 함.
+      // very_bad/bad → sad 이므로 이상징후 alert이 자동 발동, soso → calm 으로 긍정 분류됨.
+      latest_emotion: normEmotion(m.latest_emotion),
       averageScore: report.overallScore,
       areas: report.areas
     };
@@ -581,18 +606,19 @@ function getClassDashboard(classId, teacherId, { period, startDate, endDate } = 
   const studentCount = students.length;
   const avgScore = studentCount > 0 ? students.reduce((s, st) => s + (st.averageScore || 0), 0) / studentCount : 0;
 
-  // 영역별 평균
-  const areaNames = ['정서발달', '기초학력', '학습역량', '오늘의학습', '독서활동', '진로탐색'];
+  // 영역별 평균 (6축 — 설계서 §1·§3)
+  // hasData=false 학생(성취수준 등)은 평균 산정에서 제외하여 레이더가 부당히 낮아지지 않게 함.
+  const areaNames = ['정서발달', '참여도', '성취수준', '진로탐색', '독서활동', '콘텐츠활용'];
   const areas = {};
   areaNames.forEach(name => {
-    const scores = students.map(s => s.areas?.[name]?.score ?? 0);
-    const hasDataCount = students.filter(s => s.areas?.[name]?.hasData !== false).length;
+    const withData = students.filter(s => s.areas?.[name]?.hasData === true);
+    const scores = withData.map(s => s.areas?.[name]?.score ?? 0);
     const avg = scores.length > 0 ? scores.reduce((a, b) => a + b, 0) / scores.length : 0;
-    const completed = scores.filter(s => s > 0).length;
     areas[name] = {
-      averageScore: Math.round(avg),
-      completionRate: studentCount > 0 ? Math.round(completed / studentCount * 100) : 0,
-      hasData: hasDataCount > 0
+      averageScore: scores.length > 0 ? Math.round(avg) : 0,
+      completionRate: studentCount > 0 ? Math.round(withData.length / studentCount * 100) : 0,
+      hasData: withData.length > 0,
+      dataCount: withData.length
     };
   });
 
@@ -670,29 +696,101 @@ function getClassDashboard(classId, teacherId, { period, startDate, endDate } = 
     emotionDateFilter = ' AND attendance_date BETWEEN ? AND ?';
     emotionDateParams.push(startDate, endDate);
   }
+  // 요일×감정별 원시 카운트를 가져와 JS에서 정본키로 정규화 후 긍정비율 산출 (스펙 §7-4).
+  // SQL의 emotion IN (...)로는 very_bad/bad(→sad 부정)·soso(→calm 긍정)를 못 가리므로 JS 집계로 전환.
   const weekdayEmotionRows = db.prepare(`
     SELECT CAST(strftime('%w', attendance_date) AS INTEGER) as weekday,
-      COUNT(*) as total,
-      SUM(CASE WHEN emotion IN ('happy','excited','good','great','calm') THEN 1 ELSE 0 END) as positive_count
+      emotion, COUNT(*) as cnt
     FROM attendance
     WHERE class_id = ? AND emotion IS NOT NULL ${emotionDateFilter}
-    GROUP BY weekday ORDER BY weekday
+    GROUP BY weekday, emotion
   `).all(...emotionDateParams);
-  const weekdayPositiveRates = [0, 0, 0, 0, 0, 0, 0]; // 월~일
+  const POSITIVE_EMOTIONS = new Set(['happy', 'excited', 'good', 'great', 'calm']);
+  // 요일별 [positive, total] 누적 (sqlite %w 인덱스 0=일~6=토 기준)
+  const weekdayAgg = Array.from({ length: 7 }, () => ({ positive: 0, total: 0 }));
   weekdayEmotionRows.forEach(w => {
+    const norm = normEmotion(w.emotion);
+    const bucket = weekdayAgg[w.weekday];
+    bucket.total += w.cnt;
+    if (POSITIVE_EMOTIONS.has(norm)) bucket.positive += w.cnt;
+  });
+  const weekdayPositiveRates = [0, 0, 0, 0, 0, 0, 0]; // 월~일
+  weekdayAgg.forEach((b, w) => {
     // sqlite %w: 0=일, 1=월, ..., 6=토 → 배열 인덱스: 0=월, ..., 5=토, 6=일
-    const idx = (w.weekday + 6) % 7;
-    if (idx >= 0 && idx < 7 && w.total > 0) {
-      weekdayPositiveRates[idx] = Math.round(w.positive_count / w.total * 100);
+    const idx = (w + 6) % 7;
+    if (b.total > 0) {
+      weekdayPositiveRates[idx] = Math.round(b.positive / b.total * 100);
     }
   });
 
-  // 감정별 전체 통계
-  const emotionCounts = db.prepare(`
+  // 감정별 전체 통계 — 정본키로 정규화 + 동일키 합산 + cnt desc 재정렬 (스펙 §7-4)
+  // 예: soso 2건 + calm 33건 → calm 35건. 태그클라우드 "❓ 기타" 유입 차단.
+  const emotionCounts = normalizeEmotionCounts(db.prepare(`
     SELECT emotion, COUNT(*) as cnt FROM attendance
     WHERE class_id = ? AND emotion IS NOT NULL ${emotionDateFilter}
     GROUP BY emotion ORDER BY cnt DESC
+  `).all(...emotionDateParams));
+
+  // 일별 평균 감정 체크인 인원 — 기간 내 각 날짜의 distinct user 수 평균 (1자리 반올림)
+  const dailyEmotionRows = db.prepare(`
+    SELECT attendance_date, COUNT(DISTINCT user_id) as members
+    FROM attendance
+    WHERE class_id = ? AND emotion IS NOT NULL ${emotionDateFilter}
+    GROUP BY attendance_date
   `).all(...emotionDateParams);
+  const dailyAvgCheckinMembers = dailyEmotionRows.length > 0
+    ? Math.round(dailyEmotionRows.reduce((a, r) => a + r.members, 0) / dailyEmotionRows.length * 10) / 10
+    : 0;
+  const checkinDays = dailyEmotionRows.length;
+
+  // 오늘의학습 클래스 요약 — 하단 '오늘의 학습 현황' 요약(getClassDailyLearning.summary)과
+  // 동일 의미·방식으로 산출하여 상단 메트릭 카드 ↔ 하단 요약의 정합성 보장.
+  // (학년 매칭된 세트 분모로 학생별 참여율을 산출 후 평균. 참여 안 한 학생도 모집단에 포함.)
+  let dailyRange = { startDate, endDate };
+  if (!startDate || !endDate) {
+    // 전체기간 fallback: 클래스 멤버 학년에 해당하는 세트들의 min~max target_date
+    const memberGrades = members.map(m => m.grade).filter(g => g != null);
+    const grades = [...new Set(memberGrades)];
+    let allTime = null;
+    if (grades.length > 0) {
+      const ph = grades.map(() => '?').join(',');
+      allTime = db.prepare(`SELECT MIN(target_date) minD, MAX(target_date) maxD FROM daily_learning_sets WHERE (class_id = ? OR (class_id IS NULL AND target_grade IN (${ph}))) AND is_active=1`).get(classId, ...grades);
+    } else {
+      allTime = db.prepare(`SELECT MIN(target_date) minD, MAX(target_date) maxD FROM daily_learning_sets WHERE class_id = ? AND is_active=1`).get(classId);
+    }
+    if (allTime && allTime.minD && allTime.maxD) dailyRange = { startDate: allTime.minD, endDate: allTime.maxD };
+  }
+  let dailyLearning;
+  try {
+    const cd = getClassDailyLearning(classId, dailyRange);
+    const s = cd.summary || {};
+    // 일별 평균 참여 인원 — 세트가 있는 날짜에서 그 날 participated된 학생 수의 평균
+    const setDateSet = new Set((cd.sets || []).map(st => st.targetDate));
+    const dailyLearnRows = (cd.dates || [])
+      .filter(d => setDateSet.has(d))
+      .map(d => ({
+        d,
+        cnt: (cd.students || []).filter(st => st.daily && st.daily[d] && st.daily[d].participated).length
+      }));
+    const dailyAvgParticipants = dailyLearnRows.length > 0
+      ? Math.round(dailyLearnRows.reduce((a, r) => a + r.cnt, 0) / dailyLearnRows.length * 10) / 10
+      : 0;
+    const learnDays = dailyLearnRows.length;
+    dailyLearning = {
+      avgCompletionRate: s.avgCompletionRate != null ? s.avgCompletionRate : 0,
+      avgAccuracy: s.avgAccuracy, // null 허용 (점수 있는 학생 없으면 null)
+      maxStreak: s.maxStreak || 0,
+      maxStreakHolders: s.maxStreakHolders || [],
+      participantCount: (cd.students || []).filter(st => st.participationRate > 0).length,
+      studentCount: (cd.students || []).length,
+      dailyAvgParticipants,
+      learnDays,
+      hasData: !!s.hasData
+    };
+  } catch (err) {
+    console.error('dailyLearning summary failed:', err);
+    dailyLearning = { avgCompletionRate: 0, avgAccuracy: null, maxStreak: 0, maxStreakHolders: [], participantCount: 0, studentCount: members.length, dailyAvgParticipants: 0, learnDays: 0, hasData: false };
+  }
 
   return {
     className,
@@ -705,7 +803,170 @@ function getClassDashboard(classId, teacherId, { period, startDate, endDate } = 
     attentionStudents,
     alerts: attentionStudents,
     contentUsage,
-    emotionStats: { weekdayPositiveRates, emotionCounts }
+    dailyLearning,
+    emotionStats: { weekdayPositiveRates, emotionCounts, dailyAvgCheckinMembers, checkinDays }
+  };
+}
+
+// ========== 6축 성장 분포 공통 헬퍼 (설계서 §1·§8) ==========
+// 정서발달·참여도·성취수준·진로탐색·독서활동·콘텐츠활용 6축을 한 곳에서 산출.
+// getStudentReport·getClassDashboard 양쪽이 이 헬퍼를 호출해 두 화면 자동 일관.
+// 각 축은 { score, hasData, ...meta } 형태. 비율은 분모>0 ? Math.min(100,...) : null, 평균은 가용 항목만.
+function computeAreas6(studentId, { classId, startDate, endDate } = {}) {
+  const hasRange = !!(startDate && endDate);
+
+  // ── 축 1: 정서발달 (긍정 감정 비율) ──
+  const emoParams = [studentId];
+  let emoWhere = 'WHERE user_id = ?';
+  if (classId) { emoWhere += ' AND class_id = ?'; emoParams.push(classId); }
+  emoWhere += ' AND emotion IS NOT NULL';
+  if (hasRange) { emoWhere += ' AND attendance_date BETWEEN ? AND ?'; emoParams.push(startDate, endDate); }
+  // 정본키로 정규화 후 합산 (스펙 §7-4). soso→calm(긍정)·very_bad/bad→sad(부정) 정확 분류.
+  const emoRows = normalizeEmotionCounts(db.prepare(`SELECT emotion, COUNT(*) as cnt FROM attendance ${emoWhere} GROUP BY emotion`).all(...emoParams));
+  const emotionTotal = emoRows.reduce((s, e) => s + e.cnt, 0);
+  const positiveCnt = emoRows
+    .filter(e => ['happy', 'excited', 'good', 'great', 'calm'].includes(e.emotion))
+    .reduce((s, e) => s + e.cnt, 0);
+  const emotionScore = emotionTotal > 0 ? Math.round(positiveCnt / emotionTotal * 100) : 0;
+
+  // ── 축 2: 참여도 (과제·평가·오늘학습·수업 4지표 가용 평균) ──
+  // classId 없는 개인 호출은 클래스 맥락 지표라 hasData=false 가드 (설계서 §1 축2 주석)
+  const clamp = (n, d) => (d > 0 ? Math.min(100, Math.round((n / d) * 100)) : null);
+  let participation = { homework: null, exam: null, daily: null, lesson: null };
+  let participationScore = 0;
+  let participationHasData = false;
+  if (classId) {
+    const hwD = db.prepare('SELECT COUNT(*) as c FROM homework WHERE class_id = ?').get(classId).c;
+    const hwN = db.prepare(`
+      SELECT COUNT(DISTINCT h.id) as c FROM homework h
+      JOIN homework_submissions s ON s.homework_id = h.id AND s.student_id = ?
+      WHERE h.class_id = ? AND s.status IN ('submitted','graded')
+    `).get(studentId, classId).c;
+    const exD = db.prepare('SELECT COUNT(*) as c FROM exams WHERE class_id = ?').get(classId).c;
+    const exN = db.prepare(`
+      SELECT COUNT(DISTINCT e.id) as c FROM exams e
+      JOIN exam_students es ON es.exam_id = e.id AND es.user_id = ?
+      WHERE e.class_id = ? AND es.status = 'submitted'
+    `).get(studentId, classId).c;
+    const dlD = db.prepare('SELECT COUNT(*) as c FROM daily_learning_sets WHERE class_id = ?').get(classId).c;
+    const dlN = db.prepare(`
+      SELECT COUNT(DISTINCT set_id) as c FROM daily_learning_progress
+      WHERE user_id = ? AND status = 'completed'
+        AND set_id IN (SELECT id FROM daily_learning_sets WHERE class_id = ?)
+    `).get(studentId, classId).c;
+    const lsD = db.prepare('SELECT COUNT(*) as c FROM lessons WHERE class_id = ?').get(classId).c;
+    // 수업 이수: lesson_self_check(수업 후 학생 셀프 체크) DISTINCT lesson_id 기반.
+    // 단순 조회(lesson_view)가 아니라 "수업을 듣고 셀프 점검까지 한 수업"을 이수로 간주.
+    const lsN = db.prepare(`
+      SELECT COUNT(DISTINCT lesson_id) as c FROM lesson_self_check
+      WHERE user_id = ? AND class_id = ?
+    `).get(studentId, classId).c;
+    participation = {
+      homework: clamp(hwN, hwD),
+      exam: clamp(exN, exD),
+      daily: clamp(dlN, dlD),
+      lesson: clamp(lsN, lsD)
+    };
+    const avail = Object.values(participation).filter(v => v != null);
+    participationHasData = (hwD > 0 || exD > 0 || dlD > 0 || lsD > 0);
+    participationScore = avail.length > 0
+      ? Math.round(avail.reduce((a, b) => a + b, 0) / avail.length)
+      : 0;
+  }
+
+  // ── 축 3: 성취수준 (정답률) — 오늘학습·진단·문항+평가 누적 정답/문항 비율 가용 평균 ──
+  const dlAcc = db.prepare(`
+    SELECT SUM(correct_count) as cc, SUM(total_questions) as tq
+    FROM daily_learning_progress WHERE user_id = ? AND status = 'completed'
+  `).get(studentId);
+  const diAcc = db.prepare(`
+    SELECT SUM(correct_count) as cc, SUM(total_questions) as tq
+    FROM diagnosis_sessions WHERE user_id = ? AND status = 'completed'
+  `).get(studentId);
+  // 문항풀이: 콘텐츠/AI 맞춤학습의 단발 문항
+  const paAcc = db.prepare(`
+    SELECT SUM(is_correct) as cc, COUNT(*) as tq FROM problem_attempts WHERE user_id = ?
+  `).get(studentId);
+  // 채움클래스 평가: exam_students.score(0~100)를 문항수 가중으로 환산
+  const exAcc = db.prepare(`
+    SELECT
+      COALESCE(SUM(es.score * COALESCE(e.question_count, 0) / 100.0), 0) as cc,
+      COALESCE(SUM(COALESCE(e.question_count, 0)), 0) as tq
+    FROM exam_students es JOIN exams e ON es.exam_id = e.id
+    WHERE es.user_id = ? AND es.status = 'submitted' AND es.score IS NOT NULL
+  `).get(studentId);
+  // 문항풀이 + 평가 합산 정답률 (문항수 가중평균)
+  const paCC = paAcc?.cc || 0;
+  const paTQ = paAcc?.tq || 0;
+  const exCC = exAcc?.cc || 0;
+  const exTQ = exAcc?.tq || 0;
+  const combinedCC = paCC + exCC;
+  const combinedTQ = paTQ + exTQ;
+  const problemAccuracy = combinedTQ > 0 ? (combinedCC / combinedTQ) * 100 : null;
+  const accOf = (o) => (o && o.tq > 0 ? (o.cc / o.tq) * 100 : null);
+  const achievement = {
+    daily: accOf(dlAcc) != null ? Math.round(accOf(dlAcc)) : null,
+    diagnosis: accOf(diAcc) != null ? Math.round(accOf(diAcc)) : null,
+    problem: problemAccuracy != null ? Math.round(problemAccuracy) : null,
+    problemBreakdown: {
+      contentItems: paTQ,            // problem_attempts 문항 수
+      contentCorrect: paCC,
+      examQuestions: exTQ,           // 평가 문항 수 가중치
+      examCorrect: Math.round(exCC * 10) / 10
+    }
+  };
+  const accAvail = [accOf(dlAcc), accOf(diAcc), problemAccuracy].filter(v => v != null);
+  const achievementHasData = accAvail.length > 0;
+  const achievementScore = achievementHasData
+    ? Math.round(accAvail.reduce((a, b) => a + b, 0) / accAvail.length)
+    : 0;
+
+  // ── 축 4: 진로탐색 (기존 유지) ──
+  const careerDateFilter = hasRange ? ' AND activity_date BETWEEN ? AND ?' : '';
+  const careerParams = hasRange ? [studentId, startDate, endDate] : [studentId];
+  const careerLogCount = db.prepare(`
+    SELECT COUNT(*) as c FROM career_logs WHERE user_id = ? ${careerDateFilter}
+  `).get(...careerParams).c;
+  const interestAreaCount = db.prepare(`
+    SELECT COUNT(*) as c FROM (
+      SELECT interest_area FROM career_logs
+      WHERE user_id = ? AND interest_area IS NOT NULL AND interest_area != '' ${careerDateFilter}
+      GROUP BY interest_area
+    )
+  `).get(...careerParams).c;
+  const careerScore = Math.min(interestAreaCount * 20 + careerLogCount * 15, 100);
+
+  // ── 축 5: 독서활동 (기존 유지) ──
+  const readDateFilter = hasRange ? ' AND created_at BETWEEN ? AND ?' : '';
+  const readParams = hasRange ? [studentId, startDate, endDate] : [studentId];
+  const bookCount = db.prepare(`
+    SELECT COUNT(*) as c FROM reading_logs WHERE user_id = ? ${readDateFilter}
+  `).get(...readParams).c;
+  const readingScore = bookCount === 0 ? 0 :
+    bookCount <= 2 ? bookCount * 20 :
+    bookCount <= 5 ? 40 + (bookCount - 2) * 15 :
+    Math.min(85 + (bookCount - 5) * 5, 100);
+
+  // ── 축 6: 콘텐츠 활용 (content_view + lesson_view 건수 구간화) ──
+  const contentDateFilter = hasRange ? ' AND created_at BETWEEN ? AND ?' : '';
+  const contentParams = hasRange ? [studentId, startDate, endDate] : [studentId];
+  const contentCount = db.prepare(`
+    SELECT COUNT(*) as c FROM learning_logs
+    WHERE user_id = ? AND activity_type IN ('content_view','lesson_view') ${contentDateFilter}
+  `).get(...contentParams).c;
+  const contentScore = contentCount === 0 ? 0 :
+    contentCount <= 9 ? 30 :
+    contentCount <= 29 ? 50 :
+    contentCount <= 59 ? 70 :
+    contentCount <= 99 ? 85 : 100;
+
+  return {
+    '정서발달':   { score: emotionScore, hasData: emotionTotal > 0, emotionTotal, trend: '' },
+    '참여도':     { score: participationScore, hasData: participationHasData, participation, trend: '' },
+    '성취수준':   { score: achievementScore, hasData: achievementHasData, achievement, trend: '' },
+    '진로탐색':   { score: careerScore, hasData: careerLogCount > 0, interestAreaCount, careerLogCount, trend: '' },
+    '독서활동':   { score: readingScore, hasData: bookCount > 0, bookCount, trend: '' },
+    '콘텐츠활용': { score: contentScore, hasData: contentCount > 0, contentCount, trend: '' }
   };
 }
 
@@ -737,7 +998,24 @@ function getStudentReport(studentId, { classId, startDate, endDate } = {}) {
   if (classId) { emotionWhere += ' AND class_id = ?'; emotionParams.push(classId); }
   emotionWhere += ' AND emotion IS NOT NULL';
   if (startDate && endDate) { emotionWhere += ' AND attendance_date BETWEEN ? AND ?'; emotionParams.push(startDate, endDate); }
-  const emotions = db.prepare(`SELECT emotion, COUNT(*) as cnt FROM attendance ${emotionWhere} GROUP BY emotion`).all(...emotionParams);
+  // 정본키로 정규화 + 합산 (스펙 §7-4). positiveRatio 계산(L1054)·emotionDevelopment FE 출력 양쪽이 정규화된 값을 사용.
+  const emotions = normalizeEmotionCounts(db.prepare(`SELECT emotion, COUNT(*) as cnt FROM attendance ${emotionWhere} GROUP BY emotion`).all(...emotionParams));
+
+  // 최근 감정 흐름 (최대 10건, 최신순) — 학생 성장 리포트 정서 발달 카드에서
+  // "최근 감정 상태 주의" 알림의 근거가 된 실제 감정(날짜·이모지·라벨·이유)을 보여주기 위함.
+  // classId / 기간 필터 동일 적용. 정본키로 정규화하여 대시보드 알림과 분류 일치.
+  let recentEmoQuery = `
+    SELECT attendance_date, emotion, emotion_reason, emotion_score
+    FROM attendance
+    WHERE user_id = ? AND emotion IS NOT NULL
+  `;
+  const recentEmoParams = [studentId];
+  if (classId) { recentEmoQuery += ' AND class_id = ?'; recentEmoParams.push(classId); }
+  if (startDate && endDate) { recentEmoQuery += ' AND attendance_date BETWEEN ? AND ?'; recentEmoParams.push(startDate, endDate); }
+  // 기간 내 전부 반환 (FE에서 max-height+scroll). 안전 상한 200건.
+  recentEmoQuery += ' ORDER BY attendance_date DESC LIMIT 200';
+  const recentEmotions = db.prepare(recentEmoQuery).all(...recentEmoParams)
+    .map(row => ({ ...row, emotion: normEmotion(row.emotion) }));
 
   // 2. 기초학력: 진단 결과
   const diagDateFilter = startDate && endDate ? ' AND completed_at BETWEEN ? AND ?' : '';
@@ -926,14 +1204,9 @@ function getStudentReport(studentId, { classId, startDate, endDate } = {}) {
 
   const dailyTotal = dailyStats ? dailyStats.total : 0;
 
-  const areas = {
-    '정서발달': { score: Math.round(positiveRatio), hasData: emotionTotal > 0, trend: '' },
-    '기초학력': { score: Math.round(diagAvg), hasData: diagnoses.length > 0, trend: '' },
-    '학습역량': { score: Math.round(learnAvg), hasData: learningStats.length > 0, trend: '' },
-    '오늘의학습': { score: Math.round(dailyRate), hasData: dailyTotal > 0, trend: '' },
-    '독서활동': { score: readingScore, hasData: readingLogs.length > 0, bookCount: readingLogs.length, trend: '' },
-    '진로탐색': { score: careerScore, hasData: careerLogs.length > 0, interestAreaCount: interestAreaCount, careerLogCount: careerLogCount, trend: '' }
-  };
+  // 6축 성장 분포 — 공통 헬퍼로 산출 (설계서 §1·§8)
+  // 정서발달·참여도·성취수준·진로탐색·독서활동·콘텐츠활용
+  const areas = computeAreas6(studentId, { classId, startDate, endDate });
 
   // 서비스 미제공 영역 강제 0점 처리
   NO_SERVICE_AREAS.forEach(name => {
@@ -943,13 +1216,13 @@ function getStudentReport(studentId, { classId, startDate, endDate } = {}) {
     }
   });
 
-  // 가중치 기반 종합 점수 계산 (hasData인 영역만)
+  // 가중치 기반 종합 점수 계산 (hasData인 영역만, 정규화) — 설계서 §2
   const weights = {
-    '정서발달': 0.15,
-    '기초학력': 0.25,
-    '학습역량': 0.20,
-    '오늘의학습': 0.15,
-    '독서활동': 0.15,
+    '성취수준': 0.25,
+    '참여도': 0.25,
+    '정서발달': 0.20,
+    '콘텐츠활용': 0.10,
+    '독서활동': 0.10,
     '진로탐색': 0.10
   };
   const validAreas = Object.entries(areas).filter(([_, a]) => a.hasData);
@@ -968,6 +1241,7 @@ function getStudentReport(studentId, { classId, startDate, endDate } = {}) {
     overallScore,
     areas,
     emotionDevelopment: emotions,
+    recentEmotions,
     academicFoundation: diagnoses,
     learningCapacity: learningStats,
     dailyLearning: dailyStats,
@@ -988,16 +1262,23 @@ function getStudentReport(studentId, { classId, startDate, endDate } = {}) {
   };
 }
 
-function getStudentReportArea(studentId, areaName, { startDate, endDate } = {}) {
-  const report = getStudentReport(studentId, { startDate, endDate });
+function getStudentReportArea(studentId, areaName, { classId, startDate, endDate } = {}) {
+  // classId 전달 시 참여도 등 클래스 맥락 축도 정상 산출되도록 전달
+  const report = getStudentReport(studentId, { classId, startDate, endDate });
+  // 상세 데이터 필드 매핑 (탭 상세). 신규 6축 키도 areas 에서 직접 노출.
   const areaMap = {
     emotion: 'emotionDevelopment',
     academic: 'academicFoundation',
+    achievement: 'academicFoundation', // 성취수준 상세 = 진단/문항 데이터
     learning: 'learningCapacity',
     daily: 'dailyLearning',
+    participation: 'dailyLearning',
     reading: 'readingActivity',
-    career: 'careerExploration'
+    career: 'careerExploration',
+    content: 'contentUsage'
   };
+  // areas 6축 키(정서발달/참여도/성취수준/진로탐색/독서활동/콘텐츠활용) 직접 조회 지원
+  if (report.areas && report.areas[areaName]) return report.areas[areaName];
   return report[areaMap[areaName]] || null;
 }
 
@@ -1040,21 +1321,22 @@ function getObservations(studentId, classId) {
 // ========== 오늘의학습 클래스 상세 ==========
 
 function getClassDailyLearning(classId, { period = 'weekly', startDate, endDate } = {}) {
-  // 1. 클래스 학생 목록
+  // 1. 클래스 학생 목록 (학생 grade 포함 — 학년별 글로벌 세트 매칭에 사용)
   const members = db.prepare(`
-    SELECT u.id, u.display_name FROM class_members cm
+    SELECT u.id, u.display_name, u.grade FROM class_members cm
     JOIN users u ON cm.user_id = u.id WHERE cm.class_id = ? AND u.role = 'student'
     ORDER BY u.display_name
   `).all(classId);
   if (members.length === 0) return { students: [], dates: [], sets: [] };
 
-  // 2. 날짜 범위 계산
+  // 2. 날짜 범위 계산 — 로컬(KST) 기준. UTC(toISOString)는 KST 자정이 전날 15:00이 되어 -1일 시프트되므로 금지.
+  const fmtLocalDate = (dt) => `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
   const today = new Date();
   if (!startDate || !endDate) {
     if (period === 'monthly') {
-      startDate = today.toISOString().slice(0, 8) + '01';
+      startDate = fmtLocalDate(new Date(today.getFullYear(), today.getMonth(), 1));
       const lastDay = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
-      endDate = today.toISOString().slice(0, 8) + String(lastDay).padStart(2, '0');
+      endDate = fmtLocalDate(new Date(today.getFullYear(), today.getMonth(), lastDay));
     } else {
       // weekly: 이번 주 월~일
       const day = today.getDay();
@@ -1063,46 +1345,75 @@ function getClassDailyLearning(classId, { period = 'weekly', startDate, endDate 
       monday.setDate(today.getDate() + mondayOffset);
       const sunday = new Date(monday);
       sunday.setDate(monday.getDate() + 6);
-      startDate = monday.toISOString().slice(0, 10);
-      endDate = sunday.toISOString().slice(0, 10);
+      startDate = fmtLocalDate(monday);
+      endDate = fmtLocalDate(sunday);
     }
   }
 
-  // 3. 해당 기간의 학습 세트 조회
-  const sets = db.prepare(`
-    SELECT s.*,
-      (SELECT COUNT(*) FROM daily_learning_items WHERE set_id = s.id) as item_count
-    FROM daily_learning_sets s
-    WHERE (s.class_id = ? OR s.class_id IS NULL)
-      AND s.target_date BETWEEN ? AND ?
-      AND s.is_active = 1
-    ORDER BY s.target_date ASC
-  `).all(classId, startDate, endDate);
+  // 3. 해당 기간의 후보 학습 세트 조회 (학생 학년별 매칭)
+  //    후보 세트 = 클래스 전용 세트(class_id=classId) ∪ 멤버들의 학년(users.grade) union에 해당하는 글로벌 세트.
+  //    혼합 클래스(classes.grade=null)에서도 학생 학년에 맞지 않는 타 학년 글로벌 세트가 혼입되지 않도록,
+  //    클래스 grade가 아니라 실제 학생들의 grade 목록으로 제한한다.
+  const memberGrades = [...new Set(members.map(m => m.grade).filter(g => g != null))];
+  let sets;
+  if (memberGrades.length > 0) {
+    const gradePlaceholders = memberGrades.map(() => '?').join(',');
+    sets = db.prepare(`
+      SELECT s.*,
+        (SELECT COUNT(*) FROM daily_learning_items WHERE set_id = s.id) as item_count
+      FROM daily_learning_sets s
+      WHERE (s.class_id = ? OR (s.class_id IS NULL AND s.target_grade IN (${gradePlaceholders})))
+        AND s.target_date BETWEEN ? AND ?
+        AND s.is_active = 1
+      ORDER BY s.target_date ASC
+    `).all(classId, ...memberGrades, startDate, endDate);
+  } else {
+    // 학생 grade가 모두 null이면 글로벌 세트는 매칭 불가 → 클래스 전용 세트만.
+    sets = db.prepare(`
+      SELECT s.*,
+        (SELECT COUNT(*) FROM daily_learning_items WHERE set_id = s.id) as item_count
+      FROM daily_learning_sets s
+      WHERE s.class_id = ?
+        AND s.target_date BETWEEN ? AND ?
+        AND s.is_active = 1
+      ORDER BY s.target_date ASC
+    `).all(classId, startDate, endDate);
+  }
 
   // 4. 날짜 목록 생성
   const dates = [];
   const d = new Date(startDate + 'T00:00:00');
   const end = new Date(endDate + 'T00:00:00');
   while (d <= end) {
-    dates.push(d.toISOString().slice(0, 10));
+    dates.push(fmtLocalDate(d));
     d.setDate(d.getDate() + 1);
   }
 
-  // 5. 학생별 날짜별 진행 상황 조회
-  const studentIds = members.map(m => m.id);
-  const studentPlaceholders = studentIds.map(() => '?').join(',');
-
-  // 세트ID 목록
-  const setIds = sets.map(s => s.id);
-
+  // 5. 학생별 날짜별 진행 상황 조회 — 각 학생의 분모는 "그 학생 학년에 맞는 글로벌 세트 + 클래스 전용 세트"로만 한정.
   const studentData = members.map(member => {
     const dailyMap = {};
     dates.forEach(date => {
-      dailyMap[date] = { participated: false, totalItems: 0, completedItems: 0, score: null, accuracy: null };
+      dailyMap[date] = { participated: false, totalItems: 0, completedItems: 0, score: null, accuracy: null, hasSet: false, setId: null };
     });
 
-    if (setIds.length > 0) {
-      const setPlaceholders = setIds.map(() => '?').join(',');
+    // 이 학생에게 해당하는 후보 세트만 필터링 (클래스 전용 ∪ 학생 학년 글로벌)
+    const memberSets = sets.filter(s =>
+      s.class_id === classId || (s.class_id == null && s.target_grade === member.grade)
+    );
+    const memberSetIds = memberSets.map(s => s.id);
+
+    // 날짜별 대표 세트(클릭 모달용): 같은 날 여러 세트면 문항수 많은 것 우선, 동률이면 첫번째.
+    const repSetByDate = {};
+    memberSets.forEach(s => {
+      const cur = repSetByDate[s.target_date];
+      if (!cur || (s.item_count || 0) > (cur.item_count || 0)) repSetByDate[s.target_date] = s;
+    });
+    Object.keys(repSetByDate).forEach(dt => {
+      if (dailyMap[dt]) { dailyMap[dt].hasSet = true; dailyMap[dt].setId = repSetByDate[dt].id; }
+    });
+
+    if (memberSetIds.length > 0) {
+      const setPlaceholders = memberSetIds.map(() => '?').join(',');
       // 날짜별 세트에 대한 진행 상황
       const progress = db.prepare(`
         SELECT s.target_date,
@@ -1114,7 +1425,7 @@ function getClassDailyLearning(classId, { period = 'weekly', startDate, endDate 
         LEFT JOIN daily_learning_progress p ON p.item_id = i.id AND p.user_id = ?
         WHERE s.id IN (${setPlaceholders})
         GROUP BY s.target_date
-      `).all(member.id, ...setIds);
+      `).all(member.id, ...memberSetIds);
 
       progress.forEach(row => {
         if (dailyMap[row.target_date]) {
@@ -1123,15 +1434,17 @@ function getClassDailyLearning(classId, { period = 'weekly', startDate, endDate 
             totalItems: row.total_items,
             completedItems: row.completed_items,
             score: row.avg_score != null ? Math.round(row.avg_score) : null,
-            accuracy: row.total_items > 0 ? Math.round(row.completed_items / row.total_items * 100) : 0
+            accuracy: row.total_items > 0 ? Math.round(row.completed_items / row.total_items * 100) : 0,
+            hasSet: dailyMap[row.target_date].hasSet,
+            setId: dailyMap[row.target_date].setId
           };
         }
       });
     }
 
-    // 총 참여율 & 평균 정답률
+    // 총 참여율 & 평균 정답률 — 분모는 "이 학생이 매칭 세트를 가진 날 수"
     const participated = Object.values(dailyMap).filter(v => v.participated).length;
-    const datesWithSets = Object.entries(dailyMap).filter(([dt]) => sets.some(s => s.target_date === dt)).length;
+    const datesWithSets = dates.filter(dt => memberSets.some(s => s.target_date === dt)).length;
     const scores = Object.values(dailyMap).filter(v => v.score != null).map(v => v.score);
     const avgScore = scores.length > 0 ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : null;
 
@@ -1144,12 +1457,38 @@ function getClassDailyLearning(classId, { period = 'weekly', startDate, endDate 
     };
   });
 
+  // 요약 통계 — 매트릭스와 동일 기간/데이터 기준 (요약 카드 ↔ 매트릭스 일관성 보장)
+  const compRates = studentData.map(s => s.participationRate);
+  const accScores = studentData.filter(s => s.avgScore != null).map(s => s.avgScore);
+  let summaryMaxStreak = 0;
+  const studentStreaks = studentData.map(s => {
+    let cur = 0, best = 0;
+    dates.forEach(dt => {
+      if (s.daily[dt] && s.daily[dt].participated) { cur++; if (cur > best) best = cur; }
+      else cur = 0;
+    });
+    if (best > summaryMaxStreak) summaryMaxStreak = best;
+    return { name: s.name, best };
+  });
+  // 최다 연속일 달성자 명단 (동률이면 전원, FE에서 "ㅇㅇㅇ 외 N명"으로 축약)
+  const maxStreakHolders = summaryMaxStreak > 0
+    ? studentStreaks.filter(s => s.best === summaryMaxStreak).map(s => s.name)
+    : [];
+  const summary = {
+    avgCompletionRate: compRates.length ? Math.round(compRates.reduce((a, b) => a + b, 0) / compRates.length) : 0,
+    avgAccuracy: accScores.length ? Math.round(accScores.reduce((a, b) => a + b, 0) / accScores.length) : null,
+    maxStreak: summaryMaxStreak,
+    maxStreakHolders,
+    hasData: studentData.some(s => s.participationRate > 0)
+  };
+
   return {
     students: studentData,
     dates,
     startDate,
     endDate,
     period,
+    summary,
     sets: sets.map(s => ({ id: s.id, title: s.title, targetDate: s.target_date, itemCount: s.item_count, subject: s.target_subject }))
   };
 }
@@ -1487,7 +1826,7 @@ module.exports = {
   getPortfolioReportData,
   // 학교급 helper
   gradeToSchoolLevel, schoolLevelLabel, schoolLevelToGradeRange,
-  getClassDashboard, getStudentReport, getStudentReportArea, getClassDailyLearning,
+  getClassDashboard, getStudentReport, getStudentReportArea, getClassDailyLearning, computeAreas6,
   createObservation, getObservations,
   getReadingLogs, addReadingLog, updateReadingLog, deleteReadingLog,
   getCareerLogs, addCareerLog, updateCareerLog, deleteCareerLog,

@@ -1,3 +1,9 @@
+/**
+ * [비교 전용 스크립트 — DB 무변경]
+ * KOFAC v2 단일 정본(SSOT)와 폐기된 임시 엑셀(`통합_학습맵_계통도_연결_완성.xlsx`) 사이의
+ * 차시 ID 중첩 분석용. 시드 경로가 아니라 차이 분석에만 사용한다.
+ * SSOT 는 `통합_학습맵_계통도_KOFAC기준매핑_v2.xlsx` 임.
+ */
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const XLSX = require('xlsx');
@@ -5,6 +11,7 @@ const Database = require('better-sqlite3');
 const path = require('path');
 
 const kofacRows = XLSX.utils.sheet_to_json(XLSX.readFile('./통합_학습맵_계통도_KOFAC기준매핑_v2.xlsx').Sheets['학습맵_리니어연결'], { defval: '' });
+// 비교용 (폐기됨, SSOT 아님): 통합_학습맵_계통도_연결_완성.xlsx
 const oldRows = XLSX.utils.sheet_to_json(XLSX.readFile('./통합_학습맵_계통도_연결_완성.xlsx').Sheets['학습맵_리니어연결'], { defval: '' });
 const db = new Database('./data/dacheum.db', { readonly: true });
 

@@ -1,8 +1,14 @@
+/**
+ * [비교/조사 전용 스크립트 — DB 무변경]
+ * 폐기된 임시 엑셀(`통합_학습맵_계통도_연결_완성.xlsx`)의 행 구조를 들여다보기 위한 유틸.
+ * 시드 경로가 아니라 디버그/비교 용도. SSOT 는 KOFAC v2 임.
+ */
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const XLSX = require('xlsx');
 const path = require('path');
 
+// 비교용 (폐기됨, SSOT 아님)
 const p = path.resolve('./통합_학습맵_계통도_연결_완성.xlsx');
 const wb = XLSX.readFile(p);
 const ws = wb.Sheets[wb.SheetNames[0]];

@@ -78,9 +78,10 @@ const STUDENT_IDS = studentRows.map(r => r.user_id);
 console.log('[attendance] class 2 students:', STUDENT_IDS);
 
 // 감정 분포: 긍정 60%, 중립 25%, 부정 15% — 다양성 확보
+// 정본 감정 어휘 10키만 사용 (작업지시서/정서발달_감정어휘_정본화_스펙.md §1)
 const POSITIVE_EMOTIONS = ['happy', 'excited', 'good', 'great', 'calm'];
-const NEUTRAL_EMOTIONS = ['focused', 'okay']; // calm 외 중간 톤
-const NEGATIVE_EMOTIONS = ['tired', 'anxious', 'sad', 'bored'];
+const NEUTRAL_EMOTIONS = ['calm', 'good']; // 정본에 중립 버킷 없음 → 긍정 하단(calm/good)으로 대체
+const NEGATIVE_EMOTIONS = ['tired', 'anxious', 'sad', 'frustrated'];
 
 function pickEmotion() {
   const bucket = pickWeighted([['pos', 60], ['neu', 25], ['neg', 15]]);
@@ -100,12 +101,10 @@ function emotionReason(emotion) {
     good: '컨디션이 괜찮아요',
     great: '아침부터 활기차요',
     calm: '평온한 하루를 보내고 있어요',
-    focused: '오늘 집중이 잘 돼요',
-    okay: '평소와 비슷해요',
     tired: '잠을 잘 못 잤어요',
     anxious: '시험이 걱정돼요',
     sad: '조금 우울해요',
-    bored: '하루가 길게 느껴져요',
+    frustrated: '생각대로 잘 안 풀려요',
   };
   return map[emotion] || '특별한 이유는 없어요';
 }

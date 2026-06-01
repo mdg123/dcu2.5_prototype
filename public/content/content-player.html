@@ -197,13 +197,25 @@
     let solveMode = params.get('auto') === '1' || params.get('solve') === '1';
     // 임베드 모드: 오늘의 학습 등 상위 페이지에서 iframe으로 삽입된 경우
     const embedMode = params.get('embed') === '1';
+    // 사일런트 모드: 진단평가 등 매 문항 채점 결과 노출이 부적절한 흐름에서 사용
+    // (결과 오버레이/정답·오답 피드백/토스트를 모두 차단하고 postMessage만 전송)
+    const silentMode = params.get('silent') === '1';
     if (embedMode) {
       solveMode = true;
       document.addEventListener('DOMContentLoaded', () => {
         const hdr = document.querySelector('.player-header'); if (hdr) hdr.style.display = 'none';
         const notice = document.getElementById('modeNotice'); if (notice) notice.style.display = 'none';
         const container = document.querySelector('.player-container');
-        if (container){ container.style.marginTop = '0'; container.style.height = '100vh'; }
+        if (container){
+          container.style.marginTop = '0';
+          container.style.height = '100vh';
+          container.style.display = 'flex';
+        }
+        // 임베드 모드: 외곽 페이지(진단/오늘의학습)가 진행률을 표시하므로
+        // 내부 "문항 번호" 사이드바는 중복이라 숨김 → 문항 영역이 전체 폭 차지
+        const sb = document.querySelector('.sidebar'); if (sb) sb.style.display = 'none';
+        const qa = document.querySelector('.question-area');
+        if (qa){ qa.style.flex = '1'; qa.style.width = '100%'; qa.style.maxWidth = '100%'; }
         document.body.style.background = 'transparent';
       });
     }
@@ -213,6 +225,8 @@
     }
 
     function showToast(msg){
+      // 사일런트 모드(진단평가 등): 매 문항 채점·자동추가 결과 토스트 노출 금지
+      if (silentMode) return;
       const t = document.getElementById('toast');
       t.textContent = msg;
       t.style.display = 'block';
@@ -266,6 +280,13 @@
     function exitPlayer(){
       if (!graded && solveMode && answers.some(a => a != null && a !== '')){
         if (!confirm('아직 제출하지 않았습니다. 나가시겠습니까?')) return;
+      }
+      // 새 탭(바로 풀기 등 popup=1)으로 열린 경우 → 탭을 닫아 원래 콘텐츠 목록으로 복귀
+      if (params.get('popup') === '1') {
+        window.close();
+        // 일부 브라우저에서 window.close()가 무시될 수 있어 폴백
+        setTimeout(() => { location.href = '/content/index.html'; }, 150);
+        return;
       }
       history.length > 1 ? history.back() : (location.href = '/content/index.html');
     }
@@ -694,12 +715,14 @@
 
       const _gb2=document.getElementById('gradeBtn');if(_gb2)_gb2.style.display='none';
 
-      // 결과 오버레이
-      document.getElementById('resultScore').textContent = pct + '%';
-      document.getElementById('resultSub').textContent = `${totalScore} / ${pctBase}점` + (autoScored < maxTotal ? ` · 서술 ${maxTotal - autoScored}점은 별도 채점` : '');
-      document.getElementById('resultTitle').textContent = pct >= 80 ? '훌륭해요!' : pct >= 60 ? '잘했어요' : '다시 도전해봐요';
-      document.getElementById('resultIcon').textContent = pct >= 80 ? '🎉' : pct >= 60 ? '👍' : '💪';
-      document.getElementById('resultOverlay').classList.add('show');
+      // 결과 오버레이 (사일런트 모드에서는 노출 차단 — 진단평가 등에서 매 문항 결과 노출 부적절)
+      if (!silentMode){
+        document.getElementById('resultScore').textContent = pct + '%';
+        document.getElementById('resultSub').textContent = `${totalScore} / ${pctBase}점` + (autoScored < maxTotal ? ` · 서술 ${maxTotal - autoScored}점은 별도 채점` : '');
+        document.getElementById('resultTitle').textContent = pct >= 80 ? '훌륭해요!' : pct >= 60 ? '잘했어요' : '다시 도전해봐요';
+        document.getElementById('resultIcon').textContent = pct >= 80 ? '🎉' : pct >= 60 ? '👍' : '💪';
+        document.getElementById('resultOverlay').classList.add('show');
+      }
 
       // 서버에 풀이 시도 기록
       try {
@@ -758,7 +781,9 @@
         } catch(e){ console.warn('postMessage fail', e); }
       }
 
-      showQuestion(currentQ);
+      // 사일런트 모드에서는 채점 후 정답/오답 색상·피드백 박스를 다시 그리지 않음
+      // (부모 페이지가 postMessage 수신 즉시 다음 문항 iframe으로 교체)
+      if (!silentMode) showQuestion(currentQ);
     }
 
     function normalize(s){

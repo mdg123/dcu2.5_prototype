@@ -2,8 +2,12 @@
 /**
  * scripts/import-learning-map-edges.mjs
  * ------------------------------------------------------------------
- * 공식 엑셀 계통도(`통합_학습맵_계통도_연결_완성.xlsx`)를 진실의 원천으로 삼아
+ * 공식 KOFAC 기준 엑셀 계통도(`통합_학습맵_계통도_KOFAC기준매핑_v2.xlsx`)를 진실의 원천(SSOT)으로 삼아
  * `learning_map_edges` 테이블을 재시드한다.
+ *
+ * [2026-05-27 갱신] 기본 엑셀 경로를 KOFAC v2 로 단일화함.
+ *   - 과거 임시 엑셀 `통합_학습맵_계통도_연결_완성.xlsx` 는 폐기.
+ *   - KOFAC v2 엑셀도 시트명(`학습맵_리니어연결`)과 컬럼 구조가 동일하므로 파서 변경 없음.
  *
  * - 행마다 3단계ID + 선수학습ID + 후속학습ID 파싱
  *   - 후속ID: from = 3단계ID, to = 후속ID
@@ -16,12 +20,12 @@
  *                          (단, `edge_type IN ('manual','custom')` 는 보존)
  * - 기본(`--truncate` 없음) : INSERT OR IGNORE 로 누락분만 보강
  * - `--dry-run`          : DB 변경 없이 시뮬레이션
- * - `--excel <경로>`     : 엑셀 경로 (기본 ./통합_학습맵_계통도_연결_완성.xlsx)
+ * - `--excel <경로>`     : 엑셀 경로 (기본 ./통합_학습맵_계통도_KOFAC기준매핑_v2.xlsx)
  * - `--db <경로>`        : SQLite 경로 (기본 ./data/dacheum.db)
  *
  * 사용 예:
  *   node scripts/import-learning-map-edges.mjs --truncate
- *   node scripts/import-learning-map-edges.mjs --excel ./통합_학습맵_계통도_연결_완성.xlsx --truncate
+ *   node scripts/import-learning-map-edges.mjs --excel ./통합_학습맵_계통도_KOFAC기준매핑_v2.xlsx --truncate
  *   node scripts/import-learning-map-edges.mjs --dry-run
  *
  * 멱등성: 같은 엑셀로 여러 번 실행해도 결과 동일.
@@ -60,7 +64,7 @@ if (ARGS.help) {
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const ROOT = path.resolve(path.join(__dirname, '..'));
-const EXCEL_PATH = ARGS.excel ? path.resolve(ARGS.excel) : path.join(ROOT, '통합_학습맵_계통도_연결_완성.xlsx');
+const EXCEL_PATH = ARGS.excel ? path.resolve(ARGS.excel) : path.join(ROOT, '통합_학습맵_계통도_KOFAC기준매핑_v2.xlsx');
 const DB_PATH = ARGS.db ? path.resolve(ARGS.db) : path.join(ROOT, 'data', 'dacheum.db');
 
 if (!fs.existsSync(EXCEL_PATH)) {

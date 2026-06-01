@@ -70,6 +70,23 @@ function init() {
   for (const col of diagCols) {
     try { db.exec(`ALTER TABLE diagnosis_sessions ADD COLUMN ${col}`); } catch (e) { /* exists */ }
   }
+
+  // 추천학습 경로 시스템 (2026-05-27) — learning_paths 확장 (옵션 A)
+  // 진단 세션별 독립된 경로를 보존하기 위해 session_id, source_type 추가
+  const lpCols = [
+    'session_id INTEGER',                      // diagnosis_sessions.id 참조 (FK 없이)
+    "source_type TEXT DEFAULT 'manual'"        // 'diagnosis' | 'manual' | 'teacher_assigned'
+  ];
+  for (const col of lpCols) {
+    try { db.exec(`ALTER TABLE learning_paths ADD COLUMN ${col}`); } catch (e) { /* exists */ }
+  }
+  try {
+    db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_lp_session ON learning_paths(session_id);
+      CREATE INDEX IF NOT EXISTS idx_lp_user_status ON learning_paths(user_id, status);
+      CREATE INDEX IF NOT EXISTS idx_lp_source_type ON learning_paths(source_type);
+    `);
+  } catch (e) { console.error('[self-learn init] lp index error:', e.message); }
 }
 
 // 서버 시작 시 즉시 1회 실행
@@ -150,6 +167,25 @@ function startDailyItem(itemId, userId) {
   return { success: true };
 }
 
+// 영상·자료 시청 항목은 점수 없음 — 정책 일관 (매트릭스 셀 표시 정책)
+// 시청형(video/document/image/external/audio)에는 score=null을 강제하여 오염 차단.
+const NON_SCORED_CONTENT_TYPES = new Set(['video','document','image','external','audio']);
+function normalizeProgressScore(itemId, score) {
+  if (score == null) return null;
+  try {
+    const row = db.prepare(`
+      SELECT c.content_type
+        FROM daily_learning_items i
+        LEFT JOIN contents c ON c.id = i.content_id
+       WHERE i.id = ?
+    `).get(itemId);
+    if (row && row.content_type && NON_SCORED_CONTENT_TYPES.has(String(row.content_type).toLowerCase())) {
+      return null;
+    }
+  } catch (_) { /* fail-open: 조회 실패 시 원래 점수 유지 */ }
+  return score;
+}
+
 function completeDailyItem(itemId, userId, { score, timeSpent, answers, correctCount, totalQuestions } = {}) {
   const item = db.prepare('SELECT * FROM daily_learning_items WHERE id = ?').get(itemId);
   if (!item) return null;
@@ -158,6 +194,8 @@ function completeDailyItem(itemId, userId, { score, timeSpent, answers, correctC
   const wasCompleted = prev && prev.status === 'completed';
   // 정오답 상세(answers): [{questionNumber, questionText, options, myAnswer, correctAnswer, isCorrect, explanation}, ...]
   const answersJson = Array.isArray(answers) && answers.length > 0 ? JSON.stringify(answers) : null;
+  // 영상·자료 시청 항목은 점수 없음 — 정책 가드 (매트릭스 셀 표시 정책)
+  const safeScore = normalizeProgressScore(itemId, score);
   db.prepare(`
     UPDATE daily_learning_progress
     SET status = 'completed', completed_at = CURRENT_TIMESTAMP, score = ?, time_spent_seconds = ?,
@@ -165,7 +203,7 @@ function completeDailyItem(itemId, userId, { score, timeSpent, answers, correctC
         correct_count = COALESCE(?, correct_count),
         total_questions = COALESCE(?, total_questions)
     WHERE user_id = ? AND item_id = ?
-  `).run(score ?? null, timeSpent || 0, answersJson, correctCount ?? null, totalQuestions ?? null, userId, itemId);
+  `).run(safeScore ?? null, timeSpent || 0, answersJson, correctCount ?? null, totalQuestions ?? null, userId, itemId);
 
   if (wasCompleted) {
     return { success: true, alreadyCompleted: true };
@@ -174,7 +212,7 @@ function completeDailyItem(itemId, userId, { score, timeSpent, answers, correctC
   logLearningActivity({
     userId, activityType: 'daily_complete', targetType: 'daily_learning',
     targetId: itemId, verb: 'completed', sourceService: 'self-learn',
-    resultScore: score ? score / 100 : null
+    resultScore: safeScore ? safeScore / 100 : null
   });
 
   const pts = parseInt(getSetting('daily_learning_complete_point') || '10');
@@ -891,11 +929,22 @@ function finishDiagnosis(sessionId) {
   `).run(result, sessionId);
 
   // 사용자 노드 상태 업데이트
+  // [2026-05-27 fix] 단원(level=2) 노드에 대한 진단은 자동으로 'completed' 라벨을 박지 않는다.
+  //   진단 통과는 mastered/proficient/developing/needs_review로 diagnosis_result 컬럼에 보존하고,
+  //   user_node_status.status 는 'in_progress'로만 마킹.
+  //   단원이 "완료" 라벨을 얻으려면 자식 차시들이 실제 학습 완료되어야 함 (UI에서 합성 산출).
+  //   차시(level=3) 노드 진단은 기존 동작 유지 (mastered → completed).
+  let nodeLevel = null;
+  try {
+    const lmn = db.prepare('SELECT node_level FROM learning_map_nodes WHERE node_id = ?').get(session.target_node_id);
+    nodeLevel = lmn ? lmn.node_level : null;
+  } catch (_) {}
+  const isUnitNode = nodeLevel === 2;
+  const nextStatus = (result === 'mastered' && !isUnitNode) ? 'completed' : 'in_progress';
   db.prepare(`
     INSERT OR REPLACE INTO user_node_status (user_id, node_id, status, diagnosis_result, correct_rate, last_accessed_at)
     VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-  `).run(session.user_id, session.target_node_id,
-    result === 'mastered' ? 'completed' : 'in_progress', result, correctRate);
+  `).run(session.user_id, session.target_node_id, nextStatus, result, correctRate);
 
   logLearningActivity({
     userId: session.user_id, activityType: 'diagnosis_complete', targetType: 'diagnosis',
@@ -903,7 +952,583 @@ function finishDiagnosis(sessionId) {
     resultScore: correctRate, resultSuccess: result === 'mastered' ? 1 : 0
   });
 
+  // 진단 종료 시점에 추천학습 경로 자동 생성 (실패해도 finish 자체는 성공)
+  try {
+    buildRecommendedPath(sessionId);
+  } catch (e) {
+    console.error('[finishDiagnosis] buildRecommendedPath 실패:', e.message);
+  }
+
   return { sessionId, result, correctRate, correctCount: session.correct_count, totalQuestions: session.total_questions };
+}
+
+// ============================================================
+// 추천학습 경로 시스템 (2026-05-27 설계서 §3, §4, §9)
+// ============================================================
+
+/**
+ * 진단 세션 기반 추천학습 경로 생성.
+ *
+ * 알고리즘:
+ *   1. diagnosis_sessions.difficulty_path 파싱 → 노드별 통과 여부·정답률
+ *   2. 실패한 노드(passed=false 또는 정답률 < 0.60) 추출
+ *   3. 정렬: 학년 ASC → 학기 ASC → 노드 깊이 ASC → 영역 → sort_order
+ *   4. 목표 노드(target_node_id)는 항상 마지막 STEP
+ *   5. learning_paths INSERT (source_type='diagnosis', session_id=sessionId)
+ *   6. 같은 sessionId 중복 INSERT 방지 (이미 있으면 path_nodes 업데이트)
+ *
+ * @param {number} sessionId
+ * @returns {{pathId:number, sessionId:number, pathNodes:string[], created:boolean}|null}
+ */
+function buildRecommendedPath(sessionId) {
+  const sid = Number(sessionId);
+  if (!sid) return null;
+
+  const session = db.prepare('SELECT * FROM diagnosis_sessions WHERE id = ?').get(sid);
+  if (!session) return null;
+
+  // 실패 노드 수집 — difficulty_path JSON에서 passed=false 또는 정답률 < 0.60
+  let diagPath = [];
+  try { diagPath = JSON.parse(session.difficulty_path || '[]'); } catch { diagPath = []; }
+
+  const PASS_THRESHOLD = 0.60;
+  const failedNodeIds = [];
+  const seenNodes = new Set();
+  for (const p of diagPath) {
+    if (!p || typeof p !== 'object') continue;
+    if (!p.node) continue;                // 메타 항목(_endReason 등) 스킵
+    if (seenNodes.has(p.node)) continue;  // 중복 제거
+    seenNodes.add(p.node);
+    const total = Number(p.total) || 0;
+    const correct = Number(p.correct) || 0;
+    const rate = total > 0 ? correct / total : 0;
+    const isFailed = (p.passed === false) || (total > 0 && rate < PASS_THRESHOLD);
+    if (isFailed) failedNodeIds.push(p.node);
+  }
+
+  // 목표 노드 정보 + 실패 노드 메타 일괄 hydrate
+  const targetNodeId = session.target_node_id;
+  const allCandidateIds = [...failedNodeIds];
+  if (targetNodeId && !allCandidateIds.includes(targetNodeId)) {
+    allCandidateIds.push(targetNodeId);
+  }
+
+  let pathNodes = [];
+
+  if (allCandidateIds.length === 0) {
+    // 진단 노드가 하나도 없는 비정상 케이스 — target만 잡거나 빈 경로
+    if (targetNodeId) pathNodes = [targetNodeId];
+  } else {
+    // 노드 메타 일괄 조회 (정렬 키 산출용)
+    const placeholders = allCandidateIds.map(() => '?').join(',');
+    const metas = db.prepare(`
+      SELECT node_id, subject, grade, semester, area, node_level, sort_order, unit_name, lesson_name
+      FROM learning_map_nodes
+      WHERE node_id IN (${placeholders})
+    `).all(...allCandidateIds);
+    const metaById = Object.fromEntries(metas.map(m => [m.node_id, m]));
+
+    // 실패 노드만 정렬 (학년 ASC → 학기 ASC → node_level ASC → area → sort_order)
+    const sortedFailed = [...failedNodeIds].sort((a, b) => {
+      const ma = metaById[a] || {};
+      const mb = metaById[b] || {};
+      if ((ma.grade || 99) !== (mb.grade || 99)) return (ma.grade || 99) - (mb.grade || 99);
+      if ((ma.semester || 9) !== (mb.semester || 9)) return (ma.semester || 9) - (mb.semester || 9);
+      if ((ma.node_level || 9) !== (mb.node_level || 9)) return (ma.node_level || 9) - (mb.node_level || 9);
+      if ((ma.area || '') !== (mb.area || '')) return String(ma.area || '').localeCompare(String(mb.area || ''));
+      return (ma.sort_order || 0) - (mb.sort_order || 0);
+    });
+
+    // 중복 없이 [실패 노드들, 목표 노드(마지막)] 합성
+    pathNodes = sortedFailed.filter(nid => nid !== targetNodeId);
+    if (targetNodeId) pathNodes.push(targetNodeId);
+  }
+
+  // 중복 INSERT 방지 — 같은 sessionId 행 있으면 UPDATE
+  const existing = db.prepare(
+    "SELECT id FROM learning_paths WHERE session_id = ? AND source_type = 'diagnosis'"
+  ).get(sid);
+
+  const pathNodesJson = JSON.stringify(pathNodes);
+
+  if (existing) {
+    db.prepare(`
+      UPDATE learning_paths
+      SET path_nodes = ?, target_node_id = ?, user_id = ?
+      WHERE id = ?
+    `).run(pathNodesJson, targetNodeId || pathNodes[pathNodes.length - 1] || '', session.user_id, existing.id);
+    return { pathId: existing.id, sessionId: sid, pathNodes, created: false };
+  }
+
+  const info = db.prepare(`
+    INSERT INTO learning_paths (user_id, target_node_id, path_nodes, status, session_id, source_type)
+    VALUES (?, ?, ?, 'active', ?, 'diagnosis')
+  `).run(
+    session.user_id,
+    targetNodeId || pathNodes[pathNodes.length - 1] || '',
+    pathNodesJson,
+    sid
+  );
+  return { pathId: info.lastInsertRowid, sessionId: sid, pathNodes, created: true };
+}
+
+/**
+ * 추천학습 경로의 노드별 진행 상태 산출 헬퍼.
+ * user_node_status 우선, 자식 차시 활동(problem_attempts/user_content_progress) 보조 평가.
+ *
+ * @returns 'completed' | 'in_progress' | 'pending'
+ */
+function _resolvePathNodeProgress(userId, nodeId) {
+  // 1) user_node_status 우선
+  const uns = db.prepare(
+    'SELECT status FROM user_node_status WHERE user_id = ? AND node_id = ?'
+  ).get(userId, nodeId);
+  if (uns) {
+    if (uns.status === 'completed' || uns.status === 'mastered') return 'completed';
+    if (uns.status === 'in_progress') return 'in_progress';
+  }
+
+  // 2) 자식 차시(node_level=3)의 진행 활동 확인
+  try {
+    const childActivity = db.prepare(`
+      SELECT COUNT(*) AS cnt
+      FROM (
+        SELECT 1 FROM problem_attempts WHERE user_id = ? AND node_id = ?
+        UNION ALL
+        SELECT 1 FROM user_content_progress WHERE user_id = ? AND node_id = ? AND watch_ratio > 0
+      )
+    `).get(userId, nodeId, userId, nodeId);
+    if (childActivity && childActivity.cnt > 0) return 'in_progress';
+  } catch (_) {}
+
+  return 'pending';
+}
+
+/**
+ * 단원의 차시 학습 정보 산출 (총 차시 수, 완료 차시 수, 예상 학습 시간).
+ */
+function _resolvePathNodeLessons(userId, nodeId) {
+  try {
+    const children = db.prepare(`
+      SELECT node_id FROM learning_map_nodes
+      WHERE parent_node_id = ? AND node_level = 3
+    `).all(nodeId);
+    const total = children.length;
+    if (total === 0) {
+      return { total: 0, completed: 0, estimatedMinutes: 5 };
+    }
+    let completed = 0;
+    for (const c of children) {
+      const s = db.prepare(
+        'SELECT status FROM user_node_status WHERE user_id = ? AND node_id = ?'
+      ).get(userId, c.node_id);
+      if (s && (s.status === 'completed' || s.status === 'mastered')) completed++;
+    }
+    return { total, completed, estimatedMinutes: total * 5 };
+  } catch (_) {
+    return { total: 0, completed: 0, estimatedMinutes: 5 };
+  }
+}
+
+/**
+ * 학년에 따른 학교급 라벨 (초/중/고)
+ */
+function _formatGradeLabel(grade) {
+  const g = Number(grade) || 0;
+  if (g >= 1 && g <= 6) return `초${g}`;
+  if (g >= 7 && g <= 9) return `중${g - 6}`;
+  if (g >= 10 && g <= 12) return `고${g - 9}`;
+  return `${g}학년`;
+}
+
+/**
+ * 사용자별 추천학습 경로 목록 조회.
+ * 진단 세션 기반(source_type='diagnosis') 경로를 날짜 desc로.
+ */
+function listRecommendedPaths(userId, opts = {}) {
+  const limit = Math.max(1, Math.min(50, Number(opts.limit) || 10));
+  const statusFilter = opts.status || 'active';
+
+  let where = "WHERE lp.user_id = ? AND lp.source_type = 'diagnosis'";
+  const params = [userId];
+  if (statusFilter !== 'all') {
+    where += ' AND lp.status = ?';
+    params.push(statusFilter);
+  }
+
+  const rows = db.prepare(`
+    SELECT lp.id AS path_id, lp.session_id, lp.target_node_id, lp.path_nodes, lp.status, lp.created_at,
+           ds.started_at, ds.completed_at, ds.result, ds.difficulty_path,
+           lmn.unit_name, lmn.lesson_name, lmn.area, lmn.subject, lmn.grade, lmn.semester
+    FROM learning_paths lp
+    LEFT JOIN diagnosis_sessions ds ON ds.id = lp.session_id
+    LEFT JOIN learning_map_nodes lmn ON lmn.node_id = lp.target_node_id
+    ${where}
+    ORDER BY ds.completed_at DESC, lp.created_at DESC
+    LIMIT ?
+  `).all(...params, limit);
+
+  return rows.map(r => {
+    let pathNodes = [];
+    try { pathNodes = JSON.parse(r.path_nodes || '[]'); } catch {}
+    let diagPath = [];
+    try { diagPath = JSON.parse(r.difficulty_path || '[]'); } catch {}
+
+    // summary 계산
+    const nodeMeta = diagPath.filter(p => p && p.node);
+    const totalNodes = pathNodes.length;
+    const passedNodes = nodeMeta.filter(p => p.passed === true).length;
+    const failedNodes = nodeMeta.filter(p => p.passed === false).length;
+    const totalCorrect = nodeMeta.reduce((s, p) => s + (Number(p.correct) || 0), 0);
+    const totalQuestions = nodeMeta.reduce((s, p) => s + (Number(p.total) || 0), 0);
+    const averageCorrectRate = totalQuestions > 0 ? totalCorrect / totalQuestions : 0;
+
+    let completedCount = 0, inProgressCount = 0, pendingCount = 0;
+    for (const nid of pathNodes) {
+      const st = _resolvePathNodeProgress(r.user_id || userId, nid);
+      if (st === 'completed') completedCount++;
+      else if (st === 'in_progress') inProgressCount++;
+      else pendingCount++;
+    }
+    const progressPercent = totalNodes > 0 ? Math.round((completedCount / totalNodes) * 100) : 0;
+
+    return {
+      pathId: r.path_id,
+      sessionId: r.session_id,
+      status: r.status,
+      diagnosedAt: r.completed_at || r.started_at || r.created_at,
+      relativeTime: _formatRelativeTime(r.completed_at || r.started_at || r.created_at),
+      targetNode: {
+        nodeId: r.target_node_id,
+        title: r.lesson_name || r.unit_name || '이전 단원',
+        subject: r.subject || null,
+        grade: r.grade || null,
+        semester: r.semester || null,
+        area: r.area || null
+      },
+      summary: {
+        totalNodes,
+        passedNodes,
+        failedNodes,
+        averageCorrectRate,
+        progressPercent,
+        completedCount,
+        inProgressCount,
+        pendingCount
+      },
+      result: r.result || null,
+      resultLabel: _resolveResultLabel(r.result)
+    };
+  });
+}
+
+/**
+ * 특정 진단 세션의 추천학습 경로 상세 (학년·학기·영역 그룹핑 + 진행 상태).
+ *
+ * @returns null 또는 { session, targetNode, summary, groups }
+ */
+function getRecommendedPathBySession(sessionId, userId) {
+  const sid = Number(sessionId);
+  if (!sid) return null;
+
+  // session + path 동시 조회
+  const session = db.prepare('SELECT * FROM diagnosis_sessions WHERE id = ?').get(sid);
+  if (!session) return null;
+
+  // 권한 확인 — 본인 진단만 (userId 미제공이면 스킵)
+  if (userId && session.user_id !== userId) {
+    const err = new Error('FORBIDDEN');
+    err.statusCode = 403;
+    throw err;
+  }
+
+  let pathRow = db.prepare(
+    "SELECT * FROM learning_paths WHERE session_id = ? AND source_type = 'diagnosis' ORDER BY id DESC LIMIT 1"
+  ).get(sid);
+
+  // 경로 없으면 즉시 빌드
+  if (!pathRow) {
+    try {
+      buildRecommendedPath(sid);
+      pathRow = db.prepare(
+        "SELECT * FROM learning_paths WHERE session_id = ? AND source_type = 'diagnosis' ORDER BY id DESC LIMIT 1"
+      ).get(sid);
+    } catch (e) {
+      console.error('[getRecommendedPathBySession] 경로 자동 생성 실패:', e.message);
+    }
+  }
+
+  let pathNodes = [];
+  try { pathNodes = JSON.parse((pathRow && pathRow.path_nodes) || '[]'); } catch {}
+
+  // 진단 노드 결과 (passed/정답률)
+  let diagPath = [];
+  try { diagPath = JSON.parse(session.difficulty_path || '[]'); } catch {}
+  const diagByNode = {};
+  for (const p of diagPath) {
+    if (p && p.node) {
+      const total = Number(p.total) || 0;
+      const correct = Number(p.correct) || 0;
+      diagByNode[p.node] = {
+        passed: !!p.passed,
+        correctCount: correct,
+        totalCount: total,
+        correctRate: total > 0 ? correct / total : 0
+      };
+    }
+  }
+
+  // 노드 메타 일괄 조회
+  const targetNodeId = session.target_node_id;
+  const allIds = [...new Set([...pathNodes, targetNodeId].filter(Boolean))];
+  let nodeMetas = [];
+  if (allIds.length > 0) {
+    const placeholders = allIds.map(() => '?').join(',');
+    nodeMetas = db.prepare(`
+      SELECT node_id, subject, grade, semester, area, node_level, sort_order, unit_name, lesson_name
+      FROM learning_map_nodes
+      WHERE node_id IN (${placeholders})
+    `).all(...allIds);
+  }
+  const metaById = Object.fromEntries(nodeMetas.map(m => [m.node_id, m]));
+
+  // 목표 노드
+  const tMeta = metaById[targetNodeId] || {};
+  const targetNode = {
+    nodeId: targetNodeId,
+    title: tMeta.lesson_name || tMeta.unit_name || '이전 단원',
+    subject: tMeta.subject || null,
+    grade: tMeta.grade || null,
+    semester: tMeta.semester || null,
+    area: tMeta.area || null
+  };
+
+  // 학년·학기·영역 그룹핑 + STEP 번호 부여
+  const groupMap = new Map();   // groupKey -> { meta, steps[] }
+  let stepCounter = 0;
+
+  for (const nid of pathNodes) {
+    stepCounter++;
+    const m = metaById[nid] || {};
+    const grade = m.grade || null;
+    const semester = m.semester || null;
+    const area = m.area || '기타';
+    const groupKey = `${grade || 0}-${semester || 0}-${area}`;
+
+    const isTarget = (nid === targetNodeId);
+    let progressStatus, progressLabel, lockReason = null;
+    if (isTarget && pathNodes.length > 1) {
+      // 목표 노드: 앞 STEP 모두 완료되어야 풀림
+      const priorIds = pathNodes.slice(0, pathNodes.indexOf(nid));
+      const allPriorDone = priorIds.every(pid =>
+        _resolvePathNodeProgress(session.user_id, pid) === 'completed'
+      );
+      if (allPriorDone) {
+        progressStatus = _resolvePathNodeProgress(session.user_id, nid);
+        progressLabel = _progressStatusLabel(progressStatus);
+      } else {
+        progressStatus = 'locked';
+        progressLabel = '잠금';
+        lockReason = '앞 STEP을 모두 완료하면 풀려요';
+      }
+    } else {
+      progressStatus = _resolvePathNodeProgress(session.user_id, nid);
+      progressLabel = _progressStatusLabel(progressStatus);
+    }
+
+    const lessons = _resolvePathNodeLessons(session.user_id, nid);
+    const diagResult = diagByNode[nid] || null;
+
+    if (!groupMap.has(groupKey)) {
+      const schoolLevel = (Number(grade) >= 1 && Number(grade) <= 6)
+        ? '초등'
+        : (Number(grade) >= 7 && Number(grade) <= 9 ? '중등' : (Number(grade) >= 10 ? '고등' : '기타'));
+      groupMap.set(groupKey, {
+        groupKey,
+        label: `${_formatGradeLabel(grade)} ${semester || ''}학기 · ${area}`.replace(/\s+/g, ' ').trim(),
+        grade,
+        semester,
+        area,
+        schoolLevel,
+        steps: []
+      });
+    }
+    groupMap.get(groupKey).steps.push({
+      step: stepCounter,
+      nodeId: nid,
+      title: m.lesson_name || m.unit_name || '단원',
+      diagResult,
+      progressStatus,
+      progressLabel,
+      lessons: { total: lessons.total, completed: lessons.completed },
+      estimatedMinutes: lessons.estimatedMinutes,
+      isTarget,
+      lockReason
+    });
+  }
+
+  const groups = [...groupMap.values()];
+
+  // summary 합성
+  const totalNodes = pathNodes.length;
+  const passedNodes = Object.values(diagByNode).filter(d => d.passed).length;
+  const failedNodes = Object.values(diagByNode).filter(d => !d.passed).length;
+  let completedCount = 0, inProgressCount = 0, pendingCount = 0, lockedCount = 0;
+  for (const g of groups) {
+    for (const s of g.steps) {
+      if (s.progressStatus === 'completed') completedCount++;
+      else if (s.progressStatus === 'in_progress') inProgressCount++;
+      else if (s.progressStatus === 'locked') lockedCount++;
+      else pendingCount++;
+    }
+  }
+  const progressPercent = totalNodes > 0 ? Math.round((completedCount / totalNodes) * 100) : 0;
+  const totalCorrect = Object.values(diagByNode).reduce((s, d) => s + (d.correctCount || 0), 0);
+  const totalQuestions = Object.values(diagByNode).reduce((s, d) => s + (d.totalCount || 0), 0);
+  const averageCorrectRate = totalQuestions > 0 ? totalCorrect / totalQuestions : 0;
+
+  return {
+    session: {
+      id: session.id,
+      diagnosedAt: session.completed_at || session.started_at,
+      relativeTime: _formatRelativeTime(session.completed_at || session.started_at),
+      result: session.result || null,
+      resultLabel: _resolveResultLabel(session.result)
+    },
+    pathId: pathRow ? pathRow.id : null,
+    targetNode,
+    summary: {
+      totalNodes,
+      passedNodes,
+      failedNodes,
+      averageCorrectRate,
+      progressPercent,
+      completedCount,
+      inProgressCount,
+      pendingCount,
+      lockedCount
+    },
+    groups
+  };
+}
+
+/**
+ * 진행 상태 라벨 (초등학생 친화 한글)
+ */
+function _progressStatusLabel(status) {
+  switch (status) {
+    case 'completed': return '완료';
+    case 'in_progress': return '진행 중';
+    case 'locked': return '잠금';
+    case 'pending':
+    default: return '미시작';
+  }
+}
+
+/**
+ * 추천 경로 내 특정 노드의 진행 상태 갱신 (드로어 학습 완료 후 호출).
+ * 노드 상태 자동 평가 후 경로 전체의 진행률 재계산.
+ */
+function updateRecommendedPathProgress(sessionId, userId, nodeId) {
+  const sid = Number(sessionId);
+  if (!sid || !userId || !nodeId) {
+    const err = new Error('잘못된 요청');
+    err.statusCode = 400;
+    throw err;
+  }
+  const session = db.prepare('SELECT user_id FROM diagnosis_sessions WHERE id = ?').get(sid);
+  if (!session) {
+    const err = new Error('진단 세션 없음');
+    err.statusCode = 404;
+    throw err;
+  }
+  if (session.user_id !== userId) {
+    const err = new Error('FORBIDDEN');
+    err.statusCode = 403;
+    throw err;
+  }
+
+  // 노드 상태 자동 평가 (조건 충족 시 completed로 격상)
+  try { evaluateNodeCompletion(userId, nodeId); } catch (_) {}
+
+  const updatedStatus = _resolvePathNodeProgress(userId, nodeId);
+
+  // 경로 전체 진행률 재계산
+  const pathRow = db.prepare(
+    "SELECT path_nodes FROM learning_paths WHERE session_id = ? AND source_type = 'diagnosis' ORDER BY id DESC LIMIT 1"
+  ).get(sid);
+  let pathNodes = [];
+  try { pathNodes = JSON.parse((pathRow && pathRow.path_nodes) || '[]'); } catch {}
+
+  let completedCount = 0;
+  for (const nid of pathNodes) {
+    if (_resolvePathNodeProgress(userId, nid) === 'completed') completedCount++;
+  }
+  const progressPercent = pathNodes.length > 0
+    ? Math.round((completedCount / pathNodes.length) * 100)
+    : 0;
+
+  return {
+    sessionId: sid,
+    nodeId,
+    updatedNodeStatus: updatedStatus,
+    progressPercent,
+    completedCount,
+    totalNodes: pathNodes.length
+  };
+}
+
+/**
+ * 추천 경로의 모든 노드를 사용자의 학습목록(user_learning_list)에 일괄 추가.
+ */
+function addRecommendedPathToLearningList(sessionId, userId) {
+  const sid = Number(sessionId);
+  if (!sid || !userId) {
+    const err = new Error('잘못된 요청');
+    err.statusCode = 400;
+    throw err;
+  }
+  const session = db.prepare('SELECT user_id FROM diagnosis_sessions WHERE id = ?').get(sid);
+  if (!session) {
+    const err = new Error('진단 세션 없음');
+    err.statusCode = 404;
+    throw err;
+  }
+  if (session.user_id !== userId) {
+    const err = new Error('FORBIDDEN');
+    err.statusCode = 403;
+    throw err;
+  }
+
+  const pathRow = db.prepare(
+    "SELECT path_nodes FROM learning_paths WHERE session_id = ? AND source_type = 'diagnosis' ORDER BY id DESC LIMIT 1"
+  ).get(sid);
+  let pathNodes = [];
+  try { pathNodes = JSON.parse((pathRow && pathRow.path_nodes) || '[]'); } catch {}
+
+  if (pathNodes.length === 0) {
+    return { addedCount: 0, skippedCount: 0 };
+  }
+
+  const insertStmt = db.prepare(`
+    INSERT OR IGNORE INTO user_learning_list (user_id, node_id)
+    VALUES (?, ?)
+  `);
+
+  let addedCount = 0;
+  const txn = db.transaction(() => {
+    for (const nid of pathNodes) {
+      const info = insertStmt.run(userId, nid);
+      if (info.changes > 0) addedCount++;
+    }
+  });
+  txn();
+
+  return {
+    addedCount,
+    skippedCount: pathNodes.length - addedCount,
+    totalNodes: pathNodes.length
+  };
 }
 
 // B4: 사용자의 최근 진단 이력 조회 — 학생 친화 결과 화면용
@@ -1394,10 +2019,39 @@ function inferNodeIdFromContent(contentId) {
 }
 
 function getLearningDashboard(userId) {
-  // 진단/실패 보고서 반영 — 분모를 차시(level=3)로 통일 (이전: level=2 단원 vs level 무관 완료 → 불일치)
-  const totalNodes = db.prepare('SELECT COUNT(*) as cnt FROM learning_map_nodes WHERE node_level = 3').get().cnt;
-  const completedNodes = db.prepare("SELECT COUNT(*) as cnt FROM user_node_status WHERE user_id = ? AND status = 'completed'").get(userId).cnt;
-  const inProgressNodes = db.prepare("SELECT COUNT(*) as cnt FROM user_node_status WHERE user_id = ? AND status = 'in_progress'").get(userId).cnt;
+  // KPI 단원(level=2) 단위 통일 — 옵션 C / 임계 100%
+  //   - totalNodes      : 단원(level=2) 총수
+  //   - completedNodes  : 단원의 자식 차시(level=3)가 전부 status='completed' 인 단원 수 (자식 0개 단원은 제외)
+  //   - inProgressNodes : 완료 단원이 아니면서, 자식 차시 중 1개라도 status IN ('completed','in_progress') 인 단원 수
+  //
+  // 응답 키 이름(`totalNodes`, `completedNodes`, `inProgressNodes`)은 프론트엔드 호환성을 위해 유지.
+  const unitProgressRows = db.prepare(`
+    SELECT
+      parent.node_id AS unit_id,
+      COUNT(child.node_id) AS total_children,
+      SUM(CASE WHEN uns.status = 'completed' THEN 1 ELSE 0 END) AS completed_children,
+      SUM(CASE WHEN uns.status IN ('completed','in_progress') THEN 1 ELSE 0 END) AS engaged_children
+    FROM learning_map_nodes parent
+    LEFT JOIN learning_map_nodes child
+      ON child.parent_node_id = parent.node_id AND child.node_level = 3
+    LEFT JOIN user_node_status uns
+      ON uns.node_id = child.node_id AND uns.user_id = ?
+    WHERE parent.node_level = 2
+    GROUP BY parent.node_id
+  `).all(userId);
+  const totalNodes = unitProgressRows.length;
+  let completedNodes = 0;
+  let inProgressNodes = 0;
+  for (const r of unitProgressRows) {
+    const total = r.total_children || 0;
+    const done = r.completed_children || 0;
+    const engaged = r.engaged_children || 0;
+    if (total > 0 && done === total) {
+      completedNodes++;
+    } else if (engaged > 0) {
+      inProgressNodes++;
+    }
+  }
   const currentPath = getCurrentPath(userId);
   const recentDiagnosis = db.prepare('SELECT * FROM diagnosis_sessions WHERE user_id = ? ORDER BY started_at DESC LIMIT 5').all(userId);
 
@@ -1497,9 +2151,9 @@ function getLearningDashboard(userId) {
     node_title: r.node_title
   }));
 
-  // 진행률: 경로가 있으면 경로 기준, 없으면 "내가 시작한 차시(engaged) 중 완료" 비율
-  // 분모를 전체 차시(수백~수천)로 두면 22문제 풀어도 항상 0%가 되어 사용자 체감 진척도 표시 불가.
-  // 따라서 학습을 시작한 노드(in_progress / completed / mastered / diagnosed / video_watched) 기준으로 계산.
+  // 진행률(단원 단위로 통일):
+  //   - 경로가 있으면: 경로 노드 중 "완료된 단원" 비율
+  //   - 경로가 없으면: 학생이 시작한(engaged) 단원 중 완료 단원 비율, 시작 이력 없으면 전체 단원 분모 fallback
   let progressPercent = 0;
   if (currentPath && Array.isArray(currentPath.path_nodes) && currentPath.path_nodes.length > 0) {
     const pathCompleted = db.prepare(`
@@ -1508,18 +2162,14 @@ function getLearningDashboard(userId) {
     `).get(userId, ...currentPath.path_nodes).cnt;
     progressPercent = Math.round((pathCompleted / currentPath.path_nodes.length) * 100);
   } else {
-    const engagedNodes = db.prepare(`
-      SELECT COUNT(*) as cnt FROM user_node_status
-      WHERE user_id = ?
-        AND status IN ('in_progress','completed','mastered','diagnosed','video_watched')
-    `).get(userId).cnt;
-    if (engagedNodes > 0) {
-      progressPercent = Math.round((completedNodes / engagedNodes) * 100);
+    const engagedUnits = completedNodes + inProgressNodes; // 단원 단위 합성
+    if (engagedUnits > 0) {
+      progressPercent = Math.round((completedNodes / engagedUnits) * 100);
     } else if (totalNodes > 0) {
-      // 학습 시작 이력이 전혀 없는 신규 학생: 전체 분모 fallback (대부분 0%)
       progressPercent = Math.round((completedNodes / totalNodes) * 100);
     }
   }
+  if (!Number.isFinite(progressPercent)) progressPercent = 0;
 
   // 총 학습 시간(분) — problem_attempts.time_taken(초) + user_content_progress.position_sec(영상 시청 시간) 합산
   const timeAgg = db.prepare(`
@@ -3385,6 +4035,9 @@ module.exports = {
   // 진단평가 정책 v2 신규
   submitDiagnosisSheet, retryDiagnosisNode,
   generateLearningPath, getCurrentPath, completeNode, evaluateNodeCompletion, inferNodeIdFromContent,
+  // 추천학습 경로 시스템 (2026-05-27)
+  buildRecommendedPath, listRecommendedPaths, getRecommendedPathBySession,
+  updateRecommendedPathProgress, addRecommendedPathToLearningList,
   getLearningDashboard, getRanking,
   getWrongNotesExtended, getWrongNoteDashboard, getTeacherWrongNoteDashboard,
   addManualWrongNote, updateWrongNoteTags, retryWrongNote,
@@ -3395,5 +4048,7 @@ module.exports = {
   getLearningList, addLearningList, removeLearningList,
   getLastActivity, reportContent,
   // 정답 판정 헬퍼 (테스트/외부 사용)
-  judgeQuestionAnswer, resolveCorrectAnswerText
+  judgeQuestionAnswer, resolveCorrectAnswerText,
+  // 시청형 콘텐츠 점수 가드 (테스트/재사용)
+  normalizeProgressScore
 };

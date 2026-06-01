@@ -966,6 +966,10 @@ router.post('/learning-map/upload', ...adminOnly, (req, res, next) => {
     };
 
     try {
+      // ※ 진실의 원천(SSOT)은 `통합_학습맵_계통도_KOFAC기준매핑_v2.xlsx` 임.
+      //   KOFAC v2 엑셀도 시트명(`학습맵_리니어연결`)·컬럼 구조(2단계ID·교과·과목·학년·내용체계영역·
+      //   1~3단계내용요소·3단계ID·단원명·적용학년·적용학기·선수학습ID·후속학습ID·성취기준코드·성취기준)가
+      //   동일하므로 본 업로드 파서를 그대로 사용한다. (확인일 2026-05-27)
       const wb = xlsx.read(req.file.buffer, { type: 'buffer' });
       const sheetName = wb.SheetNames.includes('학습맵_리니어연결') ? '학습맵_리니어연결' : wb.SheetNames[0];
       const sheet = wb.Sheets[sheetName];

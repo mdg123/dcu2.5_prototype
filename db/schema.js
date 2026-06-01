@@ -2970,10 +2970,15 @@ function seedDummyData(db) {
 
   // === AI 맞춤학습 학습맵 노드/엣지 ===
   // ⚠ 학습맵 노드(`learning_map_nodes`)와 엣지(`learning_map_edges`)는 더 이상 schema.js 에서 시드하지 않는다.
-  // 진실의 원천은 **공식 엑셀 계통도**(`통합_학습맵_계통도_연결_완성.xlsx`) 이며,
+  // 진실의 원천(SSOT)은 **공식 KOFAC 기준 엑셀 계통도**(`통합_학습맵_계통도_KOFAC기준매핑_v2.xlsx`) 이며,
   // 아래 두 경로로 일괄 임포트한다:
-  //   1) 노드/엣지 일괄: 관리자 UI → 학습맵 엑셀 업로드 (routes/admin.js)
+  //   1) 노드/차시 일괄: `node scripts/seed-lessons-from-kofac-v2.js --apply`
   //   2) 엣지 재시드(공식 계통도 기준): `node scripts/import-learning-map-edges.mjs --truncate`
+  //   3) (선택) 관리자 UI → 학습맵 엑셀 업로드 (routes/admin.js) — 동일한 KOFAC v2 엑셀을 업로드해야 함
+  //
+  // ※ 참고: 과거 임시 엑셀 `통합_학습맵_계통도_연결_완성.xlsx` 는 2026-05-26부로 폐기되었다.
+  // 비교/분석 스크립트(`scripts/diff-xlsx-kofac-v2.js`, `scripts/inspect-kofac.mjs` 등)에서만
+  // 참고용으로 남아 있으며, 시드 경로의 단일 정본은 KOFAC v2 다.
   //
   // 과거에 여기에 있던 `M-E4-1-01` 류의 가짜 ID 더미 18개(노드 21 + 엣지 15)는
   // 엑셀 표준(`E2MATA01B01C01D01` 등)과 충돌하므로 2026-05-12 자로 제거되었다.

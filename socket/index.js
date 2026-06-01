@@ -105,6 +105,8 @@ function initSocket(io) {
     });
 
     // ─── 감독관(교사) 입장 ──────────────────────────────────────────────
+    // 정책: 감독 권한은 평가지를 **출제한 사용자(exam.owner_id)** 또는 **admin** 에게만 허용.
+    // 클래스 owner 라도 출제자가 아니면 감독 모드 진입 불가.
     socket.on('supervisor:join', ({ examId, classId }) => {
       if (!examId) return;
       const eid = String(examId);
@@ -122,19 +124,15 @@ function initSocket(io) {
           socket.emit('supervisor:error', { message: '해당 클래스의 시험이 아닙니다.' });
           return;
         }
+        // 출제자만 허용
         if (exam.owner_id === userId) authorized = true;
-        // admin 역할도 허용
+        // admin 역할은 운영 목적상 허용
         const user = db.prepare('SELECT role FROM users WHERE id = ?').get(userId);
         if (user && user.role === 'admin') authorized = true;
-        // 클래스 owner도 허용
-        if (classId) {
-          const role = classDb.getMemberRole(parseInt(classId), userId);
-          if (role === 'owner') authorized = true;
-        }
       } catch (e) {}
 
       if (!authorized) {
-        socket.emit('supervisor:error', { message: '감독 권한이 없습니다.' });
+        socket.emit('supervisor:error', { message: '감독 권한은 평가지 출제자만 가질 수 있습니다.' });
         return;
       }
 

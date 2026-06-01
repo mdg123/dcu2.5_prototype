@@ -7,6 +7,7 @@
   <link rel="stylesheet" href="/css/common-nav.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <style>
     :root {
       --primary: #2563eb; --primary-light: #dbeafe; --primary-dark: #1d4ed8;
@@ -36,6 +37,99 @@
     .main-content { flex: 1; padding: 24px; overflow-x: hidden; }
     /* 통일 — 다른 페이지와 동일 표준 폭 (--page-max-w 기준) */
     .report-container { max-width: var(--page-max-w, 1800px); margin: 0 auto; }
+
+    /* 공통 카드 — 모든 .section-card 의 흰 배경/라운드/그림자 base */
+    .section-card {
+      background: white; border-radius: 16px; padding: 24px; margin-bottom: 24px;
+      box-shadow: var(--shadow-sm);
+    }
+    .section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+    .section-title { display: flex; align-items: center; gap: 10px; font-size: 18px; font-weight: 700; color: var(--gray-800); }
+    .section-link { font-size: 14px; font-weight: 600; color: var(--primary); text-decoration: none; }
+
+    /* ===== 조회 기간 필터 ===== */
+    .period-filter-card {
+      background: white; border-radius: 16px; padding: 16px 20px; margin-bottom: 24px;
+      box-shadow: var(--shadow-sm);
+    }
+    .period-filter-label { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 700; color: var(--gray-700); margin-bottom: 12px; }
+    .period-filter-label i { color: var(--primary); }
+    .period-helper { color: var(--gray-400); cursor: help; font-size: 13px; }
+    .period-chips { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    .period-chip {
+      padding: 8px 16px; border: 1.5px solid var(--gray-300); background: #fff;
+      border-radius: 20px; font-size: 14px; font-weight: 600; color: var(--gray-600);
+      cursor: pointer; font-family: inherit; transition: all .15s; white-space: nowrap;
+    }
+    .period-chip:hover { background: var(--gray-50); border-color: var(--primary); color: var(--primary); }
+    .period-chip.active { background: var(--primary); border-color: var(--primary); color: #fff; }
+    .period-range { font-size: 14px; color: var(--gray-500); font-family: 'Courier New', monospace; margin-top: 12px; }
+    @media (max-width: 768px) {
+      .period-range { width: 100%; }
+    }
+
+    /* ===== 6카드 통일 — 도메인 카드 공통 스타일 ===== */
+    .domain-card-body { display: flex; gap: 20px; align-items: flex-start; }
+    .domain-donut-wrap { flex: 0 0 auto; display: flex; align-items: center; justify-content: center; }
+    .domain-donut {
+      width: 120px; height: 120px; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center; position: relative;
+    }
+    .domain-donut-inner {
+      width: 86px; height: 86px; background: #fff; border-radius: 50%;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+    }
+    .domain-donut-value { font-size: 26px; font-weight: 800; line-height: 1; color: var(--gray-800); }
+    .domain-donut-value span { font-size: 14px; font-weight: 600; color: var(--gray-400); margin-left: 1px; }
+    .domain-donut-label { font-size: 13px; color: var(--gray-500); margin-top: 4px; }
+    .domain-donut.is-empty { background: var(--gray-200) !important; }
+    .domain-donut.is-sample { opacity: 0.85; }
+
+    .domain-details { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
+    .domain-insight {
+      background: var(--gray-50); border-radius: 12px; padding: 12px 16px;
+      font-size: 14px; line-height: 1.6; color: var(--gray-700); border-left: 3px solid var(--primary);
+    }
+    .domain-insight.emotion { border-left-color: var(--secondary); }
+    .domain-insight.participation { border-left-color: var(--primary); }
+    .domain-insight.achievement { border-left-color: var(--purple); }
+    .domain-insight.career { border-left-color: var(--cyan); }
+    .domain-insight.reading { border-left-color: var(--warning); }
+    .domain-insight.content { border-left-color: var(--secondary); }
+
+    /* sub-metric 막대 (참여도/성취수준) */
+    .subject-growth { margin-top: 14px; display: flex; flex-direction: column; gap: 10px; }
+    .subject-item { display: flex; align-items: center; gap: 10px; }
+    .subject-name { flex: 0 0 96px; font-size: 14px; color: var(--gray-700); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .subject-bar { flex: 1 1 auto; height: 10px; background: var(--gray-200); border-radius: 6px; overflow: hidden; }
+    .subject-bar-fill, .subject-fill { height: 100%; background: var(--primary); border-radius: 6px; transition: width .4s; }
+    .subject-value { flex: 0 0 48px; text-align: right; font-size: 14px; font-weight: 700; color: var(--gray-700); }
+    .subject-status { flex: 0 0 auto; font-size: 13px; }
+    .score-cell { font-weight: 700; }
+
+    /* 칩 (콘텐츠 활용 키워드/성취기준 등) */
+    .domain-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+    .domain-chip {
+      display: inline-flex; align-items: center; gap: 4px;
+      padding: 4px 10px; border-radius: 14px; font-size: 13px;
+      background: var(--gray-100); color: var(--gray-600);
+    }
+    .domain-chip-cnt { font-weight: 700; color: var(--primary); }
+
+    /* 세부 흐름 리스트 */
+    .domain-flow-title { font-size: 14px; font-weight: 700; color: var(--gray-700); margin-bottom: 8px; display: flex; align-items: center; gap: 6px; }
+    .domain-flow-row { display: flex; align-items: center; gap: 10px; padding: 8px 10px; background: var(--gray-50); border-radius: 8px; }
+    .domain-flow-row-icon { flex: 0 0 auto; font-size: 16px; }
+    .domain-flow-row-body { flex: 1 1 auto; min-width: 0; }
+    .domain-flow-row-head { display: flex; align-items: center; gap: 6px; }
+    .domain-flow-row-label { font-size: 13px; font-weight: 600; color: var(--gray-800); }
+    .domain-flow-row-badge { font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 6px; background: var(--warning-light); color: #92400e; }
+    .domain-flow-row-date { margin-left: auto; font-size: 12px; color: var(--gray-400); }
+    .domain-flow-row-desc { font-size: 13px; color: var(--gray-500); margin-top: 2px; }
+    .domain-flow-more { display: inline-block; margin-top: 10px; font-size: 13px; font-weight: 600; color: var(--primary); text-decoration: none; }
+    .domain-flow-more a { color: var(--primary); text-decoration: none; }
+    .domain-action-link { font-size: 14px; font-weight: 600; color: var(--primary); text-decoration: none; display: inline-flex; align-items: center; gap: 4px; }
+    .domain-action-link.is-external { color: var(--gray-400); cursor: default; }
 
     /* Student Profile Header - prototype style */
     .student-header {
@@ -90,188 +184,53 @@
       margin: 4px 4px 4px 0;
     }
 
-    /* 2-column Report Grid */
+    /* 2-column Report Grid — 행 외곽 높이 일치(stretch) + 짧은 카드 내부 공백 흡수 */
     .report-grid {
-      display: grid; grid-template-columns: repeat(2, 1fr);
-      gap: 20px; margin-bottom: 24px;
+      display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 28px;
+      align-items: stretch;
     }
-
-    /* Section Cards */
-    .section-card {
-      background: white; border-radius: 16px; padding: 24px;
-      box-shadow: var(--shadow-sm);
+    .report-grid > .section-card {
+      margin-bottom: 0;
+      display: flex; flex-direction: column;   /* 카드 세로 흐름 — 늘어난 슬랙을 flow가 흡수 */
+      min-height: 480px;                        /* 안전망 */
     }
-    .section-card.full-width { grid-column: span 2; }
-    .section-card.mb { margin-bottom: 24px; }
-    .section-header {
-      display: flex; justify-content: space-between; align-items: center;
-      margin-bottom: 20px;
+    /* 헤더/도넛/인사이트 등은 고정, domain-flow가 남는 높이를 흡수 */
+    .report-grid > .section-card .domain-flow {
+      flex: 1 1 auto; margin-top: 8px;
+      display: flex; flex-direction: column; gap: 10px;
     }
-    .section-title {
-      display: flex; align-items: center; gap: 10px;
-      font-size: 16px; font-weight: 600; color: var(--gray-800);
+    /* 빈 flow는 안내문을 카드 중앙에 배치하며 남는 공백을 흡수(흰 void 방지) */
+    .report-grid > .section-card .domain-flow .domain-flow-empty {
+      flex: 1 1 auto; display: flex; align-items: center; justify-content: center;
+      min-height: 80px; color: var(--gray-400); text-align: center;
     }
-    .section-icon {
-      width: 32px; height: 32px; border-radius: 8px;
-      display: flex; align-items: center; justify-content: center; font-size: 16px;
+    /* 리스트가 있는 flow도 남는 높이를 차지하도록 */
+    .report-grid > .section-card .domain-flow .domain-flow-list {
+      flex: 1 1 auto;
     }
-    .section-icon.emotion { background: var(--warning-light); }
-    .section-icon.basic { background: #e0f2fe; }
-    .section-icon.learning { background: var(--primary-light); }
-    .section-icon.daily { background: var(--pink-light); }
-    .section-icon.reading { background: var(--secondary-light); }
-    .section-icon.career { background: var(--purple-light); }
-    .section-icon.content { background: #f0fdf4; }
-    .sample-badge {
-      display: inline-block; font-size: 10px; font-weight: 600;
-      padding: 2px 8px; border-radius: 10px;
-      background: #fef3c7; color: #b45309; margin-left: 8px;
-      vertical-align: middle;
+    /* 안전망: 혹시 비어있는 리스트가 남으면 안내 문구를 중앙에 채워 흰 공백 방지 */
+    .report-grid > .section-card .domain-flow .domain-flow-list:empty {
+      display: flex; align-items: center; justify-content: center; min-height: 80px;
     }
-
-    /* Period Filter */
-    .period-filter-card {
-      background: white; border-radius: 16px; padding: 16px 20px; margin-bottom: 20px;
-      display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
-      box-shadow: var(--shadow-sm);
+    .report-grid > .section-card .domain-flow .domain-flow-list:empty::after {
+      content: "아직 표시할 활동이 없습니다."; color: var(--gray-400); font-size: 14px;
     }
-    .period-filter-label {
-      font-size: 14px; font-weight: 600; color: var(--gray-700);
-      display: flex; align-items: center; gap: 6px;
-    }
-    .period-filter-label i.fa-calendar-alt { color: var(--primary); }
-    .period-helper { color: var(--gray-400); cursor: help; }
-    .period-helper:hover { color: var(--primary); }
-    .period-chips { display: flex; gap: 6px; flex-wrap: wrap; }
-    .period-chip {
-      padding: 6px 14px; font-size: 13px; font-weight: 500;
-      border: 1px solid var(--gray-200); border-radius: 20px;
-      background: white; color: var(--gray-600); cursor: pointer;
-      transition: all 0.15s;
-    }
-    .period-chip:hover { border-color: var(--primary); color: var(--primary); }
-    .period-chip.active {
-      background: var(--primary); color: white; border-color: var(--primary);
-    }
-    .period-range {
-      margin-left: auto; font-size: 12px; color: var(--gray-500);
-      font-family: 'Courier New', monospace;
+    /* 참여도 — 활동 유형 Top 가로 막대(짧은 카드 내부 공백 흡수) */
+    .activity-type-bars { display: flex; flex-direction: column; justify-content: space-between; gap: 12px; }
+    .activity-type-bars .atb-row { display: flex; align-items: center; gap: 12px; }
+    .activity-type-bars .atb-label { flex: 0 0 110px; font-size: 14px; color: var(--gray-700); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .activity-type-bars .atb-track { flex: 1 1 auto; height: 10px; background: var(--gray-200); border-radius: 6px; overflow: hidden; }
+    .activity-type-bars .atb-fill { height: 100%; background: var(--primary); border-radius: 6px; }
+    .activity-type-bars .atb-val { flex: 0 0 48px; text-align: right; font-size: 14px; font-weight: 600; color: var(--gray-600); }
+    @media (max-width: 1024px) {
+      .report-grid { grid-template-columns: 1fr; align-items: start; }
+      .report-grid > .section-card { min-height: 0; }
+      .report-grid > .section-card .domain-flow { flex: none; }
     }
     @media (max-width: 768px) {
-      .period-range { margin-left: 0; width: 100%; }
+      .heatmap-wrap { gap: 3px 4px; }
+      .heatmap-col-label { font-size: 10px; }
     }
-    .section-link {
-      font-size: 13px; color: var(--primary); text-decoration: none;
-      display: flex; align-items: center; gap: 4px;
-    }
-    .section-link:hover { text-decoration: underline; }
-
-    /* Emotion donut - CSS conic-gradient */
-    .emotion-summary { display: flex; gap: 24px; align-items: center; }
-    .emotion-chart { flex: 0 0 120px; }
-    .emotion-donut {
-      width: 120px; height: 120px; border-radius: 50%;
-      display: flex; align-items: center; justify-content: center; position: relative;
-    }
-    .emotion-donut-inner {
-      width: 80px; height: 80px; background: white; border-radius: 50%;
-      display: flex; flex-direction: column; align-items: center; justify-content: center;
-    }
-    .emotion-donut-value { font-size: 24px; font-weight: 700; color: var(--secondary); }
-    .emotion-donut-label { font-size: 11px; color: var(--gray-500); }
-    .emotion-details { flex: 1; }
-    .emotion-insight {
-      background: var(--gray-50); border-radius: 12px; padding: 16px;
-      margin-bottom: 16px; font-size: 14px; color: var(--gray-700);
-      border-left: 3px solid var(--secondary);
-    }
-    .emotion-legend { display: flex; gap: 20px; }
-    .legend-item { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--gray-600); }
-    .legend-dot { width: 10px; height: 10px; border-radius: 50%; }
-    .legend-dot.positive { background: var(--secondary); }
-    .legend-dot.negative { background: var(--warning); }
-    .legend-dot.none { background: var(--gray-200); }
-
-    /* Basic academics */
-    .basic-content { display: flex; gap: 24px; align-items: flex-start; }
-    .basic-status { flex: 0 0 140px; text-align: center; }
-    .status-badge {
-      display: inline-block; padding: 8px 20px; border-radius: 20px;
-      font-size: 16px; font-weight: 700; margin-bottom: 12px;
-    }
-    .status-badge.reached { background: var(--secondary-light); color: var(--secondary); }
-    .status-badge.not-reached { background: var(--danger-light); color: var(--danger); }
-    .status-description { font-size: 12px; color: var(--gray-500); line-height: 1.5; }
-    .basic-subjects { flex: 1; display: flex; flex-direction: column; gap: 10px; }
-    .basic-subject-item { display: flex; align-items: center; gap: 12px; }
-    .basic-subject-name { flex: 0 0 40px; font-size: 13px; font-weight: 500; color: var(--gray-600); }
-    .basic-subject-bar { flex: 1; height: 12px; background: var(--gray-100); border-radius: 6px; overflow: hidden; }
-    .basic-subject-fill {
-      height: 100%; background: linear-gradient(90deg, var(--primary) 0%, #60a5fa 100%);
-      border-radius: 6px; transition: width 0.5s ease;
-    }
-    .basic-subject-value { flex: 0 0 40px; font-size: 13px; font-weight: 600; color: var(--gray-700); text-align: right; }
-    .basic-subject-status { flex: 0 0 36px; font-size: 11px; font-weight: 600; padding: 2px 6px; border-radius: 4px; text-align: center; }
-    .basic-subject-status.reached { background: var(--secondary-light); color: var(--secondary); }
-    .basic-subject-status.warning { background: var(--warning-light); color: var(--warning); }
-    .basic-subject-status.not-reached { background: var(--danger-light); color: var(--danger); }
-
-    /* Learning capacity - CSS radar */
-    .learning-content { display: flex; gap: 24px; }
-    .radar-chart { flex: 0 0 180px; height: 180px; position: relative; }
-    .radar-placeholder {
-      width: 180px; height: 180px; border-radius: 50%;
-      background: var(--gray-50); border: 2px dashed var(--gray-200);
-      display: flex; align-items: center; justify-content: center; position: relative;
-    }
-    .radar-polygon {
-      position: absolute; width: 100%; height: 100%; top: 0; left: 0;
-      background: rgba(37,99,235,0.25); border: none;
-    }
-    .radar-labels { position: absolute; width: 100%; height: 100%; font-size: 10px; color: var(--gray-500); }
-    .radar-label { position: absolute; white-space: nowrap; }
-    .radar-label.top { top: -5px; left: 50%; transform: translateX(-50%); }
-    .radar-label.right { top: 35%; right: -15px; }
-    .radar-label.bottom-right { bottom: -5px; right: 10px; }
-    .radar-label.bottom-left { bottom: -5px; left: 10px; }
-    .radar-label.left { top: 35%; left: -15px; }
-    .learning-details { flex: 1; }
-    .learning-insight {
-      background: var(--gray-50); border-radius: 12px; padding: 16px;
-      margin-bottom: 16px; font-size: 14px; color: var(--gray-700);
-      border-left: 3px solid var(--primary);
-    }
-    .subject-growth { display: flex; flex-direction: column; gap: 12px; }
-    .subject-item { display: flex; align-items: center; gap: 12px; }
-    .subject-name { flex: 0 0 50px; font-size: 13px; font-weight: 500; color: var(--gray-600); }
-    .subject-bar { flex: 1; height: 8px; background: var(--gray-100); border-radius: 4px; overflow: hidden; }
-    .subject-bar-fill { height: 100%; border-radius: 4px; transition: width 0.5s ease; }
-    .subject-value { flex: 0 0 45px; font-size: 13px; font-weight: 600; text-align: right; }
-
-    /* Daily learning */
-    .daily-content { display: flex; gap: 24px; }
-    .daily-stats { flex: 0 0 180px; display: flex; flex-direction: column; gap: 12px; }
-    .daily-stat-item { background: var(--gray-50); border-radius: 12px; padding: 12px 16px; text-align: center; }
-    .daily-stat-value { font-size: 24px; font-weight: 700; color: var(--primary); }
-    .daily-stat-unit { font-size: 14px; font-weight: 500; }
-    .daily-stat-label { font-size: 12px; color: var(--gray-500); margin-top: 2px; }
-    .daily-details { flex: 1; }
-    .daily-insight {
-      background: var(--gray-50); border-radius: 12px; padding: 16px;
-      margin-bottom: 16px; font-size: 14px; color: var(--gray-700);
-      border-left: 3px solid var(--pink);
-    }
-    .daily-calendar { background: var(--gray-50); border-radius: 12px; padding: 16px; }
-    .calendar-label { font-size: 12px; color: var(--gray-500); margin-bottom: 12px; }
-    .calendar-days { display: flex; gap: 8px; }
-    .calendar-day {
-      flex: 1; height: 36px; border-radius: 8px;
-      display: flex; align-items: center; justify-content: center;
-      font-size: 12px; font-weight: 500;
-    }
-    .calendar-day.completed { background: var(--secondary); color: white; }
-    .calendar-day.missed { background: var(--danger-light); color: var(--danger); }
-    .calendar-day.none { background: var(--gray-100); color: var(--gray-400); }
 
     /* Reading activity */
     .reading-content { display: flex; gap: 24px; }
@@ -377,6 +336,16 @@
     .preparing-placeholder i { font-size: 32px; }
 
     /* Teacher Observations */
+    .obs-source-note {
+      font-size: 13px; color: var(--gray-500); line-height: 1.6;
+      background: var(--gray-50); border-left: 3px solid var(--primary);
+      border-radius: 8px; padding: 10px 14px; margin-bottom: 14px;
+    }
+    .obs-form {
+      padding: 16px; border: 1.5px solid var(--gray-200); border-radius: var(--radius-md);
+      background: var(--gray-50); margin-bottom: 16px;
+    }
+    .obs-form .form-row { grid-template-columns: 200px; }
     .obs-timeline { max-height: 400px; overflow-y: auto; }
     .obs-item { display: flex; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--gray-100); }
     .obs-item:last-child { border-bottom: none; }
@@ -469,17 +438,268 @@
       .report-footer { flex-direction: column; align-items: center; }
     }
 
-    /* Print */
+    /* Print — 인쇄/PDF 저장 공용 (외부 라이브러리 없이 print CSS만으로 정돈) */
     @media print {
-      body { background: white; }
-      .sidebar, .header-right, .section-link, .report-footer, .note-tags, #backToListBtn { display: none !important; }
-      .main-content { padding: 0; }
-      .report-container { max-width: 100%; }
-      .section-card, .student-header, .growth-summary, .content-usage-card {
-        box-shadow: none; border: 1px solid var(--gray-200); break-inside: avoid;
+      @page { margin: 12mm; }
+      body { background: white; color: #000; }
+      /* 공통 GNB·사이드바·기간칩·푸터버튼·관찰입력폼·태그필터·공유토글·토스트 숨김 */
+      #dacheum-gnb-wrapper, .dacheum-gnb-wrapper,
+      .sidebar, .header-right, .section-link, .report-footer,
+      .note-tags, .period-filter-card, .obs-form, .class-selector,
+      .emo-flow-toggle, #backToListBtn, .report-toast,
+      .domain-action-link, .reading-form {
+        display: none !important;
       }
+      .main-content, .page-shell { padding: 0 !important; max-width: 100% !important; }
+      .report-container { max-width: 100% !important; }
+      .page-header { padding-top: 0; }
+      /* 카드: 그림자 제거 + 얇은 테두리 + 페이지 중간 분절 방지 */
+      .section-card, .student-header, .growth-summary, .content-usage-card,
+      .report-grid > .section-card {
+        box-shadow: none !important; border: 1px solid #d1d5db !important;
+        break-inside: avoid; page-break-inside: avoid; min-height: 0 !important;
+      }
+      .growth-summary { color: #fff; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
       .report-grid { grid-template-columns: repeat(2, 1fr); }
+      /* 막대·도넛 색상 인쇄 보존 */
+      .std-bar-fill, .ach-bd-bar-fill, .subject-bar-fill, .basic-subject-fill,
+      .domain-donut, .usage-bar-fill, .insight-bar-fill {
+        -webkit-print-color-adjust: exact; print-color-adjust: exact;
+      }
+      /* 정서 카드 전체 보기 토글 시 가려진 항목도 인쇄 시 전부 노출 */
+      .emo-flow-extra { display: flex !important; }
+      .obs-timeline { max-height: none !important; overflow: visible !important; }
     }
+
+    /* PDF 저장 안내 토스트 */
+    .report-toast {
+      position: fixed; left: 50%; bottom: 32px; transform: translateX(-50%) translateY(16px);
+      background: rgba(17,24,39,0.95); color: #fff; padding: 12px 20px; border-radius: 10px;
+      font-size: 14px; max-width: 460px; box-shadow: 0 8px 24px rgba(0,0,0,.25);
+      opacity: 0; pointer-events: none; transition: opacity .2s, transform .2s; z-index: 10000;
+    }
+    .report-toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+    /* ===== 오늘의 학습 현황 — 기간별 "폭 꽉 채움" (cascade 마지막 = 기존 규칙 override) ===== */
+    #dailyLearningSection .daily-content-grid {
+      display: grid;
+      grid-template-columns: 180px minmax(0, 1fr) 240px;  /* 통계 | 본문(꽉채움) | 인사이트 */
+      gap: 20px; align-items: stretch; margin-top: 12px;
+    }
+    @media (max-width: 1024px) {
+      #dailyLearningSection .daily-content-grid { grid-template-columns: 1fr; }
+    }
+
+    /* 좌: 통계 4칸 */
+    #dailyLearningSection .daily-stats { display: flex; flex-direction: column; gap: 10px; }
+    #dailyLearningSection .daily-stat-item {
+      background: var(--gray-50); border-radius: 12px; padding: 14px 16px; text-align: center;
+      flex: 1 1 auto; display: flex; flex-direction: column; justify-content: center;
+    }
+    #dailyLearningSection .daily-stat-value { font-size: 26px; font-weight: 700; color: var(--gray-800); line-height: 1.1; }
+    #dailyLearningSection .daily-stat-unit  { font-size: 14px; font-weight: 600; color: var(--gray-500); margin-left: 2px; }
+    #dailyLearningSection .daily-stat-label { font-size: 13px; color: var(--gray-500); margin-top: 4px; }
+
+    /* 중간: 본문 — 세로 흐름(인사이트 전폭 상단 → 캘린더 전폭 하단이 남는 높이 흡수) */
+    #dailyLearningSection .daily-details { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+    #dailyLearningSection .daily-insight {
+      background: var(--gray-50); border-left: 3px solid var(--secondary); border-radius: 10px;
+      padding: 12px 16px; font-size: 14px; color: var(--gray-700); flex: 0 0 auto;
+    }
+    #dailyLearningSection .daily-calendar {
+      background: var(--gray-50); border-radius: 12px; padding: 16px;
+      flex: 1 1 auto; display: flex; flex-direction: column; gap: 10px; min-width: 0;
+    }
+    #dailyLearningSection .calendar-label { font-size: 13px; font-weight: 600; color: var(--gray-600); }
+
+    /* 7일 — A형 요일 그리드 (폭 100% 꽉 채움) */
+    #dailyLearningSection .calendar-days {
+      display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 8px;
+      width: 100%; flex: 1 1 auto; align-content: center;
+    }
+    #dailyLearningSection .calendar-day {
+      aspect-ratio: 1; max-width: 64px; justify-self: center; align-self: center;
+      width: 100%; border-radius: 8px; background: var(--gray-200);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 13px; color: var(--gray-500);
+    }
+    #dailyLearningSection .calendar-day.completed { background: var(--secondary); color: #fff; font-weight: 600; }
+    #dailyLearningSection .calendar-day.none { background: var(--gray-200); }
+    #dailyLearningSection .calendar-day.today { outline: 2px solid var(--primary); outline-offset: -1px; }
+    #dailyLearningSection .calendar-day .cal-day-num { font-size: 13px; }
+
+    /* 30·90일 — B형 히트맵 (폭 100%, 주차열 1fr 균등 분할) */
+    #dailyLearningSection .heatmap-wrap {
+      display: grid; gap: 4px 6px; width: 100%; flex: 1 1 auto;
+      justify-content: stretch; align-content: center;
+    }
+    #dailyLearningSection .heatmap-col-label { font-size: 11px; color: var(--gray-400); text-align: center; align-self: end; }
+    #dailyLearningSection .heatmap-row-label { font-size: 11px; color: var(--gray-400); display: flex; align-items: center; justify-content: flex-end; padding-right: 4px; }
+    #dailyLearningSection .heatmap-cell {
+      width: 100%; height: 30px; justify-self: stretch;
+      min-width: 0; border-radius: 5px; background: var(--gray-200);
+    }
+    /* 주가 적은 30일권은 셀을 약간 더 두툼하게(세로), 90일권은 기본 높이 */
+    #dailyLearningSection .heatmap-wrap.weeks-5 .heatmap-cell { height: 34px; }
+    #dailyLearningSection .heatmap-cell.done  { background: var(--secondary); }
+    #dailyLearningSection .heatmap-cell.out   { background: transparent; }
+    #dailyLearningSection .heatmap-cell.today { outline: 2px solid var(--primary); outline-offset: -1px; }
+    #dailyLearningSection .heatmap-legend { display: flex; gap: 16px; font-size: 13px; color: var(--gray-500); margin-top: auto; flex: 0 0 auto; }
+    #dailyLearningSection .heatmap-legend .lg-dot { display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 4px; vertical-align: -1px; }
+    #dailyLearningSection .lg-dot.lg-done { background: var(--secondary); }
+    #dailyLearningSection .lg-dot.lg-miss { background: var(--gray-200); }
+
+    /* 180·전체 — C형 주/월 막대 (폭 100% flex 균등 + 세로 꽉 채움) */
+    #dailyLearningSection .weekbar-wrap {
+      display: flex; align-items: stretch; gap: 8px; width: 100%;
+      flex: 1 1 auto; min-height: 150px; align-content: stretch;
+    }
+    #dailyLearningSection .weekbar-col { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; align-items: stretch; justify-content: flex-end; }
+    #dailyLearningSection .weekbar { width: 100%; min-height: 6px; background: var(--gray-200); border-radius: 4px 4px 0 0; }
+    #dailyLearningSection .weekbar.fill-low { background: #a7f3d0; }
+    #dailyLearningSection .weekbar.fill-high { background: var(--secondary); }
+    #dailyLearningSection .weekbar-meta { display: flex; justify-content: space-between; font-size: 12px; color: var(--gray-400); margin-top: 6px; flex: 0 0 auto; }
+    #dailyLearningSection .weekbar-summary { font-size: 13px; color: var(--gray-600); margin-top: 6px; flex: 0 0 auto; }
+
+    /* 우: 이번 기간 인사이트 패널 */
+    #dailyLearningSection .daily-side-panel { background: var(--gray-50); border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+    #dailyLearningSection .daily-side-panel h4 { font-size: 14px; font-weight: 700; color: var(--gray-700); margin: 0 0 4px; }
+    #dailyLearningSection .insight-row { display: flex; align-items: center; justify-content: space-between; font-size: 14px; }
+    #dailyLearningSection .insight-row .ir-label { color: var(--gray-500); }
+    #dailyLearningSection .insight-row strong { color: var(--gray-800); }
+    #dailyLearningSection .insight-row.is-zero strong { color: var(--gray-400); }
+    #dailyLearningSection .insight-row-stack { display: flex; flex-direction: column; gap: 6px; }
+    #dailyLearningSection .insight-row-stack .irs-head { display: flex; justify-content: space-between; font-size: 14px; color: var(--gray-500); }
+    #dailyLearningSection .insight-bar { height: 8px; background: var(--gray-200); border-radius: 5px; overflow: hidden; }
+    #dailyLearningSection .insight-bar-fill { height: 100%; background: var(--secondary); border-radius: 5px; }
+    #dailyLearningSection .daily-side-panel .empty-msg { font-size: 13px; color: var(--gray-400); line-height: 1.6; }
+
+    @media (max-width: 768px) {
+      #dailyLearningSection .heatmap-cell { max-width: 28px; }
+    }
+
+    /* ===== 누락 복구 1 — 성취수준: 자주 활용한 성취기준 Top5 (가로 1줄: 코드 | 막대 | 횟수) ===== */
+    .standard-list { display: flex; flex-direction: column; gap: 8px; }
+    .standard-row { display: flex; align-items: center; gap: 12px; }
+    .standard-row code {
+      flex: 0 0 96px; font-family: 'Courier New', monospace; font-size: 13px;
+      font-weight: 700; color: var(--gray-700); background: var(--gray-100);
+      padding: 4px 8px; border-radius: 6px; text-align: center;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .std-bar { flex: 1 1 auto; height: 10px; background: var(--gray-200); border-radius: 6px; overflow: hidden; }
+    .std-bar-fill { height: 100%; background: var(--purple); border-radius: 6px; transition: width .4s; }
+    .std-cnt { flex: 0 0 48px; text-align: right; font-size: 14px; font-weight: 700; color: var(--gray-700); }
+
+    /* ===== 성취수준: 정답률 출처별 구분(자기주도 문항풀이 / 채움클래스 평가) ===== */
+    .achievement-breakdown { display: flex; flex-direction: column; gap: 10px; }
+    .ach-bd-row { display: flex; align-items: center; gap: 12px; }
+    .ach-bd-label { flex: 0 0 124px; font-size: 14px; font-weight: 600; color: var(--gray-700); white-space: nowrap; }
+    .ach-bd-bar { flex: 1 1 auto; height: 12px; background: var(--gray-200); border-radius: 6px; overflow: hidden; }
+    .ach-bd-bar-fill { height: 100%; border-radius: 6px; transition: width .4s; }
+    .ach-bd-meta { flex: 0 0 auto; font-size: 13px; color: var(--gray-500); white-space: nowrap; }
+    .ach-bd-meta strong { font-size: 14px; color: var(--gray-800); }
+
+    /* ===== 누락 복구 3 — 콘텐츠 활용 지표 4칸 그리드 (저장/조회/구독/포트폴리오) ===== */
+    .usage-metric-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 4px; }
+    .usage-metric-cell {
+      display: flex; flex-direction: column; align-items: center; gap: 4px;
+      padding: 12px 8px; background: var(--gray-50); border-radius: 12px; text-align: center;
+    }
+    .usage-metric-cell .um-label { font-size: 13px; color: var(--gray-600); white-space: nowrap; }
+    .usage-metric-cell strong { font-size: 17px; font-weight: 700; color: var(--gray-800); }
+    .usage-metric-cell.is-zero { opacity: .55; }
+    .usage-metric-cell.is-zero strong { color: var(--gray-400); }
+    @media (max-width: 768px) { .usage-metric-grid { grid-template-columns: repeat(2, 1fr); } }
+
+    /* ===== 누락 복구 4 — 독서 기록 별점 ===== */
+    .book-row-stars { color: var(--warning); font-size: 13px; letter-spacing: 1px; white-space: nowrap; }
+
+    /* ===== 정서 카드 — 최근 감정 흐름 요약(5건) + 전체 보기 토글 ===== */
+    .emo-flow-extra { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; max-height: 320px; overflow-y: auto; padding-right: 4px; }
+    .emo-flow-toggle {
+      align-self: flex-start; margin-top: 10px; padding: 6px 14px;
+      background: var(--gray-50); border: 1px solid var(--gray-200); border-radius: 18px;
+      font-size: 13px; font-weight: 600; color: var(--primary); cursor: pointer;
+      font-family: inherit; display: inline-flex; align-items: center; gap: 6px; transition: all .15s;
+    }
+    .emo-flow-toggle:hover { background: var(--primary-light); border-color: var(--primary); }
+
+    /* ===== 누락 복구 5 — 기초학력 진단 (도달/미달 뱃지 + 과목 막대) ===== */
+    .basic-content { display: flex; gap: 24px; align-items: flex-start; }
+    .basic-status { flex: 0 0 200px; text-align: center; }
+    .status-badge {
+      display: inline-block; padding: 8px 20px; border-radius: 20px;
+      font-size: 16px; font-weight: 700; margin-bottom: 12px;
+    }
+    .status-badge.reached { background: var(--secondary-light); color: #047857; }
+    .status-badge.not-reached { background: var(--danger-light); color: #b91c1c; }
+    .status-description { font-size: 14px; color: var(--gray-600); line-height: 1.6; }
+    .status-description strong { color: var(--gray-800); }
+    .basic-subjects { flex: 1 1 auto; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+    .basic-subject-item { display: flex; align-items: center; gap: 12px; }
+    .basic-subject-name {
+      flex: 0 0 64px; font-size: 14px; color: var(--gray-700);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .basic-subject-bar { flex: 1 1 auto; height: 10px; background: var(--gray-200); border-radius: 6px; overflow: hidden; }
+    .basic-subject-fill { height: 100%; background: var(--primary); border-radius: 6px; transition: width .4s; }
+    .basic-subject-value { flex: 0 0 44px; text-align: right; font-size: 14px; font-weight: 700; color: var(--gray-700); }
+    .basic-subject-status { flex: 0 0 auto; font-size: 13px; font-weight: 600; padding: 2px 10px; border-radius: 10px; }
+    .basic-subject-status.reached { background: var(--secondary-light); color: #047857; }
+    .basic-subject-status.warning { background: var(--warning-light); color: #b45309; }
+    .basic-subject-status.not-reached { background: var(--danger-light); color: #b91c1c; }
+
+    /* ===== 누락 복구 6 — 학습 역량 레이더 ===== */
+    .learning-content { display: flex; gap: 24px; align-items: flex-start; }
+    .radar-chart { flex: 0 0 240px; display: flex; align-items: center; justify-content: center; }
+    .radar-placeholder {
+      position: relative; width: 200px; height: 200px; border-radius: 50%;
+      background:
+        radial-gradient(circle, transparent 0, transparent 24%, var(--gray-200) 25%, transparent 26%) center / 100% 100% no-repeat,
+        radial-gradient(circle, transparent 0, transparent 49%, var(--gray-200) 50%, transparent 51%) center / 100% 100% no-repeat,
+        radial-gradient(circle, transparent 0, transparent 74%, var(--gray-200) 75%, transparent 76%) center / 100% 100% no-repeat,
+        radial-gradient(circle, var(--gray-200) 0, var(--gray-200) 99%, transparent 100%) center / 100% 100% no-repeat;
+    }
+    .radar-polygon { position: absolute; inset: 0; background: rgba(37,99,235,0.28); border: 2px solid var(--primary); }
+    .radar-labels { position: absolute; inset: 0; }
+    .radar-label {
+      position: absolute; font-size: 11px; font-weight: 600; color: var(--gray-600);
+      white-space: nowrap; background: rgba(255,255,255,0.85); padding: 1px 4px; border-radius: 4px;
+    }
+    .radar-label.top { top: -18px; left: 50%; transform: translateX(-50%); }
+    .radar-label.right { top: 30%; right: -10px; transform: translateX(100%); }
+    .radar-label.bottom-right { bottom: 6%; right: -6px; transform: translateX(70%); }
+    .radar-label.bottom-left { bottom: 6%; left: -6px; transform: translateX(-70%); }
+    .radar-label.left { top: 30%; left: -10px; transform: translateX(-100%); }
+    .learning-details { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
+    .learning-insight {
+      background: var(--gray-50); border-radius: 12px; padding: 12px 16px;
+      font-size: 14px; line-height: 1.6; color: var(--gray-700);
+      border-left: 3px solid var(--primary); margin-bottom: 12px;
+    }
+    @media (max-width: 768px) {
+      .radar-chart { flex: none; margin: 0 auto 16px; }
+      .basic-status { flex: none; }
+    }
+
+    /* ===== 누락 복구 7 — 공통 보조 요소 (legend-dot, sample-badge, section-icon 보정) ===== */
+    .legend-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--gray-300); }
+    .legend-dot.positive { background: var(--secondary); }
+    .legend-dot.negative { background: var(--warning); }
+    .legend-dot.none { background: var(--gray-300); }
+    .sample-badge {
+      display: inline-block; margin-left: 8px; padding: 2px 10px; border-radius: 12px;
+      font-size: 12px; font-weight: 600; background: var(--gray-100); color: var(--gray-500);
+      vertical-align: middle; cursor: help;
+    }
+    .section-icon {
+      width: 32px; height: 32px; border-radius: 9px; flex-shrink: 0;
+      display: inline-flex; align-items: center; justify-content: center; font-size: 17px;
+    }
+    .section-icon.content { background: var(--secondary-light); }
+    .section-icon.basic { background: var(--warning-light); }
+    .section-icon.learning { background: var(--primary-light); }
   </style>
 </head>
 <body>
@@ -515,11 +735,11 @@
                   <th class="sortable" onclick="sortReportStudents('이름')">이름 <i class="fas fa-sort sort-icon" id="rsort-이름"></i></th>
                   <th class="sortable" onclick="sortReportStudents('종합점수')">종합 점수 <i class="fas fa-sort sort-icon" id="rsort-종합점수"></i></th>
                   <th class="sortable" onclick="sortReportStudents('정서발달')">정서발달 <i class="fas fa-sort sort-icon" id="rsort-정서발달"></i></th>
-                  <th class="sortable" onclick="sortReportStudents('기초학력')">기초학력 <i class="fas fa-sort sort-icon" id="rsort-기초학력"></i></th>
-                  <th class="sortable" onclick="sortReportStudents('학습역량')">학습역량 <i class="fas fa-sort sort-icon" id="rsort-학습역량"></i></th>
-                  <th class="sortable" onclick="sortReportStudents('오늘의학습')">오늘의학습 <i class="fas fa-sort sort-icon" id="rsort-오늘의학습"></i></th>
-                  <th class="sortable" onclick="sortReportStudents('독서활동')">독서활동 <i class="fas fa-sort sort-icon" id="rsort-독서활동"></i></th>
+                  <th class="sortable" onclick="sortReportStudents('참여도')">참여도 <i class="fas fa-sort sort-icon" id="rsort-참여도"></i></th>
+                  <th class="sortable" onclick="sortReportStudents('성취수준')">성취수준 <i class="fas fa-sort sort-icon" id="rsort-성취수준"></i></th>
                   <th class="sortable" onclick="sortReportStudents('진로탐색')">진로탐색 <i class="fas fa-sort sort-icon" id="rsort-진로탐색"></i></th>
+                  <th class="sortable" onclick="sortReportStudents('독서활동')">독서활동 <i class="fas fa-sort sort-icon" id="rsort-독서활동"></i></th>
+                  <th class="sortable" onclick="sortReportStudents('콘텐츠활용')">콘텐츠활용 <i class="fas fa-sort sort-icon" id="rsort-콘텐츠활용"></i></th>
                 </tr>
               </thead>
               <tbody id="studentListBody"></tbody>
@@ -576,10 +796,21 @@
           <div class="growth-summary-content" id="summaryContent"></div>
         </div>
 
+        <!-- 영역별 성장 분포 레이더 (6축 — class-dashboard와 동일 AREAS, '나의 성장') -->
+        <div class="section-card mb" id="radarSection">
+          <div class="section-header">
+            <div class="section-title"><div class="section-icon" style="background:var(--purple);color:#fff"><i class="fas fa-spider"></i></div> 영역별 성장 분포</div>
+          </div>
+          <div class="chart-container" style="height:280px;"><canvas id="studentRadarChart"></canvas></div>
+        </div>
+
         <!-- 6 Domain Cards in 2-column grid -->
         <div class="report-grid" id="reportGrid">
           <!-- Cards will be rendered by JS -->
         </div>
+
+        <!-- 오늘의 학습 현황 (콘텐츠 활용 현황 바로 위 — 사용자 요청으로 위치 이동) -->
+        <div class="section-card mb" id="dailyLearningSection"></div>
 
         <!-- Content Usage Section -->
         <div class="content-usage-card" id="contentUsageCard">
@@ -597,6 +828,29 @@
         <div class="section-card mb" id="observationSection">
           <div class="section-header">
             <div class="section-title"><div class="section-icon" style="background:var(--gray-100)">&#9999;&#65039;</div> 교사 관찰 기록</div>
+          </div>
+          <p class="obs-source-note" id="obsSourceNote">교사가 이 화면에서 직접 남긴 관찰 기록입니다. 아래 입력란에서 추가할 수 있어요.</p>
+          <!-- 교사 입력 폼 (교사/관리자에게만 표시) -->
+          <div class="obs-form" id="obsForm" style="display:none;">
+            <div class="form-row">
+              <div class="form-group">
+                <label for="obsArea">관찰 영역</label>
+                <select id="obsArea">
+                  <option value="학습습관">학습습관</option>
+                  <option value="교우관계">교우관계</option>
+                  <option value="가정연계">가정연계</option>
+                  <option value="특기적성">특기적성</option>
+                  <option value="생활태도">생활태도</option>
+                </select>
+              </div>
+            </div>
+            <div class="form-group">
+              <label for="obsText">관찰 내용</label>
+              <textarea id="obsText" placeholder="학생을 관찰한 내용을 구체적으로 적어보세요. (예: 모둠 활동에서 친구들을 적극적으로 도왔어요.)"></textarea>
+            </div>
+            <div class="form-actions">
+              <button class="btn btn-primary btn-sm" id="submitObsBtn"><i class="fas fa-save"></i> 관찰 기록 저장</button>
+            </div>
           </div>
           <div class="note-tags" id="obsTagFilter">
             <button class="note-tag active" data-tag="all">#전체</button>
@@ -645,8 +899,8 @@
 
         <!-- Footer Actions -->
         <div class="report-footer" id="reportFooter">
-          <button class="footer-btn secondary" onclick="alert('준비 중입니다')"><span>&#128196;</span> PDF 저장</button>
-          <button class="footer-btn secondary" onclick="window.print()"><span>&#128424;</span> 인쇄하기</button>
+          <button class="footer-btn secondary" id="savePdfBtn"><span>&#128196;</span> PDF 저장</button>
+          <button class="footer-btn secondary" id="printBtn"><span>&#128424;</span> 인쇄하기</button>
           <button class="footer-btn primary" onclick="alert('준비 중입니다')"><span>&#128106;</span> 학부모에게 공유</button>
         </div>
 
@@ -691,14 +945,15 @@
   let currentReportData = null;
   let allObservations = [];
   let activeObsTag = 'all';
+  let studentRadarInstance = null;
 
   const AREAS = [
-    { key: '정서발달', icon: 'fas fa-heart', color: '#ec4899', bg: '#fce7f3', emoji: '\uD83D\uDC9B', iconClass: 'emotion' },
-    { key: '기초학력', icon: 'fas fa-book', color: '#2563eb', bg: '#dbeafe', emoji: '\uD83D\uDCCB', iconClass: 'basic' },
-    { key: '학습역량', icon: 'fas fa-brain', color: '#8b5cf6', bg: '#ede9fe', emoji: '\uD83D\uDCDA', iconClass: 'learning' },
-    { key: '오늘의학습', icon: 'fas fa-calendar-check', color: '#10b981', bg: '#d1fae5', emoji: '\uD83D\uDCDD', iconClass: 'daily' },
-    { key: '독서활동', icon: 'fas fa-book-reader', color: '#f59e0b', bg: '#fef3c7', emoji: '\uD83D\uDCD6', iconClass: 'reading' },
-    { key: '진로탐색', icon: 'fas fa-compass', color: '#06b6d4', bg: '#cffafe', emoji: '\uD83C\uDFAF', iconClass: 'career' }
+    { key: '정서발달',   icon: 'fas fa-heart',         color: '#ec4899', bg: '#fce7f3', emoji: '\uD83D\uDC9B', iconClass: 'emotion' },
+    { key: '참여도',     icon: 'fas fa-people-arrows', color: '#2563eb', bg: '#dbeafe', emoji: '\uD83E\uDD1D', iconClass: 'learning' },
+    { key: '성취수준',   icon: 'fas fa-bullseye',      color: '#8b5cf6', bg: '#ede9fe', emoji: '\uD83C\uDFAF', iconClass: 'basic' },
+    { key: '진로탐색',   icon: 'fas fa-compass',       color: '#06b6d4', bg: '#cffafe', emoji: '\uD83E\uDDED', iconClass: 'career' },
+    { key: '독서활동',   icon: 'fas fa-book-reader',   color: '#f59e0b', bg: '#fef3c7', emoji: '\uD83D\uDCD6', iconClass: 'reading' },
+    { key: '콘텐츠활용', icon: 'fas fa-photo-film',    color: '#10b981', bg: '#d1fae5', emoji: '\uD83C\uDFAC', iconClass: 'content' }
   ];
 
   async function fetchWithAuth(url, opts) {
@@ -877,6 +1132,20 @@
     window.scrollTo(0, 0);
   };
 
+  // 정서 카드 — "최근 감정 흐름" 전체 보기/접기 토글
+  window.toggleEmotionFlow = function(btn) {
+    const extra = document.getElementById('emoFlowExtra');
+    if (!extra || !btn) return;
+    const opened = extra.style.display !== 'none';
+    if (opened) {
+      extra.style.display = 'none';
+      btn.innerHTML = '<i class="fas fa-chevron-down"></i> 전체 ' + (extra.children.length + 5) + '건 보기';
+    } else {
+      extra.style.display = 'flex';
+      btn.innerHTML = '<i class="fas fa-chevron-up"></i> 접기';
+    }
+  };
+
   // ---- Period Filter State ----
   let currentPeriod = { days: 30, startDate: null, endDate: null };
 
@@ -900,8 +1169,16 @@
   }
 
   function buildReportQuery() {
-    if (!currentPeriod.startDate) return '';
-    return '?startDate=' + currentPeriod.startDate + '&endDate=' + currentPeriod.endDate;
+    const params = [];
+    if (currentPeriod.startDate) {
+      params.push('startDate=' + currentPeriod.startDate, 'endDate=' + currentPeriod.endDate);
+    }
+    // 참여도은 클래스 맥락 지표이므로 classId를 동반해야 교사 테이블과 값이 일치 (감리 REWORK)
+    const cid = (typeof currentClassId !== 'undefined' && currentClassId)
+      || document.getElementById('reportClassSelect')?.value
+      || new URLSearchParams(location.search).get('classId') || '';
+    if (cid) params.push('classId=' + cid);
+    return params.length ? '?' + params.join('&') : '';
   }
 
   function initPeriodFilter() {
@@ -933,6 +1210,8 @@
       currentReportData = data.report;
       renderProfile(data.report);
       renderGrowthSummary(data.report);
+      renderRadarChart(data.report);
+      renderDailyLearningSection(data.report);
       renderDomainCards(data.report);
       renderContentUsage(data.report);
     } catch (err) {
@@ -1022,25 +1301,72 @@
     const areas = report.areas || {};
     let html = '';
 
-    // 1. Emotion Development
+    // 6축 카드 (설계서 §6) — 정서발달·참여도·성취수준·진로탐색·독서활동·콘텐츠활용
+    // 오늘의학습은 별도 섹션(#dailyLearningSection)으로 분리됨
     html += renderEmotionCard(report, areas['정서발달']);
-
-    // 2. Basic Academics
-    html += renderBasicAcademicsCard(report, areas['기초학력']);
-
-    // 3. Learning Capacity
-    html += renderLearningCapacityCard(report, areas['학습역량']);
-
-    // 4. Daily Learning
-    html += renderDailyLearningCard(report, areas['오늘의학습']);
-
-    // 5. Reading Activity
-    html += renderReadingActivityCard(report, areas['독서활동']);
-
-    // 6. Career Exploration
+    html += renderParticipationCard(report, areas['참여도']);
+    html += renderAchievementCard(report, areas['성취수준']);
     html += renderCareerCard(report, areas['진로탐색']);
+    html += renderReadingActivityCard(report, areas['독서활동']);
+    html += renderContentUsageCard(report, areas['콘텐츠활용']);
 
     grid.innerHTML = html;
+  }
+
+  // ---- 6축 레이더 (class-dashboard와 동일 옵션, '나의 성장') ----
+  function renderRadarChart(report) {
+    const canvas = document.getElementById('studentRadarChart');
+    if (!canvas || !window.Chart) return;
+    const areas = report.areas || {};
+    const meta = AREAS.map(a => {
+      const ad = areas[a.key] || {};
+      const hasData = ad.hasData !== false;
+      const score = ad.score != null ? ad.score : 0;
+      return { key: a.key, score, hasData };
+    });
+    const labels = meta.map(m => m.hasData ? m.key : (m.key + ' (없음)'));
+    const values = meta.map(m => m.hasData ? m.score : 0);
+    const pointColors = meta.map(m => m.hasData ? '#2563eb' : '#cbd5e1');
+    if (studentRadarInstance) studentRadarInstance.destroy();
+    studentRadarInstance = new Chart(canvas.getContext('2d'), {
+      type: 'radar',
+      data: {
+        labels,
+        datasets: [{
+          label: '나의 성장',
+          data: values,
+          backgroundColor: 'rgba(37,99,235,.15)',
+          borderColor: 'rgba(37,99,235,.7)',
+          borderWidth: 2,
+          pointBackgroundColor: pointColors,
+          pointBorderColor: pointColors,
+          pointRadius: 4
+        }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        scales: { r: { beginAtZero: true, max: 100, ticks: { stepSize: 20, font: { size: 11 } }, pointLabels: { font: { size: 13 } } } },
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label: (c) => meta[c.dataIndex] && !meta[c.dataIndex].hasData
+                ? meta[c.dataIndex].key + ': 데이터 없음'
+                : meta[c.dataIndex].key + ': ' + Math.round(c.parsed.r) + '점'
+            }
+          }
+        }
+      }
+    });
+  }
+
+  // ---- 오늘의 학습 별도 섹션 (기존 renderDailyLearningCard 내용을 독립 카드로 이전) ----
+  function renderDailyLearningSection(report) {
+    const sec = document.getElementById('dailyLearningSection');
+    if (!sec) return;
+    sec.innerHTML =
+      '<div class="section-header"><div class="section-title"><div class="section-icon" style="background:var(--secondary-light)">📅</div> 오늘의 학습 현황</div></div>' +
+      renderDailyLearningBody(report);
   }
 
   function renderContentUsage(report) {
@@ -1112,25 +1438,134 @@
 
   // ---- Domain Card Renderers ----
 
+  // 도넛 색 — score 구간별 4단계
+  function donutColorForScore(score) {
+    if (score == null) return 'var(--gray-300)';
+    if (score >= 80) return 'var(--secondary)';
+    if (score >= 60) return 'var(--primary)';
+    if (score >= 40) return 'var(--warning)';
+    return 'var(--danger)';
+  }
+
+  // 단색 도넛 (score% 만큼만 채우고 나머지는 회색) — 정서 외 카드에서 사용
+  function makeScoreDonutHtml(score, options) {
+    options = options || {};
+    const isEmpty = options.empty === true;
+    const isSample = options.sample === true;
+    const unit = options.unit || '점';
+    const label = options.label || '';
+    const tip = options.tip || '';
+    const titleAttr = tip ? ' title="' + escapeHtml(tip) + '"' : '';
+    const cursorStyle = tip ? ';cursor:help' : '';
+
+    if (isEmpty) {
+      return '<div class="domain-donut-wrap"' + titleAttr + '>' +
+        '<div class="domain-donut is-empty">' +
+          '<div class="domain-donut-inner">' +
+            '<div class="domain-donut-value" style="color:var(--gray-400);">-</div>' +
+            '<div class="domain-donut-label">' + escapeHtml(label || '데이터 없음') + '</div>' +
+          '</div>' +
+        '</div>' +
+      '</div>';
+    }
+
+    const v = Math.max(0, Math.min(100, score || 0));
+    const color = donutColorForScore(score);
+    const deg = Math.round(v / 100 * 360);
+    const sampleCls = isSample ? ' is-sample' : '';
+    const valueColor = isSample ? 'var(--gray-500)' : color;
+    return '<div class="domain-donut-wrap"' + titleAttr + '>' +
+      '<div class="domain-donut' + sampleCls + '" style="background: conic-gradient(' + color + ' 0deg ' + deg + 'deg, var(--gray-200) ' + deg + 'deg 360deg)' + cursorStyle + ';">' +
+        '<div class="domain-donut-inner">' +
+          '<div class="domain-donut-value" style="color:' + valueColor + ';">' + score + '<span class="unit">' + unit + '</span></div>' +
+          '<div class="domain-donut-label">' + escapeHtml(label) + '</div>' +
+        '</div>' +
+      '</div>' +
+    '</div>';
+  }
+
+  // 헤더 (좌: 아이콘+제목+예시뱃지 / 우: 액션 링크)
+  function makeDomainHeader(iconClass, emoji, title, opts) {
+    opts = opts || {};
+    const sample = opts.sample ? '<span class="sample-badge" title="현재 표시되는 데이터는 시연용 예시입니다.">예시 데이터</span>' : '';
+    let actionHtml = '';
+    if (opts.actionHref) {
+      const cls = opts.actionExternal ? 'domain-action-link is-external' : 'domain-action-link';
+      const arrow = opts.actionArrow || '→';
+      const onclick = opts.actionExternal ? ' onclick="event.preventDefault(); alert(\'외부 서비스(준비 중)입니다.\');"' : '';
+      actionHtml = '<a href="' + opts.actionHref + '" class="' + cls + '"' + onclick + '>' +
+        escapeHtml(opts.actionLabel || '') + ' ' + arrow + '</a>';
+    }
+    return '<div class="section-header">' +
+      '<div class="section-title"><div class="section-icon ' + iconClass + '">' + emoji + '</div> ' + title + sample + '</div>' +
+      actionHtml +
+    '</div>';
+  }
+
+  // 영역별 액션 링크 결정
+  function actionLinkFor(domain) {
+    if (domain === 'emotion') {
+      return isTeacher
+        ? { href: '/growth/emotion-monitor.html', label: '마음채움 모니터' }
+        : { href: '/self-learn/emotion-checkin.html', label: '마음채움 체크인' };
+    }
+    if (domain === 'participation') {
+      return { href: '/class/index.html', label: isTeacher ? '채움클래스 가기' : '나의 클래스 가기' };
+    }
+    if (domain === 'achievement') {
+      return isTeacher
+        ? { href: '/growth/class-dashboard.html', label: '학습 분석' }
+        : { href: '/self-learn/learning-map.html', label: 'AI 맞춤학습 가기' };
+    }
+    if (domain === 'career') {
+      return { href: '#', label: '진로진학 (외부)', external: true };
+    }
+    if (domain === 'reading') {
+      return { href: '#readingLogSection', label: '독서 기록 보기', arrow: '↓' };
+    }
+    if (domain === 'content') {
+      return { href: '/content/index.html', label: isTeacher ? '활용 대시보드' : '채움콘텐츠 가기' };
+    }
+    return null;
+  }
+
   function renderEmotionCard(report, areaData) {
     const emotions = report.emotionDevelopment || [];
     const total = emotions.reduce((s, e) => s + e.cnt, 0);
     const positiveEmotions = emotions.filter(e => ['happy','excited','good','great','calm'].includes(e.emotion));
-    const negativeEmotions = emotions.filter(e => ['sad','angry','anxious','tired','bored'].includes(e.emotion));
+    const negativeEmotions = emotions.filter(e => ['sad','angry','anxious','tired','frustrated'].includes(e.emotion));
     const positiveCount = positiveEmotions.reduce((s, e) => s + e.cnt, 0);
     const negativeCount = negativeEmotions.reduce((s, e) => s + e.cnt, 0);
     const noneCount = total - positiveCount - negativeCount;
 
+    const act = actionLinkFor('emotion');
+    const headerHtml = makeDomainHeader('emotion', '💛', '정서 발달', {
+      actionHref: act.href, actionLabel: act.label
+    });
+
+    // 빈 상태 — 5블록 placeholder 유지
     if (total === 0) {
-      return '<div class="section-card">' +
-        '<div class="section-header"><div class="section-title"><div class="section-icon emotion">\uD83D\uDC9B</div> 정서 발달</div></div>' +
-        '<div class="no-service"><i class="fas fa-heart"></i><p>아직 감정 체크인 데이터가 없습니다. 출석 체크 시 감정을 표현해보세요!</p></div></div>';
+      return '<div class="section-card">' + headerHtml +
+        '<div class="domain-card-body">' +
+          makeScoreDonutHtml(null, { empty: true, label: '체크인 없음' }) +
+          '<div class="domain-details">' +
+            '<div class="domain-insight emotion">아직 감정 체크인 데이터가 없습니다. 출석 시 감정을 표현하면 정서 발달 점수가 표시됩니다.</div>' +
+            '<div class="domain-chips">' +
+              '<span class="domain-chip is-sample" title="감정출석부에서 행복·설렘·좋음·최고·편안 등 긍정 감정으로 체크인한 횟수입니다."><span class="legend-dot positive" style="display:inline-block;margin-right:4px;"></span>긍정 0회</span>' +
+              '<span class="domain-chip is-sample" title="감정출석부에서 슬픔·화남·불안·피곤·답답 등 부정 감정으로 체크인한 횟수입니다."><span class="legend-dot negative" style="display:inline-block;margin-right:4px;"></span>부정 0회</span>' +
+              '<span class="domain-chip is-sample" title="해당 기간 중 감정 체크인을 하지 않은(미응답) 횟수입니다."><span class="legend-dot none" style="display:inline-block;margin-right:4px;"></span>무응답 0회</span>' +
+            '</div>' +
+          '</div>' +
+        '</div>' +
+        '<div class="domain-flow">' +
+          '<div class="domain-flow-title">📅 최근 감정 흐름 (0건)</div>' +
+          '<div class="domain-flow-empty">아직 감정 기록이 없습니다.</div>' +
+        '</div>' +
+      '</div>';
     }
 
     const posRatio = Math.round(positiveCount / total * 100);
     const negRatio = Math.round(negativeCount / total * 100);
-    const noneRatio = 100 - posRatio - negRatio;
-
     const posDeg = Math.round(posRatio / 100 * 360);
     const negDeg = Math.round(negRatio / 100 * 360);
 
@@ -1140,31 +1575,489 @@
       const sorted = [...emotions].sort((a, b) => b.cnt - a.cnt);
       topEmotion = sorted[0].emotion;
     }
-    const emotionKo = { happy: '행복해요', excited: '설레요', good: '좋아요', great: '최고예요', calm: '편안해요', sad: '슬퍼요', angry: '화나요', anxious: '불안해요', tired: '피곤해요', bored: '지루해요' };
+    const emotionKo = { happy: '행복해요', excited: '설레요', good: '좋아요', great: '최고예요', calm: '편안해요', sad: '슬퍼요', angry: '화나요', anxious: '불안해요', tired: '피곤해요', frustrated: '답답해요' };
+    const emotionEmoji = { happy: '😊', excited: '🤩', great: '🥳', good: '🙂', calm: '😌', tired: '😴', sad: '😢', angry: '😠', anxious: '😰', frustrated: '😫' };
 
-    return '<div class="section-card">' +
-      '<div class="section-header"><div class="section-title"><div class="section-icon emotion">\uD83D\uDC9B</div> 정서 발달</div></div>' +
-      '<div class="emotion-summary">' +
-        '<div class="emotion-chart">' +
-          '<div class="emotion-donut" style="background: conic-gradient(var(--secondary) 0deg ' + posDeg + 'deg, var(--warning) ' + posDeg + 'deg ' + (posDeg + negDeg) + 'deg, var(--gray-200) ' + (posDeg + negDeg) + 'deg 360deg);">' +
-            '<div class="emotion-donut-inner">' +
-              '<div class="emotion-donut-value">' + posRatio + '%</div>' +
-              '<div class="emotion-donut-label">긍정 비율</div>' +
-            '</div>' +
+    // 인사이트 텍스트 (3분기 + top 감정 극성)
+    const insightText = (function(){
+      const posSet = ['happy','excited','good','great','calm'];
+      const negSet = ['sad','angry','anxious','tired','frustrated'];
+      const topLabel = topEmotion ? (emotionKo[topEmotion] || '기타') : '';
+      const topIsPos = posSet.indexOf(topEmotion) >= 0;
+      const topIsNeg = negSet.indexOf(topEmotion) >= 0;
+      let topText = '';
+      if (topEmotion) {
+        if (topIsPos) topText = '"<strong>' + topLabel + '</strong>" 등 긍정 감정을 자주 표현했어요. ';
+        else if (topIsNeg) topText = '"<strong>' + topLabel + '</strong>" 감정이 자주 나타났어요. ';
+        else topText = '"<strong>' + topLabel + '</strong>" 감정을 자주 표현했어요. ';
+      }
+      let stateText;
+      if (posRatio >= 70) stateText = '전반적으로 안정적인 정서 상태를 보이고 있습니다.';
+      else if (posRatio >= 40) stateText = '긍정과 부정 감정이 비슷한 비율로 나타나 정서적 관심이 도움이 됩니다.';
+      else stateText = '부정 감정 비율이 높아 감정적 지원이 필요한 상태입니다.';
+      return topText + stateText;
+    })();
+
+    // 정서 도넛 (긍/부 2색)
+    const donutHtml =
+      '<div class="domain-donut-wrap">' +
+        '<div class="domain-donut" style="background: conic-gradient(var(--secondary) 0deg ' + posDeg + 'deg, var(--warning) ' + posDeg + 'deg ' + (posDeg + negDeg) + 'deg, var(--gray-200) ' + (posDeg + negDeg) + 'deg 360deg);">' +
+          '<div class="domain-donut-inner">' +
+            '<div class="domain-donut-value" style="color:var(--secondary);">' + posRatio + '<span class="unit">%</span></div>' +
+            '<div class="domain-donut-label">긍정 비율</div>' +
           '</div>' +
         '</div>' +
-        '<div class="emotion-details">' +
-          '<div class="emotion-insight">' +
-            (topEmotion ? '"<strong>' + (emotionKo[topEmotion] || topEmotion) + '</strong>" 감정을 가장 많이 표현했습니다. ' : '') +
-            '전반적으로 ' + (posRatio >= 60 ? '안정적인 정서 상태' : '감정적 지원이 필요한 상태') + '를 보이고 있습니다.' +
+      '</div>';
+
+    // 최근 감정 흐름 (블록 E)
+    const recents = report.recentEmotions || [];
+    let flowListHtml;
+    if (recents.length === 0) {
+      flowListHtml = '<div class="domain-flow-empty">아직 감정 기록이 없습니다.</div>';
+    } else {
+      const renderEmoRow = function(e, idx) {
+        const emoji = emotionEmoji[e.emotion] || '❓';
+        const label = emotionKo[e.emotion] || '기타';
+        const isLatest = idx === 0;
+        const dateFmt = (e.attendance_date || '').replace(/-/g, '.');
+        const reasonHtml = e.emotion_reason ? '<div class="domain-flow-row-desc">' + escapeHtml(e.emotion_reason) + '</div>' : '';
+        const badge = isLatest ? '<span class="domain-flow-row-badge">최근</span>' : '';
+        return '<div class="domain-flow-row">' +
+          '<div class="domain-flow-row-icon">' + emoji + '</div>' +
+          '<div class="domain-flow-row-body">' +
+            '<div class="domain-flow-row-head"><span class="domain-flow-row-label">' + label + '</span>' + badge + '<span class="domain-flow-row-date">' + dateFmt + '</span></div>' +
+            reasonHtml +
           '</div>' +
-          '<div class="emotion-legend">' +
-            '<div class="legend-item"><div class="legend-dot positive"></div> 긍정 ' + positiveCount + '회</div>' +
-            '<div class="legend-item"><div class="legend-dot negative"></div> 부정 ' + negativeCount + '회</div>' +
-            '<div class="legend-item"><div class="legend-dot none"></div> 무응답 ' + noneCount + '회</div>' +
+        '</div>';
+      };
+      const SUMMARY_N = 5;
+      const headRows = recents.slice(0, SUMMARY_N).map(renderEmoRow).join('');
+      let extraHtml = '';
+      if (recents.length > SUMMARY_N) {
+        const extraRows = recents.slice(SUMMARY_N).map(function(e, i){ return renderEmoRow(e, i + SUMMARY_N); }).join('');
+        extraHtml =
+          '<div class="emo-flow-extra" id="emoFlowExtra" style="display:none;">' + extraRows + '</div>' +
+          '<button type="button" class="emo-flow-toggle" id="emoFlowToggle" ' +
+            'onclick="toggleEmotionFlow(this)">' +
+            '<i class="fas fa-chevron-down"></i> 전체 ' + recents.length + '건 보기' +
+          '</button>';
+      }
+      flowListHtml = '<div class="domain-flow-list">' + headRows + extraHtml + '</div>';
+    }
+
+    return '<div class="section-card">' + headerHtml +
+      '<div class="domain-card-body">' +
+        donutHtml +
+        '<div class="domain-details">' +
+          '<div class="domain-insight emotion">' + insightText + '</div>' +
+          '<div class="domain-chips">' +
+            '<span class="domain-chip" title="감정출석부에서 행복·설렘·좋음·최고·편안 등 긍정 감정으로 체크인한 횟수입니다."><span class="legend-dot positive" style="display:inline-block;margin-right:4px;"></span>긍정 ' + positiveCount + '회</span>' +
+            '<span class="domain-chip" title="감정출석부에서 슬픔·화남·불안·피곤·답답 등 부정 감정으로 체크인한 횟수입니다."><span class="legend-dot negative" style="display:inline-block;margin-right:4px;"></span>부정 ' + negativeCount + '회</span>' +
+            '<span class="domain-chip" title="해당 기간 중 감정 체크인을 하지 않은(미응답) 횟수입니다."><span class="legend-dot none" style="display:inline-block;margin-right:4px;"></span>무응답 ' + noneCount + '회</span>' +
           '</div>' +
         '</div>' +
-      '</div></div>';
+      '</div>' +
+      '<div class="domain-flow">' +
+        '<div class="domain-flow-title">📅 최근 감정 흐름 (' + recents.length + '건)</div>' +
+        flowListHtml +
+      '</div>' +
+    '</div>';
+  }
+
+  // ---- 참여도 카드 (5블록 통일) ----
+  function renderParticipationCard(report, areaData) {
+    const ad = areaData || {};
+    const hasData = ad.hasData !== false;
+    const score = ad.score != null ? Math.round(ad.score) : null;
+    const p = ad.participation || {};
+
+    const act = actionLinkFor('participation');
+    const headerHtml = makeDomainHeader('learning', '🤝', '참여도', {
+      actionHref: act.href, actionLabel: act.label
+    });
+
+    const metrics = [
+      { key: 'homework', label: '과제 제출', c: '#2563eb',
+        tip: '채움클래스에서 배정받은 과제 대비 제출 비율입니다. (제출 ÷ 배정)' },
+      { key: 'exam',     label: '평가 응시', c: '#8b5cf6',
+        tip: '채움클래스에서 배정받은 평가 대비 응시 비율입니다. (응시 ÷ 배정)' },
+      { key: 'daily',    label: '오늘학습',  c: '#10b981',
+        tip: '스스로채움 > 오늘의 학습 배정 대비 완료 비율입니다. (완료 ÷ 배정)' },
+      { key: 'lesson',   label: '수업 이수', c: '#f59e0b',
+        tip: '수업을 듣고 셀프 점검(이해도·집중도·소감)까지 완료한 수업 개수 ÷ 개설 수업 수입니다.' }
+    ];
+
+    if (!hasData || score == null) {
+      let barsEmpty = '';
+      metrics.forEach(m => {
+        barsEmpty += '<div class="subject-item" title="' + escapeHtml(m.tip) + '">' +
+          '<span class="subject-name" style="flex:0 0 64px;">' + m.label + '</span>' +
+          '<div class="subject-bar"><div class="subject-bar-fill" style="width:0%;background:var(--gray-300)"></div></div>' +
+          '<span class="subject-value" style="color:var(--gray-400);">-</span></div>';
+      });
+      return '<div class="section-card">' + headerHtml +
+        '<div class="domain-card-body">' +
+          makeScoreDonutHtml(null, { empty: true, label: '참여 없음' }) +
+          '<div class="domain-details">' +
+            '<div class="domain-insight participation">아직 참여 데이터가 없습니다. 과제·평가·오늘의 학습·수업에 참여하면 종합 참여도가 표시됩니다.</div>' +
+            '<div class="subject-growth">' + barsEmpty + '</div>' +
+          '</div>' +
+        '</div>' +
+        '<div class="domain-flow">' +
+          '<div class="domain-flow-title">📋 최근 참여 활동</div>' +
+          '<div class="domain-flow-empty">아직 참여 활동 기록이 없습니다.</div>' +
+        '</div>' +
+      '</div>';
+    }
+
+    let barsHtml = '';
+    metrics.forEach(m => {
+      const v = p[m.key];
+      const w = v != null ? Math.min(v, 100) : 0;
+      barsHtml += '<div class="subject-item" title="' + escapeHtml(m.tip) + '">' +
+        '<span class="subject-name" style="flex:0 0 64px;">' + m.label + '</span>' +
+        '<div class="subject-bar"><div class="subject-bar-fill" style="width:' + w + '%;background:' + m.c + '"></div></div>' +
+        '<span class="subject-value">' + (v != null ? v + '%' : '-') + '</span></div>';
+    });
+
+    // 3분기 인사이트
+    let insight;
+    if (score >= 80) insight = '<strong>적극적으로 참여</strong>하고 있어요. 학습 활동에 꾸준히 응하고 있습니다.';
+    else if (score >= 50) insight = '꾸준히 참여하고 있어요. 일부 활동을 늘리면 참여도가 더 향상됩니다.';
+    else if (score >= 25) insight = '참여를 조금 더 늘려보세요. 과제·평가·오늘의 학습 등에 응해보면 좋아요.';
+    else insight = '참여가 부족합니다. 과제·평가·수업 이수에 참여해 보세요.';
+
+    // 블록 E — 최근 참여 활동 (learningCapacity 활용)
+    const lc = report.learningCapacity || [];
+    const participationTypes = ['homework_submit','exam_complete','lesson_view','daily_complete','problem_set_complete','lesson_complete','content_view','attendance_checkin','post_create','survey_respond','portfolio_add','lesson_progress','board_view','diagnosis_complete'];
+    const recent = lc.filter(l => participationTypes.indexOf(l.activity_type) >= 0 && (l.cnt||0) > 0)
+                     .sort((a,b) => (b.cnt||0) - (a.cnt||0))
+                     .slice(0, 5);
+    const typeIcon = {
+      homework_submit: '📝', exam_complete: '🎓', lesson_view: '📚',
+      daily_complete: '📋', problem_set_complete: '✏️', lesson_complete: '✅',
+      content_view: '🎬', attendance_checkin: '💛', post_create: '🗒️',
+      survey_respond: '📋', portfolio_add: '🎨', lesson_progress: '⏳',
+      board_view: '👀', diagnosis_complete: '🔎'
+    };
+    let recentHtml;
+    if (recent.length === 0) {
+      recentHtml = '<div class="domain-flow-empty">아직 참여 활동 기록이 없습니다.<br>과제·평가·오늘의 학습·수업에 참여하면 활동 유형이 표시됩니다.</div>';
+    } else {
+      // 활동 유형 Top — 칩 1줄 대신 가로 막대 리스트로 보강(짧은 카드 내부 공백 흡수, 정보량↑)
+      const maxCnt = Math.max(...recent.map(l => l.cnt || 0)) || 1;
+      recentHtml = '<div class="domain-flow-list activity-type-bars">' + recent.map(l => {
+        const ico = typeIcon[l.activity_type] || '📌';
+        const lbl = toKoActivityType(l.activity_type) || '활동';
+        const cnt = l.cnt || 0;
+        const w = Math.round((cnt / maxCnt) * 100);
+        return '<div class="atb-row" title="' + escapeHtml(lbl + ' ' + cnt + '회') + '">' +
+          '<span class="atb-label">' + ico + ' ' + escapeHtml(lbl) + '</span>' +
+          '<div class="atb-track"><div class="atb-fill" style="width:' + w + '%;"></div></div>' +
+          '<span class="atb-val">' + cnt + '회</span>' +
+        '</div>';
+      }).join('') + '</div>';
+    }
+
+    return '<div class="section-card">' + headerHtml +
+      '<div class="domain-card-body">' +
+        makeScoreDonutHtml(score, {
+          unit: '%',
+          label: '종합 참여도',
+          tip: '과제 제출률 · 평가 응시율 · 오늘의 학습 완료율 · 수업 이수율 4개 지표의 평균입니다.'
+        }) +
+        '<div class="domain-details">' +
+          '<div class="domain-insight participation">' + insight + '</div>' +
+          '<div class="subject-growth">' + barsHtml + '</div>' +
+        '</div>' +
+      '</div>' +
+      '<div class="domain-flow">' +
+        '<div class="domain-flow-title">📈 활동 유형 Top ' + recent.length + '</div>' +
+        recentHtml +
+      '</div>' +
+    '</div>';
+  }
+
+  // ---- 성취수준 카드 (5블록 통일) ----
+  function renderAchievementCard(report, areaData) {
+    const ad = areaData || {};
+    const hasData = ad.hasData !== false;
+    const score = ad.score != null ? Math.round(ad.score) : null;
+    const a = ad.achievement || {};
+
+    const act = actionLinkFor('achievement');
+    const headerHtml = makeDomainHeader('basic', '🎯', '성취수준', {
+      actionHref: act.href, actionLabel: act.label
+    });
+
+    const sources = [
+      { key: 'daily',     label: '오늘의학습', c: '#10b981',
+        tip: '스스로채움 > 오늘의 학습에서 푼 퀴즈 문항의 정답률입니다. (정답수 ÷ 응답수)' },
+      { key: 'diagnosis', label: '진단평가',   c: '#2563eb',
+        tip: 'AI 맞춤학습 > 학습맵에서 응시한 진단평가 세션의 정답률입니다. (60% 이상이면 다음 단원 추천)' },
+      { key: 'problem',   label: '문항풀이+평가', c: '#8b5cf6',
+        tip: '콘텐츠 플레이어/AI 맞춤학습에서 푼 단발 문항 + 채움클래스에서 응시한 평가 점수를 문항수 가중 평균한 정답률입니다.' }
+    ];
+
+    if (!hasData || score == null) {
+      let barsEmpty = '';
+      sources.forEach(m => {
+        barsEmpty += '<div class="subject-item" title="' + escapeHtml(m.tip) + '">' +
+          '<span class="subject-name" style="flex:0 0 84px;">' + m.label + '</span>' +
+          '<div class="subject-bar"><div class="subject-bar-fill" style="width:0%;background:var(--gray-300)"></div></div>' +
+          '<span class="subject-value" style="color:var(--gray-400);">-</span></div>';
+      });
+      const guideMsg = isTeacher
+        ? '아직 응시 기록이 없습니다. 학생이 진단평가·오늘의 학습·문항 풀이·평가에 응시하면 성취수준(정답률)이 표시됩니다.'
+        : '진단평가에 응시하면 성취수준(정답률)이 표시됩니다. AI 맞춤학습에서 시작해보세요.';
+      return '<div class="section-card">' + headerHtml +
+        '<div class="domain-card-body">' +
+          makeScoreDonutHtml(null, {
+            empty: true, label: '응시 없음',
+            tip: '오늘의 학습 · 진단평가 · (문항풀이+평가) 세 출처의 정답률(%) 평균입니다.'
+          }) +
+          '<div class="domain-details">' +
+            '<div class="domain-insight achievement">' + guideMsg + '</div>' +
+            '<div class="subject-growth">' + barsEmpty + '</div>' +
+          '</div>' +
+        '</div>' +
+        '<div class="domain-flow">' +
+          '<div class="domain-flow-title">📝 최근 응시 기록</div>' +
+          '<div class="domain-flow-empty">아직 응시 기록이 없습니다.</div>' +
+        '</div>' +
+      '</div>';
+    }
+
+    // 문항+평가 출처 상세를 툴팁에 동적 반영
+    const pb = a.problemBreakdown || {};
+    let barsHtml = '';
+    sources.forEach(m => {
+      const v = a[m.key];
+      const w = v != null ? Math.min(v, 100) : 0;
+      let tip = m.tip;
+      if (m.key === 'problem' && (pb.contentItems || pb.examQuestions)) {
+        tip += ' (콘텐츠 문항 ' + (pb.contentItems || 0) + '개, 평가 문항 ' + (pb.examQuestions || 0) + '개)';
+      }
+      barsHtml += '<div class="subject-item" title="' + escapeHtml(tip) + '">' +
+        '<span class="subject-name" style="flex:0 0 84px;">' + m.label + '</span>' +
+        '<div class="subject-bar"><div class="subject-bar-fill" style="width:' + w + '%;background:' + m.c + '"></div></div>' +
+        '<span class="subject-value">' + (v != null ? v + '%' : '-') + '</span></div>';
+    });
+
+    let insight;
+    if (score >= 70) insight = '탄탄한 정답률을 보이고 있습니다. 오늘의 학습·진단평가·문항 풀이·평가 정답률을 종합한 결과입니다.';
+    else if (score >= 40) insight = '성장 중인 상태입니다. 꾸준한 학습으로 정답률을 더 높일 수 있어요.';
+    else insight = '보충 학습을 권장합니다. AI 맞춤학습에서 약점 영역을 채워보세요.';
+
+    // 블록 E — 최근 응시 기록 (learningCapacity 활용)
+    const lc = report.learningCapacity || [];
+    const assessTypes = ['exam_complete','diagnosis_complete','problem_set_complete','daily_complete'];
+    const recent = lc.filter(l => assessTypes.indexOf(l.activity_type) >= 0 && (l.cnt||0) > 0)
+                     .sort((a,b) => (b.cnt||0) - (a.cnt||0))
+                     .slice(0, 5);
+    let recentHtml;
+    if (recent.length === 0) {
+      recentHtml = '<div class="domain-flow-empty">아직 응시 기록이 없습니다.</div>';
+    } else {
+      const typeIcon = { exam_complete: '🎓', diagnosis_complete: '🔎', problem_set_complete: '✏️', daily_complete: '📋' };
+      recentHtml = '<div class="domain-flow-list">' + recent.map(l => {
+        const ico = typeIcon[l.activity_type] || '📝';
+        const lbl = toKoActivityType(l.activity_type) || '활동';
+        const avg = l.avg_score != null ? Math.round(l.avg_score * 100) + '점' : '-';
+        return '<div class="domain-flow-row">' +
+          '<div class="domain-flow-row-icon">' + ico + '</div>' +
+          '<div class="domain-flow-row-body">' +
+            '<div class="domain-flow-row-head"><span class="domain-flow-row-label">' + escapeHtml(lbl) + '</span><span class="domain-flow-row-date">' + (l.cnt||0) + '회 · 평균 ' + avg + '</span></div>' +
+          '</div>' +
+        '</div>';
+      }).join('') + '</div>';
+    }
+
+    // 블록 E 보강 — 콘텐츠 vs 시험 정답률 비교 막대 (problemBreakdown 활용)
+    const cItems = pb.contentItems || 0;
+    const cCorrect = pb.contentCorrect || 0;
+    const eItems = pb.examQuestions || 0;
+    const eCorrect = pb.examCorrect || 0;
+    let breakdownHtml = '';
+    if (cItems > 0 || eItems > 0) {
+      const cPct = cItems > 0 ? Math.round(cCorrect / cItems * 100) : 0;
+      const ePct = eItems > 0 ? Math.round(eCorrect / eItems * 100) : 0;
+      breakdownHtml =
+        '<div class="domain-flow" style="margin-top:12px;padding-top:12px;">' +
+          '<div class="domain-flow-title">📚 정답률 출처별 구분</div>' +
+          '<div class="achievement-breakdown">' +
+            (cItems > 0 ?
+              '<div class="ach-bd-row" title="채움콘텐츠 문항풀이·오답노트·AI 맞춤학습에서 스스로 푼 문항의 정답률입니다.">' +
+                '<span class="ach-bd-label">자기주도 문항풀이</span>' +
+                '<div class="ach-bd-bar"><div class="ach-bd-bar-fill" style="width:' + cPct + '%;background:#10b981;"></div></div>' +
+                '<span class="ach-bd-meta"><strong>' + cPct + '%</strong> (' + cCorrect + '/' + cItems + ')</span>' +
+              '</div>' : '') +
+            (eItems > 0 ?
+              '<div class="ach-bd-row" title="채움클래스에서 응시한 평가의 정답률입니다.">' +
+                '<span class="ach-bd-label">채움클래스 평가</span>' +
+                '<div class="ach-bd-bar"><div class="ach-bd-bar-fill" style="width:' + ePct + '%;background:#8b5cf6;"></div></div>' +
+                '<span class="ach-bd-meta"><strong>' + ePct + '%</strong> (' + eCorrect + '/' + eItems + ')</span>' +
+              '</div>' : '') +
+          '</div>' +
+        '</div>';
+    }
+
+    return '<div class="section-card">' + headerHtml +
+      '<div class="domain-card-body">' +
+        makeScoreDonutHtml(score, {
+          unit: '%',
+          label: '평균 정답률',
+          tip: '오늘의 학습 · 진단평가 · (문항풀이+평가) 세 출처의 정답률(%)을 단순 평균한 값입니다.'
+        }) +
+        '<div class="domain-details">' +
+          '<div class="domain-insight achievement">' + insight + '</div>' +
+          '<div class="subject-growth">' + barsHtml + '</div>' +
+        '</div>' +
+      '</div>' +
+      '<div class="domain-flow">' +
+        '<div class="domain-flow-title">📝 최근 응시 기록 (' + recent.length + '건)</div>' +
+        recentHtml +
+      '</div>' +
+      breakdownHtml +
+    '</div>';
+  }
+
+  // ---- 콘텐츠 활용 카드 (5블록 통일) ----
+  function renderContentUsageCard(report, areaData) {
+    const ad = areaData || {};
+    const hasData = ad.hasData !== false;
+    const score = ad.score != null ? Math.round(ad.score) : null;
+    const cu = report.contentUsage || {};
+    const saved = cu.savedContents || 0;
+    const viewed = cu.viewedContents || 0;
+    const likes = cu.totalLikes || 0;
+    const subs = cu.mySubscriptions || 0;
+    const keywords = cu.searchKeywords || [];
+
+    const act = actionLinkFor('content');
+    const headerHtml = makeDomainHeader('content', '📊', '콘텐츠 활용', {
+      actionHref: act.href, actionLabel: act.label
+    });
+
+    const subMetrics = [
+      { label: '저장',  v: saved,  c: '#2563eb',
+        tip: '채움콘텐츠에서 "나의 보관함"에 저장한 콘텐츠 수입니다.' },
+      { label: '조회',  v: viewed, c: '#10b981',
+        tip: '내가 채움콘텐츠/수업을 조회(재생)한 총 횟수입니다.' },
+      { label: '좋아요', v: likes,  c: '#ec4899',
+        tip: '내가 채움콘텐츠에 누른 좋아요 총 개수입니다.' },
+      { label: '구독',  v: subs,   c: '#8b5cf6',
+        tip: '내가 구독 중인 채널/큐레이션 수입니다.' }
+    ];
+
+    if (!hasData || score == null) {
+      let barsEmpty = '';
+      subMetrics.forEach(m => {
+        barsEmpty += '<div class="subject-item" title="' + escapeHtml(m.tip) + '">' +
+          '<span class="subject-name" style="flex:0 0 64px;">' + m.label + '</span>' +
+          '<div class="subject-bar"><div class="subject-bar-fill" style="width:0%;background:var(--gray-300)"></div></div>' +
+          '<span class="subject-value" style="color:var(--gray-400);">0건</span></div>';
+      });
+      return '<div class="section-card">' + headerHtml +
+        '<div class="domain-card-body">' +
+          makeScoreDonutHtml(null, { empty: true, label: '활용 없음' }) +
+          '<div class="domain-details">' +
+            '<div class="domain-insight content">아직 콘텐츠 활용 기록이 없습니다. 채움콘텐츠를 둘러보면 활용 점수가 쌓입니다.</div>' +
+            '<div class="subject-growth">' + barsEmpty + '</div>' +
+          '</div>' +
+        '</div>' +
+        '<div class="domain-flow">' +
+          '<div class="domain-flow-title">🔍 자주 검색한 키워드</div>' +
+          '<div class="domain-flow-empty">아직 검색 기록이 없습니다.</div>' +
+        '</div>' +
+      '</div>';
+    }
+
+    // sub-metric 막대 (절대값 → 100 기준 정규화: 최대값을 100%로)
+    const maxVal = Math.max(saved, viewed, likes, subs, 1);
+    let barsHtml = '';
+    subMetrics.forEach(m => {
+      const w = Math.round((m.v / maxVal) * 100);
+      barsHtml += '<div class="subject-item" title="' + escapeHtml(m.tip) + '">' +
+        '<span class="subject-name" style="flex:0 0 64px;">' + m.label + '</span>' +
+        '<div class="subject-bar"><div class="subject-bar-fill" style="width:' + w + '%;background:' + m.c + '"></div></div>' +
+        '<span class="subject-value">' + m.v + '건</span></div>';
+    });
+
+    let insight;
+    if (score >= 70) insight = '<strong>활발히 활용</strong>하고 있어요. 총 ' + viewed + '건 조회, ' + saved + '건 저장했습니다.';
+    else if (score >= 40) insight = '꾸준히 콘텐츠를 둘러보고 있어요. 더 다양한 콘텐츠를 탐색해 보세요.';
+    else insight = '콘텐츠를 더 둘러보세요. 채움콘텐츠에서 관심 분야를 탐색할 수 있습니다.';
+
+    // 추가 활용 지표 (조회·포트폴리오 등 BE에서 가용한 모든 지표를 4칩으로)
+    const portfolioCount = cu.portfolioCount || 0;
+    const usageMetrics = [
+      { label: '📥 저장', v: saved, tip: '나의 보관함에 저장한 콘텐츠 수' },
+      { label: '👀 조회', v: viewed, tip: '채움콘텐츠/수업 누적 조회수' },
+      { label: '🔔 구독', v: subs, tip: '구독 중인 채널/큐레이션 수' },
+      { label: '🎨 포트폴리오', v: portfolioCount, tip: '나도예술가/포트폴리오에 등록한 작품 수' }
+    ];
+    const usageGridHtml = '<div class="usage-metric-grid">' + usageMetrics.map(u => {
+      const zero = (u.v === 0) ? ' is-zero' : '';
+      return '<div class="usage-metric-cell' + zero + '" title="' + escapeHtml(u.tip) + '">' +
+        '<span class="um-label">' + u.label + '</span>' +
+        '<strong>' + (u.v > 0 ? u.v + '건' : '—') + '</strong>' +
+      '</div>';
+    }).join('') + '</div>';
+
+    // 블록 E — 자주 검색한 키워드 Top 8
+    let kwHtml;
+    if (keywords.length === 0) {
+      kwHtml = '<div class="domain-flow-empty">아직 검색 기록이 없습니다.</div>';
+    } else {
+      kwHtml = '<div class="domain-chips">' + keywords.slice(0, 8).map(k => {
+        return '<span class="domain-chip" title="채움콘텐츠 검색창에 내가 입력한 키워드와 검색 횟수입니다.">#' + escapeHtml(k.keyword || '') + '<span class="domain-chip-cnt">' + (k.cnt || 0) + '회</span></span>';
+      }).join('') + '</div>';
+    }
+
+    // 블록 E 보강 — 자주 활용한 성취기준 Top 5 (achievementStandards 활용)
+    const standards = (cu.achievementStandards || [])
+      .filter(s => (s.cnt || 0) > 0)
+      .sort((a, b) => (b.cnt || 0) - (a.cnt || 0))
+      .slice(0, 5);
+    let standardsHtml = '';
+    if (standards.length > 0) {
+      const maxCnt = Math.max.apply(null, standards.map(s => s.cnt || 0));
+      standardsHtml =
+        '<div class="domain-flow" style="margin-top:12px;padding-top:12px;">' +
+          '<div class="domain-flow-title">🏷️ 자주 활용한 성취기준 Top ' + standards.length + '</div>' +
+          '<div class="standard-list">' +
+            standards.map(s => {
+              const pct = maxCnt > 0 ? Math.round((s.cnt || 0) / maxCnt * 100) : 0;
+              return '<div class="standard-row" title="' + escapeHtml('성취기준 ' + (s.code || '') + ' · 활용 ' + (s.cnt||0) + '회') + '">' +
+                '<code>' + escapeHtml(s.code || '-') + '</code>' +
+                '<div class="std-bar"><div class="std-bar-fill" style="width:' + pct + '%;"></div></div>' +
+                '<span class="std-cnt">' + (s.cnt || 0) + '회</span>' +
+              '</div>';
+            }).join('') +
+          '</div>' +
+        '</div>';
+    }
+
+    return '<div class="section-card">' + headerHtml +
+      '<div class="domain-card-body">' +
+        makeScoreDonutHtml(score, {
+          unit: '점',
+          label: '활용 점수',
+          tip: '저장 · 조회 · 좋아요 · 구독 등 콘텐츠 활용 누적 건수를 구간화한 점수입니다.'
+        }) +
+        '<div class="domain-details">' +
+          '<div class="domain-insight content">' + insight + '</div>' +
+          '<div class="subject-growth">' + barsHtml + '</div>' +
+          usageGridHtml +
+        '</div>' +
+      '</div>' +
+      '<div class="domain-flow">' +
+        '<div class="domain-flow-title">🔍 자주 검색한 키워드 (Top ' + Math.min(keywords.length, 8) + ')</div>' +
+        kwHtml +
+      '</div>' +
+      standardsHtml +
+    '</div>';
   }
 
   function renderBasicAcademicsCard(report, areaData) {
@@ -1322,7 +2215,152 @@
       '</div></div>';
   }
 
-  function renderDailyLearningCard(report, areaData) {
+  // ── 오늘의 학습 — 폼팩터 보조 함수 3종 ────────────────────────────
+  // 로컬 시간대 기준 YYYY-MM-DD 포맷 (UTC 변환 회피)
+  function fmtLocalDate(d) {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return y + '-' + m + '-' + day;
+  }
+  // A. 요일 캘린더 (N <= 14)
+  function renderDailyCalendarA(n, completedSet) {
+    const dayNames = ['일','월','화','수','목','금','토'];
+    const today = new Date();
+    let cells = '';
+    for (let i = n - 1; i >= 0; i--) {
+      const d = new Date(today); d.setDate(d.getDate() - i);
+      const ds = fmtLocalDate(d);
+      const lbl = dayNames[d.getDay()];
+      const done = completedSet.has(ds);
+      const tip = ds + ' (' + lbl + ') · ' + (done ? '완료' : '미완료');
+      cells += '<div class="calendar-day ' + (done ? 'completed' : 'none') +
+               '" data-tip="' + tip + '" aria-label="' + tip + '">' + lbl + '</div>';
+    }
+    return '<div class="calendar-days">' + cells + '</div>';
+  }
+
+  // B. 히트맵 (15 <= N <= 90)
+  function renderDailyCalendarB(n, completedSet) {
+    const dayNames = ['월','화','수','목','금','토','일'];
+    const today = new Date(); today.setHours(0,0,0,0);
+    const start = new Date(today); start.setDate(start.getDate() - (n - 1));
+    // 시작일이 속한 주의 월요일 (월=0 ... 일=6)
+    const startDow = (start.getDay() + 6) % 7;
+    const gridStart = new Date(start); gridStart.setDate(gridStart.getDate() - startDow);
+    const endDow = (today.getDay() + 6) % 7;
+    const gridEnd = new Date(today); gridEnd.setDate(gridEnd.getDate() + (6 - endDow));
+    const weeks = Math.round((gridEnd - gridStart) / 86400000 / 7) + 1;
+    const wrapCls = 'heatmap-wrap weeks-' + (weeks <= 6 ? 5 : 13);
+    // 주차열을 1fr 균등 분할 → 메인 컬럼 폭을 꽉 채움(우측 빈 공간 제거).
+    // 셀 상한은 CSS .heatmap-cell { max-width:40px; aspect-ratio:1 }이 담당.
+    let html = '<div class="' + wrapCls + '" style="grid-template-columns: 24px repeat(' + weeks + ', minmax(0, 1fr));">';
+    // 첫 행: 왼쪽 빈칸 + 주차 라벨 (각 주 월요일 M/D)
+    html += '<div></div>';
+    for (let w = 0; w < weeks; w++) {
+      const colMon = new Date(gridStart); colMon.setDate(colMon.getDate() + w * 7);
+      html += '<div class="heatmap-col-label">' + (colMon.getMonth() + 1) + '/' + colMon.getDate() + '</div>';
+    }
+    // 7행 × weeks열
+    for (let row = 0; row < 7; row++) {
+      html += '<div class="heatmap-row-label">' + dayNames[row] + '</div>';
+      for (let w = 0; w < weeks; w++) {
+        const d = new Date(gridStart); d.setDate(d.getDate() + w * 7 + row);
+        const ds = fmtLocalDate(d);
+        const inRange = d >= start && d <= today;
+        const isToday = d.getTime() === today.getTime();
+        const done = completedSet.has(ds);
+        let cls = 'heatmap-cell';
+        if (!inRange) cls += ' out';
+        else if (done) cls += ' done';
+        if (isToday) cls += ' today';
+        const tip = inRange ? ds + ' · ' + (done ? '완료' : '미완료') : '';
+        const aria = inRange ? ' aria-label="' + tip + '"' : '';
+        html += '<div class="' + cls + '"' + (tip ? ' data-tip="' + tip + '"' : '') + aria + '></div>';
+      }
+    }
+    html += '</div>';
+    html += '<div class="heatmap-legend"><span><span class="lg-dot lg-done"></span>완료</span>' +
+            '<span><span class="lg-dot lg-miss"></span>미완료</span></div>';
+    return html;
+  }
+
+  // C. 주/월 요약 막대 (N >= 91 또는 all)
+  function renderDailyCalendarC(n, completedSet, periodKey) {
+    const today = new Date(); today.setHours(0,0,0,0);
+    const buckets = [];
+    let startStr = '';
+    if (periodKey === 'all') {
+      const dates = Array.from(completedSet).sort();
+      if (!dates.length) {
+        // 빈 데이터: 오늘이 속한 1개월 막대 fallback
+        const y = today.getFullYear(), m = today.getMonth();
+        const dim = new Date(y, m + 1, 0).getDate();
+        buckets.push({ doneCnt: 0, totalCnt: dim, tip: y + '-' + String(m+1).padStart(2,'0') + ' · 완료 0/' + dim + '일' });
+        startStr = fmtLocalDate(today);
+      } else {
+      let cur = new Date(dates[0] + 'T00:00:00');
+      cur.setDate(1);
+      startStr = dates[0];
+      while (cur <= today) {
+        const y = cur.getFullYear(), m = cur.getMonth();
+        const dim = new Date(y, m + 1, 0).getDate();
+        let doneCnt = 0;
+        for (let i = 1; i <= dim; i++) {
+          const ds = y + '-' + String(m+1).padStart(2,'0') + '-' + String(i).padStart(2,'0');
+          if (completedSet.has(ds)) doneCnt++;
+        }
+        buckets.push({
+          doneCnt, totalCnt: dim,
+          tip: y + '-' + String(m+1).padStart(2,'0') + ' · 완료 ' + doneCnt + '/' + dim + '일'
+        });
+        cur.setMonth(cur.getMonth() + 1);
+      }
+      } // end else (dates.length>0)
+    } else {
+      // 주별 (n일 → ceil(n/7) 막대)
+      const start = new Date(today); start.setDate(start.getDate() - (n - 1));
+      startStr = fmtLocalDate(start);
+      const startDow = (start.getDay() + 6) % 7;
+      const weekStart = new Date(start); weekStart.setDate(weekStart.getDate() - startDow);
+      let cur = new Date(weekStart);
+      while (cur <= today) {
+        const wkEnd = new Date(cur); wkEnd.setDate(wkEnd.getDate() + 6);
+        let doneCnt = 0, totalCnt = 0;
+        for (let i = 0; i < 7; i++) {
+          const d = new Date(cur); d.setDate(d.getDate() + i);
+          if (d < start || d > today) continue;
+          totalCnt++;
+          const ds = fmtLocalDate(d);
+          if (completedSet.has(ds)) doneCnt++;
+        }
+        buckets.push({
+          doneCnt, totalCnt: totalCnt || 7,
+          tip: fmtLocalDate(cur) + ' ~ ' + fmtLocalDate(wkEnd) + ' · 완료 ' + doneCnt + '/' + (totalCnt || 7) + '일'
+        });
+        cur.setDate(cur.getDate() + 7);
+      }
+    }
+    let html = '<div class="weekbar-wrap">';
+    let totalDone = 0, totalAll = 0;
+    buckets.forEach(b => {
+      const rate = b.totalCnt ? b.doneCnt / b.totalCnt : 0;
+      const fillCls = rate >= 0.5 ? 'fill-high' : (rate > 0 ? 'fill-low' : '');
+      // 막대 높이는 컨테이너(.weekbar-wrap) 높이 대비 비율(%). flex로 폭은 균등.
+      const hPct = Math.max(6, Math.round(rate * 100));
+      html += '<div class="weekbar-col"><div class="weekbar ' + fillCls + '" style="height:' + hPct + '%;" data-tip="' + b.tip + '" aria-label="' + b.tip + '"></div></div>';
+      totalDone += b.doneCnt; totalAll += b.totalCnt;
+    });
+    html += '</div>';
+    const endStr = fmtLocalDate(today);
+    html += '<div class="weekbar-meta"><span>' + startStr + '</span><span>' + endStr + '</span></div>';
+    const rate = totalAll ? Math.round(totalDone/totalAll*100) : 0;
+    html += '<div class="weekbar-summary">완료 <strong>' + totalDone + '일</strong> / ' + totalAll + '일 (' + rate + '%)</div>';
+    return html;
+  }
+
+  // 오늘의 학습 본문 (section-card 래퍼 제외 — 별도 섹션에서 헤더와 함께 사용)
+  function renderDailyLearningBody(report) {
     const daily = report.dailyLearning || {};
     const total = daily.total || 0;
     const completed = daily.completed || 0;
@@ -1334,27 +2372,100 @@
     const streak = daily.maxStreak || 0;
     const recentDays = daily.recentDays || [];
 
-    // 최근 7일 캘린더 (실제 완료 날짜 기반)
-    const dayNames = ['일', '월', '화', '수', '목', '금', '토'];
-    let calendarHtml = '';
-    const today = new Date();
-    for (let i = 6; i >= 0; i--) {
-      const d = new Date(today);
-      d.setDate(d.getDate() - i);
-      const dateStr = d.toISOString().split('T')[0];
-      const dayLabel = dayNames[d.getDay()];
-      const isCompleted = recentDays.includes(dateStr);
-      const cls = isCompleted ? 'completed' : 'none';
-      calendarHtml += '<div class="calendar-day ' + cls + '">' + dayLabel + '</div>';
+    // 기간 동기화 — currentPeriod.days: 7 | 30 | 90 | 180 | 'all'
+    const periodDays = currentPeriod.days;
+    const completedSet = new Set(recentDays);
+
+    // (1) 라벨 — 기간 동적 표기
+    let periodLabel;
+    if (periodDays === 'all' || periodDays === null) {
+      const sorted = recentDays.slice().sort();
+      const todayStr = fmtLocalDate(new Date());
+      periodLabel = sorted.length
+        ? sorted[0] + ' ~ ' + todayStr + ' 학습 현황'
+        : '전체 기간 학습 현황';
+    } else {
+      const dNum = parseInt(periodDays);
+      if (dNum === 180) periodLabel = '최근 6개월 학습 현황';
+      else periodLabel = '최근 ' + dNum + '일 학습 현황';
+    }
+
+    // (2) 폼팩터 결정
+    let N;
+    if (periodDays === 'all' || periodDays === null) {
+      const sorted = recentDays.slice().sort();
+      N = sorted.length
+        ? Math.max(1, Math.ceil((Date.now() - new Date(sorted[0] + 'T00:00:00').getTime()) / 86400000) + 1)
+        : 30;
+    } else {
+      N = parseInt(periodDays);
+    }
+    let calendarBody;
+    const isAll = (periodDays === 'all' || periodDays === null);
+    if (isAll) {
+      // 전체 기간은 N과 무관하게 월별 막대(C형)
+      calendarBody = renderDailyCalendarC(N, completedSet, 'all');
+    } else if (N <= 14) {
+      calendarBody = renderDailyCalendarA(N, completedSet);
+    } else if (N <= 90) {
+      calendarBody = renderDailyCalendarB(N, completedSet);
+    } else {
+      calendarBody = renderDailyCalendarC(N, completedSet, periodDays);
     }
 
     const insightText = total > 0
       ? '이번 기간 <strong>' + completed + '회</strong> 학습을 완료했습니다. 완료율은 <strong>' + rate + '%</strong>입니다.'
       : '아직 오늘의 학습 기록이 없습니다.';
 
-    return '<div class="section-card">' +
-      '<div class="section-header"><div class="section-title"><div class="section-icon daily">\uD83D\uDCDD</div> 오늘의 학습</div></div>' +
-      '<div class="daily-content">' +
+    // 우측 사이드 패널 — 이번 기간 인사이트
+    const sortedDates = (recentDays || []).slice().sort();
+    const lastDate = sortedDates.length ? sortedDates[sortedDates.length - 1] : null;
+    const firstDate = sortedDates.length ? sortedDates[0] : null;
+    let sidePanelHtml;
+    if (total === 0 && (recentDays || []).length === 0) {
+      sidePanelHtml =
+        '<div class="daily-side-panel">' +
+          '<h4>📊 이번 기간 인사이트</h4>' +
+          '<div class="empty-msg">아직 학습 기록이 없습니다.<br>오늘의 학습을 시작해 보세요.</div>' +
+        '</div>';
+    } else {
+      sidePanelHtml =
+        '<div class="daily-side-panel">' +
+          '<h4>📊 이번 기간 인사이트</h4>' +
+          '<div class="insight-row' + (streak === 0 ? ' is-zero' : '') + '" title="기간 내 최대 연속 학습일">' +
+            '<span class="ir-label">🔥 최대 연속</span>' +
+            '<strong>' + (streak > 0 ? streak + '일' : '—') + '</strong>' +
+          '</div>' +
+          '<div class="insight-row' + (accuracy == null ? ' is-zero' : '') + '" title="기간 내 오늘의 학습 평균 정답률">' +
+            '<span class="ir-label">🎯 평균 정답률</span>' +
+            '<strong>' + (accuracy != null ? accuracy + '%' : '—') + '</strong>' +
+          '</div>' +
+          '<div class="insight-row-stack" title="배정 대비 완료한 비율">' +
+            '<div class="irs-head">' +
+              '<span class="ir-label">✅ 완료율</span>' +
+              '<strong>' + rate + '%</strong>' +
+            '</div>' +
+            '<div class="insight-bar"><div class="insight-bar-fill" style="width:' + Math.min(100, rate) + '%;"></div></div>' +
+            '<span style="font-size:12px;color:var(--gray-500);">' + completed + ' / ' + total + '회</span>' +
+          '</div>' +
+          (lastDate ?
+            '<div class="insight-row" title="최근 학습한 날짜">' +
+              '<span class="ir-label">📅 최근 학습</span>' +
+              '<strong style="font-size:14px;">' + escapeHtml(lastDate) + '</strong>' +
+            '</div>' : '') +
+          (firstDate && firstDate !== lastDate ?
+            '<div class="insight-row" title="기간 내 첫 학습 시작일">' +
+              '<span class="ir-label">⏱️ 시작일</span>' +
+              '<strong style="font-size:14px;">' + escapeHtml(firstDate) + '</strong>' +
+            '</div>' : '') +
+          '<div class="insight-row" title="기간 내 학습한 날짜 수">' +
+            '<span class="ir-label">📈 학습일 수</span>' +
+            '<strong>' + sortedDates.length + '일</strong>' +
+          '</div>' +
+        '</div>';
+    }
+
+    return '<div class="daily-content-grid">' +
         '<div class="daily-stats">' +
           '<div class="daily-stat-item"><div class="daily-stat-value">' + completed + '<span class="daily-stat-unit">회</span></div><div class="daily-stat-label">총 활동횟수</div></div>' +
           '<div class="daily-stat-item"><div class="daily-stat-value">' + (accuracy != null ? accuracy : '-') + '<span class="daily-stat-unit">' + (accuracy != null ? '%' : '') + '</span></div><div class="daily-stat-label">평균 정답률</div></div>' +
@@ -1364,11 +2475,12 @@
         '<div class="daily-details">' +
           '<div class="daily-insight">' + insightText + '</div>' +
           '<div class="daily-calendar">' +
-            '<div class="calendar-label">최근 7일 학습 현황</div>' +
-            '<div class="calendar-days">' + calendarHtml + '</div>' +
+            '<div class="calendar-label">' + periodLabel + '</div>' +
+            calendarBody +
           '</div>' +
         '</div>' +
-      '</div></div>';
+        sidePanelHtml +
+      '</div>';
   }
 
   function renderReadingActivityCard(report, areaData) {
@@ -1381,37 +2493,81 @@
     // 예시 데이터 (실제 기록이 없을 때 시연용으로 표시)
     if (!hasData) {
       books = [
-        { book_title: '어린 왕자', author: '생텍쥐페리', read_date: '2026-04-02' },
-        { book_title: '해리 포터와 마법사의 돌', author: 'J.K. 롤링', read_date: '2026-03-18' },
-        { book_title: '나무를 심은 사람', author: '장 지오노', read_date: '2026-03-05' }
+        { book_title: '어린 왕자', author: '생텍쥐페리', read_date: '2026-04-02', rating: 5 },
+        { book_title: '해리 포터와 마법사의 돌', author: 'J.K. 롤링', read_date: '2026-03-18', rating: 5 },
+        { book_title: '나무를 심은 사람', author: '장 지오노', read_date: '2026-03-05', rating: 4 },
+        { book_title: '강아지똥', author: '권정생', read_date: '2026-02-20', rating: 5 },
+        { book_title: '몽실 언니', author: '권정생', read_date: '2026-02-08', rating: 4 }
       ];
       count = 12;
     }
 
-    let booksHtml = '';
-    books.slice(0, 3).forEach(b => {
-      booksHtml += '<div class="book-item">' +
-        '<div class="book-cover">\uD83D\uDCD7</div>' +
-        '<div class="book-info">' +
-          '<div class="book-title-text">' + escapeHtml(b.book_title || b.bookTitle || '') + '</div>' +
-          '<div class="book-meta">' + escapeHtml(b.author || '') + ' · ' + formatDate(b.read_date || b.readDate || '') + '</div>' +
-        '</div></div>';
+    const act = actionLinkFor('reading');
+    const headerHtml = makeDomainHeader('reading', '📖', '독서 활동', {
+      sample: isSample,
+      actionHref: act.href, actionLabel: act.label, actionArrow: act.arrow
     });
 
-    const sampleBadge = isSample ? '<span class="sample-badge" title="현재 표시되는 데이터는 시연용 예시입니다.">예시 데이터</span>' : '';
+    // 권수 → 0~100 점수 매핑 (1권=10점, 10권=100점)
+    const score = Math.min(100, count * 10);
 
-    return '<div class="section-card">' +
-      '<div class="section-header"><div class="section-title"><div class="section-icon reading">\uD83D\uDCD6</div> 독서 활동' + sampleBadge + '</div></div>' +
-      '<div class="reading-content">' +
-        '<div class="reading-stats">' +
-          '<div class="reading-count">' + count + '</div>' +
-          '<div class="reading-count-label">읽은 책</div>' +
+    // 인사이트
+    let insight;
+    if (count >= 10) insight = '<strong>활발한 독서</strong>를 하고 있어요. 누적 <strong>' + count + '권</strong>을 읽었습니다.';
+    else if (count >= 3) insight = '꾸준한 독서를 이어가고 있어요. 누적 <strong>' + count + '권</strong>을 읽었습니다.';
+    else insight = '독서 활동을 조금 더 늘려보세요. 책 한 권부터 시작해도 좋아요.';
+
+    // Sub-metrics: 누적/평균 (단순 칩 형태)
+    const sampleNote = isSample ? ' (현재 표시 값은 시연용 예시 데이터입니다.)' : '';
+    const subHtml =
+      '<div class="domain-chips">' +
+        '<span class="domain-chip' + (isSample ? ' is-sample' : '') + '" title="우리반 성장기록 > 독서 기록에 학생이 직접 등록한 책 권수 누적입니다.' + escapeHtml(sampleNote) + '">누적 <span class="domain-chip-cnt">' + count + '권</span></span>' +
+        '<span class="domain-chip' + (isSample ? ' is-sample' : '') + '" title="최근 등록 순으로 정렬된 독서 기록 중 상위 5권을 노출합니다.' + escapeHtml(sampleNote) + '">최근 ' + Math.min(books.length, 5) + '권 기록</span>' +
+      '</div>';
+
+    // 블록 E — 최근 읽은 책 (5건 + 별점/더보기)
+    let booksHtml;
+    if (books.length === 0) {
+      booksHtml = '<div class="domain-flow-empty">아직 독서 기록이 없습니다.</div>';
+    } else {
+      booksHtml = '<div class="domain-flow-list">' + books.slice(0, 5).map(b => {
+        const rating = (b.rating || b.score);
+        let starsHtml = '';
+        if (rating != null) {
+          const r = Math.max(0, Math.min(5, Math.round(Number(rating))));
+          starsHtml = '<span class="book-row-stars" title="별점 ' + r + '점">' + '★'.repeat(r) + '☆'.repeat(5 - r) + '</span>';
+        }
+        return '<div class="domain-flow-row">' +
+          '<div class="domain-flow-row-icon">📗</div>' +
+          '<div class="domain-flow-row-body">' +
+            '<div class="domain-flow-row-head"><span class="domain-flow-row-label">' + escapeHtml(b.book_title || b.bookTitle || '') + '</span>' + starsHtml + '<span class="domain-flow-row-date">' + formatDate(b.read_date || b.readDate || '') + '</span></div>' +
+            '<div class="domain-flow-row-desc">' + escapeHtml(b.author || '') + '</div>' +
+          '</div>' +
+        '</div>';
+      }).join('') + '</div>';
+    }
+
+    // 더 보기 링크 (총 권수 > 5일 때만)
+    const moreHtml = (books.length > 5 || count > 5) ?
+      '<div class="domain-flow-more"><a href="#readingLogSection" title="독서 기록 전체 보기">+ 더 보기 (총 ' + count + '권) →</a></div>' : '';
+
+    return '<div class="section-card">' + headerHtml +
+      '<div class="domain-card-body">' +
+        makeScoreDonutHtml(score, {
+          unit: '점', label: '독서 활동', sample: isSample,
+          tip: '우리반 성장기록 > 독서 기록의 누적 권수를 구간 점수로 환산합니다.' + (isSample ? ' (현재 표시 값은 시연용 예시 데이터입니다.)' : '')
+        }) +
+        '<div class="domain-details">' +
+          '<div class="domain-insight reading">' + insight + '</div>' +
+          subHtml +
         '</div>' +
-        '<div class="reading-details">' +
-          '<div class="reading-insight">총 <strong>' + count + '권</strong>의 책을 읽었습니다.</div>' +
-          '<div class="recent-books">' + booksHtml + '</div>' +
-        '</div>' +
-      '</div></div>';
+      '</div>' +
+      '<div class="domain-flow">' +
+        '<div class="domain-flow-title">📚 최근 읽은 책 (' + Math.min(books.length, 5) + '건)</div>' +
+        booksHtml +
+        moreHtml +
+      '</div>' +
+    '</div>';
   }
 
   function renderCareerCard(report, areaData) {
@@ -1437,42 +2593,65 @@
       ];
     }
 
-    // 관심 분야 태그 (career_logs의 interest_area 기반)
+    const act = actionLinkFor('career');
+    const headerHtml = makeDomainHeader('career', '🧭', '진로 탐색', {
+      sample: isSample,
+      actionHref: act.href, actionLabel: act.label, actionExternal: act.external
+    });
+
+    // 관심 분야 다양도 → 0~100 점수 (1개=20점, 5개=100점)
+    const variety = Math.min(100, interests.length * 20);
+
+    // 인사이트
+    let insight;
+    if (interests.length >= 3) insight = '<strong>' + escapeHtml(interests[0].interest_area) + '</strong> 등 ' + interests.length + '개 분야에 관심을 보이고 있습니다.';
+    else if (interests.length > 0) insight = '<strong>' + escapeHtml(interests[0].interest_area) + '</strong> 분야에 관심을 보이고 있습니다.';
+    else insight = '다양한 진로 탐색 활동에 참여해 보세요.';
+
+    // Sub-metrics: 관심 분야 칩
+    const careerSampleNote = isSample ? ' (현재 표시 값은 시연용 예시 데이터입니다.)' : '';
+    const chipTip = '진로진학 활동에서 학생이 입력한 "관심 분야" 항목입니다.' + careerSampleNote;
     let tagsHtml = '';
     interests.slice(0, 5).forEach(s => {
-      tagsHtml += '<span class="interest-tag">#' + escapeHtml(s.interest_area) + '</span>';
+      tagsHtml += '<span class="domain-chip' + (isSample ? ' is-sample' : '') + '" title="' + escapeHtml(chipTip) + '">#' + escapeHtml(s.interest_area) + '</span>';
     });
+    const subHtml = '<div class="domain-chips">' + tagsHtml + '</div>';
 
-    // 진로 활동 이력
-    let historyHtml = '';
-    logs.slice(0, 5).forEach(l => {
-      historyHtml += '<div class="history-item">' +
-        '<div class="history-date">' + formatDate(l.activity_date) + '</div>' +
-        '<div class="history-content-text">' + escapeHtml(l.title || l.activity_type || '활동') + '</div></div>';
-    });
+    // 블록 E — 활동 이력
+    let logsHtml;
+    if (logs.length === 0) {
+      logsHtml = '<div class="domain-flow-empty">아직 진로 탐색 활동이 없습니다.</div>';
+    } else {
+      logsHtml = '<div class="domain-flow-list">' + logs.slice(0, 5).map(l => {
+        return '<div class="domain-flow-row">' +
+          '<div class="domain-flow-row-icon">📌</div>' +
+          '<div class="domain-flow-row-body">' +
+            '<div class="domain-flow-row-head"><span class="domain-flow-row-label">' + escapeHtml(l.title || l.activity_type || '활동') + '</span><span class="domain-flow-row-date">' + formatDate(l.activity_date) + '</span></div>' +
+            (l.activity_type ? '<div class="domain-flow-row-desc">' + escapeHtml(l.activity_type) + '</div>' : '') +
+          '</div>' +
+        '</div>';
+      }).join('') + '</div>';
+    }
 
-    const insightText = interests.length > 0
-      ? '<strong>' + escapeHtml(interests[0].interest_area) + '</strong> 분야에 관심을 보이고 있습니다.'
-      : '다양한 진로 탐색 활동에 참여하고 있습니다.';
-
-    const careerSampleBadge = isSample ? '<span class="sample-badge" title="현재 표시되는 데이터는 시연용 예시입니다.">예시 데이터</span>' : '';
-    return '<div class="section-card">' +
-      '<div class="section-header"><div class="section-title"><div class="section-icon career">\uD83C\uDFAF</div> 진로 탐색' +
-      careerSampleBadge +
-      '</div></div>' +
-      '<div class="career-content">' +
-        '<div class="career-interests">' +
-          '<div class="career-insight">' + insightText + '</div>' +
-          '<div class="interest-tags">' + tagsHtml + '</div>' +
+    return '<div class="section-card">' + headerHtml +
+      '<div class="domain-card-body">' +
+        makeScoreDonutHtml(variety, {
+          unit: '점', label: '관심 다양도', sample: isSample,
+          tip: '진로 탐색에서 입력된 관심 분야의 수를 0~100점으로 환산한 값입니다. (1개=20점, 5개=100점)' + (isSample ? ' (현재 표시 값은 시연용 예시 데이터입니다.)' : '')
+        }) +
+        '<div class="domain-details">' +
+          '<div class="domain-insight career">' + insight + '</div>' +
+          subHtml +
         '</div>' +
-        '<div class="career-history">' +
-          '<div class="history-title">활동 이력</div>' +
-          historyHtml +
-        '</div>' +
-      '</div></div>';
+      '</div>' +
+      '<div class="domain-flow">' +
+        '<div class="domain-flow-title">📌 활동 이력 (' + Math.min(logs.length, 5) + '건)</div>' +
+        logsHtml +
+      '</div>' +
+    '</div>';
   }
 
-  // ---- Reading Logs ----
+    // ---- Reading Logs ----
   async function loadReadingLogs() {
     try {
       const q = targetStudentId !== currentUser.id ? '?studentId=' + targetStudentId : '';
@@ -1537,6 +2716,15 @@
 
   // ---- Observations ----
   async function loadObservations() {
+    // 교사/관리자에게만 입력 폼을 노출하고, 안내문도 역할에 맞게 조정
+    const obsForm = document.getElementById('obsForm');
+    const obsNote = document.getElementById('obsSourceNote');
+    if (obsForm) obsForm.style.display = isTeacher ? 'block' : 'none';
+    if (obsNote) {
+      obsNote.textContent = isTeacher
+        ? '교사가 이 화면에서 직접 남긴 관찰 기록입니다. 아래 입력란에서 추가할 수 있어요.'
+        : '담임·교과 교사가 이 화면에서 직접 남긴 관찰 기록입니다.';
+    }
     try {
       const res = await fetchWithAuth('/api/growth/report/observations/' + targetStudentId);
       const data = await res.json();
@@ -1545,6 +2733,34 @@
     } catch (err) {
       document.getElementById('obsTimeline').innerHTML = '<div class="empty-state"><p>관찰 기록을 불러올 수 없습니다.</p></div>';
     }
+  }
+
+  // 관찰 기록 저장 (교사) — POST /api/growth/report/observation
+  async function submitObservation() {
+    const areaEl = document.getElementById('obsArea');
+    const textEl = document.getElementById('obsText');
+    const text = (textEl.value || '').trim();
+    if (!text) { alert('관찰 내용을 입력해 주세요.'); textEl.focus(); return; }
+    const classId = new URLSearchParams(location.search).get('classId') || (currentReportData && currentReportData.classId) || null;
+    try {
+      const res = await fetchWithAuth('/api/growth/report/observation', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          studentId: targetStudentId,
+          classId: classId ? parseInt(classId) : null,
+          text: text,
+          area: areaEl.value
+        })
+      });
+      const data = await res.json();
+      if (res.ok && data.success !== false) {
+        textEl.value = '';
+        await loadObservations();
+      } else {
+        alert(data.message || '관찰 기록 저장에 실패했습니다.');
+      }
+    } catch (err) { alert('서버 오류가 발생했습니다.'); }
   }
 
   function renderObservations(observations) {
@@ -1560,8 +2776,11 @@
     }
 
     if (!filtered.length) {
+      const emptyMsg = activeObsTag !== 'all'
+        ? '"' + activeObsTag + '" 카테고리의 관찰 기록이 없습니다.'
+        : (isTeacher ? '아직 관찰 기록이 없습니다. 학생을 관찰한 내용을 남겨보세요.' : '아직 관찰 기록이 없습니다.');
       timeline.innerHTML = '<div class="empty-state" style="padding:20px;"><i class="fas fa-clipboard-list"></i><p>' +
-        (activeObsTag !== 'all' ? '"' + activeObsTag + '" 카테고리의 관찰 기록이 없습니다.' : '관찰 기록이 없습니다.') + '</p></div>';
+        emptyMsg + '</p></div>';
       return;
     }
     timeline.innerHTML = filtered.map(o => {
@@ -1589,6 +2808,34 @@
     renderObservations(allObservations);
   });
 
+  // 관찰 기록 저장 버튼
+  const submitObsBtn = document.getElementById('submitObsBtn');
+  if (submitObsBtn) submitObsBtn.addEventListener('click', submitObservation);
+
+  // ---- PDF 저장 / 인쇄 ----
+  // PDF 저장: 외부 라이브러리 없이 브라우저 인쇄 대화상자에서 "PDF로 저장"을 안내한 뒤 print 호출
+  function saveAsPdf() {
+    showToast('인쇄 대화상자에서 “대상”을 “PDF로 저장”으로 선택하면 PDF 파일로 저장됩니다.');
+    setTimeout(function(){ window.print(); }, 600);
+  }
+  function showToast(msg) {
+    let t = document.getElementById('reportToast');
+    if (!t) {
+      t = document.createElement('div');
+      t.id = 'reportToast';
+      t.className = 'report-toast';
+      document.body.appendChild(t);
+    }
+    t.textContent = msg;
+    t.classList.add('show');
+    clearTimeout(showToast._tm);
+    showToast._tm = setTimeout(function(){ t.classList.remove('show'); }, 3000);
+  }
+  const savePdfBtn = document.getElementById('savePdfBtn');
+  if (savePdfBtn) savePdfBtn.addEventListener('click', saveAsPdf);
+  const printBtn = document.getElementById('printBtn');
+  if (printBtn) printBtn.addEventListener('click', function(){ window.print(); });
+
   // ---- Utilities ----
   function showError(msg) {
     document.querySelector('#individualReportArea .report-container').innerHTML =
@@ -1599,7 +2846,8 @@
     if (!str) return '';
     const d = document.createElement('div');
     d.textContent = str;
-    return d.innerHTML;
+    // textContent/innerHTML은 따옴표를 인코딩하지 않으므로 속성 컨텍스트 안전을 위해 추가 변환
+    return d.innerHTML.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   }
 
   function formatDate(dateStr) {

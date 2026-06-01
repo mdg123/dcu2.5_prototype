@@ -1,3 +1,8 @@
+/**
+ * [비교/조사 전용 스크립트 — DB 무변경]
+ * SSOT 인 KOFAC v2 엑셀의 시트 구조를 들여다보고, 폐기된 임시 엑셀(연결_완성)과
+ * 컬럼/행 차이를 한눈에 비교하기 위한 유틸. 시드 경로가 아님.
+ */
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const XLSX = require('xlsx');
@@ -23,8 +28,8 @@ for (const sheetName of wb.SheetNames) {
   }
 }
 
-// 기존 엑셀과 비교
-console.log('\n\n=== 기존 엑셀(연결_완성)과 차이점 ===');
+// 폐기된 임시 엑셀과 비교 (디버그용 — SSOT 아님)
+console.log('\n\n=== 폐기된 임시 엑셀(연결_완성)과 차이점 ===');
 const old = XLSX.readFile(path.resolve('./통합_학습맵_계통도_연결_완성.xlsx'));
 console.log('기존 시트:', old.SheetNames);
 const oldRows = XLSX.utils.sheet_to_json(old.Sheets[old.SheetNames[0]], { defval: '' });

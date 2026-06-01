@@ -525,6 +525,24 @@
   async function init() {
     if (!currentUser) { currentUser = await checkAuth(); if (!currentUser) return; }
     if (!classId || !examId) { showToast('잘못된 접근입니다.'); return; }
+    // 감독 권한 검증: 평가지 출제자(owner_id) 또는 admin만 진입 가능
+    try {
+      const res = await fetch(`/api/exam/${classId}/${examId}`, { credentials:'include' });
+      const data = await res.json();
+      if (!data.success || !data.exam) {
+        showAccessDenied('평가를 찾을 수 없습니다.', '평가지 정보를 불러올 수 없거나 삭제된 평가입니다.');
+        return;
+      }
+      const isOwner = data.exam.owner_id === currentUser.id;
+      const isAdmin = currentUser.role === 'admin';
+      if (!isOwner && !isAdmin) {
+        showAccessDenied('감독 권한이 없습니다', '감독 모드는 이 평가지를 출제한 선생님만 사용할 수 있어요.');
+        return;
+      }
+    } catch (e) {
+      showAccessDenied('권한 확인 오류', '권한 확인 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.');
+      return;
+    }
     document.getElementById('mainContent').style.display = '';
     await loadExamInfo();
     connectSocket();
@@ -580,19 +598,26 @@
       socket.emit('supervisor:join', { examId, classId: parseInt(classId) });
 
       // 초기 학생 목록 수신
+      // 주의: 이미 loadExamInfo()로 DB에서 채워진 students 객체가 있다.
+      // socket 'students:list'는 runtime 접속 학생만 포함하며, race 상황에서
+      // DB의 누적 tab_switch_count보다 작은 값(또는 0)이 들어올 수 있다.
+      // → 무조건 덮어쓰지 말고 **누적값이 더 큰 쪽을 유지**하는 merge 정책.
       socket.on('students:list', (data) => {
         if (data.students && Array.isArray(data.students)) {
           const qs = examData ? (typeof examData.questions === 'string' ? JSON.parse(examData.questions) : (examData.questions || [])) : [];
           data.students.forEach(s => {
+            const prev = students[s.userId] || {};
+            const incomingLeave = s.tabSwitchCount || 0;
+            const prevLeave = prev.leaveCount || 0;
             students[s.userId] = {
-              name: s.displayName || '학생',
-              status: s.status === 'submitted' ? 'submitted' : (s.status === 'disconnected' ? 'disconnected' : 'active'),
-              focused: s.focused !== false,
-              leaveCount: s.tabSwitchCount || 0,
-              answered: 0,
-              total: qs.length,
-              score: s.score,
-              submittedAt: s.submittedAt
+              name: s.displayName || prev.name || '학생',
+              status: s.status === 'submitted' ? 'submitted' : (s.status === 'disconnected' ? 'disconnected' : (prev.status || 'active')),
+              focused: s.focused !== undefined ? (s.focused !== false) : (prev.focused !== false),
+              leaveCount: Math.max(incomingLeave, prevLeave),
+              answered: prev.answered || 0,
+              total: qs.length || prev.total || 0,
+              score: s.score != null ? s.score : prev.score,
+              submittedAt: s.submittedAt || prev.submittedAt
             };
           });
           renderTable(); updateStats();
@@ -644,6 +669,10 @@
         showToast('시험이 종료되었습니다.');
       });
 
+      // 감독 권한 거부
+      socket.on('supervisor:error', (data) => {
+        showAccessDenied('감독 권한이 없습니다', data.message || '이 평가지의 감독 권한이 없어요.');
+      });
       socket.on('disconnect', () => { console.warn('Socket disconnected'); });
       socket.on('connect_error', () => { console.warn('Socket connect error'); });
     } catch (e) {
@@ -669,9 +698,17 @@
 
   function onStudentLeave(data) {
     const uid = data.userId || data.studentId;
-    if (!students[uid]) return;
+    if (!uid) return;
+    // 학생이 students 맵에 없으면(supervisor 입장 전 이탈 등) 새로 생성하여
+    // KPI(이탈 감지)와 표 사이 불일치를 방지한다.
+    if (!students[uid]) {
+      const qs = examData ? (typeof examData.questions === 'string' ? JSON.parse(examData.questions) : (examData.questions || [])) : [];
+      students[uid] = { name: data.displayName || '학생', status: 'active', focused: false, leaveCount: 0, answered: 0, total: qs.length, score: null, submittedAt: null };
+    }
     students[uid].focused = false;
-    students[uid].leaveCount = data.tabSwitchCount || (students[uid].leaveCount + 1);
+    // 서버 누적값 우선, 그게 없으면 +1, 그러나 이전값보다 작아지지 않도록 보장
+    const next = data.tabSwitchCount || (students[uid].leaveCount + 1);
+    students[uid].leaveCount = Math.max(next, students[uid].leaveCount || 0);
     if (data.displayName) students[uid].name = data.displayName;
     renderTable(); updateStats();
     showLiveAlert(`${students[uid].name} 화면 이탈 감지 (${students[uid].leaveCount}회)`);
@@ -897,26 +934,27 @@
   }
 
   async function refreshStats() {
-    // 폴링 폴백: 소켓 미연결 시 서버에서 최신 상태 가져오기
-    if (!socket || !socket.connected) {
-      try {
-        const res = await fetch(`/api/exam/${classId}/${examId}`);
-        const data = await res.json();
-        if (data.success && data.students) {
-          const qs = examData ? (typeof examData.questions === 'string' ? JSON.parse(examData.questions) : (examData.questions || [])) : [];
-          data.students.forEach(s => {
-            if (!students[s.user_id]) {
-              students[s.user_id] = { name: s.display_name || s.username || '학생', status: 'active', focused: true, leaveCount: 0, answered: 0, total: qs.length, score: null, submittedAt: null };
-            }
-            students[s.user_id].leaveCount = s.tab_switch_count || 0;
-            students[s.user_id].score = s.score;
-            students[s.user_id].submittedAt = s.submitted_at;
-            if (s.status === 'submitted') students[s.user_id].status = 'submitted';
-          });
-          renderTable();
-        }
-      } catch (e) {}
-    }
+    // 항상 DB 기반 폴링으로 KPI·표 동기화 (소켓 race 안전망)
+    // tab_switch_count 는 단조 증가하므로 max() 로 보존하여 일시적 감소(0 덮어쓰기)를 방지.
+    try {
+      const res = await fetch(`/api/exam/${classId}/${examId}`, { credentials:'include' });
+      const data = await res.json();
+      if (data.success && data.students) {
+        const qs = examData ? (typeof examData.questions === 'string' ? JSON.parse(examData.questions) : (examData.questions || [])) : [];
+        data.students.forEach(s => {
+          if (!students[s.user_id]) {
+            students[s.user_id] = { name: s.display_name || s.username || '학생', status: 'active', focused: true, leaveCount: 0, answered: 0, total: qs.length, score: null, submittedAt: null };
+          }
+          const prevLeave = students[s.user_id].leaveCount || 0;
+          students[s.user_id].leaveCount = Math.max(s.tab_switch_count || 0, prevLeave);
+          students[s.user_id].score = s.score != null ? s.score : students[s.user_id].score;
+          students[s.user_id].submittedAt = s.submitted_at || students[s.user_id].submittedAt;
+          if (s.status === 'submitted') students[s.user_id].status = 'submitted';
+          if (s.display_name) students[s.user_id].name = s.display_name;
+        });
+        renderTable();
+      }
+    } catch (e) {}
     updateStats();
   }
 
@@ -1056,6 +1094,31 @@
   function escHtml(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
   function formatTime(d) { if (!d) return '–'; try { return new Date(d).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }); } catch(e) { return d; } }
   function showToast(msg) { const t = document.getElementById('toast'); t.textContent = msg; t.style.display = 'block'; setTimeout(() => t.style.display = 'none', 2500); }
+
+  // 접근 거부 풀스크린 안내 (alert 대체) — 자동 redirect + 확인 버튼
+  let _accessDeniedShown = false;
+  function showAccessDenied(title, message) {
+    if (_accessDeniedShown) return; // 중복 방지
+    _accessDeniedShown = true;
+    document.getElementById('mainContent').style.display = 'none';
+    const existing = document.getElementById('accessDeniedOverlay');
+    if (existing) existing.remove();
+    const overlay = document.createElement('div');
+    overlay.id = 'accessDeniedOverlay';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,0.55);display:flex;align-items:center;justify-content:center;z-index:99999;backdrop-filter:blur(2px)';
+    overlay.innerHTML = `
+      <div style="background:#fff;border-radius:16px;padding:32px 36px;max-width:440px;width:90%;box-shadow:0 20px 60px rgba(15,23,42,0.25);text-align:center;font-family:'Pretendard','Noto Sans KR',system-ui,sans-serif">
+        <div style="width:64px;height:64px;border-radius:50%;background:#FEF3C7;display:flex;align-items:center;justify-content:center;margin:0 auto 16px;color:#D97706;font-size:30px">⚠️</div>
+        <h2 style="font-size:20px;font-weight:800;color:#0F172A;margin:0 0 10px;line-height:1.3">${escHtml(title)}</h2>
+        <p style="font-size:15px;color:#475569;margin:0 0 22px;line-height:1.6">${escHtml(message)}</p>
+        <div style="font-size:12px;color:#94A3B8;margin-bottom:14px">잠시 후 평가 목록으로 이동합니다…</div>
+        <button id="accessDeniedBtn" style="background:#4F46E5;color:#fff;border:none;border-radius:10px;padding:12px 28px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit">확인</button>
+      </div>`;
+    document.body.appendChild(overlay);
+    const go = () => { try { location.href = '/cbt/'; } catch(_) {} };
+    document.getElementById('accessDeniedBtn').addEventListener('click', go);
+    setTimeout(go, 4000); // 4초 후 자동 이동
+  }
 </script>
 </body>
 </html>

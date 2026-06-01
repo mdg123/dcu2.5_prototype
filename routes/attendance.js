@@ -443,6 +443,61 @@ router.get('/:classId/emotion/report', requireAuth, requireMember, requireOwner,
   }
 });
 
+// GET /api/attendance/:classId/emotion-respondents?emotion=good[&startDate&endDate]
+// 정서발달 탭 감정 태그 클릭 → 해당 감정을 응답한 학생 목록(날짜·사유). 학생 감정 데이터라 개설자/교사/admin 한정.
+//
+// 대시보드 집계(db/growth-extended.js normEmotion)는 비정본 키를 정본키로 정규화해 카운트한다.
+//   very_bad/bad→sad, soso/okay→calm, focused→good, bored→tired
+// 따라서 요청 emotion(정본키)에 대해 "그 정본키로 정규화되는 모든 원본 키"를 IN 절로 조회해야
+// 태그 숫자(예: 좋아요 42)와 응답자 건수가 일치한다.
+const EMOTION_NORMALIZE_REVERSE = {
+  good:  ['good', 'focused'],
+  calm:  ['calm', 'okay', 'soso'],
+  sad:   ['sad', 'bad', 'very_bad'],
+  tired: ['tired', 'bored']
+  // happy, excited, great, angry, anxious, frustrated → 자기 자신만 (정규화 대상 아님)
+};
+
+router.get('/:classId/emotion-respondents', requireAuth, requireMember, requireOwner, (req, res) => {
+  try {
+    const emotion = (req.query.emotion || '').trim();
+    if (!emotion) {
+      return res.status(400).json({ success: false, message: 'emotion 파라미터가 필요합니다.' });
+    }
+    // 방어적 검증: 영문 소문자/언더스코어만 허용 (파라미터 바인딩이지만 잡음·오용 차단)
+    if (!/^[a-z_]+$/.test(emotion)) {
+      return res.status(400).json({ success: false, message: '유효하지 않은 emotion 값입니다.' });
+    }
+
+    const { startDate, endDate } = req.query;
+
+    // 정규화 reverse-map — 요청 정본키로 환원되는 모든 원본 키를 조회 (대시보드 카운트와 일치 보장)
+    const keys = EMOTION_NORMALIZE_REVERSE[emotion] || [emotion];
+    const placeholders = keys.map(() => '?').join(', ');
+
+    let sql = `
+      SELECT a.user_id, a.attendance_date, a.emotion, a.emotion_reason,
+             u.display_name, u.username
+      FROM attendance a
+      JOIN users u ON a.user_id = u.id
+      WHERE a.class_id = ? AND a.emotion IN (${placeholders})
+    `;
+    const params = [req.classId, ...keys];
+
+    if (startDate && endDate) {
+      sql += ' AND a.attendance_date BETWEEN ? AND ?';
+      params.push(startDate, endDate);
+    }
+    sql += ' ORDER BY u.display_name, a.attendance_date DESC';
+
+    const respondents = db.prepare(sql).all(...params);
+    res.json({ success: true, emotion, respondents });
+  } catch (err) {
+    console.error('[ATTENDANCE] emotion-respondents error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
 // POST /api/attendance/:classId/emotion/feedback - 교사→학생 감정 피드백 (개설자)
 router.post('/:classId/emotion/feedback', requireAuth, requireMember, requireOwner, (req, res) => {
   try {

@@ -877,6 +877,75 @@ router.get('/diagnosis/:sessionId/result', requireAuth, (req, res) => {
   }
 });
 
+// ============================================================
+// 추천학습 경로 시스템 (2026-05-27 설계서 §4)
+// ============================================================
+
+// GET /recommended-paths — 사용자별 추천 경로 목록 (날짜 desc)
+router.get('/recommended-paths', requireAuth, (req, res) => {
+  try {
+    const limit = req.query.limit ? parseInt(req.query.limit) : 10;
+    const status = req.query.status || 'active';
+    const paths = selfLearnDb.listRecommendedPaths(req.user.id, { limit, status });
+    res.json({ success: true, paths });
+  } catch (err) {
+    console.error('[SELF-LEARN] recommended-paths list error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// GET /recommended-paths/:sessionId — 특정 진단 세션의 학습 경로 상세
+router.get('/recommended-paths/:sessionId', requireAuth, (req, res) => {
+  try {
+    const sessionId = parseInt(req.params.sessionId);
+    if (!sessionId) return res.status(400).json({ success: false, message: '잘못된 세션 ID입니다.' });
+    const data = selfLearnDb.getRecommendedPathBySession(sessionId, req.user.id);
+    if (!data) return res.status(404).json({ success: false, message: '추천 경로를 찾을 수 없습니다.' });
+    res.json({ success: true, ...data });
+  } catch (err) {
+    const code = err.statusCode || 500;
+    if (code === 403) return res.status(403).json({ success: false, message: '다른 사용자의 추천 경로는 볼 수 없어요.' });
+    console.error('[SELF-LEARN] recommended-paths detail error:', err);
+    res.status(code).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// POST /recommended-paths/:sessionId/progress — 특정 노드 진행 상태 갱신
+router.post('/recommended-paths/:sessionId/progress', requireAuth, (req, res) => {
+  try {
+    const sessionId = parseInt(req.params.sessionId);
+    const nodeId = req.body && req.body.nodeId;
+    if (!sessionId || !nodeId) {
+      return res.status(400).json({ success: false, message: 'sessionId와 nodeId가 필요합니다.' });
+    }
+    const result = selfLearnDb.updateRecommendedPathProgress(sessionId, req.user.id, nodeId);
+    res.json({ success: true, ...result });
+  } catch (err) {
+    const code = err.statusCode || 500;
+    if (code === 403) return res.status(403).json({ success: false, message: '권한이 없어요.' });
+    if (code === 404) return res.status(404).json({ success: false, message: '진단 세션을 찾을 수 없어요.' });
+    if (code === 400) return res.status(400).json({ success: false, message: err.message || '잘못된 요청입니다.' });
+    console.error('[SELF-LEARN] recommended-paths progress error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// POST /recommended-paths/:sessionId/add-to-learning-list — 경로 전체 학습목록 일괄 추가
+router.post('/recommended-paths/:sessionId/add-to-learning-list', requireAuth, (req, res) => {
+  try {
+    const sessionId = parseInt(req.params.sessionId);
+    if (!sessionId) return res.status(400).json({ success: false, message: '잘못된 세션 ID입니다.' });
+    const result = selfLearnDb.addRecommendedPathToLearningList(sessionId, req.user.id);
+    res.json({ success: true, ...result });
+  } catch (err) {
+    const code = err.statusCode || 500;
+    if (code === 403) return res.status(403).json({ success: false, message: '권한이 없어요.' });
+    if (code === 404) return res.status(404).json({ success: false, message: '진단 세션을 찾을 수 없어요.' });
+    console.error('[SELF-LEARN] recommended-paths add-list error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
 // POST /path/generate — 학습 경로 생성
 router.post('/path/generate', requireAuth, (req, res) => {
   try {
