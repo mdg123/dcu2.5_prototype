@@ -814,13 +814,18 @@ function getClassDashboard(classId, teacherId, { period, startDate, endDate } = 
 // 각 축은 { score, hasData, ...meta } 형태. 비율은 분모>0 ? Math.min(100,...) : null, 평균은 가용 항목만.
 function computeAreas6(studentId, { classId, startDate, endDate } = {}) {
   const hasRange = !!(startDate && endDate);
+  // 기간 BETWEEN off-by-one 방지 헬퍼: DATE(col) 로 정규화하여 'YYYY-MM-DD' / 'YYYY-MM-DD HH:MM:SS'
+  // 양쪽 저장 포맷 모두 종료일 당일 datetime 데이터를 포함시킨다(스펙 #6).
+  // 사용 예) `AND ${rangeClause('completed_at')}` + params.push(...rangeParams())
+  const rangeClause = (col) => `DATE(${col}) BETWEEN ? AND ?`;
+  const rangeParams = () => [startDate, endDate];
 
   // ── 축 1: 정서발달 (긍정 감정 비율) ──
   const emoParams = [studentId];
   let emoWhere = 'WHERE user_id = ?';
   if (classId) { emoWhere += ' AND class_id = ?'; emoParams.push(classId); }
   emoWhere += ' AND emotion IS NOT NULL';
-  if (hasRange) { emoWhere += ' AND attendance_date BETWEEN ? AND ?'; emoParams.push(startDate, endDate); }
+  if (hasRange) { emoWhere += ` AND ${rangeClause('attendance_date')}`; emoParams.push(...rangeParams()); }
   // 정본키로 정규화 후 합산 (스펙 §7-4). soso→calm(긍정)·very_bad/bad→sad(부정) 정확 분류.
   const emoRows = normalizeEmotionCounts(db.prepare(`SELECT emotion, COUNT(*) as cnt FROM attendance ${emoWhere} GROUP BY emotion`).all(...emoParams));
   const emotionTotal = emoRows.reduce((s, e) => s + e.cnt, 0);
@@ -830,37 +835,67 @@ function computeAreas6(studentId, { classId, startDate, endDate } = {}) {
   const emotionScore = emotionTotal > 0 ? Math.round(positiveCnt / emotionTotal * 100) : 0;
 
   // ── 축 2: 참여도 (과제·평가·오늘학습·수업 4지표 가용 평균) ──
-  // classId 없는 개인 호출은 클래스 맥락 지표라 hasData=false 가드 (설계서 §1 축2 주석)
+  // 클래스 범위 분기:
+  //  - classId 있음(교사가 특정 클래스에서 학생 조회): 그 클래스만(class_id = ?).
+  //  - classId 없음(학생 본인 전체 리포트): "성장 리포트는 학생이 속한 모든 클래스의 기록을 모아서 보여주는 곳"(사용자 정책).
+  //    학생이 'member'(학생)로 가입한 모든 클래스를 합산. 본인이 owner로 개설한 클래스는 과제를 받는 입장이 아니므로 제외.
   const clamp = (n, d) => (d > 0 ? Math.min(100, Math.round((n / d) * 100)) : null);
   let participation = { homework: null, exam: null, daily: null, lesson: null };
   let participationScore = 0;
   let participationHasData = false;
-  if (classId) {
-    const hwD = db.prepare('SELECT COUNT(*) as c FROM homework WHERE class_id = ?').get(classId).c;
+  {
+    // 클래스 IN 절 + 그에 대응하는 파라미터를 만든다.
+    //  - classId 지정: `class_id = ?` (단일, 기존과 동일 → 교사 시점 회귀 방지)
+    //  - 미지정: `class_id IN (학생으로 속한 클래스들)` — class_members.role='member'(owner 제외) AND status='active',
+    //           추가 안전장치로 본인 owner 클래스(classes.owner_id) 명시 제외.
+    const buildClassFilter = (col) => {
+      if (classId) return { clause: `${col} = ?`, params: [classId] };
+      return {
+        clause: `${col} IN (
+          SELECT cm.class_id FROM class_members cm
+          WHERE cm.user_id = ? AND cm.role = 'member' AND cm.status = 'active'
+            AND cm.class_id NOT IN (SELECT id FROM classes WHERE owner_id = ?)
+        )`,
+        params: [studentId, studentId]
+      };
+    };
+    // 분모·분자 모두 동일 기간 + 동일 클래스 범위로 필터(스펙 #1·#4): 기간 내 생성/배정된 과제·평가·세트·수업 대비
+    // 그 기간 내 제출·응시·완료. hasRange 아니면 전체. 종료일 off-by-one 은 DATE() 정규화로 해소(#6).
+    // 분모: 배정/생성 시점 컬럼(created_at / target_date) 기준.
+    const dD = hasRange ? rangeParams() : [];
+    const hwF = buildClassFilter('class_id');
+    const hwD = db.prepare(`SELECT COUNT(*) as c FROM homework WHERE ${hwF.clause}${hasRange ? ` AND ${rangeClause('created_at')}` : ''}`).get(...hwF.params, ...dD).c;
+    const hwNF = buildClassFilter('h.class_id');
     const hwN = db.prepare(`
       SELECT COUNT(DISTINCT h.id) as c FROM homework h
       JOIN homework_submissions s ON s.homework_id = h.id AND s.student_id = ?
-      WHERE h.class_id = ? AND s.status IN ('submitted','graded')
-    `).get(studentId, classId).c;
-    const exD = db.prepare('SELECT COUNT(*) as c FROM exams WHERE class_id = ?').get(classId).c;
+      WHERE ${hwNF.clause} AND s.status IN ('submitted','graded')${hasRange ? ` AND ${rangeClause('s.submitted_at')}` : ''}
+    `).get(studentId, ...hwNF.params, ...dD).c;
+    const exF = buildClassFilter('class_id');
+    const exD = db.prepare(`SELECT COUNT(*) as c FROM exams WHERE ${exF.clause}${hasRange ? ` AND ${rangeClause('created_at')}` : ''}`).get(...exF.params, ...dD).c;
+    const exNF = buildClassFilter('e.class_id');
     const exN = db.prepare(`
       SELECT COUNT(DISTINCT e.id) as c FROM exams e
       JOIN exam_students es ON es.exam_id = e.id AND es.user_id = ?
-      WHERE e.class_id = ? AND es.status = 'submitted'
-    `).get(studentId, classId).c;
-    const dlD = db.prepare('SELECT COUNT(*) as c FROM daily_learning_sets WHERE class_id = ?').get(classId).c;
+      WHERE ${exNF.clause} AND es.status = 'submitted'${hasRange ? ` AND ${rangeClause('es.submitted_at')}` : ''}
+    `).get(studentId, ...exNF.params, ...dD).c;
+    const dlF = buildClassFilter('class_id');
+    const dlD = db.prepare(`SELECT COUNT(*) as c FROM daily_learning_sets WHERE ${dlF.clause}${hasRange ? ` AND ${rangeClause('target_date')}` : ''}`).get(...dlF.params, ...dD).c;
+    const dlNF = buildClassFilter('class_id');
     const dlN = db.prepare(`
       SELECT COUNT(DISTINCT set_id) as c FROM daily_learning_progress
-      WHERE user_id = ? AND status = 'completed'
-        AND set_id IN (SELECT id FROM daily_learning_sets WHERE class_id = ?)
-    `).get(studentId, classId).c;
-    const lsD = db.prepare('SELECT COUNT(*) as c FROM lessons WHERE class_id = ?').get(classId).c;
+      WHERE user_id = ? AND status = 'completed'${hasRange ? ` AND ${rangeClause('completed_at')}` : ''}
+        AND set_id IN (SELECT id FROM daily_learning_sets WHERE ${dlNF.clause})
+    `).get(studentId, ...dD, ...dlNF.params).c;
+    const lsF = buildClassFilter('class_id');
+    const lsD = db.prepare(`SELECT COUNT(*) as c FROM lessons WHERE ${lsF.clause}${hasRange ? ` AND ${rangeClause('created_at')}` : ''}`).get(...lsF.params, ...dD).c;
     // 수업 이수: lesson_self_check(수업 후 학생 셀프 체크) DISTINCT lesson_id 기반.
     // 단순 조회(lesson_view)가 아니라 "수업을 듣고 셀프 점검까지 한 수업"을 이수로 간주.
+    const lsNF = buildClassFilter('class_id');
     const lsN = db.prepare(`
       SELECT COUNT(DISTINCT lesson_id) as c FROM lesson_self_check
-      WHERE user_id = ? AND class_id = ?
-    `).get(studentId, classId).c;
+      WHERE user_id = ? AND ${lsNF.clause}${hasRange ? ` AND ${rangeClause('created_at')}` : ''}
+    `).get(studentId, ...lsNF.params, ...dD).c;
     participation = {
       homework: clamp(hwN, hwD),
       exam: clamp(exN, exD),
@@ -874,55 +909,114 @@ function computeAreas6(studentId, { classId, startDate, endDate } = {}) {
       : 0;
   }
 
-  // ── 축 3: 성취수준 (정답률) — 오늘학습·진단·문항+평가 누적 정답/문항 비율 가용 평균 ──
+  // ── 축 3: 성취수준 (정답률) — 정답률 출처별 6종 구분 (스펙: 성취수준_출처별6종_재구성) ──
+  // 6출처: today_learning / ai_learning / wrong_note / content / class_exam / cbt_exam
+  // 각 출처 {correct,total} → rate = total>0 ? round(correct/total*100) : null (응시·전부오답=0, 미응시=null)
+  // 기간 필터(#2): 각 테이블 날짜 컬럼 기준, DATE() 정규화로 종료일 off-by-one 해소(#6).
+  const accD = hasRange ? rangeParams() : [];
+
+  // 1) today_learning — daily_learning_progress 가 정본(중복 집계 방지: problem_attempts 에는 today_learning 미기록)
   const dlAcc = db.prepare(`
     SELECT SUM(correct_count) as cc, SUM(total_questions) as tq
-    FROM daily_learning_progress WHERE user_id = ? AND status = 'completed'
-  `).get(studentId);
+    FROM daily_learning_progress WHERE user_id = ? AND status = 'completed'${hasRange ? ` AND ${rangeClause('completed_at')}` : ''}
+  `).get(studentId, ...accD);
+
+  // 진단평가(diagnosis_sessions) — ai_learning 합산 및 진단 타일에 사용
   const diAcc = db.prepare(`
     SELECT SUM(correct_count) as cc, SUM(total_questions) as tq
-    FROM diagnosis_sessions WHERE user_id = ? AND status = 'completed'
-  `).get(studentId);
-  // 문항풀이: 콘텐츠/AI 맞춤학습의 단발 문항
-  const paAcc = db.prepare(`
-    SELECT SUM(is_correct) as cc, COUNT(*) as tq FROM problem_attempts WHERE user_id = ?
-  `).get(studentId);
-  // 채움클래스 평가: exam_students.score(0~100)를 문항수 가중으로 환산
-  const exAcc = db.prepare(`
+    FROM diagnosis_sessions WHERE user_id = ? AND status = 'completed'${hasRange ? ` AND ${rangeClause('completed_at')}` : ''}
+  `).get(studentId, ...accD);
+
+  // problem_attempts 를 source_type 별로 집계 (submitted_at 기준)
+  const paBy = db.prepare(`
+    SELECT source_type as st, SUM(is_correct) as cc, COUNT(*) as tq
+    FROM problem_attempts
+    WHERE user_id = ?${hasRange ? ` AND ${rangeClause('submitted_at')}` : ''}
+    GROUP BY source_type
+  `).all(studentId, ...accD);
+  const paMap = {};
+  for (const r of paBy) paMap[r.st || 'content'] = { cc: r.cc || 0, tq: r.tq || 0 };
+  const paAi  = paMap['ai_learning'] || { cc: 0, tq: 0 };
+  const paCon = paMap['content']     || { cc: 0, tq: 0 };
+  const paWn  = paMap['wrong_note']  || { cc: 0, tq: 0 };
+
+  // 평가: exam_students.score(0~100) → 문항수 가중 환산. 감독(CBT)/일반 분리.
+  // 클래스 스코프: classId 있으면 그 클래스만, 없으면(학생 본인 전체 리포트) 전체 클래스 합산(#3, 참여도 정책과 동일).
+  // 감독/일반 분리 기준: exams.start_mode = 'waiting' → 감독(CBT) 대기실 시작 흐름 = cbt_exam,
+  //   그 외('direct' 등) → 일반 클래스 평가 = class_exam. (tab_detection 은 전 평가 기본 1 이라 변별 불가)
+  const exClassClause = classId ? ' AND e.class_id = ?' : '';
+  const examAccBy = (cbt) => db.prepare(`
     SELECT
       COALESCE(SUM(es.score * COALESCE(e.question_count, 0) / 100.0), 0) as cc,
       COALESCE(SUM(COALESCE(e.question_count, 0)), 0) as tq
     FROM exam_students es JOIN exams e ON es.exam_id = e.id
     WHERE es.user_id = ? AND es.status = 'submitted' AND es.score IS NOT NULL
-  `).get(studentId);
-  // 문항풀이 + 평가 합산 정답률 (문항수 가중평균)
-  const paCC = paAcc?.cc || 0;
-  const paTQ = paAcc?.tq || 0;
-  const exCC = exAcc?.cc || 0;
-  const exTQ = exAcc?.tq || 0;
-  const combinedCC = paCC + exCC;
-  const combinedTQ = paTQ + exTQ;
-  const problemAccuracy = combinedTQ > 0 ? (combinedCC / combinedTQ) * 100 : null;
-  const accOf = (o) => (o && o.tq > 0 ? (o.cc / o.tq) * 100 : null);
+      AND ${cbt ? "e.start_mode = 'waiting'" : "COALESCE(e.start_mode,'direct') != 'waiting'"}${exClassClause}${hasRange ? ` AND ${rangeClause('es.submitted_at')}` : ''}
+  `).get(studentId, ...(classId ? [classId] : []), ...accD);
+  const exClass = examAccBy(false);
+  const exCbt   = examAccBy(true);
+
+  // 6출처 {correct,total} 구성. exam 의 correct 는 가중 환산값(소수 → 반올림 1자리 후 정수 표기는 rate 계산에 원본 사용)
+  const mkSrc = (cc, tq) => {
+    const total = Math.round(tq || 0);
+    const correct = Math.round(cc || 0);
+    const rate = (tq && tq > 0) ? Math.round((cc / tq) * 100) : null;
+    return { correct, total, rate };
+  };
+  const bySource = {
+    today_learning: mkSrc(dlAcc?.cc, dlAcc?.tq),
+    ai_learning:    mkSrc((diAcc?.cc || 0) + paAi.cc, (diAcc?.tq || 0) + paAi.tq),
+    wrong_note:     mkSrc(paWn.cc, paWn.tq),
+    content:        mkSrc(paCon.cc, paCon.tq),
+    class_exam:     mkSrc(exClass?.cc, exClass?.tq),
+    cbt_exam:       mkSrc(exCbt?.cc, exCbt?.tq)
+  };
+
+  // donutScore: 평가류 중심 문항수 가중평균(오답노트 제외) — §5.1
+  const donutCC = (dlAcc?.cc || 0) + (diAcc?.cc || 0) + paAi.cc + paCon.cc + (exClass?.cc || 0) + (exCbt?.cc || 0);
+  const donutTQ = (dlAcc?.tq || 0) + (diAcc?.tq || 0) + paAi.tq + paCon.tq + (exClass?.tq || 0) + (exCbt?.tq || 0);
+  const donutScore = donutTQ > 0 ? Math.round((donutCC / donutTQ) * 100) : 0;
+
+  // 도넛 하단 3타일(§5.3): 자기주도 / 클래스평가 / 진단
+  const sdCC = (dlAcc?.cc || 0) + (diAcc?.cc || 0) + paAi.cc + paCon.cc + paWn.cc;
+  const sdTQ = (dlAcc?.tq || 0) + (diAcc?.tq || 0) + paAi.tq + paCon.tq + paWn.tq;
+  const ceCC = (exClass?.cc || 0) + (exCbt?.cc || 0);
+  const ceTQ = (exClass?.tq || 0) + (exCbt?.tq || 0);
+  const tiles = {
+    self_directed: mkSrc(sdCC, sdTQ),
+    class_eval:    mkSrc(ceCC, ceTQ),
+    diagnosis:     mkSrc(diAcc?.cc, diAcc?.tq)
+  };
+
+  // hasData: 6출처 total 합계 > 0 (스펙 §7-1). donutScore 분모와 별개로 wrong_note 포함 전체 응시 여부 기준.
+  const totalAllTQ = Object.values(bySource).reduce((s, o) => s + (o.total || 0), 0);
+  const achievementHasData = totalAllTQ > 0;
+  const achievementScore = donutScore;  // score = donutScore (하위호환 동일값, 스펙 §7)
+
+  // 하위호환 키(daily/diagnosis/problem/problemBreakdown) 병행 유지 — FE 미수정 구간 안전.
+  // problem = (content + ai_learning problem_attempts + 평가) 합산 정답률 — 기존 의미 근사 유지.
+  const legacyPaCC = paAi.cc + paCon.cc;
+  const legacyPaTQ = paAi.tq + paCon.tq;
+  const legacyCombCC = legacyPaCC + ceCC;
+  const legacyCombTQ = legacyPaTQ + ceTQ;
   const achievement = {
-    daily: accOf(dlAcc) != null ? Math.round(accOf(dlAcc)) : null,
-    diagnosis: accOf(diAcc) != null ? Math.round(accOf(diAcc)) : null,
-    problem: problemAccuracy != null ? Math.round(problemAccuracy) : null,
+    bySource,
+    tiles,
+    donutScore,
+    // ↓ 하위호환
+    daily: bySource.today_learning.rate,
+    diagnosis: tiles.diagnosis.rate,
+    problem: legacyCombTQ > 0 ? Math.round((legacyCombCC / legacyCombTQ) * 100) : null,
     problemBreakdown: {
-      contentItems: paTQ,            // problem_attempts 문항 수
-      contentCorrect: paCC,
-      examQuestions: exTQ,           // 평가 문항 수 가중치
-      examCorrect: Math.round(exCC * 10) / 10
+      contentItems: legacyPaTQ,
+      contentCorrect: legacyPaCC,
+      examQuestions: ceTQ,
+      examCorrect: Math.round(ceCC * 10) / 10
     }
   };
-  const accAvail = [accOf(dlAcc), accOf(diAcc), problemAccuracy].filter(v => v != null);
-  const achievementHasData = accAvail.length > 0;
-  const achievementScore = achievementHasData
-    ? Math.round(accAvail.reduce((a, b) => a + b, 0) / accAvail.length)
-    : 0;
 
   // ── 축 4: 진로탐색 (기존 유지) ──
-  const careerDateFilter = hasRange ? ' AND activity_date BETWEEN ? AND ?' : '';
+  const careerDateFilter = hasRange ? ` AND ${rangeClause('activity_date')}` : '';
   const careerParams = hasRange ? [studentId, startDate, endDate] : [studentId];
   const careerLogCount = db.prepare(`
     SELECT COUNT(*) as c FROM career_logs WHERE user_id = ? ${careerDateFilter}
@@ -937,7 +1031,7 @@ function computeAreas6(studentId, { classId, startDate, endDate } = {}) {
   const careerScore = Math.min(interestAreaCount * 20 + careerLogCount * 15, 100);
 
   // ── 축 5: 독서활동 (기존 유지) ──
-  const readDateFilter = hasRange ? ' AND created_at BETWEEN ? AND ?' : '';
+  const readDateFilter = hasRange ? ` AND ${rangeClause('created_at')}` : '';
   const readParams = hasRange ? [studentId, startDate, endDate] : [studentId];
   const bookCount = db.prepare(`
     SELECT COUNT(*) as c FROM reading_logs WHERE user_id = ? ${readDateFilter}
@@ -948,7 +1042,7 @@ function computeAreas6(studentId, { classId, startDate, endDate } = {}) {
     Math.min(85 + (bookCount - 5) * 5, 100);
 
   // ── 축 6: 콘텐츠 활용 (content_view + lesson_view 건수 구간화) ──
-  const contentDateFilter = hasRange ? ' AND created_at BETWEEN ? AND ?' : '';
+  const contentDateFilter = hasRange ? ` AND ${rangeClause('created_at')}` : '';
   const contentParams = hasRange ? [studentId, startDate, endDate] : [studentId];
   const contentCount = db.prepare(`
     SELECT COUNT(*) as c FROM learning_logs
@@ -963,7 +1057,7 @@ function computeAreas6(studentId, { classId, startDate, endDate } = {}) {
   return {
     '정서발달':   { score: emotionScore, hasData: emotionTotal > 0, emotionTotal, trend: '' },
     '참여도':     { score: participationScore, hasData: participationHasData, participation, trend: '' },
-    '성취수준':   { score: achievementScore, hasData: achievementHasData, achievement, trend: '' },
+    '성취수준':   { score: achievementScore, donutScore: achievement.donutScore, hasData: achievementHasData, achievement, trend: '' },
     '진로탐색':   { score: careerScore, hasData: careerLogCount > 0, interestAreaCount, careerLogCount, trend: '' },
     '독서활동':   { score: readingScore, hasData: bookCount > 0, bookCount, trend: '' },
     '콘텐츠활용': { score: contentScore, hasData: contentCount > 0, contentCount, trend: '' }
@@ -972,17 +1066,19 @@ function computeAreas6(studentId, { classId, startDate, endDate } = {}) {
 
 function getStudentReport(studentId, { classId, startDate, endDate } = {}) {
   // 파라미터화된 쿼리로 SQL Injection 방지
+  // 기간 BETWEEN off-by-one 방지(#6): DATE(col) 정규화로 종료일 당일 datetime 데이터 포함.
+  const hasRange = !!(startDate && endDate);
   const dateParams = [];
   let dateFilter = '';
   let attDateFilter = '';
-  if (startDate && endDate) {
-    dateFilter = ' AND created_at BETWEEN ? AND ?';
-    attDateFilter = ' AND attendance_date BETWEEN ? AND ?';
+  if (hasRange) {
+    dateFilter = ' AND DATE(created_at) BETWEEN ? AND ?';
+    attDateFilter = ' AND DATE(attendance_date) BETWEEN ? AND ?';
     dateParams.push(startDate, endDate);
   }
 
-  // 학생 정보 조회
-  const student = db.prepare('SELECT id, display_name, username, role FROM users WHERE id = ?').get(studentId);
+  // 학생 정보 조회 (grade 포함 — 오늘학습 세트 학년매칭에 사용, 스펙 #4)
+  const student = db.prepare('SELECT id, display_name, username, role, grade FROM users WHERE id = ?').get(studentId);
   const studentName = student ? student.display_name : '학생';
 
   // 클래스 정보
@@ -997,7 +1093,7 @@ function getStudentReport(studentId, { classId, startDate, endDate } = {}) {
   let emotionWhere = 'WHERE user_id = ?';
   if (classId) { emotionWhere += ' AND class_id = ?'; emotionParams.push(classId); }
   emotionWhere += ' AND emotion IS NOT NULL';
-  if (startDate && endDate) { emotionWhere += ' AND attendance_date BETWEEN ? AND ?'; emotionParams.push(startDate, endDate); }
+  if (hasRange) { emotionWhere += ' AND DATE(attendance_date) BETWEEN ? AND ?'; emotionParams.push(startDate, endDate); }
   // 정본키로 정규화 + 합산 (스펙 §7-4). positiveRatio 계산(L1054)·emotionDevelopment FE 출력 양쪽이 정규화된 값을 사용.
   const emotions = normalizeEmotionCounts(db.prepare(`SELECT emotion, COUNT(*) as cnt FROM attendance ${emotionWhere} GROUP BY emotion`).all(...emotionParams));
 
@@ -1011,14 +1107,14 @@ function getStudentReport(studentId, { classId, startDate, endDate } = {}) {
   `;
   const recentEmoParams = [studentId];
   if (classId) { recentEmoQuery += ' AND class_id = ?'; recentEmoParams.push(classId); }
-  if (startDate && endDate) { recentEmoQuery += ' AND attendance_date BETWEEN ? AND ?'; recentEmoParams.push(startDate, endDate); }
+  if (hasRange) { recentEmoQuery += ' AND DATE(attendance_date) BETWEEN ? AND ?'; recentEmoParams.push(startDate, endDate); }
   // 기간 내 전부 반환 (FE에서 max-height+scroll). 안전 상한 200건.
   recentEmoQuery += ' ORDER BY attendance_date DESC LIMIT 200';
   const recentEmotions = db.prepare(recentEmoQuery).all(...recentEmoParams)
     .map(row => ({ ...row, emotion: normEmotion(row.emotion) }));
 
   // 2. 기초학력: 진단 결과
-  const diagDateFilter = startDate && endDate ? ' AND completed_at BETWEEN ? AND ?' : '';
+  const diagDateFilter = hasRange ? ' AND DATE(completed_at) BETWEEN ? AND ?' : '';
   const diagParams = [studentId, ...dateParams];
   const diagnoses = db.prepare(`
     SELECT target_node_id, result, correct_count, total_questions
@@ -1035,25 +1131,42 @@ function getStudentReport(studentId, { classId, startDate, endDate } = {}) {
     GROUP BY activity_type
   `).all(...learnParams);
 
-  // 4. 오늘의학습: 완료율 + 연속일 + 최근 7일 현황 + 평균 정답률
-  const dailyDateFilter = startDate && endDate ? ' AND completed_at BETWEEN ? AND ?' : '';
-  const dailyParams = [studentId, ...dateParams];
+  // 4. 오늘의학습: 완료율 + 연속일 + 최근 현황 + 평균 정답률
+  // 클래스 스코프(#4): 개인·타클래스 세트 혼입 제거. getClassDailyLearning 의 학년매칭과 일관되게
+  // "현재 classId 전용 세트 ∪ 학생 학년에 맞는 글로벌 세트"의 진행 기록만 집계.
+  // classId 없으면(개인 호출) 학생 학년 글로벌 세트만으로 제한(타클래스 전용 세트 배제).
+  const studentGrade = student ? student.grade : null;
+  const dailyDateFilter = hasRange ? ' AND DATE(completed_at) BETWEEN ? AND ?' : '';
+  let dailySetClause = '';
+  const dailySetParams = [];
+  if (classId && studentGrade != null) {
+    dailySetClause = ' AND set_id IN (SELECT id FROM daily_learning_sets WHERE class_id = ? OR (class_id IS NULL AND target_grade = ?))';
+    dailySetParams.push(classId, studentGrade);
+  } else if (classId) {
+    dailySetClause = ' AND set_id IN (SELECT id FROM daily_learning_sets WHERE class_id = ?)';
+    dailySetParams.push(classId);
+  } else if (studentGrade != null) {
+    dailySetClause = ' AND set_id IN (SELECT id FROM daily_learning_sets WHERE class_id IS NULL AND target_grade = ?)';
+    dailySetParams.push(studentGrade);
+  }
+  // 파라미터 순서: user_id, [기간 startDate,endDate], [세트스코프 classId,grade]
+  const dailyParams = [studentId, ...dateParams, ...dailySetParams];
   const dailyStats = db.prepare(`
     SELECT COUNT(*) as total,
       SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed,
       SUM(CASE WHEN status = 'completed' THEN COALESCE(correct_count, 0) ELSE 0 END) as totalCorrect,
       SUM(CASE WHEN status = 'completed' THEN COALESCE(total_questions, 0) ELSE 0 END) as totalQuestions
-    FROM daily_learning_progress WHERE user_id = ? ${dailyDateFilter}
+    FROM daily_learning_progress WHERE user_id = ? ${dailyDateFilter}${dailySetClause}
   `).get(...dailyParams);
   // 평균 정답률 계산: 누적 정답 수 / 누적 문항 수 (score가 0~1 또는 0~100인 경우 모두 안전)
   if (dailyStats) {
     if (dailyStats.totalQuestions > 0) {
       dailyStats.avgAccuracy = Math.round((dailyStats.totalCorrect / dailyStats.totalQuestions) * 100);
     } else {
-      // fallback: score 컬럼 평균 (score가 0~1 범위라 가정)
+      // fallback: score 컬럼 평균 (score가 0~1 범위라 가정). 동일 기간·세트 스코프 적용.
       const scoreRow = db.prepare(`
         SELECT AVG(CAST(score AS REAL)) as avgScore, COUNT(*) as cnt
-        FROM daily_learning_progress WHERE user_id = ? AND status = 'completed' AND score IS NOT NULL ${dailyDateFilter}
+        FROM daily_learning_progress WHERE user_id = ? AND status = 'completed' AND score IS NOT NULL ${dailyDateFilter}${dailySetClause}
       `).get(...dailyParams);
       if (scoreRow && scoreRow.cnt > 0 && scoreRow.avgScore != null) {
         const avg = scoreRow.avgScore;
@@ -1064,15 +1177,20 @@ function getStudentReport(studentId, { classId, startDate, endDate } = {}) {
     }
   }
 
-  // 최근 7일 완료 날짜 조회 (연속일 및 캘린더 계산용)
+  // 완료 날짜 조회 (연속일 및 캘린더 계산용)
+  // 기간·클래스(학년매칭) 필터 일괄 적용(#5): dailyStats 완료율과 캘린더/연속일 정합.
+  //  - 7일 기간 선택 시 "완료율 0%인데 캘린더에 전기간 날짜가 뜨던" 모순 해소.
+  //  - slice(0,7) 상한 제거 → 8일+ 완료 학생도 잘리지 않음(기간 내 전 일자 반환, 안전 상한 366).
+  // 파라미터 순서: user_id, [기간], [세트스코프] — dailyStats 와 동일.
+  const recentDayParams = [studentId, ...dateParams, ...dailySetParams];
   const recentDailyDays = db.prepare(`
     SELECT DISTINCT DATE(completed_at) as day
     FROM daily_learning_progress
-    WHERE user_id = ? AND status = 'completed'
-    ORDER BY day DESC LIMIT 30
-  `).all(studentId).map(r => r.day);
+    WHERE user_id = ? AND status = 'completed'${dailyDateFilter}${dailySetClause}
+    ORDER BY day DESC LIMIT 366
+  `).all(...recentDayParams).map(r => r.day);
 
-  // 연속일 계산
+  // 연속일 계산 (기간 내 기준)
   let maxStreak = 0, currentStreak = 0;
   if (recentDailyDays.length > 0) {
     currentStreak = 1;
@@ -1087,7 +1205,7 @@ function getStudentReport(studentId, { classId, startDate, endDate } = {}) {
   }
   if (dailyStats) {
     dailyStats.maxStreak = maxStreak;
-    dailyStats.recentDays = recentDailyDays.slice(0, 7);
+    dailyStats.recentDays = recentDailyDays; // 기간 내 전체(상한 제거)
   }
 
   // 5. 독서활동
@@ -1111,35 +1229,41 @@ function getStudentReport(studentId, { classId, startDate, endDate } = {}) {
   `).all(...careerLogParams);
 
   // 7. 콘텐츠 활용 현황
-  // 내가 담은 콘텐츠 (보관함)
+  // 콘텐츠 활용 카드 전 지표에 기간 필터 일괄 적용(#7) — viewedContents 만 필터되어 같은 카드 안에서
+  // 일부만 변하던 불일치 해소. 각 테이블 날짜 컬럼 기준, DATE() 정규화로 종료일 off-by-one 해소(#6).
+  // (dateFilter 가 created_at 기준이므로 컬럼명이 다른 지표는 별도 절을 구성)
+  const collDateFilter = hasRange ? ' AND DATE(created_at) BETWEEN ? AND ?' : '';
+  const subDateFilter = hasRange ? ' AND DATE(subscribed_at) BETWEEN ? AND ?' : '';
+
+  // 내가 담은 콘텐츠 (보관함) — created_at 기준
   const savedContents = db.prepare(`
-    SELECT COUNT(*) as cnt FROM content_collections WHERE user_id = ?
-  `).get(studentId)?.cnt || 0;
+    SELECT COUNT(*) as cnt FROM content_collections WHERE user_id = ? ${collDateFilter}
+  `).get(studentId, ...dateParams)?.cnt || 0;
 
   // 조회 콘텐츠 (content_view 활동)
   const viewedContents = db.prepare(`
     SELECT COUNT(DISTINCT object_id) as cnt FROM learning_logs WHERE user_id = ? AND activity_type = 'content_view' ${dateFilter}
   `).get(studentId, ...dateParams)?.cnt || 0;
 
-  // 좋아요 (내가 올린 콘텐츠의 총 좋아요 수)
+  // 좋아요 (기간 내 올린 콘텐츠의 총 좋아요 수) — contents.created_at 기준
   const totalLikes = db.prepare(`
-    SELECT COALESCE(SUM(like_count), 0) as cnt FROM contents WHERE creator_id = ?
-  `).get(studentId)?.cnt || 0;
+    SELECT COALESCE(SUM(like_count), 0) as cnt FROM contents WHERE creator_id = ? ${dateFilter}
+  `).get(studentId, ...dateParams)?.cnt || 0;
 
-  // 내가 올린 콘텐츠
+  // 내가 올린 콘텐츠 — contents.created_at 기준
   const uploadedContents = db.prepare(`
-    SELECT COUNT(*) as cnt FROM contents WHERE creator_id = ?
-  `).get(studentId)?.cnt || 0;
+    SELECT COUNT(*) as cnt FROM contents WHERE creator_id = ? ${dateFilter}
+  `).get(studentId, ...dateParams)?.cnt || 0;
 
-  // 채널 구독자 수
+  // 채널 구독자 수 — 기간 내 개설한 채널의 구독자 합 (channels.created_at 기준)
   const subscriberCount = db.prepare(`
-    SELECT COALESCE(SUM(subscriber_count), 0) as cnt FROM channels WHERE user_id = ?
-  `).get(studentId)?.cnt || 0;
+    SELECT COALESCE(SUM(subscriber_count), 0) as cnt FROM channels WHERE user_id = ? ${collDateFilter}
+  `).get(studentId, ...dateParams)?.cnt || 0;
 
-  // 내가 구독한 수
+  // 내가 구독한 수 — channel_subscriptions.subscribed_at 기준
   const mySubscriptions = db.prepare(`
-    SELECT COUNT(*) as cnt FROM channel_subscriptions WHERE subscriber_id = ?
-  `).get(studentId)?.cnt || 0;
+    SELECT COUNT(*) as cnt FROM channel_subscriptions WHERE subscriber_id = ? ${subDateFilter}
+  `).get(studentId, ...dateParams)?.cnt || 0;
 
   // 자주 조회한 콘텐츠 (learning_logs의 object_type에서 추출)
   const searchKeywords = db.prepare(`
@@ -1155,10 +1279,10 @@ function getStudentReport(studentId, { classId, startDate, endDate } = {}) {
     GROUP BY achievement_code ORDER BY cnt DESC LIMIT 10
   `).all(studentId, ...dateParams);
 
-  // 포트폴리오 항목 수
+  // 포트폴리오 항목 수 — portfolio_items.created_at 기준 (#7)
   const portfolioCount = db.prepare(`
-    SELECT COUNT(*) as cnt FROM portfolio_items WHERE user_id = ?
-  `).get(studentId)?.cnt || 0;
+    SELECT COUNT(*) as cnt FROM portfolio_items WHERE user_id = ? ${collDateFilter}
+  `).get(studentId, ...dateParams)?.cnt || 0;
 
   // 선생님 관찰 기록
   const observations = classId

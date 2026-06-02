@@ -15,6 +15,7 @@ function init() {
         is_correct INTEGER NOT NULL DEFAULT 0,
         selected_answer TEXT,
         time_taken INTEGER,
+        source_type VARCHAR(20),
         submitted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
       CREATE INDEX IF NOT EXISTS idx_pa_content ON problem_attempts(content_id);
@@ -70,6 +71,25 @@ function init() {
   for (const col of diagCols) {
     try { db.exec(`ALTER TABLE diagnosis_sessions ADD COLUMN ${col}`); } catch (e) { /* exists */ }
   }
+
+  // ── 성취수준 6출처 집계: problem_attempts.source_type 컬럼 신설 + 1회성 백필 ──
+  // source_type 값: 'today_learning' | 'ai_learning' | 'wrong_note' | 'content'
+  //  - ai_learning : node_id ≠ null (AI 맞춤학습/학습맵 경로 문항)
+  //  - content     : node_id = null  (채움콘텐츠 내 단발 문항)
+  //  - wrong_note  : 오답노트 재풀이 기록 (Phase 3에서 신규 INSERT)
+  //  - today_learning 은 daily_learning_progress 가 정본이므로 problem_attempts 에는 기록하지 않음
+  try {
+    const paCols = db.prepare('PRAGMA table_info(problem_attempts)').all().map(c => c.name);
+    if (!paCols.includes('source_type')) {
+      db.exec('ALTER TABLE problem_attempts ADD COLUMN source_type VARCHAR(20)');
+      // 기존 데이터 백필: node_id ≠ null → 'ai_learning', 그 외 → 'content'
+      // (과거 기록에는 오답노트 재풀이가 없으므로 wrong_note 백필 대상 없음)
+      const r1 = db.prepare("UPDATE problem_attempts SET source_type = 'ai_learning' WHERE node_id IS NOT NULL AND source_type IS NULL").run();
+      const r2 = db.prepare("UPDATE problem_attempts SET source_type = 'content' WHERE node_id IS NULL AND source_type IS NULL").run();
+      console.log(`[self-learn init] problem_attempts.source_type 백필 완료 — ai_learning:${r1.changes}, content:${r2.changes}`);
+    }
+    db.exec('CREATE INDEX IF NOT EXISTS idx_pa_source ON problem_attempts(source_type)');
+  } catch (e) { console.error('[self-learn init] source_type migration error:', e.message); }
 
   // 추천학습 경로 시스템 (2026-05-27) — learning_paths 확장 (옵션 A)
   // 진단 세션별 독립된 경로를 보존하기 위해 session_id, source_type 추가
@@ -2378,6 +2398,15 @@ function retryWrongNote(id, userId, { answer }) {
   }
   db.prepare('UPDATE wrong_answers SET attempt_count = attempt_count + 1 WHERE id = ?').run(id);
 
+  // 성취수준 6출처 집계용: 오답노트 재풀이를 problem_attempts 에 source_type='wrong_note' 로 기록.
+  // content_id 는 NOT NULL 이므로 오답노트엔 매핑 콘텐츠가 없을 때 0(센티넬) 사용. node_id 는 NULL.
+  try {
+    db.prepare(`
+      INSERT INTO problem_attempts (user_id, content_id, node_id, is_correct, selected_answer, time_taken, source_type)
+      VALUES (?, ?, NULL, ?, ?, NULL, 'wrong_note')
+    `).run(userId, 0, isCorrect ? 1 : 0, answer != null ? String(answer) : null);
+  } catch (e) { /* 집계 기록 실패는 재풀이 흐름에 영향 주지 않음 */ }
+
   logLearningActivity({
     userId, activityType: 'wrong_note_retry', targetType: 'wrong_answer',
     targetId: id, verb: 'attempted', sourceService: 'self-learn',
@@ -2528,7 +2557,7 @@ function _upsertLastActivity(userId, { activity_type, node_id, content_id, title
   `).run(userId, activity_type, node_id || null, content_id || null, title || null);
 }
 
-function recordProblemAttempt(userId, contentId, { isCorrect, selectedAnswer, userAnswer, answer, questionId, timeTaken, nodeId }) {
+function recordProblemAttempt(userId, contentId, { isCorrect, selectedAnswer, userAnswer, answer, questionId, timeTaken, nodeId, sourceType }) {
   // 서버 측 정답 판정: questionId가 있으면 content_questions.answer와 비교 (client isCorrect 무시)
   // questionId 없으면 content 단위 제출로 간주하여 기존 client isCorrect 유지 (호환성)
   const submittedAnswer = selectedAnswer ?? userAnswer ?? answer ?? null;
@@ -2557,10 +2586,16 @@ function recordProblemAttempt(userId, contentId, { isCorrect, selectedAnswer, us
     if (inferred) nodeId = inferred;
   }
 
+  // 성취수준 6출처 집계용 source_type 판정 (스펙 §3·§7):
+  //  - 호출부가 sourceType 을 넘기면 우선 사용(향후 확장 대비)
+  //  - 미지정 시: node_id 있으면 'ai_learning'(학습맵 경로), 없으면 'content'(콘텐츠 단발문항)
+  //  - today_learning 은 daily_learning_progress 가 정본이므로 여기엔 기록하지 않음(중복 집계 방지)
+  const resolvedSource = sourceType || (nodeId ? 'ai_learning' : 'content');
+
   const info = db.prepare(`
-    INSERT INTO problem_attempts (user_id, content_id, node_id, is_correct, selected_answer, time_taken)
-    VALUES (?, ?, ?, ?, ?, ?)
-  `).run(userId, contentId, nodeId || null, finalIsCorrect, submittedAnswer, timeTaken || null);
+    INSERT INTO problem_attempts (user_id, content_id, node_id, is_correct, selected_answer, time_taken, source_type)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).run(userId, contentId, nodeId || null, finalIsCorrect, submittedAnswer, timeTaken || null, resolvedSource);
   isCorrect = !!finalIsCorrect;
 
   // 제목 fetch
