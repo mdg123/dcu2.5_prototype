@@ -1100,6 +1100,9 @@
     .diag-running-header .quit-btn{background:none;border:0;color:#6366F1;font-size:15px;font-weight:600;cursor:pointer;padding:8px 12px;border-radius:8px;flex-shrink:0;display:inline-flex;align-items:center;gap:6px}
     .diag-running-header .quit-btn:hover{background:#EEF2FF}
     .diag-running-header .crumbs{flex:1;font-size:15px;font-weight:600;color:#475569;text-align:center;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .diag-running-header .diag-progress-chip{flex-shrink:0;font-size:14px;font-weight:700;color:#4338CA;background:#EEF2FF;border:1px solid #C7D2FE;padding:6px 12px;border-radius:99px;white-space:nowrap}
+    .diag-running-header .diag-stop-btn{flex-shrink:0;background:#fff;border:1.5px solid #FCA5A5;color:#DC2626;font-size:14px;font-weight:700;cursor:pointer;padding:8px 14px;border-radius:8px;transition:all .15s}
+    .diag-running-header .diag-stop-btn:hover{background:#FEF2F2;border-color:#F87171}
     .diag-running-header .pct-wrap{display:flex;align-items:center;gap:12px;flex-shrink:0;min-width:200px;justify-content:flex-end}
     .diag-running-header .pct-bar{width:140px;height:8px;background:#E2E8F0;border-radius:99px;overflow:hidden}
     .diag-running-header .pct-fill{height:100%;background:linear-gradient(90deg,#4F46E5,#818CF8);border-radius:99px;transition:width .35s ease}
@@ -1493,6 +1496,8 @@
       .diag-kpi-grid{grid-template-columns:repeat(2,1fr)}
       .diag-running-header{height:auto;padding:12px 14px;flex-wrap:wrap;gap:8px}
       .diag-running-header .crumbs{order:3;flex:1 1 100%;text-align:left;font-size:14px}
+      .diag-running-header .diag-progress-chip{order:4;font-size:13px;padding:5px 10px}
+      .diag-running-header .diag-stop-btn{order:5;font-size:13px;padding:7px 12px}
       .diag-running-header .pct-wrap{min-width:0}
       .diag-running-header .pct-bar{width:90px}
       .diag-main{padding:20px 18px}
@@ -6713,9 +6718,9 @@ function renderDiagIntro() {
       <h1>내 실력에 딱 맞는 학습 경로 찾기</h1>
       <p class="diag-intro-subtitle">몇 문제만 풀면, 어디부터 공부할지 알려줄게요.</p>
       <div class="diag-intro-chips">
-        <div class="diag-intro-chip">📚 한 단원에 2문제</div>
-        <div class="diag-intro-chip">⏱ 3~5분 안에 완료</div>
-        <div class="diag-intro-chip">🎯 부족한 단원만 콕</div>
+        <div class="diag-intro-chip">📚 한 단원에 2~3문제</div>
+        <div class="diag-intro-chip">⏱ 보통 5~10분</div>
+        <div class="diag-intro-chip">🎯 부족한 단원만 콕콕</div>
       </div>
       <div id="diagResumeBanner"></div>
       <div class="diag-config">
@@ -6752,8 +6757,8 @@ function renderDiagIntro() {
       <div class="diag-help-body" id="diagHelpBody">
         <ol>
           <li><b>과목과 학년</b>을 골라 시작합니다.</li>
-          <li>한 단원당 <b>2문제</b>를 차례로 풀어요. 모두 맞히면 통과!</li>
-          <li>틀린 단원은 <b>더 쉬운 단원</b>으로 내려가서 다시 풀어봐요.</li>
+          <li>한 단원당 <b>2~3문제</b>(단원 크기에 따라 달라요)를 차례로 풀어요.</li>
+          <li>틀리면 <b>더 쉬운 단원</b>을 풀지 직접 고를 수 있어요.</li>
           <li>진단이 끝나면 <b>맞춤 학습 경로</b>를 알려드려요.</li>
         </ol>
       </div>
@@ -6962,6 +6967,11 @@ async function startDiagnosisBySubject() {
 // • 실패 시: 가장 깊이 통과한 노드부터 학습 + 학습목록 자동 추가
 // • 선수: prerequisites 관계, 문항: EBS 2개 중 무작위
 // =========================================================================
+// [DEPRECATED] diagSession 기반 레거시 진단 흐름 — 더 이상 호출되지 않음(dead code).
+// 진입 단일화로 startDiagnosisFromNode가 신규 diagState 파이프라인을 타므로
+// 아래 diagSession/diagEnterNode/diagOnNodeFinished/diagOnNodePassed/diagOnNodeFailed/
+// showDiagHistoryModal/showDiagIntroModal/showDiagPrereqIntroModal/diagBeginAtCurrentNode/
+// _renderQuestionDots/sheetSizeMax 는 미사용 상태로 보존(대형파일 제거 회귀위험 회피).
 let diagSession = null;
 
 // v2: 학년-학기-영역 라벨 ("초등 3학년 2학기 · 수와 연산")
@@ -6989,37 +6999,42 @@ function _renderQuestionDots(nodeId) {
 }
 
 async function startDiagnosisFromNode(nodeId) {
-  const targetNode = await loadNodeForDiag(nodeId);
-  if (!targetNode) { showToast('단원 정보를 불러올 수 없습니다.', 'fa-exclamation-circle'); return; }
-  // v2: 우선순위 큐(priorityQueue), 완료 목록(completedNodes), 진행 깊이(currentDepth는 통계용)
-  diagSession = {
-    targetNodeId: nodeId,
-    targetNode,
-    currentNodeId: nodeId,
-    currentDepth: 0,
-    history: [],
-    correctChain: 0,
-    questionsInNode: [],
-    currentQuestionIdx: 0,
-    nodeCorrectCount: 0,
-    finished: false,
-    // v2 신규
-    priorityQueue: [],     // [{nodeId, title, gradeLabel}]
-    completedNodes: [],    // [{nodeId, title, passed, correctRate, correct, total}]
-    sheetSizeMax: 5,
-    retryCount: {},        // nodeId -> 재진단 횟수
-    queueInitialized: false
-  };
-  // 이전 진단 이력 조회 → 있으면 분기 모달, 없으면 v2 사전 고지 모달
-  try {
-    const histRes = await fetchApi('/api/self-learn/diagnosis/history?nodeId=' + encodeURIComponent(nodeId));
-    if (histRes && histRes.success && histRes.hasAnyHistory) {
-      showDiagHistoryModal(histRes);
-      return;
-    }
-  } catch (_) { /* 이력 조회 실패는 무시 */ }
-  // v2: 사전 고지 모달을 먼저 — 선수 단원 큐 미리보기
-  await diagShowPrereqIntro();
+  // 진단 진입 단일화: 노드 "진단하기"도 과목·학년 진입(startDiagnosisBySubject)과
+  // 동일한 신규 diagState 파이프라인을 탄다. (레거시 diagSession/diagEnterNode 미사용)
+  // BE는 targetNodeId를 우선 사용하므로 subject/grade는 진행 헤더 표시용 힌트에 가깝다.
+  if (!nodeId) { showToast('단원 정보를 불러올 수 없습니다.', 'fa-exclamation-circle'); return; }
+  const meta = (typeof nodeById !== 'undefined' && nodeById && nodeById[nodeId])
+    || (typeof allNodesById !== 'undefined' && allNodesById && allNodesById[nodeId])
+    || null;
+  const subject = (meta && (meta.subject || meta.area)) || (currentUser && currentUser.subject) || '';
+  // grade 힌트 — diagGrade select 표기(초:숫자 / 중:m / 고:h)에 맞춰 정규화
+  let grade = '';
+  if (meta && meta.grade != null && meta.grade !== '') {
+    const gl = String(meta.grade_level || '');
+    const gn = String(meta.grade).replace(/\D/g, '');
+    if (gn) grade = (gl.includes('중') ? 'm' : gl.includes('고') ? 'h' : '') + gn;
+  }
+  const data = await fetchApi('/api/self-learn/diagnosis/start', {
+    method: 'POST',
+    body: JSON.stringify({ targetNodeId: nodeId, subject, grade, mode: 'cat' })
+  });
+  if (!data) { showToast('진단평가 시작에 실패했습니다.', 'fa-exclamation-circle'); return; }
+  initDiagState(data, nodeId);
+  if (!diagState) { showToast('진단평가 시작에 실패했습니다.', 'fa-exclamation-circle'); return; }
+  // 비정상 응답 가드 — 큐·현재노드·문항 모두 없으면 안내 후 인트로 복귀 (subject-flow와 동일)
+  const queueEmpty = !diagState.queue || diagState.queue.length === 0;
+  if (queueEmpty && !diagState.currentNode && !diagState.question) {
+    diagState = null;
+    switchToDiagnosis();
+    renderDiagIntro();
+    showToast('이 단원에는 아직 진단할 문제가 없어요. 다른 단원을 골라보세요.', 'fa-info-circle');
+    return;
+  }
+  // 진행 헤더 crumbs용 — 과목·학년 힌트 저장
+  diagState.startedSubject = subject;
+  diagState.startedGrade = grade;
+  switchToDiagnosis();
+  renderDiagRunning();
 }
 
 // v2: 사전 고지 모달 진입 (백엔드가 큐를 줄 때까지는 클라이언트가 직접 직속 선수만 사용)
@@ -7483,11 +7498,11 @@ function diagBuildQueueSidebarHtml() {
   const completedArr = s.completedNodes || [];
   const completedCards = completedArr.map(c => {
     const pct = c.total > 0 ? Math.round(c.correctRate * 100) : null;
-    const color = c.passed ? '#10B981' : '#EF4444';
-    const bg = c.passed ? '#ECFDF5' : '#FEF2F2';
-    const icon = c.passed ? 'fa-check-circle' : 'fa-times-circle';
-    const statusLabel = c.passed ? '통과' : '미통과';
-    return `<div title="${escHtml(c.title)}" style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:${bg};border-radius:8px;border:1px solid ${c.passed ? '#A7F3D0' : '#FECACA'}">
+    const color = c.passed ? '#10B981' : '#D97706';
+    const bg = c.passed ? '#ECFDF5' : '#FFFBEB';
+    const icon = c.passed ? 'fa-check-circle' : 'fa-flag';
+    const statusLabel = c.passed ? '잘 알아요' : '시작 추천';
+    return `<div title="${escHtml(c.title)}" style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:${bg};border-radius:8px;border:1px solid ${c.passed ? '#A7F3D0' : '#FDE68A'}">
       <i class="fas ${icon}" style="color:${color};font-size:14px;flex-shrink:0"></i>
       <div style="flex:1;min-width:0">
         <div style="font-size:13px;font-weight:700;color:#0F172A;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(c.title)}</div>
@@ -7658,7 +7673,7 @@ function diagOnNodePassed(nodeId, nodeData, rate) {
         </div>
         <ul style="list-style:none;padding:0;margin:0 0 14px;display:flex;flex-direction:column;gap:8px;font-size:16px;color:#0F172A;line-height:1.6">
           <li style="display:flex;align-items:center;gap:10px"><i class="fas fa-clipboard-check" style="color:#10B981;font-size:16px;width:18px;text-align:center"></i> 총 <b style="color:#0F172A">${total}문제</b>를 풀었어요</li>
-          <li style="display:flex;align-items:center;gap:10px"><i class="fas fa-times-circle" style="color:${wrong > 0 ? '#F59E0B' : '#94A3B8'};font-size:16px;width:18px;text-align:center"></i> ${wrong > 0 ? `<b style="color:#0F172A">${wrong}문제</b>를 틀렸어요` : `<span style="color:#475569">한 문제도 틀리지 않았어요</span>`}</li>
+          <li style="display:flex;align-items:center;gap:10px"><i class="fas fa-check-circle" style="color:#10B981;font-size:16px;width:18px;text-align:center"></i> <b style="color:#0F172A">${correct}문제</b>를 맞혔어요</li>
           <li style="display:flex;align-items:center;gap:10px"><i class="fas fa-percentage" style="color:#10B981;font-size:16px;width:18px;text-align:center"></i> 정답률 <b style="color:#10B981;font-size:18px">${pct}%</b></li>
         </ul>
         ${dotsHtml ? `<div style="display:flex;flex-wrap:wrap;align-items:center;gap:4px;padding-top:12px;border-top:1px dashed #BBF7D0">${dotsHtml}</div>` : ''}
@@ -7736,27 +7751,27 @@ async function diagOnNodeFailed(nodeId, nodeData, rate) {
       <div style="text-align:center;margin-bottom:22px">
         <div style="width:80px;height:80px;border-radius:50%;background:#FEF3C7;display:flex;align-items:center;justify-content:center;margin:0 auto 16px;color:#F59E0B;font-size:36px"><i class="fas fa-chart-pie"></i></div>
         ${(() => { const gl = _formatGradeSemester(nodeData); return gl ? `<div style="display:inline-block;font-size:13px;font-weight:700;color:#92400E;background:#FEF3C7;border:1px solid #FDE68A;padding:4px 12px;border-radius:99px;margin-bottom:8px">${escHtml(gl)}</div>` : ''; })()}
-        <h2 style="font-size:22px;font-weight:800;color:#0F172A;margin:0 0 8px;letter-spacing:-.01em">이 단원의 학습이 필요해요</h2>
+        <h2 style="font-size:22px;font-weight:800;color:#0F172A;margin:0 0 8px;letter-spacing:-.01em">여기부터 시작하면 좋아요</h2>
         <div style="font-size:18px;font-weight:700;color:#0F172A;margin:6px 0 0">"${escHtml(title)}"</div>
       </div>
 
       <div style="background:#FFFBEB;border:1.5px solid #FDE68A;border-radius:14px;padding:20px 24px;margin-bottom:16px">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
           <span style="font-size:14px;font-weight:800;color:#92400E;letter-spacing:0.3px;text-transform:uppercase">진단 결과</span>
-          <span style="font-size:13px;font-weight:700;color:#D97706;background:#fff;border:1px solid #FDE68A;padding:4px 12px;border-radius:99px">학습 필요</span>
+          <span style="font-size:13px;font-weight:700;color:#D97706;background:#fff;border:1px solid #FDE68A;padding:4px 12px;border-radius:99px">시작 추천</span>
         </div>
         <ul style="list-style:none;padding:0;margin:0 0 14px;display:flex;flex-direction:column;gap:8px;font-size:16px;color:#0F172A;line-height:1.6">
           <li style="display:flex;align-items:center;gap:10px"><i class="fas fa-clipboard-check" style="color:#D97706;font-size:16px;width:18px;text-align:center"></i> 총 <b style="color:#0F172A">${total}문제</b>를 풀었어요</li>
-          <li style="display:flex;align-items:center;gap:10px"><i class="fas fa-times-circle" style="color:#EF4444;font-size:16px;width:18px;text-align:center"></i> <b style="color:#0F172A">${wrong}문제</b>를 틀렸어요</li>
-          <li style="display:flex;align-items:center;gap:10px"><i class="fas fa-percentage" style="color:#D97706;font-size:16px;width:18px;text-align:center"></i> 정답률 <b style="color:#D97706;font-size:18px">${pct}%</b> <span style="font-size:13px;color:#94A3B8">(통과 기준 60% 미만)</span></li>
+          <li style="display:flex;align-items:center;gap:10px"><i class="fas fa-check-circle" style="color:#10B981;font-size:16px;width:18px;text-align:center"></i> <b style="color:#0F172A">${correct}문제</b>를 맞혔어요</li>
+          <li style="display:flex;align-items:center;gap:10px"><i class="fas fa-percentage" style="color:#D97706;font-size:16px;width:18px;text-align:center"></i> 정답률 <b style="color:#D97706;font-size:18px">${pct}%</b></li>
         </ul>
         ${dotsHtml ? `<div style="display:flex;flex-wrap:wrap;align-items:center;gap:4px;padding-top:12px;border-top:1px dashed #FDE68A">${dotsHtml}</div>` : ''}
         <div style="font-size:12px;color:#64748B;margin-top:8px;font-style:italic">✓는 맞은 문제, ✗는 틀린 문제 (정답은 비공개)</div>
       </div>
 
-      <div style="background:#FEF2F2;border:1px solid #FECACA;border-radius:10px;padding:14px 18px;font-size:15px;color:#991B1B;display:flex;align-items:flex-start;gap:10px;line-height:1.6;margin-bottom:16px">
-        <i class="fas fa-book-reader" style="color:#DC2626;margin-top:3px"></i>
-        <div><b>"${escHtml(title)}"</b> 단원은 추가 학습이 필요한 것으로 판단됩니다. 아래에서 다음 단계를 선택해 주세요.</div>
+      <div style="background:#EFF6FF;border:1px solid #BFDBFE;border-radius:10px;padding:14px 18px;font-size:15px;color:#1E40AF;display:flex;align-items:flex-start;gap:10px;line-height:1.6;margin-bottom:16px">
+        <i class="fas fa-book-reader" style="color:#3B82F6;margin-top:3px"></i>
+        <div><b>"${escHtml(title)}"</b> 단원부터 시작하면 딱 좋아요. 아래에서 다음 단계를 골라 봐요.</div>
       </div>
 
       <div style="display:flex;flex-direction:column;gap:10px">
@@ -8758,7 +8773,8 @@ function initDiagState(data, targetNodeId) {
     selected: null,
     finished: false,   // T-P0-2: 서버가 명시한 경우만 true, 시작 시 무조건 false
     results: null,
-    startedAt: Date.now()  // T-P1-5: 소요 시간 계산용 클라이언트 timestamp
+    startedAt: Date.now(),  // T-P1-5: 소요 시간 계산용 클라이언트 timestamp
+    progress: (data && data.progress) || null  // BE 계약: { diagnosedUnits, elapsedSec, unitCap, softTimeLimitSec }
   };
   // T-P0-2: 서버가 명시적으로 finished:true를 보낸 경우만 종료 상태 인정
   if (data && data.finished === true) {
@@ -8945,11 +8961,22 @@ function renderDiagRunning() {
   const opts = (q && (q.options || q.choices)) ? (q.options || q.choices) : [];
   const labels = ['①','②','③','④','⑤'];
 
+  // §5: 진단 진행 표시 — "진단한 단원 N / 약 M분" (BE progress 우선, 없으면 로컬 폴백)
+  const diagnosedUnits = (s.progress && typeof s.progress.diagnosedUnits === 'number')
+    ? s.progress.diagnosedUnits
+    : (passed + failed);
+  let elapsedSec = (s.progress && typeof s.progress.elapsedSec === 'number') ? s.progress.elapsedSec : 0;
+  if (!elapsedSec && s.startedAt) { try { elapsedSec = Math.round((Date.now() - s.startedAt) / 1000); } catch(_){} }
+  const elapsedMin = Math.max(0, Math.round(elapsedSec / 60));
+  const progressText = `진단한 단원 ${diagnosedUnits} · 약 ${elapsedMin}분`;
+
   $('diagnosisContent').innerHTML = `
     <div class="diag-running">
       <div class="diag-running-header">
         <button class="quit-btn" onclick="confirmQuitDiagnosis()">◀ 진단평가 종료</button>
         <div class="crumbs">${escHtml(crumbText)}</div>
+        <div class="diag-progress-chip" title="지금까지 진단한 단원 수와 걸린 시간이에요">⏱ ${escHtml(progressText)}</div>
+        <button class="diag-stop-btn" onclick="confirmStopDiagnosis()">그만하기</button>
         <div class="pct-wrap">
           <div class="pct-bar"><div class="pct-fill" style="width:${pct}%"></div></div>
           <div class="pct-text">${pct}%</div>
@@ -9060,6 +9087,78 @@ function confirmQuitDiagnosis() {
   });
 }
 
+// §5: "그만하기" 보조 버튼 — 언제든 자발적 종료 (종료/바로학습 흐름 재사용)
+function confirmStopDiagnosis() {
+  const s = diagState;
+  const du = (s && s.progress && typeof s.progress.diagnosedUnits === 'number') ? s.progress.diagnosedUnits : null;
+  const bodyMsg = du != null
+    ? `지금까지 진단한 ${du}개 단원 결과는 그대로 저장돼요.<br>여기서 마치고 결과를 볼까요?`
+    : '지금까지 푼 결과는 그대로 저장돼요.<br>여기서 마치고 결과를 볼까요?';
+  _diagShowConfirmModal({
+    icon: '🏁',
+    iconBg: '#EEF2FF',
+    iconColor: '#4338CA',
+    title: '진단 그만하기',
+    body: bodyMsg,
+    confirmText: '결과 보기',
+    confirmClass: 'btn-primary',
+    onConfirm: () => { finishDiagnosisEarly(); }
+  });
+}
+
+// §5: soft_stop — "지금까지로 충분해요. 마칠까요?" (강제 종료 아님)
+// [마치기] → 결과 보기 / [더 풀기] → 원래 액션(continueAction) 계속
+function showSoftStopModal(nextAction) {
+  const na = nextAction || {};
+  const du = (typeof na.diagnosedUnits === 'number') ? na.diagnosedUnits : null;
+  const sec = (typeof na.elapsedSec === 'number') ? na.elapsedSec : 0;
+  const min = Math.max(0, Math.round(sec / 60));
+  const info = (du != null)
+    ? `지금까지 <b>${du}개 단원</b>을 약 <b>${min}분</b> 동안 진단했어요.`
+    : `지금까지 약 <b>${min}분</b> 동안 진단했어요.`;
+  const ov = document.createElement('div');
+  ov.className = 'diag-confirm-overlay';
+  ov.setAttribute('role', 'dialog');
+  ov.setAttribute('aria-modal', 'true');
+  ov.innerHTML = `
+    <div class="diag-confirm-modal">
+      <div class="diag-confirm-header">
+        <div class="icon" style="background:#EEF2FF;color:#4338CA">🌟</div>
+        <h3>지금까지로 충분해요. 마칠까요?</h3>
+      </div>
+      <div class="diag-confirm-body">${info}<br>여기서 마쳐도 좋고, 더 풀어봐도 좋아요.</div>
+      <div class="diag-confirm-actions">
+        <button type="button" class="btn btn-ghost" data-act="more">더 풀기</button>
+        <button type="button" class="btn btn-primary" data-act="finish">마치기</button>
+      </div>
+    </div>`;
+  document.body.appendChild(ov);
+  requestAnimationFrame(() => requestAnimationFrame(() => ov.classList.add('show')));
+  setTimeout(() => ov.classList.add('show'), 20);
+  const close = () => { ov.classList.remove('show'); setTimeout(() => ov.remove(), 220); };
+  const onEsc = (e) => { if (e.key === 'Escape') { document.removeEventListener('keydown', onEsc); close(); } };
+  document.addEventListener('keydown', onEsc);
+  ov.addEventListener('click', (e) => {
+    const t = e.target;
+    if (t === ov) { close(); return; }
+    const act = t.closest('[data-act]')?.dataset.act;
+    if (act === 'finish') { document.removeEventListener('keydown', onEsc); close(); finishDiagnosisEarly(); }
+    else if (act === 'more') { document.removeEventListener('keydown', onEsc); close(); diagContinueAfterSoftStop(na.continueAction); }
+  });
+}
+
+// soft_stop "더 풀기" — continueAction 종류에 따라 원래 흐름 이어가기
+function diagContinueAfterSoftStop(continueAction) {
+  const s = diagState;
+  if (!s) { renderDiagIntro(); return; }
+  if (continueAction === 'next' || continueAction === 'fetch_next') {
+    fetchNextDiagQuestion();
+  } else {
+    // 기본: 현재 진행 화면을 다시 그려 계속 풀이
+    renderDiagRunning();
+  }
+}
+
 // "⏸ 잠시 멈춤" — 진행 상태 유지, 인트로 진입 시 "이어서 풀기" 배너 복귀
 function pauseDiagnosis() {
   _diagShowConfirmModal({
@@ -9134,6 +9233,13 @@ async function submitDiagAnswer() {
   const serverCorrect = (typeof data?.isCorrect === 'boolean') ? data.isCorrect : isCorrect;
 
   setTimeout(() => {
+    // BE 계약: progress 갱신 (진단한 단원 N / 약 M분 헤더용)
+    if (data && data.progress) s.progress = data.progress;
+    // BE 계약: soft_stop — 강제 종료 아닌 권유 ("지금까지로 충분해요. 마칠까요?")
+    if (data && (data.softStop === true || (data.nextAction && data.nextAction.type === 'soft_stop'))) {
+      showSoftStopModal(data.nextAction || {});
+      return;
+    }
     // F4: 단원 통과/보완 토스트 (응답에 nodeFinished 정보 있을 때)
     const prevNodeTitle = diagSafeTitle(s.currentNode);
     if (data?.nodeFinished) {
@@ -9233,6 +9339,7 @@ async function fetchNextDiagQuestion() {
   const s = diagState;
   // 서버에서 다음 문항을 가져온다. 플레이스홀더 문항 금지.
   const data = await fetchApi(`/api/self-learn/diagnosis/${encodeURIComponent(s.sessionId)}/next`);
+  if (data && data.progress) s.progress = data.progress;
   const nextQ = data?.question || data?.next_question || null;
   if (nextQ) {
     s.question = nextQ;
@@ -9379,11 +9486,12 @@ function renderDiagResult() {
     return;
   }
 
-  // ─── 헤로 아이콘 + 카피 (정답률 단계별 동적)
+  // ─── 헤로 아이콘 + 카피 (§6-2: 4단계 추천 톤 — 단정 단어 없이 다음 행동 추천)
   const rate = summary.correctRate;
-  const hero = rate >= 80 ? { icon: '🏆', sub: '아주 잘했어요! 핵심 단원을 거의 다 이해하고 있어요.' }
-              : rate >= 50 ? { icon: '🎯', sub: '잘 풀고 있어요. 몇 단원만 더 봐주면 완벽해질 거예요!' }
-              : { icon: '🧭', sub: '괜찮아요. 천천히 한 단원씩 같이 가봐요. 학습 경로를 만들어 둘게요.' };
+  const hero = rate >= 80 ? { icon: '🏆', sub: '잘 알고 있어요 ✓ 다음 단원으로 가볼까요!' }
+              : rate >= 60 ? { icon: '🎯', sub: '거의 다 됐어요. 다음으로 가볼까요?' }
+              : rate >= 40 ? { icon: '🧭', sub: '조금 더 보면 좋아요. 추천 단원부터 시작해 봐요.' }
+              : { icon: '🌱', sub: '여기부터 차근차근 시작해요. 학습 경로를 만들어 둘게요.' };
 
   // ─── KPI 색상 결정
   const rateColorCls = rate >= 80 ? 'success' : (rate >= 50 ? '' : 'warning');
@@ -9407,10 +9515,10 @@ function renderDiagResult() {
       ${areaStats.map(a => {
         const r = a.rate ?? 0;
         const lvl = r >= 80 ? 'lvl-a' : r >= 60 ? 'lvl-b' : r >= 40 ? 'lvl-c' : 'lvl-d';
-        const comment = r >= 80 ? '아주 잘 이해하고 있어요!'
-                       : r >= 60 ? '대부분 잘 풀어요.'
-                       : r >= 40 ? '몇 단원만 더 봐주면 좋아요.'
-                       : '천천히 다시 보면서 익혀봐요.';
+        const comment = r >= 80 ? '잘 알고 있어요 ✓ 다음 단원으로!'
+                       : r >= 60 ? '거의 다 됐어요. 다음으로 가볼까요?'
+                       : r >= 40 ? '조금 더 보면 좋아요. 여기부터 시작 추천'
+                       : '여기부터 차근차근 시작해요';
         return `
           <div class="diag-area-row">
             <div class="diag-area-head">

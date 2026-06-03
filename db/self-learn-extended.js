@@ -2927,12 +2927,15 @@ function _sortQueueByPriority(nodeIds, targetMeta) {
     .map(m => m.node_id);
 }
 
-// 진단지 조립 (설계서 §3.3)
+// 단원당 진단 문항 상한 — 권고서 §6-1 (5→3 축소). 2~3문항으로 수렴해 진단 시간 단축.
+const DIAG_SHEET_MAX = 3;
+
+// 진단지 조립 (설계서 §3.3 + 권고서 §6-1 상한 5→3)
 //   - node_level=2(단원)의 자식 차시(node_level=3) 조회
 //   - 0개: 단원 자체에서 1문항
-//   - 1~5개: 모두
-//   - 6개 이상: sort_order 역순 5개
-// 반환: [{ lessonId, lessonName, question(_pickQuestionForNode 결과) }, ...]  (길이 0~5)
+//   - 1~3개: 모두
+//   - 4개 이상: sort_order 역순 3개 (단원 후반부 우선 샘플링)
+// 반환: [{ lessonId, lessonName, question(_pickQuestionForNode 결과) }, ...]  (길이 0~3)
 function _buildDiagnosticSheet(unitNodeId) {
   const lessons = db.prepare(`
     SELECT node_id, lesson_name, sort_order
@@ -2947,11 +2950,11 @@ function _buildDiagnosticSheet(unitNodeId) {
     if (!q) return [];
     return [{ lessonId: unitNodeId, lessonName: null, question: q, ...q }];
   }
-  if (lessons.length <= 5) {
+  if (lessons.length <= DIAG_SHEET_MAX) {
     picked = lessons;
   } else {
-    // sort_order 역순 5개 (단원 후반부일수록 핵심 도달 목표에 가깝다 — §3.2)
-    picked = [...lessons].reverse().slice(0, 5);
+    // sort_order 역순 상한 개수만 샘플링 (단원 후반부일수록 핵심 도달 목표에 가깝다 — §3.2·§6-1)
+    picked = [...lessons].reverse().slice(0, DIAG_SHEET_MAX);
   }
   const sheet = [];
   for (const l of picked) {
@@ -2962,6 +2965,59 @@ function _buildDiagnosticSheet(unitNodeId) {
 }
 
 // ============================================================
+// 진단 종료 조건 상수 — 권고서 §5 (1차: B/C/D/E)
+//   B. 단원 수 상한: 진단한 단원 수 ≥ DIAG_UNIT_CAP → endReason='unit_cap'
+//   C. 누적 시간 소프트: 경과 ≥ DIAG_SOFT_TIME_SEC → nextAction.type='soft_stop' (강제 아님)
+//   D. 큐 소진 / E. 사용자 종료: 현행 유지
+// ============================================================
+const DIAG_UNIT_CAP = 6;            // 진단 단원 수 상한
+const DIAG_SOFT_TIME_SEC = 720;     // 누적 시간 소프트 한계(초) = 12분
+
+// 세션 started_at 기준 경과 초 산출 (없거나 파싱 실패 시 0)
+//   SQLite CURRENT_TIMESTAMP 은 'YYYY-MM-DD HH:MM:SS' 형태의 UTC naive 문자열이다.
+//   이를 그대로 new Date() 에 넣으면 로컬 타임존으로 해석되어 타임존 오프셋(KST=9h)만큼
+//   가짜 경과시간이 생긴다. ISO 형태로 정규화하고 Z(UTC)를 명시해 정확히 파싱한다.
+function _parseSqliteUtc(ts) {
+  if (!ts) return NaN;
+  let s = String(ts).trim();
+  // 이미 타임존 정보(Z/+/-)가 있으면 그대로 사용
+  if (/[zZ]$|[+\-]\d{2}:?\d{2}$/.test(s)) return new Date(s).getTime();
+  // 'YYYY-MM-DD HH:MM:SS[.fff]' → 'YYYY-MM-DDTHH:MM:SS[.fff]Z'
+  s = s.replace(' ', 'T');
+  if (!/[zZ]$/.test(s)) s += 'Z';
+  return new Date(s).getTime();
+}
+
+function _diagElapsedSec(session) {
+  try {
+    if (session && session.started_at) {
+      const start = _parseSqliteUtc(session.started_at);
+      if (Number.isFinite(start)) return Math.max(0, Math.round((Date.now() - start) / 1000));
+    }
+  } catch (_) {}
+  return 0;
+}
+
+// 진단 진행 메타 — FE 헤더 표시용 계약 (권고서 §5·§C)
+//   diagnosedUnits: 지금까지 진단(시트 제출 완료)한 단원 수
+//   elapsedSec    : 세션 경과 초 (started_at 기준)
+//   unitCap       : 단원 수 상한(상수)
+//   softTimeLimitSec: 누적 시간 소프트 한계(상수)
+function _buildDiagProgress(session, diagnosedUnitsOverride) {
+  let diagnosedUnits = diagnosedUnitsOverride;
+  if (diagnosedUnits == null) {
+    // difficulty_path 길이 = 시트 제출 완료한 단원 수 (종료 메타 항목 _endReason 등은 제외)
+    let path = [];
+    try { path = JSON.parse((session && session.difficulty_path) || '[]'); } catch {}
+    diagnosedUnits = path.filter(p => p && p.node).length;
+  }
+  return {
+    diagnosedUnits,
+    elapsedSec: _diagElapsedSec(session),
+    unitCap: DIAG_UNIT_CAP,
+    softTimeLimitSec: DIAG_SOFT_TIME_SEC
+  };
+}
 
 function startDiagnosisCAT(userId, { targetNodeId, subject, grade, type }) {
   // targetNodeId 지정 시 직속 선수노드만 큐 구성 (v2 — BFS 전체 펼침 폐기)
@@ -3057,6 +3113,10 @@ function startDiagnosisCAT(userId, { targetNodeId, subject, grade, type }) {
   // 첫 문항(하위호환 — v1 응답 형태) 보존
   const firstQuestion = sheet.length > 0 ? sheet[0].question : null;
 
+  // 진단 진행 메타 (FE 헤더 표시용) — 시작 시점: 진단 완료 단원 0개, 경과 ≈0초
+  const startedSession = db.prepare('SELECT started_at, difficulty_path FROM diagnosis_sessions WHERE id = ?').get(info.lastInsertRowid);
+  const progress = _buildDiagProgress(startedSession, 0);
+
   return {
     sessionId: info.lastInsertRowid,
     currentNodeId: startNodeId,
@@ -3068,8 +3128,10 @@ function startDiagnosisCAT(userId, { targetNodeId, subject, grade, type }) {
     prereqCount: directPrereqs.length,
     queueOrder,              // 사전 고지 모달용
     queueOrderHydrated: queueOrder,  // alias
-    sheet,                   // 첫 단원의 진단지 (0~5문항)
+    sheet,                   // 첫 단원의 진단지 (0~3문항)
     sheetSize: sheet.length,
+    // 진단 1차 — 진행 메타 (권고서 §5·§C)
+    progress,
     // 하위호환
     question: firstQuestion
   };
@@ -3687,6 +3749,46 @@ function submitDiagnosisSheet(sessionId, payload = {}) {
     nextAction = { type: 'choose', options: recommendActions };
   }
 
+  // ── 진단 종료 조건 — 권고서 §5 (1차: B/C/D/E) ──
+  // nodePath.length = 시트 제출 완료한 단원 수(이번 단원 push 포함)
+  const diagnosedUnits = nodePath.filter(p => p && p.node).length;
+  const elapsedSec = _diagElapsedSec(session);
+
+  // B. 단원 수 상한 — 통과/실패 무관, 진단 단원 수가 상한에 도달하면 세션 종료(unit_cap)
+  //    (실패로 인한 3옵션 모달보다 상한 종료가 우선 — 더 이상 진단하지 않도록 끝낸다)
+  if (!sessionComplete && diagnosedUnits >= DIAG_UNIT_CAP) {
+    sessionComplete = true;
+    endReason = 'unit_cap';
+    nextAction = { type: 'complete' };
+    nextNodeId = null;
+    nextSheet = [];
+    recommendActions = null;
+  }
+
+  // C. 누적 시간 소프트 — 강제종료 아님. 계속 진행 가능한 상태(통과 auto_next 또는 실패 choose)일 때만
+  //    soft_stop 신호를 덧붙여 FE가 "지금까지로 충분해요, 마칠까요?" 모달을 띄우게 한다.
+  let softStop = false;
+  if (!sessionComplete && elapsedSec >= DIAG_SOFT_TIME_SEC) {
+    softStop = true;
+    const prevAction = nextAction;  // 사용자가 계속하면 따라야 할 원래 다음 액션 보존
+    nextAction = {
+      type: 'soft_stop',
+      elapsedSec,
+      softTimeLimitSec: DIAG_SOFT_TIME_SEC,
+      diagnosedUnits,
+      // 계속 진행 선택 시 클라가 이어갈 원래 액션
+      continueAction: prevAction
+    };
+  }
+
+  // 진단 진행 메타 (FE 헤더 표시용) — 권고서 §5·§C
+  const progress = {
+    diagnosedUnits,
+    elapsedSec,
+    unitCap: DIAG_UNIT_CAP,
+    softTimeLimitSec: DIAG_SOFT_TIME_SEC
+  };
+
   // 세션 갱신
   db.prepare(`
     UPDATE diagnosis_sessions SET
@@ -3765,6 +3867,9 @@ function submitDiagnosisSheet(sessionId, payload = {}) {
     sessionComplete,
     finished: sessionComplete,
     endReason,
+    // 진단 1차 — 진행 메타 + 소프트 종료 신호 (권고서 §5·§C)
+    progress,
+    softStop,
     nodeResults,
     summary,
     areaStats,
@@ -3975,7 +4080,9 @@ function getDiagnosisState(sessionId) {
     difficultyPath: path,
     totalQuestions: s.total_questions,
     correctCount: s.correct_count,
-    targetNodeId: s.target_node_id
+    targetNodeId: s.target_node_id,
+    // 진단 1차 — 진행 메타 (권고서 §5·§C). diagnosedUnits = 시트 제출 완료 단원 수
+    progress: _buildDiagProgress(s)
   };
 }
 
