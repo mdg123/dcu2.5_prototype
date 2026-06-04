@@ -87,6 +87,9 @@
     .wn-status-badge.unresolved { background: var(--accent-light); color: var(--accent); }
     .wn-status-badge.resolved { background: var(--success-light); color: var(--success); }
     .wn-subject-tag { padding: 4px 10px; border-radius: 12px; font-size: 11px; font-weight: 500; background: var(--primary-light); color: var(--primary); white-space: nowrap; }
+    .wn-source-badge { display: inline-flex; align-items: center; gap: 4px; padding: 3px 10px; border-radius: 99px; font-size: 12px; font-weight: 700; background: #CCFBF1; color: #0F766E; white-space: nowrap; }
+    .wn-diag-banner { display: flex; align-items: center; gap: 10px; padding: 14px 18px; margin-bottom: 20px; border-radius: 12px; background: #CCFBF1; color: #0F766E; font-size: 15px; font-weight: 600; border: 1px solid #99F6E4; }
+    .wn-diag-banner i { font-size: 18px; }
     .wn-question-preview { font-size: 14px; font-weight: 500; color: var(--gray-700); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; }
     .wn-card-header-right { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
     .wn-attempt-count { font-size: 12px; color: var(--gray-500); display: flex; align-items: center; gap: 4px; }
@@ -222,6 +225,12 @@
 
       <!-- ========== TAB 1: 오답 목록 ========== -->
       <div id="tab-wrong-notes" class="tab-panel active">
+
+        <!-- 진단 진입 안내 배너 (?from=diagnosis 시 노출) -->
+        <div class="wn-diag-banner" id="diagEntryBanner" style="display:none;">
+          <i class="fas fa-compass"></i>
+          <span>진단평가에서 담은 오답을 모았어요. 🧭 진단 배지가 붙은 문제부터 복습해 보세요.</span>
+        </div>
 
         <!-- Dashboard Summary -->
         <div class="dash-grid" id="dashGrid">
@@ -438,9 +447,19 @@
     window.addEventListener('dacheim:user-loaded', (e) => {
       currentUser = e.detail;
       initTabsByRole();
+      maybeShowDiagBanner();
       loadDashboard();
       loadWrongNotes();
     });
+
+    // ?from=diagnosis 진입 시 안내 배너 노출 (학생 뷰 전용)
+    function maybeShowDiagBanner() {
+      const banner = document.getElementById('diagEntryBanner');
+      if (!banner) return;
+      const isTeacher = currentUser && (currentUser.role === 'teacher' || currentUser.role === 'admin');
+      const from = new URLSearchParams(window.location.search).get('from');
+      banner.style.display = (!isTeacher && from === 'diagnosis') ? 'flex' : 'none';
+    }
 
     function initTabsByRole() {
       const tabBar = document.getElementById('mainTabBar');
@@ -675,12 +694,14 @@
       }
       container.innerHTML = wrongNotes.map(note => {
         const isResolved = note.status === 'resolved' || note.is_resolved;
+        const isDiag = note.source === 'diagnosis';
         const tags = (note.tags || '').split(',').filter(t => t.trim());
         return `
           <div class="wn-card ${isResolved ? 'resolved' : ''}" id="wn-${note.id}">
             <div class="wn-card-header" onclick="toggleWNCard(${note.id})">
               <div class="wn-card-header-left">
                 <span class="wn-status-badge ${isResolved ? 'resolved' : 'unresolved'}">${isResolved ? '해결' : '미해결'}</span>
+                ${isDiag ? '<span class="wn-source-badge" title="진단평가에서 담긴 오답입니다">🧭 진단</span>' : ''}
                 <span class="wn-subject-tag">${note.subject || '기타'}</span>
                 <span class="wn-question-preview">${escapeHtml(note.question_text || note.question || '')}</span>
               </div>
