@@ -552,33 +552,29 @@ router.post('/map/nodes/:nodeId/diagnose-complete', requireAuth, (req, res) => {
       return res.status(404).json({ success: false, message: '노드를 찾을 수 없습니다.' });
     }
 
+    // [2026-06-05 진단↔학습 분리] 노드 클릭(간이 진단)은 user_node_status.status 를 절대 바꾸지 않는다.
+    //   노드 학습 status는 오직 실제 학습(영상 시청·문제 풀이·차시 시작/완료)으로만 산출된다.
+    //   여기서는 진단 기록(quick 세션)만 남기고, 마지막 접근 시각만 갱신(없으면 not_started로 생성).
     const existing = db.prepare('SELECT status FROM user_node_status WHERE user_id = ? AND node_id = ?').get(req.user.id, nodeId);
-    const terminalStates = new Set(['completed', 'diagnosed', 'mastered']);
+    const finalStatus = existing ? existing.status : 'not_started';
 
-    let finalStatus;
-    if (existing && terminalStates.has(existing.status)) {
-      // 이미 완료된 노드면 덮어쓰지 않음
-      finalStatus = existing.status;
-    } else {
-      finalStatus = 'diagnosed';
+    // last_accessed_at만 갱신 — status 컬럼은 건드리지 않음 (신규 행은 not_started로 생성)
+    db.prepare(`
+      INSERT INTO user_node_status (user_id, node_id, status, last_accessed_at)
+      VALUES (?, ?, 'not_started', CURRENT_TIMESTAMP)
+      ON CONFLICT(user_id, node_id) DO UPDATE SET
+        last_accessed_at = CURRENT_TIMESTAMP
+    `).run(req.user.id, nodeId);
+
+    // 간단한 진단 세션 기록 (mode='quick') — 진단 이력 보존
+    try {
       db.prepare(`
-        INSERT INTO user_node_status (user_id, node_id, status, last_accessed_at)
-        VALUES (?, ?, ?, CURRENT_TIMESTAMP)
-        ON CONFLICT(user_id, node_id) DO UPDATE SET
-          status = excluded.status,
-          last_accessed_at = CURRENT_TIMESTAMP
-      `).run(req.user.id, nodeId, finalStatus);
-
-      // 간단한 진단 세션 기록 (mode='quick')
-      try {
-        db.prepare(`
-          INSERT INTO diagnosis_sessions
-            (user_id, target_node_id, diagnosis_type, status, total_questions, correct_count, completed_at)
-          VALUES (?, ?, 'quick', 'completed', 0, 0, CURRENT_TIMESTAMP)
-        `).run(req.user.id, nodeId);
-      } catch (e) {
-        // 세션 기록 실패는 무시 (상태 갱신이 주 목적)
-      }
+        INSERT INTO diagnosis_sessions
+          (user_id, target_node_id, diagnosis_type, status, total_questions, correct_count, completed_at)
+        VALUES (?, ?, 'quick', 'completed', 0, 0, CURRENT_TIMESTAMP)
+      `).run(req.user.id, nodeId);
+    } catch (e) {
+      // 세션 기록 실패는 무시
     }
 
     const videosCount = db.prepare(`

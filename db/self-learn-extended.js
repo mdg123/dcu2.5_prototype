@@ -702,11 +702,57 @@ function getMapEdges({ subject, gradeLevel } = {}) {
 
 function getUserNodeStatuses(userId) {
   // learning_map_nodes에 존재하지 않는 node_id 참조는 자동 무시 (에러 방지)
-  return db.prepare(`
+  // [2026-06-05 진단↔학습 분리] 저장된 status는 실제 학습으로만 산출된 값이다.
+  //   진단은 status를 기록하지 않으므로 여기서 그대로 노출하면 학습맵이 실제 학습만 반영한다.
+  const rows = db.prepare(`
     SELECT uns.* FROM user_node_status uns
     WHERE uns.user_id = ?
       AND EXISTS (SELECT 1 FROM learning_map_nodes lmn WHERE lmn.node_id = uns.node_id)
   `).all(userId);
+
+  // 단원(level=2) 합성 상태 — getLearningDashboard와 동일 규칙.
+  //   자식 차시(level=3)가 전부 completed면 단원 completed,
+  //   1개라도 completed/in_progress면 단원 in_progress, 그 외 미노출(available).
+  //   단원 노드에는 실제 학습이 직접 기록되지 않으므로(콘텐츠/문제는 차시에 매핑),
+  //   자식 차시의 실제 학습 status로부터 단원 status를 산출한다.
+  try {
+    const childStatus = new Map(rows.map(r => [r.node_id, r.status]));
+    const unitRows = db.prepare(`
+      SELECT
+        parent.node_id AS unit_id,
+        COUNT(child.node_id) AS total_children,
+        SUM(CASE WHEN uns.status = 'completed' THEN 1 ELSE 0 END) AS completed_children,
+        SUM(CASE WHEN uns.status IN ('completed','in_progress','video_watched','mastered') THEN 1 ELSE 0 END) AS engaged_children
+      FROM learning_map_nodes parent
+      LEFT JOIN learning_map_nodes child
+        ON child.parent_node_id = parent.node_id AND child.node_level = 3
+      LEFT JOIN user_node_status uns
+        ON uns.node_id = child.node_id AND uns.user_id = ?
+      WHERE parent.node_level = 2
+      GROUP BY parent.node_id
+    `).all(userId);
+
+    const rowByNode = new Map(rows.map(r => [r.node_id, r]));
+    for (const u of unitRows) {
+      const total = u.total_children || 0;
+      const done = u.completed_children || 0;
+      const engaged = u.engaged_children || 0;
+      let synth = null;
+      if (total > 0 && done === total) synth = 'completed';
+      else if (engaged > 0) synth = 'in_progress';
+      if (!synth) continue; // 학습 흔적 없는 단원은 미노출(available로 처리됨)
+      const existing = rowByNode.get(u.unit_id);
+      if (existing) {
+        // 실제 학습 합성값으로 단원 status 보정 (강등 금지: completed는 유지)
+        if (existing.status !== 'completed') existing.status = synth;
+      } else {
+        rows.push({ user_id: userId, node_id: u.unit_id, status: synth, diagnosis_result: null, correct_rate: null });
+      }
+    }
+    void childStatus;
+  } catch (_) { /* 단원 합성 실패는 차시 status만으로 반환 */ }
+
+  return rows;
 }
 
 function startDiagnosis(userId, { nodeId, subject, type } = {}) {
@@ -956,23 +1002,19 @@ function finishDiagnosis(sessionId) {
     UPDATE diagnosis_sessions SET status = 'completed', result = ?, completed_at = CURRENT_TIMESTAMP WHERE id = ?
   `).run(result, sessionId);
 
-  // 사용자 노드 상태 업데이트
-  // [2026-05-27 fix] 단원(level=2) 노드에 대한 진단은 자동으로 'completed' 라벨을 박지 않는다.
-  //   진단 통과는 mastered/proficient/developing/needs_review로 diagnosis_result 컬럼에 보존하고,
-  //   user_node_status.status 는 'in_progress'로만 마킹.
-  //   단원이 "완료" 라벨을 얻으려면 자식 차시들이 실제 학습 완료되어야 함 (UI에서 합성 산출).
-  //   차시(level=3) 노드 진단은 기존 동작 유지 (mastered → completed).
-  let nodeLevel = null;
-  try {
-    const lmn = db.prepare('SELECT node_level FROM learning_map_nodes WHERE node_id = ?').get(session.target_node_id);
-    nodeLevel = lmn ? lmn.node_level : null;
-  } catch (_) {}
-  const isUnitNode = nodeLevel === 2;
-  const nextStatus = (result === 'mastered' && !isUnitNode) ? 'completed' : 'in_progress';
+  // 사용자 노드 진단 결과 기록 (status는 절대 갱신하지 않음)
+  // [2026-06-05 진단↔학습 분리] 진단은 노드의 학습 status(완료/진행중)를 바꾸지 않는다.
+  //   진단 결과(mastered/proficient/developing/needs_review)는 diagnosis_result·correct_rate 컬럼에만 보존.
+  //   노드 status는 오직 실제 학습(영상 시청·문제풀이·차시 완료)으로만 산출된다(evaluateNodeCompletion 등).
+  //   → ON CONFLICT DO UPDATE 로 기존 status를 그대로 보존하고 진단 결과 컬럼만 갱신.
   db.prepare(`
-    INSERT OR REPLACE INTO user_node_status (user_id, node_id, status, diagnosis_result, correct_rate, last_accessed_at)
-    VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-  `).run(session.user_id, session.target_node_id, nextStatus, result, correctRate);
+    INSERT INTO user_node_status (user_id, node_id, status, diagnosis_result, correct_rate, last_accessed_at)
+    VALUES (?, ?, 'not_started', ?, ?, CURRENT_TIMESTAMP)
+    ON CONFLICT(user_id, node_id) DO UPDATE SET
+      diagnosis_result = excluded.diagnosis_result,
+      correct_rate = excluded.correct_rate,
+      last_accessed_at = CURRENT_TIMESTAMP
+  `).run(session.user_id, session.target_node_id, result, correctRate);
 
   logLearningActivity({
     userId: session.user_id, activityType: 'diagnosis_complete', targetType: 'diagnosis',
@@ -3488,15 +3530,20 @@ function submitDiagnosisAnswerCAT(sessionId, payload = {}) {
   if (nodeFinished) {
     const correct = nodeHist.filter(a => a.correct === 1).length;
     const correctRate = correct / nodeHist.length; // 0~1
+    // [2026-06-05 진단↔학습 분리] 진단은 노드 학습 status(완료/진행중)를 바꾸지 않는다.
+    //   진단 결과(diagnosis_result·correct_rate)만 컬럼에 보존하고 status는 기존값 그대로 유지.
+    //   노드 status는 실제 학습(영상·문제·차시 완료)으로만 산출(evaluateNodeCompletion 등).
+    const diagResult = nodePassed
+      ? (correctRate >= 0.80 ? 'mastered' : 'proficient')
+      : (correctRate >= 0.40 ? 'developing' : 'needs_review');
     db.prepare(`
-      INSERT OR REPLACE INTO user_node_status (user_id, node_id, status, diagnosis_result, correct_rate, last_accessed_at)
-      VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-    `).run(session.user_id, curNode,
-      nodePassed ? 'completed' : 'in_progress',
-      nodePassed
-        ? (correctRate >= 0.80 ? 'mastered' : 'proficient')
-        : (correctRate >= 0.40 ? 'developing' : 'needs_review'),
-      correctRate);
+      INSERT INTO user_node_status (user_id, node_id, status, diagnosis_result, correct_rate, last_accessed_at)
+      VALUES (?, ?, 'not_started', ?, ?, CURRENT_TIMESTAMP)
+      ON CONFLICT(user_id, node_id) DO UPDATE SET
+        diagnosis_result = excluded.diagnosis_result,
+        correct_rate = excluded.correct_rate,
+        last_accessed_at = CURRENT_TIMESTAMP
+    `).run(session.user_id, curNode, diagResult, correctRate);
 
     nodePath.push({
       node: curNode,
@@ -4058,14 +4105,21 @@ function submitDiagnosisSheet(sessionId, payload = {}) {
   const correctRate = total > 0 ? correct / total : 0;
   const nodePassed = correctRate >= PASS_THRESHOLD;
 
-  // user_node_status 갱신
+  // user_node_status — 진단 결과만 기록 (status는 절대 갱신하지 않음)
+  // [2026-06-05 진단↔학습 분리] 진단은 노드 학습 status(완료/진행중)를 바꾸지 않는다.
+  //   diagnosis_result·correct_rate만 보존하고 status는 기존값 유지(없으면 not_started).
+  //   노드 status는 실제 학습(영상·문제·차시 완료)으로만 산출(evaluateNodeCompletion 등).
+  const diagResult = nodePassed
+    ? (correctRate >= 0.80 ? 'mastered' : 'proficient')
+    : (correctRate >= 0.40 ? 'developing' : 'needs_review');
   db.prepare(`
-    INSERT OR REPLACE INTO user_node_status (user_id, node_id, status, diagnosis_result, correct_rate, last_accessed_at)
-    VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-  `).run(session.user_id, curNode,
-    nodePassed ? 'completed' : 'in_progress',
-    nodePassed ? (correctRate >= 0.80 ? 'mastered' : 'proficient') : (correctRate >= 0.40 ? 'developing' : 'needs_review'),
-    correctRate);
+    INSERT INTO user_node_status (user_id, node_id, status, diagnosis_result, correct_rate, last_accessed_at)
+    VALUES (?, ?, 'not_started', ?, ?, CURRENT_TIMESTAMP)
+    ON CONFLICT(user_id, node_id) DO UPDATE SET
+      diagnosis_result = excluded.diagnosis_result,
+      correct_rate = excluded.correct_rate,
+      last_accessed_at = CURRENT_TIMESTAMP
+  `).run(session.user_id, curNode, diagResult, correctRate);
 
   // nodePath 누적 + sheetMeta 보존
   nodePath.push({
