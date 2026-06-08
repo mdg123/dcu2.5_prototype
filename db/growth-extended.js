@@ -1064,6 +1064,79 @@ function computeAreas6(studentId, { classId, startDate, endDate } = {}) {
   };
 }
 
+// ========== 참여도 활동유형 실제 원천 카운트 (스펙: learning_logs 신뢰불가 → 실제 원천 통일) ==========
+// 카드 "활동 유형 Top" 막대 카운트(N회) 와 내역 API(/detail?type=X) count·items.length 를 완전 일치시키기 위해
+// learning_logs(누락·중복) 대신 각 실제 원천 테이블에서 산출한다.
+// 각 쿼리는 getReportDetail 의 동일 type case WHERE 절과 1:1 동일(클래스·기간 필터 포함) → count == items.length 보장.
+//   post        → posts(author_id)               · 클래스필터 없음(detail 'post' 와 동일)
+//   attendance  → attendance(user_id, status NN) · classId 있을 때만 class_id
+//   survey      → survey_responses(+surveys)      · classId 있을 때만 s.class_id
+//   homework    → homework_submissions(+homework) · classFilter(h.class_id) (미지정 시 member 클래스 합산·owner 제외)
+//   exam        → exam_students(+exams)           · classFilter(e.class_id)
+//   lesson      → lesson_self_check               · classFilter(lc.class_id)
+// 반환: { post, attendance, survey, homework, exam, lesson } 정수 카운트.
+function participationSourceCounts(studentId, { classId, startDate, endDate } = {}) {
+  const hasRange = !!(startDate && endDate);
+  const rc = (col) => `DATE(${col}) BETWEEN ? AND ?`;
+  const rp = () => [startDate, endDate];
+  // 참여도 클래스 범위 — computeAreas6 §축2 / getReportDetail.classFilter 와 동일.
+  const classFilter = (col) => {
+    if (classId) return { clause: `${col} = ?`, params: [classId] };
+    return {
+      clause: `${col} IN (
+        SELECT cm.class_id FROM class_members cm
+        WHERE cm.user_id = ? AND cm.role = 'member' AND cm.status = 'active'
+          AND cm.class_id NOT IN (SELECT id FROM classes WHERE owner_id = ?)
+      )`,
+      params: [studentId, studentId]
+    };
+  };
+
+  // post — posts.author_id (클래스/유저 무관, detail 'post' 와 동일)
+  const post = db.prepare(`
+    SELECT COUNT(*) c FROM posts
+    WHERE author_id = ?${hasRange ? ` AND ${rc('created_at')}` : ''}
+  `).get(studentId, ...(hasRange ? rp() : [])).c;
+
+  // attendance — status NOT NULL, classId 있을 때만 class_id 한정 (detail 'attendance' 와 동일)
+  const attendance = db.prepare(`
+    SELECT COUNT(*) c FROM attendance
+    WHERE user_id = ?${classId ? ' AND class_id = ?' : ''} AND status IS NOT NULL${hasRange ? ` AND ${rc('attendance_date')}` : ''}
+  `).get(studentId, ...(classId ? [classId] : []), ...(hasRange ? rp() : [])).c;
+
+  // survey — survey_responses ⨝ surveys, classId 있을 때만 s.class_id (detail 'survey' 와 동일)
+  const survey = db.prepare(`
+    SELECT COUNT(*) c FROM survey_responses sr
+    JOIN surveys s ON s.id = sr.survey_id
+    WHERE sr.user_id = ?${classId ? ' AND s.class_id = ?' : ''}${hasRange ? ` AND ${rc('sr.submitted_at')}` : ''}
+  `).get(studentId, ...(classId ? [classId] : []), ...(hasRange ? rp() : [])).c;
+
+  // homework — submitted/graded 만, classFilter(h.class_id) (detail 'homework' 와 동일)
+  const hwF = classFilter('h.class_id');
+  const homework = db.prepare(`
+    SELECT COUNT(*) c FROM homework_submissions hs
+    JOIN homework h ON h.id = hs.homework_id
+    WHERE hs.student_id = ? AND hs.status IN ('submitted','graded') AND ${hwF.clause}${hasRange ? ` AND ${rc('hs.submitted_at')}` : ''}
+  `).get(studentId, ...hwF.params, ...(hasRange ? rp() : [])).c;
+
+  // exam — submitted 만, classFilter(e.class_id) (detail 'exam' 와 동일)
+  const exF = classFilter('e.class_id');
+  const exam = db.prepare(`
+    SELECT COUNT(*) c FROM exam_students es
+    JOIN exams e ON e.id = es.exam_id
+    WHERE es.user_id = ? AND es.status = 'submitted' AND ${exF.clause}${hasRange ? ` AND ${rc('es.submitted_at')}` : ''}
+  `).get(studentId, ...exF.params, ...(hasRange ? rp() : [])).c;
+
+  // lesson — lesson_self_check, classFilter(lc.class_id) (detail 'lesson' 와 동일)
+  const lsF = classFilter('lc.class_id');
+  const lesson = db.prepare(`
+    SELECT COUNT(*) c FROM lesson_self_check lc
+    WHERE lc.user_id = ? AND ${lsF.clause}${hasRange ? ` AND ${rc('lc.created_at')}` : ''}
+  `).get(studentId, ...lsF.params, ...(hasRange ? rp() : [])).c;
+
+  return { post, attendance, survey, homework, exam, lesson };
+}
+
 function getStudentReport(studentId, { classId, startDate, endDate } = {}) {
   // 파라미터화된 쿼리로 SQL Injection 방지
   // 기간 BETWEEN off-by-one 방지(#6): DATE(col) 정규화로 종료일 당일 datetime 데이터 포함.
@@ -1130,6 +1203,61 @@ function getStudentReport(studentId, { classId, startDate, endDate } = {}) {
     FROM learning_logs WHERE user_id = ? ${dateFilter}
     GROUP BY activity_type
   `).all(...learnParams);
+
+  // 참여도 "활동 유형 Top" 막대 카운트 = 모달(getReportDetail) 카운트 단일 소스화 (감리 H-1·H-2)
+  // FE(student-report.html 블록E)는 learningCapacity[].cnt 를 막대 카운트(N회)로 쓰고,
+  // ACT_TO_DETAIL_TYPE 으로 /detail?type=X 모달을 연다. learning_logs COUNT(*) 는 누락·중복이 심해
+  // 카드 카운트(learning_logs) ≠ 모달 카운트(실원천)로 항상 어긋난다(H-1: content_view 45 vs 43,
+  // H-2: portfolio_add 1 vs 19 등). → "드릴 가능한 전 활동유형"의 cnt 를 detailCountFor(=모달 count)로 교체.
+  //   · 막대 activity_type → 대표 activity_type → detail type 1:1 매핑(아래 BAR_TO_DETAIL).
+  //   · 한 detail type 으로 합쳐지는 별칭 막대(lesson_view/progress, problem_set_complete)는 제거하고
+  //     대표 행 1개로 일원화(중복 표시 방지). 대표 cnt = detailCountFor(detail).
+  //   · detailCountFor 가 null(통일 불가) 인 type 은 드릴 비대상이므로 손대지 않음(learning_logs 유지).
+  //   · learning_logs 는 막대 카운트에서만 제거 — LRS·콘텐츠활용 카드(viewedContents 등) 무영향.
+  {
+    // 막대 activity_type → { detail, rep(대표 activity_type) }. rep 가 자기 자신이 아니면 별칭(흡수·제거).
+    const BAR_TO_DETAIL = {
+      post_create:        { detail: 'post',              rep: 'post_create' },
+      attendance_checkin: { detail: 'attendance',        rep: 'attendance_checkin' },
+      survey_respond:     { detail: 'survey',            rep: 'survey_respond' },
+      homework_submit:    { detail: 'homework',          rep: 'homework_submit' },
+      exam_complete:      { detail: 'exam',              rep: 'exam_complete' },
+      lesson_complete:    { detail: 'lesson',            rep: 'lesson_complete' },
+      lesson_view:        { detail: 'lesson',            rep: 'lesson_complete' }, // 흡수
+      lesson_progress:    { detail: 'lesson',            rep: 'lesson_complete' }, // 흡수
+      content_view:       { detail: 'content_viewed',    rep: 'content_view' },
+      diagnosis_complete: { detail: 'ai_learning',       rep: 'diagnosis_complete' },
+      daily_complete:     { detail: 'today_learning',    rep: 'daily_complete' },
+      problem_set_complete: { detail: 'today_learning',  rep: 'daily_complete' }, // 흡수
+      portfolio_add:      { detail: 'content_portfolio', rep: 'portfolio_add' }
+    };
+    // 대표 activity_type 별 detail type (중복 산정 방지로 detail count 1회만 계산)
+    const repDetail = {};
+    Object.values(BAR_TO_DETAIL).forEach(m => { repDetail[m.rep] = m.detail; });
+    // 대표 activity_type 별 통일 카운트 = 모달 count
+    const repCnt = {};
+    Object.entries(repDetail).forEach(([rep, detail]) => {
+      repCnt[rep] = detailCountFor(studentId, detail, { classId, startDate, endDate });
+    });
+    // 별칭 막대 행 제거(대표로 일원화) — 자기 자신이 대표가 아닌 activity_type 행 삭제
+    const aliasDrop = new Set(
+      Object.entries(BAR_TO_DETAIL).filter(([at, m]) => m.rep !== at).map(([at]) => at)
+    );
+    for (let i = learningStats.length - 1; i >= 0; i--) {
+      if (aliasDrop.has(learningStats[i].activity_type)) learningStats.splice(i, 1);
+    }
+    // 대표 행 cnt 덮어쓰기 (avg_score 등 기타 필드 보존)
+    learningStats.forEach(row => {
+      if (Object.prototype.hasOwnProperty.call(repCnt, row.activity_type) && repCnt[row.activity_type] != null) {
+        row.cnt = repCnt[row.activity_type];
+      }
+    });
+    // 원천엔 있으나 learning_logs 에 대표 행이 없던 활동유형 주입 (cnt>0 인 것만)
+    const present = new Set(learningStats.map(r => r.activity_type));
+    Object.entries(repCnt).forEach(([at, c]) => {
+      if (c != null && c > 0 && !present.has(at)) learningStats.push({ activity_type: at, cnt: c, avg_score: null });
+    });
+  }
 
   // 4. 오늘의학습: 완료율 + 연속일 + 최근 현황 + 평균 정답률
   // 클래스 스코프(#4): 개인·타클래스 세트 혼입 제거. getClassDailyLearning 의 학년매칭과 일관되게
@@ -1939,8 +2067,616 @@ function getIngestStats() {
   };
 }
 
+// ========== 성장 리포트 — 카드 세부 내역 Drill-down (기획서: 성장리포트_내역_drilldown_스펙.md) ==========
+// 카드의 개별 항목 클릭 시 그 실제 내역(제목·날짜·목록)을 반환한다.
+// 통일 응답: { type, title, count, items:[{primary, meta, date, badge?, result?}] }
+// 카운트 일치(스펙 §2-3 / 체크리스트 ⓗ)가 최우선: 카드 배지 숫자를 만든 동일 필터(user+class+기간)를 그대로 사용.
+
+// 감정 코드 → 한글 라벨 + 이모지 (attendance/emotion 타입 표시용)
+const EMOTION_LABEL = {
+  happy: '행복해요', excited: '신나요', great: '최고예요', good: '좋아요', calm: '평온해요',
+  tired: '피곤해요', sad: '슬퍼요', angry: '화나요', anxious: '불안해요', frustrated: '답답해요'
+};
+const EMOTION_EMOJI = {
+  happy: '😊', excited: '🤩', great: '😆', good: '🙂', calm: '😌',
+  tired: '😪', sad: '😢', angry: '😠', anxious: '😰', frustrated: '😣'
+};
+const POSITIVE_EMO_SET = new Set(['happy', 'excited', 'good', 'great', 'calm']);
+
+// 게시판 카테고리 한글 + tone (게시판 kind 전수 — 영문 원시값 노출 0)
+const POST_CATEGORY = {
+  notice: { text: '공지', tone: 'warning' }, general: { text: '일반', tone: 'neutral' },
+  question: { text: '질문', tone: 'info' }, qna: { text: '질문', tone: 'info' },
+  free: { text: '자유', tone: 'neutral' }, share: { text: '공유', tone: 'success' },
+  study: { text: '학습', tone: 'info' }, gallery: { text: '갤러리', tone: 'info' },
+  class: { text: '클래스', tone: 'neutral' }, artist: { text: '나도예술가', tone: 'info' }
+};
+
+// 포트폴리오 활동유형(activity_type) 한글 — content_portfolio 모달 meta 의 영문 원시값 번역(M-1)
+const PORTFOLIO_ACTIVITY_KO = {
+  homework_submit: '과제 제출', homework_graded: '과제 채점', homework: '과제',
+  exam_complete: '평가 응시', wrong_note_retry: '오답 복습', problem_attempt: '문항 풀이',
+  diagnosis_complete: 'AI 진단', self_learn: '스스로채움', extracurricular: '교과 외 활동'
+};
+// 포트폴리오 출처(source_type) 한글 + tone — content_portfolio 모달 badge 의 영문 원시값 번역(M-1)
+const PORTFOLIO_SOURCE_KO = {
+  class: { text: '채움클래스', tone: 'info' }, 'self-learn': { text: '스스로채움', tone: 'success' },
+  self_learn: { text: '스스로채움', tone: 'success' }, cbt: { text: '채움CBT', tone: 'danger' },
+  homework: { text: '과제', tone: 'neutral' }, custom: { text: '직접 추가', tone: 'neutral' }
+};
+function koPortfolioActivity(v) {
+  if (!v) return v;
+  if (PORTFOLIO_ACTIVITY_KO[v]) return PORTFOLIO_ACTIVITY_KO[v];
+  if (/[가-힣]/.test(v)) return v; // 이미 한글이면 그대로(예: '동아리')
+  return v;
+}
+// 과목 코드(korean-e, math-e …) 한글화 — portfolio_items.subject 가 코드값인 경우(M-1 추가).
+// db/curriculum.js subjectData 와 동일 명칭. 레벨접미사(-e/-m/-h) 무관하게 베이스명으로 매핑.
+const SUBJECT_BASE_KO = {
+  korean: '국어', math: '수학', social: '사회', science: '과학', english: '영어',
+  info: '정보', moral: '도덕', music: '음악', art: '미술', pe: '체육',
+  practical: '실과', history: '역사'
+};
+function koSubject(v) {
+  if (!v) return v;
+  if (/[가-힣]/.test(v)) return v; // 이미 한글 과목명
+  const base = String(v).toLowerCase().replace(/-(e|m|h)$/, '');
+  return SUBJECT_BASE_KO[base] || v;
+}
+
+// 콘텐츠 유형 한글 (contents.content_type 전수 — 모달 badge 영문 원시값 0)
+const CONTENT_TYPE_KO = {
+  video: '영상', document: '문서', image: '이미지', audio: '음원', link: '링크',
+  quiz: '퀴즈', interactive: '인터랙티브', pdf: 'PDF', html: 'HTML',
+  package: '꾸러미', lesson_bundle: '수업 묶음', exam: '평가', assessment: '평가',
+  recipe: '레시피', activity: '학습활동'
+};
+
+// 출처(성취 6종) 한글 라벨 + tone (도넛 3타일 합산 모달의 badge)
+const ACH_SOURCE_LABEL = {
+  today_learning: { text: '오늘의 학습', tone: 'success' },
+  ai_learning:    { text: 'AI 맞춤학습', tone: 'info' },
+  wrong_note:     { text: '오답노트', tone: 'warning' },
+  content:        { text: '콘텐츠 문항', tone: 'neutral' },
+  class_exam:     { text: '클래스 평가', tone: 'info' },
+  cbt_exam:       { text: 'CBT 감독평가', tone: 'danger' }
+};
+
+// ───────────────────────────────────────────────────────────────────────────
+// 드릴 가능 활동유형 막대 ↔ 모달 단일 카운트 소스 (감리 H-1·H-2 해소)
+//
+// 참여도 "활동 유형 Top" 막대 중 FE(ACT_TO_DETAIL_TYPE)가 드릴 가능으로 표시하는
+// 모든 detail type 의 카드 카운트를 getReportDetail(type).count 와 "동일한 원천·동일한 필터"로
+// 산출한다. learning_logs COUNT(*) 는 막대 카운트에서 완전히 제거(LRS 등 타 소비처 무영향).
+//
+// 막대 activity_type → detail type 매핑(1:1)·대표 activity_type:
+//   post_create          → post              (posts)
+//   attendance_checkin   → attendance        (attendance)
+//   survey_respond       → survey            (survey_responses⨝surveys)
+//   homework_submit      → homework          (homework_submissions)
+//   exam_complete        → exam              (exam_students⨝exams)
+//   lesson_complete      → lesson            (lesson_self_check) ※ lesson_view/progress 는 흡수·제거
+//   content_view         → content_viewed    (COUNT(DISTINCT object_id) — 모달과 동일)
+//   diagnosis_complete   → ai_learning       (diagnosis_sessions + problem_attempts[ai_learning])
+//   daily_complete       → today_learning    (daily_learning_progress[completed], 세트 스코프) ※ problem_set_complete 흡수
+//   portfolio_add        → content_portfolio (portfolio_items)
+//
+// 각 분기는 getReportDetail 의 동일 case 가 사용하는 count 쿼리와 글자 그대로 같은 WHERE 를 쓴다.
+// detail count 가 변하면 이 함수도 함께 고쳐 단일 소스를 유지할 것.
+function detailCountFor(studentId, detailType, opts = {}) {
+  const { classId, startDate, endDate } = opts;
+  const hasRange = !!(startDate && endDate);
+  const rc = (col) => `DATE(${col}) BETWEEN ? AND ?`;
+  const rp = () => [startDate, endDate];
+  const classFilter = (col) => {
+    if (classId) return { clause: `${col} = ?`, params: [classId] };
+    return {
+      clause: `${col} IN (
+        SELECT cm.class_id FROM class_members cm
+        WHERE cm.user_id = ? AND cm.role = 'member' AND cm.status = 'active'
+          AND cm.class_id NOT IN (SELECT id FROM classes WHERE owner_id = ?)
+      )`,
+      params: [studentId, studentId]
+    };
+  };
+  switch (detailType) {
+    case 'post':
+      return db.prepare(`SELECT COUNT(*) c FROM posts WHERE author_id = ?${hasRange ? ` AND ${rc('created_at')}` : ''}`)
+        .get(studentId, ...(hasRange ? rp() : [])).c;
+    case 'attendance':
+      return db.prepare(`SELECT COUNT(*) c FROM attendance WHERE user_id = ?${classId ? ' AND class_id = ?' : ''} AND status IS NOT NULL${hasRange ? ` AND ${rc('attendance_date')}` : ''}`)
+        .get(studentId, ...(classId ? [classId] : []), ...(hasRange ? rp() : [])).c;
+    case 'survey':
+      return db.prepare(`SELECT COUNT(*) c FROM survey_responses sr JOIN surveys s ON s.id = sr.survey_id WHERE sr.user_id = ?${classId ? ' AND s.class_id = ?' : ''}${hasRange ? ` AND ${rc('sr.submitted_at')}` : ''}`)
+        .get(studentId, ...(classId ? [classId] : []), ...(hasRange ? rp() : [])).c;
+    case 'homework': {
+      const f = classFilter('h.class_id');
+      return db.prepare(`SELECT COUNT(*) c FROM homework_submissions hs JOIN homework h ON h.id = hs.homework_id WHERE hs.student_id = ? AND hs.status IN ('submitted','graded') AND ${f.clause}${hasRange ? ` AND ${rc('hs.submitted_at')}` : ''}`)
+        .get(studentId, ...f.params, ...(hasRange ? rp() : [])).c;
+    }
+    case 'exam': {
+      const f = classFilter('e.class_id');
+      return db.prepare(`SELECT COUNT(*) c FROM exam_students es JOIN exams e ON e.id = es.exam_id WHERE es.user_id = ? AND es.status = 'submitted' AND ${f.clause}${hasRange ? ` AND ${rc('es.submitted_at')}` : ''}`)
+        .get(studentId, ...f.params, ...(hasRange ? rp() : [])).c;
+    }
+    case 'lesson': {
+      const f = classFilter('lc.class_id');
+      return db.prepare(`SELECT COUNT(*) c FROM lesson_self_check lc WHERE lc.user_id = ? AND ${f.clause}${hasRange ? ` AND ${rc('lc.created_at')}` : ''}`)
+        .get(studentId, ...f.params, ...(hasRange ? rp() : [])).c;
+    }
+    case 'content_viewed':
+      // 모달 = GROUP BY object_id 행 수 = COUNT(DISTINCT object_id) (H-1: learning_logs COUNT(*) 아님)
+      return db.prepare(`SELECT COUNT(DISTINCT object_id) c FROM learning_logs WHERE user_id = ? AND activity_type = 'content_view'${hasRange ? ` AND ${rc('created_at')}` : ''}`)
+        .get(studentId, ...(hasRange ? rp() : [])).c;
+    case 'ai_learning': {
+      // 모달 merged.length(=diag + problem_attempts[ai_learning], LIMIT 200 미만 시 합) 과 동일.
+      const diagN = db.prepare(`SELECT COUNT(*) c FROM diagnosis_sessions WHERE user_id = ? AND status = 'completed'${hasRange ? ` AND ${rc('completed_at')}` : ''}`)
+        .get(studentId, ...(hasRange ? rp() : [])).c;
+      const paN = db.prepare(`SELECT COUNT(*) c FROM problem_attempts WHERE user_id = ? AND source_type = 'ai_learning'${hasRange ? ` AND ${rc('submitted_at')}` : ''}`)
+        .get(studentId, ...(hasRange ? rp() : [])).c;
+      return diagN + paN;
+    }
+    case 'today_learning': {
+      // 모달 = daily_learning_progress[completed] 세트스코프 행 수(getStudentReport.dailyStats 와 동일 스코프)
+      const stu = db.prepare('SELECT grade FROM users WHERE id = ?').get(studentId);
+      const grade = stu ? stu.grade : null;
+      let setClause = '', setParams = [];
+      if (classId && grade != null) { setClause = ' AND p.set_id IN (SELECT id FROM daily_learning_sets WHERE class_id = ? OR (class_id IS NULL AND target_grade = ?))'; setParams = [classId, grade]; }
+      else if (classId) { setClause = ' AND p.set_id IN (SELECT id FROM daily_learning_sets WHERE class_id = ?)'; setParams = [classId]; }
+      else if (grade != null) { setClause = ' AND p.set_id IN (SELECT id FROM daily_learning_sets WHERE class_id IS NULL AND target_grade = ?)'; setParams = [grade]; }
+      return db.prepare(`SELECT COUNT(*) c FROM daily_learning_progress p WHERE p.user_id = ? AND p.status = 'completed'${hasRange ? ` AND ${rc('p.completed_at')}` : ''}${setClause}`)
+        .get(studentId, ...(hasRange ? rp() : []), ...setParams).c;
+    }
+    case 'content_portfolio':
+      return db.prepare(`SELECT COUNT(*) c FROM portfolio_items WHERE user_id = ?${hasRange ? ` AND DATE(created_at) BETWEEN ? AND ?` : ''}`)
+        .get(studentId, ...(hasRange ? rp() : [])).c;
+    default:
+      return null; // 통일 불가 type — 호출부에서 비드릴 처리
+  }
+}
+
+// 성장 리포트 카드 세부 내역 조회.
+// @param studentId  대상 학생 user_id
+// @param type       내역 종류 (스펙 §5-2, 총 21종 + 호환 별칭)
+// @param opts       { classId, startDate, endDate, source }
+// @returns { type, title, count, items } | { _badType: true } (알 수 없는 type)
+function getReportDetail(studentId, type, opts = {}) {
+  const { classId, startDate, endDate, source } = opts;
+  const hasRange = !!(startDate && endDate);
+  const LIMIT = 200; // 안전 상한 (스펙 §5-3). count 는 실제 총건수, items 는 최대 200건.
+
+  // computeAreas6 와 동일한 기간 정규화 — DATE(col) BETWEEN 으로 종료일 off-by-one 해소(#6)
+  const rc = (col) => `DATE(${col}) BETWEEN ? AND ?`;
+  const rp = () => [startDate, endDate];
+
+  // 참여도 클래스 범위(스펙·computeAreas6 §축2 와 동일):
+  //  - classId 지정: 그 클래스만 (col = ?)
+  //  - 미지정: 학생으로(member) 속한 모든 클래스 합산, 본인 owner 클래스 제외
+  const classFilter = (col) => {
+    if (classId) return { clause: `${col} = ?`, params: [classId] };
+    return {
+      clause: `${col} IN (
+        SELECT cm.class_id FROM class_members cm
+        WHERE cm.user_id = ? AND cm.role = 'member' AND cm.status = 'active'
+          AND cm.class_id NOT IN (SELECT id FROM classes WHERE owner_id = ?)
+      )`,
+      params: [studentId, studentId]
+    };
+  };
+
+  // 참여도 6유형(post/attendance/survey/homework/exam/lesson) count 는 각 case 에서 실제 원천 테이블로
+  // 직접 산출(아래)하여 count == items.length 보장. learning_logs(누락·중복) 의존 제거(스펙).
+  const fmtPct = (cc, tq) => (tq > 0 ? Math.round((cc / tq) * 100) : 0);
+
+  switch (type) {
+
+    // ───────── 참여도 ─────────
+    case 'post': {
+      const items = db.prepare(`
+        SELECT title, category, created_at FROM posts
+        WHERE author_id = ?${hasRange ? ` AND ${rc('created_at')}` : ''}
+        ORDER BY created_at DESC LIMIT ${LIMIT}
+      `).all(studentId, ...(hasRange ? rp() : [])).map(r => {
+        const cat = POST_CATEGORY[r.category] || (r.category ? { text: r.category, tone: 'neutral' } : null);
+        return { primary: r.title || '제목 없음', meta: '', date: r.created_at, badge: cat };
+      });
+      // count = 실제 원천(posts) — items 와 동일 WHERE → count == items.length (스펙: learning_logs 신뢰불가)
+      const count = db.prepare(`
+        SELECT COUNT(*) c FROM posts
+        WHERE author_id = ?${hasRange ? ` AND ${rc('created_at')}` : ''}
+      `).get(studentId, ...(hasRange ? rp() : [])).c;
+      return { type, title: '게시물 작성 내역', count, items };
+    }
+
+    case 'attendance': {
+      const items = db.prepare(`
+        SELECT attendance_date, comment, emotion, checked_at FROM attendance
+        WHERE user_id = ?${classId ? ' AND class_id = ?' : ''} AND status IS NOT NULL
+          ${hasRange ? ` AND ${rc('attendance_date')}` : ''}
+        ORDER BY attendance_date DESC, checked_at DESC LIMIT ${LIMIT}
+      `).all(studentId, ...(classId ? [classId] : []), ...(hasRange ? rp() : [])).map(r => {
+        const e = normEmotion(r.emotion);
+        return {
+          primary: r.attendance_date || '',
+          meta: r.comment ? String(r.comment) : '',
+          date: r.checked_at || r.attendance_date,
+          badge: e ? { text: EMOTION_EMOJI[e] || '', tone: 'neutral' } : null
+        };
+      });
+      // count = 실제 원천(attendance) — items 와 동일 WHERE → count == items.length
+      const count = db.prepare(`
+        SELECT COUNT(*) c FROM attendance
+        WHERE user_id = ?${classId ? ' AND class_id = ?' : ''} AND status IS NOT NULL${hasRange ? ` AND ${rc('attendance_date')}` : ''}
+      `).get(studentId, ...(classId ? [classId] : []), ...(hasRange ? rp() : [])).c;
+      return { type, title: '출석 체크인 내역', count, items };
+    }
+
+    case 'survey': {
+      const items = db.prepare(`
+        SELECT s.title, sr.answers, sr.submitted_at FROM survey_responses sr
+        JOIN surveys s ON s.id = sr.survey_id
+        WHERE sr.user_id = ?${classId ? ' AND s.class_id = ?' : ''}
+          ${hasRange ? ` AND ${rc('sr.submitted_at')}` : ''}
+        ORDER BY sr.submitted_at DESC LIMIT ${LIMIT}
+      `).all(studentId, ...(classId ? [classId] : []), ...(hasRange ? rp() : [])).map(r => {
+        let n = 0;
+        try { const a = JSON.parse(r.answers || '[]'); n = Array.isArray(a) ? a.length : Object.keys(a || {}).length; } catch { n = 0; }
+        return { primary: r.title || '설문', meta: n > 0 ? `응답 ${n}문항` : '', date: r.submitted_at };
+      });
+      // count = 실제 원천(survey_responses⨝surveys) — items 와 동일 WHERE → count == items.length
+      const count = db.prepare(`
+        SELECT COUNT(*) c FROM survey_responses sr
+        JOIN surveys s ON s.id = sr.survey_id
+        WHERE sr.user_id = ?${classId ? ' AND s.class_id = ?' : ''}${hasRange ? ` AND ${rc('sr.submitted_at')}` : ''}
+      `).get(studentId, ...(classId ? [classId] : []), ...(hasRange ? rp() : [])).c;
+      return { type, title: '설문 응답 내역', count, items };
+    }
+
+    case 'homework': {
+      const hwF = classFilter('h.class_id');
+      const items = db.prepare(`
+        SELECT h.title, hs.status, hs.score, hs.submitted_at FROM homework_submissions hs
+        JOIN homework h ON h.id = hs.homework_id
+        WHERE hs.student_id = ? AND hs.status IN ('submitted','graded') AND ${hwF.clause}
+          ${hasRange ? ` AND ${rc('hs.submitted_at')}` : ''}
+        ORDER BY hs.submitted_at DESC LIMIT ${LIMIT}
+      `).all(studentId, ...hwF.params, ...(hasRange ? rp() : [])).map(r => {
+        const graded = r.status === 'graded';
+        return {
+          primary: r.title || '과제',
+          meta: graded ? (r.score != null ? `채점완료 · ${r.score}점` : '채점완료') : '제출',
+          date: r.submitted_at,
+          badge: graded ? { text: '채점완료', tone: 'success' } : { text: '제출', tone: 'info' }
+        };
+      });
+      // count = 실제 원천(homework_submissions) — items 와 동일 WHERE → count == items.length
+      const count = db.prepare(`
+        SELECT COUNT(*) c FROM homework_submissions hs
+        JOIN homework h ON h.id = hs.homework_id
+        WHERE hs.student_id = ? AND hs.status IN ('submitted','graded') AND ${hwF.clause}${hasRange ? ` AND ${rc('hs.submitted_at')}` : ''}
+      `).get(studentId, ...hwF.params, ...(hasRange ? rp() : [])).c;
+      return { type, title: '과제 제출 내역', count, items };
+    }
+
+    case 'exam': {
+      const exF = classFilter('e.class_id');
+      const items = db.prepare(`
+        SELECT e.title, es.score, es.submitted_at FROM exam_students es
+        JOIN exams e ON e.id = es.exam_id
+        WHERE es.user_id = ? AND es.status = 'submitted' AND ${exF.clause}
+          ${hasRange ? ` AND ${rc('es.submitted_at')}` : ''}
+        ORDER BY es.submitted_at DESC LIMIT ${LIMIT}
+      `).all(studentId, ...exF.params, ...(hasRange ? rp() : [])).map(r => ({
+        primary: r.title || '평가',
+        meta: r.score != null ? `${r.score}점` : '응시 완료',
+        date: r.submitted_at
+      }));
+      // count = 실제 원천(exam_students) — items 와 동일 WHERE → count == items.length
+      const count = db.prepare(`
+        SELECT COUNT(*) c FROM exam_students es
+        JOIN exams e ON e.id = es.exam_id
+        WHERE es.user_id = ? AND es.status = 'submitted' AND ${exF.clause}${hasRange ? ` AND ${rc('es.submitted_at')}` : ''}
+      `).get(studentId, ...exF.params, ...(hasRange ? rp() : [])).c;
+      return { type, title: '평가 응시 내역', count, items };
+    }
+
+    case 'lesson': {
+      const lsF = classFilter('lc.class_id');
+      const items = db.prepare(`
+        SELECT l.title, lc.created_at, lc.understanding FROM lesson_self_check lc
+        JOIN lessons l ON l.id = lc.lesson_id
+        WHERE lc.user_id = ? AND ${lsF.clause}${hasRange ? ` AND ${rc('lc.created_at')}` : ''}
+        ORDER BY lc.created_at DESC LIMIT ${LIMIT}
+      `).all(studentId, ...lsF.params, ...(hasRange ? rp() : [])).map(r => ({
+        primary: r.title || '수업', meta: '수업 이수', date: r.created_at
+      }));
+      // count = 실제 원천(lesson_self_check) — items 와 동일 WHERE → count == items.length
+      // (카드도 lesson_self_check 기반 단일 대표행으로 통일 — getStudentReport.learningCapacity 참조)
+      const count = db.prepare(`
+        SELECT COUNT(*) c FROM lesson_self_check lc
+        WHERE lc.user_id = ? AND ${lsF.clause}${hasRange ? ` AND ${rc('lc.created_at')}` : ''}
+      `).get(studentId, ...lsF.params, ...(hasRange ? rp() : [])).c;
+      return { type, title: '수업 이수 내역', count, items };
+    }
+
+    // ───────── 성취수준 6출처 ─────────
+    case 'today_learning': {
+      // daily_learning_progress(완료) 세트 스코프는 getStudentReport 와 동일하게 학년/클래스 매칭.
+      const student = db.prepare('SELECT grade FROM users WHERE id = ?').get(studentId);
+      const grade = student ? student.grade : null;
+      let setClause = '', setParams = [];
+      if (classId && grade != null) { setClause = ' AND p.set_id IN (SELECT id FROM daily_learning_sets WHERE class_id = ? OR (class_id IS NULL AND target_grade = ?))'; setParams = [classId, grade]; }
+      else if (classId) { setClause = ' AND p.set_id IN (SELECT id FROM daily_learning_sets WHERE class_id = ?)'; setParams = [classId]; }
+      else if (grade != null) { setClause = ' AND p.set_id IN (SELECT id FROM daily_learning_sets WHERE class_id IS NULL AND target_grade = ?)'; setParams = [grade]; }
+      const rows = db.prepare(`
+        SELECT p.set_id, s.title, p.correct_count, p.total_questions, p.score, p.completed_at
+        FROM daily_learning_progress p LEFT JOIN daily_learning_sets s ON s.id = p.set_id
+        WHERE p.user_id = ? AND p.status = 'completed'${hasRange ? ` AND ${rc('p.completed_at')}` : ''}${setClause}
+        ORDER BY p.completed_at DESC LIMIT ${LIMIT}
+      `).all(studentId, ...(hasRange ? rp() : []), ...setParams);
+      const items = rows.map(r => {
+        const c = r.correct_count || 0, t = r.total_questions || 0;
+        return {
+          primary: r.title || (r.completed_at ? String(r.completed_at).slice(0, 10) : '오늘의 학습'),
+          meta: t > 0 ? `정답 ${c} / ${t}문항 · ${fmtPct(c, t)}%` : '완료',
+          date: r.completed_at,
+          badge: { text: '완료', tone: 'success' }
+        };
+      });
+      return { type, title: '오늘의 학습 내역', count: rows.length, items };
+    }
+
+    case 'ai_learning': {
+      // 진단(diagnosis_sessions) + problem_attempts(source_type='ai_learning'). 카드 ai_learning.total 과 일치.
+      const diag = db.prepare(`
+        SELECT d.target_node_id, n.unit_name, n.subject, d.correct_count, d.total_questions, d.completed_at
+        FROM diagnosis_sessions d LEFT JOIN learning_map_nodes n ON n.node_id = d.target_node_id
+        WHERE d.user_id = ? AND d.status = 'completed'${hasRange ? ` AND ${rc('d.completed_at')}` : ''}
+      `).all(studentId, ...(hasRange ? rp() : [])).map(r => ({
+        kind: 'diag',
+        primary: `진단평가 · ${r.subject || ''}${r.unit_name ? ' ' + r.unit_name : ''}`.trim() || '진단평가',
+        meta: r.total_questions ? `정답 ${r.correct_count || 0} / ${r.total_questions}문항` : '',
+        date: r.completed_at,
+        badge: { text: `정답률 ${fmtPct(r.correct_count || 0, r.total_questions || 0)}%`, tone: 'info' }
+      }));
+      const pa = paAttemptItems(studentId, 'ai_learning', hasRange, rc, rp, LIMIT);
+      const merged = [...diag, ...pa].sort((a, b) => String(b.date || '').localeCompare(String(a.date || ''))).slice(0, LIMIT);
+      const count = merged.length === LIMIT
+        ? (diag.length + paAttemptCount(studentId, 'ai_learning', hasRange, rc, rp))
+        : merged.length;
+      return { type, title: 'AI 맞춤학습 내역', count, items: merged.map(stripKind) };
+    }
+
+    case 'wrong_note': {
+      const items = paAttemptItems(studentId, 'wrong_note', hasRange, rc, rp, LIMIT).map(stripKind);
+      return { type, title: '오답노트 다시 풀기 내역', count: paAttemptCount(studentId, 'wrong_note', hasRange, rc, rp), items };
+    }
+
+    case 'content_problem':
+    case 'content': {
+      const items = paAttemptItems(studentId, 'content', hasRange, rc, rp, LIMIT).map(stripKind);
+      return { type: 'content_problem', title: '콘텐츠 문항 풀이 내역', count: paAttemptCount(studentId, 'content', hasRange, rc, rp), items };
+    }
+
+    case 'class_exam':
+    case 'cbt_exam': {
+      const cbt = type === 'cbt_exam';
+      const exClause = classId ? ' AND e.class_id = ?' : '';
+      const modeClause = cbt ? "e.start_mode = 'waiting'" : "COALESCE(e.start_mode,'direct') != 'waiting'";
+      const rows = db.prepare(`
+        SELECT e.title, e.question_count, es.score, es.submitted_at FROM exam_students es
+        JOIN exams e ON e.id = es.exam_id
+        WHERE es.user_id = ? AND es.status = 'submitted' AND es.score IS NOT NULL AND ${modeClause}${exClause}
+          ${hasRange ? ` AND ${rc('es.submitted_at')}` : ''}
+        ORDER BY es.submitted_at DESC LIMIT ${LIMIT}
+      `).all(studentId, ...(classId ? [classId] : []), ...(hasRange ? rp() : []));
+      const items = rows.map(r => {
+        const qc = r.question_count || 0;
+        const correct = qc > 0 ? Math.round((r.score / 100) * qc) : null;
+        return {
+          primary: r.title || '평가',
+          meta: `${r.score}점${correct != null ? ` · 정답 ${correct}/${qc}` : ''}`,
+          date: r.submitted_at,
+          badge: cbt ? { text: '감독', tone: 'danger' } : null
+        };
+      });
+      return { type, title: cbt ? '채움CBT 감독 평가 내역' : '채움클래스 평가 내역', count: rows.length, items };
+    }
+
+    // ───────── 성취 도넛 3타일 (합산) ─────────
+    case 'ach_self_directed': {
+      // today_learning ∪ ai_learning ∪ content ∪ wrong_note — 각 행에 출처 badge
+      const all = [];
+      // today_learning
+      const tl = getReportDetail(studentId, 'today_learning', opts).items.map(it => ({ ...it, badge: ACH_SOURCE_LABEL.today_learning }));
+      // ai_learning (진단+pa)
+      const ai = getReportDetail(studentId, 'ai_learning', opts).items.map(it => ({ ...it, badge: ACH_SOURCE_LABEL.ai_learning }));
+      const cp = paAttemptItems(studentId, 'content', hasRange, rc, rp, LIMIT).map(stripKind).map(it => ({ ...it, badge: ACH_SOURCE_LABEL.content }));
+      const wn = paAttemptItems(studentId, 'wrong_note', hasRange, rc, rp, LIMIT).map(stripKind).map(it => ({ ...it, badge: ACH_SOURCE_LABEL.wrong_note }));
+      all.push(...tl, ...ai, ...cp, ...wn);
+      all.sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
+      return { type, title: '자기주도 학습 풀이 내역', count: all.length, items: all.slice(0, LIMIT) };
+    }
+    case 'ach_class_eval': {
+      const ce = getReportDetail(studentId, 'class_exam', opts).items.map(it => ({ ...it, badge: ACH_SOURCE_LABEL.class_exam }));
+      const cb = getReportDetail(studentId, 'cbt_exam', opts).items.map(it => ({ ...it, badge: ACH_SOURCE_LABEL.cbt_exam }));
+      const all = [...ce, ...cb].sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
+      return { type, title: '클래스평가 응시 내역', count: all.length, items: all.slice(0, LIMIT) };
+    }
+    case 'ach_diagnosis': {
+      const rows = db.prepare(`
+        SELECT d.target_node_id, n.unit_name, n.subject, d.correct_count, d.total_questions, d.completed_at
+        FROM diagnosis_sessions d LEFT JOIN learning_map_nodes n ON n.node_id = d.target_node_id
+        WHERE d.user_id = ? AND d.status = 'completed'${hasRange ? ` AND ${rc('d.completed_at')}` : ''}
+        ORDER BY d.completed_at DESC LIMIT ${LIMIT}
+      `).all(studentId, ...(hasRange ? rp() : []));
+      const items = rows.map(r => ({
+        primary: `${r.subject || '진단'}${r.unit_name ? ' ' + r.unit_name : ''} 진단평가`.trim(),
+        meta: r.total_questions ? `정답 ${r.correct_count || 0} / ${r.total_questions}문항 · ${fmtPct(r.correct_count || 0, r.total_questions || 0)}%` : '',
+        date: r.completed_at
+      }));
+      return { type, title: '진단(기초학력) 내역', count: rows.length, items };
+    }
+
+    // ───────── 정서 ─────────
+    case 'emotion': {
+      const src = source || 'all';
+      const rows = db.prepare(`
+        SELECT attendance_date, emotion, emotion_reason, checked_at FROM attendance
+        WHERE user_id = ?${classId ? ' AND class_id = ?' : ''} AND emotion IS NOT NULL
+          ${hasRange ? ` AND ${rc('attendance_date')}` : ''}
+        ORDER BY attendance_date DESC, checked_at DESC LIMIT ${LIMIT}
+      `).all(studentId, ...(classId ? [classId] : []), ...(hasRange ? rp() : []))
+        .map(r => ({ ...r, e: normEmotion(r.emotion) }))
+        .filter(r => src === 'all' ? true : (src === 'positive' ? POSITIVE_EMO_SET.has(r.e) : !POSITIVE_EMO_SET.has(r.e)));
+      const items = rows.map(r => ({
+        primary: EMOTION_LABEL[r.e] || r.e || '감정',
+        meta: r.emotion_reason ? String(r.emotion_reason) : '',
+        date: r.checked_at || r.attendance_date,
+        badge: { text: EMOTION_EMOJI[r.e] || '', tone: POSITIVE_EMO_SET.has(r.e) ? 'success' : 'neutral' }
+      }));
+      const titleMap = { positive: '긍정 감정 체크인 내역', negative: '부정 감정 체크인 내역', all: '감정 체크인 내역' };
+      return { type, title: titleMap[src] || titleMap.all, count: items.length, items };
+    }
+
+    // ───────── 진로 ─────────
+    case 'career': {
+      const items = db.prepare(`
+        SELECT title, activity_type, activity_date FROM career_logs
+        WHERE user_id = ?${hasRange ? ` AND ${rc('activity_date')}` : ''}
+        ORDER BY activity_date DESC LIMIT ${LIMIT}
+      `).all(studentId, ...(hasRange ? rp() : [])).map(r => ({
+        primary: r.title || '진로 활동', meta: r.activity_type || '', date: r.activity_date
+      }));
+      const count = db.prepare(`SELECT COUNT(*) c FROM career_logs WHERE user_id = ?${hasRange ? ` AND ${rc('activity_date')}` : ''}`).get(studentId, ...(hasRange ? rp() : [])).c;
+      return { type, title: '진로 탐색 활동 내역', count, items };
+    }
+    case 'career_interest': {
+      const rows = db.prepare(`
+        SELECT interest_area, COUNT(*) cnt, MAX(activity_date) last_date FROM career_logs
+        WHERE user_id = ? AND interest_area IS NOT NULL AND interest_area != ''${hasRange ? ` AND ${rc('activity_date')}` : ''}
+        GROUP BY interest_area ORDER BY cnt DESC LIMIT ${LIMIT}
+      `).all(studentId, ...(hasRange ? rp() : []));
+      const items = rows.map(r => ({ primary: r.interest_area, meta: `입력 ${r.cnt}회`, date: r.last_date }));
+      return { type, title: '관심 분야 내역', count: rows.length, items };
+    }
+
+    // ───────── 독서 ─────────
+    case 'reading': {
+      const rows = db.prepare(`
+        SELECT book_title, author, rating, read_date FROM reading_logs
+        WHERE user_id = ?${hasRange ? ` AND ${rc('read_date')}` : ''}
+        ORDER BY read_date DESC LIMIT ${LIMIT}
+      `).all(studentId, ...(hasRange ? rp() : []));
+      const count = db.prepare(`SELECT COUNT(*) c FROM reading_logs WHERE user_id = ?${hasRange ? ` AND ${rc('read_date')}` : ''}`).get(studentId, ...(hasRange ? rp() : [])).c;
+      const items = rows.map(r => {
+        const stars = r.rating ? '★'.repeat(Math.min(5, Math.max(0, Math.round(r.rating)))) : '';
+        return { primary: r.book_title || '책', meta: [r.author, stars].filter(Boolean).join(' · '), date: r.read_date };
+      });
+      return { type, title: '독서 기록 내역', count, items };
+    }
+
+    // ───────── 콘텐츠 활용 ─────────
+    case 'content_saved': {
+      const rows = db.prepare(`
+        SELECT cc.folder_name, cc.created_at, c.title, c.content_type FROM content_collections cc
+        LEFT JOIN contents c ON c.id = cc.content_id
+        WHERE cc.user_id = ?${hasRange ? ` AND ${rc('cc.created_at')}` : ''}
+        ORDER BY cc.created_at DESC LIMIT ${LIMIT}
+      `).all(studentId, ...(hasRange ? rp() : []));
+      const count = db.prepare(`SELECT COUNT(*) c FROM content_collections WHERE user_id = ?${hasRange ? ` AND ${rc('created_at')}` : ''}`).get(studentId, ...(hasRange ? rp() : [])).c;
+      const items = rows.map(r => ({
+        primary: r.title || '콘텐츠', meta: r.folder_name || '', date: r.created_at,
+        badge: r.content_type ? { text: CONTENT_TYPE_KO[r.content_type] || r.content_type, tone: 'info' } : null
+      }));
+      return { type, title: '보관함 저장 내역', count, items };
+    }
+    case 'content_viewed': {
+      // object_id 가 'urn:...:content:NN' 또는 'NN' 혼재 → 끝의 숫자만 추출해 contents 조인.
+      const rows = db.prepare(`
+        SELECT object_id, COUNT(*) cnt, MAX(created_at) last_date
+        FROM learning_logs WHERE user_id = ? AND activity_type = 'content_view'${hasRange ? ` AND ${rc('created_at')}` : ''}
+        GROUP BY object_id ORDER BY last_date DESC LIMIT ${LIMIT}
+      `).all(studentId, ...(hasRange ? rp() : []));
+      // 카드 배지(콘텐츠 조회) = DISTINCT object_id 수(getStudentReport.viewedContents) → rows 길이와 동일.
+      const items = rows.map(r => {
+        const m = String(r.object_id || '').match(/(\d+)\s*$/);
+        let title = null, ctype = null;
+        if (m) { const c = db.prepare('SELECT title, content_type FROM contents WHERE id = ?').get(parseInt(m[1], 10)); if (c) { title = c.title; ctype = c.content_type; } }
+        return {
+          primary: title || '콘텐츠', meta: r.cnt > 1 ? `조회 ${r.cnt}회` : '', date: r.last_date,
+          badge: ctype ? { text: CONTENT_TYPE_KO[ctype] || ctype, tone: 'info' } : null
+        };
+      });
+      return { type, title: '콘텐츠 조회 내역', count: rows.length, items };
+    }
+    case 'content_subscribed': {
+      const rows = db.prepare(`
+        SELECT ch.name, u.display_name AS oper, cs.subscribed_at FROM channel_subscriptions cs
+        JOIN channels ch ON ch.id = cs.channel_id LEFT JOIN users u ON u.id = ch.user_id
+        WHERE cs.subscriber_id = ?${hasRange ? ` AND ${rc('cs.subscribed_at')}` : ''}
+        ORDER BY cs.subscribed_at DESC LIMIT ${LIMIT}
+      `).all(studentId, ...(hasRange ? rp() : []));
+      const count = db.prepare(`SELECT COUNT(*) c FROM channel_subscriptions WHERE subscriber_id = ?${hasRange ? ` AND ${rc('subscribed_at')}` : ''}`).get(studentId, ...(hasRange ? rp() : [])).c;
+      const items = rows.map(r => ({ primary: r.name || '채널', meta: r.oper ? `${r.oper} 운영` : '', date: r.subscribed_at }));
+      return { type, title: '구독 채널 내역', count, items };
+    }
+    case 'content_portfolio': {
+      const rows = db.prepare(`
+        SELECT activity_name, subject, activity_type, source_type, COALESCE(activity_date, DATE(created_at)) AS d FROM portfolio_items
+        WHERE user_id = ?${hasRange ? ` AND DATE(created_at) BETWEEN ? AND ?` : ''}
+        ORDER BY d DESC, created_at DESC LIMIT ${LIMIT}
+      `).all(studentId, ...(hasRange ? rp() : []));
+      const count = db.prepare(`SELECT COUNT(*) c FROM portfolio_items WHERE user_id = ?${hasRange ? ` AND DATE(created_at) BETWEEN ? AND ?` : ''}`).get(studentId, ...(hasRange ? rp() : [])).c;
+      const items = rows.map(r => ({
+        primary: r.activity_name || '활동',
+        // subject(과목 코드)·activity_type 영문 원시값 → 한글(M-1).
+        meta: [koSubject(r.subject), koPortfolioActivity(r.activity_type)].filter(Boolean).join(' · '),
+        date: r.d,
+        // source_type 영문 원시값 → 한글 badge(M-1)
+        badge: r.source_type
+          ? (PORTFOLIO_SOURCE_KO[r.source_type] || { text: r.source_type, tone: 'neutral' })
+          : null
+      }));
+      return { type, title: '포트폴리오 내역', count, items };
+    }
+
+    default:
+      return { _badType: true };
+  }
+}
+
+// problem_attempts(source_type) 행 → items. node_id 로 단원/과목 표기, is_correct 로 O/X result.
+function paAttemptItems(studentId, sourceType, hasRange, rc, rp, LIMIT) {
+  return db.prepare(`
+    SELECT pa.node_id, pa.content_id, pa.is_correct, pa.submitted_at,
+           n.subject, n.unit_name, n.lesson_name, c.title AS content_title
+    FROM problem_attempts pa
+    LEFT JOIN learning_map_nodes n ON n.node_id = pa.node_id
+    LEFT JOIN contents c ON c.id = pa.content_id
+    WHERE pa.user_id = ? AND pa.source_type = ?${hasRange ? ` AND ${rc('pa.submitted_at')}` : ''}
+    ORDER BY pa.submitted_at DESC LIMIT ${LIMIT}
+  `).all(studentId, sourceType, ...(hasRange ? rp() : [])).map(r => {
+    const unit = [r.subject, r.unit_name || r.lesson_name].filter(Boolean).join(' ');
+    return {
+      kind: 'pa',
+      primary: unit || r.content_title || (r.node_id ? `문항 ${r.node_id}` : '문항'),
+      meta: r.is_correct ? '정답' : '오답',
+      date: r.submitted_at,
+      result: r.is_correct ? 'correct' : 'incorrect'
+    };
+  });
+}
+function paAttemptCount(studentId, sourceType, hasRange, rc, rp) {
+  return db.prepare(`
+    SELECT COUNT(*) c FROM problem_attempts WHERE user_id = ? AND source_type = ?${hasRange ? ` AND ${rc('submitted_at')}` : ''}
+  `).get(studentId, sourceType, ...(hasRange ? rp() : [])).c;
+}
+function stripKind(it) { const { kind, ...rest } = it; return rest; }
+
 module.exports = {
   autoAddPortfolioItem,
+  getReportDetail,
   getPortfolioItems, getPortfolioItemDetail, toggleLifeTask, saveReflection, updatePrivacy,
   getPortfolioStats, getGrowthGoals, createGrowthGoal, updateGrowthGoalProgress,
   createPortfolioItem, getCompetencyStats,

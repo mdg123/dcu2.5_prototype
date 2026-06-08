@@ -1373,6 +1373,39 @@ router.get('/report/student/:studentId/area/:areaName', requireAuth, (req, res) 
   } catch (err) { res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' }); }
 });
 
+// GET /api/growth/report/student/:studentId/detail?type=<TYPE>&classId=&startDate=&endDate=&source=
+// 성장 리포트 카드 세부 항목 클릭 시 실제 내역 목록 조회 (기획서: 성장리포트_내역_drilldown_스펙.md)
+// 응답: { success, type, title, count, items:[{primary, meta, date, badge?, result?}] }
+// 권한: 본인(학생) / 같은 클래스 교사 / admin — getStudentReport 라우트와 동일 분기.
+// 카운트 일치: computeAreas6/카드 집계와 동일 필터(classId·기간) 사용.
+router.get('/report/student/:studentId/detail', requireAuth, (req, res) => {
+  try {
+    const studentId = parseInt(req.params.studentId);
+    if (!studentId) return res.status(400).json({ success: false, message: '잘못된 요청입니다.' });
+    // 권한: 학생 본인만 / 교사는 담당 클래스 학생 / admin
+    if (!canAccessStudentReport(req, studentId)) {
+      return res.status(403).json({ success: false, message: '접근 권한이 없습니다.' });
+    }
+    const type = String(req.query.type || '').trim();
+    if (!type) return res.status(400).json({ success: false, message: 'type 파라미터가 필요합니다.' });
+
+    const classId = req.query.classId ? parseInt(req.query.classId) : null;
+    const dateRe = /^\d{4}-\d{2}-\d{2}$/;
+    const startDate = dateRe.test(String(req.query.startDate || '')) ? req.query.startDate : null;
+    const endDate = dateRe.test(String(req.query.endDate || '')) ? req.query.endDate : null;
+    const source = req.query.source ? String(req.query.source) : null;
+
+    const result = growthExtDb.getReportDetail(studentId, type, { classId, startDate, endDate, source });
+    if (result && result._badType) {
+      return res.status(400).json({ success: false, message: `알 수 없는 내역 유형입니다: ${type}` });
+    }
+    res.json({ success: true, ...result });
+  } catch (err) {
+    console.error('[GROWTH] report detail error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
 router.post('/report/observation', requireAuth, (req, res) => {
   try {
     if (req.user.role !== 'teacher' && req.user.role !== 'admin') {

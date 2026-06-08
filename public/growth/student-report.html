@@ -604,6 +604,119 @@
     }
     .report-toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 
+    /* ===== 카드 세부 내역 Drill-down 모달 (기획서: 성장리포트_내역_drilldown_스펙.md) ===== */
+    /* 클릭 가능 항목 affordance (참여도 활동행·보조타일·성취 출처행·도넛타일·정서/진로/독서/콘텐츠 항목) */
+    .is-drillable { cursor: pointer; position: relative; transition: background .15s; outline: none; }
+    .is-drillable:hover { background: var(--gray-50); }
+    .is-drillable:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+    /* 우측 셰브론 affordance — 행/타일 끝에 표시 (hover 시 진하게) */
+    .is-drillable .click-affordance {
+      position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+      color: var(--gray-300); font-size: 14px; opacity: 0; transition: opacity .15s; pointer-events: none;
+    }
+    .is-drillable:hover .click-affordance, .is-drillable:focus-visible .click-affordance { opacity: 1; }
+    /* 타일류는 셰브론을 우상단 모서리로 (중앙정렬 타일 텍스트와 겹침 회피) */
+    .report-metric-tile.is-drillable .click-affordance,
+    .usage-metric-cell.is-drillable .click-affordance,
+    .subject-item.is-drillable .click-affordance { right: 6px; top: 8px; transform: none; }
+    /* 우측 값/메타/날짜가 있는 행은 셰브론 공간(우측 22px) 확보 — 겹침 방지 */
+    .atb-row.is-drillable, .domain-flow-row.is-drillable { padding-right: 22px; }
+    .ach-bd-row.is-drillable { padding-right: 22px; }
+
+    /* 오버레이 + 패널 */
+    .dm-overlay {
+      position: fixed; inset: 0; background: rgba(17,24,39,.55); z-index: 10000;
+      display: none; align-items: center; justify-content: center; padding: 24px;
+      opacity: 0; transition: opacity .18s;
+    }
+    .dm-overlay.open { display: flex; opacity: 1; }
+    .dm-panel {
+      width: 600px; max-width: calc(100vw - 48px); max-height: 80vh; background: #fff;
+      border-radius: 16px; box-shadow: 0 20px 60px rgba(0,0,0,.25);
+      display: flex; flex-direction: column; overflow: hidden;
+      transform: translateY(8px); transition: transform .18s;
+    }
+    .dm-overlay.open .dm-panel { transform: translateY(0); }
+    .dm-header {
+      padding: 20px 24px; border-bottom: 1px solid var(--gray-200);
+      position: relative; flex: 0 0 auto; background: #fff;
+    }
+    .dm-title {
+      font-size: 19px; font-weight: 700; color: var(--gray-900);
+      display: flex; align-items: center; gap: 8px; padding-right: 48px; line-height: 1.35;
+    }
+    .dm-title .dm-title-ico { font-size: 20px; flex: 0 0 auto; }
+    .dm-title .dm-title-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .dm-count { font-size: 14px; color: var(--gray-500); margin-top: 4px; }
+    .dm-close {
+      position: absolute; top: 16px; right: 16px; width: 36px; height: 36px;
+      border-radius: 10px; border: none; background: var(--gray-100);
+      font-size: 20px; color: var(--gray-600); cursor: pointer; line-height: 1;
+      display: flex; align-items: center; justify-content: center; transition: background .15s;
+    }
+    .dm-close:hover { background: var(--gray-200); }
+    .dm-body { padding: 8px 16px 16px; overflow-y: auto; flex: 1 1 auto; }
+
+    .dm-row {
+      display: flex; align-items: center; gap: 12px; padding: 12px 12px;
+      min-height: 56px; border-radius: 10px; border-bottom: 1px solid var(--gray-100);
+    }
+    .dm-row:last-child { border-bottom: none; }
+    .dm-row-icon { flex: 0 0 auto; font-size: 18px; width: 24px; text-align: center; }
+    .dm-row-body { flex: 1 1 auto; min-width: 0; }
+    .dm-row-primary {
+      font-size: 16px; font-weight: 600; color: var(--gray-800);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .dm-row-meta {
+      font-size: 14px; color: var(--gray-500); margin-top: 2px;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .dm-row-tail { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; }
+    .dm-row-date { font-size: 13px; color: var(--gray-400); white-space: nowrap; }
+    .dm-row-badge {
+      flex: 0 0 auto; font-size: 13px; font-weight: 600; padding: 3px 10px; border-radius: 8px;
+      white-space: nowrap; max-width: 120px; overflow: hidden; text-overflow: ellipsis;
+    }
+    .dm-badge-info { background: var(--primary-light); color: var(--primary-dark); }
+    .dm-badge-success { background: var(--secondary-light); color: #047857; }
+    .dm-badge-danger { background: var(--danger-light); color: #b91c1c; }
+    .dm-badge-warning { background: var(--warning-light); color: #92400e; }
+    .dm-badge-neutral { background: var(--gray-100); color: var(--gray-600); }
+    /* O/X 결과 칩 */
+    .dm-result-chip {
+      flex: 0 0 auto; width: 22px; height: 22px; border-radius: 50%;
+      display: inline-flex; align-items: center; justify-content: center;
+      font-size: 13px; font-weight: 700; color: #fff;
+    }
+    .dm-result-correct { background: var(--secondary); }
+    .dm-result-incorrect { background: var(--danger); }
+
+    /* 빈 상태 / 로딩 */
+    .dm-empty { text-align: center; color: var(--gray-400); padding: 48px 16px; }
+    .dm-empty-ico { font-size: 36px; margin-bottom: 12px; }
+    .dm-empty-title { font-size: 16px; color: var(--gray-600); font-weight: 600; }
+    .dm-empty-text { font-size: 14px; color: var(--gray-400); margin-top: 6px; }
+    .dm-note { font-size: 13px; color: var(--gray-400); text-align: center; padding: 10px 8px 4px; }
+    .dm-skel-row {
+      display: flex; align-items: center; gap: 12px; padding: 12px; min-height: 56px;
+    }
+    .dm-skel-ico { width: 24px; height: 24px; border-radius: 6px; flex: 0 0 auto; }
+    .dm-skel-body { flex: 1 1 auto; display: flex; flex-direction: column; gap: 8px; }
+    .dm-skel-line { height: 12px; border-radius: 6px; }
+    .dm-skel-line.short { width: 40%; }
+    .dm-skel-ico, .dm-skel-line {
+      background: linear-gradient(90deg, var(--gray-100) 25%, var(--gray-200) 37%, var(--gray-100) 63%);
+      background-size: 400% 100%; animation: dmShimmer 1.2s ease infinite;
+    }
+    @keyframes dmShimmer { 0% { background-position: 100% 0; } 100% { background-position: -100% 0; } }
+
+    /* 반응형 — <768px 하단 시트 */
+    @media (max-width: 768px) {
+      .dm-overlay { align-items: flex-end; padding: 0; }
+      .dm-panel { width: 100%; max-width: none; max-height: 88vh; border-radius: 16px 16px 0 0; }
+    }
+
     /* ===== 오늘의 학습 현황 — 기간별 "폭 꽉 채움" (cascade 마지막 = 기존 규칙 override) ===== */
     #dailyLearningSection .daily-content-grid {
       display: grid;
@@ -1046,6 +1159,21 @@
   </main>
 </div>
 
+<!-- 카드 세부 내역 Drill-down 모달 (단일 재사용 컴포넌트) -->
+<div class="dm-overlay" id="detailModal" role="dialog" aria-modal="true" aria-labelledby="dmTitleText">
+  <div class="dm-panel" role="document">
+    <div class="dm-header">
+      <div class="dm-title">
+        <span class="dm-title-ico" id="dmTitleIco">📋</span>
+        <span class="dm-title-text" id="dmTitleText">내역</span>
+      </div>
+      <div class="dm-count" id="dmCount"></div>
+      <button type="button" class="dm-close" id="dmClose" aria-label="닫기">&times;</button>
+    </div>
+    <div class="dm-body" id="dmBody"></div>
+  </div>
+</div>
+
 <script src="/js/common-nav.js"></script>
 <script>
 (function() {
@@ -1073,6 +1201,34 @@
   const RESULT_TYPE_KO = { completed: '완료' };
   function toKoActivityType(v) { return (v && ACTIVITY_TYPE_KO[v]) || v; }
   function toKoSource(v) { return (v && SOURCE_SERVICE_KO[v]) || v; }
+
+  // ---- Drill-down: 클릭 가능 항목 마킹 헬퍼 ----
+  // 활성(cnt>0)이면 is-drillable + data-type(+data-source) + a11y 속성 + 셰브론 affordance.
+  // 비활성(0건)이면 빈 문자열 → 기존 흐리게 처리 유지(클릭 불가).
+  // 참여도 활동유형 행(learning_logs.activity_type) → detail type 매핑표(스펙 §3)
+  const ACT_TO_DETAIL_TYPE = {
+    post_create: 'post', attendance_checkin: 'attendance', survey_respond: 'survey',
+    homework_submit: 'homework', exam_complete: 'exam',
+    daily_complete: 'today_learning', problem_set_complete: 'today_learning',
+    lesson_complete: 'lesson', lesson_view: 'lesson', lesson_progress: 'lesson',
+    content_view: 'content_viewed', diagnosis_complete: 'ai_learning',
+    portfolio_add: 'content_portfolio'
+  };
+  // drillClass: 기존 class="..." 안에 덧붙일 ' is-drillable' 조각 (비활성이면 '')
+  function drillClass(type, opts) {
+    opts = opts || {};
+    return (type && opts.active !== false) ? ' is-drillable' : '';
+  }
+  // drillAttrs: data-type/data-source + a11y 속성 (class는 미포함 — 중복 class 방지)
+  function drillAttrs(type, label, opts) {
+    opts = opts || {};
+    if (!type || opts.active === false) return '';
+    let s = ' data-type="' + type + '"';
+    if (opts.source) s += ' data-source="' + opts.source + '"';
+    s += ' role="button" tabindex="0" aria-label="' + escapeHtml((label || '항목') + ' 내역 보기') + '"';
+    return s;
+  }
+  const DRILL_CHEVRON = '<span class="click-affordance" aria-hidden="true">›</span>';
   function toKoVerb(v) { return (v && VERB_KO[v]) || v; }
   function toKoResultType(v) { return (v && RESULT_TYPE_KO[v]) || v; }
 
@@ -1814,12 +1970,14 @@
         const dateFmt = (e.attendance_date || '').replace(/-/g, '.');
         const reasonHtml = e.emotion_reason ? '<div class="domain-flow-row-desc">' + escapeHtml(e.emotion_reason) + '</div>' : '';
         const badge = isLatest ? '<span class="domain-flow-row-badge">최근</span>' : '';
-        return '<div class="domain-flow-row">' +
+        const dc = drillClass('emotion', { active: true });
+        const da = drillAttrs('emotion', '감정 체크인', { active: true, source: 'all' });
+        return '<div class="domain-flow-row' + dc + '"' + da + '>' +
           '<div class="domain-flow-row-icon">' + emoji + '</div>' +
           '<div class="domain-flow-row-body">' +
             '<div class="domain-flow-row-head"><span class="domain-flow-row-label">' + label + '</span>' + badge + '<span class="domain-flow-row-date">' + dateFmt + '</span></div>' +
             reasonHtml +
-          '</div>' +
+          '</div>' + DRILL_CHEVRON +
         '</div>';
       };
       const headRows = recents.slice(0, LIST_SUMMARY_N).map(renderEmoRow).join('');
@@ -1842,12 +2000,15 @@
         '<div class="domain-details">' +
           '<div class="domain-insight emotion">' + insightText + '</div>' +
           '<div class="report-metric-tiles" style="--tile-n:3;">' +
-            '<div class="report-metric-tile' + (positiveCount === 0 ? ' is-zero' : '') + '" title="감정출석부에서 행복·설렘·좋음·최고·편안 등 긍정 감정으로 체크인한 횟수입니다.">' +
-              '<div class="rmt-value" style="color:var(--secondary);">' + positiveCount + '</div><div class="rmt-label">긍정</div></div>' +
-            '<div class="report-metric-tile' + (negativeCount === 0 ? ' is-zero' : '') + '" title="감정출석부에서 슬픔·화남·불안·피곤·답답 등 부정 감정으로 체크인한 횟수입니다.">' +
-              '<div class="rmt-value" style="color:var(--warning);">' + negativeCount + '</div><div class="rmt-label">부정</div></div>' +
-            '<div class="report-metric-tile" title="해당 기간 중 감정을 기록한 전체 체크인 횟수입니다. (긍정 비율의 분모)">' +
-              '<div class="rmt-value">' + total + '</div><div class="rmt-label">전체 체크인</div></div>' +
+            (function(){ const z = positiveCount === 0; const dc = drillClass('emotion', { active: !z }); const da = drillAttrs('emotion', '긍정 감정', { active: !z, source: 'positive' });
+              return '<div class="report-metric-tile' + (z ? ' is-zero' : '') + dc + '"' + da + ' title="감정출석부에서 행복·설렘·좋음·최고·편안 등 긍정 감정으로 체크인한 횟수입니다.">' +
+              '<div class="rmt-value" style="color:var(--secondary);">' + positiveCount + '</div><div class="rmt-label">긍정</div>' + (dc ? DRILL_CHEVRON : '') + '</div>'; })() +
+            (function(){ const z = negativeCount === 0; const dc = drillClass('emotion', { active: !z }); const da = drillAttrs('emotion', '부정 감정', { active: !z, source: 'negative' });
+              return '<div class="report-metric-tile' + (z ? ' is-zero' : '') + dc + '"' + da + ' title="감정출석부에서 슬픔·화남·불안·피곤·답답 등 부정 감정으로 체크인한 횟수입니다.">' +
+              '<div class="rmt-value" style="color:var(--warning);">' + negativeCount + '</div><div class="rmt-label">부정</div>' + (dc ? DRILL_CHEVRON : '') + '</div>'; })() +
+            (function(){ const z = total === 0; const dc = drillClass('emotion', { active: !z }); const da = drillAttrs('emotion', '전체 체크인', { active: !z, source: 'all' });
+              return '<div class="report-metric-tile' + (z ? ' is-zero' : '') + dc + '"' + da + ' title="해당 기간 중 감정을 기록한 전체 체크인 횟수입니다. (긍정 비율의 분모)">' +
+              '<div class="rmt-value">' + total + '</div><div class="rmt-label">전체 체크인</div>' + (dc ? DRILL_CHEVRON : '') + '</div>'; })() +
           '</div>' +
         '</div>' +
       '</div>' +
@@ -1882,12 +2043,18 @@
     ];
 
     // 보조지표 타일줄(스펙 §4.1) — 막대 승격: 과제/평가/오늘/수업 % 4타일
+    // 보조타일 → detail type 매핑(스펙 §1-A): 과제 homework / 평가 exam / 오늘학습 today_learning / 수업 lesson
+    const tileType = { homework: 'homework', exam: 'exam', daily: 'today_learning', lesson: 'lesson' };
     const buildPartTiles = (showVal) => '<div class="report-metric-tiles" style="--tile-n:4;">' + metrics.map(m => {
       const v = showVal ? p[m.key] : null;
       const valTxt = (v != null) ? v + '%' : '-';
-      const zero = (v == null || v === 0) ? ' is-zero' : '';
-      return '<div class="report-metric-tile' + zero + '" title="' + escapeHtml(m.tip) + '">' +
-        '<div class="rmt-value" style="color:' + m.c + ';">' + valTxt + '</div><div class="rmt-label">' + m.label + '</div></div>';
+      const isZero = (v == null || v === 0);
+      const zero = isZero ? ' is-zero' : '';
+      const dc = drillClass(tileType[m.key], { active: !isZero });
+      const da = drillAttrs(tileType[m.key], m.label, { active: !isZero });
+      const chev = dc ? DRILL_CHEVRON : '';
+      return '<div class="report-metric-tile' + zero + dc + '"' + da + ' title="' + escapeHtml(m.tip) + '">' +
+        '<div class="rmt-value" style="color:' + m.c + ';">' + valTxt + '</div><div class="rmt-label">' + m.label + '</div>' + chev + '</div>';
     }).join('') + '</div>';
 
     if (!hasData || score == null) {
@@ -1943,11 +2110,17 @@
         const lbl = toKoActivityType(l.activity_type) || '활동';
         const cnt = l.cnt || 0;
         const w = Math.round((cnt / maxCnt) * 100);
-        return '<div class="atb-row" title="' + escapeHtml(lbl + ' ' + cnt + '회') + '">' +
+        // 활동유형 → detail type 매핑(스펙 §3). 매핑 없으면 비활성(클릭 불가).
+        const dt = ACT_TO_DETAIL_TYPE[l.activity_type];
+        const active = !!dt && cnt > 0;
+        const dc = drillClass(dt, { active });
+        const da = drillAttrs(dt, lbl, { active });
+        const chev = dc ? DRILL_CHEVRON : '';
+        return '<div class="atb-row' + dc + '"' + da + ' title="' + escapeHtml(lbl + ' ' + cnt + '회') + '">' +
           '<span class="atb-icon">' + ico + '</span>' +
           '<div class="atb-body"><span class="atb-label">' + escapeHtml(lbl) + '</span>' +
           '<div class="atb-track"><div class="atb-fill" style="width:' + w + '%;"></div></div></div>' +
-          '<span class="atb-val">' + cnt + '회</span>' +
+          '<span class="atb-val">' + cnt + '회</span>' + chev +
         '</div>';
       }).join('') + '</div>';
     }
@@ -2025,15 +2198,27 @@
       t.srcs.forEach(k => { const d = bs[k]; if (d && d.total > 0) { c += d.correct; n += d.total; } });
       return n > 0 ? Math.round(c / n * 100) : null;
     };
+    // 도넛 3타일 key → detail type 매핑(합산 모달, 스펙 §1-B/§2-2)
+    const TILE_DETAIL_TYPE = { self_directed: 'ach_self_directed', class_eval: 'ach_class_eval', diagnosis: 'ach_diagnosis' };
     const buildAchTiles = (showVal) => '<div class="report-metric-tiles" style="--tile-n:3;">' + TILES.map(t => {
       const v = showVal ? tileRate(t) : null;
       const valTxt = (v != null) ? v + '%' : '-';
-      const zero = (v == null) ? ' is-zero' : '';
-      return '<div class="report-metric-tile' + zero + '" title="' + escapeHtml(t.tip) + '">' +
+      const isZero = (v == null);
+      const zero = isZero ? ' is-zero' : '';
+      const dt = TILE_DETAIL_TYPE[t.key];
+      const dc = drillClass(dt, { active: !isZero });
+      const da = drillAttrs(dt, t.label, { active: !isZero });
+      const chev = dc ? DRILL_CHEVRON : '';
+      return '<div class="report-metric-tile' + zero + dc + '"' + da + ' title="' + escapeHtml(t.tip) + '">' +
         '<div class="rmt-value" style="color:' + (v != null ? t.c : 'var(--gray-400)') + ';">' + valTxt + '</div>' +
-        '<div class="rmt-label">' + t.label + '</div></div>';
+        '<div class="rmt-label">' + t.label + '</div>' + chev + '</div>';
     }).join('') + '</div>';
 
+    // 출처 6행 key → detail type 매핑(스펙 §1-B). 'content' → content_problem.
+    const SRC_DETAIL_TYPE = {
+      today_learning: 'today_learning', ai_learning: 'ai_learning', wrong_note: 'wrong_note',
+      content: 'content_problem', class_exam: 'class_exam', cbt_exam: 'cbt_exam'
+    };
     // 6행 출처별 막대 렌더 (스펙 §7.2)
     const buildSourceRows = () => '<div class="achievement-breakdown">' + SOURCES.map(s => {
       const d = bs[s.key] || { correct: 0, total: 0, rate: null };
@@ -2043,11 +2228,15 @@
           '<span class="ach-bd-label">' + s.label + '</span>' +
           '<div class="ach-bd-empty">아직 풀이 기록이 없어요</div></div>';
       }
-      return '<div class="ach-bd-row" title="' + escapeHtml(s.tip) + '">' +
+      const dt = SRC_DETAIL_TYPE[s.key];
+      const dc = drillClass(dt, { active: true });
+      const da = drillAttrs(dt, s.label, { active: true });
+      const chev = dc ? DRILL_CHEVRON : '';
+      return '<div class="ach-bd-row' + dc + '"' + da + ' title="' + escapeHtml(s.tip) + '">' +
         '<span class="ach-bd-ico">' + s.ico + '</span>' +
         '<span class="ach-bd-label">' + s.label + '</span>' +
         '<div class="ach-bd-bar"><div class="ach-bd-bar-fill" style="width:' + d.rate + '%;background:' + s.c + ';"></div></div>' +
-        '<span class="ach-bd-meta"><strong>' + d.rate + '%</strong> (' + d.correct + '/' + d.total + ')</span></div>';
+        '<span class="ach-bd-meta"><strong>' + d.rate + '%</strong> (' + d.correct + '/' + d.total + ')</span>' + chev + '</div>';
     }).join('') + '</div>';
 
     const donutTip = '오늘의 학습·AI 맞춤학습·콘텐츠 문항·채움클래스 평가·채움CBT 감독 평가에서 푼 전체 문항을 문항수로 가중 평균한 정답률입니다. (오답노트 재풀이는 제외)';
@@ -2204,16 +2393,20 @@
     // 추가 활용 지표 (조회·포트폴리오 등 BE에서 가용한 모든 지표를 4칩으로)
     const portfolioCount = cu.portfolioCount || 0;
     const usageMetrics = [
-      { label: '📥 저장', v: saved, tip: '나의 보관함에 저장한 콘텐츠 수' },
-      { label: '👀 조회', v: viewed, tip: '채움콘텐츠/수업 누적 조회수' },
-      { label: '🔔 구독', v: subs, tip: '구독 중인 채널/큐레이션 수' },
-      { label: '🎨 포트폴리오', v: portfolioCount, tip: '나도예술가/포트폴리오에 등록한 작품 수' }
+      { label: '📥 저장', v: saved, type: 'content_saved', tip: '나의 보관함에 저장한 콘텐츠 수' },
+      { label: '👀 조회', v: viewed, type: 'content_viewed', tip: '채움콘텐츠/수업 누적 조회수' },
+      { label: '🔔 구독', v: subs, type: 'content_subscribed', tip: '구독 중인 채널/큐레이션 수' },
+      { label: '🎨 포트폴리오', v: portfolioCount, type: 'content_portfolio', tip: '나도예술가/포트폴리오에 등록한 작품 수' }
     ];
     const usageGridHtml = '<div class="usage-metric-grid">' + usageMetrics.map(u => {
-      const zero = (u.v === 0) ? ' is-zero' : '';
-      return '<div class="usage-metric-cell' + zero + '" title="' + escapeHtml(u.tip) + '">' +
+      const isZero = (u.v === 0);
+      const zero = isZero ? ' is-zero' : '';
+      const dc = drillClass(u.type, { active: !isZero });
+      const da = drillAttrs(u.type, u.label, { active: !isZero });
+      const chev = dc ? DRILL_CHEVRON : '';
+      return '<div class="usage-metric-cell' + zero + dc + '"' + da + ' title="' + escapeHtml(u.tip) + '">' +
         '<span class="um-label">' + u.label + '</span>' +
-        '<strong>' + (u.v || 0) + '건</strong>' +
+        '<strong>' + (u.v || 0) + '건</strong>' + chev +
       '</div>';
     }).join('') + '</div>';
 
@@ -2754,9 +2947,11 @@
     const avgRating = rated.length ? Math.round(rated.reduce((s, v) => s + v, 0) / rated.length * 10) / 10 : null;
 
     // 보조지표 타일줄(스펙 §4.1) — chips 승격: 누적 N권 · 평균 별점 · 등록 N권 3타일
+    const readDc = drillClass('reading', { active: count > 0 });
+    const readDa = drillAttrs('reading', '독서 기록', { active: count > 0 });
     const subHtml = '<div class="report-metric-tiles" style="--tile-n:3;">' +
-      '<div class="report-metric-tile" title="우리반 성장기록 > 독서 기록에 학생이 직접 등록한 책 권수 누적입니다.">' +
-        '<div class="rmt-value" style="color:var(--warning);">' + count + '</div><div class="rmt-label">누적(권)</div></div>' +
+      '<div class="report-metric-tile' + readDc + '"' + readDa + ' title="우리반 성장기록 > 독서 기록에 학생이 직접 등록한 책 권수 누적입니다.">' +
+        '<div class="rmt-value" style="color:var(--warning);">' + count + '</div><div class="rmt-label">누적(권)</div>' + (readDc ? DRILL_CHEVRON : '') + '</div>' +
       '<div class="report-metric-tile' + (avgRating == null ? ' is-zero' : '') + '" title="별점이 등록된 책들의 평균 별점입니다.">' +
         '<div class="rmt-value">' + (avgRating != null ? avgRating + '★' : '-') + '</div><div class="rmt-label">평균 별점</div></div>' +
       '<div class="report-metric-tile" title="독서 기록에 등록된 책 권수입니다.">' +
@@ -2771,12 +2966,14 @@
         const r = Math.max(0, Math.min(5, Math.round(Number(rating))));
         starsHtml = '<span class="book-row-stars" title="별점 ' + r + '점">' + '★'.repeat(r) + '☆'.repeat(5 - r) + '</span>';
       }
-      return '<div class="domain-flow-row">' +
+      const bDc = drillClass('reading', { active: true });
+      const bDa = drillAttrs('reading', '독서 기록', { active: true });
+      return '<div class="domain-flow-row' + bDc + '"' + bDa + '>' +
         '<div class="domain-flow-row-icon">📗</div>' +
         '<div class="domain-flow-row-body">' +
           '<div class="domain-flow-row-head"><span class="domain-flow-row-label">' + escapeHtml(b.book_title || b.bookTitle || '') + '</span>' + starsHtml + '<span class="domain-flow-row-date">' + formatDate(b.read_date || b.readDate || '') + '</span></div>' +
           '<div class="domain-flow-row-desc">' + escapeHtml(b.author || '') + '</div>' +
-        '</div>' +
+        '</div>' + DRILL_CHEVRON +
       '</div>';
     };
     let booksHtml;
@@ -2866,10 +3063,12 @@
 
     // 보조지표 타일줄(스펙 §4.1) — chips 승격: 관심분야 N · 활동 N 2타일
     const subHtml = '<div class="report-metric-tiles" style="--tile-n:2;">' +
-      '<div class="report-metric-tile' + (interests.length === 0 ? ' is-zero' : '') + '" title="진로진학 활동에서 학생이 입력한 관심 분야 항목 수입니다.">' +
-        '<div class="rmt-value" style="color:var(--cyan);">' + interests.length + '</div><div class="rmt-label">관심 분야</div></div>' +
-      '<div class="report-metric-tile' + (logs.length === 0 ? ' is-zero' : '') + '" title="진로 탐색 활동(체험·검사 등) 이력 건수입니다.">' +
-        '<div class="rmt-value">' + logs.length + '</div><div class="rmt-label">활동 이력</div></div>' +
+      (function(){ const z = interests.length === 0; const dc = drillClass('career_interest', { active: !z }); const da = drillAttrs('career_interest', '관심 분야', { active: !z });
+        return '<div class="report-metric-tile' + (z ? ' is-zero' : '') + dc + '"' + da + ' title="진로진학 활동에서 학생이 입력한 관심 분야 항목 수입니다.">' +
+        '<div class="rmt-value" style="color:var(--cyan);">' + interests.length + '</div><div class="rmt-label">관심 분야</div>' + (dc ? DRILL_CHEVRON : '') + '</div>'; })() +
+      (function(){ const z = logs.length === 0; const dc = drillClass('career', { active: !z }); const da = drillAttrs('career', '활동 이력', { active: !z });
+        return '<div class="report-metric-tile' + (z ? ' is-zero' : '') + dc + '"' + da + ' title="진로 탐색 활동(체험·검사 등) 이력 건수입니다.">' +
+        '<div class="rmt-value">' + logs.length + '</div><div class="rmt-label">활동 이력</div>' + (dc ? DRILL_CHEVRON : '') + '</div>'; })() +
     '</div>';
 
     // 블록 E — 활동 이력
@@ -2880,13 +3079,15 @@
     } else {
       // 토글 없는 짧은 리스트(1~4건)는 has-boost로 잔여 높이를 보강 카드에 양보(스펙 §4.2 규칙2)
       const careerBoost = careerShown < 5;
+      const careerDc = drillClass('career', { active: true });
+      const careerDa = drillAttrs('career', '진로 탐색 활동', { active: true });
       logsHtml = '<div class="domain-flow-list' + (careerBoost ? ' has-boost' : '') + '">' + logs.slice(0, 5).map(l => {
-        return '<div class="domain-flow-row">' +
+        return '<div class="domain-flow-row' + careerDc + '"' + careerDa + '>' +
           '<div class="domain-flow-row-icon">📌</div>' +
           '<div class="domain-flow-row-body">' +
             '<div class="domain-flow-row-head"><span class="domain-flow-row-label">' + escapeHtml(l.title || l.activity_type || '활동') + '</span><span class="domain-flow-row-date">' + formatDate(l.activity_date) + '</span></div>' +
             (l.activity_type ? '<div class="domain-flow-row-desc">' + escapeHtml(l.activity_type) + '</div>' : '') +
-          '</div>' +
+          '</div>' + DRILL_CHEVRON +
         '</div>';
       }).join('') + '</div>';
       if (careerBoost) {
@@ -3118,6 +3319,151 @@
     const d = new Date(dateStr);
     return d.getFullYear() + '.' + String(d.getMonth()+1).padStart(2,'0') + '.' + String(d.getDate()).padStart(2,'0');
   }
+
+  // ===== 카드 세부 내역 Drill-down 모달 =====
+  // 기획서: 성장리포트_내역_drilldown_스펙.md
+  // 단일 #detailModal 컴포넌트를 모든 type이 재사용. 카드 컨테이너에 이벤트 위임 1개.
+  const DM_TYPE_ICON = {
+    post: '🗒️', attendance: '💛', survey: '📋', homework: '📝', exam: '🎓',
+    today_learning: '📋', ai_learning: '🧭', wrong_note: '📝', content_problem: '🎬',
+    class_exam: '🎓', cbt_exam: '🛡', lesson: '📚',
+    ach_self_directed: '🎯', ach_class_eval: '🎓', ach_diagnosis: '🔎',
+    emotion: '😊', career: '🧭', career_interest: '🎯', reading: '📗',
+    content_saved: '📥', content_viewed: '👀', content_subscribed: '🔔', content_portfolio: '🎨'
+  };
+  const DM_TYPE_ROWICON = {
+    post: '🗒️', attendance: '📅', survey: '📋', homework: '📝', exam: '🎓',
+    today_learning: '📋', ai_learning: '🧭', wrong_note: '📝', content_problem: '🎬',
+    class_exam: '🎓', cbt_exam: '🛡', lesson: '📚',
+    ach_self_directed: '📚', ach_class_eval: '🎓', ach_diagnosis: '🔎',
+    emotion: '😊', career: '📌', career_interest: '🎯', reading: '📗',
+    content_saved: '📥', content_viewed: '👀', content_subscribed: '🔔', content_portfolio: '🎨'
+  };
+  let dmLastTrigger = null;
+  let dmReqSeq = 0;
+
+  function dmEl(id) { return document.getElementById(id); }
+
+  function openDetailModal(triggerEl) {
+    const type = triggerEl.getAttribute('data-type');
+    if (!type) return;
+    const source = triggerEl.getAttribute('data-source') || '';
+    dmLastTrigger = triggerEl;
+    const overlay = dmEl('detailModal');
+    // 헤더 즉시 표시(아이콘) + 스켈레톤 로딩
+    dmEl('dmTitleIco').textContent = DM_TYPE_ICON[type] || '📋';
+    dmEl('dmTitleText').textContent = '불러오는 중…';
+    dmEl('dmCount').textContent = '';
+    dmEl('dmBody').innerHTML =
+      '<div class="dm-loading">' +
+        Array(3).fill(0).map(() =>
+          '<div class="dm-skel-row"><div class="dm-skel-ico"></div>' +
+          '<div class="dm-skel-body"><div class="dm-skel-line"></div><div class="dm-skel-line short"></div></div></div>'
+        ).join('') +
+      '</div>';
+    overlay.classList.add('open');
+    document.body.style.overflow = 'hidden';
+
+    const seq = ++dmReqSeq;
+    let url = '/api/growth/report/student/' + targetStudentId + '/detail' + buildReportQuery();
+    url += (url.indexOf('?') >= 0 ? '&' : '?') + 'type=' + encodeURIComponent(type);
+    if (source) url += '&source=' + encodeURIComponent(source);
+
+    fetchWithAuth(url)
+      .then(r => r.json())
+      .then(data => {
+        if (seq !== dmReqSeq) return; // 더 최신 요청이 떴으면 무시
+        if (!data || !data.success) { renderDetailModal(type, { title: '내역', count: 0, items: [] }); return; }
+        renderDetailModal(type, data);
+      })
+      .catch(() => {
+        if (seq !== dmReqSeq) return;
+        dmEl('dmBody').innerHTML =
+          '<div class="dm-empty"><div class="dm-empty-ico">⚠️</div>' +
+          '<div class="dm-empty-title">내역을 불러올 수 없습니다</div>' +
+          '<div class="dm-empty-text">잠시 후 다시 시도해 주세요.</div></div>';
+      });
+  }
+
+  function renderDetailModal(type, data) {
+    dmEl('dmTitleIco').textContent = DM_TYPE_ICON[type] || '📋';
+    dmEl('dmTitleText').textContent = data.title || '내역';
+    const count = (typeof data.count === 'number') ? data.count : (data.items ? data.items.length : 0);
+    dmEl('dmCount').textContent = '총 ' + count + '건 · 최신순';
+
+    const items = data.items || [];
+    if (items.length === 0) {
+      dmEl('dmBody').innerHTML =
+        '<div class="dm-empty"><div class="dm-empty-ico">📭</div>' +
+        '<div class="dm-empty-title">표시할 내역이 없습니다</div>' +
+        '<div class="dm-empty-text">이 기간에는 기록이 없어요.</div></div>';
+      return;
+    }
+    const rowIco = DM_TYPE_ROWICON[type] || '•';
+    let rowsHtml = items.map(it => {
+      const primary = escapeHtml(it.primary || '제목 없음');
+      const meta = it.meta ? '<div class="dm-row-meta">' + escapeHtml(it.meta) + '</div>' : '';
+      const dateTxt = it.date ? formatDate(it.date) : '';
+      // 우측 꼬리: 결과칩(O/X) → 뱃지 → 날짜
+      let tail = '';
+      if (it.result === 'correct') tail += '<span class="dm-result-chip dm-result-correct" title="정답">O</span>';
+      else if (it.result === 'incorrect') tail += '<span class="dm-result-chip dm-result-incorrect" title="오답">X</span>';
+      if (it.badge && it.badge.text) {
+        const tone = it.badge.tone || 'neutral';
+        tail += '<span class="dm-row-badge dm-badge-' + tone + '">' + escapeHtml(it.badge.text) + '</span>';
+      }
+      if (dateTxt) tail += '<span class="dm-row-date">' + dateTxt + '</span>';
+      return '<div class="dm-row">' +
+        '<div class="dm-row-icon">' + rowIco + '</div>' +
+        '<div class="dm-row-body"><div class="dm-row-primary">' + primary + '</div>' + meta + '</div>' +
+        (tail ? '<div class="dm-row-tail">' + tail + '</div>' : '') +
+      '</div>';
+    }).join('');
+    // 200건 상한 안내 (스펙 §5-3)
+    if (count > items.length) {
+      rowsHtml += '<div class="dm-note">최근 ' + items.length + '건만 표시합니다 (전체 ' + count + '건)</div>';
+    }
+    dmEl('dmBody').innerHTML = rowsHtml;
+    dmEl('dmBody').scrollTop = 0;
+  }
+
+  function closeDetailModal() {
+    const overlay = dmEl('detailModal');
+    overlay.classList.remove('open');
+    document.body.style.overflow = '';
+    dmReqSeq++; // 진행 중 요청 무효화
+    // 접근성 — 포커스를 트리거 행으로 복귀
+    if (dmLastTrigger && typeof dmLastTrigger.focus === 'function') {
+      try { dmLastTrigger.focus(); } catch (e) {}
+    }
+    dmLastTrigger = null;
+  }
+
+  // 모달 닫기 핸들러 (×버튼 / 오버레이 빈영역 / Esc)
+  (function bindDetailModalClose() {
+    const overlay = dmEl('detailModal');
+    if (!overlay) return;
+    dmEl('dmClose').addEventListener('click', closeDetailModal);
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) closeDetailModal(); });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && overlay.classList.contains('open')) closeDetailModal();
+    });
+  })();
+
+  // 카드 컨테이너(#reportGrid)에 위임 클릭/키보드 리스너 1개
+  (function bindDetailDelegation() {
+    const grid = document.getElementById('reportGrid');
+    if (!grid) return;
+    grid.addEventListener('click', (e) => {
+      const t = e.target.closest('.is-drillable');
+      if (t && grid.contains(t)) { e.preventDefault(); openDetailModal(t); }
+    });
+    grid.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      const t = e.target.closest('.is-drillable');
+      if (t && grid.contains(t)) { e.preventDefault(); openDetailModal(t); }
+    });
+  })();
 })();
 </script>
 </body>
