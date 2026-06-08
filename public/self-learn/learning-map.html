@@ -1071,8 +1071,8 @@
     .diag-help-body li{margin-bottom:6px}
     .diag-resume-banner{background:linear-gradient(90deg,#EEF2FF,#F5F3FF);border:1px solid #C7D2FE;border-radius:12px;padding:14px 18px;display:flex;align-items:center;gap:12px;margin-bottom:16px;flex-wrap:wrap}
     .diag-resume-banner .text{flex:1;font-size:15px;font-weight:600;color:#3730A3;min-width:200px}
-    /* 지난 진단 섹션 (인트로 카드 하단) */
-    .diag-history-section{max-width:720px;margin:24px auto 0;padding:0}
+    /* 지난 진단 섹션 (인트로 카드 하단) — 상단 메트릭/인트로/단원목록과 좌우 경계 정합(full-width) */
+    .diag-history-section{width:100%;max-width:none;margin:20px 0 0;padding:0}
     .diag-history-section h3{font-size:18px;font-weight:700;color:#0F172A;margin:0 0 12px;display:flex;align-items:center;gap:8px}
     .diag-history-list{background:#fff;border-radius:14px;box-shadow:0 4px 12px rgba(15,23,42,0.04);overflow:hidden}
     .diag-history-row{display:flex;align-items:center;gap:12px;padding:14px 18px;border-bottom:1px solid #F1F5F9;font-size:15px;cursor:pointer;transition:background .12s}
@@ -1092,6 +1092,41 @@
     .diag-history-judge.failed{color:#EF4444;background:#FEE2E2}
     .diag-history-cta{font-size:13px;color:#6366F1;font-weight:600;white-space:nowrap}
     .diag-history-empty{padding:24px;text-align:center;font-size:15px;color:#94A3B8;background:#fff;border-radius:14px}
+
+    /* D-NEW-1: 모바일(≤768px) 지난 진단 행 2행 재배치 (데스크톱 1행 무손상)
+       - DOM 순서 고정(dot,time,subj,title,rate,judge,recPath?,cta) → flex-wrap 2행
+       - 상단행: dot·시간·과목·단원명(전체 보이게, 2줄 ellipsis)
+       - 하단행: 정답률·판정 뱃지·추천경로·CTA (글자 세로쪼갬 금지·잘림 금지)
+       - 줄바꿈 유도: 단원명(title)을 상단행 끝까지 채워(flex-grow) 이후 요소가 다음 줄로 wrap */
+    @media (max-width:768px){
+      .diag-history-row{
+        flex-wrap:wrap;
+        align-items:center;
+        gap:8px 8px;
+        padding:14px 16px;
+      }
+      .diag-history-row .diag-history-time{min-width:0;white-space:nowrap;flex-shrink:0}
+      .diag-history-row .diag-history-subj{flex-shrink:0;white-space:nowrap}
+      /* 단원명: 상단행 남은 폭 전부 차지(→ rate 이후가 다음 줄로 wrap) + 2줄까지 표시 */
+      .diag-history-row .diag-history-title{
+        flex:1 1 40%;min-width:0;
+        white-space:normal;
+        display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;
+        line-height:1.4;
+      }
+      /* 정답률: 단원명이 상단행을 채우면 자연 wrap되어 하단행 시작 */
+      .diag-history-row .diag-history-rate{flex:0 0 auto;white-space:nowrap;margin-left:18px}
+      .diag-history-row .diag-history-judge{flex:0 0 auto;white-space:nowrap}
+      /* 추천경로/CTA: 글자 가로 한 줄 유지, 우측으로 밀기 */
+      .diag-history-row .diag-history-rec-path-btn{
+        flex:0 0 auto;white-space:nowrap;margin-right:0 !important;margin-left:auto;
+      }
+      .diag-history-row .diag-history-cta{flex:0 0 auto;white-space:nowrap}
+      /* CTA만 있는(진행중) 행: CTA를 우측으로 */
+      .diag-history-row .diag-history-rate ~ .diag-history-cta{margin-left:auto}
+      /* 잘림 방지 */
+      .diag-history-list{overflow:visible}
+    }
 
     /* 진행 화면 — sticky 헤더 */
     .diag-running{display:grid;grid-template-columns:280px minmax(0,1fr);gap:18px;margin-top:0}
@@ -1190,8 +1225,9 @@
       .diag-confirm-actions .btn{flex:1 1 auto;justify-content:center;text-align:center}
     }
 
-    /* 결과 화면 — 헤로 */
-    .diag-result-wrap{max-width:920px;margin:0 auto;display:flex;flex-direction:column;gap:18px}
+    /* 결과 화면 — 헤로. [C1] 래퍼 폭은 인트로/단원목록과 동일하게 full-width로 정합.
+       내부 콘텐츠(KPI 그리드 max-width:640px, hero 텍스트 max-width:560px)는 자체 중앙정렬로 가독성 유지. */
+    .diag-result-wrap{width:100%;max-width:none;margin:0;display:flex;flex-direction:column;gap:18px}
     .diag-result-hero{background:linear-gradient(135deg,#EEF2FF,#F5F3FF);border-radius:20px;padding:40px 32px;text-align:center}
     .diag-result-hero .icon{width:88px;height:88px;border-radius:50%;background:#fff;display:flex;align-items:center;justify-content:center;font-size:44px;margin:0 auto 18px;box-shadow:0 8px 22px rgba(15,23,42,0.08)}
     .diag-result-hero h1{font-size:30px;font-weight:800;color:#0F172A;margin:0 0 12px;letter-spacing:-0.01em}
@@ -7205,7 +7241,7 @@ async function renderDiagIntroV3(forcePaused) {
           <div class="diag-units-empty">학교급과 학년을 고르면 단원이 나와요.</div>
         </div>
       </div>
-      <div class="diag-history-section" id="diagHistorySection" style="margin-top:20px">
+      <div class="diag-history-section" id="diagHistorySection">
         <h3>📋 지난 진단</h3>
         <div class="diag-history-list" id="diagHistoryList">
           <div class="diag-history-empty">최근 진단 이력이 없어요. 시작해 보세요!</div>
@@ -8153,16 +8189,22 @@ async function loadDiagHistorySection() {
       const subj = it.subject || it.area || '학습';
       const time = it.relativeTime || diagFmtRelative(it.completedAt || it.completed_at || it.startedAt || it.started_at);
       const sessId = it.id || it.session_id || it.sessionId;
+      // [B2] 진행 중(in_progress) 세션은 보여줄 "결과"가 없음 → "이어서 풀기"로 재개,
+      //      추천 경로 버튼은 결과 미확정이라 숨김. 완료(completed) 세션만 "결과 다시 보기".
+      const isInProgress = it.status === 'in_progress';
+      const rowAction = isInProgress ? `resumeDiagV3FromServer(${sessId})` : `viewLastDiagResultById(${sessId})`;
+      const ctaLabel = isInProgress ? '이어서 풀기 →' : '결과 다시 보기 →';
+      const recPathBtn = isInProgress ? '' : `<button type="button" class="diag-history-rec-path-btn" onclick="event.stopPropagation();showRecommendedPathModal(${sessId})" style="font-size:13px;font-weight:700;padding:6px 12px;background:#4F46E5;color:#fff;border:none;border-radius:8px;cursor:pointer;margin-right:6px;display:inline-flex;align-items:center;gap:4px"><i class="fas fa-route" style="font-size:11px"></i> 추천 경로 →</button>`;
       html += `
-        <div class="diag-history-row" onclick="viewLastDiagResultById(${sessId})">
+        <div class="diag-history-row" onclick="${rowAction}">
           <span class="diag-history-dot ${dotCls}"></span>
           <span class="diag-history-time">${escHtml(time || '-')}</span>
           <span class="diag-history-subj">${escHtml(subj)}</span>
           <span class="diag-history-title">${escHtml(title)}</span>
           <span class="diag-history-rate">${pct !== null && pct !== undefined ? pct + '%' : '-'}</span>
           <span class="diag-history-judge ${judgeCls}">${escHtml(judgeTxt)}</span>
-          <button type="button" class="diag-history-rec-path-btn" onclick="event.stopPropagation();showRecommendedPathModal(${sessId})" style="font-size:13px;font-weight:700;padding:6px 12px;background:#4F46E5;color:#fff;border:none;border-radius:8px;cursor:pointer;margin-right:6px;display:inline-flex;align-items:center;gap:4px"><i class="fas fa-route" style="font-size:11px"></i> 추천 경로 →</button>
-          <span class="diag-history-cta">결과 다시 보기 →</span>
+          ${recPathBtn}
+          <span class="diag-history-cta">${ctaLabel}</span>
         </div>`;
     });
     list.innerHTML = html;
@@ -8172,8 +8214,24 @@ async function loadDiagHistorySection() {
 }
 
 // 결과 다시 보기 — sessionId 기반
+//   [B1] 지난 진단은 대부분 concept-v3 세션 → v3 결과 API/렌더러로 먼저 시도하고,
+//        구형 CAT(v2) 세션만 v2 경로로 폴백한다. (v2로만 호출하면 v3 difficulty_path(객체)를
+//        배열로 파싱 못해 nodeResults=[] → "진단 완료! / 진단된 단원이 없어요" 빈 화면이 떴음.)
+//   호출부 3곳(히스토리 행·단원카드 등) 시그니처는 그대로 viewLastDiagResultById(id) 유지.
 async function viewLastDiagResultById(sessionId) {
   if (!sessionId) return;
+  // 1) v3 결과 먼저 시도 — units/recommendedStartNode/lastPassedNode 가 있으면 v3 세션으로 확정.
+  //    (v2 세션은 v3 라우트가 v2 결과로 폴백해 summary만 있고 위 필드가 없음 → 아래 v2 경로로 진행)
+  try {
+    const r3 = await fetchApi('/api/self-learn/diagnosis/v3/' + sessionId + '/result');
+    if (r3 && r3.summary && (r3.units || r3.recommendedStartNode || r3.lastPassedNode)) {
+      diagV3 = { sessionId, finished: true, results: r3 };
+      switchToDiagnosis();
+      renderDiagV3Result();
+      return;
+    }
+  } catch (_) { /* v3 실패 시 v2 폴백 */ }
+  // 2) v2 폴백 (구형 CAT 세션)
   try {
     const r = await fetchApi('/api/self-learn/diagnosis/' + sessionId + '/result');
     if (!r || !r.success) { showToast('진단 결과를 불러올 수 없어요.', 'fa-exclamation-circle'); return; }
@@ -8200,6 +8258,7 @@ async function viewLastDiagResultById(sessionId) {
       finished: true,
       results: r
     };
+    switchToDiagnosis();
     renderDiagResult();
   } catch (_) {
     showToast('진단 결과를 불러올 수 없어요.', 'fa-exclamation-circle');
