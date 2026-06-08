@@ -2890,7 +2890,8 @@ async function ensureAllNodesById() {
         });
       });
       allNodesById = acc;
-      try { console.log('[learning-map] allNodesById 라벨 캐시 빌드:', Object.keys(acc).length, '개'); } catch(_) {}
+      // 디버그 로그 — 기본 비활성(콘솔 노이즈 제거). 필요 시 localStorage.diagDebug='1' 로 켠다.
+      try { if (window.localStorage && localStorage.getItem('diagDebug') === '1') console.log('[learning-map] allNodesById 라벨 캐시 빌드:', Object.keys(acc).length, '개'); } catch(_) {}
     } catch (err) {
       console.warn('[learning-map] allNodesById 빌드 실패 — 폴백 사용:', err);
     }
@@ -7344,12 +7345,34 @@ async function startDiagnosisV3Unit(unitNodeId, ctx) {
   const sl = (ctx && ctx.schoolLevel) || $('diagV3SchoolLevel')?.value || '초';
   const grade = (ctx && ctx.grade != null) ? ctx.grade : ($('diagV3Grade')?.value || '');
   const area = (ctx && ctx.area) || $('diagV3Area')?.value || '';
-  const data = await fetchApi('/api/self-learn/diagnosis/v3/start', {
-    method: 'POST',
-    body: JSON.stringify({ schoolLevel: sl, grade, subject: '수학', area, unitNodeId })
-  });
-  if (!data || !data.sessionId) {
-    showToast('이 단원은 지금 진단할 수 없어요. 다른 단원을 골라보세요.', 'fa-info-circle');
+  // 직접 fetch로 실제 HTTP 상태·본문을 확인한다(원인별 안내). fetchApi는 실패 사유를 null로 뭉뚱그려
+  //   "이 단원은 지금 진단할 수 없어요"라는 오해의 토스트만 띄우므로 진단 시작 경로에선 쓰지 않는다.
+  let res, data;
+  try {
+    res = await fetch('/api/self-learn/diagnosis/v3/start', {
+      method: 'POST', credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ schoolLevel: sl, grade, subject: '수학', area, unitNodeId })
+    });
+    data = await res.json().catch(() => null);
+  } catch (e) {
+    console.warn('[diag-v3] start fetch error:', e && e.message);
+    showToast('네트워크 연결을 확인하고 다시 시도해 주세요.', 'fa-exclamation-circle');
+    return;
+  }
+  // 인증 만료 — 가장 흔한 무음 실패. 학생에게 재로그인을 명확히 안내.
+  if (res.status === 401 || res.status === 403) {
+    showToast('로그인이 만료됐어요. 다시 로그인한 뒤 진단해 주세요.', 'fa-exclamation-circle');
+    return;
+  }
+  // 교사·관리자 계정은 진단 기록을 남기지 않음(BE skipped) — 학생 계정으로 안내.
+  if (data && data.skipped) {
+    showToast('진단검사는 학생 계정에서만 풀 수 있어요. 학생으로 로그인해 주세요.', 'fa-info-circle');
+    return;
+  }
+  if (!res.ok || !data || data.success === false || !data.sessionId) {
+    console.warn('[diag-v3] start failed:', { status: res.status, ok: res.ok, message: data && data.message, unitNodeId });
+    showToast((data && data.message) ? data.message : '진단을 시작하지 못했어요. 잠시 후 다시 시도해 주세요.', 'fa-info-circle');
     return;
   }
   diagV3 = {
