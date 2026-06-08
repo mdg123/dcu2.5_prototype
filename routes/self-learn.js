@@ -874,6 +874,156 @@ router.get('/diagnosis/:sessionId/result', requireAuth, (req, res) => {
 });
 
 // ============================================================
+// 진단검사 v3 — 개념(차시) 단위 순차 진단 (기획서 진단검사_v3_기획서.md §7 API 계약)
+// ============================================================
+// 드릴다운 라우트(/diagnosis/units 등)는 단일 세그먼트라 /diagnosis/:sessionId/* 와 충돌 없음.
+// v3 세션 라우트는 별도 prefix(/diagnosis/v3/:sessionId/*)로 분리하여 v2 경로와 명확히 구분.
+
+// GET /diagnosis/grades?schoolLevel=초 — 학교급의 학년 목록 (수학, 단원 ≥1)
+router.get('/diagnosis/grades', requireAuth, (req, res) => {
+  try {
+    const grades = selfLearnDb.getV3Grades(req.query.schoolLevel);
+    res.json({ success: true, grades });
+  } catch (err) {
+    console.error('[SELF-LEARN] diagnosis/grades error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// GET /diagnosis/areas?schoolLevel=초&grade=4 — 학년의 영역 목록 (단원 ≥1)
+router.get('/diagnosis/areas', requireAuth, (req, res) => {
+  try {
+    const areas = selfLearnDb.getV3Areas(req.query.schoolLevel, req.query.grade);
+    res.json({ success: true, areas });
+  } catch (err) {
+    console.error('[SELF-LEARN] diagnosis/areas error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// GET /diagnosis/units?schoolLevel=초&grade=4&subject=수학&area=수와 연산 — 진단할 단원 목록 + 상태
+router.get('/diagnosis/units', requireAuth, (req, res) => {
+  try {
+    const units = selfLearnDb.getV3Units(req.user.id, {
+      schoolLevel: req.query.schoolLevel,
+      grade: req.query.grade,
+      area: req.query.area
+    });
+    res.json({ success: true, units });
+  } catch (err) {
+    console.error('[SELF-LEARN] diagnosis/units error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// GET /diagnosis/v3/active — 진행중(in_progress) v3 세션 1건 (FE "이어서 풀기" 배너 복원용)
+//   주의: /diagnosis/v3/:sessionId/* 파라미터 라우트보다 먼저 선언해야 'active'가 sessionId로 잡히지 않음.
+router.get('/diagnosis/v3/active', requireAuth, (req, res) => {
+  try {
+    // 교사·관리자는 진단 기록 없음 → null
+    if (req.user.role === 'teacher' || req.user.role === 'admin') {
+      return res.json({ success: true, active: null });
+    }
+    const active = selfLearnDb.getActiveDiagnosisV3(req.user.id);
+    res.json({ success: true, active: active || null });
+  } catch (err) {
+    console.error('[SELF-LEARN] diagnosis/v3/active error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// POST /diagnosis/v3/start — v3 진단 세션 시작 (단원 첫 개념 첫 문항)
+router.post('/diagnosis/v3/start', requireAuth, (req, res) => {
+  try {
+    if (req.user.role === 'teacher' || req.user.role === 'admin') {
+      return res.json({ success: true, skipped: true, reason: 'teacher_no_record', sessionId: null });
+    }
+    const result = selfLearnDb.startDiagnosisV3(req.user.id, req.body || {});
+    res.json({ success: true, ...result });
+  } catch (err) {
+    console.error('[SELF-LEARN] diagnosis/v3/start error:', err);
+    const status = err && err.statusCode ? err.statusCode : 500;
+    res.status(status).json({ success: false, message: err && err.message || '서버 오류가 발생했습니다.' });
+  }
+});
+
+// v3 세션 본인 소유 확인 헬퍼
+function _v3OwnSession(req, res) {
+  const sessionId = parseInt(req.params.sessionId);
+  if (!Number.isFinite(sessionId)) { res.status(400).json({ success: false, message: 'sessionId 형식 오류' }); return null; }
+  const sess = require('../db/index').prepare('SELECT user_id FROM diagnosis_sessions WHERE id = ?').get(sessionId);
+  if (!sess) { res.status(404).json({ success: false, message: '진단 세션을 찾을 수 없습니다.' }); return null; }
+  if (sess.user_id !== req.user.id && req.user.role !== 'admin') { res.status(403).json({ success: false, message: '본인 세션이 아닙니다.' }); return null; }
+  return sessionId;
+}
+
+// GET /diagnosis/v3/:sessionId/next — 다음 문항 1개 (정답 비노출)
+router.get('/diagnosis/v3/:sessionId/next', requireAuth, (req, res) => {
+  try {
+    const sessionId = _v3OwnSession(req, res); if (sessionId == null) return;
+    const result = selfLearnDb.getNextDiagnosisV3(sessionId);
+    if (!result) return res.status(404).json({ success: false, message: '세션 없음' });
+    res.json({ success: true, ...result });
+  } catch (err) {
+    console.error('[SELF-LEARN] diagnosis/v3/next error:', err);
+    const status = err && err.statusCode ? err.statusCode : 500;
+    res.status(status).json({ success: false, message: err && err.message || '서버 오류가 발생했습니다.' });
+  }
+});
+
+// POST /diagnosis/v3/:sessionId/answer — 채점(서버) + 2-strike + 이동 결정 (정답 비노출)
+router.post('/diagnosis/v3/:sessionId/answer', requireAuth, (req, res) => {
+  try {
+    const sessionId = _v3OwnSession(req, res); if (sessionId == null) return;
+    const result = selfLearnDb.submitDiagnosisV3(sessionId, req.body || {});
+    res.json({ success: true, ...result });
+  } catch (err) {
+    console.error('[SELF-LEARN] diagnosis/v3/answer error:', err);
+    const status = err && err.statusCode ? err.statusCode : 500;
+    res.status(status).json({ success: false, message: status === 400 ? '필수 파라미터가 누락되었습니다.' : (err && err.message || '진단 응답 처리 중 오류가 발생했습니다.'), detail: String(err && err.message || err) });
+  }
+});
+
+// POST /diagnosis/v3/:sessionId/advance — 분기 모달 선택 확정 (후속 단원/하향 선수/종료)
+router.post('/diagnosis/v3/:sessionId/advance', requireAuth, (req, res) => {
+  try {
+    const sessionId = _v3OwnSession(req, res); if (sessionId == null) return;
+    const result = selfLearnDb.advanceDiagnosisV3(sessionId, req.body || {});
+    res.json({ success: true, ...result });
+  } catch (err) {
+    console.error('[SELF-LEARN] diagnosis/v3/advance error:', err);
+    const status = err && err.statusCode ? err.statusCode : 500;
+    res.status(status).json({ success: false, message: err && err.message || '서버 오류가 발생했습니다.' });
+  }
+});
+
+// POST /diagnosis/v3/:sessionId/finish — v3 완료
+router.post('/diagnosis/v3/:sessionId/finish', requireAuth, (req, res) => {
+  try {
+    const sessionId = _v3OwnSession(req, res); if (sessionId == null) return;
+    const result = selfLearnDb.finishDiagnosisV3(sessionId);
+    if (!result) return res.status(404).json({ success: false, message: '진단 세션을 찾을 수 없습니다.' });
+    res.json({ success: true, ...result });
+  } catch (err) {
+    console.error('[SELF-LEARN] diagnosis/v3/finish error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// GET /diagnosis/v3/:sessionId/result — v3 결과 (수준·시작점·단원 현황)
+router.get('/diagnosis/v3/:sessionId/result', requireAuth, (req, res) => {
+  try {
+    const sessionId = _v3OwnSession(req, res); if (sessionId == null) return;
+    const result = selfLearnDb.getDiagnosisResultV3(sessionId);
+    if (!result) return res.status(404).json({ success: false, message: '진단 결과를 찾을 수 없습니다.' });
+    res.json({ success: true, ...result });
+  } catch (err) {
+    console.error('[SELF-LEARN] diagnosis/v3/result error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// ============================================================
 // 추천학습 경로 시스템 (2026-05-27 설계서 §4)
 // ============================================================
 
@@ -1317,7 +1467,7 @@ router.post('/problem-attempt', requireAuth, (req, res) => {
     if (req.user.role === 'teacher' || req.user.role === 'admin') {
       return res.json({ success: true, skipped: true, reason: 'teacher_no_record' });
     }
-    const { contentId, content_id, isCorrect, is_correct, selectedAnswer, userAnswer, user_answer, answer, questionId, question_id, timeTaken, time_taken, nodeId, node_id } = req.body || {};
+    const { contentId, content_id, isCorrect, is_correct, selectedAnswer, userAnswer, user_answer, answer, answerIndex, answer_index, questionId, question_id, timeTaken, time_taken, nodeId, node_id } = req.body || {};
     const cid = parseInt(contentId || content_id);
     if (!cid) return res.status(400).json({ success: false, message: 'contentId 필요' });
     const result = selfLearnDb.recordProblemAttempt(req.user.id, cid, {
@@ -1325,6 +1475,7 @@ router.post('/problem-attempt', requireAuth, (req, res) => {
       selectedAnswer: selectedAnswer ?? user_answer ?? userAnswer,
       userAnswer: userAnswer ?? user_answer,
       answer,
+      answerIndex: answerIndex != null ? answerIndex : answer_index,
       questionId: questionId || question_id,
       timeTaken: timeTaken || time_taken,
       nodeId: nodeId || node_id

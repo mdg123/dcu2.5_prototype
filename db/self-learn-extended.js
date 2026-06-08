@@ -868,23 +868,24 @@ function resolveValidContentId(rawContentId, questionId) {
 /**
  * 정답 판정 헬퍼 — content_questions.answer 형식 다양성 흡수.
  *
- * DB 사정:
- *   - content_questions.answer 는 대부분(95%+) **0-based index** 문자열 ("0"~"4"),
- *     일부는 정답 텍스트 자체("27","서울","사과") 형태로 저장됨.
- *   - content-player.html 클라이언트는 `opts[Number(corA)]` 로 정답 텍스트를 산출 →
- *     DB의 answer를 0-based index로 취급함이 정설.
+ * DB 사정 (실측 2026-06-08):
+ *   - content_questions.answer 는 **0-based index 문자열과 1-based index 문자열이 혼재**한다.
+ *     예) Q7951 answer="2" + opts=["5/8","6/8","7/8","8/8","12/16"] → 정답 "7/8"(0-based idx2)
+ *         Q7    answer="3" + opts=["①24","②25","③27","④29"]        → 정답 "③27"(1-based pos3)
+ *         Q228  answer="4" + opts=["①0","②-5","③3/4","④√2"]        → 정답 "④√2"(1-based, 0-based면 범위초과)
+ *     일부는 정답 텍스트 자체("서울","27")로 저장됨.
+ *   - 따라서 **숫자 인덱스만으로는 정답 옵션을 단정할 수 없다.** 가장 신뢰도 높은 신호는
+ *     옵션 텍스트에 박힌 원숫자 prefix(①②③④)이다 → `_resolveCorrectIndex` 가 이를 최우선 사용.
  *
- * 클라이언트가 보내는 selectedAnswer 형식:
- *   - 자기주도학습 직접풀이(line 3378): `idx + 1` (1-based 정수, 예: 1~5)
- *   - 콘텐츠 플레이어 채점(line 3148): null (이 경로는 isCorrect를 신뢰)
- *   - 진단 응답 페이로드: 옵션 텍스트 또는 1-based index 문자열
- *
- * 본 헬퍼는 다음 모두를 정답으로 인정한다:
- *   1) 0-based index (q.answer 자체) 와 동일
- *   2) 1-based index (q.answer + 1) 와 동일
- *   3) options 배열에서 q.answer가 가리키는 항목의 텍스트와 동일
- *      (① 등 prefix 문자 정규화 포함)
- *   4) q.answer 자체가 텍스트인 경우 options 무관 직접 일치
+ * 채점 규약(통일):
+ *   - 모든 FE 객관식 풀이는 **선택한 보기의 텍스트(answer) + 0-based answerIndex** 를 함께 전송한다.
+ *     (오답노트 플레이어가 이미 쓰는 규약 — learning-map v2/v3·직접풀이도 동일하게 맞춤)
+ *   - 본 헬퍼는 0-based 정답 index 를 robust 하게 산출한 뒤
+ *       (a) submittedIndex(0-based) == correctIndex   ← 가장 신뢰
+ *       (b) 선택 보기 텍스트 == 정답 보기 텍스트(정규화)
+ *     중 하나라도 맞으면 정답으로 인정한다. 단답형은 텍스트 정규화(분수·공백·대소문자) 비교.
+ *   - **0/1-based 우연 일치(맨숫자 직접 비교)로 오판하지 않는다.** 숫자만 들어와도
+ *     정답 옵션 텍스트로 환산해 비교한다.
  */
 function _normalizeAnswerText(s) {
   return String(s == null ? '' : s)
@@ -894,65 +895,144 @@ function _normalizeAnswerText(s) {
     .toLowerCase();
 }
 
-function judgeQuestionAnswer(question, submitted) {
-  // question: { answer, options(JSON or array) }
+// 옵션 문자열 맨 앞의 원숫자(①②③④…) → 1-based 위치. 없으면 null.
+const _CIRCLED_POS = { '①':1,'②':2,'③':3,'④':4,'⑤':5,'⑥':6,'⑦':7,'⑧':8,'⑨':9,'⑩':10 };
+function _circledPos(opt) {
+  const c = String(opt == null ? '' : opt).trim()[0];
+  return _CIRCLED_POS[c] || null;
+}
+
+// question.options 를 배열로 정규화.
+function _parseOptions(options) {
+  if (Array.isArray(options)) return options;
+  if (typeof options === 'string') {
+    try { const j = JSON.parse(options); if (Array.isArray(j)) return j; } catch (_) {}
+  }
+  return null;
+}
+
+/**
+ * 정답의 0-based index 를 robust 하게 산출.
+ * 우선순위:
+ *   1) 옵션 텍스트에 원숫자 prefix(①②③④)가 모두 있으면, answer 숫자와
+ *      일치하는 prefix 위치를 정답으로 확정 (저장이 0-based든 1-based든 위치로 역산).
+ *   2) answer 가 0-based 범위 내 정수면 그 index.
+ *   3) answer 가 1-based 범위 내 정수면 index-1.
+ *   4) answer 텍스트가 어떤 옵션과 (정규화) 일치하면 그 위치.
+ * 산출 불가면 null.
+ */
+function _resolveCorrectIndex(rawAnswer, opts) {
+  if (!opts || !opts.length) return null;
+  const n = Number(String(rawAnswer).trim());
+
+  // 1) 원숫자 prefix 기반 — 모든 옵션이 prefix 를 가질 때만 신뢰
+  if (Number.isInteger(n)) {
+    const positions = opts.map(_circledPos);
+    if (positions.every(p => p != null)) {
+      // answer 가 0-based 라면 정답 옵션의 prefix == n+1, 1-based 라면 prefix == n.
+      // prefix 위치를 직접 찾는다(저장 규약과 무관).
+      const byZero = (n >= 0 && n < opts.length) ? positions[n] : null;       // 0-based 가정 시 그 칸의 라벨
+      const byOne  = (n >= 1 && n <= opts.length) ? positions[n - 1] : null;   // 1-based 가정 시 그 칸의 라벨
+      // 0-based 자기일관(칸 라벨 == n+1) 이면 그 index, 1-based 자기일관(라벨 == n) 이면 index-1
+      const zeroConsistent = byZero === n + 1;
+      const oneConsistent  = byOne === n;
+      if (zeroConsistent && !oneConsistent) return n;
+      if (oneConsistent && !zeroConsistent) return n - 1;
+      // 둘 다 자기일관이면(예: 균일 라벨 배열) 아래 범위 규칙으로 폴백
+    }
+  }
+
+  // 2) 0-based 범위
+  if (Number.isInteger(n) && n >= 0 && n < opts.length) return n;
+  // 3) 1-based 범위 (0-based 범위 밖일 때)
+  if (Number.isInteger(n) && n >= 1 && n <= opts.length) return n - 1;
+
+  // 4) answer 텍스트 ↔ 옵션 위치
+  const an = _normalizeAnswerText(rawAnswer);
+  if (an) {
+    const idx = opts.findIndex(o => _normalizeAnswerText(o) === an);
+    if (idx >= 0) return idx;
+  }
+  return null;
+}
+
+/**
+ * @param question  { answer, options(JSON or array) }
+ * @param submitted 선택 보기 텍스트 또는 단답(또는 레거시 숫자 문자열)
+ * @param submittedIndex (선택) 0-based 보기 index. 객관식은 이 값을 최우선 비교에 사용.
+ */
+function judgeQuestionAnswer(question, submitted, submittedIndex) {
   if (!question) return false;
   const rawAnswer = question.answer == null ? '' : String(question.answer).trim();
   const userRaw = submitted == null ? '' : String(submitted).trim();
-  if (userRaw === '') return false;
+  const subIdx = (submittedIndex == null || submittedIndex === '') ? null : Number(submittedIndex);
+  const hasIdx = Number.isInteger(subIdx) && subIdx >= 0;
+  if (userRaw === '' && !hasIdx) return false;
 
-  // 1) 직접 문자열 일치 (q.answer가 텍스트 정답일 때 또는 사용자가 같은 index 보낼 때)
-  if (rawAnswer === userRaw) return true;
+  const opts = _parseOptions(question.options);
 
-  // options 파싱
-  let opts = null;
-  if (Array.isArray(question.options)) opts = question.options;
-  else if (typeof question.options === 'string') {
-    try { const j = JSON.parse(question.options); if (Array.isArray(j)) opts = j; } catch (_) {}
-  }
+  // ── 객관식: 정답 0-based index 를 robust 산출 후 index/텍스트 비교 ──
+  if (opts && opts.length) {
+    const correctIdx = _resolveCorrectIndex(rawAnswer, opts);
 
-  // 2) q.answer가 0-based index로 보일 때 — 1-based / 텍스트 매핑 고려
-  const ansIdx = Number(rawAnswer);
-  if (opts && Number.isInteger(ansIdx) && ansIdx >= 0 && ansIdx < opts.length) {
-    // 2-a) 사용자가 1-based index를 보낸 경우
-    const userNum = Number(userRaw);
-    if (Number.isInteger(userNum)) {
-      if (userNum === ansIdx) return true;          // 둘 다 0-based 일치
-      if (userNum - 1 === ansIdx) return true;      // user 1-based → 0-based 변환
+    // (a) 0-based index 직접 비교 (가장 신뢰 — FE 통일 규약)
+    if (correctIdx != null && hasIdx && subIdx < opts.length) {
+      return subIdx === correctIdx;
     }
-    // 2-b) 사용자가 옵션 텍스트를 보낸 경우
-    const correctText = _normalizeAnswerText(opts[ansIdx]);
-    const userText = _normalizeAnswerText(userRaw);
-    if (correctText && correctText === userText) return true;
+
+    // (b) 선택 보기 텍스트 ↔ 정답 보기 텍스트 (정규화)
+    if (correctIdx != null && userRaw !== '') {
+      const correctText = _normalizeAnswerText(opts[correctIdx]);
+      if (correctText && correctText === _normalizeAnswerText(userRaw)) return true;
+    }
+
+    // (b-2) 레거시 폴백: answerIndex 없이 맨숫자만 들어온 경우 → **0-based index**로 단정 비교.
+    //   (구 FE/외부 호출 호환. 0/1-based 동시 인정은 오판 원인이므로 금지 — 0-based만 인정.)
+    //   단, 숫자가 옵션 텍스트와 직접 일치(예: 옵션이 "3"인 수학 보기)하면 그건 텍스트로 (b)에서 처리됨.
+    if (!hasIdx && correctIdx != null && userRaw !== '') {
+      const userNum = Number(userRaw);
+      if (Number.isInteger(userNum) && userNum >= 0 && userNum < opts.length) {
+        // 옵션 텍스트가 그 숫자 자체가 아니면(= index 의도로 해석) 0-based 비교
+        const numIsOptionText = opts.some(o => _normalizeAnswerText(o) === _normalizeAnswerText(userRaw));
+        if (!numIsOptionText) return userNum === correctIdx;
+      }
+    }
+
+    // (c) 레거시/방어: 사용자가 보기 텍스트가 아니라 정답 텍스트 자체를 보낸 경우
+    if (userRaw !== '' && _normalizeAnswerText(rawAnswer) &&
+        _normalizeAnswerText(rawAnswer) === _normalizeAnswerText(userRaw)) {
+      return true;
+    }
+
+    // (d) index 도 텍스트도 매칭 불가 → 오답
+    return false;
   }
 
-  // 3) q.answer가 텍스트인 경우 — 정규화 비교
+  // ── 단답/텍스트 정답 (options 없음) ──
+  if (userRaw === '') return false;
+  // 직접 일치
+  if (rawAnswer === userRaw) return true;
+  // 정규화 비교 (① prefix·공백·대소문자)
   const ansNorm = _normalizeAnswerText(rawAnswer);
   const userNorm = _normalizeAnswerText(userRaw);
   if (ansNorm && ansNorm === userNorm) return true;
-
-  // 4) options에서 사용자 텍스트 위치를 찾아 q.answer(인덱스)와 비교
-  if (opts && Number.isInteger(ansIdx)) {
-    const userNorm2 = _normalizeAnswerText(userRaw);
-    const matchedIdx = opts.findIndex(o => _normalizeAnswerText(o) === userNorm2);
-    if (matchedIdx >= 0 && matchedIdx === ansIdx) return true;
-  }
-
+  // 수치 동치 (분수/소수)
+  const a = _toNumericValue(userRaw);
+  const b = _toNumericValue(rawAnswer);
+  if (a != null && b != null && Math.abs(a - b) < 1e-9) return true;
   return false;
 }
 
-// 정답을 사용자에게 보여줄 텍스트 형태로 반환 (q.answer가 0-based index일 때 옵션 텍스트로 변환)
+// 정답을 사용자에게 보여줄 텍스트 형태로 반환.
+// 채점과 동일한 robust 인덱스 산출(_resolveCorrectIndex: 원숫자 prefix·0/1-based 혼재 흡수)을 사용해
+// 표시 정답이 채점 정답과 항상 일치하도록 한다.
 function resolveCorrectAnswerText(question) {
   if (!question) return null;
   const raw = question.answer == null ? '' : String(question.answer);
-  let opts = null;
-  if (Array.isArray(question.options)) opts = question.options;
-  else if (typeof question.options === 'string') {
-    try { const j = JSON.parse(question.options); if (Array.isArray(j)) opts = j; } catch (_) {}
-  }
-  const n = Number(raw);
-  if (opts && Number.isInteger(n) && n >= 0 && n < opts.length) {
-    return String(opts[n]);
+  const opts = _parseOptions(question.options);
+  if (opts && opts.length) {
+    const idx = _resolveCorrectIndex(raw, opts);
+    if (idx != null && idx >= 0 && idx < opts.length) return String(opts[idx]);
   }
   return raw;
 }
@@ -963,6 +1043,7 @@ function submitDiagnosisAnswer(sessionId, payload = {}) {
   const rawContentId = payload.contentId != null ? payload.contentId : payload.content_id;
   const questionId = payload.questionId != null ? payload.questionId : payload.question_id;
   const answer = payload.answer;
+  const answerIndex = payload.answerIndex != null ? payload.answerIndex : payload.answer_index;
 
   // 세션에서 node_id 보강 (nodeId 없으면 session.target_node_id 사용)
   const session = db.prepare('SELECT target_node_id, current_node_id FROM diagnosis_sessions WHERE id = ?').get(sessionId);
@@ -981,7 +1062,7 @@ function submitDiagnosisAnswer(sessionId, payload = {}) {
     err.statusCode = 400;
     throw err;
   }
-  if (judgeQuestionAnswer(q, answer)) isCorrect = 1;
+  if (judgeQuestionAnswer(q, answer, answerIndex)) isCorrect = 1;
 
   // FK 방어: contents.id에 있는 값만 허용 (contentId NOT NULL + FK → contents(id))
   const safeContentId = resolveValidContentId(rawContentId, questionId);
@@ -3015,17 +3096,18 @@ function _upsertLastActivity(userId, { activity_type, node_id, content_id, title
   `).run(userId, activity_type, node_id || null, content_id || null, title || null);
 }
 
-function recordProblemAttempt(userId, contentId, { isCorrect, selectedAnswer, userAnswer, answer, questionId, timeTaken, nodeId, sourceType }) {
+function recordProblemAttempt(userId, contentId, { isCorrect, selectedAnswer, userAnswer, answer, answerIndex, questionId, timeTaken, nodeId, sourceType }) {
   // 서버 측 정답 판정: questionId가 있으면 content_questions.answer와 비교 (client isCorrect 무시)
   // questionId 없으면 content 단위 제출로 간주하여 기존 client isCorrect 유지 (호환성)
   const submittedAnswer = selectedAnswer ?? userAnswer ?? answer ?? null;
+  const submittedIndex = answerIndex;
   let finalIsCorrect;
   let questionExplanation = null;
   let correctAnswer = null;
   if (questionId) {
     const q = db.prepare('SELECT answer, options, explanation FROM content_questions WHERE id = ?').get(questionId);
     if (q) {
-      finalIsCorrect = judgeQuestionAnswer(q, submittedAnswer) ? 1 : 0;
+      finalIsCorrect = judgeQuestionAnswer(q, submittedAnswer, submittedIndex) ? 1 : 0;
       questionExplanation = q.explanation || null;
       correctAnswer = resolveCorrectAnswerText(q);  // 사용자 노출용: 0-based index → 옵션 텍스트
     } else {
@@ -3868,6 +3950,7 @@ function submitDiagnosisAnswerCAT(sessionId, payload = {}) {
   const contentId = payload.contentId != null ? payload.contentId : payload.content_id;
   const questionId = payload.questionId != null ? payload.questionId : payload.question_id;
   const answer = payload.answer;
+  const answerIndex = payload.answerIndex != null ? payload.answerIndex : payload.answer_index;
   const nodeId = payload.nodeId || payload.node_id;
 
   const session = db.prepare('SELECT * FROM diagnosis_sessions WHERE id = ?').get(sessionId);
@@ -3880,14 +3963,15 @@ function submitDiagnosisAnswerCAT(sessionId, payload = {}) {
     err.statusCode = 400;
     throw err;
   }
-  // 오답노트 등록(3차)을 위해 문항 메타(question_text/explanation)까지 확보
-  const q = db.prepare('SELECT id, answer, options, question_text, explanation FROM content_questions WHERE id = ?').get(questionId);
+  // 오답노트 등록(3차)을 위해 문항 메타(question_text/explanation)까지 확보.
+  //   content_id·question_number 도 함께 조회 → 오답노트에 저장해 플레이어가 원본 콘텐츠 문항(객관식 options) 복구 가능
+  const q = db.prepare('SELECT id, content_id, question_number, answer, options, question_text, explanation FROM content_questions WHERE id = ?').get(questionId);
   if (!q) {
     const err = new Error('questionId not found');
     err.statusCode = 400;
     throw err;
   }
-  const isCorrect = judgeQuestionAnswer(q, answer);
+  const isCorrect = judgeQuestionAnswer(q, answer, answerIndex);
 
   const curNode = session.current_node_id || nodeId || session.target_node_id || 'unknown';
 
@@ -4168,9 +4252,35 @@ function submitDiagnosisAnswerCAT(sessionId, payload = {}) {
 // 반환: 새로 INSERT 했으면 true, (중복으로) attempt_count만 증가/스킵했으면 false.
 function _registerDiagnosisWrongNote(userId, nodeId, q, studentAnswer) {
   try {
-    const qText = q && q.question_text ? String(q.question_text).trim() : '';
+    const qText = q && q.question_text ? String(q.question_text).trim()
+                : (q && q.text != null ? String(q.text).trim() : '');
     if (!qText) return false;  // 메타 부족 → graceful skip
-    const qIdent = q.id != null ? q.id : null;  // content_questions.id = 중복방지 식별자
+
+    // content_id / question_number(콘텐츠 문항 1-based 번호) 확보 — 플레이어가 원본 콘텐츠
+    //   문항(선택지 options 포함)을 복구하려면 wrong_answers.content_id + question_number 가
+    //   _findContentQuestion(content_id, question_number) 와 일치해야 한다.
+    //   호출 경로별로 q 가 들고 오는 필드가 달라(진단 V3 시트는 content_id/question_number 보유,
+    //   submit-sheet·CAT 경로는 content_questions 일부 컬럼만 SELECT) 부족하면 q.id 로 재조회한다.
+    //   ⚠ 기존 버그: q.id(content_questions.id)를 question_number 컬럼에 넣어 복구 매칭이 깨졌었다.
+    //     이제는 실제 content_questions.question_number 를 저장한다(content_id 와 함께).
+    let contentId = q.content_id != null ? q.content_id
+                  : (q.contentId != null ? q.contentId : null);
+    let questionNumber = q.question_number != null ? q.question_number
+                       : (q.number != null ? q.number : null);
+    const rowId = q.id != null ? q.id
+                : (q.question_id != null ? q.question_id
+                : (q.questionId != null ? q.questionId : null));
+    // content_id 또는 question_number 가 비어 있으면 content_questions.id 로 원본 메타 재조회
+    if ((contentId == null || questionNumber == null) && rowId != null) {
+      const cq = db.prepare(
+        'SELECT content_id, question_number FROM content_questions WHERE id = ?'
+      ).get(rowId);
+      if (cq) {
+        if (contentId == null) contentId = cq.content_id != null ? cq.content_id : null;
+        if (questionNumber == null) questionNumber = cq.question_number != null ? cq.question_number : null;
+      }
+    }
+
     // 노드 메타에서 과목·단원 보강
     let subject = null, unitName = null;
     if (nodeId) {
@@ -4179,25 +4289,50 @@ function _registerDiagnosisWrongNote(userId, nodeId, q, studentAnswer) {
       ).get(nodeId);
       if (meta) { subject = meta.subject || null; unitName = meta.unit_name || meta.lesson_name || null; }
     }
-    // 중복방지: 미해결(is_resolved=0) 진단 오답이 이미 있으면 재등록 대신 attempt_count++
-    if (qIdent != null) {
+    // content 메타로 보강 (노드 매핑이 비어 있어도 과목/단원 표기 확보 — 자기주도 경로와 일관)
+    if ((!subject || !unitName) && contentId != null) {
+      const c = db.prepare('SELECT subject, title FROM contents WHERE id = ?').get(contentId);
+      if (c) { subject = subject || c.subject || null; unitName = unitName || c.title || null; }
+    }
+
+    // 중복방지: 미해결(is_resolved=0) 진단 오답이 이미 있으면 재등록 대신 attempt_count++.
+    //   실제 question_number 는 콘텐츠마다 1,2,3.. 로 중복될 수 있으므로 content_id 를 dedup 키에 포함한다.
+    //   content_id 가 없는(레거시·복구불가) 경우만 question_number(=과거 row id 호환) 단독 폴백.
+    if (contentId != null && questionNumber != null) {
       const dup = db.prepare(`
         SELECT id FROM wrong_answers
-        WHERE student_id = ? AND source = 'diagnosis' AND question_number = ? AND is_resolved = 0
+        WHERE student_id = ? AND source = 'diagnosis' AND content_id = ? AND question_number = ? AND is_resolved = 0
         ORDER BY id DESC LIMIT 1
-      `).get(userId, qIdent);
+      `).get(userId, contentId, questionNumber);
       if (dup) {
         db.prepare('UPDATE wrong_answers SET attempt_count = COALESCE(attempt_count,1) + 1 WHERE id = ?').run(dup.id);
         return false;  // 신규 아님
       }
+    } else if (rowId != null) {
+      // content_id 확보 실패(원본 매핑 없음) — 과거 호환: row id 를 식별자로 한 dedup
+      const dup = db.prepare(`
+        SELECT id FROM wrong_answers
+        WHERE student_id = ? AND source = 'diagnosis' AND content_id IS NULL AND question_number = ? AND is_resolved = 0
+        ORDER BY id DESC LIMIT 1
+      `).get(userId, rowId);
+      if (dup) {
+        db.prepare('UPDATE wrong_answers SET attempt_count = COALESCE(attempt_count,1) + 1 WHERE id = ?').run(dup.id);
+        return false;
+      }
     }
+
+    // 저장값: content_id 가 있으면 (content_id, 실제 question_number) 로 → 플레이어 복구 가능.
+    //   없으면 과거 호환으로 question_number 칸에 row id 를 남기고 content_id 는 NULL(단답 폴백).
+    const storeContentId = contentId != null ? contentId : null;
+    const storeQuestionNumber = contentId != null ? questionNumber : rowId;
+
     db.prepare(`
       INSERT INTO wrong_answers
-        (student_id, exam_id, question_number, question_text, student_answer, correct_answer,
+        (student_id, exam_id, content_id, question_number, question_text, student_answer, correct_answer,
          explanation, subject, unit_name, is_resolved, attempt_count, is_manual, source)
-      VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, 0, 1, 0, 'diagnosis')
+      VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, 0, 1, 0, 'diagnosis')
     `).run(
-      userId, qIdent,
+      userId, storeContentId, storeQuestionNumber,
       qText,
       studentAnswer != null ? String(studentAnswer) : null,
       q.answer != null ? String(q.answer) : null,
@@ -4606,12 +4741,13 @@ function submitDiagnosisSheet(sessionId, payload = {}) {
   for (const a of answers) {
     const questionId = a.questionId != null ? a.questionId : a.question_id;
     if (!questionId) continue;
-    const q = db.prepare('SELECT id, answer, options, question_text, explanation FROM content_questions WHERE id = ?').get(questionId);
+    // content_id·question_number 도 함께 조회 → 오답노트 등록 시 원본 콘텐츠 문항 복구(객관식 options) 가능
+    const q = db.prepare('SELECT id, content_id, question_number, answer, options, question_text, explanation FROM content_questions WHERE id = ?').get(questionId);
     if (!q) {
       results.push({ questionId, lessonId: a.lessonId || null, isCorrect: false, skipped: true, reason: 'question_not_found' });
       continue;
     }
-    const isCorrect = judgeQuestionAnswer(q, a.userAnswer != null ? a.userAnswer : a.answer);
+    const isCorrect = judgeQuestionAnswer(q, a.userAnswer != null ? a.userAnswer : a.answer, a.answerIndex != null ? a.answerIndex : a.answer_index);
     const contentId = a.contentId != null ? a.contentId : a.content_id;
     const safeContentId = resolveValidContentId(contentId, questionId);
     const recordNodeId = a.lessonId || curNode; // 분석 시 차시 단위 정답률 — §8.3-1
@@ -4940,6 +5076,938 @@ function getDiagnosisState(sessionId) {
   };
 }
 
+// ============================================================
+// 진단검사 v3 — 개념(차시) 단위 순차 진단 엔진 (기획서 진단검사_v3_기획서.md)
+// ============================================================
+// v2(단원 단위 양방향)와 별개의 신규 함수군. v2 함수는 그대로 보존(노드클릭 진단 등 호환).
+// 핵심 원칙:
+//   - 진단 입자 = 개념(node_level=3). 단원(node_level=2)을 학생이 고르면 그 단원 첫 개념부터.
+//   - 개념 선후 = learning_map_edges.edge_type='prerequisite' (정방향=후속, 역방향=선수). 단원 경계 가로지름.
+//   - 문항 = content_questions.difficulty(정수 1~5) 기준 (v2 contents.difficulty 문자열 매칭과 다름).
+//   - 2-strike: 1차 오답 → 같은 개념·같은 난이도 "다른 문항"(이미 출제 제외) 1회 더 → 2차 오답 → 하향.
+//   - 정답 비노출: 출제 시 answer/explanation 미포함. 채점은 서버.
+// 세션 상태(diagnosis_sessions.difficulty_path)에 v3 진행 상태(JSON)를 저장한다:
+//   { v3:true, unit:{...}, conceptOrder:[...], passedConcepts:[...], skippedConcepts:[...],
+//     visitedConcepts:[...], currentConcept, currentDifficulty, strike, askedQuestionIds:[...],
+//     completedUnits:[...], diagnosedConcepts, history:[...] }
+
+// node_level=2 단원의 정렬된 개념(차시) 목록 — prerequisite 체인 우선, 폴백 sort_order.
+//   반환: [{ nodeId, name, sortOrder }] (단원 소속 개념만, 진입엣지 없는 것이 첫 개념)
+function _v3ConceptsOfUnit(unitNodeId) {
+  const concepts = db.prepare(`
+    SELECT node_id, lesson_name, sort_order
+    FROM learning_map_nodes
+    WHERE parent_node_id = ? AND node_level = 3
+    ORDER BY sort_order ASC
+  `).all(unitNodeId);
+  if (!concepts || concepts.length === 0) return [];
+
+  const idSet = new Set(concepts.map(c => c.node_id));
+  // prerequisite 그래프(단원 내부 한정)로 위상 정렬 시도
+  const nextMap = new Map();   // from → [to] (단원 내부)
+  const indeg = new Map();
+  concepts.forEach(c => { nextMap.set(c.node_id, []); indeg.set(c.node_id, 0); });
+  const edges = db.prepare(`
+    SELECT from_node_id, to_node_id FROM learning_map_edges WHERE edge_type='prerequisite'
+  `).all();
+  for (const e of edges) {
+    if (idSet.has(e.from_node_id) && idSet.has(e.to_node_id)) {
+      nextMap.get(e.from_node_id).push(e.to_node_id);
+      indeg.set(e.to_node_id, (indeg.get(e.to_node_id) || 0) + 1);
+    }
+  }
+  // 위상 정렬 (indeg=0 시작, 동순위는 sort_order)
+  const byId = new Map(concepts.map(c => [c.node_id, c]));
+  const ready = concepts.filter(c => (indeg.get(c.node_id) || 0) === 0)
+    .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0))
+    .map(c => c.node_id);
+  const order = [];
+  const localIndeg = new Map(indeg);
+  const inReady = new Set(ready);
+  while (ready.length > 0) {
+    // 항상 sort_order 가장 작은 ready 선택 (안정적 순서)
+    ready.sort((a, b) => (byId.get(a).sort_order || 0) - (byId.get(b).sort_order || 0));
+    const cur = ready.shift();
+    order.push(cur);
+    for (const nx of (nextMap.get(cur) || [])) {
+      localIndeg.set(nx, (localIndeg.get(nx) || 0) - 1);
+      if ((localIndeg.get(nx) || 0) === 0 && !inReady.has(nx) && !order.includes(nx)) {
+        ready.push(nx); inReady.add(nx);
+      }
+    }
+  }
+  // 사이클 등으로 누락된 개념은 sort_order로 뒤에 보충
+  if (order.length < concepts.length) {
+    for (const c of concepts) if (!order.includes(c.node_id)) order.push(c.node_id);
+  }
+  return order.map(id => {
+    const c = byId.get(id);
+    return { nodeId: id, name: c.lesson_name || '개념', sortOrder: c.sort_order || 0 };
+  });
+}
+
+// 개념 1개를 v3 표준 형태로 hydrate (단원/이름)
+function _v3HydrateConcept(conceptNodeId, conceptOrder) {
+  const n = db.prepare('SELECT node_id, lesson_name, unit_name, parent_node_id, grade_level, grade, semester FROM learning_map_nodes WHERE node_id = ?').get(conceptNodeId);
+  let index = null, total = null;
+  if (Array.isArray(conceptOrder) && conceptOrder.length) {
+    const i = conceptOrder.indexOf(conceptNodeId);
+    if (i >= 0) { index = i + 1; total = conceptOrder.length; }
+  }
+  // 개념(차시)에 grade/semester가 비어 있으면 부모 단원의 값으로 보강(하향 분기 시 타 학년 안내용)
+  let gradeLevel = n ? (n.grade_level || null) : null;
+  let grade = n && n.grade != null ? n.grade : null;
+  let semester = n && n.semester != null ? n.semester : null;
+  if (n && (grade == null || gradeLevel == null) && n.parent_node_id) {
+    try {
+      const p = db.prepare('SELECT grade_level, grade, semester FROM learning_map_nodes WHERE node_id = ?').get(n.parent_node_id);
+      if (p) {
+        if (gradeLevel == null) gradeLevel = p.grade_level || null;
+        if (grade == null) grade = p.grade != null ? p.grade : null;
+        if (semester == null) semester = p.semester != null ? p.semester : null;
+      }
+    } catch (_) {}
+  }
+  return {
+    nodeId: conceptNodeId,
+    name: n ? (n.lesson_name || n.unit_name || '개념') : '개념',
+    gradeLevel, grade, semester,
+    index, total
+  };
+}
+
+// 개념 1개의 난이도 D 문항 1개 선택 (정답 비노출 형태) — content_questions.difficulty(1~5) 기준.
+//   excludeQ: 이미 출제한 questionId 배열(제외). 같은 문항 재출제 절대 금지.
+//   §9-A 폴백: 같은 난이도 → ±1 난이도 → (없으면 null 반환, 호출자가 하향 처리).
+//   반환(공개): { questionId, contentId, type, text, instruction, passage, options[], difficulty } (answer 없음)
+//   내부 채점용 raw는 별도 조회.
+function _v3PickQuestion(conceptNodeId, difficulty, excludeQ = []) {
+  const ex = new Set((excludeQ || []).map(Number).filter(Number.isFinite));
+  // 개념에 매핑된 모든 문항 (content_questions.difficulty 포함)
+  const all = db.prepare(`
+    SELECT cq.id AS question_id, cq.content_id, cq.question_type, cq.question_text,
+           cq.options, cq.instruction, cq.passage, cq.points, cq.difficulty
+    FROM node_contents nc
+    JOIN content_questions cq ON cq.content_id = nc.content_id
+    WHERE nc.node_id = ?
+  `).all(conceptNodeId);
+  if (!all || all.length === 0) return null;
+
+  const avail = all.filter(q => !ex.has(Number(q.question_id)));
+  if (avail.length === 0) return null;  // 모든 문항 소진(같은 문항 재출제 금지)
+
+  const D = Number(difficulty) || 3;
+  // 우선순위: 같은 난이도 → ±1 → 그 외 (가까운 난이도 순)
+  const pickFrom = (pred) => {
+    const pool = avail.filter(pred);
+    if (pool.length === 0) return null;
+    return pool[Math.floor(Math.random() * pool.length)];
+  };
+  let chosen = pickFrom(q => Number(q.difficulty) === D);
+  if (!chosen) chosen = pickFrom(q => Math.abs(Number(q.difficulty) - D) === 1);
+  if (!chosen) {
+    // 가장 가까운 난이도 순으로 정렬해 첫 풀
+    avail.sort((a, b) => Math.abs(Number(a.difficulty) - D) - Math.abs(Number(b.difficulty) - D));
+    chosen = avail[0];
+  }
+  if (!chosen) return null;
+
+  const norm = _normalizeOriginalQuestion({
+    text: chosen.question_text, type: chosen.question_type, options: chosen.options,
+    answer: null, explanation: null, instruction: chosen.instruction,
+    passage: chosen.passage, points: chosen.points
+  });
+  if (!norm) return null;
+  return {
+    questionId: chosen.question_id,
+    contentId: chosen.content_id,
+    nodeId: conceptNodeId,
+    type: norm.type,
+    text: norm.text,
+    instruction: norm.instruction,
+    passage: norm.passage,
+    options: norm.options || [],
+    points: norm.points,
+    difficulty: Number(chosen.difficulty) || D
+    // answer / explanation 미포함 (정답 비노출)
+  };
+}
+
+// 개념이 보유한 문항 난이도 중 진단 시작 난이도 결정 — 중간값(3) 우선, 없으면 보유 난이도 중 3에 가장 가까운 값.
+function _v3StartDifficulty(conceptNodeId) {
+  const diffs = db.prepare(`
+    SELECT DISTINCT cq.difficulty AS d
+    FROM node_contents nc JOIN content_questions cq ON cq.content_id = nc.content_id
+    WHERE nc.node_id = ?
+  `).all(conceptNodeId).map(r => Number(r.d)).filter(Number.isFinite);
+  if (diffs.length === 0) return 3;
+  if (diffs.includes(3)) return 3;
+  diffs.sort((a, b) => Math.abs(a - 3) - Math.abs(b - 3));
+  return diffs[0];
+}
+
+// 개념의 후속 개념(정방향 prerequisite). 같은 단원 우선 — 호출자가 단원 완료 판정에 사용.
+function _v3ForwardConcepts(conceptNodeId) {
+  return db.prepare(`
+    SELECT e.to_node_id AS id
+    FROM learning_map_edges e
+    WHERE e.from_node_id = ? AND e.edge_type='prerequisite'
+  `).all(conceptNodeId).map(r => r.id);
+}
+
+// 개념의 선수 개념(역방향 prerequisite). 단원 경계 가로지름 허용.
+function _v3BackwardConcepts(conceptNodeId) {
+  return db.prepare(`
+    SELECT e.from_node_id AS id
+    FROM learning_map_edges e
+    WHERE e.to_node_id = ? AND e.edge_type='prerequisite'
+  `).all(conceptNodeId).map(r => r.id);
+}
+
+// 단원의 후속 단원 목록 — 단원의 (마지막) 개념들의 정방향 prerequisite가 가리키는 개념의 부모 단원.
+//   폴백: 없으면 unit_prerequisite(level2→level2) 정방향.
+//   반환: [{ nodeId, name, conceptTotal }]
+function _v3NextUnits(unitNodeId) {
+  const concepts = _v3ConceptsOfUnit(unitNodeId);
+  const conceptIds = new Set(concepts.map(c => c.nodeId));
+  const nextUnitIds = new Set();
+  // 개념 정방향 엣지가 단원 밖 개념을 가리키면 그 부모 단원이 후속 단원
+  for (const c of concepts) {
+    const fwds = _v3ForwardConcepts(c.nodeId);
+    for (const f of fwds) {
+      if (conceptIds.has(f)) continue;  // 단원 내부 후속은 제외
+      const parent = db.prepare('SELECT parent_node_id FROM learning_map_nodes WHERE node_id = ? AND node_level=3').get(f);
+      if (parent && parent.parent_node_id && parent.parent_node_id !== unitNodeId) {
+        nextUnitIds.add(parent.parent_node_id);
+      }
+    }
+  }
+  // 폴백: unit_prerequisite
+  if (nextUnitIds.size === 0) {
+    const us = db.prepare(`
+      SELECT to_node_id AS id FROM learning_map_edges WHERE from_node_id = ? AND edge_type='unit_prerequisite'
+    `).all(unitNodeId).map(r => r.id);
+    us.forEach(id => nextUnitIds.add(id));
+  }
+  const out = [];
+  for (const uid of nextUnitIds) {
+    const u = db.prepare('SELECT node_id, unit_name, grade_level, grade, semester FROM learning_map_nodes WHERE node_id = ? AND node_level=2').get(uid);
+    if (!u) continue;
+    out.push({
+      nodeId: u.node_id, name: u.unit_name || '단원',
+      gradeLevel: u.grade_level || null, grade: u.grade != null ? u.grade : null, semester: u.semester != null ? u.semester : null,
+      conceptTotal: _v3ConceptsOfUnit(u.node_id).length
+    });
+  }
+  return out;
+}
+
+// v3 세션 상태 로드/저장 (difficulty_path 컬럼 재사용)
+function _v3LoadState(session) {
+  let st = null;
+  try { st = JSON.parse(session.difficulty_path || 'null'); } catch { st = null; }
+  if (!st || !st.v3) return null;
+  return st;
+}
+function _v3SaveState(sessionId, st, extra = {}) {
+  const fields = ['difficulty_path = ?'];
+  const params = [JSON.stringify(st)];
+  if (extra.currentNodeId !== undefined) { fields.push('current_node_id = ?'); params.push(extra.currentNodeId); }
+  if (extra.status !== undefined) { fields.push('status = ?'); params.push(extra.status); }
+  if (extra.completed) { fields.push('completed_at = CURRENT_TIMESTAMP'); }
+  if (extra.wrongAddDelta) { fields.push('diag_wrong_added = COALESCE(diag_wrong_added,0) + ?'); params.push(extra.wrongAddDelta); }
+  params.push(sessionId);
+  db.prepare(`UPDATE diagnosis_sessions SET ${fields.join(', ')} WHERE id = ?`).run(...params);
+}
+
+// v3 단원 진척 카운트 (passed / total, skip 제외 분모)
+function _v3UnitProgress(st) {
+  const total = st.conceptOrder.filter(id => !st.skippedConcepts.includes(id)).length;
+  const passed = st.passedConcepts.filter(id => st.conceptOrder.includes(id)).length;
+  return { passed, total };
+}
+
+// v3 사이드바 단원 패널 스코프 — start 때 영속한 스코프(최초 선택 학교급/학년)를 반환.
+//   구(舊) 세션(scope 없음) 폴백: 현재 진단 단원(node_level=2)의 grade_level/grade로 추론하여 start와 동일 스코프 복원.
+function _v3PanelScope(st) {
+  if (st && st.scope && (st.scope.schoolLevel != null || st.scope.grade != null)) {
+    return { schoolLevel: st.scope.schoolLevel, grade: st.scope.grade, area: st.scope.area != null ? st.scope.area : (st.unit && st.unit.area) || null };
+  }
+  // 폴백: scope 미보유 구 세션 — 현재 단원의 학년 정보로 추론
+  let schoolLevel = null, grade = null;
+  try {
+    const uid = st && st.unit && st.unit.nodeId;
+    if (uid) {
+      const row = db.prepare('SELECT grade_level, grade FROM learning_map_nodes WHERE node_id = ? AND node_level=2').get(uid);
+      if (row) { schoolLevel = row.grade_level || null; grade = row.grade != null ? row.grade : null; }
+    }
+  } catch (_) {}
+  return { schoolLevel, grade, area: (st && st.scope && st.scope.area != null) ? st.scope.area : (st && st.unit && st.unit.area) || null };
+}
+
+// v3 단원 목록 조회 (드릴다운 — 학교급/학년/영역) + 사용자별 진행 상태(미진단/진행중/완료)
+//   schoolLevel: '초'|'중'|'고' (또는 elementary/middle/high), grade: 정수, area: 문자열|'전체 영역'|null
+function getV3Units(userId, { schoolLevel, grade, area } = {}) {
+  const slMap = { elementary: '초', middle: '중', high: '고', '초': '초', '중': '중', '고': '고' };
+  const gl = slMap[String(schoolLevel || '').trim()] || null;
+  let where = "WHERE node_level=2 AND subject LIKE '수학%'";
+  const params = [];
+  if (gl) { where += ' AND grade_level = ?'; params.push(gl); }
+  if (grade != null && grade !== '') { where += ' AND grade = ?'; params.push(parseInt(grade)); }
+  if (area && area !== '전체 영역') { where += ' AND area = ?'; params.push(area); }
+  const units = db.prepare(`
+    SELECT node_id, unit_name, area, sort_order, grade_level, grade, semester
+    FROM learning_map_nodes ${where}
+    ORDER BY sort_order ASC
+  `).all(...params);
+
+  // 사용자의 v3 진단 세션들에서 단원별 진행 상태 집계
+  // 단원 status: completed > in_progress > untested
+  const result = units.map(u => {
+    const concepts = _v3ConceptsOfUnit(u.node_id);
+    const total = concepts.length;
+    // 가장 최근 세션에서 이 단원 진행 상태 추출
+    let status = 'untested', passed = 0;
+    try {
+      const sessions = db.prepare(`
+        SELECT difficulty_path FROM diagnosis_sessions
+        WHERE user_id = ? AND diagnosis_type = 'concept-v3'
+        ORDER BY id DESC LIMIT 30
+      `).all(userId);
+      let best = null; // 0 untested,1 in_progress,2 completed
+      for (const s of sessions) {
+        let st = null; try { st = JSON.parse(s.difficulty_path || 'null'); } catch {}
+        if (!st || !st.v3) continue;
+        const completed = (st.completedUnits || []).includes(u.node_id);
+        const conceptIds = new Set(concepts.map(c => c.nodeId));
+        const passedHere = (st.passedConcepts || []).filter(id => conceptIds.has(id)).length;
+        if (completed) {
+          if ((best || 0) < 2) { best = 2; passed = total; }
+        } else if (passedHere > 0 || (st.unit && st.unit.nodeId === u.node_id)) {
+          // 진행 흔적 (통과 개념 있음 또는 현재/과거 진단 단원)
+          const visitedHere = (st.visitedConcepts || []).filter(id => conceptIds.has(id)).length;
+          if (passedHere > 0 || visitedHere > 0) {
+            if ((best || 0) < 1) { best = 1; }
+            if (passedHere > passed) passed = passedHere;
+          }
+        }
+      }
+      if (best === 2) status = 'completed';
+      else if (best === 1) status = 'in_progress';
+    } catch (_) {}
+    return {
+      nodeId: u.node_id, name: u.unit_name || '단원', area: u.area || null,
+      gradeLevel: u.grade_level || null, grade: u.grade != null ? u.grade : null, semester: u.semester != null ? u.semester : null,
+      conceptTotal: total, status, passed, sortOrder: u.sort_order || 0
+    };
+  });
+  // 정렬: 미진단 → 진행중 → 완료, 같은 상태 내 sort_order (기획서 §3-4)
+  const rank = { untested: 0, in_progress: 1, completed: 2 };
+  result.sort((a, b) => {
+    if (rank[a.status] !== rank[b.status]) return rank[a.status] - rank[b.status];
+    return a.sortOrder - b.sortOrder;
+  });
+  return result;
+}
+
+// v3 드릴다운 — 특정 학교급의 학년 목록 (수학, 단원 ≥1)
+function getV3Grades(schoolLevel) {
+  const slMap = { elementary: '초', middle: '중', high: '고', '초': '초', '중': '중', '고': '고' };
+  const gl = slMap[String(schoolLevel || '').trim()] || null;
+  let where = "WHERE node_level=2 AND subject LIKE '수학%'";
+  const params = [];
+  if (gl) { where += ' AND grade_level = ?'; params.push(gl); }
+  return db.prepare(`SELECT DISTINCT grade FROM learning_map_nodes ${where} ORDER BY grade ASC`).all(...params).map(r => r.grade);
+}
+
+// v3 드릴다운 — 특정 학교급+학년의 영역 목록 (단원 ≥1 영역만, 기획서 §3-2)
+function getV3Areas(schoolLevel, grade) {
+  const slMap = { elementary: '초', middle: '중', high: '고', '초': '초', '중': '중', '고': '고' };
+  const gl = slMap[String(schoolLevel || '').trim()] || null;
+  let where = "WHERE node_level=2 AND subject LIKE '수학%' AND area IS NOT NULL";
+  const params = [];
+  if (gl) { where += ' AND grade_level = ?'; params.push(gl); }
+  if (grade != null && grade !== '') { where += ' AND grade = ?'; params.push(parseInt(grade)); }
+  return db.prepare(`SELECT DISTINCT area FROM learning_map_nodes ${where} ORDER BY area ASC`).all(...params).map(r => r.area);
+}
+
+// v3 진단 세션 시작 — 선택 단원의 첫 개념부터 첫 문항 출제 (정답 비노출)
+function startDiagnosisV3(userId, { schoolLevel, grade, subject, area, unitNodeId } = {}) {
+  if (!unitNodeId) {
+    const err = new Error('unitNodeId가 필요합니다.'); err.statusCode = 400; throw err;
+  }
+  const unit = db.prepare('SELECT node_id, unit_name, area, grade_level, grade, semester FROM learning_map_nodes WHERE node_id = ? AND node_level=2').get(unitNodeId);
+  if (!unit) { const err = new Error('단원을 찾을 수 없습니다.'); err.statusCode = 404; throw err; }
+
+  const conceptsArr = _v3ConceptsOfUnit(unitNodeId);
+  if (conceptsArr.length === 0) { const err = new Error('이 단원에 진단할 개념이 없습니다.'); err.statusCode = 422; throw err; }
+  const conceptOrder = conceptsArr.map(c => c.nodeId);
+
+  // 첫 개념: 문항이 있는 첫 개념 (없으면 skip)
+  const skipped = [];
+  let firstConcept = null, firstQuestion = null, firstDiff = 3;
+  for (const cid of conceptOrder) {
+    const d = _v3StartDifficulty(cid);
+    const q = _v3PickQuestion(cid, d, []);
+    if (q) { firstConcept = cid; firstQuestion = q; firstDiff = d; break; }
+    skipped.push(cid);
+  }
+  if (!firstConcept) { const err = new Error('이 단원의 개념에 등록된 문제가 없습니다.'); err.statusCode = 422; throw err; }
+
+  const st = {
+    v3: true,
+    // 사이드바 단원 패널 스코프 — 학생이 최초로 고른 학교급/학년/영역을 영속(advance 후에도 동일 스코프 유지).
+    //   하향으로 실제 진단 단원이 타 학년으로 가더라도 패널 기준은 최초 선택을 유지(report M-1 권장안).
+    scope: {
+      schoolLevel: (schoolLevel != null && schoolLevel !== '') ? schoolLevel : null,
+      grade: (grade != null && grade !== '') ? grade : null,
+      area: unit.area || area || null
+    },
+    unit: { nodeId: unit.node_id, name: unit.unit_name || '단원', area: unit.area || area || null, gradeLevel: unit.grade_level || null, grade: unit.grade != null ? unit.grade : null, semester: unit.semester != null ? unit.semester : null },
+    conceptOrder,
+    passedConcepts: [],
+    skippedConcepts: skipped.slice(),
+    visitedConcepts: [firstConcept],
+    completedUnits: [],
+    currentConcept: firstConcept,
+    currentDifficulty: firstDiff,
+    strike: 0,
+    askedQuestionIds: [firstQuestion.questionId],
+    diagnosedConcepts: 0,
+    history: []  // [{ concept, correct, strike, questionId }]
+  };
+
+  const info = db.prepare(`
+    INSERT INTO diagnosis_sessions
+      (user_id, target_node_id, diagnosis_type, status, total_questions, correct_count,
+       queue_nodes, current_node_id, current_difficulty, difficulty_path, per_node_answers)
+    VALUES (?, ?, 'concept-v3', 'in_progress', 0, 0, ?, ?, ?, ?, '{}')
+  `).run(userId, unitNodeId, JSON.stringify(conceptOrder), firstConcept, String(firstDiff), JSON.stringify(st));
+
+  const sessionId = info.lastInsertRowid;
+  const conceptHydrated = _v3HydrateConcept(firstConcept, conceptOrder);
+  const prog = _v3UnitProgress(st);
+  return {
+    sessionId,
+    unit: { nodeId: unit.node_id, name: unit.unit_name || '단원', area: unit.area || null, gradeLevel: unit.grade_level || null, grade: unit.grade != null ? unit.grade : null, semester: unit.semester != null ? unit.semester : null, conceptTotal: conceptOrder.length },
+    concept: conceptHydrated,
+    question: firstQuestion,
+    unitList: getV3Units(userId, { schoolLevel, grade, area: st.unit.area }),
+    progress: {
+      diagnosedConcepts: 0, elapsedSec: 0,
+      conceptCap: DIAG_V3_CONCEPT_CAP, softTimeLimitSec: DIAG_SOFT_TIME_SEC,
+      unitPassed: prog.passed, unitTotal: prog.total
+    }
+  };
+}
+
+// v3 종료 상수
+const DIAG_V3_CONCEPT_CAP = 30;   // 누적 진단 개념 소프트 상한
+
+// v3 다음 문항 1개 (현재 개념·난이도, 이미 출제 제외)
+function getNextDiagnosisV3(sessionId) {
+  const session = db.prepare('SELECT * FROM diagnosis_sessions WHERE id = ?').get(sessionId);
+  if (!session) return null;
+  const st = _v3LoadState(session);
+  if (!st) { const err = new Error('v3 세션이 아닙니다.'); err.statusCode = 400; throw err; }
+  if (session.status === 'completed') return { sessionComplete: true, finished: true, question: null };
+  const q = _v3PickQuestion(st.currentConcept, st.currentDifficulty, st.askedQuestionIds);
+  if (q) {
+    st.askedQuestionIds.push(q.questionId);
+    _v3SaveState(sessionId, st);
+  }
+  return {
+    sessionComplete: false,
+    concept: _v3HydrateConcept(st.currentConcept, st.conceptOrder),
+    question: q,
+    progress: _v3Progress(session, st)
+  };
+}
+
+function _v3Progress(session, st) {
+  const prog = _v3UnitProgress(st);
+  return {
+    diagnosedConcepts: st.diagnosedConcepts || 0,
+    elapsedSec: _diagElapsedSec(session),
+    conceptCap: DIAG_V3_CONCEPT_CAP,
+    softTimeLimitSec: DIAG_SOFT_TIME_SEC,
+    unitPassed: prog.passed, unitTotal: prog.total
+  };
+}
+
+// v3 단원 완료 판정 — 단원 conceptOrder의 (skip 제외) 모든 개념이 passed
+function _v3IsUnitComplete(st, unitNodeId) {
+  const concepts = _v3ConceptsOfUnit(unitNodeId).map(c => c.nodeId);
+  const need = concepts.filter(id => !st.skippedConcepts.includes(id));
+  if (need.length === 0) return false;
+  return need.every(id => st.passedConcepts.includes(id));
+}
+
+// v3 통과 후 다음 개념 결정 — 정방향 prerequisite 중 "같은 단원·미통과·미skip" 우선.
+//   단원 conceptOrder 순서를 신뢰하여, 현재 개념 다음의 미통과 같은-단원 개념을 반환.
+function _v3NextConceptInUnit(st) {
+  const unitConcepts = _v3ConceptsOfUnit(st.unit.nodeId).map(c => c.nodeId);
+  // 정방향 엣지 우선
+  const fwd = _v3ForwardConcepts(st.currentConcept).filter(id =>
+    unitConcepts.includes(id) && !st.passedConcepts.includes(id) && !st.skippedConcepts.includes(id));
+  if (fwd.length > 0) return fwd[0];
+  // 폴백: conceptOrder 상 다음 미통과·미skip 같은-단원 개념
+  for (const id of st.conceptOrder) {
+    if (unitConcepts.includes(id) && !st.passedConcepts.includes(id) && !st.skippedConcepts.includes(id) && id !== st.currentConcept) {
+      return id;
+    }
+  }
+  return null;
+}
+
+// v3 하향(선수 개념) 결정 — 역방향 prerequisite 중 미방문 우선 (진동방지 visited).
+function _v3PrereqConcept(st) {
+  const back = _v3BackwardConcepts(st.currentConcept);
+  // 미방문 우선
+  const unvisited = back.filter(id => !st.visitedConcepts.includes(id));
+  const pool = unvisited.length > 0 ? unvisited : back.filter(id => !st.passedConcepts.includes(id));
+  if (pool.length === 0) return null;
+  // 문항 보유 개념 우선
+  for (const id of pool) {
+    const has = db.prepare(`
+      SELECT 1 FROM node_contents nc JOIN content_questions cq ON cq.content_id=nc.content_id WHERE nc.node_id=? LIMIT 1
+    `).get(id);
+    if (has) return id;
+  }
+  return pool[0];
+}
+
+// v3 채점 — 정규화 채점(judgeQuestionAnswer 재사용) + 2-strike 상태 관리 + 이동 결정.
+//   payload: { questionId, contentId, nodeId, answer }
+function submitDiagnosisV3(sessionId, payload = {}) {
+  const session = db.prepare('SELECT * FROM diagnosis_sessions WHERE id = ?').get(sessionId);
+  if (!session) { const err = new Error('세션 없음'); err.statusCode = 404; throw err; }
+  const st = _v3LoadState(session);
+  if (!st) { const err = new Error('v3 세션이 아닙니다.'); err.statusCode = 400; throw err; }
+  if (session.status === 'completed') return { finished: true, sessionComplete: true, attemptStage: 'finished' };
+
+  const questionId = payload.questionId != null ? payload.questionId : payload.question_id;
+  const answer = payload.answer;
+  const answerIndex = payload.answerIndex != null ? payload.answerIndex : payload.answer_index;
+  const nodeId = payload.nodeId || payload.node_id || st.currentConcept;
+  if (!questionId) { const err = new Error('questionId is required'); err.statusCode = 400; throw err; }
+  // content_id·question_number 도 함께 조회 → 오답노트 등록 시 원본 콘텐츠 문항 복구(객관식 options) 가능
+  const q = db.prepare('SELECT id, content_id, question_number, answer, options, question_text, explanation FROM content_questions WHERE id = ?').get(questionId);
+  if (!q) { const err = new Error('questionId not found'); err.statusCode = 400; throw err; }
+
+  const isCorrect = judgeQuestionAnswer(q, answer, answerIndex);
+  const curConcept = st.currentConcept;
+
+  // diagnosis_answers 기록 (FK 방어)
+  const safeContentId = resolveValidContentId(payload.contentId != null ? payload.contentId : payload.content_id, questionId);
+  try {
+    db.prepare(`INSERT INTO diagnosis_answers (session_id, node_id, content_id, user_answer, is_correct) VALUES (?, ?, ?, ?, ?)`)
+      .run(sessionId, curConcept, safeContentId, String(answer == null ? '' : answer), isCorrect ? 1 : 0);
+  } catch (e) {
+    if (String(e.message).includes('FOREIGN KEY')) {
+      const anyC = db.prepare('SELECT id FROM contents ORDER BY id LIMIT 1').get();
+      db.prepare(`INSERT INTO diagnosis_answers (session_id, node_id, content_id, user_answer, is_correct) VALUES (?, ?, ?, ?, ?)`)
+        .run(sessionId, curConcept, anyC ? anyC.id : 1, String(answer == null ? '' : answer), isCorrect ? 1 : 0);
+    } else throw e;
+  }
+  db.prepare(`UPDATE diagnosis_sessions SET total_questions = total_questions + 1, correct_count = correct_count + ? WHERE id = ?`)
+    .run(isCorrect ? 1 : 0, sessionId);
+
+  // 진단 오답 → 오답노트 자동 등록 (정답일 땐 미등록)
+  let wrongNoteAdded = false;
+  if (!isCorrect) {
+    wrongNoteAdded = _registerDiagnosisWrongNote(session.user_id, curConcept, q, answer);
+  }
+
+  st.history.push({ concept: curConcept, correct: isCorrect ? 1 : 0, strike: st.strike, questionId });
+
+  const resp = {
+    isCorrect,
+    strike: 0,
+    attemptStage: null,
+    nextQuestion: null,
+    nextConcept: null,
+    unitDone: false,
+    branch: null,
+    wrongNoteAdded,
+    finished: false
+  };
+
+  if (isCorrect) {
+    // ── 개념 통과 ──
+    st.strike = 0;
+    if (!st.passedConcepts.includes(curConcept)) st.passedConcepts.push(curConcept);
+    st.diagnosedConcepts = (st.diagnosedConcepts || 0) + 1;
+    resp.attemptStage = 'next-concept';
+
+    // 단원 완료 판정
+    if (_v3IsUnitComplete(st, st.unit.nodeId)) {
+      if (!st.completedUnits.includes(st.unit.nodeId)) st.completedUnits.push(st.unit.nodeId);
+      resp.unitDone = true;
+      resp.attemptStage = 'unit-done';
+      const nextUnits = _v3NextUnits(st.unit.nodeId);
+      resp.branch = { type: 'unit-complete', unitName: st.unit.name, nextUnits, isLast: nextUnits.length === 0 };
+      _v3SaveState(sessionId, st, { currentNodeId: curConcept, wrongAddDelta: wrongNoteAdded ? 1 : 0 });
+      resp.progress = _v3Progress(session, st);
+      return resp;
+    }
+
+    // 후속 개념
+    const nextC = _v3NextConceptInUnit(st);
+    if (nextC) {
+      st.currentConcept = nextC;
+      st.currentDifficulty = _v3StartDifficulty(nextC);
+      st.strike = 0;
+      if (!st.visitedConcepts.includes(nextC)) st.visitedConcepts.push(nextC);
+      const nq = _v3PickQuestion(nextC, st.currentDifficulty, st.askedQuestionIds);
+      if (nq) {
+        st.askedQuestionIds.push(nq.questionId);
+        resp.nextQuestion = nq;
+        resp.nextConcept = _v3HydrateConcept(nextC, st.conceptOrder);
+      } else {
+        // 문항 없는 개념 → skip + 단원 완료 재판정
+        if (!st.skippedConcepts.includes(nextC)) st.skippedConcepts.push(nextC);
+        resp.conceptSkipped = nextC;
+        // 재귀적 다음 개념 탐색(간단 루프 — visited로 무한루프 방지)
+        return _v3AdvanceAfterSkip(sessionId, session, st, resp, wrongNoteAdded);
+      }
+    } else {
+      // 후속 개념 없음 = 단원 완주(이론상 위에서 처리되나 방어)
+      if (!st.completedUnits.includes(st.unit.nodeId)) st.completedUnits.push(st.unit.nodeId);
+      resp.unitDone = true; resp.attemptStage = 'unit-done';
+      const nextUnits = _v3NextUnits(st.unit.nodeId);
+      resp.branch = { type: 'unit-complete', unitName: st.unit.name, nextUnits, isLast: nextUnits.length === 0 };
+    }
+  } else {
+    // ── 오답 ──
+    if (st.strike === 0) {
+      // 1차 오답 → 같은 개념·같은 난이도 다른 문항(§9-A 폴백 포함)
+      const retryQ = _v3PickQuestion(curConcept, st.currentDifficulty, st.askedQuestionIds);
+      if (retryQ) {
+        st.strike = 1;
+        st.askedQuestionIds.push(retryQ.questionId);
+        resp.strike = 1;
+        resp.attemptStage = 'retry';
+        resp.nextQuestion = retryQ;
+        resp.nextConcept = _v3HydrateConcept(curConcept, st.conceptOrder);
+      } else {
+        // §9-A 3단계: 재출제 생략 → 곧바로 하향 처리
+        resp.noRetryQuestion = true;
+        return _v3DownTo(sessionId, session, st, resp, wrongNoteAdded, /*forced*/true);
+      }
+    } else {
+      // 2차 오답 → 하향(선수 개념)
+      return _v3DownTo(sessionId, session, st, resp, wrongNoteAdded, false);
+    }
+  }
+
+  // 종료 조건 (소프트 — 개념 상한)
+  if (!resp.finished && (st.diagnosedConcepts || 0) >= DIAG_V3_CONCEPT_CAP && !resp.nextQuestion) {
+    // 상한 도달이지만 다음 문항이 없을 때만 종료 신호 (강제 아님)
+  }
+
+  _v3SaveState(sessionId, st, { currentNodeId: st.currentConcept, wrongAddDelta: wrongNoteAdded ? 1 : 0 });
+  resp.progress = _v3Progress(session, st);
+  return resp;
+}
+
+// 문항 없는 개념 skip 후 다음 개념으로 진행 (정답 통과 경로 보조)
+function _v3AdvanceAfterSkip(sessionId, session, st, resp, wrongNoteAdded) {
+  // visited로 무한루프 방지 — 최대 단원 개념 수만큼만 반복
+  const maxIter = st.conceptOrder.length + 2;
+  for (let i = 0; i < maxIter; i++) {
+    if (_v3IsUnitComplete(st, st.unit.nodeId)) {
+      if (!st.completedUnits.includes(st.unit.nodeId)) st.completedUnits.push(st.unit.nodeId);
+      resp.unitDone = true; resp.attemptStage = 'unit-done';
+      const nextUnits = _v3NextUnits(st.unit.nodeId);
+      resp.branch = { type: 'unit-complete', unitName: st.unit.name, nextUnits, isLast: nextUnits.length === 0 };
+      _v3SaveState(sessionId, st, { currentNodeId: st.currentConcept, wrongAddDelta: wrongNoteAdded ? 1 : 0 });
+      resp.progress = _v3Progress(session, st);
+      return resp;
+    }
+    const nextC = _v3NextConceptInUnit(st);
+    if (!nextC) {
+      // 더 없음 → 단원 완주 처리
+      if (!st.completedUnits.includes(st.unit.nodeId)) st.completedUnits.push(st.unit.nodeId);
+      resp.unitDone = true; resp.attemptStage = 'unit-done';
+      const nextUnits = _v3NextUnits(st.unit.nodeId);
+      resp.branch = { type: 'unit-complete', unitName: st.unit.name, nextUnits, isLast: nextUnits.length === 0 };
+      _v3SaveState(sessionId, st, { currentNodeId: st.currentConcept, wrongAddDelta: wrongNoteAdded ? 1 : 0 });
+      resp.progress = _v3Progress(session, st);
+      return resp;
+    }
+    st.currentConcept = nextC;
+    st.currentDifficulty = _v3StartDifficulty(nextC);
+    st.strike = 0;
+    if (!st.visitedConcepts.includes(nextC)) st.visitedConcepts.push(nextC);
+    const nq = _v3PickQuestion(nextC, st.currentDifficulty, st.askedQuestionIds);
+    if (nq) {
+      st.askedQuestionIds.push(nq.questionId);
+      resp.nextQuestion = nq;
+      resp.nextConcept = _v3HydrateConcept(nextC, st.conceptOrder);
+      _v3SaveState(sessionId, st, { currentNodeId: nextC, wrongAddDelta: wrongNoteAdded ? 1 : 0 });
+      resp.progress = _v3Progress(session, st);
+      return resp;
+    }
+    if (!st.skippedConcepts.includes(nextC)) st.skippedConcepts.push(nextC);
+  }
+  // 안전망: 종료
+  _v3SaveState(sessionId, st, { currentNodeId: st.currentConcept, status: 'completed', completed: true, wrongAddDelta: wrongNoteAdded ? 1 : 0 });
+  resp.finished = true; resp.sessionComplete = true; resp.attemptStage = 'finished';
+  resp.progress = _v3Progress(session, st);
+  return resp;
+}
+
+// 하향(선수 개념) 진입 — 2-strike 실패 또는 §9-A 강제. 선수 없으면 종료형 branch.
+function _v3DownTo(sessionId, session, st, resp, wrongNoteAdded, forced) {
+  st.diagnosedConcepts = (st.diagnosedConcepts || 0) + 1;
+  resp.strike = 2;
+  resp.attemptStage = 'down';
+  const prereq = _v3PrereqConcept(st);
+  if (!prereq) {
+    // root — 더 내려갈 곳 없음 → 종료형
+    resp.branch = { type: 'down', prereqConcept: null, isRoot: true };
+    _v3SaveState(sessionId, st, { currentNodeId: st.currentConcept, wrongAddDelta: wrongNoteAdded ? 1 : 0 });
+    resp.progress = _v3Progress(session, st);
+    return resp;
+  }
+  const prereqHydrated = _v3HydrateConcept(prereq, null);
+  resp.branch = { type: 'down', prereqConcept: prereqHydrated, isRoot: false, currentConcept: _v3HydrateConcept(st.currentConcept, st.conceptOrder) };
+  _v3SaveState(sessionId, st, { currentNodeId: st.currentConcept, wrongAddDelta: wrongNoteAdded ? 1 : 0 });
+  resp.progress = _v3Progress(session, st);
+  return resp;
+}
+
+// v3 분기 모달 선택 후 이동 확정 — 후속 단원 계속 / 하향 선수 개념 진입 / 종료
+//   payload: { action: 'continue-next-unit'|'go-prereq'|'finish', unitNodeId? }
+function advanceDiagnosisV3(sessionId, payload = {}) {
+  const session = db.prepare('SELECT * FROM diagnosis_sessions WHERE id = ?').get(sessionId);
+  if (!session) { const err = new Error('세션 없음'); err.statusCode = 404; throw err; }
+  const st = _v3LoadState(session);
+  if (!st) { const err = new Error('v3 세션이 아닙니다.'); err.statusCode = 400; throw err; }
+  if (session.status === 'completed') return { finished: true, sessionComplete: true };
+
+  const action = payload.action;
+  if (action === 'finish') {
+    _v3SaveState(sessionId, st, { status: 'completed', completed: true });
+    return { finished: true, sessionComplete: true };
+  }
+
+  if (action === 'continue-next-unit') {
+    const unitNodeId = payload.unitNodeId;
+    if (!unitNodeId) { const err = new Error('unitNodeId가 필요합니다.'); err.statusCode = 400; throw err; }
+    const unit = db.prepare('SELECT node_id, unit_name, area, grade_level, grade, semester FROM learning_map_nodes WHERE node_id = ? AND node_level=2').get(unitNodeId);
+    if (!unit) { const err = new Error('단원을 찾을 수 없습니다.'); err.statusCode = 404; throw err; }
+    const conceptsArr = _v3ConceptsOfUnit(unitNodeId);
+    if (conceptsArr.length === 0) { const err = new Error('이 단원에 진단할 개념이 없습니다.'); err.statusCode = 422; throw err; }
+    const conceptOrder = conceptsArr.map(c => c.nodeId);
+    // 첫 문항 보유 개념
+    let firstConcept = null, firstQuestion = null, firstDiff = 3;
+    const newSkipped = [];
+    for (const cid of conceptOrder) {
+      const d = _v3StartDifficulty(cid);
+      const q = _v3PickQuestion(cid, d, st.askedQuestionIds);
+      if (q) { firstConcept = cid; firstQuestion = q; firstDiff = d; break; }
+      newSkipped.push(cid);
+    }
+    if (!firstConcept) { const err = new Error('이 단원의 개념에 등록된 문제가 없습니다.'); err.statusCode = 422; throw err; }
+
+    // 단원 전환 — conceptOrder/unit 갱신, 누적 상태(passed/visited/asked/completedUnits)는 유지
+    st.unit = { nodeId: unit.node_id, name: unit.unit_name || '단원', area: unit.area || null, gradeLevel: unit.grade_level || null, grade: unit.grade != null ? unit.grade : null, semester: unit.semester != null ? unit.semester : null };
+    st.conceptOrder = conceptOrder;
+    st.skippedConcepts = Array.from(new Set([...(st.skippedConcepts || []), ...newSkipped]));
+    st.currentConcept = firstConcept;
+    st.currentDifficulty = firstDiff;
+    st.strike = 0;
+    if (!st.visitedConcepts.includes(firstConcept)) st.visitedConcepts.push(firstConcept);
+    st.askedQuestionIds.push(firstQuestion.questionId);
+    _v3SaveState(sessionId, st, { currentNodeId: firstConcept });
+    const scope = _v3PanelScope(st);
+    return {
+      unit: { nodeId: unit.node_id, name: unit.unit_name || '단원', area: unit.area || null, gradeLevel: unit.grade_level || null, grade: unit.grade != null ? unit.grade : null, semester: unit.semester != null ? unit.semester : null, conceptTotal: conceptOrder.length },
+      concept: _v3HydrateConcept(firstConcept, conceptOrder),
+      question: firstQuestion,
+      unitList: getV3Units(session.user_id, { schoolLevel: scope.schoolLevel, grade: scope.grade, area: scope.area }),
+      progress: _v3Progress(session, st)
+    };
+  }
+
+  if (action === 'go-prereq') {
+    const prereq = _v3PrereqConcept(st);
+    if (!prereq) {
+      _v3SaveState(sessionId, st, { status: 'completed', completed: true });
+      return { finished: true, sessionComplete: true, isRoot: true };
+    }
+    // 선수 개념의 부모 단원으로 현재 단원 갱신(단원 경계 가로지름 표시)
+    const parent = db.prepare('SELECT parent_node_id FROM learning_map_nodes WHERE node_id = ? AND node_level=3').get(prereq);
+    if (parent && parent.parent_node_id && parent.parent_node_id !== st.unit.nodeId) {
+      const u = db.prepare('SELECT node_id, unit_name, area, grade_level, grade, semester FROM learning_map_nodes WHERE node_id = ? AND node_level=2').get(parent.parent_node_id);
+      if (u) {
+        st.unit = { nodeId: u.node_id, name: u.unit_name || '단원', area: u.area || null, gradeLevel: u.grade_level || null, grade: u.grade != null ? u.grade : null, semester: u.semester != null ? u.semester : null };
+        st.conceptOrder = _v3ConceptsOfUnit(u.node_id).map(c => c.nodeId);
+      }
+    }
+    st.currentConcept = prereq;
+    st.currentDifficulty = _v3StartDifficulty(prereq);
+    st.strike = 0;
+    if (!st.visitedConcepts.includes(prereq)) st.visitedConcepts.push(prereq);
+    const q = _v3PickQuestion(prereq, st.currentDifficulty, st.askedQuestionIds);
+    if (!q) {
+      // 선수 개념도 문항 없음 → 종료
+      _v3SaveState(sessionId, st, { status: 'completed', completed: true });
+      return { finished: true, sessionComplete: true };
+    }
+    st.askedQuestionIds.push(q.questionId);
+    _v3SaveState(sessionId, st, { currentNodeId: prereq });
+    // 패널 스코프는 최초 선택 학교급/학년 유지(하향으로 단원이 타 학년으로 가도 동일). 현재 진단 단원은 FE에서 강조.
+    const scope = _v3PanelScope(st);
+    return {
+      unit: { nodeId: st.unit.nodeId, name: st.unit.name, area: st.unit.area, gradeLevel: st.unit.gradeLevel || null, grade: st.unit.grade != null ? st.unit.grade : null, semester: st.unit.semester != null ? st.unit.semester : null, conceptTotal: st.conceptOrder.length },
+      concept: _v3HydrateConcept(prereq, st.conceptOrder),
+      question: q,
+      unitList: getV3Units(session.user_id, { schoolLevel: scope.schoolLevel, grade: scope.grade, area: scope.area }),
+      progress: _v3Progress(session, st)
+    };
+  }
+
+  const err = new Error('알 수 없는 action입니다.'); err.statusCode = 400; throw err;
+}
+
+// v3 완료 — 세션 마감 + 결과 집계 (현재 수준·시작점, 단원 현황)
+function finishDiagnosisV3(sessionId) {
+  const session = db.prepare('SELECT * FROM diagnosis_sessions WHERE id = ?').get(sessionId);
+  if (!session) return null;
+  const st = _v3LoadState(session);
+  if (session.status !== 'completed') {
+    db.prepare(`UPDATE diagnosis_sessions SET status='completed', completed_at=CURRENT_TIMESTAMP, result=? WHERE id = ?`)
+      .run(_v3ResultEnum(session), sessionId);
+  }
+  return getDiagnosisResultV3(sessionId);
+}
+
+function _v3ResultEnum(session) {
+  const total = session.total_questions || 0;
+  const correct = session.correct_count || 0;
+  const rate = total > 0 ? correct / total : 0;
+  if (rate < 0.4) return 'needs_review';
+  if (rate < 0.7) return 'developing';
+  if (rate < 0.9) return 'proficient';
+  return 'mastered';
+}
+
+// v3 결과 — summary + 단원 현황 + 추천 시작점 (기획서 §8)
+function getDiagnosisResultV3(sessionId) {
+  const session = db.prepare('SELECT * FROM diagnosis_sessions WHERE id = ?').get(sessionId);
+  if (!session) return null;
+  const st = _v3LoadState(session);
+  if (!st) {
+    // v3 아님 — 기존 결과로 폴백
+    return getDiagnosisResult(sessionId);
+  }
+
+  // L-2: 실제로 "응시(채점된 문항 존재)"한 개념 집합 — diagnosis_answers 에 행이 있는 node_id.
+  //   1문항 출제만 되고 미응답한 개념은 여기 포함되지 않음 → 단원 KPI 과다 집계 방지.
+  const respondedConcepts = new Set(
+    db.prepare('SELECT DISTINCT node_id FROM diagnosis_answers WHERE session_id = ?').all(sessionId).map(r => r.node_id)
+  );
+
+  // 진단한 단원 집합 (방문/통과 개념의 부모 단원) — 표시용(현황 리스트)
+  const touchedUnits = new Set([st.unit.nodeId, ...st.completedUnits]);
+  for (const cid of st.visitedConcepts) {
+    const p = db.prepare('SELECT parent_node_id FROM learning_map_nodes WHERE node_id = ? AND node_level=3').get(cid);
+    if (p && p.parent_node_id) touchedUnits.add(p.parent_node_id);
+  }
+  const units = [];
+  for (const uid of touchedUnits) {
+    const u = db.prepare('SELECT node_id, unit_name FROM learning_map_nodes WHERE node_id = ? AND node_level=2').get(uid);
+    if (!u) continue;
+    const concepts = _v3ConceptsOfUnit(uid).map(c => c.nodeId);
+    const need = concepts.filter(id => !st.skippedConcepts.includes(id));
+    const passed = need.filter(id => st.passedConcepts.includes(id)).length;
+    const completed = st.completedUnits.includes(uid) || (need.length > 0 && passed === need.length);
+    // L-2: 이 단원에서 실제 응시(채점된 문항)·통과가 있었는지 — KPI 카운트 기준
+    const responded = completed || passed > 0 || concepts.some(id => respondedConcepts.has(id));
+    units.push({
+      nodeId: uid, name: u.unit_name || '단원',
+      conceptTotal: need.length, passed, responded,
+      status: completed ? 'completed' : (passed > 0 ? 'in_progress' : 'untested')
+    });
+  }
+
+  // 추천 시작점 = 마지막 통과 개념의 다음 미통과 개념 (없으면 첫 미통과 개념)
+  let recommendedStartNode = null;
+  const firstUnpassed = st.conceptOrder.find(id => !st.passedConcepts.includes(id) && !st.skippedConcepts.includes(id));
+  const target = firstUnpassed || st.conceptOrder.find(id => !st.passedConcepts.includes(id));
+  if (target) {
+    const n = db.prepare('SELECT node_id, lesson_name, unit_name, area FROM learning_map_nodes WHERE node_id = ?').get(target);
+    if (n) recommendedStartNode = { nodeId: n.node_id, name: n.lesson_name || n.unit_name || '개념', area: n.area || null };
+  }
+  // 현재 수준: 마지막 통과 개념
+  let lastPassedNode = null;
+  if (st.passedConcepts.length > 0) {
+    const lp = st.passedConcepts[st.passedConcepts.length - 1];
+    const n = db.prepare('SELECT node_id, lesson_name, unit_name FROM learning_map_nodes WHERE node_id = ?').get(lp);
+    if (n) lastPassedNode = { nodeId: n.node_id, name: n.lesson_name || n.unit_name || '개념' };
+  }
+
+  const diagnosedConcepts = st.diagnosedConcepts || 0;
+  const passedConcepts = st.passedConcepts.length;
+  const reviewConcepts = Math.max(0, diagnosedConcepts - passedConcepts);
+  // L-2: "진단 단원" KPI = 실제 응시(채점된 문항)·통과한 단원만 카운트 (1문항 미응답 단원 제외)
+  const diagnosedUnits = units.filter(u => u.responded).length;
+  const wrongNoteAdded = db.prepare('SELECT COALESCE(diag_wrong_added,0) AS n FROM diagnosis_sessions WHERE id = ?').get(sessionId)?.n || 0;
+
+  return {
+    summary: {
+      diagnosedConcepts, passedConcepts, reviewConcepts, diagnosedUnits,
+      elapsedSec: _diagElapsedSec(session)
+    },
+    units,
+    lastPassedNode,
+    recommendedStartNode,
+    wrongNoteAdded
+  };
+}
+
+// M-2: 진행중(in_progress) v3 진단 세션 조회 — FE "이어서 풀기" 배너 복원용.
+//   가장 최근 in_progress concept-v3 세션 1건을 재개에 필요한 정보와 함께 반환. 없으면 null.
+function getActiveDiagnosisV3(userId) {
+  const rows = db.prepare(`
+    SELECT id, difficulty_path, started_at, total_questions, correct_count, target_node_id
+    FROM diagnosis_sessions
+    WHERE user_id = ? AND diagnosis_type = 'concept-v3' AND status = 'in_progress'
+    ORDER BY id DESC LIMIT 10
+  `).all(userId);
+  for (const row of rows) {
+    let st = null;
+    try { st = JSON.parse(row.difficulty_path || 'null'); } catch { st = null; }
+    if (!st || !st.v3) continue;            // v3 상태가 유효한 세션만
+    const scope = _v3PanelScope(st);
+    const prog = _v3UnitProgress(st);
+    const conceptHydrated = st.currentConcept ? _v3HydrateConcept(st.currentConcept, st.conceptOrder) : null;
+    return {
+      sessionId: row.id,
+      unit: st.unit ? {
+        nodeId: st.unit.nodeId, name: st.unit.name || '단원', area: st.unit.area || null,
+        conceptTotal: Array.isArray(st.conceptOrder) ? st.conceptOrder.length : 0
+      } : null,
+      currentConcept: conceptHydrated,
+      schoolLevel: scope.schoolLevel,
+      grade: scope.grade,
+      area: scope.area,
+      progress: {
+        diagnosedConcepts: st.diagnosedConcepts || 0,
+        unitPassed: prog.passed,
+        unitTotal: prog.total
+      },
+      totalQuestions: row.total_questions || 0,
+      correctCount: row.correct_count || 0,
+      startedAt: row.started_at
+    };
+  }
+  return null;
+}
+
 // 진단용 폴백 problems: 노드 직접 매핑이 없을 때 자손/같은 단원 차시/같은 학년·과목에서 보충
 function collectFallbackProblems(nodeId, userId, limit = 10) {
   const problemTypes = "('quiz','exam','problem','assessment','question')";
@@ -5030,6 +6098,10 @@ module.exports = {
   getNextDiagnosisQuestion, listDiagnosisHistory,
   // 진단평가 정책 v2 신규
   submitDiagnosisSheet, retryDiagnosisNode,
+  // 진단검사 v3 — 개념(차시) 단위 순차 진단 (기획서 진단검사_v3_기획서.md)
+  getV3Units, getV3Grades, getV3Areas,
+  startDiagnosisV3, getNextDiagnosisV3, submitDiagnosisV3,
+  advanceDiagnosisV3, finishDiagnosisV3, getDiagnosisResultV3, getActiveDiagnosisV3,
   generateLearningPath, getCurrentPath, completeNode, evaluateNodeCompletion, inferNodeIdFromContent,
   // 추천학습 경로 시스템 (2026-05-27)
   buildRecommendedPath, listRecommendedPaths, getRecommendedPathBySession,
