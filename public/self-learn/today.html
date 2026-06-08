@@ -1504,23 +1504,7 @@
           scorePercent: d.score ?? null,
           contentTitle: window._currentQuizContent?.title || item?.item_title || ''
         };
-        // 오답 저장(서버)
-        try {
-          (d.detail || []).forEach(dd => {
-            if (!dd.isCorrect) {
-              fetch('/api/learning/wrong-answers', {
-                method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  question_text: dd.questionText,
-                  student_answer: dd.myAnswerText,
-                  correct_answer: dd.correctAnswerText,
-                  subject: window._currentQuizContent?.subject || null,
-                  source: 'daily_learning'
-                })
-              }).catch(() => {});
-            }
-          });
-        } catch {}
+        // 오답노트 자동 수집은 서버(/daily/:id/complete)가 처리 — answers(detail) 전달 시 source='today_learning'으로 등록(content_id 보존→플레이어 복구 가능). FE 중복 등록 제거.
         showQuizReview(_lastQuizReview);
         _canComplete = true;
         await completeCurrentItem({
@@ -1876,19 +1860,7 @@
             isCorrect,
             explanation: q.explanation || null
           });
-          // 오답만 wrong_answers 자동 저장
-          if (!isCorrect) {
-            fetch('/api/learning/wrong-answers', {
-              method: 'POST', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                question_text: q.question_text || q.text || `문제 ${i+1}`,
-                student_answer: myAnsText,
-                correct_answer: corAnsText,
-                subject: window._currentQuizContent.subject || null,
-                source: 'daily_learning'
-              })
-            }).catch(() => {});
-          }
+          // 오답노트 자동 수집은 서버(/daily/:id/complete)가 detail(answers)로 처리 — source='today_learning'(content_id 보존→플레이어 복구). FE 중복 등록 제거.
         }
         scorePercent = totalQ > 0 ? Math.round(correct / totalQ * 100) : null;
       }

@@ -1426,6 +1426,12 @@ function initSchema() {
     if (!waCols.includes('source')) {
       db.exec("ALTER TABLE wrong_answers ADD COLUMN source VARCHAR(20) DEFAULT 'auto'");
     }
+    // 자기주도 학습 오답(ai_learning/content/today_learning) 플레이어 복구용 원본 참조.
+    //   content_id 로 content_questions(content_id, question_number) 원본 문항(선택지 포함)을 재조회한다.
+    if (!waCols.includes('content_id')) {
+      db.exec("ALTER TABLE wrong_answers ADD COLUMN content_id INTEGER");
+      db.exec("CREATE INDEX IF NOT EXISTS idx_wrong_answers_content ON wrong_answers(content_id)");
+    }
   } catch (e) { /* 테이블이 아직 없으면 무시 */ }
 
   // 마이그레이션: learning_logs 테이블 xAPI 확장

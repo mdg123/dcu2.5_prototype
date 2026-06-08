@@ -1098,14 +1098,65 @@ router.put('/wrong-notes/:id/tags', requireAuth, (req, res) => {
   }
 });
 
-// POST /wrong-notes/:id/retry — 오답 재도전
+// GET /wrong-notes/by-exam/:examId/questions — [묶음] 같은 평가지 미해결 오답 일괄 복구 (정답 미포함)
+//   ⚠ '/:id/...' 보다 먼저 선언해야 'by-exam' 이 :id 로 캡처되지 않는다.
+router.get('/wrong-notes/by-exam/:examId/questions', requireAuth, (req, res) => {
+  try {
+    const result = selfLearnDb.getWrongNotesByExam(req.params.examId, req.user.id);
+    if (!result) return res.status(404).json({ success: false, message: '해당 평가지의 미해결 오답이 없습니다.' });
+    res.json({ success: true, ...result });
+  } catch (err) {
+    console.error('[SELF-LEARN] wrong-notes by-exam error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// POST /wrong-notes/retry-batch — [묶음] 평가지 오답 일괄 채점 (서버 채점)
+router.post('/wrong-notes/retry-batch', requireAuth, (req, res) => {
+  try {
+    const result = selfLearnDb.retryWrongNoteBatch(req.user.id, req.body && req.body.items);
+    // xAPI: 묶음 채점 1건 요약 기록
+    try {
+      xapiSpool.record('assessment', buildAssessment, { userId: req.user.id }, {
+        verb: 'submitted',
+        assessment_id: 0,
+        title: '오답 평가지 묶음 재도전',
+        assessment_type: 'self_check',
+        target_kind: 'quiz',
+        score: { raw: result.score, max: result.total },
+        success: result.total > 0 && result.score === result.total,
+        source: 'wrong_note_retry_batch',
+      });
+    } catch (_) {}
+    res.json({ success: true, ...result });
+  } catch (err) {
+    console.error('[SELF-LEARN] wrong-notes retry-batch error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// GET /wrong-notes/:id/question — 단일 오답 원본 문항 복구 (풀이용, 정답·해설 미포함)
+router.get('/wrong-notes/:id/question', requireAuth, (req, res) => {
+  try {
+    const result = selfLearnDb.getWrongNoteQuestion(parseInt(req.params.id), req.user.id);
+    if (!result) return res.status(404).json({ success: false, message: '오답을 찾을 수 없습니다.' });
+    if (result.forbidden) return res.status(403).json({ success: false, message: '본인의 오답만 풀 수 있습니다.' });
+    res.json({ success: true, ...result });
+  } catch (err) {
+    console.error('[SELF-LEARN] wrong-note question error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// POST /wrong-notes/:id/retry — 오답 재도전 (서버 채점, 정규화)
 router.post('/wrong-notes/:id/retry', requireAuth, (req, res) => {
   try {
     const result = selfLearnDb.retryWrongNote(parseInt(req.params.id), req.user.id, req.body);
     if (!result) return res.status(404).json({ success: false, message: '오답을 찾을 수 없습니다.' });
-    // xAPI: 오답 재도전 annotation.annotated + assessment.submitted
+    if (result.forbidden) return res.status(403).json({ success: false, message: '본인의 오답만 풀 수 있습니다.' });
+    // xAPI: 오답 재도전 annotation.annotated + assessment.submitted (서버 채점 결과 사용)
     try {
-      const correct = req.body && req.body.is_correct ? 1 : 0;
+      const correct = result.is_correct ? 1 : 0;
       xapiSpool.record('annotation', buildAnnotation, { userId: req.user.id }, {
         verb: 'annotated',
         annotation_id: parseInt(req.params.id),
@@ -1127,6 +1178,7 @@ router.post('/wrong-notes/:id/retry', requireAuth, (req, res) => {
     } catch (_) {}
     res.json({ success: true, ...result });
   } catch (err) {
+    console.error('[SELF-LEARN] wrong-note retry error:', err);
     res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
   }
 });

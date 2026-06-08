@@ -237,6 +237,29 @@ function completeDailyItem(itemId, userId, { score, timeSpent, answers, correctC
     return { success: true, alreadyCompleted: true };
   }
 
+  // 자기주도 오답 자동 수집(오늘의 학습) — 최초 완료 시점에 채점 상세(answers)에서 틀린 문항을 오답노트에 등록.
+  //   콘텐츠 기반 항목(content_id 有)만 플레이어 복구 가능하므로 등록. 중복방지·graceful은 헬퍼가 처리.
+  //   item.node_id 가 있으면 subject/unit_name 보강에 사용(있어도 source는 today_learning 고정).
+  if (Array.isArray(answers) && answers.length > 0 && item.content_id) {
+    for (const a of answers) {
+      if (!a || a.isCorrect) continue;  // 정답이면 미등록
+      _registerSelfLearnWrongNote(userId, {
+        source: 'today_learning',
+        contentId: item.content_id,
+        nodeId: item.node_id || null,
+        question: {
+          question_number: a.questionNumber != null ? a.questionNumber : a.question_number,
+          text: a.questionText != null ? a.questionText : a.question_text,
+          options: a.options,
+          answer: a.correctAnswer != null ? a.correctAnswer : a.correct_answer,
+          explanation: a.explanation
+        },
+        studentAnswer: a.myAnswerText != null ? a.myAnswerText
+                     : (a.myAnswer != null ? a.myAnswer : a.student_answer)
+      });
+    }
+  }
+
   logLearningActivity({
     userId, activityType: 'daily_complete', targetType: 'daily_learning',
     targetId: itemId, verb: 'completed', sourceService: 'self-learn',
@@ -2436,17 +2459,363 @@ function updateWrongNoteTags(id, userId, tags) {
     .run(JSON.stringify(tags), id, userId);
 }
 
-function retryWrongNote(id, userId, { answer }) {
-  const note = db.prepare('SELECT * FROM wrong_answers WHERE id = ? AND student_id = ?').get(id, userId);
-  if (!note) return null;
+// ============================================================
+// 오답노트 "다시 풀기" 플레이어 — 원본 복구 + 서버 채점 (기획서 §6)
+// ============================================================
+//
+// 보안 대전제: 풀이 화면 진입(/question) 응답에는 정답(answer)·해설(explanation)을
+//   절대 포함하지 않는다(커닝 차단). 채점은 서버(retry)에서만 수행하고,
+//   정답/해설은 채점 후 응답에서만 공개한다.
 
-  const isCorrect = answer === note.correct_answer;
-  if (isCorrect) {
+// exams.answers JSON 파싱 캐시 (요청 단위 단발 — 모듈 캐시 안 함, exam 행 직접 조회)
+function _parseExamAnswers(examId) {
+  if (!examId) return null;
+  const row = db.prepare('SELECT answers FROM exams WHERE id = ?').get(examId);
+  if (!row || !row.answers) return null;
+  try {
+    const parsed = JSON.parse(row.answers);
+    return Array.isArray(parsed) ? parsed : null;
+  } catch (_) { return null; }
+}
+
+// exams.answers 배열에서 (question_number)에 해당하는 원본 문항 객체를 찾는다.
+//   스키마 A) { number, text, type, options, answer, points }   → number 일치
+//   스키마 B) { question, options, answer, explanation }         → number 없음, 배열 index+1
+function _findExamQuestion(examId, questionNumber) {
+  const arr = _parseExamAnswers(examId);
+  if (!arr || !arr.length) return null;
+  const qn = Number(questionNumber);
+  let q = Number.isFinite(qn) ? arr.find(x => x && Number(x.number) === qn) : null;
+  if (!q && Number.isInteger(qn) && qn >= 1 && qn <= arr.length) {
+    const cand = arr[qn - 1];
+    if (cand && cand.number == null) q = cand;
+  }
+  // question_number 자체가 없으면(NULL) 복구 불가
+  return q || null;
+}
+
+// 원본 문항 객체를 표준 형태로 정규화한다.
+//   반환: { type, text, instruction, passage, options[], points, answer(raw), explanation } | null
+// answer/explanation 은 채점/공개용으로만 사용하고, 풀이용 응답에서는 호출부가 제거한다.
+function _normalizeOriginalQuestion(q) {
+  if (!q || typeof q !== 'object') return null;
+  const text = q.text != null ? q.text : (q.question != null ? q.question : null);
+  if (text == null || String(text).trim() === '') return null;
+
+  let options = null;
+  if (Array.isArray(q.options)) options = q.options.slice();
+  else if (typeof q.options === 'string') {
+    try { const j = JSON.parse(q.options); if (Array.isArray(j)) options = j; } catch (_) { options = null; }
+  }
+  // 보기 텍스트 prefix(①, "1)" 등) 정리는 하지 않고 원본 그대로 노출(렌더 일관성).
+
+  let type = q.type || q.question_type || null;
+  if (!type) type = (options && options.length) ? 'choice' : 'short';
+  // content_questions 는 'multiple_choice'/'single_choice' 등으로 저장 — 플레이어가 인식하는 'choice'/'short' 로 정규화.
+  const tlc = String(type).toLowerCase();
+  if (['multiple_choice', 'single_choice', 'mc', 'objective', 'select'].includes(tlc)) type = 'choice';
+  else if (['short_answer', 'subjective', 'fill_blank', 'fill_in_blank'].includes(tlc)) type = 'short';
+  if (type === 'essay') type = 'short';            // essay 는 입력칸 동일 취급
+  if (type === 'choice' && (!options || !options.length)) type = 'short'; // 보기 없으면 단답 폴백
+
+  return {
+    type,
+    text: String(text),
+    instruction: q.instruction != null ? String(q.instruction) : null,
+    passage: q.passage != null ? String(q.passage) : null,
+    options: options || null,
+    points: q.points != null ? Number(q.points) : null,
+    answer: q.answer,                              // raw (index/text/"1.0" 혼재)
+    explanation: q.explanation != null ? String(q.explanation) : null
+  };
+}
+
+/**
+ * 오답노트 1건의 원본 문항을 복구한다(채점·복구 공용 내부 헬퍼).
+ * @returns {{
+ *   recovery: 'ok'|'fallback_short'|'unavailable',
+ *   question: {type,text,instruction,passage,options,points} | null,  // 정답/해설 미포함
+ *   grading: { type, options, answer, explanation } | null            // 서버 채점 전용(노출 금지)
+ * }}
+ */
+function _recoverWrongNoteQuestion(note) {
+  // 1) 평가(exam) 원본 복구 — exam_id + question_number → exams.answers
+  if (note.exam_id != null) {
+    const raw = _findExamQuestion(note.exam_id, note.question_number);
+    const q = _normalizeOriginalQuestion(raw);
+    if (q) {
+      // 원본 복구 성공 — 객관식(보기有)/단답 모두 정상 복구(recovery:'ok').
+      //   기획서 §5: A(객관식)·B(단답) 둘 다 복구 성공이므로 'ok'.
+      //   fallback_short 는 원본 링크가 없어 단답으로 폴백한 경우(아래 2단계)에만.
+      return {
+        recovery: 'ok',
+        question: {
+          type: q.type, text: q.text, instruction: q.instruction,
+          passage: q.passage, options: q.options, points: q.points
+        },
+        grading: {
+          type: q.type, options: q.options,
+          answer: q.answer != null ? q.answer : note.correct_answer,
+          explanation: q.explanation || note.explanation || null
+        }
+      };
+    }
+  }
+
+  // 1-b) 자기주도(content) 원본 복구 — content_id + question_number → content_questions 원본 문항(선택지 포함).
+  //   ai_learning / content / today_learning 오답 모두 동일 경로(콘텐츠 문항이 원본).
+  if (note.content_id != null) {
+    const q = _findContentQuestion(note.content_id, note.question_number);
+    if (q) {
+      return {
+        recovery: 'ok',
+        question: {
+          type: q.type, text: q.text, instruction: q.instruction,
+          passage: q.passage, options: q.options, points: q.points
+        },
+        grading: {
+          type: q.type, options: q.options,
+          answer: q.answer != null ? q.answer : note.correct_answer,
+          explanation: q.explanation || note.explanation || null
+        }
+      };
+    }
+  }
+
+  // 2) 원본 복구 실패 — correct_answer 보유 시 단답 폴백(C), 없으면 풀이 불가(D)
+  const hasAnswer = note.correct_answer != null && String(note.correct_answer).trim() !== '';
+  if (hasAnswer) {
+    const fallbackText = note.question_text && String(note.question_text).trim() !== ''
+      ? String(note.question_text) : '문제';
+    return {
+      recovery: 'fallback_short',
+      question: { type: 'short', text: fallbackText, instruction: null, passage: null, options: null, points: null },
+      grading: { type: 'short', options: null, answer: note.correct_answer, explanation: note.explanation || null }
+    };
+  }
+
+  return {
+    recovery: 'unavailable',
+    question: null,
+    grading: { type: null, options: null, answer: null, explanation: note.explanation || null }
+  };
+}
+
+/**
+ * GET /wrong-notes/:id/question 용 — 풀이용 문항(정답·해설 미포함) 반환.
+ * @returns null(본인 오답 아님/없음) | { ...정답 미포함 페이로드 }
+ */
+function getWrongNoteQuestion(noteId, userId) {
+  // 권한: 본인 오답만. 존재하나 타인 소유면 forbidden 신호(403), 아예 없으면 null(404).
+  const owner = db.prepare('SELECT student_id FROM wrong_answers WHERE id = ?').get(noteId);
+  if (!owner) return null;
+  if (owner.student_id !== userId) return { forbidden: true };
+  const note = db.prepare('SELECT * FROM wrong_answers WHERE id = ?').get(noteId);
+
+  const rec = _recoverWrongNoteQuestion(note);
+
+  // 같은 평가지 미해결 오답 묶음 정보(묶음 풀기 진입 안내용)
+  let examGroup = null;
+  if (note.exam_id != null) {
+    const cnt = db.prepare(
+      'SELECT COUNT(*) c FROM wrong_answers WHERE student_id = ? AND exam_id = ? AND is_resolved = 0'
+    ).get(userId, note.exam_id).c;
+    if (cnt >= 2) examGroup = { examId: note.exam_id, total: cnt };
+  }
+
+  const payload = {
+    note_id: note.id,
+    source: note.source || (note.exam_id != null ? 'exam' : 'manual'),
+    subject: note.subject || null,
+    unit_name: note.unit_name || null,
+    recovery: rec.recovery,
+    attempt_count: note.attempt_count || 0,
+    is_resolved: note.is_resolved ? 1 : 0,
+    examGroup
+  };
+
+  if (rec.recovery === 'unavailable') {
+    payload.question = null;
+    payload.can_retry = false;
+    payload.explanation_available = !!(note.explanation && String(note.explanation).trim());
+  } else {
+    // ⚠ 정답(answer)·해설(explanation)은 절대 포함하지 않는다.
+    payload.question = {
+      number: note.question_number != null ? note.question_number : null,
+      type: rec.question.type,
+      instruction: rec.question.instruction,
+      passage: rec.question.passage,
+      text: rec.question.text,
+      options: rec.question.options || null,
+      points: rec.question.points
+    };
+    payload.can_retry = true;
+  }
+  return payload;
+}
+
+/**
+ * GET /wrong-notes/by-exam/:examId/questions 용 — 같은 평가지 미해결 오답 묶음(정답 미포함).
+ * @returns null(해당 없음) | { exam_id, subject, total, questions:[{note_id, ...정답 미포함}] }
+ */
+function getWrongNotesByExam(examId, userId) {
+  const notes = db.prepare(
+    'SELECT * FROM wrong_answers WHERE student_id = ? AND exam_id = ? AND is_resolved = 0 ORDER BY question_number ASC, id ASC'
+  ).all(userId, examId);
+  if (!notes.length) return null;
+
+  const questions = notes.map(note => {
+    const rec = _recoverWrongNoteQuestion(note);
+    const item = {
+      note_id: note.id,
+      subject: note.subject || null,
+      unit_name: note.unit_name || null,
+      recovery: rec.recovery,
+      attempt_count: note.attempt_count || 0
+    };
+    if (rec.recovery === 'unavailable') {
+      item.question = null;
+      item.can_retry = false;
+    } else {
+      item.question = {
+        number: note.question_number != null ? note.question_number : null,
+        type: rec.question.type,
+        instruction: rec.question.instruction,
+        passage: rec.question.passage,
+        text: rec.question.text,
+        options: rec.question.options || null,
+        points: rec.question.points
+      };
+      item.can_retry = true;
+    }
+    return item;
+  });
+
+  const subject = notes.find(n => n.subject)?.subject || null;
+  const examTitle = (db.prepare('SELECT title FROM exams WHERE id = ?').get(examId) || {}).title || null;
+  return { exam_id: examId, exam_title: examTitle, subject, total: questions.length, questions };
+}
+
+// ── 서버 채점 정규화 (기획서 §6.3) ───────────────────────────────────
+// 분수/소수 등 수치 동치 비교 (best-effort): "3/10" == "0.3", "1.0" == "1" 등.
+function _toNumericValue(s) {
+  if (s == null) return null;
+  let t = String(s).trim();
+  if (t === '') return null;
+  // 분수 a/b
+  const frac = t.match(/^(-?\d+)\s*\/\s*(\d+)$/);
+  if (frac) {
+    const den = Number(frac[2]);
+    if (den === 0) return null;
+    return Number(frac[1]) / den;
+  }
+  // 일반 수치 (정수/소수/"1.0")
+  if (/^-?\d+(\.\d+)?$/.test(t)) return Number(t);
+  return null;
+}
+
+/**
+ * 오답노트 채점 — 제출 답안과 복구된 정답을 정규화 비교.
+ * @param grading { type, options, answer }  (복구 grading 객체)
+ * @param submittedText  제출 텍스트 (보기 텍스트 또는 단답)
+ * @param submittedIndex 제출 보기 index (0-based, 객관식; 없으면 null)
+ * @returns { isCorrect, correctText, correctIndex }
+ */
+function _gradeWrongNote(grading, submittedText, submittedIndex) {
+  const opts = Array.isArray(grading.options) ? grading.options : null;
+  const rawAnswer = grading.answer == null ? '' : String(grading.answer).trim();
+
+  // 정답 index 산출: answer 가 0-based index 숫자이고 options 범위 내면 그 index.
+  //   exams 스키마는 0-based index(예: id130 answer=0), content_questions 는 1-based("1","2") 혼재.
+  //   양쪽을 모두 시도하여 보기 텍스트도 함께 확보.
+  let correctIndex = null;
+  let correctText = rawAnswer;
+  if (opts && opts.length) {
+    const n = Number(rawAnswer);
+    if (Number.isInteger(n)) {
+      if (n >= 0 && n < opts.length) { correctIndex = n; correctText = String(opts[n]); }          // 0-based
+      else if (n >= 1 && n <= opts.length) { correctIndex = n - 1; correctText = String(opts[n - 1]); } // 1-based
+    }
+    // answer 가 텍스트면 options 에서 위치 역참조
+    if (correctIndex == null) {
+      const idx = opts.findIndex(o => _normalizeAnswerText(o) === _normalizeAnswerText(rawAnswer));
+      if (idx >= 0) { correctIndex = idx; correctText = String(opts[idx]); }
+    }
+  }
+
+  // ── 판정 시도 (하나라도 일치하면 정답) ──
+  const subText = submittedText == null ? '' : String(submittedText).trim();
+  const subIdx = (submittedIndex == null || submittedIndex === '') ? null : Number(submittedIndex);
+
+  // 1) 객관식 index 직접 일치 (정답 index 확정 시)
+  if (correctIndex != null && Number.isInteger(subIdx)) {
+    if (subIdx === correctIndex) return { isCorrect: true, correctText, correctIndex };
+  }
+  // 2) 제출 텍스트 == 정답 텍스트 (정규화)
+  if (subText !== '') {
+    if (_normalizeAnswerText(subText) === _normalizeAnswerText(correctText)) {
+      return { isCorrect: true, correctText, correctIndex };
+    }
+    // 2-b) 제출 텍스트 == raw answer (텍스트 정답이 options 밖일 때)
+    if (_normalizeAnswerText(subText) === _normalizeAnswerText(rawAnswer)) {
+      return { isCorrect: true, correctText, correctIndex };
+    }
+    // 2-c) 제출 텍스트가 보기 index 숫자로 들어온 경우(0/1-based) → 정답 index 비교
+    const subAsNum = Number(subText);
+    if (correctIndex != null && Number.isInteger(subAsNum)) {
+      if (subAsNum === correctIndex || subAsNum - 1 === correctIndex) {
+        return { isCorrect: true, correctText, correctIndex };
+      }
+    }
+    // 3) 단답 수치 동치 (분수/소수)
+    const a = _toNumericValue(subText);
+    const b = _toNumericValue(correctText);
+    if (a != null && b != null && Math.abs(a - b) < 1e-9) {
+      return { isCorrect: true, correctText, correctIndex };
+    }
+  }
+  // 4) 제출 index 로 보기 텍스트 환산 후 텍스트 비교 (정답이 텍스트일 때)
+  if (opts && Number.isInteger(subIdx) && subIdx >= 0 && subIdx < opts.length) {
+    if (_normalizeAnswerText(opts[subIdx]) === _normalizeAnswerText(correctText)) {
+      return { isCorrect: true, correctText, correctIndex };
+    }
+  }
+
+  return { isCorrect: false, correctText, correctIndex };
+}
+
+function retryWrongNote(id, userId, { answer, answerIndex } = {}) {
+  // 권한: 본인 오답만. 존재하나 타인 소유면 forbidden 신호(403), 없으면 null(404).
+  const owner = db.prepare('SELECT student_id FROM wrong_answers WHERE id = ?').get(id);
+  if (!owner) return null;
+  if (owner.student_id !== userId) return { forbidden: true };
+  const note = db.prepare('SELECT * FROM wrong_answers WHERE id = ?').get(id);
+
+  // 원본 복구 → 서버 정규화 채점 (기획서 §6.2/§6.3)
+  const rec = _recoverWrongNoteQuestion(note);
+  let isCorrect = false, correctText = null, correctIndex = null;
+  if (rec.recovery !== 'unavailable') {
+    const graded = _gradeWrongNote(rec.grading, answer, answerIndex);
+    isCorrect = graded.isCorrect;
+    correctText = graded.correctText;
+    correctIndex = graded.correctIndex;
+  } else {
+    // 복구 불가(D) — correct_answer 없음. 채점 불가, 오답 처리(해결 안 됨).
+    correctText = note.correct_answer || null;
+  }
+
+  const wasResolved = note.is_resolved === 1;
+  let pointsAwarded = 0;
+  if (isCorrect && !wasResolved) {
     db.prepare('UPDATE wrong_answers SET is_resolved = 1 WHERE id = ?').run(id);
     const pts = parseInt(getSetting('wrong_note_resolve_point') || '5');
     awardPoints(userId, { source: 'wrong_note', sourceId: id, points: pts, description: '오답 해결' });
+    pointsAwarded = pts;
+  } else if (isCorrect && wasResolved) {
+    // 이미 해결된 항목 재도전 — 해결 상태 유지, 포인트 재지급 없음.
   }
   db.prepare('UPDATE wrong_answers SET attempt_count = attempt_count + 1 WHERE id = ?').run(id);
+  const newAttempt = (note.attempt_count || 0) + 1;
 
   // 성취수준 6출처 집계용: 오답노트 재풀이를 problem_attempts 에 source_type='wrong_note' 로 기록.
   // content_id 는 NOT NULL 이므로 오답노트엔 매핑 콘텐츠가 없을 때 0(센티넬) 사용. node_id 는 NULL.
@@ -2463,7 +2832,46 @@ function retryWrongNote(id, userId, { answer }) {
     resultSuccess: isCorrect ? 1 : 0
   });
 
-  return { isCorrect, resolved: isCorrect };
+  // 채점 후이므로 정답·해설 공개 허용
+  return {
+    isCorrect,
+    is_correct: isCorrect,
+    resolved: isCorrect || wasResolved,
+    attempt_count: newAttempt,
+    correct_answer: correctText,
+    correct_index: correctIndex,
+    explanation: rec.grading.explanation || note.explanation || null,
+    points_awarded: pointsAwarded
+  };
+}
+
+/**
+ * POST /wrong-notes/retry-batch 용 — 같은 평가지 묶음 일괄 채점.
+ * @param items [{ note_id, answer, answerIndex }]
+ * @returns { results:[{ note_id, is_correct, resolved, correct_answer, correct_index, explanation }], score, total }
+ */
+function retryWrongNoteBatch(userId, items) {
+  const list = Array.isArray(items) ? items : [];
+  const results = [];
+  let score = 0;
+  for (const it of list) {
+    if (!it || it.note_id == null) continue;
+    const r = retryWrongNote(parseInt(it.note_id), userId, { answer: it.answer, answerIndex: it.answerIndex });
+    if (!r) { results.push({ note_id: it.note_id, error: 'not_found' }); continue; }
+    if (r.forbidden) { results.push({ note_id: it.note_id, error: 'forbidden' }); continue; }
+    if (r.is_correct) score++;
+    results.push({
+      note_id: parseInt(it.note_id),
+      is_correct: r.is_correct,
+      resolved: r.resolved,
+      attempt_count: r.attempt_count,
+      correct_answer: r.correct_answer,
+      correct_index: r.correct_index,
+      explanation: r.explanation,
+      points_awarded: r.points_awarded
+    });
+  }
+  return { results, score, total: results.filter(r => !r.error).length };
 }
 
 // ========== 나만의 문제집 ==========
@@ -2647,6 +3055,30 @@ function recordProblemAttempt(userId, contentId, { isCorrect, selectedAnswer, us
     VALUES (?, ?, ?, ?, ?, ?, ?)
   `).run(userId, contentId, nodeId || null, finalIsCorrect, submittedAnswer, timeTaken || null, resolvedSource);
   isCorrect = !!finalIsCorrect;
+
+  // 자기주도 오답 자동 수집 — 틀린 경우에만 오답노트(wrong_answers)에 등록(중복방지·graceful).
+  //   source: nodeId 있으면 'ai_learning'(학습맵), 없으면 'content'(공개콘텐츠 단발문항).
+  //   원본 문항은 questionId(있으면)→content_id+question_number 로 헬퍼가 조회/보강한다.
+  if (!finalIsCorrect) {
+    let qForNote = null;
+    if (questionId) {
+      const qrow = db.prepare(
+        'SELECT id, question_number, question_text, question_type, options, answer, explanation, instruction, passage, points FROM content_questions WHERE id = ?'
+      ).get(questionId);
+      if (qrow) {
+        qForNote = {
+          question_number: qrow.question_number,
+          text: qrow.question_text, type: qrow.question_type,
+          options: qrow.options, answer: qrow.answer, explanation: qrow.explanation,
+          instruction: qrow.instruction, passage: qrow.passage, points: qrow.points
+        };
+      }
+    }
+    _registerSelfLearnWrongNote(userId, {
+      source: resolvedSource === 'ai_learning' ? 'ai_learning' : 'content',
+      contentId, nodeId: nodeId || null, question: qForNote, studentAnswer: submittedAnswer
+    });
+  }
 
   // 제목 fetch
   const ct = db.prepare('SELECT title FROM contents WHERE id = ?').get(contentId);
@@ -3779,6 +4211,126 @@ function _registerDiagnosisWrongNote(userId, nodeId, q, studentAnswer) {
   }
 }
 
+// content_id(+question_number)로 원본 콘텐츠 문항을 표준 형태로 조회한다(자기주도 오답 복구·등록 공용).
+//   question_number 가 명시되면 그 문항, 없으면 첫 문항을 반환.
+//   반환: { id, question_number, type, text, instruction, passage, options[], points, answer(raw), explanation } | null
+function _findContentQuestion(contentId, questionNumber) {
+  if (contentId == null) return null;
+  let row = null;
+  const qn = Number(questionNumber);
+  if (Number.isFinite(qn) && questionNumber != null) {
+    row = db.prepare(
+      'SELECT * FROM content_questions WHERE content_id = ? AND question_number = ? ORDER BY id ASC LIMIT 1'
+    ).get(contentId, qn);
+  }
+  if (!row) {
+    row = db.prepare(
+      'SELECT * FROM content_questions WHERE content_id = ? ORDER BY question_number ASC, id ASC LIMIT 1'
+    ).get(contentId);
+  }
+  if (!row) return null;
+  // exams 원본 정규화기와 동일 키로 매핑(question_text→text, question_type→type 등)
+  const norm = _normalizeOriginalQuestion({
+    text: row.question_text,
+    type: row.question_type,
+    options: row.options,
+    answer: row.answer,
+    explanation: row.explanation,
+    instruction: row.instruction,
+    passage: row.passage,
+    points: row.points
+  });
+  if (!norm) return null;
+  return { id: row.id, question_number: row.question_number, ...norm };
+}
+
+// 자기주도 학습(AI맞춤·공개콘텐츠·오늘의학습) 오답 1건을 오답노트(wrong_answers)에 자동 등록.
+//   진단 헬퍼(_registerDiagnosisWrongNote)와 동형. 오답일 때만 호출(정답은 미등록).
+//   중복방지: 같은 (student_id, source, content_id, question_number) 미해결 오답이 있으면
+//     attempt_count++ 후 skip(신규 INSERT 안 함). 없으면 새로 INSERT.
+//   문항 메타(질문/정답/선택지)는 우선 인자(question)로, 부족하면 content_id+question_number로 원본 조회해 보강.
+//   subject/unit_name 은 node(있으면)→content 순으로 보강.
+//   등록 실패가 본 학습 흐름(채점)을 막지 않도록 try/catch graceful.
+// 반환: 새로 INSERT 했으면 true, (중복으로) attempt_count만 증가/스킵했으면 false.
+function _registerSelfLearnWrongNote(userId, { source, contentId, nodeId, question, studentAnswer } = {}) {
+  try {
+    if (userId == null || contentId == null) return false;
+    const src = source || (nodeId ? 'ai_learning' : 'content');
+
+    // 1) 원본 문항 확보 — 인자 question 우선, 부족하면 content_questions 재조회.
+    let q = question || null;
+    const qNumberHint = q && q.question_number != null ? q.question_number
+                       : (q && q.number != null ? q.number : null);
+    if (!q || q.text == null || (q.options == null && q.answer == null)) {
+      const fromDb = _findContentQuestion(contentId, qNumberHint);
+      if (fromDb) q = { ...fromDb, ...(q || {}) };  // 인자가 채운 값 우선, 빈 곳만 DB로 보강
+    }
+    if (!q) return false;
+
+    const qText = q.text != null ? String(q.text).trim()
+                : (q.question_text != null ? String(q.question_text).trim() : '');
+    if (!qText) return false;  // 메타 부족 → graceful skip
+
+    // 중복방지/복구 키: question_number (content_questions 식별). 없으면 원본 조회로 확정 시도.
+    let qNumber = q.question_number != null ? q.question_number
+                : (q.number != null ? q.number : qNumberHint);
+    if (qNumber == null) {
+      const fromDb = _findContentQuestion(contentId, null);
+      if (fromDb) qNumber = fromDb.question_number;
+    }
+
+    // 정답·해설·선택지 raw (저장은 원본 그대로 — 플레이어 채점이 정규화 비교)
+    const correctAnswerRaw = q.answer != null ? String(q.answer)
+                           : (q.correct_answer != null ? String(q.correct_answer) : null);
+    const explanation = q.explanation != null ? String(q.explanation) : null;
+
+    // subject/unit_name 보강: node(우선) → content
+    let subject = null, unitName = null;
+    if (nodeId) {
+      const meta = db.prepare(
+        'SELECT subject, unit_name, lesson_name FROM learning_map_nodes WHERE node_id = ?'
+      ).get(nodeId);
+      if (meta) { subject = meta.subject || null; unitName = meta.unit_name || meta.lesson_name || null; }
+    }
+    if (!subject || !unitName) {
+      const c = db.prepare('SELECT subject, title FROM contents WHERE id = ?').get(contentId);
+      if (c) { subject = subject || c.subject || null; unitName = unitName || c.title || null; }
+    }
+
+    // 중복방지: 미해결(is_resolved=0) 동일 출처·콘텐츠·문항 오답이 있으면 attempt_count++ 후 skip
+    const dup = db.prepare(`
+      SELECT id FROM wrong_answers
+      WHERE student_id = ? AND source = ? AND content_id = ?
+        AND ((question_number IS NULL AND ? IS NULL) OR question_number = ?)
+        AND is_resolved = 0
+      ORDER BY id DESC LIMIT 1
+    `).get(userId, src, contentId, qNumber, qNumber);
+    if (dup) {
+      db.prepare('UPDATE wrong_answers SET attempt_count = COALESCE(attempt_count,1) + 1 WHERE id = ?').run(dup.id);
+      return false;  // 신규 아님
+    }
+
+    db.prepare(`
+      INSERT INTO wrong_answers
+        (student_id, exam_id, content_id, question_number, question_text, student_answer, correct_answer,
+         explanation, subject, unit_name, is_resolved, attempt_count, is_manual, source)
+      VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, 0, 1, 0, ?)
+    `).run(
+      userId, contentId, qNumber,
+      qText,
+      studentAnswer != null ? String(studentAnswer) : null,
+      correctAnswerRaw,
+      explanation,
+      subject, unitName,
+      src
+    );
+    return true;
+  } catch (e) {
+    // 등록 실패는 본 학습 채점 흐름을 막지 않는다(graceful).
+    return false;
+  }
+}
+
 // ============================================================
 // 진단 단원완료 공통 후처리 — 1·2·3차 로직 단일 구현 (감리 H-1)
 // ============================================================
@@ -4485,6 +5037,8 @@ module.exports = {
   getLearningDashboard, getRanking,
   getWrongNotesExtended, getWrongNoteDashboard, getTeacherWrongNoteDashboard,
   addManualWrongNote, updateWrongNoteTags, retryWrongNote,
+  // 오답노트 "다시 풀기" 플레이어 (원본 복구 + 묶음 + 일괄채점)
+  getWrongNoteQuestion, getWrongNotesByExam, retryWrongNoteBatch,
   getProblemSets, createProblemSet, getProblemSetDetail,
   addProblemSetItem, removeProblemSetItem, startProblemSet, submitProblemSet,
   // P0 추가
