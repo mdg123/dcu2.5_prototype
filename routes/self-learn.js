@@ -1040,6 +1040,19 @@ router.get('/recommended-paths', requireAuth, (req, res) => {
   }
 });
 
+// GET /recommended-paths/current — 최신 완료 진단 세션의 학습 경로 (학습경로 탭 정본)
+//   ⚠ 라우트 순서: 반드시 '/:sessionId'보다 위에 두어 'current'가 sessionId로 매칭되지 않게 한다.
+router.get('/recommended-paths/current', requireAuth, (req, res) => {
+  try {
+    const data = selfLearnDb.getRecommendedPathCurrent(req.user.id);
+    res.json({ success: true, ...data });
+  } catch (err) {
+    console.error('[SELF-LEARN] recommended-paths current error:', err);
+    // 빈 상태로 안전 반환 (탭이 오류 화면 대신 빈 상태를 그릴 수 있게)
+    res.json({ success: true, hasDiagnosis: false, groups: [] });
+  }
+});
+
 // GET /recommended-paths/:sessionId — 특정 진단 세션의 학습 경로 상세
 router.get('/recommended-paths/:sessionId', requireAuth, (req, res) => {
   try {

@@ -1161,9 +1161,16 @@ function buildRecommendedPath(sessionId) {
   const session = db.prepare('SELECT * FROM diagnosis_sessions WHERE id = ?').get(sid);
   if (!session) return null;
 
+  // [2026-06-09 v3 분기] difficulty_path가 v3 state 객체({v3:true,...})면 v3 경로 빌더로 위임.
+  //   v2(배열)는 아래 기존 로직 그대로 사용. 어떤 입력에도 throw 금지(빈 경로 안전 반환).
+  let parsedDP = null;
+  try { parsedDP = JSON.parse(session.difficulty_path || 'null'); } catch { parsedDP = null; }
+  if (parsedDP && !Array.isArray(parsedDP) && parsedDP.v3) {
+    return _buildRecommendedPathV3(session, parsedDP);
+  }
+
   // 실패 노드 수집 — difficulty_path JSON에서 passed=false 또는 정답률 < 0.60
-  let diagPath = [];
-  try { diagPath = JSON.parse(session.difficulty_path || '[]'); } catch { diagPath = []; }
+  let diagPath = Array.isArray(parsedDP) ? parsedDP : [];
 
   const PASS_THRESHOLD = 0.60;
   const failedNodeIds = [];
@@ -1243,6 +1250,143 @@ function buildRecommendedPath(sessionId) {
     pathNodesJson,
     sid
   );
+  return { pathId: info.lastInsertRowid, sessionId: sid, pathNodes, created: true };
+}
+
+/**
+ * [2026-06-09] v3 진단 state 기반 추천학습 경로 빌더.
+ *
+ * v3는 difficulty_path에 state 객체(배열 아님)를 저장한다(개념 단위 진행 상태).
+ * 경로 STEP은 "개념 → 부모 단원 승격" 규칙으로 구성한다(학습 진입·차시 집계가 단원 기준).
+ *
+ * 규칙(기획서 §3.2):
+ *   1. conceptOrder + visitedConcepts 에서 미통과 개념(!passed && !skipped) 수집.
+ *   2. STEP 1 = 진단 확정 시작점(recommendedStartNode)의 부모 단원.
+ *   3. 미통과 개념들을 각자의 부모 단원(node_level=2)으로 승격, 중복 단원 병합.
+ *   4. 정렬: 학년 ASC → 학기 ASC → node_level ASC → area → sort_order (v2와 동일).
+ *   5. 목표 단원(target_node_id)은 항상 마지막 STEP.
+ *   6. 미통과 단원이 목표뿐이면 pathNodes=[targetUnit] 단일 STEP.
+ *   7. learning_paths UPSERT (source_type='diagnosis', session_id).
+ *
+ * throw 금지: 입력 이상 시 빈/단일 경로로 안전 반환.
+ *
+ * @param {object} session diagnosis_sessions 행
+ * @param {object} st 파싱된 v3 state
+ * @returns {{pathId:number, sessionId:number, pathNodes:string[], created:boolean}|null}
+ */
+function _buildRecommendedPathV3(session, st) {
+  const sid = Number(session.id);
+  const userId = session.user_id;
+  const targetUnitId = session.target_node_id;   // v3 target_node_id는 node_level=2 단원
+
+  // 개념 → 부모 단원(node_level=2) 매핑 헬퍼 (개념이 곧 단원이면 그대로)
+  const _parentUnitOf = (conceptId) => {
+    if (!conceptId) return null;
+    try {
+      const n = db.prepare(
+        'SELECT node_id, node_level, parent_node_id FROM learning_map_nodes WHERE node_id = ?'
+      ).get(conceptId);
+      if (!n) return null;
+      if (n.node_level === 2) return n.node_id;             // 이미 단원
+      if (n.parent_node_id) return n.parent_node_id;        // 개념(차시) → 부모 단원
+      return n.node_id;
+    } catch (_) { return null; }
+  };
+
+  // 1) 미통과 개념 수집 (conceptOrder + visitedConcepts, 통과·스킵 제외)
+  const passed = new Set(Array.isArray(st.passedConcepts) ? st.passedConcepts : []);
+  const skipped = new Set(Array.isArray(st.skippedConcepts) ? st.skippedConcepts : []);
+  const conceptPool = [];
+  const seenConcept = new Set();
+  const pushConcept = (cid) => {
+    if (!cid || seenConcept.has(cid)) return;
+    seenConcept.add(cid);
+    if (!passed.has(cid) && !skipped.has(cid)) conceptPool.push(cid);
+  };
+  (Array.isArray(st.conceptOrder) ? st.conceptOrder : []).forEach(pushConcept);
+  (Array.isArray(st.visitedConcepts) ? st.visitedConcepts : []).forEach(pushConcept);
+
+  // 2) 진단 확정 시작점(개념)의 부모 단원 → STEP 1 선두
+  let startConceptId = null, startUnitId = null;
+  try {
+    const r = getDiagnosisResultV3(sid);
+    if (r && r.recommendedStartNode && r.recommendedStartNode.nodeId) {
+      startConceptId = r.recommendedStartNode.nodeId;
+      startUnitId = _parentUnitOf(startConceptId);
+    }
+  } catch (e) {
+    console.error('[_buildRecommendedPathV3] getDiagnosisResultV3 실패:', e.message);
+  }
+
+  // 3) 미통과 개념 → 부모 단원 승격(중복 제거)
+  const unitSet = new Set();
+  const unitOrder = [];          // 입력 순서 보존(시작점이 없을 때 폴백 정렬 기준)
+  const addUnit = (uid) => {
+    if (!uid || unitSet.has(uid)) return;
+    unitSet.add(uid); unitOrder.push(uid);
+  };
+  if (startUnitId) addUnit(startUnitId);
+  for (const cid of conceptPool) addUnit(_parentUnitOf(cid));
+  // 목표 단원은 항상 후보(마지막에 별도 처리)
+  if (targetUnitId) unitSet.add(targetUnitId);
+
+  // 목표 단원을 제외한 중간 단원들
+  const midUnits = unitOrder.filter(uid => uid !== targetUnitId);
+
+  // 4) 정렬용 메타 일괄 조회
+  const allUnitIds = [...new Set([...midUnits, targetUnitId, startUnitId].filter(Boolean))];
+  let pathNodes = [];
+  if (allUnitIds.length === 0) {
+    pathNodes = [];
+  } else {
+    const placeholders = allUnitIds.map(() => '?').join(',');
+    let metas = [];
+    try {
+      metas = db.prepare(`
+        SELECT node_id, subject, grade, semester, area, node_level, sort_order, unit_name, lesson_name
+        FROM learning_map_nodes WHERE node_id IN (${placeholders})
+      `).all(...allUnitIds);
+    } catch (_) { metas = []; }
+    const metaById = Object.fromEntries(metas.map(m => [m.node_id, m]));
+
+    const sortedMid = [...midUnits].sort((a, b) => {
+      const ma = metaById[a] || {};
+      const mb = metaById[b] || {};
+      if ((ma.grade || 99) !== (mb.grade || 99)) return (ma.grade || 99) - (mb.grade || 99);
+      if ((ma.semester || 9) !== (mb.semester || 9)) return (ma.semester || 9) - (mb.semester || 9);
+      if ((ma.node_level || 9) !== (mb.node_level || 9)) return (ma.node_level || 9) - (mb.node_level || 9);
+      if ((ma.area || '') !== (mb.area || '')) return String(ma.area || '').localeCompare(String(mb.area || ''));
+      return (ma.sort_order || 0) - (mb.sort_order || 0);
+    });
+
+    // 시작점 단원이 정렬 후에도 선두가 되도록 보장(있으면 맨 앞으로)
+    pathNodes = [...sortedMid];
+    if (startUnitId && pathNodes.includes(startUnitId)) {
+      pathNodes = [startUnitId, ...pathNodes.filter(u => u !== startUnitId)];
+    }
+    // 목표 단원은 마지막
+    if (targetUnitId) pathNodes.push(targetUnitId);
+  }
+
+  // 6) 단일 STEP 폴백 — 아무것도 없으면 목표 단원만
+  if (pathNodes.length === 0 && targetUnitId) pathNodes = [targetUnitId];
+
+  // 7) learning_paths UPSERT
+  const pathNodesJson = JSON.stringify(pathNodes);
+  const lastNode = targetUnitId || pathNodes[pathNodes.length - 1] || '';
+  const existing = db.prepare(
+    "SELECT id FROM learning_paths WHERE session_id = ? AND source_type = 'diagnosis'"
+  ).get(sid);
+  if (existing) {
+    db.prepare(`
+      UPDATE learning_paths SET path_nodes = ?, target_node_id = ?, user_id = ? WHERE id = ?
+    `).run(pathNodesJson, lastNode, userId, existing.id);
+    return { pathId: existing.id, sessionId: sid, pathNodes, created: false };
+  }
+  const info = db.prepare(`
+    INSERT INTO learning_paths (user_id, target_node_id, path_nodes, status, session_id, source_type)
+    VALUES (?, ?, ?, 'active', ?, 'diagnosis')
+  `).run(userId, lastNode, pathNodesJson, sid);
   return { pathId: info.lastInsertRowid, sessionId: sid, pathNodes, created: true };
 }
 
@@ -1435,20 +1579,71 @@ function getRecommendedPathBySession(sessionId, userId) {
   let pathNodes = [];
   try { pathNodes = JSON.parse((pathRow && pathRow.path_nodes) || '[]'); } catch {}
 
-  // 진단 노드 결과 (passed/정답률)
-  let diagPath = [];
-  try { diagPath = JSON.parse(session.difficulty_path || '[]'); } catch {}
+  // 진단 노드 결과 (passed/정답률) — v2(배열)와 v3(state 객체) 분기. 어떤 입력에도 throw 금지.
+  let diagPathParsed = null;
+  try { diagPathParsed = JSON.parse(session.difficulty_path || 'null'); } catch { diagPathParsed = null; }
   const diagByNode = {};
-  for (const p of diagPath) {
-    if (p && p.node) {
-      const total = Number(p.total) || 0;
-      const correct = Number(p.correct) || 0;
-      diagByNode[p.node] = {
-        passed: !!p.passed,
-        correctCount: correct,
-        totalCount: total,
-        correctRate: total > 0 ? correct / total : 0
-      };
+  const isV3 = diagPathParsed && !Array.isArray(diagPathParsed) && diagPathParsed.v3;
+
+  if (isV3) {
+    // v3: difficulty_path에 개념별 정답수가 없음 → diagnosis_answers를 단원(개념의 부모) 기준 집계.
+    //   pathNodes는 단원(node_level=2)이므로 키도 단원 nodeId로 맞춘다. 집계 불가 단원은 미포함(FE "미진단").
+    try {
+      const answers = db.prepare(
+        'SELECT node_id, is_correct FROM diagnosis_answers WHERE session_id = ?'
+      ).all(sid);
+      if (answers.length > 0) {
+        // 응답된 개념들의 부모 단원 일괄 조회
+        const ansConceptIds = [...new Set(answers.map(a => a.node_id).filter(Boolean))];
+        const parentByConcept = {};
+        if (ansConceptIds.length > 0) {
+          const ph = ansConceptIds.map(() => '?').join(',');
+          const rows = db.prepare(`
+            SELECT node_id, node_level, parent_node_id FROM learning_map_nodes WHERE node_id IN (${ph})
+          `).all(...ansConceptIds);
+          for (const r of rows) {
+            parentByConcept[r.node_id] = (r.node_level === 2)
+              ? r.node_id
+              : (r.parent_node_id || r.node_id);
+          }
+        }
+        // 단원별 정답/총합 집계
+        const agg = {};   // unitId -> { correct, total }
+        for (const a of answers) {
+          const unitId = parentByConcept[a.node_id] || a.node_id;
+          if (!unitId) continue;
+          if (!agg[unitId]) agg[unitId] = { correct: 0, total: 0 };
+          agg[unitId].total += 1;
+          if (a.is_correct) agg[unitId].correct += 1;
+        }
+        const PASS_RATE = 0.60;
+        for (const [unitId, v] of Object.entries(agg)) {
+          const rate = v.total > 0 ? v.correct / v.total : 0;
+          diagByNode[unitId] = {
+            passed: rate >= PASS_RATE,
+            correctCount: v.correct,
+            totalCount: v.total,
+            correctRate: rate
+          };
+        }
+      }
+    } catch (e) {
+      console.error('[getRecommendedPathBySession] v3 diagByNode 집계 실패:', e.message);
+    }
+  } else {
+    // v2: difficulty_path 배열에서 노드별 결과 추출 (기존 로직 유지)
+    const diagPath = Array.isArray(diagPathParsed) ? diagPathParsed : [];
+    for (const p of diagPath) {
+      if (p && p.node) {
+        const total = Number(p.total) || 0;
+        const correct = Number(p.correct) || 0;
+        diagByNode[p.node] = {
+          passed: !!p.passed,
+          correctCount: correct,
+          totalCount: total,
+          correctRate: total > 0 ? correct / total : 0
+        };
+      }
     }
   }
 
@@ -1476,6 +1671,17 @@ function getRecommendedPathBySession(sessionId, userId) {
     semester: tMeta.semester || null,
     area: tMeta.area || null
   };
+
+  // [2026-06-09] v3: 첫 STEP(시작점 단원)에 진단 시작 개념명을 conceptHint로 보조 표기.
+  let v3StartConceptName = null;
+  if (isV3) {
+    try {
+      const r = getDiagnosisResultV3(sid);
+      if (r && r.recommendedStartNode && r.recommendedStartNode.name) {
+        v3StartConceptName = r.recommendedStartNode.name;
+      }
+    } catch (_) {}
+  }
 
   // 학년·학기·영역 그룹핑 + STEP 번호 부여
   const groupMap = new Map();   // groupKey -> { meta, steps[] }
@@ -1527,7 +1733,7 @@ function getRecommendedPathBySession(sessionId, userId) {
         steps: []
       });
     }
-    groupMap.get(groupKey).steps.push({
+    const stepObj = {
       step: stepCounter,
       nodeId: nid,
       title: m.lesson_name || m.unit_name || '단원',
@@ -1538,7 +1744,12 @@ function getRecommendedPathBySession(sessionId, userId) {
       estimatedMinutes: lessons.estimatedMinutes,
       isTarget,
       lockReason
-    });
+    };
+    // 첫 STEP(시작점 단원)에만 진단 시작 개념명 보조 표기(선택). 단원과 개념명이 다를 때만 노출.
+    if (stepCounter === 1 && v3StartConceptName && v3StartConceptName !== stepObj.title) {
+      stepObj.conceptHint = `${v3StartConceptName} 개념부터`;
+    }
+    groupMap.get(groupKey).steps.push(stepObj);
   }
 
   const groups = [...groupMap.values()];
@@ -1584,6 +1795,41 @@ function getRecommendedPathBySession(sessionId, userId) {
     },
     groups
   };
+}
+
+/**
+ * [2026-06-09] 학습경로 탭용 "현재 경로" — 가장 최근 완료 진단 세션의 경로.
+ *   완료 세션 0건이면 { hasDiagnosis:false, groups:[] } (빈 상태 신호, throw 금지).
+ *
+ * @param {number} userId
+ * @returns {{ hasDiagnosis:boolean, groups:Array, ... }}
+ */
+function getRecommendedPathCurrent(userId) {
+  // 최신 완료 진단 세션 1건 (v2/v3 무관)
+  let latest = null;
+  try {
+    latest = db.prepare(`
+      SELECT id FROM diagnosis_sessions
+      WHERE user_id = ? AND status = 'completed'
+      ORDER BY COALESCE(completed_at, started_at) DESC, id DESC
+      LIMIT 1
+    `).get(userId);
+  } catch (e) {
+    console.error('[getRecommendedPathCurrent] 세션 조회 실패:', e.message);
+  }
+  if (!latest || !latest.id) {
+    return { hasDiagnosis: false, groups: [] };
+  }
+  let data = null;
+  try {
+    data = getRecommendedPathBySession(latest.id, userId);
+  } catch (e) {
+    console.error('[getRecommendedPathCurrent] 경로 합성 실패:', e.message);
+  }
+  if (!data) {
+    return { hasDiagnosis: false, groups: [] };
+  }
+  return { hasDiagnosis: true, ...data };
 }
 
 /**
@@ -5312,6 +5558,10 @@ function _v3LoadState(session) {
   let st = null;
   try { st = JSON.parse(session.difficulty_path || 'null'); } catch { st = null; }
   if (!st || !st.v3) return null;
+  // [다갈래 선수큐] 하위호환 — 구 세션엔 세 필드 부재. load 시 1회 정규화(설계서 §3·R7).
+  if (st.prereqQueue == null) st.prereqQueue = [];
+  if (st.downCount == null) st.downCount = 0;
+  if (st.branchDepth == null) st.branchDepth = 0;
   return st;
 }
 function _v3SaveState(sessionId, st, extra = {}) {
@@ -5479,6 +5729,10 @@ function startDiagnosisV3(userId, { schoolLevel, grade, subject, area, unitNodeI
     strike: 0,
     askedQuestionIds: [firstQuestion.questionId],
     diagnosedConcepts: 0,
+    // [다갈래 선수큐] 설계서 §3 — 약점 선수를 모두 담아 근본도순으로 차례 검사
+    prereqQueue: [],   // 검사 대기 선수 node_id 큐(근본도 오름차순 정렬 유지)
+    downCount: 0,      // 누적 하향(선수로 내려간) 개념 수 — 하드 상한 판정용
+    branchDepth: 0,    // 현재 갈래의 연속 하향 깊이 — 깊이 상한·갈래 전환 시 0 리셋
     history: []  // [{ concept, correct, strike, questionId }]
   };
 
@@ -5509,6 +5763,12 @@ function startDiagnosisV3(userId, { schoolLevel, grade, subject, area, unitNodeI
 // v3 종료 상수
 const DIAG_V3_CONCEPT_CAP = 30;   // 누적 진단 개념 소프트 상한
 
+// v3 다갈래 선수큐(prereqQueue) 상한 — 설계서 §5.1 + 사용자 확정(Q1="더 철저히").
+//   하향 약점 갈래를 넉넉히 검사하되, 기존 DIAG_V3_CONCEPT_CAP(30)+12분 소프트스톱이 실질 백스톱.
+const DIAG_V3_DOWN_CONCEPT_CAP = 20;  // 한 진단에서 하향(선수)으로 검사하는 개념 누적 상한
+const DIAG_V3_DOWN_DEPTH_CAP   = 8;   // 한 갈래의 연속 하향 최대 깊이
+const DIAG_V3_PREREQ_FANOUT    = 6;   // 한 개념에서 한 번에 큐에 담는 선수 최대 수(근본도 상위)
+
 // v3 다음 문항 1개 (현재 개념·난이도, 이미 출제 제외)
 function getNextDiagnosisV3(sessionId) {
   const session = db.prepare('SELECT * FROM diagnosis_sessions WHERE id = ?').get(sessionId);
@@ -5536,7 +5796,9 @@ function _v3Progress(session, st) {
     elapsedSec: _diagElapsedSec(session),
     conceptCap: DIAG_V3_CONCEPT_CAP,
     softTimeLimitSec: DIAG_SOFT_TIME_SEC,
-    unitPassed: prog.passed, unitTotal: prog.total
+    unitPassed: prog.passed, unitTotal: prog.total,
+    prereqQueueRemaining: Array.isArray(st.prereqQueue) ? st.prereqQueue.length : 0,  // [다갈래] FE 헤더용 남은 갈래 수
+    downCount: st.downCount || 0                                                       // [다갈래] 누적 하향 개념 수
   };
 }
 
@@ -5566,6 +5828,7 @@ function _v3NextConceptInUnit(st) {
 }
 
 // v3 하향(선수 개념) 결정 — 역방향 prerequisite 중 미방문 우선 (진동방지 visited).
+//   [구 단일갈래 헬퍼] 다갈래 큐 도입 후 본류 흐름에선 미사용. 참조/하위호환용 보존.
 function _v3PrereqConcept(st) {
   const back = _v3BackwardConcepts(st.currentConcept);
   // 미방문 우선
@@ -5580,6 +5843,119 @@ function _v3PrereqConcept(st) {
     if (has) return id;
   }
   return pool[0];
+}
+
+// ============================================================
+// 다갈래 선수큐(prereqQueue) — 설계서 §4
+//   2-strike 하향 시 현재 개념의 약한 선수를 "모두" 큐에 담아 근본(낮은 학년)부터 차례 검사.
+// ============================================================
+
+// 개념 node_id의 절대학년(_gradeAbs) — 개념(차시) 메타가 비면 부모 단원값으로 보강(_v3HydrateConcept 동일 패턴).
+function _gradeAbsOf(conceptId) {
+  const n = db.prepare('SELECT grade_level, grade, semester, parent_node_id FROM learning_map_nodes WHERE node_id = ?').get(conceptId);
+  if (!n) return 999;
+  let gradeLevel = n.grade_level || null;
+  let grade = n.grade != null ? n.grade : null;
+  let semester = n.semester != null ? n.semester : null;
+  if ((grade == null || gradeLevel == null) && n.parent_node_id) {
+    try {
+      const p = db.prepare('SELECT grade_level, grade, semester FROM learning_map_nodes WHERE node_id = ?').get(n.parent_node_id);
+      if (p) {
+        if (gradeLevel == null) gradeLevel = p.grade_level || null;
+        if (grade == null) grade = p.grade != null ? p.grade : null;
+        if (semester == null) semester = p.semester != null ? p.semester : null;
+      }
+    } catch (_) {}
+  }
+  return _gradeAbs(gradeLevel, grade, semester);
+}
+
+// 개념 node_id의 sort_order(동률 정렬용) — 없으면 0.
+function _sortOrderOf(conceptId) {
+  const n = db.prepare('SELECT sort_order FROM learning_map_nodes WHERE node_id = ?').get(conceptId);
+  return n && n.sort_order != null ? n.sort_order : 0;
+}
+
+// 개념 node_id에 출제 가능한 문항이 1개라도 있는지.
+function _v3HasQuestion(conceptId) {
+  const has = db.prepare(`
+    SELECT 1 FROM node_contents nc JOIN content_questions cq ON cq.content_id=nc.content_id WHERE nc.node_id=? LIMIT 1
+  `).get(conceptId);
+  return !!has;
+}
+
+// §4.1 — 정렬·필터된 선수 후보. 역방향 prerequisite 전체에서 visited/passed/skip/큐중복/자기참조 제외,
+//   근본도(절대학년) 오름차순 정렬 후 fanout 상한 절단. (문항 없는 건 enqueue는 하되 pop에서 skip)
+function _v3PrereqCandidates(st, conceptId) {
+  const raw = _v3BackwardConcepts(conceptId);
+  const seen = new Set();
+  const cand = [];
+  for (const id of raw) {
+    if (id === conceptId) continue;                       // 자기참조 방어(사이클)
+    if (seen.has(id)) continue;                            // 엣지 중복 제거
+    if (st.visitedConcepts.includes(id)) continue;        // 이미 검사/방문 X
+    if (st.passedConcepts.includes(id)) continue;         // 이미 통과 X
+    if (st.skippedConcepts.includes(id)) continue;        // 문항없음 skip X
+    if (st.prereqQueue.includes(id)) continue;            // 이미 대기열 X
+    seen.add(id);
+    cand.push(id);
+  }
+  cand.sort((a, b) => (_gradeAbsOf(a) - _gradeAbsOf(b)) || (_sortOrderOf(a) - _sortOrderOf(b)));
+  return cand.slice(0, DIAG_V3_PREREQ_FANOUT);
+}
+
+// §4.2 — enqueue. 현재 개념의 약점 선수를 큐에 담고 전역 근본도순 재정렬·길이 절단.
+function _v3EnqueuePrereqs(st, conceptId) {
+  const cands = _v3PrereqCandidates(st, conceptId);
+  for (const id of cands) {
+    if (!st.prereqQueue.includes(id)) st.prereqQueue.push(id);
+  }
+  // 큐 전체를 근본도 오름차순 재정렬(여러 갈래 누적 시 전역 우선순위 유지)
+  st.prereqQueue.sort((a, b) => (_gradeAbsOf(a) - _gradeAbsOf(b)) || (_sortOrderOf(a) - _sortOrderOf(b)));
+  // 큐 길이 상한: 가장 근본(앞)만 남기고 절단
+  if (st.prereqQueue.length > DIAG_V3_DOWN_CONCEPT_CAP) {
+    st.prereqQueue = st.prereqQueue.slice(0, DIAG_V3_DOWN_CONCEPT_CAP);
+  }
+  return cands.length;
+}
+
+// §4.3 — dequeue. 가장 근본(앞)부터 pop. visited/passed/skip·상한 가드·문항없음 skip 루프.
+//   반환: 다음 검사할 선수 node_id 또는 null(큐 소진/상한 → 하향 전체 종료).
+function _v3DequeueNext(st) {
+  const maxIter = (st.prereqQueue.length || 0) + 2;  // 무한루프 방어(R3)
+  let iter = 0;
+  while (st.prereqQueue.length > 0 && iter++ < maxIter) {
+    if ((st.downCount || 0) >= DIAG_V3_DOWN_CONCEPT_CAP) { st.prereqQueue = []; break; }  // 하드 상한 → 종료
+    const id = st.prereqQueue.shift();  // 가장 근본(앞)
+    if (!id) continue;
+    if (st.visitedConcepts.includes(id) || st.passedConcepts.includes(id) || st.skippedConcepts.includes(id)) continue;  // 그 사이 처리됨
+    if (!_v3HasQuestion(id)) { if (!st.skippedConcepts.includes(id)) st.skippedConcepts.push(id); continue; }  // 문항 없음 skip
+    return id;
+  }
+  return null;
+}
+
+// 다갈래 — 선수 개념으로 실제 이동(부모 단원 전환, currentConcept 갱신, visited.push, downCount/branchDepth 증가).
+//   반환: 출제 문항(q) 또는 null(문항 없음). go-prereq / next-prereq 공통.
+function _v3MoveIntoPrereq(st, prereqId) {
+  // 선수 개념의 부모 단원으로 현재 단원 갱신(단원 경계 가로지름 표시)
+  const parent = db.prepare('SELECT parent_node_id FROM learning_map_nodes WHERE node_id = ? AND node_level=3').get(prereqId);
+  if (parent && parent.parent_node_id && parent.parent_node_id !== st.unit.nodeId) {
+    const u = db.prepare('SELECT node_id, unit_name, area, grade_level, grade, semester FROM learning_map_nodes WHERE node_id = ? AND node_level=2').get(parent.parent_node_id);
+    if (u) {
+      st.unit = { nodeId: u.node_id, name: u.unit_name || '단원', area: u.area || null, gradeLevel: u.grade_level || null, grade: u.grade != null ? u.grade : null, semester: u.semester != null ? u.semester : null };
+      st.conceptOrder = _v3ConceptsOfUnit(u.node_id).map(c => c.nodeId);
+    }
+  }
+  st.currentConcept = prereqId;
+  st.currentDifficulty = _v3StartDifficulty(prereqId);
+  st.strike = 0;
+  if (!st.visitedConcepts.includes(prereqId)) st.visitedConcepts.push(prereqId);
+  st.downCount = (st.downCount || 0) + 1;
+  st.branchDepth = (st.branchDepth || 0) + 1;
+  const q = _v3PickQuestion(prereqId, st.currentDifficulty, st.askedQuestionIds);
+  if (q) st.askedQuestionIds.push(q.questionId);
+  return q;
 }
 
 // v3 채점 — 정규화 채점(judgeQuestionAnswer 재사용) + 2-strike 상태 관리 + 이동 결정.
@@ -5635,7 +6011,9 @@ function submitDiagnosisV3(sessionId, payload = {}) {
     unitDone: false,
     branch: null,
     wrongNoteAdded,
-    finished: false
+    finished: false,
+    prereqDone: false,                         // [다갈래] 선수 큐 소진 후 본류 복귀 신호
+    queueRemaining: st.prereqQueue.length      // [다갈래] 남은 갈래 수(FE 헤더용)
   };
 
   if (isCorrect) {
@@ -5644,6 +6022,47 @@ function submitDiagnosisV3(sessionId, payload = {}) {
     if (!st.passedConcepts.includes(curConcept)) st.passedConcepts.push(curConcept);
     st.diagnosedConcepts = (st.diagnosedConcepts || 0) + 1;
     resp.attemptStage = 'next-concept';
+
+    // [다갈래 §4.4-C] 선수 개념 통과(branchDepth>0) → 이 갈래 위치 확정. 갈래 확장 중단하고 큐 다음으로.
+    if ((st.branchDepth || 0) > 0) {
+      const nextPrereq = _v3DequeueNext(st);
+      if (nextPrereq) {
+        // 다음 갈래로 자동 이동 — FE는 advance 호출 없이 토스트만(자동 문항 반환)
+        st.branchDepth = 0;  // 새 갈래 시작 → 깊이 리셋
+        const nq = _v3MoveIntoPrereq(st, nextPrereq);
+        if (nq) {
+          resp.attemptStage = 'next-prereq';
+          resp.nextQuestion = nq;
+          resp.nextConcept = _v3HydrateConcept(st.currentConcept, st.conceptOrder);
+          resp.queueRemaining = st.prereqQueue.length;
+          _v3SaveState(sessionId, st, { currentNodeId: st.currentConcept, wrongAddDelta: wrongNoteAdded ? 1 : 0 });
+          resp.progress = _v3Progress(session, st);
+          return resp;
+        }
+        // 다음 갈래 문항 없음 → skip 후 한 번 더 dequeue 시도(루프는 _v3DequeueNext가 처리)
+        if (!st.skippedConcepts.includes(nextPrereq)) st.skippedConcepts.push(nextPrereq);
+        const nextPrereq2 = _v3DequeueNext(st);
+        if (nextPrereq2) {
+          const nq2 = _v3MoveIntoPrereq(st, nextPrereq2);
+          if (nq2) {
+            resp.attemptStage = 'next-prereq';
+            resp.nextQuestion = nq2;
+            resp.nextConcept = _v3HydrateConcept(st.currentConcept, st.conceptOrder);
+            resp.queueRemaining = st.prereqQueue.length;
+            _v3SaveState(sessionId, st, { currentNodeId: st.currentConcept, wrongAddDelta: wrongNoteAdded ? 1 : 0 });
+            resp.progress = _v3Progress(session, st);
+            return resp;
+          }
+        }
+      }
+      // 큐 소진 → 본류 복귀. branchDepth 리셋 후 아래 본류 unit/next-concept 흐름으로 합류.
+      //   resp.prereqDone 플래그로 FE에 "기초 점검 완료" 신호 전달(attemptStage는 합류 결과로 덮임).
+      st.branchDepth = 0;
+      resp.prereqDone = true;
+      resp.queueRemaining = 0;
+      // 본류 복귀: 현재 단원(=마지막으로 이동한 선수의 부모 단원)에서 다음 미통과 개념/단원완료 판정.
+      //   주의: 큐 소진 시점의 st.unit/conceptOrder는 마지막 선수 단원. 본류 합류는 그 단원 기준으로 정상 진행.
+    }
 
     // 단원 완료 판정
     if (_v3IsUnitComplete(st, st.unit.nodeId)) {
@@ -5764,20 +6183,50 @@ function _v3AdvanceAfterSkip(sessionId, session, st, resp, wrongNoteAdded) {
 }
 
 // 하향(선수 개념) 진입 — 2-strike 실패 또는 §9-A 강제. 선수 없으면 종료형 branch.
+//   [다갈래] 설계서 §4.4-A(본류 2-strike) / §4.4-D(선수 2-strike) 통합.
+//   실제 이동은 안 하고(FE 확인 대기) branch만 반환. branch.multi/queueRemaining/autoProceed 포함.
+//   §4.4-D: 이미 선수 갈래 안(branchDepth>0)에서 2-strike면 깊이 상한 검사 → 상한 도달 시 더 안 내려가고
+//           큐의 다음 갈래로(이 갈래의 더 깊은 선수 enqueue 생략). 미도달 시 선수의 선수 enqueue(BFS).
 function _v3DownTo(sessionId, session, st, resp, wrongNoteAdded, forced) {
   st.diagnosedConcepts = (st.diagnosedConcepts || 0) + 1;
   resp.strike = 2;
   resp.attemptStage = 'down';
-  const prereq = _v3PrereqConcept(st);
-  if (!prereq) {
-    // root — 더 내려갈 곳 없음 → 종료형
-    resp.branch = { type: 'down', prereqConcept: null, isRoot: true };
+
+  const inBranch = (st.branchDepth || 0) > 0;
+  const depthCapped = inBranch && (st.branchDepth || 0) >= DIAG_V3_DOWN_DEPTH_CAP;
+
+  // 역방향 선수가 아예 없으면 root(더 내려갈 곳 없음). enqueue 전에 판정해 isRoot 정확히.
+  const hasBackward = _v3BackwardConcepts(st.currentConcept).length > 0;
+
+  // §4.4-D 깊이 상한 도달이면 이 갈래의 더 깊은 선수는 enqueue 안 함(이 갈래 포기) → 기존 큐에서만 다음 갈래 pop.
+  if (!depthCapped) {
+    _v3EnqueuePrereqs(st, st.currentConcept);
+  }
+  const next = _v3DequeueNext(st);
+  if (!next) {
+    // root/검사 가능한 선수 없음/큐 소진 → 종료형. (선수 갈래에서 큐 소진이면 본류 복귀 대신 종료형 안내 — root 모달 재사용)
+    //   isRoot: 본류 개념이면서 역방향 자체가 없을 때만 true. 그 외(큐 소진)는 isRoot false지만 prereqConcept null.
+    resp.branch = { type: 'down', prereqConcept: null, isRoot: (!inBranch && !hasBackward), queueRemaining: 0, multi: false, autoProceed: false };
+    delete st._pendingPrereq;
     _v3SaveState(sessionId, st, { currentNodeId: st.currentConcept, wrongAddDelta: wrongNoteAdded ? 1 : 0 });
     resp.progress = _v3Progress(session, st);
     return resp;
   }
-  const prereqHydrated = _v3HydrateConcept(prereq, null);
-  resp.branch = { type: 'down', prereqConcept: prereqHydrated, isRoot: false, currentConcept: _v3HydrateConcept(st.currentConcept, st.conceptOrder) };
+  // 깊이 상한·갈래 전환을 위해 다음 갈래로 가면 branchDepth 리셋(go-prereq의 _v3MoveIntoPrereq가 다시 1로 올림).
+  if (depthCapped) st.branchDepth = 0;
+  // 다음 검사할 선수 확정(go-prereq에서 동일 개념 사용 — 2회 호출 불일치 방지)
+  st._pendingPrereq = next;
+  const queueRemaining = st.prereqQueue.length;  // next는 이미 큐에서 빠진 상태(설계서 §4.4: 남은 갈래 수)
+  const prereqHydrated = _v3HydrateConcept(next, null);
+  resp.branch = {
+    type: 'down',
+    prereqConcept: prereqHydrated,
+    isRoot: false,
+    currentConcept: _v3HydrateConcept(st.currentConcept, st.conceptOrder),
+    queueRemaining,                       // [신규] 남은 갈래 수
+    multi: queueRemaining > 0,            // [신규] 다갈래 여부(남은 큐가 있으면 true)
+    autoProceed: (st.downCount || 0) > 0  // [신규] 첫 확인 이후 자동 진행 가능 신호(선수 갈래면 모달없이 go-prereq)
+  };
   _v3SaveState(sessionId, st, { currentNodeId: st.currentConcept, wrongAddDelta: wrongNoteAdded ? 1 : 0 });
   resp.progress = _v3Progress(session, st);
   return resp;
@@ -5838,37 +6287,48 @@ function advanceDiagnosisV3(sessionId, payload = {}) {
   }
 
   if (action === 'go-prereq') {
-    const prereq = _v3PrereqConcept(st);
+    // [다갈래] submit 때 정한 _pendingPrereq 우선(일관성) → 없으면 큐에서 dequeue.
+    let prereq = st._pendingPrereq;
+    delete st._pendingPrereq;
+    if (!prereq || st.visitedConcepts.includes(prereq) || st.passedConcepts.includes(prereq)) {
+      prereq = _v3DequeueNext(st);
+    }
     if (!prereq) {
       _v3SaveState(sessionId, st, { status: 'completed', completed: true });
       return { finished: true, sessionComplete: true, isRoot: true };
     }
-    // 선수 개념의 부모 단원으로 현재 단원 갱신(단원 경계 가로지름 표시)
-    const parent = db.prepare('SELECT parent_node_id FROM learning_map_nodes WHERE node_id = ? AND node_level=3').get(prereq);
-    if (parent && parent.parent_node_id && parent.parent_node_id !== st.unit.nodeId) {
-      const u = db.prepare('SELECT node_id, unit_name, area, grade_level, grade, semester FROM learning_map_nodes WHERE node_id = ? AND node_level=2').get(parent.parent_node_id);
-      if (u) {
-        st.unit = { nodeId: u.node_id, name: u.unit_name || '단원', area: u.area || null, gradeLevel: u.grade_level || null, grade: u.grade != null ? u.grade : null, semester: u.semester != null ? u.semester : null };
-        st.conceptOrder = _v3ConceptsOfUnit(u.node_id).map(c => c.nodeId);
-      }
-    }
-    st.currentConcept = prereq;
-    st.currentDifficulty = _v3StartDifficulty(prereq);
-    st.strike = 0;
-    if (!st.visitedConcepts.includes(prereq)) st.visitedConcepts.push(prereq);
-    const q = _v3PickQuestion(prereq, st.currentDifficulty, st.askedQuestionIds);
+    // 선수 개념으로 실제 이동(부모 단원 전환·downCount++·branchDepth++·출제) — _v3MoveIntoPrereq
+    const q = _v3MoveIntoPrereq(st, prereq);
     if (!q) {
-      // 선수 개념도 문항 없음 → 종료
-      _v3SaveState(sessionId, st, { status: 'completed', completed: true });
-      return { finished: true, sessionComplete: true };
+      // 선수 개념도 문항 없음 → skip 후 큐의 다음 갈래 시도
+      if (!st.skippedConcepts.includes(prereq)) st.skippedConcepts.push(prereq);
+      const next2 = _v3DequeueNext(st);
+      if (!next2) {
+        _v3SaveState(sessionId, st, { status: 'completed', completed: true });
+        return { finished: true, sessionComplete: true };
+      }
+      const q2 = _v3MoveIntoPrereq(st, next2);
+      if (!q2) {
+        _v3SaveState(sessionId, st, { status: 'completed', completed: true });
+        return { finished: true, sessionComplete: true };
+      }
+      _v3SaveState(sessionId, st, { currentNodeId: st.currentConcept });
+      const scope2 = _v3PanelScope(st);
+      return {
+        unit: { nodeId: st.unit.nodeId, name: st.unit.name, area: st.unit.area, gradeLevel: st.unit.gradeLevel || null, grade: st.unit.grade != null ? st.unit.grade : null, semester: st.unit.semester != null ? st.unit.semester : null, conceptTotal: st.conceptOrder.length },
+        concept: _v3HydrateConcept(st.currentConcept, st.conceptOrder),
+        question: q2,
+        unitList: getV3Units(session.user_id, { schoolLevel: scope2.schoolLevel, grade: scope2.grade, area: scope2.area }),
+        progress: _v3Progress(session, st)
+      };
     }
-    st.askedQuestionIds.push(q.questionId);
-    _v3SaveState(sessionId, st, { currentNodeId: prereq });
+    const prereqId = st.currentConcept;
+    _v3SaveState(sessionId, st, { currentNodeId: prereqId });
     // 패널 스코프는 최초 선택 학교급/학년 유지(하향으로 단원이 타 학년으로 가도 동일). 현재 진단 단원은 FE에서 강조.
     const scope = _v3PanelScope(st);
     return {
       unit: { nodeId: st.unit.nodeId, name: st.unit.name, area: st.unit.area, gradeLevel: st.unit.gradeLevel || null, grade: st.unit.grade != null ? st.unit.grade : null, semester: st.unit.semester != null ? st.unit.semester : null, conceptTotal: st.conceptOrder.length },
-      concept: _v3HydrateConcept(prereq, st.conceptOrder),
+      concept: _v3HydrateConcept(prereqId, st.conceptOrder),
       question: q,
       unitList: getV3Units(session.user_id, { schoolLevel: scope.schoolLevel, grade: scope.grade, area: scope.area }),
       progress: _v3Progress(session, st)
@@ -5886,6 +6346,12 @@ function finishDiagnosisV3(sessionId) {
   if (session.status !== 'completed') {
     db.prepare(`UPDATE diagnosis_sessions SET status='completed', completed_at=CURRENT_TIMESTAMP, result=? WHERE id = ?`)
       .run(_v3ResultEnum(session), sessionId);
+  }
+  // [2026-06-09] 진단 완료 즉시 추천학습 경로 영속 (v2 finishDiagnosis와 동일 패턴, 실패해도 finish는 성공)
+  try {
+    buildRecommendedPath(sessionId);
+  } catch (e) {
+    console.error('[finishDiagnosisV3] buildRecommendedPath 실패:', e.message);
   }
   return getDiagnosisResultV3(sessionId);
 }
@@ -5939,10 +6405,26 @@ function getDiagnosisResultV3(sessionId) {
     });
   }
 
-  // 추천 시작점 = 마지막 통과 개념의 다음 미통과 개념 (없으면 첫 미통과 개념)
+  // 추천 시작점 = [다갈래 §6.2-A] 가장 근본(최저 _gradeAbs) 미통과 개념 1개.
+  //   본류·하향 모두 검사한 개념(conceptOrder + visitedConcepts) 중 미통과·미skip을 근본도 오름차순으로 정렬해 최저 선택.
+  //   학습은 "가장 기초부터" 시작이 정석 → 경로 STEP1도 그 단원이 선두(_buildRecommendedPathV3가 startUnitId 선두 고정).
   let recommendedStartNode = null;
-  const firstUnpassed = st.conceptOrder.find(id => !st.passedConcepts.includes(id) && !st.skippedConcepts.includes(id));
-  const target = firstUnpassed || st.conceptOrder.find(id => !st.passedConcepts.includes(id));
+  const candPool = [];
+  const seenCand = new Set();
+  for (const id of [...(st.conceptOrder || []), ...(st.visitedConcepts || [])]) {
+    if (!id || seenCand.has(id)) continue;
+    seenCand.add(id);
+    if (st.passedConcepts.includes(id) || st.skippedConcepts.includes(id)) continue;
+    candPool.push(id);
+  }
+  let target = null;
+  if (candPool.length > 0) {
+    candPool.sort((a, b) => (_gradeAbsOf(a) - _gradeAbsOf(b)) || (_sortOrderOf(a) - _sortOrderOf(b)));
+    target = candPool[0];
+  } else {
+    // 폴백(전부 통과/skip): conceptOrder 첫 미통과(기존 동작 보존)
+    target = st.conceptOrder.find(id => !st.passedConcepts.includes(id));
+  }
   if (target) {
     const n = db.prepare('SELECT node_id, lesson_name, unit_name, area FROM learning_map_nodes WHERE node_id = ?').get(target);
     if (n) recommendedStartNode = { nodeId: n.node_id, name: n.lesson_name || n.unit_name || '개념', area: n.area || null };
@@ -6110,6 +6592,7 @@ module.exports = {
   generateLearningPath, getCurrentPath, completeNode, evaluateNodeCompletion, inferNodeIdFromContent,
   // 추천학습 경로 시스템 (2026-05-27)
   buildRecommendedPath, listRecommendedPaths, getRecommendedPathBySession,
+  getRecommendedPathCurrent,
   updateRecommendedPathProgress, addRecommendedPathToLearningList,
   getLearningDashboard, getRanking,
   getWrongNotesExtended, getWrongNoteDashboard, getTeacherWrongNoteDashboard,
