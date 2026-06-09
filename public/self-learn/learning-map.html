@@ -1889,6 +1889,19 @@
     }
     .node-start-hint2[hidden]{ display:none !important; }
     .node-start-hint2 i{ color:#9CA3AF; }
+    /* 보조 액션 — 맵에서 확대 (주 CTA보다 톤 다운, 좌측 정렬 링크형) */
+    .node-start-zoom{
+      display:inline-flex; align-items:center; gap:6px;
+      margin:0 0 12px; padding:7px 12px;
+      font-size:14px; font-weight:600; font-family:inherit;
+      color:#2563eb; background:#EFF6FF;
+      border:1px solid #DBEAFE; border-radius:8px;
+      cursor:pointer; transition:background .15s, border-color .15s;
+    }
+    .node-start-zoom:hover{ background:#DBEAFE; border-color:#BFDBFE; }
+    .node-start-zoom:active{ background:#BFDBFE; }
+    .node-start-zoom:focus-visible{ outline:2px solid #1d4ed8; outline-offset:2px; }
+    .node-start-zoom i{ font-size:13px; }
     /* CTA */
     .node-start-actions{
       display:flex; gap:10px; justify-content:flex-end; align-items:center;
@@ -2126,8 +2139,8 @@
               <button data-val="lesson">차시</button>
             </div>
             <div class="mini-toggle" id="viewModeToggle">
-              <button data-val="map"><i class="fas fa-project-diagram"></i> 맵</button>
               <button class="active" data-val="list"><i class="fas fa-list"></i> 리스트</button>
+              <button data-val="map"><i class="fas fa-project-diagram"></i> 맵</button>
             </div>
             <div class="jump-bar-wrap">
               <div class="jump-bar-row" id="gradeJumpBar" role="toolbar" aria-label="학년별 이동"><span class="jump-bar-label">학년</span></div>
@@ -2317,6 +2330,9 @@
     <div class="node-start-hint2" id="nodeStartHint2">
       <i class="fas fa-info-circle"></i> 학습 흐름을 다음 화면에서 한눈에 볼 수 있어요
     </div>
+    <button type="button" class="node-start-zoom" id="nodeStartZoom">
+      <i class="fas fa-search-plus"></i> 맵에서 이 단원 확대
+    </button>
     <div class="node-start-actions">
       <button type="button" class="ns-btn ns-btn-ghost" id="nodeStartCancel">취소</button>
       <button type="button" class="ns-btn ns-btn-primary" id="nodeStartGo">학습 시작 <i class="fas fa-arrow-right"></i></button>
@@ -2754,11 +2770,13 @@ function bindUI() {
     if (e.target.closest('.svg-node')) return;
     mapState.dragging = true; mapState.sx = e.clientX - mapState.x; mapState.sy = e.clientY - mapState.y;
     canvas.classList.add('drag-pan');
+    // 드래그 시작 시 줌/포커스에서 남은 transition을 확실히 제거 — 끌림 방지
+    const world = $('mapWorld'); if (world) world.style.transition = 'none';
   });
   window.addEventListener('mousemove', (e) => {
     if (!mapState.dragging) return;
     mapState.x = e.clientX - mapState.sx; mapState.y = e.clientY - mapState.sy;
-    updateMapTransform();
+    updateMapTransform(0); // 드래그 팬은 즉시 반응 (transition 끔)
   });
   window.addEventListener('mouseup', () => { mapState.dragging = false; canvas.classList.remove('drag-pan'); });
   canvas.addEventListener('wheel', (e) => {
@@ -2766,7 +2784,12 @@ function bindUI() {
     if (e.target.closest('.list-view')) return;
     e.preventDefault();
     const factor = e.deltaY < 0 ? 1.1 : 0.9;
-    zoomAt(e.offsetX, e.offsetY, factor);
+    // offsetX/Y는 커서 아래 요소(노드 카드) 기준이라 노드 위에서 확대하면 기준점이 튐.
+    // 캔버스 기준 좌표로 환산해야 "가리킨 지점이 그대로 확대"됨.
+    const rect = canvas.getBoundingClientRect();
+    const px = e.clientX - rect.left;
+    const py = e.clientY - rect.top;
+    zoomAt(px, py, factor, 120); // 휠은 빈번하니 짧게(120ms)
   }, { passive: false });
 }
 
@@ -4016,7 +4039,7 @@ function renderMap() {
     nodesHtml += `
       <div class="svg-node status-${status}${extraCls}" data-node-id="${escHtml(n._id)}" data-area="${escHtml(normalizeSubjectArea(n) || '')}" style="left:${n._x}px;top:${n._y}px;--node-area-color:${_areaColor}"
            tabindex="0" role="button" aria-label="${escHtml(ariaLabel)}"
-           onclick="handleSvgNodeClick('${n._id}')" ondblclick="handleSvgNodeClick('${n._id}')"
+           onclick="handleSvgNodeClick('${n._id}')" ondblclick="event.preventDefault();focusOnNode('${n._id}')"
            onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();handleSvgNodeClick('${n._id}')}">
         <div class="svg-node-header">
           <span>${escHtml(gradeLabel)}</span>
@@ -4079,11 +4102,21 @@ function statusLabel(s) {
   return '학습가능';
 }
 
-function updateMapTransform() {
+// animMs: 명시적 숫자 인자일 때만 인라인 transition 제어.
+//   - animMs > 0 : 'transform {animMs}ms ease' (줌/포커스 부드럽게)
+//   - animMs === 0 : 'none' (드래그 팬 즉시 반응 — 끌림 방지)
+//   - 인자 미지정(undefined): 인라인 transition 손대지 않음 (.smooth-transform 클래스 기반 기존 동작 보존)
+function updateMapTransform(animMs) {
   const world = $('mapWorld');
   if (!world) return;
+  if (typeof animMs === 'number') {
+    world.style.transition = animMs > 0 ? ('transform ' + animMs + 'ms ease') : 'none';
+  } else if (world.classList.contains('smooth-transform')) {
+    // 클래스 기반 애니메이션(.smooth-transform) 사용 경로 — 이전 줌이 남긴 인라인 transition 제거해 클래스가 우선되게
+    world.style.transition = '';
+  }
   world.style.transform = `translate(${mapState.x}px, ${mapState.y}px) scale(${mapState.scale})`;
-  $('zoomLevel').textContent = Math.round(mapState.scale * 100) + '%';
+  const zl = $('zoomLevel'); if (zl) zl.textContent = Math.round(mapState.scale * 100) + '%';
 }
 
 function zoomBy(f) {
@@ -4092,13 +4125,32 @@ function zoomBy(f) {
   zoomAt(cx, cy, f);
 }
 
-function zoomAt(px, py, f) {
+// 줌(휠/버튼/포커스 공통). animMs 지정 시 부드럽게, 미지정 시 120ms 기본.
+function zoomAt(px, py, f, animMs) {
   const newScale = Math.max(0.2, Math.min(2.0, mapState.scale * f));
   const ratio = newScale / mapState.scale;
   mapState.x = px - (px - mapState.x) * ratio;
   mapState.y = py - (py - mapState.y) * ratio;
   mapState.scale = newScale;
-  updateMapTransform();
+  updateMapTransform(typeof animMs === 'number' ? animMs : 120);
+}
+
+// 노드 더블클릭 → 해당 노드를 캔버스 정중앙으로 + 읽기 좋은 배율(기본 1.2)로 부드럽게 이동.
+// 단일클릭(연결 강조·패널)과 별개. 노드 220×130 기준 중심 = (_x+110, _y+65).
+function focusOnNode(nodeId, targetScale){
+  const n = (typeof nodeById !== 'undefined' && nodeById[nodeId])
+    || ((typeof allNodes !== 'undefined' && Array.isArray(allNodes)) ? allNodes.find(x => x._id === nodeId || x.id === nodeId || x.node_id === nodeId) : null);
+  if (!n || typeof n._x !== 'number' || typeof n._y !== 'number') return;
+  const canvas = $('mapCanvas'); if (!canvas) return;
+  const s = Math.max(0.2, Math.min(2.0, targetScale || 1.2));
+  const cx = canvas.clientWidth / 2, cy = canvas.clientHeight / 2;
+  const ncx = n._x + 110, ncy = n._y + 65; // 노드 중심(220×130)
+  mapState.scale = s;
+  mapState.x = cx - ncx * s;
+  mapState.y = cy - ncy * s;
+  // .smooth-transform 클래스가 남아있으면 인라인 transition과 충돌하므로 제거 후 인라인으로 통일
+  try { const w = $('mapWorld'); if (w) w.classList.remove('smooth-transform'); } catch(_) {}
+  updateMapTransform(250); // 부드럽게(250ms)
 }
 
 // 디자이너 §3-D: 자동 줌 클램프 (75% 미만 금지, 150% 초과 금지)
@@ -4745,6 +4797,13 @@ document.addEventListener('DOMContentLoaded', function(){
   if (cancelBtn) cancelBtn.addEventListener('click', function(e){ e.preventDefault(); cancelNodeGuide(); });
   const closeBtn = document.getElementById('nodeStartClose');
   if (closeBtn) closeBtn.addEventListener('click', function(e){ e.preventDefault(); cancelNodeGuide(); });
+  // 보조 액션: 현재 패널 노드를 맵에서 중앙 확대 (패널은 우상단 카드라 그대로 유지)
+  const zoomBtn = document.getElementById('nodeStartZoom');
+  if (zoomBtn) zoomBtn.addEventListener('click', function(e){
+    e.preventDefault();
+    var nid = (typeof _nodeGuideState !== 'undefined' && _nodeGuideState) ? _nodeGuideState.nodeId : null;
+    if (nid) focusOnNode(nid, 1.2);
+  });
 });
 
 async function openDrawer(nodeId, opts) {
@@ -7918,9 +7977,13 @@ function showDiagV3DownModal(branch) {
   const s = diagV3;
   const curName = (branch && branch.currentConcept && branch.currentConcept.name) || (s.concept && s.concept.name) || '이 개념';
   const isRoot = branch && branch.isRoot;
-  const prereqName = (branch && branch.prereqConcept && branch.prereqConcept.name) || '';
-  const prereqGs = _diagV3UnitGradeSemLabel(branch && branch.prereqConcept);
-  const prereqLabel = prereqGs ? `${prereqGs} · ${prereqName}` : prereqName;
+  const prereq = branch && branch.prereqConcept;
+  const prereqName = (prereq && prereq.name) || '';
+  // 선수 개념이 속한 단원명(학습맵 표기와 동일) + 학년-학기 라벨 — 사용자가 학습맵과 한눈에 연결되게.
+  const prereqUnitName = (prereq && prereq.unitName) || '';
+  const prereqGs = _diagV3UnitGradeSemLabel(prereq);
+  // "(학년-학기 ·) 단원명"을 굵게 — 학습맵 단원과 동일 문자열로 강조.
+  const prereqUnitLabel = prereqGs ? `${prereqGs} · ${prereqUnitName}` : prereqUnitName;
 
   const ov = document.createElement('div');
   ov.className = 'diag-confirm-overlay';
@@ -7931,8 +7994,12 @@ function showDiagV3DownModal(branch) {
     bodyHtml = `<p style="margin:0 0 4px">"${escHtml(curName)}"이(가) 조금 어려웠죠? 괜찮아요!</p><p style="margin:0">여기가 가장 처음 배우는 개념이라, 천천히 익히면 돼요. 오늘 진단은 여기까지 해볼까요?</p>`;
     actionsHtml = `<button type="button" class="btn btn-primary" data-act="finish">결과 보기 →</button>`;
   } else {
+    // "단원명 · 개념명" — 단원명을 굵게/앞에 두어 학습맵 단원과 동일하게 보이도록.
+    const prereqLine = prereqUnitName
+      ? `<strong>${escHtml(prereqUnitLabel)}</strong> 단원의 '${escHtml(prereqName)}'`
+      : `"${escHtml(prereqGs ? `${prereqGs} · ${prereqName}` : prereqName)}"`;
     bodyHtml = `<p style="margin:0 0 4px">"${escHtml(curName)}"이(가) 조금 어려웠죠? 괜찮아요!</p>
-      <p style="margin:0">조금 더 쉬운 "${escHtml(prereqLabel)}"부터 시작하면 훨씬 잘 이해할 수 있어요.</p>`;
+      <p style="margin:0">학습맵의 ${prereqLine} 개념부터 점검하면 훨씬 잘 이해할 수 있어요.</p>`;
     actionsHtml = `
       <button type="button" class="btn btn-ghost" data-act="finish">여기서 마칠래요</button>
       <button type="button" class="btn btn-warning" data-act="go-prereq">쉬운 것부터 풀어볼래요 →</button>`;

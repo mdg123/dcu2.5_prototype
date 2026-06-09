@@ -5158,19 +5158,24 @@ function _v3HydrateConcept(conceptNodeId, conceptOrder) {
   let gradeLevel = n ? (n.grade_level || null) : null;
   let grade = n && n.grade != null ? n.grade : null;
   let semester = n && n.semester != null ? n.semester : null;
-  if (n && (grade == null || gradeLevel == null) && n.parent_node_id) {
+  // unitName: 학습맵 단원명(부모 단원의 unit_name)을 기본으로, 없으면 개념 노드 자신의 unit_name 폴백.
+  //   → 하향(선수 개념) 안내 시 "단원명 · 개념명"으로 학습맵과 동일 문자열 노출.
+  let unitName = n ? (n.unit_name || null) : null;
+  if (n && (grade == null || gradeLevel == null || unitName == null) && n.parent_node_id) {
     try {
-      const p = db.prepare('SELECT grade_level, grade, semester FROM learning_map_nodes WHERE node_id = ?').get(n.parent_node_id);
+      const p = db.prepare('SELECT grade_level, grade, semester, unit_name FROM learning_map_nodes WHERE node_id = ?').get(n.parent_node_id);
       if (p) {
         if (gradeLevel == null) gradeLevel = p.grade_level || null;
         if (grade == null) grade = p.grade != null ? p.grade : null;
         if (semester == null) semester = p.semester != null ? p.semester : null;
+        if (p.unit_name) unitName = p.unit_name;  // 부모 단원명 우선(학습맵 표기와 동일)
       }
     } catch (_) {}
   }
   return {
     nodeId: conceptNodeId,
     name: n ? (n.lesson_name || n.unit_name || '개념') : '개념',
+    unitName,
     gradeLevel, grade, semester,
     index, total
   };
