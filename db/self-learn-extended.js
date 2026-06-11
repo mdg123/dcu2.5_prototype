@@ -1460,6 +1460,31 @@ function _formatGradeLabel(grade) {
 }
 
 /**
+ * "학년-학기" 라벨 — FE `_diagV3UnitGradeSemLabel`과 동일 문자열 산출.
+ *   예) {gradeLevel:'초',grade:3,semester:2} → "초3 2학기" / semester 없으면 "초3" / grade 없으면 ""
+ *   gradeLevel(초/중/고)이 없으면 grade로 학교급 접두 추론(1~6 초, 7~9 중1~3, 10~12 고1~3).
+ */
+function _gradeSemLabel(obj) {
+  if (!obj) return '';
+  let g = obj.grade != null ? parseInt(obj.grade) : null;
+  if (!Number.isFinite(g) || g <= 0) return '';
+  let lv = String(obj.gradeLevel || '').trim();
+  let dispG = g;
+  // gradeLevel 미제공 시 grade로 학교급·학년 추론(중7→중1 등)
+  if (!lv) {
+    if (g >= 1 && g <= 6) { lv = '초'; dispG = g; }
+    else if (g >= 7 && g <= 9) { lv = '중'; dispG = g - 6; }
+    else if (g >= 10 && g <= 12) { lv = '고'; dispG = g - 9; }
+  } else if (lv === '중' && g >= 7) { dispG = g - 6; }
+  else if (lv === '고' && g >= 10) { dispG = g - 9; }
+  const p = { '초': '초', '중': '중', '고': '고' }[lv] || '';
+  const gradePart = p ? `${p}${dispG}` : `${dispG}학년`;
+  const s = obj.semester != null ? parseInt(obj.semester) : null;
+  const semPart = (Number.isFinite(s) && (s === 1 || s === 2)) ? ` ${s}학기` : '';
+  return gradePart + semPart;
+}
+
+/**
  * 사용자별 추천학습 경로 목록 조회.
  * 진단 세션 기반(source_type='diagnosis') 경로를 날짜 desc로.
  */
@@ -1477,7 +1502,7 @@ function listRecommendedPaths(userId, opts = {}) {
   const rows = db.prepare(`
     SELECT lp.id AS path_id, lp.session_id, lp.target_node_id, lp.path_nodes, lp.status, lp.created_at,
            ds.started_at, ds.completed_at, ds.result, ds.difficulty_path,
-           lmn.unit_name, lmn.lesson_name, lmn.area, lmn.subject, lmn.grade, lmn.semester
+           lmn.unit_name, lmn.lesson_name, lmn.area, lmn.subject, lmn.grade, lmn.semester, lmn.grade_level
     FROM learning_paths lp
     LEFT JOIN diagnosis_sessions ds ON ds.id = lp.session_id
     LEFT JOIN learning_map_nodes lmn ON lmn.node_id = lp.target_node_id
@@ -1489,10 +1514,15 @@ function listRecommendedPaths(userId, opts = {}) {
   return rows.map(r => {
     let pathNodes = [];
     try { pathNodes = JSON.parse(r.path_nodes || '[]'); } catch {}
+    // difficulty_path는 v2(노드 배열) 또는 v3(state 객체 {v3:true,...})일 수 있음.
+    //   v3 객체에 .filter 호출 시 TypeError → 반드시 배열 가드. 비배열(객체/널)이면 빈 배열로 취급.
     let diagPath = [];
-    try { diagPath = JSON.parse(r.difficulty_path || '[]'); } catch {}
+    try {
+      const p = JSON.parse(r.difficulty_path || '[]');
+      diagPath = Array.isArray(p) ? p : [];
+    } catch {}
 
-    // summary 계산
+    // summary 계산 (v2 노드 배열 기준; v3는 빈 배열 → passed/failed 0, 진행률은 user_node_status로 산출)
     const nodeMeta = diagPath.filter(p => p && p.node);
     const totalNodes = pathNodes.length;
     const passedNodes = nodeMeta.filter(p => p.passed === true).length;
@@ -1510,12 +1540,24 @@ function listRecommendedPaths(userId, opts = {}) {
     }
     const progressPercent = totalNodes > 0 ? Math.round((completedCount / totalNodes) * 100) : 0;
 
+    const gradeLabel = _gradeSemLabel({
+      gradeLevel: r.grade_level, grade: r.grade, semester: r.semester
+    });
+    const targetUnitName = r.unit_name || r.lesson_name || '이전 단원';
+
     return {
       pathId: r.path_id,
       sessionId: r.session_id,
       status: r.status,
       diagnosedAt: r.completed_at || r.started_at || r.created_at,
       relativeTime: _formatRelativeTime(r.completed_at || r.started_at || r.created_at),
+      // 이력 라벨용 플랫 필드(기획서 §데이터계약) — FE가 nested 없이도 바로 사용 가능. nested는 하위호환 유지.
+      grade: r.grade != null ? r.grade : null,
+      gradeLabel,
+      area: r.area || null,
+      targetUnitName,
+      progressPercent,
+      stepCount: pathNodes.length,
       targetNode: {
         nodeId: r.target_node_id,
         title: r.lesson_name || r.unit_name || '이전 단원',
@@ -5562,6 +5604,9 @@ function _v3LoadState(session) {
   if (st.prereqQueue == null) st.prereqQueue = [];
   if (st.downCount == null) st.downCount = 0;
   if (st.branchDepth == null) st.branchDepth = 0;
+  // [선수 표본 과반] 하위호환 — 구 세션은 표본 미적용으로 안전 합류(설계서 §3·R6).
+  if (st.branchSample === undefined) st.branchSample = null;
+  if (st.branchVerdicts == null || typeof st.branchVerdicts !== 'object') st.branchVerdicts = {};
   return st;
 }
 function _v3SaveState(sessionId, st, extra = {}) {
@@ -5733,6 +5778,10 @@ function startDiagnosisV3(userId, { schoolLevel, grade, subject, area, unitNodeI
     prereqQueue: [],   // 검사 대기 선수 node_id 큐(근본도 오름차순 정렬 유지)
     downCount: 0,      // 누적 하향(선수로 내려간) 개념 수 — 하드 상한 판정용
     branchDepth: 0,    // 현재 갈래의 연속 하향 깊이 — 깊이 상한·갈래 전환 시 0 리셋
+    // [선수 표본 과반] 설계서 §3 — 현재 선수 갈래(단원)의 표본 검사 진행. 본류·미진입이면 null.
+    branchSample: null,
+    // [선수 표본 과반] done 단원의 갈래 판정(통과/하향) 라벨용. { [unitId]: 'pass'|'down' }
+    branchVerdicts: {},
     history: []  // [{ concept, correct, strike, questionId }]
   };
 
@@ -5755,19 +5804,34 @@ function startDiagnosisV3(userId, { schoolLevel, grade, subject, area, unitNodeI
     progress: {
       diagnosedConcepts: 0, elapsedSec: 0,
       conceptCap: DIAG_V3_CONCEPT_CAP, softTimeLimitSec: DIAG_SOFT_TIME_SEC,
-      unitPassed: prog.passed, unitTotal: prog.total
+      unitPassed: prog.passed, unitTotal: prog.total,
+      diagPlan: []   // 시작 시엔 항상 단갈래(큐 없음) → 빈 배열(패널 숨김)
     }
   };
 }
 
 // v3 종료 상수
 const DIAG_V3_CONCEPT_CAP = 30;   // 누적 진단 개념 소프트 상한
+// [루프 안전망] FE 가 down/unit-complete 분기 처리에 실패해 같은 문항을 반복 제출하거나
+//   하향이 비정상적으로 길어져도 진단이 절대 무한히 이어지지 않도록 하는 하드 상한.
+//   - 어떤 클라이언트 동작에서도 누적 출제 문항 수가 이 값을 넘으면 즉시 종료(finished:true).
+//   - 정상 경로(통과/하향/완주)는 위 소프트 상한·downCount(20)·시간 소프트스톱이 먼저 작동하므로
+//     이 값은 순수 방어선이다. 정상 진단(최대 약 130문항 관측)보다 충분히 큰 200으로 둔다.
+const DIAG_V3_HARD_QUESTION_CAP = 200;
 
 // v3 다갈래 선수큐(prereqQueue) 상한 — 설계서 §5.1 + 사용자 확정(Q1="더 철저히").
 //   하향 약점 갈래를 넉넉히 검사하되, 기존 DIAG_V3_CONCEPT_CAP(30)+12분 소프트스톱이 실질 백스톱.
 const DIAG_V3_DOWN_CONCEPT_CAP = 20;  // 한 진단에서 하향(선수)으로 검사하는 개념 누적 상한
 const DIAG_V3_DOWN_DEPTH_CAP   = 8;   // 한 갈래의 연속 하향 최대 깊이
 const DIAG_V3_PREREQ_FANOUT    = 6;   // 한 개념에서 한 번에 큐에 담는 선수 최대 수(근본도 상위)
+
+// [선수 표본 과반] 설계서 §6.1 — 선수 단원 '통과' 판정을 첫 개념 1정답 → 표본 과반으로.
+//   N=3: 선수 단원 진입 시 그 단원 개념을 conceptOrder 순으로 최대 3개 표본 검사.
+//   각 표본 개념은 기존 2-strike(1정답=통과·2오답=실패) 유지하되, 개념 실패가 즉시 하향을 일으키지 않고
+//   표본 카운트(passed/failed)에만 반영 → 표본 통과 과반이면 갈래 '통과', 미달이면 '하향'.
+//   조기확정 on: cap3에서 2통과/2실패 도달 즉시 판정해 진단 단축. 본류(branchDepth=0)는 미적용.
+const DIAG_V3_PREREQ_SAMPLE_N = 3;             // 선수 단원 표본 검사 개념 수(문항보유 개념 부족 시 축소)
+const DIAG_V3_PREREQ_SAMPLE_EARLYSTOP = true;  // 조기 확정 on(통과/실패 과반 도달 즉시 판정)
 
 // v3 다음 문항 1개 (현재 개념·난이도, 이미 출제 제외)
 function getNextDiagnosisV3(sessionId) {
@@ -5789,6 +5853,136 @@ function getNextDiagnosisV3(sessionId) {
   };
 }
 
+// 개념(node_level=3) node_id의 부모 단원(node_level=2) 메타 조회.
+//   반환: { nodeId, unitName, gradeLevel, grade, semester, area } | null
+//   개념 노드 자신에 unit_name/학년이 비면 그대로(부모 단원이 정본). 단원 메타만 노출(정답·문항 비포함).
+function _v3ParentUnitOf(conceptId) {
+  const n = db.prepare('SELECT parent_node_id FROM learning_map_nodes WHERE node_id = ?').get(conceptId);
+  if (!n || !n.parent_node_id) return null;
+  const u = db.prepare(
+    'SELECT node_id, unit_name, grade_level, grade, semester, area FROM learning_map_nodes WHERE node_id = ?'
+  ).get(n.parent_node_id);
+  if (!u) return null;
+  return {
+    nodeId: u.node_id,
+    unitName: u.unit_name || '단원',
+    gradeLevel: u.grade_level || null,
+    grade: u.grade != null ? u.grade : null,
+    semester: u.semester != null ? u.semester : null,
+    area: u.area || null
+  };
+}
+
+// [다갈래] 진단 진행 계획 목록 — 선수(하향) 갈래 단원만 done/current/pending으로 dedupe.
+//   본류 목표 단원(st.unit.nodeId)은 제외(헤더·결과에서 별도 안내). 단갈래/큐없음이면 [].
+//   정렬: prereqQueue가 이미 근본도(_gradeAbsOf 학년 오름차순) 순 → 그 순서를 단원 단위로 보존.
+//        done(상단) → current(가운데) → pending(하단) 자연 순서.
+//   반환: [{ nodeId, unitName, gradeLabel, area, status, passed?, conceptTotal? }]
+function _v3BuildDiagPlan(st) {
+  if (!st || !st.v3) return [];
+  const prereqQueue = Array.isArray(st.prereqQueue) ? st.prereqQueue : [];
+  const downCount = st.downCount || 0;
+  // 단갈래/하향 없음 → 패널 숨김 신호(빈 배열)
+  if (prereqQueue.length === 0 && downCount === 0) return [];
+
+  const passed = new Set(Array.isArray(st.passedConcepts) ? st.passedConcepts : []);
+  const visited = Array.isArray(st.visitedConcepts) ? st.visitedConcepts : [];
+
+  // 본류 목표 단원(제외) = 최초 시작 개념(visitedConcepts[0])의 부모 단원.
+  //   ⚠ st.unit/conceptOrder는 하향 진입 시 선수 단원으로 재할당되므로 "현재 단원"일 뿐 원 목표가 아님.
+  //   visitedConcepts[0]은 시작 개념으로 절대 제거되지 않아 원 목표 단원을 안정적으로 복원.
+  const originConcept = visited.length > 0 ? visited[0] : null;
+  const originUnit = originConcept ? _v3ParentUnitOf(originConcept) : null;
+  const originUnitId = originUnit ? originUnit.nodeId : null;
+
+  // current 단원 = 현재 진단 중 개념(st.currentConcept)의 부모 단원(= st.unit). 하향 갈래면 이 단원이 ▶.
+  const curUnit = st.currentConcept ? _v3ParentUnitOf(st.currentConcept) : null;
+  const curUnitId = curUnit ? curUnit.nodeId : null;
+
+  // 단원별 누적: { meta, status, conceptIds:Set, passedCount, orderKey }
+  const byUnit = new Map();
+  const order = [];   // 첫 등장 순서 보존(근본도순 큐/visited 순서)
+
+  const touch = (unitMeta) => {
+    if (!unitMeta || !unitMeta.nodeId) return null;
+    if (!byUnit.has(unitMeta.nodeId)) {
+      byUnit.set(unitMeta.nodeId, { meta: unitMeta, status: 'pending', passedCount: 0, conceptCount: 0 });
+      order.push(unitMeta.nodeId);
+    }
+    return byUnit.get(unitMeta.nodeId);
+  };
+
+  // 1) current 단원(본류 목표 단원이 아닐 때만 — 본류는 헤더에서 안내하므로 목록 제외)
+  if (curUnitId && curUnitId !== originUnitId) {
+    const e = touch(curUnit);
+    if (e) e.status = 'current';
+  }
+
+  // 2) done — visited 중 통과/검사완료된 개념의 부모 단원 (본류·current 제외)
+  for (const cid of visited) {
+    const pu = _v3ParentUnitOf(cid);
+    if (!pu || pu.nodeId === originUnitId) continue;
+    if (pu.nodeId === curUnitId) {            // 진행 중 단원이면 통과 개념만 카운트(상태는 current 유지)
+      if (passed.has(cid)) { const e = byUnit.get(curUnitId); if (e) e.passedCount++; }
+      continue;
+    }
+    const e = touch(pu);
+    if (!e) continue;
+    if (e.status !== 'current') e.status = 'done';
+    if (passed.has(cid)) e.passedCount++;
+  }
+
+  // 3) pending — prereqQueue(아직 미검사)의 개념 부모 단원 (본류·current 제외)
+  //   이미 done/current로 잡힌 단원이면 touch가 기존 엔트리 유지, 신규 단원이면 기본값 pending.
+  for (const cid of prereqQueue) {
+    const pu = _v3ParentUnitOf(cid);
+    if (!pu || pu.nodeId === originUnitId) continue;
+    if (pu.nodeId === curUnitId) continue;    // 진행 중 단원이면 current로 이미 표기
+    touch(pu);
+  }
+
+  // 정렬: done(위) → current(가운데) → pending(아래). 같은 그룹 내는 첫 등장 순서(근본도 오름차순) 보존.
+  const rank = { done: 0, current: 1, pending: 2 };
+  const ordered = order
+    .map((unitId, i) => ({ unitId, i }))
+    .sort((a, b) => {
+      const ra = rank[byUnit.get(a.unitId).status], rb = rank[byUnit.get(b.unitId).status];
+      return ra !== rb ? ra - rb : a.i - b.i;
+    })
+    .map(x => x.unitId);
+
+  // [선수 표본 과반] 표본 메타 — current 단원이 표본 검사 중이면 "확인 X/N"(분모=표본수) 부착,
+  //   done 단원은 branchVerdicts로 통과/하향(verdict) 부착. conceptTotal(단원 전체)은 분모 금지(설계서 §5.1).
+  const bs = st.branchSample;
+  const verdicts = (st.branchVerdicts && typeof st.branchVerdicts === 'object') ? st.branchVerdicts : {};
+  // 단원 개념 총수 보강(pending 라벨 "개념 N개"용) — 단원 소속 개념 수
+  return ordered.map(unitId => {
+    const e = byUnit.get(unitId);
+    const m = e.meta;
+    let conceptTotal = 0;
+    try { conceptTotal = _v3ConceptsOfUnit(unitId).length; } catch (_) {}
+    const out = {
+      nodeId: m.nodeId,
+      unitName: m.unitName,
+      gradeLabel: _gradeSemLabel({ gradeLevel: m.gradeLevel, grade: m.grade, semester: m.semester }),
+      area: m.area || null,
+      status: e.status,
+      passed: e.passedCount,
+      conceptTotal,
+      verdict: null   // done 단원의 갈래 판정('pass'|'down'). current·pending은 null.
+    };
+    // current 단원이 표본 검사 중이면 "확인 X/N" 메타(분모=표본수)
+    if (e.status === 'current' && bs && bs.unitId === unitId) {
+      out.sampleCap = bs.sampleCap;
+      out.sampleTested = (bs.tested || []).length;
+      out.samplePassed = bs.passed || 0;
+    }
+    // done 단원의 통과/하향 판정
+    if (e.status === 'done' && verdicts[unitId]) out.verdict = verdicts[unitId];
+    return out;
+  });
+}
+
 function _v3Progress(session, st) {
   const prog = _v3UnitProgress(st);
   return {
@@ -5798,7 +5992,8 @@ function _v3Progress(session, st) {
     softTimeLimitSec: DIAG_SOFT_TIME_SEC,
     unitPassed: prog.passed, unitTotal: prog.total,
     prereqQueueRemaining: Array.isArray(st.prereqQueue) ? st.prereqQueue.length : 0,  // [다갈래] FE 헤더용 남은 갈래 수
-    downCount: st.downCount || 0                                                       // [다갈래] 누적 하향 개념 수
+    downCount: st.downCount || 0,                                                      // [다갈래] 누적 하향 개념 수
+    diagPlan: _v3BuildDiagPlan(st)                                                     // [다갈래] 진단 진행 계획(선수 단원 done/current/pending). 단갈래=[]
   };
 }
 
@@ -5890,6 +6085,7 @@ function _v3PrereqCandidates(st, conceptId) {
   const raw = _v3BackwardConcepts(conceptId);
   const seen = new Set();
   const cand = [];
+  const verdicts = (st.branchVerdicts && typeof st.branchVerdicts === 'object') ? st.branchVerdicts : {};
   for (const id of raw) {
     if (id === conceptId) continue;                       // 자기참조 방어(사이클)
     if (seen.has(id)) continue;                            // 엣지 중복 제거
@@ -5897,6 +6093,9 @@ function _v3PrereqCandidates(st, conceptId) {
     if (st.passedConcepts.includes(id)) continue;         // 이미 통과 X
     if (st.skippedConcepts.includes(id)) continue;        // 문항없음 skip X
     if (st.prereqQueue.includes(id)) continue;            // 이미 대기열 X
+    // [P1 본류복귀 2026-06-11/P3 가드] 부모 단원이 이미 판정(pass/down)된 갈래면 후보 제외 — 판정 끝난 단원 재진입 차단.
+    const pu = _v3ParentUnitOf(id);
+    if (pu && pu.nodeId && verdicts[pu.nodeId]) continue;
     seen.add(id);
     cand.push(id);
   }
@@ -5924,11 +6123,15 @@ function _v3EnqueuePrereqs(st, conceptId) {
 function _v3DequeueNext(st) {
   const maxIter = (st.prereqQueue.length || 0) + 2;  // 무한루프 방어(R3)
   let iter = 0;
+  const verdicts = (st.branchVerdicts && typeof st.branchVerdicts === 'object') ? st.branchVerdicts : {};
   while (st.prereqQueue.length > 0 && iter++ < maxIter) {
     if ((st.downCount || 0) >= DIAG_V3_DOWN_CONCEPT_CAP) { st.prereqQueue = []; break; }  // 하드 상한 → 종료
     const id = st.prereqQueue.shift();  // 가장 근본(앞)
     if (!id) continue;
     if (st.visitedConcepts.includes(id) || st.passedConcepts.includes(id) || st.skippedConcepts.includes(id)) continue;  // 그 사이 처리됨
+    // [P1 본류복귀 2026-06-11/P3 가드] 부모 단원이 이미 판정(pass/down)된 갈래면 pop 대상에서 제외 — 재진입 차단.
+    const pu = _v3ParentUnitOf(id);
+    if (pu && pu.nodeId && verdicts[pu.nodeId]) continue;
     if (!_v3HasQuestion(id)) { if (!st.skippedConcepts.includes(id)) st.skippedConcepts.push(id); continue; }  // 문항 없음 skip
     return id;
   }
@@ -5947,15 +6150,314 @@ function _v3MoveIntoPrereq(st, prereqId) {
       st.conceptOrder = _v3ConceptsOfUnit(u.node_id).map(c => c.nodeId);
     }
   }
-  st.currentConcept = prereqId;
-  st.currentDifficulty = _v3StartDifficulty(prereqId);
+  // [선수 표본 과반 버그수정 2026-06-11] 표본을 '단원 앞에서부터' N개로 잡고, 진입 개념도
+  //   선수 엣지 타깃(prereqId)이 아니라 표본 첫 개념(=단원 기초 개념)으로 둔다. 이렇게 해야
+  //   모든 갈래가 동일하게 단원 앞 N개 표본(cap=min(3,가용))을 검사한다. (이전엔 prereqId가
+  //   단원 마지막 개념이면 표본 1개로 축소돼 둘째 갈래부터 1정답 통과되던 버그.)
+  const sample = (st.unit && st.unit.nodeId) ? _v3UnitSampleConcepts(st.unit.nodeId, prereqId, st) : [];
+  const entryConcept = (sample.length > 0) ? sample[0] : prereqId;   // 표본 0이면 폴백(기존 prereqId)
+
+  // [P1 본류복귀 2026-06-11] 소비된 큐 토큰(prereqId)도 visited 마킹 — #216 표본화로 entryConcept(sample[0])만
+  //   visited되며 사라졌던 pre-#216 불변 복원. prereqId가 visited되지 않으면 _v3PrereqCandidates 필터를 통과해
+  //   같은 선수 개념이 재enqueue될 수 있다(재진입 차단).
+  if (prereqId && !st.visitedConcepts.includes(prereqId)) st.visitedConcepts.push(prereqId);
+
+  st.currentConcept = entryConcept;
+  st.currentDifficulty = _v3StartDifficulty(entryConcept);
   st.strike = 0;
-  if (!st.visitedConcepts.includes(prereqId)) st.visitedConcepts.push(prereqId);
+  if (!st.visitedConcepts.includes(entryConcept)) st.visitedConcepts.push(entryConcept);
   st.downCount = (st.downCount || 0) + 1;
   st.branchDepth = (st.branchDepth || 0) + 1;
-  const q = _v3PickQuestion(prereqId, st.currentDifficulty, st.askedQuestionIds);
+  const q = _v3PickQuestion(entryConcept, st.currentDifficulty, st.askedQuestionIds);
+  if (q) st.askedQuestionIds.push(q.questionId);
+  // [선수 표본 과반] 새 선수 단원(갈래) 진입 → 표본 검사 초기화(설계서 §4.2). 표본 배열 직접 전달.
+  _v3InitBranchSample(st, entryConcept, sample);
+  return q;
+}
+
+// ============================================================
+// [선수 표본 과반] 단원 표본 검사(unit sampling) — 설계서 §4
+//   선수 갈래(branchDepth>0)에 한해 '통과' 판정을 첫 개념 1정답 → 표본 N개 중 과반 정답으로 강화.
+//   본류(branchDepth=0)는 미적용(기존 순차 진단 그대로).
+// ============================================================
+
+// §4.1 — 표본 단원 개념 목록(문항 보유·미통과·미skip, conceptOrder 순).
+//   [버그수정 2026-06-11] 진입 개념(선수 엣지 타깃) 이후만 slice 하던 로직 제거 —
+//   선수 엣지는 보통 단원의 출구(마지막) 개념을 가리켜 둘째 갈래부터 표본이 1개로 축소되어
+//   '과반 통과' 규칙이 무력화(1정답 통과)됐다. 모든 갈래가 동일하게 단원 conceptOrder
+//   '앞에서부터' 문항보유·미통과·미skip 개념을 최대 N개 모아 표본으로 삼는다(단원 기초부터 검사).
+//   (visited는 무관 — _v3MoveIntoPrereq가 표본 산정 후 sample[0]을 진입 개념으로 세팅·visited.push 하므로
+//    표본 산정 단계에서는 visited를 필터에 넣지 않는다.)
+function _v3UnitSampleConcepts(unitId, entryConceptId, st) {
+  const all = _v3ConceptsOfUnit(unitId).map(c => c.nodeId);   // conceptOrder(위상정렬) 순
+  // 단원 앞에서부터: 문항보유 + 미통과 + 미skip만. (visited 무관 — 진입 직전 push 되므로 제외하면 표본 0됨)
+  const seq = all.filter(id =>
+    _v3HasQuestion(id) && !st.passedConcepts.includes(id) && !st.skippedConcepts.includes(id));
+  // 최대 N개(앞에서부터). 문항보유 개념이 N 미만이면 있는 만큼.
+  return seq.slice(0, DIAG_V3_PREREQ_SAMPLE_N);
+}
+
+// §4.2 — 선수 단원 진입 시 표본 상태 초기화. cap<1이면 null(표본 미적용=구 동작 폴백).
+//   sampleArr(선택): _v3MoveIntoPrereq가 이미 계산한 표본 배열(단원 앞 N개). 정합·일관 위해 그대로 사용.
+//   미전달 시 내부 재계산(하위호환). 표본 첫 개념=진입 개념, 나머지는 sampleQueue.
+function _v3InitBranchSample(st, entryConceptId, sampleArr) {
+  const unitId = st.unit && st.unit.nodeId;
+  if (!unitId) { st.branchSample = null; return; }
+  const seq = (Array.isArray(sampleArr) && sampleArr.length > 0)
+    ? sampleArr
+    : _v3UnitSampleConcepts(unitId, entryConceptId, st);
+  const cap = Math.min(DIAG_V3_PREREQ_SAMPLE_N, seq.length);
+  if (cap < 1) { st.branchSample = null; return; }
+  st.branchSample = {
+    unitId,
+    sampleCap: cap,
+    sampleQueue: seq.slice(1),   // 진입 개념(seq[0])은 곧 검사하므로 큐에서 제외
+    tested: [],
+    passed: 0,
+    failed: 0
+  };
+}
+
+// §4.3 — 표본 1개념 판정 반영(개념 통과/실패 확정 순간). passed/failed·tested 갱신.
+function _v3SampleRecord(st, conceptId, conceptPassed) {
+  const bs = st.branchSample;
+  if (!bs) return;
+  if (!bs.tested.includes(conceptId)) bs.tested.push(conceptId);
+  if (conceptPassed) bs.passed += 1; else bs.failed += 1;
+}
+
+// §4.4 — 갈래 판정. 'pass' | 'fail' | 'continue'. 조기확정·소수표본 엄격화 반영.
+function _v3SampleVerdict(bs) {
+  if (!bs) return 'pass';
+  const cap = bs.sampleCap;
+  let needPass = Math.ceil(cap / 2);
+  let needFail = cap - needPass + 1;
+  // 소수 표본 엄격화(S5): cap2는 둘 다 맞아야 통과(1 우연정답 차단), cap1은 단일.
+  if (cap === 2) { needPass = 2; needFail = 1; }
+  if (cap === 1) { needPass = 1; needFail = 1; }
+  if (DIAG_V3_PREREQ_SAMPLE_EARLYSTOP) {
+    if (bs.passed >= needPass) return 'pass';   // 조기확정: 과반 통과 도달 즉시
+    if (bs.failed >= needFail) return 'fail';   // 조기확정: 과반 미달 확정 즉시
+  }
+  if (bs.tested.length >= cap) return (bs.passed >= needPass) ? 'pass' : 'fail';  // 표본 소진
+  return 'continue';   // 다음 표본 개념으로
+}
+
+// §4.6 — 같은 단원 표본 다음 개념 이동(downCount/branchDepth/branchSample.unitId 불변).
+//   _v3MoveIntoPrereq(새 갈래 진입)와 달리 같은 갈래 내부 진행이므로 깊이·하향 카운트 미증가.
+//   반환: 출제 문항(q) 또는 null(문항 없음).
+function _v3MoveToSample(st, conceptId) {
+  st.currentConcept = conceptId;
+  st.currentDifficulty = _v3StartDifficulty(conceptId);
+  st.strike = 0;
+  if (!st.visitedConcepts.includes(conceptId)) st.visitedConcepts.push(conceptId);
+  const q = _v3PickQuestion(conceptId, st.currentDifficulty, st.askedQuestionIds);
   if (q) st.askedQuestionIds.push(q.questionId);
   return q;
+}
+
+// §4.5 — 표본 판정 후 다음 표본 개념 출제(continue) 또는 강제 판정(큐 소진). 문항없음 skip 루프.
+//   반환: { kind:'sample-next', question, verdict:null } (다음 표본 출제 성공)
+//        | { kind:'verdict', verdict:'pass'|'fail' } (continue 불가 → 강제 판정)
+function _v3SampleAdvance(st) {
+  const bs = st.branchSample;
+  if (!bs) return { kind: 'verdict', verdict: 'pass' };
+  const cap = bs.sampleCap;
+  let needPass = Math.ceil(cap / 2);
+  if (cap === 2) needPass = 2;
+  if (cap === 1) needPass = 1;
+  // 표본 큐에서 문항 보유 다음 개념을 찾는다(문항없음 개념은 표본 제외·skip).
+  let guard = (bs.sampleQueue.length || 0) + 2;
+  while (bs.sampleQueue.length > 0 && guard-- > 0) {
+    const nextC = bs.sampleQueue.shift();
+    if (!nextC) continue;
+    if (st.passedConcepts.includes(nextC) || st.visitedConcepts.includes(nextC)) continue;  // 이미 검사됨
+    if (!_v3HasQuestion(nextC)) { if (!st.skippedConcepts.includes(nextC)) st.skippedConcepts.push(nextC); continue; }
+    const q = _v3MoveToSample(st, nextC);
+    if (q) return { kind: 'sample-next', question: q };
+    if (!st.skippedConcepts.includes(nextC)) st.skippedConcepts.push(nextC);
+  }
+  // 큐 소진(문항없음 등으로 cap 미달) → 강제 판정.
+  return { kind: 'verdict', verdict: (bs.passed >= needPass) ? 'pass' : 'fail' };
+}
+
+// [P1 본류복귀 2026-06-11] 선수 큐 소진(prereqDone) 시 st.unit/conceptOrder를 "원 목표 단원"으로 복원.
+//   ⚠ st.unit은 하향 진입(_v3MoveIntoPrereq)에서 마지막 갈래 단원으로 재할당된 채 남는다.
+//   복원 안 하면 폴스루(submit isCorrect / _v3ResumeMainAfterPrereq)가 마지막 갈래 단원 기준으로
+//   _v3IsUnitComplete/_v3NextConceptInUnit을 수행 → 목표 단원 진단이 방치되고 갈래 단원이 본류로 둔갑.
+//   원 목표 단원 = visitedConcepts[0](시작 개념, 절대 제거 안 됨)의 부모 단원 (diagPlan originUnit과 동일 출처).
+//   반환: 복원 성공 시 복원된 단원 메타({nodeId,name,area,gradeLevel,grade,semester,conceptTotal}) 또는 null.
+function _v3RestoreOriginUnit(st) {
+  const visited = Array.isArray(st.visitedConcepts) ? st.visitedConcepts : [];
+  const originConcept = visited.length > 0 ? visited[0] : null;
+  if (!originConcept) return null;
+  const originUnit = _v3ParentUnitOf(originConcept);   // { nodeId, unitName, gradeLevel, grade, semester, area }
+  if (!originUnit || !originUnit.nodeId) return null;
+  st.unit = {
+    nodeId: originUnit.nodeId,
+    name: originUnit.unitName || '단원',
+    area: originUnit.area || null,
+    gradeLevel: originUnit.gradeLevel || null,
+    grade: originUnit.grade != null ? originUnit.grade : null,
+    semester: originUnit.semester != null ? originUnit.semester : null
+  };
+  st.conceptOrder = _v3ConceptsOfUnit(originUnit.nodeId).map(c => c.nodeId);
+  return {
+    nodeId: st.unit.nodeId,
+    name: st.unit.name,
+    area: st.unit.area,
+    gradeLevel: st.unit.gradeLevel,
+    grade: st.unit.grade,
+    semester: st.unit.semester,
+    conceptTotal: st.conceptOrder.length
+  };
+}
+
+// §4.5 — 갈래 '통과' 확정 처리. 표본 종료 → branchVerdicts[unit]='pass' → 큐 다음 갈래/본류 복귀.
+//   resp에 next-prereq(다음 갈래) 출제 또는 prereqDone(본류 복귀) 신호를 채워 반환(완결) 또는 null(본류 합류).
+//   반환: resp(완결, return 대상) 또는 null(호출자가 이어서 본류 unit/next-concept 흐름 진행).
+function _v3BranchSamplePass(sessionId, session, st, resp, wrongNoteAdded) {
+  if (st.branchSample && st.branchSample.unitId) st.branchVerdicts[st.branchSample.unitId] = 'pass';
+  st.branchSample = null;
+  // 큐 다음 갈래 시도(문항없음 skip는 _v3DequeueNext가 처리)
+  let next = _v3DequeueNext(st);
+  while (next) {
+    st.branchDepth = 0;                 // 새 갈래 시작 → 깊이 리셋(_v3MoveIntoPrereq가 1로 올림)
+    const nq = _v3MoveIntoPrereq(st, next);
+    if (nq) {
+      resp.attemptStage = 'next-prereq';
+      resp.nextQuestion = nq;
+      resp.nextConcept = _v3HydrateConcept(st.currentConcept, st.conceptOrder);
+      resp.queueRemaining = st.prereqQueue.length;
+      _v3SaveState(sessionId, st, { currentNodeId: st.currentConcept, wrongAddDelta: wrongNoteAdded ? 1 : 0 });
+      resp.progress = _v3Progress(session, st);
+      return resp;
+    }
+    if (!st.skippedConcepts.includes(next)) st.skippedConcepts.push(next);
+    next = _v3DequeueNext(st);
+  }
+  // 큐 소진 → 본류 복귀. branchDepth 리셋·prereqDone 신호 후 본류 unit/next-concept 흐름으로 합류.
+  st.branchDepth = 0;
+  resp.prereqDone = true;
+  resp.queueRemaining = 0;
+  // [P1 본류복귀 2026-06-11] st.unit이 마지막 갈래 단원에 머물러 있으므로 원 목표 단원으로 복원.
+  //   복원 후 폴스루/_v3ResumeMainAfterPrereq가 목표 단원 기준으로 단원완료·후속개념 판정 → 미통과 본류 개념 재출제.
+  //   resp.unit으로 FE 플레이어 헤더 단원명을 갈래 단원(예: 다각형)→목표 단원(예: 합동과 대칭)으로 교체.
+  const restored = _v3RestoreOriginUnit(st);
+  if (restored) resp.unit = restored;
+  return null;   // 호출자가 본류 단원완료/후속개념 흐름 이어감
+}
+
+// §4.5 — 갈래 '하향(과반 미달)' 확정 처리(DOWNSHIFT). branchVerdicts[unit]='down' → 이 단원 선수 enqueue → 큐 다음.
+//   _v3DownTo와 동일한 branch(down) 응답을 만들되, 표본 과반 미달이 진입점. 반환: resp(완결).
+function _v3BranchSampleDownshift(sessionId, session, st, resp, wrongNoteAdded) {
+  if (st.branchSample && st.branchSample.unitId) st.branchVerdicts[st.branchSample.unitId] = 'down';
+  st.branchSample = null;
+  resp.strike = 2;
+  resp.attemptStage = 'down';
+
+  const depthCapped = (st.branchDepth || 0) >= DIAG_V3_DOWN_DEPTH_CAP;
+  // 이 선수 단원(진입 개념)의 더 깊은 선수를 큐에 추가(깊이 상한 미도달 시).
+  if (!depthCapped) _v3EnqueuePrereqs(st, st.currentConcept);
+  const next = _v3DequeueNext(st);
+  if (!next) {
+    // 더 내려갈 곳 없음/큐 소진 → 종료형 안내(root 모달 재사용, 본류 복귀 대신 종료형).
+    resp.branch = { type: 'down', prereqConcept: null, isRoot: false, queueRemaining: 0, multi: false, autoProceed: false };
+    delete st._pendingPrereq;
+    _v3SaveState(sessionId, st, { currentNodeId: st.currentConcept, wrongAddDelta: wrongNoteAdded ? 1 : 0 });
+    resp.progress = _v3Progress(session, st);
+    return resp;
+  }
+  if (depthCapped) st.branchDepth = 0;
+  st._pendingPrereq = next;
+  const queueRemaining = st.prereqQueue.length;
+  resp.branch = {
+    type: 'down',
+    prereqConcept: _v3HydrateConcept(next, null),
+    isRoot: false,
+    currentConcept: _v3HydrateConcept(st.currentConcept, st.conceptOrder),
+    queueRemaining,
+    multi: queueRemaining > 0,
+    autoProceed: (st.downCount || 0) > 0   // 선수 갈래 내부라 항상 true(모달없이 go-prereq)
+  };
+  _v3SaveState(sessionId, st, { currentNodeId: st.currentConcept, wrongAddDelta: wrongNoteAdded ? 1 : 0 });
+  resp.progress = _v3Progress(session, st);
+  return resp;
+}
+
+// §4.5-(B) — 선수 갈래에서 표본 개념 '실패'(2-strike 또는 재출제 없음) 라우팅.
+//   즉시 하향이 아니라 표본 실패 카운트 → verdict. continue=같은 단원 다음 표본 출제, fail=하향, pass(드묾)=갈래 통과.
+//   diagnosedConcepts++ 는 표본 개념도 "진단한 개념"이므로 여기서 1회 증가(기존 _v3DownTo 패턴 유지).
+function _v3SampleConceptFail(sessionId, session, st, resp, wrongNoteAdded) {
+  const curConcept = st.currentConcept;
+  st.diagnosedConcepts = (st.diagnosedConcepts || 0) + 1;
+  _v3SampleRecord(st, curConcept, false);
+  let verdict = _v3SampleVerdict(st.branchSample);
+  if (verdict === 'continue') {
+    const adv = _v3SampleAdvance(st);
+    if (adv.kind === 'sample-next') {
+      resp.attemptStage = 'sample-next';
+      resp.sampleCorrect = false;   // FE 토스트 문구 분기(직전 오답)
+      resp.strike = 0;
+      resp.nextQuestion = adv.question;
+      resp.nextConcept = _v3HydrateConcept(st.currentConcept, st.conceptOrder);
+      resp.queueRemaining = st.prereqQueue.length;
+      _v3SaveState(sessionId, st, { currentNodeId: st.currentConcept, wrongAddDelta: wrongNoteAdded ? 1 : 0 });
+      resp.progress = _v3Progress(session, st);
+      return resp;
+    }
+    verdict = adv.verdict;   // 큐 소진 → 강제 판정
+  }
+  if (verdict === 'pass') {
+    const done = _v3BranchSamplePass(sessionId, session, st, resp, wrongNoteAdded);
+    if (done) return done;
+    // 본류 복귀(prereqDone) → 본류 단원완료/후속개념 판정으로 합류
+    return _v3ResumeMainAfterPrereq(sessionId, session, st, resp, wrongNoteAdded);
+  }
+  // 'fail' — 표본 과반 미달 → 하향
+  return _v3BranchSampleDownshift(sessionId, session, st, resp, wrongNoteAdded);
+}
+
+// 선수 큐 소진(prereqDone) 후 본류 단원 흐름 합류 — 단원완료/후속개념 출제.
+//   submit 정답 분기는 본문에서 이어가지만, 표본 fail→pass(드묾) 경로는 별도 진입점이 필요해 추출.
+function _v3ResumeMainAfterPrereq(sessionId, session, st, resp, wrongNoteAdded) {
+  if (_v3IsUnitComplete(st, st.unit.nodeId)) {
+    if (!st.completedUnits.includes(st.unit.nodeId)) st.completedUnits.push(st.unit.nodeId);
+    resp.unitDone = true; resp.attemptStage = 'unit-done';
+    const nextUnits = _v3NextUnits(st.unit.nodeId);
+    resp.branch = { type: 'unit-complete', unitName: st.unit.name, nextUnits, isLast: nextUnits.length === 0 };
+    _v3SaveState(sessionId, st, { currentNodeId: st.currentConcept, wrongAddDelta: wrongNoteAdded ? 1 : 0 });
+    resp.progress = _v3Progress(session, st);
+    return resp;
+  }
+  const nextC = _v3NextConceptInUnit(st);
+  if (nextC) {
+    st.currentConcept = nextC;
+    st.currentDifficulty = _v3StartDifficulty(nextC);
+    st.strike = 0;
+    if (!st.visitedConcepts.includes(nextC)) st.visitedConcepts.push(nextC);
+    const nq = _v3PickQuestion(nextC, st.currentDifficulty, st.askedQuestionIds);
+    if (nq) {
+      st.askedQuestionIds.push(nq.questionId);
+      resp.attemptStage = 'next-concept';
+      resp.nextQuestion = nq;
+      resp.nextConcept = _v3HydrateConcept(nextC, st.conceptOrder);
+      _v3SaveState(sessionId, st, { currentNodeId: nextC, wrongAddDelta: wrongNoteAdded ? 1 : 0 });
+      resp.progress = _v3Progress(session, st);
+      return resp;
+    }
+    if (!st.skippedConcepts.includes(nextC)) st.skippedConcepts.push(nextC);
+    resp.conceptSkipped = nextC;
+    return _v3AdvanceAfterSkip(sessionId, session, st, resp, wrongNoteAdded);
+  }
+  // 후속 없음 → 단원 완주
+  if (!st.completedUnits.includes(st.unit.nodeId)) st.completedUnits.push(st.unit.nodeId);
+  resp.unitDone = true; resp.attemptStage = 'unit-done';
+  const nextUnits = _v3NextUnits(st.unit.nodeId);
+  resp.branch = { type: 'unit-complete', unitName: st.unit.name, nextUnits, isLast: nextUnits.length === 0 };
+  _v3SaveState(sessionId, st, { currentNodeId: st.currentConcept, wrongAddDelta: wrongNoteAdded ? 1 : 0 });
+  resp.progress = _v3Progress(session, st);
+  return resp;
 }
 
 // v3 채점 — 정규화 채점(judgeQuestionAnswer 재사용) + 2-strike 상태 관리 + 이동 결정.
@@ -5966,6 +6468,14 @@ function submitDiagnosisV3(sessionId, payload = {}) {
   const st = _v3LoadState(session);
   if (!st) { const err = new Error('v3 세션이 아닙니다.'); err.statusCode = 400; throw err; }
   if (session.status === 'completed') return { finished: true, sessionComplete: true, attemptStage: 'finished' };
+
+  // [루프 안전망] 누적 출제 문항이 하드 상한을 넘으면 — 어떤 분기·클라이언트 동작에서도 — 즉시 종료.
+  //   (정상 경로는 통과/하향 상한이 먼저 작동. 이 가드는 FE 분기 실패로 인한 무한 제출을 끊는 최종 방어선.)
+  const _askedSoFar = Array.isArray(st.askedQuestionIds) ? st.askedQuestionIds.length : (session.total_questions || 0);
+  if (_askedSoFar >= DIAG_V3_HARD_QUESTION_CAP) {
+    _v3SaveState(sessionId, st, { status: 'completed', completed: true });
+    return { finished: true, sessionComplete: true, attemptStage: 'finished', progress: _v3Progress(session, st) };
+  }
 
   const questionId = payload.questionId != null ? payload.questionId : payload.question_id;
   const answer = payload.answer;
@@ -6023,45 +6533,37 @@ function submitDiagnosisV3(sessionId, payload = {}) {
     st.diagnosedConcepts = (st.diagnosedConcepts || 0) + 1;
     resp.attemptStage = 'next-concept';
 
-    // [다갈래 §4.4-C] 선수 개념 통과(branchDepth>0) → 이 갈래 위치 확정. 갈래 확장 중단하고 큐 다음으로.
-    if ((st.branchDepth || 0) > 0) {
-      const nextPrereq = _v3DequeueNext(st);
-      if (nextPrereq) {
-        // 다음 갈래로 자동 이동 — FE는 advance 호출 없이 토스트만(자동 문항 반환)
-        st.branchDepth = 0;  // 새 갈래 시작 → 깊이 리셋
-        const nq = _v3MoveIntoPrereq(st, nextPrereq);
-        if (nq) {
-          resp.attemptStage = 'next-prereq';
-          resp.nextQuestion = nq;
+    // [선수 표본 과반 §4.5-(A)] 선수 갈래(branchDepth>0)에서 개념 통과(1정답) → 표본 카운트로 라우팅.
+    //   branchSample!=null이면: record(passed) → verdict. continue=같은 단원 다음 표본 출제(갈래 유지),
+    //   pass=갈래 통과(큐 다음/본류), fail(강제판정)=하향. 본류(branchSample==null)는 영향 없음.
+    if ((st.branchDepth || 0) > 0 && st.branchSample) {
+      _v3SampleRecord(st, curConcept, true);
+      let verdict = _v3SampleVerdict(st.branchSample);
+      if (verdict === 'continue') {
+        const adv = _v3SampleAdvance(st);
+        if (adv.kind === 'sample-next') {
+          resp.attemptStage = 'sample-next';
+          resp.sampleCorrect = true;   // FE 토스트 문구 분기(직전 정답)
+          resp.nextQuestion = adv.question;
           resp.nextConcept = _v3HydrateConcept(st.currentConcept, st.conceptOrder);
           resp.queueRemaining = st.prereqQueue.length;
           _v3SaveState(sessionId, st, { currentNodeId: st.currentConcept, wrongAddDelta: wrongNoteAdded ? 1 : 0 });
           resp.progress = _v3Progress(session, st);
           return resp;
         }
-        // 다음 갈래 문항 없음 → skip 후 한 번 더 dequeue 시도(루프는 _v3DequeueNext가 처리)
-        if (!st.skippedConcepts.includes(nextPrereq)) st.skippedConcepts.push(nextPrereq);
-        const nextPrereq2 = _v3DequeueNext(st);
-        if (nextPrereq2) {
-          const nq2 = _v3MoveIntoPrereq(st, nextPrereq2);
-          if (nq2) {
-            resp.attemptStage = 'next-prereq';
-            resp.nextQuestion = nq2;
-            resp.nextConcept = _v3HydrateConcept(st.currentConcept, st.conceptOrder);
-            resp.queueRemaining = st.prereqQueue.length;
-            _v3SaveState(sessionId, st, { currentNodeId: st.currentConcept, wrongAddDelta: wrongNoteAdded ? 1 : 0 });
-            resp.progress = _v3Progress(session, st);
-            return resp;
-          }
-        }
+        verdict = adv.verdict;   // 큐 소진 → 강제 판정(pass/fail)
       }
-      // 큐 소진 → 본류 복귀. branchDepth 리셋 후 아래 본류 unit/next-concept 흐름으로 합류.
-      //   resp.prereqDone 플래그로 FE에 "기초 점검 완료" 신호 전달(attemptStage는 합류 결과로 덮임).
-      st.branchDepth = 0;
-      resp.prereqDone = true;
-      resp.queueRemaining = 0;
-      // 본류 복귀: 현재 단원(=마지막으로 이동한 선수의 부모 단원)에서 다음 미통과 개념/단원완료 판정.
-      //   주의: 큐 소진 시점의 st.unit/conceptOrder는 마지막 선수 단원. 본류 합류는 그 단원 기준으로 정상 진행.
+      if (verdict === 'pass') {
+        const done = _v3BranchSamplePass(sessionId, session, st, resp, wrongNoteAdded);
+        if (done) return done;   // 다음 갈래 출제 완결. null이면 본류 복귀 → 아래 흐름 합류.
+      } else {  // 'fail' — 표본 큐 소진 강제판정으로 미달(통과 직후 드묾) → 하향
+        return _v3BranchSampleDownshift(sessionId, session, st, resp, wrongNoteAdded);
+      }
+    } else if ((st.branchDepth || 0) > 0) {
+      // [하위호환] 선수 갈래인데 branchSample 없음(구 세션) → 기존 1정답 통과(즉시 큐 다음/본류).
+      if (st.branchSample && st.branchSample.unitId) st.branchVerdicts[st.branchSample.unitId] = 'pass';
+      const done = _v3BranchSamplePass(sessionId, session, st, resp, wrongNoteAdded);
+      if (done) return done;   // null이면 본류 복귀(prereqDone) → 아래 흐름 합류.
     }
 
     // 단원 완료 판정
@@ -6115,12 +6617,21 @@ function submitDiagnosisV3(sessionId, payload = {}) {
         resp.nextQuestion = retryQ;
         resp.nextConcept = _v3HydrateConcept(curConcept, st.conceptOrder);
       } else {
-        // §9-A 3단계: 재출제 생략 → 곧바로 하향 처리
+        // §9-A 3단계: 재출제 생략 → 개념 실패 처리.
         resp.noRetryQuestion = true;
+        // [선수 표본 과반 §4.5-(B)] 선수 갈래·표본 진행 중이면 즉시 하향이 아니라 '표본 실패 1'.
+        if ((st.branchDepth || 0) > 0 && st.branchSample) {
+          return _v3SampleConceptFail(sessionId, session, st, resp, wrongNoteAdded);
+        }
         return _v3DownTo(sessionId, session, st, resp, wrongNoteAdded, /*forced*/true);
       }
     } else {
-      // 2차 오답 → 하향(선수 개념)
+      // 2차 오답 → 개념 실패.
+      // [선수 표본 과반 §4.5-(B)] 선수 갈래·표본 진행 중이면 즉시 하향이 아니라 '표본 실패 1' → verdict.
+      if ((st.branchDepth || 0) > 0 && st.branchSample) {
+        return _v3SampleConceptFail(sessionId, session, st, resp, wrongNoteAdded);
+      }
+      // 본류(또는 표본 미적용) → 기존 하향(선수 개념)
       return _v3DownTo(sessionId, session, st, resp, wrongNoteAdded, false);
     }
   }
@@ -6191,6 +6702,8 @@ function _v3DownTo(sessionId, session, st, resp, wrongNoteAdded, forced) {
   st.diagnosedConcepts = (st.diagnosedConcepts || 0) + 1;
   resp.strike = 2;
   resp.attemptStage = 'down';
+  // [선수 표본 과반] _v3DownTo는 "확정 하향"만 담당. 표본 라우팅은 submit이 끝냄 → 진입 시 표본 정리.
+  st.branchSample = null;
 
   const inBranch = (st.branchDepth || 0) > 0;
   const depthCapped = inBranch && (st.branchDepth || 0) >= DIAG_V3_DOWN_DEPTH_CAP;
@@ -6485,7 +6998,8 @@ function getActiveDiagnosisV3(userId) {
       progress: {
         diagnosedConcepts: st.diagnosedConcepts || 0,
         unitPassed: prog.passed,
-        unitTotal: prog.total
+        unitTotal: prog.total,
+        diagPlan: _v3BuildDiagPlan(st)   // 재개 시에도 진행 계획 동기화(다갈래면 done/current/pending)
       },
       totalQuestions: row.total_questions || 0,
       correctCount: row.correct_count || 0,
