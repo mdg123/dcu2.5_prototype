@@ -1387,22 +1387,68 @@
     .diag-v3-panel-toggle{display:none}
 
     /* [다갈래] 진단 단원 진행 계획 — 헤더 아래 1줄 요약 띠 (풀폭·얇음) */
-    .dpl-plan-strip{flex-shrink:0;display:flex;align-items:center;gap:4px;min-height:32px;padding:6px 24px;background:#FFF7E6;border-bottom:1px solid #FCD9A3;color:#92400E;font-size:13.5px;line-height:1.4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    /*   position:relative → 펼침 드롭다운 패널(.dps-panel)의 anchor. 띠 자체는 1줄(overflow:hidden)로 잘림 없이 요약 칩만 표시. */
+    .dpl-plan-strip{position:relative;flex-shrink:0;display:flex;align-items:center;gap:4px;min-height:32px;padding:6px 24px;background:#FFF7E6;border-bottom:1px solid #FCD9A3;color:#92400E;font-size:13.5px;line-height:1.4;white-space:nowrap;overflow:hidden;cursor:pointer}
     .dpl-plan-strip .dps-count{font-weight:800;color:#B45309;margin-right:4px;flex-shrink:0}
     .dpl-plan-strip .dps-sep{color:#D9A55B;margin:0 4px;flex-shrink:0}
-    .dpl-plan-strip .dps-unit{font-weight:600}
+    .dpl-plan-strip .dps-unit{font-weight:600;flex-shrink:0}
+    /*   current 단원 — flex 컨테이너. 아이콘/태그는 비축소, 단원명(.dps-cname)만 축소·말줄임. */
+    .dpl-plan-strip .dps-unit.current{color:#B45309;font-weight:800;display:inline-flex;align-items:center;min-width:0;flex-shrink:1;max-width:46%}
+    .dpl-plan-strip .dps-unit.current .dps-cname{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
     .dpl-plan-strip .dps-unit.done{color:#9CA3AF;font-weight:500}
     .dpl-plan-strip .dps-unit.done .dps-ic{color:#16A34A}
-    .dpl-plan-strip .dps-unit.current{color:#B45309;font-weight:800}
     .dpl-plan-strip .dps-unit.pending{color:#B59B6E;font-weight:500}
     .dpl-plan-strip .dps-ic{font-weight:800;margin-right:3px}
     /* [표본 과반] 단원 표본 상태 태그 — "확인 X/N · 통과/더 내려감". 분모=표본수(≤3) */
-    .dpl-plan-strip .dps-tag{margin-left:5px;font-size:12.5px;font-weight:700;color:#6B7280}
+    .dpl-plan-strip .dps-tag{margin-left:5px;font-size:12.5px;font-weight:700;color:#6B7280;flex-shrink:0}
     .dpl-plan-strip .dps-unit.current .dps-tag{color:#B45309}
     .dpl-plan-strip .dps-tag.pass{color:#16A34A}
     .dpl-plan-strip .dps-tag.down{color:#D97706}
+    /* [요약] done 압축 칩 — ✓통과 m / ↓더 내려감 k. 기존 pass/down 톤 재사용 + 알약형 배경. */
+    .dpl-plan-strip .dps-chip{flex-shrink:0;display:inline-flex;align-items:center;gap:3px;font-weight:700;font-size:12.5px;line-height:1.2;padding:0 9px;border-radius:999px;border:1px solid transparent}
+    .dpl-plan-strip .dps-chip.pass{color:#15803D;background:#DCFCE7;border-color:#BBF7D0}
+    .dpl-plan-strip .dps-chip.down{color:#B45309;background:#FEF3C7;border-color:#FDE68A}
+    .dpl-plan-strip .dps-chip.more{color:#B59B6E;background:#FBF3E2;border-color:#F0DEBB}
+    /* [펼침] 우측 "자세히 ▾" 버튼 — 띠 클릭과 동일 동작. margin-left:auto로 우측 정렬. */
+    .dpl-plan-strip .dps-more-btn{margin-left:auto;flex-shrink:0;display:inline-flex;align-items:center;gap:3px;background:#FDE9C8;color:#92400E;border:1px solid #F2C879;border-radius:999px;font-size:12.5px;font-weight:700;padding:1px 11px;cursor:pointer;line-height:1.2}
+    .dpl-plan-strip .dps-more-btn:hover{background:#FBDCA6}
+    .dpl-plan-strip .dps-more-btn .dps-caret{font-size:11px;transition:transform .18s ease}
+    .dpl-plan-strip.expanded .dps-more-btn .dps-caret{transform:rotate(180deg)}
+    /* [펼침 목록] 전체 단원 드롭다운 — 띠 기준 아래, GNB/모달 콘텐츠 위(11010). 세로 스크롤만(가로 금지). */
+    .dps-panel{position:absolute;top:calc(100% + 1px);left:16px;right:16px;z-index:11010;background:#fff;border:1px solid #F0DEBB;border-radius:10px;box-shadow:0 14px 36px rgba(120,80,10,0.22);max-height:280px;overflow-y:auto;overflow-x:hidden;padding:6px;display:none;cursor:default}
+    /* [펼침] 펼친 동안은 strip의 overflow:hidden을 풀어 absolute 패널이 잘리지 않게(접힘 시엔 1줄 요약 클립 유지). */
+    .dpl-plan-strip.expanded{overflow:visible}
+    .dpl-plan-strip.expanded .dps-panel{display:block}
+    /* [단계 그룹] 펼침 패널 라운드 헤더 — "{r}단계 내려감". 배경 없음 + 옅은 상단 구분선. */
+    .dps-panel-group{padding:8px 12px 4px;font-size:13.5px;font-weight:600;color:#6B7280;letter-spacing:-0.01em;white-space:normal;border-top:1px solid #F3EBDA}
+    .dps-panel-group.first{margin-top:0;border-top:none;padding-top:2px}
+    .dps-panel-row{display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:8px;font-size:14.5px;color:#374151;white-space:normal}
+    .dps-panel-row + .dps-panel-row{border-top:1px solid #F3EBDA}
+    .dps-panel-row .dpr-ic{flex-shrink:0;width:20px;text-align:center;font-weight:800;font-size:14px}
+    .dps-panel-row.done .dpr-ic{color:#16A34A}
+    .dps-panel-row.current{background:#FFF7E6}
+    .dps-panel-row.current .dpr-ic{color:#B45309}
+    .dps-panel-row.pending .dpr-ic{color:#B59B6E}
+    .dps-panel-row .dpr-name{flex:1;min-width:0;font-weight:600;color:#1F2937}
+    .dps-panel-row.current .dpr-name{color:#B45309;font-weight:800}
+    .dps-panel-row.pending .dpr-name{color:#9CA3AF;font-weight:500}
+    .dps-panel-row.done .dpr-name{color:#6B7280;font-weight:500}
+    .dps-panel-row .dpr-gs{flex-shrink:0;font-size:13px;font-weight:600;color:#9CA3AF}
+    .dps-panel-row .dpr-state{flex-shrink:0;font-size:13px;font-weight:700;color:#6B7280}
+    .dps-panel-row .dpr-state.pass{color:#16A34A}
+    .dps-panel-row .dpr-state.down{color:#D97706}
+    .dps-panel-row.current .dpr-state{color:#B45309}
     @media (max-width:768px){
-      .dpl-plan-strip{padding:6px 16px;font-size:13px}
+      .dpl-plan-strip{padding:6px 14px;font-size:13px;gap:3px}
+      .dpl-plan-strip .dps-sep{margin:0 2px}
+      .dpl-plan-strip .dps-unit.current{max-width:42%}
+      .dpl-plan-strip .dps-chip,.dpl-plan-strip .dps-more-btn,.dpl-plan-strip .dps-tag{font-size:12px}
+      .dpl-plan-strip .dps-chip{padding:0 7px;gap:2px}
+      .dpl-plan-strip .dps-more-btn{padding:1px 8px}
+      .dpl-plan-strip .dps-more-txt{display:none}   /* 좁은 폭: "자세히" 글자 생략, ▾ 아이콘만(aria-label 유지) */
+      .dps-panel{left:10px;right:10px}
+      .dps-panel-row{font-size:14px;padding:9px 10px;gap:8px}
+      .dps-panel-row .dpr-gs,.dps-panel-row .dpr-state{font-size:13px}
     }
 
     /* v3 인라인 문항 — 개념명 줄 */
@@ -7651,7 +7697,7 @@ function ensureDiagV3Player() {
         <button class="dpl-stop-btn" onclick="confirmStopDiagV3()">그만하기</button>
         <button class="dpl-close" onclick="confirmQuitDiagV3()" title="닫기" aria-label="진단 닫기">&times;</button>
       </div>
-      <div class="dpl-plan-strip" id="dplPlanStrip" role="status" title="기초가 되는 단원을 쉬운 것부터 차례로 점검하고 있어요" style="display:none"></div>
+      <div class="dpl-plan-strip" id="dplPlanStrip" role="status" title="기초가 되는 단원을 쉬운 것부터 차례로 점검하고 있어요" style="display:none" onclick="onDiagPlanStripClick(event)"></div>
       <div class="dpl-body" id="diagV3PlayerBody"></div>
     </div>`;
   document.body.appendChild(ov);
@@ -7861,47 +7907,210 @@ function toggleDiagV3Panel() {
 
 // ── [다갈래] 진단 단원 진행 계획 — 헤더 아래 1줄 요약 띠 ──
 //   progress.diagPlan(BE: done/current/pending) 기반. 헤더 바로 아래 얇은 풀폭 띠(#dplPlanStrip)에
-//   완료=✓·진행중=▶·대기=○ + 카운트(X/Y)를 1줄로 렌더. 길면 말줄임(가로 스크롤 0).
-//   diagPlan 길이 < 2면 띠 숨김 → 기존 단갈래 UX 100% 유지. (큰 패널 없음 — 문항이 바로 위로)
+//   완료=✓·진행중=▶·대기=○ 를 1줄 요약으로 렌더. 라운드 진단으로 단원이 10개+ 누적돼도 절대 잘리지 않게:
+//     - done: 2개 이하면 단원명 개별 표시, 3개 이상이면 "✓통과 m" + "↓더 내려감 k" 압축 칩으로 요약.
+//     - current: 항상 전체 표시(단원명만 길면 말줄임), pending: 첫 1개 + "○대기 +N" 칩.
+//   띠 클릭(또는 "자세히 ▾")으로 띠 아래 드롭다운 패널(.dps-panel)에 전체 단원 목록을 펼쳐 보여준다.
+//   diagPlan 길이 < 2면 띠 숨김 → 기존 단갈래 UX 100% 유지.
 function _renderDiagPlanStrip(diagPlan) {
   const strip = document.getElementById('dplPlanStrip');
   if (!strip) return;
   const plan = Array.isArray(diagPlan) ? diagPlan : [];
-  if (plan.length < 2) { strip.style.display = 'none'; strip.innerHTML = ''; return; }
+  if (plan.length < 2) {
+    strip.style.display = 'none';
+    strip.innerHTML = '';
+    strip.classList.remove('expanded');
+    _diagPlanCache = [];
+    return;
+  }
+  _diagPlanCache = plan;   // 펼침 패널이 참조할 최신 계획(풀이 진행마다 갱신)
 
-  const doneCount = plan.filter(p => p.status === 'done').length;
-  const totalCount = plan.length;
+  const doneList    = plan.filter(p => p.status === 'done');
+  const currentList = plan.filter(p => p.status === 'current');
+  const pendingList = plan.filter(p => p.status === 'pending');
+  const doneCount   = doneList.length;
+  const totalCount  = plan.length;
 
-  // [표본 과반] 표본 라벨 — "통과 1/8"(단원 전체 분모) 폐기. 분모는 표본수(sampleCap≤3).
-  //   current(▶): "확인 중 X/N"(sample 필드 없으면 "진단 중" 폴백)
-  //   done(✓)+verdict 'pass': "확인 X/N · 통과"(그린)  / 'down': "확인 X/N · 더 내려감"(앰버)
-  //   pending(○): "대기". sample/verdict 필드 없으면 라벨 생략(폴백·NaN 비노출).
-  const sampleLabel = (p) => {
+  // 좁은 폭(<768)에서는 학년라벨·pending 단원명·태그 접두어를 생략해 1줄 요약을 더 줄인다(잘림 0 보장).
+  const narrow = (typeof window !== 'undefined') && window.innerWidth < 768;
+
+  // current(▶) 표본 라벨 — 넓은 폭 "확인 중 X/N", 좁은 폭 "X/N"(접두 생략). sample 없으면 "진단 중".
+  const currentTag = (p) => {
     const hasSample = Number.isFinite(p.sampleCap) && p.sampleCap > 0;
-    if (p.status === 'current') {
-      if (!hasSample) return '<span class="dps-tag">진단 중</span>';
-      const x = Number.isFinite(p.samplePassed) ? p.samplePassed : 0;
-      return `<span class="dps-tag">확인 중 ${x}/${p.sampleCap}</span>`;
-    }
-    if (p.status === 'done') {
-      const x = Number.isFinite(p.samplePassed) ? p.samplePassed : null;
-      const base = (hasSample && x !== null) ? `확인 ${x}/${p.sampleCap}` : null;
-      if (p.verdict === 'pass') return `<span class="dps-tag pass">${base ? base + ' · ' : ''}통과</span>`;
-      if (p.verdict === 'down') return `<span class="dps-tag down">${base ? base + ' · ' : ''}더 내려감</span>`;
-      return base ? `<span class="dps-tag">${base}</span>` : '';
-    }
-    return '<span class="dps-tag">대기</span>';   // pending
+    if (!hasSample) return '<span class="dps-tag">진단 중</span>';
+    const x = Number.isFinite(p.samplePassed) ? p.samplePassed : 0;
+    return `<span class="dps-tag">${narrow ? '' : '확인 중 '}${x}/${p.sampleCap}</span>`;
   };
-  const units = plan.map(p => {
-    const cls = p.status === 'done' ? 'done' : (p.status === 'current' ? 'current' : 'pending');
-    const ic  = p.status === 'done' ? '✓'   : (p.status === 'current' ? '▶'   : '○');
-    // 진행중 단원에만 학년·학기 라벨 보조 노출(1줄 유지 우선). 완료·대기는 단원명만.
-    const gs = (p.status === 'current' && p.gradeLabel) ? ` (${escHtml(p.gradeLabel)})` : '';
-    return `<span class="dps-unit ${cls}"><span class="dps-ic">${ic}</span>${escHtml(p.unitName || '단원')}${gs}${sampleLabel(p)}</span>`;
-  }).join('<span class="dps-sep">·</span>');
+  // done(✓) 개별 단원 태그 — verdict pass/down 톤. 2개 이하 짧은 케이스 전용.
+  const doneTag = (p) => {
+    if (p.verdict === 'pass') return '<span class="dps-tag pass">통과</span>';
+    if (p.verdict === 'down') return '<span class="dps-tag down">더 내려감</span>';
+    return '';
+  };
 
-  strip.innerHTML = `<span class="dps-count">🧭 기초 점검 ${doneCount}/${totalCount}</span><span class="dps-sep">·</span>${units}`;
+  // [단계표기] 현재 진행 중 단원의 round → 띠 헤더에 "· {r}단계". current 없으면 생략.
+  //   좁은 폭(<768)에서는 1줄·잘림0 원칙 보호를 위해 생략(짧지만 안전 우선).
+  let curRoundLabel = '';
+  if (!narrow && currentList.length > 0) {
+    const cr = currentList.find(p => Number.isFinite(p.round) && p.round > 0);
+    if (cr) curRoundLabel = ` · ${cr.round}단계`;
+  }
+
+  const parts = [];
+  parts.push(`<span class="dps-count">🧭 기초 점검 ${doneCount}/${totalCount}${curRoundLabel}</span>`);
+
+  // ── done 단원 ──
+  if (doneCount > 0) {
+    parts.push('<span class="dps-sep">·</span>');
+    if (doneCount <= 2) {
+      // 짧은 케이스: 기존처럼 단원명 개별 표시(정보 유지)
+      const html = doneList.map(p =>
+        `<span class="dps-unit done"><span class="dps-ic">✓</span>${escHtml(p.unitName || '단원')}${doneTag(p)}</span>`
+      ).join('<span class="dps-sep">·</span>');
+      parts.push(html);
+    } else {
+      // 3개 이상: 압축 칩 — ✓통과 m / ↓더 내려감 k (0이면 생략)
+      const passN = doneList.filter(p => p.verdict === 'pass').length;
+      const downN = doneList.filter(p => p.verdict === 'down').length;
+      const chips = [];
+      if (passN > 0) chips.push(`<span class="dps-chip pass"><span class="dps-ic">✓</span>통과 ${passN}</span>`);
+      if (downN > 0) chips.push(`<span class="dps-chip down"><span class="dps-ic">↓</span>더 내려감 ${downN}</span>`);
+      // pass/down verdict가 둘 다 0인 예외(이론상 거의 없음) — done 수만 칩으로
+      if (chips.length === 0) chips.push(`<span class="dps-chip pass"><span class="dps-ic">✓</span>완료 ${doneCount}</span>`);
+      parts.push(chips.join(''));
+    }
+  }
+
+  // ── current 단원(항상 전체 표시 — 단원명만 길면 .dps-cname 한정 말줄임. 아이콘·태그는 비축소·비절단) ──
+  for (const p of currentList) {
+    parts.push('<span class="dps-sep">·</span>');
+    const gs = (!narrow && p.gradeLabel) ? ` (${escHtml(p.gradeLabel)})` : '';
+    parts.push(`<span class="dps-unit current"><span class="dps-ic">▶</span><span class="dps-cname">${escHtml(p.unitName || '단원')}${gs}</span>${currentTag(p)}</span>`);
+  }
+
+  // ── pending 단원(넓은 폭: 첫 1개 단원명 + 나머지 칩 / 좁은 폭: 전부 "○대기 +N" 칩) ──
+  if (pendingList.length > 0) {
+    parts.push('<span class="dps-sep">·</span>');
+    if (narrow) {
+      parts.push(`<span class="dps-chip more"><span class="dps-ic">○</span>대기 ${pendingList.length}</span>`);
+    } else {
+      const first = pendingList[0];
+      parts.push(`<span class="dps-unit pending"><span class="dps-ic">○</span>${escHtml(first.unitName || '단원')}<span class="dps-tag">대기</span></span>`);
+      if (pendingList.length > 1) {
+        parts.push(`<span class="dps-chip more"><span class="dps-ic">○</span>대기 +${pendingList.length - 1}</span>`);
+      }
+    }
+  }
+
+  // ── "자세히 ▾" 버튼 + 펼침 패널 ──
+  const expanded = strip.classList.contains('expanded');
+  parts.push(`<button type="button" class="dps-more-btn" id="dpsMoreBtn" aria-expanded="${expanded ? 'true' : 'false'}" aria-controls="dpsPanel" aria-label="기초 점검 전체 단원 펼쳐보기" onclick="toggleDiagPlanPanel(event)"><span class="dps-more-txt">자세히 </span><span class="dps-caret">▾</span></button>`);
+  parts.push(`<div class="dps-panel" id="dpsPanel" role="list">${_renderDiagPlanPanelRows(plan)}</div>`);
+
+  strip.innerHTML = parts.join('');
   strip.style.display = '';
+}
+
+// 펼침 패널 — 띠가 참조하는 최신 diagPlan 캐시(풀이 진행마다 _renderDiagPlanStrip가 갱신)
+let _diagPlanCache = [];
+
+// 펼침 패널 행 — 전체 단원을 round(라운드) 오름차순 그룹으로 묶고, 각 그룹 앞에 "{r}단계 내려감" 헤더 행을 둔다.
+//   그룹 내부는 done→current→pending(원래 plan 순서) 유지. round 없으면(구세션) 1로 폴백.
+//   행 자체는 기존 형식(상태 아이콘 + 단원명 + 학년-학기 + 판정/진행) 그대로.
+function _renderDiagPlanPanelRows(plan) {
+  // round 오름차순으로 그룹핑(plan 내 등장 순서는 그룹 내부에서 유지)
+  const groups = new Map();              // round → [entries]
+  for (const p of (plan || [])) {
+    const r = Number.isFinite(p.round) && p.round > 0 ? p.round : 1;
+    if (!groups.has(r)) groups.set(r, []);
+    groups.get(r).push(p);
+  }
+  const rounds = Array.from(groups.keys()).sort((a, b) => a - b);
+
+  const rowHtml = (p) => {
+    const cls = p.status === 'done' ? 'done' : (p.status === 'current' ? 'current' : 'pending');
+    const ic  = p.status === 'done'
+      ? (p.verdict === 'down' ? '↓' : '✓')
+      : (p.status === 'current' ? '▶' : '○');
+    const gs = p.gradeLabel ? `<span class="dpr-gs">${escHtml(p.gradeLabel)}</span>` : '';
+    let state = '';
+    if (p.status === 'done') {
+      if (p.verdict === 'pass') state = '<span class="dpr-state pass">통과</span>';
+      else if (p.verdict === 'down') state = '<span class="dpr-state down">더 내려감</span>';
+      else state = '<span class="dpr-state">완료</span>';
+    } else if (p.status === 'current') {
+      const hasSample = Number.isFinite(p.sampleCap) && p.sampleCap > 0;
+      if (hasSample) {
+        const x = Number.isFinite(p.samplePassed) ? p.samplePassed : 0;
+        state = `<span class="dpr-state">확인 ${x}/${p.sampleCap}</span>`;
+      } else {
+        state = '<span class="dpr-state">진단 중</span>';
+      }
+    } else {
+      state = '<span class="dpr-state">대기</span>';
+    }
+    return `<div class="dps-panel-row ${cls}" role="listitem"><span class="dpr-ic">${ic}</span><span class="dpr-name">${escHtml(p.unitName || '단원')}</span>${gs}${state}</div>`;
+  };
+
+  const out = [];
+  rounds.forEach((r, gi) => {
+    out.push(`<div class="dps-panel-group${gi === 0 ? ' first' : ''}" role="presentation">${r}단계 내려감</div>`);
+    for (const p of groups.get(r)) out.push(rowHtml(p));
+  });
+  return out.join('');
+}
+
+// 띠 영역 클릭 — 요약 칩/카운트 등 띠 본문 클릭 시 토글. 단, 펼친 패널 내부 클릭은 무시(행 클릭이 닫지 않게),
+//   "자세히 ▾" 버튼은 자체 onclick(toggleDiagPlanPanel)으로 처리되므로 여기선 버튼 클릭을 제외.
+function onDiagPlanStripClick(ev) {
+  const panel = document.getElementById('dpsPanel');
+  if (panel && panel.contains(ev.target)) return;          // 패널 내부(행) 클릭 → 무시
+  const btn = document.getElementById('dpsMoreBtn');
+  if (btn && btn.contains(ev.target)) return;              // 버튼은 자체 핸들러가 처리(중복 방지)
+  toggleDiagPlanPanel(ev);
+}
+
+// 펼침 패널 토글 — 띠 클릭 또는 "자세히 ▾" 버튼. 외부 클릭/ESC로 닫힘.
+function toggleDiagPlanPanel(ev) {
+  if (ev) { ev.stopPropagation(); ev.preventDefault(); }
+  const strip = document.getElementById('dplPlanStrip');
+  if (!strip) return;
+  const willOpen = !strip.classList.contains('expanded');
+  strip.classList.toggle('expanded', willOpen);
+  const btn = document.getElementById('dpsMoreBtn');
+  if (btn) btn.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
+  if (willOpen) {
+    // 열림 시 최신 캐시로 패널 행 갱신(혹시 진행 후 갱신 전이면 동기화)
+    const panel = document.getElementById('dpsPanel');
+    if (panel && _diagPlanCache.length) panel.innerHTML = _renderDiagPlanPanelRows(_diagPlanCache);
+    // 외부 클릭/ESC 닫힘 핸들러 부착(중복 방지)
+    if (!_diagPlanPanelBound) {
+      _diagPlanPanelBound = true;
+      setTimeout(() => {
+        document.addEventListener('click', _diagPlanPanelOutside, true);
+        document.addEventListener('keydown', _diagPlanPanelEsc, true);
+      }, 0);
+    }
+  } else {
+    _closeDiagPlanPanel();
+  }
+}
+let _diagPlanPanelBound = false;
+function _closeDiagPlanPanel() {
+  const strip = document.getElementById('dplPlanStrip');
+  if (strip) strip.classList.remove('expanded');
+  const btn = document.getElementById('dpsMoreBtn');
+  if (btn) btn.setAttribute('aria-expanded', 'false');
+  document.removeEventListener('click', _diagPlanPanelOutside, true);
+  document.removeEventListener('keydown', _diagPlanPanelEsc, true);
+  _diagPlanPanelBound = false;
+}
+function _diagPlanPanelOutside(ev) {
+  const strip = document.getElementById('dplPlanStrip');
+  if (strip && !strip.contains(ev.target)) _closeDiagPlanPanel();
+}
+function _diagPlanPanelEsc(ev) {
+  if (ev.key === 'Escape') _closeDiagPlanPanel();
 }
 
 function selectDiagV3Option(el) {

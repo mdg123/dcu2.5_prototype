@@ -5607,6 +5607,13 @@ function _v3LoadState(session) {
   // [선수 표본 과반] 하위호환 — 구 세션은 표본 미적용으로 안전 합류(설계서 §3·R6).
   if (st.branchSample === undefined) st.branchSample = null;
   if (st.branchVerdicts == null || typeof st.branchVerdicts !== 'object') st.branchVerdicts = {};
+  // [라운드방식 2026-06-11] 하위호환 — 구 세션(끼어들기·우선순위큐)엔 두 필드 부재.
+  //   prereqRound=1(=현재 라운드), nextRoundQueue=[](다음 라운드 적립큐). 구 세션은 nextRoundQueue가 항상 비어
+  //   라운드 전환이 발생하지 않으므로 기존 동작 그대로(prereqQueue 소진=하향종료/본류복귀)와 동치.
+  if (st.prereqRound == null) st.prereqRound = 1;
+  if (st.nextRoundQueue == null || !Array.isArray(st.nextRoundQueue)) st.nextRoundQueue = [];
+  // [단계표기 2026-06-11] 하위호환 — 구 세션엔 unitRound 부재. {}로 정규화(diagPlan round 폴백=1).
+  if (st.unitRound == null || typeof st.unitRound !== 'object') st.unitRound = {};
   return st;
 }
 function _v3SaveState(sessionId, st, extra = {}) {
@@ -5782,6 +5789,9 @@ function startDiagnosisV3(userId, { schoolLevel, grade, subject, area, unitNodeI
     branchSample: null,
     // [선수 표본 과반] done 단원의 갈래 판정(통과/하향) 라벨용. { [unitId]: 'pass'|'down' }
     branchVerdicts: {},
+    // [단계표기 2026-06-11] 단원별 진입 라운드 기록 { [unitId]: round } — FE "N단계 내려감" 그룹 표기용.
+    //   갈래 진입(_v3MoveIntoPrereq) 시 첫 진입 라운드만 기록(이미 있으면 유지).
+    unitRound: {},
     history: []  // [{ concept, correct, strike, questionId }]
   };
 
@@ -5932,12 +5942,26 @@ function _v3BuildDiagPlan(st) {
     if (passed.has(cid)) e.passedCount++;
   }
 
-  // 3) pending — prereqQueue(아직 미검사)의 개념 부모 단원 (본류·current 제외)
-  //   이미 done/current로 잡힌 단원이면 touch가 기존 엔트리 유지, 신규 단원이면 기본값 pending.
+  // 3) pending — prereqQueue(현재 라운드, 아직 미검사) + nextRoundQueue(다음 라운드 적립)의 개념 부모 단원.
+  //   [라운드방식 2026-06-11] 현재 라운드 pending을 먼저, 다음 라운드 대기 단원을 그 뒤에 touch(첫 등장 순서 보존)
+  //   → 진행 띠(diagPlan)에 다음 라운드 대기 단원도 pending으로 자연 노출(FE 변경 없이). 본류·current 제외.
+  const nextRoundQueue = Array.isArray(st.nextRoundQueue) ? st.nextRoundQueue : [];
+  // [단계표기 2026-06-11] pending 단원의 round 산정용 — 현재 라운드(prereqQueue)/다음 라운드(nextRoundQueue) 구분.
+  //   nextRoundUnits: nextRoundQueue 소속 개념의 부모 단원 집합(현재 라운드에 동시 등장하면 현재 라운드 우선).
+  const curRound = st.prereqRound || 1;
+  const nextRoundUnits = new Set();
   for (const cid of prereqQueue) {
     const pu = _v3ParentUnitOf(cid);
     if (!pu || pu.nodeId === originUnitId) continue;
     if (pu.nodeId === curUnitId) continue;    // 진행 중 단원이면 current로 이미 표기
+    touch(pu);
+  }
+  for (const cid of nextRoundQueue) {
+    const pu = _v3ParentUnitOf(cid);
+    if (!pu || pu.nodeId === originUnitId) continue;
+    if (pu.nodeId === curUnitId) continue;
+    // 현재 라운드(prereqQueue)에 이미 등장한 단원이면 현재 라운드로 본다(round 중복 방지).
+    if (!byUnit.has(pu.nodeId)) nextRoundUnits.add(pu.nodeId);
     touch(pu);
   }
 
@@ -5961,12 +5985,22 @@ function _v3BuildDiagPlan(st) {
     const m = e.meta;
     let conceptTotal = 0;
     try { conceptTotal = _v3ConceptsOfUnit(unitId).length; } catch (_) {}
+    // [단계표기 2026-06-11] round — FE "N단계 내려감" 그룹 표기용.
+    //   done/current: unitRound 기록값(첫 진입 라운드, 없으면 1).
+    //   pending: 현재 라운드(prereqQueue 소속)=curRound, 다음 라운드(nextRoundQueue 소속)=curRound+1.
+    let round;
+    if (e.status === 'pending') {
+      round = nextRoundUnits.has(unitId) ? curRound + 1 : curRound;
+    } else {
+      round = (st.unitRound && st.unitRound[unitId] != null) ? st.unitRound[unitId] : 1;
+    }
     const out = {
       nodeId: m.nodeId,
       unitName: m.unitName,
       gradeLabel: _gradeSemLabel({ gradeLevel: m.gradeLevel, grade: m.grade, semester: m.semester }),
       area: m.area || null,
       status: e.status,
+      round,           // [단계표기] 진입 라운드(1=1단계 내려감, 2=2단계 …)
       passed: e.passedCount,
       conceptTotal,
       verdict: null   // done 단원의 갈래 판정('pass'|'down'). current·pending은 null.
@@ -6092,7 +6126,9 @@ function _v3PrereqCandidates(st, conceptId) {
     if (st.visitedConcepts.includes(id)) continue;        // 이미 검사/방문 X
     if (st.passedConcepts.includes(id)) continue;         // 이미 통과 X
     if (st.skippedConcepts.includes(id)) continue;        // 문항없음 skip X
-    if (st.prereqQueue.includes(id)) continue;            // 이미 대기열 X
+    if (st.prereqQueue.includes(id)) continue;            // 이미 대기열(현재 라운드) X
+    // [라운드방식 2026-06-11] 이미 다음 라운드 적립큐에 있으면 중복 제외 — #217 가드 확장.
+    if (Array.isArray(st.nextRoundQueue) && st.nextRoundQueue.includes(id)) continue;  // 이미 다음 라운드 큐 X
     // [P1 본류복귀 2026-06-11/P3 가드] 부모 단원이 이미 판정(pass/down)된 갈래면 후보 제외 — 판정 끝난 단원 재진입 차단.
     const pu = _v3ParentUnitOf(id);
     if (pu && pu.nodeId && verdicts[pu.nodeId]) continue;
@@ -6103,19 +6139,81 @@ function _v3PrereqCandidates(st, conceptId) {
   return cand.slice(0, DIAG_V3_PREREQ_FANOUT);
 }
 
-// §4.2 — enqueue. 현재 개념의 약점 선수를 큐에 담고 전역 근본도순 재정렬·길이 절단.
+// §4.2 — enqueue(현재 라운드, prereqQueue 적재용).
+//   [라운드방식 2026-06-11] 본류 2-strike에서 1라운드를 적재할 때만 사용. 라운드 진행 중 순서 불변이 핵심이므로
+//   여기서 전역 재정렬은 1회만(=라운드 적재 순간) 수행하고, 이후 dequeue는 순서를 절대 바꾸지 않는다.
+//   갈래 내부에서 발견된 더 깊은 선수는 prereqQueue가 아니라 nextRoundQueue로 적립한다(_v3EnqueueNextRound).
 function _v3EnqueuePrereqs(st, conceptId) {
   const cands = _v3PrereqCandidates(st, conceptId);
   for (const id of cands) {
     if (!st.prereqQueue.includes(id)) st.prereqQueue.push(id);
   }
-  // 큐 전체를 근본도 오름차순 재정렬(여러 갈래 누적 시 전역 우선순위 유지)
+  // 라운드 적재 순간 1회 근본도 오름차순 정렬(고정 순서 확정) — 이후 라운드 진행 중에는 재정렬 금지.
   st.prereqQueue.sort((a, b) => (_gradeAbsOf(a) - _gradeAbsOf(b)) || (_sortOrderOf(a) - _sortOrderOf(b)));
   // 큐 길이 상한: 가장 근본(앞)만 남기고 절단
   if (st.prereqQueue.length > DIAG_V3_DOWN_CONCEPT_CAP) {
     st.prereqQueue = st.prereqQueue.slice(0, DIAG_V3_DOWN_CONCEPT_CAP);
   }
   return cands.length;
+}
+
+// [라운드방식 2026-06-11] §4.2-R — enqueue(다음 라운드, nextRoundQueue 적립용).
+//   갈래 검사 중 발견된 "더 깊은 선수"를 현재 라운드에 끼워넣지 않고 다음 라운드로 미룬다(BFS rounds).
+//   가드는 _v3PrereqCandidates가 visited/passed/skipped/prereqQueue/nextRoundQueue/branchVerdicts 단원을 모두 거른다.
+//   정렬은 하지 않는다(라운드 시작 시 _v3StartNextRound가 1회 정렬). 누적 상한만 적용.
+function _v3EnqueueNextRound(st, conceptId) {
+  const cands = _v3PrereqCandidates(st, conceptId);
+  let added = 0;
+  for (const id of cands) {
+    if (!st.nextRoundQueue.includes(id) && !st.prereqQueue.includes(id)) { st.nextRoundQueue.push(id); added++; }
+  }
+  // 적립 큐도 폭주 방지(근본 우선 절단) — 라운드 시작 시 정렬되므로 여기선 길이만 제한.
+  if (st.nextRoundQueue.length > DIAG_V3_DOWN_CONCEPT_CAP) {
+    st.nextRoundQueue = st.nextRoundQueue.slice(0, DIAG_V3_DOWN_CONCEPT_CAP);
+  }
+  return added;
+}
+
+// [라운드방식 2026-06-11] §4.3-R — 라운드 전환. 현재 prereqQueue 소진 시 호출.
+//   nextRoundQueue가 비었으면 false(라운드 없음 → 호출자가 기존 종료/본류복귀 흐름 진행).
+//   비어있지 않으면: prereqRound++ → DEPTH_CAP(라운드 깊이) 초과 시 라운드 폐기(false 반환, 종료 흐름),
+//   아니면 prereqQueue = sort(nextRoundQueue), nextRoundQueue=[] (반드시 비움 — 무한루프 가드), true 반환.
+//   ⚠ 전환에 성공해도 _v3DequeueNext의 본문 가드(visited/판정단원/문항없음)로 실제 pop은 0개일 수 있다.
+//      그 경우 dequeue가 다시 null → 호출자가 또 _v3StartNextRound 시도(다음 라운드도 적립돼 있으면)하므로
+//      라운드 전환은 항상 nextRoundQueue를 비워 유한성을 보장한다.
+function _v3StartNextRound(st) {
+  if (!Array.isArray(st.nextRoundQueue) || st.nextRoundQueue.length === 0) return false;
+  st.prereqRound = (st.prereqRound || 1) + 1;
+  // 라운드 깊이 상한(연속 하향 깊이와 동일 기준) 초과 → 라운드 폐기·종료 흐름.
+  if (st.prereqRound > DIAG_V3_DOWN_DEPTH_CAP) {
+    st.nextRoundQueue = [];   // 무한루프 가드: 폐기 시에도 반드시 비운다.
+    return false;
+  }
+  // 다음 라운드 적재 — 근본도 오름차순 1회 정렬(이후 라운드 진행 중 불변).
+  const round = st.nextRoundQueue.slice();
+  round.sort((a, b) => (_gradeAbsOf(a) - _gradeAbsOf(b)) || (_sortOrderOf(a) - _sortOrderOf(b)));
+  st.prereqQueue = (round.length > DIAG_V3_DOWN_CONCEPT_CAP) ? round.slice(0, DIAG_V3_DOWN_CONCEPT_CAP) : round;
+  st.nextRoundQueue = [];     // 무한루프 가드: 전환 시 반드시 비운다(설계서 회귀 보존).
+  return true;
+}
+
+// [라운드방식 2026-06-11] §4.3-R — 라운드 인식 dequeue. 현재 라운드(prereqQueue)에서만 pop하되,
+//   현재 라운드 소진 시 다음 라운드를 시작해 계속 pop을 시도한다(유한 — 라운드 수는 DEPTH_CAP, 각 라운드 큐는 비워짐).
+//   반환: { id, newRound } — newRound는 이번 호출에서 라운드가 새로 전환됐으면 그 번호, 아니면 null.
+//        id=null이면 모든 라운드 소진(호출자가 종료/본류복귀).
+function _v3DequeueNextRoundAware(st) {
+  let newRound = null;
+  // 라운드 수 상한(DEPTH_CAP)만큼만 전환 시도(무한루프 방어).
+  let roundGuard = DIAG_V3_DOWN_DEPTH_CAP + 2;
+  while (roundGuard-- > 0) {
+    const id = _v3DequeueNext(st);
+    if (id) return { id, newRound };
+    // 현재 라운드 소진 → 다음 라운드 시작 시도.
+    if (!_v3StartNextRound(st)) return { id: null, newRound };
+    newRound = st.prereqRound;
+    // 전환 성공 → 루프 상단에서 새 라운드 prereqQueue로 다시 pop.
+  }
+  return { id: null, newRound };
 }
 
 // §4.3 — dequeue. 가장 근본(앞)부터 pop. visited/passed/skip·상한 가드·문항없음 skip 루프.
@@ -6167,7 +6265,14 @@ function _v3MoveIntoPrereq(st, prereqId) {
   st.strike = 0;
   if (!st.visitedConcepts.includes(entryConcept)) st.visitedConcepts.push(entryConcept);
   st.downCount = (st.downCount || 0) + 1;
-  st.branchDepth = (st.branchDepth || 0) + 1;
+  // [라운드방식 2026-06-11] branchDepth = 현재 라운드 번호(증가 대신). branchDepth>0 게이트(표본 적용)는
+  //   라운드>=1이면 항상 성립하므로 그대로 유효. 깊이 상한 검사도 라운드 번호 기준으로 동작.
+  st.branchDepth = st.prereqRound || 1;
+  // [단계표기 2026-06-11] 이 갈래 단원의 진입 라운드 기록(첫 진입만 — 이미 있으면 유지).
+  //   FE가 "N단계 내려감" 그룹 표기에 사용. unitRound[단원] = 진입 시점 라운드.
+  if (st.unitRound && typeof st.unitRound === 'object' && st.unit && st.unit.nodeId) {
+    if (st.unitRound[st.unit.nodeId] == null) st.unitRound[st.unit.nodeId] = st.prereqRound || 1;
+  }
   const q = _v3PickQuestion(entryConcept, st.currentDifficulty, st.askedQuestionIds);
   if (q) st.askedQuestionIds.push(q.questionId);
   // [선수 표본 과반] 새 선수 단원(갈래) 진입 → 표본 검사 초기화(설계서 §4.2). 표본 배열 직접 전달.
@@ -6319,13 +6424,15 @@ function _v3RestoreOriginUnit(st) {
 function _v3BranchSamplePass(sessionId, session, st, resp, wrongNoteAdded) {
   if (st.branchSample && st.branchSample.unitId) st.branchVerdicts[st.branchSample.unitId] = 'pass';
   st.branchSample = null;
-  // 큐 다음 갈래 시도(문항없음 skip는 _v3DequeueNext가 처리)
-  let next = _v3DequeueNext(st);
+  // [라운드방식 2026-06-11] 큐 다음 갈래 시도 — 라운드 인식 dequeue(현재 라운드 소진 시 다음 라운드로 전환).
+  let deq = _v3DequeueNextRoundAware(st);
+  let next = deq.id;
   while (next) {
-    st.branchDepth = 0;                 // 새 갈래 시작 → 깊이 리셋(_v3MoveIntoPrereq가 1로 올림)
+    st.branchDepth = 0;                 // 새 갈래 시작 → 리셋(_v3MoveIntoPrereq가 prereqRound로 세팅)
     const nq = _v3MoveIntoPrereq(st, next);
     if (nq) {
       resp.attemptStage = 'next-prereq';
+      if (deq.newRound) resp.newRound = deq.newRound;   // [라운드방식] FE 후속용 라운드 전환 신호
       resp.nextQuestion = nq;
       resp.nextConcept = _v3HydrateConcept(st.currentConcept, st.conceptOrder);
       resp.queueRemaining = st.prereqQueue.length;
@@ -6334,7 +6441,8 @@ function _v3BranchSamplePass(sessionId, session, st, resp, wrongNoteAdded) {
       return resp;
     }
     if (!st.skippedConcepts.includes(next)) st.skippedConcepts.push(next);
-    next = _v3DequeueNext(st);
+    deq = _v3DequeueNextRoundAware(st);
+    next = deq.id;
   }
   // 큐 소진 → 본류 복귀. branchDepth 리셋·prereqDone 신호 후 본류 unit/next-concept 흐름으로 합류.
   st.branchDepth = 0;
@@ -6351,23 +6459,37 @@ function _v3BranchSamplePass(sessionId, session, st, resp, wrongNoteAdded) {
 // §4.5 — 갈래 '하향(과반 미달)' 확정 처리(DOWNSHIFT). branchVerdicts[unit]='down' → 이 단원 선수 enqueue → 큐 다음.
 //   _v3DownTo와 동일한 branch(down) 응답을 만들되, 표본 과반 미달이 진입점. 반환: resp(완결).
 function _v3BranchSampleDownshift(sessionId, session, st, resp, wrongNoteAdded) {
-  if (st.branchSample && st.branchSample.unitId) st.branchVerdicts[st.branchSample.unitId] = 'down';
-  st.branchSample = null;
+  const bs = st.branchSample;
+  if (bs && bs.unitId) st.branchVerdicts[bs.unitId] = 'down';
   resp.strike = 2;
   resp.attemptStage = 'down';
 
   const depthCapped = (st.branchDepth || 0) >= DIAG_V3_DOWN_DEPTH_CAP;
-  // 이 선수 단원(진입 개념)의 더 깊은 선수를 큐에 추가(깊이 상한 미도달 시).
-  if (!depthCapped) _v3EnqueuePrereqs(st, st.currentConcept);
-  const next = _v3DequeueNext(st);
+  // [라운드방식 2026-06-11 — 갭 fix 핵심] 실패한 '표본 개념 전체'의 더 깊은 선수를 "다음 라운드"에 적립.
+  //   이전: _v3EnqueuePrereqs(st, currentConcept) 1개만 → 표본 중 마지막 실패 개념의 선수만 검사돼
+  //         (예: 각·직각 표본의 '각 이해하기' 선수 '반직선 구별하기'가 누락)되던 갭.
+  //   이번: bs.tested 중 미통과(=실패) 개념 각각의 선수를 nextRoundQueue로 push(중복·#217 가드는 후보 함수가 처리).
+  //   현재 라운드(prereqQueue)엔 끼워넣지 않으므로 라운드 내 고정 순서가 보존된다(끼어들기 제거).
+  if (!depthCapped) {
+    const tested = (bs && Array.isArray(bs.tested)) ? bs.tested : [];
+    const failed = tested.filter(id => !st.passedConcepts.includes(id));
+    // 표본 미적용 폴백(bs 없음) 등으로 failed가 비면 현재 개념을 대상으로(하위호환).
+    const targets = failed.length > 0 ? failed : [st.currentConcept];
+    for (const cid of targets) _v3EnqueueNextRound(st, cid);
+  }
+  st.branchSample = null;
+  // [라운드방식] dequeue는 현재 라운드(prereqQueue)에서만 — 소진 시 _v3DequeueNextRoundAware가 다음 라운드로 전환.
+  const deq = _v3DequeueNextRoundAware(st);
+  const next = deq.id;
   if (!next) {
-    // 더 내려갈 곳 없음/큐 소진 → 종료형 안내(root 모달 재사용, 본류 복귀 대신 종료형).
+    // 더 내려갈 곳 없음/모든 라운드 소진 → 종료형 안내(root 모달 재사용, 본류 복귀 대신 종료형).
     resp.branch = { type: 'down', prereqConcept: null, isRoot: false, queueRemaining: 0, multi: false, autoProceed: false };
     delete st._pendingPrereq;
     _v3SaveState(sessionId, st, { currentNodeId: st.currentConcept, wrongAddDelta: wrongNoteAdded ? 1 : 0 });
     resp.progress = _v3Progress(session, st);
     return resp;
   }
+  if (deq.newRound) resp.newRound = deq.newRound;   // [라운드방식] FE 후속용 라운드 전환 신호
   if (depthCapped) st.branchDepth = 0;
   st._pendingPrereq = next;
   const queueRemaining = st.prereqQueue.length;
@@ -6711,13 +6833,23 @@ function _v3DownTo(sessionId, session, st, resp, wrongNoteAdded, forced) {
   // 역방향 선수가 아예 없으면 root(더 내려갈 곳 없음). enqueue 전에 판정해 isRoot 정확히.
   const hasBackward = _v3BackwardConcepts(st.currentConcept).length > 0;
 
-  // §4.4-D 깊이 상한 도달이면 이 갈래의 더 깊은 선수는 enqueue 안 함(이 갈래 포기) → 기존 큐에서만 다음 갈래 pop.
+  // [라운드방식 2026-06-11] enqueue 분기:
+  //   - 본류(!inBranch) 2-strike: 이번이 1라운드 적재 시점 → prereqRound=1로 두고 현재 라운드(prereqQueue)에 적재.
+  //   - 갈래 내부(inBranch, 표본 미적용 구세션 등에서 직접 _v3DownTo로 진입): 더 깊은 선수는 다음 라운드로 적립.
+  //   §4.4-D 깊이 상한 도달이면 이 갈래의 더 깊은 선수는 enqueue 안 함(이 갈래 포기).
   if (!depthCapped) {
-    _v3EnqueuePrereqs(st, st.currentConcept);
+    if (!inBranch) {
+      st.prereqRound = 1;                        // 1라운드 시작 — 본류 직접 선수 적재
+      _v3EnqueuePrereqs(st, st.currentConcept);
+    } else {
+      _v3EnqueueNextRound(st, st.currentConcept); // 갈래 내부 발견 선수는 다음 라운드로
+    }
   }
-  const next = _v3DequeueNext(st);
+  // [라운드방식] dequeue는 현재 라운드(prereqQueue)에서만 — 소진 시 _v3DequeueNextRoundAware가 다음 라운드로 전환.
+  const deq = _v3DequeueNextRoundAware(st);
+  const next = deq.id;
   if (!next) {
-    // root/검사 가능한 선수 없음/큐 소진 → 종료형. (선수 갈래에서 큐 소진이면 본류 복귀 대신 종료형 안내 — root 모달 재사용)
+    // root/검사 가능한 선수 없음/모든 라운드 소진 → 종료형. (선수 갈래에서 소진이면 본류 복귀 대신 종료형 안내)
     //   isRoot: 본류 개념이면서 역방향 자체가 없을 때만 true. 그 외(큐 소진)는 isRoot false지만 prereqConcept null.
     resp.branch = { type: 'down', prereqConcept: null, isRoot: (!inBranch && !hasBackward), queueRemaining: 0, multi: false, autoProceed: false };
     delete st._pendingPrereq;
@@ -6725,7 +6857,8 @@ function _v3DownTo(sessionId, session, st, resp, wrongNoteAdded, forced) {
     resp.progress = _v3Progress(session, st);
     return resp;
   }
-  // 깊이 상한·갈래 전환을 위해 다음 갈래로 가면 branchDepth 리셋(go-prereq의 _v3MoveIntoPrereq가 다시 1로 올림).
+  if (deq.newRound) resp.newRound = deq.newRound;   // [라운드방식] FE 후속용 라운드 전환 신호
+  // 깊이 상한·갈래 전환을 위해 다음 갈래로 가면 branchDepth 리셋(go-prereq의 _v3MoveIntoPrereq가 prereqRound로 세팅).
   if (depthCapped) st.branchDepth = 0;
   // 다음 검사할 선수 확정(go-prereq에서 동일 개념 사용 — 2회 호출 불일치 방지)
   st._pendingPrereq = next;
@@ -6804,18 +6937,19 @@ function advanceDiagnosisV3(sessionId, payload = {}) {
     let prereq = st._pendingPrereq;
     delete st._pendingPrereq;
     if (!prereq || st.visitedConcepts.includes(prereq) || st.passedConcepts.includes(prereq)) {
-      prereq = _v3DequeueNext(st);
+      // [라운드방식 2026-06-11] _pendingPrereq 누락·소진 폴백 — 라운드 인식 dequeue(현재 라운드 소진 시 다음 라운드).
+      prereq = _v3DequeueNextRoundAware(st).id;
     }
     if (!prereq) {
       _v3SaveState(sessionId, st, { status: 'completed', completed: true });
       return { finished: true, sessionComplete: true, isRoot: true };
     }
-    // 선수 개념으로 실제 이동(부모 단원 전환·downCount++·branchDepth++·출제) — _v3MoveIntoPrereq
+    // 선수 개념으로 실제 이동(부모 단원 전환·downCount++·branchDepth=라운드번호·출제) — _v3MoveIntoPrereq
     const q = _v3MoveIntoPrereq(st, prereq);
     if (!q) {
-      // 선수 개념도 문항 없음 → skip 후 큐의 다음 갈래 시도
+      // 선수 개념도 문항 없음 → skip 후 큐의 다음 갈래 시도(라운드 인식)
       if (!st.skippedConcepts.includes(prereq)) st.skippedConcepts.push(prereq);
-      const next2 = _v3DequeueNext(st);
+      const next2 = _v3DequeueNextRoundAware(st).id;
       if (!next2) {
         _v3SaveState(sessionId, st, { status: 'completed', completed: true });
         return { finished: true, sessionComplete: true };
