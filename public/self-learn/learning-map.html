@@ -76,7 +76,7 @@
     /* .page-subtitle 자체 정의 폐기 */
 
     /* ===== Dashboard Cards ===== */
-    .dashboard-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:18px}
+    .dashboard-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
     .dash-card{background:#fff;border-radius:var(--radius-lg);padding:18px 20px;box-shadow:var(--shadow-sm);display:flex;align-items:center;gap:14px}
     .dash-icon{width:48px;height:48px;border-radius:var(--radius-md);display:flex;align-items:center;justify-content:center;font-size:var(--fs-xl);color:#fff;flex-shrink:0}
     .dash-label{font-size:var(--fs-sm);color:var(--gray-500);margin-bottom:3px;font-weight:500}
@@ -84,6 +84,40 @@
     .dash-value{font-size:var(--fs-kpi);font-weight:700;line-height:1.15;color:#111827;letter-spacing:-0.02em}
     .dash-value--empty{color:#9ca3af;font-weight:600}
     .dash-sub{font-size:var(--fs-xs);color:var(--gray-400);margin-top:2px}
+
+    /* ===== Dashboard 접기/펼치기 ===== */
+    .dash-section{margin-bottom:18px}
+    /* 펼침 상태: 우상단 접기 버튼 행 */
+    .dash-toggle-row{display:flex;justify-content:flex-end;margin-bottom:8px}
+    .dash-toggle-btn{display:inline-flex;align-items:center;gap:6px;min-height:36px;
+      padding:7px 14px;border:1px solid var(--gray-200);background:#fff;border-radius:var(--radius-md);
+      font-family:inherit;font-size:var(--fs-sm);font-weight:500;color:var(--gray-600);cursor:pointer;
+      transition:background .2s,color .2s,border-color .2s,box-shadow .2s}
+    .dash-toggle-btn:hover{background:var(--gray-50,#f9fafb);color:var(--gray-800);border-color:var(--gray-300)}
+    .dash-toggle-btn:focus-visible{outline:3px solid var(--primary);outline-offset:2px}
+    .dash-toggle-btn i{font-size:13px;transition:transform .2s}
+    /* 접힘 상태: 한 줄 띠 (기본 숨김, 접힐 때 노출) */
+    .dash-collapsed-bar{display:none;width:100%;align-items:center;gap:10px;min-height:44px;
+      padding:11px 18px;border:1px solid var(--gray-200);background:#fff;border-radius:var(--radius-lg);
+      box-shadow:var(--shadow-sm);font-family:inherit;font-size:var(--fs-sm);font-weight:600;
+      color:var(--gray-700);cursor:pointer;text-align:left;
+      transition:background .2s,border-color .2s,box-shadow .2s}
+    .dash-collapsed-bar:hover{background:var(--gray-50,#f9fafb);border-color:var(--primary);color:var(--gray-900)}
+    .dash-collapsed-bar:focus-visible{outline:3px solid var(--primary);outline-offset:2px}
+    .dash-collapsed-bar__icon{font-size:16px;line-height:1;flex-shrink:0}
+    .dash-collapsed-bar__text{flex:1}
+    .dash-collapsed-bar__chevron{font-size:13px;color:var(--gray-400);flex-shrink:0}
+    /* 펼침↔접힘 트랜지션 래퍼 (dashboard-grid)
+       펼침 max-height는 실제 카드 높이를 넉넉히 초과(반응형 4열·2열·캐러셀 모두 수용) */
+    .dashboard-grid{overflow:hidden;max-height:500px;opacity:1;transition:max-height .22s ease,opacity .22s ease,margin .22s ease}
+    /* 접힘 상태(.is-collapsed): 그리드 숨김 + 띠 노출 + 접기버튼 행 숨김 */
+    .dash-section.is-collapsed .dashboard-grid{max-height:0 !important;opacity:0;margin-bottom:0;pointer-events:none}
+    .dash-section.is-collapsed .dash-toggle-row{display:none}
+    .dash-section.is-collapsed .dash-collapsed-bar{display:flex}
+    @media (prefers-reduced-motion:reduce){
+      .dashboard-grid{transition:none}
+      .dash-toggle-btn i,.dash-collapsed-bar{transition:none}
+    }
 
     /* ===== Top Tabs ===== */
     .tab-nav{display:flex;gap:4px;background:var(--gray-100);border-radius:var(--radius-md);padding:4px;margin-bottom:18px;width:fit-content}
@@ -666,7 +700,34 @@
 
     /* List view */
     /* 필터바 sticky를 위해 padding-top 0, 필터바 자체가 상단 패딩 역할 (필터바 padding 14px 18px → 시각적으로 동일) */
-    .list-view{padding:0 16px 16px;display:flex;flex-direction:column;gap:8px;overflow-y:auto;max-height:calc(100vh - var(--map-top-chrome))}
+    .list-view{padding:0 16px 16px;display:flex;flex-direction:column;gap:8px;overflow-y:auto;overflow-x:hidden;max-height:calc(100vh - var(--map-top-chrome))}
+    /* 단원 카드 멀티컬럼 그리드 — 가로 공간 활용 + 스크롤 감소.
+       기본 3열(>1200px), 2열(≤1200px), 1열(≤767px). minmax 하한 0으로 긴 단원명에도 줄바꿈으로 흡수. */
+    .list-grid{
+      display:grid;gap:10px 12px;align-items:start;
+      grid-template-columns:repeat(3,minmax(0,1fr));
+      width:100%;
+    }
+    @media (max-width:1200px){
+      .list-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+    }
+    @media (max-width:768px){
+      .list-grid{grid-template-columns:1fr;gap:10px}
+    }
+    /* 그리드 안의 아코디언은 셀에 꽉 차게, 카드 자체 외곽 마진 제거 (gap이 간격 담당) */
+    .list-grid > .list-accordion{margin-bottom:0;min-width:0}
+    /* 펼친 카드만 전체폭 차지 → 펼침 영역이 카드 아래 전체폭으로 자연스럽게 노출 */
+    .list-grid > .list-accordion.active{grid-column:1 / -1}
+    /* 좁은 그리드 셀 대응 (2~3열, 769px↑): 우측 진행률 영역 폭 축소로 본문 공간 확보.
+       단, 펼친(active=전체폭) 카드는 넉넉하므로 기본 160px 유지.
+       ≤768px는 카드가 세로 스택(column)으로 전환되므로 적용 제외. */
+    @media (min-width:769px){
+      .list-grid > .list-accordion:not(.active) .lcv-progress-area{
+        width:120px;padding:14px 14px;
+      }
+      .list-grid > .list-accordion:not(.active) .lcv-body{padding:16px 16px}
+      .list-grid > .list-accordion:not(.active) .lcv-stats{gap:10px}
+    }
     .list-card{background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:14px 16px;display:flex;flex-direction:column;gap:6px;cursor:pointer;transition:all .15s}
     .list-card:hover{border-color:#2563eb;box-shadow:0 2px 8px rgba(37,99,235,.1)}
     .list-card.status-completed{border-color:var(--success);background:var(--success-light)}
@@ -2204,8 +2265,26 @@
       </div>
     </header>
 
-    <!-- Dashboard 4 cards -->
-    <div class="dashboard-grid">
+    <!-- Dashboard 4 cards (접기/펼치기 가능) -->
+    <section class="dash-section" id="dashSection" aria-label="학습 현황 대시보드">
+      <!-- 펼침 상태 컨트롤: 우상단 접기 버튼 -->
+      <div class="dash-toggle-row" id="dashToggleRow">
+        <button type="button" class="dash-toggle-btn" id="dashCollapseBtn"
+                aria-expanded="true" aria-controls="dashGrid"
+                title="학습 현황 카드 접기">
+          <i class="fas fa-chevron-up" aria-hidden="true"></i>
+          <span class="dash-toggle-label">접기</span>
+        </button>
+      </div>
+      <!-- 접힘 상태 띠: 한 줄 바, 클릭 시 다시 펼침 -->
+      <button type="button" class="dash-collapsed-bar" id="dashExpandBar"
+              aria-expanded="false" aria-controls="dashGrid"
+              title="학습 현황 카드 펼치기">
+        <span class="dash-collapsed-bar__icon" aria-hidden="true">📊</span>
+        <span class="dash-collapsed-bar__text">학습 현황 보기</span>
+        <i class="fas fa-chevron-down dash-collapsed-bar__chevron" aria-hidden="true"></i>
+      </button>
+      <div class="dashboard-grid" id="dashGrid">
       <div class="dash-card">
         <div class="dash-icon" style="background:linear-gradient(135deg,var(--primary),var(--primary-dark))"><i class="fas fa-book-open"></i></div>
         <div class="dash-info">
@@ -2238,7 +2317,8 @@
           <div class="dash-sub" id="dashRankSub">순위</div>
         </div>
       </div>
-    </div>
+      </div><!-- /.dashboard-grid -->
+    </section><!-- /.dash-section -->
 
     <!-- Top Tabs -->
     <div class="tab-nav">
@@ -3889,7 +3969,9 @@ function renderListView(nodes){
       </div>
     `;
   } else {
-    html += filtered.map(renderListCard).join('');
+    // 카드만 그리드 컨테이너로 감싼다 (필터바·빈 상태는 전체폭 유지).
+    // 펼친 아코디언은 .list-accordion.active{grid-column:1/-1}로 전체폭 차지.
+    html += '<div class="list-grid">' + filtered.map(renderListCard).join('') + '</div>';
   }
   html += '</div>';
   canvas.innerHTML = html;
@@ -4987,6 +5069,36 @@ document.addEventListener('DOMContentLoaded', function(){
     var nid = (typeof _nodeGuideState !== 'undefined' && _nodeGuideState) ? _nodeGuideState.nodeId : null;
     if (nid) focusOnNode(nid, 1.2);
   });
+
+  // ===== 상단 대시보드 접기/펼치기 (localStorage 상태 기억) =====
+  (function initDashCollapse(){
+    var DASH_KEY = 'slmap_dash_collapsed';
+    var section = document.getElementById('dashSection');
+    var grid = document.getElementById('dashGrid');
+    var collapseBtn = document.getElementById('dashCollapseBtn');
+    var expandBar = document.getElementById('dashExpandBar');
+    if (!section || !grid || !collapseBtn || !expandBar) return;
+
+    function setCollapsed(collapsed, persist){
+      section.classList.toggle('is-collapsed', collapsed);
+      collapseBtn.setAttribute('aria-expanded', String(!collapsed));
+      expandBar.setAttribute('aria-expanded', String(!collapsed));
+      if (persist){
+        try { localStorage.setItem(DASH_KEY, collapsed ? '1' : '0'); } catch(_){}
+      }
+    }
+
+    // 초기 복원
+    var stored = null;
+    try { stored = localStorage.getItem(DASH_KEY); } catch(_){}
+    setCollapsed(stored === '1', false);
+
+    collapseBtn.addEventListener('click', function(e){ e.preventDefault(); setCollapsed(true, true); });
+    expandBar.addEventListener('click', function(e){ e.preventDefault(); setCollapsed(false, true);
+      // 펼친 직후 접기 버튼으로 포커스 이동(키보드 사용자 동선)
+      try { collapseBtn.focus(); } catch(_){}
+    });
+  })();
 });
 
 async function openDrawer(nodeId, opts) {
