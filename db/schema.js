@@ -1628,6 +1628,54 @@ function initSchema() {
     console.error('[DB] users.school_level 마이그레이션 실패:', e.message);
   }
 
+  // 마이그레이션: LRS 관리자 거시분석 기반 (LRS_관리자_거시분석_기획서 §5 / S1)
+  //  - users.region (시·군 — 거시 비교 ③의 전제), users.is_seed (시드 격리)
+  //  - learning_logs.is_seed (시드 로그 격리)
+  //  - users.school_level 표준값 정규화: 'elementary'/'middle'/'high' 로 통일
+  //    (실데이터에 '고등학교' 등 혼재 → 표준값 매핑. 표준집합은 routes/admin.js
+  //     SK_ALLOWED_SCHOOL_LEVELS / db/featured.js ALLOWED_* 와 동치)
+  try {
+    const userCols = db.prepare("PRAGMA table_info(users)").all().map(c => c.name);
+    if (!userCols.includes('region')) {
+      db.exec("ALTER TABLE users ADD COLUMN region TEXT");
+      db.exec('CREATE INDEX IF NOT EXISTS idx_users_region ON users(region)');
+      // 실데이터 학교 → 행정구역(교육지원청 권역) 1곳 부여 (시드는 seed 스크립트가 채움)
+      db.exec("UPDATE users SET region = '청주' WHERE region IS NULL AND school_name IN ('금성초등학교', '다채움테스트학교')");
+    }
+    if (!userCols.includes('is_seed')) {
+      db.exec("ALTER TABLE users ADD COLUMN is_seed INTEGER DEFAULT 0");
+      db.exec('CREATE INDEX IF NOT EXISTS idx_users_is_seed ON users(is_seed)');
+    }
+    // school_level 표준 정규화 (한국어/축약 혼재 → elementary/middle/high)
+    db.exec(`
+      UPDATE users SET school_level = CASE school_level
+        WHEN '초'       THEN 'elementary'
+        WHEN '초등'     THEN 'elementary'
+        WHEN '초등학교' THEN 'elementary'
+        WHEN '중'       THEN 'middle'
+        WHEN '중등'     THEN 'middle'
+        WHEN '중학교'   THEN 'middle'
+        WHEN '고'       THEN 'high'
+        WHEN '고등'     THEN 'high'
+        WHEN '고등학교' THEN 'high'
+        ELSE school_level
+      END
+      WHERE school_level IN ('초','초등','초등학교','중','중등','중학교','고','고등','고등학교')
+    `);
+  } catch (e) {
+    console.error('[DB] LRS 거시분석 마이그레이션(users.region/is_seed/school_level 정규화) 실패:', e.message);
+  }
+
+  try {
+    const llCols = db.prepare("PRAGMA table_info(learning_logs)").all().map(c => c.name);
+    if (!llCols.includes('is_seed')) {
+      db.exec("ALTER TABLE learning_logs ADD COLUMN is_seed INTEGER DEFAULT 0");
+      db.exec('CREATE INDEX IF NOT EXISTS idx_learning_logs_is_seed ON learning_logs(is_seed)');
+    }
+  } catch (e) {
+    console.error('[DB] learning_logs.is_seed 마이그레이션 실패:', e.message);
+  }
+
   // 마이그레이션: portfolio_reports 신규 테이블 (기획서 §7-2 / Backend 미션)
   try {
     db.exec(`

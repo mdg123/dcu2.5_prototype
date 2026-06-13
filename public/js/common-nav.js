@@ -113,7 +113,7 @@
       sub: [
         { label: '🏠 홈',        url: '/lrs/index.html?menu=home',       roles: ['student','teacher','admin'] },
         { label: '현황 분석',    url: '/lrs/index.html?menu=analytics',  roles: ['student','teacher','admin'] },
-        { label: '학습 활동',    url: '/lrs/index.html?menu=activities', roles: ['student','teacher','admin'] },
+        { label: '학습 활동',    url: '/lrs/index.html?menu=activities', roles: ['student','teacher'] },
         { label: '운영',         url: '/lrs/index.html?menu=operations', roles: ['teacher','admin'] },
         { label: '리포트',       url: '/lrs/index.html?menu=reports',    roles: ['admin'] }
       ]

@@ -61,12 +61,17 @@ const SERVICE_LABELS = {
   'board': '알림장',
   'survey': '설문',
   'lesson': '수업',
+  'portal': '포털',
   'external': '외부연계'
 };
 const SUBJECT_LABELS = {
   'KOR': '국어', 'MAT': '수학', 'ENG': '영어',
   'SCI': '과학', 'SOC': '사회', 'ART': '예술',
-  'PE': '체육', 'MUS': '음악', 'MOR': '도덕', 'PRA': '실과'
+  'PE': '체육', 'MUS': '음악', 'MOR': '도덕', 'PRA': '실과',
+  // 시드 데이터 교과코드(소문자 -e/-m/-h 접미) 매핑
+  'korean': '국어', 'math': '수학', 'english': '영어',
+  'science': '과학', 'social': '사회', 'art': '예술/미술',
+  'music': '음악', 'moral': '도덕', 'pe': '체육', 'practical': '실과'
 };
 function serviceLabel(code) {
   if (code == null) return '';
@@ -74,7 +79,11 @@ function serviceLabel(code) {
 }
 function subjectLabel(code, fallback) {
   if (code == null) return fallback || '';
-  return SUBJECT_LABELS[code] || fallback || String(code);
+  if (SUBJECT_LABELS[code]) return SUBJECT_LABELS[code];
+  // 시드 교과코드: 'math-e' / 'korean-m' → 접미사 제거 후 매핑
+  const base = String(code).replace(/-[emh]$/i, '');
+  if (SUBJECT_LABELS[base]) return SUBJECT_LABELS[base];
+  return fallback || String(code);
 }
 
 // ─────────────────────────────────────────────────────────
@@ -1944,6 +1953,561 @@ router.get('/xapi/recent-events', requireAuth, (req, res) => {
   } catch (err) {
     console.error('[LRS] /xapi/recent-events error:', err);
     res.status(500).json({ success: false, message: '서버 오류' });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// LRS 관리자 거시분석 — S2/S3 집계 API (기획서 LRS_관리자_거시분석_기획서.md)
+//   admin 전용. 개인 식별정보·정답 비노출. is_seed 포함이 기본,
+//   ?realOnly=1 토글 시 실데이터(is_seed=0)만 집계.
+//   학교급 정규화 값: elementary/middle/high.
+// ═══════════════════════════════════════════════════════════════════
+
+const _LEVEL_LABELS = { elementary: '초등학교', middle: '중학교', high: '고등학교' };
+function levelLabel(code) { return _LEVEL_LABELS[code] || (code || '미분류'); }
+
+/** ?realOnly=1 이면 is_seed=0 만. 기본(미전달/0)은 전체(시드+실). */
+function seedFilter(req, alias) {
+  const p = alias ? `${alias}.` : '';
+  const realOnly = String(req.query.realOnly || '') === '1';
+  return { where: realOnly ? ` AND ${p}is_seed = 0` : '', realOnly };
+}
+
+/** period=7d|30d|90d (기본 30) → 일수 정수 반환. 거시 KPI 전용 단순 파서. */
+function macroDays(req, def = 30) {
+  const raw = String(req.query.period || `${def}d`).replace('d', '');
+  const n = parseInt(raw, 10);
+  if (isNaN(n) || n <= 0) return def;
+  return Math.min(n, 365);
+}
+
+/** 정수 배열에서 percentile 경계값(선형보간) 산출. p: 0~1. */
+function _pctile(sortedAsc, p) {
+  if (!sortedAsc.length) return 0;
+  if (sortedAsc.length === 1) return sortedAsc[0];
+  const idx = p * (sortedAsc.length - 1);
+  const lo = Math.floor(idx), hi = Math.ceil(idx);
+  if (lo === hi) return sortedAsc[lo];
+  return sortedAsc[lo] + (sortedAsc[hi] - sortedAsc[lo]) * (idx - lo);
+}
+
+// ─────────────────────────────────────────────────────────
+// S2-① GET /api/lrs/stats/admin-kpi — 한눈 현황 KPI 8종
+//   params: period=7d|30d|90d (DAU/WAU/오늘활동은 절대 기준일), realOnly
+// ─────────────────────────────────────────────────────────
+router.get('/stats/admin-kpi', requireAuth, (req, res) => {
+  try {
+    if (!_adminOnly(req, res)) return;
+    const days = macroDays(req, 30);
+    const sfU = seedFilter(req, 'u');
+    const sfL = seedFilter(req, 'll');
+
+    // 가입자 (학생 한정 학교 수 — 거시 단위 기준)
+    const schoolCnt = db.prepare(`
+      SELECT COUNT(DISTINCT school_name) c FROM users u
+      WHERE role='student' AND school_name IS NOT NULL AND school_name <> '' ${sfU.where}
+    `).get().c || 0;
+    const teacherCnt = db.prepare(`SELECT COUNT(*) c FROM users u WHERE role='teacher' ${sfU.where}`).get().c || 0;
+    const studentCnt = db.prepare(`SELECT COUNT(*) c FROM users u WHERE role='student' ${sfU.where}`).get().c || 0;
+
+    // 누적 총 학습시간(시간) — duration_sec 우선, 없으면 PTxxxS 파싱
+    const totalSec = db.prepare(`
+      SELECT COALESCE(SUM(COALESCE(ll.duration_sec,
+        CAST(REPLACE(REPLACE(COALESCE(ll.result_duration,''),'PT',''),'S','') AS INTEGER), 0)), 0) s
+      FROM learning_logs ll WHERE 1=1 ${sfL.where}
+    `).get().s || 0;
+    const totalLearnHours = Math.round(totalSec / 3600);
+
+    // 오늘 활동량 / DAU
+    const todayRow = db.prepare(`
+      SELECT COUNT(*) acts, COUNT(DISTINCT ll.user_id) dau
+      FROM learning_logs ll
+      WHERE DATE(ll.created_at) = DATE('now','localtime') ${sfL.where}
+    `).get();
+    const todayActs = todayRow.acts || 0;
+    const dau = todayRow.dau || 0;
+
+    // WAU (최근 7일 고유 사용자)
+    const wau = db.prepare(`
+      SELECT COUNT(DISTINCT ll.user_id) c
+      FROM learning_logs ll
+      WHERE DATE(ll.created_at) >= DATE('now','localtime','-6 days') ${sfL.where}
+    `).get().c || 0;
+
+    // 활성률 = WAU / 가입 학생 수
+    const activeRate = studentCnt > 0 ? Math.round((wau / studentCnt) * 1000) / 10 : 0;
+
+    // period 기간 활동량 (참고 KPI)
+    const periodActs = db.prepare(`
+      SELECT COUNT(*) c FROM learning_logs ll
+      WHERE DATE(ll.created_at) >= DATE('now','localtime', ?) ${sfL.where}
+    `).get(`-${days - 1} days`).c || 0;
+
+    // 학교급 미니카드 (학생 수 + 활동량)
+    const byLevelRows = db.prepare(`
+      SELECT u.school_level lvl, COUNT(*) students
+      FROM users u
+      WHERE u.role='student' AND u.school_level IS NOT NULL ${sfU.where}
+      GROUP BY u.school_level
+    `).all();
+    const actByLevel = db.prepare(`
+      SELECT u.school_level lvl, COUNT(*) acts
+      FROM learning_logs ll JOIN users u ON u.id = ll.user_id
+      WHERE u.role='student' AND u.school_level IS NOT NULL
+        AND DATE(ll.created_at) >= DATE('now','localtime', ?) ${sfL.where}
+      GROUP BY u.school_level
+    `).all(`-${days - 1} days`);
+    const actMap = new Map(actByLevel.map(r => [r.lvl, r.acts]));
+    const byLevel = ['elementary', 'middle', 'high'].map(lv => {
+      const row = byLevelRows.find(r => r.lvl === lv) || { students: 0 };
+      return { level: lv, label: levelLabel(lv), students: row.students || 0, acts: actMap.get(lv) || 0 };
+    });
+
+    // 주간 활동 추이 (최근 8주, ISO 주 시작 월요일 근사 — 7일 버킷)
+    const weekly = db.prepare(`
+      SELECT CAST((JULIANDAY('now','localtime') - JULIANDAY(ll.created_at)) / 7 AS INTEGER) wk,
+             COUNT(*) cnt
+      FROM learning_logs ll
+      WHERE DATE(ll.created_at) >= DATE('now','localtime','-55 days') ${sfL.where}
+      GROUP BY wk ORDER BY wk DESC
+    `).all();
+    const wkMap = new Map(weekly.map(r => [r.wk, r.cnt]));
+    const weeklyTrend = [];
+    for (let w = 7; w >= 0; w--) weeklyTrend.push({ weeksAgo: w, count: wkMap.get(w) || 0 });
+
+    res.json({
+      success: true,
+      period: `${days}d`,
+      realOnly: sfL.realOnly,
+      kpi: {
+        schools: schoolCnt,
+        teachers: teacherCnt,
+        students: studentCnt,
+        dau,
+        wau,
+        totalLearnHours,
+        todayActs,
+        activeRate, // %
+        periodActs
+      },
+      byLevel,
+      weeklyTrend
+    });
+  } catch (err) {
+    console.error('[LRS] /stats/admin-kpi error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────
+// S2-② GET /api/lrs/stats/service-ops — 서비스 운영 진단
+//   서비스별 사용률·비중·추세Δ(직전 동기간 대비)·고유사용자·재방문율 + 미사용 진단
+//   params: period=30d(기본·추세 비교 기간), realOnly
+// ─────────────────────────────────────────────────────────
+router.get('/stats/service-ops', requireAuth, (req, res) => {
+  try {
+    if (!_adminOnly(req, res)) return;
+    const days = macroDays(req, 30);
+    const sf = seedFilter(req, 'll');
+    const curFrom = `-${days - 1} days`;
+    const prevFrom = `-${2 * days - 1} days`;
+    const prevTo = `-${days} days`;
+
+    // 현재 기간 서비스별 집계
+    const cur = db.prepare(`
+      SELECT ll.source_service svc,
+             COUNT(*) cnt,
+             COUNT(DISTINCT ll.user_id) uniq_users,
+             COALESCE(SUM(COALESCE(ll.duration_sec,
+               CAST(REPLACE(REPLACE(COALESCE(ll.result_duration,''),'PT',''),'S','') AS INTEGER), 0)),0) dur_sec
+      FROM learning_logs ll
+      WHERE ll.source_service IS NOT NULL
+        AND DATE(ll.created_at) >= DATE('now','localtime', ?) ${sf.where}
+      GROUP BY ll.source_service
+    `).all(curFrom);
+
+    // 직전 동기간 건수 (추세 비교)
+    const prev = db.prepare(`
+      SELECT ll.source_service svc, COUNT(*) cnt
+      FROM learning_logs ll
+      WHERE ll.source_service IS NOT NULL
+        AND DATE(ll.created_at) >= DATE('now','localtime', ?)
+        AND DATE(ll.created_at) <= DATE('now','localtime', ?) ${sf.where}
+      GROUP BY ll.source_service
+    `).all(prevFrom, prevTo);
+    const prevMap = new Map(prev.map(r => [r.svc, r.cnt]));
+
+    // 현재 기간 재방문(2일 이상 활동) 고유 사용자 — 서비스별
+    const revisit = db.prepare(`
+      SELECT svc, COUNT(*) revisit_users FROM (
+        SELECT ll.source_service svc, ll.user_id
+        FROM learning_logs ll
+        WHERE ll.source_service IS NOT NULL
+          AND DATE(ll.created_at) >= DATE('now','localtime', ?) ${sf.where}
+        GROUP BY ll.source_service, ll.user_id
+        HAVING COUNT(DISTINCT DATE(ll.created_at)) >= 2
+      ) GROUP BY svc
+    `).all(curFrom);
+    const revisitMap = new Map(revisit.map(r => [r.svc, r.revisit_users]));
+
+    const totalCnt = cur.reduce((s, r) => s + r.cnt, 0) || 1;
+
+    let services = cur.map(r => {
+      const share = Math.round((r.cnt / totalCnt) * 1000) / 10; // %
+      const prevCnt = prevMap.get(r.svc) || 0;
+      const trendDelta = prevCnt > 0
+        ? Math.round(((r.cnt - prevCnt) / prevCnt) * 1000) / 10
+        : (r.cnt > 0 ? 100 : 0); // 직전 0이면 신규 → +100% 표기
+      const revisitUsers = revisitMap.get(r.svc) || 0;
+      const revisitRate = r.uniq_users > 0
+        ? Math.round((revisitUsers / r.uniq_users) * 1000) / 10 : 0;
+      const avgMinPerUser = r.uniq_users > 0
+        ? Math.round((r.dur_sec / r.uniq_users) / 60 * 10) / 10 : 0;
+
+      // 룰베이스 진단 상태 (기획서 4-1). 원자료로 status/severity/reason 제공.
+      let status = '정상', severity = 'ok';
+      if (share < 2) { status = '거의 미사용'; severity = 'critical'; }
+      else if (share < 5 && trendDelta <= 0) { status = '저활용·정체'; severity = 'warn'; }
+      else if (share < 5 && trendDelta > 0) { status = '저활용·성장중'; severity = 'caution'; }
+      else if (trendDelta < -20) { status = '사용 급감'; severity = 'warn'; }
+
+      return {
+        service: r.svc,
+        service_label: serviceLabel(r.svc),
+        count: r.cnt,
+        share,
+        prevCount: prevCnt,
+        trendDelta, // %
+        uniqueUsers: r.uniq_users,
+        revisitUsers,
+        revisitRate, // %
+        avgMinPerUser,
+        status,
+        severity,
+        underused: severity !== 'ok' && severity !== 'caution' ? true
+                   : (severity === 'caution') // 저활용군 전체를 진단 목록 후보로
+      };
+    });
+    services.sort((a, b) => b.count - a.count);
+
+    // 미사용 진단 목록 (저활용·성장중 포함 — 점유율 임계 미달군)
+    const underusedList = services.filter(s => s.severity !== 'ok');
+
+    res.json({
+      success: true,
+      period: `${days}d`,
+      realOnly: sf.realOnly,
+      totalCount: totalCnt,
+      operatingServices: services.length,
+      topService: services[0] ? services[0].service : null,
+      bottomService: services.length ? services[services.length - 1].service : null,
+      underusedCount: underusedList.length,
+      services,
+      underused: underusedList
+    });
+  } catch (err) {
+    console.error('[LRS] /stats/service-ops error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────
+// S3-③ GET /api/lrs/stats/macro-drill — 거시 드릴다운(통합)
+//   level=region|school_level|school|grade|subject
+//   상위 필터: region, school_level, school, grade (체인)
+//   각 단위: 학생수·활동량·평균학습시간(분)·평균성취. n<10 마스킹 게이트.
+//   params: period, realOnly
+// ─────────────────────────────────────────────────────────
+router.get('/stats/macro-drill', requireAuth, (req, res) => {
+  try {
+    if (!_adminOnly(req, res)) return;
+    const days = macroDays(req, 90);
+    const level = String(req.query.level || 'region').trim();
+    const sfU = seedFilter(req, 'u');
+    const sfL = seedFilter(req, 'll');
+
+    // 상위 필터 (체인)
+    const region = req.query.region ? String(req.query.region).trim() : null;
+    const schoolLevel = req.query.school_level ? String(req.query.school_level).trim() : null;
+    const school = req.query.school ? String(req.query.school).trim() : null;
+    const grade = req.query.grade != null && req.query.grade !== '' ? parseInt(req.query.grade, 10) : null;
+
+    const GROUP = {
+      region: { col: 'u.region', next: 'school_level' },
+      school_level: { col: 'u.school_level', next: 'school' },
+      school: { col: 'u.school_name', next: 'grade' },
+      grade: { col: 'u.grade', next: 'subject' },
+      subject: { col: 'll.subject_code', next: null }
+    };
+    if (!GROUP[level]) {
+      return res.status(400).json({ success: false, message: '잘못된 level 파라미터입니다.' });
+    }
+    const gcol = GROUP[level].col;
+
+    // 공통 학생 필터 (subject 제외 — subject는 로그 기준 집계)
+    const studWhere = [];
+    const studParams = [];
+    studWhere.push("u.role='student'");
+    if (region) { studWhere.push('u.region = ?'); studParams.push(region); }
+    if (schoolLevel) { studWhere.push('u.school_level = ?'); studParams.push(schoolLevel); }
+    if (school) { studWhere.push('u.school_name = ?'); studParams.push(school); }
+    if (grade != null && !isNaN(grade)) { studWhere.push('u.grade = ?'); studParams.push(grade); }
+    if (sfU.where) studWhere.push(sfU.where.replace(/^ AND /, ''));
+    const studWhereSql = studWhere.join(' AND ');
+    const dateFrom = `-${days - 1} days`;
+
+    let rows;
+    if (level === 'subject') {
+      // 교과 단위: 로그 기준(subject_code) 집계. 분모 학생수는 해당 상위 필터 학생 집합.
+      rows = db.prepare(`
+        SELECT ll.subject_code id,
+               COUNT(*) acts,
+               COUNT(DISTINCT ll.user_id) students,
+               COALESCE(SUM(COALESCE(ll.duration_sec,
+                 CAST(REPLACE(REPLACE(COALESCE(ll.result_duration,''),'PT',''),'S','') AS INTEGER),0)),0) dur_sec,
+               AVG(ll.result_score) avg_score
+        FROM learning_logs ll JOIN users u ON u.id = ll.user_id
+        WHERE ${studWhereSql} AND ll.subject_code IS NOT NULL
+          AND DATE(ll.created_at) >= DATE('now','localtime', ?) ${sfL.where}
+        GROUP BY ll.subject_code
+        ORDER BY acts DESC
+      `).all(...studParams, dateFrom);
+    } else {
+      // 단위(지역/학교급/학교/학년): 학생 집합 분리 집계 후 로그 LEFT 매칭
+      const studAgg = db.prepare(`
+        SELECT ${gcol} id, COUNT(*) students
+        FROM users u
+        WHERE ${studWhereSql} AND ${gcol} IS NOT NULL AND ${gcol} <> ''
+        GROUP BY ${gcol}
+      `).all(...studParams);
+      const logAgg = db.prepare(`
+        SELECT ${gcol} id,
+               COUNT(*) acts,
+               COALESCE(SUM(COALESCE(ll.duration_sec,
+                 CAST(REPLACE(REPLACE(COALESCE(ll.result_duration,''),'PT',''),'S','') AS INTEGER),0)),0) dur_sec,
+               AVG(ll.result_score) avg_score
+        FROM learning_logs ll JOIN users u ON u.id = ll.user_id
+        WHERE ${studWhereSql} AND ${gcol} IS NOT NULL AND ${gcol} <> ''
+          AND DATE(ll.created_at) >= DATE('now','localtime', ?) ${sfL.where}
+        GROUP BY ${gcol}
+      `).all(...studParams, dateFrom);
+      const logMap = new Map(logAgg.map(r => [String(r.id), r]));
+      rows = studAgg.map(s => {
+        const l = logMap.get(String(s.id)) || { acts: 0, dur_sec: 0, avg_score: null };
+        return { id: s.id, students: s.students, acts: l.acts, dur_sec: l.dur_sec, avg_score: l.avg_score };
+      });
+    }
+
+    const MIN_N = 10; // 개인정보 보호 게이트
+    const children = rows.map(r => {
+      const students = r.students || 0;
+      const masked = students < MIN_N;
+      const labelFn = level === 'school_level' ? levelLabel
+        : level === 'subject' ? (c) => subjectLabel(c)
+        : level === 'grade' ? (c) => `${c}학년`
+        : (c) => String(c);
+      return {
+        id: String(r.id == null ? '' : r.id),
+        label: labelFn(r.id),
+        level,
+        nextLevel: GROUP[level].next,
+        students,
+        masked,
+        acts: masked ? null : (r.acts || 0),
+        avgActsPerStudent: masked ? null : (students > 0 ? Math.round((r.acts / students) * 10) / 10 : 0),
+        avgLearnMin: masked ? null : (students > 0 ? Math.round((r.dur_sec / students) / 60) : 0),
+        avgScore: masked || r.avg_score == null ? null : Math.round(r.avg_score * 10) / 10
+      };
+    });
+    // 활동량 내림차순 정렬(마스킹은 뒤로)
+    children.sort((a, b) => {
+      if (a.masked !== b.masked) return a.masked ? 1 : -1;
+      return (b.acts || 0) - (a.acts || 0);
+    });
+
+    res.json({
+      success: true,
+      level,
+      nextLevel: GROUP[level].next,
+      period: `${days}d`,
+      realOnly: sfL.realOnly,
+      filters: { region, school_level: schoolLevel, school, grade },
+      minSample: MIN_N,
+      children
+    });
+  } catch (err) {
+    console.error('[LRS] /stats/macro-drill error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────
+// S3-④ GET /api/lrs/stats/cross-activity-achievement — 활동×성취 교차
+//   활동량 3분위(상/중/하) × 평균성취 매트릭스 + 익명 산점 + 콘텐츠/스스로채움 상하위 집단 비교
+//   params: period, realOnly
+// ─────────────────────────────────────────────────────────
+router.get('/stats/cross-activity-achievement', requireAuth, (req, res) => {
+  try {
+    if (!_adminOnly(req, res)) return;
+    const days = macroDays(req, 90);
+    const sfL = seedFilter(req, 'll');
+    const sfU = seedFilter(req, 'u');
+    const dateFrom = `-${days - 1} days`;
+
+    // 학생 단위: 총 활동량, 평균성취, 콘텐츠/자기주도 활용 빈도
+    const perUser = db.prepare(`
+      SELECT u.id uid,
+             COUNT(*) acts,
+             AVG(ll.result_score) avg_score,
+             SUM(CASE WHEN ll.source_service='content' THEN 1 ELSE 0 END) content_acts,
+             SUM(CASE WHEN ll.source_service='self-learn' THEN 1 ELSE 0 END) self_acts,
+             COUNT(ll.result_score) scored_cnt
+      FROM users u JOIN learning_logs ll ON ll.user_id = u.id
+      WHERE u.role='student'
+        AND DATE(ll.created_at) >= DATE('now','localtime', ?) ${sfL.where} ${sfU.where}
+      GROUP BY u.id
+    `).all(dateFrom);
+
+    const n = perUser.length;
+    // 활동량 3분위 경계 (33/66 percentile)
+    const actsSorted = perUser.map(r => r.acts).sort((a, b) => a - b);
+    const b33 = _pctile(actsSorted, 1 / 3);
+    const b66 = _pctile(actsSorted, 2 / 3);
+    const tierOf = (a) => (a <= b33 ? '하' : a <= b66 ? '중' : '상');
+
+    // 산점 데이터 (익명 좌표: 활동량 × 평균성취) — 식별정보 제외
+    const scatter = perUser
+      .filter(r => r.avg_score != null)
+      .map(r => ({ x: r.acts, y: Math.round(r.avg_score * 10) / 10, tier: tierOf(r.acts) }));
+
+    // 활동량 구간별 성취 매트릭스
+    const tierAgg = { 상: [], 중: [], 하: [] };
+    perUser.forEach(r => { if (r.avg_score != null) tierAgg[tierOf(r.acts)].push(r.avg_score); });
+    const matrix = ['상', '중', '하'].map(t => {
+      const arr = tierAgg[t];
+      const avg = arr.length ? arr.reduce((s, v) => s + v, 0) / arr.length : null;
+      return { tier: t, n: arr.length, avgScore: avg == null ? null : Math.round(avg * 10) / 10 };
+    });
+
+    // 상/하위 집단 성취 비교 (활용 빈도 33/66 percentile 기준 상위33% vs 하위33%)
+    function groupCompare(key) {
+      const valsSorted = perUser.map(r => r[key]).sort((a, b) => a - b);
+      const lo = _pctile(valsSorted, 1 / 3);
+      const hi = _pctile(valsSorted, 2 / 3);
+      const hiArr = [], loArr = [];
+      perUser.forEach(r => {
+        if (r.avg_score == null) return;
+        if (r[key] >= hi) hiArr.push(r.avg_score);
+        else if (r[key] <= lo) loArr.push(r.avg_score);
+      });
+      const mean = (a) => a.length ? a.reduce((s, v) => s + v, 0) / a.length : null;
+      const sHi = mean(hiArr), sLo = mean(loArr);
+      const gap = (sHi != null && sLo != null) ? Math.round((sHi - sLo) * 10) / 10 : null;
+      return {
+        high: { n: hiArr.length, avgScore: sHi == null ? null : Math.round(sHi * 10) / 10 },
+        low: { n: loArr.length, avgScore: sLo == null ? null : Math.round(sLo * 10) / 10 },
+        gapPP: gap // %p
+      };
+    }
+
+    res.json({
+      success: true,
+      period: `${days}d`,
+      realOnly: sfL.realOnly,
+      sampleN: n,
+      smallSample: n < 30, // 표본 부족 단서
+      tertileBounds: { p33: Math.round(b33 * 10) / 10, p66: Math.round(b66 * 10) / 10 },
+      matrix,
+      scatter,
+      contentCompare: groupCompare('content_acts'),
+      selfLearnCompare: groupCompare('self_acts')
+    });
+  } catch (err) {
+    console.error('[LRS] /stats/cross-activity-achievement error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────
+// S3-⑤ GET /api/lrs/stats/time-by-unit — 학습시간 분석
+//   unit=school_level|grade|region (단위별 1인당 평균 학습시간) + 요일×시간 히트맵
+//   params: period, realOnly
+// ─────────────────────────────────────────────────────────
+router.get('/stats/time-by-unit', requireAuth, (req, res) => {
+  try {
+    if (!_adminOnly(req, res)) return;
+    const days = macroDays(req, 90);
+    const unit = String(req.query.unit || 'school_level').trim();
+    const sfL = seedFilter(req, 'll');
+    const sfU = seedFilter(req, 'u');
+    const dateFrom = `-${days - 1} days`;
+
+    const UNIT = {
+      school_level: { col: 'u.school_level', label: levelLabel },
+      grade: { col: 'u.grade', label: (c) => `${c}학년` },
+      region: { col: 'u.region', label: (c) => String(c) }
+    };
+    if (!UNIT[unit]) return res.status(400).json({ success: false, message: '잘못된 unit 파라미터입니다.' });
+    const ucol = UNIT[unit].col;
+
+    // 단위별 1인당 평균 학습시간(분) = 총 duration / 활동 학생 수
+    const rows = db.prepare(`
+      SELECT ${ucol} id,
+             COUNT(DISTINCT ll.user_id) students,
+             COALESCE(SUM(COALESCE(ll.duration_sec,
+               CAST(REPLACE(REPLACE(COALESCE(ll.result_duration,''),'PT',''),'S','') AS INTEGER),0)),0) dur_sec
+      FROM learning_logs ll JOIN users u ON u.id = ll.user_id
+      WHERE u.role='student' AND ${ucol} IS NOT NULL AND ${ucol} <> ''
+        AND DATE(ll.created_at) >= DATE('now','localtime', ?) ${sfL.where} ${sfU.where}
+      GROUP BY ${ucol}
+    `).all(dateFrom);
+    const byUnit = rows.map(r => ({
+      id: String(r.id),
+      label: UNIT[unit].label(r.id),
+      students: r.students || 0,
+      avgLearnMin: r.students > 0 ? Math.round((r.dur_sec / r.students) / 60 * 10) / 10 : 0,
+      totalLearnHours: Math.round(r.dur_sec / 3600 * 10) / 10
+    })).sort((a, b) => b.avgLearnMin - a.avgLearnMin);
+
+    // 요일×시간 히트맵 (dow 0=일~6=토, hour 0~23) — 활동 건수 기준
+    const hm = db.prepare(`
+      SELECT CAST(strftime('%w', ll.created_at, 'localtime') AS INTEGER) dow,
+             CAST(strftime('%H', ll.created_at, 'localtime') AS INTEGER) hour,
+             COUNT(*) cnt
+      FROM learning_logs ll
+      WHERE DATE(ll.created_at) >= DATE('now','localtime', ?) ${sfL.where}
+      GROUP BY dow, hour
+    `).all(dateFrom);
+    // 7x24 매트릭스 + 피크 산출
+    const heatmap = Array.from({ length: 7 }, () => new Array(24).fill(0));
+    let peak = { dow: 0, hour: 0, count: -1 };
+    hm.forEach(r => {
+      if (r.dow >= 0 && r.dow < 7 && r.hour >= 0 && r.hour < 24) {
+        heatmap[r.dow][r.hour] = r.cnt;
+        if (r.cnt > peak.count) peak = { dow: r.dow, hour: r.hour, count: r.cnt };
+      }
+    });
+    // 평일/주말 비교
+    let weekdaySum = 0, weekendSum = 0;
+    for (let d = 0; d < 7; d++) {
+      const s = heatmap[d].reduce((a, b) => a + b, 0);
+      if (d === 0 || d === 6) weekendSum += s; else weekdaySum += s;
+    }
+    const DOW = ['일', '월', '화', '수', '목', '금', '토'];
+
+    res.json({
+      success: true,
+      unit,
+      period: `${days}d`,
+      realOnly: sfL.realOnly,
+      byUnit,
+      heatmap,
+      peak: { ...peak, dowLabel: DOW[peak.dow], label: `${DOW[peak.dow]} ${peak.hour}시` },
+      weekdayVsWeekend: { weekday: weekdaySum, weekend: weekendSum }
+    });
+  } catch (err) {
+    console.error('[LRS] /stats/time-by-unit error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
   }
 });
 
