@@ -1167,7 +1167,7 @@ router.get('/warnings/:classId', requireAuth, (req, res) => {
         ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY created_at DESC) as rn
       FROM learning_logs
       WHERE class_id = ? AND result_success IS NOT NULL
-        AND user_id IN (SELECT cm.user_id FROM class_members cm WHERE cm.class_id = ?)
+        AND user_id IN (SELECT cm.user_id FROM class_members cm JOIN users u ON u.id = cm.user_id WHERE cm.class_id = ? AND u.role = 'student')
     `).all(classId, classId);
     const streakByUser = new Map();
     // 사용자별 첫 10건까지만 고려, 선두 연속 0 카운트
@@ -1197,7 +1197,7 @@ router.get('/warnings/:classId', requireAuth, (req, res) => {
       SELECT las.user_id, u.display_name, las.achievement_code, las.avg_score, las.last_level, las.attempt_count
       FROM lrs_achievement_stats las
       JOIN users u ON u.id = las.user_id
-      WHERE las.user_id IN (SELECT cm.user_id FROM class_members cm WHERE cm.class_id = ?)
+      WHERE las.user_id IN (SELECT cm.user_id FROM class_members cm JOIN users u2 ON u2.id = cm.user_id WHERE cm.class_id = ? AND u2.role = 'student')
         AND (las.last_level = '하' OR las.last_level = '미도달')
       ORDER BY las.user_id, COALESCE(las.avg_score, 0) ASC
     `).all(classId);
@@ -1299,6 +1299,7 @@ router.get('/stats/perform', requireAuth, (req, res) => {
     // byStudent (mine이 아닐 때만)
     let byStudent = [];
     if (sf.scope !== 'mine') {
+      // 학생 랭킹: 모집단을 role='student'로 고정 (비학생 체험 기록 격리).
       byStudent = db.prepare(`
         SELECT ll.user_id,
                COALESCE(u.display_name, u.username) name,
@@ -1308,8 +1309,8 @@ router.get('/stats/perform', requireAuth, (req, res) => {
                COUNT(*) total_cnt,
                AVG(ll.result_score) avg_score
         FROM learning_logs ll
-        LEFT JOIN users u ON u.id = ll.user_id
-        ${baseWhere}
+        JOIN users u ON u.id = ll.user_id
+        ${baseWhere} AND u.role = 'student'
         GROUP BY ll.user_id
         ORDER BY total_cnt DESC
         LIMIT 100
@@ -1787,8 +1788,9 @@ function _xapiScopeUserIds(req, scope) {
     const classId = parseInt(scope.slice(6));
     if (!classId) return [req.user.id];
     try {
+      // 학생 모집단만 (비학생 체험 기록 격리)
       const members = db.prepare(
-        'SELECT user_id FROM class_members WHERE class_id = ?'
+        "SELECT cm.user_id FROM class_members cm JOIN users u ON u.id = cm.user_id WHERE cm.class_id = ? AND u.role = 'student'"
       ).all(classId).map(r => r.user_id);
       // 교사면 자기 학급 허용, 학생이면 본인만
       const role = classDb.getMemberRole(classId, req.user.id);

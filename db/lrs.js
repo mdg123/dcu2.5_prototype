@@ -143,12 +143,13 @@ function getClassLrsStats(classId, opts = {}) {
   const totalLogs = db.prepare(`SELECT COUNT(*) as cnt FROM learning_logs WHERE ${wTot.sql}`).get(...wTot.params).cnt;
 
   // 학생별 활동 통계 — duration_sec 우선 (C-4)
+  // 모집단을 role='student'로 고정 — 비학생(교사/학부모/관리자) 체험 기록 격리
   const wByS = buildWhere('ll');
   const byStudent = db.prepare(`
     SELECT ll.user_id, u.display_name, COUNT(*) as activity_count,
            COALESCE(SUM(COALESCE(ll.duration_sec, ll.duration, CAST(REPLACE(REPLACE(COALESCE(ll.result_duration,''),'PT',''),'S','') AS INTEGER), 0)), 0) as total_duration
     FROM learning_logs ll JOIN users u ON ll.user_id = u.id
-    WHERE ${wByS.sql}
+    WHERE ${wByS.sql} AND u.role = 'student'
     GROUP BY ll.user_id ORDER BY activity_count DESC
   `).all(...wByS.params);
 

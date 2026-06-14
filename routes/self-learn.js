@@ -492,14 +492,8 @@ router.post('/map/nodes/:nodeId/start', requireAuth, (req, res) => {
       return res.status(404).json({ success: false, message: '노드를 찾을 수 없습니다.' });
     }
 
-    // 교사 세션은 no-op
-    if (req.user.role === 'teacher') {
-      const existing = db.prepare('SELECT status FROM user_node_status WHERE user_id = ? AND node_id = ?').get(req.user.id, nodeId);
-      const prevStatus = existing ? existing.status : 'not_started';
-      db.close();
-      return res.json({ success: true, status: prevStatus, prevStatus, changed: false });
-    }
-
+    // 전 역할 허용: 모든 인증 사용자가 자기 user.id로 차시 진행을 기록한다.
+    // (비학생 기록은 학생 통계 집계 쿼리의 role='student' 필터로 격리됨)
     const existing = db.prepare('SELECT status FROM user_node_status WHERE user_id = ? AND node_id = ?').get(req.user.id, nodeId);
     const prevStatus = existing ? existing.status : 'not_started';
     const terminal = new Set(['in_progress', 'completed', 'mastered']);
@@ -651,10 +645,8 @@ router.get('/diagnosis/history', requireAuth, (req, res) => {
 
 router.post('/diagnosis/start', requireAuth, (req, res) => {
   try {
-    // 교사·관리자는 학생 기록을 만들지 않음 — 데모/시연용 응답만 반환
-    if (req.user.role === 'teacher' || req.user.role === 'admin') {
-      return res.json({ success: true, skipped: true, reason: 'teacher_no_record', sessionId: null, queue: [], targetNode: null, question: null });
-    }
+    // 전 역할 허용: 모든 인증 사용자가 자기 user.id로 진단을 수행한다.
+    // (비학생 진단 기록은 학생 통계 집계 쿼리의 role='student' 필터로 격리됨)
     const { targetNodeId, nodeId, mode } = req.body || {};
     // targetNodeId 또는 mode='cat'일 경우 CAT 시작
     if (targetNodeId || mode === 'cat') {
@@ -920,10 +912,7 @@ router.get('/diagnosis/units', requireAuth, (req, res) => {
 //   주의: /diagnosis/v3/:sessionId/* 파라미터 라우트보다 먼저 선언해야 'active'가 sessionId로 잡히지 않음.
 router.get('/diagnosis/v3/active', requireAuth, (req, res) => {
   try {
-    // 교사·관리자는 진단 기록 없음 → null
-    if (req.user.role === 'teacher' || req.user.role === 'admin') {
-      return res.json({ success: true, active: null });
-    }
+    // 전 역할 허용: 자기 user.id의 진행중 v3 세션을 반환 (이어풀기 배너 복원)
     const active = selfLearnDb.getActiveDiagnosisV3(req.user.id);
     res.json({ success: true, active: active || null });
   } catch (err) {
@@ -935,9 +924,8 @@ router.get('/diagnosis/v3/active', requireAuth, (req, res) => {
 // POST /diagnosis/v3/start — v3 진단 세션 시작 (단원 첫 개념 첫 문항)
 router.post('/diagnosis/v3/start', requireAuth, (req, res) => {
   try {
-    if (req.user.role === 'teacher' || req.user.role === 'admin') {
-      return res.json({ success: true, skipped: true, reason: 'teacher_no_record', sessionId: null });
-    }
+    // 전 역할 허용: 모든 인증 사용자가 자기 user.id로 v3 진단을 시작한다.
+    // (단원 노드 기반이라 학년 정보가 없어도 동작; 비학생 기록은 학생 통계에서 격리)
     const result = selfLearnDb.startDiagnosisV3(req.user.id, req.body || {});
     res.json({ success: true, ...result });
   } catch (err) {
@@ -1476,10 +1464,8 @@ router.post('/problem-sets/:id/reorder', requireAuth, (req, res) => {
 // POST /problem-attempt — 문제 풀이 시도 기록 (별칭, body에 contentId 포함)
 router.post('/problem-attempt', requireAuth, (req, res) => {
   try {
-    // 교사·관리자는 학생 기록(content_question_attempts/problem_attempts)에 누적하지 않음
-    if (req.user.role === 'teacher' || req.user.role === 'admin') {
-      return res.json({ success: true, skipped: true, reason: 'teacher_no_record' });
-    }
+    // 전 역할 허용: 모든 인증 사용자가 자기 user.id로 문제 풀이를 기록한다.
+    // (비학생 기록은 학생 통계 집계 쿼리의 role='student' 필터로 격리됨)
     const { contentId, content_id, isCorrect, is_correct, selectedAnswer, userAnswer, user_answer, answer, answerIndex, answer_index, questionId, question_id, timeTaken, time_taken, nodeId, node_id } = req.body || {};
     const cid = parseInt(contentId || content_id);
     if (!cid) return res.status(400).json({ success: false, message: 'contentId 필요' });

@@ -577,7 +577,7 @@ function getClassDashboard(classId, teacherId, { period, startDate, endDate } = 
       (SELECT COUNT(*) FROM learning_logs WHERE class_id = ? AND user_id = u.id) as activity_count,
       (SELECT emotion FROM attendance WHERE class_id = ? AND user_id = u.id ORDER BY attendance_date DESC LIMIT 1) as latest_emotion
     FROM class_members cm JOIN users u ON cm.user_id = u.id
-    WHERE cm.class_id = ? AND cm.role = 'member'
+    WHERE cm.class_id = ? AND cm.role = 'member' AND u.role = 'student'
     ORDER BY u.display_name
   `).all(classId, classId, classId, classId);
 
