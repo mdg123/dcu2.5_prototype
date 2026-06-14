@@ -1703,7 +1703,16 @@
     const keywords = cu.searchKeywords || [];
     const standards = cu.achievementStandards || [];
 
-    const hasData = saved + viewed + likes + uploaded + subscribers + subscriptions + keywords.length + standards.length > 0;
+    // 콘텐츠활용 신호(#4): BE area.signals = {viewed,completed,attempted,produced,curated}.
+    //  카드에 "완료 N · 퀴즈 N" 추가 표기(기존 업로드/보관함/구독 옆). 축 hasData 가 true 면 빈상태 아님.
+    const contentArea = (report.areas && report.areas['콘텐츠활용']) || {};
+    const sig = contentArea.signals || {};
+    const sigCompleted = sig.completed || 0;
+    const sigAttempted = sig.attempted || 0;
+    const areaHasData = contentArea.hasData === true;
+
+    const hasData = areaHasData ||
+      (saved + viewed + likes + uploaded + subscribers + subscriptions + keywords.length + standards.length > 0);
 
     if (!hasData) {
       card.innerHTML = `
@@ -1721,9 +1730,11 @@
     const stats = [
       { value: saved, label: '내가 담은 콘텐츠', icon: '📥', bg: '#dbeafe', color: '#2563eb' },
       { value: viewed, label: '조회 콘텐츠', icon: '👁️', bg: '#ede9fe', color: '#8b5cf6' },
+      { value: sigCompleted, label: '완료 콘텐츠', icon: '✅', bg: '#d1fae5', color: '#10b981' },
+      { value: sigAttempted, label: '퀴즈 풀이', icon: '✏️', bg: '#fef3c7', color: '#d97706' },
       { value: likes, label: '받은 좋아요', icon: '❤️', bg: '#fce7f3', color: '#ec4899' },
-      { value: uploaded, label: '내가 올린 콘텐츠', icon: '📤', bg: '#d1fae5', color: '#10b981' },
-      { value: subscribers, label: '구독자 수', icon: '👥', bg: '#fef3c7', color: '#f59e0b' },
+      { value: uploaded, label: '내가 올린 콘텐츠', icon: '📤', bg: '#dcfce7', color: '#16a34a' },
+      { value: subscribers, label: '구독자 수', icon: '👥', bg: '#ffedd5', color: '#f59e0b' },
       { value: subscriptions, label: '내가 구독한 수', icon: '🔔', bg: '#e0e7ff', color: '#6366f1' }
     ];
 
@@ -1743,13 +1754,21 @@
         </div>
       </div>` : '';
 
+    // 성취기준 빈상태(#7): achievementStandards [] 이면 친절 빈상태 안내(아이콘+제목+안내).
+    //  학습성격 화이트리스트만 집계되므로 id3 처럼 해당 활동이 없으면 빈 배열로 옴.
     const standardsHtml = standards.length > 0 ? `
       <div class="cu-tags-section">
         <div class="cu-tags-title">📋 학습한 성취기준</div>
         <div class="cu-tags-wrap">
           ${standards.map(s => `<span class="cu-tag" style="background:#dbeafe;color:#2563eb;">${s.code} <span class="cu-tag-cnt">${s.cnt}회</span></span>`).join('')}
         </div>
-      </div>` : '';
+      </div>` : `
+      <div class="cu-tags-section">
+        <div class="cu-tags-title">📋 학습한 성취기준</div>
+        ${makeEmptyRich('🏷️', '아직 학습한 성취기준이 없어요',
+          '오늘의 학습·평가·콘텐츠 학습을 진행하면 연계된 성취기준이 여기에 모여요.',
+          '스스로채움에서 학습 시작하기')}
+      </div>`;
 
     card.innerHTML = `
       <div class="section-header">
@@ -2045,16 +2064,39 @@
     // 보조지표 타일줄(스펙 §4.1) — 막대 승격: 과제/평가/오늘/수업 % 4타일
     // 보조타일 → detail type 매핑(스펙 §1-A): 과제 homework / 평가 exam / 오늘학습 today_learning / 수업 lesson
     const tileType = { homework: 'homework', exam: 'exam', daily: 'today_learning', lesson: 'lesson' };
+    // 참여도 객체 대응(#6): p[key] 는 {rate,denom,numer} 객체.
+    //  denom===0 → 미배정(회색, '-'), denom>0 & numer===0 → 미참여(0%, denom 표기·평균제외),
+    //  denom>0 & numer>0 → rate% (numer/denom 표기). drill 활성은 numer>0 인 경우만.
     const buildPartTiles = (showVal) => '<div class="report-metric-tiles" style="--tile-n:4;">' + metrics.map(m => {
-      const v = showVal ? p[m.key] : null;
-      const valTxt = (v != null) ? v + '%' : '-';
-      const isZero = (v == null || v === 0);
+      const o = (showVal && p[m.key]) ? p[m.key] : null;
+      const denom = o ? (o.denom || 0) : 0;
+      const numer = o ? (o.numer || 0) : 0;
+      const rate = o ? o.rate : null;
+      // 상태 분류
+      const unassigned = (denom === 0);                 // 미배정
+      const inactive   = (denom > 0 && numer === 0);    // 미참여
+      let valTxt, valColor, subTxt;
+      if (!showVal || unassigned) {
+        valTxt = '-'; valColor = 'var(--gray-400)';
+        subTxt = showVal ? '미배정' : '';
+      } else if (inactive) {
+        valTxt = '0%'; valColor = 'var(--gray-500)';
+        subTxt = '미참여 0/' + denom;
+      } else {
+        valTxt = (rate != null ? rate : 0) + '%'; valColor = m.c;
+        subTxt = numer + '/' + denom;
+      }
+      const isZero = (numer === 0); // 미배정·미참여 모두 흐리게 + drill 비활성
       const zero = isZero ? ' is-zero' : '';
       const dc = drillClass(tileType[m.key], { active: !isZero });
       const da = drillAttrs(tileType[m.key], m.label, { active: !isZero });
       const chev = dc ? DRILL_CHEVRON : '';
+      const subHtml = subTxt
+        ? '<div class="rmt-sub" style="font-size:13px;color:var(--gray-400);margin-top:2px;">' + escapeHtml(subTxt) + '</div>'
+        : '';
       return '<div class="report-metric-tile' + zero + dc + '"' + da + ' title="' + escapeHtml(m.tip) + '">' +
-        '<div class="rmt-value" style="color:' + m.c + ';">' + valTxt + '</div><div class="rmt-label">' + m.label + '</div>' + chev + '</div>';
+        '<div class="rmt-value" style="color:' + valColor + ';">' + valTxt + '</div>' +
+        '<div class="rmt-label">' + m.label + '</div>' + subHtml + chev + '</div>';
     }).join('') + '</div>';
 
     if (!hasData || score == null) {
@@ -2390,11 +2432,17 @@
     else if (score >= 40) insight = '꾸준히 콘텐츠를 둘러보고 있어요. 더 다양한 콘텐츠를 탐색해 보세요.';
     else insight = '콘텐츠를 더 둘러보세요. 채움콘텐츠에서 관심 분야를 탐색할 수 있습니다.';
 
-    // 추가 활용 지표 (조회·포트폴리오 등 BE에서 가용한 모든 지표를 4칩으로)
+    // 추가 활용 지표 (조회·포트폴리오 등 BE에서 가용한 모든 지표를 칩으로)
+    //  콘텐츠활용 신호(#4): area.signals.completed/attempted 를 "완료·퀴즈"로 함께 노출.
     const portfolioCount = cu.portfolioCount || 0;
+    const sig = (ad.signals) || {};
+    const sigCompleted = sig.completed || 0;
+    const sigAttempted = sig.attempted || 0;
     const usageMetrics = [
       { label: '📥 저장', v: saved, type: 'content_saved', tip: '나의 보관함에 저장한 콘텐츠 수' },
       { label: '👀 조회', v: viewed, type: 'content_viewed', tip: '채움콘텐츠/수업 누적 조회수' },
+      { label: '✅ 완료', v: sigCompleted, type: null, tip: '끝까지 학습을 완료한 콘텐츠 수입니다.' },
+      { label: '✏️ 퀴즈', v: sigAttempted, type: null, tip: '콘텐츠 내 퀴즈를 풀어본 콘텐츠 수입니다.' },
       { label: '🔔 구독', v: subs, type: 'content_subscribed', tip: '구독 중인 채널/큐레이션 수' },
       { label: '🎨 포트폴리오', v: portfolioCount, type: 'content_portfolio', tip: '나도예술가/포트폴리오에 등록한 작품 수' }
     ];

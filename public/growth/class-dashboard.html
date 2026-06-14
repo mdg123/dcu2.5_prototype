@@ -643,19 +643,33 @@
     grid.innerHTML = months.join('');
   }
 
+  // 기간 동기화(#3): 상단 월선택(selectedYear/selectedMonth) → startDate/endDate 단일 산출.
+  //  상단 메트릭 카드(loadDashboard) 와 오늘학습 매트릭스(loadDailyLearning) 가 항상 같은 기간을 쓰도록
+  //  이 헬퍼 한 곳에서만 범위를 만든다. (과거: loadDashboard 는 날짜없이, 매트릭스는 현재월 → 기간 불일치)
+  function selectedMonthRange() {
+    const y = selectedYear, m = selectedMonth;
+    const startDate = y + '-' + String(m).padStart(2, '0') + '-01';
+    const lastDay = new Date(y, m, 0).getDate();
+    const endDate = y + '-' + String(m).padStart(2, '0') + '-' + String(lastDay).padStart(2, '0');
+    return { startDate, endDate };
+  }
+
+  // 선택 월 기준 대시보드 전체 갱신 — 상단 카드 + 매트릭스 동시.
+  //  loadDashboardWithPeriod 내부에서 dailyLearning(상단 '오늘의 학습' 카드)도 selectedMonth 기간으로 산출되고,
+  //  loadDashboard 가 renderDashboard 끝에서 loadDailyLearning() 을 호출 → 두 영역 동시 동일기간 반영.
+  function refreshDashboardForSelectedMonth() {
+    if (!currentClassId) return;
+    const { startDate, endDate } = selectedMonthRange();
+    loadDashboardWithPeriod(currentClassId, startDate, endDate);
+  }
+
   window.selectMonth = function(year, month) {
     selectedYear = year;
     selectedMonth = month;
     document.getElementById('periodLabel').textContent = year + '년 ' + month + '월';
     document.getElementById('monthPickerDropdown').style.display = 'none';
-    // 선택된 월로 대시보드 새로고침
-    if (currentClassId) {
-      const startDate = year + '-' + String(month).padStart(2, '0') + '-01';
-      const lastDay = new Date(year, month, 0).getDate();
-      const endDate = year + '-' + String(month).padStart(2, '0') + '-' + String(lastDay).padStart(2, '0');
-      loadDashboardWithPeriod(currentClassId, startDate, endDate);
-      loadDailyLearning();
-    }
+    // 선택된 월로 대시보드 새로고침 — 상단 카드 + 매트릭스 동시 갱신(renderDashboard 가 loadDailyLearning 호출)
+    refreshDashboardForSelectedMonth();
   };
 
   // 외부 클릭 시 드롭다운 닫기
@@ -695,14 +709,17 @@
         const target = classes.find(c => c.id === wantedId) || classes[0];
         select.value = target.id;
         document.getElementById('periodLabel').textContent = selectedYear + '년 ' + selectedMonth + '월';
-        loadDashboard(target.id);
+        // 기간 동기화(#3): 초기 로드도 selectedMonth 의 startDate/endDate 를 전달 → 상단 카드·매트릭스 동일기간.
+        currentClassId = target.id;
+        refreshDashboardForSelectedMonth();
       }
     } catch (err) { console.error('클래스 로드 실패:', err); }
   }
 
   document.getElementById('classSelect').addEventListener('change', (e) => {
     const classId = parseInt(e.target.value);
-    if (classId) loadDashboard(classId);
+    // 클래스 변경 시에도 현재 선택 월 기간을 유지하여 상단 카드·매트릭스 동일기간(#3)
+    if (classId) { currentClassId = classId; refreshDashboardForSelectedMonth(); }
     else hideDashboard();
   });
 
@@ -778,6 +795,9 @@
       ? dailyArea.avgAccuracy
       : (dailyArea.averageScore != null ? dailyArea.averageScore : null);
     const dailyCompletionRate = dailyArea.avgCompletionRate != null ? dailyArea.avgCompletionRate : (dailyArea.completionRate != null ? dailyArea.completionRate : 0);
+    // 기간 동기화(#3): 이 기간에 참여 학생이 없으면(hasData=false) 상단 카드도 매트릭스와 동일하게
+    //  "정답률 75 / 0명 / 완료 0%" 모순을 노출하지 않고 빈상태로 안내. (정답률 잔여값 단독 표기 차단)
+    const dailyHasData = dailyArea.hasData === true;
 
     // Reading stats
     const totalBooks = students.reduce((s, st) => s + (st.areas?.['독서활동']?.bookCount || 0), 0);
@@ -845,17 +865,25 @@
       <div class="metric-card">
         <div class="metric-header">
           <div class="metric-title"><div class="metric-icon daily">&#128221;</div> 오늘의 학습</div>
-          <span class="metric-badge ${dailyCompletionRate > 50 ? 'up' : 'down'}">&#8593; ${Math.round(dailyCompletionRate)}%</span>
+          ${dailyHasData
+            ? `<span class="metric-badge ${dailyCompletionRate > 50 ? 'up' : 'down'}">&#8593; ${Math.round(dailyCompletionRate)}%</span>`
+            : `<span class="metric-badge na">참여 없음</span>`}
         </div>
         <div class="metric-body">
-          <div class="metric-big-number" style="width:100%;text-align:left;">
+          ${dailyHasData
+            ? `<div class="metric-big-number" style="width:100%;text-align:left;">
             <div class="big-number-value">${Math.round(dailyCompletionRate)}<span class="big-number-unit">%</span></div>
             <div class="big-number-label">학습 완료율</div>
             <div class="big-number-sub">평균 정답률 ${dailyAvgScore != null ? Math.round(dailyAvgScore) + '점' : '-'}</div>
             <div style="font-size:12px;color:var(--gray-500);margin-top:6px;padding-top:6px;border-top:1px dashed var(--gray-100);">
               &#128197; 일별 평균 ${(d.dailyLearning?.dailyAvgParticipants ?? 0)}명 (${d.dailyLearning?.learnDays ?? 0}일)
             </div>
-          </div>
+          </div>`
+            : `<div class="service-na" style="padding:14px 8px;">
+              <i class="fas fa-calendar-day"></i>
+              <div style="font-weight:600;color:var(--gray-500);margin-bottom:2px;">이 기간엔 참여 기록이 없어요</div>
+              <div style="font-size:12px;color:var(--gray-400);line-height:1.5;">선택한 기간에 완료한 학생이 없습니다. 아래 현황표에서 자세히 확인하세요.</div>
+            </div>`}
         </div>
       </div>
 
@@ -973,6 +1001,16 @@
     return 'score-danger';
   }
 
+  // result_score 정규화(#1): DB의 result_score 가 0~1(비율)과 0~100(이미 %) 혼재 → FE 방어.
+  //  값 <=1 → ×100(비율로 간주), >1 → 그대로(이미 백분위). 이후 round + clamp 0~100.
+  //  8000%·3953%·3488% 등 *100 중복 적용 깨짐 제거. null/NaN 은 null 반환(표시는 '-').
+  function normPct(v) {
+    if (v == null || isNaN(v)) return null;
+    const n = Number(v);
+    const pct = n <= 1 ? n * 100 : n;
+    return Math.max(0, Math.min(100, Math.round(pct)));
+  }
+
   function renderRadarChart(areas) {
     const ctx = document.getElementById('radarChart').getContext('2d');
     if (radarChartInstance) radarChartInstance.destroy();
@@ -1025,11 +1063,17 @@
     const wrap = document.getElementById('dailySummaryCards');
     if (!wrap) return;
     const d = daily || {};
-    const completion = d.avgCompletionRate != null ? Math.round(d.avgCompletionRate)
-      : (d.completionRate != null ? Math.round(d.completionRate) : null);
-    const accuracy = d.avgAccuracy != null ? Math.round(d.avgAccuracy)
-      : (d.averageScore != null ? Math.round(d.averageScore) : null);
-    const maxStreak = d.maxStreak != null ? d.maxStreak : (d.maxConsecutiveDays != null ? d.maxConsecutiveDays : null);
+    // 기간 동기화(#3): 이 기간에 참여 학생이 없으면(hasData=false) 정답률·완료율·연속일을 '-'로 표시.
+    //  잔여 정답률(예: 75점)만 단독 노출되어 "완료 0% / 0명"과 모순되는 현상 제거(매트릭스 빈상태와 일치).
+    const noParticipation = (d.hasData === false);
+    const completion = noParticipation ? null
+      : (d.avgCompletionRate != null ? Math.round(d.avgCompletionRate)
+        : (d.completionRate != null ? Math.round(d.completionRate) : null));
+    const accuracy = noParticipation ? null
+      : (d.avgAccuracy != null ? Math.round(d.avgAccuracy)
+        : (d.averageScore != null ? Math.round(d.averageScore) : null));
+    const maxStreak = noParticipation ? null
+      : (d.maxStreak != null ? d.maxStreak : (d.maxConsecutiveDays != null ? d.maxConsecutiveDays : null));
     // 최다 연속일 달성자 — 1명이면 이름, 동률 여러 명이면 "ㅇㅇㅇ 외 N명"
     const escHtml = (s) => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
     const holders = Array.isArray(d.maxStreakHolders) ? d.maxStreakHolders : [];
@@ -1619,7 +1663,8 @@
         const label = typeLabels[t.activity_type] || toKoActivityType(t.activity_type) || '기타';
         const pct = Math.round(t.cnt / typeMaxCnt * 100);
         const color = typeColors[i % typeColors.length];
-        const avgScore = t.avg_score != null ? Math.round(t.avg_score * 100) + '%' : '-';
+        const avgScoreN = normPct(t.avg_score);
+        const avgScore = avgScoreN != null ? avgScoreN + '%' : '-';
         return `<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
           <div style="width:80px;font-size:13px;color:var(--gray-600);text-align:right;">${label}</div>
           <div style="flex:1;background:var(--gray-100);border-radius:6px;height:22px;overflow:hidden;">
