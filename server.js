@@ -167,6 +167,18 @@ const { errorHandler } = require('./middleware/errors');
 app.use(errorHandler);
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
-  console.log(`[다채움] 서버 시작: http://localhost:${PORT}`);
-});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// listen 가드 + 테스트용 export.
+//   - `node server.js` (직접 실행) 일 때만 포트를 listen 한다.
+//   - `require('./server')` (테스트 등) 일 때는 app/server/io 만 노출하고 listen 하지 않는다.
+//     → 테스트가 supertest 없이 http.createServer(app) 로 임시 포트 기동할 수 있게 함.
+//       (회귀: 직접 실행 시 동작 동일, npm start 정상 기동 확인.)
+// ─────────────────────────────────────────────────────────────────────────────
+if (require.main === module) {
+  server.listen(PORT, () => {
+    console.log(`[다채움] 서버 시작: http://localhost:${PORT}`);
+  });
+}
+
+module.exports = { app, server, io };

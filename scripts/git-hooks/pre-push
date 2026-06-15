@@ -1,0 +1,21 @@
+#!/bin/sh
+# 다채움 자동 검증 하네스 — git push 전 데이터/함수 하네스(npm test) 통과 필수.
+#
+# 활성화(1회): git config core.hooksPath scripts/git-hooks
+# 긴급 우회   : git push --no-verify
+#
+# npm test 는 ~3초(node:test, 실DB 임시복사 격리). 화면 스모크(test:e2e:smoke)는
+# 무거워서 여기 넣지 않는다 — FE 화면 변경 시 수동/CI로 돌린다.
+
+echo "[pre-push] 🔍 npm test (데이터/함수 하네스) 실행..."
+npm test
+status=$?
+if [ "$status" -ne 0 ]; then
+  echo ""
+  echo "[pre-push] ❌ 테스트 실패 — push를 막았습니다."
+  echo "           코드를 고쳐 'npm test' 가 통과한 뒤 다시 push하세요."
+  echo "           (긴급 우회: git push --no-verify)"
+  exit 1
+fi
+echo "[pre-push] ✅ 통과 — push 진행"
+exit 0

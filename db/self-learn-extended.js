@@ -3617,6 +3617,23 @@ function reportContent(userId, contentId, { reason, details, contentType }) {
 
 // ========== CAT 진단 확장 ==========
 
+// ── 정답 비노출 sanitize (보안) ─────────────────────────────────────────────
+//   v2 진단(_pickQuestionForNode / _buildDiagnosticSheet)이 만드는 "학생에게 내려가는 문항"
+//   객체에서 정답류 필드를 제거한다. 채점은 questionId 로 content_questions 를 재조회하므로
+//   응답에서 정답을 가려도 회귀가 없다. (v3 _v3PickQuestion 이 쓰는 비노출 규약과 동일 목적)
+//   ⚠ 응답 직전 sanitize 만 — DB·내부 채점 로직의 정답은 그대로 유지.
+const _DIAG_ANSWER_KEYS = [
+  'answer', 'correct_answer', 'correctAnswer',
+  'correctIndex', 'correct_index', 'answerIndex', 'answer_index',
+  'explanation'
+];
+function _sanitizeDiagQuestion(q) {
+  if (!q || typeof q !== 'object') return q;
+  const out = { ...q };
+  for (const k of _DIAG_ANSWER_KEYS) delete out[k];
+  return out;
+}
+
 function _pickQuestionForNode(nodeId, difficulty) {
   // node_contents에서 problem 타입 content 중 난이도 맞는 것 선택
   const problemTypes = "('quiz','exam','problem','assessment')";
@@ -3704,7 +3721,10 @@ function _pickQuestionForNode(nodeId, difficulty) {
   let opts = [];
   try { opts = q.options ? JSON.parse(q.options) : []; } catch { opts = []; }
 
-  return {
+  // 정답 비노출(보안): answer/explanation 은 응답 객체에 싣지 않는다.
+  //   채점은 submitDiagnosisAnswer/submitDiagnosisSheet 가 questionId 로 content_questions 를
+  //   재조회해 수행하므로(이 함수 반환의 answer 를 쓰지 않음) 회귀가 없다.
+  return _sanitizeDiagQuestion({
     // snake_case (하위 호환)
     content_id: picked.content_id,
     content_title: picked.title,
@@ -3712,8 +3732,6 @@ function _pickQuestionForNode(nodeId, difficulty) {
     question_number: q.question_number,
     question_text: q.question_text,
     options: opts,
-    answer: q.answer,
-    explanation: q.explanation,
     difficulty: q.difficulty || difficulty,
     points: q.points,
     node_id: nodeId,
@@ -3723,7 +3741,7 @@ function _pickQuestionForNode(nodeId, difficulty) {
     title: picked.title,
     questionText: q.question_text,
     nodeId: nodeId
-  };
+  });
 }
 
 // ============================================================

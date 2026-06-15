@@ -153,10 +153,12 @@ router.get('/classes', ...adminOnly, (req, res) => {
   try {
     const { page = 1, limit = 20 } = req.query;
     const total = db.prepare('SELECT COUNT(*) as cnt FROM classes').get().cnt;
+    // classes 테이블의 소유자 컬럼은 owner_id (created_by 아님 — 스키마 실측).
+    // 소유자가 삭제된 클래스도 누락되지 않도록 LEFT JOIN 사용.
     const classes = db.prepare(`
       SELECT c.*, u.display_name as creator_name,
         (SELECT COUNT(*) FROM class_members WHERE class_id = c.id) as member_count
-      FROM classes c JOIN users u ON c.created_by = u.id
+      FROM classes c LEFT JOIN users u ON c.owner_id = u.id
       ORDER BY c.created_at DESC LIMIT ? OFFSET ?
     `).all(parseInt(limit), (parseInt(page) - 1) * parseInt(limit));
     res.json({ success: true, classes, total, totalPages: Math.ceil(total / parseInt(limit)) || 1 });
