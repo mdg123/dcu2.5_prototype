@@ -6543,11 +6543,14 @@ function renderRelList(items, kind, parentNode) {
     const pid = p.node_id || p._id || p.id || p;
     const title = resolveRelLabel(p, pid);
     const st = (p.user_status || p.status || inferStatus(pid) || 'not_started');
-    const subject = p.area || p.subject || (nodeById[pid]?.area) || (nodeById[pid]?.subject) || '';
-    const grade = p.grade ?? (nodeById[pid]?.grade);
+    // 부제(영역·학년) 메타: 현재 맵 필터에 없는 연결 단원(다른 학년·학교급)은 nodeById에 없으므로
+    //   전체 노드 캐시 allNodesById 까지 폴백해야 area/grade/grade_level 이 복원된다. (예: 초4 단원의 이어지는 학습이 중1)
+    const _relMeta = nodeById[pid] || ((typeof allNodesById !== 'undefined' && allNodesById) ? allNodesById[pid] : null) || {};
+    const subject = p.area || p.subject || _relMeta.area || _relMeta.subject || '';
+    const grade = p.grade ?? _relMeta.grade;
     const subParts = [];
     if (subject) subParts.push(subject);
-    const gradeLv = p.grade_level ?? (nodeById[pid]?.grade_level) ?? '';
+    const gradeLv = p.grade_level ?? _relMeta.grade_level ?? '';
     if (grade != null && grade !== '') subParts.push(gradeLv + grade + '학년');
     const sub = subParts.join(' · ');
     const hiddenStyle = shouldCollapse && idx >= collapseThreshold ? 'style="display:none" data-rel-hidden' : '';
