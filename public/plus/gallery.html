@@ -216,6 +216,33 @@
     .empty-state .empty-msg { font-size: var(--fs-meta); color: var(--gray-500); margin-bottom: 18px; }
     .empty-state .btn { display: inline-flex; align-items: center; gap: 6px; }
 
+    /* ─────── 콘테스트 슬림 배너 (풀 페이지 진입) ─────── */
+    .contest-banner {
+      display: none; align-items: center; gap: 14px;
+      min-height: 56px; padding: 14px 22px; margin-bottom: 16px;
+      background: linear-gradient(135deg, #fff7ed, #fef3c7);
+      border-left: 4px solid var(--dday-warn);
+      border-radius: 12px; text-decoration: none;
+      transition: box-shadow 0.18s, transform 0.18s;
+    }
+    .contest-banner:hover { box-shadow: 0 4px 12px rgba(245,158,11,0.18); transform: translateY(-1px); }
+    .contest-banner:focus-visible { outline: 2px solid var(--brand-1); outline-offset: 2px; }
+    .contest-banner__icon { font-size: 22px; line-height: 1; flex-shrink: 0; }
+    .contest-banner__text { font-size: 16px; color: #92400e; flex: 1; min-width: 0; }
+    .contest-banner__text strong { font-weight: 800; }
+    .contest-banner__cta {
+      font-size: 15px; color: var(--brand-1); font-weight: 600; white-space: nowrap; flex-shrink: 0;
+      display: inline-flex; align-items: center; gap: 6px;
+    }
+    .contest-banner:hover .contest-banner__cta { text-decoration: underline; }
+    @media (max-width: 600px) {
+      .contest-banner { flex-wrap: wrap; gap: 8px 14px; }
+      .contest-banner__cta { width: 100%; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .contest-banner { transition: none; }
+    }
+
     /* ─────── 콘테스트 캐러셀 ─────── */
     .contest-section {
       margin-bottom: 24px; background: #fff; border-radius: 16px; padding: 22px 24px;
@@ -1208,42 +1235,14 @@
 
     <!-- 갤러리 뷰 -->
     <div id="galleryView">
-      <!-- 콘테스트 캐러셀 — 1줄 자동 가로 캐러셀(기본), 전체 보기 버튼으로 grid 확장 -->
-      <div id="contestSection" class="contest-section" style="display:none;">
-        <div class="contest-head">
-          <h3>
-            <i class="fas fa-trophy" style="color:#f59e0b;font-size:22px;"></i>
-            <span>이번 달 콘테스트</span>
-            <span id="contestCountBadge" style="font-size:14px;color:#92400e;font-weight:600;margin-left:4px;padding:3px 10px;background:rgba(245,158,11,0.15);border-radius:99px;"></span>
-            <span style="font-size:13px;color:#92400e;font-weight:500;margin-left:8px;">— 우리 학교 친구들과 함께 응모해요!</span>
-          </h3>
-          <div class="section-actions">
-            <button class="contest-toggle" type="button" onclick="toggleExpandedView('contestSection')" aria-expanded="false">
-              <i class="fas fa-th-large" id="contestToggleIcon"></i>
-              <span id="contestToggleLabel">전체 보기</span>
-            </button>
-            <button type="button" class="section-collapse-btn" onclick="toggleSectionCollapse('contestSection')" aria-expanded="true" aria-label="이번 달 콘테스트 섹션 접기/펼치기">
-              <i class="fas fa-chevron-up" id="contestCollapseIcon"></i>
-              <span id="contestCollapseLabel">접기</span>
-            </button>
-          </div>
-        </div>
-        <!-- 자동 캐러셀 영역 -->
-        <div class="carousel-shell" id="contestCarouselShell">
-          <button type="button" class="carousel-nav prev" aria-label="이전" onclick="moveCarousel('contestSection', -1)"><i class="fas fa-chevron-left"></i></button>
-          <div class="carousel-clip">
-            <div class="carousel-track" id="contestCarouselTrack"></div>
-          </div>
-          <button type="button" class="carousel-nav next" aria-label="다음" onclick="moveCarousel('contestSection', 1)"><i class="fas fa-chevron-right"></i></button>
-          <div class="carousel-fade left"></div>
-          <div class="carousel-fade right"></div>
-        </div>
-        <!-- 전체 보기 grid 영역 -->
-        <div class="expanded-grid--contest" id="contestExpandedGrid"></div>
-        <button type="button" class="back-to-carousel-btn" onclick="toggleExpandedView('contestSection')">
-          <i class="fas fa-arrow-up"></i> 슬라이드로 돌아가기
-        </button>
-      </div>
+      <!-- 콘테스트 슬림 배너 — 전용 풀 페이지(/plus/contests.html)로 진입 -->
+      <a class="contest-banner" href="/plus/contests.html" id="contestBanner" style="display:none;">
+        <span class="contest-banner__icon" aria-hidden="true">🏆</span>
+        <span class="contest-banner__text" id="contestBannerText">
+          이번 달 콘테스트 <strong id="contestBannerCount">0</strong>개 진행 중
+        </span>
+        <span class="contest-banner__cta">콘테스트 보러 가기 <i class="fas fa-arrow-right"></i></span>
+      </a>
 
       <!-- 인기 작품 Top 100 — 1줄 자동 가로 캐러셀(기본), 전체 보기 버튼으로 grid 확장 -->
       <div id="popularSection" class="popular-section" style="display:none;">
@@ -1510,44 +1509,7 @@
     </div>
   </div>
 
-  <!-- 콘테스트 상세/응모 모달 -->
-  <div class="modal-overlay" id="contestModal">
-    <div class="modal" style="max-width:720px;">
-      <h3 id="contestModalTitle"><i class="fas fa-trophy" style="color:#f59e0b;margin-right:8px;"></i>콘테스트</h3>
-      <div id="contestModalBody"></div>
-      <div class="modal-actions" id="contestModalActions"></div>
-    </div>
-  </div>
-
-  <!-- 콘테스트 응모 모달 -->
-  <div class="modal-overlay" id="submitContestModal">
-    <div class="modal">
-      <h3><i class="fas fa-paper-plane" style="color:#f97316;margin-right:8px;"></i>콘테스트 응모</h3>
-      <input type="hidden" id="submitEventId" value="">
-      <div class="form-group">
-        <label>작품 제목</label>
-        <input type="text" id="submitTitle" placeholder="응모 작품 제목">
-      </div>
-      <div class="form-group">
-        <label>작품 설명</label>
-        <textarea id="submitDesc" rows="3" placeholder="작품에 대한 설명"></textarea>
-      </div>
-      <div class="form-group">
-        <label>이미지</label>
-        <input type="file" id="submitImage" accept="image/*" style="padding:8px;">
-      </div>
-      <div class="form-group">
-        <label class="form-check">
-          <input type="checkbox" id="submitPublishGallery" checked>
-          <span>갤러리에도 함께 공개합니다</span>
-        </label>
-      </div>
-      <div class="modal-actions">
-        <button class="btn-outline" onclick="closeSubmitContestModal()">취소</button>
-        <button class="btn btn-primary" onclick="submitContestEntry()">응모 등록</button>
-      </div>
-    </div>
-  </div>
+  <!-- 콘테스트 상세/응모/만들기 기능은 전용 풀 페이지(/plus/contests.html)로 분리됨 -->
 
   <div class="toast-container"><div id="toast" class="toast"></div></div>
 
@@ -2026,8 +1988,8 @@
       detailViewLogged = false;
       detailCommentPage = 1;
       detailCommentHasMore = true;
-      // 캐러셀 자동 회전 정지 (양 섹션)
-      try { pauseAutoScroll('contestSection'); pauseAutoScroll('popularSection'); } catch(e) {}
+      // 캐러셀 자동 회전 정지 (인기 작품 섹션)
+      try { pauseAutoScroll('popularSection'); } catch(e) {}
 
       // 단일 GET 으로 attachments + body_text 보강
       try {
@@ -2187,7 +2149,7 @@
       detailActiveMediaIdx = 0;
       closeDetailMoreMenu();
       // 캐러셀 자동 회전 재개 (확장 모드가 아닌 섹션만)
-      try { resumeAutoScroll('contestSection'); resumeAutoScroll('popularSection'); } catch(e) {}
+      try { resumeAutoScroll('popularSection'); } catch(e) {}
     }
 
     function toggleLikeFromDetail() {
@@ -2249,8 +2211,6 @@
       if (e.key === 'Escape') {
         if (document.getElementById('detailModal').classList.contains('active')) closeDetailModal();
         if (document.getElementById('uploadModal').classList.contains('active')) closeUploadModal();
-        if (document.getElementById('contestModal').classList.contains('active')) closeContestModal();
-        if (document.getElementById('submitContestModal').classList.contains('active')) closeSubmitContestModal();
       }
     });
 
@@ -2670,159 +2630,31 @@
     }
 
     // ────────────────── 콘테스트 (P1) ──────────────────
+    // 콘테스트는 전용 풀 페이지(/plus/contests.html)로 분리됨.
+    // 갤러리에서는 진행 중 콘테스트 개수만 조회해 슬림 배너를 채운다.
     async function loadContests() {
+      const banner = document.getElementById('contestBanner');
+      if (!banner) return;
       try {
-        // 진행 중 + 임박(upcoming) 모두 노출 — 임박이 더 유용 (응모 마감 전)
-        const [actRes, upRes] = await Promise.all([
-          fetch('/api/growth/events?status=active&limit=10'),
-          fetch('/api/growth/events?status=upcoming&limit=10')
-        ]);
-        const [actData, upData] = await Promise.all([actRes.json(), upRes.json()]);
-        const merged = [...(actData.items || []), ...(upData.items || [])];
-        // 중복 제거 (id 기준)
-        const seen = new Set();
-        const items = merged.filter(it => { if (seen.has(it.id)) return false; seen.add(it.id); return true; });
-        if (items.length === 0) {
-          document.getElementById('contestSection').style.display = 'none';
-          return;
-        }
-        document.getElementById('contestSection').style.display = 'block';
-        // 카운트 배지 갱신
-        const badge = document.getElementById('contestCountBadge');
-        if (badge) badge.textContent = '· ' + items.length + '개';
-        // 자동 캐러셀 초기화 + 시작
-        initCarousel('contestSection', items, renderContestCardHTML);
-        startAutoScroll('contestSection');
-      } catch (e) {
-        document.getElementById('contestSection').style.display = 'none';
-      }
-    }
-
-    function calcDDay(endDate) {
-      if (!endDate) return { label: '', cls: '' };
-      const end = new Date((endDate.length > 10 ? endDate : endDate + 'T23:59:59').replace(' ', 'T'));
-      const now = new Date();
-      const diffMs = end.getTime() - now.getTime();
-      const days = Math.ceil(diffMs / (1000*60*60*24));
-      if (days < 0) return { label: '종료', cls: 'closed' };
-      if (days === 0) return { label: '오늘 마감', cls: 'danger' };
-      if (days <= 2) return { label: `D-${days}`, cls: 'danger' };
-      if (days <= 7) return { label: `D-${days}`, cls: 'warn' };
-      return { label: `D-${days}`, cls: '' };
-    }
-
-    // 콘테스트 카드 1장의 HTML 문자열 생성 (캐러셀/grid 모두에서 재사용)
-    function renderContestCardHTML(ev) {
-      const catKey = ev.category || 'other';
-      const catCls = getCatClass(catKey);
-      const dd = calcDDay(ev.end_date || ev.deadline);
-      const participants = ev.participant_count || ev.submission_count || 0;
-      const loc = ev.location || '';
-      const date = (ev.start_date && ev.end_date) ? `${ev.start_date.slice(5,10)} ~ ${ev.end_date.slice(5,10)}` : (ev.end_date ? `~ ${ev.end_date.slice(0,10)}` : '');
-      return `<div class="contest-card" onclick="showContestModal(${ev.id})">
-        <div class="contest-card-thumb ${catCls}">
-          <span class="contest-cat-badge">${catNames[catKey] || catKey}</span>
-          <span class="contest-dday ${dd.cls}">${dd.label}</span>
-          ${catEmojis[catKey] || '🏆'}
-        </div>
-        <div class="contest-card-body">
-          <div class="contest-card-title">${escHtml(ev.title)}</div>
-          <div class="contest-card-meta">
-            ${date ? `<div><i class="far fa-calendar"></i> ${escHtml(date)}</div>` : ''}
-            ${loc ? `<div><i class="fas fa-map-marker-alt"></i> ${escHtml(loc)}</div>` : ''}
-            <div><i class="fas fa-users"></i> ${participants}명 응모</div>
-          </div>
-          <div class="contest-card-actions">
-            <button class="btn btn-outline btn-sm" onclick="event.stopPropagation();showContestModal(${ev.id})">상세 보기</button>
-            <button class="btn btn-primary btn-sm" onclick="event.stopPropagation();openSubmitContestModal(${ev.id})">응모하기</button>
-          </div>
-        </div>
-      </div>`;
-    }
-
-    async function showContestModal(eventId) {
-      try {
-        const res = await fetch(`/api/growth/events/${eventId}`);
+        const res = await fetch('/api/growth/events?status=active&limit=50');
         const data = await res.json();
-        if (!data.success) { showToast('콘테스트 정보를 불러오지 못했어요'); return; }
-        const ev = data.event || data.item || data;
-        const catKey = ev.category || 'other';
-        const dd = calcDDay(ev.end_date || ev.deadline);
-        const date = (ev.start_date && ev.end_date) ? `${ev.start_date.slice(0,10)} ~ ${ev.end_date.slice(0,10)}` : (ev.end_date ? `~ ${ev.end_date.slice(0,10)}` : '');
-        document.getElementById('contestModalTitle').innerHTML = `<i class="fas fa-trophy" style="color:#f59e0b;margin-right:8px;"></i>${escHtml(ev.title)}`;
-        document.getElementById('contestModalBody').innerHTML = `
-          <div style="display:flex;gap:8px;margin-bottom:14px;align-items:center;flex-wrap:wrap;">
-            <span class="detail-cat-badge ${getCatClass(catKey)}">${catEmojis[catKey] || ''} ${catNames[catKey] || catKey}</span>
-            <span class="contest-dday ${dd.cls}" style="position:static;">${dd.label}</span>
-          </div>
-          <div style="font-size:15px;color:var(--gray-700);line-height:1.8;margin-bottom:14px;">
-            ${date ? `<div><i class="far fa-calendar" style="color:var(--gray-400);width:16px;"></i> ${escHtml(date)}</div>` : ''}
-            ${ev.location ? `<div><i class="fas fa-map-marker-alt" style="color:var(--gray-400);width:16px;"></i> ${escHtml(ev.location)}</div>` : ''}
-            ${ev.organizer ? `<div><i class="fas fa-user-tie" style="color:var(--gray-400);width:16px;"></i> 주최: ${escHtml(ev.organizer)}</div>` : ''}
-            <div><i class="fas fa-users" style="color:var(--gray-400);width:16px;"></i> 현재 응모: ${ev.participant_count || ev.submission_count || 0}건</div>
-          </div>
-          ${ev.description ? `<div style="font-size:16px;line-height:1.8;color:var(--gray-700);padding:14px;background:var(--gray-50);border-radius:10px;white-space:pre-wrap;">${escHtml(ev.description)}</div>` : ''}
-        `;
-        document.getElementById('contestModalActions').innerHTML = `
-          <button class="btn-outline" onclick="closeContestModal()">닫기</button>
-          ${dd.cls !== 'closed' ? `<button class="btn btn-primary" onclick="closeContestModal();openSubmitContestModal(${ev.id})"><i class="fas fa-paper-plane"></i> 응모하기</button>` : ''}
-        `;
-        document.getElementById('contestModal').classList.add('active');
-      } catch (e) { showToast('네트워크 오류'); }
-    }
-    function closeContestModal() { document.getElementById('contestModal').classList.remove('active'); }
-    document.getElementById('contestModal').addEventListener('click', function(e) {
-      if (e.target === this) closeContestModal();
-    });
-
-    function openSubmitContestModal(eventId) {
-      document.getElementById('submitEventId').value = eventId;
-      document.getElementById('submitTitle').value = '';
-      document.getElementById('submitDesc').value = '';
-      document.getElementById('submitImage').value = '';
-      document.getElementById('submitPublishGallery').checked = true;
-      document.getElementById('submitContestModal').classList.add('active');
-    }
-    function closeSubmitContestModal() { document.getElementById('submitContestModal').classList.remove('active'); }
-    document.getElementById('submitContestModal').addEventListener('click', function(e) {
-      if (e.target === this) closeSubmitContestModal();
-    });
-
-    async function submitContestEntry() {
-      const eventId = document.getElementById('submitEventId').value;
-      const title = document.getElementById('submitTitle').value.trim();
-      if (!title) { showToast('작품 제목을 입력하세요'); return; }
-      let imageUrl = null;
-      const fileInput = document.getElementById('submitImage');
-      if (fileInput.files[0]) {
-        const fd = new FormData();
-        fd.append('file', fileInput.files[0]);
-        const up = await fetch('/api/upload?type=gallery', { method: 'POST', body: fd });
-        const upd = await up.json();
-        if (upd.success) imageUrl = upd.file.url;
-        else { showToast('이미지 업로드 실패'); return; }
-      }
-      try {
-        const res = await fetch(`/api/growth/events/${eventId}/submit`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            title,
-            description: document.getElementById('submitDesc').value,
-            image_url: imageUrl,
-            publish_to_gallery: document.getElementById('submitPublishGallery').checked ? 1 : 0
-          })
-        });
-        const data = await res.json();
-        if (data.success) {
-          showToast('응모가 완료되었어요!');
-          closeSubmitContestModal();
-          loadContests();
-          reloadGallery();
+        const count = (data.items || []).length;
+        const countEl = document.getElementById('contestBannerCount');
+        const textEl = document.getElementById('contestBannerText');
+        if (count > 0) {
+          if (countEl) countEl.textContent = count;
+          if (textEl) textEl.innerHTML = `이번 달 콘테스트 <strong id="contestBannerCount">${count}</strong>개 진행 중`;
+          banner.setAttribute('href', '/plus/contests.html');
         } else {
-          showToast(data.message || '응모 실패');
+          // 진행중 0개 — 진입로를 닫지 않고 예정 탭으로 안내
+          if (textEl) textEl.textContent = '현재 진행 중인 콘테스트가 없어요. 예정 콘테스트를 확인해 보세요';
+          banner.setAttribute('href', '/plus/contests.html?tab=upcoming');
         }
-      } catch (e) { showToast('네트워크 오류'); }
+        banner.style.display = 'flex';
+      } catch (e) {
+        // 조회 실패 시 배너 숨김(필수 진입로는 GNB '콘테스트'로 항상 제공)
+        banner.style.display = 'none';
+      }
     }
 
     // ────────────────── 승인 관리 (교사/관리자) ──────────────────
@@ -2982,26 +2814,8 @@
     }
 
     // ────────────────── 자동 가로 캐러셀 엔진 ──────────────────
+    // 콘테스트 캐러셀은 전용 페이지(/plus/contests.html)로 분리됨 — 인기 작품 섹션만 캐러셀 사용.
     const carouselState = {
-      contestSection: {
-        trackId: 'contestCarouselTrack',
-        shellId: 'contestCarouselShell',
-        expandedGridId: 'contestExpandedGrid',
-        expandedClass: 'expanded-grid--contest',
-        cardSelector: '.contest-card',
-        intervalId: null,
-        currentIndex: 0,
-        totalCards: 0,
-        cardWidth: 232,        // 220 + 12 gap (콘테스트·인기 카드 폭 동일 통일)
-        viewportCards: 5,
-        paused: false,
-        expanded: false,
-        intervalMs: 2000,
-        items: [],
-        renderCardHTMLFn: null,
-        modalPauseCount: 0,
-        listenersBound: false,
-      },
       popularSection: {
         trackId: 'popularCarouselTrack',
         shellId: 'popularCarouselShell',

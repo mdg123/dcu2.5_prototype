@@ -104,7 +104,8 @@
       id: 'chaeumPlus', label: '채움성장',
       defaultUrl: '/plus/gallery.html',
       sub: [
-        { label: '나도예술가', url: '/plus/gallery.html' }
+        { label: '나도예술가', url: '/plus/gallery.html' },
+        { label: '🏆 콘테스트', url: '/plus/contests.html' }
       ]
     },
     {

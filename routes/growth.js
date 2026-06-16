@@ -887,7 +887,7 @@ router.post('/events/upload-thumbnail', requireAuth, (req, res) => {
   });
 });
 
-// POST /api/growth/events/:id/submit  body: { title, description, image_url }
+// POST /api/growth/events/:id/submit  body: { title, description, image_url, publish_to_gallery }
 router.post('/events/:id/submit', requireAuth, (req, res) => {
   try {
     const id = pInt(req.params.id);
@@ -897,8 +897,13 @@ router.post('/events/:id/submit', requireAuth, (req, res) => {
     if (title.length > 100) return res.status(400).json({ success: false, message: '제목은 100자 이하로 입력하세요.' });
     const description = req.body.description ? String(req.body.description).slice(0, 2000) : null;
     const image_url = req.body.image_url ? String(req.body.image_url).slice(0, 500) : null;
+    // 학생의 '갤러리에도 공개' 선택. 미전송 시 undefined → DB 레이어가 레거시 기본(공개)으로 처리.
+    // 콘테스트 정책(publish_to_gallery=0)이면 학생이 켜도 공개 안 함(DB에서 AND).
+    const publish_to_gallery = req.body.publish_to_gallery === undefined
+      ? undefined
+      : (req.body.publish_to_gallery ? 1 : 0);
 
-    const result = growthDb.submitGalleryEvent(id, req.user.id, { title, description, image_url });
+    const result = growthDb.submitGalleryEvent(id, req.user.id, { title, description, image_url, publish_to_gallery });
     res.status(201).json({ success: true, submission: result.submission, galleryItemId: result.galleryItemId });
   } catch (err) {
     const status = err.status || 500;

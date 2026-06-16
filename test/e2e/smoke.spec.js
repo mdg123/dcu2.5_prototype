@@ -41,8 +41,9 @@ const VIEWPORTS = [
   { name: 'mobile', width: 375, height: 812 },
 ];
 
-// 1000% 이상의 깨진 백분율 (예: 8000%). 정상 범위(0~999%)는 통과.
-const BROKEN_PCT_RE = /\b[1-9]\d{3,}\s*%/;
+// 깨진 값: 1000% 이상 백분율(예: 8000%) + NaN(예: NaN%·NaN점). 정상 범위(0~999%)는 통과.
+// NaN은 한국어 UI에 정상 등장하지 않으므로 리터럴로 검출(참여도 객체 합산 등 FE 계산 깨짐 부류).
+const BROKEN_PCT_RE = /\b[1-9]\d{3,}\s*%|NaN/;
 
 /**
  * 한 화면(URL)을 두 뷰포트에서 열고 5종 검출을 수행한다.
@@ -114,13 +115,13 @@ async function checkScreen(browser, statePath, url, label) {
       });
       expect.soft(objObjCount, `${label} [${vp.name}] (A)[object Object] ${objObjCount}건 발견`).toBe(0);
 
-      // ── (D) 깨진 백분율(1000%+) 0건 ──
+      // ── (D) 깨진 값(1000%+ / NaN) 0건 ──
       const brokenPct = await page.evaluate(() => {
         const t = document.body.innerText || '';
-        const re = /\b[1-9]\d{3,}\s*%/g;
+        const re = /\b[1-9]\d{3,}\s*%|NaN/g;
         return t.match(re) || [];
       });
-      expect.soft(brokenPct.length, `${label} [${vp.name}] (D)깨진 백분율 발견: ${JSON.stringify(brokenPct)}`).toBe(0);
+      expect.soft(brokenPct.length, `${label} [${vp.name}] (D)깨진 값(8000%/NaN) 발견: ${JSON.stringify(brokenPct)}`).toBe(0);
 
       // ── (C) 가로 스크롤 0 ──
       const overflow = await page.evaluate(() => {
@@ -198,11 +199,11 @@ async function checkScreenWithModal(browser, statePath, url, label, opener, moda
       const t = (m && m.innerText) || '';
       return {
         objObj: (t.match(/\[object Object\]/g) || []).length,
-        brokenPct: t.match(/\b[1-9]\d{3,}\s*%/g) || [],
+        brokenPct: t.match(/\b[1-9]\d{3,}\s*%|NaN/g) || [],
       };
     }, modalSel);
     expect.soft(inModal.objObj, `${label} [모달] (A)[object Object] ${inModal.objObj}건`).toBe(0);
-    expect.soft(inModal.brokenPct.length, `${label} [모달] (D)깨진 백분율: ${JSON.stringify(inModal.brokenPct)}`).toBe(0);
+    expect.soft(inModal.brokenPct.length, `${label} [모달] (D)깨진 값(8000%/NaN): ${JSON.stringify(inModal.brokenPct)}`).toBe(0);
 
     // (C) 가로 스크롤 — 모달 컨테이너 자체 overflow
     const mo = await page.evaluate((sel) => {
@@ -266,6 +267,7 @@ const SCREENS = {
     { url: '/lrs/index.html?menu=analytics', label: '학생-LRS 현황분석' },
     { url: '/class/find.html', label: '학생-클래스 찾기' },
     { url: '/class/hall-of-fame.html', label: '학생-명예의 전당' },
+    { url: '/plus/contests.html', label: '학생-콘테스트' },
   ],
   teacher: [
     // ── 기존 5화면 (회귀 유지) ──
@@ -281,6 +283,9 @@ const SCREENS = {
     { url: '/class/analytics.html', label: '교사-클래스별 학습분석' },
     { url: '/self-learn/problem-sets.html', label: '교사-문제집(출제뷰)' },
     { url: '/lrs/index.html?menu=operations', label: '교사-LRS 운영' },
+    { url: '/plus/contests.html', label: '교사-콘테스트(만들기뷰)' },
+    { url: '/plus/contests.html?tab=upcoming', label: '교사-콘테스트 예정탭' },
+    { url: '/plus/contests.html?tab=past', label: '교사-콘테스트 마감탭' },
   ],
   admin: [
     // ── 기존 3화면 (회귀 유지) ──
@@ -306,6 +311,14 @@ const MODAL_SCREENS = [
   {
     role: 'teacher', url: '/plus/gallery.html', label: '교사-나도예술가 갤러리(모달)',
     opener: '.gallery-card', modalSel: '#detailModal',
+  },
+  {
+    role: 'teacher', url: '/plus/contests.html', label: '교사-콘테스트 상세(모달)',
+    opener: '.ct-card', modalSel: '#detailModal',
+  },
+  {
+    role: 'student', url: '/plus/contests.html', label: '학생-콘테스트 상세(모달)',
+    opener: '.ct-card', modalSel: '#detailModal',
   },
 ];
 

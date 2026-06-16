@@ -1061,7 +1061,13 @@ function submitGalleryEvent(eventId, userId, data) {
     throw err;
   }
 
-  const publishToGallery = event.publish_to_gallery == null ? 1 : Number(event.publish_to_gallery);
+  // 갤러리 공개 = (콘테스트가 허용) AND (학생이 선택).
+  //  - eventPublish: 콘테스트 정책. null 은 레거시 기본 허용(1)으로 본다.
+  //  - studentWants: 학생이 응모 모달에서 체크. data.publish_to_gallery 가 명시되지 않으면(undefined)
+  //    레거시 호출 호환을 위해 "선택함(1)"으로 본다. 명시되면 그 값을 따른다(끄면 0).
+  const eventPublish = event.publish_to_gallery == null ? 1 : Number(event.publish_to_gallery);
+  const studentWants = data.publish_to_gallery === undefined ? 1 : (data.publish_to_gallery ? 1 : 0);
+  const publishToGallery = (eventPublish && studentWants) ? 1 : 0;
 
   const tx = db.transaction(() => {
     // 1) submissions INSERT

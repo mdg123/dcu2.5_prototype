@@ -1,0 +1,1380 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>다채움 - 콘테스트</title>
+  <link rel="stylesheet" href="/dacheum-common.css">
+  <link rel="stylesheet" href="/css/common-nav.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <style>
+    :root {
+      --primary: #4A7CFF; --primary-dark: #3A6AE8; --primary-light: #E8EEFF;
+      --gray-50: #F9FAFB; --gray-100: #F3F4F6; --gray-200: #E5E7EB;
+      --gray-300: #D1D5DB; --gray-400: #9CA3AF;
+      --gray-500: #6B7280; --gray-700: #374151; --gray-800: #1F2937;
+      --radius: 12px; --radius-sm: 8px;
+
+      /* 페이지 정체 색 (오렌지·핑크 그라디언트, 갤러리와 통일) */
+      --brand-1: #f97316;
+      --brand-2: #ec4899;
+      --brand-grad: linear-gradient(135deg, var(--brand-1), var(--brand-2));
+
+      /* 카테고리 토큰 (갤러리와 동일) */
+      --cat-art-bg:     linear-gradient(135deg, #fce7f3, #fbcfe8);
+      --cat-art-fg:     #9333ea;
+      --cat-art-solid:  #8b5cf6;
+      --cat-art-soft:   #ede9fe;
+
+      --cat-music-bg:   linear-gradient(135deg, #fef3c7, #fde68a);
+      --cat-music-fg:   #db2777;
+      --cat-music-solid:#ec4899;
+      --cat-music-soft: #fce7f3;
+
+      --cat-writing-bg: linear-gradient(135deg, #d1fae5, #a7f3d0);
+      --cat-writing-fg: #059669;
+      --cat-writing-solid:#10b981;
+      --cat-writing-soft: #d1fae5;
+
+      --cat-video-bg:   linear-gradient(135deg, #dbeafe, #bfdbfe);
+      --cat-video-fg:   #2563eb;
+      --cat-video-solid:#3b82f6;
+      --cat-video-soft: #dbeafe;
+
+      --cat-other-bg:   linear-gradient(135deg, #e5e7eb, #d1d5db);
+      --cat-other-fg:   #4b5563;
+      --cat-other-solid:#6b7280;
+      --cat-other-soft: #f3f4f6;
+
+      /* 상태 색 (D-day, 마감) */
+      --dday-safe:   #6b7280;
+      --dday-warn:   #f59e0b;
+      --dday-danger: #ef4444;
+      --dday-closed: #9ca3af;
+
+      --meta-fg:        #6b7280;
+      --card-shadow:    0 1px 4px rgba(0,0,0,0.05);
+      --card-hover-shadow: 0 12px 28px rgba(0,0,0,0.10);
+
+      --radius-card:   16px;
+      --radius-modal:  20px;
+      --radius-pill:   999px;
+
+      /* 폰트 크기 */
+      --fs-body: 17px;
+      --fs-h1: 28px;
+      --fs-h3: 19px;
+      --fs-modal-title: 22px;
+      --fs-base: 16px;
+      --fs-meta: 14px;
+      --fs-meta-sm: 13px;
+      --fs-badge: 13px;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Pretendard','Noto Sans KR',system-ui,sans-serif; background: #F5F7FA; color: #1A1A2E; font-size: var(--fs-body); overflow-x: hidden; }
+    .container { max-width: 1800px; margin: 0 auto; padding: 24px 20px; overflow-x: hidden; }
+
+    /* ─────── 페이지 헤더 보조 (dacheum-common.css .page-header 활용) ─────── */
+    .page-header__subtitle { word-break: keep-all; }
+
+    /* ─────── 컨트롤 바 ─────── */
+    .contest-controls { margin-bottom: 18px; }
+    /* 상태 탭 (세그먼트 토글) */
+    .status-tabs {
+      display: flex; gap: 6px; background: #f3f4f6; padding: 4px;
+      border-radius: 8px; width: fit-content; max-width: 100%;
+      flex-wrap: wrap; margin-bottom: 14px;
+    }
+    .status-tab {
+      border: none; background: transparent; cursor: pointer; font-family: inherit;
+      padding: 9px 18px; border-radius: 6px; font-size: 15px; font-weight: 600;
+      color: var(--gray-500); transition: all 0.15s;
+      display: inline-flex; align-items: center; gap: 8px; white-space: nowrap;
+    }
+    .status-tab:hover { color: var(--brand-1); }
+    .status-tab.active {
+      background: #fff; color: var(--brand-1); font-weight: 700;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    }
+    .status-tab:focus-visible { outline: 2px solid var(--brand-1); outline-offset: 2px; }
+    .status-tab .tab-count {
+      font-size: var(--fs-badge); font-weight: 700; line-height: 1;
+      padding: 3px 9px; border-radius: var(--radius-pill); color: #fff;
+      min-width: 22px; text-align: center;
+    }
+    .status-tab[data-status="active"] .tab-count { background: var(--dday-warn); }
+    .status-tab[data-status="upcoming"] .tab-count { background: #2563eb; }
+    .status-tab[data-status="past"] .tab-count { background: var(--dday-closed); }
+
+    /* 칩 + 뷰토글 라인 */
+    .controls-line {
+      display: flex; gap: 12px; align-items: center; justify-content: space-between;
+      flex-wrap: wrap;
+    }
+    .cat-chips { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; flex: 1; min-width: 0; }
+    .chip {
+      padding: 10px 18px; border-radius: var(--radius-pill); border: 1.5px solid var(--gray-200);
+      background: #fff; font-size: 15px; cursor: pointer; font-family: inherit;
+      transition: all 0.2s; color: var(--gray-500); white-space: nowrap;
+    }
+    .chip:hover { border-color: var(--brand-1); color: var(--brand-1); }
+    .chip.active { border-color: var(--brand-1); background: #fff7ed; color: var(--brand-1); font-weight: 600; }
+    .chip:focus-visible { outline: 2px solid var(--brand-1); outline-offset: 2px; }
+
+    .view-toggle { display: inline-flex; border: 1.5px solid var(--gray-200); border-radius: var(--radius-sm); padding: 3px; background: #fff; flex-shrink: 0; }
+    .view-toggle button { width: 38px; height: 32px; border: none; background: transparent; cursor: pointer; border-radius: 6px; color: var(--gray-500); font-size: 14px; transition: all 0.15s; }
+    .view-toggle button:hover { color: var(--brand-1); }
+    .view-toggle button.active { background: #fff7ed; color: var(--brand-1); }
+    .view-toggle button:focus-visible { outline: 2px solid var(--brand-1); outline-offset: 1px; }
+
+    /* ─────── 버튼 ─────── */
+    .btn { padding: 12px 22px; border: none; border-radius: var(--radius-sm); font-size: var(--fs-base); font-weight: 600; cursor: pointer; font-family: inherit; transition: all 0.2s; display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+    .btn-primary { background: var(--brand-grad); color: #fff; }
+    .btn-primary:hover { opacity: 0.92; transform: translateY(-1px); }
+    .btn-primary:active { transform: scale(0.98); }
+    .btn-primary:disabled, .btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+    .btn-sm { padding: 8px 14px; font-size: var(--fs-meta); }
+    .btn-outline { background: #fff; border: 1.5px solid var(--gray-200); color: var(--gray-700); padding: 12px 22px; border-radius: var(--radius-sm); font-size: var(--fs-base); font-weight: 600; cursor: pointer; font-family: inherit; transition: all 0.2s; display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+    .btn-outline:hover { border-color: var(--brand-1); color: var(--brand-1); }
+    .btn-outline:disabled { opacity: 0.5; cursor: not-allowed; border-color: var(--gray-200); color: var(--gray-400); }
+    .btn:focus-visible, .btn-outline:focus-visible { outline: 2px solid var(--brand-1); outline-offset: 2px; }
+
+    /* ─────── 카드 그리드 ─────── */
+    .contest-page-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+      gap: 20px;
+    }
+    .ct-card {
+      background: #fff; border: 1px solid var(--gray-200); border-radius: var(--radius-card);
+      overflow: hidden; min-width: 0; position: relative; transition: all 0.25s;
+      box-shadow: var(--card-shadow); display: flex; flex-direction: column;
+    }
+    .ct-card:hover { transform: translateY(-3px); box-shadow: var(--card-hover-shadow); }
+    .ct-card:focus-within { outline: 2px solid var(--brand-1); outline-offset: 2px; }
+    .ct-card.is-past { opacity: 0.92; }
+
+    .ct-thumb {
+      width: 100%; aspect-ratio: 16 / 9; position: relative;
+      display: flex; align-items: center; justify-content: center;
+      background: var(--cat-other-bg); overflow: hidden;
+    }
+    .ct-thumb.cat-art    { background: var(--cat-art-bg); }
+    .ct-thumb.cat-music  { background: var(--cat-music-bg); }
+    .ct-thumb.cat-writing{ background: var(--cat-writing-bg); }
+    .ct-thumb.cat-video  { background: var(--cat-video-bg); }
+    .ct-thumb.cat-other  { background: var(--cat-other-bg); }
+    .ct-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .ct-thumb .no-image { font-size: 48px; color: rgba(255,255,255,0.9); filter: drop-shadow(0 1px 2px rgba(0,0,0,0.15)); }
+
+    .ct-cat-badge {
+      position: absolute; top: 12px; left: 12px; padding: 5px 12px; border-radius: var(--radius-pill);
+      font-size: var(--fs-badge); font-weight: 700; color: #fff;
+      background: rgba(0,0,0,0.45); backdrop-filter: blur(4px); letter-spacing: 0.2px;
+    }
+    .ct-dday {
+      position: absolute; top: 12px; right: 12px; padding: 5px 12px; border-radius: var(--radius-pill);
+      font-size: var(--fs-badge); font-weight: 700; color: #fff; background: var(--dday-safe);
+    }
+    .ct-dday.warn   { background: var(--dday-warn); }
+    .ct-dday.danger { background: var(--dday-danger); }
+    .ct-dday.closed { background: var(--dday-closed); }
+
+    .ct-body { padding: 16px 18px 18px; display: flex; flex-direction: column; flex: 1; min-width: 0; }
+    .ct-title {
+      font-size: var(--fs-h3); font-weight: 700; line-height: 1.4; min-height: 53px;
+      display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+      overflow: hidden; word-break: keep-all;
+    }
+    .ct-meta { font-size: var(--fs-meta); color: var(--gray-500); line-height: 1.7; margin: 8px 0 14px; }
+    .ct-meta > div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .ct-meta i { width: 16px; color: var(--gray-400); margin-right: 4px; }
+    .ct-actions { display: flex; gap: 8px; margin-top: auto; }
+    .ct-actions .btn, .ct-actions .btn-outline { flex: 1 1 0; min-width: 0; white-space: nowrap; }
+
+    /* ─────── 리스트 뷰 ─────── */
+    .contest-page-list { display: flex; flex-direction: column; gap: 10px; }
+    .ct-row {
+      background: #fff; border: 1px solid var(--gray-200); border-radius: 12px;
+      padding: 14px 18px; display: flex; gap: 16px; align-items: center;
+      transition: all 0.2s; min-width: 0;
+    }
+    .ct-row:hover { border-color: var(--brand-1); box-shadow: 0 4px 12px rgba(249,115,22,0.1); }
+    .ct-row-thumb {
+      width: 64px; height: 64px; border-radius: 10px; overflow: hidden; flex-shrink: 0;
+      display: flex; align-items: center; justify-content: center; background: var(--cat-other-bg);
+    }
+    .ct-row-thumb.cat-art    { background: var(--cat-art-bg); }
+    .ct-row-thumb.cat-music  { background: var(--cat-music-bg); }
+    .ct-row-thumb.cat-writing{ background: var(--cat-writing-bg); }
+    .ct-row-thumb.cat-video  { background: var(--cat-video-bg); }
+    .ct-row-thumb img { width: 100%; height: 100%; object-fit: cover; }
+    .ct-row-thumb .no-image { font-size: 28px; color: rgba(255,255,255,0.85); }
+    .ct-row-info { flex: 1; min-width: 0; }
+    .ct-row-titleline { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; flex-wrap: wrap; min-width: 0; }
+    .ct-row-badge {
+      display: inline-flex; align-items: center; padding: 3px 10px; border-radius: var(--radius-pill);
+      font-size: var(--fs-badge); font-weight: 700; flex-shrink: 0;
+    }
+    .ct-row-badge.cat-art    { background: var(--cat-art-soft); color: var(--cat-art-fg); }
+    .ct-row-badge.cat-music  { background: var(--cat-music-soft); color: var(--cat-music-fg); }
+    .ct-row-badge.cat-writing{ background: var(--cat-writing-soft); color: var(--cat-writing-fg); }
+    .ct-row-badge.cat-video  { background: var(--cat-video-soft); color: var(--cat-video-fg); }
+    .ct-row-badge.cat-other  { background: var(--cat-other-soft); color: var(--cat-other-fg); }
+    .ct-row-title { font-size: var(--fs-h3); font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+    .ct-row-meta { display: flex; gap: 14px; font-size: var(--fs-meta); color: var(--gray-500); flex-wrap: wrap; }
+    .ct-row-meta span { display: inline-flex; align-items: center; gap: 5px; }
+    .ct-row-meta i { color: var(--gray-400); }
+    .ct-row-right { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+    .ct-row-dday {
+      padding: 5px 12px; border-radius: var(--radius-pill); font-size: var(--fs-badge);
+      font-weight: 700; color: #fff; background: var(--dday-safe); white-space: nowrap;
+    }
+    .ct-row-dday.warn { background: var(--dday-warn); }
+    .ct-row-dday.danger { background: var(--dday-danger); }
+    .ct-row-dday.closed { background: var(--dday-closed); }
+    .ct-row-actions { display: flex; gap: 8px; }
+
+    /* ─────── 빈 상태 / 에러 ─────── */
+    .empty-state { text-align: center; padding: 60px 20px; color: var(--gray-500); grid-column: 1 / -1; }
+    .empty-state .empty-icon { font-size: 48px; margin-bottom: 14px; display: block; }
+    .empty-state .empty-title { font-size: 18px; font-weight: 600; color: var(--gray-700); margin-bottom: 6px; }
+    .empty-state .empty-msg { font-size: var(--fs-meta); color: var(--gray-500); margin-bottom: 18px; }
+    .empty-state .btn, .empty-state .btn-outline { display: inline-flex; align-items: center; gap: 6px; }
+
+    /* 로딩 스켈레톤 */
+    .ct-skeleton {
+      background: #fff; border: 1px solid var(--gray-200); border-radius: var(--radius-card);
+      overflow: hidden; min-width: 0;
+    }
+    .ct-skeleton .sk-thumb { width: 100%; aspect-ratio: 16/9; background: linear-gradient(90deg,#f3f4f6 25%,#e9eaec 50%,#f3f4f6 75%); background-size: 200% 100%; animation: sk 1.2s infinite; }
+    .ct-skeleton .sk-line { height: 14px; margin: 14px 18px; border-radius: 6px; background: linear-gradient(90deg,#f3f4f6 25%,#e9eaec 50%,#f3f4f6 75%); background-size: 200% 100%; animation: sk 1.2s infinite; }
+    .ct-skeleton .sk-line.short { width: 60%; }
+    @keyframes sk { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
+
+    /* ─────── 모달 (공통) ─────── */
+    .modal-overlay {
+      position: fixed; inset: 0; background: rgba(0,0,0,0.5);
+      display: none; align-items: center; justify-content: center;
+      z-index: 10000; padding: 20px; backdrop-filter: blur(4px);
+      opacity: 0; transition: opacity 0.18s ease;
+    }
+    .modal-overlay.active { display: flex; opacity: 1; }
+    .modal {
+      background: #fff; border-radius: var(--radius-card); padding: 28px; width: 100%; max-width: 560px;
+      max-height: 90vh; overflow-y: auto; transform: scale(0.96); transition: transform 0.2s ease;
+      scrollbar-gutter: stable both-edges; scrollbar-width: thin; scrollbar-color: rgba(0,0,0,0.22) transparent;
+    }
+    .modal::-webkit-scrollbar { width: 8px; }
+    .modal::-webkit-scrollbar-track { background: transparent; }
+    .modal::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.18); border-radius: 8px; border: 2px solid transparent; background-clip: padding-box; }
+    .modal-overlay.active .modal { transform: scale(1); }
+    @media (prefers-reduced-motion: reduce) { .modal-overlay, .modal, .ct-card { transition: none; } }
+    .modal h3 { font-size: var(--fs-modal-title); font-weight: 700; margin-bottom: 20px; }
+    .form-group { margin-bottom: 16px; }
+    .form-group label { display: block; font-size: var(--fs-meta); font-weight: 600; margin-bottom: 6px; color: var(--gray-700); }
+    .form-group input, .form-group select, .form-group textarea {
+      width: 100%; padding: 12px 14px; border: 1.5px solid var(--gray-200); border-radius: var(--radius-sm);
+      font-size: var(--fs-base); font-family: inherit; outline: none; transition: border-color 0.2s;
+    }
+    .form-group input:focus, .form-group select:focus, .form-group textarea:focus { border-color: var(--brand-1); }
+    .form-group .field-error { display: none; font-size: var(--fs-meta-sm); color: #dc2626; margin-top: 6px; font-weight: 600; }
+    .form-group.has-error input, .form-group.has-error textarea, .form-group.has-error select { border-color: #dc2626; }
+    .form-group.has-error .field-error { display: block; }
+    .form-row { display: flex; gap: 14px; flex-wrap: wrap; }
+    .form-row > .form-group { flex: 1 1 200px; min-width: 0; }
+    .form-check { display: flex; align-items: center; gap: 8px; font-size: var(--fs-base); color: var(--gray-700); cursor: pointer; }
+    .form-check input { width: auto; }
+    .modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 22px; flex-wrap: wrap; }
+    .modal-actions .left-actions { margin-right: auto; display: flex; gap: 8px; }
+
+    /* 880px 폼 모달 (응모 / 만들기) */
+    .form-modal {
+      width: 92vw; max-width: 880px; max-height: 90vh; padding: 30px 32px;
+      border-radius: 14px; overflow-y: auto; scrollbar-gutter: stable both-edges;
+    }
+    .form-modal .modal-headline {
+      font-size: var(--fs-modal-title); font-weight: 700; margin-bottom: 8px;
+      display: flex; align-items: center; gap: 8px; word-break: keep-all;
+    }
+    .form-modal .modal-headline i { color: var(--brand-1); }
+    .form-modal .modal-subhead { font-size: var(--fs-meta); color: var(--gray-500); margin-bottom: 20px; }
+    .upload-section-title {
+      display: flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 700; color: #374151;
+      margin: 18px 0 10px; padding-top: 16px; border-top: 1px dashed var(--gray-200);
+    }
+    .upload-section-title:first-of-type { padding-top: 0; border-top: none; }
+    .upload-section-title i { color: var(--brand-1); font-size: 14px; }
+    .upload-section-title .opt { font-size: 13px; color: #6b7280; font-weight: 500; margin-left: 4px; }
+
+    /* 이미지 첨부 박스 */
+    .img-attach-box {
+      padding: 16px; background: #f9fafb; border: 1px dashed var(--gray-300); border-radius: 10px;
+      display: flex; gap: 14px; align-items: center; flex-wrap: wrap;
+    }
+    .img-attach-preview {
+      width: 88px; height: 88px; border-radius: 10px; overflow: hidden; flex-shrink: 0;
+      background: #fff; border: 1px solid var(--gray-200); display: flex; align-items: center; justify-content: center;
+      color: var(--gray-300); font-size: 28px;
+    }
+    .img-attach-preview img { width: 100%; height: 100%; object-fit: cover; }
+    .img-attach-body { flex: 1; min-width: 0; }
+    .img-attach-name { font-size: var(--fs-meta); color: var(--gray-700); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-bottom: 8px; }
+    .img-attach-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+    .media-add-btn {
+      display: inline-flex; align-items: center; gap: 8px; padding: 9px 14px; border: 1.5px solid var(--gray-200);
+      background: #fff; border-radius: 8px; font-size: 14px; font-weight: 600; color: var(--gray-700);
+      cursor: pointer; transition: all 0.15s; font-family: inherit;
+    }
+    .media-add-btn:hover { border-color: var(--brand-1); color: var(--brand-1); background: #fff7ed; }
+    .media-add-btn:focus-visible { outline: 2px solid var(--brand-1); outline-offset: 2px; }
+    .media-add-btn.remove:hover { border-color: #ef4444; color: #ef4444; background: #fef2f2; }
+
+    .textarea-with-counter { position: relative; }
+    .textarea-with-counter textarea {
+      width: 100%; padding: 12px 14px 26px; border: 1.5px solid var(--gray-200); border-radius: var(--radius-sm);
+      font-size: var(--fs-base); font-family: inherit; outline: none; transition: border-color 0.2s; resize: vertical; line-height: 1.6;
+    }
+    .textarea-with-counter textarea:focus { border-color: var(--brand-1); }
+    .textarea-counter { position: absolute; right: 10px; bottom: 8px; font-size: 13px; color: var(--gray-400); pointer-events: none; background: rgba(255,255,255,0.85); padding: 2px 6px; border-radius: 4px; }
+    .textarea-counter.warn { color: #f59e0b; }
+    .textarea-counter.danger { color: #dc2626; font-weight: 700; }
+
+    .upload-approval-notice {
+      margin-top: 16px; padding: 12px 14px; background: #fffbeb; border: 1px solid #fde68a; border-radius: 10px;
+      font-size: 14px; color: #92400e; line-height: 1.6; display: flex; gap: 8px; align-items: flex-start;
+    }
+    .upload-approval-notice i { color: #f59e0b; margin-top: 2px; }
+
+    .target-chip-group { display: flex; gap: 8px; flex-wrap: wrap; }
+    .target-chip {
+      padding: 8px 14px; border-radius: var(--radius-pill); border: 1.5px solid var(--gray-200);
+      cursor: pointer; font-size: var(--fs-meta); font-weight: 600; color: var(--gray-500);
+      background: #fff; transition: all 0.15s; font-family: inherit;
+    }
+    .target-chip:hover { border-color: var(--brand-1); color: var(--brand-1); }
+    .target-chip.active { border-color: var(--brand-1); background: #fff7ed; color: var(--brand-1); }
+    .target-chip:focus-visible { outline: 2px solid var(--brand-1); outline-offset: 2px; }
+
+    /* ─────── 상세 모달 (90vw, 세로 흐름형) ─────── */
+    .detail-modal {
+      width: 90vw; max-width: 1100px; max-height: 90vh; padding: 0; overflow: hidden;
+      position: relative; border-radius: var(--radius-modal); display: flex; flex-direction: column;
+      box-shadow: 0 24px 64px rgba(0,0,0,0.32);
+    }
+    .detail-close {
+      position: absolute; top: 16px; right: 20px; z-index: 10001;
+      width: 40px; height: 40px; border-radius: 50%; border: none;
+      background: rgba(0,0,0,0.5); color: #fff; font-size: 18px; cursor: pointer;
+      display: flex; align-items: center; justify-content: center; backdrop-filter: blur(6px); transition: all 0.2s;
+    }
+    .detail-close:hover { background: rgba(0,0,0,0.7); transform: scale(1.05); }
+    .detail-close:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+    .detail-body {
+      overflow-y: auto; flex: 1; padding: 0;
+      scrollbar-gutter: stable both-edges; scrollbar-width: thin; scrollbar-color: rgba(0,0,0,0.25) transparent;
+    }
+    .detail-body::-webkit-scrollbar { width: 10px; }
+    .detail-body::-webkit-scrollbar-track { background: transparent; }
+    .detail-body::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.18); border-radius: 8px; border: 2px solid transparent; background-clip: padding-box; }
+    .detail-banner-wrap { padding: 24px 24px 0; }
+    .detail-banner {
+      width: 100%; aspect-ratio: 16 / 9; position: relative; overflow: hidden;
+      display: flex; align-items: center; justify-content: center;
+      background: var(--cat-other-bg); border-radius: 14px;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.10), inset 0 0 0 1px rgba(0,0,0,0.04);
+    }
+    .detail-banner.cat-art    { background: var(--cat-art-bg); }
+    .detail-banner.cat-music  { background: var(--cat-music-bg); }
+    .detail-banner.cat-writing{ background: var(--cat-writing-bg); }
+    .detail-banner.cat-video  { background: var(--cat-video-bg); }
+    .detail-banner.cat-other  { background: var(--cat-other-bg); }
+    .detail-banner.no-media { aspect-ratio: auto; min-height: 200px; max-height: 280px; }
+    .detail-banner img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .detail-banner .no-image { font-size: 96px; color: rgba(255,255,255,0.9); }
+    /* 배너 좌하단 배지 (닫기 버튼과 분리 — 안전영역 확보) */
+    .detail-banner-badges {
+      position: absolute; left: 16px; bottom: 16px; display: flex; gap: 8px; flex-wrap: wrap; max-width: calc(100% - 32px);
+    }
+    .detail-banner-badges .b-cat {
+      padding: 5px 12px; border-radius: var(--radius-pill); font-size: var(--fs-badge); font-weight: 700;
+      color: #fff; background: rgba(0,0,0,0.5); backdrop-filter: blur(4px);
+    }
+    .detail-banner-badges .b-dday {
+      padding: 5px 12px; border-radius: var(--radius-pill); font-size: var(--fs-badge); font-weight: 700; color: #fff;
+      background: var(--dday-safe);
+    }
+    .detail-banner-badges .b-dday.warn { background: var(--dday-warn); }
+    .detail-banner-badges .b-dday.danger { background: var(--dday-danger); }
+    .detail-banner-badges .b-dday.closed { background: var(--dday-closed); }
+    @supports not (aspect-ratio: 16 / 9) {
+      .detail-banner { height: 0; padding-bottom: 56.25%; }
+      .detail-banner > * { position: absolute; }
+      .detail-banner-badges { position: absolute; }
+    }
+
+    .detail-content { padding: 22px 28px 28px; }
+    .detail-title-row { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 14px; flex-wrap: wrap; }
+    .detail-cat-badge { display: inline-flex; align-items: center; padding: 5px 14px; border-radius: var(--radius-pill); font-size: var(--fs-meta); font-weight: 700; flex-shrink: 0; }
+    .detail-cat-badge.cat-art    { background: var(--cat-art-soft); color: var(--cat-art-fg); }
+    .detail-cat-badge.cat-music  { background: var(--cat-music-soft); color: var(--cat-music-fg); }
+    .detail-cat-badge.cat-writing{ background: var(--cat-writing-soft); color: var(--cat-writing-fg); }
+    .detail-cat-badge.cat-video  { background: var(--cat-video-soft); color: var(--cat-video-fg); }
+    .detail-cat-badge.cat-other  { background: var(--cat-other-soft); color: var(--cat-other-fg); }
+    .detail-title { font-size: var(--fs-modal-title); font-weight: 700; line-height: 1.4; flex: 1; min-width: 200px; word-break: keep-all; }
+    .detail-meta { display: flex; align-items: center; gap: 18px; font-size: var(--fs-meta); color: var(--gray-500); margin-bottom: 18px; flex-wrap: wrap; }
+    .detail-meta span { display: inline-flex; align-items: center; gap: 6px; }
+    .detail-meta i { color: var(--gray-400); }
+    .detail-desc {
+      font-size: var(--fs-base); line-height: 1.8; color: var(--gray-700); padding: 18px 0;
+      border-top: 1px solid var(--gray-100); border-bottom: 1px solid var(--gray-100);
+      white-space: pre-wrap; word-break: keep-all;
+    }
+    .detail-desc.empty { color: var(--gray-400); font-style: italic; }
+    .detail-target { padding: 16px 0; border-bottom: 1px solid var(--gray-100); font-size: var(--fs-meta); color: var(--gray-700); display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .detail-target .t-label { font-weight: 700; color: var(--gray-800); display: inline-flex; align-items: center; gap: 6px; }
+    .detail-target .t-chip { padding: 4px 12px; border-radius: var(--radius-pill); background: var(--gray-100); color: var(--gray-700); font-size: var(--fs-badge); font-weight: 600; }
+
+    /* 응모작/수상작 섹션 */
+    .detail-subs { padding: 18px 0 4px; }
+    .detail-subs-head { font-size: 17px; font-weight: 700; margin-bottom: 14px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .detail-subs-head .count-pill { font-size: var(--fs-badge); font-weight: 700; color: var(--brand-1); background: #fff7ed; padding: 3px 12px; border-radius: var(--radius-pill); }
+    .subs-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 12px; }
+    .sub-thumb {
+      border: 1px solid var(--gray-200); border-radius: 10px; overflow: hidden; min-width: 0; background: #fff;
+    }
+    .sub-thumb-img { width: 100%; aspect-ratio: 1/1; background: var(--cat-other-bg); display: flex; align-items: center; justify-content: center; position: relative; }
+    .sub-thumb-img img { width: 100%; height: 100%; object-fit: cover; }
+    .sub-thumb-img .no-image { font-size: 30px; color: rgba(255,255,255,0.9); }
+    .sub-thumb-img .rank-pill { position: absolute; top: 6px; left: 6px; width: 24px; height: 24px; border-radius: 50%; background: linear-gradient(135deg,#f97316,#ec4899); color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 12px; box-shadow: 0 2px 6px rgba(0,0,0,0.18); }
+    .sub-thumb-body { padding: 8px 10px; min-width: 0; }
+    .sub-thumb-title { font-size: var(--fs-meta-sm); font-weight: 600; color: var(--gray-800); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .sub-thumb-author { font-size: var(--fs-meta-sm); color: var(--gray-500); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .detail-subs-link { margin-top: 12px; font-size: var(--fs-meta); }
+    .detail-subs-link a { color: var(--brand-1); font-weight: 600; text-decoration: none; }
+    .detail-subs-link a:hover { text-decoration: underline; }
+    .detail-subs-count-only { font-size: var(--fs-meta); color: var(--gray-500); padding: 10px 0; }
+
+    .detail-action-bar {
+      display: flex; align-items: center; gap: 10px; padding: 18px 28px; flex-wrap: wrap;
+      border-top: 1px solid var(--gray-100); background: #fff;
+    }
+    .detail-action-bar .right { margin-left: auto; display: flex; gap: 10px; flex-wrap: wrap; }
+
+    /* ─────── 토스트 ─────── */
+    .toast-container { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); z-index: 20000; }
+    .toast { padding: 12px 24px; background: var(--gray-800); color: #fff; border-radius: var(--radius-sm); font-size: var(--fs-base); opacity: 0; transform: translateY(10px); transition: all 0.3s; }
+    .toast.show { opacity: 1; transform: translateY(0); }
+
+    /* ─────── 반응형 (가로 스크롤 0 보장) ─────── */
+    @media (max-width: 1199px) {
+      .contest-page-grid { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; }
+    }
+    @media (max-width: 768px) {
+      .container { padding: 16px; }
+      .contest-page-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+      .ct-title { font-size: 16px; min-height: 44px; }
+      .ct-body { padding: 12px 14px 14px; }
+      .ct-actions { flex-direction: column; }
+      .status-tabs { width: 100%; justify-content: space-between; }
+      .status-tab { flex: 1; justify-content: center; padding: 9px 8px; }
+      .controls-line { flex-direction: column; align-items: stretch; }
+      .view-toggle { align-self: flex-end; }
+      .ct-row { flex-wrap: wrap; }
+      .ct-row-right { width: 100%; justify-content: space-between; }
+      .ct-row-actions { flex: 1; }
+      .ct-row-actions .btn, .ct-row-actions .btn-outline { flex: 1; }
+      .detail-modal { width: 96vw; max-width: 96vw; }
+      .detail-content { padding: 20px 18px; }
+      .detail-action-bar { padding: 16px 18px; }
+      .detail-meta { gap: 12px; font-size: 13px; }
+      .form-modal { width: 96vw; padding: 22px 18px; }
+    }
+    @media (max-width: 480px) {
+      .contest-page-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+      .ct-title { -webkit-line-clamp: 2; }
+    }
+  </style>
+</head>
+<body>
+  <script src="/js/common-nav.js"></script>
+  <div class="container" id="mainContent" style="display:none;">
+    <header class="page-header">
+      <div class="page-header__main">
+        <div class="page-header__title-row">
+          <span class="page-header__icon" aria-hidden="true">🏆</span>
+          <h1 class="page-header__title">콘테스트</h1>
+        </div>
+        <p class="page-header__subtitle">우리 학교 친구들과 함께 응모하고, 수상작을 감상해 보세요.</p>
+      </div>
+      <div class="page-header__actions">
+        <button class="btn btn-primary" id="createContestBtn" style="display:none;" onclick="openCreateModal()"><i class="fas fa-plus"></i> 콘테스트 만들기</button>
+      </div>
+    </header>
+
+    <!-- 컨트롤 바 -->
+    <div class="contest-controls">
+      <div class="status-tabs" role="tablist" aria-label="콘테스트 상태">
+        <button class="status-tab active" data-status="active" role="tab" aria-selected="true" onclick="setStatusTab('active')">
+          진행중 <span class="tab-count" id="countActive">0</span>
+        </button>
+        <button class="status-tab" data-status="upcoming" role="tab" aria-selected="false" onclick="setStatusTab('upcoming')">
+          예정 <span class="tab-count" id="countUpcoming">0</span>
+        </button>
+        <button class="status-tab" data-status="past" role="tab" aria-selected="false" onclick="setStatusTab('past')">
+          마감 <span class="tab-count" id="countPast">0</span>
+        </button>
+      </div>
+      <div class="controls-line">
+        <div class="cat-chips" id="catChips">
+          <button class="chip active" data-cat="" onclick="setCategory('')">전체</button>
+          <button class="chip" data-cat="art" onclick="setCategory('art')">🎨 미술</button>
+          <button class="chip" data-cat="music" onclick="setCategory('music')">🎵 음악</button>
+          <button class="chip" data-cat="video" onclick="setCategory('video')">🎬 영상</button>
+          <button class="chip" data-cat="writing" onclick="setCategory('writing')">📝 문학</button>
+          <button class="chip" data-cat="other" onclick="setCategory('other')">✨ 기타</button>
+        </div>
+        <div class="view-toggle" role="group" aria-label="보기 방식">
+          <button id="viewCardBtn" class="active" onclick="setViewMode('card')" title="카드 뷰" aria-label="카드 뷰"><i class="fas fa-th-large"></i></button>
+          <button id="viewListBtn" onclick="setViewMode('list')" title="리스트 뷰" aria-label="리스트 뷰"><i class="fas fa-list"></i></button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 그리드 -->
+    <div id="contestGrid" class="contest-page-grid"></div>
+  </div>
+
+  <!-- ─────── 상세 모달 (90vw) ─────── -->
+  <div class="modal-overlay" id="detailModal">
+    <div class="modal detail-modal">
+      <button class="detail-close" onclick="closeDetailModal()" aria-label="닫기"><i class="fas fa-times"></i></button>
+      <div class="detail-body" id="detailBody"></div>
+      <div class="detail-action-bar" id="detailActionBar"></div>
+    </div>
+  </div>
+
+  <!-- ─────── 응모 모달 (880px) ─────── -->
+  <div class="modal-overlay" id="submitModal">
+    <div class="modal form-modal">
+      <div class="modal-headline"><i class="fas fa-paper-plane"></i> <span id="submitContestName">콘테스트 응모</span></div>
+      <div class="modal-subhead">아래 내용을 채워 작품을 응모해 주세요. <strong style="color:#ef4444;">*</strong> 표시는 필수입니다.</div>
+      <input type="hidden" id="submitEventId" value="">
+
+      <div class="form-group">
+        <label>작품 제목 <span style="color:#ef4444;">*</span></label>
+        <input type="text" id="submitTitle" placeholder="응모 작품 제목을 입력하세요" maxlength="100">
+        <div class="field-error" id="submitTitleError">작품 제목을 입력하세요.</div>
+      </div>
+
+      <div class="upload-section-title"><i class="fas fa-image"></i> 작품 이미지 <span class="opt">(선택)</span></div>
+      <div class="img-attach-box">
+        <div class="img-attach-preview" id="submitImgPreview"><i class="fas fa-image"></i></div>
+        <div class="img-attach-body">
+          <div class="img-attach-name" id="submitImgName">아직 선택한 이미지가 없어요</div>
+          <div class="img-attach-actions">
+            <button type="button" class="media-add-btn" onclick="document.getElementById('submitImageInput').click()"><i class="fas fa-upload"></i> 이미지 선택</button>
+            <button type="button" class="media-add-btn remove" id="submitImgRemoveBtn" style="display:none;" onclick="clearSubmitImage()"><i class="fas fa-trash"></i> 삭제</button>
+          </div>
+        </div>
+      </div>
+      <input type="file" id="submitImageInput" accept="image/*" style="display:none;" onchange="handleSubmitImage(this)">
+
+      <div class="upload-section-title"><i class="fas fa-comment-dots"></i> 작품 설명 <span class="opt">(선택)</span></div>
+      <div class="textarea-with-counter">
+        <textarea id="submitDesc" rows="4" placeholder="작품에 담긴 이야기나 소개를 적어주세요" maxlength="1000" oninput="updateCounter('submitDesc','submitDescCounter',1000)"></textarea>
+        <span class="textarea-counter" id="submitDescCounter">0/1000</span>
+      </div>
+
+      <!-- 콘테스트가 갤러리 공개를 허용할 때만 노출 (publish_to_gallery=1) -->
+      <div class="form-group" id="submitPublishGroup" style="margin-top:18px;">
+        <label class="form-check">
+          <input type="checkbox" id="submitPublishGallery" checked>
+          <span>갤러리에도 함께 공개합니다 (선생님 승인 후 공개)</span>
+        </label>
+      </div>
+      <!-- 콘테스트가 갤러리 비공개일 때 강등 안내 (거짓 약속 제거) -->
+      <div class="upload-approval-notice" id="submitNoGalleryNotice" style="display:none;">
+        <i class="fas fa-info-circle"></i>
+        <div>이 콘테스트 응모작은 <strong>갤러리에 공개되지 않아요.</strong> 응모 내역은 <strong>‘나도예술가 &gt; 내 작품’</strong> 탭에서 확인할 수 있어요.</div>
+      </div>
+      <div class="upload-approval-notice" id="submitGalleryNotice">
+        <i class="fas fa-info-circle"></i>
+        <div>응모작은 <strong>선생님 승인 후</strong> 친구들에게 공개돼요. 응모 직후엔 <strong>‘나도예술가 &gt; 내 작품’</strong> 탭에서 상태를 확인할 수 있어요.</div>
+      </div>
+
+      <div class="modal-actions">
+        <button class="btn-outline" onclick="closeSubmitModal()">취소</button>
+        <button class="btn btn-primary" id="submitEntryBtn" onclick="submitEntry()"><i class="fas fa-paper-plane"></i> 응모 등록</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ─────── 콘테스트 만들기/수정 모달 (880px, teacher/admin) ─────── -->
+  <div class="modal-overlay" id="editModal">
+    <div class="modal form-modal">
+      <div class="modal-headline"><i class="fas fa-trophy"></i> <span id="editModalTitle">콘테스트 만들기</span></div>
+      <div class="modal-subhead">콘테스트 정보를 입력해 주세요. <strong style="color:#ef4444;">*</strong> 표시는 필수입니다.</div>
+      <input type="hidden" id="editEventId" value="">
+
+      <div class="form-group">
+        <label>콘테스트 제목 <span style="color:#ef4444;">*</span></label>
+        <input type="text" id="editTitle" placeholder="예: 봄맞이 우리학교 그림 그리기 대회" maxlength="200">
+        <div class="field-error" id="editTitleError">제목을 입력하세요.</div>
+      </div>
+
+      <div class="form-group">
+        <label>분류</label>
+        <select id="editCategory">
+          <option value="art">🎨 미술</option>
+          <option value="music">🎵 음악</option>
+          <option value="video">🎬 영상</option>
+          <option value="writing">📝 문학</option>
+          <option value="other">✨ 기타</option>
+        </select>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label>시작일 <span style="color:#ef4444;">*</span></label>
+          <input type="date" id="editStartDate">
+          <div class="field-error" id="editStartError">시작일을 입력하세요.</div>
+        </div>
+        <div class="form-group">
+          <label>종료일 <span style="color:#ef4444;">*</span></label>
+          <input type="date" id="editEndDate">
+          <div class="field-error" id="editEndError">종료일은 시작일 이후여야 합니다.</div>
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label>장소 <span class="opt" style="color:#9ca3af;font-weight:500;">(선택)</span></label>
+          <input type="text" id="editLocation" placeholder="예: 금성초등학교 강당" maxlength="200">
+        </div>
+        <div class="form-group">
+          <label>주최 <span class="opt" style="color:#9ca3af;font-weight:500;">(선택)</span></label>
+          <input type="text" id="editHost" placeholder="예: 금성초등학교" maxlength="200">
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label>설명 <span class="opt" style="color:#9ca3af;font-weight:500;">(선택)</span></label>
+        <div class="textarea-with-counter">
+          <textarea id="editDesc" rows="5" placeholder="콘테스트 주제·참가 방법·심사 기준 등을 적어주세요" maxlength="5000" oninput="updateCounter('editDesc','editDescCounter',5000)"></textarea>
+          <span class="textarea-counter" id="editDescCounter">0/5000</span>
+        </div>
+      </div>
+
+      <div class="upload-section-title"><i class="fas fa-image"></i> 대표 썸네일 <span class="opt">(선택)</span></div>
+      <div class="img-attach-box">
+        <div class="img-attach-preview" id="editThumbPreview"><i class="fas fa-image"></i></div>
+        <div class="img-attach-body">
+          <div class="img-attach-name" id="editThumbName">아직 선택한 썸네일이 없어요</div>
+          <div class="img-attach-actions">
+            <button type="button" class="media-add-btn" onclick="document.getElementById('editThumbInput').click()"><i class="fas fa-upload"></i> 썸네일 선택</button>
+            <button type="button" class="media-add-btn remove" id="editThumbRemoveBtn" style="display:none;" onclick="clearEditThumb()"><i class="fas fa-trash"></i> 삭제</button>
+          </div>
+        </div>
+      </div>
+      <input type="file" id="editThumbInput" accept="image/*" style="display:none;" onchange="handleEditThumb(this)">
+
+      <div class="upload-section-title"><i class="fas fa-bullseye"></i> 응모 대상 <span class="opt">(선택)</span></div>
+      <div class="form-group">
+        <label>학교급</label>
+        <div class="target-chip-group" id="editLevelChips">
+          <button type="button" class="target-chip" data-level="elementary" onclick="toggleTargetChip(this)">초등학교</button>
+          <button type="button" class="target-chip" data-level="middle" onclick="toggleTargetChip(this)">중학교</button>
+          <button type="button" class="target-chip" data-level="high" onclick="toggleTargetChip(this)">고등학교</button>
+        </div>
+      </div>
+      <div class="form-group" style="margin-bottom:0;">
+        <label class="form-check">
+          <input type="checkbox" id="editSchoolOnly">
+          <span>우리 학교 학생만 응모할 수 있어요</span>
+        </label>
+      </div>
+
+      <div class="modal-actions">
+        <button class="btn-outline" onclick="closeEditModal()">취소</button>
+        <button class="btn btn-primary" id="editSaveBtn" onclick="saveEvent()"><i class="fas fa-check"></i> 저장</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast-container"><div id="toast" class="toast"></div></div>
+
+  <script>
+    // ────────────────── 상태 ──────────────────
+    let currentUser = null;
+    let currentStatus = 'active';   // active | upcoming | past
+    let currentCategory = '';
+    let viewMode = 'card';          // card | list
+    // status별 items 캐시 (재 fetch 방지)
+    const cache = { active: null, upcoming: null, past: null };
+    const counts = { active: 0, upcoming: 0, past: 0 };
+
+    const catNames = { art: '미술', music: '음악', writing: '문학', literature: '문학', video: '영상', other: '기타' };
+    const catEmojis = { art: '🎨', music: '🎵', writing: '📝', literature: '📝', video: '🎬', other: '✨' };
+    const statusLabels = { active: '진행중', upcoming: '예정', past: '마감' };
+
+    // ────────────────── 유틸 ──────────────────
+    function escHtml(s) { if (s === null || s === undefined) return ''; const d = document.createElement('div'); d.textContent = String(s); return d.innerHTML; }
+    function showToast(msg) { const t = document.getElementById('toast'); t.textContent = msg; t.classList.add('show'); setTimeout(() => t.classList.remove('show'), 2500); }
+    function getCatClass(cat) {
+      if (cat === 'literature') return 'cat-writing';
+      return ['art','music','writing','video','other'].includes(cat) ? 'cat-' + cat : 'cat-other';
+    }
+    function isStaff() { return currentUser && ['teacher','admin'].includes(currentUser.role); }
+    function fmtRange(ev) {
+      if (ev.start_date && ev.end_date) return `${ev.start_date.slice(0,10).replace(/-/g,'.')} ~ ${ev.end_date.slice(0,10).replace(/-/g,'.')}`;
+      if (ev.end_date) return `~ ${ev.end_date.slice(0,10).replace(/-/g,'.')}`;
+      return '';
+    }
+    function fmtRangeShort(ev) {
+      if (ev.start_date && ev.end_date) return `${ev.start_date.slice(5,10).replace('-','.')} ~ ${ev.end_date.slice(5,10).replace('-','.')}`;
+      if (ev.end_date) return `~ ${ev.end_date.slice(5,10).replace('-','.')}`;
+      return '';
+    }
+
+    // D-day 경계값: 종료→closed / 오늘마감(D-0)·D1·D2→danger / D3~7→warn / D8+→safe
+    // ★ 정합 기준: 실 end_date 는 대부분 date-only('2026-07-01'). "그 날 자정까지" 가 아니라
+    //   "그 날 하루 전체가 마감일"이므로, 시:분:초를 버린 로컬 자정 기준 "날짜 차"로 계산한다.
+    //   - 오늘 날짜 == end 날짜 → 오늘 마감(D-0, danger)
+    //   - 오늘 < end → D-(남은일수)
+    //   - 오늘 > end → 종료(closed)
+    //   UTC(toISOString) 비교 금지(KST 시프트 유발). full-ISO 입력도 날짜 부분만 추출해 동일 처리.
+    //   now(기준일) 주입 가능 → 테스트가 고정 "오늘"을 넣어 경계 검증.
+    function calcDDay(endDate, now) {
+      if (!endDate) return { label: '', cls: '' };
+      // end 의 로컬 자정 Date 생성 (date-only 든 full-ISO 든 'YYYY-MM-DD' 부분만 사용)
+      const m = String(endDate).match(/^(\d{4})-(\d{2})-(\d{2})/);
+      if (!m) return { label: '', cls: '' };
+      const endMid = new Date(+m[1], +m[2] - 1, +m[3]); // 로컬 자정
+      const base = now ? new Date(now) : new Date();
+      const nowMid = new Date(base.getFullYear(), base.getMonth(), base.getDate()); // 오늘 로컬 자정
+      // 자정-자정 차이는 DST 영향 없는 정수 일수가 되도록 round 처리
+      const days = Math.round((endMid.getTime() - nowMid.getTime()) / (1000*60*60*24));
+      if (days < 0) return { label: '종료', cls: 'closed' };
+      if (days === 0) return { label: '오늘 마감', cls: 'danger' };
+      if (days <= 2) return { label: `D-${days}`, cls: 'danger' };
+      if (days <= 7) return { label: `D-${days}`, cls: 'warn' };
+      return { label: `D-${days}`, cls: 'safe' };
+    }
+
+    // ────────────────── 데이터 로딩 ──────────────────
+    async function fetchStatus(status) {
+      if (cache[status]) return cache[status];
+      const res = await fetch(`/api/growth/events?status=${status}&limit=50`);
+      const data = await res.json();
+      if (!data.success) throw new Error(data.message || 'load fail');
+      cache[status] = data.items || [];
+      counts[status] = cache[status].length;
+      return cache[status];
+    }
+
+    async function initLoad() {
+      // 3개 status 카운트 동시 조회
+      try {
+        const [a, u, p] = await Promise.all([
+          fetchStatus('active').catch(() => []),
+          fetchStatus('upcoming').catch(() => []),
+          fetchStatus('past').catch(() => [])
+        ]);
+        document.getElementById('countActive').textContent = a.length;
+        document.getElementById('countUpcoming').textContent = u.length;
+        document.getElementById('countPast').textContent = p.length;
+      } catch (e) {}
+      renderGrid();
+    }
+
+    // ────────────────── 렌더 ──────────────────
+    function renderGrid() {
+      const grid = document.getElementById('contestGrid');
+      grid.className = viewMode === 'card' ? 'contest-page-grid' : 'contest-page-list';
+      const items = cache[currentStatus];
+      if (items === null) {
+        // 미로딩 → 스켈레톤 후 fetch
+        grid.className = 'contest-page-grid';
+        grid.innerHTML = Array.from({length: 4}).map(() => `<div class="ct-skeleton"><div class="sk-thumb"></div><div class="sk-line"></div><div class="sk-line short"></div></div>`).join('');
+        fetchStatus(currentStatus).then(() => {
+          document.getElementById('count' + currentStatus.charAt(0).toUpperCase() + currentStatus.slice(1)).textContent = cache[currentStatus].length;
+          renderGrid();
+        }).catch(() => renderError());
+        return;
+      }
+      const filtered = currentCategory ? items.filter(it => getCatClass(it.category) === getCatClass(currentCategory)) : items;
+      if (!filtered.length) { renderEmpty(); return; }
+      grid.innerHTML = filtered.map(ev => viewMode === 'card' ? cardHTML(ev) : rowHTML(ev)).join('');
+    }
+
+    function cardHTML(ev) {
+      const catKey = ev.category || 'other';
+      const catCls = getCatClass(catKey);
+      const dd = calcDDay(ev.end_date);
+      const isPast = currentStatus === 'past';
+      const isUpcoming = currentStatus === 'upcoming';
+      const subs = ev.submission_count || ev.participant_count || 0;
+      const thumb = ev.thumbnail_url
+        ? `<img src="${escHtml(ev.thumbnail_url)}" alt="${escHtml(ev.title)}" onerror="this.onerror=null;this.style.display='none';this.parentElement.insertAdjacentHTML('beforeend','<span class=\\'no-image\\'>${catEmojis[catKey]||'🏆'}</span>')">`
+        : `<span class="no-image">${catEmojis[catKey]||'🏆'}</span>`;
+      // 액션 버튼 분기
+      let actions;
+      if (isPast) {
+        actions = `<button class="btn-outline btn-sm" onclick="event.stopPropagation();showDetail(${ev.id})">상세 보기</button>
+                   <button class="btn-outline btn-sm" onclick="event.stopPropagation();showDetail(${ev.id})"><i class="fas fa-medal"></i> 수상작 보기</button>`;
+      } else if (isUpcoming) {
+        const startTxt = ev.start_date ? ev.start_date.slice(5,10).replace('-','.') : '';
+        actions = `<button class="btn-outline btn-sm" onclick="event.stopPropagation();showDetail(${ev.id})">상세 보기</button>
+                   <button class="btn-primary btn-sm" disabled title="응모는 ${startTxt}부터 가능해요">${startTxt} 응모 시작</button>`;
+      } else {
+        actions = `<button class="btn-outline btn-sm" onclick="event.stopPropagation();showDetail(${ev.id})">상세 보기</button>
+                   <button class="btn-primary btn-sm" onclick="event.stopPropagation();openSubmitModal(${ev.id})">응모하기</button>`;
+      }
+      return `<div class="ct-card ${isPast?'is-past':''}" tabindex="0" role="button" onclick="showDetail(${ev.id})" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();showDetail(${ev.id})}">
+        <div class="ct-thumb ${catCls}">
+          <span class="ct-cat-badge">${catNames[catKey]||catKey}</span>
+          <span class="ct-dday ${dd.cls}">${dd.label}</span>
+          ${thumb}
+        </div>
+        <div class="ct-body">
+          <div class="ct-title">${escHtml(ev.title)}</div>
+          <div class="ct-meta">
+            ${fmtRangeShort(ev) ? `<div><i class="far fa-calendar"></i>${escHtml(fmtRangeShort(ev))}</div>` : ''}
+            ${ev.location ? `<div><i class="fas fa-map-marker-alt"></i>${escHtml(ev.location)}</div>` : ''}
+            <div><i class="fas fa-users"></i>${subs}명 응모</div>
+          </div>
+          <div class="ct-actions">${actions}</div>
+        </div>
+      </div>`;
+    }
+
+    function rowHTML(ev) {
+      const catKey = ev.category || 'other';
+      const catCls = getCatClass(catKey);
+      const dd = calcDDay(ev.end_date);
+      const isPast = currentStatus === 'past';
+      const isUpcoming = currentStatus === 'upcoming';
+      const subs = ev.submission_count || ev.participant_count || 0;
+      const thumb = ev.thumbnail_url
+        ? `<img src="${escHtml(ev.thumbnail_url)}" alt="${escHtml(ev.title)}" onerror="this.onerror=null;this.style.display='none';this.parentElement.insertAdjacentHTML('beforeend','<span class=\\'no-image\\'>${catEmojis[catKey]||'🏆'}</span>')">`
+        : `<span class="no-image">${catEmojis[catKey]||'🏆'}</span>`;
+      let actBtn;
+      if (isPast) actBtn = `<button class="btn-outline btn-sm" onclick="event.stopPropagation();showDetail(${ev.id})"><i class="fas fa-medal"></i> 수상작</button>`;
+      else if (isUpcoming) actBtn = `<button class="btn-primary btn-sm" disabled>응모 예정</button>`;
+      else actBtn = `<button class="btn-primary btn-sm" onclick="event.stopPropagation();openSubmitModal(${ev.id})">응모하기</button>`;
+      return `<div class="ct-row" tabindex="0" role="button" onclick="showDetail(${ev.id})" onkeydown="if(event.key==='Enter'){showDetail(${ev.id})}">
+        <div class="ct-row-thumb ${catCls}">${thumb}</div>
+        <div class="ct-row-info">
+          <div class="ct-row-titleline">
+            <span class="ct-row-badge ${catCls}">${catNames[catKey]||catKey}</span>
+            <span class="ct-row-title">${escHtml(ev.title)}</span>
+          </div>
+          <div class="ct-row-meta">
+            ${fmtRangeShort(ev) ? `<span><i class="far fa-calendar"></i> ${escHtml(fmtRangeShort(ev))}</span>` : ''}
+            ${ev.location ? `<span><i class="fas fa-map-marker-alt"></i> ${escHtml(ev.location)}</span>` : ''}
+            <span><i class="fas fa-users"></i> ${subs}명 응모</span>
+          </div>
+        </div>
+        <div class="ct-row-right">
+          <span class="ct-row-dday ${dd.cls}">${dd.label}</span>
+          <div class="ct-row-actions">
+            <button class="btn-outline btn-sm" onclick="event.stopPropagation();showDetail(${ev.id})">상세</button>
+            ${actBtn}
+          </div>
+        </div>
+      </div>`;
+    }
+
+    function renderEmpty() {
+      const grid = document.getElementById('contestGrid');
+      grid.className = 'contest-page-grid';
+      let icon, title, msg, btn;
+      if (currentCategory) {
+        icon = '🔍';
+        title = `‘${catNames[currentCategory]||currentCategory}’ 콘테스트가 없어요`;
+        msg = '다른 분류를 골라보세요.';
+        btn = `<button class="btn-outline" onclick="setCategory('')"><i class="fas fa-rotate-left"></i> 전체 보기</button>`;
+      } else if (currentStatus === 'active') {
+        icon = '🌱';
+        title = '지금 진행 중인 콘테스트가 없어요';
+        msg = '예정된 콘테스트를 확인해 보세요.';
+        btn = `<button class="btn-primary" onclick="setStatusTab('upcoming')"><i class="far fa-calendar"></i> 예정 콘테스트 보기</button>`;
+      } else if (currentStatus === 'upcoming') {
+        icon = '📅';
+        title = '예정된 콘테스트가 없어요';
+        msg = isStaff() ? '새 콘테스트를 만들어 친구들에게 알려보세요.' : '진행 중인 콘테스트를 확인해 보세요.';
+        btn = isStaff()
+          ? `<button class="btn-primary" onclick="openCreateModal()"><i class="fas fa-plus"></i> 콘테스트 만들기</button>`
+          : `<button class="btn-outline" onclick="setStatusTab('active')"><i class="fas fa-trophy"></i> 진행 중 콘테스트 보기</button>`;
+      } else {
+        icon = '🏁';
+        title = '아직 마감된 콘테스트가 없어요';
+        msg = '진행 중인 콘테스트를 확인해 보세요.';
+        btn = `<button class="btn-outline" onclick="setStatusTab('active')"><i class="fas fa-trophy"></i> 진행 중 콘테스트 보기</button>`;
+      }
+      grid.innerHTML = `<div class="empty-state"><span class="empty-icon">${icon}</span><div class="empty-title">${title}</div><div class="empty-msg">${msg}</div>${btn}</div>`;
+    }
+
+    function renderError() {
+      const grid = document.getElementById('contestGrid');
+      grid.className = 'contest-page-grid';
+      grid.innerHTML = `<div class="empty-state"><span class="empty-icon">⚠️</span><div class="empty-title">콘테스트를 불러오지 못했어요</div><div class="empty-msg">잠시 후 다시 시도해 주세요.</div><button class="btn-primary" onclick="retryLoad()"><i class="fas fa-rotate-right"></i> 다시 시도</button></div>`;
+    }
+
+    function retryLoad() {
+      cache[currentStatus] = null;
+      renderGrid();
+    }
+
+    // ────────────────── 컨트롤 ──────────────────
+    function setStatusTab(status) {
+      currentStatus = status;
+      document.querySelectorAll('.status-tab').forEach(t => {
+        const on = t.dataset.status === status;
+        t.classList.toggle('active', on);
+        t.setAttribute('aria-selected', on ? 'true' : 'false');
+      });
+      syncUrl();
+      renderGrid();
+    }
+    function setCategory(cat) {
+      currentCategory = cat;
+      document.querySelectorAll('#catChips .chip').forEach(c => c.classList.toggle('active', (c.dataset.cat||'') === cat));
+      renderGrid();
+    }
+    function setViewMode(mode) {
+      viewMode = mode;
+      try { localStorage.setItem('contestView', mode); } catch (e) {}
+      document.getElementById('viewCardBtn').classList.toggle('active', mode === 'card');
+      document.getElementById('viewListBtn').classList.toggle('active', mode === 'list');
+      renderGrid();
+    }
+    function syncUrl() {
+      const params = new URLSearchParams();
+      if (currentStatus !== 'active') params.set('tab', currentStatus);
+      const qs = params.toString();
+      history.replaceState(null, '', qs ? `?${qs}` : window.location.pathname);
+    }
+
+    // ────────────────── 상세 모달 ──────────────────
+    async function showDetail(eventId) {
+      const body = document.getElementById('detailBody');
+      const bar = document.getElementById('detailActionBar');
+      body.innerHTML = `<div class="empty-state"><span class="empty-icon">⏳</span><div class="empty-title">불러오는 중...</div></div>`;
+      bar.innerHTML = '';
+      document.getElementById('detailModal').classList.add('active');
+      try {
+        const res = await fetch(`/api/growth/events/${eventId}`);
+        const data = await res.json();
+        if (!data.success) { body.innerHTML = errBox('콘테스트 정보를 불러오지 못했어요'); return; }
+        const ev = data.event;
+        renderDetail(ev);
+      } catch (e) {
+        body.innerHTML = errBox('네트워크 오류가 발생했어요');
+      }
+    }
+    function errBox(msg) {
+      return `<div class="empty-state"><span class="empty-icon">⚠️</span><div class="empty-title">${escHtml(msg)}</div><div class="empty-msg">잠시 후 다시 시도해 주세요.</div></div>`;
+    }
+
+    function statusOfEvent(ev) {
+      const today = new Date().toISOString().slice(0,10);
+      if (ev.closed_at || (ev.end_date && ev.end_date.slice(0,10) < today)) return 'past';
+      if (ev.start_date && ev.start_date.slice(0,10) > today) return 'upcoming';
+      return 'active';
+    }
+
+    async function renderDetail(ev) {
+      const catKey = ev.category || 'other';
+      const catCls = getCatClass(catKey);
+      const dd = calcDDay(ev.end_date);
+      const st = statusOfEvent(ev);
+      const subs = ev.submission_count || ev.participant_count || 0;
+      const body = document.getElementById('detailBody');
+      const bar = document.getElementById('detailActionBar');
+
+      const bannerInner = ev.thumbnail_url
+        ? `<img src="${escHtml(ev.thumbnail_url)}" alt="${escHtml(ev.title)}" onerror="this.onerror=null;this.style.display='none';this.parentElement.insertAdjacentHTML('beforeend','<span class=\\'no-image\\'>${catEmojis[catKey]||'🏆'}</span>')">`
+        : `<span class="no-image">${catEmojis[catKey]||'🏆'}</span>`;
+      const noMediaCls = ev.thumbnail_url ? '' : 'no-media';
+
+      // 대상 칩
+      let targetHtml = '';
+      const targets = [];
+      let levels = ev.target_school_levels;
+      try { if (typeof levels === 'string' && levels.trim().startsWith('[')) levels = JSON.parse(levels); } catch(e){}
+      const levelLabel = { elementary: '초등학교', middle: '중학교', high: '고등학교' };
+      if (Array.isArray(levels)) levels.forEach(l => targets.push(levelLabel[l] || l));
+      else if (typeof levels === 'string' && levels) targets.push(levelLabel[levels] || levels);
+      if (ev.target_school_only) targets.push('우리 학교만');
+      if (targets.length) {
+        targetHtml = `<div class="detail-target"><span class="t-label"><i class="fas fa-bullseye"></i> 응모 대상</span>${targets.map(t=>`<span class="t-chip">${escHtml(t)}</span>`).join('')}</div>`;
+      }
+
+      body.innerHTML = `
+        <div class="detail-banner-wrap">
+          <div class="detail-banner ${catCls} ${noMediaCls}">
+            ${bannerInner}
+            <div class="detail-banner-badges">
+              <span class="b-cat">${catEmojis[catKey]||''} ${catNames[catKey]||catKey}</span>
+              <span class="b-dday ${dd.cls}">${dd.label}</span>
+            </div>
+          </div>
+        </div>
+        <div class="detail-content">
+          <div class="detail-title-row">
+            <h3 class="detail-title">${escHtml(ev.title)}</h3>
+          </div>
+          <div class="detail-meta">
+            ${fmtRange(ev) ? `<span><i class="far fa-calendar"></i> ${escHtml(fmtRange(ev))}</span>` : ''}
+            ${ev.location ? `<span><i class="fas fa-map-marker-alt"></i> ${escHtml(ev.location)}</span>` : ''}
+            ${ev.host_school_name ? `<span><i class="fas fa-school"></i> ${escHtml(ev.host_school_name)}</span>` : ''}
+            <span><i class="fas fa-users"></i> 응모 ${subs}건</span>
+          </div>
+          <div class="detail-desc ${ev.description ? '' : 'empty'}">${ev.description ? escHtml(ev.description) : '아직 등록된 설명이 없어요.'}</div>
+          ${targetHtml}
+          <div class="detail-subs" id="detailSubs"></div>
+        </div>
+      `;
+
+      // 응모작/수상작 영역 — 권한 분기
+      renderDetailSubs(ev, st, subs);
+
+      // 하단 액션 바
+      let actions = `<button class="btn-outline" onclick="closeDetailModal()">닫기</button>`;
+      let right = '';
+      if (st === 'active') {
+        right = `<button class="btn btn-primary" onclick="closeDetailModal();openSubmitModal(${ev.id})"><i class="fas fa-paper-plane"></i> 응모하기</button>`;
+      } else if (st === 'upcoming') {
+        const startTxt = ev.start_date ? ev.start_date.slice(5,10).replace('-','.') : '';
+        right = `<button class="btn btn-primary" disabled title="응모는 ${startTxt}부터 가능해요">${startTxt} 응모 시작</button>`;
+      }
+      // (L-1) past+staff '응모작 관리' 버튼 제거 — 별도 관리화면 없이 같은 상세 모달을
+      //       닫았다 다시 여는 중복 동작이라 혼란만 줬다. 응모작/수상작은 상세 모달
+      //       본문(renderDetailSubs)에서 이미 권한별로 보여준다.
+      // 교사·관리자 수정/삭제 (본인 또는 admin)
+      let staffActions = '';
+      if (isStaff() && (currentUser.role === 'admin' || ev.host_user_id === currentUser.id)) {
+        staffActions = `<button class="btn-outline" onclick='openEditModal(${JSON.stringify(ev).replace(/'/g, "&#39;")})'><i class="fas fa-pen"></i> 수정</button>
+                        <button class="btn-outline" onclick="deleteEvent(${ev.id})" style="color:#ef4444;"><i class="fas fa-trash"></i> 삭제</button>`;
+      }
+      bar.innerHTML = `${staffActions ? `<div class="left-actions">${staffActions}</div>` : ''}${actions}<div class="right">${right}</div>`;
+    }
+
+    async function renderDetailSubs(ev, st, subs) {
+      const el = document.getElementById('detailSubs');
+      if (!el) return;
+      if (isStaff()) {
+        // 교사·관리자: /submissions 실데이터
+        try {
+          const sort = st === 'past' ? 'likes' : 'latest';
+          const res = await fetch(`/api/growth/events/${ev.id}/submissions?sort=${sort}&limit=8`);
+          if (res.status === 403) { el.innerHTML = ''; return; }
+          const data = await res.json();
+          const items = data.items || [];
+          if (!items.length) {
+            el.innerHTML = `<div class="detail-subs-head"><i class="fas fa-images" style="color:var(--brand-1);"></i> ${st==='past'?'인기 응모작':'응모작 미리보기'}</div><div class="detail-subs-count-only">아직 등록된 응모작이 없어요.</div>`;
+            return;
+          }
+          const total = data.total || items.length;
+          const label = st === 'past' ? '인기 응모작' : '응모작 미리보기';
+          const cards = items.map((s, i) => {
+            const sc = getCatClass(ev.category || 'other');
+            const img = s.image_url
+              ? `<img src="${escHtml(s.image_url)}" alt="${escHtml(s.title)}" onerror="this.onerror=null;this.style.display='none';this.parentElement.insertAdjacentHTML('beforeend','<span class=\\'no-image\\'>${catEmojis[ev.category]||'🎨'}</span>')">`
+              : `<span class="no-image">${catEmojis[ev.category]||'🎨'}</span>`;
+            const rank = st === 'past' ? `<span class="rank-pill">${i+1}</span>` : '';
+            return `<div class="sub-thumb"><div class="sub-thumb-img ${sc}">${rank}${img}</div><div class="sub-thumb-body"><div class="sub-thumb-title">${escHtml(s.title)}</div><div class="sub-thumb-author">${escHtml(s.author_name||'익명')}</div></div></div>`;
+          }).join('');
+          el.innerHTML = `<div class="detail-subs-head"><i class="fas fa-images" style="color:var(--brand-1);"></i> ${label} <span class="count-pill">응모 ${total}건</span></div><div class="subs-grid">${cards}</div>`;
+        } catch (e) { el.innerHTML = ''; }
+      } else {
+        // 학생: /submissions 호출 금지. 공개 갤러리 링크 또는 카운트만.
+        if (subs > 0) {
+          el.innerHTML = `<div class="detail-subs-head"><i class="fas fa-images" style="color:var(--brand-1);"></i> 응모작 <span class="count-pill">응모 ${subs}건</span></div>
+            <div class="detail-subs-link"><a href="/plus/gallery.html"><i class="fas fa-arrow-right"></i> 갤러리에서 출품작 보러 가기</a></div>`;
+        } else {
+          el.innerHTML = '';
+        }
+      }
+    }
+
+    function closeDetailModal() { document.getElementById('detailModal').classList.remove('active'); }
+    document.getElementById('detailModal').addEventListener('click', function(e) { if (e.target === this) closeDetailModal(); });
+
+    // ────────────────── 응모 모달 ──────────────────
+    let submitImageUrl = null;
+    function openSubmitModal(eventId) {
+      const ev = findEvent(eventId);
+      document.getElementById('submitEventId').value = eventId;
+      document.getElementById('submitContestName').textContent = ev ? `‘${ev.title}’ 응모` : '콘테스트 응모';
+      document.getElementById('submitTitle').value = '';
+      document.getElementById('submitDesc').value = '';
+      updateCounter('submitDesc','submitDescCounter',1000);
+      // 콘테스트가 갤러리 공개를 허용(publish_to_gallery!==0)할 때만 체크박스 노출.
+      // 비공개면 체크박스를 숨기고 강등 안내로 거짓 약속을 제거한다.
+      const allowGallery = !ev || (ev.publish_to_gallery !== 0 && ev.publish_to_gallery !== false);
+      const pubGroup = document.getElementById('submitPublishGroup');
+      const galleryNotice = document.getElementById('submitGalleryNotice');
+      const noGalleryNotice = document.getElementById('submitNoGalleryNotice');
+      document.getElementById('submitPublishGallery').checked = allowGallery; // 기본 체크 유지
+      pubGroup.style.display = allowGallery ? '' : 'none';
+      galleryNotice.style.display = allowGallery ? '' : 'none';
+      noGalleryNotice.style.display = allowGallery ? 'none' : '';
+      clearSubmitImage();
+      clearFieldError('submitTitle');
+      document.getElementById('submitModal').classList.add('active');
+      setTimeout(() => document.getElementById('submitTitle').focus(), 100);
+    }
+    function closeSubmitModal() { document.getElementById('submitModal').classList.remove('active'); }
+    document.getElementById('submitModal').addEventListener('click', function(e) { if (e.target === this) closeSubmitModal(); });
+
+    function findEvent(id) {
+      for (const k of ['active','upcoming','past']) {
+        if (cache[k]) { const f = cache[k].find(x => x.id === Number(id)); if (f) return f; }
+      }
+      return null;
+    }
+
+    async function handleSubmitImage(input) {
+      const file = input.files[0];
+      if (!file) return;
+      document.getElementById('submitImgName').textContent = '업로드 중...';
+      try {
+        const fd = new FormData(); fd.append('file', file);
+        const up = await fetch('/api/upload?type=gallery', { method: 'POST', body: fd });
+        const upd = await up.json();
+        if (upd.success) {
+          submitImageUrl = upd.file.url;
+          document.getElementById('submitImgPreview').innerHTML = `<img src="${escHtml(submitImageUrl)}" alt="미리보기">`;
+          document.getElementById('submitImgName').textContent = file.name;
+          document.getElementById('submitImgRemoveBtn').style.display = 'inline-flex';
+        } else { showToast('이미지 업로드 실패'); clearSubmitImage(); }
+      } catch (e) { showToast('이미지 업로드 오류'); clearSubmitImage(); }
+    }
+    function clearSubmitImage() {
+      submitImageUrl = null;
+      document.getElementById('submitImageInput').value = '';
+      document.getElementById('submitImgPreview').innerHTML = '<i class="fas fa-image"></i>';
+      document.getElementById('submitImgName').textContent = '아직 선택한 이미지가 없어요';
+      document.getElementById('submitImgRemoveBtn').style.display = 'none';
+    }
+
+    async function submitEntry() {
+      const eventId = document.getElementById('submitEventId').value;
+      const title = document.getElementById('submitTitle').value.trim();
+      if (!title) { setFieldError('submitTitle', '작품 제목을 입력하세요.'); document.getElementById('submitTitle').focus(); return; }
+      clearFieldError('submitTitle');
+      const btn = document.getElementById('submitEntryBtn');
+      btn.disabled = true;
+      try {
+        const res = await fetch(`/api/growth/events/${eventId}/submit`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            title,
+            description: document.getElementById('submitDesc').value,
+            image_url: submitImageUrl,
+            publish_to_gallery: document.getElementById('submitPublishGallery').checked ? 1 : 0
+          })
+        });
+        const data = await res.json();
+        if (data.success) {
+          showToast('응모가 완료되었어요!');
+          closeSubmitModal();
+          invalidateAndReload();
+        } else { showToast(data.message || '응모에 실패했어요'); }
+      } catch (e) { showToast('네트워크 오류'); }
+      finally { btn.disabled = false; }
+    }
+
+    // ────────────────── 만들기 / 수정 모달 ──────────────────
+    let editThumbUrl = null;
+    function openCreateModal() {
+      document.getElementById('editModalTitle').textContent = '콘테스트 만들기';
+      document.getElementById('editEventId').value = '';
+      document.getElementById('editTitle').value = '';
+      document.getElementById('editCategory').value = 'art';
+      document.getElementById('editStartDate').value = '';
+      document.getElementById('editEndDate').value = '';
+      document.getElementById('editLocation').value = '';
+      document.getElementById('editHost').value = currentUser && currentUser.school_name ? currentUser.school_name : '';
+      document.getElementById('editDesc').value = '';
+      updateCounter('editDesc','editDescCounter',5000);
+      document.getElementById('editSchoolOnly').checked = false;
+      document.querySelectorAll('#editLevelChips .target-chip').forEach(c => c.classList.remove('active'));
+      clearEditThumb();
+      ['editTitle','editStartDate','editEndDate'].forEach(clearFieldError);
+      document.getElementById('editModal').classList.add('active');
+      setTimeout(() => document.getElementById('editTitle').focus(), 100);
+    }
+    function openEditModal(ev) {
+      document.getElementById('editModalTitle').textContent = '콘테스트 수정';
+      document.getElementById('editEventId').value = ev.id;
+      document.getElementById('editTitle').value = ev.title || '';
+      document.getElementById('editCategory').value = ['art','music','video','writing','other'].includes(ev.category) ? ev.category : 'other';
+      document.getElementById('editStartDate').value = ev.start_date ? ev.start_date.slice(0,10) : '';
+      document.getElementById('editEndDate').value = ev.end_date ? ev.end_date.slice(0,10) : '';
+      document.getElementById('editLocation').value = ev.location || '';
+      document.getElementById('editHost').value = ev.host_school_name || '';
+      document.getElementById('editDesc').value = ev.description || '';
+      updateCounter('editDesc','editDescCounter',5000);
+      document.getElementById('editSchoolOnly').checked = !!ev.target_school_only;
+      let levels = ev.target_school_levels;
+      try { if (typeof levels === 'string' && levels.trim().startsWith('[')) levels = JSON.parse(levels); } catch(e){}
+      const lvArr = Array.isArray(levels) ? levels : (levels ? [levels] : []);
+      document.querySelectorAll('#editLevelChips .target-chip').forEach(c => c.classList.toggle('active', lvArr.includes(c.dataset.level)));
+      clearEditThumb();
+      if (ev.thumbnail_url) {
+        editThumbUrl = ev.thumbnail_url;
+        document.getElementById('editThumbPreview').innerHTML = `<img src="${escHtml(editThumbUrl)}" alt="썸네일">`;
+        document.getElementById('editThumbName').textContent = '등록된 썸네일';
+        document.getElementById('editThumbRemoveBtn').style.display = 'inline-flex';
+      }
+      ['editTitle','editStartDate','editEndDate'].forEach(clearFieldError);
+      document.getElementById('editModal').classList.add('active');
+    }
+    function closeEditModal() { document.getElementById('editModal').classList.remove('active'); }
+    document.getElementById('editModal').addEventListener('click', function(e) { if (e.target === this) closeEditModal(); });
+
+    function toggleTargetChip(btn) { btn.classList.toggle('active'); }
+
+    async function handleEditThumb(input) {
+      const file = input.files[0];
+      if (!file) return;
+      document.getElementById('editThumbName').textContent = '업로드 중...';
+      try {
+        const fd = new FormData(); fd.append('file', file);
+        const up = await fetch('/api/growth/events/upload-thumbnail', { method: 'POST', body: fd });
+        const upd = await up.json();
+        if (upd.success) {
+          editThumbUrl = upd.url;
+          document.getElementById('editThumbPreview').innerHTML = `<img src="${escHtml(editThumbUrl)}" alt="썸네일">`;
+          document.getElementById('editThumbName').textContent = file.name;
+          document.getElementById('editThumbRemoveBtn').style.display = 'inline-flex';
+        } else { showToast(upd.message || '썸네일 업로드 실패'); clearEditThumb(); }
+      } catch (e) { showToast('썸네일 업로드 오류'); clearEditThumb(); }
+    }
+    function clearEditThumb() {
+      editThumbUrl = null;
+      document.getElementById('editThumbInput').value = '';
+      document.getElementById('editThumbPreview').innerHTML = '<i class="fas fa-image"></i>';
+      document.getElementById('editThumbName').textContent = '아직 선택한 썸네일이 없어요';
+      document.getElementById('editThumbRemoveBtn').style.display = 'none';
+    }
+
+    async function saveEvent() {
+      const id = document.getElementById('editEventId').value;
+      const title = document.getElementById('editTitle').value.trim();
+      const start = document.getElementById('editStartDate').value;
+      const end = document.getElementById('editEndDate').value;
+      let ok = true;
+      if (!title) { setFieldError('editTitle', '제목을 입력하세요.'); ok = false; } else clearFieldError('editTitle');
+      if (!start) { setFieldError('editStartDate', '시작일을 입력하세요.'); ok = false; } else clearFieldError('editStartDate');
+      if (!end) { setFieldError('editEndDate', '종료일을 입력하세요.'); ok = false; }
+      else if (start && end < start) { setFieldError('editEndDate', '종료일은 시작일 이후여야 합니다.'); ok = false; }
+      else clearFieldError('editEndDate');
+      if (!ok) return;
+
+      const levels = Array.from(document.querySelectorAll('#editLevelChips .target-chip.active')).map(c => c.dataset.level);
+      const payload = {
+        title,
+        category: document.getElementById('editCategory').value,
+        start_date: start,
+        end_date: end,
+        location: document.getElementById('editLocation').value.trim() || null,
+        host_school_name: document.getElementById('editHost').value.trim() || null,
+        description: document.getElementById('editDesc').value.trim() || null,
+        thumbnail_url: editThumbUrl,
+        target_school_levels: levels.length ? levels : null,
+        target_school_only: document.getElementById('editSchoolOnly').checked ? 1 : 0
+      };
+      const btn = document.getElementById('editSaveBtn');
+      btn.disabled = true;
+      try {
+        const url = id ? `/api/growth/events/${id}` : '/api/growth/events';
+        const method = id ? 'PUT' : 'POST';
+        const res = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+        const data = await res.json();
+        if (data.success) {
+          showToast(id ? '콘테스트가 수정되었어요' : '콘테스트가 만들어졌어요');
+          closeEditModal();
+          invalidateAndReload();
+        } else { showToast(data.message || '저장에 실패했어요'); }
+      } catch (e) { showToast('네트워크 오류'); }
+      finally { btn.disabled = false; }
+    }
+
+    async function deleteEvent(id) {
+      if (!confirm('이 콘테스트를 삭제할까요? 삭제하면 되돌릴 수 없어요.')) return;
+      try {
+        const res = await fetch(`/api/growth/events/${id}`, { method: 'DELETE' });
+        const data = await res.json();
+        if (data.success) {
+          showToast('삭제되었어요');
+          closeDetailModal();
+          invalidateAndReload();
+        } else { showToast(data.message || '삭제에 실패했어요'); }
+      } catch (e) { showToast('네트워크 오류'); }
+    }
+
+    function invalidateAndReload() {
+      cache.active = null; cache.upcoming = null; cache.past = null;
+      initLoad();
+    }
+
+    // ────────────────── 폼 헬퍼 ──────────────────
+    function setFieldError(inputId, msg) {
+      const grp = document.getElementById(inputId).closest('.form-group');
+      if (grp) { grp.classList.add('has-error'); const e = grp.querySelector('.field-error'); if (e && msg) e.textContent = msg; }
+    }
+    function clearFieldError(inputId) {
+      const grp = document.getElementById(inputId).closest('.form-group');
+      if (grp) grp.classList.remove('has-error');
+    }
+    function updateCounter(taId, cId, max) {
+      const ta = document.getElementById(taId), c = document.getElementById(cId);
+      if (!ta || !c) return;
+      const len = ta.value.length;
+      c.textContent = `${len}/${max}`;
+      c.classList.toggle('warn', len > max * 0.8 && len <= max);
+      c.classList.toggle('danger', len >= max);
+    }
+
+    // ────────────────── 초기화 ──────────────────
+    window.addEventListener('dacheim:user-loaded', (e) => {
+      currentUser = e.detail;
+      document.getElementById('mainContent').style.display = 'block';
+
+      // teacher/admin → 만들기 버튼
+      if (isStaff()) document.getElementById('createContestBtn').style.display = 'inline-flex';
+
+      // 뷰 모드 복원
+      try { const v = localStorage.getItem('contestView'); if (v === 'list' || v === 'card') viewMode = v; } catch (e) {}
+      document.getElementById('viewCardBtn').classList.toggle('active', viewMode === 'card');
+      document.getElementById('viewListBtn').classList.toggle('active', viewMode === 'list');
+
+      // URL ?tab= 복원
+      const tab = new URLSearchParams(window.location.search).get('tab');
+      if (['active','upcoming','past'].includes(tab)) currentStatus = tab;
+      document.querySelectorAll('.status-tab').forEach(t => {
+        const on = t.dataset.status === currentStatus;
+        t.classList.toggle('active', on);
+        t.setAttribute('aria-selected', on ? 'true' : 'false');
+      });
+
+      initLoad();
+
+      // ESC로 모달 닫기
+      document.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Escape') {
+          ['detailModal','submitModal','editModal'].forEach(m => {
+            const el = document.getElementById(m);
+            if (el && el.classList.contains('active')) el.classList.remove('active');
+          });
+        }
+      });
+    });
+  </script>
+</body>
+</html>
