@@ -300,6 +300,49 @@
       filter: drop-shadow(0 0 4px rgba(37,99,235,.45));
     }
     .map-world.highlight-mode .svg-node.hl-center{ animation: hlCenterBreath 1.8s ease-in-out infinite; }
+
+    /* ==== 선택 노드 표시 — 줌 무관 식별(앰버 전용색) ==== */
+    /* (1) non-scaling SVG 링: .map-svg 내부에 노드 외곽 +4px rect로 그려짐.
+       vector-effect:non-scaling-stroke 로 stroke 두께(3px)가 줌에 관계없이 일정.
+       앰버(#F59E0B) = 선택 전용색(✓green·▶blue·🔍보라·○회색·🔒회색과 충돌 없음). */
+    .map-svg .map-sel-ring{
+      fill:none; stroke:#F59E0B; stroke-width:3;
+      vector-effect:non-scaling-stroke;
+      animation: selRingBreath 1.8s ease-in-out infinite;
+      pointer-events:none;
+    }
+    @keyframes selRingBreath{
+      0%,100%{ stroke:#F59E0B; stroke-opacity:1; }
+      50%    { stroke:#FBBF24; stroke-opacity:.55; }
+    }
+    /* (2) 화면 고정 핀 배지: #mapCanvas 직속(맵월드 밖)이라 줌과 무관하게 항상 ~26px.
+       JS가 transform마다 선택 노드의 화면 좌표로 재배치. scale 0.10에서도 "여기 눌렀음" 식별. */
+    .map-sel-pin{
+      position:absolute; z-index:48;
+      width:26px; height:26px; border-radius:50%;
+      display:flex; align-items:center; justify-content:center;
+      font-size:15px; line-height:1;
+      background:#F59E0B; color:#fff;
+      border:2px solid #fff;
+      box-shadow:0 3px 10px rgba(245,158,11,.5);
+      transform:translate(-50%,-50%);
+      pointer-events:none;
+      animation: selPinPop 220ms ease-out, selPinBreath 1.8s ease-in-out infinite 220ms;
+    }
+    .map-sel-pin[hidden]{ display:none !important; }
+    @keyframes selPinPop{
+      from{ transform:translate(-50%,-50%) scale(.4); opacity:0; }
+      to  { transform:translate(-50%,-50%) scale(1);  opacity:1; }
+    }
+    @keyframes selPinBreath{
+      0%,100%{ box-shadow:0 3px 10px rgba(245,158,11,.5); }
+      50%    { box-shadow:0 3px 16px rgba(245,158,11,.85); }
+    }
+    @media (prefers-reduced-motion: reduce){
+      .map-svg .map-sel-ring{ animation:none; }
+      .map-sel-pin{ animation:none; }
+    }
+
     .map-world.smooth-transform{ transition: transform .42s cubic-bezier(.4,0,.2,1); }
 
     .hl-close-btn{
@@ -2204,6 +2247,15 @@
     .ns-btn-ghost:hover{ background:#F3F4F6; border-color:#9CA3AF; color:#4B5563; }
     .ns-btn-ghost:active{ background:#E5E7EB; }
     .ns-btn-primary:disabled, .ns-btn-ghost:disabled{ opacity:.5; cursor:not-allowed; }
+    /* 취소 — 보조 링크형(두 CTA보다 톤 다운, 행 아래 우측) */
+    .ns-link-cancel{
+      display:block; margin:10px 0 0 auto; padding:6px 8px;
+      font-size:14px; font-weight:600; font-family:inherit;
+      color:#9CA3AF; background:transparent; border:none; border-radius:6px;
+      cursor:pointer; transition:color .15s, background .15s;
+    }
+    .ns-link-cancel:hover{ color:#4B5563; background:#F3F4F6; }
+    .ns-link-cancel:focus-visible{ outline:2px solid #2563eb; outline-offset:2px; }
     .node-start-keyhint{
       font-size:13px; font-weight:400; color:#9CA3AF;
       margin-top:10px; text-align:right;
@@ -2241,7 +2293,9 @@
         to{ opacity:0; transform:translateY(16px); }
       }
       .node-start-title{ font-size:19px; }
-      .ns-btn{ flex:1 1 auto; min-width:0; padding:13px 14px; font-size:16px; }
+      /* 모바일 — CTA 2개 동일 폭으로 가로 풀폭(flex-basis:0 으로 균등 분할) */
+      .node-start-actions{ gap:8px; }
+      .ns-btn, .ns-btn-ghost, .ns-btn-primary{ flex:1 1 0; min-width:0; padding:13px 12px; font-size:16px; }
       .node-start-keyhint{ display:none; }
       .node-start-hint2{ display:none !important; }
     }
@@ -2457,8 +2511,8 @@
           <div class="map-canvas" id="mapCanvas">
             <div class="spinner"><i class="fas fa-spinner"></i><p style="margin-top:8px">학습맵 로딩 중...</p></div>
           </div>
-          <button id="hlCloseBtn" class="hl-close-btn" title="하이라이트 해제하고 학습맵 전체 표시 (Esc)" aria-label="하이라이트 해제하고 학습맵 전체 표시" style="display:none" onclick="clearFocusMode()">
-            <i class="fas fa-xmark"></i> 하이라이트 해제
+          <button id="hlCloseBtn" class="hl-close-btn" title="선택 해제하고 학습맵 전체 표시 (Esc)" aria-label="선택 해제하고 학습맵 전체 표시" style="display:none" onclick="clearFocusMode()">
+            <i class="fas fa-xmark"></i> 선택 해제
           </button>
         </section>
       </div>
@@ -2624,10 +2678,11 @@
       <i class="fas fa-search-plus"></i> 맵에서 이 단원 확대
     </button>
     <div class="node-start-actions">
-      <button type="button" class="ns-btn ns-btn-ghost" id="nodeStartCancel">취소</button>
-      <button type="button" class="ns-btn ns-btn-primary" id="nodeStartGo">학습 시작 <i class="fas fa-arrow-right"></i></button>
+      <button type="button" class="ns-btn ns-btn-ghost" id="nodeStartGo">학습 흐름 보기</button>
+      <button type="button" class="ns-btn ns-btn-primary" id="nodeStartList"><i class="fas fa-list-ul"></i> 학습 목록 바로가기</button>
     </div>
-    <div class="node-start-keyhint"><kbd>Enter</kbd> 시작 · <kbd>Esc</kbd> 취소</div>
+    <button type="button" class="ns-link-cancel" id="nodeStartCancel">취소</button>
+    <div class="node-start-keyhint"><kbd>Enter</kbd> 학습 목록 · <kbd>Esc</kbd> 취소</div>
   </div>
 </div>
 
@@ -4414,6 +4469,8 @@ function updateMapTransform(animMs) {
   }
   world.style.transform = `translate(${mapState.x}px, ${mapState.y}px) scale(${mapState.scale})`;
   const zl = $('zoomLevel'); if (zl) zl.textContent = Math.round(mapState.scale * 100) + '%';
+  // 선택 핀(화면고정)을 현재 transform 기준으로 재배치
+  try { if (typeof _positionSelPin === 'function') _positionSelPin(); } catch(_) {}
 }
 
 function zoomBy(f) {
@@ -4697,6 +4754,86 @@ function focusNodeWithConnections(nodeId) {
   }, 520);
 }
 
+/* ============================================================
+   선택 노드 표시 — 줌 무관 식별 (선택칩: non-scaling 링 + 화면고정 핀)
+   - 링: .map-svg 안에 노드 외곽 +4px <rect>, vector-effect:non-scaling-stroke
+         → 줌이 작아져도 stroke 3px 유지(앰버, 선택 전용색).
+   - 핀: #mapCanvas 직속 HTML 배지(~26px 고정), JS가 transform마다 화면좌표로 재배치
+         → scale 0.10 에서도 "여기 눌렀음" 위치를 항상 식별.
+   ============================================================ */
+let _selChipNodeId = null;
+
+function _ensureSelPin(){
+  const canvas = document.getElementById('mapCanvas');
+  if (!canvas) return null;
+  let pin = document.getElementById('mapSelPin');
+  if (!pin){
+    pin = document.createElement('div');
+    pin.id = 'mapSelPin';
+    pin.className = 'map-sel-pin';
+    pin.setAttribute('aria-hidden', 'true');
+    pin.hidden = true;
+    pin.textContent = '📍';
+    canvas.appendChild(pin);
+  }
+  return pin;
+}
+
+// 선택 노드의 화면(캔버스 기준) 좌표를 mapState로 계산해 핀을 재배치.
+// 노드 우상단(220×130 기준 우상귀)에 살짝 띄워 표시.
+function _positionSelPin(){
+  const pin = document.getElementById('mapSelPin');
+  if (!pin || !_selChipNodeId) return;
+  const n = (typeof nodeById !== 'undefined' && nodeById[_selChipNodeId]) || null;
+  if (!n || typeof n._x !== 'number' || typeof n._y !== 'number'){ pin.hidden = true; return; }
+  const s = mapState.scale, ox = mapState.x, oy = mapState.y;
+  // 노드 우상단 모서리(맵월드 좌표) → 화면(캔버스) 좌표
+  const cornerX = (n._x + 220) * s + ox;
+  const cornerY = (n._y) * s + oy;
+  pin.style.left = cornerX + 'px';
+  pin.style.top  = cornerY + 'px';
+  pin.hidden = false;
+}
+
+// .map-svg 안에 선택 링(rect) 1개 생성/갱신
+function _setSelRing(nodeId){
+  const world = document.getElementById('mapWorld') || document.querySelector('.map-world');
+  if (!world) return;
+  const svg = world.querySelector('svg.map-svg');
+  // 기존 링 제거
+  world.querySelectorAll('rect.map-sel-ring').forEach(r => r.remove());
+  if (!svg || !nodeId) return;
+  const n = (typeof nodeById !== 'undefined' && nodeById[nodeId]) || null;
+  if (!n || typeof n._x !== 'number' || typeof n._y !== 'number') return;
+  const NS = 'http://www.w3.org/2000/svg';
+  const rect = document.createElementNS(NS, 'rect');
+  rect.setAttribute('class', 'map-sel-ring');
+  rect.setAttribute('x', String(n._x - 4));
+  rect.setAttribute('y', String(n._y - 4));
+  rect.setAttribute('width', '228');   // 220 + 4*2
+  rect.setAttribute('height', '138');  // 130 + 4*2
+  rect.setAttribute('rx', '8');
+  rect.setAttribute('ry', '8');
+  svg.appendChild(rect); // SVG 끝에 추가 → 다른 엣지 위에 렌더
+}
+
+// 선택칩(링+핀) 표시 — highlightFullChain 내부에서 호출
+function _showSelChip(nodeId){
+  _selChipNodeId = nodeId || null;
+  _setSelRing(nodeId);
+  _ensureSelPin();
+  _positionSelPin();
+}
+
+// 선택칩 제거 — clearHighlight에서 호출
+function _clearSelChip(){
+  _selChipNodeId = null;
+  const world = document.getElementById('mapWorld') || document.querySelector('.map-world');
+  if (world) world.querySelectorAll('rect.map-sel-ring').forEach(r => r.remove());
+  const pin = document.getElementById('mapSelPin');
+  if (pin) pin.hidden = true;
+}
+
 /**
  * 전체 BFS 체인 강조 + fit-zoom 통합.
  * 클릭 노드(.hl-center) + 전체 체인(.hl-target) + 체인 내부 엣지(.hl-edge).
@@ -4720,6 +4857,8 @@ function highlightFullChain(nodeId) {
     const f = p.getAttribute('data-from'), t = p.getAttribute('data-to');
     if (all.has(f) && all.has(t)) p.classList.add('hl-edge');
   });
+  // 선택칩(줌 무관 링+핀) — 줌아웃에도 클릭한 노드를 식별
+  try { _showSelChip(nodeId); } catch(_) {}
   return { all, ups: chain.ups, downs: chain.downs };
 }
 
@@ -4742,6 +4881,8 @@ function clearHighlight() {
     el.classList.remove('hl-center', 'hl-target');
   });
   world.querySelectorAll('.map-svg path.edge-line.hl-edge').forEach(p => p.classList.remove('hl-edge'));
+  // 선택칩(링+핀) 제거
+  try { _clearSelChip(); } catch(_) {}
 }
 
 /**
@@ -4862,11 +5003,14 @@ function _ngFillPanel(nodeId){
   const hint2 = _ngEl('nodeStartHint2');
   if (hint2) hint2.hidden = (_ngResolveLevel(nodeId) === 3);
 
-  // 학습 시작 버튼 라벨 (상태별)
+  // "학습 흐름 보기"(ghost) — 흐름 시각화 진입. 라벨 고정(상태 무관).
   const goBtn = _ngEl('nodeStartGo');
-  if (goBtn){
+  if (goBtn){ goBtn.innerHTML = '학습 흐름 보기'; }
+  // "학습 목록 바로가기"(primary) — 상태별 동사 + 목록 아이콘. lessonCount 0이면 비활성 안내.
+  const listBtn = _ngEl('nodeStartList');
+  if (listBtn){
     const label = _ngGoLabel(status, lessonCount);
-    goBtn.innerHTML = `${escHtml(label)} <i class="fas fa-arrow-right"></i>`;
+    listBtn.innerHTML = `<i class="fas fa-list-ul"></i> ${escHtml(label === '학습 시작' ? '학습 목록 바로가기' : label)}`;
   }
 
   // 선수/후속 한 줄 — 일단 숨김(비동기로 채움)
@@ -4930,10 +5074,11 @@ function _ngAttachKeys(){
     if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar'){
       if (!_nodeGuideState.keyArmed) return; // 디바운스: 진입 직후 잔향 무시
       const ae = document.activeElement;
-      // 다른 인터랙티브 요소(취소/닫기 버튼 등)에 포커스면 가로채지 않음 — Enter만 가로챔
-      if (e.key === 'Enter' && ae && (ae.id === 'nodeStartCancel' || ae.id === 'nodeStartClose')) return;
+      // 보조 요소(취소/닫기/흐름보기 버튼)에 포커스면 가로채지 않음 — 해당 버튼 자체 동작에 위임
+      if (e.key === 'Enter' && ae && (ae.id === 'nodeStartCancel' || ae.id === 'nodeStartClose' || ae.id === 'nodeStartGo' || ae.id === 'nodeStartZoom')) return;
       e.preventDefault(); e.stopPropagation();
-      proceedNodeGuide();
+      // 기본 Enter 액션 = 주 CTA(학습 목록 바로가기)
+      proceedNodeGuideToList();
     }
   };
   _nodeGuideState.keyHandler = handler;
@@ -4983,9 +5128,9 @@ function startNodeGuidePanel(nodeId, level){
   // 1프레임 후 키 활성화(Enter로 노드를 연 경우 같은 Enter가 바로 시작되는 오발화 방지)
   requestAnimationFrame(() => { if (_nodeGuideState) _nodeGuideState.keyArmed = true; });
 
-  // 자동 포커스 — "학습 시작" 버튼 (능동 진입 기본)
+  // 자동 포커스 — 주 CTA "학습 목록 바로가기" (능동 진입 기본, Enter=목록)
   setTimeout(() => {
-    try { _ngEl('nodeStartGo')?.focus({ preventScroll: true }); } catch(_) {}
+    try { (_ngEl('nodeStartList') || _ngEl('nodeStartGo'))?.focus({ preventScroll: true }); } catch(_) {}
   }, 30);
 }
 
@@ -5028,7 +5173,7 @@ function resetNodeGuide(newNodeId, newLevel){
   _ngFetchRelate(newNodeId, info.status);
   _ngAttachKeys();
   requestAnimationFrame(() => { if (_nodeGuideState) _nodeGuideState.keyArmed = true; });
-  setTimeout(() => { try { _ngEl('nodeStartGo')?.focus({ preventScroll: true }); } catch(_) {} }, 30);
+  setTimeout(() => { try { (_ngEl('nodeStartList') || _ngEl('nodeStartGo'))?.focus({ preventScroll: true }); } catch(_) {} }, 30);
 }
 
 function _ngProceed(nodeId, level){
@@ -5067,6 +5212,21 @@ function proceedNodeGuide(){
   _ngProceed(nodeId, level);
 }
 
+// "학습 목록 바로가기"(primary) — chainGraphModal 건너뛰고 드로어("이 단원의 학습 목록") 직행.
+// 3클릭(노드→흐름모달→목록) → 2클릭(노드→목록) 최단 진입.
+function proceedNodeGuideToList(){
+  if (!_nodeGuideState) return;
+  const nodeId = _nodeGuideState.nodeId;
+  _ngDetachKeys();
+  _ngCleanupCard();
+  _nodeGuideState = null;
+  // 사용자 상호작용 마킹(자동 오픈 차단 회피) + 드로어 직행(흐름모달·하이라이트게이트 우회)
+  try { userInteracted = true; } catch(_) {}
+  try {
+    openDrawer(nodeId, { force: true, skipChainGraph: true, skipHighlightGate: true });
+  } catch(_) {}
+}
+
 // SVG 노드 클릭 핸들러 — 기존 inline onclick에서 호출 (openDrawer 대신)
 function handleSvgNodeClick(nodeId){
   if (!nodeId) return;
@@ -5090,6 +5250,8 @@ function handleSvgNodeClick(nodeId){
 document.addEventListener('DOMContentLoaded', function(){
   const goBtn = document.getElementById('nodeStartGo');
   if (goBtn) goBtn.addEventListener('click', function(e){ e.preventDefault(); proceedNodeGuide(); });
+  const listBtn = document.getElementById('nodeStartList');
+  if (listBtn) listBtn.addEventListener('click', function(e){ e.preventDefault(); proceedNodeGuideToList(); });
   const cancelBtn = document.getElementById('nodeStartCancel');
   if (cancelBtn) cancelBtn.addEventListener('click', function(e){ e.preventDefault(); cancelNodeGuide(); });
   const closeBtn = document.getElementById('nodeStartClose');
