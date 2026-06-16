@@ -1343,7 +1343,10 @@
       const avg = withData.length > 0 ? Math.round(withData.reduce((s, l) => s + l.score, 0) / withData.length) : 0;
       // 4지표 클래스 평균 (가용 학생만)
       const subAvg = (key) => {
-        const vals = partList.map(s => s.p[key]).filter(v => v != null);
+        // 참여도 4지표는 {rate,denom,numer} 객체(BE 객체화). rate 숫자만 추출 + NaN/null 제외.
+        //   (객체를 그대로 합산하면 NaN%, filter(v!=null)는 NaN을 못 거르므로 isNaN 가드 필수)
+        const vals = partList.map(s => { const m = s.p[key]; return (m && typeof m === 'object') ? m.rate : m; })
+          .filter(v => v != null && !isNaN(v));
         return vals.length > 0 ? Math.round(vals.reduce((a, b) => a + b, 0) / vals.length) : null;
       };
       const metrics = [
@@ -1405,7 +1408,8 @@
       const sorted = [...withData].sort((a, b) => b.score - a.score);
       const avg = withData.length > 0 ? Math.round(withData.reduce((s, l) => s + l.score, 0) / withData.length) : 0;
       const srcAvg = (key) => {
-        const vals = achiList.map(s => s.a[key]).filter(v => v != null);
+        // NaN 방어 일관성(참여도 subAvg와 동일): filter(v!=null)는 NaN을 못 거르므로 isNaN 가드 추가
+        const vals = achiList.map(s => s.a[key]).filter(v => v != null && !isNaN(v));
         return vals.length > 0 ? Math.round(vals.reduce((a, b) => a + b, 0) / vals.length) : null;
       };
       const sources = [
