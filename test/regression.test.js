@@ -111,40 +111,46 @@ test('BUG3: 콘텐츠활용현황 classId + 기간 필터 적용', () => {
 });
 
 // ──────────────────────────────────────────────────────────────────────────
-// 4) 오늘학습 날짜 귀속: getClassDailyLearning 에서 완료기록이 set.target_date 가 아니라
-//    실제 DATE(completed_at) 셀에 귀속되어야 한다.
-//    검증: target_date 와 다른 날짜에 완료한 기록을 만들고, completed_at 일자 셀이 participated 여야.
+// 4) 오늘학습 날짜 귀속(정책 전환 — DATE_ATTRIBUTION_SPEC §6-2): 매트릭스는 진도표이므로
+//    완료기록을 세트 배정일(target_date) 칸에 귀속한다. 이학생 실제 사례(6/16에 5/31 세트 완료) 박제.
+//    검증: (1) 5월 화면에 5/31 칸이 participated(배정일 칸 복귀), (2) 6월 화면 6/16 칸엔 진도 없음.
 // ──────────────────────────────────────────────────────────────────────────
-test('BUG4: 오늘학습 완료기록은 DATE(completed_at) 셀에 귀속', () => {
-  const targetDate = '2099-06-10';   // 세트 배정일
-  const completedDate = '2099-06-12'; // 실제 완료일 (다름)
-  const win = { startDate: '2099-06-01', endDate: '2099-06-30' };
+test('BUG4-R: 배정일보다 늦게 푼 세트는 배정일(target_date) 칸에 집계', () => {
+  const targetDate = '2099-05-31';    // 세트 배정일
+  const completedDate = '2099-06-16'; // 실제 완료일 (밀려 풀기, 이학생 사례)
+  const mayWin = { startDate: '2099-05-01', endDate: '2099-05-31' };
+  const juneWin = { startDate: '2099-06-01', endDate: '2099-06-30' };
 
-  // class 1 전용 세트 1개 + 항목 1개
+  // class 1 전용 세트 1개(target_date=5/31) + 항목 1개
   const setId = db.prepare(`
     INSERT INTO daily_learning_sets (class_id, teacher_id, title, target_date, target_grade, is_active)
-    VALUES (?, ?, '회귀-날짜귀속세트', ?, 4, 1)
+    VALUES (?, ?, '회귀-밀려풀기세트', ?, 4, 1)
   `).run(CLASS, TEACHER, targetDate).lastInsertRowid;
   const itemId = db.prepare(`
     INSERT INTO daily_learning_items (set_id, source_type, item_title, sort_order)
     VALUES (?, 'content', '회귀항목', 1)
   `).run(setId).lastInsertRowid;
-  // student1 이 6/12 에 완료 (target_date=6/10 과 다름)
+  // student1 이 6/16 에 완료 (target_date=5/31 과 다름 — 밀려 풀기)
   db.prepare(`
     INSERT INTO daily_learning_progress (user_id, item_id, set_id, status, completed_at, correct_count, total_questions, score)
     VALUES (?, ?, ?, 'completed', ?, 1, 1, 100)
   `).run(S1, itemId, setId, completedDate + ' 09:30:00');
 
-  const cd = g.getClassDailyLearning(CLASS, win);
-  const stu = cd.students.find(s => s.id === S1);
-  assert.ok(stu, 'student1 이 매트릭스에 있어야');
+  // (1) 5월 화면: 5/31 셀이 participated 여야 한다 (배정일 칸 — 이학생 다시 보임)
+  const may = g.getClassDailyLearning(CLASS, mayWin);
+  const stuMay = may.students.find(s => s.id === S1);
+  assert.ok(stuMay, 'student1 이 5월 매트릭스에 있어야');
   assert.equal(
-    stu.daily[completedDate] && stu.daily[completedDate].participated, true,
-    'completed_at(6/12) 셀이 participated 여야 한다'
+    !!(stuMay.daily[targetDate] && stuMay.daily[targetDate].participated), true,
+    '밀려 푼 세트도 배정일(5/31) 칸에 집계되어야 한다(5월 화면 복귀)'
   );
+
+  // (2) 6월 화면: 6/16 셀에는 진도(participated)가 잡히면 안 된다 (배정일이 5월이므로 6월 진도표엔 없음)
+  const june = g.getClassDailyLearning(CLASS, juneWin);
+  const stuJune = june.students.find(s => s.id === S1);
   assert.equal(
-    !!(stu.daily[targetDate] && stu.daily[targetDate].participated), false,
-    'target_date(6/10) 셀에는 완료가 귀속되면 안 된다(off-by-month 버그 방어)'
+    !!(stuJune && stuJune.daily[completedDate] && stuJune.daily[completedDate].participated), false,
+    '완료일(6/16) 칸에는 진도가 귀속되면 안 됨(진도=배정일)'
   );
 });
 

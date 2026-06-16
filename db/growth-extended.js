@@ -1735,22 +1735,11 @@ function getClassDailyLearning(classId, { period = 'weekly', startDate, endDate 
   //    후보 세트 = 클래스 전용 세트(class_id=classId) ∪ 멤버들의 학년(users.grade) union에 해당하는 글로벌 세트.
   //    혼합 클래스(classes.grade=null)에서도 학생 학년에 맞지 않는 타 학년 글로벌 세트가 혼입되지 않도록,
   //    클래스 grade가 아니라 실제 학생들의 grade 목록으로 제한한다.
-  //    스펙 #8: 세트의 target_date 가 범위 밖이어도, 멤버가 그 세트를 "이 기간 안에 완료(completed_at)"했다면
-  //    그 활동은 이 기간에 귀속되어야 하므로 후보 세트에 포함한다(완료일 기준 귀속).
-  //    (target_date BETWEEN range) OR (멤버 중 누군가 이 기간 내 DATE(completed_at)로 완료한 세트)
+  //    날짜 귀속 정책(DAILY_LEARNING_DATE_ATTRIBUTION_SPEC §2·§7): 매트릭스는 "날짜별 커리큘럼 진도표"이므로
+  //    후보 세트 = target_date 가 기간 내인 세트만(배정일 기준). 완료일(completed_at) OR 조항은 폐기한다.
+  //    → 5월 화면 = target_date ∈ 5월 세트만. 6/16에 푼 5/31 세트도 5/31(5월) 칸으로 귀속된다.
+  //    target_date IS NULL 세트는 "진도 미배정"이라 어느 날짜 칸에도 배치 불가 → 매트릭스에서 제외(§8).
   const memberGrades = [...new Set(members.map(m => m.grade).filter(g => g != null))];
-  const memberIdList = members.map(m => m.id);
-  const memberIdPh = memberIdList.map(() => '?').join(',');
-  // 이 기간(completed_at) 안에 멤버가 완료한 세트 id 목록 (완료일 기준 귀속용)
-  const completedInRangeSetIds = db.prepare(`
-    SELECT DISTINCT i.set_id AS sid
-    FROM daily_learning_progress p
-    JOIN daily_learning_items i ON i.id = p.item_id
-    WHERE p.user_id IN (${memberIdPh}) AND p.status = 'completed'
-      AND DATE(p.completed_at) BETWEEN ? AND ?
-  `).all(...memberIdList, startDate, endDate).map(r => r.sid);
-  const compSetPh = completedInRangeSetIds.length ? completedInRangeSetIds.map(() => '?').join(',') : null;
-  const compSetClause = compSetPh ? ` OR s.id IN (${compSetPh})` : '';
 
   let sets;
   if (memberGrades.length > 0) {
@@ -1760,10 +1749,11 @@ function getClassDailyLearning(classId, { period = 'weekly', startDate, endDate 
         (SELECT COUNT(*) FROM daily_learning_items WHERE set_id = s.id) as item_count
       FROM daily_learning_sets s
       WHERE (s.class_id = ? OR (s.class_id IS NULL AND s.target_grade IN (${gradePlaceholders})))
-        AND ((s.target_date BETWEEN ? AND ?)${compSetClause})
+        AND s.target_date IS NOT NULL
+        AND s.target_date BETWEEN ? AND ?
         AND s.is_active = 1
       ORDER BY s.target_date ASC
-    `).all(classId, ...memberGrades, startDate, endDate, ...completedInRangeSetIds);
+    `).all(classId, ...memberGrades, startDate, endDate);
   } else {
     // 학생 grade가 모두 null이면 글로벌 세트는 매칭 불가 → 클래스 전용 세트만.
     sets = db.prepare(`
@@ -1771,10 +1761,11 @@ function getClassDailyLearning(classId, { period = 'weekly', startDate, endDate 
         (SELECT COUNT(*) FROM daily_learning_items WHERE set_id = s.id) as item_count
       FROM daily_learning_sets s
       WHERE s.class_id = ?
-        AND ((s.target_date BETWEEN ? AND ?)${compSetClause})
+        AND s.target_date IS NOT NULL
+        AND s.target_date BETWEEN ? AND ?
         AND s.is_active = 1
       ORDER BY s.target_date ASC
-    `).all(classId, startDate, endDate, ...completedInRangeSetIds);
+    `).all(classId, startDate, endDate);
   }
 
   // 4. 날짜 목록 생성
@@ -1809,14 +1800,13 @@ function getClassDailyLearning(classId, { period = 'weekly', startDate, endDate 
       if (dailyMap[dt]) { dailyMap[dt].hasSet = true; dailyMap[dt].setId = repSetByDate[dt].id; }
     });
 
-    // 스펙 #8: 완료 기록을 set.target_date 가 아니라 실제 활동일 DATE(p.completed_at) 컬럼에 귀속한다.
-    //  과거: 6/8 에 푼 5/30 세트가 5/30 열에 잡혀 6월 활동이 5월에 나타나는 off-by-month 오류.
-    //  매트릭스 날짜축(dates)·hasSet/setId(세트 배정일=target_date) 정의는 그대로 두되,
-    //  participated/completedItems/score/accuracy 는 completed_at 일자로 집계한다(타임존: DATE() 정규화).
-    //  완료 기록 조회 범위도 completed_at 기준(현재 범위 내) → 타 target_date 세트라도 이 기간에 완료했으면 잡힘.
+    // 날짜 귀속 정책(SPEC §2 #1·§7): 완료 기록을 "어느 날짜 칸에 넣을지"는 세트 배정일(s.target_date)로 귀속한다.
+    //  매트릭스는 진도표("그 날짜의 커리큘럼을 누가 이수했나")이므로, 6/16에 푼 5/31 세트도 5/31 칸에 participated 가 된다.
+    //  "완료됐는가" 판정은 여전히 status='completed'(completed_at 존재). 단지 셀 배치 축이 completed_at → target_date.
+    //  완료 조회는 completed_at 기간 제한 없이 "해당 세트(target_date∈기간)의 완료"를 잡고, GROUP BY s.target_date 로 배치.
     if (memberSetIds.length > 0) {
       const setPlaceholders = memberSetIds.map(() => '?').join(',');
-      // 5-a) 날짜별 총 문항수(분모용) — 세트 배정일(target_date) 기준. 매트릭스 "그 날의 세트 문항수".
+      // 5-a) 날짜별 총 문항수(분모용) — 세트 배정일(target_date) 기준. 매트릭스 "그 날의 세트 문항수". (변경 없음)
       const itemsByDate = db.prepare(`
         SELECT s.target_date AS day, COUNT(DISTINCT i.id) AS total_items
         FROM daily_learning_sets s
@@ -1827,25 +1817,27 @@ function getClassDailyLearning(classId, { period = 'weekly', startDate, endDate 
       itemsByDate.forEach(row => {
         if (dailyMap[row.day]) dailyMap[row.day].totalItems = row.total_items;
       });
-      // 5-b) 완료 항목을 실제 활동일(DATE(completed_at)) 별로 집계. 이 학생의 매칭 세트 항목만.
+      // 5-b) 완료 항목을 세트 배정일(s.target_date) 별로 집계. 이 학생의 매칭 세트 항목만.
+      //  같은 세트를 여러 번 완료해도 COUNT(DISTINCT p.item_id) 로 항목 단위 1회 집계(SPEC §8 중복완료 규칙).
       const compByDate = db.prepare(`
-        SELECT DATE(p.completed_at) AS day,
+        SELECT s.target_date AS day,
           COUNT(DISTINCT p.item_id) AS completed_items,
           AVG(p.score) AS avg_score
         FROM daily_learning_progress p
         JOIN daily_learning_items i ON i.id = p.item_id
+        JOIN daily_learning_sets s ON s.id = i.set_id
         WHERE p.user_id = ? AND p.status = 'completed'
           AND i.set_id IN (${setPlaceholders})
-          AND p.completed_at IS NOT NULL
-        GROUP BY DATE(p.completed_at)
+          AND s.target_date IS NOT NULL
+        GROUP BY s.target_date
       `).all(member.id, ...memberSetIds);
       compByDate.forEach(row => {
         if (dailyMap[row.day]) {
           dailyMap[row.day].participated = row.completed_items > 0;
           dailyMap[row.day].completedItems = row.completed_items;
           dailyMap[row.day].score = row.avg_score != null ? Math.round(row.avg_score) : null;
-          // 정답률(셀 표시용): 그 날 완료수 / 그 날 배정 세트 문항수. 배정 없으면(타 target_date 세트를
-          // 이 날 완료) 분모 0 → 100%로 표기(완료=참여 신호).
+          // 정답률(셀 표시용): 그 날 완료수 / 그 날 배정 세트 문항수. 후보 세트가 target_date∈기간으로
+          // 한정되어 배정 없는 셀엔 완료도 없으므로 분모 0 폴백(100%)은 거의 발생 안 함 — 안전망으로 유지.
           const tot = dailyMap[row.day].totalItems;
           dailyMap[row.day].accuracy = tot > 0
             ? Math.round(row.completed_items / tot * 100)
@@ -1863,6 +1855,7 @@ function getClassDailyLearning(classId, { period = 'weekly', startDate, endDate 
     return {
       id: member.id,
       name: member.display_name,
+      grade: member.grade, // 스트릭 재계산(활동일 기준)에서 학생 학년 글로벌 세트 매칭에 사용
       daily: dailyMap,
       participationRate: datesWithSets > 0 ? Math.round(participated / datesWithSets * 100) : 0,
       avgScore
@@ -1872,13 +1865,43 @@ function getClassDailyLearning(classId, { period = 'weekly', startDate, endDate 
   // 요약 통계 — 매트릭스와 동일 기간/데이터 기준 (요약 카드 ↔ 매트릭스 일관성 보장)
   const compRates = studentData.map(s => s.participationRate);
   const accScores = studentData.filter(s => s.avgScore != null).map(s => s.avgScore);
+  // 스트릭(연속 학습일)은 "습관" 지표 — SPEC §4: 매트릭스 셀(이제 target_date=진도)에서 파생하면
+  //  "배정일 연속"으로 오집계된다(5/30·5/31 세트를 6/16 하루에 풀면 스트릭 2일로 둔갑).
+  //  → 반드시 각 학생의 실제 활동일 DISTINCT DATE(completed_at) 집합(기간 내)에서 연속을 센다.
+  //  세트 스코프는 매트릭스와 동일(클래스 전용 ∪ 학생 학년 글로벌)하되, 귀속 축만 completed_at.
+  //  알고리즘은 getStudentReport 의 연속일 계산(정렬 → 인접 diff==1 카운트)과 동일.
   let summaryMaxStreak = 0;
   const studentStreaks = studentData.map(s => {
-    let cur = 0, best = 0;
-    dates.forEach(dt => {
-      if (s.daily[dt] && s.daily[dt].participated) { cur++; if (cur > best) best = cur; }
-      else cur = 0;
-    });
+    const memberSets = sets.filter(st =>
+      st.class_id === classId || (st.class_id == null && st.target_grade === s.grade)
+    );
+    const memberSetIds = memberSets.map(st => st.id);
+    let best = 0;
+    if (memberSetIds.length > 0) {
+      const ph = memberSetIds.map(() => '?').join(',');
+      // 기간 내(completed_at) 실제 학습일 — 오름차순 distinct.
+      const days = db.prepare(`
+        SELECT DISTINCT DATE(p.completed_at) AS day
+        FROM daily_learning_progress p
+        JOIN daily_learning_items i ON i.id = p.item_id
+        WHERE p.user_id = ? AND p.status = 'completed'
+          AND i.set_id IN (${ph})
+          AND p.completed_at IS NOT NULL
+          AND DATE(p.completed_at) BETWEEN ? AND ?
+        ORDER BY day ASC
+      `).all(s.id, ...memberSetIds, startDate, endDate).map(r => r.day);
+      let cur = 0;
+      for (let i = 0; i < days.length; i++) {
+        if (i === 0) { cur = 1; }
+        else {
+          const prev = new Date(days[i - 1] + 'T00:00:00');
+          const curr = new Date(days[i] + 'T00:00:00');
+          const diff = (curr - prev) / (1000 * 60 * 60 * 24);
+          cur = diff === 1 ? cur + 1 : 1;
+        }
+        if (cur > best) best = cur;
+      }
+    }
     if (best > summaryMaxStreak) summaryMaxStreak = best;
     return { name: s.name, best };
   });

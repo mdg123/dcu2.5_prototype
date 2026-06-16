@@ -206,11 +206,12 @@ test('INV5: dailyLearning 요약 ↔ getClassDailyLearning 매트릭스 모순 �
 });
 
 // ──────────────────────────────────────────────────────────────────────────
-// INV6: 날짜 귀속 정합 — getClassDailyLearning 의 participated 셀 날짜는 그 학생의 실제
-//   활동일(DATE(completed_at))과 일치. ← 타임존 off-by-one / off-by-month 부류 차단.
-//   매트릭스 셀별 (날짜) 과 DB 의 실제 완료일 집합이 일치하는지 교차 검증.
+// INV6: 날짜 귀속 정책 (DAILY_LEARNING_DATE_ATTRIBUTION_SPEC §6-1) — 매트릭스는 진도표이므로
+//   participated 셀의 날짜 = 그 학생이 완료한 세트의 target_date(완료일 completed_at 무관).
+//   즉 학생이 어느 셀(날짜 d)에 participated면, d 는 그 학생이 1건 이상 완료한 세트의 target_date 집합에 속해야 한다.
+//   (완료일 completed_at 은 검증식에 일절 등장하지 않음 = 진도=배정일 정책 박제. 밀려 풀기는 정상 동작.)
 // ──────────────────────────────────────────────────────────────────────────
-test('INV6: 매트릭스 participated 날짜 = 실제 DATE(completed_at)', () => {
+test('INV6: 매트릭스 participated 셀의 날짜 = 세트 target_date (완료일 무관)', () => {
   const { openTestDb } = require('./_setup');
   const db = openTestDb();
   // 데이터가 확실히 있는 기간으로 검증 (현재 월)
@@ -227,28 +228,125 @@ test('INV6: 매트릭스 participated 날짜 = 실제 DATE(completed_at)', () =>
     if (matrixDates.size === 0) continue; // 참여 없는 학생은 스킵
 
     // 매트릭스가 이 학생에게 부여한 후보 세트들(이 학생 학년·클래스 매칭) 의 id 집합
-    const memberSetIds = (cd.sets || [])
-      .map(st => st.id);
+    const memberSetIds = (cd.sets || []).map(st => st.id);
     if (memberSetIds.length === 0) continue;
     const ph = memberSetIds.map(() => '?').join(',');
 
-    // DB 실제 완료일 (기간 내, 이 학생, 매칭 세트 항목)
-    const realDates = new Set(db.prepare(`
-      SELECT DISTINCT DATE(p.completed_at) AS d
+    // 이 학생이 1건 이상 완료한 세트의 target_date 집합 (기간은 target_date 기준 — 완료일 미사용)
+    const targetDateSet = new Set(db.prepare(`
+      SELECT DISTINCT s.target_date AS d
       FROM daily_learning_progress p
       JOIN daily_learning_items i ON i.id = p.item_id
+      JOIN daily_learning_sets s ON s.id = i.set_id
       WHERE p.user_id = ? AND p.status = 'completed'
         AND i.set_id IN (${ph})
-        AND DATE(p.completed_at) BETWEEN ? AND ?
+        AND s.target_date IS NOT NULL
+        AND s.target_date BETWEEN ? AND ?
     `).all(s.id, ...memberSetIds, start, end).map(r => r.d));
 
-    // 매트릭스 participated 날짜는 모두 실제 완료일 집합의 부분집합이어야 (off-by-one/month 면 어긋남)
+    // 매트릭스 participated 날짜는 모두 "완료 세트의 target_date" 집합에 속해야 (배정일 칸 귀속)
     for (const d of matrixDates) {
       assert.ok(
-        realDates.has(d),
-        `학생 ${s.id}: 매트릭스 participated 날짜 ${d} 가 실제 DATE(completed_at) 집합에 없음(날짜 귀속 오류)`
+        targetDateSet.has(d),
+        `학생 ${s.id}: 매트릭스 participated 날짜 ${d} 가 완료 세트의 target_date 집합에 없음(진도≠배정일 = 정책 위반)`
       );
     }
   }
+  db.close();
+});
+
+// ──────────────────────────────────────────────────────────────────────────
+// INV7: 스트릭(연속 학습일)은 활동일(DATE(completed_at)) distinct 기준 (SPEC §6-3).
+//   진도(매트릭스 셀=target_date)와 습관(스트릭=완료일)을 분리. 밀려 몰아 풀면(배정일 여러 날을
+//   하루에 완료) 스트릭이 배정일 연속으로 늘면 안 됨(실제 학습일이 하루뿐이면 스트릭 기여 1).
+//   격리 DB fixture 로 5/30·5/31 배정 세트 2개를 6/16 하루에 완료한 케이스를 직접 삽입해 검증.
+// ──────────────────────────────────────────────────────────────────────────
+test('INV7: 매트릭스 summaryMaxStreak 는 활동일(DATE(completed_at)) 연속 기준 (진도≠습관)', () => {
+  const { openTestDb } = require('./_setup');
+  const db = openTestDb();
+  // 미래 기간(실 데이터와 무간섭) — 5/30·5/31 배정 세트를 6/16 하루에 몰아 완료.
+  const d1 = '2097-05-30', d2 = '2097-05-31';
+  const completedDay = '2097-06-16 09:00:00';
+  const win = { startDate: '2097-05-01', endDate: '2097-05-31' };
+
+  const mkSet = (td) => db.prepare(`
+    INSERT INTO daily_learning_sets (class_id, teacher_id, title, target_date, target_grade, is_active)
+    VALUES (?, ?, 'INV7-몰아풀기세트', ?, 4, 1)
+  `).run(CLASS, TEACHER, td).lastInsertRowid;
+  const mkItem = (sid) => db.prepare(`
+    INSERT INTO daily_learning_items (set_id, source_type, item_title, sort_order)
+    VALUES (?, 'content', 'INV7항목', 1)
+  `).run(sid).lastInsertRowid;
+  for (const td of [d1, d2]) {
+    const sid = mkSet(td);
+    const iid = mkItem(sid);
+    db.prepare(`
+      INSERT INTO daily_learning_progress (user_id, item_id, set_id, status, completed_at, correct_count, total_questions, score)
+      VALUES (?, ?, ?, 'completed', ?, 1, 1, 100)
+    `).run(S1, iid, sid, completedDay);
+  }
+
+  const cd = g.getClassDailyLearning(CLASS, win);
+  const stu = cd.students.find(s => s.id === S1);
+  assert.ok(stu, 'INV7: student1 매트릭스 존재');
+  // 진도(매트릭스): 5/30·5/31 둘 다 participated (배정일 칸 귀속)
+  assert.equal(!!(stu.daily[d1] && stu.daily[d1].participated), true, 'INV7: 5/30 칸 진도 participated');
+  assert.equal(!!(stu.daily[d2] && stu.daily[d2].participated), true, 'INV7: 5/31 칸 진도 participated');
+  // 습관(스트릭): 실제 학습일이 6/16 하루뿐 → 5월 기간의 활동일 0 → summaryMaxStreak 가 배정일 연속(2)로 둔갑하면 안 됨.
+  // 이 학생만의 활동일 distinct 연속 길이와 일치해야 한다.
+  const days = db.prepare(`
+    SELECT DISTINCT DATE(p.completed_at) AS day
+    FROM daily_learning_progress p
+    JOIN daily_learning_items i ON i.id = p.item_id
+    JOIN daily_learning_sets s ON s.id = i.set_id
+    WHERE p.user_id = ? AND p.status = 'completed'
+      AND (s.class_id = ? OR (s.class_id IS NULL AND s.target_grade = 4))
+      AND s.target_date BETWEEN ? AND ?
+      AND DATE(p.completed_at) BETWEEN ? AND ?
+    ORDER BY day ASC
+  `).all(S1, CLASS, win.startDate, win.endDate, win.startDate, win.endDate).map(r => r.day);
+  // 5월 기간 한정: target_date∈5월 세트의 완료를 5월 활동일로 보면 6/16 은 5월 밖 → days 비어야 함.
+  assert.equal(days.length, 0, 'INV7: 5월 배정 세트를 6/16에 완료 → 5월 활동일 0 (습관은 5월에 없음)');
+  // 따라서 이 fixture 가 만든 학생의 5월 스트릭 기여는 0 이어야(배정일 연속 2로 둔갑 금지).
+  // summaryMaxStreak 는 클래스 전체 max 이므로 이 학생만의 best 를 직접 검증할 수 없다 → studentData 미노출.
+  // 대신: 매트릭스 participated 셀이 2개(연속)인데도, 스트릭이 셀에서 파생되지 않음을 보증하기 위해
+  // "스트릭이 활동일 0 학생에 대해 2를 주지 않는다"를 클래스 max 로 상한 검증한다.
+  // (이 격리 DB엔 5월 활동일을 가진 다른 학생이 없으므로 summaryMaxStreak 는 0 이어야 한다.)
+  assert.equal(cd.summary.maxStreak, 0,
+    'INV7: 5월 화면 스트릭은 활동일(6/16=5월밖) 기준 0 — 배정일 연속(2)로 둔갑 금지');
+});
+
+// ──────────────────────────────────────────────────────────────────────────
+// INV8: computeAreas6 비전파 (SPEC §6-4) — 매트릭스가 target_date 로 바뀌어도 6축 daily 산식은 그대로.
+//   daily 분모=target_date(그 기간 배정 세트 수)·분자=completed_at(그 기간 실제 완료). 밀려 풀기 시
+//   5월 배정 0 / 6월에 5월세트 완료 케이스에서 6월 기간 computeAreas6: daily.denom==0 → rate=null(clamp).
+//   격리 DB fixture: 5월 배정 세트를 6/16에 완료 → 6월 화면 daily denom 0 검증.
+// ──────────────────────────────────────────────────────────────────────────
+test('INV8: 6축 daily 분모는 target_date·분자는 completed_at (매트릭스 정책 비전파)', () => {
+  const { openTestDb } = require('./_setup');
+  const db = openTestDb();
+  // 5월 배정 세트(class1 전용)를 6/16에 student2 가 완료. 6월엔 배정 세트 0건이 되도록 별도 학생/기간 사용.
+  const td = '2098-05-31';                 // 5월 배정
+  const completedDay = '2098-06-16 09:00:00'; // 6월 완료
+  const juneWin = { classId: CLASS, startDate: '2098-06-01', endDate: '2098-06-30' };
+
+  const sid = db.prepare(`
+    INSERT INTO daily_learning_sets (class_id, teacher_id, title, target_date, target_grade, is_active)
+    VALUES (?, ?, 'INV8-비전파세트', ?, 4, 1)
+  `).run(CLASS, TEACHER, td).lastInsertRowid;
+  const iid = db.prepare(`
+    INSERT INTO daily_learning_items (set_id, source_type, item_title, sort_order)
+    VALUES (?, 'content', 'INV8항목', 1)
+  `).run(sid).lastInsertRowid;
+  db.prepare(`
+    INSERT INTO daily_learning_progress (user_id, item_id, set_id, status, completed_at, correct_count, total_questions, score)
+    VALUES (?, ?, ?, 'completed', ?, 1, 1, 100)
+  `).run(S2, iid, sid, completedDay);
+
+  const a = g.computeAreas6(S2, juneWin);
+  const daily = a['참여도'].participation.daily;
+  // 6월 화면: 6월 배정 세트 0 → daily.denom == 0, clamp 에 의해 rate == null (점수 왜곡 없음)
+  assert.equal(daily.denom, 0, 'INV8: 6월 기간 배정(target_date) 세트 0 → daily.denom=0');
+  assert.equal(daily.rate, null, 'INV8: denom 0 → rate null (매트릭스 정책 비전파, clamp 흡수)');
   db.close();
 });
