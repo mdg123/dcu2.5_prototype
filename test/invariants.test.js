@@ -350,3 +350,46 @@ test('INV8: 6축 daily 분모는 target_date·분자는 completed_at (매트릭�
   assert.equal(daily.rate, null, 'INV8: denom 0 → rate null (매트릭스 정책 비전파, clamp 흡수)');
   db.close();
 });
+
+// ──────────────────────────────────────────────────────────────────────────
+// INV9: 포트폴리오 학교급 필터는 메타(school_level/grade_year) 없는 자동 수집 항목을 가리지 않는다.
+//   과제 제출·문항풀이 등 자동 생성 portfolio_items 는 학교급 메타가 둘 다 NULL 일 수 있고,
+//   학생 포트폴리오 화면은 기본 학교급 필터가 활성이므로, 이 절이 없으면 자동 항목이 전부 사라진다.
+//   부류 차단: "학교급 필터 적용 시 메타 없는 항목이 조회 결과에서 사라지면 실패."
+//   동시에 학교급 격리(다른 학교급 명시 항목은 섞이지 않음)도 함께 단언한다.
+//   격리 DB fixture: 메타 null·초등명시·중등명시 3건을 삽입하고 elementary/middle 필터로 교차 검증.
+// ──────────────────────────────────────────────────────────────────────────
+test('INV9: 학교급 필터는 메타없는 자동 portfolio_items 를 가리지 않고 학교급 격리는 유지', () => {
+  const { openTestDb } = require('./_setup');
+  const db = openTestDb();
+  // 실 데이터와 무간섭한 가짜 학생(미래/고유 id). users 행을 만들어 격리.
+  const stuId = 990001;
+  db.prepare("INSERT OR REPLACE INTO users (id, username, password, display_name, role, grade) VALUES (?, ?, '0000', 'INV9학생', 'student', 4)")
+    .run(stuId, 'inv9_stu_' + stuId);
+
+  const mkPI = (name, schoolLevel, gradeYear) => db.prepare(`
+    INSERT INTO portfolio_items (user_id, source_type, activity_name, activity_date, result_type, activity_type, school_level, grade_year)
+    VALUES (?, 'class', ?, '2099-06-17', 'completed', 'homework_submit', ?, ?)
+  `).run(stuId, name, schoolLevel, gradeYear).lastInsertRowid;
+
+  const idNull = mkPI('INV9 메타없는 자동항목(과제제출)', null, null);  // 자동 수집 — 메타 둘 다 null
+  const idElem = mkPI('INV9 초등 명시항목', 'elementary', '4');
+  const idMid  = mkPI('INV9 중등 명시항목', 'middle', '8');
+
+  // elementary 필터: 메타없는 항목 + 초등 명시 포함, 중등 제외
+  const elem = g.getPortfolioItems(stuId, { schoolLevel: 'elementary', limit: 100 });
+  const elemIds = elem.items.map(i => i.id);
+  assert.ok(elemIds.includes(idNull),
+    'INV9: 메타(school_level/grade_year) 없는 자동 항목은 학교급 필터(elementary)에서 사라지면 안 됨');
+  assert.ok(elemIds.includes(idElem), 'INV9: 초등 명시 항목은 elementary 필터에 포함');
+  assert.ok(!elemIds.includes(idMid), 'INV9: 중등 명시 항목은 elementary 필터에서 제외(학교급 격리)');
+
+  // middle 필터: 메타없는 항목 + 중등 명시 포함, 초등 제외
+  const mid = g.getPortfolioItems(stuId, { schoolLevel: 'middle', limit: 100 });
+  const midIds = mid.items.map(i => i.id);
+  assert.ok(midIds.includes(idNull), 'INV9: 메타 없는 자동 항목은 middle 필터에서도 사라지면 안 됨');
+  assert.ok(midIds.includes(idMid), 'INV9: 중등 명시 항목은 middle 필터에 포함');
+  assert.ok(!midIds.includes(idElem), 'INV9: 초등 명시 항목은 middle 필터에서 제외(학교급 격리)');
+
+  db.close();
+});

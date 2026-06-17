@@ -1,6 +1,16 @@
 // db/learning-log-helper.js
 const db = require('./index');
 
+// 학년 → 학교급 매핑 (growth-extended.js gradeToSchoolLevel 와 동일 규칙을 로컬 복제 — 순환참조 방지)
+function gradeToSchoolLevel(grade) {
+  const g = parseInt(grade, 10);
+  if (!g || isNaN(g)) return null;
+  if (g >= 1 && g <= 6) return 'elementary';
+  if (g >= 7 && g <= 9) return 'middle';
+  if (g >= 10 && g <= 12) return 'high';
+  return null;
+}
+
 // ── Prepared Statements 캐시 (성능 최적화) ──
 let _stmts = null;
 function getStmts() {
@@ -415,11 +425,24 @@ function logLearningActivity({
         ).get(userId, sourceService || 'learning', insertedId);
 
         if (!existing) {
+          // 학생 학년 기반으로 grade_year/school_level 메타를 채운다.
+          // 메타가 비면 성장기록>포트폴리오 화면의 기본 학교급 필터에서 자동 항목이 전부 가려진다(회귀 박제됨).
+          // role='student' 인 사용자만 채우고, grade 가 없으면(교사 본인용 등) NULL 유지한다.
+          let pfGradeYear = null;
+          let pfSchoolLevel = null;
+          try {
+            const stu = db.prepare("SELECT grade FROM users WHERE id = ? AND role = 'student'").get(userId);
+            if (stu && stu.grade != null && String(stu.grade).trim() !== '') {
+              pfGradeYear = String(stu.grade);
+              pfSchoolLevel = gradeToSchoolLevel(stu.grade);
+            }
+          } catch (_) { /* users 조회 실패 시 메타 없이 진행 */ }
+
           db.prepare(`
             INSERT INTO portfolio_items
             (user_id, source_type, source_id, class_id, activity_name, subject,
-             activity_date, score, result_type, activity_type, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+             activity_date, score, result_type, activity_type, grade_year, school_level, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
           `).run(
             userId,
             sourceService || 'learning',
@@ -430,7 +453,9 @@ function logLearningActivity({
             new Date().toISOString().split('T')[0],
             resultScore != null ? String(resultScore) : null,
             'completed',
-            activityType || 'activity'
+            activityType || 'activity',
+            pfGradeYear,
+            pfSchoolLevel
           );
         }
       } catch (pfErr) {
