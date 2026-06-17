@@ -15,6 +15,8 @@ const { setupTestDb, openTestDb } = require('./_setup');
 
 // ★ db 모듈 require 전에 DB_PATH 주입
 setupTestDb();
+// 마이그레이션을 격리 DB에도 적용 (신규 ADD COLUMN 회귀 검증 — 복사본은 옛 스키마일 수 있음)
+require('../db/schema').initSchema();
 const g = require('../db/growth-extended');
 const db = openTestDb();
 
@@ -281,4 +283,113 @@ test('BUG9: 감정 classId 스코프 — classId 줘도 emotion_checkins(self)�
   const hit = rep.recentEmotions.find(e => e.attendance_date === date && e.source === 'self');
   assert.ok(hit, 'classId 지정해도 emotion_checkins(self) 가 recentEmotions 에 포함되어야');
   assert.equal(hit.emotion, 'calm');
+});
+
+// ──────────────────────────────────────────────────────────────────────────
+// BUG10: 과제 제출 자동 수집 portfolio_item 이 학생 기본 학교급 필터로 조회되어야 한다.
+//   결함: 자동 수집 항목(homework_submit 등)은 grade_year/school_level 메타가 NULL 이라,
+//         성장기록>포트폴리오 화면(기본 학교급 필터 활성)에서 전부 사라졌다.
+//   A(서버 필터: 메타 없는 항목 항상 포함) + B(자동 INSERT 시 학생 학년 메타 채움) 동시 박제.
+// ──────────────────────────────────────────────────────────────────────────
+test('BUG10: 과제 제출 자동 portfolio_item 이 학생 학년 메타를 갖고 학교급 필터(elementary)로 조회됨', () => {
+  const { logLearningActivity } = require('../db/learning-log-helper');
+  // S1 = student1, grade=4(초등). 실 DB 복사본이라 users 행 존재.
+  const u = db.prepare("SELECT grade, role FROM users WHERE id = ?").get(S1);
+  assert.equal(u.role, 'student', 'BUG10 전제: S1 은 학생');
+  assert.equal(String(u.grade), '4', 'BUG10 전제: S1 grade=4(초등)');
+
+  // 과제 제출 학습 활동 기록 → 자동으로 portfolio_items 1건 생성됨.
+  // (자동 portfolio 의 source_id 는 learning_logs.id(반환 id)이다 — targetId 가 아님)
+  const targetId = 9900100 + Math.floor(Math.random() * 10000); // 실 데이터와 무간섭
+  const logRes = logLearningActivity({
+    userId: S1,
+    activityType: 'homework_submit',
+    targetType: 'homework',
+    targetId,
+    classId: CLASS,
+    verb: 'submitted',
+    objectType: 'BUG10 과제',
+    resultSuccess: 1,
+    sourceService: 'class'
+  });
+  assert.ok(logRes && logRes.id, 'BUG10: logLearningActivity 가 learning_logs id 를 반환');
+
+  // B 검증: 생성된 자동 항목이 학생 학년 메타를 가짐 (source_id = learning_logs.id)
+  const pi = db.prepare(
+    "SELECT * FROM portfolio_items WHERE user_id = ? AND source_type = 'class' AND source_id = ?"
+  ).get(S1, logRes.id);
+  assert.ok(pi, 'BUG10: 과제 제출 시 portfolio_items 자동 생성');
+  assert.equal(pi.school_level, 'elementary', 'BUG10(B): 자동 항목 school_level=elementary(학생 학년 기반)');
+  assert.equal(String(pi.grade_year), '4', 'BUG10(B): 자동 항목 grade_year=4(학생 학년 기반)');
+
+  // A+B 종합 검증: 학생 기본 학교급 필터(elementary)로 조회됨
+  const res = g.getPortfolioItems(S1, { schoolLevel: 'elementary', limit: 300 });
+  assert.ok(res.items.some(i => i.id === pi.id),
+    'BUG10(A+B): 과제 제출 자동 항목이 학교급(elementary) 필터 결과에 포함되어야 — 화면에서 사라지면 안 됨');
+});
+
+// ──────────────────────────────────────────────────────────────────────────
+// 11) 성장 목표 계약 정합 (GROWTH_GOAL_SPEC) — 폼↔저장↔표시 키 일치.
+//   옛 버그: 폼 {title,area,deadline} → createGrowthGoal 이 title→period_label /
+//   area→goal_type 로 매핑, deadline 폐기 → getGrowthGoals 가 FE 기대 키를 안 줌 →
+//   "제목 없는 빈 카드 + 0%". 이 회귀를 박제한다.
+// ──────────────────────────────────────────────────────────────────────────
+test('BUG11: 성장 목표 — createGrowthGoal(title·area·deadline) → getGrowthGoals 가 그대로 반환', () => {
+  const created = g.createGrowthGoal(S1, {
+    title: '이번 학기 책 20권 읽기',
+    area: '독서활동',
+    deadline: '2099-07-18',
+    description: '주 2권 목표'
+  });
+  assert.ok(created && created.id, 'createGrowthGoal 이 id 반환');
+
+  const goals = g.getGrowthGoals(S1);
+  const hit = goals.find(x => x.id === created.id);
+  assert.ok(hit, '생성한 목표가 getGrowthGoals 에 보여야 한다');
+  assert.equal(hit.title, '이번 학기 책 20권 읽기', 'title 이 period_label 로 엉뚱저장되지 않고 그대로 반환');
+  assert.equal(hit.area, '독서활동', 'area 가 goal_type 가 아니라 정본 area 로 반환');
+  assert.equal(hit.deadline, '2099-07-18', 'deadline 이 폐기되지 않고 그대로 반환');
+  assert.equal(hit.progress, 0, '신규 목표 progress 기본 0');
+  assert.equal(hit.status, 'active', '신규 목표 status 기본 active');
+  assert.equal(hit.description, '주 2권 목표', 'description 저장·반환');
+});
+
+test('BUG11b: 성장 목표 — title 빈값 거부(400)', () => {
+  assert.throws(() => g.createGrowthGoal(S1, { title: '   ', area: '독서활동' }),
+    /제목/, '빈 제목은 에러');
+});
+
+test('BUG11c: 성장 목표 — 영역 화이트리스트 외면 정서발달 폴백', () => {
+  const c = g.createGrowthGoal(S1, { title: '엉뚱영역 목표', area: '기초학력' });
+  const hit = g.getGrowthGoals(S1).find(x => x.id === c.id);
+  assert.equal(hit.area, '정서발달', '정본 6영역 외 값은 정서발달로 폴백');
+});
+
+test('BUG11d: 성장 목표 — updateGrowthGoal(progress=100) → status=completed 자동 전환', () => {
+  const c = g.createGrowthGoal(S1, { title: '완료될 목표', area: '참여도' });
+  const up = g.updateGrowthGoal(c.id, S1, { progress: 100 });
+  assert.equal(up.progress, 100, 'progress 100 반영');
+  assert.equal(up.status, 'completed', 'progress>=100 → status=completed 자동');
+
+  // 되돌리기: 100 미만 → active 복귀
+  const down = g.updateGrowthGoal(c.id, S1, { progress: 40 });
+  assert.equal(down.status, 'active', 'progress<100 으로 내리면 active 복귀');
+});
+
+test('BUG11e: 성장 목표 — progress 0~100 클램프', () => {
+  const c = g.createGrowthGoal(S1, { title: '클램프 목표', area: '성취수준' });
+  assert.equal(g.updateGrowthGoal(c.id, S1, { progress: 250 }).progress, 100, '100 초과 → 100');
+  assert.equal(g.updateGrowthGoal(c.id, S1, { progress: -50 }).progress, 0, '0 미만 → 0');
+});
+
+test('BUG11f: 성장 목표 — 타인 목표 update/delete 차단(소유 격리)', () => {
+  const c = g.createGrowthGoal(S1, { title: 'S1 소유 목표', area: '진로탐색' });
+  // S2 가 S1 목표 수정 시도 → null
+  assert.equal(g.updateGrowthGoal(c.id, S2, { progress: 50 }), null, '타인 update 차단(null)');
+  // S2 가 S1 목표 삭제 시도 → false, 원본 보존
+  assert.equal(g.deleteGrowthGoal(c.id, S2), false, '타인 delete 차단(false)');
+  assert.ok(g.getGrowthGoals(S1).some(x => x.id === c.id), '차단 후 원본 목표 보존');
+  // 본인 삭제는 성공
+  assert.equal(g.deleteGrowthGoal(c.id, S1), true, '본인 delete 성공');
+  assert.ok(!g.getGrowthGoals(S1).some(x => x.id === c.id), '삭제 후 목록에서 사라짐');
 });

@@ -97,8 +97,11 @@ function getPortfolioItems(userId, opts = {}) {
   if (schoolLevel) {
     const range = schoolLevelToGradeRange(schoolLevel);
     if (range) {
-      // school_level 직접 매칭 또는 grade_year(예: '5') 가 학년 범위 안에 들어가는 경우
-      where += ` AND (pi.school_level = ? OR (pi.grade_year IS NOT NULL AND CAST(pi.grade_year AS INTEGER) BETWEEN ? AND ?))`;
+      // school_level 직접 매칭 또는 grade_year(예: '5') 가 학년 범위 안에 들어가는 경우.
+      // 자동 수집 항목(과제 제출·문항풀이 등)은 메타(school_level/grade_year)가 둘 다 NULL일 수 있다.
+      // 메타가 없는 항목은 학교급을 판정할 수 없으므로 학교급 필터에서 제외하지 않고 항상 포함한다.
+      // (학생 포트폴리오 화면은 기본 학교급 필터가 활성이라, 이 절이 없으면 자동 항목이 전부 가려진다)
+      where += ` AND (pi.school_level = ? OR (pi.grade_year IS NOT NULL AND CAST(pi.grade_year AS INTEGER) BETWEEN ? AND ?) OR (pi.school_level IS NULL AND pi.grade_year IS NULL))`;
       params.push(schoolLevel, range[0], range[1]);
     }
   }
@@ -517,23 +520,95 @@ function getPortfolioReportData(studentId, { from, to, schoolLevel, itemIds } = 
   };
 }
 
+// 영역별 학기 목표(제목+영역+기한+진행률) — GROWTH_GOAL_SPEC
+const GOAL_AREAS = ['정서발달', '참여도', '성취수준', '진로탐색', '독서활동', '콘텐츠활용'];
+
+// 행 → 정본 계약 형태로 정규화 (과거 'N회 달성' 행도 폴백으로 구제)
+function _normalizeGoal(r) {
+  return {
+    id: r.id,
+    title: r.title || r.period_label || '',                 // 과거 행 폴백
+    area: r.area || r.goal_type || null,
+    deadline: r.deadline || null,
+    progress: r.progress != null ? r.progress
+              : (r.target_count > 0
+                  ? Math.min(100, Math.round((r.current_count / r.target_count) * 100))
+                  : 0),                                       // 구세대 환산 폴백
+    status: r.status || ((r.progress >= 100) ? 'completed' : 'active'),
+    description: r.description || null,
+    created_at: r.created_at,
+    updated_at: r.updated_at || r.created_at
+  };
+}
+
 function getGrowthGoals(userId) {
-  return db.prepare('SELECT * FROM growth_goals WHERE user_id = ? ORDER BY created_at DESC').all(userId);
+  const rows = db.prepare(
+    'SELECT * FROM growth_goals WHERE user_id = ? ORDER BY created_at DESC'
+  ).all(userId);
+  return rows.map(_normalizeGoal);
 }
 
 function createGrowthGoal(userId, data) {
-  const goalType = data.goalType || data.area || 'general';
-  const targetCount = data.targetCount || 10;
-  const periodLabel = data.periodLabel || data.title || null;
+  const title = (data.title || '').trim().slice(0, 60);
+  if (!title) { const e = new Error('목표 제목을 입력하세요.'); e.status = 400; throw e; }
+  const area = GOAL_AREAS.includes(data.area) ? data.area : '정서발달';
+  const deadline = /^\d{4}-\d{2}-\d{2}$/.test(data.deadline || '') ? data.deadline : null;
+  const description = ((data.description || '').trim().slice(0, 200)) || null;
   const info = db.prepare(`
-    INSERT INTO growth_goals (user_id, goal_type, target_count, period, period_label)
-    VALUES (?, ?, ?, ?, ?)
-  `).run(userId, goalType, targetCount, data.period || 'semester', periodLabel);
+    INSERT INTO growth_goals
+      (user_id, title, area, deadline, progress, status, description,
+       goal_type, target_count, current_count, period, period_label, created_at, updated_at)
+    VALUES (?, ?, ?, ?, 0, 'active', ?,  ?, 100, 0, 'semester', ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+  `).run(userId, title, area, deadline, description, area /*goal_type 호환*/, title /*period_label 호환*/);
   return { id: info.lastInsertRowid };
 }
 
-function updateGrowthGoalProgress(id, delta) {
-  db.prepare('UPDATE growth_goals SET current_count = current_count + ? WHERE id = ?').run(delta, id);
+// 부분 수정(진행률·제목·영역·기한·설명). 본인 소유만. progress>=100 → status=completed 자동 전환.
+// 반환: 갱신된 정본 계약 goal | null(타인·없는 id)
+function updateGrowthGoal(id, userId, patch) {
+  const row = db.prepare('SELECT * FROM growth_goals WHERE id = ? AND user_id = ?').get(id, userId);
+  if (!row) return null;
+
+  const sets = [];
+  const args = [];
+
+  if (patch.progress != null && patch.progress !== '') {
+    let p = parseInt(patch.progress, 10);
+    if (isNaN(p)) p = 0;
+    p = Math.max(0, Math.min(100, p));
+    sets.push('progress = ?'); args.push(p);
+    sets.push('status = ?');   args.push(p >= 100 ? 'completed' : 'active');
+  }
+  if (typeof patch.title === 'string') {
+    const t = patch.title.trim().slice(0, 60);
+    if (t) { sets.push('title = ?'); args.push(t); sets.push('period_label = ?'); args.push(t); }
+  }
+  if (typeof patch.area === 'string' && GOAL_AREAS.includes(patch.area)) {
+    sets.push('area = ?'); args.push(patch.area);
+    sets.push('goal_type = ?'); args.push(patch.area);
+  }
+  if (patch.deadline !== undefined) {
+    const d = /^\d{4}-\d{2}-\d{2}$/.test(patch.deadline || '') ? patch.deadline : null;
+    sets.push('deadline = ?'); args.push(d);
+  }
+  if (patch.description !== undefined) {
+    const desc = ((patch.description || '').trim().slice(0, 200)) || null;
+    sets.push('description = ?'); args.push(desc);
+  }
+
+  if (sets.length) {
+    sets.push("updated_at = CURRENT_TIMESTAMP");
+    db.prepare(`UPDATE growth_goals SET ${sets.join(', ')} WHERE id = ? AND user_id = ?`)
+      .run(...args, id, userId);
+  }
+  const updated = db.prepare('SELECT * FROM growth_goals WHERE id = ? AND user_id = ?').get(id, userId);
+  return _normalizeGoal(updated);
+}
+
+// 삭제 — 본인 소유만. 반환: true(삭제됨) | false(타인·없는 id)
+function deleteGrowthGoal(id, userId) {
+  const info = db.prepare('DELETE FROM growth_goals WHERE id = ? AND user_id = ?').run(id, userId);
+  return info.changes > 0;
 }
 
 // ========== 포트폴리오 자동 추가 ==========
@@ -2861,7 +2936,7 @@ module.exports = {
   autoAddPortfolioItem,
   getReportDetail,
   getPortfolioItems, getPortfolioItemDetail, toggleLifeTask, saveReflection, updatePrivacy,
-  getPortfolioStats, getGrowthGoals, createGrowthGoal, updateGrowthGoalProgress,
+  getPortfolioStats, getGrowthGoals, createGrowthGoal, updateGrowthGoal, deleteGrowthGoal,
   createPortfolioItem, getCompetencyStats,
   // PDF 보고서
   createPortfolioReport, attachPortfolioReportFile, saveGeneratedReport,

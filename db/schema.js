@@ -752,6 +752,14 @@ function initSchema() {
       current_count INTEGER DEFAULT 0,
       period VARCHAR(20) DEFAULT 'semester',
       period_label VARCHAR(50),
+      -- 영역별 학기 목표(제목+영역+기한+진행률) 계약 컬럼 (GROWTH_GOAL_SPEC §1-2)
+      title TEXT,
+      area TEXT,
+      deadline TEXT,
+      progress INTEGER DEFAULT 0,
+      status TEXT DEFAULT 'active',
+      description TEXT,
+      updated_at TEXT,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (user_id) REFERENCES users(id)
     );
@@ -2575,6 +2583,26 @@ function initSchema() {
     }
   }
 
+  // 마이그레이션: growth_goals — 영역별 학기 목표(제목+영역+기한+진행률) 세대로 확장
+  // (구 'N회 달성' 세대 → title/area/deadline/progress/status 계약. GROWTH_GOAL_SPEC §1-2)
+  try {
+    const ggCols = db.prepare("PRAGMA table_info(growth_goals)").all().map(c => c.name);
+    if (!ggCols.includes('title'))       db.exec("ALTER TABLE growth_goals ADD COLUMN title TEXT");
+    if (!ggCols.includes('area'))        db.exec("ALTER TABLE growth_goals ADD COLUMN area TEXT");
+    if (!ggCols.includes('deadline'))    db.exec("ALTER TABLE growth_goals ADD COLUMN deadline TEXT");
+    if (!ggCols.includes('progress'))    db.exec("ALTER TABLE growth_goals ADD COLUMN progress INTEGER DEFAULT 0");
+    if (!ggCols.includes('status'))      db.exec("ALTER TABLE growth_goals ADD COLUMN status TEXT DEFAULT 'active'");
+    if (!ggCols.includes('description')) db.exec("ALTER TABLE growth_goals ADD COLUMN description TEXT");
+    if (!ggCols.includes('updated_at'))  db.exec("ALTER TABLE growth_goals ADD COLUMN updated_at TEXT");
+    // 과거 행 1회 백필: period_label(구 제목)·goal_type(구 영역) → title·area로 끌어올림(데이터 구제)
+    db.exec(`UPDATE growth_goals
+               SET title = COALESCE(title, period_label),
+                   area  = COALESCE(area, goal_type)
+             WHERE title IS NULL OR area IS NULL`);
+  } catch (e) {
+    console.error('[다채움] growth_goals 영역목표 마이그레이션 실패:', e.message);
+  }
+
   // ============ 추천콘텐츠 큐레이션 (관리자 직접 기획) ============
   // spec_admin_featured_curation.md A항 — featured_sections / featured_section_items
   try {
@@ -2898,6 +2926,43 @@ function initSchema() {
     console.log('[DB] 클래스 마일리지 테이블 준비 완료 (class_mileage_rules / class_mileage / class_mileage_log)');
   } catch (e) {
     console.error('[DB] 클래스 마일리지 테이블 생성 실패:', e.message);
+  }
+
+  // 백필: 자동 수집 portfolio_items 의 학교급 메타 채움 (idempotent)
+  //   과제 제출·문항풀이 등 자동 생성 항목은 과거 grade_year/school_level 이 둘 다 NULL 이라
+  //   성장기록>포트폴리오 화면의 기본 학교급 필터에서 전부 가려졌다.
+  //   해당 항목을 그 학생의 현재 users.grade 로 일괄 채운다(동일 학년도 내라 대부분 정확).
+  //   - role='student' 항목만, grade 있는 사용자만. 이미 채워진 행은 건드리지 않음(WHERE 절).
+  //   - 재실행 안전: 채울 행이 없으면 0행 UPDATE. 운영(GCP) DB에도 서버 기동 시 자동 적용.
+  try {
+    const piCols = db.prepare("PRAGMA table_info(portfolio_items)").all().map(c => c.name);
+    if (piCols.includes('grade_year') && piCols.includes('school_level')) {
+      const res = db.prepare(`
+        UPDATE portfolio_items
+        SET grade_year = (
+              SELECT CAST(u.grade AS TEXT) FROM users u WHERE u.id = portfolio_items.user_id
+            ),
+            school_level = (
+              SELECT CASE
+                WHEN CAST(u.grade AS INTEGER) BETWEEN 1 AND 6 THEN 'elementary'
+                WHEN CAST(u.grade AS INTEGER) BETWEEN 7 AND 9 THEN 'middle'
+                WHEN CAST(u.grade AS INTEGER) BETWEEN 10 AND 12 THEN 'high'
+                ELSE NULL END
+              FROM users u WHERE u.id = portfolio_items.user_id
+            )
+        WHERE grade_year IS NULL
+          AND school_level IS NULL
+          AND user_id IN (
+            SELECT id FROM users
+            WHERE role = 'student' AND grade IS NOT NULL AND TRIM(CAST(grade AS TEXT)) <> ''
+          )
+      `).run();
+      if (res.changes > 0) {
+        console.log(`[DB] 포트폴리오 학교급 메타 백필 완료 — ${res.changes}건 (자동 수집 항목에 학생 학년 부여)`);
+      }
+    }
+  } catch (e) {
+    console.error('[DB] 포트폴리오 학교급 메타 백필 실패:', e.message);
   }
 }
 

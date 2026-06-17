@@ -1276,10 +1276,32 @@ router.get('/portfolio/goals', requireAuth, (req, res) => {
   } catch (err) { res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' }); }
 });
 
+// 생성: 학생 본인만 (교사 대리 생성 금지 — req.user.id 고정)
 router.post('/portfolio/goals', requireAuth, (req, res) => {
   try {
     const result = growthExtDb.createGrowthGoal(req.user.id, req.body);
     res.json({ success: true, ...result });
+  } catch (err) {
+    const status = err.status || 500;
+    res.status(status).json({ success: false, message: err.status ? err.message : '서버 오류가 발생했습니다.' });
+  }
+});
+
+// 진행률·내용 수정: 본인 소유만. progress>=100 → status=completed 자동 전환.
+router.put('/portfolio/goals/:id', requireAuth, (req, res) => {
+  try {
+    const goal = growthExtDb.updateGrowthGoal(parseInt(req.params.id), req.user.id, req.body);
+    if (!goal) return res.status(404).json({ success: false, message: '목표를 찾을 수 없습니다.' });
+    res.json({ success: true, goal });
+  } catch (err) { res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' }); }
+});
+
+// 삭제: 본인 소유만.
+router.delete('/portfolio/goals/:id', requireAuth, (req, res) => {
+  try {
+    const ok = growthExtDb.deleteGrowthGoal(parseInt(req.params.id), req.user.id);
+    if (!ok) return res.status(404).json({ success: false, message: '목표를 찾을 수 없습니다.' });
+    res.json({ success: true });
   } catch (err) { res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' }); }
 });
 
