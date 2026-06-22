@@ -6,6 +6,7 @@ const db = require('../db/index');
 const lrsDb = require('../db/lrs');
 const classDb = require('../db/class');
 const mastery = require('../db/lrs-mastery');
+const analytics = require('../db/lrs-analytics');
 const { rebuildAllAggregates } = require('../db/lrs-aggregate');
 const { logLearningActivity } = require('../db/learning-log-helper');
 const { LRS_CONFIG } = require('../lib/lrs-config');
@@ -208,6 +209,53 @@ function resolveScopeFilter(req, colAlias) {
 }
 
 /**
+ * §C-5 멤버십 기반 scope 필터.
+ *   resolveScopeFilter 는 class scope 를 `class_id IN (...)` 로 거른다. 하지만
+ *   self-learn(99.4%)·content(99.6%) 로그는 class_id 가 NULL → 교사 class scope 가 0건.
+ *   이 헬퍼는 class scope 를 **class_members.user_id 멤버십 조인**(소유 반 학생 합집합)으로
+ *   바꿔 "교사가 우리 반 학생의 AI맞춤학습 등 자기주도 활동을 보게" 한다.
+ *   - scope=mine  : user_id = 본인
+ *   - scope=class : user_id IN (교사 소유 반들의 student 멤버) — class_id NULL 도 포착
+ *   - scope=all   : admin 전용 (필터 없음)
+ *   미전달/권한미달 시 resolveScopeFilter 와 동일 규칙으로 다운그레이드.
+ */
+function resolveMembershipScopeFilter(req, colAlias) {
+  const prefix = colAlias ? `${colAlias}.` : '';
+  const requested = String(req.query.scope || '').toLowerCase();
+  const role = req.user && req.user.role;
+  let scope = requested;
+  if (scope === 'all' && role !== 'admin') scope = 'mine';
+  if (scope === 'class' && role !== 'teacher' && role !== 'admin') scope = 'mine';
+  if (!scope) scope = role === 'admin' ? 'all' : (role === 'teacher' ? 'class' : 'mine');
+
+  if (scope === 'all') {
+    return { where: '', params: [], scope, downgraded: requested && requested !== scope };
+  }
+  if (scope === 'mine') {
+    return { where: ` AND ${prefix}user_id = ?`, params: [req.user.id], scope, downgraded: requested && requested !== scope };
+  }
+  // class → 소유 반 student 멤버 합집합 (멤버십 조인)
+  let memberIds = [];
+  try {
+    const classIds = db.prepare('SELECT id FROM classes WHERE owner_id = ?').all(req.user.id).map(r => r.id);
+    if (classIds.length) {
+      const ph = classIds.map(() => '?').join(',');
+      memberIds = db.prepare(`
+        SELECT DISTINCT cm.user_id AS id
+        FROM class_members cm JOIN users u ON u.id = cm.user_id
+        WHERE cm.class_id IN (${ph}) AND u.role = 'student'
+      `).all(...classIds).map(r => r.id);
+    }
+  } catch (_) { memberIds = []; }
+  if (!memberIds.length) {
+    // 소유 반·멤버 없으면 mine 으로 다운그레이드
+    return { where: ` AND ${prefix}user_id = ?`, params: [req.user.id], scope: 'mine', downgraded: true };
+  }
+  const ph2 = memberIds.map(() => '?').join(',');
+  return { where: ` AND ${prefix}user_id IN (${ph2})`, params: memberIds, scope, downgraded: requested && requested !== scope };
+}
+
+/**
  * 클래스 매트릭스/경고/통계 열람 권한: 관리자 또는 "해당 클래스" 교사-티어 멤버만.
  *   - admin: 전체 허용
  *   - 멤버 role 이 owner/teacher/co_teacher(개설자·공동담임) → 허용
@@ -225,6 +273,40 @@ function canViewClass(req, classId) {
     if (CLASS_TEACHER_ROLES.has(role)) return true;
   } catch (_) {}
   return false;
+}
+
+// ─────────────────────────────────────────────────────────
+// 개인정보 마스킹 정책 (2026-06 전환 — 단일 진실원천)
+//   isClassManager: 그 반의 담임/담당(owner·teacher·co_teacher 멤버)인가.
+//     ★ admin 이라도 "그 반의 교사-티어 멤버가 아니면" manager 가 아니다(거시뷰=익명).
+//   shouldMaskNames: 학생 식별(이름)을 가려야 하는가.
+//     = (학생수 < minSampleN) AND (담임/담당이 아님)
+//     → 담임/담당(manager): 항상 실명(n 무관). 자기 반 위험 학생을 식별해 지도해야 하므로.
+//     → 관리자(비소유)·기타: n<10 이면 익명(개인정보 보호 유지).
+//   maskNameLabel: 마스킹 시 일관된 익명 라벨("학생 A","학생 B"...). 인덱스 기반.
+// ─────────────────────────────────────────────────────────
+const MIN_SAMPLE_N = LRS_CONFIG.minSampleN;
+
+function isClassManager(req, classId) {
+  if (!req.user) return false;
+  try {
+    const role = classDb.getMemberRole(classId, req.user.id);
+    return CLASS_TEACHER_ROLES.has(role);
+  } catch (_) {
+    return false;
+  }
+}
+
+/** 이름 마스킹 여부 판정 — 거시뷰(비담임)에서만 n<10 익명화. */
+function shouldMaskNames(req, classId, studentCount) {
+  if (studentCount >= MIN_SAMPLE_N) return false;     // 표본 충분 → 식별 가능
+  if (isClassManager(req, classId)) return false;     // 담임/담당 → 항상 실명
+  return true;                                        // 비담임 + 소표본 → 익명
+}
+
+/** 익명 라벨 ("학생 A" …) — 인덱스 기반, 26 순환. */
+function maskNameLabel(i) {
+  return `학생 ${String.fromCharCode(65 + (i % 26))}`;
 }
 
 // ─────────────────────────────────────────────────────────
@@ -1065,11 +1147,11 @@ router.get('/mastery/class/:id', requireAuth, (req, res) => {
 
     const data = mastery.getClassMastery(classId, students, { subjectCode });
 
-    // 개인정보 게이트: 학생 수 n<10 이면 개별 식별(학생명·매트릭스 셀의 user 키)을 마스킹.
-    const MIN_N = 10;
-    const masked = students.length < MIN_N;
+    // 개인정보 게이트(정책 2026-06): 담임/담당은 실명, 비담임 거시뷰는 n<10 → 익명.
+    const MIN_N = MIN_SAMPLE_N;
+    const masked = shouldMaskNames(req, classId, students.length);
     if (masked) {
-      data.students = data.students.map((s, i) => ({ id: s.id, name: `학생 ${String.fromCharCode(65 + (i % 26))}` }));
+      data.students = data.students.map((s, i) => ({ id: s.id, name: maskNameLabel(i) }));
       const nm = new Map(data.students.map(s => [s.id, s.name]));
       data.standards = data.standards.map(s => ({
         ...s,
@@ -1084,6 +1166,171 @@ router.get('/mastery/class/:id', requireAuth, (req, res) => {
     res.json({ success: true, masked, minSample: MIN_N, ...data });
   } catch (err) {
     console.error('[LRS] /mastery/class error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────
+// 분석·예측 P0 (온더플라이) — 기획서: LRS_분석예측_강화_기획서.md
+//   §B-1 위험점수 · §B-2 추세 · §B-3 도달예측 · §B-4 선수갭
+//   윤리(P6): 위험점수는 교사/관리자 전용(ews). 학생 trend 응답에 위험 필드 비포함.
+// ─────────────────────────────────────────────────────────
+
+// GET /api/lrs/ews/class/:id — 교사(소유)/관리자 전용 조기경보(위험군+추세+반 도달외삽+선수갭)
+//   학생 접근 차단(403). n<10(반 학생수) 이면 학생 식별 마스킹(기존 패턴).
+router.get('/ews/class/:id', requireAuth, (req, res) => {
+  try {
+    const classId = parseInt(req.params.id, 10);
+    if (!Number.isInteger(classId)) {
+      return res.status(400).json({ success: false, message: '잘못된 클래스 ID 입니다.' });
+    }
+    // P6 낙인 방지: 교사(소유)/관리자만. 학생은 본인 반이어도 위험군 비노출(403).
+    if (!canViewClass(req, classId)) {
+      return res.status(403).json({ success: false, message: '권한이 없습니다.' });
+    }
+
+    const students = analytics.classStudents(classId);
+    const target = req.query.target ? Math.max(1, Math.min(100, parseInt(req.query.target, 10) || 80)) : 80;
+
+    // 위험군 리스트(B-1)
+    const risk = analytics.getClassRiskList(classId, students);
+    // 반 도달 추세 + 외삽(B-2 → B-3) — 반 전체 멤버십 집계
+    const classTrend = analytics.computeTrend({ classId });
+    const projection = analytics.projectReach(classTrend, { target });
+    // 선수개념 갭(B-4)
+    const prereqGap = analytics.getPrereqGap(classId);
+
+    // 개인정보 게이트(정책 2026-06): 담임/담당은 실명, 비담임 거시뷰는 n<10 → 익명(이름만, id 유지).
+    const MIN_N = MIN_SAMPLE_N;
+    const masked = shouldMaskNames(req, classId, students.length);
+    let riskList = risk.list;
+    let gaps = prereqGap.gaps;
+    if (masked) {
+      const labelById = new Map();
+      students.forEach((s, i) => labelById.set(s.id, maskNameLabel(i)));
+      riskList = riskList.map(r => ({ ...r, name: labelById.get(r.userId) || '학생' }));
+      gaps = gaps.map(g => ({
+        ...g,
+        blockedStudents: (g.blockedStudents || []).map(b => ({ ...b, name: labelById.get(b.userId) || '학생' })),
+      }));
+    }
+
+    res.json({
+      success: true, classId, masked, minSample: MIN_N,
+      studentCount: students.length,
+      risk: { list: riskList, summary: risk.summary },
+      classTrend,
+      projection,
+      prereqGap: { edgesLoaded: prereqGap.edgesLoaded, bridged: prereqGap.bridged, gaps },
+      target,
+      disclaimer: '이 신호는 규칙 기반 조기경보이며 실제와 다를 수 있어요. 소표본일수록 참고용으로 보세요.',
+    });
+  } catch (err) {
+    console.error('[LRS] /ews/class error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// GET /api/lrs/trend/student/:id — 본인/교사/관리자. 성취 추이 + 도달예상.
+//   윤리(P6): 위험점수·위험등급 필드 절대 미포함(학생 낙인 방지).
+router.get('/trend/student/:id', requireAuth, (req, res) => {
+  try {
+    const userId = parseInt(req.params.id, 10);
+    if (!Number.isInteger(userId)) {
+      return res.status(400).json({ success: false, message: '잘못된 사용자 ID 입니다.' });
+    }
+    if (!canViewUser(req, userId)) {
+      return res.status(403).json({ success: false, message: '권한이 없습니다.' });
+    }
+    const target = req.query.target ? Math.max(1, Math.min(100, parseInt(req.query.target, 10) || 80)) : 80;
+
+    const trend = analytics.computeTrend({ userId });
+    const projection = analytics.projectReach(trend, { target });
+
+    // ★ 응답에 위험점수/위험등급 등 어떤 위험 필드도 포함하지 않는다(P6).
+    res.json({
+      success: true, userId, target,
+      trend, projection,
+      disclaimer: '이 추정은 규칙 기반이라 실제와 다를 수 있어요. 더 풀수록 정확해져요!',
+    });
+  } catch (err) {
+    console.error('[LRS] /trend/student error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// GET /api/lrs/trend/class/:id — 교사(소유)/관리자. 반 성취 추세 + 도달 외삽.
+router.get('/trend/class/:id', requireAuth, (req, res) => {
+  try {
+    const classId = parseInt(req.params.id, 10);
+    if (!Number.isInteger(classId)) {
+      return res.status(400).json({ success: false, message: '잘못된 클래스 ID 입니다.' });
+    }
+    if (!canViewClass(req, classId)) {
+      return res.status(403).json({ success: false, message: '권한이 없습니다.' });
+    }
+    const target = req.query.target ? Math.max(1, Math.min(100, parseInt(req.query.target, 10) || 80)) : 80;
+    const students = analytics.classStudents(classId);
+
+    const trend = analytics.computeTrend({ classId });
+    const projection = analytics.projectReach(trend, { target });
+
+    res.json({
+      success: true, classId, target, studentCount: students.length,
+      trend, projection,
+      disclaimer: '이 추정은 규칙 기반 조기경보이며 실제와 다를 수 있어요.',
+    });
+  } catch (err) {
+    console.error('[LRS] /trend/class error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// GET /api/lrs/weak-trend — 관리자(scope=all)/교사(scope=class). 취약 성취기준 추세 랭킹.
+//   scope=class: 교사 소유 반 멤버 전체. scope=all: admin 전용 전체 학생.
+//   평가 학생수 n<10 인 성취기준은 식별 무관(코드 단위 집계)이지만, 전체 표본<10 이면 마스킹 플래그.
+router.get('/weak-trend', requireAuth, (req, res) => {
+  try {
+    const role = req.user && req.user.role;
+    let requested = String(req.query.scope || '').toLowerCase();
+    let scope = requested;
+    if (scope === 'all' && role !== 'admin') scope = 'class';
+    if (!scope) scope = role === 'admin' ? 'all' : 'class';
+    if (scope === 'class' && role !== 'teacher' && role !== 'admin') {
+      return res.status(403).json({ success: false, message: '권한이 없습니다.' });
+    }
+
+    const limit = req.query.limit ? Math.max(1, Math.min(50, parseInt(req.query.limit, 10) || 15)) : 15;
+    let userIds = [];
+    if (scope === 'all') {
+      userIds = db.prepare("SELECT id FROM users WHERE role='student'").all().map(r => r.id);
+    } else {
+      // class: 교사 소유 반들의 student 멤버 합집합
+      const classIds = db.prepare('SELECT id FROM classes WHERE owner_id = ?').all(req.user.id).map(r => r.id);
+      if (classIds.length) {
+        const ph = classIds.map(() => '?').join(',');
+        userIds = db.prepare(`
+          SELECT DISTINCT cm.user_id AS id
+          FROM class_members cm JOIN users u ON u.id = cm.user_id
+          WHERE cm.class_id IN (${ph}) AND u.role = 'student'
+        `).all(...classIds).map(r => r.id);
+      }
+    }
+
+    // 정책 2026-06: scope=class 는 교사가 "자기 반(담당) 학생"을 보는 관점 → 실명(masked=false).
+    //   scope=all 은 관리자 거시뷰 → 표본 n<10 이면 익명 게이트 유지(개인정보 보호).
+    //   (※ getWeakTrend 자체는 성취기준 코드 단위 집계로 개별 학생명 미포함 — masked 는 FE 참고 배너용 플래그.)
+    const MIN_N = MIN_SAMPLE_N;
+    const masked = scope === 'class' ? false : (userIds.length < MIN_N);
+    const ranking = analytics.getWeakTrend({ userIds, limit });
+
+    res.json({
+      success: true, scope, studentCount: userIds.length, masked, minSample: MIN_N,
+      ranking,
+      disclaimer: '취약·하락 추세는 규칙 기반 신호입니다. 표본이 적은 단위는 참고용으로 보세요.',
+    });
+  } catch (err) {
+    console.error('[LRS] /weak-trend error:', err);
     res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
   }
 });
@@ -1309,14 +1556,29 @@ router.get('/warnings/:classId', requireAuth, (req, res) => {
     }
     const weakAchievements = Array.from(weakMap.values());
 
+    // 개인정보 게이트(정책 2026-06): 담임/담당은 실명, 비담임(관리자 비소유 등) 거시뷰는 n<10 → 익명.
+    //   warnings 는 위험 학생을 displayName 으로 직접 노출 → 비담임 소표본 열람 시 식별 마스킹 필요.
+    const studentCount = memberRows.filter(m => true).length; // 학생 멤버 수(쿼리에서 이미 student 한정)
+    const masked = shouldMaskNames(req, classId, studentCount);
+    let outInactive = inactive, outNoData = noData, outWrong = consecutiveWrong, outWeak = weakAchievements;
+    if (masked) {
+      const labelById = new Map();
+      memberRows.forEach((m, i) => labelById.set(m.user_id, maskNameLabel(i)));
+      const relabel = (u) => ({ ...u, displayName: labelById.get(u.userId) || '학생' });
+      outInactive = inactive.map(relabel);
+      outNoData = noData.map(relabel);
+      outWrong = consecutiveWrong.map(relabel);
+      outWeak = weakAchievements.map(relabel);
+    }
+
     res.json({
-      success: true, classId,
-      inactive, noData, consecutiveWrong, weakAchievements,
+      success: true, classId, masked, minSample: MIN_SAMPLE_N,
+      inactive: outInactive, noData: outNoData, consecutiveWrong: outWrong, weakAchievements: outWeak,
       summary: {
-        inactiveCount: inactive.length,
-        noDataCount: noData.length,
-        consecutiveWrongCount: consecutiveWrong.length,
-        weakCount: weakAchievements.length
+        inactiveCount: outInactive.length,
+        noDataCount: outNoData.length,
+        consecutiveWrongCount: outWrong.length,
+        weakCount: outWeak.length
       }
     });
   } catch (err) {
@@ -1447,7 +1709,9 @@ router.get('/stats/custom', requireAuth, (req, res) => {
   try {
     const r = dateRangeWhere(req, 'created_at', 'll');
     if (r.invalid) return sendInvalidPeriod(res, r.reason);
-    const sf = resolveScopeFilter(req, 'll');
+    // §C-5 fix: self-learn 로그는 class_id 99.4% NULL → class_id 기반 scope 는 교사 0건.
+    //   멤버십(소속 학생 user_id IN) 기반으로 교체해 교사가 우리 반 학생 AI맞춤학습을 보게 함.
+    const sf = resolveMembershipScopeFilter(req, 'll');
     const baseWhere = `WHERE ll.source_service='self-learn' ${r.where} ${sf.where}`;
     const baseParams = [...r.params, ...sf.params];
 

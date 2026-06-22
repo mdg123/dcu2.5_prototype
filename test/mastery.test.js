@@ -293,3 +293,102 @@ test('BUG-M6d: 회귀 없음 — 소유 교사·관리자는 자기 반/전체 w
   const adminAny = await req(`/warnings/${foreign.id}`, ADMIN);
   assert.equal(adminAny.status, 200, '관리자는 임의 반 warnings 200 유지');
 });
+
+// ──────────────────────────────────────────────────────────────────────────
+// ⑦ 개인정보 마스킹 정책 전환(2026-06) 박제.
+//    결정: 담임/담당(owner·teacher·co_teacher 멤버)은 자기 반 학생을 n 과 무관하게 실명.
+//          n<10 익명화는 "담임이 아닌" 거시뷰(관리자 비소유·타반)에만 적용(개인정보 보호 유지).
+//    실 DB: class 1 = teacher1(id2) 소유, 학생 8명(<10). admin(id1) 은 class 1 비멤버.
+// ──────────────────────────────────────────────────────────────────────────
+
+// 익명 라벨("학생 A" 패턴) 판별 — 마스킹 여부 휴리스틱.
+function looksAnonymized(name) {
+  return /^학생\s*[A-Z]$/.test(String(name || '').trim());
+}
+
+test('INV-PRIV1: 전제 — class 1 은 소표본(학생<10) 이고 teacher1 소유, admin 은 비멤버', () => {
+  const n = db.prepare(`
+    SELECT COUNT(*) c FROM class_members cm JOIN users u ON cm.user_id=u.id
+    WHERE cm.class_id=? AND cm.status='active' AND u.role='student'
+  `).get(CLASS).c;
+  assert.ok(n > 0 && n < 10, `class ${CLASS} 학생수 ${n} 은 0<n<10 이어야(소표본 정책 검증 가능)`);
+  const teacherRole = db.prepare("SELECT role FROM class_members WHERE class_id=? AND user_id=? AND status='active'").get(CLASS, TEACHER);
+  assert.ok(teacherRole && ['owner','teacher','co_teacher'].includes(teacherRole.role),
+    `teacher1 은 class ${CLASS} 의 교사-티어 멤버여야 (role=${teacherRole && teacherRole.role})`);
+  const adminRole = db.prepare("SELECT role FROM class_members WHERE class_id=? AND user_id=? AND status='active'").get(CLASS, ADMIN);
+  assert.ok(!adminRole || !['owner','teacher','co_teacher'].includes(adminRole.role),
+    'admin 은 class 1 의 교사-티어 멤버가 아니어야(거시뷰 익명 검증 전제)');
+});
+
+test('INV-PRIV2: 담임/담당(teacher1)은 소표본이어도 자기 반 mastery 실명(masked=false)', async () => {
+  const r = await req(`/mastery/class/${CLASS}`, TEACHER);
+  assert.equal(r.status, 200, '소유 교사 mastery 200');
+  assert.equal(r.json.masked, false, '담임은 masked=false(실명) — n<10 무관');
+  // 학생 이름이 익명 라벨이 아니어야(실명 노출)
+  const anyAnon = (r.json.students || []).some(s => looksAnonymized(s.name));
+  assert.ok(!anyAnon, '담임 뷰의 학생명이 "학생 A" 익명 라벨이면 안 됨(실명이어야)');
+  assert.ok((r.json.students || []).length > 0, '학생 헤더가 있어야');
+});
+
+test('INV-PRIV3: 비소유 관리자(admin)는 소표본 mastery 익명(masked=true) — 개인정보 불변식', async () => {
+  const r = await req(`/mastery/class/${CLASS}`, ADMIN);
+  assert.equal(r.status, 200, '관리자 mastery 200');
+  assert.equal(r.json.masked, true, '비소유 관리자는 n<10 → masked=true(익명) 유지(개인정보 보호)');
+  // 모든 학생명이 익명 라벨이어야
+  const allAnon = (r.json.students || []).every(s => looksAnonymized(s.name));
+  assert.ok(allAnon, '비소유 관리자 뷰의 학생명은 전부 "학생 A" 형태 익명이어야');
+});
+
+test('INV-PRIV4: ews — 담임 실명(masked=false), 비소유 관리자 익명(masked=true)', async () => {
+  const t = await req(`/ews/class/${CLASS}`, TEACHER);
+  assert.equal(t.status, 200, '담임 ews 200');
+  assert.equal(t.json.masked, false, '담임 ews masked=false');
+  const a = await req(`/ews/class/${CLASS}`, ADMIN);
+  assert.equal(a.status, 200, '관리자 ews 200');
+  assert.equal(a.json.masked, true, '비소유 관리자 ews masked=true(소표본 익명)');
+  // 담임 위험군 이름이 익명 라벨이 아니어야(데이터가 있을 때만 의미)
+  for (const r of (t.json.risk && t.json.risk.list) || []) {
+    assert.ok(!looksAnonymized(r.name), `담임 ews 위험군 이름 "${r.name}" 이 익명이면 안 됨`);
+  }
+  // 관리자 위험군 이름은 익명이어야(데이터가 있을 때)
+  for (const r of (a.json.risk && a.json.risk.list) || []) {
+    assert.ok(looksAnonymized(r.name), `관리자 ews 위험군 이름 "${r.name}" 은 익명이어야`);
+  }
+});
+
+test('INV-PRIV5: warnings — 담임 실명, 비소유 관리자 소표본 익명', async () => {
+  const t = await req(`/warnings/${CLASS}`, TEACHER);
+  assert.equal(t.status, 200, '담임 warnings 200');
+  assert.equal(t.json.masked, false, '담임 warnings masked=false(실명)');
+  const a = await req(`/warnings/${CLASS}`, ADMIN);
+  assert.equal(a.status, 200, '관리자 warnings 200');
+  assert.equal(a.json.masked, true, '비소유 관리자 warnings masked=true(소표본 익명)');
+  // 이름 노출되는 모든 리스트에 대해 담임=실명 / 관리자=익명 교차 검증(데이터 있을 때)
+  const namesOf = (j) => [
+    ...(j.inactive || []), ...(j.noData || []), ...(j.consecutiveWrong || []),
+    ...(j.weakAchievements || [])
+  ].map(x => x.displayName).filter(Boolean);
+  for (const nm of namesOf(t.json)) assert.ok(!looksAnonymized(nm), `담임 warnings 이름 "${nm}" 이 익명이면 안 됨`);
+  for (const nm of namesOf(a.json)) assert.ok(looksAnonymized(nm), `관리자 warnings 이름 "${nm}" 은 익명이어야`);
+});
+
+test('INV-PRIV6: weak-trend — 교사 scope=class masked=false, 관리자 scope=all 소표본 익명 유지', async () => {
+  const t = await req(`/weak-trend?scope=class`, TEACHER);
+  assert.equal(t.status, 200, '교사 weak-trend(class) 200');
+  assert.equal(t.json.scope, 'class');
+  assert.equal(t.json.masked, false, '교사 자기 반 weak-trend 는 masked=false');
+  const a = await req(`/weak-trend?scope=all`, ADMIN);
+  assert.equal(a.status, 200, '관리자 weak-trend(all) 200');
+  assert.equal(a.json.scope, 'all');
+  // 전체 학생이 10명 미만이면 masked=true 여야(소표본 거시 보호). 10명 이상이면 false.
+  const expected = (a.json.studentCount || 0) < (a.json.minSample || 10);
+  assert.equal(a.json.masked, expected,
+    `관리자 all weak-trend masked 는 (studentCount<minSample)=${expected} 와 일치해야`);
+});
+
+test('INV-PRIV7: 비멤버 교사는 여전히 403(권한) — 마스킹 이전에 차단', async () => {
+  const foreign = classNotMemberedByTeacher();
+  assert.ok(foreign, '비멤버 active 클래스 필요');
+  const r = await req(`/mastery/class/${foreign.id}`, TEACHER);
+  assert.equal(r.status, 403, '비멤버 교사는 마스킹 분기 이전에 403');
+});

@@ -127,6 +127,128 @@
       --mastery-insufficient:#9ca3af;  --mastery-insufficient-soft:#f3f4f6;  --mastery-insufficient-ink:#4b5563;
     }
 
+    /* ═══════════════════════════════════════════════════════════════════
+       분석·예측 강화 P0 — 위험 전용 톤 vs 4상태 도달색 구분 (단일 출처)
+       기획서: 작업지시서/LRS_분석예측_P0_시각스펙.md §1
+       ★ 도달도(채움색)와 위험도(테두리+아이콘+배지)는 다른 축. 절대 혼동 금지.
+       ═══════════════════════════════════════════════════════════════════ */
+    :root{
+      /* 위험 등급(EWS) — 도달 4상태와 혼동 금지: 채움 아닌 테두리/아이콘/배지로 */
+      --risk-high:#dc2626;  --risk-high-soft:#fef2f2;  --risk-high-ink:#991b1b;   /* 진빨강(미도달 #ef4444보다 진함) */
+      --risk-mid:#f59e0b;   --risk-mid-soft:#fffbeb;   --risk-mid-ink:#b45309;     /* 주황 */
+      --risk-low:#9ca3af;   --risk-low-soft:#f9fafb;   --risk-low-ink:#4b5563;     /* 회색 */
+      /* 추세(Trend) 화살표 — 빨강 금지(미도달색 충돌 회피). 하락은 호박색 */
+      --trend-up:#16a34a;   --trend-flat:#9ca3af;      --trend-down:#ea7317;
+      /* 신뢰도(Confidence) 점 */
+      --conf-high:#16a34a;  --conf-mid:#f59e0b;        --conf-low:#9ca3af;
+      /* 예상 밴드(불확실성) */
+      --proj-line:#2563eb;  --proj-band:rgba(37,99,235,.12);  --proj-band-stroke:rgba(37,99,235,.35);
+    }
+
+    /* ── 공통: 신뢰 배지 / 소표본 단서 / 예측 한계 고지 ── */
+    .conf-badge{ display:inline-flex; align-items:center; gap:6px; font-size:13px; font-weight:600;
+      color:#4b5563; padding:3px 10px; border-radius:9999px; background:#f9fafb; border:1px solid #e5e7eb; cursor:help; white-space:nowrap; }
+    .conf-badge .conf-dot{ width:8px; height:8px; border-radius:50%; flex:0 0 auto; }
+    .conf-badge[data-conf="high"] .conf-dot{ background:var(--conf-high); }
+    .conf-badge[data-conf="mid"]  .conf-dot{ background:var(--conf-mid); }
+    .conf-badge[data-conf="low"]  .conf-dot{ background:var(--conf-low); }
+    .lowsample-chip{ display:inline-flex; align-items:center; gap:5px; font-size:12px; font-weight:600;
+      color:#92400e; background:#fffbeb; border:1px solid #fde68a; border-radius:9999px; padding:3px 10px; white-space:nowrap; }
+    .proj-disclaimer{ font-size:13px; color:#9ca3af; margin-top:10px; display:flex; align-items:center; gap:6px; }
+    .proj-headline{ font-size:13px; color:#374151; font-weight:600; }
+    .proj-headline strong{ color:var(--proj-line); }
+    .proj-headline.warn strong{ color:var(--trend-down); }
+
+    /* ── T-EWS: 위험군 조기경보 카드 ── */
+    .ews-list{ display:flex; flex-direction:column; gap:12px; }
+    .ews-card{ background:#fff; border:1px solid #e5e7eb; border-left-width:4px; border-radius:12px;
+      padding:16px 18px; box-shadow:0 1px 3px rgba(0,0,0,.08); display:flex; flex-direction:column; gap:10px;
+      transition:box-shadow .15s; min-width:0; }
+    .ews-card:hover{ box-shadow:0 4px 12px rgba(0,0,0,.10); }
+    .ews-card[data-risk="high"]{ border-left-color:var(--risk-high); }
+    .ews-card[data-risk="mid"]{  border-left-color:var(--risk-mid); }
+    .ews-card[data-risk="low"]{  border-left-color:var(--risk-low); }
+    .ews-card .ews-top{ display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; }
+    .ews-card .ews-name{ font-size:17px; font-weight:700; color:#111827; display:inline-flex; align-items:center; gap:8px; min-width:0; }
+    .ews-card .ews-name .risk-icon[data-risk="high"]{ color:var(--risk-high); }
+    .ews-card .ews-name .risk-icon[data-risk="mid"]{  color:var(--risk-mid); }
+    .ews-card .ews-name .risk-icon[data-risk="low"]{  color:var(--risk-low); }
+    .ews-card .ews-badges{ display:inline-flex; align-items:center; gap:8px; flex-wrap:wrap; }
+    /* 위험 배지 — 도달 배지(soft 채움 무테두리)와 달리 테두리+아이콘 강조 */
+    .risk-badge{ display:inline-flex; align-items:center; gap:5px; font-size:13px; font-weight:700;
+      padding:3px 11px; border-radius:9999px; border:1.5px solid; background:#fff; line-height:1.4; white-space:nowrap; }
+    .risk-badge[data-risk="high"]{ color:var(--risk-high-ink); border-color:var(--risk-high); background:var(--risk-high-soft); }
+    .risk-badge[data-risk="mid"]{  color:var(--risk-mid-ink);  border-color:var(--risk-mid);  background:var(--risk-mid-soft); }
+    .risk-badge[data-risk="low"]{  color:var(--risk-low-ink);  border-color:var(--risk-low);  background:var(--risk-low-soft); }
+    .ews-reasons{ display:flex; flex-wrap:wrap; gap:6px; }
+    .ews-reason{ font-size:13px; font-weight:600; color:#374151; background:#f3f4f6; border-radius:8px; padding:4px 10px; cursor:help; }
+    .ews-reason[data-key="decline"]{ color:#b45309; background:#fffbeb; }
+    .ews-reason[data-key="insufficient"]{ color:#4b5563; background:#f9fafb; }
+    .ews-reason:focus-visible{ outline:0; box-shadow:0 0 0 3px rgba(37,99,235,.35); }
+    .ews-actions{ display:flex; gap:8px; flex-wrap:wrap; }
+    .ews-actions .mastery-btn-sm{ flex:0 0 auto; }
+
+    /* ── T-TREND: 학생별 성취 추세 스파크라인 표 ── */
+    .trend-table-wrap{ max-width:100%; min-width:0; }
+    .trend-table{ width:100%; border-collapse:collapse; font-size:13px; }
+    .trend-table th{ text-align:left; font-size:13px; color:#4b5563; font-weight:600; padding:8px 10px; border-bottom:1px solid #e5e7eb; }
+    .trend-table td{ padding:10px; border-bottom:1px solid #f3f4f6; vertical-align:middle; }
+    .trend-table td.t-name{ font-size:15px; color:#1f2937; font-weight:600; white-space:nowrap; }
+    .spark{ display:block; width:120px; height:32px; max-width:100%; cursor:help; }
+    .spark .spark-line{ fill:none; stroke-width:2; }
+    .spark .spark-line[data-trend="up"]{ stroke:var(--trend-up); }
+    .spark .spark-line[data-trend="flat"]{ stroke:var(--trend-flat); }
+    .spark .spark-line[data-trend="down"]{ stroke:var(--trend-down); }
+    .spark .spark-area[data-trend="up"]{ fill:var(--trend-up); opacity:.12; }
+    .spark .spark-area[data-trend="flat"]{ fill:var(--trend-flat); opacity:.12; }
+    .spark .spark-area[data-trend="down"]{ fill:var(--trend-down); opacity:.12; }
+    .spark .spark-dot[data-trend="up"]{ fill:var(--trend-up); }
+    .spark .spark-dot[data-trend="flat"]{ fill:var(--trend-flat); }
+    .spark .spark-dot[data-trend="down"]{ fill:var(--trend-down); }
+    .trend-arrow{ display:inline-flex; align-items:center; gap:6px; font-size:14px; font-weight:700; white-space:nowrap; cursor:help; }
+    .trend-arrow[data-trend="up"]{ color:var(--trend-up); }
+    .trend-arrow[data-trend="flat"]{ color:var(--trend-flat); }
+    .trend-arrow[data-trend="down"]{ color:var(--trend-down); }
+    .trend-note{ font-size:13px; color:#9ca3af; }
+    /* T-TREND 모바일 카드 전환 */
+    .trend-cards{ display:none; }
+    .trend-card{ background:#fff; border:1px solid #e5e7eb; border-radius:12px; padding:14px 16px; margin-bottom:10px; }
+    .trend-card .tc-top{ display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:8px; }
+    .trend-card .tc-name{ font-size:15px; font-weight:700; color:#1f2937; }
+    .trend-card .spark{ width:100%; max-width:240px; }
+    @media (max-width:767px){
+      .trend-table-wrap{ display:none; }
+      .trend-cards{ display:block; }
+    }
+
+    /* ── S-TREND/S-PROJ: 학생 도달 예상 칩 (무위험·자기효능) ── */
+    .sproj-chips{ display:flex; gap:12px; flex-wrap:wrap; margin-top:14px; }
+    .sproj-chip{ display:inline-flex; align-items:center; gap:8px; font-size:15px; font-weight:600;
+      padding:10px 16px; border-radius:12px; line-height:1.4; }
+    .sproj-chip.good{ background:#dcfce7; color:#15803d; }
+    .sproj-chip.proj{ background:#eff6ff; color:#1d4ed8; }
+    .sproj-chip.soft{ background:#f3f4f6; color:#4b5563; }
+    @media (max-width:767px){ .sproj-chips{ flex-direction:column; } .sproj-chip{ width:100%; } }
+
+    /* ── A-WEAK: 취약 성취기준 추세 랭킹 — 인라인 도달 Bar ── */
+    .weak-bar{ display:inline-flex; align-items:center; gap:8px; }
+    .weak-bar .wb-track{ width:64px; height:8px; border-radius:4px; background:#f3f4f6; overflow:hidden; flex:0 0 auto; }
+    .weak-bar .wb-fill{ height:100%; border-radius:4px; display:block; }
+    .weak-bar .wb-fill[data-state="reached"]{ background:var(--mastery-reached); }
+    .weak-bar .wb-fill[data-state="partial"]{ background:var(--mastery-partial); }
+    .weak-bar .wb-fill[data-state="notReached"]{ background:var(--mastery-notreached); }
+    .weak-bar .wb-num{ font-size:14px; font-weight:600; color:#374151; min-width:36px; font-variant-numeric:tabular-nums; }
+    /* A-WEAK 모바일 카드 */
+    .weak-cards{ display:none; }
+    .weak-card{ background:#fff; border:1px solid #e5e7eb; border-radius:12px; padding:14px 16px; margin-bottom:10px; }
+    .weak-card .wc-title{ font-size:15px; font-weight:700; color:#1f2937; margin-bottom:2px; }
+    .weak-card .wc-sub{ font-size:13px; color:#9ca3af; margin-bottom:10px; }
+    .weak-card .wc-row{ display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; }
+    @media (max-width:767px){
+      .weak-table-wrap{ display:none; }
+      .weak-cards{ display:block; }
+    }
+
     /* 신규 위젯 전용 타이포 상향 (lrs/index.html 기본 스케일이 작아 위젯 한정 상향) */
     .mastery-h2{ font-size:19px; font-weight:700; color:#1f2937; margin:0; }
     .mastery-sub{ font-size:13px; color:#6b7280; line-height:1.5; }
@@ -1008,6 +1130,171 @@ const MasteryTip = {
 };
 
 /* =====================================================================
+ * 분석·예측 강화(P0) 공통 헬퍼 — 위험톤·추세·예상밴드·신뢰·스파크라인
+ *   기획서: 작업지시서/LRS_분석예측_P0_시각스펙.md §1·§2·§4·§5
+ *   ★ BE grade/conf 값: high/medium/low → CSS data 속성은 high/mid/low 로 매핑.
+ *   ★ 위험은 면적 채움이 아니라 테두리+아이콘+배지. 추세 하락은 주황(#ea7317, 빨강 금지).
+ * ===================================================================== */
+/* BE의 medium → CSS mid (high/low는 그대로). 위험 등급·신뢰 공통. */
+function gradeKey(g){ return g === 'medium' ? 'mid' : (g === 'high' || g === 'low' ? g : 'mid'); }
+/* 신뢰 라벨(KO) — BE confidenceKo 우선, 없으면 매핑 */
+const CONF_KO_MAP = { high:'높음', medium:'보통', mid:'보통', low:'낮음' };
+function confLabelKo(conf, confKo){ return confKo || CONF_KO_MAP[conf] || '낮음'; }
+
+/* 신뢰 배지(우상단 일관 배치). observed/표본 hover 단서. (학생 화면엔 사용 금지) */
+function confBadge(conf, confKo, hint){
+  const k = gradeKey(conf);
+  const label = confLabelKo(conf, confKo);
+  const title = hint ? escapeAttr(hint) : '';
+  return `<span class="conf-badge" data-conf="${k}" title="${title}"><span class="conf-dot"></span>신뢰 ${escapeHtml(label)}</span>`;
+}
+/* 소표본 단서 칩 */
+function lowSampleChip(text){
+  return `<span class="lowsample-chip"><i class="fas fa-circle-info" aria-hidden="true"></i> ${escapeHtml(text || '표본 부족 · 참고용')}</span>`;
+}
+/* 예측 한계 1줄 고지(예측 섹션 하단 의무) */
+function projDisclaimer(text){
+  return `<p class="proj-disclaimer"><i class="fas fa-circle-info" aria-hidden="true"></i> ${escapeHtml(text || '이 추정은 규칙 기반이며 실제와 다를 수 있어요.')}</p>`;
+}
+
+/* 추세 방향(up/flat/down) → 아이콘 클래스 */
+const TREND_ICON = { up:'fa-arrow-trend-up', flat:'fa-arrow-right-long', down:'fa-arrow-trend-down' };
+function normTrendDir(dir){
+  if (dir === 'up' || dir === 'rising') return 'up';
+  if (dir === 'down' || dir === 'falling' || dir === 'declining') return 'down';
+  if (dir === 'flat' || dir === 'stable') return 'flat';
+  return 'flat';
+}
+/* 추세 화살표(색·기호·기울기). slope 단위 %p/주. */
+function trendArrow(dir, slope, hint){
+  const d = normTrendDir(dir);
+  const icon = TREND_ICON[d] || TREND_ICON.flat;
+  let txt;
+  if (d === 'flat' || slope == null) txt = '정체';
+  else txt = (slope > 0 ? '+' : '') + slope + '%p/주';
+  const title = hint ? ` title="${escapeAttr(hint)}"` : '';
+  return `<span class="trend-arrow" data-trend="${d}"${title}><i class="fas ${icon}" aria-hidden="true"></i> ${escapeHtml(txt)}</span>`;
+}
+
+/* 인라인 SVG 스파크라인 — 120×32, 0~100 고정 스케일(행간 비교 일관).
+ *   pts: 정답률 배열(% 또는 null). 결측주는 보간(선 안 끊김), 점은 안 찍음.
+ *   trend: up/flat/down 색. 마지막 점 강조. (Chart.js 인스턴스 N개 회피) */
+function sparklineSvg(pts, trend, opts){
+  const W = 120, H = 32, P = 4;
+  const innerW = W - P*2, innerH = H - P*2;
+  const series = (pts || []).map(v => (v == null ? null : Number(v)));
+  const valid = series.filter(v => v != null);
+  if (valid.length < 2) return `<span class="trend-note">추세 데이터 부족</span>`;
+  const d = normTrendDir(trend);
+  const n = series.length;
+  const xAt = i => P + (n === 1 ? innerW/2 : (i/(n-1))*innerW);
+  const yAt = v => P + innerH - (Math.max(0, Math.min(100, v))/100)*innerH; // 0~100 고정
+  // 결측 보간: 선형 채움(앞/뒤 유효값 사이)
+  const filled = series.slice();
+  for (let i=0;i<n;i++){
+    if (filled[i] != null) continue;
+    let a=i-1; while(a>=0 && filled[a]==null) a--;
+    let b=i+1; while(b<n && series[b]==null) b++;
+    if (a>=0 && b<n && series[b]!=null){ const t=(i-a)/(b-a); filled[i]=series[a]+(series[b]-series[a])*t; }
+    else if (a>=0) filled[i]=filled[a];
+    else if (b<n) filled[i]=series[b];
+  }
+  const linePts = filled.map((v,i)=> `${xAt(i).toFixed(1)},${yAt(v).toFixed(1)}`).join(' ');
+  // 영역 폴리곤(라인 → 하단 baseline)
+  const areaPts = `${P},${(H-P).toFixed(1)} ` + linePts + ` ${(W-P)},${(H-P).toFixed(1)}`;
+  const lastI = n-1, lastV = filled[lastI];
+  const cx = xAt(lastI).toFixed(1), cy = yAt(lastV).toFixed(1);
+  const aria = (opts && opts.aria) ? escapeAttr(opts.aria) : '추세 스파크라인';
+  return `<svg class="spark" viewBox="0 0 ${W} ${H}" role="img" aria-label="${aria}" preserveAspectRatio="none">
+    <polygon class="spark-area" data-trend="${d}" points="${areaPts}"></polygon>
+    <polyline class="spark-line" data-trend="${d}" points="${linePts}"></polyline>
+    <circle class="spark-dot" data-trend="${d}" cx="${cx}" cy="${cy}" r="2.5"></circle>
+  </svg>`;
+}
+
+/* 추세에서 행별 시계열(rate %) 추출. series가 없으면 OLS 기울기로 직선 합성(관측주차만큼). */
+function trendSeriesPercents(trend){
+  if (trend && Array.isArray(trend.series) && trend.series.length){
+    return trend.series.map(s => (s.rate == null ? null : s.rate));
+  }
+  return null;
+}
+/* 학생 행: 관측주차·기울기·현재율로 추세 직선 합성(스파크라인용, series 미제공 시) */
+function synthLineFromSlope(currentRate, slope, observedWeeks){
+  const n = Math.max(2, Math.min(8, observedWeeks || 0));
+  if (currentRate == null || slope == null) return null;
+  const arr = [];
+  for (let i=0;i<n;i++){
+    const back = (n-1) - i;            // 마지막이 현재
+    const v = currentRate - slope*back; // 과거로 갈수록 slope만큼 역산
+    arr.push(Math.max(0, Math.min(100, Math.round(v*10)/10)));
+  }
+  return arr;
+}
+
+/* 예상 밴드(3-dataset) — 실측선 + 점선 외삽 중심선 + 밴드(상/하단 채움).
+ *   trend.series(과거) + projection(외삽). 목표선·"지금" 분기선은 호출부에서 옵션. */
+function buildProjChartData(trend, projection, opts){
+  opts = opts || {};
+  const past = (trend && Array.isArray(trend.series)) ? trend.series : [];
+  const pastLabels = past.map(s => s.week || '');
+  const pastVals = past.map(s => (s.rate == null ? null : s.rate));
+  const r0 = (trend && trend.currentRate != null) ? trend.currentRate : (pastVals.length ? pastVals[pastVals.length-1] : null);
+
+  // 외삽 구간 길이: weeksToReach(≤12) 또는 8주
+  const reachable = projection && projection.reachable && projection.weeksToReach;
+  const wk = reachable ? Math.min(12, projection.weeksToReach) : 8;
+  const slope = (projection && projection.slope != null) ? projection.slope : (trend && trend.slope) || 0;
+  const projLabels = [];
+  for (let i=1;i<=wk;i++) projLabels.push('+' + i + '주');
+
+  const nPast = pastLabels.length;
+  const labels = pastLabels.concat(projLabels);
+
+  // 실측선: 과거 구간만 값, 외삽 구간 null
+  const dsActual = {
+    label:'지금까지', data: pastVals.concat(Array(wk).fill(null)),
+    borderColor:'var(--proj-line)', backgroundColor:'var(--proj-line)',
+    borderWidth:2.5, tension:.2, pointRadius:3, spanGaps:false, fill:false, order:1
+  };
+  // 외삽 중심선(점선): 마지막 실측점에서 이어지게 (경계점 공유)
+  const projLine = Array(nPast).fill(null);
+  if (nPast) projLine[nPast-1] = r0;
+  let lo = Array(nPast).fill(null), hi = Array(nPast).fill(null);
+  const bandW = Math.max(8, Math.abs(slope)*2);
+  if (nPast){ lo[nPast-1] = r0; hi[nPast-1] = r0; }
+  for (let i=1;i<=wk;i++){
+    const v = Math.max(0, Math.min(100, r0 + slope*i));
+    projLine.push(Math.round(v*10)/10);
+    lo.push(Math.round(Math.max(0, v - bandW)*10)/10);
+    hi.push(Math.round(Math.min(100, v + bandW)*10)/10);
+  }
+  const dsProj = {
+    label:'예상(추정)', data: projLine,
+    borderColor:'var(--proj-line)', backgroundColor:'var(--proj-line)',
+    borderWidth:2, borderDash:[6,4], tension:.1,
+    pointRadius:(ctx)=> ctx.dataIndex === labels.length-1 ? 6 : 0,
+    pointBackgroundColor:'var(--proj-line)', spanGaps:true, fill:false, order:2
+  };
+  // 밴드: hi(상단) fill '+1'(아래=lo dataset)까지 채움
+  const dsHi = {
+    label:'예상 상단', data: hi, borderColor:'var(--proj-band-stroke)', borderWidth:1, borderDash:[2,3],
+    pointRadius:0, tension:.1, fill:'+1', backgroundColor:'var(--proj-band)', spanGaps:true, order:4
+  };
+  const dsLo = {
+    label:'예상 하단', data: lo, borderColor:'var(--proj-band-stroke)', borderWidth:1, borderDash:[2,3],
+    pointRadius:0, tension:.1, fill:false, spanGaps:true, order:5
+  };
+  // 목표선
+  const datasets = [dsHi, dsLo, dsActual, dsProj];
+  if (opts.target != null){
+    datasets.push({ label:'목표 ' + opts.target + '%', data: labels.map(()=> opts.target),
+      borderColor:'#9ca3af', borderWidth:1.5, borderDash:[4,4], pointRadius:0, tension:0, fill:false, order:6 });
+  }
+  return { labels, datasets, boundaryIndex: nPast-1 };
+}
+
+/* =====================================================================
  * 뷰 렌더러 — 각 역할별 메뉴 id -> 함수
  * ===================================================================== */
 const VIEWS = {};
@@ -1794,6 +2081,19 @@ VIEWS['s-achieve'] = async function(root){
     </div>
     ${masteryLegend()}
 
+    <!-- S-TREND + S-PROJ: 내 성취 추이 + 도달 예상 (무위험·자기효능) -->
+    <section class="mastery-section" id="sTrendSection" style="margin-top:16px;">
+      <div class="ms-head"><div class="ms-titles">
+        <h2 class="mastery-h2"><i class="fas fa-seedling" aria-hidden="true" style="color:#16a34a;"></i> 내 성취 추이</h2>
+        <div class="mastery-sub">꾸준히 풀수록 그래프가 올라가요. 이번 주가 진하게 표시돼요.</div>
+      </div></div>
+      <div class="chart-body" id="sTrendBody" style="height:280px;">
+        <canvas id="sTrendChart" role="img" aria-label="내 정답률 추이"></canvas>
+      </div>
+      <div class="sproj-chips" id="sTrendChips"></div>
+      <div id="sTrendFoot"></div>
+    </section>
+
     <!-- S2: 강약 다이버징 Bar -->
     <section class="mastery-section" id="sDivergeSection" style="margin-top:16px;">
       <div class="ms-head">
@@ -1942,6 +2242,78 @@ VIEWS['s-achieve'] = async function(root){
   document.getElementById('sDivergeTopN').addEventListener('change', drawDiverge);
   drawDiverge();
 
+  // ── S-TREND + S-PROJ (분석·예측 P0, 무위험·자기효능) — 후행 로드 ──────
+  (async () => {
+    const td = await apiGet('/api/lrs/trend/student/' + encodeURIComponent(uid));
+    renderStudentTrend(td);
+  })();
+
+  function renderStudentTrend(td){
+    const body = document.getElementById('sTrendBody');
+    const chips = document.getElementById('sTrendChips');
+    const foot = document.getElementById('sTrendFoot');
+    if (!body) return;
+    const trend = td && td.trend;
+    const proj = td && td.proj || (td && td.projection);  // 라우트는 projection 키
+    const target = (td && td.target) || 80;
+
+    // ★ 윤리(P6): 위험점수·등수·"위험" 어휘·신뢰배지 절대 미표기. 하락도 파랑 유지.
+    if (!td || !td.success || !trend || trend.status !== 'ok' || !(trend.series||[]).length){
+      // 관측 부족 → 격려 빈상태(숨기지 않되 추이 그릴 데이터 없으면 안내)
+      const sec = document.getElementById('sTrendSection');
+      if (sec) sec.querySelector('#sTrendBody').outerHTML =
+        `<div class="mastery-empty"><i class="fas fa-seedling me-icon" style="color:#86efac;"></i>
+          <p>조금 더 풀면 내 성취 그래프가 그려져요. 오늘의 학습부터 시작해볼까요?</p>
+          <a class="mastery-btn mastery-btn-sm" href="/self-learn/"><i class="fas fa-rocket"></i> 오늘의 학습</a></div>`;
+      if (chips) chips.innerHTML = '';
+      return;
+    }
+
+    // 추이 라인 — 기존 "일별 추이" 톤(파랑) 그대로. 이번주 점만 크게.
+    const series = trend.series;
+    const labels = series.map(s => s.week || '');
+    const vals = series.map(s => (s.rate == null ? null : s.rate));
+    const lastI = vals.length - 1;
+    mkChart(document.getElementById('sTrendChart'), 'line', {
+      labels,
+      datasets:[{
+        label:'내 정답률(%)', data: vals,
+        borderColor:'#2563eb', backgroundColor:'rgba(37,99,235,.15)',
+        borderWidth:2.5, tension:.3, fill:true, spanGaps:true,
+        pointRadius:(c)=> c.dataIndex === lastI ? 6 : 3,
+        pointBackgroundColor:'#2563eb', pointBorderColor:'#fff', pointBorderWidth:2
+      }]
+    }, {
+      scales:{ y:{ min:0, max:100, ticks:{ callback:v=>v+'%', font:{size:12} } }, x:{ ticks:{ font:{size:11}, maxTicksLimit: window.innerWidth<768?6:10 } } },
+      plugins:{ legend:{ display:false },
+        tooltip:{ callbacks:{ label:(c)=> c.parsed.y==null?null:`정답률 ${c.parsed.y}%` } } }
+    });
+
+    // 칩 2종 (윤리 문구) — 감소 수치/위험 절대 노출 금지
+    const lowSample = (trend.observedWeeks||0) < 6 || trend.confidence === 'low';
+    let chipHtml = '';
+    const dir = normTrendDir(trend.direction);
+    if (dir === 'up'){
+      chipHtml += `<span class="sproj-chip good"><i class="fas fa-wand-magic-sparkles"></i> 꾸준히 오르고 있어요!</span>`;
+    } else {
+      // 정체/하락도 격려·중립 (떨어짐·위험 금지)
+      chipHtml += `<span class="sproj-chip soft"><i class="fas fa-hand-holding-heart"></i> 최근 조금 어려워졌네요. 이걸 같이 볼까요?</span>`;
+    }
+    if (proj && proj.reachable && proj.weeksToReach != null && proj.weeksToReach > 0){
+      chipHtml += `<span class="sproj-chip proj"><i class="fas fa-bullseye"></i> 이 속도면 약 ${proj.weeksToReach}주 후 ${target}% 도달 예상이에요! 👍</span>`;
+    } else if (proj && proj.reachable && proj.weeksToReach === 0){
+      chipHtml += `<span class="sproj-chip good"><i class="fas fa-star"></i> 이미 ${target}% 수준이에요. 이대로 꾸준히!</span>`;
+    } else {
+      chipHtml += `<span class="sproj-chip proj"><i class="fas fa-seedling"></i> 조금만 더 풀면 가까워져요.</span>`;
+    }
+    if (chips) chips.innerHTML = chipHtml;
+
+    // 학생용 순화 disclaimer + 소표본 단서(중립, 신뢰배지 없음)
+    if (foot){
+      foot.innerHTML = `<p class="proj-disclaimer"><i class="fas fa-circle-info"></i> 이 추정은 함께 참고하는 거예요.${lowSample ? ' 표본이 적어 대략적인 추정이에요.' : ''}</p>`;
+    }
+  }
+
   // ── S4 추천 카드 ─────────────────────────────────────────────────────
   const nextGrid = document.getElementById('sNextGrid');
   // 미도달 우선 → 부분 도달 (평가부족은 카드 만들지 않음)
@@ -2087,16 +2459,13 @@ function flattenWarnings(w){
 VIEWS['t-home'] = async function(root){
   root.innerHTML = tplLoading(4);
   const cid = await resolveClassId();
-  const [dash, warnings, daily] = await Promise.all([
+  const [dash, daily, ews] = await Promise.all([
     apiGet('/api/lrs/dashboard'),
-    apiGet('/api/lrs/warnings/' + encodeURIComponent(cid)),
-    apiGet('/api/lrs/stats/daily')
+    apiGet('/api/lrs/stats/daily'),
+    apiGet('/api/lrs/ews/class/' + encodeURIComponent(cid))   // T-EWS 조기경보(위험군)
   ]);
 
   const stats = (dash && dash.stats) || {};
-  const wf = flattenWarnings(warnings);
-  const warns = wf.all;
-  const summary = wf.summary;
 
   // 평균성취: stats/daily의 avg_score·count 가중평균
   const drowsRaw = (daily && daily.data) || [];
@@ -2109,21 +2478,36 @@ VIEWS['t-home'] = async function(root){
 
   const totalActs = stats.totalActivities || 0;
   const totalHours = Math.round((stats.totalDurationMinutes||0)/60);
-  const warnCount = (summary.inactiveCount||0) + (summary.wrongCount||0) + (summary.weakCount||0);
+
+  // ── T-EWS 데이터 정규화 ──
+  const ewsOk = ews && ews.success;
+  const ewsMasked = !!(ews && ews.masked);
+  const riskList = (ewsOk && ews.risk && ews.risk.list) || [];
+  const riskSummary = (ewsOk && ews.risk && ews.risk.summary) || { high:0, medium:0, low:0, total:0 };
+  // 지금 지원이 필요한 학생 = 높음 + 보통 (지원 프레임)
+  const supportCount = (riskSummary.high||0) + (riskSummary.medium||0);
 
   root.innerHTML = `
     <div class="dc-kpi-grid">
       ${kpiCard('학급 평균 성취', avgScore,      '점', {dir:'flat', text:'이번 기간'}, 'primary')}
       ${kpiCard('총 활동',        totalActs.toLocaleString(), '건', {dir:'up', text:'기간 누적'}, 'success')}
       ${kpiCard('총 학습시간',    totalHours,    '시간', {dir:'flat', text:''}, 'primary')}
-      ${kpiCard('도달 점검 필요',  warnCount,     '명', {dir:warnCount?'down':'flat', text:`미접속 ${summary.inactiveCount||0}·연속오답 ${summary.wrongCount||0}·약점 ${summary.weakCount||0}`}, warnCount?'danger':'primary')}
+      ${kpiCard('지금 지원이 필요한 학생', supportCount, '명', {dir:supportCount?'down':'flat', text:`위험 높음 ${riskSummary.high||0} · 보통 ${riskSummary.medium||0}`}, supportCount?'warning':'primary')}
     </div>
 
     <div class="grid-2">
       ${chartWrap('tHomeDaily','일별 학급 활동량','학생 전체 합계')}
-      <section class="dc-chart-wrapper">
-        <header><h2>보충이 필요한 학생</h2><div class="subtitle">우선순위 순</div></header>
-        <div id="warnList"></div>
+      <section class="mastery-section" id="ewsSection" style="margin-bottom:0;">
+        <div class="ms-head">
+          <div class="ms-titles">
+            <h2 class="mastery-h2"><i class="fas fa-life-ring" aria-hidden="true" style="color:#2563eb;"></i> 지금 지원이 필요한 학생</h2>
+            <div class="mastery-sub">위험순으로 정렬했어요. 칩을 누르면 근거를 볼 수 있어요.${ewsMasked ? ' <span class="mastery-chip-gray" style="margin-left:4px;"><i class="fas fa-user-shield"></i> 타 반 — 이름 익명</span>' : ''}</div>
+          </div>
+          <div class="ms-controls">
+            <span class="mastery-sub">위험 높음 ${riskSummary.high||0} · 보통 ${riskSummary.medium||0}</span>
+          </div>
+        </div>
+        <div id="ewsList"></div>
       </section>
     </div>`;
 
@@ -2138,31 +2522,86 @@ VIEWS['t-home'] = async function(root){
       `<header><h2>일별 학급 활동량</h2></header>` + tplEmpty();
   }
 
-  const warnListEl = document.getElementById('warnList');
-  if (!warns.length){
-    warnListEl.innerHTML = tplEmpty('보충이 필요한 학생이 없어요. 반 전체가 잘 따라오고 있어요!');
-  } else {
-    LRS._warnCache = warns;
-    warnListEl.innerHTML = warns.slice(0,6).map((w, idx)=>{
-      const name = w.name || ('학생 #'+(w.user_id||'?'));
-      const reason = w.reason || '연속 미학습 또는 낮은 정답률';
-      const uid = w.user_id||'';
-      const code = w.achievement_code || '';
-      return `<div class="dc-warning-card" data-severity="${escapeAttr(w.severity||'medium')}">
-        <h3>${escapeHtml(name)}</h3>
-        <p>${escapeHtml(reason)}</p>
-        <div class="actions" data-student-id="${escapeAttr(uid)}" data-achievement-code="${escapeAttr(code)}" data-warn-idx="${idx}">
-          <button type="button" data-action="message"   aria-label="메시지 보내기"><i class="fas fa-envelope"></i> 메시지</button>
-          <button type="button" data-action="homework"  aria-label="과제 부과"><i class="fas fa-clipboard-list"></i> 과제부과</button>
-          <button type="button" data-action="recommend" aria-label="맞춤학습 추천"><i class="fas fa-wand-magic-sparkles"></i> 맞춤학습</button>
-          <button type="button" data-action="detail"    aria-label="학생 드릴다운 열기"><i class="fas fa-up-right-from-square"></i> 상세</button>
-        </div>
-      </div>`;
-    }).join('');
-    bindWarningActions(warnListEl);
-  }
+  renderEwsList(document.getElementById('ewsList'), { ok:ewsOk, masked:ewsMasked, list:riskList, summary:riskSummary });
   await renderDodMini(root);
 };
+
+/* ── T-EWS 위험군 카드 리스트 렌더(공통) ── */
+function renderEwsList(host, ews){
+  if (!host) return;
+  if (!ews.ok){
+    host.innerHTML = `<div class="mastery-empty"><i class="fas fa-triangle-exclamation me-icon"></i>
+      <p>조기경보 데이터를 불러오지 못했어요. 잠시 후 다시 시도해주세요.</p></div>`;
+    return;
+  }
+  // masked 여부와 무관하게 데이터가 있으면 항상 렌더한다.
+  //  - masked=false(담임): BE가 준 실명 그대로
+  //  - masked=true(관리자 거시·타반): BE가 이미 익명("학생 A")으로 내려줌 → 그대로 렌더
+  // 빈상태는 "진짜 위험 학생 0명"일 때만(아래 flagged 분기).
+  const list = (ews.list || []);
+  // 위험 가산 신호가 있는 학생만(점수>0 또는 등급 high/mid). 전원 무위험이면 긍정 빈상태.
+  const flagged = list.filter(r => (r.score||0) > 0 && r.grade !== 'low');
+  const allLowSample = list.length > 0 && list.every(r => r.evaluated < 3 || r.observedWeeks < 3);
+  if (!flagged.length){
+    if (allLowSample){
+      host.innerHTML = `<div class="mastery-empty"><i class="fas fa-hourglass-half me-icon"></i>
+        <p>아직 위험 신호를 가릴 데이터가 부족해요. 학습이 더 쌓이면 표시됩니다.</p></div>`;
+    } else {
+      host.innerHTML = `<div class="mastery-empty"><i class="fas fa-face-smile me-icon" style="color:#86efac;"></i>
+        <p>지금 특별히 지원이 필요한 학생이 없어요. 반 전체가 잘 따라오고 있어요! 🎉</p></div>`;
+    }
+    return;
+  }
+  LRS._ewsCache = flagged;
+  const RISK_ICON = { high:'fa-triangle-exclamation', mid:'fa-circle-exclamation', low:'fa-circle-check' };
+  host.innerHTML = `<div class="ews-list">${flagged.slice(0,8).map((r, idx)=>{
+    const g = gradeKey(r.grade);
+    const icon = RISK_ICON[g] || RISK_ICON.mid;
+    const uid = r.userId != null ? r.userId : '';
+    const reasons = (r.reasons||[]).filter(x => x.type !== 'insufficient');
+    const insuf = (r.reasons||[]).find(x => x.type === 'insufficient');
+    const lowSample = (r.evaluated != null && r.evaluated < 3) || (r.observedWeeks != null && r.observedWeeks < 3);
+    const reasonChips = reasons.map(rs => {
+      let hint = rs.text;
+      if (rs.type === 'decline') hint = `${rs.text} (관측 ${r.observedWeeks||0}주)`;
+      return `<span class="ews-reason" data-key="${escapeAttr(rs.type)}" tabindex="0" title="${escapeAttr(hint)}">${escapeHtml(rs.text)}</span>`;
+    }).join('');
+    const insufChip = insuf ? `<span class="ews-reason" data-key="insufficient" title="${escapeAttr(insuf.text)}">참여 부족</span>` : '';
+    const confHint = `관측 ${r.observedWeeks||0}주 · 판정 성취기준 ${r.evaluated||0}개`;
+    return `<div class="ews-card" data-risk="${g}">
+      <div class="ews-top">
+        <span class="ews-name"><i class="fas ${icon} risk-icon" data-risk="${g}" aria-hidden="true"></i> ${escapeHtml(r.name||('학생 '+uid))}</span>
+        <span class="ews-badges">
+          <span class="risk-badge" data-risk="${g}"><i class="fas ${icon}" aria-hidden="true"></i> 위험 ${r.score} · ${escapeHtml(r.gradeKo||'')}</span>
+          ${confBadge(r.confidence, r.confidenceKo, confHint)}
+        </span>
+      </div>
+      <div class="ews-reasons">${reasonChips}${insufChip}${lowSample ? lowSampleChip('표본 부족 · 참고용') : ''}</div>
+      <div class="ews-actions" data-student-id="${escapeAttr(uid)}" data-warn-idx="${idx}">
+        <button type="button" class="mastery-btn mastery-btn-sm" data-action="recommend"><i class="fas fa-wand-magic-sparkles"></i> 맞춤학습</button>
+        <button type="button" class="mastery-btn mastery-btn-sm mastery-btn-ghost" data-action="message"><i class="fas fa-envelope"></i> 메시지</button>
+        <button type="button" class="mastery-btn mastery-btn-sm mastery-btn-ghost" data-action="homework"><i class="fas fa-clipboard-list"></i> 과제부과</button>
+        <button type="button" class="mastery-btn mastery-btn-sm mastery-btn-ghost" data-action="detail"><i class="fas fa-up-right-from-square"></i> 상세</button>
+      </div>
+    </div>`;
+  }).join('')}</div>`;
+
+  // 액션 바인딩
+  host.querySelectorAll('.ews-actions button[data-action]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const wrap = btn.closest('.ews-actions');
+      const uid = wrap.getAttribute('data-student-id');
+      const idx = parseInt(wrap.getAttribute('data-warn-idx'),10);
+      const action = btn.getAttribute('data-action');
+      const row = (LRS._ewsCache||[])[idx] || { user_id: uid };
+      if (action === 'detail'){
+        LRS.openDrilldown({ user_id: uid, name: row.name, reason: (row.reasons||[]).map(x=>x.text).join(' · ') });
+      } else {
+        LRS.teacherAction(action, uid, '');
+      }
+    });
+  });
+}
 
 VIEWS['t-drill'] = async function(root){
   root.innerHTML = tplLoading(2);
@@ -2249,7 +2688,7 @@ VIEWS['t-warnings'] = async function(root){
       <div class="ms-head">
         <div class="ms-titles">
           <h2 class="mastery-h2">성취기준 × 학생 도달 현황</h2>
-          <div class="mastery-sub">셀을 누르면 학생·성취기준 상세를 볼 수 있어요. ${masked ? '<span class="mastery-chip-gray" style="margin-left:6px;"><i class="fas fa-user-shield"></i> 표본 10명 미만 — 학생 이름 익명 처리</span>' : ''}</div>
+          <div class="mastery-sub">셀을 누르면 학생·성취기준 상세를 볼 수 있어요. ${masked ? '<span class="mastery-chip-gray" style="margin-left:6px;"><i class="fas fa-user-shield"></i> 타 반 — 이름 익명</span>' : ''}</div>
         </div>
         <div class="ms-controls">
           <select class="ms-select" id="tMastSort" aria-label="행 정렬">
@@ -2277,6 +2716,33 @@ VIEWS['t-warnings'] = async function(root){
         <div class="ms-controls"><span class="mastery-btn mastery-btn-sm" style="background:#cbd5e1;cursor:not-allowed;" title="반 전체 보충 배정은 다음 단계(P1)에 제공됩니다" aria-disabled="true"><i class="fas fa-layer-group"></i> 반 전체 배정(준비 중)</span></div>
       </div>
       <div id="tNotReachedTable"></div>
+    </section>
+
+    <!-- T-TREND 학생별 성취 추세 스파크라인 -->
+    <section class="mastery-section" id="tTrendSection">
+      <div class="ms-head">
+        <div class="ms-titles">
+          <h2 class="mastery-h2"><i class="fas fa-chart-line" aria-hidden="true" style="color:#2563eb;"></i> 학생별 성취 추세</h2>
+          <div class="mastery-sub">최근 8주 정답률 기울기 · <span style="color:var(--trend-up);font-weight:700;">↗ 오르는 중</span> · <span style="color:var(--trend-flat);font-weight:700;">→ 비슷</span> · <span style="color:var(--trend-down);font-weight:700;">↘ 어려워지는 중</span></div>
+        </div>
+        <div class="ms-controls" id="tTrendConf"></div>
+      </div>
+      <div id="tTrendHost"></div>
+    </section>
+
+    <!-- T-PROG 학기말 도달 외삽 -->
+    <section class="mastery-section" id="tProgSection">
+      <div class="ms-head">
+        <div class="ms-titles">
+          <h2 class="mastery-h2"><i class="fas fa-bullseye" aria-hidden="true" style="color:#2563eb;"></i> 학기말 도달 외삽</h2>
+          <div class="mastery-sub" id="tProgHeadline">실선=지금까지, 점선=예상 범위(추정). 폭이 넓을수록 불확실해요.</div>
+        </div>
+        <div class="ms-controls" id="tProgConf"></div>
+      </div>
+      <div class="chart-body" id="tProgBody" style="height:280px;">
+        <canvas id="tProgChart" role="img" aria-label="학기말 도달 외삽 차트"></canvas>
+      </div>
+      <div id="tProgFoot"></div>
     </section>`;
 
   // ── 상태 관리 (정렬·필터·행수) ─────────────────────────────────────
@@ -2489,6 +2955,135 @@ VIEWS['t-warnings'] = async function(root){
     });
   }
   renderNotReached();
+
+  // ── T-TREND + T-PROG (분석·예측 P0) — 비동기 후행 로드 ──────────────────
+  (async () => {
+    const [ews, ctrend] = await Promise.all([
+      apiGet('/api/lrs/ews/class/' + encodeURIComponent(cid)),
+      apiGet('/api/lrs/trend/class/' + encodeURIComponent(cid))
+    ]);
+    renderTrendTable(ews);
+    renderClassProjection(ctrend);
+  })();
+
+  // T-TREND: 학생별 추세 표(데스크탑) + 카드(모바일)
+  function renderTrendTable(ews){
+    const host = document.getElementById('tTrendHost');
+    const confHost = document.getElementById('tTrendConf');
+    if (!host) return;
+    if (!ews || !ews.success){
+      host.innerHTML = `<div class="mastery-empty"><i class="fas fa-chart-line me-icon"></i><p>학생별 추세 데이터를 불러오지 못했어요.</p></div>`;
+      return;
+    }
+    // masked 여부로 빈처리하지 않는다. BE가 준 이름(실명/익명) 그대로 렌더.
+    const rows = (ews.risk && ews.risk.list) || [];
+    if (!rows.length){
+      host.innerHTML = `<div class="mastery-empty"><i class="fas fa-chart-line me-icon"></i><p>아직 추세를 볼 데이터가 부족해요. 더 풀면 학생별 추세가 나타나요.</p></div>`;
+      return;
+    }
+    // 반 전체 신뢰(class trend) 배지를 우상단에 (개별 학생 신뢰는 행별 처리)
+    const ct = ews.classTrend;
+    if (confHost && ct && ct.status === 'ok'){
+      confHost.innerHTML = confBadge(ct.confidence, ct.confidenceKo, `관측 ${ct.observedWeeks||0}주${ct.lowVariance?' · 변동 큼':''}`);
+    }
+    // masked=true(관리자 거시·타반)면 우상단에 익명 안내칩 1개. 담임(masked=false)은 안내칩 없이 실명.
+    if (ews.masked && confHost){
+      confHost.insertAdjacentHTML('beforeend', '<span class="mastery-chip-gray" style="margin-left:6px;"><i class="fas fa-user-shield"></i> 타 반 — 이름 익명</span>');
+    }
+    // 하락 추세 위로(지원 우선), 그다음 정체·상승. lowSample은 맨 아래.
+    const order = { down:0, flat:1, up:2, insufficient:3 };
+    const sorted = rows.slice().sort((a,b)=>{
+      const da = a.observedWeeks < 3 ? 'insufficient' : normTrendDir(a.trendDirection);
+      const dbb = b.observedWeeks < 3 ? 'insufficient' : normTrendDir(b.trendDirection);
+      return (order[da]-order[dbb]) || ((a.trendSlope||0)-(b.trendSlope||0));
+    });
+
+    function rowParts(r){
+      const lowSample = (r.observedWeeks||0) < 3;
+      const dir = normTrendDir(r.trendDirection);
+      const slope = r.trendSlope;
+      const r2note = '';
+      const hint = lowSample ? `관측 ${r.observedWeeks||0}주 · 표본 적어 참고용`
+        : `최근 ${r.observedWeeks||0}주 정답률 기울기 ${slope==null?'-':((slope>0?'+':'')+slope)}%p/주`;
+      // 스파크라인: series 미제공이므로 OLS 기울기로 추세 직선 합성(현재율 미상이면 부족 표시)
+      const synth = lowSample ? null : synthLineFromSlope(50, slope, r.observedWeeks); // 절대값 미상 → 중앙 기준 상대선
+      const sparkOk = !lowSample && synth;
+      const spark = sparkOk ? sparklineSvg(synth, dir, { aria:`${r.name} 추세` }) : `<span class="trend-note">추세 데이터 부족</span>`;
+      const arrow = lowSample ? '<span class="trend-note">—</span>' : trendArrow(dir, slope, hint);
+      const note = lowSample ? `관측 ${r.observedWeeks||0}주` : '';
+      return { name:r.name, spark, arrow, note, hint };
+    }
+
+    // 데스크탑 표
+    const trHtml = sorted.map(r => {
+      const p = rowParts(r);
+      return `<tr>
+        <td class="t-name">${escapeHtml(p.name||'')}</td>
+        <td title="${escapeAttr(p.hint||'')}">${p.spark}</td>
+        <td>${p.arrow}</td>
+        <td class="trend-note">${escapeHtml(p.note||'')}</td>
+      </tr>`;
+    }).join('');
+    // 모바일 카드
+    const cardHtml = sorted.map(r => {
+      const p = rowParts(r);
+      return `<div class="trend-card">
+        <div class="tc-top"><span class="tc-name">${escapeHtml(p.name||'')}</span>${p.arrow}</div>
+        ${p.spark}
+        ${p.note ? `<div class="trend-note" style="margin-top:6px;">${escapeHtml(p.note)}</div>` : ''}
+      </div>`;
+    }).join('');
+
+    host.innerHTML = `
+      <div class="trend-table-wrap">
+        <table class="trend-table">
+          <thead><tr><th>학생</th><th>최근 8주 추이</th><th>추세</th><th>비고</th></tr></thead>
+          <tbody>${trHtml}</tbody>
+        </table>
+      </div>
+      <div class="trend-cards">${cardHtml}</div>`;
+  }
+
+  // T-PROG: 반 평균 도달 외삽(점선 밴드)
+  function renderClassProjection(ctrend){
+    const body = document.getElementById('tProgBody');
+    const headline = document.getElementById('tProgHeadline');
+    const confHost = document.getElementById('tProgConf');
+    const foot = document.getElementById('tProgFoot');
+    if (!body) return;
+    const trend = ctrend && ctrend.trend;
+    const proj = ctrend && ctrend.projection;
+    const target = (ctrend && ctrend.target) || 80;
+    if (!ctrend || !ctrend.success || !trend || trend.status !== 'ok'){
+      body.closest('.mastery-section').querySelector('#tProgBody').outerHTML =
+        `<div class="mastery-empty"><i class="fas fa-bullseye me-icon"></i><p>학기말 도달 예상을 그리려면 추세 데이터가 더 필요해요. 학습이 쌓이면 표시됩니다.</p></div>`;
+      if (headline) headline.textContent = '실선=지금까지, 점선=예상 범위(추정). 폭이 넓을수록 불확실해요.';
+      if (confHost) confHost.innerHTML = '';
+      return;
+    }
+    if (confHost) confHost.innerHTML = confBadge(trend.confidence, trend.confidenceKo, `관측 ${trend.observedWeeks||0}주${trend.lowVariance?' · 변동 큼':''}`);
+    const reachable = proj && proj.reachable && proj.weeksToReach != null;
+    if (headline){
+      if (reachable) headline.innerHTML = `<span class="proj-headline">목표 ${target}% · <strong>이 속도면 약 ${proj.weeksToReach}주 후 도달 예상</strong></span>`;
+      else headline.innerHTML = `<span class="proj-headline warn">목표 ${target}% · <strong>현재 추세로는 도달이 어려워요(보충 권장)</strong></span>`;
+    }
+    const cfg = buildProjChartData(trend, proj, { target });
+    const boundaryIndex = cfg.boundaryIndex;
+    const ctx = document.getElementById('tProgChart');
+    mkChart(ctx, 'line', cfg, {
+      scales:{
+        y:{ min:0, max:100, ticks:{ callback:v=>v+'%', font:{size:12} } },
+        x:{ ticks:{ font:{size:11}, maxRotation:0, autoSkip:true, maxTicksLimit: window.innerWidth<768?6:10 },
+            grid:{ color:(c)=> c.index===boundaryIndex ? '#d1d5db' : 'rgba(0,0,0,.04)' } }
+      },
+      plugins:{
+        legend:{ display:true, position:'bottom', labels:{ font:{size:12}, usePointStyle:true, boxWidth:14, padding:10,
+          filter:(item)=> !/^예상 (상단|하단)$/.test(item.text) } },
+        tooltip:{ callbacks:{ label:(c)=>{ const v=c.parsed.y; if(v==null) return null; return `${c.dataset.label}: ${v}%`; } } }
+      }
+    });
+    if (foot) foot.innerHTML = projDisclaimer((ctrend && ctrend.disclaimer) || '이 추정은 규칙 기반이며 실제와 다를 수 있어요.');
+  }
 };
 
 VIEWS['t-usage'] = async function(root){
@@ -2806,6 +3401,19 @@ VIEWS['a-svc-ops'] = async function(root){
     <section class="dc-chart-wrapper" style="margin-top:var(--space-4);">
       <header><h2>서비스 운영 점수표</h2><div class="subtitle">건수·고유사용자·평균시간·추세·재방문·상태 (정렬 가능)</div></header>
       <div id="aSvcTable"></div>
+    </section>
+
+    <!-- A-WEAK 취약 성취기준 추세 랭킹 -->
+    <section class="mastery-section" id="aWeakSection" style="margin-top:var(--space-4);">
+      <div class="ms-head">
+        <div class="ms-titles">
+          <h2 class="mastery-h2"><i class="fas fa-arrow-trend-down" aria-hidden="true" style="color:#ea7317;"></i> 취약 성취기준 추세 랭킹</h2>
+          <div class="mastery-sub">도달률이 낮고 하락 중인 성취기준이에요. 표본이 클수록 신뢰돼요.</div>
+        </div>
+        <div class="ms-controls" id="aWeakConf"></div>
+      </div>
+      <div id="aWeakHost"></div>
+      <div id="aWeakFoot"></div>
     </section>`;
 
   // 가로 막대 랭킹
@@ -2859,7 +3467,89 @@ VIEWS['a-svc-ops'] = async function(root){
     ],
     rows: services, initialSort:'count', initialDir:'desc'
   });
+
+  // ── A-WEAK 취약 성취기준 추세 랭킹 — 후행 로드 ─────────────────────────
+  (async () => {
+    const w = await apiGet('/api/lrs/weak-trend', { scope:'all', limit:15 });
+    renderWeakTrend(w);
+  })();
 };
+
+/* A-WEAK 렌더(관리자) — renderDataTable + 인라인 도달 Bar(4상태색) + 추세 화살표 + 표본수 */
+function renderWeakTrend(w){
+  const host = document.getElementById('aWeakHost');
+  const confHost = document.getElementById('aWeakConf');
+  const foot = document.getElementById('aWeakFoot');
+  if (!host) return;
+  if (!w || !w.success){
+    host.innerHTML = `<div class="mastery-empty"><i class="fas fa-arrow-trend-down me-icon"></i><p>취약 추세 데이터를 불러오지 못했어요.</p></div>`;
+    return;
+  }
+  const rows = (w.ranking || []);
+  if (!rows.length){
+    host.innerHTML = `<div class="mastery-empty"><i class="fas fa-face-smile me-icon" style="color:#86efac;"></i>
+      <p>전반적으로 하락 중인 성취기준이 없어요. 안정적인 추세예요.</p></div>`;
+    return;
+  }
+  // 전체 신뢰(표본 기준) — 가장 보수적 단위로 표시
+  if (confHost){
+    const conf = w.masked ? 'low' : 'high';
+    confHost.innerHTML = confBadge(conf, w.masked ? '낮음' : '높음', `전체 학생 ${w.studentCount||0}명${w.masked?' · 표본 적어 참고용':''}`);
+  }
+
+  function barState(rate){ return rate>=80 ? 'reached' : rate>=50 ? 'partial' : 'notReached'; }
+  function inlineBar(rate){
+    const st = barState(rate);
+    return `<span class="weak-bar"><span class="wb-num">${rate}%</span><span class="wb-track"><span class="wb-fill" data-state="${st}" style="width:${Math.max(0,Math.min(100,rate))}%;"></span></span></span>`;
+  }
+
+  // 데스크탑 표(renderDataTable) + 모바일 카드
+  host.innerHTML = `<div class="weak-table-wrap" id="aWeakTable"></div><div class="weak-cards" id="aWeakCards"></div>`;
+  const tableRows = rows.map((r, i) => Object.assign({}, r, { _rank: i+1 }));
+
+  renderDataTable(document.getElementById('aWeakTable'), {
+    columns:[
+      { key:'_rank', label:'#', align:'right', format:v=>escapeHtml(String(v)) },
+      { key:'label', label:'성취기준', format:(_,r)=>{
+          const codeBare = String(r.code||'').replace(/^\[|\]$/g,'');
+          const lbl = r.label && r.label !== r.code ? r.label : codeBare;
+          const short = lbl.length>18 ? lbl.slice(0,18)+'…' : lbl;
+          return `<div style="max-width:280px;"><div style="font-weight:600;color:#1f2937;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(short)}</div><div style="font-size:12px;color:#9ca3af;">[${escapeHtml(codeBare)}]</div></div>`;
+        } },
+      { key:'subject', label:'교과', format:v=>escapeHtml(v||'-') },
+      { key:'reachedRate', label:'도달률', format:(v)=> inlineBar(v==null?0:v) },
+      { key:'direction', label:'추세', format:(v,r)=>{
+          if ((r.observedWeeks||0) < 3) return `<span class="trend-note">관측 ${r.observedWeeks||0}주</span>`;
+          const hint = `최근 ${r.observedWeeks||0}주 정답률 기울기 ${r.slope==null?'-':((r.slope>0?'+':'')+r.slope)}%p/주`;
+          return trendArrow(v, r.slope, hint);
+        } },
+      { key:'evaluatedStudents', label:'표본', align:'right', format:(v)=>{
+          const n = Number(v)||0;
+          if (n < 10) return `${n} ${lowSampleChip('표본 부족')}`;
+          return escapeHtml(String(n));
+        } }
+    ],
+    rows: tableRows, initialSort:'reachedRate', initialDir:'asc'
+  });
+
+  // 모바일 카드
+  document.getElementById('aWeakCards').innerHTML = tableRows.map(r => {
+    const codeBare = String(r.code||'').replace(/^\[|\]$/g,'');
+    const lbl = r.label && r.label !== r.code ? r.label : codeBare;
+    const low = (r.observedWeeks||0) < 3;
+    const arrow = low ? `<span class="trend-note">관측 ${r.observedWeeks||0}주</span>`
+      : trendArrow(r.direction, r.slope, `최근 ${r.observedWeeks||0}주 ${r.slope==null?'-':((r.slope>0?'+':'')+r.slope)}%p/주`);
+    const sampleLow = (Number(r.evaluatedStudents)||0) < 10;
+    return `<div class="weak-card">
+      <div class="wc-title">${r._rank}. ${escapeHtml(lbl)}</div>
+      <div class="wc-sub">[${escapeHtml(codeBare)}] · ${escapeHtml(r.subject||'-')}</div>
+      <div style="margin:8px 0;">${inlineBar(r.reachedRate==null?0:r.reachedRate)}</div>
+      <div class="wc-row">${arrow}<span class="trend-note">표본 ${Number(r.evaluatedStudents)||0}명${sampleLow?' · 참고용':''}</span></div>
+    </div>`;
+  }).join('');
+
+  if (foot) foot.innerHTML = projDisclaimer((w && w.disclaimer) || '취약·하락 추세는 규칙 기반 신호입니다. 표본이 적은 단위는 참고용으로 보세요.');
+}
 
 /* ======================================================================
  * ③ 거시 비교 (a-macro) — 지역▸학교급▸학교▸학년▸교과 드릴다운
