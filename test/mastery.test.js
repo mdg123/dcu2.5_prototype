@@ -1,0 +1,295 @@
+// test/mastery.test.js
+// ─────────────────────────────────────────────────────────────────────────────
+// 성취수준(성취기준 도달도) 중심 LRS — P0 하네스.
+//   기획서: 작업지시서/LRS_성취수준_인사이트_재설계_기획서.md §C-2 / §D P0-1·P0-2·P0-6
+//
+// 불변식·회귀 5종:
+//   ① 4상태(도달·부분도달·미도달·평가부족) 합 = 전체 (평가부족 포함)
+//   ② 모든 rate ∈ [0,100] 또는 null (분모 0 = null, NaN/Infinity 금지)
+//   ③ att<3 은 not_reached 가 아니라 insufficient ← BUG 박제("안 해본 것"≠"못한 것")
+//   ④ mastery API classId 격리 — class 매트릭스는 해당 반 학생만 포함
+//   ⑤ 권한분기 — 학생은 본인만, 타 학생/타 반 차단(403)
+//
+// DB 격리: 실 DB → 임시 복사본. initSchema()로 격리 DB에도 마이그레이션(std_id·level ADD COLUMN)
+//   적용 후 rebuildAllAggregates()로 재집계(insufficient 분리·std_id 충진).
+// 계정(실 DB 확정): admin=1, teacher1=2, student1=3, student2=4. class 1 = teacher1 소유.
+// ─────────────────────────────────────────────────────────────────────────────
+const { test, before, after } = require('node:test');
+const assert = require('node:assert/strict');
+const http = require('node:http');
+const { setupTestDb, openTestDb } = require('./_setup');
+
+setupTestDb();                          // ★ db require 전에 DB_PATH 주입
+require('../db/schema').initSchema();   // 격리 DB에도 std_id·level 컬럼 마이그레이션
+require('../db/lrs-aggregate').rebuildAllAggregates(); // insufficient 분리·std_id 충진 반영
+
+const mastery = require('../db/lrs-mastery');
+const db = openTestDb();
+
+const ADMIN = 1, TEACHER = 2, STUDENT1 = 3, STUDENT2 = 4;
+const CLASS = 1;
+
+const VALID_STATUS = new Set(['reached', 'partial', 'not_reached', 'insufficient']);
+
+// ── 직접 모듈 단언용: 성취 데이터가 있는 학생 id 들을 실측으로 고른다.
+function studentsWithData(limit = 5) {
+  return db.prepare(
+    'SELECT user_id FROM lrs_achievement_stats GROUP BY user_id ORDER BY COUNT(*) DESC LIMIT ?'
+  ).all(limit).map(r => r.user_id);
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// ① 4상태 합 = 전체 (학생 mastery)
+// ──────────────────────────────────────────────────────────────────────────
+test('INV-M1: 학생 4상태(도달·부분도달·미도달·평가부족) 합 = standards 총수 = distribution.total', () => {
+  for (const sid of studentsWithData()) {
+    const d = mastery.getStudentMastery(sid);
+    const sum = d.counts.reached + d.counts.partial + d.counts.notReached + d.counts.insufficient;
+    assert.equal(sum, d.counts.total, `student ${sid}: 4상태 합(${sum}) != total(${d.counts.total})`);
+    assert.equal(d.standards.length, d.counts.total, `student ${sid}: standards 길이 != total`);
+    // distribution(도넛 키)도 동일
+    const distSum = d.distribution.reached + d.distribution.partial + d.distribution.not_reached + d.distribution.insufficient;
+    assert.equal(distSum, d.distribution.total, `student ${sid}: distribution 합 != total`);
+  }
+});
+
+// ──────────────────────────────────────────────────────────────────────────
+// ② rate ∈ [0,100] 또는 null. status 는 4종 중 하나. NaN/Infinity 금지.
+// ──────────────────────────────────────────────────────────────────────────
+test('INV-M2: 모든 rate ∈ [0,100] 또는 null, status 4종, NaN/Infinity 금지', () => {
+  const checkRate = (rate, ctx) => {
+    if (rate == null) return;
+    assert.ok(Number.isFinite(rate), `${ctx} rate=${rate} 는 유한수여야`);
+    assert.ok(rate >= 0 && rate <= 100, `${ctx} rate=${rate} 는 0~100`);
+  };
+  for (const sid of studentsWithData()) {
+    const d = mastery.getStudentMastery(sid);
+    for (const s of d.standards) {
+      checkRate(s.rate, `student ${sid} ${s.code}`);
+      assert.ok(VALID_STATUS.has(s.status), `student ${sid} ${s.code} status=${s.status} 비정상`);
+    }
+    for (const bs of d.bySubject) {
+      checkRate(bs.reachedRate, `student ${sid} subj ${bs.subject_code} reachedRate`);
+      checkRate(bs.avgRate, `student ${sid} subj ${bs.subject_code} avgRate`);
+    }
+  }
+  // 클래스 매트릭스 셀 rate 도 검증
+  const members = db.prepare(`
+    SELECT cm.user_id, u.display_name FROM class_members cm JOIN users u ON cm.user_id=u.id
+    WHERE cm.class_id=? AND cm.status='active' AND u.role='student'
+  `).all(CLASS).map(m => ({ id: m.user_id, name: m.display_name }));
+  const cd = mastery.getClassMastery(CLASS, members);
+  for (const code of Object.keys(cd.matrix)) {
+    for (const uid of Object.keys(cd.matrix[code])) {
+      const cell = cd.matrix[code][uid];
+      checkRate(cell.rate, `class ${CLASS} ${code} u${uid}`);
+      assert.ok(VALID_STATUS.has(cell.status), `class ${CLASS} ${code} u${uid} status=${cell.status} 비정상`);
+    }
+  }
+});
+
+// ──────────────────────────────────────────────────────────────────────────
+// ③ BUG 박제: att<3 은 not_reached 가 아니라 insufficient.
+//    (옛 버그: lrs_aggregate.js 가 시도<3 → '미도달' 로 묶어 "안 해본 것"="못한 것" 혼동)
+// ──────────────────────────────────────────────────────────────────────────
+test('BUG-M3: att<3 성취기준은 insufficient(평가부족) 이지 not_reached(미도달) 아님', () => {
+  // classifyStatus 단위 — 핵심 임계
+  assert.equal(mastery.classifyStatus(0, null), 'insufficient', 'att=0 → insufficient');
+  assert.equal(mastery.classifyStatus(1, 100), 'insufficient', 'att=1(만점이어도) → insufficient');
+  assert.equal(mastery.classifyStatus(2, 0), 'insufficient', 'att=2 → insufficient (미도달 아님)');
+  assert.equal(mastery.classifyStatus(3, 0), 'not_reached', 'att=3 rate0 → not_reached');
+  assert.equal(mastery.classifyStatus(3, 50), 'partial', 'att=3 rate50 → partial');
+  assert.equal(mastery.classifyStatus(3, 80), 'reached', 'att=3 rate80 → reached');
+  assert.equal(mastery.classifyStatus(5, null), 'insufficient', 'rate null(분모0) → insufficient');
+
+  // 집계 테이블 전수: att<3 인데 not_reached 인 행이 단 1개도 없어야(BUG 재발 차단)
+  const bad = db.prepare(
+    "SELECT COUNT(*) c FROM lrs_achievement_stats WHERE attempt_count<3 AND level='not_reached'"
+  ).get().c;
+  assert.equal(bad, 0, `att<3 인데 level=not_reached 인 행 ${bad}개 — 평가부족으로 분리돼야`);
+  // 한글 레거시 컬럼도 동일(att<3 → '평가부족', '미도달' 아님)
+  const badKo = db.prepare(
+    "SELECT COUNT(*) c FROM lrs_achievement_stats WHERE attempt_count<3 AND last_level='미도달'"
+  ).get().c;
+  assert.equal(badKo, 0, `att<3 인데 last_level='미도달' 인 행 ${badKo}개 — '평가부족'으로 분리돼야`);
+  // 분리가 실제로 발생했는지(insufficient 가 0 이 아님 — 데이터가 있으면)
+  const hasData = db.prepare('SELECT COUNT(*) c FROM lrs_achievement_stats WHERE attempt_count<3').get().c;
+  if (hasData > 0) {
+    const ins = db.prepare("SELECT COUNT(*) c FROM lrs_achievement_stats WHERE level='insufficient'").get().c;
+    assert.ok(ins > 0, 'att<3 데이터가 있는데 insufficient 가 0 — 분리 미작동');
+  }
+});
+
+// ──────────────────────────────────────────────────────────────────────────
+// ④ classId 격리: class 매트릭스는 해당 반 학생만 포함(타 반 user 셀 없음)
+// ──────────────────────────────────────────────────────────────────────────
+test('INV-M4: mastery class 매트릭스 classId 격리 — 해당 반 학생만 등장', () => {
+  const members = db.prepare(`
+    SELECT cm.user_id FROM class_members cm JOIN users u ON cm.user_id=u.id
+    WHERE cm.class_id=? AND cm.status='active' AND u.role='student'
+  `).all(CLASS).map(m => m.user_id);
+  const memberSet = new Set(members);
+  const studentsArg = members.map(id => ({ id, name: `s${id}` }));
+  const cd = mastery.getClassMastery(CLASS, studentsArg);
+
+  // students 헤더 = 멤버 집합과 동일
+  for (const s of cd.students) assert.ok(memberSet.has(s.id), `class ${CLASS}: 매트릭스 학생 ${s.id} 가 반 멤버 아님`);
+  // 매트릭스 셀의 user 키도 전부 멤버
+  for (const code of Object.keys(cd.matrix)) {
+    for (const uid of Object.keys(cd.matrix[code])) {
+      assert.ok(memberSet.has(Number(uid)), `class ${CLASS}: 매트릭스 셀 u${uid} 가 반 멤버 아님(격리 위반)`);
+    }
+  }
+  // notReachedStudents 명단도 멤버 한정
+  for (const s of cd.standards) {
+    for (const u of (s.notReachedStudents || [])) {
+      assert.ok(memberSet.has(u.id), `class ${CLASS}: 미도달 명단 u${u.id} 가 반 멤버 아님`);
+    }
+  }
+});
+
+// ──────────────────────────────────────────────────────────────────────────
+// ⑤ 권한분기 (API 레벨, 실제 라우터+미들웨어 HTTP).
+// ──────────────────────────────────────────────────────────────────────────
+const express = require('express');
+const session = require('express-session');
+let server, baseUrl;
+
+function buildApp() {
+  const app = express();
+  app.use(express.json());
+  app.use(session({ secret: 'test-secret', resave: false, saveUninitialized: false }));
+  app.use((req, res, next) => {
+    const uid = req.headers['x-test-user'];
+    if (uid) req.session.userId = parseInt(uid, 10);
+    next();
+  });
+  app.use('/api/lrs', require('../routes/lrs'));
+  return app;
+}
+function req(path, userId) {
+  return new Promise((resolve, reject) => {
+    const u = new URL(baseUrl + '/api/lrs' + path);
+    const r = http.request(
+      { hostname: u.hostname, port: u.port, path: u.pathname + u.search, method: 'GET',
+        headers: userId ? { 'x-test-user': String(userId) } : {} },
+      (res) => {
+        let body = '';
+        res.on('data', c => body += c);
+        res.on('end', () => { let j = null; try { j = JSON.parse(body); } catch (_) {} resolve({ status: res.statusCode, json: j }); });
+      });
+    r.on('error', reject); r.end();
+  });
+}
+
+before(async () => {
+  await new Promise((resolve) => {
+    server = http.createServer(buildApp()).listen(0, '127.0.0.1', () => {
+      baseUrl = `http://127.0.0.1:${server.address().port}`;
+      resolve();
+    });
+  });
+});
+after(async () => { if (server) await new Promise(r => server.close(r)); });
+
+test('PERM-M5a: 학생은 본인 mastery 조회 가능(200), 타 학생은 차단(403)', async () => {
+  const own = await req(`/mastery/student/${STUDENT1}`, STUDENT1);
+  assert.equal(own.status, 200, '본인 조회는 200');
+  assert.equal(own.json.success, true);
+  assert.ok(own.json.counts && typeof own.json.counts.total === 'number', 'counts.total 존재');
+
+  const other = await req(`/mastery/student/${STUDENT2}`, STUDENT1);
+  assert.equal(other.status, 403, '타 학생 조회는 403');
+});
+
+test('PERM-M5b: 교사·관리자는 학생 mastery 조회 가능(200)', async () => {
+  const byTeacher = await req(`/mastery/student/${STUDENT1}`, TEACHER);
+  assert.equal(byTeacher.status, 200, '교사는 학생 조회 200');
+  const byAdmin = await req(`/mastery/student/${STUDENT1}`, ADMIN);
+  assert.equal(byAdmin.status, 200, '관리자는 학생 조회 200');
+});
+
+test('PERM-M5c: class mastery — 소유 교사·관리자 200, 타 학생 403', async () => {
+  const byTeacher = await req(`/mastery/class/${CLASS}`, TEACHER);
+  assert.equal(byTeacher.status, 200, '소유 교사 class 조회 200');
+  assert.ok(Array.isArray(byTeacher.json.standards), 'standards 배열');
+  assert.ok(byTeacher.json.matrix && typeof byTeacher.json.matrix === 'object', 'matrix 객체');
+  assert.ok(byTeacher.json.distribution && typeof byTeacher.json.distribution.total === 'number', 'distribution.total');
+
+  // 학생(class 멤버여도 매트릭스 차단 — 타 학생 성취 노출 방지). canViewClass: student → false
+  const byStudent = await req(`/mastery/class/${CLASS}`, STUDENT1);
+  assert.equal(byStudent.status, 403, '학생은 class 매트릭스 차단(403)');
+});
+
+test('PERM-M5d: class mastery 응답의 학생은 해당 반 멤버만(API 레벨 격리)', async () => {
+  const r = await req(`/mastery/class/${CLASS}`, TEACHER);
+  assert.equal(r.status, 200);
+  const memberIds = new Set(db.prepare(`
+    SELECT cm.user_id FROM class_members cm JOIN users u ON cm.user_id=u.id
+    WHERE cm.class_id=? AND cm.status='active' AND u.role='student'
+  `).all(CLASS).map(m => m.user_id));
+  // masked(n<10) 면 학생 id 는 유지(이름만 마스킹). id 격리 검증.
+  for (const code of Object.keys(r.json.matrix)) {
+    for (const uid of Object.keys(r.json.matrix[code])) {
+      assert.ok(memberIds.has(Number(uid)), `API class ${CLASS}: 매트릭스 u${uid} 가 반 멤버 아님`);
+    }
+  }
+});
+
+// ──────────────────────────────────────────────────────────────────────────
+// ⑥ BUG 박제(P0): 비멤버 교사가 "남의 반" 성취 매트릭스/경고/통계에 접근 불가.
+//    옛 결함: canViewClass 의 폴백 `return req.user.role==='teacher'` 가 모든 교사에게
+//    모든 클래스를 통과시켜 반 경계를 넘은 개인 성취 데이터(per-student 매트릭스) 노출.
+//    실 DB: teacher1(id2) 는 class 1·2 의 owner, class 3·4 의 owner_id 는 8·9 → 비멤버.
+//    → teacher1 이 자기 소유가 아닌 반을 조회하면 403 이어야 한다.
+// ──────────────────────────────────────────────────────────────────────────
+
+// 실측: teacher(id2) 가 멤버가 아닌(=교사 티어 role 이 없는) active 클래스 id 를 고른다.
+function classNotMemberedByTeacher() {
+  return db.prepare(`
+    SELECT c.id FROM classes c
+    WHERE c.status='active'
+      AND c.id NOT IN (
+        SELECT cm.class_id FROM class_members cm
+        WHERE cm.user_id=? AND cm.status='active'
+          AND cm.role IN ('owner','teacher','co_teacher')
+      )
+    ORDER BY c.id LIMIT 1
+  `).get(TEACHER);
+}
+
+test('BUG-M6: 비멤버 교사는 남의 반 mastery/class 차단(403) — P0 권한 누수 fix', async () => {
+  const foreign = classNotMemberedByTeacher();
+  assert.ok(foreign, '실 DB 에 teacher1 비멤버 active 클래스가 있어야 테스트 가능');
+  // 사전 확인: teacher1 은 정말 이 반의 교사-티어 멤버가 아님
+  const myRole = db.prepare(
+    "SELECT role FROM class_members WHERE class_id=? AND user_id=? AND status='active'"
+  ).get(foreign.id, TEACHER);
+  assert.ok(!myRole || !['owner','teacher','co_teacher'].includes(myRole.role),
+    `전제 위반: teacher1 이 class ${foreign.id} 의 교사-티어 멤버임(role=${myRole && myRole.role})`);
+
+  const r = await req(`/mastery/class/${foreign.id}`, TEACHER);
+  assert.equal(r.status, 403, `비멤버 교사의 class ${foreign.id} mastery 는 403 이어야 (현재 ${r.status})`);
+});
+
+test('BUG-M6b: 비멤버 교사는 남의 반 warnings 차단(403) — canViewClass 공통 거동', async () => {
+  const foreign = classNotMemberedByTeacher();
+  assert.ok(foreign, '비멤버 active 클래스 필요');
+  const r = await req(`/warnings/${foreign.id}`, TEACHER);
+  assert.equal(r.status, 403, `비멤버 교사의 class ${foreign.id} warnings 는 403 이어야 (현재 ${r.status})`);
+});
+
+test('BUG-M6c: 비멤버 교사는 남의 반 class LRS 통계 차단(403)', async () => {
+  const foreign = classNotMemberedByTeacher();
+  assert.ok(foreign, '비멤버 active 클래스 필요');
+  const r = await req(`/class/${foreign.id}`, TEACHER);
+  assert.equal(r.status, 403, `비멤버 교사의 class ${foreign.id} 통계는 403 이어야 (현재 ${r.status})`);
+});
+
+test('BUG-M6d: 회귀 없음 — 소유 교사·관리자는 자기 반/전체 warnings 여전히 200', async () => {
+  const ownByTeacher = await req(`/warnings/${CLASS}`, TEACHER);
+  assert.equal(ownByTeacher.status, 200, '소유 교사의 자기 반 warnings 200 유지');
+  const foreign = classNotMemberedByTeacher();
+  const adminAny = await req(`/warnings/${foreign.id}`, ADMIN);
+  assert.equal(adminAny.status, 200, '관리자는 임의 반 warnings 200 유지');
+});

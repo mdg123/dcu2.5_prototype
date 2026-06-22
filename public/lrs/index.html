@@ -113,6 +113,175 @@
       .dc-tertile-grid { grid-template-columns:1fr; }
       .dc-level-mini { grid-template-columns:1fr; }
     }
+
+    /* ═══════════════════════════════════════════════════════════════════
+       성취수준 P0 — 4상태 색상 시스템 (전 위젯 단일 출처)
+       기획서: 작업지시서/LRS_성취수준_P0_시각스펙.md §1
+       BE status 코드: reached / partial / not_reached / insufficient
+       (CSS data-state 키는 카멜 notReached 로 정규화하여 셀에 부착)
+       ═══════════════════════════════════════════════════════════════════ */
+    :root{
+      --mastery-reached:#16a34a;       --mastery-reached-soft:#dcfce7;       --mastery-reached-ink:#15803d;
+      --mastery-partial:#f59e0b;       --mastery-partial-soft:#fef3c7;       --mastery-partial-ink:#b45309;
+      --mastery-notreached:#ef4444;    --mastery-notreached-soft:#fee2e2;    --mastery-notreached-ink:#b91c1c;
+      --mastery-insufficient:#9ca3af;  --mastery-insufficient-soft:#f3f4f6;  --mastery-insufficient-ink:#4b5563;
+    }
+
+    /* 신규 위젯 전용 타이포 상향 (lrs/index.html 기본 스케일이 작아 위젯 한정 상향) */
+    .mastery-h2{ font-size:19px; font-weight:700; color:#1f2937; margin:0; }
+    .mastery-sub{ font-size:13px; color:#6b7280; line-height:1.5; }
+    .mastery-section{ background:#fff; border:1px solid #e5e7eb; border-radius:16px; padding:24px; margin-bottom:16px; box-shadow:0 1px 3px rgba(0,0,0,.08); max-width:100%; min-width:0; }
+    .mastery-section > .ms-head{ display:flex; justify-content:space-between; align-items:flex-start; gap:16px; flex-wrap:wrap; margin-bottom:16px; }
+    .mastery-section > .ms-head .ms-titles{ min-width:0; }
+    .mastery-section .ms-controls{ display:inline-flex; align-items:center; gap:8px; flex-wrap:wrap; }
+    .mastery-section select.ms-select{ font-size:14px; font-family:inherit; padding:7px 12px; border:1px solid #d1d5db; border-radius:8px; background:#fff; color:#374151; cursor:pointer; }
+
+    /* 4상태 범례 */
+    .mastery-legend{ display:flex; flex-wrap:wrap; gap:16px; align-items:center; font-size:13px; color:#4b5563; margin-top:12px; }
+    .mastery-legend .item{ display:inline-flex; align-items:center; gap:6px; }
+    /* 범례 스와치 = 히트맵 셀이 실제로 보이는 색을 그대로 반영(셀↔범례 1:1) */
+    .mastery-legend .dot{ width:12px; height:12px; border-radius:4px; flex:0 0 auto; border:1px solid transparent; }
+    .mastery-legend .dot.reached{ background:var(--mastery-reached); }
+    .mastery-legend .dot.partial{ background:var(--mastery-partial); }
+    .mastery-legend .dot.notReached{ background:var(--mastery-notreached); }
+    /* 평가 부족 셀 = soft 배경(#f3f4f6) → 범례도 동일 soft + 가는 테두리 */
+    .mastery-legend .dot.insufficient{ background:var(--mastery-insufficient-soft); border-color:#d1d5db; }
+    /* 데이터 없음 셀 = 흰색 + 점선 테두리 → 범례도 동일 */
+    .mastery-legend .dot.none{ background:#fff; border:1px dashed #d1d5db; }
+    .mastery-legend .info{ cursor:help; color:#9ca3af; font-size:13px; }
+
+    /* 신규 버튼/뱃지 (CLAUDE.md 스케일) */
+    .mastery-btn{ font-size:16px; font-weight:700; padding:12px 22px; border-radius:10px; border:0; cursor:pointer;
+      background:var(--lrs-primary,#2563eb); color:#fff; display:inline-flex; align-items:center; justify-content:center; gap:8px;
+      font-family:inherit; transition:background .15s,transform .05s; text-decoration:none; }
+    .mastery-btn:hover{ background:#1d4ed8; }
+    .mastery-btn:active{ transform:translateY(1px); }
+    .mastery-btn:focus-visible{ outline:0; box-shadow:0 0 0 3px rgba(37,99,235,.35); }
+    .mastery-btn:disabled{ background:#cbd5e1; color:#fff; cursor:not-allowed; }
+    .mastery-btn-sm{ font-size:14px; font-weight:600; padding:8px 14px; border-radius:8px; }
+    .mastery-btn-ghost{ background:#fff; color:#2563eb; border:1px solid #93c5fd; }
+    .mastery-btn-ghost:hover{ background:#eff6ff; }
+    .mastery-badge{ display:inline-flex; align-items:center; gap:4px; font-size:13px; font-weight:600;
+      padding:4px 12px; border-radius:9999px; line-height:1.4; }
+    .mastery-badge.reached{ background:var(--mastery-reached-soft); color:var(--mastery-reached-ink); }
+    .mastery-badge.partial{ background:var(--mastery-partial-soft); color:var(--mastery-partial-ink); }
+    .mastery-badge.notReached{ background:var(--mastery-notreached-soft); color:var(--mastery-notreached-ink); }
+    .mastery-badge.insufficient{ background:var(--mastery-insufficient-soft); color:var(--mastery-insufficient-ink); }
+    .mastery-chip-gray{ display:inline-flex; align-items:center; gap:4px; font-size:13px; font-weight:600;
+      padding:3px 10px; border-radius:9999px; background:var(--mastery-insufficient-soft); color:var(--mastery-insufficient-ink); }
+
+    /* 빈 상태 (친절 문구 + CTA) */
+    .mastery-empty{ display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center;
+      padding:40px 24px; color:#6b7280; gap:14px; }
+    .mastery-empty .me-icon{ font-size:34px; color:#cbd5e1; }
+    .mastery-empty p{ font-size:16px; line-height:1.6; margin:0; max-width:460px; }
+
+    /* 2분할 그리드 (S1) */
+    .mastery-grid2{ display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+    @media (max-width:1024px){ .mastery-grid2{ grid-template-columns:1fr; } }
+
+    /* 도넛 중앙 텍스트 래퍼 */
+    .donut-wrap{ position:relative; }
+    .donut-center{ position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; pointer-events:none; }
+    .donut-center .dc-num{ font-size:24px; font-weight:700; color:#111827; line-height:1.1; }
+    .donut-center .dc-lbl{ font-size:13px; color:#6b7280; margin-top:2px; }
+
+    /* ── S4: "다음에 뭘?" CTA 카드 ── */
+    .next-grid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(300px,1fr)); gap:16px; }
+    .next-card{ background:#fff; border:1px solid #e5e7eb; border-radius:12px; padding:20px;
+      display:flex; flex-direction:column; gap:10px; box-shadow:0 1px 3px rgba(0,0,0,.08);
+      transition:box-shadow .15s,transform .15s; }
+    .next-card:hover{ box-shadow:0 8px 18px rgba(0,0,0,.10); transform:translateY(-2px); }
+    .next-card:focus-within{ box-shadow:0 0 0 3px rgba(37,99,235,.35); }
+    .next-card .nc-badgerow{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+    .next-card .nc-subject{ font-size:13px; color:#6b7280; font-weight:600; }
+    .next-card .nc-title{ font-size:17px; font-weight:700; color:#1f2937; line-height:1.5;
+      display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+    .next-card .nc-meta{ font-size:13px; color:#6b7280; }
+    .next-card .nc-divider{ border:0; border-top:1px solid #f3f4f6; margin:2px 0; }
+    .next-card .nc-item{ font-size:15px; color:#374151; display:flex; align-items:center; gap:8px; }
+    .next-card .nc-item .nc-mins{ margin-left:auto; font-size:13px; color:#6b7280; background:#f3f4f6; border-radius:9999px; padding:2px 8px; }
+    .next-card .nc-more{ font-size:13px; color:#2563eb; background:none; border:0; cursor:pointer; padding:0; text-align:left; font-family:inherit; }
+    .next-card .nc-prereq{ font-size:13px; color:#6b7280; background:#f9fafb; border-radius:8px; padding:8px 10px; }
+    .next-card .nc-cta{ margin-top:auto; }
+    .next-card .mastery-btn{ width:100%; }
+
+    /* ── S4: 90vw/90vh 플레이어 모달 (CLAUDE.md 표준) ── */
+    .player-modal{ position:fixed; inset:0; z-index:10000; background:rgba(17,24,39,.5); display:none;
+      align-items:center; justify-content:center; }
+    .player-modal[data-open="true"]{ display:flex; }
+    .player-modal .pm-box{ width:90vw; height:90vh; background:#fff; border-radius:16px; overflow:hidden;
+      display:flex; flex-direction:column; box-shadow:0 20px 40px rgba(0,0,0,.25); }
+    .player-modal .pm-head{ display:flex; align-items:center; justify-content:space-between;
+      gap:16px; padding:16px 20px; border-bottom:1px solid #e5e7eb; }
+    .player-modal .pm-head h3{ font-size:19px; font-weight:700; color:#1f2937; margin:0;
+      max-width:calc(100% - 56px); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .player-modal .pm-close{ flex:0 0 auto; width:40px; height:40px; min-width:40px; border:0; background:#f3f4f6; border-radius:8px;
+      font-size:20px; line-height:1; color:#4b5563; cursor:pointer; }
+    .player-modal .pm-close:hover{ background:#e5e7eb; }
+    .player-modal .pm-body{ flex:1; min-height:0; }
+    .player-modal .pm-body iframe{ width:100%; height:100%; border:0; display:block; }
+
+    /* ── T1: 성취기준×학생 히트맵 ── */
+    .mastery-heatmap-wrap{ overflow-x:auto; -webkit-overflow-scrolling:touch; max-width:100%;
+      border:1px solid #e5e7eb; border-radius:12px; }
+    .mastery-heatmap{ border-collapse:separate; border-spacing:3px; font-size:13px; }
+    .mastery-heatmap thead th{ position:sticky; top:0; z-index:3; background:#fff;
+      font-size:12px; color:#4b5563; font-weight:600; padding:6px 4px; white-space:nowrap;
+      writing-mode:vertical-rl; text-orientation:mixed; height:96px; vertical-align:bottom; }
+    .mastery-heatmap thead th.corner{ left:0; z-index:4; writing-mode:horizontal-tb; width:200px;
+      text-align:left; vertical-align:bottom; padding:6px 10px; }
+    .mastery-heatmap thead th.summary-h{ writing-mode:horizontal-tb; height:auto; vertical-align:bottom; text-align:center; }
+    .mastery-heatmap tbody th{ position:sticky; left:0; z-index:2; background:#fff; text-align:left;
+      font-size:13px; color:#1f2937; font-weight:600; padding:6px 10px; width:200px; max-width:200px;
+      white-space:nowrap; overflow:hidden; text-overflow:ellipsis; cursor:pointer; }
+    .mastery-heatmap tbody th:hover{ color:#2563eb; }
+    .mastery-heatmap tbody th .mh-code{ color:#9ca3af; font-weight:500; font-size:12px; }
+    .mastery-heatmap td.cell{ width:30px; height:30px; min-width:30px; border-radius:6px; cursor:pointer;
+      text-align:center; color:#fff; font-weight:600; font-size:11px; transition:transform .1s,box-shadow .1s; }
+    .mastery-heatmap td.cell:focus-visible{ outline:0; box-shadow:0 0 0 3px rgba(37,99,235,.45); transform:scale(1.1); position:relative; z-index:5; }
+    .mastery-heatmap td.cell:hover{ transform:scale(1.18); box-shadow:0 2px 8px rgba(0,0,0,.25); z-index:5; position:relative; }
+    .mastery-heatmap td[data-state="reached"]{ background:var(--mastery-reached); }
+    .mastery-heatmap td[data-state="partial"]{ background:var(--mastery-partial); }
+    .mastery-heatmap td[data-state="notReached"]{ background:var(--mastery-notreached); }
+    .mastery-heatmap td[data-state="insufficient"]{ background:var(--mastery-insufficient-soft); color:#9ca3af; }
+    .mastery-heatmap td[data-state="none"]{ background:#fff; border:1px dashed #e5e7eb; color:#d1d5db; }
+    .mastery-heatmap td.summary{ background:transparent; color:#374151; font-weight:600; text-align:right;
+      padding:0 8px; white-space:nowrap; font-variant-numeric:tabular-nums; }
+
+    /* T1 모바일 카드형 (전치) */
+    .mastery-cardview{ display:none; }
+    .mastery-card{ background:#fff; border:1px solid #e5e7eb; border-radius:12px; padding:16px; margin-bottom:12px; }
+    .mastery-card .mc-title{ font-size:16px; font-weight:700; color:#1f2937; margin-bottom:4px;
+      display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+    .mastery-card .mc-sub{ font-size:13px; color:#6b7280; margin-bottom:10px; }
+    .mastery-stack{ display:flex; height:22px; border-radius:6px; overflow:hidden; background:#f3f4f6; }
+    .mastery-stack span{ display:block; min-width:0; }
+    .mastery-stack span.reached{ background:var(--mastery-reached); }
+    .mastery-stack span.partial{ background:var(--mastery-partial); }
+    .mastery-stack span.notReached{ background:var(--mastery-notreached); }
+    .mastery-stack span.insufficient{ background:var(--mastery-insufficient); }
+    .mastery-card .mc-counts{ font-size:13px; color:#4b5563; margin-top:8px; display:flex; flex-wrap:wrap; gap:10px; }
+    .mastery-card .mc-counts b{ color:#1f2937; }
+    .mastery-card .mc-action{ margin-top:12px; }
+
+    @media (max-width:767px){
+      .mastery-heatmap-wrap{ display:none; }
+      .mastery-cardview{ display:block; }
+    }
+
+    /* T3 미도달 명단 — 학생 칩 */
+    .nr-chips{ display:flex; flex-wrap:wrap; gap:6px; }
+    .nr-chip{ display:inline-flex; align-items:center; font-size:13px; font-weight:600; padding:3px 10px; border-radius:9999px;
+      background:var(--mastery-notreached-soft); color:var(--mastery-notreached-ink); border:1px solid #fecaca; }
+    .nr-chip.insufficient{ background:var(--mastery-insufficient-soft); color:var(--mastery-insufficient-ink); border-color:#e5e7eb; }
+    .nr-more{ background:none; border:0; color:#2563eb; font-size:13px; cursor:pointer; font-family:inherit; padding:3px 4px; }
+    .rate-dot{ display:inline-block; width:8px; height:8px; border-radius:50%; margin-left:6px; vertical-align:middle; }
+
+    /* 히트맵 커스텀 툴팁 */
+    #masteryTooltip{ position:fixed; z-index:10002; max-width:280px; background:#111827; color:#fff;
+      font-size:13px; line-height:1.5; padding:8px 12px; border-radius:8px; pointer-events:none;
+      box-shadow:0 4px 12px rgba(0,0,0,.3); display:none; }
   </style>
 </head>
 <body>
@@ -188,6 +357,20 @@
     </header>
     <div class="drawer-body" id="drawerBody"></div>
   </aside>
+
+  <!-- 90vw/90vh 플레이어 모달 (성취 추천학습 — S4) -->
+  <div class="player-modal" id="masteryPlayer" data-open="false" role="dialog" aria-modal="true" aria-labelledby="masteryPlayerTitle">
+    <div class="pm-box">
+      <div class="pm-head">
+        <h3 id="masteryPlayerTitle">학습</h3>
+        <button class="pm-close" type="button" aria-label="닫기" id="masteryPlayerClose">&times;</button>
+      </div>
+      <div class="pm-body"><iframe id="masteryPlayerFrame" title="추천 학습 플레이어" src=""></iframe></div>
+    </div>
+  </div>
+
+  <!-- 히트맵 셀 커스텀 툴팁 -->
+  <div id="masteryTooltip" role="tooltip" aria-hidden="true"></div>
 
 <script>
 /* =====================================================================
@@ -281,8 +464,8 @@ const ROLE_CATEGORIES = {
 const MENUS = {
   student: [
     { id:'s-home',       label:'홈',              icon:'fa-house',         group:'나의 학습',  category:'home' },
-    { id:'s-trend',      label:'활용 현황',       icon:'fa-chart-line',    group:'분석',       category:'analytics' },
-    { id:'s-achieve',    label:'성취 분석',       icon:'fa-award',         group:'분석',       category:'analytics' },
+    { id:'s-achieve',    label:'내 성취 분석',     icon:'fa-award',         group:'분석',       category:'analytics' },
+    { id:'s-trend',      label:'학습 습관',       icon:'fa-chart-line',    group:'분석',       category:'analytics' },
     { id:'s-compare',    label:'비교',            icon:'fa-people-group',  group:'분석',       category:'analytics' },
     { id:'s-xapi',       label:'표준체계 분석',    icon:'fa-diagram-project',group:'분석',      category:'analytics' },
     { id:'s-perform',    label:'과제·평가 수행',  icon:'fa-tasks',         group:'학습 활동',  category:'activities' },
@@ -291,13 +474,13 @@ const MENUS = {
   ],
   teacher: [
     { id:'t-home',       label:'홈',              icon:'fa-gauge',                 group:'우리반',        category:'home' },
+    { id:'t-warnings',   label:'성취 도달 현황',   icon:'fa-table-cells',           group:'분석',         category:'analytics' },
+    { id:'t-subject',    label:'교과 성취 분석',   icon:'fa-book',                  group:'분석',         category:'analytics' },
     { id:'t-usage',      label:'활용 현황',        icon:'fa-chalkboard',            group:'분석',         category:'analytics' },
-    { id:'t-subject',    label:'성취 분석',        icon:'fa-book',                  group:'분석',         category:'analytics' },
     { id:'t-xapi',       label:'표준체계 분석',    icon:'fa-diagram-project',       group:'분석',         category:'analytics' },
     { id:'t-perform',    label:'과제·평가 수행',  icon:'fa-tasks',                 group:'학습 활동',     category:'activities' },
     { id:'t-custom',     label:'맞춤학습 관리',    icon:'fa-compass',               group:'학습 활동',     category:'activities' },
     { id:'t-daily',      label:'일일현황',        icon:'fa-calendar-day',          group:'학습 활동',     category:'activities' },
-    { id:'t-warnings',   label:'경고',            icon:'fa-triangle-exclamation',  group:'학습 활동',     category:'activities' },
     { id:'t-drill',      label:'학생 드릴다운',    icon:'fa-user-magnifying-glass', group:'학습 활동',     category:'activities' },
     { id:'t-teacher-idx',label:'교사 활용지수',    icon:'fa-chalkboard-teacher',    group:'운영',         category:'operations' },
   ],
@@ -338,7 +521,7 @@ const MENU_LABELS = {
 /* ---- common-nav ?menu=<category> → 역할별 카테고리 기본 뷰 매핑 ---- */
 const MENU_TO_VIEW = {
   home:       { student:'s-home',    teacher:'t-home',    admin:'a-home' },
-  analytics:  { student:'s-trend',   teacher:'t-usage',   admin:'a-svc-ops' },
+  analytics:  { student:'s-achieve', teacher:'t-warnings', admin:'a-svc-ops' },
   activities: { student:'s-perform', teacher:'t-perform', admin:'a-svc-ops' },
   operations: { student:null,        teacher:'t-teacher-idx', admin:'a-xapi' },
   reports:    { student:null,        teacher:null,        admin:'a-export' },
@@ -353,7 +536,7 @@ const LEGACY_MENU_TO_CATEGORY = {
   's-perform':'activities','s-custom':'activities','s-daily':'activities',
   't-home':'home','t-usage':'analytics','t-subject':'analytics',
   't-perform':'activities','t-custom':'activities','t-daily':'activities',
-  't-warnings':'activities','t-drill':'activities','t-teacher-idx':'operations',
+  't-warnings':'analytics','t-drill':'activities','t-teacher-idx':'operations',
   // 신규 5블록
   'a-home':'home','a-svc-ops':'analytics','a-macro':'analytics','a-cross':'analytics','a-time':'analytics',
   'a-xapi':'operations','a-teacher-idx':'operations','a-quality':'operations','a-export':'reports',
@@ -435,7 +618,12 @@ function tplError(msg, onRetry){
 }
 
 /* ---- 차트 라이프사이클 ---- */
-function destroyCharts(){ state.charts.forEach(c=>{ try{c.destroy();}catch(_){} }); state.charts = []; }
+function destroyCharts(){
+  state.charts.forEach(c=>{ try{c.destroy();}catch(_){} }); state.charts = [];
+  // 성취 다이버징 차트(별도 추적)·히트맵 툴팁 정리
+  try { if (window.LRS && LRS._divergeChart){ LRS._divergeChart.destroy(); LRS._divergeChart = null; } } catch(_){}
+  try { const t = document.getElementById('masteryTooltip'); if (t){ t.style.display='none'; } } catch(_){}
+}
 
 /* CSS 변수 → 실제 색 해석 (Chart.js는 var(--..) 문자열을 인식 못함) */
 const CHART_FALLBACK = ['#2563eb','#10b981','#f59e0b','#ef4444','#8b5cf6','#06b6d4','#ec4899','#14b8a6','#f97316','#6366f1'];
@@ -718,6 +906,106 @@ function bindWarningActions(container){
     }
   });
 }
+
+/* =====================================================================
+ * 성취수준(P0) 공통 헬퍼 — 4상태 정규화·범례·도넛 중앙·플레이어 모달
+ *   기획서: 작업지시서/LRS_성취수준_P0_시각스펙.md
+ *   BE status: reached / partial / not_reached / insufficient
+ *   → FE 정규화 키(CSS data-state·뱃지 클래스): reached / partial / notReached / insufficient
+ * ===================================================================== */
+const MASTERY_HEX = {
+  reached:'#16a34a', partial:'#f59e0b', notReached:'#ef4444', insufficient:'#9ca3af',
+};
+const MASTERY_KO = { reached:'도달', partial:'부분 도달', notReached:'미도달', insufficient:'평가 부족' };
+
+/* BE의 not_reached(snake) → FE notReached(camel) 정규화. 그 외는 그대로. */
+function normStatus(s){
+  if (s === 'not_reached' || s === 'notReached') return 'notReached';
+  if (s === 'reached' || s === 'partial' || s === 'insufficient') return s;
+  return 'insufficient';
+}
+function masteryKo(s){ return MASTERY_KO[normStatus(s)] || '평가 부족'; }
+
+/* 4상태 범례 (모든 위젯 공통) */
+function masteryLegend(){
+  return `<div class="mastery-legend" aria-label="성취 5상태 범례">
+    <span class="item"><span class="dot reached"></span>도달</span>
+    <span class="item"><span class="dot partial"></span>부분 도달</span>
+    <span class="item"><span class="dot notReached"></span>미도달</span>
+    <span class="item"><span class="dot insufficient"></span>평가 부족
+      <i class="fas fa-circle-info info" title="평가를 시작했지만 시도가 3회 미만 — 더 풀어야 도달 여부를 판정할 수 있어요"></i></span>
+    <span class="item"><span class="dot none"></span>데이터 없음
+      <i class="fas fa-circle-info info" title="아직 평가·학습 기록이 없어요 (이 성취기준을 아직 배우지 않았거나 한 번도 풀지 않음)"></i></span>
+  </div>`;
+}
+
+/* 추천 콘텐츠 id → 플레이어 진입 URL (오답노트/콘텐츠 플레이어 패턴 재사용) */
+function recPlayUrl(item){
+  const id = item && (item.id != null ? item.id : item.contentId);
+  if (id == null) return null;
+  return '/self-learn/learning-map.html?contentId=' + encodeURIComponent(id);
+}
+/* 콘텐츠 타입 → FontAwesome 아이콘 */
+function recTypeIcon(type){
+  const t = String(type||'').toLowerCase();
+  if (t.includes('quiz') || t.includes('exam') || t.includes('문항') || t==='pen') return 'fa-pen';
+  if (t.includes('diag') || t.includes('진단')) return 'fa-stethoscope';
+  return 'fa-book';
+}
+
+/* 도넛 중앙 텍스트 플러그인 데이터(절대배치 div로 처리 — Chart.js plugin 불필요) */
+function donutCenterHtml(big, small){
+  return `<div class="donut-center"><span class="dc-num">${escapeHtml(big)}</span><span class="dc-lbl">${escapeHtml(small)}</span></div>`;
+}
+
+/* ── 90vw/90vh 플레이어 모달 제어 ── */
+const MasteryPlayer = {
+  open(title, url){
+    if (!url){ alert('이 학습의 추천 콘텐츠를 준비 중이에요.'); return; }
+    const modal = document.getElementById('masteryPlayer');
+    const frame = document.getElementById('masteryPlayerFrame');
+    document.getElementById('masteryPlayerTitle').textContent = title || '학습';
+    frame.src = url;
+    modal.setAttribute('data-open','true');
+    document.body.style.overflow = 'hidden';
+  },
+  close(){
+    const modal = document.getElementById('masteryPlayer');
+    const frame = document.getElementById('masteryPlayerFrame');
+    modal.setAttribute('data-open','false');
+    frame.src = 'about:blank';            // 재생 중지 (빈문자열은 현재 페이지 재로드 → about:blank로 완전 비움)
+    document.body.style.overflow = '';
+  }
+};
+(function bindPlayerModal(){
+  function bind(){
+    const modal = document.getElementById('masteryPlayer');
+    const closeBtn = document.getElementById('masteryPlayerClose');
+    if (closeBtn) closeBtn.addEventListener('click', () => MasteryPlayer.close());
+    if (modal) modal.addEventListener('click', (e) => { if (e.target === modal) MasteryPlayer.close(); });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && modal && modal.getAttribute('data-open') === 'true') MasteryPlayer.close();
+    });
+  }
+  // 스크립트가 body 끝에서 실행되므로 DOM은 이미 준비됨 — 즉시 바인딩(폴백: DOMContentLoaded)
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', bind);
+  else bind();
+})();
+
+/* ── 히트맵 커스텀 툴팁 ── */
+const MasteryTip = {
+  el(){ return document.getElementById('masteryTooltip'); },
+  show(html, x, y){
+    const t = this.el(); if (!t) return;
+    t.innerHTML = html; t.style.display = 'block'; t.setAttribute('aria-hidden','false');
+    const pad = 14, w = t.offsetWidth, h = t.offsetHeight;
+    let left = x + pad, top = y + pad;
+    if (left + w > window.innerWidth - 8) left = x - w - pad;
+    if (top + h > window.innerHeight - 8) top = y - h - pad;
+    t.style.left = Math.max(8,left) + 'px'; t.style.top = Math.max(8,top) + 'px';
+  },
+  hide(){ const t = this.el(); if (t){ t.style.display = 'none'; t.setAttribute('aria-hidden','true'); } }
+};
 
 /* =====================================================================
  * 뷰 렌더러 — 각 역할별 메뉴 id -> 함수
@@ -1435,110 +1723,298 @@ VIEWS['s-home'] = async function(root){
   await renderDodMini(root);
 };
 
+/* =====================================================================
+ * s-achieve (학생 성취 분석 = 홈) — S1 한눈 + S2 강약 + S4 다음에 뭘?
+ *   API: GET /api/lrs/mastery/student/:id
+ *   기획서: LRS_성취수준_P0_시각스펙 §3(S2)·§4(S4)·§5(S1)
+ * ===================================================================== */
 VIEWS['s-achieve'] = async function(root){
-  root.innerHTML = tplLoading(2);
+  root.innerHTML = tplLoading(3);
   const uid = state.me && state.me.id;
-  // 실제 응답: {standards:[{code, subject_code, attempts, success, avg_score, level, lastAt}]}
-  const cid = await resolveClassId();
-  const r = await apiGet('/api/lrs/achievement-progress', { userId: uid, classId: cid });
-  const standards = (r && (r.standards || r.byAchievement)) || [];
+  if (!uid){ root.innerHTML = tplEmpty('로그인 정보를 확인할 수 없어요'); return; }
 
-  if (!standards.length) {
-    // 역할 전환 힌트 + 샘플 학생 보기 버튼
+  const m = await apiGet('/api/lrs/mastery/student/' + encodeURIComponent(uid), {});
+  if (!m || !m.success){
+    root.innerHTML = tplError('성취 데이터를 불러오지 못했습니다', () => setView('s-achieve'));
+    return;
+  }
+
+  const counts = m.counts || { total:0, reached:0, partial:0, notReached:0, insufficient:0 };
+  const dist = m.distribution || {};
+  const bySubject = (m.bySubject || []).filter(x => x.avgRate != null || x.evaluatedCount > 0);
+  const standards = m.standards || [];
+  const weaknesses = m.weaknesses || [];
+  const strengths = m.strengths || [];
+
+  const evaluatedCount = (counts.reached||0) + (counts.partial||0) + (counts.notReached||0);
+  const allInsufficient = counts.total > 0 && evaluatedCount === 0;
+  const noData = !counts.total;
+
+  // ── 전체 빈 상태 (데이터 0건) ─────────────────────────────────────────
+  if (noData){
     const isAdmin = state.me && state.me.role === 'admin';
-    const hint = isAdmin
-      ? '관리자 계정에는 개인 성취 데이터가 없어요. 학생 계정으로 로그인하거나, 상단 역할 스위처로 <b>교사</b>로 전환 후 "학생 드릴다운"에서 학생을 선택하세요.'
-      : '아직 진단 결과가 충분하지 않아요. 학습을 진행하면 성취 데이터가 집계됩니다.';
-    root.innerHTML = `
-      <div class="dc-state-panel" role="status">
-        <i class="fas fa-award" aria-hidden="true"></i>
-        <p>${hint}</p>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin-top:12px;">
-          ${isAdmin ? `<button type="button" class="btn" id="sAchGotoDrill"><i class="fas fa-user-magnifying-glass"></i> 샘플 학생 보기</button>` : ''}
-          <a class="btn" href="/self-learn/"><i class="fas fa-book-open-reader"></i> 스스로채움</a>
-        </div>
-      </div>`;
+    root.innerHTML = `<section class="mastery-section"><div class="mastery-empty">
+      <i class="fas fa-award me-icon" aria-hidden="true"></i>
+      <p>성취 데이터를 모으는 중이에요. 학습을 진행하면 교과별 성취가 채워져요.</p>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:center;">
+        ${isAdmin ? `<button type="button" class="mastery-btn mastery-btn-sm mastery-btn-ghost" id="sAchGotoDrill"><i class="fas fa-user-magnifying-glass"></i> 샘플 학생 보기(교사 뷰)</button>` : ''}
+        <a class="mastery-btn mastery-btn-sm" href="/self-learn/"><i class="fas fa-book-open-reader"></i> 스스로채움 풀러 가기</a>
+      </div>
+    </div></section>`;
     const go = document.getElementById('sAchGotoDrill');
     if (go) go.addEventListener('click', async () => {
-      // 교사로 전환 후 t-drill → 첫 학생 drawer 자동 오픈
-      setRole('teacher');
-      await setView('t-drill');
-      setTimeout(() => {
-        const first = (LRS._warnCache||[])[0];
-        if (first) LRS.openDrilldown(first);
-      }, 300);
+      setRole('teacher'); await setView('t-warnings');
     });
     return;
   }
 
-  // 레벨별 카운트 집계
-  const levelMap = { '상':0, '중':0, '하':0, '미도달':0 };
-  standards.forEach(s => {
-    const lv = s.level || s.last_level || '미도달';
-    if (levelMap[lv] != null) levelMap[lv]++; else levelMap['미도달']++;
-  });
-
-  // KPI 계산
-  const reached = (levelMap['상']||0) + (levelMap['중']||0) + (levelMap['하']||0);
-  let accSum=0, accN=0;
-  standards.forEach(s => {
-    const v = Number(s.avg_score);
-    if (!isNaN(v) && v >= 0){ accSum += v; accN++; }
-  });
-  const avgAcc = accN ? (accSum/accN) : 0;
-  // 약점: avg_score < 60 또는 level === '미도달'/'하'
-  const weaknesses = standards.filter(s => {
-    const v = Number(s.avg_score);
-    const lv = s.level || s.last_level;
-    return (isFinite(v) && v < 60) || lv === '미도달' || lv === '하';
-  });
-
+  // ── 화면 골격 (S1 → S2 → S4) ─────────────────────────────────────────
   root.innerHTML = `
-    <div class="dc-kpi-grid">
-      ${kpiCard('도달 성취기준', reached, '개', {dir:'flat',text:'상/중/하 합계'}, 'success')}
-      ${kpiCard('평균 정답률',   avgAcc.toFixed(1), '%', {dir:'flat',text:'성취기준 전체 평균'}, 'primary')}
-      ${kpiCard('약점 성취기준', weaknesses.length, '개', {dir:weaknesses.length?'down':'flat', text:'60점 미만/미도달'}, weaknesses.length?'danger':'primary')}
+    <!-- S1: 내 성취 한눈 -->
+    <div class="mastery-grid2">
+      <section class="mastery-section">
+        <div class="ms-head"><div class="ms-titles">
+          <h2 class="mastery-h2">교과별 평균 성취</h2>
+          <div class="mastery-sub">교과별 평균 정답률(0~100)</div>
+        </div></div>
+        <div class="chart-body" style="height:300px;">
+          <canvas id="sMastRadar" role="img" aria-label="교과별 평균 성취 레이더"></canvas>
+        </div>
+      </section>
+      <section class="mastery-section">
+        <div class="ms-head"><div class="ms-titles">
+          <h2 class="mastery-h2">성취 현황 요약</h2>
+          <div class="mastery-sub">전체 ${counts.total}개 성취기준의 도달 상태</div>
+        </div></div>
+        <div class="chart-body donut-wrap" style="height:300px;">
+          <canvas id="sMastDonut" role="img" aria-label="성취 4상태 분포 도넛"></canvas>
+          ${donutCenterHtml('도달 ' + (counts.reached||0) + '/' + counts.total, '성취기준')}
+        </div>
+      </section>
     </div>
-    <div class="grid-2">
-      ${chartWrap('sAchDist','성취수준 분포','상/중/하/미도달 비율')}
-      ${chartWrap('sAchBar','성취기준별 평균 점수','상위 15개')}
-    </div>
-    <section class="dc-chart-wrapper">
-      <header><h2>약점 Top 5</h2><div class="subtitle">평균점수 낮은 순</div></header>
-      <div id="sAchWeakTable"></div>
+    ${masteryLegend()}
+
+    <!-- S2: 강약 다이버징 Bar -->
+    <section class="mastery-section" id="sDivergeSection" style="margin-top:16px;">
+      <div class="ms-head">
+        <div class="ms-titles">
+          <h2 class="mastery-h2">성취기준 강·약 분석</h2>
+          <div class="mastery-sub">정답률 기준 — 오른쪽이 강점, 왼쪽이 약점</div>
+        </div>
+        <div class="ms-controls">
+          ${counts.insufficient ? `<span class="mastery-chip-gray"><i class="fas fa-hourglass-half"></i> 평가 부족 ${counts.insufficient}개</span>` : ''}
+          <select class="ms-select" id="sDivergeTopN" aria-label="표시 개수">
+            <option value="5">강 5 · 약 5</option>
+            <option value="10">강·약 합계 10</option>
+            <option value="15">합계 15</option>
+          </select>
+        </div>
+      </div>
+      <div class="chart-body" id="sDivergeBody" style="height:360px;">
+        <canvas id="sMastDiverge" role="img" aria-label="성취기준 강약 다이버징 차트"></canvas>
+      </div>
+      ${masteryLegend()}
+    </section>
+
+    <!-- S4: 다음에 뭘? -->
+    <section class="mastery-section" id="sNextSection" style="margin-top:16px;">
+      <div class="ms-head"><div class="ms-titles">
+        <h2 class="mastery-h2">다음에 이걸 해볼까요?</h2>
+        <div class="mastery-sub">약한 성취기준을 채울 학습이에요. 하나씩 풀어 도달로 바꿔봐요.</div>
+      </div>
+      <div class="ms-controls"><span class="mastery-sub">미도달·부분 ${weaknesses.length}개</span></div>
+      </div>
+      <div id="sNextGrid"></div>
     </section>`;
 
-  mkChart(document.getElementById('sAchDist'),'doughnut',{
-    labels:['상','중','하','미도달'],
-    datasets:[{
-      data:[levelMap['상'], levelMap['중'], levelMap['하'], levelMap['미도달']],
-      backgroundColor:['var(--lvl-high)','var(--lvl-mid)','var(--lvl-low)','var(--gray-300)']
-    }]
-  }, donutLegendOpts('개'));
-
-  const top = standards.slice().sort((a,b)=> (Number(b.avg_score)||0)-(Number(a.avg_score)||0)).slice(0,15);
-  mkChart(document.getElementById('sAchBar'),'bar',{
-    labels: top.map(s => s.code || s.achievement_code || '-'),
-    datasets:[{
-      label:'평균 점수',
-      data: top.map(s => Number(s.avg_score)||0),
-      backgroundColor:'var(--chart-2)'
-    }]
-  }, { indexAxis:'y', scales:{ x:{ beginAtZero:true, max:100 } } });
-
-  const weakTop5 = weaknesses.slice().sort((a,b)=> (Number(a.avg_score)||0)-(Number(b.avg_score)||0)).slice(0,5);
-  if (weakTop5.length){
-    renderDataTable(document.getElementById('sAchWeakTable'), {
-      columns: [
-        { key:'achievement_code', label:'성취기준', format:(_,r)=>escapeHtml(r.code||r.achievement_code||'-') },
-        { key:'avg_score',        label:'평균점수', align:'right', format:v=>escapeHtml(v==null?'-':Number(v).toFixed(1)) },
-        { key:'attempts',         label:'시도횟수', align:'right', format:(_,r)=>escapeHtml(Number(r.attempts||r.attempt_count||0).toLocaleString()) }
-      ],
-      rows: weakTop5,
-      initialSort:'avg_score', initialDir:'asc'
-    });
+  // ── S1 레이더 ────────────────────────────────────────────────────────
+  if (bySubject.length >= 3){
+    mkChart(document.getElementById('sMastRadar'), 'radar', {
+      labels: bySubject.map(s => s.subject || '기타'),
+      datasets: [{
+        label:'평균 정답률', data: bySubject.map(s => s.avgRate == null ? 0 : s.avgRate),
+        borderColor:'var(--lrs-primary)', backgroundColor:'rgba(37,99,235,.15)',
+        pointBackgroundColor:'var(--lrs-primary)', borderWidth:2,
+      }]
+    }, { scales:{ r:{ min:0, max:100, ticks:{ stepSize:20, font:{size:11} }, pointLabels:{ font:{size:13} } } },
+         plugins:{ legend:{ display:false } } });
+  } else if (bySubject.length){
+    // 교과 3개 미만 → 가로 Bar 폴백
+    mkChart(document.getElementById('sMastRadar'), 'bar', {
+      labels: bySubject.map(s => s.subject || '기타'),
+      datasets: [{ label:'평균 정답률', data: bySubject.map(s => s.avgRate == null ? 0 : s.avgRate),
+        backgroundColor:'var(--lrs-primary)' }]
+    }, { indexAxis:'y', scales:{ x:{ min:0, max:100 } }, plugins:{ legend:{ display:false } } });
   } else {
-    document.getElementById('sAchWeakTable').innerHTML = `<p style="color:var(--gray-600);padding:12px 0;">약점 성취기준이 없습니다. 좋은 페이스를 유지하세요!</p>`;
+    document.getElementById('sMastRadar').closest('.chart-body').innerHTML =
+      '<div class="mastery-empty"><i class="fas fa-chart-pie me-icon"></i><p>교과별 평균을 낼 성취 데이터가 아직 부족해요.</p></div>';
+  }
+
+  // ── S1 도넛 (4상태) ──────────────────────────────────────────────────
+  if (allInsufficient){
+    // 평가부족만 — 회색 1색 + 안내
+    document.getElementById('sMastDonut').closest('.donut-wrap').querySelector('.donut-center').innerHTML =
+      `<span class="dc-num">평가 부족 ${counts.insufficient}/${counts.total}</span><span class="dc-lbl">성취기준</span>`;
+    mkChart(document.getElementById('sMastDonut'), 'doughnut', {
+      labels:['평가 부족'],
+      datasets:[{ data:[counts.insufficient], backgroundColor:[MASTERY_HEX.insufficient] }]
+    }, Object.assign({ cutout:'62%' }, donutLegendOpts('개')));
+  } else {
+    mkChart(document.getElementById('sMastDonut'), 'doughnut', {
+      labels:['도달','부분 도달','미도달','평가 부족'],
+      datasets:[{
+        data:[counts.reached||0, counts.partial||0, counts.notReached||0, counts.insufficient||0],
+        backgroundColor:[MASTERY_HEX.reached, MASTERY_HEX.partial, MASTERY_HEX.notReached, MASTERY_HEX.insufficient]
+      }]
+    }, Object.assign({ cutout:'62%' }, donutLegendOpts('개')));
+  }
+
+  // ── S2 다이버징 Bar (재그림 함수) ────────────────────────────────────
+  const evaluated = standards.filter(s => normStatus(s.status) !== 'insufficient' && s.rate != null);
+  const strong = evaluated.filter(s => { const st = normStatus(s.status); return st === 'reached' || (st === 'partial' && s.rate >= 70); })
+                          .sort((a,b)=> b.rate - a.rate);
+  const weak = evaluated.filter(s => { const st = normStatus(s.status); return st === 'notReached' || (st === 'partial' && s.rate < 70); })
+                        .sort((a,b)=> a.rate - b.rate);
+
+  function clampLabel(s, n){
+    const lbl = (s.label && s.label !== s.code) ? s.label : (s.subject || '');
+    const codeBare = String(s.code||'').replace(/^\[|\]$/g,'');
+    const short = lbl.length > n ? lbl.slice(0, n) + '…' : lbl;
+    return short ? `${short} [${codeBare}]` : `[${codeBare}]`;
+  }
+
+  function drawDiverge(){
+    destroyDivergeChart();
+    const total = parseInt(document.getElementById('sDivergeTopN').value, 10) || 5;
+    let pickStrong, pickWeak;
+    if (total === 5){ pickStrong = strong.slice(0,5); pickWeak = weak.slice(0,5); }
+    else { const half = Math.ceil(total/2); pickStrong = strong.slice(0,half); pickWeak = weak.slice(0,total-Math.min(half,pickStrong.length)); }
+
+    const labelClamp = window.innerWidth < 768 ? 12 : (window.innerWidth < 1200 ? 14 : 18);
+    // 강점은 위(rate 내림차) → 가운데 0선 → 약점은 아래(rate 오름차 = 최저 맨 아래)
+    const ordered = pickStrong.slice().concat(pickWeak.slice().reverse());
+    const bodyEl = document.getElementById('sDivergeBody');
+
+    if (!ordered.length){
+      bodyEl.innerHTML = `<div class="mastery-empty"><i class="fas fa-scale-balanced me-icon"></i>
+        <p>아직 강·약을 가를 데이터가 부족해요. 성취기준당 3회 이상 풀면 강점·약점이 나타나요.</p>
+        <a class="mastery-btn mastery-btn-sm" href="/self-learn/"><i class="fas fa-book-open-reader"></i> 스스로채움 풀러 가기</a></div>`;
+      return;
+    }
+    bodyEl.innerHTML = '<canvas id="sMastDiverge" role="img" aria-label="성취기준 강약 다이버징 차트"></canvas>';
+    bodyEl.style.height = (Math.max(360, ordered.length * 34 + 40)) + 'px';
+
+    const values = ordered.map(s => { const st = normStatus(s.status); return st === 'notReached' || (st === 'partial' && s.rate < 70) ? -s.rate : s.rate; });
+    const colors = ordered.map(s => { const st = normStatus(s.status); const isWeak = st === 'notReached' || (st === 'partial' && s.rate < 70);
+      return isWeak ? MASTERY_HEX.notReached : (st === 'reached' ? MASTERY_HEX.reached : MASTERY_HEX.partial); });
+
+    LRS._divergeChart = new Chart(document.getElementById('sMastDiverge'), {
+      type:'bar',
+      data:{ labels: ordered.map(s => clampLabel(s, labelClamp)),
+        datasets:[{ data: values, backgroundColor: colors, borderRadius:4, _meta: ordered }] },
+      options:{
+        responsive:true, maintainAspectRatio:false, indexAxis:'y',
+        animation:{ duration:500 },
+        scales:{
+          x:{ min:-100, max:100, ticks:{ callback:v=>Math.abs(v)+'%', font:{size:12} },
+              grid:{ color:(ctx)=> ctx.tick.value === 0 ? '#9ca3af' : '#f1f5f9' } },
+          y:{ ticks:{ font:{size:12} } }
+        },
+        plugins:{
+          legend:{ display:false },
+          tooltip:{ callbacks:{ label:(ctx)=>{ const s = ordered[ctx.dataIndex];
+            const codeBare = String(s.code||'').replace(/^\[|\]$/g,'');
+            return `${codeBare} · 정답률 ${s.rate}% (${s.attempts}회 중 ${s.correct}정답) · ${masteryKo(s.status)}`; } } }
+        },
+        onClick:(e, els)=>{ if (!els.length) return; const s = ordered[els[0].index];
+          // 약점 막대 클릭 → S4 추천 학습으로 스크롤
+          const st = normStatus(s.status);
+          if (st === 'notReached' || (st === 'partial' && s.rate < 70)){
+            const sec = document.getElementById('sNextSection'); if (sec) sec.scrollIntoView({ behavior:'smooth', block:'start' });
+          } else {
+            location.href = '/self-learn/?achievement_code=' + encodeURIComponent(s.code);
+          }
+        }
+      }
+    });
+  }
+  function destroyDivergeChart(){ if (LRS._divergeChart){ try{ LRS._divergeChart.destroy(); }catch(_){} LRS._divergeChart = null; } }
+  document.getElementById('sDivergeTopN').addEventListener('change', drawDiverge);
+  drawDiverge();
+
+  // ── S4 추천 카드 ─────────────────────────────────────────────────────
+  const nextGrid = document.getElementById('sNextGrid');
+  // 미도달 우선 → 부분 도달 (평가부족은 카드 만들지 않음)
+  const cards = weaknesses.slice().sort((a,b)=>{
+    const rank = s => normStatus(s.status) === 'notReached' ? 0 : 1;
+    return rank(a) - rank(b) || (a.rate||0) - (b.rate||0);
+  });
+  if (!cards.length){
+    // 빈 상태 3분기: 데이터없음 / 평가부족만(아직 미평가) / 진짜 약점없음(모두 도달)
+    if (noData){
+      nextGrid.innerHTML = `<div class="mastery-empty"><i class="fas fa-seedling me-icon" style="color:#9ca3af;"></i>
+        <p>아직 성취 데이터가 없어요. 학습을 풀면 강·약과 다음 할 일이 나타나요.</p>
+        <a class="mastery-btn mastery-btn-sm" href="/self-learn/"><i class="fas fa-rocket"></i> 오늘의 학습</a></div>`;
+    } else if (allInsufficient){
+      nextGrid.innerHTML = `<div class="mastery-empty"><i class="fas fa-hourglass-half me-icon" style="color:#9ca3af;"></i>
+        <p>아직 평가된 성취기준이 없어요. 성취기준당 3번 이상 풀면 강·약을 가릴 수 있어요.</p>
+        <a class="mastery-btn mastery-btn-sm" href="/self-learn/"><i class="fas fa-rocket"></i> 오늘의 학습</a></div>`;
+    } else {
+      nextGrid.innerHTML = `<div class="mastery-empty"><i class="fas fa-circle-check me-icon" style="color:#86efac;"></i>
+        <p>지금 보충할 약점이 없어요! 새로운 학습에 도전해볼까요?</p>
+        <a class="mastery-btn mastery-btn-sm" href="/self-learn/"><i class="fas fa-rocket"></i> 오늘의 학습</a></div>`;
+    }
+  } else {
+    nextGrid.className = 'next-grid';
+    nextGrid.innerHTML = cards.map((w, i) => {
+      const st = normStatus(w.status);
+      const codeBare = String(w.code||'').replace(/^\[|\]$/g,'');
+      const recs = w.recommendations || [];
+      const first = recs[0];
+      const moreCount = Math.max(0, recs.length - 1);
+      const hasRec = !!first;
+      const itemRow = first ? `<div class="nc-item"><i class="fas ${recTypeIcon(first.type)}" aria-hidden="true"></i>
+          <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(first.title||'추천 학습')}</span></div>`
+        : `<div class="nc-item" style="color:#9ca3af;"><i class="fas fa-hourglass-half"></i> 이 성취기준 추천 콘텐츠를 준비 중이에요</div>`;
+      const moreRow = moreCount > 0 ? `<button type="button" class="nc-more" data-more="${i}">+${moreCount}개 더 보기</button>
+        <div class="nc-more-list" id="ncMore-${i}" hidden style="display:flex;flex-direction:column;gap:6px;">
+          ${recs.slice(1).map(r=>`<div class="nc-item"><i class="fas ${recTypeIcon(r.type)}"></i>
+            <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(r.title||'추천 학습')}</span></div>`).join('')}
+        </div>` : '';
+      return `<div class="next-card" data-idx="${i}">
+        <div class="nc-badgerow">
+          <span class="mastery-badge ${st}">${masteryKo(w.status)}</span>
+          <span class="nc-subject">${escapeHtml(w.subject||'')}</span>
+        </div>
+        <div class="nc-title">${escapeHtml(w.label || codeBare)}</div>
+        <div class="nc-meta">[${escapeHtml(codeBare)}] · 현재 ${w.rate==null?'-':w.rate}%</div>
+        <hr class="nc-divider">
+        ${itemRow}
+        ${moreRow}
+        <div class="nc-cta">
+          <button type="button" class="mastery-btn" data-play="${i}" ${hasRec?'':'disabled'}>
+            ${hasRec ? '이 학습 풀기 <i class="fas fa-arrow-right"></i>' : '추천 준비 중'}
+          </button>
+        </div>
+      </div>`;
+    }).join('');
+
+    // 카드 이벤트: 풀기 / 더보기
+    nextGrid.querySelectorAll('button[data-play]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const i = parseInt(btn.getAttribute('data-play'),10);
+        const w = cards[i]; const first = (w.recommendations||[])[0];
+        const url = recPlayUrl(first);
+        MasteryPlayer.open(w.label || (w.code||'학습'), url);
+      });
+    });
+    nextGrid.querySelectorAll('button[data-more]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const i = btn.getAttribute('data-more');
+        const list = document.getElementById('ncMore-'+i);
+        if (list){ const open = !list.hidden; list.hidden = open; btn.textContent = open ? `+${list.children.length}개 더 보기` : '접기'; }
+      });
+    });
   }
 };
 
@@ -1640,13 +2116,13 @@ VIEWS['t-home'] = async function(root){
       ${kpiCard('학급 평균 성취', avgScore,      '점', {dir:'flat', text:'이번 기간'}, 'primary')}
       ${kpiCard('총 활동',        totalActs.toLocaleString(), '건', {dir:'up', text:'기간 누적'}, 'success')}
       ${kpiCard('총 학습시간',    totalHours,    '시간', {dir:'flat', text:''}, 'primary')}
-      ${kpiCard('경고 학생',      warnCount,     '건', {dir:warnCount?'down':'flat', text:`미접속 ${summary.inactiveCount||0}·연속오답 ${summary.wrongCount||0}·약점 ${summary.weakCount||0}`}, warnCount?'danger':'primary')}
+      ${kpiCard('도달 점검 필요',  warnCount,     '명', {dir:warnCount?'down':'flat', text:`미접속 ${summary.inactiveCount||0}·연속오답 ${summary.wrongCount||0}·약점 ${summary.weakCount||0}`}, warnCount?'danger':'primary')}
     </div>
 
     <div class="grid-2">
       ${chartWrap('tHomeDaily','일별 학급 활동량','학생 전체 합계')}
       <section class="dc-chart-wrapper">
-        <header><h2>경고 리스트</h2><div class="subtitle">우선순위 순</div></header>
+        <header><h2>보충이 필요한 학생</h2><div class="subtitle">우선순위 순</div></header>
         <div id="warnList"></div>
       </section>
     </div>`;
@@ -1664,7 +2140,7 @@ VIEWS['t-home'] = async function(root){
 
   const warnListEl = document.getElementById('warnList');
   if (!warns.length){
-    warnListEl.innerHTML = tplEmpty('현재 경고 학생이 없어요');
+    warnListEl.innerHTML = tplEmpty('보충이 필요한 학생이 없어요. 반 전체가 잘 따라오고 있어요!');
   } else {
     LRS._warnCache = warns;
     warnListEl.innerHTML = warns.slice(0,6).map((w, idx)=>{
@@ -1722,85 +2198,297 @@ VIEWS['t-drill'] = async function(root){
   });
 };
 
+/* =====================================================================
+ * t-warnings → "성취 도달 현황" (중립·실행 프레임)
+ *   T1 성취기준×학생 히트맵 + T3 미도달 명단표
+ *   API: GET /api/lrs/mastery/class/:id
+ *   기획서: LRS_성취수준_P0_시각스펙 §6(T1)·§7(T3)
+ * ===================================================================== */
 VIEWS['t-warnings'] = async function(root){
   root.innerHTML = tplLoading(3);
   const cid = await resolveClassId();
-  const w = await apiGet('/api/lrs/warnings/' + encodeURIComponent(cid));
-  const wf = flattenWarnings(w);
-  const list = wf.all;
-  const s = wf.summary;
-  if (!list.length) { root.innerHTML = tplEmpty('현재 경고가 없어요'); return; }
-  root.innerHTML = `<section class="dc-chart-wrapper">
-    <header>
-      <h2>경고 학생 리스트</h2>
-      <div class="subtitle">
-        미접속 ${escapeHtml(s.inactiveCount||0)}명 ·
-        연속오답 ${escapeHtml(s.wrongCount||0)}명 ·
-        약점 ${escapeHtml(s.weakCount||0)}건 ·
-        데이터 없음 ${escapeHtml(s.noDataCount||0)}명
-      </div>
-    </header>
-    <div id="warnTable"></div>
-    <h3 style="margin-top:24px;font-size:var(--fs-h2);color:var(--gray-800);">카드 뷰</h3>
-    <div id="warnGrid"></div>
-  </section>`;
+  const m = await apiGet('/api/lrs/mastery/class/' + encodeURIComponent(cid), {});
+  if (!m || !m.success){
+    root.innerHTML = tplError('성취 도달 데이터를 불러오지 못했습니다', () => setView('t-warnings'));
+    return;
+  }
 
-  // 데이터 테이블
-  LRS._warnCache = list;
-  renderDataTable(document.getElementById('warnTable'), {
-    columns: [
-      { key:'name', label:'학생', format:(v,row) => escapeHtml(row.name||row.student_name||('학생 #'+(row.user_id||row.id||'?'))) },
-      { key:'severity', label:'심각도', format:(v) => {
-          const cls = v==='high'?'danger':v==='low'?'muted':'warning';
-          return `<span class="dc-badge dc-badge--${cls}">${escapeHtml(v||'medium')}</span>`;
-        } },
-      { key:'reason', label:'사유', format:(v,row) => escapeHtml(row.reason||row.description||'기준 미달') },
-      { key:'last_active', label:'최근 활동', format:(v) => escapeHtml(v||'-') },
-      { key:'_act', label:'액션', format:(v,row) => {
-          const uid = escapeAttr(row.user_id||row.id||'');
-          const code = escapeAttr(row.achievement_code||'');
-          return `<span class="actions" data-student-id="${uid}" data-achievement-code="${code}">
-            <button type="button" data-action="message">메시지</button>
-            <button type="button" data-action="homework">과제</button>
-            <button type="button" data-action="recommend">맞춤학습</button>
-          </span>`;
-        } }
-    ],
-    rows: list,
-    initialSort:'severity', initialDir:'desc',
-    onRowClick: (row) => LRS.openDrilldown(row)
+  const students = m.students || [];          // [{id,name}] — masked면 익명
+  const standards = m.standards || [];        // 취약순 정렬됨
+  const matrix = m.matrix || {};              // {code:{userId:{status,rate}}}
+  const dist = m.distribution || {};
+  const masked = !!m.masked;
+
+  if (!students.length || !standards.length){
+    root.innerHTML = `<section class="mastery-section"><div class="mastery-empty">
+      <i class="fas fa-table-cells me-icon" aria-hidden="true"></i>
+      <p>아직 반 학생들의 성취 데이터가 충분하지 않아요. 평가·학습이 쌓이면 히트맵이 채워져요.</p>
+    </div></section>`;
+    return;
+  }
+
+  // 교과 필터 옵션 (실데이터에서 추출)
+  // ⚠ 같은 교과명(예: "수학")에 학교급별 subject_code가 여러 개(math-e/m/h) 존재 →
+  //   교과명 기준으로 묶어 하나의 옵션으로 노출. value = 해당 교과명의 모든 코드(콤마결합).
+  //   (코드별 옵션을 그대로 쓰면 "수학" 선택 시 다른 학교급 수학 행이 남아 필터가 망가져 보임)
+  const subjGroups = new Map();   // label → Set(subject_code)
+  standards.forEach(s => {
+    if (!s.subject_code) return;
+    const label = s.subject || s.subject_code;
+    if (!subjGroups.has(label)) subjGroups.set(label, new Set());
+    subjGroups.get(label).add(s.subject_code);
   });
-  // 테이블 내부 액션 버튼 동작 (이벤트 델리게이션, 행 클릭과 충돌 방지)
-  const tableWrap = document.getElementById('warnTable');
-  tableWrap.addEventListener('click', (ev) => {
-    const btn = ev.target.closest('button[data-action]');
-    if (!btn) return;
-    ev.stopPropagation();
-    const actions = btn.closest('.actions');
-    const studentId = actions.getAttribute('data-student-id') || '';
-    const code = actions.getAttribute('data-achievement-code') || '';
-    LRS.teacherAction(btn.getAttribute('data-action'), studentId, code);
-  }, true);
+  const subjects = [...subjGroups.entries()].map(([label, codeSet]) => ({
+    label, codes: [...codeSet], value: [...codeSet].join(',')
+  }));
 
-  // 카드 뷰
-  const grid = document.getElementById('warnGrid');
-  grid.innerHTML = list.map((x, idx) => {
-    const name = x.name||('학생 #'+(x.user_id||'?'));
-    const reason = x.reason||'기준 미달';
-    const uid = x.user_id||'';
-    const code = x.achievement_code||'';
-    return `<div class="dc-warning-card" data-severity="${escapeAttr(x.severity||'medium')}">
-      <h3>${escapeHtml(name)}</h3>
-      <p>${escapeHtml(reason)}</p>
-      <div class="actions" data-student-id="${escapeAttr(uid)}" data-achievement-code="${escapeAttr(code)}" data-warn-idx="${idx}">
-        <button type="button" data-action="message">메시지</button>
-        <button type="button" data-action="homework">과제</button>
-        <button type="button" data-action="recommend">맞춤학습</button>
-        <button type="button" data-action="detail">상세</button>
+  const totalEval = (dist.reached||0)+(dist.partial||0)+(dist.not_reached||0);
+  root.innerHTML = `
+    <!-- T1 히트맵 -->
+    <section class="mastery-section" id="tMasterySection">
+      <div class="ms-head">
+        <div class="ms-titles">
+          <h2 class="mastery-h2">성취기준 × 학생 도달 현황</h2>
+          <div class="mastery-sub">셀을 누르면 학생·성취기준 상세를 볼 수 있어요. ${masked ? '<span class="mastery-chip-gray" style="margin-left:6px;"><i class="fas fa-user-shield"></i> 표본 10명 미만 — 학생 이름 익명 처리</span>' : ''}</div>
+        </div>
+        <div class="ms-controls">
+          <select class="ms-select" id="tMastSort" aria-label="행 정렬">
+            <option value="weak">반 평균 낮은 순</option>
+            <option value="code">코드순</option>
+          </select>
+          ${subjects.length > 1 ? `<select class="ms-select" id="tMastSubject" aria-label="교과 필터">
+            <option value="">전체 교과</option>
+            ${subjects.map(s=>`<option value="${escapeAttr(s.value)}">${escapeHtml(s.label)}</option>`).join('')}
+          </select>` : ''}
+        </div>
       </div>
-    </div>`;
-  }).join('');
-  bindWarningActions(grid);
+      <div id="tHeatmapHost"></div>
+      <div id="tHeatmapMore" style="margin-top:12px;text-align:center;"></div>
+      ${masteryLegend()}
+    </section>
+
+    <!-- T3 미도달 명단표 -->
+    <section class="mastery-section" id="tNotReachedSection">
+      <div class="ms-head">
+        <div class="ms-titles">
+          <h2 class="mastery-h2">보충이 필요한 성취기준</h2>
+          <div class="mastery-sub">미도달 학생이 있는 성취기준이에요. 추천 학습을 배정해 도달을 도와요.</div>
+        </div>
+        <div class="ms-controls"><span class="mastery-btn mastery-btn-sm" style="background:#cbd5e1;cursor:not-allowed;" title="반 전체 보충 배정은 다음 단계(P1)에 제공됩니다" aria-disabled="true"><i class="fas fa-layer-group"></i> 반 전체 배정(준비 중)</span></div>
+      </div>
+      <div id="tNotReachedTable"></div>
+    </section>`;
+
+  // ── 상태 관리 (정렬·필터·행수) ─────────────────────────────────────
+  const tState = { sort:'weak', subject:'', expanded:false, rowLimit:12 };
+
+  // tState.subject 는 교과명에 묶인 subject_code들의 콤마결합값(예: "math-e,math-m,math-h")
+  function subjectMatch(code){
+    if (!tState.subject) return true;
+    return tState.subject.split(',').includes(code);
+  }
+
+  function filterStds(){
+    let list = standards.slice();
+    if (tState.subject) list = list.filter(s => subjectMatch(s.subject_code));
+    if (tState.sort === 'code') list.sort((a,b)=> String(a.code).localeCompare(String(b.code),'ko'));
+    else { // weak: 도달률 낮은 순(미평가는 뒤로) — BE 기본정렬이지만 필터 후 재보장
+      list.sort((x,y)=>{ const xr = x.reachedRate==null?Infinity:x.reachedRate; const yr = y.reachedRate==null?Infinity:y.reachedRate; return xr-yr; });
+    }
+    return list;
+  }
+
+  function cellState(code, uid){
+    const c = matrix[code] && matrix[code][uid];
+    if (!c) return { state:'none', rate:null };
+    return { state: normStatus(c.status), rate: c.rate };
+  }
+
+  // ── T1 데스크탑 히트맵(table) + 모바일 카드형(전치) ─────────────────
+  function renderHeatmap(){
+    const all = filterStds();
+    const rows = tState.expanded ? all : all.slice(0, tState.rowLimit);
+    const host = document.getElementById('tHeatmapHost');
+
+    // 데스크탑 table
+    const thead = `<thead><tr>
+      <th class="corner">성취기준 \\ 학생</th>
+      ${students.map(st=>`<th title="${escapeAttr(st.name)}">${escapeHtml(st.name)}</th>`).join('')}
+      <th class="summary-h">반 평균</th><th class="summary-h">도달수</th>
+    </tr></thead>`;
+    const tbody = `<tbody>${rows.map(s => {
+      const codeBare = String(s.code||'').replace(/^\[|\]$/g,'');
+      const cells = students.map(st => {
+        const { state, rate } = cellState(s.code, st.id);
+        const txt = state==='insufficient' ? '–' : (state==='none' ? '' : (rate==null?'':Math.round(rate)));
+        const stateKo = MASTERY_KO[state] || '데이터 없음';
+        return `<td class="cell" data-state="${state}" data-code="${escapeAttr(s.code)}" data-uid="${escapeAttr(st.id)}"
+          data-sname="${escapeAttr(st.name)}" data-rate="${rate==null?'':rate}" tabindex="0"
+          role="button" aria-label="${escapeAttr(st.name+' '+codeBare+' '+stateKo)}">${txt}</td>`;
+      }).join('');
+      const evalN = s.evaluated || 0;
+      const rr = s.reachedRate == null ? '—' : (s.reachedRate + '%');
+      return `<tr>
+        <th data-code="${escapeAttr(s.code)}" title="${escapeAttr(s.label||codeBare)}">${escapeHtml(s.label||codeBare)} <span class="mh-code">[${escapeHtml(codeBare)}]</span></th>
+        ${cells}
+        <td class="summary">${rr}</td><td class="summary">${s.reached}/${evalN||'-'}</td>
+      </tr>`;
+    }).join('')}</tbody>`;
+
+    // 모바일 카드형 (성취기준별 4상태 누적바)
+    const cardHtml = rows.map(s => {
+      const codeBare = String(s.code||'').replace(/^\[|\]$/g,'');
+      const tot = (s.reached||0)+(s.partial||0)+(s.notReached||0)+(s.insufficient||0) || 1;
+      const seg = (k,n)=> n>0 ? `<span class="${k}" style="flex-basis:${(n/tot*100).toFixed(1)}%"></span>` : '';
+      return `<div class="mastery-card">
+        <div class="mc-title">${escapeHtml(s.label||codeBare)}</div>
+        <div class="mc-sub">[${escapeHtml(codeBare)}] · ${escapeHtml(s.subject||'')} · 반 평균 ${s.reachedRate==null?'—':s.reachedRate+'%'}</div>
+        <div class="mastery-stack">${seg('reached',s.reached)}${seg('partial',s.partial)}${seg('notReached',s.notReached)}${seg('insufficient',s.insufficient)}</div>
+        <div class="mc-counts">
+          <span><b>${s.reached||0}</b> 도달</span><span><b>${s.partial||0}</b> 부분</span>
+          <span><b>${s.notReached||0}</b> 미도달</span><span><b>${s.insufficient||0}</b> 평가부족</span>
+        </div>
+        ${s.notReached>0 ? `<div class="mc-action"><button type="button" class="mastery-btn mastery-btn-sm mastery-btn-ghost" data-nrcode="${escapeAttr(s.code)}"><i class="fas fa-users"></i> 미도달 학생 보기</button></div>`:''}
+      </div>`;
+    }).join('');
+
+    host.innerHTML = `
+      <div class="mastery-heatmap-wrap"><table class="mastery-heatmap">${thead}${tbody}</table></div>
+      <div class="mastery-cardview">${cardHtml}</div>`;
+
+    // 더보기 토글
+    const moreHost = document.getElementById('tHeatmapMore');
+    if (all.length > tState.rowLimit){
+      moreHost.innerHTML = `<button type="button" class="mastery-btn mastery-btn-sm mastery-btn-ghost" id="tHeatmapToggle">
+        ${tState.expanded ? '접기' : `전체 ${all.length}개 보기`}</button>`;
+      document.getElementById('tHeatmapToggle').addEventListener('click', ()=>{ tState.expanded = !tState.expanded; renderHeatmap(); });
+    } else moreHost.innerHTML = '';
+
+    bindHeatmapEvents(host);
+  }
+
+  function bindHeatmapEvents(host){
+    // 셀 hover 툴팁
+    host.querySelectorAll('td.cell').forEach(td => {
+      const show = (ev) => {
+        const state = td.getAttribute('data-state');
+        const sname = td.getAttribute('data-sname');
+        const code = String(td.getAttribute('data-code')||'').replace(/^\[|\]$/g,'');
+        const rate = td.getAttribute('data-rate');
+        let body;
+        if (state === 'none') body = `${escapeHtml(sname)} · ${escapeHtml(code)}<br>데이터 없음`;
+        else if (state === 'insufficient') body = `${escapeHtml(sname)} · ${escapeHtml(code)}<br>평가 부족 · 3회 미만 풀어 판정 불가`;
+        else body = `${escapeHtml(sname)} · ${escapeHtml(code)}<br>${MASTERY_KO[state]}${rate!==''?` · 정답률 ${Math.round(rate)}%`:''}`;
+        const r = td.getBoundingClientRect();
+        MasteryTip.show(body, r.right, r.top);
+      };
+      td.addEventListener('mouseenter', show);
+      td.addEventListener('focus', show);
+      td.addEventListener('mouseleave', ()=> MasteryTip.hide());
+      td.addEventListener('blur', ()=> MasteryTip.hide());
+      const act = () => openCellDetail(td);
+      td.addEventListener('click', act);
+      td.addEventListener('keydown', (e)=>{ if (e.key==='Enter'||e.key===' '){ e.preventDefault(); act(); } });
+    });
+    // 행 제목 클릭 → T3로 스크롤
+    host.querySelectorAll('.mastery-heatmap tbody th[data-code]').forEach(th => {
+      th.addEventListener('click', ()=>{ const sec = document.getElementById('tNotReachedSection'); if (sec) sec.scrollIntoView({behavior:'smooth',block:'start'}); });
+    });
+    // 모바일 카드 "미도달 학생 보기"
+    host.querySelectorAll('button[data-nrcode]').forEach(b => {
+      b.addEventListener('click', ()=>{ const sec = document.getElementById('tNotReachedSection'); if (sec) sec.scrollIntoView({behavior:'smooth',block:'start'}); });
+    });
+  }
+
+  function openCellDetail(td){
+    const code = td.getAttribute('data-code');
+    const uid = td.getAttribute('data-uid');
+    const sname = td.getAttribute('data-sname');
+    const state = td.getAttribute('data-state');
+    const rate = td.getAttribute('data-rate');
+    const std = standards.find(s => s.code === code) || {};
+    const codeBare = String(code||'').replace(/^\[|\]$/g,'');
+    LRS.openMasteryDrawer({
+      title: sname,
+      bodyHtml: `
+        <p style="font-size:14px;color:#4b5563;line-height:1.7;">
+          <strong style="color:#1f2937;">${escapeHtml(std.label||codeBare)}</strong><br>
+          [${escapeHtml(codeBare)}] · ${escapeHtml(std.subject||'')}
+        </p>
+        <div style="margin:14px 0;padding:14px;border-radius:10px;background:var(--mastery-${state==='notReached'?'notreached':state}-soft,#f3f4f6);">
+          <span class="mastery-badge ${state}">${MASTERY_KO[state]||'데이터 없음'}</span>
+          ${rate!==''?`<span style="margin-left:8px;font-weight:700;color:#1f2937;">정답률 ${Math.round(rate)}%</span>`:''}
+        </div>
+        <button type="button" class="mastery-btn mastery-btn-sm" id="drwRecommend" data-uid="${escapeAttr(uid)}" data-code="${escapeAttr(code)}">
+          <i class="fas fa-wand-magic-sparkles"></i> 이 학생에게 보충 배정
+        </button>`
+    });
+  }
+
+  document.getElementById('tMastSort').addEventListener('change', (e)=>{ tState.sort = e.target.value; tState.expanded=false; renderHeatmap(); });
+  const subSel = document.getElementById('tMastSubject');
+  if (subSel) subSel.addEventListener('change', (e)=>{ tState.subject = e.target.value; tState.expanded=false; renderHeatmap(); renderNotReached(); });
+  window.addEventListener('resize', ()=>{ MasteryTip.hide(); });
+
+  renderHeatmap();
+
+  // ── T3 미도달 명단표 ─────────────────────────────────────────────────
+  function renderNotReached(){
+    const host = document.getElementById('tNotReachedTable');
+    let list = standards.filter(s => (s.notReached||0) > 0);
+    if (tState.subject) list = list.filter(s => subjectMatch(s.subject_code));
+    list.sort((a,b)=> (a.avgRate==null?Infinity:a.avgRate) - (b.avgRate==null?Infinity:b.avgRate));
+    if (!list.length){
+      host.innerHTML = `<div class="mastery-empty"><i class="fas fa-face-smile me-icon" style="color:#86efac;"></i>
+        <p>보충이 필요한 학생이 없어요. 반 전체가 잘 따라오고 있어요! 🎉</p></div>`;
+      return;
+    }
+    // recommendations 룩업 (weakTop에 추천 포함)
+    const recByCode = {};
+    (m.weakTop||[]).forEach(w => { recByCode[w.code] = (w.recommendations||[])[0] || null; });
+
+    renderDataTable(host, {
+      columns:[
+        { key:'label', label:'성취기준', format:(_,r)=>{
+            const codeBare = String(r.code||'').replace(/^\[|\]$/g,'');
+            return `<div style="max-width:280px;"><div style="font-weight:600;color:#1f2937;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(r.label||codeBare)}</div><div style="font-size:12px;color:#9ca3af;">[${escapeHtml(codeBare)}] · ${escapeHtml(r.subject||'')}</div></div>`;
+          } },
+        { key:'_nr', label:'미도달 학생', format:(_,r)=>{
+            const nr = r.notReachedStudents || [];
+            const shown = nr.slice(0,3).map(u=>`<span class="nr-chip">${escapeHtml(u.name)}</span>`).join('');
+            const more = nr.length>3 ? `<span class="nr-chip" style="background:#f3f4f6;color:#4b5563;border-color:#e5e7eb;">외 ${nr.length-3}명</span>` : '';
+            return `<div class="nr-chips">${shown||'<span style="color:#9ca3af;">-</span>'}${more}</div>`;
+          } },
+        { key:'avgRate', label:'평균 정답률', align:'right', format:(v)=>{
+            if (v==null) return '-';
+            const color = v<50 ? MASTERY_HEX.notReached : v<80 ? MASTERY_HEX.partial : MASTERY_HEX.reached;
+            return `${v}%<span class="rate-dot" style="background:${color};"></span>`;
+          } },
+        { key:'_rec', label:'추천 보충', format:(_,r)=>{
+            const rec = recByCode[r.code];
+            if (!rec) return '<span style="color:#9ca3af;font-size:13px;">준비 중</span>';
+            return `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+              <span style="font-size:13px;color:#374151;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:160px;"><i class="fas ${recTypeIcon(rec.type)}"></i> ${escapeHtml(rec.title||'추천 콘텐츠')}</span>
+              <button type="button" class="mastery-btn mastery-btn-sm mastery-btn-ghost" data-assign="${escapeAttr(r.code)}" data-recid="${escapeAttr(rec.id)}" data-rectitle="${escapeAttr(rec.title||'')}">배정</button>
+            </div>`;
+          } }
+      ],
+      rows: list,
+      initialSort:'avgRate', initialDir:'asc'
+    });
+
+    // 배정 버튼 — P0: 확인 토스트(목업). 실제 일괄 배정 API는 P1.
+    host.querySelectorAll('button[data-assign]').forEach(btn => {
+      btn.addEventListener('click', (ev)=>{
+        ev.stopPropagation();
+        const title = btn.getAttribute('data-rectitle') || '추천 콘텐츠';
+        if (confirm(`[${title}]을(를) 미도달 학생에게 배정할까요?\n(개별 배정은 다음 단계에서 실제 연동됩니다)`)){
+          btn.outerHTML = `<span class="mastery-badge reached"><i class="fas fa-check"></i> 배정됨</span>`;
+        }
+      });
+    });
+  }
+  renderNotReached();
 };
 
 VIEWS['t-usage'] = async function(root){
@@ -3167,6 +3855,23 @@ const LRS = window.LRS = {
         initialSort:'date', initialDir:'desc'
       });
     })();
+  },
+  /* 성취 히트맵 셀 상세 드로어 (기존 드로어 재사용) */
+  openMasteryDrawer(cfg){
+    cfg = cfg || {};
+    const overlay = document.getElementById('drawerOverlay');
+    const drawer  = document.getElementById('drilldownDrawer');
+    overlay.setAttribute('data-open','true');
+    drawer.setAttribute('data-open','true');
+    drawer.setAttribute('aria-hidden','false');
+    document.getElementById('drawerTitle').textContent = cfg.title || '성취 상세';
+    const body = document.getElementById('drawerBody');
+    body.innerHTML = cfg.bodyHtml || '';
+    overlay.onclick = LRS.closeDrawer;
+    const rec = document.getElementById('drwRecommend');
+    if (rec) rec.addEventListener('click', ()=>{
+      LRS.teacherAction('recommend', rec.getAttribute('data-uid'), rec.getAttribute('data-code'));
+    });
   },
   closeDrawer(){
     document.getElementById('drawerOverlay').setAttribute('data-open','false');

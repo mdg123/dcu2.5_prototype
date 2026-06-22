@@ -1516,6 +1516,21 @@ function initSchema() {
     db.exec("CREATE INDEX IF NOT EXISTS idx_las_user ON lrs_achievement_stats(user_id);");
     db.exec("CREATE INDEX IF NOT EXISTS idx_las_code ON lrs_achievement_stats(achievement_code);");
 
+    // P0-6: 성취수준 재설계 — std_id·level 컬럼 추가 (재빌드 시 resolver 로 채움).
+    //   achievement_code → std_id 를 매 쿼리 join 하지 않도록 사전 충진(성능).
+    //   level: 4상태(reached/partial/not_reached/insufficient) 영문 status.
+    //   기존 last_level(한글 상/중/하/미도달)은 호환 위해 그대로 유지.
+    {
+      const lasCols = db.prepare("PRAGMA table_info(lrs_achievement_stats)").all().map(c => c.name);
+      if (!lasCols.includes('std_id')) {
+        db.exec("ALTER TABLE lrs_achievement_stats ADD COLUMN std_id VARCHAR(40)");
+      }
+      if (!lasCols.includes('level')) {
+        db.exec("ALTER TABLE lrs_achievement_stats ADD COLUMN level VARCHAR(20)");
+      }
+      db.exec("CREATE INDEX IF NOT EXISTS idx_las_std ON lrs_achievement_stats(std_id);");
+    }
+
     db.exec(`
       CREATE TABLE IF NOT EXISTS lrs_session_stats (
         session_id VARCHAR(40) PRIMARY KEY,

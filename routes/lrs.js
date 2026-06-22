@@ -5,6 +5,7 @@ const { requireAuth } = require('../middleware/auth');
 const db = require('../db/index');
 const lrsDb = require('../db/lrs');
 const classDb = require('../db/class');
+const mastery = require('../db/lrs-mastery');
 const { rebuildAllAggregates } = require('../db/lrs-aggregate');
 const { logLearningActivity } = require('../db/learning-log-helper');
 const { LRS_CONFIG } = require('../lib/lrs-config');
@@ -203,15 +204,24 @@ function resolveScopeFilter(req, colAlias) {
   };
 }
 
-/** 클래스 소유자/교사/관리자만 허용 */
+/**
+ * 클래스 매트릭스/경고/통계 열람 권한: 관리자 또는 "해당 클래스" 교사-티어 멤버만.
+ *   - admin: 전체 허용
+ *   - 멤버 role 이 owner/teacher/co_teacher(개설자·공동담임) → 허용
+ *   - 학생 멤버(member/student): 차단 (타 학생 성취 노출 방지 — 본인 mastery 는 별도 엔드포인트)
+ *   - 비멤버 교사: 차단 (★P0 결함 fix: 이전 폴백 `return role==='teacher'` 가 모든 교사에게
+ *     모든 반 통과를 허용 → 반 경계를 넘어 개인 성취 데이터 노출. 폴백 제거.)
+ *   co_teacher 티어 정의는 마일리지 랭킹 제외(class-mileage.js, lrs.js mileage)와 동일하게 통일.
+ */
+const CLASS_TEACHER_ROLES = new Set(['owner', 'teacher', 'co_teacher']);
 function canViewClass(req, classId) {
   if (!req.user) return false;
   if (req.user.role === 'admin') return true;
   try {
     const role = classDb.getMemberRole(classId, req.user.id);
-    if (role === 'owner' || role === 'teacher') return true;
+    if (CLASS_TEACHER_ROLES.has(role)) return true;
   } catch (_) {}
-  return req.user.role === 'teacher';
+  return false;
 }
 
 // ─────────────────────────────────────────────────────────
@@ -953,8 +963,8 @@ router.get('/achievement-progress', requireAuth, (req, res) => {
           SUM(CASE WHEN ll.result_success = 1 THEN 1 ELSE 0 END) as success,
           AVG(ll.result_score) as avg_score,
           CASE
-            WHEN COUNT(*) < 3 THEN '미도달'
-            WHEN AVG(ll.result_score) IS NULL THEN '미도달'
+            WHEN COUNT(*) < 3 THEN '평가부족'
+            WHEN AVG(ll.result_score) IS NULL THEN '평가부족'
             WHEN AVG(CASE WHEN ll.result_score > 1 THEN ll.result_score/100.0 ELSE ll.result_score END) >= 0.80 THEN '상'
             WHEN AVG(CASE WHEN ll.result_score > 1 THEN ll.result_score/100.0 ELSE ll.result_score END) >= 0.50 THEN '중'
             ELSE '하'
@@ -976,16 +986,90 @@ router.get('/achievement-progress', requireAuth, (req, res) => {
       `).all(req.user.id);
     }
 
-    const summary = { total: standards.length, 상: 0, 중: 0, 하: 0, 미도달: 0 };
+    // P0-6: 평가부족(insufficient) 분리. last_level 한글(상/중/하/미도달/평가부족) 집계.
+    const summary = { total: standards.length, 상: 0, 중: 0, 하: 0, 미도달: 0, 평가부족: 0 };
     standards.forEach(s => { if (summary[s.level] !== undefined) summary[s.level]++; });
-    // level 키 래핑
+    // level 키 래핑 (notYet=미도달, insufficient=평가부족 신설)
     const distribution = {
-      high: summary['상'], mid: summary['중'], low: summary['하'], notYet: summary['미도달'], total: summary.total
+      high: summary['상'], mid: summary['중'], low: summary['하'],
+      notYet: summary['미도달'], insufficient: summary['평가부족'], total: summary.total
     };
 
     res.json({ success: true, standards, distribution });
   } catch (err) {
     console.error('[LRS] /achievement-progress error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 성취수준(성취기준 도달도) Mastery API — P0-2
+//   기획서: LRS_성취수준_인사이트_재설계_기획서.md §D P0-2 / §C-2 임계
+//   상태 4종: reached(도달) / partial(부분도달) / not_reached(미도달) / insufficient(평가부족)
+//   ※ 정답/정오 raw 비노출 — 성취 "집계"만(attempts·correct·rate·status).
+// ─────────────────────────────────────────────────────────────────────────────
+
+// GET /api/lrs/mastery/student/:id?subjectCode=math-e
+//   학생 성취기준별 도달 + 강약 분류 + 미도달→추천 콘텐츠 + 교과요약(레이더) + 4상태 분포(도넛)
+//   권한: 본인 / 교사·관리자.
+router.get('/mastery/student/:id', requireAuth, (req, res) => {
+  try {
+    const userId = parseInt(req.params.id, 10);
+    if (!Number.isInteger(userId)) {
+      return res.status(400).json({ success: false, message: '잘못된 사용자 ID 입니다.' });
+    }
+    if (!canViewUser(req, userId)) {
+      return res.status(403).json({ success: false, message: '권한이 없습니다.' });
+    }
+    const subjectCode = req.query.subjectCode || null;
+    const data = mastery.getStudentMastery(userId, { subjectCode });
+    res.json({ success: true, ...data });
+  } catch (err) {
+    console.error('[LRS] /mastery/student error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// GET /api/lrs/mastery/class/:id?subjectCode=math-e
+//   성취기준×학생 매트릭스 + 성취기준별 학급 도달률·미도달 명단 + 4상태 분포 + 약점 Top10.
+//   권한: 클래스 소유 교사 / 관리자. (학생은 본인 반이어도 매트릭스 차단 — 타 학생 성취 노출 방지)
+//   개인정보 게이트: 평가된 표본 n<10 이면 학생 식별을 마스킹(_minSampleGuard 정책 유지).
+router.get('/mastery/class/:id', requireAuth, (req, res) => {
+  try {
+    const classId = parseInt(req.params.id, 10);
+    if (!Number.isInteger(classId)) {
+      return res.status(400).json({ success: false, message: '잘못된 클래스 ID 입니다.' });
+    }
+    if (!canViewClass(req, classId)) {
+      return res.status(403).json({ success: false, message: '권한이 없습니다.' });
+    }
+    const subjectCode = req.query.subjectCode || null;
+
+    // 클래스의 학생 멤버만 (교사·학부모 제외)
+    const members = classDb.getClassMembers(classId).filter(m => m.user_role === 'student');
+    const students = members.map(m => ({ id: m.user_id, name: m.display_name || m.username || `학생${m.user_id}` }));
+
+    const data = mastery.getClassMastery(classId, students, { subjectCode });
+
+    // 개인정보 게이트: 학생 수 n<10 이면 개별 식별(학생명·매트릭스 셀의 user 키)을 마스킹.
+    const MIN_N = 10;
+    const masked = students.length < MIN_N;
+    if (masked) {
+      data.students = data.students.map((s, i) => ({ id: s.id, name: `학생 ${String.fromCharCode(65 + (i % 26))}` }));
+      const nm = new Map(data.students.map(s => [s.id, s.name]));
+      data.standards = data.standards.map(s => ({
+        ...s,
+        notReachedStudents: (s.notReachedStudents || []).map(u => ({ id: u.id, name: nm.get(u.id) || '학생' })),
+      }));
+      data.weakTop = data.weakTop.map(w => ({
+        ...w,
+        notReachedStudents: (w.notReachedStudents || []).map(u => ({ id: u.id, name: nm.get(u.id) || '학생' })),
+      }));
+    }
+
+    res.json({ success: true, masked, minSample: MIN_N, ...data });
+  } catch (err) {
+    console.error('[LRS] /mastery/class error:', err);
     res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
   }
 });

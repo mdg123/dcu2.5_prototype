@@ -96,9 +96,14 @@ function rebuildAllAggregates() {
 
     // 7. lrs_achievement_stats 재집계 (D1: 0-1/0-100 스케일 혼재 방어)
     //    result_score > 1 이면 0-100 스케일로 보고 maxScore=100 기준 비율로 환산.
-    //    avg_ratio >= 0.80 → 상, >= 0.50 → 중, < 0.50 → 하, 시도 < 3 → 미도달
+    //    P0-6 / C-2 임계 (평가부족 분리):
+    //      attempts < 3              → 평가부족(insufficient)   ← "안 해본 것"≠"못한 것"
+    //      rate >= 80% & att >= 3    → 도달(상/reached)
+    //      rate >= 50% & att >= 3    → 부분도달(중/partial)
+    //      rate <  50% & att >= 3    → 미도달(하/not_reached)
+    //    last_level: 레거시 한글(상/중/하/평가부족), level: 영문 4상태.
     db.exec(`
-      INSERT INTO lrs_achievement_stats (user_id, achievement_code, subject_code, attempt_count, success_count, avg_score, last_level, last_attempt_at, updated_at)
+      INSERT INTO lrs_achievement_stats (user_id, achievement_code, subject_code, attempt_count, success_count, avg_score, last_level, level, last_attempt_at, updated_at)
       SELECT
         user_id,
         achievement_code,
@@ -107,18 +112,40 @@ function rebuildAllAggregates() {
         SUM(CASE WHEN result_success = 1 THEN 1 ELSE 0 END) as success_count,
         AVG(result_score) as avg_score,
         CASE
-          WHEN COUNT(*) < 3 THEN '미도달'
+          WHEN COUNT(*) < 3 THEN '평가부족'
+          WHEN AVG(result_score) IS NULL THEN '평가부족'
           WHEN AVG(CASE WHEN result_score > 1 THEN result_score/100.0 ELSE result_score END) >= 0.80 THEN '상'
           WHEN AVG(CASE WHEN result_score > 1 THEN result_score/100.0 ELSE result_score END) >= 0.50 THEN '중'
-          WHEN AVG(result_score) IS NULL THEN '미도달'
           ELSE '하'
         END as last_level,
+        CASE
+          WHEN COUNT(*) < 3 THEN 'insufficient'
+          WHEN AVG(result_score) IS NULL THEN 'insufficient'
+          WHEN AVG(CASE WHEN result_score > 1 THEN result_score/100.0 ELSE result_score END) >= 0.80 THEN 'reached'
+          WHEN AVG(CASE WHEN result_score > 1 THEN result_score/100.0 ELSE result_score END) >= 0.50 THEN 'partial'
+          ELSE 'not_reached'
+        END as level,
         MAX(created_at) as last_attempt_at,
         CURRENT_TIMESTAMP as updated_at
       FROM learning_logs
       WHERE achievement_code IS NOT NULL
       GROUP BY user_id, achievement_code
     `);
+
+    // 7b. std_id 충진 — achievement_code → std_id resolver (P0-1).
+    //     매 쿼리 join 대신 사전 충진(성능). 매핑 없으면 NULL 유지(무손상).
+    try {
+      const { resolveCode, invalidateCache } = require('./lrs-mastery');
+      invalidateCache(); // 재빌드 직전 캐시 무효화(스키마/데이터 변동 반영)
+      const codes = db.prepare('SELECT DISTINCT achievement_code FROM lrs_achievement_stats WHERE achievement_code IS NOT NULL').all();
+      const updStd = db.prepare('UPDATE lrs_achievement_stats SET std_id = ? WHERE achievement_code = ? AND std_id IS NULL');
+      for (const { achievement_code } of codes) {
+        const ctx = resolveCode(achievement_code);
+        if (ctx && ctx.std_id) updStd.run(ctx.std_id, achievement_code);
+      }
+    } catch (e) {
+      console.warn('[다채움] lrs_achievement_stats std_id 충진 건너뜀:', e && e.message);
+    }
 
     // 8. lrs_user_daily 재집계
     db.exec(`

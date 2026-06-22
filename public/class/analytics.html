@@ -19,6 +19,11 @@
       --gray-500: #6b7280; --gray-600: #4b5563; --gray-700: #374151; --gray-800: #1f2937;
       --radius: 12px; --radius-sm: 8px; --radius-lg: 16px; --radius-full: 999px;
       --shadow: 0 1px 3px rgba(0,0,0,0.08); --shadow-md: 0 4px 12px rgba(0,0,0,0.1);
+      /* ===== P0-5: 성취수준 4상태 색상 토큰 (LRS 위젯 전 화면 통일 — 시각스펙 §1) ===== */
+      --mastery-reached:#16a34a;       --mastery-reached-soft:#dcfce7;       --mastery-reached-ink:#15803d;
+      --mastery-partial:#f59e0b;       --mastery-partial-soft:#fef3c7;       --mastery-partial-ink:#b45309;
+      --mastery-notreached:#ef4444;    --mastery-notreached-soft:#fee2e2;    --mastery-notreached-ink:#b91c1c;
+      --mastery-insufficient:#9ca3af;  --mastery-insufficient-soft:#f3f4f6;  --mastery-insufficient-ink:#4b5563;
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: 'Pretendard','Noto Sans KR',system-ui,sans-serif; background: var(--gray-100); color: var(--gray-800); line-height: 1.6; }
@@ -281,6 +286,27 @@
     .analytics-insight.tone-danger { background: #fef2f2; border-left-color: var(--danger); }
     .analytics-insight.tone-normal { background: var(--primary-50); border-left-color: var(--primary); }
     .analytics-insight strong { color: var(--gray-800); }
+
+    /* ===== P0-5: 성취 섹션 (클래스 성취 도넛 + 약점 성취기준 Top10) ===== */
+    /* 도넛 중앙 텍스트 — chart-container 위 절대배치 (CLAUDE.md 비례: 큰 숫자 + 작은 라벨) */
+    .mastery-donut-wrap { position: relative; }
+    .mastery-donut-center { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); text-align: center; pointer-events: none; }
+    .mastery-donut-center .md-num { font-size: 24px; font-weight: 700; color: var(--gray-800); line-height: 1.1; }
+    .mastery-donut-center .md-label { font-size: 13px; color: var(--gray-500); margin-top: 2px; }
+    /* 4상태 범례 (도넛·Bar 공통, 섹션 하단 1회) */
+    .mastery-legend { display: flex; flex-wrap: wrap; gap: 16px; align-items: center; font-size: 13px; color: var(--gray-600); margin-top: 14px; }
+    .mastery-legend .item { display: inline-flex; align-items: center; gap: 6px; }
+    .mastery-legend .dot { width: 10px; height: 10px; border-radius: 50%; flex: 0 0 auto; }
+    .mastery-legend .dot.reached { background: var(--mastery-reached); }
+    .mastery-legend .dot.partial { background: var(--mastery-partial); }
+    .mastery-legend .dot.notreached { background: var(--mastery-notreached); }
+    .mastery-legend .dot.insufficient { background: var(--mastery-insufficient); }
+    .mastery-legend .item .hint { font-size: 13px; color: var(--gray-500); cursor: help; }
+    /* 약점 Top10 Bar 빈상태/안내 */
+    .mastery-empty { text-align: center; padding: 40px 20px; color: var(--gray-500); }
+    .mastery-empty .me-emoji { font-size: 44px; line-height: 1; margin-bottom: 10px; display: block; }
+    .mastery-empty h4 { font-size: 16px; font-weight: 700; color: var(--gray-700); margin-bottom: 6px; }
+    .mastery-empty p { font-size: 14px; line-height: 1.7; }
 
     /* 토스트 */
     .toast-container { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); z-index: 20000; pointer-events: none; }
@@ -1247,6 +1273,26 @@
               <div class="chart-container" style="height:${Math.max(200, students.length * 32)}px"><canvas id="studentBarChart"></canvas></div>
             </div>
 
+            <!-- ===== P0-5: 성취수준(성취기준 도달도) 섹션 — 클래스 성취 도넛 + 약점 Top10 ===== -->
+            <div class="chart-grid" id="masterySection">
+              <div class="section-box">
+                <div class="section-header">
+                  <h3 class="section-title"><i class="fas fa-bullseye"></i> 우리 반 성취 도달 현황</h3>
+                </div>
+                <div id="masteryDonutBox">
+                  <div class="empty-state"><i class="fas fa-spinner fa-spin"></i><h3>성취 데이터 로드 중…</h3></div>
+                </div>
+              </div>
+              <div class="section-box">
+                <div class="section-header">
+                  <h3 class="section-title"><i class="fas fa-arrow-trend-down"></i> 보충이 필요한 성취기준 Top 10</h3>
+                </div>
+                <div id="masteryWeakBox">
+                  <div class="empty-state"><i class="fas fa-spinner fa-spin"></i><h3>성취 데이터 로드 중…</h3></div>
+                </div>
+              </div>
+            </div>
+
             <!-- ===== 수업 이해도 / 수업 집중도 (셀프체크 기반) ===== -->
             <div id="selfCheckSection">${renderSelfCheckSection(students.length)}</div>
           </div>
@@ -1392,6 +1438,8 @@
         loadBoardAnalytics(classId, _periodState.startDate, _periodState.endDate);
         // 🎯 마일리지 현황 탭 데이터 로드
         loadMileageAnalytics(classId, _periodState.startDate, _periodState.endDate);
+        // P0-5: 성취수준(성취기준 도달도) 섹션 — 클래스 성취 도넛 + 약점 Top10
+        loadMasterySection(classId);
         // P1: 자동 리포트 알림 (이번 주/이번 달 미확인 시 New 배너 노출)
         renderAutoReportBanner(classId);
       } catch(err) {
@@ -1439,6 +1487,204 @@
       if (v >= 50) return '#2563eb';
       if (v > 0) return '#f59e0b';
       return '#9ca3af';
+    }
+
+    // ===== P0-5: 성취수준(성취기준 도달도) 섹션 =====
+    let masteryDonutChart = null, masteryWeakChart = null;
+    // 4상태 색 — CSS 토큰과 동일 HEX (Chart.js는 CSS var 직접 못 읽어 hex 직기입, 시각스펙 §11)
+    const MASTERY_COLORS = { reached: '#16a34a', partial: '#f59e0b', notReached: '#ef4444', insufficient: '#9ca3af' };
+    // classRate(도달률 0~100) → 4상태 색 (도달≥80 / 부분≥50 / 미도달<50). null → 평가부족 회색
+    function _masteryRateColor(v) {
+      if (v == null) return MASTERY_COLORS.insufficient;
+      if (v >= 80) return MASTERY_COLORS.reached;
+      if (v >= 50) return MASTERY_COLORS.partial;
+      return MASTERY_COLORS.notReached;
+    }
+    // 성취기준 서술 클램프 + 코드 병기 (y축 라벨)
+    function _masteryBarLabel(w) {
+      const label = String(w.label || '성취기준').slice(0, 18);
+      const code = w.code ? ` [${w.code}]` : '';
+      return label + code;
+    }
+    const _masteryLegend = `
+      <div class="mastery-legend">
+        <span class="item"><span class="dot reached"></span>도달</span>
+        <span class="item"><span class="dot partial"></span>부분 도달</span>
+        <span class="item"><span class="dot notreached"></span>미도달</span>
+        <span class="item"><span class="dot insufficient"></span>평가 부족 <span class="hint" title="시도 3회 미만 — 더 풀어야 판정돼요">ⓘ</span></span>
+      </div>`;
+
+    async function loadMasterySection(classId) {
+      // 차트 정리 (재진입 안전)
+      if (masteryDonutChart) { masteryDonutChart.destroy(); masteryDonutChart = null; }
+      if (masteryWeakChart) { masteryWeakChart.destroy(); masteryWeakChart = null; }
+      const donutBox = document.getElementById('masteryDonutBox');
+      const weakBox = document.getElementById('masteryWeakBox');
+      if (!donutBox || !weakBox) return;
+      let data;
+      try {
+        const res = await fetch(`/api/lrs/mastery/class/${classId}`).then(r => r.ok ? r.json() : { success: false });
+        if (!res || !res.success) throw new Error('no data');
+        data = res;
+      } catch (e) {
+        const fail = `<div class="mastery-empty"><span class="me-emoji">📊</span><h4>성취 데이터를 불러오지 못했어요</h4><p>잠시 후 다시 시도해주세요.</p></div>`;
+        donutBox.innerHTML = fail; weakBox.innerHTML = fail;
+        return;
+      }
+      renderMasteryDonut(donutBox, data.distribution || {});
+      renderMasteryWeakBar(weakBox, data.weakTop || []);
+    }
+
+    function renderMasteryDonut(box, dist) {
+      const reached = Number(dist.reached) || 0;
+      const partial = Number(dist.partial) || 0;
+      const notReached = Number(dist.not_reached) || 0;       // BE는 snake_case not_reached
+      const insufficient = Number(dist.insufficient) || 0;
+      const total = Number(dist.total) || (reached + partial + notReached + insufficient);
+      const judged = reached + partial + notReached;           // 판정된 성취기준×학생 (평가부족 제외)
+
+      // 빈상태: 합계 0
+      if (total === 0) {
+        box.innerHTML = `<div class="mastery-empty"><span class="me-emoji">🌱</span>
+          <h4>아직 성취 데이터가 모이지 않았어요</h4>
+          <p>평가·학습이 쌓이면 성취기준 도달 현황이 표시됩니다.</p></div>`;
+        return;
+      }
+      // 빈상태(약식): 평가부족만 — 판정된 것이 0
+      const onlyInsufficient = judged === 0;
+
+      box.innerHTML = `
+        <div class="chart-container mastery-donut-wrap" style="height:280px;">
+          <canvas id="masteryDonutCanvas"></canvas>
+          <div class="mastery-donut-center">
+            <div class="md-num">${onlyInsufficient ? '–' : `${reached}/${total}`}</div>
+            <div class="md-label">${onlyInsufficient ? '판정 전' : '도달'}</div>
+          </div>
+        </div>
+        ${_masteryLegend}
+        <div class="insight-box" id="masteryDonutInsight"></div>`;
+
+      const reachRate = total > 0 ? Math.round((reached / total) * 100) : 0;
+      masteryDonutChart = new Chart(document.getElementById('masteryDonutCanvas'), {
+        type: 'doughnut',
+        data: {
+          labels: ['도달', '부분 도달', '미도달', '평가 부족'],
+          datasets: [{
+            data: [reached, partial, notReached, insufficient],
+            backgroundColor: [MASTERY_COLORS.reached, MASTERY_COLORS.partial, MASTERY_COLORS.notReached, MASTERY_COLORS.insufficient],
+            borderWidth: 2, borderColor: '#fff',
+          }]
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false, cutout: '62%',
+          plugins: {
+            legend: { position: window.innerWidth < 768 ? 'bottom' : 'right', labels: { font: { size: 13 }, padding: 12, usePointStyle: true } },
+            tooltip: { callbacks: { label: ctx => {
+              const v = ctx.parsed; const p = total > 0 ? Math.round(v / total * 100) : 0;
+              return `${ctx.label}: ${v}건 (${p}%)`;
+            }}}
+          }
+        }
+      });
+
+      // 인사이트 문장 (동적)
+      const insightEl = document.getElementById('masteryDonutInsight');
+      if (insightEl) {
+        if (onlyInsufficient) {
+          insightEl.innerHTML = `<strong>📊 인사이트</strong>아직 판정된 성취기준이 없어요. 평가부족 ${insufficient}건 — 성취기준당 3회 이상 풀면 도달 여부가 판정됩니다.`;
+        } else {
+          let extra = '';
+          if (insufficient > judged) extra = ` 평가 부족이 ${insufficient}건으로 더 풀어야 판정될 항목이 많아요.`;
+          else if (notReached > 0) extra = ` 미도달 ${notReached}건은 보충이 필요해요.`;
+          insightEl.innerHTML = `<strong>📊 인사이트</strong>성취기준 도달률 <strong>${reachRate}%</strong> (도달 ${reached} / 전체 ${total}건).${extra} <a href="/lrs/index.html" style="color:var(--primary);font-weight:600;">→ LRS 성취 도달 현황 보기</a>`;
+        }
+      }
+    }
+
+    function renderMasteryWeakBar(box, weakTop) {
+      const items = (weakTop || []).slice(0, 10);
+      // 빈상태: 약점 0개 (전부 도달/부분 또는 평가 데이터 없음)
+      if (!items.length) {
+        box.innerHTML = `<div class="mastery-empty"><span class="me-emoji">🎉</span>
+          <h4>보충이 필요한 성취기준이 없어요</h4>
+          <p>반 전체가 잘 따라오고 있어요! 더 풀면 추가 판정도 가능해요.</p></div>`;
+        return;
+      }
+      const innerHeight = Math.max(180, items.length * 38);
+      box.innerHTML = `
+        <div class="chart-container" style="height:${innerHeight}px;">
+          <canvas id="masteryWeakCanvas"></canvas>
+        </div>
+        ${_masteryLegend}
+        <div class="insight-box" id="masteryWeakInsight"></div>`;
+
+      // 막대 끝에 "도달률% · 미도달 N명" 인라인 표기 (시각스펙: 막대 옆 미도달 학생수)
+      const _weakLabelPlugin = {
+        id: 'masteryWeakLabels',
+        afterDatasetsDraw(chart) {
+          const { ctx } = chart;
+          const meta = chart.getDatasetMeta(0);
+          ctx.save();
+          ctx.font = '600 12px Pretendard, sans-serif';
+          ctx.textBaseline = 'middle';
+          meta.data.forEach((bar, i) => {
+            const w = items[i];
+            const rate = w.reachedRate == null ? '판정 전' : `${w.reachedRate}%`;
+            const txt = `${rate} · 미도달 ${w.notReached || 0}명`;
+            const tw = ctx.measureText(txt).width;
+            const chartRight = chart.chartArea.right;
+            // 막대 바깥(오른쪽)에 표기, 공간 부족 시 막대 안쪽 흰 글씨
+            if (bar.x + 8 + tw < chartRight) {
+              ctx.fillStyle = '#4b5563'; ctx.textAlign = 'left';
+              ctx.fillText(txt, bar.x + 8, bar.y);
+            } else {
+              ctx.fillStyle = '#fff'; ctx.textAlign = 'right';
+              ctx.fillText(txt, bar.x - 8, bar.y);
+            }
+          });
+          ctx.restore();
+        }
+      };
+      masteryWeakChart = new Chart(document.getElementById('masteryWeakCanvas').getContext('2d'), {
+        type: 'bar',
+        data: {
+          labels: items.map(_masteryBarLabel),
+          datasets: [{
+            label: '도달률(%)',
+            data: items.map(w => w.reachedRate == null ? 0 : w.reachedRate),
+            backgroundColor: items.map(w => _masteryRateColor(w.reachedRate)),
+            borderRadius: 6, barThickness: 22,
+          }]
+        },
+        plugins: [_weakLabelPlugin],
+        options: {
+          indexAxis: 'y', maintainAspectRatio: false, responsive: true,
+          layout: { padding: { right: 110 } },
+          plugins: {
+            legend: { display: false },
+            tooltip: { callbacks: { label: ctx => {
+              const w = items[ctx.dataIndex];
+              const rate = w.reachedRate == null ? '판정 전' : `${w.reachedRate}%`;
+              return [
+                `${w.subject || ''} ${w.code || ''}`.trim(),
+                `도달률 ${rate} · 미도달 ${w.notReached || 0}명 (평가 ${w.evaluated || 0}명)`
+              ];
+            }}}
+          },
+          scales: {
+            x: { min: 0, max: 100, ticks: { callback: v => v + '%' } },
+            y: { ticks: { font: { size: 12 }, autoSkip: false } }
+          }
+        }
+      });
+
+      // 막대 옆(라벨 형태)에 미도달 학생수를 datalabel 없이 — 툴팁/인사이트로 보강. 인사이트 문장:
+      const insightEl = document.getElementById('masteryWeakInsight');
+      if (insightEl) {
+        const worst = items[0];
+        const worstRate = worst.reachedRate == null ? '판정 전' : `${worst.reachedRate}%`;
+        insightEl.innerHTML = `<strong>📊 인사이트</strong><strong>${escHtml(String(worst.label || worst.code || '').slice(0,20))}</strong>(${worstRate})이 가장 취약해요. 미도달 ${worst.notReached || 0}명 — 보충 콘텐츠를 배정해보세요. <a href="/lrs/index.html" style="color:var(--primary);font-weight:600;">→ 보충 대상 명단 보기</a>`;
+      }
     }
 
     function renderLessonBar() {
