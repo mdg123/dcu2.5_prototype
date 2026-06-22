@@ -2480,6 +2480,59 @@ function inferNodeIdFromContent(contentId) {
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// 자기주도 문항풀이(problem_attempt) → 괄호형 성취기준코드(standard_code) 해석.
+//   결함 A fix: learning_logs.achievement_code 가 NULL 이면 rebuildAllAggregates 가
+//   WHERE achievement_code IS NOT NULL 로만 집계 → 자기주도 풀이가 mastery 히트맵에
+//   영원히 안 잡힘. 그 시점의 nodeId·contentId 로 성취기준코드를 우선순위로 해석한다.
+//
+//   우선순위 (PM 확정):
+//     1) nodeId → learning_map_nodes.achievement_code (이미 '[2수01-01]' 괄호형 저장)
+//     2) contentId → contents.achievement_code
+//     3) contentId → node_contents → learning_map_nodes.achievement_code
+//     4) 없으면 null (억지 생성 금지 — 매핑 없는 node 는 NULL 이 정상)
+//   괄호형 standard_code(string) 또는 null 반환. 어떤 경우에도 throw 가 전파되지 않게 graceful.
+// ─────────────────────────────────────────────────────────────────────────────
+function resolveAchievementForAttempt(nodeId, contentId) {
+  // 1) node → achievement_code
+  if (nodeId) {
+    try {
+      const r = db.prepare(
+        'SELECT achievement_code FROM learning_map_nodes WHERE node_id = ?'
+      ).get(nodeId);
+      if (r && r.achievement_code && String(r.achievement_code).trim() !== '') {
+        return String(r.achievement_code).trim();
+      }
+    } catch (_) { /* graceful */ }
+  }
+  if (contentId) {
+    // 2) content → achievement_code
+    try {
+      const r = db.prepare(
+        'SELECT achievement_code FROM contents WHERE id = ?'
+      ).get(contentId);
+      if (r && r.achievement_code && String(r.achievement_code).trim() !== '') {
+        return String(r.achievement_code).trim();
+      }
+    } catch (_) { /* graceful */ }
+    // 3) content → node_contents → node → achievement_code
+    try {
+      const r = db.prepare(`
+        SELECT lmn.achievement_code
+        FROM node_contents nc
+        JOIN learning_map_nodes lmn ON nc.node_id = lmn.node_id
+        WHERE nc.content_id = ? AND lmn.achievement_code IS NOT NULL AND lmn.achievement_code <> ''
+        LIMIT 1
+      `).get(contentId);
+      if (r && r.achievement_code && String(r.achievement_code).trim() !== '') {
+        return String(r.achievement_code).trim();
+      }
+    } catch (_) { /* graceful */ }
+  }
+  // 4) 매핑 없음 — NULL 유지(억지 생성 금지)
+  return null;
+}
+
 function getLearningDashboard(userId) {
   // KPI 단원(level=2) 단위 통일 — 옵션 C / 임계 100%
   //   - totalNodes      : 단원(level=2) 총수
@@ -3466,10 +3519,21 @@ function recordProblemAttempt(userId, contentId, { isCorrect, selectedAnswer, us
 
   // 로깅 & 포인트 (정답 시 소량)
   try {
+    // 결함 A fix: 성취기준코드/교과코드 주입 — 미주입 시 mastery 히트맵에 자기주도 풀이가 누락된다.
+    const achievementCode = resolveAchievementForAttempt(nodeId, contentId);
+    let subjectCode = null;
+    if (achievementCode) {
+      try {
+        const ctx = require('./lrs-mastery').resolveCode(achievementCode);
+        subjectCode = ctx && ctx.subject_code ? ctx.subject_code : null;
+      } catch (_) { /* graceful */ }
+    }
     logLearningActivity({
       userId, activityType: 'problem_attempt', targetType: 'content',
       targetId: contentId, verb: isCorrect ? 'passed' : 'attempted', sourceService: 'self-learn',
-      resultSuccess: isCorrect ? 1 : 0
+      resultSuccess: isCorrect ? 1 : 0,
+      achievementCode: achievementCode || null,
+      subjectCode: subjectCode || null
     });
     if (isCorrect) awardPoints(userId, { source: 'problem_attempt', sourceId: contentId, points: 2, description: '문제 정답' });
   } catch (e) {}
@@ -7269,6 +7333,8 @@ module.exports = {
   addProblemSetItem, removeProblemSetItem, startProblemSet, submitProblemSet,
   // P0 추가
   recordProblemAttempt, recordVideoProgress,
+  // 결함 A: 자기주도 풀이 성취기준코드 해석 헬퍼 (테스트/재사용)
+  resolveAchievementForAttempt,
   getLearningList, addLearningList, removeLearningList,
   getLastActivity, reportContent,
   // 정답 판정 헬퍼 (테스트/외부 사용)

@@ -36,12 +36,15 @@ const LOG_STUDENT_FIELDS = new Set([
   'metadata','activity_id'
 ]);
 
+// REWORK-2: 학부모 리포트 점수 마스킹 라벨도 STATUS_KO 어휘로 통일(도달/부분도달/미도달).
+//   기존 상/중/하 어휘는 다른 경로(도달/부분도달)와 같은 level 필드에서 이원화되어
+//   API 계약 일관성을 깼다. 단일 분류기와 동일 임계(80/50)·동일 어휘로 산출한다.
+//   (점수 원값은 비노출 — 비율→레이블만 반환. 데이터 없으면 null.)
 function maskDigestScore(val) {
   if (val == null) return null;
   const ratio = (typeof val === 'number' && val > 1) ? val / 100 : val;
-  if (ratio >= 0.80) return '상';
-  if (ratio >= 0.50) return '중';
-  if (ratio >= 0) return '하';
+  if (ratio >= 0.80) return '도달';
+  if (ratio >= 0.50) return '부분도달';
   return '미도달';
 }
 
@@ -957,24 +960,26 @@ router.get('/achievement-progress', requireAuth, (req, res) => {
       let where = 'WHERE ll.class_id = ? AND ll.achievement_code IS NOT NULL';
       const params = [classId];
       if (subjectCode) { where += ' AND ll.subject_code = ?'; params.push(subjectCode); }
-      standards = db.prepare(`
+      // REWORK-2: classId 경로도 단일 분류기/어휘로 통일.
+      //   기존 SQL CASE 가 상/중/하(레거시 어휘)를 산출해 userId 경로(STATUS_KO: 도달/부분도달)
+      //   와 같은 level 필드가 호출 파라미터에 따라 다른 어휘를 내보내던 계약 불일치를 해소한다.
+      //   → 집계만 SQL 로 뽑고, success/attempt 우선 reachRate→classifyStatus→STATUS_KO 를 JS 에서 부여.
+      const rawRows = db.prepare(`
         SELECT ll.achievement_code as code, ll.subject_code,
           COUNT(*) as attempts,
           SUM(CASE WHEN ll.result_success = 1 THEN 1 ELSE 0 END) as success,
           AVG(ll.result_score) as avg_score,
-          CASE
-            WHEN COUNT(*) < 3 THEN '평가부족'
-            WHEN AVG(ll.result_score) IS NULL THEN '평가부족'
-            WHEN AVG(CASE WHEN ll.result_score > 1 THEN ll.result_score/100.0 ELSE ll.result_score END) >= 0.80 THEN '상'
-            WHEN AVG(CASE WHEN ll.result_score > 1 THEN ll.result_score/100.0 ELSE ll.result_score END) >= 0.50 THEN '중'
-            ELSE '하'
-          END as level,
           MAX(ll.created_at) as lastAt
         FROM learning_logs ll
         ${where}
         GROUP BY ll.achievement_code
         ORDER BY attempts DESC
       `).all(...params);
+      standards = rawRows.map(r => {
+        const rate = mastery.reachRate(r.success, r.attempts, r.avg_score);
+        const status = mastery.classifyStatus(r.attempts, rate);
+        return { ...r, level: mastery.STATUS_KO[status] };  // STATUS_KO 어휘로 통일
+      });
     } else {
       // 기본: 요청 사용자 본인
       standards = db.prepare(`
@@ -986,13 +991,22 @@ router.get('/achievement-progress', requireAuth, (req, res) => {
       `).all(req.user.id);
     }
 
-    // P0-6: 평가부족(insufficient) 분리. last_level 한글(상/중/하/미도달/평가부족) 집계.
-    const summary = { total: standards.length, 상: 0, 중: 0, 하: 0, 미도달: 0, 평가부족: 0 };
-    standards.forEach(s => { if (summary[s.level] !== undefined) summary[s.level]++; });
-    // level 키 래핑 (notYet=미도달, insufficient=평가부족 신설)
+    // P0-6 / REWORK-2: 평가부족(insufficient) 분리 + 단일 어휘 통일.
+    //   결함 B·REWORK-1·REWORK-2 fix 이후 userId·classId·rebuild 모든 경로의 level 은
+    //   단일 분류기 STATUS_KO 값(도달/부분도달/미도달/평가부족)으로 일원화된다.
+    //   레거시 상/중/하 키는 아직 재집계되지 않은 raw last_level 방어용 별칭으로만 남긴다.
+    const summary = { total: standards.length, high: 0, mid: 0, low: 0, notYet: 0, insufficient: 0 };
+    const LEVEL_BUCKET = {
+      '도달': 'high', '상': 'high',
+      '부분도달': 'mid', '중': 'mid',
+      '미도달': 'notYet', '하': 'low',
+      '평가부족': 'insufficient'
+    };
+    standards.forEach(s => { const b = LEVEL_BUCKET[s.level]; if (b) summary[b]++; });
+    // level 키 래핑 (notYet=미도달, insufficient=평가부족)
     const distribution = {
-      high: summary['상'], mid: summary['중'], low: summary['하'],
-      notYet: summary['미도달'], insufficient: summary['평가부족'], total: summary.total
+      high: summary.high, mid: summary.mid, low: summary.low,
+      notYet: summary.notYet, insufficient: summary.insufficient, total: summary.total
     };
 
     res.json({ success: true, standards, distribution });
@@ -1282,7 +1296,7 @@ router.get('/warnings/:classId', requireAuth, (req, res) => {
       FROM lrs_achievement_stats las
       JOIN users u ON u.id = las.user_id
       WHERE las.user_id IN (SELECT cm.user_id FROM class_members cm JOIN users u2 ON u2.id = cm.user_id WHERE cm.class_id = ? AND u2.role = 'student')
-        AND (las.last_level = '하' OR las.last_level = '미도달')
+        AND (las.last_level IN ('하', '미도달') OR las.level = 'not_reached')
       ORDER BY las.user_id, COALESCE(las.avg_score, 0) ASC
     `).all(classId);
     const weakMap = new Map();

@@ -116,8 +116,8 @@ function getStmts() {
         updated_at = CURRENT_TIMESTAMP
     `),
     upsertAchievement: db.prepare(`
-      INSERT INTO lrs_achievement_stats (user_id, achievement_code, subject_code, attempt_count, success_count, avg_score, last_level, last_attempt_at)
-      VALUES (?, ?, ?, 1, ?, ?, ?, CURRENT_TIMESTAMP)
+      INSERT INTO lrs_achievement_stats (user_id, achievement_code, subject_code, attempt_count, success_count, avg_score, level, last_level, last_attempt_at)
+      VALUES (?, ?, ?, 1, ?, ?, ?, ?, CURRENT_TIMESTAMP)
       ON CONFLICT(user_id, achievement_code)
       DO UPDATE SET
         attempt_count = attempt_count + 1,
@@ -125,6 +125,7 @@ function getStmts() {
         avg_score = CASE WHEN excluded.avg_score IS NOT NULL
           THEN (COALESCE(avg_score,0) * attempt_count + excluded.avg_score) / (attempt_count + 1)
           ELSE avg_score END,
+        level = excluded.level,
         last_level = excluded.last_level,
         last_attempt_at = CURRENT_TIMESTAMP,
         updated_at = CURRENT_TIMESTAMP
@@ -351,22 +352,36 @@ function logLearningActivity({
 
       // 신규: lrs_achievement_stats
       if (achievementCode) {
-        // 현재 누적을 조회해서 last_level 재계산
+        // ── REWORK-1: realtime upsert 도 mastery 의 "단일 분류기"로 통일 ──
+        //   레거시 computeAchievementLevel(avg 기반 상/중/하, att<3→'미도달') 폐기.
+        //   rebuild 경로(db/lrs-aggregate.js 7-classify)와 동일하게
+        //   success/attempt 우선(없으면 avg 폴백)으로 reachRate→classifyStatus 산출,
+        //   영문 level(reached/partial/not_reached/insufficient)과
+        //   한글 last_level(STATUS_KO: 도달/부분도달/미도달/평가부족)을 함께 기록한다.
+        //   → realtime 과 rebuild 가 동일 결과(플리커 0). att<3 정답은 '평가부족'(insufficient)
+        //     로 분류되어 /warnings 의 '하'/'미도달' 결손 매칭에서 제외(오탐 해소).
+        const { classifyStatus, reachRate, STATUS_KO } = require('./lrs-mastery');
+        // 현재 누적(success/attempt/avg)을 조회해 "이번 1건 반영 후" 누적값으로 재계산.
+        //   (upsert 의 증분 로직과 동일한 결과: attempt+1, success+이번성공, avg 증분평균)
         const cur = db.prepare(
-          'SELECT attempt_count, avg_score FROM lrs_achievement_stats WHERE user_id = ? AND achievement_code = ?'
+          'SELECT attempt_count, success_count, avg_score FROM lrs_achievement_stats WHERE user_id = ? AND achievement_code = ?'
         ).get(userId, achievementCode);
-        let newAttempts = (cur?.attempt_count || 0) + 1;
+        const thisSuccess = resultSuccess ? 1 : 0;
+        const newAttempts = (cur?.attempt_count || 0) + 1;
+        const newSuccess = (cur?.success_count || 0) + thisSuccess;
         let newAvg;
         if (resultScore != null) {
           newAvg = cur ? ((cur.avg_score || 0) * (cur.attempt_count || 0) + resultScore) / newAttempts : resultScore;
         } else {
           newAvg = cur?.avg_score ?? null;
         }
-        // 신규 시그니처: (score, maxScore). newAvg가 null이면 미도달, 값 > 1이면 0-100 스케일로 간주.
-        const level = (newAttempts < 3) ? '미도달' : computeAchievementLevel(newAvg, 100);
+        // success/attempt 우선 정답률 → 단일 분류기. (avg 기반 상/중/하 폐기)
+        const rate = reachRate(newSuccess, newAttempts, newAvg);
+        const status = classifyStatus(newAttempts, rate);   // 영문 status (level)
+        const lastLevelKo = STATUS_KO[status];              // 한글 (last_level)
         stmts.upsertAchievement.run(
           userId, achievementCode, subjectCode,
-          resultSuccess ? 1 : 0, resultScore, level
+          thisSuccess, resultScore, status, lastLevelKo
         );
       }
 

@@ -94,16 +94,13 @@ function rebuildAllAggregates() {
       GROUP BY COALESCE(source_service, 'unknown'), verb
     `);
 
-    // 7. lrs_achievement_stats 재집계 (D1: 0-1/0-100 스케일 혼재 방어)
-    //    result_score > 1 이면 0-100 스케일로 보고 maxScore=100 기준 비율로 환산.
-    //    P0-6 / C-2 임계 (평가부족 분리):
-    //      attempts < 3              → 평가부족(insufficient)   ← "안 해본 것"≠"못한 것"
-    //      rate >= 80% & att >= 3    → 도달(상/reached)
-    //      rate >= 50% & att >= 3    → 부분도달(중/partial)
-    //      rate <  50% & att >= 3    → 미도달(하/not_reached)
-    //    last_level: 레거시 한글(상/중/하/평가부족), level: 영문 4상태.
+    // 7. lrs_achievement_stats 재집계 — 집계 컬럼만 INSERT.
+    //    level/last_level 은 아래 7-classify 에서 mastery API 와 동일한 단일 분류기로 채운다.
+    //    (결함 B fix: 과거에는 avg_score 기반 CASE SQL 로 산출 → avg_score IS NULL 인데
+    //     attempt 多·success 0 인 행이 'insufficient/평가부족' 으로 박혀 mastery API 의
+    //     success/attempt 기반 'not_reached/미도달' 과 어긋남(2020행 불일치). 분류기 통일로 정합.)
     db.exec(`
-      INSERT INTO lrs_achievement_stats (user_id, achievement_code, subject_code, attempt_count, success_count, avg_score, last_level, level, last_attempt_at, updated_at)
+      INSERT INTO lrs_achievement_stats (user_id, achievement_code, subject_code, attempt_count, success_count, avg_score, last_attempt_at, updated_at)
       SELECT
         user_id,
         achievement_code,
@@ -111,26 +108,28 @@ function rebuildAllAggregates() {
         COUNT(*) as attempt_count,
         SUM(CASE WHEN result_success = 1 THEN 1 ELSE 0 END) as success_count,
         AVG(result_score) as avg_score,
-        CASE
-          WHEN COUNT(*) < 3 THEN '평가부족'
-          WHEN AVG(result_score) IS NULL THEN '평가부족'
-          WHEN AVG(CASE WHEN result_score > 1 THEN result_score/100.0 ELSE result_score END) >= 0.80 THEN '상'
-          WHEN AVG(CASE WHEN result_score > 1 THEN result_score/100.0 ELSE result_score END) >= 0.50 THEN '중'
-          ELSE '하'
-        END as last_level,
-        CASE
-          WHEN COUNT(*) < 3 THEN 'insufficient'
-          WHEN AVG(result_score) IS NULL THEN 'insufficient'
-          WHEN AVG(CASE WHEN result_score > 1 THEN result_score/100.0 ELSE result_score END) >= 0.80 THEN 'reached'
-          WHEN AVG(CASE WHEN result_score > 1 THEN result_score/100.0 ELSE result_score END) >= 0.50 THEN 'partial'
-          ELSE 'not_reached'
-        END as level,
         MAX(created_at) as last_attempt_at,
         CURRENT_TIMESTAMP as updated_at
       FROM learning_logs
       WHERE achievement_code IS NOT NULL
       GROUP BY user_id, achievement_code
     `);
+
+    // 7-classify: level/last_level 을 mastery API 와 동일한 단일 분류기(DRY)로 채운다.
+    //   reachRate(success/attempt 우선, 없으면 avg_score 폴백) → classifyStatus → level(영문),
+    //   STATUS_KO[level] → last_level(한글: 도달/부분도달/미도달/평가부족).
+    {
+      const { classifyStatus, reachRate, STATUS_KO } = require('./lrs-mastery');
+      // 주의: lrs_achievement_stats 는 id INTEGER PRIMARY KEY → 'rowid' 별칭이 SELECT 시
+      //   'id' 로 반환된다(rowid 키는 안 옴). 반드시 실 PK 컬럼 id 를 키로 UPDATE 한다.
+      const allStats = db.prepare('SELECT id, attempt_count, success_count, avg_score FROM lrs_achievement_stats').all();
+      const updLevel = db.prepare('UPDATE lrs_achievement_stats SET level = ?, last_level = ? WHERE id = ?');
+      for (const s of allStats) {
+        const rate = reachRate(s.success_count, s.attempt_count, s.avg_score);
+        const status = classifyStatus(s.attempt_count, rate);
+        updLevel.run(status, STATUS_KO[status], s.id);
+      }
+    }
 
     // 7b. std_id 충진 — achievement_code → std_id resolver (P0-1).
     //     매 쿼리 join 대신 사전 충진(성능). 매핑 없으면 NULL 유지(무손상).
