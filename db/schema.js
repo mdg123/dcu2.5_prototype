@@ -2979,6 +2979,18 @@ function initSchema() {
   } catch (e) {
     console.error('[DB] 포트폴리오 학교급 메타 백필 실패:', e.message);
   }
+
+  // 백필: 콘텐츠/평가/과제 achievement_code 매핑 커버리지 보강 (멱등·부팅 자동)
+  //   단원/차시(node_contents→learning_map_nodes)에는 성취기준이 매핑돼 있는데
+  //   contents.achievement_code 컬럼에 전파되지 않아(3,690건) content_view 로깅이
+  //   성취 히트맵에 반영 안 되던 갭을 닫는다. 매핑 없는 콘텐츠는 NULL 유지(억지 생성 금지).
+  //   재실행 안전: 채울 행이 없으면 거의 무비용. 운영(GCP) 재시작 시 자동 적용 + 신규 콘텐츠도
+  //   다음 부팅에 보강(영구 방어선). 상세 규칙: db/achievement-backfill.js
+  try {
+    require('./achievement-backfill').runAchievementBackfill(db);
+  } catch (e) {
+    console.error('[DB] 성취코드 커버리지 백필 실패:', e.message);
+  }
 }
 
 function seedDummyData(db) {

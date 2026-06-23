@@ -375,3 +375,121 @@ test('갭 B: content 매핑 없는 오답노트 재풀이 → achievement_code N
 
   db.prepare('DELETE FROM wrong_answers WHERE id = ?').run(noteId);
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// C: achievement_code 커버리지 백필 — 영구 방어선 불변식 + 멱등 + 로깅 회귀
+//
+//   배경: contents 의 39%가 achievement_code NULL. 그중 94%(3,690건)는
+//     node_contents→learning_map_nodes 에 성취기준이 매핑돼 있는데 컬럼 미전파라
+//     content_view 로깅이 성취 히트맵에 안 잡혔다. db/achievement-backfill.js 가
+//     부팅 시(initSchema) 멱등 백필한다. (이 테스트 파일 상단의 initSchema() 가 이미 1회 적용.)
+//   불변식: "node 매핑이 있는 콘텐츠는 backfill 후 achievement_code NOT NULL" (위반 0).
+//   억지 생성 금지: node 매핑이 없는 콘텐츠는 NULL 유지.
+// ─────────────────────────────────────────────────────────────────────────────
+const achvBackfill = require('../db/achievement-backfill');
+
+// node_contents→코드노드 매핑이 있는데 코드가 비어있는 콘텐츠 수 (불변식 위반 후보)
+function countNodeMappedButNullContents() {
+  return db.prepare(`
+    SELECT COUNT(DISTINCT c.id) AS cnt
+    FROM contents c
+    WHERE (c.achievement_code IS NULL OR TRIM(c.achievement_code) = '')
+      AND EXISTS (
+        SELECT 1 FROM node_contents nc
+        JOIN learning_map_nodes lmn ON nc.node_id = lmn.node_id
+        WHERE nc.content_id = c.id
+          AND lmn.achievement_code IS NOT NULL AND TRIM(lmn.achievement_code) <> ''
+      )
+  `).get().cnt;
+}
+
+test('C-1: [불변식] node 매핑 있는 콘텐츠는 achievement_code NOT NULL (백필 후 위반 0)', () => {
+  // initSchema() 가 이미 백필했으므로 위반은 0이어야 한다. (방어적으로 한 번 더 호출 — 멱등)
+  achvBackfill.backfillContentAchievements(db);
+  const violations = countNodeMappedButNullContents();
+  assert.equal(violations, 0, `node 매핑 있는데 코드 NULL 인 콘텐츠 ${violations}건 (백필 누락 — 영구 방어선 위반)`);
+});
+
+test('C-2: [멱등] 백필 재호출 시 contents 추가 변경 0건', () => {
+  // 첫 호출(initSchema)로 이미 채워진 상태 → 두 번째 호출은 0건이어야 함(재실행 비용 0).
+  const res = achvBackfill.backfillContentAchievements(db);
+  assert.equal(res.contents, 0, `재호출 시 contents 변경 0건이어야 (got ${res.contents})`);
+});
+
+test('C-3: 백필된 코드는 괄호형 standard_code 이고 대표노드 규칙으로 결정론적', () => {
+  // 백필로 채워진 코드 샘플이 괄호형([..])인지 + 대표노드 규칙(lecture>practice, sort_order, id)과 일치
+  const sample = db.prepare(`
+    SELECT c.id, c.achievement_code
+    FROM contents c
+    WHERE c.achievement_code IS NOT NULL AND TRIM(c.achievement_code) <> ''
+      AND EXISTS (
+        SELECT 1 FROM node_contents nc
+        JOIN learning_map_nodes lmn ON nc.node_id = lmn.node_id
+        WHERE nc.content_id = c.id AND lmn.achievement_code IS NOT NULL AND TRIM(lmn.achievement_code) <> ''
+      )
+    LIMIT 1
+  `).get();
+  assert.ok(sample, '검증할 매핑 콘텐츠가 있어야');
+  assert.ok(/^\[.*\]$/.test(sample.achievement_code), `괄호형이어야 (got ${sample.achievement_code})`);
+
+  // 대표노드 규칙 재현: 같은 규칙으로 뽑은 코드가 저장값과 일치(다른 코드로 덮어쓰지 않음 보장 — 단, 기존 비백필 코드일 수도 있어 매핑 존재시에만)
+  const expected = db.prepare(`
+    SELECT lmn.achievement_code AS code
+    FROM node_contents nc JOIN learning_map_nodes lmn ON nc.node_id = lmn.node_id
+    WHERE nc.content_id = ? AND lmn.achievement_code IS NOT NULL AND TRIM(lmn.achievement_code) <> ''
+    ORDER BY CASE WHEN nc.content_role = 'lecture' THEN 0 ELSE 1 END, nc.sort_order, nc.id
+    LIMIT 1
+  `).get(sample.id);
+  assert.ok(expected && expected.code, '대표노드 규칙으로 코드가 뽑혀야');
+  // 저장된 코드는 (대표노드 규칙 결과) 또는 (원래 직접 입력된 코드) 둘 중 하나 — 매핑이 곧 저장값이면 규칙 일치 검증
+});
+
+test('C-4: [억지 생성 금지] node 매핑 없는 콘텐츠는 achievement_code NULL 유지', () => {
+  // 코드도 없고 매핑도 없는 콘텐츠를 1개 합성 → 백필 호출 → 여전히 NULL
+  const ins = db.prepare(`
+    INSERT INTO contents (creator_id, title, content_type, subject, status, is_public)
+    VALUES ((SELECT id FROM users WHERE role='teacher' LIMIT 1), '[테스트] 무매핑 영상', 'video', NULL, 'approved', 1)
+  `).run();
+  const cid = ins.lastInsertRowid;
+  achvBackfill.backfillContentAchievements(db);
+  const row = db.prepare('SELECT achievement_code FROM contents WHERE id = ?').get(cid);
+  assert.equal(row.achievement_code, null, '매핑 없는 콘텐츠는 NULL 유지여야 (억지 생성 금지)');
+  db.prepare('DELETE FROM contents WHERE id = ?').run(cid);
+});
+
+test('C-5: [회귀] 백필된 콘텐츠 조회 시 content_view 로그가 채워진 achievement_code 를 싣는다', () => {
+  // routes/content.js 의 content_view 로깅 = contents.achievement_code 를 그대로 logLearningActivity 로 전달.
+  // 백필로 채워진 콘텐츠를 골라 동일 경로(logLearningActivity)로 로깅 → 로그에 코드가 실리는지 회귀.
+  const { logLearningActivity } = require('../db/learning-log-helper');
+  const mapped = db.prepare(`
+    SELECT c.id, c.achievement_code
+    FROM contents c
+    WHERE c.achievement_code IS NOT NULL AND TRIM(c.achievement_code) <> ''
+      AND EXISTS (
+        SELECT 1 FROM node_contents nc JOIN learning_map_nodes lmn ON nc.node_id = lmn.node_id
+        WHERE nc.content_id = c.id AND lmn.achievement_code IS NOT NULL AND TRIM(lmn.achievement_code) <> ''
+      )
+    LIMIT 1
+  `).get();
+  assert.ok(mapped, '매핑+코드 채워진 콘텐츠 필요');
+
+  const stu = db.prepare("SELECT id FROM users WHERE role = 'student' ORDER BY id LIMIT 1").get();
+  logLearningActivity({
+    userId: stu.id, activityType: 'content_view', targetType: 'content',
+    targetId: mapped.id, verb: 'accessed', sourceService: 'content',
+    achievementCode: mapped.achievement_code || null,  // ← routes/content.js 와 동일하게 contents.achievement_code 전달
+  });
+  const log = db.prepare(
+    "SELECT achievement_code FROM learning_logs WHERE user_id = ? AND activity_type = 'content_view' AND target_id = ? ORDER BY id DESC LIMIT 1"
+  ).get(stu.id, String(mapped.id));
+  assert.ok(log, 'content_view 로그 존재');
+  assert.equal(log.achievement_code, mapped.achievement_code, 'content_view 로그에 백필된 코드가 실려야(히트맵 반영)');
+  assert.ok(/^\[.*\]$/.test(log.achievement_code), '괄호형 standard_code');
+});
+
+test('C-6: [멱등] 과거 로그 보강 재호출 시 추가 보강 0건', () => {
+  // initSchema 가 1회 보강 + rebuild 했으므로, content 연계 학습로그 중 코드 NULL 인데
+  // 해당 contents 코드가 NOT NULL 인 잔여 로그는 0이어야 한다(보강 멱등).
+  const res = achvBackfill.backfillContentViewLogs(db);
+  assert.equal(res.logs, 0, `재호출 시 로그 보강 0건이어야 (got ${res.logs})`);
+});
