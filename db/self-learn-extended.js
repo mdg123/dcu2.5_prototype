@@ -260,10 +260,26 @@ function completeDailyItem(itemId, userId, { score, timeSpent, answers, correctC
     }
   }
 
+  // 성취 히트맵 반영(갭 A fix): 오늘의 학습 완료에도 성취기준코드/교과코드 주입.
+  //   item 은 콘텐츠/노드에 연결됨 → resolveAchievementForAttempt(node_id, content_id) 로 해석.
+  //   매핑 없으면 null 유지(억지 생성 금지). 단일 분류기는 logLearningActivity 내부가 처리.
+  let dailyAchievementCode = null, dailySubjectCode = null;
+  try {
+    dailyAchievementCode = resolveAchievementForAttempt(item.node_id || null, item.content_id || null);
+    if (dailyAchievementCode) {
+      try {
+        const ctx = require('./lrs-mastery').resolveCode(dailyAchievementCode);
+        dailySubjectCode = ctx && ctx.subject_code ? ctx.subject_code : null;
+      } catch (_) { /* graceful */ }
+    }
+  } catch (_) { /* graceful — 해석 실패는 완료 흐름에 영향 없음 */ }
+
   logLearningActivity({
     userId, activityType: 'daily_complete', targetType: 'daily_learning',
     targetId: itemId, verb: 'completed', sourceService: 'self-learn',
-    resultScore: safeScore ? safeScore / 100 : null
+    resultScore: safeScore ? safeScore / 100 : null,
+    achievementCode: dailyAchievementCode || null,
+    subjectCode: dailySubjectCode || null
   });
 
   const pts = parseInt(getSetting('daily_learning_complete_point') || '10');
@@ -3248,10 +3264,28 @@ function retryWrongNote(id, userId, { answer, answerIndex } = {}) {
     `).run(userId, 0, isCorrect ? 1 : 0, answer != null ? String(answer) : null);
   } catch (e) { /* 집계 기록 실패는 재풀이 흐름에 영향 주지 않음 */ }
 
+  // 성취 히트맵 반영(갭 B fix): 오답노트 재풀이는 원문항의 성취기준에 매핑돼야 함.
+  //   wrong_answers 행에는 node_id 컬럼이 없고 content_id 만 보존됨(자기주도 오답 수집 시 저장).
+  //   → resolveAchievementForAttempt(null, note.content_id) 로 원문항 기준 해석.
+  //   매핑(content_id) 없으면 null 유지(억지 생성 금지). 단일 분류기는 logLearningActivity 내부가 처리.
+  let retryAchievementCode = null, retrySubjectCode = null;
+  try {
+    const retryContentId = (note.content_id != null && note.content_id !== 0) ? note.content_id : null;
+    retryAchievementCode = resolveAchievementForAttempt(null, retryContentId);
+    if (retryAchievementCode) {
+      try {
+        const ctx = require('./lrs-mastery').resolveCode(retryAchievementCode);
+        retrySubjectCode = ctx && ctx.subject_code ? ctx.subject_code : null;
+      } catch (_) { /* graceful */ }
+    }
+  } catch (_) { /* graceful — 해석 실패는 재풀이 흐름에 영향 없음 */ }
+
   logLearningActivity({
     userId, activityType: 'wrong_note_retry', targetType: 'wrong_answer',
     targetId: id, verb: 'attempted', sourceService: 'self-learn',
-    resultSuccess: isCorrect ? 1 : 0
+    resultSuccess: isCorrect ? 1 : 0,
+    achievementCode: retryAchievementCode || null,
+    subjectCode: retrySubjectCode || null
   });
 
   // 채점 후이므로 정답·해설 공개 허용

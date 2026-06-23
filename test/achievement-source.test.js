@@ -208,3 +208,170 @@ test('B-2: avg_score NULL & attempt>=3 & success 0 → 저장 level=not_reached(
   // 정리
   db.prepare('DELETE FROM lrs_achievement_stats WHERE user_id = ? AND achievement_code = ?').run(synthUser, synthCode);
 });
+
+// ──────────────────────────────────────────────────────────────────────────
+// 추가 결함 (히트맵 반영 갭 2건) — 오늘의 학습 완료 / 오답노트 재풀이
+//   배경: logLearningActivity 는 호출부가 명시한 achievement_code 만 기록한다.
+//     · daily_complete (completeDailyItem)  : 코드 미주입 → 실측 0/19 → 히트맵 누락
+//     · wrong_note_retry (retryWrongNote)   : 코드 미주입 → 원문항 성취기준 누락
+//   fix: 두 곳 모두 resolveAchievementForAttempt(...) 로 해석해 주입.
+//        daily 는 item.node_id/content_id, retry 는 note.content_id 경유.
+//        매핑 없으면 null 유지(억지 생성 금지). 단일 분류기로 자동 집계.
+// ──────────────────────────────────────────────────────────────────────────
+
+// 코드 해석 가능한 content 1개 (content.achievement_code 또는 node_contents→node 경유)
+function pickMappedContent() {
+  const direct = db.prepare(
+    "SELECT id, achievement_code FROM contents WHERE achievement_code IS NOT NULL AND achievement_code <> '' LIMIT 1"
+  ).get();
+  if (direct) return { id: direct.id, code: String(direct.achievement_code).trim() };
+  const viaNc = db.prepare(`
+    SELECT nc.content_id AS id, lmn.achievement_code AS code
+    FROM node_contents nc JOIN learning_map_nodes lmn ON nc.node_id = lmn.node_id
+    WHERE lmn.achievement_code IS NOT NULL AND lmn.achievement_code <> '' LIMIT 1
+  `).get();
+  return viaNc ? { id: viaNc.id, code: String(viaNc.code).trim() } : null;
+}
+
+// ── 갭 A-1: 매핑된 daily item 완료 → learning_logs.achievement_code NOT NULL(원문항 기준) ──
+test('갭 A: 매핑된 오늘의 학습 item 완료 → daily_complete 로그에 achievement_code 주입', () => {
+  const c = pickMappedContent();
+  assert.ok(c, '코드 해석 가능한 content 가 있어야 테스트 가능');
+  const expected = selfLearn.resolveAchievementForAttempt(null, c.id);
+  assert.ok(expected, 'resolveAchievementForAttempt 로 해석되는 content 여야');
+
+  const stu = db.prepare("SELECT id FROM users WHERE role = 'student' ORDER BY id LIMIT 1").get();
+  const userId = stu.id;
+  const teacher = db.prepare("SELECT id FROM users WHERE role = 'teacher' ORDER BY id LIMIT 1").get() || stu;
+
+  // 격리 픽스처: 세트 + (코드 content 연결) item + pending progress 행 시드
+  const setInfo = db.prepare(`
+    INSERT INTO daily_learning_sets (class_id, teacher_id, title, is_active, target_date)
+    VALUES (NULL, ?, '[테스트] 갭A 세트', 1, DATE('now'))
+  `).run(teacher.id);
+  const setId = setInfo.lastInsertRowid;
+  const itemInfo = db.prepare(`
+    INSERT INTO daily_learning_items (set_id, source_type, content_id, node_id, item_title, sort_order)
+    VALUES (?, 'content', ?, NULL, '[테스트] 갭A 문항', 1)
+  `).run(setId, c.id);
+  const itemId = itemInfo.lastInsertRowid;
+  db.prepare(`
+    INSERT INTO daily_learning_progress (user_id, item_id, set_id, status, started_at)
+    VALUES (?, ?, ?, 'in_progress', CURRENT_TIMESTAMP)
+  `).run(userId, itemId, setId);
+
+  const res = selfLearn.completeDailyItem(itemId, userId, { score: 100, timeSpent: 30 });
+  assert.ok(res && res.success && !res.alreadyCompleted, '최초 완료 처리 성공');
+
+  const log = db.prepare(
+    "SELECT achievement_code, subject_code FROM learning_logs WHERE user_id = ? AND activity_type = 'daily_complete' AND target_id = ? ORDER BY id DESC LIMIT 1"
+  ).get(userId, String(itemId));
+  assert.ok(log, 'daily_complete 로그 존재');
+  assert.ok(log.achievement_code, 'achievement_code 가 NULL 이 아니어야 (갭 A)');
+  assert.equal(log.achievement_code, expected, 'item content 기준 코드와 동일해야');
+  assert.ok(/^\[.*\]$/.test(log.achievement_code), `괄호형이어야 (got ${log.achievement_code})`);
+  assert.ok(log.subject_code, 'subject_code 도 해석돼 채워져야');
+
+  // realtime 으로 lrs_achievement_stats 에 해당 기준 행/attempt 반영
+  const stat = db.prepare(
+    'SELECT attempt_count FROM lrs_achievement_stats WHERE user_id = ? AND achievement_code = ?'
+  ).get(userId, expected);
+  assert.ok(stat && stat.attempt_count >= 1, '오늘의 학습 완료가 히트맵 집계에 실시간 반영돼야');
+
+  // 정리
+  db.prepare('DELETE FROM daily_learning_progress WHERE item_id = ?').run(itemId);
+  db.prepare('DELETE FROM daily_learning_items WHERE id = ?').run(itemId);
+  db.prepare('DELETE FROM daily_learning_sets WHERE id = ?').run(setId);
+});
+
+// ── 갭 A-2: 매핑 없는 daily item 완료 → achievement_code NULL 유지 (억지 생성 금지) ──
+test('갭 A: 매핑 없는 오늘의 학습 item 완료 → achievement_code NULL 유지', () => {
+  const noMap = pickNoMapContent();
+  assert.ok(noMap, '코드·매핑 없는 content 필요');
+  const stu = db.prepare("SELECT id FROM users WHERE role = 'student' ORDER BY id LIMIT 1").get();
+  const userId = stu.id;
+  const teacher = db.prepare("SELECT id FROM users WHERE role = 'teacher' ORDER BY id LIMIT 1").get() || stu;
+
+  const setInfo = db.prepare(`
+    INSERT INTO daily_learning_sets (class_id, teacher_id, title, is_active, target_date)
+    VALUES (NULL, ?, '[테스트] 갭A nomap 세트', 1, DATE('now'))
+  `).run(teacher.id);
+  const setId = setInfo.lastInsertRowid;
+  const itemInfo = db.prepare(`
+    INSERT INTO daily_learning_items (set_id, source_type, content_id, node_id, item_title, sort_order)
+    VALUES (?, 'content', ?, NULL, '[테스트] 갭A nomap 문항', 1)
+  `).run(setId, noMap.id);
+  const itemId = itemInfo.lastInsertRowid;
+  db.prepare(`
+    INSERT INTO daily_learning_progress (user_id, item_id, set_id, status, started_at)
+    VALUES (?, ?, ?, 'in_progress', CURRENT_TIMESTAMP)
+  `).run(userId, itemId, setId);
+
+  const res = selfLearn.completeDailyItem(itemId, userId, { score: 80, timeSpent: 20 });
+  assert.ok(res && res.success, '완료 처리 성공');
+
+  const log = db.prepare(
+    "SELECT achievement_code FROM learning_logs WHERE user_id = ? AND activity_type = 'daily_complete' AND target_id = ? ORDER BY id DESC LIMIT 1"
+  ).get(userId, String(itemId));
+  assert.ok(log, '로그 존재');
+  assert.equal(log.achievement_code, null, '매핑 없으면 achievement_code 는 NULL 이어야 (억지 생성 금지)');
+
+  db.prepare('DELETE FROM daily_learning_progress WHERE item_id = ?').run(itemId);
+  db.prepare('DELETE FROM daily_learning_items WHERE id = ?').run(itemId);
+  db.prepare('DELETE FROM daily_learning_sets WHERE id = ?').run(setId);
+});
+
+// ── 갭 B-1: content_id 매핑된 wrong_answer 재풀이 → achievement_code = 원문항 기준 ──
+test('갭 B: content 매핑된 오답노트 재풀이 → wrong_note_retry 로그에 원문항 성취기준 주입', () => {
+  const c = pickMappedContent();
+  assert.ok(c, '코드 해석 가능한 content 필요');
+  const expected = selfLearn.resolveAchievementForAttempt(null, c.id);
+  assert.ok(expected, '해석 가능한 content 여야');
+
+  const stu = db.prepare("SELECT id FROM users WHERE role = 'student' ORDER BY id LIMIT 1").get();
+  const userId = stu.id;
+
+  // content_id 가 달린 오답 1건 시드 (객관식 — 채점 가능하게 옵션/정답 단순화는 불필요: 정오 무관, 코드 주입만 검증)
+  const waInfo = db.prepare(`
+    INSERT INTO wrong_answers (student_id, question_text, student_answer, correct_answer, subject, source, content_id, is_resolved, attempt_count)
+    VALUES (?, '[테스트] 갭B 문항', '오답', '정답', '수학', 'content', ?, 0, 0)
+  `).run(userId, c.id);
+  const noteId = waInfo.lastInsertRowid;
+
+  const r = selfLearn.retryWrongNote(noteId, userId, { answer: '아무거나' });
+  assert.ok(r && !r.forbidden, '재풀이 처리 성공(권한 OK)');
+
+  const log = db.prepare(
+    "SELECT achievement_code, subject_code FROM learning_logs WHERE user_id = ? AND activity_type = 'wrong_note_retry' AND target_id = ? ORDER BY id DESC LIMIT 1"
+  ).get(userId, String(noteId));
+  assert.ok(log, 'wrong_note_retry 로그 존재');
+  assert.ok(log.achievement_code, 'achievement_code 가 NULL 이 아니어야 (갭 B)');
+  assert.equal(log.achievement_code, expected, '원문항(content) 기준 코드와 동일해야');
+  assert.ok(/^\[.*\]$/.test(log.achievement_code), `괄호형이어야 (got ${log.achievement_code})`);
+
+  db.prepare('DELETE FROM wrong_answers WHERE id = ?').run(noteId);
+});
+
+// ── 갭 B-2: content_id 없는 wrong_answer 재풀이 → achievement_code NULL 유지 ──
+test('갭 B: content 매핑 없는 오답노트 재풀이 → achievement_code NULL 유지', () => {
+  const stu = db.prepare("SELECT id FROM users WHERE role = 'student' ORDER BY id LIMIT 1").get();
+  const userId = stu.id;
+
+  // content_id NULL 인 오답 (수기 등록형 — 콘텐츠 미연결)
+  const waInfo = db.prepare(`
+    INSERT INTO wrong_answers (student_id, question_text, student_answer, correct_answer, subject, source, content_id, is_resolved, attempt_count)
+    VALUES (?, '[테스트] 갭B nomap', '오답', '정답', '수학', 'manual', NULL, 0, 0)
+  `).run(userId);
+  const noteId = waInfo.lastInsertRowid;
+
+  const r = selfLearn.retryWrongNote(noteId, userId, { answer: '아무거나' });
+  assert.ok(r && !r.forbidden, '재풀이 처리 성공');
+
+  const log = db.prepare(
+    "SELECT achievement_code FROM learning_logs WHERE user_id = ? AND activity_type = 'wrong_note_retry' AND target_id = ? ORDER BY id DESC LIMIT 1"
+  ).get(userId, String(noteId));
+  assert.ok(log, '로그 존재');
+  assert.equal(log.achievement_code, null, '매핑 없으면 achievement_code 는 NULL 이어야 (억지 생성 금지)');
+
+  db.prepare('DELETE FROM wrong_answers WHERE id = ?').run(noteId);
+});
