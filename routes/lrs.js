@@ -7,6 +7,7 @@ const lrsDb = require('../db/lrs');
 const classDb = require('../db/class');
 const mastery = require('../db/lrs-mastery');
 const analytics = require('../db/lrs-analytics');
+const supplement = require('../db/lrs-supplement');
 const { rebuildAllAggregates } = require('../db/lrs-aggregate');
 const { logLearningActivity } = require('../db/learning-log-helper');
 const { LRS_CONFIG } = require('../lib/lrs-config');
@@ -2871,6 +2872,154 @@ router.get('/stats/time-by-unit', requireAuth, (req, res) => {
     });
   } catch (err) {
     console.error('[LRS] /stats/time-by-unit error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────
+// P1-3 — 교사 보충 일괄배정(처방 실행). 기획서: LRS_P1_심화_기획서.md §4
+//   권한: 배정/취소/현황 = 담당 교사(isClassManager: owner·teacher·co_teacher)·관리자만.
+//         학생: 본인 보충 목록/완료만. 멱등(UNIQUE) · 취소 soft · P6 학생 위험 비노출.
+// ─────────────────────────────────────────────────────────
+
+// POST /api/lrs/supplement/assign — 교사 일괄배정(멱등).
+//   body 형식 2종 지원:
+//   (A) { classId, items:[{userId, achievementCode, contentId?}], source? }
+//   (B) { classId, achievementCode, contentIds:[], studentIds:[], source? }
+//       → 미도달/부분도달 학생 × 추천 콘텐츠 조합(contentIds 없으면 코드만 처방).
+//   resp: { success, assigned, skipped, ids:[], skippedDetail:[] }
+router.post('/supplement/assign', requireAuth, (req, res) => {
+  try {
+    const classId = parseInt(req.body.classId, 10);
+    if (!Number.isInteger(classId)) {
+      return res.status(400).json({ success: false, message: '잘못된 클래스 ID 입니다.' });
+    }
+    // 권한: 담당 교사/관리자만. 비담당·학생 403.
+    if (!isClassManager(req, classId) && req.user.role !== 'admin') {
+      return res.status(403).json({ success: false, message: '권한이 없습니다.' });
+    }
+
+    const source = req.body.source || 'ews';
+    let items = [];
+    if (Array.isArray(req.body.items)) {
+      // (A) 명시 items
+      items = req.body.items;
+    } else if (req.body.achievementCode && Array.isArray(req.body.studentIds)) {
+      // (B) 약점 코드 × 학생 × 콘텐츠 조합
+      const code = String(req.body.achievementCode);
+      const studentIds = req.body.studentIds.map(Number).filter(Number.isInteger);
+      const contentIds = Array.isArray(req.body.contentIds)
+        ? req.body.contentIds.map(Number).filter(Number.isInteger)
+        : [];
+      for (const uid of studentIds) {
+        if (contentIds.length) {
+          for (const cid of contentIds) items.push({ userId: uid, achievementCode: code, contentId: cid });
+        } else {
+          items.push({ userId: uid, achievementCode: code, contentId: null }); // 코드만 처방
+        }
+      }
+    }
+    if (!items.length) {
+      return res.status(400).json({ success: false, message: '배정할 항목이 없습니다.' });
+    }
+    // 멤버십 검증: 배정 대상은 해당 반 student 멤버여야(타 반 학생 배정 차단).
+    const memberSet = new Set(analytics.classStudentIds(classId));
+    const filtered = items.filter(it => memberSet.has(Number(it.userId)));
+    if (!filtered.length) {
+      return res.status(400).json({ success: false, message: '배정 대상이 이 반의 학생이 아닙니다.' });
+    }
+
+    const result = supplement.assignSupplements(classId, req.user.id, filtered, { source });
+    res.status(201).json({ success: true, ...result });
+  } catch (err) {
+    console.error('[LRS] /supplement/assign error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// GET /api/lrs/supplement/recommend?classId&code — 약점 코드 → 추천 콘텐츠 + 배정후보 학생.
+router.get('/supplement/recommend', requireAuth, (req, res) => {
+  try {
+    const classId = parseInt(req.query.classId, 10);
+    const code = req.query.code;
+    if (!Number.isInteger(classId) || !code) {
+      return res.status(400).json({ success: false, message: 'classId 와 code 가 필요합니다.' });
+    }
+    if (!isClassManager(req, classId) && req.user.role !== 'admin') {
+      return res.status(403).json({ success: false, message: '권한이 없습니다.' });
+    }
+    const members = classDb.getClassMembers(classId).filter(m => m.user_role === 'student');
+    const students = members.map(m => ({ id: m.user_id, name: m.display_name || m.username || `학생${m.user_id}` }));
+    const data = supplement.recommendCandidates(classId, code, students);
+    res.json({ success: true, classId, ...data });
+  } catch (err) {
+    console.error('[LRS] /supplement/recommend error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// GET /api/lrs/supplement/class/:classId — 교사: 반 배정 현황(학생 실명 — 담임 정책).
+router.get('/supplement/class/:classId', requireAuth, (req, res) => {
+  try {
+    const classId = parseInt(req.params.classId, 10);
+    if (!Number.isInteger(classId)) {
+      return res.status(400).json({ success: false, message: '잘못된 클래스 ID 입니다.' });
+    }
+    if (!isClassManager(req, classId) && req.user.role !== 'admin') {
+      return res.status(403).json({ success: false, message: '권한이 없습니다.' });
+    }
+    const includeCancelled = String(req.query.includeCancelled || 'true') !== 'false';
+    const list = supplement.getClassSupplements(classId, { includeCancelled });
+    res.json({ success: true, classId, count: list.length, list });
+  } catch (err) {
+    console.error('[LRS] /supplement/class error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// GET /api/lrs/supplement/my — 학생 본인 보충 목록(P6: 위험 필드 미포함).
+router.get('/supplement/my', requireAuth, (req, res) => {
+  try {
+    const list = supplement.getMySupplements(req.user.id, { includeDone: true });
+    res.json({ success: true, userId: req.user.id, count: list.length, list });
+  } catch (err) {
+    console.error('[LRS] /supplement/my error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// POST /api/lrs/supplement/:id/cancel — 교사(소유 배정 반의 담당) 취소(soft).
+router.post('/supplement/:id/cancel', requireAuth, (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const row = supplement.getSupplementById(id);
+    if (!row) return res.status(404).json({ success: false, message: '보충 배정을 찾을 수 없습니다.' });
+    if (!isClassManager(req, row.class_id) && req.user.role !== 'admin') {
+      return res.status(403).json({ success: false, message: '권한이 없습니다.' });
+    }
+    const ok = supplement.cancelSupplement(id);
+    res.json({ success: true, cancelled: ok, id });
+  } catch (err) {
+    console.error('[LRS] /supplement/cancel error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// POST /api/lrs/supplement/:id/done — 학생 본인 완료(또는 담당 교사/관리자 완료 연동).
+router.post('/supplement/:id/done', requireAuth, (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const row = supplement.getSupplementById(id);
+    if (!row) return res.status(404).json({ success: false, message: '보충 배정을 찾을 수 없습니다.' });
+    const isOwnerStudent = row.user_id === req.user.id;
+    const isManager = isClassManager(req, row.class_id) || req.user.role === 'admin';
+    if (!isOwnerStudent && !isManager) {
+      return res.status(403).json({ success: false, message: '권한이 없습니다.' });
+    }
+    const ok = supplement.markDone(id);
+    res.json({ success: true, done: ok, id });
+  } catch (err) {
+    console.error('[LRS] /supplement/done error:', err);
     res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
   }
 });

@@ -36,7 +36,20 @@ router.get('/:classId', requireAuth, requireClassMember, (req, res) => {
       status, page: parseInt(page) || 1, userId: req.user.id, std_ids: stdIdsArr,
       hideScheduled: !isOwner
     });
-    res.json({ success: true, ...result });
+    // 일반 과제 항목엔 type='homework' 명시(FE 가 보충과 구분 가능)
+    result.homework = (result.homework || []).map(h => ({ type: 'homework', ...h }));
+
+    // P1-3 보충 미러: 학생(비개설자) 본인에게 배정된 보충(supplement_assignment)을
+    //   "보충" 출처로 합쳐 노출. 위조 homework 행 생성 안 함 — 별도 type='supplement' 배열.
+    //   교사(owner)·관리자 과제 목록엔 미포함(교사는 /supplement/class 현황으로 봄).
+    let supplements = [];
+    if (!isOwner) {
+      try {
+        const supDb = require('../db/lrs-supplement');
+        supplements = supDb.getStudentSupplementsForList(req.user.id, req.classId);
+      } catch (e) { supplements = []; }
+    }
+    res.json({ success: true, ...result, supplements });
   } catch (err) {
     res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
   }
