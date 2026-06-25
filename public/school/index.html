@@ -1,0 +1,1269 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>다채움 - 학교 경영 대시보드</title>
+  <link rel="stylesheet" href="/css/common-nav.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    /* ═══════════════════════════════════════════════════════════════════
+       학교 경영 대시보드 — 자가완결 토큰 (시각스펙 §1, lrs/index.html과 동일 HEX)
+       ═══════════════════════════════════════════════════════════════════ */
+    :root{
+      /* 4상태 도달색(성취 — 면적 채움) */
+      --mastery-reached:#16a34a;       --mastery-reached-soft:#dcfce7;       --mastery-reached-ink:#15803d;
+      --mastery-partial:#f59e0b;       --mastery-partial-soft:#fef3c7;       --mastery-partial-ink:#b45309;
+      --mastery-notreached:#ef4444;    --mastery-notreached-soft:#fee2e2;    --mastery-notreached-ink:#b91c1c;
+      --mastery-insufficient:#9ca3af;  --mastery-insufficient-soft:#f3f4f6;  --mastery-insufficient-ink:#4b5563;
+      /* 위험 전용(EWS — 테두리/아이콘, 채움 금지) */
+      --risk-high:#dc2626;  --risk-high-soft:#fef2f2;  --risk-high-ink:#991b1b;
+      --risk-mid:#f59e0b;   --risk-mid-soft:#fffbeb;   --risk-mid-ink:#b45309;
+      --risk-low:#9ca3af;   --risk-low-soft:#f9fafb;   --risk-low-ink:#4b5563;
+      /* 추세 화살표(빨강 금지) */
+      --trend-up:#16a34a;  --trend-flat:#9ca3af;  --trend-down:#ea7317;
+      /* 신뢰/예측 */
+      --conf-high:#16a34a; --conf-mid:#f59e0b; --conf-low:#9ca3af;
+      --proj-line:#2563eb; --proj-band:rgba(37,99,235,.12); --proj-band-stroke:rgba(37,99,235,.35);
+      /* 기본 팔레트 */
+      --sch-primary:#2563eb; --sch-primary-dark:#1d4ed8;
+      --sch-ink:#1f2937; --sch-ink-sub:#6b7280; --sch-line:#e5e7eb; --sch-bg:#f9fafb; --sch-card:#fff;
+      /* 자동 인사이트 카드(규칙기반) — 노란 강조 */
+      --insight-bg:#fffbeb; --insight-border:#fde68a; --insight-ink:#92400e; --insight-accent:#f59e0b;
+      /* 외부 연계 서비스 배지(미로깅) — 중립 회색 */
+      --ext-bg:#f3f4f6; --ext-border:#e5e7eb; --ext-ink:#6b7280; --ext-icon:#9ca3af;
+      /* 준비 중(데이터 적재 예정) — 점선 */
+      --soon-bg:#fafafa; --soon-border:#e5e7eb; --soon-ink:#9ca3af;
+      /* 실명 명단 카드(개인정보) — 보라 경계 */
+      --pii-bg:#faf5ff; --pii-border:#d8b4fe; --pii-ink:#7c3aed; --pii-accent:#8b5cf6;
+      /* 비교/벤치마크 */
+      --bench-self:#2563eb; --bench-avg:#cbd5e1; --bench-up:#16a34a; --bench-down:#ea7317;
+      /* 회색 보조 */
+      --gray-200:#e5e7eb; --gray-500:#6b7280;
+    }
+    *{ box-sizing:border-box; }
+    html{ overflow-x:clip; }
+    body{ font-family:'Pretendard','Noto Sans KR',system-ui,-apple-system,sans-serif;
+      background:var(--sch-bg); color:var(--sch-ink); margin:0; overflow-x:clip; font-size:16px; line-height:1.7; }
+
+    /* ── 타이포 (시각스펙 §2) ── */
+    .sch-h1{ font-size:28px;font-weight:700;color:#1f2937;line-height:1.3;margin:0;display:flex;align-items:center;gap:10px; }
+    .mastery-h2{ font-size:19px;font-weight:700;color:#1f2937;margin:0; }
+    .mastery-sub{ font-size:13px;color:#6b7280;margin-top:4px;line-height:1.6; }
+
+    /* ── 셸: 헤더/탭/푸터 (시각스펙 §3) ── */
+    .sch-wrap{ max-width:1320px; margin:0 auto; padding:0 24px 40px; }
+    .sch-header{ background:#fff;border-bottom:1px solid #e5e7eb;padding:20px 24px;
+      display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap; }
+    .sch-header .sch-head-main{ min-width:0; }
+    .sch-header .sch-meta{ font-size:13px;color:#6b7280;margin-top:4px; }
+    .sch-header .sch-tools{ display:flex;align-items:center;gap:10px;flex-wrap:wrap; }
+    .sch-tools select,.sch-tools button{ font-family:inherit; }
+    .sch-tabs{ display:flex;gap:4px;background:#fff;border-bottom:1px solid #e5e7eb;padding:0 24px;
+      overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;
+      position:sticky;top:0;z-index:50; }
+    .sch-tabs::-webkit-scrollbar{ display:none; }
+    .sch-tab{ flex:0 0 auto;font-size:15px;font-weight:600;color:#6b7280;background:none;border:0;cursor:pointer;
+      padding:14px 16px;border-bottom:3px solid transparent;white-space:nowrap;font-family:inherit;transition:color .15s; }
+    .sch-tab:hover{ color:#374151; }
+    .sch-tab[aria-selected="true"]{ color:#2563eb;border-bottom-color:#2563eb; }
+    .sch-tab:focus-visible{ outline:0;box-shadow:inset 0 0 0 2px rgba(37,99,235,.35);border-radius:6px; }
+    .sch-footer{ font-size:13px;color:#9ca3af;line-height:1.7;padding:20px 24px;border-top:1px solid #f3f4f6;max-width:1320px;margin:0 auto; }
+
+    /* ── 섹션 카드 ── */
+    .sch-section{ background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:24px;
+      box-shadow:0 1px 3px rgba(0,0,0,.06);margin-bottom:20px;max-width:100%;min-width:0; }
+    .sch-section-head{ display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:16px;flex-wrap:wrap; }
+    .sch-section-head .ssh-titles{ min-width:0; }
+    .sch-section-head .ssh-controls{ display:inline-flex;align-items:center;gap:8px;flex-wrap:wrap; }
+    .sch-section select.sch-select{ font-size:14px;font-family:inherit;padding:7px 12px;border:1px solid #d1d5db;border-radius:8px;background:#fff;color:#374151;cursor:pointer; }
+    .chart-body{ position:relative;height:300px;max-width:100%; }
+    .chart-body.tall{ height:340px; }
+    .chart-body canvas{ max-width:100%; }
+
+    /* ── 버튼/뱃지 (CLAUDE.md 스케일) ── */
+    .mastery-btn{ font-size:16px;font-weight:700;padding:12px 22px;border-radius:10px;border:0;cursor:pointer;
+      background:var(--sch-primary);color:#fff;display:inline-flex;align-items:center;justify-content:center;gap:8px;
+      font-family:inherit;transition:background .15s,transform .05s;text-decoration:none; }
+    .mastery-btn:hover{ background:#1d4ed8; }
+    .mastery-btn:active{ transform:translateY(1px); }
+    .mastery-btn:focus-visible{ outline:0;box-shadow:0 0 0 3px rgba(37,99,235,.35); }
+    .mastery-btn:disabled{ background:#cbd5e1;color:#fff;cursor:not-allowed; }
+    .mastery-btn-sm{ font-size:14px;font-weight:600;padding:8px 14px;border-radius:8px; }
+    .mastery-btn-ghost{ background:#fff;color:#2563eb;border:1px solid #93c5fd; }
+    .mastery-btn-ghost:hover{ background:#eff6ff; }
+    .mastery-btn-ghost[aria-pressed="true"]{ background:#2563eb;color:#fff;border-color:#2563eb; }
+    .mastery-badge{ display:inline-flex;align-items:center;gap:4px;font-size:13px;font-weight:600;padding:4px 12px;border-radius:9999px;line-height:1.4; }
+    .mastery-badge.reached{ background:var(--mastery-reached-soft);color:var(--mastery-reached-ink); }
+    .mastery-badge.partial{ background:var(--mastery-partial-soft);color:var(--mastery-partial-ink); }
+    .mastery-badge.notReached{ background:var(--mastery-notreached-soft);color:var(--mastery-notreached-ink); }
+    .mastery-badge.insufficient{ background:var(--mastery-insufficient-soft);color:var(--mastery-insufficient-ink); }
+
+    /* ── 신뢰/소표본/추세 (분석예측 계승) ── */
+    .conf-badge{ display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:600;
+      color:#4b5563;padding:3px 10px;border-radius:9999px;background:#f9fafb;border:1px solid #e5e7eb;white-space:nowrap; }
+    .conf-badge .conf-dot{ width:8px;height:8px;border-radius:50%;flex:0 0 auto; }
+    .conf-badge[data-conf="high"] .conf-dot{ background:var(--conf-high); }
+    .conf-badge[data-conf="medium"] .conf-dot,.conf-badge[data-conf="mid"] .conf-dot{ background:var(--conf-mid); }
+    .conf-badge[data-conf="low"] .conf-dot{ background:var(--conf-low); }
+    .lowsample-chip{ display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;
+      color:#92400e;background:#fffbeb;border:1px solid #fde68a;border-radius:9999px;padding:3px 10px;white-space:nowrap; }
+    .trend-arrow{ display:inline-flex;align-items:center;gap:6px;font-size:14px;font-weight:700;white-space:nowrap; }
+    .trend-arrow[data-trend="up"]{ color:var(--trend-up); }
+    .trend-arrow[data-trend="flat"]{ color:var(--trend-flat); }
+    .trend-arrow[data-trend="down"]{ color:var(--trend-down); }
+    .trend-arrow[data-trend="insufficient"]{ color:#9ca3af; }
+
+    /* ── KPI 카드 (lrs 계승) ── */
+    .sch-kpi-grid{ display:grid;grid-template-columns:repeat(6,1fr);gap:16px;margin-bottom:20px; }
+    .dc-kpi-card{ background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:20px;display:flex;flex-direction:column;gap:6px;
+      box-shadow:0 1px 2px rgba(0,0,0,.04);transition:box-shadow .15s;min-width:0; }
+    .dc-kpi-card:hover{ box-shadow:0 4px 12px rgba(0,0,0,.08); }
+    .dc-kpi-card:focus-visible{ outline:0;box-shadow:0 0 0 3px rgba(37,99,235,.35); }
+    .dc-kpi-card[data-tone="primary"]{ border-top:4px solid #2563eb; }
+    .dc-kpi-card[data-tone="info"]{ border-top:4px solid #06b6d4; }
+    .dc-kpi-card[data-tone="success"]{ border-top:4px solid #16a34a; }
+    .dc-kpi-card[data-tone="danger"]{ border-top:4px solid #dc2626; }
+    .dc-kpi-card[data-tone="warning"]{ border-top:4px solid #f59e0b; }
+    .dc-kpi-card[data-tone="purple"]{ border-top:4px solid #8b5cf6; }
+    .dc-kpi-card .kpi-label{ font-size:13px;font-weight:600;color:#6b7280;line-height:1.4; }
+    .dc-kpi-card .kpi-value{ font-size:28px;font-weight:700;color:#111827;line-height:1.1;font-variant-numeric:tabular-nums; }
+    .dc-kpi-card .kpi-value .kpi-unit{ font-size:15px;font-weight:600;color:#6b7280;margin-left:3px; }
+    .dc-kpi-card .kpi-trend{ font-size:13px;font-weight:600;display:flex;align-items:center;gap:4px;flex-wrap:wrap; }
+    .dc-kpi-card .kpi-trend.up{ color:#16a34a; }
+    .dc-kpi-card .kpi-trend.down{ color:#ea7317; }
+    .dc-kpi-card .kpi-trend.flat{ color:#6b7280; }
+    .dc-kpi-card .kpi-trend.warn{ color:#dc2626; }
+    .dc-kpi-card .kpi-extra{ font-size:13px;color:#6b7280;line-height:1.5;display:flex;align-items:center;gap:6px;flex-wrap:wrap; }
+    .kpi-gauge{ display:flex;flex-direction:column;align-items:flex-start; }
+
+    /* ── 게이지 (lrs 계승) ── */
+    .sch-gauge{ width:140px;max-width:100%; }
+    .sch-gauge svg{ width:140px;height:84px;display:block; }
+    .sch-gauge .gauge-value{ font-size:26px;font-weight:700;color:#111827;line-height:1;margin-top:-10px;text-align:center;width:140px; }
+    .sch-gauge .gauge-label{ font-size:13px;color:#6b7280;text-align:center;width:140px; }
+
+    /* ── 도넛 중앙 ── */
+    .donut-wrap{ position:relative;height:240px;max-width:100%; }
+    .donut-center{ position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;pointer-events:none; }
+    .donut-center .dc-num{ font-size:24px;font-weight:700;color:#111827;line-height:1.1; }
+    .donut-center .dc-lbl{ font-size:13px;color:#6b7280;margin-top:2px; }
+
+    /* ── 가입 1줄 카드 ── */
+    .sch-enroll-card{ display:grid;grid-template-columns:auto 1fr;gap:24px;align-items:center;
+      background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:18px 24px;margin-bottom:20px; }
+    .sch-enroll-card .enr-text{ font-size:17px;font-weight:600;color:#1f2937;white-space:nowrap; }
+    .sch-enroll-card .enr-text .sep{ color:#cbd5e1;margin:0 6px; }
+    .soon-chip{ font-size:12px;font-weight:600;color:#9ca3af;background:#f3f4f6;border-radius:9999px;padding:2px 8px; }
+    .sch-mini-bars{ display:flex;align-items:flex-end;gap:10px;height:64px; }
+    .sch-mini-bars .mb{ display:flex;flex-direction:column;align-items:center;gap:4px;flex:1;min-width:0; }
+    .sch-mini-bars .mb .mb-num{ font-size:12px;color:#374151;font-weight:600; }
+    .sch-mini-bars .mb .mb-bar{ width:60%;max-width:28px;background:#93c5fd;border-radius:4px 4px 0 0;min-height:3px; }
+    .sch-mini-bars .mb .mb-lbl{ font-size:12px;color:#6b7280; }
+    @media(max-width:768px){ .sch-enroll-card{ grid-template-columns:1fr;gap:12px; } .sch-enroll-card .enr-text{ white-space:normal; } }
+
+    /* ── 자동 인사이트 카드 (노란) ── */
+    .sch-insight{ background:var(--insight-bg);border:1px solid var(--insight-border);border-left:4px solid var(--insight-accent);
+      border-radius:12px;padding:18px 20px;margin-bottom:20px; }
+    .sch-insight.good{ background:#f0fdf4;border-color:#bbf7d0;border-left-color:#16a34a; }
+    .sch-insight .ins-head{ font-size:15px;font-weight:700;color:#92400e;display:flex;align-items:center;gap:8px;margin-bottom:12px; }
+    .sch-insight.good .ins-head{ color:#15803d; }
+    .sch-insight .ins-item{ display:flex;align-items:flex-start;justify-content:space-between;gap:16px;
+      padding:12px 0;border-top:1px solid rgba(245,158,11,.18); }
+    .sch-insight .ins-item:first-of-type{ border-top:0;padding-top:0; }
+    .sch-insight .ins-main{ flex:1;min-width:0; }
+    .sch-insight .ins-text{ font-size:15px;color:#1f2937;line-height:1.6; }
+    .sch-insight .ins-foot{ font-size:13px;color:#92400e;margin-top:6px;display:flex;gap:8px;flex-wrap:wrap;align-items:center; }
+    .sch-insight .ins-link{ flex:0 0 auto;font-size:14px;font-weight:600;color:#2563eb;background:#fff;
+      border:1px solid #93c5fd;border-radius:8px;padding:6px 12px;cursor:pointer;white-space:nowrap;text-decoration:none;font-family:inherit; }
+    .sch-insight .ins-link:hover{ background:#eff6ff; }
+    .sch-insight .ins-link:focus-visible{ outline:0;box-shadow:0 0 0 3px rgba(37,99,235,.35); }
+
+    /* ── 2분할 ── */
+    .sch-2col{ display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:stretch; }
+    @media(max-width:1024px){ .sch-2col{ grid-template-columns:1fr; } }
+
+    /* ── 외부 서비스 배지 그룹 ── */
+    .sch-ext-group{ display:flex;flex-wrap:wrap;gap:12px; }
+    .sch-ext-card{ flex:1 1 180px;min-width:160px;background:var(--ext-bg);border:1px solid var(--ext-border);
+      border-radius:12px;padding:18px 16px;display:flex;flex-direction:column;gap:6px; }
+    .sch-ext-card .ext-name{ font-size:16px;font-weight:700;color:#374151;display:flex;align-items:center;gap:8px; }
+    .sch-ext-card .ext-icon{ color:var(--ext-icon); }
+    .sch-ext-card .ext-badge{ align-self:flex-start;font-size:13px;font-weight:600;color:var(--ext-ink);
+      background:#fff;border:1px solid #e5e7eb;border-radius:9999px;padding:3px 10px; }
+    .sch-ext-card .ext-desc{ font-size:13px;color:#9ca3af;line-height:1.5; }
+    .sch-ext-handoff{ margin-top:14px;font-size:13px;color:#6b7280;line-height:1.6;display:flex;align-items:center;gap:8px;flex-wrap:wrap; }
+
+    /* ── 준비 중 점선 카드 ── */
+    .sch-soon-grid{ display:grid;grid-template-columns:1fr 1fr;gap:16px; }
+    @media(max-width:768px){ .sch-soon-grid{ grid-template-columns:1fr; } }
+    .sch-soon-card{ background:var(--soon-bg);border:1.5px dashed var(--soon-border);border-radius:12px;
+      padding:24px;text-align:center;display:flex;flex-direction:column;align-items:center;gap:8px; }
+    .sch-soon-card .soon-icon{ font-size:28px;color:#d1d5db; }
+    .sch-soon-card .soon-title{ font-size:16px;font-weight:700;color:#9ca3af; }
+    .sch-soon-card .soon-badge{ font-size:13px;font-weight:600;color:#9ca3af;background:#f3f4f6;border-radius:9999px;padding:3px 12px; }
+    .sch-soon-card .soon-desc{ font-size:13px;color:#9ca3af;line-height:1.5; }
+
+    /* ── 학년×교과 히트맵 (lrs 계승) ── */
+    .mastery-heatmap-wrap{ overflow-x:auto;-webkit-overflow-scrolling:touch;max-width:100%;border:1px solid #e5e7eb;border-radius:12px; }
+    .mastery-heatmap{ border-collapse:separate;border-spacing:4px;font-size:13px;width:100%; }
+    .mastery-heatmap thead th{ background:#fff;font-size:13px;color:#4b5563;font-weight:600;padding:8px 6px;text-align:center;white-space:nowrap; }
+    .mastery-heatmap thead th.corner{ text-align:left;padding:8px 12px;font-weight:700;color:#1f2937; }
+    .mastery-heatmap tbody th{ background:#fff;text-align:left;font-size:14px;color:#1f2937;font-weight:600;padding:6px 12px;white-space:nowrap; }
+    .mastery-heatmap td.cell{ min-width:56px;height:48px;border-radius:8px;text-align:center;color:#fff;font-weight:700;font-size:14px;
+      cursor:pointer;transition:transform .1s,box-shadow .1s;font-variant-numeric:tabular-nums; }
+    .mastery-heatmap td.cell:hover{ transform:scale(1.12);box-shadow:0 2px 8px rgba(0,0,0,.25);position:relative;z-index:5; }
+    .mastery-heatmap td.cell:focus-visible{ outline:0;box-shadow:0 0 0 3px rgba(37,99,235,.45);transform:scale(1.08);position:relative;z-index:5; }
+    .mastery-heatmap td[data-state="reached"]{ background:var(--mastery-reached); }
+    .mastery-heatmap td[data-state="partial"]{ background:var(--mastery-partial); }
+    .mastery-heatmap td[data-state="notReached"]{ background:var(--mastery-notreached); }
+    .mastery-heatmap td[data-state="insufficient"]{ background:var(--mastery-insufficient-soft);color:#9ca3af; }
+    .mastery-heatmap td[data-state="none"]{ background:#fff;border:1px dashed #e5e7eb;color:#d1d5db;cursor:default; }
+    .mastery-heatmap td.summary{ background:transparent;color:#374151;font-weight:600;text-align:right;padding:0 8px;white-space:nowrap;font-variant-numeric:tabular-nums; }
+    .heat-pulse{ animation:heatPulse 1.5s ease-out 2; }
+    @keyframes heatPulse{ 0%{box-shadow:0 0 0 0 rgba(239,68,68,.6);} 100%{box-shadow:0 0 0 8px rgba(239,68,68,0);} }
+    .mastery-legend{ display:flex;flex-wrap:wrap;gap:16px;align-items:center;font-size:13px;color:#4b5563;margin-top:14px; }
+    .mastery-legend .item{ display:inline-flex;align-items:center;gap:6px; }
+    .mastery-legend .dot{ width:12px;height:12px;border-radius:4px;flex:0 0 auto;border:1px solid transparent; }
+    .mastery-legend .dot.reached{ background:var(--mastery-reached); }
+    .mastery-legend .dot.partial{ background:var(--mastery-partial); }
+    .mastery-legend .dot.notReached{ background:var(--mastery-notreached); }
+    .mastery-legend .dot.insufficient{ background:var(--mastery-insufficient-soft);border-color:#d1d5db; }
+    .mastery-legend .dot.none{ background:#fff;border:1px dashed #d1d5db; }
+    /* 히트맵 모바일 카드형 */
+    .sch-heat-cards{ display:none; }
+    .sch-heat-card{ background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:14px 16px;margin-bottom:10px; }
+    .sch-heat-card .hc-title{ font-size:15px;font-weight:700;color:#1f2937;margin-bottom:10px; }
+    .sch-heat-card .hc-chips{ display:flex;flex-wrap:wrap;gap:8px; }
+    .sch-heat-chip{ display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:600;padding:5px 10px;border-radius:8px; }
+    .sch-heat-chip .hcc-dot{ width:10px;height:10px;border-radius:3px;flex:0 0 auto; }
+    @media(max-width:767px){ .mastery-heatmap-wrap{ display:none; } .sch-heat-cards{ display:block; } }
+
+    /* ── 취약 Top10 표 (lrs 계승) ── */
+    .dc-data-table-wrap{ overflow-x:auto;max-width:100%;-webkit-overflow-scrolling:touch; }
+    .dc-data-table{ width:100%;border-collapse:collapse;font-size:15px; }
+    .dc-data-table th{ text-align:left;font-size:13px;color:#4b5563;font-weight:700;padding:10px 12px;border-bottom:2px solid #e5e7eb;white-space:nowrap; }
+    .dc-data-table th.sortable{ cursor:pointer;user-select:none; }
+    .dc-data-table th.sortable:hover{ color:#2563eb; }
+    .dc-data-table th.sorted-asc::after{ content:" ▲";font-size:10px; }
+    .dc-data-table th.sorted-desc::after{ content:" ▼";font-size:10px; }
+    .dc-data-table td{ padding:10px 12px;border-bottom:1px solid #f3f4f6;vertical-align:middle;color:#374151; }
+    .dc-data-table td.num{ text-align:right;font-variant-numeric:tabular-nums; }
+    .dc-data-table tbody tr:hover{ background:#f9fafb; }
+    .weak-bar{ display:inline-flex;align-items:center;gap:8px; }
+    .weak-bar .wb-track{ width:64px;height:8px;border-radius:4px;background:#f3f4f6;overflow:hidden;flex:0 0 auto; }
+    .weak-bar .wb-fill{ height:100%;border-radius:4px;display:block; }
+    .weak-bar .wb-fill[data-state="reached"]{ background:var(--mastery-reached); }
+    .weak-bar .wb-fill[data-state="partial"]{ background:var(--mastery-partial); }
+    .weak-bar .wb-fill[data-state="notReached"]{ background:var(--mastery-notreached); }
+    .weak-bar .wb-fill[data-state="insufficient"]{ background:var(--mastery-insufficient); }
+    .weak-bar .wb-num{ font-size:14px;font-weight:600;color:#374151;min-width:42px;font-variant-numeric:tabular-nums; }
+    .wk-code{ color:#9ca3af;font-weight:500;font-size:12px; }
+    .wk-label{ display:inline-block;max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:bottom; }
+    /* 표 모바일 카드 전환 */
+    .sch-tbl-cards{ display:none; }
+    .sch-tbl-card{ background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:14px 16px;margin-bottom:10px; }
+    .sch-tbl-card .tc-title{ font-size:15px;font-weight:700;color:#1f2937;margin-bottom:2px; }
+    .sch-tbl-card .tc-sub{ font-size:13px;color:#9ca3af;margin-bottom:10px; }
+    .sch-tbl-card .tc-row{ display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap; }
+    @media(max-width:767px){ .sch-tbl-wrap{ display:none; } .sch-tbl-cards{ display:block; } }
+
+    /* ── 추세 / 격차 ── */
+    .sch-range-bar{ display:flex;align-items:center;gap:12px;flex-wrap:wrap; }
+    .sch-range-bar .rb-track{ flex:1;height:12px;border-radius:6px;background:#f3f4f6;position:relative;min-width:80px; }
+    .sch-range-bar .rb-fill{ position:absolute;top:0;height:100%;border-radius:6px;background:linear-gradient(90deg,#ef4444,#f59e0b,#16a34a); }
+    .sch-range-bar .rb-min,.sch-range-bar .rb-max{ font-size:14px;font-weight:600;color:#374151;white-space:nowrap; }
+    .sch-range-bar .rb-gap{ font-size:14px;font-weight:700;color:#b45309;white-space:nowrap; }
+
+    /* ── 기초학력 funnel ── */
+    .sch-funnel{ display:flex;align-items:stretch;gap:8px; }
+    .sch-funnel .fn-step{ flex:1;min-width:0;border-radius:10px;padding:16px;text-align:center; }
+    .sch-funnel .fn-step.s1{ background:#fee2e2;color:#b91c1c; }
+    .sch-funnel .fn-step.s2{ background:#fef3c7;color:#b45309; }
+    .sch-funnel .fn-step.s3{ background:#dcfce7;color:#15803d; }
+    .sch-funnel .fn-num{ font-size:26px;font-weight:700;line-height:1; }
+    .sch-funnel .fn-lbl{ font-size:13px;margin-top:4px; }
+    .sch-funnel .fn-arrow{ align-self:center;color:#9ca3af;font-size:18px;flex:0 0 auto; }
+    @media(max-width:767px){ .sch-funnel{ flex-direction:column; } .sch-funnel .fn-arrow{ transform:rotate(90deg); } }
+    .basic-note{ display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;color:#6b7280;background:#f3f4f6;border-radius:9999px;padding:3px 10px; }
+
+    /* ── 안전망 명단 (ews 계승) ── */
+    .ews-list{ display:flex;flex-direction:column;gap:12px; }
+    .ews-card{ background:#fff;border:1px solid #e5e7eb;border-left-width:4px;border-radius:12px;
+      padding:16px 18px;box-shadow:0 1px 3px rgba(0,0,0,.08);display:flex;flex-direction:column;gap:10px;min-width:0; }
+    .ews-card[data-risk="high"]{ border-left-color:var(--risk-high); }
+    .ews-card[data-risk="medium"],.ews-card[data-risk="mid"]{ border-left-color:var(--risk-mid); }
+    .ews-card[data-risk="low"]{ border-left-color:var(--risk-low); }
+    .ews-card .ews-top{ display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap; }
+    .ews-card .ews-name{ font-size:17px;font-weight:700;color:#111827;display:inline-flex;align-items:center;gap:8px;min-width:0; }
+    .ews-card .ews-name .risk-icon[data-risk="high"]{ color:var(--risk-high); }
+    .ews-card .ews-name .risk-icon[data-risk="medium"],.ews-card .ews-name .risk-icon[data-risk="mid"]{ color:var(--risk-mid); }
+    .ews-card .ews-name .risk-icon[data-risk="low"]{ color:var(--risk-low); }
+    .ews-card .ews-badges{ display:inline-flex;align-items:center;gap:8px;flex-wrap:wrap; }
+    .risk-badge{ display:inline-flex;align-items:center;gap:5px;font-size:13px;font-weight:700;padding:3px 11px;border-radius:9999px;border:1.5px solid;background:#fff;line-height:1.4;white-space:nowrap; }
+    .risk-badge[data-risk="high"]{ color:var(--risk-high-ink);border-color:var(--risk-high);background:var(--risk-high-soft); }
+    .risk-badge[data-risk="medium"],.risk-badge[data-risk="mid"]{ color:var(--risk-mid-ink);border-color:var(--risk-mid);background:var(--risk-mid-soft); }
+    .risk-badge[data-risk="low"]{ color:var(--risk-low-ink);border-color:var(--risk-low);background:var(--risk-low-soft); }
+    .ews-reasons{ display:flex;flex-wrap:wrap;gap:6px; }
+    .ews-reason{ font-size:13px;font-weight:600;color:#374151;background:#f3f4f6;border-radius:8px;padding:4px 10px; }
+    .ews-reason[data-key="decline"]{ color:#b45309;background:#fffbeb; }
+    .ews-reason[data-key="emotion"]{ color:#7c3aed;background:#faf5ff; }
+    .ews-actions{ display:flex;gap:8px;flex-wrap:wrap; }
+
+    /* ── 실명 명단 모달 (보라) ── */
+    .pii-modal{ position:fixed;inset:0;z-index:10000;background:rgba(17,24,39,.5);display:none;align-items:center;justify-content:center;padding:24px; }
+    .pii-modal[data-open="true"]{ display:flex; }
+    .pii-box{ width:min(720px,94vw);max-height:86vh;background:#fff;border-radius:14px;overflow:hidden;
+      display:flex;flex-direction:column;box-shadow:0 20px 40px rgba(0,0,0,.25);border-top:5px solid var(--pii-accent); }
+    .pii-head{ display:flex;align-items:center;justify-content:space-between;gap:12px;padding:18px 20px;background:var(--pii-bg);border-bottom:1px solid var(--pii-border); }
+    .pii-head h3{ font-size:19px;font-weight:700;color:#6b21a8;margin:0;display:flex;align-items:center;gap:8px;
+      max-width:calc(100% - 56px);overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }
+    .pii-close{ flex:0 0 auto;width:36px;height:36px;border:0;background:#fff;border-radius:8px;font-size:18px;color:#7c3aed;cursor:pointer; }
+    .pii-close:hover{ background:#f3e8ff; }
+    .pii-body{ flex:1;min-height:0;overflow-y:auto;padding:16px 20px; }
+    .pii-note{ font-size:13px;color:#7c3aed;background:#faf5ff;border-radius:8px;padding:10px 12px;margin-bottom:12px;display:flex;align-items:flex-start;gap:8px;line-height:1.5; }
+
+    /* ── 벤치마크 ── */
+    .sch-delta-grid{ display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:16px; }
+    .sch-delta-card{ background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:18px;display:flex;flex-direction:column;gap:4px; }
+    .sch-delta-card .dl-label{ font-size:13px;font-weight:600;color:#6b7280; }
+    .sch-delta{ font-size:24px;font-weight:700;font-variant-numeric:tabular-nums; }
+    .sch-delta.up{ color:var(--bench-up); }
+    .sch-delta.down{ color:var(--bench-down); }
+    .sch-delta.warn{ color:var(--risk-high); }
+    .sch-delta.flat{ color:#6b7280; }
+    .sch-delta-card .dl-sub{ font-size:12px;color:#9ca3af; }
+
+    /* ── 빈/로딩 상태 ── */
+    .dc-state-panel{ display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;
+      padding:40px 24px;color:#6b7280;gap:14px; }
+    .dc-state-panel i{ font-size:34px;color:#cbd5e1; }
+    .dc-state-panel p{ font-size:16px;line-height:1.6;margin:0;max-width:460px; }
+    .dc-skeleton{ background:linear-gradient(90deg,#f3f4f6 25%,#e9ecef 50%,#f3f4f6 75%);background-size:200% 100%;
+      animation:skel 1.4s infinite;border-radius:10px; }
+    @keyframes skel{ 0%{background-position:200% 0;} 100%{background-position:-200% 0;} }
+    .sch-insight.good .ins-link{ border-color:#86efac; }
+
+    /* ── 토스트 ── */
+    #schToast{ position:fixed;left:50%;bottom:32px;transform:translateX(-50%) translateY(20px);z-index:10050;
+      background:#111827;color:#fff;font-size:15px;font-weight:600;padding:14px 22px;border-radius:10px;
+      box-shadow:0 8px 24px rgba(0,0,0,.3);opacity:0;pointer-events:none;transition:opacity .2s,transform .2s;display:flex;align-items:center;gap:10px; }
+    #schToast[data-show="true"]{ opacity:1;transform:translateX(-50%) translateY(0); }
+
+    /* ── 탭 패널 ── */
+    .sch-panel{ display:none;padding-top:24px; }
+    .sch-panel[data-active="true"]{ display:block; }
+
+    /* ── 반응형 ── */
+    @media(max-width:1279px){ .sch-kpi-grid{ grid-template-columns:repeat(3,1fr); } }
+    @media(max-width:1023px){ .sch-kpi-grid{ grid-template-columns:repeat(2,1fr); } }
+    @media(max-width:767px){
+      .sch-wrap{ padding:0 14px 32px; }
+      .sch-section{ padding:18px; }
+      .sch-h1{ font-size:24px; }
+    }
+    @media(prefers-reduced-motion:reduce){
+      .heat-pulse{ animation:none; }
+      *{ transition:none !important; }
+    }
+  </style>
+</head>
+<body>
+  <!-- GNB(공통) -->
+  <script src="/js/common-nav.js"></script>
+
+  <div id="schRoot" hidden>
+    <!-- 헤더 -->
+    <header class="sch-header">
+      <div class="sch-head-main">
+        <h1 class="sch-h1"><span aria-hidden="true">🏫</span> <span id="schName">학교 경영 대시보드</span></h1>
+        <div class="sch-meta" id="schMeta">학교 책임자 뷰 · 우리 학교만 표시 · 활동 기준(외부 진단과 별도)</div>
+      </div>
+      <div class="sch-tools">
+        <label for="schPeriod" style="font-size:13px;color:#6b7280;">기간</label>
+        <select id="schPeriod" class="sch-select" aria-label="기간 선택">
+          <option value="30d" selected>최근 30일</option>
+          <option value="90d">최근 90일</option>
+        </select>
+        <button class="mastery-btn mastery-btn-sm mastery-btn-ghost" id="btnPdf" type="button"><i class="fas fa-file-pdf" aria-hidden="true"></i> PDF</button>
+        <button class="mastery-btn mastery-btn-sm mastery-btn-ghost" id="btnExcel" type="button"><i class="fas fa-file-excel" aria-hidden="true"></i> 엑셀</button>
+      </div>
+    </header>
+
+    <!-- 탭 네비 -->
+    <nav class="sch-tabs" role="tablist" aria-label="대시보드 탭" id="schTabs">
+      <button class="sch-tab" role="tab" data-tab="overview"  aria-selected="true"  aria-controls="panel-overview">⓪ 한눈 요약</button>
+      <button class="sch-tab" role="tab" data-tab="enroll"    aria-selected="false" aria-controls="panel-enroll">① 가입·접속</button>
+      <button class="sch-tab" role="tab" data-tab="usage"     aria-selected="false" aria-controls="panel-usage">② 서비스 이용</button>
+      <button class="sch-tab" role="tab" data-tab="academics" aria-selected="false" aria-controls="panel-academics">③ 학력·성취</button>
+      <button class="sch-tab" role="tab" data-tab="safety"    aria-selected="false" aria-controls="panel-safety">④ 안전망·정서</button>
+      <button class="sch-tab" role="tab" data-tab="staff"     aria-selected="false" aria-controls="panel-staff">⑤ 교직원·운영</button>
+      <button class="sch-tab" role="tab" data-tab="benchmark" aria-selected="false" aria-controls="panel-benchmark">⑥ 비교</button>
+    </nav>
+
+    <div class="sch-wrap">
+      <section class="sch-panel" id="panel-overview"  role="tabpanel" aria-labelledby="tab-overview"  data-active="true"></section>
+      <section class="sch-panel" id="panel-enroll"    role="tabpanel" data-active="false"></section>
+      <section class="sch-panel" id="panel-usage"     role="tabpanel" data-active="false"></section>
+      <section class="sch-panel" id="panel-academics" role="tabpanel" data-active="false"></section>
+      <section class="sch-panel" id="panel-safety"    role="tabpanel" data-active="false"></section>
+      <section class="sch-panel" id="panel-staff"     role="tabpanel" data-active="false"></section>
+      <section class="sch-panel" id="panel-benchmark" role="tabpanel" data-active="false"></section>
+    </div>
+
+    <footer class="sch-footer" id="schFooter"></footer>
+  </div>
+
+  <!-- 실명 명단 모달 -->
+  <div class="pii-modal" id="piiModal" data-open="false" role="dialog" aria-modal="true" aria-labelledby="piiTitle">
+    <div class="pii-box">
+      <div class="pii-head">
+        <h3 id="piiTitle"><i class="fas fa-lock" aria-hidden="true"></i> 지원이 필요한 학생 명단</h3>
+        <button class="pii-close" id="piiClose" type="button" aria-label="닫기">&times;</button>
+      </div>
+      <div class="pii-body" id="piiBody"></div>
+    </div>
+  </div>
+
+  <div id="schToast" role="status" aria-live="polite"></div>
+
+<script>
+(function(){
+'use strict';
+
+/* ───────── 헬퍼 ───────── */
+function escapeHtml(s){
+  return String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+function escapeAttr(s){ return escapeHtml(s); }
+function pct(n){ return (n==null||isNaN(n)) ? '-' : Math.round(Number(n)); }
+function num(n){ return (Number(n)||0).toLocaleString(); }
+
+const state = { charts:[], tab:'overview', period:'30d', data:{} };
+
+function destroyCharts(){ state.charts.forEach(c=>{try{c.destroy();}catch(_){}}); state.charts=[]; }
+
+async function apiGet(path){
+  try{ const r = await fetch(path,{credentials:'include'}); if(!r.ok) throw new Error('HTTP '+r.status); return await r.json(); }
+  catch(e){ console.warn('[SCHOOL] API 실패', path, e.message); return null; }
+}
+
+function tplLoading(n=2){
+  let s=''; for(let i=0;i<n;i++) s+='<div class="dc-skeleton" style="height:90px;margin-bottom:14px;"></div>';
+  return '<div role="status" aria-label="데이터 로딩 중">'+s+'</div>';
+}
+function tplEmpty(msg, cta){
+  return '<div class="dc-state-panel" role="status"><i class="fas fa-inbox" aria-hidden="true"></i><p>'+escapeHtml(msg||'아직 데이터가 없어요')+'</p>'
+    + (cta?'<a class="mastery-btn mastery-btn-sm" href="'+escapeAttr(cta.href)+'">'+escapeHtml(cta.label)+'</a>':'') + '</div>';
+}
+
+const CHART_FALLBACK = ['#2563eb','#16a34a','#8b5cf6','#06b6d4','#f59e0b','#ec4899','#9ca3af','#14b8a6','#f97316','#6366f1'];
+function _resolveCssVar(str){
+  if (typeof str !== 'string') return str;
+  const m = str.match(/^\s*var\(\s*(--[\w-]+)\s*(?:,\s*([^)]+))?\)\s*$/); if(!m) return str;
+  try{ const v = getComputedStyle(document.documentElement).getPropertyValue(m[1]).trim(); if(v) return v; }catch(_){}
+  return m[2]?m[2].trim():str;
+}
+function _resolveColorField(val, idx){
+  if (Array.isArray(val)) return val.map((v,i)=>_resolveColorField(v,i));
+  const r=_resolveCssVar(val);
+  if (typeof r==='string' && /^\s*var\(/.test(r)) return CHART_FALLBACK[(idx||0)%CHART_FALLBACK.length];
+  return r;
+}
+function _resolveDatasetColors(data){
+  if(!data||!Array.isArray(data.datasets)) return data;
+  data.datasets.forEach((ds,i)=>{ ['backgroundColor','borderColor','hoverBackgroundColor','pointBackgroundColor'].forEach(k=>{ if(ds[k]!==undefined) ds[k]=_resolveColorField(ds[k],i); }); });
+  return data;
+}
+function mkChart(canvas, type, data, opts){
+  if(!canvas) return null;
+  _resolveDatasetColors(data);
+  const base = { responsive:true, maintainAspectRatio:false,
+    plugins:{ legend:{ position:'bottom', labels:{ font:{size:12}, usePointStyle:true, boxWidth:14, padding:10 } } },
+    animation: window.matchMedia('(prefers-reduced-motion:reduce)').matches ? false : { duration:550, easing:'easeOutCubic' } };
+  const chart = new Chart(canvas, { type, data, options: Object.assign(base, opts||{}) });
+  state.charts.push(chart); return chart;
+}
+function donutLegendOpts(unit){
+  const u = unit||'건';
+  return { plugins:{ legend:{ position:'right', labels:{ font:{size:12}, padding:12, boxWidth:14, boxHeight:14,
+    generateLabels:(chart)=>{ const d=chart.data, ds=(d.datasets&&d.datasets[0])||{};
+      return (d.labels||[]).map((lbl,i)=>({ text: lbl+' — '+(Number(ds.data&&ds.data[i])||0).toLocaleString()+u,
+        fillStyle: Array.isArray(ds.backgroundColor)?ds.backgroundColor[i]:ds.backgroundColor, strokeStyle:'transparent', hidden:false, index:i })); } } } } };
+}
+
+/* 반원 게이지 SVG (lrs 계승, 140px) */
+function gaugeHTML(current, label, tone){
+  const p = Math.max(0, Math.min(100, Math.round(Number(current)||0)));
+  const cx=80, cy=80, r=64, startA=Math.PI, endA=startA+(p/100)*Math.PI;
+  const pt=a=>[cx+r*Math.cos(a), cy+r*Math.sin(a)];
+  const [sx,sy]=pt(startA), [ex,ey]=pt(endA);
+  const large=(endA-startA)>Math.PI?1:0;
+  const arcBg='M '+(cx-r)+' '+cy+' A '+r+' '+r+' 0 0 1 '+(cx+r)+' '+cy;
+  const arcFg=p>0?('M '+sx.toFixed(1)+' '+sy.toFixed(1)+' A '+r+' '+r+' 0 '+large+' 1 '+ex.toFixed(1)+' '+ey.toFixed(1)):'';
+  const col = tone==='success'?'var(--mastery-reached)':tone==='info'?'#06b6d4':'var(--sch-primary)';
+  return '<div class="sch-gauge"><svg viewBox="0 0 160 96" aria-label="'+escapeAttr((label||'')+' '+p+'%')+'">'
+    + '<path d="'+arcBg+'" stroke="#e5e7eb" stroke-width="14" fill="none" stroke-linecap="round"/>'
+    + (arcFg?'<path d="'+arcFg+'" stroke="'+col+'" stroke-width="14" fill="none" stroke-linecap="round"/>':'')
+    + '</svg><div class="gauge-value">'+p+'%</div>'+(label?'<div class="gauge-label">'+escapeHtml(label)+'</div>':'')+'</div>';
+}
+
+/* KPI 카드 */
+function kpiCard(opts){
+  const { label, value, unit, tone, trend, extra, gaugeVal, gaugeLabel } = opts;
+  const tcls = trend ? (trend.cls||'flat') : 'flat';
+  const tArrow = trend ? (trend.cls==='up'?'▲':trend.cls==='down'?'▼':trend.cls==='warn'?'▲':'·') : '';
+  const valHtml = gaugeVal!=null
+    ? '<div class="kpi-gauge">'+gaugeHTML(gaugeVal, gaugeLabel||'', tone)+'</div>'
+    : '<div class="kpi-value">'+escapeHtml(String(value))+(unit?'<span class="kpi-unit">'+escapeHtml(unit)+'</span>':'')+'</div>';
+  return '<article class="dc-kpi-card" data-tone="'+escapeAttr(tone||'primary')+'" tabindex="0" role="group" aria-label="'+escapeAttr(label)+'">'
+    + '<div class="kpi-label">'+escapeHtml(label)+'</div>'
+    + valHtml
+    + (trend?'<div class="kpi-trend '+tcls+'">'+tArrow+' '+escapeHtml(trend.text)+'</div>':'')
+    + (extra?'<div class="kpi-extra">'+extra+'</div>':'')
+    + '</article>';
+}
+
+/* 토스트 */
+function toast(msg){
+  const el=document.getElementById('schToast');
+  el.innerHTML='<i class="fas fa-circle-check" aria-hidden="true"></i> '+escapeHtml(msg);
+  el.setAttribute('data-show','true');
+  clearTimeout(el._t); el._t=setTimeout(()=>el.setAttribute('data-show','false'), 2600);
+}
+
+/* ───────── 상태 분류 ───────── */
+function rateState(reachedRate, evaluated){
+  if (evaluated==null || evaluated===0 || reachedRate==null) return 'insufficient';
+  const r=Number(reachedRate);
+  if (r>=80) return 'reached';
+  if (r>=50) return 'partial';
+  return 'notReached';
+}
+function cellStateForHeat(c){
+  // crossMasked 소표본/미평가 → none(데이터없음) 또는 insufficient
+  if (c.reachedRate==null || c.evaluated===0) return 'none';
+  return rateState(c.reachedRate, c.evaluated);
+}
+
+const SUBJECT_ORDER = ['국어','수학','영어','과학','사회','음악','미술','체육','미상'];
+function sortSubjects(list){
+  return list.slice().sort((a,b)=>{
+    const ia=SUBJECT_ORDER.indexOf(a), ib=SUBJECT_ORDER.indexOf(b);
+    return (ia<0?99:ia)-(ib<0?99:ib);
+  });
+}
+
+/* ───────── 데이터 로딩 ───────── */
+async function loadAll(){
+  const p = state.period;
+  const [overview, enrollment, access, pages, achievement, safety, staff, benchmark] = await Promise.all([
+    apiGet('/api/school/overview'),
+    apiGet('/api/school/enrollment'),
+    apiGet('/api/school/access?period='+p),
+    apiGet('/api/school/pages?period='+p),
+    apiGet('/api/school/achievement'),
+    apiGet('/api/school/safety?names=1'),
+    apiGet('/api/school/staff'),
+    apiGet('/api/school/benchmark?period=90d'),
+  ]);
+  state.data = { overview, enrollment, access, pages, achievement, safety, staff, benchmark };
+}
+
+/* ───────── 탭 렌더러 ───────── */
+const RENDERERS = {
+  overview: renderOverview,
+  enroll: renderEnroll,
+  usage: renderUsage,
+  academics: renderAcademics,
+  safety: renderSafety,
+  staff: renderStaff,
+  benchmark: renderBenchmark,
+};
+
+function renderTab(tab){
+  destroyCharts();
+  document.querySelectorAll('.sch-panel').forEach(p=>p.setAttribute('data-active', p.id==='panel-'+tab ? 'true':'false'));
+  document.querySelectorAll('.sch-tab').forEach(t=>t.setAttribute('aria-selected', t.dataset.tab===tab ? 'true':'false'));
+  state.tab = tab;
+  const fn = RENDERERS[tab];
+  const panel = document.getElementById('panel-'+tab);
+  if (fn && panel){ try{ fn(panel); }catch(e){ console.error('[SCHOOL] render',tab,e); panel.innerHTML=tplEmpty('화면을 그리는 중 문제가 발생했어요.'); } }
+}
+
+/* ── ⓪ 한눈 요약 ── */
+function renderOverview(panel){
+  const ov = state.data.overview && state.data.overview.overview;
+  const insights = (state.data.overview && state.data.overview.insights) || [];
+  if (!ov){ panel.innerHTML = tplEmpty('요약 데이터를 불러오지 못했어요.'); return; }
+
+  const tl = ov.todayLearning||{};
+  const em = ov.emotion||{};
+  const rs = ov.riskSummary||{};
+  const staff = state.data.staff;
+  const teacherTotal = staff && staff.teachers ? staff.teachers.reduce((s,t)=>s+(t.total||0),0) : 0;
+
+  // KPI 6장
+  const kpis = [
+    kpiCard({ label:'학생 수', value:num(ov.studentCount), unit:'명', tone:'primary',
+      extra:'교사 '+num(ov.teacherCount)+' · 학부모 '+num(ov.parentCount||0) }),
+    kpiCard({ label:'활성 이용률(활동 기준)', gaugeVal:ov.activeClassRate, tone:'info',
+      trend:{cls:'up', text:'학급 활동 기준'}, extra:'활성 학급 '+num(ov.activeClasses)+'/'+num(ov.totalClasses) }),
+    kpiCard({ label:'평균 성취 도달률', gaugeVal:ov.avgReachedRate, tone:'success',
+      trend:{cls:'flat', text:'평가된 성취기준 기준'}, extra:'평가 '+num(ov.evaluatedStandards)+'개 기준' }),
+    kpiCard({ label:'지금 지원이 필요한 학생', value:num(ov.supportNeeded), unit:'명', tone:'danger',
+      trend:{cls:'warn', text:'점검 권장'}, extra:'위험 높음 '+num(rs.high)+' · 보통 '+num(rs.medium) }),
+    kpiCard({ label:'긍정 정서 비율', value:pct(em.positivePct), unit:'%', tone:'warning',
+      trend:{cls:'flat', text:'최근 응답 기준'}, extra:'<span class="lowsample-chip">n='+num(em.sampleN)+' · 표본 작음</span>' }),
+    kpiCard({ label:'교사 활동량', value:num(teacherTotal), unit:'건', tone:'purple',
+      trend:{cls:'up', text:'수업·과제·평가·콘텐츠 합'}, extra:'교사 '+num(ov.teacherCount)+'명' }),
+  ].join('');
+
+  // 가입 1줄
+  const bars = (ov.gradeBars||[]);
+  const maxB = Math.max(1, ...bars.map(b=>b.count||0));
+  const barsHtml = bars.map(b=>'<div class="mb"><span class="mb-num">'+num(b.count)+'</span>'
+    + '<div class="mb-bar" style="height:'+Math.max(4, Math.round((b.count/maxB)*48))+'px"></div>'
+    + '<span class="mb-lbl">'+escapeHtml(b.grade)+'학년</span></div>').join('');
+  const enrollHtml = '<div class="sch-enroll-card">'
+    + '<div class="enr-text">학생 '+num(ov.studentCount)+'<span class="sep">·</span>교사 '+num(ov.teacherCount)
+    + '<span class="sep">·</span>학부모 '+num(ov.parentCount||0)+' <span class="soon-chip">데이터 보강중</span></div>'
+    + '<div class="sch-mini-bars">'+(bars.length?barsHtml:'<span style="color:#9ca3af;font-size:14px;">학년 데이터 적음</span>')+'</div>'
+    + '</div>';
+
+  // 인사이트
+  const insightHtml = renderInsightCard(insights);
+
+  // 2분할
+  const twoCol = '<div class="sch-2col">'
+    + '<div class="sch-section"><div class="sch-section-head"><div class="ssh-titles">'
+    + '<h2 class="mastery-h2">일자별 이용자수(활동 기준)</h2><div class="mastery-sub">로그인 세션이 아닌 활동 발생 기준이에요.</div></div></div>'
+    + '<div class="chart-body"><canvas id="ovAccess"></canvas></div></div>'
+    + '<div class="sch-section"><div class="sch-section-head"><div class="ssh-titles">'
+    + '<h2 class="mastery-h2">안전망 추이</h2><div class="mastery-sub">정서 부정 응답 비율(주별, 참고용)</div></div>'
+    + '<span class="lowsample-chip">표본 작음</span></div>'
+    + '<div class="chart-body"><canvas id="ovEmotion"></canvas></div>'
+    + '<div id="ovEmoNote" style="margin-top:10px;font-size:13px;font-weight:600;"></div></div>'
+    + '</div>';
+
+  panel.innerHTML = '<div class="sch-kpi-grid">'+kpis+'</div>' + enrollHtml + insightHtml + twoCol;
+
+  // 2분할 차트 데이터
+  drawOverviewAccess();
+  drawOverviewEmotion();
+  bindInsightLinks(panel);
+}
+
+function renderInsightCard(insights){
+  if (!insights.length){
+    return '<div class="sch-insight good"><div class="ins-head"><i class="fas fa-circle-check" aria-hidden="true"></i> 오늘의 인사이트</div>'
+      + '<div class="ins-item"><div class="ins-main"><div class="ins-text">오늘 특이 신호가 없어요. 학교 전반이 안정적입니다. 👍</div></div></div></div>';
+  }
+  const items = insights.map(ins=>{
+    const sampleTxt = ins.sample!=null ? ('표본 '+ins.sample+'명') : '';
+    const confKo = ins.confidence==='high'?'신뢰 높음':ins.confidence==='low'?'표본 적어 참고용':'신뢰 보통';
+    const tabLabel = ({academics:'③ 학력·성취', safety:'④ 안전망·정서', enroll:'① 가입·접속', usage:'② 서비스 이용', staff:'⑤ 교직원·운영', benchmark:'⑥ 비교'})[ins.tab] || '상세';
+    return '<div class="ins-item"><div class="ins-main">'
+      + '<div class="ins-text">'+escapeHtml(ins.text)+'</div>'
+      + '<div class="ins-foot"><span class="conf-badge" data-conf="'+escapeAttr(ins.confidence||'mid')+'"><span class="conf-dot"></span>'+confKo+'</span>'
+      + (sampleTxt?'<span>· '+escapeHtml(sampleTxt)+'</span>':'')+'</div></div>'
+      + '<button class="ins-link" type="button" data-go-tab="'+escapeAttr(ins.tab||'')+'" data-go-id="'+escapeAttr(ins.id||'')+'">'+escapeHtml(tabLabel)+' ▸</button>'
+      + '</div>';
+  }).join('');
+  return '<div class="sch-insight"><div class="ins-head"><span aria-hidden="true">💡</span> 오늘의 인사이트 <span style="font-weight:500;color:#b45309;font-size:13px;">(규칙 기반 자동 분석)</span></div>'+items+'</div>';
+}
+
+function bindInsightLinks(panel){
+  panel.querySelectorAll('.ins-link[data-go-tab]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const tab = btn.dataset.goTab, id = btn.dataset.goId;
+      if (!tab) return;
+      switchTab(tab);
+      // 펄스 하이라이트 타깃
+      setTimeout(()=>{
+        if (tab==='academics' && id && id.indexOf('trend')<0){
+          const cell = document.querySelector('#panel-academics .mastery-heatmap td.cell[data-target="1"]');
+          if (cell){ cell.classList.add('heat-pulse'); cell.scrollIntoView({behavior:'smooth',block:'center'}); }
+        } else {
+          const panelEl = document.getElementById('panel-'+tab);
+          if (panelEl){ const sec=panelEl.querySelector('.sch-section'); if(sec) sec.scrollIntoView({behavior:'smooth',block:'start'}); }
+        }
+      }, 120);
+    });
+  });
+}
+
+function drawOverviewAccess(){
+  const acc = state.data.access;
+  const cv = document.getElementById('ovAccess'); if(!cv) return;
+  if (!acc || !(acc.daily||[]).length){ cv.closest('.chart-body').innerHTML = tplEmpty('아직 접속 추이를 그릴 데이터가 부족해요.'); return; }
+  const byDate = {};
+  (acc.daily||[]).forEach(r=>{ byDate[r.date]=byDate[r.date]||{student:0,teacher:0}; const k=r.role==='student'?'student':'teacher'; byDate[r.date][k]+=(r.users||0); });
+  const dates = Object.keys(byDate).sort();
+  mkChart(cv, 'line', { labels:dates.map(d=>d.slice(5)),
+    datasets:[
+      { label:'학생', data:dates.map(d=>byDate[d].student), borderColor:'#2563eb', backgroundColor:'rgba(37,99,235,.08)', tension:.3, fill:true, pointRadius:3 },
+      { label:'교사', data:dates.map(d=>byDate[d].teacher), borderColor:'#8b5cf6', backgroundColor:'rgba(139,92,246,.06)', tension:.3, fill:true, pointRadius:3 },
+    ]}, { scales:{ y:{ beginAtZero:true, ticks:{ precision:0 } } } });
+}
+
+function drawOverviewEmotion(){
+  const sf = state.data.safety;
+  const cv = document.getElementById('ovEmotion'); if(!cv) return;
+  const weeks = (sf && sf.emotionTrend && sf.emotionTrend.weeks) || [];
+  if (!weeks.length){ cv.closest('.chart-body').innerHTML = tplEmpty('감정 데이터가 아직 적어요.'); return; }
+  mkChart(cv, 'bar', { labels:weeks.map(w=>w.week),
+    datasets:[{ label:'부정 응답 비율(%)', data:weeks.map(w=>w.negativePct), backgroundColor:'#ea7317', borderRadius:6, maxBarThickness:34 }] },
+    { scales:{ y:{ beginAtZero:true, max:100, ticks:{ callback:v=>v+'%' } } }, plugins:{ legend:{ display:false } } });
+  const last=weeks[weeks.length-1], prev=weeks[weeks.length-2];
+  const note=document.getElementById('ovEmoNote');
+  if (note && last){
+    const dir = prev ? (last.negativePct>prev.negativePct?'down':last.negativePct<prev.negativePct?'up':'flat') : 'flat';
+    const arrow = dir==='down'?'↗ 개선':dir==='up'?'↘ 악화':'→ 유지';
+    const tcls = dir==='down'?'up':dir==='up'?'down':'flat';
+    note.className='trend-arrow';
+    note.setAttribute('data-trend', tcls);
+    note.innerHTML = arrow+' 이번 주 부정 '+pct(last.negativePct)+'%'+(prev?' (지난주 '+pct(prev.negativePct)+'%)':'');
+  }
+}
+
+/* ── ① 가입·접속 ── */
+function renderEnroll(panel){
+  const en = state.data.enrollment, acc = state.data.access;
+  if (!en){ panel.innerHTML=tplEmpty('가입 데이터를 불러오지 못했어요.'); return; }
+  const role = en.byRole||{};
+  panel.innerHTML =
+    '<div class="sch-2col">'
+    + '<div class="sch-section"><div class="sch-section-head"><div class="ssh-titles"><h2 class="mastery-h2">역할·학년별 가입자</h2><div class="mastery-sub">학생은 학년별, 교직원은 합계 기준</div></div></div>'
+    + '<div class="chart-body"><canvas id="enGrade"></canvas></div></div>'
+    + '<div class="sch-section"><div class="sch-section-head"><div class="ssh-titles"><h2 class="mastery-h2">역할 구성</h2><div class="mastery-sub">전체 가입자 구성비</div></div></div>'
+    + '<div class="donut-wrap"><canvas id="enRole"></canvas><div class="donut-center"><div class="dc-num">'+num((role.student||0)+(role.teacher||0)+(role.principal||0)+(role.admin||0))+'</div><div class="dc-lbl">총 가입자</div></div></div>'
+    + '<div style="margin-top:10px;font-size:13px;color:#9ca3af;">학부모 가입은 데이터 적재 예정이에요(준비 중).</div></div>'
+    + '</div>'
+    + '<div class="sch-section"><div class="sch-section-head"><div class="ssh-titles"><h2 class="mastery-h2">일자별 이용자 · DAU/WAU/MAU</h2><div class="mastery-sub">'+escapeHtml((acc&&acc.label)||'이용자수(활동 기준)')+' · 로그인 세션 로그가 빈약해 활동 발생을 접속으로 봅니다</div></div></div>'
+    + '<div class="sch-kpi-grid" style="grid-template-columns:repeat(3,1fr);margin-bottom:16px;">'+dauKpis(acc)+'</div>'
+    + '<div class="chart-body"><canvas id="enAccessLine"></canvas></div></div>'
+    + '<div class="sch-section"><div class="sch-section-head"><div class="ssh-titles"><h2 class="mastery-h2">시간대 이용 패턴</h2><div class="mastery-sub">요일×시간 활동 농도(활동 기준)</div></div></div>'
+    + '<div id="enHeatmap"></div></div>';
+
+  // 학년 + 역할 바
+  const bars = (en.byGrade||[]);
+  const cvG = document.getElementById('enGrade');
+  mkChart(cvG, 'bar', {
+    labels: bars.map(b=>b.grade+'학년').concat(['교사','관리자']),
+    datasets:[{ label:'가입자 수', data: bars.map(b=>b.count).concat([role.teacher||0, role.admin||0]),
+      backgroundColor: bars.map(()=>'#93c5fd').concat(['#8b5cf6','#9ca3af']), borderRadius:6, maxBarThickness:48 }]
+  }, { plugins:{ legend:{ display:false } }, scales:{ y:{ beginAtZero:true, ticks:{ precision:0 } } } });
+
+  const cvR = document.getElementById('enRole');
+  mkChart(cvR, 'doughnut', {
+    labels:['학생','교사','관리자','학부모'],
+    datasets:[{ data:[role.student||0, role.teacher||0, (role.admin||0)+(role.principal||0), role.parent||0],
+      backgroundColor:['#2563eb','#8b5cf6','#06b6d4','#9ca3af'], borderWidth:2, borderColor:'#fff' }]
+  }, Object.assign({ cutout:'62%' }, donutLegendOpts('명')));
+
+  drawEnAccessLine();
+  renderHeatmap(document.getElementById('enHeatmap'), acc);
+}
+
+function dauKpis(acc){
+  if (!acc) return '';
+  const dauExtra = (acc.dau===0) ? '오늘 활동 없음(활동 기준)' : '오늘 활동 학생·교사';
+  return [
+    kpiCard({ label:'DAU(활동 기준)', value:num(acc.dau), unit:'명', tone:'primary', extra:dauExtra }),
+    kpiCard({ label:'WAU(활동 기준)', value:num(acc.wau), unit:'명', tone:'info', extra:'최근 7일' }),
+    kpiCard({ label:'MAU(활동 기준)', value:num(acc.mau), unit:'명', tone:'success', extra:'최근 30일' }),
+  ].join('');
+}
+
+function drawEnAccessLine(){
+  const acc = state.data.access; const cv=document.getElementById('enAccessLine'); if(!cv) return;
+  if (!acc || !(acc.daily||[]).length){ cv.closest('.chart-body').innerHTML=tplEmpty('아직 접속 추이를 그릴 데이터가 부족해요.'); return; }
+  const byDate={}; (acc.daily||[]).forEach(r=>{ byDate[r.date]=byDate[r.date]||{student:0,teacher:0}; const k=r.role==='student'?'student':'teacher'; byDate[r.date][k]+=(r.users||0); });
+  const dates=Object.keys(byDate).sort();
+  mkChart(cv,'line',{ labels:dates.map(d=>d.slice(5)),
+    datasets:[
+      { label:'학생', data:dates.map(d=>byDate[d].student), borderColor:'#2563eb', backgroundColor:'rgba(37,99,235,.08)', tension:.3, fill:true, pointRadius:3 },
+      { label:'교사', data:dates.map(d=>byDate[d].teacher), borderColor:'#8b5cf6', backgroundColor:'rgba(139,92,246,.06)', tension:.3, fill:true, pointRadius:3 },
+    ]},{ scales:{ y:{ beginAtZero:true, ticks:{ precision:0 } } } });
+}
+
+/* 요일×시간 히트맵 (lrs renderHeatmap 계승, hourly:[{dow,hour,cnt}]) */
+function renderHeatmap(container, acc){
+  if(!container) return;
+  const hourly = (acc && acc.hourly) || [];
+  if (!hourly.length){ container.innerHTML=tplEmpty('시간대 데이터가 아직 적어요.'); return; }
+  const matrix = Array.from({length:7},()=>Array(24).fill(0));
+  hourly.forEach(r=>{ const d=r.dow, h=r.hour; if(d>=0&&d<7&&h>=0&&h<24) matrix[d][h]+=(r.cnt||0); });
+  let maxV=0; matrix.forEach(row=>row.forEach(v=>{ if(v>maxV)maxV=v; }));
+  function bucket(v){ if(!maxV||v<=0) return 0; const r=v/maxV; if(r>.75)return 4; if(r>.5)return 3; if(r>.25)return 2; if(r>0)return 1; return 0; }
+  const HEAT=['#f3f4f6','#dbeafe','#93c5fd','#3b82f6','#1d4ed8'];
+  const dows=['일','월','화','수','목','금','토'];
+  let html='<div style="overflow-x:auto;max-width:100%;-webkit-overflow-scrolling:touch;"><div style="display:inline-grid;grid-template-columns:32px repeat(24,1fr);gap:3px;min-width:520px;">';
+  html += '<div></div>';
+  for(let h=0;h<24;h++) html+='<div style="font-size:10px;color:#9ca3af;text-align:center;">'+(h%3===0?h:'')+'</div>';
+  for(let d=0;d<7;d++){
+    html += '<div style="font-size:12px;color:#6b7280;font-weight:600;display:flex;align-items:center;">'+dows[d]+'</div>';
+    for(let h=0;h<24;h++){ const v=matrix[d][h], b=bucket(v);
+      html += '<div title="'+dows[d]+' '+h+'시: '+v+'건" style="aspect-ratio:1;min-height:18px;border-radius:4px;background:'+HEAT[b]+';"></div>'; }
+  }
+  html += '</div></div>';
+  container.innerHTML = html;
+}
+
+/* ── ② 서비스 이용 ── */
+function renderUsage(panel){
+  const pg = state.data.pages, ov = state.data.overview && state.data.overview.overview;
+  if (!pg){ panel.innerHTML=tplEmpty('서비스 이용 데이터를 불러오지 못했어요.'); return; }
+  const tl = (ov && ov.todayLearning) || {};
+
+  panel.innerHTML =
+    '<div class="sch-section"><div class="sch-section-head"><div class="ssh-titles"><h2 class="mastery-h2">내부 서비스 이용</h2><div class="mastery-sub">우리 학교 사용자의 서비스별 활동 비중(활동 기준)</div></div></div>'
+    + '<div class="chart-body"><canvas id="usSvc"></canvas></div></div>'
+    + '<div class="sch-section"><div class="sch-section-head"><div class="ssh-titles"><h2 class="mastery-h2">채움클래스 운영 · 오늘의 학습</h2><div class="mastery-sub">개설 클래스 참여·이수·정답률</div></div></div>'
+    + '<div style="display:flex;gap:32px;flex-wrap:wrap;align-items:center;">'
+    + '<div style="text-align:center;">'+gaugeHTML(tl.participationRate,'참여율','info')+'</div>'
+    + '<div style="text-align:center;">'+gaugeHTML(tl.completionRate,'이수율','success')+'</div>'
+    + '<div style="text-align:center;">'+gaugeHTML(tl.avgScore,'평균 정답률','primary')+'</div>'
+    + '<div style="font-size:14px;color:#6b7280;line-height:1.8;min-width:160px;">참여 '+num(tl.participants)+'/'+num(tl.studentCount)+'명<br>배정 '+num(tl.assignedRows)+'행 · 완료 '+num(tl.completed)+'행</div>'
+    + '</div></div>'
+    + '<div class="sch-section"><div class="sch-section-head"><div class="ssh-titles"><h2 class="mastery-h2">외부 연계 서비스</h2><div class="mastery-sub">우리 플랫폼에서 데이터를 수집하지 않는 외부 서비스예요</div></div></div>'
+    + renderExtGroup(pg.external) + '</div>'
+    + '<div class="sch-section"><div class="sch-section-head"><div class="ssh-titles"><h2 class="mastery-h2">준비 중</h2><div class="mastery-sub">데이터 적재 예정 영역</div></div></div>'
+    + '<div class="sch-soon-grid">'
+    + soonCard('fa-book-open','채움책방(독서)','학년별 읽은 책 · 다독 학급')
+    + soonCard('fa-people-roof','학부모 이용','자녀 리포트 열람률 · 소통 참여')
+    + '</div></div>';
+
+  drawUsageSvc();
+  bindHandoff(panel);
+}
+
+function drawUsageSvc(){
+  const pg = state.data.pages; const cv=document.getElementById('usSvc'); if(!cv) return;
+  const internal=(pg.internal||[]).filter(s=>(s.count||0)>0);
+  if (!internal.length){ cv.closest('.chart-body').innerHTML=tplEmpty('서비스 이용 데이터가 아직 적어요.'); return; }
+  const colors=['#2563eb','#16a34a','#8b5cf6','#06b6d4','#f59e0b','#ec4899','#9ca3af'];
+  mkChart(cv,'bar',{
+    labels: internal.map(s=>s.label),
+    datasets:[{ label:'활동 수', data: internal.map(s=>s.count),
+      backgroundColor: internal.map((_,i)=>colors[i%colors.length]), borderRadius:6, maxBarThickness:52 }]
+  }, { indexAxis:'y', plugins:{ legend:{ display:false }, tooltip:{ callbacks:{ label:(c)=>{ const s=internal[c.dataIndex]; return num(s.count)+'건 · 이용자 '+num(s.users)+'명 ('+s.share+'%)'; } } } },
+       scales:{ x:{ beginAtZero:true, ticks:{ precision:0 } } } });
+}
+
+function renderExtGroup(external){
+  const list = (external||[]).slice();
+  // 진로진학 5번째 추가(시각스펙 §6-4: 외부 5장)
+  if (!list.some(s=>s.service==='career')) list.push({ service:'career', label:'진로진학', external:true });
+  const cards = list.map(s=>'<div class="sch-ext-card">'
+    + '<div class="ext-name"><i class="fas fa-arrow-up-right-from-square ext-icon" aria-hidden="true"></i> '+escapeHtml(s.label)+'</div>'
+    + '<span class="ext-badge">외부 서비스 — 연계 예정</span>'
+    + '<div class="ext-desc">우리 플랫폼에 활동 데이터가 적재되지 않아요.</div>'
+    + '</div>').join('');
+  return '<div class="sch-ext-group">'+cards+'</div>'
+    + '<div class="sch-ext-handoff"><i class="fas fa-circle-info" aria-hidden="true" style="color:#9ca3af;"></i>'
+    + ' 기초학력 도달 현황은 플랫폼 학습데이터 기반으로 ③ 학력·성취 탭에서 확인할 수 있어요. (외부 기초학력 진단시스템과 별도)'
+    + ' <button class="ins-link" type="button" data-handoff="academics">③ 학력·성취 ▸</button></div>';
+}
+
+function bindHandoff(panel){
+  panel.querySelectorAll('[data-handoff]').forEach(b=>b.addEventListener('click',()=>switchTab(b.dataset.handoff)));
+}
+
+function soonCard(icon,title,desc){
+  return '<div class="sch-soon-card"><i class="fas '+icon+' soon-icon" aria-hidden="true"></i>'
+    + '<div class="soon-title">'+escapeHtml(title)+'</div><span class="soon-badge">준비 중</span>'
+    + '<div class="soon-desc">'+escapeHtml(desc)+'<br>데이터 적재 예정</div></div>';
+}
+
+/* ── ③ 학력·성취 ── */
+function renderAcademics(panel){
+  const ac = state.data.achievement;
+  if (!ac){ panel.innerHTML=tplEmpty('성취 데이터를 불러오지 못했어요.'); return; }
+  const ov = ac.overall||{};
+  const cg = ac.classGap||{};
+  const tr = ac.trend||{};
+  const nrbg = ac.notReachedByGrade||[];
+  const totalNR = nrbg.reduce((s,g)=>s+(g.students||0),0);
+
+  panel.innerHTML =
+    '<div class="sch-2col" style="grid-template-columns:1.3fr 1fr;">'
+    + '<div class="sch-section"><div class="sch-section-head"><div class="ssh-titles"><h2 class="mastery-h2">학년×교과 도달률 히트맵</h2><div class="mastery-sub">평가된 성취기준 기준 · 소표본 교차는 카운트만 표시(분모 &lt;'+num(ac.minCrossN)+')</div></div>'
+    + '<span class="conf-badge" data-conf="'+escapeAttr(tr.confidence||'mid')+'"><span class="conf-dot"></span>신뢰 '+escapeHtml(tr.confidenceKo||'보통')+'</span></div>'
+    + '<div id="acHeat"></div>'
+    + '<div class="mastery-legend"><span class="item"><span class="dot reached"></span>도달(≥80%)</span><span class="item"><span class="dot partial"></span>부분(50~79%)</span>'
+    + '<span class="item"><span class="dot notReached"></span>미도달(&lt;50%)</span><span class="item"><span class="dot insufficient"></span>평가 부족</span><span class="item"><span class="dot none"></span>데이터 없음</span></div>'
+    + '</div>'
+    + '<div class="sch-section"><div class="sch-section-head"><div class="ssh-titles"><h2 class="mastery-h2">취약 성취기준 Top10</h2><div class="mastery-sub">도달률 낮은 순</div></div></div>'
+    + '<div id="acWeak"></div></div>'
+    + '</div>'
+    + '<div class="sch-section"><div class="sch-section-head"><div class="ssh-titles"><h2 class="mastery-h2">성취 추세</h2><div class="mastery-sub">학교 전체 주별 도달률</div></div>'
+    + (tr.status==='ok'?'<span class="trend-arrow" data-trend="'+(tr.direction==='down'?'down':tr.direction==='up'?'up':'flat')+'">'+(tr.direction==='down'?'↘':tr.direction==='up'?'↗':'→')+' '+escapeHtml(tr.directionKo||'')+(tr.slope!=null?' '+tr.slope+'%p/주':'')+'</span>':'')+'</div>'
+    + '<div class="chart-body"><canvas id="acTrend"></canvas></div></div>'
+    + '<div class="sch-section"><div class="sch-section-head"><div class="ssh-titles"><h2 class="mastery-h2">학급 간 격차</h2><div class="mastery-sub">같은 학년·교과 안에서 학급별 도달률 범위</div></div></div>'
+    + renderRangeBar(cg) + '</div>'
+    + '<div class="sch-section"><div class="sch-section-head"><div class="ssh-titles"><h2 class="mastery-h2">🎓 기초학력 안전망 <span class="basic-note"><i class="fas fa-circle-info" aria-hidden="true"></i> 플랫폼 학습데이터 기반 · 외부 진단과 별도</span></h2><div class="mastery-sub">미도달 → 보충배정 → 이수 흐름</div></div></div>'
+    + renderFunnel(totalNR, nrbg)
+    + '<div style="margin-top:16px;display:flex;gap:10px;flex-wrap:wrap;">'
+    + '<button class="mastery-btn mastery-btn-sm" type="button" id="acNamesBtn"><i class="fas fa-lock" aria-hidden="true"></i> 명단 보기</button>'
+    + '<button class="mastery-btn mastery-btn-sm mastery-btn-ghost" type="button" id="acAdviseBtn"><i class="fas fa-paper-plane" aria-hidden="true"></i> 담임에게 권고</button>'
+    + '</div></div>';
+
+  drawAcademicsHeatmap();
+  drawWeakTop(ac.weakTop||[]);
+  drawTrendChart(tr);
+
+  const nb=document.getElementById('acNamesBtn'); if(nb) nb.addEventListener('click',openPiiModal);
+  const ab=document.getElementById('acAdviseBtn'); if(ab) ab.addEventListener('click',()=>toast('권고 알림을 보냈어요(목업).'));
+}
+
+function drawAcademicsHeatmap(){
+  const ac = state.data.achievement;
+  const container = document.getElementById('acHeat'); if(!container) return;
+  const heat = ac.heatmap||[];
+  if (!heat.length){ container.innerHTML=tplEmpty('성취 히트맵 데이터가 아직 적어요.'); return; }
+  const grades = (ac.grades||[]).slice();
+  const subjects = sortSubjects([...new Set(heat.map(c=>c.subject))]);
+  // 인사이트 타깃: 미도달이 가장 두드러진 셀(최저 도달률)
+  let target=null, tMin=Infinity;
+  heat.forEach(c=>{ if(c.reachedRate!=null && c.evaluated>0 && c.reachedRate<tMin){ tMin=c.reachedRate; target=c; } });
+
+  const lookup={}; heat.forEach(c=>{ lookup[c.grade+'|'+c.subject]=c; });
+
+  // 데스크탑 표
+  let thead='<th class="corner">학년 \\ 교과</th>'+subjects.map(s=>'<th>'+escapeHtml(s)+'</th>').join('')+'<th class="summary-h">학년 평균</th>';
+  let tbody='';
+  grades.forEach(g=>{
+    let rowEval=0, rowReached=0;
+    let cells='';
+    subjects.forEach(s=>{
+      const c=lookup[g+'|'+s];
+      if (!c){ cells+='<td class="cell" data-state="none" tabindex="-1">-</td>'; return; }
+      const st=cellStateForHeat(c);
+      rowEval+=c.evaluated||0; rowReached+=c.reached||0;
+      const isTarget = target && c.grade===target.grade && c.subject===target.subject;
+      const label = st==='none' ? '-' : (st==='insufficient' ? '·' : pct(c.reachedRate)+'%');
+      const tip = escapeAttr(g+'학년 '+s+' · 평가 '+(c.evaluated||0)+'개 · 도달 '+(c.reached||0)+'개'+(c.crossMasked?' (소표본 — 카운트만)':''));
+      cells+='<td class="cell" data-state="'+st+'" tabindex="0"'+(isTarget?' data-target="1"':'')+' title="'+tip+'">'+label+'</td>';
+    });
+    const avg = rowEval>0 ? Math.round((rowReached/rowEval)*100) : null;
+    tbody+='<tr><th>'+escapeHtml(g)+'학년</th>'+cells+'<td class="summary">'+(avg==null?'평가 부족':avg+'% ('+rowReached+'/'+rowEval+')')+'</td></tr>';
+  });
+  // 모바일 카드
+  let cards='';
+  grades.forEach(g=>{
+    let chips='';
+    subjects.forEach(s=>{
+      const c=lookup[g+'|'+s]; if(!c) return;
+      const st=cellStateForHeat(c); if(st==='none') return;
+      const bg = st==='reached'?'#dcfce7':st==='partial'?'#fef3c7':st==='notReached'?'#fee2e2':'#f3f4f6';
+      const dot = st==='reached'?'#16a34a':st==='partial'?'#f59e0b':st==='notReached'?'#ef4444':'#9ca3af';
+      const ink = st==='reached'?'#15803d':st==='partial'?'#b45309':st==='notReached'?'#b91c1c':'#4b5563';
+      const val = st==='insufficient'?'평가부족':pct(c.reachedRate)+'%';
+      chips+='<span class="sch-heat-chip" style="background:'+bg+';color:'+ink+';"><span class="hcc-dot" style="background:'+dot+';"></span>'+escapeHtml(s)+' '+val+'</span>';
+    });
+    if(chips) cards+='<div class="sch-heat-card"><div class="hc-title">'+escapeHtml(g)+'학년</div><div class="hc-chips">'+chips+'</div></div>';
+  });
+
+  container.innerHTML = '<div class="mastery-heatmap-wrap"><table class="mastery-heatmap"><thead><tr>'+thead+'</tr></thead><tbody>'+tbody+'</tbody></table></div>'
+    + '<div class="sch-heat-cards">'+(cards||tplEmpty('표시할 학년 데이터가 적어요.'))+'</div>';
+
+  // 셀 클릭 → 학급 분포 토스트(집계, 실명 없음)
+  container.querySelectorAll('.mastery-heatmap td.cell[data-state]:not([data-state="none"])').forEach(td=>{
+    td.addEventListener('click',()=>{ toast((td.getAttribute('title')||'학급 분포')+' — 집계 기준'); });
+    td.addEventListener('keydown',(e)=>{ if(e.key==='Enter'){ td.click(); } });
+  });
+}
+
+function drawWeakTop(weak){
+  const container=document.getElementById('acWeak'); if(!container) return;
+  if (!weak.length){ container.innerHTML=tplEmpty('취약 성취기준 데이터가 아직 적어요.'); return; }
+  const rows = weak.slice(0,10);
+  // 데스크탑 표
+  const trs = rows.map((w,i)=>{
+    const st = w.direction==='insufficient'?'insufficient':rateState(w.reachedRate, w.evaluated);
+    const trendDir = w.direction==='down'?'down':w.direction==='up'?'up':w.direction==='insufficient'?'insufficient':'flat';
+    const trendTxt = w.directionKo || '-';
+    const sample = (w.evaluatedStudents!=null && w.evaluatedStudents<30) ? '<span class="lowsample-chip">표본 '+num(w.evaluatedStudents)+'</span>' : num(w.evaluatedStudents||0)+'명';
+    return '<tr><td class="num">'+(i+1)+'</td>'
+      + '<td><span class="wk-label" title="'+escapeAttr(w.label)+'">'+escapeHtml(w.label)+'</span> <span class="wk-code">'+escapeHtml(w.code)+'</span></td>'
+      + '<td>'+escapeHtml(w.subject||'-')+'</td>'
+      + '<td><span class="weak-bar"><span class="wb-track"><span class="wb-fill" data-state="'+st+'" style="width:'+Math.max(3,pct(w.reachedRate))+'%"></span></span><span class="wb-num">'+pct(w.reachedRate)+'%</span></span></td>'
+      + '<td><span class="trend-arrow" data-trend="'+trendDir+'">'+(trendDir==='down'?'↘':trendDir==='up'?'↗':trendDir==='insufficient'?'·':'→')+' '+escapeHtml(trendTxt)+'</span></td>'
+      + '<td>'+sample+'</td></tr>';
+  }).join('');
+  // 모바일 카드
+  const cards = rows.map((w,i)=>{
+    const st = w.direction==='insufficient'?'insufficient':rateState(w.reachedRate, w.evaluated);
+    return '<div class="sch-tbl-card"><div class="tc-title">'+(i+1)+'. '+escapeHtml(w.label)+'</div>'
+      + '<div class="tc-sub">'+escapeHtml(w.code)+' · '+escapeHtml(w.subject||'-')+'</div>'
+      + '<div class="tc-row"><span class="weak-bar"><span class="wb-track"><span class="wb-fill" data-state="'+st+'" style="width:'+Math.max(3,pct(w.reachedRate))+'%"></span></span><span class="wb-num">'+pct(w.reachedRate)+'%</span></span>'
+      + '<span class="trend-arrow" data-trend="'+(w.direction||'flat')+'">'+escapeHtml(w.directionKo||'-')+'</span></div></div>';
+  }).join('');
+  container.innerHTML = '<div class="sch-tbl-wrap"><div class="dc-data-table-wrap"><table class="dc-data-table">'
+    + '<thead><tr><th>#</th><th>성취기준</th><th>교과</th><th>도달률</th><th>추세</th><th>표본</th></tr></thead><tbody>'+trs+'</tbody></table></div></div>'
+    + '<div class="sch-tbl-cards">'+cards+'</div>';
+}
+
+function drawTrendChart(tr){
+  const cv=document.getElementById('acTrend'); if(!cv) return;
+  const series=(tr.series||[]);
+  if (series.length<2){ cv.closest('.chart-body').innerHTML=tplEmpty('추세를 그릴 데이터가 아직 적어요.'); return; }
+  mkChart(cv,'line',{ labels:series.map(s=>s.week),
+    datasets:[{ label:'주별 도달률(%)', data:series.map(s=>s.rate), borderColor:'#2563eb', backgroundColor:'rgba(37,99,235,.1)', tension:.3, fill:true, pointRadius:4 }] },
+    { scales:{ y:{ beginAtZero:true, max:100, ticks:{ callback:v=>v+'%' } } } });
+}
+
+function renderRangeBar(cg){
+  const classes=(cg.classes||[]);
+  if (classes.length<2){
+    const one=classes[0];
+    return '<div style="font-size:15px;color:#6b7280;">현재 평가 가능한 학급이 '+num(classes.length)+'개라 학급 간 격차를 비교하기 어려워요.'
+      + (one?' (<b style="color:#1f2937;">'+escapeHtml(one.name)+'</b> 도달률 '+pct(one.reachedRate)+'%)':'')+'</div>';
+  }
+  const max=cg.maxRate, min=cg.minRate, gap=cg.spread;
+  const maxC=classes.reduce((a,b)=>(b.reachedRate>a.reachedRate?b:a));
+  const minC=classes.reduce((a,b)=>(b.reachedRate<a.reachedRate?b:a));
+  return '<div class="sch-range-bar"><span class="rb-min">최저 '+escapeHtml(minC.name)+' '+pct(min)+'%</span>'
+    + '<span class="rb-track"><span class="rb-fill" style="left:'+pct(min)+'%;width:'+Math.max(2,pct(max)-pct(min))+'%"></span></span>'
+    + '<span class="rb-max">최고 '+escapeHtml(maxC.name)+' '+pct(max)+'%</span>'
+    + '<span class="rb-gap">격차 '+pct(gap)+'%p</span></div>';
+}
+
+function renderFunnel(totalNR, nrbg){
+  // 보충/이수 데이터가 별도 API에 없으므로 미도달은 BE 집계, 보충/이수는 보수적으로 0/0 표시(가짜수치 금지)
+  const worstGrade = nrbg.slice().sort((a,b)=>(b.students||0)-(a.students||0))[0];
+  const unassigned = totalNR; // 보충배정 데이터 미적재 → 전원 미배정으로 보수 표시
+  return '<div class="sch-funnel">'
+    + '<div class="fn-step s1"><div class="fn-num">'+num(totalNR)+'</div><div class="fn-lbl">미도달 학생</div></div>'
+    + '<div class="fn-arrow">▸</div>'
+    + '<div class="fn-step s2"><div class="fn-num">0</div><div class="fn-lbl">보충 배정<br><span style="font-size:11px;">(적재 예정)</span></div></div>'
+    + '<div class="fn-arrow">▸</div>'
+    + '<div class="fn-step s3"><div class="fn-num">0</div><div class="fn-lbl">보충 이수</div></div>'
+    + '</div>'
+    + (totalNR>0 ? '<div style="margin-top:12px;font-size:14px;font-weight:600;color:#b91c1c;display:flex;align-items:center;gap:6px;"><i class="fas fa-triangle-exclamation" aria-hidden="true"></i> 미배정 '+num(unassigned)+'명'
+      + (worstGrade?' · 미도달 많은 학년: '+escapeHtml(worstGrade.grade)+'학년('+num(worstGrade.students)+'명)':'')+'</div>' : '');
+}
+
+/* ── ④ 안전망·정서 ── */
+function renderSafety(panel){
+  const sf = state.data.safety;
+  if (!sf){ panel.innerHTML=tplEmpty('안전망 데이터를 불러오지 못했어요.'); return; }
+  const rbg = sf.riskByGrade||[];
+  const totalRisk = (sf.riskSummary&&sf.riskSummary.high||0)+(sf.riskSummary&&sf.riskSummary.medium||0);
+  const att = sf.attendance||{};
+  const inact = sf.inactive||{};
+
+  const hasRisk = rbg.some(g=>(g.high||0)+(g.medium||0)>0);
+
+  panel.innerHTML =
+    '<div class="sch-section"><div class="sch-section-head"><div class="ssh-titles"><h2 class="mastery-h2">학년별 지원이 필요한 학생 수</h2><div class="mastery-sub">위험 높음/보통 집계(익명) · 실명은 명단 보기에서만</div></div>'
+    + '<button class="mastery-btn mastery-btn-sm" type="button" id="sfNamesBtn"><i class="fas fa-lock" aria-hidden="true"></i> 명단 보기 (실명)</button></div>'
+    + (hasRisk ? '<div class="chart-body"><canvas id="sfRisk"></canvas></div>' : tplEmpty('지금 특별히 지원이 필요한 학생이 없어요. 반 전체가 잘 따라오고 있어요! 🎉'))
+    + '</div>'
+    + '<div class="sch-2col">'
+    + '<div class="sch-section"><div class="sch-section-head"><div class="ssh-titles"><h2 class="mastery-h2">감정 긍정/부정 추이</h2><div class="mastery-sub">주별 부정 응답 비율</div></div>'
+    + '<span class="lowsample-chip">n='+num(sf.emotionTrend&&sf.emotionTrend.sampleN)+' · 참고용</span></div>'
+    + '<div class="chart-body"><canvas id="sfEmotion"></canvas></div></div>'
+    + '<div class="sch-section"><div class="sch-section-head"><div class="ssh-titles"><h2 class="mastery-h2">출결</h2><div class="mastery-sub">출석률 · 장기 결석</div></div></div>'
+    + '<div style="display:flex;gap:24px;align-items:center;flex-wrap:wrap;">'
+    + '<div style="text-align:center;">'+gaugeHTML(att.presentRate,'출석률','success')+'</div>'
+    + '<div style="font-size:15px;color:#374151;line-height:1.9;">최근 무활동 학생 <b style="color:#111827;">'+num(inact.count)+'명</b><br><span style="font-size:13px;color:#9ca3af;">'+num(inact.gapDays)+'일 이상 기준</span>'
+    + '<br><span class="lowsample-chip" style="margin-top:6px;">표본 '+num(att.sampleN)+'건 · 참고용</span></div>'
+    + '</div></div>'
+    + '</div>';
+
+  if (hasRisk) drawSafetyRisk(rbg);
+  drawSafetyEmotion(sf.emotionTrend);
+  const nb=document.getElementById('sfNamesBtn'); if(nb) nb.addEventListener('click',openPiiModal);
+}
+
+function drawSafetyRisk(rbg){
+  const cv=document.getElementById('sfRisk'); if(!cv) return;
+  mkChart(cv,'bar',{ labels:rbg.map(g=>g.grade+'학년'),
+    datasets:[
+      { label:'위험 높음', data:rbg.map(g=>g.high||0), backgroundColor:'#dc2626', borderRadius:5, maxBarThickness:46 },
+      { label:'위험 보통', data:rbg.map(g=>g.medium||0), backgroundColor:'#f59e0b', borderRadius:5, maxBarThickness:46 },
+    ]},{ scales:{ x:{ stacked:true }, y:{ stacked:true, beginAtZero:true, ticks:{ precision:0 } } } });
+}
+
+function drawSafetyEmotion(et){
+  const cv=document.getElementById('sfEmotion'); if(!cv) return;
+  const weeks=(et&&et.weeks)||[];
+  if (!weeks.length){ cv.closest('.chart-body').innerHTML=tplEmpty('감정·출석 데이터가 아직 적어요. 쌓이면 추이가 표시됩니다.'); return; }
+  mkChart(cv,'line',{ labels:weeks.map(w=>w.week),
+    datasets:[
+      { label:'긍정(%)', data:weeks.map(w=>Math.max(0,100-(w.negativePct||0))), borderColor:'#16a34a', backgroundColor:'rgba(22,163,74,.08)', tension:.3, fill:true, pointRadius:3 },
+      { label:'부정(%)', data:weeks.map(w=>w.negativePct), borderColor:'#ea7317', backgroundColor:'rgba(234,115,23,.06)', tension:.3, fill:true, pointRadius:3 },
+    ]},{ scales:{ y:{ beginAtZero:true, max:100, ticks:{ callback:v=>v+'%' } } } });
+}
+
+function openPiiModal(){
+  const sf = state.data.safety;
+  const watch = (sf && sf.watchlist) || [];
+  const body = document.getElementById('piiBody');
+  let inner = '<div class="pii-note"><i class="fas fa-circle-info" aria-hidden="true"></i> <span>지도 목적의 명단입니다. 열람은 기록됩니다(거버넌스). 학급 분모가 10명 미만이면 개별 점수·이름 대신 카운트만 표시됩니다.</span></div>';
+  if (!watch.length){
+    inner += tplEmpty('지금 명단에 표시할 학생이 없어요.');
+  } else {
+    inner += '<div class="ews-list">' + watch.map(w=>{
+      const reasons = (w.reasons||[]).map(r=>'<span class="ews-reason" data-key="'+escapeAttr(r.type||'')+'">'+escapeHtml(r.text)+'</span>').join('');
+      return '<div class="ews-card" data-risk="'+escapeAttr(w.riskGrade)+'">'
+        + '<div class="ews-top"><div class="ews-name"><i class="fas fa-triangle-exclamation risk-icon" data-risk="'+escapeAttr(w.riskGrade)+'" aria-hidden="true"></i> '+escapeHtml(w.name)+'<span style="font-size:13px;color:#6b7280;font-weight:500;margin-left:6px;">'+escapeHtml(w.grade)+'학년</span></div>'
+        + '<div class="ews-badges"><span class="risk-badge" data-risk="'+escapeAttr(w.riskGrade)+'">위험 '+num(w.score)+' · '+escapeHtml(w.riskGradeKo)+'</span>'
+        + '<span class="conf-badge" data-conf="'+escapeAttr(w.confidence||'mid')+'"><span class="conf-dot"></span>'+escapeHtml(w.confidenceKo||'보통')+'</span></div></div>'
+        + '<div class="ews-reasons">'+reasons+'</div>'
+        + '<div class="ews-actions"><button class="mastery-btn mastery-btn-sm" type="button" data-act="notify">담임에게 알림</button>'
+        + '<button class="mastery-btn mastery-btn-sm mastery-btn-ghost" type="button" data-act="detail">상세</button></div></div>';
+    }).join('') + '</div>';
+  }
+  body.innerHTML = inner;
+  body.querySelectorAll('[data-act="notify"]').forEach(b=>b.addEventListener('click',()=>toast('담임에게 알림을 보냈어요(목업).')));
+  body.querySelectorAll('[data-act="detail"]').forEach(b=>b.addEventListener('click',()=>toast('학생 상세는 LRS 드릴다운에서 확인할 수 있어요.')));
+  const m=document.getElementById('piiModal');
+  m.setAttribute('data-open','true');
+  document.body.style.overflow='hidden';
+  setTimeout(()=>{ const c=document.getElementById('piiClose'); if(c) c.focus(); },30);
+}
+function closePiiModal(){
+  document.getElementById('piiModal').setAttribute('data-open','false');
+  document.body.style.overflow='';
+}
+
+/* ── ⑤ 교직원·운영 ── */
+function renderStaff(panel){
+  const st = state.data.staff;
+  if (!st){ panel.innerHTML=tplEmpty('교직원 데이터를 불러오지 못했어요.'); return; }
+  const teachers=(st.teachers||[]).slice().sort((a,b)=>(b.total||0)-(a.total||0));
+  const ch=st.classHealth||{}, cm=st.contentMix||{};
+
+  const rows = teachers.map(t=>'<tr><td>'+escapeHtml(t.name)+'</td>'
+    + '<td class="num">'+num(t.lessons)+'</td><td class="num">'+num(t.homework)+'</td><td class="num">'+num(t.exams)+'</td><td class="num">'+num(t.contents)+'</td>'
+    + '<td class="num"><b>'+num(t.total)+'</b></td></tr>').join('');
+  const cards = teachers.map(t=>'<div class="sch-tbl-card"><div class="tc-title">'+escapeHtml(t.name)+'</div>'
+    + '<div class="tc-row" style="gap:14px;font-size:14px;color:#374151;"><span>수업 '+num(t.lessons)+'</span><span>과제 '+num(t.homework)+'</span><span>평가 '+num(t.exams)+'</span><span>콘텐츠 '+num(t.contents)+'</span><span><b>합계 '+num(t.total)+'</b></span></div></div>').join('');
+
+  panel.innerHTML =
+    '<div class="sch-section"><div class="sch-section-head"><div class="ssh-titles"><h2 class="mastery-h2">교사 활동량</h2><div class="mastery-sub">수업·과제·평가·콘텐츠 제작 합계(많은 순)</div></div></div>'
+    + '<div class="sch-tbl-wrap"><div class="dc-data-table-wrap"><table class="dc-data-table"><thead><tr><th>교사</th><th>수업</th><th>과제</th><th>평가</th><th>콘텐츠</th><th>합계</th></tr></thead><tbody>'+rows+'</tbody></table></div></div>'
+    + '<div class="sch-tbl-cards">'+cards+'</div></div>'
+    + '<div class="sch-2col">'
+    + '<div class="sch-section"><div class="sch-section-head"><div class="ssh-titles"><h2 class="mastery-h2">클래스 건강도</h2><div class="mastery-sub">최근 14일 활동 기준</div></div></div>'
+    + '<div class="donut-wrap"><canvas id="stHealth"></canvas><div class="donut-center"><div class="dc-num">'+num(ch.active)+'/'+num(ch.total)+'</div><div class="dc-lbl">활성 학급</div></div></div></div>'
+    + '<div class="sch-section"><div class="sch-section-head"><div class="ssh-titles"><h2 class="mastery-h2">자체제작 vs 공유 콘텐츠</h2><div class="mastery-sub">제작자(creator) 기준</div></div></div>'
+    + '<div class="donut-wrap"><canvas id="stContent"></canvas><div class="donut-center"><div class="dc-num">'+num(cm.total)+'</div><div class="dc-lbl">콘텐츠 합계</div></div></div></div>'
+    + '</div>';
+
+  mkChart(document.getElementById('stHealth'),'doughnut',{ labels:['활성','휴면'],
+    datasets:[{ data:[ch.active||0, ch.dormant||0], backgroundColor:['#16a34a','#9ca3af'], borderWidth:2, borderColor:'#fff' }] },
+    Object.assign({ cutout:'64%' }, donutLegendOpts('개')));
+  mkChart(document.getElementById('stContent'),'doughnut',{ labels:['자체제작','공유'],
+    datasets:[{ data:[cm.own||0, cm.shared||0], backgroundColor:['#2563eb','#8b5cf6'], borderWidth:2, borderColor:'#fff' }] },
+    Object.assign({ cutout:'64%' }, donutLegendOpts('개')));
+}
+
+/* ── ⑥ 비교 ── */
+function renderBenchmark(panel){
+  const bm = state.data.benchmark;
+  if (!bm){ panel.innerHTML=tplEmpty('비교 데이터를 불러오지 못했어요.'); return; }
+  const ours=bm.ours||{}, lv=bm.levelAvg||{}, rg=bm.regionAvg||{}, mc=bm.monthCompare||{};
+  const levelKo = bm.schoolLevel==='elementary'?'초등':bm.schoolLevel==='middle'?'중등':bm.schoolLevel==='high'?'고등':'학교급';
+
+  panel.innerHTML =
+    '<div class="sch-section"><div class="sch-section-head"><div class="ssh-titles"><h2 class="mastery-h2">우리 학교 vs 평균</h2><div class="mastery-sub">'+levelKo+' 평균('+num(lv.schools)+'교) · '+escapeHtml(bm.region||'지역')+' 평균('+num(rg.schools)+'교)과 비교</div></div></div>'
+    + '<div class="chart-body tall"><canvas id="bmBars"></canvas></div></div>'
+    + '<div class="sch-section"><div class="sch-section-head"><div class="ssh-titles"><h2 class="mastery-h2">전월 대비</h2><div class="mastery-sub">최근 90일 성취 도달률 추세 비교</div></div></div>'
+    + '<div class="sch-delta-grid">'
+    + deltaCard('평균 성취 도달률', mc.deltaPP, 'pp')
+    + deltaCard2('이번 달 도달률', pct(mc.current)+'%', '지난 달 '+pct(mc.previous)+'%')
+    + deltaCard2('학생당 활동량', num(Math.round(ours.avgActsPerStudent))+'건', levelKo+' 평균 '+num(Math.round(lv.avgActsPerStudent))+'건')
+    + deltaCard2('학생당 학습시간', num(Math.round(ours.avgLearnMin))+'분', levelKo+' 평균 '+num(Math.round(lv.avgLearnMin))+'분')
+    + '</div>'
+    + '<div style="margin-top:16px;"><span class="soon-chip">전년 대비는 데이터 1년 누적 후 표시</span></div></div>';
+
+  mkChart(document.getElementById('bmBars'),'bar',{
+    labels:['평균 성취 도달률(%)','학생당 활동량(건)','학생당 학습시간(분)'],
+    datasets:[
+      { label:'우리 학교', data:[pct(ours.reachedRate), Math.round(ours.avgActsPerStudent||0), Math.round(ours.avgLearnMin||0)], backgroundColor:'#2563eb', borderRadius:6, maxBarThickness:40 },
+      { label:levelKo+' 평균', data:[pct(lv.avgReachedRate), Math.round(lv.avgActsPerStudent||0), Math.round(lv.avgLearnMin||0)], backgroundColor:'#cbd5e1', borderRadius:6, maxBarThickness:40 },
+      { label:escapeHtml(bm.region||'지역')+' 평균', data:[pct(rg.avgReachedRate), Math.round(rg.avgActsPerStudent||0), Math.round(rg.avgLearnMin||0)], backgroundColor:'#e2e8f0', borderRadius:6, maxBarThickness:40 },
+    ]},{ scales:{ y:{ beginAtZero:true } } });
+}
+
+function deltaCard(label, deltaPP, kind){
+  const v=Number(deltaPP)||0;
+  const cls = v>0?'up':v<0?'down':'flat';
+  const arrow = v>0?'▲':v<0?'▼':'·';
+  const txt = arrow+' '+(v>0?'+':'')+v+(kind==='pp'?'%p':'');
+  return '<div class="sch-delta-card"><div class="dl-label">'+escapeHtml(label)+'</div>'
+    + '<div class="sch-delta '+cls+'">'+txt+'</div><div class="dl-sub">전월 대비</div></div>';
+}
+function deltaCard2(label, value, sub){
+  return '<div class="sch-delta-card"><div class="dl-label">'+escapeHtml(label)+'</div>'
+    + '<div class="sch-delta flat" style="font-size:22px;color:#111827;">'+escapeHtml(value)+'</div><div class="dl-sub">'+escapeHtml(sub)+'</div></div>';
+}
+
+/* ───────── 탭 전환 ───────── */
+function switchTab(tab){
+  const tabEl = document.querySelector('.sch-tab[data-tab="'+tab+'"]');
+  if (tabEl) tabEl.scrollIntoView({behavior:'smooth', inline:'center', block:'nearest'});
+  renderTab(tab);
+  window.scrollTo({ top:0, behavior:'smooth' });
+}
+
+/* ───────── 초기화 ───────── */
+async function init(){
+  // 로그인 확인
+  let me=null;
+  try{ const r=await fetch('/api/auth/me',{credentials:'include'}); if(r.ok){ const j=await r.json(); me=j&&(j.user||j); } }catch(_){}
+  const root=document.getElementById('schRoot');
+  if (!me || (me.role!=='principal' && me.role!=='admin' && me.role!=='vice_principal')){
+    root.hidden=false;
+    document.getElementById('panel-overview').innerHTML = tplEmpty('이 페이지는 학교 책임자(교장·교감) 전용이에요. 권한 있는 계정으로 로그인해 주세요.', { href:'/login.html', label:'로그인' });
+    document.querySelector('.sch-tabs').style.display='none';
+    return;
+  }
+
+  await loadAll();
+  const sc = state.data.overview && state.data.overview.scope;
+  if (sc && sc.school){ document.getElementById('schName').textContent = sc.school + ' 경영 대시보드'; document.title='다채움 - '+sc.school+' 경영 대시보드'; }
+  const foot = (state.data.overview && state.data.overview.footnote) || '';
+  document.getElementById('schFooter').textContent =
+    foot + ' · 기초학력 도달은 플랫폼 학습데이터 기반이며 외부 진단시스템과 별도입니다. · 평가부족 ≠ 미도달.';
+
+  root.hidden=false;
+  renderTab('overview');
+
+  // 탭 클릭
+  document.getElementById('schTabs').addEventListener('click', (e)=>{ const t=e.target.closest('.sch-tab'); if(t) switchTab(t.dataset.tab); });
+  document.getElementById('schTabs').addEventListener('keydown', (e)=>{
+    if (e.key!=='ArrowRight' && e.key!=='ArrowLeft') return;
+    const tabs=[...document.querySelectorAll('.sch-tab')]; const cur=tabs.findIndex(t=>t.getAttribute('aria-selected')==='true');
+    let ni = e.key==='ArrowRight' ? Math.min(tabs.length-1,cur+1) : Math.max(0,cur-1);
+    tabs[ni].focus(); switchTab(tabs[ni].dataset.tab);
+  });
+
+  // 기간
+  document.getElementById('schPeriod').addEventListener('change', async (e)=>{
+    state.period=e.target.value; await loadAll(); renderTab(state.tab);
+  });
+
+  // 내보내기(목업)
+  document.getElementById('btnPdf').addEventListener('click', ()=>toast('PDF 내보내기는 준비 중이에요.'));
+  document.getElementById('btnExcel').addEventListener('click', ()=>toast('엑셀 내보내기는 준비 중이에요.'));
+
+  // 모달 닫기
+  document.getElementById('piiClose').addEventListener('click', closePiiModal);
+  document.getElementById('piiModal').addEventListener('click', (e)=>{ if(e.target.id==='piiModal') closePiiModal(); });
+  document.addEventListener('keydown', (e)=>{ if(e.key==='Escape' && document.getElementById('piiModal').getAttribute('data-open')==='true') closePiiModal(); });
+}
+
+if (document.readyState==='loading') document.addEventListener('DOMContentLoaded', init);
+else init();
+
+})();
+</script>
+</body>
+</html>

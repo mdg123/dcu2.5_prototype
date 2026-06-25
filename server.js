@@ -140,6 +140,7 @@ app.use('/api/learning', require('./routes/learning'));
 app.use('/api/growth', require('./routes/growth'));
 app.use('/api/ingest', require('./routes/ingest'));
 app.use('/api/lrs', require('./routes/lrs'));
+app.use('/api/school', require('./routes/school'));
 app.use('/api/self-learn', require('./routes/self-learn'));
 app.use('/api/portal', require('./routes/portal'));
 app.use('/api/curriculum', require('./routes/curriculum'));

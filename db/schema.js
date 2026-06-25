@@ -2774,6 +2774,68 @@ function initSchema() {
     console.warn('[DB] 알림장 강화 테이블 생성 경고:', e.message);
   }
 
+  // ============ 마이그레이션: users.role CHECK 에 'principal'(교장·교감) 추가 ============
+  // 학교 경영 대시보드 P0-1. 기존 CHECK 는 ('student','teacher','parent','staff','admin') 만 허용 →
+  // principal INSERT 가 CHECK 위반으로 막힌다. 동적 컬럼 보존 테이블 재생성으로 CHECK 만 확장한다.
+  //   - 멱등: principal 삽입 가능 여부를 SAVEPOINT 테스트로 감지, 막혀 있을 때만 재생성.
+  //   - 무손상: PRAGMA table_info 로 현재 컬럼/타입을 그대로 복제(school_level·region·is_seed·
+  //             parent_id·deleted_at 등 후속 마이그레이션 컬럼 유실 방지). 인덱스도 재생성.
+  try {
+    let needsMigration = false;
+    try {
+      db.exec("SAVEPOINT role_check_test");
+      db.prepare("INSERT INTO users (username, password, display_name, role) VALUES (?, ?, ?, ?)")
+        .run('__principal_check_probe__', 'x', 'probe', 'principal');
+      db.exec("ROLLBACK TO role_check_test"); db.exec("RELEASE role_check_test");
+    } catch (probeErr) {
+      try { db.exec("ROLLBACK TO role_check_test"); db.exec("RELEASE role_check_test"); } catch (_) {}
+      if (String(probeErr.message || '').includes('CHECK')) needsMigration = true;
+    }
+    if (needsMigration) {
+      console.log('[DB] users.role CHECK 확장 중 (principal 추가)...');
+      const existingCols = db.prepare("PRAGMA table_info(users)").all();
+      const colDefs = existingCols.map(c => {
+        if (c.name === 'id') return 'id INTEGER PRIMARY KEY AUTOINCREMENT';
+        if (c.name === 'username') return 'username TEXT UNIQUE NOT NULL';
+        if (c.name === 'password') return 'password TEXT NOT NULL';
+        if (c.name === 'display_name') return 'display_name TEXT NOT NULL';
+        if (c.name === 'role') return "role TEXT DEFAULT 'student'";
+        if (c.name === 'status') return "status TEXT DEFAULT 'active'";
+        if (c.name === 'created_at') return 'created_at DATETIME DEFAULT CURRENT_TIMESTAMP';
+        if (c.name === 'updated_at') return 'updated_at DATETIME DEFAULT CURRENT_TIMESTAMP';
+        const t = (c.type && String(c.type).trim()) ? c.type : 'TEXT';
+        const dflt = (c.dflt_value != null && c.dflt_value !== '') ? ` DEFAULT ${c.dflt_value}` : '';
+        return `${c.name} ${t}${dflt}`;
+      }).join(',\n        ');
+      const colNames = existingCols.map(c => c.name).join(',');
+      db.pragma('foreign_keys = OFF');
+      const tx = db.transaction(() => {
+        db.exec(`
+          CREATE TABLE users_role_fix (
+            ${colDefs},
+            CHECK(role IN ('student', 'teacher', 'parent', 'staff', 'principal', 'admin')),
+            CHECK(status IN ('active', 'inactive', 'suspended', 'deleted'))
+          );
+          INSERT INTO users_role_fix (${colNames}) SELECT ${colNames} FROM users;
+          DROP TABLE users;
+          ALTER TABLE users_role_fix RENAME TO users;
+          CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
+          CREATE INDEX IF NOT EXISTS idx_users_role ON users(role);
+        `);
+        // 후속 마이그레이션이 만든 보조 인덱스도 best-effort 재생성(없으면 무시)
+        for (const ix of [
+          "CREATE INDEX IF NOT EXISTS idx_users_school_level ON users(school_level)",
+          "CREATE INDEX IF NOT EXISTS idx_users_region ON users(region)",
+        ]) { try { db.exec(ix); } catch (_) {} }
+      });
+      tx();
+      db.pragma('foreign_keys = ON');
+      console.log('[DB] users.role CHECK 확장 완료 (principal 지원)');
+    }
+  } catch (e) {
+    console.error('[DB] users.role principal 마이그레이션 실패:', e.message);
+  }
+
   // 관리자 기본 계정
   const admin = db.prepare('SELECT id FROM users WHERE username = ?').get('admin');
   if (!admin) {
@@ -2783,6 +2845,29 @@ function initSchema() {
       'INSERT INTO users (username, password, display_name, role) VALUES (?, ?, ?, ?)'
     ).run('admin', hash, '관리자', 'admin');
     console.log('[DB] 관리자 기본 계정 생성 (admin / 1234)');
+  }
+
+  // 교장·교감(principal) 시드 1계정 — 금성초등학교(실증 파일럿 학교) 경영 대시보드용.
+  //   멱등: username='principal1' 이미 있으면 skip. 비번 1234(다른 데모 계정과 동일).
+  //   school_name 정확 일치('금성초등학교') = 학교 스코프 키. region/school_level/is_seed 는
+  //   금성초 학생·교사와 동일 메타(청주·elementary·실데이터 0)로 맞춰 거시 벤치마크 조인이 일치하도록.
+  try {
+    const principal = db.prepare("SELECT id FROM users WHERE username = 'principal1'").get();
+    if (!principal) {
+      const hash = bcrypt.hashSync('1234', 10);
+      const cols = db.prepare("PRAGMA table_info(users)").all().map(c => c.name);
+      // 선택 컬럼은 존재할 때만 채운다(후속 마이그레이션 컬럼 의존성 회피).
+      const fields = ['username', 'password', 'display_name', 'role', 'school_name'];
+      const vals = ['principal1', hash, '금성초 교장', 'principal', '금성초등학교'];
+      if (cols.includes('region')) { fields.push('region'); vals.push('청주'); }
+      if (cols.includes('school_level')) { fields.push('school_level'); vals.push('elementary'); }
+      if (cols.includes('is_seed')) { fields.push('is_seed'); vals.push(0); }
+      const ph = fields.map(() => '?').join(', ');
+      db.prepare(`INSERT INTO users (${fields.join(', ')}) VALUES (${ph})`).run(...vals);
+      console.log('[DB] 교장 계정 생성 (principal1 / 1234, 금성초등학교)');
+    }
+  } catch (e) {
+    console.error('[DB] principal1 시드 실패:', e.message);
   }
 
   // 더미 사용자 계정 (개발용)
@@ -2978,6 +3063,14 @@ function initSchema() {
     }
   } catch (e) {
     console.error('[DB] 포트폴리오 학교급 메타 백필 실패:', e.message);
+  }
+
+  // 마이그레이션: P1-3 보충 일괄배정 테이블(supplement_assignment) — 멱등 self-create.
+  //   모듈 require 시에도 생성되나, initSchema 만 호출하는 경로(테스트 등) 안전망으로 동반.
+  try {
+    require('./lrs-supplement').ensureTable();
+  } catch (e) {
+    console.error('[DB] supplement_assignment 테이블 마이그레이션 실패:', e && e.message);
   }
 
   // 백필: 콘텐츠/평가/과제 achievement_code 매핑 커버리지 보강 (멱등·부팅 자동)
