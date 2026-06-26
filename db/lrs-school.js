@@ -459,7 +459,7 @@ function _notReachedStudentsByGrade(scope, gradeById) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// P0-6 안전망·정서 — 위험군(학년별) + 미도달/위기 명단(실명은 라우트가 결정) + 정서·출결.
+// P0-6 사회·정서 — 위험군(학년별) + 미도달/위기 명단(실명은 라우트가 결정) + 정서·출결.
 //   list 는 항상 userId·name·grade 동반(라우트가 실명/마스킹 적용).
 // ─────────────────────────────────────────────────────────────────────────────
 function getSafety(scope) {
@@ -488,12 +488,20 @@ function getSafety(scope) {
   const emotionTrend = _emotionWeeklyTrend(scope.studentIds);
   const attendance = _attendanceRate(scope.studentIds);
 
+  // 정서 요약(최근 30일 긍정/부정 비율) — ⓪요약과 동일 산식 재사용. 긍정 균형 표시용.
+  const emo = _emotionSummary(scope.studentIds);
+  const emotion = {
+    positivePct: emo.positivePct,
+    negativePct: (emo.sampleN > 0 && emo.positivePct != null) ? 100 - emo.positivePct : null,
+    sampleN: emo.sampleN,
+  };
+
   // 연속 무활동 학생 수(7일+ 공백) — lrs_user_daily.
   const inactive = _inactiveCount(scope.studentIds, 7);
 
   return {
     riskSummary: risk.summary, riskByGrade, watchlist,
-    emotionTrend, attendance, inactive,
+    emotion, emotionTrend, attendance, inactive,
   };
 }
 

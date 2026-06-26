@@ -109,6 +109,19 @@
     .conf-badge[data-conf="low"] .conf-dot{ background:var(--conf-low); }
     .lowsample-chip{ display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;
       color:#92400e;background:#fffbeb;border:1px solid #fde68a;border-radius:9999px;padding:3px 10px;white-space:nowrap; }
+    /* ── ④ 사회·정서 긍정 정서 요약 ── */
+    .emo-pos{ display:flex;align-items:flex-end;flex-wrap:wrap;gap:14px 20px;
+      margin:4px 0 14px;padding:16px 18px;border-radius:12px;
+      background:#f0fdf4;border:1px solid #bbf7d0; }
+    .emo-pos .ep-main{ display:flex;flex-direction:column;gap:2px;min-width:0; }
+    .emo-pos .ep-label{ font-size:14px;font-weight:600;color:#15803d;line-height:1.4; }
+    .emo-pos .ep-value{ font-size:32px;font-weight:800;color:#16a34a;line-height:1.05;font-variant-numeric:tabular-nums; }
+    .emo-pos .ep-value .ep-unit{ font-size:18px;font-weight:700;margin-left:2px; }
+    .emo-pos .ep-side{ display:flex;flex-direction:column;gap:6px;align-items:flex-start;padding-bottom:2px; }
+    .emo-pos .ep-neg{ font-size:14px;font-weight:600;color:#6b7280;line-height:1.4; }
+    .emo-pos .ep-neg b{ color:#ea7317;font-weight:700; }
+    .emo-pos-empty{ margin:4px 0 14px;padding:16px 18px;border-radius:12px;
+      background:#f9fafb;border:1px solid #e5e7eb;font-size:15px;color:#6b7280;line-height:1.6; }
     .trend-arrow{ display:inline-flex;align-items:center;gap:6px;font-size:14px;font-weight:700;white-space:nowrap; }
     .trend-arrow[data-trend="up"]{ color:var(--trend-up); }
     .trend-arrow[data-trend="flat"]{ color:var(--trend-flat); }
@@ -249,6 +262,7 @@
     .dc-data-table th.sorted-asc::after{ content:" ▲";font-size:10px; }
     .dc-data-table th.sorted-desc::after{ content:" ▼";font-size:10px; }
     .dc-data-table td{ padding:10px 12px;border-bottom:1px solid #f3f4f6;vertical-align:middle;color:#374151; }
+    .dc-data-table th.num{ text-align:right; }
     .dc-data-table td.num{ text-align:right;font-variant-numeric:tabular-nums; }
     .dc-data-table tbody tr:hover{ background:#f9fafb; }
     .weak-bar{ display:inline-flex;align-items:center;gap:8px; }
@@ -288,7 +302,7 @@
     @media(max-width:767px){ .sch-funnel{ flex-direction:column; } .sch-funnel .fn-arrow{ transform:rotate(90deg); } }
     .basic-note{ display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;color:#6b7280;background:#f3f4f6;border-radius:9999px;padding:3px 10px; }
 
-    /* ── 안전망 명단 (ews 계승) ── */
+    /* ── 사회·정서 명단 (ews 계승) ── */
     .ews-list{ display:flex;flex-direction:column;gap:12px; }
     .ews-card{ background:#fff;border:1px solid #e5e7eb;border-left-width:4px;border-radius:12px;
       padding:16px 18px;box-shadow:0 1px 3px rgba(0,0,0,.08);display:flex;flex-direction:column;gap:10px;min-width:0; }
@@ -397,7 +411,7 @@
       <button class="sch-tab" role="tab" data-tab="enroll"    aria-selected="false" aria-controls="panel-enroll">① 가입·접속</button>
       <button class="sch-tab" role="tab" data-tab="usage"     aria-selected="false" aria-controls="panel-usage">② 서비스 이용</button>
       <button class="sch-tab" role="tab" data-tab="academics" aria-selected="false" aria-controls="panel-academics">③ 학력·성취</button>
-      <button class="sch-tab" role="tab" data-tab="safety"    aria-selected="false" aria-controls="panel-safety">④ 안전망·정서</button>
+      <button class="sch-tab" role="tab" data-tab="safety"    aria-selected="false" aria-controls="panel-safety">④ 사회·정서</button>
       <button class="sch-tab" role="tab" data-tab="staff"     aria-selected="false" aria-controls="panel-staff">⑤ 교직원·운영</button>
       <button class="sch-tab" role="tab" data-tab="benchmark" aria-selected="false" aria-controls="panel-benchmark">⑥ 비교</button>
     </nav>
@@ -482,12 +496,40 @@ function mkChart(canvas, type, data, opts){
   const base = { responsive:true, maintainAspectRatio:false,
     plugins:{ legend:{ position:'bottom', labels:{ font:{size:12}, usePointStyle:true, boxWidth:14, padding:10 } } },
     animation: window.matchMedia('(prefers-reduced-motion:reduce)').matches ? false : { duration:550, easing:'easeOutCubic' } };
-  const chart = new Chart(canvas, { type, data, options: Object.assign(base, opts||{}) });
+  const cfg = { type, data, options: Object.assign(base, opts||{}) };
+  // 도넛이고 .donut-center 오버레이가 있으면 중앙텍스트 정렬 플러그인 부착
+  if((type==='doughnut'||type==='pie') && canvas.closest && canvas.closest('.donut-wrap')){
+    cfg.plugins = [donutCenterPlugin];
+  }
+  const chart = new Chart(canvas, cfg);
   state.charts.push(chart); return chart;
 }
+// 도넛 중앙텍스트(.donut-center)를 '도넛이 실제로 그려진 영역(chartArea)'의 정중앙에
+// 맞추는 인라인 플러그인. 하단 레전드가 캔버스 아랫부분을 차지해 도넛이 위로 밀리므로,
+// 캔버스 전체 기준 정렬(CSS inset:0)만으로는 세로가 어긋난다 → 매 프레임 chartArea 기준 보정.
+const donutCenterPlugin = {
+  id:'donutCenterAlign',
+  afterDraw(chart){
+    const cv = chart.canvas;
+    const wrap = cv && cv.closest('.donut-wrap');
+    const center = wrap && wrap.querySelector('.donut-center');
+    if(!center) return;
+    const a = chart.chartArea; if(!a) return;
+    // Chart.js v3+ 의 chartArea 는 이미 CSS 픽셀 좌표(캔버스 좌상단 기준) → 추가 환산 불필요.
+    // (DPR=2 모바일에서 백킹스토어 픽셀로 잘못 환산하면 좌표가 절반이 되어 좌상단으로 쏠림)
+    center.style.left = ((a.left + a.right)/2) + 'px';
+    center.style.top  = ((a.top + a.bottom)/2) + 'px';
+    center.style.right = 'auto';
+    center.style.bottom = 'auto';
+    center.style.transform = 'translate(-50%,-50%)';
+  }
+};
 function donutLegendOpts(unit){
   const u = unit||'건';
-  return { plugins:{ legend:{ position:'right', labels:{ font:{size:12}, padding:12, boxWidth:14, boxHeight:14,
+  // 레전드를 '하단'에 두어 도넛이 캔버스 가로 폭을 가득 채우게 함 →
+  // .donut-center 오버레이가 도넛 구멍 정중앙과 일치(가로). 세로는 donutCenterPlugin 이 보정.
+  // (position:'right' 이면 캔버스 우측이 레전드로 잘려 도넛이 좌측으로 밀리고 중앙텍스트가 어긋남)
+  return { layout:{ padding:{ bottom:4 } }, plugins:{ legend:{ position:'bottom', labels:{ font:{size:12}, padding:12, boxWidth:14, boxHeight:14,
     generateLabels:(chart)=>{ const d=chart.data, ds=(d.datasets&&d.datasets[0])||{};
       return (d.labels||[]).map((lbl,i)=>({ text: lbl+' — '+(Number(ds.data&&ds.data[i])||0).toLocaleString()+u,
         fillStyle: Array.isArray(ds.backgroundColor)?ds.backgroundColor[i]:ds.backgroundColor, strokeStyle:'transparent', hidden:false, index:i })); } } } } };
@@ -641,7 +683,7 @@ function renderOverview(panel){
     + '<h2 class="mastery-h2">일자별 이용자수(활동 기준)</h2><div class="mastery-sub">로그인 세션이 아닌 활동 발생 기준이에요.</div></div></div>'
     + '<div class="chart-body"><canvas id="ovAccess"></canvas></div></div>'
     + '<div class="sch-section"><div class="sch-section-head"><div class="ssh-titles">'
-    + '<h2 class="mastery-h2">안전망 추이</h2><div class="mastery-sub">정서 부정 응답 비율(주별, 참고용)</div></div>'
+    + '<h2 class="mastery-h2">사회·정서 추이</h2><div class="mastery-sub">정서 긍정·부정 비율(주별, 참고용)</div></div>'
     + '<span class="lowsample-chip">표본 작음</span></div>'
     + '<div class="chart-body"><canvas id="ovEmotion"></canvas></div>'
     + '<div id="ovEmoNote" style="margin-top:10px;font-size:13px;font-weight:600;"></div></div>'
@@ -663,7 +705,7 @@ function renderInsightCard(insights){
   const items = insights.map(ins=>{
     const sampleTxt = ins.sample!=null ? ('표본 '+ins.sample+'명') : '';
     const confKo = ins.confidence==='high'?'신뢰 높음':ins.confidence==='low'?'표본 적어 참고용':'신뢰 보통';
-    const tabLabel = ({academics:'③ 학력·성취', safety:'④ 안전망·정서', enroll:'① 가입·접속', usage:'② 서비스 이용', staff:'⑤ 교직원·운영', benchmark:'⑥ 비교'})[ins.tab] || '상세';
+    const tabLabel = ({academics:'③ 학력·성취', safety:'④ 사회·정서', enroll:'① 가입·접속', usage:'② 서비스 이용', staff:'⑤ 교직원·운영', benchmark:'⑥ 비교'})[ins.tab] || '상세';
     return '<div class="ins-item"><div class="ins-main">'
       + '<div class="ins-text">'+escapeHtml(ins.text)+'</div>'
       + '<div class="ins-foot"><span class="conf-badge" data-conf="'+escapeAttr(ins.confidence||'mid')+'"><span class="conf-dot"></span>'+confKo+'</span>'
@@ -904,7 +946,7 @@ function renderAcademics(panel){
     + '<div class="chart-body"><canvas id="acTrend"></canvas></div></div>'
     + '<div class="sch-section"><div class="sch-section-head"><div class="ssh-titles"><h2 class="mastery-h2">학급 간 격차</h2><div class="mastery-sub">같은 학년·교과 안에서 학급별 도달률 범위</div></div></div>'
     + renderRangeBar(cg) + '</div>'
-    + '<div class="sch-section"><div class="sch-section-head"><div class="ssh-titles"><h2 class="mastery-h2">🎓 기초학력 안전망 <span class="basic-note"><i class="fas fa-circle-info" aria-hidden="true"></i> 플랫폼 학습데이터 기반 · 외부 진단과 별도</span></h2><div class="mastery-sub">미도달 → 보충배정 → 이수 흐름</div></div></div>'
+    + '<div class="sch-section"><div class="sch-section-head"><div class="ssh-titles"><h2 class="mastery-h2">🎓 기초학력 지원 <span class="basic-note"><i class="fas fa-circle-info" aria-hidden="true"></i> 플랫폼 학습데이터 기반 · 외부 진단과 별도</span></h2><div class="mastery-sub">미도달 → 보충배정 → 이수 흐름</div></div></div>'
     + renderFunnel(totalNR, nrbg)
     + '<div style="margin-top:16px;display:flex;gap:10px;flex-wrap:wrap;">'
     + '<button class="mastery-btn mastery-btn-sm" type="button" id="acNamesBtn"><i class="fas fa-lock" aria-hidden="true"></i> 명단 보기</button>'
@@ -1047,10 +1089,10 @@ function renderFunnel(totalNR, nrbg){
       + (worstGrade?' · 미도달 많은 학년: '+escapeHtml(worstGrade.grade)+'학년('+num(worstGrade.students)+'명)':'')+'</div>' : '');
 }
 
-/* ── ④ 안전망·정서 ── */
+/* ── ④ 사회·정서 ── */
 function renderSafety(panel){
   const sf = state.data.safety;
-  if (!sf){ panel.innerHTML=tplEmpty('안전망 데이터를 불러오지 못했어요.'); return; }
+  if (!sf){ panel.innerHTML=tplEmpty('사회·정서 데이터를 불러오지 못했어요.'); return; }
   const rbg = sf.riskByGrade||[];
   const totalRisk = (sf.riskSummary&&sf.riskSummary.high||0)+(sf.riskSummary&&sf.riskSummary.medium||0);
   const att = sf.attendance||{};
@@ -1064,8 +1106,9 @@ function renderSafety(panel){
     + (hasRisk ? '<div class="chart-body"><canvas id="sfRisk"></canvas></div>' : tplEmpty('지금 특별히 지원이 필요한 학생이 없어요. 반 전체가 잘 따라오고 있어요! 🎉'))
     + '</div>'
     + '<div class="sch-2col">'
-    + '<div class="sch-section"><div class="sch-section-head"><div class="ssh-titles"><h2 class="mastery-h2">감정 긍정/부정 추이</h2><div class="mastery-sub">주별 부정 응답 비율</div></div>'
+    + '<div class="sch-section"><div class="sch-section-head"><div class="ssh-titles"><h2 class="mastery-h2">감정 긍정/부정 추이</h2><div class="mastery-sub">주별 긍정·부정 비율</div></div>'
     + '<span class="lowsample-chip">n='+num(sf.emotionTrend&&sf.emotionTrend.sampleN)+' · 참고용</span></div>'
+    + emotionPositiveHTML(sf.emotion)
     + '<div class="chart-body"><canvas id="sfEmotion"></canvas></div></div>'
     + '<div class="sch-section"><div class="sch-section-head"><div class="ssh-titles"><h2 class="mastery-h2">출결</h2><div class="mastery-sub">출석률 · 장기 결석</div></div></div>'
     + '<div style="display:flex;gap:24px;align-items:center;flex-wrap:wrap;">'
@@ -1089,14 +1132,30 @@ function drawSafetyRisk(rbg){
     ]},{ scales:{ x:{ stacked:true }, y:{ stacked:true, beginAtZero:true, ticks:{ precision:0 } } } });
 }
 
+/* 긍정 감정비율 요약(차트 위) — 긍정을 주(主)로, 부정은 보조로. */
+function emotionPositiveHTML(emo){
+  const pos = emo && emo.positivePct;
+  const n = (emo && emo.sampleN) || 0;
+  if (pos==null || n===0){
+    return '<div class="emo-pos-empty">감정 응답이 아직 적어요. 쌓이면 긍정 비율이 표시됩니다.</div>';
+  }
+  const neg = (emo.negativePct!=null) ? emo.negativePct : Math.max(0, 100-pos);
+  return '<div class="emo-pos">'
+    + '<div class="ep-main"><div class="ep-label">긍정 감정비율</div>'
+    + '<div class="ep-value">'+num(pos)+'<span class="ep-unit">%</span></div></div>'
+    + '<div class="ep-side"><div class="ep-neg">부정 <b>'+num(neg)+'%</b></div>'
+    + '<span class="lowsample-chip">n='+num(n)+' · 참고용</span></div>'
+    + '</div>';
+}
+
 function drawSafetyEmotion(et){
   const cv=document.getElementById('sfEmotion'); if(!cv) return;
   const weeks=(et&&et.weeks)||[];
   if (!weeks.length){ cv.closest('.chart-body').innerHTML=tplEmpty('감정·출석 데이터가 아직 적어요. 쌓이면 추이가 표시됩니다.'); return; }
   mkChart(cv,'line',{ labels:weeks.map(w=>w.week),
     datasets:[
-      { label:'긍정(%)', data:weeks.map(w=>Math.max(0,100-(w.negativePct||0))), borderColor:'#16a34a', backgroundColor:'rgba(22,163,74,.08)', tension:.3, fill:true, pointRadius:3 },
-      { label:'부정(%)', data:weeks.map(w=>w.negativePct), borderColor:'#ea7317', backgroundColor:'rgba(234,115,23,.06)', tension:.3, fill:true, pointRadius:3 },
+      { label:'긍정(%)', data:weeks.map(w=>Math.max(0,100-(w.negativePct||0))), borderColor:'#16a34a', backgroundColor:'rgba(22,163,74,.12)', borderWidth:3.5, tension:.3, fill:true, pointRadius:4, pointBackgroundColor:'#16a34a', order:1 },
+      { label:'부정(%)', data:weeks.map(w=>w.negativePct), borderColor:'#ea7317', backgroundColor:'rgba(234,115,23,.04)', borderWidth:1.5, borderDash:[5,4], tension:.3, fill:false, pointRadius:2.5, pointBackgroundColor:'#ea7317', order:2 },
     ]},{ scales:{ y:{ beginAtZero:true, max:100, ticks:{ callback:v=>v+'%' } } } });
 }
 
@@ -1147,7 +1206,7 @@ function renderStaff(panel){
 
   panel.innerHTML =
     '<div class="sch-section"><div class="sch-section-head"><div class="ssh-titles"><h2 class="mastery-h2">교사 활동량</h2><div class="mastery-sub">수업·과제·평가·콘텐츠 제작 합계(많은 순)</div></div></div>'
-    + '<div class="sch-tbl-wrap"><div class="dc-data-table-wrap"><table class="dc-data-table"><thead><tr><th>교사</th><th>수업</th><th>과제</th><th>평가</th><th>콘텐츠</th><th>합계</th></tr></thead><tbody>'+rows+'</tbody></table></div></div>'
+    + '<div class="sch-tbl-wrap"><div class="dc-data-table-wrap"><table class="dc-data-table"><thead><tr><th>교사</th><th class="num">수업</th><th class="num">과제</th><th class="num">평가</th><th class="num">콘텐츠</th><th class="num">합계</th></tr></thead><tbody>'+rows+'</tbody></table></div></div>'
     + '<div class="sch-tbl-cards">'+cards+'</div></div>'
     + '<div class="sch-2col">'
     + '<div class="sch-section"><div class="sch-section-head"><div class="ssh-titles"><h2 class="mastery-h2">클래스 건강도</h2><div class="mastery-sub">최근 14일 활동 기준</div></div></div>'

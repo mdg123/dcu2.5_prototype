@@ -168,7 +168,7 @@ router.get('/achievement', requireAuth, requireSchoolScope, (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// P0-6 GET /api/school/safety — 안전망: 위험군(학년별) + 미도달/위기 명단(실명) + 정서·출결.
+// P0-6 GET /api/school/safety — 사회·정서: 위험군(학년별) + 미도달/위기 명단(실명) + 정서·출결.
 //   명단은 principal(자기학교)/admin 만 실명. 그 외 진입 자체가 403(미들웨어). audit 1건.
 //   ?names=0 으로 마스킹 미리보기 가능(실명 audit 회피).
 // ─────────────────────────────────────────────────────────────────────────────
@@ -193,6 +193,7 @@ router.get('/safety', requireAuth, requireSchoolScope, (req, res) => {
       riskByGrade: data.riskByGrade,
       watchlist,
       named: wantNames,
+      emotion: data.emotion,
       emotionTrend: data.emotionTrend,
       attendance: data.attendance,
       inactive: data.inactive,
