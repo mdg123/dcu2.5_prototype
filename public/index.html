@@ -133,6 +133,36 @@
     .guest-info-card .ttl { font-size: 17px; font-weight: 700; color: var(--gray-800); margin-bottom: 3px; }
     .guest-info-card .desc { font-size: 15px; color: var(--gray-600); line-height: 1.5; }
 
+    /* ===== 교장·교감 학교 관리자 바로가기 CTA ===== */
+    .principal-cta-card {
+      display: flex; align-items: center; gap: 18px;
+      background: linear-gradient(135deg, #0EA5E9 0%, #0284C7 100%);
+      border-radius: var(--radius-lg);
+      padding: 22px 26px; margin-bottom: 24px;
+      box-shadow: 0 8px 24px rgba(14,165,233,0.28);
+      color: #fff; text-decoration: none;
+      transition: transform .15s ease, box-shadow .15s ease;
+    }
+    .principal-cta-card:hover { transform: translateY(-2px); box-shadow: 0 12px 30px rgba(14,165,233,0.38); }
+    .principal-cta-card .ico {
+      width: 56px; height: 56px; border-radius: 16px; flex-shrink: 0;
+      background: rgba(255,255,255,0.2);
+      display: flex; align-items: center; justify-content: center; font-size: 26px;
+    }
+    .principal-cta-card .body { flex: 1; min-width: 0; }
+    .principal-cta-card .ttl { font-size: 20px; font-weight: 800; margin-bottom: 4px; }
+    .principal-cta-card .desc { font-size: 15px; opacity: 0.92; line-height: 1.5; }
+    .principal-cta-card .go {
+      flex-shrink: 0; display: inline-flex; align-items: center; gap: 8px;
+      background: #fff; color: #0284C7; font-weight: 700; font-size: 16px;
+      padding: 12px 22px; border-radius: 10px; white-space: nowrap;
+    }
+    @media (max-width: 768px) {
+      .principal-cta-card { flex-wrap: wrap; gap: 14px; padding: 18px 20px; }
+      .principal-cta-card .body { flex-basis: calc(100% - 74px); }
+      .principal-cta-card .go { width: 100%; justify-content: center; margin-top: 4px; }
+    }
+
     /* ===== 오늘 할 일 카드 (히어로 1순위) ===== */
     .today-action-card {
       background: white; border-radius: var(--radius-lg);
@@ -1008,7 +1038,8 @@
       student: ['self','class','contents','cbt','popular','growth','coding','typing','math','english','career','notice','monitor','canvas','hwp','lrs','nawoolbom'],
       parent:  ['class','contents','notice','growth','career','nawoolbom','self','popular','cbt','monitor','canvas','hwp','coding','typing','math','english','lrs'],
       staff:   ['class','contents','monitor','canvas','hwp','notice','lrs','cbt','growth','popular','career','self','coding','typing','math','english','nawoolbom'],
-      admin:   ['admin','class','contents','lrs','cbt','growth','self','notice','popular','monitor','canvas','hwp','coding','typing','math','english','career','nawoolbom']
+      admin:   ['admin','class','contents','lrs','cbt','growth','self','notice','popular','monitor','canvas','hwp','coding','typing','math','english','career','nawoolbom'],
+      principal: ['lrs','class','contents','growth','cbt','notice','popular','self','monitor','canvas','hwp','coding','typing','math','english','career','nawoolbom']
     };
 
     const ROLE_RECOMMEND = {
@@ -1016,7 +1047,8 @@
       student: ['self','coding','math'],
       parent:  ['growth','career','nawoolbom'],
       staff:   ['monitor','canvas','hwp'],
-      admin:   ['lrs','admin','class']
+      admin:   ['lrs','admin','class'],
+      principal: ['lrs','growth','class']
     };
 
     // 4슬롯 정의 (라벨 + 이동 URL + 친절 카피)
@@ -1050,6 +1082,12 @@
         { label: '전체 클래스',       href: '/admin/index.html', empty: '등록된 클래스가 없어요' },
         { label: '오늘 접속자',       href: '/admin/index.html', empty: '오늘 접속자가 없어요' },
         { label: '시스템 알림',       href: '/admin/index.html', empty: '시스템 알림이 없어요' }
+      ],
+      principal: [
+        { label: '우리 학교 학생',     href: '/school/', empty: '학생 데이터를 불러오는 중이에요' },
+        { label: '우리 학교 교사',     href: '/school/', empty: '교사 데이터를 불러오는 중이에요' },
+        { label: '지원 필요 학생',     href: '/school/#safety', empty: '지원이 필요한 학생이 없어요' },
+        { label: '평균 도달률',        href: '/school/#achievement', empty: '도달률 데이터를 준비 중이에요' }
       ]
     };
 
@@ -1085,6 +1123,7 @@
       await loadRealStats();
 
       renderHero();
+      renderPrincipalCta();
       renderQuickMenu();
       renderDashboard();
       loadTodayAction();
@@ -1136,6 +1175,23 @@
     // 역할별 4개 슬롯 — 기획서 §2.2 정확 매핑
     let realStats = { slot0: 0, slot1: 0, slot2: 0, slot3: 0 };
     let summaryRaw = {};
+    let schoolOverview = null;   // 교장·교감: /api/school/overview KPI
+
+    // 교장·교감 — 우리 학교 한눈요약 KPI 로드 (학생/교사/지원필요/평균도달률)
+    async function loadSchoolOverview() {
+      try {
+        const res = await fetch('/api/school/overview');
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!data || !data.success) return;
+        const ov = data.overview || {};
+        schoolOverview = ov;
+        realStats.slot0 = ov.studentCount || 0;
+        realStats.slot1 = ov.teacherCount || 0;
+        realStats.slot2 = ov.supportNeeded || 0;
+        realStats.slot3 = (ov.avgReachedRate != null) ? (ov.avgReachedRate + '%') : '-';
+      } catch(e) {}
+    }
 
     async function loadRealStats() {
       try {
@@ -1176,6 +1232,10 @@
               realStats.slot3 = s.systemAlerts || 0;
             }
           }
+        }
+        // 교장·교감: 우리 학교 KPI를 학교 관리자 API에서 보강
+        if ((currentUser?.role) === 'principal') {
+          await loadSchoolOverview();
         }
       } catch(e) {
         // fallback: basic class count
@@ -1314,25 +1374,52 @@
         teacher: `${name} 선생님, 환영합니다`,
         parent:  `${name}님, 자녀와 함께 성장해요`,
         staff:   `${name}님, 오늘도 수고하셨어요`,
-        admin:   isAdminName ? `${name}님, 환영합니다` : `${name} 관리자님, 환영합니다`
+        admin:   isAdminName ? `${name}님, 환영합니다` : `${name} 관리자님, 환영합니다`,
+        principal: `${name} 선생님, 환영합니다`
       };
       const descMap = {
         student: '오늘도 다채로운 하루 되세요',
         teacher: '클래스와 학습을 한곳에서 관리해 보세요',
         parent:  '자녀의 학습과 성장을 함께 확인해요',
         staff:   '학사 운영과 행정을 효율적으로',
-        admin:   '플랫폼 전반을 한 화면에서 관리해 보세요'
+        admin:   '플랫폼 전반을 한 화면에서 관리해 보세요',
+        principal: '우리 학교의 학습 현황을 한눈에 살펴보세요'
       };
       const badgeMap = {
         student: '<i class="fas fa-user-graduate"></i> 학생',
         teacher: '<i class="fas fa-chalkboard-teacher"></i> 교사',
         parent:  '<i class="fas fa-users"></i> 학부모',
         staff:   '<i class="fas fa-briefcase"></i> 교직원',
-        admin:   '<i class="fas fa-shield-alt"></i> 관리자'
+        admin:   '<i class="fas fa-shield-alt"></i> 관리자',
+        principal: '<i class="fas fa-school"></i> 교장·교감'
       };
       greet.textContent = greetMap[role] || `안녕하세요, ${name}님`;
       desc.textContent  = descMap[role] || '오늘도 다채로운 하루 되세요';
       badge.innerHTML   = badgeMap[role] || `<i class="fas fa-user"></i> ${role}`;
+    }
+
+    // ==================== 교장·교감 — 학교 관리자 대시보드 바로가기 CTA ====================
+    function renderPrincipalCta() {
+      // 기존 CTA 중복 삽입 방지
+      const old = document.getElementById('principalCtaCard');
+      if (old) old.remove();
+      if ((currentUser?.role) !== 'principal') return;
+      const hero = document.getElementById('heroCompact');
+      if (!hero) return;
+      const school = (currentUser?.school_name) ? currentUser.school_name + ' ' : '우리 학교 ';
+      const a = document.createElement('a');
+      a.id = 'principalCtaCard';
+      a.className = 'principal-cta-card';
+      a.href = '/school/';
+      a.innerHTML = `
+        <div class="ico"><i class="fas fa-school"></i></div>
+        <div class="body">
+          <div class="ttl">🏫 학교 관리자 대시보드 바로가기</div>
+          <div class="desc">${escHtml(school)}학생·교사 현황과 학업 성취·정서·안전을 한 화면에서 확인하세요.</div>
+        </div>
+        <span class="go">대시보드 열기 <i class="fas fa-arrow-right"></i></span>
+      `;
+      hero.parentNode.insertBefore(a, hero.nextSibling);
     }
 
     // ==================== 퀵메뉴 ====================
@@ -1510,6 +1597,25 @@
               { label: '시스템 알림', value: s.systemAlerts || 0, suffix: '건' },
               { label: '오늘 활동', value: s.logToday || 0, suffix: '건' }
             ], cta: '/lrs/index.html', ctaLabel: 'LRS 보기' }
+        ];
+      } else if (role === 'principal') {
+        const ov = schoolOverview || {};
+        cards = [
+          { area: 'class',   icon: 'fas fa-school', title: '우리 학교 구성원',
+            stats: [
+              { label: '학생', value: ov.studentCount || 0, suffix: '명' },
+              { label: '교사', value: ov.teacherCount || 0, suffix: '명' }
+            ], cta: '/school/', ctaLabel: '학교 대시보드' },
+          { area: 'lrs',     icon: 'fas fa-bullseye', title: '학업 성취',
+            stats: [
+              { label: '평균 도달률', value: (ov.avgReachedRate != null ? ov.avgReachedRate : '-'), suffix: (ov.avgReachedRate != null ? '%' : '') },
+              { label: '지원 필요 학생', value: ov.supportNeeded || 0, suffix: '명' }
+            ], cta: '/school/#achievement', ctaLabel: '성취 현황' },
+          { area: 'self',    icon: 'fas fa-heart', title: '정서·안전',
+            stats: [
+              { label: '긍정 정서 비율', value: (ov.positiveEmotionPct != null ? ov.positiveEmotionPct : '-'), suffix: (ov.positiveEmotionPct != null ? '%' : '') },
+              { label: '지원 필요 학생', value: ov.supportNeeded || 0, suffix: '명' }
+            ], cta: '/school/#safety', ctaLabel: '안전 현황' }
         ];
       }
 

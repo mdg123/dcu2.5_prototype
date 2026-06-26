@@ -1,6 +1,6 @@
 // test/school-dashboard.test.js
 // ─────────────────────────────────────────────────────────────────────────────
-// 학교 경영 대시보드(교장·교감) P0 하네스 — 기획서: 작업지시서/학교관리자_대시보드_기획서.md
+// 학교 관리자 대시보드(교장·교감) P0 하네스 — 기획서: 작업지시서/학교관리자_대시보드_기획서.md
 //
 // 박제(SCH-1~12):
 //   SCH-1  role principal 마이그레이션 — principal INSERT 허용 + principal1 시드(금성초)
@@ -127,7 +127,7 @@ test('SCH-2: principal1 /overview — 자기 학교(금성초) 학생만 집계'
 // ════════════════════════════════════════════════════════════════════════════
 // SCH-3: 비principal/비admin → 403
 // ════════════════════════════════════════════════════════════════════════════
-test('SCH-3: 학생/교사/학부모 → 403 (학교 경영 비열람)', async () => {
+test('SCH-3: 학생/교사/학부모 → 403 (학교 관리자 대시보드 비열람)', async () => {
   const rStu = await get('/api/school/overview', STUDENT1);
   assert.equal(rStu.status, 403, `학생 403 (got ${rStu.status})`);
   const rTea = await get('/api/school/overview', TEACHER1);
@@ -309,4 +309,30 @@ test('SCH-14: /pages — 내부 서비스 + 외부 4서비스 external=true', as
     assert.equal(e.external, true, '외부 플래그');
     assert.equal(e.count, null, '외부는 데이터 없음(null)');
   }
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// SCH-15: 다학교 타이틀/스코프 동적성 — 타이틀 원천(scope.school)이 교장별 자기 학교로 동적
+//   화면 타이틀은 sc.school 을 그대로 쓰므로(public/school/index.html), 데이터 계층에서
+//   "principal2 → 다채움테스트학교, principal1 → 금성초등학교" 로 스코프가 갈리는지 박제.
+//   ⇒ 다른 학교 교장 로그인 시 타이틀이 자기 학교명으로 바뀜을 데이터 원천에서 보장.
+// ════════════════════════════════════════════════════════════════════════════
+test('SCH-15: 다학교 타이틀 원천 — principal2 scope.school=다채움테스트학교 (≠ principal1 금성초)', async () => {
+  // principal2 시드 존재 확인(멱등 시드)
+  const p2row = db.prepare("SELECT id, role, school_name FROM users WHERE username='principal2'").get();
+  assert.ok(p2row, 'principal2 시드 존재');
+  assert.equal(p2row.role, 'principal', 'principal2 역할=principal');
+  assert.equal(p2row.school_name, '다채움테스트학교', 'principal2 학교=다채움테스트학교');
+
+  // principal2 /overview → scope.school 이 자기 학교(다채움테스트학교)
+  const r2 = await get('/api/school/overview', p2row.id);
+  assert.equal(r2.status, 200, `principal2 overview 200 (got ${r2.status})`);
+  assert.equal(r2.json.scope.school, '다채움테스트학교', `principal2 스코프=다채움테스트학교(got ${r2.json.scope.school})`);
+
+  // principal1 은 여전히 금성초 — 두 교장의 스코프(=타이틀 원천)가 서로 다름
+  const r1 = await get('/api/school/overview', PRINCIPAL);
+  assert.equal(r1.status, 200);
+  assert.equal(r1.json.scope.school, SCHOOL, 'principal1 스코프=금성초 유지');
+  assert.notEqual(r2.json.scope.school, r1.json.scope.school,
+    '두 교장의 스코프(타이틀 원천)가 학교별로 동적으로 갈림');
 });

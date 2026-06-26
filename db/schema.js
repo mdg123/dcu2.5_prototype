@@ -2870,6 +2870,27 @@ function initSchema() {
     console.error('[DB] principal1 시드 실패:', e.message);
   }
 
+  // 교장·교감(principal) 시드 2계정 — 다채움테스트학교(다학교 동적 타이틀 검증용).
+  //   principal1(금성초)과 school_name 만 다르게 하여 "교장별 자기 학교명이 타이틀에 동적 반영"되는지 검증.
+  //   멱등: username='principal2' 이미 있으면 skip. 비번 1234. region/school_level 는 principal1 패턴.
+  try {
+    const principal2 = db.prepare("SELECT id FROM users WHERE username = 'principal2'").get();
+    if (!principal2) {
+      const hash = bcrypt.hashSync('1234', 10);
+      const cols = db.prepare("PRAGMA table_info(users)").all().map(c => c.name);
+      const fields = ['username', 'password', 'display_name', 'role', 'school_name'];
+      const vals = ['principal2', hash, '다채움테스트 교장', 'principal', '다채움테스트학교'];
+      if (cols.includes('region')) { fields.push('region'); vals.push('청주'); }
+      if (cols.includes('school_level')) { fields.push('school_level'); vals.push('elementary'); }
+      if (cols.includes('is_seed')) { fields.push('is_seed'); vals.push(0); }
+      const ph = fields.map(() => '?').join(', ');
+      db.prepare(`INSERT INTO users (${fields.join(', ')}) VALUES (${ph})`).run(...vals);
+      console.log('[DB] 교장 계정 생성 (principal2 / 1234, 다채움테스트학교)');
+    }
+  } catch (e) {
+    console.error('[DB] principal2 시드 실패:', e.message);
+  }
+
   // 더미 사용자 계정 (개발용)
   const teacher = db.prepare('SELECT id FROM users WHERE username = ?').get('teacher1');
   if (!teacher) {

@@ -111,7 +111,10 @@
     {
       id: 'lrsAnalytics', label: 'LRS 학습분석',
       defaultUrl: '/lrs/index.html?menu=home',
+      // 교장·교감(principal)은 LRS 학생/교사용 하위가 의미 없어 학교 관리자 대시보드로 진입
+      defaultUrlByRole: { principal: '/school/' },
       sub: [
+        { label: '🏫 학교 관리자 대시보드', url: '/school/', roles: ['principal'] },
         { label: '🏠 홈',        url: '/lrs/index.html?menu=home',       roles: ['student','teacher','admin'] },
         { label: '현황 분석',    url: '/lrs/index.html?menu=analytics',  roles: ['student','teacher','admin'] },
         { label: '학습 활동',    url: '/lrs/index.html?menu=activities', roles: ['student','teacher'] },
@@ -228,7 +231,7 @@
     // 사용자 영역
     const userArea = document.createElement('div');
     userArea.className = 'gnb-user';
-    const roleBadge = { student: '학생', teacher: '교사', parent: '학부모', staff: '교직원', admin: '관리자' };
+    const roleBadge = { student: '학생', teacher: '교사', parent: '학부모', staff: '교직원', admin: '관리자', principal: '교장·교감' };
     if (isGuest) {
       // 비로그인: 로그인 / 회원가입 버튼만 노출
       const redirectQs = '?redirect=' + encodeURIComponent(location.pathname + location.search);
@@ -244,6 +247,7 @@
           <span id="gnbUnreadBadge" style="display:none;position:absolute;top:-4px;right:-6px;background:#EF4444;color:#fff;border-radius:10px;min-width:18px;height:18px;font-size:13px;font-weight:700;line-height:18px;text-align:center;padding:0 5px;"></span>
         </a>
         ${user.role === 'admin' ? `<a href="/admin/index.html" class="gnb-admin-btn" title="관리자 페이지" style="display:inline-flex;align-items:center;gap:6px;padding:6px 12px;background:#4F46E5;color:#fff;border-radius:6px;font-size:14px;font-weight:600;text-decoration:none;margin-right:4px;"><i class="fas fa-cog"></i> 관리자 페이지</a>` : ''}
+        ${user.role === 'principal' ? `<a href="/school/" class="gnb-admin-btn gnb-school-btn" title="학교 관리자 대시보드" style="display:inline-flex;align-items:center;gap:6px;padding:6px 12px;background:#0EA5E9;color:#fff;border-radius:6px;font-size:14px;font-weight:600;text-decoration:none;margin-right:4px;"><i class="fas fa-school"></i> 학교 관리자</a>` : ''}
         <span class="gnb-user-role">${roleBadge[user.role] || user.role}</span>
         <span class="gnb-user-name">${user.display_name}</span>
         <button class="gnb-logout-btn" id="gnbLogoutBtn">로그아웃</button>
