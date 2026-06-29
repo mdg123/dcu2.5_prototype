@@ -398,11 +398,14 @@
     .wizard-step.done + .wizard-step-divider, .wizard-step.active + .wizard-step-divider { background: var(--primary-200); }
 
     /* Body */
-    .wizard-body { flex: 1; overflow-y: auto; padding: 24px 28px; }
+    .wizard-body { flex: 1; min-height: 0; overflow: hidden; padding: 24px 28px; display: flex; flex-direction: column; }
     .wizard-step-pane { display:none; }
-    .wizard-step-pane.active { display:block; }
-    .wizard-pane-title { font-size: 19px; font-weight: 700; color: var(--gray-900); margin-bottom: 6px; }
-    .wizard-pane-sub { font-size: 14px; color: var(--gray-500); margin-bottom: 20px; }
+    /* 활성 단계 패널이 body 가용 높이를 채우고, 폼형 단계는 패널 자체가 단일 스크롤러 */
+    .wizard-step-pane.active { display:flex; flex-direction:column; flex:1; min-height:0; overflow-y:auto; }
+    /* 목록/미리보기형 단계: 패널은 스크롤하지 않고(이중 스크롤 방지) 내부 목록만 스크롤 */
+    .wizard-step-pane--fill.active { overflow:hidden; }
+    .wizard-pane-title { font-size: 19px; font-weight: 700; color: var(--gray-900); margin-bottom: 6px; flex-shrink: 0; }
+    .wizard-pane-sub { font-size: 14px; color: var(--gray-500); margin-bottom: 20px; flex-shrink: 0; }
 
     .wizard-form-row { margin-bottom: 18px; }
     .wizard-form-row > label { display:block; font-size: 14px; font-weight: 600; color: var(--gray-700); margin-bottom: 8px; }
@@ -422,10 +425,11 @@
     .wizard-include-item input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--primary); }
 
     /* Step 2 — items list */
-    .wizard-filter-summary { background: var(--primary-50); border: 1px solid var(--primary-100); border-radius: 10px; padding: 12px 16px; font-size: 14px; color: var(--primary-700); display:flex; align-items:center; gap:10px; margin-bottom:16px; flex-wrap: wrap; }
+    .wizard-filter-summary { background: var(--primary-50); border: 1px solid var(--primary-100); border-radius: 10px; padding: 12px 16px; font-size: 14px; color: var(--primary-700); display:flex; align-items:center; gap:10px; margin-bottom:16px; flex-wrap: wrap; flex-shrink: 0; }
     .wizard-filter-summary i { color: var(--primary); }
-    .wizard-quick-select { display:flex; gap:8px; margin-bottom: 14px; flex-wrap: wrap; }
-    .wizard-items-list { display:flex; flex-direction: column; gap: 8px; max-height: 50vh; overflow-y:auto; padding: 4px; }
+    .wizard-quick-select { display:flex; gap:8px; margin-bottom: 14px; flex-wrap: wrap; flex-shrink: 0; }
+    /* 목록이 패널의 남는 공간을 채우는 유일한 스크롤러 (창 높이 적응) */
+    .wizard-items-list { display:flex; flex-direction: column; gap: 8px; flex: 1; min-height: 120px; overflow-y:auto; padding: 4px; }
     .wizard-item-row { display:flex; align-items:center; gap: 12px; padding: 12px 14px; border: 1.5px solid var(--gray-200); border-radius: 10px; cursor: pointer; transition: all 0.15s; background:white; }
     .wizard-item-row:hover { border-color: var(--primary-200); background: var(--primary-50); }
     .wizard-item-row.checked { border-color: var(--primary); background: var(--primary-50); }
@@ -437,8 +441,9 @@
     .wizard-item-row .wii-life { color: var(--primary); font-size: 13px; }
 
     /* Step 3 — preview */
-    .wizard-preview-grid { display:grid; grid-template-columns: 180px 1fr; gap: 16px; height: 100%; }
-    .wizard-thumb-list { display:flex; flex-direction: column; gap: 8px; max-height: 60vh; overflow-y:auto; padding-right: 4px; }
+    .wizard-preview-info { flex-shrink: 0; }
+    .wizard-preview-grid { display:grid; grid-template-columns: 180px 1fr; gap: 16px; flex: 1; min-height: 0; }
+    .wizard-thumb-list { display:flex; flex-direction: column; gap: 8px; min-height: 0; max-height: 100%; overflow-y:auto; padding-right: 4px; }
     .wizard-thumb { width: 160px; height: 226px; border: 2px solid var(--gray-200); border-radius: 8px; background: white; cursor: pointer; padding: 12px 10px; font-size: 9px; color: var(--gray-700); overflow:hidden; position: relative; transition: all 0.15s; }
     .wizard-thumb:hover { border-color: var(--primary-200); }
     .wizard-thumb.active { border-color: var(--primary); box-shadow: 0 4px 12px rgba(37,99,235,.15); }
@@ -1059,7 +1064,7 @@
       </div>
 
       <!-- Step 2 -->
-      <div class="wizard-step-pane" data-step="2" id="wizPane2">
+      <div class="wizard-step-pane wizard-step-pane--fill" data-step="2" id="wizPane2">
         <div class="wizard-pane-title">어떤 활동을 담을까요?</div>
         <div class="wizard-pane-sub">기간/학교급 필터로 좁힌 후보입니다. 인생 과제와 최근 활동이 기본 선택되어 있어요.</div>
         <div class="wizard-filter-summary" id="wizFilterSummary">
@@ -1077,7 +1082,7 @@
       </div>
 
       <!-- Step 3 -->
-      <div class="wizard-step-pane" data-step="3" id="wizPane3">
+      <div class="wizard-step-pane wizard-step-pane--fill" data-step="3" id="wizPane3">
         <div class="wizard-pane-title">이렇게 만들어집니다</div>
         <div class="wizard-pane-sub">표지부터 마무리까지 페이지를 미리 살펴보세요.</div>
         <div class="wizard-preview-info" id="wizPreviewInfo">총 페이지: -, 예상 크기: -</div>
