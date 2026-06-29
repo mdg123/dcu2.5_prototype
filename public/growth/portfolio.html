@@ -351,100 +351,54 @@
     .viewing-student-banner .student-label { font-size: 12px; color: var(--primary); }
     .section-card { background: #fff; border-radius: var(--radius-lg); padding: 24px; box-shadow: var(--shadow-sm); margin-bottom: 16px; }
 
-    /* ===== 한 화면 타이트 레이아웃 (body.pf-fit — 개별 포트폴리오 뷰 활성 시 JS 토글) =====
-       원리: page-main 을 뷰포트 높이에 잠그고(세로 스크롤 차단), 헤더·통계·목표·필터는 고정,
-       content-wrapper → main-area → 목록 패널만 flex:1 로 남는 높이를 정확히 채워 내부 스크롤.
-       상단 누적 높이가 변해도(목표 개수 등) flex 가 자동 흡수 → calc 하드코딩 불필요.
-       데스크탑(>768px)에서만 적용. 모바일/인쇄는 아래 media query 에서 자연 펼침으로 환원. */
-    /* 뷰포트 높이에 잠그고(definite height → flex:1 계산 가능) 외부 스크롤 차단.
-       → 스크롤 주체는 목록 패널 한 곳뿐(단일 스크롤러, 이중 스크롤 원천 차단).
-       상단(헤더·통계·목표·필터)은 고정, 목록 패널만 flex 로 남는 높이를 정확히 채워 내부 스크롤.
-       창이 매우 낮을 때 목록이 과도하게 작아지면 → '성장 목표 접기' 토글로 144px 확보(설계된 탈출구). */
-    body.pf-fit .app-layout { height: calc(100vh - var(--pf-top-offset, 96px)); min-height: 0; overflow: hidden; }
-    /* page-main = 뷰포트에 잠긴 flex column. overflow:hidden 으로 flex 자식이 정확히 가용 높이를 채움.
-       상하 패딩 축소(기본 28px → 12px)로 목록에 ~32px 추가 확보. */
-    body.pf-fit .page-main { height: 100%; min-height: 0; display: flex; flex-direction: column; overflow: hidden; padding-top: 12px; padding-bottom: 12px; }
-    /* 상단 헤더 컴팩트 — 패딩/마진 축소 + 보조 설명문 숨김으로 목록에 높이 양보 (타이틀 글꼴 스케일은 유지) */
-    body.pf-fit .page-main > .page-header { padding: 8px 0 6px; margin-bottom: 10px; }
-    body.pf-fit .page-main > .page-header .page-header__subtitle { display: none; }
-    /* 통계: 한 화면 모드에선 5개 빅카드 → 한 줄 슬림 통계 행(인라인 칩). 전체 높이 ~56px.
-       숫자 가독성 유지(숫자 18px·라벨 14px). 아이콘은 좌측 인라인, 수직정렬. */
-    body.pf-fit .stats-grid {
-      display: flex; flex-wrap: nowrap; gap: 10px; margin-bottom: 10px;
-      background: #fff; border-radius: var(--radius-lg); box-shadow: var(--shadow-sm);
-      padding: 8px 10px;
-    }
-    body.pf-fit .stat-card {
-      flex: 1 1 0; min-width: 0;
-      display: flex; align-items: center; justify-content: center; gap: 8px;
-      padding: 6px 8px; text-align: left; box-shadow: none; border-radius: var(--radius-md);
-      background: var(--gray-50);
-    }
-    body.pf-fit .stat-card:hover { transform: none; box-shadow: none; background: var(--gray-100); }
-    body.pf-fit .stat-icon { width: 30px; height: 30px; margin: 0; border-radius: 8px; font-size: 0.95rem; flex-shrink: 0; }
-    body.pf-fit .stat-card .stat-text { display: flex; flex-direction: column; line-height: 1.15; min-width: 0; }
-    body.pf-fit .stat-value { font-size: 18px; line-height: 1.15; }
-    body.pf-fit .stat-label { font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    /* 좁아지면(<1100px 등) 칩이 2줄 줄바꿈 허용 */
-    @media (max-width: 1180px) {
-      body.pf-fit .stats-grid { flex-wrap: wrap; }
-      body.pf-fit .stat-card { flex: 1 1 30%; }
-    }
-    /* 목표 영역: 한 화면 모드에선 기본 접힘(JS). 펼쳐도 낮은 상한(약 1.5개)+내부 스크롤로 상단 잠식 방지. */
-    body.pf-fit .goals-section { margin-bottom: 10px; padding: 12px 16px; }
-    body.pf-fit #goalList { max-height: 120px; }
-    /* 페이지 헤더 / 교사 배너 / 돌아가기 버튼 = 고정 (목록 위 영역) */
-    body.pf-fit .page-main > .page-header,
-    body.pf-fit .page-main > #teacherPortfolioView,
-    body.pf-fit .page-main > #backToPortfolioListBtn { flex-shrink: 0; }
-    /* 개별 포트폴리오 영역이 page-main 의 남는 높이를 차지하는 flex column */
-    body.pf-fit #individualPortfolioArea { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-    /* 그 안에서 통계·목표·필터·배너는 고정, content-wrapper 만 남는 높이를 flex 로 채움 */
-    body.pf-fit #individualPortfolioArea > #viewingStudentBanner,
-    body.pf-fit #individualPortfolioArea > .stats-grid,
-    body.pf-fit #individualPortfolioArea > .goals-section,
-    body.pf-fit #individualPortfolioArea > .controls-bar { flex-shrink: 0; }
-    body.pf-fit #individualPortfolioArea > .content-wrapper { flex: 1; min-height: 0; align-items: stretch; }
-    /* main-area 가 content-wrapper 높이를 채우고, 그 안 목록/타임라인만 스크롤 */
-    body.pf-fit .content-wrapper > .main-area { min-height: 0; height: 100%; }
-    body.pf-fit .main-area > .selection-bar { flex-shrink: 0; }
-    body.pf-fit .main-area > #loadMoreWrap { flex-shrink: 0; margin-top: 12px; }
-    /* 목록/타임라인 패널 = 유일한 스크롤러. flex 가 남는 높이를 채워 가용한 만큼 카드를 노출
-       (900≈5장·800≈4장·700≈3~4장). min-height 는 0px 붕괴만 막는 보수적 바닥값(≈3장).
-       page-main overflow:hidden 이라 min 을 가용보다 크게 잡으면 하단이 잘려 도달 불가 → 바닥값만. */
+    /* ===== 넉넉한 목록 우선 레이아웃 (body.pf-fit — 개별 포트폴리오 뷰 활성 시 JS 토글) =====
+       방침 전환: '한 화면 강제'(뷰포트 잠금·과압축)를 버리고 **목록을 크고 넉넉하게**.
+       - 통계 빅카드 5개·성장목표 펼침은 원래대로 유지(살짝만 컴팩트).
+       - 목록 패널은 '창 높이 적응 스크롤'(generous): max-height 를 넉넉히 잡아 6~8장 노출, 넘치면 내부 스크롤.
+       - 페이지 자체는 상단(통계+목표+필터) 때문에 세로로 조금 스크롤될 수 있음(허용).
+       데스크탑(>768px)에서만 적용. 모바일/인쇄는 아래 media query 에서 자연 펼침. */
+
+    /* 상단은 빅카드 유지하되 적당히 컴팩트 — 목록이 외부 스크롤 없이 화면 대부분을 차지하도록 자리 양보 */
+    /* 기본 .app-layout min-height: calc(100vh-60px) 은 GNB 60px 가정 → 실제 GNB 96px 라 36px 초과(잔여 스크롤).
+       개별뷰에선 최소높이 제거 — 내용만큼만 차지하게 하여 잔여 페이지 스크롤 제거. */
+    body.pf-fit .app-layout { min-height: 0; }
+    body.pf-fit .page-main { padding-top: 16px; padding-bottom: 16px; }
+    body.pf-fit .page-main > .page-header { padding: 8px 0 6px; margin-bottom: 12px; }
+    body.pf-fit .page-main > .page-header .page-header__subtitle { display: none; } /* 보조설명문만 숨김 */
+    body.pf-fit .stats-grid { margin-bottom: 12px; gap: 14px; }
+    /* 빅카드 유지·가볍게 컴팩트(카드 높이 ~108px) — 슬림 strip 아님(정보 빈약 X). 숫자 24px·라벨 유지 */
+    body.pf-fit .stat-card { padding: 12px 16px; }
+    body.pf-fit .stat-icon { width: 40px; height: 40px; margin-bottom: 6px; font-size: 20px; }
+    body.pf-fit .stat-value { font-size: 24px; }
+    body.pf-fit .stat-label { font-size: 14px; }
+    body.pf-fit .goals-section { margin-bottom: 12px; }
+    /* 성장목표: 데스크탑 개별뷰 기본 접힘(목록 우선) — 헤더 펼치기 토글로 언제든 펼침(상태 기억).
+       펼치면 목표 리스트 자체 내부 스크롤로 상단 과점유 방지. */
+    body.pf-fit #goalList { max-height: 132px; }
+    body.pf-fit .controls-bar { margin-bottom: 12px; }
+
+    /* 목록/타임라인 = 넉넉한 창 높이 적응 스크롤 패널.
+       · min-height 460px(≈5장): 목록이 항상 큼 — '너무 작게' 방지(사용자 핵심 요구).
+       · max-height: 창이 크면 (뷰포트 - 목록시작y(JS실측 --pf-list-top) - 하단여유64) 만큼 더 늘어 더 많은 장수.
+       · 넘치는 항목은 패널 내부 스크롤(단일 스크롤러). 낮은 창(≈800)에선 min(460) 때문에 페이지가
+         적당히 세로 스크롤되어 큰 목록을 드러냄(허용). 하단여유 64 = '더 보기' 버튼 공간. */
     body.pf-fit #listView,
-    body.pf-fit #timelineView { max-height: none; min-height: 180px; flex: 1 1 auto; }
-    /* 한 화면 모드: 목록 카드/간격 컴팩트 → 같은 높이에 더 많은 카드(가독성 유지: 제목 600/메타 13px). */
-    body.pf-fit .list-item { padding: 8px 16px; gap: 12px; }
-    body.pf-fit .list-item .list-title { margin-bottom: 2px; }
-    body.pf-fit .list-icon { width: 36px; height: 42px; font-size: 1rem; }
-    body.pf-fit .portfolio-list { gap: 7px; }
-    body.pf-fit .main-area > #loadMoreWrap { margin-top: 8px; }
-    body.pf-fit #loadMoreWrap .btn { padding: 7px 18px; }
-    /* select-all 헤더 슬림 (sticky 유지) */
-    body.pf-fit .select-all-row { padding: 6px 16px; }
-    /* 페이지 헤더 한 줄 더 슬림 */
-    body.pf-fit .page-main > .page-header { padding: 4px 0 2px; margin-bottom: 6px; }
-    body.pf-fit .page-main > .page-header .page-header__title { font-size: 24px; }
-    /* 필터행 컴팩트 — 패딩/간격 더 축소(2줄→가능하면 1줄 근접) */
-    body.pf-fit .controls-bar { padding: 10px 14px; margin-bottom: 10px; }
-    body.pf-fit .controls-row { gap: 10px; row-gap: 8px; }
-    /* 우측 사이드바(역량 레이더 등)도 영역 안에서 스크롤되도록 — 길면 자체 스크롤 */
-    body.pf-fit .content-wrapper > .right-sidebar { min-height: 0; max-height: 100%; overflow-y: auto; padding-right: 2px; }
-    /* 매우 낮은 창(≤740px): 카드/상단을 한 단계 더 압축해 목록 ≥3장 확보 */
-    @media (min-width: 769px) and (max-height: 740px) {
-      body.pf-fit .list-item { padding: 5px 16px; gap: 10px; }
-      body.pf-fit .list-icon { width: 30px; height: 34px; }
-      body.pf-fit .portfolio-list { gap: 6px; }
-      body.pf-fit .select-all-row { padding: 4px 16px; }
-      body.pf-fit .stats-grid { padding: 6px 10px; margin-bottom: 8px; }
-      body.pf-fit .stat-card { padding: 4px 8px; }
-      body.pf-fit .stat-icon { width: 28px; height: 28px; }
-      body.pf-fit .goals-section { padding: 8px 16px; margin-bottom: 8px; }
-      body.pf-fit .controls-bar { padding: 8px 12px; margin-bottom: 8px; }
-      body.pf-fit .page-main > .page-header { padding: 2px 0 0; margin-bottom: 4px; }
-      body.pf-fit #listView, body.pf-fit #timelineView { min-height: 150px; }
+    body.pf-fit #timelineView {
+      max-height: max(600px, calc(100vh - var(--pf-list-top, 470px) - 64px));
+      min-height: 600px;
+      overflow-y: auto; overflow-x: hidden;
+      overscroll-behavior: contain;
+      scroll-margin-top: 110px;
     }
+    /* 우측 사이드바(레이더+목표+빠른실행)가 목록보다 길어 페이지를 늘리지 않도록 동일 높이로 캡 + 자체 스크롤.
+       (그리드 행이 사이드바 높이에 맞춰 늘어나 페이지가 길어지던 문제 차단) */
+    body.pf-fit .content-wrapper { align-items: start; }
+    body.pf-fit .content-wrapper > .right-sidebar {
+      max-height: calc(100vh - var(--pf-list-top, 470px) - 64px);
+      overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain;
+      padding-right: 2px;
+    }
+    /* 카드 높이는 원래 정도(~100px) 유지(가독성). select-all sticky 유지. */
 
     /* ===== RESPONSIVE ===== */
     @media (max-width: 1200px) {
@@ -469,40 +423,21 @@
       .goal-info { flex: 1 1 calc(100% - 40px); }
       .goal-progress { width: 100%; margin-top: 8px; }
       .goal-controls { justify-content: flex-start; }
-      /* 모바일: 사이드바가 아래로 빠지므로 목록 내부 스크롤을 완화 — 페이지 자연 스크롤 허용 */
+      /* 모바일: 사이드바가 아래로 빠지므로 목록 높이 제한 해제 — 페이지 자연 스크롤 허용 */
       .portfolio-list, .portfolio-timeline { max-height: none; overflow: visible; padding-right: 0; }
       .portfolio-list .select-all-row { position: static; }
-      /* 모바일은 '한 화면 강제' 해제 — pf-fit 높이 잠금/flex 무력화하고 자연 세로 스크롤 */
-      body.pf-fit .app-layout { height: auto; min-height: calc(100vh - 60px); overflow: visible; }
-      body.pf-fit .page-main { height: auto; display: block; overflow: visible; }
-      body.pf-fit #individualPortfolioArea { display: block; flex: none; min-height: 0; }
-      body.pf-fit #individualPortfolioArea > .content-wrapper { flex: none; }
-      body.pf-fit .content-wrapper > .main-area { height: auto; }
-      body.pf-fit .content-wrapper > .right-sidebar { max-height: none; overflow: visible; }
-      body.pf-fit #listView, body.pf-fit #timelineView { max-height: none; flex: none; min-height: 0; }
-      /* 모바일: 슬림 통계 행 해제 → 2열 그리드 + 전체 라벨(말줄임 제거) 가독성 우선 */
-      body.pf-fit .stats-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; background: transparent; box-shadow: none; padding: 0; }
-      body.pf-fit .stat-card { flex: none; flex-direction: column; justify-content: center; gap: 4px; text-align: center; padding: 14px; background: #fff; box-shadow: var(--shadow-sm); }
-      body.pf-fit .stat-card .stat-text { align-items: center; }
-      body.pf-fit .stat-icon { width: 40px; height: 40px; margin: 0 auto 4px; }
-      body.pf-fit .stat-label { white-space: normal; overflow: visible; text-overflow: clip; }
-      body.pf-fit .stat-value { font-size: 1.5rem; }
-      /* 모바일: page-main 패딩 pf-fit 잔재 제거 */
-      body.pf-fit .page-main { padding: 16px; }
+      /* 모바일: pf-fit 목록 창적응 max-height 해제(자연 세로 스크롤) */
+      body.pf-fit #listView, body.pf-fit #timelineView { max-height: none; min-height: 0; overflow: visible; }
+      body.pf-fit #goalList { max-height: none; }
     }
 
     @media print {
       .nav-sidebar, .controls-bar, .selection-bar, .right-sidebar, .modal-overlay, .toast-container { display: none !important; }
       .content-wrapper { grid-template-columns: 1fr !important; }
       .list-item { break-inside: avoid; box-shadow: none; border: 1px solid var(--gray-200); }
-      /* 인쇄/PDF 시 목록 높이 제한 해제 — 전체 항목이 잘리지 않도록 */
+      /* 인쇄/PDF 시 목록·목표 높이 제한 해제 — 전체 항목이 잘리지 않도록 */
       .portfolio-list, .portfolio-timeline { max-height: none !important; overflow: visible !important; }
-      /* 인쇄: pf-fit 의 뷰포트 잠금/flex 전부 해제하여 전체 펼침 */
-      body.pf-fit .app-layout, body.pf-fit .page-main { height: auto !important; min-height: 0 !important; display: block !important; overflow: visible !important; }
-      body.pf-fit #individualPortfolioArea { display: block !important; flex: none !important; }
-      body.pf-fit #individualPortfolioArea > .content-wrapper { flex: none !important; }
-      body.pf-fit .content-wrapper > .main-area { height: auto !important; }
-      body.pf-fit #listView, body.pf-fit #timelineView { max-height: none !important; flex: none !important; overflow: visible !important; }
+      body.pf-fit #listView, body.pf-fit #timelineView, body.pf-fit #goalList { max-height: none !important; overflow: visible !important; }
     }
 
     /* ===== PAGE HEADER — dacheum-common.css 의 .page-header 표준 사용 ===== */
@@ -1324,32 +1259,37 @@
   let targetUserId = null;
   let viewingStudentName = '';
 
-  // 한 화면 타이트 레이아웃 토글 — 개별 포트폴리오 영역이 보일 때만 body.pf-fit 부여.
+  // 넉넉한 목록 레이아웃 토글 — 개별 포트폴리오 영역이 보일 때만 body.pf-fit 부여.
   // (교사 학생목록 그리드 화면에서는 해제하여 자연 스크롤 유지)
   function applyFitLayout() {
     var ipa = document.getElementById('individualPortfolioArea');
     var active = ipa && getComputedStyle(ipa).display !== 'none';
     document.body.classList.toggle('pf-fit', !!active);
-    if (active) { measureTopOffset(); requestAnimationFrame(measureTopOffset); }
-    if (typeof applyGoalsDefaultState === 'function') applyGoalsDefaultState(); // pf-fit 기본 접힘 반영
+    if (typeof applyGoalsDefaultState === 'function') applyGoalsDefaultState(); // pf-fit 기준 기본 접힘/펼침 반영
+    if (active) { measureListTop(); requestAnimationFrame(measureListTop); }
   }
-  // 공통 GNB(고정 헤더)의 실제 높이를 측정해 한 화면 잠금 높이의 기준 오프셋으로 사용.
-  // (GNB가 1줄/2줄로 달라져도 자동 반영 — 36px 잔여 스크롤 같은 하드코딩 오차 방지)
-  function measureTopOffset() {
+  // 목록 패널의 화면상 시작 y(top) 를 실측해 --pf-list-top 으로 설정.
+  // → 목록 max-height = 100vh - listTop - 24px 로 '창 높이 적응 스크롤'(넉넉, 하단이 항상 창 안).
+  // 상단 누적 높이(통계·목표 펼침 등)가 달라져도 자동 반영.
+  function measureListTop() {
     try {
-      var gnb = document.getElementById('dacheum-gnb-wrapper');
-      var off = 0;
-      if (gnb) off = Math.round(gnb.getBoundingClientRect().height);
-      if (!off) { // 폴백: body padding-top
-        var pt = parseFloat(getComputedStyle(document.body).paddingTop) || 0;
-        off = Math.round(pt);
+      var active = document.getElementById('listView');
+      var tl = document.getElementById('timelineView');
+      // 보이는 패널 기준(없으면 listView)
+      var panel = (active && getComputedStyle(active).display !== 'none') ? active
+                : (tl && getComputedStyle(tl).display !== 'none') ? tl : active;
+      if (!panel) return;
+      // 패널 max-height 영향을 배제하려고 부모 기준 top 을 사용
+      var top = Math.round(panel.getBoundingClientRect().top + window.scrollY);
+      // 화면(뷰포트) 상단 기준 top = 절대 top - 현재 스크롤
+      var viewportTop = Math.round(panel.getBoundingClientRect().top);
+      if (viewportTop > 0 && viewportTop < window.innerHeight) {
+        document.documentElement.style.setProperty('--pf-list-top', viewportTop + 'px');
       }
-      if (!off) off = 96;
-      document.documentElement.style.setProperty('--pf-top-offset', off + 'px');
     } catch (e) {}
   }
-  // GNB 비동기 주입/리사이즈 시 오프셋 재측정
-  window.addEventListener('resize', function(){ if (document.body.classList.contains('pf-fit')) measureTopOffset(); });
+  // 리사이즈/상단 변화 시 재측정
+  window.addEventListener('resize', function(){ if (document.body.classList.contains('pf-fit')) measureListTop(); });
   let currentPage = 1;
   let currentCategory = 'all';
   let currentSource = '';
@@ -1582,9 +1522,8 @@
     }).join('');
   }
 
-  // 성장 목표 접기/펼치기 — 한 화면 모드에서 목록 공간 확보.
-  //  · 사용자가 직접 토글하면 그 선택을 localStorage 에 저장(존중).
-  //  · 저장값이 없으면: pf-fit(데스크탑 한 화면) 에선 기본 '접힘'(목록 우선), 그 외 '펼침'.
+  // 성장 목표 접기/펼치기 — 선택적 기능(기본 펼침). 사용자가 원하면 접어서 목록 공간 확보.
+  //  · 기본값: 펼침(원래대로). 사용자가 토글한 선택만 localStorage 에 저장·복원.
   var GOALS_COLLAPSE_KEY = 'pf_goals_collapsed';
   function _setGoalsCollapsed(c, persist){
     var btn = document.getElementById('goalsCollapseBtn');
@@ -1594,15 +1533,16 @@
     btn.setAttribute('aria-expanded', c ? 'false' : 'true');
     btn.title = c ? '성장 목표 펼치기' : '성장 목표 접기';
     if (persist) { try { localStorage.setItem(GOALS_COLLAPSE_KEY, c ? '1' : '0'); } catch(e){} }
+    if (typeof measureListTop === 'function') { measureListTop(); requestAnimationFrame(measureListTop); }
   }
-  // pf-fit 적용 시점에 기본 접힘/펼침 결정(사용자 저장값 우선)
+  // 사용자 저장 선택 우선. 없으면: 데스크탑 개별뷰(pf-fit)에선 기본 접힘(목록을 화면에 크게 노출),
+  // 그 외(모바일 등)에선 펼침. 펼치기/접기 토글은 항상 헤더에 노출.
   function applyGoalsDefaultState(){
     var saved = null;
     try { saved = localStorage.getItem(GOALS_COLLAPSE_KEY); } catch(e){}
     if (saved === '1' || saved === '0') { _setGoalsCollapsed(saved === '1', false); return; }
-    // 저장값 없음 → pf-fit(데스크탑 한 화면) 이면 기본 접힘
-    var isFit = document.body.classList.contains('pf-fit') && window.matchMedia('(min-width: 769px)').matches;
-    _setGoalsCollapsed(isFit, false);
+    var collapseByDefault = document.body.classList.contains('pf-fit') && window.matchMedia('(min-width: 769px)').matches;
+    _setGoalsCollapsed(collapseByDefault, false);
   }
   (function initGoalsCollapse(){
     var btn = document.getElementById('goalsCollapseBtn');
