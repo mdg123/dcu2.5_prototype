@@ -15,6 +15,28 @@
     .page-header h1 { font-size:22px; font-weight:700; display:flex; align-items:center; gap:10px; }
     .btn-primary { padding:10px 22px; background:var(--primary); color:#fff; border:none; border-radius:10px; font-size:13px; font-weight:700; cursor:pointer; font-family:inherit; display:flex; align-items:center; gap:6px; }
     .btn-outline { padding:8px 16px; background:#fff; border:1.5px solid var(--gray-200); border-radius:8px; font-size:13px; cursor:pointer; font-family:inherit; color:var(--gray-600); }
+    .btn-bulk { padding:10px 22px; background:#fff; color:#7c3aed; border:1.5px solid #c4b5fd; border-radius:10px; font-size:13px; font-weight:700; cursor:pointer; font-family:inherit; display:flex; align-items:center; gap:6px; }
+    .btn-bulk:hover { background:#f5f3ff; border-color:#a78bfa; }
+
+    /* 일괄 배포 모달 전용 */
+    .bulk-info { background:#f5f3ff; border:1.5px solid #ddd6fe; border-radius:12px; padding:14px 16px; font-size:13px; line-height:1.7; color:#5b21b6; margin-bottom:20px; display:flex; gap:10px; }
+    .bulk-info i { font-size:16px; margin-top:2px; flex-shrink:0; }
+    .bulk-scope-group { display:flex; gap:8px; flex-wrap:wrap; }
+    .bulk-scope { padding:10px 16px; border:1.5px solid var(--gray-200); border-radius:10px; font-size:13px; cursor:pointer; font-family:inherit; background:#fff; flex:1; text-align:center; min-width:120px; }
+    .bulk-scope.active { border-color:#7c3aed; background:#f5f3ff; color:#7c3aed; font-weight:700; }
+    .bulk-scope small { display:block; font-size:11px; color:var(--gray-400); margin-top:2px; font-weight:400; }
+    .bulk-scope.active small { color:#8b5cf6; }
+    .bulk-result { margin-top:8px; }
+    .bulk-result-summary { display:flex; gap:16px; flex-wrap:wrap; align-items:center; padding:14px 16px; background:#ecfdf5; border:1.5px solid #a7f3d0; border-radius:12px; margin-bottom:14px; }
+    .bulk-result-summary .br-total { font-size:18px; font-weight:800; color:#047857; }
+    .bulk-result-summary .br-skip { font-size:13px; color:var(--gray-500); }
+    .bulk-result-summary .br-range { font-size:13px; color:var(--gray-600); margin-left:auto; }
+    .bulk-grade-chips { display:flex; gap:8px; flex-wrap:wrap; }
+    .bulk-grade-chip { display:flex; flex-direction:column; align-items:center; gap:2px; padding:10px 14px; background:#fff; border:1.5px solid var(--gray-200); border-radius:10px; min-width:64px; }
+    .bulk-grade-chip .bgc-label { font-size:13px; font-weight:700; color:var(--gray-700); }
+    .bulk-grade-chip .bgc-count { font-size:18px; font-weight:800; color:#7c3aed; }
+    .bulk-grade-chip.zero .bgc-count { color:var(--gray-300); }
+    .btn-primary[disabled], .btn-bulk[disabled] { opacity:.6; cursor:not-allowed; }
 
     /* 필터 */
     .filter-bar { display:flex; gap:10px; margin-bottom:20px; flex-wrap:wrap; align-items:center; }
@@ -98,7 +120,10 @@
   <div class="main-wrap">
     <div class="page-header">
       <h1>📚 오늘의 학습 배포 관리</h1>
-      <button class="btn-primary" onclick="openCreateModal()"><i class="fas fa-plus"></i> 새로 배포하기</button>
+      <div style="display:flex;gap:10px;">
+        <button class="btn-bulk" onclick="openBulkModal()"><i class="fas fa-calendar-alt"></i> 기간 일괄 배포</button>
+        <button class="btn-primary" onclick="openCreateModal()"><i class="fas fa-plus"></i> 새로 배포하기</button>
+      </div>
     </div>
 
     <!-- 필터 -->
@@ -244,6 +269,53 @@
         <label style="display:flex;align-items:center;gap:6px;margin-right:auto;font-size:13px;"><input type="checkbox" id="setActive" checked> 즉시 배포 (활성화)</label>
         <button class="btn-outline" onclick="closeCreateModal()">취소</button>
         <button class="btn-primary" onclick="saveSet()"><i class="fas fa-check"></i> 저장</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 기간 일괄 배포 모달 -->
+  <div class="modal-overlay" id="bulkModal">
+    <div class="modal" style="max-width:640px;">
+      <div class="modal-header">
+        <h3><i class="fas fa-calendar-alt" style="color:#7c3aed"></i> 기간 일괄 배포</h3>
+        <button class="modal-close" onclick="closeBulkModal()">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="bulk-info">
+          <i class="fas fa-info-circle"></i>
+          <div>현재 오늘의 학습 일괄배포는 <strong>수학 과목</strong>만 지원합니다.<br>승인된 영상·문항 콘텐츠 풀에서 학년별(초3~고1)로 날짜마다 자동 구성됩니다. 이미 같은 날짜·학년 세트가 있으면 건너뜁니다.</div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">시작일 *</label>
+            <input type="date" class="form-input" id="bulkStart">
+          </div>
+          <div class="form-group">
+            <label class="form-label">종료일 *</label>
+            <input type="date" class="form-input" id="bulkEnd">
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">대상 범위 *</label>
+          <div class="bulk-scope-group" id="bulkScopeGroup">
+            <div class="bulk-scope active" data-scope="all" onclick="selectScope(this)">전체<small>초3~고1 (8개 학년)</small></div>
+            <div class="bulk-scope" data-scope="elementary" onclick="selectScope(this)">초등<small>3~6학년</small></div>
+            <div class="bulk-scope" data-scope="middle-high" onclick="selectScope(this)">중등·고1<small>중1~고1</small></div>
+          </div>
+        </div>
+
+        <!-- 결과 영역 -->
+        <div class="bulk-result" id="bulkResult" style="display:none;">
+          <div class="form-label" style="margin-bottom:10px;">📊 배포 결과</div>
+          <div class="bulk-result-summary" id="bulkResultSummary"></div>
+          <div class="bulk-grade-chips" id="bulkGradeChips"></div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-outline" onclick="closeBulkModal()">닫기</button>
+        <button class="btn-bulk" id="bulkRunBtn" onclick="runBulkDistribute()" style="background:#7c3aed;color:#fff;border-color:#7c3aed;"><i class="fas fa-paper-plane"></i> 일괄 배포 실행</button>
       </div>
     </div>
   </div>
@@ -549,6 +621,90 @@
         showToast('삭제되었습니다.');
         loadSets();
       } catch { showToast('삭제 실패'); }
+    }
+
+    // ===== 기간 일괄 배포 =====
+    function openBulkModal() {
+      const today = new Date('2026-06-29'); // 기준일
+      const start = today.toISOString().slice(0,10);
+      const endD = new Date(today); endD.setDate(endD.getDate() + 30);
+      const end = endD.toISOString().slice(0,10);
+      document.getElementById('bulkStart').value = start;
+      document.getElementById('bulkEnd').value = end;
+      document.querySelectorAll('#bulkScopeGroup .bulk-scope').forEach(s => s.classList.remove('active'));
+      document.querySelector('#bulkScopeGroup .bulk-scope[data-scope="all"]').classList.add('active');
+      document.getElementById('bulkResult').style.display = 'none';
+      const btn = document.getElementById('bulkRunBtn');
+      btn.disabled = false;
+      btn.innerHTML = '<i class="fas fa-paper-plane"></i> 일괄 배포 실행';
+      document.getElementById('bulkModal').classList.add('active');
+    }
+    function closeBulkModal() { document.getElementById('bulkModal').classList.remove('active'); }
+    function selectScope(el) {
+      document.querySelectorAll('#bulkScopeGroup .bulk-scope').forEach(s => s.classList.remove('active'));
+      el.classList.add('active');
+    }
+
+    const scopeLabels = { all: '전체 학년(초3~고1)', elementary: '초등(3~6학년)', 'middle-high': '중등·고1' };
+
+    async function runBulkDistribute() {
+      const startDate = document.getElementById('bulkStart').value;
+      const endDate = document.getElementById('bulkEnd').value;
+      const scope = document.querySelector('#bulkScopeGroup .bulk-scope.active')?.dataset.scope || 'all';
+
+      if (!startDate || !endDate) { showToast('시작일과 종료일을 모두 선택하세요'); return; }
+      if (endDate < startDate) { showToast('종료일이 시작일보다 빠를 수 없습니다'); return; }
+
+      const fmt = (d) => d.replace(/-/g, '/').slice(5); // MM/DD
+      if (!confirm(`${fmt(startDate)}~${fmt(endDate)} 기간에 [${scopeLabels[scope]}] 오늘의 학습(수학)을 일괄 생성할까요?\n많은 세트가 생성될 수 있습니다.`)) return;
+
+      const btn = document.getElementById('bulkRunBtn');
+      btn.disabled = true;
+      btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 배포 중...';
+
+      try {
+        const res = await fetch('/api/admin/daily-learning/bulk-distribute', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ startDate, endDate, scope })
+        });
+        const data = await res.json();
+        if (!res.ok || !data.success) {
+          showToast(data.message || `배포 실패 (${res.status})`);
+          btn.disabled = false;
+          btn.innerHTML = '<i class="fas fa-paper-plane"></i> 일괄 배포 실행';
+          return;
+        }
+        renderBulkResult(data);
+        showToast(`일괄 배포 완료 — 총 ${data.totalCreated}개 생성`);
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-paper-plane"></i> 일괄 배포 실행';
+        loadSets(); // 목록 새로고침
+      } catch (err) {
+        showToast('배포 실패: ' + err.message);
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-paper-plane"></i> 일괄 배포 실행';
+      }
+    }
+
+    function renderBulkResult(data) {
+      const summary = data.summary || {};
+      const range = data.dateRange || {};
+      document.getElementById('bulkResultSummary').innerHTML =
+        `<span class="br-total"><i class="fas fa-check-circle"></i> 총 ${data.totalCreated || 0}개 생성</span>` +
+        `<span class="br-skip">건너뜀(이미 존재) ${data.totalSkipped || 0}개</span>` +
+        `<span class="br-range">${range.startDate || ''} ~ ${range.endDate || ''}</span>`;
+
+      // 학년 순서 고정 (초3~고1)
+      const order = ['초3','초4','초5','초6','중1','중2','중3','고1'];
+      const keys = order.filter(k => k in summary).concat(Object.keys(summary).filter(k => !order.includes(k)));
+      document.getElementById('bulkGradeChips').innerHTML = keys.map(k => {
+        const n = summary[k] || 0;
+        return `<div class="bulk-grade-chip ${n === 0 ? 'zero' : ''}">
+          <span class="bgc-label">${escHtml(k)}</span>
+          <span class="bgc-count">${n}</span>
+        </div>`;
+      }).join('');
+      document.getElementById('bulkResult').style.display = 'block';
     }
 
     // 검색 엔터키
