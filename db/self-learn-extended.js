@@ -218,20 +218,34 @@ function completeDailyItem(itemId, userId, { score, timeSpent, answers, correctC
   const item = db.prepare('SELECT * FROM daily_learning_items WHERE id = ?').get(itemId);
   if (!item) return null;
   // 중복 완료 처리 방지: 이미 completed면 포인트 재지급/로그 반복 안 함
-  const prev = db.prepare("SELECT status FROM daily_learning_progress WHERE user_id=? AND item_id=?").get(userId, itemId);
+  const prev = db.prepare("SELECT id, status FROM daily_learning_progress WHERE user_id=? AND item_id=?").get(userId, itemId);
   const wasCompleted = prev && prev.status === 'completed';
   // 정오답 상세(answers): [{questionNumber, questionText, options, myAnswer, correctAnswer, isCorrect, explanation}, ...]
   const answersJson = Array.isArray(answers) && answers.length > 0 ? JSON.stringify(answers) : null;
   // 영상·자료 시청 항목은 점수 없음 — 정책 가드 (매트릭스 셀 표시 정책)
   const safeScore = normalizeProgressScore(itemId, score);
-  db.prepare(`
-    UPDATE daily_learning_progress
-    SET status = 'completed', completed_at = CURRENT_TIMESTAMP, score = ?, time_spent_seconds = ?,
-        answers_json = COALESCE(?, answers_json),
-        correct_count = COALESCE(?, correct_count),
-        total_questions = COALESCE(?, total_questions)
-    WHERE user_id = ? AND item_id = ?
-  `).run(safeScore ?? null, timeSpent || 0, answersJson, correctCount ?? null, totalQuestions ?? null, userId, itemId);
+
+  // ★ UPSERT (결함 #2 fix): 진행행이 없으면(=/start 없이 complete 또는 start 가 조용히 실패한 경우)
+  //   INSERT 로 생성한 뒤 completed 처리. 기존 bare UPDATE 는 0행 갱신이라 행이 없으면
+  //   포인트만 지급되고 daily_learning_progress 행은 누락 → 스트릭·통계 오염이었다.
+  //   started_at 은 기존 값 보존(없으면 완료 시각으로 기록).
+  if (prev) {
+    db.prepare(`
+      UPDATE daily_learning_progress
+      SET status = 'completed', completed_at = CURRENT_TIMESTAMP, score = ?, time_spent_seconds = ?,
+          answers_json = COALESCE(?, answers_json),
+          correct_count = COALESCE(?, correct_count),
+          total_questions = COALESCE(?, total_questions)
+      WHERE user_id = ? AND item_id = ?
+    `).run(safeScore ?? null, timeSpent || 0, answersJson, correctCount ?? null, totalQuestions ?? null, userId, itemId);
+  } else {
+    db.prepare(`
+      INSERT INTO daily_learning_progress
+        (user_id, item_id, set_id, status, started_at, completed_at, score, time_spent_seconds,
+         answers_json, correct_count, total_questions)
+      VALUES (?, ?, ?, 'completed', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?)
+    `).run(userId, itemId, item.set_id, safeScore ?? null, timeSpent || 0, answersJson, correctCount ?? null, totalQuestions ?? null);
+  }
 
   if (wasCompleted) {
     return { success: true, alreadyCompleted: true };

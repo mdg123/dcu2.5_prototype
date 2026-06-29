@@ -2132,23 +2132,11 @@ function initSchema() {
     );
   `);
 
-  // 갤러리 이벤트 시드 (비어있을 때만)
-  try {
-    const evCount = db.prepare('SELECT COUNT(*) AS cnt FROM gallery_events').get().cnt;
-    if (evCount === 0) {
-      const admin = db.prepare("SELECT id FROM users WHERE role='admin' ORDER BY id ASC LIMIT 1").get();
-      const hostId = admin ? admin.id : 1;
-      const insEv = db.prepare(`INSERT INTO gallery_events (title, description, category, start_date, end_date, location, host_user_id, thumbnail_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`);
-      // 날짜는 오늘 기준 상대값(동적 계산)으로 삽입 — 데모 시나리오에서 '참여가능' 필터에 정상 노출되도록
-      const d = (days) => { const t = new Date(); t.setDate(t.getDate() + days); return t.toISOString().slice(0, 10); };
-      insEv.run('전국 학생 사생대회', '전국의 초·중학생이 참여하는 야외 사생대회입니다. 자연을 주제로 자유롭게 그려보세요.', 'art', d(14), d(14), '올림픽공원', hostId, null);
-      insEv.run('청소년 음악제', '학생들이 갈고닦은 음악 실력을 뽐내는 음악제. 독주·합주·성악 부문.', 'music', d(33), d(33), '예술의전당', hostId, null);
-      insEv.run('학생 영상 예술제', '짧은 영상으로 이야기하는 예술제. 창의적인 영상 작품을 기다립니다.', 'video', d(27), d(27), '상암DMC', hostId, null);
-      insEv.run('전국 미술 공모전', '회화·조소·디자인 전 분야를 아우르는 전국 공모전.', 'art', d(50), d(50), '국립현대미술관', hostId, null);
-      insEv.run('청소년 문학상', '시·소설·수필 부문의 글쓰기 대회. 청소년의 빛나는 문장을 기다립니다.', 'literature', d(45), d(45), '국립중앙도서관', hostId, null);
-      console.log('[DB] gallery_events 시드 5건 삽입 완료');
-    }
-  } catch (e) { console.error('[DB] gallery_events 시드 실패:', e.message); }
+  // 갤러리 이벤트 시드는 admin·더미유저 시드 "뒤"로 이동했다.
+  //   (결함 #5 fix: host_user_id 가 users(id) FK 참조 → fresh DB 에서 유저보다 먼저 INSERT 하면
+  //    FOREIGN KEY constraint failed 로 데모 이벤트가 누락됐다. 실제 시드는 아래 'gallery_events
+  //    데모 시드(유저 시드 이후)' 블록에서 수행한다.) 날짜/컬럼 마이그레이션은 기존 운영 DB 의
+  //    이미 존재하는 행을 대상으로 하므로 여기 위치를 유지한다(멱등).
 
   // 마이그레이션: 기존 시드의 과거 날짜를 오늘 기준 미래로 이동 (한 번만)
   try {
@@ -2909,6 +2897,27 @@ function initSchema() {
   if (!existingClass) {
     seedDummyData(db);
   }
+
+  // ============ gallery_events 데모 시드 (유저 시드 이후) ============
+  //   ★ 결함 #5 fix: 반드시 admin·더미유저 시드 "뒤"에 실행해야 host_user_id FK 가 무결.
+  //     이전엔 gallery_events 시드가 유저 시드보다 ~700줄 먼저 실행 → fresh DB 에서
+  //     FOREIGN KEY constraint failed → 데모 이벤트 누락. 멱등(비어있을 때만 INSERT).
+  try {
+    const evCount = db.prepare('SELECT COUNT(*) AS cnt FROM gallery_events').get().cnt;
+    if (evCount === 0) {
+      const admin = db.prepare("SELECT id FROM users WHERE role='admin' ORDER BY id ASC LIMIT 1").get();
+      const hostId = admin ? admin.id : 1;
+      const insEv = db.prepare(`INSERT INTO gallery_events (title, description, category, start_date, end_date, location, host_user_id, thumbnail_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`);
+      // 날짜는 오늘 기준 상대값(동적 계산)으로 삽입 — 데모 시나리오에서 '참여가능' 필터에 정상 노출되도록
+      const d = (days) => { const t = new Date(); t.setDate(t.getDate() + days); return t.toISOString().slice(0, 10); };
+      insEv.run('전국 학생 사생대회', '전국의 초·중학생이 참여하는 야외 사생대회입니다. 자연을 주제로 자유롭게 그려보세요.', 'art', d(14), d(14), '올림픽공원', hostId, null);
+      insEv.run('청소년 음악제', '학생들이 갈고닦은 음악 실력을 뽐내는 음악제. 독주·합주·성악 부문.', 'music', d(33), d(33), '예술의전당', hostId, null);
+      insEv.run('학생 영상 예술제', '짧은 영상으로 이야기하는 예술제. 창의적인 영상 작품을 기다립니다.', 'video', d(27), d(27), '상암DMC', hostId, null);
+      insEv.run('전국 미술 공모전', '회화·조소·디자인 전 분야를 아우르는 전국 공모전.', 'art', d(50), d(50), '국립현대미술관', hostId, null);
+      insEv.run('청소년 문학상', '시·소설·수필 부문의 글쓰기 대회. 청소년의 빛나는 문장을 기다립니다.', 'literature', d(45), d(45), '국립중앙도서관', hostId, null);
+      console.log('[DB] gallery_events 시드 5건 삽입 완료');
+    }
+  } catch (e) { console.error('[DB] gallery_events 시드 실패:', e.message); }
 
   // 학부모-자녀 매핑 시드 (idempotent — 매번 실행되어도 안전)
   // parent1 → student1, student2 의 학부모로 매핑하여 학부모 대시보드 데이터 노출

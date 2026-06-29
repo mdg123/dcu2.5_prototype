@@ -1020,9 +1020,12 @@ router.get('/portfolios/:studentId/report-data', requireAuth, (req, res) => {
 router.post('/portfolios/report', requireAuth, async (req, res) => {
   try {
     const studentId = parseInt(req.body.studentId) || req.user.id;
-    // 본인 또는 admin
-    if (req.user.id !== studentId && req.user.role !== 'admin') {
-      return res.status(403).json({ success: false, message: '본인 보고서만 생성할 수 있습니다.' });
+    // 권한: 본인 / admin / 같은 반 담당(owner) 교사 — 화면조회(GET /report/student/:id,
+    //   .../detail, .../report-data)와 동일 기준(canAccessStudentReport)으로 통일.
+    //   (결함 #7 fix: 이전엔 "본인 || admin" 만 허용해 담임이 화면으로 보던 리포트를 PDF 로
+    //    못 뽑는 모순이 있었다. 타 반·무관 교사·타 학생은 여전히 403.)
+    if (!canAccessStudentReport(req, studentId)) {
+      return res.status(403).json({ success: false, message: '해당 학생의 보고서를 생성할 권한이 없습니다.' });
     }
 
     const opts = req.body.options || {};
