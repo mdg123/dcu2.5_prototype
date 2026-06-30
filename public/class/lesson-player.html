@@ -60,6 +60,48 @@
     .header-btn.hand-raised { background: rgba(245,158,11,0.3); color: #fcd34d; animation: pulse-hand 1.5s infinite; }
     @keyframes pulse-hand { 0%,100% { box-shadow: 0 0 0 0 rgba(245,158,11,0.4); } 50% { box-shadow: 0 0 0 6px rgba(245,158,11,0); } }
 
+    /* ===== 수업꾸러미 동기화(lockstep) — 교사 토글 버튼 ===== */
+    #syncToggleBtn { white-space: nowrap; min-width: 96px; justify-content: center; }
+    #syncToggleBtn .sync-dot { display: none; width: 8px; height: 8px; border-radius: 50%; background: #fff; margin-right: 2px; }
+    /* ON(내가 컨트롤) — 그린 + 점멸 dot. body.light-mode .header-btn-ghost 보다 우선하도록 body 한정으로 명시 */
+    #syncToggleBtn.sync-on, body.light-mode #syncToggleBtn.sync-on { background: #10b981; color: #fff; }
+    #syncToggleBtn.sync-on:hover, body.light-mode #syncToggleBtn.sync-on:hover { background: #0ea571; }
+    #syncToggleBtn.sync-on .sync-dot { display: inline-block; animation: sync-pulse 1.4s infinite; }
+    /* 다른 교사가 ON — 주황(이어받기) */
+    #syncToggleBtn.sync-takeover, body.light-mode #syncToggleBtn.sync-takeover { background: #f59e0b; color: #fff; }
+    #syncToggleBtn.sync-takeover:hover, body.light-mode #syncToggleBtn.sync-takeover:hover { background: #e08e09; }
+    #syncToggleBtn:disabled { opacity: .45; cursor: not-allowed; }
+    @keyframes sync-pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(255,255,255,0.55); } 50% { box-shadow: 0 0 0 5px rgba(255,255,255,0); } }
+    body.light-mode #syncToggleBtn.sync-on,
+    body.light-mode #syncToggleBtn.sync-takeover { color: #fff !important; }
+    body.light-mode #syncToggleBtn.sync-on *,
+    body.light-mode #syncToggleBtn.sync-takeover * { color: #fff !important; }
+
+    /* ===== 학생 잠금 배너 ===== */
+    #syncLockBanner {
+      display: none; align-items: center; justify-content: center; gap: 8px;
+      width: 100%; box-sizing: border-box; margin: 0 0 12px;
+      padding: 10px 16px; border-radius: 10px;
+      font-size: 15px; font-weight: 600; line-height: 1.4; text-align: center;
+      background: #fef3c7; color: #92400e;
+    }
+    #syncLockBanner.show { display: flex; }
+    #syncLockBanner.unlocked { background: #dcfce7; color: #166534; }
+    #syncLockBanner .sync-lock-icon { flex-shrink: 0; }
+    body.light-mode #syncLockBanner { color: #92400e; }
+    body.light-mode #syncLockBanner.unlocked { color: #166534; }
+    body.light-mode #syncLockBanner * { color: inherit; }
+    /* 잠금 중 컨트롤 비활성(잠금이 기존 disabled보다 우선) */
+    .step-item.sync-locked { pointer-events: none; opacity: .55; }
+    .step-item.sync-locked.active { opacity: 1; } /* 교사 현재 위치는 또렷하게 */
+    .nav-btn.sync-locked { opacity: .4 !important; cursor: not-allowed !important; }
+    @media (max-width: 768px) {
+      /* 모바일: 토글 라벨 숨기고 아이콘만, 배너 2줄 허용 */
+      #syncToggleBtn .sync-label { display: none; }
+      #syncToggleBtn { min-width: 0; }
+      #syncLockBanner { white-space: normal; }
+    }
+
     /* ===== Layout ===== */
     .viewer-container { display: flex; height: calc(100vh - var(--header-height)); margin-top: var(--header-height); }
 
@@ -608,6 +650,8 @@
   </style>
   <script defer src="/js/components/std-smart-search.js"></script>
   <script src="/js/class-ui.js"></script>
+  <!-- 수업꾸러미 동기화(lockstep): Socket.IO 클라이언트 (기존 미로드 → 추가) -->
+  <script src="/socket.io/socket.io.js"></script>
 </head>
 <body class="light-mode">
   <!-- Header -->
@@ -623,6 +667,7 @@
       <button class="header-btn header-btn-ghost" id="chatBtn" onclick="toggleChat()" title="채팅"><i class="fas fa-comments"></i> 채팅</button>
       <button class="header-btn header-btn-ghost" id="settingsBtn" onclick="toggleSettings()" title="설정"><i class="fas fa-cog"></i> 설정</button>
       <button class="header-btn header-btn-ghost" id="handBtn" onclick="raiseHand()" title="손들기"><i class="fas fa-hand-paper"></i> 손들기</button>
+      <button class="header-btn header-btn-ghost" id="syncToggleBtn" onclick="toggleLessonSync()" title="학생 화면 동기화" style="display:none;"><span class="sync-dot"></span><i class="fas fa-users-rectangle" id="syncToggleIcon"></i> <span class="sync-label" id="syncToggleLabel">동기화 시작</span></button>
       <button class="header-btn header-btn-ghost" onclick="toggleSidebar()" title="목차 토글"><i class="fas fa-bars"></i></button>
       <button class="header-btn header-btn-danger" onclick="goBack()"><i class="fas fa-sign-out-alt"></i> 나가기</button>
     </div>
@@ -682,6 +727,11 @@
       <canvas class="drawing-canvas" id="drawingCanvas"></canvas>
 
       <div class="controls-bar">
+        <!-- 수업꾸러미 동기화: 학생 잠금 배너 (기본 숨김) -->
+        <div id="syncLockBanner" role="status" aria-live="polite">
+          <i class="fas fa-lock sync-lock-icon" id="syncLockBannerIcon"></i>
+          <span id="syncLockBannerText">선생님 화면을 따라가고 있어요 · 이동이 잠겨 있어요</span>
+        </div>
         <div class="controls-top">
           <h3 id="currentTitle">콘텐츠를 선택하세요</h3>
           <span class="type-badge" id="currentBadge" style="display:none;"></span>
@@ -1045,6 +1095,9 @@
         const firstUndone = contents.findIndex(c => !progressMap[c.id]?.completed);
         selectContent(firstUndone >= 0 ? firstUndone : 0);
 
+        // ── 수업꾸러미 동기화: contents 로드 완료 후 룸 join + 보류 상태 적용 ──
+        initLessonSync();
+
         // 셀프체크 초기화: pending 재전송 + 본인 응답 프리페치 (학생 한정, 비동기)
         initSelfCheckOnLoad().catch(() => {});
       } catch (err) {
@@ -1096,6 +1149,13 @@
     // Content Selection & Rendering
     // ============================================================
     function selectContent(index) {
+      // ── 수업꾸러미 동기화(lockstep) 가드: 단일 갈고리 ──
+      // 잠금 중인 학생(=교사뷰 아님)이 목표 외로 이동하려 하면 교사 위치로 즉시 되돌림.
+      if (syncState.on && !isTeacherViewer && index !== syncState.index) {
+        showSyncToast('지금은 선생님 화면을 따라가는 중이에요');
+        if (currentIndex !== syncState.index) selectContent(syncState.index);
+        return;
+      }
       currentIndex = index;
       const c = contents[index];
       const viewport = document.getElementById('playerViewport');
@@ -1218,8 +1278,10 @@
         btn.innerHTML = '<i class="fas fa-check-circle"></i> 학습 완료 처리';
       }
 
-      document.getElementById('prevBtn').disabled = (currentIndex === 0);
-      document.getElementById('nextBtn').disabled = (currentIndex === contents.length - 1);
+      // 잠금 중인 학생이면 prev/next는 항상 비활성(잠금 우선), 아니면 통상 경계 판정
+      const navLocked = syncState.on && !isTeacherViewer;
+      document.getElementById('prevBtn').disabled = navLocked || (currentIndex === 0);
+      document.getElementById('nextBtn').disabled = navLocked || (currentIndex === contents.length - 1);
 
       // Auto-record 50% progress on view
       if (!isDone && !isPreviewMode) {
@@ -1228,6 +1290,15 @@
 
       renderSidebar();
       resizeCanvas();
+
+      // ── 수업꾸러미 동기화: 사이드바가 새로 그려졌으므로 잠금 스타일 재적용 ──
+      if (syncState.on && !isTeacherViewer) applyStepLock(true);
+
+      // ── 교사(컨트롤러)가 이동하면 동기화 ON일 때 학생에게 전파 ──
+      if (isTeacherViewer && syncState.on && syncState.youAreController && socket) {
+        socket.emit('lesson:sync:move', { classId, lessonId, index });
+        syncState.index = index;
+      }
     }
 
     // ============================================================
@@ -2133,6 +2204,243 @@
       const btn = document.getElementById('bookmarkBtn');
       btn.classList.toggle('active');
       showToast(btn.classList.contains('active') ? '📌 북마크 추가됨' : '북마크 해제됨');
+    }
+
+    // ============================================================
+    // 수업꾸러미 동기화 (lockstep) — 클라이언트
+    // ============================================================
+    let socket = null;
+    // 현재 동기화 상태 (서버 lesson:sync:state 단일 채널로만 갱신)
+    // youAreController 는 controllerId(현재 제어 교사 userId)로 파생 — H-1: 교사 본인 echo false 덮어쓰기 방지
+    let syncState = { on: false, index: 0, controllerName: '', controllerId: null, youAreController: false };
+    // 교사뷰 여부 = 서버가 준 canControl 신뢰 (owner + co_teacher + admin 포함, 클라 자가판단 금지)
+    let isTeacherViewer = false;
+    // contents 미로드 상태로 먼저 도착한 state 보관
+    let pendingSyncState = null;
+    let contentsLoaded = false;
+    // OFF 배너 자동 숨김 타이머
+    let _syncBannerTimer = null;
+    // 모드: 학생 플레이 모드에서만 동기화 활성
+    const isStudentPlayMode = !isCreatorMode && !isEditMode && !isPreviewMode;
+
+    function initLessonSync() {
+      contentsLoaded = true;
+      // 로드 전에 도착해 보관해둔 상태가 있으면 즉시 적용
+      if (pendingSyncState) { const ps = pendingSyncState; pendingSyncState = null; applySyncState(ps); }
+      // 학생 플레이 모드가 아니거나 콘텐츠 0개 / 식별자 없으면 동기화 비활성 (fail-open)
+      if (!isStudentPlayMode || !classId || !lessonId) return;
+      if (!window.io) { console.warn('[sync] socket.io 미로드 — 동기화 비활성(자유 이동 유지)'); return; }
+
+      try {
+        socket = io();
+      } catch (e) {
+        console.warn('[sync] 소켓 생성 실패 — 자유 이동 유지', e);
+        return;
+      }
+
+      socket.on('connect', () => {
+        // 연결/재연결 시마다 join 재전송 → 상태 복원
+        socket.emit('lesson:join', { classId, lessonId });
+      });
+
+      // 단일 상태 채널: 시작/이동/종료/복원 모두 이 이벤트로 처리
+      socket.on('lesson:sync:state', (st) => {
+        if (!st || typeof st !== 'object') return;
+        applySyncState(st);
+      });
+
+      // 교사 헤더 "N명 동기화 중" 라벨 갱신 (컨트롤러에게만 옴)
+      socket.on('lesson:sync:peers', (p) => {
+        const count = (p && typeof p.count === 'number') ? p.count : 0;
+        syncState._peers = count;
+        renderSyncToggle();
+      });
+
+      // 위반/오류 — 조용히 무시 (학생 우회 emit 차단 피드백). 1회 토스트만.
+      let _errToasted = false;
+      socket.on('lesson:error', (e) => {
+        if (!_errToasted) {
+          _errToasted = true;
+          // 학생 잠금/자유에는 영향 없음. 디버깅용 안내만.
+          console.warn('[sync] lesson:error', e && e.message);
+        }
+      });
+
+      socket.on('disconnect', () => {
+        // 끊김 시에는 잠금을 강제로 풀지 않음(재연결 후 state로 복원). 단 영구 잠금 방지를 위해
+        // 서버가 컨트롤러 이탈을 브로드캐스트(state on=false)하면 그때 풀린다. fail-open은 서버 주도.
+      });
+    }
+
+    // 서버에서 온 상태를 화면에 반영
+    function applySyncState(st) {
+      // contents 미로드 시 보관 후 로드 완료되면 적용
+      if (!contentsLoaded || contents.length === 0) {
+        pendingSyncState = st;
+        return;
+      }
+
+      // canControl(교사뷰)은 join push(per-socket)에만 실린다 — 키가 있을 때만 갱신(브로드캐스트엔 없으므로
+      // false로 덮어쓰지 말 것). co_teacher 포함, 클라 자가판단 금지.
+      if (typeof st.canControl === 'boolean') isTeacherViewer = st.canControl;
+
+      const prevOn = syncState.on;
+      syncState.on = !!st.on;
+      syncState.controllerName = st.controllerName || '';
+      // youAreController 는 controllerId 로 파생한다(H-1). 브로드캐스트엔 youAreController 키가 없으므로
+      // st.youAreController 에 의존하면 교사 본인이 자기 echo 를 받을 때 false 로 덮여 토글이 오작동했다.
+      // controllerId(현재 제어 교사 userId) === 내 userId 이면 내가 컨트롤러. off(controllerId=null)면 모두 false.
+      syncState.controllerId = (st.controllerId != null) ? st.controllerId : null;
+      syncState.youAreController = (syncState.controllerId != null && currentUser && syncState.controllerId === currentUser.id);
+
+      // index clamp (교사·학생 콘텐츠 길이 불일치 방어)
+      let idx = (typeof st.index === 'number') ? st.index : 0;
+      if (idx < 0) idx = 0;
+      if (idx > contents.length - 1) {
+        console.warn('[sync] index 범위 밖 — clamp', idx, '→', contents.length - 1);
+        idx = contents.length - 1;
+      }
+      syncState.index = idx;
+
+      // 교사 헤더 토글 상태 갱신(교사뷰일 때만 의미)
+      renderSyncToggle();
+
+      if (syncState.on) {
+        // 교사 본인은 잠그지 않음 — 상태 표시만
+        if (isTeacherViewer) {
+          applyLockUI(false);
+          return;
+        }
+        // 학생: 교사 위치로 강제 이동 (다르면)
+        if (currentIndex !== syncState.index) {
+          selectContent(syncState.index); // 가드 통과(목표=syncState.index)
+          showSyncToast('선생님 화면으로 이동했어요');
+        }
+        applyLockUI(true, syncState.controllerName);
+      } else {
+        // OFF: 학생 잠금 해제 (켜져 있던 상태에서만 해제 안내)
+        if (!isTeacherViewer) applyLockUI(false, '', prevOn);
+      }
+    }
+
+    // 교사 헤더 토글 버튼 3상태 렌더
+    function renderSyncToggle() {
+      const btn = document.getElementById('syncToggleBtn');
+      if (!btn) return;
+      // 학생/비교사뷰면 토글 자체를 숨김(미리보기/생성/편집/학생 모두 숨김)
+      if (!isStudentPlayMode || !isTeacherViewer) { btn.style.display = 'none'; return; }
+      btn.style.display = 'flex';
+
+      const icon = document.getElementById('syncToggleIcon');
+      const label = document.getElementById('syncToggleLabel');
+      const empty = contents.length === 0;
+      btn.disabled = empty;
+      btn.title = empty ? '연결된 콘텐츠가 없어요' : '학생 화면 동기화';
+
+      btn.classList.remove('sync-on', 'sync-takeover');
+      if (!syncState.on) {
+        // OFF
+        icon.className = 'fas fa-users-rectangle';
+        label.textContent = '동기화 시작';
+        btn.title = empty ? '연결된 콘텐츠가 없어요' : '학생 화면 동기화 시작';
+      } else if (syncState.youAreController) {
+        // ON — 내가 컨트롤
+        btn.classList.add('sync-on');
+        icon.className = 'fas fa-broadcast-tower';
+        const n = (typeof syncState._peers === 'number') ? syncState._peers : null;
+        label.textContent = (n !== null) ? `동기화 중 · ${n}명` : '동기화 중';
+        btn.title = '동기화 끄기';
+      } else {
+        // 다른 교사가 ON — 이어받기
+        btn.classList.add('sync-takeover');
+        icon.className = 'fas fa-hand-pointer';
+        label.textContent = '이어받기';
+        btn.title = (syncState.controllerName ? syncState.controllerName + ' 선생님' : '다른 선생님') + '이 진행 중 — 이어받기';
+      }
+    }
+
+    // 교사 토글 클릭 — 상태별 분기 emit
+    function toggleLessonSync() {
+      if (!socket || !isTeacherViewer || contents.length === 0) return;
+      if (!syncState.on) {
+        // OFF → 시작(현재 보고 있는 위치로)
+        socket.emit('lesson:sync:start', { classId, lessonId, index: Math.max(0, currentIndex) });
+      } else if (syncState.youAreController) {
+        // 내가 켠 상태 → 끄기(확인 모달 없이 즉시)
+        socket.emit('lesson:sync:end', { classId, lessonId });
+      } else {
+        // 다른 교사가 켠 상태 → 이어받기(start로 제어 이양)
+        socket.emit('lesson:sync:start', { classId, lessonId, index: Math.max(0, currentIndex) });
+      }
+    }
+
+    // 학생 잠금 UI 적용/해제
+    // applyLockUI(true, name) → 잠금, applyLockUI(false) → 해제, applyLockUI(false,'',true) → 해제 안내 표시
+    function applyLockUI(on, controllerName, wasOn) {
+      const banner = document.getElementById('syncLockBanner');
+      const bText = document.getElementById('syncLockBannerText');
+      const bIcon = document.getElementById('syncLockBannerIcon');
+      const prevBtn = document.getElementById('prevBtn');
+      const nextBtn = document.getElementById('nextBtn');
+
+      if (_syncBannerTimer) { clearTimeout(_syncBannerTimer); _syncBannerTimer = null; }
+
+      if (on) {
+        // ── 잠금 ON ──
+        if (banner) {
+          banner.classList.remove('unlocked');
+          banner.classList.add('show');
+          if (bIcon) bIcon.className = 'fas fa-lock sync-lock-icon';
+          let msg = '선생님 화면을 따라가고 있어요 · 이동이 잠겨 있어요';
+          if (controllerName) msg += ' · 진행: ' + controllerName + ' 선생님';
+          if (bText) bText.textContent = msg;
+        }
+        if (prevBtn) { prevBtn.disabled = true; prevBtn.classList.add('sync-locked'); }
+        if (nextBtn) { nextBtn.disabled = true; nextBtn.classList.add('sync-locked'); }
+        applyStepLock(true);
+      } else {
+        // ── 잠금 해제 ──
+        if (prevBtn) { prevBtn.classList.remove('sync-locked'); prevBtn.disabled = (currentIndex === 0); }
+        if (nextBtn) { nextBtn.classList.remove('sync-locked'); nextBtn.disabled = (currentIndex === contents.length - 1); }
+        applyStepLock(false);
+        if (banner) {
+          if (wasOn) {
+            // 해제 순간만 2.5초 안내 후 사라짐
+            banner.classList.add('unlocked', 'show');
+            if (bIcon) bIcon.className = 'fas fa-lock-open sync-lock-icon';
+            if (bText) bText.textContent = '이제 자유롭게 이동할 수 있어요';
+            _syncBannerTimer = setTimeout(() => {
+              banner.classList.remove('show', 'unlocked');
+            }, 2500);
+          } else {
+            banner.classList.remove('show', 'unlocked');
+          }
+        }
+      }
+    }
+
+    // 사이드바 목차 잠금 스타일 (renderSidebar 후마다 재적용)
+    function applyStepLock(on) {
+      document.querySelectorAll('.step-item').forEach((el, i) => {
+        if (on) {
+          el.classList.add('sync-locked');
+          el.setAttribute('aria-disabled', 'true');
+        } else {
+          el.classList.remove('sync-locked');
+          el.removeAttribute('aria-disabled');
+        }
+      });
+    }
+
+    // 짧은 토스트(동기화 전용 — 1.2초). 기존 showToast는 3초 고정이라 별도 처리.
+    function showSyncToast(msg) {
+      const container = document.getElementById('toastContainer');
+      if (!container) return;
+      const toast = document.createElement('div');
+      toast.className = 'toast';
+      toast.textContent = msg;
+      container.appendChild(toast);
+      setTimeout(() => toast.remove(), 1200);
     }
 
     // ============================================================
