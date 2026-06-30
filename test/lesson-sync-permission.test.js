@@ -167,3 +167,170 @@ test('H-1 회귀: lesson:sync:start 브로드캐스트 payload 에 controllerId 
   assert.ok('controllerId' in payload, 'H-1: 브로드캐스트 payload 에 controllerId 키가 반드시 존재해야 함');
   assert.equal(payload.controllerId, OWNER, 'H-1: controllerId 는 제어 교사(userId)와 일치해야 함');
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// [판서 동기화 계약] lesson:sync:draw / draw-clear / join snapshot 의 권한·payload 계약.
+//   판서동기화 기획서 §3·§4·§8: 단방향(교사→서버→학생), draw/clear 는 canControlLesson +
+//   controllerId 본인 + contentIndex 일치 3중 재검증. 학생/비controller emit 은 브로드캐스트 0.
+//   좌표는 0~1 정규화 그대로 중계(서버는 클램프만, 변형 없음).
+//
+//   소켓 서버를 띄우지 않고 fake io/socket 주입으로 핸들러 산출 payload "구조"만 검증(H-1 패턴).
+//   - io.to(room).emit  → 룸 브로드캐스트 (학생에게 보이는 채널)
+//   - socket.emit       → 그 소켓에만 (join snapshot / lesson:error)
+// ─────────────────────────────────────────────────────────────────────────────
+
+// 공용 하네스: fake io + 임의 userId 소켓 연결 → 핸들러 맵 + 캡처 버퍼 반환.
+function setupSyncHarness() {
+  const roomEmits = [];   // {room, event, payload}  (io.to(room).emit)
+  let connectionHandler = null;
+  const fakeIo = {
+    on(ev, fn) { if (ev === 'connection') connectionHandler = fn; },
+    to(room) { return { emit(event, payload) { roomEmits.push({ room, event, payload }); } }; }
+  };
+  initSocket(fakeIo);
+
+  // 주어진 userId 로 소켓 연결 → 핸들러 등록 + 그 소켓의 직접 emit 캡처.
+  function connect(uid, sockId) {
+    const handlers = {};
+    const socketEmits = [];  // {event, payload}  (socket.emit — 그 소켓에만)
+    const fakeSocket = {
+      request: { session: { userId: uid } },
+      id: sockId,
+      join() {}, leave() {},
+      emit(event, payload) { socketEmits.push({ event, payload }); },
+      on(ev, fn) { handlers[ev] = fn; }
+    };
+    connectionHandler(fakeSocket);
+    return { handlers, socketEmits };
+  }
+  return { roomEmits, connect };
+}
+
+test('판서: 학생(member)의 lesson:sync:draw 는 룸 브로드캐스트되지 않음(권한 차단)', () => {
+  const h = setupSyncHarness();
+
+  // 교사가 먼저 동기화 ON (contentIndex 0)
+  const owner = h.connect(OWNER, 'sock-owner');
+  owner.handlers['lesson:join']({ classId: CLASS, lessonId: LESSON });
+  owner.handlers['lesson:sync:start']({ classId: CLASS, lessonId: LESSON, index: 0 });
+
+  // 학생이 draw 위조 emit
+  const member = h.connect(MEMBER, 'sock-member');
+  member.handlers['lesson:join']({ classId: CLASS, lessonId: LESSON });
+  member.handlers['lesson:sync:draw']({
+    classId: CLASS, lessonId: LESSON, contentIndex: 0,
+    tool: 'pen', color: '#ff0000', nsize: 0.01,
+    segments: [{ x0: 0.1, y0: 0.1, x1: 0.2, y1: 0.2 }]
+  });
+
+  // lesson:sync:annotation 룸 브로드캐스트가 학생 draw 로 인해 발생하면 안 됨
+  const annots = h.roomEmits.filter(e => e.event === 'lesson:sync:annotation' && e.room === `lesson:${LESSON}`);
+  assert.equal(annots.length, 0, '학생 draw 는 절대 브로드캐스트되지 않아야 함');
+  // 본인에겐 lesson:error 통지(선택) — 차단 피드백
+  const errs = member.socketEmits.filter(e => e.event === 'lesson:error');
+  assert.ok(errs.length >= 1, '학생 draw 위조 시 본인에게 lesson:error 1회 통지');
+});
+
+test('판서: 교사 draw 브로드캐스트 payload 에 contentIndex + 정규화 segments(op:segments) 포함', () => {
+  const h = setupSyncHarness();
+  const owner = h.connect(OWNER, 'sock-owner-2');
+  owner.handlers['lesson:join']({ classId: CLASS, lessonId: LESSON });
+  owner.handlers['lesson:sync:start']({ classId: CLASS, lessonId: LESSON, index: 0 });
+
+  owner.handlers['lesson:sync:draw']({
+    classId: CLASS, lessonId: LESSON, contentIndex: 0,
+    tool: 'highlight', color: '#ffff00', nsize: 0.02,
+    // 범위 밖 좌표(1.5, -0.3)는 서버가 0~1 로 클램프해야 함
+    segments: [{ x0: 0.1, y0: 0.2, x1: 1.5, y1: -0.3 }]
+  });
+
+  const annots = h.roomEmits.filter(e => e.event === 'lesson:sync:annotation' && e.room === `lesson:${LESSON}`);
+  assert.ok(annots.length >= 1, '교사 draw 는 룸 브로드캐스트 1회 이상');
+  const p = annots[annots.length - 1].payload;
+  assert.equal(p.op, 'segments', 'op 은 segments');
+  assert.equal(p.contentIndex, 0, 'payload 에 contentIndex 포함');
+  assert.equal(p.tool, 'highlight', 'tool 중계');
+  assert.ok(Array.isArray(p.segments) && p.segments.length === 1, 'segments 배열 중계');
+  const s = p.segments[0];
+  // 0~1 클램프 검증: 1.5→1, -0.3→0, 정상값은 그대로
+  assert.equal(s.x0, 0.1); assert.equal(s.y0, 0.2);
+  assert.equal(s.x1, 1, 'x1=1.5 는 1 로 클램프');
+  assert.equal(s.y1, 0, 'y1=-0.3 은 0 으로 클램프');
+  assert.ok(s.x0 >= 0 && s.x0 <= 1 && s.x1 >= 0 && s.x1 <= 1, '모든 좌표 0~1 범위');
+});
+
+test('판서: contentIndex 불일치 draw 는 무시(전환 race 가드)', () => {
+  const h = setupSyncHarness();
+  const owner = h.connect(OWNER, 'sock-owner-3');
+  owner.handlers['lesson:join']({ classId: CLASS, lessonId: LESSON });
+  owner.handlers['lesson:sync:start']({ classId: CLASS, lessonId: LESSON, index: 0 });  // currentIndex=0
+
+  // 직전 콘텐츠(index 5)용 stroke 가 늦게 도착 → currentIndex(0)와 불일치 → 무시
+  owner.handlers['lesson:sync:draw']({
+    classId: CLASS, lessonId: LESSON, contentIndex: 5,
+    tool: 'pen', color: '#fff', nsize: 0.01,
+    segments: [{ x0: 0.1, y0: 0.1, x1: 0.2, y1: 0.2 }]
+  });
+
+  const annots = h.roomEmits.filter(e => e.event === 'lesson:sync:annotation' && e.room === `lesson:${LESSON}`);
+  assert.equal(annots.length, 0, 'contentIndex 불일치 draw 는 브로드캐스트 0');
+});
+
+test('판서: 권한 없는(학생) draw-clear 는 무시(브로드캐스트 0)', () => {
+  const h = setupSyncHarness();
+  const owner = h.connect(OWNER, 'sock-owner-4');
+  owner.handlers['lesson:join']({ classId: CLASS, lessonId: LESSON });
+  owner.handlers['lesson:sync:start']({ classId: CLASS, lessonId: LESSON, index: 0 });
+
+  const member = h.connect(MEMBER, 'sock-member-4');
+  member.handlers['lesson:join']({ classId: CLASS, lessonId: LESSON });
+  member.handlers['lesson:sync:draw-clear']({ classId: CLASS, lessonId: LESSON, contentIndex: 0 });
+
+  const clears = h.roomEmits.filter(e =>
+    e.event === 'lesson:sync:annotation' && e.payload && e.payload.op === 'clear' && e.room === `lesson:${LESSON}`);
+  assert.equal(clears.length, 0, '학생 draw-clear 는 절대 브로드캐스트되지 않아야 함');
+});
+
+test('판서: 교사 draw-clear 는 op:clear + contentIndex 브로드캐스트', () => {
+  const h = setupSyncHarness();
+  const owner = h.connect(OWNER, 'sock-owner-5');
+  owner.handlers['lesson:join']({ classId: CLASS, lessonId: LESSON });
+  owner.handlers['lesson:sync:start']({ classId: CLASS, lessonId: LESSON, index: 0 });
+  owner.handlers['lesson:sync:draw-clear']({ classId: CLASS, lessonId: LESSON, contentIndex: 0 });
+
+  const clears = h.roomEmits.filter(e =>
+    e.event === 'lesson:sync:annotation' && e.payload && e.payload.op === 'clear' && e.room === `lesson:${LESSON}`);
+  assert.ok(clears.length >= 1, '교사 draw-clear 는 op:clear 브로드캐스트');
+  assert.equal(clears[clears.length - 1].payload.contentIndex, 0, 'clear payload 에 contentIndex 포함');
+});
+
+test('판서: 늦은 입장 학생에게 op:snapshot(누적 strokes) 그 소켓에만 push', () => {
+  const h = setupSyncHarness();
+  // 교사 ON + index0 에 판서 1회 누적
+  const owner = h.connect(OWNER, 'sock-owner-6');
+  owner.handlers['lesson:join']({ classId: CLASS, lessonId: LESSON });
+  owner.handlers['lesson:sync:start']({ classId: CLASS, lessonId: LESSON, index: 0 });
+  owner.handlers['lesson:sync:draw']({
+    classId: CLASS, lessonId: LESSON, contentIndex: 0,
+    tool: 'pen', color: '#ffffff', nsize: 0.01,
+    segments: [{ x0: 0.1, y0: 0.1, x1: 0.3, y1: 0.3 }]
+  });
+
+  // 늦게 입장한 학생 — join 직후 그 소켓에만 snapshot 이 와야 함
+  const late = h.connect(MEMBER, 'sock-late-member');
+  late.handlers['lesson:join']({ classId: CLASS, lessonId: LESSON });
+
+  const snaps = late.socketEmits.filter(e =>
+    e.event === 'lesson:sync:annotation' && e.payload && e.payload.op === 'snapshot');
+  assert.ok(snaps.length >= 1, '늦은 입장 학생에게 snapshot 1회 push');
+  const sp = snaps[snaps.length - 1].payload;
+  assert.equal(sp.contentIndex, 0, 'snapshot contentIndex=현재 인덱스');
+  assert.ok(Array.isArray(sp.strokes) && sp.strokes.length === 1, 'snapshot strokes 누적 포함');
+  const st = sp.strokes[0];
+  assert.equal(st.tool, 'pen');
+  assert.ok(Array.isArray(st.segments) && st.segments.length === 1, 'stroke segments 정규화 좌표 포함');
+  // snapshot 은 그 소켓 전용 — 룸 전체 브로드캐스트로 새지 않아야 함(late.socketEmits 에만)
+  const lateRoomSnaps = h.roomEmits.filter(e =>
+    e.event === 'lesson:sync:annotation' && e.payload && e.payload.op === 'snapshot');
+  assert.equal(lateRoomSnaps.length, 0, 'join snapshot 은 룸 브로드캐스트가 아니라 그 소켓에만');
+});

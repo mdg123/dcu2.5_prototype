@@ -17,11 +17,19 @@ function getRuntime(examId) {
 // ─────────────────────────────────────────────────────────────────────────────
 // 수업꾸러미 동기화(교사 주도 lockstep) — 런타임 전용 상태맵 (기획서 §2.1)
 // Key: lessonId(String), Value:
-//   { on, controllerId, controllerName, classId, currentIndex, members(Map), updatedAt }
+//   { on, controllerId, controllerName, classId, currentIndex, members(Map), updatedAt,
+//     annotations: Map<contentIndex, Array<{tool,color,nsize,segments:[{x0,y0,x1,y1}]}>> }
 //   members: Map<userId, {socketId, role, displayName}>  (현재 룸 접속자)
+//   annotations: 교사 판서 누적 (contentIndex 단위, 정규화 좌표) — 늦은 입장 snapshot 복원용 (판서동기화 기획서 §4.1)
 // DB 영속 불요 — 세션성 기능. join push 로 복원, fail-open 으로 안전 수렴(§2.2).
 // ─────────────────────────────────────────────────────────────────────────────
 const lessonSync = new Map();
+
+// 판서 동기화 가드 상수 (판서동기화 기획서 §4.2, §8-5)
+const ANNOT_TOOLS = new Set(['pen', 'highlight', 'eraser']);  // tool 화이트리스트
+const ANNOT_MAX_SEGMENTS_PER_BATCH = 500;   // 배치당 세그먼트 상한 (초과 드롭)
+const ANNOT_MAX_SEGMENTS_PER_INDEX = 4000;  // contentIndex별 누적 세그먼트 상한 (FIFO 드롭)
+const ANNOT_MAX_BATCH_RATE = 20;            // per-socket 초당 draw 배치 상한 (DoS 가드)
 
 function getLessonSync(lessonId) {
   const lid = String(lessonId);
@@ -33,10 +41,43 @@ function getLessonSync(lessonId) {
       classId: null,
       currentIndex: 0,
       members: new Map(),
-      updatedAt: 0
+      updatedAt: 0,
+      annotations: new Map()  // contentIndex -> Array<stroke>
     });
   }
   return lessonSync.get(lid);
+}
+
+// 정규화 좌표 0~1 클램프 (NaN/범위밖 방어, 기획서 §8-5)
+function clamp01(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return null;
+  if (n < 0) return 0;
+  if (n > 1) return 1;
+  return n;
+}
+
+// 교사가 보낸 draw payload 의 segments 를 검증·정제 (배열·상한·0~1 클램프).
+//   비정상 좌표가 하나라도 있는 세그먼트는 드롭. 배치 상한 초과분도 잘라낸다.
+//   반환: 정제된 segments 배열 (빈 배열 가능 — 호출측에서 length 체크).
+function sanitizeSegments(segments) {
+  if (!Array.isArray(segments)) return [];
+  const out = [];
+  for (let i = 0; i < segments.length && out.length < ANNOT_MAX_SEGMENTS_PER_BATCH; i++) {
+    const s = segments[i];
+    if (!s || typeof s !== 'object') continue;
+    const x0 = clamp01(s.x0), y0 = clamp01(s.y0), x1 = clamp01(s.x1), y1 = clamp01(s.y1);
+    if (x0 === null || y0 === null || x1 === null || y1 === null) continue;  // 비정상 좌표 드롭
+    out.push({ x0, y0, x1, y1 });
+  }
+  return out;
+}
+
+// 현재 contentIndex 누적 stroke 의 총 세그먼트 수를 합산 (FIFO 드롭 판정용).
+function countIndexSegments(strokes) {
+  let n = 0;
+  for (const st of strokes) n += (st.segments ? st.segments.length : 0);
+  return n;
 }
 
 // 수업 동기화 제어 권한 서버측 재검증 (기획서 §5).
@@ -550,6 +591,20 @@ function initSocket(io) {
           youAreController: sync.on && sync.controllerId === userId
         });
 
+        // ⑥ 판서 늦은 입장 복원 (판서동기화 §4.3) — sync ON + 비교사뷰면
+        //   현재 currentIndex 의 누적 판서를 그 소켓에만 snapshot push.
+        //   교사뷰(canControl)에는 미전송(교사는 자기 로컬 캔버스 사용).
+        if (sync.on && !canControl) {
+          const strokes = sync.annotations.get(sync.currentIndex) || [];
+          if (strokes.length > 0) {
+            socket.emit('lesson:sync:annotation', {
+              op: 'snapshot',
+              contentIndex: sync.currentIndex,
+              strokes
+            });
+          }
+        }
+
         // 컨트롤러에게 학생 수 갱신
         emitLessonPeers(io, sync);
       } catch (e) { /* silent */ }
@@ -618,6 +673,13 @@ function initSocket(io) {
           controllerName: sync.controllerName,
           controllerId: sync.controllerId   // FE youAreController 파생용(=현재 제어 교사 userId)
         });
+        // 콘텐츠 전환 시 새 index 의 판서 snapshot 을 룸에 함께 push (판서동기화 §5.3) —
+        //   학생은 state(이동) 직후 새 콘텐츠의 누적 판서를 별도 요청 없이 복원. 비어 있으면 빈 배열(=클리어).
+        io.to(`lesson:${lid}`).emit('lesson:sync:annotation', {
+          op: 'snapshot',
+          contentIndex: i,
+          strokes: (sync.annotations.get(i) || [])
+        });
       };
 
       if (!throttle[key] || now - throttle[key] >= 1000) {
@@ -661,6 +723,93 @@ function initSocket(io) {
       if (throttle[`${key}_t`]) { clearTimeout(throttle[`${key}_t`]); delete throttle[`${key}_t`]; }
       // off 상태이므로 controllerId=null (FE는 controllerId로 youAreController 파생 → null이면 모두 false)
       io.to(`lesson:${lid}`).emit('lesson:sync:state', { on: false, controllerId: null });
+      // 동기화 종료 시 판서 누적 정리 (§6.5 — 교사 사라지면 판서도 소멸)
+      sync.annotations.clear();
+    });
+
+    // ═════════════════════════════════════════════════════════════════════
+    // 교사 판서 실시간 공유 (판서동기화 기획서 §3) — 단방향 교사→서버→학생.
+    //   모든 draw/draw-clear 는 canControlLesson + controllerId 본인 + contentIndex 일치
+    //   3중 재검증. 좌표는 0~1 정규화 그대로 중계(서버 변형 없음, 단 클램프·tool 화이트리스트).
+    //   누적은 annotations(contentIndex별)에 FIFO 상한으로 보관 → 늦은 입장 snapshot 복원.
+    // ═════════════════════════════════════════════════════════════════════
+
+    // per-socket draw 배치 rate 가드 (초당 ANNOT_MAX_BATCH_RATE 배치 — 폭주 주입 방어 §3.4-4).
+    //   소켓 로컬 카운터(이 클로저 스코프). 1초 윈도우.
+    let drawRateWindow = 0;   // 윈도우 시작 ms
+    let drawRateCount = 0;
+    function passDrawRate() {
+      const now = Date.now();
+      if (now - drawRateWindow >= 1000) { drawRateWindow = now; drawRateCount = 0; }
+      drawRateCount += 1;
+      return drawRateCount <= ANNOT_MAX_BATCH_RATE;
+    }
+
+    // ─── 교사(컨트롤러 본인): 판서 세그먼트 배치 ───
+    socket.on('lesson:sync:draw', ({ classId, lessonId, contentIndex, tool, color, nsize, segments }) => {
+      const lid = lessonId != null ? String(lessonId) : null;
+      if (!lid) return;
+      // 1) 권한 재검증 (DB) — 학생/비권한 emit 즉시 차단 (브로드캐스트 0)
+      if (!canControlLesson(userId, classId, lid)) {
+        emitLessonError(lid, '판서를 공유할 권한이 없습니다.');
+        return;
+      }
+      const sync = getLessonSync(lid);
+      // 2) 컨트롤러 본인만 (move 와 동일 가드)
+      if (!sync.on || sync.controllerId !== userId) return;
+      // 3) contentIndex 일치 검증 (전환 race — 직전 콘텐츠 잔여 stroke 가 새 콘텐츠 오염 방지 §6.1)
+      const idx = parseInt(contentIndex);
+      if (!Number.isFinite(idx) || idx !== sync.currentIndex) return;
+      // 4) 배치 rate 가드 (DoS)
+      if (!passDrawRate()) return;
+      // 5) tool 화이트리스트 + payload 정제 (0~1 클램프·상한)
+      const t = ANNOT_TOOLS.has(tool) ? tool : 'pen';
+      const cleanSegs = sanitizeSegments(segments);
+      if (cleanSegs.length === 0) return;  // 유효 좌표 없으면 무시
+      const ns = clamp01(nsize);
+      const stroke = {
+        tool: t,
+        color: (typeof color === 'string' ? color.slice(0, 32) : '#ffffff'),
+        nsize: ns === null ? 0 : ns,
+        segments: cleanSegs
+      };
+
+      // 6) annotations[idx] 누적 (FIFO 상한 — 가장 오래된 stroke 부터 드롭 §4.2)
+      if (!sync.annotations.has(idx)) sync.annotations.set(idx, []);
+      const strokes = sync.annotations.get(idx);
+      strokes.push(stroke);
+      let total = countIndexSegments(strokes);
+      while (total > ANNOT_MAX_SEGMENTS_PER_INDEX && strokes.length > 1) {
+        const dropped = strokes.shift();
+        total -= (dropped.segments ? dropped.segments.length : 0);
+      }
+
+      // 7) 학생 룸 브로드캐스트 (교사 본인 echo 는 FE renderRemoteStroke 에서 isTeacherViewer 로 무시)
+      io.to(`lesson:${lid}`).emit('lesson:sync:annotation', {
+        op: 'segments',
+        contentIndex: idx,
+        tool: t,
+        color: stroke.color,
+        nsize: stroke.nsize,
+        segments: cleanSegs
+      });
+    });
+
+    // ─── 교사(컨트롤러 본인): 판서 전체 지우기 / 콘텐츠 전환 클리어 ───
+    socket.on('lesson:sync:draw-clear', ({ classId, lessonId, contentIndex }) => {
+      const lid = lessonId != null ? String(lessonId) : null;
+      if (!lid) return;
+      if (!canControlLesson(userId, classId, lid)) {
+        emitLessonError(lid, '판서를 공유할 권한이 없습니다.');
+        return;
+      }
+      const sync = getLessonSync(lid);
+      if (!sync.on || sync.controllerId !== userId) return;
+      // contentIndex 가 유효하면 해당 인덱스, 아니면 현재 인덱스 클리어
+      const parsed = parseInt(contentIndex);
+      const idx = Number.isFinite(parsed) ? parsed : sync.currentIndex;
+      sync.annotations.set(idx, []);  // 비우기
+      io.to(`lesson:${lid}`).emit('lesson:sync:annotation', { op: 'clear', contentIndex: idx });
     });
 
     // ─── 연결 해제 ──────────────────────────────────────────────────────
@@ -715,6 +864,8 @@ function initSocket(io) {
             if (!stillHere) {
               sync.on = false;
               sync.updatedAt = Date.now();
+              // 판서 누적 정리 (§6.5 — 교사 이탈 시 판서 소멸, 학생은 teacher-left 수신 시 FE 캔버스 클리어)
+              sync.annotations.clear();
               // 대기 중 trailing move 취소
               const mkey = `lmove_${userId}_${lid}`;
               if (throttle[`${mkey}_t`]) { clearTimeout(throttle[`${mkey}_t`]); delete throttle[`${mkey}_t`]; }
