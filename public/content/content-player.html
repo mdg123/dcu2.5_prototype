@@ -111,6 +111,21 @@
 
     .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--gray-800);color:#fff;padding:12px 24px;border-radius:10px;font-size:14px;z-index:9999;display:none;}
 
+    /* 앱 스타일 확인 모달 — 네이티브 confirm 대체. GNB(9999)·결과오버레이(10001)보다 위 */
+    .app-confirm-overlay{position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:10002;display:none;align-items:center;justify-content:center;padding:20px;}
+    .app-confirm-overlay.show{display:flex;}
+    .app-confirm-box{background:#fff;border-radius:16px;width:100%;max-width:380px;padding:28px 24px 22px;box-shadow:0 20px 50px rgba(0,0,0,.25);text-align:center;animation:appConfirmPop .18s ease;}
+    @keyframes appConfirmPop{from{opacity:0;transform:translateY(10px) scale(.97);}to{opacity:1;transform:none;}}
+    .app-confirm-icon{width:56px;height:56px;margin:0 auto 14px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:26px;background:#FEF3C7;color:#F59E0B;}
+    .app-confirm-title{font-size:19px;font-weight:800;color:var(--gray-800);margin-bottom:8px;}
+    .app-confirm-message{font-size:16px;line-height:1.6;color:var(--gray-600);margin-bottom:22px;}
+    .app-confirm-actions{display:flex;gap:10px;}
+    .app-confirm-btn{flex:1;padding:12px 18px;border-radius:10px;font-size:16px;font-weight:700;cursor:pointer;border:none;font-family:inherit;}
+    .app-confirm-cancel{background:var(--gray-100);color:var(--gray-700);}
+    .app-confirm-cancel:hover{background:var(--gray-200);}
+    .app-confirm-ok{background:var(--primary);color:#fff;}
+    .app-confirm-ok:hover{background:var(--primary-dark);}
+
     @media (max-width: 768px){
       .player-container{flex-direction:column;overflow-y:auto;}
       .sidebar{width:100%;height:auto;flex-shrink:0;border-right:none;border-bottom:1px solid var(--gray-200);}
@@ -181,6 +196,19 @@
 
   <div class="toast" id="toast"></div>
 
+  <!-- 앱 스타일 확인 모달 (네이티브 confirm 대체) — 임베드(오늘의 학습 iframe) 흐름에서도 자연스럽게 표시 -->
+  <div class="app-confirm-overlay" id="appConfirmOverlay" aria-hidden="true">
+    <div class="app-confirm-box" role="dialog" aria-modal="true" aria-labelledby="appConfirmTitle">
+      <div class="app-confirm-icon" id="appConfirmIcon"><i class="fas fa-question-circle"></i></div>
+      <h3 class="app-confirm-title" id="appConfirmTitle">확인</h3>
+      <p class="app-confirm-message" id="appConfirmMessage"></p>
+      <div class="app-confirm-actions">
+        <button type="button" class="app-confirm-btn app-confirm-cancel" id="appConfirmCancel" onclick="resolveAppConfirm(false)">취소</button>
+        <button type="button" class="app-confirm-btn app-confirm-ok" id="appConfirmOk" onclick="resolveAppConfirm(true)">확인</button>
+      </div>
+    </div>
+  </div>
+
   <script>
     const params = new URLSearchParams(location.search);
     const contentId = params.get('id');
@@ -233,6 +261,42 @@
       setTimeout(() => t.style.display = 'none', 2200);
     }
 
+    // ===== 앱 스타일 확인 모달 (네이티브 confirm 대체) =====
+    let _appConfirmResolve = null;
+    function appConfirm(opts){
+      opts = opts || {};
+      return new Promise(resolve => {
+        _appConfirmResolve = resolve;
+        const ov = document.getElementById('appConfirmOverlay');
+        document.getElementById('appConfirmIcon').innerHTML = `<i class="fas ${opts.icon || 'fa-question-circle'}"></i>`;
+        const iconEl = document.getElementById('appConfirmIcon');
+        iconEl.style.background = opts.iconBg || '#FEF3C7';
+        iconEl.style.color = opts.iconColor || '#F59E0B';
+        document.getElementById('appConfirmTitle').textContent = opts.title || '확인';
+        document.getElementById('appConfirmMessage').textContent = opts.message || '';
+        document.getElementById('appConfirmCancel').textContent = opts.cancelText || '취소';
+        const okBtn = document.getElementById('appConfirmOk');
+        okBtn.textContent = opts.okText || '확인';
+        okBtn.style.background = opts.okColor || '';
+        ov.classList.add('show');
+        ov.setAttribute('aria-hidden', 'false');
+        okBtn.focus();
+      });
+    }
+    function resolveAppConfirm(result){
+      const ov = document.getElementById('appConfirmOverlay');
+      ov.classList.remove('show');
+      ov.setAttribute('aria-hidden', 'true');
+      if (_appConfirmResolve){ const r = _appConfirmResolve; _appConfirmResolve = null; r(result); }
+    }
+    // ESC=취소, Enter=확인 (모달 표시 중에만)
+    document.addEventListener('keydown', (e) => {
+      const ov = document.getElementById('appConfirmOverlay');
+      if (!ov || !ov.classList.contains('show')) return;
+      if (e.key === 'Escape'){ e.preventDefault(); resolveAppConfirm(false); }
+      else if (e.key === 'Enter'){ e.preventDefault(); resolveAppConfirm(true); }
+    });
+
     // 자동 채점 가능한 문항(객관식/주관식) 유무
     function hasGradableQuestion(){
       return questions.some(q => {
@@ -277,9 +341,24 @@
       });
     }
 
-    function exitPlayer(){
+    async function exitPlayer(){
       if (!graded && solveMode && answers.some(a => a != null && a !== '')){
-        if (!confirm('아직 제출하지 않았습니다. 나가시겠습니까?')) return;
+        const ok = await appConfirm({
+          icon: 'fa-door-open', iconBg: '#FEF3C7', iconColor: '#F59E0B',
+          title: '아직 제출하지 않았어요',
+          message: '제출하지 않고 나가시겠습니까?',
+          cancelText: '계속 풀기', okText: '나가기', okColor: '#EF4444'
+        });
+        if (!ok) return;
+      }
+      // 임베드 모드(오늘의 학습·진단 등 상위 페이지 iframe): iframe 자체를 네비게이트하면
+      // 부모(오늘의 학습) 모달이 깨지고 채움콘텐츠로 이탈한다. 절대 location/history 이동 금지.
+      // 부모에게 닫기 메시지만 전달하고, 부모가 모달을 닫거나 다음 항목으로 진행하도록 위임한다.
+      if (embedMode){
+        if (window.parent && window.parent !== window){
+          try { window.parent.postMessage({ type: 'dacheum:player-close', contentId: Number(contentId), graded }, '*'); } catch(e){}
+        }
+        return;
       }
       // 새 탭(바로 풀기 등 popup=1)으로 열린 경우 → 탭을 닫아 원래 콘텐츠 목록으로 복귀
       if (params.get('popup') === '1') {
@@ -302,6 +381,14 @@
         const type = content.content_type || '';
         if (type !== 'quiz' && type !== 'exam' && type !== 'assessment'){
           showToast('문항/평가지 콘텐츠만 플레이할 수 있습니다.');
+          // 임베드 모드: iframe을 채움콘텐츠로 네비게이트하지 않는다(오늘의 학습 모달 이탈 방지).
+          // 부모에게 오류를 알려 부모가 모달 처리. 인라인 안내만 표시.
+          if (embedMode){
+            if (window.parent && window.parent !== window){
+              try { window.parent.postMessage({ type: 'dacheum:player-error', contentId: Number(contentId), reason: 'invalid-type' }, '*'); } catch(e){}
+            }
+            return;
+          }
           setTimeout(() => location.href = '/content/index.html', 1500);
           return;
         }
@@ -658,8 +745,14 @@
       updateAnsweredCount();
     }
 
-    function resetAnswers(){
-      if (!confirm('답안을 모두 지우고 다시 시작할까요?')) return;
+    async function resetAnswers(){
+      const ok = await appConfirm({
+        icon: 'fa-rotate-left', iconBg: '#FEE2E2', iconColor: '#EF4444',
+        title: '답안을 초기화할까요?',
+        message: '지금까지 입력한 답안을 모두 지우고 처음부터 다시 풉니다.',
+        cancelText: '취소', okText: '다시 시작', okColor: '#EF4444'
+      });
+      if (!ok) return;
       answers = questions.map(() => null);
       results = questions.map(q => ({correct: null, score: 0, maxScore: Number(q.points) || 1}));
       graded = false;
@@ -670,10 +763,16 @@
       showQuestion(0);
     }
 
-    function gradeAnswers(){
+    async function gradeAnswers(){
       const unanswered = answers.filter(a => a == null || a === '').length;
       if (unanswered > 0){
-        if (!confirm(`미응답 ${unanswered}문항이 있습니다. 제출할까요?`)) return;
+        const ok = await appConfirm({
+          icon: 'fa-paper-plane', iconBg: '#DBEAFE', iconColor: '#2563eb',
+          title: '제출할까요?',
+          message: `아직 풀지 않은 문항이 ${unanswered}개 있어요. 그래도 제출하시겠습니까?`,
+          cancelText: '더 풀기', okText: '제출하기', okColor: '#2563eb'
+        });
+        if (!ok) return;
       }
       let totalScore = 0;
       let maxTotal = 0;
