@@ -98,6 +98,11 @@
     /* 판서 동기화 중 학생은 자기 캔버스에 직접 못 그림(도구 비활성 + 캔버스 입력 차단) */
     .toolbar.sync-draw-locked { opacity: .4; pointer-events: none; }
     .drawing-canvas.sync-draw-locked { pointer-events: none !important; }
+    /* 동기화 잠금 중 학생 캔버스: 교사 판서가 "보이되 입력은 막힘".
+       기본 .drawing-canvas 는 opacity:0(=.active 일 때만 1). 학생 잠금 시 도구를 강제 해제해
+       .active 가 빠지면 opacity:0 → 교사 stroke 가 그려져도 투명해 안 보였다(근본원인 버그B).
+       sync-view 로 보이게 강제하되 pointer-events 는 차단해 직접 그리기는 막는다. */
+    .drawing-canvas.sync-view { opacity: 1 !important; pointer-events: none !important; }
     @media (max-width: 768px) {
       /* 모바일: 토글 라벨 숨기고 아이콘만, 배너 2줄 허용 */
       #syncToggleBtn .sync-label { display: none; }
@@ -2364,6 +2369,13 @@
         handleRemoteAnnotation(a);
       });
 
+      // 버그A: 교사가 콘텐츠 추가/삭제 → 룸 전체에 단순 신호. 콘텐츠만 소프트 리로드(동기화 상태·잠금·위치 보존).
+      //   교사 본인도 수신하지만 이미 loadPlayer 로 갱신했으므로 무시(중복 fetch 방지).
+      socket.on('lesson:sync:contents-changed', () => {
+        if (isTeacherViewer) return; // 교사 본인 echo 무시(이미 loadPlayer 로 갱신)
+        softReloadContents();
+      });
+
       // 교사 이탈 안내 — disconnect 시 서버가 함께 보내는 메시지(상태 off 는 applySyncState 가 별도 처리). 학생에게만 1회 토스트(감리 L-2)
       socket.on('lesson:sync:teacher-left', (d) => {
         if (isTeacherViewer) return;
@@ -2384,6 +2396,72 @@
         // 끊김 시에는 잠금을 강제로 풀지 않음(재연결 후 state로 복원). 단 영구 잠금 방지를 위해
         // 서버가 컨트롤러 이탈을 브로드캐스트(state on=false)하면 그때 풀린다. fail-open은 서버 주도.
       });
+    }
+
+    // ── 버그A: 콘텐츠 목록 소프트 리로드(학생) ──
+    //   교사가 콘텐츠를 추가/삭제했을 때 lesson:sync:contents-changed 수신 → 콘텐츠만 다시 가져온다.
+    //   ★ initLessonSync·소켓 재연결·룸 재join 금지(전체 loadPlayer 호출하면 상태 리셋 부작용).
+    //   동기화 상태/잠금/판서버퍼는 그대로 보존하고 contents[]·progressMap·사이드바만 갱신한다.
+    let _softReloadInflight = false;
+    async function softReloadContents() {
+      if (_softReloadInflight) return;     // 동시 다중 신호 합치기
+      if (!classId || !lessonId) return;
+      if (!isStudentPlayMode) return;      // 학생 플레이 모드에서만
+      _softReloadInflight = true;
+      try {
+        const res = await fetch(`/api/lesson/${classId}/${lessonId}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!data || !data.success) return;
+
+        // 콘텐츠 목록 교체 + quiz 데이터 enrich (loadPlayer 와 동일 규칙)
+        const newContents = data.contents || [];
+        newContents.forEach(c => {
+          if (c.content_type === 'quiz' || (c.metadata && c.metadata.includes('quiz_data'))) {
+            try {
+              const meta = JSON.parse(c.metadata || '{}');
+              if (meta.quiz_data) c._quiz = meta.quiz_data;
+            } catch (e) {}
+          }
+        });
+        contents = newContents;
+
+        // progressMap 갱신(머지 — 기존 진행 보존하며 서버 최신 반영)
+        (data.progress || []).forEach(p => { progressMap[p.content_id] = p; });
+
+        if (contents.length === 0) {
+          document.getElementById('stepList').innerHTML = '<div style="text-align:center;color:#64748b;padding:24px;font-size:13px;">연결된 콘텐츠가 없습니다.</div>';
+          currentIndex = -1;
+          return;
+        }
+
+        // currentIndex 보존 — 동기화 중이면 교사 위치(syncState.index), 아니면 현재 위치를 새 length 로 clamp.
+        let targetIndex = (syncState.on && !isTeacherViewer)
+          ? syncState.index
+          : currentIndex;
+        if (typeof targetIndex !== 'number' || targetIndex < 0) targetIndex = 0;
+        if (targetIndex > contents.length - 1) targetIndex = contents.length - 1;
+
+        // 사이드바 재렌더 후 잠금 UI 재적용(renderSidebar 가 step-item 을 새로 만들어 sync-locked 가 날아감)
+        renderSidebar();
+        if (syncState.on && !isTeacherViewer) applyStepLock(true);
+
+        // 현재 보던 콘텐츠가 그대로면 뷰 유지, 인덱스가 바뀌었으면(클램프 등) 그 위치로 갱신.
+        //   동기화 잠금 중에도 targetIndex===syncState.index 이므로 selectContent 가드를 통과한다.
+        if (currentIndex !== targetIndex) {
+          selectContent(targetIndex);
+        } else {
+          // 같은 위치라도 콘텐츠 객체가 교체됐을 수 있으니 메타/진행 배지만 가볍게 갱신
+          renderSidebar();
+          if (syncState.on && !isTeacherViewer) applyStepLock(true);
+        }
+        updateOverallProgress();
+        showSyncToast('수업 자료가 업데이트됐어요');
+      } catch (e) {
+        console.warn('[sync] contents 소프트 리로드 실패', e);
+      } finally {
+        _softReloadInflight = false;
+      }
     }
 
     // 서버에서 온 상태를 화면에 반영
@@ -2557,12 +2635,16 @@
     function applyDrawLock(on) {
       const toolbar = document.getElementById('toolbar');
       if (on) {
-        deactivateTools();           // 활성 펜/형광/지우개 해제 → 캔버스 비활성
+        deactivateTools();           // 활성 펜/형광/지우개 해제 → 캔버스 비활성(.active 제거 → 기본 opacity:0)
         if (toolbar) { toolbar.classList.add('sync-draw-locked'); toolbar.setAttribute('aria-disabled', 'true'); }
         canvas.classList.add('sync-draw-locked');
+        // 버그B 수정: .active 가 빠져 opacity:0 이 되어도 교사 판서가 보이도록 sync-view 강제(입력은 여전히 차단).
+        canvas.classList.add('sync-view');
       } else {
         if (toolbar) { toolbar.classList.remove('sync-draw-locked'); toolbar.removeAttribute('aria-disabled'); }
         canvas.classList.remove('sync-draw-locked');
+        // 잠금 해제 시 sync-view 제거 → 캔버스 opacity 원복(.active 따라 0/1). 잔여 판서는 clearRemoteAnnotations 가 클리어.
+        canvas.classList.remove('sync-view');
       }
     }
 
@@ -3064,10 +3146,23 @@
           showToast('콘텐츠가 추가되었습니다!');
           closeAddContentModal();
           loadPlayer();
+          // 버그A: 같은 룸의 학생들에게 목록 변경 신호 → 학생은 콘텐츠만 소프트 리로드.
+          notifyContentsChanged();
         } else {
           showToast(res.message || '추가 실패');
         }
       } catch(e) { showToast('추가 실패'); }
+    }
+
+    // 교사(개설자/공동교사) 라이브 플레이어에서 콘텐츠 추가/삭제 후, 룸의 학생들에게 목록 변경 신호 emit.
+    //   소켓 연결 + (컨트롤러 또는 개설자)일 때만. 서버가 canControlLesson 으로 재검증하므로 클라 판별은 보조.
+    function notifyContentsChanged() {
+      try {
+        if (!socket || !classId || !lessonId) return;
+        const isOwner = currentUser && lessonData && currentUser.id === lessonData.teacher_id;
+        if (!isTeacherViewer && !isOwner) return; // 학생 우회 방지(서버가 최종 차단)
+        socket.emit('lesson:sync:contents-changed', { classId, lessonId });
+      } catch (e) { /* silent */ }
     }
 
     // ============================================================

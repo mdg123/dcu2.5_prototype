@@ -334,3 +334,52 @@ test('판서: 늦은 입장 학생에게 op:snapshot(누적 strokes) 그 소켓�
     e.event === 'lesson:sync:annotation' && e.payload && e.payload.op === 'snapshot');
   assert.equal(lateRoomSnaps.length, 0, 'join snapshot 은 룸 브로드캐스트가 아니라 그 소켓에만');
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// [버그A 회귀 박제] lesson:sync:contents-changed — 콘텐츠 추가/삭제 신호의 권한·브로드캐스트 계약.
+//   교사가 라이브 플레이어에서 콘텐츠를 추가/삭제하면 같은 lesson 룸 전체에 단순 신호를 보내
+//   학생이 콘텐츠 목록만 소프트 리로드하게 한다. 좌표·인덱스 없는 신호({}).
+//   - 교사(canControlLesson 통과): 룸 브로드캐스트 1회.
+//   - 학생(member)·비권한: 브로드캐스트 0 + 본인에게 lesson:error 1회.
+//   진짜 교차 클라이언트 와이어(2 socket.io-client)는 scratchpad/lesson-sync-itest.js 가 6/6 PASS 로 입증.
+//   여기서는 핸들러 산출 payload "구조"를 fake io/socket 으로 박제(회귀 영구 고정).
+// ─────────────────────────────────────────────────────────────────────────────
+test('버그A: 교사 lesson:sync:contents-changed 는 룸에 빈 신호 1회 브로드캐스트', () => {
+  const h = setupSyncHarness();
+  const owner = h.connect(OWNER, 'sock-owner-cc');
+  owner.handlers['lesson:join']({ classId: CLASS, lessonId: LESSON });
+  assert.ok(typeof owner.handlers['lesson:sync:contents-changed'] === 'function',
+    'lesson:sync:contents-changed 핸들러 등록 확인');
+
+  owner.handlers['lesson:sync:contents-changed']({ classId: CLASS, lessonId: LESSON });
+
+  const ccs = h.roomEmits.filter(e =>
+    e.event === 'lesson:sync:contents-changed' && e.room === `lesson:${LESSON}`);
+  assert.equal(ccs.length, 1, '교사 contents-changed 는 룸 브로드캐스트 정확히 1회');
+  // 좌표·인덱스 없는 단순 신호 — payload 는 빈 객체
+  assert.deepEqual(ccs[0].payload, {}, 'contents-changed payload 는 좌표 없는 빈 신호 {}');
+});
+
+test('버그A 권한: 학생(member)의 contents-changed 는 브로드캐스트 0 + 본인 lesson:error', () => {
+  const h = setupSyncHarness();
+  const member = h.connect(MEMBER, 'sock-member-cc');
+  member.handlers['lesson:join']({ classId: CLASS, lessonId: LESSON });
+  member.handlers['lesson:sync:contents-changed']({ classId: CLASS, lessonId: LESSON });
+
+  const ccs = h.roomEmits.filter(e =>
+    e.event === 'lesson:sync:contents-changed' && e.room === `lesson:${LESSON}`);
+  assert.equal(ccs.length, 0, '학생 contents-changed 는 절대 브로드캐스트되지 않아야 함');
+  const errs = member.socketEmits.filter(e => e.event === 'lesson:error');
+  assert.ok(errs.length >= 1, '학생 위조 contents-changed 시 본인에게 lesson:error 1회 통지');
+});
+
+test('버그A 교차검증: owner 라도 타 클래스 lessonId 의 contents-changed 는 차단', () => {
+  const h = setupSyncHarness();
+  const owner = h.connect(OWNER, 'sock-owner-cc2');
+  // 타 클래스 소속 lesson 으로 끼워넣기 시도 → canControlLesson 교차검증에서 차단
+  owner.handlers['lesson:sync:contents-changed']({ classId: CLASS, lessonId: otherLessonId });
+
+  const ccs = h.roomEmits.filter(e =>
+    e.event === 'lesson:sync:contents-changed' && e.room === `lesson:${otherLessonId}`);
+  assert.equal(ccs.length, 0, '타 클래스 lessonId contents-changed 는 브로드캐스트 0');
+});

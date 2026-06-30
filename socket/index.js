@@ -727,6 +727,21 @@ function initSocket(io) {
       sync.annotations.clear();
     });
 
+    // ─── 교사(개설자/공동교사/admin): 수업 콘텐츠 목록 변경 신호 (추가/삭제) ───
+    //   버그A: 교사가 라이브 플레이어에서 콘텐츠를 추가/삭제하면 교사 본인만 갱신되고
+    //   같은 룸의 학생 목록/플레이어가 미반영됐다. 콘텐츠 변경 시 룸 전체에 단순 신호를 보내
+    //   학생이 콘텐츠만 소프트 리로드하게 한다(좌표 없음·상태 신호만). 권한 재검증 필수.
+    socket.on('lesson:sync:contents-changed', ({ classId, lessonId }) => {
+      const lid = lessonId != null ? String(lessonId) : null;
+      if (!lid) return;
+      if (!canControlLesson(userId, classId, lid)) {
+        emitLessonError(lid, '수업 콘텐츠를 변경할 권한이 없습니다.');
+        return;
+      }
+      // 좌표·인덱스 없는 단순 신호 — 학생은 이 신호로 /api/lesson 재fetch 후 목록만 갱신.
+      io.to(`lesson:${lid}`).emit('lesson:sync:contents-changed', {});
+    });
+
     // ═════════════════════════════════════════════════════════════════════
     // 교사 판서 실시간 공유 (판서동기화 기획서 §3) — 단방향 교사→서버→학생.
     //   모든 draw/draw-clear 는 canControlLesson + controllerId 본인 + contentIndex 일치
