@@ -714,7 +714,7 @@ const MENUS = {
     { id:'s-xapi',       label:'표준체계 분석',    icon:'fa-diagram-project',group:'분석',      category:'analytics' },
     { id:'s-perform',    label:'과제·평가 수행',  icon:'fa-tasks',         group:'학습 활동',  category:'activities' },
     { id:'s-custom',     label:'맞춤학습',        icon:'fa-compass',       group:'학습 활동',  category:'activities' },
-    { id:'s-daily',      label:'일일현황',        icon:'fa-calendar-day',  group:'학습 활동',  category:'activities' },
+    { id:'s-daily',      label:'일일현황',        icon:'fa-calendar-day',  group:'분석',       category:'analytics' },
   ],
   teacher: [
     { id:'t-home',       label:'홈',              icon:'fa-gauge',                 group:'우리반',        category:'home' },
@@ -724,7 +724,7 @@ const MENUS = {
     { id:'t-xapi',       label:'표준체계 분석',    icon:'fa-diagram-project',       group:'분석',         category:'analytics' },
     { id:'t-perform',    label:'과제·평가 수행',  icon:'fa-tasks',                 group:'학습 활동',     category:'activities' },
     { id:'t-custom',     label:'맞춤학습 관리',    icon:'fa-compass',               group:'학습 활동',     category:'activities' },
-    { id:'t-daily',      label:'일일현황',        icon:'fa-calendar-day',          group:'학습 활동',     category:'activities' },
+    { id:'t-daily',      label:'일일현황',        icon:'fa-calendar-day',          group:'분석',         category:'analytics' },
     { id:'t-drill',      label:'학생 드릴다운',    icon:'fa-user-magnifying-glass', group:'학습 활동',     category:'activities' },
     { id:'t-teacher-idx',label:'교사 활용지수',    icon:'fa-chalkboard-teacher',    group:'운영',         category:'operations' },
   ],
@@ -774,10 +774,10 @@ const MENU_TO_VIEW = {
 /* ---- 레거시 URL 호환: 구 뷰 키 또는 뷰 id → 카테고리 ---- */
 const LEGACY_MENU_TO_CATEGORY = {
   usage:'analytics', achieve:'analytics', perform:'activities', custom:'activities',
-  daily:'activities', teacher:'operations', quality:'operations',
+  daily:'analytics', teacher:'operations', quality:'operations',
   // 구 뷰 id도 수용
   's-home':'home','s-trend':'analytics','s-achieve':'analytics','s-compare':'analytics','s-xapi':'analytics','t-xapi':'analytics','a-xapi':'analytics',
-  's-perform':'activities','s-custom':'activities','s-daily':'activities',
+  's-perform':'activities','s-custom':'activities','s-daily':'analytics',
   't-home':'home','t-usage':'analytics','t-subject':'analytics',
   't-perform':'activities','t-custom':'activities','t-daily':'activities',
   't-warnings':'analytics','t-drill':'activities','t-teacher-idx':'operations',
@@ -947,6 +947,30 @@ function mkChart(canvas, type, data, opts){
   return chart;
 }
 
+/* ---- 도넛 중앙 텍스트(.donut-center) 정렬 플러그인 ----
+   범례가 오른쪽(position:'right')이면 도넛이 캔버스 왼쪽으로 치우쳐 그려지는데,
+   .donut-center 는 wrap 전체폭 기준이라 텍스트가 도넛 구멍에서 어긋난다.
+   afterDraw 에서 오버레이를 실제 도넛 그리기영역(chartArea)에 맞춰 재배치 → 범례 위치 무관하게 항상 중앙. */
+const donutCenterAlignPlugin = {
+  id: 'donutCenterAlign',
+  afterDraw(chart){
+    try{
+      const cv = chart.canvas;
+      const wrap = cv && cv.closest ? cv.closest('.donut-wrap') : null;
+      if (!wrap) return;
+      const overlay = wrap.querySelector('.donut-center');
+      const ca = chart.chartArea;
+      if (!overlay || !ca) return;
+      overlay.style.inset  = 'auto';
+      overlay.style.left   = (cv.offsetLeft + ca.left) + 'px';
+      overlay.style.top    = (cv.offsetTop  + ca.top)  + 'px';
+      overlay.style.width  = (ca.right  - ca.left) + 'px';
+      overlay.style.height = (ca.bottom - ca.top)  + 'px';
+    } catch(_){ /* 오버레이 없으면 무시 */ }
+  }
+};
+if (window.Chart && Chart.register) { try { Chart.register(donutCenterAlignPlugin); } catch(_){} }
+
 /* ---- 렌더 헬퍼 ---- */
 function kpiCard(label, value, unit, trend, tone, extra){
   const t = trend || {};
@@ -1000,6 +1024,8 @@ function renderDataTable(container, config){
     applySort();
     const thead = cols.map(c => {
       const cls = ['sortable'];
+      if (c.align === 'right') cls.push('num');      // 헤더도 값(td.num)과 같은 우측정렬로 맞춤
+      if (c.align === 'center') cls.push('center');
       if (state.sortKey === c.key) cls.push(state.sortDir === 'asc' ? 'sorted-asc' : 'sorted-desc');
       return `<th class="${cls.join(' ')}" data-key="${escapeAttr(c.key)}">${escapeHtml(c.label)}</th>`;
     }).join('');
