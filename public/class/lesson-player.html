@@ -103,6 +103,11 @@
        .active 가 빠지면 opacity:0 → 교사 stroke 가 그려져도 투명해 안 보였다(근본원인 버그B).
        sync-view 로 보이게 강제하되 pointer-events 는 차단해 직접 그리기는 막는다. */
     .drawing-canvas.sync-view { opacity: 1 !important; pointer-events: none !important; }
+    /* 동기화 완전 고정(학생): 화면 자체를 교사에 고정 — 상단 GNB·헤더 나가기·새 탭 링크까지 잠금.
+       단, 콘텐츠 상호작용(문항 풀이 .quiz-option[div], 영상 <video>)은 앵커가 아니므로 영향 없음. */
+    body.sync-captive #dacheum-gnb-wrapper { pointer-events: none !important; opacity: .5; filter: grayscale(.35); }
+    body.sync-captive .btn-back, body.sync-captive .header-btn-danger { pointer-events: none; opacity: .45; }
+    body.sync-captive #playerViewport a[target="_blank"] { pointer-events: none; opacity: .5; }
     @media (max-width: 768px) {
       /* 모바일: 토글 라벨 숨기고 아이콘만, 배너 2줄 허용 */
       #syncToggleBtn .sync-label { display: none; }
@@ -2595,12 +2600,14 @@
         if (nextBtn) { nextBtn.disabled = true; nextBtn.classList.add('sync-locked'); }
         applyStepLock(true);
         applyDrawLock(true);
+        document.body.classList.add('sync-captive'); // 화면 고정: 상단 GNB·나가기·새 탭 이탈 차단(콘텐츠 풀이·영상은 유지)
       } else {
         // ── 잠금 해제 ──
         if (prevBtn) { prevBtn.classList.remove('sync-locked'); prevBtn.disabled = (currentIndex === 0); }
         if (nextBtn) { nextBtn.classList.remove('sync-locked'); nextBtn.disabled = (currentIndex === contents.length - 1); }
         applyStepLock(false);
         applyDrawLock(false);
+        document.body.classList.remove('sync-captive'); // 화면 고정 해제 → 상단 GNB·나가기·새 탭 복구
         if (banner) {
           if (wasOn) {
             // 해제 순간만 2.5초 안내 후 사라짐
@@ -2747,7 +2754,14 @@
     // ============================================================
     // Navigation & Utilities
     // ============================================================
-    function goBack() { location.href = `/class/lesson-board.html?classId=${classId}`; }
+    function goBack() {
+      // 동기화 완전 고정: 잠긴 학생은 나가기 차단(교사·비잠금은 정상)
+      if (typeof syncState !== 'undefined' && syncState.on && !isTeacherViewer) {
+        showSyncToast('선생님 동기화 중에는 나갈 수 없어요');
+        return;
+      }
+      location.href = `/class/lesson-board.html?classId=${classId}`;
+    }
 
     function showToast(msg, cls) {
       const container = document.getElementById('toastContainer');
