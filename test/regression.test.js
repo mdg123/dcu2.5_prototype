@@ -522,3 +522,161 @@ test('BUG13: 오늘의 학습 백필 — 대응 로그 없는 완료건 1회 발
   assert.equal(backfillOnce(), 0, 'BUG13: 재실행 시 중복 발행 0(멱등)');
   assert.equal(countLog(), 1, 'BUG13: 재실행 후에도 로그 1건 유지(중복 없음)');
 });
+
+// ──────────────────────────────────────────────────────────────────────────
+// BUG14: LRS /stats/perform "활동 유형별 요약" 확장 — 콘텐츠·수업 등 전 활동유형 노출.
+//   결함: perfTypes 화이트리스트(exam/homework/self)가 byType 표에도 걸려 content_solve·
+//         content_view·lesson_progress·attendance·post·survey 등 실제 학습활동이 표에서 누락됐다.
+//   fix(routes/lrs.js):
+//     · byType 표 = 화이트리스트 없는 tableWhere 로 **모든 activity_type** GROUP BY(투명 노출).
+//     · 점수 없는 유형(view/lesson/attendance/post/survey)은 SCORED_SQL 밖 → avgScore NULL('-').
+//     · content_solve 는 점수 있음(0~100) → avgScore 표시.
+//     · KPI 콘텐츠 학습 = content_solve+content_view+lesson_progress 합.
+//     · trend = 학습 4계열(평가·과제·자기주도·콘텐츠 학습 묶음)만. attendance/post/survey 제외.
+//   박제(라우트 SQL 조각 재현 — BUG12 와 동일 패턴):
+//     (a) byType 에 content_solve/content_view/lesson_progress + attendance/post/survey 행이 뜬다
+//     (b) 점수 없는 유형은 avgScore NULL, content_solve 는 avgScore 있음
+//     (c) KPI content_cnt = 3종 합, trend 에 content_cnt 계열 존재
+//     (d) daily_complete 는 self_learn 으로 병합(별도 행 없음)
+// ──────────────────────────────────────────────────────────────────────────
+test('BUG14: LRS 활동유형별 요약 — 전 활동유형 노출 + 점수없는유형 NULL + KPI/trend 콘텐츠 묶음', () => {
+  const { logLearningActivity } = require('../db/learning-log-helper');
+  const U = S2;                 // student2 로 격리(다른 테스트 S1 시드와 간섭 최소화)
+  const D = '2099-06-14';       // 먼 미래 날짜 — 실 데이터와 무간섭
+  const at = (n) => `${D} 0${n}:00:00`;
+
+  // 격리 시드: 유형별 알려진 건수/점수로 발행.
+  //   content_solve ×3 (score 100·80·60 → avg 80), content_view ×4(점수 없음),
+  //   lesson_progress ×2(result_score 0.5 이지만 진도율 → 표 점수 대상 아님),
+  //   attendance_checkin ×2, post_create ×1, survey_respond ×1, exam_complete ×1(score 90).
+  const seed = (activityType, opts = {}) => logLearningActivity({
+    userId: U, activityType, targetType: 'test', targetId: opts.tid || ('bug14-' + Math.random().toString(36).slice(2, 8)),
+    classId: CLASS, verb: opts.verb || 'experienced', sourceService: 'test-bug14',
+    resultScore: opts.score != null ? opts.score : null, createdAt: opts.at || at(1),
+    metadata: { bug14: 1 }
+  });
+  seed('content_solve', { score: 100 }); seed('content_solve', { score: 80 }); seed('content_solve', { score: 60 });
+  for (let i = 0; i < 4; i++) seed('content_view');
+  seed('lesson_progress', { score: 0.5 }); seed('lesson_progress', { score: 1 });
+  seed('attendance_checkin'); seed('attendance_checkin');
+  seed('post_create'); seed('survey_respond');
+  seed('exam_complete', { score: 90, verb: 'completed' });
+
+  // 라우트와 동일한 SQL 조각(routes/lrs.js /stats/perform).
+  const SCORED_SQL = `ll.activity_type IN ('exam_complete','homework_submit','self_learn','daily_complete','content_solve')`;
+  const CONTENT_SQL = `ll.activity_type IN ('content_solve','content_view','lesson_progress')`;
+  // scope=mine 재현: tableWhere = 날짜(D) + user_id(U). 화이트리스트 없음(전 유형).
+  const byType = db.prepare(`
+    SELECT CASE WHEN ll.activity_type='daily_complete' THEN 'self_learn' ELSE ll.activity_type END AS activity_type,
+           COUNT(*) cnt,
+           AVG(CASE WHEN ${SCORED_SQL} THEN ll.result_score END) avg_score
+    FROM learning_logs ll
+    WHERE DATE(ll.created_at) = ? AND ll.user_id = ?
+    GROUP BY CASE WHEN ll.activity_type='daily_complete' THEN 'self_learn' ELSE ll.activity_type END
+    ORDER BY cnt DESC
+  `).all(D, U);
+  const byMap = Object.fromEntries(byType.map(r => [r.activity_type, r]));
+
+  // (a) 전 활동유형이 표에 뜬다(누락 0)
+  for (const t of ['content_solve', 'content_view', 'lesson_progress', 'attendance_checkin', 'post_create', 'survey_respond']) {
+    assert.ok(byMap[t], `BUG14(a): byType 에 ${t} 행이 있어야(전 유형 투명 노출)`);
+  }
+  assert.equal(byMap['content_solve'].cnt, 3, 'BUG14(a): content_solve 3건');
+  assert.equal(byMap['content_view'].cnt, 4, 'BUG14(a): content_view 4건');
+  assert.equal(byMap['lesson_progress'].cnt, 2, 'BUG14(a): lesson_progress 2건');
+  assert.equal(byMap['attendance_checkin'].cnt, 2, 'BUG14(a): attendance_checkin 2건');
+
+  // (b) 점수 없는 유형 = avgScore NULL('-'), content_solve = 점수 있음(avg 80)
+  assert.equal(byMap['content_view'].avg_score, null, 'BUG14(b): content_view 평균점수 NULL(-)');
+  assert.equal(byMap['lesson_progress'].avg_score, null, 'BUG14(b): lesson_progress(진도율)은 점수 아님 → NULL(-)');
+  assert.equal(byMap['attendance_checkin'].avg_score, null, 'BUG14(b): attendance 평균점수 NULL(-)');
+  assert.equal(byMap['post_create'].avg_score, null, 'BUG14(b): post 평균점수 NULL(-)');
+  assert.equal(byMap['survey_respond'].avg_score, null, 'BUG14(b): survey 평균점수 NULL(-)');
+  assert.equal(Math.round(byMap['content_solve'].avg_score), 80, 'BUG14(b): content_solve 평균점수 80(점수 있음)');
+
+  // (c) KPI content_cnt = content 3종 합(3+4+2=9), trend 에 content_cnt 계열 존재
+  const kpi = db.prepare(`
+    SELECT SUM(CASE WHEN ${CONTENT_SQL} THEN 1 ELSE 0 END) content_cnt,
+           AVG(CASE WHEN ll.activity_type='content_solve' THEN ll.result_score END) content_solve_avg
+    FROM learning_logs ll WHERE DATE(ll.created_at) = ? AND ll.user_id = ?
+  `).get(D, U);
+  assert.equal(kpi.content_cnt, 9, 'BUG14(c): KPI 콘텐츠 학습 = content_solve+view+lesson(3+4+2=9)');
+  assert.equal(Math.round(kpi.content_solve_avg), 80, 'BUG14(c): KPI content_solve 평균 80');
+
+  const SELF_SQL = `ll.activity_type IN ('self_learn','daily_complete')`;
+  const perfTypes = ['exam_complete', 'homework_submit', 'self_learn', 'daily_complete', 'content_solve', 'content_view', 'lesson_progress'];
+  const ph = perfTypes.map(() => '?').join(',');
+  const trend = db.prepare(`
+    SELECT DATE(ll.created_at) date,
+           SUM(CASE WHEN ll.activity_type='exam_complete' THEN 1 ELSE 0 END) exam_cnt,
+           SUM(CASE WHEN ${SELF_SQL} THEN 1 ELSE 0 END) self_cnt,
+           SUM(CASE WHEN ${CONTENT_SQL} THEN 1 ELSE 0 END) content_cnt
+    FROM learning_logs ll
+    WHERE ll.activity_type IN (${ph}) AND DATE(ll.created_at) = ? AND ll.user_id = ?
+    GROUP BY DATE(ll.created_at)
+  `).all(...perfTypes, D, U);
+  assert.equal(trend.length, 1, 'BUG14(c): 시드 날짜 1일 추이 행');
+  assert.ok('content_cnt' in trend[0], 'BUG14(c): trend 에 content_cnt(콘텐츠 학습 묶음) 계열 존재');
+  assert.equal(trend[0].content_cnt, 9, 'BUG14(c): trend content_cnt = 9(콘텐츠 3종 묶음 합)');
+  // trend 는 학습 계열만 — attendance/post/survey 는 SUM 컬럼이 없다(라인에 안 뜬다) 재확인.
+  assert.ok(!('attendance_cnt' in trend[0] || 'post_cnt' in trend[0] || 'survey_cnt' in trend[0]),
+    'BUG14(c): trend 에 attendance/post/survey 계열이 없어야(그래프 가독성)');
+
+  // (d) daily_complete 는 self_learn 으로 병합 → byType 에 daily_complete 별도 행 없음
+  assert.ok(!byMap['daily_complete'], 'BUG14(d): daily_complete 는 self_learn 으로 병합(별도 행 금지)');
+});
+
+// ──────────────────────────────────────────────────────────────────────────
+// BUG15: LRS /stats/perform "평균 점수" 스케일 혼재 정규화(표시용 0~100).
+//   결함: result_score 저장 스케일이 유형별로 혼재 — exam/self/homework_graded 는 0~1,
+//         content_solve 는 0~100. 그대로 AVG 하면 평가 평균이 0.9(=94.5점) 로 뜨는 시각 결함.
+//   fix(routes/lrs.js): NORM_SCORE = CASE WHEN result_score<=1 THEN *100 ELSE 그대로 END 로
+//         행 단위 정규화 후 AVG → 모든 '평균 점수' 0~100 일관.
+//   박제:
+//     (a) 0~1 저장 유형(exam) 평균이 0~100 으로(>1, ≈94.5), ≤1 소수로 안 뜬다
+//     (b) 이미 0~100 인 content_solve 는 그대로 100(이중 ×100 없음)
+//     (c) lesson_progress(진도율)는 SCORED_SQL 밖 → 정규화·평균 대상 아님(NULL/'-')
+//     (d) 점수있는 모든 유형 avgScore 가 0~100 범위(0<v<=100)
+// ──────────────────────────────────────────────────────────────────────────
+test('BUG15: LRS 평균점수 표시용 0~100 정규화 — 0~1 저장 유형 ×100, content_solve 그대로, 진도율 제외', () => {
+  const { logLearningActivity } = require('../db/learning-log-helper');
+  const U = S1;
+  const D = '2099-08-20';
+  const seed = (activityType, score, tid) => logLearningActivity({
+    userId: U, activityType, targetType: 'test', targetId: tid || ('bug15-' + Math.random().toString(36).slice(2, 8)),
+    classId: CLASS, verb: 'completed', sourceService: 'test-bug15',
+    resultScore: score, createdAt: `${D} 03:00:00`, metadata: { bug15: 1 }
+  });
+  // exam: 0~1 스케일 2건(0.90, 1.00 → 정규화 90·100 → 평균 95)
+  seed('exam_complete', 0.90); seed('exam_complete', 1.00);
+  // content_solve: 이미 0~100 2건(100·80 → 평균 90, 이중 ×100 되면 안 됨)
+  seed('content_solve', 100); seed('content_solve', 80);
+  // lesson_progress: 진도율 0.5·1.0 (정규화·평균 대상 아님 → NULL)
+  seed('lesson_progress', 0.5); seed('lesson_progress', 1.0);
+
+  const SCORED_SQL = `ll.activity_type IN ('exam_complete','homework_submit','self_learn','daily_complete','content_solve')`;
+  const NORM_SCORE = `(CASE WHEN ll.result_score <= 1 THEN ll.result_score*100 ELSE ll.result_score END)`;
+  const byType = db.prepare(`
+    SELECT ll.activity_type AS activity_type,
+           AVG(CASE WHEN ${SCORED_SQL} THEN ${NORM_SCORE} END) avg_score
+    FROM learning_logs ll
+    WHERE DATE(ll.created_at) = ? AND ll.user_id = ? AND ll.metadata LIKE '%bug15%'
+    GROUP BY ll.activity_type
+  `).all(D, U);
+  const m = Object.fromEntries(byType.map(r => [r.activity_type, r.avg_score]));
+  const rnd = v => v == null ? null : Math.round(v * 10) / 10;
+
+  // (a) exam 0~1 → 0~100 (95), ≤1 소수로 안 뜬다
+  assert.equal(rnd(m['exam_complete']), 95, 'BUG15(a): exam 정규화 평균 95(0.9·1.0 → 90·100)');
+  assert.ok(m['exam_complete'] > 1, 'BUG15(a): exam 평균이 0~1 소수가 아니라 0~100(>1)');
+  // (b) content_solve 이미 0~100 → 90 (이중 ×100 없음: 9000 이 아니어야)
+  assert.equal(rnd(m['content_solve']), 90, 'BUG15(b): content_solve 90(0~100 그대로, 이중 ×100 없음)');
+  assert.ok(m['content_solve'] <= 100, 'BUG15(b): content_solve 평균 <=100(이중 정규화 아님)');
+  // (c) lesson_progress 진도율 → 평균 대상 아님(GROUP 행은 있어도 avg NULL)
+  assert.ok(!('lesson_progress' in m) || m['lesson_progress'] == null,
+    'BUG15(c): lesson_progress(진도율)는 avgScore NULL(정규화·평균 제외)');
+  // (d) 점수있는 모든 유형 avgScore 0~100 범위
+  for (const [t, v] of Object.entries(m)) {
+    if (v != null) assert.ok(v > 0 && v <= 100, `BUG15(d): ${t} avgScore(${v}) 가 0~100 범위여야`);
+  }
+});

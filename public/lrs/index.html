@@ -712,7 +712,7 @@ const MENUS = {
     { id:'s-trend',      label:'학습 습관',       icon:'fa-chart-line',    group:'분석',       category:'analytics' },
     { id:'s-compare',    label:'비교',            icon:'fa-people-group',  group:'분석',       category:'analytics' },
     { id:'s-xapi',       label:'표준체계 분석',    icon:'fa-diagram-project',group:'분석',      category:'analytics' },
-    { id:'s-perform',    label:'과제·평가 수행',  icon:'fa-tasks',         group:'학습 활동',  category:'activities' },
+    { id:'s-perform',    label:'학습 활동 수행',  icon:'fa-tasks',         group:'학습 활동',  category:'activities' },
     { id:'s-custom',     label:'맞춤학습',        icon:'fa-compass',       group:'학습 활동',  category:'activities' },
     { id:'s-daily',      label:'일일현황',        icon:'fa-calendar-day',  group:'분석',       category:'analytics' },
   ],
@@ -722,7 +722,7 @@ const MENUS = {
     { id:'t-subject',    label:'교과 성취 분석',   icon:'fa-book',                  group:'분석',         category:'analytics' },
     { id:'t-usage',      label:'활용 현황',        icon:'fa-chalkboard',            group:'분석',         category:'analytics' },
     { id:'t-xapi',       label:'표준체계 분석',    icon:'fa-diagram-project',       group:'분석',         category:'analytics' },
-    { id:'t-perform',    label:'과제·평가 수행',  icon:'fa-tasks',                 group:'학습 활동',     category:'activities' },
+    { id:'t-perform',    label:'학습 활동 수행',  icon:'fa-tasks',                 group:'학습 활동',     category:'activities' },
     { id:'t-custom',     label:'맞춤학습 관리',    icon:'fa-compass',               group:'학습 활동',     category:'activities' },
     { id:'t-daily',      label:'일일현황',        icon:'fa-calendar-day',          group:'분석',         category:'analytics' },
     { id:'t-drill',      label:'학생 드릴다운',    icon:'fa-user-magnifying-glass', group:'학습 활동',     category:'activities' },
@@ -1451,15 +1451,19 @@ const VIEWS = {};
 
 /* ---- 공통 차트 데이터 헬퍼 ---- */
 function _perfTrendDatasets(trend){
+  // 학습 4계열만(가독성): 평가·과제·자기주도 + 콘텐츠 학습(문항풀이·조회·수업진행 묶음, 보라 #8b5cf6).
   return {
     labels: (trend||[]).map(t => t.date),
     datasets: [
       { label:'평가', data:(trend||[]).map(t => t.exam_cnt||0),     borderColor:'#ef4444', backgroundColor:'#ef4444', tension:0.3 },
       { label:'과제', data:(trend||[]).map(t => t.homework_cnt||0), borderColor:'#2563eb', backgroundColor:'#2563eb', tension:0.3 },
-      { label:'자기주도', data:(trend||[]).map(t => t.self_cnt||0), borderColor:'#10b981', backgroundColor:'#10b981', tension:0.3 }
+      { label:'자기주도', data:(trend||[]).map(t => t.self_cnt||0), borderColor:'#10b981', backgroundColor:'#10b981', tension:0.3 },
+      { label:'콘텐츠 학습', data:(trend||[]).map(t => t.content_cnt||0), borderColor:'#8b5cf6', backgroundColor:'#8b5cf6', tension:0.3 }
     ]
   };
 }
+// 활동유형별 표/차트용 팔레트 (유형 개수가 늘어도 색이 반복되도록). 유형 순서(byType는 cnt DESC)와 무관하게 index 매핑.
+const PERF_TYPE_PALETTE = ['#ef4444','#2563eb','#10b981','#8b5cf6','#f59e0b','#06b6d4','#ec4899','#64748b','#84cc16','#f97316'];
 
 /* ======== s-perform ======== */
 VIEWS['s-perform'] = async function(root){
@@ -1468,18 +1472,21 @@ VIEWS['s-perform'] = async function(root){
   if (!d || !d.success) { root.innerHTML = tplEmpty('학습수행 데이터를 불러오지 못했습니다'); return; }
   const s = d.summary || {};
   if (!s.totalActs) {
-    root.innerHTML = tplEmpty('최근 수행한 평가·과제·자기주도 학습이 없어요', {href:'/self-learn/', label:'스스로채움 시작하기'});
+    root.innerHTML = tplEmpty('최근 수행한 평가·과제·자기주도·콘텐츠 학습이 없어요', {href:'/self-learn/', label:'스스로채움 시작하기'});
     return;
   }
+  // 콘텐츠 학습 KPI 부제: 점수 있는 콘텐츠 문항풀이 평균만 표기(조회·수업진행은 점수 없음).
+  const contentSub = s.contentSolveAvgScore != null ? `문항풀이 평균 ${s.contentSolveAvgScore}점` : '조회·수업 포함';
   root.innerHTML = `
     <section class="dc-kpi-grid">
       ${kpiCard('완료 평가', (s.examCount||0).toLocaleString(), '건', {dir:'flat',text:`평균 ${s.examAvgScore||0}점`}, 'primary')}
       ${kpiCard('제출 과제', (s.homeworkCount||0).toLocaleString(), '건', {dir:'flat',text:`제출률 ${s.homeworkSubmitRate||0}%`}, 'success')}
       ${kpiCard('자기주도 학습', (s.selfLearnCount||0).toLocaleString(), '건', {dir:'flat',text:`평균 ${s.selfLearnAvgScore||0}점`}, 'warning')}
+      ${kpiCard('콘텐츠 학습', (s.contentCount||0).toLocaleString(), '건', {dir:'flat',text:contentSub}, 'purple')}
       ${kpiCard('전체 수행', (s.totalActs||0).toLocaleString(), '건', {dir:'flat',text:'기간 누적'}, 'primary')}
     </section>
     <section class="dc-chart-grid">
-      ${chartWrap('sPerfTrend','일별 학습수행 추이','평가·과제·자기주도')}
+      ${chartWrap('sPerfTrend','일별 학습수행 추이','평가·과제·자기주도·콘텐츠 학습')}
     </section>
     <section><h2 style="margin:16px 0 8px;">활동 유형별 요약</h2><div id="sPerfTypeTable"></div></section>`;
   mkChart(document.getElementById('sPerfTrend'),'line', _perfTrendDatasets(d.trend));
@@ -1509,13 +1516,13 @@ VIEWS['t-perform'] = async function(root){
       ${kpiCard('반 평균 점수', (s.examAvgScore||0), '점', {dir:'flat',text:'평가 기준'}, 'primary')}
     </section>
     <section class="dc-chart-grid">
-      ${chartWrap('tPerfBar','활동유형별 건수','평가·과제·자기주도')}
+      ${chartWrap('tPerfBar','활동유형별 건수','전체 활동유형')}
     </section>
     <section><h2 style="margin:16px 0 8px;">학생별 수행 현황</h2><div id="tPerfStudents"></div></section>`;
   const types = d.byType || [];
   mkChart(document.getElementById('tPerfBar'),'bar', {
     labels: types.map(t=>t.label),
-    datasets: [{ label:'건수', data: types.map(t=>t.count||0), backgroundColor:['#ef4444','#2563eb','#10b981'] }]
+    datasets: [{ label:'건수', data: types.map(t=>t.count||0), backgroundColor: types.map((_,i)=>PERF_TYPE_PALETTE[i % PERF_TYPE_PALETTE.length]) }]
   });
   const rows = d.byStudent && d.byStudent.length ? d.byStudent : [];
   if (!rows.length) {
@@ -1557,7 +1564,7 @@ VIEWS['a-perform'] = async function(root){
   const types = d.byType || [];
   mkChart(document.getElementById('aPerfPie'),'doughnut', {
     labels: types.map(t=>t.label),
-    datasets:[{ data: types.map(t=>t.count||0), backgroundColor:['#ef4444','#2563eb','#10b981'] }]
+    datasets:[{ data: types.map(t=>t.count||0), backgroundColor: types.map((_,i)=>PERF_TYPE_PALETTE[i % PERF_TYPE_PALETTE.length]) }]
   }, donutLegendOpts('건'));
   const top = (d.byStudent||[]).slice(0,10);
   if (!top.length) { document.getElementById('aPerfTop').innerHTML = tplEmpty(); }

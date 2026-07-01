@@ -1751,23 +1751,43 @@ router.get('/stats/perform', requireAuth, (req, res) => {
     //   두 타입은 서로 다른 row(각 이수 1건 → 1 row)라 함께 세도 이중 카운트 없음.
     //   집계·라벨·추이는 daily_complete 를 self_learn 으로 정규화해 '자기주도 학습' 단일 행으로 합친다.
     const SELF_LEARN_TYPES = ['self_learn', 'daily_complete'];
-    const perfTypes = ['exam_complete', 'homework_submit', ...SELF_LEARN_TYPES];
+    // 학습 수행에 포함할 콘텐츠·수업 성격 활동:
+    //   content_solve(콘텐츠 문항풀이, 점수 있음), content_view(콘텐츠 학습, 점수 없음),
+    //   lesson_progress(수업 진행, result_score 는 진도율 0~1 이라 '점수'가 아님 → 표에서 점수 없음 처리).
+    //   추이(trend)는 이 3종을 '콘텐츠 학습' 1계열로 묶어 계열 폭주를 막는다.
+    const CONTENT_TYPES = ['content_solve', 'content_view', 'lesson_progress'];
+    // 제외: attendance_checkin(감정출석)·post_create(게시글)·survey_respond(설문) — 학습 수행 아님.
+    const perfTypes = ['exam_complete', 'homework_submit', ...SELF_LEARN_TYPES, ...CONTENT_TYPES];
     const typePH = perfTypes.map(()=>'?').join(',');
     const baseWhere = `WHERE ll.activity_type IN (${typePH}) ${r.where} ${sf.where}`;
     const baseParams = [...perfTypes, ...r.params, ...sf.params];
     // self_learn 버킷 판정 SQL 조각 (재사용). daily_complete 도 자기주도 학습으로 합산.
     const SELF_SQL = `ll.activity_type IN ('self_learn','daily_complete')`;
+    // 콘텐츠 학습 버킷 판정 SQL 조각 (추이 묶음 계열 + summary KPI 재사용).
+    const CONTENT_SQL = `ll.activity_type IN ('content_solve','content_view','lesson_progress')`;
+    // '점수' 개념이 있는 유형만 평균점수 집계 대상. content_view/lesson_progress 는 제외(진도율·조회는 점수 아님).
+    //   → byType 평균점수 컬럼에서 이 두 유형은 '-'(NULL) 로 표시된다.
+    const SCORED_SQL = `ll.activity_type IN ('exam_complete','homework_submit','self_learn','daily_complete','content_solve')`;
+    // ── 표시용 0~100 정규화 (표시 계층 band-aid) ──────────────────────────────
+    //   DB 저장 스케일 혼재: exam/self/homework_graded 등은 result_score 0~1, content_solve 는 0~100.
+    //   그대로 AVG 하면 평가 평균이 0.9(=94.5%)로 오해되게 뜬다(사용자 지적 결함).
+    //   행 단위로 0~1 값이면 ×100 해서 모든 '평균 점수'를 0~100 로 통일한다.
+    //   (저장 스케일 통일 마이그레이션은 별건 — 여기선 표시만 교정.)
+    //   ※ lesson_progress 는 진도율이라 애초에 SCORED_SQL 밖 → 정규화 대상 아님(계속 NULL/'-').
+    const NORM_SCORE = `(CASE WHEN ll.result_score <= 1 THEN ll.result_score*100 ELSE ll.result_score END)`;
 
     // summary
     const sumRow = db.prepare(`
       SELECT
         SUM(CASE WHEN ll.activity_type='exam_complete' THEN 1 ELSE 0 END) exam_cnt,
-        AVG(CASE WHEN ll.activity_type='exam_complete' THEN ll.result_score END) exam_avg,
+        AVG(CASE WHEN ll.activity_type='exam_complete' THEN ${NORM_SCORE} END) exam_avg,
         SUM(CASE WHEN ll.activity_type='exam_complete' AND ll.result_success=1 THEN 1 ELSE 0 END) exam_ok,
         SUM(CASE WHEN ll.activity_type='homework_submit' THEN 1 ELSE 0 END) hw_cnt,
         SUM(CASE WHEN ll.activity_type='homework_submit' AND ll.result_success=1 THEN 1 ELSE 0 END) hw_ok,
         SUM(CASE WHEN ${SELF_SQL} THEN 1 ELSE 0 END) self_cnt,
-        AVG(CASE WHEN ${SELF_SQL} THEN ll.result_score END) self_avg,
+        AVG(CASE WHEN ${SELF_SQL} THEN ${NORM_SCORE} END) self_avg,
+        SUM(CASE WHEN ${CONTENT_SQL} THEN 1 ELSE 0 END) content_cnt,
+        AVG(CASE WHEN ll.activity_type='content_solve' THEN ${NORM_SCORE} END) content_solve_avg,
         COUNT(*) total_acts
       FROM learning_logs ll
       ${baseWhere}
@@ -1781,23 +1801,39 @@ router.get('/stats/perform', requireAuth, (req, res) => {
       homeworkSubmitRate: sumRow.hw_cnt ? Math.round((sumRow.hw_ok||0)*1000/sumRow.hw_cnt)/10 : null,
       selfLearnCount: sumRow.self_cnt || 0,
       selfLearnAvgScore: sumRow.self_avg != null ? Math.round(sumRow.self_avg*10)/10 : null,
+      // 콘텐츠 학습(콘텐츠 문항풀이·콘텐츠 학습·수업 진행) 통합 건수. 평균점수는 점수 있는 content_solve 만.
+      contentCount: sumRow.content_cnt || 0,
+      contentSolveAvgScore: sumRow.content_solve_avg != null ? Math.round(sumRow.content_solve_avg*10)/10 : null,
       totalActs: sumRow.total_acts || 0
     };
 
-    // byType
-    //   daily_complete 를 self_learn 으로 정규화(GROUP BY 前)해 '자기주도 학습' 한 행으로 합친다.
-    //   (self_learn·daily_complete 가 각각 별도 행으로 쪼개지면 표에 두 줄이 생겨 혼란.)
-    const typeLabels = { exam_complete:'평가 완료', homework_submit:'과제 제출', self_learn:'자기주도 학습' };
+    // byType — "활동 유형별 요약" 표는 **모든 activity_type 을 투명하게** 노출한다.
+    //   (학습 수행 화이트리스트 baseWhere 를 쓰지 않고, 날짜·스코프만 건 tableWhere 로 전 유형 GROUP BY.)
+    //   summary/byStudent/trend 는 학습 위주(perfTypes 화이트리스트) 유지 — 표만 전 유형.
+    //   daily_complete 는 self_learn 으로 정규화해 '자기주도 학습' 한 행으로 계속 병합(표에 두 줄 방지).
+    //   점수: SCORED_SQL(평가·과제·자기주도·콘텐츠 문항풀이)만 평균 — 그 외(조회·수업진행·감정출석·게시글·설문)는 NULL → '-'.
+    const tableWhere = `WHERE 1=1 ${r.where} ${sf.where}`;
+    const tableParams = [...r.params, ...sf.params];
+    const typeLabels = {
+      exam_complete:'평가 완료', homework_submit:'과제 제출', self_learn:'자기주도 학습',
+      content_solve:'콘텐츠 문항풀이', content_view:'콘텐츠 학습', lesson_progress:'수업 진행',
+      attendance_checkin:'감정 출석', post_create:'게시글 작성', survey_respond:'설문 응답',
+      // 그 밖의 알려진 학습 활동 유형(라벨만 부여, 그래도 미지 유형은 raw 폴백).
+      problem_attempt:'문항 풀이 시도', wrong_note_retry:'오답노트 재도전',
+      homework_graded:'과제 채점 완료', survey_create:'설문 생성', post_comment:'댓글 작성'
+    };
     const byType = db.prepare(`
       SELECT CASE WHEN ll.activity_type='daily_complete' THEN 'self_learn' ELSE ll.activity_type END AS activity_type,
              COUNT(*) cnt,
-             AVG(ll.result_score) avg_score,
+             AVG(CASE WHEN ${SCORED_SQL} THEN ${NORM_SCORE} END) avg_score,
              AVG(COALESCE(ll.duration_sec, ll.result_duration, 0)) avg_dur_sec
       FROM learning_logs ll
-      ${baseWhere}
+      ${tableWhere}
       GROUP BY CASE WHEN ll.activity_type='daily_complete' THEN 'self_learn' ELSE ll.activity_type END
-    `).all(...baseParams).map(row => ({
+      ORDER BY cnt DESC
+    `).all(...tableParams).map(row => ({
       activity_type: row.activity_type,
+      // 미지 유형도 코드가 죽지 않게 raw activity_type 폴백.
       label: typeLabels[row.activity_type] || row.activity_type,
       count: row.cnt || 0,
       avgScore: row.avg_score != null ? Math.round(row.avg_score*10)/10 : null,
@@ -1815,7 +1851,7 @@ router.get('/stats/perform', requireAuth, (req, res) => {
                SUM(CASE WHEN ll.activity_type='homework_submit' THEN 1 ELSE 0 END) homework_cnt,
                SUM(CASE WHEN ${SELF_SQL} THEN 1 ELSE 0 END) self_cnt,
                COUNT(*) total_cnt,
-               AVG(ll.result_score) avg_score
+               AVG(CASE WHEN ${SCORED_SQL} THEN ${NORM_SCORE} END) avg_score
         FROM learning_logs ll
         JOIN users u ON u.id = ll.user_id
         ${baseWhere} AND u.role = 'student'
@@ -1833,12 +1869,15 @@ router.get('/stats/perform', requireAuth, (req, res) => {
       }));
     }
 
-    // trend
+    // trend — 그래프 가독성 위해 학습 4계열만: 평가·과제·자기주도·콘텐츠 학습(content 3종 묶음).
+    //   content_solve+content_view+lesson_progress 를 content_cnt 한 계열로 SUM(계열 폭주 방지).
+    //   attendance/post/survey 는 추이에 넣지 않는다(표에만 노출).
     const trend = db.prepare(`
       SELECT DATE(ll.created_at) date,
              SUM(CASE WHEN ll.activity_type='exam_complete' THEN 1 ELSE 0 END) exam_cnt,
              SUM(CASE WHEN ll.activity_type='homework_submit' THEN 1 ELSE 0 END) homework_cnt,
-             SUM(CASE WHEN ${SELF_SQL} THEN 1 ELSE 0 END) self_cnt
+             SUM(CASE WHEN ${SELF_SQL} THEN 1 ELSE 0 END) self_cnt,
+             SUM(CASE WHEN ${CONTENT_SQL} THEN 1 ELSE 0 END) content_cnt
       FROM learning_logs ll
       ${baseWhere}
       GROUP BY DATE(ll.created_at)
