@@ -351,7 +351,13 @@ function logLearningActivity({
       stmts.upsertUserDaily.run(userId, durationForAgg, resultScore, subjectCode || '');
 
       // 신규: lrs_achievement_stats
-      if (achievementCode) {
+      //   ── 평가신호 없는 이수(콘텐츠 시청형)는 성취 시도에서 제외(도달률 역효과 fix) ──
+      //     resultScore·resultSuccess 둘 다 없는 완료(=순수 활동/시청)는 정오답 판정 대상이 아니다.
+      //     이런 건을 attempt_count 로 올리면 thisSuccess=0(NULL→0) 이 누적돼 "1시도 0정답"으로
+      //     도달률을 끌어내리는 왜곡이 발생(LRS 학생 전수감사 §1 근본원인 A-2). 따라서 평가신호가
+      //     하나라도 있는 완료만 mastery 집계에 반영한다. (문항 정답률은 정상 기여, 이수는 활동으로만)
+      const hasEvalSignal = (resultScore != null) || (resultSuccess != null);
+      if (achievementCode && hasEvalSignal) {
         // ── REWORK-1: realtime upsert 도 mastery 의 "단일 분류기"로 통일 ──
         //   레거시 computeAchievementLevel(avg 기반 상/중/하, att<3→'미도달') 폐기.
         //   rebuild 경로(db/lrs-aggregate.js 7-classify)와 동일하게

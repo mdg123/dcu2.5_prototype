@@ -884,6 +884,45 @@ router.post('/rebuild-aggregates', requireAuth, (req, res) => {
 // 신규 엔드포인트 8개 (Phase 2)
 // ─────────────────────────────────────────────────────────
 
+// ─────────────────────────────────────────────────────────
+// 성취기준 코드 → 학생 친화 짧은 이름(단원명) 라벨 헬퍼
+//   우선순위: learning_map_nodes.unit_name(가장 짧고 익숙) →
+//             resolveCode(code).label(성취기준 서술, 길면 FE가 축약) → 코드 폴백.
+//   반환: { label(짧은 이름), fullLabel(서술 전체·툴팁용), subjectLabel, code }
+//   코드→단원명 캐시(1회 로드). raw 코드([N수..])가 화면에 그대로 노출되지 않게 함.
+// ─────────────────────────────────────────────────────────
+let _unitNameCache = null;
+function _buildUnitNameCache() {
+  const map = new Map();
+  try {
+    const rows = db.prepare(
+      "SELECT achievement_code, unit_name FROM learning_map_nodes WHERE achievement_code IS NOT NULL AND unit_name IS NOT NULL AND TRIM(unit_name) <> ''"
+    ).all();
+    for (const r of rows) {
+      const key = String(r.achievement_code).trim();
+      if (!map.has(key)) map.set(key, r.unit_name); // 첫 단원명 채택(결정론)
+    }
+  } catch (_) { /* 테이블 없으면 무시 */ }
+  return map;
+}
+function achievementLabel(code) {
+  if (!_unitNameCache) _unitNameCache = _buildUnitNameCache();
+  const raw = String(code || '').trim();
+  const bare = raw.replace(/^\[|\]$/g, '');
+  const bracketed = raw.startsWith('[') ? raw : `[${bare}]`;
+  const unit = _unitNameCache.get(bracketed) || _unitNameCache.get(bare) || _unitNameCache.get(raw);
+  let full = '', subj = '';
+  try { const ctx = mastery.resolveCode(code); full = (ctx && ctx.label) || ''; subj = (ctx && ctx.subject_label) || ''; } catch (_) {}
+  // 짧은 이름: 단원명 우선, 없으면 성취기준 서술, 그래도 없으면 코드
+  const short = unit || (full && full !== bracketed && full !== bare ? full : '') || bracketed;
+  return {
+    code: bracketed,
+    label: short,                       // 화면 표기용 짧은 이름
+    fullLabel: full || short,           // 툴팁/보조용 서술
+    subjectLabel: subj || '',
+  };
+}
+
 // 1. GET /api/lrs/insights/:userId — 개인 인사이트
 router.get('/insights/:userId', requireAuth, (req, res) => {
   try {
@@ -891,6 +930,13 @@ router.get('/insights/:userId', requireAuth, (req, res) => {
     if (!canViewUser(req, userId)) {
       return res.status(403).json({ success: false, message: '권한이 없습니다.' });
     }
+
+    // 기간 반영(LRS 학생 전수감사 §2): 기간칩(period/days/from~to)을 실제 집계에 반영.
+    //   이전엔 주간=-7일·교과비중=-30일 하드코딩이라 7d/30d/90d 응답이 완전 동일했다.
+    //   period 를 fromDate~toDate 로 해석해 학습시간(dur)·평균성취·교과비중을 그 기간으로 산출한다.
+    const period = resolvePeriod(req);
+    if (period.invalid) return sendInvalidPeriod(res, period.reason);
+    const pFrom = period.fromDate, pTo = period.toDate;
 
     // streak: 연속 학습 일수
     const dailyRows = db.prepare(`
@@ -911,12 +957,14 @@ router.get('/insights/:userId', requireAuth, (req, res) => {
       }
     }
 
-    // 주간 통계
-    const weekly = db.prepare(`
+    // 기간 통계(구 "주간") — 선택 기간(pFrom~pTo)의 학습시간·평균성취.
+    const periodStat = db.prepare(`
       SELECT COALESCE(SUM(duration_sec),0) as dur, AVG(avg_score) as avg_score
       FROM lrs_user_daily
-      WHERE user_id = ? AND stat_date >= DATE('now','-7 days')
-    `).get(userId);
+      WHERE user_id = ?
+        ${pFrom ? 'AND stat_date >= ?' : ''}
+        ${pTo ? 'AND stat_date <= ?' : ''}
+    `).get(userId, ...(pFrom ? [pFrom] : []), ...(pTo ? [pTo] : []));
 
     // 약점 TOP5
     const weaknesses = db.prepare(`
@@ -927,9 +975,13 @@ router.get('/insights/:userId', requireAuth, (req, res) => {
       LIMIT 5
     `).all(userId);
 
-    // 추천 콘텐츠 (약점 성취기준에 매핑된 콘텐츠)
+    // 추천 콘텐츠 (약점 성취기준에 매핑된 콘텐츠) + 학생 친화 이름(단원명) 라벨 부착
     const recommendedContentIds = [];
     for (const w of weaknesses) {
+      const nm = achievementLabel(w.achievement_code);
+      w.label = nm.label;                 // 화면 표기용 짧은 이름(단원명 우선)
+      w.fullLabel = nm.fullLabel;         // 툴팁/보조 서술
+      w.subject_label = w.subject_label || nm.subjectLabel;
       try {
         const cs = db.prepare(`
           SELECT id FROM contents WHERE achievement_code = ? ORDER BY id DESC LIMIT 3
@@ -947,28 +999,41 @@ router.get('/insights/:userId', requireAuth, (req, res) => {
       ORDER BY COALESCE(avg_score, 0) DESC
       LIMIT 5
     `).all(userId);
+    for (const s of strengths) {
+      const nm = achievementLabel(s.achievement_code);
+      s.label = nm.label; s.fullLabel = nm.fullLabel;
+      s.subject_label = s.subject_label || nm.subjectLabel;
+    }
 
-    // 교과별 비중 (최근 30일)
+    // 교과별 비중 (선택 기간 pFrom~pTo)
     const subjectBalance = db.prepare(`
       SELECT subject_code,
         COALESCE(SUM(COALESCE(duration_sec, CAST(REPLACE(REPLACE(COALESCE(result_duration,''),'PT',''),'S','') AS INTEGER), 0)),0) as duration_sec,
         COUNT(*) as count
       FROM learning_logs
       WHERE user_id = ? AND subject_code IS NOT NULL
-        AND DATE(created_at) >= DATE('now','-30 days')
+        ${pFrom ? 'AND DATE(created_at) >= ?' : ''}
+        ${pTo ? 'AND DATE(created_at) <= ?' : ''}
       GROUP BY subject_code ORDER BY duration_sec DESC
-    `).all(userId);
+    `).all(userId, ...(pFrom ? [pFrom] : []), ...(pTo ? [pTo] : []));
 
     res.json({
       success: true,
       userId,
       asOf: new Date().toISOString(),
+      // FE 공유 계약: period.{fromDate,toDate,label} 를 함께 반환(어떤 기간이 반영됐는지 표기용).
+      period: { fromDate: pFrom, toDate: pTo, label: period.label },
       snapshot: {
         streakDays,
-        weeklyDurationMin: Math.round((weekly.dur || 0) / 60),
+        // 선택 기간의 학습시간/평균성취. (라벨은 FE 가 기간에 맞춰 표기)
+        weeklyDurationMin: Math.round((periodStat.dur || 0) / 60),
+        periodDurationMin: Math.round((periodStat.dur || 0) / 60),
         weeklyTarget: LRS_CONFIG.weeklyTargetMin,
-        weeklyScoreAvg: weekly.avg_score,
-        engagementIndex: streakDays >= 7 ? 0.9 : (streakDays / 7)
+        // 주의: lrs_user_daily.avg_score 는 저장 스케일 혼재(0~1·0~100)이므로 여기선 정규화하지 않는다
+        //   (섣부른 ×100 이 오히려 왜곡 — 스케일 통일은 별건 마이그레이션). 기존 동작 보존 + 기간만 반영.
+        weeklyScoreAvg: periodStat.avg_score,
+        // engagementIndex 0~100 정규화(0~1 노출 위험 제거, 감사 §4).
+        engagementIndex: Math.round((streakDays >= 7 ? 0.9 : (streakDays / 7)) * 100)
       },
       strengths,
       weaknesses,
@@ -1119,7 +1184,29 @@ router.get('/mastery/student/:id', requireAuth, (req, res) => {
       return res.status(403).json({ success: false, message: '권한이 없습니다.' });
     }
     const subjectCode = req.query.subjectCode || null;
-    const data = mastery.getStudentMastery(userId, { subjectCode });
+    // 기간 반영(감사 §2): 기간칩(period/days/from~to)이 오면 그 기간 learning_logs 로 재계산.
+    //   기간 파라미터가 전혀 없으면(순수 진입) 전기간 누적 유지 → "성취는 누적" 기본 정책 보존.
+    const hasPeriodParam = !!(req.query.period || req.query.days || req.query.from || req.query.to);
+    let scope = {};
+    if (hasPeriodParam) {
+      const period = resolvePeriod(req);
+      if (period.invalid) return sendInvalidPeriod(res, period.reason);
+      scope = { fromDate: period.fromDate, toDate: period.toDate };
+    }
+    const data = mastery.getStudentMastery(userId, { subjectCode, ...scope });
+    // 코드→이름 통일(P0-4·감사 §5): standards/강약 라벨을 단원명(achievementLabel)로 일원화.
+    //   getStudentMastery 는 resolveCode(=성취기준 서술 전문)을 label 로 주는데, 강약 다이버징 축·
+    //   레이더가 이를 그대로 쓰면 raw 코드/문장 전문이 노출된다. 단원명으로 덮고 서술은 fullLabel 로.
+    const relabelM = (node) => {
+      if (!node || !node.code) return node;
+      const nm = achievementLabel(node.code);
+      node.fullLabel = node.fullLabel || node.label || nm.fullLabel;
+      node.label = nm.label;
+      return node;
+    };
+    (data.standards || []).forEach(relabelM);
+    (data.strengths || []).forEach(relabelM);
+    (data.weaknesses || []).forEach(relabelM);
     res.json({ success: true, ...data });
   } catch (err) {
     console.error('[LRS] /mastery/student error:', err);
@@ -1245,12 +1332,24 @@ router.get('/trend/student/:id', requireAuth, (req, res) => {
     }
     const target = req.query.target ? Math.max(1, Math.min(100, parseInt(req.query.target, 10) || 80)) : 80;
 
-    const trend = analytics.computeTrend({ userId });
+    // 기간 반영(감사 §2): 이전엔 computeTrend 가 기본 8주창 고정이라 7d/90d 응답이 동일했다.
+    //   기간칩(period/days/from~to)을 주(week) 수로 환산해 관측 창을 조정한다.
+    //   단 추세는 최소 3주 필요 — 기간이 3주 미만이면 관측 창을 3주로 보장(insufficient 문구로 안내됨).
+    const period = resolvePeriod(req);
+    if (period.invalid) return sendInvalidPeriod(res, period.reason);
+    let weeks = analytics.DEFAULT_WEEKS;
+    if (period.fromDate && period.toDate) {
+      const spanDays = Math.max(1, Math.round((new Date(period.toDate) - new Date(period.fromDate)) / 86400000));
+      weeks = Math.max(analytics.MIN_WEEKS, Math.ceil(spanDays / 7));
+    }
+
+    const trend = analytics.computeTrend({ userId, weeks });
     const projection = analytics.projectReach(trend, { target });
 
     // ★ 응답에 위험점수/위험등급 등 어떤 위험 필드도 포함하지 않는다(P6).
     res.json({
       success: true, userId, target,
+      period: { fromDate: period.fromDate, toDate: period.toDate, label: period.label, weeks },
       trend, projection,
       disclaimer: '이 추정은 규칙 기반이라 실제와 다를 수 있어요. 더 풀수록 정확해져요!',
     });
@@ -1272,15 +1371,142 @@ router.get('/emotion-mirror/:userId', requireAuth, (req, res) => {
     if (!canViewUser(req, userId)) {
       return res.status(403).json({ success: false, message: '권한이 없습니다.' });
     }
-    const days = req.query.days
-      ? Math.max(1, Math.min(180, parseInt(req.query.days, 10) || 60))
-      : 60;
+    // 기간 반영(감사 §2·§3 s-trend): 이전엔 ?days= 만 받고 ?period= 를 무시해 기간칩 무반응이었다.
+    //   period(7d/30d/90d/custom) → days 로 환산해 반영. days 명시가 있으면 그것을 우선.
+    let days;
+    if (req.query.days) {
+      days = Math.max(1, Math.min(180, parseInt(req.query.days, 10) || 60));
+    } else if (req.query.period || req.query.from || req.query.to) {
+      const period = resolvePeriod(req);
+      if (period.invalid) return sendInvalidPeriod(res, period.reason);
+      if (period.fromDate && period.toDate) {
+        const span = Math.round((new Date(period.toDate) - new Date(period.fromDate)) / 86400000) + 1;
+        days = Math.max(1, Math.min(180, span));
+      } else {
+        days = 60;
+      }
+    } else {
+      days = 60;
+    }
 
     const { groups, totalDays, coaching, note } = analytics.getEmotionMirror(userId, { days });
 
     res.json({ success: true, userId, days, groups, totalDays, coaching, note });
   } catch (err) {
     console.error('[LRS] /emotion-mirror error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// GET /api/lrs/peer-compare/:userId — s-compare "또래 비교"(학생 · 반 평균 대비 본인 위치).
+//   死스텁 탈피(감사 §3 s-compare · CP1): 완전 익명 집계만 반환(다른 학생 식별 절대 없음).
+//   본인/교사/관리자(canViewUser). 표본이 적으면 값 대신 정직한 status='insufficient' 를 반환.
+//   지표: 성취 도달률(reached/evaluated, %) + 학습 활동량(learning_logs 건수) 두 축.
+//     · 본인 값 vs 반 평균/중앙값 + 백분위(상위 몇 %). 개별 학생 명단·점수 미포함.
+router.get('/peer-compare/:userId', requireAuth, (req, res) => {
+  try {
+    const userId = parseInt(req.params.userId, 10);
+    if (!Number.isInteger(userId)) {
+      return res.status(400).json({ success: false, message: '잘못된 사용자 ID 입니다.' });
+    }
+    if (!canViewUser(req, userId)) {
+      return res.status(403).json({ success: false, message: '권한이 없습니다.' });
+    }
+    const MIN_PEERS = 5; // 표본 가드: 반 학생 수가 이 미만이면 익명이어도 비교 비노출(개인정보/신뢰도).
+
+    // 대상 학생의 반들 → 반 멤버(학생) 합집합. 여러 반이면 학생이 속한 모든 반의 동료를 후보로.
+    const classRows = db.prepare(`
+      SELECT cm.class_id FROM class_members cm JOIN users u ON u.id = cm.user_id
+      WHERE cm.user_id = ? AND u.role = 'student'
+    `).all(userId);
+    const classIds = [...new Set(classRows.map(r => r.class_id))];
+    if (!classIds.length) {
+      return res.json({ success: true, userId, status: 'no_class',
+        message: '아직 소속된 클래스가 없어 비교할 친구들이 없어요.' });
+    }
+    const ph = classIds.map(() => '?').join(',');
+    const peerIds = db.prepare(`
+      SELECT DISTINCT cm.user_id AS id FROM class_members cm JOIN users u ON u.id = cm.user_id
+      WHERE cm.class_id IN (${ph}) AND u.role = 'student'
+    `).all(...classIds).map(r => r.id);
+
+    if (peerIds.length < MIN_PEERS) {
+      return res.json({ success: true, userId, status: 'insufficient', peerCount: peerIds.length, minPeers: MIN_PEERS,
+        message: `비교하려면 같은 반 친구가 최소 ${MIN_PEERS}명은 있어야 해요(지금 ${peerIds.length}명). 표본이 적으면 정확하지 않아 숨겨요.` });
+    }
+
+    // 학생별 지표 계산 — 익명(값 배열만). 도달률 = 평가된(att>=3) 성취기준 중 도달 비율.
+    const { classifyStatus, reachRate, STATUS } = require('../db/lrs-mastery');
+    const statsByUser = db.prepare(`
+      SELECT user_id, achievement_code, attempt_count AS attempts, success_count AS correct, avg_score
+      FROM lrs_achievement_stats WHERE user_id IN (${peerIds.map(()=>'?').join(',')})
+    `).all(...peerIds);
+    const actByUser = new Map(db.prepare(`
+      SELECT user_id, COUNT(*) c FROM learning_logs
+      WHERE user_id IN (${peerIds.map(()=>'?').join(',')}) GROUP BY user_id
+    `).all(...peerIds).map(r => [r.user_id, r.c]));
+
+    const perUser = new Map(peerIds.map(id => [id, { evaluated: 0, reached: 0 }]));
+    for (const s of statsByUser) {
+      const rate = reachRate(s.correct, s.attempts, s.avg_score);
+      const status = classifyStatus(s.attempts, rate);
+      if (status === STATUS.INSUFFICIENT) continue; // 평가부족은 분모 제외
+      const u = perUser.get(s.user_id); if (!u) continue;
+      u.evaluated++;
+      if (status === STATUS.REACHED) u.reached++;
+    }
+    // 도달률(%) 배열 — 평가된 성취기준이 하나라도 있는 학생만.
+    const reachSamples = []; // { id, reachPct }
+    for (const id of peerIds) {
+      const u = perUser.get(id);
+      if (u.evaluated > 0) reachSamples.push({ id, reachPct: Math.round((u.reached / u.evaluated) * 1000) / 10 });
+    }
+    const actSamples = peerIds.map(id => ({ id, acts: actByUser.get(id) || 0 }));
+
+    const avg = (arr, key) => arr.length ? Math.round(arr.reduce((s, x) => s + x[key], 0) / arr.length * 10) / 10 : null;
+    const median = (arr, key) => {
+      if (!arr.length) return null;
+      const v = arr.map(x => x[key]).sort((a, b) => a - b);
+      const m = Math.floor(v.length / 2);
+      return Math.round((v.length % 2 ? v[m] : (v[m - 1] + v[m]) / 2) * 10) / 10;
+    };
+    // 백분위(상위 %) = 나보다 낮은 학생 비율. 값 없으면 null.
+    const percentileOf = (arr, key, id) => {
+      const me = arr.find(x => x.id === id); if (!me) return null;
+      const below = arr.filter(x => x[key] < me[key]).length;
+      return Math.round((below / arr.length) * 100);
+    };
+
+    const myReach = reachSamples.find(x => x.id === userId);
+    const myAct = actSamples.find(x => x.id === userId);
+
+    const buildAxis = (samples, key, myRow, unit) => {
+      if (!samples.length || !myRow) {
+        return { status: 'insufficient', mine: myRow ? myRow[key] : null, unit,
+          message: '아직 이 지표를 비교할 기록이 부족해요.' };
+      }
+      const pct = percentileOf(samples, key, myRow.id);
+      return {
+        status: 'ok', unit,
+        mine: myRow[key],
+        classAvg: avg(samples, key),
+        classMedian: median(samples, key),
+        percentile: pct,                                   // 상위 (100-pct)% 수준
+        aboveAverage: myRow[key] >= avg(samples, key),
+        sampleSize: samples.length,
+      };
+    };
+
+    res.json({
+      success: true, userId, status: 'ok',
+      peerCount: peerIds.length, minPeers: MIN_PEERS,
+      anonymous: true,
+      reach: buildAxis(reachSamples, 'reachPct', myReach, '%'),   // 성취 도달률
+      activity: buildAxis(actSamples, 'acts', myAct, '건'),        // 학습 활동량
+      disclaimer: '반 친구들과 익명으로 비교한 값이에요. 개별 친구가 누구인지는 알 수 없고, 기록이 적으면 정확하지 않을 수 있어요.',
+    });
+  } catch (err) {
+    console.error('[LRS] /peer-compare error:', err);
     res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
   }
 });
@@ -1390,6 +1616,22 @@ router.get('/next-step/:userId', requireAuth, (req, res) => {
       : 3;
 
     const result = analytics.getNextStep(userId, { limit });
+    // 코드→이름 통일(P0-4·감사 §5): getNextStep 의 label 은 resolveCode(=성취기준 서술 전문)이라
+    //   다른 카드(약점=단원명)와 라벨이 어긋난다. achievementLabel(단원명 우선)로 label 을 덮어써
+    //   전 뷰 라벨 정책을 일원화한다. 서술 전문은 fullLabel(툴팁용)로 보존.
+    const relabel = (node) => {
+      if (!node || !node.code) return node;
+      const nm = achievementLabel(node.code);
+      node.fullLabel = node.fullLabel || node.label || nm.fullLabel;
+      node.label = nm.label;
+      return node;
+    };
+    (result.keyNodes || []).forEach(k => {
+      relabel(k);
+      (k.unlocks || []).forEach(relabel);
+      (k.chain || []).forEach(relabel);
+    });
+    (result.readyToChallenge || []).forEach(relabel);
     res.json({ success: true, ...result });
   } catch (err) {
     console.error('[LRS] /next-step error:', err);
@@ -1902,10 +2144,14 @@ router.get('/stats/custom', requireAuth, (req, res) => {
     const baseWhere = `WHERE ll.source_service='self-learn' ${r.where} ${sf.where}`;
     const baseParams = [...r.params, ...sf.params];
 
+    // 스케일 정규화(감사 §4·P0-5): self-learn 로그는 result_score 를 0~1 로 저장(0.75~1.0).
+    //   AVG(result_score) 를 그대로 내보내면 "평균 0.9점"으로 오노출된다. perform 선례대로
+    //   NORM_SCORE(≤1 이면 ×100)로 0~100 정규화한다.
+    const NORM_SCORE = `(CASE WHEN ll.result_score <= 1 THEN ll.result_score*100 ELSE ll.result_score END)`;
     const sumRow = db.prepare(`
       SELECT COUNT(*) recommended,
              SUM(CASE WHEN ll.result_success=1 THEN 1 ELSE 0 END) completed,
-             AVG(ll.result_score) avg_score,
+             AVG(${NORM_SCORE}) avg_score,
              COUNT(DISTINCT ll.user_id) uniq_learners
       FROM learning_logs ll
       ${baseWhere}
@@ -1932,7 +2178,7 @@ router.get('/stats/custom', requireAuth, (req, res) => {
     const weakTargets = db.prepare(`
       SELECT ll.achievement_code,
              COUNT(*) attempts,
-             AVG(ll.result_score) avg_score,
+             AVG(${NORM_SCORE}) avg_score,
              MAX(ll.created_at) last_at
       FROM learning_logs ll
       ${baseWhere} AND ll.achievement_code IS NOT NULL AND ll.achievement_code != ''
@@ -1940,14 +2186,21 @@ router.get('/stats/custom', requireAuth, (req, res) => {
       HAVING attempts >= 1
       ORDER BY avg_score ASC NULLS LAST
       LIMIT 10
-    `).all(...baseParams).map(w => ({
-      achievement_code: w.achievement_code,
-      attempts: w.attempts,
-      avg_score: w.avg_score != null ? Math.round(w.avg_score*10)/10 : null,
-      last_at: w.last_at
-    }));
+    `).all(...baseParams).map(w => {
+      // 코드→이름 통일(P0-4): 약점표에 단원명 label 부착(raw 코드 단독 노출 방지). FE 는 label||code 표기.
+      const nm = achievementLabel(w.achievement_code);
+      return {
+        achievement_code: w.achievement_code,
+        label: nm.label,            // 화면 표기용 짧은 이름(단원명 우선)
+        fullLabel: nm.fullLabel,    // 툴팁/보조 서술
+        subject_label: nm.subjectLabel,
+        attempts: w.attempts,
+        avg_score: w.avg_score != null ? Math.round(w.avg_score*10)/10 : null,
+        last_at: w.last_at
+      };
+    });
 
-    res.json({ success:true, scope: sf.scope, summary, byDay, weakTargets });
+    res.json({ success:true, scope: sf.scope, period: { fromDate: r.fromDate, toDate: r.toDate }, summary, byDay, weakTargets });
   } catch (err) {
     console.error('[LRS] /stats/custom error:', err);
     res.status(500).json({ success:false, message:'서버 오류가 발생했습니다.' });
@@ -2046,9 +2299,13 @@ router.get('/stats/daily-snapshot', requireAuth, (req, res) => {
   try {
     const sf = resolveScopeFilter(req, 'll');
 
-    function snapshot(dateIso) {
-      const where = `WHERE DATE(ll.created_at) = ? ${sf.where}`;
-      const params = [dateIso, ...sf.params];
+    // 기간 반영(감사 §3 s-daily, P0): 이전엔 DATE('now')/DATE('now','-1 day') 하드코딩이라
+    //   기간칩 7d/30d/90d 응답이 완전 동일했다. 이제 선택 기간 범위(from~to)로 요약하고,
+    //   직전 동일 길이 구간과 비교한다. 기간칩이 없으면 오늘/어제(기존 동작) 유지.
+    // 날짜 범위(from~to, 포함) 스냅샷.
+    function snapshotRange(fromIso, toIso) {
+      const where = `WHERE DATE(ll.created_at) >= ? AND DATE(ll.created_at) <= ? ${sf.where}`;
+      const params = [fromIso, toIso, ...sf.params];
       const sumRow = db.prepare(`
         SELECT COUNT(*) total_acts,
                COUNT(DISTINCT ll.user_id) uniq_users,
@@ -2070,7 +2327,7 @@ router.get('/stats/daily-snapshot', requireAuth, (req, res) => {
       const byHour = [];
       for (let h=0; h<24; h++) byHour.push({ hour: h, count: hourMap.get(h) || 0 });
       return {
-        date: dateIso,
+        from: fromIso, to: toIso, date: toIso,
         totalActs: sumRow.total_acts || 0,
         uniqueUsers: sumRow.uniq_users || 0,
         durationMin: Math.round((sumRow.dur_sec||0)/60),
@@ -2082,18 +2339,42 @@ router.get('/stats/daily-snapshot', requireAuth, (req, res) => {
         byHour
       };
     }
+    const snapshot = (dateIso) => snapshotRange(dateIso, dateIso); // 단일 날짜 편의
 
-    // 오늘/어제 계산
-    const nowRow = db.prepare("SELECT DATE('now','localtime') today, DATE('now','-1 day','localtime') yesterday").get();
-    const today = snapshot(nowRow.today);
-    const yesterday = snapshot(nowRow.yesterday);
+    const hasPeriodParam = !!(req.query.period || req.query.days || req.query.from || req.query.to);
+    let current, previous, periodMeta;
+    if (hasPeriodParam) {
+      const period = resolvePeriod(req);
+      if (period.invalid) return sendInvalidPeriod(res, period.reason);
+      const from = period.fromDate, to = period.toDate;
+      const spanDays = Math.max(1, Math.round((new Date(to) - new Date(from)) / 86400000) + 1);
+      // 직전 동일 길이 구간: [from - spanDays, from - 1]
+      const prevTo = new Date(from); prevTo.setDate(prevTo.getDate() - 1);
+      const prevFrom = new Date(prevTo); prevFrom.setDate(prevFrom.getDate() - (spanDays - 1));
+      const iso = (d) => d.toISOString().slice(0, 10);
+      current = snapshotRange(from, to);
+      previous = snapshotRange(iso(prevFrom), iso(prevTo));
+      periodMeta = { fromDate: from, toDate: to, label: period.label, spanDays };
+    } else {
+      // 기간칩 없음 → 오늘/어제(기존 동작).
+      const nowRow = db.prepare("SELECT DATE('now','localtime') today, DATE('now','-1 day','localtime') yesterday").get();
+      current = snapshot(nowRow.today);
+      previous = snapshot(nowRow.yesterday);
+      periodMeta = { fromDate: nowRow.today, toDate: nowRow.today, label: 'today', spanDays: 1 };
+    }
     const delta = {
-      totalActs: today.totalActs - yesterday.totalActs,
-      uniqueUsers: today.uniqueUsers - yesterday.uniqueUsers,
-      durationMin: today.durationMin - yesterday.durationMin
+      totalActs: current.totalActs - previous.totalActs,
+      uniqueUsers: current.uniqueUsers - previous.uniqueUsers,
+      durationMin: current.durationMin - previous.durationMin
     };
 
-    res.json({ success:true, scope: sf.scope, today, yesterday, delta });
+    // 하위호환: today/yesterday 키 유지(FE 가 아직 참조). current/previous 는 기간 인지 신규 키.
+    res.json({
+      success:true, scope: sf.scope,
+      periodAware: hasPeriodParam, period: periodMeta,
+      today: current, yesterday: previous,
+      current, previous, delta
+    });
   } catch (err) {
     console.error('[LRS] /stats/daily-snapshot error:', err);
     res.status(500).json({ success:false, message:'서버 오류가 발생했습니다.' });

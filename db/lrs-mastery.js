@@ -208,9 +208,31 @@ const _stuStmt = db.prepare(`
   ORDER BY attempt_count DESC
 `);
 
+// 기간 스코프 재계산용: learning_logs 에서 (기간 내) 성취기준별 시도/정답/평균 집계.
+//   평가신호(result_score 또는 result_success 비-NULL) 있는 로그만 시도로 셈(도달률 역효과 방지 —
+//   log-helper 의 실시간 집계 규칙과 동일). cumulative 테이블(lrs_achievement_stats)과 컬럼 계약 일치.
+const _stuRangeStmt = db.prepare(`
+  SELECT achievement_code AS code, MAX(subject_code) AS subject_code,
+         COUNT(*) AS attempts,
+         SUM(CASE WHEN result_success = 1 THEN 1 ELSE 0 END) AS correct,
+         AVG(result_score) AS avg_score,
+         MAX(created_at) AS lastAt
+  FROM learning_logs
+  WHERE user_id = ? AND achievement_code IS NOT NULL AND achievement_code <> ''
+    AND (result_score IS NOT NULL OR result_success IS NOT NULL)
+    AND DATE(created_at) >= ? AND DATE(created_at) <= ?
+  GROUP BY achievement_code
+  ORDER BY attempts DESC
+`);
+
 function getStudentMastery(userId, opts = {}) {
   const subjectFilter = opts.subjectCode || null;
-  const rows = _stuStmt.all(userId);
+  // 기간 스코프(감사 §2): fromDate~toDate 가 주어지면 그 기간 learning_logs 로 재계산(누적 대신).
+  //   미지정이면 기존대로 lrs_achievement_stats 누적(전기간) 사용.
+  const scoped = opts.fromDate && opts.toDate;
+  const rows = scoped
+    ? _stuRangeStmt.all(userId, opts.fromDate, opts.toDate)
+    : _stuStmt.all(userId);
   const standards = [];
   const distribution = {
     [STATUS.REACHED]: 0, [STATUS.PARTIAL]: 0, [STATUS.NOT_REACHED]: 0, [STATUS.INSUFFICIENT]: 0, total: 0,
@@ -288,6 +310,9 @@ function getStudentMastery(userId, opts = {}) {
 
   return {
     userId: Number(userId),
+    // 집계 기준: scoped=true 면 기간 스코프(기간칩 반영), false 면 전기간 누적.
+    scoped: !!scoped,
+    period: scoped ? { fromDate: opts.fromDate, toDate: opts.toDate } : null,
     counts: {
       total: distribution.total,
       reached: distribution[STATUS.REACHED],

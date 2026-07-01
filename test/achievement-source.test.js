@@ -260,23 +260,32 @@ test('갭 A: 매핑된 오늘의 학습 item 완료 → daily_complete 로그에
     VALUES (?, ?, ?, 'in_progress', CURRENT_TIMESTAMP)
   `).run(userId, itemId, setId);
 
-  const res = selfLearn.completeDailyItem(itemId, userId, { score: 100, timeSpent: 30 });
+  // ★ 평가신호(정오답) 있는 완료로 시드 — 문항 채점 결과를 함께 전달한다.
+  //   (LRS 학생 전수감사 §1 fix 이후 정책: score-only 라도 content_type=document/video 등
+  //    NON_SCORED 는 점수가 null 화되어 mastery 시도로 안 잡힌다. 히트맵 실시간 반영을 검증하려면
+  //    평가신호가 있는 완료여야 한다 — correctCount/totalQuestions 는 문항형 정답 신호로 항상 유효.)
+  const before = (db.prepare(
+    'SELECT attempt_count FROM lrs_achievement_stats WHERE user_id = ? AND achievement_code = ?'
+  ).get(userId, expected) || { attempt_count: 0 }).attempt_count;
+  const res = selfLearn.completeDailyItem(itemId, userId, { score: 100, correctCount: 5, totalQuestions: 5, timeSpent: 30 });
   assert.ok(res && res.success && !res.alreadyCompleted, '최초 완료 처리 성공');
 
   const log = db.prepare(
-    "SELECT achievement_code, subject_code FROM learning_logs WHERE user_id = ? AND activity_type = 'daily_complete' AND target_id = ? ORDER BY id DESC LIMIT 1"
+    "SELECT achievement_code, subject_code, result_success FROM learning_logs WHERE user_id = ? AND activity_type = 'daily_complete' AND target_id = ? ORDER BY id DESC LIMIT 1"
   ).get(userId, String(itemId));
   assert.ok(log, 'daily_complete 로그 존재');
   assert.ok(log.achievement_code, 'achievement_code 가 NULL 이 아니어야 (갭 A)');
   assert.equal(log.achievement_code, expected, 'item content 기준 코드와 동일해야');
   assert.ok(/^\[.*\]$/.test(log.achievement_code), `괄호형이어야 (got ${log.achievement_code})`);
   assert.ok(log.subject_code, 'subject_code 도 해석돼 채워져야');
+  // 정답 완료 → result_success 채워짐(NULL 아님, §1 근본 fix)
+  assert.equal(log.result_success, 1, '만점(5/5) 완료는 result_success=1 (NULL 아님)');
 
-  // realtime 으로 lrs_achievement_stats 에 해당 기준 행/attempt 반영
+  // realtime 으로 lrs_achievement_stats 에 해당 기준 행/attempt 반영(평가신호 있는 완료만)
   const stat = db.prepare(
     'SELECT attempt_count FROM lrs_achievement_stats WHERE user_id = ? AND achievement_code = ?'
   ).get(userId, expected);
-  assert.ok(stat && stat.attempt_count >= 1, '오늘의 학습 완료가 히트맵 집계에 실시간 반영돼야');
+  assert.ok(stat && stat.attempt_count >= before + 1, '평가신호 있는 오늘의 학습 완료가 히트맵 집계에 실시간 반영돼야');
 
   // 정리
   db.prepare('DELETE FROM daily_learning_progress WHERE item_id = ?').run(itemId);

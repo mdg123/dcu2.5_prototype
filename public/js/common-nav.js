@@ -116,8 +116,9 @@
       sub: [
         { label: '🏫 학교 관리자 대시보드', url: '/school/', roles: ['principal'] },
         { label: '🏠 홈',        url: '/lrs/index.html?menu=home',       roles: ['student','teacher','admin'] },
-        { label: '현황 분석',    url: '/lrs/index.html?menu=analytics',  roles: ['student','teacher','admin'] },
-        { label: '학습 활동',    url: '/lrs/index.html?menu=activities', roles: ['student','teacher'] },
+        // 학생만 성취수준/학습활동 분석으로 명명(이름→내용 예측). 교사·관리자는 기존 유지.
+        { label: '현황 분석',    labelByRole: { student:'성취수준 분석' }, url: '/lrs/index.html?menu=analytics',  roles: ['student','teacher','admin'] },
+        { label: '학습 활동',    labelByRole: { student:'학습활동 분석' }, url: '/lrs/index.html?menu=activities', roles: ['student','teacher'] },
         { label: '운영',         url: '/lrs/index.html?menu=operations', roles: ['teacher','admin'] },
         { label: '리포트',       url: '/lrs/index.html?menu=reports',    roles: ['admin'] }
       ]
@@ -270,7 +271,7 @@
         a.href = sub.url;
         a.className = 'gnb-nav2-item';
         if (sub.url === activeSubUrl) a.classList.add('active');
-        a.textContent = sub.label;
+        a.textContent = (sub.labelByRole && sub.labelByRole[user.role]) || sub.label;
         nav2.appendChild(a);
       });
 

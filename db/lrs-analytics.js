@@ -188,10 +188,17 @@ function computeTrend({ userId, classId, userIds, code = null, weeks = DEFAULT_W
 // ─────────────────────────────────────────────────────────────────────────────
 function projectReach(trend, { target = 80 } = {}) {
   if (!trend || trend.status !== 'ok' || trend.currentRate == null) {
+    // 문구 정직성(감사 §3·§7): insufficient 는 "덜 풀어서"가 아니라 "관측 주차(시간)가 3주 미만"이라
+    //   추세선을 아직 못 그리는 상태다. currentRate 는 이미 있는데 "더 풀면"이라 하면 오해를 준다.
+    //   → 시간(주차) 어휘로 교정. 현재 도달률이 있으면 그 값을 함께 안내.
+    const nW = trend && trend.observedWeeks != null ? trend.observedWeeks : 0;
+    const rateHint = (trend && trend.currentRate != null)
+      ? ` 지금 도달률은 약 ${Math.round(trend.currentRate)}%예요.` : '';
     return {
       status: 'insufficient',
       reachable: null, weeksToReach: null,
-      message: '아직 추세를 볼 데이터가 부족해요. 더 풀면 표시됩니다.',
+      observedWeeks: nW,
+      message: `아직 3주치 학습 기록이 안 모여서 추세선을 그릴 수 없어요(현재 ${nW}주).${rateHint} 시간이 지나면 표시돼요.`,
       confidence: CONFIDENCE.LOW, confidenceKo: CONFIDENCE_KO.low,
     };
   }

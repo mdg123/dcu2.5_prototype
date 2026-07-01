@@ -137,7 +137,10 @@ test('PROJ-3: 데이터 부족(trend insufficient) → status=insufficient 친�
   const p = analytics.projectReach({ status: 'insufficient' }, { target: 80 });
   assert.equal(p.status, 'insufficient');
   assert.equal(p.reachable, null);
-  assert.match(p.message, /부족/);
+  // 문구 정직성(감사 §7): "덜 풀어서"가 아니라 "관측 주차(시간) 부족"임을 알리는 어휘.
+  //   → "더 풀면" 금지, "주(週)/시간/기록" 어휘 사용.
+  assert.doesNotMatch(p.message, /더 풀면/, 'insufficient 는 양(量) 문제가 아니므로 "더 풀면" 금지');
+  assert.match(p.message, /주|시간|기록/, '시간(주차) 어휘로 안내해야');
 });
 
 test('PROJ-4: 이미 도달(r0>=target) → reachable=true, weeks=0', () => {

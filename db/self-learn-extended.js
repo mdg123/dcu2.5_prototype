@@ -288,10 +288,37 @@ function completeDailyItem(itemId, userId, { score, timeSpent, answers, correctC
     }
   } catch (_) { /* graceful — 해석 실패는 완료 흐름에 영향 없음 */ }
 
+  // ── 성취 반영 근본 fix (LRS 학생 전수감사 §1) ──
+  //   이전: resultSuccess 미전달 → 항상 NULL → ① computeTrend 시계열에서 배제,
+  //         ② lrs_achievement_stats 에 '0정답'으로 누적돼 도달률 역효과, ③ 성장목표·포트폴리오 미반영.
+  //   수정: 완료의 정답/점수로 resultSuccess 를 올바로 산출한다.
+  //     · 평가형(문항: correctCount/totalQuestions 또는 점수 존재) → 정답률 ≥ PASS_THRESHOLD 면 success=1, 아니면 0.
+  //     · 시청/이수형(점수 없음: safeScore=null & 문항수 없음) → success=null 유지(평가대상 아님).
+  //       (log-helper 가 평가신호 없는 건을 mastery 시도에서 제외 → 도달률 깎지 않음.)
+  //   resultScore 는 xAPI 관례대로 0~1 scaled 로 저장(집계 NORM_SCORE 가 ×100 정규화).
+  const PASS_THRESHOLD = 0.6;
+  let dailyResultSuccess = null;
+  let dailyScoreScaled = null;
+  const hasQuestionCount = (correctCount != null && totalQuestions != null && Number(totalQuestions) > 0);
+  if (hasQuestionCount) {
+    const ratio = Number(correctCount) / Number(totalQuestions);
+    dailyResultSuccess = ratio >= PASS_THRESHOLD ? 1 : 0;
+    dailyScoreScaled = Math.max(0, Math.min(1, ratio));
+  } else if (safeScore != null) {
+    // 점수만 있는 평가형: 0~100 을 0~1 로 정규화(이미 ≤1 이면 그대로).
+    const scaled = Number(safeScore) > 1 ? Number(safeScore) / 100 : Number(safeScore);
+    dailyScoreScaled = Math.max(0, Math.min(1, scaled));
+    dailyResultSuccess = dailyScoreScaled >= PASS_THRESHOLD ? 1 : 0;
+  }
+  // else: 시청/이수형 — success/score 모두 null(평가대상 아님, 활동으로만 집계)
+
   logLearningActivity({
     userId, activityType: 'daily_complete', targetType: 'daily_learning',
     targetId: itemId, verb: 'completed', sourceService: 'self-learn',
-    resultScore: safeScore ? safeScore / 100 : null,
+    resultScore: dailyScoreScaled,
+    resultSuccess: dailyResultSuccess,
+    correctCount: hasQuestionCount ? Number(correctCount) : null,
+    totalItems: hasQuestionCount ? Number(totalQuestions) : null,
     achievementCode: dailyAchievementCode || null,
     subjectCode: dailySubjectCode || null
   });

@@ -448,3 +448,133 @@ test.describe('스모크: LRS A6 감정-성취 비교', () => {
     });
   }
 });
+
+// ── 5) LRS 학생 홈·메뉴 재설계 불변식 (스펙 E: INV-a ~ INV-e + INV-f 약점 라벨) ──
+//    스펙: 작업지시서/LRS_학생_홈_메뉴_재설계_스펙.md §E
+//    사람 눈 대신 매번 전수 검증할 객관 규칙. 학생 홈(s-home) 실렌더 기준.
+//
+//    INV-a: LRS 점수 표시 0~100 일관 (0~1 스케일 혼입 금지)
+//    INV-b: 학생 화면에 "활성 사용자" 등 집계형 무의미 지표 미노출
+//    INV-e: 학생 홈 KPI/스냅샷 라벨·증감 ≥ 14px, 값 ≥ 24px
+//    INV-f: 약점 차트/카드 라벨이 raw 성취기준 코드([N수..]) 형태가 아니라 한글 단원명
+//    (INV-c 도넛 오버레이·INV-d 표 정렬은 s-achieve/표 렌더 뷰 별도 — 여기선 홈 4종 집중)
+async function gotoStudentHome(page) {
+  await page.goto('/lrs/index.html#s-home', { waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('#dacheum-gnb-wrapper', { timeout: 10000 }).catch(() => {});
+  // 홈 스냅샷/KPI 렌더 대기 (SPA 비동기)
+  await page.waitForFunction(() => {
+    const vr = document.getElementById('viewRoot');
+    return !!(vr && vr.querySelector('.dc-snapshot .dc-kpi-card'));
+  }, { timeout: 15000 }).catch(() => {});
+  await page.waitForTimeout(500);
+}
+
+test.describe('스모크: LRS 학생 홈·메뉴 재설계 불변식(INV-a~f)', () => {
+  test('INV-e: 학생 홈 KPI/스냅샷 폰트 라벨·증감≥14px, 값≥24px', async ({ browser }) => {
+    const context = await browser.newContext({ storageState: stateFor('student'), locale: 'ko-KR', baseURL: BASE_URL });
+    try {
+      const page = await context.newPage();
+      page.setViewportSize({ width: 1440, height: 900 });
+      await gotoStudentHome(page);
+      const fonts = await page.evaluate(() => {
+        const px = el => el ? parseFloat(getComputedStyle(el).fontSize) : null;
+        const cards = [...document.querySelectorAll('#viewRoot .dc-kpi-card')];
+        return cards.map(c => ({
+          label: c.querySelector('.kpi-label')?.textContent || '',
+          labelPx: px(c.querySelector('.kpi-label')),
+          valuePx: px(c.querySelector('.kpi-value')),
+          trendPx: px(c.querySelector('.kpi-trend')),
+        }));
+      });
+      expect.soft(fonts.length, 'INV-e: 학생 홈 KPI 카드가 없음').toBeGreaterThan(0);
+      for (const f of fonts) {
+        expect.soft(f.labelPx, `INV-e: "${f.label}" 라벨 ${f.labelPx}px < 14`).toBeGreaterThanOrEqual(14);
+        expect.soft(f.trendPx, `INV-e: "${f.label}" 증감 ${f.trendPx}px < 14`).toBeGreaterThanOrEqual(14);
+        expect.soft(f.valuePx, `INV-e: "${f.label}" 값 ${f.valuePx}px < 24`).toBeGreaterThanOrEqual(24);
+      }
+      await page.close();
+    } finally { await context.close(); }
+  });
+
+  test('INV-b: 학생 홈에 "활성 사용자" 등 무의미 집계 지표 미노출', async ({ browser }) => {
+    const context = await browser.newContext({ storageState: stateFor('student'), locale: 'ko-KR', baseURL: BASE_URL });
+    try {
+      const page = await context.newPage();
+      page.setViewportSize({ width: 1440, height: 900 });
+      await gotoStudentHome(page);
+      const found = await page.evaluate(() => {
+        const t = document.getElementById('viewRoot')?.innerText || '';
+        return { hasActiveUsers: t.includes('활성 사용자'), hasUniqueUsers: t.includes('고유 사용자') || t.includes('고유사용자') };
+      });
+      expect.soft(found.hasActiveUsers, 'INV-b: 학생 홈에 "활성 사용자" 노출됨').toBeFalsy();
+      expect.soft(found.hasUniqueUsers, 'INV-b: 학생 홈에 "고유 사용자" 노출됨').toBeFalsy();
+    } finally { await context.close(); }
+  });
+
+  test('INV-a: 학생 홈 점수/정답률/성취 표시가 0~100 범위(0~1 혼입 금지)', async ({ browser }) => {
+    const context = await browser.newContext({ storageState: stateFor('student'), locale: 'ko-KR', baseURL: BASE_URL });
+    try {
+      const page = await context.newPage();
+      page.setViewportSize({ width: 1440, height: 900 });
+      await gotoStudentHome(page);
+      const bad = await page.evaluate(() => {
+        const t = document.getElementById('viewRoot')?.innerText || '';
+        const out = [];
+        const re = /(\d+(?:\.\d+)?)\s*(점|%)/g; let m;
+        while ((m = re.exec(t))) {
+          const v = parseFloat(m[1]);
+          // 0~1 스케일 혼입 신호: 소수점이 있고 값이 1 이하 (예: 0.57점/0.9%), 또는 100 초과
+          if (v > 100 || (m[1].includes('.') && v > 0 && v <= 1)) out.push(m[0]);
+        }
+        return out;
+      });
+      expect.soft(bad.length, `INV-a: 0~100 벗어난 점/% 표시: ${JSON.stringify(bad)}`).toBe(0);
+    } finally { await context.close(); }
+  });
+
+  test('INV-f: 약점 차트/카드 라벨이 raw 코드가 아닌 한글 단원명', async ({ browser }) => {
+    const context = await browser.newContext({ storageState: stateFor('student'), locale: 'ko-KR', baseURL: BASE_URL });
+    try {
+      const page = await context.newPage();
+      page.setViewportSize({ width: 1440, height: 900 });
+      await gotoStudentHome(page);
+      const res = await page.evaluate(() => {
+        const titles = [...document.querySelectorAll('#sWeakCards .dc-warning-card h3')].map(h => (h.textContent || '').trim());
+        // raw 코드 형태([4수01-02] / 4수01-02)만으로 된 제목 검출
+        const rawCodeOnly = titles.filter(x => /^\[?\S*\d+-\d+\]?$/.test(x) && !/[가-힣]/.test(x.replace(/[\[\]\d수국영과사-]/g, '')));
+        // 한글이 하나도 안 들어간 제목(=코드로 추정)
+        const noHangul = titles.filter(x => x && !/[가-힣]/.test(x));
+        return { count: titles.length, titles, rawCodeOnly, noHangul };
+      });
+      if (res.count > 0) {
+        expect.soft(res.noHangul.length, `INV-f: 약점 카드 제목에 한글 단원명 없음(코드 추정): ${JSON.stringify(res.noHangul)}`).toBe(0);
+      }
+    } finally { await context.close(); }
+  });
+
+  test('메뉴: 학생 s-xapi(표준체계 분석) 메뉴 탭 미노출 + 딥링크는 라우팅', async ({ browser }) => {
+    const context = await browser.newContext({ storageState: stateFor('student'), locale: 'ko-KR', baseURL: BASE_URL });
+    try {
+      const page = await context.newPage();
+      page.setViewportSize({ width: 1440, height: 900 });
+      await page.goto('/lrs/index.html?menu=analytics', { waitUntil: 'domcontentloaded' });
+      await page.waitForSelector('#dacheum-gnb-wrapper', { timeout: 10000 }).catch(() => {});
+      await page.waitForSelector('#lrsTabs .lrs-tab', { timeout: 15000 }).catch(() => {});
+      await page.waitForTimeout(400);
+      const tabLabels = await page.evaluate(() => [...document.querySelectorAll('#lrsTabs .lrs-tab')].map(t => t.textContent.trim()));
+      expect.soft(tabLabels.some(l => l.includes('표준체계')), `메뉴: 학생 탭에 표준체계 분석 노출됨 (${JSON.stringify(tabLabels)})`).toBeFalsy();
+      expect.soft(tabLabels.includes('내 성취 분석') && tabLabels.includes('또래 비교'), `메뉴: 성취수준 분석 탭 구성 이상 (${JSON.stringify(tabLabels)})`).toBeTruthy();
+
+      // 딥링크 #s-xapi 는 여전히 라우팅(404/준비중 아님)
+      await page.evaluate(() => { location.hash = '#s-xapi'; });
+      await page.waitForTimeout(1200);
+      const routed = await page.evaluate(() => {
+        const t = document.getElementById('viewRoot')?.innerText || '';
+        return { is404: /준비 중인 화면/.test(t), hasContent: t.length > 50 };
+      });
+      expect.soft(routed.is404, '메뉴: s-xapi 딥링크가 404("준비 중")로 떨어짐').toBeFalsy();
+      expect.soft(routed.hasContent, 's-xapi 딥링크 본문 미렌더').toBeTruthy();
+      await page.close();
+    } finally { await context.close(); }
+  });
+});

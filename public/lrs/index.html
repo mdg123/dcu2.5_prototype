@@ -544,7 +544,7 @@
           </div>
           <p class="page-header__subtitle">나의 학습 활동 데이터를 한눈에 분석하세요.</p>
           <div class="breadcrumb" aria-label="현재 위치" style="font-size:13px;color:#6B7280;margin:8px 0 0 40px;">
-            LRS &rsaquo; <span id="bcRole">—</span> &rsaquo; <span id="bcMenu">—</span> &rsaquo; <strong id="bcPage">—</strong>
+            LRS &rsaquo; <span id="bcRole">—</span> <span id="bcMenuSeg">&rsaquo; <span id="bcMenu">—</span> </span>&rsaquo; <strong id="bcPage">—</strong>
           </div>
         </div>
         <div class="page-header__actions">
@@ -671,6 +671,31 @@ function fmtDate(s){
   const m = str.match(/\d{4}-(\d{2}-\d{2})/);
   return m ? m[1] : str;
 }
+/* 풀 날짜(YYYY-MM-DD) — 타임스탬프에서 날짜부만 추출(시:분:초 제거). s-custom 최근 학습일 등. */
+function fmtFullDate(s){
+  if (!s) return '-';
+  const m = String(s).match(/\d{4}-\d{2}-\d{2}/);
+  return m ? m[0] : String(s);
+}
+/* 현재 기간칩(state.period)을 학생 친화 한국어 라벨로. custom이면 from~to. */
+function periodLabelKo(){
+  if (state.period === 'custom'){
+    if (state.from && state.to) return `${fmtFullDate(state.from)} ~ ${fmtFullDate(state.to)}`;
+    return '사용자 지정 기간';
+  }
+  const n = String(state.period||'').replace('d','');
+  return n ? `최근 ${n}일` : '선택 기간';
+}
+/* 현재 기간칩을 일수(days)로 — ?days= 계약 엔드포인트(emotion-mirror 등)에 전달용. custom은 from~to 폭. */
+function periodDays(){
+  if (state.period === 'custom' && state.from && state.to){
+    const a = new Date(state.from), b = new Date(state.to);
+    const diff = Math.round((b - a) / 86400000);
+    return (isFinite(diff) && diff > 0) ? diff + 1 : 30;
+  }
+  const n = parseInt(String(state.period||'').replace('d',''), 10);
+  return isFinite(n) && n > 0 ? n : 30;
+}
 
 /* ---- 교사 class_id 해석 (fallback 1) ---- */
 async function resolveClassId(){
@@ -706,15 +731,17 @@ const ROLE_CATEGORIES = {
 
 /* ---- 메뉴 정의 (역할별, category 필드 부여) ---- */
 const MENUS = {
+  // 학생: 스펙 B(LRS_학생_홈_메뉴_재설계_스펙) — category=성취수준 분석(analytics)/학습활동 분석(activities),
+  //       뷰 label 재명명(id 불변), s-xapi 는 학생 메뉴 숨김(hidden, id·라우팅은 유지)
   student: [
     { id:'s-home',       label:'홈',              icon:'fa-house',         group:'나의 학습',  category:'home' },
-    { id:'s-achieve',    label:'내 성취 분석',     icon:'fa-award',         group:'분석',       category:'analytics' },
-    { id:'s-trend',      label:'학습 습관',       icon:'fa-chart-line',    group:'분석',       category:'analytics' },
-    { id:'s-compare',    label:'비교',            icon:'fa-people-group',  group:'분석',       category:'analytics' },
-    { id:'s-xapi',       label:'표준체계 분석',    icon:'fa-diagram-project',group:'분석',      category:'analytics' },
-    { id:'s-perform',    label:'학습 활동 수행',  icon:'fa-tasks',         group:'학습 활동',  category:'activities' },
-    { id:'s-custom',     label:'맞춤학습',        icon:'fa-compass',       group:'학습 활동',  category:'activities' },
-    { id:'s-daily',      label:'일일현황',        icon:'fa-calendar-day',  group:'분석',       category:'analytics' },
+    { id:'s-achieve',    label:'내 성취 분석',     icon:'fa-award',         group:'성취수준 분석', category:'analytics' },
+    { id:'s-compare',    label:'또래 비교',        icon:'fa-people-group',  group:'성취수준 분석', category:'analytics' },
+    { id:'s-perform',    label:'활동 유형별 수행', icon:'fa-tasks',         group:'학습활동 분석', category:'activities' },
+    { id:'s-daily',      label:'오늘 활동 요약',   icon:'fa-calendar-day',  group:'학습활동 분석', category:'activities' },
+    { id:'s-trend',      label:'학습 습관·추이',   icon:'fa-chart-line',    group:'학습활동 분석', category:'activities' },
+    { id:'s-custom',     label:'맞춤학습(AI 추천)', icon:'fa-compass',       group:'학습활동 분석', category:'activities' },
+    { id:'s-xapi',       label:'표준체계 분석',    icon:'fa-diagram-project',group:'분석',      category:'analytics', hidden:true },
   ],
   teacher: [
     { id:'t-home',       label:'홈',              icon:'fa-gauge',                 group:'우리반',        category:'home' },
@@ -746,7 +773,8 @@ const MENUS = {
 /* ---- 카테고리 → 기본 뷰 (role별 첫 항목) ---- */
 function defaultViewForCategory(role, cat){
   const items = MENUS[role] || [];
-  const found = items.find(it => it.category === cat);
+  // 숨김(hidden) 항목은 카테고리 기본 랜딩 뷰로 선택하지 않음 (s-xapi 등)
+  const found = items.find(it => it.category === cat && !it.hidden);
   return found ? found.id : null;
 }
 
@@ -758,9 +786,21 @@ function categoryForView(role, viewId){
 }
 
 /* ---- 상단 2차메뉴 라벨 (브레드크럼 & 배너용) ---- */
+/* 기본(교사·관리자): 기존 라벨 유지(파괴 금지). key(analytics/activities)는 불변. */
 const MENU_LABELS = {
   home:'홈', analytics:'현황 분석', activities:'학습 활동', operations:'운영', reports:'리포트'
 };
+/* 학생 전용 카테고리 라벨 오버라이드 (스펙 B-1: 질 vs 양 대비).
+   key는 그대로 두고 label 문자열만 학생 role 에서 분기. */
+const MENU_LABELS_STUDENT = {
+  home:'홈', analytics:'성취수준 분석', activities:'학습활동 분석', operations:'운영', reports:'리포트'
+};
+/* role 분기 카테고리 라벨 조회 헬퍼 — 학생만 오버라이드, 나머지는 기존 유지 */
+function menuLabel(cat, role){
+  const r = role || state.role;
+  if (r === 'student' && MENU_LABELS_STUDENT[cat]) return MENU_LABELS_STUDENT[cat];
+  return MENU_LABELS[cat] || cat;
+}
 
 /* ---- common-nav ?menu=<category> → 역할별 카테고리 기본 뷰 매핑 ---- */
 const MENU_TO_VIEW = {
@@ -1618,10 +1658,29 @@ function _renderCustomCore(root, d, opts){
   } else {
     renderDataTable(document.getElementById('customWeak'), {
       columns:[
-        {key:'achievement_code',label:'성취기준'},
+        // 1차 표기는 단원명(label). 코드는 회색 소자로만 부기(툴팁 title). BE가 label 미제공 시 code 폴백.
+        {key:'label',label:'단원',
+          format:(v,row)=>{
+            const code = row.achievement_code || '';
+            const hasName = v && String(v).trim() && String(v).trim() !== code;   // BE label 있을 때만
+            const name = hasName ? String(v).trim() : (code || '성취기준');
+            // 코드 소자는 단원명이 별도로 있을 때만 부기(이름이 곧 코드면 중복 노출 방지).
+            const codeSub = (hasName && code)
+              ? `<span style="display:block;margin-top:2px;font-size:12px;color:var(--gray-400);" title="${escapeAttr(code)}">${escapeHtml(code)}</span>`
+              : '';
+            return `<span style="font-weight:600;">${escapeHtml(name)}</span>${codeSub}`;
+          }},
         {key:'attempts',label:'시도',align:'right'},
-        {key:'avg_score',label:'평균점수',align:'right', format:(v)=>v==null?'-':String(v)},
-        {key:'last_at',label:'최근 학습일'}
+        // 평균점수: BE가 0~100으로 정규화(계약). 방어적 폴백 — 값이 0<v≤1로 오면(구 0~1 원점수) ×100.
+        //   >1이면 그대로 통과(BE 정규화 후 재변환 방지, 멱등). null은 '-'.
+        {key:'avg_score',label:'평균점수',align:'right', format:(v)=>{
+          if (v==null) return '-';
+          let n = Number(v); if (!isFinite(n)) return '-';
+          if (n > 0 && n <= 1) n = n * 100;
+          return (Math.round(n*10)/10) + '점';
+        }},
+        // 풀 타임스탬프 → 날짜(YYYY-MM-DD)만.
+        {key:'last_at',label:'최근 학습일', format:(v)=>escapeHtml(fmtFullDate(v))}
       ],
       rows: weak
     });
@@ -1947,6 +2006,13 @@ function _dailyHourChart(canvasId, today, yesterday){
 }
 function _deltaTrend(curr, prev){
   const diff = (curr||0) - (prev||0);
+  // 부류 G(부정 프레이밍) 교정: 학생 뷰에서는 감소를 빨강 ▼로 겁주지 않는다.
+  //   감소/동일도 dir을 'flat'(중립 회색·· 기호)로 두고 격려 톤 문구를 붙인다. 교사/관리자는 기존대로.
+  if (state.role === 'student'){
+    if (diff > 0)  return { dir:'up',   text:`어제보다 +${diff} — 좋아요!` };
+    if (diff < 0)  return { dir:'flat', text:`어제보다 ${diff} — 오늘 채워볼까요?` };
+    return { dir:'flat', text:'어제와 비슷해요' };
+  }
   return { dir: diff>0?'up':(diff<0?'down':'flat'), text: `어제 대비 ${diff>=0?'+':''}${diff}` };
 }
 
@@ -1959,10 +2025,17 @@ VIEWS['s-daily'] = async function(root){
   if (!(t.totalActs||y.totalActs)) {
     root.innerHTML = tplEmpty('오늘/어제 활동 기록이 없어요'); return;
   }
-  root.innerHTML = `
+  // DL1·DL4 교정: 이 화면은 '오늘 vs 어제' 고정 비교라 상단 기간칩과 무관 → 사용자에게 명시(모순 문구 제거).
+  const noteHtml = `<div class="mastery-sub" style="margin:0 0 12px;padding:10px 14px;background:var(--lrs-primary-lighter);border-radius:8px;">
+    <i class="fas fa-circle-info" aria-hidden="true" style="color:var(--lrs-primary);"></i> 이 화면은 <strong>오늘과 어제</strong>를 비교해요. (기간 선택과는 별개예요)</div>`;
+  // 오늘 학습시간 0분이면 낙담 대신 격려 CTA.
+  const timeTrend = (t.durationMin||0) === 0
+    ? { dir:'flat', text:'오늘은 아직이에요 — 지금 시작?' }
+    : _deltaTrend(t.durationMin, y.durationMin);
+  root.innerHTML = noteHtml + `
     <section class="dc-kpi-grid">
       ${kpiCard('오늘 활동', (t.totalActs||0).toLocaleString(), '건', _deltaTrend(t.totalActs, y.totalActs), 'primary')}
-      ${kpiCard('오늘 학습시간', (t.durationMin||0).toLocaleString(), '분', _deltaTrend(t.durationMin, y.durationMin), 'success')}
+      ${kpiCard('오늘 학습시간', (t.durationMin||0).toLocaleString(), '분', timeTrend, 'success')}
       ${kpiCard('어제 활동', (y.totalActs||0).toLocaleString(), '건', {dir:'flat',text:y.date||''}, 'warning')}
     </section>
     <section class="dc-chart-grid">
@@ -2058,7 +2131,10 @@ VIEWS['s-home'] = async function(root){
   const avgScore = Math.round(Number(snap.weeklyScoreAvg || 0) * 10) / 10;
   const streakDays = snap.streakDays || 0;
   const doneTasks = dashStats.totalActivities || 0;
-  const summary = { total_minutes: totalMinutes, done_tasks: doneTasks, avg_score: avgScore, streak_days: streakDays };
+  // 기간 내 "학습한 날"(활동일 수) = 일별 데이터에서 활동 1건↑ 있던 날 수.
+  // 연속 학습(스트릭)은 오늘 스냅샷으로 이동 → 기간 카드는 중복 제거하고 활동일로 교체(스펙 A-2·P2).
+  const activeDays = ((daily && daily.data) || []).filter(d => (Number(d.count)||0) > 0).length;
+  const summary = { total_minutes: totalMinutes, done_tasks: doneTasks, avg_score: avgScore, streak_days: streakDays, active_days: activeDays };
 
   // 관리자 계정이 학생 뷰 (scope=mine) 로 볼 때 전부 0이면 안내
   const allZero = !totalMinutes && !doneTasks && !avgScore && !streakDays;
@@ -2076,16 +2152,16 @@ VIEWS['s-home'] = async function(root){
       ${kpiCard('완료 과제',         (summary.done_tasks||0).toLocaleString(), '건', {dir:'flat', text:'이번 기간'}, 'success',
         '<div id="sHomeSpark" class="kpi-spark"></div>')}
       ${kpiCard('평균 성취',          (summary.avg_score||0),                   '점', {dir:'up',   text:'지난 기간 대비'}, 'primary')}
-      ${kpiCard('연속 학습',          (summary.streak_days||0),                 '일', {dir:'flat', text:'현재'},            'warning')}
+      ${kpiCard('학습한 날',          (summary.active_days||0),                 '일', {dir:'flat', text:'이번 기간 활동일'}, 'warning')}
     </div>`;
 
   const chartsHtml = `
     <div class="grid-2">
       ${chartWrap('sHomeDaily',  '일별 학습시간 추이', '최근 기간', null)}
-      ${chartWrap('sHomeWeak',   '내 약점 성취기준 Top 5', '정답률 낮은 순', '약점 카드를 눌러 스스로채움 추천 콘텐츠로 이동합니다')}
+      ${chartWrap('sHomeWeak',   '더 연습하면 좋은 단원 Top 5', '많이 시도했는데 아직 헷갈리는 순', '단원 카드를 눌러 스스로채움 추천 콘텐츠로 이동합니다')}
     </div>
-    <section class="dc-chart-wrapper" aria-label="약점 카드 리스트">
-      <header><h2>약점 영역 & 추천 액션</h2></header>
+    <section class="dc-chart-wrapper" aria-label="더 연습하면 좋은 단원 카드 리스트">
+      <header><h2>더 연습하면 좋은 단원 &amp; 추천 학습</h2></header>
       <div id="sWeakCards"></div>
     </section>`;
 
@@ -2129,26 +2205,39 @@ VIEWS['s-home'] = async function(root){
       `<header><h2>일별 학습시간 추이</h2></header>` + tplEmpty('선택한 기간의 데이터가 없어요');
   }
 
-  // 약점 차트 (weaknesses:[{achievement_code, attempt_count, success_count, avg_score, last_level}])
+  // 약점 차트 (weaknesses:[{achievement_code, label, fullLabel, subject_label, attempt_count, success_count, avg_score, last_level}])
+  //   Y축·카드 제목 = 학생 친화 단원명(w.label). 코드는 카드 하단 회색 소자·차트 툴팁으로 부기.
   if (weakList.length) {
+    const top5 = weakList.slice(0,5);
+    // 이름 폴백(라벨 없으면 코드) + Y축용 축약(14자+…)
+    const nameOf = w => (w.label && String(w.label).trim()) || w.achievement_code || '성취기준';
+    const clampY = s => { const t = String(s||''); return t.length > 14 ? t.slice(0,14)+'…' : t; };
     mkChart(document.getElementById('sHomeWeak'), 'bar', {
-      labels: weakList.slice(0,5).map(w=>w.achievement_code||'-'),
+      labels: top5.map(w => clampY(nameOf(w))),
       datasets:[{
         label:'시도 횟수',
-        data: weakList.slice(0,5).map(w => Number(w.attempt_count)||0),
+        data: top5.map(w => Number(w.attempt_count)||0),
         backgroundColor:'var(--chart-4)'
       }]
-    }, { indexAxis:'y', scales:{ x:{ beginAtZero:true } } });
+    }, { indexAxis:'y', scales:{ x:{ beginAtZero:true, title:{ display:true, text:'시도 횟수(회)' } } },
+      plugins:{ tooltip:{ callbacks:{
+        title:(items)=>{ const w = top5[items[0].dataIndex]; return nameOf(w); },
+        afterTitle:(items)=>{ const w = top5[items[0].dataIndex]; return w.achievement_code ? String(w.achievement_code) : ''; },
+        label:(item)=>{ const w = top5[item.dataIndex]; const acc = (w.avg_score!=null)?` · 정답률 ${Math.round(w.avg_score)}%`:''; return `시도 ${w.attempt_count||0}회${acc}`; }
+      } } } });
 
-    // 약점 카드 → self-learn 딥링크
-    document.getElementById('sWeakCards').innerHTML = weakList.slice(0,5).map(w=>{
+    // 약점 카드 → self-learn 딥링크. 제목=단원명(이름), 코드는 회색 소자로 부기.
+    document.getElementById('sWeakCards').innerHTML = top5.map(w=>{
       const code = w.achievement_code||'';
-      const accuracy = (w.avg_score != null ? w.avg_score : (w.last_level||'미도달'));
+      const name = nameOf(w);
+      const subj = w.subject_label ? `${escapeHtml(w.subject_label)} · ` : '';
+      const accuracy = (w.avg_score != null) ? `정답률 ${Math.round(w.avg_score)}%` : (w.last_level ? escapeHtml(w.last_level) : '아직 정답률 집계 전');
       const attempts = w.attempt_count || '-';
       const href = '/self-learn/?achievement_code=' + encodeURIComponent(code);
       return `<div class="dc-warning-card" data-severity="medium">
-        <h3>${escapeHtml(code||'성취기준')}</h3>
-        <p>평균 ${escapeHtml(accuracy)} · 시도 ${escapeHtml(attempts)}회</p>
+        <h3>${escapeHtml(name)}</h3>
+        <p>${subj}${accuracy} · 시도 ${escapeHtml(attempts)}회
+          ${code?`<span style="display:block;margin-top:2px;font-size:13px;color:var(--gray-400);">성취기준 ${escapeHtml(code)}</span>`:''}</p>
         <div class="actions">
           <a role="button" href="${escapeAttr(href)}" class="dc-badge dc-badge--primary" style="text-decoration:none;">
             <i class="fas fa-book-open-reader"></i> 맞춤학습으로 이동
@@ -2158,11 +2247,11 @@ VIEWS['s-home'] = async function(root){
     }).join('');
   } else {
     document.getElementById('sHomeWeak').closest('.dc-chart-wrapper').innerHTML =
-      `<header><h2>내 약점 성취기준 Top 5</h2></header>` +
+      `<header><h2>더 연습하면 좋은 단원 Top 5</h2></header>` +
       tplEmpty('아직 진단 결과가 충분하지 않아요', {href:'/self-learn/', label:'스스로채움 시작하기'});
     document.getElementById('sWeakCards').innerHTML = '';
   }
-  await renderDodMini(root);
+  await renderDodMini(root, { streakDays: summary.streak_days || 0 });
 };
 
 /* =====================================================================
@@ -2230,7 +2319,7 @@ VIEWS['s-achieve'] = async function(root){
         </div></div>
         <div class="chart-body donut-wrap" style="height:300px;">
           <canvas id="sMastDonut" role="img" aria-label="성취 4상태 분포 도넛"></canvas>
-          ${donutCenterHtml('도달 ' + (counts.reached||0) + '/' + counts.total, '성취기준')}
+          ${donutCenterHtml((counts.reached||0) + ' / ' + counts.total, '단원 도달')}
         </div>
       </section>
     </div>
@@ -2285,34 +2374,76 @@ VIEWS['s-achieve'] = async function(root){
     <!-- A4: 다음 한 걸음 (선수→후속 경로) -->
     <section id="sNextStepHost"></section>`;
 
-  // ── S1 레이더 ────────────────────────────────────────────────────────
-  if (bySubject.length >= 3){
-    mkChart(document.getElementById('sMastRadar'), 'radar', {
-      labels: bySubject.map(s => s.subject || '기타'),
-      datasets: [{
-        label:'평균 정답률', data: bySubject.map(s => s.avgRate == null ? 0 : s.avgRate),
-        borderColor:'var(--lrs-primary)', backgroundColor:'rgba(37,99,235,.15)',
-        pointBackgroundColor:'var(--lrs-primary)', borderWidth:2,
-      }]
-    }, { scales:{ r:{ min:0, max:100, ticks:{ stepSize:20, font:{size:11} }, pointLabels:{ font:{size:13} } } },
-         plugins:{ legend:{ display:false } } });
-  } else if (bySubject.length){
-    // 교과 3개 미만 → 가로 Bar 폴백
-    mkChart(document.getElementById('sMastRadar'), 'bar', {
-      labels: bySubject.map(s => s.subject || '기타'),
-      datasets: [{ label:'평균 정답률', data: bySubject.map(s => s.avgRate == null ? 0 : s.avgRate),
-        backgroundColor:'var(--lrs-primary)' }]
-    }, { indexAxis:'y', scales:{ x:{ min:0, max:100 } }, plugins:{ legend:{ display:false } } });
-  } else {
-    document.getElementById('sMastRadar').closest('.chart-body').innerHTML =
-      '<div class="mastery-empty"><i class="fas fa-chart-pie me-icon"></i><p>교과별 평균을 낼 성취 데이터가 아직 부족해요.</p></div>';
+  // ── S1 레이더 (교과별 평균 성취) ─────────────────────────────────────
+  //   AC1·AC2·부류 F 교정: null(미평가) 교과를 0으로 찍어 중심으로 붕괴(스파이크)시키지 않는다.
+  //   전 교과 정본 축(국어·수학·사회·과학·영어)을 항상 표시하고, 데이터 있는 교과에만 실제 avgRate를 매핑.
+  //   미평가 교과는 null(spanGaps:false로 선을 끊음) → "0점"이 아니라 "아직 평가 전"으로 회색 축 자리표시.
+  {
+    const CORE_SUBJECTS = ['국어','수학','사회','과학','영어'];   // 초등 핵심 5교과 정본 축
+    const rateBySubj = new Map();
+    (bySubject || []).forEach(s => {
+      const name = (s.subject && String(s.subject).trim()) || '기타';
+      // 미평가 판정: evaluatedCount===0(평가 표본 없음)이면 avgRate가 0으로 와도 "0점"이 아니라 미평가(null).
+      //   BE가 미평가 교과에 avgRate:0을 실어보내므로 avgRate만으로는 0점과 미평가를 구분 못함 → evaluatedCount로 판정.
+      const evaluated = Number(s.evaluatedCount) > 0;
+      rateBySubj.set(name, (!evaluated || s.avgRate == null) ? null : s.avgRate);
+    });
+    // 축 = 정본 5교과 ∪ 데이터에 등장한 그 밖의 교과(예: 예술) — 순서: 정본 먼저, 그다음 기타.
+    const extra = [...rateBySubj.keys()].filter(k => !CORE_SUBJECTS.includes(k));
+    const axes = CORE_SUBJECTS.concat(extra);
+    const dataVals = axes.map(a => rateBySubj.has(a) ? rateBySubj.get(a) : null);
+    const evaluatedAxes = axes.filter(a => rateBySubj.get(a) != null);
+
+    if (evaluatedAxes.length >= 3){
+      // 3교과 이상 평가됨 → 레이더. 미평가 축은 null(끊김)로 스파이크 방지.
+      // 점 표시: 값 있는 축은 파란 점, 없는 축은 투명(0점처럼 안 보이게).
+      const ptColors = dataVals.map(v => v == null ? 'rgba(0,0,0,0)' : '#2563eb');
+      const hasGap = dataVals.some(v => v == null);
+      mkChart(document.getElementById('sMastRadar'), 'radar', {
+        labels: axes,
+        datasets: [{
+          label:'평균 정답률', data: dataVals, spanGaps:false,
+          borderColor:'var(--lrs-primary)', backgroundColor:'rgba(37,99,235,.15)',
+          pointBackgroundColor:ptColors, pointBorderColor:ptColors, borderWidth:2,
+        }]
+      }, { scales:{ r:{ min:0, max:100, ticks:{ stepSize:20, font:{size:12} }, pointLabels:{ font:{size:13} } } },
+           plugins:{ legend:{ display:false },
+             tooltip:{ callbacks:{ label:(ctx)=> ctx.raw == null ? `${ctx.label}: 아직 평가 전` : `${ctx.label}: ${ctx.raw}%` } } } });
+      if (hasGap){
+        const cap = document.createElement('div');
+        cap.className = 'mastery-sub';
+        cap.style.cssText = 'margin-top:6px;text-align:center;';
+        cap.textContent = '점이 없는 교과는 아직 평가 전이에요.';
+        document.getElementById('sMastRadar').closest('.chart-body').after(cap);
+      }
+    } else if (evaluatedAxes.length){
+      // 평가 교과 3개 미만 → 레이더는 스파이크로 왜곡되므로 가로 Bar 폴백(평가된 교과만, 0값 스파이크 없음).
+      const barSubj = evaluatedAxes;
+      mkChart(document.getElementById('sMastRadar'), 'bar', {
+        labels: barSubj,
+        datasets: [{ label:'평균 정답률', data: barSubj.map(a => rateBySubj.get(a)),
+          backgroundColor:'var(--lrs-primary)' }]
+      }, { indexAxis:'y', scales:{ x:{ min:0, max:100, title:{display:true,text:'평균 정답률(%)'} } },
+           plugins:{ legend:{ display:false },
+             tooltip:{ callbacks:{ label:(ctx)=> `${ctx.raw}%` } } } });
+      const cap = document.createElement('div');
+      cap.className = 'mastery-sub';
+      cap.style.cssText = 'margin-top:8px;text-align:center;';
+      cap.textContent = evaluatedAxes.length === 1
+        ? '아직 한 교과만 평가됐어요. 다른 교과도 풀면 교과별 비교가 나타나요.'
+        : '평가된 교과만 표시했어요. 더 풀면 나머지 교과도 채워져요.';
+      document.getElementById('sMastRadar').closest('.chart-body').after(cap);
+    } else {
+      document.getElementById('sMastRadar').closest('.chart-body').innerHTML =
+        '<div class="mastery-empty"><i class="fas fa-chart-pie me-icon"></i><p>교과별 평균을 낼 성취 데이터가 아직 부족해요.</p></div>';
+    }
   }
 
   // ── S1 도넛 (4상태) ──────────────────────────────────────────────────
   if (allInsufficient){
     // 평가부족만 — 회색 1색 + 안내
     document.getElementById('sMastDonut').closest('.donut-wrap').querySelector('.donut-center').innerHTML =
-      `<span class="dc-num">평가 부족 ${counts.insufficient}/${counts.total}</span><span class="dc-lbl">성취기준</span>`;
+      `<span class="dc-num">${counts.insufficient} / ${counts.total}</span><span class="dc-lbl">평가 부족</span>`;
     mkChart(document.getElementById('sMastDonut'), 'doughnut', {
       labels:['평가 부족'],
       datasets:[{ data:[counts.insufficient], backgroundColor:[MASTERY_HEX.insufficient] }]
@@ -2335,10 +2466,12 @@ VIEWS['s-achieve'] = async function(root){
                         .sort((a,b)=> a.rate - b.rate);
 
   function clampLabel(s, n){
+    // AC3 교정: 축 라벨은 단원명(label)만. 성취기준 코드는 부착하지 않는다(툴팁으로만 노출).
     const lbl = (s.label && s.label !== s.code) ? s.label : (s.subject || '');
+    if (lbl) return lbl.length > n ? lbl.slice(0, n) + '…' : lbl;
+    // 라벨이 전혀 없을 때만(BE label·subject 모두 없음) 최후 폴백으로 코드 사용.
     const codeBare = String(s.code||'').replace(/^\[|\]$/g,'');
-    const short = lbl.length > n ? lbl.slice(0, n) + '…' : lbl;
-    return short ? `${short} [${codeBare}]` : `[${codeBare}]`;
+    return codeBare || '성취기준';
   }
 
   function drawDiverge(){
@@ -2380,9 +2513,15 @@ VIEWS['s-achieve'] = async function(root){
         },
         plugins:{
           legend:{ display:false },
-          tooltip:{ callbacks:{ label:(ctx)=>{ const s = ordered[ctx.dataIndex];
-            const codeBare = String(s.code||'').replace(/^\[|\]$/g,'');
-            return `${codeBare} · 정답률 ${s.rate}% (${s.attempts}회 중 ${s.correct}정답) · ${masteryKo(s.status)}`; } } }
+          // 툴팁: 단원명(제목) → 정답률·시도(본문) → 성취기준 코드(맨 끝 회색 부기). 코드가 앞에 안 오게.
+          tooltip:{ callbacks:{
+            title:(items)=>{ const s = ordered[items[0].dataIndex]; return (s.label && s.label!==s.code) ? s.label : (s.subject || '성취기준'); },
+            label:(ctx)=>{ const s = ordered[ctx.dataIndex];
+              return `정답률 ${s.rate}% (${s.attempts}회 중 ${s.correct}정답) · ${masteryKo(s.status)}`; },
+            afterLabel:(ctx)=>{ const s = ordered[ctx.dataIndex];
+              const codeBare = String(s.code||'').replace(/^\[|\]$/g,'');
+              return codeBare ? `성취기준 ${codeBare}` : ''; }
+          } }
         },
         onClick:(e, els)=>{ if (!els.length) return; const s = ordered[els[0].index];
           // 약점 막대 클릭 → S4 추천 학습으로 스크롤
@@ -2417,12 +2556,33 @@ VIEWS['s-achieve'] = async function(root){
 
     // ★ 윤리(P6): 위험점수·등수·"위험" 어휘·신뢰배지 절대 미표기. 하락도 파랑 유지.
     if (!td || !td.success || !trend || trend.status !== 'ok' || !(trend.series||[]).length){
-      // 관측 부족 → 격려 빈상태(숨기지 않되 추이 그릴 데이터 없으면 안내)
+      // 관측 주차 부족(<3주)이라 '추세선'은 못 그려도, 이번 주 실제 도달률은 반드시 보여준다(학생 노력 반영).
       const sec = document.getElementById('sTrendSection');
-      if (sec) sec.querySelector('#sTrendBody').outerHTML =
-        `<div class="mastery-empty"><i class="fas fa-seedling me-icon" style="color:#86efac;"></i>
-          <p>조금 더 풀면 내 성취 그래프가 그려져요. 오늘의 학습부터 시작해볼까요?</p>
-          <a class="mastery-btn mastery-btn-sm" href="/self-learn/"><i class="fas fa-rocket"></i> 오늘의 학습</a></div>`;
+      const s0 = trend && (trend.series||[]).filter(p=>p && p.attempts>0).slice(-1)[0];
+      const curRate = (trend && trend.currentRate!=null) ? trend.currentRate
+                      : (s0 ? s0.rate : null);
+      const obsW = (trend && trend.observedWeeks) || (s0 ? 1 : 0);
+      if (sec){
+        if (curRate != null && s0){
+          // 데이터는 있으나 아직 1~2주 → 이번 주 도달률을 큰 숫자로, 추세선은 왜 아직 안 뜨는지 안내
+          sec.querySelector('#sTrendBody').outerHTML =
+            `<div class="mastery-empty" id="sTrendBody" style="display:flex;flex-direction:column;align-items:center;gap:14px;padding:22px 18px;">
+               <div style="display:flex;align-items:center;gap:16px;">
+                 <div style="font-size:44px;font-weight:800;color:#2563eb;line-height:1;">${Math.round(curRate)}<span style="font-size:22px;font-weight:700;">%</span></div>
+                 <div style="text-align:left;font-size:15px;color:#374151;line-height:1.5;">이번 주 내 도달률<br><span style="font-size:13px;color:#6b7280;">(${s0.attempts}문제 기준)</span></div>
+               </div>
+               <p style="font-size:15px;color:#374151;line-height:1.7;margin:0;max-width:440px;text-align:center;">
+                 <i class="fas fa-seedling" style="color:#16a34a;"></i> 이번 주 학습은 잘 반영됐어요! <b>추세 그래프</b>는 <b>3주 이상</b> 기록이 쌓이면 나타나요(현재 ${obsW}주). 꾸준히 하면 곧 흐름이 보여요.</p>
+               <a class="mastery-btn mastery-btn-sm" href="/self-learn/"><i class="fas fa-rocket"></i> 오늘의 학습 계속하기</a>
+             </div>`;
+        } else {
+          // 진짜 기록 없음
+          sec.querySelector('#sTrendBody').outerHTML =
+            `<div class="mastery-empty" id="sTrendBody"><i class="fas fa-seedling me-icon" style="color:#86efac;"></i>
+               <p>아직 성취 기록이 없어요. <b>오늘의 학습</b>이나 문제풀이를 하면 여기에 도달률이 쌓여요!</p>
+               <a class="mastery-btn mastery-btn-sm" href="/self-learn/"><i class="fas fa-rocket"></i> 오늘의 학습 시작하기</a></div>`;
+        }
+      }
       if (chips) chips.innerHTML = '';
       return;
     }
@@ -2553,9 +2713,10 @@ VIEWS['s-achieve'] = async function(root){
 
 VIEWS['s-trend'] = async function(root){
   root.innerHTML = tplLoading(1);
-  // 학생 추이는 90일 고정 요청
-  const daily = await apiGet('/api/lrs/stats/daily', { period:'90d' });
+  // 기간칩(state.period) 반영 — apiGet이 rangeQS로 현재 기간을 자동 부착. (구 period:'90d' 하드코딩 제거)
+  const daily = await apiGet('/api/lrs/stats/daily');
   const rows = (daily && daily.data) || [];
+  const periodTitle = periodLabelKo();   // "최근 30일" 등 선택 기간과 일치
 
   // 추이 차트 영역 + A6 "감정-성취 비교" 카드 자리(하단 append)
   root.innerHTML = `<div id="sTrendChartHost"></div><div id="sEmotionMirrorHost"></div>`;
@@ -2563,7 +2724,7 @@ VIEWS['s-trend'] = async function(root){
   if (!rows.length){
     chartHost.innerHTML = tplEmpty('추이 데이터가 없어요');
   } else {
-    chartHost.innerHTML = chartWrap('sTrendLine','학습 추이 (최근 90일)','학습시간·활동건수·평균점수');
+    chartHost.innerHTML = chartWrap('sTrendLine','학습 추이 (' + periodTitle + ')','학습시간·활동건수·평균점수');
     mkChart(document.getElementById('sTrendLine'),'line',{
       labels: rows.map(r=>fmtDate(r.stat_date)),
       datasets:[
@@ -2589,7 +2750,8 @@ async function renderEmotionMirror(host){
   if (!uid){ host.innerHTML = ''; return; } // 로그인 정보 없으면 조용히 생략
 
   host.innerHTML = tplLoading(1);
-  const d = await apiGet('/api/lrs/emotion-mirror/' + encodeURIComponent(uid), {});
+  // 기간칩 반영: apiGet이 period를 자동 부착 + emotion-mirror는 ?days= 계약도 있으므로 days도 함께 전달(BE 매핑 유무와 무관하게 동작).
+  const d = await apiGet('/api/lrs/emotion-mirror/' + encodeURIComponent(uid), { days: periodDays() });
   if (!d || d.success === false){
     host.innerHTML = `<section class="dc-chart-wrapper">${tplError('감정-성취 비교를 불러오지 못했어요', ()=>setView('s-trend'))}</section>`;
     return;
@@ -3218,8 +3380,8 @@ async function renderNextStep(host){
 }
 
 VIEWS['s-compare'] = async function(root){
-  root.innerHTML = `<section class="dc-chart-wrapper"><header><h2>반 평균과 내 위치</h2><div class="subtitle">익명 비교 — 표본이 적을 경우 주의</div></header>
-    ${tplEmpty('비교 집계 API 준비 중입니다 (Phase 2 후속).', {href:'/lrs/#s-home', label:'내 학습 요약으로'})}</section>`;
+  root.innerHTML = `<section class="dc-chart-wrapper"><header><h2>반 평균과 내 위치</h2><div class="subtitle">친구들과 익명으로 비교해요 — 기록이 적으면 아직 정확하지 않아요</div></header>
+    ${tplEmpty('친구들과 비교하는 기능을 준비하고 있어요. 곧 보여드릴게요!', {href:'#s-home', label:'내 학습 요약으로'})}</section>`;
 };
 
 /* ===== 교사 경고 응답 → 통합 목록 변환 =====
@@ -4043,8 +4205,13 @@ async function adminFetchWithPeriod(path, period){
   } catch(_){ return null; }
 }
 
-/* ---- 홈 공용: DoD(어제 대비 오늘) 미니 위젯 ---- */
-async function renderDodMini(root){
+/* ---- 홈 공용: DoD(어제 대비 오늘) 미니 위젯 ----
+   스펙 A(LRS_학생_홈_메뉴_재설계): role 분기.
+   - 학생: "오늘 스냅샷" 3카드 스트립(.dc-kpi-card 재사용) = 오늘 배운 것 / 오늘 학습시간 / 연속 학습.
+           "활성 사용자"(=항상 1) 제거. 라벨 15px·값 28px·증감 14px(12px 이하 폐지).
+   - 교사·관리자: 반/전체 단위라 활성 사용자 유의미 → 기존 미니 띠 유지(파괴 금지). */
+async function renderDodMini(root, opts){
+  opts = opts || {};
   try {
     const dd = await apiGet('/api/lrs/stats/daily-snapshot');
     if (!dd || !dd.success) return;
@@ -4053,6 +4220,43 @@ async function renderDodMini(root){
     const deltaActs = (Number(t.totalActs)||0) - (Number(y.totalActs)||0);
     const deltaUsers = (Number(t.uniqueUsers)||0) - (Number(y.uniqueUsers)||0);
     const deltaDur = (Number(t.durationMin)||0) - (Number(y.durationMin)||0);
+
+    // ── 학생: 오늘 스냅샷 3카드 (활성 사용자 제거, 큰 글씨 dc-kpi-card 재사용) ──
+    if (state.role === 'student') {
+      const todayActs = Number(t.totalActs)||0;
+      const todayDur  = Number(t.durationMin)||0;
+      const streak    = Number(opts.streakDays)||0;
+      // 부류 G(부정 프레이밍) 교정: 학생은 감소를 빨강 ▼로 안 찍는다 → 감소도 dir:'flat'(중립·격려 문구).
+      // 슬롯1: 오늘 배운 것(건)
+      const actsTrend = (todayActs===0 && (Number(y.totalActs)||0)===0)
+        ? { dir:'flat', text:'오늘은 아직이에요' }
+        : deltaActs>0 ? { dir:'up',   text:`어제보다 +${deltaActs}건 — 좋아요!` }
+        : deltaActs<0 ? { dir:'flat', text:`어제보다 ${deltaActs}건 — 괜찮아요, 오늘 채워봐요` }
+        :               { dir:'flat', text:'어제와 비슷해요' };
+      // 슬롯2: 오늘 학습시간(분) — 정답률 데이터 소스 없어 학습시간으로 대체(스펙 A-3 폴백)
+      const durTrend = (todayDur===0 && (Number(y.durationMin)||0)===0)
+        ? { dir:'flat', text:'오늘은 아직이에요' }
+        : deltaDur>0 ? { dir:'up',   text:`어제보다 +${deltaDur}분 — 좋아요!` }
+        : deltaDur<0 ? { dir:'flat', text:`어제보다 ${deltaDur}분 — 괜찮아요` }
+        :              { dir:'flat', text:'어제와 비슷해요' };
+      // 슬롯3: 연속 학습(일) — 오늘 활동 여부로 안내 분기
+      const streakTrend = todayActs>0
+        ? { dir:'flat', text:'오늘도 이어가요' }
+        : { dir:'flat', text:`오늘 하면 ${streak+1}일` };
+      const html = `
+        <section class="dc-snapshot" aria-label="오늘 스냅샷">
+          <div class="dc-snapshot__label">오늘 활동을 어제와 비교했어요</div>
+          <div class="dc-kpi-grid dc-snapshot-strip">
+            ${kpiCard('오늘 배운 것',  todayActs.toLocaleString(), '건', actsTrend,   'primary')}
+            ${kpiCard('오늘 학습시간', todayDur.toLocaleString(),  '분', durTrend,    'success')}
+            ${kpiCard('연속 학습',     streak.toLocaleString(),    '일', streakTrend, 'warning')}
+          </div>
+        </section>`;
+      root.insertAdjacentHTML('afterbegin', html);
+      return;
+    }
+
+    // ── 교사·관리자: 기존 미니 띠 유지(활성 사용자 유의미) ──
     const colorOf = v => (v>=0?'var(--lrs-success, #10b981)':'var(--lrs-danger, #ef4444)');
     const arrow = v => (v>0?'▲':(v<0?'▼':'■'));
     const html = `
@@ -4970,7 +5174,22 @@ async function _renderXapiAnalysis(root, scope) {
   `;
 }
 
-VIEWS['s-xapi'] = async function(root) { await _renderXapiAnalysis(root, 'me'); };
+VIEWS['s-xapi'] = async function(root) {
+  // 역할 가드: 학생 뷰에는 원시 xAPI(영문 동사키·표준체계 노드코드·AIDT/허브 용어)를 노출하지 않는다.
+  //   메뉴에선 hidden:true지만 URL(#s-xapi) 직접 진입이 가능하므로 여기서 차단 → 홈으로 안내.
+  //   교사/관리자(t-xapi·a-xapi)는 정상 유지.
+  if (state.role === 'student') {
+    root.innerHTML = `<section class="mastery-section"><div class="mastery-empty" role="status">
+      <i class="fas fa-lock me-icon" aria-hidden="true"></i>
+      <p>이 화면은 선생님·관리자용이에요. 내 학습은 <strong>학습 요약</strong>에서 볼 수 있어요.</p>
+      <a class="mastery-btn mastery-btn-sm" href="#s-home"><i class="fas fa-house"></i> 내 학습 요약으로</a>
+    </div></section>`;
+    // 해시/뷰 상태를 홈으로 되돌려 새로고침·뒤로가기 시에도 원시 화면이 다시 뜨지 않게 함
+    setTimeout(() => { if (state.role === 'student') setView('s-home'); }, 1200);
+    return;
+  }
+  await _renderXapiAnalysis(root, 'me');
+};
 VIEWS['t-xapi'] = async function(root) {
   const cid = state.classId || state.class_id;
   await _renderXapiAnalysis(root, cid ? `class:${cid}` : null);
@@ -5154,7 +5373,7 @@ function renderInPageTabs(cat){
   document.getElementById('bcRole').textContent =
     state.role==='student'?'학생':state.role==='teacher'?'교사':'관리자';
 
-  const items = (MENUS[state.role] || []).filter(it => it.category === useCat);
+  const items = (MENUS[state.role] || []).filter(it => it.category === useCat && !it.hidden);
 
   // 뷰 1개 이하: 탭 바 아예 렌더하지 않음
   if (!tabs || items.length < 2){
@@ -5163,7 +5382,7 @@ function renderInPageTabs(cat){
   }
 
   tabs.hidden = false;
-  tabs.setAttribute('aria-label', (MENU_LABELS[useCat] || '분석') + ' 하위 메뉴');
+  tabs.setAttribute('aria-label', menuLabel(useCat) + ' 하위 메뉴');
   tabs.innerHTML = items.map(it=>{
     const active = state.view === it.id;
     return `<button class="lrs-tab${active?' is-active':''}" type="button" role="tab"
@@ -5211,17 +5430,21 @@ async function setView(id){
   const menuKey = viewToMenu(id);
   state.category = menuKey || state.category || 'home';
   const bcMenuEl = document.getElementById('bcMenu');
+  const bcMenuSeg = document.getElementById('bcMenuSeg');
   // 브레드크럼: 홈 카테고리면 "역할 > 홈" 3단, 그 외 4단
   const isHome = state.category === 'home';
   if (bcMenuEl) {
     if (isHome) {
       bcMenuEl.textContent = '';
+      // 라벨+선행 구분자(›)를 통째로 숨겨 "학생 › › 홈" 이중 구분자 방지 (스펙 C·P2)
+      if (bcMenuSeg) bcMenuSeg.setAttribute('hidden','');
       bcMenuEl.setAttribute('hidden','');
       // 홈에서는 bcPage만 "홈"으로
       document.getElementById('bcPage').textContent = '홈';
     } else {
+      if (bcMenuSeg) bcMenuSeg.removeAttribute('hidden');
       bcMenuEl.removeAttribute('hidden');
-      bcMenuEl.textContent = MENU_LABELS[state.category] || '—';
+      bcMenuEl.textContent = menuLabel(state.category);
     }
   }
   renderInPageTabs(state.category);
@@ -5242,6 +5465,9 @@ async function setView(id){
 
   destroyCharts();
   const root = document.getElementById('viewRoot');
+  // 현재 뷰/역할을 루트에 표기 → CSS 스코프(예: 학생 홈 KPI 글자 상향)에 사용
+  root.setAttribute('data-view', id);
+  root.setAttribute('data-role', state.role || '');
   // 클릭 즉시 로딩 표시가 보이도록 프레임 양보 없이 바로 갱신
   root.innerHTML = tplLoading(3);
   try {

@@ -152,7 +152,11 @@ router.post('/daily/:itemId/complete', requireAuth, (req, res) => {
   try {
     const itemId = parseInt(req.params.itemId);
     selfLearnDb.completeDailyItem(itemId, req.user.id, req.body);
-    // xAPI: 오늘의 학습 완료 → navigation(learned). 항목이 평가형(quiz/practice)이면 assessment(submitted) 도 함께 적재
+    // LRS 정본 이벤트: completeDailyItem 이 learning_logs 에 'daily_complete' 1건만 적재한다.
+    //   아래 xapiSpool.record 는 KERIS/AIDT 허브 송신용 xapi_statement_spool(별도 트랙)에만 기록되며
+    //   학생 LRS 대시보드(/insights·/mastery·/trend·/stats/*·/emotion-mirror)는 learning_logs 만 조회한다.
+    //   따라서 1 이수는 학생 뷰에서 '오늘의 학습(자기주도)' 단일 건으로만 집계된다(이중카운트 없음).
+    // xAPI(허브 송신용): 오늘의 학습 완료 → navigation(learned). 항목이 평가형(quiz/practice)이면 assessment(submitted) 도 함께 적재
     try {
       const meta = _loadDailyItemMeta(itemId);
       if (meta) {

@@ -680,3 +680,245 @@ test('BUG15: LRS 평균점수 표시용 0~100 정규화 — 0~1 저장 유형 ×
     if (v != null) assert.ok(v > 0 && v <= 100, `BUG15(d): ${t} avgScore(${v}) 가 0~100 범위여야`);
   }
 });
+
+// ──────────────────────────────────────────────────────────────────────────
+// BUG16: 약점 성취기준 라벨 = 학생 친화 단원명 (raw 코드 노출 금지) — INV-f 박제.
+//   routes/lrs.js insights 엔드포인트가 achievementLabel(code) 로 learning_map_nodes
+//   .unit_name 을 붙인다. 이 데이터 계약(코드→단원명 매핑 존재)이 깨지면 화면에 [4수01-02]
+//   같은 raw 코드가 뜨므로 여기서 미리 잡는다. (엔드포인트 로직과 동일한 lookup 검증)
+// ──────────────────────────────────────────────────────────────────────────
+test('BUG16: 약점 성취기준 코드→한글 단원명 매핑 존재(raw 코드 노출 방지, INV-f)', () => {
+  // student1(id3)의 실제 약점 코드 상위 5개 (엔드포인트와 동일 쿼리)
+  const weak = db.prepare(`
+    SELECT achievement_code FROM lrs_achievement_stats
+    WHERE user_id = ? AND attempt_count >= 1
+    ORDER BY COALESCE(avg_score,0) ASC, attempt_count DESC LIMIT 5
+  `).all(S1);
+
+  // 약점 데이터가 없으면(격리 DB 시드 상태) 스킵성 통과 — 계약 자체는 아래 샘플로 검증
+  const sampleCodes = weak.length ? weak.map(w => w.achievement_code)
+    : ['[4수01-02]', '[4수03-02]'];
+
+  // 엔드포인트 achievementLabel 과 동일한 lookup: bracketed/bare 양쪽으로 unit_name 조회
+  const unitOf = (code) => {
+    const raw = String(code || '').trim();
+    const bare = raw.replace(/^\[|\]$/g, '');
+    const bracketed = raw.startsWith('[') ? raw : `[${bare}]`;
+    const row = db.prepare(
+      "SELECT unit_name FROM learning_map_nodes WHERE achievement_code IN (?,?,?) AND unit_name IS NOT NULL AND TRIM(unit_name) <> '' LIMIT 1"
+    ).get(bracketed, bare, raw);
+    return row ? row.unit_name : null;
+  };
+
+  let mapped = 0;
+  for (const code of sampleCodes) {
+    const unit = unitOf(code);
+    if (unit) {
+      mapped++;
+      // 단원명은 한글을 포함해야(코드 그대로 X)
+      assert.ok(/[가-힣]/.test(unit), `BUG16: ${code} 단원명("${unit}")에 한글 없음(코드 추정)`);
+      // 단원명이 raw 코드와 같으면 안 됨
+      assert.notEqual(unit, code, `BUG16: ${code} 단원명이 코드 그대로`);
+    }
+  }
+  assert.ok(mapped > 0, `BUG16: 약점 코드 ${sampleCodes.length}개 중 단원명 매핑 0개 — learning_map_nodes 계약 깨짐`);
+});
+
+// ──────────────────────────────────────────────────────────────────────────
+// BUG17: 오늘의 학습 완료 → result_success 정합 (LRS 학생 전수감사 §1 근본 fix).
+//   (a) 문항형(correct/total) 완료 → result_success 가 NULL 이 아니라 정오답으로 채워짐.
+//   (b) 100점(만점) 완료가 '0정답'으로 기록되면 안 됨(도달률 역효과 방지) — success=1.
+//   (c) 불합격(정답률<0.6) 완료 → success=0, 하지만 result_score 는 실제 비율(≠null).
+//   (d) 시청/이수형(점수·문항 없음) 완료 → success=NULL 유지(평가대상 아님) & 성취 시도로 안 셈.
+// ──────────────────────────────────────────────────────────────────────────
+test('BUG17: 오늘의 학습 완료 result_success 정합(100점≠0정답, 시청형=NULL·시도제외)', () => {
+  const selfLearn = require('../db/self-learn-extended');
+  const mastery = require('../db/lrs-mastery');
+  const CODE = '[4수03-02]'; // unit_name 있는 코드
+
+  // 격리 세트/항목 3개: (a/b) 만점 문항형, (c) 불합격 문항형, (d) 시청형(external·점수없음)
+  const setInfo = db.prepare(`
+    INSERT INTO daily_learning_sets (class_id, teacher_id, title, target_date, target_grade, is_active)
+    VALUES (?, ?, 'BUG17 세트', '2099-12-01', 4, 1)
+  `).run(CLASS, TEACHER);
+  const setId = setInfo.lastInsertRowid;
+  const mkItem = (title) => db.prepare(`
+    INSERT INTO daily_learning_items (set_id, source_type, external_url, external_title, item_title, node_id, sort_order)
+    VALUES (?, 'external', 'https://example.com/bug17', ?, ?, NULL, 1)
+  `).run(setId, title, title).lastInsertRowid;
+  const itemPass = mkItem('BUG17 만점'), itemFail = mkItem('BUG17 불합격'), itemView = mkItem('BUG17 시청');
+
+  const logOf = (itemId) => db.prepare(
+    "SELECT result_score, result_success, correct_count, total_items FROM learning_logs WHERE user_id=? AND target_type='daily_learning' AND target_id=? AND activity_type='daily_complete' ORDER BY id DESC LIMIT 1"
+  ).get(S1, String(itemId));
+
+  // (a·b) 만점: 5/5 → success=1, score≈1.0 (NULL 아님)
+  selfLearn.completeDailyItem(itemPass, S1, { score: 100, correctCount: 5, totalQuestions: 5, timeSpent: 100 });
+  const lp = logOf(itemPass);
+  assert.notEqual(lp.result_success, null, 'BUG17(a): 문항형 완료 result_success 가 NULL 이면 안 됨');
+  assert.equal(lp.result_success, 1, 'BUG17(b): 100점(5/5) 완료는 success=1(0정답 아님)');
+  assert.ok(lp.result_score != null && lp.result_score > 0.9, 'BUG17(b): 만점 result_score≈1.0');
+  assert.equal(lp.correct_count, 5, 'BUG17: correct_count 전달');
+
+  // (c) 불합격: 1/5=0.2 → success=0, score=0.2(≠null)
+  selfLearn.completeDailyItem(itemFail, S1, { score: 20, correctCount: 1, totalQuestions: 5, timeSpent: 90 });
+  const lf = logOf(itemFail);
+  assert.equal(lf.result_success, 0, 'BUG17(c): 정답률<0.6 완료는 success=0');
+  assert.ok(lf.result_score != null && lf.result_score < 0.5, 'BUG17(c): 불합격도 result_score 는 실제 비율(≠null)');
+
+  // (d) 시청형(점수·문항 없음): success=NULL 유지 & 성취 시도 미증가.
+  const beforeAtt = (db.prepare(
+    'SELECT attempt_count FROM lrs_achievement_stats WHERE user_id=? AND achievement_code=?'
+  ).get(S1, CODE) || { attempt_count: 0 }).attempt_count;
+  selfLearn.completeDailyItem(itemView, S1, { timeSpent: 120 }); // 점수·문항 없음
+  const lv = logOf(itemView);
+  assert.equal(lv.result_success, null, 'BUG17(d): 시청/이수형(점수없음) 완료는 result_success=NULL 유지');
+  // 시청형은 achievement_code 미해석(node_id null) → 성취 시도 자체가 안 늘어야(역효과 방지).
+  const afterAtt = (db.prepare(
+    'SELECT attempt_count FROM lrs_achievement_stats WHERE user_id=? AND achievement_code=?'
+  ).get(S1, CODE) || { attempt_count: 0 }).attempt_count;
+  assert.equal(afterAtt, beforeAtt, 'BUG17(d): 평가신호 없는 이수는 성취 시도(attempt)를 늘리지 않아야(도달률 역효과 방지)');
+});
+
+// ──────────────────────────────────────────────────────────────────────────
+// BUG18: 평가신호 없는 완료가 lrs_achievement_stats 를 '0정답'으로 깎지 않음(도달률 역효과).
+//   achievement_code 有 + result_score·result_success 모두 NULL 인 로그는 mastery 집계 제외.
+//   (log-helper 의 hasEvalSignal 가드 박제) — 100점 완료가 성취를 깎던 왜곡 재발 방지.
+// ──────────────────────────────────────────────────────────────────────────
+test('BUG18: 평가신호 없는 이수는 성취 도달률을 깎지 않음(hasEvalSignal 가드)', () => {
+  const { logLearningActivity } = require('../db/learning-log-helper');
+  const CODE = '[4수17-99]'; // 실 데이터와 무간섭 가짜 코드(격리)
+
+  // 기준: 이 코드 성취 stats 초기 없음.
+  const cur0 = db.prepare('SELECT * FROM lrs_achievement_stats WHERE user_id=? AND achievement_code=?').get(S1, CODE);
+  assert.equal(cur0, undefined, 'BUG18 전제: 가짜 코드 성취 stats 없음(격리)');
+
+  // 평가신호 없는 완료(점수·성공 NULL) 3건 발행 → 성취 stats 가 생기면 안 됨(시도 미집계).
+  for (let i = 0; i < 3; i++) {
+    logLearningActivity({
+      userId: S1, activityType: 'daily_complete', targetType: 'daily_learning',
+      targetId: 8800000 + i, verb: 'completed', sourceService: 'self-learn',
+      resultScore: null, resultSuccess: null, achievementCode: CODE, subjectCode: 'math-e',
+    });
+  }
+  const after = db.prepare('SELECT * FROM lrs_achievement_stats WHERE user_id=? AND achievement_code=?').get(S1, CODE);
+  assert.ok(!after || (after.attempt_count || 0) === 0,
+    'BUG18: 평가신호 없는 이수 3건이 성취 attempt/success 를 만들면 안 됨(0정답 누적=역효과)');
+
+  // 반대로, 평가신호(정답) 있는 완료 1건은 정상 집계(도달) 되어야.
+  logLearningActivity({
+    userId: S1, activityType: 'daily_complete', targetType: 'daily_learning',
+    targetId: 8800099, verb: 'completed', sourceService: 'self-learn',
+    resultScore: 1, resultSuccess: 1, achievementCode: CODE, subjectCode: 'math-e',
+  });
+  const afterOk = db.prepare('SELECT attempt_count, success_count FROM lrs_achievement_stats WHERE user_id=? AND achievement_code=?').get(S1, CODE);
+  assert.ok(afterOk && afterOk.attempt_count === 1 && afterOk.success_count === 1,
+    'BUG18: 평가신호 있는 정답 완료는 성취 시도·정답으로 정상 집계(att=1,succ=1)');
+});
+
+// ──────────────────────────────────────────────────────────────────────────
+// BUG19: computeTrend 가 오늘의 학습 이수(문항 정답)를 시계열에 반영.
+//   result_success 채워진 daily_complete 가 _weeklyRateSeries(result_success IS NOT NULL 필터)에
+//   잡혀 해당 주 attempts 가 증가해야 한다. (이전엔 success=NULL 이라 배제 → 추이 누락)
+// ──────────────────────────────────────────────────────────────────────────
+test('BUG19: 오늘의 학습 정답 이수 → computeTrend 주차 시계열 attempts 증가', () => {
+  const { logLearningActivity } = require('../db/learning-log-helper');
+  const analytics = require('../db/lrs-analytics');
+  const CODE = '[4수18-88]';
+  const U = S2; // student2 로 격리(다른 테스트 간섭 최소화)
+
+  // 같은 주(週)에 3건 이상 있어야 유효 주차(_weeklyRateSeries MIN_WEEK_ATTEMPTS). 최근 주로 4건.
+  const iso = (d) => d.toISOString().slice(0, 10) + ' 10:00:00';
+  const base = new Date(); // 이번 주
+  for (let i = 0; i < 4; i++) {
+    const d = new Date(base); d.setDate(base.getDate() - i);
+    logLearningActivity({
+      userId: U, activityType: 'daily_complete', targetType: 'daily_learning',
+      targetId: 7700000 + i, verb: 'completed', sourceService: 'self-learn',
+      resultScore: 1, resultSuccess: 1, achievementCode: CODE, subjectCode: 'math-e',
+      createdAt: iso(d),
+    });
+  }
+  const t = analytics.computeTrend({ userId: U, code: CODE, weeks: 8 });
+  const totalAttempts = (t.series || []).reduce((s, w) => s + (w.attempts || 0), 0);
+  assert.ok(totalAttempts >= 3,
+    `BUG19: 정답 이수 4건이 computeTrend 시계열 attempts 에 반영돼야(합 >=3). 실제=${totalAttempts}`);
+});
+
+// ──────────────────────────────────────────────────────────────────────────
+// BUG20: 기간 파라미터 반영 — getStudentMastery(기간 스코프)가 기간별로 다른 집계.
+//   fromDate~toDate 를 주면 learning_logs 기간 집계(scoped=true), 넓은 기간이 좁은 기간보다
+//   성취기준 수(total)가 크거나 같아야(단조). 7d 와 90d 결과가 동일하면 기간 무반영(RED).
+// ──────────────────────────────────────────────────────────────────────────
+test('BUG20: 기간칩 반영 — mastery 기간 스코프가 7d≠90d(넓을수록 total≥)', () => {
+  const { logLearningActivity } = require('../db/learning-log-helper');
+  const mastery = require('../db/lrs-mastery');
+  const U = S2;
+  const iso = (d) => d.toISOString().slice(0, 10) + ' 10:00:00';
+  const today = new Date();
+  const daysAgo = (n) => { const d = new Date(today); d.setDate(today.getDate() - n); return d; };
+
+  // 최근(3일 전) 코드 A, 오래된(50일 전) 코드 B 각각 정답 이수.
+  logLearningActivity({ userId: U, activityType: 'daily_complete', targetType: 'daily_learning', targetId: 6600001,
+    verb: 'completed', sourceService: 'self-learn', resultScore: 1, resultSuccess: 1,
+    achievementCode: '[4수19-01]', subjectCode: 'math-e', createdAt: iso(daysAgo(3)) });
+  logLearningActivity({ userId: U, activityType: 'daily_complete', targetType: 'daily_learning', targetId: 6600002,
+    verb: 'completed', sourceService: 'self-learn', resultScore: 1, resultSuccess: 1,
+    achievementCode: '[4수19-02]', subjectCode: 'math-e', createdAt: iso(daysAgo(50)) });
+
+  const isoD = (d) => d.toISOString().slice(0, 10);
+  const m7 = mastery.getStudentMastery(U, { fromDate: isoD(daysAgo(7)), toDate: isoD(today) });
+  const m90 = mastery.getStudentMastery(U, { fromDate: isoD(daysAgo(90)), toDate: isoD(today) });
+  assert.equal(m7.scoped, true, 'BUG20: 기간 스코프시 scoped=true');
+  assert.ok(m90.counts.total >= m7.counts.total,
+    `BUG20: 90d total(${m90.counts.total}) 이 7d total(${m7.counts.total}) 보다 크거나 같아야(기간 반영)`);
+  assert.ok(m90.counts.total > m7.counts.total || m90.counts.total >= 2,
+    'BUG20: 넓은 기간이 오래된 코드까지 포함해 더 많은 성취기준을 봐야(7d≠90d)');
+});
+
+// ──────────────────────────────────────────────────────────────────────────
+// BUG21: s-custom 스케일(0~1→0~100) + 약점표 label(단원명). NORM_SCORE 미적용 재발 방지.
+//   self-learn result_score(0~1 저장)의 AVG 가 그대로 나가면 "0.9점"으로 오노출.
+//   NORM_SCORE(≤1이면 ×100) 적용 결과가 0~100 범위여야 하고, weakTargets 에 label 존재.
+// ──────────────────────────────────────────────────────────────────────────
+test('BUG21: s-custom avgScore 0~100 정규화 + 약점표 단원명 label', () => {
+  const { logLearningActivity } = require('../db/learning-log-helper');
+  const U = S2;
+  const CODE = '[4수03-02]'; // unit_name 있는 코드
+  // 0~1 스케일 self-learn 로그 2건(0.9·1.0) → NORM 후 평균 95 여야(0.95 아님).
+  logLearningActivity({ userId: U, activityType: 'daily_complete', targetType: 'daily_learning', targetId: 5500001,
+    verb: 'completed', sourceService: 'self-learn', resultScore: 0.9, resultSuccess: 1, achievementCode: CODE, subjectCode: 'math-e' });
+  logLearningActivity({ userId: U, activityType: 'daily_complete', targetType: 'daily_learning', targetId: 5500002,
+    verb: 'completed', sourceService: 'self-learn', resultScore: 1.0, resultSuccess: 1, achievementCode: CODE, subjectCode: 'math-e' });
+
+  const NORM = '(CASE WHEN ll.result_score <= 1 THEN ll.result_score*100 ELSE ll.result_score END)';
+  const row = db.prepare(
+    "SELECT ROUND(AVG(" + NORM + "),1) avg_norm FROM learning_logs ll " +
+    "WHERE ll.source_service='self-learn' AND ll.user_id=? AND ll.achievement_code=?"
+  ).get(U, CODE);
+  assert.ok(row.avg_norm > 1 && row.avg_norm <= 100, `BUG21: custom avgScore(${row.avg_norm}) 는 0~100(0.x 아님)`);
+
+  // 약점표 label: achievementLabel 과 동일 lookup 으로 단원명 존재 확인(엔드포인트가 붙임).
+  const raw = CODE, bare = raw.replace(/^\[|\]$/g, '');
+  const unit = db.prepare(
+    "SELECT unit_name FROM learning_map_nodes WHERE achievement_code IN (?,?) AND unit_name IS NOT NULL AND TRIM(unit_name)<>'' LIMIT 1"
+  ).get(raw, bare);
+  assert.ok(unit && /[가-힣]/.test(unit.unit_name), 'BUG21: 약점표 label 로 붙일 단원명(한글)이 있어야(raw 코드 노출 방지)');
+});
+
+// ──────────────────────────────────────────────────────────────────────────
+// BUG22: projectReach insufficient 문구 정직성(§7). status=insufficient·currentRate>50 일 때
+//   "더 풀면"(양 문제) 대신 "주(週)/시간" 어휘를 써야 오해가 없다.
+// ──────────────────────────────────────────────────────────────────────────
+test('BUG22: 추세 부족 안내가 "더 풀면"이 아니라 "주차/시간" 어휘(문구 정직성)', () => {
+  const analytics = require('../db/lrs-analytics');
+  // 관측주차 2 → insufficient. currentRate 존재하는 trend 를 인위로 구성.
+  const fakeTrend = { status: 'ok', currentRate: 75, slope: 1, confidence: 'low', observedWeeks: 2 };
+  // computeTrend 를 안 쓰고 projectReach 만 검증하려면 status!=='ok' 케이스가 필요 →
+  //   insufficient trend 직접 전달.
+  const insufTrend = { status: 'insufficient', currentRate: 75, observedWeeks: 2 };
+  const p = analytics.projectReach(insufTrend, { target: 80 });
+  assert.equal(p.status, 'insufficient', 'BUG22 전제: insufficient');
+  assert.ok(!/더 풀면/.test(p.message || ''), `BUG22: "더 풀면" 문구가 남아있으면 안 됨. msg=${p.message}`);
+  assert.ok(/주|시간/.test(p.message || ''), `BUG22: "주(週)/시간" 어휘로 안내해야. msg=${p.message}`);
+});
