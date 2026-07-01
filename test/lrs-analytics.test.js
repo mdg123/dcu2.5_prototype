@@ -253,6 +253,98 @@ test('WEAK-1: getWeakTrend — 도달률 오름차 정렬, reachedRate ∈ [0,10
 });
 
 // ════════════════════════════════════════════════════════════════════════════
+// [MIRROR] A6 마음-공부 거울 — 정서 3그룹 × 성취/활동량 (학생 · 자기이해)
+//   불변식: (a) groups 항상 3개(positive/neutral/negative 순) / (b) n<5 → avgScore·avgActs
+//   모두 null / (c) avgScore ∈ [0,100] 또는 null / (d) 응답에 위험점수(score/grade/risk)
+//   필드 부재(P6) / (e) coaching 문자열 존재.
+//   시드: 합성 학생 id=99101 에 attendance(감정)+lrs_user_daily 를 INSERT.
+// ════════════════════════════════════════════════════════════════════════════
+const MIRROR_UID = 99101;
+{
+  // 합성 유저(관계 무결성용 — attendance.user_id FK). users: password/display_name NOT NULL.
+  db.prepare(`INSERT OR IGNORE INTO users (id, username, password, display_name, role)
+              VALUES (?, ?, ?, ?, 'student')`)
+    .run(MIRROR_UID, `mirror_${MIRROR_UID}`, 'x', '거울테스트');
+
+  // 최근 N일 내 날짜 문자열(오늘 - offset).
+  const isoBack = (n) => {
+    const d = new Date(); d.setDate(d.getDate() - n);
+    return d.toISOString().slice(0, 10);
+  };
+  // attendance 감정 + 같은 날 lrs_user_daily 시드. class_id 는 임의(1).
+  //   좋았던 날(긍정) 6일: 점수 80±, 활동 5   → n>=5 (수치 노출)
+  //   힘든 날(부정)   6일: 점수 70±, 활동 3   → n>=5 (수치 노출)
+  //   보통인 날(중립) 2일: 점수 75,  활동 4   → n<5  (마스킹)
+  const seed = [];
+  for (let i = 0; i < 6; i++) seed.push({ off: i + 1,  emo: 'happy',    score: 80, acts: 5 });   // positive
+  for (let i = 0; i < 6; i++) seed.push({ off: i + 10, emo: 'sad',      score: 70, acts: 3 });   // negative
+  for (let i = 0; i < 2; i++) seed.push({ off: i + 20, emo: 'neutral',  score: 75, acts: 4 });   // neutral (소표본)
+  const insAtt = db.prepare(`INSERT OR IGNORE INTO attendance (class_id, user_id, attendance_date, status, emotion)
+                             VALUES (1, ?, ?, 'present', ?)`);
+  const insDaily = db.prepare(`INSERT OR IGNORE INTO lrs_user_daily (user_id, stat_date, activity_count, duration_sec, avg_score)
+                               VALUES (?, ?, ?, ?, ?)`);
+  for (const s of seed) {
+    const date = isoBack(s.off);
+    try { insAtt.run(MIRROR_UID, date, s.emo); } catch (_) {}
+    try { insDaily.run(MIRROR_UID, date, s.acts, s.acts * 300, s.score); } catch (_) {}
+  }
+}
+
+test('MIRROR-1: groups 항상 3개 · 순서 positive/neutral/negative', () => {
+  const m = analytics.getEmotionMirror(MIRROR_UID, { days: 60 });
+  assert.equal(m.groups.length, 3, 'groups 3개');
+  assert.deepEqual(m.groups.map(g => g.key), ['positive', 'neutral', 'negative'], '고정 순서');
+  for (const g of m.groups) {
+    assert.ok(typeof g.label === 'string' && g.label.length > 0, 'label 유지');
+    assert.ok(typeof g.emoji === 'string' && g.emoji.length > 0, 'emoji 유지');
+    assert.ok(Number.isInteger(g.n) && g.n >= 0, `n 정수 (${g.n})`);
+  }
+});
+
+test('MIRROR-2: 각 그룹 n<5 → avgScore·avgActs 모두 null(소표본 마스킹)', () => {
+  const m = analytics.getEmotionMirror(MIRROR_UID, { days: 60 });
+  for (const g of m.groups) {
+    if (g.n < 5) {
+      assert.equal(g.avgScore, null, `${g.key} n=${g.n}<5 인데 avgScore 마스킹 안됨`);
+      assert.equal(g.avgActs, null, `${g.key} n=${g.n}<5 인데 avgActs 마스킹 안됨`);
+    }
+  }
+  // 시드상 neutral 은 n=2(<5) → 마스킹, positive/negative 는 n>=5 → 수치 노출 기대
+  const neu = m.groups.find(g => g.key === 'neutral');
+  assert.ok(neu.n < 5 && neu.avgScore === null, 'neutral 소표본 마스킹 확인');
+});
+
+test('MIRROR-3: avgScore 는 null 또는 0~100', () => {
+  const m = analytics.getEmotionMirror(MIRROR_UID, { days: 60 });
+  for (const g of m.groups) {
+    if (g.avgScore != null) {
+      assert.ok(g.avgScore >= 0 && g.avgScore <= 100, `${g.key} avgScore=${g.avgScore} 범위밖`);
+    }
+    if (g.avgActs != null) {
+      assert.ok(g.avgActs >= 0, `${g.key} avgActs=${g.avgActs} 음수`);
+    }
+  }
+});
+
+test('MIRROR-4: ★윤리(P6) — 함수 결과에 위험점수(score/grade/risk) 필드 부재', () => {
+  const m = analytics.getEmotionMirror(MIRROR_UID, { days: 60 });
+  const json = JSON.stringify(m);
+  assert.ok(!/"risk"/.test(json), 'risk 키 없음');
+  assert.ok(!/"score"/.test(json), 'score(위험점수) 키 없음');
+  assert.ok(!/"grade"/.test(json), 'grade(위험등급) 키 없음');
+  assert.ok(!/위험/.test(json), '"위험" 어휘 없음');
+});
+
+test('MIRROR-5: coaching 문자열 존재 · note 고정 · totalDays 정수', () => {
+  const m = analytics.getEmotionMirror(MIRROR_UID, { days: 60 });
+  assert.ok(typeof m.coaching === 'string' && m.coaching.length > 0, 'coaching 문자열');
+  assert.equal(m.note, '감정 기록이 있는 날만 비교했어요. 이건 경향일 뿐, 정답은 아니에요.');
+  assert.ok(Number.isInteger(m.totalDays) && m.totalDays >= 0, `totalDays=${m.totalDays}`);
+  // 시드 14일(감정 있는 날) 전부 최근 60일 내 → totalDays=14 기대
+  assert.equal(m.totalDays, 14, '감정기록일수 = 시드 14일');
+});
+
+// ════════════════════════════════════════════════════════════════════════════
 // [PERM] 권한·윤리 (HTTP 레벨)
 // ════════════════════════════════════════════════════════════════════════════
 const express = require('express');
@@ -348,6 +440,22 @@ test('PERM-4: ★윤리 — 학생 trend 응답에 위험점수/위험등급 등
   assert.ok(!/위험/.test(json), '"위험" 어휘 없음');
   // 추세·도달예상은 있어야(긍정 프레임)
   assert.ok(own.json.trend && own.json.projection, 'trend·projection 은 포함');
+});
+
+test('PERM-4b: emotion-mirror — 본인 200, 타 학생 403, 교사 200, 응답에 위험필드 없음(P6)', async () => {
+  const own = await req(`/emotion-mirror/${STUDENT1}`, STUDENT1);
+  assert.equal(own.status, 200, '본인 마음-공부 거울 200');
+  assert.equal(own.json.success, true);
+  assert.ok(Array.isArray(own.json.groups) && own.json.groups.length === 3, 'groups 3개');
+  assert.ok(typeof own.json.coaching === 'string', 'coaching 문자열');
+  const j = JSON.stringify(own.json);
+  assert.ok(!/"risk"|"score"|"grade"|위험/.test(j), '학생 응답에 위험 필드/어휘 없음(P6)');
+
+  const other = await req(`/emotion-mirror/${STUDENT2}`, STUDENT1);
+  assert.equal(other.status, 403, '타 학생 거울 403');
+
+  const byT = await req(`/emotion-mirror/${STUDENT1}`, TEACHER);
+  assert.equal(byT.status, 200, '교사 200');
 });
 
 test('PERM-5: trend/class — 소유 교사 200, 비멤버 교사 403', async () => {

@@ -644,10 +644,146 @@ function getWeakTrend({ userIds, weeks = DEFAULT_WEEKS, limit = 15 } = {}) {
   return out.slice(0, limit);
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// A6 "마음-공부 거울" (학생 · 정서×성취/활동량) — 온더플라이(신규 테이블 0).
+//   스펙: 작업지시서/LRS_P0_시각데이터스펙_v1.md §카드1(③④⑤⑧)
+//   attendance(감정 있는 날) LEFT JOIN lrs_user_daily(같은 날짜) → 3그룹 평균 비교.
+//     그룹 라벨: emotion_score 있으면 >=2.5 긍정 / 1.5~2.5 중립 / <1.5 부정 (1~3 스케일)
+//               없으면 emotion 텍스트: NEGATIVE_EMOTIONS.has → 부정 / neutral류 → 중립 / 그 외 → 긍정
+//   ★ 학생용 — 위험점수·EWS 필드 절대 미포함(P6 낙인 방지, 자기이해 프레임).
+//   ★ 소표본 마스킹 — 그룹 n<5 면 avgScore/avgActs 를 null 로 마스킹(groups 는 항상 3개).
+//   getEmotionMirror(userId, { days=60 }) →
+//     { groups:[positive,neutral,negative], coaching, note, totalDays }
+// ─────────────────────────────────────────────────────────────────────────────
+const EMOTION_GROUP_META = {
+  positive: { key: 'positive', label: '긍정 감정', emoji: '😀' },
+  neutral:  { key: 'neutral',  label: '중립',      emoji: '😐' },
+  negative: { key: 'negative', label: '부정 감정', emoji: '😢' },
+};
+// 중립 어휘(스펙 §카드1-③ "neutral/ok/soso/보통"류). 그 외 비부정은 긍정으로 분류.
+const NEUTRAL_EMOTIONS = new Set(['neutral', 'ok', 'soso', 'so-so', 'normal', '보통']);
+const A6_MIN_GROUP_N = 5; // 그룹 n<5 → 수치 마스킹(null)
+
+// 감정 라벨링: emotion_score(1~3) 우선, 없으면 emotion 텍스트.
+function _emotionGroupKey(emotion, emotionScore) {
+  if (emotionScore != null && Number.isFinite(Number(emotionScore))) {
+    const sc = Number(emotionScore);
+    if (sc >= 2.5) return 'positive';
+    if (sc >= 1.5) return 'neutral';
+    return 'negative';
+  }
+  const t = String(emotion || '').trim().toLowerCase();
+  if (!t) return null; // 감정 정보 없음(레코드 자체가 감정없음이면 SQL 에서 제외됨)
+  if (NEGATIVE_EMOTIONS.has(t)) return 'negative';
+  if (NEUTRAL_EMOTIONS.has(t)) return 'neutral';
+  return 'positive';
+}
+
+function getEmotionMirror(userId, { days = 60 } = {}) {
+  const d = Math.max(1, Math.min(180, Number(days) || 60));
+  const emptyGroups = () =>
+    ['positive', 'neutral', 'negative'].map(k => ({
+      ...EMOTION_GROUP_META[k], n: 0, avgScore: null, avgActs: null,
+    }));
+
+  let rows;
+  try {
+    rows = db.prepare(`
+      SELECT a.attendance_date AS d,
+             a.emotion         AS emotion,
+             a.emotion_score   AS escore,
+             ud.avg_score      AS avg_score,
+             ud.activity_count AS acts
+      FROM attendance a
+      LEFT JOIN lrs_user_daily ud
+             ON ud.user_id = a.user_id AND ud.stat_date = a.attendance_date
+      WHERE a.user_id = ?
+        AND (a.emotion IS NOT NULL OR a.emotion_score IS NOT NULL)
+        AND a.attendance_date >= date('now', ?)
+      ORDER BY a.attendance_date ASC
+    `).all(userId, `-${d} days`);
+  } catch (_) { rows = []; }
+
+  // 날짜 중복 방어: 같은 날 감정 기록이 여러 건이면 하루 1건으로(최신 우선 — ORDER ASC 라 마지막이 최신).
+  const byDate = new Map();
+  for (const r of rows) byDate.set(r.d, r);
+
+  // 그룹 누적
+  const acc = {
+    positive: { n: 0, scoreSum: 0, scoreN: 0, actSum: 0, actN: 0 },
+    neutral:  { n: 0, scoreSum: 0, scoreN: 0, actSum: 0, actN: 0 },
+    negative: { n: 0, scoreSum: 0, scoreN: 0, actSum: 0, actN: 0 },
+  };
+  let totalDays = 0;
+  for (const r of byDate.values()) {
+    const key = _emotionGroupKey(r.emotion, r.escore);
+    if (!key) continue;
+    totalDays++;
+    const a = acc[key];
+    a.n++;
+    // avg_score 없는 날은 점수 평균 분모에서 제외(평가부족 계승 §카드1-⑤).
+    if (r.avg_score != null && Number.isFinite(Number(r.avg_score))) {
+      a.scoreSum += Number(r.avg_score); a.scoreN++;
+    }
+    // activity_count: LEFT JOIN 이라 null 가능 → 0 으로 간주(활동 없음).
+    const actVal = (r.acts != null && Number.isFinite(Number(r.acts))) ? Number(r.acts) : 0;
+    a.actSum += actVal; a.actN++;
+  }
+
+  const groups = ['positive', 'neutral', 'negative'].map(k => {
+    const a = acc[k];
+    const masked = a.n < A6_MIN_GROUP_N; // 소표본 → 수치 마스킹
+    return {
+      ...EMOTION_GROUP_META[k],
+      n: a.n,
+      avgScore: (masked || a.scoreN === 0) ? null : round1(a.scoreSum / a.scoreN),
+      avgActs:  (masked || a.actN === 0)   ? null : round1(a.actSum / a.actN),
+    };
+  });
+
+  return {
+    groups,
+    totalDays,
+    coaching: _emotionCoaching(groups),
+    note: '감정 기록이 있는 날만 비교했어요. 이건 경향일 뿐, 정답은 아니에요.',
+  };
+}
+
+// 코칭 문구 규칙(§카드1-⑧, 비낙인·관찰형). 마스킹으로 수치가 없으면 안전 폴백.
+function _emotionCoaching(groups) {
+  const pos = groups.find(g => g.key === 'positive');
+  const neg = groups.find(g => g.key === 'negative');
+  const posScore = pos ? pos.avgScore : null;
+  const negScore = neg ? neg.avgScore : null;
+  const negActs = neg ? neg.avgActs : null;
+
+  // 규칙1: 힘든 날 점수가 좋았던 날의 -5 이상 → 회복탄력 칭찬.
+  if (posScore != null && negScore != null && negScore >= posScore - 5) {
+    return '힘든 날에도 꾸준히 공부한 날이 있었어요. 잘하고 있어요.';
+  }
+  // 규칙2: 힘든 날에도 활동이 있었으면 → 꾸준함 칭찬.
+  if (negActs != null && negActs > 0) {
+    return '힘든 날에도 꾸준히 공부한 날이 있었어요. 잘하고 있어요.';
+  }
+  // 규칙3: 좋았던 날 점수가 가장 높으면 → 컨디션 인식.
+  if (posScore != null && negScore != null && posScore > negScore) {
+    return '기분 좋은 날 집중이 잘 되는 경향이 보여요.';
+  }
+  // 규칙4: 3그룹 모두 안정적(점수 편차 작음) → 리듬 칭찬.
+  const scores = groups.map(g => g.avgScore).filter(v => v != null);
+  if (scores.length >= 2) {
+    const spread = Math.max(...scores) - Math.min(...scores);
+    if (spread <= 5) return '요즘 마음도 공부도 안정적이에요. 이 리듬 좋아요.';
+  }
+  // 폴백(수치 부족/소표본): 항상 1개는 내려간다.
+  return '이건 경향일 뿐이에요 — 어떤 날이든 네 노력은 소중해요.';
+}
+
 module.exports = {
   CONFIDENCE, CONFIDENCE_KO, RISK_GRADE, RISK_GRADE_KO, RISK_WEIGHTS,
   MIN_WEEKS, MIN_WEEK_ATTEMPTS, DEFAULT_WEEKS, NEGATIVE_EMOTIONS,
   classStudentIds, classStudents,
   computeTrend, projectReach, getClassRiskList, getPrereqGap, getWeakTrend,
+  getEmotionMirror,
   riskGrade, invalidateBridge,
 };

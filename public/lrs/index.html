@@ -404,6 +404,14 @@
     #masteryTooltip{ position:fixed; z-index:10002; max-width:280px; background:#111827; color:#fff;
       font-size:13px; line-height:1.5; padding:8px 12px; border-radius:8px; pointer-events:none;
       box-shadow:0 4px 12px rgba(0,0,0,.3); display:none; }
+
+    /* A6 감정-성취 비교 — 반응형(§⑦): <1200 차트 240px, <768 220px */
+    #sEmoMirrorBody{ height:280px; }
+    @media (max-width:1200px){ #sEmoMirrorBody{ height:240px; } }
+    @media (max-width:768px){
+      #sEmoMirrorBody{ height:220px; }
+      #sEmoMirrorCoach{ padding:14px 16px; }
+    }
   </style>
 </head>
 <body>
@@ -411,12 +419,6 @@
   <script src="/js/common-nav.js"></script>
 
   <div id="lrsRoot" class="lrs-shell" hidden>
-    <!-- 좌측 서브메뉴 (역할별 동적) -->
-    <aside class="lrs-sidemenu" aria-label="LRS 서브메뉴">
-      <h3 id="roleMenuTitle" hidden>메뉴</h3>
-      <nav id="roleMenu" role="navigation" aria-live="polite"></nav>
-    </aside>
-
     <div class="lrs-main">
       <!-- 표준 페이지 헤더 -->
       <header class="page-header">
@@ -431,7 +433,9 @@
           </div>
         </div>
         <div class="page-header__actions">
-          <div class="dc-role-switcher" role="group" aria-label="역할 전환">
+          <!-- 역할 미리보기 (admin 전용, 일반 사용자에겐 boot에서 숨김) -->
+          <div class="dc-role-switcher" id="roleSwitcher" role="group" aria-label="역할 전환" hidden>
+            <span class="dc-role-switcher__label" id="roleSwitcherLabel" hidden>미리보기:</span>
             <button type="button" data-role="student" aria-pressed="false" aria-label="학생 뷰로 전환">학생</button>
             <button type="button" data-role="teacher" aria-pressed="false" aria-label="교사 뷰로 전환">교사</button>
             <button type="button" data-role="admin"   aria-pressed="false" aria-label="관리자 뷰로 전환">관리자</button>
@@ -439,6 +443,9 @@
           <span class="sync-time" id="syncTime" aria-live="polite">동기화: --:--</span>
         </div>
       </header>
+
+      <!-- 인페이지 탭 (카테고리 내 뷰 2개↑일 때만 렌더) -->
+      <nav class="lrs-tabs" id="lrsTabs" role="tablist" aria-label="분석 하위 메뉴" hidden></nav>
 
       <!-- 공통 필터 바 (기간 피커) -->
       <section class="dc-filter-bar" aria-label="기간 필터">
@@ -2395,17 +2402,161 @@ VIEWS['s-trend'] = async function(root){
   // 학생 추이는 90일 고정 요청
   const daily = await apiGet('/api/lrs/stats/daily', { period:'90d' });
   const rows = (daily && daily.data) || [];
-  if (!rows.length) { root.innerHTML = tplEmpty('추이 데이터가 없어요'); return; }
-  root.innerHTML = chartWrap('sTrendLine','학습 추이 (최근 90일)','학습시간·활동건수·평균점수');
-  mkChart(document.getElementById('sTrendLine'),'line',{
-    labels: rows.map(r=>fmtDate(r.stat_date)),
-    datasets:[
-      { label:'학습시간(분)', data: rows.map(r=>toMinutes(r.total_duration_sec || r.total_duration)), borderColor:'var(--chart-1)', tension:.3 },
-      { label:'활동 건수',    data: rows.map(r=>r.count||0),                   borderColor:'var(--chart-5)', tension:.3, yAxisID:'y2' },
-      { label:'평균 점수',    data: rows.map(r=>Number(r.avg_score)||0),       borderColor:'var(--chart-3)', tension:.3, yAxisID:'y2' }
-    ]
-  }, { scales:{ y:{title:{display:true,text:'분'}}, y2:{position:'right', title:{display:true,text:'건/점'}, grid:{drawOnChartArea:false}} }});
+
+  // 추이 차트 영역 + A6 "감정-성취 비교" 카드 자리(하단 append)
+  root.innerHTML = `<div id="sTrendChartHost"></div><div id="sEmotionMirrorHost"></div>`;
+  const chartHost = document.getElementById('sTrendChartHost');
+  if (!rows.length){
+    chartHost.innerHTML = tplEmpty('추이 데이터가 없어요');
+  } else {
+    chartHost.innerHTML = chartWrap('sTrendLine','학습 추이 (최근 90일)','학습시간·활동건수·평균점수');
+    mkChart(document.getElementById('sTrendLine'),'line',{
+      labels: rows.map(r=>fmtDate(r.stat_date)),
+      datasets:[
+        { label:'학습시간(분)', data: rows.map(r=>toMinutes(r.total_duration_sec || r.total_duration)), borderColor:'var(--chart-1)', tension:.3 },
+        { label:'활동 건수',    data: rows.map(r=>r.count||0),                   borderColor:'var(--chart-5)', tension:.3, yAxisID:'y2' },
+        { label:'평균 점수',    data: rows.map(r=>Number(r.avg_score)||0),       borderColor:'var(--chart-3)', tension:.3, yAxisID:'y2' }
+      ]
+    }, { scales:{ y:{title:{display:true,text:'분'}}, y2:{position:'right', title:{display:true,text:'건/점'}, grid:{drawOnChartArea:false}} }});
+  }
+
+  // A6 "감정-성취 비교" — 정서×성취(학습 점수) (학생 본인)
+  await renderEmotionMirror(document.getElementById('sEmotionMirrorHost'));
 };
+
+/* ===== A6 "감정-성취 비교" (학생 · 정서×성취) =====
+ * 스펙: 작업지시서/LRS_P0_시각데이터스펙_v1.md 카드1(A6)
+ * GET /api/lrs/emotion-mirror/:userId → { groups:[{key,label,emoji,n,avgScore|null,avgActs|null}]×3, totalDays, coaching }
+ * 단일축 bar: 데이터셋 1개 = 평균 학습 점수(파랑#2563eb, y축 0~100 하나). 활동량은 툴팁에만.
+ * n<5(avgScore=null) 그룹은 막대 미표시 + 차트 중앙 높이에 회색 "기록 부족"(축 라벨과 분리). 가로스크롤 0. */
+async function renderEmotionMirror(host){
+  if (!host) return;
+  const uid = state.me && state.me.id;
+  if (!uid){ host.innerHTML = ''; return; } // 로그인 정보 없으면 조용히 생략
+
+  host.innerHTML = tplLoading(1);
+  const d = await apiGet('/api/lrs/emotion-mirror/' + encodeURIComponent(uid), {});
+  if (!d || d.success === false){
+    host.innerHTML = `<section class="dc-chart-wrapper">${tplError('감정-성취 비교를 불러오지 못했어요', ()=>setView('s-trend'))}</section>`;
+    return;
+  }
+
+  const groups = Array.isArray(d.groups) ? d.groups : [];
+  const totalDays = Number(d.totalDays) || 0;
+  // 빈 상태(§⑤): 전체 기록<5일 또는 모든 그룹 소표본(n<5 → 비교할 그룹 없음).
+  // n>=5 그룹이 하나라도 있으면 렌더(점수 없이 활동량만 있는 경우도 비교 대상).
+  const hasComparableGroup = groups.some(g => g && Number(g.n) >= 5);
+  if (totalDays < 5 || !hasComparableGroup || !groups.length){
+    host.innerHTML = `<section class="dc-chart-wrapper" style="padding:24px 28px;border-radius:16px;">
+      <header style="margin-bottom:12px;"><div>
+        <h2 style="font-size:20px;font-weight:700;margin:0;">📊 감정-성취 비교</h2>
+        <div class="subtitle" style="font-size:14px;">기분에 따라 내 성취(학습 점수)가 어떻게 달랐는지 살펴봐요</div>
+      </div></header>
+      ${tplEmpty('감정 기록이 더 쌓이면 감정-성취 비교를 보여드릴게요', {href:'/attendance', label:'감정 출석 하러 가기'})}
+    </section>`;
+    return;
+  }
+
+  // 총 감정 기록 일수 꼬리표(mastery-chip-gray)
+  const nChip = `<span class="mastery-chip-gray"><i class="fas fa-calendar-check" aria-hidden="true"></i> 감정 기록 ${totalDays}일</span>`;
+  const coaching = escapeHtml(d.coaching || '이건 경향일 뿐이에요 — 어떤 날이든 네 노력은 소중해요.');
+
+  host.innerHTML = `<section class="dc-chart-wrapper" style="padding:24px 28px;border-radius:16px;">
+    <header style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:12px;">
+      <div>
+        <h2 style="font-size:20px;font-weight:700;margin:0;">📊 감정-성취 비교</h2>
+        <div class="subtitle" style="font-size:14px;">기분에 따라 내 성취(학습 점수)가 어떻게 달랐는지 살펴봐요</div>
+      </div>
+      <div style="flex:none;">${nChip}</div>
+    </header>
+    <div class="chart-body" id="sEmoMirrorBody" style="position:relative;max-width:100%;">
+      <canvas id="sEmoMirror" role="img" aria-label="감정 그룹별 평균 학습 점수 비교 막대 차트"></canvas>
+    </div>
+    <div id="sEmoMirrorCoach" style="margin-top:16px;background:#f0f7ff;border-left:4px solid #2563eb;border-radius:8px;padding:16px 20px;font-size:16px;line-height:1.7;color:#1e3a5f;">
+      💬 ${coaching}
+    </div>
+    <div style="margin-top:10px;text-align:right;">
+      <a href="/attendance" style="font-size:14px;color:#2563eb;font-weight:600;text-decoration:none;">감정 기록 더 보기 →</a>
+    </div>
+  </section>`;
+
+  // x라벨 = 이모지+텍스트. n<5(avgScore=null) 그룹은 데이터 null(막대 미표시).
+  const labels   = groups.map(g => `${g.emoji || ''} ${g.label || ''}`.trim());
+  const scoreData = groups.map(g => (g && g.avgScore != null) ? g.avgScore : null);
+  const nList     = groups.map(g => (g && g.n != null) ? Number(g.n) : 0);
+  const shortLabelP = window.matchMedia && window.matchMedia('(max-width:768px)').matches ? 13 : 14;
+
+  // 데이터라벨(막대 위 수치, 값 있을 때만) + 소표본 "기록 부족"(차트 영역 중앙 높이) — 인라인 플러그인(신규 라이브러리 없음)
+  const emoMirrorLabelPlugin = {
+    id: 'emoMirrorLabels',
+    afterDraw(chart){
+      const { ctx } = chart;
+      const meta = chart.getDatasetMeta(0);
+      const xScale = chart.scales.x;
+      const area = chart.chartArea;
+      ctx.save();
+      // 막대 위 데이터라벨 — 실제 막대(avgScore≠null)에만
+      if (meta && !meta.hidden){
+        ctx.fillStyle = '#1d4ed8';
+        ctx.font = '700 ' + shortLabelP + 'px Pretendard, system-ui, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'bottom';
+        meta.data.forEach((bar, i) => {
+          const v = scoreData[i];
+          if (v == null) return;                          // 값 없으면 라벨 없음(떠다니는 라벨 방지)
+          ctx.fillText(String(Math.round(v)) + '점', bar.x, bar.y - 4);
+        });
+      }
+      // 소표본 그룹(n<5) → 차트 영역 중앙 높이에 옅은 회색 "기록 부족"(x축 감정 라벨과 분리)
+      ctx.fillStyle = '#9ca3af';
+      ctx.font = '600 ' + shortLabelP + 'px Pretendard, system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      const midY = (area.top + area.bottom) / 2;
+      labels.forEach((_, i) => {
+        if (nList[i] < 5){
+          ctx.fillText('기록 부족', xScale.getPixelForValue(i), midY);
+        }
+      });
+      ctx.restore();
+    }
+  };
+
+  const canvas = document.getElementById('sEmoMirror');
+  const chart = new Chart(canvas, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        { label:'평균 학습 점수', data: scoreData, backgroundColor:'#2563eb', borderRadius:4, maxBarThickness:64 }
+      ]
+    },
+    options: {
+      responsive:true, maintainAspectRatio:false,
+      layout:{ padding:{ top:18, bottom:8 } },
+      animation:{ duration:600, easing:'easeOutCubic' },
+      plugins:{
+        legend:{ display:false },
+        tooltip:{
+          callbacks:{
+            label(c){
+              const g = groups[c.dataIndex] || {};
+              if (g.avgScore == null) return `${g.label||''} · ${g.n||0}일 · 기록 부족`;
+              const acts = g.avgActs != null ? `활동 ${g.avgActs}건 · ` : '';
+              return `${g.label||''} · 평균 ${g.avgScore}점 · ${acts}${g.n||0}일`;
+            }
+          }
+        }
+      },
+      scales:{
+        x:{ grid:{ display:false }, ticks:{ font:{size:shortLabelP} } },
+        y:{ beginAtZero:true, min:0, max:100, title:{ display:true, text:'점수', font:{size:13} }, ticks:{ stepSize:20, font:{size:12} } }
+      }
+    },
+    plugins: [emoMirrorLabelPlugin]
+  });
+  state.charts.push(chart);
+}
 
 VIEWS['s-compare'] = async function(root){
   root.innerHTML = `<section class="dc-chart-wrapper"><header><h2>반 평균과 내 위치</h2><div class="subtitle">익명 비교 — 표본이 적을 경우 주의</div></header>
@@ -4319,53 +4470,56 @@ function setRole(role){
   if (!ROLE_CATEGORIES[role].includes(state.category || 'home')) {
     state.category = 'home';
   }
-  renderSideMenu(state.category || 'home');
+  renderInPageTabs(state.category || 'home');
   const firstId = defaultViewForCategory(role, state.category || 'home') || MENUS[role][0].id;
   setView(firstId);
 }
 
-function renderSideMenu(cat){
+/* 인페이지 가로 탭 렌더 — 사이드바 대체. 카테고리 내 뷰가 2개↑면 탭 바,
+   1개(홈/운영·리포트 단일 등)면 탭 바 미렌더(빈 탭 금지). group 필드는 무시하고 flat 순서. */
+function renderInPageTabs(cat){
   const useCat = cat || state.category || 'home';
   state.category = useCat;
-  const aside = document.querySelector('.lrs-sidemenu');
-  const allItems = MENUS[state.role] || [];
-  // 홈 카테고리: 사이드바 전체 숨김 (빈 pill 금지)
-  if (useCat === 'home'){
-    if (aside) aside.setAttribute('data-hidden', 'true');
-    const m = document.getElementById('roleMenu'); if (m) m.innerHTML = '';
-    document.getElementById('bcRole').textContent =
-      state.role==='student'?'학생':state.role==='teacher'?'교사':'관리자';
-    return;
-  }
-  if (aside) aside.setAttribute('data-hidden', 'false');
-
-  const items = allItems.filter(it => it.category === useCat);
-  document.getElementById('roleMenuTitle').textContent = MENU_LABELS[useCat] || '메뉴';
-
-  // group 필드로 묶어 헤더 삽입
-  const groups = [];
-  const seen = new Map();
-  items.forEach(it => {
-    const g = it.group || '기타';
-    if (!seen.has(g)){ seen.set(g, groups.length); groups.push({ name:g, items:[] }); }
-    groups[seen.get(g)].items.push(it);
-  });
-  const catLabel = MENU_LABELS[useCat] || '';
-  document.getElementById('roleMenu').innerHTML = groups.map(g => `
-    <div class="dc-sidemenu-group">
-      ${(groups.length>1 && g.name !== catLabel) ? `<div class="dc-sidemenu-group-title">${escapeHtml(g.name)}</div>` : ''}
-      ${g.items.map(it=>`
-        <button class="menu-item" type="button" data-view="${escapeAttr(it.id)}"
-          ${state.view===it.id?'aria-current="page"':''}
-          aria-label="${escapeAttr(it.label)}로 이동">
-          <i class="fas ${escapeAttr(it.icon)}" aria-hidden="true"></i><span class="label">${escapeHtml(it.label)}</span>
-        </button>`).join('')}
-    </div>`).join('');
-  document.getElementById('roleMenu').querySelectorAll('button').forEach(b=>{
-    b.onclick = ()=> setView(b.dataset.view);
-  });
+  const tabs = document.getElementById('lrsTabs');
   document.getElementById('bcRole').textContent =
     state.role==='student'?'학생':state.role==='teacher'?'교사':'관리자';
+
+  const items = (MENUS[state.role] || []).filter(it => it.category === useCat);
+
+  // 뷰 1개 이하: 탭 바 아예 렌더하지 않음
+  if (!tabs || items.length < 2){
+    if (tabs){ tabs.innerHTML = ''; tabs.hidden = true; }
+    return;
+  }
+
+  tabs.hidden = false;
+  tabs.setAttribute('aria-label', (MENU_LABELS[useCat] || '분석') + ' 하위 메뉴');
+  tabs.innerHTML = items.map(it=>{
+    const active = state.view === it.id;
+    return `<button class="lrs-tab${active?' is-active':''}" type="button" role="tab"
+      data-view="${escapeAttr(it.id)}"
+      aria-selected="${active?'true':'false'}"${active?' aria-current="page"':''}
+      tabindex="${active?'0':'-1'}">${escapeHtml(it.label)}</button>`;
+  }).join('');
+  tabs.querySelectorAll('button').forEach(b=>{
+    b.onclick = ()=> setView(b.dataset.view);
+  });
+}
+
+/* 하위 호환 별칭 — 기존 호출부(boot 등) 안전. */
+function renderSideMenu(cat){ return renderInPageTabs(cat); }
+
+/* 현재 state.view 기준으로 인페이지 탭 활성 상태만 갱신 (hashchange/popstate 대응) */
+function refreshTabActive(){
+  const tabs = document.getElementById('lrsTabs');
+  if (!tabs || tabs.hidden) return;
+  tabs.querySelectorAll('button').forEach(b=>{
+    const active = b.dataset.view === state.view;
+    b.classList.toggle('is-active', active);
+    b.setAttribute('aria-selected', active?'true':'false');
+    if (active){ b.setAttribute('aria-current','page'); b.tabIndex = 0; }
+    else { b.removeAttribute('aria-current'); b.tabIndex = -1; }
+  });
 }
 
 /* 폐기/통합된 구 관리자 뷰 id → 신규 5블록 매핑 (레거시 URL 호환) */
@@ -4400,7 +4554,7 @@ async function setView(id){
       bcMenuEl.textContent = MENU_LABELS[state.category] || '—';
     }
   }
-  renderSideMenu(state.category);
+  renderInPageTabs(state.category);
   // URL 동기화: hash + ?menu= 둘 다 갱신
   try {
     const url = new URL(location.href);
@@ -4619,6 +4773,21 @@ async function boot(){
 
   document.getElementById('lrsRoot').hidden = false;
 
+  // 역할 스위처 노출 정책: admin만 "미리보기" chip 토글로 노출. 학생/교사는 완전 숨김(로그인 역할 자동).
+  const roleSwitcher = document.getElementById('roleSwitcher');
+  if (roleSwitcher){
+    if (user.role === 'admin'){
+      roleSwitcher.hidden = false;
+      roleSwitcher.classList.add('is-preview');
+      roleSwitcher.setAttribute('aria-label','역할 미리보기(관리자 전용)');
+      roleSwitcher.title = '다른 역할이 보는 화면을 미리봅니다';
+      const lbl = document.getElementById('roleSwitcherLabel');
+      if (lbl) lbl.hidden = false;
+    } else {
+      roleSwitcher.hidden = true;
+    }
+  }
+
   document.querySelectorAll('.dc-role-switcher button').forEach(b=>{
     b.onclick = ()=> {
       const r = b.dataset.role;
@@ -4727,6 +4896,10 @@ async function boot(){
   document.addEventListener('keydown', e => { if (e.key === 'Escape') LRS.closeDrawer(); });
   const closeBtn = document.getElementById('drawerCloseBtn');
   if (closeBtn) closeBtn.addEventListener('click', LRS.closeDrawer);
+
+  // 인페이지 탭 활성 상태 보강 갱신 — setView가 이미 탭을 재렌더하므로 보조 안전장치.
+  // refreshTabActive는 클래스/속성만 토글(setView·이벤트 재발화 없음) → 무한루프 없음.
+  window.addEventListener('dacheum:menu-changed', refreshTabActive);
 }
 
 boot();

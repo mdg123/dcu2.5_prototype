@@ -1260,6 +1260,31 @@ router.get('/trend/student/:id', requireAuth, (req, res) => {
   }
 });
 
+// GET /api/lrs/emotion-mirror/:userId — A6 "마음-공부 거울"(학생 · 정서×성취/활동량).
+//   본인/교사/관리자(canViewUser). ★ 위험점수·EWS 필드 절대 미포함(P6 낙인 방지).
+//   ?days=60(기본, 1~180 클램프). 감정 있는 날 × lrs_user_daily 3그룹 평균 비교.
+router.get('/emotion-mirror/:userId', requireAuth, (req, res) => {
+  try {
+    const userId = parseInt(req.params.userId, 10);
+    if (!Number.isInteger(userId)) {
+      return res.status(400).json({ success: false, message: '잘못된 사용자 ID 입니다.' });
+    }
+    if (!canViewUser(req, userId)) {
+      return res.status(403).json({ success: false, message: '권한이 없습니다.' });
+    }
+    const days = req.query.days
+      ? Math.max(1, Math.min(180, parseInt(req.query.days, 10) || 60))
+      : 60;
+
+    const { groups, totalDays, coaching, note } = analytics.getEmotionMirror(userId, { days });
+
+    res.json({ success: true, userId, days, groups, totalDays, coaching, note });
+  } catch (err) {
+    console.error('[LRS] /emotion-mirror error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
 // GET /api/lrs/trend/class/:id — 교사(소유)/관리자. 반 성취 추세 + 도달 외삽.
 router.get('/trend/class/:id', requireAuth, (req, res) => {
   try {

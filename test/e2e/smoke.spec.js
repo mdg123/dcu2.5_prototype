@@ -381,3 +381,70 @@ for (const [role, screens] of Object.entries(DYNAMIC_SCREENS)) {
     }
   });
 }
+
+// ── 4) A6 "마음-공부 거울" 카드 (학생 · s-trend 하단) 집중 회귀 ──
+//    LRS s-trend 뷰로 진입 → 카드가 렌더(차트/빈상태/에러 중 하나)되는지 + 가로스크롤 0
+//    + [object Object]/JS에러 0 을 데스크탑·모바일 두 뷰포트에서 검증.
+test.describe('스모크: LRS A6 감정-성취 비교', () => {
+  for (const vp of VIEWPORTS) {
+    test(`학생-A6 카드 렌더·무결 [${vp.name}]`, async ({ browser }) => {
+      const context = await browser.newContext({ storageState: stateFor('student'), locale: 'ko-KR', baseURL: BASE_URL });
+      const consoleErrors = [];
+      const pageErrors = [];
+      try {
+        const page = await context.newPage();
+        page.setViewportSize({ width: vp.width, height: vp.height });
+        page.on('console', (msg) => { if (msg.type() === 'error') { const t = msg.text(); if (!isWhitelisted(t)) consoleErrors.push(`[${vp.name}] ${t}`); } });
+        page.on('pageerror', (err) => { pageErrors.push(`[${vp.name}] ${err.message}`); });
+
+        // ?menu=analytics 로 진입 → 분석 카테고리 사이드메뉴(s-trend 버튼 포함)가 렌더됨.
+        // (bare /lrs/index.html 은 홈 카테고리라 s-trend 버튼이 없음.)
+        // ※ LRS SPA 는 주기적 sync 타이머가 있어 networkidle 이 안정적으로 안 옴 → 셀렉터 대기로 대체.
+        await page.goto('/lrs/index.html?menu=analytics', { waitUntil: 'domcontentloaded' });
+        await page.waitForSelector('#dacheum-gnb-wrapper', { timeout: 10000 }).catch(() => {});
+        await page.waitForSelector('[data-view="s-trend"]', { timeout: 15000 }).catch(() => {});
+
+        // s-trend(학습 습관) 진입 → 카드 호스트가 채워질 때까지. SPA 비동기 렌더 경합 방어로 최대 3회 재시도.
+        let hostFilled = false;
+        for (let attempt = 0; attempt < 3 && !hostFilled; attempt++) {
+          await page.evaluate(() => {
+            const b = document.querySelector('[data-view="s-trend"]');
+            if (b) b.click(); else location.hash = '#s-trend';
+          }).catch(() => {});
+          hostFilled = await page.waitForFunction(() => {
+            const h = document.getElementById('sEmotionMirrorHost');
+            return !!(h && h.querySelector('.dc-chart-wrapper, .dc-state-panel'));
+          }, { timeout: 10000 }).then(() => true).catch(() => false);
+        }
+        await page.waitForTimeout(400);
+
+        // (렌더) A6 카드 호스트에 차트(canvas) 또는 빈/에러 상태 패널이 존재
+        const a6 = await page.evaluate(() => {
+          const h = document.getElementById('sEmotionMirrorHost');
+          if (!h) return { host: false };
+          return {
+            host: true,
+            hasCanvas: !!h.querySelector('#sEmoMirror'),
+            hasStatePanel: !!h.querySelector('.dc-state-panel'),
+            hasTitle: /감정-성취 비교/.test(h.innerText || ''),
+            objObj: ((h.innerText || '').match(/\[object Object\]/g) || []).length,
+          };
+        });
+        expect.soft(a6.host, `A6 [${vp.name}] 카드 호스트(#sEmotionMirrorHost) 없음`).toBeTruthy();
+        expect.soft(a6.hasCanvas || a6.hasStatePanel, `A6 [${vp.name}] 차트/상태패널 둘 다 없음(렌더 실패)`).toBeTruthy();
+        expect.soft(a6.hasTitle, `A6 [${vp.name}] 카드 제목("감정-성취 비교") 미표시`).toBeTruthy();
+        expect.soft(a6.objObj, `A6 [${vp.name}] [object Object] ${a6.objObj}건`).toBe(0);
+
+        // (C) 가로 스크롤 0
+        const ov = await page.evaluate(() => ({ sw: document.documentElement.scrollWidth, cw: document.documentElement.clientWidth }));
+        expect.soft(ov.sw, `A6 [${vp.name}] 가로 스크롤: scrollWidth ${ov.sw} > clientWidth ${ov.cw}`).toBeLessThanOrEqual(ov.cw + 1);
+
+        await page.close();
+      } finally {
+        await context.close();
+      }
+      const allErrors = [...pageErrors, ...consoleErrors];
+      expect.soft(allErrors.length, `A6 [${vp.name}] (B)콘솔/JS 에러:\n${allErrors.join('\n')}`).toBe(0);
+    });
+  }
+});
