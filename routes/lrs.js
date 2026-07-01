@@ -1745,10 +1745,18 @@ router.get('/stats/perform', requireAuth, (req, res) => {
     const r = dateRangeWhere(req, 'created_at', 'll');
     if (r.invalid) return sendInvalidPeriod(res, r.reason);
     const sf = resolveScopeFilter(req, 'll');
-    const perfTypes = ['exam_complete', 'homework_submit', 'self_learn'];
+    // '자기주도 학습' 버킷 = self_learn(시드/구 경로) ∪ daily_complete(오늘의 학습 실 경로).
+    //   completeDailyItem()(db/self-learn-extended.js)는 오늘의 학습 이수를 activity_type='daily_complete'
+    //   로 발행하지만, LRS 활동유형 요약/추이는 self_learn 만 읽어 실제 이수가 표에서 누락됐다.
+    //   두 타입은 서로 다른 row(각 이수 1건 → 1 row)라 함께 세도 이중 카운트 없음.
+    //   집계·라벨·추이는 daily_complete 를 self_learn 으로 정규화해 '자기주도 학습' 단일 행으로 합친다.
+    const SELF_LEARN_TYPES = ['self_learn', 'daily_complete'];
+    const perfTypes = ['exam_complete', 'homework_submit', ...SELF_LEARN_TYPES];
     const typePH = perfTypes.map(()=>'?').join(',');
     const baseWhere = `WHERE ll.activity_type IN (${typePH}) ${r.where} ${sf.where}`;
     const baseParams = [...perfTypes, ...r.params, ...sf.params];
+    // self_learn 버킷 판정 SQL 조각 (재사용). daily_complete 도 자기주도 학습으로 합산.
+    const SELF_SQL = `ll.activity_type IN ('self_learn','daily_complete')`;
 
     // summary
     const sumRow = db.prepare(`
@@ -1758,8 +1766,8 @@ router.get('/stats/perform', requireAuth, (req, res) => {
         SUM(CASE WHEN ll.activity_type='exam_complete' AND ll.result_success=1 THEN 1 ELSE 0 END) exam_ok,
         SUM(CASE WHEN ll.activity_type='homework_submit' THEN 1 ELSE 0 END) hw_cnt,
         SUM(CASE WHEN ll.activity_type='homework_submit' AND ll.result_success=1 THEN 1 ELSE 0 END) hw_ok,
-        SUM(CASE WHEN ll.activity_type='self_learn' THEN 1 ELSE 0 END) self_cnt,
-        AVG(CASE WHEN ll.activity_type='self_learn' THEN ll.result_score END) self_avg,
+        SUM(CASE WHEN ${SELF_SQL} THEN 1 ELSE 0 END) self_cnt,
+        AVG(CASE WHEN ${SELF_SQL} THEN ll.result_score END) self_avg,
         COUNT(*) total_acts
       FROM learning_logs ll
       ${baseWhere}
@@ -1777,15 +1785,17 @@ router.get('/stats/perform', requireAuth, (req, res) => {
     };
 
     // byType
+    //   daily_complete 를 self_learn 으로 정규화(GROUP BY 前)해 '자기주도 학습' 한 행으로 합친다.
+    //   (self_learn·daily_complete 가 각각 별도 행으로 쪼개지면 표에 두 줄이 생겨 혼란.)
     const typeLabels = { exam_complete:'평가 완료', homework_submit:'과제 제출', self_learn:'자기주도 학습' };
     const byType = db.prepare(`
-      SELECT ll.activity_type,
+      SELECT CASE WHEN ll.activity_type='daily_complete' THEN 'self_learn' ELSE ll.activity_type END AS activity_type,
              COUNT(*) cnt,
              AVG(ll.result_score) avg_score,
              AVG(COALESCE(ll.duration_sec, ll.result_duration, 0)) avg_dur_sec
       FROM learning_logs ll
       ${baseWhere}
-      GROUP BY ll.activity_type
+      GROUP BY CASE WHEN ll.activity_type='daily_complete' THEN 'self_learn' ELSE ll.activity_type END
     `).all(...baseParams).map(row => ({
       activity_type: row.activity_type,
       label: typeLabels[row.activity_type] || row.activity_type,
@@ -1803,7 +1813,7 @@ router.get('/stats/perform', requireAuth, (req, res) => {
                COALESCE(u.display_name, u.username) name,
                SUM(CASE WHEN ll.activity_type='exam_complete' THEN 1 ELSE 0 END) exam_cnt,
                SUM(CASE WHEN ll.activity_type='homework_submit' THEN 1 ELSE 0 END) homework_cnt,
-               SUM(CASE WHEN ll.activity_type='self_learn' THEN 1 ELSE 0 END) self_cnt,
+               SUM(CASE WHEN ${SELF_SQL} THEN 1 ELSE 0 END) self_cnt,
                COUNT(*) total_cnt,
                AVG(ll.result_score) avg_score
         FROM learning_logs ll
@@ -1828,7 +1838,7 @@ router.get('/stats/perform', requireAuth, (req, res) => {
       SELECT DATE(ll.created_at) date,
              SUM(CASE WHEN ll.activity_type='exam_complete' THEN 1 ELSE 0 END) exam_cnt,
              SUM(CASE WHEN ll.activity_type='homework_submit' THEN 1 ELSE 0 END) homework_cnt,
-             SUM(CASE WHEN ll.activity_type='self_learn' THEN 1 ELSE 0 END) self_cnt
+             SUM(CASE WHEN ${SELF_SQL} THEN 1 ELSE 0 END) self_cnt
       FROM learning_logs ll
       ${baseWhere}
       GROUP BY DATE(ll.created_at)

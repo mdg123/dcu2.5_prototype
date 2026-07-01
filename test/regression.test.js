@@ -393,3 +393,132 @@ test('BUG11f: 성장 목표 — 타인 목표 update/delete 차단(소유 격리
   assert.equal(g.deleteGrowthGoal(c.id, S1), true, '본인 delete 성공');
   assert.ok(!g.getGrowthGoals(S1).some(x => x.id === c.id), '삭제 후 목록에서 사라짐');
 });
+
+// ──────────────────────────────────────────────────────────────────────────
+// BUG12: 오늘의 학습 이수가 LRS(자기주도 학습)에 잡혀야 한다.
+//   결함: completeDailyItem() 은 오늘의 학습 이수를 activity_type='daily_complete' 로 발행하는데,
+//         LRS /stats/perform 은 self_learn 만 읽어 실제 이수가 "활동 유형별 요약/추이"에서 누락됐다.
+//   fix(routes/lrs.js): self_learn 버킷 = self_learn ∪ daily_complete 로 합산(자기주도 학습 단일 라벨).
+//   박제 3종:
+//     (a) 오늘의 학습 이수 → learning_logs daily_complete 1건 발행(going-forward)
+//     (b) LRS self_learn 버킷 쿼리에 그 이수가 반영(자기주도 학습 count 증가)
+//     (c) 같은 항목 중복 완료 시 로그 2건 안 생김(멱등)
+// ──────────────────────────────────────────────────────────────────────────
+test('BUG12: 오늘의 학습 이수 → LRS 자기주도 학습(daily_complete) 반영 + 멱등', () => {
+  const selfLearn = require('../db/self-learn-extended');
+
+  // 격리 시드: 먼 미래 세트/항목 1건 (실 데이터 무간섭). content 없는 external 항목 → 점수 없음 경로.
+  const setInfo = db.prepare(`
+    INSERT INTO daily_learning_sets (class_id, teacher_id, title, target_date, target_grade, is_active)
+    VALUES (?, ?, 'BUG12 오늘의학습 세트', '2099-11-15', 4, 1)
+  `).run(CLASS, TEACHER);
+  const setId = setInfo.lastInsertRowid;
+  const itemInfo = db.prepare(`
+    INSERT INTO daily_learning_items (set_id, source_type, external_url, external_title, item_title, sort_order)
+    VALUES (?, 'external', 'https://example.com/bug12', 'BUG12 항목', 'BUG12 항목', 1)
+  `).run(setId);
+  const itemId = itemInfo.lastInsertRowid;
+
+  // 발행 전: 이 항목에 대한 daily_complete 로그 0건
+  const countLog = () => db.prepare(
+    "SELECT COUNT(*) c FROM learning_logs WHERE user_id = ? AND target_type = 'daily_learning' AND target_id = ? AND activity_type = 'daily_complete'"
+  ).get(S1, String(itemId)).c;
+  assert.equal(countLog(), 0, 'BUG12 전제: 이수 전 daily_complete 로그 0건');
+
+  // (a) 이수 → learning_logs daily_complete 1건
+  selfLearn.completeDailyItem(itemId, S1, { score: 90, timeSpent: 120 });
+  assert.equal(countLog(), 1, 'BUG12(a): 오늘의 학습 이수 시 daily_complete 로그 1건 발행');
+
+  // (c) 멱등: 같은 항목 재완료해도 로그 2건 안 생김 (completeDailyItem 이 wasCompleted 가드)
+  selfLearn.completeDailyItem(itemId, S1, { score: 95, timeSpent: 60 });
+  assert.equal(countLog(), 1, 'BUG12(c): 중복 이수 시 daily_complete 로그가 2건이 되면 안 됨(멱등)');
+
+  // (b) LRS /stats/perform self_learn 버킷 쿼리(핵심 로직 재현): daily_complete 가 self_learn 으로 합산.
+  //   route(routes/lrs.js)와 동일하게 daily_complete → self_learn 정규화 후 GROUP BY.
+  const perfTypes = ['exam_complete', 'homework_submit', 'self_learn', 'daily_complete'];
+  const typePH = perfTypes.map(() => '?').join(',');
+  const byType = db.prepare(`
+    SELECT CASE WHEN ll.activity_type='daily_complete' THEN 'self_learn' ELSE ll.activity_type END AS activity_type,
+           COUNT(*) cnt
+    FROM learning_logs ll
+    WHERE ll.activity_type IN (${typePH}) AND ll.user_id = ?
+    GROUP BY CASE WHEN ll.activity_type='daily_complete' THEN 'self_learn' ELSE ll.activity_type END
+  `).all(...perfTypes, S1);
+  const selfRow = byType.find(r => r.activity_type === 'self_learn');
+  assert.ok(selfRow, 'BUG12(b): LRS byType 에 self_learn(자기주도 학습) 행이 있어야');
+  // 방금 이수한 이 항목만 세도 최소 1 이상. (S1 의 기존 self_learn/daily_complete 도 합산되므로 >=1)
+  assert.ok(selfRow.cnt >= 1, 'BUG12(b): 자기주도 학습 count 에 방금 이수(daily_complete)가 포함(>=1)');
+
+  // daily_complete 만 별도 행으로 남지 않아야(자기주도 학습으로 병합됨 — 표에 두 줄 방지)
+  assert.ok(!byType.some(r => r.activity_type === 'daily_complete'),
+    'BUG12(b): daily_complete 는 self_learn 으로 병합되어 별도 행이 없어야');
+});
+
+// ──────────────────────────────────────────────────────────────────────────
+// BUG13: 오늘의 학습 백필 멱등 — completed daily_learning_progress 중 대응 로그 없는 건만
+//   1회 발행, 재실행 시 중복 0. (scripts/backfill-daily-learning-logs.js 의 EXISTS 가드 로직 박제)
+// ──────────────────────────────────────────────────────────────────────────
+test('BUG13: 오늘의 학습 백필 — 대응 로그 없는 완료건 1회 발행, 재실행 중복 0(멱등)', () => {
+  const { logLearningActivity } = require('../db/learning-log-helper');
+
+  // 격리 시드: 먼 미래 세트/항목 + "완료된 progress" 인데 learning_log 는 없는 고아 상태 재현.
+  const setInfo = db.prepare(`
+    INSERT INTO daily_learning_sets (class_id, teacher_id, title, target_date, target_grade, is_active)
+    VALUES (?, ?, 'BUG13 백필 세트', '2099-12-01', 4, 1)
+  `).run(CLASS, TEACHER);
+  const setId = setInfo.lastInsertRowid;
+  const itemInfo = db.prepare(`
+    INSERT INTO daily_learning_items (set_id, source_type, external_url, item_title, sort_order)
+    VALUES (?, 'external', 'https://example.com/bug13', 'BUG13 항목', 1)
+  `).run(setId);
+  const itemId = itemInfo.lastInsertRowid;
+  // completed progress 직접 삽입(=구버전 이수, 로그 없음) — completeDailyItem 안 거침.
+  db.prepare(`
+    INSERT INTO daily_learning_progress (user_id, item_id, set_id, status, started_at, completed_at, score)
+    VALUES (?, ?, ?, 'completed', '2099-12-01 09:00:00', '2099-12-01 09:10:00', NULL)
+  `).run(S1, itemId, setId);
+
+  // 백필 로직(스크립트와 동일한 EXISTS 가드) 재현: 대응 로그 없는 완료건만 발행.
+  function backfillOnce() {
+    const orphans = db.prepare(`
+      SELECT p.user_id, p.item_id, p.completed_at,
+             (SELECT s.class_id FROM daily_learning_sets s
+                JOIN daily_learning_items i ON i.set_id = s.id WHERE i.id = p.item_id) AS class_id
+      FROM daily_learning_progress p
+      WHERE p.status = 'completed' AND p.completed_at IS NOT NULL AND p.item_id = ?
+        AND NOT EXISTS (
+          SELECT 1 FROM learning_logs ll
+          WHERE ll.user_id = p.user_id AND ll.target_type = 'daily_learning'
+            AND ll.target_id = CAST(p.item_id AS TEXT)
+            AND ll.activity_type IN ('daily_complete','self_learn')
+        )
+    `).all(itemId);
+    let n = 0;
+    for (const o of orphans) {
+      const res = logLearningActivity({
+        userId: o.user_id, activityType: 'daily_complete', targetType: 'daily_learning',
+        targetId: o.item_id, classId: o.class_id || null, verb: 'completed',
+        sourceService: 'self-learn', resultScore: null, createdAt: o.completed_at,
+        metadata: { backfill: 'daily-learning-logs' }
+      });
+      if (res && res.id) n++;
+    }
+    return n;
+  }
+
+  const countLog = () => db.prepare(
+    "SELECT COUNT(*) c FROM learning_logs WHERE user_id = ? AND target_type = 'daily_learning' AND target_id = ? AND activity_type = 'daily_complete'"
+  ).get(S1, String(itemId)).c;
+
+  assert.equal(countLog(), 0, 'BUG13 전제: 백필 전 로그 0건');
+  assert.equal(backfillOnce(), 1, 'BUG13: 1회차 백필 — 고아 완료건 1건 발행');
+  assert.equal(countLog(), 1, 'BUG13: 발행 후 로그 1건');
+  // created_at 이 원래 이수 시각으로 귀속됐는지(날짜 정합)
+  const log = db.prepare(
+    "SELECT created_at FROM learning_logs WHERE user_id = ? AND target_id = ? AND activity_type = 'daily_complete'"
+  ).get(S1, String(itemId));
+  assert.equal(log.created_at, '2099-12-01 09:10:00', 'BUG13: created_at = 원래 completed_at(날짜 귀속)');
+  // 재실행 멱등: 이미 로그 있으니 0건 발행, 총 1건 유지
+  assert.equal(backfillOnce(), 0, 'BUG13: 재실행 시 중복 발행 0(멱등)');
+  assert.equal(countLog(), 1, 'BUG13: 재실행 후에도 로그 1건 유지(중복 없음)');
+});
