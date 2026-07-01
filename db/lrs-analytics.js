@@ -779,11 +779,358 @@ function _emotionCoaching(groups) {
   return '이건 경향일 뿐이에요 — 어떤 날이든 네 노력은 소중해요.';
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// B4 "겉핥기 감지" (교사 · 너무 빨리 넘긴 학습) — 온더플라이(신규 테이블 0).
+//   스펙: 작업지시서/LRS_P0_시각데이터스펙_v1.md §카드3(③④⑤)
+//   반 학생 × 정답(success=1) × 소요시간 有 콘텐츠 로그를 콘텐츠별로 묶어
+//   median(duration_sec) 계산 → duration < median*0.4 & 정답 이면 "속도이상" 플래그.
+//   ★ 표본<10(그룹 로그수) 콘텐츠는 median 불안정 → 개별 비노출(maskedContentCount만 +1).
+//   ★ points 는 표본≥10 콘텐츠만. topStudents 는 flagCount desc.
+//   getShallowLearning(classId, { days=30 }) →
+//     { classId, days, studentCount, points[], topStudents[], maskedContentCount,
+//       medianThreshold, disclaimer }
+// ─────────────────────────────────────────────────────────────────────────────
+const SHALLOW_MIN_CONTENT_SAMPLE = 10; // 콘텐츠 그룹 로그수<10 → median 불안정(비노출)
+const SHALLOW_RATIO = 0.4;             // duration < median*0.4 → 속도이상
+
+// 배열 중앙값(정렬 후). 이상치 방어(평균 아님). 빈 배열 → null.
+function _median(arr) {
+  if (!arr || !arr.length) return null;
+  const s = [...arr].sort((a, b) => a - b);
+  const mid = Math.floor(s.length / 2);
+  return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
+}
+
+// 콘텐츠 라벨: contents.title 우선(target_id 매칭), 없으면 성취기준 라벨/코드 폴백.
+function _contentLabel(targetType, targetId, achievementCode, titleCache) {
+  const key = `${targetType}:${targetId}`;
+  if (titleCache.has(key)) return titleCache.get(key);
+  let label = null;
+  if (targetType === 'content' && targetId != null) {
+    try {
+      const row = db.prepare('SELECT title FROM contents WHERE id = ?').get(Number(targetId));
+      if (row && row.title) label = row.title;
+    } catch (_) { /* contents 없으면 폴백 */ }
+  }
+  if (!label && achievementCode) {
+    try { label = resolveCode(achievementCode).label; } catch (_) { label = null; }
+  }
+  if (!label) label = `${targetType} ${targetId}`;
+  titleCache.set(key, label);
+  return label;
+}
+
+function getShallowLearning(classId, { days = 30 } = {}) {
+  const d = Math.max(1, Math.min(365, Number(days) || 30));
+  const ids = classStudentIds(classId);
+  const empty = {
+    classId: Number(classId), days: d, studentCount: ids.length,
+    points: [], topStudents: [], maskedContentCount: 0,
+    medianThreshold: SHALLOW_RATIO,
+    disclaimer: '빠르게 맞힌 게 꼭 부정은 아니에요. 이미 잘 아는 내용일 수도 있어요.',
+  };
+  if (!ids.length) return empty;
+
+  // 1) 대상 로그: 반 학생 × 소요시간 有 × 콘텐츠 식별(target_type/id 有) × 기간.
+  //    result_success 는 median 계산엔 전부 쓰되, 플래그 판정은 success=1 만.
+  const ph = ids.map(() => '?').join(',');
+  let rows;
+  try {
+    rows = db.prepare(`
+      SELECT ll.user_id, ll.target_type, ll.target_id, ll.duration_sec,
+             ll.result_success, ll.result_score, ll.achievement_code
+      FROM learning_logs ll
+      WHERE ll.user_id IN (${ph})
+        AND ll.duration_sec IS NOT NULL AND ll.duration_sec > 0
+        AND ll.target_type IS NOT NULL AND ll.target_id IS NOT NULL
+        AND ll.created_at >= date('now', ?)
+    `).all(...ids, `-${d} days`);
+  } catch (_) { rows = []; }
+  if (!rows.length) return empty;
+
+  const nameById = new Map(classStudents(classId).map(s => [s.id, s.name]));
+
+  // 2) 콘텐츠(target_type:target_id) 그룹핑 → duration 배열.
+  const groups = new Map(); // key -> { durations:[], rows:[], achievementCode }
+  for (const r of rows) {
+    const key = `${r.target_type}:${r.target_id}`;
+    if (!groups.has(key)) groups.set(key, { durations: [], rows: [], achievementCode: r.achievement_code || null });
+    const g = groups.get(key);
+    g.durations.push(Number(r.duration_sec));
+    g.rows.push(r);
+    if (!g.achievementCode && r.achievement_code) g.achievementCode = r.achievement_code;
+  }
+
+  // 3) 그룹별 median → 표본<10 은 비노출(maskedContentCount). 표본≥10 만 플래그 산출.
+  const titleCache = new Map();
+  const points = [];
+  let maskedContentCount = 0;
+  const flagCountByUser = new Map(); // userId -> flagCount
+
+  for (const [key, g] of groups.entries()) {
+    if (g.durations.length < SHALLOW_MIN_CONTENT_SAMPLE) { maskedContentCount++; continue; }
+    const med = _median(g.durations);
+    if (med == null || med <= 0) { maskedContentCount++; continue; }
+    const [tType, tId] = key.split(':');
+    const label = _contentLabel(tType, tId, g.achievementCode, titleCache);
+    for (const r of g.rows) {
+      const dur = Number(r.duration_sec);
+      const ratio = Math.round((dur / med) * 100) / 100;
+      const correct = r.result_success === 1;
+      const flag = correct && dur < med * SHALLOW_RATIO;
+      if (flag) flagCountByUser.set(r.user_id, (flagCountByUser.get(r.user_id) || 0) + 1);
+      points.push({
+        userId: r.user_id,
+        name: nameById.get(r.user_id) || `학생${r.user_id}`,
+        content: label,
+        durationSec: dur,
+        median: Math.round(med),
+        ratio,
+        correct,
+        flag,
+      });
+    }
+  }
+
+  // 4) topStudents: 플래그 있는 학생만, flagCount desc. severity: >=3 high / 1~2 medium.
+  const topStudents = Array.from(flagCountByUser.entries())
+    .map(([userId, flagCount]) => ({
+      userId,
+      name: nameById.get(userId) || `학생${userId}`,
+      flagCount,
+      severity: flagCount >= 3 ? 'high' : 'medium',
+    }))
+    .sort((a, b) => b.flagCount - a.flagCount);
+
+  // points: 플래그 우선 노출(빈 산점 방지) — flag desc, 그다음 ratio asc(빠른 순).
+  points.sort((a, b) => (b.flag - a.flag) || (a.ratio - b.ratio));
+
+  return {
+    classId: Number(classId), days: d, studentCount: ids.length,
+    points, topStudents, maskedContentCount,
+    medianThreshold: SHALLOW_RATIO,
+    disclaimer: '빠르게 맞힌 게 꼭 부정은 아니에요. 이미 잘 아는 내용일 수도 있어요.',
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// B6 "정서-참여 교차" (교사 · 반 2×2 매트릭스) — 온더플라이(신규 테이블 0).
+//   스펙: 작업지시서/LRS_P0_시각데이터스펙_v1.md §카드2(③④)
+//   getClassRiskList 가 이미 낸 signals.s_emotion(부정비율 0~1, 없으면 null)·
+//   signals.s_engage(참여 하락 0~1) 를 2축 좌표로 재노출만 한다(신규 산식 최소).
+//   ★ score/grade/reasons 필드는 제거(이 카드 목적은 사분면). 실명 마스킹은 라우트가 처리.
+//   축 매핑(스펙 §카드2-③):
+//     y(정서) = round((1 - s_emotion)*100)  // 0=부정↑(위), 100=긍정(아래). null → y=50(중립)
+//     x(참여) = round((1 - s_engage)*100)    // 0=참여↓(좌), 100=참여유지(우)
+//     yNeg = s_emotion>=0.5 ; xLow = s_engage>=0.5
+//       yNeg & xLow → red(적신호) / yNeg & !xLow → care(정서케어)
+//       !yNeg & xLow → motive(학습동기) / else → stable(안정)
+//     감정없음(hasEmotion=false) 은 사분면 판정에서 중립 → stable 로 두되 quadrant 별도 표기 안 함.
+//   getEmotionEngage(classId, { weeks=2 }) →
+//     { classId, weeks, studentCount, points[], summary{red,care,motive,stable}, disclaimer }
+// ─────────────────────────────────────────────────────────────────────────────
+function getEmotionEngage(classId, { weeks = 2 } = {}) {
+  const w = Math.max(1, Math.min(12, Number(weeks) || 2));
+  const students = classStudents(classId);
+  const empty = {
+    classId: Number(classId), weeks: w, studentCount: students.length,
+    points: [], summary: { red: 0, care: 0, motive: 0, stable: 0 },
+    disclaimer: '규칙 기반 신호예요. 학생과의 대화로 꼭 확인하세요.',
+  };
+  if (!students.length) return empty;
+
+  const risk = getClassRiskList(classId, students);
+  const points = [];
+  const summary = { red: 0, care: 0, motive: 0, stable: 0 };
+
+  for (const r of risk.list) {
+    const sEmotion = r.signals ? r.signals.s_emotion : null;
+    const sEngage = (r.signals && r.signals.s_engage != null) ? r.signals.s_engage : 0;
+    const hasEmotion = sEmotion != null;
+
+    // 좌표(0~100). 감정없음 → y=50(중립).
+    const y = hasEmotion ? Math.round((1 - sEmotion) * 100) : 50;
+    const x = Math.round((1 - sEngage) * 100);
+
+    const xLow = sEngage >= 0.5;         // 참여 하락 우세
+    let quadrant;
+    if (hasEmotion) {
+      const yNeg = sEmotion >= 0.5;      // 부정 우세
+      if (yNeg && xLow) quadrant = 'red';
+      else if (yNeg && !xLow) quadrant = 'care';
+      else if (!yNeg && xLow) quadrant = 'motive';
+      else quadrant = 'stable';
+    } else {
+      // 감정 기록 없는 학생은 적신호/케어 사분면에서 제외(스펙 §카드2-⑤).
+      //   참여만 낮으면 학습동기, 아니면 안정. 회색 중립 점으로 표기.
+      quadrant = xLow ? 'motive' : 'stable';
+    }
+    summary[quadrant]++;
+
+    // 노트(교사 개입 힌트) — 실명·수치 최소.
+    let engageNote = '정상';
+    if (sEngage >= 0.7) engageNote = '활동 급감';
+    else if (sEngage >= 0.4) engageNote = '활동 감소';
+    const emotionNote = hasEmotion ? `부정 ${Math.round(sEmotion * 100)}%` : '감정 기록 없음';
+
+    points.push({
+      userId: r.userId,
+      name: r.name,
+      x, y, quadrant, hasEmotion,
+      engageNote, emotionNote,
+    });
+  }
+
+  return {
+    classId: Number(classId), weeks: w, studentCount: students.length,
+    points, summary,
+    disclaimer: '규칙 기반 신호예요. 학생과의 대화로 꼭 확인하세요.',
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// A4 "다음 한 걸음" (학생 · 선수→후속 학습 경로) — 온더플라이(신규 테이블 0).
+//   스펙: 작업지시서/LRS_P0_시각데이터스펙_v1.md §카드4(③④⑤)
+//   getPrereqGap 의 1인칭 변형. 브리지(prereqOf: 후속→[선수들])는 동일 _buildBridge/_nodeToCode.
+//   ★ 학생용 — 위험점수/EWS 필드 절대 미포함(P6). 코칭 프레임만.
+//   산식(스펙 §카드4-③):
+//     1) 본인 성취 status(lrs_achievement_stats → classifyStatus): reached/not_reached/insufficient.
+//     2) 열쇠 노드 X 후보 = 본인이 not_reached 인 선수개념(insufficient 는 "막힘" 아님).
+//        각 X 의 unlocksCount = X 를 선수로 갖는 후속 Y 중 본인이 not_reached/insufficient 인 개수.
+//     3) 우선순위 = unlocksCount desc → 상위 limit(기본 3)개.  (평가부족 선수는 열쇠 아님)
+//     4) readyToChallenge = 선수 전부 reached 인데 본인이 not_reached 인 후속 Y.
+//     5) 각 열쇠/도전에 recommendForCode(code,3) + 미니 사슬(선수→현재→후속) 부착.
+//   getNextStep(userId, { limit=3 }) →
+//     { userId, keyNodes[], readyToChallenge[], note }
+// ─────────────────────────────────────────────────────────────────────────────
+function getNextStep(userId, { limit = 3 } = {}) {
+  const lim = Math.max(1, Math.min(10, Number(limit) || 3));
+  const uid = Number(userId);
+  const note = '학습 지도를 따라가면 막힌 곳을 넘을 수 있어요.';
+  const empty = { userId: uid, keyNodes: [], readyToChallenge: [], note };
+
+  // 1) 본인 성취 status 맵(code(정규형) → status).
+  let statRows;
+  try {
+    statRows = db.prepare(`
+      SELECT achievement_code AS code, attempt_count AS attempts,
+             success_count AS correct, avg_score
+      FROM lrs_achievement_stats WHERE user_id = ? AND achievement_code IS NOT NULL
+    `).all(uid);
+  } catch (_) { statRows = []; }
+  const statusByCode = new Map(); // normCode -> status
+  for (const r of statRows) {
+    const rate = reachRate(Number(r.correct) || 0, Number(r.attempts) || 0, r.avg_score);
+    const status = classifyStatus(Number(r.attempts) || 0, rate);
+    statusByCode.set(normCode(r.code), status);
+  }
+  const statusOf = (code) => statusByCode.get(normCode(code)) || STATUS.INSUFFICIENT;
+
+  // 2) prerequisite 엣지 브리지: prereqOf(후속→[선수]) + prereqReverse(선수→[후속]).
+  let edges;
+  try { edges = db.prepare("SELECT from_node_id, to_node_id FROM learning_map_edges WHERE edge_type='prerequisite'").all(); }
+  catch (_) { edges = []; }
+  const prereqOf = new Map();     // toCode -> Set(fromCode)  (후속 → 직접 선수들)
+  const unlockedBy = new Map();   // fromCode -> Set(toCode)  (선수 → 그것을 필요로 하는 후속들)
+  for (const e of edges) {
+    const fromCode = _nodeToCode(e.from_node_id);
+    const toCode = _nodeToCode(e.to_node_id);
+    if (!fromCode || !toCode) continue; // 브리지 실패 → 제외(보수적, getPrereqGap 규칙 계승)
+    if (fromCode === toCode) continue;  // 자기 자신을 선수로 갖는 자기루프 제외(억지 매핑 방지)
+    if (!prereqOf.has(toCode)) prereqOf.set(toCode, new Set());
+    prereqOf.get(toCode).add(fromCode);
+    if (!unlockedBy.has(fromCode)) unlockedBy.set(fromCode, new Set());
+    unlockedBy.get(fromCode).add(toCode);
+  }
+  if (!prereqOf.size) return empty;
+
+  // 미니 사슬(선수→현재→후속) 조립 헬퍼. 각 노드 3~5개.
+  const buildChain = (code) => {
+    const chain = [];
+    // 선수 1개(있으면) — 현재 코드의 직접 선수 중 하나.
+    const prereqs = prereqOf.get(normCode(code));
+    if (prereqs) {
+      for (const pc of prereqs) {
+        chain.push({ code: pc, label: resolveCode(pc).label, status: statusOf(pc), current: false });
+        break; // 대표 선수 1개(사슬 과밀 방지)
+      }
+    }
+    // 현재 노드
+    chain.push({ code: normCode(code), label: resolveCode(code).label, status: statusOf(code), current: true });
+    // 후속 노드(들) — 최대 2개.
+    const succs = unlockedBy.get(normCode(code));
+    if (succs) {
+      let cnt = 0;
+      for (const sc of succs) {
+        chain.push({ code: sc, label: resolveCode(sc).label, status: statusOf(sc), current: false });
+        if (++cnt >= 2) break;
+      }
+    }
+    return chain;
+  };
+
+  // 3) 열쇠 노드 후보 = 본인이 not_reached 인 선수개념(X). unlocksCount 계산.
+  const keyNodes = [];
+  for (const [fromCode, succSet] of unlockedBy.entries()) {
+    if (statusOf(fromCode) !== STATUS.NOT_REACHED) continue; // 미도달 선수만 열쇠(평가부족 제외)
+    // X 를 선수로 갖는 후속 Y 중 본인이 not_reached/insufficient 인 것 = 아직 안 열린 후속.
+    const unlocks = [];
+    for (const toCode of succSet) {
+      const st = statusOf(toCode);
+      if (st === STATUS.NOT_REACHED || st === STATUS.INSUFFICIENT) {
+        unlocks.push({ code: toCode, label: resolveCode(toCode).label, status: st });
+      }
+    }
+    if (!unlocks.length) continue; // 여는 게 없으면 열쇠 아님
+    keyNodes.push({
+      code: normCode(fromCode),
+      label: resolveCode(fromCode).label,
+      status: STATUS.NOT_REACHED,
+      unlocksCount: unlocks.length,
+      unlocks,
+      chain: buildChain(fromCode),
+      recommendations: recommendForCode(fromCode, 3),
+      cta: unlocks.length === 1 ? '이걸 풀면 뒤의 학습이 열려요' : `이걸 풀면 뒤의 ${unlocks.length}개가 열려요`,
+    });
+  }
+  // 우선순위: unlocksCount desc(하나 풀면 여러 개 열림) → 상위 limit.
+  keyNodes.sort((a, b) => b.unlocksCount - a.unlocksCount);
+  const topKeyNodes = keyNodes.slice(0, lim);
+
+  // 4) readyToChallenge = 본인이 not_reached 인 후속 Y 인데 선수 X 전부 reached.
+  const readyToChallenge = [];
+  for (const [toCode, prereqSet] of prereqOf.entries()) {
+    if (statusOf(toCode) !== STATUS.NOT_REACHED) continue; // 도전 대상 = 본인 미도달 후속
+    if (!prereqSet.size) continue;
+    let allReached = true;
+    for (const pc of prereqSet) {
+      if (statusOf(pc) !== STATUS.REACHED) { allReached = false; break; }
+    }
+    if (!allReached) continue;
+    readyToChallenge.push({
+      code: normCode(toCode),
+      label: resolveCode(toCode).label,
+      status: STATUS.NOT_REACHED,
+      prereqReached: true,
+      recommendations: recommendForCode(toCode, 3),
+      message: '선수 학습을 마쳤어요 — 지금 도전해 볼까요?',
+    });
+  }
+  readyToChallenge.sort((a, b) => a.code.localeCompare(b.code));
+
+  return {
+    userId: uid,
+    keyNodes: topKeyNodes,
+    readyToChallenge: readyToChallenge.slice(0, lim),
+    note,
+  };
+}
+
 module.exports = {
   CONFIDENCE, CONFIDENCE_KO, RISK_GRADE, RISK_GRADE_KO, RISK_WEIGHTS,
   MIN_WEEKS, MIN_WEEK_ATTEMPTS, DEFAULT_WEEKS, NEGATIVE_EMOTIONS,
   classStudentIds, classStudents,
   computeTrend, projectReach, getClassRiskList, getPrereqGap, getWeakTrend,
-  getEmotionMirror,
+  getEmotionMirror, getShallowLearning, getEmotionEngage, getNextStep,
   riskGrade, invalidateBridge,
 };

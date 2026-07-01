@@ -1285,6 +1285,118 @@ router.get('/emotion-mirror/:userId', requireAuth, (req, res) => {
   }
 });
 
+// 담임 실명 열람 audit — learning_logs 1건(거버넌스 추적). best-effort(실패 무시).
+//   routes/school.js:42 auditNameAccess 의 lrs 복제판. B6 담임 실명 사분면 열람 시 1건 적재.
+function auditNameAccessLrs(req, kind, classId, count) {
+  try {
+    logLearningActivity({
+      userId: req.user.id,
+      activityType: 'governance',
+      verb: 'viewed',
+      targetType: 'lrs-roster',
+      targetId: String(classId),
+      objectType: 'roster',
+      objectId: kind,
+      sourceService: 'lrs',
+      metadata: { kind, count, classId, role: req.user.role },
+    });
+  } catch (_) { /* audit 실패는 응답을 막지 않는다 */ }
+}
+
+// GET /api/lrs/shallow/class/:id — B4 "겉핥기 감지"(교사 · 너무 빨리 넘긴 학습).
+//   담임/담당(canViewClass) → 403. ?days=30(기본, 1~365 클램프).
+//   콘텐츠별 median(duration)×0.4 플래그. 표본<10 콘텐츠는 개별 비노출(maskedContentCount).
+router.get('/shallow/class/:id', requireAuth, (req, res) => {
+  try {
+    const classId = parseInt(req.params.id, 10);
+    if (!Number.isInteger(classId)) {
+      return res.status(400).json({ success: false, message: '잘못된 클래스 ID 입니다.' });
+    }
+    if (!canViewClass(req, classId)) {
+      return res.status(403).json({ success: false, message: '권한이 없습니다.' });
+    }
+    const days = req.query.days
+      ? Math.max(1, Math.min(365, parseInt(req.query.days, 10) || 30))
+      : 30;
+
+    const result = analytics.getShallowLearning(classId, { days });
+    res.json({ success: true, ...result });
+  } catch (err) {
+    console.error('[LRS] /shallow/class error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// GET /api/lrs/emotion-engage/class/:id — B6 "정서-참여 교차"(교사 · 반 2×2 매트릭스).
+//   담임/담당(canViewClass) → 403. ?weeks=2(기본, 1~12 클램프).
+//   getClassRiskList 신호 2축 → 4사분면 좌표. 담임=실명+audit / 비담임 소표본=익명.
+router.get('/emotion-engage/class/:id', requireAuth, (req, res) => {
+  try {
+    const classId = parseInt(req.params.id, 10);
+    if (!Number.isInteger(classId)) {
+      return res.status(400).json({ success: false, message: '잘못된 클래스 ID 입니다.' });
+    }
+    if (!canViewClass(req, classId)) {
+      return res.status(403).json({ success: false, message: '권한이 없습니다.' });
+    }
+    const weeks = req.query.weeks
+      ? Math.max(1, Math.min(12, parseInt(req.query.weeks, 10) || 2))
+      : 2;
+
+    const result = analytics.getEmotionEngage(classId, { weeks });
+    const studentCount = result.studentCount;
+    const masked = shouldMaskNames(req, classId, studentCount);
+
+    let points = result.points;
+    if (masked) {
+      // 비담임 소표본 → 실명 대신 익명 라벨(개인정보 보호). audit 미적재(실명 아님).
+      points = result.points.map((p, i) => ({ ...p, name: maskNameLabel(i) }));
+    } else if (points.length) {
+      // 담임/담당 실명 노출 → 거버넌스 audit 1건.
+      auditNameAccessLrs(req, 'emotion-engage', classId, points.length);
+    }
+
+    res.json({
+      success: true,
+      classId: result.classId,
+      weeks: result.weeks,
+      masked,
+      minSample: MIN_SAMPLE_N,
+      studentCount,
+      points,
+      summary: result.summary,
+      disclaimer: result.disclaimer,
+    });
+  } catch (err) {
+    console.error('[LRS] /emotion-engage/class error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// GET /api/lrs/next-step/:userId — A4 "다음 한 걸음"(학생 · 선수→후속 학습 경로).
+//   본인/교사/관리자(canViewUser) → 403. ?limit=3(열쇠 노드 수, 1~10).
+//   ★ 위험점수/EWS 필드 절대 미포함(P6). 코칭 프레임만.
+router.get('/next-step/:userId', requireAuth, (req, res) => {
+  try {
+    const userId = parseInt(req.params.userId, 10);
+    if (!Number.isInteger(userId)) {
+      return res.status(400).json({ success: false, message: '잘못된 사용자 ID 입니다.' });
+    }
+    if (!canViewUser(req, userId)) {
+      return res.status(403).json({ success: false, message: '권한이 없습니다.' });
+    }
+    const limit = req.query.limit
+      ? Math.max(1, Math.min(10, parseInt(req.query.limit, 10) || 3))
+      : 3;
+
+    const result = analytics.getNextStep(userId, { limit });
+    res.json({ success: true, ...result });
+  } catch (err) {
+    console.error('[LRS] /next-step error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
 // GET /api/lrs/trend/class/:id — 교사(소유)/관리자. 반 성취 추세 + 도달 외삽.
 router.get('/trend/class/:id', requireAuth, (req, res) => {
   try {

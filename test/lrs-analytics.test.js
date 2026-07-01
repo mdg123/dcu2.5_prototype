@@ -345,6 +345,199 @@ test('MIRROR-5: coaching 문자열 존재 · note 고정 · totalDays 정수', (
 });
 
 // ════════════════════════════════════════════════════════════════════════════
+// [SHALLOW] B4 겉핥기 감지 — 콘텐츠별 median × 0.4 플래그 (교사 · 활용의 질)
+//   불변식(스펙 §5-1): (a) ratio 는 0 이상 · (b) flag=true ⇔ ratio<0.4 & correct=true
+//   (c) classId 격리(다른 반 학생 미포함) · (d) 표본<10 콘텐츠 개별 비노출(maskedContentCount)
+//   (e) topStudents flagCount desc · severity 규칙(>=3 high / 1~2 medium).
+//   시드: 합성 반(SH_CLASS)에 학생 2명 × 콘텐츠 1개(target content 90001)에 로그 12건
+//         (median 안정 표본>=10). 1명은 빠르게(속도이상) 정답, 1명은 정상.
+// ════════════════════════════════════════════════════════════════════════════
+const SH_CLASS = 99201, SH_S1 = 99211, SH_S2 = 99212, SH_OTHER = 99213, SH_CONTENT = 90001;
+{
+  const insUser = db.prepare(`INSERT OR IGNORE INTO users (id, username, password, display_name, role)
+                              VALUES (?, ?, 'x', ?, 'student')`);
+  insUser.run(SH_S1, `sh1_${SH_S1}`, '겉핥기1');
+  insUser.run(SH_S2, `sh2_${SH_S2}`, '겉핥기2');
+  insUser.run(SH_OTHER, `shO_${SH_OTHER}`, '타반학생');
+  // classes: code·name·owner_id 는 NOT NULL — 반드시 채운다(FK 부모).
+  db.prepare(`INSERT OR IGNORE INTO classes (id, code, name, owner_id, status)
+              VALUES (?, ?, '겉핥기반', ?, 'active')`)
+    .run(SH_CLASS, `SHCLS${SH_CLASS}`, TEACHER);
+  const insMem = db.prepare(`INSERT OR IGNORE INTO class_members (class_id, user_id, role, status)
+                             VALUES (?, ?, 'member', 'active')`);
+  insMem.run(SH_CLASS, SH_S1); insMem.run(SH_CLASS, SH_S2);
+  // 교사 멤버(담임) — canViewClass 통과용
+  db.prepare(`INSERT OR IGNORE INTO class_members (class_id, user_id, role, status) VALUES (?, ?, 'owner', 'active')`).run(SH_CLASS, TEACHER);
+  // SH_OTHER 는 다른 반(멤버십 없음) → classId 격리 확인용
+  const isoBackSh = (n) => { const d = new Date(); d.setDate(d.getDate() - n); return d.toISOString().slice(0, 10); };
+  const insLog = db.prepare(`INSERT INTO learning_logs
+    (user_id, activity_type, verb, target_type, target_id, duration_sec, result_success, created_at)
+    VALUES (?, 'content', 'experienced', 'content', ?, ?, ?, ?)`);
+  // 콘텐츠 90001 로그 12건: 정상 소요 60초 위주(median≈60). S1 은 10초(속도이상, 정답).
+  //   S2 정상 55초 정답. 나머지는 median 안정용(정답=null 도 섞어 median 만 기여).
+  for (let i = 0; i < 10; i++) insLog.run(SH_S2, SH_CONTENT, 60, (i % 2), isoBackSh(i + 1));
+  insLog.run(SH_S1, SH_CONTENT, 10, 1, isoBackSh(2));   // 10 < 60*0.4=24 & 정답 → flag
+  insLog.run(SH_S2, SH_CONTENT, 55, 1, isoBackSh(3));   // 55 > 24 → flag 아님
+  // SH_OTHER(타반) — 같은 콘텐츠에 빠른 정답이지만 SH_CLASS 조회엔 안 나와야(격리)
+  insLog.run(SH_OTHER, SH_CONTENT, 8, 1, isoBackSh(2));
+  // 표본<10 콘텐츠(90002) — S1 3건 → 개별 비노출(maskedContentCount)
+  for (let i = 0; i < 3; i++) insLog.run(SH_S1, 90002, 5, 1, isoBackSh(i + 1));
+}
+
+test('SHALLOW-1: ratio>=0 · flag=true ⇔ ratio<0.4 & correct=true (불변식 a·b)', () => {
+  const r = analytics.getShallowLearning(SH_CLASS, { days: 60 });
+  assert.ok(Array.isArray(r.points), 'points 배열');
+  for (const p of r.points) {
+    assert.ok(p.ratio >= 0, `ratio 음수 (${p.ratio})`);
+    if (p.flag) {
+      assert.ok(p.ratio < 0.4 && p.correct === true, `flag=true 인데 ratio=${p.ratio} correct=${p.correct}`);
+    }
+  }
+});
+
+test('SHALLOW-2: classId 격리 — 타반 학생(SH_OTHER) 미포함 (불변식 c)', () => {
+  const r = analytics.getShallowLearning(SH_CLASS, { days: 60 });
+  assert.ok(!r.points.some(p => p.userId === SH_OTHER), '타반 학생이 결과에 섞임(격리 실패)');
+  assert.ok(r.points.every(p => p.userId === SH_S1 || p.userId === SH_S2), '반 멤버만');
+});
+
+test('SHALLOW-3: 표본<10 콘텐츠 개별 비노출 → maskedContentCount (불변식 d)', () => {
+  const r = analytics.getShallowLearning(SH_CLASS, { days: 60 });
+  assert.ok(r.maskedContentCount >= 1, `표본<10 콘텐츠(90002)가 masked 되어야 (${r.maskedContentCount})`);
+  // 표본 적은 콘텐츠(90002)의 로그는 points 에 없어야
+  assert.ok(!r.points.some(p => p.content === 'content 90002'), '표본<10 콘텐츠 로그가 points 에 노출됨');
+});
+
+test('SHALLOW-4: topStudents flagCount desc · severity 규칙 (불변식 e)', () => {
+  const r = analytics.getShallowLearning(SH_CLASS, { days: 60 });
+  for (let i = 1; i < r.topStudents.length; i++) {
+    assert.ok(r.topStudents[i - 1].flagCount >= r.topStudents[i].flagCount, 'flagCount 내림차순 아님');
+  }
+  for (const t of r.topStudents) {
+    const exp = t.flagCount >= 3 ? 'high' : 'medium';
+    assert.equal(t.severity, exp, `severity 규칙 위반 flagCount=${t.flagCount}`);
+  }
+  // 시드상 S1 이 속도이상 1건(정답 10초) → topStudents 에 존재
+  assert.ok(r.topStudents.some(t => t.userId === SH_S1), 'S1 속도이상 감지 실패');
+});
+
+test('SHALLOW-5: 빈/희소 안전 — 로그 없는 반도 크래시 없이 빈 계약 반환', () => {
+  const r = analytics.getShallowLearning(99999, { days: 30 });
+  assert.equal(r.points.length, 0);
+  assert.equal(r.topStudents.length, 0);
+  assert.equal(r.medianThreshold, 0.4);
+  assert.ok(typeof r.disclaimer === 'string');
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// [EMOENG] B6 정서-참여 교차 — getClassRiskList 신호 2축 → 4사분면 (교사)
+//   불변식(스펙 §5-1): (a) x·y ∈ [0,100] · (b) quadrant ∈ {red,care,motive,stable}
+//   (c) summary 합 == points.length · (d) 감정없음(hasEmotion=false) 은 red/care 제외
+//   (e) score/grade/reasons 필드 부재(사분면 목적 최소필드).
+//   실 DB class 1(멤버 있음) 로 검증.
+// ════════════════════════════════════════════════════════════════════════════
+test('EMOENG-1: x·y ∈ [0,100] · quadrant 4종만 (불변식 a·b)', () => {
+  const r = analytics.getEmotionEngage(CLASS, { weeks: 2 });
+  const Q = new Set(['red', 'care', 'motive', 'stable']);
+  for (const p of r.points) {
+    assert.ok(p.x >= 0 && p.x <= 100, `x=${p.x} 범위밖`);
+    assert.ok(p.y >= 0 && p.y <= 100, `y=${p.y} 범위밖`);
+    assert.ok(Q.has(p.quadrant), `quadrant=${p.quadrant} 미정의`);
+  }
+});
+
+test('EMOENG-2: summary 합 == points.length (불변식 c)', () => {
+  const r = analytics.getEmotionEngage(CLASS, { weeks: 2 });
+  const sum = r.summary.red + r.summary.care + r.summary.motive + r.summary.stable;
+  assert.equal(sum, r.points.length, 'summary 사분면 합이 points 수와 불일치');
+});
+
+test('EMOENG-3: 감정 기록 없는 학생은 red/care 사분면 제외 (불변식 d)', () => {
+  const r = analytics.getEmotionEngage(CLASS, { weeks: 2 });
+  for (const p of r.points) {
+    if (p.hasEmotion === false) {
+      assert.ok(p.quadrant !== 'red' && p.quadrant !== 'care',
+        `감정없음 학생이 정서기반 사분면(${p.quadrant})에 배치됨`);
+      assert.equal(p.y, 50, '감정없음 → y=50(중립) 이어야');
+    }
+  }
+});
+
+test('EMOENG-4: score/grade/reasons 필드 부재 (불변식 e, 사분면 최소필드)', () => {
+  const r = analytics.getEmotionEngage(CLASS, { weeks: 2 });
+  for (const p of r.points) {
+    assert.equal(p.score, undefined, 'point 에 score 노출');
+    assert.equal(p.grade, undefined, 'point 에 grade 노출');
+    assert.equal(p.reasons, undefined, 'point 에 reasons 노출');
+  }
+});
+
+test('EMOENG-5: 빈 반 안전 — 멤버 없는 반도 빈 계약 반환', () => {
+  const r = analytics.getEmotionEngage(99999, { weeks: 2 });
+  assert.equal(r.points.length, 0);
+  assert.deepEqual(r.summary, { red: 0, care: 0, motive: 0, stable: 0 });
+  assert.ok(typeof r.disclaimer === 'string');
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// [NEXTSTEP] A4 다음 한 걸음 — 선수 미도달 열쇠노드 (학생 · 코칭)
+//   불변식(스펙 §5-1): (a) keyNodes 우선순위 unlocksCount desc · (b) 평가부족(insufficient)
+//   선수는 keyNodes(빨강) 아님 — keyNode.status 는 항상 not_reached · (c)/(d) N/A(학생 1인칭)
+//   (e) 위험점수(score/grade/riskScore/reasons) 필드 부재(P6).
+//   실 DB student1(uid=3, 미도달 성취 有) 로 검증.
+// ════════════════════════════════════════════════════════════════════════════
+test('NEXTSTEP-1: keyNodes 우선순위 unlocksCount desc (불변식 a)', () => {
+  const r = analytics.getNextStep(STUDENT1, { limit: 3 });
+  assert.ok(Array.isArray(r.keyNodes), 'keyNodes 배열');
+  for (let i = 1; i < r.keyNodes.length; i++) {
+    assert.ok(r.keyNodes[i - 1].unlocksCount >= r.keyNodes[i].unlocksCount, 'unlocksCount 내림차순 아님');
+  }
+  // unlocks 각 항목은 아직 안 열린 후속(not_reached/insufficient)만
+  for (const k of r.keyNodes) {
+    assert.ok(k.unlocksCount === k.unlocks.length, 'unlocksCount 와 unlocks 길이 불일치');
+    for (const u of k.unlocks) {
+      assert.ok(['not_reached', 'insufficient'].includes(u.status), `unlock status=${u.status} 부적절`);
+      assert.notEqual(u.code, k.code, '자기 자신을 unlock(자기루프) 노출');
+    }
+  }
+});
+
+test('NEXTSTEP-2: 평가부족 선수는 keyNode 아님 — keyNode.status 항상 not_reached (불변식 b)', () => {
+  const r = analytics.getNextStep(STUDENT1, { limit: 5 });
+  for (const k of r.keyNodes) {
+    assert.equal(k.status, 'not_reached', `열쇠노드 status=${k.status} (평가부족/도달이 빨강 열쇠로 오분류)`);
+  }
+});
+
+test('NEXTSTEP-3: readyToChallenge 는 선수 전부 도달한 미도달 후속만', () => {
+  const r = analytics.getNextStep(STUDENT1, { limit: 3 });
+  for (const rc of r.readyToChallenge) {
+    assert.equal(rc.status, 'not_reached', '도전 대상은 본인 미도달 후속');
+    assert.equal(rc.prereqReached, true, 'prereqReached=true 여야');
+    assert.ok(Array.isArray(rc.recommendations), 'recommendations 배열');
+  }
+});
+
+test('NEXTSTEP-4: ★윤리(P6) — 응답에 위험점수(score/grade/riskScore/reasons) 필드 부재 (불변식 e)', () => {
+  const r = analytics.getNextStep(STUDENT1, { limit: 3 });
+  const json = JSON.stringify(r);
+  assert.ok(!/"riskScore"/.test(json), 'riskScore 키 없음');
+  assert.ok(!/"grade"/.test(json), 'grade(위험등급) 키 없음');
+  assert.ok(!/"reasons"/.test(json), 'reasons(위험근거) 키 없음');
+  assert.ok(!/위험/.test(json), '"위험" 어휘 없음');
+  // status/label 은 학습 상태이므로 허용. "score" 는 위험점수 맥락에서 금지지만
+  // 응답에 성취'점수' 필드를 두지 않으므로 score 키 자체가 없어야.
+  assert.ok(!/"score"/.test(json), 'score(점수) 키 없음');
+});
+
+test('NEXTSTEP-5: 막힘 없는 학생 안전 — 빈 계약(keyNodes/readyToChallenge 빈) 반환', () => {
+  // 성취 기록 자체가 없는 합성 학생 → 미도달 선수 없음 → 빈 결과, note 유지.
+  const r = analytics.getNextStep(MIRROR_UID, { limit: 3 });
+  assert.ok(Array.isArray(r.keyNodes) && Array.isArray(r.readyToChallenge));
+  assert.equal(typeof r.note, 'string');
+});
+
+// ════════════════════════════════════════════════════════════════════════════
 // [PERM] 권한·윤리 (HTTP 레벨)
 // ════════════════════════════════════════════════════════════════════════════
 const express = require('express');
@@ -475,6 +668,61 @@ test('PERM-6: weak-trend — 교사 scope=class 200, 학생 비교사 → scope=
   // 학생이 class scope 요청 → 권한 미달 403
   const stu = await req(`/weak-trend?scope=class`, STUDENT1);
   assert.equal(stu.status, 403, '학생 weak-trend(class) 403');
+});
+
+test('PERM-7: shallow/class — 소유 교사 200, 비멤버 교사 403, 학생 403', async () => {
+  const ok = await req(`/shallow/class/${CLASS}`, TEACHER);
+  assert.equal(ok.status, 200, '소유 교사 200');
+  assert.equal(ok.json.success, true);
+  assert.ok(Array.isArray(ok.json.points), 'points 배열');
+  assert.equal(ok.json.medianThreshold, 0.4, 'medianThreshold=0.4');
+  const foreign = classNotMemberedByTeacher();
+  const no = await req(`/shallow/class/${foreign.id}`, TEACHER);
+  assert.equal(no.status, 403, '비멤버 교사 403');
+  const stu = await req(`/shallow/class/${CLASS}`, STUDENT1);
+  assert.equal(stu.status, 403, '학생 403');
+});
+
+test('PERM-8: emotion-engage/class — 소유 교사 200(실명+audit), 비멤버 403, 학생 403', async () => {
+  // audit 적재 전 governance 로그 수(담임 실명 열람 후 +1 기대)
+  const before = db.prepare(
+    "SELECT COUNT(*) c FROM learning_logs WHERE activity_type='governance' AND object_id='emotion-engage' AND user_id=?"
+  ).get(TEACHER).c;
+
+  const ok = await req(`/emotion-engage/class/${CLASS}`, TEACHER);
+  assert.equal(ok.status, 200, '소유 교사 200');
+  assert.equal(ok.json.success, true);
+  assert.equal(ok.json.masked, false, '담임 → 실명(masked=false)');
+  const sum = ok.json.summary.red + ok.json.summary.care + ok.json.summary.motive + ok.json.summary.stable;
+  assert.equal(sum, ok.json.points.length, 'summary 합 == points 수');
+
+  // 담임 실명 열람 → governance audit 1건 적재(points>0 일 때)
+  if (ok.json.points.length > 0) {
+    const after = db.prepare(
+      "SELECT COUNT(*) c FROM learning_logs WHERE activity_type='governance' AND object_id='emotion-engage' AND user_id=?"
+    ).get(TEACHER).c;
+    assert.ok(after > before, `실명 열람 audit 미적재 (before=${before}, after=${after})`);
+  }
+
+  const foreign = classNotMemberedByTeacher();
+  const no = await req(`/emotion-engage/class/${foreign.id}`, TEACHER);
+  assert.equal(no.status, 403, '비멤버 교사 403');
+  const stu = await req(`/emotion-engage/class/${CLASS}`, STUDENT1);
+  assert.equal(stu.status, 403, '학생 403');
+});
+
+test('PERM-9: next-step — 본인 200, 타 학생 403, 교사 200, 응답에 위험필드 없음(P6)', async () => {
+  const own = await req(`/next-step/${STUDENT1}`, STUDENT1);
+  assert.equal(own.status, 200, '본인 200');
+  assert.equal(own.json.success, true);
+  assert.ok(Array.isArray(own.json.keyNodes) && Array.isArray(own.json.readyToChallenge), 'keyNodes/readyToChallenge 배열');
+  const j = JSON.stringify(own.json);
+  assert.ok(!/"riskScore"|"grade"|"reasons"|위험/.test(j), '학생 응답에 위험 필드/어휘 없음(P6)');
+
+  const other = await req(`/next-step/${STUDENT2}`, STUDENT1);
+  assert.equal(other.status, 403, '타 학생 403');
+  const byT = await req(`/next-step/${STUDENT1}`, TEACHER);
+  assert.equal(byT.status, 200, '교사 200');
 });
 
 // ════════════════════════════════════════════════════════════════════════════
