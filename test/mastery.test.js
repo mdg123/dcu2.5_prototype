@@ -149,6 +149,44 @@ test('INV-M4: mastery class 매트릭스 classId 격리 — 해당 반 학생만
 });
 
 // ──────────────────────────────────────────────────────────────────────────
+// ④b BUG 박제(P0): 성취수준 분류는 "누적" 기준 — 기간(period)으로 은폐되면 안 됨.
+//    옛 결함: getStudentMastery 가 fromDate~toDate(30일) 로 성취기준을 필터해, 30일보다
+//      이전에 시도한 누적 미도달이 창 밖으로 빠져 은폐됐다(uid3 notReached 5→2). 도달/미도달은
+//      그간 학습의 누적 결과이므로, 누적(전기간 lrs_achievement_stats)만 써야 한다.
+//    ground-truth(실 DB uid3=student1): 누적 미도달 5건
+//      [4수01-02]·[4수03-02]·[4수03-04]·[4수01-13]·[4수03-10] (전부 att>=3 & 정답 0).
+// ──────────────────────────────────────────────────────────────────────────
+const S1_NOT_REACHED = ['[4수01-02]', '[4수03-02]', '[4수03-04]', '[4수01-13]', '[4수03-10]'];
+
+test('BUG-M-CUM: student1(uid3) 누적 미도달 5건 — 기간(period) 무관 동일(은폐 금지)', () => {
+  // opts.period 를 넘겨도 분류는 항상 누적(전기간). period 파라미터는 무시돼야 한다.
+  const base = mastery.getStudentMastery(STUDENT1);
+  assert.equal(base.counts.notReached, 5,
+    `uid3 누적 미도달은 5건이어야(현재 ${base.counts.notReached}) — 30일 창 밖 누적 미도달 은폐 금지`);
+
+  // ground-truth 5개 코드가 weaknesses/standards 에 모두 미도달로 포함
+  const nrCodes = new Set(base.standards.filter(s => s.status === 'not_reached').map(s => s.code));
+  for (const c of S1_NOT_REACHED) {
+    assert.ok(nrCodes.has(c), `누적 미도달 성취기준 ${c} 가 standards(not_reached)에 없음`);
+  }
+  const weakCodes = new Set((base.weaknesses || []).map(w => w.code));
+  const nrInWeak = S1_NOT_REACHED.filter(c => weakCodes.has(c));
+  // weaknesses 는 상한 5 — 미도달 5건이 모두 약점 상위에 올라야(부분도달 0이므로 5칸 전부 미도달)
+  assert.equal(nrInWeak.length, 5, `weaknesses 에 누적 미도달 5건이 모두 있어야(현재 ${nrInWeak.length})`);
+
+  // ★ period(7/30/90d) 를 어떻게 주어도 counts 가 동일(누적 불변) — 은폐 재발 차단
+  for (const p of ['7d', '30d', '90d']) {
+    const d = mastery.getStudentMastery(STUDENT1, { period: p });
+    assert.equal(d.counts.notReached, base.counts.notReached,
+      `period=${p} 인데 notReached 가 달라짐(${d.counts.notReached}≠${base.counts.notReached}) — 성취수준은 누적이어야`);
+    assert.equal(d.counts.reached, base.counts.reached, `period=${p} reached 변동`);
+    assert.equal(d.counts.partial, base.counts.partial, `period=${p} partial 변동`);
+    assert.equal(d.counts.insufficient, base.counts.insufficient, `period=${p} insufficient 변동`);
+    assert.equal(d.counts.total, base.counts.total, `period=${p} total 변동`);
+  }
+});
+
+// ──────────────────────────────────────────────────────────────────────────
 // ⑤ 권한분기 (API 레벨, 실제 라우터+미들웨어 HTTP).
 // ──────────────────────────────────────────────────────────────────────────
 const express = require('express');
@@ -207,6 +245,21 @@ test('PERM-M5b: 교사·관리자는 학생 mastery 조회 가능(200)', async (
   assert.equal(byTeacher.status, 200, '교사는 학생 조회 200');
   const byAdmin = await req(`/mastery/student/${STUDENT1}`, ADMIN);
   assert.equal(byAdmin.status, 200, '관리자는 학생 조회 200');
+});
+
+test('API-M-CUM: /mastery/student/3 — period=30d·90d 모두 notReached=5 (누적, 기간 무관)', async () => {
+  const d30 = await req(`/mastery/student/${STUDENT1}?period=30d`, STUDENT1);
+  const d90 = await req(`/mastery/student/${STUDENT1}?period=90d`, STUDENT1);
+  const d7  = await req(`/mastery/student/${STUDENT1}?period=7d`, STUDENT1);
+  assert.equal(d30.status, 200); assert.equal(d90.status, 200); assert.equal(d7.status, 200);
+  assert.equal(d30.json.counts.notReached, 5, `?period=30d notReached=5 (현재 ${d30.json.counts.notReached})`);
+  assert.equal(d90.json.counts.notReached, 5, `?period=90d notReached=5 (현재 ${d90.json.counts.notReached})`);
+  assert.equal(d7.json.counts.notReached, 5, `?period=7d 도 notReached=5 (누적, 은폐 금지)`);
+  // 응답의 weaknesses 에 ground-truth 5코드가 모두 포함(라벨 relabel 후에도 code 는 유지)
+  const weakCodes = new Set((d30.json.weaknesses || []).map(w => w.code));
+  for (const c of S1_NOT_REACHED) {
+    assert.ok(weakCodes.has(c), `?period=30d weaknesses 에 미도달 ${c} 누락`);
+  }
 });
 
 test('PERM-M5c: class mastery — 소유 교사·관리자 200, 타 학생 403', async () => {

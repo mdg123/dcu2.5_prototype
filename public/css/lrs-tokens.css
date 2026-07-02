@@ -87,6 +87,11 @@
 .sync-time { font-size:var(--fs-sm); color:var(--gray-600); }
 
 .dc-period-picker { display:inline-flex; align-items:center; gap:var(--space-2); flex-wrap:wrap; }
+/* P2-1: 일일현황 등 오늘/어제 고정 화면 — 기간칩 비활성(dim) */
+.dc-filter-bar.is-period-inert .dc-period-picker { opacity:.45; filter:grayscale(.3); pointer-events:none; }
+.dc-filter-bar .dc-period-inert-note { margin-left:8px; font-size:14px; color:var(--gray-500); font-weight:500; }
+.dc-filter-bar .dc-period-inert-note i { color:var(--lrs-primary); margin-right:4px; }
+.dc-filter-bar .dc-period-inert-note[hidden] { display:none; }
 .dc-period-picker .chip {
   padding:5px 12px; border-radius:var(--radius-pill);
   border:1px solid var(--gray-300); background:#fff;
@@ -281,6 +286,100 @@
 .dc-badge--danger  { background:var(--lvl-low-soft); color:var(--lrs-danger-dark); }
 .dc-badge--muted   { background:var(--gray-100);     color:var(--gray-600); }
 
+/* 교과별 배지 색(스펙 C-5) — 학생 약점 리스트/기타 교과 표기 공통 */
+.dc-badge.subj-math    { background:#dbeafe; color:#1d4ed8; }
+.dc-badge.subj-korean  { background:#fee2e2; color:#b91c1c; }
+.dc-badge.subj-english { background:#ede9fe; color:#6d28d9; }
+.dc-badge.subj-science { background:#d1fae5; color:#047857; }
+.dc-badge.subj-social  { background:#ffedd5; color:#c2410c; }
+.dc-badge.subj-etc     { background:#f3f4f6; color:#374151; }
+
+/* ── 학생 홈: 오늘 스냅샷 도움말 툴팁(라벨 옆 물음표) ─────────────── */
+.dc-snapshot__label { display:flex; align-items:center; gap:6px; }
+.dc-snapshot__help { position:relative; display:inline-flex; color:var(--gray-400); cursor:help; font-size:15px; }
+.dc-snapshot__help:hover, .dc-snapshot__help:focus-visible { color:var(--lrs-primary); outline:none; }
+.dc-snapshot__tip {
+  position:absolute; left:0; top:calc(100% + 8px); z-index:20;
+  width:min(320px,80vw); padding:10px 12px; border-radius:8px;
+  background:var(--gray-900); color:#fff; font-size:14px; font-weight:500; line-height:1.5;
+  box-shadow:var(--shadow-lg); opacity:0; visibility:hidden; transition:opacity .15s;
+  pointer-events:none;
+}
+.dc-snapshot__tip b { color:#fbbf24; }
+.dc-snapshot__help:hover .dc-snapshot__tip, .dc-snapshot__help:focus-visible .dc-snapshot__tip { opacity:1; visibility:visible; }
+/* 오늘 배운 것 카드 하단 "콘텐츠 조회 N회"(학습활동과 분리) */
+.dc-snapshot__cv { margin-top:6px; font-size:14px; color:var(--gray-500); font-weight:500; }
+
+/* ── 학생 홈: 통합 약점 순위 리스트(스펙 C — 막대·카드 합침) ──────── */
+.s-weak-list { display:flex; flex-direction:column; gap:12px; }
+.s-weak-row {
+  display:grid; grid-template-columns:28px minmax(0,1fr) auto auto auto;
+  align-items:center; gap:16px;
+  min-height:64px; padding:16px 20px;
+  background:#fff; border:1px solid var(--gray-100); border-radius:12px;
+  transition:box-shadow var(--dur) var(--ease-out), border-color var(--dur);
+}
+.s-weak-row:hover { box-shadow:0 2px 8px rgba(0,0,0,.06); border-color:var(--gray-200); }
+.s-weak-rank {
+  width:28px; height:28px; border-radius:50%;
+  display:inline-flex; align-items:center; justify-content:center;
+  font-size:15px; font-weight:700; background:var(--gray-100); color:var(--gray-700);
+}
+.s-weak-rank[data-top="1"] { background:#fef3c7; color:#b45309; }
+.s-weak-name { min-width:0; }
+.s-weak-name__title {
+  font-size:16px; font-weight:700; color:var(--gray-900);
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+.s-weak-name__code { font-size:13px; color:var(--gray-400); margin-top:2px; }
+.s-weak-list .dc-badge { font-size:13px; padding:4px 12px; flex:none; }
+.s-weak-metric { display:flex; align-items:center; gap:8px; justify-content:flex-end; }
+.s-weak-bar { width:96px; height:8px; border-radius:4px; background:var(--gray-200); overflow:hidden; }
+.s-weak-bar__fill { display:block; height:100%; border-radius:4px; background:var(--lrs-warning); }
+.s-weak-metric__num { font-size:14px; font-weight:600; color:var(--gray-700); white-space:nowrap; }
+.s-weak-cta {
+  display:inline-flex; align-items:center; gap:6px; white-space:nowrap;
+  padding:8px 14px; border-radius:var(--radius-sm);
+  background:var(--lrs-primary); color:#fff !important; border:1px solid var(--lrs-primary);
+  font-size:14px; font-weight:600; text-decoration:none; cursor:pointer;
+  transition:background var(--dur), box-shadow var(--dur);
+}
+.s-weak-cta:hover { background:var(--lrs-primary-dark); box-shadow:var(--shadow-md); }
+.s-weak-cta:focus-visible { outline:2px solid var(--lrs-primary); outline-offset:2px; }
+/* 반응형: 태블릿/모바일 — 행 내부 세로 스택(스펙 C-7) */
+@media (max-width:768px) {
+  .s-weak-row {
+    grid-template-columns:28px 1fr; grid-auto-rows:min-content;
+    row-gap:10px; column-gap:12px; padding:14px 16px;
+  }
+  .s-weak-name { grid-column:2; }
+  .s-weak-list .dc-badge { grid-column:2; justify-self:start; }
+  .s-weak-metric { grid-column:2; justify-content:flex-start; }
+  .s-weak-cta { grid-column:1 / -1; width:100%; justify-content:center; }
+}
+
+/* ── 학생: 또래 비교(s-compare) 카드/막대 ────────────────────────── */
+.s-cmp-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:16px; }
+.s-cmp-card { background:var(--gray-50); border:1px solid var(--gray-100); border-radius:12px; padding:18px 20px; }
+.s-cmp-card__title { font-size:16px; font-weight:700; color:var(--gray-900); margin-bottom:14px; display:flex; align-items:center; gap:8px; }
+.s-cmp-bars { display:flex; flex-direction:column; gap:12px; }
+.s-cmp-bar__head { display:flex; justify-content:space-between; align-items:baseline; font-size:14px; color:var(--gray-600); margin-bottom:5px; }
+.s-cmp-bar__head b { font-size:16px; color:var(--gray-900); font-variant-numeric:tabular-nums; }
+.s-cmp-track { height:12px; border-radius:6px; background:var(--gray-200); overflow:hidden; }
+.s-cmp-fill { display:block; height:100%; border-radius:6px; transition:width .4s var(--ease-out); }
+.s-cmp-fill.is-above { background:var(--lrs-secondary); }
+.s-cmp-fill.is-below { background:var(--lrs-warning); }
+.s-cmp-fill.is-avg   { background:var(--gray-400); }
+.s-cmp-card__meta { margin-top:12px; font-size:14px; color:var(--gray-600); font-weight:600; }
+.s-cmp-note { margin-top:16px; padding:10px 14px; background:var(--lrs-primary-lighter); border-radius:8px; font-size:14px; color:var(--gray-600); line-height:1.5; }
+.s-cmp-note i { color:var(--lrs-primary); margin-right:4px; }
+@media (max-width:768px) { .s-cmp-grid { grid-template-columns:1fr; } }
+
+/* 학습수행 표 하단 주석(게시글·설문 포함 안내) */
+.s-perf-note { margin:10px 2px 0; font-size:14px; color:var(--gray-600); line-height:1.5; }
+.s-perf-note i { color:var(--lrs-primary); margin-right:4px; }
+.s-perf-note b { color:var(--gray-800); }
+
 /* -- 드로어 ----------------------------------- */
 .dc-drawer { position:fixed; top:0; right:0; width:420px; max-width:90vw; height:100vh; background:#fff; border-left:1px solid var(--gray-200); box-shadow:var(--shadow-lg); transform:translateX(100%); transition:transform var(--dur) var(--ease-out); z-index:1000; display:flex; flex-direction:column; }
 .dc-drawer[data-open="true"] { transform:translateX(0); }
@@ -389,6 +488,167 @@
   .lrs-content { padding:var(--space-3); }
 }
 
+/* 정의 툴팁 용어(재방문율·성장추세 등) — 밑줄 점선 + info 아이콘, hover 시 브라우저 title 툴팁 */
+.dc-def-term { border-bottom:1px dotted var(--gray-400); cursor:help; white-space:nowrap; }
+.dc-def-term i { margin-left:3px; font-size:12px; color:var(--lrs-primary); }
+
 /* -- 접근성 ----------------------------------- */
 .sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
 *:focus-visible { outline:2px solid var(--lrs-primary); outline-offset:2px; }
+
+/* =====================================================================
+   활동 유형별 수행 — KPI 카드 Drill-down 모달
+   기획서: 작업지시서/LRS_활동유형별수행_카드드릴다운_스펙.md
+   성장리포트 #detailModal(public/growth/student-report.html) 치수·구조 그대로 계승.
+   색 변수만 LRS 토큰으로 치환, 치수(600px·80vh·16px·19px 등)는 불변.
+   ===================================================================== */
+
+/* ── 카드 클릭 어포던스 (§5-2) ── */
+.dc-kpi-card.is-drillable { cursor:pointer; }
+.dc-kpi-card.is-drillable:hover {
+  box-shadow:var(--shadow-lg); border-color:var(--lrs-primary);
+}
+.dc-kpi-card.is-drillable:focus-visible { outline:0; box-shadow:var(--shadow-focus); }
+/* "자세히 보기 ›" 힌트 — 우상단 코너(부제 trend와 줄 충돌 회피, top:12px right:14px) */
+.dc-kpi-card .kpi-drill-hint {
+  position:absolute; right:14px; top:12px;
+  font-size:13px; font-weight:600; color:var(--gray-400);
+  display:inline-flex; align-items:center; gap:2px; opacity:.85;
+  transition:color var(--dur-fast) var(--ease-out); pointer-events:none;
+}
+.dc-kpi-card.is-drillable:hover .kpi-drill-hint,
+.dc-kpi-card.is-drillable:focus-visible .kpi-drill-hint {
+  color:var(--lrs-primary); opacity:1;
+}
+/* 라벨이 우상단 힌트와 겹치지 않도록 우측 여백 확보(짧은 라벨이라 여유롭지만 안전) */
+.dc-kpi-card.is-drillable .kpi-label { padding-right:78px; }
+
+/* ── 오버레이 + 패널 (§4-2, 성장리포트 실측 계승) ── */
+.lrs-dm-overlay {
+  position:fixed; inset:0; background:rgba(17,24,39,.55); z-index:10000;
+  display:none; align-items:center; justify-content:center; padding:24px;
+  opacity:0; transition:opacity .18s;
+}
+.lrs-dm-overlay.open { display:flex; opacity:1; }
+.lrs-dm-panel {
+  width:600px; max-width:calc(100vw - 48px); max-height:80vh; background:#fff;
+  border-radius:16px; box-shadow:0 20px 60px rgba(0,0,0,.25);
+  display:flex; flex-direction:column; overflow:hidden;
+  transform:translateY(8px); transition:transform .18s;
+}
+.lrs-dm-overlay.open .lrs-dm-panel { transform:translateY(0); }
+.lrs-dm-header {
+  padding:20px 24px; border-bottom:1px solid var(--gray-200);
+  position:relative; flex:0 0 auto; background:#fff;
+}
+.lrs-dm-title {
+  font-size:19px; font-weight:700; color:var(--gray-900);
+  display:flex; align-items:center; gap:8px; padding-right:48px; line-height:1.35;
+}
+.lrs-dm-title .lrs-dm-title-ico { font-size:20px; flex:0 0 auto; }
+.lrs-dm-title .lrs-dm-title-text { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.lrs-dm-count { font-size:14px; color:var(--gray-500); margin-top:4px; }
+/* 닫기 버튼 — 40px 안전영역(top/right 16px + 36px = 우상단 무겹침, .lrs-dm-title padding-right:48px) */
+.lrs-dm-close {
+  position:absolute; top:16px; right:16px; width:36px; height:36px;
+  border-radius:10px; border:none; background:var(--gray-100);
+  font-size:20px; color:var(--gray-600); cursor:pointer; line-height:1;
+  display:flex; align-items:center; justify-content:center; transition:background var(--dur-fast) var(--ease-out);
+}
+.lrs-dm-close:hover { background:var(--gray-200); }
+.lrs-dm-body { padding:8px 16px 16px; overflow-y:auto; flex:1 1 auto; }
+
+/* ── 세그먼트 탭 (콘텐츠 활동 전용, §4-3) ── */
+.lrs-dm-seg {
+  display:flex; gap:0; padding:0 16px; border-bottom:1px solid var(--gray-200);
+  flex:0 0 auto; background:#fff;
+}
+.lrs-dm-seg button {
+  font-size:14px; font-weight:600; color:var(--gray-500); padding:10px 12px;
+  background:none; border:none; border-bottom:2px solid transparent; cursor:pointer;
+  font-family:inherit; white-space:nowrap; transition:color var(--dur-fast) var(--ease-out);
+}
+.lrs-dm-seg button:hover { color:var(--gray-700); }
+.lrs-dm-seg button.active { color:var(--lrs-primary); border-bottom-color:var(--lrs-primary); }
+
+/* ── 내역 행 (§4-2) ── */
+.lrs-dm-row {
+  display:flex; align-items:center; gap:12px; padding:12px 12px;
+  min-height:56px; border-radius:10px; border-bottom:1px solid var(--gray-100);
+}
+.lrs-dm-row:last-child { border-bottom:none; }
+/* 종합 소계 행·콘텐츠 세그먼트 헤더 등 클릭 가능 행 */
+.lrs-dm-row.is-clickable { cursor:pointer; transition:background var(--dur-fast) var(--ease-out); }
+.lrs-dm-row.is-clickable:hover { background:var(--gray-50); }
+.lrs-dm-row.is-clickable:focus-visible { outline:0; background:var(--gray-50); box-shadow:inset 0 0 0 2px var(--lrs-primary); }
+.lrs-dm-row-icon { flex:0 0 auto; font-size:18px; width:24px; text-align:center; }
+.lrs-dm-row-body { flex:1 1 auto; min-width:0; }
+.lrs-dm-row-primary {
+  font-size:16px; font-weight:600; color:var(--gray-800);
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+.lrs-dm-row-meta {
+  font-size:14px; color:var(--gray-500); margin-top:2px;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+.lrs-dm-row-tail { flex:0 0 auto; display:flex; align-items:center; gap:8px; }
+.lrs-dm-row-date { font-size:13px; color:var(--gray-400); white-space:nowrap; }
+.lrs-dm-row-chev { font-size:15px; color:var(--gray-300); flex:0 0 auto; }
+.lrs-dm-row-badge {
+  flex:0 0 auto; font-size:13px; font-weight:600; padding:3px 10px; border-radius:8px;
+  white-space:nowrap; max-width:120px; overflow:hidden; text-overflow:ellipsis;
+}
+.lrs-dm-badge-info    { background:var(--lrs-primary-light); color:var(--lrs-primary-dark); }
+.lrs-dm-badge-success { background:#d1fae5; color:#047857; }
+.lrs-dm-badge-danger  { background:#fee2e2; color:#b91c1c; }
+.lrs-dm-badge-warning { background:#fef3c7; color:#92400e; }
+.lrs-dm-badge-neutral { background:var(--gray-100); color:var(--gray-600); }
+/* 점수 칩 (§6): ≥80 초록 / 60~79 회색 / <60 주황. content 조회·수업진행은 '-' 회색 */
+.lrs-dm-score {
+  flex:0 0 auto; font-size:16px; font-weight:700; white-space:nowrap;
+  min-width:38px; text-align:right;
+}
+.lrs-dm-score.high { color:var(--lrs-secondary); }
+.lrs-dm-score.mid  { color:var(--gray-500); }
+.lrs-dm-score.low  { color:var(--lrs-warning); }
+.lrs-dm-score.none { color:var(--gray-300); }
+.lrs-dm-count-tail { flex:0 0 auto; font-size:16px; font-weight:700; color:var(--gray-700); white-space:nowrap; }
+
+/* ── 빈 상태 / 로딩 (§8-1, §4-2) ── */
+.lrs-dm-empty { text-align:center; color:var(--gray-400); padding:44px 16px; }
+.lrs-dm-empty-ico { font-size:36px; margin-bottom:12px; }
+.lrs-dm-empty-title { font-size:16px; color:var(--gray-600); font-weight:600; }
+.lrs-dm-empty-text { font-size:14px; color:var(--gray-400); margin-top:6px; line-height:1.6; }
+.lrs-dm-empty-cta { display:flex; gap:8px; justify-content:center; flex-wrap:wrap; margin-top:16px; }
+.lrs-dm-empty-cta button, .lrs-dm-empty-cta a {
+  font-size:14px; font-weight:600; padding:8px 16px; border-radius:10px;
+  border:1px solid var(--gray-300); background:#fff; color:var(--gray-700);
+  cursor:pointer; text-decoration:none; font-family:inherit; transition:all var(--dur-fast) var(--ease-out);
+}
+.lrs-dm-empty-cta button.primary, .lrs-dm-empty-cta a.primary {
+  background:var(--lrs-primary); border-color:var(--lrs-primary); color:#fff;
+}
+.lrs-dm-empty-cta button:hover { border-color:var(--lrs-primary); color:var(--lrs-primary); }
+.lrs-dm-empty-cta button.primary:hover { background:var(--lrs-primary-dark); color:#fff; }
+.lrs-dm-note { font-size:13px; color:var(--gray-400); text-align:center; padding:10px 8px 4px; }
+.lrs-dm-skel-row { display:flex; align-items:center; gap:12px; padding:12px; min-height:56px; }
+.lrs-dm-skel-ico { width:24px; height:24px; border-radius:6px; flex:0 0 auto; }
+.lrs-dm-skel-body { flex:1 1 auto; display:flex; flex-direction:column; gap:8px; }
+.lrs-dm-skel-line { height:12px; border-radius:6px; }
+.lrs-dm-skel-line.short { width:40%; }
+.lrs-dm-skel-ico, .lrs-dm-skel-line {
+  background:linear-gradient(90deg, var(--gray-100) 25%, var(--gray-200) 37%, var(--gray-100) 63%);
+  background-size:400% 100%; animation:lrsDmShimmer 1.2s ease infinite;
+}
+@keyframes lrsDmShimmer { 0% { background-position:100% 0; } 100% { background-position:-100% 0; } }
+
+/* ── 반응형 <768px — 하단 시트 (§4-4) ── */
+@media (max-width:768px) {
+  .lrs-dm-overlay { align-items:flex-end; padding:0; }
+  .lrs-dm-panel { width:100%; max-width:none; max-height:88vh; border-radius:16px 16px 0 0; }
+  /* 세그먼트 3탭은 라벨이 짧아 한 줄 유지 — 가로 스크롤 0 원칙 */
+}
+@media (prefers-reduced-motion: reduce) {
+  .lrs-dm-overlay, .lrs-dm-panel { transition:none; }
+  .lrs-dm-skel-ico, .lrs-dm-skel-line { animation:none; }
+}

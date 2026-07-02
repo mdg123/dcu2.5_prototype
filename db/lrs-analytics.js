@@ -84,13 +84,16 @@ function classStudents(classId) {
 function _weeklyRateSeries({ userIds, code, weeksLimit }) {
   if (!userIds || !userIds.length) return [];
   const ph = userIds.map(() => '?').join(',');
+  // [P1 추이 과다 게이트 fix] achievement_code IS NOT NULL 은 '특정 성취기준(code)' 추세일 때만 요구한다.
+  //   전체(overall) 추세는 성취기준 태그가 없는 정오답 로그도 포함해야 한다.
+  //   (실측: uid3 는 23·24주 정오답 로그에 achievement_code 가 없어 이 조건 때문에 25주 1점만 남아
+  //    추세선이 영영 안 떴다.) code 필터가 있을 때만 achievement_code 조건을 건다.
   let sql = `
     SELECT strftime('%Y-%W', created_at) AS week,
            COUNT(*) AS attempts,
            SUM(CASE WHEN result_success = 1 THEN 1 ELSE 0 END) AS success
     FROM learning_logs
     WHERE user_id IN (${ph})
-      AND achievement_code IS NOT NULL
       AND result_success IS NOT NULL`;
   const params = [...userIds];
   if (code) { sql += ' AND achievement_code = ?'; params.push(code); }
@@ -99,9 +102,13 @@ function _weeklyRateSeries({ userIds, code, weeksLimit }) {
   let rows;
   try { rows = db.prepare(sql).all(...params); } catch (_) { return []; }
 
-  // 한 주 시도<3 결측 처리 → 유효 주만 남긴다.
+  // 한 주 최소 시도 게이트 완화(P1): 기존 3건 필터는 sparse 주(1~2건)를 결측 처리해
+  //   관측 주가 과소 산출됐다. 이제 SPARSE 주도 관측 포인트로 포함한다(시각화 목적).
+  //   ★ slope/예측(projection)의 신뢰성은 computeTrend 가 관측주<3 시 status='insufficient' 로
+  //     별도 게이트하므로, 여기서는 포인트를 살려 series 를 실측대로 채운다.
+  //   여전히 완전 결측(0건)만 제외.
   let weeks = rows
-    .filter(r => (Number(r.attempts) || 0) >= MIN_WEEK_ATTEMPTS)
+    .filter(r => (Number(r.attempts) || 0) >= 1)
     .map(r => {
       const a = Number(r.attempts) || 0;
       const s = Number(r.success) || 0;
@@ -156,6 +163,9 @@ function computeTrend({ userId, classId, userIds, code = null, weeks = DEFAULT_W
       direction: 'insufficient', directionKo: TREND_KO.insufficient,
       confidence: CONFIDENCE.LOW, confidenceKo: CONFIDENCE_KO.low,
       observedWeeks: nW, currentRate,
+      // 선(line)은 관측 2점이면 그릴 수 있다(P1). 예측·기울기만 3주 게이트.
+      //   status='insufficient' 여도 series 를 실측대로 채워 FE 가 canDrawLine 로 꺾은선을 그리게 한다.
+      canDrawLine: nW >= 2,
       series: series.map((w, i) => ({ week: w.week, x: i, rate: round1(w.rate), attempts: w.attempts })),
     };
   }
@@ -176,6 +186,7 @@ function computeTrend({ userId, classId, userIds, code = null, weeks = DEFAULT_W
     observedWeeks: nW,
     currentRate,
     lowVariance: model.r2 < 0.3,   // R²<0.3 → "변동 큼" 단서(§B-5)
+    canDrawLine: nW >= 2,          // 관측 2점 이상이면 꺾은선 가능(항상 참, ok 는 nW>=3).
     series: series.map((w, i) => ({ week: w.week, x: i, rate: round1(w.rate), attempts: w.attempts })),
   };
 }

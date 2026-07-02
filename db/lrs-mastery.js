@@ -208,31 +208,18 @@ const _stuStmt = db.prepare(`
   ORDER BY attempt_count DESC
 `);
 
-// 기간 스코프 재계산용: learning_logs 에서 (기간 내) 성취기준별 시도/정답/평균 집계.
-//   평가신호(result_score 또는 result_success 비-NULL) 있는 로그만 시도로 셈(도달률 역효과 방지 —
-//   log-helper 의 실시간 집계 규칙과 동일). cumulative 테이블(lrs_achievement_stats)과 컬럼 계약 일치.
-const _stuRangeStmt = db.prepare(`
-  SELECT achievement_code AS code, MAX(subject_code) AS subject_code,
-         COUNT(*) AS attempts,
-         SUM(CASE WHEN result_success = 1 THEN 1 ELSE 0 END) AS correct,
-         AVG(result_score) AS avg_score,
-         MAX(created_at) AS lastAt
-  FROM learning_logs
-  WHERE user_id = ? AND achievement_code IS NOT NULL AND achievement_code <> ''
-    AND (result_score IS NOT NULL OR result_success IS NOT NULL)
-    AND DATE(created_at) >= ? AND DATE(created_at) <= ?
-  GROUP BY achievement_code
-  ORDER BY attempts DESC
-`);
+// [폐지] 성취수준은 누적 기준 — 기간 스코프 폐지.
+//   과거엔 fromDate~toDate 가 오면 learning_logs 기간 집계(_stuRangeStmt)로 성취기준 분류를
+//   재계산했다. 그러나 "도달/미도달"은 그간 학습의 누적 결과이므로, 30일보다 이전에 시도한
+//   누적 미도달이 기간 창 밖으로 빠지면 은폐되는 P0 버그가 있었다(uid3 notReached 5→0).
+//   → 성취기준 분류·counts·강약·bySubject·도넛은 항상 누적(lrs_achievement_stats=_stuStmt)만 쓴다.
+//   period(7/30/90d)는 이 분류에 절대 영향 없음. 추이(computeTrend, db/lrs-analytics.js)만 기간 유지.
+//   (_stuRangeStmt 는 미사용 — 회귀 방지를 위해 아래 참조 코드는 제거함.)
 
 function getStudentMastery(userId, opts = {}) {
   const subjectFilter = opts.subjectCode || null;
-  // 기간 스코프(감사 §2): fromDate~toDate 가 주어지면 그 기간 learning_logs 로 재계산(누적 대신).
-  //   미지정이면 기존대로 lrs_achievement_stats 누적(전기간) 사용.
-  const scoped = opts.fromDate && opts.toDate;
-  const rows = scoped
-    ? _stuRangeStmt.all(userId, opts.fromDate, opts.toDate)
-    : _stuStmt.all(userId);
+  // 성취수준 분류는 항상 누적(전기간 lrs_achievement_stats). period 파라미터는 무시한다.
+  const rows = _stuStmt.all(userId);
   const standards = [];
   const distribution = {
     [STATUS.REACHED]: 0, [STATUS.PARTIAL]: 0, [STATUS.NOT_REACHED]: 0, [STATUS.INSUFFICIENT]: 0, total: 0,
@@ -310,9 +297,9 @@ function getStudentMastery(userId, opts = {}) {
 
   return {
     userId: Number(userId),
-    // 집계 기준: scoped=true 면 기간 스코프(기간칩 반영), false 면 전기간 누적.
-    scoped: !!scoped,
-    period: scoped ? { fromDate: opts.fromDate, toDate: opts.toDate } : null,
+    // 집계 기준: 항상 전기간 누적(성취수준=누적 결과). period 무반영 → FE 호환 위해 필드는 유지.
+    scoped: false,
+    period: null,
     counts: {
       total: distribution.total,
       reached: distribution[STATUS.REACHED],

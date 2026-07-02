@@ -846,11 +846,14 @@ test('BUG19: 오늘의 학습 정답 이수 → computeTrend 주차 시계열 at
 });
 
 // ──────────────────────────────────────────────────────────────────────────
-// BUG20: 기간 파라미터 반영 — getStudentMastery(기간 스코프)가 기간별로 다른 집계.
-//   fromDate~toDate 를 주면 learning_logs 기간 집계(scoped=true), 넓은 기간이 좁은 기간보다
-//   성취기준 수(total)가 크거나 같아야(단조). 7d 와 90d 결과가 동일하면 기간 무반영(RED).
+// BUG20(정정): 성취수준 분류는 누적 기준 — period 7/30/90 무관하게 counts/notReached 동일.
+//   [정책 전환] 과거 BUG20 은 "기간칩 반영(7d≠90d)"을 박제했으나 이는 오히려 P0 버그였다:
+//   도달/미도달은 그간 학습의 누적 결과라, 30일보다 이전에 시도한 누적 미도달이 기간 창 밖으로
+//   빠지면 은폐된다(uid3 notReached 5→0). → getStudentMastery 는 항상 누적(lrs_achievement_stats)만
+//   보고, period 를 넣어도(넣지 않아도) 결과가 동일해야 한다. scoped=false·period=null 고정.
+//   (period 가 route 레벨에서 무시됨은 HTTP 레벨은 test/lrs-mastery-cumulative.test.js 에서 커버.)
 // ──────────────────────────────────────────────────────────────────────────
-test('BUG20: 기간칩 반영 — mastery 기간 스코프가 7d≠90d(넓을수록 total≥)', () => {
+test('BUG20(정정): 성취수준 분류는 누적 — fromDate/toDate 를 줘도 인자 없는 호출과 동일', () => {
   const { logLearningActivity } = require('../db/learning-log-helper');
   const mastery = require('../db/lrs-mastery');
   const U = S2;
@@ -858,7 +861,7 @@ test('BUG20: 기간칩 반영 — mastery 기간 스코프가 7d≠90d(넓을수
   const today = new Date();
   const daysAgo = (n) => { const d = new Date(today); d.setDate(today.getDate() - n); return d; };
 
-  // 최근(3일 전) 코드 A, 오래된(50일 전) 코드 B 각각 정답 이수.
+  // 최근(3일 전) 코드 A, 오래된(50일 전) 코드 B 각각 정답 이수(집계 테이블에 누적).
   logLearningActivity({ userId: U, activityType: 'daily_complete', targetType: 'daily_learning', targetId: 6600001,
     verb: 'completed', sourceService: 'self-learn', resultScore: 1, resultSuccess: 1,
     achievementCode: '[4수19-01]', subjectCode: 'math-e', createdAt: iso(daysAgo(3)) });
@@ -867,13 +870,36 @@ test('BUG20: 기간칩 반영 — mastery 기간 스코프가 7d≠90d(넓을수
     achievementCode: '[4수19-02]', subjectCode: 'math-e', createdAt: iso(daysAgo(50)) });
 
   const isoD = (d) => d.toISOString().slice(0, 10);
-  const m7 = mastery.getStudentMastery(U, { fromDate: isoD(daysAgo(7)), toDate: isoD(today) });
-  const m90 = mastery.getStudentMastery(U, { fromDate: isoD(daysAgo(90)), toDate: isoD(today) });
-  assert.equal(m7.scoped, true, 'BUG20: 기간 스코프시 scoped=true');
-  assert.ok(m90.counts.total >= m7.counts.total,
-    `BUG20: 90d total(${m90.counts.total}) 이 7d total(${m7.counts.total}) 보다 크거나 같아야(기간 반영)`);
-  assert.ok(m90.counts.total > m7.counts.total || m90.counts.total >= 2,
-    'BUG20: 넓은 기간이 오래된 코드까지 포함해 더 많은 성취기준을 봐야(7d≠90d)');
+  const base = mastery.getStudentMastery(U);                                              // 인자 없음(누적)
+  const m7   = mastery.getStudentMastery(U, { fromDate: isoD(daysAgo(7)),  toDate: isoD(today) });
+  const m90  = mastery.getStudentMastery(U, { fromDate: isoD(daysAgo(90)), toDate: isoD(today) });
+  // 정책: period 무반영 → 세 결과의 counts 가 모두 동일. scoped=false, period=null.
+  assert.equal(base.scoped, false, 'BUG20(정정): scoped 는 항상 false(누적)');
+  assert.equal(base.period, null,  'BUG20(정정): period 는 항상 null(누적)');
+  assert.deepEqual(m7.counts,  base.counts, 'BUG20(정정): 7d 인자를 줘도 counts 는 누적과 동일해야');
+  assert.deepEqual(m90.counts, base.counts, 'BUG20(정정): 90d 인자를 줘도 counts 는 누적과 동일해야');
+});
+
+// ──────────────────────────────────────────────────────────────────────────
+// BUG20b(신규 핵심): uid3(student1) 누적 미도달 5건이 항상 잡혀야 한다.
+//   결함: 옛 기간 스코프가 30일 창 밖 누적 미도달을 은폐(notReached 5→0).
+//   uid3 의 5건은 기존 시드 데이터라 삽입 없이 존재해야 한다(읽기만; 삽입 순서 무관).
+//   기대: notReached=5, weakness 코드 집합에 5건 모두 포함(순서 무관 Set 비교).
+// ──────────────────────────────────────────────────────────────────────────
+test('BUG20b: uid3 누적 미도달 5건(은폐 방지) — notReached=5 + 5개 코드 전부', () => {
+  const mastery = require('../db/lrs-mastery');
+  const d = mastery.getStudentMastery(3); // student1 = id 3 (읽기 전용)
+  assert.equal(d.counts.notReached, 5,
+    `BUG20b: uid3 누적 notReached 는 5여야(은폐되면 <5). 실제=${d.counts.notReached}`);
+  const EXPECTED = new Set(['[4수01-02]', '[4수03-02]', '[4수03-10]', '[4수01-13]', '[4수03-04]']);
+  // weaknesses 는 상위 5건 슬라이스 — 미도달 5건이 전부(부분도달보다 우선 정렬).
+  const nrCodes = new Set(
+    d.weaknesses.filter(w => w.status === 'not_reached').map(w => w.code)
+  );
+  for (const code of EXPECTED) {
+    assert.ok(nrCodes.has(code), `BUG20b: 미도달 코드 ${code} 가 weaknesses 에 없음(은폐)`);
+  }
+  assert.equal(nrCodes.size, 5, `BUG20b: 미도달 weakness 코드 수는 5여야. 실제=${nrCodes.size}`);
 });
 
 // ──────────────────────────────────────────────────────────────────────────

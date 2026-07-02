@@ -25,6 +25,7 @@ require('../db/lrs-aggregate').rebuildAllAggregates();
 
 const { ols, predict } = require('../lib/analytics/regression');
 const analytics = require('../db/lrs-analytics');
+const mastery = require('../db/lrs-mastery');
 const db = openTestDb();
 
 const ADMIN = 1, TEACHER = 2, STUDENT1 = 3, STUDENT2 = 4;
@@ -100,11 +101,57 @@ test('TREND-2: status=ok 면 slope/r2 유효, r2 ∈ [0,1], direction 4종', () 
   }
 });
 
-test('TREND-3: 한 주 시도<3 은 결측 — series 의 모든 주 attempts>=3', () => {
+// [P1 추이 과다 게이트 fix — 계약 변경] sparse 주(시도 1~2건)도 이제 관측 포인트로 포함한다.
+//   과거엔 주<3 을 결측 처리해 관측주가 과소 산출됐다(uid3 는 25주 1점만 남아 추세선이 영영 안 뜸).
+//   이제 완전 결측(0건)만 제외하고, series 는 실측 주를 그대로 채운다. attempts>=1 이면 series 에 존재.
+test('TREND-3: sparse 주(시도>=1)도 series 관측 포인트로 포함 (과다 게이트 제거)', () => {
   const t = analytics.computeTrend({ classId: CLASS });
   for (const w of t.series) {
-    assert.ok(w.attempts >= analytics.MIN_WEEK_ATTEMPTS, `주 ${w.week} attempts=${w.attempts} <3 결측돼야`);
+    assert.ok(w.attempts >= 1, `주 ${w.week} attempts=${w.attempts} 는 1 이상이어야(0건만 제외)`);
+    assert.ok(w.rate >= 0 && w.rate <= 100, `주 ${w.week} rate=${w.rate} 는 0~100`);
   }
+});
+
+// [P1 추이 회귀박제] uid3 는 실제 정오답 3주(2026-23·24·25)가 있으므로 series 는 최소 2점(가능하면 3점),
+//   canDrawLine=true 여야 한다. 과거 결함: achievement_code IS NOT NULL 조건 + 주<3 게이트로 1점만 나와
+//   꺾은선이 영영 안 그려졌다. (성취기준 태그 없는 정오답 로그가 있는 학생의 전체 추세가 사라지던 문제.)
+test('TREND-3b: uid3 전체 추세 series 는 >=2점(실측 3점) & canDrawLine=true', () => {
+  const t = analytics.computeTrend({ userId: 3 });
+  assert.ok(t.series.length >= 2,
+    `uid3 series 길이=${t.series.length} — 최소 2점이어야(과다 게이트 회귀). 실측 3주.`);
+  assert.equal(t.canDrawLine, true, 'series>=2 면 canDrawLine=true (꺾은선 가능 신호)');
+  // 관측 3주면 status='ok' 로 slope/예측까지 산출돼야(≥3주 게이트 통과).
+  if (t.series.length >= 3) {
+    assert.equal(t.status, 'ok', '관측 3주면 status=ok');
+    assert.ok(Number.isFinite(t.slope), 'ok 면 slope 유한');
+  }
+});
+
+// [P0 약점 은폐 fix — 회귀박제] success_count=0 & avg_score=null 인 미도달 성취기준이
+//   mastery weaknesses/standards 에서 통째로 누락되지 않아야 한다.
+//   reachRate(success,attempts,avg) 가 success/attempt 로 rate=0 을 산출(avg_score null 폴백) →
+//   status=not_reached 로 약점에 반드시 포함. (avg_score 만 보면 null 이라 빠지던 결함.)
+//   과거 증상: 도달 5개(초록)만 보이고 미도달 5개가 화면에서 사라짐.
+test('MASTERY-WEAK-1: 미도달(success=0·avg=null)도 약점에 rate 0~100 으로 포함 (은폐 방지)', () => {
+  const m = mastery.getStudentMastery(STUDENT1);
+  // 미도달 성취기준은 standards 와 weaknesses 양쪽에 rate(0~100)로 존재해야.
+  const nrStandards = (m.standards || []).filter(s => s.status === 'not_reached');
+  assert.ok(nrStandards.length >= 1,
+    `미도달 성취기준이 standards 에 최소 1건 있어야(은폐 회귀) — 실제=${nrStandards.length}`);
+  for (const s of nrStandards) {
+    assert.ok(s.rate != null && s.rate >= 0 && s.rate <= 100,
+      `미도달 rate 는 0~100 이어야(null 금지) — code=${s.code}, rate=${s.rate}`);
+  }
+  // weaknesses 에도 미도달이 실려야(강·약 diverge 에서 약점 축이 비지 않게).
+  const nrWeak = (m.weaknesses || []).filter(w => w.status === 'not_reached');
+  assert.ok(nrWeak.length >= 1,
+    `weaknesses 에 미도달이 최소 1건 있어야 — 실제=${nrWeak.length}`);
+  for (const w of nrWeak) {
+    assert.ok(w.rate != null && w.rate >= 0 && w.rate <= 100,
+      `약점 미도달 rate 0~100 — code=${w.code}, rate=${w.rate}`);
+  }
+  // counts.notReached 도 0 이 아니어야(도넛/집계에서 미도달이 살아있어야).
+  assert.ok(m.counts.notReached >= 1, `counts.notReached=${m.counts.notReached} — 미도달 집계 은폐`);
 });
 
 test('TREND-4: 반 추세도 동일 함수(classId) — 멤버십 집계', () => {

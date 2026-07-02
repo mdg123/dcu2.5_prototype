@@ -99,6 +99,12 @@ function subjectLabel(code, fallback) {
 /**
  * 기간 파라미터 통일: period=7d|30d|90d|custom + from/to.
  * 반환: { fromDate, toDate, label }
+ *
+ * [P2 오프바이원 — 의도적 미적용] start=today-n 이라 period=7d 가 양끝 포함 8일 창을 만든다
+ *   (정확히는 today-(n-1) 이 7일). 전수감사에서 지적됐으나, 이 함수는 LRS 의 거의 모든 기간 엔드포인트가
+ *   공유하는 단일 출처라 하루 시프트가 daily-snapshot 의 spanDays·직전동기간 창까지 파급된다.
+ *   P0(점수 정규화)·P1(약점/교과/기간) 우선 원칙에 따라 이번 배치에서는 손대지 않았다.
+ *   (수정 시 start.setDate(getDate()-(n-1)) 로 바꾸고 daily-snapshot spanDays/prev 창 재검증 필요.)
  */
 function resolvePeriod(req) {
   const { period, from, to, days } = req.query;
@@ -153,6 +159,137 @@ function canViewUser(req, targetUserId) {
   if (!req.user) return false;
   if (req.user.id === targetUserId) return true;
   return req.user.role === 'teacher' || req.user.role === 'admin';
+}
+
+// ─────────────────────────────────────────────────────────
+// 점수 정규화 공통 정의 (단일 출처)
+//   /insights 의 "평균 성취(periodScoreAvg)" 모집단.
+//   과거 /insights 는 lrs_user_daily.avg_score(0~1·0~100 혼재 저장)를 그대로 AVG 해
+//   perform 표(평가 94.5·자기주도 92·콘텐츠 100)와 값이 어긋났다(사용자 실측 결함).
+//   → learning_logs 원천에서 채점된(SCORED) 유형만, NORM_SCORE(≤1이면 ×100)로 0~100 정규화해 평균.
+//
+//   ★ 모집단 = "학습활동 7종" 중 '점수(정답률)' 개념이 있는 것만.
+//     포함: exam_complete·homework_submit·content_solve·self_learn·daily_complete·wrong_note_retry
+//           (+ node_complete: AI 차시 이수, 향후 점수 있으면 자동 포함. 현재 0건)
+//     제외: lesson_progress — result_score 가 '진도율(0.5~1)'이라 정답률이 아님(DB 실측 확인).
+//           그대로 넣으면 진도 50% 가 '성취 50점'으로 오염된다 → 반드시 제외.
+//     제외: content_view·post_create·attendance_checkin·survey_respond·homework_graded 등 7종 밖.
+//   (DB 실측: wrong_note_retry avg 68·min 24 = 실제 정답률 → 포함. lesson_progress avg 0.54 = 진도율 → 제외.)
+// ─────────────────────────────────────────────────────────
+const LRS_SCORED_TYPES = [
+  'exam_complete', 'homework_submit', 'content_solve',
+  'self_learn', 'daily_complete', 'wrong_note_retry', 'node_complete'
+];
+const LRS_SCORED_SQL = `ll.activity_type IN ('exam_complete','homework_submit','content_solve','self_learn','daily_complete','wrong_note_retry','node_complete')`;
+//   행 단위 0~1 값이면 ×100 → 모든 평균을 0~100 스케일로 통일 (perform L2019 와 동일 식).
+const LRS_NORM_SCORE = `(CASE WHEN ll.result_score <= 1 THEN ll.result_score*100 ELSE ll.result_score END)`;
+
+// ─────────────────────────────────────────────────────────
+// [P0 시스템성] 점수 스케일 정규화 공통 헬퍼 (단일 출처)
+//   DB 저장 스케일 혼재: 시험 등 일부 유형은 result_score 를 0~1 로, 콘텐츠 등은 0~100 로 저장한다.
+//   (실측: self_learn 은 같은 유형 안에서도 0.61~100 이 섞임.) 정규화 없이 AVG(result_score) 를
+//   그대로 내보내면 "학급 평균 성취 8.5점"(실제 ≈78) 같은 붕괴가 난다.
+//   → 모든 '평균 점수' 반환 사이트는 반드시 아래 두 조각을 통과시켜 0~100 스케일로 통일한다.
+//
+//   ★ 진도형 제외 필수: lesson_progress 는 result_score 가 '진도율(0.5~1.0)'이라 정답률이 아니다.
+//     (0.54 가 54점으로 오염되면 안 됨.) 점수 평균 모집단에서 항상 제외한다.
+//
+//   임의 별칭(alias) 지원: perform 은 'll', by-service/daily 도 'll', by-achievement 는 별칭 없음.
+//     - normScoreExpr(alias): (CASE WHEN <col> <= 1 THEN <col>*100 ELSE <col> END)  — 행 단위 0~100 정규화
+//     - scoredWhere(alias):   진도형(lesson_progress)·점수없음 유형을 제외하는 화이트리스트 조각
+//   각 사이트에서 AVG(result_score) → AVG(normScoreExpr(alias)), 그리고 WHERE 에 scoredWhere(alias) 를 AND 로 건다.
+// ─────────────────────────────────────────────────────────
+const LRS_SCORED_TYPES_SQL_LIST = "'exam_complete','homework_submit','content_solve','self_learn','daily_complete','wrong_note_retry','node_complete'";
+/** 행 단위 result_score 를 0~100 로 정규화하는 SQL 조각. alias 없으면 컬럼만. */
+function normScoreExpr(alias) {
+  const col = alias ? `${alias}.result_score` : 'result_score';
+  return `(CASE WHEN ${col} <= 1 THEN ${col}*100 ELSE ${col} END)`;
+}
+/** 점수(정답률) 개념이 있는 유형만 남기는 SQL 조각 — 진도형(lesson_progress) 등 자동 제외. */
+function scoredWhere(alias) {
+  const col = alias ? `${alias}.activity_type` : 'activity_type';
+  return `${col} IN (${LRS_SCORED_TYPES_SQL_LIST})`;
+}
+
+/**
+ * 선택 기간(pFrom~pTo) 내, 특정 학생의 채점된 학습로그 평균 성취(0~100 정규화).
+ *   - /stats/perform summary avg 와 동일 로직(같은 SCORED_SQL·NORM_SCORE·기간 필터) 재사용.
+ *   - 점수 없는 유형(lesson_progress·content_view·감정출석·게시글·설문 등)은 result_score 유무와
+ *     무관하게 SCORED_SQL 밖이므로 자동 제외.
+ *   - 데이터(채점된 로그) 0건이면 null 반환(0 아님 — "성취 없음"과 "0점"을 혼동하지 않게).
+ * @returns {number|null} 0~100 (소수1자리 반올림) 또는 null
+ */
+function computeNormScoreAvg(userId, pFrom, pTo) {
+  const row = db.prepare(`
+    SELECT AVG(${LRS_NORM_SCORE}) AS avg_score
+    FROM learning_logs ll
+    WHERE ll.user_id = ?
+      AND ${LRS_SCORED_SQL}
+      AND ll.result_score IS NOT NULL
+      ${pFrom ? 'AND DATE(ll.created_at) >= ?' : ''}
+      ${pTo ? 'AND DATE(ll.created_at) <= ?' : ''}
+  `).get(userId, ...(pFrom ? [pFrom] : []), ...(pTo ? [pTo] : []));
+  if (!row || row.avg_score == null) return null;
+  return Math.round(row.avg_score * 10) / 10;
+}
+
+// ─────────────────────────────────────────────────────────
+// "학습활동" 정본 화이트리스트 (사용자 확정 7종 — 능동 이수·응시·제출·풀이).
+//   PM 확정 정의 + learning_logs 실 activity_type 검증(코드/DB 대조) 결과 매핑:
+//     1) 수업꾸러미(수업) 이수      → 'lesson_progress'   (routes/lesson.js:188, verb=completed 시 이수.
+//                                       'lesson_view'(verb=accessed, 7440건)는 '조회'라 제외)
+//     2) 평가 응시                  → 'exam_complete'
+//     3) 과제 제출                  → 'homework_submit'
+//     4) 콘텐츠 문항 바로 풀이       → 'content_solve'
+//     5) 스스로채움 오늘의학습       → 'self_learn' ∪ 'daily_complete'
+//     6) AI 맞춤학습 차시 노드 이수  → 'node_complete'    (db/self-learn-extended.js:2383·2491,
+//                                       source=self-learn, verb=completed. 신규 이벤트 — 과거 데이터엔 0건)
+//     7) 오답노트 문항 풀이         → 'wrong_note_retry'
+//   제외(학습활동 아님): content_view(단순 조회/시청), post_create, attendance_checkin,
+//     survey_respond, homework_graded(교사 채점 이벤트), lesson_view(조회),
+//     content_complete·problem_attempt·problem_set_complete·diagnosis_complete(7종 밖).
+//   → todayActs 는 전 유형 총건수(참고), todayLearnActs 는 이 7종만.
+// ─────────────────────────────────────────────────────────
+const LRS_LEARN_ACTIVITY_TYPES = [
+  'lesson_progress',                    // 1) 수업꾸러미 이수
+  'exam_complete',                      // 2) 평가 응시
+  'homework_submit',                    // 3) 과제 제출
+  'content_solve',                      // 4) 콘텐츠 문항 바로 풀이
+  'self_learn', 'daily_complete',       // 5) 오늘의 학습
+  'node_complete',                      // 6) AI 맞춤학습 차시 노드 이수
+  'wrong_note_retry'                    // 7) 오답노트 문항 풀이
+];
+
+/** 서버 로컬 날짜 기준 오늘/어제 ISO(YYYY-MM-DD). */
+function localDateIso(offsetDays = 0) {
+  const d = new Date();
+  d.setDate(d.getDate() + offsetDays);
+  // 로컬 타임존 기준 날짜(주의: toISOString은 UTC라 자정 근처 오차 → 로컬 파트로 조립)
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+/**
+ * 특정 날짜(dateIso) 하루 동안 학생의 활동 건수.
+ *   - period 파라미터와 무관 — 항상 그 하루만 센다(FE rangeQS 우회 불필요).
+ *   - total       : 전 유형(참고용)
+ *   - learn       : 학습활동 7종(LRS_LEARN_ACTIVITY_TYPES)만 — 정본 '학습' 카운트.
+ *   - contentView : content_view(콘텐츠 조회/시청) — 학습활동 합계에서 분리한 별도 지표.
+ * @returns {{ total:number, learn:number, contentView:number }}
+ */
+function countActivitiesOnDate(userId, dateIso) {
+  const learnPH = LRS_LEARN_ACTIVITY_TYPES.map(() => '?').join(',');
+  const row = db.prepare(`
+    SELECT
+      COUNT(*) AS total,
+      SUM(CASE WHEN activity_type IN (${learnPH}) THEN 1 ELSE 0 END) AS learn,
+      SUM(CASE WHEN activity_type = 'content_view' THEN 1 ELSE 0 END) AS content_view
+    FROM learning_logs
+    WHERE user_id = ? AND DATE(created_at) = ?
+  `).get(...LRS_LEARN_ACTIVITY_TYPES, userId, dateIso);
+  return { total: row.total || 0, learn: row.learn || 0, contentView: row.content_view || 0 };
 }
 
 /**
@@ -513,7 +650,9 @@ router.get('/stats/by-service', requireAuth, (req, res) => {
     const role = req.query.role;
     const sf = resolveScopeFilter(req, 'll');
     let join = '';
-    let where = `WHERE ll.source_service IS NOT NULL ${r.where}${sf.where}`;
+    // demo_* 합성 시드 제외(P2 관리자·교사 결함): 실서비스 랭킹에 demo_b4 등 데모 시드가 노출되면 안 됨.
+    //   realOnly 와 무관하게 '항상' 제외한다(데모는 실서비스가 아님).
+    let where = `WHERE ll.source_service IS NOT NULL AND ll.source_service NOT LIKE 'demo%' ${r.where}${sf.where}`;
     const params = [...r.params, ...sf.params];
     if (role) {
       join = 'JOIN users u ON ll.user_id = u.id';
@@ -522,16 +661,18 @@ router.get('/stats/by-service', requireAuth, (req, res) => {
     const rawStats = db.prepare(`
       SELECT ll.source_service,
         COUNT(*) as count,
-        AVG(ll.result_score) as avg_score,
+        AVG(CASE WHEN ${scoredWhere('ll')} THEN ${normScoreExpr('ll')} END) as avg_score,
         COUNT(DISTINCT ll.user_id) as unique_users,
         COALESCE(SUM(COALESCE(ll.duration_sec, CAST(REPLACE(REPLACE(COALESCE(ll.result_duration,''),'PT',''),'S','') AS INTEGER), 0)), 0) as total_duration_sec
       FROM learning_logs ll ${join}
       ${where}
       GROUP BY ll.source_service ORDER BY count DESC
     `).all(...params);
-    // 하위 호환: source_service 유지 + service/service_label 병기
+    // 하위 호환: source_service 유지 + service/service_label 병기.
+    //   avg_score: 채점형만·0~100 정규화(진도형 제외) 후 소수1자리 (P0 정규화 일괄 적용).
     const stats = rawStats.map(row => ({
       ...row,
+      avg_score: row.avg_score != null ? Math.round(row.avg_score * 10) / 10 : null,
       service: row.source_service,
       service_label: serviceLabel(row.source_service)
     }));
@@ -566,12 +707,16 @@ router.get('/stats/by-achievement', requireAuth, (req, res) => {
     if (subject_code) { where += ' AND subject_code = ?'; params.push(subject_code); }
     const rawStats = db.prepare(`
       SELECT achievement_code, subject_code, COUNT(*) as count,
-        AVG(result_score) as avg_score,
+        AVG(CASE WHEN ${scoredWhere('')} THEN ${normScoreExpr('')} END) as avg_score,
         SUM(CASE WHEN result_success = 1 THEN 1 ELSE 0 END) as success_count
       FROM learning_logs
       ${where}
       GROUP BY achievement_code ORDER BY count DESC
-    `).all(...params);
+    `).all(...params).map(row => ({
+      ...row,
+      // 채점형만·0~100 정규화(진도형 제외) 후 소수1자리 (P0 정규화 일괄 적용).
+      avg_score: row.avg_score != null ? Math.round(row.avg_score * 10) / 10 : null
+    }));
     // achievement_label JOIN: learning_map_nodes 에서 lesson_name/achievement_text 를 가져와 폴백
     let labelMap = {};
     try {
@@ -619,7 +764,7 @@ router.get('/dataset-coverage', requireAuth, (req, res) => {
     if (r.invalid) return sendInvalidPeriod(res, r.reason);
     const types = db.prepare(`SELECT activity_type, COUNT(*) as count FROM learning_logs WHERE 1=1 ${r.where} GROUP BY activity_type`).all(...r.params);
     const verbs = db.prepare(`SELECT verb, COUNT(*) as count FROM learning_logs WHERE 1=1 ${r.where} GROUP BY verb`).all(...r.params);
-    const services = db.prepare(`SELECT source_service, COUNT(*) as count FROM learning_logs WHERE source_service IS NOT NULL ${r.where} GROUP BY source_service`).all(...r.params);
+    const services = db.prepare(`SELECT source_service, COUNT(*) as count FROM learning_logs WHERE source_service IS NOT NULL AND source_service NOT LIKE 'demo%' ${r.where} GROUP BY source_service`).all(...r.params);
     const totalStatements = types.reduce((s, t) => s + t.count, 0);
     res.json({ success: true, totalStatements, byType: types, byVerb: verbs, byService: services, ...userCounts });
   } catch (err) {
@@ -726,16 +871,23 @@ router.get('/stats/daily', requireAuth, (req, res) => {
       where += ' AND u.role = ?'; params.push(role);
     }
 
+    // 점수 정규화(P0 시스템성): avg_score 는 채점형만·0~100 정규화(진도형 제외). 교사 홈 '학급 평균 성취'가
+    //   이 값을 count 가중평균하므로, 비정규화 AVG(result_score) 를 쓰면 8.5점(실제 ≈78) 붕괴가 난다.
+    //   scored_count 도 함께 반환 → FE 가 정규화 평균을 낼 때 채점 건수 기준 가중평균을 하도록.
     const data = db.prepare(`
       SELECT DATE(ll.created_at) as stat_date,
         COUNT(*) as count,
         COUNT(DISTINCT ll.user_id) as users,
-        AVG(ll.result_score) as avg_score,
+        AVG(CASE WHEN ${scoredWhere('ll')} THEN ${normScoreExpr('ll')} END) as avg_score,
+        SUM(CASE WHEN ${scoredWhere('ll')} AND ll.result_score IS NOT NULL THEN 1 ELSE 0 END) as scored_count,
         COALESCE(SUM(COALESCE(ll.duration_sec, CAST(REPLACE(REPLACE(COALESCE(ll.result_duration,''),'PT',''),'S','') AS INTEGER), 0)), 0) as total_duration_sec
       FROM learning_logs ll ${join}
       ${where}
       GROUP BY DATE(ll.created_at) ORDER BY stat_date ASC
-    `).all(...params);
+    `).all(...params).map(row => ({
+      ...row,
+      avg_score: row.avg_score != null ? Math.round(row.avg_score * 10) / 10 : null
+    }));
     res.json({ success: true, scope: sf.scope, data, period: r.fromDate && r.toDate ? { from: r.fromDate, to: r.toDate } : null });
   } catch (err) {
     console.error('[LRS] /stats/daily error:', err);
@@ -824,15 +976,17 @@ router.get('/stats/by-class', requireAuth, (req, res) => {
     const rawStats = db.prepare(`
       SELECT ll.class_id, c.name as class_name, ll.activity_type,
         COUNT(*) as total_count, COUNT(DISTINCT ll.user_id) as unique_users,
-        AVG(ll.result_score) as avg_score
+        AVG(CASE WHEN ${scoredWhere('ll')} THEN ${normScoreExpr('ll')} END) as avg_score
       FROM learning_logs ll JOIN classes c ON ll.class_id = c.id
       WHERE ll.class_id IS NOT NULL ${r.where}${sf.where}
       GROUP BY ll.class_id, ll.activity_type
       ORDER BY total_count DESC LIMIT 50
     `).all(...r.params, ...sf.params);
-    // 하위 호환: total_count 유지 + count / unique_students 병기
+    // 하위 호환: total_count 유지 + count / unique_students 병기.
+    //   avg_score: 채점형만·0~100 정규화(진도형 제외) 후 소수1자리 (P0 정규화 일괄 적용).
     const stats = rawStats.map(row => ({
       ...row,
+      avg_score: row.avg_score != null ? Math.round(row.avg_score * 10) / 10 : null,
       count: row.total_count,
       unique_students: row.unique_users
     }));
@@ -854,11 +1008,15 @@ router.get('/stats/user-summary', requireAuth, (req, res) => {
     const summary = db.prepare(`
       SELECT activity_type, COUNT(*) as total_count,
         COALESCE(SUM(COALESCE(duration_sec, CAST(REPLACE(REPLACE(COALESCE(result_duration,''),'PT',''),'S','') AS INTEGER), 0)), 0) as total_duration_sec,
-        AVG(result_score) as avg_score,
+        AVG(CASE WHEN ${scoredWhere('')} THEN ${normScoreExpr('')} END) as avg_score,
         MAX(created_at) as last_activity_at
       FROM learning_logs WHERE user_id = ? ${r.where}
       GROUP BY activity_type ORDER BY total_count DESC
-    `).all(userId, ...r.params);
+    `).all(userId, ...r.params).map(row => ({
+      ...row,
+      // 채점형만·0~100 정규화(진도형 등은 NULL) 후 소수1자리 (P0 정규화 일괄 적용).
+      avg_score: row.avg_score != null ? Math.round(row.avg_score * 10) / 10 : null
+    }));
     const total = summary.reduce((s, x) => s + x.total_count, 0);
     res.json({ success: true, userId, total, summary });
   } catch (err) {
@@ -966,14 +1124,38 @@ router.get('/insights/:userId', requireAuth, (req, res) => {
         ${pTo ? 'AND stat_date <= ?' : ''}
     `).get(userId, ...(pFrom ? [pFrom] : []), ...(pTo ? [pTo] : []));
 
-    // 약점 TOP5
-    const weaknesses = db.prepare(`
+    // 약점 TOP5 — 정렬 기준 명확화:
+    //   (1) 채점된 것(avg_score IS NOT NULL) 을 먼저, 그중 정답률 낮은 순.
+    //   (2) 미채점(avg_score IS NULL)은 그 뒤에, 연습량(시도) 많은 순.
+    //   과거엔 COALESCE(avg_score,0) 로 null 을 0점 취급 → avg_score 전무한 학생은
+    //   사실상 '시도 많은 순'인데 FE가 그걸 구분할 신호가 없었다(사용자 실측 결함).
+    //   → hasScore/avg_score(0~100)/criterion 을 함께 반환해 FE가 정답률 유무를 표시하게 한다.
+    const WEAKNESS_CRITERION = '미도달·부분도달·평가부족 중 정답률 낮은 순 · 미채점은 연습량 순 (도달 제외)';
+    // 약점 후보: attempt_count>=1 전체를 뽑아 단일 분류기(reachRate→classifyStatus)로 상태를 부여하고,
+    //   '도달(reached)' 은 약점에서 제외한다(P1 학생 결함: 시드에서 도달·avg95 성취기준이 약점 TOP5 에 혼입).
+    //   후보 = 미도달·부분도달·평가부족. SQL 정렬 순서(채점 우선 → 정답률↓ → 연습량↑)는 그대로 유지하되,
+    //   충분한 후보 확보를 위해 넉넉히 조회 후 도달 제외하고 상위 5개를 취한다.
+    const weaknessPool = db.prepare(`
       SELECT achievement_code, subject_code, attempt_count, success_count, avg_score, last_level
       FROM lrs_achievement_stats
       WHERE user_id = ? AND attempt_count >= 1
-      ORDER BY COALESCE(avg_score, 0) ASC, attempt_count DESC
-      LIMIT 5
+      ORDER BY
+        CASE WHEN avg_score IS NULL THEN 1 ELSE 0 END ASC,  -- 채점된 것 우선
+        avg_score ASC,                                       -- 정답률 낮은 순 (null 은 위 CASE로 후순위)
+        attempt_count DESC                                   -- 동점/미채점은 연습량 많은 순
     `).all(userId);
+    const weaknesses = weaknessPool.filter(w => {
+      // 단일 분류기(SSOT): success/attempt 우선 reachRate → classifyStatus. 도달만 걸러낸다.
+      const rate = mastery.reachRate(w.success_count, w.attempt_count, w.avg_score);
+      const status = mastery.classifyStatus(w.attempt_count, rate);
+      w.status = status;                            // FE 참고용 상태 코드 부착
+      w.statusLabel = mastery.STATUS_KO ? mastery.STATUS_KO[status] : undefined;
+      return status !== mastery.STATUS.REACHED;     // 도달 제외
+    }).slice(0, 5);
+
+    // avg_score 0~100 정규화 헬퍼 (lrs_achievement_stats.avg_score = AVG(result_score), 스케일 혼재).
+    //   행 값이 null 이면 null 유지(미채점), 1 이하면 ×100(0~1 저장분), 그 외 그대로(이미 0~100).
+    const normStat = (v) => (v == null ? null : Math.round((v <= 1 ? v * 100 : v) * 10) / 10);
 
     // 추천 콘텐츠 (약점 성취기준에 매핑된 콘텐츠) + 학생 친화 이름(단원명) 라벨 부착
     const recommendedContentIds = [];
@@ -982,6 +1164,9 @@ router.get('/insights/:userId', requireAuth, (req, res) => {
       w.label = nm.label;                 // 화면 표기용 짧은 이름(단원명 우선)
       w.fullLabel = nm.fullLabel;         // 툴팁/보조 서술
       w.subject_label = w.subject_label || nm.subjectLabel;
+      // FE가 정답률 유무를 표시할 수 있도록 채점 신호 부착.
+      w.hasScore = w.avg_score != null;   // 채점 데이터 존재 여부
+      w.avg_score = normStat(w.avg_score); // 0~100 정규화 또는 null
       try {
         const cs = db.prepare(`
           SELECT id FROM contents WHERE achievement_code = ? ORDER BY id DESC LIMIT 3
@@ -1003,10 +1188,16 @@ router.get('/insights/:userId', requireAuth, (req, res) => {
       const nm = achievementLabel(s.achievement_code);
       s.label = nm.label; s.fullLabel = nm.fullLabel;
       s.subject_label = s.subject_label || nm.subjectLabel;
+      s.hasScore = s.avg_score != null;
+      s.avg_score = normStat(s.avg_score); // 약점과 동일 스케일(0~100)로 통일
     }
 
     // 교과별 비중 (선택 기간 pFrom~pTo)
-    const subjectBalance = db.prepare(`
+    //   교과 정규화(P1 학생 결함): subject_code 에 MAT/math-e/수학, KOR/korean-e/국어 등이 혼재해
+    //   한 교과가 2~3행으로 분할됐다(mastery.bySubject 정규화 뷰와 불일치). raw 코드로 GROUP BY 한 뒤
+    //   mastery.subjectLabel() 로 정규 교과명(canonical)을 키로 JS 에서 합산해 교과당 1행으로 만든다.
+    //   duration 결측이 많으므로 건수(count) 비중도 병기한다.
+    const subjectRaw = db.prepare(`
       SELECT subject_code,
         COALESCE(SUM(COALESCE(duration_sec, CAST(REPLACE(REPLACE(COALESCE(result_duration,''),'PT',''),'S','') AS INTEGER), 0)),0) as duration_sec,
         COUNT(*) as count
@@ -1014,8 +1205,63 @@ router.get('/insights/:userId', requireAuth, (req, res) => {
       WHERE user_id = ? AND subject_code IS NOT NULL
         ${pFrom ? 'AND DATE(created_at) >= ?' : ''}
         ${pTo ? 'AND DATE(created_at) <= ?' : ''}
-      GROUP BY subject_code ORDER BY duration_sec DESC
+      GROUP BY subject_code
     `).all(userId, ...(pFrom ? [pFrom] : []), ...(pTo ? [pTo] : []));
+    const subjMerge = new Map(); // canonical label → { subject_label, duration_sec, count, codes:[] }
+    for (const r of subjectRaw) {
+      const label = mastery.subjectLabel(r.subject_code) || String(r.subject_code);
+      const cur = subjMerge.get(label) || { subject_label: label, duration_sec: 0, count: 0, codes: [] };
+      cur.duration_sec += r.duration_sec || 0;
+      cur.count += r.count || 0;
+      cur.codes.push(r.subject_code);
+      subjMerge.set(label, cur);
+    }
+    const subjTotalCnt = [...subjMerge.values()].reduce((s, v) => s + v.count, 0) || 1;
+    const subjTotalDur = [...subjMerge.values()].reduce((s, v) => s + v.duration_sec, 0) || 1;
+    const subjectBalance = [...subjMerge.values()]
+      .map(v => ({
+        subject_code: v.codes[0],       // 대표 코드(하위호환). subject_label 이 정본.
+        subject_codes: v.codes,          // 합쳐진 원본 코드 목록(투명성)
+        subject_label: v.subject_label,
+        duration_sec: v.duration_sec,
+        count: v.count,
+        // duration 결측 대비 두 비중 병기(합계 100 기준 %). FE 는 상황에 맞게 택1.
+        durationShare: Math.round((v.duration_sec / subjTotalDur) * 1000) / 10,
+        countShare: Math.round((v.count / subjTotalCnt) * 1000) / 10
+      }))
+      .sort((a, b) => (b.duration_sec - a.duration_sec) || (b.count - a.count));
+
+    // ── 정합성 fix (사용자 실측 결함) ─────────────────────────────
+    // (1) periodScoreAvg: /stats/perform 과 동일 로직으로 0~100 정규화 평균 재산출.
+    //     lrs_user_daily.avg_score(스케일 혼재) 대신 learning_logs 원천에서 채점된 유형만.
+    const periodScoreAvg = computeNormScoreAvg(userId, pFrom, pTo);
+    const scoreBasis = '채점된 문항·평가의 평균 정답률';
+
+    // (2) completedAssignments: 선택 기간 내 실제 과제 제출/이수 건수.
+    //     소스 = homework_submissions (권위 원천). draft 제외, 제출/재제출/채점 상태만.
+    //     (learning_logs 의 homework_submit 로그는 발행 누락·중복 가능 → 실 제출 테이블이 정확.)
+    let completedAssignments = 0;
+    try {
+      const hsCols = db.prepare("PRAGMA table_info(homework_submissions)").all().map(c => c.name);
+      const draftClause = hsCols.includes('is_draft') ? 'AND COALESCE(is_draft,0) = 0' : '';
+      const row = db.prepare(`
+        SELECT COUNT(*) AS cnt
+        FROM homework_submissions
+        WHERE student_id = ?
+          AND status IN ('submitted','graded','resubmitted','returned')
+          ${draftClause}
+          ${pFrom ? 'AND DATE(submitted_at) >= ?' : ''}
+          ${pTo ? 'AND DATE(submitted_at) <= ?' : ''}
+      `).get(userId, ...(pFrom ? [pFrom] : []), ...(pTo ? [pTo] : []));
+      completedAssignments = row ? (row.cnt || 0) : 0;
+    } catch (_) { completedAssignments = 0; }
+
+    // (3) 오늘/어제 활동 건수 — period 파라미터와 무관하게 서버 로컬 '하루'만 집계.
+    //     FE renderDodMini 가 rangeQS(자동 period=30 부착) 우회 없이 진짜 '오늘'을 쓰게 한다.
+    const todayIso = localDateIso(0);
+    const yesterdayIso = localDateIso(-1);
+    const todayCount = countActivitiesOnDate(userId, todayIso);
+    const yesterdayCount = countActivitiesOnDate(userId, yesterdayIso);
 
     res.json({
       success: true,
@@ -1029,14 +1275,30 @@ router.get('/insights/:userId', requireAuth, (req, res) => {
         weeklyDurationMin: Math.round((periodStat.dur || 0) / 60),
         periodDurationMin: Math.round((periodStat.dur || 0) / 60),
         weeklyTarget: LRS_CONFIG.weeklyTargetMin,
-        // 주의: lrs_user_daily.avg_score 는 저장 스케일 혼재(0~1·0~100)이므로 여기선 정규화하지 않는다
-        //   (섣부른 ×100 이 오히려 왜곡 — 스케일 통일은 별건 마이그레이션). 기존 동작 보존 + 기간만 반영.
-        weeklyScoreAvg: periodStat.avg_score,
+        // 평균 성취 — /stats/perform 과 동일한 0~100 정규화 값(스케일 혼재 평균 폐기).
+        //   periodScoreAvg 가 정본. weeklyScoreAvg 는 하위호환 별칭(동일 값).
+        periodScoreAvg,
+        weeklyScoreAvg: periodScoreAvg,   // 하위호환: 동일 정규화 값으로 맞춤
+        scoreBasis,                        // 지표 정의 문구
+        // 실제 과제 제출/이수 건수(선택 기간). 총 활동수(totalActivities)와 혼동 금지.
+        completedAssignments,
+        // 오늘/어제 활동 건수 (period 불변 — 항상 하루).
+        //   todayActs 는 전 유형 총건수(참고). '학습활동' 정본 카운트는 todayLearnActs(7종).
+        //   content_view(조회/시청)는 학습활동 합계에서 분리 → todayContentViews 로 별도 노출.
+        todayActs: todayCount.total,
+        todayLearnActs: todayCount.learn,
+        todayContentViews: todayCount.contentView,
+        yesterdayActs: yesterdayCount.total,
+        yesterdayLearnActs: yesterdayCount.learn,
+        yesterdayContentViews: yesterdayCount.contentView,
         // engagementIndex 0~100 정규화(0~1 노출 위험 제거, 감사 §4).
         engagementIndex: Math.round((streakDays >= 7 ? 0.9 : (streakDays / 7)) * 100)
       },
       strengths,
       weaknesses,
+      // 약점 정렬 기준 문구 (FE가 표에 근거 표기). 채점된 것 우선(정답률↓) → 미채점(연습량↑).
+      weaknessCriterion: WEAKNESS_CRITERION,
+      criterion: WEAKNESS_CRITERION,     // 지시서 계약 별칭
       subjectBalance,
       recommendedContentIds: [...new Set(recommendedContentIds)].slice(0, 10)
     });
@@ -1184,16 +1446,15 @@ router.get('/mastery/student/:id', requireAuth, (req, res) => {
       return res.status(403).json({ success: false, message: '권한이 없습니다.' });
     }
     const subjectCode = req.query.subjectCode || null;
-    // 기간 반영(감사 §2): 기간칩(period/days/from~to)이 오면 그 기간 learning_logs 로 재계산.
-    //   기간 파라미터가 전혀 없으면(순수 진입) 전기간 누적 유지 → "성취는 누적" 기본 정책 보존.
-    const hasPeriodParam = !!(req.query.period || req.query.days || req.query.from || req.query.to);
-    let scope = {};
-    if (hasPeriodParam) {
+    // [정정] 성취수준 분류는 누적 기준 — period(7/30/90d) 무반영. 도달/미도달은 그간 학습의
+    //   누적 결과이므로 기간칩에 따라 은폐/변동되면 안 된다(uid3 누적 미도달 5건이 30일 창 밖으로
+    //   빠져 0으로 은폐되던 P0 버그 fix). period 파라미터가 와도 getStudentMastery 에 넘기지 않는다.
+    //   (invalid from>to 만 안전하게 400 처리 — 분류엔 미반영이지만 잘못된 입력은 거른다.)
+    if (req.query.from || req.query.to) {
       const period = resolvePeriod(req);
       if (period.invalid) return sendInvalidPeriod(res, period.reason);
-      scope = { fromDate: period.fromDate, toDate: period.toDate };
     }
-    const data = mastery.getStudentMastery(userId, { subjectCode, ...scope });
+    const data = mastery.getStudentMastery(userId, { subjectCode });
     // 코드→이름 통일(P0-4·감사 §5): standards/강약 라벨을 단원명(achievementLabel)로 일원화.
     //   getStudentMastery 는 resolveCode(=성취기준 서술 전문)을 label 로 주는데, 강약 다이버징 축·
     //   레이더가 이를 그대로 쓰면 raw 코드/문장 전문이 노출된다. 단원명으로 덮고 서술은 fullLabel 로.
@@ -2068,7 +2329,7 @@ router.get('/stats/perform', requireAuth, (req, res) => {
       SELECT CASE WHEN ll.activity_type='daily_complete' THEN 'self_learn' ELSE ll.activity_type END AS activity_type,
              COUNT(*) cnt,
              AVG(CASE WHEN ${SCORED_SQL} THEN ${NORM_SCORE} END) avg_score,
-             AVG(COALESCE(ll.duration_sec, ll.result_duration, 0)) avg_dur_sec
+             AVG(COALESCE(ll.duration_sec, CAST(REPLACE(REPLACE(COALESCE(ll.result_duration,''),'PT',''),'S','') AS INTEGER), 0)) avg_dur_sec
       FROM learning_logs ll
       ${tableWhere}
       GROUP BY CASE WHEN ll.activity_type='daily_complete' THEN 'self_learn' ELSE ll.activity_type END
@@ -2130,6 +2391,189 @@ router.get('/stats/perform', requireAuth, (req, res) => {
   } catch (err) {
     console.error('[LRS] /stats/perform error:', err);
     res.status(500).json({ success:false, message:'서버 오류가 발생했습니다.' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// (1b) GET /api/lrs/perform/detail — KPI 카드 드릴다운 내역
+//   기획서: 작업지시서/LRS_활동유형별수행_카드드릴다운_스펙.md
+//   ?bucket=<exam|homework|self|content|all>  (필수)
+//   &segment=<view|lesson|solve>              (선택 — bucket=content 세그먼트 필터)
+//   &days|&period|&from&to                     (카드와 동일 기간 — dateRangeWhere 재사용)
+//   &userId=<n>                                (교사/관리자가 특정 학생 조회. 미지정=본인)
+//
+//   ★카운트 일치 계약(불변식): count 는 JOIN 없이 learning_logs 원천 COUNT(*).
+//     동일 dateRangeWhere(created_at,'ll') + 명시적 ll.user_id 필터로 /stats/perform 학생 뷰
+//     (scope=mine=본인 user_id)의 카드 숫자와 정확히 일치. 제목 조인 실패해도 count 불변.
+//     → count == items.length(200 상한 내) == 카드 숫자.
+// ─────────────────────────────────────────────────────────────────────────────
+const PERFORM_DETAIL_ITEM_CAP = 200;
+// bucket → activity_type 화이트리스트 (전부 learning_logs 단일 원천).
+const PERFORM_BUCKET_TYPES = {
+  exam:     ['exam_complete'],
+  homework: ['homework_submit'],
+  self:     ['self_learn', 'daily_complete'],
+  content:  ['content_view', 'lesson_progress', 'content_solve'],
+  all:      ['exam_complete', 'homework_submit', 'self_learn', 'daily_complete',
+             'content_view', 'lesson_progress', 'content_solve'],
+};
+const PERFORM_BUCKET_TITLE = {
+  exam: '완료 평가', homework: '제출 과제', self: '자기주도 학습',
+  content: '콘텐츠 활동', all: '학습 활동',
+};
+// content 세그먼트 → activity_type
+const PERFORM_SEGMENT_TYPE = { view: 'content_view', lesson: 'lesson_progress', solve: 'content_solve' };
+const PERFORM_SEGMENT_LABEL = { view: '콘텐츠 학습', lesson: '수업 진행', solve: '문항풀이' };
+// 점수(정답률) 개념이 있는 유형만 NORM_SCORE 정규화, 그 외(조회·진도율)는 null.
+const PERFORM_SCORED_TYPES = new Set([
+  'exam_complete', 'homework_submit', 'self_learn', 'daily_complete', 'content_solve',
+]);
+
+router.get('/perform/detail', requireAuth, (req, res) => {
+  try {
+    const bucket = String(req.query.bucket || '').toLowerCase();
+    if (!PERFORM_BUCKET_TYPES[bucket]) {
+      return res.status(400).json({ success: false, message: '잘못된 bucket 파라미터입니다.' });
+    }
+    // 조회 대상 학생: userId 미지정이면 본인. 학생은 본인만(canViewUser 403).
+    const userId = parseInt(req.query.userId, 10) || req.user.id;
+    if (!canViewUser(req, userId)) {
+      return res.status(403).json({ success: false, message: '권한이 없습니다.' });
+    }
+    // 기간 필터: /stats/perform 과 100% 동일 코드(dateRangeWhere) 재사용 → 카운트 일치 보증.
+    const r = dateRangeWhere(req, 'created_at', 'll');
+    if (r.invalid) return sendInvalidPeriod(res, r.reason);
+
+    // segment 필터(content 전용). 유효하지 않으면 무시(전체 45).
+    let types = PERFORM_BUCKET_TYPES[bucket];
+    let segmentKey = null;
+    if (bucket === 'content') {
+      const seg = String(req.query.segment || '').toLowerCase();
+      if (PERFORM_SEGMENT_TYPE[seg]) { types = [PERFORM_SEGMENT_TYPE[seg]]; segmentKey = seg; }
+    }
+    const typePH = types.map(() => '?').join(',');
+    // ★ count: JOIN 없이 learning_logs 원천 COUNT — 카드와 구조적으로 동일.
+    const countRow = db.prepare(`
+      SELECT COUNT(*) c
+      FROM learning_logs ll
+      WHERE ll.user_id = ? AND ll.activity_type IN (${typePH}) ${r.where}
+    `).get(userId, ...types, ...r.params);
+    const count = countRow.c || 0;
+
+    // bucket=content 세그먼트 소계 (segment 미지정일 때만 3종 소계 제공, 합=count)
+    let segments;
+    if (bucket === 'content' && !segmentKey) {
+      segments = ['view', 'lesson', 'solve'].map(k => {
+        const t = PERFORM_SEGMENT_TYPE[k];
+        const cr = db.prepare(`
+          SELECT COUNT(*) c FROM learning_logs ll
+          WHERE ll.user_id = ? AND ll.activity_type = ? ${r.where}
+        `).get(userId, t, ...r.params);
+        return { key: k, label: PERFORM_SEGMENT_LABEL[k], count: cr.c || 0 };
+      });
+    }
+    // bucket=all 버킷 소계 (exam/homework/self/content, 합=count=totalActs)
+    let subtotals;
+    if (bucket === 'all') {
+      subtotals = ['exam', 'homework', 'self', 'content'].map(b => {
+        const bt = PERFORM_BUCKET_TYPES[b];
+        const ph = bt.map(() => '?').join(',');
+        const cr = db.prepare(`
+          SELECT COUNT(*) c FROM learning_logs ll
+          WHERE ll.user_id = ? AND ll.activity_type IN (${ph}) ${r.where}
+        `).get(userId, ...bt, ...r.params);
+        return { bucket: b, label: PERFORM_BUCKET_TITLE[b], count: cr.c || 0 };
+      });
+    }
+
+    // items: LEFT JOIN 으로 제목만 보강(조인 실패해도 count 불변). 최신순, 최대 200.
+    //   각 대상 테이블을 개별 LEFT JOIN(문자열 target_id → 정수 id 는 CAST, exams.id 는 uuid 문자열).
+    const NORM = `(CASE WHEN ll.result_score <= 1 THEN ll.result_score*100 ELSE ll.result_score END)`;
+    const rows = db.prepare(`
+      SELECT ll.activity_type, ll.target_type, ll.target_id, ll.created_at,
+             ll.result_score, ll.result_success, ll.correct_count, ll.total_items,
+             ll.source_service,
+             e.title  AS exam_title,
+             h.title  AS hw_title,
+             di.item_title AS self_title,
+             c.title  AS content_title,
+             l.title  AS lesson_title,
+             ${NORM}  AS norm_score
+      FROM learning_logs ll
+      LEFT JOIN exams e   ON ll.activity_type='exam_complete'    AND e.id = ll.target_id
+      LEFT JOIN homework h ON ll.activity_type='homework_submit' AND h.id = CAST(ll.target_id AS INTEGER)
+      LEFT JOIN daily_learning_items di ON ll.activity_type IN ('self_learn','daily_complete') AND di.id = CAST(ll.target_id AS INTEGER)
+      LEFT JOIN contents c ON ll.activity_type IN ('content_view','content_solve') AND c.id = CAST(ll.target_id AS INTEGER)
+      LEFT JOIN lessons  l ON ll.activity_type='lesson_progress' AND l.id = CAST(ll.target_id AS INTEGER)
+      WHERE ll.user_id = ? AND ll.activity_type IN (${typePH}) ${r.where}
+      ORDER BY ll.created_at DESC
+      LIMIT ?
+    `).all(userId, ...types, ...r.params, PERFORM_DETAIL_ITEM_CAP);
+
+    const items = rows.map(row => {
+      const at = row.activity_type;
+      // 제목(폴백 라벨)
+      let title, typeLabel, badge, seg;
+      if (at === 'exam_complete') {
+        title = row.exam_title || '평가';
+        typeLabel = '채움클래스 평가';
+        badge = { text: '채움클래스', tone: 'success' };
+      } else if (at === 'homework_submit') {
+        title = row.hw_title || '과제';
+        typeLabel = '과제';
+        badge = { text: '과제', tone: 'info' };
+      } else if (at === 'self_learn' || at === 'daily_complete') {
+        title = row.self_title || '오늘의 학습';
+        // 출처(오늘의학습/AI맞춤/오답노트) — source_service 로 대략 구분. 애매하면 '자기주도'.
+        const src = String(row.source_service || '');
+        typeLabel = src.includes('wrong') ? '오답노트' : (src.includes('ai') || src.includes('map') ? 'AI맞춤' : '오늘의 학습');
+        badge = { text: '자기주도', tone: 'info' };
+      } else if (at === 'content_view') {
+        title = row.content_title || '콘텐츠';
+        typeLabel = '콘텐츠 학습'; seg = 'view';
+        badge = { text: '콘텐츠 학습', tone: 'neutral' };
+      } else if (at === 'lesson_progress') {
+        title = row.lesson_title || '콘텐츠';
+        typeLabel = '수업 진행'; seg = 'lesson';
+        badge = { text: '수업 진행', tone: 'info' };
+      } else if (at === 'content_solve') {
+        title = row.content_title || '콘텐츠';
+        typeLabel = '콘텐츠 문항풀이'; seg = 'solve';
+        badge = { text: '문항풀이', tone: 'success' };
+      } else {
+        title = '학습 활동'; typeLabel = '학습'; badge = { text: '학습', tone: 'neutral' };
+      }
+      // 점수: 점수 개념 있는 유형만 0~100 정규화, 조회·진도율은 null.
+      const score = (PERFORM_SCORED_TYPES.has(at) && row.norm_score != null)
+        ? Math.round(Number(row.norm_score) * 10) / 10
+        : null;
+      // sub(부가): exam 은 정답 c/t 있으면.
+      let sub = '';
+      if (at === 'exam_complete' && row.total_items != null && row.correct_count != null) {
+        sub = `정답 ${row.correct_count}/${row.total_items}`;
+      }
+      const item = { title, date: row.created_at, score, sub, typeLabel, badge };
+      if (seg) item.segment = seg;
+      return item;
+    });
+
+    const out = {
+      success: true,
+      bucket,
+      title: PERFORM_BUCKET_TITLE[bucket],
+      period: r.fromDate && r.toDate ? `${r.fromDate} ~ ${r.toDate}` : null,
+      count,
+      items,
+    };
+    if (segments) out.segments = segments;
+    if (subtotals) out.subtotals = subtotals;
+    if (count > PERFORM_DETAIL_ITEM_CAP) {
+      out.note = `최근 ${PERFORM_DETAIL_ITEM_CAP}건만 표시합니다.`;
+    }
+    res.json(out);
+  } catch (err) {
+    console.error('[LRS] /perform/detail error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
   }
 });
 
@@ -2234,13 +2678,20 @@ router.get('/stats/teacher-index', requireAuth, (req, res) => {
     const hasHomeworkFeedback = _tableExists('homework_feedback');
     const hasExams = _tableExists('exams');
 
+    // 기간 반영(P1 교사 결함): 이전엔 contents/exams/feedback 카운트에 기간 필터가 없어 7d 와 90d 응답이
+    //   완전 동일했다(기간 무반응). created_at 이 있는 '해당 기간에 만든/작성한' 지표는 기간 date-range 를 적용한다.
+    //   기간 필터용 조각(별칭 없이 created_at 컬럼 직접). r.params 를 그대로 재사용.
+    const periodWhere = r.where;               // ' AND DATE(created_at) >= ? AND DATE(created_at) <= ?' 또는 ''
+    const periodParams = r.params;
     const teachers = teacherIds.map(tid => {
       const u = db.prepare('SELECT id, COALESCE(display_name, username) name FROM users WHERE id = ?').get(tid) || { id: tid, name: '#'+tid };
+      // class_count 는 본질적으로 누적(반은 특정 기간에 '개설'되는 지표로 다루지 않음) → 기간 불변, 라벨로 명시.
       let classCount = 0;
       try { classCount = db.prepare('SELECT COUNT(*) c FROM classes WHERE owner_id = ?').get(tid).c; } catch (_){}
+      // 아래 3종은 created_at 기준 '기간 내 신규 작성' 건수 → 기간 date-range 적용(기간 반응성 확보).
       let contentsAuthored = 0;
       if (hasContents) {
-        try { contentsAuthored = db.prepare('SELECT COUNT(*) c FROM contents WHERE creator_id = ?').get(tid).c; } catch (_){}
+        try { contentsAuthored = db.prepare(`SELECT COUNT(*) c FROM contents WHERE creator_id = ? ${periodWhere}`).get(tid, ...periodParams).c; } catch (_){}
       }
       let lessonsHeld = 0;
       try {
@@ -2248,21 +2699,21 @@ router.get('/stats/teacher-index', requireAuth, (req, res) => {
       } catch (_){}
       let examsOpened = 0;
       if (hasExams) {
-        try { examsOpened = db.prepare('SELECT COUNT(*) c FROM exams WHERE owner_id = ?').get(tid).c; } catch (_){}
+        try { examsOpened = db.prepare(`SELECT COUNT(*) c FROM exams WHERE owner_id = ? ${periodWhere}`).get(tid, ...periodParams).c; } catch (_){}
       }
       let feedbackCount = 0;
       if (hasHomeworkFeedback) {
-        try { feedbackCount = db.prepare('SELECT COUNT(*) c FROM homework_feedback WHERE author_id = ?').get(tid).c; } catch (_){}
+        try { feedbackCount = db.prepare(`SELECT COUNT(*) c FROM homework_feedback WHERE author_id = ? ${periodWhere}`).get(tid, ...periodParams).c; } catch (_){}
       }
       // 가중합 지수: c*2 + l + e*2 + f, 최대값으로 정규화 (100점 만점)
       const raw = contentsAuthored*2 + lessonsHeld + examsOpened*2 + feedbackCount;
       return {
         user_id: u.id, name: u.name || ('#'+u.id),
-        class_count: classCount,
-        contents_authored: contentsAuthored,
-        lessons_held: lessonsHeld,
-        exams_opened: examsOpened,
-        feedback_count: feedbackCount,
+        class_count: classCount,       // 누적(기간 불변)
+        contents_authored: contentsAuthored,  // 기간 내 신규
+        lessons_held: lessonsHeld,             // 기간 내
+        exams_opened: examsOpened,             // 기간 내 신규
+        feedback_count: feedbackCount,         // 기간 내
         _raw: raw,
         utilization_score: 0
       };
@@ -2287,7 +2738,19 @@ router.get('/stats/teacher-index', requireAuth, (req, res) => {
       }
     }
 
-    res.json({ success:true, scope, teachers, myIndex });
+    res.json({
+      success: true,
+      scope,
+      // 어떤 지표가 기간에 반응하고 어떤 게 누적인지 FE 가 라벨링할 수 있게 명시.
+      period: { fromDate: r.fromDate, toDate: r.toDate },
+      metricScopes: {
+        contents_authored: 'period', lessons_held: 'period',
+        exams_opened: 'period', feedback_count: 'period',
+        class_count: 'cumulative'   // 누적 — 기간 무관
+      },
+      teachers,
+      myIndex
+    });
   } catch (err) {
     console.error('[LRS] /stats/teacher-index error:', err);
     res.status(500).json({ success:false, message:'서버 오류가 발생했습니다.' });
@@ -2309,7 +2772,7 @@ router.get('/stats/daily-snapshot', requireAuth, (req, res) => {
       const sumRow = db.prepare(`
         SELECT COUNT(*) total_acts,
                COUNT(DISTINCT ll.user_id) uniq_users,
-               COALESCE(SUM(COALESCE(ll.duration_sec, ll.result_duration, 0)),0) dur_sec
+               COALESCE(SUM(COALESCE(ll.duration_sec, CAST(REPLACE(REPLACE(COALESCE(ll.result_duration,''),'PT',''),'S','') AS INTEGER), 0)),0) dur_sec
         FROM learning_logs ll ${where}
       `).get(...params);
       const byServiceRows = db.prepare(`
@@ -2953,7 +3416,7 @@ router.get('/stats/service-ops', requireAuth, (req, res) => {
              COALESCE(SUM(COALESCE(ll.duration_sec,
                CAST(REPLACE(REPLACE(COALESCE(ll.result_duration,''),'PT',''),'S','') AS INTEGER), 0)),0) dur_sec
       FROM learning_logs ll
-      WHERE ll.source_service IS NOT NULL
+      WHERE ll.source_service IS NOT NULL AND ll.source_service NOT LIKE 'demo%'
         AND DATE(ll.created_at) >= DATE('now','localtime', ?) ${sf.where}
       GROUP BY ll.source_service
     `).all(curFrom);
@@ -2962,7 +3425,7 @@ router.get('/stats/service-ops', requireAuth, (req, res) => {
     const prev = db.prepare(`
       SELECT ll.source_service svc, COUNT(*) cnt
       FROM learning_logs ll
-      WHERE ll.source_service IS NOT NULL
+      WHERE ll.source_service IS NOT NULL AND ll.source_service NOT LIKE 'demo%'
         AND DATE(ll.created_at) >= DATE('now','localtime', ?)
         AND DATE(ll.created_at) <= DATE('now','localtime', ?) ${sf.where}
       GROUP BY ll.source_service
@@ -2974,7 +3437,7 @@ router.get('/stats/service-ops', requireAuth, (req, res) => {
       SELECT svc, COUNT(*) revisit_users FROM (
         SELECT ll.source_service svc, ll.user_id
         FROM learning_logs ll
-        WHERE ll.source_service IS NOT NULL
+        WHERE ll.source_service IS NOT NULL AND ll.source_service NOT LIKE 'demo%'
           AND DATE(ll.created_at) >= DATE('now','localtime', ?) ${sf.where}
         GROUP BY ll.source_service, ll.user_id
         HAVING COUNT(DISTINCT DATE(ll.created_at)) >= 2
@@ -3097,7 +3560,7 @@ router.get('/stats/macro-drill', requireAuth, (req, res) => {
                COUNT(DISTINCT ll.user_id) students,
                COALESCE(SUM(COALESCE(ll.duration_sec,
                  CAST(REPLACE(REPLACE(COALESCE(ll.result_duration,''),'PT',''),'S','') AS INTEGER),0)),0) dur_sec,
-               AVG(ll.result_score) avg_score
+               AVG(CASE WHEN ${scoredWhere('ll')} THEN ${normScoreExpr('ll')} END) avg_score
         FROM learning_logs ll JOIN users u ON u.id = ll.user_id
         WHERE ${studWhereSql} AND ll.subject_code IS NOT NULL
           AND DATE(ll.created_at) >= DATE('now','localtime', ?) ${sfL.where}
@@ -3117,7 +3580,7 @@ router.get('/stats/macro-drill', requireAuth, (req, res) => {
                COUNT(*) acts,
                COALESCE(SUM(COALESCE(ll.duration_sec,
                  CAST(REPLACE(REPLACE(COALESCE(ll.result_duration,''),'PT',''),'S','') AS INTEGER),0)),0) dur_sec,
-               AVG(ll.result_score) avg_score
+               AVG(CASE WHEN ${scoredWhere('ll')} THEN ${normScoreExpr('ll')} END) avg_score
         FROM learning_logs ll JOIN users u ON u.id = ll.user_id
         WHERE ${studWhereSql} AND ${gcol} IS NOT NULL AND ${gcol} <> ''
           AND DATE(ll.created_at) >= DATE('now','localtime', ?) ${sfL.where}
@@ -3186,14 +3649,16 @@ router.get('/stats/cross-activity-achievement', requireAuth, (req, res) => {
     const sfU = seedFilter(req, 'u');
     const dateFrom = `-${days - 1} days`;
 
-    // 학생 단위: 총 활동량, 평균성취, 콘텐츠/자기주도 활용 빈도
+    // 학생 단위: 총 활동량, 평균성취, 콘텐츠/자기주도 활용 빈도.
+    //   avg_score(산점도 Y축=성취): 채점형만·0~100 정규화(진도형 제외). 미정규화면 0~1 점이 Y축에 혼입돼
+    //   산점도 하단에 0.x 점이 찍힌다(P0 정규화 일괄 적용).
     const perUser = db.prepare(`
       SELECT u.id uid,
              COUNT(*) acts,
-             AVG(ll.result_score) avg_score,
+             AVG(CASE WHEN ${scoredWhere('ll')} THEN ${normScoreExpr('ll')} END) avg_score,
              SUM(CASE WHEN ll.source_service='content' THEN 1 ELSE 0 END) content_acts,
              SUM(CASE WHEN ll.source_service='self-learn' THEN 1 ELSE 0 END) self_acts,
-             COUNT(ll.result_score) scored_cnt
+             SUM(CASE WHEN ${scoredWhere('ll')} AND ll.result_score IS NOT NULL THEN 1 ELSE 0 END) scored_cnt
       FROM users u JOIN learning_logs ll ON ll.user_id = u.id
       WHERE u.role='student'
         AND DATE(ll.created_at) >= DATE('now','localtime', ?) ${sfL.where} ${sfU.where}
