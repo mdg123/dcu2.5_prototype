@@ -427,13 +427,13 @@ test.describe('스모크: LRS A6 감정-성취 비교', () => {
             host: true,
             hasCanvas: !!h.querySelector('#sEmoMirror'),
             hasStatePanel: !!h.querySelector('.dc-state-panel'),
-            hasTitle: /감정-성취 비교/.test(h.innerText || ''),
+            hasTitle: /감정체크-학습성취/.test(h.innerText || ''),
             objObj: ((h.innerText || '').match(/\[object Object\]/g) || []).length,
           };
         });
         expect.soft(a6.host, `A6 [${vp.name}] 카드 호스트(#sEmotionMirrorHost) 없음`).toBeTruthy();
         expect.soft(a6.hasCanvas || a6.hasStatePanel, `A6 [${vp.name}] 차트/상태패널 둘 다 없음(렌더 실패)`).toBeTruthy();
-        expect.soft(a6.hasTitle, `A6 [${vp.name}] 카드 제목("감정-성취 비교") 미표시`).toBeTruthy();
+        expect.soft(a6.hasTitle, `A6 [${vp.name}] 카드 제목("감정체크-학습성취 수준 연관 분석") 미표시`).toBeTruthy();
         expect.soft(a6.objObj, `A6 [${vp.name}] [object Object] ${a6.objObj}건`).toBe(0);
 
         // (C) 가로 스크롤 0
@@ -588,7 +588,7 @@ test.describe('스모크: LRS 학생 홈·메뉴 재설계 불변식(INV-a~f)', 
 
   // ── INV-K5(P0-4): 학생 "오늘 활동 요약"(s-daily) 폐지 + 습관 카드 이관 ──
   //    ① 학습활동 분석 탭에 "오늘 활동 요약" 부재
-  //    ② s-trend에 "내가 주로 공부하는 시간" 카드 존재
+  //    ② s-trend에 "주 학습 시간대" 습관 카드 존재
   //    ③ 구 딥링크 #s-daily → "활동 유형별 수행"(s-perform) 폴백(빈 화면·에러 없음)
   test('INV-K5: s-daily 폐지 — 탭 부재 + 습관 카드 이관 + 구 해시 폴백', async ({ browser }) => {
     const context = await browser.newContext({ storageState: stateFor('student'), locale: 'ko-KR', baseURL: BASE_URL });
@@ -610,9 +610,9 @@ test.describe('스모크: LRS 학생 홈·메뉴 재설계 불변식(INV-a~f)', 
       });
       const habit = await page.waitForFunction(() => {
         const h = document.getElementById('sHabitHost');
-        return !!(h && /내가 주로 공부하는 시간/.test(h.innerText || ''));
+        return !!(h && /주 학습 시간대/.test(h.innerText || ''));
       }, { timeout: 10000 }).then(() => true).catch(() => false);
-      expect.soft(habit, 'INV-K5: s-trend에 "내가 주로 공부하는 시간" 카드 미렌더').toBeTruthy();
+      expect.soft(habit, 'INV-K5: s-trend에 "주 학습 시간대" 습관 카드 미렌더').toBeTruthy();
 
       // ③ 구 딥링크 진입(페이지 로드 경유 — SPA는 hashchange 라우팅이 없어 boot가 처리) → s-perform 폴백
       await page.goto('/lrs/index.html#s-daily', { waitUntil: 'domcontentloaded' });
@@ -627,6 +627,69 @@ test.describe('스모크: LRS 학생 홈·메뉴 재설계 불변식(INV-a~f)', 
       }));
       expect.soft(fallback.view, `INV-K5: #s-daily 딥링크가 s-perform으로 폴백 안 됨(현재 뷰: ${fallback.view})`).toBe('s-perform');
       expect.soft(fallback.text.length, 'INV-K5: 폴백 화면 본문 미렌더').toBeGreaterThan(20);
+      await page.close();
+    } finally { await context.close(); }
+  });
+});
+
+// ── 7) LRS P1: 3구간 IA(INV-K10) + 학령 분기 실존·윤리(INV-K11 학생측) ──
+//    스펙: 작업지시서/LRS_P1_3구간IA_스택바_학급비교_스펙.md §7
+//    (middle 계정 측 검사는 시드 계정 확보 후 확장 — 여기서는 student1(elementary) 기준 절반)
+test.describe('스모크: LRS P1 3구간 IA·학령 분기(INV-K10·K11)', () => {
+  test('INV-K10: 학생 홈 3구간 now→flow→next + 스냅샷 구간① 내부 + 링크→s-perform + 격식어 0', async ({ browser }) => {
+    const context = await browser.newContext({ storageState: stateFor('student'), locale: 'ko-KR', baseURL: BASE_URL });
+    try {
+      const page = await context.newPage();
+      page.setViewportSize({ width: 1440, height: 900 });
+      await gotoStudentHome(page);
+      const zones = await page.evaluate(() => ({
+        order: [...document.querySelectorAll('#viewRoot .sh-zone')].map(z => z.getAttribute('data-zone')),
+        snapshotInNow: !!document.querySelector('#viewRoot .sh-zone[data-zone="now"] .dc-snapshot'),
+        heads: [...document.querySelectorAll('#viewRoot .sh-zone__head')].map(h => (h.textContent || '').trim()),
+        hasLink: !!document.getElementById('shZoneFlowLink'),
+      }));
+      expect.soft(zones.order, `INV-K10: 구간 순서 now→flow→next 아님: ${JSON.stringify(zones.order)}`).toEqual(['now', 'flow', 'next']);
+      expect.soft(zones.snapshotInNow, 'INV-K10: 오늘 스냅샷이 구간①(now) 안에 없음(구간 밖으로 샘)').toBeTruthy();
+      const formal = zones.heads.filter(t => /이력|현황|계획/.test(t));
+      expect.soft(formal.length, `INV-K10: 구간 헤더에 격식어(이력/현황/계획) 노출: ${JSON.stringify(formal)}`).toBe(0);
+      expect.soft(zones.hasLink, 'INV-K10: 구간② "최근 활동 자세히 보기" 링크 부재').toBeTruthy();
+      // 링크 실클릭 → s-perform 전환 (setView 경유 — 해시 단독 변경 아님)
+      await page.click('#shZoneFlowLink');
+      await page.waitForFunction(() => document.getElementById('viewRoot')?.getAttribute('data-view') === 's-perform',
+        { timeout: 10000 }).catch(() => {});
+      const view = await page.evaluate(() => document.getElementById('viewRoot')?.getAttribute('data-view'));
+      expect.soft(view, `INV-K10: 링크 클릭 후 s-perform 미전환(현재: ${view})`).toBe('s-perform');
+      await page.close();
+    } finally { await context.close(); }
+  });
+
+  test('INV-K11: 초등(student1) — 스택바 부재·레이더 유지 + withClass 요청 0 + 오버레이·비교 문구 0', async ({ browser }) => {
+    const context = await browser.newContext({ storageState: stateFor('student'), locale: 'ko-KR', baseURL: BASE_URL });
+    try {
+      const page = await context.newPage();
+      page.setViewportSize({ width: 1440, height: 900 });
+      const withClassReqs = [];
+      page.on('request', (r) => { if (r.url().includes('withClass=')) withClassReqs.push(r.url()); });
+      await page.goto('/lrs/index.html?menu=analytics', { waitUntil: 'domcontentloaded' });
+      await page.waitForFunction(() => {
+        const vr = document.getElementById('viewRoot');
+        return !!(vr && vr.getAttribute('data-view') === 's-achieve' && vr.querySelector('.mastery-section'));
+      }, { timeout: 20000 }).catch(() => {});
+      await page.waitForTimeout(1500); // 후행 trend fetch·렌더 대기
+      const st = await page.evaluate(() => ({
+        hasStack: !!document.getElementById('sSubjStack'),
+        hasAvgCard: /교과별 평균 정답률/.test(document.getElementById('viewRoot')?.innerText || ''),
+        trendDatasets: (window.Chart && Chart.getChart && Chart.getChart('sTrendChart'))
+          ? Chart.getChart('sTrendChart').data.datasets.length : null,
+        compareText: /반 평균/.test(document.getElementById('viewRoot')?.innerText || ''),
+      }));
+      expect.soft(st.hasStack, 'INV-K11: 초등에 #sSubjStack 렌더됨(스택바는 중·고 전용)').toBeFalsy();
+      expect.soft(st.hasAvgCard, 'INV-K11: 초등 "교과별 평균 정답률" 카드(레이더/막대 폴백) 부재').toBeTruthy();
+      if (st.trendDatasets != null) {
+        expect.soft(st.trendDatasets, 'INV-K11: 초등 추이 차트에 학급 오버레이 dataset 혼입').toBe(1);
+      }
+      expect.soft(st.compareText, 'INV-K11: 초등 화면에 "반 평균" 비교 문구 노출(윤리 위반)').toBeFalsy();
+      expect.soft(withClassReqs.length, `INV-K11: 초등이 withClass 요청을 보냄(네트워크 가드 위반): ${JSON.stringify(withClassReqs)}`).toBe(0);
       await page.close();
     } finally { await context.close(); }
   });

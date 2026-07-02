@@ -80,8 +80,11 @@ function classStudents(classId) {
 // §B-2. 주차별 정답률 시계열을 learning_logs 에서 재구성(스냅샷 불요).
 //   주차 = strftime('%Y-%W') (ISO 유사 주). 한 주 시도<3 은 결측(노이즈 배제).
 //   반환 weeks: [{ week, attempts, success, rate }] (rate 0~100, 시도순)
+//   withContributors(P1-3 학급 비교, 스펙 §4-2): true 면 주별 기여 인원수
+//     COUNT(DISTINCT user_id) AS contributors 1컬럼을 추가로 산출한다(익명 인원수만 —
+//     개별 학생 값·명단 없음). false(기본)면 기존 반환 형태 완전 불변(회귀 0).
 // ─────────────────────────────────────────────────────────────────────────────
-function _weeklyRateSeries({ userIds, code, weeksLimit }) {
+function _weeklyRateSeries({ userIds, code, weeksLimit, withContributors = false }) {
   if (!userIds || !userIds.length) return [];
   const ph = userIds.map(() => '?').join(',');
   // [P1 추이 과다 게이트 fix] achievement_code IS NOT NULL 은 '특정 성취기준(code)' 추세일 때만 요구한다.
@@ -91,7 +94,8 @@ function _weeklyRateSeries({ userIds, code, weeksLimit }) {
   let sql = `
     SELECT strftime('%Y-%W', created_at) AS week,
            COUNT(*) AS attempts,
-           SUM(CASE WHEN result_success = 1 THEN 1 ELSE 0 END) AS success
+           SUM(CASE WHEN result_success = 1 THEN 1 ELSE 0 END) AS success${withContributors ? `,
+           COUNT(DISTINCT user_id) AS contributors` : ''}
     FROM learning_logs
     WHERE user_id IN (${ph})
       AND result_success IS NOT NULL`;
@@ -112,7 +116,9 @@ function _weeklyRateSeries({ userIds, code, weeksLimit }) {
     .map(r => {
       const a = Number(r.attempts) || 0;
       const s = Number(r.success) || 0;
-      return { week: r.week, attempts: a, success: s, rate: a > 0 ? (s / a) * 100 : null };
+      const row = { week: r.week, attempts: a, success: s, rate: a > 0 ? (s / a) * 100 : null };
+      if (withContributors) row.contributors = Number(r.contributors) || 0;
+      return row;
     })
     .filter(w => w.rate != null);
 
@@ -1148,6 +1154,7 @@ module.exports = {
   CONFIDENCE, CONFIDENCE_KO, RISK_GRADE, RISK_GRADE_KO, RISK_WEIGHTS,
   MIN_WEEKS, MIN_WEEK_ATTEMPTS, DEFAULT_WEEKS, NEGATIVE_EMOTIONS,
   classStudentIds, classStudents,
+  weeklyRateSeries: _weeklyRateSeries, // P1-3 classTrend(routes/lrs.js)용 — withContributors 옵션 지원
   computeTrend, projectReach, getClassRiskList, getPrereqGap, getWeakTrend,
   getEmotionMirror, getShallowLearning, getEmotionEngage, getNextStep,
   riskGrade, invalidateBridge,

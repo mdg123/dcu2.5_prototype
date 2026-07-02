@@ -161,6 +161,34 @@ function canViewUser(req, targetUserId) {
   return req.user.role === 'teacher' || req.user.role === 'admin';
 }
 
+// ── 학급(peer) 집합 공용 헬퍼 — P1-3 스펙 §4-2 ────────────────────────────
+// 표본 가드: 반 학생 수가 이 미만이면 익명 집계여도 비교 비노출(개인정보/신뢰도).
+//   peer-compare 와 /trend/student(withClass=1) classTrend 가 공유하는 단일 정책값.
+const MIN_PEERS = 5;
+
+/**
+ * peer 집합 산출 — 대상 학생이 소속된 반들(student 멤버십)의 student 멤버 합집합.
+ * 본인 포함(peer-compare 기존 정책과 동일 — 스펙 §4-2 문서화).
+ * peer-compare 핸들러의 인라인 로직을 추출한 공용 헬퍼(산식 2벌 금지 —
+ * "학급"의 정의가 두 화면에서 갈리면 안 됨).
+ * @param {number} userId 대상 학생 id
+ * @returns {{ classIds:number[], peerIds:number[] }} 반 없음이면 둘 다 빈 배열
+ */
+function _peerIdsOf(userId) {
+  const classRows = db.prepare(`
+    SELECT cm.class_id FROM class_members cm JOIN users u ON u.id = cm.user_id
+    WHERE cm.user_id = ? AND u.role = 'student'
+  `).all(userId);
+  const classIds = [...new Set(classRows.map(r => r.class_id))];
+  if (!classIds.length) return { classIds: [], peerIds: [] };
+  const ph = classIds.map(() => '?').join(',');
+  const peerIds = db.prepare(`
+    SELECT DISTINCT cm.user_id AS id FROM class_members cm JOIN users u ON u.id = cm.user_id
+    WHERE cm.class_id IN (${ph}) AND u.role = 'student'
+  `).all(...classIds).map(r => r.id);
+  return { classIds, peerIds };
+}
+
 // ─────────────────────────────────────────────────────────
 // 점수 정규화 공통 정의 (단일 출처)
 //   /insights 의 "평균 성취(periodScoreAvg)" 모집단.
@@ -1826,8 +1854,45 @@ router.get('/ews/class/:id', requireAuth, (req, res) => {
   }
 });
 
+// ── P1-3: classTrend(학급 주별 평균 정답률) 조립 — 스펙 §4-2 계약 그대로 ──
+//   익명 집계만: 개별 학생 값·명단·id 절대 미포함(집계값과 인원수만 — 역추적 불가).
+//   가드(이중):
+//     ① 반 없음 → { status:'no_class' }
+//     ② 전체 peer < MIN_PEERS(5) → { status:'insufficient', peerCount, minPeers } (series 미포함)
+//     ③ 주별 contributors < MIN_PEERS(5) 또는 attempts < MIN_WEEK_ATTEMPTS(3) → 그 주 반환하지 않음(결측)
+//     ④ 유효 주 0개(전 주 가드 미달) → status:'insufficient' + series:[] (FE 오버레이 생략)
+//   주 키 = strftime('%Y-%W') — 내(trend.series) 주 키와 동일 형식(FE 주 단위 align 전제).
+function _buildClassTrend(userId, weeks) {
+  const { classIds, peerIds } = _peerIdsOf(userId);
+  if (!classIds.length) return { status: 'no_class' };
+  if (peerIds.length < MIN_PEERS) {
+    return { status: 'insufficient', peerCount: peerIds.length, minPeers: MIN_PEERS };
+  }
+  const raw = analytics.weeklyRateSeries({ userIds: peerIds, weeksLimit: weeks, withContributors: true });
+  const series = raw
+    .filter(w => (w.contributors || 0) >= MIN_PEERS && (w.attempts || 0) >= analytics.MIN_WEEK_ATTEMPTS)
+    .map(w => ({
+      week: w.week,                                   // '%Y-%W' — 내 series 와 동일 키 형식
+      rate: Math.round(w.rate * 10) / 10,             // 0~100, 소수 1자리(내 series round1 과 동일)
+      attempts: w.attempts,
+      contributors: w.contributors,                   // 익명 인원수만(식별 정보 없음)
+    }));
+  if (!series.length) {
+    return { status: 'insufficient', peerCount: peerIds.length, minPeers: MIN_PEERS, currentRate: null, series: [] };
+  }
+  return {
+    status: 'ok',
+    peerCount: peerIds.length, minPeers: MIN_PEERS,
+    currentRate: series[series.length - 1].rate,      // 유효 마지막 주 rate
+    series,
+  };
+}
+
 // GET /api/lrs/trend/student/:id — 본인/교사/관리자. 성취 추이 + 도달예상.
 //   윤리(P6): 위험점수·위험등급 필드 절대 미포함(학생 낙인 방지).
+//   P1-3(스펙 §4-2): ?withClass=1 옵트인 시에만 classTrend 를 "추가"한다.
+//     미지정 시 응답 완전 불변(필드 추가 0 — 기존 소비처 회귀 0). 초등 FE 는 이 파라미터를
+//     아예 보내지 않으므로(네트워크 레벨 윤리 가드) 응답에 반 비교 데이터 자체가 존재하지 않는다.
 router.get('/trend/student/:id', requireAuth, (req, res) => {
   try {
     const userId = parseInt(req.params.id, 10);
@@ -1854,12 +1919,17 @@ router.get('/trend/student/:id', requireAuth, (req, res) => {
     const projection = analytics.projectReach(trend, { target });
 
     // ★ 응답에 위험점수/위험등급 등 어떤 위험 필드도 포함하지 않는다(P6).
-    res.json({
+    const payload = {
       success: true, userId, target,
       period: { fromDate: period.fromDate, toDate: period.toDate, label: period.label, weeks },
       trend, projection,
       disclaimer: '이 추정은 규칙 기반이라 실제와 다를 수 있어요. 더 풀수록 정확해져요!',
-    });
+    };
+    // P1-3 옵트인 확장 — withClass=1 일 때만 classTrend 추가(미지정 시 위 payload 그대로 = 불변).
+    if (String(req.query.withClass || '') === '1') {
+      payload.classTrend = _buildClassTrend(userId, weeks);
+    }
+    res.json(payload);
   } catch (err) {
     console.error('[LRS] /trend/student error:', err);
     res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
@@ -1919,23 +1989,14 @@ router.get('/peer-compare/:userId', requireAuth, (req, res) => {
     if (!canViewUser(req, userId)) {
       return res.status(403).json({ success: false, message: '권한이 없습니다.' });
     }
-    const MIN_PEERS = 5; // 표본 가드: 반 학생 수가 이 미만이면 익명이어도 비교 비노출(개인정보/신뢰도).
-
     // 대상 학생의 반들 → 반 멤버(학생) 합집합. 여러 반이면 학생이 속한 모든 반의 동료를 후보로.
-    const classRows = db.prepare(`
-      SELECT cm.class_id FROM class_members cm JOIN users u ON u.id = cm.user_id
-      WHERE cm.user_id = ? AND u.role = 'student'
-    `).all(userId);
-    const classIds = [...new Set(classRows.map(r => r.class_id))];
+    //   P1-3(스펙 §4-2): 인라인이던 산출 로직을 _peerIdsOf 공용 헬퍼로 추출 —
+    //   /trend/student(withClass=1) classTrend 와 "학급" 정의·MIN_PEERS 정책을 공유한다.
+    const { classIds, peerIds } = _peerIdsOf(userId);
     if (!classIds.length) {
       return res.json({ success: true, userId, status: 'no_class',
         message: '아직 소속된 클래스가 없어 비교할 친구들이 없어요.' });
     }
-    const ph = classIds.map(() => '?').join(',');
-    const peerIds = db.prepare(`
-      SELECT DISTINCT cm.user_id AS id FROM class_members cm JOIN users u ON u.id = cm.user_id
-      WHERE cm.class_id IN (${ph}) AND u.role = 'student'
-    `).all(...classIds).map(r => r.id);
 
     if (peerIds.length < MIN_PEERS) {
       return res.json({ success: true, userId, status: 'insufficient', peerCount: peerIds.length, minPeers: MIN_PEERS,
