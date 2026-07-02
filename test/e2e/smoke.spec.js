@@ -397,10 +397,11 @@ test.describe('스모크: LRS A6 감정-성취 비교', () => {
         page.on('console', (msg) => { if (msg.type() === 'error') { const t = msg.text(); if (!isWhitelisted(t)) consoleErrors.push(`[${vp.name}] ${t}`); } });
         page.on('pageerror', (err) => { pageErrors.push(`[${vp.name}] ${err.message}`); });
 
-        // ?menu=analytics 로 진입 → 분석 카테고리 사이드메뉴(s-trend 버튼 포함)가 렌더됨.
-        // (bare /lrs/index.html 은 홈 카테고리라 s-trend 버튼이 없음.)
+        // ?menu=activities 로 진입 → 학습활동 분석 카테고리 탭(s-trend 버튼 포함)이 렌더됨.
+        //   (d9c879a 메뉴 재설계에서 s-trend 가 analytics → activities 로 이동. 구 진입 경로
+        //    ?menu=analytics 는 s-trend 버튼이 없어 본 테스트가 무의미하게 타임아웃됨 — 경로 교정.)
         // ※ LRS SPA 는 주기적 sync 타이머가 있어 networkidle 이 안정적으로 안 옴 → 셀렉터 대기로 대체.
-        await page.goto('/lrs/index.html?menu=analytics', { waitUntil: 'domcontentloaded' });
+        await page.goto('/lrs/index.html?menu=activities', { waitUntil: 'domcontentloaded' });
         await page.waitForSelector('#dacheum-gnb-wrapper', { timeout: 10000 }).catch(() => {});
         await page.waitForSelector('[data-view="s-trend"]', { timeout: 15000 }).catch(() => {});
 
@@ -561,9 +562,16 @@ test.describe('스모크: LRS 학생 홈·메뉴 재설계 불변식(INV-a~f)', 
       await page.waitForSelector('#dacheum-gnb-wrapper', { timeout: 10000 }).catch(() => {});
       await page.waitForSelector('#lrsTabs .lrs-tab', { timeout: 15000 }).catch(() => {});
       await page.waitForTimeout(400);
-      const tabLabels = await page.evaluate(() => [...document.querySelectorAll('#lrsTabs .lrs-tab')].map(t => t.textContent.trim()));
-      expect.soft(tabLabels.some(l => l.includes('표준체계')), `메뉴: 학생 탭에 표준체계 분석 노출됨 (${JSON.stringify(tabLabels)})`).toBeFalsy();
-      expect.soft(tabLabels.includes('내 성취 분석') && tabLabels.includes('또래 비교'), `메뉴: 성취수준 분석 탭 구성 이상 (${JSON.stringify(tabLabels)})`).toBeTruthy();
+      // INV-K4(P0-3 학령 차등): student1은 elementary → "또래 비교" 탭 DOM 부재(윤리 정책).
+      //   초등 analytics 카테고리는 남는 뷰가 "내 성취 분석" 1개뿐이라 탭 바 자체가 미렌더됨
+      //   (기존 "뷰 1개 이하 탭 바 미렌더" 정책) — 랜딩 뷰(data-view=s-achieve)로 정상 진입을 검증.
+      const analyticsState = await page.evaluate(() => ({
+        tabLabels: [...document.querySelectorAll('#lrsTabs .lrs-tab')].map(t => t.textContent.trim()),
+        view: document.getElementById('viewRoot')?.getAttribute('data-view') || '',
+      }));
+      expect.soft(analyticsState.tabLabels.some(l => l.includes('표준체계')), `메뉴: 학생 탭에 표준체계 분석 노출됨 (${JSON.stringify(analyticsState.tabLabels)})`).toBeFalsy();
+      expect.soft(analyticsState.tabLabels.some(l => l.includes('또래 비교')), `INV-K4: 초등 학생 탭에 "또래 비교" 노출됨 (${JSON.stringify(analyticsState.tabLabels)})`).toBeFalsy();
+      expect.soft(analyticsState.view, `메뉴: 초등 analytics 랜딩 뷰가 s-achieve가 아님(${analyticsState.view})`).toBe('s-achieve');
 
       // 딥링크 #s-xapi 는 여전히 라우팅(404/준비중 아님)
       await page.evaluate(() => { location.hash = '#s-xapi'; });
@@ -574,6 +582,51 @@ test.describe('스모크: LRS 학생 홈·메뉴 재설계 불변식(INV-a~f)', 
       });
       expect.soft(routed.is404, '메뉴: s-xapi 딥링크가 404("준비 중")로 떨어짐').toBeFalsy();
       expect.soft(routed.hasContent, 's-xapi 딥링크 본문 미렌더').toBeTruthy();
+      await page.close();
+    } finally { await context.close(); }
+  });
+
+  // ── INV-K5(P0-4): 학생 "오늘 활동 요약"(s-daily) 폐지 + 습관 카드 이관 ──
+  //    ① 학습활동 분석 탭에 "오늘 활동 요약" 부재
+  //    ② s-trend에 "내가 주로 공부하는 시간" 카드 존재
+  //    ③ 구 딥링크 #s-daily → "활동 유형별 수행"(s-perform) 폴백(빈 화면·에러 없음)
+  test('INV-K5: s-daily 폐지 — 탭 부재 + 습관 카드 이관 + 구 해시 폴백', async ({ browser }) => {
+    const context = await browser.newContext({ storageState: stateFor('student'), locale: 'ko-KR', baseURL: BASE_URL });
+    try {
+      const page = await context.newPage();
+      page.setViewportSize({ width: 1440, height: 900 });
+      await page.goto('/lrs/index.html?menu=activities', { waitUntil: 'domcontentloaded' });
+      await page.waitForSelector('#dacheum-gnb-wrapper', { timeout: 10000 }).catch(() => {});
+      await page.waitForSelector('#lrsTabs .lrs-tab', { timeout: 15000 }).catch(() => {});
+      await page.waitForTimeout(400);
+      const tabLabels = await page.evaluate(() => [...document.querySelectorAll('#lrsTabs .lrs-tab')].map(t => t.textContent.trim()));
+      expect.soft(tabLabels.some(l => l.includes('오늘 활동 요약')), `INV-K5: 학생 탭에 "오늘 활동 요약" 잔존 (${JSON.stringify(tabLabels)})`).toBeFalsy();
+      expect.soft(tabLabels.some(l => l.includes('학습 습관')), `INV-K5: 학습 습관·추이 탭 없음 (${JSON.stringify(tabLabels)})`).toBeTruthy();
+
+      // ② s-trend 진입 → 습관 카드 렌더(차트 또는 빈상태)
+      await page.evaluate(() => {
+        const b = [...document.querySelectorAll('#lrsTabs .lrs-tab')].find(t => t.textContent.includes('학습 습관'));
+        if (b) b.click(); else location.hash = '#s-trend';
+      });
+      const habit = await page.waitForFunction(() => {
+        const h = document.getElementById('sHabitHost');
+        return !!(h && /내가 주로 공부하는 시간/.test(h.innerText || ''));
+      }, { timeout: 10000 }).then(() => true).catch(() => false);
+      expect.soft(habit, 'INV-K5: s-trend에 "내가 주로 공부하는 시간" 카드 미렌더').toBeTruthy();
+
+      // ③ 구 딥링크 진입(페이지 로드 경유 — SPA는 hashchange 라우팅이 없어 boot가 처리) → s-perform 폴백
+      await page.goto('/lrs/index.html#s-daily', { waitUntil: 'domcontentloaded' });
+      await page.waitForFunction(() => {
+        const vr = document.getElementById('viewRoot');
+        return !!(vr && vr.getAttribute('data-view'));
+      }, { timeout: 15000 }).catch(() => {});
+      await page.waitForTimeout(800);
+      const fallback = await page.evaluate(() => ({
+        view: document.getElementById('viewRoot')?.getAttribute('data-view') || '',
+        text: (document.getElementById('viewRoot')?.innerText || '').slice(0, 200),
+      }));
+      expect.soft(fallback.view, `INV-K5: #s-daily 딥링크가 s-perform으로 폴백 안 됨(현재 뷰: ${fallback.view})`).toBe('s-perform');
+      expect.soft(fallback.text.length, 'INV-K5: 폴백 화면 본문 미렌더').toBeGreaterThan(20);
       await page.close();
     } finally { await context.close(); }
   });

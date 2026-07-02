@@ -888,7 +888,30 @@ router.get('/stats/daily', requireAuth, (req, res) => {
       ...row,
       avg_score: row.avg_score != null ? Math.round(row.avg_score * 10) / 10 : null
     }));
-    res.json({ success: true, scope: sf.scope, data, period: r.fromDate && r.toDate ? { from: r.fromDate, to: r.toDate } : null });
+
+    // P0-4 (KERIS 로드맵 §3 P0-4 ②): s-trend "내가 주로 공부하는 시간" 습관 카드용
+    //   기간(period) 기반 시간대별 활동 집계 — daily-snapshot byHour(오늘 고정·전 유형)의
+    //   기간 확장판. 학습활동 7종 화이트리스트(LRS_LEARN_ACTIVITY_TYPES) 기준.
+    //   동일 where(기간칩·scope·class_id·subject 필터)를 그대로 공유 → 기간칩과 연동 보장.
+    //   시간대는 daily-snapshot 과 동일하게 localtime 기준(학생 체감 시각). 24칸 항상 반환.
+    //   교사·관리자 일일현황(/stats/daily-snapshot)은 불변 — 본 필드는 추가 노출일 뿐.
+    const learnPH = LRS_LEARN_ACTIVITY_TYPES.map(() => '?').join(',');
+    const byHourRows = db.prepare(`
+      SELECT CAST(strftime('%H', ll.created_at, 'localtime') AS INTEGER) AS hour, COUNT(*) AS cnt
+      FROM learning_logs ll ${join}
+      ${where} AND ll.activity_type IN (${learnPH})
+      GROUP BY hour
+    `).all(...params, ...LRS_LEARN_ACTIVITY_TYPES);
+    const hourMap = new Map(byHourRows.map(x => [x.hour, x.cnt]));
+    const byHour = [];
+    for (let h = 0; h < 24; h++) byHour.push({ hour: h, count: hourMap.get(h) || 0 });
+
+    res.json({
+      success: true, scope: sf.scope, data,
+      byHour,
+      byHourBasis: '학습활동 7종(기간 내)',
+      period: r.fromDate && r.toDate ? { from: r.fromDate, to: r.toDate } : null
+    });
   } catch (err) {
     console.error('[LRS] /stats/daily error:', err);
     res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
@@ -1081,6 +1104,74 @@ function achievementLabel(code) {
   };
 }
 
+// ─────────────────────────────────────────────────────────
+// P0-2 추천 SSOT 헬퍼 (KERIS 로드맵 §3 P0-2 (b) — 우선순위·이유·예상 소요시간)
+//   BE 한 곳에서 산정한 동일 필드를 s-home 리스트·s-achieve A4 카드가 나눠 표시한다.
+//   FE 자체 재산정 금지(수용 기준 3) — reasonText·estMinutes·priority 는 여기가 정본.
+// ─────────────────────────────────────────────────────────
+
+/**
+ * 이유 한줄 reasonText — 기획서 확정 템플릿 5종(상태×채점 분기), 임의 변형 금지.
+ *   시급(채점)      : 정답률 {avg}%예요 — 여기부터 다시 잡아봐요
+ *   시급(미채점)    : 가장 많이 연습한 단원이에요({att}회) — 채점되는 문제로 실력을 확인해봐요
+ *   권장(부분도달)  : 정답률 {avg}% — 조금만 더 하면 도달해요
+ *   권장(평가부족)  : 아직 {att}번밖에 안 풀었어요 — 3번 이상 풀면 도달 판정을 받을 수 있어요
+ *   선택(강점 심화) : 정답률 {avg}%로 잘하고 있어요 — 한 단계 더 깊게 배워볼까요?
+ *   → 실측 결함 해소: 정답률 100%·평가부족([4영01-08]) 행도 "아직 {att}번밖에…" 로 이유가 자명해진다.
+ *     (기획서 결정: 100% 행을 약점에서 제거하는 게 아니라 이유 문구로 해소 — §3 P0-2 ②·수용기준 2)
+ * @param {string} status  mastery.STATUS 값 (not_reached|partial|insufficient) 또는 'strength'
+ * @param {boolean} hasScore 채점 데이터 존재 여부
+ * @param {number|null} avg 표시용 정답률(0~100 정규화). 미채점이면 null 허용.
+ * @param {number} att 시도 횟수
+ */
+function recoReasonText(status, hasScore, avg, att) {
+  const a = avg != null ? Math.round(avg) : null;
+  if (status === 'strength') {
+    return `정답률 ${a}%로 잘하고 있어요 — 한 단계 더 깊게 배워볼까요?`;
+  }
+  if (status === mastery.STATUS.PARTIAL) {
+    return `정답률 ${a}% — 조금만 더 하면 도달해요`;
+  }
+  if (status === mastery.STATUS.INSUFFICIENT) {
+    return `아직 ${att}번밖에 안 풀었어요 — 3번 이상 풀면 도달 판정을 받을 수 있어요`;
+  }
+  // not_reached (시급 계열)
+  if (hasScore && a != null) {
+    return `정답률 ${a}%예요 — 여기부터 다시 잡아봐요`;
+  }
+  return `가장 많이 연습한 단원이에요(${att}회) — 채점되는 문제로 실력을 확인해봐요`;
+}
+
+/**
+ * 예상 소요시간 estMinutes — 기획서 산식(실데이터 근거 확정):
+ *   연결 콘텐츠(최대 3개)별 분 = estimated_minutes(>0) 그대로,
+ *                              결측 시 MAX(2, content_questions 수 × 2)  — 문항당 2분
+ *   estMinutes = CLAMP(Σ, 5, 60) 항상 5~60 정수. 연결 콘텐츠 0개면 10(기본 학습 단위).
+ *   0·null 금지(하네스 불변식 INV-K3).
+ * @param {number[]} contentIds 그 성취기준의 recommendedContentIds
+ * @returns {number} 5~60 정수
+ */
+function computeEstMinutes(contentIds) {
+  if (!Array.isArray(contentIds) || contentIds.length === 0) return 10;
+  let sum = 0;
+  for (const id of contentIds) {
+    try {
+      const row = db.prepare(`
+        SELECT estimated_minutes,
+               (SELECT COUNT(*) FROM content_questions cq WHERE cq.content_id = contents.id) AS qcnt
+        FROM contents WHERE id = ?
+      `).get(id);
+      if (!row) continue;
+      const est = (row.estimated_minutes != null && row.estimated_minutes > 0)
+        ? Number(row.estimated_minutes)
+        : Math.max(2, (row.qcnt || 0) * 2);
+      sum += est;
+    } catch (_) { /* 콘텐츠 조회 실패는 합산 제외 */ }
+  }
+  if (sum <= 0) return 10;
+  return Math.max(5, Math.min(60, Math.round(sum)));
+}
+
 // 1. GET /api/lrs/insights/:userId — 개인 인사이트
 router.get('/insights/:userId', requireAuth, (req, res) => {
   try {
@@ -1150,6 +1241,7 @@ router.get('/insights/:userId', requireAuth, (req, res) => {
       const status = mastery.classifyStatus(w.attempt_count, rate);
       w.status = status;                            // FE 참고용 상태 코드 부착
       w.statusLabel = mastery.STATUS_KO ? mastery.STATUS_KO[status] : undefined;
+      w.reachRateVal = rate;                        // P0-2: 미채점 partial 이유 문구용(분류기와 동일 rate)
       return status !== mastery.STATUS.REACHED;     // 도달 제외
     }).slice(0, 5);
 
@@ -1190,6 +1282,85 @@ router.get('/insights/:userId', requireAuth, (req, res) => {
       s.subject_label = s.subject_label || nm.subjectLabel;
       s.hasScore = s.avg_score != null;
       s.avg_score = normStat(s.avg_score); // 약점과 동일 스케일(0~100)로 통일
+    }
+
+    // ── P0-2 추천 SSOT (KERIS 로드맵 §3 P0-2 (b)) ─────────────────────────
+    // weaknesses[] 각 행에 priority(선정 키 또는 null)·reasonText·estMinutes 부착 +
+    // 최상위 recommendations[](최대 3건: ①시급 ②권장 ③선택) 신설.
+    // 우선순위 선정 규칙(위에서 순차 확정, 각 1건):
+    //   ① 시급(urgent)      : not_reached & 채점 → avg_score 오름차순 1건.
+    //                          없으면 not_reached 미채점 중 attempt_count 최다 1건.
+    //   ② 권장(recommended) : ① 제외 후 partial 우선 → insufficient(채점 우선) →
+    //                          미채점 not_reached 잔여 중 attempt 최다.
+    //   ③ 선택(optional)    : strengths(att>=3) 중 avg_score 최고 1건 — 강점 심화.
+    //                          (채점 데이터 있는 강점만 — 이유 문구 {avg} 필요.)
+    // 후보 부족 시 있는 것만 반환, 전부 없으면 recommendations:[].
+    for (const w of weaknesses) {
+      // 이유 문구 {avg}: 채점이면 정규화 avg_score, 미채점 partial 은 분류기와 동일 rate 폴백.
+      const dispAvg = w.hasScore ? w.avg_score : (w.reachRateVal != null ? Math.round(w.reachRateVal) : null);
+      w.reasonText = recoReasonText(w.status, w.hasScore, dispAvg, w.attempt_count);
+      w.estMinutes = computeEstMinutes(w.recommendedContentIds);
+      w.priority = null; // 아래 선정 후 부여
+    }
+    let recoUrgent = null, recoRecommended = null;
+    {
+      const nrScored = weaknesses
+        .filter(w => w.status === mastery.STATUS.NOT_REACHED && w.hasScore)
+        .sort((a, b) => a.avg_score - b.avg_score);
+      recoUrgent = nrScored[0] || weaknesses
+        .filter(w => w.status === mastery.STATUS.NOT_REACHED && !w.hasScore)
+        .sort((a, b) => b.attempt_count - a.attempt_count)[0] || null;
+      const rest = weaknesses.filter(w => w !== recoUrgent);
+      recoRecommended = rest.find(w => w.status === mastery.STATUS.PARTIAL)
+        || rest.find(w => w.status === mastery.STATUS.INSUFFICIENT && w.hasScore)
+        || rest.find(w => w.status === mastery.STATUS.INSUFFICIENT)
+        || rest.filter(w => w.status === mastery.STATUS.NOT_REACHED && !w.hasScore)
+             .sort((a, b) => b.attempt_count - a.attempt_count)[0]
+        || null;
+    }
+    if (recoUrgent) recoUrgent.priority = 'urgent';
+    if (recoRecommended) recoRecommended.priority = 'recommended';
+    // ③ 선택 = 강점 심화 (strengths 는 avg desc 정렬 — 채점된 첫 행. ①②와 코드 중복 방지 가드)
+    const usedCodes = new Set([recoUrgent, recoRecommended].filter(Boolean).map(w => w.achievement_code));
+    const recoOptional = strengths.find(s => s.hasScore && !usedCodes.has(s.achievement_code)) || null;
+    if (recoOptional) {
+      // 강점 행에도 연결 콘텐츠·소요시간·이유 부착(추천 카드 CTA 목적지 = recommendedContentIds[0]).
+      try {
+        const cs = db.prepare(`SELECT id FROM contents WHERE achievement_code = ? ORDER BY id DESC LIMIT 3`)
+          .all(recoOptional.achievement_code);
+        recoOptional.recommendedContentIds = cs.map(c => c.id);
+      } catch (_) { recoOptional.recommendedContentIds = []; }
+      recoOptional.reasonText = recoReasonText('strength', true, recoOptional.avg_score, recoOptional.attempt_count);
+      recoOptional.estMinutes = computeEstMinutes(recoOptional.recommendedContentIds);
+      recoOptional.priority = 'optional';
+    }
+    const mkReco = (row, priority) => ({
+      priority,
+      achievement_code: row.achievement_code,
+      label: row.label,
+      fullLabel: row.fullLabel,
+      subject_code: row.subject_code || null,
+      subject_label: row.subject_label || '',
+      status: row.status || null,
+      statusLabel: row.statusLabel || null,
+      hasScore: !!row.hasScore,
+      avg_score: row.avg_score != null ? row.avg_score : null,
+      attempt_count: row.attempt_count || 0,
+      reasonText: row.reasonText,
+      estMinutes: row.estMinutes,
+      recommendedContentIds: row.recommendedContentIds || []
+    });
+    const recommendations = [];
+    if (recoUrgent) recommendations.push(mkReco(recoUrgent, 'urgent'));
+    if (recoRecommended) recommendations.push(mkReco(recoRecommended, 'recommended'));
+    if (recoOptional) {
+      // 강점 행 status 는 분류기 기준(참고용 — 대개 reached).
+      if (!recoOptional.status) {
+        const r0 = mastery.reachRate(undefined, recoOptional.attempt_count, recoOptional.avg_score);
+        recoOptional.status = mastery.classifyStatus(recoOptional.attempt_count, r0);
+        recoOptional.statusLabel = mastery.STATUS_KO ? mastery.STATUS_KO[recoOptional.status] : undefined;
+      }
+      recommendations.push(mkReco(recoOptional, 'optional'));
     }
 
     // 교과별 비중 (선택 기간 pFrom~pTo)
@@ -1296,6 +1467,8 @@ router.get('/insights/:userId', requireAuth, (req, res) => {
       },
       strengths,
       weaknesses,
+      // P0-2 추천 SSOT — ①시급 ②권장 ③선택 최대 3건. s-home 리스트·s-achieve A4 가 공유.
+      recommendations,
       // 약점 정렬 기준 문구 (FE가 표에 근거 표기). 채점된 것 우선(정답률↓) → 미채점(연습량↑).
       weaknessCriterion: WEAKNESS_CRITERION,
       criterion: WEAKNESS_CRITERION,     // 지시서 계약 별칭
@@ -1304,6 +1477,79 @@ router.get('/insights/:userId', requireAuth, (req, res) => {
     });
   } catch (err) {
     console.error('[LRS] /insights error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// P0-1. GET /api/lrs/retry-growth/:uid — 문항 재풀이 전·후 비교 ("오답을 다시 풀었더니")
+//   기획서: 작업지시서/LRS_개선로드맵_KERIS벤치마킹.md §3 P0-1 (a)(b)
+//   산식 정본 = learning_logs(activity_type='wrong_note_retry')의 result_success 만 사용.
+//     · result_score 의존 금지(시드 전용 — 실사용 경로 retryWrongNote() 는 null 기록).
+//     · result_success IS NULL 행(점수만 있는 행)은 N·M·attempts 모두 미포함(INV-K1).
+//   N(questions)  = 기간 내 재도전한 DISTINCT 문항(target_id) 수
+//   M(succeeded)  = 그중 result_success=1 이 1회 이상인 DISTINCT 문항 수
+//   retryRate     = N>0 ? ROUND(100·M/N) : null   ← N=0 이면 null(0 으로 찍지 말 것 — 빈상태)
+//   attempts      = 시도 단위 보조(부제용)
+//   wrongTotal / wrongResolved = wrong_answers 본인 행 COUNT·SUM(is_resolved) — 오답노트
+//     현황 문구용 보조(기간 무관), 테이블 없거나 0행이면 0.
+//   전(처음) = 0% 고정은 FE 표기 규약(오답노트 문항은 정의상 첫 시도 전부 오답) — BE 필드 없음.
+//   권한: 본인 또는 교사/관리자(canViewUser 재사용). 기간: 기존 5엔드포인트와 동일 파서.
+//   드릴다운: /perform/detail?activityType=wrong_note_retry (문항 단위 — count==N 계약).
+// ─────────────────────────────────────────────────────────────────────────────
+router.get('/retry-growth/:uid', requireAuth, (req, res) => {
+  try {
+    const userId = parseInt(req.params.uid, 10);
+    if (!Number.isFinite(userId)) {
+      return res.status(400).json({ success: false, message: '잘못된 사용자 ID 입니다.' });
+    }
+    if (!canViewUser(req, userId)) {
+      return res.status(403).json({ success: false, message: '권한이 없습니다.' });
+    }
+    const period = resolvePeriod(req);
+    if (period.invalid) return sendInvalidPeriod(res, period.reason);
+    const pFrom = period.fromDate, pTo = period.toDate;
+
+    const agg = db.prepare(`
+      SELECT COUNT(DISTINCT ll.target_id) AS n,
+             COUNT(DISTINCT CASE WHEN ll.result_success = 1 THEN ll.target_id END) AS m,
+             COUNT(*) AS attempts
+      FROM learning_logs ll
+      WHERE ll.user_id = ?
+        AND ll.activity_type = 'wrong_note_retry'
+        AND ll.result_success IS NOT NULL
+        ${pFrom ? 'AND DATE(ll.created_at) >= ?' : ''}
+        ${pTo ? 'AND DATE(ll.created_at) <= ?' : ''}
+    `).get(userId, ...(pFrom ? [pFrom] : []), ...(pTo ? [pTo] : []));
+
+    const questions = agg && agg.n ? agg.n : 0;
+    const succeeded = agg && agg.m ? agg.m : 0;
+    const attempts = agg && agg.attempts ? agg.attempts : 0;
+    const retryRate = questions > 0 ? Math.round((100 * succeeded) / questions) : null;
+
+    // 보조: 오답노트 현황(기간 무관 — "내 오답노트: 전체 N문항 중 M문항 해결" 문구용)
+    let wrongTotal = 0, wrongResolved = 0;
+    try {
+      const w = db.prepare(
+        'SELECT COUNT(*) AS c, COALESCE(SUM(is_resolved), 0) AS r FROM wrong_answers WHERE student_id = ?'
+      ).get(userId);
+      wrongTotal = (w && w.c) || 0;
+      wrongResolved = (w && w.r) || 0;
+    } catch (_) { /* 테이블 없으면 0 유지 */ }
+
+    res.json({
+      success: true,
+      userId,
+      period: { fromDate: pFrom, toDate: pTo, label: period.label },
+      questions,
+      succeeded,
+      attempts,
+      retryRate,
+      wrongTotal,
+      wrongResolved
+    });
+  } catch (err) {
+    console.error('[LRS] /retry-growth error:', err);
     res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
   }
 });
@@ -2431,8 +2677,16 @@ const PERFORM_SCORED_TYPES = new Set([
 
 router.get('/perform/detail', requireAuth, (req, res) => {
   try {
+    // P0-1 드릴 (KERIS 로드맵 §3 P0-1 (b)·(d) + 인벤토리 스펙 SP7 파라미터 확장):
+    //   ?activityType=wrong_note_retry — 재풀이 카드 "다시 푼 문항" 문항 단위 내역.
+    //   신규 detail 라우트 금지 계약에 따라 본 라우트의 파라미터로 흡수한다.
+    //   (그 외 activityType 값은 아직 미지원 — SP7 전 유형 일반화는 P1 범위.)
+    const activityType = String(req.query.activityType || '').trim();
     const bucket = String(req.query.bucket || '').toLowerCase();
-    if (!PERFORM_BUCKET_TYPES[bucket]) {
+    if (activityType && activityType !== 'wrong_note_retry') {
+      return res.status(400).json({ success: false, message: '지원하지 않는 activityType 파라미터입니다.' });
+    }
+    if (!activityType && !PERFORM_BUCKET_TYPES[bucket]) {
       return res.status(400).json({ success: false, message: '잘못된 bucket 파라미터입니다.' });
     }
     // 조회 대상 학생: userId 미지정이면 본인. 학생은 본인만(canViewUser 403).
@@ -2443,6 +2697,65 @@ router.get('/perform/detail', requireAuth, (req, res) => {
     // 기간 필터: /stats/perform 과 100% 동일 코드(dateRangeWhere) 재사용 → 카운트 일치 보증.
     const r = dateRangeWhere(req, 'created_at', 'll');
     if (r.invalid) return sendInvalidPeriod(res, r.reason);
+
+    // ── activityType=wrong_note_retry 분기 — 문항 단위(로그 단위 아님) ──────────
+    //   count = 기간 내 DISTINCT target_id 수 == /retry-growth questions(N) == items.length
+    //   (카드=내역 계약, 기획서 §3 P0-1 (d) "count == N == items.length").
+    //   문항 식별: 오답 id(wrongId)·question_text 앞 40자·성공여부·일시.
+    //   성공여부 = 기간 내 result_success=1 이 1회 이상(재풀이 M 산식과 동일 기준).
+    //   result_score 참조 없음(산식 정본 = result_success). "틀림" 어휘 금지 → 맞힘/아직.
+    if (activityType === 'wrong_note_retry') {
+      const countRow = db.prepare(`
+        SELECT COUNT(DISTINCT ll.target_id) AS c
+        FROM learning_logs ll
+        WHERE ll.user_id = ? AND ll.activity_type = 'wrong_note_retry'
+          AND ll.result_success IS NOT NULL ${r.where}
+      `).get(userId, ...r.params);
+      const count = countRow.c || 0;
+      const rows = db.prepare(`
+        SELECT ll.target_id,
+               MAX(CASE WHEN ll.result_success = 1 THEN 1 ELSE 0 END) AS succeeded,
+               MAX(ll.created_at) AS last_at,
+               COUNT(*) AS attempts,
+               w.id AS wrong_id, w.question_text, w.subject
+        FROM learning_logs ll
+        LEFT JOIN wrong_answers w ON w.id = CAST(ll.target_id AS INTEGER)
+        WHERE ll.user_id = ? AND ll.activity_type = 'wrong_note_retry'
+          AND ll.result_success IS NOT NULL ${r.where}
+        GROUP BY ll.target_id
+        ORDER BY last_at DESC
+        LIMIT ?
+      `).all(userId, ...r.params, PERFORM_DETAIL_ITEM_CAP);
+      const items = rows.map(row => {
+        const ok = !!row.succeeded;
+        const qText = String(row.question_text || '').replace(/\s+/g, ' ').trim();
+        return {
+          wrongId: row.wrong_id != null ? row.wrong_id : row.target_id, // 오답 id (조인 실패 시 target_id 폴백)
+          title: qText ? qText.slice(0, 40) : '오답 문항',
+          date: row.last_at,
+          score: null,                          // result_score 의존 금지 — 항상 null
+          success: ok,                          // 다시 맞혔는가 (M 산식과 동일 기준)
+          attempts: row.attempts || 1,
+          sub: (row.attempts || 1) > 1 ? `재도전 ${row.attempts}회` : '',
+          typeLabel: '오답노트 재도전',
+          subject: row.subject || null,
+          badge: ok ? { text: '맞힘', tone: 'success' } : { text: '아직', tone: 'neutral' },
+        };
+      });
+      const out = {
+        success: true,
+        activityType: 'wrong_note_retry',
+        bucket: null,
+        title: '다시 푼 문항',
+        period: r.fromDate && r.toDate ? `${r.fromDate} ~ ${r.toDate}` : null,
+        count,
+        items,
+      };
+      if (count > PERFORM_DETAIL_ITEM_CAP) {
+        out.note = `최근 ${PERFORM_DETAIL_ITEM_CAP}건만 표시합니다.`;
+      }
+      return res.json(out);
+    }
 
     // segment 필터(content 전용). 유효하지 않으면 무시(전체 45).
     let types = PERFORM_BUCKET_TYPES[bucket];
