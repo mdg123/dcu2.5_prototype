@@ -34,7 +34,8 @@
 // ─────────────────────────────────────────────────────────────────────────────
 const bcrypt = require('bcryptjs');
 
-const TARGET_STUDENT_ID = 2040;        // seed_s023 최준혁 (middle·1학년) — 스펙 §4-4 고정
+const DEFAULT_TARGET_STUDENT_ID = 2040; // 로컬 DB 의 seed_s023 최준혁 (middle·1학년) — 스펙 §4-4
+const SEED_USERNAME = 'seed_s023';      // DB 마다 id 가 달라(예: GCP=46) username 으로 우선 해석
 const STUDENT_USERNAME = 'middle1';
 const TEACHER_USERNAME = 'mteacher1';
 const PASSWORD_PLAIN = '1234';
@@ -51,9 +52,19 @@ function run({ dryRun = false, log = console.log } = {}) {
   const actions = [];
   const act = (msg) => { actions.push(msg); log(`${dryRun ? '[dry-run] ' : ''}${msg}`); };
 
-  // ── 1. 학생 대표 계정: id=2040 → middle1 ─────────────────────────────────
+  // ── 0. 대상 학생 해석: env 강제 → 기존 middle1(멱등 재진입) → seed_s023 → 기본 id ──
+  const TARGET_STUDENT_ID = (() => {
+    if (process.env.SEED_MIDDLE_TARGET_ID) return Number(process.env.SEED_MIDDLE_TARGET_ID);
+    const done = db.prepare(`SELECT id FROM users WHERE username = ? AND role = 'student'`).get(STUDENT_USERNAME);
+    if (done) return done.id;
+    const seed = db.prepare(`SELECT id FROM users WHERE username = ? AND role = 'student'`).get(SEED_USERNAME);
+    if (seed) return seed.id;
+    return DEFAULT_TARGET_STUDENT_ID;
+  })();
+
+  // ── 1. 학생 대표 계정: 대상 학생 → middle1 ─────────────────────────────────
   const stu = db.prepare('SELECT id, username, password, display_name, role, school_level, school_name, grade FROM users WHERE id = ?').get(TARGET_STUDENT_ID);
-  if (!stu) throw new Error(`대상 학생 id=${TARGET_STUDENT_ID} 이 없습니다(시드 DB 아님?).`);
+  if (!stu) throw new Error(`대상 학생 id=${TARGET_STUDENT_ID} 이 없습니다(시드 DB 아님?). username '${SEED_USERNAME}'/'${STUDENT_USERNAME}' 도 없음.`);
   if (stu.role !== 'student' || stu.school_level !== 'middle') {
     throw new Error(`id=${TARGET_STUDENT_ID} 전제 불일치: role=${stu.role}, school_level=${stu.school_level}`);
   }
@@ -236,4 +247,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { run, TARGET_STUDENT_ID, STUDENT_USERNAME, TEACHER_USERNAME, CLASS_STUDENT_TOTAL };
+module.exports = { run, TARGET_STUDENT_ID: DEFAULT_TARGET_STUDENT_ID, STUDENT_USERNAME, TEACHER_USERNAME, CLASS_STUDENT_TOTAL };
