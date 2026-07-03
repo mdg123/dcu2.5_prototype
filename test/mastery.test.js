@@ -153,28 +153,54 @@ test('INV-M4: mastery class 매트릭스 classId 격리 — 해당 반 학생만
 //    옛 결함: getStudentMastery 가 fromDate~toDate(30일) 로 성취기준을 필터해, 30일보다
 //      이전에 시도한 누적 미도달이 창 밖으로 빠져 은폐됐다(uid3 notReached 5→2). 도달/미도달은
 //      그간 학습의 누적 결과이므로, 누적(전기간 lrs_achievement_stats)만 써야 한다.
-//    ground-truth(실 DB uid3=student1): 누적 미도달 5건
+//    ground-truth 참고(2026-07 실 DB uid3): 누적 미도달 5건
 //      [4수01-02]·[4수03-02]·[4수03-04]·[4수01-13]·[4수03-10] (전부 att>=3 & 정답 0).
+//    ★[2026-07-03 강건화] "정확히 5건" 절대값 박제는 라이브 DB 드리프트에 취약 —
+//      student1 은 프리뷰 데모 계정이라 스위트 실행 중에도 로그가 쌓여(파일별 복사 시점이 달라)
+//      과도 상태의 6건 등이 잡히며 flake 났다. → 기대값을 "같은 복사본에 대한 독립 SQL
+//      이중장부"(문서화된 임계 att>=3 & rate<50 를 테스트가 별도 산출)로 대체.
+//      분류기(classifyStatus·reachRate) 회귀 감시는 유지되고, 핵심 박제(기간 불변)는 그대로다.
 // ──────────────────────────────────────────────────────────────────────────
-const S1_NOT_REACHED = ['[4수01-02]', '[4수03-02]', '[4수03-04]', '[4수01-13]', '[4수03-10]'];
+/** 독립 이중장부: 미도달 코드 집합을 테스트 소유 산식(att>=3 & rate<50)으로 직접 산출. */
+function sqlNotReachedCodes(uid) {
+  return db.prepare(
+    'SELECT achievement_code code, attempt_count a, success_count s, avg_score v FROM lrs_achievement_stats WHERE user_id = ?'
+  ).all(uid).filter(r => {
+    const a = r.a || 0;
+    if (a < 3) return false;
+    let rate = null;
+    if (a > 0 && Number.isFinite(Number(r.s))) rate = (Number(r.s) / a) * 100;
+    else if (r.v != null) rate = Number(r.v) > 1 ? Number(r.v) : Number(r.v) * 100;
+    if (rate == null || !Number.isFinite(rate)) return false;
+    return rate < 50;
+  }).map(r => (String(r.code).startsWith('[') ? r.code : `[${r.code}]`));
+}
 
-test('BUG-M-CUM: student1(uid3) 누적 미도달 5건 — 기간(period) 무관 동일(은폐 금지)', () => {
+test('BUG-M-CUM: student1(uid3) 누적 미도달 == 독립 SQL 산출 — 기간(period) 무관 동일(은폐 금지)', () => {
+  const expected = new Set(sqlNotReachedCodes(STUDENT1));
+  assert.ok(expected.size >= 1, '전제: uid3 누적 미도달 최소 1건(빈 데이터로 공허 통과 금지)');
+
   // opts.period 를 넘겨도 분류는 항상 누적(전기간). period 파라미터는 무시돼야 한다.
   const base = mastery.getStudentMastery(STUDENT1);
-  assert.equal(base.counts.notReached, 5,
-    `uid3 누적 미도달은 5건이어야(현재 ${base.counts.notReached}) — 30일 창 밖 누적 미도달 은폐 금지`);
+  assert.equal(base.counts.notReached, expected.size,
+    `uid3 누적 미도달 ${expected.size}건(독립 SQL)이어야(현재 ${base.counts.notReached}) — 30일 창 밖 누적 미도달 은폐 금지`);
 
-  // ground-truth 5개 코드가 weaknesses/standards 에 모두 미도달로 포함
-  const nrCodes = new Set(base.standards.filter(s => s.status === 'not_reached').map(s => s.code));
-  for (const c of S1_NOT_REACHED) {
-    assert.ok(nrCodes.has(c), `누적 미도달 성취기준 ${c} 가 standards(not_reached)에 없음`);
+  // 분류기(API) 미도달 집합 == 독립 SQL 집합 (이중장부 완전 일치)
+  const nrCodes = base.standards.filter(s => s.status === 'not_reached').map(s => s.code).sort();
+  assert.deepEqual(nrCodes, [...expected].sort(),
+    'standards(not_reached) 코드 집합 != 독립 SQL 산출(분류기 회귀)');
+
+  // weaknesses(상한 5) 구조 계약: 전부 미도달·부분도달에서만, 개수 == min(5, 미도달+부분)
+  const weakCodes = (base.weaknesses || []).map(w => w.code);
+  const nrOrPartial = new Set(base.standards
+    .filter(s => s.status === 'not_reached' || s.status === 'partial').map(s => s.code));
+  for (const c of weakCodes) {
+    assert.ok(nrOrPartial.has(c), `weakness ${c} 가 미도달/부분도달 밖(약점 정의 위반)`);
   }
-  const weakCodes = new Set((base.weaknesses || []).map(w => w.code));
-  const nrInWeak = S1_NOT_REACHED.filter(c => weakCodes.has(c));
-  // weaknesses 는 상한 5 — 미도달 5건이 모두 약점 상위에 올라야(부분도달 0이므로 5칸 전부 미도달)
-  assert.equal(nrInWeak.length, 5, `weaknesses 에 누적 미도달 5건이 모두 있어야(현재 ${nrInWeak.length})`);
+  assert.equal(weakCodes.length, Math.min(5, base.counts.notReached + base.counts.partial),
+    `weaknesses 개수 != min(5, 미도달+부분도달)`);
 
-  // ★ period(7/30/90d) 를 어떻게 주어도 counts 가 동일(누적 불변) — 은폐 재발 차단
+  // ★ period(7/30/90d) 를 어떻게 주어도 counts 가 동일(누적 불변) — 은폐 재발 차단(핵심 박제)
   for (const p of ['7d', '30d', '90d']) {
     const d = mastery.getStudentMastery(STUDENT1, { period: p });
     assert.equal(d.counts.notReached, base.counts.notReached,
@@ -247,18 +273,27 @@ test('PERM-M5b: 교사·관리자는 학생 mastery 조회 가능(200)', async (
   assert.equal(byAdmin.status, 200, '관리자는 학생 조회 200');
 });
 
-test('API-M-CUM: /mastery/student/3 — period=30d·90d 모두 notReached=5 (누적, 기간 무관)', async () => {
+test('API-M-CUM: /mastery/student/3 — period 7d·30d·90d 전부 동일 counts (누적, 기간 무관)', async () => {
+  // 기대값 = 같은 복사본 독립 SQL(BUG-M-CUM 과 동일 이중장부 — 라이브 절대값 5 박제 폐지, 강건화 주석 참조)
+  const expected = sqlNotReachedCodes(STUDENT1).length;
   const d30 = await req(`/mastery/student/${STUDENT1}?period=30d`, STUDENT1);
   const d90 = await req(`/mastery/student/${STUDENT1}?period=90d`, STUDENT1);
   const d7  = await req(`/mastery/student/${STUDENT1}?period=7d`, STUDENT1);
   assert.equal(d30.status, 200); assert.equal(d90.status, 200); assert.equal(d7.status, 200);
-  assert.equal(d30.json.counts.notReached, 5, `?period=30d notReached=5 (현재 ${d30.json.counts.notReached})`);
-  assert.equal(d90.json.counts.notReached, 5, `?period=90d notReached=5 (현재 ${d90.json.counts.notReached})`);
-  assert.equal(d7.json.counts.notReached, 5, `?period=7d 도 notReached=5 (누적, 은폐 금지)`);
-  // 응답의 weaknesses 에 ground-truth 5코드가 모두 포함(라벨 relabel 후에도 code 는 유지)
-  const weakCodes = new Set((d30.json.weaknesses || []).map(w => w.code));
-  for (const c of S1_NOT_REACHED) {
-    assert.ok(weakCodes.has(c), `?period=30d weaknesses 에 미도달 ${c} 누락`);
+  assert.equal(d30.json.counts.notReached, expected, `?period=30d notReached=${expected}(독립 SQL) (현재 ${d30.json.counts.notReached})`);
+  assert.equal(d90.json.counts.notReached, expected, `?period=90d notReached=${expected} (현재 ${d90.json.counts.notReached})`);
+  assert.equal(d7.json.counts.notReached, expected, `?period=7d 도 notReached=${expected} (누적, 은폐 금지)`);
+  // 세 기간 counts 완전 동일(누적 불변 — 핵심 박제)
+  assert.deepEqual(d90.json.counts, d30.json.counts, '30d↔90d counts 불일치(기간이 분류를 바꿈)');
+  assert.deepEqual(d7.json.counts, d30.json.counts, '7d↔30d counts 불일치(기간이 분류를 바꿈)');
+  // 응답 weaknesses 는 전부 미도달/부분도달 코드(라벨 relabel 후에도 code 는 유지)
+  const nrOrPartial = new Set((d30.json.standards || [])
+    .filter(s => s.status === 'not_reached' || s.status === 'partial').map(s => s.code));
+  for (const w of (d30.json.weaknesses || [])) {
+    assert.ok(nrOrPartial.has(w.code), `?period=30d weakness ${w.code} 가 미도달/부분도달 밖`);
+  }
+  if (expected > 0) {
+    assert.ok((d30.json.weaknesses || []).length > 0, '미도달 존재 시 weaknesses 비어 있으면 안 됨');
   }
 });
 

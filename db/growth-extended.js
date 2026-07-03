@@ -2856,7 +2856,6 @@ function getReportDetail(studentId, type, opts = {}) {
         FROM learning_logs WHERE user_id = ? AND activity_type = 'content_view'${hasRange ? ` AND ${rc('created_at')}` : ''}
         GROUP BY object_id ORDER BY last_date DESC LIMIT ${LIMIT}
       `).all(studentId, ...(hasRange ? rp() : []));
-      // 카드 배지(콘텐츠 조회) = DISTINCT object_id 수(getStudentReport.viewedContents) → rows 길이와 동일.
       const items = rows.map(r => {
         const m = String(r.object_id || '').match(/(\d+)\s*$/);
         let title = null, ctype = null;
@@ -2866,7 +2865,15 @@ function getReportDetail(studentId, type, opts = {}) {
           badge: ctype ? { text: CONTENT_TYPE_KO[ctype] || ctype, tone: 'info' } : null
         };
       });
-      return { type, title: '콘텐츠 조회 내역', count: rows.length, items };
+      // [카드=내역 fix, INV4] count 는 실제 총건수(본 함수 상단 계약 L2504) — 과거 rows.length(LIMIT 200
+      //   후 값)를 반환해 DISTINCT object_id 가 200을 넘는 순간 막대(detailCountFor: 비상한 207)와
+      //   모달 count(200)가 어긋났다. 막대와 글자 그대로 같은 비상한 COUNT(DISTINCT) 로 단일 소스화.
+      //   items 는 최대 200건 유지(형제 분기 content_collections·channel_subscriptions 와 동일 패턴).
+      const count = db.prepare(`
+        SELECT COUNT(DISTINCT object_id) c FROM learning_logs
+        WHERE user_id = ? AND activity_type = 'content_view'${hasRange ? ` AND ${rc('created_at')}` : ''}
+      `).get(studentId, ...(hasRange ? rp() : [])).c;
+      return { type, title: '콘텐츠 조회 내역', count, items };
     }
     case 'content_subscribed': {
       const rows = db.prepare(`

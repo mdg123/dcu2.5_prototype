@@ -14,16 +14,19 @@
 //   ⓖ  권한 — 학생은 본인만(타 학생 403), 잘못된 bucket 400.
 //
 // DB 격리: 실 DB → 임시 복사본(_setup). 계정(실 DB 확정): admin=1, teacher1=2, student1=3, student2=4.
-// ground-truth 표(직전 확인, uid3=student1):
-//   period | exam | homework | self | content(view+lesson+solve) | all
-//   7d     |  0   |    0     |  7   |  44 (23+14+7)              | 51
-//   30d    | 29   |    2     | 10   |  45 (23+15+7)              | 86
-//   90d    | 29   |    2     | 10   |  45 (23+15+7)              | 86
+// ground-truth 절대값(uid3=student1) — ★고정 from/to 창(2026-04-01 ~ 2026-07-02)★:
+//   과거 상대기간(7d/30d/90d) GT 는 달력이 지나며 창 밖으로 로그가 빠져 자연 붕괴했다
+//   (2026-07-03 실측: content@7d 44→39 — 06-25 로그 5건이 7d 창을 벗어남. 제품 버그 아님).
+//   → 절대값 박제는 "고정 창"으로 옮겨 영구 안정화(uid3 최초 로그 2026-04-19, 창이 전 데이터
+//   포괄·창 끝이 과거라 미래 로그 유입에도 불변). 상대기간은 REG-DRILL-e 에서 원천 SQL
+//   독립 대조로 검증(달력 무관 — 창 시프트·은폐·이중카운트 여전히 적발).
+//   fixed window | exam | homework | self | content(view+lesson+solve) | all
+//   04-01~07-02  |  29  |    2     |  10  |  45 (23+15+7)              | 86
 // ─────────────────────────────────────────────────────────────────────────────
 const { test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const http = require('node:http');
-const { setupTestDb } = require('./_setup');
+const { setupTestDb, openTestDb } = require('./_setup');
 
 setupTestDb();
 require('../db/schema').initSchema();
@@ -35,14 +38,21 @@ const ADMIN = 1, TEACHER = 2, STUDENT1 = 3, STUDENT2 = 4;
 const BUCKETS = ['exam', 'homework', 'self', 'content', 'all'];
 const PERIODS = ['7d', '30d', '90d'];
 
-// ground-truth 절대값(uid3). period → bucket → count.
-const GT = {
-  '7d':  { exam: 0,  homework: 0, self: 7,  content: 44, all: 51,
-           seg: { view: 23, lesson: 14, solve: 7 } },
-  '30d': { exam: 29, homework: 2, self: 10, content: 45, all: 86,
-           seg: { view: 23, lesson: 15, solve: 7 } },
-  '90d': { exam: 29, homework: 2, self: 10, content: 45, all: 86,
-           seg: { view: 23, lesson: 15, solve: 7 } },
+// ground-truth 절대값(uid3) — 고정 from/to 창(달력 경과 불변 — 파일 헤더 주석 참조).
+//   uid3 최초 로그 2026-04-19: 창이 당시 전 데이터를 포괄하고, 창 끝(07-02)이 과거로 고정이라
+//   이후 새 로그가 쌓여도 이 절대값은 변하지 않는다(재시드 시에만 갱신).
+const GT_FIXED = {
+  from: '2026-04-01', to: '2026-07-02',
+  exam: 29, homework: 2, self: 10, content: 45, all: 86,
+  seg: { view: 23, lesson: 15, solve: 7 },
+};
+// 상대기간 SQL 독립 대조용 — 라우트와 같은 화이트리스트를 테스트가 별도로 소유(이중 장부).
+//   라우트 쪽 화이트리스트가 바뀌면 여기와 어긋나 빨간불 → 의도된 감시.
+const BUCKET_TYPES_MIRROR = {
+  exam: ['exam_complete'], homework: ['homework_submit'], self: ['self_learn', 'daily_complete'],
+  content: ['content_view', 'lesson_progress', 'content_solve'],
+  all: ['exam_complete', 'homework_submit', 'self_learn', 'daily_complete',
+        'content_view', 'lesson_progress', 'content_solve'],
 };
 
 // ── HTTP 하네스 ────────────────────────────────────────────────────────────
@@ -154,31 +164,61 @@ test('INV-DRILL-d: content 세그먼트 합 == content.count, ?segment 필터 co
     const segSum = content.json.segments.reduce((s, x) => s + x.count, 0);
     assert.equal(segSum, content.json.count, `세그먼트 합(${segSum}) != content(${content.json.count}) @${p}`);
 
-    // ?segment=view|lesson|solve 각각의 count == 세그먼트 소계 == items.length
+    // ?segment=view|lesson|solve 각각의 count == 세그먼트 소계, items 는 200 캡 인지
+    //   (R-2 부류 fix: view 조회 로그가 200 을 넘으면 items 는 상한 — count 와 무조건 등치 금지.
+    //    2026-07-03 프리뷰 사용 로그 유입으로 uid3 content_view 가 200 을 넘어 표면화.)
     for (const seg of ['view', 'lesson', 'solve']) {
       const s = await detail('content', p, STUDENT1, `&segment=${seg}`);
       const declared = content.json.segments.find(x => x.key === seg).count;
       assert.equal(s.json.count, declared, `segment=${seg}@${p}: count(${s.json.count}) != 소계(${declared})`);
-      assert.equal((s.json.items || []).length, s.json.count, `segment=${seg}@${p}: items.length != count`);
+      assert.equal((s.json.items || []).length, Math.min(200, s.json.count),
+        `segment=${seg}@${p}: items.length != min(200, count)`);
+      if (s.json.count > 200) assert.ok(s.json.note, `segment=${seg}@${p}: 상한 안내 note 필요`);
     }
   }
 });
 
 // ──────────────────────────────────────────────────────────────────────────
-// ⓔ ground-truth 절대값 박제(uid3) — 30일 창 밖 은폐/이중카운트 회귀 차단
+// ⓔ ground-truth 절대값 박제(uid3) — 은폐/이중카운트 회귀 차단.
+//   ⓔ-1 고정 창 절대값: from/to 커스텀 기간으로 호출 — 달력이 지나도 영구 불변.
+//   ⓔ-2 상대기간(7d/30d/90d): 절대값 대신 "원천 SQL 독립 대조"(테스트 소유 화이트리스트·
+//       테스트가 직접 계산한 창) — 어느 날짜에 돌려도 창 시프트·JOIN 소실·스코프 누수 적발.
+//   (과거: 상대기간에 절대값을 박아 달력 경과로 자연 붕괴 — 2026-07-03 content@7d 44→39.)
 // ──────────────────────────────────────────────────────────────────────────
-test('REG-DRILL-e: uid3 ground-truth 절대값 (period × bucket × 세그먼트)', async () => {
+test('REG-DRILL-e1: uid3 고정 창(2026-04-01~07-02) 절대값 (bucket × 세그먼트)', async () => {
+  const win = `&from=${GT_FIXED.from}&to=${GT_FIXED.to}`;
+  for (const b of BUCKETS) {
+    const r = await req(`/perform/detail?bucket=${b}${win}`, STUDENT1);
+    assert.equal(r.status, 200, `${b}@fixed 200`);
+    assert.equal(r.json.count, GT_FIXED[b], `uid3 ${b}@고정창 count=${GT_FIXED[b]} 이어야 (현재 ${r.json.count})`);
+  }
+  const content = await req(`/perform/detail?bucket=content${win}`, STUDENT1);
+  for (const seg of ['view', 'lesson', 'solve']) {
+    const declared = content.json.segments.find(x => x.key === seg).count;
+    assert.equal(declared, GT_FIXED.seg[seg], `uid3 content/${seg}@고정창=${GT_FIXED.seg[seg]} 이어야 (현재 ${declared})`);
+  }
+});
+
+test('REG-DRILL-e2: uid3 상대기간(7d/30d/90d) — 원천 SQL 독립 대조 (달력 무관)', async () => {
+  const tdb = openTestDb();
+  // 창을 테스트가 독립 계산(resolvePeriod 문서 규약: today-n .. today, UTC ISO).
+  //   라우트가 창 산식을 바꾸면 여기와 어긋나 빨간불(의도된 감시 — P2 오프바이원 주석 참조).
+  const toIso = (d) => d.toISOString().slice(0, 10);
   for (const p of PERIODS) {
-    const g = GT[p];
+    const n = parseInt(p, 10);
+    const today = new Date();
+    const start = new Date(today); start.setDate(start.getDate() - n);
+    const from = toIso(start), to = toIso(today);
     for (const b of BUCKETS) {
+      const types = BUCKET_TYPES_MIRROR[b];
+      const ph = types.map(() => '?').join(',');
+      const expected = tdb.prepare(`
+        SELECT COUNT(*) c FROM learning_logs
+        WHERE user_id = ? AND activity_type IN (${ph})
+          AND DATE(created_at) >= ? AND DATE(created_at) <= ?
+      `).get(STUDENT1, ...types, from, to).c;
       const r = await detail(b, p);
-      assert.equal(r.json.count, g[b], `uid3 ${b}@${p} count=${g[b]} 이어야 (현재 ${r.json.count})`);
-    }
-    // content 세그먼트 소계 절대값
-    const content = await detail('content', p);
-    for (const seg of ['view', 'lesson', 'solve']) {
-      const declared = content.json.segments.find(x => x.key === seg).count;
-      assert.equal(declared, g.seg[seg], `uid3 content/${seg}@${p}=${g.seg[seg]} 이어야 (현재 ${declared})`);
+      assert.equal(r.json.count, expected, `uid3 ${b}@${p}: count(${r.json.count}) != 원천 SQL(${expected})`);
     }
   }
 });
@@ -228,9 +268,11 @@ test('PERM-DRILL-g2: 학생은 본인만(타 학생 403), 잘못된 bucket 400',
 });
 
 test('PERM-DRILL-g3: 교사·관리자는 학생 drill-down 조회 가능(200)', async () => {
-  const byTeacher = await req(`/perform/detail?bucket=all&period=30d&userId=${STUDENT1}`, TEACHER);
+  // ground-truth 는 고정 창 절대값(GT_FIXED — 달력 불변)으로 대조.
+  const win = `&from=${GT_FIXED.from}&to=${GT_FIXED.to}`;
+  const byTeacher = await req(`/perform/detail?bucket=all${win}&userId=${STUDENT1}`, TEACHER);
   assert.equal(byTeacher.status, 200, '교사는 학생 조회 200');
-  assert.equal(byTeacher.json.count, GT['30d'].all, '교사 조회 count 도 ground-truth 일치');
-  const byAdmin = await req(`/perform/detail?bucket=all&period=30d&userId=${STUDENT1}`, ADMIN);
+  assert.equal(byTeacher.json.count, GT_FIXED.all, '교사 조회 count 도 ground-truth(고정 창) 일치');
+  const byAdmin = await req(`/perform/detail?bucket=all${win}&userId=${STUDENT1}`, ADMIN);
   assert.equal(byAdmin.status, 200, '관리자는 학생 조회 200');
 });

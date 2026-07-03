@@ -466,8 +466,12 @@
       border:1px solid #e5e7eb; border-radius:12px; }
     .mastery-heatmap{ border-collapse:separate; border-spacing:3px; font-size:13px; }
     .mastery-heatmap thead th{ position:sticky; top:0; z-index:3; background:#fff;
-      font-size:12px; color:#4b5563; font-weight:600; padding:6px 4px; white-space:nowrap;
+      font-size:13px; color:#4b5563; font-weight:600; padding:6px 4px; white-space:nowrap;
       writing-mode:vertical-rl; text-orientation:mixed; height:96px; vertical-align:bottom; }
+    /* P2-1 (C) 열(학생) 헤더 — 클릭 어포던스(학생 성취 요약 드로어) */
+    .mastery-heatmap thead th.mh-stu{ cursor:pointer; }
+    .mastery-heatmap thead th.mh-stu:hover{ color:#2563eb; }
+    .mastery-heatmap thead th.mh-stu:focus-visible{ outline:2px solid #2563eb; outline-offset:-2px; }
     .mastery-heatmap thead th.corner{ left:0; z-index:4; writing-mode:horizontal-tb; width:200px;
       text-align:left; vertical-align:bottom; padding:6px 10px; }
     .mastery-heatmap thead th.summary-h{ writing-mode:horizontal-tb; height:auto; vertical-align:bottom; text-align:center; }
@@ -475,9 +479,9 @@
       font-size:13px; color:#1f2937; font-weight:600; padding:6px 10px; width:200px; max-width:200px;
       white-space:nowrap; overflow:hidden; text-overflow:ellipsis; cursor:pointer; }
     .mastery-heatmap tbody th:hover{ color:#2563eb; }
-    .mastery-heatmap tbody th .mh-code{ color:#9ca3af; font-weight:500; font-size:12px; }
-    .mastery-heatmap td.cell{ width:30px; height:30px; min-width:30px; border-radius:6px; cursor:pointer;
-      text-align:center; color:#fff; font-weight:600; font-size:11px; transition:transform .1s,box-shadow .1s; }
+    .mastery-heatmap tbody th .mh-code{ color:#9ca3af; font-weight:500; font-size:13px; }
+    .mastery-heatmap td.cell{ width:32px; height:30px; min-width:32px; border-radius:6px; cursor:pointer;
+      text-align:center; color:#fff; font-weight:600; font-size:13px; transition:transform .1s,box-shadow .1s; }
     .mastery-heatmap td.cell:focus-visible{ outline:0; box-shadow:0 0 0 3px rgba(37,99,235,.45); transform:scale(1.1); position:relative; z-index:5; }
     .mastery-heatmap td.cell:hover{ transform:scale(1.18); box-shadow:0 2px 8px rgba(0,0,0,.25); z-index:5; position:relative; }
     .mastery-heatmap td[data-state="reached"]{ background:var(--mastery-reached); }
@@ -521,6 +525,63 @@
     #masteryTooltip{ position:fixed; z-index:10002; max-width:280px; background:#111827; color:#fff;
       font-size:13px; line-height:1.5; padding:8px 12px; border-radius:8px; pointer-events:none;
       box-shadow:0 4px 12px rgba(0,0,0,.3); display:none; }
+
+    /* ── P2-1 히트맵 드릴 3종 — 드로어 내부 컴포넌트 (셀 시도내역·행 분포·열 요약) ──
+       기획서: LRS_P2_교사히트맵_타임라인메타_스펙.md §2-4~2-6 (픽셀·색 확정값 그대로) */
+    .drw-actions{ display:flex; gap:8px; margin-top:12px; flex-wrap:nowrap; }
+    .drw-actions .mastery-btn{ white-space:nowrap; min-width:0; }
+    .drw-sect-title{ font-size:15px; font-weight:700; color:#374151; margin:20px 0 6px; }
+    .drw-att-row{ display:grid; grid-template-columns:88px 1fr 56px; gap:10px; align-items:center;
+      padding:9px 4px; border-bottom:1px solid #f3f4f6; }
+    .drw-att-row:last-child{ border-bottom:0; }
+    .drw-att-date{ font-size:13px; color:#9ca3af; font-variant-numeric:tabular-nums; white-space:nowrap; }
+    .drw-att-type{ font-size:14px; color:#374151; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .drw-att-badge{ justify-self:end; font-size:13px; font-weight:700; padding:3px 10px; border-radius:9999px; white-space:nowrap; }
+    .drw-att-badge.ok{ background:#d1fae5; color:#047857; }
+    .drw-att-badge.miss{ background:#fee2e2; color:#b91c1c; }
+    .drw-att-badge.rec{ background:#f3f4f6; color:#6b7280; }
+    .drw-loading{ font-size:13px; color:#9ca3af; padding:8px 0; }
+    .drw-note{ font-size:13px; color:#9ca3af; text-align:center; padding:8px 0 0; }
+    .drw-meta{ font-size:13px; color:#6b7280; line-height:1.6; margin:4px 0 10px; }
+    /* 행 분포·열 요약 — 학생/성취기준 칩 (T3 .nr-chip 문법 계승, 상태별 soft 배경) */
+    .drw-chips{ display:flex; flex-wrap:wrap; gap:6px; margin:6px 0 12px; }
+    .drw-chip{ display:inline-flex; align-items:center; font-size:14px; font-weight:600; padding:5px 12px;
+      border-radius:9999px; border:1px solid transparent; background:#f3f4f6; color:#6b7280; font-family:inherit; }
+    button.drw-chip{ cursor:pointer; }
+    button.drw-chip:hover{ filter:brightness(.94); }
+    button.drw-chip:focus-visible{ outline:2px solid #2563eb; outline-offset:2px; }
+    .drw-chip.reached{ background:var(--mastery-reached-soft); color:var(--mastery-reached-ink); }
+    .drw-chip.partial{ background:var(--mastery-partial-soft); color:var(--mastery-partial-ink); }
+    .drw-chip.notReached{ background:var(--mastery-notreached-soft); color:var(--mastery-notreached-ink); border-color:#fecaca; }
+    .drw-chip.insufficient{ background:var(--mastery-insufficient-soft); color:var(--mastery-insufficient-ink); }
+    .drw-group-title{ font-size:15px; font-weight:700; margin:14px 0 4px; color:#374151; }
+    .drw-group-title.notReached{ color:var(--mastery-notreached-ink); }
+    .drw-group-title.partial{ color:var(--mastery-partial-ink); }
+    .drw-group-title.reached{ color:var(--mastery-reached-ink); }
+    .drw-group-title.insufficient, .drw-group-title.none{ color:#6b7280; }
+    .drw-link{ background:none; border:0; color:#2563eb; font-size:14px; font-weight:600; cursor:pointer;
+      font-family:inherit; padding:6px 0; }
+    .drw-link:hover{ text-decoration:underline; }
+    .drw-sum-panel{ margin:12px 0; padding:14px; border-radius:10px; background:#f9fafb; border:1px solid #f3f4f6; }
+    .drw-sum-counts{ display:flex; flex-wrap:wrap; gap:6px; }
+    .drw-sum-sub{ font-size:14px; color:#6b7280; margin-top:8px; }
+
+    /* ── P2-2 최근 학습 활동 (s-perform 타임라인 카드) — 스펙 §3-4 ──
+       행은 드릴 모달 .lrs-dm-row 구조·치수 재사용(같은 일=같은 생김새). */
+    #sRecentActs .lrs-dm-row{ padding:12px 0; }
+    .ra-gauge{ display:inline-flex; align-items:center; gap:6px; flex:0 0 auto; }
+    .ra-gauge .rag-track{ width:96px; height:8px; border-radius:4px; background:#e5e7eb; overflow:hidden; flex:0 0 auto; }
+    .ra-gauge .rag-fill{ display:block; height:100%; background:#10b981; border-radius:4px; }
+    .ra-gauge .rag-num{ font-size:13px; font-weight:600; color:var(--gray-600); white-space:nowrap; }
+    .ra-delta{ font-size:13px; font-weight:700; padding:3px 10px; border-radius:9999px;
+      background:#eff6ff; color:#1d4ed8; white-space:nowrap; flex:0 0 auto; }
+    .ra-delta.neutral{ background:#f3f4f6; color:#6b7280; }
+    @media (max-width:768px){
+      #sRecentActs .lrs-dm-row{ flex-wrap:wrap; }                          /* tail 둘째 줄 개행 허용(§3-4) */
+      #sRecentActs .lrs-dm-row-body{ flex:1 1 0; min-width:0; }            /* basis 0 — 긴 제목이 아이콘 아래로 밀리는 개행 방지 */
+      #sRecentActs .lrs-dm-row-tail{ flex-wrap:wrap; margin-left:34px; }   /* 아이콘 폭+갭만큼 들여 둘째 줄 정렬 */
+      #sRecentActs .lrs-dm-row-primary{ white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    }
 
     /* A6 감정체크-학습성취 연관 분석 — 반응형(§⑦): <1200 차트 240px, <768 220px */
     #sEmoMirrorBody{ height:280px; }
@@ -612,7 +673,7 @@
     .ns-node .nsn-emoji{ font-size:15px; line-height:1; }
     .ns-node .nsn-label{ font-size:14px; font-weight:600; color:#1f2937; max-width:100%; overflow:hidden;
       text-overflow:ellipsis; white-space:nowrap; }
-    .ns-node .nsn-pin{ font-size:12px; color:#2563eb; font-weight:700; }
+    .ns-node .nsn-pin{ font-size:13px; color:#2563eb; font-weight:700; }
     .ns-arrow{ display:flex; align-items:center; color:#9ca3af; font-size:14px; flex:0 0 auto; }
     /* CTA 카드 */
     .ns-cta-card{ border:2px solid #2563eb; border-radius:14px; padding:20px 22px; margin-top:16px; background:#fff; }
@@ -802,15 +863,15 @@ function _shouldAttachScope(path){
  *   subjectStackbar(P1-2 스택바)·trendClassOverlay(P1-3 학급 비교) — P1에서 사용 개시.
  * ===================================================================== */
 const LEVEL_CONFIG = {
-  elementary: { compareTab:false, subjectStackbar:false, trendClassOverlay:false,
+  elementary: { compareTab:false, subjectStackbar:false, trendClassOverlay:false, timelineClassDelta:false,
                 headline:'오늘도 잘 왔어요! 같이 볼까요? 👋',
                 recoLabels:{urgent:'🔥 이걸 먼저 공부해 볼까요?', recommended:'조금씩 연습해봐요', optional:'🌟 잘하는 부분을 더 키워봐요!'},
                 recoCta:'공부하러 가기', retrySub:'오답노트에서 다시 푼 문항 {N}개 기준' },
-  middle:     { compareTab:true,  subjectStackbar:true,  trendClassOverlay:true,   // P1-3(§4-1): false→true — KERIS 정의상 중등=비교형, compareTab과 동일 정책
+  middle:     { compareTab:true,  subjectStackbar:true,  trendClassOverlay:true,  timelineClassDelta:true,   // P1-3(§4-1): false→true — KERIS 정의상 중등=비교형, compareTab과 동일 정책. timelineClassDelta: P2-2 활동 타임라인 반평균 메타(P0-3 분기표 예약 자리 이행)
                 headline:'오늘도 함께 성장해요!',
                 recoLabels:{urgent:'시급', recommended:'권장', optional:'선택'},
                 recoCta:'학습 시작하기', retrySub:'재풀이 성공률 — 틀렸던 문항의 정복 비율' },
-  high:       { compareTab:true,  subjectStackbar:true,  trendClassOverlay:true,
+  high:       { compareTab:true,  subjectStackbar:true,  trendClassOverlay:true,  timelineClassDelta:true,
                 headline:'학습 시간·성취도·추천을 한눈에 정리했어요',
                 recoLabels:{urgent:'시급', recommended:'권장', optional:'선택'},
                 recoCta:'학습 시작하기', retrySub:'재풀이 성공률 — 틀렸던 문항의 정복 비율' }
@@ -1364,9 +1425,11 @@ function renderSparkline(container, values, opts){
   </svg>`;
 }
 
-/* 경고 카드 액션 버튼 이벤트 바인딩 (인라인 onclick 제거) */
+/* 경고 카드 액션 버튼 이벤트 바인딩 (인라인 onclick 제거)
+   ⚠ #drawerBody 는 영구 요소 — 드로어를 열 때마다 재호출되면 리스너가 누적되므로 1회 가드(P2-1). */
 function bindWarningActions(container){
-  if (!container) return;
+  if (!container || container._warnBound) return;
+  container._warnBound = true;
   container.addEventListener('click', (ev) => {
     const btn = ev.target.closest('button[data-action]');
     if (!btn) return;
@@ -1693,6 +1756,7 @@ VIEWS['s-perform'] = async function(root){
       ${kpiCard('콘텐츠 활동', (s.contentCount||0).toLocaleString(), '건', {dir:'flat',text:`조회·풀이·수업 · ${contentSub}`}, 'purple', null, {bucket:'content'})}
       ${kpiCard('학습 활동', (s.totalActs||0).toLocaleString(), '건', {dir:'flat',text:'평가·과제·자기주도·콘텐츠 학습 합계'}, 'primary', null, {bucket:'all'})}
     </section>
+    <div id="sRecentActs"></div>
     <section class="dc-chart-grid">
       ${chartWrap('sPerfTrend','일별 학습수행 추이','평가·과제·자기주도·콘텐츠 학습')}
     </section>
@@ -1700,6 +1764,7 @@ VIEWS['s-perform'] = async function(root){
       <p class="s-perf-note"><i class="fas fa-circle-info" aria-hidden="true"></i> 표는 게시글·설문 등 전체 활동을 포함해요. 위 <b>학습 활동</b> 카드는 평가·과제·자기주도·콘텐츠 학습만 합한 수예요.</p>
     </section>`;
   bindPerfDrilldown(root);
+  renderRecentActs();   // P2-2: 최근 학습 활동 카드 (KPI 아래·추이 위, 비동기 후행 채움)
   mkChart(document.getElementById('sPerfTrend'),'line', _perfTrendDatasets(d.trend));
   // 표 유형 라벨 정정: content_view "콘텐츠 학습" → "콘텐츠 조회"(조회는 학습활동 아님).
   const perfTypeRelabel = { content_view:'콘텐츠 조회' };
@@ -1715,6 +1780,75 @@ VIEWS['s-perform'] = async function(root){
       avgScore: r.avgScore==null?'-':r.avgScore }))
   });
 };
+
+/* =====================================================================
+ * P2-2 "최근 학습 활동" 카드 — s-perform KPI 아래 최근 8행 스냅
+ *   기획서: LRS_P2_교사히트맵_타임라인메타_스펙.md §3-4 + §3-3 [개정 2026-07-03 감리 R-1]
+ *   데이터: /perform/detail?bucket=all&limit=40&learnOnly=1 (+중·고만 withClassAvg=1 — 초등 요청 미발송)
+ *     - learnOnly=1: 학습활동 정본 7종만(조회성 content_view 등 제외 — BE 계약: 미지정 시 응답 불변.
+ *       BE 미착륙 시 파라미터 무시 → 기존 동작, 무해 폴백)
+ *     - fetch 창 40건: 연속 중복 병합 후에도 "서로 다른 최근 활동" 8행을 채우기 위한 여유
+ *       (8건만 받으면 같은 수업 진도 로그 도배 시 병합 후 1~2행만 남음 — student1 실측 재발 방지)
+ *   카드 한정 연속 중복 병합: 같은 활동·같은 대상(typeLabel+title)의 연속 이벤트 1행 + "×N회" 보조 표기.
+ *     ★ 드릴 모달(활동 전체 보기·버킷 드릴)은 절대 불변 — 표시값=내역 계약 유지.
+ *   행 구조 = 드릴 모달 .lrs-dm-row 재사용 · 메타 = _perfInlineMeta 공용(표시값=드릴 정합)
+ * ===================================================================== */
+let _raReqSeq = 0;
+async function renderRecentActs(){
+  const host = document.getElementById('sRecentActs');
+  if (!host) return;
+  const seq = ++_raReqSeq;                       // 기간칩 연속 전환 경합 가드
+  const extra = { bucket:'all', limit:40, learnOnly:1 };   // [감리 R-1] 7종 정본 + 병합 여유창
+  if (levelCfg().timelineClassDelta) extra.withClassAvg = 1;   // 학령 가드 — 초등은 파라미터 자체 미부착
+  const d = await apiGet('/api/lrs/perform/detail', extra);
+  if (seq !== _raReqSeq) return;
+  const raw = (d && d.success && Array.isArray(d.items)) ? d.items : [];
+  // [감리 R-1] 카드 한정 연속 중복 병합 — 최신 이벤트의 메타(진도율·점수·날짜)를 대표로 유지
+  const merged = [];
+  raw.forEach(it => {
+    const key = (it.typeLabel || '') + '|' + (it.title || '');
+    const last = merged[merged.length - 1];
+    if (last && last._key === key) { last._dup += 1; return; }
+    merged.push(Object.assign({ _key: key, _dup: 1 }, it));
+  });
+  const items = merged.slice(0, 8);
+  if (!items.length){ host.innerHTML = ''; return; }   // 방어(§3-4 빈 상태: 섹션 미렌더 — s-perform 전체 빈상태가 선처리)
+
+  const rowsHtml = items.map(it => {
+    const kind = _perfItemKind(it);
+    const ico = RA_KIND_ICON[kind] || '•';
+    const dupTxt = it._dup > 1 ? ` · ×${it._dup}회` : '';   // 병합 보조 표기(카드 한정)
+    const metaTxt = `${it.sub ? escapeHtml(it.sub) + ' · ' : ''}${escapeHtml(it.typeLabel || '')}${dupTxt}`;
+    const inline = _perfInlineMeta(it);
+    // tail: 점수칩(평가·자기주도·문항풀이 — 현행 규칙 + 조회는 '-' 칩 유지) → 유형별 메타 1개 → 날짜
+    let tail = '';
+    if (kind === 'exam' || kind === 'self' || kind === 'solve' || kind === 'view') tail += _pdScoreChip(it.score);
+    tail += inline;
+    // BE 메타 필드 미착륙 폴백: 과제·수업 행 tail 이 비면 기존 뱃지로 채움(빈 꼬리 방지)
+    if (!inline && (kind === 'homework' || kind === 'lesson')) tail += _pdBadge(it.badge);
+    if (it.date) tail += `<span class="lrs-dm-row-date">${_pdFmtDate(it.date)}</span>`;
+    return `<div class="lrs-dm-row">
+      <div class="lrs-dm-row-icon">${ico}</div>
+      <div class="lrs-dm-row-body">
+        <div class="lrs-dm-row-primary">${escapeHtml(it.title || '제목 없음')}</div>
+        ${metaTxt ? `<div class="lrs-dm-row-meta">${metaTxt}</div>` : ''}
+      </div>
+      <div class="lrs-dm-row-tail">${tail}</div>
+    </div>`;
+  }).join('');
+
+  host.innerHTML = `
+    <section class="dc-chart-wrapper" aria-label="최근 학습 활동">
+      <header>
+        <div><h2>최근 학습 활동</h2>
+          <div class="subtitle">가장 최근에 한 학습 ${items.length}건이에요</div></div>
+        <button type="button" class="sh-zone__link" id="raSeeAll">활동 전체 보기 ›</button>
+      </header>
+      <div id="raRows">${rowsHtml}</div>
+    </section>`;
+  const seeAll = document.getElementById('raSeeAll');
+  if (seeAll) seeAll.addEventListener('click', () => openPerfDetail('all', seeAll));
+}
 
 /* =====================================================================
  * 활동 유형별 수행 — KPI 카드 Drill-down 모달
@@ -1764,6 +1898,51 @@ function _pdBadge(badge){
   if (!badge || !badge.text) return '';
   const tone = ['info','success','danger','warning','neutral'].indexOf(badge.tone) >= 0 ? badge.tone : 'neutral';
   return `<span class="lrs-dm-row-badge lrs-dm-badge-${tone}">${escapeHtml(badge.text)}</span>`;
+}
+
+/* =====================================================================
+ * P2-2 인라인 메타 공용 헬퍼 — 타임라인 카드·드릴 모달 행이 같은 함수를 사용
+ *   (같은 활동=같은 생김새 구조 보장, 스펙 §3-4 "드릴 모달 행 동기화")
+ *   BE 확장 필드(progressPct·hwStatus·classAvg) 미착륙 시 필드 부재 → 메타 생략 폴백.
+ * ===================================================================== */
+/* 응답 item 의 활동 유형 추정 — activity_type 미포함 응답이라 typeLabel·segment·확장필드로 판별 */
+function _perfItemKind(it){
+  if (!it) return 'other';
+  if (it.hwStatus || it.typeLabel === '과제') return 'homework';
+  if (it.classAvg != null || it.typeLabel === '채움클래스 평가') return 'exam';
+  if (it.progressPct != null || it.segment === 'lesson' || it.typeLabel === '수업 진행') return 'lesson';
+  if (it.segment === 'view' || it.typeLabel === '콘텐츠 학습') return 'view';
+  if (it.segment === 'solve' || it.typeLabel === '콘텐츠 문항풀이') return 'solve';
+  if (it.typeLabel === '오늘의 학습' || it.typeLabel === 'AI맞춤' || it.typeLabel === '오답노트') return 'self';
+  return 'other';
+}
+/* 유형→아이콘 (드릴 모달 상수와 동일 계열: exam 🎓 / homework 📝 / self 🧭 / content·lesson 🎬) */
+const RA_KIND_ICON = { exam:'🎓', homework:'📝', self:'🧭', lesson:'🎬', view:'🎬', solve:'🎬', other:'•' };
+
+/* 유형별 인라인 메타 1개 (스펙 §3-4 표) — 없으면 빈 문자열(생략 폴백) */
+function _perfInlineMeta(it){
+  const kind = _perfItemKind(it);
+  // ① 수업/콘텐츠 = 진도율 게이지 (progressPct 0~100 — BE §3-3 확장 필드)
+  if (kind === 'lesson' && it.progressPct != null && isFinite(Number(it.progressPct))){
+    const p = Math.max(0, Math.min(100, Math.round(Number(it.progressPct))));
+    return `<span class="ra-gauge" role="img" aria-label="진도율 ${p}%">` +
+      `<span class="rag-track"><span class="rag-fill" style="width:${p}%"></span></span>` +
+      `<span class="rag-num">${p}%</span></span>`;
+  }
+  // ② 과제 = 상태 뱃지 (graded 채점완료 #dbeafe/#1d4ed8 = info · submitted 제출완료 #d1fae5/#047857 = success)
+  if (kind === 'homework' && it.hwStatus){
+    return it.hwStatus === 'graded'
+      ? `<span class="lrs-dm-row-badge lrs-dm-badge-info">채점완료</span>`
+      : `<span class="lrs-dm-row-badge lrs-dm-badge-success">제출완료</span>`;
+  }
+  // ③ 평가 = 반 평균 대비 델타 — 중·고만(levelCfg 가드 이중 방어; 초등은 withClassAvg 요청 자체 미발송).
+  //    음수·0 델타는 중립 표기 "반 평균 {avg}점" 회색 — 마이너스 기호·빨강·부정 어휘 절대 금지(스펙 §0 P2-2).
+  if (kind === 'exam' && levelCfg().timelineClassDelta && it.classAvg != null && it.score != null){
+    const delta = Math.round(Number(it.score) - Number(it.classAvg));
+    if (delta >= 1) return `<span class="ra-delta">반 평균 +${delta}점</span>`;
+    return `<span class="ra-delta neutral">반 평균 ${Math.round(Number(it.classAvg))}점</span>`;
+  }
+  return '';
 }
 
 /* KPI 그리드에 위임 리스너 1개 (뷰 재렌더마다 root 새로 바인딩) */
@@ -1817,6 +1996,8 @@ function openPerfDetail(bucket, triggerEl, opts){
   // 기간칩(state.period/from/to) + scope 그대로 전달 — rangeQS 재사용(카드와 동일 기간·스코프).
   const extra = { bucket };
   if (opts.segment) extra.segment = opts.segment;
+  // P2-2: 평가 행 반평균 메타 — 중·고만 옵트인. 초등은 요청 자체 미발송(네트워크 레벨 가드, P1-3 방식 계승).
+  if ((bucket === 'exam' || bucket === 'all') && levelCfg().timelineClassDelta) extra.withClassAvg = 1;
   const url = '/api/lrs/perform/detail' + rangeQS(extra, '/api/lrs/perform/detail');
   fetch(url, { credentials:'include' })
     .then(r => r.ok ? r.json() : Promise.reject(new Error('HTTP '+r.status)))
@@ -1914,13 +2095,19 @@ function _renderPerfItems(bucket, data){
     const primary = escapeHtml(it.title || '제목 없음');
     const metaTxt = it.sub ? `<div class="lrs-dm-row-meta">${escapeHtml(it.sub)}</div>` : '';
     const dateTxt = it.date ? _pdFmtDate(it.date) : '';
-    // 우측 꼬리: 점수칩 → 뱃지 → 날짜. content 조회/수업진행은 score null → '-'(칼럼 일관성, §2-2 wireframe).
-    //   점수 개념 있는 버킷(평가·자기주도·콘텐츠)은 항상 칩 노출(null이면 '-'). 과제는 점수 있을 때만.
+    // 우측 꼬리: 점수칩 → 인라인 메타 → 뱃지 → 날짜. content 조회는 score null → '-'(칼럼 일관성, §2-2 wireframe).
+    //   P2-2 동기화(§3-4): ① lesson 행 '-' 칩 대신 진도 게이지 ② homework 행 상태 뱃지로 대체 ③ exam 행 델타/중립 칩.
+    //   확장 필드 미착륙 시 kind·inline 이 비어 기존 렌더와 동일(회귀 0).
+    const kind = _perfItemKind(it);
+    const inline = _perfInlineMeta(it);
+    const lessonGauge = (kind === 'lesson' && it.progressPct != null);   // 게이지가 '-' 칩을 대체
+    const hwStatusBadge = (kind === 'homework' && it.hwStatus);          // 상태 뱃지가 기존 '과제' 뱃지를 대체
     let tail = '';
-    const showScore = bucket === 'exam' || bucket === 'self' || bucket === 'content' ||
-      (bucket === 'all' && it.score != null) || (bucket === 'homework' && it.score != null);
+    const showScore = !lessonGauge && (bucket === 'exam' || bucket === 'self' || bucket === 'content' ||
+      (bucket === 'all' && it.score != null) || (bucket === 'homework' && it.score != null));
     if (showScore) tail += _pdScoreChip(it.score);
-    tail += _pdBadge(it.badge);
+    tail += inline;
+    if (!hwStatusBadge) tail += _pdBadge(it.badge);
     if (dateTxt) tail += `<span class="lrs-dm-row-date">${dateTxt}</span>`;
     return `<div class="lrs-dm-row">
       <div class="lrs-dm-row-icon">${rowIco}</div>
@@ -3175,6 +3362,9 @@ VIEWS['s-achieve'] = async function(root){
           tooltip:{ callbacks:{
             title:(items)=>{ const s = ordered[items[0].dataIndex]; return (s.label && s.label!==s.code) ? s.label : (s.subject || '성취기준'); },
             label:(ctx)=>{ const s = ordered[ctx.dataIndex];
+              // 마감1 방어: rate null 이면 "시도 N회"만(없는 정답률 암시 금지).
+              //   rate 존재 시엔 correct/attempts 실채점 값이라 "(N회 중 M정답)" 병기로 정직 표기 유지(PM P0 약점 은폐 방지 결정).
+              if (s.rate == null) return `시도 ${_attempts(s)}회 · ${masteryKo(s.status)}`;
               return `정답률 ${s.rate}% (${s.attempts}회 중 ${s.correct}정답) · ${masteryKo(s.status)}`; },
             afterLabel:(ctx)=>{ const s = ordered[ctx.dataIndex];
               const codeBare = String(s.code||'').replace(/^\[|\]$/g,'');
@@ -3768,8 +3958,9 @@ function openSubjStackDetail(subject, statusKey, triggerEl){
     const name = s.label || s.code || '성취기준';
     const rate = (s.rate == null) ? null : Math.round(Number(s.rate));
     const attempts = Number(s.attempts) || 0;
-    // rate null이면 "시도 N회" — 없는 정답률 암시 금지(정직 표기).
-    const tailTxt = (rate != null) ? `정답률 ${rate}% · ${attempts}회` : `시도 ${attempts}회`;
+    // 마감1(P2 공통 규칙): insufficient 또는 rate null → "시도 N회"만 — 미채점을 "정답률 0%"로 오독 금지.
+    //   (reachRate가 success 0·avg null에 0을 반환해 평가부족 행이 "정답률 0%"로 렌더되던 결함 봉합)
+    const tailTxt = (rate != null && st !== 'insufficient') ? `정답률 ${rate}% · ${attempts}회` : `시도 ${attempts}회`;
     const href = '/self-learn/?achievement_code=' + encodeURIComponent(String(s.code||'').replace(/^\[|\]$/g,''));
     return `<a class="lrs-dm-row is-clickable subj-dm-row" href="${escapeAttr(href)}">
       <div class="lrs-dm-row-body">
@@ -4824,6 +5015,67 @@ VIEWS['t-drill'] = async function(root){
 };
 
 /* =====================================================================
+ * P2-1 히트맵 드릴 — 문서 위임 1회 바인딩 (재렌더에도 리스너 유실 없음, 스펙 §2-4)
+ *   컨텍스트(_masteryDrill)는 t-warnings 렌더 시마다 최신 클로저로 교체된다.
+ * ===================================================================== */
+let _masteryDrill = null;
+let _cellDetailSeq = 0;
+
+/* 시도 내역 일시 포맷 (MM.DD HH:mm — §2-4 표) */
+function _attFmtDate(v){
+  if (!v) return '-';
+  const d = new Date(String(v).replace(' ', 'T'));
+  if (isNaN(d.getTime())){
+    const m = String(v).match(/\d{4}-(\d{2})-(\d{2})[ T](\d{2}:\d{2})/);
+    return m ? `${m[1]}.${m[2]} ${m[3]}` : String(v).slice(5, 16);
+  }
+  const p = n => String(n).padStart(2, '0');
+  return `${p(d.getMonth()+1)}.${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+function _bindMasteryDrillDelegation(){
+  if (_bindMasteryDrillDelegation._bound) return;
+  _bindMasteryDrillDelegation._bound = true;
+  const act = (target) => {
+    const ctx = _masteryDrill;
+    if (!ctx) return false;
+    const cell = target.closest('.mastery-heatmap td.cell');
+    if (cell) { ctx.openCell(cell.getAttribute('data-code'), cell.getAttribute('data-uid')); return true; }
+    const rowTh = target.closest('.mastery-heatmap tbody th[data-code]');
+    if (rowTh) { ctx.openRow(rowTh.getAttribute('data-code')); return true; }
+    const colTh = target.closest('.mastery-heatmap thead th.mh-stu[data-uid]');
+    if (colTh) { ctx.openCol(colTh.getAttribute('data-uid')); return true; }
+    const nrBtn = target.closest('button[data-nrcode]');            // 모바일 카드 "미도달 학생 보기" → 분포 드로어(§2-5)
+    if (nrBtn) { ctx.openRow(nrBtn.getAttribute('data-nrcode')); return true; }
+    const more = target.closest('#drwNrMore');                      // "외 n개" — 전체 펼침(§2-6). data-drill-cell 검사보다 먼저.
+    if (more) { ctx.openCol(more.getAttribute('data-uid'), { expandNr: true }); return true; }
+    const chip = target.closest('[data-drill-cell]');               // 드로어 내 학생/성취기준 칩 → 셀 드로어 전환(새 레이어 금지)
+    if (chip) { ctx.openCell(chip.getAttribute('data-code'), chip.getAttribute('data-uid')); return true; }
+    const msg = target.closest('#drwMessage');                      // 쪽지 — teacherAction 재사용(P5 조치 완결)
+    if (msg) { LRS.teacherAction('message', msg.getAttribute('data-uid')); return true; }
+    const goto3 = target.closest('#drwGotoT3');                     // 기존 "T3 스크롤" 동선 승계
+    if (goto3) {
+      LRS.closeDrawer();
+      const sec = document.getElementById('tNotReachedSection');
+      if (sec) sec.scrollIntoView({ behavior:'smooth', block:'start' });
+      return true;
+    }
+    return false;
+  };
+  document.addEventListener('click', (e) => {
+    if (!(e.target instanceof Element)) return;
+    act(e.target);
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' && e.key !== ' ' && e.key !== 'Spacebar') return;
+    const el = (e.target instanceof Element)
+      ? e.target.closest('.mastery-heatmap td.cell, .mastery-heatmap tbody th[data-code], .mastery-heatmap thead th.mh-stu[data-uid]')
+      : null;
+    if (el && act(el)) e.preventDefault();
+  });
+}
+
+/* =====================================================================
  * t-warnings → "성취 도달 현황" (중립·실행 프레임)
  *   T1 성취기준×학생 히트맵 + T3 미도달 명단표
  *   API: GET /api/lrs/mastery/class/:id
@@ -4874,7 +5126,7 @@ VIEWS['t-warnings'] = async function(root){
       <div class="ms-head">
         <div class="ms-titles">
           <h2 class="mastery-h2">성취기준 × 학생 도달 현황</h2>
-          <div class="mastery-sub">셀을 누르면 학생·성취기준 상세를 볼 수 있어요. ${masked ? '<span class="mastery-chip-gray" style="margin-left:6px;"><i class="fas fa-user-shield"></i> 타 반 — 이름 익명</span>' : ''}</div>
+          <div class="mastery-sub">셀은 시도 내역, 왼쪽 단원 이름은 반 분포, 학생 이름은 학생 현황으로 이어져요. ${masked ? '<span class="mastery-chip-gray" style="margin-left:6px;"><i class="fas fa-user-shield"></i> 타 반 — 이름 익명</span>' : ''}</div>
         </div>
         <div class="ms-controls">
           <select class="ms-select" id="tMastSort" aria-label="행 정렬">
@@ -4965,10 +5217,11 @@ VIEWS['t-warnings'] = async function(root){
     const rows = tState.expanded ? all : all.slice(0, tState.rowLimit);
     const host = document.getElementById('tHeatmapHost');
 
-    // 데스크탑 table
+    // 데스크탑 table — 학생 열 헤더는 P2-1 (C) 학생 성취 요약 드로어 진입점(role=button)
     const thead = `<thead><tr>
       <th class="corner">성취기준 \\ 학생</th>
-      ${students.map(st=>`<th title="${escapeAttr(st.name)}">${escapeHtml(st.name)}</th>`).join('')}
+      ${students.map(st=>`<th class="mh-stu" data-uid="${escapeAttr(st.id)}" title="${escapeAttr(st.name)}"
+        role="button" tabindex="0" aria-label="${escapeAttr(st.name + ' 성취 현황 보기')}">${escapeHtml(st.name)}</th>`).join('')}
       <th class="summary-h">반 평균</th><th class="summary-h">도달수</th>
     </tr></thead>`;
     const tbody = `<tbody>${rows.map(s => {
@@ -4984,7 +5237,8 @@ VIEWS['t-warnings'] = async function(root){
       const evalN = s.evaluated || 0;
       const rr = s.reachedRate == null ? '—' : (s.reachedRate + '%');
       return `<tr>
-        <th data-code="${escapeAttr(s.code)}" title="${escapeAttr(s.label||codeBare)}">${escapeHtml(s.label||codeBare)} <span class="mh-code">[${escapeHtml(codeBare)}]</span></th>
+        <th data-code="${escapeAttr(s.code)}" title="${escapeAttr(s.label||codeBare)}"
+          role="button" tabindex="0" aria-label="${escapeAttr((s.label||codeBare) + ' 학생 분포 보기')}">${escapeHtml(s.label||codeBare)} <span class="mh-code">[${escapeHtml(codeBare)}]</span></th>
         ${cells}
         <td class="summary">${rr}</td><td class="summary">${s.reached}/${evalN||'-'}</td>
       </tr>`;
@@ -5023,7 +5277,8 @@ VIEWS['t-warnings'] = async function(root){
   }
 
   function bindHeatmapEvents(host){
-    // 셀 hover 툴팁
+    // 셀 hover 툴팁 — mouseenter 는 버블링이 없어 셀 단위 바인딩 유지.
+    // 클릭·키보드 드릴은 문서 위임 1회 바인딩(_bindMasteryDrillDelegation)으로 이관(P2-1 §2-4).
     host.querySelectorAll('td.cell').forEach(td => {
       const show = (ev) => {
         const state = td.getAttribute('data-state');
@@ -5041,30 +5296,21 @@ VIEWS['t-warnings'] = async function(root){
       td.addEventListener('focus', show);
       td.addEventListener('mouseleave', ()=> MasteryTip.hide());
       td.addEventListener('blur', ()=> MasteryTip.hide());
-      const act = () => openCellDetail(td);
-      td.addEventListener('click', act);
-      td.addEventListener('keydown', (e)=>{ if (e.key==='Enter'||e.key===' '){ e.preventDefault(); act(); } });
-    });
-    // 행 제목 클릭 → T3로 스크롤
-    host.querySelectorAll('.mastery-heatmap tbody th[data-code]').forEach(th => {
-      th.addEventListener('click', ()=>{ const sec = document.getElementById('tNotReachedSection'); if (sec) sec.scrollIntoView({behavior:'smooth',block:'start'}); });
-    });
-    // 모바일 카드 "미도달 학생 보기"
-    host.querySelectorAll('button[data-nrcode]').forEach(b => {
-      b.addEventListener('click', ()=>{ const sec = document.getElementById('tNotReachedSection'); if (sec) sec.scrollIntoView({behavior:'smooth',block:'start'}); });
     });
   }
 
-  function openCellDetail(td){
-    const code = td.getAttribute('data-code');
-    const uid = td.getAttribute('data-uid');
-    const sname = td.getAttribute('data-sname');
-    const state = td.getAttribute('data-state');
-    const rate = td.getAttribute('data-rate');
+  /* ── P2-1 (A) 셀 드릴 — 상태·조치(동기) + 시도 내역(/api/lrs/mastery/detail, 누적·기간 무반영) ── */
+  function openCellDrawer(code, uid){
     const std = standards.find(s => s.code === code) || {};
+    const stu = students.find(st => String(st.id) === String(uid)) || {};
+    const { state, rate } = cellState(code, Number(uid));
+    if (state === 'none') return;   // 기록 없음 셀 — 드로어를 열지 않음(빈 내역 금지, §2-4)
     const codeBare = String(code||'').replace(/^\[|\]$/g,'');
+    // 마감1: insufficient 또는 rate null → 정답률 미표기(채점된 값에만 허용). 시도수는 fetch 후 병기.
+    const rateTxt = (state !== 'insufficient' && rate != null && rate !== '')
+      ? `정답률 ${Math.round(rate)}%` : '';
     LRS.openMasteryDrawer({
-      title: sname,
+      title: stu.name || '학생',
       bodyHtml: `
         <p style="font-size:14px;color:#4b5563;line-height:1.7;">
           <strong style="color:#1f2937;">${escapeHtml(std.label||codeBare)}</strong><br>
@@ -5072,13 +5318,150 @@ VIEWS['t-warnings'] = async function(root){
         </p>
         <div style="margin:14px 0;padding:14px;border-radius:10px;background:var(--mastery-${state==='notReached'?'notreached':state}-soft,#f3f4f6);">
           <span class="mastery-badge ${state}">${MASTERY_KO[state]||'데이터 없음'}</span>
-          ${rate!==''?`<span style="margin-left:8px;font-weight:700;color:#1f2937;">정답률 ${Math.round(rate)}%</span>`:''}
+          <span id="drwCellStat" style="margin-left:8px;font-weight:700;color:#1f2937;">${rateTxt}</span>
         </div>
-        <button type="button" class="mastery-btn mastery-btn-sm" id="drwRecommend" data-uid="${escapeAttr(uid)}" data-code="${escapeAttr(code)}">
-          <i class="fas fa-wand-magic-sparkles"></i> 이 학생에게 보충 배정
-        </button>`
+        <div class="drw-actions">
+          <button type="button" class="mastery-btn mastery-btn-sm" id="drwRecommend" data-uid="${escapeAttr(uid)}" data-code="${escapeAttr(code)}">
+            <i class="fas fa-wand-magic-sparkles"></i> 이 학생에게 보충 배정
+          </button>
+          <button type="button" class="mastery-btn mastery-btn-sm mastery-btn-ghost" id="drwMessage" data-uid="${escapeAttr(uid)}">
+            <i class="fas fa-paper-plane"></i> 쪽지 보내기
+          </button>
+        </div>
+        <div class="drw-sect-title" id="drwAttTitle">시도 내역 · 누적 기준</div>
+        <div id="drwAttList" class="drw-loading">불러오는 중…</div>`
+    });
+    const seq = ++_cellDetailSeq;
+    fetch('/api/lrs/mastery/detail?user_id=' + encodeURIComponent(uid) + '&achievement_code=' + encodeURIComponent(code), { credentials:'include' })
+      .then(r => r.ok ? r.json() : Promise.reject(new Error('HTTP '+r.status)))
+      .then(d => {
+        if (seq !== _cellDetailSeq) return;
+        const list = document.getElementById('drwAttList');
+        if (!list || !d || d.success === false) throw new Error('bad response');
+        const items = Array.isArray(d.items) ? d.items : [];
+        const total = (typeof d.count === 'number') ? d.count : items.length;
+        const titleEl = document.getElementById('drwAttTitle');
+        if (titleEl) titleEl.textContent = `시도 내역 · 누적 ${total}회`;
+        // 상태 패널 시도수 병기 — 마감1: insufficient/rate null 은 "시도 N회"만
+        const statEl = document.getElementById('drwCellStat');
+        if (statEl) statEl.textContent = rateTxt ? `${rateTxt} · 시도 ${total}회` : `시도 ${total}회`;
+        if (!items.length){ list.innerHTML = '<div class="drw-loading">아직 시도 기록이 없어요</div>'; return; }
+        // 결과 뱃지 — 교사 전용 어휘(정답/오답/기록). 학생 화면(s-*) 노출 없음(§2-4).
+        let html = items.map(it => {
+          const ok = (it.success === 1 || it.success === true);
+          const miss = (it.success === 0 || it.success === false);
+          const cls = ok ? 'ok' : miss ? 'miss' : 'rec';
+          return `<div class="drw-att-row">
+            <span class="drw-att-date">${_attFmtDate(it.date)}</span>
+            <span class="drw-att-type" title="${escapeAttr(it.typeLabel||'')}">${escapeHtml(it.typeLabel||'학습 활동')}</span>
+            <span class="drw-att-badge ${cls}">${ok ? '정답' : miss ? '오답' : '기록'}</span>
+          </div>`;
+        }).join('');
+        if (total > items.length) html += `<div class="drw-note">최근 ${items.length}회만 표시</div>`;
+        list.innerHTML = html;
+      })
+      .catch(() => {
+        if (seq !== _cellDetailSeq) return;
+        const list = document.getElementById('drwAttList');
+        if (list) list.innerHTML = '<div class="drw-loading">시도 내역을 불러오지 못했어요</div>';
+      });
+  }
+
+  /* ── P2-1 (B) 행(성취기준) 드릴 — 학생 분포 드로어 (matrix 클라이언트 파생, fetch 없음 §2-5) ── */
+  function openRowDrawer(code){
+    const std = standards.find(s => s.code === code);
+    if (!std) return;
+    const codeBare = String(code||'').replace(/^\[|\]$/g,'');
+    const groups = { notReached:[], partial:[], reached:[], insufficient:[], none:[] };
+    students.forEach(st => {
+      const { state, rate } = cellState(code, st.id);
+      (groups[state] || groups.none).push({ id: st.id, name: st.name, rate });
+    });
+    // 그룹 순서 고정: 취약 우선(미도달→부분→도달→평가부족→기록없음) — 0명 그룹 미렌더
+    const order = [
+      ['notReached','미도달'], ['partial','부분 도달'], ['reached','도달'],
+      ['insufficient','평가 부족'], ['none','기록 없음']
+    ];
+    const groupsHtml = order.map(([key, ko]) => {
+      const arr = groups[key];
+      if (!arr.length) return '';
+      const chips = arr.map(u => {
+        if (key === 'none') return `<span class="drw-chip">${escapeHtml(u.name)}</span>`;   // 회색·클릭 불가
+        // 마감1: insufficient 칩은 이름만(정답률 미표기)
+        const rateTxt = (key !== 'insufficient' && u.rate != null) ? ` ${Math.round(u.rate)}%` : '';
+        return `<button type="button" class="drw-chip ${key}" data-drill-cell data-code="${escapeAttr(code)}" data-uid="${escapeAttr(u.id)}">${escapeHtml(u.name)}${rateTxt}</button>`;
+      }).join('');
+      return `<div class="drw-group-title ${key}">${ko} ${arr.length}명</div><div class="drw-chips">${chips}</div>`;
+    }).join('');
+    LRS.openMasteryDrawer({
+      title: std.label || codeBare,
+      bodyHtml: `
+        <div class="drw-meta">[${escapeHtml(codeBare)}] · ${escapeHtml(std.subject||'')} · 반 평균 ${std.reachedRate==null?'—':std.reachedRate+'%'} · 평가 ${std.evaluated||0}/${students.length}명</div>
+        ${groupsHtml}
+        <button type="button" class="drw-link" id="drwGotoT3">보충이 필요한 성취기준 표로 이동 ›</button>`
     });
   }
+
+  /* ── P2-1 (C) 열(학생) 드릴 — 학생 성취 요약 드로어 (matrix 전 코드 파생 · INV-K14) ── */
+  function openColDrawer(uid, opts){
+    opts = opts || {};
+    const stu = students.find(st => String(st.id) === String(uid));
+    if (!stu) return;
+    const counts = { reached:0, partial:0, notReached:0, insufficient:0 };
+    const nrList = [];
+    standards.forEach(s => {
+      const c = matrix[s.code] && matrix[s.code][uid];
+      if (!c) return;
+      const st = normStatus(c.status);
+      if (counts[st] != null) counts[st]++;
+      if (st === 'notReached') nrList.push({ code: s.code, label: s.label || s.code, rate: c.rate });
+    });
+    const recorded = counts.reached + counts.partial + counts.notReached + counts.insufficient;
+    nrList.sort((a,b) => (a.rate==null?Infinity:a.rate) - (b.rate==null?Infinity:b.rate));
+    const showAll = !!opts.expandNr;
+    const shown = showAll ? nrList : nrList.slice(0, 8);
+    const nrChips = shown.map(n => {
+      const label = String(n.label);
+      const short = label.length > 14 ? label.slice(0, 14) + '…' : label;
+      const rateTxt = n.rate != null ? ` ${Math.round(n.rate)}%` : '';
+      return `<button type="button" class="drw-chip notReached" data-drill-cell data-code="${escapeAttr(n.code)}" data-uid="${escapeAttr(uid)}" title="${escapeAttr(label)}">${escapeHtml(short)}${rateTxt}</button>`;
+    }).join('');
+    const moreBtn = (!showAll && nrList.length > 8)
+      ? `<button type="button" class="drw-chip" id="drwNrMore" data-uid="${escapeAttr(uid)}">외 ${nrList.length - 8}개</button>` : '';
+    const firstNr = nrList.length ? nrList[0].code : '';
+    // masked(비담임·관리자 거시): 타 반 개입 최소화 — [메시지]만 유지(§2-6, EWS 관례)
+    const actionsHtml = `
+      <div class="dc-warning-card" data-severity="medium" style="margin-top:16px;">
+        <h3>추천 액션</h3>
+        <div class="actions" data-student-id="${escapeAttr(uid)}" data-achievement-code="${escapeAttr(firstNr)}">
+          <button type="button" data-action="message">메시지</button>
+          ${masked ? '' : `<button type="button" data-action="homework">과제부과</button>
+          <button type="button" data-action="recommend">맞춤학습 추천</button>`}
+        </div>
+      </div>`;
+    LRS.openMasteryDrawer({
+      title: stu.name,
+      bodyHtml: `
+        <div class="drw-meta">성취기준 현황 · 누적 기준</div>
+        <div class="drw-sum-panel">
+          <div class="drw-sum-counts">
+            <span class="mastery-badge reached">도달 ${counts.reached}</span>
+            <span class="mastery-badge partial">부분 ${counts.partial}</span>
+            <span class="mastery-badge notReached">미도달 ${counts.notReached}</span>
+            <span class="mastery-badge insufficient">평가부족 ${counts.insufficient}</span>
+          </div>
+          <div class="drw-sum-sub">기록 있는 기준 ${recorded} / 전체 ${standards.length}</div>
+        </div>
+        ${nrList.length ? `<div class="drw-sect-title" style="color:#b91c1c;">미도달 성취기준 ${nrList.length}개</div>
+        <div class="drw-chips">${nrChips}${moreBtn}</div>` : ''}
+        ${actionsHtml}`
+    });
+    bindWarningActions(document.getElementById('drawerBody'));   // 1회 가드 내장 — 중복 안전
+  }
+
+  // 문서 위임 컨텍스트 등록 — 델리게이션 자체는 모듈 레벨 1회 바인딩
+  _masteryDrill = { openCell: openCellDrawer, openRow: openRowDrawer, openCol: openColDrawer };
+  _bindMasteryDrillDelegation();
 
   document.getElementById('tMastSort').addEventListener('change', (e)=>{ tState.sort = e.target.value; tState.expanded=false; renderHeatmap(); });
   const subSel = document.getElementById('tMastSubject');
@@ -5106,7 +5489,7 @@ VIEWS['t-warnings'] = async function(root){
       columns:[
         { key:'label', label:'성취기준', format:(_,r)=>{
             const codeBare = String(r.code||'').replace(/^\[|\]$/g,'');
-            return `<div style="max-width:280px;"><div style="font-weight:600;color:#1f2937;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(r.label||codeBare)}</div><div style="font-size:12px;color:#9ca3af;">[${escapeHtml(codeBare)}] · ${escapeHtml(r.subject||'')}</div></div>`;
+            return `<div style="max-width:280px;"><div style="font-weight:600;color:#1f2937;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(r.label||codeBare)}</div><div style="font-size:13px;color:#9ca3af;">[${escapeHtml(codeBare)}] · ${escapeHtml(r.subject||'')}</div></div>`;
           } },
         { key:'_nr', label:'미도달 학생', format:(_,r)=>{
             const nr = r.notReachedStudents || [];

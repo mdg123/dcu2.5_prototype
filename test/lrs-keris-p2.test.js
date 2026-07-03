@@ -1,0 +1,490 @@
+// test/lrs-keris-p2.test.js
+// ─────────────────────────────────────────────────────────────────────────────
+// KERIS 벤치마킹 P2 하네스 (BE 소관 불변식 박제)
+//   기획서: 작업지시서/LRS_P2_교사히트맵_타임라인메타_스펙.md §7 (INV-K12~K15·K11′)
+//
+//   INV-K12  mastery/detail 계약 — count == items.length == lrs_achievement_stats.attempt_count
+//            (uid3 [4수01-04] 실측 8=8=8) · items 행 date·typeLabel 존재·success ∈ {1,0,null}
+//            · 학생 세션 타 학생 user_id → 403 · 기간 파라미터 무시(누적 — deepEqual)
+//   INV-K13  타임라인 메타 계약 — ① lesson progressPct == round(NORM(result_score)) ∈ [0,100]
+//            ② homework hwStatus ∈ {graded,submitted}, graded ⇔ result_score 존재
+//            ③ withClassAvg=1: classAvg 존재 ⇔ takers ≥ 5, classAvg ∈ [0,100]
+//            ④ withClassAvg 미지정 → classAvg·takers 키 부재(응답 불변 — deepEqual)
+//            ⑤ limit=8 → items ≤ 8·count 는 전체 · 키 화이트리스트(식별자 미노출)
+//   INV-K14  히트맵 데이터 정합(BE 부분) — standards 행 카운트 == matrix 파생 집계 ==
+//            distribution (렌더 셀 수·드로어 DOM 검사는 스모크 FE 소관)
+//   INV-K11′ middle 완전판(BE 부분) — 시드(scripts/seed-middle-class.js) 멱등 +
+//            middle1 로그인 자격 + peer-compare(2040).peerCount ≥ 5 +
+//            mteacher1 mastery/class 학생 8·성취기준 >0·실명(masked=false)
+//            (middle1 렌더 분기 스모크는 FE 소관 — 본 파일은 BE 데이터 계약만)
+//   INV-K15  평가부족 어휘는 FE DOM 검사(스모크 소관). BE 몫인 '반 평균 -' 마이너스 표기
+//            금지는 INV-K13③(classAvg ∈ [0,100] — 음수 불가)과 regression INV-K9 가 커버.
+//
+// DB 격리: 실 DB → 임시 복사본(_setup). 계정(실 DB 확정): teacher1=2, student1=3, student2=4,
+//   middle1=2040(시드 후). HTTP 하네스는 lrs-keris-p0/p1 테스트와 동일 패턴.
+// ─────────────────────────────────────────────────────────────────────────────
+const { test, before, after } = require('node:test');
+const assert = require('node:assert/strict');
+const http = require('node:http');
+const { setupTestDb, openTestDb } = require('./_setup');
+
+setupTestDb();
+require('../db/schema').initSchema();
+
+const express = require('express');
+const session = require('express-session');
+const seedMiddle = require('../scripts/seed-middle-class');
+
+const TEACHER = 2, STUDENT1 = 3, STUDENT2 = 4, MIDDLE1 = 2040;
+const MIN_PEERS = 5;
+
+let server, baseUrl, tdb, mteacherId, midClassId;
+
+function buildApp() {
+  const app = express();
+  app.use(express.json());
+  app.use(session({ secret: 'test-secret', resave: false, saveUninitialized: false }));
+  app.use((req, res, next) => {
+    const uid = req.headers['x-test-user'];
+    if (uid) req.session.userId = parseInt(uid, 10);
+    next();
+  });
+  app.use('/api/lrs', require('../routes/lrs'));
+  return app;
+}
+function req(path, userId) {
+  return new Promise((resolve, reject) => {
+    const u = new URL(baseUrl + '/api/lrs' + path);
+    const r = http.request(
+      { hostname: u.hostname, port: u.port, path: u.pathname + u.search, method: 'GET',
+        headers: userId ? { 'x-test-user': String(userId) } : {} },
+      (res) => {
+        let body = '';
+        res.on('data', c => body += c);
+        res.on('end', () => { let j = null; try { j = JSON.parse(body); } catch (_) {} resolve({ status: res.statusCode, json: j, raw: body }); });
+      });
+    r.on('error', reject); r.end();
+  });
+}
+// 멀티셋 비교(정렬 후 deepEqual) — 순서 무관 값 일치
+const multiset = (arr) => arr.map(x => JSON.stringify(x)).sort();
+
+before(async () => {
+  tdb = openTestDb();
+
+  // ── 시드 실행 + 멱등 검증(INV-K11′ 전제) ─────────────────────────────────
+  //   임시 DB 가 이미 시드된 복사본이든 아니든: 1차 실행으로 시드 보장 → 스냅샷 →
+  //   2차 실행 → 스냅샷 동일(중복 0)이어야 멱등.
+  const snap = () => ({
+    users: tdb.prepare('SELECT COUNT(*) c FROM users').get().c,
+    classes: tdb.prepare('SELECT COUNT(*) c FROM classes').get().c,
+    members: tdb.prepare('SELECT COUNT(*) c FROM class_members').get().c,
+  });
+  seedMiddle.run({ log: () => {} });
+  const s1 = snap();
+  seedMiddle.run({ log: () => {} });
+  const s2 = snap();
+  assert.deepEqual(s2, s1, '시드 재실행이 행을 추가함(멱등 위반)');
+
+  mteacherId = tdb.prepare("SELECT id FROM users WHERE username = 'mteacher1'").get().id;
+  midClassId = tdb.prepare(
+    "SELECT id FROM classes WHERE owner_id = ? AND name LIKE '%1학년 수학' AND status = 'active'"
+  ).get(mteacherId).id;
+
+  await new Promise((resolve) => {
+    server = http.createServer(buildApp()).listen(0, '127.0.0.1', () => {
+      baseUrl = `http://127.0.0.1:${server.address().port}`;
+      resolve();
+    });
+  });
+});
+after(async () => { if (server) await new Promise(r => server.close(r)); });
+
+// ──────────────────────────────────────────────────────────────────────────
+// INV-K12①: 표시값=내역 — uid3 상위 코드( [4수01-04] 포함 ) 전수:
+//   count == items.length == attempt_count == learning_logs 행수(동일 WHERE).
+// ──────────────────────────────────────────────────────────────────────────
+test('INV-K12①: mastery/detail count == items.length == attempt_count == 로그 행수 (uid3 상위 3코드+[4수01-04])', async () => {
+  const tops = tdb.prepare(
+    'SELECT achievement_code code, attempt_count FROM lrs_achievement_stats WHERE user_id = ? ORDER BY attempt_count DESC LIMIT 3'
+  ).all(STUDENT1);
+  assert.ok(tops.length > 0, '전제: uid3 stats 존재');
+  const codes = [...new Set([...tops.map(t => t.code), '[4수01-04]'])];
+  for (const code of codes) {
+    const r = await req(`/mastery/detail?user_id=${STUDENT1}&achievement_code=${encodeURIComponent(code)}`, TEACHER);
+    assert.equal(r.status, 200, `${code}: HTTP 200`);
+    const j = r.json;
+    assert.equal(j.success, true);
+    const logRows = tdb.prepare(
+      'SELECT COUNT(*) c FROM learning_logs WHERE user_id = ? AND achievement_code = ?'
+    ).get(STUDENT1, code).c;
+    const stat = tdb.prepare(
+      'SELECT attempt_count FROM lrs_achievement_stats WHERE user_id = ? AND achievement_code = ?'
+    ).get(STUDENT1, code);
+    assert.equal(j.count, logRows, `${code}: count(${j.count}) != 로그 행수(${logRows})`);
+    // items 는 LIMIT 50 캡 — cap 인지 비교(R-2 부류 재발 방지: count 는 항상 전체, items 는 캡 내)
+    assert.equal(j.items.length, Math.min(50, j.count), `${code}: items.length != min(50, count)`);
+    if (stat) {
+      assert.equal(j.attempts, stat.attempt_count, `${code}: attempts != attempt_count`);
+      assert.equal(j.count, stat.attempt_count, `${code}: count != attempt_count(표시값=내역 계약)`);
+    }
+    // 실측 박제: [4수01-04] 은 8=8=8 (스펙 §1-4)
+    if (code === '[4수01-04]') assert.equal(j.count, 8, '[4수01-04] 실측 8 회귀');
+  }
+});
+
+// ──────────────────────────────────────────────────────────────────────────
+// INV-K12②: items 행 계약 + status/rate 분류 일관(셀과 동일 분류기).
+// ──────────────────────────────────────────────────────────────────────────
+test('INV-K12②: items 행 date·activityType·typeLabel 존재, success ∈ {1,0,null}, scoreNorm 0~100|null, 최신순', async () => {
+  const r = await req(`/mastery/detail?user_id=${STUDENT1}&achievement_code=${encodeURIComponent('[4수01-04]')}`, TEACHER);
+  assert.equal(r.status, 200);
+  const j = r.json;
+  assert.ok(['reached', 'partial', 'not_reached', 'insufficient'].includes(j.status), `status enum: ${j.status}`);
+  assert.ok(j.rate == null || (j.rate >= 0 && j.rate <= 100), `rate 범위: ${j.rate}`);
+  assert.ok(typeof j.label === 'string' && j.label.length > 0, 'label 존재(resolveCode 보강)');
+  let prev = null;
+  for (const it of j.items) {
+    assert.ok(it.date, 'date 존재');
+    assert.ok(typeof it.activityType === 'string' && it.activityType, 'activityType 존재');
+    assert.ok(typeof it.typeLabel === 'string' && it.typeLabel.length > 0, 'typeLabel 존재');
+    assert.ok(it.success === 1 || it.success === 0 || it.success === null, `success enum: ${it.success}`);
+    assert.ok(it.scoreNorm == null || (it.scoreNorm >= 0 && it.scoreNorm <= 100), `scoreNorm 범위: ${it.scoreNorm}`);
+    if (prev) assert.ok(String(it.date) <= String(prev), 'items 최신순(DESC)');
+    prev = it.date;
+  }
+});
+
+// ──────────────────────────────────────────────────────────────────────────
+// INV-K12③: 권한 — 학생이 타 학생 user_id → 403 / 본인 → 200 / 잘못된 입력 → 400.
+// ──────────────────────────────────────────────────────────────────────────
+test('INV-K12③: 권한 403(학생→타 학생)·200(본인·교사)·400(파라미터 누락)', async () => {
+  const code = encodeURIComponent('[4수01-04]');
+  const other = await req(`/mastery/detail?user_id=${STUDENT2}&achievement_code=${code}`, STUDENT1);
+  assert.equal(other.status, 403, '학생 → 타 학생 403');
+  const self = await req(`/mastery/detail?user_id=${STUDENT1}&achievement_code=${code}`, STUDENT1);
+  assert.equal(self.status, 200, '학생 → 본인 200');
+  const noUid = await req(`/mastery/detail?achievement_code=${code}`, TEACHER);
+  assert.equal(noUid.status, 400, 'user_id 누락 400');
+  const noCode = await req(`/mastery/detail?user_id=${STUDENT1}`, TEACHER);
+  assert.equal(noCode.status, 400, 'achievement_code 누락 400');
+});
+
+// ──────────────────────────────────────────────────────────────────────────
+// INV-K12④: 기간 파라미터 무시(누적 정책) — period/from/to 를 줘도 응답 동일.
+// ──────────────────────────────────────────────────────────────────────────
+test('INV-K12④: mastery/detail 은 누적 — period=7d 지정 응답 == 무지정 응답(deepEqual)', async () => {
+  const code = encodeURIComponent('[4수01-04]');
+  const plain = await req(`/mastery/detail?user_id=${STUDENT1}&achievement_code=${code}`, TEACHER);
+  const scoped = await req(`/mastery/detail?user_id=${STUDENT1}&achievement_code=${code}&period=7d`, TEACHER);
+  assert.equal(plain.status, 200); assert.equal(scoped.status, 200);
+  assert.deepEqual(scoped.json, plain.json, '기간 파라미터가 응답을 바꿈(누적 정책 위반)');
+});
+
+// ──────────────────────────────────────────────────────────────────────────
+// INV-K13①②⑤: perform/detail 상시 메타(progressPct·hwStatus) + limit 클램프.
+// ──────────────────────────────────────────────────────────────────────────
+test('INV-K13①: lesson_progress progressPct == round(NORM(result_score)) ∈ [0,100] — SQL 멀티셋 대조(cap 인지)', async () => {
+  // [감리 R-2 fix] 과거엔 bucket=all 의 items(200 cap)를 "uncapped SQL 행수"와 비교 —
+  //   content_view 대량 유입(프리뷰 사용 로그 1,400+건)으로 lesson 행이 top-200 밖으로 밀리면
+  //   API 0건이 정상인데 어서션이 FAIL 하는 데이터 의존 취약. → 세그먼트 드릴(bucket=content&
+  //   segment=lesson — 같은 라우트·같은 item 매핑 코드)로 lesson 행만 요청하고, SQL 미러에도
+  //   라우트와 동일한 "최신순 LIMIT 200" 캡을 걸어 어느 데이터 상태에서도 결정적으로 대조한다.
+  const r = await req('/perform/detail?bucket=content&segment=lesson&period=30d', STUDENT1);
+  assert.equal(r.status, 200);
+  const j = r.json;
+  const [from, to] = String(j.period).split(' ~ ');
+  const lessonItems = j.items;
+  for (const it of lessonItems) {
+    assert.equal(it.segment, 'lesson', 'segment=lesson 필터 정합');
+    if (it.progressPct != null) {
+      assert.ok(Number.isInteger(it.progressPct) && it.progressPct >= 0 && it.progressPct <= 100,
+        `progressPct 정수 0~100: ${it.progressPct}`);
+    }
+  }
+  // SQL 기대값(동일 WHERE·동일 NORM·동일 캡: 최신순 LIMIT 200) — 멀티셋 일치
+  const sqlRows = tdb.prepare(`
+    SELECT (CASE WHEN result_score <= 1 THEN result_score*100 ELSE result_score END) AS norm, result_score
+    FROM learning_logs
+    WHERE user_id = ? AND activity_type = 'lesson_progress'
+      AND DATE(created_at) >= ? AND DATE(created_at) <= ?
+    ORDER BY created_at DESC
+    LIMIT 200
+  `).all(STUDENT1, from, to);
+  assert.ok(sqlRows.length > 0, '전제: 기간 내 lesson_progress 행 존재(uid3)');
+  assert.equal(lessonItems.length, sqlRows.length, 'lesson 항목 수 == SQL 행수(동일 캡 기준)');
+  assert.equal(lessonItems.length, Math.min(200, j.count), 'items.length == min(200, count)');
+  const expected = sqlRows.filter(x => x.result_score != null)
+    .map(x => Math.max(0, Math.min(100, Math.round(Number(x.norm)))));
+  const got = lessonItems.filter(it => it.progressPct != null).map(it => it.progressPct);
+  assert.deepEqual(multiset(got), multiset(expected), 'progressPct 멀티셋 == round(NORM) 멀티셋');
+  const nullExpected = sqlRows.filter(x => x.result_score == null).length;
+  const nullGot = lessonItems.filter(it => it.progressPct == null).length;
+  assert.equal(nullGot, nullExpected, 'result_score null → progressPct 생략 수 일치');
+  // bucket=all 경로도 구조 검증(캡 안에 lesson 행이 있든 없든 항상 참인 계약만 — 데이터 무의존)
+  const all = await req('/perform/detail?bucket=all&period=30d', STUDENT1);
+  for (const it of all.json.items.filter(x => x.segment === 'lesson')) {
+    assert.ok(it.progressPct == null || (Number.isInteger(it.progressPct) && it.progressPct >= 0 && it.progressPct <= 100),
+      `bucket=all lesson 행 progressPct 계약: ${it.progressPct}`);
+  }
+});
+
+test('INV-K13②: homework hwStatus ∈ {graded,submitted}, graded ⇔ result_score 존재', async () => {
+  const r = await req('/perform/detail?bucket=homework&period=90d', STUDENT1);
+  assert.equal(r.status, 200);
+  const j = r.json;
+  const [from, to] = String(j.period).split(' ~ ');
+  for (const it of j.items) {
+    assert.ok(it.hwStatus === 'graded' || it.hwStatus === 'submitted', `hwStatus enum: ${it.hwStatus}`);
+  }
+  // SQL 미러에도 라우트와 동일 캡(최신순 LIMIT 200) — R-2 부류(uncapped 비교) 재발 방지.
+  const gradedSql = tdb.prepare(`
+    SELECT COUNT(*) c FROM (
+      SELECT result_score FROM learning_logs
+      WHERE user_id = ? AND activity_type = 'homework_submit'
+        AND DATE(created_at) >= ? AND DATE(created_at) <= ?
+      ORDER BY created_at DESC
+      LIMIT 200
+    ) WHERE result_score IS NOT NULL
+  `).get(STUDENT1, from, to).c;
+  const gradedGot = j.items.filter(it => it.hwStatus === 'graded').length;
+  assert.equal(gradedGot, gradedSql, 'graded 수 == result_score 채움 행수(⇔ 계약)');
+});
+
+test('INV-K13⑤: limit=8 → items ≤ 8 · count 는 전체 불변 · 클램프(0→1, 9999→200)', async () => {
+  const base = await req('/perform/detail?bucket=all&period=30d', STUDENT1);
+  const lim8 = await req('/perform/detail?bucket=all&period=30d&limit=8', STUDENT1);
+  assert.equal(lim8.status, 200);
+  assert.ok(lim8.json.items.length <= 8, `limit=8: items ${lim8.json.items.length} ≤ 8`);
+  assert.equal(lim8.json.items.length, Math.min(8, base.json.count), 'limit=8: items == min(8, 전체)');
+  assert.equal(lim8.json.count, base.json.count, 'count 는 limit 무관 전체 건수');
+  const lim0 = await req('/perform/detail?bucket=all&period=30d&limit=0', STUDENT1);
+  assert.ok(lim0.json.items.length <= 1, 'limit=0 → 1 클램프');
+  const limBig = await req('/perform/detail?bucket=all&period=30d&limit=9999', STUDENT1);
+  assert.ok(limBig.json.items.length <= 200, 'limit=9999 → 200 클램프');
+  assert.deepEqual(limBig.json, base.json, 'limit=9999(=CAP 클램프) == 미지정 응답');
+});
+
+// ──────────────────────────────────────────────────────────────────────────
+// INV-K13③④: withClassAvg 옵트인 — 표본 가드·SQL 대조·미지정 불변·식별자 미노출.
+// ──────────────────────────────────────────────────────────────────────────
+test('INV-K13③: withClassAvg=1 — classAvg 존재 ⇔ takers ≥ 5, classAvg ∈ [0,100], SQL 멀티셋 대조 (uid3: 7명 6건 통과·1명 1건 차단)', async () => {
+  const r = await req('/perform/detail?bucket=exam&period=30d&withClassAvg=1', STUDENT1);
+  assert.equal(r.status, 200);
+  const j = r.json;
+  const [from, to] = String(j.period).split(' ~ ');
+  for (const it of j.items) {
+    const hasAvg = it.classAvg !== undefined, hasTakers = it.takers !== undefined;
+    assert.equal(hasAvg, hasTakers, 'classAvg·takers 동반 존재/부재');
+    if (hasAvg) {
+      assert.ok(it.takers >= MIN_PEERS, `takers ${it.takers} ≥ ${MIN_PEERS}(표본 가드)`);
+      assert.ok(it.classAvg >= 0 && it.classAvg <= 100, `classAvg 0~100: ${it.classAvg}`);
+    }
+  }
+  // SQL 기대값: 항목별(로그별) 같은 target_id 응시자 전원 AVG(NORM)·COUNT(DISTINCT user) — 기간 무관 전체.
+  //   미러에도 라우트와 동일 캡(최신순 LIMIT 200) — R-2 부류(uncapped 비교) 재발 방지.
+  const expRows = tdb.prepare(`
+    SELECT me.created_at,
+           (SELECT ROUND(AVG(CASE WHEN x.result_score <= 1 THEN x.result_score*100 ELSE x.result_score END), 1)
+              FROM learning_logs x WHERE x.activity_type='exam_complete' AND x.target_id = me.target_id) AS avg_norm,
+           (SELECT COUNT(DISTINCT x.user_id)
+              FROM learning_logs x WHERE x.activity_type='exam_complete' AND x.target_id = me.target_id) AS takers
+    FROM learning_logs me
+    WHERE me.user_id = ? AND me.activity_type = 'exam_complete'
+      AND DATE(me.created_at) >= ? AND DATE(me.created_at) <= ?
+    ORDER BY me.created_at DESC
+    LIMIT 200
+  `).all(STUDENT1, from, to);
+  const expected = expRows.map(x => (x.takers >= MIN_PEERS && x.avg_norm != null)
+    ? { classAvg: x.avg_norm, takers: x.takers } : { classAvg: undefined, takers: undefined });
+  const got = j.items.map(it => ({ classAvg: it.classAvg, takers: it.takers }));
+  assert.equal(got.length, expected.length, 'exam 항목 수 == SQL 행수');
+  assert.deepEqual(multiset(got), multiset(expected), 'classAvg·takers 멀티셋 == SQL 기대값');
+  // 실측 회귀(스펙 §1-4): 응시자 7명 평가는 통과, 1명 평가는 차단 — 둘 다 존재해야 가드가 실검증됨
+  assert.ok(got.some(x => x.takers !== undefined), '가드 통과 케이스 존재(응시자 ≥5)');
+  assert.ok(got.some(x => x.takers === undefined), '가드 차단 케이스 존재(응시자 <5)');
+});
+
+test('INV-K13④: withClassAvg 미지정 → classAvg·takers 키 부재 + (옵트인 응답 − 두 키) == 미지정 응답 deepEqual', async () => {
+  const plain = await req('/perform/detail?bucket=exam&period=30d', STUDENT1);
+  const opted = await req('/perform/detail?bucket=exam&period=30d&withClassAvg=1', STUDENT1);
+  assert.equal(plain.status, 200); assert.equal(opted.status, 200);
+  for (const it of plain.json.items) {
+    assert.ok(!('classAvg' in it) && !('takers' in it), '미지정 응답에 classAvg/takers 키 존재(회귀)');
+  }
+  const stripped = JSON.parse(JSON.stringify(opted.json, (k, v) => (k === 'classAvg' || k === 'takers') ? undefined : v));
+  assert.deepEqual(stripped, plain.json, '옵트인은 두 키 추가 외 응답 불변이어야');
+});
+
+test('INV-K13 키 화이트리스트: items 에 개별 학생 식별자(이름·id) 미노출', async () => {
+  const ALLOWED = new Set(['title', 'date', 'score', 'sub', 'typeLabel', 'badge', 'segment',
+    'progressPct', 'hwStatus', 'classAvg', 'takers']);
+  const r = await req('/perform/detail?bucket=all&period=30d&withClassAvg=1', STUDENT1);
+  for (const it of r.json.items) {
+    for (const k of Object.keys(it)) {
+      assert.ok(ALLOWED.has(k), `허용 밖 키 노출: ${k}(식별자/원시 필드 유출 감시)`);
+    }
+  }
+});
+
+// ──────────────────────────────────────────────────────────────────────────
+// [감리 R-1] learnOnly=1 — 학습활동 정본 7종 옵트인 필터 (routes/lrs.js L281
+//   LRS_LEARN_ACTIVITY_TYPES 와 동일 기준: content_view 등 조회성 제외).
+//   미지정/비-1 값 → 응답 완전 불변. count·segments·subtotals 도 필터 후 기준(표시값=내역).
+// ──────────────────────────────────────────────────────────────────────────
+const LEARN7 = ['lesson_progress', 'exam_complete', 'homework_submit', 'content_solve',
+  'self_learn', 'daily_complete', 'node_complete', 'wrong_note_retry']; // 테스트 소유 미러(이중 장부)
+
+test('R-1①: learnOnly=1 bucket=all — content_view 0건 · count == 7종∩버킷 SQL · subtotals 합 == count', async () => {
+  const r = await req('/perform/detail?bucket=all&period=30d&learnOnly=1', STUDENT1);
+  assert.equal(r.status, 200);
+  const j = r.json;
+  const [from, to] = String(j.period).split(' ~ ');
+  // ① 조회성(content_view) 항목 0건 — segment 'view'·라벨 '콘텐츠 학습' 부재
+  assert.equal(j.items.filter(it => it.segment === 'view').length, 0, 'learnOnly 응답에 view(조회) 항목 잔존');
+  // ② count == 7종∩all버킷 유형 SQL(테스트 독립 미러)
+  const allowed = LEARN7.filter(t => ['exam_complete', 'homework_submit', 'self_learn', 'daily_complete',
+    'content_view', 'lesson_progress', 'content_solve'].includes(t));
+  const ph = allowed.map(() => '?').join(',');
+  const expected = tdb.prepare(`
+    SELECT COUNT(*) c FROM learning_logs
+    WHERE user_id = ? AND activity_type IN (${ph})
+      AND DATE(created_at) >= ? AND DATE(created_at) <= ?
+  `).get(STUDENT1, ...allowed, from, to).c;
+  assert.equal(j.count, expected, `learnOnly count(${j.count}) != 7종 SQL(${expected}) — 표시값=내역`);
+  assert.equal(j.items.length, Math.min(200, j.count), 'items.length == min(200, count)');
+  // ③ subtotals 합 == count (필터 후 기준 일관)
+  const subSum = j.subtotals.reduce((s, x) => s + x.count, 0);
+  assert.equal(subSum, j.count, `learnOnly subtotals 합(${subSum}) != count(${j.count})`);
+});
+
+test('R-1②: learnOnly 미지정/비-1 값 → 응답 완전 불변(deepEqual — 기존 드릴 모달 계약 보호)', async () => {
+  const plain = await req('/perform/detail?bucket=all&period=30d', STUDENT1);
+  const zero = await req('/perform/detail?bucket=all&period=30d&learnOnly=0', STUDENT1);
+  const junk = await req('/perform/detail?bucket=all&period=30d&learnOnly=yes', STUDENT1);
+  assert.equal(plain.status, 200);
+  assert.deepEqual(zero.json, plain.json, 'learnOnly=0 이 응답을 바꿈(비-1 값은 불변이어야)');
+  assert.deepEqual(junk.json, plain.json, 'learnOnly=yes 가 응답을 바꿈(비-1 값은 불변이어야)');
+  // 미지정 응답엔 조회성(view) 항목이 정상 포함(기존 bucket=all 계약 그대로) — 데이터 존재 시
+  const viewSql = tdb.prepare(`
+    SELECT COUNT(*) c FROM learning_logs
+    WHERE user_id = ? AND activity_type = 'content_view'
+      AND DATE(created_at) >= ? AND DATE(created_at) <= ?
+  `).get(STUDENT1, ...String(plain.json.period).split(' ~ ')).c;
+  if (viewSql > 0) {
+    assert.ok(plain.json.count > 0 && plain.json.count >= viewSql, '미지정 count 에 조회성 포함(기존 계약)');
+  }
+});
+
+test('R-1③: learnOnly=1 bucket=content — segments == lesson·solve(view 제외)·합==count / segment=view → 빈 응답', async () => {
+  const r = await req('/perform/detail?bucket=content&period=30d&learnOnly=1', STUDENT1);
+  assert.equal(r.status, 200);
+  const j = r.json;
+  assert.deepEqual(j.segments.map(s => s.key).sort(), ['lesson', 'solve'], 'learnOnly segments 는 lesson·solve 만');
+  const segSum = j.segments.reduce((s, x) => s + x.count, 0);
+  assert.equal(segSum, j.count, `learnOnly content 세그먼트 합(${segSum}) != count(${j.count})`);
+  // 7종 밖 세그먼트 명시 요청 → 빈 응답(공집합 가드 — 500/SQL 오류 없이)
+  const view = await req('/perform/detail?bucket=content&period=30d&segment=view&learnOnly=1', STUDENT1);
+  assert.equal(view.status, 200, 'segment=view&learnOnly=1 도 200(공집합 가드)');
+  assert.equal(view.json.count, 0, '공집합 count 0');
+  assert.deepEqual(view.json.items, [], '공집합 items []');
+});
+
+test('R-1④: FE 카드 호출 형태(learnOnly=1&limit=8&withClassAvg=1) — 조회성 0·items ≤ 8·count 전체·classAvg 가드 유지', async () => {
+  const r = await req('/perform/detail?bucket=all&period=30d&learnOnly=1&limit=8&withClassAvg=1', STUDENT1);
+  assert.equal(r.status, 200);
+  const j = r.json;
+  assert.ok(j.items.length <= 8, `items ${j.items.length} ≤ 8`);
+  assert.equal(j.items.filter(it => it.segment === 'view').length, 0, '카드 항목에 조회성 없음');
+  const learnOnlyFull = await req('/perform/detail?bucket=all&period=30d&learnOnly=1', STUDENT1);
+  assert.equal(j.count, learnOnlyFull.json.count, 'count 는 limit 무관 learnOnly 전체 건수');
+  for (const it of j.items) {
+    if (it.classAvg !== undefined) {
+      assert.ok(it.takers >= MIN_PEERS && it.classAvg >= 0 && it.classAvg <= 100, '반평균 가드·범위 유지');
+    }
+  }
+});
+
+// ──────────────────────────────────────────────────────────────────────────
+// INV-K14(BE): 히트맵 데이터 삼중 정합 — standards 행 == matrix 파생 == distribution.
+//   (teacher1 classId=2 + mteacher1 middle 시드 반 — 렌더 셀 수/드로어 검사는 스모크 소관)
+// ──────────────────────────────────────────────────────────────────────────
+test('INV-K14(BE): mastery/class — standards 카운트 == matrix 집계 == distribution (class 2·middle 반)', async () => {
+  const cases = [ { classId: 2, as: TEACHER }, { classId: midClassId, as: mteacherId } ];
+  for (const c of cases) {
+    const r = await req(`/mastery/class/${c.classId}`, c.as);
+    assert.equal(r.status, 200, `class ${c.classId}: HTTP 200`);
+    const j = r.json;
+    const dist = { reached: 0, partial: 0, not_reached: 0, insufficient: 0, total: 0 };
+    for (const row of j.standards) {
+      const cell = j.matrix[row.code] || {};
+      const tally = { reached: 0, partial: 0, not_reached: 0, insufficient: 0 };
+      for (const uid of Object.keys(cell)) tally[cell[uid].status]++;
+      assert.equal(row.reached, tally.reached, `${row.code}: reached 행 != matrix`);
+      assert.equal(row.partial, tally.partial, `${row.code}: partial 행 != matrix`);
+      assert.equal(row.notReached, tally.not_reached, `${row.code}: notReached 행 != matrix`);
+      assert.equal(row.insufficient, tally.insufficient, `${row.code}: insufficient 행 != matrix`);
+      assert.equal(row.studentCount, Object.keys(cell).length, `${row.code}: studentCount != matrix 엔트리 수`);
+      assert.equal(row.evaluated, tally.reached + tally.partial + tally.not_reached, `${row.code}: evaluated 정의`);
+      // 행 드로어(§2-5) 근거: notReachedStudents id == matrix not_reached 엔트리
+      const nrIds = (row.notReachedStudents || []).map(u => u.id).sort();
+      const nrMx = Object.keys(cell).filter(uid => cell[uid].status === 'not_reached').map(Number).sort();
+      assert.deepEqual(nrIds, nrMx, `${row.code}: notReachedStudents != matrix not_reached`);
+      dist.reached += tally.reached; dist.partial += tally.partial;
+      dist.not_reached += tally.not_reached; dist.insufficient += tally.insufficient;
+      dist.total += Object.keys(cell).length;
+    }
+    assert.deepEqual(j.distribution, dist, `class ${c.classId}: distribution == Σ standards/matrix`);
+    // 열 드로어(§2-6) 근거: 학생별 상태 카운트 합 == 그 학생 matrix 엔트리 수(총합 == distribution.total)
+    let colTotal = 0;
+    for (const s of j.students) {
+      let cnt = 0;
+      for (const code of Object.keys(j.matrix)) if (j.matrix[code][s.id]) cnt++;
+      colTotal += cnt;
+    }
+    assert.equal(colTotal, dist.total, `class ${c.classId}: 열 파생 총합 == distribution.total`);
+  }
+});
+
+// ──────────────────────────────────────────────────────────────────────────
+// INV-K11′(BE): middle 시드 완전판 — 계정 자격·peer 표본·교사 히트맵 표본·델타 자산.
+// ──────────────────────────────────────────────────────────────────────────
+test("INV-K11′(BE): middle1 자격(비번 1234·role student·middle) + mteacher1 + 반 학생 8명", () => {
+  const bcrypt = require('bcryptjs');
+  const stu = tdb.prepare('SELECT * FROM users WHERE id = ?').get(MIDDLE1);
+  assert.equal(stu.username, 'middle1', 'id 2040 → username middle1');
+  assert.equal(stu.role, 'student'); assert.equal(stu.school_level, 'middle');
+  assert.ok(bcrypt.compareSync('1234', stu.password), 'middle1 비밀번호 1234 로그인 가능');
+  const t = tdb.prepare("SELECT * FROM users WHERE username = 'mteacher1'").get();
+  assert.equal(t.role, 'teacher'); assert.equal(t.school_level, 'middle');
+  assert.equal(t.school_name, stu.school_name, 'mteacher1 학교 == 2040 학교');
+  const members = tdb.prepare(`
+    SELECT COUNT(*) c FROM class_members cm JOIN users u ON u.id = cm.user_id
+    WHERE cm.class_id = ? AND cm.status = 'active' AND u.role = 'student'
+  `).get(midClassId).c;
+  assert.equal(members, 8, '반 학생 8명(≥ MIN_PEERS 5 + 여유)');
+});
+
+test("INV-K11′(BE): peer-compare(2040).peerCount ≥ 5 + mteacher1 mastery/class 학생 8·성취기준 >0·실명", async () => {
+  const pc = await req(`/peer-compare/${MIDDLE1}`, MIDDLE1);
+  assert.equal(pc.status, 200);
+  assert.ok((pc.json.peerCount || 0) >= MIN_PEERS, `peerCount ${pc.json.peerCount} ≥ ${MIN_PEERS}`);
+  const mc = await req(`/mastery/class/${midClassId}`, mteacherId);
+  assert.equal(mc.status, 200);
+  assert.equal(mc.json.students.length, 8, 'mastery/class 학생 8명');
+  assert.ok(mc.json.standards.length > 0, '성취기준 > 0(히트맵 데이터 존재)');
+  assert.equal(mc.json.masked, false, '담임(mteacher1)은 실명(masked=false)');
+  // 권한 회귀: 비담당 교사(teacher1)가 middle 반 매트릭스 → 403 (반 경계)
+  const forbidden = await req(`/mastery/class/${midClassId}`, TEACHER);
+  assert.equal(forbidden.status, 403, '비담당 교사 403(반 경계 가드)');
+});
+
+test("INV-K11′(BE): P2-2 델타 자산 — middle1 withClassAvg=1 평가 항목에 classAvg 존재(응시자 ≥5 평가 보유)", async () => {
+  const r = await req('/perform/detail?bucket=exam&period=90d&withClassAvg=1', MIDDLE1);
+  assert.equal(r.status, 200);
+  const withAvg = r.json.items.filter(it => it.classAvg !== undefined);
+  assert.ok(withAvg.length > 0, `middle1 평가 중 classAvg 부착 ${withAvg.length}건 > 0(델타 칩 실검증 가능)`);
+  for (const it of withAvg) {
+    assert.ok(it.takers >= MIN_PEERS && it.classAvg >= 0 && it.classAvg <= 100, '가드·범위 계약');
+  }
+});

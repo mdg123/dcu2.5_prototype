@@ -669,7 +669,8 @@ test.describe('스모크: LRS P1 3구간 IA·학령 분기(INV-K10·K11)', () =>
       const page = await context.newPage();
       page.setViewportSize({ width: 1440, height: 900 });
       const withClassReqs = [];
-      page.on('request', (r) => { if (r.url().includes('withClass=')) withClassReqs.push(r.url()); });
+      // withClass=(P1-3 오버레이) + withClassAvg=(P2-2 타임라인 델타) — 초등은 두 파라미터 모두 미발송이어야 함
+      page.on('request', (r) => { if (/withClass(Avg)?=/.test(r.url())) withClassReqs.push(r.url()); });
       await page.goto('/lrs/index.html?menu=analytics', { waitUntil: 'domcontentloaded' });
       await page.waitForFunction(() => {
         const vr = document.getElementById('viewRoot');
@@ -692,5 +693,241 @@ test.describe('스모크: LRS P1 3구간 IA·학령 분기(INV-K10·K11)', () =>
       expect.soft(withClassReqs.length, `INV-K11: 초등이 withClass 요청을 보냄(네트워크 가드 위반): ${JSON.stringify(withClassReqs)}`).toBe(0);
       await page.close();
     } finally { await context.close(); }
+  });
+});
+
+// ── 8) LRS P2: 최근 학습 활동 카드(INV-K13 FE측) + 히트맵 드릴 3종(INV-K14·K15) + middle 완전판(INV-K11′) ──
+//    스펙: 작업지시서/LRS_P2_교사히트맵_타임라인메타_스펙.md §2-8·§3-5·§7
+test.describe('스모크: LRS P2 히트맵 드릴·최근 학습 활동(INV-K13~K15·K11′)', () => {
+
+  /* middle1 시드 계정 컨텍스트 — 시드 미착륙(로그인 실패) 시 null 반환 → 테스트는 skip 처리 */
+  async function middle1Context(browser) {
+    const context = await browser.newContext({ locale: 'ko-KR', baseURL: BASE_URL });
+    try {
+      const res = await context.request.post('/api/auth/login', { data: { username: 'middle1', password: '1234' } });
+      if (!res.ok()) { await context.close(); return null; }
+      return context;
+    } catch (_) { await context.close(); return null; }
+  }
+
+  test('P2-2: 초등(student1) s-perform 최근 학습 활동 카드 — ≤8행·게이지·withClassAvg 0·반평균 문구 0·12px 미만 0', async ({ browser }) => {
+    const context = await browser.newContext({ storageState: stateFor('student'), locale: 'ko-KR', baseURL: BASE_URL });
+    try {
+      const page = await context.newPage();
+      page.setViewportSize({ width: 1440, height: 900 });
+      const withClassReqs = [];
+      page.on('request', (r) => { if (/withClass(Avg)?=/.test(r.url())) withClassReqs.push(r.url()); });
+      await page.goto('/lrs/index.html#s-perform', { waitUntil: 'domcontentloaded' });
+      await page.waitForFunction(() => {
+        const h = document.getElementById('sRecentActs');
+        return !!(h && h.querySelector('.lrs-dm-row'));
+      }, { timeout: 20000 }).catch(() => {});
+      const card = await page.evaluate(() => {
+        const host = document.getElementById('sRecentActs');
+        if (!host || !host.innerHTML) return { exists: false };
+        const rows = [...host.querySelectorAll('.lrs-dm-row')];
+        const kpi = document.querySelector('.dc-kpi-grid');
+        return {
+          exists: true,
+          rowCount: rows.length,
+          h2: (host.querySelector('h2') || {}).textContent || '',
+          afterKpi: !!(kpi && (kpi.compareDocumentPosition(host) & Node.DOCUMENT_POSITION_FOLLOWING)),
+          gauges: host.querySelectorAll('.ra-gauge').length,
+          lessonRows: rows.filter(r => /수업 진행/.test(r.innerText)).length,
+          deltaChips: host.querySelectorAll('.ra-delta').length,
+          // 금칙어 검사는 UI 생성 문구(메타·꼬리·부제·헤더)로 한정 — 활동 제목(.lrs-dm-row-primary)은
+          // 콘텐츠 고유명이라 제외("초등수학"의 '등수' 부분문자열 오탐 실측 — 스펙 §3-3 개정 기록 R-1e)
+          banText: /반 평균|등수|순위|꼴찌|위험|뒤처|낮은 편|부족한 편|못했|실패/.test(
+            [...host.querySelectorAll('.lrs-dm-row-meta, .lrs-dm-row-tail, .subtitle, h2')]
+              .map(el => el.textContent).join(' ')),
+          tinyFonts: [...host.querySelectorAll('*')].filter(el => {
+            const fs = parseFloat(getComputedStyle(el).fontSize);
+            return el.textContent.trim() && fs > 0 && fs < 13;
+          }).length,
+          seeAll: !!document.getElementById('raSeeAll'),
+          // [감리 R-1] learnOnly: 조회성 content_view(메타 "콘텐츠 학습") 행 0건 — 학습활동 정본 7종만
+          //   ('콘텐츠 문항풀이'는 별개 문자열이라 오검출 없음)
+          contentViewRows: rows.filter(r => {
+            const meta = (r.querySelector('.lrs-dm-row-meta') || {}).textContent || '';
+            return meta.includes('콘텐츠 학습');
+          }).length,
+          // [감리 R-1] 연속 중복 병합: 인접 행의 (제목+메타에서 ×N회 제외) 동일 조합 0건
+          adjacentDups: rows.reduce((acc, r, i) => {
+            if (i === 0) return acc;
+            const sig = (el) => ((el.querySelector('.lrs-dm-row-primary') || {}).textContent || '') + '|' +
+              (((el.querySelector('.lrs-dm-row-meta') || {}).textContent || '').replace(/ · ×\d+회/, ''));
+            return acc + (sig(r) === sig(rows[i - 1]) ? 1 : 0);
+          }, 0),
+          dupBadgeSample: ([...host.querySelectorAll('.lrs-dm-row-meta')].map(m => m.textContent).find(t => /×\d+회/.test(t)) || null),
+        };
+      });
+      expect.soft(card.exists, 'P2-2: #sRecentActs 카드 미렌더').toBeTruthy();
+      if (card.exists) {
+        expect.soft(card.rowCount, `P2-2: 행 수 1~8 위반(${card.rowCount})`).toBeLessThanOrEqual(8);
+        expect.soft(card.rowCount, 'P2-2: 행 0건인데 카드 렌더됨').toBeGreaterThan(0);
+        expect.soft(card.h2.trim(), 'P2-2: 제목 격식 명사형 "최근 학습 활동" 아님').toBe('최근 학습 활동');
+        expect.soft(card.afterKpi, 'P2-2: 카드가 KPI 그리드 아래에 있지 않음').toBeTruthy();
+        // 수업 행이 있으면 진도 게이지도 있어야(INV-K13①의 FE측 — progressPct 렌더)
+        if (card.lessonRows > 0) {
+          expect.soft(card.gauges, `P2-2: 수업 행 ${card.lessonRows}개인데 진도 게이지 ${card.gauges}개`).toBeGreaterThan(0);
+        }
+        expect.soft(card.deltaChips, 'P2-2: 초등 카드에 반평균 델타 칩 노출(윤리 위반)').toBe(0);
+        expect.soft(card.banText, 'P2-2: 초등 카드에 반평균·금칙어 문구 노출').toBeFalsy();
+        expect.soft(card.tinyFonts, `P2-2: 카드 내부 12px 이하 글꼴 ${card.tinyFonts}건`).toBe(0);
+        expect.soft(card.seeAll, 'P2-2: "활동 전체 보기" 링크 부재').toBeTruthy();
+        // [감리 R-1] 학습활동 정본 7종(learnOnly) — 조회성 content_view 행 0건
+        expect.soft(card.contentViewRows, `P2-2(R-1): 카드에 조회성 "콘텐츠 학습" 행 ${card.contentViewRows}건 — learnOnly 미반영`).toBe(0);
+        // [감리 R-1] 연속 중복 병합 — 인접 동일 활동 행 0건(×N회 병합 후)
+        expect.soft(card.adjacentDups, `P2-2(R-1): 카드에 인접 중복 행 ${card.adjacentDups}건 — 연속 병합 미동작`).toBe(0);
+        // "활동 전체 보기" → all 드릴 모달 열림(표시값=드릴 동선)
+        await page.click('#raSeeAll');
+        const modalOpen = await page.waitForFunction(() =>
+          document.getElementById('lrsPerfDetailModal')?.classList.contains('open'),
+          { timeout: 8000 }).then(() => true).catch(() => false);
+        expect.soft(modalOpen, 'P2-2: 활동 전체 보기 클릭 시 all 모달 미오픈').toBeTruthy();
+      }
+      expect.soft(withClassReqs.length, `P2-2: 초등이 withClassAvg 요청 발송(네트워크 가드 위반): ${JSON.stringify(withClassReqs)}`).toBe(0);
+      await page.close();
+    } finally { await context.close(); }
+  });
+
+  test('INV-K14·K15: 교사(teacher1) 히트맵 드릴 3종 — 셀 시도내역=count·행 그룹합=학생수·열 카운트=열 셀수·평가부족 어휘', async ({ browser }) => {
+    const context = await browser.newContext({ storageState: stateFor('teacher'), locale: 'ko-KR', baseURL: BASE_URL });
+    try {
+      const page = await context.newPage();
+      page.setViewportSize({ width: 1440, height: 900 });
+      await page.goto('/lrs/index.html?menu=analytics#t-warnings', { waitUntil: 'domcontentloaded' });
+      await page.waitForSelector('.mastery-heatmap td.cell', { timeout: 20000 }).catch(() => {});
+      const ready = await page.evaluate(() => !!document.querySelector('.mastery-heatmap td.cell'));
+      if (!ready) {
+        test.info().annotations.push({ type: 'skip-screen', description: 'INV-K14: 히트맵 미렌더(성취 데이터 부족) — 드릴 검사 스킵' });
+        await page.close(); return;
+      }
+
+      // ── (A) 셀 드릴: 시도 내역 행수 == "누적 N회" == /mastery/detail count ──
+      const cellRes = await page.evaluate(async () => {
+        const cell = document.querySelector('.mastery-heatmap td.cell[data-state="notReached"], .mastery-heatmap td.cell[data-state="reached"], .mastery-heatmap td.cell[data-state="partial"]');
+        if (!cell) return { skip: true };
+        const code = cell.getAttribute('data-code'), uid = cell.getAttribute('data-uid');
+        cell.click();
+        await new Promise(r => setTimeout(r, 1500));   // fetch 대기
+        const rows = document.querySelectorAll('#drwAttList .drw-att-row').length;
+        const title = (document.getElementById('drwAttTitle') || {}).textContent || '';
+        const n = parseInt((title.match(/누적 (\d+)회/) || [])[1], 10);
+        const api = await (await fetch('/api/lrs/mastery/detail?user_id=' + encodeURIComponent(uid) + '&achievement_code=' + encodeURIComponent(code), { credentials: 'include' })).json();
+        window.LRS.closeDrawer();
+        return { skip: false, rows, titleN: n, apiCount: api.count,
+          capped: api.count > 50,   // LIMIT 50 초과 시 rows < count 허용(각주 노출)
+          hasActions: !!document.getElementById('drwMessage') };
+      });
+      if (!cellRes.skip) {
+        if (cellRes.capped) {
+          expect.soft(cellRes.rows, 'INV-K14③: 셀 드로어 행수가 상한(50) 초과').toBeLessThanOrEqual(50);
+        } else {
+          expect.soft(cellRes.rows, `INV-K14③: 셀 드로어 행수(${cellRes.rows}) != API count(${cellRes.apiCount})`).toBe(cellRes.apiCount);
+        }
+        expect.soft(cellRes.titleN, `INV-K14③: "누적 N회" 표기(${cellRes.titleN}) != API count(${cellRes.apiCount})`).toBe(cellRes.apiCount);
+      }
+
+      // ── (A′) 평가부족 셀: "정답률" 미출현 + "시도 N회"만 (INV-K15) ──
+      const insRes = await page.evaluate(async () => {
+        const cell = document.querySelector('.mastery-heatmap td.cell[data-state="insufficient"]');
+        if (!cell) return { skip: true };
+        cell.click();
+        await new Promise(r => setTimeout(r, 1500));
+        const stat = (document.getElementById('drwCellStat') || {}).textContent || '';
+        window.LRS.closeDrawer();
+        return { skip: false, stat };
+      });
+      if (!insRes.skip) {
+        expect.soft(/정답률/.test(insRes.stat), `INV-K15: 평가부족 셀 드로어에 "정답률" 출현(${insRes.stat})`).toBeFalsy();
+        expect.soft(/^시도 \d+회$/.test(insRes.stat.trim()), `INV-K15: 평가부족 상태 표기가 "시도 N회" 형식 아님(${insRes.stat})`).toBeTruthy();
+      }
+
+      // ── (B) 행 드릴: 그룹 인원 합 == 학생 수 (INV-K14④) ──
+      const rowRes = await page.evaluate(async () => {
+        const th = document.querySelector('.mastery-heatmap tbody th[data-code]');
+        th.click();
+        await new Promise(r => setTimeout(r, 400));
+        const groups = [...document.querySelectorAll('#drawerBody .drw-group-title')].map(g => g.textContent.trim());
+        const sum = groups.reduce((a, g) => a + (parseInt((g.match(/(\d+)명/) || [])[1], 10) || 0), 0);
+        const students = document.querySelectorAll('.mastery-heatmap thead th.mh-stu').length;
+        const hasGoto = !!document.getElementById('drwGotoT3');
+        window.LRS.closeDrawer();
+        return { sum, students, hasGoto, groups };
+      });
+      expect.soft(rowRes.sum, `INV-K14④: 행 드로어 그룹 합(${rowRes.sum}) != 학생 수(${rowRes.students}) — ${JSON.stringify(rowRes.groups)}`).toBe(rowRes.students);
+      expect.soft(rowRes.hasGoto, 'INV-K14④: 행 드로어 T3 이동 링크 부재').toBeTruthy();
+
+      // ── (C) 열 드릴: 4상태 카운트 == 그 열의 상태별 셀 수(전체 펼침, INV-K14②) ──
+      const colRes = await page.evaluate(async () => {
+        const toggle = document.getElementById('tHeatmapToggle');
+        if (toggle && /전체/.test(toggle.textContent)) { toggle.click(); await new Promise(r => setTimeout(r, 600)); }
+        const th = document.querySelector('.mastery-heatmap thead th.mh-stu[data-uid]');
+        const uid = th.getAttribute('data-uid');
+        const tally = { reached: 0, partial: 0, notReached: 0, insufficient: 0 };
+        document.querySelectorAll(`.mastery-heatmap td.cell[data-uid="${uid}"]`).forEach(td => {
+          const s = td.getAttribute('data-state');
+          if (tally[s] != null) tally[s]++;
+        });
+        th.click();
+        await new Promise(r => setTimeout(r, 400));
+        const badges = [...document.querySelectorAll('#drawerBody .drw-sum-counts .mastery-badge')].map(b => b.textContent.trim());
+        const parse = (label) => parseInt(((badges.find(t => t.startsWith(label)) || '').match(/(\d+)$/) || [])[1], 10) || 0;
+        const drawer = { reached: parse('도달'), partial: parse('부분'), notReached: parse('미도달'), insufficient: parse('평가부족') };
+        window.LRS.closeDrawer();
+        return { tally, drawer, badges };
+      });
+      expect.soft(colRes.drawer, `INV-K14②: 열 드로어 카운트 != 히트맵 열 셀 수 — 드로어 ${JSON.stringify(colRes.drawer)} vs 열 ${JSON.stringify(colRes.tally)}`).toEqual(colRes.tally);
+
+      // 페이지 가로 스크롤 0(히트맵은 내부 컨테이너 스크롤만) + 콘솔 무결은 공통 스모크가 커버
+      const hScroll = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+      expect.soft(hScroll, `INV-K14: t-warnings 페이지 가로 스크롤 ${hScroll}px`).toBeLessThanOrEqual(0);
+      await page.close();
+    } finally { await context.close(); }
+  });
+
+  test('INV-K11′: 중등(middle1 시드) 완전판 — 또래비교 탭·스택바·평가 델타/중립 칩·withClassAvg 발송·마이너스 0', async ({ browser }) => {
+    const context = await middle1Context(browser);
+    test.skip(!context, 'middle1 시드 미착륙(로그인 실패) — BE 시드 실행 후 자동 활성화');
+    try {
+      const page = await context.newPage();
+      page.setViewportSize({ width: 1440, height: 900 });
+      const withClassAvgReqs = [];
+      page.on('request', (r) => { if (r.url().includes('withClassAvg=1')) withClassAvgReqs.push(r.url()); });
+
+      // ① analytics: 또래 비교 탭 + 스택바(#sSubjStack) — 중·고 전용 실존
+      await page.goto('/lrs/index.html?menu=analytics', { waitUntil: 'domcontentloaded' });
+      await page.waitForFunction(() => !!document.querySelector('#viewRoot .mastery-section'), { timeout: 20000 }).catch(() => {});
+      await page.waitForTimeout(1200);
+      const mid = await page.evaluate(() => ({
+        tabLabels: [...document.querySelectorAll('#lrsTabs .lrs-tab')].map(t => t.textContent.trim()),
+        hasStack: !!document.getElementById('sSubjStack'),
+      }));
+      expect.soft(mid.tabLabels.some(l => l.includes('또래 비교')), `INV-K11′: 중등 탭에 "또래 비교" 부재(${JSON.stringify(mid.tabLabels)})`).toBeTruthy();
+      expect.soft(mid.hasStack, 'INV-K11′: 중등에 #sSubjStack(교과별 스택바) 미렌더').toBeTruthy();
+
+      // ② s-perform 90d → 평가 드릴: 델타/중립 칩 ≥1 + 마이너스 표기 0 + withClassAvg 발송
+      await page.goto('/lrs/index.html#s-perform', { waitUntil: 'domcontentloaded' });
+      await page.waitForFunction(() => !!document.querySelector('.dc-kpi-card[data-bucket="exam"]'), { timeout: 20000 }).catch(() => {});
+      await page.evaluate(() => {
+        const chip90 = [...document.querySelectorAll('button')].find(b => b.textContent.trim() === '최근 90일');
+        if (chip90) chip90.click();
+      });
+      await page.waitForTimeout(1500);
+      await page.click('.dc-kpi-card[data-bucket="exam"]');
+      await page.waitForFunction(() => document.querySelectorAll('#lrsDmBody .lrs-dm-row').length > 0, { timeout: 10000 }).catch(() => {});
+      const exam = await page.evaluate(() => ({
+        rows: document.querySelectorAll('#lrsDmBody .lrs-dm-row').length,
+        chips: document.querySelectorAll('#lrsDmBody .ra-delta').length,
+        minus: /반 평균 -/.test(document.getElementById('lrsDmBody')?.innerText || ''),
+      }));
+      if (exam.rows > 0) {
+        expect.soft(exam.chips, `INV-K11′: 중등 평가 드릴에 델타/중립 칩 0개(행 ${exam.rows}개)`).toBeGreaterThan(0);
+      }
+      expect.soft(exam.minus, 'INV-K11′: 델타 칩에 마이너스 표기("반 평균 -") 출현 — 중립 표기 위반').toBeFalsy();
+      expect.soft(withClassAvgReqs.length, 'INV-K11′: 중등이 withClassAvg=1 요청을 보내지 않음').toBeGreaterThan(0);
+      await page.close();
+    } finally { if (context) await context.close(); }
   });
 });

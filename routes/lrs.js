@@ -1793,6 +1793,136 @@ router.get('/mastery/class/:id', requireAuth, (req, res) => {
   }
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// P2-1(A): GET /api/lrs/mastery/detail?user_id=&achievement_code= — 셀 드릴 "시도 내역"
+//   기획서: 작업지시서/LRS_P2_교사히트맵_타임라인메타_스펙.md §2-4 (인벤토리 TW2 계약)
+//
+//   응답: { success, userId, code, label, subject, status, rate, attempts, count, items[] }
+//     - label·subject: resolveCode 보강(서술 전문 + 교과 라벨), 매핑 없으면 코드 폴백(무손상)
+//     - status·rate: 셀과 동일 분류기(classifyStatus·reachRate — SSOT) + 매트릭스와 동일 반올림(0.1)
+//     - attempts: lrs_achievement_stats.attempt_count (셀 툴팁과 동일 값)
+//     - count: learning_logs 행수(user_id×achievement_code 전체 — LIMIT 무관 전체 건수)
+//     - items: 최신순 최대 50행 { date, activityType, typeLabel, success, scoreNorm }
+//
+//   ★ 표시값=내역 정합 계약: count == attempt_count == 로그 행수.
+//     (스펙 §1-4 실측: uid3 상위 8개 코드 전부 정확 일치 8=8·6=6·5=5.
+//      attempt_count 정본 산식 = rebuild 경로(db/lrs-aggregate.js §7):
+//      COUNT(*) FROM learning_logs WHERE achievement_code IS NOT NULL GROUP BY user_id, code
+//      → 본 라우트도 동일 WHERE(user_id×achievement_code, 유형 필터 없음)를 재사용한다.)
+//     불일치 시 응답은 로그 기준(count=행수)으로 내리되 서버 콘솔 경고 1줄(정합 감시).
+//
+//   기간 파라미터 없음 — mastery 는 누적이 정책(P1 스펙 §3-3 계승). period 류가 와도 무시.
+//   권한: canViewUser 재사용(본인·교사·관리자). 학생이 타 학생 user_id 요청 → 403 (INV-K12).
+// ─────────────────────────────────────────────────────────────────────────────
+const MASTERY_DETAIL_LIMIT = 50;
+
+/** 시도 내역 유형 라벨 — PERFORM 계열 한국어 라벨 재사용(스펙 §2-4).
+ *  exam 은 스펙 명시 어휘 '평가'(드로어 421px 1줄 축약형 — §2-4 와이어프레임 정본). */
+function masteryDetailTypeLabel(activityType, sourceService) {
+  switch (activityType) {
+    case 'exam_complete': return '평가';
+    case 'homework_submit': return '과제';
+    case 'content_solve': return '콘텐츠 문항풀이';
+    case 'content_view': return '콘텐츠 학습';
+    case 'content_complete': return '콘텐츠 학습 완료';
+    case 'lesson_progress': return '수업 진행';
+    case 'lesson_view': return '수업 조회';
+    case 'wrong_note_retry': return '오답노트 재도전';
+    case 'problem_attempt': return '문항 풀이';
+    case 'node_complete': return 'AI 학습맵';
+    case 'self_learn':
+    case 'daily_complete': {
+      // perform/detail 의 self 계열 라벨 분기와 동일(source_service 로 출처 구분)
+      const src = String(sourceService || '');
+      return src.includes('wrong') ? '오답노트' : (src.includes('ai') || src.includes('map') ? 'AI맞춤' : '오늘의 학습');
+    }
+    default: return '학습 활동';
+  }
+}
+
+router.get('/mastery/detail', requireAuth, (req, res) => {
+  try {
+    const userId = parseInt(req.query.user_id, 10);
+    const rawCode = String(req.query.achievement_code || '').trim();
+    if (!Number.isInteger(userId)) {
+      return res.status(400).json({ success: false, message: '잘못된 user_id 파라미터입니다.' });
+    }
+    if (!rawCode) {
+      return res.status(400).json({ success: false, message: 'achievement_code 파라미터가 필요합니다.' });
+    }
+    if (!canViewUser(req, userId)) {
+      return res.status(403).json({ success: false, message: '권한이 없습니다.' });
+    }
+
+    // 괄호 유/무 양쪽 방어(데이터에 '9수01-01' 무괄호 형도 존재 — resolveCode 와 동일 관용)
+    const ctx = mastery.resolveCode(rawCode);
+    const codeForms = [...new Set([ctx.code, rawCode, rawCode.replace(/^\[|\]$/g, '')].filter(Boolean))];
+    const ph = codeForms.map(() => '?').join(',');
+
+    // ① stats — 셀 툴팁과 동일 원천(attempt_count). 괄호 이형이 별행이면 합산(로그 WHERE 와 대칭).
+    const statRows = db.prepare(`
+      SELECT attempt_count AS a, success_count AS s, avg_score AS v, subject_code
+      FROM lrs_achievement_stats
+      WHERE user_id = ? AND achievement_code IN (${ph})
+    `).all(userId, ...codeForms);
+    let attempts = 0, success = 0, wSum = 0, wCnt = 0, statSubject = null;
+    for (const r of statRows) {
+      attempts += r.a || 0; success += r.s || 0;
+      if (r.v != null && (r.a || 0) > 0) { wSum += r.v * r.a; wCnt += r.a; }
+      if (!statSubject && r.subject_code) statSubject = r.subject_code;
+    }
+    const avgScore = wCnt > 0 ? wSum / wCnt : null;
+    const rateRaw = mastery.reachRate(success, attempts, avgScore);
+    const rate = rateRaw == null ? null : Math.round(rateRaw * 10) / 10; // 매트릭스 셀과 동일 반올림
+    const status = mastery.classifyStatus(attempts, rate);
+
+    // ② count — 로그 행수(전체, LIMIT 무관). attempt_count 정본 산식과 동일 WHERE.
+    const totalRow = db.prepare(`
+      SELECT COUNT(*) AS c FROM learning_logs
+      WHERE user_id = ? AND achievement_code IN (${ph})
+    `).get(userId, ...codeForms);
+    const count = totalRow.c || 0;
+    if (statRows.length > 0 && count !== attempts) {
+      // 정합 감시(계약: 불일치 시 응답은 로그 기준) — 증분 upsert(hasEvalSignal 필터)와
+      // rebuild(무필터) 경로 간 드리프트 신호. rebuildAllAggregates 재실행으로 수렴됨.
+      console.warn(`[LRS] mastery/detail 정합 경고: uid=${userId} code=${ctx.code} 로그행수 ${count} != attempt_count ${attempts}`);
+    }
+
+    // ③ items — 시도 내역(누적·최신순·최대 50행). 기간 필터 없음(mastery 누적 정책).
+    const NORM = `(CASE WHEN ll.result_score <= 1 THEN ll.result_score*100 ELSE ll.result_score END)`;
+    const rows = db.prepare(`
+      SELECT ll.activity_type, ll.created_at, ll.result_success, ll.source_service,
+             ${NORM} AS norm_score
+      FROM learning_logs ll
+      WHERE ll.user_id = ? AND ll.achievement_code IN (${ph})
+      ORDER BY ll.created_at DESC
+      LIMIT ?
+    `).all(userId, ...codeForms, MASTERY_DETAIL_LIMIT);
+    const items = rows.map(r => ({
+      date: r.created_at,
+      activityType: r.activity_type,
+      typeLabel: masteryDetailTypeLabel(r.activity_type, r.source_service),
+      success: r.result_success == null ? null : (Number(r.result_success) ? 1 : 0),
+      scoreNorm: r.norm_score == null ? null : Math.round(Number(r.norm_score) * 10) / 10, // 참고용 — 정본은 success
+    }));
+
+    const out = {
+      success: true,
+      userId,
+      code: ctx.code,
+      label: ctx.label,
+      subject: ctx.subject_label || subjectLabel(statSubject, ''),
+      status, rate, attempts, count,
+      items,
+    };
+    if (count > MASTERY_DETAIL_LIMIT) out.note = `최근 ${MASTERY_DETAIL_LIMIT}회만 표시합니다.`;
+    res.json(out);
+  } catch (err) {
+    console.error('[LRS] /mastery/detail error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
 // ─────────────────────────────────────────────────────────
 // 분석·예측 P0 (온더플라이) — 기획서: LRS_분석예측_강화_기획서.md
 //   §B-1 위험점수 · §B-2 추세 · §B-3 도달예측 · §B-4 선수갭
@@ -2713,6 +2843,25 @@ router.get('/stats/perform', requireAuth, (req, res) => {
 //     동일 dateRangeWhere(created_at,'ll') + 명시적 ll.user_id 필터로 /stats/perform 학생 뷰
 //     (scope=mine=본인 user_id)의 카드 숫자와 정확히 일치. 제목 조인 실패해도 count 불변.
 //     → count == items.length(200 상한 내) == 카드 숫자.
+//
+//   [P2-2 확장 — 작업지시서/LRS_P2_교사히트맵_타임라인메타_스펙.md §3-3]
+//     &limit=<n>        items 상한(1~200 클램프, 기본 200=현행). count 는 현행 그대로 전체 건수
+//                       (limit 지정 시 count ≠ items.length 허용 — 타임라인 "최근 8건" 스냅 케이스 한정).
+//     progressPct(상시) lesson_progress 항목: result_score(=진도율 0~1, L202 주석 정본) → 0~100 정수.
+//                       result_score null 이면 필드 생략. (NORM 경유 — 0~100 저장 이형도 안전)
+//     hwStatus(상시)    homework_submit 항목: result_score 유무 → 'graded'(채점완료)/'submitted'(제출완료).
+//     &withClassAvg=1   옵트인: exam_complete 항목에 한해 같은 target_id 의 exam_complete 로그
+//                       전체(응시자 본인 포함·기간 무관)에서 AVG(NORM_SCORE) 0.1 반올림 classAvg +
+//                       COUNT(DISTINCT user_id) takers. ★takers < MIN_PEERS(5) 면 두 필드 모두 생략.
+//                       GROUP BY target_id 단일 쿼리(항목당 반복 쿼리 금지). 개별 학생 값·명단 미포함.
+//                       미지정 시 classAvg·takers 키 자체 부재(현행 응답 불변 — INV-K13④).
+//                       학령 가드는 FE 네트워크 레벨(초등은 요청 자체를 안 보냄 — 스펙 §3-3).
+//     &learnOnly=1      [감리 R-1] 옵트인: 유형을 "학습활동" 정본 7종(LRS_LEARN_ACTIVITY_TYPES,
+//                       L281 — 능동 이수·응시·제출·풀이)과의 교집합으로 좁힌다. content_view 등
+//                       조회성 제외 — "최근 학습 활동" 타임라인 카드용(조회 로그가 200 cap 을
+//                       점유해 실제 학습 행이 밀리는 것 방지). count·segments·subtotals 도 필터 후
+//                       기준으로 일관(표시값=내역 계약 유지 — 합=count 불변식 보존).
+//                       값이 정확히 '1' 일 때만 활성 — 미지정/그 외 값은 응답 완전 불변.
 // ─────────────────────────────────────────────────────────────────────────────
 const PERFORM_DETAIL_ITEM_CAP = 200;
 // bucket → activity_type 화이트리스트 (전부 learning_logs 단일 원천).
@@ -2758,6 +2907,18 @@ router.get('/perform/detail', requireAuth, (req, res) => {
     // 기간 필터: /stats/perform 과 100% 동일 코드(dateRangeWhere) 재사용 → 카운트 일치 보증.
     const r = dateRangeWhere(req, 'created_at', 'll');
     if (r.invalid) return sendInvalidPeriod(res, r.reason);
+    // P2-2: items 상한(1~200 클램프, 기본 200=현행 CAP → 미지정 시 응답 불변).
+    const limitRaw = parseInt(req.query.limit, 10);
+    const itemLimit = Number.isInteger(limitRaw)
+      ? Math.max(1, Math.min(PERFORM_DETAIL_ITEM_CAP, limitRaw))
+      : PERFORM_DETAIL_ITEM_CAP;
+    // P2-2: 반평균 옵트인(중·고 전용 — FE 가 학령 가드. 초등은 이 파라미터를 보내지 않음).
+    const withClassAvg = String(req.query.withClassAvg || '') === '1';
+    // [감리 R-1] 학습활동 정본 7종 옵트인 — '1' 일 때만 활성(그 외 값·미지정 = 완전 불변).
+    const learnOnly = String(req.query.learnOnly || '') === '1';
+    const LEARN_SET = learnOnly ? new Set(LRS_LEARN_ACTIVITY_TYPES) : null;
+    /** learnOnly 활성 시 유형 목록을 7종 교집합으로 좁힌다(비활성 시 원본 그대로). */
+    const applyLearnOnly = (typeList) => (LEARN_SET ? typeList.filter(t => LEARN_SET.has(t)) : typeList);
 
     // ── activityType=wrong_note_retry 분기 — 문항 단위(로그 단위 아님) ──────────
     //   count = 기간 내 DISTINCT target_id 수 == /retry-growth questions(N) == items.length
@@ -2825,8 +2986,19 @@ router.get('/perform/detail', requireAuth, (req, res) => {
       const seg = String(req.query.segment || '').toLowerCase();
       if (PERFORM_SEGMENT_TYPE[seg]) { types = [PERFORM_SEGMENT_TYPE[seg]]; segmentKey = seg; }
     }
+    // [감리 R-1] learnOnly=1 → 7종 교집합(조회성 content_view 등 제거). 미지정 시 무변화.
+    types = applyLearnOnly(types);
+    // 교집합이 공집합(예: bucket=content&segment=view&learnOnly=1)이면 SQL IN () 없이 빈 응답.
+    if (types.length === 0) {
+      return res.json({
+        success: true, bucket, title: PERFORM_BUCKET_TITLE[bucket],
+        period: r.fromDate && r.toDate ? `${r.fromDate} ~ ${r.toDate}` : null,
+        count: 0, items: [],
+      });
+    }
     const typePH = types.map(() => '?').join(',');
     // ★ count: JOIN 없이 learning_logs 원천 COUNT — 카드와 구조적으로 동일.
+    //   learnOnly 활성 시엔 필터 후 유형 기준(표시값=내역 — items 와 같은 WHERE).
     const countRow = db.prepare(`
       SELECT COUNT(*) c
       FROM learning_logs ll
@@ -2834,23 +3006,28 @@ router.get('/perform/detail', requireAuth, (req, res) => {
     `).get(userId, ...types, ...r.params);
     const count = countRow.c || 0;
 
-    // bucket=content 세그먼트 소계 (segment 미지정일 때만 3종 소계 제공, 합=count)
+    // bucket=content 세그먼트 소계 (segment 미지정일 때만 소계 제공, 합=count)
+    //   learnOnly 시 7종 밖 세그먼트(view)는 목록에서 제외 — 합=count 불변식 유지.
     let segments;
     if (bucket === 'content' && !segmentKey) {
-      segments = ['view', 'lesson', 'solve'].map(k => {
-        const t = PERFORM_SEGMENT_TYPE[k];
-        const cr = db.prepare(`
-          SELECT COUNT(*) c FROM learning_logs ll
-          WHERE ll.user_id = ? AND ll.activity_type = ? ${r.where}
-        `).get(userId, t, ...r.params);
-        return { key: k, label: PERFORM_SEGMENT_LABEL[k], count: cr.c || 0 };
-      });
+      segments = ['view', 'lesson', 'solve']
+        .filter(k => !LEARN_SET || LEARN_SET.has(PERFORM_SEGMENT_TYPE[k]))
+        .map(k => {
+          const t = PERFORM_SEGMENT_TYPE[k];
+          const cr = db.prepare(`
+            SELECT COUNT(*) c FROM learning_logs ll
+            WHERE ll.user_id = ? AND ll.activity_type = ? ${r.where}
+          `).get(userId, t, ...r.params);
+          return { key: k, label: PERFORM_SEGMENT_LABEL[k], count: cr.c || 0 };
+        });
     }
     // bucket=all 버킷 소계 (exam/homework/self/content, 합=count=totalActs)
+    //   learnOnly 시 각 버킷 유형도 7종 교집합으로 계산(content=lesson+solve) — 합=count 유지.
     let subtotals;
     if (bucket === 'all') {
       subtotals = ['exam', 'homework', 'self', 'content'].map(b => {
-        const bt = PERFORM_BUCKET_TYPES[b];
+        const bt = applyLearnOnly(PERFORM_BUCKET_TYPES[b]);
+        if (bt.length === 0) return { bucket: b, label: PERFORM_BUCKET_TITLE[b], count: 0 };
         const ph = bt.map(() => '?').join(',');
         const cr = db.prepare(`
           SELECT COUNT(*) c FROM learning_logs ll
@@ -2882,7 +3059,7 @@ router.get('/perform/detail', requireAuth, (req, res) => {
       WHERE ll.user_id = ? AND ll.activity_type IN (${typePH}) ${r.where}
       ORDER BY ll.created_at DESC
       LIMIT ?
-    `).all(userId, ...types, ...r.params, PERFORM_DETAIL_ITEM_CAP);
+    `).all(userId, ...types, ...r.params, itemLimit);
 
     const items = rows.map(row => {
       const at = row.activity_type;
@@ -2928,8 +3105,48 @@ router.get('/perform/detail', requireAuth, (req, res) => {
       }
       const item = { title, date: row.created_at, score, sub, typeLabel, badge };
       if (seg) item.segment = seg;
+      // P2-2 상시 메타(스펙 §3-3): 진도율·과제 상태 — 타임라인/드릴 모달 공용(같은 엔드포인트=같은 값).
+      if (at === 'lesson_progress' && row.result_score != null && row.norm_score != null) {
+        // result_score 가 곧 진도율(0~1, L202 주석 정본) → ×100 정수. NORM 경유로 0~100 저장 이형도 안전.
+        item.progressPct = Math.max(0, Math.min(100, Math.round(Number(row.norm_score))));
+      }
+      if (at === 'homework_submit') {
+        item.hwStatus = row.result_score != null ? 'graded' : 'submitted';
+      }
       return item;
     });
+
+    // P2-2 옵트인(스펙 §3-3): 평가 반평균 — 같은 target_id 의 exam_complete 로그 전체(본인 포함·
+    //   기간 무관 — peer-compare 정책과 동일)에서 AVG(NORM)·응시자 수. GROUP BY 단일 쿼리.
+    //   ★ 표본 가드: takers < MIN_PEERS(5) → 두 필드 모두 생략. 개별 학생 값·명단·id 미포함(익명 집계).
+    if (withClassAvg) {
+      const tidByKey = new Map(); // String(tid) → 원본 값(타입 보존 바인딩 — TEXT/INTEGER 혼재 방어)
+      rows.forEach(row => {
+        if (row.activity_type === 'exam_complete' && row.target_id != null) {
+          tidByKey.set(String(row.target_id), row.target_id);
+        }
+      });
+      if (tidByKey.size > 0) {
+        const tids = [...tidByKey.values()];
+        const tph = tids.map(() => '?').join(',');
+        const stats = db.prepare(`
+          SELECT ll.target_id AS tid,
+                 AVG(${NORM}) AS avg_norm,
+                 COUNT(DISTINCT ll.user_id) AS takers
+          FROM learning_logs ll
+          WHERE ll.activity_type = 'exam_complete' AND ll.target_id IN (${tph})
+          GROUP BY ll.target_id
+        `).all(...tids);
+        const byTid = new Map(stats.map(s => [String(s.tid), s]));
+        rows.forEach((row, i) => {
+          if (row.activity_type !== 'exam_complete' || row.target_id == null) return;
+          const s = byTid.get(String(row.target_id));
+          if (!s || s.avg_norm == null || (s.takers || 0) < MIN_PEERS) return; // 표본 가드
+          items[i].classAvg = Math.round(s.avg_norm * 10) / 10;
+          items[i].takers = s.takers;
+        });
+      }
+    }
 
     const out = {
       success: true,
@@ -2941,8 +3158,9 @@ router.get('/perform/detail', requireAuth, (req, res) => {
     };
     if (segments) out.segments = segments;
     if (subtotals) out.subtotals = subtotals;
-    if (count > PERFORM_DETAIL_ITEM_CAP) {
-      out.note = `최근 ${PERFORM_DETAIL_ITEM_CAP}건만 표시합니다.`;
+    if (count > itemLimit) {
+      // limit 미지정 시 itemLimit == CAP(200) → 현행 문구·발생 조건 그대로(응답 불변).
+      out.note = `최근 ${itemLimit}건만 표시합니다.`;
     }
     res.json(out);
   } catch (err) {

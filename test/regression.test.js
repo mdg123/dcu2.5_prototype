@@ -948,3 +948,110 @@ test('BUG22: 추세 부족 안내가 "더 풀면"이 아니라 "주차/시간" �
   assert.ok(!/더 풀면/.test(p.message || ''), `BUG22: "더 풀면" 문구가 남아있으면 안 됨. msg=${p.message}`);
   assert.ok(/주|시간/.test(p.message || ''), `BUG22: "주(週)/시간" 어휘로 안내해야. msg=${p.message}`);
 });
+
+// ──────────────────────────────────────────────────────────────────────────
+// INV-K6 (P1 스펙 §7 — 스택바 = 내역): /mastery/student 응답에서 standards[] 를
+//   교과×상태로 집계했을 때 ①교과별 4상태 합 == 그 교과 bySubject.standardCount
+//   ②전 교과 합 == counts.total ③각 상태값 ≥ 0 정수.
+//   (uid3=student1 + middle 시드 대표 2040=middle1 — 실 DB 임시본)
+//   박제 소관: P2 스펙 §4-2(PM/BE — test/regression.test.js).
+// ──────────────────────────────────────────────────────────────────────────
+test('INV-K6: 스택바=내역 — 교과별 4상태 합 == bySubject.standardCount, 전 교과 합 == counts.total (uid3·2040)', () => {
+  const mastery = require('../db/lrs-mastery');
+  const STATUSES = ['reached', 'partial', 'not_reached', 'insufficient'];
+  for (const uid of [3, 2040]) {
+    const m = mastery.getStudentMastery(uid);
+    assert.ok(m.standards.length > 0, `INV-K6 전제: uid${uid} standards 존재`);
+    // standards[] → 교과×상태 집계 (스택바가 FE 에서 하는 파생과 동일)
+    const agg = new Map();
+    for (const s of m.standards) {
+      const key = s.subject_code || 'unknown';
+      if (!agg.has(key)) agg.set(key, { reached: 0, partial: 0, not_reached: 0, insufficient: 0 });
+      const a = agg.get(key);
+      assert.ok(STATUSES.includes(s.status), `INV-K6: 알 수 없는 status ${s.status}`);
+      a[s.status]++;
+    }
+    // ① 교과별 4상태 합 == bySubject.standardCount, ③ 각 상태값 ≥0 정수
+    for (const bs of m.bySubject) {
+      const key = bs.subject_code || 'unknown';
+      const a = agg.get(key);
+      assert.ok(a, `INV-K6: bySubject 에만 있는 교과 ${key}(uid${uid})`);
+      const sum4 = STATUSES.reduce((t, st) => t + a[st], 0);
+      assert.equal(sum4, bs.standardCount,
+        `INV-K6①: uid${uid} ${key} 4상태 합 ${sum4} != standardCount ${bs.standardCount}`);
+      for (const st of STATUSES) {
+        assert.ok(Number.isInteger(a[st]) && a[st] >= 0, `INV-K6③: uid${uid} ${key}.${st} 음수/비정수`);
+      }
+    }
+    assert.equal(agg.size, m.bySubject.length, `INV-K6: uid${uid} 교과 수 불일치(standards ↔ bySubject)`);
+    // ② 전 교과 합 == counts.total
+    const total = m.bySubject.reduce((t, b) => t + b.standardCount, 0);
+    assert.equal(total, m.counts.total, `INV-K6②: uid${uid} 전 교과 합 ${total} != counts.total ${m.counts.total}`);
+  }
+});
+
+// ──────────────────────────────────────────────────────────────────────────
+// INV-K9 (P1 스펙 §7 — 처방 템플릿 윤리·정합): public/lrs/index.html 의
+//   renderTrendRx IIFE(실 프로덕션 코드)를 vm 샌드박스에서 그대로 실행해
+//   대표 입력 조합(모드 compare/self × delta +7/0/−7 × weak0 유무 = 12조합)에 대해
+//   ① 금칙어 정규식 0건(등수·순위·꼴찌·위험·뒤처·낮은 편·부족한 편·못했·실패
+//      + 델타 칩 마이너스 표기 '반 평균 -' — INV-K15 어휘 확장)
+//   ② `{delta}`·`{단원}` 등 템플릿 변수 잔존 0
+//   ③ weak0 있을 때 문장 속 단원명 === weaknesses[0].label
+//   박제 소관: P2 스펙 §4-2(PM/BE). FE 코드를 복제(미러) 하지 않고 원본을 추출 실행
+//   — FE 가 템플릿을 바꾸면 이 테스트가 그 바뀐 문장을 그대로 검사한다.
+// ──────────────────────────────────────────────────────────────────────────
+test('INV-K9: 처방 템플릿 — 12조합(compare/self × +7/0/−7 × weak0 유무) 금칙어 0·변수잔존 0·단원명 정합', () => {
+  const fs = require('fs');
+  const path = require('path');
+  const vm = require('vm');
+  const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'lrs', 'index.html'), 'utf8');
+  const start = html.indexOf('(function renderTrendRx(){');
+  assert.ok(start > 0, 'INV-K9: renderTrendRx IIFE 를 찾지 못함(FE 리팩터 시 추출 앵커 갱신 필요)');
+  const end = html.indexOf('})();', start);
+  assert.ok(end > start, 'INV-K9: IIFE 종결부 미발견');
+  const src = html.slice(start, end + '})();'.length);
+
+  // 원본 IIFE 가 참조하는 클로저 변수·DOM 을 샌드박스로 주입해 실행
+  function runRx({ mode, delta, weak0 }) {
+    const els = {
+      sTrendRx: { hidden: true },
+      sTrendRxText: { innerHTML: '' },
+    };
+    const sandbox = {
+      document: { getElementById: (id) => els[id] || null },
+      // compare: 겹치는 주 2개, mean(my)-mean(class) == delta / self: 마지막 2점 차 == delta
+      valuedPts: mode === 'self' ? [{ rate: 50 }, { rate: 50 + delta }] : [{ rate: 60 }, { rate: 60 }],
+      drawOverlay: mode === 'compare',
+      chartLabels: ['2026-01', '2026-02'],
+      myVals: mode === 'compare' ? [60 + delta, 60 + delta] : [60, 60],
+      classVals: mode === 'compare' ? [60, 60] : [null, null],
+      insightsForReco: { weaknesses: weak0 ? [weak0] : [] },
+      escapeAttr: (s) => String(s),
+      escapeHtml: (s) => String(s),
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(src, sandbox, { timeout: 2000 });
+    return els;
+  }
+
+  // 금칙어(P1 스펙 §4-4·§7) + '반 평균 -'(INV-K15 마이너스 표기 확장)
+  const FORBIDDEN = /등수|순위|꼴찌|위험|뒤처|낮은 편|부족한 편|못했|실패|반 평균 -/;
+  const LEFTOVER = /\{[^}]*\}/; // {delta}·{단원} 류 변수 잔존
+  const WEAK0 = { label: '두 자리 수의 곱셈', achievement_code: '[4수01-05]' };
+
+  for (const mode of ['compare', 'self']) {
+    for (const delta of [7, 0, -7]) {
+      for (const w of [WEAK0, null]) {
+        const tag = `${mode}/delta=${delta}/weak0=${w ? 'Y' : 'N'}`;
+        const els = runRx({ mode, delta, weak0: w });
+        assert.equal(els.sTrendRx.hidden, false, `INV-K9(${tag}): 처방 박스가 렌더되지 않음`);
+        const text = String(els.sTrendRxText.innerHTML || '');
+        assert.ok(text.length > 0, `INV-K9(${tag}): 문장 비어 있음`);
+        assert.ok(!FORBIDDEN.test(text), `INV-K9①(${tag}): 금칙어 검출 — "${text}"`);
+        assert.ok(!LEFTOVER.test(text), `INV-K9②(${tag}): 템플릿 변수 잔존 — "${text}"`);
+        if (w) assert.ok(text.includes(w.label), `INV-K9③(${tag}): 문장 속 단원명 != weaknesses[0].label — "${text}"`);
+      }
+    }
+  }
+});
