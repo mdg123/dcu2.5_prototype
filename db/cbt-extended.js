@@ -29,9 +29,11 @@ function importFromContent(contentId, classId, userId, opts = {}) {
   const startDate = opts.start_date || null;
   const endDate = opts.end_date || null;
 
+  // "평가 등록" = 학생에게 즉시 게시(진행중). 콘텐츠 가져오기도 direct 등록과 동일하게 active 로 생성
+  // (시작일이 미래면 학생 화면에서 시작일 기준 잠금 표시). draft 초안 저장 UI 는 존재하지 않음.
   db.prepare(`
-    INSERT INTO exams (id, class_id, title, description, answers, question_count, status, owner_id, source_content_id, time_limit, start_date, end_date)
-    VALUES (?, ?, ?, ?, ?, ?, 'draft', ?, ?, ?, ?, ?)
+    INSERT INTO exams (id, class_id, title, description, answers, question_count, status, start_mode, owner_id, source_content_id, time_limit, start_date, end_date)
+    VALUES (?, ?, ?, ?, ?, ?, 'active', 'direct', ?, ?, ?, ?, ?)
   `).run(examId, classId || null, title, desc, answers, qCount, userId, contentId, timeLimit, startDate, endDate);
 
   // std_ids 저장: opts.std_ids 우선, 없으면 원본 content의 std_ids 상속
