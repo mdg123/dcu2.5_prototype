@@ -3244,6 +3244,122 @@ router.get('/stats/custom', requireAuth, (req, res) => {
   }
 });
 
+/* ── teacher-index 헬퍼 (교사 본인 활동 4소스 공통 산식) ──────────────────
+ * 4소스 = 콘텐츠(contents.creator_id) · 수업(lessons.teacher_id) ·
+ *         평가(exams.owner_id) · 피드백(homework_feedback.author_id).
+ * 모두 created_at 기준 '해당 기간 신규' 카운트. 산식을 한 곳에 모아
+ *   메인 KPI / prev(직전기간) / trend(버킷)이 동일 정의를 공유하게 한다.
+ */
+function _teacherMetricsInRange(tid, fromIso, toIso) {
+  // fromIso/toIso 는 'YYYY-MM-DD'(포함). null 이면 무제한.
+  const cond = (col) => {
+    let w = ''; const p = [];
+    if (fromIso) { w += ` AND DATE(${col}) >= ?`; p.push(fromIso); }
+    if (toIso)   { w += ` AND DATE(${col}) <= ?`; p.push(toIso); }
+    return { w, p };
+  };
+  const cnt = (sql, id, col) => {
+    const { w, p } = cond(col);
+    try { return db.prepare(sql + w).get(id, ...p).c || 0; } catch (_) { return 0; }
+  };
+  const out = { contents_authored: 0, lessons_held: 0, exams_opened: 0, feedback_count: 0 };
+  if (_tableExists('contents'))
+    out.contents_authored = cnt('SELECT COUNT(*) c FROM contents WHERE creator_id = ?', tid, 'created_at');
+  if (_tableExists('lessons'))
+    out.lessons_held = cnt('SELECT COUNT(*) c FROM lessons WHERE teacher_id = ?', tid, 'created_at');
+  if (_tableExists('exams'))
+    out.exams_opened = cnt('SELECT COUNT(*) c FROM exams WHERE owner_id = ?', tid, 'created_at');
+  if (_tableExists('homework_feedback'))
+    out.feedback_count = cnt('SELECT COUNT(*) c FROM homework_feedback WHERE author_id = ?', tid, 'created_at');
+  return out;
+}
+
+/* 버킷 경계 산출: 기간 길이에 맞춰 일별(≤14일)·주별(≤90일)·월별(>90) 창을 만든다.
+ *   각 원소 { from, to, label(한국어 날짜범위) }. from/to 는 포함 경계(YYYY-MM-DD). */
+function _makeBuckets(fromIso, toIso) {
+  const iso = (d) => d.toISOString().slice(0, 10);
+  const start = new Date(fromIso + 'T00:00:00Z');
+  const end = new Date(toIso + 'T00:00:00Z');
+  const spanDays = Math.max(1, Math.round((end - start) / 86400000) + 1);
+  const md = (d) => `${d.getUTCMonth() + 1}/${d.getUTCDate()}`;
+  const buckets = [];
+  if (spanDays <= 14) {
+    // 일별
+    for (let d = new Date(start); d <= end; d.setUTCDate(d.getUTCDate() + 1)) {
+      const day = iso(d);
+      buckets.push({ from: day, to: day, label: md(d) });
+    }
+  } else if (spanDays <= 90) {
+    // 주별(7일 창)
+    for (let s = new Date(start); s <= end; s.setUTCDate(s.getUTCDate() + 7)) {
+      const e = new Date(s); e.setUTCDate(e.getUTCDate() + 6);
+      if (e > end) e.setTime(end.getTime());
+      buckets.push({ from: iso(s), to: iso(e), label: `${md(s)}~${md(e)}` });
+    }
+  } else {
+    // 월별(달력 월 경계)
+    let s = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), 1));
+    if (s < start) s = new Date(start);
+    let cur = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), 1));
+    while (cur <= end) {
+      const mEnd = new Date(Date.UTC(cur.getUTCFullYear(), cur.getUTCMonth() + 1, 0)); // 해당 월 말일
+      const bFrom = cur < start ? new Date(start) : new Date(cur);
+      const bTo = mEnd > end ? new Date(end) : new Date(mEnd);
+      buckets.push({ from: iso(bFrom), to: iso(bTo), label: `${cur.getUTCFullYear()}.${cur.getUTCMonth() + 1}` });
+      cur = new Date(Date.UTC(cur.getUTCFullYear(), cur.getUTCMonth() + 1, 1));
+    }
+  }
+  return buckets;
+}
+
+/* 교사 본인의 최근 활동 4소스 UNION → created_at desc N건. 기간 필터 적용.
+ *   각 원소 { type, title, class_name, date }. type ∈ content|lesson|exam|feedback. */
+function _teacherRecentActivity(tid, fromIso, toIso, limit = 10) {
+  const rangeCond = (col) => {
+    let w = ''; const p = [];
+    if (fromIso) { w += ` AND DATE(${col}) >= ?`; p.push(fromIso); }
+    if (toIso)   { w += ` AND DATE(${col}) <= ?`; p.push(toIso); }
+    return { w, p };
+  };
+  const rows = [];
+  const pushAll = (sql, id, col, mapper) => {
+    const { w, p } = rangeCond(col);
+    try { db.prepare(sql + w + ` ORDER BY DATE(${col}) DESC LIMIT ?`).all(id, ...p, limit).forEach(r => rows.push(mapper(r))); }
+    catch (_) {}
+  };
+  if (_tableExists('contents'))
+    pushAll(
+      'SELECT title, created_at FROM contents WHERE creator_id = ?', tid, 'created_at',
+      (r) => ({ type: 'content', title: r.title || '(제목 없음)', class_name: null, date: String(r.created_at || '').slice(0, 10) })
+    );
+  if (_tableExists('lessons'))
+    pushAll(
+      `SELECT l.title, l.created_at, c.name class_name
+         FROM lessons l LEFT JOIN classes c ON c.id = l.class_id
+        WHERE l.teacher_id = ?`, tid, 'l.created_at',
+      (r) => ({ type: 'lesson', title: r.title || '(제목 없음)', class_name: r.class_name || null, date: String(r.created_at || '').slice(0, 10) })
+    );
+  if (_tableExists('exams'))
+    pushAll(
+      `SELECT e.title, e.created_at, c.name class_name
+         FROM exams e LEFT JOIN classes c ON c.id = e.class_id
+        WHERE e.owner_id = ?`, tid, 'e.created_at',
+      (r) => ({ type: 'exam', title: r.title || '(제목 없음)', class_name: r.class_name || null, date: String(r.created_at || '').slice(0, 10) })
+    );
+  if (_tableExists('homework_feedback'))
+    pushAll(
+      `SELECT hf.created_at, h.title htitle, c.name class_name
+         FROM homework_feedback hf
+         LEFT JOIN homework_submissions hs ON hs.id = hf.submission_id
+         LEFT JOIN homework h ON h.id = hs.homework_id
+         LEFT JOIN classes c ON c.id = h.class_id
+        WHERE hf.author_id = ?`, tid, 'hf.created_at',
+      (r) => ({ type: 'feedback', title: (r.htitle ? `${r.htitle} 과제 피드백` : '과제 피드백'), class_name: r.class_name || null, date: String(r.created_at || '').slice(0, 10) })
+    );
+  rows.sort((a, b) => String(b.date).localeCompare(String(a.date)));
+  return rows.slice(0, limit);
+}
+
 // (3) GET /api/lrs/stats/teacher-index
 router.get('/stats/teacher-index', requireAuth, (req, res) => {
   try {
@@ -3286,9 +3402,12 @@ router.get('/stats/teacher-index', requireAuth, (req, res) => {
       if (hasContents) {
         try { contentsAuthored = db.prepare(`SELECT COUNT(*) c FROM contents WHERE creator_id = ? ${periodWhere}`).get(tid, ...periodParams).c; } catch (_){}
       }
+      // [버그 fix] 교사가 개설(소유)한 수업 건수. 이전엔 learning_logs.activity_type='lesson_view'
+      //   AND user_id=tid 를 셌으나, 교사는 자기 수업을 lesson_view 로그로 남기지 않아 항상 0 이었다.
+      //   → lessons.teacher_id 소유 기준(기간은 lessons.created_at)으로 교체. (기획서 §3-1)
       let lessonsHeld = 0;
       try {
-        lessonsHeld = db.prepare(`SELECT COUNT(*) c FROM learning_logs WHERE user_id = ? AND activity_type='lesson_view' ${r.where}`).get(tid, ...r.params).c;
+        lessonsHeld = db.prepare(`SELECT COUNT(*) c FROM lessons WHERE teacher_id = ? ${periodWhere}`).get(tid, ...periodParams).c;
       } catch (_){}
       let examsOpened = 0;
       if (hasExams) {
@@ -3331,6 +3450,43 @@ router.get('/stats/teacher-index', requireAuth, (req, res) => {
       }
     }
 
+    // ── 교사 스코프 신규 필드: prev(직전기간 델타) · trend(버킷 추이) · recent(최근활동) ──
+    //    관리자 scope='all' 경로에는 붙이지 않는다(교사 본인 뷰 전용).
+    let prev = null, trend = null, recent = null;
+    if (scope !== 'all' && teacherIds.length === 1) {
+      const tid = teacherIds[0];
+      const fromIso = r.fromDate, toIso = r.toDate;
+      // (a) prev — 현재 기간과 동일 폭의 직전 구간 [from-span, from-1].
+      //     기간칩이 없어(무제한) fromIso 가 null 이면 prev 는 의미 없음 → null 유지.
+      if (fromIso && toIso) {
+        const dFrom = new Date(fromIso + 'T00:00:00Z');
+        const dTo = new Date(toIso + 'T00:00:00Z');
+        const spanDays = Math.max(1, Math.round((dTo - dFrom) / 86400000) + 1);
+        const prevTo = new Date(dFrom); prevTo.setUTCDate(prevTo.getUTCDate() - 1);
+        const prevFrom = new Date(prevTo); prevFrom.setUTCDate(prevFrom.getUTCDate() - (spanDays - 1));
+        const iso = (d) => d.toISOString().slice(0, 10);
+        prev = _teacherMetricsInRange(tid, iso(prevFrom), iso(prevTo));
+      } else {
+        // 무제한(기간칩 없음)이면 '직전 동일기간' 개념이 없음 → 0 채움(FE 는 flat 화살표).
+        prev = { contents_authored: 0, lessons_held: 0, exams_opened: 0, feedback_count: 0 };
+      }
+      // (b) trend — 기간을 버킷으로 쪼개 버킷별 4지표. 무제한(기간칩 없음)이면 빈 배열.
+      if (fromIso && toIso) {
+        trend = _makeBuckets(fromIso, toIso).map(b => {
+          const m = _teacherMetricsInRange(tid, b.from, b.to);
+          return {
+            label: b.label, from: b.from, to: b.to,
+            contents: m.contents_authored, lessons: m.lessons_held,
+            exams: m.exams_opened, feedback: m.feedback_count
+          };
+        });
+      } else {
+        trend = [];
+      }
+      // (c) recent — 4소스 UNION, 기간 필터, 최근 10건.
+      recent = _teacherRecentActivity(tid, fromIso, toIso, 10);
+    }
+
     res.json({
       success: true,
       scope,
@@ -3342,7 +3498,11 @@ router.get('/stats/teacher-index', requireAuth, (req, res) => {
         class_count: 'cumulative'   // 누적 — 기간 무관
       },
       teachers,
-      myIndex
+      myIndex,
+      // 교사 스코프 신규 계약(FE t-teacher-idx 소비). 관리자 scope='all' 시 null.
+      prev,     // { contents_authored, lessons_held, exams_opened, feedback_count } — KPI 델타 화살표용
+      trend,    // [ { label, from, to, contents, lessons, exams, feedback } ] — 라인차트용
+      recent    // [ { type, title, class_name, date } ] created_at desc 최대 10건 — 최근활동 표
     });
   } catch (err) {
     console.error('[LRS] /stats/teacher-index error:', err);
