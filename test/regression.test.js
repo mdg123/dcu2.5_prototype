@@ -1055,3 +1055,43 @@ test('INV-K9: 처방 템플릿 — 12조합(compare/self × +7/0/−7 × weak0 �
     }
   }
 });
+
+// ──────────────────────────────────────────────────────────────────────────
+// 이슈6 (교사 위험학생 약점 상세): 교사가 "학생을 대상으로" 보는 위치에서
+//   /self-learn?user_id=X (학생 자기주도 학습) 오배치 딥링크를 전부 제거했다.
+//   재발 방지 정적 박제:
+//   ① teacherAction 에 recommend 분기(→/self-learn/?user_id=) 부재
+//   ② 교사 렌더러의 data-action="recommend" / #drwRecommend 버튼 부재
+//   ③ 위험학생 카드 액션에 "맞춤학습" 라벨 부재(→ "약점 상세" primary로 대체)
+//   ④ 강화 드로어 헬퍼 _ewsWeakHtml 존재(약점 교과·성취기준 렌더 앵커)
+//   ※ 학생 s-home 의 /self-learn <a> 링크(자기 CTA)·전역 GNB 링크는 정당 → 검사 대상 아님.
+// ──────────────────────────────────────────────────────────────────────────
+test('이슈6: LRS 교사 화면 — 학생대상 /self-learn 오배치 딥링크 제거 정적 박제', () => {
+  const fs = require('fs');
+  const path = require('path');
+  const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'lrs', 'index.html'), 'utf8');
+
+  // ① teacherAction 의 recommend→/self-learn?user_id 분기 제거
+  assert.ok(!/self-learn\/\?user_id=/.test(html),
+    '이슈6①: 교사→학생 /self-learn?user_id= 딥링크가 남아 있음(제거 대상)');
+  assert.ok(!/kind === 'recommend'/.test(html),
+    "이슈6①: teacherAction recommend 분기가 남아 있음");
+
+  // ② 교사 렌더러의 recommend 버튼/바인딩 제거
+  assert.ok(!/data-action="recommend"/.test(html),
+    '이슈6②: data-action="recommend" 버튼이 남아 있음(카드·열드로어)');
+  assert.ok(!/id="drwRecommend"|getElementById\('drwRecommend'\)/.test(html),
+    '이슈6②: 셀 드로어 #drwRecommend(보충 배정) 버튼/바인딩이 남아 있음');
+
+  // ③ 위험학생 카드에 "약점 상세" primary 존재 + "맞춤학습" 카드 액션 라벨 부재
+  assert.ok(/fa-magnifying-glass-chart"><\/i> 약점 상세/.test(html),
+    '이슈6③: 위험학생 카드 "약점 상세" primary 버튼이 없음');
+  assert.ok(!/data-action="recommend"[^>]*>\s*<i[^>]*><\/i> 맞춤학습/.test(html),
+    '이슈6③: 카드에 "맞춤학습" 액션 버튼이 남아 있음');
+
+  // ④ 강화 드로어 약점 렌더 헬퍼 존재
+  assert.ok(/function _ewsWeakHtml\(/.test(html),
+    '이슈6④: _ewsWeakHtml(약점 교과·성취기준 그룹 렌더) 헬퍼가 없음');
+  assert.ok(/insights\/'\s*\+\s*encodeURIComponent\(uid\)/.test(html),
+    '이슈6④: openDrilldown 이 /api/lrs/insights/:uid 를 로드하지 않음');
+});
