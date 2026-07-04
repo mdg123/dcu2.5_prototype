@@ -947,17 +947,14 @@ router.get('/stats/daily', requireAuth, (req, res) => {
 });
 
 // GET /api/lrs/stats/by-subject
+// ★ 이 엔드포인트는 "교과별 활동 현황"(운영 총량 리포트)이므로 항상 전체 기간 누적으로 집계한다.
+//   형제 탭 "성취 도달 현황"이 누적이라, 기간 창(기본 최근 30일)으로 필터하면 이 탭만 텅 빈
+//   것처럼 보이는 신뢰 훼손 버그가 있었다(teacher1 자료는 대부분 30일 창 밖). period 파라미터는
+//   무시(유일 소비자는 FE VIEWS['t-subject']). scope 필터(class/mine)는 그대로 유지한다.
+//   또한 subject_code 가 NULL 인 자료도 "(교과 미지정)" 한 행으로 집계(LEFT JOIN)해 교사가
+//   분류 안 된 자료까지 인지하도록 한다. — 기획서 이슈3 ①안.
 router.get('/stats/by-subject', requireAuth, (req, res) => {
   try {
-    const period = resolvePeriod(req);
-    if (period.invalid) return sendInvalidPeriod(res, period.reason);
-    const { fromDate: from, toDate: to } = period;
-    const buildDate = (col) => {
-      let w = ''; const p = [];
-      if (from) { w += ` AND DATE(${col}) >= ?`; p.push(from); }
-      if (to)   { w += ` AND DATE(${col}) <= ?`; p.push(to); }
-      return { w, p };
-    };
     // scope: lessons/homework/exams 는 user_id 없음. mine=본인 소유(teacher_id/owner_id),
     //        class=교사 소유 반의 class_id IN (...).  학생이 mine 요청 시 자신이 속한 class 의 자료 노출은 피하고 빈 결과 폴백.
     const sfRaw = resolveScopeFilter(req);
@@ -975,33 +972,37 @@ router.get('/stats/by-subject', requireAuth, (req, res) => {
       }
       return { w: ' AND 1=0', p: [] };
     };
-    const dl = buildDate('l.created_at'); const sl = buildScope('l', 'teacher_id');
+    // ★ 날짜 필터 없음(누적). LEFT JOIN 으로 subject_code NULL·미매칭 코드도 포함.
+    //   GROUP BY 는 COALESCE(subject_code,'__none__') 기준 → NULL 자료를 한 행으로 묶는다.
+    //   scope 는 WHERE 로 시작(0-조건 대비 '1=1' 선행)해 sl.w 의 선행 ' AND ' 를 안전하게 이어 붙인다.
+    const sl = buildScope('l', 'teacher_id');
     const lessonStats = db.prepare(`
       SELECT l.subject_code, s.name as subject_name, COUNT(*) as lesson_count
-      FROM lessons l JOIN subjects s ON l.subject_code = s.code
-      WHERE l.subject_code IS NOT NULL ${dl.w}${sl.w}
-      GROUP BY l.subject_code ORDER BY lesson_count DESC
-    `).all(...dl.p, ...sl.p);
-    const dh = buildDate('h.created_at'); const sh = buildScope('h', 'teacher_id');
+      FROM lessons l LEFT JOIN subjects s ON l.subject_code = s.code
+      WHERE 1=1${sl.w}
+      GROUP BY COALESCE(l.subject_code, '__none__') ORDER BY lesson_count DESC
+    `).all(...sl.p);
+    const sh = buildScope('h', 'teacher_id');
     const homeworkStats = db.prepare(`
       SELECT h.subject_code, s.name as subject_name, COUNT(*) as hw_count
-      FROM homework h JOIN subjects s ON h.subject_code = s.code
-      WHERE h.subject_code IS NOT NULL ${dh.w}${sh.w}
-      GROUP BY h.subject_code ORDER BY hw_count DESC
-    `).all(...dh.p, ...sh.p);
-    const de = buildDate('e.created_at'); const se = buildScope('e', 'owner_id');
+      FROM homework h LEFT JOIN subjects s ON h.subject_code = s.code
+      WHERE 1=1${sh.w}
+      GROUP BY COALESCE(h.subject_code, '__none__') ORDER BY hw_count DESC
+    `).all(...sh.p);
+    const se = buildScope('e', 'owner_id');
     const examStats = db.prepare(`
       SELECT e.subject_code, s.name as subject_name, COUNT(*) as exam_count
-      FROM exams e JOIN subjects s ON e.subject_code = s.code
-      WHERE e.subject_code IS NOT NULL ${de.w}${se.w}
-      GROUP BY e.subject_code ORDER BY exam_count DESC
-    `).all(...de.p, ...se.p);
+      FROM exams e LEFT JOIN subjects s ON e.subject_code = s.code
+      WHERE 1=1${se.w}
+      GROUP BY COALESCE(e.subject_code, '__none__') ORDER BY exam_count DESC
+    `).all(...se.p);
     // 일관된 키 병기: subject_code 유지 + subject_label 추가 (한글명 / subject_name 폴백)
-    const enrich = (rows, countKey) => rows.map(r => ({
-      ...r,
-      subject_label: subjectLabel(r.subject_code, r.subject_name),
-      count: r[countKey]
-    }));
+    //   subject_code 가 NULL 이거나 라벨이 빈값이면 "(교과 미지정)" → FE 무변경으로 표시.
+    const enrich = (rows, countKey) => rows.map(r => {
+      let label = subjectLabel(r.subject_code, r.subject_name);
+      if (!label || String(label).trim() === '') label = '(교과 미지정)';
+      return { ...r, subject_label: label, count: r[countKey] };
+    });
     res.json({
       success: true,
       scope: sfRaw.scope,
