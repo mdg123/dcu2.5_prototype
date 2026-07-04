@@ -110,14 +110,18 @@ function getHomeworkByClass(classId, { status, page = 1, limit = 20, userId = nu
                            AND cm.class_id = h.class_id
                            AND cm.role = 'member'
                            AND cm.status = 'active'
+      JOIN users us ON us.id = cm.user_id AND us.role = 'student'
       WHERE hs.homework_id = h.id AND COALESCE(hs.is_draft,0) = 0) as submitted_count,
     (SELECT COUNT(DISTINCT hs.student_id) FROM homework_submissions hs
       JOIN class_members cm ON cm.user_id = hs.student_id
                            AND cm.class_id = h.class_id
                            AND cm.role = 'member'
                            AND cm.status = 'active'
+      JOIN users us ON us.id = cm.user_id AND us.role = 'student'
       WHERE hs.homework_id = h.id AND COALESCE(hs.is_draft,0) = 0 AND hs.status = 'graded') as graded_count,
-    (SELECT COUNT(*) FROM class_members cm2 WHERE cm2.class_id = h.class_id AND cm2.role = 'member' AND cm2.status = 'active') as member_count
+    (SELECT COUNT(*) FROM class_members cm2 JOIN users u2 ON u2.id = cm2.user_id
+       WHERE cm2.class_id = h.class_id AND cm2.role = 'member' AND cm2.status = 'active'
+         AND u2.role = 'student') as member_count
     ${mySubSelect}
     FROM homework h JOIN users u ON h.teacher_id = u.id
     ${where} ORDER BY (h.due_date IS NULL) ASC, h.due_date DESC, h.created_at DESC LIMIT ? OFFSET ?
@@ -295,13 +299,14 @@ function getSubmissionStats(homeworkId, classId) {
      WHERE homework_id = ? AND COALESCE(is_draft, 0) = 0
   `).get(homeworkId).c;
 
-  // 'student' 역할의 활성 멤버를 분모로 사용 (교사/관리자 제외)
+  // 정본 분모: cm.role='member' & cm.status='active' & u.role='student'
+  //   (owner·co_teacher·parent·removed 제외 — 전 화면 동일 학생 모집단)
   const total_students = db.prepare(`
     SELECT COUNT(*) AS c
       FROM class_members cm
       JOIN users u ON cm.user_id = u.id
-     WHERE cm.class_id = ? AND cm.status = 'active'
-       AND cm.role <> 'owner' AND u.role = 'student'
+     WHERE cm.class_id = ? AND cm.role = 'member' AND cm.status = 'active'
+       AND u.role = 'student'
   `).get(classId).c;
 
   const percent = total_students > 0

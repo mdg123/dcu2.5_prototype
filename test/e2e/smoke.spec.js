@@ -931,3 +931,76 @@ test.describe('스모크: LRS P2 히트맵 드릴·최근 학습 활동(INV-K13~
     } finally { if (context) await context.close(); }
   });
 });
+
+// ── 9) CBT 이탈 감지 — 이탈"시간" 누적 계약 + 감독 화면 이탈시간 열(감사 확정 결함 3건) ──
+//    스펙: 감사 리포트(대외연계_기술규격_검토의견_v1) — 결함 3건
+//      [H] player.html 이탈 시간 영구 0: blur 가 focus:lost{duration:0} 고정 → 서버 미누적
+//          → fixed: leaveStartTime 기록 후 복귀 시 경과 초를 focus:lost{duration>0} 로 송신
+//      [M] supervisor.html 에 이탈"시간" 열 부재 → fixed: "이탈 시간" 컬럼 + student:leave-time 수신
+//      [M] 감독 입장 전 제출 미반영(onStudentSubmitted early-return) → fixed: 미등록 학생 생성·반영
+//    ※ CBT 응시 UI 는 세션·평가 상태 의존이 커 E2E 흐름 대신 "이벤트 계약·렌더 함수"를 정적+렌더로 검증.
+//      실 소켓 누적 E2E 는 별도 하네스(scratchpad/cbt_leavetime_e2e.js)에서 확인(DB total_leave_time 증가).
+test.describe('스모크: CBT 이탈 감지 계약(이탈시간 누적·감독 열·제출 반영)', () => {
+
+  test('결함1[H]: player.html — blur 가 focus:lost{duration:0} 고정이 아니라 경과초를 송신', async ({ browser }) => {
+    const context = await browser.newContext({ storageState: stateFor('teacher'), locale: 'ko-KR', baseURL: BASE_URL });
+    try {
+      const page = await context.newPage();
+      const res = await page.request.get('/cbt/player.html');
+      const src = await res.text();
+      // (a) 회귀 가드: blur 에서 duration:0 을 그대로 emit 하는 옛 계약이 남아있으면 실패
+      expect.soft(/focus:lost['"]\s*,\s*\{\s*examId\s*,\s*duration:\s*0\s*\}/.test(src),
+        "결함1[H]: player.html 에 옛 계약 emit('focus:lost',{examId,duration:0}) 잔존").toBeFalsy();
+      // (b) 복귀 시 초 단위 경과값(Date.now()-leaveStartTime)/1000 을 focus:lost 로 송신하는 정본 계약 존재
+      expect.soft(/leaveStartTime/.test(src), "결함1[H]: player.html 이탈 시작시각(leaveStartTime) 기록 부재").toBeTruthy();
+      expect.soft(/\/\s*1000/.test(src) && /focus:lost/.test(src),
+        "결함1[H]: player.html 복귀 시 초 단위(/1000) focus:lost 송신 계약 부재").toBeTruthy();
+      // (c) exam-view 정본과 동일하게 focus:lost 에 duration 변수(durationSec)를 실어야 함 (duration:0 리터럴만이면 안 됨)
+      expect.soft(/emit\(['"]focus:lost['"]\s*,\s*\{[^}]*duration:\s*durationSec/.test(src),
+        "결함1[H]: focus:lost 에 실제 경과초(durationSec) 미탑재").toBeTruthy();
+      await page.close();
+    } finally { await context.close(); }
+  });
+
+  test('결함2[M]·3[M]: supervisor.html — 이탈 시간 열·student:leave-time 수신·미등록 제출 반영', async ({ browser }) => {
+    const context = await browser.newContext({ storageState: stateFor('teacher'), locale: 'ko-KR', baseURL: BASE_URL });
+    try {
+      const page = await context.newPage();
+      const res = await page.request.get('/cbt/supervisor.html');
+      const src = await res.text();
+      // (결함2) 테이블 헤더에 "이탈 시간" 컬럼 존재 + 실시간 갱신 리스너 + 렌더 함수
+      expect.soft(/<th[^>]*>\s*이탈 시간\s*<\/th>/.test(src), "결함2[M]: supervisor 테이블에 '이탈 시간' 헤더 부재").toBeTruthy();
+      expect.soft(/socket\.on\(['"]student:leave-time['"]/.test(src), "결함2[M]: student:leave-time 소켓 리스너 부재").toBeTruthy();
+      expect.soft(/function getLeaveTimeHtml/.test(src) && /function formatLeaveDuration/.test(src),
+        "결함2[M]: 이탈시간 렌더 함수(getLeaveTimeHtml/formatLeaveDuration) 부재").toBeTruthy();
+      expect.soft(/leaveTimeHtml/.test(src), "결함2[M]: 렌더 행에 이탈시간 셀(leaveTimeHtml) 미삽입").toBeTruthy();
+      // (결함3) onStudentSubmitted 가 미등록 학생을 early-return 으로 버리지 않고 생성·반영
+      const fnBody = (src.match(/function onStudentSubmitted\(data\)\s*\{[\s\S]*?\n  \}/) || [''])[0];
+      expect.soft(/if\s*\(!students\[data\.userId\]\)\s*return/.test(fnBody),
+        "결함3[M]: onStudentSubmitted 에 미등록 학생 early-return(버그) 잔존").toBeFalsy();
+      expect.soft(/students\[uid\]\s*=\s*\{[^}]*status:\s*'active'/.test(fnBody) || /if\s*\(!students\[uid\]\)/.test(fnBody),
+        "결함3[M]: onStudentSubmitted 이 미등록 학생을 생성·반영하지 않음").toBeTruthy();
+
+      // 렌더 함수 실측: 페이지 컨텍스트에서 정의를 추출·평가하여 출력값 검증(초/분·경계 색상 임계)
+      const rendered = await page.evaluate((source) => {
+        // supervisor.html 원문에서 두 함수 정의를 추출해 안전 평가
+        const fmt = (source.match(/function formatLeaveDuration[\s\S]*?\n  \}/) || [''])[0];
+        const ght = (source.match(/function getLeaveTimeHtml[\s\S]*?\n  \}/) || [''])[0];
+        // eslint-disable-next-line no-new-func
+        const mk = new Function(fmt + '\n' + ght + '\nreturn { formatLeaveDuration, getLeaveTimeHtml };');
+        const { formatLeaveDuration, getLeaveTimeHtml } = mk();
+        return {
+          zero: getLeaveTimeHtml(0),
+          four: getLeaveTimeHtml(4),
+          thirty: getLeaveTimeHtml(30),
+          min125: formatLeaveDuration(125),
+        };
+      }, src);
+      expect.soft(/0초/.test(rendered.zero) && /none/.test(rendered.zero), `이탈시간 0초 렌더 이상: ${rendered.zero}`).toBeTruthy();
+      expect.soft(/4초/.test(rendered.four) && /low/.test(rendered.four), `이탈시간 4초(low) 렌더 이상: ${rendered.four}`).toBeTruthy();
+      expect.soft(/30초/.test(rendered.thirty) && /high/.test(rendered.thirty), `이탈시간 30초(임계 high) 렌더 이상: ${rendered.thirty}`).toBeTruthy();
+      expect.soft(rendered.min125, '분·초 포맷(125초→"2분 5초") 이상').toBe('2분 5초');
+      await page.close();
+    } finally { await context.close(); }
+  });
+});

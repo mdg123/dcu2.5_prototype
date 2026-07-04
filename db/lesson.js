@@ -297,10 +297,15 @@ function getClassCompletionStats(classId, userId) {
 function getLessonsByClassWithProgress(classId, userId, { status, page = 1, limit = 20, std_ids } = {}) {
   const result = getLessonsByClass(classId, { status, page, limit, std_ids });
   result.lessons.forEach(l => { try { l.std_ids = getLessonStdIds(l.id); } catch { l.std_ids = []; } });
-  // 클래스 멤버 학생 수 (role='member' & status='active') — 모든 lesson에 공통값
-  const memberCount = db.prepare(
-    "SELECT COUNT(*) as cnt FROM class_members WHERE class_id = ? AND role = 'member' AND status = 'active'"
-  ).get(classId).cnt;
+  // 클래스 순수 학생 수 (정본 분모: cm.role='member' & cm.status='active' & u.role='student')
+  //   owner·co_teacher·parent·removed 제외 — 전 화면 동일 모집단. 모든 lesson에 공통값.
+  const memberCount = db.prepare(`
+    SELECT COUNT(*) as cnt
+      FROM class_members cm
+      JOIN users u ON u.id = cm.user_id
+     WHERE cm.class_id = ? AND cm.role = 'member' AND cm.status = 'active'
+       AND u.role = 'student'
+  `).get(classId).cnt;
   result.lessons = result.lessons.map(lesson => {
     const totalContents = db.prepare('SELECT COUNT(*) as cnt FROM lesson_contents WHERE lesson_id = ?').get(lesson.id).cnt;
     let completedContents = 0;
@@ -329,6 +334,7 @@ function getLessonsByClassWithProgress(classId, userId, { status, page = 1, limi
                                   AND cm.class_id = ?
                                   AND cm.role = 'member'
                                   AND cm.status = 'active'
+            JOIN users cu ON cu.id = cm.user_id AND cu.role = 'student'
             JOIN lesson_contents lc ON lc.lesson_id = cp.lesson_id
                                     AND lc.content_id = cp.content_id
            WHERE cp.lesson_id = ?
@@ -388,8 +394,15 @@ function getLessonBoardList(classId, { status, search, sort = 'latest', page = 1
     ${where} ${orderBy} LIMIT ? OFFSET ?
   `).all(...params, limit, (page - 1) * limit);
 
-  // 클래스 전체 멤버 수
-  const memberCount = db.prepare('SELECT COUNT(*) as cnt FROM class_members WHERE class_id = ?').get(classId).cnt;
+  // 클래스 순수 학생 수 (정본 분모: cm.role='member' & cm.status='active' & u.role='student')
+  //   owner·co_teacher·parent·removed 제외 — 전 화면 동일 모집단.
+  const memberCount = db.prepare(`
+    SELECT COUNT(*) as cnt
+      FROM class_members cm
+      JOIN users u ON u.id = cm.user_id
+     WHERE cm.class_id = ? AND cm.role = 'member' AND cm.status = 'active'
+       AND u.role = 'student'
+  `).get(classId).cnt;
 
   // 각 수업에 추가 정보 부여
   const enriched = lessons.map(lesson => {
@@ -402,14 +415,20 @@ function getLessonBoardList(classId, { status, search, sort = 'latest', page = 1
     const contentTypes = [...new Set(contents.map(c => c.content_type))];
     const contentCount = contents.length;
 
-    // 이수 완료 학생 수 (모든 콘텐츠를 완료한 학생)
+    // 이수 완료 학생 수 (모든 콘텐츠를 완료한 학생) — 정본 학생 모집단 한정
+    //   (cm.role='member' & cm.status='active' & u.role='student' 인 사용자만 집계)
     let completedStudents = 0;
     if (contentCount > 0) {
       const result = db.prepare(`
         SELECT COUNT(DISTINCT cp.user_id) as cnt
         FROM content_progress cp
+        JOIN class_members cm ON cm.user_id = cp.user_id
+                             AND cm.class_id = ?
+                             AND cm.role = 'member'
+                             AND cm.status = 'active'
+        JOIN users u ON u.id = cm.user_id AND u.role = 'student'
         WHERE cp.lesson_id = ? AND cp.completed = 1
-      `).get(lesson.id);
+      `).get(classId, lesson.id);
       completedStudents = result.cnt;
     }
 
@@ -446,12 +465,14 @@ function getLessonBoardList(classId, { status, search, sort = 'latest', page = 1
 
 // 특정 수업의 모든 학생별 이수 현황
 function getLessonStudentProgress(lessonId, classId) {
-  // 클래스 멤버 (학생만)
+  // 클래스 순수 학생 명단 (정본: cm.role='member' & cm.status='active' & u.role='student')
+  //   removed(탈퇴)·parent(학부모)·owner·co_teacher 제외 → 이수 명단에 순수 학생만.
   const members = db.prepare(`
     SELECT cm.user_id, u.display_name, u.username
     FROM class_members cm
     JOIN users u ON cm.user_id = u.id
-    WHERE cm.class_id = ? AND cm.role = 'member'
+    WHERE cm.class_id = ? AND cm.role = 'member' AND cm.status = 'active'
+      AND u.role = 'student'
     ORDER BY u.display_name
   `).all(classId);
 

@@ -26,6 +26,41 @@ function _examSchoolLevel(sc) {
 const { ensureTodayAttendance } = require('../db/attendance');
 const initSocket = require('../socket');
 
+// ─── [H] 평가 기간 게이트 헬퍼 ────────────────────────────────────────────────
+// exams.start_date / end_date 는 DATE 컬럼(schema.js). FE 는 보통 'YYYY-MM-DD',
+// 콘텐츠 임포트/일부 경로는 'YYYY-MM-DD HH:MM' 로도 저장될 수 있어 앞 10자(날짜부)만
+// 비교한다. 타임존은 코드베이스 공통 규칙(homework.js·growth.js 의 date('now','+9 hours'))
+// 과 일관되게 KST(UTC+9) 로컬 날짜를 기준일로 삼는다.
+function kstTodayStr() {
+  // 현재 시각 + 9시간 = KST → 날짜부(YYYY-MM-DD) 추출
+  const kst = new Date(Date.now() + 9 * 60 * 60 * 1000);
+  return kst.toISOString().slice(0, 10);
+}
+function dateOnly(v) {
+  if (v == null) return null;
+  const s = String(v).trim();
+  if (!s) return null;
+  return s.slice(0, 10); // 'YYYY-MM-DD' 또는 'YYYY-MM-DD HH:MM' 모두 날짜부만
+}
+/**
+ * 학생 응시 기간 게이트. 통과 시 null, 위반 시 { code, message } 반환.
+ * - start_date 있고 today < start_date → 아직 시작 전(거부)
+ * - end_date   있고 today > end_date   → 마감(거부)
+ * - 상시운영(둘 다 null)·기한없음 컬럼은 통과(회귀 금지). 오늘 == start/end 는 통과(경계 포함).
+ */
+function examPeriodGate(exam) {
+  const today = kstTodayStr();
+  const start = dateOnly(exam.start_date);
+  const end = dateOnly(exam.end_date);
+  if (start && today < start) {
+    return { code: 403, message: '아직 시작 전인 평가입니다. 시작일 이후에 응시할 수 있습니다.' };
+  }
+  if (end && today > end) {
+    return { code: 403, message: '마감된 평가입니다. 응시 기간이 종료되었습니다.' };
+  }
+  return null;
+}
+
 // ─── PDF 업로드 설정 ────────────────────────────────────────────────────────
 const uploadDir = path.join(__dirname, '..', 'uploads', 'exams');
 if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
@@ -434,6 +469,15 @@ router.post('/:classId/:examId/start', requireAuth, requireClassMember, (req, re
     if (!exam) return res.status(404).json({ success: false, message: '평가를 찾을 수 없습니다.' });
     if (exam.status !== 'active' && exam.status !== 'waiting') {
       return res.status(400).json({ success: false, message: '진행 중이거나 대기 중인 평가가 아닙니다.' });
+    }
+
+    // ─── [H] 응시 기간 게이트 ─────────────────────────────────────────────────
+    // 학생(member/participant) 경로만 게이트. 교사(owner)·admin 은 검수·미리보기
+    // 목적의 응시를 허용(시작 전 검수 응시 허용). 상시운영·기한없음은 통과(회귀 금지).
+    const isSupervisor = req.myRole === 'owner' || req.user.role === 'admin';
+    if (!isSupervisor) {
+      const gate = examPeriodGate(exam);
+      if (gate) return res.status(gate.code).json({ success: false, message: gate.message });
     }
 
     const result = examDb.startExam(exam.id, req.user.id);

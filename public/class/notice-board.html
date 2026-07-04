@@ -1019,7 +1019,7 @@
       const rxBtns = rxLabels.map(r => {
         const active = myRx.has(r.kind) ? 'active' : '';
         const cnt = rx[r.kind] || 0;
-        return `<button class="nb-reaction-btn ${active}" onclick="toggleReaction('${r.kind}')">${r.emoji} ${r.label}${cnt ? ' · ' + cnt : ''}</button>`;
+        return `<button class="nb-reaction-btn ${active}" id="nbRx-${r.kind}" data-kind="${r.kind}" data-emoji="${r.emoji}" data-label="${r.label}" onclick="toggleReaction('${r.kind}')">${r.emoji} ${r.label}${cnt ? ' · ' + cnt : ''}</button>`;
       }).join('');
 
       const isMine = (n.author_id === currentUser.id) || isOwner;
@@ -1045,7 +1045,7 @@
             <button class="nb-action-btn nb-fs-trigger" onclick="enterFullscreen()" title="전시 모드(전자칠판·교실 TV용)">
               <i class="fas fa-tv"></i> 전체 화면
             </button>
-            <button class="nb-action-btn" onclick="toggleBookmark(${n.id}, true)" title="즐겨찾기">
+            <button class="nb-action-btn" id="nbDetailBookmark" onclick="toggleBookmark(${n.id}, true)" title="즐겨찾기">
               <i class="fa${n.is_bookmarked_by_me?'s':'r'} fa-star" style="color:${n.is_bookmarked_by_me?'var(--warning)':'var(--gray-500)'};"></i>
               ${n.is_bookmarked_by_me ? '즐겨찾기됨' : '즐겨찾기'}
             </button>
@@ -1127,14 +1127,29 @@
         });
         const data = await res.json();
         if (!data.success) { showToast(data.message || '실패', 'error'); return; }
+        // 상태 갱신 (전체 재렌더 없이 상태만 유지 — 작성 중 댓글 보존)
         if (currentDetail) {
           currentDetail.notice.reactions = data.reactions;
           currentDetail.notice.my_reactions = data.my_reactions;
-          renderDetail(currentDetail);
         }
+        // 리액션 버튼만 부분 갱신 (renderDetail 전체 재호출 금지)
+        updateReactionButtons(data.reactions || {}, data.my_reactions || []);
         const target = allNotices.find(n => n.id === selectedNoticeId);
-        if (target) { target.reactions = data.reactions; target.my_reactions = data.my_reactions; renderList(); }
+        if (target) { target.reactions = data.reactions; target.my_reactions = data.my_reactions; }
+        // 목록 카드의 리액션 칩만 부분 갱신 — renderList() 전체 재렌더 금지(열린 상세·작성 중 댓글 보존)
+        updateCardChips(selectedNoticeId);
       } catch (e) { showToast('네트워크 오류', 'error'); }
+    }
+
+    // 리액션 버튼만 부분 갱신 — 카운트·활성색만 DOM 업데이트, 댓글 에디터 보존
+    function updateReactionButtons(reactions, myReactions) {
+      const myRx = new Set(myReactions || []);
+      document.querySelectorAll('.nb-reaction-btn[data-kind]').forEach(btn => {
+        const kind = btn.dataset.kind;
+        const cnt = (reactions && reactions[kind]) || 0;
+        btn.classList.toggle('active', myRx.has(kind));
+        btn.textContent = `${btn.dataset.emoji} ${btn.dataset.label}${cnt ? ' · ' + cnt : ''}`;
+      });
     }
 
     async function toggleBookmark(id, fromDetail = false) {
@@ -1144,11 +1159,59 @@
         if (!data.success) { showToast(data.message || '실패', 'error'); return; }
         const target = allNotices.find(n => n.id === id);
         if (target) target.is_bookmarked_by_me = !!data.is_bookmarked;
-        if (fromDetail && currentDetail) { currentDetail.notice.is_bookmarked_by_me = !!data.is_bookmarked; renderDetail(currentDetail); }
         updateStats();
-        renderList();
+        // 상세가 열린 상태에서의 토글 → 전체 재렌더 시 열린 상세·작성 중 댓글이 날아감.
+        //   ∴ 상세 버튼 + 해당 카드 별표만 부분 갱신, renderList() 호출 안 함.
+        // 단, '즐겨찾기' 필터 뷰에서 해제하면 목록에서 빠져야 하므로 그때는 전체 재렌더.
+        const detailOpenForThis = (fromDetail && currentDetail && selectedNoticeId === id);
+        if (fromDetail && currentDetail) {
+          currentDetail.notice.is_bookmarked_by_me = !!data.is_bookmarked;
+          updateDetailBookmarkBtn(!!data.is_bookmarked);
+        }
+        if (detailOpenForThis && currentFilter !== 'bookmark') {
+          updateCardChips(id); // 카드 별표만 부분 갱신 (상세 보존)
+        } else {
+          renderList();
+        }
         showToast(data.is_bookmarked ? '즐겨찾기에 추가했습니다.' : '즐겨찾기를 해제했습니다.', 'success');
       } catch (e) { showToast('네트워크 오류', 'error'); }
+    }
+
+    // 상세 즐겨찾기 버튼만 부분 갱신 — 아이콘·색·라벨만, 댓글 에디터 보존
+    function updateDetailBookmarkBtn(isBookmarked) {
+      const btn = document.getElementById('nbDetailBookmark');
+      if (!btn) return;
+      btn.innerHTML = `<i class="fa${isBookmarked ? 's' : 'r'} fa-star" style="color:${isBookmarked ? 'var(--warning)' : 'var(--gray-500)'};"></i> ${isBookmarked ? '즐겨찾기됨' : '즐겨찾기'}`;
+    }
+
+    // 목록 카드 1건의 리액션 칩·별표만 부분 갱신 — 카드 전체를 재생성하지 않아
+    // 열려 있는 아코디언 상세(nbSlot)와 작성 중인 댓글 에디터가 보존된다.
+    function updateCardChips(id) {
+      const n = allNotices.find(x => x.id === id);
+      const card = document.querySelector(`.nb-card[data-id="${id}"]`);
+      if (!n || !card) return;
+      // 리액션 칩 (count>0 인 것만, renderCard와 동일 규칙)
+      const rx = n.reactions || {};
+      const rxLabels = { like: '👍', check: '✅', love: '💡', wow: '🎉' };
+      const rxHtml = Object.keys(rxLabels).filter(k => rx[k]).map(k => `<span class="rx">${rxLabels[k]} ${rx[k]}</span>`).join('');
+      const metaRow = card.querySelector('.nb-card-meta');
+      if (metaRow) {
+        let chips = metaRow.querySelector('.nb-card-reactions');
+        if (rxHtml) {
+          if (!chips) { chips = document.createElement('div'); chips.className = 'nb-card-reactions'; metaRow.appendChild(chips); }
+          chips.innerHTML = rxHtml;
+        } else if (chips) {
+          chips.remove();
+        }
+      }
+      // 별표 버튼 상태
+      const star = card.querySelector('.nb-bookmark');
+      if (star) {
+        const on = !!n.is_bookmarked_by_me;
+        star.classList.toggle('on', on);
+        const icon = star.querySelector('i');
+        if (icon) { icon.classList.toggle('fas', on); icon.classList.toggle('far', !on); }
+      }
     }
 
     // ─────────────────────────────────────

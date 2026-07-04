@@ -259,7 +259,7 @@ function initSocket(io) {
         let studentData = {};
         try {
           const es = db.prepare(
-            'SELECT tab_switch_count, current_focus, score, status, submitted_at FROM exam_students WHERE exam_id = ? AND user_id = ?'
+            'SELECT tab_switch_count, total_leave_time, current_focus, score, status, submitted_at FROM exam_students WHERE exam_id = ? AND user_id = ?'
           ).get(eid, uid);
           if (es) studentData = es;
         } catch (e) {}
@@ -269,6 +269,7 @@ function initSocket(io) {
           displayName: info.displayName,
           joinedAt: info.joinedAt,
           tabSwitchCount: studentData.tab_switch_count || 0,
+          totalLeaveTime: studentData.total_leave_time || 0,
           focused: studentData.current_focus !== 0,
           status: studentData.status || 'active',
           score: studentData.score,
@@ -381,11 +382,12 @@ function initSocket(io) {
           if (user) displayName = user.display_name || user.username;
         } catch (e) {}
 
-        // tab_switch_count 조회
+        // tab_switch_count / total_leave_time 조회
         let tabSwitchCount = 0;
+        let totalLeaveTime = 0;
         try {
-          const es = db.prepare('SELECT tab_switch_count FROM exam_students WHERE exam_id = ? AND user_id = ?').get(String(examId), userId);
-          if (es) tabSwitchCount = es.tab_switch_count;
+          const es = db.prepare('SELECT tab_switch_count, total_leave_time FROM exam_students WHERE exam_id = ? AND user_id = ?').get(String(examId), userId);
+          if (es) { tabSwitchCount = es.tab_switch_count; totalLeaveTime = es.total_leave_time || 0; }
         } catch (e) {}
 
         // tab_events에 이벤트 기록
@@ -404,6 +406,7 @@ function initSocket(io) {
           studentId: userId,
           displayName,
           tabSwitchCount,
+          totalLeaveTime,
           isFocused: false,
           timestamp: new Date().toISOString(),
           examId
@@ -423,11 +426,12 @@ function initSocket(io) {
     socket.on('tab:return', ({ examId }) => {
       let displayName = '학생';
       let tabSwitchCount = 0;
+      let totalLeaveTime = 0;
       try {
         const user = db.prepare('SELECT display_name, username FROM users WHERE id = ?').get(userId);
         if (user) displayName = user.display_name || user.username;
-        const es = db.prepare('SELECT tab_switch_count FROM exam_students WHERE exam_id = ? AND user_id = ?').get(String(examId), userId);
-        if (es) tabSwitchCount = es.tab_switch_count;
+        const es = db.prepare('SELECT tab_switch_count, total_leave_time FROM exam_students WHERE exam_id = ? AND user_id = ?').get(String(examId), userId);
+        if (es) { tabSwitchCount = es.tab_switch_count; totalLeaveTime = es.total_leave_time || 0; }
       } catch (e) {}
 
       // tab_events에 복귀 이벤트 기록
@@ -445,6 +449,7 @@ function initSocket(io) {
         studentId: userId,
         displayName,
         tabSwitchCount,
+        totalLeaveTime,
         isFocused: true,
         timestamp: new Date().toISOString(),
         examId
@@ -463,6 +468,20 @@ function initSocket(io) {
     socket.on('focus:lost', ({ examId, duration }) => {
       if (duration && duration > 0) {
         try { examDb.updateLeaveTime(examId, userId, Math.round(duration)); } catch (e) {}
+        // 누적된 이탈 시간을 감독관에게 실시간 반영
+        try {
+          const es = db.prepare('SELECT total_leave_time, tab_switch_count FROM exam_students WHERE exam_id = ? AND user_id = ?').get(String(examId), userId);
+          if (es) {
+            io.to(`exam:${examId}:supervisor`).emit('student:leave-time', {
+              userId,
+              studentId: userId,
+              examId,
+              totalLeaveTime: es.total_leave_time || 0,
+              tabSwitchCount: es.tab_switch_count || 0,
+              timestamp: new Date().toISOString()
+            });
+          }
+        } catch (e) {}
       }
     });
 
@@ -944,15 +963,23 @@ initSocket.notifySubmission = function({ examId, userId, score, submittedAt }) {
   if (!io) return;
 
   let displayName = '학생';
+  let totalLeaveTime = 0;
+  let tabSwitchCount = 0;
   try {
     const user = db.prepare('SELECT display_name, username FROM users WHERE id = ?').get(userId);
     if (user) displayName = user.display_name || user.username;
+  } catch (e) {}
+  try {
+    const es = db.prepare('SELECT total_leave_time, tab_switch_count FROM exam_students WHERE exam_id = ? AND user_id = ?').get(String(examId), userId);
+    if (es) { totalLeaveTime = es.total_leave_time || 0; tabSwitchCount = es.tab_switch_count || 0; }
   } catch (e) {}
 
   io.to(`exam:${examId}:supervisor`).emit('student:submitted', {
     userId,
     displayName,
     score,
+    totalLeaveTime,
+    tabSwitchCount,
     submittedAt: submittedAt || new Date().toISOString()
   });
 };

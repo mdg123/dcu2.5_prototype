@@ -816,33 +816,38 @@
     }
 
     // ─── 이탈 감지 (강화) ──────────────────────────────────────────────────
+    //   이탈 "시간" 누적 계약: 이탈 시작 시각(leaveStartTime)을 기록하고,
+    //   복귀 시 경과 초(seconds)를 focus:lost{duration}로 서버에 보낸다.
+    //   서버(socket/index.js)는 focus:lost 의 duration>0 일 때만 total_leave_time 을
+    //   누적하므로, 이 이벤트 계약이 정본이다(class/exam-view.html 과 동일 패턴).
+    //   leaveStartTime===0 이면 이탈 중이 아님 → 중복 복귀 처리 방지.
+    function markLeave() {
+      if (!examStarted || isSubmitted) return;
+      // 이미 이탈 상태면(예: blur 직후 visibilitychange) 시작 시각 유지 — 이중 카운트 방지
+      if (leaveStartTime) return;
+      leaveCount++;
+      leaveStartTime = Date.now();
+      if (socket) socket.emit('tab:leave', { examId });
+      showTabAlert(`화면 이탈 ${leaveCount}회 감지되었습니다. 시험 화면에 집중해주세요.`);
+    }
+    function markReturn() {
+      if (!examStarted || isSubmitted) return;
+      if (!leaveStartTime) return; // 이탈 기록이 없으면 무시
+      const durationSec = (Date.now() - leaveStartTime) / 1000;
+      leaveStartTime = 0;
+      if (socket) {
+        socket.emit('tab:return', { examId });
+        // 서버가 이탈 시간을 누적하는 정본 이벤트 — 초 단위 경과값 전송
+        if (durationSec > 0) socket.emit('focus:lost', { examId, duration: durationSec });
+      }
+    }
     function setupTabDetection() {
       document.addEventListener('visibilitychange', () => {
-        if (!examStarted || isSubmitted) return;
-        if (document.hidden) {
-          leaveCount++;
-          leaveStartTime = Date.now();
-          if (socket) socket.emit('tab:leave', { examId, type: 'visibilitychange' });
-          showTabAlert(`화면 이탈 ${leaveCount}회 감지되었습니다. 시험 화면에 집중해주세요.`);
-        } else {
-          const duration = Date.now() - leaveStartTime;
-          if (socket) {
-            socket.emit('tab:return', { examId });
-            if (duration > 0) socket.emit('focus:gained', { examId, duration });
-          }
-        }
+        if (document.hidden) markLeave();
+        else markReturn();
       });
-      window.addEventListener('blur', () => {
-        if (!examStarted || isSubmitted) return;
-        if (socket) socket.emit('focus:lost', { examId, duration: 0 });
-      });
-      // 마우스가 시험 창 영역을 벗어남 감지
-      document.addEventListener('mouseleave', () => {
-        if (!examStarted || isSubmitted) return;
-        leaveCount++;
-        if (socket) socket.emit('tab:leave', { examId, type: 'mouseleave' });
-        showTabAlert(`화면 이탈 ${leaveCount}회 감지되었습니다. 시험 화면에 집중해주세요.`);
-      });
+      window.addEventListener('blur', markLeave);
+      window.addEventListener('focus', markReturn);
     }
 
     function showTabAlert(msg) {

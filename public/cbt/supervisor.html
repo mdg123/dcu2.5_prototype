@@ -423,8 +423,9 @@
             <th style="width:48px;">No</th>
             <th>이름</th>
             <th>상태</th>
-            <th>상태</th>
+            <th>집중</th>
             <th style="width:90px;">이탈 횟수</th>
+            <th style="width:100px;">이탈 시간</th>
             <th style="width:90px;">답안 진행</th>
             <th style="width:80px;">점수</th>
             <th style="width:100px;">제출 시간</th>
@@ -432,7 +433,7 @@
         </thead>
         <tbody id="studentTableBody">
           <tr>
-            <td colspan="8" style="text-align:center;padding:40px;color:var(--gray-400);">
+            <td colspan="9" style="text-align:center;padding:40px;color:var(--gray-400);">
               <i class="fas fa-spinner fa-spin" style="font-size:24px;margin-bottom:10px;display:block;"></i>
               학생 데이터를 불러오는 중...
             </td>
@@ -577,6 +578,7 @@
               status: s.status === 'submitted' ? 'submitted' : 'active',
               focused: true,
               leaveCount: s.tab_switch_count || 0,
+              leaveTime: s.total_leave_time || 0,
               answered: 0,
               total: qs.length,
               score: s.score,
@@ -609,11 +611,14 @@
             const prev = students[s.userId] || {};
             const incomingLeave = s.tabSwitchCount || 0;
             const prevLeave = prev.leaveCount || 0;
+            const incomingLeaveTime = s.totalLeaveTime || 0;
+            const prevLeaveTime = prev.leaveTime || 0;
             students[s.userId] = {
               name: s.displayName || prev.name || '학생',
               status: s.status === 'submitted' ? 'submitted' : (s.status === 'disconnected' ? 'disconnected' : (prev.status || 'active')),
               focused: s.focused !== undefined ? (s.focused !== false) : (prev.focused !== false),
               leaveCount: Math.max(incomingLeave, prevLeave),
+              leaveTime: Math.max(incomingLeaveTime, prevLeaveTime),
               answered: prev.answered || 0,
               total: qs.length || prev.total || 0,
               score: s.score != null ? s.score : prev.score,
@@ -637,6 +642,11 @@
       // 학생 포커스 복귀
       socket.on('student:tab-return', (data) => {
         onStudentReturn(data);
+      });
+
+      // 이탈 누적 시간 실시간 갱신
+      socket.on('student:leave-time', (data) => {
+        onStudentLeaveTime(data);
       });
 
       // 학생 제출 완료
@@ -688,7 +698,7 @@
       const qs = examData ? (typeof examData.questions === 'string' ? JSON.parse(examData.questions) : (examData.questions || [])) : [];
       students[data.userId] = {
         name: data.displayName || data.username || '학생',
-        status: 'active', focused: true, leaveCount: 0, answered: 0, total: qs.length, score: null, submittedAt: null
+        status: 'active', focused: true, leaveCount: 0, leaveTime: 0, answered: 0, total: qs.length, score: null, submittedAt: null
       };
     } else {
       students[data.userId].status = 'active';
@@ -703,12 +713,14 @@
     // KPI(이탈 감지)와 표 사이 불일치를 방지한다.
     if (!students[uid]) {
       const qs = examData ? (typeof examData.questions === 'string' ? JSON.parse(examData.questions) : (examData.questions || [])) : [];
-      students[uid] = { name: data.displayName || '학생', status: 'active', focused: false, leaveCount: 0, answered: 0, total: qs.length, score: null, submittedAt: null };
+      students[uid] = { name: data.displayName || '학생', status: 'active', focused: false, leaveCount: 0, leaveTime: 0, answered: 0, total: qs.length, score: null, submittedAt: null };
     }
     students[uid].focused = false;
     // 서버 누적값 우선, 그게 없으면 +1, 그러나 이전값보다 작아지지 않도록 보장
     const next = data.tabSwitchCount || (students[uid].leaveCount + 1);
     students[uid].leaveCount = Math.max(next, students[uid].leaveCount || 0);
+    // 이탈 시간은 복귀 시점에 누적되므로 이탈 순간에는 서버값이 있으면 반영(작아지지 않게)
+    if (data.totalLeaveTime != null) students[uid].leaveTime = Math.max(data.totalLeaveTime, students[uid].leaveTime || 0);
     if (data.displayName) students[uid].name = data.displayName;
     renderTable(); updateStats();
     showLiveAlert(`${students[uid].name} 화면 이탈 감지 (${students[uid].leaveCount}회)`);
@@ -717,18 +729,47 @@
 
   function onStudentReturn(data) {
     const uid = data.userId || data.studentId;
-    if (!students[uid]) return;
+    if (!uid) return;
+    // 감독 입장 전 복귀 이벤트 등으로 학생이 없을 수 있음 → 생성하여 불일치 방지
+    if (!students[uid]) {
+      const qs = examData ? (typeof examData.questions === 'string' ? JSON.parse(examData.questions) : (examData.questions || [])) : [];
+      students[uid] = { name: data.displayName || '학생', status: 'active', focused: true, leaveCount: 0, leaveTime: 0, answered: 0, total: qs.length, score: null, submittedAt: null };
+    }
     students[uid].focused = true;
-    students[uid].leaveCount = data.tabSwitchCount || students[uid].leaveCount;
+    students[uid].leaveCount = Math.max(data.tabSwitchCount || 0, students[uid].leaveCount || 0);
+    // 복귀 시점에 누적 이탈 시간이 확정됨 — 작아지지 않게 반영
+    if (data.totalLeaveTime != null) students[uid].leaveTime = Math.max(data.totalLeaveTime, students[uid].leaveTime || 0);
     if (data.displayName) students[uid].name = data.displayName;
     renderTable(); updateStats();
   }
 
+  // 서버가 focus:lost 누적 직후 보내는 실시간 이탈 시간 갱신 이벤트
+  function onStudentLeaveTime(data) {
+    const uid = data.userId || data.studentId;
+    if (!uid) return;
+    if (!students[uid]) {
+      const qs = examData ? (typeof examData.questions === 'string' ? JSON.parse(examData.questions) : (examData.questions || [])) : [];
+      students[uid] = { name: data.displayName || '학생', status: 'active', focused: true, leaveCount: 0, leaveTime: 0, answered: 0, total: qs.length, score: null, submittedAt: null };
+    }
+    if (data.totalLeaveTime != null) students[uid].leaveTime = Math.max(data.totalLeaveTime, students[uid].leaveTime || 0);
+    if (data.tabSwitchCount != null) students[uid].leaveCount = Math.max(data.tabSwitchCount, students[uid].leaveCount || 0);
+    renderTable(); updateStats();
+  }
+
   function onStudentSubmitted(data) {
-    if (!students[data.userId]) return;
-    students[data.userId].status = 'submitted';
-    students[data.userId].score = data.score;
-    students[data.userId].submittedAt = data.submittedAt || new Date().toISOString();
+    const uid = data.userId || data.studentId;
+    if (!uid) return;
+    // 감독 입장 전 제출 / direct 제출 학생도 stats에 반영 (미등록이면 생성) — tab-leave 핸들러와 대칭
+    if (!students[uid]) {
+      const qs = examData ? (typeof examData.questions === 'string' ? JSON.parse(examData.questions) : (examData.questions || [])) : [];
+      students[uid] = { name: data.displayName || '학생', status: 'active', focused: true, leaveCount: 0, leaveTime: 0, answered: 0, total: qs.length, score: null, submittedAt: null };
+    }
+    students[uid].status = 'submitted';
+    students[uid].score = data.score;
+    if (data.displayName) students[uid].name = data.displayName;
+    if (data.totalLeaveTime != null) students[uid].leaveTime = Math.max(data.totalLeaveTime, students[uid].leaveTime || 0);
+    if (data.tabSwitchCount != null) students[uid].leaveCount = Math.max(data.tabSwitchCount, students[uid].leaveCount || 0);
+    students[uid].submittedAt = data.submittedAt || new Date().toISOString();
     renderTable(); updateStats();
     renderAccuracyChart();
   }
@@ -851,7 +892,7 @@
     );
 
     if (entries.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;padding:40px;color:var(--gray-400);">
+      tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;padding:40px;color:var(--gray-400);">
         <i class="fas fa-users" style="font-size:32px;margin-bottom:10px;display:block;"></i>
         아직 접속한 학생이 없습니다.
       </td></tr>`;
@@ -862,6 +903,7 @@
       const statusHtml = getStatusBadgeHtml(s.status);
       const focusHtml = getFocusHtml(s);
       const leaveHtml = getLeaveCountHtml(s.leaveCount);
+      const leaveTimeHtml = getLeaveTimeHtml(s.leaveTime);
       const progressHtml = s.status === 'submitted'
         ? `<span style="color:var(--success);font-weight:600;">${s.total}/${s.total}</span>`
         : `<span style="color:var(--gray-600);">${s.answered}/${s.total}</span>`;
@@ -875,6 +917,7 @@
         <td>${statusHtml}</td>
         <td>${focusHtml}</td>
         <td>${leaveHtml}</td>
+        <td>${leaveTimeHtml}</td>
         <td>${progressHtml}</td>
         <td>${scoreHtml}</td>
         <td style="font-size:13px;color:var(--gray-500);">${submitTime}</td>
@@ -907,6 +950,21 @@
     if (!count) return `<span class="leave-count none"><i class="fas fa-minus"></i> 0회</span>`;
     const cls = count >= 3 ? 'high' : 'low';
     return `<span class="leave-count ${cls}"><i class="fas fa-sign-out-alt"></i> ${count}회</span>`;
+  }
+
+  // 이탈 누적 시간(초) → "N초" / "M분 N초" 표기. 30초 이상이면 경고 색.
+  function formatLeaveDuration(sec) {
+    const s = Math.max(0, Math.round(sec || 0));
+    if (s < 60) return `${s}초`;
+    const m = Math.floor(s / 60);
+    const r = s % 60;
+    return r ? `${m}분 ${r}초` : `${m}분`;
+  }
+  function getLeaveTimeHtml(sec) {
+    const s = Math.max(0, Math.round(sec || 0));
+    if (!s) return `<span class="leave-count none"><i class="fas fa-minus"></i> 0초</span>`;
+    const cls = s >= 30 ? 'high' : 'low';
+    return `<span class="leave-count ${cls}"><i class="fas fa-clock"></i> ${formatLeaveDuration(s)}</span>`;
   }
 
   function getScoreBadgeHtml(score) {
@@ -943,10 +1001,12 @@
         const qs = examData ? (typeof examData.questions === 'string' ? JSON.parse(examData.questions) : (examData.questions || [])) : [];
         data.students.forEach(s => {
           if (!students[s.user_id]) {
-            students[s.user_id] = { name: s.display_name || s.username || '학생', status: 'active', focused: true, leaveCount: 0, answered: 0, total: qs.length, score: null, submittedAt: null };
+            students[s.user_id] = { name: s.display_name || s.username || '학생', status: 'active', focused: true, leaveCount: 0, leaveTime: 0, answered: 0, total: qs.length, score: null, submittedAt: null };
           }
           const prevLeave = students[s.user_id].leaveCount || 0;
           students[s.user_id].leaveCount = Math.max(s.tab_switch_count || 0, prevLeave);
+          // total_leave_time 도 단조 증가 — max() 로 보존 (API 미제공 시 || 0 로 무해)
+          students[s.user_id].leaveTime = Math.max(s.total_leave_time || 0, students[s.user_id].leaveTime || 0);
           students[s.user_id].score = s.score != null ? s.score : students[s.user_id].score;
           students[s.user_id].submittedAt = s.submitted_at || students[s.user_id].submittedAt;
           if (s.status === 'submitted') students[s.user_id].status = 'submitted';
@@ -1006,9 +1066,9 @@
   // ─── 내보내기 ─────────────────────────────────────────────────────────────────
   function exportResults() {
     // TODO: 개발자가 CSV/Excel 내보내기 구현
-    const rows = [['No', '이름', '상태', '이탈횟수', '진행', '점수', '제출시간']];
+    const rows = [['No', '이름', '상태', '이탈횟수', '이탈시간', '진행', '점수', '제출시간']];
     Object.values(students).forEach((s, i) => {
-      rows.push([i+1, s.name, s.status, s.leaveCount, `${s.answered}/${s.total}`, s.score ?? '-', s.submittedAt ? formatTime(s.submittedAt) : '-']);
+      rows.push([i+1, s.name, s.status, s.leaveCount, formatLeaveDuration(s.leaveTime), `${s.answered}/${s.total}`, s.score ?? '-', s.submittedAt ? formatTime(s.submittedAt) : '-']);
     });
     const csv = rows.map(r => r.join(',')).join('\n');
     const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
@@ -1022,16 +1082,16 @@
   // ─── 목업 데이터 (Socket.IO 미연결 환경) ────────────────────────────────────
   function loadMockStudents() {
     const mockData = [
-      { uid: 1, name: '김민준', status: 'active', focused: true, leaveCount: 0, answered: 7, total: 10, score: null },
-      { uid: 2, name: '이서연', status: 'active', focused: false, leaveCount: 2, answered: 5, total: 10, score: null },
-      { uid: 3, name: '박지호', status: 'submitted', focused: true, leaveCount: 0, answered: 10, total: 10, score: 90 },
-      { uid: 4, name: '최수아', status: 'active', focused: true, leaveCount: 1, answered: 3, total: 10, score: null },
-      { uid: 5, name: '정태양', status: 'active', focused: false, leaveCount: 4, answered: 8, total: 10, score: null },
-      { uid: 6, name: '한예린', status: 'submitted', focused: true, leaveCount: 0, answered: 10, total: 10, score: 75 },
-      { uid: 7, name: '오준서', status: 'waiting', focused: true, leaveCount: 0, answered: 0, total: 10, score: null },
+      { uid: 1, name: '김민준', status: 'active', focused: true, leaveCount: 0, leaveTime: 0, answered: 7, total: 10, score: null },
+      { uid: 2, name: '이서연', status: 'active', focused: false, leaveCount: 2, leaveTime: 18, answered: 5, total: 10, score: null },
+      { uid: 3, name: '박지호', status: 'submitted', focused: true, leaveCount: 0, leaveTime: 0, answered: 10, total: 10, score: 90 },
+      { uid: 4, name: '최수아', status: 'active', focused: true, leaveCount: 1, leaveTime: 6, answered: 3, total: 10, score: null },
+      { uid: 5, name: '정태양', status: 'active', focused: false, leaveCount: 4, leaveTime: 95, answered: 8, total: 10, score: null },
+      { uid: 6, name: '한예린', status: 'submitted', focused: true, leaveCount: 0, leaveTime: 0, answered: 10, total: 10, score: 75 },
+      { uid: 7, name: '오준서', status: 'waiting', focused: true, leaveCount: 0, leaveTime: 0, answered: 0, total: 10, score: null },
     ];
     mockData.forEach(d => {
-      students[d.uid] = { name: d.name, status: d.status, focused: d.focused, leaveCount: d.leaveCount, answered: d.answered, total: d.total, score: d.score, submittedAt: d.status === 'submitted' ? new Date().toISOString() : null };
+      students[d.uid] = { name: d.name, status: d.status, focused: d.focused, leaveCount: d.leaveCount, leaveTime: d.leaveTime, answered: d.answered, total: d.total, score: d.score, submittedAt: d.status === 'submitted' ? new Date().toISOString() : null };
     });
     renderTable(); updateStats();
   }
