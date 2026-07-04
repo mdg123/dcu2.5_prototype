@@ -148,9 +148,16 @@ function incrementViewCount(id) {
 
 // 댓글
 function createComment(postId, authorId, content, parentId = null) {
+  // 대댓글 교차 격리: parent_id 가 있으면 그 부모 댓글이 "같은 게시글(post_id)" 소속인지 검증.
+  // 불일치(다른 게시글의 댓글 id)면 무시하고 top-level 로 강등한다. (알림장 addComment 와 대칭)
+  let pid = null;
+  if (parentId != null) {
+    const p = db.prepare('SELECT id, post_id FROM comments WHERE id = ?').get(parentId);
+    if (p && p.post_id === postId) pid = p.id;
+  }
   const info = db.prepare(
     'INSERT INTO comments (post_id, author_id, content, parent_id) VALUES (?, ?, ?, ?)'
-  ).run(postId, authorId, content, parentId);
+  ).run(postId, authorId, content, pid);
   return getCommentById(info.lastInsertRowid);
 }
 

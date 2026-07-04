@@ -28,8 +28,11 @@ function getUserRooms(userId) {
 }
 
 function getRoomMembers(roomId) {
+  // u.id AS user_id 추가(additive) — FE(class-home.html)가 m.user_id 로 1:1 상대(파트너)를
+  //   판별하므로 이 키가 없으면 항상 첫 멤버(=본인일 수 있음)를 반환해 상대 이름이 본인으로 오표시됨.
+  //   기존 u.id 도 유지해 다른 소비자를 깨뜨리지 않는다.
   return db.prepare(`
-    SELECT u.id, u.display_name, u.username, u.role
+    SELECT u.id, u.id AS user_id, u.display_name, u.username, u.role
     FROM message_room_members mrm JOIN users u ON mrm.user_id = u.id
     WHERE mrm.room_id = ?
   `).all(roomId);

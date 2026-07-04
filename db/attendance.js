@@ -20,6 +20,42 @@ function checkIn(classId, userId, comment = null, emotion = null, emotionReason 
   }
 }
 
+// 오늘 출석 자동 기록 (멱등) — 학습 활동 발생 시 라우트가 호출.
+//   수업 이수·과제 열람·평가 응시·설문 응답·게시판 활동 등에서 "오늘 출석"을 자동 present 기록한다.
+//   ⚠ 멱등: 오늘 이미 출석행(수동 checkin·감정 포함)이 있으면 절대 덮어쓰지 않고 skip.
+//   날짜 규칙은 기존 checkIn/isCheckedIn 과 동일(new Date().toISOString().slice(0,10), YYYY-MM-DD).
+//   스키마 근거(실 DB PRAGMA table_info): attendance(class_id,user_id,attendance_date,status,
+//     comment,checked_at,emotion,emotion_reason,emotion_reason_type,emotion_score,checkin_source),
+//     UNIQUE(class_id,user_id,attendance_date), status CHECK IN('present','absent','late','excused').
+//   source 는 checkin_source 컬럼에 기록(예: 'lesson_view','homework_submit','exam_take',
+//     'survey_respond','post_read','comment_write'). 미지정 시 'auto'.
+function ensureTodayAttendance(classId, userId, source = 'auto') {
+  if (!classId || !userId) return { success: false, skipped: true };
+  const today = new Date().toISOString().slice(0, 10);
+
+  // 이미 오늘 출석행이 있으면 무변경(수동 checkin·감정 데이터 보존).
+  const existing = db.prepare(
+    'SELECT id FROM attendance WHERE class_id = ? AND user_id = ? AND attendance_date = ?'
+  ).get(classId, userId, today);
+  if (existing) return { success: false, already: true, id: existing.id };
+
+  try {
+    const info = db.prepare(`
+      INSERT INTO attendance (class_id, user_id, attendance_date, status, checkin_source)
+      VALUES (?, ?, ?, 'present', ?)
+    `).run(classId, userId, today, source || 'auto');
+    // 자동 출석도 게이미피케이션 스트릭·뱃지에 반영.
+    checkAndAwardBadges(classId, userId);
+    return { success: true, date: today, id: info.lastInsertRowid, auto: true };
+  } catch (e) {
+    // 동시 요청 레이스 등으로 UNIQUE 충돌 시 이미 기록된 것으로 간주(멱등 유지).
+    if (e.message && e.message.includes('UNIQUE')) {
+      return { success: false, already: true };
+    }
+    throw e;
+  }
+}
+
 // 오늘 출석 여부 확인
 function isCheckedIn(classId, userId) {
   const today = new Date().toISOString().slice(0, 10);
@@ -316,7 +352,7 @@ function getWeekStart() {
 }
 
 module.exports = {
-  checkIn, isCheckedIn, getAttendanceByDate, getAttendanceRange,
+  checkIn, ensureTodayAttendance, isCheckedIn, getAttendanceByDate, getAttendanceRange,
   getStreak, getUserStats, getRanking, getClassStats,
   getSettings, updateSettings, getAttendanceTable, getUserBadges
 };

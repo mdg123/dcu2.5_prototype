@@ -178,6 +178,14 @@ router.get('/:classId/:postId', requireAuth, requireMember, (req, res) => {
   try {
     const post = boardDb.getPostById(parseInt(req.params.postId), req.user.id);
     if (!post || post.class_id !== req.classId) return res.status(404).json({ success: false, message: '게시글을 찾을 수 없습니다.' });
+    // 승인 가드: 교사(개설자)·관리자는 전부 열람 가능. 그 외에는
+    // approved(또는 레거시 approval_status IS NULL) 또는 본인 글만 열람. 그렇지 않으면 존재를 은닉(404).
+    // (목록 getPostsByClass 의 은닉 규칙과 대칭 — 미승인/반려 글이 상세로만 뚫리던 문제 차단)
+    const isPrivileged = req.myRole === 'owner' || req.user.role === 'admin';
+    const isVisible = post.approval_status == null || post.approval_status === 'approved' || post.author_id === req.user.id;
+    if (!isPrivileged && !isVisible) {
+      return res.status(404).json({ success: false, message: '게시글을 찾을 수 없습니다.' });
+    }
     boardDb.incrementViewCount(post.id);
     const comments = boardDb.getComments(post.id);
     try { ensureTodayAttendance(req.classId, req.user.id, 'post_read'); } catch (e) {}

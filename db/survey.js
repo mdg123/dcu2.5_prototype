@@ -1,5 +1,28 @@
 const db = require('./index');
 
+// questions JSON 을 방어적으로 배열로 파싱한다.
+//  - 정상: '[{...},{...}]' → 배열
+//  - 이중 인코딩(손상): '"[{...}]"' (JSON.parse 하면 문자열) → 한 번 더 unwrap 시도
+//  - 그 외 손상/비배열 → [] (question_count 0)
+// 감사가 survey id=2 에서 "236문항" 이상치를 본 원인 = 이중 인코딩된 문자열의 .length 를 셌기 때문.
+function parseQuestions(raw) {
+  if (raw == null) return [];
+  let v = raw;
+  try {
+    for (let i = 0; i < 2; i++) {          // 최대 2회 파싱(이중 인코딩까지 unwrap)
+      if (Array.isArray(v)) return v;
+      if (typeof v !== 'string') return [];
+      v = JSON.parse(v);
+    }
+    return Array.isArray(v) ? v : [];
+  } catch { return []; }
+}
+
+// 문항 수(FE 가 소비하는 필드명 = question_count). 파싱 실패/비배열 시 0.
+function countQuestions(raw) {
+  return parseQuestions(raw).length;
+}
+
 function createSurvey(classId, authorId, data) {
   const info = db.prepare(`
     INSERT INTO surveys (class_id, author_id, title, description, questions, status, start_date, end_date, is_anonymous)
@@ -19,7 +42,8 @@ function getSurveyById(id) {
     FROM surveys s JOIN users u ON s.author_id = u.id WHERE s.id = ?
   `).get(id);
   if (!s) return null;
-  try { s.questions = JSON.parse(s.questions || '[]'); } catch { s.questions = []; }
+  s.questions = parseQuestions(s.questions);   // 방어적 파싱(이중 인코딩 unwrap 포함)
+  s.question_count = s.questions.length;
   return s;
 }
 
@@ -36,7 +60,7 @@ function getSurveysByClass(classId, { status, page = 1, limit = 20, userId = nul
     : '';
   const surveys = db.prepare(`
     SELECT s.id, s.class_id, s.author_id, s.title, s.description, s.status,
-           s.start_date, s.end_date, s.is_anonymous, s.created_at,
+           s.start_date, s.end_date, s.is_anonymous, s.created_at, s.questions,
            u.display_name as author_name,
            (SELECT COUNT(*) FROM survey_responses WHERE survey_id = s.id) as response_count,
            (SELECT COUNT(DISTINCT sr.user_id) FROM survey_responses sr
@@ -52,7 +76,13 @@ function getSurveysByClass(classId, { status, page = 1, limit = 20, userId = nul
            ${myRespondedSelect}
     FROM surveys s JOIN users u ON s.author_id = u.id
     ${where} ORDER BY s.created_at DESC LIMIT ? OFFSET ?
-  `).all(...params, limit, (page - 1) * limit);
+  `).all(...params, limit, (page - 1) * limit)
+    .map(s => {
+      // FE(class-home.html)가 소비하는 문항 수 필드. 방어적 파싱(손상 JSON → 0).
+      s.question_count = countQuestions(s.questions);
+      delete s.questions;   // 목록 페이로드에 원본 questions 블롭은 내보내지 않음(count 만 소비)
+      return s;
+    });
   return { surveys, total, totalPages: Math.ceil(total / limit) || 1 };
 }
 
@@ -91,13 +121,20 @@ function getResponse(surveyId, userId) {
   return r || null;
 }
 
-function getResponses(surveyId) {
+// isAnonymous=true 이면 응답자 신원 필드(user_id/display_name/username)를 제거해 반환한다.
+// 응답 내용(answers)·제출시각·점수 등 집계에 필요한 필드는 유지 → 통계엔 지장 없음.
+function getResponses(surveyId, isAnonymous = false) {
   return db.prepare(`
     SELECT sr.*, u.display_name, u.username
     FROM survey_responses sr JOIN users u ON sr.user_id = u.id
     WHERE sr.survey_id = ? ORDER BY sr.submitted_at
   `).all(surveyId).map(r => {
     try { r.answers = JSON.parse(r.answers || '[]'); } catch { r.answers = []; }
+    if (isAnonymous) {
+      delete r.user_id;
+      delete r.display_name;
+      delete r.username;
+    }
     return r;
   });
 }

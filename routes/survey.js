@@ -47,7 +47,8 @@ router.get('/:classId/:surveyId', requireAuth, requireMember, (req, res) => {
     let response = null;
     let responses = null;
     if (req.myRole === 'owner') {
-      responses = surveyDb.getResponses(survey.id);
+      // 익명 설문이면 응답자 신원(user_id/display_name/username)을 제거해 전달(집계는 유지)
+      responses = surveyDb.getResponses(survey.id, !!survey.is_anonymous);
     }
     response = surveyDb.getResponse(survey.id, req.user.id);
     res.json({ success: true, survey, response, responses });
@@ -73,7 +74,21 @@ router.delete('/:classId/:surveyId', requireAuth, requireMember, (req, res) => {
 router.post('/:classId/:surveyId/submit', requireAuth, requireMember, (req, res) => {
   try {
     if (!req.body.answers) return res.status(400).json({ success: false, message: '응답을 입력하세요.' });
-    const result = surveyDb.submitResponse(parseInt(req.params.surveyId), req.user.id, req.body.answers);
+    // ── 응답 게이트: 대상 설문이 응답 가능한 상태·기간인지 서버에서 재검증(FE 버튼 숨김 우회 차단) ──
+    const surveyId = parseInt(req.params.surveyId);
+    const target = surveyDb.getSurveyById(surveyId);
+    if (!target || target.class_id !== req.classId) {
+      return res.status(404).json({ success: false, message: '설문을 찾을 수 없습니다.' });
+    }
+    // 진행 중(active)만 응답 허용 — 초안(draft)·마감(closed)·보관(archived) 거부
+    if (target.status !== 'active') {
+      return res.status(403).json({ success: false, message: '지금은 응답할 수 없는 설문입니다.' });
+    }
+    // 응답 기간 종료(end_date 경과) 거부
+    if (target.end_date && new Date(target.end_date).getTime() < Date.now()) {
+      return res.status(403).json({ success: false, message: '응답 기간이 종료된 설문입니다.' });
+    }
+    const result = surveyDb.submitResponse(surveyId, req.user.id, req.body.answers);
     if (!result.success) return res.status(409).json({ success: false, message: '이미 응답한 설문입니다.' });
     logLearningActivity({
       userId: req.user.id,
@@ -93,8 +108,8 @@ router.post('/:classId/:surveyId/submit', requireAuth, requireMember, (req, res)
     } catch (e) { console.error('[mileage:survey_submit]', e.message); }
     // xAPI: 설문 응답 → survey(responded) — comprehension-survey (기본 일반 설문)
     try {
-      const surveyId = parseInt(req.params.surveyId);
-      const survey = surveyDb.getSurveyById(surveyId);
+      // 상단 게이트에서 조회한 target 재사용(중복 쿼리 방지)
+      const survey = target;
       // 응답 정규화: { questionId, answer } 또는 { score } 형태 모두 수용
       const answers = req.body.answers;
       let responses = [];
