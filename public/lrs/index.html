@@ -5708,17 +5708,19 @@ VIEWS['t-warnings'] = async function(root){
       <div id="tTrendHost"></div>
     </section>
 
-    <!-- T-PROG 학기말 도달 외삽 -->
+    <!-- T-PROG 목표 도달 예상 (반 평균 성취 도달률 추세 외삽) -->
     <section class="mastery-section" id="tProgSection">
       <div class="ms-head">
         <div class="ms-titles">
-          <h2 class="mastery-h2"><i class="fas fa-bullseye" aria-hidden="true" style="color:#2563eb;"></i> 학기말 도달 예상</h2>
-          <div class="mastery-sub" id="tProgHeadline">실선=지금까지, 점선=예상 범위(추정). 폭이 넓을수록 불확실해요.</div>
+          <h2 class="mastery-h2"><i class="fas fa-bullseye" aria-hidden="true" style="color:#2563eb;"></i> 목표 도달 예상</h2>
+          <div class="mastery-sub">이 반 <b>전체 학생 평균</b>의 성취 도달률(정답 기준을 채운 성취기준 비율)이 지금 속도로 오르면 <b>목표 80%</b>에 언제 닿을지 예측해요.</div>
+          <div class="mastery-sub" id="tProgHeadline" style="margin-top:4px;">실선=지금까지, 점선=예상 범위(추정). 폭이 넓을수록 불확실해요.</div>
         </div>
         <div class="ms-controls" id="tProgConf"></div>
       </div>
+      <div class="lrs-insight-wrap" id="tProgInsights" style="display:none;"></div>
       <div class="chart-body" id="tProgBody" style="height:280px;">
-        <canvas id="tProgChart" role="img" aria-label="학기말 도달 외삽 차트"></canvas>
+        <canvas id="tProgChart" role="img" aria-label="목표 도달 예상 차트"></canvas>
       </div>
       <div id="tProgFoot"></div>
     </section>
@@ -6154,7 +6156,7 @@ VIEWS['t-warnings'] = async function(root){
       <div class="trend-cards">${cardHtml}</div>`;
   }
 
-  // T-PROG: 반 평균 도달 외삽(점선 밴드)
+  // T-PROG: 반 평균 목표 도달 예상(점선 밴드 외삽)
   function renderClassProjection(ctrend){
     const body = document.getElementById('tProgBody');
     const headline = document.getElementById('tProgHeadline');
@@ -6164,9 +6166,11 @@ VIEWS['t-warnings'] = async function(root){
     const trend = ctrend && ctrend.trend;
     const proj = ctrend && ctrend.projection;
     const target = (ctrend && ctrend.target) || 80;
+    // 분석 멘트(공통 lrs-insight) — 빈 상태에서도 "자료 부족" 안내를 노출.
+    renderInsights(document.getElementById('tProgInsights'), ctrend && ctrend.insights);
     if (!ctrend || !ctrend.success || !trend || trend.status !== 'ok'){
       body.closest('.mastery-section').querySelector('#tProgBody').outerHTML =
-        `<div class="mastery-empty"><i class="fas fa-bullseye me-icon"></i><p>학기말 도달 예상을 그리려면 추세 데이터가 더 필요해요. 학습이 쌓이면 표시됩니다.</p></div>`;
+        `<div class="mastery-empty"><i class="fas fa-bullseye me-icon"></i><p>목표 도달 예상을 그리려면 추세 데이터가 더 필요해요. 학습이 쌓이면 표시됩니다.</p></div>`;
       if (headline) headline.textContent = '실선=지금까지, 점선=예상 범위(추정). 폭이 넓을수록 불확실해요.';
       if (confHost) confHost.innerHTML = '';
       return;
@@ -6174,7 +6178,8 @@ VIEWS['t-warnings'] = async function(root){
     if (confHost) confHost.innerHTML = confBadge(trend.confidence, trend.confidenceKo, `관측 ${trend.observedWeeks||0}주${trend.lowVariance?' · 변동 큼':''}`);
     const reachable = proj && proj.reachable && proj.weeksToReach != null;
     if (headline){
-      if (reachable) headline.innerHTML = `<span class="proj-headline">목표 ${target}% · <strong>이 속도면 약 ${proj.weeksToReach}주 후 도달 예상</strong></span>`;
+      if (reachable && proj.weeksToReach === 0) headline.innerHTML = `<span class="proj-headline">목표 ${target}% · <strong>이미 도달 수준이에요</strong></span>`;
+      else if (reachable) headline.innerHTML = `<span class="proj-headline">목표 ${target}% · <strong>이 속도면 약 ${proj.weeksToReach}주 후 도달 예상</strong></span>`;
       else headline.innerHTML = `<span class="proj-headline warn">목표 ${target}% · <strong>현재 추세로는 도달이 어려워요(보충 권장)</strong></span>`;
     }
     const cfg = buildProjChartData(trend, proj, { target });

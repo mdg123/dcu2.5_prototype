@@ -196,6 +196,63 @@ test('PROJ-4: 이미 도달(r0>=target) → reachable=true, weeks=0', () => {
   assert.equal(p.weeksToReach, 0);
 });
 
+// ── [PROJ-INS] 도달 예측 "분석 멘트"(insights) — 전체 LRS 공통 lrs-insight 소비.
+//   문안은 BE 소유(FE 하드코딩 금지). level 3종(good/warn/info)·1~2개·비어있지 않음·단정 금지.
+const VALID_INS_LEVELS = new Set(['good', 'warn', 'info']);
+function assertInsShape(ins) {
+  assert.ok(Array.isArray(ins), 'insights 는 배열');
+  assert.ok(ins.length >= 1 && ins.length <= 2, `insights 1~2개 (실제 ${ins.length})`);
+  for (const it of ins) {
+    assert.ok(VALID_INS_LEVELS.has(it.level), `level 3종 중 하나 (${it.level})`);
+    assert.ok(typeof it.text === 'string' && it.text.trim().length > 0, '문안 비어있지 않음');
+  }
+}
+
+test('PROJ-INS-1: 자료부족 → info 1개, "부족·주" 안내', () => {
+  const trend = { status: 'insufficient', observedWeeks: 1 };
+  const proj = analytics.projectReach(trend, { target: 80 });
+  const ins = analytics.projectionInsights(trend, proj, 80);
+  assertInsShape(ins);
+  assert.equal(ins[0].level, 'info');
+  assert.match(ins[0].text, /부족|주/);
+});
+
+test('PROJ-INS-2: 이미 목표 도달 → good "이미"', () => {
+  const trend = { status: 'ok', currentRate: 85, slope: 1, confidence: 'high' };
+  const proj = analytics.projectReach(trend, { target: 80 });
+  const ins = analytics.projectionInsights(trend, proj, 80);
+  assertInsShape(ins);
+  assert.equal(ins[0].level, 'good');
+  assert.match(ins[0].text, /이미/);
+});
+
+test('PROJ-INS-3: 상승세 없음(slope<=0) → warn "오르지 않"·보충 유도', () => {
+  const trend = { status: 'ok', currentRate: 40, slope: -3, confidence: 'medium' };
+  const proj = analytics.projectReach(trend, { target: 80 });
+  const ins = analytics.projectionInsights(trend, proj, 80);
+  assertInsShape(ins);
+  assert.equal(ins[0].level, 'warn');
+  assert.match(ins[0].text, /오르지 않|보충/);
+});
+
+test('PROJ-INS-4: 곧 도달(≤6주) → good, 주(週) 언급', () => {
+  const trend = { status: 'ok', currentRate: 70, slope: 4, confidence: 'high' }; // ceil((80-70)/4)=3주
+  const proj = analytics.projectReach(trend, { target: 80 });
+  const ins = analytics.projectionInsights(trend, proj, 80);
+  assertInsShape(ins);
+  assert.equal(ins[0].level, 'good');
+  assert.match(ins[0].text, /주/);
+});
+
+test('PROJ-INS-5: 도달 오래(>6주)+저신뢰 → info + 보조멘트(정확히 2개)', () => {
+  const trend = { status: 'ok', currentRate: 40, slope: 3, confidence: 'low', observedWeeks: 3 }; // ceil(40/3)=14주
+  const proj = analytics.projectReach(trend, { target: 80 });
+  const ins = analytics.projectionInsights(trend, proj, 80);
+  assert.equal(ins.length, 2, '저신뢰면 보조멘트 포함 2개');
+  assertInsShape(ins);
+  assert.equal(ins[0].level, 'info');
+});
+
 // ════════════════════════════════════════════════════════════════════════════
 // [RISK] 위험점수 — 0~100, insufficient 비가산, 감정없음 재정규화, 등급경계, 근거
 // ════════════════════════════════════════════════════════════════════════════

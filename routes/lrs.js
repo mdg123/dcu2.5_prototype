@@ -2356,10 +2356,12 @@ router.get('/trend/class/:id', requireAuth, (req, res) => {
 
     const trend = analytics.computeTrend({ classId });
     const projection = analytics.projectReach(trend, { target });
+    // 분석 멘트(전체 LRS 공통 lrs-insight) — 문안은 BE 소유.
+    const insights = analytics.projectionInsights(trend, projection, target);
 
     res.json({
       success: true, classId, target, studentCount: students.length,
-      trend, projection,
+      trend, projection, insights,
       disclaimer: '이 추정은 규칙 기반 조기경보이며 실제와 다를 수 있어요.',
     });
   } catch (err) {

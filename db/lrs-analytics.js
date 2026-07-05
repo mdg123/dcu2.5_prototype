@@ -267,6 +267,54 @@ function projectReach(trend, { target = 80 } = {}) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// §B-3b. 도달 예측 "분석 멘트"(insights[]) — projectReach 결과를 규칙 기반 문안으로.
+//   전체 LRS 공통 lrs-insight 컴포넌트가 소비(FE 문안 하드코딩 금지 — 문안은 BE 소유).
+//   관점: "이 반 전체 학생 평균 성취 도달률"이 목표(target%)에 언제 닿을지.
+//   톤: 단정 금지·행동 유도(초등 담임 이해). 최대 2개(정보 과부하 차단).
+//   → [{ level:'good|warn|info', icon, text }]
+function projectionInsights(trend, projection, target = 80) {
+  const out = [];
+  const p = projection || {};
+  const t = trend || {};
+  const r0 = (t.currentRate != null) ? Math.round(t.currentRate) : null;
+
+  // (1) 자료 부족 — 추세선을 아직 못 그림(관측 주차 < 3)
+  if (!t || t.status !== 'ok' || p.status === 'insufficient') {
+    const nW = (t && t.observedWeeks != null) ? t.observedWeeks : 0;
+    out.push({ level: 'info', icon: '🔵',
+      text: `아직 추세를 그릴 자료가 부족해요(현재 ${nW}주). 학습이 3주 이상 쌓이면 목표 도달 예측이 표시돼요.` });
+    return out;
+  }
+  // (2) 이미 목표 도달 수준
+  if (p.weeksToReach === 0 || (r0 != null && r0 >= target)) {
+    out.push({ level: 'good', icon: '🟢',
+      text: `이미 반 평균이 목표 ${target}% 수준이에요. 지금 흐름을 유지하면 좋아요.` });
+    return out;
+  }
+  // (3) 상승세 없음 — 현 추세로는 도달 어려움
+  if (!p.reachable || p.slope == null || p.slope <= 0) {
+    out.push({ level: 'warn', icon: '🟠',
+      text: `최근 반 평균 도달률이 오르지 않고 있어요${r0 != null ? `(현재 약 ${r0}%)` : ''}. 반이 어려워하는 성취기준을 함께 보충하면 흐름을 되돌릴 수 있어요.` });
+    return out;
+  }
+  // (4) 도달 가능 — 남은 주(週)에 따라 톤 분기
+  const wk = p.weeksToReach;
+  if (wk <= 6) {
+    out.push({ level: 'good', icon: '🟢',
+      text: `지금 상승 속도면 약 ${wk}주 후 목표 ${target}%에 닿을 전망이에요. 이대로 꾸준히 가면 좋아요.` });
+  } else {
+    out.push({ level: 'info', icon: '🔵',
+      text: `목표 ${target}%까지는 약 ${wk}주가 걸릴 전망이에요. 상승세는 있으니 꾸준함이 관건이에요.` });
+  }
+  // (5) 저신뢰(관측 짧음) 보조 멘트
+  if (t.confidence === CONFIDENCE.LOW) {
+    out.push({ level: 'info', icon: '🔵',
+      text: `관측 기간이 짧아(${t.observedWeeks || 0}주) 예측 폭이 넓어요. 참고용으로만 봐 주세요.` });
+  }
+  return out;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // §B-1. 위험점수(0~100) — 4신호 가중합. 학생별 근거·신뢰 동반.
 //   getClassRiskList(classId, students?) →
 //     { classId, list:[{ userId, name, score, grade, gradeKo, signals{}, reasons[],
@@ -1340,7 +1388,7 @@ module.exports = {
   MIN_WEEKS, MIN_WEEK_ATTEMPTS, DEFAULT_WEEKS, NEGATIVE_EMOTIONS,
   classStudentIds, classStudents,
   weeklyRateSeries: _weeklyRateSeries, // P1-3 classTrend(routes/lrs.js)용 — withContributors 옵션 지원
-  computeTrend, projectReach, getClassRiskList, getPrereqGap, getWeakTrend,
+  computeTrend, projectReach, projectionInsights, getClassRiskList, getPrereqGap, getWeakTrend,
   getEmotionMirror, getShallowLearning, getEmotionEngage, getNextStep,
   riskGrade, invalidateBridge,
   // B4 풀이 속도-정확도 점검 — 속도버킷 상수·헬퍼(하네스 경계 테스트용)
