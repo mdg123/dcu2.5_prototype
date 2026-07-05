@@ -2301,6 +2301,82 @@ router.get('/emotion-engage/class/:id', requireAuth, (req, res) => {
   }
 });
 
+// GET /api/lrs/emotion-engage/student/:userId?classId=&weeks=2
+//   B6-상세 "정서-참여 교차" 점(학생) 클릭 → 상세 근거 팝업(교사).
+//   기획서: 보고서/LRS_정서참여_점클릭_상세팝업_기획서_v1.md §3
+//   권한: canViewClass(그 반 담임/담당·admin) → 403. 그 반 소속 학생이 아니면 403(타 반 노출 차단).
+//   담임 실명 열람 → auditNameAccessLrs 1건. 비담임 소표본 → 이름·이유·라벨 마스킹(masked=true).
+router.get('/emotion-engage/student/:userId', requireAuth, (req, res) => {
+  try {
+    const userId = parseInt(req.params.userId, 10);
+    if (!Number.isInteger(userId)) {
+      return res.status(400).json({ success: false, message: '잘못된 사용자 ID 입니다.' });
+    }
+    const classId = parseInt(req.query.classId, 10);
+    if (!Number.isInteger(classId)) {
+      return res.status(400).json({ success: false, message: 'classId 파라미터가 필요합니다.' });
+    }
+    // (1) 반 열람 권한
+    if (!canViewClass(req, classId)) {
+      return res.status(403).json({ success: false, message: '권한이 없습니다.' });
+    }
+    // (2) 반 소속 교차검증 — 그 반 학생이 아니면 403(타 반 학생 데이터 노출 차단)
+    const members = analytics.classStudentIds(classId);
+    if (!members.includes(userId)) {
+      return res.status(403).json({ success: false, message: '이 반 소속 학생이 아닙니다.' });
+    }
+
+    const weeks = req.query.weeks
+      ? Math.max(1, Math.min(12, parseInt(req.query.weeks, 10) || 2))
+      : 2;
+
+    const data = analytics.getEmotionEngageStudent(userId, classId, { weeks });
+
+    // (3) 마스킹 정책(카드와 동일 SSOT). 담임/담당=실명, 비담임 소표본=익명.
+    const studentCount = members.length;
+    const masked = shouldMaskNames(req, classId, studentCount);
+    let name = data.name;
+    let engagements = data.engagements;
+    let emotions = data.emotions;
+    if (masked) {
+      // 비담임 소표본 → 이름 익명 + 개인 식별 텍스트(감정 이유·활동 대상 라벨) 은닉.
+      const idx = members.indexOf(userId);
+      name = maskNameLabel(idx >= 0 ? idx : 0);
+      engagements = data.engagements.map(e => ({ ...e, label: null }));
+      emotions = data.emotions.map(m => ({ ...m, reason: null }));
+    } else {
+      // 담임/담당 실명 열람 → 거버넌스 audit 1건.
+      auditNameAccessLrs(req, 'emotion-engage-student', classId, 1);
+    }
+
+    // (4) count줄용 반명(있으면). 없으면 생략.
+    let className = null;
+    try {
+      const row = db.prepare('SELECT name FROM classes WHERE id = ?').get(classId);
+      className = row ? row.name : null;
+    } catch (_) { className = null; }
+
+    res.json({
+      success: true,
+      userId: data.userId,
+      name,
+      classId: data.classId,
+      ...(className ? { className } : {}),
+      weeks: data.weeks,
+      quadrant: data.quadrant,
+      hasEmotion: data.hasEmotion,
+      masked,
+      signals: data.signals,
+      engagements,
+      emotions,
+      disclaimer: '규칙 기반 신호예요. 학생과의 대화로 꼭 확인하세요.',
+    });
+  } catch (err) {
+    console.error('[LRS] /emotion-engage/student error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
 // GET /api/lrs/next-step/:userId — A4 "다음 한 걸음"(학생 · 선수→후속 학습 경로).
 //   본인/교사/관리자(canViewUser) → 403. ?limit=3(열쇠 노드 수, 1~10).
 //   ★ 위험점수/EWS 필드 절대 미포함(P6). 코칭 프레임만.

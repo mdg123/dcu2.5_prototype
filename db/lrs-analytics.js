@@ -1341,6 +1341,231 @@ function getEmotionEngage(classId, { weeks = 2 } = {}) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// B6-상세 "정서-참여 교차" 점(학생) 클릭 → 상세 근거 팝업 (교사).
+//   기획서: 보고서/LRS_정서참여_점클릭_상세팝업_기획서_v1.md §3
+//   getEmotionEngageStudent(userId, classId, { weeks=2 }) →
+//     { userId, name, classId, weeks, quadrant, hasEmotion,
+//       signals{ emotionNegPct, emotionDays, negCount, gapDays, engageTrend, engageCount, engageNote },
+//       engagements[](최근 weeks주 learning_logs 정본 7종, created_at desc, ≤20),
+//       emotions[](최근 weeks주 attendance 감정, date desc, ≤14) }
+//
+//   ★ 정합 원칙(기획서 §3-4·§5): quadrant/hasEmotion/emotionNegPct/gapDays/engageTrend/engageNote 는
+//      getEmotionEngage(=getClassRiskList) 가 낸 그 학생 point·signals 를 100% 재사용(재산식 금지).
+//      engagements(원시 learning_logs)·emotions(원시 attendance) 는 목록 표시용 — gapDays/negPct 산출에
+//      쓰인 집계(lrs_user_daily)와 다른 테이블이라 engageCount 와 집계 카운트가 일치하지 않을 수 있음(정직 노출).
+//   ★ 감정 원천은 attendance 단일(emotion_checkins/마음채움 미통합 — grep 0건). source='attendance' 고정.
+//
+//   ★ 라우트 책임(재확인): 권한(canViewClass)·반 소속 교차검증·실명 audit·마스킹은 routes/lrs.js 소유.
+//      이 엔진은 순수 데이터 산출만 담당(name 은 원시 실명 반환 — 마스킹은 라우트가 덮어씀).
+// ─────────────────────────────────────────────────────────────────────────────
+
+// learning_logs.activity_type → 정본 학습활동 7종 라벨(사용자 확정 정의). 매핑에 없는 값은 제외.
+//   (수업꾸러미 이수·평가·과제·콘텐츠 문항풀이·오늘의 학습·AI 노드·오답노트만 학습활동)
+//   ★ content_view(단순 조회)·content_complete(시청 완료)·게시글·출석·설문·포트폴리오·거버넌스는 제외.
+const ENGAGE_ACTIVITY_MAP = {
+  // 수업꾸러미 이수
+  lesson_view:          { type: 'lesson',         typeKo: '수업꾸러미' },
+  lesson_progress:      { type: 'lesson',         typeKo: '수업꾸러미' },
+  lesson_complete:      { type: 'lesson',         typeKo: '수업꾸러미' },
+  // 평가(클래스/CBT)
+  exam_complete:        { type: 'exam',           typeKo: '평가' },
+  // 과제
+  homework_submit:      { type: 'homework',       typeKo: '과제' },
+  homework_graded:      { type: 'homework',       typeKo: '과제' },
+  // 콘텐츠 문항 풀이(단순 조회·시청은 제외 — 문항 풀이만)
+  content_solve:        { type: 'content',        typeKo: '콘텐츠 문항' },
+  problem_attempt:      { type: 'content',        typeKo: '콘텐츠 문항' },
+  problem_set_complete: { type: 'content',        typeKo: '콘텐츠 문항' },
+  // 오늘의 학습
+  daily_complete:       { type: 'today_learning', typeKo: '오늘의 학습' },
+  // AI 노드(AI 맞춤학습·진단)
+  self_learn:           { type: 'ai_node',        typeKo: 'AI 학습' },
+  diagnosis_complete:   { type: 'ai_node',        typeKo: 'AI 학습' },
+  // 오답노트
+  wrong_note_retry:     { type: 'wrong_note',     typeKo: '오답노트' },
+};
+
+// 감정 텍스트 → 이모지/한글 감정명(정본 맵, emotion-checkin.html:334 SSOT 계승).
+const ENG_EMOTION_EMOJI = {
+  happy: '🤩', excited: '🤩', great: '🤩', good: '😊', calm: '😐',
+  tired: '😕', sad: '😢', angry: '😡', anxious: '😰', frustrated: '😤',
+  neutral: '😐', soso: '😐', bad: '😢',
+};
+const ENG_EMOTION_LABEL = {
+  happy: '행복한', excited: '신나는', great: '아주좋은', good: '좋은', calm: '평온한',
+  tired: '피곤한', sad: '슬픈', angry: '화난', anxious: '불안한', frustrated: '답답한',
+  neutral: '보통', soso: '보통', bad: '나쁜',
+};
+// emotion_score(1~3)만 있고 텍스트 없을 때 이모지 폴백.
+function _emojiFromScore(sc) {
+  const n = Number(sc);
+  if (!Number.isFinite(n)) return '😐';
+  if (n >= 2.5) return '😊';
+  if (n >= 1.5) return '😐';
+  return '😢';
+}
+
+function getEmotionEngageStudent(userId, classId, { weeks = 2 } = {}) {
+  const w = Math.max(1, Math.min(12, Number(weeks) || 2));
+  const uid = Number(userId);
+  const students = classStudents(classId);
+  const stu = students.find(s => s.id === uid);
+  const name = stu ? stu.name : `학생${uid}`;
+
+  // ── 1) 사분면·핵심 signals: getEmotionEngage(=getClassRiskList) 의 그 학생 point 를 재사용(정합 100%).
+  const engage = getEmotionEngage(classId, { weeks: w });
+  const point = engage.points.find(p => p.userId === uid) || null;
+  const quadrant = point ? point.quadrant : 'stable';
+  const hasEmotion = point ? point.hasEmotion : false;
+  const engageNote = point ? point.engageNote : '정상';
+
+  // ── 2) 부정비율/감정근거 카운트: _emotionNeg(카드 s_emotion 원천, attendance 최근 10건) 재사용.
+  //   ★ 정합 주의(REWORK-2): emotionNegPct 는 s_emotion(=attendance 최근 N=10건, 2주보다 긴 창)이다.
+  //     카드 quadrant 근거라 detail↔card 정합상 이 값은 절대 바꾸지 않는다.
+  //     대신 이 값의 "실제 표본 창"을 정확히 라벨(emotionBasisKo)로 실어, "최근 2주" 문구를 옆에 두지 않는다.
+  //     "N일 중 부정 M회" 같은 2주 집계 서브라인은 이 값과 다른 창이므로 나란히 두지 않는다(§왜 정서 근거).
+  const emo = _emotionNeg([uid]).get(uid) || { neg: null, count: 0 };
+  const emotionNegPct = (emo.neg != null) ? Math.round(clamp01(emo.neg) * 100) : null;
+  const emotionSampleN = emo.count || 0;                // s_emotion 산출에 실제 쓰인 attendance 표본 수(≤10)
+  const emotionBasisKo = emotionNegPct != null
+    ? `최근 감정 기록 ${emotionSampleN}건 기준`         // ★ "최근 2주"가 아니라 실제 표본 창을 명시(모순 제거)
+    : null;
+
+  // ── 3) 참여 공백/추세: _engagement(카드 s_engage 원천, lrs_user_daily) 재사용.
+  const eng = _engagement([uid]).get(uid) || { gapDays: null, lastDate: null, weeklySlope: 0 };
+  const gapDays = eng.gapDays; // null = 활동기록 자체 없음
+  let engageTrend;
+  if (gapDays == null) engageTrend = 'nodata';       // lrs_user_daily 활동기록 없음
+  else if (eng.weeklySlope < 0) engageTrend = 'down';
+  else if (eng.weeklySlope > 0) engageTrend = 'up';
+  else engageTrend = 'flat';
+
+  // ── 4) 참여 활동 내역(engagements): learning_logs 원시 이벤트(정본 7종만), 최근 weeks주, created_at desc.
+  //   ★ demo_* 합성 시드 제외(REWORK-1): source_service NOT LIKE 'demo%' — by-service·gapDays 와 동일 정책.
+  //     (demo_b4 등 데모 시드는 실활동이 아니라 gapDays(집계, 실활동만)와 모순됨. 목록에서도 제거해야 정합.)
+  const sinceExpr = `-${w * 7} days`;
+  let engRows = [];
+  try {
+    engRows = db.prepare(`
+      SELECT ll.activity_type, ll.target_type, ll.target_id, ll.created_at,
+             ll.subject_code, ll.achievement_code, c.title AS content_title
+      FROM learning_logs ll
+      LEFT JOIN contents c ON c.id = ll.target_id AND ll.target_type = 'content'
+      WHERE ll.user_id = ?
+        AND ll.created_at >= date('now', ?)
+        AND (ll.source_service IS NULL OR ll.source_service NOT LIKE 'demo%')
+        AND ll.activity_type IN (${Object.keys(ENGAGE_ACTIVITY_MAP).map(() => '?').join(',')})
+      ORDER BY ll.created_at DESC
+    `).all(uid, sinceExpr, ...Object.keys(ENGAGE_ACTIVITY_MAP));
+  } catch (_) { engRows = []; }
+
+  const ENG_MAX = 20;
+  const engagements = [];
+  for (const r of engRows) {
+    const map = ENGAGE_ACTIVITY_MAP[r.activity_type];
+    if (!map) continue; // 정본 7종 외 방어(IN 절로 이미 걸러짐)
+    // 대상 라벨: 콘텐츠 제목 우선 → 성취기준 라벨 폴백 → null(라벨 없으면 typeKo 만 표기).
+    let label = r.content_title || null;
+    if (!label && r.achievement_code) {
+      try { label = resolveCode(r.achievement_code).label || null; } catch (_) { label = null; }
+    }
+    engagements.push({
+      date: String(r.created_at || '').slice(0, 10),
+      type: map.type,
+      typeKo: map.typeKo,
+      label: label || null,
+    });
+  }
+  const engageCount = engagements.length;               // 원시 learning_logs 정본 카운트(집계와 다를 수 있음)
+  const engagementsCapped = engagements.slice(0, ENG_MAX);
+
+  // ── 5) 감정 체크 내역(emotions): attendance 원시(감정 있는 날), 최근 weeks주, date desc, 하루 1건 축약.
+  const EMO_MAX = 14;
+  let emoRows = [];
+  try {
+    emoRows = db.prepare(`
+      SELECT attendance_date AS d, emotion, emotion_score AS escore,
+             comment, emotion_reason, emotion_reason_type
+      FROM attendance
+      WHERE user_id = ?
+        AND (emotion IS NOT NULL OR emotion_score IS NOT NULL)
+        AND attendance_date >= date('now', ?)
+      ORDER BY attendance_date DESC
+    `).all(uid, sinceExpr);
+  } catch (_) { emoRows = []; }
+
+  // 하루 중복 방어(getEmotionMirror 계승): 같은 날 다건이면 하루 1건(최신 우선 — DESC 라 첫 행이 최신).
+  const emoByDate = new Map();
+  for (const r of emoRows) { if (!emoByDate.has(r.d)) emoByDate.set(r.d, r); }
+
+  const emotions = [];
+  let negCount = 0;
+  let recentPosCount = 0, recentNegCount = 0;           // 최근 2주 창의 극성 집계(recentEmotionHint 용)
+  for (const r of emoByDate.values()) {
+    const key = _emotionGroupKey(r.emotion, r.escore); // positive|neutral|negative|null
+    if (key === 'negative') { negCount++; recentNegCount++; }
+    else if (key === 'positive') recentPosCount++;
+    const etxt = String(r.emotion || '').trim().toLowerCase();
+    const emoji = ENG_EMOTION_EMOJI[etxt] || (etxt ? '😐' : _emojiFromScore(r.escore));
+    const emotionKo = ENG_EMOTION_LABEL[etxt] || (r.emotion ? String(r.emotion) : '기록');
+    // 이유: emotion_reason(감정출석부 이유) 우선, 없으면 comment(한마디).
+    const reason = (r.emotion_reason && String(r.emotion_reason).trim())
+      || (r.comment && String(r.comment).trim()) || null;
+    emotions.push({
+      date: String(r.d || '').slice(0, 10),
+      emotion: r.emotion || null,
+      emoji,
+      emotionKo,
+      reason: reason || null,
+      source: 'attendance',      // ★ 감정 원천 단일(마음채움 미통합) — 확장 대비 필드만 유지.
+      sourceKo: '감정출석부',
+      group: key || 'neutral',
+    });
+  }
+  const emotionDays = emotions.length;                  // 하루 축약 후 최근 2주 감정 기록 일수(=emotions 창)
+  const emotionsCapped = emotions.slice(0, EMO_MAX);
+
+  // ── 최근 추세 힌트(REWORK-2, 선택): s_emotion 창(과거 포함)과 최근 2주 극성이 다르면 그 사실을 드러낸다.
+  //   교사가 "과거엔 부정 많았지만 최근엔 개선(또는 악화)"을 읽게. 단정 금지(관찰형 톤).
+  //   판정: emotionNegPct(s_emotion)가 부정 우세(≥50)인데 최근 2주는 긍정 우세 → "최근에는 긍정 신호".
+  //         반대로 s_emotion 은 낮은데(긍정) 최근 2주 부정 우세 → "최근에는 부정 신호가 보여요".
+  //   최근 2주 감정 기록이 없거나(중립만) 애매하면 null(억지로 만들지 않음).
+  let recentEmotionHint = null;
+  if (hasEmotion && emotionNegPct != null && emotionDays > 0) {
+    const recentPositive = recentPosCount > recentNegCount;
+    const recentNegative = recentNegCount > recentPosCount;
+    if (emotionNegPct >= 50 && recentPositive) {
+      recentEmotionHint = '최근에는 긍정 신호가 보여요';
+    } else if (emotionNegPct < 50 && recentNegative) {
+      recentEmotionHint = '최근에는 부정 신호가 보여요';
+    }
+  }
+
+  return {
+    userId: uid,
+    name,
+    classId: Number(classId),
+    weeks: w,
+    quadrant,
+    hasEmotion,
+    signals: {
+      emotionNegPct,                                    // hasEmotion=false 면 null(부정 0% 오해 방지) — s_emotion(최근 N건)
+      emotionSampleN,                                   // ★ emotionNegPct 의 실제 표본 수(attendance 최근 ≤10건)
+      emotionBasisKo,                                   // ★ "최근 감정 기록 N건 기준" — negPct 옆 라벨(‘최근 2주’ 아님)
+      recentEmotionHint,                                // ★ 최근 2주 극성이 s_emotion 과 다르면 관찰 힌트(없으면 null)
+      emotionDays,                                      // 최근 2주 감정 기록 일수(=emotions 목록 창) — 목록 섹션 헤더용
+      negCount,                                         // 최근 2주 부정 건수(emotions 목록 창) — negPct 근거 아님(창 다름)
+      gapDays,                                          // 활동기록 없으면 null (집계 lrs_user_daily 기준)
+      engageTrend,                                      // down|flat|up|nodata
+      engageCount,                                      // 최근 2주 원시 learning_logs 정본 카운트(demo 제외)
+      engageNote,                                       // 카드 툴팁 동일 어휘(정상/활동 감소/활동 급감)
+    },
+    engagements: engagementsCapped,
+    emotions: emotionsCapped,
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // A4 "다음 한 걸음" (학생 · 선수→후속 학습 경로) — 온더플라이(신규 테이블 0).
 //   스펙: 작업지시서/LRS_P0_시각데이터스펙_v1.md §카드4(③④⑤)
 //   getPrereqGap 의 1인칭 변형. 브리지(prereqOf: 후속→[선수들])는 동일 _buildBridge/_nodeToCode.
@@ -1485,7 +1710,7 @@ module.exports = {
   canonicalSubject, SUBJECT_ALIAS, // 교과 별칭 정규화(레거시→정본 병합)
   weeklyRateSeries: _weeklyRateSeries, // P1-3 classTrend(routes/lrs.js)용 — withContributors 옵션 지원
   computeTrend, projectReach, projectionInsights, getClassRiskList, getPrereqGap, getWeakTrend,
-  getEmotionMirror, getShallowLearning, getEmotionEngage, getNextStep,
+  getEmotionMirror, getShallowLearning, getEmotionEngage, getEmotionEngageStudent, getNextStep,
   riskGrade, invalidateBridge,
   // B4 풀이 속도-정확도 점검 — 속도버킷 상수·헬퍼(하네스 경계 테스트용)
   SPEED_FAST, SPEED_SLOW, SHALLOW_MIN_GRADED_SAMPLE, SHALLOW_MIN_CONTENT_SAMPLE,

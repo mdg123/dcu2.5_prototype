@@ -738,6 +738,50 @@
       .eng-chips{ flex-direction:column; }
       .eng-chip{ flex:1 1 auto; justify-content:flex-start; }
     }
+    /* 모바일 폴백 이름 → 클릭 pill (점 클릭 상세팝업 기획서 §1-3) */
+    .eng-mob-quad .emq-names{ display:flex; flex-wrap:wrap; gap:6px; }
+    .emq-name-btn{
+      font-size:15px; font-weight:600; color:var(--gray-800);
+      background:var(--gray-100); border:1px solid var(--gray-200);
+      border-radius:9999px; padding:6px 12px; min-height:36px; cursor:pointer;
+      font-family:inherit; line-height:1.2; display:inline-flex; align-items:center;
+      transition:background var(--dur-fast,.15s) var(--ease-out,ease), border-color .15s;
+    }
+    .emq-name-btn:hover{ background:var(--gray-200); }
+    .emq-name-btn:focus-visible{ outline:0; box-shadow:0 0 0 2px var(--lrs-primary); }
+    .eng-mob-quad.red   .emq-name-btn{ background:#fef2f2; border-color:#fecaca; }
+    .eng-mob-quad.care  .emq-name-btn{ background:#fffbeb; border-color:#fde68a; }
+    .eng-mob-quad.motive .emq-name-btn{ background:#eff6ff; border-color:#bfdbfe; }
+    .eng-mob-quad.stable .emq-name-btn{ background:#f0fdf4; border-color:#bbf7d0; }
+
+    /* ===== 정서-참여 점 클릭 → 학생 상세 팝업 (기획서 §2·§4, .lrs-dm-* 상속) ===== */
+    /* 헤더 사분면 배지 (닫기 40px 안전영역: .lrs-dm-title padding-right:48px 계승) */
+    .lrs-eng-quad-badge{
+      flex:0 0 auto; font-size:13px; font-weight:700; padding:3px 10px; border-radius:8px;
+      white-space:nowrap; display:inline-flex; align-items:center; gap:4px;
+    }
+    /* 섹션 소제목 */
+    .lrs-eng-sec-title{
+      font-size:15px; font-weight:700; color:var(--gray-700);
+      margin:16px 4px 8px; display:flex; align-items:center; gap:6px;
+    }
+    .lrs-eng-sec-title:first-child{ margin-top:6px; }
+    .lrs-eng-sec-title .lrs-eng-sec-count{ font-size:14px; font-weight:600; color:var(--gray-400); }
+    /* 근거 카드(§왜 이 사분면인가) — 2축 각 1행 */
+    .lrs-eng-signal{ border:1px solid var(--gray-200); border-radius:12px; overflow:hidden; }
+    .lrs-eng-signal-row{ display:flex; align-items:flex-start; gap:12px; padding:14px 14px; }
+    .lrs-eng-signal-row + .lrs-eng-signal-row{ border-top:1px solid var(--gray-100); }
+    .lrs-eng-signal-ico{ flex:0 0 auto; font-size:20px; width:26px; text-align:center; line-height:1.4; }
+    .lrs-eng-signal-body{ flex:1 1 auto; min-width:0; }
+    .lrs-eng-signal-axis{ font-size:13px; font-weight:700; color:var(--gray-500); letter-spacing:.02em; }
+    .lrs-eng-signal-main{ font-size:16px; font-weight:600; color:var(--gray-800); margin-top:2px; line-height:1.5; }
+    .lrs-eng-signal-sub{ font-size:13px; color:var(--gray-500); margin-top:3px; line-height:1.5; }
+    /* recentEmotionHint — 최근 개선 관찰형 한 줄(단정 금지 톤, 은은한 초록) */
+    .lrs-eng-signal-hint{ font-size:13px; color:#16a34a; margin-top:5px; line-height:1.5; display:flex; align-items:center; gap:5px; }
+    .lrs-eng-signal-hint i{ font-size:12px; }
+    .lrs-eng-signal-row.is-muted .lrs-eng-signal-main{ color:var(--gray-500); }
+    .lrs-eng-disclaimer{ font-size:13px; color:var(--gray-500); line-height:1.6; margin:10px 4px 2px; }
+    /* 출처 배지 (감정 체크 내역 꼬리) — .lrs-dm-badge-neutral 재사용, 여기선 별칭 없음 */
 
     /* ===== B4 풀이 속도-정확도 점검 (교사 · 산점 + 표) ===== */
     #tShallowChartWrap{ position:relative; height:300px; max-width:100%; }
@@ -983,6 +1027,22 @@
       </div>
       <div class="lrs-dm-seg" id="lrsDmSeg" hidden></div>
       <div class="lrs-dm-body" id="lrsDmBody"></div>
+    </div>
+  </div>
+
+  <!-- 정서-참여 산점도 점 클릭 → 학생 상세 팝업 (별도 DOM·별도 함수, openPerfDetail 상태 오염 방지) -->
+  <div class="lrs-dm-overlay" id="lrsEngageStudentModal" role="dialog" aria-modal="true" aria-labelledby="lrsEngTitleText">
+    <div class="lrs-dm-panel" role="document">
+      <div class="lrs-dm-header">
+        <div class="lrs-dm-title">
+          <span class="lrs-dm-title-ico" aria-hidden="true">🧭</span>
+          <span class="lrs-dm-title-text" id="lrsEngTitleText">학생</span>
+          <span class="lrs-eng-quad-badge" id="lrsEngQuadBadge"></span>
+        </div>
+        <div class="lrs-dm-count" id="lrsEngCount"></div>
+        <button type="button" class="lrs-dm-close" id="lrsEngClose" aria-label="닫기">&times;</button>
+      </div>
+      <div class="lrs-dm-body" id="lrsEngBody"></div>
     </div>
   </div>
 
@@ -2458,6 +2518,287 @@ function closePerfDetail(){
     if (e.key !== 'Enter' && e.key !== ' ' && e.key !== 'Spacebar') return;
     const sub = e.target.closest('.lrs-dm-row.is-clickable[data-subbucket]');
     if (sub) { e.preventDefault(); _pdSegment = null; openPerfDetail(sub.getAttribute('data-subbucket'), null); }
+  });
+})();
+
+/* =====================================================================
+ * 정서-참여 산점도 점(학생) 클릭 → 상세 팝업
+ *   기획서: 보고서/LRS_정서참여_점클릭_상세팝업_기획서_v1.md
+ *   BE 계약: GET /api/lrs/emotion-engage/student/:userId?classId=&weeks=2
+ *   별도 DOM(#lrsEngageStudentModal)·별도 상태(_eng*) — openPerfDetail 오염 방지
+ *   CSS는 .lrs-dm-* 재사용(z-index 10000·닫기 40px 안전영역·모바일 하단 시트 계승)
+ * ===================================================================== */
+let _engReqSeq = 0;
+let _engLastTrigger = null;
+
+function _engEl(id){ return document.getElementById(id); }
+function _engFmtMD(v){                      // 목록 행 우측 날짜(MM.DD)
+  if (!v) return '';
+  const s = String(v).slice(0,10);
+  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (m) return m[2] + '.' + m[3];
+  const d = new Date(v);
+  if (isNaN(d.getTime())) return s.replace(/-/g,'.');
+  return String(d.getMonth()+1).padStart(2,'0') + '.' + String(d.getDate()).padStart(2,'0');
+}
+
+/* 감정 이모지·라벨 FE 폴백 (emotion-checkin.html SSOT 계승 — BE가 emoji/emotionKo를 주면 그걸 우선) */
+const ENG_API_EMOJI = { happy:'🤩', excited:'🤩', great:'🤩', good:'😊', calm:'😐', tired:'😕', sad:'😢', angry:'😡', anxious:'😰', frustrated:'😤', bad:'😞' };
+const ENG_API_LABEL = { happy:'행복한', excited:'신나는', great:'아주좋은', good:'좋은', calm:'평온한', tired:'피곤한', sad:'슬픈', angry:'화난', anxious:'불안한', frustrated:'답답한', bad:'속상한' };
+/* 참여 활동 유형 아이콘 폴백(정본 7종 라벨 계승) — BE typeKo 우선, 아이콘은 type로 매핑 */
+const ENG_TYPE_ICON = { exam:'🎓', homework:'📝', content:'🧩', content_view:'🎬', today_learning:'🧭', ai_node:'🧭', wrong_note:'🧭', lesson:'📚', other:'🔹' };
+/* 참여 추세 한국어(기획서 §2-3) */
+const ENG_TREND_KO = { down:'감소(↓)', flat:'유지(→)', up:'증가(↑)', nodata:'활동 기록 없음' };
+
+/* 팝업 열기: 헤더 즉시(seed) → 스켈레톤 → fetch → 렌더 (경합가드 _engReqSeq) */
+function openEngageStudent(seed, triggerEl){
+  seed = seed || {};
+  const overlay = _engEl('lrsEngageStudentModal');
+  if (!overlay) return;
+  if (triggerEl) _engLastTrigger = triggerEl;
+
+  // 헤더 즉시 — 이름·사분면 배지는 seed로 바로 채움(로딩 체감 최소)
+  _engSetHeader({ name: seed.name, quadrant: seed.quadrant, hasEmotion: seed.hasEmotion, weeks: 2, className: null }, true);
+  _engEl('lrsEngBody').innerHTML =
+    '<div class="lrs-dm-loading">' +
+      Array(3).fill(0).map(() =>
+        '<div class="lrs-dm-skel-row"><div class="lrs-dm-skel-ico"></div>' +
+        '<div class="lrs-dm-skel-body"><div class="lrs-dm-skel-line"></div><div class="lrs-dm-skel-line short"></div></div></div>'
+      ).join('') +
+    '</div>';
+  if (!overlay.classList.contains('open')){
+    overlay.classList.add('open');
+    document.body.style.overflow = 'hidden';
+    setTimeout(() => { try { _engEl('lrsEngClose').focus(); } catch(_){} }, 0);
+  }
+
+  const seq = ++_engReqSeq;
+  const uid = seed.userId;
+  if (uid == null){ _engRenderError('학생 정보를 확인할 수 없어요'); return; }
+
+  (async () => {
+    const cid = await resolveClassId();
+    const d = await apiGet('/api/lrs/emotion-engage/student/' + encodeURIComponent(uid), { classId: cid, weeks: 2 });
+    if (seq !== _engReqSeq) return;                 // 더 최신 요청이 떴으면 무시
+    if (!d || d.success === false){
+      // BE 미배포·오류·403 graceful — 에러 없이 안내
+      const is403 = d && (d.status === 403 || d.code === 'FORBIDDEN');
+      _engRenderError(is403 ? '이 학생의 상세를 볼 권한이 없어요' : '상세를 불러오지 못했어요', seed);
+      return;
+    }
+    renderEngageStudent(d, seed);
+  })();
+}
+
+/* 헤더(이름 + 사분면 배지 + count줄) 채우기 */
+function _engSetHeader(data, isSeed){
+  const name = data && data.name ? data.name : (isSeed ? '학생' : '학생');
+  _engEl('lrsEngTitleText').textContent = name;
+  const badge = _engEl('lrsEngQuadBadge');
+  const hasEmo = data && data.hasEmotion;
+  const q = data && data.quadrant && ENG_QUAD[data.quadrant] ? ENG_QUAD[data.quadrant] : null;
+  if (hasEmo === false || !q){
+    badge.textContent = '⚪ 판정 보류';
+    badge.style.background = 'var(--gray-100)';
+    badge.style.color = 'var(--gray-600)';
+  } else {
+    badge.textContent = q.emoji + ' ' + q.ko;
+    badge.style.background = _engTint(q.color, .12);
+    badge.style.color = q.color;
+  }
+  const weeks = Number(data && data.weeks) || 2;
+  const cls = data && data.className ? ' · ' + escapeHtml(data.className) : '';
+  _engEl('lrsEngCount').innerHTML = '최근 ' + weeks + '주 기준' + cls;
+}
+/* hex 색 → rgba 틴트 */
+function _engTint(hex, a){
+  const h = String(hex||'').replace('#','');
+  if (h.length !== 6) return 'rgba(148,163,184,' + a + ')';
+  const r = parseInt(h.slice(0,2),16), g = parseInt(h.slice(2,4),16), b = parseInt(h.slice(4,6),16);
+  return 'rgba(' + r + ',' + g + ',' + b + ',' + a + ')';
+}
+
+/* 본문 렌더: §왜 이 사분면인가 → §참여 활동 내역 → §감정 체크 내역 */
+function renderEngageStudent(d, seed){
+  _engSetHeader(d, false);
+  const weeks = Number(d.weeks) || 2;
+  const sig = d.signals || {};
+  const engagements = Array.isArray(d.engagements) ? d.engagements : [];
+  const emotions = Array.isArray(d.emotions) ? d.emotions : [];
+  const masked = !!d.masked;
+
+  // ── §왜 이 사분면인가 (정서·참여 2축) ──
+  //   ⚠ 정서 근거는 quadrant 산출 창(emotionNegPct + emotionBasisKo)만 표시.
+  //   2주 목록 창 필드(emotionDays/negCount)는 서로 다른 창이라 근거 요약에 나란히 두지 않음(자기모순 방지).
+  const hasEmo = d.hasEmotion !== false;
+  let emoIco, emoMain, emoSub, emoMuted;
+  let emoHint = '';   // recentEmotionHint(관찰형 한 줄) — 있으면 노출, null이면 숨김
+  if (!hasEmo){
+    emoIco = '⚪'; emoMuted = true;
+    emoMain = '감정 기록 없음';
+    emoSub = '사분면 판정에서 중립 처리했어요';
+  } else {
+    const neg = (sig.emotionNegPct != null) ? sig.emotionNegPct : null;
+    emoIco = (neg != null && neg >= 50) ? '🖤' : '💙'; emoMuted = false;
+    // "최근 2주" 하드코딩 제거 — negPct 는 카드 quadrant 근거 값 그대로
+    emoMain = (neg != null) ? ('부정 감정 ' + neg + '%') : '감정 신호';
+    // 보조 라벨 = BE emotionBasisKo(예 "최근 감정 기록 10건 기준"). 없으면 표본수로 폴백, 그것도 없으면 생략
+    emoSub = (sig.emotionBasisKo && String(sig.emotionBasisKo).trim())
+      ? String(sig.emotionBasisKo).trim()
+      : (sig.emotionSampleN != null ? ('최근 감정 기록 ' + sig.emotionSampleN + '건 기준') : '');
+    // recentEmotionHint(최근 개선 관찰) — 있으면 관찰형 한 줄(단정 금지 톤), null이면 숨김
+    if (sig.recentEmotionHint && String(sig.recentEmotionHint).trim()) emoHint = String(sig.recentEmotionHint).trim();
+  }
+  const gap = sig.gapDays;
+  const isNoData = sig.engageTrend === 'nodata';
+  const trendKo = ENG_TREND_KO[sig.engageTrend] || '';
+  // nodata는 "활동 추세 ~" 접두어 없이 그대로("활동 기록 없음") — 중복 어휘 방지
+  const trendPhrase = trendKo ? (isNoData ? trendKo : ('활동 추세 ' + trendKo)) : '';
+  const engIco = (sig.engageTrend === 'down') ? '📉' : (sig.engageTrend === 'up') ? '📈' : isNoData ? '⚪' : '➡️';
+  let engMain;
+  if (gap != null && trendPhrase) engMain = '무활동 ' + gap + '일 · ' + trendPhrase;
+  else if (gap != null)           engMain = '무활동 ' + gap + '일';
+  else if (trendPhrase)           engMain = trendPhrase;
+  else                            engMain = '참여 신호';
+  const ec = sig.engageCount;
+  const engSub = (ec != null) ? ('최근 ' + weeks + '주 참여 활동 ' + ec + '건') : '';
+
+  const signalHtml =
+    '<div class="lrs-eng-sec-title">■ 왜 이 사분면인가</div>' +
+    '<div class="lrs-eng-signal">' +
+      '<div class="lrs-eng-signal-row' + (emoMuted ? ' is-muted' : '') + '">' +
+        '<div class="lrs-eng-signal-ico" aria-hidden="true">' + emoIco + '</div>' +
+        '<div class="lrs-eng-signal-body">' +
+          '<div class="lrs-eng-signal-axis">정서</div>' +
+          '<div class="lrs-eng-signal-main">' + escapeHtml(emoMain) + '</div>' +
+          (emoSub ? '<div class="lrs-eng-signal-sub">' + escapeHtml(emoSub) + '</div>' : '') +
+          (emoHint ? '<div class="lrs-eng-signal-hint"><i class="fas fa-eye" aria-hidden="true"></i> ' + escapeHtml(emoHint) + '</div>' : '') +
+        '</div>' +
+      '</div>' +
+      '<div class="lrs-eng-signal-row">' +
+        '<div class="lrs-eng-signal-ico" aria-hidden="true">' + engIco + '</div>' +
+        '<div class="lrs-eng-signal-body">' +
+          '<div class="lrs-eng-signal-axis">참여</div>' +
+          '<div class="lrs-eng-signal-main">' + escapeHtml(engMain) + '</div>' +
+          (engSub ? '<div class="lrs-eng-signal-sub">' + escapeHtml(engSub) + '</div>' : '') +
+        '</div>' +
+      '</div>' +
+    '</div>' +
+    '<div class="lrs-eng-disclaimer"><i class="fas fa-circle-info" aria-hidden="true"></i> ' +
+      escapeHtml(d.disclaimer || '규칙 기반 신호예요. 학생과의 대화로 꼭 확인하세요.') + '</div>';
+
+  // ── §참여 활동 내역 ──
+  let engListHtml = '<div class="lrs-eng-sec-title">■ 참여 활동 내역 <span class="lrs-eng-sec-count">(최근 ' + weeks + '주 · ' + engagements.length + '건)</span></div>';
+  if (!engagements.length){
+    const sub = (gap != null) ? ('무활동 ' + gap + '일') : '활동 기록이 전혀 없어요';
+    engListHtml += '<div class="lrs-dm-empty"><div class="lrs-dm-empty-ico">📭</div>' +
+      '<div class="lrs-dm-empty-title">이 기간 참여 활동 기록이 없어요</div>' +
+      '<div class="lrs-dm-empty-text">' + escapeHtml(sub) + '</div></div>';
+  } else {
+    const MAX = 20;
+    const shown = engagements.slice(0, MAX);
+    engListHtml += shown.map(it => {
+      const ico = ENG_TYPE_ICON[it.type] || '🔹';
+      const typeKo = it.typeKo || '학습 활동';
+      const primary = it.label ? (escapeHtml(typeKo) + ' — ' + escapeHtml(it.label)) : escapeHtml(typeKo);
+      const date = _engFmtMD(it.date);
+      return '<div class="lrs-dm-row">' +
+        '<div class="lrs-dm-row-icon">' + ico + '</div>' +
+        '<div class="lrs-dm-row-body"><div class="lrs-dm-row-primary">' + primary + '</div></div>' +
+        (date ? '<div class="lrs-dm-row-tail"><span class="lrs-dm-row-date">' + date + '</span></div>' : '') +
+        '</div>';
+    }).join('');
+    if (engagements.length > MAX){
+      engListHtml += '<div class="lrs-dm-note">외 ' + (engagements.length - MAX) + '건</div>';
+    }
+  }
+
+  // ── §감정 체크 내역 ──
+  let emoListHtml = '<div class="lrs-eng-sec-title">■ 감정 체크 내역 <span class="lrs-eng-sec-count">(최근 ' + weeks + '주 · ' + emotions.length + '건)</span></div>';
+  if (!emotions.length){
+    emoListHtml += '<div class="lrs-dm-empty"><div class="lrs-dm-empty-ico">😶</div>' +
+      '<div class="lrs-dm-empty-title">이 기간 감정 체크 기록이 없어요</div>' +
+      '<div class="lrs-dm-empty-text">감정출석부에서 감정을 남기면 여기 표시돼요</div></div>';
+  } else {
+    const MAX = 14;
+    const shown = emotions.slice(0, MAX);
+    emoListHtml += shown.map(it => {
+      const emoji = it.emoji || ENG_API_EMOJI[it.emotion] || '😐';
+      const ko = it.emotionKo || ENG_API_LABEL[it.emotion] || (it.emotion ? escapeHtml(it.emotion) : '감정');
+      const reason = (it.reason && String(it.reason).trim()) ? String(it.reason).trim() : '';
+      // 출처 배지: 현재 감정 원천은 감정출석부 단일(마음채움 미통합 — 허위 출처 금지)
+      const srcKo = it.sourceKo || '감정출석부';
+      const meta = reason
+        ? '<div class="lrs-dm-row-meta">“' + escapeHtml(reason) + '”</div>'
+        : '<div class="lrs-dm-row-meta" style="color:var(--gray-400);">(이유 없음)</div>';
+      const date = _engFmtMD(it.date);
+      return '<div class="lrs-dm-row">' +
+        '<div class="lrs-dm-row-icon">' + escapeHtml(emoji) + '</div>' +
+        '<div class="lrs-dm-row-body"><div class="lrs-dm-row-primary">' + escapeHtml(ko) + '</div>' + meta + '</div>' +
+        '<div class="lrs-dm-row-tail">' +
+          '<span class="lrs-dm-row-badge lrs-dm-badge-neutral">' + escapeHtml(srcKo) + '</span>' +
+          (date ? '<span class="lrs-dm-row-date">' + date + '</span>' : '') +
+        '</div>' +
+      '</div>';
+    }).join('');
+    if (emotions.length > MAX){
+      emoListHtml += '<div class="lrs-dm-note">외 ' + (emotions.length - MAX) + '건</div>';
+    }
+  }
+
+  // ── (선택) 경량 조치 1버튼 — 메시지 보내기(검증된 딥링크만, self-learn 금지) ──
+  let actionHtml = '';
+  if (!masked && d.userId != null){
+    actionHtml = '<div class="lrs-dm-empty-cta" style="justify-content:flex-end;margin-top:18px;">' +
+      '<button type="button" id="lrsEngMsgBtn" data-uid="' + escapeAttr(d.userId) + '">✉️ 메시지 보내기</button>' +
+      '</div>';
+  }
+
+  const maskBanner = masked
+    ? '<div class="lrs-eng-disclaimer" style="color:var(--gray-500);"><i class="fas fa-user-shield" aria-hidden="true"></i> 타 반 — 개인정보 보호 중</div>'
+    : '';
+
+  _engEl('lrsEngBody').innerHTML = maskBanner + signalHtml + engListHtml + emoListHtml + actionHtml;
+  _engEl('lrsEngBody').scrollTop = 0;
+}
+
+/* 오류/graceful 상태 (BE 미배포·403·네트워크) — 에러 없이 안내 */
+function _engRenderError(msg, seed){
+  if (seed) _engSetHeader({ name: seed.name, quadrant: seed.quadrant, hasEmotion: seed.hasEmotion, weeks: 2 }, true);
+  _engEl('lrsEngBody').innerHTML =
+    '<div class="lrs-dm-empty"><div class="lrs-dm-empty-ico">⚠️</div>' +
+    '<div class="lrs-dm-empty-title">' + escapeHtml(msg || '상세를 불러오지 못했어요') + '</div>' +
+    '<div class="lrs-dm-empty-text">잠시 후 다시 시도해 주세요.</div></div>';
+}
+
+/* 닫기 — 진행요청 무효화 + 트리거 포커스 복귀 */
+function closeEngageStudent(){
+  const overlay = _engEl('lrsEngageStudentModal');
+  if (!overlay) return;
+  overlay.classList.remove('open');
+  document.body.style.overflow = '';
+  _engReqSeq++;
+  if (_engLastTrigger && typeof _engLastTrigger.focus === 'function'){
+    try { _engLastTrigger.focus(); } catch(_){}
+  }
+  _engLastTrigger = null;
+}
+
+/* 이벤트 바인딩 (×·오버레이·Esc·메시지 버튼) — 1회 */
+(function bindEngageStudentModal(){
+  const overlay = _engEl('lrsEngageStudentModal');
+  if (!overlay) return;
+  _engEl('lrsEngClose').addEventListener('click', closeEngageStudent);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) closeEngageStudent(); });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && overlay.classList.contains('open')) closeEngageStudent();
+  });
+  overlay.addEventListener('click', (e) => {
+    const msg = e.target.closest && e.target.closest('#lrsEngMsgBtn');
+    if (msg){
+      const uid = msg.getAttribute('data-uid');
+      try { if (window.LRS && typeof LRS.teacherAction === 'function') LRS.teacherAction('message', uid); } catch(_){}
+    }
   });
 })();
 
@@ -4645,18 +4986,29 @@ async function renderEmotionEngage(host){
     </div>
   </section>`;
 
-  // ── 모바일 리스트 폴백 채우기(적신호 먼저) ──
+  // ── 모바일 리스트 폴백 채우기(적신호 먼저) — 이름을 클릭 pill로 승격(점 클릭 상세팝업 §1-3) ──
   const mob = document.getElementById('tEngageMobile');
   if (mob){
     const order = ['red','care','motive','stable'];
     mob.innerHTML = order.map(q => {
-      const names = points.filter(p => p.quadrant === q).map(p => escapeHtml(p.name || '학생'));
+      const qp = points.filter(p => p.quadrant === q);
       const q0 = ENG_QUAD[q];
+      const pills = qp.map(p =>
+        `<button type="button" class="emq-name-btn" data-uid="${escapeAttr(p.userId)}">${escapeHtml(p.name || '학생')}</button>`
+      ).join('');
       return `<div class="eng-mob-quad ${q}">
-        <div class="emq-head"><span class="emq-dot" style="background:${q0.color};"></span>${q0.emoji} ${q0.ko} (${names.length})</div>
-        ${names.length ? `<div class="emq-names">▸ ${names.join(' · ')}</div>` : `<div class="emq-empty">해당 학생 없음</div>`}
+        <div class="emq-head"><span class="emq-dot" style="background:${q0.color};"></span>${q0.emoji} ${q0.ko} (${qp.length})</div>
+        ${qp.length ? `<div class="emq-names">${pills}</div>` : `<div class="emq-empty">해당 학생 없음</div>`}
       </div>`;
     }).join('');
+    // 이름 pill 클릭 → 동일 상세 팝업 (위임)
+    mob.addEventListener('click', (e) => {
+      const btn = e.target.closest && e.target.closest('.emq-name-btn');
+      if (!btn) return;
+      const uid = btn.getAttribute('data-uid');
+      const seed = points.find(p => String(p.userId) === String(uid));
+      if (seed) openEngageStudent(seed, btn);
+    });
   }
 
   // ── 산점도(scatter, y reverse) ──
@@ -4675,6 +5027,17 @@ async function renderEmotionEngage(host){
         responsive:true, maintainAspectRatio:false,
         layout:{ padding:{ top:10, right:12, bottom:10, left:12 } },
         animation:{ duration:500 },
+        // 점 위 손가락 커서(§1-2)
+        onHover(e, els){
+          if (e && e.native && e.native.target) e.native.target.style.cursor = (els && els.length) ? 'pointer' : 'default';
+        },
+        // 점 클릭 → 상세 팝업 직접 오픈(§1-2). nearest 1개(겹친 점은 가장 가까운 1명)
+        onClick(e){
+          const hits = chart.getElementsAtEventForMode(e, 'nearest', { intersect:true }, false);
+          if (!hits || !hits.length) return;
+          const seed = points[hits[0].index];
+          if (seed) openEngageStudent(seed, canvas);
+        },
         plugins:{
           legend:{ display:false },
           tooltip:{

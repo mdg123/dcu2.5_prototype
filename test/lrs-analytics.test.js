@@ -1204,3 +1204,240 @@ test('MEMB-2: /stats/custom 회귀 — scope=mine 은 본인만, scope=all 은 a
   ).get(STUDENT1).c;
   assert.equal(mine.json.summary.recommendedCount, ownCount, 'mine 집계 정합');
 });
+
+// ════════════════════════════════════════════════════════════════════════════
+// [ENGDETAIL] "정서-참여 교차" 점 클릭 → 학생 상세(getEmotionEngageStudent + /emotion-engage/student)
+//   기획서: 보고서/LRS_정서참여_점클릭_상세팝업_기획서_v1.md
+//   박제: 권한(비담임/타반 403)·signals 카드 정합·배열 계약·빈데이터 정직·classId 격리·감정 원천 단일.
+// ════════════════════════════════════════════════════════════════════════════
+const ENGAGE_ACTIVITY_TYPES_ALLOWED = new Set([
+  'lesson', 'exam', 'homework', 'content', 'today_learning', 'ai_node', 'wrong_note',
+]);
+
+test('ENGDETAIL-1: 엔진 signals 가 getEmotionEngage 그 점과 100% 정합(quadrant·hasEmotion·engageNote·부호)', () => {
+  const card = analytics.getEmotionEngage(CLASS, { weeks: 2 });
+  assert.ok(card.points.length > 0, 'class 1 에 점이 있어야 회귀 의미 있음');
+  for (const p of card.points) {
+    const d = analytics.getEmotionEngageStudent(p.userId, CLASS, { weeks: 2 });
+    assert.equal(d.quadrant, p.quadrant, `uid ${p.userId} quadrant 카드와 불일치`);
+    assert.equal(d.hasEmotion, p.hasEmotion, `uid ${p.userId} hasEmotion 카드와 불일치`);
+    assert.equal(d.signals.engageNote, p.engageNote, `uid ${p.userId} engageNote 카드와 불일치`);
+    // 부정비율: 카드 emotionNote("부정 NN%") 의 수치와 signals.emotionNegPct 1:1.
+    if (p.hasEmotion) {
+      const m = /부정 (\d+)%/.exec(p.emotionNote);
+      assert.ok(m, `uid ${p.userId} emotionNote 형식`);
+      assert.equal(d.signals.emotionNegPct, Number(m[1]),
+        `uid ${p.userId} emotionNegPct(${d.signals.emotionNegPct}) != 카드(${m[1]})`);
+    } else {
+      assert.equal(d.signals.emotionNegPct, null, 'hasEmotion=false 면 emotionNegPct=null(부정 0% 오해 방지)');
+    }
+  }
+});
+
+test('ENGDETAIL-2: engagements 배열 계약 — 정본 7종만·created_at desc·≤20·필드 shape', () => {
+  // 데이터 풍부한 학생(이학생=STUDENT1) 기준.
+  const d = analytics.getEmotionEngageStudent(STUDENT1, CLASS, { weeks: 2 });
+  assert.ok(Array.isArray(d.engagements), 'engagements 배열');
+  assert.ok(d.engagements.length <= 20, `상한 20 (got ${d.engagements.length})`);
+  let prev = null;
+  for (const e of d.engagements) {
+    assert.ok(ENGAGE_ACTIVITY_TYPES_ALLOWED.has(e.type), `정본 7종 외 type 노출: ${e.type}`);
+    assert.equal(typeof e.typeKo, 'string');
+    assert.ok(/^\d{4}-\d{2}-\d{2}$/.test(e.date), `date YYYY-MM-DD (got ${e.date})`);
+    assert.ok('label' in e, 'label 필드 존재(값은 null 가능)');
+    if (prev) assert.ok(e.date <= prev, `created_at desc 위반 (${prev} → ${e.date})`);
+    prev = e.date;
+  }
+  // 정본 정의: content_view(조회)·게시글·출석·설문은 참여 활동에서 제외 — type 에 그런 값 없음.
+  const j = JSON.stringify(d.engagements);
+  assert.ok(!/"content_view"|"post"|"attendance"|"survey"|"portfolio"/.test(j),
+    '조회·게시글·출석·설문·포트폴리오는 참여 활동 내역에서 제외(정본 정의)');
+});
+
+test('ENGDETAIL-2b: engagements 는 demo_* 합성 시드 제외 — 목록 원시행이 실 learning_logs(demo 제외) 카운트와 일치(REWORK-1)', () => {
+  // 반의 모든 학생에 대해: 상세 engageCount(=목록 원시 정본 카운트) == demo 제외 원시 카운트(캡 전).
+  const ACT = ['lesson_view', 'lesson_progress', 'lesson_complete', 'exam_complete',
+    'homework_submit', 'homework_graded', 'content_solve', 'problem_attempt',
+    'problem_set_complete', 'daily_complete', 'self_learn', 'diagnosis_complete', 'wrong_note_retry'];
+  const ph = ACT.map(() => '?').join(',');
+  for (const s of analytics.classStudents(CLASS)) {
+    const d = analytics.getEmotionEngageStudent(s.id, CLASS, { weeks: 2 });
+    const rawNoDemo = db.prepare(`
+      SELECT COUNT(*) c FROM learning_logs
+      WHERE user_id=? AND created_at >= date('now','-14 days')
+        AND (source_service IS NULL OR source_service NOT LIKE 'demo%')
+        AND activity_type IN (${ph})
+    `).get(s.id, ...ACT).c;
+    assert.equal(d.signals.engageCount, rawNoDemo,
+      `uid ${s.id} engageCount(${d.signals.engageCount}) != demo제외 원시(${rawNoDemo})`);
+    // demo 포함 카운트가 더 크면(=demo 존재) 반드시 그만큼 줄었어야 한다(demo 미제외 회귀 방지).
+    const rawWithDemo = db.prepare(`
+      SELECT COUNT(*) c FROM learning_logs
+      WHERE user_id=? AND created_at >= date('now','-14 days')
+        AND activity_type IN (${ph})
+    `).get(s.id, ...ACT).c;
+    assert.ok(d.signals.engageCount <= rawWithDemo, 'engageCount 는 demo 포함 카운트 이하');
+  }
+});
+
+test('ENGDETAIL-3: emotions 배열 계약 — attendance 단일 원천·date desc·≤14·하루1건·이모지/한글', () => {
+  const d = analytics.getEmotionEngageStudent(STUDENT1, CLASS, { weeks: 2 });
+  assert.ok(Array.isArray(d.emotions), 'emotions 배열');
+  assert.ok(d.emotions.length <= 14, `상한 14 (got ${d.emotions.length})`);
+  const seenDates = new Set();
+  let prev = null;
+  for (const m of d.emotions) {
+    assert.equal(m.source, 'attendance', '감정 원천은 attendance 단일(마음채움 미통합)');
+    assert.equal(m.sourceKo, '감정출석부', '출처 라벨 감정출석부 고정');
+    assert.equal(typeof m.emoji, 'string');
+    assert.equal(typeof m.emotionKo, 'string');
+    assert.ok(/^\d{4}-\d{2}-\d{2}$/.test(m.date));
+    assert.ok(!seenDates.has(m.date), `하루 1건 축약 위반(중복 날짜 ${m.date})`);
+    seenDates.add(m.date);
+    if (prev) assert.ok(m.date <= prev, `date desc 위반 (${prev} → ${m.date})`);
+    prev = m.date;
+  }
+});
+
+test('ENGDETAIL-4: 빈 데이터 학생 정직 응답 — 활동/감정 없으면 빈 배열 + honest signals', () => {
+  // 한서윤(uid 13): gapDays 큼·최근 2주 활동/감정 없음(실측). 없으면 스킵(데이터 의존 방어).
+  const EMPTY_UID = 13;
+  const members = analytics.classStudentIds(CLASS);
+  if (!members.includes(EMPTY_UID)) return; // 방어: 시드 변동 시 스킵
+  const d = analytics.getEmotionEngageStudent(EMPTY_UID, CLASS, { weeks: 2 });
+  assert.equal(d.engagements.length, 0, '최근 2주 참여 활동 없음 → 빈 배열');
+  assert.equal(d.emotions.length, 0, '최근 2주 감정 기록 없음 → 빈 배열');
+  assert.equal(d.signals.engageCount, 0, 'engageCount 0(정직)');
+  assert.equal(d.signals.emotionDays, 0, 'emotionDays 0(정직)');
+  // gapDays 는 실제 경과일(집계 기반) — null 이 아니면 숫자, 활동기록 자체 없으면 null.
+  assert.ok(d.signals.gapDays === null || typeof d.signals.gapDays === 'number');
+  // engageTrend enum 계약.
+  assert.ok(['down', 'flat', 'up', 'nodata'].includes(d.signals.engageTrend));
+});
+
+test('ENGDETAIL-5: classId 격리 — 다른 반 컨텍스트로 조회해도 그 학생 1명분만, 타반 학생 누락 없음', () => {
+  // getEmotionEngageStudent 는 classId 컨텍스트로 사분면을 뽑되 응답은 :userId 1명분.
+  const d = analytics.getEmotionEngageStudent(STUDENT1, CLASS, { weeks: 2 });
+  assert.equal(d.userId, STUDENT1, '응답은 요청 userId 1명분');
+  assert.equal(d.classId, CLASS);
+  // 다른 학생 이름/데이터가 섞이지 않음.
+  const j = JSON.stringify(d);
+  const others = analytics.classStudents(CLASS).filter(s => s.id !== STUDENT1);
+  for (const o of others) {
+    assert.ok(!j.includes(`"userId":${o.id}`), `타 학생 userId(${o.id}) 누출`);
+  }
+});
+
+test('ENGDETAIL-6: 권한 — 소유 교사 200(실명+audit), 비멤버 교사 403, 학생 403, classId 누락 400', async () => {
+  const before = db.prepare(
+    "SELECT COUNT(*) c FROM learning_logs WHERE activity_type='governance' AND object_id='emotion-engage-student' AND user_id=?"
+  ).get(TEACHER).c;
+
+  const ok = await req(`/emotion-engage/student/${STUDENT1}?classId=${CLASS}&weeks=2`, TEACHER);
+  assert.equal(ok.status, 200, '소유 교사 200');
+  assert.equal(ok.json.success, true);
+  assert.equal(ok.json.masked, false, '담임 → 실명(masked=false)');
+  assert.equal(ok.json.userId, STUDENT1);
+  assert.ok(ok.json.signals && typeof ok.json.signals === 'object', 'signals 포함');
+  assert.ok(Array.isArray(ok.json.engagements) && Array.isArray(ok.json.emotions), '배열 계약');
+
+  // 담임 실명 열람 → governance audit 1건 적재.
+  const after = db.prepare(
+    "SELECT COUNT(*) c FROM learning_logs WHERE activity_type='governance' AND object_id='emotion-engage-student' AND user_id=?"
+  ).get(TEACHER).c;
+  assert.ok(after > before, `실명 열람 audit 미적재 (before=${before}, after=${after})`);
+
+  // classId 누락 → 400.
+  const noCid = await req(`/emotion-engage/student/${STUDENT1}`, TEACHER);
+  assert.equal(noCid.status, 400, 'classId 누락 400');
+
+  // 비멤버 교사 → 403(그 반 담임 아님).
+  const foreign = classNotMemberedByTeacher();
+  const noPerm = await req(`/emotion-engage/student/${STUDENT1}?classId=${foreign.id}`, TEACHER);
+  assert.equal(noPerm.status, 403, '비멤버 교사 403');
+
+  // 학생 → 403.
+  const stu = await req(`/emotion-engage/student/${STUDENT1}?classId=${CLASS}`, STUDENT1);
+  assert.equal(stu.status, 403, '학생 403');
+});
+
+test('ENGDETAIL-7: 타 반 학생 차단 — classId 반 소속이 아닌 userId 는 403(반 경계 노출 차단)', async () => {
+  // classId=CLASS(class1) 컨텍스트인데 그 반 소속이 아닌 학생 userId → 403.
+  const class1Members = analytics.classStudentIds(CLASS);
+  // class1 에 없는 학생 id 를 다른 반에서 찾는다.
+  const foreignStudent = db.prepare(`
+    SELECT cm.user_id AS id FROM class_members cm JOIN users u ON u.id=cm.user_id
+    WHERE u.role='student' AND cm.user_id NOT IN (${class1Members.map(() => '?').join(',') || 'NULL'})
+    LIMIT 1
+  `).get(...class1Members);
+  if (!foreignStudent) return; // 방어: 외부 학생 없으면 스킵
+  const res = await req(`/emotion-engage/student/${foreignStudent.id}?classId=${CLASS}`, TEACHER);
+  assert.equal(res.status, 403, '반 소속 아닌 학생 → 403(타 반 데이터 노출 차단)');
+});
+
+test('ENGDETAIL-8: HTTP signals 가 /emotion-engage/class 그 점과 정합(quadrant·engageNote·부정%)', async () => {
+  const card = await req(`/emotion-engage/class/${CLASS}?weeks=2`, TEACHER);
+  assert.equal(card.status, 200);
+  const p = (card.json.points || []).find(pt => pt.userId === STUDENT1);
+  if (!p) return; // 방어: 점 없으면 스킵
+  const detail = await req(`/emotion-engage/student/${STUDENT1}?classId=${CLASS}&weeks=2`, TEACHER);
+  assert.equal(detail.status, 200);
+  assert.equal(detail.json.quadrant, p.quadrant, 'quadrant 카드↔상세 정합');
+  assert.equal(detail.json.signals.engageNote, p.engageNote, 'engageNote 카드↔상세 정합');
+  if (p.hasEmotion) {
+    const m = /부정 (\d+)%/.exec(p.emotionNote);
+    assert.equal(detail.json.signals.emotionNegPct, Number(m[1]), 'emotionNegPct 카드↔상세 정합');
+  }
+});
+
+test('ENGDETAIL-9: 정서 근거 라벨 계약 — emotionNegPct 는 실제 표본(N건) 라벨 동반, "최근 2주" 문구 미사용(REWORK-2)', () => {
+  // 감정 있는 학생 전수: emotionBasisKo 는 emotionSampleN 을 반영하고 "2주"가 아니다.
+  for (const s of analytics.classStudents(CLASS)) {
+    const d = analytics.getEmotionEngageStudent(s.id, CLASS, { weeks: 2 });
+    const sig = d.signals;
+    if (sig.emotionNegPct == null) {
+      // 감정 없음 → 표본 라벨/힌트도 정직하게 없음.
+      assert.equal(sig.emotionBasisKo, null, 'emotion 없으면 emotionBasisKo=null');
+      assert.equal(sig.recentEmotionHint, null, 'emotion 없으면 recentEmotionHint=null');
+      continue;
+    }
+    // 표본 수 필드 존재·정합.
+    assert.equal(typeof sig.emotionSampleN, 'number', 'emotionSampleN 숫자');
+    assert.ok(sig.emotionSampleN >= 1 && sig.emotionSampleN <= 10, `표본 1~10 (got ${sig.emotionSampleN})`);
+    assert.equal(typeof sig.emotionBasisKo, 'string', 'emotionBasisKo 문자열');
+    assert.ok(sig.emotionBasisKo.includes(String(sig.emotionSampleN)),
+      `basis 라벨(${sig.emotionBasisKo}) 이 표본수(${sig.emotionSampleN}) 반영`);
+    // ★ 핵심 불변식(REWORK-2): negPct 근거 라벨에 "2주/주" 창 문구를 쓰지 않는다(다른 창 혼용 금지).
+    assert.ok(!/주/.test(sig.emotionBasisKo),
+      `emotionBasisKo 에 '주'(2주 등) 창 문구 금지 — s_emotion 창과 다름 (got "${sig.emotionBasisKo}")`);
+  }
+});
+
+test('ENGDETAIL-10: 창 분리 정직성 — negPct(s_emotion 창) 와 2주 목록(emotionDays/negCount)은 별개 필드로 분리', () => {
+  // 임지호(uid 12): s_emotion 부정 우세(≥50)이나 최근 2주는 긍정 1건(🤩) → 두 창이 극성 반대.
+  //   이 모순 상황에서 (a) negPct 는 s_emotion 유지, (b) 2주 부정건수는 별도 필드, (c) recentEmotionHint 동반.
+  const IMOJIHO = 12;
+  const members = analytics.classStudentIds(CLASS);
+  if (!members.includes(IMOJIHO)) return; // 방어: 시드 변동 시 스킵
+  const d = analytics.getEmotionEngageStudent(IMOJIHO, CLASS, { weeks: 2 });
+  const sig = d.signals;
+  // negPct 는 card 정합(불변) — ENGDETAIL-1/8 에서 이미 카드와 대조. 여기선 값 존재만.
+  assert.equal(typeof sig.emotionNegPct, 'number');
+  // emotionDays/negCount 는 '최근 2주 목록' 창 — negPct 창과 독립. 필드가 분리되어 있어야 한다.
+  assert.ok('emotionDays' in sig && 'negCount' in sig, '2주 목록 카운트는 별도 필드(negPct 근거로 병합 금지)');
+  assert.ok('emotionSampleN' in sig && 'emotionBasisKo' in sig, 'negPct 창을 표현하는 별도 필드 존재');
+  // 극성이 반대면 recentEmotionHint 로 그 사실을 드러낸다(임지호: negPct≥50 & 최근 긍정 → 긍정 신호).
+  if (sig.emotionNegPct >= 50) {
+    const recentPositive = d.emotions.some(e => e.group === 'positive')
+      && !d.emotions.some(e => e.group === 'negative');
+    if (recentPositive) {
+      assert.equal(sig.recentEmotionHint, '최근에는 긍정 신호가 보여요',
+        '과거 부정 우세 + 최근 긍정 → recentEmotionHint 로 개선 신호 노출');
+    }
+  }
+  // recentEmotionHint 는 null 또는 관찰형 문자열(단정 어휘 금지).
+  if (sig.recentEmotionHint != null) {
+    assert.equal(typeof sig.recentEmotionHint, 'string');
+    assert.ok(/신호/.test(sig.recentEmotionHint), '관찰형(‘신호’) 톤');
+  }
+});
