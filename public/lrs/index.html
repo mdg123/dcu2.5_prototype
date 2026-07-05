@@ -281,6 +281,19 @@
     .mastery-section .ms-controls__lbl{ font-size:14px; font-weight:600; color:#6b7280; }
     .mastery-section select.ms-select{ font-size:14px; font-family:inherit; padding:7px 12px; border:1px solid #d1d5db; border-radius:8px; background:#fff; color:#374151; cursor:pointer; }
 
+    /* T-PROG(목표 도달 예상) 전용 셀렉터 — 계약상 select 16px, 라벨 15px */
+    .tprog-ctrl{ display:inline-flex; align-items:center; gap:6px; min-width:0; }
+    .tprog-ctrl > .ms-controls__lbl{ font-size:15px; font-weight:600; color:#6b7280; white-space:nowrap; }
+    .mastery-section select.tprog-select{ font-size:16px; font-family:inherit; padding:8px 12px; border:1px solid #d1d5db; border-radius:8px; background:#fff; color:#374151; cursor:pointer; max-width:180px; }
+    .mastery-section select.tprog-select:focus{ outline:2px solid #93c5fd; outline-offset:1px; border-color:#2563eb; }
+    /* 제목 옆 예측 방식 안내 (?) */
+    .tprog-info{ display:inline-flex; align-items:center; justify-content:center; width:20px; height:20px; margin-left:6px; border-radius:50%; background:#eef2ff; color:#4f46e5; font-size:12px; font-weight:700; cursor:help; vertical-align:middle; border:1px solid #c7d2fe; }
+    .tprog-info:hover{ background:#e0e7ff; }
+    @media (max-width:767px){
+      .mastery-section > .ms-head #tProgConf{ width:100%; }
+      .mastery-section select.tprog-select{ max-width:none; flex:1 1 auto; }
+    }
+
     /* 4상태 범례 */
     .mastery-legend{ display:flex; flex-wrap:wrap; gap:16px; align-items:center; font-size:13px; color:#4b5563; margin-top:12px; }
     .mastery-legend .item{ display:inline-flex; align-items:center; gap:6px; }
@@ -5708,15 +5721,32 @@ VIEWS['t-warnings'] = async function(root){
       <div id="tTrendHost"></div>
     </section>
 
-    <!-- T-PROG 목표 도달 예상 (반 평균 성취 도달률 추세 외삽) -->
+    <!-- T-PROG 목표 도달 예상 (반 전체 학생 주간 정답률 추세 외삽) -->
     <section class="mastery-section" id="tProgSection">
       <div class="ms-head">
         <div class="ms-titles">
-          <h2 class="mastery-h2"><i class="fas fa-bullseye" aria-hidden="true" style="color:#2563eb;"></i> 목표 도달 예상</h2>
-          <div class="mastery-sub">이 반 <b>전체 학생 평균</b>의 성취 도달률(정답 기준을 채운 성취기준 비율)이 지금 속도로 오르면 <b>목표 80%</b>에 언제 닿을지 예측해요.</div>
+          <h2 class="mastery-h2"><i class="fas fa-bullseye" aria-hidden="true" style="color:#2563eb;"></i> 목표 도달 예상<span class="tprog-info" id="tProgHow" tabindex="0" role="img" aria-label="예측 방식 안내" title="최근 주별 정답률에 직선(추세)을 그어 앞으로 연장한 값이에요. 지금 속도가 계속된다는 단순 가정이라 실제와 다를 수 있어요.">?</span></h2>
+          <div class="mastery-sub" id="tProgSubtitle">이 반 <b>전체 학생</b>의 <b>전체 교과</b> <b>정답률(맞힌 문항 비율)</b>이 지금 속도로 오르면 <b>목표 80%</b>에 언제 닿을지 예측해요.</div>
           <div class="mastery-sub" id="tProgHeadline" style="margin-top:4px;">실선=지금까지, 점선=예상 범위(추정). 폭이 넓을수록 불확실해요.</div>
         </div>
-        <div class="ms-controls" id="tProgConf"></div>
+        <div class="ms-controls" id="tProgConf">
+          <span class="tprog-ctrl">
+            <label class="ms-controls__lbl" for="tProgSubject">교과</label>
+            <select class="tprog-select" id="tProgSubject" aria-label="교과 선택">
+              <option value="all">전체 교과</option>
+            </select>
+          </span>
+          <span class="tprog-ctrl">
+            <label class="ms-controls__lbl" for="tProgTarget">목표</label>
+            <select class="tprog-select" id="tProgTarget" aria-label="목표 정답률 선택">
+              <option value="60">60%</option>
+              <option value="70">70%</option>
+              <option value="80" selected>80%</option>
+              <option value="90">90%</option>
+            </select>
+          </span>
+          <span id="tProgConfBadge" class="tprog-ctrl" style="gap:0;"></span>
+        </div>
       </div>
       <div class="lrs-insight-wrap" id="tProgInsights" style="display:none;"></div>
       <div class="chart-body" id="tProgBody" style="height:280px;">
@@ -6069,14 +6099,75 @@ VIEWS['t-warnings'] = async function(root){
   renderNotReached();
 
   // ── T-TREND + T-PROG (분석·예측 P0) — 비동기 후행 로드 ──────────────────
+  // T-PROG 로컬 상태(교과·목표). 셀렉터 change 시 재조회 후 renderClassProjection 재렌더.
+  const tProgState = { subject:'all', target:80, subjectsBuilt:false };
+
   (async () => {
     const [ews, ctrend] = await Promise.all([
       apiGet('/api/lrs/ews/class/' + encodeURIComponent(cid)),
-      apiGet('/api/lrs/trend/class/' + encodeURIComponent(cid))
+      apiGet('/api/lrs/trend/class/' + encodeURIComponent(cid), { subject:tProgState.subject, target:tProgState.target })
     ]);
     renderTrendTable(ews);
     renderClassProjection(ctrend);
+    wireProjControls();
   })();
+
+  // T-PROG 셀렉터 재조회 — 교과/목표 변경 시 해당 파라미터로 재요청 후 재렌더
+  let _projReqSeq = 0;
+  async function reloadProjection(){
+    const seq = ++_projReqSeq;
+    const subjSel = document.getElementById('tProgSubject');
+    const tgtSel  = document.getElementById('tProgTarget');
+    if (subjSel){ subjSel.disabled = true; }
+    if (tgtSel){ tgtSel.disabled = true; }
+    const ctrend = await apiGet('/api/lrs/trend/class/' + encodeURIComponent(cid),
+      { subject:tProgState.subject, target:tProgState.target });
+    if (seq !== _projReqSeq) return; // 더 최신 요청이 있으면 무시(레이스 방지)
+    if (subjSel){ subjSel.disabled = false; }
+    if (tgtSel){ tgtSel.disabled = false; }
+    renderClassProjection(ctrend);
+  }
+
+  // 셀렉터 이벤트 배선(1회) — 최초 렌더 후 호출
+  function wireProjControls(){
+    const subjSel = document.getElementById('tProgSubject');
+    const tgtSel  = document.getElementById('tProgTarget');
+    if (subjSel && !subjSel._wired){
+      subjSel._wired = true;
+      subjSel.addEventListener('change', ()=>{ tProgState.subject = subjSel.value || 'all'; reloadProjection(); });
+    }
+    if (tgtSel && !tgtSel._wired){
+      tgtSel._wired = true;
+      tgtSel.addEventListener('change', ()=>{ tProgState.target = parseInt(tgtSel.value,10) || 80; reloadProjection(); });
+    }
+  }
+
+  // 교과 셀렉터 채우기 — 첫 응답의 subjects 배열로 구성(graceful: 없으면 전체 교과 단일 유지)
+  function buildSubjectSelect(subjects){
+    const subjSel = document.getElementById('tProgSubject');
+    if (!subjSel || tProgState.subjectsBuilt) return;
+    if (!Array.isArray(subjects) || !subjects.length) return; // BE 미배포 → 기존 '전체 교과' 단일 옵션 유지
+    // 'all'(전체 교과)이 목록에 없으면 맨 앞에 보강
+    const hasAll = subjects.some(s => s && s.code === 'all');
+    const opts = (hasAll ? subjects : [{ code:'all', label:'전체 교과' }].concat(subjects))
+      .filter(s => s && s.code)
+      .map(s => {
+        const cnt = (s.code !== 'all' && s.count != null) ? ` (${s.count})` : '';
+        return `<option value="${escapeAttr(s.code)}">${escapeHtml(s.label || s.code)}${escapeHtml(cnt)}</option>`;
+      }).join('');
+    subjSel.innerHTML = opts;
+    subjSel.value = tProgState.subject; // 현재 선택 유지
+    tProgState.subjectsBuilt = true;
+  }
+
+  // 부제(설명) 정정 — 선택한 교과명·목표치를 정확히 반영(정답률 기준으로 통일)
+  function updateProjSubtitle(subjectLabel, target){
+    const el = document.getElementById('tProgSubtitle');
+    if (!el) return;
+    const lbl = subjectLabel || '전체 교과';
+    const tgt = (target != null) ? target : tProgState.target;
+    el.innerHTML = `이 반 <b>전체 학생</b>의 <b>${escapeHtml(lbl)}</b> <b>정답률(맞힌 문항 비율)</b>이 지금 속도로 오르면 <b>목표 ${escapeHtml(String(tgt))}%</b>에 언제 닿을지 예측해요.`;
+  }
 
   // T-TREND: 학생별 추세 표(데스크탑) + 카드(모바일)
   function renderTrendTable(ews){
@@ -6156,23 +6247,50 @@ VIEWS['t-warnings'] = async function(root){
       <div class="trend-cards">${cardHtml}</div>`;
   }
 
-  // T-PROG: 반 평균 목표 도달 예상(점선 밴드 외삽)
+  // T-PROG: 반 전체 학생 주간 정답률 목표 도달 예상(점선 밴드 외삽)
   function renderClassProjection(ctrend){
-    const body = document.getElementById('tProgBody');
+    // 빈 상태에서 outerHTML 교체로 사라진 #tProgBody 를 매 렌더마다 복원(재조회 대응)
+    const section = document.getElementById('tProgSection');
+    let body = document.getElementById('tProgBody');
+    if (!body && section){
+      const foot0 = document.getElementById('tProgFoot');
+      const restored = document.createElement('div');
+      restored.className = 'chart-body';
+      restored.id = 'tProgBody';
+      restored.style.height = '280px';
+      restored.innerHTML = '<canvas id="tProgChart" role="img" aria-label="목표 도달 예상 차트"></canvas>';
+      // 남아있던 빈상태(.mastery-empty) 노드 제거
+      const emptyNode = section.querySelector('.mastery-empty');
+      if (emptyNode) emptyNode.remove();
+      if (foot0) section.insertBefore(restored, foot0); else section.appendChild(restored);
+      body = restored;
+    }
     const headline = document.getElementById('tProgHeadline');
-    const confHost = document.getElementById('tProgConf');
+    const confHost = document.getElementById('tProgConfBadge');
     const foot = document.getElementById('tProgFoot');
     if (!body) return;
     const trend = ctrend && ctrend.trend;
     const proj = ctrend && ctrend.projection;
-    const target = (ctrend && ctrend.target) || 80;
+    const target = (ctrend && ctrend.target) || tProgState.target || 80;
+    // 교과 셀렉터 채우기(첫 응답의 subjects) + 부제 정정(선택 교과·목표 반영)
+    buildSubjectSelect(ctrend && ctrend.subjects);
+    updateProjSubtitle(ctrend && ctrend.subjectLabel, target);
     // 분석 멘트(공통 lrs-insight) — 빈 상태에서도 "자료 부족" 안내를 노출.
     renderInsights(document.getElementById('tProgInsights'), ctrend && ctrend.insights);
     if (!ctrend || !ctrend.success || !trend || trend.status !== 'ok'){
-      body.closest('.mastery-section').querySelector('#tProgBody').outerHTML =
-        `<div class="mastery-empty"><i class="fas fa-bullseye me-icon"></i><p>목표 도달 예상을 그리려면 추세 데이터가 더 필요해요. 학습이 쌓이면 표시됩니다.</p></div>`;
+      const isSubjectScoped = tProgState.subject && tProgState.subject !== 'all';
+      const emptyMsg = isSubjectScoped
+        ? '이 교과는 아직 추세를 그릴 자료가 부족해요. 학습이 쌓이면 표시됩니다.'
+        : '목표 도달 예상을 그리려면 추세 데이터가 더 필요해요. 학습이 쌓이면 표시됩니다.';
+      // 이전에 그려둔 차트가 있으면 파기(재조회로 데이터 있음→없음 전환 대응)
+      const prevCv = document.getElementById('tProgChart');
+      const pIdx = state.charts.findIndex(c => c && c.canvas === prevCv);
+      if (pIdx >= 0){ try{ state.charts[pIdx].destroy(); }catch(_){} state.charts.splice(pIdx,1); }
+      body.outerHTML =
+        `<div class="mastery-empty"><i class="fas fa-bullseye me-icon"></i><p>${emptyMsg}</p></div>`;
       if (headline) headline.textContent = '실선=지금까지, 점선=예상 범위(추정). 폭이 넓을수록 불확실해요.';
       if (confHost) confHost.innerHTML = '';
+      if (foot) foot.innerHTML = '';
       return;
     }
     if (confHost) confHost.innerHTML = confBadge(trend.confidence, trend.confidenceKo, `관측 ${trend.observedWeeks||0}주${trend.lowVariance?' · 변동 큼':''}`);
@@ -6185,6 +6303,9 @@ VIEWS['t-warnings'] = async function(root){
     const cfg = buildProjChartData(trend, proj, { target });
     const boundaryIndex = cfg.boundaryIndex;
     const ctx = document.getElementById('tProgChart');
+    // 재조회 시 같은 캔버스의 이전 차트 파기(누수·"Canvas already in use" 방지) — tShallow 패턴 준용
+    const prevIdx = state.charts.findIndex(c => c && c.canvas === ctx);
+    if (prevIdx >= 0){ try{ state.charts[prevIdx].destroy(); }catch(_){} state.charts.splice(prevIdx,1); }
     mkChart(ctx, 'line', cfg, {
       scales:{
         y:{ min:0, max:100, ticks:{ callback:v=>v+'%', font:{size:12} } },

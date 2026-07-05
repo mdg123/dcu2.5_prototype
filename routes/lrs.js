@@ -2354,13 +2354,36 @@ router.get('/trend/class/:id', requireAuth, (req, res) => {
     const target = req.query.target ? Math.max(1, Math.min(100, parseInt(req.query.target, 10) || 80)) : 80;
     const students = analytics.classStudents(classId);
 
-    const trend = analytics.computeTrend({ classId });
+    // ── 교과 셀렉터 구성: '전체 교과'(all) 를 항상 맨 앞에 prepend + 데이터 있는 교과(count desc).
+    const classSubjects = analytics.classSubjects(classId); // [{code,label,count}] (all 미포함)
+    const subjects = [{ code: 'all', label: '전체 교과' }, ...classSubjects];
+
+    // ── 선택 스코프 파싱: subject 생략/'all' → 전체(기존 동작 100% 유지). 그 외 → 그 교과만.
+    //   ★ 교과 별칭 정규화: FE 가 실수로 레거시 코드(MAT 등)를 넘겨도 canonical(math-e)로 접어
+    //     동일 동작. subjects 배열의 code 는 canonical 이므로 존재 검증도 canonical 로 한다.
+    //   존재하지 않는(반 데이터에 없는) subject 코드가 오면 'all' 로 폴백(안전·정직성 유지).
+    let subject = String(req.query.subject || 'all').trim() || 'all';
+    if (subject !== 'all') {
+      subject = analytics.canonicalSubject(subject);
+      if (!classSubjects.some(s => s.code === subject)) subject = 'all';
+    }
+    const subjectLabel = subject === 'all'
+      ? '전체 교과'
+      : (classSubjects.find(s => s.code === subject)?.label || subject);
+
+    // subject!=='all' 이면 computeTrend 에 subject 전달(그 교과 정답률만). 'all' 이면 미전달=전체.
+    const trend = analytics.computeTrend(
+      subject === 'all' ? { classId } : { classId, subject }
+    );
     const projection = analytics.projectReach(trend, { target });
-    // 분석 멘트(전체 LRS 공통 lrs-insight) — 문안은 BE 소유.
-    const insights = analytics.projectionInsights(trend, projection, target);
+    // 분석 멘트(전체 LRS 공통 lrs-insight) — 문안은 BE 소유. 교과 스코프면 라벨을 넘겨 문안에 반영.
+    const insights = analytics.projectionInsights(trend, projection, target,
+      subject === 'all' ? null : subjectLabel);
 
     res.json({
-      success: true, classId, target, studentCount: students.length,
+      success: true, classId, target,
+      subject, subjectLabel, subjects,
+      studentCount: students.length,
       trend, projection, insights,
       disclaimer: '이 추정은 규칙 기반 조기경보이며 실제와 다를 수 있어요.',
     });

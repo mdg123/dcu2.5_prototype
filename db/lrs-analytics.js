@@ -55,6 +55,29 @@ function normCode(code) {
   return `[${t}]`;
 }
 
+// ── 교과 코드 별칭 정규화(정합 결함 fix) ─────────────────────────────────────
+//   learning_logs.subject_code 에 정본(-e, 예 'math-e')과 레거시 대문자(예 'MAT','SCI')가
+//   같은 교과인데 중복 존재한다. 셀렉터·필터에서 레거시를 정본으로 접어 병합한다.
+//   canonicalSubject('MAT')='math-e', canonicalSubject('math-e')='math-e'(불변).
+//   ★ 정본 -e 코드는 그대로. 대문자 레거시만 정본으로 매핑. 미지 코드는 원형 유지(정직성).
+const SUBJECT_ALIAS = {
+  KOR: 'korean-e', MAT: 'math-e', MATH: 'math-e', ENG: 'english-e',
+  SCI: 'science-e', SOC: 'social-e', MUS: 'music-e', MOR: 'moral-e', ART: 'art-e',
+};
+function canonicalSubject(code) {
+  if (code == null) return code;
+  return SUBJECT_ALIAS[String(code).toUpperCase()] || code;
+}
+// canonical → 그 canonical 로 매핑되는 모든 원본 코드(자신 + 별칭들). 필터 IN 확장용.
+//   예: subjectAliases('math-e') = ['math-e','MAT','MATH']. 미지 코드는 [자기 자신].
+function subjectAliases(canonical) {
+  const set = new Set([canonical]);
+  for (const [alias, canon] of Object.entries(SUBJECT_ALIAS)) {
+    if (canon === canonical) set.add(alias);
+  }
+  return Array.from(set);
+}
+
 // ── 멤버십 조인: 반의 student 멤버 id (C-5 표준) ──────────────────────────────
 function classStudentIds(classId) {
   try {
@@ -84,13 +107,19 @@ function classStudents(classId) {
 //     COUNT(DISTINCT user_id) AS contributors 1컬럼을 추가로 산출한다(익명 인원수만 —
 //     개별 학생 값·명단 없음). false(기본)면 기존 반환 형태 완전 불변(회귀 0).
 // ─────────────────────────────────────────────────────────────────────────────
-function _weeklyRateSeries({ userIds, code, weeksLimit, withContributors = false }) {
+function _weeklyRateSeries({ userIds, code, subject, weeksLimit, withContributors = false }) {
   if (!userIds || !userIds.length) return [];
   const ph = userIds.map(() => '?').join(',');
   // [P1 추이 과다 게이트 fix] achievement_code IS NOT NULL 은 '특정 성취기준(code)' 추세일 때만 요구한다.
   //   전체(overall) 추세는 성취기준 태그가 없는 정오답 로그도 포함해야 한다.
   //   (실측: uid3 는 23·24주 정오답 로그에 achievement_code 가 없어 이 조건 때문에 25주 1점만 남아
   //    추세선이 영영 안 떴다.) code 필터가 있을 때만 achievement_code 조건을 건다.
+  //
+  //   [교과별 분리] subject(learning_logs.subject_code) 필터를 code 필터와 동일 패턴으로 추가한다.
+  //   subject 없으면(=전체 교과) SQL 완전 불변 → 기존 전체 추세 동작 100% 유지(회귀 0).
+  //   ★ 지표의 정체는 그대로 "주간 정답률"(SUM(result_success=1)/COUNT(*)) — 성취기준 도달 비율 아님.
+  //     교과별로 쪼개면 subject_code 있는 로그만 잡히므로(전체는 NULL 포함) 관측 주차가 줄어들 수 있다
+  //     (일부 교과는 관측 주차<3 → status='insufficient' 가 정상 — 억지로 채우지 않음).
   let sql = `
     SELECT strftime('%Y-%W', created_at) AS week,
            COUNT(*) AS attempts,
@@ -101,6 +130,15 @@ function _weeklyRateSeries({ userIds, code, weeksLimit, withContributors = false
       AND result_success IS NOT NULL`;
   const params = [...userIds];
   if (code) { sql += ' AND achievement_code = ?'; params.push(code); }
+  if (subject) {
+    // [교과 별칭 병합] subject 는 canonical(정본) 코드. 그 canonical 로 접히는 레거시 별칭까지
+    //   subject_code IN (...) 로 함께 잡아 병합된 데이터 전체를 추세에 반영한다.
+    //   (예: 'math-e' 선택 → IN ('math-e','MAT','MATH').) 미지 코드는 [자기 자신] → 단일 필터.
+    const aliases = subjectAliases(canonicalSubject(subject));
+    const sph = aliases.map(() => '?').join(',');
+    sql += ` AND subject_code IN (${sph})`;
+    params.push(...aliases);
+  }
   sql += ' GROUP BY week ORDER BY week ASC';
 
   let rows;
@@ -150,14 +188,15 @@ const TREND_KO = { up: '상승', flat: '정체', down: '하락', insufficient: '
 //       confidence, confidenceKo, observedWeeks, currentRate, series[] }
 //   관측주차 < 3 → status='insufficient'(미산출). slope/r2 는 참고용으로만.
 // ─────────────────────────────────────────────────────────────────────────────
-function computeTrend({ userId, classId, userIds, code = null, weeks = DEFAULT_WEEKS } = {}) {
+function computeTrend({ userId, classId, userIds, code = null, weeks = DEFAULT_WEEKS, subject = null } = {}) {
   let ids = userIds;
   if (!ids) {
     if (userId != null) ids = [userId];
     else if (classId != null) ids = classStudentIds(classId);
     else ids = [];
   }
-  const series = _weeklyRateSeries({ userIds: ids, code, weeksLimit: weeks });
+  // subject(=learning_logs.subject_code) 전달. null/생략 시 교과 필터 없음(전체 추세, 회귀 0).
+  const series = _weeklyRateSeries({ userIds: ids, code, subject, weeksLimit: weeks });
   const nW = series.length;
   const currentRate = nW > 0 ? round1(series[nW - 1].rate) : null;
 
@@ -195,6 +234,55 @@ function computeTrend({ userId, classId, userIds, code = null, weeks = DEFAULT_W
     canDrawLine: nW >= 2,          // 관측 2점 이상이면 꺾은선 가능(항상 참, ok 는 nW>=3).
     series: series.map((w, i) => ({ week: w.week, x: i, rate: round1(w.rate), attempts: w.attempts })),
   };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 교과별 도달 예상 셀렉터 — 이 반 학생들의 learning_logs 에서 관측된 교과 목록.
+//   classSubjects(classId) → [{ code, label, count }] (count desc)
+//     · learning_logs.subject_code NOT NULL & result_success NOT NULL 인 로그만(정답률 산출 대상).
+//     · ★ 교과 별칭 병합(정합 결함 fix): distinct subject_code 를 canonical(정본 -e)로 접어
+//       GROUP BY 병합 → 카운트 합산. 결과에 레거시 코드 단독 엔트리 0(예 'MAT'/'SCI' 소멸).
+//       수학=math-e+MAT+MATH, 과학=science-e+SCI … 처럼 하나로.
+//     · label 은 canonical 의 subjects.name(예 math-e→"수학"). 조인 실패 시 canonical code 폴백.
+//     · '전체 교과'({code:'all'})는 여기서 넣지 않는다 — 라우트가 맨 앞에 prepend.
+//   ★ 정직성: 교과별로 쪼개면 subject_code 태그된 로그만 잡히므로 count 가 적은 교과는
+//     주차<3 → status='insufficient' 가 정상. 억지로 채우지 않는다.
+// ─────────────────────────────────────────────────────────────────────────────
+function classSubjects(classId) {
+  const ids = classStudentIds(classId);
+  if (!ids.length) return [];
+  const ph = ids.map(() => '?').join(',');
+  let rows;
+  try {
+    rows = db.prepare(`
+      SELECT ll.subject_code AS code, COUNT(*) AS count
+      FROM learning_logs ll
+      WHERE ll.user_id IN (${ph})
+        AND ll.subject_code IS NOT NULL
+        AND ll.result_success IS NOT NULL
+      GROUP BY ll.subject_code
+    `).all(...ids);
+  } catch (_) { return []; }
+
+  // canonical 로 접어 카운트 합산(레거시→정본 병합).
+  const merged = new Map(); // canonicalCode -> count
+  for (const r of rows) {
+    const canon = canonicalSubject(r.code);
+    merged.set(canon, (merged.get(canon) || 0) + (Number(r.count) || 0));
+  }
+
+  // canonical → 한글 라벨(subjects.name). 조인 실패(미지 코드)면 canonical code 폴백.
+  const out = [];
+  for (const [canon, count] of merged.entries()) {
+    let label = null;
+    try {
+      const srow = db.prepare('SELECT name FROM subjects WHERE code = ?').get(canon);
+      if (srow && srow.name && String(srow.name).trim() !== '') label = String(srow.name);
+    } catch (_) { /* subjects 없으면 폴백 */ }
+    out.push({ code: canon, label: label || canon, count });
+  }
+  out.sort((a, b) => b.count - a.count);
+  return out;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -272,29 +360,36 @@ function projectReach(trend, { target = 80 } = {}) {
 //   관점: "이 반 전체 학생 평균 성취 도달률"이 목표(target%)에 언제 닿을지.
 //   톤: 단정 금지·행동 유도(초등 담임 이해). 최대 2개(정보 과부하 차단).
 //   → [{ level:'good|warn|info', icon, text }]
-function projectionInsights(trend, projection, target = 80) {
+function projectionInsights(trend, projection, target = 80, subjectLabel = null) {
   const out = [];
   const p = projection || {};
   const t = trend || {};
   const r0 = (t.currentRate != null) ? Math.round(t.currentRate) : null;
+  // 교과 스코프 접두어(선택). '전체 교과'/미지정이면 접두어 없음(기존 문안 그대로).
+  //   ★ 문안 하드코딩·단정 금지 원칙 유지 — 자연스러운 라벨만 덧댄다("이 교과는 …").
+  const isSubjectScope = subjectLabel != null
+    && String(subjectLabel).trim() !== '' && String(subjectLabel).trim() !== '전체 교과';
+  const subj = isSubjectScope ? `${String(subjectLabel).trim()} 정답률` : '반 평균 도달률';
+  const subjShort = isSubjectScope ? `${String(subjectLabel).trim()}은(는)` : '반 평균이';
 
   // (1) 자료 부족 — 추세선을 아직 못 그림(관측 주차 < 3)
   if (!t || t.status !== 'ok' || p.status === 'insufficient') {
     const nW = (t && t.observedWeeks != null) ? t.observedWeeks : 0;
+    const scopeHint = isSubjectScope ? `이 교과는 아직 학습 기록이 적어요. ` : '';
     out.push({ level: 'info', icon: '🔵',
-      text: `아직 추세를 그릴 자료가 부족해요(현재 ${nW}주). 학습이 3주 이상 쌓이면 목표 도달 예측이 표시돼요.` });
+      text: `${scopeHint}아직 추세를 그릴 자료가 부족해요(현재 ${nW}주). 학습이 3주 이상 쌓이면 목표 도달 예측이 표시돼요.` });
     return out;
   }
   // (2) 이미 목표 도달 수준
   if (p.weeksToReach === 0 || (r0 != null && r0 >= target)) {
     out.push({ level: 'good', icon: '🟢',
-      text: `이미 반 평균이 목표 ${target}% 수준이에요. 지금 흐름을 유지하면 좋아요.` });
+      text: `이미 ${subjShort} 목표 ${target}% 수준이에요. 지금 흐름을 유지하면 좋아요.` });
     return out;
   }
   // (3) 상승세 없음 — 현 추세로는 도달 어려움
   if (!p.reachable || p.slope == null || p.slope <= 0) {
     out.push({ level: 'warn', icon: '🟠',
-      text: `최근 반 평균 도달률이 오르지 않고 있어요${r0 != null ? `(현재 약 ${r0}%)` : ''}. 반이 어려워하는 성취기준을 함께 보충하면 흐름을 되돌릴 수 있어요.` });
+      text: `최근 ${subj}이 오르지 않고 있어요${r0 != null ? `(현재 약 ${r0}%)` : ''}. 반이 어려워하는 성취기준을 함께 보충하면 흐름을 되돌릴 수 있어요.` });
     return out;
   }
   // (4) 도달 가능 — 남은 주(週)에 따라 톤 분기
@@ -1386,7 +1481,8 @@ function getNextStep(userId, { limit = 3 } = {}) {
 module.exports = {
   CONFIDENCE, CONFIDENCE_KO, RISK_GRADE, RISK_GRADE_KO, RISK_WEIGHTS,
   MIN_WEEKS, MIN_WEEK_ATTEMPTS, DEFAULT_WEEKS, NEGATIVE_EMOTIONS,
-  classStudentIds, classStudents,
+  classStudentIds, classStudents, classSubjects,
+  canonicalSubject, SUBJECT_ALIAS, // 교과 별칭 정규화(레거시→정본 병합)
   weeklyRateSeries: _weeklyRateSeries, // P1-3 classTrend(routes/lrs.js)용 — withContributors 옵션 지원
   computeTrend, projectReach, projectionInsights, getClassRiskList, getPrereqGap, getWeakTrend,
   getEmotionMirror, getShallowLearning, getEmotionEngage, getNextStep,

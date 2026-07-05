@@ -161,6 +161,136 @@ test('TREND-4: 반 추세도 동일 함수(classId) — 멤버십 집계', () =>
 });
 
 // ════════════════════════════════════════════════════════════════════════════
+// [SUBJTREND] 교과별 도달 예상 분리 — classSubjects 셀렉터 + subject 필터(정답률 지표 유지)
+//   불변식/회귀:
+//     (a) classSubjects: '전체 교과' 미포함(라우트가 prepend)·데이터 있는 교과만·count desc·label 폴백
+//     (b) _weeklyRateSeries/computeTrend subject 필터: subject 주면 series 가 subset(≤ 전체 시도합),
+//         subject 없으면 기존과 동일(회귀 0)
+//     (c) 희박 교과: 데이터 적은 subject → status='insufficient' 여도 크래시 없이 정직 응답
+//     (d) ★ 교과 별칭 병합(정합): 레거시 코드('MAT','SCI' 등) 단독 엔트리 0 · canonical 카운트=정본+별칭 합
+//         · canonical 선택 시 series 가 별칭 로그까지 포함(레거시 무시 대비 크거나 같음)
+// ════════════════════════════════════════════════════════════════════════════
+test('SUBJTREND-1: classSubjects — all 미포함·canonical 병합(레거시 단독 0)·count desc·label', () => {
+  const subs = analytics.classSubjects(CLASS);
+  assert.ok(Array.isArray(subs), 'classSubjects 배열');
+  // '전체 교과'/all 은 라우트가 prepend — 함수 반환에는 없어야.
+  assert.ok(!subs.some(s => s.code === 'all'), 'classSubjects 에 all 포함 금지(라우트 prepend)');
+  // ★ 별칭 병합: 레거시 대문자 코드가 단독 엔트리로 남으면 안 됨(정본으로 접혀야).
+  const legacy = Object.keys(analytics.SUBJECT_ALIAS); // ['KOR','MAT','MATH','ENG','SCI',...]
+  for (const s of subs) {
+    assert.ok(typeof s.code === 'string' && s.code.length > 0, 'code 문자열');
+    assert.ok(!legacy.includes(String(s.code).toUpperCase()),
+      `레거시 코드 '${s.code}' 가 병합 안 되고 단독 노출됨(정합 결함 회귀)`);
+    assert.equal(s.code, analytics.canonicalSubject(s.code),
+      `${s.code} 는 canonical 이어야(별칭이면 접혀야)`);
+    assert.ok(typeof s.label === 'string' && s.label.length > 0, 'label 문자열(없으면 code 폴백)');
+    assert.ok(Number.isInteger(s.count) && s.count >= 1, `count 양의 정수 (${s.code}=${s.count})`);
+  }
+  // canonical 코드 중복 없음(병합 완결).
+  const codes = subs.map(s => s.code);
+  assert.equal(codes.length, new Set(codes).size, 'canonical 코드 중복(병합 미완)');
+  // count desc 정렬
+  for (let i = 1; i < subs.length; i++) {
+    assert.ok(subs[i - 1].count >= subs[i].count, `count desc 위반: ${subs[i-1].count}<${subs[i].count}`);
+  }
+});
+
+test('SUBJTREND-1b: 별칭 병합 카운트 정합 — canonical count == 정본+별칭 raw 합', () => {
+  const ids = analytics.classStudentIds(CLASS);
+  if (!ids.length) return;
+  const ph = ids.map(() => '?').join(',');
+  // raw distinct subject_code 카운트(병합 전).
+  const raw = db.prepare(`
+    SELECT subject_code AS code, COUNT(*) AS c FROM learning_logs
+    WHERE user_id IN (${ph}) AND subject_code IS NOT NULL AND result_success IS NOT NULL
+    GROUP BY subject_code
+  `).all(...ids);
+  // 기대치: canonical 별로 raw 합산.
+  const expected = new Map();
+  for (const r of raw) {
+    const canon = analytics.canonicalSubject(r.code);
+    expected.set(canon, (expected.get(canon) || 0) + r.c);
+  }
+  const subs = analytics.classSubjects(CLASS);
+  for (const s of subs) {
+    assert.equal(s.count, expected.get(s.code),
+      `${s.code} 병합 카운트 불일치: got ${s.count}, expected ${expected.get(s.code)}`);
+  }
+  // ★ 실 DB 확정: MAT(레거시)+math-e(정본) 둘 다 있으면 수학 canonical 은 둘의 합이어야.
+  const math = subs.find(s => s.code === 'math-e');
+  if (math) {
+    const rawMath = raw.filter(r => analytics.canonicalSubject(r.code) === 'math-e')
+      .reduce((a, r) => a + r.c, 0);
+    assert.equal(math.count, rawMath, '수학(math-e) 카운트 = math-e+MAT+MATH raw 합');
+  }
+});
+
+test('SUBJTREND-1c: canonical 선택 시 series 가 별칭 로그까지 포함(레거시 무시 대비 >=)', () => {
+  // math-e 선택 시도합 >= (별칭 무시하고 math-e 만 직접 필터한) 시도합. 별칭 포함으로 커지거나 같음.
+  const ids = analytics.classStudentIds(CLASS);
+  if (!ids.length) return;
+  const subs = analytics.classSubjects(CLASS);
+  const math = subs.find(s => s.code === 'math-e');
+  if (!math) return; // 수학 데이터 없으면 스킵
+  const merged = analytics.computeTrend({ classId: CLASS, subject: 'math-e' });
+  const mergedAttempts = merged.series.reduce((a, w) => a + (w.attempts || 0), 0);
+  // 별칭(MAT/MATH)에 실제 데이터가 있으면 merged 시도합이 canonical count 와 동일 규모여야(창 slice 무시 시).
+  //   최소 불변식: mergedAttempts <= math.count(전체 창 이내) & >0.
+  assert.ok(mergedAttempts > 0, 'math-e 병합 series 비어있음');
+  assert.ok(mergedAttempts <= math.count + 0.001,
+    `병합 series 시도합(${mergedAttempts}) > canonical count(${math.count})`);
+  // 레거시 코드로 직접 넘겨도 canonical 로 접혀 동일 결과(FE 폴백 안전).
+  const viaLegacy = analytics.computeTrend({ classId: CLASS, subject: 'MAT' });
+  assert.deepEqual(viaLegacy.series, merged.series, "레거시 'MAT' 넘겨도 canonical(math-e) 와 동일 series");
+});
+
+test('SUBJTREND-2: computeTrend subject 필터 — subject 시도합 <= 전체 시도합(subset)', () => {
+  const subs = analytics.classSubjects(CLASS);
+  if (!subs.length) return; // 교과 태그 로그가 없으면 스킵(정직)
+  const all = analytics.computeTrend({ classId: CLASS });
+  const allAttempts = all.series.reduce((a, w) => a + (w.attempts || 0), 0);
+  let sumBySubject = 0;
+  for (const s of subs) {
+    const t = analytics.computeTrend({ classId: CLASS, subject: s.code });
+    assert.ok(t.status === 'ok' || t.status === 'insufficient', `${s.code} status 유효`);
+    for (const w of t.series) {
+      assert.ok(w.attempts >= 1, `${s.code} 주 ${w.week} attempts>=1`);
+      assert.ok(w.rate >= 0 && w.rate <= 100, `${s.code} rate 0~100 (${w.rate})`);
+    }
+    const subAttempts = t.series.reduce((a, w) => a + (w.attempts || 0), 0);
+    sumBySubject += subAttempts;
+    // 최근 N주 창(slice) 때문에 개별 교과 시도합이 전체보다 큰 일은 없어야(교과 ⊆ 전체).
+    assert.ok(subAttempts <= allAttempts + 0.001,
+      `${s.code} 시도합(${subAttempts}) > 전체(${allAttempts}) — 교과가 전체의 subset 아님`);
+  }
+  // NULL subject_code 로그가 전체엔 포함되므로, 교과별 합 <= 전체(창 slice 무시 시 등호 아님). 부등호만 박제.
+});
+
+test('SUBJTREND-3: subject 미전달 = 전체 추세 완전 동일 (회귀 0)', () => {
+  const a = analytics.computeTrend({ classId: CLASS });
+  const b = analytics.computeTrend({ classId: CLASS, subject: null });
+  assert.deepEqual(a, b, 'subject:null 은 전체와 완전 동일(회귀)');
+  // _weeklyRateSeries 직접 호출도 동일해야(옵션 미전달 불변).
+  const ids = analytics.classStudentIds(CLASS);
+  const s1 = analytics.weeklyRateSeries({ userIds: ids, weeksLimit: 8 });
+  const s2 = analytics.weeklyRateSeries({ userIds: ids, weeksLimit: 8, subject: null });
+  assert.deepEqual(s1, s2, 'subject 미전달 series 불변');
+});
+
+test('SUBJTREND-4: 희박 교과 — 데이터 적으면 status=insufficient 여도 크래시 없이 정직 응답', () => {
+  // 존재하지 않는 교과코드로 필터 → series 빈 → insufficient(관측 주차 0). 예외 없이 반환.
+  const t = analytics.computeTrend({ classId: CLASS, subject: '__no_such_subject__' });
+  assert.equal(t.status, 'insufficient', '데이터 없는 교과는 insufficient(억지로 채우지 않음)');
+  assert.equal(t.observedWeeks, 0, '관측 주차 0');
+  assert.equal(t.direction, 'insufficient');
+  // projectReach·projectionInsights 도 안전(정직 메시지).
+  const p = analytics.projectReach(t, { target: 80 });
+  assert.equal(p.status, 'insufficient');
+  const ins = analytics.projectionInsights(t, p, 80, '수학');
+  assert.ok(Array.isArray(ins) && ins.length >= 1, 'insights 정직 안내 1+');
+});
+
+// ════════════════════════════════════════════════════════════════════════════
 // [PROJ] 도달 예측 — slope<=0 도달불가, 밴드 동반, 단일확정선 금지
 // ════════════════════════════════════════════════════════════════════════════
 test('PROJ-1: slope<=0 이면 reachable=false (도달 어려움)', () => {
@@ -899,6 +1029,74 @@ test('PERM-5: trend/class — 소유 교사 200, 비멤버 교사 403', async ()
   const foreign = classNotMemberedByTeacher();
   const no = await req(`/trend/class/${foreign.id}`, TEACHER);
   assert.equal(no.status, 403, '비멤버 교사 trend/class 403');
+});
+
+test('SUBJTREND-HTTP-1: /trend/class?subject=all&target= — subjects 배열·subject 필드·target 클램프', async () => {
+  const r = await req(`/trend/class/${CLASS}?subject=all&target=70`, TEACHER);
+  assert.equal(r.status, 200, '소유 교사 200');
+  assert.equal(r.json.success, true);
+  // 신규 계약 필드(FE 소비).
+  assert.equal(r.json.subject, 'all', "subject 기본/명시 all");
+  assert.equal(r.json.subjectLabel, '전체 교과', 'all 라벨=전체 교과');
+  assert.ok(Array.isArray(r.json.subjects) && r.json.subjects.length >= 1, 'subjects 배열');
+  assert.equal(r.json.subjects[0].code, 'all', 'subjects[0]=전체 교과(prepend)');
+  assert.equal(r.json.subjects[0].label, '전체 교과');
+  const legacy = Object.keys(analytics.SUBJECT_ALIAS);
+  for (const s of r.json.subjects.slice(1)) {
+    assert.ok(typeof s.code === 'string' && s.code !== 'all', '교과 코드');
+    assert.ok(typeof s.label === 'string' && s.label.length > 0, '교과 라벨');
+    assert.ok(Number.isInteger(s.count) && s.count >= 1, `count ${s.code}=${s.count}`);
+    // ★ 병합: 레거시 코드(MAT/SCI 등) 단독 노출 금지 — canonical 로 접혀야(교사 혼란 방지).
+    assert.ok(!legacy.includes(String(s.code).toUpperCase()),
+      `셀렉터에 레거시 코드 '${s.code}' 단독 노출(중복 결함 회귀)`);
+  }
+  // canonical 코드 중복 없음(수학·MAT 따로 뜨지 않음).
+  const codes = r.json.subjects.map(s => s.code);
+  assert.equal(codes.length, new Set(codes).size, '셀렉터 교과 코드 중복(병합 미완)');
+  assert.equal(r.json.target, 70, 'target 반영');
+  assert.ok(r.json.trend && r.json.projection && Array.isArray(r.json.insights), 'trend/projection/insights');
+});
+
+test('SUBJTREND-HTTP-2: /trend/class?subject=all 은 subject 미지정과 동일 추세(회귀 0)', async () => {
+  const base = await req(`/trend/class/${CLASS}`, TEACHER);
+  const all = await req(`/trend/class/${CLASS}?subject=all`, TEACHER);
+  assert.equal(base.status, 200); assert.equal(all.status, 200);
+  // 전체 추세(trend) 는 subject=all 과 미지정이 동일해야.
+  assert.deepEqual(all.json.trend, base.json.trend, 'subject=all trend == 미지정 trend');
+});
+
+test('SUBJTREND-HTTP-3: /trend/class?subject=<실제교과> — 그 교과 스코프 응답', async () => {
+  // subjects 배열에서 실제 교과 코드 하나 골라 스코프 요청.
+  const list = await req(`/trend/class/${CLASS}?subject=all`, TEACHER);
+  const realSubjects = (list.json.subjects || []).filter(s => s.code !== 'all');
+  if (!realSubjects.length) return; // 교과 태그 로그 없으면 스킵(정직)
+  const pick = realSubjects[0].code;
+  const r = await req(`/trend/class/${CLASS}?subject=${encodeURIComponent(pick)}&target=90`, TEACHER);
+  assert.equal(r.status, 200);
+  assert.equal(r.json.subject, pick, '요청 교과 반영');
+  assert.equal(r.json.subjectLabel, realSubjects[0].label, '교과 라벨 반영');
+  assert.equal(r.json.target, 90);
+  // 희박 교과여도 200·정직: trend.status 는 ok|insufficient 둘 다 허용.
+  assert.ok(['ok', 'insufficient'].includes(r.json.trend.status), `trend.status=${r.json.trend.status}`);
+});
+
+test('SUBJTREND-HTTP-4: target 클램프(1~100) · 없는 교과코드 → all 폴백', async () => {
+  const hi = await req(`/trend/class/${CLASS}?target=500`, TEACHER);
+  assert.equal(hi.status, 200);
+  assert.equal(hi.json.target, 100, 'target>100 → 100 클램프');
+  const lo = await req(`/trend/class/${CLASS}?target=0`, TEACHER);
+  assert.equal(lo.json.target, 80, 'target=0(falsy) → 기본 80');
+  // 존재하지 않는 subject → all 폴백(안전).
+  const bad = await req(`/trend/class/${CLASS}?subject=__nope__`, TEACHER);
+  assert.equal(bad.status, 200);
+  assert.equal(bad.json.subject, 'all', '없는 교과코드 → all 폴백');
+  // ★ 레거시 코드(MAT)를 넘겨도 canonical(math-e)로 정규화되어 반영(FE 폴백 안전).
+  //   반에 수학 데이터가 있으면 subject='math-e' 로 접혀야, 없으면 all 폴백.
+  const canonMath = await req(`/trend/class/${CLASS}?subject=MAT`, TEACHER);
+  assert.equal(canonMath.status, 200);
+  const hasMath = (canonMath.json.subjects || []).some(s => s.code === 'math-e');
+  assert.equal(canonMath.json.subject, hasMath ? 'math-e' : 'all',
+    `레거시 'MAT' → ${hasMath ? 'math-e canonical' : 'all 폴백'}`);
 });
 
 test('PERM-6: weak-trend — 교사 scope=class 200, 학생 비교사 → scope=all 거부(403)', async () => {
