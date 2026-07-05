@@ -408,3 +408,62 @@ test('INV-11: demo_* 서비스가 by-service·service-ops·dataset-coverage 랭�
   assert.equal(dc.status, 200);
   assert.ok(!hasDemo(dc.json.byService, 'source_service'), 'dataset-coverage.byService 에 demo_* 부재');
 });
+
+// ──────────────────────────────────────────────────────────────────────────
+// USAGE-1 (스코프 fix): 교사 "활용 현황" 도넛 = /stats/by-service(scope=class)
+//   과거 결함: FE 가 role:'teacher' 로 호출 → 교사 본인 로그만(content 압도) 또는 class_id
+//   기반 스코프로 self-learn/content(class_id NULL) 누락 → "채움클래스 한 서비스"만 남음.
+//   fix: 멤버십 스코프(소유 반 학생 user_id 합집합)로 학급 전체 서비스 분포가 나와야 함.
+// ──────────────────────────────────────────────────────────────────────────
+test('USAGE-1: 교사 by-service(scope=class) 는 다서비스 반환(단일 class 아님)', async () => {
+  const r = await getJson(`/api/lrs/stats/by-service?scope=class&period=90d`, TEACHER);
+  assert.equal(r.status, 200);
+  const stats = r.json.stats || [];
+  assert.ok(stats.length >= 2,
+    `학급 전체 활동은 여러 서비스에 분포해야(실제 서비스 수=${stats.length}) — 스코프 버그 시 1개(class)만 남음`);
+  // class_id NULL 인 self-learn 또는 content 가 최소 하나는 포착돼야(멤버십 스코프의 핵심 효과).
+  const svcSet = new Set(stats.map(s => s.source_service));
+  assert.ok(svcSet.has('self-learn') || svcSet.has('content'),
+    `멤버십 스코프는 class_id NULL(self-learn/content)도 포착해야 함 (실제 서비스=${[...svcSet].join(',')})`);
+  // demo_* 는 제외.
+  assert.ok(!stats.some(s => String(s.source_service || '').toLowerCase().startsWith('demo')),
+    'by-service(교사) 에 demo_* 부재');
+  // 라벨 정합(오라벨 재발 방지): cbt = 채움CBT (성장기록 아님).
+  const cbtRow = stats.find(s => s.source_service === 'cbt');
+  if (cbtRow) assert.equal(cbtRow.service_label, '채움CBT',
+    `cbt 서비스는 '채움CBT' 로 라벨돼야 함(성장기록 오라벨 재발 방지) — 실제='${cbtRow.service_label}'`);
+});
+
+// USAGE-2 (회귀 0): 관리자 by-service(scope=all) 는 기존과 동일 — 멤버십 스코프 전환이
+//   admin=all(필터 없음) 경로를 바꾸지 않았음을 확인.
+test('USAGE-2: 관리자 by-service(scope=all) 회귀 0 — 전체 집계 유지', async () => {
+  const r = await getJson(`/api/lrs/stats/by-service?scope=all&period=90d`, ADMIN);
+  assert.equal(r.status, 200);
+  const stats = r.json.stats || [];
+  assert.equal(r.json.scope, 'all', 'admin scope=all 유지');
+  // 전체 집계는 학급 스코프보다 서비스 종류가 같거나 더 많아야(상위집합) — 축소 회귀 방지.
+  assert.ok(stats.length >= 2, `관리자 전체 by-service 는 다서비스여야(실제=${stats.length})`);
+  assert.ok(!stats.some(s => String(s.source_service || '').toLowerCase().startsWith('demo')),
+    'by-service(관리자) 에 demo_* 부재');
+});
+
+// ──────────────────────────────────────────────────────────────────────────
+// USAGE-3 (히트맵 fix): /stats/daily 가 요일×시간 7x24 매트릭스(heatmapDowHour)를 제공.
+//   과거 결함: FE 가 data(날짜별 1행, 시간축 없음)에 new Date(날짜).getHours() 를 써서
+//   모든 활동이 한 칸에 뭉쳤다. 서버가 strftime('%w'/'%H') 로 직접 집계 → 다중 셀.
+// ──────────────────────────────────────────────────────────────────────────
+test('USAGE-3: 교사 stats/daily heatmapDowHour = 7x24 + 다중 셀', async () => {
+  const r = await getJson(`/api/lrs/stats/daily?scope=class&period=90d`, TEACHER);
+  assert.equal(r.status, 200);
+  const hm = r.json.heatmapDowHour;
+  assert.ok(Array.isArray(hm) && hm.length === 7, 'heatmapDowHour 는 7행(요일)');
+  hm.forEach((row, i) => assert.ok(Array.isArray(row) && row.length === 24, `${i}행은 24열(시간)`));
+  // 활동이 있으면 서로 다른 (요일,시) 셀 2개 이상에 값이 있어야(단일 셀 붕괴 회귀 방지).
+  const nonZero = [];
+  hm.forEach((row, d) => row.forEach((v, h) => { if ((Number(v) || 0) > 0) nonZero.push(`${d}:${h}`); }));
+  const total = hm.reduce((s, row) => s + row.reduce((a, b) => a + (Number(b) || 0), 0), 0);
+  if (total > 0) {
+    assert.ok(nonZero.length >= 2,
+      `학급 활동이 여러 (요일,시) 셀에 분포해야(실제 비영 셀=${nonZero.length}) — 스코프/렌더 버그 시 1칸만`);
+  }
+});

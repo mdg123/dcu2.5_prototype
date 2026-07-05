@@ -60,7 +60,7 @@ const SERVICE_LABELS = {
   'exam': '채움평가',
   'self-learn': '스스로채움',
   'growth': '성장기록',
-  'cbt': '채움성장',
+  'cbt': '채움CBT',
   'lrs': '학습분석',
   'homework': '과제',
   'attendance': '출결',
@@ -671,12 +671,17 @@ router.get('/statements/:id', requireAuth, (req, res) => {
 });
 
 // GET /api/lrs/stats/by-service
+//   scope=class(교사) 는 멤버십 스코프(resolveMembershipScopeFilter)를 사용한다.
+//   이유: resolveScopeFilter 는 class_id IN(...) 로 걸러 self-learn(99.4%)·content(99.6%)
+//   처럼 class_id 가 NULL 인 로그를 놓쳐 "채움클래스 한 서비스"만 남는 스코프 버그가 있었다.
+//   멤버십(소유 반 학생 user_id 합집합)으로 걸러야 학급 전체의 서비스 분포(cbt·self-learn·class·content)가 나온다.
+//   admin scope=all → 필터 없음(기존과 동일, 회귀 0). role 파라미터는 하위호환 유지(현재 FE 미사용).
 router.get('/stats/by-service', requireAuth, (req, res) => {
   try {
     const r = dateRangeWhere(req, 'created_at', 'll');
     if (r.invalid) return sendInvalidPeriod(res, r.reason);
     const role = req.query.role;
-    const sf = resolveScopeFilter(req, 'll');
+    const sf = resolveMembershipScopeFilter(req, 'll');
     let join = '';
     // demo_* 합성 시드 제외(P2 관리자·교사 결함): 실서비스 랭킹에 demo_b4 등 데모 시드가 노출되면 안 됨.
     //   realOnly 와 무관하게 '항상' 제외한다(데모는 실서비스가 아님).
@@ -934,10 +939,40 @@ router.get('/stats/daily', requireAuth, (req, res) => {
     const byHour = [];
     for (let h = 0; h < 24; h++) byHour.push({ hour: h, count: hourMap.get(h) || 0 });
 
+    // 요일×시간 히트맵 (dow 0=일~6=토, hour 0~23) — "학급 전체 활동 기반" 7x24 매트릭스.
+    //   ★스코프 버그 fix: 기존 FE 는 data(날짜별 1행, 시간축 없음)에 new Date(날짜).getHours()
+    //   를 써서 모든 활동이 한 칸(예: 화 9시)에 뭉쳤다. 서버가 strftime('%w'/'%H') 로 요일·시간을
+    //   직접 집계해 실제 분포(다중 셀)를 준다.
+    //   스코프: 멤버십(소유 반 학생 user_id 합집합) — class_id NULL(self-learn·content)도 포착.
+    //   admin scope=all → 필터 없음. demo_* 합성 시드 제외(현황 시각화 정책과 동일).
+    const msf = resolveMembershipScopeFilter(req, 'll');
+    const hmWhere = 'WHERE 1=1' + r.where + msf.where
+      + " AND (ll.source_service IS NULL OR ll.source_service NOT LIKE 'demo%')"
+      + (activity_type ? ' AND ll.activity_type = ?' : '')
+      + (subject ? ' AND ll.subject_code = ?' : '');
+    const hmParams = [...r.params, ...msf.params];
+    if (activity_type) hmParams.push(activity_type);
+    if (subject) hmParams.push(subject);
+    const hmRows = db.prepare(`
+      SELECT CAST(strftime('%w', ll.created_at, 'localtime') AS INTEGER) AS dow,
+             CAST(strftime('%H', ll.created_at, 'localtime') AS INTEGER) AS hour,
+             COUNT(*) AS cnt
+      FROM learning_logs ll
+      ${hmWhere}
+      GROUP BY dow, hour
+    `).all(...hmParams);
+    const heatmapDowHour = Array.from({ length: 7 }, () => new Array(24).fill(0));
+    hmRows.forEach(x => {
+      if (x.dow >= 0 && x.dow < 7 && x.hour >= 0 && x.hour < 24) heatmapDowHour[x.dow][x.hour] = x.cnt;
+    });
+
     res.json({
       success: true, scope: sf.scope, data,
       byHour,
       byHourBasis: '학습활동 7종(기간 내)',
+      heatmapDowHour,
+      heatmapScope: msf.scope,
+      heatmapBasis: '학급 전체 활동(요일×시간, 멤버십 기준)',
       period: r.fromDate && r.toDate ? { from: r.fromDate, to: r.toDate } : null
     });
   } catch (err) {

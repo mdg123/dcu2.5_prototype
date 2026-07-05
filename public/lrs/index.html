@@ -2636,7 +2636,7 @@ function renderEngageStudent(d, seed){
   if (!hasEmo){
     emoIco = '⚪'; emoMuted = true;
     emoMain = '감정 기록 없음';
-    emoSub = '사분면 판정에서 중립 처리했어요';
+    emoSub = '감정 기록이 없어 중립으로 봤어요';
   } else {
     const neg = (sig.emotionNegPct != null) ? sig.emotionNegPct : null;
     emoIco = (neg != null && neg >= 50) ? '🖤' : '💙'; emoMuted = false;
@@ -2664,7 +2664,7 @@ function renderEngageStudent(d, seed){
   const engSub = (ec != null) ? ('최근 ' + weeks + '주 참여 활동 ' + ec + '건') : '';
 
   const signalHtml =
-    '<div class="lrs-eng-sec-title">■ 왜 이 사분면인가</div>' +
+    '<div class="lrs-eng-sec-title">■ 이 학생을 이렇게 본 이유</div>' +
     '<div class="lrs-eng-signal">' +
       '<div class="lrs-eng-signal-row' + (emoMuted ? ' is-muted' : '') + '">' +
         '<div class="lrs-eng-signal-ico" aria-hidden="true">' + emoIco + '</div>' +
@@ -6690,15 +6690,20 @@ VIEWS['t-warnings'] = async function(root){
 
 VIEWS['t-usage'] = async function(root){
   root.innerHTML = tplLoading(2);
+  // 스코프 fix: role:'teacher'(교사 본인 로그만) 제거 → 학급 전체 활동 기준.
+  //   by-service·daily 둘 다 scope=class(멤버십, 소유 반 학생 합집합)로 집계돼 다서비스·다중 셀이 나온다.
   const [svc, daily] = await Promise.all([
-    apiGet('/api/lrs/stats/by-service', { role:'teacher' }),
-    apiGet('/api/lrs/stats/daily', { role:'teacher' })
+    apiGet('/api/lrs/stats/by-service'),
+    apiGet('/api/lrs/stats/daily')
   ]);
   const rows = (svc && svc.stats) || [];
-  const drows = (daily && daily.data) || [];
+  // 히트맵: 서버가 요일×시간(7x24)으로 직접 집계한 heatmapDowHour 사용(정본).
+  //   기존 data(날짜별 1행)에 getHours() 를 쓰던 방식은 모든 활동이 한 칸에 뭉치는 버그였음.
+  const heat = (daily && Array.isArray(daily.heatmapDowHour)) ? daily.heatmapDowHour : null;
+  const heatSum = heat ? heat.reduce((s,row)=>s+row.reduce((a,b)=>a+(Number(b)||0),0),0) : 0;
   root.innerHTML = `
     <div class="grid-2">
-      ${chartWrap('tUsagePie','서비스별 수업 활용 비중')}
+      ${chartWrap('tUsagePie','학급 서비스별 활용 비중')}
       <section class="dc-chart-wrapper">
         <header><h2>요일×시간 활동 히트맵</h2><div class="subtitle">학급 전체 활동 기반</div></header>
         <div id="tUsageHeat"></div>
@@ -6713,13 +6718,12 @@ VIEWS['t-usage'] = async function(root){
     }, donutLegendOpts('건'));
   } else {
     document.getElementById('tUsagePie').closest('.dc-chart-wrapper').innerHTML =
-      `<header><h2>서비스별 수업 활용 비중</h2></header>` + tplEmpty();
+      `<header><h2>학급 서비스별 활용 비중</h2></header>` + tplEmpty();
   }
-  if (drows.length){
-    // stat_date → date 필드 정규화(히트맵이 r.date 사용)
-    renderHeatmap(document.getElementById('tUsageHeat'), drows.map(r => Object.assign({}, r, { date: r.stat_date || r.date })));
+  if (heat && heatSum > 0){
+    renderHeatmapMatrix(document.getElementById('tUsageHeat'), heat);
   } else {
-    document.getElementById('tUsageHeat').innerHTML = tplEmpty('히트맵 데이터가 없습니다');
+    document.getElementById('tUsageHeat').innerHTML = tplEmpty('아직 학급 활동 기록이 없어요');
   }
 
   // B4 "풀이 속도-정확도 점검" — 정오×속도 매트릭스 + 분석 멘트 + 산점도(담임/담당, 하단 append)
