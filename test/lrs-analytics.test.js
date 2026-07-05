@@ -432,6 +432,30 @@ const SH_CLASS = 99201, SH_S1 = 99211, SH_S2 = 99212, SH_OTHER = 99213, SH_CONTE
   insLog.run(SH_OTHER, SH_CONTENT, 8, 1, isoBackSh(2));
   // 표본<10 콘텐츠(90002) — S1 3건 → 개별 비노출(maskedContentCount)
   for (let i = 0; i < 3; i++) insLog.run(SH_S1, 90002, 5, 1, isoBackSh(i + 1));
+
+  // ── B4 확장(정오×속도): problem_attempts(채점형) 로 오답+시간 point 시드.
+  //   그룹 임계=5(채점형). content 90003(achievement_code 有) 에 6건 → 노출.
+  //   median≈50초 기준: 오답×느림(120), 오답×보통(50), 오답×빠름(10), 정답×보통(50) 등 6셀 커버.
+  const SH_GCONTENT = 90003;
+  db.prepare(`INSERT OR IGNORE INTO contents (id, title, content_type, achievement_code, status, creator_id)
+              VALUES (?, '분수 나눗셈 문항 세트', 'quiz', '[6수01-05]', 'approved', ?)`)
+    .run(SH_GCONTENT, TEACHER);
+  const insPa = db.prepare(`INSERT INTO problem_attempts
+    (user_id, content_id, node_id, is_correct, time_taken, source_type, submitted_at)
+    VALUES (?, ?, NULL, ?, ?, 'content', ?)`);
+  // 6건(표본>=5) — median(정렬 [10,40,50,50,60,120]) = 50.
+  //   ratio: 10/50=0.2(fast) · 40/50=0.8(normal) · 50/50=1.0(normal) · 60/50=1.2(normal) · 120/50=2.4(slow)
+  insPa.run(SH_S1, SH_GCONTENT, 0, 120, isoBackSh(2)); // 오답×느림 (ratio 2.4)
+  insPa.run(SH_S1, SH_GCONTENT, 0, 50, isoBackSh(2));  // 오답×보통 (ratio 1.0)
+  insPa.run(SH_S2, SH_GCONTENT, 0, 10, isoBackSh(3));  // 오답×빠름 (ratio 0.2)
+  insPa.run(SH_S2, SH_GCONTENT, 1, 50, isoBackSh(3));  // 정답×보통 (ratio 1.0)
+  insPa.run(SH_S1, SH_GCONTENT, 1, 40, isoBackSh(4));  // 정답×보통 (ratio 0.8)
+  insPa.run(SH_S2, SH_GCONTENT, 1, 60, isoBackSh(4));  // 정답×보통 (ratio 1.2)
+  // 타반 격리 확인용 — SH_OTHER 오답이지만 SH_CLASS 조회엔 안 나와야
+  insPa.run(SH_OTHER, SH_GCONTENT, 0, 200, isoBackSh(2));
+  // 시간 없는(time_taken NULL) 채점 로그 — 매트릭스 제외(시간 있는 것만)
+  db.prepare(`INSERT INTO problem_attempts (user_id, content_id, node_id, is_correct, time_taken, source_type, submitted_at)
+              VALUES (?, ?, NULL, 0, NULL, 'content', ?)`).run(SH_S1, SH_GCONTENT, isoBackSh(2));
 }
 
 test('SHALLOW-1: ratio>=0 · flag=true ⇔ ratio<0.4 & correct=true (불변식 a·b)', () => {
@@ -475,8 +499,119 @@ test('SHALLOW-5: 빈/희소 안전 — 로그 없는 반도 크래시 없이 빈
   const r = analytics.getShallowLearning(99999, { days: 30 });
   assert.equal(r.points.length, 0);
   assert.equal(r.topStudents.length, 0);
-  assert.equal(r.medianThreshold, 0.4);
+  assert.equal(r.medianThreshold, analytics.SPEED_FAST); // 0.5 로 갱신(속도버킷 임계)
   assert.ok(typeof r.disclaimer === 'string');
+  // 빈 계약도 신규 필드 계약 유지(FE 안전).
+  assert.deepEqual(r.matrix, { correct: { fast: 0, normal: 0, slow: 0 }, wrong: { fast: 0, normal: 0, slow: 0 } });
+  assert.equal(r.hasWrongData, false);
+  assert.deepEqual(r.wrongUnits, []);
+  assert.ok(r.insights.length >= 1 && r.insights.length <= 2, 'insights 1~2개');
+});
+
+// ── B4 확장(정오×속도 매트릭스) 불변식 (기획서 §6) ─────────────────────────────
+test('SHALLOW-6: matrix 6칸 합 == 매트릭스 대상 points 수 (불변식 §6-1)', () => {
+  const r = analytics.getShallowLearning(SH_CLASS, { days: 60 });
+  const m = r.matrix;
+  const sum = m.correct.fast + m.correct.normal + m.correct.slow
+            + m.wrong.fast + m.wrong.normal + m.wrong.slow;
+  assert.equal(sum, r.points.length, `matrix 합(${sum}) != points(${r.points.length})`);
+});
+
+test('SHALLOW-7: 모든 point 에 speed(fast/normal/slow) + correct(bool)', () => {
+  const r = analytics.getShallowLearning(SH_CLASS, { days: 60 });
+  const S = new Set(['fast', 'normal', 'slow']);
+  assert.ok(r.points.length > 0, '시드상 point 존재해야');
+  for (const p of r.points) {
+    assert.ok(S.has(p.speed), `speed=${p.speed} 미정의`);
+    assert.equal(typeof p.correct, 'boolean', 'correct 는 boolean');
+    // 매트릭스 배치와 speed 일치
+    assert.equal(_speedBucketRef(p.ratio), p.speed, `ratio=${p.ratio} → speed 불일치(${p.speed})`);
+  }
+});
+
+// 경계 정확 분류: ratio=0.5(→normal, fast 아님), 1.5(→normal, slow 아님), 그 바깥.
+function _speedBucketRef(ratio) {
+  if (ratio < 0.5) return 'fast';
+  if (ratio > 1.5) return 'slow';
+  return 'normal';
+}
+test('SHALLOW-8: 속도버킷 경계값(0.5·1.5) 정확 분류 (불변식 §6)', () => {
+  assert.equal(analytics.speedBucket(0.49), 'fast');
+  assert.equal(analytics.speedBucket(0.5), 'normal');  // 경계 = 보통(빠름 아님)
+  assert.equal(analytics.speedBucket(1.5), 'normal');  // 경계 = 보통(느림 아님)
+  assert.equal(analytics.speedBucket(1.51), 'slow');
+  assert.equal(analytics.speedBucket(0), 'fast');
+  assert.equal(analytics.speedBucket(3), 'slow');
+});
+
+test('SHALLOW-9: hasWrongData=true(시드 오답 有) & wrong 매트릭스 채워짐', () => {
+  const r = analytics.getShallowLearning(SH_CLASS, { days: 60 });
+  assert.equal(r.hasWrongData, true, '시드에 problem_attempts 오답 있으므로 true');
+  const wrongSum = r.matrix.wrong.fast + r.matrix.wrong.normal + r.matrix.wrong.slow;
+  assert.ok(wrongSum >= 3, `오답 셀 합이 3 이상이어야 (${wrongSum})`);
+  // problem_attempts(90003, median 50) 배치: 오답×느림 1(120·ratio2.4) · 오답×빠름 1(10·ratio0.2)
+  //   · 오답×보통 1(50·ratio1.0). learning_logs(90001, median 60)의 (i%2)=0 시청로그 5건은
+  //   60초(ratio1.0)라 wrong.normal 에 추가된다(시청 로그도 정오 소스 — 정직).
+  //   → 느림/빠름 셀은 graded 단독이라 값이 안정적.
+  assert.equal(r.matrix.wrong.slow, 1, '오답×느림 1명(graded 120초 단독)');
+  assert.equal(r.matrix.wrong.fast, 1, '오답×빠름 1명(graded 10초 단독)');
+  assert.ok(r.matrix.wrong.normal >= 1, `오답×보통 1명 이상 (${r.matrix.wrong.normal})`);
+});
+
+test('SHALLOW-10: hasWrongData=false 이면 wrong 매트릭스 전부 0 (불변식 §3-3)', () => {
+  // 시청 로그(정답만)만 있는 반 = class 1 실 DB(오답+시간 채점 로그 희박) 또는 빈 반.
+  const empty = analytics.getShallowLearning(99999, { days: 30 });
+  assert.equal(empty.hasWrongData, false);
+  assert.equal(empty.matrix.wrong.fast + empty.matrix.wrong.normal + empty.matrix.wrong.slow, 0);
+  // 일반 규칙: 어느 반이든 hasWrongData=false ⇒ wrong.* 합 0.
+  for (const cid of [SH_CLASS, CLASS, 99999]) {
+    const r = analytics.getShallowLearning(cid, { days: 60 });
+    if (r.hasWrongData === false) {
+      const ws = r.matrix.wrong.fast + r.matrix.wrong.normal + r.matrix.wrong.slow;
+      assert.equal(ws, 0, `class ${cid}: hasWrongData=false 인데 wrong 합=${ws}`);
+    }
+  }
+});
+
+test('SHALLOW-11: wrongUnits count desc 정렬 · 합 <= 오답 총수 · 코드/라벨 有', () => {
+  const r = analytics.getShallowLearning(SH_CLASS, { days: 60 });
+  for (let i = 1; i < r.wrongUnits.length; i++) {
+    assert.ok(r.wrongUnits[i - 1].count >= r.wrongUnits[i].count, 'wrongUnits count 내림차순 아님');
+  }
+  const wrongTotal = r.matrix.wrong.fast + r.matrix.wrong.normal + r.matrix.wrong.slow;
+  const unitSum = r.wrongUnits.reduce((a, u) => a + u.count, 0);
+  assert.ok(unitSum <= wrongTotal, `wrongUnits 합(${unitSum}) > 오답총수(${wrongTotal})`);
+  for (const u of r.wrongUnits) {
+    assert.ok(typeof u.code === 'string' && u.code.length, 'wrongUnit.code 문자열');
+    assert.ok(typeof u.label === 'string' && u.label.length, 'wrongUnit.label 문자열');
+    assert.ok(u.count >= 1, 'count>=1');
+  }
+  // 시드: 오답 3건 모두 [6수01-05] → wrongUnits[0].count=3.
+  assert.ok(r.wrongUnits.length >= 1, '오답 단원 최소 1개');
+  assert.equal(r.wrongUnits[0].count, 3, '몰린 단원 오답 3건');
+});
+
+test('SHALLOW-12: insights 1~2개 · 각 level 4종 중 하나 · text 문자열 (불변식 §6)', () => {
+  const L = new Set(['danger', 'warn', 'info', 'good']);
+  for (const cid of [SH_CLASS, CLASS, 99999]) {
+    const r = analytics.getShallowLearning(cid, { days: 60 });
+    assert.ok(r.insights.length >= 1 && r.insights.length <= 2, `class ${cid} insights=${r.insights.length}`);
+    for (const it of r.insights) {
+      assert.ok(L.has(it.level), `level=${it.level} 미정의`);
+      assert.ok(typeof it.text === 'string' && it.text.length > 5, 'text 문자열');
+      assert.ok(typeof it.icon === 'string' && it.icon.length, 'icon 있음');
+    }
+  }
+  // 시드: 오답×느림 1명 → 최우선 danger insight 존재.
+  const rSh = analytics.getShallowLearning(SH_CLASS, { days: 60 });
+  assert.equal(rSh.insights[0].level, 'danger', '오답×느림 있으면 첫 insight=danger');
+});
+
+test('SHALLOW-13: classId 격리 — 타반 오답(SH_OTHER) 매트릭스/wrongUnits 미반영', () => {
+  const r = analytics.getShallowLearning(SH_CLASS, { days: 60 });
+  // SH_OTHER 오답(200초, ratio 큼)이 포함됐다면 오답×느림이 2가 됨 → 1 이어야 격리 정상.
+  assert.equal(r.matrix.wrong.slow, 1, '타반 오답이 매트릭스에 섞임(격리 실패)');
+  assert.ok(!r.points.some(p => p.userId === SH_OTHER), '타반 학생 point 노출');
 });
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -725,7 +860,12 @@ test('PERM-7: shallow/class — 소유 교사 200, 비멤버 교사 403, 학생 
   assert.equal(ok.status, 200, '소유 교사 200');
   assert.equal(ok.json.success, true);
   assert.ok(Array.isArray(ok.json.points), 'points 배열');
-  assert.equal(ok.json.medianThreshold, 0.4, 'medianThreshold=0.4');
+  assert.equal(ok.json.medianThreshold, 0.5, 'medianThreshold=SPEED_FAST(0.5)');
+  // 신규 계약 필드 라우트 통과 확인(FE 소비 계약).
+  assert.ok(ok.json.matrix && ok.json.matrix.correct && ok.json.matrix.wrong, 'matrix 6칸');
+  assert.equal(typeof ok.json.hasWrongData, 'boolean', 'hasWrongData bool');
+  assert.ok(Array.isArray(ok.json.wrongUnits), 'wrongUnits 배열');
+  assert.ok(Array.isArray(ok.json.insights) && ok.json.insights.length >= 1, 'insights 1+');
   const foreign = classNotMemberedByTeacher();
   const no = await req(`/shallow/class/${foreign.id}`, TEACHER);
   assert.equal(no.status, 403, '비멤버 교사 403');

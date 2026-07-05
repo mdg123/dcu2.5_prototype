@@ -726,7 +726,7 @@
       .eng-chip{ flex:1 1 auto; justify-content:flex-start; }
     }
 
-    /* ===== B4 표면적 학습 감지 (교사 · 산점 + 표) ===== */
+    /* ===== B4 풀이 속도-정확도 점검 (교사 · 산점 + 표) ===== */
     #tShallowChartWrap{ position:relative; height:300px; max-width:100%; }
     @media (max-width:1200px){ #tShallowChartWrap{ height:260px; } }
     .shallow-table-wrap{ max-width:100%; overflow:hidden; }
@@ -746,9 +746,82 @@
     .shallow-card .sc-name{ font-size:15px; font-weight:700; color:#1f2937; }
     .shallow-card .sc-meta{ font-size:14px; color:#4b5563; margin-top:6px; }
     @media (max-width:768px){
-      #tShallowChartWrap{ display:none; }
       .shallow-table-wrap{ display:none; }
       .shallow-cards{ display:block; }
+    }
+
+    /* ===== 공통 lrs-insight (분석 멘트 박스 · 모든 LRS 카드 재사용) =====
+     * 기획서 §5-1: 헤더 아래·차트 위. 4레벨(danger/warn/info/good) 좌보더 4px.
+     * 데이터 계약: insights[{level,icon,text}]. renderInsights(host, insights) 공용 렌더. */
+    .lrs-insight-wrap{ display:flex; flex-direction:column; gap:8px; margin:14px 0 4px; }
+    .lrs-insight{ display:flex; align-items:flex-start; gap:10px;
+      padding:14px 18px; border-radius:8px; border-left:4px solid;
+      font-size:16px; line-height:1.7; word-break:keep-all; }
+    .lrs-insight .li-ico{ font-size:18px; flex:none; line-height:1.5; }
+    .lrs-insight .li-txt{ flex:1 1 auto; min-width:0; }
+    .lrs-insight.danger{ background:#fef2f2; border-left-color:#ef4444; color:#991b1b; }
+    .lrs-insight.warn{   background:#fffbeb; border-left-color:#f59e0b; color:#92400e; }
+    .lrs-insight.info{   background:#eff6ff; border-left-color:#2563eb; color:#1e3a8a; }
+    .lrs-insight.good{   background:#f0fdf4; border-left-color:#16a34a; color:#166534; }
+
+    /* ===== 풀이 속도-정확도 점검 — 2×3 카운트 매트릭스(주 시각화) ===== */
+    .shallow-matrix{ display:grid; grid-template-columns:72px 1fr 1fr 1fr; gap:10px; margin-top:6px; }
+    .shallow-matrix .sm-corner{ display:flex; flex-direction:column; align-items:flex-start; justify-content:flex-end;
+      font-size:12px; color:#9ca3af; line-height:1.4; padding:2px; }
+    .shallow-matrix .sm-colhead{ display:flex; align-items:center; justify-content:center;
+      font-size:14px; font-weight:600; color:#6b7280; }
+    .shallow-matrix .sm-rowhead{ display:flex; align-items:center; justify-content:center;
+      font-size:15px; font-weight:700; color:#374151; }
+    .shallow-matrix .sm-cell{ position:relative; min-height:104px; padding:14px 16px; border-radius:12px;
+      border:1px solid; display:flex; flex-direction:column; align-items:flex-start; justify-content:center; gap:2px;
+      cursor:pointer; transition:transform .1s, box-shadow .1s; text-align:left; }
+    .shallow-matrix .sm-cell:hover{ transform:translateY(-1px); box-shadow:0 3px 10px rgba(0,0,0,.08); }
+    .shallow-matrix .sm-cell:focus-visible{ outline:0; box-shadow:0 0 0 3px rgba(37,99,235,.4); }
+    .shallow-matrix .sm-cell[aria-pressed="true"]{ box-shadow:0 0 0 2px currentColor inset, 0 3px 10px rgba(0,0,0,.1); }
+    .shallow-matrix .sm-cell .sm-count{ font-size:28px; font-weight:700; line-height:1.1; white-space:nowrap; }
+    .shallow-matrix .sm-cell .sm-count .sm-ico{ font-size:20px; margin-right:4px; }
+    .shallow-matrix .sm-cell .sm-name{ font-size:15px; font-weight:700; line-height:1.3; }
+    .shallow-matrix .sm-cell .sm-units{ display:flex; flex-wrap:wrap; gap:4px; margin-top:4px; }
+    .shallow-matrix .sm-cell .sm-unit-chip{ font-size:13px; font-weight:600; padding:2px 8px; border-radius:9999px;
+      background:rgba(255,255,255,.65); border:1px solid rgba(0,0,0,.06); white-space:nowrap; }
+    /* 6셀 색 토큰(기획서 §2-2 / §6-7) — 배경/글자/보더 */
+    .shallow-matrix .sm-cell.cf{ background:#fffbeb; color:#b45309; border-color:#fde68a; } /* 정답×빠름 🟠 */
+    .shallow-matrix .sm-cell.cn{ background:#f0fdf4; color:#15803d; border-color:#bbf7d0; } /* 정답×보통 🟢 */
+    .shallow-matrix .sm-cell.cs{ background:#eff6ff; color:#1d4ed8; border-color:#bfdbfe; } /* 정답×느림 🔵 */
+    .shallow-matrix .sm-cell.wf{ background:#fef2f2; color:#b91c1c; border-color:#fecaca; } /* 오답×빠름 🔴 */
+    .shallow-matrix .sm-cell.wn{ background:#fef2f2; color:#b91c1c; border-color:#fecaca; } /* 오답×보통 🔴 */
+    .shallow-matrix .sm-cell.ws{ background:#fee2e2; color:#991b1b; border-color:#fca5a5; } /* 오답×느림 🔴 */
+    /* 카운트 0 셀 → 회색 "해당 기록 없음"(무의미 아님) */
+    .shallow-matrix .sm-cell.empty{ background:#f9fafb; color:#9ca3af; border-color:#e5e7eb;
+      cursor:default; opacity:.85; }
+    .shallow-matrix .sm-cell.empty:hover{ transform:none; box-shadow:none; }
+    .shallow-matrix .sm-cell.empty .sm-count{ font-size:15px; font-weight:600; }
+    .shallow-matrix .sm-cell.empty .sm-none{ font-size:13px; color:#9ca3af; margin-top:2px; }
+    /* 오답 행 미데이터 안내 배너 */
+    .shallow-nowrong{ margin:10px 0 2px; padding:10px 14px; border-radius:8px;
+      background:#f9fafb; border:1px solid #eef2f7; font-size:14px; color:#6b7280; line-height:1.6; }
+    .shallow-nowrong i{ color:#9ca3af; margin-right:6px; }
+    /* 산점도 자세히 보기 토글 */
+    .shallow-details{ margin-top:16px; border-top:1px solid #f0f1f3; padding-top:12px; }
+    .shallow-details > summary{ cursor:pointer; list-style:none; display:inline-flex; align-items:center; gap:6px;
+      font-size:14px; font-weight:600; color:#2563eb; padding:6px 2px; user-select:none; }
+    .shallow-details > summary::-webkit-details-marker{ display:none; }
+    .shallow-details > summary .sd-caret{ transition:transform .15s; font-size:12px; }
+    .shallow-details[open] > summary .sd-caret{ transform:rotate(90deg); }
+    .shallow-details > summary:focus-visible{ outline:0; box-shadow:0 0 0 3px rgba(37,99,235,.35); border-radius:6px; }
+    @media (max-width:768px){
+      .shallow-matrix{ grid-template-columns:52px 1fr 1fr 1fr; gap:6px; }
+      /* 1fr 트랙이 min-content(nowrap 카운트/문구) 아래로 축소되게 — 375px 3열 잘림 방지 */
+      .shallow-matrix .sm-cell{ min-height:88px; padding:12px 10px; min-width:0; overflow:hidden; }
+      .shallow-matrix .sm-cell .sm-count{ font-size:24px; white-space:normal; word-break:keep-all; }
+      .shallow-matrix .sm-cell.empty .sm-count,
+      .shallow-matrix .sm-cell .sm-none{ white-space:normal; word-break:keep-all; }
+      .shallow-matrix .sm-cell .sm-name{ font-size:14px; }
+      .shallow-details{ display:none; }  /* 모바일: 산점도 토글 숨김(매트릭스+표만) */
+    }
+    @media (max-width:480px){
+      .shallow-matrix .sm-cell .sm-name{ display:none; }  /* 매우 좁으면 카운트+아이콘만, 상세는 표로 */
+      .shallow-matrix .sm-cell .sm-units{ display:none; }
     }
 
     /* ===== A4 다음 한 걸음 (학생 · 경로 사슬 + CTA) ===== */
@@ -4638,19 +4711,73 @@ async function renderEmotionEngage(host){
   }
 }
 
-/* ===== B4 "표면적 학습 감지" (교사 · 산점 + median 점선 + 속도이상 표) =====
- * 스펙: 작업지시서/LRS_P0_시각데이터스펙_v1.md 카드3(B4)
+/* ===== 공통 분석 멘트 렌더러 renderInsights(host, insights) =====
+ * 기획서 §5-1: 모든 LRS 카드 재사용 공용 컴포넌트(lrs-insight).
+ * insights = [{ level:'danger|warn|info|good', icon:'🔴', text:'…' }]  (BE 계산분만 렌더)
+ * - level 검증(4종만) + 폴백('info'). icon 없으면 level별 기본 아이콘. 문안은 BE 소유(FE 하드코딩 금지).
+ * - 빈 배열/비배열이면 host 비우고 숨김(빈 박스 방치 금지). 최대 2개만 노출(정보 과부하 차단).
+ * host = .lrs-insight-wrap 컨테이너(호출부에서 미리 마련). 반환값 없음. */
+const LRS_INSIGHT_LEVELS = { danger:'🔴', warn:'🟠', info:'🔵', good:'🟢' };
+function renderInsights(host, insights){
+  if (!host) return;
+  const list = (Array.isArray(insights) ? insights : [])
+    .filter(it => it && typeof it.text === 'string' && it.text.trim())
+    .slice(0, 2);
+  if (!list.length){ host.innerHTML = ''; host.style.display = 'none'; return; }
+  host.style.display = '';
+  host.innerHTML = list.map(it => {
+    const level = LRS_INSIGHT_LEVELS[it.level] ? it.level : 'info';
+    const icon  = (it.icon && String(it.icon).trim()) || LRS_INSIGHT_LEVELS[level];
+    return `<div class="lrs-insight ${level}" role="note" aria-label="분석 도움말">
+      <span class="li-ico" aria-hidden="true">${escapeHtml(icon)}</span>
+      <span class="li-txt">${escapeHtml(it.text)}</span>
+    </div>`;
+  }).join('');
+}
+
+/* ===== B4 "풀이 속도-정확도 점검" (교사 · 2×3 카운트 매트릭스 + 분석 멘트 + 산점도 접힘) =====
+ * 스펙: 보고서/LRS_학습질_정오속도_분석_재설계_기획서_v1.md
  * GET /api/lrs/shallow/class/:id?days=30
- *   → { points:[{userId,name,content,durationSec,median,ratio,correct,flag}],
- *       topStudents:[{userId,name,flagCount,severity}], maskedContentCount, medianThreshold, disclaimer }
- * 빈 상태=긍정 톤. 채워진 경로=콘텐츠 셀렉트+산점(median 세로 점선·좌하 음영)+속도이상 Top표. 모바일<768=표만. 가로스크롤 0. */
+ *   → { points:[{userId,name,content,durationSec,median,ratio,correct,flag, speed?}],
+ *       matrix?:{correct:{fast,normal,slow}, wrong:{fast,normal,slow}},
+ *       wrongUnits?:[{code,label,count}], hasWrongData?, insights?:[{level,icon,text}],
+ *       topStudents[], maskedContentCount, medianThreshold, disclaimer }
+ * 주 시각화=2×3 매트릭스(정오×속도), 산점도는 "자세히 보기" <details>로 접어 보존.
+ * graceful 폴백: matrix/insights/speed 없으면(BE 미배포) 기존 산점도+표만. 모바일<768=매트릭스+표. 가로스크롤 0. */
+// 속도 버킷 상수(기획서 §2-1) — ratio = dur/median. BE speed 없을 때 FE 폴백 분류에 사용.
+const SHALLOW_SPEED_FAST = 0.5;  // ratio < 0.5  → 빠름
+const SHALLOW_SPEED_SLOW = 1.5;  // ratio > 1.5  → 느림 (그 사이 = 보통)
+// 6셀 정의(정오×속도) — 클래스·아이콘·이름·조치. 기획서 §2-2.
+const SHALLOW_CELLS = {
+  correct: {
+    fast:   { cls:'cf', ico:'🟠', name:'찍기 점검', tip:'개념을 실제로 아는지 1문제만 되물어 확인해 보세요.' },
+    normal: { cls:'cn', ico:'🟢', name:'정상',      tip:'잘 하고 있어요. 별도 조치는 필요 없어요.' },
+    slow:   { cls:'cs', ico:'🔵', name:'애써 맞춤', tip:'반복 연습으로 속도를 붙여 주면 좋아요.' },
+  },
+  wrong: {
+    fast:   { cls:'wf', ico:'🔴', name:'대충·오개념', tip:'틀린 단원을 오답노트로 다시 확인하고 보충을 배정해 주세요.' },
+    normal: { cls:'wn', ico:'🔴', name:'개념 부족',   tip:'해당 단원 개념을 다시 설명하고 보충해 주세요.' },
+    slow:   { cls:'ws', ico:'🔴', name:'개념 결손',   tip:'개념을 처음부터 다시 짚어 주세요. 개별 지도 우선순위예요.' },
+  },
+};
+function shallowSpeedOf(p){
+  // BE가 내려준 speed 우선, 없으면 ratio로 폴백 분류(기획서 §6-2 graceful).
+  const s = p && p.speed;
+  if (s === 'fast' || s === 'normal' || s === 'slow') return s;
+  const r = (p && p.ratio != null) ? Number(p.ratio) : null;
+  if (r == null || !isFinite(r)) return 'normal';
+  if (r < SHALLOW_SPEED_FAST) return 'fast';
+  if (r > SHALLOW_SPEED_SLOW) return 'slow';
+  return 'normal';
+}
+
 async function renderShallowLearning(host){
   if (!host) return;
   host.innerHTML = tplLoading(2);
   const cid = await resolveClassId();
   const d = await apiGet('/api/lrs/shallow/class/' + encodeURIComponent(cid), { days:30 });
   if (!d || d.success === false){
-    host.innerHTML = `<section class="dc-chart-wrapper" style="padding:24px 28px;border-radius:16px;">${tplError('표면적 학습 감지 데이터를 불러오지 못했어요', ()=>setView('t-usage'))}</section>`;
+    host.innerHTML = `<section class="dc-chart-wrapper" style="padding:24px 28px;border-radius:16px;">${tplError('풀이 속도-정확도 점검 데이터를 불러오지 못했어요', ()=>setView('t-usage'))}</section>`;
     return;
   }
 
@@ -4659,6 +4786,27 @@ async function renderShallowLearning(host){
   const days = Number(d.days) || 30;
   const maskedContentCount = Number(d.maskedContentCount) || 0;
   const disclaimer = escapeHtml(d.disclaimer || '빠르게 맞힌 게 꼭 부정은 아니에요. 이미 잘 아는 내용일 수도 있어요.');
+  const insights = Array.isArray(d.insights) ? d.insights : [];
+  const wrongUnits = Array.isArray(d.wrongUnits) ? d.wrongUnits : [];
+  // hasWrongData: BE가 내려주면 사용, 없으면 points에서 파생(graceful).
+  const hasWrongData = (d.hasWrongData != null) ? !!d.hasWrongData : points.some(p => p && p.correct === false);
+
+  // 각 point에 speed 파생(BE speed 없으면 ratio 폴백) — 이후 매트릭스·표·산점도 공용.
+  points.forEach(p => { if (p) p._speed = shallowSpeedOf(p); });
+
+  // 2×3 매트릭스 카운트: BE matrix 우선, 없으면 points에서 클라 집계(graceful 폴백).
+  function emptyMatrix(){ return { correct:{fast:0,normal:0,slow:0}, wrong:{fast:0,normal:0,slow:0} }; }
+  let matrix;
+  if (d.matrix && d.matrix.correct && d.matrix.wrong){
+    matrix = {
+      correct:{ fast:Number(d.matrix.correct.fast)||0, normal:Number(d.matrix.correct.normal)||0, slow:Number(d.matrix.correct.slow)||0 },
+      wrong:{   fast:Number(d.matrix.wrong.fast)||0,   normal:Number(d.matrix.wrong.normal)||0,   slow:Number(d.matrix.wrong.slow)||0 },
+    };
+  } else {
+    matrix = emptyMatrix();
+    points.forEach(p => { if (!p) return; const row = p.correct ? 'correct' : 'wrong'; matrix[row][p._speed] = (matrix[row][p._speed]||0) + 1; });
+  }
+
   const maskChip = maskedContentCount > 0
     ? `<span class="mastery-chip-gray"><i class="fas fa-circle-info" aria-hidden="true"></i> 표본 적음 ${maskedContentCount}건</span>` : '';
   const periodChip = `<span class="mastery-chip-gray"><i class="fas fa-calendar-day" aria-hidden="true"></i> 기간: 최근 ${days}일</span>`;
@@ -4666,18 +4814,18 @@ async function renderShallowLearning(host){
   const headerHtml = `
     <header style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:14px;flex-wrap:wrap;">
       <div>
-        <h2 style="font-size:20px;font-weight:700;margin:0;display:inline-flex;align-items:center;">⏱️ 표면적 학습 감지<span class="lrs-help" tabindex="0" role="button" aria-label="표면적 학습 감지 설명"><i class="fas fa-circle-question" aria-hidden="true"></i><span class="lrs-help-pop">같은 콘텐츠를 푼 우리 반 학생들의 <b>중앙값 시간</b>을 기준으로, 그보다 훨씬 빨리(기준의 40% 미만) 정답 처리한 경우를 표시해요.</span></span></h2>
-        <div class="subtitle" style="font-size:14px;">반 학생들의 보통 풀이 시간(중앙값)보다 훨씬 빨리 정답 처리한 학습을 모았어요.</div>
-        <div class="subtitle" style="font-size:14px;margin-top:2px;">충분히 익히지 않고 넘어갔을 수 있어, 한 번 더 확인해 보면 좋아요.</div>
+        <h2 style="font-size:20px;font-weight:700;margin:0;display:inline-flex;align-items:center;">⏱️ 풀이 속도-정확도 점검<span class="lrs-help" tabindex="0" role="button" aria-label="풀이 속도-정확도 점검 설명"><i class="fas fa-circle-question" aria-hidden="true"></i><span class="lrs-help-pop">같은 콘텐츠·문항을 푼 우리 반 학생들의 <b>중앙값 시간</b>을 기준으로, 각 학습을 '정답/오답 × 빠름/보통/느림' 6가지로 나눠 보여줘요. 회색은 데이터가 없다는 뜻이 아니라 '정상 범위'예요.</span></span></h2>
+        <div class="subtitle" style="font-size:14px;">정답·오답을 얼마나 빠르게(또는 느리게) 풀었는지로 학습의 질을 함께 살펴봐요.</div>
+        <div class="subtitle" style="font-size:14px;margin-top:2px;">빠른 정답은 '찍기'가, 느린 정답·오답은 '개념 부족'이 숨어 있을 수 있어요.</div>
       </div>
       <div style="flex:none;display:flex;gap:8px;flex-wrap:wrap;">${maskChip}${periodChip}</div>
     </header>`;
 
-  // 빈 상태(§⑤ — 긍정 톤)
+  // 빈 상태(§3-3 — 긍정 톤)
   if (!points.length){
     host.innerHTML = `<section class="dc-chart-wrapper" style="padding:24px 28px;border-radius:16px;">
       ${headerHtml}
-      ${tplEmpty('최근 표면적 학습 신호가 없어요. 학생들이 충분한 시간을 들이고 있어요 👍')}
+      ${tplEmpty("최근 '점검이 필요한' 풀이 신호가 없어요. 대부분 정상 속도로 정답을 맞히고 있어요 👍")}
       <div style="margin-top:14px;font-size:13px;color:#6b7280;line-height:1.6;">
         <i class="fas fa-circle-info" aria-hidden="true"></i> ${disclaimer}
       </div>
@@ -4685,48 +4833,78 @@ async function renderShallowLearning(host){
     return;
   }
 
-  // 콘텐츠 유니크 목록(셀렉트)
-  const contentSet = [];
-  const seen = new Set();
-  points.forEach(p => { const c = p.content || '(콘텐츠)'; if (!seen.has(c)){ seen.add(c); contentSet.push(c); } });
+  // 오답 단원 칩(오답×빠름 셀 하단) — wrongUnits 상위 2개 + "외 N"
+  function wrongUnitChips(){
+    if (!wrongUnits.length) return '';
+    const top = wrongUnits.slice(0, 2);
+    const rest = wrongUnits.length - top.length;
+    const chips = top.map(u => `<span class="sm-unit-chip">${escapeHtml(u.label || u.code || '단원')}</span>`).join('');
+    const more = rest > 0 ? `<span class="sm-unit-chip">외 ${rest}</span>` : '';
+    return `<div class="sm-units">${chips}${more}</div>`;
+  }
+
+  // 셀 1개 렌더(카운트 0 → 회색). 오답 행 & hasWrongData=false → "오답 기록 대기"(데이터 대기, 무의미 아님).
+  function cellHtml(row, speed){
+    const def = SHALLOW_CELLS[row][speed];
+    const n = matrix[row][speed] || 0;
+    const key = row + ':' + speed;
+    if (n === 0){
+      // 오답 행 전체가 미데이터(hasWrongData=false)인 경우: "해당 기록 없음"이 아니라 "오답 기록 대기"로 명시.
+      const pendingWrong = (row === 'wrong' && !hasWrongData);
+      const noneLbl = pendingWrong ? '오답 기록 대기' : '해당 기록 없음';
+      const noneTip = pendingWrong ? '채점된 오답 기록이 아직 적어요. 문항 풀이·평가가 쌓이면 채워져요.' : '이 조합의 학습 기록이 아직 없어요.';
+      return `<div class="sm-cell empty" data-cell="${key}" role="gridcell" aria-label="${def.name} ${noneLbl}" title="${escapeAttr(noneTip)}">
+        <div class="sm-count">${def.ico} 0명</div>
+        <div class="sm-none">${noneLbl}</div>
+      </div>`;
+    }
+    const units = (row === 'wrong' && speed === 'fast') ? wrongUnitChips() : '';
+    return `<div class="sm-cell ${def.cls}" data-cell="${key}" role="gridcell" tabindex="0" aria-pressed="false"
+        aria-label="${def.name} ${n}명" title="${escapeAttr(def.tip)}">
+      <div class="sm-count"><span class="sm-ico" aria-hidden="true">${def.ico}</span>${n}명</div>
+      <div class="sm-name">${def.name}</div>
+      ${units}
+    </div>`;
+  }
+
+  // 오답 데이터 미존재 안내 배너(§3-3)
+  const noWrongBanner = !hasWrongData
+    ? `<div class="shallow-nowrong"><i class="fas fa-circle-info" aria-hidden="true"></i>이 기간에는 채점된 오답 기록이 아직 적어, 정답 행 위주로 표시했어요. 문항 풀이·평가가 쌓이면 오답 행도 채워져요.</div>`
+    : '';
 
   host.innerHTML = `<section class="dc-chart-wrapper" style="padding:24px 28px;border-radius:16px;">
     ${headerHtml}
 
-    <div style="display:flex;justify-content:flex-end;margin-bottom:10px;">
-      <select class="ms-select" id="tShallowSelect" aria-label="콘텐츠 필터">
-        <option value="">전체 콘텐츠</option>
-        ${contentSet.map(c => `<option value="${escapeAttr(c)}">${escapeHtml(c)}</option>`).join('')}
-      </select>
+    <!-- 분석 멘트 박스(lrs-insight · 헤더 아래·매트릭스 위) -->
+    <div class="lrs-insight-wrap" id="tShallowInsights" style="display:none;"></div>
+
+    ${noWrongBanner}
+
+    <!-- 주 시각화: 2×3 카운트 매트릭스(정오 × 속도) -->
+    <div class="shallow-matrix" role="grid" aria-label="정답·오답 × 속도 6칸 매트릭스">
+      <div class="sm-corner" role="presentation"><span>↓ 정오</span><span>속도 →</span></div>
+      <div class="sm-colhead" role="columnheader">빠름</div>
+      <div class="sm-colhead" role="columnheader">보통</div>
+      <div class="sm-colhead" role="columnheader">느림</div>
+
+      <div class="sm-rowhead" role="rowheader">정답</div>
+      ${cellHtml('correct','fast')}
+      ${cellHtml('correct','normal')}
+      ${cellHtml('correct','slow')}
+
+      <div class="sm-rowhead" role="rowheader">오답</div>
+      ${cellHtml('wrong','fast')}
+      ${cellHtml('wrong','normal')}
+      ${cellHtml('wrong','slow')}
     </div>
 
-    <!-- 이슈5: 산점도 커스텀 범례 (Chart.js 기본 범례가 색을 못 나눔) -->
-    <div class="shallow-legend" role="group" aria-label="산점도 범례">
-      <span class="sl-item"><span class="sl-dot" style="background:#ef4444"></span>
-        빠른 풀이 · <b>점검 대상</b> <em>(정답이지만 기준보다 훨씬 빠름)</em></span>
-      <span class="sl-item"><span class="sl-dot" style="background:#9ca3af"></span>
-        보통 속도</span>
-      <span class="sl-item"><span class="sl-line"></span>
-        기준선 <em>(반 중앙값 시간)</em></span>
-      <span class="sl-item"><span class="sl-zone"></span>
-        점검 구간 <em>(빠름 + 정답)</em></span>
-    </div>
-    <div class="shallow-axes-note">
-      가로(X) = 소요 시간(초), 세로(Y) = 정답 / 오답
-    </div>
-
-    <!-- 데스크탑: 산점도 -->
-    <div id="tShallowChartWrap">
-      <canvas id="tShallowChart" role="img" aria-label="소요시간 대비 정답 산점도"></canvas>
-    </div>
-
-    <!-- 속도이상 Top 표 (t-warnings 명단 표 톤 재사용) -->
+    <!-- 셀 상세 표(매트릭스 셀 클릭 → 필터) -->
     <div style="margin-top:18px;">
-      <div style="font-size:15px;font-weight:700;color:#1f2937;margin-bottom:8px;">속도이상 Top</div>
+      <div id="tShallowTableTitle" style="font-size:15px;font-weight:700;color:#1f2937;margin-bottom:8px;">셀 상세 <span style="font-weight:500;color:#6b7280;font-size:14px;">(위 매트릭스 칸을 누르면 그 칸만 봐요)</span></div>
       <div class="shallow-table-wrap">
         <table class="shallow-table">
           <thead><tr>
-            <th>학생</th><th>콘텐츠</th><th>소요 / 기준</th><th>결과</th><th>속도이상</th>
+            <th>학생</th><th>콘텐츠 / 단원</th><th>소요 / 기준</th><th>결과</th><th>구분</th>
           </tr></thead>
           <tbody id="tShallowTbody"></tbody>
         </table>
@@ -4735,90 +4913,159 @@ async function renderShallowLearning(host){
       ${maskedContentCount > 0 ? `<div style="margin-top:10px;font-size:13px;color:#9ca3af;"><i class="fas fa-circle-info"></i> 표본 적음 ${maskedContentCount}건 — 중앙값이 불안정해 제외했어요.</div>` : ''}
     </div>
 
+    <!-- 산점도(부·접힘): 자세히 보기 토글 -->
+    <details class="shallow-details" id="tShallowDetails">
+      <summary><span class="sd-caret">▶</span> 자세히 보기 (산점도)</summary>
+      <div class="shallow-legend" role="group" aria-label="산점도 범례" style="margin-top:10px;">
+        <span class="sl-item"><span class="sl-dot" style="background:#f59e0b"></span>정답·빠름</span>
+        <span class="sl-item"><span class="sl-dot" style="background:#16a34a"></span>정답·보통</span>
+        <span class="sl-item"><span class="sl-dot" style="background:#2563eb"></span>정답·느림</span>
+        <span class="sl-item"><span class="sl-dot" style="background:#ef4444"></span>오답</span>
+        <span class="sl-item"><span class="sl-line"></span>기준선 <em>(반 중앙값 시간)</em></span>
+      </div>
+      <div class="shallow-axes-note">가로(X) = 소요 시간(초), 세로(Y) = 정답 / 오답 · 세로 밴드 = 빠름/보통/느림 구간</div>
+      <div style="display:flex;justify-content:flex-end;margin-bottom:8px;">
+        <select class="ms-select" id="tShallowSelect" aria-label="콘텐츠 필터">
+          <option value="">전체 콘텐츠</option>
+        </select>
+      </div>
+      <div id="tShallowChartWrap">
+        <canvas id="tShallowChart" role="img" aria-label="소요시간 대비 정답 산점도"></canvas>
+      </div>
+    </details>
+
     <div style="margin-top:14px;font-size:13px;color:#6b7280;line-height:1.6;">
       <i class="fas fa-circle-info" aria-hidden="true"></i> ${disclaimer}
     </div>
   </section>`;
 
-  // ── 속도이상 Top 표 채우기(flagCount desc, 이미 정렬돼 옴) ──
-  const flagPoints = points.filter(p => p.flag);
-  const nameToFirstFlag = new Map();  // userId → 대표 flag 포인트(콘텐츠/소요 표기용)
-  flagPoints.forEach(p => { if (!nameToFirstFlag.has(p.userId)) nameToFirstFlag.set(p.userId, p); });
-  const topRows = (topStudents.length ? topStudents : []).map(ts => {
-    const rep = nameToFirstFlag.get(ts.userId) || {};
-    return {
-      name: ts.name, content: rep.content || '-',
-      durationSec: rep.durationSec, median: rep.median, ratio: rep.ratio,
-      correct: rep.correct, flagCount: ts.flagCount, severity: ts.severity
-    };
-  });
+  // ── 분석 멘트 렌더(공통 컴포넌트). BE insights 없으면 박스 숨김(FE 하드코딩 금지). ──
+  renderInsights(document.getElementById('tShallowInsights'), insights);
 
-  function sevBadge(sev, count){
-    const cls = sev === 'high' ? 'high' : 'medium';
-    const dot = sev === 'high' ? '🔴' : '🟠';
-    return `<span class="shallow-sevbadge ${cls}">${dot} ${count}건</span>`;
-  }
-  function durCell(r){
-    if (r.durationSec == null || r.median == null) return '-';
-    const ratio = (r.ratio != null) ? ` (${Number(r.ratio).toFixed(2)}×)` : '';
-    return `${r.durationSec}초 / ${r.median}초<span class="st-ratio">${ratio}</span>`;
-  }
-  function resultCell(r){
-    return r.correct ? '✅ 정답' : '❌';
-  }
+  // ── 콘텐츠 유니크 목록 채우기(산점도 필터 셀렉트) ──
+  (function(){
+    const sel = document.getElementById('tShallowSelect');
+    if (!sel) return;
+    const seen = new Set();
+    points.forEach(p => { const c = p.content || '(콘텐츠)'; if (!seen.has(c)){ seen.add(c);
+      const o = document.createElement('option'); o.value = c; o.textContent = c; sel.appendChild(o); } });
+  })();
 
-  const tbody = document.getElementById('tShallowTbody');
-  const cards = document.getElementById('tShallowCards');
-  if (tbody){
-    if (!topRows.length){
-      tbody.innerHTML = `<tr><td colspan="5" style="color:#9ca3af;text-align:center;padding:18px;">속도이상으로 분류된 학생이 없어요.</td></tr>`;
-    } else {
-      tbody.innerHTML = topRows.map(r => `<tr>
-        <td class="st-name">${escapeHtml(r.name || '학생')}</td>
-        <td>${escapeHtml(r.content || '-')}</td>
-        <td>${durCell(r)}</td>
-        <td>${resultCell(r)}</td>
-        <td>${sevBadge(r.severity, r.flagCount)}</td>
-      </tr>`).join('');
+  // ── 셀 상세 표(선택 셀 필터). 기본=전체(정오·속도 전 셀). ──
+  function speedLabel(sp){ return sp==='fast'?'빠름':(sp==='slow'?'느림':'보통'); }
+  function cellBadge(p){
+    const row = p.correct ? 'correct' : 'wrong';
+    const def = SHALLOW_CELLS[row][p._speed];
+    const cls = p.correct ? (p._speed==='fast'?'medium':'') : 'high';
+    // 6색 뱃지: 정답×빠름=주황(medium 톤), 오답=빨강(high 톤), 그 외 셀 색 인라인.
+    const bg = { cf:'#fffbeb', cn:'#f0fdf4', cs:'#eff6ff', wf:'#fef2f2', wn:'#fef2f2', ws:'#fee2e2' }[def.cls];
+    const ink= { cf:'#b45309', cn:'#15803d', cs:'#1d4ed8', wf:'#b91c1c', wn:'#b91c1c', ws:'#991b1b' }[def.cls];
+    return `<span class="shallow-sevbadge" style="background:${bg};color:${ink};">${def.ico} ${def.name}</span>`;
+  }
+  function durCell(p){
+    if (p.durationSec == null || p.median == null) return '-';
+    const ratio = (p.ratio != null) ? ` (${Number(p.ratio).toFixed(2)}×)` : '';
+    return `${p.durationSec}초 / ${p.median}초<span class="st-ratio">${ratio}</span>`;
+  }
+  function contentLabel(p){
+    // 오답은 단원 라벨 우선(있으면), 없으면 콘텐츠명.
+    if (!p.correct && (p.unitLabel || p.achievementLabel)) return escapeHtml(p.unitLabel || p.achievementLabel);
+    return escapeHtml(p.content || '-');
+  }
+  function resultCell(p){ return p.correct ? '✅ 정답' : '❌ 오답'; }
+
+  let selectedCell = null;  // 'row:speed' | null(전체)
+  function filteredPoints(){
+    if (!selectedCell) return points.slice();
+    const [row, sp] = selectedCell.split(':');
+    const wantCorrect = row === 'correct';
+    return points.filter(p => (p.correct === wantCorrect) && p._speed === sp);
+  }
+  function renderTable(){
+    const rows = filteredPoints();
+    const tbody = document.getElementById('tShallowTbody');
+    const cards = document.getElementById('tShallowCards');
+    const emptyMsg = selectedCell ? '이 칸에 해당하는 학습 기록이 없어요.' : '표시할 학습 기록이 없어요.';
+    if (tbody){
+      tbody.innerHTML = rows.length ? rows.map(p => `<tr>
+        <td class="st-name">${escapeHtml(p.name || '학생')}</td>
+        <td>${contentLabel(p)}</td>
+        <td>${durCell(p)}</td>
+        <td>${resultCell(p)}</td>
+        <td>${cellBadge(p)}</td>
+      </tr>`).join('') : `<tr><td colspan="5" style="color:#9ca3af;text-align:center;padding:18px;">${emptyMsg}</td></tr>`;
+    }
+    if (cards){
+      cards.innerHTML = rows.length ? rows.map(p => `<div class="shallow-card">
+        <div class="sc-top"><span class="sc-name">${escapeHtml(p.name || '학생')}</span>${cellBadge(p)}</div>
+        <div class="sc-meta">${contentLabel(p)} · ${durCell(p)} · ${resultCell(p)}</div>
+      </div>`).join('') : `<div style="color:#9ca3af;font-size:14px;padding:8px 2px;">${emptyMsg}</div>`;
+    }
+    const title = document.getElementById('tShallowTableTitle');
+    if (title){
+      if (selectedCell){
+        const [row, sp] = selectedCell.split(':');
+        const def = SHALLOW_CELLS[row][sp];
+        title.innerHTML = `셀 상세 <span style="font-weight:600;color:#374151;font-size:14px;">— ${row==='correct'?'정답':'오답'}·${speedLabel(sp)} (${def.name})</span> <button type="button" id="tShallowClear" style="margin-left:6px;font-size:13px;color:#2563eb;background:none;border:none;cursor:pointer;font-weight:600;">전체 보기 ×</button>`;
+        const clr = document.getElementById('tShallowClear');
+        if (clr) clr.addEventListener('click', () => selectCell(null));
+      } else {
+        title.innerHTML = `셀 상세 <span style="font-weight:500;color:#6b7280;font-size:14px;">(위 매트릭스 칸을 누르면 그 칸만 봐요)</span>`;
+      }
     }
   }
-  if (cards){
-    cards.innerHTML = topRows.length ? topRows.map(r => `<div class="shallow-card">
-      <div class="sc-top"><span class="sc-name">${escapeHtml(r.name || '학생')}</span>${sevBadge(r.severity, r.flagCount)}</div>
-      <div class="sc-meta">${escapeHtml(r.content || '-')} · ${durCell(r)} · ${resultCell(r)}</div>
-    </div>`).join('') : `<div style="color:#9ca3af;font-size:14px;padding:8px 2px;">속도이상으로 분류된 학생이 없어요.</div>`;
+  function selectCell(key){
+    selectedCell = (selectedCell === key) ? null : key;
+    host.querySelectorAll('.shallow-matrix .sm-cell').forEach(el => {
+      const on = el.getAttribute('data-cell') === selectedCell;
+      if (!el.classList.contains('empty')) el.setAttribute('aria-pressed', on ? 'true' : 'false');
+    });
+    renderTable();
   }
+  // 매트릭스 셀 클릭/키보드 → 필터(빈 셀 제외)
+  host.querySelectorAll('.shallow-matrix .sm-cell:not(.empty)').forEach(el => {
+    const key = el.getAttribute('data-cell');
+    el.addEventListener('click', () => selectCell(key));
+    el.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' '){ e.preventDefault(); selectCell(key); } });
+  });
+  renderTable();
 
-  // ── 산점도 렌더(콘텐츠 필터 반영) ──
+  // ── 산점도 렌더(콘텐츠 필터 반영, <details> 펼칠 때만 그림) ──
   const isMobile = window.matchMedia && window.matchMedia('(max-width:768px)').matches;
+  // 산점도 점 색 = 6셀 색(정답 3속도 + 오답 통합 빨강). 기획서 §3-4.
+  function scatterColor(p){
+    if (!p.correct) return '#ef4444';
+    return p._speed==='fast' ? '#f59e0b' : (p._speed==='slow' ? '#2563eb' : '#16a34a');
+  }
   function drawScatter(selectedContent){
     const canvas = document.getElementById('tShallowChart');
     if (!canvas || isMobile) return;
-    // 기존 차트 제거
     const prevIdx = state.charts.findIndex(c => c && c.canvas === canvas);
     if (prevIdx >= 0){ try{ state.charts[prevIdx].destroy(); }catch(_){} state.charts.splice(prevIdx,1); }
 
     const shown = selectedContent ? points.filter(p => (p.content||'(콘텐츠)') === selectedContent) : points;
-    // 특정 콘텐츠 선택 시 median(그 콘텐츠 대표값) → 세로 점선
     let medianX = null;
     if (selectedContent && shown.length){ const m = shown.find(p => p.median != null); if (m) medianX = Number(m.median); }
 
-    // median 세로 점선 + 좌하(빠름+맞음) 음영 플러그인
+    // 속도 3밴드(빠름/보통/느림) 세로 음영 + median 세로 점선 플러그인
     const shallowOverlay = {
       id:'shallowOverlay',
       beforeDatasetsDraw(chart){
         if (medianX == null) return;
         const { ctx, chartArea:area, scales } = chart;
-        const xPx = scales.x.getPixelForValue(medianX);
-        const thrPx = scales.x.getPixelForValue(medianX * 0.4);
-        const yMidTop = scales.y.getPixelForValue(0.5);  // 정답(1) 위쪽 = area.top~yMid
+        const xFast = scales.x.getPixelForValue(medianX * SHALLOW_SPEED_FAST);
+        const xSlow = scales.x.getPixelForValue(medianX * SHALLOW_SPEED_SLOW);
+        const xMed  = scales.x.getPixelForValue(medianX);
         ctx.save();
-        // 좌하(x<median*0.4 & 정답=위) 음영
-        ctx.fillStyle = '#fef2f2';
-        ctx.fillRect(area.left, area.top, Math.max(0, thrPx - area.left), yMidTop - area.top);
+        // 빠름 밴드(좌·주황 옅게)
+        ctx.fillStyle = 'rgba(245,158,11,.06)';
+        ctx.fillRect(area.left, area.top, Math.max(0, xFast - area.left), area.bottom - area.top);
+        // 느림 밴드(우·파랑 옅게)
+        ctx.fillStyle = 'rgba(37,99,235,.05)';
+        ctx.fillRect(xSlow, area.top, Math.max(0, area.right - xSlow), area.bottom - area.top);
         // median 세로 점선
         ctx.strokeStyle = '#2563eb'; ctx.lineWidth = 1.5; ctx.setLineDash([6,4]);
-        ctx.beginPath(); ctx.moveTo(xPx, area.top); ctx.lineTo(xPx, area.bottom); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(xMed, area.top); ctx.lineTo(xMed, area.bottom); ctx.stroke();
         ctx.restore();
       }
     };
@@ -4828,9 +5075,9 @@ async function renderShallowLearning(host){
       data:{ datasets:[{
         label:'학습 기록',
         data: shown.map(p => ({ x: Number(p.durationSec)||0, y: p.correct ? 1 : 0 })),
-        backgroundColor: shown.map(p => p.flag ? '#ef4444' : '#9ca3af'),
-        pointRadius: shown.map(p => p.flag ? 7 : 5),
-        pointHoverRadius: shown.map(p => p.flag ? 9 : 7),
+        backgroundColor: shown.map(p => scatterColor(p)),
+        pointRadius: shown.map(p => (p.correct && p._speed==='fast') || !p.correct ? 7 : 5),
+        pointHoverRadius: shown.map(p => (p.correct && p._speed==='fast') || !p.correct ? 9 : 7),
         borderColor:'#fff', borderWidth:1
       }]},
       options:{
@@ -4842,7 +5089,8 @@ async function renderShallowLearning(host){
           tooltip:{ callbacks:{ label(c){
             const p = shown[c.dataIndex] || {};
             const ratio = (p.ratio != null) ? `(기준 ${p.median}초의 ${Number(p.ratio).toFixed(2)}배)` : '';
-            return `${p.name || '학생'} · ${p.content||''} · ${p.durationSec}초 ${ratio} · ${p.correct?'정답':'오답'}`;
+            const sp = speedLabel(p._speed);
+            return `${p.name || '학생'} · ${p.content||''} · ${p.durationSec}초 ${ratio} · ${p.correct?'정답':'오답'}·${sp}`;
           } } }
         },
         scales:{
@@ -4855,10 +5103,16 @@ async function renderShallowLearning(host){
     });
     state.charts.push(chart);
   }
-  drawScatter('');
 
+  // <details>를 처음 펼칠 때(또는 셀렉트 변경 시) 산점도 그림 — 접힌 canvas는 0폭이라 미리 그리면 깨짐.
+  const details = document.getElementById('tShallowDetails');
+  let scatterDrawn = false;
+  function ensureScatter(){ const sel = document.getElementById('tShallowSelect'); drawScatter(sel ? sel.value : ''); scatterDrawn = true; }
+  if (details){
+    details.addEventListener('toggle', () => { if (details.open && !scatterDrawn) ensureScatter(); });
+  }
   const sel = document.getElementById('tShallowSelect');
-  if (sel) sel.addEventListener('change', () => drawScatter(sel.value));
+  if (sel) sel.addEventListener('change', () => { if (details && details.open) drawScatter(sel.value); });
 }
 
 /* ===== A4 "다음 한 걸음" (학생 · 선수→후속 경로 사슬 + CTA) =====
@@ -5961,7 +6215,7 @@ VIEWS['t-usage'] = async function(root){
         <div id="tUsageHeat"></div>
       </section>
     </div>
-    <!-- B4: 표면적 학습 감지 (하단 append) -->
+    <!-- B4: 풀이 속도-정확도 점검 (하단 append) -->
     <div id="tShallowHost" style="margin-top:16px;"></div>`;
   if (rows.length){
     mkChart(document.getElementById('tUsagePie'),'doughnut',{
@@ -5979,7 +6233,7 @@ VIEWS['t-usage'] = async function(root){
     document.getElementById('tUsageHeat').innerHTML = tplEmpty('히트맵 데이터가 없습니다');
   }
 
-  // B4 "표면적 학습 감지" — 소요시간 대비 정답 산점 + 속도이상 표 (담임/담당, 하단 append)
+  // B4 "풀이 속도-정확도 점검" — 정오×속도 매트릭스 + 분석 멘트 + 산점도(담임/담당, 하단 append)
   await renderShallowLearning(document.getElementById('tShallowHost'));
 };
 

@@ -2228,9 +2228,12 @@ function auditNameAccessLrs(req, kind, classId, count) {
   } catch (_) { /* audit 실패는 응답을 막지 않는다 */ }
 }
 
-// GET /api/lrs/shallow/class/:id — B4 "겉핥기 감지"(교사 · 너무 빨리 넘긴 학습).
+// GET /api/lrs/shallow/class/:id — B4 "풀이 속도-정확도 점검"(교사 · 정오×속도 매트릭스).
 //   담임/담당(canViewClass) → 403. ?days=30(기본, 1~365 클램프).
-//   콘텐츠별 median(duration)×0.4 플래그. 표본<10 콘텐츠는 개별 비노출(maskedContentCount).
+//   데이터원: learning_logs(시청·채점) + problem_attempts(문항 채점, 오답+시간) union.
+//   응답(analytics.getShallowLearning): points[](+correct+speed) · matrix(정오×fast/normal/slow)
+//     · wrongUnits[](오답 몰린 단원 desc) · hasWrongData · insights[](§4 규칙 BE계산)
+//     · topStudents · maskedContentCount · medianThreshold(=SPEED_FAST 0.5) · disclaimer.
 router.get('/shallow/class/:id', requireAuth, (req, res) => {
   try {
     const classId = parseInt(req.params.id, 10);

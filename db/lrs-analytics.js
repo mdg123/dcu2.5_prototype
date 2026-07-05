@@ -804,18 +804,42 @@ function _emotionCoaching(groups) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// B4 "겉핥기 감지" (교사 · 너무 빨리 넘긴 학습) — 온더플라이(신규 테이블 0).
-//   스펙: 작업지시서/LRS_P0_시각데이터스펙_v1.md §카드3(③④⑤)
-//   반 학생 × 정답(success=1) × 소요시간 有 콘텐츠 로그를 콘텐츠별로 묶어
-//   median(duration_sec) 계산 → duration < median*0.4 & 정답 이면 "속도이상" 플래그.
-//   ★ 표본<10(그룹 로그수) 콘텐츠는 median 불안정 → 개별 비노출(maskedContentCount만 +1).
-//   ★ points 는 표본≥10 콘텐츠만. topStudents 는 flagCount desc.
+// B4 "풀이 속도-정확도 점검"(구 겉핥기 감지 · 교사) — 온더플라이(신규 테이블 0).
+//   스펙: 보고서/LRS_학습질_정오속도_분석_재설계_기획서_v1.md (§0·§2·§4·§6)
+//
+//   개념: 정답/오답 × 빠름/보통/느림(속도) 2×3 매트릭스로 "학습의 질"을 점검.
+//     - 반 학생들의 같은 콘텐츠/문항 median(소요시간) 기준으로 각 풀이의 ratio(=dur/med) 산출.
+//     - ratio<0.5 빠름 / 0.5~1.5 보통 / >1.5 느림 (3버킷).
+//
+//   ★ 데이터원 확장(정오축을 실제로 채우는 핵심):
+//     (A) learning_logs: 콘텐츠 시청·채점형 로그(result_success 0/1, duration_sec>0).
+//         현실상 오답이 거의 없음(대부분 정답 시청 로그).
+//     (B) problem_attempts: 문항 채점 로그(is_correct 0/1, time_taken>0). 오답+시간 유.
+//     두 소스를 콘텐츠 그룹으로 union → 정답/오답 point 를 모두 포함.
+//   ★ 소요시간(duration/time_taken)이 있는 채점 로그만 매트릭스 대상(시간 없는 건 제외).
+//   ★ 표본<임계 콘텐츠 그룹은 median 불안정 → 개별 비노출(maskedContentCount).
+//     - 시청 로그(learning_logs): 임계 10 (기존 유지, 대량이라 안정).
+//     - 채점 로그(problem_attempts): 임계 5 (응시 인원이 반 인원 수준으로 적어 완화 — §6-1).
+//
 //   getShallowLearning(classId, { days=30 }) →
-//     { classId, days, studentCount, points[], topStudents[], maskedContentCount,
-//       medianThreshold, disclaimer }
+//     { classId, days, studentCount,
+//       points[]( +correct +speed ), topStudents[], maskedContentCount,
+//       medianThreshold, disclaimer,
+//       matrix{correct:{fast,normal,slow}, wrong:{fast,normal,slow}},
+//       wrongUnits[]{code,label,count}, hasWrongData, insights[]{level,icon,text} }
 // ─────────────────────────────────────────────────────────────────────────────
-const SHALLOW_MIN_CONTENT_SAMPLE = 10; // 콘텐츠 그룹 로그수<10 → median 불안정(비노출)
-const SHALLOW_RATIO = 0.4;             // duration < median*0.4 → 속도이상
+const SHALLOW_MIN_CONTENT_SAMPLE = 10; // 시청 로그 그룹 로그수<10 → median 불안정(비노출)
+const SHALLOW_MIN_GRADED_SAMPLE = 5;   // 채점 로그 그룹 로그수<5 → 비노출(응시 인원 적음, §6-1)
+const SHALLOW_RATIO = 0.4;             // (하위호환) duration < median*0.4 → 기존 "속도이상" 플래그
+const SPEED_FAST = 0.5;                // ratio < 0.5 → 빠름 (§2-1)
+const SPEED_SLOW = 1.5;                // ratio > 1.5 → 느림 (그 사이 = 보통)
+
+// ratio → 속도 버킷. 경계: ratio<0.5 fast / 0.5~1.5 normal / >1.5 slow.
+function _speedBucket(ratio) {
+  if (ratio < SPEED_FAST) return 'fast';
+  if (ratio > SPEED_SLOW) return 'slow';
+  return 'normal';
+}
 
 // 배열 중앙값(정렬 후). 이상치 방어(평균 아님). 빈 배열 → null.
 function _median(arr) {
@@ -844,79 +868,233 @@ function _contentLabel(targetType, targetId, achievementCode, titleCache) {
   return label;
 }
 
+// 빈 매트릭스(카운트 0). correct/wrong × fast/normal/slow.
+function _emptyMatrix() {
+  return {
+    correct: { fast: 0, normal: 0, slow: 0 },
+    wrong: { fast: 0, normal: 0, slow: 0 },
+  };
+}
+
+// §4-1 규칙표 → insights[]. point 배열(정오·speed·achievementCode 포함)로 학급 수준 자동 해석.
+//   우선순위 1~5, 상위 2개만(폴백 good 1개 항상 보장). 각 {level,icon,text}.
+//   단정 금지 톤 — "찍었을 가능성/확인 권유"(낙인 X).
+function _buildShallowInsights(matrix, wrongUnits, studentCount) {
+  const out = [];
+  const m = matrix;
+  const wrongTotal = m.wrong.fast + m.wrong.normal + m.wrong.slow;
+
+  // 1) 오답 × 느림 ≥ 1 → 위험(개념 결손 의심)
+  if (m.wrong.slow >= 1) {
+    out.push({
+      level: 'danger', icon: '🔴',
+      text: `오래 고민하고도 틀린 학생이 ${m.wrong.slow}명 있어요. 개념 결손이 의심돼요 — 개별 지도를 우선해 주세요.`,
+    });
+  }
+  // 2) 오답 총합 ≥ 3 또는 특정 단원 오답 ≥ 2 → 주의(단원 몰림)
+  const topUnit = wrongUnits && wrongUnits.length ? wrongUnits[0] : null;
+  if (wrongTotal >= 3 || (topUnit && topUnit.count >= 2)) {
+    const unitLabel = topUnit ? topUnit.label : '일부 단원';
+    out.push({
+      level: 'danger', icon: '🔴',
+      text: `오답이 특정 단원(${unitLabel})에 몰려 있어요. 그 단원 보충을 배정해 보세요.`,
+    });
+  }
+  // 3) 정답 × 빠름 ≥ max(3, 반인원 20%) → 점검(찍기 가능성)
+  const fastThreshold = Math.max(3, Math.ceil((Number(studentCount) || 0) * 0.2));
+  if (m.correct.fast >= fastThreshold) {
+    out.push({
+      level: 'warn', icon: '🟠',
+      text: `정답을 아주 빨리 처리한 학생이 ${m.correct.fast}명이에요. 찍었을 가능성이 있어, 개념을 한 번 확인해 보면 좋아요.`,
+    });
+  }
+  // 4) 정답 × 느림 ≥ 3 → 참고(유창성)
+  if (m.correct.slow >= 3) {
+    out.push({
+      level: 'info', icon: '🔵',
+      text: `맞히긴 했지만 시간이 오래 걸린 학생이 ${m.correct.slow}명이에요. 반복 연습으로 유창성을 키워 주세요.`,
+    });
+  }
+
+  // 최대 2개만(위험도 순으로 이미 push). 폴백: 하나도 없으면 긍정 1개.
+  const top = out.slice(0, 2);
+  if (!top.length) {
+    top.push({
+      level: 'good', icon: '🟢',
+      text: '대부분 정상 속도로 정답을 맞히고 있어요. 지금 리듬이 좋아요 👍',
+    });
+  }
+  return top;
+}
+
 function getShallowLearning(classId, { days = 30 } = {}) {
   const d = Math.max(1, Math.min(365, Number(days) || 30));
   const ids = classStudentIds(classId);
   const empty = {
     classId: Number(classId), days: d, studentCount: ids.length,
     points: [], topStudents: [], maskedContentCount: 0,
-    medianThreshold: SHALLOW_RATIO,
+    medianThreshold: SPEED_FAST,
     disclaimer: '빠르게 맞힌 게 꼭 부정은 아니에요. 이미 잘 아는 내용일 수도 있어요.',
+    matrix: _emptyMatrix(),
+    wrongUnits: [],
+    hasWrongData: false,
+    insights: _buildShallowInsights(_emptyMatrix(), [], ids.length),
   };
   if (!ids.length) return empty;
 
-  // 1) 대상 로그: 반 학생 × 소요시간 有 × 콘텐츠 식별(target_type/id 有) × 기간.
-  //    result_success 는 median 계산엔 전부 쓰되, 플래그 판정은 success=1 만.
   const ph = ids.map(() => '?').join(',');
-  let rows;
+  const nameById = new Map(classStudents(classId).map(s => [s.id, s.name]));
+  const titleCache = new Map();
+
+  // ── 공통 union 행 셰이프: { userId, key, source, durationSec, correct, achievementCode }
+  //    key = 콘텐츠 그룹 식별자(그룹핑·median 기준). source = 'view'|'graded'(임계 분기).
+  const unionRows = [];
+
+  // (A) learning_logs — 콘텐츠 시청·채점형(소요시간 有). result_success=1 정답 / =0 오답.
+  //     result_success NULL 은 median 안정용으로만 쓰이므로 point 대상에서 제외(정오 미상).
   try {
-    rows = db.prepare(`
+    const rows = db.prepare(`
       SELECT ll.user_id, ll.target_type, ll.target_id, ll.duration_sec,
-             ll.result_success, ll.result_score, ll.achievement_code
+             ll.result_success, ll.achievement_code
       FROM learning_logs ll
       WHERE ll.user_id IN (${ph})
         AND ll.duration_sec IS NOT NULL AND ll.duration_sec > 0
         AND ll.target_type IS NOT NULL AND ll.target_id IS NOT NULL
         AND ll.created_at >= date('now', ?)
     `).all(...ids, `-${d} days`);
-  } catch (_) { rows = []; }
-  if (!rows.length) return empty;
+    for (const r of rows) {
+      unionRows.push({
+        userId: r.user_id,
+        key: `view:${r.target_type}:${r.target_id}`,
+        source: 'view',
+        durationSec: Number(r.duration_sec),
+        // 정오는 result_success 가 0/1 로 실측된 경우만(NULL 은 median 만 기여).
+        correct: r.result_success === 1 ? true : (r.result_success === 0 ? false : null),
+        achievementCode: r.achievement_code || null,
+        tType: r.target_type, tId: r.target_id,
+      });
+    }
+  } catch (_) { /* learning_logs 없으면 스킵 */ }
 
-  const nameById = new Map(classStudents(classId).map(s => [s.id, s.name]));
+  // (B) problem_attempts — 문항 채점 로그(is_correct 0/1, time_taken>0). 오답+시간 유.
+  //     achievement_code 는 contents.achievement_code(content_id 조인)에서 취득.
+  try {
+    const rows = db.prepare(`
+      SELECT pa.user_id, pa.content_id, pa.node_id, pa.is_correct, pa.time_taken,
+             c.achievement_code AS c_code, c.title AS c_title
+      FROM problem_attempts pa
+      LEFT JOIN contents c ON c.id = pa.content_id
+      WHERE pa.user_id IN (${ph})
+        AND pa.time_taken IS NOT NULL AND pa.time_taken > 0
+        AND pa.submitted_at >= date('now', ?)
+    `).all(...ids, `-${d} days`);
+    for (const r of rows) {
+      // 그룹 키: content_id 우선, 없으면 node_id. (같은 문항/콘텐츠끼리 median 비교)
+      const gid = (r.content_id != null && r.content_id !== 0)
+        ? `c${r.content_id}` : (r.node_id ? `n${r.node_id}` : 'unknown');
+      const key = `graded:${gid}`;
+      // 라벨/코드: contents 제목·achievement_code 우선. titleCache 에 미리 채워 _contentLabel 재사용.
+      if (r.c_title && !titleCache.has(key)) titleCache.set(key, r.c_title);
+      unionRows.push({
+        userId: r.user_id,
+        key,
+        source: 'graded',
+        durationSec: Number(r.time_taken),
+        correct: r.is_correct === 1,
+        achievementCode: r.c_code || null,
+        gid,
+      });
+    }
+  } catch (_) { /* problem_attempts 없으면 스킵 */ }
 
-  // 2) 콘텐츠(target_type:target_id) 그룹핑 → duration 배열.
-  const groups = new Map(); // key -> { durations:[], rows:[], achievementCode }
-  for (const r of rows) {
-    const key = `${r.target_type}:${r.target_id}`;
-    if (!groups.has(key)) groups.set(key, { durations: [], rows: [], achievementCode: r.achievement_code || null });
-    const g = groups.get(key);
-    g.durations.push(Number(r.duration_sec));
+  if (!unionRows.length) return empty;
+
+  // ── 콘텐츠 그룹핑 → duration 배열 + rows.
+  const groups = new Map(); // key -> { durations:[], rows:[], achievementCode, source }
+  for (const r of unionRows) {
+    if (!groups.has(r.key)) {
+      groups.set(r.key, { durations: [], rows: [], achievementCode: r.achievementCode || null, source: r.source });
+    }
+    const g = groups.get(r.key);
+    g.durations.push(r.durationSec);
     g.rows.push(r);
-    if (!g.achievementCode && r.achievement_code) g.achievementCode = r.achievement_code;
+    if (!g.achievementCode && r.achievementCode) g.achievementCode = r.achievementCode;
   }
 
-  // 3) 그룹별 median → 표본<10 은 비노출(maskedContentCount). 표본≥10 만 플래그 산출.
-  const titleCache = new Map();
+  // ── 그룹별 median → 표본<임계(소스별)면 비노출. point 산출.
   const points = [];
   let maskedContentCount = 0;
-  const flagCountByUser = new Map(); // userId -> flagCount
+  const flagCountByUser = new Map(); // userId -> 기존 "속도이상"(정답×아주빠름) flagCount(하위호환)
 
   for (const [key, g] of groups.entries()) {
-    if (g.durations.length < SHALLOW_MIN_CONTENT_SAMPLE) { maskedContentCount++; continue; }
+    const minSample = g.source === 'graded' ? SHALLOW_MIN_GRADED_SAMPLE : SHALLOW_MIN_CONTENT_SAMPLE;
+    if (g.durations.length < minSample) { maskedContentCount++; continue; }
     const med = _median(g.durations);
     if (med == null || med <= 0) { maskedContentCount++; continue; }
-    const [tType, tId] = key.split(':');
-    const label = _contentLabel(tType, tId, g.achievementCode, titleCache);
+
+    // 콘텐츠 라벨: view 는 target_type/id, graded 는 titleCache(제목) → achievement 폴백.
+    let label;
+    const first = g.rows[0];
+    if (g.source === 'view') {
+      label = _contentLabel(first.tType, first.tId, g.achievementCode, titleCache);
+    } else {
+      label = titleCache.get(key)
+        || (g.achievementCode ? (() => { try { return resolveCode(g.achievementCode).label; } catch (_) { return null; } })() : null)
+        || `문항 ${first.gid || ''}`.trim();
+    }
+
     for (const r of g.rows) {
-      const dur = Number(r.duration_sec);
+      if (r.correct == null) continue; // 정오 미상(view NULL) → 매트릭스 대상 제외(median 만 기여).
+      const dur = r.durationSec;
       const ratio = Math.round((dur / med) * 100) / 100;
-      const correct = r.result_success === 1;
-      const flag = correct && dur < med * SHALLOW_RATIO;
-      if (flag) flagCountByUser.set(r.user_id, (flagCountByUser.get(r.user_id) || 0) + 1);
+      const correct = r.correct === true;
+      const speed = _speedBucket(ratio);
+      const flag = correct && dur < med * SHALLOW_RATIO; // 하위호환 플래그
+      if (flag) flagCountByUser.set(r.userId, (flagCountByUser.get(r.userId) || 0) + 1);
       points.push({
-        userId: r.user_id,
-        name: nameById.get(r.user_id) || `학생${r.user_id}`,
+        userId: r.userId,
+        name: nameById.get(r.userId) || `학생${r.userId}`,
         content: label,
         durationSec: dur,
         median: Math.round(med),
         ratio,
         correct,
+        speed,
         flag,
+        achievementCode: g.achievementCode || null,
       });
     }
   }
 
-  // 4) topStudents: 플래그 있는 학생만, flagCount desc. severity: >=3 high / 1~2 medium.
+  // ── matrix: point 를 correct×speed 로 카운트(6칸). 합 == points.length(불변식).
+  const matrix = _emptyMatrix();
+  for (const p of points) {
+    matrix[p.correct ? 'correct' : 'wrong'][p.speed]++;
+  }
+  const hasWrongData = points.some(p => !p.correct);
+
+  // ── wrongUnits: 오답 point 를 achievement_code 로 묶어 count desc(상위 5). 코드 없으면 제외.
+  const wrongByCode = new Map(); // normCode -> { code, label, count }
+  for (const p of points) {
+    if (p.correct) continue;
+    const code = p.achievementCode;
+    if (!code) continue;
+    const nc = normCode(code);
+    if (!wrongByCode.has(nc)) {
+      let label = nc;
+      try { label = resolveCode(code).label || nc; } catch (_) { label = nc; }
+      wrongByCode.set(nc, { code: nc, label, count: 0 });
+    }
+    wrongByCode.get(nc).count++;
+  }
+  const wrongUnits = Array.from(wrongByCode.values())
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 5);
+
+  // ── insights: §4-1 규칙 서버 평가(최대 2·최소 1).
+  const insights = _buildShallowInsights(matrix, wrongUnits, ids.length);
+
+  // ── topStudents(하위호환): 정답×아주빠름 flagCount desc. severity: >=3 high / 1~2 medium.
   const topStudents = Array.from(flagCountByUser.entries())
     .map(([userId, flagCount]) => ({
       userId,
@@ -926,14 +1104,21 @@ function getShallowLearning(classId, { days = 30 } = {}) {
     }))
     .sort((a, b) => b.flagCount - a.flagCount);
 
-  // points: 플래그 우선 노출(빈 산점 방지) — flag desc, 그다음 ratio asc(빠른 순).
-  points.sort((a, b) => (b.flag - a.flag) || (a.ratio - b.ratio));
+  // points 정렬: 오답 우선(주의 노출) → 그다음 flag → ratio asc(빠른 순).
+  points.sort((a, b) =>
+    (Number(!a.correct) - Number(!b.correct) === 0
+      ? ((b.flag - a.flag) || (a.ratio - b.ratio))
+      : (Number(!b.correct) - Number(!a.correct))));
 
   return {
     classId: Number(classId), days: d, studentCount: ids.length,
     points, topStudents, maskedContentCount,
-    medianThreshold: SHALLOW_RATIO,
+    medianThreshold: SPEED_FAST,
     disclaimer: '빠르게 맞힌 게 꼭 부정은 아니에요. 이미 잘 아는 내용일 수도 있어요.',
+    matrix,
+    wrongUnits,
+    hasWrongData,
+    insights,
   };
 }
 
@@ -1158,4 +1343,7 @@ module.exports = {
   computeTrend, projectReach, getClassRiskList, getPrereqGap, getWeakTrend,
   getEmotionMirror, getShallowLearning, getEmotionEngage, getNextStep,
   riskGrade, invalidateBridge,
+  // B4 풀이 속도-정확도 점검 — 속도버킷 상수·헬퍼(하네스 경계 테스트용)
+  SPEED_FAST, SPEED_SLOW, SHALLOW_MIN_GRADED_SAMPLE, SHALLOW_MIN_CONTENT_SAMPLE,
+  speedBucket: _speedBucket,
 };
