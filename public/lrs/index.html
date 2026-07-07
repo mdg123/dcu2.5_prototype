@@ -1246,6 +1246,7 @@ const MENUS = {
     { id:'a-home',       label:'한눈 현황',        icon:'fa-globe',                 group:'홈',             category:'home' },
     { id:'a-svc-ops',    label:'서비스 운영 진단',  icon:'fa-gauge-high',            group:'거시 분석',       category:'analytics' },
     { id:'a-macro',      label:'거시 비교',        icon:'fa-layer-group',           group:'거시 분석',       category:'analytics' },
+    { id:'a-equity',     label:'형평성',          icon:'fa-scale-balanced',        group:'거시 분석',       category:'analytics' },
     { id:'a-cross',      label:'활동×성취 교차',    icon:'fa-arrows-to-dot',         group:'거시 분석',       category:'analytics' },
     { id:'a-time',       label:'학습시간 분석',     icon:'fa-clock',                 group:'거시 분석',       category:'analytics' },
     // ── 보조 (고급/운영) ──
@@ -1315,7 +1316,7 @@ const LEGACY_MENU_TO_CATEGORY = {
   't-perform':'activities','t-custom':'activities','t-daily':'activities',
   't-warnings':'analytics','t-drill':'activities','t-teacher-idx':'operations',
   // 신규 5블록
-  'a-home':'home','a-svc-ops':'analytics','a-macro':'analytics','a-cross':'analytics','a-time':'analytics',
+  'a-home':'home','a-svc-ops':'analytics','a-macro':'analytics','a-equity':'analytics','a-cross':'analytics','a-time':'analytics',
   'a-xapi':'operations','a-teacher-idx':'operations','a-quality':'operations','a-export':'reports',
   // 폐기/통합된 구 뷰 id → 신규 블록 카테고리로 호환 리다이렉트
   'a-usage':'analytics','a-achieve':'analytics','a-overview':'analytics',
@@ -7570,6 +7571,366 @@ VIEWS['a-macro'] = async function(root){
     onRowClick:(row)=>{ if (!row.masked) drillOf(row); }
   });
 };
+
+/* ======================================================================
+ * ③-2 교육 격차 모니터링 (a-equity) — Track 1 형평성
+ *    지역/학교급 단위 활용·성취 격차 진단 (macro-drill 재사용, 신규 BE /stats/equity)
+ *    구성: ① dim·기간 chip ② 헤드라인 KPI 4칸 ③ 분석멘트 ④ 격차 막대
+ *          ⑤ 우선개입 사분면 산점도(+후보 카드) ⑥ 격차 추세 라인 ⑦ 상세표
+ * ==================================================================== */
+// 격차 크기 → tone (성취·도달률·활성률 %p 기준: gap<8 작음(success)·8~15 중간(warning)·≥15 큼(danger))
+function _equityGapTone(gap){
+  const g = Math.abs(Number(gap)||0);
+  if (g >= 15) return 'danger';
+  if (g >= 8)  return 'warning';
+  return 'success';
+}
+// 1인당 활동(배수)용 tone: <1.5배 작음·1.5~2.5배 중간·≥2.5배 큼
+function _equityGapToneX(gapX){
+  const x = Number(gapX)||0;
+  if (x >= 2.5) return 'danger';
+  if (x >= 1.5) return 'warning';
+  return 'success';
+}
+// 규칙기반 분석멘트 (renderInsights/_crossInsight 톤·구조) — BE는 숫자만, 문장은 FE 생성
+// 받침 유무로 조사 선택 (a=받침있음, b=받침없음). 한글 아니면 a.
+function _josa(word, a, b){
+  const c = (word || '').trim().slice(-1);
+  if (!c) return a;
+  const code = c.charCodeAt(0);
+  if (code < 0xAC00 || code > 0xD7A3) return a;
+  return ((code - 0xAC00) % 28 !== 0) ? a : b;
+}
+function _equityInsight(d){
+  const dimLabel = (d && d.dim === 'school_level') ? '학교급' : '지역';
+  const dimJosaIga = _josa(dimLabel, '이', '가');
+  const ms = (d && d.metrics) || {};
+  const sc = ms.avgScore || {};
+  const out = { headline:'', trend:'', priority:'' };
+
+  // 헤드라인: 평균 성취 격차 중심
+  if (sc.gapPP == null || !sc.top || !sc.bottom){
+    out.headline = `${dimLabel} 간 성취 격차를 산출할 표본이 부족합니다.`;
+  } else {
+    const gap = Number(sc.gapPP);
+    const topL = sc.top.label, botL = sc.bottom.label;
+    let verdict;
+    if (gap >= 15) verdict = '격차가 큽니다. 하위 지역 집중 지원을 검토하세요.';
+    else if (gap >= 8) verdict = '중간 수준 격차입니다. 추세를 함께 확인하세요.';
+    else verdict = '격차가 크지 않습니다.';
+    // '지역' 문구는 dim에 맞춰 자연스럽게 치환
+    if (d.dim === 'school_level') verdict = verdict.replace('하위 지역', '하위 학교급');
+    out.headline = `${dimLabel} 간 평균 성취 격차는 ${gap}%p입니다. ${escapeHtml(topL)}(최상위)${_josa(topL,'과','와')} ${escapeHtml(botL)}(최하위)의 차이로, ${verdict}`;
+  }
+
+  // 추세: 최근 3개 기간 헤드라인 격차 변화
+  const pts = (d && d.trend && Array.isArray(d.trend.points)) ? d.trend.points.filter(p=>!p.masked && p.gapPP!=null) : [];
+  if (pts.length >= 2){
+    const first = Number(pts[0].gapPP), last = Number(pts[pts.length-1].gapPP);
+    const delta = Math.round((last - first) * 10) / 10;
+    let dir;
+    if (delta > 1) dir = '벌어짐';
+    else if (delta < -1) dir = '좁혀짐';
+    else dir = '유지';
+    const prev = pts[pts.length-2] ? Number(pts[pts.length-2].gapPP) : first;
+    const dPrev = Math.round((last - prev) * 10) / 10;
+    out.trend = `최근 ${pts.length}개 기간 격차가 ${dir}. 직전 대비 ${dPrev>=0?'+':''}${dPrev}%p`;
+  } else {
+    out.trend = '격차 추세를 산출할 표본이 부족합니다.';
+  }
+
+  // 우선개입: both_low(활용·성취 동반 저조)
+  const pu = (d && Array.isArray(d.priorityUnits)) ? d.priorityUnits : [];
+  if (pu.length){
+    const names = pu.slice(0,3).map(u=>u.label).join(', ');
+    out.priority = `${escapeHtml(names)}${pu.length>3?' 등':''} ${pu.length}개 ${dimLabel}${dimJosaIga} '활용·성취 동반 저조' 구간입니다. 콘텐츠 보급·연수·기기 지원 등 투입 우선순위 후보입니다.`;
+  } else {
+    out.priority = `'활용·성취 동반 저조' 구간에 해당하는 ${dimLabel}${dimJosaIga} 없습니다.`;
+  }
+  return out;
+}
+
+VIEWS['a-equity'] = async function(root){
+  root.innerHTML = tplLoading(3);
+  if (!state._equityDim) state._equityDim = 'region';
+  if (!state._equityPeriod) state._equityPeriod = '30d';
+  const dim = state._equityDim;
+  const period = state._equityPeriod;
+  const DIM_LABEL = { region:'지역', school_level:'학교급' };
+  const dimLabel = DIM_LABEL[dim] || '지역';
+
+  // apiGet은 state.period를 자동부착하나, equity는 자체 period(30d/90d)를 쓴다 → 명시 전달(자동값 덮어씀)
+  const d = await apiGet('/api/lrs/stats/equity', { dim, period });
+  if (!d || !d.success){ root.innerHTML = tplError('형평성 데이터를 불러오지 못했습니다', ()=>VIEWS['a-equity'](root)); return; }
+
+  const units = Array.isArray(d.units) ? d.units : [];
+  const visible = units.filter(u => !u.masked);
+  const maskedCnt = units.length - visible.length;
+  // 빈 상태: 표본 충족 단위 < 2면 격차 산출 불가
+  if (visible.length < 2){
+    root.innerHTML = _renderEquityChips(dim, period) +
+      _seedHintEmpty(`격차를 산출할 ${dimLabel} 표본이 부족합니다(최소 2개 ${dimLabel}, 각 ${d.minSample||10}명 이상)`);
+    _bindEquityChips(root);
+    return;
+  }
+
+  const ms = d.metrics || {};
+  const mScore = ms.avgScore || {};
+  const mActive = ms.activeRate || {};
+  const mActs = ms.actsPerStu || {};
+  const mReach = ms.reachRate || {};
+  const ins = _equityInsight(d);
+  const fmtPP = (v)=> (v==null?'-':Number(v).toFixed(1));
+  const fmtX  = (v)=> (v==null?'-':Number(v).toFixed(1));
+
+  root.innerHTML = `
+    ${_renderEquityChips(dim, period)}
+    <div class="dc-kpi-grid">
+      ${kpiCard('성취 격차', fmtPP(mScore.gapPP), '%p',
+        {dir:'flat', text: mScore.top&&mScore.bottom ? `${escapeHtml(mScore.top.label)}↔${escapeHtml(mScore.bottom.label)}` : '최상위↔최하위'},
+        _equityGapTone(mScore.gapPP))}
+      ${kpiCard('활성률 격차', fmtPP(mActive.gapPP), '%p',
+        {dir:'flat', text: mActive.top&&mActive.bottom ? `${escapeHtml(mActive.top.label)}↔${escapeHtml(mActive.bottom.label)}` : '주간활동 학생비중'},
+        _equityGapTone(mActive.gapPP))}
+      ${kpiCard('1인당 활동', fmtX(mActs.gapX), '배',
+        {dir:'flat', text: mActs.top&&mActs.bottom ? `${escapeHtml(mActs.top.label)}↔${escapeHtml(mActs.bottom.label)}` : '최다÷최소'},
+        _equityGapToneX(mActs.gapX))}
+      ${kpiCard('도달률 격차', fmtPP(mReach.gapPP), '%p',
+        {dir:'flat', text: mReach.top&&mReach.bottom ? `${escapeHtml(mReach.top.label)}↔${escapeHtml(mReach.bottom.label)}` : '성취기준 도달 학생비중'},
+        _equityGapTone(mReach.gapPP))}
+    </div>
+
+    <section class="dc-insight-banner" style="margin-bottom:var(--space-4);">
+      <span class="ib-icon">💡</span>
+      <div>
+        <div style="font-weight:700;color:var(--gray-900);margin-bottom:4px;">${dimLabel} 간 성취 격차</div>
+        <div style="line-height:1.7;">${ins.headline}</div>
+      </div>
+    </section>
+
+    <section class="dc-chart-wrapper">
+      <header><h2>${dimLabel}별 성취 격차</h2><div class="subtitle">평균 성취 내림차순 · 하위 3개 ${dimLabel} 빨강 강조${maskedCnt?` · 표본 부족 ${maskedCnt}개 제외`:''}</div></header>
+      <div class="chart-body" style="height:${Math.max(280, visible.length*34)}px;"><canvas id="aEquityBar" role="img" aria-label="${dimLabel}별 성취 격차 막대"></canvas></div>
+    </section>
+
+    <section class="dc-chart-wrapper">
+      <header><h2>우선개입 후보 진단</h2><div class="subtitle">가로=1인당 활동 · 세로=평균 성취 · 좌하단(활용·성취 동반 저조) 우선개입 대상</div></header>
+      <div class="chart-body"><canvas id="aEquityScatter" role="img" aria-label="우선개입 사분면 산점도"></canvas></div>
+      <div id="aEquityPriority" style="margin-top:14px;"></div>
+    </section>
+
+    <section class="dc-chart-wrapper">
+      <header><h2>격차 추세</h2><div class="subtitle">최근 3개 기간 성취 격차(%p) 추이</div></header>
+      <div class="chart-body" style="height:260px;"><canvas id="aEquityTrend" role="img" aria-label="격차 추세 라인"></canvas></div>
+      <div class="insight" aria-live="polite" style="margin-top:10px;">📈 ${escapeHtml(ins.trend)}</div>
+    </section>
+
+    <section class="dc-chart-wrapper">
+      <header><h2>${dimLabel}별 상세</h2><div class="subtitle">열 머리글로 정렬${maskedCnt?` · 표본 부족 ${maskedCnt}개 회색 표기`:''}</div></header>
+      <div id="aEquityTable"></div>
+    </section>`;
+
+  _bindEquityChips(root);
+
+  // ④ 지역별 격차 막대 (성취 내림차순, 최하위 3개 빨강)
+  const barRows = visible.slice().sort((a,b)=>(b.avgScore||0)-(a.avgScore||0));
+  const lowSet = new Set(barRows.slice(-3).map(u=>u.id));
+  mkChart(document.getElementById('aEquityBar'),'bar',{
+    labels: barRows.map(u=>u.label),
+    datasets:[{ label:'평균 성취', data: barRows.map(u=>u.avgScore),
+      backgroundColor: barRows.map(u=> lowSet.has(u.id) ? '#dc2626' : 'var(--chart-1)') }]
+  }, {
+    indexAxis:'y',
+    scales:{ x:{ min:0, max:100, title:{display:true,text:'평균 성취점수'} } },
+    plugins:{ legend:{display:false},
+      tooltip:{ callbacks:{ afterLabel:(item)=> lowSet.has(barRows[item.dataIndex].id) ? '하위 3개 — 집중 지원 후보' : '' } } }
+  });
+
+  // ⑤ 우선개입 사분면 산점도 (x=1인당활동, y=평균성취, 좌하단 이중취약 음영)
+  const scPts = visible.filter(u=> u.avgActsPerStudent!=null && u.avgScore!=null);
+  if (scPts.length){
+    const xs = scPts.map(p=>p.avgActsPerStudent);
+    const ys = scPts.map(p=>p.avgScore);
+    // 이상치 강건: x축 상한 = max(p90*1.15, 소단위 가드). 단위 수 적으니 auto도 무난하나 1개/빈 방어.
+    const xSorted = xs.slice().sort((a,b)=>a-b);
+    const xP90 = xSorted[Math.min(xSorted.length-1, Math.floor(xSorted.length*0.9))];
+    const xMax = Math.max(5, Math.ceil((xP90||1) * 1.15));
+    // 사분면 경계 = 중앙값(both_low 정의와 일치)
+    const median = (arr)=>{ const s=arr.slice().sort((a,b)=>a-b); const m=Math.floor(s.length/2); return s.length%2?s[m]:(s[m-1]+s[m])/2; };
+    const xMed = median(xs), yMed = median(ys);
+    const bothLowIds = new Set((d.priorityUnits||[]).map(u=>u.id));
+    // 좌하단(이중취약) 음영 플러그인 — 산점도 chartArea 기준 사각형
+    const quadShade = {
+      id:'equityQuadShade',
+      beforeDatasetsDraw(chart){
+        try{
+          const {ctx, chartArea:ca, scales} = chart;
+          const xPix = scales.x.getPixelForValue(Math.min(xMed, xMax));
+          const yPix = scales.y.getPixelForValue(yMed);
+          ctx.save();
+          ctx.fillStyle = 'rgba(220,38,38,0.07)';
+          ctx.fillRect(ca.left, yPix, xPix - ca.left, ca.bottom - yPix);
+          ctx.restore();
+        }catch(_){}
+      }
+    };
+    const ptColor = (u)=> bothLowIds.has(u.id) ? '#dc2626' : '#2563eb';
+    // 단위명을 점 위에 캔버스로 직접 그리는 라벨 플러그인(외부 datalabels 미의존)
+    const ptLabels = {
+      id:'equityPtLabels',
+      afterDatasetsDraw(chart){
+        try{
+          const ctx = chart.ctx;
+          const meta = chart.getDatasetMeta(0);
+          ctx.save();
+          ctx.font = '12px Pretendard, system-ui, sans-serif';
+          ctx.textAlign = 'center';
+          meta.data.forEach((pt, i)=>{
+            const raw = chart.data.datasets[0].data[i]||{};
+            ctx.fillStyle = raw._both ? '#991b1b' : '#475569';
+            ctx.fillText(raw._label||'', pt.x, pt.y - 11);
+          });
+          ctx.restore();
+        }catch(_){}
+      }
+    };
+    // 인스턴스 플러그인(사분면 음영·점 라벨)을 직접 넘기려면 mkChart(옵션만 병합)로는 불가 → new Chart 직접 생성.
+    // mkChart의 색 해석·state.charts 등록 규약은 여기서 동등 재현.
+    const scatterData = { datasets:[{
+      label:`${dimLabel}`,
+      data: scPts.map(u=>({ x:u.avgActsPerStudent, y:u.avgScore, _label:u.label, _both:bothLowIds.has(u.id) })),
+      backgroundColor: scPts.map(ptColor),
+      borderColor: scPts.map(u=> bothLowIds.has(u.id) ? '#991b1b' : '#1d4ed8'),
+      pointRadius:7, pointHoverRadius:9, borderWidth:1.5
+    }] };
+    const scatterChart = new Chart(document.getElementById('aEquityScatter'), {
+      type:'scatter',
+      data: scatterData,
+      plugins:[quadShade, ptLabels],
+      options:{
+        responsive:true, maintainAspectRatio:false,
+        animation:{ duration:600, easing:'easeOutCubic' },
+        scales:{
+          x:{ title:{display:true,text:'1인당 활동량(건)'}, beginAtZero:true, max:xMax },
+          y:{ title:{display:true,text:'평균 성취점수'}, min:0, max:100 }
+        },
+        plugins:{
+          legend:{display:false},
+          tooltip:{ callbacks:{ label:(item)=>{
+            const r = item.raw||{};
+            return `${r._label} · 활동 ${Number(r.x).toFixed(1)}건 · 성취 ${Number(r.y).toFixed(1)}점${r._both?' · 우선개입':''}`;
+          } } }
+        }
+      }
+    });
+    state.charts.push(scatterChart);
+  } else {
+    document.getElementById('aEquityScatter').closest('.dc-chart-wrapper').querySelector('.chart-body').innerHTML =
+      _seedHintEmpty('산점 표본이 부족해요');
+  }
+
+  // ⑤-하단 우선개입 후보 카드
+  const pri = Array.isArray(d.priorityUnits) ? d.priorityUnits : [];
+  const priHost = document.getElementById('aEquityPriority');
+  if (priHost){
+    if (pri.length){
+      priHost.innerHTML = `
+        <div class="dc-state-panel" role="status" style="text-align:left;border-left:4px solid #dc2626;background:#fef2f2;margin:0;">
+          <div style="font-weight:700;color:#991b1b;margin-bottom:6px;"><i class="fas fa-triangle-exclamation" aria-hidden="true"></i> 우선개입 후보 ${dimLabel}</div>
+          <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px;">
+            ${pri.map(u=>`<span class="dc-badge dc-badge--danger">${escapeHtml(u.label)}</span>`).join('')}
+          </div>
+          <div style="line-height:1.7;color:var(--gray-800);">${ins.priority}</div>
+        </div>`;
+    } else {
+      priHost.innerHTML = `<div class="dc-state-panel" role="status" style="text-align:left;border-left:4px solid #15803d;background:#f0fdf4;margin:0;">
+        <div style="line-height:1.7;color:var(--gray-800);">${ins.priority}</div></div>`;
+    }
+  }
+
+  // ⑥ 격차 추세 라인 (3점, masked 점 생략)
+  const tPts = (d.trend && Array.isArray(d.trend.points)) ? d.trend.points : [];
+  if (tPts.length){
+    mkChart(document.getElementById('aEquityTrend'),'line',{
+      labels: tPts.map(p=>p.periodLabel || p.label || ''),
+      datasets:[{
+        label:'성취 격차(%p)',
+        // masked 구간은 점·선 생략(null)
+        data: tPts.map(p=> p.masked ? null : (p.gapPP==null?null:Number(p.gapPP))),
+        borderColor:'#dc2626', backgroundColor:'rgba(220,38,38,0.12)',
+        spanGaps:false, tension:0.25, fill:true, pointRadius:5, pointHoverRadius:7
+      }]
+    }, {
+      scales:{ y:{ beginAtZero:true, title:{display:true,text:'격차(%p)'} } },
+      plugins:{ legend:{display:false},
+        tooltip:{ callbacks:{ label:(item)=> item.raw==null ? '표본 부족' : `격차 ${Number(item.raw).toFixed(1)}%p` } } }
+    });
+    // masked 구간 안내 캡션
+    const maskedPts = tPts.filter(p=>p.masked).length;
+    if (maskedPts){
+      const wrap = document.getElementById('aEquityTrend').closest('.dc-chart-wrapper');
+      const cap = document.createElement('div');
+      cap.style.cssText = 'font-size:var(--fs-sm);color:var(--gray-600);margin-top:6px;';
+      cap.textContent = `표본 부족 ${maskedPts}개 기간은 점 생략`;
+      if (wrap) wrap.appendChild(cap);
+    }
+  } else {
+    document.getElementById('aEquityTrend').closest('.dc-chart-wrapper').querySelector('.chart-body').innerHTML =
+      _seedHintEmpty('격차 추세 표본이 부족해요');
+  }
+
+  // ⑦ 상세 표 (마스킹 행 회색 표기, 정렬 가능)
+  const QUAD_BADGE = {
+    both_low: { cls:'dc-badge--danger',  label:'이중취약' },
+    use_low:  { cls:'dc-badge--warning', label:'활용 저조' },
+    ach_low:  { cls:'dc-badge--warning', label:'성취 저조' },
+    good:     { cls:'dc-badge--success', label:'양호' }
+  };
+  renderDataTable(document.getElementById('aEquityTable'), {
+    columns:[
+      { key:'label', label:dimLabel },
+      { key:'students', label:'학생수', align:'right', format:v=>escapeHtml((Number(v)||0).toLocaleString()) },
+      { key:'activeRate', label:'활성률(%)', align:'right', format:(v,r)=> r.masked ? '<span style="color:var(--gray-400);">표본 부족</span>' : escapeHtml(v==null?'-':Number(v).toFixed(1)) },
+      { key:'avgActsPerStudent', label:'1인당활동(건)', align:'right', format:(v,r)=> r.masked ? '<span style="color:var(--gray-400);">·</span>' : escapeHtml(v==null?'-':Number(v).toFixed(1)) },
+      { key:'avgLearnMin', label:'평균학습시간(분)', align:'right', format:(v,r)=> r.masked ? '<span style="color:var(--gray-400);">·</span>' : escapeHtml((Number(v)||0).toLocaleString()) },
+      { key:'avgScore', label:'평균성취', align:'right', format:(v,r)=> r.masked ? '<span style="color:var(--gray-400);">·</span>' : escapeHtml(v==null?'-':Number(v).toFixed(1)) },
+      { key:'reachRate', label:'도달률(%)', align:'right', format:(v,r)=> r.masked ? '<span style="color:var(--gray-400);">·</span>' : escapeHtml(v==null?'-':Number(v).toFixed(1)) },
+      { key:'quadrant', label:'구간', align:'center', format:(v,r)=>{
+          if (r.masked) return '<span style="color:var(--gray-400);">·</span>';
+          const q = QUAD_BADGE[v] || QUAD_BADGE.good;
+          return `<span class="dc-badge ${q.cls}">${q.label}</span>`;
+        } }
+    ],
+    rows: units, initialSort:'avgScore', initialDir:'desc'
+  });
+};
+
+/* dim(지역/학교급) + 기간(30/90일) 스위처 chip — a-time 단위토글 스타일 재사용 */
+function _renderEquityChips(dim, period){
+  return `
+    <div class="dc-chart-wrapper" style="margin-bottom:var(--space-4);">
+      <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
+        <div class="dc-unit-toggle" id="aEquityDimToggle" role="group" aria-label="비교 단위 선택">
+          <span style="font-size:var(--fs-body);font-weight:600;color:var(--gray-700);">단위</span>
+          <button class="chip" type="button" data-dim="region" aria-pressed="${dim==='region'}">지역</button>
+          <button class="chip" type="button" data-dim="school_level" aria-pressed="${dim==='school_level'}">학교급</button>
+        </div>
+        <div class="dc-unit-toggle" id="aEquityPeriodToggle" role="group" aria-label="기간 선택">
+          <span style="font-size:var(--fs-body);font-weight:600;color:var(--gray-700);">기간</span>
+          <button class="chip" type="button" data-eperiod="30d" aria-pressed="${period==='30d'}">30일</button>
+          <button class="chip" type="button" data-eperiod="90d" aria-pressed="${period==='90d'}">90일</button>
+        </div>
+      </div>
+    </div>`;
+}
+function _bindEquityChips(root){
+  root.querySelectorAll('#aEquityDimToggle button[data-dim]').forEach(btn=>{
+    btn.onclick = ()=>{ state._equityDim = btn.dataset.dim; VIEWS['a-equity'](root); };
+  });
+  root.querySelectorAll('#aEquityPeriodToggle button[data-eperiod]').forEach(btn=>{
+    btn.onclick = ()=>{ state._equityPeriod = btn.dataset.eperiod; VIEWS['a-equity'](root); };
+  });
+}
 
 /* ======================================================================
  * ④ 활동×성취 교차분석 (a-cross)

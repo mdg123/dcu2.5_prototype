@@ -4797,6 +4797,260 @@ router.get('/stats/macro-drill', requireAuth, (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────
+// [T1] 격차 지표 계산 순수함수 (테스트/재사용 — 분산·격차 산식 단일 출처)
+//   values: 표본충족 단위의 (v>=0) 지표 값 배열. 최소 1개 이상.
+//   kind: 'pp'(격차=최상위−최하위, %p) | 'ratio'(격차=최상위/최하위, 배수).
+//   반환: { gapPP|gapX, iqr, cv, bottom20Ratio, top:{...}, bottom:{...} }
+//   ★ 여기서 top/bottom 은 id/label 없는 {v}만 — 호출부에서 단위 id/label 을 붙인다.
+// ─────────────────────────────────────────────────────────
+function _equityMetric(unitVals, kind) {
+  // unitVals: [{ id, label, v }] — 표본충족 단위만(마스킹 제외). v 는 지표값.
+  const arr = unitVals.filter(u => u.v != null && !isNaN(u.v));
+  const r1 = (x) => Math.round(x * 10) / 10; // 소수1 반올림
+  if (arr.length === 0) {
+    return { gapPP: 0, gapX: 0, iqr: 0, cv: 0, bottom20Ratio: 0, top: null, bottom: null };
+  }
+  const sorted = [...arr].sort((a, b) => a.v - b.v);
+  const top = sorted[sorted.length - 1];
+  const bottom = sorted[0];
+  const vals = sorted.map(u => u.v);
+  // 격차: pp = top−bottom, ratio(배수) = top/bottom (bottom 0 이면 null)
+  const gapPP = r1(top.v - bottom.v);
+  const gapX = bottom.v > 0 ? Math.round((top.v / bottom.v) * 10) / 10 : null;
+  // IQR = Q3 − Q1 (선형보간 percentile — 기존 _pctile 재사용, 오름차순 정렬 배열)
+  const q1 = _pctile(vals, 0.25);
+  const q3 = _pctile(vals, 0.75);
+  const iqr = r1(q3 - q1);
+  // CV = 표준편차/평균 ×100(%). 평균 0 이면 0.
+  const mean = vals.reduce((s, v) => s + v, 0) / vals.length;
+  const variance = vals.reduce((s, v) => s + (v - mean) * (v - mean), 0) / vals.length;
+  const sd = Math.sqrt(variance);
+  const cv = mean > 0 ? r1((sd / mean) * 100) : 0;
+  // 하위 20% 평균 대비 전체 평균 비(%). "가장 뒤처진 단위들이 평균의 몇 %인가".
+  //   하위 20% 단위 수 = ceil(n×0.2), 최소 1개. 그 평균/전체평균 ×100.
+  const k = Math.max(1, Math.ceil(vals.length * 0.2));
+  const bottomK = vals.slice(0, k); // 오름차순이라 앞쪽이 하위
+  const bottomMean = bottomK.reduce((s, v) => s + v, 0) / bottomK.length;
+  const bottom20Ratio = mean > 0 ? r1((bottomMean / mean) * 100) : 0;
+  const out = {
+    iqr, cv, bottom20Ratio,
+    top: { id: top.id, label: top.label, v: r1(top.v) },
+    bottom: { id: bottom.id, label: bottom.label, v: r1(bottom.v) }
+  };
+  if (kind === 'ratio') out.gapX = gapX;      // 활동량: 배수
+  else out.gapPP = gapPP;                      // %p 지표
+  return out;
+}
+
+// ─────────────────────────────────────────────────────────
+// [T1] GET /api/lrs/stats/equity — 교육 격차 모니터링(형평성)
+//   기획서 §T1-1~T1-7. macro-drill 집계(studAgg/logAgg·scoredWhere·normScoreExpr·
+//   seedFilter·MIN_N)를 그대로 소비. 신규 원자료·외부연동 없음.
+//   params: dim=region|school_level(기본 region), period=30d|90d, realOnly
+// ─────────────────────────────────────────────────────────
+router.get('/stats/equity', requireAuth, (req, res) => {
+  try {
+    if (!_adminOnly(req, res)) return;
+    const MIN_N = 10;                          // macro-drill 과 동일 표본부족 마스킹 게이트
+    const dim = String(req.query.dim || 'region').trim();
+    if (dim !== 'region' && dim !== 'school_level') {
+      return res.status(400).json({ success: false, message: '잘못된 dim 파라미터입니다.' });
+    }
+    const days = macroDays(req, 30);           // 30d 기본, 90d 허용(그 외 값은 그대로 일수화)
+    const sfU = seedFilter(req, 'u');
+    const sfL = seedFilter(req, 'll');
+    const gcol = dim === 'region' ? 'u.region' : 'u.school_level';
+
+    // ── 한 기간(days, offsetDays 만큼 과거로 이동)의 단위별 집계 ─────────────
+    //   offsetDays=0 → 최근 days, 30 → 직전 days(30일 오프셋) ... (trend 3구간용)
+    //   반환: Map<unitId, { students, acts, dur_sec, avg_score, wau, reached }>
+    function aggregate(offsetDays) {
+      const fromExpr = `-${offsetDays + days - 1} days`;
+      const toExpr = offsetDays > 0 ? `-${offsetDays} days` : null;
+      const dateWhere = toExpr
+        ? `AND DATE(ll.created_at) >= DATE('now','localtime', ?) AND DATE(ll.created_at) <= DATE('now','localtime', ?)`
+        : `AND DATE(ll.created_at) >= DATE('now','localtime', ?)`;
+      const dateParams = toExpr ? [fromExpr, toExpr] : [fromExpr];
+
+      // 학생 수(단위별) — 로그 유무와 무관, 재학생 분모(macro-drill studAgg 동일)
+      const studAgg = db.prepare(`
+        SELECT ${gcol} id, COUNT(*) students
+        FROM users u
+        WHERE u.role='student' AND ${gcol} IS NOT NULL AND ${gcol} <> '' ${sfU.where}
+        GROUP BY ${gcol}
+      `).all();
+
+      // 활동수·학습시간·평균성취(단위별) — macro-drill logAgg 동일 SQL
+      const logAgg = db.prepare(`
+        SELECT ${gcol} id,
+               COUNT(*) acts,
+               COALESCE(SUM(COALESCE(ll.duration_sec,
+                 CAST(REPLACE(REPLACE(COALESCE(ll.result_duration,''),'PT',''),'S','') AS INTEGER),0)),0) dur_sec,
+               AVG(CASE WHEN ${scoredWhere('ll')} THEN ${normScoreExpr('ll')} END) avg_score
+        FROM learning_logs ll JOIN users u ON u.id = ll.user_id
+        WHERE u.role='student' AND ${gcol} IS NOT NULL AND ${gcol} <> ''
+          ${dateWhere} ${sfL.where}
+        GROUP BY ${gcol}
+      `).all(...dateParams);
+      const logMap = new Map(logAgg.map(r => [String(r.id), r]));
+
+      // WAU(단위별) — 최근 7일 활동 1회+ 고유 학생. activeRate 분자.
+      //   ★ 최근 7일 절대창(offsetDays 무관) — activeRate 는 "현재 활성" 지표라 최근 기간에만 정의.
+      //   trend 는 avgScore 만 쓰므로 wau 는 offsetDays=0 에서만 유의미.
+      const wauAgg = offsetDays === 0 ? db.prepare(`
+        SELECT ${gcol} id, COUNT(DISTINCT ll.user_id) wau
+        FROM learning_logs ll JOIN users u ON u.id = ll.user_id
+        WHERE u.role='student' AND ${gcol} IS NOT NULL AND ${gcol} <> ''
+          AND DATE(ll.created_at) >= DATE('now','localtime','-6 days') ${sfL.where}
+        GROUP BY ${gcol}
+      `).all() : [];
+      const wauMap = new Map(wauAgg.map(r => [String(r.id), r.wau]));
+
+      // 도달률(reachRate) — v1 간이 정의: 학생 개인 avg_score ≥ 60 인 학생 수(단위별).
+      //   분모는 units 의 students(재학생 전체) — reached/students ×100.
+      const reachAgg = db.prepare(`
+        SELECT region_id id, SUM(CASE WHEN uavg >= 60 THEN 1 ELSE 0 END) reached
+        FROM (
+          SELECT ${gcol} region_id, u.id uid,
+                 AVG(CASE WHEN ${scoredWhere('ll')} THEN ${normScoreExpr('ll')} END) uavg
+          FROM users u JOIN learning_logs ll ON ll.user_id = u.id
+          WHERE u.role='student' AND ${gcol} IS NOT NULL AND ${gcol} <> ''
+            ${dateWhere} ${sfL.where}
+          GROUP BY u.id
+          HAVING uavg IS NOT NULL
+        ) GROUP BY region_id
+      `).all(...dateParams);
+      const reachMap = new Map(reachAgg.map(r => [String(r.id), r.reached]));
+
+      const map = new Map();
+      studAgg.forEach(s => {
+        const key = String(s.id);
+        const l = logMap.get(key) || { acts: 0, dur_sec: 0, avg_score: null };
+        map.set(key, {
+          students: s.students || 0,
+          acts: l.acts || 0,
+          dur_sec: l.dur_sec || 0,
+          avg_score: l.avg_score,
+          wau: wauMap.get(key) || 0,
+          reached: reachMap.get(key) || 0
+        });
+      });
+      return map;
+    }
+
+    const cur = aggregate(0);
+    const labelFn = dim === 'school_level' ? levelLabel : (c) => String(c);
+
+    // ── units 배열 (표본부족은 값 마스킹·masked:true, 지표계산엔 제외) ─────────
+    const units = [];
+    let excludedMasked = 0;
+    for (const [id, a] of cur.entries()) {
+      const students = a.students || 0;
+      const masked = students < MIN_N;
+      if (masked) excludedMasked++;
+      const activeRate = students > 0 ? Math.round((a.wau / students) * 1000) / 10 : 0;
+      const avgActsPerStudent = students > 0 ? Math.round((a.acts / students) * 10) / 10 : 0;
+      const avgLearnMin = students > 0 ? Math.round((a.dur_sec / students) / 60) : 0;
+      const avgScore = a.avg_score == null ? null : Math.round(a.avg_score * 10) / 10;
+      const reachRate = students > 0 ? Math.round((a.reached / students) * 1000) / 10 : 0;
+      units.push({
+        id, label: labelFn(id), students,
+        activeRate: masked ? null : activeRate,
+        avgActsPerStudent: masked ? null : avgActsPerStudent,
+        avgLearnMin: masked ? null : avgLearnMin,
+        avgScore: masked ? null : avgScore,
+        reachRate: masked ? null : reachRate,
+        quadrant: null,   // 아래에서 사분면 산정 후 채움(마스킹은 null 유지)
+        masked
+      });
+    }
+
+    // 표본충족 단위만(마스킹 제외)으로 지표·사분면 계산.
+    const ok = units.filter(u => !u.masked);
+
+    // ── 사분면(§T1-2): 활용(avgActsPerStudent) 중앙값 × 성취(avgScore) 중앙값 ──
+    //   avgScore null 인 표본충족 단위(로그는 있으나 채점형 0)는 성취 축 판정 불가 → 사분면 미부여(null).
+    const actsVals = ok.map(u => u.avgActsPerStudent).filter(v => v != null).sort((a, b) => a - b);
+    const scoreVals = ok.map(u => u.avgScore).filter(v => v != null).sort((a, b) => a - b);
+    const medActs = actsVals.length ? _pctile(actsVals, 0.5) : null;
+    const medScore = scoreVals.length ? _pctile(scoreVals, 0.5) : null;
+    ok.forEach(u => {
+      if (u.avgScore == null || medActs == null || medScore == null) { u.quadrant = null; return; }
+      const useLow = u.avgActsPerStudent <= medActs;   // 활용 低(중앙값 이하)
+      const achLow = u.avgScore <= medScore;           // 성취 低(중앙값 이하)
+      u.quadrant = useLow && achLow ? 'both_low'       // ② 이중취약(최우선 개입)
+        : useLow && !achLow ? 'use_low'                // ④ 활용少·성취高
+        : !useLow && achLow ? 'ach_low'                // ③ 활용多·성취低
+        : 'good';                                      // ① 양호
+    });
+
+    // ── 지표 4종(§T1-1) — 표본충족 단위 배열에 대해 격차·IQR·CV·하위20%비 ───────
+    const mkVals = (field) => ok
+      .filter(u => u[field] != null)
+      .map(u => ({ id: u.id, label: u.label, v: u[field] }));
+    const metrics = {
+      activeRate: _equityMetric(mkVals('activeRate'), 'pp'),
+      avgScore:   _equityMetric(mkVals('avgScore'), 'pp'),
+      actsPerStu: _equityMetric(mkVals('avgActsPerStudent'), 'ratio'),  // 활동량은 배수(gapX)
+      reachRate:  _equityMetric(mkVals('reachRate'), 'pp')
+    };
+
+    // ── 추세(§T1-3): 최근 3구간 avgScore 헤드라인 격차(pp) 3점 ─────────────────
+    //   최근 days / 직전 days / 그 이전 days. 각 구간 표본충족 단위(students≥MIN_N) 의
+    //   avgScore top−bottom. 표본충족 단위 < 2 면 masked:true(점 생략용).
+    function periodGap(offsetDays) {
+      const agg = aggregate(offsetDays);
+      const vals = [];
+      for (const [, a] of agg.entries()) {
+        if ((a.students || 0) < MIN_N) continue;       // 표본부족 제외
+        if (a.avg_score == null) continue;
+        vals.push(Math.round(a.avg_score * 10) / 10);
+      }
+      if (vals.length < 2) return { gapPP: null, masked: true, units: vals.length };
+      vals.sort((x, y) => x - y);
+      return { gapPP: Math.round((vals[vals.length - 1] - vals[0]) * 10) / 10, masked: false, units: vals.length };
+    }
+    const trendPoints = [
+      { periodLabel: `직전전 ${days}일`, offset: days * 2 },
+      { periodLabel: `직전 ${days}일`, offset: days },
+      { periodLabel: `최근 ${days}일`, offset: 0 }
+    ].map(p => {
+      const g = periodGap(p.offset);
+      return { periodLabel: p.periodLabel, gapPP: g.gapPP, masked: g.masked };
+    });
+
+    // ── 우선개입 후보(§T1-2): both_low(이중취약) 단위 ────────────────────────
+    const priorityUnits = ok
+      .filter(u => u.quadrant === 'both_low')
+      .map(u => ({
+        id: u.id, label: u.label, students: u.students,
+        avgActsPerStudent: u.avgActsPerStudent, avgScore: u.avgScore,
+        activeRate: u.activeRate, reachRate: u.reachRate
+      }))
+      .sort((a, b) => (a.avgScore || 0) - (b.avgScore || 0)); // 성취 낮은 순(가장 취약 먼저)
+
+    // units 정렬: 표본충족(avgScore 내림차순) → 마스킹 뒤로.
+    units.sort((a, b) => {
+      if (a.masked !== b.masked) return a.masked ? 1 : -1;
+      return (b.avgScore || 0) - (a.avgScore || 0);
+    });
+
+    res.json({
+      success: true,
+      dim, period: `${days}d`, realOnly: sfL.realOnly, minSample: MIN_N,
+      units,
+      excludedMasked,
+      metrics,
+      trend: { metric: 'avgScore', points: trendPoints },
+      priorityUnits
+    });
+  } catch (err) {
+    console.error('[LRS] /stats/equity error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────
 // S3-④ GET /api/lrs/stats/cross-activity-achievement — 활동×성취 교차
 //   활동량 3분위(상/중/하) × 평균성취 매트릭스 + 익명 산점 + 콘텐츠/스스로채움 상하위 집단 비교
 //   params: period, realOnly
