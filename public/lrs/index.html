@@ -783,12 +783,25 @@
     .lrs-eng-disclaimer{ font-size:13px; color:var(--gray-500); line-height:1.6; margin:10px 4px 2px; }
     /* 출처 배지 (감정 체크 내역 꼬리) — .lrs-dm-badge-neutral 재사용, 여기선 별칭 없음 */
 
+    /* ===== 활용 현황 히트맵 셀 클릭 가능(t-usage 드릴다운) ===== */
+    .dc-heatmap.is-clickable .cell[role="button"]{ cursor:pointer; transition:transform .08s ease, box-shadow .08s ease; }
+    .dc-heatmap.is-clickable .cell[role="button"]:hover{ transform:scale(1.12); box-shadow:0 0 0 2px rgba(37,99,235,.55); }
+    .dc-heatmap.is-clickable .cell[role="button"]:focus-visible{ outline:0; box-shadow:0 0 0 2px #2563eb; }
+
     /* ===== B4 풀이 속도-정확도 점검 (교사 · 산점 + 표) ===== */
     #tShallowChartWrap{ position:relative; height:300px; max-width:100%; }
     @media (max-width:1200px){ #tShallowChartWrap{ height:260px; } }
     .shallow-table-wrap{ max-width:100%; overflow:hidden; }
+    /* 상세 정보 목록 — 고정 높이 + 내부 세로 스크롤(행 많아도 카드가 끝없이 늘지 않음).
+       헤더(제목/필터 배지/전체 보기 버튼)는 이 컨테이너 밖 → 스크롤 밖 고정. thead 는 sticky 로 스크롤 안 고정. */
+    .shallow-detail-scroll{ max-height:400px; overflow-y:auto; overflow-x:hidden;
+      border:1px solid #eef0f2; border-radius:10px; scrollbar-width:thin; scrollbar-color:#cbd5e1 transparent; }
+    .shallow-detail-scroll::-webkit-scrollbar{ width:8px; }
+    .shallow-detail-scroll::-webkit-scrollbar-thumb{ background:#cbd5e1; border-radius:8px; }
+    .shallow-detail-scroll::-webkit-scrollbar-track{ background:transparent; }
     table.shallow-table{ width:100%; border-collapse:collapse; font-size:14px; }
     table.shallow-table th, table.shallow-table td{ text-align:left; padding:10px 12px; border-bottom:1px solid #f0f1f3; white-space:nowrap; }
+    table.shallow-table thead th{ position:sticky; top:0; z-index:1; }
     table.shallow-table th{ font-size:13px; color:#6b7280; font-weight:600; background:#f9fafb; }
     table.shallow-table td{ color:#374151; }
     table.shallow-table td.st-name{ font-weight:600; color:#1f2937; }
@@ -804,7 +817,7 @@
     .shallow-card .sc-meta{ font-size:14px; color:#4b5563; margin-top:6px; }
     @media (max-width:768px){
       .shallow-table-wrap{ display:none; }
-      .shallow-cards{ display:block; }
+      .shallow-cards{ display:block; padding:12px 12px 2px; }   /* 모바일 카드는 스크롤 컨테이너 안쪽 여백 */
     }
 
     /* ===== 공통 lrs-insight (분석 멘트 박스 · 모든 LRS 카드 재사용) =====
@@ -1027,6 +1040,21 @@
       </div>
       <div class="lrs-dm-seg" id="lrsDmSeg" hidden></div>
       <div class="lrs-dm-body" id="lrsDmBody"></div>
+    </div>
+  </div>
+
+  <!-- 활용 현황 히트맵 셀 클릭 → 요일×시간 활동 드릴다운 (별도 DOM·별도 함수, .lrs-dm-* 재사용) -->
+  <div class="lrs-dm-overlay" id="lrsHeatCellModal" role="dialog" aria-modal="true" aria-labelledby="lrsHcTitleText">
+    <div class="lrs-dm-panel" role="document">
+      <div class="lrs-dm-header">
+        <div class="lrs-dm-title">
+          <span class="lrs-dm-title-ico" aria-hidden="true">🕒</span>
+          <span class="lrs-dm-title-text" id="lrsHcTitleText">시간대 활동</span>
+        </div>
+        <div class="lrs-dm-count" id="lrsHcCount"></div>
+        <button type="button" class="lrs-dm-close" id="lrsHcClose" aria-label="닫기">&times;</button>
+      </div>
+      <div class="lrs-dm-body" id="lrsHcBody"></div>
     </div>
   </div>
 
@@ -2799,6 +2827,133 @@ function closeEngageStudent(){
       const uid = msg.getAttribute('data-uid');
       try { if (window.LRS && typeof LRS.teacherAction === 'function') LRS.teacherAction('message', uid); } catch(_){}
     }
+  });
+})();
+
+/* =====================================================================
+ * 활용 현황(t-usage) 히트맵 셀 클릭 → 요일×시간 활동 드릴다운 팝업
+ *   BE 계약: GET /api/lrs/stats/heatmap-cell?classId=&dow=&hour=&period=
+ *   응답 count 는 히트맵 그 칸 값과 동일(멤버십 스코프·demo 제외·기간·셀 필터 동일).
+ *   별도 DOM(#lrsHeatCellModal)·별도 상태(_hc*) — 다른 모달 오염 방지.
+ *   CSS는 .lrs-dm-* 재사용(z-index 10000·닫기 40px 안전영역·모바일 하단 시트 계승).
+ * ===================================================================== */
+const HC_DOW_KO = ['일','월','화','수','목','금','토'];
+/* 활동유형 → 아이콘(정본 7종 + content_view 등). 라벨은 BE activityKo(masteryDetailTypeLabel) 사용. */
+const HC_TYPE_ICON = {
+  exam_complete:'🎓', homework_submit:'📝', content_solve:'🧩', content_view:'🎬',
+  lesson_progress:'📚', self_learn:'🧭', daily_complete:'🧭', node_complete:'🧭',
+  wrong_note_retry:'🔁', problem_attempt:'✏️'
+};
+let _hcReqSeq = 0;
+let _hcLastTrigger = null;
+function _hcEl(id){ return document.getElementById(id); }
+
+/* 팝업 열기: 헤더 즉시 → 스켈레톤 → fetch → 렌더 (경합가드 _hcReqSeq) */
+function openHeatmapCell(dow, hour, triggerEl){
+  const overlay = _hcEl('lrsHeatCellModal');
+  if (!overlay) return;
+  if (triggerEl) _hcLastTrigger = triggerEl;
+
+  _hcEl('lrsHcTitleText').textContent = `${HC_DOW_KO[dow]}요일 ${hour}시 활동`;
+  _hcEl('lrsHcCount').textContent = '';
+  _hcEl('lrsHcBody').innerHTML =
+    '<div class="lrs-dm-loading">' +
+      Array(3).fill(0).map(() =>
+        '<div class="lrs-dm-skel-row"><div class="lrs-dm-skel-ico"></div>' +
+        '<div class="lrs-dm-skel-body"><div class="lrs-dm-skel-line"></div><div class="lrs-dm-skel-line short"></div></div></div>'
+      ).join('') +
+    '</div>';
+  if (!overlay.classList.contains('open')){
+    overlay.classList.add('open');
+    document.body.style.overflow = 'hidden';
+    setTimeout(() => { try { _hcEl('lrsHcClose').focus(); } catch(_){} }, 0);
+  }
+
+  const seq = ++_hcReqSeq;
+  (async () => {
+    const cid = await resolveClassId();
+    const d = await apiGet('/api/lrs/stats/heatmap-cell', { classId: cid, dow, hour });
+    if (seq !== _hcReqSeq) return;                  // 더 최신 요청이 떴으면 무시
+    if (!d || d.success === false){
+      const is403 = d && (d.status === 403 || d.code === 'FORBIDDEN');
+      _hcRenderError(is403 ? '이 학급의 활동을 볼 권한이 없어요' : '활동 목록을 불러오지 못했어요');
+      return;
+    }
+    renderHeatmapCell(d, dow, hour);
+  })();
+}
+
+function renderHeatmapCell(d, dow, hour){
+  const total = Number(d.total || 0);
+  const items = Array.isArray(d.items) ? d.items : [];
+  _hcEl('lrsHcTitleText').textContent = `${HC_DOW_KO[dow]}요일 ${hour}시 활동`;
+  _hcEl('lrsHcCount').textContent = total > 0 ? `활동 ${total.toLocaleString()}건` : '';
+
+  if (!items.length){
+    _hcEl('lrsHcBody').innerHTML =
+      '<div class="lrs-dm-empty"><div class="lrs-dm-empty-ico">🗒️</div>' +
+      '<div class="lrs-dm-empty-title">이 시간대에는 활동 기록이 없어요</div>' +
+      '<div class="lrs-dm-empty-text">다른 칸을 눌러 보세요.</div></div>';
+    _hcEl('lrsHcBody').scrollTop = 0;
+    return;
+  }
+
+  const rowsHtml = items.map(it => {
+    const ico = HC_TYPE_ICON[it.activityType] || '🔹';
+    const who = escapeHtml(it.name || '학생');
+    const act = escapeHtml(it.activityKo || '학습 활동');
+    const label = it.label ? `<div class="lrs-dm-row-meta">${escapeHtml(it.label)}</div>` : '';
+    const time = it.createdAt ? `<span class="lrs-dm-row-date">${escapeHtml(it.createdAt)}</span>` : '';
+    return `<div class="lrs-dm-row">
+      <div class="lrs-dm-row-icon">${ico}</div>
+      <div class="lrs-dm-row-body">
+        <div class="lrs-dm-row-primary">${who} · ${act}</div>
+        ${label}
+      </div>
+      <div class="lrs-dm-row-tail">${time}</div>
+    </div>`;
+  }).join('');
+
+  // 상한(100) 초과 안내
+  const moreNote = total > items.length
+    ? `<div class="lrs-dm-count" style="padding:10px 16px 4px;">최근 ${items.length}건만 표시 · 외 ${(total - items.length).toLocaleString()}건 더 있어요</div>`
+    : '';
+  // 비담임 소표본 마스킹 안내
+  const maskNote = d.masked
+    ? `<div class="lrs-dm-count" style="padding:6px 16px 10px;">개인정보 보호를 위해 이름을 가렸어요(소규모 학급).</div>`
+    : '';
+
+  _hcEl('lrsHcBody').innerHTML = maskNote + rowsHtml + moreNote;
+  _hcEl('lrsHcBody').scrollTop = 0;
+}
+
+function _hcRenderError(msg){
+  _hcEl('lrsHcCount').textContent = '';
+  _hcEl('lrsHcBody').innerHTML =
+    '<div class="lrs-dm-empty"><div class="lrs-dm-empty-ico">⚠️</div>' +
+    '<div class="lrs-dm-empty-title">' + escapeHtml(msg || '불러오지 못했어요') + '</div>' +
+    '<div class="lrs-dm-empty-text">잠시 후 다시 시도해 주세요.</div></div>';
+}
+
+function closeHeatmapCell(){
+  const overlay = _hcEl('lrsHeatCellModal');
+  if (!overlay) return;
+  overlay.classList.remove('open');
+  document.body.style.overflow = '';
+  _hcReqSeq++;
+  if (_hcLastTrigger && typeof _hcLastTrigger.focus === 'function'){
+    try { _hcLastTrigger.focus(); } catch(_){}
+  }
+  _hcLastTrigger = null;
+}
+
+(function bindHeatmapCellModal(){
+  const overlay = _hcEl('lrsHeatCellModal');
+  if (!overlay) return;
+  _hcEl('lrsHcClose').addEventListener('click', closeHeatmapCell);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) closeHeatmapCell(); });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && overlay.classList.contains('open')) closeHeatmapCell();
   });
 })();
 
@@ -5276,16 +5431,18 @@ async function renderShallowLearning(host){
 
     <!-- 셀 상세 표(매트릭스 셀 클릭 → 필터) -->
     <div style="margin-top:18px;">
-      <div id="tShallowTableTitle" style="font-size:15px;font-weight:700;color:#1f2937;margin-bottom:8px;">셀 상세 <span style="font-weight:500;color:#6b7280;font-size:14px;">(위 매트릭스 칸을 누르면 그 칸만 봐요)</span></div>
-      <div class="shallow-table-wrap">
-        <table class="shallow-table">
-          <thead><tr>
-            <th>학생</th><th>콘텐츠 / 단원</th><th>소요 / 기준</th><th>결과</th><th>구분</th>
-          </tr></thead>
-          <tbody id="tShallowTbody"></tbody>
-        </table>
+      <div id="tShallowTableTitle" style="font-size:15px;font-weight:700;color:#1f2937;margin-bottom:8px;">상세 정보 <span style="font-weight:500;color:#6b7280;font-size:14px;">(위 매트릭스 칸을 누르면 그 칸만 봐요)</span></div>
+      <div class="shallow-detail-scroll">
+        <div class="shallow-table-wrap">
+          <table class="shallow-table">
+            <thead><tr>
+              <th>학생</th><th>콘텐츠 / 단원</th><th>소요 / 기준</th><th>결과</th><th>구분</th>
+            </tr></thead>
+            <tbody id="tShallowTbody"></tbody>
+          </table>
+        </div>
+        <div class="shallow-cards" id="tShallowCards"></div>
       </div>
-      <div class="shallow-cards" id="tShallowCards"></div>
       ${maskedContentCount > 0 ? `<div style="margin-top:10px;font-size:13px;color:#9ca3af;"><i class="fas fa-circle-info"></i> 표본 적음 ${maskedContentCount}건 — 중앙값이 불안정해 제외했어요.</div>` : ''}
     </div>
 
@@ -5382,11 +5539,11 @@ async function renderShallowLearning(host){
       if (selectedCell){
         const [row, sp] = selectedCell.split(':');
         const def = SHALLOW_CELLS[row][sp];
-        title.innerHTML = `셀 상세 <span style="font-weight:600;color:#374151;font-size:14px;">— ${row==='correct'?'정답':'오답'}·${speedLabel(sp)} (${def.name})</span> <button type="button" id="tShallowClear" style="margin-left:6px;font-size:13px;color:#2563eb;background:none;border:none;cursor:pointer;font-weight:600;">전체 보기 ×</button>`;
+        title.innerHTML = `상세 정보 <span style="font-weight:600;color:#374151;font-size:14px;">— ${row==='correct'?'정답':'오답'}·${speedLabel(sp)} (${def.name})</span> <button type="button" id="tShallowClear" style="margin-left:6px;font-size:13px;color:#2563eb;background:none;border:none;cursor:pointer;font-weight:600;">전체 보기 ×</button>`;
         const clr = document.getElementById('tShallowClear');
         if (clr) clr.addEventListener('click', () => selectCell(null));
       } else {
-        title.innerHTML = `셀 상세 <span style="font-weight:500;color:#6b7280;font-size:14px;">(위 매트릭스 칸을 누르면 그 칸만 봐요)</span>`;
+        title.innerHTML = `상세 정보 <span style="font-weight:500;color:#6b7280;font-size:14px;">(위 매트릭스 칸을 누르면 그 칸만 봐요)</span>`;
       }
     }
   }
@@ -6721,7 +6878,9 @@ VIEWS['t-usage'] = async function(root){
       `<header><h2>학급 서비스별 활용 비중</h2></header>` + tplEmpty();
   }
   if (heat && heatSum > 0){
-    renderHeatmapMatrix(document.getElementById('tUsageHeat'), heat);
+    renderHeatmapMatrix(document.getElementById('tUsageHeat'), heat, {
+      onCellClick: (dow, hour, el) => openHeatmapCell(dow, hour, el)
+    });
   } else {
     document.getElementById('tUsageHeat').innerHTML = tplEmpty('아직 학급 활동 기록이 없어요');
   }
@@ -7534,8 +7693,9 @@ VIEWS['a-time'] = async function(root){
   renderHeatmapMatrix(document.getElementById('aTimeHeatmap'), d.heatmap || []);
 };
 
-/* 서버 제공 7×24 매트릭스를 직접 히트맵으로 렌더 (renderHeatmap는 date 파싱 기반이라 별도 함수) */
-function renderHeatmapMatrix(container, matrix){
+/* 서버 제공 7×24 매트릭스를 직접 히트맵으로 렌더 (renderHeatmap는 date 파싱 기반이라 별도 함수)
+   opts.onCellClick(dow, hour, el) 를 주면 값>0 셀 클릭 드릴다운 활성화(t-usage 전용). */
+function renderHeatmapMatrix(container, matrix, opts){
   if (!container) return;
   let maxV = 0;
   (matrix||[]).forEach(row => row.forEach(v => { if (v>maxV) maxV=v; }));
@@ -7545,17 +7705,36 @@ function renderHeatmapMatrix(container, matrix){
   }
   const dows = ['일','월','화','수','목','금','토'];
   const ylabels = dows.map(d=>`<div>${d}</div>`).join('');
+  // opts.onCellClick 이 있으면 값>0 셀을 클릭 가능(버튼)으로 — t-usage 드릴다운. 빈 셀은 클릭 불가.
+  const clickable = opts && typeof opts.onCellClick === 'function';
   const cells = (matrix||[]).map((row,di)=>
-    row.map((v,hi)=>`<div class="cell heat-${bucket(v)}" data-h="${bucket(v)}" title="${dows[di]} ${hi}시: ${v}" aria-label="${dows[di]}요일 ${hi}시 활동 ${v}">${v>0?v:''}</div>`).join('')
+    row.map((v,hi)=>{
+      const base = `class="cell heat-${bucket(v)}" data-h="${bucket(v)}"`;
+      if (clickable && v>0){
+        return `<div ${base} data-dow="${di}" data-hour="${hi}" role="button" tabindex="0"`
+          + ` title="${dows[di]} ${hi}시: ${v}건 · 클릭하면 누가·무엇을 했는지 볼 수 있어요"`
+          + ` aria-label="${dows[di]}요일 ${hi}시 활동 ${v}건, 자세히 보기">${v}</div>`;
+      }
+      return `<div ${base} title="${dows[di]} ${hi}시: ${v}" aria-label="${dows[di]}요일 ${hi}시 활동 ${v}">${v>0?v:''}</div>`;
+    }).join('')
   ).join('');
   const xlabels = Array.from({length:24},(_,i)=>`<div>${i%3===0?i:''}</div>`).join('');
   container.innerHTML = `
     <div class="dc-heatmap-wrap">
       <div class="hm-ylabels" style="grid-template-rows:repeat(7,1fr);">${ylabels}</div>
-      <div class="dc-heatmap" style="grid-template-columns:repeat(24,1fr);">${cells}</div>
+      <div class="dc-heatmap${clickable?' is-clickable':''}" style="grid-template-columns:repeat(24,1fr);">${cells}</div>
       <div></div>
       <div class="hm-xlabels">${xlabels}</div>
     </div>`;
+  if (clickable){
+    container.querySelectorAll('.dc-heatmap .cell[role="button"]').forEach(el => {
+      const dow = parseInt(el.getAttribute('data-dow'), 10);
+      const hour = parseInt(el.getAttribute('data-hour'), 10);
+      const fire = () => opts.onCellClick(dow, hour, el);
+      el.addEventListener('click', fire);
+      el.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' '){ e.preventDefault(); fire(); } });
+    });
+  }
 }
 
 VIEWS['a-quality'] = async function(root){

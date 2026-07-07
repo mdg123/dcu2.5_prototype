@@ -981,6 +981,147 @@ router.get('/stats/daily', requireAuth, (req, res) => {
   }
 });
 
+// GET /api/lrs/stats/heatmap-cell?classId=&dow=&hour=&period=
+//   활용 현황(t-usage) 요일×시간 히트맵의 **한 칸(dow,hour) 클릭 → 드릴다운**.
+//   ★count 정합 계약: 이 엔드포인트의 count 는 /stats/daily 의 heatmapDowHour[dow][hour] 와
+//     반드시 동일해야 한다. 그러려면 스코프·필터·셀 필터를 heatmapDowHour 와 **동일하게** 쓴다:
+//       - 스코프: resolveMembershipScopeFilter(소유 반 student user_id 합집합) — classId 로 좁히지 않음.
+//                 (히트맵 자체가 소유 반 전체 합집합이므로 여기서 class_id 로 좁히면 칸 수치가 어긋난다.)
+//       - period 창(dateRangeWhere) + demo_* 합성 시드 제외(source_service NOT LIKE 'demo%').
+//       - 셀 필터: strftime('%w'/'%H', created_at, 'localtime') = dow / hour (히트맵 집계와 동일 표현식).
+//   권한: classId 는 열람 권한 게이트(canViewClass) 전용 — 403 차단 + 담임 실명 노출 audit 1건.
+//     비담임(소표본)은 shouldMaskNames 정책으로 이름 마스킹("학생 A"…).
+//   응답: { success, dow, hour, period, count, total, items:[{ userId, name, activityType,
+//           activityKo, service, serviceKo, label, createdAt }] }. label=대상/콘텐츠 제목(LEFT JOIN 보강).
+const HEATMAP_CELL_LIMIT = 100;
+router.get('/stats/heatmap-cell', requireAuth, (req, res) => {
+  try {
+    const classId = parseInt(req.query.classId, 10);
+    const dow = parseInt(req.query.dow, 10);
+    const hour = parseInt(req.query.hour, 10);
+    if (!Number.isInteger(classId)) {
+      return res.status(400).json({ success: false, message: '잘못된 classId 파라미터입니다.' });
+    }
+    if (!Number.isInteger(dow) || dow < 0 || dow > 6) {
+      return res.status(400).json({ success: false, message: '잘못된 dow 파라미터입니다.(0~6)' });
+    }
+    if (!Number.isInteger(hour) || hour < 0 || hour > 23) {
+      return res.status(400).json({ success: false, message: '잘못된 hour 파라미터입니다.(0~23)' });
+    }
+    // 권한 게이트 — 담임/담당(canViewClass)만. 비멤버 교사·학생 403.
+    if (!canViewClass(req, classId)) {
+      return res.status(403).json({ success: false, message: '권한이 없습니다.' });
+    }
+
+    const r = dateRangeWhere(req, 'created_at', 'll');
+    if (r.invalid) return sendInvalidPeriod(res, r.reason);
+
+    // heatmapDowHour(/stats/daily) 와 동일 스코프·필터 — count 정합 보장.
+    const msf = resolveMembershipScopeFilter(req, 'll');
+    const dowStr = String(dow);
+    const hourStr = String(hour).padStart(2, '0');
+    const cellWhere = 'WHERE 1=1' + r.where + msf.where
+      + " AND (ll.source_service IS NULL OR ll.source_service NOT LIKE 'demo%')"
+      + " AND CAST(strftime('%w', ll.created_at, 'localtime') AS INTEGER) = ?"
+      + " AND CAST(strftime('%H', ll.created_at, 'localtime') AS INTEGER) = ?";
+    const cellParams = [...r.params, ...msf.params, dow, hour];
+
+    // total(상한 무관 전수) — heatmapDowHour 칸 값과 대조되는 정합 기준값.
+    const totalRow = db.prepare(`
+      SELECT COUNT(*) AS c FROM learning_logs ll ${cellWhere}
+    `).get(...cellParams);
+    const total = totalRow.c || 0;
+
+    // items — 최신순 상한 100. 각 대상 테이블 LEFT JOIN 으로 제목 보강(조인 실패해도 count 불변).
+    const rows = db.prepare(`
+      SELECT ll.user_id, ll.activity_type, ll.target_type, ll.target_id,
+             ll.source_service, ll.created_at,
+             strftime('%H:%M', ll.created_at, 'localtime') AS local_hm,
+             u.display_name AS name, u.username AS username,
+             e.title  AS exam_title,
+             h.title  AS hw_title,
+             di.item_title AS self_title,
+             c.title  AS content_title,
+             l.title  AS lesson_title
+      FROM learning_logs ll
+      JOIN users u ON u.id = ll.user_id
+      LEFT JOIN exams e    ON ll.activity_type='exam_complete'    AND e.id = ll.target_id
+      LEFT JOIN homework h ON ll.activity_type='homework_submit'  AND h.id = CAST(ll.target_id AS INTEGER)
+      LEFT JOIN daily_learning_items di ON ll.activity_type IN ('self_learn','daily_complete') AND di.id = CAST(ll.target_id AS INTEGER)
+      LEFT JOIN contents c ON ll.activity_type IN ('content_view','content_solve') AND c.id = CAST(ll.target_id AS INTEGER)
+      LEFT JOIN lessons  l ON ll.activity_type='lesson_progress'  AND l.id = CAST(ll.target_id AS INTEGER)
+      ${cellWhere}
+      ORDER BY ll.created_at DESC
+      LIMIT ?
+    `).all(...cellParams, HEATMAP_CELL_LIMIT);
+
+    // 이름 마스킹 정책: 반 학생 수 기준(shouldMaskNames). 담임/담당 → 실명, 비담임 소표본 → 익명.
+    let studentCount = 0;
+    try {
+      studentCount = db.prepare(`
+        SELECT COUNT(*) AS c FROM class_members cm JOIN users u ON u.id = cm.user_id
+        WHERE cm.class_id = ? AND u.role = 'student'
+      `).get(classId).c || 0;
+    } catch (_) { studentCount = 0; }
+    const mask = shouldMaskNames(req, classId, studentCount);
+    const maskIdx = new Map();  // userId → 안정적 익명 인덱스
+
+    // 대상/콘텐츠 제목(target 기반) 보강.
+    function cellTitle(row) {
+      const at = row.activity_type;
+      if (at === 'exam_complete') return row.exam_title || null;
+      if (at === 'homework_submit') return row.hw_title || null;
+      if (at === 'self_learn' || at === 'daily_complete') return row.self_title || null;
+      if (at === 'content_view' || at === 'content_solve') return row.content_title || null;
+      if (at === 'lesson_progress') return row.lesson_title || null;
+      return null;
+    }
+    function hhmm(row) {
+      // 로컬 시각 HH:MM — strftime(...,'localtime') 로 산출(히트맵 칸 귀속과 동일 표현식이라
+      //   표시 시각의 '시'가 클릭한 칸의 hour 와 일치). 폴백은 raw created_at.
+      if (row.local_hm) return String(row.local_hm);
+      const m = String(row.created_at || '').match(/(\d{2}):(\d{2})/);
+      return m ? `${m[1]}:${m[2]}` : '';
+    }
+
+    const items = rows.map((row) => {
+      let name;
+      if (mask) {
+        if (!maskIdx.has(row.user_id)) maskIdx.set(row.user_id, maskIdx.size);
+        name = maskNameLabel(maskIdx.get(row.user_id));
+      } else {
+        name = row.name || row.username || '학생';
+      }
+      return {
+        userId: row.user_id,
+        name,
+        activityType: row.activity_type,
+        activityKo: masteryDetailTypeLabel(row.activity_type, row.source_service),
+        service: row.source_service || null,
+        serviceKo: serviceLabel(row.source_service),
+        label: cellTitle(row),
+        createdAt: hhmm(row),
+      };
+    });
+
+    // 실명 노출(비마스킹) 시 audit 1건 — 담임 실명 열람 거버넌스 로그.
+    if (!mask) auditNameAccessLrs(req, 'heatmap-cell', classId, total);
+
+    res.json({
+      success: true,
+      dow, hour,
+      period: r.fromDate && r.toDate ? { from: r.fromDate, to: r.toDate } : null,
+      count: Math.min(total, HEATMAP_CELL_LIMIT),
+      total,
+      masked: mask,
+      items,
+    });
+  } catch (err) {
+    console.error('[LRS] /stats/heatmap-cell error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
 // GET /api/lrs/stats/by-subject
 // ★ 이 엔드포인트는 "교과별 활동 현황"(운영 총량 리포트)이므로 항상 전체 기간 누적으로 집계한다.
 //   형제 탭 "성취 도달 현황"이 누적이라, 기간 창(기본 최근 30일)으로 필터하면 이 탭만 텅 빈

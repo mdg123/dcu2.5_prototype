@@ -39,7 +39,7 @@ const LEARN7 = [
 ];
 
 // ── HTTP 하네스 (lrs-perform-detail.test.js 와 동일 패턴) ────────────────────
-let server, baseUrl, tdb, SEED_UID;
+let server, baseUrl, tdb, SEED_UID, HEAT_TS;
 function buildApp() {
   const app = express();
   app.use(express.json());
@@ -93,6 +93,27 @@ before(async () => {
   ins.run(SEED_UID, 't-q1', 1, null);
   ins.run(SEED_UID, 't-q2', 0, null);
   ins.run(SEED_UID, 't-q3', null, 80); // score-only 행 — 미포함 검증용
+
+  // ── 히트맵 드릴다운(heatmap-cell) 시드 ──
+  //   teacher1(uid2) 이 소유한 class 2 의 student member(uid3) 활동을 특정 (dow,hour) 칸에 심는다.
+  //   demo_* 는 히트맵/드릴 모두에서 제외돼야 하므로 같은 칸에 1건 심어 '제외 정합' 확인.
+  //   created_at 은 '주중 정오'로 고정(HEAT_DOW·HEAT_HOUR) — strftime localtime 기준 칸 귀속.
+  const insHm = tdb.prepare(`
+    INSERT INTO learning_logs (user_id, activity_type, verb, target_id, source_service, created_at)
+    VALUES (?, ?, 'completed', ?, ?, ?)
+  `);
+  // 최근 화요일(dow=2) 10:30 로컬. 90d 창 안에 들도록 today 기준 최근 화요일 계산.
+  const now = new Date();
+  const back = (now.getDay() - 2 + 7) % 7 || 7;          // 오늘이 화면 7일 전 화요일(항상 과거·창 안)
+  const tue = new Date(now); tue.setDate(now.getDate() - back); tue.setHours(10, 30, 0, 0);
+  const pad = n => String(n).padStart(2, '0');
+  const tueLocal = `${tue.getFullYear()}-${pad(tue.getMonth()+1)}-${pad(tue.getDate())} 10:30:00`;
+  HEAT_TS = tueLocal;
+  insHm.run(3, 'content_solve', 'c-hm1', 'content', tueLocal);         // 실데이터(포함)
+  insHm.run(3, 'exam_complete', 'e-hm1', 'exam', tueLocal);           // 실데이터(포함)
+  insHm.run(4, 'homework_submit', 'h-hm1', 'homework', tueLocal);     // 실데이터(포함·다른 학생)
+  insHm.run(3, 'content_view', 'c-hm2', 'demo_seed', tueLocal);       // demo_* → 히트맵/드릴 모두 제외
+
   await new Promise((resolve) => {
     server = http.createServer(buildApp()).listen(0, '127.0.0.1', () => {
       baseUrl = `http://127.0.0.1:${server.address().port}`;
@@ -332,4 +353,68 @@ test('PERM-K: retry-growth·재풀이 드릴 — 학생 본인 200, 타 학생 4
   assert.equal((await req(`/retry-growth/abc?period=30d`, STUDENT1)).status, 400, '잘못된 uid 400');
   const drillOther = await req(`/perform/detail?activityType=wrong_note_retry&period=30d&userId=${STUDENT2}`, STUDENT1);
   assert.equal(drillOther.status, 403, '드릴도 학생→타 학생 403');
+});
+
+// ──────────────────────────────────────────────────────────────────────────
+// HEATMAP-CELL: 활용 현황 히트맵 셀 클릭 드릴다운
+//   INV-HC1  count 정합: 임의 (dow,hour) 칸에서 heatmap-cell.total ==
+//            /stats/daily heatmapDowHour[dow][hour] (멤버십 스코프·demo 제외·기간·셀필터 동일).
+//            teacher1(uid2) scope=class 기본 → 소유 반(class 2) 학생 합집합.
+//   INV-HC2  demo_* 제외: 시드한 demo_seed 행은 count·items 어디에도 안 잡힘.
+//   PERM-HC  비담임 교사 403(teacher3=uid9 는 class 2 비멤버), 학생 403, 담임 200.
+//   BOUND-HC 잘못된 dow/hour/classId → 400. 상한(count ≤ 100).
+// ──────────────────────────────────────────────────────────────────────────
+const HEAT_DOW = 2, HEAT_HOUR = 10;   // 시드 화요일 10시
+
+test('INV-HC1: heatmap-cell.total == /stats/daily heatmapDowHour 전 칸 정합(teacher1·전 기간)', async () => {
+  for (const p of PERIODS) {
+    const daily = await req(`/stats/daily?period=${p}`, TEACHER); // scope=class 기본
+    assert.equal(daily.status, 200, `daily@${p} 200`);
+    const hm = daily.json.heatmapDowHour;
+    assert.ok(Array.isArray(hm) && hm.length === 7, 'heatmapDowHour 7행');
+    // 값>0 인 칸을 전수 대조(개수 폭주 방지 위해 상위 몇 칸만)
+    const nonZero = [];
+    hm.forEach((row, dow) => row.forEach((v, hour) => { if (v > 0) nonZero.push({ dow, hour, v }); }));
+    for (const cell of nonZero.slice(0, 12)) {
+      const r = await req(`/stats/heatmap-cell?classId=2&dow=${cell.dow}&hour=${cell.hour}&period=${p}`, TEACHER);
+      assert.equal(r.status, 200, `heatmap-cell@${p} (${cell.dow},${cell.hour}) 200`);
+      assert.equal(r.json.total, cell.v,
+        `@${p} 칸(${cell.dow},${cell.hour}): heatmap-cell.total(${r.json.total}) == heatmapDowHour(${cell.v})`);
+      assert.equal(r.json.count, Math.min(cell.v, 100), 'count = min(total,100) 상한');
+      assert.ok(Array.isArray(r.json.items) && r.json.items.length <= 100, 'items ≤ 100');
+      // items 계약 필드
+      r.json.items.forEach(it => {
+        for (const k of ['userId','name','activityType','activityKo','createdAt']) {
+          assert.ok(k in it, `item 에 ${k} 필드`);
+        }
+        assert.ok(!/demo/i.test(String(it.service||'')), 'demo_* 서비스 미노출');
+      });
+    }
+  }
+});
+
+test('INV-HC2: 시드 화요일 10시 칸 — 실데이터 3건(demo 제외), demo_seed 미포함', async () => {
+  const r = await req(`/stats/heatmap-cell?classId=2&dow=${HEAT_DOW}&hour=${HEAT_HOUR}&period=90d`, TEACHER);
+  assert.equal(r.status, 200, '200');
+  // 시드 3건(content_solve·exam_complete·homework_submit) 이상(기존 실데이터가 같은 칸일 수도 있어 >=)
+  assert.ok(r.json.total >= 3, `시드 실데이터 3건 이상 (현재 ${r.json.total})`);
+  const services = r.json.items.map(it => String(it.service||''));
+  assert.ok(!services.some(s => /demo/i.test(s)), 'demo_seed 행은 items 에 없어야');
+  // daily 히트맵 그 칸과 정확히 일치(정합 재확인)
+  const daily = await req(`/stats/daily?period=90d`, TEACHER);
+  assert.equal(r.json.total, daily.json.heatmapDowHour[HEAT_DOW][HEAT_HOUR], '그 칸 heatmapDowHour 와 일치');
+});
+
+test('PERM-HC: 담임 200 · 비담임 교사 403 · 학생 403', async () => {
+  assert.equal((await req(`/stats/heatmap-cell?classId=2&dow=${HEAT_DOW}&hour=${HEAT_HOUR}&period=90d`, TEACHER)).status, 200, '담임(teacher1) 200');
+  assert.equal((await req(`/stats/heatmap-cell?classId=2&dow=${HEAT_DOW}&hour=${HEAT_HOUR}&period=90d`, 9)).status, 403, '비담임 교사(teacher3) 403');
+  assert.equal((await req(`/stats/heatmap-cell?classId=2&dow=${HEAT_DOW}&hour=${HEAT_HOUR}&period=90d`, STUDENT1)).status, 403, '학생 403');
+  assert.equal((await req(`/stats/heatmap-cell?classId=2&dow=${HEAT_DOW}&hour=${HEAT_HOUR}&period=90d`, ADMIN)).status, 200, '관리자 200');
+});
+
+test('BOUND-HC: 잘못된 dow/hour/classId → 400', async () => {
+  assert.equal((await req(`/stats/heatmap-cell?classId=2&dow=7&hour=10`, TEACHER)).status, 400, 'dow=7 400');
+  assert.equal((await req(`/stats/heatmap-cell?classId=2&dow=2&hour=24`, TEACHER)).status, 400, 'hour=24 400');
+  assert.equal((await req(`/stats/heatmap-cell?classId=abc&dow=2&hour=10`, TEACHER)).status, 400, 'classId=abc 400');
+  assert.equal((await req(`/stats/heatmap-cell?classId=2&dow=-1&hour=10`, TEACHER)).status, 400, 'dow=-1 400');
 });
