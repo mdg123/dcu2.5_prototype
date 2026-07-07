@@ -60,6 +60,33 @@
     }
     .dc-unit-toggle .chip[aria-pressed="true"] { background:var(--lrs-primary); color:#fff; border-color:var(--lrs-primary); }
 
+    /* ── KPI 카드 보조 라인(kpi-extra) — a-equity CV(산포) 노출 등. lrs-tokens 미정의라 여기 자립 정의(13px, 12px 금지) ── */
+    .dc-kpi-card .kpi-extra { font-size:13px; color:var(--gray-500); line-height:1.5; margin-top:6px;
+      display:flex; align-items:center; gap:5px; flex-wrap:wrap; }
+    .dc-kpi-card .kpi-extra .kpi-extra-ico { font-size:12px; color:var(--gray-400); flex:0 0 auto; }
+    .dc-kpi-card .kpi-extra b { font-weight:700; color:var(--gray-700); }
+
+    /* ── 학교급×지역 교차 격차 히트맵(a-equity P2) — 컴팩트 성취 히트맵 + 행별 격차 요약 ── */
+    .dc-clr-wrap { overflow-x:auto; -webkit-overflow-scrolling:touch; max-width:100%; padding-bottom:4px; }
+    .dc-clr-table { border-collapse:separate; border-spacing:4px; width:100%; table-layout:auto; }
+    .dc-clr-table th, .dc-clr-table td { font-size:13px; line-height:1.3; }
+    .dc-clr-table thead th { font-weight:600; color:var(--gray-600); padding:4px 6px; text-align:center; white-space:nowrap; vertical-align:bottom; }
+    .dc-clr-table thead th.dc-clr-corner { text-align:left; min-width:88px; }
+    .dc-clr-table tbody th.dc-clr-rowlab { text-align:left; font-weight:700; color:var(--gray-800); padding:4px 8px 4px 4px; white-space:nowrap; }
+    .dc-clr-table tbody th.dc-clr-rowlab small { display:block; font-size:13px; font-weight:600; color:var(--gray-500); margin-top:2px; }
+    .dc-clr-cell { width:52px; min-width:52px; height:38px; border-radius:7px; text-align:center; vertical-align:middle;
+      color:#fff; font-weight:700; font-variant-numeric:tabular-nums; padding:0 4px; }
+    .dc-clr-cell.masked { background:repeating-linear-gradient(45deg,#e2e8f0,#e2e8f0 5px,#cbd5e1 5px,#cbd5e1 10px); color:#64748b; font-weight:600; }
+    .dc-clr-gap { padding:4px 6px 4px 10px; white-space:nowrap; vertical-align:middle; font-size:13px; color:var(--gray-700); }
+    .dc-clr-gap .dc-clr-gap-v { font-weight:700; font-variant-numeric:tabular-nums; }
+    .dc-clr-legend { display:flex; align-items:center; gap:10px; flex-wrap:wrap; font-size:13px; color:var(--gray-600); margin-top:10px; }
+    .dc-clr-legend .sw { display:inline-flex; align-items:center; gap:5px; }
+    .dc-clr-legend .sw i { width:14px; height:14px; border-radius:4px; display:inline-block; }
+    @media (max-width:767px){
+      .dc-clr-cell { width:44px; min-width:44px; height:34px; }
+      .dc-clr-table thead th.dc-clr-corner { min-width:64px; }
+    }
+
     /* ── 서비스 사용률 가로 막대 랭킹 ───────────────────────────── */
     .dc-svc-rank { display:flex; flex-direction:column; gap:10px; margin-top:4px; }
     .dc-svc-rank .row { display:grid; grid-template-columns:130px 1fr auto; align-items:center; gap:12px; }
@@ -7682,22 +7709,31 @@ VIEWS['a-equity'] = async function(root){
   const ins = _equityInsight(d);
   const fmtPP = (v)=> (v==null?'-':Number(v).toFixed(1));
   const fmtX  = (v)=> (v==null?'-':Number(v).toFixed(1));
+  // CV(변동계수, %) 보조 노출 — 헤드라인은 격차(gap) 유지, CV는 "산포(고른 정도)"를 kpi-extra 한 줄로.
+  //   kpiCard()가 이미 <div class="kpi-extra">로 감싸므로 여기선 내부 콘텐츠만 반환(이중 래핑 방지).
+  //   BE 미반영(cv 없음)이면 라인 자체를 생략(폴백 안전).
+  const cvExtra = (cv)=>{
+    const n = Number(cv);
+    if (cv==null || isNaN(n)) return '';
+    return `<i class="fas fa-arrows-left-right-to-line kpi-extra-ico" aria-hidden="true"></i>`
+      + `<span>${dimLabel} 간 산포(변동계수) <b>${n.toFixed(0)}%</b> · 낮을수록 고름</span>`;
+  };
 
   root.innerHTML = `
     ${_renderEquityChips(dim, period)}
     <div class="dc-kpi-grid">
       ${kpiCard('성취 격차', fmtPP(mScore.gapPP), '%p',
         {dir:'flat', text: mScore.top&&mScore.bottom ? `${escapeHtml(mScore.top.label)}↔${escapeHtml(mScore.bottom.label)}` : '최상위↔최하위'},
-        _equityGapTone(mScore.gapPP))}
+        _equityGapTone(mScore.gapPP), cvExtra(mScore.cv))}
       ${kpiCard('활성률 격차', fmtPP(mActive.gapPP), '%p',
         {dir:'flat', text: mActive.top&&mActive.bottom ? `${escapeHtml(mActive.top.label)}↔${escapeHtml(mActive.bottom.label)}` : '주간활동 학생비중'},
-        _equityGapTone(mActive.gapPP))}
+        _equityGapTone(mActive.gapPP), cvExtra(mActive.cv))}
       ${kpiCard('1인당 활동', fmtX(mActs.gapX), '배',
         {dir:'flat', text: mActs.top&&mActs.bottom ? `${escapeHtml(mActs.top.label)}↔${escapeHtml(mActs.bottom.label)}` : '최다÷최소'},
-        _equityGapToneX(mActs.gapX))}
+        _equityGapToneX(mActs.gapX), cvExtra(mActs.cv))}
       ${kpiCard('도달률 격차', fmtPP(mReach.gapPP), '%p',
         {dir:'flat', text: mReach.top&&mReach.bottom ? `${escapeHtml(mReach.top.label)}↔${escapeHtml(mReach.bottom.label)}` : '성취기준 도달 학생비중'},
-        _equityGapTone(mReach.gapPP))}
+        _equityGapTone(mReach.gapPP), cvExtra(mReach.cv))}
     </div>
 
     <section class="dc-insight-banner" style="margin-bottom:var(--space-4);">
@@ -7717,6 +7753,11 @@ VIEWS['a-equity'] = async function(root){
       <header><h2>우선개입 후보 진단</h2><div class="subtitle">가로=1인당 활동 · 세로=평균 성취 · 좌하단(활용·성취 동반 저조) 우선개입 대상</div></header>
       <div class="chart-body"><canvas id="aEquityScatter" role="img" aria-label="우선개입 사분면 산점도"></canvas></div>
       <div id="aEquityPriority" style="margin-top:14px;"></div>
+    </section>
+
+    <section class="dc-chart-wrapper" id="aEquityCrossLevelSec">
+      <header><h2>학교급별 지역 격차</h2><div class="subtitle">초·중·고 각 학교급에서 지역 간 평균 성취가 얼마나 벌어졌는지 · 셀 색: 초록(높음)↔빨강(낮음), 회색 대각선(표본 부족)</div></header>
+      <div id="aEquityCrossLevel"></div>
     </section>
 
     <section class="dc-chart-wrapper">
@@ -7848,6 +7889,9 @@ VIEWS['a-equity'] = async function(root){
     }
   }
 
+  // ⑤-½ 학교급×지역 교차 격차 히트맵 (초·중·고 3행 × 지역 열)
+  _renderEquityCrossLevel(d);
+
   // ⑥ 격차 추세 라인 (3점, masked 점 생략)
   const tPts = (d.trend && Array.isArray(d.trend.points)) ? d.trend.points : [];
   if (tPts.length){
@@ -7930,6 +7974,119 @@ function _bindEquityChips(root){
   root.querySelectorAll('#aEquityPeriodToggle button[data-eperiod]').forEach(btn=>{
     btn.onclick = ()=>{ state._equityPeriod = btn.dataset.eperiod; VIEWS['a-equity'](root); };
   });
+}
+
+/* 평균성취(0~100) → 히트맵 셀 배경색: 낮음(빨강) ↔ 높음(초록). 도달선 60 부근을 노랑으로.
+   masked 셀은 CSS(.dc-clr-cell.masked)가 회색 대각선 처리하므로 여기선 유효 셀만 색칠. */
+function _equityScoreColor(score){
+  const s = Math.max(0, Math.min(100, Number(score)||0));
+  // 3구간 보간: 0~50 빨강→주황, 50~75 주황→연두, 75~100 연두→초록
+  let r,g,b;
+  if (s < 50){ const t=s/50; r=220; g=Math.round(38+(158-38)*t); b=38; }        // #dc2626 → #dc9e26(주황)
+  else if (s < 75){ const t=(s-50)/25; r=Math.round(220+(132-220)*t); g=Math.round(158+(179-158)*t); b=Math.round(38+(45-38)*t); } // 주황 → #84b32d(연두)
+  else { const t=(s-75)/25; r=Math.round(132+(21-132)*t); g=Math.round(179+(128-179)*t); b=Math.round(45+(61-45)*t); }         // 연두 → #15803d(초록)
+  return `rgb(${r},${g},${b})`;
+}
+
+/* ⑤-½ 학교급×지역 교차 격차 — crossLevelRegion(초·중·고 3행) 컴팩트 히트맵 + 행별 격차 요약 + 분석멘트.
+   BE 미반영(crossLevelRegion 없음/빈배열)이면 섹션 통째로 숨김(폴백 안전, 다른 뷰 회귀 없음). */
+function _renderEquityCrossLevel(d){
+  const host = document.getElementById('aEquityCrossLevel');
+  const sec  = document.getElementById('aEquityCrossLevelSec');
+  if (!host) return;
+  const rows = (d && Array.isArray(d.crossLevelRegion)) ? d.crossLevelRegion : [];
+  // BE 미반영 → 섹션 숨김(빈 껍데기 방지)
+  if (!rows.length){ if (sec) sec.style.display = 'none'; return; }
+  if (sec) sec.style.display = '';
+
+  // 열(지역) 순서: 모든 행 cells를 합쳐 지역 등장 순서를 안정적으로 수집(중복 제거).
+  const colOrder = [];
+  const colLabel = {};
+  rows.forEach(r=>{
+    (Array.isArray(r.cells)?r.cells:[]).forEach(c=>{
+      const key = String(c.region);
+      if (!(key in colLabel)){ colLabel[key] = c.regionLabel || key; colOrder.push(key); }
+    });
+  });
+
+  // 헤더
+  const headCells = colOrder.map(k=>`<th scope="col" title="${escapeAttr(colLabel[k])}">${escapeHtml(colLabel[k])}</th>`).join('');
+  const thead = `<thead><tr>
+      <th scope="col" class="dc-clr-corner">학교급 \\ 지역</th>
+      ${headCells}
+      <th scope="col" style="text-align:left;">지역 간 격차</th>
+    </tr></thead>`;
+
+  // 본문 3행
+  const bodyRows = rows.map(r=>{
+    const cellByRegion = {};
+    (Array.isArray(r.cells)?r.cells:[]).forEach(c=>{ cellByRegion[String(c.region)] = c; });
+    const tds = colOrder.map(k=>{
+      const c = cellByRegion[k];
+      if (!c || c.masked || c.avgScore==null){
+        return `<td class="dc-clr-cell masked" title="${escapeAttr(colLabel[k])} · 표본 부족" aria-label="${escapeAttr(colLabel[k])} 표본 부족">-</td>`;
+      }
+      const v = Number(c.avgScore);
+      const stu = c.students!=null ? ` · ${Number(c.students).toLocaleString()}명` : '';
+      return `<td class="dc-clr-cell" style="background:${_equityScoreColor(v)};"`
+        + ` title="${escapeAttr(r.levelLabel||r.level)} · ${escapeAttr(colLabel[k])} · 평균 ${v.toFixed(1)}점${stu}">`
+        + `${v.toFixed(0)}</td>`;
+    }).join('');
+    // 행별 격차 요약(최상위↔최하위)
+    const gap = (r.regionGapPP==null) ? null : Number(r.regionGapPP);
+    const gapTone = gap==null ? 'muted' : (gap>=15?'danger':gap>=8?'warning':'success');
+    const gapColor = { danger:'#dc2626', warning:'#b45309', success:'#15803d', muted:'var(--gray-500)' }[gapTone];
+    let gapHtml;
+    if (gap==null){
+      gapHtml = `<span style="color:var(--gray-400);">표본 부족</span>`;
+    } else {
+      const topL = r.top && r.top.label ? escapeHtml(r.top.label) : '최상위';
+      const botL = r.bottom && r.bottom.label ? escapeHtml(r.bottom.label) : '최하위';
+      gapHtml = `<span class="dc-clr-gap-v" style="color:${gapColor};">${gap.toFixed(1)}%p</span>`
+        + `<span style="color:var(--gray-500);"> (${topL}↔${botL})</span>`;
+    }
+    return `<tr>
+      <th scope="row" class="dc-clr-rowlab">${escapeHtml(r.levelLabel||r.level||'-')}</th>
+      ${tds}
+      <td class="dc-clr-gap">${gapHtml}</td>
+    </tr>`;
+  }).join('');
+
+  const legend = `<div class="dc-clr-legend">
+      <span class="sw"><i style="background:${_equityScoreColor(90)};"></i>높음</span>
+      <span class="sw"><i style="background:${_equityScoreColor(62)};"></i>보통</span>
+      <span class="sw"><i style="background:${_equityScoreColor(35)};"></i>낮음</span>
+      <span class="sw"><i style="background:repeating-linear-gradient(45deg,#e2e8f0,#e2e8f0 4px,#cbd5e1 4px,#cbd5e1 8px);"></i>표본 부족</span>
+    </div>`;
+
+  // 분석멘트: 격차가 가장 큰 학교급 지목(규칙기반, _equityInsight 톤)
+  const insight = _equityCrossLevelInsight(rows);
+
+  host.innerHTML = `
+    <div class="dc-clr-wrap">
+      <table class="dc-clr-table" aria-label="학교급별 지역 평균 성취 히트맵">
+        ${thead}
+        <tbody>${bodyRows}</tbody>
+      </table>
+    </div>
+    ${legend}
+    ${insight ? `<div class="insight" aria-live="polite" style="margin-top:12px;line-height:1.7;">💡 ${insight}</div>` : ''}`;
+}
+
+/* 학교급×지역 교차 분석멘트 — "격차가 가장 큰 학교급"을 규칙기반으로 지목 */
+function _equityCrossLevelInsight(rows){
+  const valid = (rows||[]).filter(r=>r.regionGapPP!=null && !isNaN(Number(r.regionGapPP)));
+  if (!valid.length) return '학교급별 지역 격차를 산출할 표본이 부족합니다.';
+  const sorted = valid.slice().sort((a,b)=>Number(b.regionGapPP)-Number(a.regionGapPP));
+  const worst = sorted[0];
+  const gap = Number(worst.regionGapPP);
+  const lvl = escapeHtml(worst.levelLabel || worst.level || '해당 학교급');
+  const bot = (worst.bottom && worst.bottom.label) ? escapeHtml(worst.bottom.label) : '하위 지역';
+  let tail;
+  if (gap >= 15) tail = `해당 학교급 하위 지역(${bot} 등) 우선 지원을 검토하세요.`;
+  else if (gap >= 8) tail = `추세와 함께 하위 지역 지원 필요성을 확인하세요.`;
+  else tail = `학교급 간 지역 격차는 크지 않습니다.`;
+  return `지역 격차는 <b>${lvl}</b>에서 가장 큽니다(${gap.toFixed(1)}%p). ${tail}`;
 }
 
 /* ======================================================================
@@ -8198,6 +8355,15 @@ VIEWS['a-quality'] = async function(root){
   };
 
   function tone(rate){ return rate>20 ? 'danger' : rate>10 ? 'warning' : 'success'; }
+  // 세션 커버리지: 높을수록 좋음 → ≥80 success · 50~80 warning · <50 danger (결측률 tone과 방향 반대).
+  //   BE 미반영(session_coverage_rate 없음)이면 카드 생략(폴백 안전).
+  const sessCov = (d.session_coverage_rate==null || isNaN(Number(d.session_coverage_rate))) ? null : Number(d.session_coverage_rate);
+  const sessDenom = (d.denominators && d.denominators.session!=null && !isNaN(Number(d.denominators.session))) ? Number(d.denominators.session) : null;
+  function covTone(rate){ return rate>=80 ? 'success' : rate>=50 ? 'warning' : 'danger'; }
+  const sessCovCard = (sessCov==null) ? '' : kpiCard(
+    '세션 커버리지', sessCov.toFixed(1), '%',
+    {dir: sessCov>=80?'up':'down', text: sessDenom!=null ? `세션 있는 학습 로그 ${sessDenom.toLocaleString()}건 중 · 높을수록 좋음` : '높을수록 좋음'},
+    covTone(sessCov));
 
   root.innerHTML = `
     <div class="dc-kpi-grid">
@@ -8207,6 +8373,7 @@ VIEWS['a-quality'] = async function(root){
       ${kpiCard('학습시간 결측률', missDur.toFixed(1), '%', {dir:missDur>20?'down':'up', text:denomText('duration','시간형 로그')||'낮을수록 좋음'}, tone(missDur))}
     </div>
     <div class="dc-kpi-grid">
+      ${sessCovCard}
       ${kpiCard('최근 동기화', d.last_synced||'-', '', {dir:'flat',text:d.last_synced?'가장 최근 로그 시각':''}, 'primary')}
       ${kpiCard('서비스 수', srows.length, '종', {dir:'flat',text:'활동 기록 기준'}, 'primary')}
       ${kpiCard('성취 매핑 수', achRows.length, '개', {dir:'flat',text:'집계된 성취기준'}, 'primary')}

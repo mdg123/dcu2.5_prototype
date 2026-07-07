@@ -260,6 +260,19 @@ const LRS_MISS_ACH_EXPR = "(achievement_code IS NULL OR TRIM(achievement_code) =
 const LRS_MISS_SUBJ_EXPR = "(subject_code IS NULL OR TRIM(subject_code) = '')";
 const LRS_MISS_DUR_EXPR = "((duration_sec IS NULL OR duration_sec = 0) AND (result_duration IS NULL OR TRIM(result_duration) = ''))";
 
+// ─────────────────────────────────────────────────────────
+// [P2 심화] 세션 커버리지 정식화(기획서 §P2, §2-A-1 로드맵)
+//   P0 에서 '세션 결측률'은 분모 불명확으로 뺐다(85% 결측 대부분이 세션 개념 없는 조회/출석).
+//   P2 에서 "세션 개념이 실제 있는 activity_type" 화이트리스트로 분모를 한정해 정식화한다.
+//     세션 의미 유형: exam_complete·homework_submit·self_learn·content_solve·lesson_progress·wrong_note_retry·daily_complete
+//     (조회 content_view/lesson_view·출석·설문·게시글 제외 — 순간 이벤트라 세션 개념 없음)
+//   ★ 결측률(음의 지표)이 아니라 커버리지(session_id 채워진 비율, 양의 지표)로 노출(높을수록 좋음).
+//   missing_session_rate 는 계속 미제공(FE 폴백 유지) — 새 지표는 별도.
+// ─────────────────────────────────────────────────────────
+const LRS_SESSION_TYPES_SQL = "'exam_complete','homework_submit','self_learn','content_solve','lesson_progress','wrong_note_retry','daily_complete'";
+// 세션 채움 판정: session_id NOT NULL AND 공백 아님.
+const LRS_SESSION_FILLED_EXPR = "(session_id IS NOT NULL AND TRIM(session_id) <> '')";
+
 /**
  * 선택 기간(pFrom~pTo) 내, 특정 학생의 채점된 학습로그 평균 성취(0~100 정규화).
  *   - /stats/perform summary avg 와 동일 로직(같은 SCORED_SQL·NORM_SCORE·기간 필터) 재사용.
@@ -836,7 +849,9 @@ router.get('/dataset-coverage', requireAuth, (req, res) => {
         SUM(CASE WHEN activity_type IN (${LRS_MISS_SUBJ_TYPES_SQL}) THEN 1 ELSE 0 END) AS subj_denom,
         SUM(CASE WHEN activity_type IN (${LRS_MISS_SUBJ_TYPES_SQL}) AND ${LRS_MISS_SUBJ_EXPR} THEN 1 ELSE 0 END) AS subj_missing,
         SUM(CASE WHEN activity_type IN (${LRS_MISS_DUR_TYPES_SQL}) THEN 1 ELSE 0 END) AS dur_denom,
-        SUM(CASE WHEN activity_type IN (${LRS_MISS_DUR_TYPES_SQL}) AND ${LRS_MISS_DUR_EXPR} THEN 1 ELSE 0 END) AS dur_missing
+        SUM(CASE WHEN activity_type IN (${LRS_MISS_DUR_TYPES_SQL}) AND ${LRS_MISS_DUR_EXPR} THEN 1 ELSE 0 END) AS dur_missing,
+        SUM(CASE WHEN activity_type IN (${LRS_SESSION_TYPES_SQL}) THEN 1 ELSE 0 END) AS sess_denom,
+        SUM(CASE WHEN activity_type IN (${LRS_SESSION_TYPES_SQL}) AND ${LRS_SESSION_FILLED_EXPR} THEN 1 ELSE 0 END) AS sess_filled
       FROM learning_logs
       WHERE ${qBase}
     `).get(...r.params);
@@ -846,6 +861,10 @@ router.get('/dataset-coverage', requireAuth, (req, res) => {
     const missingAchievementRate = pct(missRow.ach_missing || 0, achDenom);
     const missingSubjectRate = pct(missRow.subj_missing || 0, subjDenom);
     const missingDurationRate = pct(missRow.dur_missing || 0, durDenom);
+    // [P2] 세션 커버리지(양의 지표) = 세션 의미 유형 분모 중 session_id 채워진 비율(%).
+    //   결측률(음)이 아니라 커버리지(양). 분모 0 → 0%(NaN 가드). 조회 로그는 분모에 안 섞임.
+    const sessDenom = missRow.sess_denom || 0;
+    const sessionCoverageRate = pct(missRow.sess_filled || 0, sessDenom);
 
     // 서비스별 결측(동일 "정당 분모" 규칙을 서비스 내부에도 적용).
     const perServiceRows = db.prepare(`
@@ -884,9 +903,11 @@ router.get('/dataset-coverage', requireAuth, (req, res) => {
       missing_subject_rate: missingSubjectRate,
       missing_duration_rate: missingDurationRate,
       // missing_session_rate 미제공(의도적) — FE 는 null → "제공 안됨" 처리 보유. 억지 계산 금지.
+      // [P2] 세션 커버리지(양의 지표) — 세션 의미 유형 분모 기준 session_id 채움 비율(%).
+      session_coverage_rate: sessionCoverageRate,
       last_synced: lastSynced,
       per_service: perServiceRows,
-      denominators: { achievement: achDenom, subject: subjDenom, duration: durDenom },
+      denominators: { achievement: achDenom, subject: subjDenom, duration: durDenom, session: sessDenom },
       realOnly: sf.realOnly
     });
   } catch (err) {
@@ -5035,6 +5056,71 @@ router.get('/stats/equity', requireAuth, (req, res) => {
       return (b.avgScore || 0) - (a.avgScore || 0);
     });
 
+    // ── [P2 심화] 학교급×지역 교차(§P2, T1-7 확장) ─────────────────────────────
+    //   "격차가 초·중·고 어디에서 더 큰가"를 교육청이 보게. dim 파라미터와 무관하게 항상 반환.
+    //   재사용: studAgg/logAgg SQL 을 GROUP BY school_level, region 으로 확장(단일 쿼리 2회).
+    //           scoredWhere·normScoreExpr·seedFilter·MIN_N(=10 마스킹) 동일 적용.
+    //   현재 period(days) 창 기준. 표본부족(students<10) 셀은 masked·avgScore null·격차 산정 제외.
+    const crossLevelRegion = (() => {
+      // 학교급별 재학생 수(급×지역). 로그 유무 무관.
+      const clrStud = db.prepare(`
+        SELECT u.school_level lvl, u.region reg, COUNT(*) students
+        FROM users u
+        WHERE u.role='student'
+          AND u.school_level IS NOT NULL AND u.school_level <> ''
+          AND u.region IS NOT NULL AND u.region <> '' ${sfU.where}
+        GROUP BY u.school_level, u.region
+      `).all();
+      // 학교급×지역 평균성취(채점형만·0~100 정규화) — 현재 days 창.
+      const clrScore = db.prepare(`
+        SELECT u.school_level lvl, u.region reg,
+               AVG(CASE WHEN ${scoredWhere('ll')} THEN ${normScoreExpr('ll')} END) avg_score
+        FROM learning_logs ll JOIN users u ON u.id = ll.user_id
+        WHERE u.role='student'
+          AND u.school_level IS NOT NULL AND u.school_level <> ''
+          AND u.region IS NOT NULL AND u.region <> ''
+          AND DATE(ll.created_at) >= DATE('now','localtime', ?) ${sfL.where}
+        GROUP BY u.school_level, u.region
+      `).all(`-${days - 1} days`);
+      const scoreMap = new Map(clrScore.map(r => [`${r.lvl} ${r.reg}`, r.avg_score]));
+
+      // 학교급별로 지역 셀을 모은다.
+      const byLevel = new Map(); // lvl -> [{ region, students, avg_score }]
+      clrStud.forEach(s => {
+        const av = scoreMap.get(`${s.lvl} ${s.reg}`);
+        if (!byLevel.has(s.lvl)) byLevel.set(s.lvl, []);
+        byLevel.get(s.lvl).push({ region: s.reg, students: s.students || 0, avg_score: av });
+      });
+
+      // 초·중·고 순서 고정(존재하는 학교급만). 셀 = 평균성취 내림차순, 표본부족 뒤로.
+      const LEVEL_ORDER = ['elementary', 'middle', 'high'];
+      const levels = LEVEL_ORDER.filter(lv => byLevel.has(lv));
+      return levels.map(lv => {
+        const rows = byLevel.get(lv);
+        const cells = rows.map(rw => {
+          const masked = rw.students < MIN_N;
+          const avgScore = (masked || rw.avg_score == null) ? null : Math.round(rw.avg_score * 10) / 10;
+          return { region: rw.region, regionLabel: String(rw.region), avgScore, students: rw.students, masked };
+        });
+        // 정렬: 표본충족(avgScore 내림차순) → 마스킹/성취null 뒤로.
+        cells.sort((a, b) => {
+          const am = a.avgScore == null, bm = b.avgScore == null;
+          if (am !== bm) return am ? 1 : -1;
+          return (b.avgScore || 0) - (a.avgScore || 0);
+        });
+        // 지역격차 = 표본충족·성취 있는 셀 중 최상위−최하위(%p). top/bottom.
+        const scored = cells.filter(c => !c.masked && c.avgScore != null);
+        let regionGapPP = null, top = null, bottom = null;
+        if (scored.length >= 2) {
+          const t = scored[0], b = scored[scored.length - 1]; // 이미 내림차순
+          regionGapPP = Math.round((t.avgScore - b.avgScore) * 10) / 10;
+          top = { id: t.region, label: t.regionLabel, v: t.avgScore };
+          bottom = { id: b.region, label: b.regionLabel, v: b.avgScore };
+        }
+        return { level: lv, levelLabel: levelLabel(lv), regionGapPP, top, bottom, cells };
+      });
+    })();
+
     res.json({
       success: true,
       dim, period: `${days}d`, realOnly: sfL.realOnly, minSample: MIN_N,
@@ -5042,7 +5128,8 @@ router.get('/stats/equity', requireAuth, (req, res) => {
       excludedMasked,
       metrics,
       trend: { metric: 'avgScore', points: trendPoints },
-      priorityUnits
+      priorityUnits,
+      crossLevelRegion
     });
   } catch (err) {
     console.error('[LRS] /stats/equity error:', err);
