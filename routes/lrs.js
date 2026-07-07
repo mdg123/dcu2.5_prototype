@@ -239,6 +239,27 @@ function scoredWhere(alias) {
   return `${col} IN (${LRS_SCORED_TYPES_SQL_LIST})`;
 }
 
+// ─────────────────────────────────────────────────────────
+// [2-A] 데이터 품질 KPI "정당 분모" 화이트리스트 (기획서 §2-A-1 표)
+//   전체 로그 분모는 오탐을 낳는다(세션 결측 85% 대부분이 조회/출석 로그).
+//   필드별로 "결측이 정당한 activity_type"을 제외한 분모만 센다.
+//     · 성취기준 결측률 분모 = 채점형 7종(= LRS_SCORED_TYPES_SQL_LIST)
+//     · 교과 결측률 분모     = 채점형 7종 + content_complete(콘텐츠는 교과 태깅 대상)
+//     · 학습시간 결측률 분모 = 시간의미 유형(exam/homework/self_learn/content_solve/lesson_progress + content_view 체류)
+//   ★ content_solve 는 화이트리스트 문자열이지만 실 로그엔 없을 수 있음(계약 정의는 유지 — 존재하면 자동 포착).
+//   ※ 세션(session_id) 결측률은 v1 비노출(분모 정의 불명확 — FE 는 null→"제공 안됨" 처리 보유).
+// ─────────────────────────────────────────────────────────
+// 성취기준: 채점형 7종만.
+const LRS_MISS_ACH_TYPES_SQL = LRS_SCORED_TYPES_SQL_LIST; // 'exam_complete',...,'node_complete'
+// 교과: 채점형 7종 + content_complete.
+const LRS_MISS_SUBJ_TYPES_SQL = `${LRS_SCORED_TYPES_SQL_LIST},'content_complete'`;
+// 학습시간: 시간이 의미있는 유형(응시·제출·자기주도·콘텐츠풀이·수업진도 + 콘텐츠 체류).
+const LRS_MISS_DUR_TYPES_SQL = "'exam_complete','homework_submit','self_learn','content_solve','lesson_progress','content_view'";
+// 결측 판정 조각(재사용): 성취/교과 = NULL 또는 공백, 학습시간 = duration_sec NULL/0 이면서 result_duration 도 없음.
+const LRS_MISS_ACH_EXPR = "(achievement_code IS NULL OR TRIM(achievement_code) = '')";
+const LRS_MISS_SUBJ_EXPR = "(subject_code IS NULL OR TRIM(subject_code) = '')";
+const LRS_MISS_DUR_EXPR = "((duration_sec IS NULL OR duration_sec = 0) AND (result_duration IS NULL OR TRIM(result_duration) = ''))";
+
 /**
  * 선택 기간(pFrom~pTo) 내, 특정 학생의 채점된 학습로그 평균 성취(0~100 정규화).
  *   - /stats/perform summary avg 와 동일 로직(같은 SCORED_SQL·NORM_SCORE·기간 필터) 재사용.
@@ -799,7 +820,75 @@ router.get('/dataset-coverage', requireAuth, (req, res) => {
     const verbs = db.prepare(`SELECT verb, COUNT(*) as count FROM learning_logs WHERE 1=1 ${r.where} GROUP BY verb`).all(...r.params);
     const services = db.prepare(`SELECT source_service, COUNT(*) as count FROM learning_logs WHERE source_service IS NOT NULL AND source_service NOT LIKE 'demo%' ${r.where} GROUP BY source_service`).all(...r.params);
     const totalStatements = types.reduce((s, t) => s + t.count, 0);
-    res.json({ success: true, totalStatements, byType: types, byVerb: verbs, byService: services, ...userCounts });
+
+    // ── [2-A] 데이터 품질 KPI: "정당 분모"(기획서 §2-A-1) 기반 결측률 ─────────────
+    //   전체 로그가 아니라 "결측이 의미 있는 activity_type"로 분모를 한정한다.
+    //   모든 집계에 기존 필터 규칙 유지: demo% 제외 · realOnly(seedFilter) · 기간(dateRangeWhere).
+    const sf = seedFilter(req, null); // realOnly=1 → is_seed=0 만. alias 없음(테이블 직접 쿼리).
+    // demo% 제외 + 기간(r.where 는 created_at 기준) + seedFilter 를 공통 WHERE 로.
+    const qBase = `source_service IS NOT NULL AND source_service NOT LIKE 'demo%' ${r.where}${sf.where}`;
+
+    // 각 KPI 분모/결측 건수 (분모 = 정당 유형 화이트리스트, 결측 = 필드 NULL/빈값).
+    const missRow = db.prepare(`
+      SELECT
+        SUM(CASE WHEN activity_type IN (${LRS_MISS_ACH_TYPES_SQL}) THEN 1 ELSE 0 END) AS ach_denom,
+        SUM(CASE WHEN activity_type IN (${LRS_MISS_ACH_TYPES_SQL}) AND ${LRS_MISS_ACH_EXPR} THEN 1 ELSE 0 END) AS ach_missing,
+        SUM(CASE WHEN activity_type IN (${LRS_MISS_SUBJ_TYPES_SQL}) THEN 1 ELSE 0 END) AS subj_denom,
+        SUM(CASE WHEN activity_type IN (${LRS_MISS_SUBJ_TYPES_SQL}) AND ${LRS_MISS_SUBJ_EXPR} THEN 1 ELSE 0 END) AS subj_missing,
+        SUM(CASE WHEN activity_type IN (${LRS_MISS_DUR_TYPES_SQL}) THEN 1 ELSE 0 END) AS dur_denom,
+        SUM(CASE WHEN activity_type IN (${LRS_MISS_DUR_TYPES_SQL}) AND ${LRS_MISS_DUR_EXPR} THEN 1 ELSE 0 END) AS dur_missing
+      FROM learning_logs
+      WHERE ${qBase}
+    `).get(...r.params);
+    const achDenom = missRow.ach_denom || 0, subjDenom = missRow.subj_denom || 0, durDenom = missRow.dur_denom || 0;
+    // 분모 0 → 0%(NaN 가드). 조회 로그만 있는 시나리오에서 성취결측률 분모=0 → 0 처리(오탐 방지).
+    const pct = (miss, denom) => denom > 0 ? Math.round((miss / denom) * 1000) / 10 : 0;
+    const missingAchievementRate = pct(missRow.ach_missing || 0, achDenom);
+    const missingSubjectRate = pct(missRow.subj_missing || 0, subjDenom);
+    const missingDurationRate = pct(missRow.dur_missing || 0, durDenom);
+
+    // 서비스별 결측(동일 "정당 분모" 규칙을 서비스 내부에도 적용).
+    const perServiceRows = db.prepare(`
+      SELECT source_service AS service,
+        COUNT(*) AS total,
+        SUM(CASE WHEN activity_type IN (${LRS_MISS_ACH_TYPES_SQL}) AND ${LRS_MISS_ACH_EXPR} THEN 1 ELSE 0 END) AS missing_achievement,
+        SUM(CASE WHEN activity_type IN (${LRS_MISS_SUBJ_TYPES_SQL}) AND ${LRS_MISS_SUBJ_EXPR} THEN 1 ELSE 0 END) AS missing_subject,
+        SUM(CASE WHEN activity_type IN (${LRS_MISS_DUR_TYPES_SQL}) AND ${LRS_MISS_DUR_EXPR} THEN 1 ELSE 0 END) AS missing_duration
+      FROM learning_logs
+      WHERE ${qBase}
+      GROUP BY source_service
+      ORDER BY total DESC
+    `).all(...r.params).map(row => ({
+      service: row.service,
+      service_label: serviceLabel(row.service),
+      total: row.total,
+      missing_achievement: row.missing_achievement || 0,
+      missing_subject: row.missing_subject || 0,
+      missing_duration: row.missing_duration || 0
+    }));
+
+    // 최근 동기화: 품질 집계 대상(demo 제외·seed 필터·기간) 로그 중 MAX(created_at) → 'YYYY-MM-DD HH:MM'.
+    const lastRow = db.prepare(`SELECT MAX(created_at) AS max_ts FROM learning_logs WHERE ${qBase}`).get(...r.params);
+    let lastSynced = null;
+    if (lastRow && lastRow.max_ts) {
+      // created_at 저장 포맷은 'YYYY-MM-DD HH:MM:SS' → 앞 16자('YYYY-MM-DD HH:MM'). ISO 'T' 도 대응.
+      lastSynced = String(lastRow.max_ts).replace('T', ' ').slice(0, 16);
+    }
+
+    res.json({
+      success: true,
+      totalStatements, byType: types, byVerb: verbs, byService: services, ...userCounts,
+      // ── [2-A] FE(a-quality) 계약 확장 ──
+      total_logs: totalStatements,                    // 즉시 정상화(별칭)
+      missing_achievement_rate: missingAchievementRate,
+      missing_subject_rate: missingSubjectRate,
+      missing_duration_rate: missingDurationRate,
+      // missing_session_rate 미제공(의도적) — FE 는 null → "제공 안됨" 처리 보유. 억지 계산 금지.
+      last_synced: lastSynced,
+      per_service: perServiceRows,
+      denominators: { achievement: achDenom, subject: subjDenom, duration: durDenom },
+      realOnly: sf.realOnly
+    });
   } catch (err) {
     res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
   }
@@ -4480,6 +4569,13 @@ router.get('/stats/service-ops', requireAuth, (req, res) => {
 
     const totalCnt = cur.reduce((s, r) => s + r.cnt, 0) || 1;
 
+    // [2-C] 시드 과경보 게이트 (기획서 §2-C-1·§2-C-2).
+    //   시드 로그가 특정 기간(3~5월)에 몰려 6→7월 트레일링 창이 합성 절벽을 가로질러
+    //   −70%대 급감이 다수 서비스에서 동시 발생 → 소표본 급변을 경보로 승격 금지.
+    //   MIN_ABS: 현재기간 count 또는 직전기간 prevCount 가 이 미만이면 추세Δ를 경보로 신뢰하지 않음.
+    const MIN_ABS = 30;
+    const seedInfluenced = (sf.realOnly === false); // 시드 포함(기본) 상태면 톤다운 트리거.
+
     let services = cur.map(r => {
       const share = Math.round((r.cnt / totalCnt) * 1000) / 10; // %
       const prevCnt = prevMap.get(r.svc) || 0;
@@ -4492,12 +4588,28 @@ router.get('/stats/service-ops', requireAuth, (req, res) => {
       const avgMinPerUser = r.uniq_users > 0
         ? Math.round((r.dur_sec / r.uniq_users) / 60 * 10) / 10 : 0;
 
+      // 절대량 게이트: 현재기간·직전기간 둘 다 MIN_ABS 이상일 때만 추세Δ 경보를 신뢰.
+      const dataSufficient = (r.cnt >= MIN_ABS && prevCnt >= MIN_ABS);
+
       // 룰베이스 진단 상태 (기획서 4-1). 원자료로 status/severity/reason 제공.
       let status = '정상', severity = 'ok';
       if (share < 2) { status = '거의 미사용'; severity = 'critical'; }
       else if (share < 5 && trendDelta <= 0) { status = '저활용·정체'; severity = 'warn'; }
       else if (share < 5 && trendDelta > 0) { status = '저활용·성장중'; severity = 'caution'; }
       else if (trendDelta < -20) { status = '사용 급감'; severity = 'warn'; }
+
+      // [2-C] 표본 부족(dataSufficient===false)이면 추세Δ 기반 경보를 승격 금지 →
+      //   '급감 경보'에서 빼고 '표본 부족—판단 보류'(info)로 강등. share 기반 저활용 판정은 유지하되,
+      //   '사용 급감'(trendΔ 발) 만 info 로 재분류(빨강 남발 제거). 문구·색은 FE 담당.
+      if (!dataSufficient && status === '사용 급감') {
+        status = '표본 부족'; severity = 'info';
+      }
+      // [2-C] seedInfluenced(시드 포함 기본 화면): 표본은 충분하지만 시드 데이터가 특정 기간에 몰려
+      //   생긴 급감 착시일 수 있으므로 '사용 급감'(hard warn)을 '예시 영향 가능' caution(관찰 대상)으로 강등.
+      //   realOnly=true면 seedInfluenced=false → 원래 warn(hard) 유지(실데이터 급감은 그대로 경보).
+      else if (seedInfluenced && status === '사용 급감') {
+        status = '사용 감소(예시 영향 가능)'; severity = 'caution';
+      }
 
       return {
         service: r.svc,
@@ -4512,26 +4624,41 @@ router.get('/stats/service-ops', requireAuth, (req, res) => {
         avgMinPerUser,
         status,
         severity,
-        underused: severity !== 'ok' && severity !== 'caution' ? true
-                   : (severity === 'caution') // 저활용군 전체를 진단 목록 후보로
+        // [2-C 계약] FE 는 s.dataSufficient 를 _deltaChip(trendDelta, dataSufficient) 로 소비(칩 회색 처리),
+        //   s.seedInfluenced 로 톤다운 트리거. 반드시 각 서비스 객체의 프로퍼티여야 함.
+        dataSufficient,
+        seedInfluenced,
+        // [2-C] underused(개선 필요/장애 후보) = hard 경보(warn/critical)만. caution(관찰)·info(표본부족)는 제외.
+        underused: (severity === 'warn' || severity === 'critical')
       };
     });
     services.sort((a, b) => b.count - a.count);
 
-    // 미사용 진단 목록 (저활용·성장중 포함 — 점유율 임계 미달군)
-    const underusedList = services.filter(s => s.severity !== 'ok');
+    // [2-C] 진단 목록 hard/soft/insufficient 3분리 (과경보 제거).
+    //   · underusedList(hard) = warn·critical — '개선 필요/장애 점검' 후보.
+    //   · watchList(soft)      = caution — '관찰 대상'(저활용·성장중 + 시드영향 급감). 빨강 아님.
+    //   · insufficientList     = dataSufficient=false — '표본 부족·판단 보류'(회색 info).
+    const underusedList = services.filter(s => s.severity === 'warn' || s.severity === 'critical');
+    const watchList = services.filter(s => s.severity === 'caution');
+    const insufficientList = services.filter(s => !s.dataSufficient);
 
     res.json({
       success: true,
       period: `${days}d`,
       realOnly: sf.realOnly,
+      seedInfluenced,        // 화면 상단 disclaimer 트리거(시드 포함 기본 상태)
+      minAbs: MIN_ABS,       // 게이트 임계(투명성)
       totalCount: totalCnt,
       operatingServices: services.length,
       topService: services[0] ? services[0].service : null,
       bottomService: services.length ? services[services.length - 1].service : null,
-      underusedCount: underusedList.length,
+      underusedCount: underusedList.length,   // 이제 hard(warn/critical)만
+      watchCount: watchList.length,           // soft(caution) 관찰 대상
+      insufficientCount: insufficientList.length,
       services,
-      underused: underusedList
+      underused: underusedList,
+      watchList,
+      insufficient: insufficientList
     });
   } catch (err) {
     console.error('[LRS] /stats/service-ops error:', err);

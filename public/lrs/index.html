@@ -82,6 +82,7 @@
     .dc-diag-card[data-sev="critical"] { border-left-color:#dc2626; background:#fef2f2; }
     .dc-diag-card[data-sev="warn"] { border-left-color:#f59e0b; background:#fffbeb; }
     .dc-diag-card[data-sev="caution"] { border-left-color:#eab308; background:#fefce8; }
+    .dc-diag-card[data-sev="info"] { border-left-color:#94a3b8; background:#f8fafc; }
     .dc-diag-card[data-sev="ok"] { border-left-color:#10b981; }
     .dc-diag-card .dc-diag-head { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:8px; }
     .dc-diag-card .dc-diag-svc { font-size:var(--fs-h2); font-weight:700; color:var(--gray-900); }
@@ -89,6 +90,7 @@
     .dc-diag-card[data-sev="critical"] .dc-diag-status { color:#dc2626; background:#fee2e2; }
     .dc-diag-card[data-sev="warn"] .dc-diag-status { color:#b45309; background:#fef3c7; }
     .dc-diag-card[data-sev="caution"] .dc-diag-status { color:#a16207; background:#fef9c3; }
+    .dc-diag-card[data-sev="info"] .dc-diag-status { color:#475569; background:#e2e8f0; }
     .dc-diag-card .dc-diag-msg { font-size:var(--fs-body); color:var(--gray-700); line-height:1.6; }
     .dc-diag-card .dc-diag-metrics { display:flex; gap:14px; margin-top:10px; font-size:var(--fs-sm); color:var(--gray-600); flex-wrap:wrap; }
     .dc-diag-card .dc-diag-metrics b { color:var(--gray-900); }
@@ -7202,6 +7204,12 @@ VIEWS['a-home'] = async function(root){
 function _svcRecommendation(s){
   const name = s.service_label || s.service;
   const share = s.share;
+  // 2-C(soft): 시드 톤다운 대상(caution 강등 또는 status에 '예시 영향' 포함)은
+  //   '장애·정책 점검' 대신 예시데이터 착시 가능성을 안내하는 부드러운 문구로.
+  const isSoft = s.severity === 'caution' || (typeof s.status === 'string' && s.status.indexOf('예시') !== -1);
+  if (isSoft){
+    return `${name} 활동이 직전 기간 대비 ${Math.abs(s.trendDelta)}% 감소했습니다. 예시(시드) 데이터가 특정 기간에 몰린 영향일 수 있어요. 절대 활동량과 함께 확인하세요.`;
+  }
   switch (s.status){
     case '거의 미사용':
       return `${name} 사용률이 전체의 ${share}%에 그칩니다. 진입 동선 노출을 점검하거나 교사 연수·안내를 권고합니다.`;
@@ -7215,8 +7223,13 @@ function _svcRecommendation(s){
       return `${name}은(는) 정상 범위입니다.`;
   }
 }
-function _deltaChip(delta){
+function _deltaChip(delta, dataSufficient){
   const d = Number(delta)||0;
+  // 2-C: 표본 부족(dataSufficient===false)이면 추세Δ chip을 회색 처리(경보 색 남발 방지)
+  if (dataSufficient === false){
+    const arrow = d>0?'▲':d<0?'▼':'·';
+    return `<span class="delta flat" title="표본 부족 — 판단 보류">${arrow} ${d>=0?'+':''}${d}%</span>`;
+  }
   const cls = d>0?'up':d<0?'down':'flat';
   const arrow = d>0?'▲':d<0?'▼':'·';
   return `<span class="delta ${cls}">${arrow} ${d>=0?'+':''}${d}%</span>`;
@@ -7229,25 +7242,35 @@ VIEWS['a-svc-ops'] = async function(root){
   if (!services.length){ root.innerHTML = _seedHintEmpty('집계된 서비스 활동이 없어요'); return; }
   const top = services[0], bottom = services[services.length-1];
   const maxCnt = Math.max.apply(null, services.map(s=>s.count)) || 1;
-  const underused = d.underused || [];
+  // 2-C: hard(개선 필요=warn/critical) vs soft(관찰 대상=caution·예시데이터 영향) 분리.
+  //   신규 계약: d.underusedList(hard)·d.watchList(soft)·d.underusedCount(hard만)·d.watchCount.
+  //   구버전 폴백: d.underused를 severity로 분류.
+  const legacyUnderused = d.underused || [];
+  const hardList = Array.isArray(d.underusedList) ? d.underusedList
+    : legacyUnderused.filter(s => s.severity==='warn' || s.severity==='critical');
+  const softList = Array.isArray(d.watchList) ? d.watchList
+    : legacyUnderused.filter(s => s.severity==='caution');
+  const hardCount = (d.underusedCount!=null) ? Number(d.underusedCount) : hardList.length;
+  const watchCount = (d.watchCount!=null) ? Number(d.watchCount) : softList.length;
 
   root.innerHTML = `
     <div class="dc-kpi-grid">
       ${kpiCard('운영 서비스', (d.operatingServices||services.length), '종', {dir:'flat',text:'활동 기록 기준'}, 'primary')}
       ${kpiCard('최다 서비스', escapeHtml(top.service_label||top.service), '', {dir:'up',text:`${top.count.toLocaleString()}건 · ${top.share}%`}, 'success')}
       ${kpiCard('최소 서비스', escapeHtml(bottom.service_label||bottom.service), '', {dir:'down',text:`${bottom.count.toLocaleString()}건 · ${bottom.share}%`}, 'warning')}
-      ${kpiCard('개선 필요',   (d.underusedCount||underused.length), '종', {dir:underused.length?'down':'flat',text:'진단 발동'}, underused.length?'danger':'primary')}
+      ${kpiCard('개선 필요',   hardCount, '종', {dir:hardCount?'down':'flat',text:watchCount>0?`관찰 ${watchCount}종`:'진단 발동'}, hardCount?'danger':'primary')}
     </div>
     <section class="dc-chart-wrapper">
       <header><h2>서비스별 사용률 랭킹</h2><div class="subtitle">활동 건수 ·
         <span class="dc-def-term">추세Δ<i class="fas fa-circle-info" aria-hidden="true" title="성장추세(추세Δ)=직전 동기간 대비 활동 건수 증감률(%). +는 증가, -는 감소예요."></i></span>(직전 동기간 대비) ·
         <span class="dc-def-term">재방문율<i class="fas fa-circle-info" aria-hidden="true" title="재방문율=기간 내 2일 이상 활동한 사용자 비중이에요."></i></span></div></header>
       <div class="dc-svc-rank" id="aSvcRank"></div>
-      <p class="proj-disclaimer" style="margin-top:10px;"><i class="fas fa-circle-info" aria-hidden="true"></i> 최근 급증은 시드(예시) 데이터의 영향일 수 있어요.</p>
+      <p class="proj-disclaimer" style="margin-top:10px;"><i class="fas fa-circle-info" aria-hidden="true"></i> 최근 급증·급감은 예시(시드) 데이터가 특정 기간에 몰려 생긴 착시일 수 있어요. 절대 활동량과 함께 보세요.</p>
     </section>
     <section style="margin-top:var(--space-4);">
-      <h2 style="font-size:var(--fs-h2);margin:0 0 10px;">개선 필요 서비스 진단</h2>
+      <h2 id="aSvcDiagTitle" style="font-size:var(--fs-h2);margin:0 0 10px;">${hardList.length ? '개선 필요 서비스 진단' : (softList.length ? '관찰 대상 서비스' : '개선 필요 서비스 진단')}</h2>
       <div class="dc-diag-grid" id="aSvcDiag"></div>
+      <div class="dc-diag-grid" id="aSvcWatch" style="margin-top:${softList.length && hardList.length ? '16px' : '0'};"></div>
     </section>
     <section class="dc-chart-wrapper" style="margin-top:var(--space-4);">
       <header><h2>서비스 운영 점수표</h2><div class="subtitle">건수·고유사용자·평균시간·
@@ -7276,14 +7299,12 @@ VIEWS['a-svc-ops'] = async function(root){
     return `<div class="row ${rowCls}">
       <span class="name" title="${escapeAttr(s.service_label||s.service)}">${escapeHtml(s.service_label||s.service)}</span>
       <span class="bar-track"><span class="bar-fill" style="width:${pct}%;"></span></span>
-      <span class="meta"><span class="cnt">${s.count.toLocaleString()}</span><span style="color:var(--gray-500);font-size:var(--fs-sm);">${s.share}%</span>${_deltaChip(s.trendDelta)}</span>
+      <span class="meta"><span class="cnt">${s.count.toLocaleString()}</span><span style="color:var(--gray-500);font-size:var(--fs-sm);">${s.share}%</span>${_deltaChip(s.trendDelta, s.dataSufficient)}</span>
     </div>`;
   }).join('');
 
-  // 진단 카드 (룰베이스 권고)
-  const diagEl = document.getElementById('aSvcDiag');
-  if (underused.length){
-    diagEl.innerHTML = underused.map(s => `
+  // 진단 카드 (룰베이스 권고) — 2-C: 개선 필요(hard)와 관찰 대상(soft) 2그룹 분리
+  const diagCard = (s) => `
       <div class="dc-diag-card" data-sev="${escapeAttr(s.severity)}">
         <div class="dc-diag-head">
           <span class="dc-diag-svc">${escapeHtml(s.service_label||s.service)}</span>
@@ -7295,12 +7316,40 @@ VIEWS['a-svc-ops'] = async function(root){
           <span>추세 <b>${s.trendDelta>=0?'+':''}${s.trendDelta}%</b></span>
           <span>고유사용자 <b>${(s.uniqueUsers||0).toLocaleString()}명</b></span>
         </div>
-      </div>`).join('');
-  } else {
+      </div>`;
+  const diagEl = document.getElementById('aSvcDiag');
+  const watchEl = document.getElementById('aSvcWatch');
+  // 개선 필요(hard: warn/critical) — 기존 카드 스타일
+  if (hardList.length){
+    diagEl.innerHTML = hardList.map(diagCard).join('');
+  } else if (!softList.length){
     diagEl.innerHTML = `<div class="dc-diag-card" data-sev="ok">
       <div class="dc-diag-head"><span class="dc-diag-svc">전체 정상</span><span class="dc-diag-status" style="color:#15803d;background:#dcfce7;">정상</span></div>
       <div class="dc-diag-msg">현재 기간 기준 저활용·미사용으로 진단된 서비스가 없습니다.</div>
     </div>`;
+  } else {
+    diagEl.innerHTML = '';
+  }
+  // 관찰 대상(soft: caution·예시데이터 영향) — 회색/청록 톤, 빨강 금지
+  if (watchEl && softList.length){
+    const subhead = hardList.length
+      ? `<div style="grid-column:1/-1;font-size:var(--fs-body);font-weight:600;color:var(--gray-700);margin:2px 0 2px;">관찰 대상 (예시데이터 영향 가능)</div>`
+      : '';
+    watchEl.innerHTML = subhead + softList.map(s => `
+      <div class="dc-diag-card" data-sev="caution">
+        <div class="dc-diag-head">
+          <span class="dc-diag-svc">${escapeHtml(s.service_label||s.service)}</span>
+          <span class="dc-diag-status">${escapeHtml(s.status||'사용 감소(예시데이터 영향 가능)')}</span>
+        </div>
+        <div class="dc-diag-msg">${escapeHtml(_svcRecommendation(s))}</div>
+        <div class="dc-diag-metrics">
+          <span>점유율 <b>${s.share}%</b></span>
+          <span>추세 <b>${s.trendDelta>=0?'+':''}${s.trendDelta}%</b></span>
+          <span>고유사용자 <b>${(s.uniqueUsers||0).toLocaleString()}명</b></span>
+        </div>
+      </div>`).join('');
+  } else if (watchEl){
+    watchEl.innerHTML = '';
   }
 
   // 운영 점수표
@@ -7776,25 +7825,31 @@ VIEWS['a-quality'] = async function(root){
   const missAch = Number(d.missing_achievement_rate||0);
   const missDur = Number(d.missing_duration_rate||0);
   const missSub = Number(d.missing_subject_rate||0);
-  const missSes = Number(d.missing_session_rate||0);
   const perService = Array.isArray(d.per_service) ? d.per_service : null;
   const srows = (svc && (svc.stats||svc.data)) || [];
   const achRows = (ach && (ach.stats||ach.data)) || [];
+  // 분모(투명성): BE가 denominators.{achievement|subject|duration}를 주면 "채점형 로그 N건 중" 부제로 명시.
+  //   없으면(계약 미충족·구버전) 부제 생략 폴백 → 카드가 깨지지 않음.
+  const denom = (d.denominators && typeof d.denominators==='object') ? d.denominators : null;
+  const denomText = (key, noun) => {
+    const n = denom ? Number(denom[key]) : null;
+    return (n!=null && !isNaN(n)) ? `${noun} ${n.toLocaleString()}건 중` : '';
+  };
 
   function tone(rate){ return rate>20 ? 'danger' : rate>10 ? 'warning' : 'success'; }
 
   root.innerHTML = `
     <div class="dc-kpi-grid">
       ${kpiCard('로그 총 건수', (d.total_logs||0).toLocaleString(), '건', {dir:'flat',text:''}, 'primary')}
-      ${kpiCard('성취기준 결측률', missAch.toFixed(1), '%', {dir:missAch>20?'down':'up', text:'낮을수록 좋음'}, tone(missAch))}
-      ${kpiCard('학습시간 결측률', missDur.toFixed(1), '%', {dir:missDur>20?'down':'up', text:''}, tone(missDur))}
-      ${kpiCard('최근 동기화', d.last_synced||'-', '', {dir:'flat',text:''}, 'primary')}
+      ${kpiCard('성취기준 결측률', missAch.toFixed(1), '%', {dir:missAch>20?'down':'up', text:denomText('achievement','채점형 로그')||'낮을수록 좋음'}, tone(missAch))}
+      ${kpiCard('교과 결측률', missSub.toFixed(1), '%', {dir:missSub>20?'down':'up', text:denomText('subject','채점·콘텐츠 로그')||(d.missing_subject_rate==null?'제공 안됨':'낮을수록 좋음')}, tone(missSub))}
+      ${kpiCard('학습시간 결측률', missDur.toFixed(1), '%', {dir:missDur>20?'down':'up', text:denomText('duration','시간형 로그')||'낮을수록 좋음'}, tone(missDur))}
     </div>
     <div class="dc-kpi-grid">
-      ${kpiCard('교과 결측률', missSub.toFixed(1), '%', {dir:missSub>20?'down':'up', text:d.missing_subject_rate==null?'제공 안됨':''}, tone(missSub))}
-      ${kpiCard('세션 결측률', missSes.toFixed(1), '%', {dir:missSes>20?'down':'up', text:d.missing_session_rate==null?'제공 안됨':''}, tone(missSes))}
-      ${kpiCard('서비스 수', srows.length, '종', {dir:'flat',text:''}, 'primary')}
-      ${kpiCard('성취 매핑 수', achRows.length, '개', {dir:'flat',text:''}, 'primary')}
+      ${kpiCard('최근 동기화', d.last_synced||'-', '', {dir:'flat',text:d.last_synced?'가장 최근 로그 시각':''}, 'primary')}
+      ${kpiCard('서비스 수', srows.length, '종', {dir:'flat',text:'활동 기록 기준'}, 'primary')}
+      ${kpiCard('성취 매핑 수', achRows.length, '개', {dir:'flat',text:'집계된 성취기준'}, 'primary')}
+      ${kpiCard('성취기준 미매핑', achRows.filter(r=>!r.achievement_code||String(r.achievement_code).trim()==='').length, '건', {dir:'flat',text:'코드 미부여 집계 행'}, 'primary')}
     </div>
 
     <section class="dc-chart-wrapper">
@@ -7903,6 +7958,43 @@ VIEWS['a-quality'] = async function(root){
 };
 
 /* ======== xAPI 표준체계 분석 (Phase E) ======== */
+// 2-B: 실 xAPI 표준 표본이 최소 기준 미만일 때 "정직한 빈상태" (억지 정상화 금지)
+const XAPI_MIN = 200; // 표준 분석(A~E·노드정답률) 최소 표본
+function tplXapiInsufficient(total, min){
+  const t = Number(total)||0;
+  const m = Number(min)||XAPI_MIN;
+  const recent7 = (arguments.length>2 && arguments[2]!=null) ? Number(arguments[2]) : null;
+  const unsent  = (arguments.length>3 && arguments[3]!=null) ? Number(arguments[3]) : null;
+  // 수집 현황 미니 KPI(정직): overview가 주는 값만 노출. 없으면 총계만.
+  const chips = [`<div class="xq-chip"><span class="xq-chip-n">${t.toLocaleString()}</span><span class="xq-chip-l">총 수집(건)</span></div>`];
+  if (recent7!=null && !isNaN(recent7)) chips.push(`<div class="xq-chip"><span class="xq-chip-n">${recent7.toLocaleString()}</span><span class="xq-chip-l">최근 7일(건)</span></div>`);
+  if (unsent!=null && !isNaN(unsent))  chips.push(`<div class="xq-chip"><span class="xq-chip-n">${unsent.toLocaleString()}</span><span class="xq-chip-l">허브 송신 대기(건)</span></div>`);
+  return `
+    <section class="dc-state-panel" role="status" style="border-left:4px solid var(--lrs-primary);background:rgba(37,99,235,.06);text-align:left;">
+      <div style="display:flex;align-items:flex-start;gap:14px;flex-wrap:wrap;">
+        <i class="fas fa-database" aria-hidden="true" style="font-size:26px;color:var(--lrs-primary);margin-top:2px;"></i>
+        <div style="flex:1;min-width:240px;">
+          <h2 style="font-size:var(--fs-h2);margin:0 0 8px;color:var(--gray-900);">xAPI 표준 표본이 쌓이는 중입니다</h2>
+          <p style="font-size:var(--fs-body);line-height:1.7;color:var(--gray-700);margin:0 0 6px;">
+            현재 표준(xAPI) 형식으로 수집된 학습 기록은 <b>${t.toLocaleString()}건</b>입니다.
+            성취수준(A~E) 분포와 노드별 정답률은 표본이 <b>${m.toLocaleString()}건 이상</b> 모이면 자동으로 표시됩니다.
+            그때까지는 <b>‘현황분석’ 탭</b>의 활동·성취 지표를 이용하세요.
+          </p>
+        </div>
+      </div>
+      <div class="xq-mini-kpi" style="display:flex;gap:12px;flex-wrap:wrap;margin:16px 0 6px;">
+        ${chips.join('')}
+      </div>
+      <div style="margin-top:8px;">
+        <button type="button" class="btn" id="xqGoMacro"><i class="fas fa-chart-line" aria-hidden="true"></i> 현황분석 탭으로 이동</button>
+      </div>
+    </section>
+    <style>
+      .xq-mini-kpi .xq-chip{background:#fff;border:1px solid var(--gray-200);border-radius:10px;padding:14px 20px;min-width:120px;display:flex;flex-direction:column;gap:2px;}
+      .xq-mini-kpi .xq-chip-n{font-size:var(--fs-h2);font-weight:700;color:var(--lrs-primary);font-variant-numeric:tabular-nums;}
+      .xq-mini-kpi .xq-chip-l{font-size:var(--fs-sm);color:var(--gray-600);}
+    </style>`;
+}
 async function _renderXapiAnalysis(root, scope) {
   root.innerHTML = tplLoading(5);
   const qs = scope ? `?scope=${encodeURIComponent(scope)}` : '';
@@ -7914,6 +8006,14 @@ async function _renderXapiAnalysis(root, scope) {
     apiGet(`/api/lrs/xapi/recent-events${qs}${qs?'&':'?'}limit=20`),
   ]);
   if (!ov || !ov.success) { root.innerHTML = tplEmpty('xAPI 수집 데이터를 불러오지 못했습니다'); return; }
+
+  // 2-B: 표본 게이트 — 실 표준 표본이 최소 기준 미만이면 정직한 빈상태(가짜 0% 금지)
+  if (Number(ov.total||0) < XAPI_MIN) {
+    root.innerHTML = tplXapiInsufficient(ov.total||0, XAPI_MIN, ov.recent7d, ov.unsent);
+    const goBtn = document.getElementById('xqGoMacro');
+    if (goBtn) goBtn.addEventListener('click', ()=>setView('a-macro'));
+    return;
+  }
 
   // 1) 수집 현황 KPI
   const kpiHtml = `
@@ -7941,13 +8041,16 @@ async function _renderXapiAnalysis(root, scope) {
       </div>
     </section>`;
 
-  // 3) 성취수준 분포
+  // 3) 성취수준 분포 — 부분데이터: distribution 빈배열이면 이 섹션만 인라인 빈상태(전체는 렌더)
   const distLevels = ['A','B','C','D','E'];
-  const distMap = Object.fromEntries((dist && dist.distribution || []).map(r=>[r.level,r.cnt]));
+  const distRows = (dist && dist.distribution) || [];
+  const distMap = Object.fromEntries(distRows.map(r=>[r.level,r.cnt]));
   const distTotal = distLevels.reduce((s,l)=>s+(distMap[l]||0),0) || 1;
+  const distHasData = distRows.length > 0 && distLevels.some(l=>(distMap[l]||0)>0);
   const distHtml = `
     <section class="dc-chart-wrapper" style="margin-top:var(--space-4);">
       <header><h2>성취수준 분포</h2><div class="subtitle">초 A~C · 중·고 A~E</div></header>
+      ${distHasData ? `
       <div style="display:flex;gap:8px;">
         ${distLevels.map(l => {
           const c = distMap[l]||0;
@@ -7958,7 +8061,10 @@ async function _renderXapiAnalysis(root, scope) {
             <div style="font-size:var(--fs-caption);color:var(--gray-600);">${pct}%</div>
           </div>`;
         }).join('')}
-      </div>
+      </div>` : `
+      <div class="dc-state-panel" role="status" style="margin:0;text-align:left;border-left:4px solid var(--gray-400);background:var(--gray-50);">
+        <p style="font-size:var(--fs-body);color:var(--gray-700);margin:0;">성취수준(A~E) 태깅 표본이 아직 부족합니다. 채점형 로그에 성취수준이 부여되면 이곳에 분포가 표시됩니다.</p>
+      </div>`}
     </section>`;
 
   // 4) 표준체계 히트맵 (상위 20)
