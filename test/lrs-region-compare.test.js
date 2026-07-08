@@ -221,22 +221,29 @@ test('INV-RC-2b: 잘못된 school_level/subject → 400', async () => {
 });
 
 // ──────────────────────────────────────────────────────────────────────────
-// INV-RC-3: admin-kpi weeklyTrendByLevel — 8주 · total===초+중+고
+// INV-RC-3: admin-kpi weeklyTrendByLevel — 8주 · total===초+중+고+무학년
+//   [2026-07 정합 개편] 활동 카운트가 학생×학습활동 7종 스코프로 통일되며 weeklyTrend 와
+//   weeklyTrendByLevel 을 단일 소스로 산출. total 은 무학년(unleveled)까지 포함해
+//   weeklyTrend.count 과 정확히 일치해야 한다(같은 스코프). 초·중·고 3선 + unleveled 각주.
 // ──────────────────────────────────────────────────────────────────────────
-test('INV-RC-3: admin-kpi weeklyTrendByLevel 길이8 · weeksAgo 7..0 · total===elem+mid+high', async () => {
+test('INV-RC-3: admin-kpi weeklyTrendByLevel 길이8 · weeksAgo 7..0 · total===elem+mid+high+unleveled === weeklyTrend.count', async () => {
   const r = await req('/stats/admin-kpi?period=30d', ADMIN);
   assert.equal(r.status, 200, `admin-kpi 200, got ${r.status}: ${r.raw}`);
   const w = r.json.weeklyTrendByLevel;
+  const wt = r.json.weeklyTrend;
   assert.ok(Array.isArray(w) && w.length === 8, `weeklyTrendByLevel 길이 8, got ${w && w.length}`);
   // 기존 weeklyTrend 하위호환 유지
-  assert.ok(Array.isArray(r.json.weeklyTrend) && r.json.weeklyTrend.length === 8, 'weeklyTrend 하위호환');
+  assert.ok(Array.isArray(wt) && wt.length === 8, 'weeklyTrend 하위호환');
   for (let i = 0; i < 8; i++) {
     const e = w[i];
     assert.equal(e.weeksAgo, 7 - i, `weeksAgo 순서(오래된→최근): idx${i} 기대 ${7 - i}`);
-    ['total', 'elementary', 'middle', 'high'].forEach(k => {
+    ['total', 'elementary', 'middle', 'high', 'unleveled'].forEach(k => {
       assert.ok(Number.isInteger(e[k]) && e[k] >= 0, `${k} 음이 아닌 정수`);
     });
-    assert.equal(e.total, e.elementary + e.middle + e.high, `total===초+중+고 (weeksAgo ${e.weeksAgo})`);
+    assert.equal(e.total, e.elementary + e.middle + e.high + e.unleveled,
+      `total===초+중+고+무학년 (weeksAgo ${e.weeksAgo})`);
+    // 단일 소스 정합: weeklyTrend.count === weeklyTrendByLevel.total (같은 스코프).
+    assert.equal(wt[i].count, e.total, `weeklyTrend.count===byLevel.total (weeksAgo ${e.weeksAgo})`);
   }
   // 합성 데이터(오늘 생성)는 weeksAgo 0 버킷 → elementary·middle > 0 이어야
   const now = w[7];

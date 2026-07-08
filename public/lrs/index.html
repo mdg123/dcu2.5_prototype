@@ -1313,19 +1313,33 @@ const MENUS = {
     { id:'a-macro',      label:'지역별 성취수준 비교', icon:'fa-scale-balanced',      group:'거시 분석',       category:'analytics' },
     { id:'a-cross',      label:'활동×성취 교차',    icon:'fa-arrows-to-dot',         group:'거시 분석',       category:'analytics' },
     { id:'a-time',       label:'학습시간 분석',     icon:'fa-clock',                 group:'거시 분석',       category:'analytics' },
-    // ── 보조 (고급/운영) ──
-    { id:'a-xapi',       label:'표준체계 분석',    icon:'fa-diagram-project',       group:'보조 분석',       category:'operations' },
-    { id:'a-teacher-idx',label:'교사 실행지수',    icon:'fa-chalkboard-teacher',    group:'보조 분석',       category:'operations' },
+    // ── 보조 (운영·데이터 건전성) ──
+    //   운영 진입 기본은 실데이터 충실한 '데이터 품질'을 맨 앞에 둔다(표본 부족 a-xapi로 튕기지 않게).
     { id:'a-quality',    label:'데이터 품질',      icon:'fa-shield-halved',         group:'보조 분석',       category:'operations' },
+    { id:'a-teacher-idx',label:'교사 실행지수',    icon:'fa-chalkboard-teacher',    group:'보조 분석',       category:'operations' },
+    { id:'a-xapi',       label:'표준체계 분석',    icon:'fa-diagram-project',       group:'보조 분석',       category:'operations' },
     { id:'a-export',     label:'내보내기',        icon:'fa-download',              group:'리포트',         category:'reports' },
   ]
 };
 
+/* ---- 런타임 조건부 숨김 판정 (정적 hidden + 데이터 임계 기반 동적 숨김) ----
+   - 정적 hidden:true (s-xapi 등)는 항상 숨김.
+   - a-xapi(관리자 표준체계 분석): 실 xAPI 표본이 최소 기준(200건, XAPI_MIN과 동일) 미만이면
+     운영 탭/기본뷰에서 숨김 → "표본 부족 빈상태로 튕김"이 운영 첫인상이 되지 않게.
+   - 표본 수 미상(primeXapiSample 전, state._xapiSampleCount==null/undefined)일 땐 노출(정보 은닉 방지).
+     prime 완료 후 재렌더로 정리한다. */
+function isViewHiddenNow(it){
+  if (!it) return true;
+  if (it.hidden) return true;
+  if (it.id === 'a-xapi' && state._xapiSampleCount != null && state._xapiSampleCount < 200) return true;
+  return false;
+}
+
 /* ---- 카테고리 → 기본 뷰 (role별 첫 항목) ---- */
 function defaultViewForCategory(role, cat){
   const items = MENUS[role] || [];
-  // 숨김(hidden) 항목은 카테고리 기본 랜딩 뷰로 선택하지 않음 (s-xapi 등)
-  const found = items.find(it => it.category === cat && !it.hidden);
+  // 숨김(hidden) 항목 + 런타임 조건 숨김(표본 부족 a-xapi 등)은 카테고리 기본 랜딩 뷰로 선택하지 않음
+  const found = items.find(it => it.category === cat && !isViewHiddenNow(it));
   return found ? found.id : null;
 }
 
@@ -1365,7 +1379,7 @@ const MENU_TO_VIEW = {
   home:       { student:'s-home',    teacher:'t-home',    admin:'a-home' },
   analytics:  { student:'s-achieve', teacher:'t-warnings', admin:'a-svc-ops' },
   activities: { student:'s-perform', teacher:'t-perform', admin:'a-svc-ops' },
-  operations: { student:null,        teacher:'t-teacher-idx', admin:'a-xapi' },
+  operations: { student:null,        teacher:'t-teacher-idx', admin:'a-quality' },
   reports:    { student:null,        teacher:null,        admin:'a-export' },
 };
 
@@ -3491,6 +3505,33 @@ VIEWS['a-teacher-idx'] = async function(root){
 
   // 퍼센타일
   const scores = dist.scores;
+  // 값이 전부 0이거나(집계 대상 활동 없음), 90% 이상이 0이라 히스토그램이 '0-10 한 칸'으로 붕괴하는
+  //   퇴화 분포 → 0.0점 히스토그램만 덩그러니 뜨지 않게 친절 빈상태로 대체.
+  const _maxScore = (scores && scores.length) ? Math.max.apply(null, scores) : 0;
+  const _nzCount  = (scores || []).filter(v => Number(v) > 0).length;
+  const _degenerate = !(_maxScore > 0) || (scores.length >= 10 && (_nzCount / scores.length) < 0.1);
+  if (_degenerate) {
+    const _msg = !(_maxScore > 0)
+      ? `집계 대상 교사(${n.toLocaleString()}명)의 실행 활동(수업·콘텐츠·평가 운영 등)이 아직 없어 지수가 모두 0입니다.`
+      : `집계 대상 교사(${n.toLocaleString()}명) 중 실행 활동(수업·콘텐츠·평가 운영 등)이 기록된 교사가 ${_nzCount.toLocaleString()}명뿐이라 분포를 표시하기 어렵습니다.`;
+    body.innerHTML = `
+      <section class="dc-state-panel" role="status" style="text-align:left;border-left:4px solid var(--lrs-primary);background:rgba(37,99,235,.06);">
+        <div style="display:flex;align-items:flex-start;gap:14px;flex-wrap:wrap;">
+          <i class="fas fa-chalkboard-teacher" aria-hidden="true" style="font-size:26px;color:var(--lrs-primary);margin-top:2px;"></i>
+          <div style="flex:1;min-width:240px;">
+            <h2 style="font-size:var(--fs-h2);margin:0 0 8px;color:var(--gray-900);">교사 실행지수가 아직 산출되지 않았습니다</h2>
+            <p style="font-size:var(--fs-body);line-height:1.7;color:var(--gray-700);margin:0 0 6px;">
+              ${_msg}
+              교사 활동 데이터가 쌓이면 이 화면에 실행지수 분포와 학교급별 비교가 표시됩니다.
+            </p>
+            <p style="font-size:var(--fs-sm);line-height:1.6;color:var(--gray-600);margin:0;">
+              운영 탭의 <b>데이터 품질</b>에서 로그 수집 현황을 함께 확인할 수 있습니다.
+            </p>
+          </div>
+        </div>
+      </section>`;
+    return;
+  }
   const p10 = _percentile(scores,10), p25 = _percentile(scores,25),
         p50 = _percentile(scores,50), p75 = _percentile(scores,75),
         p90 = _percentile(scores,90), p95 = _percentile(scores,95);
@@ -7203,10 +7244,27 @@ VIEWS['a-home'] = async function(root){
   if (!d || !d.success){ root.innerHTML = tplError('한눈 현황 데이터를 불러오지 못했습니다', ()=>setView('a-home')); return; }
   const k = d.kpi || {};
   const wt = d.weeklyTrend || [];
-  // 주간 추이 증감(최근주 vs 직전주)
-  const lastWk = wt.length ? wt[wt.length-1].count : 0;
-  const prevWk = wt.length>1 ? wt[wt.length-2].count : 0;
+  // 주간 추이 캡션 정합(P0): 차트가 그리는 '전체' 선은 weeklyTrendByLevel.total(학습활동 7종·학생 스코프)이다.
+  //   캡션 숫자도 반드시 같은 소스(byLevel total)로 산출해야 "캡션 9,345 vs 선 972" 모순이 사라진다.
+  //   weeklyTrendByLevel 미제공 시에만 구 weeklyTrend(count)로 폴백.
+  const _wtbl = Array.isArray(d.weeklyTrendByLevel) ? d.weeklyTrendByLevel : [];
+  const _wkThis = _wtbl.find(w => Number(w.weeksAgo) === 0);
+  const _wkPrev = _wtbl.find(w => Number(w.weeksAgo) === 1);
+  const lastWk = _wtbl.length ? (Number(_wkThis && _wkThis.total) || 0)
+                              : (wt.length ? (Number(wt[wt.length-1].count) || 0) : 0);
+  const prevWk = _wtbl.length ? (Number(_wkPrev && _wkPrev.total) || 0)
+                              : (wt.length > 1 ? (Number(wt[wt.length-2].count) || 0) : 0);
   const wkDelta = lastWk - prevWk;
+
+  // ── 라벨 정직화(포렌식 P0): '활동량'은 정본 학습활동 7종(조회 제외) 집계임을 라벨·부제·각주로 드러낸다. ──
+  const ACT_BASIS = '수업이수·평가·과제·문항풀이·오늘의학습·AI 학습맵·오답노트 · 조회 제외';
+  // 누적 학습시간 각주: 실데이터만 토글이 꺼져 있으면(예시 포함) '예시 데이터 포함' 보조표기.
+  //   BE learnHoursSeedShare(%) 주면 비중까지 명시. 없으면 문구만. 실데이터만(realOnly)이면 각주 생략.
+  const _seedShare = (d.learnHoursSeedShare != null && !isNaN(Number(d.learnHoursSeedShare)))
+    ? Number(d.learnHoursSeedShare) : null;
+  const learnHoursSeedExtra = (!state.realOnly)
+    ? `<i class="fas fa-circle-info kpi-extra-ico" aria-hidden="true"></i> 예시 데이터 포함${_seedShare!=null?` (약 ${_seedShare}%)`:''}`
+    : '';
 
   root.innerHTML = `
     <div class="dc-kpi-grid">
@@ -7215,10 +7273,14 @@ VIEWS['a-home'] = async function(root){
       ${kpiCard('가입 학생',    (k.students||0).toLocaleString(), '명', {dir:'flat',text:'role=student'},  'primary')}
       ${kpiCard('DAU',          (k.dau||0).toLocaleString(),      '명', {dir:'flat',text:'오늘 활동자'},    'success')}
       ${kpiCard('WAU',          (k.wau||0).toLocaleString(),      '명', {dir:'flat',text:'최근 7일'},       'success')}
-      ${kpiCard('누적 학습시간', (k.totalLearnHours||0).toLocaleString(), '시간', {dir:'flat',text:'전체 누적'}, 'warning')}
-      ${kpiCard('오늘 활동량',  (k.todayActs||0).toLocaleString(),'건', {dir:'flat',text:'오늘 하루'}, 'warning')}
+      ${kpiCard('누적 학습시간', (k.totalLearnHours||0).toLocaleString(), '시간', {dir:'flat',text:'전체 누적'}, 'warning', learnHoursSeedExtra)}
+      ${kpiCard('오늘 학습활동',  (k.todayActs||0).toLocaleString(),'건', {dir:'flat',text:'오늘 하루 · 학습활동 7종'}, 'warning')}
       ${kpiCard('7일 활성률',   (k.activeRate||0),                '%', {dir:(k.activeRate||0)>=50?'up':'flat',text:'WAU/가입학생'}, 'primary')}
     </div>
+    <p class="a-home-basis" style="font-size:13px;color:var(--gray-500);line-height:1.5;margin:2px 0 var(--space-4);">
+      <i class="fas fa-circle-info" aria-hidden="true" style="color:var(--gray-400);"></i>
+      활동량은 <b>학습활동 7종</b> · 학생 기준 집계입니다. (${escapeHtml(ACT_BASIS)})
+    </p>
     <div class="grid-2">
       ${chartWrap('aHomeWeek','주간 활동 추이','최근 8주 · 전체 및 초·중·고 학교급별',`이번 주 ${lastWk.toLocaleString()}건 (직전주 대비 ${wkDelta>=0?'+':''}${wkDelta.toLocaleString()})`)}
       <section class="dc-chart-wrapper">
@@ -7227,8 +7289,9 @@ VIEWS['a-home'] = async function(root){
       </section>
     </div>
     <section class="dc-chart-wrapper" style="margin-top:var(--space-4);">
-      <header><h2>학교급 요약</h2><div class="subtitle">학생 수 · 기간 활동량</div></header>
+      <header><h2>학교급 요약</h2><div class="subtitle">학생 수 · 학습활동(7종 · 조회 제외)</div></header>
       <div class="dc-level-mini" id="aHomeLevels"></div>
+      <p class="a-home-lvfoot" id="aHomeLevelsFoot" hidden style="font-size:13px;color:var(--gray-500);line-height:1.5;margin-top:10px;"></p>
     </section>`;
 
   // 8주 추이 (오래된 주 → 최근 주) — 학교급별 멀티라인(전체+초·중·고). weeklyTrendByLevel 미반영 시 전체 단일 라인 폴백.
@@ -7266,13 +7329,13 @@ VIEWS['a-home'] = async function(root){
       `<header><h2>주간 활동 추이</h2></header>` + _seedHintEmpty();
   }
 
-  // 오늘 스냅샷
+  // 오늘 스냅샷 — '활동량' → '학습활동'(정본 7종·조회 제외) 라벨 정직화. 기간 항목은 친화 라벨(최근 30일 등).
   document.getElementById('aHomeSnapshot').innerHTML = `
     <ul style="list-style:none;padding:0;margin:0;font-size:var(--fs-body);">
-      <li style="display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--gray-100);">오늘 활동량 <strong>${(k.todayActs||0).toLocaleString()}건</strong></li>
+      <li style="display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--gray-100);">오늘 학습활동 <strong>${(k.todayActs||0).toLocaleString()}건</strong></li>
       <li style="display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--gray-100);">오늘 활동자(DAU) <strong>${(k.dau||0).toLocaleString()}명</strong></li>
       <li style="display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--gray-100);">최근 7일 활동자(WAU) <strong>${(k.wau||0).toLocaleString()}명</strong></li>
-      <li style="display:flex;justify-content:space-between;padding:10px 0;">기간 활동량(${state.period}) <strong>${(k.periodActs||0).toLocaleString()}건</strong></li>
+      <li style="display:flex;justify-content:space-between;padding:10px 0;">${escapeHtml(periodLabelKo())} 학습활동 <strong>${(k.periodActs||0).toLocaleString()}건</strong></li>
     </ul>`;
 
   // 학교급 미니카드
@@ -7281,8 +7344,25 @@ VIEWS['a-home'] = async function(root){
     <div class="mini">
       <div class="lv">${escapeHtml(l.label)}</div>
       <div class="row"><span>학생 수</span><b>${(l.students||0).toLocaleString()}명</b></div>
-      <div class="row"><span>기간 활동</span><b>${(l.acts||0).toLocaleString()}건</b></div>
+      <div class="row"><span>학습활동</span><b>${(l.acts||0).toLocaleString()}건</b></div>
     </div>`).join('') || _seedHintEmpty('학교급 데이터가 없어요');
+
+  // 학교급 요약 각주 — 학교급별 학생 합 ≠ 가입 학생이면 '미분류 N명 제외' 각주(합계 착시 방지).
+  //   BE studentUnleveledCount/unleveledActs 주면 그 값 우선, 없으면 (가입 학생 − 학교급 합)으로 추정.
+  try {
+    const _lvStuSum = lv.reduce((s,l)=> s + (Number(l.students)||0), 0);
+    const _unStu = (d.studentUnleveledCount != null && !isNaN(Number(d.studentUnleveledCount)))
+      ? Number(d.studentUnleveledCount)
+      : Math.max(0, (Number(k.students)||0) - _lvStuSum);
+    const _unActs = (d.unleveledActs != null && !isNaN(Number(d.unleveledActs))) ? Number(d.unleveledActs) : null;
+    const foot = document.getElementById('aHomeLevelsFoot');
+    if (foot && _unStu > 0) {
+      const actPart = (_unActs != null) ? ` · 학습활동 ${_unActs.toLocaleString()}건` : '';
+      foot.innerHTML = `<i class="fas fa-circle-info" aria-hidden="true" style="color:var(--gray-400);"></i> `
+        + `학교급 미분류 학생 ${_unStu.toLocaleString()}명${actPart}은 위 학교급 합계에서 제외되었습니다.`;
+      foot.hidden = false;
+    }
+  } catch(_){}
 };
 
 /* ======================================================================
@@ -8932,16 +9012,16 @@ function tplXapiInsufficient(total, min){
           <h2 style="font-size:var(--fs-h2);margin:0 0 8px;color:var(--gray-900);">xAPI 표준 표본이 쌓이는 중입니다</h2>
           <p style="font-size:var(--fs-body);line-height:1.7;color:var(--gray-700);margin:0 0 6px;">
             현재 표준(xAPI) 형식으로 수집된 학습 기록은 <b>${t.toLocaleString()}건</b>입니다.
-            성취수준(A~E) 분포와 노드별 정답률은 표본이 <b>${m.toLocaleString()}건 이상</b> 모이면 자동으로 표시됩니다.
-            그때까지는 <b>‘현황분석’ 탭</b>의 활동·성취 지표를 이용하세요.
+            표준(xAPI) 수집이 <b>${m.toLocaleString()}건 이상</b> 쌓이면, 이 화면에서
+            성취수준(A~E) 분포·노드별 정답률 등 <b>표준체계(AIDT) 정합</b>을 점검할 수 있습니다.
+          </p>
+          <p style="font-size:var(--fs-sm);line-height:1.6;color:var(--gray-600);margin:0;">
+            운영 탭의 <b>데이터 품질</b>에서 로그 결측률·동기화 현황을, <b>교사 실행지수</b>에서 활용 분포를 함께 확인하세요.
           </p>
         </div>
       </div>
       <div class="xq-mini-kpi" style="display:flex;gap:12px;flex-wrap:wrap;margin:16px 0 6px;">
         ${chips.join('')}
-      </div>
-      <div style="margin-top:8px;">
-        <button type="button" class="btn" id="xqGoMacro"><i class="fas fa-chart-line" aria-hidden="true"></i> 현황분석 탭으로 이동</button>
       </div>
     </section>
     <style>
@@ -8962,13 +9042,16 @@ async function _renderXapiAnalysis(root, scope) {
   ]);
   if (!ov || !ov.success) { root.innerHTML = tplEmpty('xAPI 수집 데이터를 불러오지 못했습니다'); return; }
 
-  // 2-B: 표본 게이트 — 실 표준 표본이 최소 기준 미만이면 정직한 빈상태(가짜 0% 금지)
+  // 2-B: 표본 게이트 — 실 표준 표본이 최소 기준 미만이면 정직한 빈상태(가짜 0% 금지).
+  //   운영 맥락 설명만 제공(현황분석 탭 punt 제거) → 운영 탭 안에서 맥락이 끊기지 않게.
+  //   표본 캐시도 갱신해 운영 탭에서 표준체계 분석 탭이 정리되도록 한다.
   if (Number(ov.total||0) < XAPI_MIN) {
+    state._xapiSampleCount = Number(ov.total||0);
     root.innerHTML = tplXapiInsufficient(ov.total||0, XAPI_MIN, ov.recent7d, ov.unsent);
-    const goBtn = document.getElementById('xqGoMacro');
-    if (goBtn) goBtn.addEventListener('click', ()=>setView('a-macro'));
     return;
   }
+  // 표본 충분 → 캐시 갱신(운영 탭에 표준체계 분석 노출 유지)
+  state._xapiSampleCount = Number(ov.total||0);
 
   // 1) 수집 현황 KPI
   const kpiHtml = `
@@ -9310,7 +9393,7 @@ function renderInPageTabs(cat){
   document.getElementById('bcRole').textContent =
     state.role==='student'?'학생':state.role==='teacher'?'교사':'관리자';
 
-  let items = (MENUS[state.role] || []).filter(it => it.category === useCat && !it.hidden);
+  let items = (MENUS[state.role] || []).filter(it => it.category === useCat && !isViewHiddenNow(it));
   // P0-3(학령 차등): 초등 학생에게는 "또래 비교" 탭을 렌더 자체 하지 않는다(윤리 정책 —
   //   KERIS 초등 Key Screen에도 또래비교 없음). BE peer-compare는 유지, FE 노출만 분기.
   if (state.role === 'student' && !levelCfg().compareTab) items = items.filter(it => it.id !== 's-compare');
@@ -9777,6 +9860,10 @@ async function boot(){
     } catch(_){}
   }
 
+  // 관리자: 실 xAPI 표본을 한 번 조회해 캐시 → 표본<200이면 운영 탭에서 '표준체계 분석(a-xapi)' 숨김.
+  //   fire-and-forget(부팅 지연 없음). 결과 확정 후 현재 운영 카테고리면 탭만 재렌더로 정리.
+  if (state.role === 'admin') { primeXapiSample(); }
+
   document.addEventListener('keydown', e => { if (e.key === 'Escape') LRS.closeDrawer(); });
   const closeBtn = document.getElementById('drawerCloseBtn');
   if (closeBtn) closeBtn.addEventListener('click', LRS.closeDrawer);
@@ -9784,6 +9871,21 @@ async function boot(){
   // 인페이지 탭 활성 상태 보강 갱신 — setView가 이미 탭을 재렌더하므로 보조 안전장치.
   // refreshTabActive는 클래스/속성만 토글(setView·이벤트 재발화 없음) → 무한루프 없음.
   window.addEventListener('dacheum:menu-changed', refreshTabActive);
+}
+
+/* 실 xAPI 표본 수 캐시 채우기(관리자) — isViewHiddenNow(a-xapi) 판정에 사용.
+   표본<200이면 운영 탭에서 표준체계 분석을 숨긴다. 미상(fetch 실패)은 null 유지 → 노출. */
+async function primeXapiSample(){
+  try {
+    const ov = await apiGet('/api/lrs/xapi/overview');
+    state._xapiSampleCount = (ov && ov.success) ? (Number(ov.total)||0) : 0;
+  } catch(_){ state._xapiSampleCount = null; return; }
+  // 표본 부족 확정 & 현재 운영 카테고리를 보고 있으면 탭 재렌더(표준체계 분석 탭 정리).
+  //   현재 뷰가 a-xapi였는데 숨김 대상이 되면 기본 랜딩(데이터 품질)으로 이동.
+  if (state._xapiSampleCount != null && state._xapiSampleCount < 200 && state.category === 'operations') {
+    if (state.view === 'a-xapi') { setView(defaultViewForCategory('admin','operations') || 'a-quality'); }
+    else { renderInPageTabs('operations'); }
+  }
 }
 
 boot();

@@ -4520,6 +4520,8 @@ router.get('/stats/admin-kpi', requireAuth, (req, res) => {
     const sfL = seedFilter(req, 'll');
 
     // 가입자 (학생 한정 학교 수 — 거시 단위 기준)
+    //   ★ 필드 의미: role='student' 인 사용자가 1명 이상 있는 school_name 의 distinct 수.
+    //     교사만 있고 학생이 0명인 학교는 이 카운트에서 빠진다(거시 단위=학생 소속 학교 기준).
     const schoolCnt = db.prepare(`
       SELECT COUNT(DISTINCT school_name) c FROM users u
       WHERE role='student' AND school_name IS NOT NULL AND school_name <> '' ${sfU.where}
@@ -4527,93 +4529,120 @@ router.get('/stats/admin-kpi', requireAuth, (req, res) => {
     const teacherCnt = db.prepare(`SELECT COUNT(*) c FROM users u WHERE role='teacher' ${sfU.where}`).get().c || 0;
     const studentCnt = db.prepare(`SELECT COUNT(*) c FROM users u WHERE role='student' ${sfU.where}`).get().c || 0;
 
-    // 누적 총 학습시간(시간) — duration_sec 우선, 없으면 PTxxxS 파싱
+    // 누적 총 학습시간(시간) — duration_sec 우선, 없으면 PTxxxS 파싱.
+    //   ★ 산식 유지(정직): 활동 유형 제한 없이 시간이 기록된 모든 로그의 누적. 활동 카운트(아래 7종 스코프)와는 별개 개념.
     const totalSec = db.prepare(`
       SELECT COALESCE(SUM(COALESCE(ll.duration_sec,
         CAST(REPLACE(REPLACE(COALESCE(ll.result_duration,''),'PT',''),'S','') AS INTEGER), 0)), 0) s
       FROM learning_logs ll WHERE 1=1 ${sfL.where}
     `).get().s || 0;
     const totalLearnHours = Math.round(totalSec / 3600);
+    // 누적 학습시간 중 시드(합성) 비중(%) — FE 각주용 정직 라벨. realOnly 화면에선 0(시드 제외됨).
+    const seedSec = db.prepare(`
+      SELECT COALESCE(SUM(COALESCE(ll.duration_sec,
+        CAST(REPLACE(REPLACE(COALESCE(ll.result_duration,''),'PT',''),'S','') AS INTEGER), 0)), 0) s
+      FROM learning_logs ll WHERE ll.is_seed = 1 ${sfL.where}
+    `).get().s || 0;
+    const learnHoursSeedShare = totalSec > 0 ? Math.round((seedSec / totalSec) * 1000) / 10 : 0;
 
-    // 오늘 활동량 / DAU
+    // ── [정합 P0 · 2026-07] 활동 카운트 = 정본 학습활동 7종 + 학생 스코프로 통일 ──────────────
+    //   포렌식 감사 확정 결함(raw learning_logs 무필터 카운트):
+    //     · 오늘 활동/DAU/WAU 에 admin·teacher 의 LRS 열람(governance)·content_view(조회) 로그가 섞여
+    //       "관리자가 대시보드를 여는 행위"가 오늘 활동으로 잡히는 자기참조 착시.
+    //     · periodActs(role·조회 무필터)와 byLevel.acts(학생×학습만)가 ~2.5배 어긋남(합이 절대 안 맞음).
+    //     · weeklyTrend(전체)와 weeklyTrendByLevel(학생)이 ~9.6배 모순(캡션=전체, 선=학생).
+    //   → 아래 모든 활동 카운트(todayActs·dau·wau·periodActs·byLevel.acts·weeklyTrend·weeklyTrendByLevel)를
+    //     JOIN users u ON u.id=ll.user_id WHERE u.role='student' AND ll.activity_type IN (정본 7종) 로 통일.
+    //     정본 7종 = LRS_LEARN_ACTIVITY_TYPES(수업꾸러미 이수·평가·과제·콘텐츠 문항풀이·오늘의 학습·AI 노드·오답노트).
+    //     content_view(조회)·게시글·출석·설문·governance(LRS 열람)·비학생 로그는 전부 제외된다.
+    //     seedFilter(sfL)는 유지(realOnly=1 이면 실데이터만).
+    //   불변식: periodActs === Σ byLevel.acts + unleveledActs, 각 주 weeklyTrend.count === weeklyTrendByLevel.total.
+    const learnPH = LRS_LEARN_ACTIVITY_TYPES.map(() => '?').join(',');
+    const LEARN = LRS_LEARN_ACTIVITY_TYPES; // 파라미터 스프레드 별칭
+
+    // 오늘 활동량 / DAU (학생 × 학습활동 7종만 — 관리자·교사 열람이나 단순 조회는 오르지 않음)
     const todayRow = db.prepare(`
       SELECT COUNT(*) acts, COUNT(DISTINCT ll.user_id) dau
-      FROM learning_logs ll
-      WHERE DATE(ll.created_at) = DATE('now','localtime') ${sfL.where}
-    `).get();
+      FROM learning_logs ll JOIN users u ON u.id = ll.user_id
+      WHERE u.role='student' AND ll.activity_type IN (${learnPH})
+        AND DATE(ll.created_at) = DATE('now','localtime') ${sfL.where}
+    `).get(...LEARN);
     const todayActs = todayRow.acts || 0;
     const dau = todayRow.dau || 0;
 
-    // WAU (최근 7일 고유 사용자)
+    // WAU (최근 7일, 학습활동 7종을 수행한 고유 학생)
     const wau = db.prepare(`
       SELECT COUNT(DISTINCT ll.user_id) c
-      FROM learning_logs ll
-      WHERE DATE(ll.created_at) >= DATE('now','localtime','-6 days') ${sfL.where}
-    `).get().c || 0;
+      FROM learning_logs ll JOIN users u ON u.id = ll.user_id
+      WHERE u.role='student' AND ll.activity_type IN (${learnPH})
+        AND DATE(ll.created_at) >= DATE('now','localtime','-6 days') ${sfL.where}
+    `).get(...LEARN).c || 0;
 
-    // 활성률 = WAU / 가입 학생 수
+    // 활성률 = WAU / 가입 학생 수 (활동 학생 / 등록 학생)
     const activeRate = studentCnt > 0 ? Math.round((wau / studentCnt) * 1000) / 10 : 0;
 
-    // period 기간 활동량 (참고 KPI)
-    const periodActs = db.prepare(`
-      SELECT COUNT(*) c FROM learning_logs ll
-      WHERE DATE(ll.created_at) >= DATE('now','localtime', ?) ${sfL.where}
-    `).get(`-${days - 1} days`).c || 0;
+    // period 활동량 + 학교급 분해 — 단일 소스(같은 스코프)로 산출해 전체↔학교급 합 정합 보장.
+    //   actByLevel 을 학교급별로 GROUP BY 한 뒤 periodActs = Σ(모든 학교급 행) 로 파생 →
+    //   무학년(school_level NULL/기타)까지 포함해 periodActs === Σ byLevel.acts + unleveledActs (INV-1).
+    const actByLevel = db.prepare(`
+      SELECT u.school_level lvl, COUNT(*) acts
+      FROM learning_logs ll JOIN users u ON u.id = ll.user_id
+      WHERE u.role='student' AND ll.activity_type IN (${learnPH})
+        AND DATE(ll.created_at) >= DATE('now','localtime', ?) ${sfL.where}
+      GROUP BY u.school_level
+    `).all(...LEARN, `-${days - 1} days`);
+    const actMap = new Map(actByLevel.map(r => [r.lvl, r.acts]));
+    const periodActs = actByLevel.reduce((s, r) => s + (r.acts || 0), 0);
 
-    // 학교급 미니카드 (학생 수 + 활동량)
+    // 학교급 미니카드 (학생 수 + 활동량). 학생 수는 등록 기준(활동 유무 무관).
     const byLevelRows = db.prepare(`
       SELECT u.school_level lvl, COUNT(*) students
       FROM users u
       WHERE u.role='student' AND u.school_level IS NOT NULL ${sfU.where}
       GROUP BY u.school_level
     `).all();
-    const actByLevel = db.prepare(`
-      SELECT u.school_level lvl, COUNT(*) acts
-      FROM learning_logs ll JOIN users u ON u.id = ll.user_id
-      WHERE u.role='student' AND u.school_level IS NOT NULL
-        AND DATE(ll.created_at) >= DATE('now','localtime', ?) ${sfL.where}
-      GROUP BY u.school_level
-    `).all(`-${days - 1} days`);
-    const actMap = new Map(actByLevel.map(r => [r.lvl, r.acts]));
     const byLevel = ['elementary', 'middle', 'high'].map(lv => {
       const row = byLevelRows.find(r => r.lvl === lv) || { students: 0 };
       return { level: lv, label: levelLabel(lv), students: row.students || 0, acts: actMap.get(lv) || 0 };
     });
+    // 무학년(school_level NULL/기타) 학생 활동 = periodActs − (초+중+고). INV-1 보장(합=전체).
+    //   FE 가 "학교급 미분류 N건"으로 정직 표기 가능.
+    const leveledActs = byLevel.reduce((s, b) => s + b.acts, 0);
+    const unleveledActs = periodActs - leveledActs;
+    // 학교급 미분류 등록 학생 수(가입 학교/학교급 각주용 보조필드)
+    const studentUnleveledCount = db.prepare(`
+      SELECT COUNT(*) c FROM users u
+      WHERE u.role='student'
+        AND (u.school_level IS NULL OR u.school_level NOT IN ('elementary','middle','high')) ${sfU.where}
+    `).get().c || 0;
 
-    // 주간 활동 추이 (최근 8주, ISO 주 시작 월요일 근사 — 7일 버킷)
-    const weekly = db.prepare(`
-      SELECT CAST((JULIANDAY('now','localtime') - JULIANDAY(ll.created_at)) / 7 AS INTEGER) wk,
-             COUNT(*) cnt
-      FROM learning_logs ll
-      WHERE DATE(ll.created_at) >= DATE('now','localtime','-55 days') ${sfL.where}
-      GROUP BY wk ORDER BY wk DESC
-    `).all();
-    const wkMap = new Map(weekly.map(r => [r.wk, r.cnt]));
-    const weeklyTrend = [];
-    for (let w = 7; w >= 0; w--) weeklyTrend.push({ weeksAgo: w, count: wkMap.get(w) || 0 });
-
-    // [BE-4] 주간 활동 추이 학교급별 분해 (전체 + 초·중·고 멀티라인).
-    //   기존 8주 버킷 로직에 JOIN users + GROUP BY school_level 만 추가. role='student' 스코프.
-    //   total = elementary+middle+high (학교급 없는 학생/교사는 제외 → total===초+중+고 정합).
+    // 주간 활동 추이 (최근 8주, 7일 버킷) — weeklyTrend 와 weeklyTrendByLevel 을 단일 소스로 산출.
+    //   같은 스코프(학생 × 학습활동 7종)라 각 주 weeklyTrend.count === weeklyTrendByLevel.total (INV-2).
+    //   total = elementary+middle+high+unleveled(무학년 포함 → 전체 정합). FE 는 초·중·고 3선 + unleveled(각주).
     const weeklyLvl = db.prepare(`
       SELECT CAST((JULIANDAY('now','localtime') - JULIANDAY(ll.created_at)) / 7 AS INTEGER) wk,
              u.school_level lvl, COUNT(*) cnt
       FROM learning_logs ll JOIN users u ON u.id = ll.user_id
-      WHERE u.role='student' AND u.school_level IN ('elementary','middle','high')
+      WHERE u.role='student' AND ll.activity_type IN (${learnPH})
         AND DATE(ll.created_at) >= DATE('now','localtime','-55 days') ${sfL.where}
       GROUP BY wk, u.school_level
-    `).all();
-    const lvlMap = new Map(); // wk -> { elementary, middle, high }
+    `).all(...LEARN);
+    const lvlMap = new Map(); // wk -> { elementary, middle, high, unleveled }
     weeklyLvl.forEach(r => {
-      if (!lvlMap.has(r.wk)) lvlMap.set(r.wk, { elementary: 0, middle: 0, high: 0 });
-      lvlMap.get(r.wk)[r.lvl] += r.cnt;
+      if (!lvlMap.has(r.wk)) lvlMap.set(r.wk, { elementary: 0, middle: 0, high: 0, unleveled: 0 });
+      const bucket = lvlMap.get(r.wk);
+      if (r.lvl === 'elementary' || r.lvl === 'middle' || r.lvl === 'high') bucket[r.lvl] += r.cnt;
+      else bucket.unleveled += r.cnt; // school_level NULL/기타 → 무학년
     });
+    const weeklyTrend = [];
     const weeklyTrendByLevel = [];
     for (let w = 7; w >= 0; w--) {
-      const o = lvlMap.get(w) || { elementary: 0, middle: 0, high: 0 };
+      const o = lvlMap.get(w) || { elementary: 0, middle: 0, high: 0, unleveled: 0 };
+      const total = o.elementary + o.middle + o.high + o.unleveled;
+      weeklyTrend.push({ weeksAgo: w, count: total });
       weeklyTrendByLevel.push({
-        weeksAgo: w, total: o.elementary + o.middle + o.high,
-        elementary: o.elementary, middle: o.middle, high: o.high
+        weeksAgo: w, total,
+        elementary: o.elementary, middle: o.middle, high: o.high, unleveled: o.unleveled
       });
     }
 
@@ -4621,18 +4650,26 @@ router.get('/stats/admin-kpi', requireAuth, (req, res) => {
       success: true,
       period: `${days}d`,
       realOnly: sfL.realOnly,
+      // 활동 카운트 스코프 계약(투명성): 학생 × 학습활동 정본 7종. 조회·게시글·출석·설문·governance·비학생 제외.
+      activityScope: { role: 'student', activityTypes: LRS_LEARN_ACTIVITY_TYPES },
       kpi: {
         schools: schoolCnt,
         teachers: teacherCnt,
         students: studentCnt,
+        studentUnleveledCount, // 학교급 미분류 등록 학생 수(가입 학교/학교급 각주용)
         dau,
         wau,
         totalLearnHours,
+        learnHoursSeedShare,   // 누적 학습시간 중 시드(합성) 비중 %(정직 각주)
         todayActs,
         activeRate, // %
-        periodActs
+        periodActs,
+        unleveledActs // periodActs = Σ byLevel.acts + unleveledActs (학교급 미분류 학생 활동)
       },
       byLevel,
+      unleveledActs,        // top-level 미러(FE 편의)
+      studentUnleveledCount, // top-level 미러 — a-home 학교급 미분류 각주(FE d.studentUnleveledCount)
+      learnHoursSeedShare,   // top-level 미러 — a-home 누적 학습시간 "예시 N%" 각주(FE d.learnHoursSeedShare)
       weeklyTrend,
       weeklyTrendByLevel
     });
