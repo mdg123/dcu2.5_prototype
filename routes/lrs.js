@@ -5286,6 +5286,230 @@ router.get('/stats/equity', requireAuth, (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────
+// [반별 비교] GET /api/lrs/stats/class-compare — 교사 담당 반 성취/활용 비교
+//   기획서: 보고서/LRS_교사_반별비교_기획서_v1.md §C-1·§C-2 (관리자 /stats/equity 의 "반(class)" 버전)
+//   ★ equity 와의 차이(문서화):
+//     ① _adminOnly 대신 teacher/admin 허용   ② 집계축 users컬럼(region/level) → class_members 멤버십(user_id IN)
+//     ③ 개인정보 마스킹(MIN_N) 미적용 — 교사는 자기 반 학생을 이미 실명 열람(t-home·t-drill)하므로
+//        반 평균 비교는 새 노출이 아님. 대신 채점형 학생<3 인 반에 lowSample 플래그만 부착(통계 신뢰 캡션).
+//     ④ crossLevelRegion 없음 → 대신 classSubjectMatrix(반×교과, 교과=all 일 때만)   ⑤ 학교급 필터 없음(반=단일 급)
+//   재사용(공용 헬퍼 무변경): scoredWhere·normScoreExpr·subjectCodeSetFilter·_equityMetric·_pctile·
+//                            buildAvailableSubjects·canonicalSubjectKey·subjectLabel·macroDays·seedFilter.
+//   신규: (a) 반 루프 멤버십 조인 SQL, (b) status='active' 필터, (c) lowSample 플래그, (d) classSubjectMatrix.
+//   params: subject=all|<canonicalKey>(기본 all), period=30d|90d(기본 30d).
+// ─────────────────────────────────────────────────────────
+router.get('/stats/class-compare', requireAuth, (req, res) => {
+  try {
+    const role = req.user && req.user.role;
+    if (role !== 'teacher' && role !== 'admin') {
+      return res.status(403).json({ success: false, message: '교사 또는 관리자 권한이 필요합니다.' });
+    }
+    // ★ 프라이버시 마스킹(MIN_N) 미적용. 채점형 학생 < 3 인 반만 lowSample(참고용 캡션·값은 항상 노출).
+    const LOW_SAMPLE_SCORED = 3;
+
+    // 교과 필터 검증(§0-4 codeSet IN 정규화 재사용)
+    const subjectParam = String(req.query.subject || 'all').trim();
+    if (!isValidSubjectParam(subjectParam)) {
+      return res.status(400).json({ success: false, message: '잘못된 subject 파라미터입니다.' });
+    }
+    const subjF = subjectCodeSetFilter(subjectParam, 'll');   // { where, params }
+    const subjW = subjF.where, subjP = subjF.params;
+    const days = macroDays(req, 30);                          // 30d 기본, 90d 허용
+    const sfL = seedFilter(req, 'll');
+    const dateFromExpr = `-${days - 1} days`;                 // equity 현재창(-(days-1)일)과 동일
+    const subjectLabelApplied = subjectParam !== 'all' ? (CANONICAL_SUBJECT_LABEL[subjectParam] || null) : null;
+
+    // ── 스코프: 본인 소유 + status='active' 반만(§A-2). deleted/archived 혼입 금지. ──
+    const ownedClasses = db.prepare(
+      "SELECT id, name FROM classes WHERE owner_id = ? AND status = 'active' ORDER BY id"
+    ).all(req.user.id);
+    const ownedCount = ownedClasses.length;
+
+    // 반 < 2 → 비교 불가(§A-3 빈상태). units 빈배열 + insufficientClasses.
+    if (ownedCount < 2) {
+      return res.json({
+        success: true, period: `${days}d`, realOnly: sfL.realOnly,
+        units: [],
+        metrics: { avgScore: null, actsPerStu: null, activeRate: null, reachRate: null },
+        priorityUnits: [],
+        availableSubjects: buildAvailableSubjects(new Set()),
+        classSubjectMatrix: [],
+        appliedSubject: subjectParam, appliedSubjectLabel: subjectLabelApplied,
+        insufficientClasses: true, ownedCount, minScoredForCaption: LOW_SAMPLE_SCORED
+      });
+    }
+
+    // ── 반별 학생 멤버(§0-4 멤버십 조인) — resolveMembershipScopeFilter 와 동일 방식. ──
+    //   class_id NULL 자기주도 활동(self-learn·content)도 user_id IN 으로 반에 귀속.
+    const memberIdsOf = (classId) => db.prepare(`
+      SELECT cm.user_id AS id
+      FROM class_members cm JOIN users u ON u.id = cm.user_id
+      WHERE cm.class_id = ? AND u.role = 'student'
+    `).all(classId).map(r => r.id);
+
+    // ── 반 단위 집계(memberIds IN) — logAgg/wau/reach. equity logAgg/wauAgg/reachAgg 산식 미러. ──
+    function aggClass(memberIds) {
+      if (!memberIds.length) return { acts: 0, dur_sec: 0, avg_score: null, scored_students: 0, wau: 0, reached: 0 };
+      const ph = memberIds.map(() => '?').join(',');
+      const logRow = db.prepare(`
+        SELECT COUNT(*) acts,
+               COALESCE(SUM(COALESCE(ll.duration_sec,
+                 CAST(REPLACE(REPLACE(COALESCE(ll.result_duration,''),'PT',''),'S','') AS INTEGER),0)),0) dur_sec,
+               AVG(CASE WHEN ${scoredWhere('ll')} THEN ${normScoreExpr('ll')} END) avg_score,
+               COUNT(DISTINCT CASE WHEN ${scoredWhere('ll')} THEN ll.user_id END) scored_students
+        FROM learning_logs ll
+        WHERE ll.user_id IN (${ph})
+          AND DATE(ll.created_at) >= DATE('now','localtime', ?) ${sfL.where} ${subjW}
+      `).get(...memberIds, dateFromExpr, ...subjP);
+      // WAU — 최근 7일 절대창(activeRate 분자). equity wauAgg 동일 정책(subject 필터 동반).
+      const wau = db.prepare(`
+        SELECT COUNT(DISTINCT ll.user_id) wau
+        FROM learning_logs ll
+        WHERE ll.user_id IN (${ph})
+          AND DATE(ll.created_at) >= DATE('now','localtime','-6 days') ${sfL.where} ${subjW}
+      `).get(...memberIds, ...subjP).wau || 0;
+      // 도달률 분자 — 개인 avg_score(채점형·0~100 정규화) ≥ 60 학생 수. equity reachAgg 동일.
+      const reached = db.prepare(`
+        SELECT COUNT(*) reached FROM (
+          SELECT ll.user_id, AVG(CASE WHEN ${scoredWhere('ll')} THEN ${normScoreExpr('ll')} END) uavg
+          FROM learning_logs ll
+          WHERE ll.user_id IN (${ph})
+            AND DATE(ll.created_at) >= DATE('now','localtime', ?) ${sfL.where} ${subjW}
+          GROUP BY ll.user_id
+          HAVING uavg IS NOT NULL AND uavg >= 60
+        )
+      `).get(...memberIds, dateFromExpr, ...subjP).reached || 0;
+      return {
+        acts: logRow.acts || 0, dur_sec: logRow.dur_sec || 0, avg_score: logRow.avg_score,
+        scored_students: logRow.scored_students || 0, wau, reached
+      };
+    }
+
+    // ── units 구성 (★ 마스킹 미적용 — 값 항상 노출, lowSample 플래그만) ──
+    const units = ownedClasses.map(c => {
+      const memberIds = memberIdsOf(c.id);
+      const students = memberIds.length;
+      const a = aggClass(memberIds);
+      const activeRate = students > 0 ? Math.round((a.wau / students) * 1000) / 10 : 0;
+      const avgActsPerStudent = students > 0 ? Math.round((a.acts / students) * 10) / 10 : 0;
+      const avgLearnMin = students > 0 ? Math.round((a.dur_sec / students) / 60) : 0;
+      const avgScore = a.avg_score == null ? null : Math.round(a.avg_score * 10) / 10;
+      const reachRate = students > 0 ? Math.round((a.reached / students) * 1000) / 10 : 0;
+      return {
+        id: c.id, label: c.name,
+        classId: c.id, className: c.name,       // equity 렌더러=id/label · 계약=classId/className 양립
+        students,
+        activeRate, avgActsPerStudent, avgLearnMin, avgScore, reachRate,
+        quadrant: null,
+        masked: false,                          // ★ 프라이버시 마스킹 미적용(§C-2) — 항상 false
+        lowSample: a.scored_students < LOW_SAMPLE_SCORED
+      };
+    });
+
+    // ── 사분면(활용 중앙값 × 성취 중앙값) — avgScore null 반은 판정 제외(quadrant null). ──
+    const actsVals = units.map(u => u.avgActsPerStudent).filter(v => v != null).sort((a, b) => a - b);
+    const scoreVals = units.map(u => u.avgScore).filter(v => v != null).sort((a, b) => a - b);
+    const medActs = actsVals.length ? _pctile(actsVals, 0.5) : null;
+    const medScore = scoreVals.length ? _pctile(scoreVals, 0.5) : null;
+    units.forEach(u => {
+      if (u.avgScore == null || medActs == null || medScore == null) { u.quadrant = null; return; }
+      const useLow = u.avgActsPerStudent <= medActs;
+      const achLow = u.avgScore <= medScore;
+      u.quadrant = useLow && achLow ? 'both_low'
+        : useLow && !achLow ? 'use_low'
+        : !useLow && achLow ? 'ach_low' : 'good';
+    });
+
+    // ── 지표(_equityMetric 재사용) — FE 는 avgScore.gapPP·actsPerStu.gapX 사용(격차 중심). ──
+    const mkVals = (field) => units.filter(u => u[field] != null).map(u => ({ id: u.id, label: u.label, v: u[field] }));
+    const metrics = {
+      avgScore:   _equityMetric(mkVals('avgScore'), 'pp'),
+      actsPerStu: _equityMetric(mkVals('avgActsPerStudent'), 'ratio'),
+      activeRate: _equityMetric(mkVals('activeRate'), 'pp'),
+      reachRate:  _equityMetric(mkVals('reachRate'), 'pp')
+    };
+
+    // ── 우선 관심 반: 이중취약(both_low), 성취 낮은 순. (산점도 없음 — 목록만) ──
+    const priorityUnits = units
+      .filter(u => u.quadrant === 'both_low')
+      .map(u => ({
+        id: u.id, label: u.label, classId: u.id, className: u.label,
+        students: u.students, avgActsPerStudent: u.avgActsPerStudent, avgScore: u.avgScore,
+        activeRate: u.activeRate, reachRate: u.reachRate, lowSample: u.lowSample
+      }))
+      .sort((a, b) => (a.avgScore || 0) - (b.avgScore || 0));
+
+    // units 정렬: avgScore 내림차순(성취 null 뒤로).
+    units.sort((a, b) => {
+      const am = a.avgScore == null, bm = b.avgScore == null;
+      if (am !== bm) return am ? 1 : -1;
+      return (b.avgScore || 0) - (a.avgScore || 0);
+    });
+
+    // ── availableSubjects — 소유 active 반 전체 학생 로그(subject 무관·period 창)에 존재하는 교과. ──
+    //   (죽은 칩 방지 · 데이터 주도) buildAvailableSubjects 재사용.
+    const allMemberIds = [...new Set(ownedClasses.flatMap(c => memberIdsOf(c.id)))];
+    const presentKeys = new Set();
+    if (allMemberIds.length) {
+      const ph = allMemberIds.map(() => '?').join(',');
+      const availRows = db.prepare(`
+        SELECT DISTINCT ll.subject_code c
+        FROM learning_logs ll
+        WHERE ll.user_id IN (${ph}) AND ll.subject_code IS NOT NULL AND ll.subject_code <> ''
+          AND DATE(ll.created_at) >= DATE('now','localtime', ?) ${sfL.where}
+      `).all(...allMemberIds, dateFromExpr);
+      availRows.forEach(r => { const k = canonicalSubjectKey(subjectLabel(r.c)); if (k) presentKeys.add(k); });
+    }
+    const availableSubjects = buildAvailableSubjects(presentKeys);
+
+    // ── (선택 BE-5) classSubjectMatrix — 반×교과 평균 정답률. 교과=all 일 때만 채움(§C-1). ──
+    //   표본(채점형 학생) < 3 셀은 masked:true·avgScore null(회색). subjectCodeSetFilter 와 동일 codeSet 규칙.
+    let classSubjectMatrix = [];
+    if (subjectParam === 'all') {
+      const distinctCodes = db.prepare(
+        "SELECT DISTINCT subject_code c FROM learning_logs WHERE subject_code IS NOT NULL AND subject_code <> ''"
+      ).all().map(r => r.c);
+      const keyToCodeSet = {};
+      distinctCodes.forEach(c => { const k = canonicalSubjectKey(subjectLabel(c)); if (k) (keyToCodeSet[k] = keyToCodeSet[k] || []).push(c); });
+      const presentSubjKeys = CANONICAL_SUBJECT_ORDER.filter(k => presentKeys.has(k));
+      classSubjectMatrix = ownedClasses.map(c => {
+        const memberIds = memberIdsOf(c.id);
+        const cells = presentSubjKeys.map(key => {
+          const codeSet = keyToCodeSet[key] || [];
+          if (!memberIds.length || !codeSet.length) {
+            return { subjectKey: key, subjectLabel: CANONICAL_SUBJECT_LABEL[key], avgScore: null, students: 0, masked: true };
+          }
+          const phM = memberIds.map(() => '?').join(',');
+          const phC = codeSet.map(() => '?').join(',');
+          const row = db.prepare(`
+            SELECT AVG(CASE WHEN ${scoredWhere('ll')} THEN ${normScoreExpr('ll')} END) avg_score,
+                   COUNT(DISTINCT CASE WHEN ${scoredWhere('ll')} THEN ll.user_id END) scored_students
+            FROM learning_logs ll
+            WHERE ll.user_id IN (${phM}) AND ll.subject_code IN (${phC})
+              AND DATE(ll.created_at) >= DATE('now','localtime', ?) ${sfL.where}
+          `).get(...memberIds, ...codeSet, dateFromExpr);
+          const masked = (row.scored_students || 0) < LOW_SAMPLE_SCORED;
+          const avgScore = (masked || row.avg_score == null) ? null : Math.round(row.avg_score * 10) / 10;
+          return { subjectKey: key, subjectLabel: CANONICAL_SUBJECT_LABEL[key], avgScore, students: row.scored_students || 0, masked };
+        });
+        return { classId: c.id, className: c.name, cells };
+      });
+    }
+
+    res.json({
+      success: true,
+      period: `${days}d`, realOnly: sfL.realOnly,
+      units, metrics, priorityUnits, availableSubjects, classSubjectMatrix,
+      appliedSubject: subjectParam, appliedSubjectLabel: subjectLabelApplied,
+      insufficientClasses: false, ownedCount, minScoredForCaption: LOW_SAMPLE_SCORED
+    });
+  } catch (err) {
+    console.error('[LRS] /stats/class-compare error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────
 // S3-④ GET /api/lrs/stats/cross-activity-achievement — 활동×성취 교차
 //   활동량 3분위(상/중/하) × 평균성취 매트릭스 + 익명 산점 + 콘텐츠/스스로채움 상하위 집단 비교
 //   params: period, realOnly
