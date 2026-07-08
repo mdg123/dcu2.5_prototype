@@ -93,6 +93,57 @@ function subjectLabel(code, fallback) {
 }
 
 // ─────────────────────────────────────────────────────────
+// [지역별 성취수준 비교] 교과 필터 정규화 (기획서 §0-4 제약)
+//   learning_logs.subject_code 는 접미(-e/-m/-h)·레거시 대문자(MAT)·원문 한글(국어)이 혼재해
+//   `WHERE subject_code = ?` 단순 매칭이 불가하다. 반드시 subjectLabel(code) 로 한글 라벨을 뽑고,
+//   그 한글 라벨을 canonical key 로 역매핑해 "요청 교과로 귀속되는 raw code 집합(codeSet)"을 만든다.
+//   canonical key 예: korean·math·english·science·social·moral·music·art·pe·practical.
+// ─────────────────────────────────────────────────────────
+const CANONICAL_SUBJECT_ORDER = ['korean', 'math', 'english', 'science', 'social', 'moral', 'music', 'art', 'pe', 'practical'];
+const CANONICAL_SUBJECT_LABEL = {
+  korean: '국어', math: '수학', english: '영어', science: '과학', social: '사회',
+  moral: '도덕', music: '음악', art: '미술', pe: '체육', practical: '실과'
+};
+const CANONICAL_SUBJECT_KEYS = new Set(CANONICAL_SUBJECT_ORDER);
+// 한글 교과 라벨 → canonical key 역매핑(소상수맵). subjectLabel() 이 내는 라벨을 되돌린다.
+//   예술/미술 계열은 모두 'art'로 귀속(SUBJECT_LABELS 의 'art':'예술/미술'·'ART':'예술' 양립 흡수).
+const SUBJECT_LABEL_TO_KEY = {
+  '국어': 'korean', '수학': 'math', '영어': 'english', '과학': 'science', '사회': 'social',
+  '도덕': 'moral', '음악': 'music', '예술': 'art', '예술/미술': 'art', '미술': 'art',
+  '체육': 'pe', '실과': 'practical'
+};
+/** 한글 교과 라벨 → canonical key. 미매칭이면 null. */
+function canonicalSubjectKey(label) {
+  if (label == null) return null;
+  return SUBJECT_LABEL_TO_KEY[String(label).trim()] || null;
+}
+/** canonical key 유효성(subject 파라미터 검증용). 'all' 또는 알려진 키만 true. */
+function isValidSubjectParam(subject) {
+  return subject === 'all' || CANONICAL_SUBJECT_KEYS.has(subject);
+}
+/**
+ * canonical subject key → learning_logs.subject_code IN 필터 조각(§0-4).
+ *   subjectLabel() 로 raw code 를 정규화해 요청 canonical 로 귀속되는 code 집합만 IN.
+ *   codeSet 0개면 ` AND 1=0`(그 교과 로그 없음 → 빈결과). subject='all'/미지정이면 조건 없음.
+ *   @returns {{ where:string, params:string[] }}
+ */
+function subjectCodeSetFilter(subject, alias = 'll') {
+  if (!subject || subject === 'all') return { where: '', params: [] };
+  const raw = db.prepare(
+    "SELECT DISTINCT subject_code c FROM learning_logs WHERE subject_code IS NOT NULL AND subject_code <> ''"
+  ).all();
+  const codeSet = raw.map(r => r.c).filter(c => canonicalSubjectKey(subjectLabel(c)) === subject);
+  if (!codeSet.length) return { where: ' AND 1=0', params: [] };
+  return { where: ` AND ${alias}.subject_code IN (${codeSet.map(() => '?').join(',')})`, params: codeSet };
+}
+/** present key Set → availableSubjects:[{key,label,present}] (기획서 §A-6·§C-2 노출 순서). */
+function buildAvailableSubjects(presentKeys) {
+  return CANONICAL_SUBJECT_ORDER.map(key => ({
+    key, label: CANONICAL_SUBJECT_LABEL[key], present: presentKeys.has(key)
+  }));
+}
+
+// ─────────────────────────────────────────────────────────
 // 공용 헬퍼
 // ─────────────────────────────────────────────────────────
 
@@ -2770,9 +2821,22 @@ router.get('/weak-trend', requireAuth, (req, res) => {
     }
 
     const limit = req.query.limit ? Math.max(1, Math.min(50, parseInt(req.query.limit, 10) || 15)) : 15;
+    // ── [BE-5] 학교급·교과 필터 (기본 all). aWeak 취약 성취기준 추세 랭킹 스코프. ──
+    const wLevel = String(req.query.school_level || 'all').trim();
+    if (!['all', 'elementary', 'middle', 'high'].includes(wLevel)) {
+      return res.status(400).json({ success: false, message: '잘못된 school_level 파라미터입니다.' });
+    }
+    const wSubject = String(req.query.subject || 'all').trim();
+    if (!isValidSubjectParam(wSubject)) {
+      return res.status(400).json({ success: false, message: '잘못된 subject 파라미터입니다.' });
+    }
+    // 학교급 조건: userIds 산출 SQL 에 AND u.school_level=? 추가(있으면).
+    const lvlCond = wLevel !== 'all' ? ' AND u.school_level = ?' : '';
+    const lvlArg = wLevel !== 'all' ? [wLevel] : [];
     let userIds = [];
     if (scope === 'all') {
-      userIds = db.prepare("SELECT id FROM users WHERE role='student'").all().map(r => r.id);
+      userIds = db.prepare(`SELECT id FROM users u WHERE u.role='student'${lvlCond}`)
+        .all(...lvlArg).map(r => r.id);
     } else {
       // class: 교사 소유 반들의 student 멤버 합집합
       const classIds = db.prepare('SELECT id FROM classes WHERE owner_id = ?').all(req.user.id).map(r => r.id);
@@ -2781,8 +2845,8 @@ router.get('/weak-trend', requireAuth, (req, res) => {
         userIds = db.prepare(`
           SELECT DISTINCT cm.user_id AS id
           FROM class_members cm JOIN users u ON u.id = cm.user_id
-          WHERE cm.class_id IN (${ph}) AND u.role = 'student'
-        `).all(...classIds).map(r => r.id);
+          WHERE cm.class_id IN (${ph}) AND u.role = 'student'${lvlCond}
+        `).all(...classIds, ...lvlArg).map(r => r.id);
       }
     }
 
@@ -2791,11 +2855,26 @@ router.get('/weak-trend', requireAuth, (req, res) => {
     //   (※ getWeakTrend 자체는 성취기준 코드 단위 집계로 개별 학생명 미포함 — masked 는 FE 참고 배너용 플래그.)
     const MIN_N = MIN_SAMPLE_N;
     const masked = scope === 'class' ? false : (userIds.length < MIN_N);
-    const ranking = analytics.getWeakTrend({ userIds, limit });
+    // [BE-5] 전체 랭킹을 넉넉히 받아(getWeakTrend 무변경) availableSubjects 산출 + 교과 후처리 필터.
+    //   getWeakTrend 는 code 단위로 이미 취약 우선 정렬 → 넉넉히(999) 받아 정렬 유지한 채 슬라이스.
+    const fullRanking = analytics.getWeakTrend({ userIds, limit: 999 });
+    // availableSubjects — 현재 급 스코프 랭킹에 존재하는 교과만 present=true(교과 필터 전 기준).
+    const wPresent = new Set();
+    fullRanking.forEach(row => { const k = canonicalSubjectKey(row.subject); if (k) wPresent.add(k); });
+    const availableSubjects = buildAvailableSubjects(wPresent);
+    // 교과 필터: canonicalSubjectKey(row.subject)===wSubject 인 행만(learning_logs 무관·resolveCode 기반).
+    let ranking = fullRanking;
+    if (wSubject !== 'all') ranking = ranking.filter(row => canonicalSubjectKey(row.subject) === wSubject);
+    ranking = ranking.slice(0, limit);
 
     res.json({
       success: true, scope, studentCount: userIds.length, masked, minSample: MIN_N,
       ranking,
+      availableSubjects,
+      appliedLevel: wLevel,
+      appliedLevelLabel: wLevel !== 'all' ? levelLabel(wLevel) : null,
+      appliedSubject: wSubject,
+      appliedSubjectLabel: wSubject !== 'all' ? (CANONICAL_SUBJECT_LABEL[wSubject] || null) : null,
       disclaimer: '취약·하락 추세는 규칙 기반 신호입니다. 표본이 적은 단위는 참고용으로 보세요.',
     });
   } catch (err) {
@@ -4513,6 +4592,31 @@ router.get('/stats/admin-kpi', requireAuth, (req, res) => {
     const weeklyTrend = [];
     for (let w = 7; w >= 0; w--) weeklyTrend.push({ weeksAgo: w, count: wkMap.get(w) || 0 });
 
+    // [BE-4] 주간 활동 추이 학교급별 분해 (전체 + 초·중·고 멀티라인).
+    //   기존 8주 버킷 로직에 JOIN users + GROUP BY school_level 만 추가. role='student' 스코프.
+    //   total = elementary+middle+high (학교급 없는 학생/교사는 제외 → total===초+중+고 정합).
+    const weeklyLvl = db.prepare(`
+      SELECT CAST((JULIANDAY('now','localtime') - JULIANDAY(ll.created_at)) / 7 AS INTEGER) wk,
+             u.school_level lvl, COUNT(*) cnt
+      FROM learning_logs ll JOIN users u ON u.id = ll.user_id
+      WHERE u.role='student' AND u.school_level IN ('elementary','middle','high')
+        AND DATE(ll.created_at) >= DATE('now','localtime','-55 days') ${sfL.where}
+      GROUP BY wk, u.school_level
+    `).all();
+    const lvlMap = new Map(); // wk -> { elementary, middle, high }
+    weeklyLvl.forEach(r => {
+      if (!lvlMap.has(r.wk)) lvlMap.set(r.wk, { elementary: 0, middle: 0, high: 0 });
+      lvlMap.get(r.wk)[r.lvl] += r.cnt;
+    });
+    const weeklyTrendByLevel = [];
+    for (let w = 7; w >= 0; w--) {
+      const o = lvlMap.get(w) || { elementary: 0, middle: 0, high: 0 };
+      weeklyTrendByLevel.push({
+        weeksAgo: w, total: o.elementary + o.middle + o.high,
+        elementary: o.elementary, middle: o.middle, high: o.high
+      });
+    }
+
     res.json({
       success: true,
       period: `${days}d`,
@@ -4529,7 +4633,8 @@ router.get('/stats/admin-kpi', requireAuth, (req, res) => {
         periodActs
       },
       byLevel,
-      weeklyTrend
+      weeklyTrend,
+      weeklyTrendByLevel
     });
   } catch (err) {
     console.error('[LRS] /stats/admin-kpi error:', err);
@@ -4707,6 +4812,13 @@ router.get('/stats/macro-drill', requireAuth, (req, res) => {
     const schoolLevel = req.query.school_level ? String(req.query.school_level).trim() : null;
     const school = req.query.school ? String(req.query.school).trim() : null;
     const grade = req.query.grade != null && req.query.grade !== '' ? parseInt(req.query.grade, 10) : null;
+    // [BE-6] 교과 필터(§A-6 학교 1단 드릴용). canonical key → codeSet IN(subjectLabel 정규화).
+    //   level=subject(교과 드릴) 에는 미적용(모든 교과를 봐야 함) — 단위 드릴(school 등) logAgg 에만.
+    const subjectFilter = req.query.subject && req.query.subject !== 'all' ? String(req.query.subject).trim() : null;
+    if (subjectFilter && !CANONICAL_SUBJECT_KEYS.has(subjectFilter)) {
+      return res.status(400).json({ success: false, message: '잘못된 subject 파라미터입니다.' });
+    }
+    const mdSubjF = subjectCodeSetFilter(subjectFilter, 'll'); // { where, params } — subjectFilter null 이면 빈 조건
 
     const GROUP = {
       region: { col: 'u.region', next: 'school_level' },
@@ -4764,9 +4876,9 @@ router.get('/stats/macro-drill', requireAuth, (req, res) => {
                AVG(CASE WHEN ${scoredWhere('ll')} THEN ${normScoreExpr('ll')} END) avg_score
         FROM learning_logs ll JOIN users u ON u.id = ll.user_id
         WHERE ${studWhereSql} AND ${gcol} IS NOT NULL AND ${gcol} <> ''
-          AND DATE(ll.created_at) >= DATE('now','localtime', ?) ${sfL.where}
+          AND DATE(ll.created_at) >= DATE('now','localtime', ?) ${sfL.where} ${mdSubjF.where}
         GROUP BY ${gcol}
-      `).all(...studParams, dateFrom);
+      `).all(...studParams, dateFrom, ...mdSubjF.params);
       const logMap = new Map(logAgg.map(r => [String(r.id), r]));
       rows = studAgg.map(s => {
         const l = logMap.get(String(s.id)) || { acts: 0, dur_sec: 0, avg_score: null };
@@ -4807,7 +4919,7 @@ router.get('/stats/macro-drill', requireAuth, (req, res) => {
       nextLevel: GROUP[level].next,
       period: `${days}d`,
       realOnly: sfL.realOnly,
-      filters: { region, school_level: schoolLevel, school, grade },
+      filters: { region, school_level: schoolLevel, school, grade, subject: subjectFilter },
       minSample: MIN_N,
       children
     });
@@ -4877,6 +4989,20 @@ router.get('/stats/equity', requireAuth, (req, res) => {
     if (dim !== 'region' && dim !== 'school_level') {
       return res.status(400).json({ success: false, message: '잘못된 dim 파라미터입니다.' });
     }
+    // ── [BE-1] 학교급 스코프 필터 (기본 all). region 비교를 그 학교급으로 좁힌다. ──
+    const schoolLevelParam = String(req.query.school_level || 'all').trim();
+    if (!['all', 'elementary', 'middle', 'high'].includes(schoolLevelParam)) {
+      return res.status(400).json({ success: false, message: '잘못된 school_level 파라미터입니다.' });
+    }
+    const levelWhere = schoolLevelParam !== 'all' ? ' AND u.school_level = ?' : '';
+    const levelParams = schoolLevelParam !== 'all' ? [schoolLevelParam] : [];
+    // ── [BE-2] 교과 스코프 필터 (기본 all). §0-4 codeSet IN(subjectLabel 정규화) 방식. ──
+    const subjectParam = String(req.query.subject || 'all').trim();
+    if (!isValidSubjectParam(subjectParam)) {
+      return res.status(400).json({ success: false, message: '잘못된 subject 파라미터입니다.' });
+    }
+    const subjF = subjectCodeSetFilter(subjectParam, 'll'); // { where, params }
+    const subjW = subjF.where, subjP = subjF.params;
     const days = macroDays(req, 30);           // 30d 기본, 90d 허용(그 외 값은 그대로 일수화)
     const sfU = seedFilter(req, 'u');
     const sfL = seedFilter(req, 'll');
@@ -4894,14 +5020,16 @@ router.get('/stats/equity', requireAuth, (req, res) => {
       const dateParams = toExpr ? [fromExpr, toExpr] : [fromExpr];
 
       // 학생 수(단위별) — 로그 유무와 무관, 재학생 분모(macro-drill studAgg 동일)
+      //   [BE-1] 학교급 필터만 적용(subject 는 로그 기준이라 분모 미변경).
       const studAgg = db.prepare(`
         SELECT ${gcol} id, COUNT(*) students
         FROM users u
-        WHERE u.role='student' AND ${gcol} IS NOT NULL AND ${gcol} <> '' ${sfU.where}
+        WHERE u.role='student' AND ${gcol} IS NOT NULL AND ${gcol} <> '' ${sfU.where} ${levelWhere}
         GROUP BY ${gcol}
-      `).all();
+      `).all(...levelParams);
 
       // 활동수·학습시간·평균성취(단위별) — macro-drill logAgg 동일 SQL
+      //   [BE-1/2] 학교급 + 교과(codeSet IN) 필터 적용.
       const logAgg = db.prepare(`
         SELECT ${gcol} id,
                COUNT(*) acts,
@@ -4910,9 +5038,9 @@ router.get('/stats/equity', requireAuth, (req, res) => {
                AVG(CASE WHEN ${scoredWhere('ll')} THEN ${normScoreExpr('ll')} END) avg_score
         FROM learning_logs ll JOIN users u ON u.id = ll.user_id
         WHERE u.role='student' AND ${gcol} IS NOT NULL AND ${gcol} <> ''
-          ${dateWhere} ${sfL.where}
+          ${dateWhere} ${sfL.where} ${levelWhere} ${subjW}
         GROUP BY ${gcol}
-      `).all(...dateParams);
+      `).all(...dateParams, ...levelParams, ...subjP);
       const logMap = new Map(logAgg.map(r => [String(r.id), r]));
 
       // WAU(단위별) — 최근 7일 활동 1회+ 고유 학생. activeRate 분자.
@@ -4922,9 +5050,9 @@ router.get('/stats/equity', requireAuth, (req, res) => {
         SELECT ${gcol} id, COUNT(DISTINCT ll.user_id) wau
         FROM learning_logs ll JOIN users u ON u.id = ll.user_id
         WHERE u.role='student' AND ${gcol} IS NOT NULL AND ${gcol} <> ''
-          AND DATE(ll.created_at) >= DATE('now','localtime','-6 days') ${sfL.where}
+          AND DATE(ll.created_at) >= DATE('now','localtime','-6 days') ${sfL.where} ${levelWhere} ${subjW}
         GROUP BY ${gcol}
-      `).all() : [];
+      `).all(...levelParams, ...subjP) : [];
       const wauMap = new Map(wauAgg.map(r => [String(r.id), r.wau]));
 
       // 도달률(reachRate) — v1 간이 정의: 학생 개인 avg_score ≥ 60 인 학생 수(단위별).
@@ -4936,11 +5064,11 @@ router.get('/stats/equity', requireAuth, (req, res) => {
                  AVG(CASE WHEN ${scoredWhere('ll')} THEN ${normScoreExpr('ll')} END) uavg
           FROM users u JOIN learning_logs ll ON ll.user_id = u.id
           WHERE u.role='student' AND ${gcol} IS NOT NULL AND ${gcol} <> ''
-            ${dateWhere} ${sfL.where}
+            ${dateWhere} ${sfL.where} ${levelWhere} ${subjW}
           GROUP BY u.id
           HAVING uavg IS NOT NULL
         ) GROUP BY region_id
-      `).all(...dateParams);
+      `).all(...dateParams, ...levelParams, ...subjP);
       const reachMap = new Map(reachAgg.map(r => [String(r.id), r.reached]));
 
       const map = new Map();
@@ -5061,7 +5189,8 @@ router.get('/stats/equity', requireAuth, (req, res) => {
     //   재사용: studAgg/logAgg SQL 을 GROUP BY school_level, region 으로 확장(단일 쿼리 2회).
     //           scoredWhere·normScoreExpr·seedFilter·MIN_N(=10 마스킹) 동일 적용.
     //   현재 period(days) 창 기준. 표본부족(students<10) 셀은 masked·avgScore null·격차 산정 제외.
-    const crossLevelRegion = (() => {
+    //   [BE-3] 특정 학교급 선택 시 급×지역 교차는 무의미 → [] 반환(FE 자동 숨김).
+    const crossLevelRegion = schoolLevelParam !== 'all' ? [] : (() => {
       // 학교급별 재학생 수(급×지역). 로그 유무 무관.
       const clrStud = db.prepare(`
         SELECT u.school_level lvl, u.region reg, COUNT(*) students
@@ -5072,6 +5201,7 @@ router.get('/stats/equity', requireAuth, (req, res) => {
         GROUP BY u.school_level, u.region
       `).all();
       // 학교급×지역 평균성취(채점형만·0~100 정규화) — 현재 days 창.
+      //   [BE-2] 교과 선택 시 codeSet IN 필터 적용(그 교과 히트맵).
       const clrScore = db.prepare(`
         SELECT u.school_level lvl, u.region reg,
                AVG(CASE WHEN ${scoredWhere('ll')} THEN ${normScoreExpr('ll')} END) avg_score
@@ -5079,9 +5209,9 @@ router.get('/stats/equity', requireAuth, (req, res) => {
         WHERE u.role='student'
           AND u.school_level IS NOT NULL AND u.school_level <> ''
           AND u.region IS NOT NULL AND u.region <> ''
-          AND DATE(ll.created_at) >= DATE('now','localtime', ?) ${sfL.where}
+          AND DATE(ll.created_at) >= DATE('now','localtime', ?) ${sfL.where} ${subjW}
         GROUP BY u.school_level, u.region
-      `).all(`-${days - 1} days`);
+      `).all(`-${days - 1} days`, ...subjP);
       const scoreMap = new Map(clrScore.map(r => [`${r.lvl} ${r.reg}`, r.avg_score]));
 
       // 학교급별로 지역 셀을 모은다.
@@ -5121,6 +5251,18 @@ router.get('/stats/equity', requireAuth, (req, res) => {
       });
     })();
 
+    // ── [BE-3] availableSubjects — 현재 급·기간 스코프에 로그가 존재하는 교과만 present=true. ──
+    //   교과 필터(subjectParam)와 무관한 "그 스코프 전체" 기준(죽은 칩 방지 · 데이터 주도).
+    const availRows = db.prepare(`
+      SELECT DISTINCT ll.subject_code c
+      FROM learning_logs ll JOIN users u ON u.id = ll.user_id
+      WHERE u.role='student' AND ll.subject_code IS NOT NULL AND ll.subject_code <> ''
+        AND DATE(ll.created_at) >= DATE('now','localtime', ?) ${sfL.where} ${levelWhere}
+    `).all(`-${days - 1} days`, ...levelParams);
+    const presentKeys = new Set();
+    availRows.forEach(r => { const k = canonicalSubjectKey(subjectLabel(r.c)); if (k) presentKeys.add(k); });
+    const availableSubjects = buildAvailableSubjects(presentKeys);
+
     res.json({
       success: true,
       dim, period: `${days}d`, realOnly: sfL.realOnly, minSample: MIN_N,
@@ -5129,7 +5271,13 @@ router.get('/stats/equity', requireAuth, (req, res) => {
       metrics,
       trend: { metric: 'avgScore', points: trendPoints },
       priorityUnits,
-      crossLevelRegion
+      crossLevelRegion,
+      // ── [BE-3] 통합 뷰 필터 계약(FE 연동) ──
+      availableSubjects,
+      appliedLevel: schoolLevelParam,
+      appliedLevelLabel: schoolLevelParam !== 'all' ? levelLabel(schoolLevelParam) : null,
+      appliedSubject: subjectParam,
+      appliedSubjectLabel: subjectParam !== 'all' ? (CANONICAL_SUBJECT_LABEL[subjectParam] || null) : null
     });
   } catch (err) {
     console.error('[LRS] /stats/equity error:', err);

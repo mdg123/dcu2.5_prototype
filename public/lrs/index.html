@@ -60,6 +60,39 @@
     }
     .dc-unit-toggle .chip[aria-pressed="true"] { background:var(--lrs-primary); color:#fff; border-color:var(--lrs-primary); }
 
+    /* ── 통합 뷰(지역별 성취수준 비교) 필터바 + aWeak 필터 공용 ─────────────── */
+    .dc-eq-filters { display:flex; align-items:center; gap:16px 20px; flex-wrap:wrap; }
+    .dc-eq-flabel { font-size:15px; font-weight:600; color:var(--gray-700); margin-right:2px; }
+    .dc-eq-caption { margin-top:10px; font-size:13px; color:var(--gray-600); line-height:1.5; }
+    .dc-eq-summary { margin-top:8px; display:inline-flex; align-items:center; gap:6px;
+      font-size:13px; font-weight:600; color:var(--lrs-primary-dark);
+      background:var(--lrs-primary-lighter); border:1px solid var(--lrs-primary-light);
+      border-radius:var(--radius-pill); padding:4px 12px; }
+    .dc-eq-summary i { font-size:12px; color:var(--lrs-primary); }
+    .dc-eq-filterbar #aWeakSubjectToggle, .dc-eq-filterbar #aEquitySubjectToggle { max-width:100%; }
+
+    /* ── ⑦ 지역 상세표 → 학교 1단 인라인 드릴 패널(모달 아님) ─────────────── */
+    .eq-drill-row td { background:#f8fafc !important; padding:0 !important; border-bottom:1px solid var(--gray-200); }
+    .eq-drill-row:hover td { background:#f8fafc !important; cursor:default; }
+    .eq-drill { padding:14px 16px; }
+    .eq-drill-load, .eq-drill-empty { font-size:14px; color:var(--gray-600); padding:6px 2px; }
+    .eq-drill-empty { color:var(--gray-500); }
+    .eq-drill-head { font-size:15px; font-weight:700; color:var(--gray-800); margin-bottom:10px; display:flex; align-items:baseline; gap:6px; flex-wrap:wrap; }
+    .eq-drill-head i { color:var(--lrs-primary); }
+    .eq-drill-sub { font-size:13px; font-weight:500; color:var(--gray-500); }
+    .eq-drill-bars { display:flex; flex-direction:column; gap:7px; }
+    .eq-drill-bar { display:grid; grid-template-columns:minmax(96px,160px) 1fr 62px; align-items:center; gap:10px; }
+    .eq-drill-bar .edb-name { font-size:14px; font-weight:600; color:var(--gray-700); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .eq-drill-bar .edb-track { height:14px; border-radius:7px; background:var(--gray-200); overflow:hidden; }
+    .eq-drill-bar .edb-fill { display:block; height:100%; border-radius:7px; transition:width .4s var(--ease-out); }
+    .eq-drill-bar .edb-val { font-size:14px; font-weight:700; color:var(--gray-800); text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; }
+    .eq-drill-bar.is-low .edb-name, .eq-drill-bar.is-low .edb-val { color:var(--gray-400); font-weight:600; }
+    .eq-drill-bar .edb-low { color:var(--gray-400); font-weight:600; }
+    @media (max-width:768px) {
+      .eq-drill-bar { grid-template-columns:1fr 56px; grid-auto-rows:min-content; row-gap:3px; }
+      .eq-drill-bar .edb-track { grid-column:1 / -1; order:3; }
+    }
+
     /* ── KPI 카드 보조 라인(kpi-extra) — a-equity CV(산포) 노출 등. lrs-tokens 미정의라 여기 자립 정의(13px, 12px 금지) ── */
     .dc-kpi-card .kpi-extra { font-size:13px; color:var(--gray-500); line-height:1.5; margin-top:6px;
       display:flex; align-items:center; gap:5px; flex-wrap:wrap; }
@@ -1272,8 +1305,7 @@ const MENUS = {
     // ── 핵심 5블록 (정책가의 질문 순서) ──
     { id:'a-home',       label:'한눈 현황',        icon:'fa-globe',                 group:'홈',             category:'home' },
     { id:'a-svc-ops',    label:'서비스 운영 진단',  icon:'fa-gauge-high',            group:'거시 분석',       category:'analytics' },
-    { id:'a-macro',      label:'거시 비교',        icon:'fa-layer-group',           group:'거시 분석',       category:'analytics' },
-    { id:'a-equity',     label:'형평성',          icon:'fa-scale-balanced',        group:'거시 분석',       category:'analytics' },
+    { id:'a-macro',      label:'지역별 성취수준 비교', icon:'fa-scale-balanced',      group:'거시 분석',       category:'analytics' },
     { id:'a-cross',      label:'활동×성취 교차',    icon:'fa-arrows-to-dot',         group:'거시 분석',       category:'analytics' },
     { id:'a-time',       label:'학습시간 분석',     icon:'fa-clock',                 group:'거시 분석',       category:'analytics' },
     // ── 보조 (고급/운영) ──
@@ -7183,7 +7215,7 @@ VIEWS['a-home'] = async function(root){
       ${kpiCard('7일 활성률',   (k.activeRate||0),                '%', {dir:(k.activeRate||0)>=50?'up':'flat',text:'WAU/가입학생'}, 'primary')}
     </div>
     <div class="grid-2">
-      ${chartWrap('aHomeWeek','주간 활동 추이','최근 8주',`이번 주 ${lastWk.toLocaleString()}건 (직전주 대비 ${wkDelta>=0?'+':''}${wkDelta.toLocaleString()})`)}
+      ${chartWrap('aHomeWeek','주간 활동 추이','최근 8주 · 전체 및 초·중·고 학교급별',`이번 주 ${lastWk.toLocaleString()}건 (직전주 대비 ${wkDelta>=0?'+':''}${wkDelta.toLocaleString()})`)}
       <section class="dc-chart-wrapper">
         <header><h2>오늘 활동 스냅샷</h2><div class="subtitle">실시간 요약</div></header>
         <div id="aHomeSnapshot"></div>
@@ -7194,12 +7226,36 @@ VIEWS['a-home'] = async function(root){
       <div class="dc-level-mini" id="aHomeLevels"></div>
     </section>`;
 
-  // 8주 추이 라인 (오래된 주 → 최근 주)
-  if (wt.length){
+  // 8주 추이 (오래된 주 → 최근 주) — 학교급별 멀티라인(전체+초·중·고). weeklyTrendByLevel 미반영 시 전체 단일 라인 폴백.
+  const wtByLevel = Array.isArray(d.weeklyTrendByLevel)
+    ? d.weeklyTrendByLevel.slice().sort((a,b)=> (b.weeksAgo||0) - (a.weeksAgo||0)) // 오래된 주(7)→최근(0)
+    : [];
+  const legendTop = {
+    display:true, position:'top',
+    labels:{ font:{size:LRS_CHART_FONT_SIZE}, usePointStyle:true, boxWidth:14, padding:10 }
+  };
+  if (wtByLevel.length){
+    const wkLabel = (w)=> w.weeksAgo===0 ? '이번 주' : `${w.weeksAgo}주 전`;
+    const mkLine = (label, key, color, width)=>({
+      label, data: wtByLevel.map(w => Number(w[key])||0),
+      borderColor:color, backgroundColor:'transparent', fill:false,
+      tension:.3, pointRadius:3, borderWidth:width
+    });
+    mkChart(document.getElementById('aHomeWeek'),'line',{
+      labels: wtByLevel.map(wkLabel),
+      datasets:[
+        mkLine('전체','total','#2563eb',3),
+        mkLine('초등학교','elementary','#10b981',2),
+        mkLine('중학교','middle','#f59e0b',2),
+        mkLine('고등학교','high','#8b5cf6',2)
+      ]
+    }, { scales:{ y:{ beginAtZero:true } }, plugins:{ legend: legendTop } });
+  } else if (wt.length){
+    // 폴백: 학교급 분해 데이터 없음 → 전체 단일 라인(기존 동작)
     mkChart(document.getElementById('aHomeWeek'),'line',{
       labels: wt.map(w => w.weeksAgo===0 ? '이번 주' : `${w.weeksAgo}주 전`),
       datasets:[{ label:'활동 건수', data: wt.map(w=>w.count||0), borderColor:'var(--chart-1)', backgroundColor:'rgba(37,99,235,.1)', fill:true, tension:.3, pointRadius:3 }]
-    }, { scales:{ y:{ beginAtZero:true } } });
+    }, { scales:{ y:{ beginAtZero:true } }, plugins:{ legend:{ display:false } } });
   } else {
     document.getElementById('aHomeWeek').closest('.dc-chart-wrapper').innerHTML =
       `<header><h2>주간 활동 추이</h2></header>` + _seedHintEmpty();
@@ -7316,6 +7372,7 @@ VIEWS['a-svc-ops'] = async function(root){
         </div>
         <div class="ms-controls" id="aWeakConf"></div>
       </div>
+      <div id="aWeakFilters" class="dc-eq-filterbar" style="margin:6px 0 14px;"></div>
       <div id="aWeakHost"></div>
       <div id="aWeakFoot"></div>
     </section>`;
@@ -7398,12 +7455,48 @@ VIEWS['a-svc-ops'] = async function(root){
     rows: services, initialSort:'count', initialDir:'desc'
   });
 
-  // ── A-WEAK 취약 성취기준 추세 랭킹 — 후행 로드 ─────────────────────────
-  (async () => {
-    const w = await apiGet('/api/lrs/weak-trend', { scope:'all', limit:15 });
-    renderWeakTrend(w);
-  })();
+  // ── A-WEAK 취약 성취기준 추세 랭킹 — 후행 로드(학교급·교과 필터) ─────────────
+  loadWeakTrend();
 };
+
+/* A-WEAK 후행 로드(학교급·교과 필터) — 칩 변경 시 부분 재조회(전 뷰 리로드 없음) */
+async function loadWeakTrend(){
+  const params = { scope:'all', limit:15 };
+  const lv = state._weakLevel || 'all';
+  const subj = state._weakSubject || 'all';
+  if (lv !== 'all')   params.school_level = lv;
+  if (subj !== 'all') params.subject = subj;
+  const w = await apiGet('/api/lrs/weak-trend', params);
+  renderWeakFilters(w);
+  renderWeakTrend(w);
+}
+
+/* A-WEAK 필터 칩(학교급·교과) — equity 통합뷰와 동일 chip 컴포넌트 재사용 */
+function renderWeakFilters(w){
+  const host = document.getElementById('aWeakFilters');
+  if (!host) return;
+  const lv = state._weakLevel || 'all';
+  const subj = state._weakSubject || 'all';
+  const avail = (w && Array.isArray(w.availableSubjects)) ? w.availableSubjects.filter(s=>s && s.present) : [];
+  const subjToggle = avail.length
+    ? `<div class="dc-unit-toggle" id="aWeakSubjectToggle" role="group" aria-label="교과 선택">
+         <span class="dc-eq-flabel">교과</span>${_eqSubjectChipsHtml(avail, subj)}</div>`
+    : '';
+  host.innerHTML = `
+    <div class="dc-eq-filters">
+      <div class="dc-unit-toggle" id="aWeakLevelToggle" role="group" aria-label="학교급 선택">
+        <span class="dc-eq-flabel">학교급</span>${_eqLevelChipsHtml(lv)}
+      </div>
+      ${subjToggle}
+    </div>
+    ${_eqSummaryChip(lv, subj, null)}`;
+  host.querySelectorAll('#aWeakLevelToggle button[data-lv]').forEach(b=>{
+    b.onclick = ()=>{ if (state._weakLevel===b.dataset.lv) return; state._weakLevel = b.dataset.lv; loadWeakTrend(); };
+  });
+  host.querySelectorAll('#aWeakSubjectToggle button[data-subj]').forEach(b=>{
+    b.onclick = ()=>{ if (state._weakSubject===b.dataset.subj) return; state._weakSubject = b.dataset.subj; loadWeakTrend(); };
+  });
+}
 
 /* A-WEAK 렌더(관리자) — renderDataTable + 인라인 도달 Bar(4상태색) + 추세 화살표 + 표본수 */
 function renderWeakTrend(w){
@@ -7417,8 +7510,10 @@ function renderWeakTrend(w){
   }
   const rows = (w.ranking || []);
   if (!rows.length){
+    const cond = _eqSummaryText(state._weakLevel, state._weakSubject);
+    if (confHost) confHost.innerHTML = '';
     host.innerHTML = `<div class="mastery-empty"><i class="fas fa-face-smile me-icon" style="color:#86efac;"></i>
-      <p>전반적으로 하락 중인 성취기준이 없어요. 안정적인 추세예요.</p></div>`;
+      <p>${cond ? `선택한 조건(${escapeHtml(cond)})에서 ` : ''}하락 중인 성취기준이 없어요. 안정적인 추세예요.</p></div>`;
     return;
   }
   // 전체 신뢰(표본 기준) — 가장 보수적 단위로 표시
@@ -7444,7 +7539,7 @@ function renderWeakTrend(w){
           const codeBare = String(r.code||'').replace(/^\[|\]$/g,'');
           const lbl = r.label && r.label !== r.code ? r.label : codeBare;
           const short = lbl.length>18 ? lbl.slice(0,18)+'…' : lbl;
-          return `<div style="max-width:280px;"><div style="font-weight:600;color:#1f2937;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(short)}</div><div style="font-size:12px;color:#9ca3af;">[${escapeHtml(codeBare)}]</div></div>`;
+          return `<div style="max-width:280px;"><div style="font-weight:600;color:#1f2937;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(short)}</div><div style="font-size:13px;color:#9ca3af;">[${escapeHtml(codeBare)}]</div></div>`;
         } },
       { key:'subject', label:'교과', format:v=>escapeHtml(v||'-') },
       { key:'reachedRate', label:'도달률', format:(v)=> inlineBar(v==null?0:v) },
@@ -7482,128 +7577,119 @@ function renderWeakTrend(w){
 }
 
 /* ======================================================================
- * ③ 거시 비교 (a-macro) — 지역▸학교급▸학교▸학년▸교과 드릴다운
- *    브레드크럼 + KPI 4 + 막대 비교 + 정렬 표. n<10 마스킹("표본 부족").
- *    state._macroPath: [{level, id, label}] 체인
+ * ③ 지역별 성취수준 비교 (a-macro) — 통합 뷰 공용 헬퍼
+ *    (구 거시 비교 5단 드릴 + 형평성 뷰를 하나로 통합. 렌더 본체는 아래 VIEWS['a-macro'].)
+ *    학교급·교과·기간 3필터 칩 · 필터 요약 · 학교 1단 인라인 드릴을 공용 헬퍼로 제공.
+ *    aWeak(취약 성취기준) 필터와 동일 chip 컴포넌트를 공유한다.
  * ==================================================================== */
-const MACRO_LEVEL_LABEL = { region:'지역', school_level:'학교급', school:'학교', grade:'학년', subject:'교과' };
-function _macroFiltersFromPath(path){
-  // path의 각 단계에서 상위 필터 파라미터 구성
-  const f = {};
-  path.forEach(p => {
-    if (p.level === 'region') f.region = p.id;
-    else if (p.level === 'school_level') f.school_level = p.id;
-    else if (p.level === 'school') f.school = p.id;
-    else if (p.level === 'grade') f.grade = p.id;
-  });
-  return f;
+const EQ_LEVELS = [['all','전체'],['elementary','초'],['middle','중'],['high','고']];
+const EQ_SUBJECT_ORDER = ['korean','math','english','science','social','moral','music','art','pe','practical'];
+const EQ_SUBJECT_LABEL = { korean:'국어', math:'수학', english:'영어', science:'과학', social:'사회', moral:'도덕', music:'음악', art:'미술', pe:'체육', practical:'실과' };
+function _eqLevelLabelOf(v){ return v==='elementary'?'초등학교':v==='middle'?'중학교':v==='high'?'고등학교':null; }
+function _eqSubjectLabelOf(k){ return (k && k!=='all') ? (EQ_SUBJECT_LABEL[k]||k) : null; }
+function _eqPeriodLabelOf(p){ return p==='90d'?'최근 90일':p==='30d'?'최근 30일':null; }
+
+/* 학교급 칩(전체/초/중/고) — data-lv. equity·aWeak 공용 */
+function _eqLevelChipsHtml(active){
+  return EQ_LEVELS.map(([v,l])=>`<button class="chip" type="button" data-lv="${v}" aria-pressed="${active===v?'true':'false'}">${l}</button>`).join('');
 }
-VIEWS['a-macro'] = async function(root){
-  root.innerHTML = tplLoading(2);
-  if (!state._macroPath) state._macroPath = []; // 비어있으면 region 레벨부터
+/* 교과 칩(전체 + 데이터 존재 교과만) — availableSubjects(present) 데이터 주도로 죽은 칩 방지. data-subj */
+function _eqSubjectChipsHtml(avail, active){
+  const present = new Map((avail||[]).map(s=>[s.key, s.label || EQ_SUBJECT_LABEL[s.key] || s.key]));
+  const ordered = EQ_SUBJECT_ORDER.filter(k=>present.has(k))
+    .concat([...present.keys()].filter(k=>EQ_SUBJECT_ORDER.indexOf(k)<0));
+  const chips = [`<button class="chip" type="button" data-subj="all" aria-pressed="${active==='all'?'true':'false'}">전체</button>`]
+    .concat(ordered.map(k=>`<button class="chip" type="button" data-subj="${escapeAttr(k)}" aria-pressed="${active===k?'true':'false'}">${escapeHtml(present.get(k))}</button>`));
+  return chips.join('');
+}
+/* 적용 필터 요약 텍스트("초등학교 · 수학 · 최근 30일") — state 값 기준(BE 미반영 폴백 안전) */
+function _eqSummaryText(level, subject, period){
+  const parts = [];
+  const l = _eqLevelLabelOf(level);     if (l) parts.push(l);
+  const s = _eqSubjectLabelOf(subject); if (s) parts.push(s);
+  const p = _eqPeriodLabelOf(period);   if (p) parts.push(p);
+  return parts.join(' · ');
+}
+/* 적용 필터 요약칩(현재위치 피드백) — 학교급·교과가 전체가 아닐 때만 노출(기간 단독은 미노출) */
+function _eqSummaryChip(level, subject, period){
+  const hasScope = (level && level!=='all') || (subject && subject!=='all');
+  if (!hasScope) return '';
+  const t = _eqSummaryText(level, subject, period);
+  return t ? `<div class="dc-eq-summary" role="status"><i class="fas fa-filter" aria-hidden="true"></i> 필터: ${escapeHtml(t)}</div>` : '';
+}
 
-  const path = state._macroPath;
-  // 다음에 조회할 level 결정: 마지막 단계의 nextLevel(없으면 region)
-  const last = path[path.length-1];
-  const NEXT = { region:'school_level', school_level:'school', school:'grade', grade:'subject', subject:null };
-  const queryLevel = last ? NEXT[last.level] : 'region';
-
-  // 브레드크럼
-  const crumbs = [`<button type="button" data-idx="-1" ${path.length===0?'aria-current="page"':''}>전체(충북)</button>`]
-    .concat(path.map((p,i)=> `<span class="sep">▸</span><button type="button" data-idx="${i}" ${i===path.length-1?'aria-current="page"':''}>${escapeHtml(p.label)}</button>`))
-    .join('');
-
-  root.innerHTML = `
-    <nav class="dc-drill-bc" id="aMacroBc" aria-label="거시 드릴다운 경로">${crumbs}</nav>
-    <div id="aMacroBody">${tplLoading(2)}</div>`;
-  root.querySelectorAll('#aMacroBc button').forEach(btn => {
-    btn.onclick = () => {
-      const idx = Number(btn.dataset.idx);
-      state._macroPath = idx < 0 ? [] : path.slice(0, idx+1);
-      VIEWS['a-macro'](root);
-    };
+/* ⑦ 지역 행 클릭 → 학교 1단 인라인 드릴(모달 아님). 재클릭 토글. macro-drill(level=school) 재사용. */
+async function _toggleEquitySchoolDrill(row){
+  const table = document.getElementById('aEquityTable');
+  if (!table || !row || row.masked) return;
+  let targetTr = null;
+  table.querySelectorAll('tbody tr[data-row-id]').forEach(tr=>{
+    if (tr.getAttribute('data-row-id') === String(row.id)) targetTr = tr;
   });
+  if (!targetTr) return;
+  const colspan = targetTr.children.length;
+  // 이미 이 지역이 펼쳐져 있으면 접기(토글)
+  const existing = table.querySelector('tr.eq-drill-row');
+  const openedFor = existing ? existing.getAttribute('data-drill-for') : null;
+  if (existing) existing.remove();
+  if (openedFor === String(row.id)){ state._eqDrillRegion = null; return; }
+  state._eqDrillRegion = String(row.id);
 
-  const body = document.getElementById('aMacroBody');
+  const panel = document.createElement('tr');
+  panel.className = 'eq-drill-row';
+  panel.setAttribute('data-drill-for', String(row.id));
+  panel.innerHTML = `<td colspan="${colspan}"><div class="eq-drill"><div class="eq-drill-load"><i class="fas fa-spinner fa-spin" aria-hidden="true"></i> ${escapeHtml(row.label)} 학교별 정답률 불러오는 중…</div></div></td>`;
+  targetTr.after(panel);
 
-  // 교과(subject)가 마지막 단계면 더 내려갈 곳이 없음 — 안내
-  if (!queryLevel){
-    body.innerHTML = `<div class="dc-state-panel" role="status" style="border-left:4px solid #64748b;background:#f1f5f9;">
-      <span style="font-size:var(--fs-display);">📊</span>
-      <p><strong>최하위 단위(교과)까지 도달했습니다</strong></p>
-      <p style="font-size:var(--fs-sm);color:var(--gray-600);line-height:1.6;">개인정보 보호 원칙에 따라 학급·개인 단위는 제공하지 않습니다. 상위 단계로 돌아가 다른 갈래를 살펴보세요.</p>
-    </div>`;
+  // macro-drill(level=school) — 현재 필터 스코프(학교급·교과·기간) 반영
+  const params = { level:'school', region: row.id, period: state._eqPeriod || '30d' };
+  if (state._eqLevel && state._eqLevel!=='all')     params.school_level = state._eqLevel;
+  if (state._eqSubject && state._eqSubject!=='all') params.subject = state._eqSubject;
+  const d = await apiGet('/api/lrs/stats/macro-drill', params);
+  const cell = panel.querySelector('.eq-drill');
+  if (!cell) return;
+  const subjLabel = _eqSubjectLabelOf(state._eqSubject);
+  const scoreNoun = subjLabel ? `${subjLabel} 정답률` : '정답률';
+  if (!d || !d.success){
+    cell.innerHTML = `<div class="eq-drill-empty">${escapeHtml(row.label)} 학교별 ${escapeHtml(scoreNoun)} 데이터를 불러오지 못했어요.</div>`;
     return;
   }
-
-  // API 호출
-  const f = _macroFiltersFromPath(path);
-  const d = await apiGet('/api/lrs/stats/macro-drill', { level: queryLevel, ...f });
-  if (!d || !d.success){ body.innerHTML = tplError('거시 비교 데이터를 불러오지 못했습니다', ()=>VIEWS['a-macro'](root)); return; }
-  const children = d.children || [];
-  if (!children.length){ body.innerHTML = _seedHintEmpty(`${MACRO_LEVEL_LABEL[queryLevel]||''} 단위 집계가 없어요`); return; }
-
-  const visible = children.filter(c => !c.masked);
-  const maskedCnt = children.length - visible.length;
-  // 집계 KPI (마스킹 제외 합산)
-  const totStu = children.reduce((s,c)=>s+(c.students||0),0);
-  const totActs = visible.reduce((s,c)=>s+(c.acts||0),0);
-  const wMin = visible.reduce((s,c)=>s+(c.avgLearnMin||0)*(c.students||0),0) / Math.max(1, visible.reduce((s,c)=>s+(c.students||0),0));
-  const scored = visible.filter(c=>c.avgScore!=null);
-  const wScore = scored.reduce((s,c)=>s+c.avgScore*(c.students||0),0) / Math.max(1, scored.reduce((s,c)=>s+(c.students||0),0));
-
-  body.innerHTML = `
-    <div class="dc-kpi-grid">
-      ${kpiCard('학생 수', totStu.toLocaleString(), '명', {dir:'flat',text:`${MACRO_LEVEL_LABEL[queryLevel]} ${children.length}개`}, 'primary')}
-      ${kpiCard('활동량',  totActs.toLocaleString(), '건', {dir:'flat',text:'표본 충족 합계'}, 'success')}
-      ${kpiCard('평균 학습시간', Math.round(wMin).toLocaleString(), '분', {dir:'flat',text:'1인 가중평균'}, 'warning')}
-      ${kpiCard('평균 성취', scored.length?wScore.toFixed(1):'-', '점', {dir:'flat',text:'가중평균'}, 'primary')}
-    </div>
-    <section class="dc-chart-wrapper">
-      <header><h2>${escapeHtml(MACRO_LEVEL_LABEL[queryLevel])}별 평균 성취 비교</h2><div class="subtitle">막대 클릭 시 하위 단위로 드릴다운</div></header>
-      <div class="chart-body" style="height:${Math.max(280, visible.length*30)}px;"><canvas id="aMacroBar" role="img" aria-label="${escapeAttr(MACRO_LEVEL_LABEL[queryLevel])}별 비교 막대"></canvas></div>
-    </section>
-    <section class="dc-chart-wrapper">
-      <header><h2>${escapeHtml(MACRO_LEVEL_LABEL[queryLevel])} 상세</h2><div class="subtitle">행 클릭 시 드릴다운 · 열 머리글로 정렬${maskedCnt?` · 표본 부족 ${maskedCnt}개 마스킹`:''}</div></header>
-      <div id="aMacroTable"></div>
-    </section>`;
-
-  // 비교 막대 (마스킹 제외, 성취 내림차순)
-  const barRows = visible.slice().sort((a,b)=>(b.avgScore||0)-(a.avgScore||0));
-  const drillOf = (c) => {
-    if (!NEXT[queryLevel]) return; // 교과면 더 못 내려감
-    state._macroPath = state._macroPath.concat([{ level:queryLevel, id:c.id, label:c.label }]);
-    VIEWS['a-macro'](root);
-  };
-  mkChart(document.getElementById('aMacroBar'),'bar',{
-    labels: barRows.map(c=>c.label),
-    datasets:[{ label:'평균 성취', data: barRows.map(c=>c.avgScore), backgroundColor:'var(--chart-1)' }]
-  }, {
-    indexAxis:'y',
-    scales:{ x:{ min:0, max:100, title:{display:true,text:'평균 성취점수'} } },
-    plugins:{ legend:{display:false} },
-    onClick:(evt, els)=>{ if (els && els.length) drillOf(barRows[els[0].index]); }
+  const schools = Array.isArray(d.children) ? d.children.slice() : [];
+  if (!schools.length){
+    cell.innerHTML = `<div class="eq-drill-empty">${escapeHtml(row.label)}에 집계할 학교별 ${escapeHtml(scoreNoun)} 데이터가 없어요.</div>`;
+    return;
+  }
+  // 정답률 내림차순(표본부족·무점수는 뒤로)
+  schools.sort((a,b)=>{
+    const av = (a.masked || a.avgScore==null) ? -1 : a.avgScore;
+    const bv = (b.masked || b.avgScore==null) ? -1 : b.avgScore;
+    return bv - av;
   });
-
-  // 상세 표 (마스킹 행 포함, "표본 부족" 표기)
-  renderDataTable(document.getElementById('aMacroTable'), {
-    columns:[
-      { key:'label', label:MACRO_LEVEL_LABEL[queryLevel] },
-      { key:'students', label:'학생수', align:'right', format:v=>escapeHtml((Number(v)||0).toLocaleString()) },
-      { key:'acts', label:'활동량', align:'right', format:(v,r)=> r.masked ? '<span style="color:var(--gray-400);">표본 부족</span>' : escapeHtml((Number(v)||0).toLocaleString()) },
-      { key:'avgLearnMin', label:'평균 학습시간(분)', align:'right', format:(v,r)=> r.masked ? '<span style="color:var(--gray-400);">·</span>' : escapeHtml((Number(v)||0).toLocaleString()) },
-      { key:'avgScore', label:'평균 성취', align:'right', format:(v,r)=> r.masked ? '<span style="color:var(--gray-400);">·</span>' : escapeHtml(v==null?'-':Number(v).toFixed(1)) }
-    ],
-    rows: children, initialSort:'students', initialDir:'desc',
-    onRowClick:(row)=>{ if (!row.masked) drillOf(row); }
-  });
-};
-
+  const bars = schools.map(s=>{
+    const low = s.masked || s.avgScore==null;
+    const sc = low ? null : Number(s.avgScore);
+    const w = low ? 0 : Math.max(0, Math.min(100, sc));
+    const barColor = low ? 'var(--gray-300)' : _equityScoreColor(sc);
+    const valTxt = low ? '<span class="edb-low">표본 부족</span>' : `${sc.toFixed(1)}점`;
+    const stu = (s.students!=null) ? ` · ${Number(s.students).toLocaleString()}명` : '';
+    return `<div class="eq-drill-bar${low?' is-low':''}">
+        <span class="edb-name" title="${escapeAttr(s.label)}${escapeAttr(stu)}">${escapeHtml(s.label)}</span>
+        <span class="edb-track"><span class="edb-fill" style="width:${w}%;background:${barColor};"></span></span>
+        <span class="edb-val">${valTxt}</span>
+      </div>`;
+  }).join('');
+  cell.innerHTML = `
+    <div class="eq-drill-head"><i class="fas fa-school" aria-hidden="true"></i> ${escapeHtml(row.label)} · 학교별 ${escapeHtml(scoreNoun)}
+      <span class="eq-drill-sub">정답률 내림차순 · 학생 10명 미만 학교는 표본 부족</span></div>
+    <div class="eq-drill-bars">${bars}</div>`;
+}
 /* ======================================================================
- * ③-2 교육 격차 모니터링 (a-equity) — Track 1 형평성
- *    지역/학교급 단위 활용·성취 격차 진단 (macro-drill 재사용, 신규 BE /stats/equity)
- *    구성: ① dim·기간 chip ② 헤드라인 KPI 4칸 ③ 분석멘트 ④ 격차 막대
- *          ⑤ 우선개입 사분면 산점도(+후보 카드) ⑥ 격차 추세 라인 ⑦ 상세표
+ * ③-본체 지역별 성취수준 비교 (VIEWS['a-macro']) — 구 형평성 렌더러 확장
+ *    ① 필터바(학교급·교과·기간 3필터) + 정의 캡션·요약칩
+ *    ② 격차 헤드라인 KPI 4칸  ③ 지역별 성취수준(정답률) 막대(1차 비교)
+ *    ④ 학교급×지역 히트맵(학교급=전체일 때만)  ⑤ 우선 지원 후보 지역(목록)
+ *    ⑥ 격차 추세  ⑦ 상세표(행 클릭 → 학교 1단 인라인 드릴)
+ *    성취수준 = 채점형 학습활동 평균 정답률(0~100점) — 전 라벨·툴팁 병기.
  * ==================================================================== */
 // 격차 크기 → tone (성취·도달률·활성률 %p 기준: gap<8 작음(success)·8~15 중간(warning)·≥15 큼(danger))
 function _equityGapTone(gap){
@@ -7629,15 +7715,18 @@ function _josa(word, a, b){
   return ((code - 0xAC00) % 28 !== 0) ? a : b;
 }
 function _equityInsight(d){
-  const dimLabel = (d && d.dim === 'school_level') ? '학교급' : '지역';
-  const dimJosaIga = _josa(dimLabel, '이', '가');
+  // 통합 뷰는 비교 단위를 지역으로 고정. 교과 선택 시 "○○ 정답률"로 라벨 적응.
+  const dimLabel = '지역';
+  const dimJosaIga = '이';
+  const subjLabel = (d && d.appliedSubjectLabel) ? d.appliedSubjectLabel : null;
+  const scoreNoun = subjLabel ? `${subjLabel} 정답률` : '정답률';
   const ms = (d && d.metrics) || {};
   const sc = ms.avgScore || {};
   const out = { headline:'', trend:'', priority:'' };
 
-  // 헤드라인: 평균 성취 격차 중심
+  // 헤드라인: 평균 정답률 격차 중심
   if (sc.gapPP == null || !sc.top || !sc.bottom){
-    out.headline = `${dimLabel} 간 성취 격차를 산출할 표본이 부족합니다.`;
+    out.headline = `지역 간 ${scoreNoun} 격차를 산출할 표본이 부족합니다.`;
   } else {
     const gap = Number(sc.gapPP);
     const topL = sc.top.label, botL = sc.bottom.label;
@@ -7645,9 +7734,7 @@ function _equityInsight(d){
     if (gap >= 15) verdict = '격차가 큽니다. 하위 지역 집중 지원을 검토하세요.';
     else if (gap >= 8) verdict = '중간 수준 격차입니다. 추세를 함께 확인하세요.';
     else verdict = '격차가 크지 않습니다.';
-    // '지역' 문구는 dim에 맞춰 자연스럽게 치환
-    if (d.dim === 'school_level') verdict = verdict.replace('하위 지역', '하위 학교급');
-    out.headline = `${dimLabel} 간 평균 성취 격차는 ${gap}%p입니다. ${escapeHtml(topL)}(최상위)${_josa(topL,'과','와')} ${escapeHtml(botL)}(최하위)의 차이로, ${verdict}`;
+    out.headline = `지역 간 평균 ${scoreNoun} 격차는 ${gap}%p입니다. ${escapeHtml(topL)}(최상위)${_josa(topL,'과','와')} ${escapeHtml(botL)}(최하위)의 차이로, ${verdict}`;
   }
 
   // 추세: 최근 3개 기간 헤드라인 격차 변화
@@ -7666,37 +7753,49 @@ function _equityInsight(d){
     out.trend = '격차 추세를 산출할 표본이 부족합니다.';
   }
 
-  // 우선개입: both_low(활용·성취 동반 저조)
+  // 우선 지원: both_low(활용도·정답률 동반 저조)
   const pu = (d && Array.isArray(d.priorityUnits)) ? d.priorityUnits : [];
   if (pu.length){
     const names = pu.slice(0,3).map(u=>u.label).join(', ');
-    out.priority = `${escapeHtml(names)}${pu.length>3?' 등':''} ${pu.length}개 ${dimLabel}${dimJosaIga} '활용·성취 동반 저조' 구간입니다. 콘텐츠 보급·연수·기기 지원 등 투입 우선순위 후보입니다.`;
+    out.priority = `${escapeHtml(names)}${pu.length>3?' 등':''} ${pu.length}개 ${dimLabel}${dimJosaIga} '활용도·${scoreNoun} 동반 저조' 구간입니다. 콘텐츠 보급·연수·기기 지원 등 투입 우선순위 후보입니다.`;
   } else {
-    out.priority = `'활용·성취 동반 저조' 구간에 해당하는 ${dimLabel}${dimJosaIga} 없습니다.`;
+    out.priority = `'활용도·${scoreNoun} 동반 저조' 구간에 해당하는 ${dimLabel}${dimJosaIga} 없습니다.`;
   }
   return out;
 }
 
-VIEWS['a-equity'] = async function(root){
+VIEWS['a-macro'] = async function(root){
   root.innerHTML = tplLoading(3);
-  if (!state._equityDim) state._equityDim = 'region';
-  if (!state._equityPeriod) state._equityPeriod = '30d';
-  const dim = state._equityDim;
-  const period = state._equityPeriod;
-  const DIM_LABEL = { region:'지역', school_level:'학교급' };
-  const dimLabel = DIM_LABEL[dim] || '지역';
+  if (!state._eqLevel)   state._eqLevel = 'all';
+  if (!state._eqSubject) state._eqSubject = 'all';
+  if (!state._eqPeriod)  state._eqPeriod = '30d';
+  state._eqDrillRegion = null; // 전체 재렌더 시 학교 드릴 접힘
+  const level = state._eqLevel, subject = state._eqSubject, period = state._eqPeriod;
+  const dimLabel = '지역'; // 통합 뷰는 비교 단위를 지역으로 고정
 
-  // apiGet은 state.period를 자동부착하나, equity는 자체 period(30d/90d)를 쓴다 → 명시 전달(자동값 덮어씀)
-  const d = await apiGet('/api/lrs/stats/equity', { dim, period });
-  if (!d || !d.success){ root.innerHTML = tplError('형평성 데이터를 불러오지 못했습니다', ()=>VIEWS['a-equity'](root)); return; }
+  // apiGet은 state.period를 자동부착하나, 통합뷰는 자체 기간(30d/90d)을 쓴다 → 명시 전달(자동값 덮어씀)
+  const qp = { dim:'region', period };
+  if (level !== 'all')   qp.school_level = level;
+  if (subject !== 'all') qp.subject = subject;
+  const d = await apiGet('/api/lrs/stats/equity', qp);
+  if (!d || !d.success){ root.innerHTML = tplError('지역별 성취수준 데이터를 불러오지 못했습니다', ()=>VIEWS['a-macro'](root)); return; }
+
+  // 성취수준=정답률 라벨(교과 선택 시 "○○ 정답률"로 적응)
+  const subjLabel  = d.appliedSubjectLabel || _eqSubjectLabelOf(subject);
+  const scoreLabel = subjLabel ? `${subjLabel} 정답률` : '성취수준(정답률)';
+  const scoreShort = subjLabel ? `${subjLabel} 정답률` : '정답률';
+  const axisTitle  = subjLabel ? `${subjLabel} 정답률(0~100점)` : '성취수준(정답률, 0~100점)';
 
   const units = Array.isArray(d.units) ? d.units : [];
   const visible = units.filter(u => !u.masked);
   const maskedCnt = units.length - visible.length;
-  // 빈 상태: 표본 충족 단위 < 2면 격차 산출 불가
+  // 빈 상태: 표본 충족 지역 < 2면 격차 산출 불가
   if (visible.length < 2){
-    root.innerHTML = _renderEquityChips(dim, period) +
-      _seedHintEmpty(`격차를 산출할 ${dimLabel} 표본이 부족합니다(최소 2개 ${dimLabel}, 각 ${d.minSample||10}명 이상)`);
+    const cond = _eqSummaryText(level, subject, period);
+    const msg = cond
+      ? `선택하신 조건(${cond})에는 집계할 정답률 데이터가 부족해요. 학교급이나 교과를 바꿔보세요.`
+      : `격차를 산출할 지역 표본이 부족합니다(최소 2개 지역, 각 ${d.minSample||10}명 이상)`;
+    root.innerHTML = _renderEquityChips(d) + _seedHintEmpty(msg);
     _bindEquityChips(root);
     return;
   }
@@ -7710,19 +7809,18 @@ VIEWS['a-equity'] = async function(root){
   const fmtPP = (v)=> (v==null?'-':Number(v).toFixed(1));
   const fmtX  = (v)=> (v==null?'-':Number(v).toFixed(1));
   // CV(변동계수, %) 보조 노출 — 헤드라인은 격차(gap) 유지, CV는 "산포(고른 정도)"를 kpi-extra 한 줄로.
-  //   kpiCard()가 이미 <div class="kpi-extra">로 감싸므로 여기선 내부 콘텐츠만 반환(이중 래핑 방지).
   //   BE 미반영(cv 없음)이면 라인 자체를 생략(폴백 안전).
   const cvExtra = (cv)=>{
     const n = Number(cv);
     if (cv==null || isNaN(n)) return '';
     return `<i class="fas fa-arrows-left-right-to-line kpi-extra-ico" aria-hidden="true"></i>`
-      + `<span>${dimLabel} 간 산포(변동계수) <b>${n.toFixed(0)}%</b> · 낮을수록 고름</span>`;
+      + `<span>지역 간 산포(변동계수) <b>${n.toFixed(0)}%</b> · 낮을수록 고름</span>`;
   };
 
   root.innerHTML = `
-    ${_renderEquityChips(dim, period)}
+    ${_renderEquityChips(d)}
     <div class="dc-kpi-grid">
-      ${kpiCard('성취 격차', fmtPP(mScore.gapPP), '%p',
+      ${kpiCard(`${scoreLabel} 격차`, fmtPP(mScore.gapPP), '%p',
         {dir:'flat', text: mScore.top&&mScore.bottom ? `${escapeHtml(mScore.top.label)}↔${escapeHtml(mScore.bottom.label)}` : '최상위↔최하위'},
         _equityGapTone(mScore.gapPP), cvExtra(mScore.cv))}
       ${kpiCard('활성률 격차', fmtPP(mActive.gapPP), '%p',
@@ -7739,145 +7837,71 @@ VIEWS['a-equity'] = async function(root){
     <section class="dc-insight-banner" style="margin-bottom:var(--space-4);">
       <span class="ib-icon">💡</span>
       <div>
-        <div style="font-weight:700;color:var(--gray-900);margin-bottom:4px;">${dimLabel} 간 성취 격차</div>
+        <div style="font-weight:700;color:var(--gray-900);margin-bottom:4px;">지역 간 ${escapeHtml(scoreShort)} 격차</div>
         <div style="line-height:1.7;">${ins.headline}</div>
       </div>
     </section>
 
     <section class="dc-chart-wrapper">
-      <header><h2>${dimLabel}별 성취 격차</h2><div class="subtitle">평균 성취 내림차순 · 하위 3개 ${dimLabel} 빨강 강조${maskedCnt?` · 표본 부족 ${maskedCnt}개 제외`:''}</div></header>
-      <div class="chart-body" style="height:${Math.max(280, visible.length*34)}px;"><canvas id="aEquityBar" role="img" aria-label="${dimLabel}별 성취 격차 막대"></canvas></div>
-    </section>
-
-    <section class="dc-chart-wrapper">
-      <header><h2>우선개입 후보 진단</h2><div class="subtitle">가로=1인당 활동 · 세로=평균 성취 · 좌하단(활용·성취 동반 저조) 우선개입 대상</div></header>
-      <div class="chart-body"><canvas id="aEquityScatter" role="img" aria-label="우선개입 사분면 산점도"></canvas></div>
-      <div id="aEquityPriority" style="margin-top:14px;"></div>
+      <header><h2>지역별 ${escapeHtml(scoreLabel)}</h2><div class="subtitle">평균 정답률 내림차순 · 하위 3개 지역 빨강 강조${maskedCnt?` · 표본 부족 ${maskedCnt}개 제외`:''}</div></header>
+      <div class="chart-body" style="height:${Math.max(280, visible.length*34)}px;"><canvas id="aEquityBar" role="img" aria-label="지역별 ${escapeAttr(scoreLabel)} 막대"></canvas></div>
     </section>
 
     <section class="dc-chart-wrapper" id="aEquityCrossLevelSec">
-      <header><h2>학교급별 지역 격차</h2><div class="subtitle">초·중·고 각 학교급에서 지역 간 평균 성취가 얼마나 벌어졌는지 · 셀 색: 초록(높음)↔빨강(낮음), 회색 대각선(표본 부족)</div></header>
+      <header><h2>학교급별 지역 격차</h2><div class="subtitle">초·중·고 각 학교급에서 지역 간 평균 ${escapeHtml(scoreShort)}이 얼마나 벌어졌는지 · 셀 색: 초록(높음)↔빨강(낮음), 회색 대각선(표본 부족)</div></header>
       <div id="aEquityCrossLevel"></div>
     </section>
 
     <section class="dc-chart-wrapper">
-      <header><h2>격차 추세</h2><div class="subtitle">최근 3개 기간 성취 격차(%p) 추이</div></header>
+      <header><h2>우선 지원 후보 지역</h2><div class="subtitle">${subjLabel ? `${escapeHtml(subjLabel)} 활용도와 정답률이` : '활용도와 성취(정답률)가'} 함께 낮아 먼저 지원이 필요한 지역이에요.</div></header>
+      <div id="aEquityPriority"></div>
+    </section>
+
+    <section class="dc-chart-wrapper">
+      <header><h2>격차 추세</h2><div class="subtitle">최근 3개 기간 ${escapeHtml(scoreShort)} 격차(%p) 추이</div></header>
       <div class="chart-body" style="height:260px;"><canvas id="aEquityTrend" role="img" aria-label="격차 추세 라인"></canvas></div>
       <div class="insight" aria-live="polite" style="margin-top:10px;">📈 ${escapeHtml(ins.trend)}</div>
     </section>
 
     <section class="dc-chart-wrapper">
-      <header><h2>${dimLabel}별 상세</h2><div class="subtitle">열 머리글로 정렬${maskedCnt?` · 표본 부족 ${maskedCnt}개 회색 표기`:''}</div></header>
+      <header><h2>지역별 상세</h2><div class="subtitle">행을 누르면 그 지역 학교별 정답률을 펼쳐 볼 수 있어요 · 열 머리글로 정렬${maskedCnt?` · 표본 부족 ${maskedCnt}개 회색 표기`:''}</div></header>
       <div id="aEquityTable"></div>
     </section>`;
 
   _bindEquityChips(root);
 
-  // ④ 지역별 격차 막대 (성취 내림차순, 최하위 3개 빨강)
+  // ③ 지역별 성취수준(정답률) 막대 (정답률 내림차순, 최하위 3개 빨강)
   const barRows = visible.slice().sort((a,b)=>(b.avgScore||0)-(a.avgScore||0));
   const lowSet = new Set(barRows.slice(-3).map(u=>u.id));
   mkChart(document.getElementById('aEquityBar'),'bar',{
     labels: barRows.map(u=>u.label),
-    datasets:[{ label:'평균 성취', data: barRows.map(u=>u.avgScore),
+    datasets:[{ label: scoreLabel, data: barRows.map(u=>u.avgScore),
       backgroundColor: barRows.map(u=> lowSet.has(u.id) ? '#dc2626' : 'var(--chart-1)') }]
   }, {
     indexAxis:'y',
-    scales:{ x:{ min:0, max:100, title:{display:true,text:'평균 성취점수'} } },
+    scales:{ x:{ min:0, max:100, title:{display:true,text:axisTitle} } },
     plugins:{ legend:{display:false},
-      tooltip:{ callbacks:{ afterLabel:(item)=> lowSet.has(barRows[item.dataIndex].id) ? '하위 3개 — 집중 지원 후보' : '' } } }
+      tooltip:{ callbacks:{
+        label:(item)=> `${item.label} · ${scoreShort} ${Number(item.raw).toFixed(1)}점`,
+        afterLabel:(item)=> lowSet.has(barRows[item.dataIndex].id) ? '하위 3개 — 집중 지원 후보' : '' } } }
   });
 
-  // ⑤ 우선개입 사분면 산점도 (x=1인당활동, y=평균성취, 좌하단 이중취약 음영)
-  const scPts = visible.filter(u=> u.avgActsPerStudent!=null && u.avgScore!=null);
-  if (scPts.length){
-    const xs = scPts.map(p=>p.avgActsPerStudent);
-    const ys = scPts.map(p=>p.avgScore);
-    // 이상치 강건: x축 상한 = max(p90*1.15, 소단위 가드). 단위 수 적으니 auto도 무난하나 1개/빈 방어.
-    const xSorted = xs.slice().sort((a,b)=>a-b);
-    const xP90 = xSorted[Math.min(xSorted.length-1, Math.floor(xSorted.length*0.9))];
-    const xMax = Math.max(5, Math.ceil((xP90||1) * 1.15));
-    // 사분면 경계 = 중앙값(both_low 정의와 일치)
-    const median = (arr)=>{ const s=arr.slice().sort((a,b)=>a-b); const m=Math.floor(s.length/2); return s.length%2?s[m]:(s[m-1]+s[m])/2; };
-    const xMed = median(xs), yMed = median(ys);
-    const bothLowIds = new Set((d.priorityUnits||[]).map(u=>u.id));
-    // 좌하단(이중취약) 음영 플러그인 — 산점도 chartArea 기준 사각형
-    const quadShade = {
-      id:'equityQuadShade',
-      beforeDatasetsDraw(chart){
-        try{
-          const {ctx, chartArea:ca, scales} = chart;
-          const xPix = scales.x.getPixelForValue(Math.min(xMed, xMax));
-          const yPix = scales.y.getPixelForValue(yMed);
-          ctx.save();
-          ctx.fillStyle = 'rgba(220,38,38,0.07)';
-          ctx.fillRect(ca.left, yPix, xPix - ca.left, ca.bottom - yPix);
-          ctx.restore();
-        }catch(_){}
-      }
-    };
-    const ptColor = (u)=> bothLowIds.has(u.id) ? '#dc2626' : '#2563eb';
-    // 단위명을 점 위에 캔버스로 직접 그리는 라벨 플러그인(외부 datalabels 미의존)
-    const ptLabels = {
-      id:'equityPtLabels',
-      afterDatasetsDraw(chart){
-        try{
-          const ctx = chart.ctx;
-          const meta = chart.getDatasetMeta(0);
-          ctx.save();
-          ctx.font = '12px Pretendard, system-ui, sans-serif';
-          ctx.textAlign = 'center';
-          meta.data.forEach((pt, i)=>{
-            const raw = chart.data.datasets[0].data[i]||{};
-            ctx.fillStyle = raw._both ? '#991b1b' : '#475569';
-            ctx.fillText(raw._label||'', pt.x, pt.y - 11);
-          });
-          ctx.restore();
-        }catch(_){}
-      }
-    };
-    // 인스턴스 플러그인(사분면 음영·점 라벨)을 직접 넘기려면 mkChart(옵션만 병합)로는 불가 → new Chart 직접 생성.
-    // mkChart의 색 해석·state.charts 등록 규약은 여기서 동등 재현.
-    const scatterData = { datasets:[{
-      label:`${dimLabel}`,
-      data: scPts.map(u=>({ x:u.avgActsPerStudent, y:u.avgScore, _label:u.label, _both:bothLowIds.has(u.id) })),
-      backgroundColor: scPts.map(ptColor),
-      borderColor: scPts.map(u=> bothLowIds.has(u.id) ? '#991b1b' : '#1d4ed8'),
-      pointRadius:7, pointHoverRadius:9, borderWidth:1.5
-    }] };
-    const scatterChart = new Chart(document.getElementById('aEquityScatter'), {
-      type:'scatter',
-      data: scatterData,
-      plugins:[quadShade, ptLabels],
-      options:{
-        responsive:true, maintainAspectRatio:false,
-        animation:{ duration:600, easing:'easeOutCubic' },
-        scales:{
-          x:{ title:{display:true,text:'1인당 활동량(건)'}, beginAtZero:true, max:xMax },
-          y:{ title:{display:true,text:'평균 성취점수'}, min:0, max:100 }
-        },
-        plugins:{
-          legend:{display:false},
-          tooltip:{ callbacks:{ label:(item)=>{
-            const r = item.raw||{};
-            return `${r._label} · 활동 ${Number(r.x).toFixed(1)}건 · 성취 ${Number(r.y).toFixed(1)}점${r._both?' · 우선개입':''}`;
-          } } }
-        }
-      }
-    });
-    state.charts.push(scatterChart);
+  // ④ 학교급×지역 교차 격차 히트맵 — 학교급=전체일 때만(특정 급 안 급×지역 교차는 무의미)
+  if (level === 'all'){
+    _renderEquityCrossLevel(d);
   } else {
-    document.getElementById('aEquityScatter').closest('.dc-chart-wrapper').querySelector('.chart-body').innerHTML =
-      _seedHintEmpty('산점 표본이 부족해요');
+    const clSec = document.getElementById('aEquityCrossLevelSec');
+    if (clSec) clSec.style.display = 'none';
   }
 
-  // ⑤-하단 우선개입 후보 카드
+  // ⑤ 우선 지원 후보 지역 (목록 카드만 — 산점도 제거) · d.priorityUnits(both_low) 그대로
   const pri = Array.isArray(d.priorityUnits) ? d.priorityUnits : [];
   const priHost = document.getElementById('aEquityPriority');
   if (priHost){
     if (pri.length){
       priHost.innerHTML = `
         <div class="dc-state-panel" role="status" style="text-align:left;border-left:4px solid #dc2626;background:#fef2f2;margin:0;">
-          <div style="font-weight:700;color:#991b1b;margin-bottom:6px;"><i class="fas fa-triangle-exclamation" aria-hidden="true"></i> 우선개입 후보 ${dimLabel}</div>
+          <div style="font-weight:700;color:#991b1b;margin-bottom:6px;"><i class="fas fa-triangle-exclamation" aria-hidden="true"></i> 우선 지원 후보 지역</div>
           <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px;">
             ${pri.map(u=>`<span class="dc-badge dc-badge--danger">${escapeHtml(u.label)}</span>`).join('')}
           </div>
@@ -7889,16 +7913,13 @@ VIEWS['a-equity'] = async function(root){
     }
   }
 
-  // ⑤-½ 학교급×지역 교차 격차 히트맵 (초·중·고 3행 × 지역 열)
-  _renderEquityCrossLevel(d);
-
   // ⑥ 격차 추세 라인 (3점, masked 점 생략)
   const tPts = (d.trend && Array.isArray(d.trend.points)) ? d.trend.points : [];
   if (tPts.length){
     mkChart(document.getElementById('aEquityTrend'),'line',{
       labels: tPts.map(p=>p.periodLabel || p.label || ''),
       datasets:[{
-        label:'성취 격차(%p)',
+        label:`${scoreShort} 격차(%p)`,
         // masked 구간은 점·선 생략(null)
         data: tPts.map(p=> p.masked ? null : (p.gapPP==null?null:Number(p.gapPP))),
         borderColor:'#dc2626', backgroundColor:'rgba(220,38,38,0.12)',
@@ -7923,7 +7944,7 @@ VIEWS['a-equity'] = async function(root){
       _seedHintEmpty('격차 추세 표본이 부족해요');
   }
 
-  // ⑦ 상세 표 (마스킹 행 회색 표기, 정렬 가능)
+  // ⑦ 상세 표 (마스킹 행 회색 표기, 정렬 가능) — 행 클릭 시 학교 1단 인라인 드릴
   const QUAD_BADGE = {
     both_low: { cls:'dc-badge--danger',  label:'이중취약' },
     use_low:  { cls:'dc-badge--warning', label:'활용 저조' },
@@ -7937,7 +7958,7 @@ VIEWS['a-equity'] = async function(root){
       { key:'activeRate', label:'활성률(%)', align:'right', format:(v,r)=> r.masked ? '<span style="color:var(--gray-400);">표본 부족</span>' : escapeHtml(v==null?'-':Number(v).toFixed(1)) },
       { key:'avgActsPerStudent', label:'1인당활동(건)', align:'right', format:(v,r)=> r.masked ? '<span style="color:var(--gray-400);">·</span>' : escapeHtml(v==null?'-':Number(v).toFixed(1)) },
       { key:'avgLearnMin', label:'평균학습시간(분)', align:'right', format:(v,r)=> r.masked ? '<span style="color:var(--gray-400);">·</span>' : escapeHtml((Number(v)||0).toLocaleString()) },
-      { key:'avgScore', label:'평균성취', align:'right', format:(v,r)=> r.masked ? '<span style="color:var(--gray-400);">·</span>' : escapeHtml(v==null?'-':Number(v).toFixed(1)) },
+      { key:'avgScore', label:scoreLabel, align:'right', format:(v,r)=> r.masked ? '<span style="color:var(--gray-400);">·</span>' : escapeHtml(v==null?'-':Number(v).toFixed(1)) },
       { key:'reachRate', label:'도달률(%)', align:'right', format:(v,r)=> r.masked ? '<span style="color:var(--gray-400);">·</span>' : escapeHtml(v==null?'-':Number(v).toFixed(1)) },
       { key:'quadrant', label:'구간', align:'center', format:(v,r)=>{
           if (r.masked) return '<span style="color:var(--gray-400);">·</span>';
@@ -7945,34 +7966,47 @@ VIEWS['a-equity'] = async function(root){
           return `<span class="dc-badge ${q.cls}">${q.label}</span>`;
         } }
     ],
-    rows: units, initialSort:'avgScore', initialDir:'desc'
+    rows: units, initialSort:'avgScore', initialDir:'desc',
+    onRowClick:(row)=>{ _toggleEquitySchoolDrill(row); }
   });
 };
 
-/* dim(지역/학교급) + 기간(30/90일) 스위처 chip — a-time 단위토글 스타일 재사용 */
-function _renderEquityChips(dim, period){
+/* 통합 뷰 필터바 — 학교급·교과·기간 3필터 + 정의 캡션 + 적용 필터 요약칩(현재위치 피드백).
+   교과 칩은 availableSubjects(present) 데이터 주도(죽은 칩 방지). aWeak 필터와 동일 chip 컴포넌트. */
+function _renderEquityChips(d){
+  const lv = state._eqLevel || 'all';
+  const subj = state._eqSubject || 'all';
+  const per = state._eqPeriod || '30d';
+  const avail = (d && Array.isArray(d.availableSubjects)) ? d.availableSubjects.filter(s=>s && s.present) : [];
+  const subjToggle = avail.length ? `
+        <div class="dc-unit-toggle" id="aEquitySubjectToggle" role="group" aria-label="교과 선택">
+          <span class="dc-eq-flabel">교과</span>${_eqSubjectChipsHtml(avail, subj)}
+        </div>` : '';
   return `
-    <div class="dc-chart-wrapper" style="margin-bottom:var(--space-4);">
-      <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
-        <div class="dc-unit-toggle" id="aEquityDimToggle" role="group" aria-label="비교 단위 선택">
-          <span style="font-size:var(--fs-body);font-weight:600;color:var(--gray-700);">단위</span>
-          <button class="chip" type="button" data-dim="region" aria-pressed="${dim==='region'}">지역</button>
-          <button class="chip" type="button" data-dim="school_level" aria-pressed="${dim==='school_level'}">학교급</button>
-        </div>
+    <div class="dc-chart-wrapper dc-eq-filterbar" style="margin-bottom:var(--space-4);">
+      <div class="dc-eq-filters">
+        <div class="dc-unit-toggle" id="aEquityLevelToggle" role="group" aria-label="학교급 선택">
+          <span class="dc-eq-flabel">학교급</span>${_eqLevelChipsHtml(lv)}
+        </div>${subjToggle}
         <div class="dc-unit-toggle" id="aEquityPeriodToggle" role="group" aria-label="기간 선택">
-          <span style="font-size:var(--fs-body);font-weight:600;color:var(--gray-700);">기간</span>
-          <button class="chip" type="button" data-eperiod="30d" aria-pressed="${period==='30d'}">30일</button>
-          <button class="chip" type="button" data-eperiod="90d" aria-pressed="${period==='90d'}">90일</button>
+          <span class="dc-eq-flabel">기간</span>
+          <button class="chip" type="button" data-eperiod="30d" aria-pressed="${per==='30d'}">30일</button>
+          <button class="chip" type="button" data-eperiod="90d" aria-pressed="${per==='90d'}">90일</button>
         </div>
       </div>
+      <div class="dc-eq-caption">성취수준 = 채점형 학습활동(평가·과제·문항풀이·오늘의 학습 등)의 평균 정답률(0~100점)이에요.</div>
+      ${_eqSummaryChip(lv, subj, per)}
     </div>`;
 }
 function _bindEquityChips(root){
-  root.querySelectorAll('#aEquityDimToggle button[data-dim]').forEach(btn=>{
-    btn.onclick = ()=>{ state._equityDim = btn.dataset.dim; VIEWS['a-equity'](root); };
+  root.querySelectorAll('#aEquityLevelToggle button[data-lv]').forEach(btn=>{
+    btn.onclick = ()=>{ if (state._eqLevel===btn.dataset.lv) return; state._eqLevel = btn.dataset.lv; VIEWS['a-macro'](root); };
+  });
+  root.querySelectorAll('#aEquitySubjectToggle button[data-subj]').forEach(btn=>{
+    btn.onclick = ()=>{ if (state._eqSubject===btn.dataset.subj) return; state._eqSubject = btn.dataset.subj; VIEWS['a-macro'](root); };
   });
   root.querySelectorAll('#aEquityPeriodToggle button[data-eperiod]').forEach(btn=>{
-    btn.onclick = ()=>{ state._equityPeriod = btn.dataset.eperiod; VIEWS['a-equity'](root); };
+    btn.onclick = ()=>{ if (state._eqPeriod===btn.dataset.eperiod) return; state._eqPeriod = btn.dataset.eperiod; VIEWS['a-macro'](root); };
   });
 }
 
@@ -8929,6 +8963,7 @@ const ADMIN_VIEW_ALIAS = {
   'a-usage':'a-svc-ops', 'a-overview':'a-home',
   'a-achieve':'a-cross', 'a-perform':'a-cross', 'a-custom':'a-cross',
   'a-warnings':'a-macro', 'a-drill':'a-macro', 'a-compare':'a-macro',
+  'a-equity':'a-macro', // 형평성 뷰 통합 폐지 → 지역별 성취수준 비교(a-macro)로 리다이렉트
   'a-daily':'a-time'
 };
 async function setView(id){
@@ -9255,7 +9290,11 @@ async function boot(){
   // 쿼리/해시 기반 초기 뷰
   const urlParams = new URLSearchParams(location.search);
   let menuParam = urlParams.get('menu');
-  const hash = (location.hash||'').replace('#','');
+  let hash = (location.hash||'').replace('#','');
+  // 폐기·통합된 구 관리자 뷰 id(#a-equity 등)로 첫 진입 시 신규 뷰로 정규화(setView 밖 boot 경로 보정)
+  if (hash && !VIEWS[hash] && ADMIN_VIEW_ALIAS[hash] && VIEWS[ADMIN_VIEW_ALIAS[hash]]) {
+    hash = ADMIN_VIEW_ALIAS[hash];
+  }
 
   // 레거시 URL 정규화: 구 뷰 키(usage/achieve/...) 또는 구 뷰 id(a-usage, t-warnings...)를 카테고리로 보정
   let legacyHashOverride = null;
