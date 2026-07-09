@@ -1192,13 +1192,18 @@ test('MEMB-1: /stats/custom?scope=class — 교사가 우리 반 학생 self-lea
 });
 
 test('MEMB-2: /stats/custom 회귀 — scope=mine 은 본인만, scope=all 은 admin 전체', async () => {
-  const mine = await req(`/stats/custom?scope=mine`, STUDENT1);
+  // 견고화: /stats/custom 은 resolvePeriod 기본 30일 창을 적용한다(routes/lrs.js dateRangeWhere).
+  //   기간 미지정 시 recommendedCount 는 최근 30일 self-learn 만 세므로, 전기간 raw COUNT 와
+  //   비교하려면 반드시 전기간 범위를 명시해야 한다(로그 created_at 이 30일 밖으로 밀리면
+  //   윈도 vs 전기간 비교가 되어 오탐). from/to 전기간 고정으로 시점 독립적 정합 단언.
+  const ALLTIME = 'from=2000-01-01&to=2100-12-31';
+  const mine = await req(`/stats/custom?scope=mine&${ALLTIME}`, STUDENT1);
   assert.equal(mine.status, 200);
   assert.equal(mine.json.scope, 'mine');
   const all = await req(`/stats/custom?scope=all`, ADMIN);
   assert.equal(all.status, 200);
   assert.equal(all.json.scope, 'all');
-  // mine 의 recommendedCount 는 본인 self-learn 수와 일치
+  // mine 의 recommendedCount 는 본인 self-learn 수(전기간)와 일치
   const ownCount = db.prepare(
     "SELECT COUNT(*) c FROM learning_logs WHERE source_service='self-learn' AND user_id=?"
   ).get(STUDENT1).c;
