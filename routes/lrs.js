@@ -83,6 +83,33 @@ function serviceLabel(code) {
   if (code == null) return '';
   return SERVICE_LABELS[code] || String(code);
 }
+
+// ─────────────────────────────────────────────────────────
+// [service-ops 롤업] 채움클래스 하위 기능 → 상위 서비스로 정규화
+//   목적: 관리자 '서비스 활용 진단(service-ops)'의 "서비스 나열" 수준을 일관되게 맞춘다.
+//   'survey'(설문)은 채움클래스 내부 기능(surveys/survey_responses 테이블·survey_respond 로그)이라
+//   채움클래스·채움CBT 같은 서비스급으로 나열되면 나열 수준이 어긋난다 → 'class'(채움클래스)로 롤업.
+//   ⚠ 서비스급 비교/랭킹(service-ops)에서만 사용. 원시 로그(export)·드릴다운·mastery detail 등
+//     개별 source_service 를 그대로 보여야 하는 경로에는 절대 적용하지 말 것.
+//   ⚠ 향후 확장: 다른 채움클래스 하위기능(예: 알림장 'board'·출결 'attendance')이 자기 source_service 를
+//     서비스급 나열에 섞기 시작하면 여기 SERVICE_ROLLUP 매핑에 'code':'class' 를 추가하면 된다.
+//     (원시 보존 원칙은 그대로 — 표시 집계만 롤업)
+const SERVICE_ROLLUP = {
+  survey: 'class' // 설문 = 채움클래스 하위 기능 → 채움클래스로 합산
+};
+// JS 정규화 헬퍼: survey→class, 그 외 identity (원본 코드 유지).
+function rollupService(code) {
+  if (code == null) return code;
+  return SERVICE_ROLLUP[code] || code;
+}
+// SQL 정규화 스니펫: 위 매핑과 동일 산식을 SQL 로 표현(산식 2벌 금지 — 두 헬퍼가 같은 규칙).
+//   GROUP BY 에 이 표현식을 그대로 쓰면 survey 로그가 class 로 합산 집계된다.
+//   alias 예: rollupServiceSql('ll') → CASE WHEN ll.source_service='survey' THEN 'class' ELSE ll.source_service END
+function rollupServiceSql(alias) {
+  const col = alias ? `${alias}.source_service` : 'source_service';
+  // SERVICE_ROLLUP 이 단일 매핑(survey→class)이라 CASE 1개면 충분. 매핑이 늘면 CASE 절을 확장할 것.
+  return `CASE WHEN ${col}='survey' THEN 'class' ELSE ${col} END`;
+}
 function subjectLabel(code, fallback) {
   if (code == null) return fallback || '';
   if (SUBJECT_LABELS[code]) return SUBJECT_LABELS[code];
@@ -4694,8 +4721,10 @@ router.get('/stats/service-ops', requireAuth, (req, res) => {
     const prevTo = `-${days} days`;
 
     // 현재 기간 서비스별 집계
+    //   [롤업] svc = rollupServiceSql('ll') → survey(설문)는 class(채움클래스)로 합산.
+    //   WHERE 의 demo/null 필터는 원본 컬럼 기준(survey 는 통과 후 class 로 합산). GROUP BY 는 롤업된 svc.
     const cur = db.prepare(`
-      SELECT ll.source_service svc,
+      SELECT ${rollupServiceSql('ll')} svc,
              COUNT(*) cnt,
              COUNT(DISTINCT ll.user_id) uniq_users,
              COALESCE(SUM(COALESCE(ll.duration_sec,
@@ -4703,28 +4732,29 @@ router.get('/stats/service-ops', requireAuth, (req, res) => {
       FROM learning_logs ll
       WHERE ll.source_service IS NOT NULL AND ll.source_service NOT LIKE 'demo%'
         AND DATE(ll.created_at) >= DATE('now','localtime', ?) ${sf.where}
-      GROUP BY ll.source_service
+      GROUP BY svc
     `).all(curFrom);
 
-    // 직전 동기간 건수 (추세 비교)
+    // 직전 동기간 건수 (추세 비교) — 동일 롤업으로 svc 키를 cur 와 정합.
     const prev = db.prepare(`
-      SELECT ll.source_service svc, COUNT(*) cnt
+      SELECT ${rollupServiceSql('ll')} svc, COUNT(*) cnt
       FROM learning_logs ll
       WHERE ll.source_service IS NOT NULL AND ll.source_service NOT LIKE 'demo%'
         AND DATE(ll.created_at) >= DATE('now','localtime', ?)
         AND DATE(ll.created_at) <= DATE('now','localtime', ?) ${sf.where}
-      GROUP BY ll.source_service
+      GROUP BY svc
     `).all(prevFrom, prevTo);
     const prevMap = new Map(prev.map(r => [r.svc, r.cnt]));
 
-    // 현재 기간 재방문(2일 이상 활동) 고유 사용자 — 서비스별
+    // 현재 기간 재방문(2일 이상 활동) 고유 사용자 — 서비스별(롤업).
+    //   내부 서브쿼리에서 svc 를 롤업 → class+survey 를 채움클래스 한 서비스로 묶어 재방문일 판정.
     const revisit = db.prepare(`
       SELECT svc, COUNT(*) revisit_users FROM (
-        SELECT ll.source_service svc, ll.user_id
+        SELECT ${rollupServiceSql('ll')} svc, ll.user_id
         FROM learning_logs ll
         WHERE ll.source_service IS NOT NULL AND ll.source_service NOT LIKE 'demo%'
           AND DATE(ll.created_at) >= DATE('now','localtime', ?) ${sf.where}
-        GROUP BY ll.source_service, ll.user_id
+        GROUP BY svc, ll.user_id
         HAVING COUNT(DISTINCT DATE(ll.created_at)) >= 2
       ) GROUP BY svc
     `).all(curFrom);

@@ -1318,7 +1318,7 @@ const MENUS = {
     { id:'a-quality',    label:'데이터 품질',      icon:'fa-shield-halved',         group:'보조 분석',       category:'operations' },
     { id:'a-teacher-idx',label:'교사 활용 지수',    icon:'fa-chalkboard-teacher',    group:'보조 분석',       category:'operations' },
     { id:'a-xapi',       label:'수집 표준 점검',    icon:'fa-diagram-project',       group:'보조 분석',       category:'operations' },
-    { id:'a-export',     label:'내보내기',        icon:'fa-download',              group:'리포트',         category:'reports' },
+    { id:'a-export',     label:'요약 보고서',      icon:'fa-file-lines',            group:'리포트',         category:'reports' },
   ]
 };
 
@@ -9227,107 +9227,546 @@ VIEWS['t-xapi'] = async function(root) {
 };
 VIEWS['a-xapi'] = async function(root) { await _renderXapiAnalysis(root, 'school'); };
 
+/* ======================================================================
+ * ⑧ 리포트 = 학습데이터 정책 요약 보고서 (a-export)
+ *    도메인 기획서 §4 8블록 정책 브리프. BE 신규 0 — 기존 6개 API 조립.
+ *    [헤더 표지] → ① 기간 KPI → ② 참여·활용 → ③ 성취·격차 → ④ 취약 성취기준
+ *    → ⑤ 활동-성취 한 줄 → ⑥ 데이터 신뢰도 → ⑦ 규칙기반 권고문 → ⑧ 근거 내보내기(접이식)
+ *    인쇄/PDF = @media print(라이브러리 금지). 뷰 id·해시(a-export) 불변.
+ * ==================================================================== */
+// 종합 데이터 신뢰도 신호(규칙 기반) — dataset-coverage 결측·세션 + xAPI 표본 충분성.
+function _reportReliabilitySignal(cov, xapiTotal){
+  if (!cov) return { tone:'muted', label:'확인 불가', text:'데이터 신뢰도 정보를 불러오지 못했습니다.' };
+  const rates = [cov.missing_achievement_rate, cov.missing_subject_rate, cov.missing_duration_rate]
+    .map(v => Number(v)).filter(v => !isNaN(v));
+  const maxMiss = rates.length ? Math.max.apply(null, rates) : null;
+  const sess = (cov.session_coverage_rate==null || isNaN(Number(cov.session_coverage_rate))) ? null : Number(cov.session_coverage_rate);
+  let tone='success', label='높음';
+  if (maxMiss!=null){
+    if (maxMiss>20){ tone='danger'; label='주의'; }
+    else if (maxMiss>10){ tone='warning'; label='보통'; }
+  }
+  if (sess!=null && sess<50 && tone==='success'){ tone='warning'; label='보통'; }
+  const parts=[];
+  if (maxMiss!=null) parts.push(`최대 결측률 ${maxMiss.toFixed(1)}%`);
+  if (sess!=null)    parts.push(`세션 커버리지 ${sess.toFixed(1)}%`);
+  if (xapiTotal!=null) parts.push(`표준(xAPI) 표본 ${xapiTotal.toLocaleString()}건${xapiTotal>=200?'(충분)':'(축적 중)'}`);
+  return { tone, label, text: parts.join(' · ') || '수집 건전성 지표를 확인했습니다.' };
+}
+// 리포트 블록 셸 — 번호 배지 + 제목 + 부제 + 본문(공통 레이아웃)
+function _rblock(num, title, sub, inner){
+  return `<section class="lrs-rblock">
+    <div class="rb-head">
+      <span class="rb-num" aria-hidden="true">${num}</span>
+      <div><h2 class="rb-title">${escapeHtml(title)}</h2>${sub?`<div class="rb-sub">${escapeHtml(sub)}</div>`:''}</div>
+    </div>
+    <div class="rb-body">${inner}</div>
+  </section>`;
+}
+// .lrs-insight 컴포넌트 재사용(renderInsights와 동일 마크업) — 권고문·활동성취 한 줄에 사용.
+function _reportInsightHtml(it){
+  const level = LRS_INSIGHT_LEVELS[it.level] ? it.level : 'info';
+  const icon  = (it.icon && String(it.icon).trim()) || LRS_INSIGHT_LEVELS[level];
+  return `<div class="lrs-insight ${level}" role="note" aria-label="분석 도움말">
+    <span class="li-ico" aria-hidden="true">${escapeHtml(icon)}</span>
+    <span class="li-txt">${escapeHtml(it.text)}</span>
+  </div>`;
+}
+
 VIEWS['a-export'] = async function(root){
-  root.innerHTML = tplLoading(1);
-  const [cov, daily] = await Promise.all([
+  root.innerHTML = tplLoading(4);
+  // 상단 기간·실데이터 토글이 전 블록 API에 전달됨(apiGet→rangeQS 자동 부착). 각 apiGet은 실패 시 null 반환 →
+  //   일부 API가 실패해도 나머지 블록은 정상 렌더(우아한 부분 실패).
+  const [kpiR, svcR, eqRegR, eqLvlR, weakR, crossR, covR, xapiR, dailyR] = await Promise.all([
+    apiGet('/api/lrs/stats/admin-kpi'),
+    apiGet('/api/lrs/stats/service-ops'),
+    apiGet('/api/lrs/stats/equity', { dim:'region' }),
+    apiGet('/api/lrs/stats/equity', { dim:'school_level' }),
+    apiGet('/api/lrs/weak-trend', { scope:'all', limit:10 }),
+    apiGet('/api/lrs/stats/cross-activity-achievement'),
     apiGet('/api/lrs/dataset-coverage'),
+    apiGet('/api/lrs/xapi/overview'),
     apiGet('/api/lrs/stats/daily')
   ]);
-  const d = (cov && (cov.data||cov)) || {};
-  const drows = (daily && daily.data) || [];
+
+  const kpi   = (kpiR && kpiR.success && kpiR.kpi) ? kpiR.kpi : null;
+  const covD  = (covR && (covR.data||covR)) || null;
+  const xapiTotal = (xapiR && xapiR.total!=null && !isNaN(Number(xapiR.total))) ? Number(xapiR.total) : null;
+  if (xapiTotal!=null) state._xapiSampleCount = xapiTotal;
+  const relSig = _reportReliabilitySignal(covD, xapiTotal);
+  const genTime  = new Date().toLocaleString('ko-KR');
+  const lastSync = (covD && covD.last_synced) ? covD.last_synced : '-';
+  const seedShare = (kpi && kpi.learnHoursSeedShare!=null && !isNaN(Number(kpi.learnHoursSeedShare))) ? Number(kpi.learnHoursSeedShare) : null;
+
+  // 내보내기(블록8)용 — 총 로그 추정 + 일별 행수
+  const drows = (dailyR && dailyR.data) || [];
   const dailySum = drows.reduce((s,r)=>s+(Number(r.count)||0),0);
-  const totalLogs = Number(d.total_logs||0) || dailySum;
+  const totalLogs = Number((covD && covD.total_logs)||0) || dailySum;
 
-  // 필터 요약
-  const periodLabel = state.period === 'custom'
-    ? ((state.from||'?') + ' ~ ' + (state.to||'?'))
-    : state.period;
-
-  // LocalStorage 이력
-  let hist = [];
-  try { hist = JSON.parse(localStorage.getItem('lrs_export_hist')||'[]'); } catch(_){}
-
-  root.innerHTML = `
-    <section class="dc-chart-wrapper">
-      <header><h2>데이터 내보내기</h2><div class="subtitle">상단 기간 필터가 export API에 전달됩니다</div></header>
-
-      <h3 style="font-size:var(--fs-h3);margin:var(--space-4) 0 var(--space-2);">1. 현재 필터</h3>
-      <div class="dc-kpi-grid" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));">
-        ${kpiCard('기간', periodLabel, '', {dir:'flat',text:''}, 'primary')}
-        ${kpiCard('역할', state.role, '', {dir:'flat',text:''}, 'primary')}
-        ${kpiCard('현재 뷰', state.view||'-', '', {dir:'flat',text:''}, 'primary')}
-        ${kpiCard('총 로그(추정)', totalLogs.toLocaleString(), '건', {dir:'flat',text:'전체'}, 'success')}
+  // ── [헤더] 표지 밴드 ─────────────────────────────────────────────
+  const cover = `
+    <section class="lrs-rcover">
+      <div class="rc-main">
+        <div class="rc-kicker">충청북도교육청 · 다채움 학습분석(LRS)</div>
+        <h1 class="rc-title">학습데이터 정책 요약 보고서</h1>
+        <div class="rc-meta">
+          <span><b>대상 기간</b> ${escapeHtml(periodLabelKo())}</span>
+          <span><b>집계 범위</b> ${state.realOnly?'실데이터만':'전체(예시 데이터 포함)'}</span>
+          <span><b>생성 시각</b> ${escapeHtml(genTime)}</span>
+          <span><b>데이터 기준일</b> ${escapeHtml(lastSync)}</span>
+        </div>
+        <div class="rc-badges">
+          <span class="dc-badge dc-badge--${relSig.tone==='muted'?'muted':relSig.tone}">데이터 신뢰도 ${escapeHtml(relSig.label)}</span>
+          ${(!state.realOnly && seedShare!=null) ? `<span class="dc-badge dc-badge--warning">예시 데이터 포함 (약 ${seedShare}%)</span>` : ''}
+        </div>
       </div>
-
-      <h3 style="font-size:var(--fs-h3);margin:var(--space-4) 0 var(--space-2);">2. 내보낼 범위</h3>
-      <div id="exScope" role="radiogroup" style="display:flex;flex-wrap:wrap;gap:var(--space-2);">
-        <label class="chip" style="cursor:pointer;"><input type="radio" name="exScope" value="all" checked style="margin-right:6px;">전체 원시 로그</label>
-        <label class="chip" style="cursor:pointer;"><input type="radio" name="exScope" value="daily" style="margin-right:6px;">일별 집계</label>
-        <label class="chip" style="cursor:pointer;"><input type="radio" name="exScope" value="service" style="margin-right:6px;">서비스별 집계</label>
-        <label class="chip" style="cursor:pointer;"><input type="radio" name="exScope" value="class" style="margin-right:6px;">학급별 집계</label>
-        <label class="chip" style="cursor:pointer;"><input type="radio" name="exScope" value="subject" style="margin-right:6px;">교과별 집계</label>
-      </div>
-
-      <h3 style="font-size:var(--fs-h3);margin:var(--space-4) 0 var(--space-2);">3. 형식</h3>
-      <div id="exFormat" role="radiogroup" style="display:flex;gap:var(--space-2);">
-        <label class="chip" style="cursor:pointer;"><input type="radio" name="exFormat" value="csv" checked style="margin-right:6px;">CSV</label>
-        <label class="chip" style="cursor:pointer;"><input type="radio" name="exFormat" value="xlsx" style="margin-right:6px;">Excel(xlsx)</label>
-      </div>
-
-      <h3 style="font-size:var(--fs-h3);margin:var(--space-4) 0 var(--space-2);">4. 예상 행 수</h3>
-      <p id="exEstimate" style="color:var(--gray-700);font-size:var(--fs-body);margin:0 0 var(--space-3);">-</p>
-
-      <div style="display:flex;gap:var(--space-3);flex-wrap:wrap;margin-top:var(--space-4);">
-        <button id="btnExportDo" type="button" class="dc-badge dc-badge--primary"
-                style="padding:10px 22px;border:0;cursor:pointer;font-size:var(--fs-body);">
-          <i class="fas fa-download"></i> 다운로드
-        </button>
-        <button id="btnExportCsvQuick" type="button" class="dc-badge dc-badge--success"
-                style="padding:10px 18px;border:0;cursor:pointer;font-size:var(--fs-body);">
-          <i class="fas fa-file-csv"></i> 전체 CSV 즉시
-        </button>
-        <button id="btnExportXlsxQuick" type="button" class="dc-badge dc-badge--warning"
-                style="padding:10px 18px;border:0;cursor:pointer;font-size:var(--fs-body);">
-          <i class="fas fa-file-excel"></i> 전체 Excel 즉시
-        </button>
-      </div>
-      <p style="margin-top:var(--space-3);color:var(--gray-500);font-size:var(--fs-sm);">
-        엔드포인트: <code>/api/lrs/export?format=csv|xlsx&amp;scope=...</code> · 기간 파라미터 자동 부착
-      </p>
-    </section>
-
-    <section class="dc-chart-wrapper">
-      <header><h2>최근 다운로드 이력</h2><div class="subtitle">브라우저 LocalStorage · 최대 10건</div></header>
-      <div id="exHist"></div>
+      <button id="btnReportPrint" type="button" class="dc-report-print-btn lrs-noprint">
+        <i class="fas fa-print" aria-hidden="true"></i> 인쇄 / PDF 저장
+      </button>
     </section>`;
 
-  function currentScope(){
-    const el = root.querySelector('input[name="exScope"]:checked');
-    return el ? el.value : 'all';
+  // ── [블록 1] 기간 요약 KPI ───────────────────────────────────────
+  const b1inner = kpi ? `
+    <div class="dc-kpi-grid">
+      ${kpiCard('가입 학교',   (kpi.schools||0).toLocaleString(),  '개', {dir:'flat',text:'학생 소속 기준'}, 'primary')}
+      ${kpiCard('가입 교사',   (kpi.teachers||0).toLocaleString(), '명', {dir:'flat',text:'role=teacher'},  'primary')}
+      ${kpiCard('가입 학생',   (kpi.students||0).toLocaleString(), '명', {dir:'flat',text:'role=student'},  'primary')}
+      ${kpiCard('7일 활성률',  (kpi.activeRate||0),                '%', {dir:(kpi.activeRate||0)>=50?'up':'flat',text:'WAU / 가입 학생'}, 'success')}
+      ${kpiCard('누적 학습시간',(kpi.totalLearnHours||0).toLocaleString(),'시간', {dir:'flat',text:'전체 누적'}, 'warning')}
+      ${kpiCard('기간 학습활동',(kpi.periodActs||0).toLocaleString(),'건', {dir:'flat',text:periodLabelKo()+' · 7종'}, 'primary')}
+    </div>
+    <p class="rb-foot"><i class="fas fa-circle-info" aria-hidden="true"></i> 활동량은 학습활동 7종(수업이수·평가·과제·문항풀이·오늘의 학습·AI 학습맵·오답노트) · 학생 기준 집계입니다. 조회는 제외됩니다.</p>`
+    : _seedHintEmpty('기간 요약 데이터를 불러오지 못했어요');
+
+  // ── [블록 2] 참여·활용 하이라이트 ────────────────────────────────
+  let b2inner;
+  if (!svcR || !svcR.success || !(svcR.services||[]).length){
+    b2inner = _seedHintEmpty('집계된 서비스 활동이 없어요');
+  } else {
+    const services = svcR.services;
+    const top3 = services.slice(0,3);
+    // 우측 3버킷(개선필요>관찰>판단보류)을 상호배타로 dedupe — 상위 버킷에 든 서비스는 하위 버킷에서 제외.
+    // 서비스 식별키는 응답의 service(id) 우선, 없으면 service_label. 하드코딩된 서비스명 가정 없음(응답 데이터 무관 동작).
+    const _svcKey = (s)=> String((s && (s.service!=null ? s.service : s.service_label)) || '');
+    const _seenSvc = new Set();
+    const _dedupeSvc = (arr)=>{
+      const out = [];
+      (arr||[]).forEach(s=>{
+        const k = _svcKey(s);
+        if (!k || _seenSvc.has(k)) return;
+        _seenSvc.add(k); out.push(s);
+      });
+      return out;
+    };
+    const hard  = _dedupeSvc(svcR.underused);     // 1순위: 개선 필요
+    const watch = _dedupeSvc(svcR.watchList);      // 2순위: 관찰 대상 (개선필요 제외분)
+    const insuf = _dedupeSvc(svcR.insufficient);   // 3순위: 판단 보류 (상위 2버킷 제외분)
+    const chip = (s, cls)=>`<span class="dc-badge ${cls}">${escapeHtml(s.service_label||s.service)}</span>`;
+    const _top1 = top3[0] || null;
+    const _rankNote = (_top1 && _top1.share!=null)
+      ? `상위 순위와 '개선 필요'는 함께 나타날 수 있어요. 특정 서비스에 이용이 편중되면(예: 1위 ${_top1.share}% 집중) 순위가 높아도 균형·개선 대상이 됩니다.`
+      : `상위 순위와 '개선 필요'는 함께 나타날 수 있어요. 특정 서비스에 이용이 편중되면 순위가 높아도 균형·개선 대상이 됩니다.`;
+    b2inner = `
+      <div class="rb-2col">
+        <div>
+          <div class="rb-subhead">활용 순위 (상위 3)</div>
+          <ol class="rb-toplist">
+            ${top3.map((s,i)=>`<li>
+              <span class="rb-rank">${i+1}</span>
+              <span class="rb-tname">${escapeHtml(s.service_label||s.service)}</span>
+              <span class="rb-tmeta">${(s.count||0).toLocaleString()}건 · ${s.share}%${s.revisitRate!=null?` · 재방문 ${s.revisitRate}%`:''}</span>
+            </li>`).join('')}
+          </ol>
+          <p class="rb-foot"><i class="fas fa-circle-info" aria-hidden="true"></i> ${_rankNote}</p>
+        </div>
+        <div>
+          <div class="rb-subhead">개선·관찰 대상</div>
+          <div class="rb-alertwrap">
+            <div class="rb-alertrow"><span class="rb-alabel danger">개선 필요</span>${hard.length ? hard.map(s=>chip(s,'dc-badge--danger')).join('') : '<span class="rb-none">없음</span>'}</div>
+            <div class="rb-alertrow"><span class="rb-alabel warn">관찰 대상</span>${watch.length ? watch.map(s=>chip(s,'dc-badge--warning')).join('') : '<span class="rb-none">없음</span>'}</div>
+            <div class="rb-alertrow"><span class="rb-alabel muted">판단 보류(표본 부족)</span>${insuf.length ? insuf.map(s=>chip(s,'dc-badge--muted')).join('') : '<span class="rb-none">없음</span>'}</div>
+          </div>
+        </div>
+      </div>`;
   }
-  function currentFormat(){
-    const el = root.querySelector('input[name="exFormat"]:checked');
-    return el ? el.value : 'csv';
+
+  // ── [블록 3] 성취·격차 요약 ──────────────────────────────────────
+  let b3inner;
+  if (!eqRegR || !eqRegR.success){
+    b3inner = _seedHintEmpty('성취·격차 데이터를 불러오지 못했어요');
+  } else {
+    const ms = (eqRegR.metrics||{}).avgScore || {};
+    const lvms = (eqLvlR && eqLvlR.success && eqLvlR.metrics) ? (eqLvlR.metrics.avgScore||{}) : null;
+    const clr = eqRegR.crossLevelRegion || [];
+    b3inner = `
+      <div class="dc-kpi-grid">
+        ${kpiCard('지역 간 성취 격차', ms.gapPP!=null?ms.gapPP:'-', '%p',
+          {dir:'flat', text: (ms.top&&ms.bottom)?`${escapeHtml(ms.top.label)}↔${escapeHtml(ms.bottom.label)}`:'최상위↔최하위'}, _equityGapTone(ms.gapPP))}
+        ${lvms ? kpiCard('학교급 간 성취 격차', lvms.gapPP!=null?lvms.gapPP:'-', '%p',
+          {dir:'flat', text: (lvms.top&&lvms.bottom)?`${escapeHtml(lvms.top.label)}↔${escapeHtml(lvms.bottom.label)}`:'최상위↔최하위'}, _equityGapTone(lvms.gapPP)) : ''}
+        ${kpiCard('지역 간 산포(CV)', ms.cv!=null?ms.cv:'-', '%', {dir:'flat',text:'낮을수록 고름'}, 'primary')}
+        ${kpiCard('하위 20% 성취 수준', ms.bottom20Ratio!=null?ms.bottom20Ratio:'-', '%', {dir:'flat',text:'전체 평균 대비'}, 'primary')}
+      </div>
+      <div class="rb-priority">
+        <div class="rb-subhead">우선 지원 후보 지역 <span class="rb-subnote">(활용도·성취가 함께 낮은 지역)</span></div>
+        <div id="rptPriorityTable"></div>
+      </div>
+      ${clr.length ? `<div class="rb-clr">
+        <div class="rb-subhead">학교급별 지역 격차</div>
+        <ul class="rb-clrlist">
+          ${clr.map(r=>{
+            const g = r.regionGapPP;
+            const tone = g==null?'muted':(g>=15?'danger':g>=8?'warn':'ok');
+            return `<li>
+              <span class="rb-clrlv">${escapeHtml(r.levelLabel||r.level||'-')}</span>
+              <span class="rb-clrgap ${tone}">${g==null?'표본 부족':g+'%p'}</span>
+              ${(g!=null&&r.top&&r.bottom)?`<span class="rb-clrtb">${escapeHtml(r.top.label)} ↔ ${escapeHtml(r.bottom.label)}</span>`:''}
+            </li>`;
+          }).join('')}
+        </ul>
+      </div>` : ''}`;
   }
+
+  // ── [블록 4] 취약 성취기준 Top N ─────────────────────────────────
+  let b4inner;
+  if (!weakR || !weakR.success){
+    b4inner = _seedHintEmpty('취약 성취기준 데이터를 불러오지 못했어요');
+  } else if (!(weakR.ranking||[]).length){
+    b4inner = `<p class="rb-goodnote"><i class="fas fa-face-smile" aria-hidden="true"></i> 하락 중인 취약 성취기준이 없습니다. 안정적인 추세예요.</p>`;
+  } else {
+    b4inner = `<div id="rptWeakTable"></div><p class="rb-foot" id="rptWeakDisc"></p>`;
+  }
+
+  // ── [블록 5] 활동-성취 관계 한 줄 ────────────────────────────────
+  let b5inner;
+  if (!crossR || !crossR.success || !crossR.sampleN){
+    b5inner = _seedHintEmpty('활동-성취 관계를 산출할 표본이 부족해요');
+  } else {
+    const matrix = crossR.matrix||[];
+    const hi = matrix.find(x=>x.tier==='상')||{avgScore:null,n:0};
+    const lo = matrix.find(x=>x.tier==='하')||{avgScore:null,n:0};
+    const gap = (hi.avgScore!=null && lo.avgScore!=null) ? Math.round((hi.avgScore-lo.avgScore)*10)/10 : null;
+    const small = !!crossR.smallSample;
+    const sentence = gap!=null
+      ? `활동량 상위 33% 학생의 평균 성취는 ${hi.avgScore}점으로 하위 33%(${lo.avgScore}점)보다 ${gap>=0?'+':''}${gap}%p ${gap>=0?'높습니다':'낮습니다'}. ${gap>=10?'활용이 성취와 뚜렷한 양(+)의 관계를 보일 가능성이 있습니다.':gap>0?'활용과 성취의 관계는 약하게 나타납니다.':'이 표본에서는 뚜렷한 관계가 관찰되지 않습니다.'}${small?' (표본이 작아 참고용입니다)':''}`
+      : '활동량 분위별 성취를 비교할 표본이 부족합니다.';
+    const level = gap==null?'info':(gap>=10?'good':gap>0?'info':'warn');
+    b5inner = `
+      ${_reportInsightHtml({level, text:sentence})}
+      <div class="rb-tertile">
+        ${['상','중','하'].map(t=>{
+          const m = matrix.find(x=>x.tier===t)||{avgScore:null,n:0};
+          const cls = t==='상'?'t-hi':t==='중'?'t-mid':'t-lo';
+          return `<div class="rb-tcard ${cls}">
+            <div class="rb-ttier">활동량 ${t}위</div>
+            <div class="rb-tscore">${m.avgScore==null?'-':m.avgScore}<span>점</span></div>
+            <div class="rb-tn">${(m.n||0).toLocaleString()}명</div>
+          </div>`;
+        }).join('')}
+      </div>`;
+  }
+
+  // ── [블록 6] 데이터 신뢰도 요약 ──────────────────────────────────
+  let b6inner;
+  if (!covD){
+    b6inner = _seedHintEmpty('데이터 신뢰도 정보를 불러오지 못했어요');
+  } else {
+    const tone=(rate)=>rate>20?'danger':rate>10?'warning':'success';
+    const missAch=Number(covD.missing_achievement_rate||0);
+    const missSub=Number(covD.missing_subject_rate||0);
+    const missDur=Number(covD.missing_duration_rate||0);
+    const sess=(covD.session_coverage_rate==null||isNaN(Number(covD.session_coverage_rate)))?null:Number(covD.session_coverage_rate);
+    const covTone=(r)=>r>=80?'success':r>=50?'warning':'danger';
+    b6inner = `
+      <div class="dc-kpi-grid">
+        ${kpiCard('성취기준 결측률', missAch.toFixed(1), '%', {dir:missAch>20?'down':'up',text:'낮을수록 좋음'}, tone(missAch))}
+        ${kpiCard('교과 결측률',    missSub.toFixed(1), '%', {dir:missSub>20?'down':'up',text:'낮을수록 좋음'}, tone(missSub))}
+        ${kpiCard('학습시간 결측률', missDur.toFixed(1), '%', {dir:missDur>20?'down':'up',text:'낮을수록 좋음'}, tone(missDur))}
+        ${sess!=null ? kpiCard('세션 커버리지', sess.toFixed(1), '%', {dir:sess>=80?'up':'down',text:'높을수록 좋음'}, covTone(sess)) : ''}
+      </div>
+      <div class="rb-relrow">
+        <span class="dc-badge dc-badge--${relSig.tone==='muted'?'muted':relSig.tone}">종합 신뢰도 ${escapeHtml(relSig.label)}</span>
+        <span class="rb-relmeta">${escapeHtml(relSig.text)}</span>
+      </div>
+      <p class="rb-foot"><i class="fas fa-circle-info" aria-hidden="true"></i> 최근 동기화 ${escapeHtml(covD.last_synced||'-')} · 표준(xAPI) 표본 ${xapiTotal!=null?xapiTotal.toLocaleString()+'건':'집계 중'}${xapiTotal!=null?(xapiTotal>=200?' · 표준 정합 점검 가능':' · 200건 이상 축적 시 표준 점검 활성화'):''}</p>`;
+  }
+
+  // ── [블록 7] 규칙 기반 권고문 ────────────────────────────────────
+  const recos = [];
+  if (eqRegR && eqRegR.success){
+    const pri = eqRegR.priorityUnits||[];
+    if (pri.length){
+      const names = pri.slice(0,3).map(u=>u.label).join(', ');
+      recos.push({level:'danger', text:`${names}${pri.length>3?' 등':''} ${pri.length}개 지역이 활용도와 성취가 함께 낮은 '동반 저조' 구간입니다. 콘텐츠 보급·연수 등 우선 지원 대상일 가능성이 있어 검토가 필요합니다.`});
+    }
+    const ms=(eqRegR.metrics||{}).avgScore||{};
+    if (ms.gapPP!=null && ms.gapPP>=15 && ms.bottom){
+      recos.push({level:'warn', text:`지역 간 성취 격차가 ${ms.gapPP}%p로 큰 편입니다. 최하위 ${ms.bottom.label} 지역의 원인 점검과 집중 지원 검토가 필요할 가능성이 있습니다.`});
+    }
+  }
+  if (eqLvlR && eqLvlR.success){
+    const lv=(eqLvlR.metrics||{}).avgScore||{};
+    if (lv.gapPP!=null && lv.gapPP>=15 && lv.bottom){
+      recos.push({level:'warn', text:`학교급 간 성취 격차가 ${lv.gapPP}%p입니다. ${lv.bottom.label} 성취가 상대적으로 낮아 학교급 맞춤 지원이 필요할 가능성이 있습니다.`});
+    }
+  }
+  if (weakR && weakR.success && (weakR.ranking||[]).length){
+    // headline 취약 성취기준 권고는 평가표본 ≥5 충족 기준 중에서 선정(극소표본 인용 방지, RFP 정직화).
+    const MIN_WEAK_SAMPLE = 5;
+    const ranked = weakR.ranking;
+    const w0 = ranked.find(r => (Number(r.evaluatedStudents)||0) >= MIN_WEAK_SAMPLE) || null;
+    if (w0){
+      const code = String(w0.code||'').replace(/^\[|\]$/g,'');
+      const nm = (w0.label && w0.label!==w0.code) ? w0.label : code;
+      const es = Number(w0.evaluatedStudents)||0;
+      recos.push({level:'warn', text:`'${nm}'(${w0.subject||'교과 미상'}) 성취기준의 도달률이 ${w0.reachedRate==null?'낮은 수준':w0.reachedRate+'%'}(평가표본 ${es}명)으로 취약합니다. 공통 보충·연수 콘텐츠 마련을 검토할 만합니다.`});
+    } else {
+      // 표본 ≥5 충족 기준이 없으면 특정 기준 지목 대신 캐비어트(참고용)로만 언급.
+      recos.push({level:'info', text:`취약 후보 성취기준이 있으나 평가표본이 모두 5명 미만이라 신뢰도가 낮습니다. 표본이 더 쌓인 뒤 판단하는 것을 권고합니다. (참고용)`});
+    }
+  }
+  if (svcR && svcR.success){
+    const hard = svcR.underused||[];
+    if (hard.length){
+      const s0=hard[0];
+      recos.push({level:'warn', text:`${s0.service_label||s0.service} 활용이 저조(점유율 ${s0.share}%)합니다. 진입 동선 점검·홍보 또는 정리 판단이 필요할 가능성이 있습니다.`});
+    }
+  }
+  if (covD){
+    const maxMiss = Math.max(Number(covD.missing_achievement_rate||0),Number(covD.missing_subject_rate||0),Number(covD.missing_duration_rate||0));
+    if (maxMiss>20){
+      recos.push({level:'danger', text:`일부 항목 결측률이 ${maxMiss.toFixed(1)}%로 20%를 초과합니다. 성취·격차 지표 해석에 주의가 필요하며 서비스 로거 풍부화 점검을 권고합니다.`});
+    }
+  }
+  if (!recos.length){
+    recos.push({level:'good', text:'현재 기간·표본 기준으로 임계치를 초과한 정책 경보가 없습니다. 전반적으로 안정적인 상태로 보입니다.'});
+  }
+  const b7inner = `
+    <div class="rb-recos">${recos.slice(0,6).map(_reportInsightHtml).join('')}</div>
+    <p class="rb-foot"><i class="fas fa-circle-info" aria-hidden="true"></i> 위 권고문은 각 지표의 임계 규칙으로 자동 생성됩니다(AI 판단 아님). 최종 정책 판단 전 근거 데이터를 함께 확인하세요.</p>`;
+
+  // ── [블록 8] 근거 데이터 내보내기(접이식) ────────────────────────
+  const b8inner = `
+    <details class="rb-export">
+      <summary><i class="fas fa-download" aria-hidden="true"></i> 근거 데이터 내보내기 (CSV / Excel)</summary>
+      <div class="rb-export-body">
+        <p class="rb-foot" style="margin-top:2px;">이 보고서의 근거가 된 원시·집계 데이터를 파일로 내려받습니다. 상단 기간 필터가 함께 적용됩니다. (총 로그 추정 ${totalLogs.toLocaleString()}건)</p>
+
+        <div class="rb-subhead" style="margin-top:14px;">내보낼 범위</div>
+        <div id="exScope" role="radiogroup" style="display:flex;flex-wrap:wrap;gap:var(--space-2);">
+          <label class="chip" style="cursor:pointer;"><input type="radio" name="exScope" value="all" checked style="margin-right:6px;">전체 원시 로그</label>
+          <label class="chip" style="cursor:pointer;"><input type="radio" name="exScope" value="daily" style="margin-right:6px;">일별 집계</label>
+          <label class="chip" style="cursor:pointer;"><input type="radio" name="exScope" value="service" style="margin-right:6px;">서비스별 집계</label>
+          <label class="chip" style="cursor:pointer;"><input type="radio" name="exScope" value="class" style="margin-right:6px;">학급별 집계</label>
+          <label class="chip" style="cursor:pointer;"><input type="radio" name="exScope" value="subject" style="margin-right:6px;">교과별 집계</label>
+        </div>
+
+        <div class="rb-subhead" style="margin-top:14px;">형식</div>
+        <div id="exFormat" role="radiogroup" style="display:flex;gap:var(--space-2);">
+          <label class="chip" style="cursor:pointer;"><input type="radio" name="exFormat" value="csv" checked style="margin-right:6px;">CSV</label>
+          <label class="chip" style="cursor:pointer;"><input type="radio" name="exFormat" value="xlsx" style="margin-right:6px;">Excel(xlsx)</label>
+        </div>
+
+        <p id="exEstimate" style="color:var(--gray-700);font-size:var(--fs-body);margin:14px 0 var(--space-3);">-</p>
+
+        <div style="display:flex;gap:var(--space-3);flex-wrap:wrap;">
+          <button id="btnExportDo" type="button" class="dc-badge dc-badge--primary" style="padding:10px 22px;border:0;cursor:pointer;font-size:var(--fs-body);">
+            <i class="fas fa-download" aria-hidden="true"></i> 선택 항목 다운로드
+          </button>
+          <button id="btnExportCsvQuick" type="button" class="dc-badge dc-badge--success" style="padding:10px 18px;border:0;cursor:pointer;font-size:var(--fs-body);">
+            <i class="fas fa-file-csv" aria-hidden="true"></i> 전체 CSV 즉시
+          </button>
+          <button id="btnExportXlsxQuick" type="button" class="dc-badge dc-badge--warning" style="padding:10px 18px;border:0;cursor:pointer;font-size:var(--fs-body);">
+            <i class="fas fa-file-excel" aria-hidden="true"></i> 전체 Excel 즉시
+          </button>
+        </div>
+
+        <div class="rb-subhead" style="margin-top:18px;">최근 다운로드 이력 <span class="rb-subnote">(브라우저 저장 · 최대 10건)</span></div>
+        <div id="exHist"></div>
+      </div>
+    </details>`;
+
+  root.innerHTML = `
+    <div id="lrsReport" class="lrs-report">
+      ${cover}
+      ${_rblock(1,'기간 요약 KPI','규모와 참여 — 이 기간 플랫폼 사용 규모예요.', b1inner)}
+      ${_rblock(2,'참여·활용 하이라이트','어디에 예산·홍보를 집중할지 — 활용 상위·저조 서비스예요.', b2inner)}
+      ${_rblock(3,'성취·격차 요약','어디에 먼저 개입할지 — 지역·학교급 성취 격차예요.', b3inner)}
+      ${_rblock(4,'취약 성취기준 Top 10','무엇을 보충할지 — 전체 기준 취약·하락 성취기준이에요.', b4inner)}
+      ${_rblock(5,'활동-성취 관계','활용 독려가 정당한지 — 활동량과 성취의 관계예요.', b5inner)}
+      ${_rblock(6,'데이터 신뢰도 요약','이 보고서를 믿어도 되는지 — 결측·세션·표준 수집 건전성이에요.', b6inner)}
+      ${_rblock(7,'규칙 기반 정책 권고','위 지표에서 임계 규칙으로 자동 생성한 권고예요.', b7inner)}
+      ${_rblock(8,'근거 데이터 내보내기','이 보고서의 근거가 된 원시·집계 데이터를 내려받아요.', b8inner)}
+    </div>
+    <style id="lrsReportStyle">
+      #lrsReport{ display:flex; flex-direction:column; gap:20px; }
+      .lrs-rcover{ display:flex; justify-content:space-between; align-items:flex-start; gap:18px; flex-wrap:wrap;
+        background:linear-gradient(135deg,#1d4ed8,#3b82f6); color:#fff; border-radius:16px; padding:26px 30px; }
+      .lrs-rcover .rc-kicker{ font-size:14px; opacity:.92; margin-bottom:6px; }
+      .lrs-rcover .rc-title{ font-size:28px; font-weight:800; margin:0 0 14px; line-height:1.25; color:#fff; }
+      .lrs-rcover .rc-meta{ display:flex; flex-wrap:wrap; gap:6px 22px; font-size:15px; line-height:1.6; }
+      .lrs-rcover .rc-meta b{ font-weight:600; opacity:.85; margin-right:6px; }
+      .lrs-rcover .rc-badges{ display:flex; flex-wrap:wrap; gap:8px; margin-top:14px; }
+      .lrs-rcover .rc-badges .dc-badge{ font-size:13px; }
+      .dc-report-print-btn{ flex:none; background:#fff; color:#1d4ed8; border:0; border-radius:10px;
+        padding:12px 20px; font-size:16px; font-weight:700; cursor:pointer; box-shadow:0 2px 8px rgba(0,0,0,.18); white-space:nowrap; }
+      .dc-report-print-btn:hover{ background:#eff6ff; }
+
+      .lrs-rblock{ background:#fff; border:1px solid var(--gray-200); border-radius:16px; padding:22px 26px; }
+      .lrs-rblock .rb-head{ display:flex; align-items:flex-start; gap:12px; margin-bottom:16px; }
+      .rb-num{ flex:none; width:30px; height:30px; border-radius:9px; background:var(--lrs-primary,#2563eb);
+        color:#fff; font-weight:700; font-size:16px; display:flex; align-items:center; justify-content:center; }
+      .rb-title{ font-size:20px; font-weight:700; margin:0; color:var(--gray-900,#1a1a2e); line-height:1.3; }
+      .rb-sub{ font-size:14px; color:var(--gray-500,#6b7280); margin-top:3px; line-height:1.5; }
+      .rb-foot{ font-size:13px; color:var(--gray-500,#6b7280); line-height:1.6; margin:12px 0 0; }
+      .rb-foot i{ color:var(--gray-400,#9ca3af); margin-right:4px; }
+      .rb-subhead{ font-size:15px; font-weight:700; color:var(--gray-800,#374151); margin:0 0 8px; }
+      .rb-subnote{ font-size:13px; font-weight:500; color:var(--gray-500,#6b7280); }
+      .rb-goodnote{ font-size:15px; color:#166534; background:#f0fdf4; border-radius:10px; padding:12px 16px; margin:0; line-height:1.6; }
+      .rb-goodnote i{ margin-right:6px; }
+
+      .rb-2col{ display:grid; grid-template-columns:1fr 1fr; gap:24px; }
+      .rb-toplist{ list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:9px; }
+      .rb-toplist li{ display:flex; align-items:center; gap:10px; font-size:16px; }
+      .rb-rank{ flex:none; width:24px; height:24px; border-radius:50%; background:var(--lrs-primary-light,#dbeafe);
+        color:var(--lrs-primary-dark,#1d4ed8); font-weight:700; font-size:14px; display:flex; align-items:center; justify-content:center; }
+      .rb-tname{ font-weight:600; color:var(--gray-800,#374151); }
+      .rb-tmeta{ margin-left:auto; font-size:14px; color:var(--gray-500,#6b7280); text-align:right; }
+      .rb-alertwrap{ display:flex; flex-direction:column; gap:11px; }
+      .rb-alertrow{ display:flex; align-items:center; flex-wrap:wrap; gap:6px; font-size:15px; }
+      .rb-alabel{ font-size:14px; font-weight:700; margin-right:4px; }
+      .rb-alabel.danger{ color:#b91c1c; } .rb-alabel.warn{ color:#b45309; } .rb-alabel.muted{ color:var(--gray-500,#6b7280); }
+      .rb-none{ font-size:14px; color:var(--gray-400,#9ca3af); }
+
+      .rb-priority{ margin-top:18px; }
+      .rb-clr{ margin-top:18px; }
+      .rb-clrlist{ list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:7px; }
+      .rb-clrlist li{ display:flex; align-items:center; gap:10px; font-size:15px; flex-wrap:wrap; }
+      .rb-clrlv{ flex:none; min-width:76px; font-weight:600; color:var(--gray-800,#374151); }
+      .rb-clrgap{ font-weight:700; }
+      .rb-clrgap.danger{ color:#dc2626; } .rb-clrgap.warn{ color:#b45309; } .rb-clrgap.ok{ color:#15803d; } .rb-clrgap.muted{ color:var(--gray-400,#9ca3af); }
+      .rb-clrtb{ font-size:14px; color:var(--gray-500,#6b7280); }
+
+      .rb-tertile{ display:grid; grid-template-columns:repeat(3,1fr); gap:12px; }
+      .rb-tcard{ border-radius:12px; padding:16px; text-align:center; border:1px solid var(--gray-200); }
+      .rb-tcard.t-hi{ background:#eff6ff; border-color:#bfdbfe; }
+      .rb-tcard.t-mid{ background:#f0fdf4; border-color:#bbf7d0; }
+      .rb-tcard.t-lo{ background:#fffbeb; border-color:#fde68a; }
+      .rb-ttier{ font-size:14px; color:var(--gray-600,#4b5563); font-weight:600; margin-bottom:6px; }
+      .rb-tscore{ font-size:26px; font-weight:800; color:var(--gray-900,#1a1a2e); }
+      .rb-tscore span{ font-size:15px; font-weight:600; color:var(--gray-500,#6b7280); margin-left:2px; }
+      .rb-tn{ font-size:14px; color:var(--gray-500,#6b7280); margin-top:4px; }
+
+      .rb-relrow{ display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin:14px 0 0; }
+      .rb-relmeta{ font-size:14px; color:var(--gray-600,#4b5563); }
+      .rb-recos{ display:flex; flex-direction:column; gap:10px; }
+
+      details.rb-export{ border:1px solid var(--gray-200); border-radius:12px; background:var(--gray-50,#f9fafb); }
+      .rb-export summary{ cursor:pointer; font-size:16px; font-weight:700; padding:14px 18px; color:var(--gray-800,#374151); list-style:none; }
+      .rb-export summary::-webkit-details-marker{ display:none; }
+      .rb-export summary::before{ content:'▸'; margin-right:8px; color:var(--lrs-primary,#2563eb); }
+      .rb-export[open] summary::before{ content:'▾'; }
+      .rb-export .rb-export-body{ padding:4px 18px 18px; }
+
+      @media (max-width:768px){
+        .rb-2col{ grid-template-columns:1fr; gap:18px; }
+        .rb-tertile{ grid-template-columns:1fr; }
+        .lrs-rcover{ flex-direction:column; }
+        .lrs-rcover .rc-title{ font-size:24px; }
+      }
+
+      @media print{
+        @page{ size:A4; margin:13mm; }
+        body:has(#lrsReport) #dacheum-gnb-wrapper,
+        body:has(#lrsReport) .page-header,
+        body:has(#lrsReport) .lrs-tabs,
+        body:has(#lrsReport) .dc-filter-bar,
+        body:has(#lrsReport) .lrs-noprint,
+        body:has(#lrsReport) .dc-drawer,
+        body:has(#lrsReport) .dc-drawer-overlay{ display:none !important; }
+        body:has(#lrsReport) .lrs-content,
+        body:has(#lrsReport) .lrs-main,
+        body:has(#lrsReport) .lrs-shell{ padding:0 !important; margin:0 !important; }
+        body:has(#lrsReport){ background:#fff !important; }
+        #lrsReport{ gap:12px; }
+        #lrsReport .lrs-rblock{ break-inside:avoid; page-break-inside:avoid; box-shadow:none; }
+        #lrsReport .rb-export{ display:none !important; }
+        .lrs-rcover,.rb-num,.dc-badge,.rb-tcard,.lrs-insight{ -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+      }
+    </style>`;
+
+  // ── 후처리: 표(블록3·4) 렌더 + 인쇄 버튼 + 내보내기 동작 ──────────
+  if (eqRegR && eqRegR.success){
+    const pri = eqRegR.priorityUnits||[];
+    const host = document.getElementById('rptPriorityTable');
+    if (host){
+      if (pri.length){
+        renderDataTable(host, {
+          columns:[
+            { key:'label', label:'지역' },
+            { key:'students', label:'학생수', align:'right', format:v=>escapeHtml((Number(v)||0).toLocaleString()) },
+            { key:'avgScore', label:'평균 성취(점)', align:'right', format:v=>escapeHtml(v==null?'-':String(v)) },
+            { key:'avgActsPerStudent', label:'1인당 활동(건)', align:'right', format:v=>escapeHtml(v==null?'-':String(v)) }
+          ],
+          rows: pri, initialSort:'avgScore', initialDir:'asc'
+        });
+      } else {
+        host.innerHTML = `<p class="rb-goodnote"><i class="fas fa-circle-check" aria-hidden="true"></i> 활용·성취가 함께 낮은 '동반 저조' 지역이 없습니다.</p>`;
+      }
+    }
+  }
+  if (weakR && weakR.success && (weakR.ranking||[]).length){
+    const rows = weakR.ranking.slice(0,10).map((r,i)=>Object.assign({}, r, { _rank:i+1 }));
+    const reachBadge = (rate)=>{
+      const v = rate==null?0:Number(rate);
+      const t = v>=80?'dc-badge--success':v>=50?'dc-badge--warning':'dc-badge--danger';
+      return `<span class="dc-badge ${t}">${v}%</span>`;
+    };
+    renderDataTable(document.getElementById('rptWeakTable'), {
+      columns:[
+        { key:'_rank', label:'#', align:'right', format:v=>escapeHtml(String(v)) },
+        { key:'label', label:'성취기준', format:(_,r)=>{
+            const code = String(r.code||'').replace(/^\[|\]$/g,'');
+            const lbl  = (r.label && r.label!==r.code) ? r.label : code;
+            const short = lbl.length>24 ? lbl.slice(0,24)+'…' : lbl;
+            return `<div style="max-width:320px;"><div style="font-weight:600;color:#1f2937;">${escapeHtml(short)}</div><div style="font-size:13px;color:#9ca3af;">[${escapeHtml(code)}]</div></div>`;
+          } },
+        { key:'subject', label:'교과', format:v=>escapeHtml(v||'-') },
+        { key:'reachedRate', label:'도달률', align:'right', format:v=>reachBadge(v) },
+        { key:'evaluatedStudents', label:'표본', align:'right', format:v=>escapeHtml(((Number(v)||0))+'명') }
+      ],
+      rows, initialSort:'reachedRate', initialDir:'asc'
+    });
+    const disc = document.getElementById('rptWeakDisc');
+    if (disc) disc.innerHTML = `<i class="fas fa-circle-info" aria-hidden="true"></i> ${escapeHtml((weakR.disclaimer)||'취약·하락 추세는 규칙 기반 신호입니다. 표본이 적은 단위는 참고용으로 보세요.')}`;
+  }
+
+  // 인쇄/PDF 저장
+  const printBtn = document.getElementById('btnReportPrint');
+  if (printBtn) printBtn.addEventListener('click', () => { window.print(); });
+
+  // ── 내보내기(블록8) 동작 — 기존 기능 그대로 흡수 ──────────────────
+  let hist = [];
+  try { hist = JSON.parse(localStorage.getItem('lrs_export_hist')||'[]'); } catch(_){}
+  function currentScope(){ const el = root.querySelector('input[name="exScope"]:checked'); return el ? el.value : 'all'; }
+  function currentFormat(){ const el = root.querySelector('input[name="exFormat"]:checked'); return el ? el.value : 'csv'; }
   function updateEstimate(){
     const sc = currentScope();
     const est = document.getElementById('exEstimate');
     if (!est) return;
     let n = 0, label = '';
-    if (sc === 'all')      { n = totalLogs; label = '원시 로그'; }
+    if (sc === 'all')          { n = totalLogs; label = '원시 로그'; }
     else if (sc === 'daily')   { n = drows.length; label = '일별 집계 행'; }
     else if (sc === 'service') { n = 10; label = '서비스 집계 행(대략)'; }
     else if (sc === 'class')   { n = 30; label = '학급 집계 행(대략)'; }
     else if (sc === 'subject') { n = 20; label = '교과 집계 행(대략)'; }
     est.innerHTML = `약 <strong>${n.toLocaleString()}</strong>행 (${escapeHtml(label)}) · 형식 <strong>${escapeHtml(currentFormat().toUpperCase())}</strong>`;
   }
-  root.querySelectorAll('input[name="exScope"],input[name="exFormat"]').forEach(el => {
-    el.addEventListener('change', updateEstimate);
-  });
+  root.querySelectorAll('input[name="exScope"],input[name="exFormat"]').forEach(el => { el.addEventListener('change', updateEstimate); });
   updateEstimate();
-
   function renderHist(){
     const box = document.getElementById('exHist');
+    if (!box) return;
     if (!hist.length){ box.innerHTML = tplEmpty('다운로드 이력이 없습니다'); return; }
     renderDataTable(box, {
       columns: [
@@ -9340,22 +9779,13 @@ VIEWS['a-export'] = async function(root){
     });
   }
   renderHist();
-
-  document.getElementById('btnExportDo').addEventListener('click', () => {
-    LRS.exportData(currentFormat(), currentScope());
-    try { hist = JSON.parse(localStorage.getItem('lrs_export_hist')||'[]'); } catch(_){ hist = []; }
-    renderHist();
-  });
-  document.getElementById('btnExportCsvQuick').addEventListener('click', () => {
-    LRS.exportData('csv', 'all');
-    try { hist = JSON.parse(localStorage.getItem('lrs_export_hist')||'[]'); } catch(_){ hist = []; }
-    renderHist();
-  });
-  document.getElementById('btnExportXlsxQuick').addEventListener('click', () => {
-    LRS.exportData('xlsx', 'all');
-    try { hist = JSON.parse(localStorage.getItem('lrs_export_hist')||'[]'); } catch(_){ hist = []; }
-    renderHist();
-  });
+  function refreshHist(){ try { hist = JSON.parse(localStorage.getItem('lrs_export_hist')||'[]'); } catch(_){ hist = []; } renderHist(); }
+  const bDo = document.getElementById('btnExportDo');
+  const bCsv = document.getElementById('btnExportCsvQuick');
+  const bXlsx = document.getElementById('btnExportXlsxQuick');
+  if (bDo)  bDo.addEventListener('click', () => { LRS.exportData(currentFormat(), currentScope()); refreshHist(); });
+  if (bCsv) bCsv.addEventListener('click', () => { LRS.exportData('csv', 'all'); refreshHist(); });
+  if (bXlsx)bXlsx.addEventListener('click', () => { LRS.exportData('xlsx', 'all'); refreshHist(); });
 };
 
 /* =====================================================================
