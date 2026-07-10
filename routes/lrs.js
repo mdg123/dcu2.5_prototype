@@ -2833,79 +2833,150 @@ router.get('/trend/class/:id', requireAuth, (req, res) => {
   }
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// 취약/우수 성취기준 추세 랭킹 공통 산출 (weak-trend·strong-trend 공유).
+//   userIds 산출·학교급/학년/교과 필터·availableSubjects/Grades·마스킹이 두 엔드포인트에서 동일하다.
+//   order 만 다르다: 'weak'(도달률 낮·하락 우선) | 'strong'(도달률 높·상승/안정 우선).
+//   @returns 응답 payload 객체(성공, disclaimer 제외) | null(이미 4xx 응답 전송됨 — 호출부는 즉시 return).
+// ─────────────────────────────────────────────────────────────────────────────
+function _computeTrendRanking(req, res, order) {
+  const role = req.user && req.user.role;
+  let scope = String(req.query.scope || '').toLowerCase();
+  if (scope === 'all' && role !== 'admin') scope = 'class';
+  if (!scope) scope = role === 'admin' ? 'all' : 'class';
+  if (scope === 'class' && role !== 'teacher' && role !== 'admin') {
+    res.status(403).json({ success: false, message: '권한이 없습니다.' });
+    return null;
+  }
+
+  const defLimit = order === 'strong' ? 10 : 15;
+  const limit = req.query.limit
+    ? Math.max(1, Math.min(50, parseInt(req.query.limit, 10) || defLimit))
+    : defLimit;
+
+  // ── 학교급·교과 필터 (기본 all). ──
+  const wLevel = String(req.query.school_level || 'all').trim();
+  if (!['all', 'elementary', 'middle', 'high'].includes(wLevel)) {
+    res.status(400).json({ success: false, message: '잘못된 school_level 파라미터입니다.' });
+    return null;
+  }
+  const wSubject = String(req.query.subject || 'all').trim();
+  if (!isValidSubjectParam(wSubject)) {
+    res.status(400).json({ success: false, message: '잘못된 subject 파라미터입니다.' });
+    return null;
+  }
+  // ── 학년(grade) 필터: 정수 1~6만 허용(그 외 400). school_level=all 이면 무시(적용 안 함). ──
+  //   유효성은 값이 넘어온 경우에만 검사(정수/범위). 급별 범위 초과(예: 중학교 grade=6)는
+  //   결과가 빈 것이 정상이므로 400 아님 — 400 은 정수/1~6 범위 밖일 때만.
+  let gradeValid = null;
+  const gradeRaw = req.query.grade;
+  if (gradeRaw !== undefined && String(gradeRaw).trim() !== '') {
+    const s = String(gradeRaw).trim();
+    const g = /^\d+$/.test(s) ? parseInt(s, 10) : NaN;
+    if (!Number.isInteger(g) || g < 1 || g > 6) {
+      res.status(400).json({ success: false, message: '잘못된 grade 파라미터입니다. (정수 1~6)' });
+      return null;
+    }
+    gradeValid = g;
+  }
+
+  // ── (1) 학교급 스코프 userIds (grade 필터 적용 *전*) — availableGrades 산출 기준. ──
+  //   availableSubjects 가 fullRanking(교과 필터 전)에서 나오는 것과 동일 원리:
+  //   학년 필터 적용 전 스코프의 distinct grade 를 뽑아야 학년 칩이 죽지 않는다.
+  const lvlCond = wLevel !== 'all' ? ' AND u.school_level = ?' : '';
+  const lvlArg = wLevel !== 'all' ? [wLevel] : [];
+  let baseRows = [];
+  if (scope === 'all') {
+    baseRows = db.prepare(`SELECT u.id AS id, u.grade AS grade FROM users u WHERE u.role='student'${lvlCond}`)
+      .all(...lvlArg);
+  } else {
+    // class: 교사 소유 반들의 student 멤버 합집합
+    const classIds = db.prepare('SELECT id FROM classes WHERE owner_id = ?').all(req.user.id).map(r => r.id);
+    if (classIds.length) {
+      const ph = classIds.map(() => '?').join(',');
+      baseRows = db.prepare(`
+        SELECT DISTINCT cm.user_id AS id, u.grade AS grade
+        FROM class_members cm JOIN users u ON u.id = cm.user_id
+        WHERE cm.class_id IN (${ph}) AND u.role = 'student'${lvlCond}
+      `).all(...classIds, ...lvlArg);
+    }
+  }
+
+  // availableGrades: 학교급 스코프에 존재하는 학년(오름차). school_level=all 이면 [](학년 필터 비활성 신호).
+  let availableGrades = [];
+  if (wLevel !== 'all') {
+    const gset = new Set();
+    for (const r of baseRows) { if (r.grade != null) gset.add(Number(r.grade)); }
+    availableGrades = Array.from(gset).sort((a, b) => a - b);
+  }
+
+  // ── (2) grade 필터로 랭킹용 userIds 좁힘 (school_level 이 특정 급일 때만 적용). ──
+  let appliedGrade = null;
+  let scopedRows = baseRows;
+  if (wLevel !== 'all' && gradeValid != null) {
+    appliedGrade = gradeValid;
+    scopedRows = baseRows.filter(r => Number(r.grade) === gradeValid);
+  }
+  const userIds = scopedRows.map(r => r.id);
+
+  // 정책 2026-06: scope=class 는 교사가 "자기 반(담당) 학생"을 보는 관점 → 실명(masked=false).
+  //   scope=all 은 관리자 거시뷰 → 표본 n<10 이면 익명 게이트 유지(개인정보 보호).
+  //   (※ getWeakTrend 자체는 성취기준 코드 단위 집계로 개별 학생명 미포함 — masked 는 FE 참고 배너용 플래그.)
+  const MIN_N = MIN_SAMPLE_N;
+  const masked = scope === 'class' ? false : (userIds.length < MIN_N);
+  // 전체 랭킹을 넉넉히 받아(999) availableSubjects 산출 + 교과 후처리 필터.
+  //   getWeakTrend 는 order 로 이미 취약/우수 정렬 → 정렬 유지한 채 슬라이스.
+  const fullRanking = analytics.getWeakTrend({ userIds, limit: 999, order });
+  // availableSubjects — 현재 급·학년 스코프 랭킹에 존재하는 교과만 present=true(교과 필터 전 기준).
+  const wPresent = new Set();
+  fullRanking.forEach(row => { const k = canonicalSubjectKey(row.subject); if (k) wPresent.add(k); });
+  const availableSubjects = buildAvailableSubjects(wPresent);
+  // 교과 필터: canonicalSubjectKey(row.subject)===wSubject 인 행만(learning_logs 무관·resolveCode 기반).
+  let ranking = fullRanking;
+  if (wSubject !== 'all') ranking = ranking.filter(row => canonicalSubjectKey(row.subject) === wSubject);
+  ranking = ranking.slice(0, limit);
+
+  return {
+    success: true, scope, studentCount: userIds.length, masked, minSample: MIN_N,
+    // strong 랭킹 티어 임계(표본 충분 기준). 두 엔드포인트 공통 반환 → weak/strong 응답 shape 동일 유지(WS-6).
+    //   weak 는 미사용(정보용), strong FE 는 disclaimer 근거로 선택 소비.
+    strongMinSample: analytics.MIN_STRONG_SAMPLE,
+    ranking,
+    availableSubjects,
+    availableGrades,
+    appliedLevel: wLevel,
+    appliedLevelLabel: wLevel !== 'all' ? levelLabel(wLevel) : null,
+    appliedGrade,
+    appliedSubject: wSubject,
+    appliedSubjectLabel: wSubject !== 'all' ? (CANONICAL_SUBJECT_LABEL[wSubject] || null) : null,
+  };
+}
+
 // GET /api/lrs/weak-trend — 관리자(scope=all)/교사(scope=class). 취약 성취기준 추세 랭킹.
 //   scope=class: 교사 소유 반 멤버 전체. scope=all: admin 전용 전체 학생.
-//   평가 학생수 n<10 인 성취기준은 식별 무관(코드 단위 집계)이지만, 전체 표본<10 이면 마스킹 플래그.
+//   필터: school_level(급)·grade(학년, 급 선택 시만)·subject(교과). 평가 학생수 n<10 은 마스킹 플래그.
 router.get('/weak-trend', requireAuth, (req, res) => {
   try {
-    const role = req.user && req.user.role;
-    let requested = String(req.query.scope || '').toLowerCase();
-    let scope = requested;
-    if (scope === 'all' && role !== 'admin') scope = 'class';
-    if (!scope) scope = role === 'admin' ? 'all' : 'class';
-    if (scope === 'class' && role !== 'teacher' && role !== 'admin') {
-      return res.status(403).json({ success: false, message: '권한이 없습니다.' });
-    }
-
-    const limit = req.query.limit ? Math.max(1, Math.min(50, parseInt(req.query.limit, 10) || 15)) : 15;
-    // ── [BE-5] 학교급·교과 필터 (기본 all). aWeak 취약 성취기준 추세 랭킹 스코프. ──
-    const wLevel = String(req.query.school_level || 'all').trim();
-    if (!['all', 'elementary', 'middle', 'high'].includes(wLevel)) {
-      return res.status(400).json({ success: false, message: '잘못된 school_level 파라미터입니다.' });
-    }
-    const wSubject = String(req.query.subject || 'all').trim();
-    if (!isValidSubjectParam(wSubject)) {
-      return res.status(400).json({ success: false, message: '잘못된 subject 파라미터입니다.' });
-    }
-    // 학교급 조건: userIds 산출 SQL 에 AND u.school_level=? 추가(있으면).
-    const lvlCond = wLevel !== 'all' ? ' AND u.school_level = ?' : '';
-    const lvlArg = wLevel !== 'all' ? [wLevel] : [];
-    let userIds = [];
-    if (scope === 'all') {
-      userIds = db.prepare(`SELECT id FROM users u WHERE u.role='student'${lvlCond}`)
-        .all(...lvlArg).map(r => r.id);
-    } else {
-      // class: 교사 소유 반들의 student 멤버 합집합
-      const classIds = db.prepare('SELECT id FROM classes WHERE owner_id = ?').all(req.user.id).map(r => r.id);
-      if (classIds.length) {
-        const ph = classIds.map(() => '?').join(',');
-        userIds = db.prepare(`
-          SELECT DISTINCT cm.user_id AS id
-          FROM class_members cm JOIN users u ON u.id = cm.user_id
-          WHERE cm.class_id IN (${ph}) AND u.role = 'student'${lvlCond}
-        `).all(...classIds, ...lvlArg).map(r => r.id);
-      }
-    }
-
-    // 정책 2026-06: scope=class 는 교사가 "자기 반(담당) 학생"을 보는 관점 → 실명(masked=false).
-    //   scope=all 은 관리자 거시뷰 → 표본 n<10 이면 익명 게이트 유지(개인정보 보호).
-    //   (※ getWeakTrend 자체는 성취기준 코드 단위 집계로 개별 학생명 미포함 — masked 는 FE 참고 배너용 플래그.)
-    const MIN_N = MIN_SAMPLE_N;
-    const masked = scope === 'class' ? false : (userIds.length < MIN_N);
-    // [BE-5] 전체 랭킹을 넉넉히 받아(getWeakTrend 무변경) availableSubjects 산출 + 교과 후처리 필터.
-    //   getWeakTrend 는 code 단위로 이미 취약 우선 정렬 → 넉넉히(999) 받아 정렬 유지한 채 슬라이스.
-    const fullRanking = analytics.getWeakTrend({ userIds, limit: 999 });
-    // availableSubjects — 현재 급 스코프 랭킹에 존재하는 교과만 present=true(교과 필터 전 기준).
-    const wPresent = new Set();
-    fullRanking.forEach(row => { const k = canonicalSubjectKey(row.subject); if (k) wPresent.add(k); });
-    const availableSubjects = buildAvailableSubjects(wPresent);
-    // 교과 필터: canonicalSubjectKey(row.subject)===wSubject 인 행만(learning_logs 무관·resolveCode 기반).
-    let ranking = fullRanking;
-    if (wSubject !== 'all') ranking = ranking.filter(row => canonicalSubjectKey(row.subject) === wSubject);
-    ranking = ranking.slice(0, limit);
-
-    res.json({
-      success: true, scope, studentCount: userIds.length, masked, minSample: MIN_N,
-      ranking,
-      availableSubjects,
-      appliedLevel: wLevel,
-      appliedLevelLabel: wLevel !== 'all' ? levelLabel(wLevel) : null,
-      appliedSubject: wSubject,
-      appliedSubjectLabel: wSubject !== 'all' ? (CANONICAL_SUBJECT_LABEL[wSubject] || null) : null,
-      disclaimer: '취약·하락 추세는 규칙 기반 신호입니다. 표본이 적은 단위는 참고용으로 보세요.',
-    });
+    const payload = _computeTrendRanking(req, res, 'weak');
+    if (!payload) return; // 4xx 이미 전송됨
+    payload.disclaimer = '취약·하락 추세는 규칙 기반 신호입니다. 표본이 적은 단위는 참고용으로 보세요.';
+    res.json(payload);
   } catch (err) {
     console.error('[LRS] /weak-trend error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// GET /api/lrs/strong-trend — 우수 성취기준 추세 랭킹. weak-trend 와 파라미터·권한·마스킹 동일.
+//   차이: 정렬만 반대(도달률 내림차 → slope 내림차). 응답 shape 동일(ranking·availableSubjects·availableGrades…).
+router.get('/strong-trend', requireAuth, (req, res) => {
+  try {
+    const payload = _computeTrendRanking(req, res, 'strong');
+    if (!payload) return; // 4xx 이미 전송됨
+    payload.disclaimer = '우수는 평가 표본이 충분한(5명 이상) 성취기준을 우선 배치하고, 그 안에서 도달률이 높고 상승·안정인 순입니다. 표본이 적은 단위는 아래에 참고로 표시됩니다.';
+    res.json(payload);
+  } catch (err) {
+    console.error('[LRS] /strong-trend error:', err);
     res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
   }
 });

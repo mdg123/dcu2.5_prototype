@@ -1446,3 +1446,280 @@ test('ENGDETAIL-10: 창 분리 정직성 — negPct(s_emotion 창) 와 2주 목�
     assert.ok(/신호/.test(sig.recentEmotionHint), '관찰형(‘신호’) 톤');
   }
 });
+
+// ════════════════════════════════════════════════════════════════════════════
+// [WEAKSTRONG] 성취기준 강·약 Top 10 — weak-trend grade 필터 + strong-trend 신설
+//   기획서: 보고서/LRS_성취기준_강약_Top10_필터_기획_v1.md §4 (API 계약)
+//   박제 불변식·회귀:
+//     (i)  strong 정렬(감리 REWORK 옵션 B): tier(n>=5 우선) → Wilson 하한 → reachedRate → slope.
+//          동일 티어 내에서만 Wilson 하한 비증가. 단순 도달률 내림차 아님.
+//     (i') 표본 큰 고도달 기준이 evaluatedStudents==1 100% 기준보다 우수 랭킹 상위(핵심 박제)
+//     (i'')[티어] strong 랭킹에서 evaluatedStudents>=5 행은 전부 <5 행보다 앞선다(티어 단조·핵심 박제)
+//     (ii) weak 정렬 reachedRate 오름차(기존 유지 · A-WEAK 회귀 0 · 처방에서 손대지 않음)
+//     (iii) grade 필터가 studentCount 를 좁힘(초등 3학년)
+//     (iv) availableGrades == school_level 스코프의 실제 distinct grade 집합(오름차)
+//     (v)  school_level=all → grade 무시 · availableGrades:[]
+//     (vi) weak-trend 기존 응답 필드 불변(A-WEAK 회귀) + strong shape 동일
+// ════════════════════════════════════════════════════════════════════════════
+
+// 처방 A 산식 재현(BE 와 동일) — 정렬키·신규 불변식 교차검증용.
+function _wilsonLoTest(pos, n, z = 1.96) {
+  if (!n) return 0;
+  const p = pos / n, z2 = z * z;
+  return (p + z2 / (2 * n) - z * Math.sqrt((p * (1 - p) + z2 / (4 * n)) / n)) / (1 + z2 / n);
+}
+
+// strong 티어(감리 옵션 B): 평가 학생수 >= MIN_STRONG_SAMPLE(=5) → tier 0(상위), 미만 → tier 1(하위).
+const _strongTier = (r) => (r.evaluatedStudents >= analytics.MIN_STRONG_SAMPLE ? 0 : 1);
+
+// strong 정렬 헬퍼(옵션 B): 1차 tier 비감소(0→1) → 동일 티어 내 Wilson 하한 비증가 → reachedRate 내림차 → slope 내림차.
+//   ★ Wilson 하한은 '동일 티어 안에서만' 단조. 티어 경계(0→1)에선 하위키 비교하지 않는다(티어가 우선).
+function _assertStrongOrder(ranking) {
+  for (let i = 1; i < ranking.length; i++) {
+    const a = ranking[i - 1], b = ranking[i];
+    const ta = _strongTier(a), tb = _strongTier(b);
+    // 1차: 티어 비감소 — 표본 부족(tier1)이 표본 충분(tier0)보다 앞서면 위반.
+    assert.ok(ta <= tb,
+      `strong 티어 역전(표본부족이 표본충분보다 위) (nA=${a.evaluatedStudents}→nB=${b.evaluatedStudents})`);
+    if (ta !== tb) continue; // 티어 경계 — 하위 정렬키 비교 안 함(티어가 지배)
+    // 응답에 _wilsonLo 동봉 확인(정렬 근거 노출).
+    assert.ok(typeof a._wilsonLo === 'number' && typeof b._wilsonLo === 'number',
+      'strong ranking 항목에 _wilsonLo(정렬키) 존재');
+    if (a._wilsonLo !== b._wilsonLo) {
+      assert.ok(a._wilsonLo >= b._wilsonLo,
+        `strong 동일티어 Wilson하한 내림차 위반 (${a._wilsonLo} → ${b._wilsonLo})`);
+    } else if (a.reachedRate !== b.reachedRate) {
+      assert.ok(a.reachedRate >= b.reachedRate,
+        `strong 동일티어 도달률 내림차 위반 (${a.reachedRate} → ${b.reachedRate})`);
+    } else {
+      const as = a.slope == null ? 0 : a.slope;
+      const bs = b.slope == null ? 0 : b.slope;
+      assert.ok(as >= bs, `strong 동일티어 slope 내림차 위반 (${as} → ${bs})`);
+    }
+  }
+}
+function _assertAscByRate(ranking) {
+  for (let i = 1; i < ranking.length; i++) {
+    assert.ok(ranking[i - 1].reachedRate <= ranking[i].reachedRate,
+      `weak 도달률 오름차 위반 (${ranking[i - 1].reachedRate} → ${ranking[i].reachedRate})`);
+  }
+}
+
+test('WS-U1: getWeakTrend order=strong — 티어(n>=5)→Wilson 하한 정렬(취약과 동일 집합), 기본 order=weak 하위호환', () => {
+  const ids = analytics.classStudentIds(CLASS);
+  const weak = analytics.getWeakTrend({ userIds: ids, limit: 999 });          // 기본 = weak
+  const weakExplicit = analytics.getWeakTrend({ userIds: ids, limit: 999, order: 'weak' });
+  const strong = analytics.getWeakTrend({ userIds: ids, limit: 999, order: 'strong' });
+  // (하위호환) 기본 == 명시 weak
+  assert.deepEqual(weakExplicit.map(r => r.code), weak.map(r => r.code), 'order 기본값=weak(하위호환)');
+  // 정렬 방향: weak 은 도달률 오름차(불변), strong 은 티어→Wilson 하한(옵션 B)
+  _assertAscByRate(weak);
+  _assertStrongOrder(strong);
+  // _wilsonLo 는 이항비율 하한 → [0,1] 유한값(정밀 산식 교차검증은 WS-U2 에서 결정적 케이스로).
+  for (const r of strong) {
+    assert.ok(Number.isFinite(r._wilsonLo) && r._wilsonLo >= 0 && r._wilsonLo <= 1,
+      `_wilsonLo ∈ [0,1] (${r._wilsonLo})`);
+  }
+  // 동일 코드 집합(정렬만 다름 — 집계는 동일)
+  assert.deepEqual([...weak.map(r => r.code)].sort(), [...strong.map(r => r.code)].sort(),
+    'weak/strong 은 동일 코드 집합(정렬만 반대)');
+  // reachedRate ∈ [0,100]
+  for (const r of strong) assert.ok(r.reachedRate >= 0 && r.reachedRate <= 100, `strong rate ${r.reachedRate}`);
+});
+
+test('WS-1: /strong-trend?scope=all — ranking 티어→Wilson 정렬 + strongMinSample + 우수 disclaimer', async () => {
+  const r = await req(`/strong-trend?scope=all`, ADMIN);
+  assert.equal(r.status, 200, '관리자 strong-trend 200');
+  assert.equal(r.json.success, true);
+  assert.ok(Array.isArray(r.json.ranking) && r.json.ranking.length > 0, 'ranking 배열');
+  _assertStrongOrder(r.json.ranking); // 티어(n>=5 우선) → 동일 티어 Wilson 하한 비증가
+  assert.equal(r.json.strongMinSample, analytics.MIN_STRONG_SAMPLE, 'strongMinSample=5 응답 동봉');
+  assert.ok(/우수/.test(r.json.disclaimer), '우수 전용 disclaimer');
+  assert.ok(/5명 이상|표본/.test(r.json.disclaimer), 'disclaimer 에 표본 티어 근거 명시');
+});
+
+test('WS-U2: [핵심 박제] 표본 큰 고도달 기준이 evaluatedStudents==1 100% 기준보다 strong 랭킹 상위', () => {
+  // 감리 실증: 단순 도달률 내림차면 n=1 100% 가 최상단 도배. Wilson 하한으로 표본 큰 기준이 위로.
+  //   합성 결정 케이스: A=도달률 90% n=20(Wilson≈0.70) vs B=도달률 100% n=1(Wilson≈0.21) → A > B.
+  const CODE_A = 'ZZWILSON-A', CODE_B = 'ZZWILSON-B';
+  const del = db.prepare("DELETE FROM lrs_achievement_stats WHERE achievement_code IN (?, ?)");
+  const ins = db.prepare(
+    "INSERT INTO lrs_achievement_stats (user_id, achievement_code, attempt_count, success_count, avg_score) VALUES (?,?,?,?,?)"
+  );
+  del.run(CODE_A, CODE_B);
+  const ids = [];
+  try {
+    // A: 18명 도달(att5/succ5=100 → reached) + 2명 부분도달(att4/succ2=50 → partial, 평가O/도달X) = 20평가·18도달·90%
+    for (let i = 0; i < 18; i++) { const uid = 900001 + i; ids.push(uid); ins.run(uid, CODE_A, 5, 5, null); }
+    for (let i = 0; i < 2;  i++) { const uid = 900020 + i; ids.push(uid); ins.run(uid, CODE_A, 4, 2, null); }
+    // B: 1명 도달(att5/succ5=100) = 1평가·1도달·100%
+    const uidB = 900100; ids.push(uidB); ins.run(uidB, CODE_B, 5, 5, null);
+
+    const strong = analytics.getWeakTrend({ userIds: ids, limit: 999, order: 'strong' });
+    const A = strong.find(r => r.code === CODE_A);
+    const B = strong.find(r => r.code === CODE_B);
+    assert.ok(A && B, '합성 코드 A·B 둘 다 랭킹에 존재');
+    // 도달률·표본 정합(표시값은 도달률 그대로 유지)
+    assert.equal(A.reachedRate, 90, 'A 도달률 90%');
+    assert.equal(A.evaluatedStudents, 20, 'A 평가 학생수 20');
+    assert.equal(B.reachedRate, 100, 'B 도달률 100%');
+    assert.equal(B.evaluatedStudents, 1, 'B 평가 학생수 1');
+    // Wilson 하한: A(≈0.70) > B(≈0.21) — BE 산출이 재현 산식과 정확히 일치(reached=18/20, 1/1).
+    assert.ok(Math.abs(A._wilsonLo - _wilsonLoTest(18, 20)) < 1e-9, `A _wilsonLo BE==재현산식 (${A._wilsonLo})`);
+    assert.ok(Math.abs(B._wilsonLo - _wilsonLoTest(1, 1)) < 1e-9, `B _wilsonLo BE==재현산식 (${B._wilsonLo})`);
+    assert.ok(A._wilsonLo > B._wilsonLo, `A Wilson(${A._wilsonLo}) > B Wilson(${B._wilsonLo})`);
+    assert.ok(A._wilsonLo > 0.6 && A._wilsonLo < 0.75, `A Wilson≈0.70 (${A._wilsonLo})`);
+    assert.ok(B._wilsonLo > 0.15 && B._wilsonLo < 0.30, `B Wilson≈0.21 (${B._wilsonLo})`);
+    // 핵심: 도달률은 B(100)>A(90) 이지만 strong 랭킹에서 A 가 B 보다 위(구식 도달률 정렬이면 정반대)
+    assert.ok(strong.indexOf(A) < strong.indexOf(B),
+      `표본 큰 고도달 A(90% n=20)가 소표본 B(100% n=1)보다 상위여야 (idxA=${strong.indexOf(A)}, idxB=${strong.indexOf(B)})`);
+  } finally {
+    del.run(CODE_A, CODE_B); // 합성 데이터 정리(격리)
+  }
+});
+
+test('WS-U3: [핵심 박제] 티어 단조 — strong 랭킹에서 n>=5 행이 전부 n<5 행보다 앞선다(옵션 B)', () => {
+  // 감리 옵션 B: 표본 충분(n>=5) 티어가 표본 부족(n<5, n=1 100% 포함)보다 항상 위.
+  //   결정 케이스: 표본충분 저도달(n=6 33%·n=8 50%)이 표본부족 고도달(n=1 100%·n=2 100%)보다 상위.
+  //   ★ 티어가 Wilson·도달률을 지배 — n=1 100%(Wilson 0.207)가 n=6 33%(Wilson≈0.10)보다 높아도 아래로 강등.
+  const T = { c1: 'ZZTIER-C1', c2: 'ZZTIER-C2', d1: 'ZZTIER-D1', d2: 'ZZTIER-D2' };
+  const codes = Object.values(T);
+  const ph = codes.map(() => '?').join(',');
+  const del = db.prepare(`DELETE FROM lrs_achievement_stats WHERE achievement_code IN (${ph})`);
+  const ins = db.prepare(
+    "INSERT INTO lrs_achievement_stats (user_id, achievement_code, attempt_count, success_count, avg_score) VALUES (?,?,?,?,?)"
+  );
+  del.run(...codes);
+  const ids = [];
+  let uid = 910000;
+  const put = (code, att, succ) => { ids.push(uid); ins.run(uid, code, att, succ, null); uid++; };
+  try {
+    // tier0(표본충분): C1 = n=6, 2도달(33.3%) / C2 = n=8, 4도달(50%)
+    for (let i = 0; i < 2; i++) put(T.c1, 5, 5); for (let i = 0; i < 4; i++) put(T.c1, 4, 1); // 6평가, 2도달
+    for (let i = 0; i < 4; i++) put(T.c2, 5, 5); for (let i = 0; i < 4; i++) put(T.c2, 4, 1); // 8평가, 4도달
+    // tier1(표본부족): D1 = n=1 100%, D2 = n=2 100%
+    put(T.d1, 5, 5);                                   // 1평가, 1도달 (100%)
+    for (let i = 0; i < 2; i++) put(T.d2, 5, 5);       // 2평가, 2도달 (100%)
+
+    const strong = analytics.getWeakTrend({ userIds: ids, limit: 999, order: 'strong' });
+    const byCode = Object.fromEntries(strong.map((r, i) => [r.code, { i, r }]));
+    for (const c of codes) assert.ok(byCode[c], `합성 코드 ${c} 랭킹 존재`);
+    // 표본·도달률 정합
+    assert.equal(byCode[T.c1].r.evaluatedStudents, 6); assert.equal(byCode[T.c1].r.reachedRate, 33.3);
+    assert.equal(byCode[T.c2].r.evaluatedStudents, 8); assert.equal(byCode[T.c2].r.reachedRate, 50);
+    assert.equal(byCode[T.d1].r.evaluatedStudents, 1); assert.equal(byCode[T.d1].r.reachedRate, 100);
+    assert.equal(byCode[T.d2].r.evaluatedStudents, 2); assert.equal(byCode[T.d2].r.reachedRate, 100);
+    // 핵심: 모든 tier0(C1,C2) 인덱스 < 모든 tier1(D1,D2) 인덱스 — 티어 단조.
+    const tier0Max = Math.max(byCode[T.c1].i, byCode[T.c2].i);
+    const tier1Min = Math.min(byCode[T.d1].i, byCode[T.d2].i);
+    assert.ok(tier0Max < tier1Min,
+      `n>=5(C1·C2) 전부가 n<5(D1·D2)보다 앞서야 (tier0Max=${tier0Max}, tier1Min=${tier1Min})`);
+    // 티어가 Wilson 을 지배함을 명시 확인: D1(n=1 100%) Wilson > C1(n=6 33%) Wilson 인데도 C1 이 위.
+    assert.ok(byCode[T.d1].r._wilsonLo > byCode[T.c1].r._wilsonLo,
+      '전제: 소표본 D1 Wilson 하한이 대표본 C1 보다 높다(그럼에도 티어로 C1 이 위)');
+    assert.ok(byCode[T.c1].i < byCode[T.d1].i, '티어가 Wilson 을 지배 — C1(저도달·대표본)이 D1(고도달·소표본) 위');
+    // 전체 티어 단조 불변식도 통과(범용 헬퍼).
+    _assertStrongOrder(strong);
+  } finally {
+    del.run(...codes); // 합성 데이터 정리(격리)
+  }
+});
+
+test('WS-2: /weak-trend?scope=all — ranking 도달률 오름차(기존 유지 · A-WEAK 회귀)', async () => {
+  const r = await req(`/weak-trend?scope=all`, ADMIN);
+  assert.equal(r.status, 200);
+  _assertAscByRate(r.json.ranking);
+  assert.ok(/취약/.test(r.json.disclaimer), '취약 전용 disclaimer');
+});
+
+test('WS-3: grade 필터가 studentCount 를 좁힌다(초등 3학년) + appliedGrade=3', async () => {
+  const lvl = await req(`/weak-trend?scope=all&school_level=elementary`, ADMIN);
+  const g3 = await req(`/weak-trend?scope=all&school_level=elementary&grade=3`, ADMIN);
+  assert.equal(lvl.status, 200); assert.equal(g3.status, 200);
+  // DB 실측 기대치(시드 독립).
+  const expected = db.prepare(
+    "SELECT COUNT(*) c FROM users WHERE role='student' AND school_level='elementary' AND grade=3"
+  ).get().c;
+  assert.equal(g3.json.studentCount, expected, `초등3 studentCount=${expected} 기대`);
+  assert.ok(g3.json.studentCount < lvl.json.studentCount, 'grade 필터가 모수를 좁혀야');
+  assert.equal(g3.json.appliedGrade, 3, 'appliedGrade=3');
+  assert.equal(lvl.json.appliedGrade, null, 'grade 미전달 → appliedGrade=null');
+  // strong-trend 도 동일하게 좁혀야(공통 로직).
+  const g3s = await req(`/strong-trend?scope=all&school_level=elementary&grade=3`, ADMIN);
+  assert.equal(g3s.json.studentCount, expected, 'strong-trend 도 grade 필터 동일 적용');
+  assert.equal(g3s.json.appliedGrade, 3);
+});
+
+test('WS-4: availableGrades == school_level 스코프의 실제 distinct grade(오름차)', async () => {
+  for (const lv of ['elementary', 'middle', 'high']) {
+    const r = await req(`/weak-trend?scope=all&school_level=${lv}`, ADMIN);
+    assert.equal(r.status, 200);
+    const expected = db.prepare(
+      "SELECT DISTINCT grade FROM users WHERE role='student' AND school_level=? AND grade IS NOT NULL ORDER BY grade"
+    ).all(lv).map(x => x.grade);
+    assert.deepEqual(r.json.availableGrades, expected, `${lv} availableGrades 정합`);
+    // grade 필터 적용 후에도 availableGrades 는 급 스코프 기준으로 유지(필터 전 산출 — 칩 안 죽음).
+    if (expected.length) {
+      const g = expected[0];
+      const rg = await req(`/weak-trend?scope=all&school_level=${lv}&grade=${g}`, ADMIN);
+      assert.deepEqual(rg.json.availableGrades, expected,
+        `${lv} grade=${g} 필터 후에도 availableGrades 전체 유지(필터 전 산출)`);
+    }
+  }
+});
+
+test('WS-5: school_level=all → grade 무시 · availableGrades:[]', async () => {
+  const all = await req(`/weak-trend?scope=all`, ADMIN);
+  const allGrade = await req(`/weak-trend?scope=all&grade=3`, ADMIN); // level 없이 grade
+  assert.equal(all.status, 200); assert.equal(allGrade.status, 200);
+  assert.deepEqual(all.json.availableGrades, [], 'all → availableGrades 빈배열');
+  assert.deepEqual(allGrade.json.availableGrades, [], 'all(+grade) → 여전히 빈배열');
+  assert.equal(allGrade.json.appliedGrade, null, 'level 없으면 grade 무시 → appliedGrade=null');
+  assert.equal(allGrade.json.studentCount, all.json.studentCount, 'grade 무시 → studentCount 불변(전체)');
+  // strong-trend 도 동일.
+  const allS = await req(`/strong-trend?scope=all`, ADMIN);
+  assert.deepEqual(allS.json.availableGrades, [], 'strong all → 빈배열');
+});
+
+test('WS-6: weak-trend 기존 응답 필드 불변(A-WEAK 회귀) + strong shape 동일', async () => {
+  const w = await req(`/weak-trend?scope=all&school_level=elementary&subject=math`, ADMIN);
+  assert.equal(w.status, 200);
+  // 기존 계약 필드 전부 존재.
+  for (const k of ['success', 'scope', 'studentCount', 'masked', 'minSample', 'ranking',
+    'availableSubjects', 'appliedLevel', 'appliedLevelLabel', 'appliedSubject',
+    'appliedSubjectLabel', 'disclaimer']) {
+    assert.ok(k in w.json, `weak-trend 응답에 기존 필드 '${k}' 유지`);
+  }
+  // 신규 필드 존재.
+  assert.ok('availableGrades' in w.json && 'appliedGrade' in w.json, '신규 필드 availableGrades·appliedGrade');
+  assert.equal(w.json.appliedLevel, 'elementary');
+  assert.equal(w.json.appliedLevelLabel, '초등학교');
+  assert.equal(w.json.appliedSubject, 'math');
+  assert.equal(w.json.appliedSubjectLabel, '수학');
+  // 교과 필터: ranking 전부 수학(있다면).
+  for (const row of w.json.ranking) {
+    assert.ok(row.subject == null || row.subject === '수학', `교과 필터 후 비수학 노출: ${row.subject}`);
+  }
+  // strong shape == weak shape (키 집합 동일).
+  const s = await req(`/strong-trend?scope=all&school_level=elementary&subject=math`, ADMIN);
+  assert.equal(s.status, 200);
+  assert.deepEqual(Object.keys(s.json).sort(), Object.keys(w.json).sort(), 'strong/weak 응답 키 집합 동일');
+});
+
+test('WS-7: grade 유효성 — 정수 1~6만 200, 그 외 400; 급별 범위 초과 grade 는 빈결과(400 아님)', async () => {
+  // 정수/범위 밖 → 400.
+  for (const bad of ['0', '7', '-1', 'abc', '3.5']) {
+    const r = await req(`/weak-trend?scope=all&school_level=elementary&grade=${encodeURIComponent(bad)}`, ADMIN);
+    assert.equal(r.status, 400, `grade=${bad} → 400`);
+    const rs = await req(`/strong-trend?scope=all&school_level=elementary&grade=${encodeURIComponent(bad)}`, ADMIN);
+    assert.equal(rs.status, 400, `strong grade=${bad} → 400`);
+  }
+  // 유효(1~6) → 200.
+  const okv = await req(`/weak-trend?scope=all&school_level=elementary&grade=6`, ADMIN);
+  assert.equal(okv.status, 200, 'grade=6(유효) → 200');
+  // 중학교 grade=6(급 범위 초과지만 정수 1~6) → 200 + 빈 결과(정상, 400 아님).
+  const midHi = await req(`/weak-trend?scope=all&school_level=middle&grade=6`, ADMIN);
+  assert.equal(midHi.status, 200, '중학교 grade=6 → 200(빈결과 정상)');
+  assert.equal(midHi.json.studentCount, 0, '중학교에 6학년 없음 → studentCount 0');
+  assert.equal(midHi.json.appliedGrade, 6, 'appliedGrade=6(적용은 됨, 결과가 빌 뿐)');
+});

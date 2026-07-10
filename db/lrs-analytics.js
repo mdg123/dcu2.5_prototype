@@ -46,6 +46,11 @@ function riskGrade(score) {
 function clamp01(v) { return Math.max(0, Math.min(1, v)); }
 function round1(v) { return v == null ? null : Math.round(v * 10) / 10; }
 
+// 우수(strong) 랭킹 티어 임계 — 평가 학생수 이 값 이상이어야 "표본 충분" 상위 티어.
+//   A6_MIN_GROUP_N(감정 그룹 마스킹)·소표본 관례와 정합해 5로 통일.
+//   (감리 옵션 B) 티어를 strong 1차 정렬키로 사용 → n<5 고도달(예: n=1 100%)이 우수 헤드라인 지배 방지.
+const MIN_STRONG_SAMPLE = 5;
+
 // 성취기준 코드 정규화 — 괄호 유/무 혼재('[2수01-01]' vs '9수01-01') 비교용.
 //   lrs-mastery.resolveCode 의 정규화 규칙(괄호 부착)과 동일. 비교는 항상 정규형으로.
 function normCode(code) {
@@ -753,12 +758,30 @@ function getPrereqGap(classId, { targetCodes = null } = {}) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// A-WEAK 보조: 취약 성취기준 추세 랭킹 (관리자 scope=all / 교사 scope=class).
-//   getWeakTrend({ userIds, weeks, limit }) →
+// A-WEAK 보조: 취약/우수 성취기준 추세 랭킹 (관리자 scope=all / 교사 scope=class).
+//   getWeakTrend({ userIds, weeks, limit, order }) →
 //     [{ code, label, subject, reachedRate, evaluated, slope, direction, confidence }]
-//   도달률 낮고 하락 중인 성취기준 우선. n<10(평가 학생수) 은 라우트에서 마스킹.
+//   order='weak'(기본): 도달률 낮고 하락 중인 성취기준 우선(취약). 하위호환 — 기존 호출부 무변경.
+//   order='strong': 도달률 높고 상승·안정인 성취기준 우선(우수).
+//     ★ 정렬키(감리 REWORK 옵션 B — 티어링 + Wilson):
+//        1차 tier(evaluatedStudents>=MIN_STRONG_SAMPLE ? 0 : 1) 오름차 — 표본 충분이 항상 위.
+//        2차 Wilson 점수 하한(_wilsonLo, 95%) 내림차 → 3차 reachedRate 내림차 → 4차 slope 내림차.
+//       (배경) 단순 도달률 내림차는 평가 학생수 n=1 100% 가 최상단을 도배. Wilson 하한만으론
+//       희소 시드에서 n=1 100%(≈0.21)가 최선 대표본(n=9 44%≈0.19)을 근소 상회해 잔류 → 티어를
+//       1차로 얹어 n<5 기준을 하위 티어로 내려 "확산 후보=표본 충분 기준" 정책 목적 확정 충족.
+//   집계/필드는 동일 — strong 만 정렬키 변경(weak 은 도달률 오름차 유지, A-WEAK 회귀 계약 불변).
+//   표시값은 그대로 reachedRate(도달률). _wilsonLo 는 정렬 근거로 응답에 동봉(FE 표시는 도달률·표본·추세).
+//   n<10(평가 학생수) 은 라우트에서 마스킹.
 // ─────────────────────────────────────────────────────────────────────────────
-function getWeakTrend({ userIds, weeks = DEFAULT_WEEKS, limit = 15 } = {}) {
+// Wilson 점수 구간 하한(95%, z=1.96) — 이항비율의 소표본 보정 신뢰하한.
+//   pos=성공(도달)수, n=시행(평가)수. n=0 → 0. 표본 클수록 관측비율에 수렴, 작을수록 0쪽으로 수축.
+function wilsonLo(pos, n, z = 1.96) {
+  if (!n) return 0;
+  const p = pos / n, z2 = z * z;
+  return (p + z2 / (2 * n) - z * Math.sqrt((p * (1 - p) + z2 / (4 * n)) / n)) / (1 + z2 / n);
+}
+
+function getWeakTrend({ userIds, weeks = DEFAULT_WEEKS, limit = 15, order = 'weak' } = {}) {
   if (!userIds || !userIds.length) return [];
   const ph = userIds.map(() => '?').join(',');
   // 성취기준별 현재 도달 분포(단일 분류기)
@@ -792,6 +815,7 @@ function getWeakTrend({ userIds, weeks = DEFAULT_WEEKS, limit = 15 } = {}) {
     out.push({
       code, label: ctx.label, subject: ctx.subject_label || null,
       reachedRate, evaluated: a.evaluated, evaluatedStudents: a.users.size,
+      _wilsonLo: wilsonLo(a.reached, a.evaluated), // strong 정렬 근거(소표본 하방보정). weak 은 미사용.
       slope: trend.status === 'ok' ? trend.slope : null,
       direction: trend.status === 'ok' ? trend.direction : 'insufficient',
       directionKo: trend.status === 'ok' ? TREND_KO[trend.direction] : TREND_KO.insufficient,
@@ -800,13 +824,31 @@ function getWeakTrend({ userIds, weeks = DEFAULT_WEEKS, limit = 15 } = {}) {
     });
   }
 
-  // 취약 우선: (도달률 낮음) → (하락 추세) 가중. 도달률 오름차, 동률이면 slope 오름차.
-  out.sort((x, y) => {
-    if (x.reachedRate !== y.reachedRate) return x.reachedRate - y.reachedRate;
-    const xs = x.slope == null ? 0 : x.slope;
-    const ys = y.slope == null ? 0 : y.slope;
-    return xs - ys;
-  });
+  if (order === 'strong') {
+    // 우수 우선(감리 REWORK 옵션 B — 티어링 + Wilson):
+    //   1차 tier(표본 충분=0, 부족=1) 오름차 → n>=MIN_STRONG_SAMPLE 기준이 항상 위(n=1 100% 강등).
+    //   2차 Wilson 하한 내림차 → 3차 도달률 내림차 → 4차 slope 내림차.
+    //   효과: 최선 대표본(예 n=9 44%)이 소표본 n=1 100% 위로 = "확산 후보"는 표본 충분 기준 중심.
+    //   Top10 행 수는 유지(부족분은 하위 티어로 채움). 표시값은 reachedRate 그대로.
+    out.sort((x, y) => {
+      const tx = x.evaluatedStudents >= MIN_STRONG_SAMPLE ? 0 : 1;
+      const ty = y.evaluatedStudents >= MIN_STRONG_SAMPLE ? 0 : 1;
+      if (tx !== ty) return tx - ty;                               // 1차: 티어(0 먼저)
+      if (x._wilsonLo !== y._wilsonLo) return y._wilsonLo - x._wilsonLo; // 2차: Wilson 하한
+      if (x.reachedRate !== y.reachedRate) return y.reachedRate - x.reachedRate; // 3차: 도달률
+      const xs = x.slope == null ? 0 : x.slope;
+      const ys = y.slope == null ? 0 : y.slope;
+      return ys - xs;                                              // 4차: slope
+    });
+  } else {
+    // 취약 우선(기본): (도달률 낮음) → (하락 추세) 가중. 도달률 오름차, 동률이면 slope 오름차.
+    out.sort((x, y) => {
+      if (x.reachedRate !== y.reachedRate) return x.reachedRate - y.reachedRate;
+      const xs = x.slope == null ? 0 : x.slope;
+      const ys = y.slope == null ? 0 : y.slope;
+      return xs - ys;
+    });
+  }
 
   return out.slice(0, limit);
 }
@@ -1705,7 +1747,7 @@ function getNextStep(userId, { limit = 3 } = {}) {
 
 module.exports = {
   CONFIDENCE, CONFIDENCE_KO, RISK_GRADE, RISK_GRADE_KO, RISK_WEIGHTS,
-  MIN_WEEKS, MIN_WEEK_ATTEMPTS, DEFAULT_WEEKS, NEGATIVE_EMOTIONS,
+  MIN_WEEKS, MIN_WEEK_ATTEMPTS, DEFAULT_WEEKS, NEGATIVE_EMOTIONS, MIN_STRONG_SAMPLE,
   classStudentIds, classStudents, classSubjects,
   canonicalSubject, SUBJECT_ALIAS, // 교과 별칭 정규화(레거시→정본 병합)
   weeklyRateSeries: _weeklyRateSeries, // P1-3 classTrend(routes/lrs.js)용 — withContributors 옵션 지원
