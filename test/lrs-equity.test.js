@@ -90,8 +90,10 @@ before(async () => {
 
   // ── REGION_A: 학생 10명, 각 20 acts, score=90 → avgScore≈90·avgActs=20·reach=100% ──
   for (let i = 0; i < 10; i++) seedStudent(REGION_A, i, 20, 90);
-  // ── REGION_B: 학생 10명, 각 4 acts, score=50 → avgScore≈50·avgActs=4·reach=0% ──
-  for (let i = 0; i < 10; i++) seedStudent(REGION_B, i, 4, 50);
+  // ── REGION_B: 학생 10명, 각 1 act, score=50 → avgScore≈50·avgActs=1·reach=0% ──
+  //   견고화: 실 지역 avgActs 중앙값(30일창·시드 노후화로 3.2~4 부근 변동)보다 B가 확실히 낮아야
+  //   both_low(활용 중앙값 이하)가 시점 독립적으로 성립. 4→1(실 최소보다도 낮게)로 마진 확보.
+  for (let i = 0; i < 10; i++) seedStudent(REGION_B, i, 1, 50);
   // ── REGION_MASK: 학생 6명(<10) → 마스킹. 값 있어도 units 에서 null·지표 제외 ──
   for (let i = 0; i < 6; i++) seedStudent(REGION_MASK, i, 30, 99);
 
@@ -215,7 +217,7 @@ test('INV-E5: 마스킹 — <10 단위 값 null·지표 제외·excludedMasked �
 // ──────────────────────────────────────────────────────────────────────────
 // INV-E5b: 합성 표본충족 단위의 값 정확성(결정적 박제).
 //   REGION_A: 각 학생 20 acts·score90 → avgActs=20·avgScore≈90·reach=100.
-//   REGION_B: 각 학생 4 acts·score50  → avgActs=4·avgScore≈50·reach=0.
+//   REGION_B: 각 학생 1 act·score50  → avgActs=1·avgScore≈50·reach=0.
 // ──────────────────────────────────────────────────────────────────────────
 test('INV-E5b: 합성 지역 값 정확 — avgActs/avgScore/reachRate 결정적', async () => {
   const j = await fetchEquity();
@@ -223,7 +225,7 @@ test('INV-E5b: 합성 지역 값 정확 — avgActs/avgScore/reachRate 결정적
   assert.equal(a.masked, false); assert.equal(b.masked, false);
   assert.equal(a.students, 10); assert.equal(b.students, 10);
   assert.equal(a.avgActsPerStudent, 20, 'A 1인당 활동=20');
-  assert.equal(b.avgActsPerStudent, 4, 'B 1인당 활동=4');
+  assert.equal(b.avgActsPerStudent, 1, 'B 1인당 활동=1');
   assert.equal(a.avgScore, 90, 'A 평균성취=90');
   assert.equal(b.avgScore, 50, 'B 평균성취=50');
   assert.equal(a.reachRate, 100, 'A 도달률=100(전원 ≥60)');
