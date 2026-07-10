@@ -1296,6 +1296,7 @@ const MENUS = {
   teacher: [
     { id:'t-home',       label:'홈',              icon:'fa-gauge',                 group:'우리반',        category:'home' },
     { id:'t-warnings',   label:'성취 도달 현황',   icon:'fa-table-cells',           group:'분석',         category:'analytics' },
+    { id:'t-weakstrong', label:'성취기준 강·약',   icon:'fa-ranking-star',          group:'분석',         category:'analytics' },
     { id:'t-classcompare',label:'개설클래스 비교',  icon:'fa-scale-balanced',        group:'분석',         category:'analytics' },
     { id:'t-subject',    label:'교과별 활동 현황', icon:'fa-book',                  group:'분석',         category:'analytics' },
     { id:'t-usage',      label:'활용 현황',        icon:'fa-chalkboard',            group:'분석',         category:'analytics' },
@@ -1402,7 +1403,7 @@ const LEGACY_MENU_TO_CATEGORY = {
   's-perform':'activities','s-custom':'activities','s-daily':'analytics',
   't-home':'home','t-usage':'analytics','t-subject':'analytics',
   't-perform':'activities','t-custom':'activities','t-daily':'activities',
-  't-warnings':'analytics','t-classcompare':'analytics','t-drill':'activities','t-teacher-idx':'operations',
+  't-warnings':'analytics','t-weakstrong':'analytics','t-classcompare':'analytics','t-drill':'activities','t-teacher-idx':'operations',
   // 신규 5블록
   'a-home':'home','a-svc-ops':'analytics','a-macro':'analytics','a-equity':'analytics','a-cross':'analytics','a-time':'analytics',
   'a-xapi':'operations','a-teacher-idx':'operations','a-quality':'operations','a-export':'reports',
@@ -7842,8 +7843,12 @@ function renderWSFilters(data){
     };
   });
 }
-/* 취약/우수 랭킹 표 렌더(공통) — renderDataTable 6컬럼 + 신뢰뱃지 + 각주. 빈·오류 상태는 §8 문구. */
-function renderRptRanking(kind, data){
+/* 취약/우수 랭킹 표 렌더(공통) — renderDataTable 6컬럼 + 신뢰뱃지 + 각주. 빈·오류 상태는 §8 문구.
+ *   opts.audience==='teacher'(교사 t-weakstrong 뷰): 신뢰뱃지 대신 중립 "우리 반 N명" 표본뱃지,
+ *   각주는 반 관점 문구, 빈결과 조건문구는 opts.condText(선택 교과) 사용. 미지정(관리자)=기존(회귀 0). */
+function renderRptRanking(kind, data, opts){
+  opts = opts || {};
+  const audience  = opts.audience;
   const isWeak    = (kind==='weak');
   const tableHost = document.getElementById(isWeak?'rptWeakTable':'rptStrongTable');
   const disc      = document.getElementById(isWeak?'rptWeakDisc':'rptStrongDisc');
@@ -7856,16 +7861,21 @@ function renderRptRanking(kind, data){
     if (disc) disc.innerHTML = '';
     return;
   }
-  // 신뢰 뱃지(섹션 헤더 우측)
+  // 신뢰 뱃지(섹션 헤더 우측) — 교사는 중립 "우리 반 N명" 표본뱃지(신뢰 높음/낮음 오도 방지)
   if (confHost){
-    const conf = data.masked ? 'low' : 'high';
-    confHost.innerHTML = confBadge(conf, data.masked?'낮음':'높음',
-      `전체 학생 ${(Number(data.studentCount)||0).toLocaleString()}명${data.masked?' · 표본 적어 참고용':''}`);
+    if (audience === 'teacher'){
+      const n = Number(data.studentCount)||0;
+      confHost.innerHTML = `<span class="dc-badge dc-badge--muted" title="개설한 클래스를 통합한 우리 반 학생 수예요"><i class="fas fa-users" aria-hidden="true"></i> 우리 반 ${n.toLocaleString()}명</span>`;
+    } else {
+      const conf = data.masked ? 'low' : 'high';
+      confHost.innerHTML = confBadge(conf, data.masked?'낮음':'높음',
+        `전체 학생 ${(Number(data.studentCount)||0).toLocaleString()}명${data.masked?' · 표본 적어 참고용':''}`);
+    }
   }
   const ranking = data.ranking || [];
-  // 빈 결과(조건 삽입)
+  // 빈 결과(조건 삽입) — 교사는 선택 교과(opts.condText), 관리자는 공유 필터 요약
   if (!ranking.length){
-    const cond = _wsSummaryText();
+    const cond = (audience === 'teacher') ? (opts.condText || '') : _wsSummaryText();
     if (isWeak){
       tableHost.innerHTML = `<p class="rb-goodnote"><i class="fas fa-face-smile" aria-hidden="true"></i> ${cond?`선택한 조건(${escapeHtml(cond)})에서 `:''}하락 중인 취약 성취기준이 없어요. 안정적인 추세예요.</p>`;
     } else {
@@ -7908,14 +7918,193 @@ function renderRptRanking(kind, data){
     //   사용자가 헤더(도달률 등) 클릭 시 재정렬은 그대로 동작.
     rows, initialSort:'_rank', initialDir:'asc'
   });
-  // 각주(disclaimer)
+  // 각주(disclaimer) — 교사는 반 관점 문구(BE disclaimer 무시), 관리자는 기존(BE 우선)
   if (disc){
-    const def = isWeak
-      ? '취약은 평가 표본이 충분한(5명 이상) 성취기준을 우선 배치하고, 그 안에서 도달률이 낮고 하락하는 순입니다. 표본이 적은 단위는 아래에 참고로 표시됩니다.'
-      : '우수는 평가 표본이 충분한(5명 이상) 성취기준을 우선 배치하고, 그 안에서 도달률이 높고 상승·안정인 순입니다. 표본이 적은 단위는 아래에 참고로 표시됩니다.';
-    disc.innerHTML = `<i class="fas fa-circle-info" aria-hidden="true"></i> ${escapeHtml((data.disclaimer)||def)}`;
+    if (audience === 'teacher'){
+      const tdef = isWeak
+        ? '반 학생 대부분이 평가된(5명 이상) 성취기준 중 도달률이 낮은 순이에요. 평가 인원이 적은 기준은 아래에 참고로 표시돼요.'
+        : '반 학생 대부분이 평가된(5명 이상) 성취기준 중 상대적으로 높게 도달한 순이에요. 평가 인원이 적은 기준은 참고로 표시돼요.';
+      disc.innerHTML = `<i class="fas fa-circle-info" aria-hidden="true"></i> ${escapeHtml(tdef)}`;
+    } else {
+      const def = isWeak
+        ? '취약은 평가 표본이 충분한(5명 이상) 성취기준을 우선 배치하고, 그 안에서 도달률이 낮고 하락하는 순입니다. 표본이 적은 단위는 아래에 참고로 표시됩니다.'
+        : '우수는 평가 표본이 충분한(5명 이상) 성취기준을 우선 배치하고, 그 안에서 도달률이 높고 상승·안정인 순입니다. 표본이 적은 단위는 아래에 참고로 표시됩니다.';
+      disc.innerHTML = `<i class="fas fa-circle-info" aria-hidden="true"></i> ${escapeHtml((data.disclaimer)||def)}`;
+    }
   }
 }
+
+/* ======================================================================
+ * VIEWS['t-weakstrong'] — 교사 "성취기준 강·약 Top 10" (analytics 카테고리)
+ *   관리자 리포트 블록4(renderRptRanking 취약/우수 2섹션)를 scope=class로 재사용.
+ *   기획서: 보고서/LRS_교사_성취기준_강약_Top10_기획_v1.md (채택안 b).
+ *   BE 무변경: GET /api/lrs/weak-trend?scope=class · strong-trend?scope=class (교사=자기 반 학생 union).
+ *   필터: 교과 칩만. period·classId는 BE가 scope=class에서 미반영 → 거짓 UI 방지로 미배치(§3-2).
+ * ==================================================================== */
+/* 부분 재조회 파라미터(교과 AND) — scope=class 고정 */
+function _twsParams(){
+  const p = { scope:'class', limit:10 };
+  if (state._twsSubject && state._twsSubject !== 'all') p.subject = state._twsSubject;
+  return p;
+}
+/* 선택 교과 라벨(빈 결과 조건 문구용) — 전체면 '' */
+function _twsSubjectLabel(){
+  return (state._twsSubject && state._twsSubject !== 'all') ? (_eqSubjectLabelOf(state._twsSubject) || '') : '';
+}
+/* 교과 칩(present만) + 요약칩 렌더 + 부분 재조회 바인딩 (_bindClassCmpChips 패턴 복제) */
+function _renderTwsChips(data){
+  const host = document.getElementById('twsFilters');
+  if (!host) return;
+  const d = data || {};
+  const avail = Array.isArray(d.availableSubjects) ? d.availableSubjects.filter(x=>x && x.present) : [];
+  // 현재 교과가 present에 없으면 전체로 강등(죽은 칩·빈 결과 방지)
+  if (state._twsSubject && state._twsSubject!=='all' && avail.length && !avail.some(x=>x.key===state._twsSubject)){
+    state._twsSubject = 'all';
+  }
+  const subj = state._twsSubject || 'all';
+  const subjToggle = avail.length
+    ? `<div class="dc-unit-toggle" id="twsSubjectToggle" role="group" aria-label="교과 선택"><span class="dc-eq-flabel">교과</span>${_eqSubjectChipsHtml(avail, subj)}</div>`
+    : '';
+  const summary = (subj!=='all')
+    ? `<div class="dc-eq-summary" role="status"><i class="fas fa-filter" aria-hidden="true"></i> 필터: ${escapeHtml(_eqSubjectLabelOf(subj)||'')}</div>`
+    : '';
+  host.innerHTML = `<div class="dc-eq-filters">${subjToggle}</div>
+    <div class="dc-eq-caption">개설한 클래스 전체를 통합한 우리 반 학생 기준이에요. (반별·기간별 분리는 준비 중)</div>
+    ${summary}`;
+  host.querySelectorAll('#twsSubjectToggle button[data-subj]').forEach(b=>{
+    b.onclick = ()=>{ if ((state._twsSubject||'all')===b.dataset.subj) return; state._twsSubject = b.dataset.subj; loadTeacherWeakStrong(); };
+  });
+}
+/* 교사 프레이밍: 우수 조건부 정직 배너(최고<80) + 취약·우수 중복 각주 (§5-1·§6) */
+function _renderTwsFraming(w, s){
+  // 우수 정직 배너 — 우수 최고 도달률<80이면 "아직 80%↑ 없음, 상대 강점" (모순 해소)
+  const banner = document.getElementById('twsStrongBanner');
+  if (banner){
+    const sr = (s && s.success && Array.isArray(s.ranking)) ? s.ranking.slice(0,10) : [];
+    const maxRate = sr.reduce((mx,r)=>Math.max(mx, r.reachedRate==null?0:Number(r.reachedRate)), 0);
+    banner.innerHTML = (sr.length && maxRate < 80)
+      ? _reportInsightHtml({ level:'info',
+          text:'우리 반은 아직 도달률 80% 이상인 성취기준이 없어요. 아래는 그중 상대적으로 높게 도달한 기준이에요(절대 도달률은 낮을 수 있어요).' })
+      : '';
+  }
+  // 취약·우수 중복 각주 — 소표본으로 같은 코드가 양쪽에 등장할 때만
+  const note = document.getElementById('twsStrongNote');
+  if (note){
+    const wc = new Set((w && w.success && Array.isArray(w.ranking) ? w.ranking.slice(0,10) : [])
+      .map(r=>String(r.code||'')).filter(Boolean));
+    const overlap = (s && s.success && Array.isArray(s.ranking) ? s.ranking.slice(0,10) : [])
+      .some(r=>r.code && wc.has(String(r.code)));
+    note.innerHTML = overlap
+      ? `<i class="fas fa-circle-info" aria-hidden="true"></i> 평가된 성취기준이 적으면 취약·우수 목록에 같은 기준이 함께 나올 수 있어요(가장 낮은 것과 가장 높은 것을 각각 보여줘요).`
+      : '';
+  }
+}
+/* 취약·우수 두 표 부분 재조회(교과 변경 시 · 전체 뷰 리로드 없음) */
+async function loadTeacherWeakStrong(){
+  const [w, s] = await Promise.all([
+    apiGet('/api/lrs/weak-trend', _twsParams()),
+    apiGet('/api/lrs/strong-trend', _twsParams())
+  ]);
+  _renderTwsChips((w && w.success) ? w : s);
+  const opts = { audience:'teacher', condText:_twsSubjectLabel() };
+  renderRptRanking('weak', w, opts);
+  renderRptRanking('strong', s, opts);
+  _renderTwsFraming(w, s);
+}
+VIEWS['t-weakstrong'] = async function(root){
+  root.innerHTML = tplLoading(3);
+  if (!state._twsSubject) state._twsSubject = 'all';
+  const [w, s] = await Promise.all([
+    apiGet('/api/lrs/weak-trend', _twsParams()),
+    apiGet('/api/lrs/strong-trend', _twsParams())
+  ]);
+  // 둘 다 실패 → 에러(재시도)
+  if ((!w || !w.success) && (!s || !s.success)){
+    root.innerHTML = tplError('성취기준 강·약 데이터를 불러오지 못했습니다', ()=>setView('t-weakstrong'));
+    return;
+  }
+  const base = (w && w.success) ? w : s;
+  const studentCount = Number(base.studentCount)||0;
+  // 담당 학생 0명 → 전용 빈상태 패널(§6)
+  if (studentCount === 0){
+    root.innerHTML = `
+      <div class="dc-state-panel" role="status" style="text-align:center;">
+        <div style="font-size:34px;line-height:1;margin-bottom:10px;" aria-hidden="true">🏫</div>
+        <p style="font-size:var(--fs-h3);font-weight:700;color:var(--gray-900);margin:0 0 6px;">아직 담당 학생 데이터가 없어요.</p>
+        <p style="line-height:1.7;color:var(--gray-700);margin:0;">반에 학생이 참여하고 평가가 쌓이면 우리 반이 어려워하는·잘 도달한 성취기준이 보여요.</p>
+        <div style="margin-top:16px;"><a class="btn" href="/class/index.html"><i class="fas fa-chalkboard-user" aria-hidden="true"></i> 클래스로 이동</a></div>
+      </div>`;
+    return;
+  }
+  // 뷰 셸 — 스코프 <style>(블록4 rb-ws-* 재사용, a-export 미진입 시에도 렌더 보장) + 헤더 + 교과칩 + 취약/우수 2섹션
+  root.innerHTML = `
+    <style>
+      .tws-head{ margin:0 0 var(--space-4); }
+      .tws-title{ font-size:20px; font-weight:700; color:var(--gray-900,#1a1a2e); margin:0; line-height:1.3; }
+      .tws-sub{ font-size:16px; color:var(--gray-600,#4b5563); margin:6px 0 0; line-height:1.7; }
+      .tws-filterbar{ margin:0 0 var(--space-4); }
+      .rb-foot{ font-size:13px; color:var(--gray-500,#6b7280); line-height:1.6; margin:12px 0 0; }
+      .rb-foot i{ color:var(--gray-400,#9ca3af); margin-right:4px; }
+      .rb-goodnote{ font-size:15px; color:#166534; background:#f0fdf4; border-radius:10px; padding:12px 16px; margin:0; line-height:1.6; }
+      .rb-goodnote i{ margin-right:6px; }
+      .rb-ws-sec{ margin-top:22px; padding-left:14px; }
+      .rb-ws-sec.rb-ws-weak{ border-left:3px solid #ea7317; }
+      .rb-ws-sec.rb-ws-strong{ margin-top:24px; padding-top:22px; border-top:1px solid var(--gray-200,#e5e7eb); border-left:3px solid #16a34a; }
+      .rb-ws-head{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; font-size:19px; font-weight:700; margin:0 0 12px; line-height:1.3; }
+      .rb-ws-head i{ font-size:18px; }
+      .rb-ws-head.weak{ color:#ea7317; }
+      .rb-ws-head.strong{ color:#16a34a; }
+      .rb-ws-head .rb-ws-note{ font-size:14px; font-weight:500; color:var(--gray-500,#6b7280); }
+      .rb-ws-head .rb-ws-conf{ margin-left:auto; }
+      .tws-link{ margin-top:12px; }
+      .tws-link a{ color:var(--lrs-primary,#2563eb); font-weight:600; text-decoration:none; }
+      .tws-link a:hover{ text-decoration:underline; }
+      .tws-link a:focus-visible{ outline:2px solid var(--lrs-primary); outline-offset:2px; border-radius:4px; }
+      @media (max-width:767px){
+        .rb-ws-sec .dc-data-table th:nth-child(6),
+        .rb-ws-sec .dc-data-table td:nth-child(6){ display:none; }
+      }
+    </style>
+    <div class="tws-head">
+      <h2 class="tws-title">성취기준 강·약 Top 10</h2>
+      <p class="tws-sub">우리 반이 특히 어려워하는 성취기준과, 상대적으로 잘 도달한 성취기준이에요. 평가가 쌓일수록 정확해져요.</p>
+    </div>
+    <div class="tws-filterbar" id="twsFilters"></div>
+    <section class="rb-ws-sec rb-ws-weak">
+      <div class="rb-ws-head weak">
+        <i class="fas fa-arrow-trend-down" aria-hidden="true"></i> 취약 성취기준 Top 10
+        <span class="rb-ws-note">우리 반 도달률이 낮은 순 · 보충이 필요해요</span>
+        <span class="rb-ws-conf" id="rptWeakConf"></span>
+      </div>
+      <div id="rptWeakTable"></div>
+      <p class="rb-foot" id="rptWeakDisc"></p>
+      <p class="rb-foot tws-link" id="twsWeakLink"></p>
+    </section>
+    <section class="rb-ws-sec rb-ws-strong">
+      <div class="rb-ws-head strong">
+        <i class="fas fa-arrow-trend-up" aria-hidden="true"></i> 우수 성취기준 Top 10
+        <span class="rb-ws-note">우리 반에서 상대적으로 높게 도달한 순</span>
+        <span class="rb-ws-conf" id="rptStrongConf"></span>
+      </div>
+      <div id="twsStrongBanner"></div>
+      <div id="rptStrongTable"></div>
+      <p class="rb-foot" id="rptStrongDisc"></p>
+      <p class="rb-foot" id="twsStrongNote"></p>
+    </section>`;
+  // 취약 → 성취 도달 현황(t-warnings) 경량 동선 (인접 탭 · §10)
+  const link = document.getElementById('twsWeakLink');
+  if (link){
+    link.innerHTML = `<i class="fas fa-arrow-right-long" aria-hidden="true"></i> <a href="#t-warnings" id="twsToWarnings" role="link">학생별로 누가 미도달인지 보고 보충을 배정하려면 성취 도달 현황으로</a>`;
+    const a = document.getElementById('twsToWarnings');
+    if (a) a.onclick = (e)=>{ e.preventDefault(); setView('t-warnings'); };
+  }
+  // 초기 렌더 — 이미 가져온 w,s 재사용(재조회 없음)
+  _renderTwsChips(base);
+  const opts = { audience:'teacher', condText:_twsSubjectLabel() };
+  renderRptRanking('weak', w, opts);
+  renderRptRanking('strong', s, opts);
+  _renderTwsFraming(w, s);
+};
 
 /* ⑦ 지역 행 클릭 → 학교 1단 인라인 드릴(모달 아님). 재클릭 토글. macro-drill(level=school) 재사용. */
 async function _toggleEquitySchoolDrill(row){
@@ -10164,19 +10353,24 @@ async function setView(id){
   //   기간칩을 완전히 숨기면 다른 뷰로 나갈 때 사라져 혼란 → dim + disabled로 "이 화면엔 안 써요" 표시.
   try {
     const isDailyView = /(^|-)daily$/.test(id) || id === 's-daily' || id === 't-daily' || id === 'a-daily';
+    // t-weakstrong(교사 성취기준 강·약)은 평가 누적 기준이라 기간 무효 → 기간칩도 inert 처리(거짓 UI 방지)
+    const isWeakStrong = (id === 't-weakstrong');
+    const isPeriodInert = isDailyView || isWeakStrong;
     const picker = document.getElementById('periodPicker');
     const fbar = picker ? picker.closest('.dc-filter-bar') : null;
     if (fbar) {
-      fbar.classList.toggle('is-period-inert', isDailyView);
-      picker.querySelectorAll('button[data-period]').forEach(b => { b.disabled = isDailyView; });
+      fbar.classList.toggle('is-period-inert', isPeriodInert);
+      picker.querySelectorAll('button[data-period]').forEach(b => { b.disabled = isPeriodInert; });
       let note = fbar.querySelector('.dc-period-inert-note');
-      if (isDailyView) {
+      if (isPeriodInert) {
         if (!note) {
           note = document.createElement('span');
           note.className = 'dc-period-inert-note';
-          note.innerHTML = '<i class="fas fa-circle-info" aria-hidden="true"></i> 이 화면은 오늘·어제 고정이라 기간 선택을 쓰지 않아요';
           fbar.appendChild(note);
         }
+        note.innerHTML = isWeakStrong
+          ? '<i class="fas fa-circle-info" aria-hidden="true"></i> 성취기준 강·약은 평가 누적 기준이라 기간 선택을 쓰지 않아요'
+          : '<i class="fas fa-circle-info" aria-hidden="true"></i> 이 화면은 오늘·어제 고정이라 기간 선택을 쓰지 않아요';
         note.hidden = false;
       } else if (note) { note.hidden = true; }
     }
