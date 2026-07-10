@@ -119,8 +119,9 @@
         // 학생만 성취수준/학습활동 분석으로 명명(이름→내용 예측). 교사·관리자는 기존 유지.
         { label: '현황 분석',    labelByRole: { student:'성취수준 분석' }, url: '/lrs/index.html?menu=analytics',  roles: ['student','teacher','admin'] },
         { label: '학습 활동',    labelByRole: { student:'학습활동 분석' }, url: '/lrs/index.html?menu=activities', roles: ['student','teacher'] },
-        { label: '운영',         labelByRole: { teacher:'내 활동분석', admin:'데이터 신뢰성' }, url: '/lrs/index.html?menu=operations', roles: ['teacher','admin'] },
-        { label: '리포트',       url: '/lrs/index.html?menu=reports',    roles: ['admin'] }
+        // 관리자 순서(사용자 확정): 분석 리포트 → 데이터 로그. 교사는 reports 미노출이라 '내 활동분석' 위치 불변.
+        { label: '리포트',       labelByRole: { admin:'분석 리포트' }, url: '/lrs/index.html?menu=reports',    roles: ['admin'] },
+        { label: '운영',         labelByRole: { teacher:'내 활동분석', admin:'데이터 로그' }, url: '/lrs/index.html?menu=operations', roles: ['teacher','admin'] }
       ]
     }
   ];
