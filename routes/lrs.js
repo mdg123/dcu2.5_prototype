@@ -2938,9 +2938,10 @@ function _computeTrendRanking(req, res, order) {
 
   return {
     success: true, scope, studentCount: userIds.length, masked, minSample: MIN_N,
-    // strong 랭킹 티어 임계(표본 충분 기준). 두 엔드포인트 공통 반환 → weak/strong 응답 shape 동일 유지(WS-6).
-    //   weak 는 미사용(정보용), strong FE 는 disclaimer 근거로 선택 소비.
+    // 취약/우수 랭킹 티어 임계(표본 충분 기준). 두 엔드포인트 공통 반환 → weak/strong 응답 shape 동일 유지(WS-6).
+    //   2026-07 대칭 티어링: strong·weak 모두 티어 1차 정렬 → 각 FE 가 disclaimer 근거로 선택 소비.
     strongMinSample: analytics.MIN_STRONG_SAMPLE,
+    weakMinSample: analytics.MIN_WEAK_SAMPLE_TIER,
     ranking,
     availableSubjects,
     availableGrades,
@@ -2959,7 +2960,7 @@ router.get('/weak-trend', requireAuth, (req, res) => {
   try {
     const payload = _computeTrendRanking(req, res, 'weak');
     if (!payload) return; // 4xx 이미 전송됨
-    payload.disclaimer = '취약·하락 추세는 규칙 기반 신호입니다. 표본이 적은 단위는 참고용으로 보세요.';
+    payload.disclaimer = '취약은 평가 표본이 충분한(5명 이상) 성취기준을 우선 배치하고, 그 안에서 도달률이 낮고 하락하는 순입니다. 표본이 적은 단위는 아래에 참고로 표시됩니다.';
     res.json(payload);
   } catch (err) {
     console.error('[LRS] /weak-trend error:', err);

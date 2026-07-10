@@ -36,9 +36,13 @@ const ADMIN = 1;
 const SVC = 't_rel_p0_svc';       // 합성 전용 서비스(격리 대조용)
 const SVC_LOW = 't_rel_p0_low';   // 절대량 게이트용 소표본 서비스
 const SVC_DROP = 't_rel_p0_drop'; // '사용 급감'(share≥5·trendΔ<-20·dataSufficient) 유발 — 톤다운/hard 대조
-// SVC_DROP 물량: 현재기간(최근 30일) cur건·직전 동기간 prev건. realOnly 현재총합(≈9.7k) 대비
-//   share≥5% 가 되도록 cur 를 넉넉히. 둘 다 ≥30(dataSufficient=true), trendΔ<-20(급감).
-const DROP_CUR = 1100, DROP_PREV = 1500; // trendΔ=(1100-1500)/1500≈-26.7%<-20(급감), 둘다 ≥30
+// SVC_DROP 물량: 현재기간(최근 30일) cur건·직전 동기간 prev건. share≥5%(급감 경로 진입 전제)를
+//   보장해야 한다. 그런데 share = cur / (현재창 전체 로그) 이므로 DB 총량이 커지면(예: 벤치마크
+//   집중 재시드 +70k) 고정 cur(구 1100)의 share 가 5% 밑으로 희석된다(실측 1.7%).
+//   [재기준 2026-07-10] cur 를 하드코딩하지 않고 before() 에서 현재창 총 로그 대비 동적 산정(≥12%
+//   목표 = 5% 게이트 대비 넉넉한 마진) → 재시드 유무·DB 규모와 무관하게 불변. 둘 다 ≥30,
+//   prev = cur×1.4 로 trendΔ=(cur-prev)/prev≈-28.6%<-20(급감) 유지.
+let DROP_CUR = 1100, DROP_PREV = 1500; // before() 에서 현재창 총합 기준으로 재산정
 
 let server, baseUrl, tdb, synthUid;
 
@@ -71,6 +75,17 @@ function req(path, userId) {
 
 before(async () => {
   tdb = openTestDb();
+
+  // [재기준 2026-07-10] SVC_DROP cur/prev 를 현재 30일창 총 로그 대비 동적 산정(share≥5% 게이트 보장).
+  //   벤치마크 재시드로 총량이 커져도 share 가 희석되지 않도록 목표 share≈12%(마진)로 cur 설정.
+  //   현재창 정의는 SVC_DROP prev(-45일) 대비 '최근 30일' = created_at >= now-29일(all 로그, seed 포함).
+  {
+    const winTotal = Number(tdb.prepare(
+      "SELECT COUNT(*) c FROM learning_logs WHERE created_at >= datetime('now','localtime','-29 days')"
+    ).get().c) || 0;
+    DROP_CUR = Math.max(1100, Math.ceil(winTotal * 0.12)); // share≈12% (5% 게이트 대비 넉넉), 최소 1100 유지
+    DROP_PREV = Math.ceil(DROP_CUR * 1.4);                  // trendΔ=(cur-prev)/prev≈-28.6%<-20(급감)·둘다 ≥30
+  }
 
   // 합성 학생 1명(실계정 — is_seed=0).
   synthUid = Number(tdb.prepare(

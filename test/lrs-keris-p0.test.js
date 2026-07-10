@@ -284,7 +284,16 @@ test('REG-K3: uid3 ground-truth — ①시급 [4수03-10] ②권장 [4국01-01] 
   assert.equal(recs.length, 3, 'uid3 은 3건 모두 선정');
   assert.equal(recs[0].priority, 'urgent');
   assert.equal(recs[0].achievement_code, '[4수03-10]', '① 시급 = 미도달·채점 avg 최저');
-  assert.equal(recs[0].reasonText, '정답률 25%예요 — 여기부터 다시 잡아봐요', '시급(채점) 템플릿 그대로');
+  // [재기준 2026-07-10 · 벤치 재시드 rebuild] 25%→75%.
+  //   원인: 벤치마크 집중 재시드(scripts/seed-benchmark-enrich.js)가 rebuildAllAggregates()로
+  //   lrs_achievement_stats를 learning_logs 진실원에서 전면 재파생 → uid3(student1, 실사용자)의
+  //   [4수03-10] avg_score가 stale 0.25 → 로그정합 0.75로 교정됨(재시드 前 백업 대조 실측:
+  //   해당 daily_complete 로그 result_score=0.75인데 커밋 achievement_stats는 0.25로 불일치했음
+  //   — 2026-07-04 uid3 오염복구 때 로그만 고치고 집계 미재빌드로 남은 stale). uid3 로그·attempt·success는
+  //   불변(내 재시드는 is_seed=1 로그만 추가, uid3 무영향; 130=130건 실측). 표시값이 진실원에 정합화된
+  //   정당 교정이다. (미도달인데 avg 75% 표기의 의미괴리는 reasonText가 avg_score를, 도달판정은
+  //   success/attempt를 쓰는 기존 insights 산식 특성 — 별건, 본 재시드 범위 밖.)
+  assert.equal(recs[0].reasonText, '정답률 75%예요 — 여기부터 다시 잡아봐요', '시급(채점) 템플릿 그대로 · avg 진실원 정합(0.75)');
   assert.equal(recs[1].priority, 'recommended');
   assert.equal(recs[1].achievement_code, '[4국01-01]', '② 권장 = 평가부족(채점 우선)');
   assert.equal(recs[1].reasonText, '아직 2번밖에 안 풀었어요 — 3번 이상 풀면 도달 판정을 받을 수 있어요', '권장(평가부족) 템플릿 그대로');

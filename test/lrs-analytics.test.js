@@ -478,15 +478,15 @@ test('PREREQ-1: getPrereqGap 구조 — edgesLoaded/bridged/gaps, blockedStudent
 // ════════════════════════════════════════════════════════════════════════════
 // [WEAK] 취약 추세 랭킹
 // ════════════════════════════════════════════════════════════════════════════
-test('WEAK-1: getWeakTrend — 도달률 오름차 정렬, reachedRate ∈ [0,100]', () => {
+test('WEAK-1: getWeakTrend — 티어 인지 정렬(표본충분 우선→Wilson상한↑→도달률↑→slope↑), reachedRate ∈ [0,100]', () => {
+  // [재기준 2026-07] 과거: "도달률 단조 오름차"(소표본 0% 노이즈가 최상단). 벤치마크 재시드로 대표본 취약
+  //   셀([2수03-05] n=80 등)이 생겨 계약을 strong 미러 티어링("표본 충분=대표본 취약 우선")으로 격상.
   const ids = analytics.classStudentIds(CLASS);
   const rk = analytics.getWeakTrend({ userIds: ids, limit: 15 });
   for (const w of rk) {
     assert.ok(w.reachedRate >= 0 && w.reachedRate <= 100, `${w.code} reachedRate=${w.reachedRate}`);
   }
-  for (let i = 1; i < rk.length; i++) {
-    assert.ok(rk[i - 1].reachedRate <= rk[i].reachedRate, '도달률 오름차(취약 우선)');
-  }
+  _assertWeakOrder(rk); // 1차 tier 비감소 → 티어 내 wilsonHi↑ → rate↑ → slope↑
 });
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -1468,6 +1468,12 @@ function _wilsonLoTest(pos, n, z = 1.96) {
   const p = pos / n, z2 = z * z;
   return (p + z2 / (2 * n) - z * Math.sqrt((p * (1 - p) + z2 / (4 * n)) / n)) / (1 + z2 / n);
 }
+// Wilson 상한 재현(하한의 +대칭항) — weak 티어링 정렬키 교차검증용. n=0 → 1.
+function _wilsonHiTest(pos, n, z = 1.96) {
+  if (!n) return 1;
+  const p = pos / n, z2 = z * z;
+  return (p + z2 / (2 * n) + z * Math.sqrt((p * (1 - p) + z2 / (4 * n)) / n)) / (1 + z2 / n);
+}
 
 // strong 티어(감리 옵션 B): 평가 학생수 >= MIN_STRONG_SAMPLE(=5) → tier 0(상위), 미만 → tier 1(하위).
 const _strongTier = (r) => (r.evaluatedStudents >= analytics.MIN_STRONG_SAMPLE ? 0 : 1);
@@ -1498,10 +1504,37 @@ function _assertStrongOrder(ranking) {
     }
   }
 }
-function _assertAscByRate(ranking) {
+// weak 티어(2026-07 대칭 티어링): 평가 학생수 >= MIN_WEAK_SAMPLE_TIER(=5) → tier 0(상위), 미만 → tier 1(하위).
+const _weakTier = (r) => (r.evaluatedStudents >= analytics.MIN_WEAK_SAMPLE_TIER ? 0 : 1);
+
+// weak 정렬 헬퍼(strong _assertStrongOrder 의 거울상):
+//   1차 tier 비감소(0→1) → 동일 티어 내 Wilson 상한 비감소(오름차) → reachedRate 오름차 → slope 오름차.
+//   ★ [재기준 2026-07] 과거 계약은 "weak 도달률 단조 오름차"였다. 벤치마크 재시드로 대표본 취약 셀
+//     ([2수03-05] n=80·15% 등)이 생겨, 소표본 0%(n=1~7) 노이즈가 Top10 상단을 도배하는 비대칭을
+//     strong 과 동일한 티어링으로 해소 → 계약이 "표본 충분(대표본 취약) 우선"으로 격상됨.
+//   ★ Wilson 상한·도달률은 '동일 티어 안에서만' 단조. 티어 경계(0→1)에선 하위키 비교하지 않는다(티어 지배).
+function _assertWeakOrder(ranking) {
   for (let i = 1; i < ranking.length; i++) {
-    assert.ok(ranking[i - 1].reachedRate <= ranking[i].reachedRate,
-      `weak 도달률 오름차 위반 (${ranking[i - 1].reachedRate} → ${ranking[i].reachedRate})`);
+    const a = ranking[i - 1], b = ranking[i];
+    const ta = _weakTier(a), tb = _weakTier(b);
+    // 1차: 티어 비감소 — 표본 부족(tier1)이 표본 충분(tier0)보다 앞서면 위반.
+    assert.ok(ta <= tb,
+      `weak 티어 역전(표본부족이 표본충분보다 위) (nA=${a.evaluatedStudents}→nB=${b.evaluatedStudents})`);
+    if (ta !== tb) continue; // 티어 경계 — 하위 정렬키 비교 안 함(티어가 지배)
+    // 응답에 _wilsonHi 동봉 확인(정렬 근거 노출).
+    assert.ok(typeof a._wilsonHi === 'number' && typeof b._wilsonHi === 'number',
+      'weak ranking 항목에 _wilsonHi(정렬키) 존재');
+    if (a._wilsonHi !== b._wilsonHi) {
+      assert.ok(a._wilsonHi <= b._wilsonHi,
+        `weak 동일티어 Wilson상한 오름차 위반 (${a._wilsonHi} → ${b._wilsonHi})`);
+    } else if (a.reachedRate !== b.reachedRate) {
+      assert.ok(a.reachedRate <= b.reachedRate,
+        `weak 동일티어 도달률 오름차 위반 (${a.reachedRate} → ${b.reachedRate})`);
+    } else {
+      const as = a.slope == null ? 0 : a.slope;
+      const bs = b.slope == null ? 0 : b.slope;
+      assert.ok(as <= bs, `weak 동일티어 slope 오름차 위반 (${as} → ${bs})`);
+    }
   }
 }
 
@@ -1512,8 +1545,9 @@ test('WS-U1: getWeakTrend order=strong — 티어(n>=5)→Wilson 하한 정렬(�
   const strong = analytics.getWeakTrend({ userIds: ids, limit: 999, order: 'strong' });
   // (하위호환) 기본 == 명시 weak
   assert.deepEqual(weakExplicit.map(r => r.code), weak.map(r => r.code), 'order 기본값=weak(하위호환)');
-  // 정렬 방향: weak 은 도달률 오름차(불변), strong 은 티어→Wilson 하한(옵션 B)
-  _assertAscByRate(weak);
+  // 정렬 방향: weak·strong 은 대칭 티어링 — weak 은 티어→Wilson 상한↑→도달률↑, strong 은 티어→Wilson 하한↓.
+  //   [재기준 2026-07] weak 도 티어 인지 단언(과거 도달률 단조 오름차 → 표본충분 우선 격상).
+  _assertWeakOrder(weak);
   _assertStrongOrder(strong);
   // _wilsonLo 는 이항비율 하한 → [0,1] 유한값(정밀 산식 교차검증은 WS-U2 에서 결정적 케이스로).
   for (const r of strong) {
@@ -1625,11 +1659,59 @@ test('WS-U3: [핵심 박제] 티어 단조 — strong 랭킹에서 n>=5 행이 �
   }
 });
 
-test('WS-2: /weak-trend?scope=all — ranking 도달률 오름차(기존 유지 · A-WEAK 회귀)', async () => {
+test('WS-U4: [핵심 박제] 티어 단조(취약 미러) — 대표본 저도달이 소표본 0%보다 취약 랭킹 상위(대칭 티어링)', () => {
+  // strong WS-U3 의 거울상: 표본 충분(n>=5) 취약이 표본 부족(n<5, n=1 0% 포함)보다 항상 위.
+  //   결정 케이스: 대표본 저도달(n=30 10%)이 소표본 0%(n=1 0%)보다 상위 — 티어가 Wilson 상한·도달률 지배.
+  //   ★ n=1 0% 는 도달률(0)이 최저지만 Wilson 상한≈0.79(확신 없는 저도달)라 하위 티어로 강등.
+  const T = { big: 'ZZWTIER-BIG', small: 'ZZWTIER-SMALL' };
+  const codes = Object.values(T);
+  const ph = codes.map(() => '?').join(',');
+  const del = db.prepare(`DELETE FROM lrs_achievement_stats WHERE achievement_code IN (${ph})`);
+  const ins = db.prepare(
+    "INSERT INTO lrs_achievement_stats (user_id, achievement_code, attempt_count, success_count, avg_score) VALUES (?,?,?,?,?)"
+  );
+  del.run(...codes);
+  const ids = [];
+  let uid = 920000;
+  const put = (code, att, succ) => { ids.push(uid); ins.run(uid, code, att, succ, null); uid++; };
+  try {
+    // tier0(표본충분): BIG = n=30, 3도달(10%). 도달 3(att5/succ5=100→reached) + 부분도달 27(att4/succ2=50→partial, 평가O·도달X)
+    for (let i = 0; i < 3;  i++) put(T.big, 5, 5);
+    for (let i = 0; i < 27; i++) put(T.big, 4, 2);
+    // tier1(표본부족): SMALL = n=1, 0도달(0%). att4/succ0=0 → not_reached(평가O·도달X)
+    put(T.small, 4, 0);
+
+    const weak = analytics.getWeakTrend({ userIds: ids, limit: 999, order: 'weak' });
+    const byCode = Object.fromEntries(weak.map((r, i) => [r.code, { i, r }]));
+    for (const c of codes) assert.ok(byCode[c], `합성 코드 ${c} 랭킹 존재`);
+    // 표본·도달률 정합
+    assert.equal(byCode[T.big].r.evaluatedStudents, 30, 'BIG 평가 학생수 30');
+    assert.equal(byCode[T.big].r.reachedRate, 10, 'BIG 도달률 10%');
+    assert.equal(byCode[T.small].r.evaluatedStudents, 1, 'SMALL 평가 학생수 1');
+    assert.equal(byCode[T.small].r.reachedRate, 0, 'SMALL 도달률 0%');
+    // Wilson 상한: BE 산출 == 재현 산식(reached=3/30, 0/1). SMALL(≈0.79) > BIG(≈0.26).
+    assert.ok(Math.abs(byCode[T.big].r._wilsonHi - _wilsonHiTest(3, 30)) < 1e-9, `BIG _wilsonHi BE==재현산식 (${byCode[T.big].r._wilsonHi})`);
+    assert.ok(Math.abs(byCode[T.small].r._wilsonHi - _wilsonHiTest(0, 1)) < 1e-9, `SMALL _wilsonHi BE==재현산식 (${byCode[T.small].r._wilsonHi})`);
+    assert.ok(byCode[T.small].r._wilsonHi > byCode[T.big].r._wilsonHi,
+      '전제: 소표본 SMALL Wilson 상한이 대표본 BIG 보다 높다(그럼에도 티어로 BIG 이 위)');
+    // 핵심: 도달률은 SMALL(0)<BIG(10) 이라 구식 도달률 오름차면 SMALL 이 최상단. 티어로 역전 — BIG 이 위.
+    assert.ok(byCode[T.big].i < byCode[T.small].i,
+      `대표본 저도달 BIG(10% n=30)이 소표본 SMALL(0% n=1)보다 취약 상위여야 (idxBig=${byCode[T.big].i}, idxSmall=${byCode[T.small].i})`);
+    // 전체 티어 단조 불변식도 통과(범용 헬퍼, strong 미러).
+    _assertWeakOrder(weak);
+  } finally {
+    del.run(...codes); // 합성 데이터 정리(격리)
+  }
+});
+
+test('WS-2: /weak-trend?scope=all — ranking 티어 인지 정렬(표본충분 우선→Wilson상한↑) + weakMinSample · A-WEAK 회귀', async () => {
+  // [재기준 2026-07] 과거 "도달률 오름차" → 대칭 티어링으로 격상(대표본 취약 우선, 소표본 0% 노이즈 강등).
   const r = await req(`/weak-trend?scope=all`, ADMIN);
   assert.equal(r.status, 200);
-  _assertAscByRate(r.json.ranking);
+  _assertWeakOrder(r.json.ranking); // 티어(n>=5 우선) → 동일 티어 Wilson 상한 비감소
+  assert.equal(r.json.weakMinSample, analytics.MIN_WEAK_SAMPLE_TIER, 'weakMinSample=5 응답 동봉');
   assert.ok(/취약/.test(r.json.disclaimer), '취약 전용 disclaimer');
+  assert.ok(/5명 이상|표본/.test(r.json.disclaimer), 'disclaimer 에 표본 티어 근거 명시');
 });
 
 test('WS-3: grade 필터가 studentCount 를 좁힌다(초등 3학년) + appliedGrade=3', async () => {
