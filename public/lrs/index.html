@@ -1298,10 +1298,12 @@ const MENUS = {
     { id:'t-warnings',   label:'성취 도달 현황',   icon:'fa-table-cells',           group:'분석',         category:'analytics' },
     { id:'t-weakstrong', label:'성취기준 강·약',   icon:'fa-ranking-star',          group:'분석',         category:'analytics' },
     { id:'t-classcompare',label:'개설클래스 비교',  icon:'fa-scale-balanced',        group:'분석',         category:'analytics' },
+    { id:'t-benchmark',  label:'도 벤치마크',      icon:'fa-map-location-dot',       group:'분석',         category:'analytics' },
     { id:'t-subject',    label:'교과별 활동 현황', icon:'fa-book',                  group:'분석',         category:'analytics' },
     { id:'t-usage',      label:'활용 현황',        icon:'fa-chalkboard',            group:'분석',         category:'analytics' },
     { id:'t-xapi',       label:'표준체계 분석',    icon:'fa-diagram-project',       group:'분석',         category:'analytics' },
     { id:'t-perform',    label:'학습 활동 수행',  icon:'fa-tasks',                 group:'학습 활동',     category:'activities' },
+    { id:'t-daily-benchmark', label:'오늘의 학습 도 비교', icon:'fa-calendar-week',   group:'학습 활동',     category:'activities' },
     { id:'t-custom',     label:'맞춤학습 관리',    icon:'fa-compass',               group:'학습 활동',     category:'activities' },
     { id:'t-daily',      label:'일일현황',        icon:'fa-calendar-day',          group:'분석',         category:'analytics' },
     { id:'t-drill',      label:'학생 드릴다운',    icon:'fa-user-magnifying-glass', group:'학습 활동',     category:'activities' },
@@ -1403,7 +1405,7 @@ const LEGACY_MENU_TO_CATEGORY = {
   's-perform':'activities','s-custom':'activities','s-daily':'analytics',
   't-home':'home','t-usage':'analytics','t-subject':'analytics',
   't-perform':'activities','t-custom':'activities','t-daily':'activities',
-  't-warnings':'analytics','t-weakstrong':'analytics','t-classcompare':'analytics','t-drill':'activities','t-teacher-idx':'operations',
+  't-warnings':'analytics','t-weakstrong':'analytics','t-classcompare':'analytics','t-benchmark':'analytics','t-daily-benchmark':'activities','t-drill':'activities','t-teacher-idx':'operations',
   // 신규 5블록
   'a-home':'home','a-svc-ops':'analytics','a-macro':'analytics','a-equity':'analytics','a-cross':'analytics','a-time':'analytics',
   'a-xapi':'operations','a-teacher-idx':'operations','a-quality':'operations','a-export':'reports',
@@ -9000,6 +9002,598 @@ VIEWS['t-classcompare'] = async function(root){
 };
 
 /* ======================================================================
+ * [Phase 2] 도 전체 벤치마크 — 공통 자산 (t-benchmark · t-daily-benchmark 공유)
+ *   기획서: 보고서/LRS_Phase2_벤치마크_UI_기획_v1.md + _방법론_API_v1.md
+ *   BE: GET /api/lrs/stats/benchmark · /stats/daily-benchmark (구현·배포 완료)
+ *   정직성(§5): 시드 고지 상시 배너 · in-view 실데이터 토글(교사 전역 realOnly 숨김 대체)
+ *     · 소표본 마스킹("표본 부족", 0 채움 금지) · 성취기준 초등 코어만 · 상관≠인과.
+ * ==================================================================== */
+/* 비교 지표 정의 — pct(0~100 트랙) 여부·단위·표기 폭. score/reach=비율(반↔도 공정),
+   time/usage=누적량(충북 시드 학생이 많아 절대비교는 참고용 — §정직성 캡션). */
+const BM_METRICS = [
+  { key:'score', label:'정답률',   unit:'점', pct:true,  vol:false },
+  { key:'reach', label:'도달률',   unit:'%',  pct:true,  vol:false },
+  { key:'time',  label:'학습시간', unit:'분', pct:false, vol:true  },
+  { key:'usage', label:'활용률',   unit:'건', pct:false, vol:true  },
+];
+const BM_METRIC_BY = Object.fromEntries(BM_METRICS.map(m=>[m.key, m]));
+/* 값 표기 — 활용률(건)만 소수1, 나머지 정수 반올림. null 은 '-'. */
+function _bmNum(v, m){ if (v==null || isNaN(v)) return '-'; return (m && m.key==='usage') ? Number(v).toFixed(1) : String(Math.round(v)); }
+/* 델타 단위 — 비율지표=%p, 그 외=지표단위. */
+function _bmDeltaUnit(m){ return m && m.pct ? '%p' : (m ? m.unit : ''); }
+
+/* 담당(개설) active 클래스 목록 — /api/class/my 에서 owner_id=본인 필터. 세션 캐시. */
+async function _bmFetchOwnedClasses(){
+  if (Array.isArray(state._bmOwnedClasses)) return state._bmOwnedClasses;
+  let list = [];
+  try {
+    const r = await fetch('/api/class/my', { credentials:'include' });
+    if (r.ok){ const j = await r.json(); list = (j && j.classes) || []; }
+  } catch(_){}
+  const meId = state.me && state.me.id;
+  const owned = list.filter(c => meId!=null && Number(c.owner_id) === Number(meId));
+  state._bmOwnedClasses = owned;
+  return owned;
+}
+/* 담당 클래스 0개 → 전용 빈상태 패널(t-classcompare/t-weakstrong 🏫 패턴 재사용). */
+function _bmNoClassPanel(){
+  return `<div class="dc-state-panel" role="status" style="text-align:center;">
+    <div style="font-size:34px;line-height:1;margin-bottom:10px;" aria-hidden="true">🏫</div>
+    <p style="font-size:var(--fs-h3);font-weight:700;color:var(--gray-900);margin:0 0 6px;">아직 담당(개설)한 클래스가 없어요.</p>
+    <p style="line-height:1.7;color:var(--gray-700);margin:0;">클래스를 만들고 학생이 학습을 쌓으면 우리 반이 충북 도 전체 같은 학년과 견줘 어디쯤인지 보여드려요.</p>
+    <div style="margin-top:16px;"><a class="btn" href="/class/index.html"><i class="fas fa-chalkboard-user" aria-hidden="true"></i> 클래스로 이동</a></div>
+  </div>`;
+}
+/* 클래스 선택 칩(단일선택) — 담당 1개면 호출부에서 미노출. data-bmclass */
+function _bmClassChipsHtml(classes, activeId){
+  return `<div class="dc-unit-toggle" id="bmClassToggle" role="group" aria-label="클래스 선택">
+    <span class="dc-eq-flabel">클래스</span>${classes.map(c=>
+      `<button class="chip" type="button" data-bmclass="${escapeAttr(String(c.id))}" aria-pressed="${String(c.id)===String(activeId)?'true':'false'}">${escapeHtml(c.name)}</button>`).join('')}</div>`;
+}
+/* 교과 present 캐시 — 벤치마크(level=subject·subject=all) cells 에서 파생. 두 뷰 공유(클래스·realOnly 키). */
+async function _bmPresentSubjects(classId, realOnly){
+  const ck = String(classId) + (realOnly ? '_r' : '');
+  state._bmSubjCache = state._bmSubjCache || {};
+  if (state._bmSubjCache[ck]) return state._bmSubjCache[ck];
+  const d = await apiGet('/api/lrs/stats/benchmark', { classId, level:'subject', subject:'all', metric:'score', realOnly: realOnly?'1':'0' });
+  let subs = [];
+  if (d && d.success && Array.isArray(d.cells)) subs = d.cells.map(c=>({ key:c.subject, label:c.label, present:true })).filter(s=>s.key);
+  state._bmSubjCache[ck] = subs;
+  return subs;
+}
+/* 시드 고지 배너(상단 상시 · §5-1) + in-view 실데이터 토글(교사 전역 realOnly 숨김 대체). realKey=state 키명. */
+function _bmSeedBar(seedNotice, realOn, realKey){
+  const banner = _reportInsightHtml({ level:'info',
+    text: (seedNotice || '도 전체 수치는 시연용 시드 데이터 기반이에요. 실제 학교·학급 데이터가 쌓이면 자동으로 실데이터 비교로 바뀌어요.') });
+  return `<div class="bm-topbar">
+    <div class="bm-topbar-notice">${banner}</div>
+    <div class="dc-unit-toggle bm-realtoggle" id="bmRealToggle" role="group" aria-label="데이터 범위" data-realkey="${escapeAttr(realKey)}">
+      <span class="dc-eq-flabel">데이터 범위</span>
+      <button class="chip" type="button" data-bmreal="0" aria-pressed="${realOn?'false':'true'}">시드 포함</button>
+      <button class="chip" type="button" data-bmreal="1" aria-pressed="${realOn?'true':'false'}">실데이터만</button>
+    </div>
+  </div>`;
+}
+/* 백분위 배지(§2-2) — 상대 위치 색 + '순위 배지' 명시(fa-ranking-star + 상위/중간 병기). */
+function _bmPctlBadge(pct){
+  if (pct == null) return `<span class="bm-badge bm-badge--muted"><i class="fas fa-ranking-star" aria-hidden="true"></i> 표본 부족</span>`;
+  const p = Math.max(1, Math.round(pct));
+  let tone, text;
+  if (pct <= 25){ tone='success'; text='상위 '+p+'%'; }
+  else if (pct <= 50){ tone='info'; text='상위 '+p+'%'; }
+  else if (pct <= 74){ tone='muted'; text='충북 중간쯤 (상위 '+p+'%)'; }
+  else { tone='warning'; text='더 올라갈 여지가 커요 (상위 '+p+'%)'; }
+  return `<span class="bm-badge bm-badge--${tone}"><i class="fas fa-ranking-star" aria-hidden="true"></i> ${escapeHtml(text)}</span>`;
+}
+/* 표 델타 배지 — +초록▲/−빨강▼/0회색. 지표별 단위. */
+function _bmDeltaBadge(delta, m){
+  if (delta == null || isNaN(delta)) return `<span class="dc-badge dc-badge--muted">-</span>`;
+  const du = _bmDeltaUnit(m);
+  const av = (m && m.key==='usage') ? Number(Math.abs(delta)).toFixed(1) : String(Math.round(Math.abs(delta)));
+  if (delta > 0) return `<span class="dc-badge dc-badge--success">▲ +${av}${du}</span>`;
+  if (delta < 0) return `<span class="dc-badge dc-badge--danger">▼ −${av}${du}</span>`;
+  return `<span class="dc-badge dc-badge--muted">± 0${du}</span>`;
+}
+/* 헤드라인 3값 대비 카드(§2-1) — 우리 반=채움 막대, 도 평균=실선 마커, 도 중앙값=점선 마커,
+   백분위=우상단 배지, 범례 상시(값 병기, x축 라벨 겹침 회피). */
+function _bmHeadlineHero(h, m){
+  if (!h || h.mineValue == null){
+    return `<div class="bm-hero"><div class="bm-hero-sentence">우리 반의 ${escapeHtml(m.label)} 값을 아직 만들 수 없어요. 학습·평가가 쌓이면 보여드릴게요.</div></div>`;
+  }
+  const unit = h.unit || m.unit;
+  const masked = h.masked || h.provMean == null;
+  const mineTxt = _bmNum(h.mineValue, m);
+  const badge = masked
+    ? `<span class="bm-badge bm-badge--muted"><i class="fas fa-ranking-star" aria-hidden="true"></i> 도 표본 부족</span>`
+    : _bmPctlBadge(h.percentile);
+  let sentence = `우리 반 <b>${mineTxt}${unit}</b>`;
+  sentence += masked
+    ? ` · <span style="color:var(--gray-500);">충북 동학년 표본이 아직 적어 평균·중앙값을 숨겼어요</span>`
+    : ` · 충북 평균 <b>${_bmNum(h.provMean,m)}${unit}</b> · 중앙값 <b>${_bmNum(h.provMedian,m)}${unit}</b>`;
+  const cand = [h.mineValue, h.provMean, h.provMedian, h.provP75].filter(v=>v!=null && !isNaN(v));
+  const trackMax = m.pct ? 100 : Math.max(1, Math.ceil(Math.max.apply(null, cand.concat([1])) * 1.15));
+  const pos = v => (v==null ? null : Math.max(0, Math.min(100, v / trackMax * 100)));
+  const mineW = pos(h.mineValue) || 0;
+  const markers = masked ? '' :
+    `<span class="bm-marker bm-marker--mean" style="left:${pos(h.provMean)}%;" title="도 평균 ${_bmNum(h.provMean,m)}${unit}"></span>
+     <span class="bm-marker bm-marker--median" style="left:${pos(h.provMedian)}%;" title="도 중앙값 ${_bmNum(h.provMedian,m)}${unit}"></span>`;
+  const legend = masked
+    ? `<span class="sw"><i class="bm-sw-fill"></i> 우리 반 ${mineTxt}${unit}</span>`
+    : `<span class="sw"><i class="bm-sw-fill"></i> 우리 반 ${mineTxt}${unit}</span>
+       <span class="sw"><i class="bm-sw-mean"></i> 도 평균(실선) ${_bmNum(h.provMean,m)}${unit}</span>
+       <span class="sw"><i class="bm-sw-median"></i> 도 중앙값(점선) ${_bmNum(h.provMedian,m)}${unit}</span>`;
+  const note = masked ? '' :
+    `<div class="bm-hero-note">평균과 중앙값이 다르면 충북 안에 유독 높거나 낮은 반이 섞여 있다는 뜻이에요. 상위%는 충북 같은 학년 학생들 대비 우리 반 평균의 위치예요(시연 시드 기준).</div>`;
+  return `<div class="bm-hero">
+    <div class="bm-hero-top"><div class="bm-hero-sentence">${sentence}</div>${badge}</div>
+    <div class="bm-track" role="img" aria-label="우리 반 ${mineTxt}${unit}${masked?'':', 도 평균 '+_bmNum(h.provMean,m)+unit}">
+      <span class="bm-fill" style="width:${mineW}%;">${mineW>=16?mineTxt:''}</span>${markers}
+    </div>
+    <div class="bm-legend">${legend}</div>${note}
+  </div>`;
+}
+/* KPI 4종(내 클래스 vs 도 평균) — 비율지표(정답률·도달률) 색델타, 누적지표(학습시간·활용률)
+   중립 '누적·참고' 톤(충북 시드 학생 활동량↑으로 절대비교 부정직 방지 — §정직성). */
+function _bmKpiRow(mine, prov){
+  const field = { score:'avgScore', reach:'reachRate', time:'avgLearnMin', usage:'avgActsPerStudent' };
+  const cards = BM_METRICS.map(m=>{
+    const mv = mine ? mine[field[m.key]] : null;
+    const pv = prov ? prov[field[m.key]] : null;
+    const val = _bmNum(mv, m);
+    let trend, tone;
+    if (mv == null || pv == null){ trend={dir:'flat', text:'표본 부족'}; tone='muted'; }
+    else if (m.vol){ trend={dir:'flat', text:`도 ${_bmNum(pv,m)}${m.unit} · 누적 참고`}; tone='muted'; }
+    else {
+      const d = mv - pv, du = _bmDeltaUnit(m);
+      const av = Math.abs(Math.round(d));
+      trend = { dir: d>0?'up':d<0?'down':'flat', text:`도 ${_bmNum(pv,m)}${m.unit} · ${d>0?'+':d<0?'−':''}${av}${du}` };
+      tone = d>0?'success':d<0?'danger':'muted';
+    }
+    return kpiCard(m.label, val, m.unit, trend, tone);
+  }).join('');
+  return `<section class="dc-kpi-grid">${cards}</section>`;
+}
+
+/* 벤치마크·데일리 공통 스코프 스타일(뷰 셸에 주입 — 전체 재렌더로 중복 누적 없음). */
+const BM_STYLE = `<style>
+  .bm-topbar{ display:flex; align-items:flex-start; gap:14px; flex-wrap:wrap; margin:0 0 var(--space-4); }
+  .bm-topbar-notice{ flex:1 1 320px; min-width:0; }
+  .bm-realtoggle{ flex:0 0 auto; }
+  .bm-filterbar{ display:flex; flex-direction:column; gap:12px; margin:0 0 var(--space-4);
+    background:#fff; border:1px solid var(--gray-200); border-radius:12px; padding:14px 16px; }
+  .bm-filterbar .bm-frow{ display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+  .bm-caption{ font-size:14px; color:var(--gray-600); line-height:1.6; }
+  .bm-hero{ background:#fff; border:1px solid var(--gray-200); border-radius:14px; padding:20px 22px; margin:0 0 16px; }
+  .bm-hero-top{ display:flex; align-items:flex-start; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+  .bm-hero-sentence{ font-size:18px; line-height:1.6; color:var(--gray-900); font-weight:600; flex:1 1 auto; min-width:0; }
+  .bm-hero-sentence b{ color:var(--lrs-primary); font-weight:800; }
+  .bm-track{ position:relative; height:32px; background:var(--gray-100); border-radius:8px;
+    margin:18px 0 10px; }
+  .bm-fill{ position:absolute; left:0; top:0; bottom:0; min-width:2px; background:var(--lrs-primary);
+    border-radius:8px 0 0 8px; display:flex; align-items:center; justify-content:flex-end;
+    padding-right:8px; color:#fff; font-weight:700; font-size:14px; }
+  .bm-marker{ position:absolute; top:-5px; bottom:-5px; width:0; }
+  .bm-marker--mean{ border-left:2px solid #4b5563; }
+  .bm-marker--median{ border-left:2px dashed #9ca3af; }
+  .bm-legend{ display:flex; flex-wrap:wrap; gap:16px; font-size:13px; color:var(--gray-600); margin-top:8px; }
+  .bm-legend .sw{ display:inline-flex; align-items:center; gap:6px; }
+  .bm-legend i{ display:inline-block; flex:none; }
+  .bm-legend i.bm-sw-fill{ width:14px; height:12px; border-radius:3px; background:var(--lrs-primary); }
+  .bm-legend i.bm-sw-mean{ width:16px; border-top:2px solid #4b5563; }
+  .bm-legend i.bm-sw-median{ width:16px; border-top:2px dashed #9ca3af; }
+  .bm-hero-note{ font-size:13px; color:var(--gray-500); line-height:1.6; margin-top:12px;
+    border-top:1px dashed var(--gray-200); padding-top:10px; }
+  .bm-badge{ display:inline-flex; align-items:center; gap:6px; flex:none; white-space:nowrap;
+    font-size:13px; font-weight:700; padding:5px 12px; border-radius:999px; }
+  .bm-badge i{ font-size:12px; }
+  .bm-badge--success{ background:#dcfce7; color:#15803d; }
+  .bm-badge--info{ background:#dbeafe; color:#1d4ed8; }
+  .bm-badge--muted{ background:var(--gray-100); color:var(--gray-600); }
+  .bm-badge--warning{ background:#ffedd5; color:#b45309; }
+  .bm-sec-title{ font-size:19px; font-weight:700; color:var(--gray-900); margin:0 0 4px; line-height:1.3; }
+  .bm-sec-sub{ font-size:14px; color:var(--gray-600); line-height:1.6; margin:0 0 12px; }
+  .bm-block{ margin:0 0 var(--space-5); }
+  .bm-date-range{ display:inline-flex; align-items:center; gap:8px; flex-wrap:wrap; }
+  .bm-date-range input[type=date]{ font-size:15px; padding:7px 10px; border:1px solid var(--gray-300);
+    border-radius:8px; font-family:inherit; color:var(--gray-800); }
+  .bm-date-range .btn-sm{ font-size:14px; padding:8px 14px; }
+  .bm-date-err{ font-size:13px; color:var(--lrs-danger); margin-left:4px; }
+  .bm-kpi3{ display:grid; grid-template-columns:repeat(3,1fr); gap:var(--space-4); margin-bottom:var(--space-4); }
+  @media (max-width:1024px){ .bm-kpi3{ grid-template-columns:repeat(2,1fr); } }
+  @media (max-width:767px){ .bm-kpi3{ grid-template-columns:1fr; } }
+  @media (max-width:767px){
+    .bm-topbar{ flex-direction:column; }
+    .bm-realtoggle{ width:100%; }
+    .bm-hero-sentence{ font-size:16px; }
+  }
+</style>`;
+
+/* ======================================================================
+ * VIEWS['t-benchmark'] — [교사] 도 벤치마크(내 클래스 vs 충북 동학년) · analytics
+ * ==================================================================== */
+function _bmBindCommon(root, rerun){
+  // 클래스 칩 → 전체 재조회(반→학년 매칭 갱신). 교과 present 캐시는 유지.
+  root.querySelectorAll('#bmClassToggle button[data-bmclass]').forEach(b=>{
+    b.onclick = ()=>{ if (String(state._bmClassId)===b.dataset.bmclass) return; state._bmClassId = b.dataset.bmclass; rerun(); };
+  });
+  // 실데이터 토글(뷰 내부) → realKey 상태 갱신 후 재조회.
+  const rt = root.querySelector('#bmRealToggle');
+  if (rt){
+    const key = rt.getAttribute('data-realkey');
+    rt.querySelectorAll('button[data-bmreal]').forEach(b=>{
+      b.onclick = ()=>{ const on = b.dataset.bmreal==='1'; if (!!state[key]===on) return; state[key]=on; rerun(); };
+    });
+  }
+}
+VIEWS['t-benchmark'] = async function(root){
+  root.innerHTML = tplLoading(3);
+  const owned = await _bmFetchOwnedClasses();
+  if (!owned.length){ root.innerHTML = BM_STYLE + _bmNoClassPanel(); return; }
+  // 상태 기본값
+  if (state._bmClassId == null || !owned.some(c=>String(c.id)===String(state._bmClassId))) state._bmClassId = owned[0].id;
+  if (!state._bmSubject) state._bmSubject = 'all';
+  if (!state._bmLevel) state._bmLevel = 'subject';
+  if (!state._bmMetric) state._bmMetric = 'score';
+  const realOn = !!state._bmRealOnly;
+  const level = state._bmLevel;
+  // 성취기준 level 은 도달률 고정(cells 가 도달률 기반)
+  const metricKey = level === 'achievement' ? 'reach' : (BM_METRIC_BY[state._bmMetric] ? state._bmMetric : 'score');
+  const m = BM_METRIC_BY[metricKey];
+
+  const d = await apiGet('/api/lrs/stats/benchmark', {
+    classId: state._bmClassId, level, subject: state._bmSubject, metric: metricKey, realOnly: realOn?'1':'0'
+  });
+  if (!d || !d.success){ root.innerHTML = tplError('도 벤치마크 데이터를 불러오지 못했습니다', ()=>VIEWS['t-benchmark'](root)); return; }
+
+  // 교과 present 캐시(subject=all 응답일 때 파생) — 칩 죽음 방지
+  if (state._bmSubject === 'all' && Array.isArray(d.cells) && level === 'subject'){
+    state._bmSubjCache = state._bmSubjCache || {};
+    state._bmSubjCache[String(state._bmClassId) + (realOn?'_r':'')] = d.cells.map(c=>({ key:c.subject, label:c.label, present:true })).filter(s=>s.key);
+  }
+  const availSubs = await _bmPresentSubjects(state._bmClassId, realOn);
+
+  // ── 필터바 구성 ──
+  const classChips = owned.length > 1 ? _bmClassChipsHtml(owned, state._bmClassId) : '';
+  const subjChips = availSubs.length
+    ? `<div class="dc-unit-toggle" id="bmSubjToggle" role="group" aria-label="교과 선택"><span class="dc-eq-flabel">교과</span>${_eqSubjectChipsHtml(availSubs, state._bmSubject)}</div>`
+    : '';
+  const levelSeg = `<div class="dc-unit-toggle" id="bmLevelToggle" role="group" aria-label="비교 단위">
+      <span class="dc-eq-flabel">비교 단위</span>
+      <button class="chip" type="button" data-bmlevel="subject" aria-pressed="${level==='subject'?'true':'false'}">교과별</button>
+      <button class="chip" type="button" data-bmlevel="achievement" aria-pressed="${level==='achievement'?'true':'false'}">성취기준별</button>
+    </div>`;
+  const metricSeg = (level === 'subject') ? `<div class="dc-unit-toggle" id="bmMetricToggle" role="group" aria-label="비교 지표">
+      <span class="dc-eq-flabel">비교 지표</span>
+      ${BM_METRICS.map(mm=>`<button class="chip" type="button" data-bmmetric="${mm.key}" aria-pressed="${mm.key===metricKey?'true':'false'}">${mm.label}</button>`).join('')}
+    </div>` : '';
+  const clsName = d.className || (owned.find(c=>String(c.id)===String(state._bmClassId))||{}).name || '';
+  const subjLabel = state._bmSubject!=='all' ? (_eqSubjectLabelOf(state._bmSubject)||'') : '전체';
+  const summary = `<div class="dc-eq-summary" role="status"><i class="fas fa-filter" aria-hidden="true"></i> 필터: ${escapeHtml(clsName)} · ${escapeHtml(subjLabel)} · ${level==='achievement'?'성취기준별':'교과별'}${level==='subject'?(' · '+escapeHtml(m.label)):''}</div>`;
+  const volCaption = (level==='subject')
+    ? `<div class="bm-caption">정답률·도달률은 학생별 비율이라 반↔도 비교가 공정해요. 학습시간·활용률은 충북 시드 학생의 누적 기록이 많아 절대 비교는 참고용이에요.</div>`
+    : `<div class="bm-caption">표본이 충분한(도 50명 이상 학습한) 초등 코어 성취기준만 보여드려요. 우리 반이 평가한 기준만 비교표에 담아요.</div>`;
+
+  const filterbar = `<div class="bm-filterbar">
+    <div class="bm-frow">${classChips}${levelSeg}</div>
+    <div class="bm-frow">${subjChips}${metricSeg}</div>
+    ${volCaption}
+    ${summary}
+  </div>`;
+
+  // ── 도 학년 파생 불가 / 성취기준 초등 전용 안내(정직 빈) ──
+  const gradeLine = d.gradeLabel ? `충북 <b>${escapeHtml(d.gradeLabel)}</b>` : '충북 동학년';
+  if (d.empty){
+    const msg = d.emptyReason === 'achievement_elementary_only'
+      ? '성취기준 단위 벤치마크는 초등학교 반만 제공돼요. 이 반은 교과별 비교를 이용해 주세요.'
+      : (d.message || '이 반의 학년 정보를 확인할 수 없어 도 비교를 만들 수 없어요.');
+    root.innerHTML = BM_STYLE + _bmSeedBar(d.seedNotice, realOn, '_bmRealOnly')
+      + `<div class="bm-block"><h2 class="bm-sec-title">도 벤치마크 비교</h2>
+         <p class="bm-sec-sub">우리 반이 ${gradeLine} 대비 어디쯤 있는지 성취(정답률·도달률) 중심으로 보여줘요.</p></div>`
+      + filterbar + tplEmpty(msg);
+    _bmBindCommon(root, ()=>VIEWS['t-benchmark'](root));
+    _bmBindBenchToggles(root);
+    return;
+  }
+
+  const cells = Array.isArray(d.cells) ? d.cells : [];
+  // 성취기준: 우리 반이 평가한(mine.n>0) 코드만 비교표에 — 미평가 코어 개수는 캡션.
+  const isAch = (level === 'achievement');
+  const rowsRaw = isAch ? cells.filter(c=>c.mine && c.mine.value != null) : cells;
+  const excludedAch = isAch ? (cells.length - rowsRaw.length) : 0;
+  const rows = rowsRaw.map(c=>({
+    label: c.label, code: c.code || null, fullLabel: c.fullLabel || null,
+    mineVal: c.mine ? c.mine.value : null, mineN: c.mine ? c.mine.n : 0,
+    provMean: c.province ? c.province.mean : null, provMedian: c.province ? c.province.median : null,
+    delta: c.delta, pctl: c.percentile, provN: c.province ? c.province.n : 0,
+    masked: !!c.masked, lowConf: !!c.lowConfidence
+  }));
+
+  root.innerHTML = BM_STYLE
+    + _bmSeedBar(d.seedNotice, realOn, '_bmRealOnly')
+    + `<div class="bm-block"><h2 class="bm-sec-title">도 벤치마크 비교</h2>
+       <p class="bm-sec-sub">우리 반이 <b>${escapeHtml(clsName)}</b> · ${gradeLine} 대비 어디쯤 있는지 성취 중심으로 보여줘요. 평균·중앙값·상위%를 함께 봐요.</p></div>`
+    + filterbar
+    + `<div id="bmHero"></div>`
+    + `<div class="bm-block">${_bmKpiRow(d.mine, d.province)}</div>`
+    + `<section class="dc-chart-wrapper">
+         <header><div><h2>${isAch ? '성취기준별 우리 반 vs 충북' : '교과별 우리 반 vs 충북'}</h2>
+         <div class="subtitle">${isAch
+            ? '델타(+)=충북보다 잘 도달 · (−)=충북보다 낮음. 우리 반이 평가한 성취기준만 보여요.'
+            : '델타(+)=충북보다 높음 · (−)=낮음. 도 표본이 적은 교과는 회색으로 표시돼요.'}</div></div></header>
+         <div id="bmCells"></div>
+         <p class="rb-foot" id="bmCellsFoot" style="font-size:13px;color:var(--gray-500);line-height:1.6;margin:12px 0 0;"></p>
+       </section>`;
+
+  // 헤드라인 3값 대비 + 백분위
+  document.getElementById('bmHero').innerHTML = _bmHeadlineHero(d.headline, m);
+
+  // 셀 표(교과별/성취기준별)
+  const host = document.getElementById('bmCells');
+  if (!rows.length){
+    host.innerHTML = tplEmpty(isAch
+      ? '아직 우리 반이 평가한 코어 성취기준이 없어요. 교과별 비교부터 확인해 주세요.'
+      : '아직 비교할 교과 데이터가 부족해요.');
+  } else {
+    const labelCol = isAch
+      ? { key:'label', label:'성취기준', format:(v,r)=> `<span title="${escapeAttr(r.fullLabel||v)}">${escapeHtml(v)}</span>${r.code?` <span style="font-size:13px;color:var(--gray-500);">[${escapeHtml(String(r.code).replace(/[\[\]]/g,''))}]</span>`:''}` }
+      : { key:'label', label:'교과', format:(v)=> escapeHtml(v) };
+    const cols = [
+      labelCol,
+      { key:'mineVal', label:'내 클래스', align:'right', format:(v,r)=> v==null
+          ? '<span style="color:var(--gray-400);">기록 없음</span>'
+          : `${escapeHtml(_bmNum(v,m))}${m.unit}${r.mineN!=null?`<div style="font-size:13px;color:var(--gray-500);">${r.mineN}명</div>`:''}` },
+      { key:'provMean', label:'도 평균', align:'right', format:(v,r)=> r.masked
+          ? '<span style="color:var(--gray-400);">표본 부족</span>'
+          : `${escapeHtml(_bmNum(v,m))}${m.unit}${(!isAch && r.provMedian!=null)?`<div style="font-size:13px;color:var(--gray-500);">중앙값 ${_bmNum(r.provMedian,m)}${m.unit}</div>`:''}` },
+      { key:'delta', label:'델타', align:'right', format:(v,r)=> r.masked ? '<span class="dc-badge dc-badge--muted">-</span>' : _bmDeltaBadge(v, m) },
+    ];
+    if (!isAch) cols.push({ key:'pctl', label:'백분위', align:'right', format:(v)=> v==null ? '<span style="color:var(--gray-400);">-</span>' : _bmPctlBadge(v) });
+    cols.push({ key:'provN', label: isAch ? '도 평가 n' : '도 표본', align:'right', format:(v)=> `${escapeHtml(String(v||0))}명` });
+    renderDataTable(host, { columns: cols, rows, initialSort:'delta', initialDir:'desc' });
+  }
+  // 캡션(저신뢰·미평가 코어)
+  const foot = document.getElementById('bmCellsFoot');
+  if (foot){
+    const bits = [];
+    bits.push('<i class="fas fa-circle-info" aria-hidden="true"></i> 우리 반은 6~10명 규모라 표본이 작아요 — 학생 한 명이 값을 크게 좌우할 수 있어요(참고용).');
+    if (isAch && excludedAch > 0) bits.push(`우리 반이 아직 평가하지 않은 코어 성취기준 <b>${excludedAch}개</b>는 비교표에서 제외했어요.`);
+    foot.innerHTML = bits.join(' ');
+  }
+
+  _bmBindCommon(root, ()=>VIEWS['t-benchmark'](root));
+  _bmBindBenchToggles(root);
+};
+/* 벤치마크 전용 토글(교과·비교단위·지표) 바인딩 — 전체 재렌더. */
+function _bmBindBenchToggles(root){
+  root.querySelectorAll('#bmSubjToggle button[data-subj]').forEach(b=>{
+    b.onclick = ()=>{ if ((state._bmSubject||'all')===b.dataset.subj) return; state._bmSubject = b.dataset.subj; VIEWS['t-benchmark'](root); };
+  });
+  root.querySelectorAll('#bmLevelToggle button[data-bmlevel]').forEach(b=>{
+    b.onclick = ()=>{ if (state._bmLevel===b.dataset.bmlevel) return; state._bmLevel = b.dataset.bmlevel;
+      if (b.dataset.bmlevel==='achievement') state._bmSubject = 'all'; VIEWS['t-benchmark'](root); };
+  });
+  root.querySelectorAll('#bmMetricToggle button[data-bmmetric]').forEach(b=>{
+    b.onclick = ()=>{ if (state._bmMetric===b.dataset.bmmetric) return; state._bmMetric = b.dataset.bmmetric; VIEWS['t-benchmark'](root); };
+  });
+}
+
+/* ======================================================================
+ * VIEWS['t-daily-benchmark'] — [교사] 오늘의 학습 도 비교(일자별) · activities
+ * ==================================================================== */
+const DB_RANGES = [['today','오늘'],['7d','최근 7일'],['30d','최근 30일'],['custom','기간 지정']];
+function _dbTodayIso(){ const d=new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
+function _dbRangeFromTo(range){
+  const to = _dbTodayIso();
+  if (range === 'today') return { from: to, to };
+  if (range === '7d'){ const d=new Date(); d.setDate(d.getDate()-6); return { from:`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`, to }; }
+  if (range === '30d'){ const d=new Date(); d.setDate(d.getDate()-29); return { from:`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`, to }; }
+  // custom
+  return { from: state._dbFrom || '', to: state._dbTo || to };
+}
+function _dbRangeLabel(range){ const f=DB_RANGES.find(r=>r[0]===range); return f?f[1]:'최근 30일'; }
+function _fmtMD(iso){ const p=String(iso||'').split('-'); return p.length===3 ? `${Number(p[1])}/${Number(p[2])}` : String(iso||''); }
+
+VIEWS['t-daily-benchmark'] = async function(root){
+  root.innerHTML = tplLoading(3);
+  const owned = await _bmFetchOwnedClasses();
+  if (!owned.length){ root.innerHTML = BM_STYLE + _bmNoClassPanel(); return; }
+  if (state._dbClassId == null || !owned.some(c=>String(c.id)===String(state._dbClassId))) state._dbClassId = owned[0].id;
+  if (!state._dbRange) state._dbRange = '30d';
+  if (!state._dbSubject) state._dbSubject = 'all';
+  if (!state._dbGran) state._dbGran = 'day';
+  const realOn = !!state._dbRealOnly;
+
+  const { from, to } = _dbRangeFromTo(state._dbRange);
+  // custom 역순 방어 — 재조회 차단(빈 셸 + 인라인 에러)
+  const badRange = (state._dbRange==='custom' && from && to && from > to);
+
+  const availSubs = await _bmPresentSubjects(state._dbClassId, realOn);
+  let d = null;
+  if (!badRange && from && to){
+    d = await apiGet('/api/lrs/stats/daily-benchmark', {
+      classId: state._dbClassId, subject: state._dbSubject, from, to, granularity: state._dbGran, realOnly: realOn?'1':'0'
+    });
+  }
+
+  // ── 필터바 ──
+  const classChips = owned.length > 1 ? _bmClassChipsHtml(owned, state._dbClassId) : '';
+  const rangeSeg = `<div class="dc-unit-toggle" id="dbRangeToggle" role="group" aria-label="기간">
+      <span class="dc-eq-flabel">기간</span>
+      ${DB_RANGES.map(([v,l])=>`<button class="chip" type="button" data-dbrange="${v}" aria-pressed="${state._dbRange===v?'true':'false'}">${l}</button>`).join('')}
+    </div>`;
+  const today = _dbTodayIso();
+  const customRow = state._dbRange==='custom'
+    ? `<div class="bm-frow"><div class="bm-date-range">
+         <input type="date" id="dbFrom" value="${escapeAttr(state._dbFrom||'')}" max="${today}" aria-label="시작일">
+         <span>~</span>
+         <input type="date" id="dbTo" value="${escapeAttr(state._dbTo||today)}" max="${today}" aria-label="종료일">
+         <button class="btn btn-sm" type="button" id="dbApply">적용</button>
+         ${badRange?'<span class="bm-date-err">시작일이 종료일보다 늦어요.</span>':''}
+       </div></div>`
+    : '';
+  const subjChips = availSubs.length
+    ? `<div class="dc-unit-toggle" id="dbSubjToggle" role="group" aria-label="교과 선택"><span class="dc-eq-flabel">교과</span>${_eqSubjectChipsHtml(availSubs, state._dbSubject)}</div>`
+    : '';
+  const granSeg = `<div class="dc-unit-toggle" id="dbGranToggle" role="group" aria-label="집계 단위">
+      <span class="dc-eq-flabel">단위</span>
+      <button class="chip" type="button" data-dbgran="day" aria-pressed="${state._dbGran==='day'?'true':'false'}">일별</button>
+      <button class="chip" type="button" data-dbgran="week" aria-pressed="${state._dbGran==='week'?'true':'false'}">주별</button>
+    </div>`;
+  const clsName = (d && d.className) || (owned.find(c=>String(c.id)===String(state._dbClassId))||{}).name || '';
+  const gradeLbl = (d && d.gradeLabel) ? d.gradeLabel : '동학년';
+  const subjLbl = state._dbSubject!=='all' ? (_eqSubjectLabelOf(state._dbSubject)||'') : '전체';
+  const summary = `<div class="dc-eq-summary" role="status"><i class="fas fa-filter" aria-hidden="true"></i> 필터: ${escapeHtml(_dbRangeLabel(state._dbRange))} · ${escapeHtml(clsName)} · ${escapeHtml(subjLbl)}${state._dbGran==='week'?' · 주별':''}</div>`;
+  const subjCap = state._dbSubject!=='all' ? `<div class="bm-caption">교과를 좁히면 도 표본이 얇아질 수 있어요(표본이 적은 날은 회색으로 표시돼요).</div>` : '';
+
+  const filterbar = `<div class="bm-filterbar">
+    <div class="bm-frow">${rangeSeg}</div>
+    ${customRow}
+    <div class="bm-frow">${classChips}${subjChips}${granSeg}</div>
+    ${subjCap}${summary}
+  </div>`;
+
+  const head = `<div class="bm-block"><h2 class="bm-sec-title">오늘의 학습 · 충북 도 비교</h2>
+    <p class="bm-sec-sub">우리 반 오늘의 학습이 충북 <b>${escapeHtml(gradeLbl)}</b>와 견줘 일자별로 어떤지 정답률·학습시간으로 보여줘요.</p></div>`;
+
+  // ── 오류/역순/빈 분기 ──
+  if (badRange){
+    root.innerHTML = BM_STYLE + _bmSeedBar('도 전체 수치는 시연용 시드 데이터 기반이에요. 실데이터가 쌓이면 자동 전환돼요.', realOn, '_dbRealOnly')
+      + head + filterbar + tplEmpty('시작일이 종료일보다 늦어요. 날짜를 다시 선택해 주세요.');
+    _bmBindDaily(root); return;
+  }
+  if (!d || !d.success){
+    root.innerHTML = BM_STYLE + _bmSeedBar('도 전체 수치는 시연용 시드 데이터 기반이에요. 실데이터가 쌓이면 자동 전환돼요.', realOn, '_dbRealOnly')
+      + head + filterbar + tplError('오늘의 학습 도 비교 데이터를 불러오지 못했습니다', ()=>VIEWS['t-daily-benchmark'](root));
+    _bmBindDaily(root); return;
+  }
+
+  const series = Array.isArray(d.series) ? d.series : [];
+  const sm = d.summary || {};
+  const clsHasData = series.some(s=>s.class && s.class.n>0);
+
+  // ── 요약 KPI(3장): 오늘/기간 정답률 · 학습시간 · 백분위 ──
+  const isSingle = (state._dbRange==='today') || (from===to);
+  const accLabel = isSingle ? '오늘 정답률' : '기간 평균 정답률';
+  const timeLabel = isSingle ? '오늘 학습시간' : '기간 일평균 학습시간';
+  const accTrend = (sm.classAcc!=null && sm.provinceAcc!=null)
+    ? { dir: sm.accGapPP>0?'up':sm.accGapPP<0?'down':'flat', text:`충북 ${Math.round(sm.provinceAcc)}% · ${sm.accGapPP>0?'+':sm.accGapPP<0?'−':''}${Math.abs(Math.round(sm.accGapPP||0))}%p` }
+    : { dir:'flat', text: sm.provinceAcc!=null?`충북 ${Math.round(sm.provinceAcc)}%`:'표본 부족' };
+  const accTone = (sm.classAcc==null||sm.provinceAcc==null)?'muted':(sm.accGapPP>0?'success':sm.accGapPP<0?'danger':'muted');
+  const timeTrend = (sm.classTime!=null && sm.provinceTime!=null)
+    ? { dir: (sm.classTime-sm.provinceTime)>0?'up':(sm.classTime-sm.provinceTime)<0?'down':'flat', text:`충북 ${sm.provinceTime}분 · ${(sm.classTime-sm.provinceTime)>0?'+':(sm.classTime-sm.provinceTime)<0?'−':''}${Math.abs(sm.classTime-sm.provinceTime)}분` }
+    : { dir:'flat', text: sm.provinceTime!=null?`충북 ${sm.provinceTime}분`:'표본 부족' };
+  const timeTone = (sm.classTime==null||sm.provinceTime==null)?'muted':((sm.classTime-sm.provinceTime)>0?'success':(sm.classTime-sm.provinceTime)<0?'danger':'muted');
+  const pctlVal = sm.percentile!=null ? `상위 ${Math.max(1,Math.round(sm.percentile))}%` : '표본 부족';
+  const kpi = `<section class="bm-kpi3">
+    ${kpiCard(accLabel, sm.classAcc!=null?Math.round(sm.classAcc):'-', '%', accTrend, accTone)}
+    ${kpiCard(timeLabel, sm.classTime!=null?sm.classTime:'-', '분', timeTrend, timeTone)}
+    ${kpiCard('충북 동학년 중 위치', pctlVal, '', { dir:'flat', text: isSingle?'오늘 기준':'기간 평균 기준' }, sm.percentile==null?'muted':(sm.percentile<=25?'success':sm.percentile<=50?'primary':sm.percentile<=74?'muted':'warning'))}
+  </section>`;
+
+  // 도 커버리지 + 우리 반 빈 안내
+  const coverIns = d.coverageNote ? _reportInsightHtml({ level:'info', text:`${d.coverageNote}. 표본이 적은 날의 충북 값은 회색으로 비워 정직하게 표시해요.` }) : '';
+  const emptyIns = !clsHasData
+    ? _reportInsightHtml({ level:'warn', text:'이 기간에는 우리 반 오늘의 학습 기록이 없어요. 아래 충북 흐름만 참고하시고, 기간을 넓히거나 「기간 지정」으로 학습이 있었던 날짜를 골라보세요.' })
+    : '';
+
+  root.innerHTML = BM_STYLE
+    + _bmSeedBar(d.seedNotice, realOn, '_dbRealOnly')
+    + head + filterbar
+    + `<div class="lrs-insight-wrap" style="margin:0 0 var(--space-4);">${coverIns}${emptyIns}</div>`
+    + `<div class="bm-block">${kpi}</div>`
+    + `<section class="dc-chart-wrapper bm-block">
+         <header><div><h2>일자별 정답률</h2><div class="subtitle">실선=우리 반 · 점선=충북 동학년 · 도 표본이 적은 날은 선이 끊겨요</div></div></header>
+         <div class="chart-body" style="height:260px;"><canvas id="dbAccChart" role="img" aria-label="일자별 정답률 라인차트"></canvas></div>
+       </section>`
+    + `<section class="dc-chart-wrapper bm-block">
+         <header><div><h2>일자별 학습시간(분)</h2><div class="subtitle">실선=우리 반 · 점선=충북 동학년 · 학생 1인당 하루 평균</div></div></header>
+         <div class="chart-body" style="height:260px;"><canvas id="dbTimeChart" role="img" aria-label="일자별 학습시간 라인차트"></canvas></div>
+       </section>`
+    + `<section class="dc-chart-wrapper">
+         <header><div><h2>일자별 상세</h2><div class="subtitle">열 머리글로 정렬 · 도 표본이 적은 날은 회색</div></div></header>
+         <div id="dbTable"></div>
+       </section>`;
+
+  // ── 라인 차트 2종(정답률·학습시간) — 이중축 금지, 세로 스택 ──
+  const labels = series.map(s=>_fmtMD(s.date));
+  const mineAcc = series.map(s=> (s.class && s.class.n>0) ? s.class.acc : null);
+  const provAcc = series.map(s=> (s.province && !s.province.masked) ? s.province.acc : null);
+  const mineTime = series.map(s=> (s.class && s.class.n>0) ? s.class.timeMin : null);
+  const provTime = series.map(s=> (s.province && !s.province.masked) ? s.province.timeMin : null);
+  const lineOpts = (yMax) => ({
+    spanGaps:false,
+    scales:{ y:{ min:0, ...(yMax?{max:yMax}:{}), ticks:{ font:{size:LRS_CHART_FONT_SIZE} } },
+             x:{ ticks:{ font:{size:LRS_CHART_FONT_SIZE}, maxRotation:0, autoSkip:true } } },
+    plugins:{ legend:{ position:'bottom', labels:{ font:{size:LRS_CHART_FONT_SIZE}, usePointStyle:true, boxWidth:14, padding:10 } } }
+  });
+  const mkLine = (canvasId, mineArr, provArr, yMax) => mkChart(document.getElementById(canvasId), 'line', {
+    labels,
+    datasets:[
+      { label:'우리 반', data:mineArr, borderColor:'var(--lrs-primary)', backgroundColor:'var(--lrs-primary)',
+        borderWidth:2.5, pointRadius:2.5, tension:0.25, spanGaps:false },
+      { label:'충북 동학년', data:provArr, borderColor:'#9ca3af', backgroundColor:'#9ca3af',
+        borderWidth:2, borderDash:[6,4], pointRadius:2, tension:0.25, spanGaps:false }
+    ]
+  }, lineOpts(yMax));
+  mkLine('dbAccChart', mineAcc, provAcc, 100);
+  mkLine('dbTimeChart', mineTime, provTime, null);
+
+  // ── 일자별 표 ──
+  const tblRows = series.slice().reverse().map(s=>({
+    date: s.date, dateLabel: _fmtMD(s.date),
+    mineAcc: (s.class && s.class.n>0) ? s.class.acc : null,
+    provAcc: (s.province && !s.province.masked) ? s.province.acc : null,
+    gap: (s.class && s.class.n>0 && s.province && !s.province.masked) ? Math.round((s.class.acc - s.province.acc)*10)/10 : null,
+    mineTime: (s.class && s.class.n>0) ? s.class.timeMin : null,
+    provTime: (s.province && !s.province.masked) ? s.province.timeMin : null,
+    provN: s.province ? s.province.n : 0
+  }));
+  renderDataTable(document.getElementById('dbTable'), {
+    columns:[
+      { key:'dateLabel', label:'일자', format:(v)=> escapeHtml(v) },
+      { key:'mineAcc', label:'내 반 정답률', align:'right', format:(v)=> v==null?'<span style="color:var(--gray-400);">-</span>':`${Number(v).toFixed(1)}%` },
+      { key:'provAcc', label:'도 정답률', align:'right', format:(v,r)=> v==null?`<span style="color:var(--gray-400);">표본 부족${r.provN?` (${r.provN}명)`:''}</span>`:`${Number(v).toFixed(1)}%` },
+      { key:'gap', label:'델타', align:'right', format:(v)=> v==null?'<span class="dc-badge dc-badge--muted">-</span>':(v>0?`<span class="dc-badge dc-badge--success">▲ +${v}%p</span>`:v<0?`<span class="dc-badge dc-badge--danger">▼ −${Math.abs(v)}%p</span>`:'<span class="dc-badge dc-badge--muted">± 0%p</span>') },
+      { key:'mineTime', label:'내 반 시간(분)', align:'right', format:(v)=> v==null?'<span style="color:var(--gray-400);">-</span>':escapeHtml(String(v)) },
+      { key:'provTime', label:'도 시간(분)', align:'right', format:(v)=> v==null?'<span style="color:var(--gray-400);">-</span>':escapeHtml(String(v)) },
+      { key:'provN', label:'도 표본', align:'right', format:(v)=> `${escapeHtml(String(v||0))}명` },
+    ],
+    rows: tblRows, initialSort:'date', initialDir:'desc'
+  });
+
+  _bmBindDaily(root);
+};
+/* 데일리 벤치마크 필터 바인딩 — 전체 재렌더. */
+function _bmBindDaily(root){
+  _bmBindCommon(root, ()=>VIEWS['t-daily-benchmark'](root)); // 클래스 칩은 _dbClassId 를 써야 하므로 별도 처리
+  // 클래스 칩(_dbClassId) 재바인딩(공통은 _bmClassId 대상)
+  root.querySelectorAll('#bmClassToggle button[data-bmclass]').forEach(b=>{
+    b.onclick = ()=>{ if (String(state._dbClassId)===b.dataset.bmclass) return; state._dbClassId = b.dataset.bmclass; VIEWS['t-daily-benchmark'](root); };
+  });
+  // 실데이터 토글(_dbRealOnly)은 _bmBindCommon 이 data-realkey 로 처리(셸에서 '_dbRealOnly' 전달)
+  root.querySelectorAll('#dbRangeToggle button[data-dbrange]').forEach(b=>{
+    b.onclick = ()=>{ if (state._dbRange===b.dataset.dbrange) return; state._dbRange = b.dataset.dbrange;
+      if (b.dataset.dbrange==='custom' && !state._dbFrom){ const r=_dbRangeFromTo('30d'); state._dbFrom=r.from; state._dbTo=r.to; }
+      VIEWS['t-daily-benchmark'](root); };
+  });
+  root.querySelectorAll('#dbSubjToggle button[data-subj]').forEach(b=>{
+    b.onclick = ()=>{ if ((state._dbSubject||'all')===b.dataset.subj) return; state._dbSubject = b.dataset.subj; VIEWS['t-daily-benchmark'](root); };
+  });
+  root.querySelectorAll('#dbGranToggle button[data-dbgran]').forEach(b=>{
+    b.onclick = ()=>{ if (state._dbGran===b.dataset.dbgran) return; state._dbGran = b.dataset.dbgran; VIEWS['t-daily-benchmark'](root); };
+  });
+  const applyBtn = root.querySelector('#dbApply');
+  if (applyBtn){
+    applyBtn.onclick = ()=>{
+      const f = root.querySelector('#dbFrom'), t = root.querySelector('#dbTo');
+      state._dbFrom = (f && f.value) || null; state._dbTo = (t && t.value) || null;
+      state._dbRange = 'custom';
+      VIEWS['t-daily-benchmark'](root);
+    };
+  }
+}
+
+/* ======================================================================
  * ④ 활동×성취 교차분석 (a-cross)
  *    인사이트 배너 + 3분위 매트릭스 + 산점도 + 콘텐츠/스스로채움 상하위 비교
  * ==================================================================== */
@@ -10355,7 +10949,10 @@ async function setView(id){
     const isDailyView = /(^|-)daily$/.test(id) || id === 's-daily' || id === 't-daily' || id === 'a-daily';
     // t-weakstrong(교사 성취기준 강·약)은 평가 누적 기준이라 기간 무효 → 기간칩도 inert 처리(거짓 UI 방지)
     const isWeakStrong = (id === 't-weakstrong');
-    const isPeriodInert = isDailyView || isWeakStrong;
+    // Phase2 도 벤치마크: t-benchmark(누적 기준·기간 미배치) / t-daily-benchmark(뷰 자체 기간 세그먼트 사용)
+    //   둘 다 전역 기간칩 무효 → inert. (t-daily-benchmark 는 'benchmark' 로 끝나 daily 정규식에 안 걸리므로 명시)
+    const isBenchmark = (id === 't-benchmark' || id === 't-daily-benchmark');
+    const isPeriodInert = isDailyView || isWeakStrong || isBenchmark;
     const picker = document.getElementById('periodPicker');
     const fbar = picker ? picker.closest('.dc-filter-bar') : null;
     if (fbar) {
@@ -10370,6 +10967,10 @@ async function setView(id){
         }
         note.innerHTML = isWeakStrong
           ? '<i class="fas fa-circle-info" aria-hidden="true"></i> 성취기준 강·약은 평가 누적 기준이라 기간 선택을 쓰지 않아요'
+          : (id === 't-benchmark')
+            ? '<i class="fas fa-circle-info" aria-hidden="true"></i> 도 벤치마크는 평가 누적 기준이라 기간 선택을 쓰지 않아요'
+          : (id === 't-daily-benchmark')
+            ? '<i class="fas fa-circle-info" aria-hidden="true"></i> 이 화면은 아래 자체 날짜 선택을 써요 (위 기간 선택은 사용 안 함)'
           : '<i class="fas fa-circle-info" aria-hidden="true"></i> 이 화면은 오늘·어제 고정이라 기간 선택을 쓰지 않아요';
         note.hidden = false;
       } else if (note) { note.hidden = true; }

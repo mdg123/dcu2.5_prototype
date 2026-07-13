@@ -5968,4 +5968,522 @@ router.post('/supplement/:id/done', requireAuth, (req, res) => {
   }
 });
 
+// ═══════════════════════════════════════════════════════════════════════════
+// Phase 2 — 도 전체 벤치마크 (내 클래스 vs 충청북도 도내 동학년)
+//   기획: 보고서/LRS_Phase2_벤치마크_방법론_API_v1.md (산식·정직성 정본)
+//         보고서/LRS_Phase2_벤치마크_UI_기획_v1.md   (FE 소비 필드·classId KEY)
+//   산식은 전부 기존 자산 재사용(신규 산식 금지):
+//     normScoreExpr·scoredWhere       — 점수 0~100 정규화·채점형 필터
+//     classifyStatus·reachRate(SSOT)  — 도달 판정(att>=3·rate80/50, db/lrs-mastery)
+//     LRS_LEARN_ACTIVITY_TYPES        — 활용률 7종
+//     canonicalSubjectKey·subjectLabel·subjectCodeSetFilter — 교과 매칭
+//     _pctile                          — median/IQR(p25·p75)
+//     canViewClass                     — 소유 교사/admin 권한 게이트(비소유 403)
+//   ★ KEY(UI 확정): classId → 반 학년(grade) 해석 → 도 모집단 = 충북 동 school_level×grade 전체 학생.
+//     grade = classes.grade(선언 1~6) 우선, 없으면 반 학생 최빈 grade(gradeSource로 투명 표기).
+//   정직성:
+//     · lrs_achievement_stats 엔 is_seed 컬럼이 없음 → realOnly 시 users.is_seed=0 을 JOIN 으로 필터.
+//       (learning_logs 기반 지표는 ll.is_seed 직접 필터.)
+//     · 도 성취통계 99% 시드 → seedNotice 상시 반환(FE 배너 강제). realOnly=1 이면 도 모집단이
+//       거의 비어 masked/빈 시리즈가 "정상"(정직 빈상태).
+//     · 소표본: 도 표본 n<minSampleN(10) → 값 마스킹(masked=true, 수치 null). 결측을 0으로 채우지 않음.
+//     · 성취기준 level 게이트: 초등만 노출 + 도 distinct 학생 n>=50 코어 화이트리스트(동적)만.
+//       중·고는 성취기준 단위 미노출(교과×학년만).
+// ═══════════════════════════════════════════════════════════════════════════
+const BENCH_SEED_NOTICE = '도 전체 수치는 시연용 시드 기반이며, 실데이터가 쌓이면 자동 반영됩니다.';
+const BENCH_MIN_SAMPLE = LRS_CONFIG.minSampleN;   // 10 — 소표본 마스킹 게이트
+const BENCH_CORE_MIN = 50;                        // 초등 코어 화이트리스트 게이트(도 distinct 학생 n>=50)
+const BENCH_DUR_SQL = "COALESCE(ll.duration_sec, CAST(REPLACE(REPLACE(COALESCE(ll.result_duration,''),'PT',''),'S','') AS INTEGER), 0)";
+const BENCH_LEARN_TYPES_SQL = LRS_LEARN_ACTIVITY_TYPES.map(t => `'${t}'`).join(',');
+const BENCH_SL_LABEL = { elementary: '초등학교', middle: '중학교', high: '고등학교' };
+const BENCH_METRIC_UNIT = { score: '점', reach: '%', time: '분', usage: '건' };
+const _bR1 = (x) => (x == null || isNaN(x)) ? null : Math.round(x * 10) / 10;
+
+/** classId → { cls, studentIds, schoolLevel, grade, gradeSource } | null(반 없음). */
+function _benchClassCtx(classId) {
+  const cls = db.prepare('SELECT id, name, grade, status FROM classes WHERE id = ?').get(classId);
+  if (!cls) return null;
+  const members = db.prepare(`
+    SELECT u.id, u.grade, u.school_level
+    FROM class_members cm JOIN users u ON u.id = cm.user_id
+    WHERE cm.class_id = ? AND u.role = 'student'
+  `).all(classId);
+  const studentIds = members.map(m => m.id);
+  // school_level = 멤버 최빈 school_level
+  const slCnt = {};
+  members.forEach(m => { if (m.school_level) slCnt[m.school_level] = (slCnt[m.school_level] || 0) + 1; });
+  let schoolLevel = null, slBest = 0;
+  for (const k of Object.keys(slCnt)) if (slCnt[k] > slBest) { slBest = slCnt[k]; schoolLevel = k; }
+  // grade = classes.grade(선언, 1~6) 우선 → 없으면 멤버 최빈 grade
+  let grade = null, gradeSource = null;
+  const clsGrade = cls.grade != null ? parseInt(cls.grade, 10) : NaN;
+  if (Number.isInteger(clsGrade) && clsGrade >= 1 && clsGrade <= 6) { grade = clsGrade; gradeSource = 'class'; }
+  else {
+    const gCnt = {};
+    members.forEach(m => { if (m.grade != null) gCnt[m.grade] = (gCnt[m.grade] || 0) + 1; });
+    let gBest = 0;
+    for (const k of Object.keys(gCnt)) if (gCnt[k] > gBest) { gBest = gCnt[k]; grade = Number(k); }
+    if (grade != null) gradeSource = 'members';
+  }
+  if (!schoolLevel && grade != null && grade >= 1 && grade <= 6) schoolLevel = 'elementary';
+  return { cls, studentIds, schoolLevel, grade, gradeSource };
+}
+
+/** 도 모집단 학생 ids = 충북 동 school_level×grade 전체 학생(realOnly 시 is_seed=0). */
+function _benchProvinceIds(schoolLevel, grade, realOnly) {
+  if (!schoolLevel || grade == null) return [];
+  const seedW = realOnly ? ' AND u.is_seed = 0' : '';
+  return db.prepare(`
+    SELECT u.id FROM users u
+    WHERE u.role='student' AND u.school_level = ? AND u.grade = ? ${seedW}
+  `).all(schoolLevel, grade).map(r => r.id);
+}
+
+/** 학습로그 per-(학생,교과) 집계(score/time/usage 원천). realOnly 시 ll.is_seed=0. */
+function _benchLogAgg(uids, realOnly) {
+  if (!uids.length) return [];
+  const ph = uids.map(() => '?').join(',');
+  const seedW = realOnly ? ' AND ll.is_seed = 0' : '';
+  return db.prepare(`
+    SELECT ll.user_id uid, ll.subject_code sc,
+      SUM(CASE WHEN ${scoredWhere('ll')} AND ll.result_score IS NOT NULL THEN ${normScoreExpr('ll')} ELSE 0 END) score_sum,
+      SUM(CASE WHEN ${scoredWhere('ll')} AND ll.result_score IS NOT NULL THEN 1 ELSE 0 END) score_cnt,
+      SUM(${BENCH_DUR_SQL}) dur_sec,
+      SUM(CASE WHEN ll.activity_type IN (${BENCH_LEARN_TYPES_SQL}) THEN 1 ELSE 0 END) acts
+    FROM learning_logs ll
+    WHERE ll.user_id IN (${ph}) ${seedW}
+    GROUP BY ll.user_id, ll.subject_code
+  `).all(...uids);
+}
+
+/** 성취통계 rows(도달률 원천). realOnly 시 users.is_seed=0 JOIN(ach_stats엔 is_seed 없음 — 정직성 필수). */
+function _benchAchAgg(uids, realOnly) {
+  if (!uids.length) return [];
+  const ph = uids.map(() => '?').join(',');
+  const joinU = realOnly ? 'JOIN users u ON u.id = s.user_id' : '';
+  const seedW = realOnly ? ' AND u.is_seed = 0' : '';
+  return db.prepare(`
+    SELECT s.user_id uid, s.achievement_code code, s.subject_code sc,
+           s.attempt_count att, s.success_count succ, s.avg_score avg
+    FROM lrs_achievement_stats s ${joinU}
+    WHERE s.user_id IN (${ph}) AND s.achievement_code IS NOT NULL AND s.achievement_code <> '' ${seedW}
+  `).all(...uids);
+}
+
+/** 값 배열 → { n, mean, median, p25, p75 }(_pctile 재사용). */
+function _benchDist(arr) {
+  const a = arr.filter(v => v != null && !isNaN(v));
+  if (!a.length) return { n: 0, mean: null, median: null, p25: null, p75: null };
+  const s = [...a].sort((x, y) => x - y);
+  const mean = s.reduce((t, v) => t + v, 0) / s.length;
+  return { n: s.length, mean: _bR1(mean), median: _bR1(_pctile(s, 0.5)), p25: _bR1(_pctile(s, 0.25)), p75: _bR1(_pctile(s, 0.75)) };
+}
+/** 상위 백분위(%) — mine 값이 도 학생 분포에서 상위 몇%인지(높을수록 상위). 표본 없으면 null. */
+function _benchTopPct(arr, val) {
+  const a = arr.filter(v => v != null && !isNaN(v));
+  if (!a.length || val == null) return null;
+  const below = a.filter(v => v < val).length;
+  return Math.round(100 - (below / a.length) * 100);
+}
+
+/**
+ * score/time/usage 지표(로그 기반). subjKey=null → 전 교과.
+ *   score: 도/반 평균 = 채점형 로그 pooled AVG(normScore). 분포 배열 = 학생별 평균정답률(채점로그 보유 학생).
+ *   time : 평균 = Σ분/등록학생. 분포 배열 = 학생별 총 학습분(등록 학생 전체, 무활동=0 포함).
+ *   usage: 평균 = Σ활동수(7종)/등록학생. 분포 배열 = 학생별 활동수(등록 학생 전체).
+ *   반환 { mean, arr, n }.  arr=백분위/median 산출용 학생별 값. n=도표본(마스킹 판정용).
+ */
+function _benchScoreTimeUsage(enrolledIds, rows, subjKey, metric) {
+  const byU = new Map();
+  for (const r of rows) {
+    if (subjKey && canonicalSubjectKey(subjectLabel(r.sc)) !== subjKey) continue;
+    let e = byU.get(r.uid); if (!e) { e = { scoreSum: 0, scoreCnt: 0, dur: 0, acts: 0 }; byU.set(r.uid, e); }
+    e.scoreSum += r.score_sum || 0; e.scoreCnt += r.score_cnt || 0;
+    e.dur += r.dur_sec || 0; e.acts += r.acts || 0;
+  }
+  if (metric === 'score') {
+    let sSum = 0, sCnt = 0; const arr = [];
+    for (const e of byU.values()) { sSum += e.scoreSum; sCnt += e.scoreCnt; if (e.scoreCnt > 0) arr.push(e.scoreSum / e.scoreCnt); }
+    return { mean: sCnt > 0 ? _bR1(sSum / sCnt) : null, arr, n: arr.length };
+  }
+  if (metric === 'time') {
+    const arr = enrolledIds.map(uid => (byU.get(uid)?.dur || 0) / 60);
+    const mean = enrolledIds.length ? arr.reduce((t, v) => t + v, 0) / enrolledIds.length : null;
+    return { mean: _bR1(mean), arr, n: enrolledIds.length };
+  }
+  // usage
+  const arr = enrolledIds.map(uid => (byU.get(uid)?.acts || 0));
+  const mean = enrolledIds.length ? arr.reduce((t, v) => t + v, 0) / enrolledIds.length : null;
+  return { mean: _bR1(mean), arr, n: enrolledIds.length };
+}
+
+/**
+ * 도달률(성취통계 기반). subjKey=null → 전 교과.
+ *   평균 = Σreached/Σevaluated(pooled 비율). 분포 배열 = 학생별 도달률%(평가충분 코드 보유 학생).
+ *   n = 평가충분 학생 수(도달률 분모 정직성 — 재학생 아님).
+ */
+function _benchReach(achRows, subjKey) {
+  const byU = new Map();
+  for (const r of achRows) {
+    let sk = canonicalSubjectKey(subjectLabel(r.sc));
+    if (!sk) { try { sk = canonicalSubjectKey(subjectLabel(mastery.resolveCode(r.code).subject_code)); } catch (_) {} }
+    if (subjKey && sk !== subjKey) continue;
+    const rate = mastery.reachRate(r.succ, r.att, r.avg);
+    const status = mastery.classifyStatus(r.att, rate);
+    if (status === mastery.STATUS.INSUFFICIENT) continue; // 평가부족은 분모 제외
+    let e = byU.get(r.uid); if (!e) { e = { reached: 0, evaluated: 0 }; byU.set(r.uid, e); }
+    e.evaluated++; if (status === mastery.STATUS.REACHED) e.reached++;
+  }
+  let tReached = 0, tEval = 0; const arr = [];
+  for (const e of byU.values()) { tReached += e.reached; tEval += e.evaluated; if (e.evaluated > 0) arr.push((e.reached / e.evaluated) * 100); }
+  return { mean: tEval > 0 ? _bR1((tReached / tEval) * 100) : null, arr, n: arr.length };
+}
+
+/** 선택 metric 지표 산출 라우터. */
+function _benchMetric(enrolledIds, logRows, achRows, subjKey, metric) {
+  if (metric === 'reach') return _benchReach(achRows, subjKey);
+  return _benchScoreTimeUsage(enrolledIds, logRows, subjKey, metric);
+}
+
+/** mine/province 헤드라인 KPI 풀 번들(정답률·도달률·학습시간·활용률 동시). */
+function _benchBundle(ids, logRows, achRows, subjKey) {
+  const sc = _benchScoreTimeUsage(ids, logRows, subjKey, 'score');
+  const rc = _benchReach(achRows, subjKey);
+  const tm = _benchScoreTimeUsage(ids, logRows, subjKey, 'time');
+  const us = _benchScoreTimeUsage(ids, logRows, subjKey, 'usage');
+  return {
+    students: ids.length,
+    avgScore: sc.mean, scoredStudents: sc.n,
+    reachRate: rc.mean, evaluated: rc.n,
+    avgLearnMin: tm.mean, avgActsPerStudent: us.mean,
+  };
+}
+
+// ─────────────────────────────────────────────────────────
+// GET /api/lrs/stats/benchmark — 내 클래스 vs 충북 도내 동학년 벤치마크
+//   params: classId(필수·소유), level=subject|achievement(기본 subject),
+//           subject(canonical|all), metric=score|reach|time|usage
+//           (기본: subject→score, achievement→reach), realOnly=0|1(기본 0).
+//   응답: 전역(grade·gradeLabel·className·seedNotice·realOnly·minSample) +
+//         mine/province 헤드라인 번들 + headline(선택 metric) + cells[](교과 or 코어 성취기준 행).
+// ─────────────────────────────────────────────────────────
+router.get('/stats/benchmark', requireAuth, (req, res) => {
+  try {
+    const role = req.user && req.user.role;
+    if (role !== 'teacher' && role !== 'admin') {
+      return res.status(403).json({ success: false, message: '교사 또는 관리자 권한이 필요합니다.' });
+    }
+    const classId = parseInt(req.query.classId, 10);
+    if (!Number.isInteger(classId)) {
+      return res.status(400).json({ success: false, message: 'classId 파라미터가 필요합니다.' });
+    }
+    if (!canViewClass(req, classId)) {
+      return res.status(403).json({ success: false, message: '권한이 없습니다.' });
+    }
+    const level = req.query.level === 'achievement' ? 'achievement' : 'subject';
+    const subjectParam = String(req.query.subject || 'all').trim();
+    if (!isValidSubjectParam(subjectParam)) {
+      return res.status(400).json({ success: false, message: '잘못된 subject 파라미터입니다.' });
+    }
+    const subjKey = subjectParam === 'all' ? null : subjectParam;
+    const validMetrics = new Set(['score', 'reach', 'time', 'usage']);
+    let metric = String(req.query.metric || '').trim();
+    if (!validMetrics.has(metric)) metric = level === 'achievement' ? 'reach' : 'score';
+    const realOnly = String(req.query.realOnly || '') === '1';
+
+    const ctx = _benchClassCtx(classId);
+    if (!ctx) return res.status(404).json({ success: false, message: '클래스를 찾을 수 없습니다.' });
+
+    const base = {
+      success: true, scope: 'class', classId,
+      level, subject: subjectParam, metric, metricUnit: BENCH_METRIC_UNIT[metric], realOnly,
+      minSample: BENCH_MIN_SAMPLE,
+      grade: ctx.grade, gradeLabel: ctx.grade != null ? `${ctx.grade}학년` : null, gradeSource: ctx.gradeSource,
+      schoolLevel: ctx.schoolLevel, schoolLevelLabel: BENCH_SL_LABEL[ctx.schoolLevel] || null,
+      className: ctx.cls.name,
+      seedNotice: BENCH_SEED_NOTICE, note: BENCH_SEED_NOTICE,
+    };
+
+    // 학년/급 파생 불가 → 정직 빈
+    if (ctx.grade == null || !ctx.schoolLevel) {
+      return res.json({
+        ...base, mine: null, province: null, headline: null, cells: [], cellCount: 0,
+        empty: true, emptyReason: 'no_grade',
+        message: '이 클래스의 학년 정보를 확인할 수 없어 도 비교를 만들 수 없습니다.'
+      });
+    }
+    // 성취기준 level 은 초등만
+    if (level === 'achievement' && ctx.schoolLevel !== 'elementary') {
+      return res.json({
+        ...base, mine: null, province: null, headline: null, cells: [], cellCount: 0,
+        empty: true, emptyReason: 'achievement_elementary_only',
+        message: '성취기준 단위 벤치마크는 초등학교만 제공됩니다. 중·고는 교과×학년 비교를 이용하세요.'
+      });
+    }
+
+    const classIds = ctx.studentIds;
+    const provIds = _benchProvinceIds(ctx.schoolLevel, ctx.grade, realOnly);
+
+    // 원천 1회 조회(교과·코드 필터는 JS 후처리)
+    const classLog = _benchLogAgg(classIds, realOnly);
+    const provLog = _benchLogAgg(provIds, realOnly);
+    const classAch = _benchAchAgg(classIds, realOnly);
+    const provAch = _benchAchAgg(provIds, realOnly);
+
+    // ── 헤드라인(선택 metric · subject 스코프) ──
+    const mMine = _benchMetric(classIds, classLog, classAch, subjKey, metric);
+    const mProv = _benchMetric(provIds, provLog, provAch, subjKey, metric);
+    const provMasked = mProv.n < BENCH_MIN_SAMPLE;
+    const provDist = _benchDist(mProv.arr);
+    const headlinePct = provMasked ? null : _benchTopPct(mProv.arr, mMine.mean);
+    const headline = {
+      metric, unit: BENCH_METRIC_UNIT[metric],
+      mineValue: mMine.mean, mineN: mMine.n,
+      provMean: provMasked ? null : mProv.mean,
+      provMedian: provMasked ? null : provDist.median,
+      provP25: provMasked ? null : provDist.p25, provP75: provMasked ? null : provDist.p75,
+      provN: mProv.n, percentile: headlinePct, masked: provMasked,
+    };
+
+    // ── mine/province 풀 지표 번들(헤드라인 KPI 3종용) ──
+    const mineBundle = { label: ctx.cls.name, ..._benchBundle(classIds, classLog, classAch, subjKey) };
+    const provTimeDist = _benchDist(_benchScoreTimeUsage(provIds, provLog, subjKey, 'time').arr);
+    const provBundle = {
+      ..._benchBundle(provIds, provLog, provAch, subjKey),
+      // 선택 metric 분포(헤드라인 마커) + 학습시간 중앙값(방법론 avgLearnMinMedian)
+      mean: provMasked ? null : mProv.mean, median: provMasked ? null : provDist.median,
+      p25: provMasked ? null : provDist.p25, p75: provMasked ? null : provDist.p75,
+      avgLearnMinMedian: provTimeDist.median,
+      percentileOfMine: headlinePct, masked: provMasked,
+    };
+
+    // ── cells ──
+    let cells = [];
+    if (level === 'subject') {
+      const present = new Set();
+      [...provLog, ...classLog].forEach(r => { const k = canonicalSubjectKey(subjectLabel(r.sc)); if (k) present.add(k); });
+      const keys = subjKey ? [subjKey] : CANONICAL_SUBJECT_ORDER.filter(k => present.has(k));
+      cells = keys.map(k => {
+        const cm = _benchMetric(classIds, classLog, classAch, k, metric);
+        const pm = _benchMetric(provIds, provLog, provAch, k, metric);
+        const pd = _benchDist(pm.arr);
+        const masked = pm.n < BENCH_MIN_SAMPLE;
+        const delta = (cm.mean != null && pm.mean != null && !masked) ? _bR1(cm.mean - pm.mean) : null;
+        return {
+          key: k, subject: k, label: CANONICAL_SUBJECT_LABEL[k] || k,
+          isCore: pm.n >= 30,
+          mine: { value: cm.mean, n: cm.n },
+          province: masked
+            ? { mean: null, median: null, p25: null, p75: null, n: pm.n }
+            : { mean: pm.mean, median: pd.median, p25: pd.p25, p75: pd.p75, n: pm.n },
+          delta, percentile: masked ? null : _benchTopPct(pm.arr, cm.mean),
+          masked, lowConfidence: cm.n < BENCH_MIN_SAMPLE,
+          // FE 편의 별칭(UI 기획 §6)
+          mineScore: cm.mean, provMean: masked ? null : pm.mean, provMedian: masked ? null : pd.median,
+        };
+      });
+    } else {
+      // achievement(초등 코어): 도 distinct 학생 n>=50 코드만
+      const provByCode = new Map();
+      for (const r of provAch) {
+        let sk = canonicalSubjectKey(subjectLabel(r.sc));
+        if (!sk) { try { sk = canonicalSubjectKey(subjectLabel(mastery.resolveCode(r.code).subject_code)); } catch (_) {} }
+        if (subjKey && sk !== subjKey) continue;
+        const code = mastery.resolveCode(r.code).code;
+        let e = provByCode.get(code); if (!e) { e = { touch: new Set(), reached: 0, evaluated: 0, subj: sk }; provByCode.set(code, e); }
+        e.touch.add(r.uid);
+        const st = mastery.classifyStatus(r.att, mastery.reachRate(r.succ, r.att, r.avg));
+        if (st !== mastery.STATUS.INSUFFICIENT) { e.evaluated++; if (st === mastery.STATUS.REACHED) e.reached++; }
+      }
+      const clsByCode = new Map();
+      for (const r of classAch) {
+        const code = mastery.resolveCode(r.code).code;
+        let e = clsByCode.get(code); if (!e) { e = { reached: 0, evaluated: 0 }; clsByCode.set(code, e); }
+        const st = mastery.classifyStatus(r.att, mastery.reachRate(r.succ, r.att, r.avg));
+        if (st !== mastery.STATUS.INSUFFICIENT) { e.evaluated++; if (st === mastery.STATUS.REACHED) e.reached++; }
+      }
+      cells = [...provByCode.entries()]
+        .filter(([, e]) => e.touch.size >= BENCH_CORE_MIN)   // 코어 화이트리스트 게이트
+        .map(([code, e]) => {
+          const provReach = e.evaluated > 0 ? _bR1((e.reached / e.evaluated) * 100) : null;
+          const cl = clsByCode.get(code);
+          const mineReach = cl && cl.evaluated > 0 ? _bR1((cl.reached / cl.evaluated) * 100) : null;
+          const masked = e.evaluated < BENCH_MIN_SAMPLE;
+          const nm = achievementLabel(code);
+          const delta = (mineReach != null && provReach != null && !masked) ? _bR1(mineReach - provReach) : null;
+          return {
+            key: code, code, subject: e.subj || null,
+            label: nm.label || code, fullLabel: nm.fullLabel || null,
+            isCore: true,
+            mine: { value: mineReach, n: cl ? cl.evaluated : 0 },
+            province: masked
+              ? { mean: null, median: null, p25: null, p75: null, n: e.evaluated, touched: e.touch.size }
+              : { mean: provReach, median: provReach, p25: null, p75: null, n: e.evaluated, touched: e.touch.size },
+            delta, percentile: null,   // 코드별 도달률은 비율값 → 백분위 미산출(헤드라인만)
+            masked, lowConfidence: !cl || cl.evaluated < BENCH_MIN_SAMPLE,
+            // FE 편의 별칭(UI 기획 §6)
+            mineReach, provMeanReach: masked ? null : provReach, deltaPP: delta,
+          };
+        });
+      // 델타 내림차순(강점 먼저), 델타 null 은 도 도달률 내림차순으로 뒤에
+      cells.sort((a, b) => {
+        if (a.delta == null && b.delta == null) return (b.province.mean || 0) - (a.province.mean || 0);
+        if (a.delta == null) return 1; if (b.delta == null) return -1;
+        return b.delta - a.delta;
+      });
+    }
+
+    return res.json({
+      ...base,
+      mine: mineBundle, province: provBundle, headline,
+      cells, cellCount: cells.length,
+      classStudents: classIds.length, provinceStudents: provIds.length,
+    });
+  } catch (err) {
+    console.error('[LRS] /stats/benchmark error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+/** 기간(from~to) self_learn 도/반 전체 요약 — pooled 정답률·학생당 학습분·학생별 정답률 배열. */
+function _benchDailyOverall(uids, from, to, subjF, realOnly) {
+  if (!uids.length) return { acc: null, timeMin: null, n: 0, perStudentAcc: [] };
+  const ph = uids.map(() => '?').join(',');
+  const seedW = realOnly ? ' AND ll.is_seed = 0' : '';
+  const rows = db.prepare(`
+    SELECT ll.user_id uid, AVG(${normScoreExpr('ll')}) acc, SUM(${BENCH_DUR_SQL}) dur_sec, COUNT(*) cnt
+    FROM learning_logs ll
+    WHERE ll.activity_type = 'self_learn' AND ll.user_id IN (${ph})
+      AND DATE(ll.created_at) BETWEEN ? AND ? ${subjF.where} ${seedW}
+    GROUP BY ll.user_id
+  `).all(...uids, from, to, ...subjF.params);
+  if (!rows.length) return { acc: null, timeMin: null, n: 0, perStudentAcc: [] };
+  let accW = 0, cntT = 0, durT = 0; const perStudentAcc = [];
+  rows.forEach(r => { accW += (r.acc || 0) * (r.cnt || 0); cntT += r.cnt || 0; durT += r.dur_sec || 0; if (r.cnt > 0 && r.acc != null) perStudentAcc.push(r.acc); });
+  return { acc: cntT > 0 ? _bR1(accW / cntT) : null, timeMin: Math.round(durT / rows.length / 60), n: rows.length, perStudentAcc };
+}
+
+// ─────────────────────────────────────────────────────────
+// GET /api/lrs/stats/daily-benchmark — 오늘의 학습(self_learn) 도 비교(일자별)
+//   데이터: learning_logs activity_type='self_learn'(daily_complete 31행뿐이라 제외 — 도메인 스펙).
+//   일자축 = 활동일 DATE(created_at)([[project_daily_date_attribution]] 습관/활동=활동일).
+//   params: classId(필수·소유)→grade 해석, subject(canonical|all), from·to(YYYY-MM-DD, 기본 최근30일),
+//           granularity=day|week(기본 day), realOnly=0|1.
+//   응답: series[{date, class:{acc,timeMin,n}, province:{acc,timeMin,n,masked}}] + summary + 전역.
+// ─────────────────────────────────────────────────────────
+router.get('/stats/daily-benchmark', requireAuth, (req, res) => {
+  try {
+    const role = req.user && req.user.role;
+    if (role !== 'teacher' && role !== 'admin') {
+      return res.status(403).json({ success: false, message: '교사 또는 관리자 권한이 필요합니다.' });
+    }
+    const classId = parseInt(req.query.classId, 10);
+    if (!Number.isInteger(classId)) {
+      return res.status(400).json({ success: false, message: 'classId 파라미터가 필요합니다.' });
+    }
+    if (!canViewClass(req, classId)) {
+      return res.status(403).json({ success: false, message: '권한이 없습니다.' });
+    }
+    const subjectParam = String(req.query.subject || 'all').trim();
+    if (!isValidSubjectParam(subjectParam)) {
+      return res.status(400).json({ success: false, message: '잘못된 subject 파라미터입니다.' });
+    }
+    const realOnly = String(req.query.realOnly || '') === '1';
+    const granularity = req.query.granularity === 'week' ? 'week' : 'day';
+
+    const ctx = _benchClassCtx(classId);
+    if (!ctx) return res.status(404).json({ success: false, message: '클래스를 찾을 수 없습니다.' });
+
+    // 날짜 범위: from/to(기본 최근 30일). from>to → 400.
+    const today = new Date();
+    const toIso = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    let from = req.query.from ? String(req.query.from).slice(0, 10) : null;
+    let to = req.query.to ? String(req.query.to).slice(0, 10) : null;
+    if (!to) to = toIso(today);
+    if (!from) { const d = new Date(today); d.setDate(d.getDate() - 29); from = toIso(d); }
+    if (from > to) return res.status(400).json({ success: false, message: '시작일이 종료일보다 늦습니다.' });
+
+    const base = {
+      success: true, scope: 'class', classId, subject: subjectParam, realOnly,
+      granularity, from, to, minSample: BENCH_MIN_SAMPLE,
+      grade: ctx.grade, gradeLabel: ctx.grade != null ? `${ctx.grade}학년` : null, gradeSource: ctx.gradeSource,
+      schoolLevel: ctx.schoolLevel, schoolLevelLabel: BENCH_SL_LABEL[ctx.schoolLevel] || null,
+      className: ctx.cls.name, seedNotice: BENCH_SEED_NOTICE,
+      coverageNote: '초등 최근 30일 조밀 · 중학교는 기간 합산 권고 · 고교는 표본 희박',
+    };
+
+    if (ctx.grade == null || !ctx.schoolLevel) {
+      return res.json({
+        ...base, series: [], summary: null, empty: true, emptyReason: 'no_grade',
+        message: '이 클래스의 학년 정보를 확인할 수 없어 도 비교를 만들 수 없습니다.'
+      });
+    }
+
+    const classIds = ctx.studentIds;
+    const provIds = _benchProvinceIds(ctx.schoolLevel, ctx.grade, realOnly);
+    const subjF = subjectCodeSetFilter(subjectParam, 'll');
+    // 일자축 = 활동일. week 는 그 주 월요일로 버킷.
+    const dateExpr = granularity === 'week'
+      ? "DATE(ll.created_at, 'weekday 0', '-6 days')"
+      : 'DATE(ll.created_at)';
+
+    function dailyAgg(uids) {
+      if (!uids.length) return new Map();
+      const ph = uids.map(() => '?').join(',');
+      const seedW = realOnly ? ' AND ll.is_seed = 0' : '';
+      const rows = db.prepare(`
+        SELECT ${dateExpr} d, AVG(${normScoreExpr('ll')}) acc, SUM(${BENCH_DUR_SQL}) dur_sec,
+               COUNT(DISTINCT ll.user_id) n
+        FROM learning_logs ll
+        WHERE ll.activity_type = 'self_learn' AND ll.user_id IN (${ph})
+          AND DATE(ll.created_at) BETWEEN ? AND ? ${subjF.where} ${seedW}
+        GROUP BY d
+      `).all(...uids, from, to, ...subjF.params);
+      return new Map(rows.map(r => [r.d, r]));
+    }
+    const classMap = dailyAgg(classIds);
+    const provMap = dailyAgg(provIds);
+
+    // 데이터 있는 일자만(미래·빈 일자 제외), 오름차순
+    const allDates = [...new Set([...classMap.keys(), ...provMap.keys()])].sort();
+    const series = allDates.map(d => {
+      const c = classMap.get(d); const p = provMap.get(d);
+      const pMasked = !p || p.n < BENCH_MIN_SAMPLE;
+      return {
+        date: d,
+        class: c
+          ? { acc: _bR1(c.acc), timeMin: c.n > 0 ? Math.round(c.dur_sec / c.n / 60) : 0, n: c.n }
+          : { acc: null, timeMin: null, n: 0 },
+        province: pMasked
+          ? { acc: null, timeMin: null, n: p ? p.n : 0, masked: true }
+          : { acc: _bR1(p.acc), timeMin: p.n > 0 ? Math.round(p.dur_sec / p.n / 60) : 0, n: p.n, masked: false },
+      };
+    });
+
+    // summary(기간 전체) — 정답률은 pooled(백분위 근거), 학습시간은 일자 series 의 "학생당 일평균"의
+    //   평균으로 산출(요약↔series 스케일 정합: 기간 합산이 아니라 일평균이라 UI "N분/일"과 직접 비교 가능).
+    const clsOverall = _benchDailyOverall(classIds, from, to, subjF, realOnly);
+    const provOverall = _benchDailyOverall(provIds, from, to, subjF, realOnly);
+    const provMaskedSum = provOverall.n < BENCH_MIN_SAMPLE;
+    const _avgDaily = (arr) => arr.length ? Math.round(arr.reduce((t, v) => t + v, 0) / arr.length) : null;
+    const clsDailyTimes = series.map(s => s.class).filter(c => c.n > 0 && c.timeMin != null).map(c => c.timeMin);
+    const provDailyTimes = series.map(s => s.province).filter(p => !p.masked && p.timeMin != null).map(p => p.timeMin);
+    const summary = {
+      classAcc: clsOverall.acc, provinceAcc: provMaskedSum ? null : provOverall.acc,
+      classTime: _avgDaily(clsDailyTimes), provinceTime: provMaskedSum ? null : _avgDaily(provDailyTimes),
+      accGapPP: (clsOverall.acc != null && provOverall.acc != null && !provMaskedSum) ? _bR1(clsOverall.acc - provOverall.acc) : null,
+      percentile: provMaskedSum ? null : _benchTopPct(provOverall.perStudentAcc, clsOverall.acc),
+      classStudents: clsOverall.n, provinceStudents: provOverall.n, provinceMasked: provMaskedSum,
+    };
+
+    return res.json({
+      ...base, series, summary,
+      classStudents: classIds.length, provinceStudents: provIds.length,
+    });
+  } catch (err) {
+    console.error('[LRS] /stats/daily-benchmark error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
 module.exports = router;
