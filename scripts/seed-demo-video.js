@@ -48,7 +48,10 @@ const MODE = has('--clean') ? 'clean' : has('--stats') ? 'stats' : has('--plan')
 const NO_BACKUP = has('--no-backup');
 
 // ─────────────────────────── 상수 ───────────────────────────
-const TEACHER1 = 2;                          // 담임 교사 계정(고정)
+// 담임 교사 계정 — 로컬↔GCP uid 가 다를 수 있어 하드코딩 금지, username 으로 해석.
+const _t1 = db.prepare("SELECT id FROM users WHERE username='teacher1' AND role='teacher' LIMIT 1").get();
+if (!_t1) { console.error('[demo-video] ✗ teacher1 교사 계정 없음 — 중단'); process.exit(1); }
+const TEACHER1 = _t1.id;                      // 담임 교사 계정(username='teacher1' 해석)
 const DEMO_TAG = 'demo_video_v1';            // 문서용 태그(ucp 엔 컬럼 없음 → is_seed=1 로 식별)
 const SEED = 20260714;
 // 학생당 배정 영상 수. 8명 반 × 8영상 = 64관측치에서 주요 밴드 distinct 학생 ≥5 확보 +
