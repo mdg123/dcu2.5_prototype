@@ -2635,10 +2635,14 @@ router.get('/shallow/class/:id', requireAuth, (req, res) => {
 // ═══════════════════════════════════════════════════════════════════════════════
 const BEHAV_MASK_N = 5;                                  // 그룹 n<5 → 값 마스킹
 const BEHAV_PERIOD_DAYS = { '30d': 30, '90d': 90, 'term': 180 };
-const BEHAV_SIGNALS = ['speed', 'retry', 'participation', 'rewatch'];
+// 'video'(우산) = 완주율·재시청·건너뛰기 3지표(sub). 'rewatch' 는 sub=replay 하위호환 alias(유지).
+const BEHAV_SIGNALS = ['speed', 'retry', 'participation', 'rewatch', 'video'];
+const VIDEO_SUBS = ['completion', 'replay', 'seek'];    // 완주율 · 재시청 · 건너뛰기
 const BEHAV_SEED_TEXT = '본 분석은 시연용 시드 데이터 기반이며, 실 운영 데이터가 쌓이면 자동으로 반영됩니다.';
 const BEHAV_ASSOC_CAVEAT = "이 결과는 행동과 성취가 '함께 나타난' 연관성이며, 행동이 성취의 '원인'이라고 단정할 수 없습니다.";
 const BEHAV_SMALL_CAVEAT = '표본이 작을수록 학생 한 명이 결과를 크게 바꿉니다. n이 작은 그룹의 값은 참고로만 봐 주세요.';
+// [Phase 4a] 데모 계측 정직 문구 — 영상 이벤트는 시연용 시드이며 실 플레이어 계측은 향후.
+const BEHAV_DEMO_CAVEAT = '영상 시청 이벤트(완주율·재시청·건너뛰기)는 시연용 데모 계측이며, 실제 영상 플레이어의 정밀 계측은 향후 제공됩니다. 현재 수치는 실 시청 로그가 아닌 시드 기반입니다.';
 
 // realOnly 반영 반 학생 id (users.is_seed=0 만 — ON 시 거의 빈 결과가 정상).
 function _behaviorMemberIds(classId, realOnly) {
@@ -2739,13 +2743,26 @@ function _behaviorCaveats(signal) {
     retry: '성취가 낮아 오답이 많은 학생이 재풀이도 많이 하게 됐을 수 있습니다(역인과 가능).',
     participation: '학습 습관이 좋은 학생이 참여도 성취도 함께 높은 것일 수 있어, 참여가 성취의 원인이라 단정할 수 없습니다(역인과 가능).',
     rewatch: '어려운 콘텐츠일수록 반복해 접근하므로, 낮은 성취가 재시청을 유발했을 가능성이 큽니다(역인과). 재시청은 도움 신호로 읽어 주세요.',
+    video: '어려운 영상일수록 되돌려 보고 구간을 오가므로, 낮은 성취가 재시청·건너뛰기를 유발했을 수 있습니다(역인과, 원인·결과가 반대일 수 있음).',
   };
   const confound = {
     speed: '빠르게 맞힌 학생은 이미 잘 아는 학생일 수도, 찍었을 수도 있어 속도만으로 성취를 설명할 수 없습니다(교란변수).',
     retry: '재풀이가 많은 학생은 전반적으로 학습량·사전 학력도 높은 경향이 있어, 차이를 재풀이 하나로 볼 수 없습니다(교란변수).',
     participation: '참여에는 가정·환경 등 여러 사정이 얽혀 있어, 미참여를 성취 부족으로 해석하면 안 됩니다(교란변수).',
     rewatch: '재시청 로그는 실제 시청 완료가 아닌 접근 반복이라, 시청의 효과로 해석할 수 없습니다(교란변수).',
+    video: '영상 학습 습관이 좋은 학생은 성취도 함께 높은 경향이 있어, 완주·재시청 하나로 차이를 설명할 수 없습니다(교란변수).',
   };
+  // [Phase 4a] video 는 caveat 5종 + 데모 계측(필수). 시드 문구도 함께 유지(하위호환).
+  if (signal === 'video') {
+    return [
+      BEHAV_ASSOC_CAVEAT,
+      BEHAV_SMALL_CAVEAT,
+      reverse.video,
+      confound.video,
+      BEHAV_DEMO_CAVEAT,
+      BEHAV_SEED_TEXT,
+    ];
+  }
   return [
     BEHAV_ASSOC_CAVEAT,
     BEHAV_SMALL_CAVEAT,
@@ -2756,7 +2773,11 @@ function _behaviorCaveats(signal) {
 }
 
 // ── 신호별 빌더 ────────────────────────────────────────────────────────────────
-function buildBehaviorSignal(classId, { signal, subject, period, realOnly }) {
+function buildBehaviorSignal(classId, { signal, sub, subject, period, realOnly }) {
+  // [Phase 4a] 영상 학습 행동(video 우산 · 완주/재시청/건너뛰기) + rewatch 하위호환 alias 위임.
+  if (signal === 'video' || signal === 'rewatch') {
+    return buildVideoSignal(classId, { signal, sub, subject, period, realOnly });
+  }
   const days = BEHAV_PERIOD_DAYS[period] || 90;
   const subjectList = _behaviorSubjectList(subject);
   const memberIds = _behaviorMemberIds(classId, realOnly);
@@ -2914,60 +2935,217 @@ function buildBehaviorSignal(classId, { signal, subject, period, realOnly }) {
     };
   }
 
-  // ── ④ 재시청 → content_view 반복(접근 이벤트). 오독 위험 최고 → 기본 정직 비노출.
-  if (signal === 'rewatch') {
-    const bandUsers = { none: [], mid: [], high: [] }; // 없음(<2) / 2~5회 / 6회+
-    let rwMap = new Map();
-    if (memberIds.length) {
-      const ph = memberIds.map(() => '?').join(',');
-      const rows = db.prepare(`
-        SELECT user_id AS uid, MAX(rep) AS maxrep FROM (
-          SELECT user_id, object_id, COUNT(*) AS rep FROM learning_logs
-          WHERE activity_type = 'content_view' AND object_id IS NOT NULL
-            AND user_id IN (${ph}) AND created_at >= date('now', ?)
-          GROUP BY user_id, object_id
-        ) GROUP BY user_id
-      `).all(...memberIds, `-${days} days`);
-      rwMap = new Map(rows.map(r => [r.uid, Number(r.maxrep) || 0]));
-    }
-    // 성취값 = 도달률(reachRate) 재사용. base 모집단 = 성취 산출 가능 학생.
-    for (const [uid, a] of achMap) {
-      if (a.score == null) continue;
-      const reach = mastery.reachRate(a.success, a.attempts, a.score);
-      if (reach == null) continue;
-      const maxrep = rwMap.get(uid) || 0;
-      if (maxrep >= 6) bandUsers.high.push(reach);
-      else if (maxrep >= 2) bandUsers.mid.push(reach);
-      else bandUsers.none.push(reach);
-    }
-    const groups = [
-      _behaviorGroup('none', '재시청 없음', bandUsers.none, 'info', 'reachRate'),
-      _behaviorGroup('mid', '재시청 2~5회', bandUsers.mid, 'good', 'reachRate'),
-      _behaviorGroup('high', '재시청 6회+', bandUsers.high, 'warn', 'reachRate'),
-    ];
-    // 정직 노출 게이트: 주요 밴드(없음·2~5회) 각각 n≥10 이어야 노출. 반 스코프는 사실상 항상 비노출.
-    const available = groups[0].n >= MIN_SAMPLE_N && groups[1].n >= MIN_SAMPLE_N;
-    return {
-      ...base, metricLabel: '평균 도달률',
-      groups, refValue: null, comparison: available ? _behaviorComparison(groups) : null,
-      available,
-      reason: available ? null : 'insufficient_or_misleading',
-      empty: !available,
-      emptyReason: available ? null : '우리 반의 영상 재시청 기록이 아직 적고, 재시청은 실제 시청과 다를 수 있어 관계를 보여드리기 어려워요. 영상 학습이 쌓이면 자동으로 채워져요.',
-      masked: true,
-      lowConfidence: true,
-      insights: [{ level: 'info', icon: '🔵', text: '재시청은 콘텐츠 접근(조회) 반복이라 실제 시청 완료를 알 수 없고, 반 단위 표본도 적어 경향을 제시하지 않습니다.' }],
-      dataNote: '재시청은 콘텐츠 접근(조회) 반복 횟수로, 실제 시청 완료·시청 구간은 계측되지 않습니다. 영상 건너뛰기(seek) 분석은 향후 제공 예정입니다.',
-      disclaimer: '재시청 로그는 접속 반복이라 실제로 끝까지 봤는지는 알 수 없어요.',
-    };
-  }
-
   return { ...base, groups: [], available: false, empty: true, insights: [{ level: 'info', icon: '🔵', text: '알 수 없는 신호입니다.' }] };
 }
 
-// GET /api/lrs/stats/behavior?scope=class&classId=&signal=speed|retry|participation|rewatch
-//   권한: canViewClass(소유 교사/admin) — 비소유 403. classId 누락 400 · bad signal 400.
+// ═══════════════════════════════════════════════════════════════════════════════
+// [Phase 4a] 영상 학습 행동(video) — 완주율(completion)·재시청(replay)·건너뛰기(seek)
+//   기획: 보고서/LRS_Phase4a_영상행동_방법론_API_v1.md(정본 산식·시드·API) · _UI_기획_v1.md(FE 계약)
+//   저장: user_content_progress(watch_ratio·view_count·seek_count·is_seed) — learning_logs 무변경.
+//   집계 단위 = (학생×영상) 관측치. 밴드 값 = 밴드에 ≥1 관측치 가진 distinct 학생의 성취(도달률) 1회씩.
+//   정직: instrumentation:'demo'·demoInstrumented:true 상시. 억지 상관 없음(주변분포 독립 시드).
+// ═══════════════════════════════════════════════════════════════════════════════
+const VIDEO_SUB_META = {
+  completion: { label: '완주율', metricLabel: '평균 도달률' },
+  replay:     { label: '재시청', metricLabel: '평균 도달률' },
+  seek:       { label: '건너뛰기', metricLabel: '평균 도달률' },
+};
+const VIDEO_SUB_DATANOTE = {
+  completion: '완주율은 영상 시청 비율(watch_ratio) 기준입니다. 성취는 해당 교과 도달률로, 영상별 성취기준 정합은 데이터가 쌓이면 정밀화됩니다.',
+  replay: '재시청은 영상 재생 횟수(view_count) 기준입니다. 콘텐츠 접근(조회) 반복은 실제 시청과 달라 보조 참고로만 봅니다.',
+  seek: '건너뛰기는 영상 구간 이동(seek) 횟수 기준이며, 반 중앙값으로 적음/많음을 나눕니다. 실제 플레이어 구간 계측은 향후 제공됩니다.',
+};
+// 오독 차단(§5-2) — 가치판단·처방 금지 disclaimer.
+const VIDEO_SUB_DISCLAIMER = {
+  completion: '완주가 곧 이해는 아니며(틀어놓기 가능), 완주율은 참여 신호의 하나로만 봐 주세요.',
+  replay: '재시청이 많다고 나쁜 것이 아닙니다. 어려운 부분을 다시 확인한 도움 신호일 수 있어요(재시청 많음을 문제로 보지 마세요).',
+  seek: '건너뛰기가 많다고 성취가 낮은 것이 아닙니다. 이미 아는 내용을 지나쳤을 수 있어요(건너뛰지 마라는 뜻이 아니에요).',
+};
+
+function _videoMedian(nums) {
+  if (!nums.length) return 0;
+  const s = [...nums].sort((a, b) => a - b);
+  const m = Math.floor(s.length / 2);
+  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+}
+
+// (학생×영상) 관측치 조회 — video 콘텐츠만, realOnly 시 데모 시드(is_seed=1) 제외. 컬럼 존재 가드.
+function _videoObservations(memberIds, realOnly) {
+  if (!memberIds.length) return [];
+  const cols = new Set(db.prepare('PRAGMA table_info(user_content_progress)').all().map(c => c.name));
+  const seekSel = cols.has('seek_count') ? 'ucp.seek_count' : '0';
+  const seedSel = cols.has('is_seed') ? 'COALESCE(ucp.is_seed,0)' : '0';
+  const realFilter = (realOnly && cols.has('is_seed')) ? 'AND COALESCE(ucp.is_seed,0) = 0' : '';
+  const ph = memberIds.map(() => '?').join(',');
+  let rows = [];
+  try {
+    rows = db.prepare(`
+      SELECT ucp.user_id AS uid, ucp.watch_ratio AS wr, ucp.view_count AS vc,
+             ${seekSel} AS seek, ${seedSel} AS isSeed
+      FROM user_content_progress ucp
+      JOIN contents c ON c.id = ucp.content_id
+      WHERE ucp.user_id IN (${ph}) AND c.content_type = 'video' ${realFilter}
+    `).all(...memberIds);
+  } catch (_) { rows = []; }
+  return rows.map(r => ({
+    uid: r.uid,
+    wr: r.wr == null ? 0 : Number(r.wr),
+    vc: Number(r.vc) || 0,
+    seek: Number(r.seek) || 0,
+    isSeed: Number(r.isSeed) || 0,
+  }));
+}
+
+// sub 1개 산출 — 밴드 → distinct 학생 도달률 → _behaviorGroup 재사용(마스킹·저신뢰 SSOT).
+function _computeVideoSub(sub, observations, reachByUid, refValue) {
+  const meta = VIDEO_SUB_META[sub];
+  let bands, median = null;
+  if (sub === 'completion') {
+    bands = [
+      ['low', '절반 미만 시청', 'info', o => o.wr < 0.5],
+      ['mid', '절반~대부분 시청', 'good', o => o.wr >= 0.5 && o.wr < 0.9],
+      ['full', '완주', 'good', o => o.wr >= 0.9],
+    ];
+  } else if (sub === 'replay') {
+    bands = [
+      ['once', '1회 시청', 'info', o => o.vc <= 1],
+      ['few', '2~3회 반복', 'good', o => o.vc >= 2 && o.vc <= 3],
+      ['many', '4회 이상 반복', 'warn', o => o.vc >= 4],
+    ];
+  } else { // seek — 반 중앙값 분할(2밴드, 양쪽 info=낙인 방지)
+    median = _videoMedian(observations.map(o => o.seek));
+    bands = [
+      ['low', '건너뛰기 적음', 'info', o => o.seek <= median],
+      ['high', '건너뛰기 많음', 'info', o => o.seek > median],
+    ];
+  }
+  // 밴드별 distinct 학생 집합(관측치 단위 배정, 배타)
+  const bandSets = new Map(bands.map(b => [b[0], new Set()]));
+  for (const o of observations) {
+    for (const [key, , , test] of bands) { if (test(o)) { bandSets.get(key).add(o.uid); break; } }
+  }
+  const groups = bands.map(([key, label, tone]) => {
+    const values = [...bandSets.get(key)].map(u => reachByUid.get(u)).filter(v => v != null);
+    return _behaviorGroup(key, label, values, tone, 'reachRate');
+  });
+  const unmasked = groups.filter(g => !g.masked);
+  const available = unmasked.length >= 2;                 // 비교 가능(주요 2밴드 이상 unmask)
+  const comparison = available ? _behaviorComparison(groups) : null;
+  const insights = _videoSubInsights(comparison, available);
+  const out = {
+    key: sub, sub, label: meta.label, metricLabel: meta.metricLabel, unit: '%',
+    groups, refValue, comparison,
+    available, empty: !available,
+    emptyReason: available ? null : '영상 학습 기록이 쌓이면 자동으로 채워져요.',
+    masked: groups.every(g => g.masked),
+    insights,
+    dataNote: VIDEO_SUB_DATANOTE[sub],
+    disclaimer: VIDEO_SUB_DISCLAIMER[sub],
+    observations: observations.length,
+  };
+  if (sub === 'seek') out.medianThreshold = median;
+  return out;
+}
+
+// 관찰형 insight(최대 1) — 처방·인과·낙인 금지, '때문에/영향' 회피(INV-BH7).
+function _videoSubInsights(comparison, available) {
+  if (!available || !comparison) {
+    return [{ level: 'info', icon: '🔵', text: '영상 학습 기록이 아직 적어 그룹 간 차이를 안정적으로 보여드리기 어려워요. 기록이 쌓이면 자동으로 반영돼요.' }];
+  }
+  if (comparison.gapPP <= 3) {
+    return [{ level: 'info', icon: '🔵', text: '그룹 간 평균 도달률에 뚜렷한 차이가 관측되지 않습니다(연관 약함). 영상 행동만으로 성취를 예측하기는 어려워요.' }];
+  }
+  return [{ level: 'info', icon: '🔵', text: `'${comparison.topLabel}' 그룹에서 평균 도달률이 다소 높게 관측됩니다(연관 경향). 다만 원인이라 단정할 수 없어요.` }];
+}
+
+// video 우산 빌더 — signal=video(+sub 또는 metrics[] 우산) · signal=rewatch(→sub=replay 하위호환).
+function buildVideoSignal(classId, { signal, sub, subject, period, realOnly }) {
+  const days = BEHAV_PERIOD_DAYS[period] || 90;
+  const subjectList = _behaviorSubjectList(subject);
+  const memberIds = _behaviorMemberIds(classId, realOnly);
+  const studentCount = memberIds.length;
+  let className = `클래스 ${classId}`;
+  try { const c = db.prepare('SELECT name FROM classes WHERE id = ?').get(classId); if (c && c.name) className = c.name; } catch (_) {}
+
+  // 성취(도달률) 맵 — 학생별 reachRate 1회(다시청 편중 방지).
+  const achMap = _behaviorAchMap(memberIds, days, subjectList);
+  const reachByUid = new Map();
+  for (const [uid, a] of achMap) {
+    if (a.score == null) continue;
+    const r = mastery.reachRate(a.success, a.attempts, a.score);
+    if (r != null) reachByUid.set(uid, Math.round(r * 10) / 10);
+  }
+  const reachVals = [...reachByUid.values()];
+  const refValue = reachVals.length ? Math.round((reachVals.reduce((s, v) => s + v, 0) / reachVals.length) * 10) / 10 : null;
+
+  const observations = _videoObservations(memberIds, realOnly);
+  const seedObservations = observations.filter(o => o.isSeed === 1).length;
+
+  const base = {
+    signal,                                              // 요청 신호 echo(video | rewatch)
+    subject: subject || 'all', period, realOnly: !!realOnly,
+    className, classStudents: studentCount, studentCount,
+    minSample: BEHAV_MASK_N, maskThreshold: BEHAV_MASK_N, lowConfThreshold: MIN_SAMPLE_N,
+    instrumentation: 'demo', demoInstrumented: true,     // ★ 정직 플래그(상시)
+    seedNotice: true, seedNoticeText: BEHAV_SEED_TEXT,
+    lowConfidence: studentCount < MIN_SAMPLE_N,
+    caveats: _behaviorCaveats('video'),
+    unit: '%',
+    observations: observations.length, seedObservations,
+    dataAvailable: observations.length > 0,
+  };
+
+  // 하위호환 alias: signal=rewatch → sub=replay 단일 응답(기존 소비 경로 유지).
+  if (signal === 'rewatch') sub = 'replay';
+
+  // 우산 모드: signal=video 이고 sub 미지정 → metrics[] 3지표 한 페이로드(UI 세로 3섹션).
+  if (signal === 'video' && !sub) {
+    const metrics = VIDEO_SUBS.map(s => _computeVideoSub(s, observations, reachByUid, refValue));
+    const anyAvailable = metrics.some(m => m.available);
+    const firstAvail = metrics.find(m => m.available);
+    return {
+      ...base,
+      metricLabel: '평균 도달률',
+      metrics,
+      refValue,
+      available: anyAvailable,
+      empty: observations.length === 0,
+      emptyReason: observations.length === 0 ? '우리 반의 영상 학습 기록이 아직 적어요. 영상 학습이 쌓이면 자동으로 채워져요.' : null,
+      insights: firstAvail ? firstAvail.insights : [{ level: 'info', icon: '🔵', text: '영상 학습 기록이 쌓이면 완주·재시청·건너뛰기와 성취의 관계를 보여드려요.' }],
+      dataNote: '완주율·재시청·건너뛰기는 영상 시청 비율·재생 횟수·구간 이동 기준입니다. 현재는 시연용 데모 계측이며, 실제 플레이어 계측은 향후 연동됩니다.',
+      disclaimer: '영상 행동은 성취의 원인이 아니라 함께 나타나는 신호입니다. 완주·재시청·건너뛰기를 가치판단(좋다/나쁘다)으로 읽지 말아 주세요.',
+    };
+  }
+
+  // 단일 sub 모드(signal=video&sub=… · rewatch alias)
+  const subKey = VIDEO_SUBS.includes(sub) ? sub : 'completion';
+  const subObj = _computeVideoSub(subKey, observations, reachByUid, refValue);
+  const result = {
+    ...base,
+    sub: subKey,
+    metricLabel: subObj.metricLabel,
+    groups: subObj.groups,
+    refValue,
+    comparison: subObj.comparison,
+    available: subObj.available,
+    empty: observations.length === 0 ? true : subObj.empty,
+    emptyReason: subObj.available ? null : (observations.length === 0
+      ? '우리 반의 영상 학습 기록이 아직 적어요. 영상 학습이 쌓이면 자동으로 채워져요.'
+      : subObj.emptyReason),
+    masked: subObj.masked,
+    insights: subObj.insights,
+    dataNote: subObj.dataNote,
+    disclaimer: subObj.disclaimer,
+  };
+  if (subKey === 'seek') result.medianThreshold = subObj.medianThreshold;
+  return result;
+}
+
+// GET /api/lrs/stats/behavior?scope=class&classId=&signal=speed|retry|participation|rewatch|video
+//   권한: canViewClass(소유 교사/admin) — 비소유 403. classId 누락 400 · bad signal 400 · bad sub 400.
 //   subject(선택)·period(30d|90d|term, 기본 90d)·realOnly(0|1).
+//   [Phase 4a] signal=video&sub=completion|replay|seek(단일) 또는 sub 생략 시 metrics[] 3지표 우산.
+//     signal=rewatch 는 sub=replay 하위호환 alias(video 계약으로 승격).
 router.get('/stats/behavior', requireAuth, (req, res) => {
   try {
     const classId = parseInt(req.query.classId, 10);
@@ -2976,7 +3154,12 @@ router.get('/stats/behavior', requireAuth, (req, res) => {
     }
     const signal = String(req.query.signal || '').toLowerCase();
     if (!BEHAV_SIGNALS.includes(signal)) {
-      return res.status(400).json({ success: false, message: 'signal은 speed|retry|participation|rewatch 중 하나여야 합니다.' });
+      return res.status(400).json({ success: false, message: 'signal은 speed|retry|participation|rewatch|video 중 하나여야 합니다.' });
+    }
+    // [Phase 4a] signal=video 의 sub(completion|replay|seek) — 지정 시 검증(잘못되면 400), 미지정 시 metrics[] 우산.
+    let sub = req.query.sub ? String(req.query.sub).toLowerCase() : null;
+    if (signal === 'video' && sub && !VIDEO_SUBS.includes(sub)) {
+      return res.status(400).json({ success: false, message: 'sub은 completion|replay|seek 중 하나여야 합니다.' });
     }
     if (!canViewClass(req, classId)) {
       return res.status(403).json({ success: false, message: '권한이 없습니다.' });
@@ -2985,7 +3168,7 @@ router.get('/stats/behavior', requireAuth, (req, res) => {
     const period = ['30d', '90d', 'term'].includes(String(req.query.period)) ? String(req.query.period) : '90d';
     const realOnly = req.query.realOnly === '1' || req.query.realOnly === 'true';
 
-    const result = buildBehaviorSignal(classId, { signal, subject, period, realOnly });
+    const result = buildBehaviorSignal(classId, { signal, sub, subject, period, realOnly });
     res.json({ success: true, scope: 'class', classId, ...result });
   } catch (err) {
     console.error('[LRS] /stats/behavior error:', err);

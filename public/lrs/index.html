@@ -9617,14 +9617,15 @@ function _bmBindDaily(root){
 /* ======================================================================
  * [Phase 3] VIEWS['t-behavior'] — [교사] 학습 행동 심화 분석 · activities
  *   기획: 보고서/LRS_Phase3_행동성취_UI_기획_v1.md((a) 흡수·확장) + _방법론_API_v1.md(정직성)
- *   BE: GET /api/lrs/stats/behavior?scope=class&classId=&signal=speed|retry|participation|rewatch
+ *   BE: GET /api/lrs/stats/behavior?scope=class&classId=&signal=speed|retry|participation|video
  *   4신호 인페이지 세그먼트 탭. 신호①(풀이속도)은 기존 shallow 카드를 그대로 흡수(renderShallowLearning),
- *     상단에 그룹비교 막대(renderGroupCompare)만 얹음. 신호④(재시청)는 정직 비노출.
+ *     상단에 그룹비교 막대(renderGroupCompare)만 얹음. [Phase 4a] 신호④(영상 학습 행동, video 우산)는
+ *     완주율·재시청·건너뛰기 세로 3섹션 스택(renderVideoSignal) + 데모 계측 정직 배너로 활성화.
  *   상관≠인과 3중 안전장치: 상단 고정 캐비어트 배너 + 관찰형 insights + 하단 caveats 배너.
  *   재사용: _bmFetchOwnedClasses·_bmNoClassPanel·_bmSeedBar·_bmBindCommon·renderInsights·
  *     renderShallowLearning·_reportInsightHtml·tplEmpty/Error. 신규는 renderGroupCompare 1개.
  * ==================================================================== */
-const BEHAV_SIGNALS = ['speed', 'retry', 'participation', 'rewatch'];
+const BEHAV_SIGNALS = ['speed', 'retry', 'participation', 'video'];
 const BEHAV_PERIOD_DAYS_FE = { '30d': 30, '90d': 90, 'term': 180 };
 const BEHAV_SIG_META = {
   speed:         { num:'①', label:'풀이 속도',    icon:'⏱️',
@@ -9636,9 +9637,19 @@ const BEHAV_SIG_META = {
   participation: { num:'③', label:'기간 내 참여', icon:'📅',
     title:'기한 내 참여와 성취의 관계',
     help:'실제 제출·이수 기록(과제 제출·평가 응시·수업 이수)의 유무로 참여/미참여를 나눠 그룹별 평균 성취를 견줘요. 기한준수(기한내/지연)는 로그 조인 불가로 계측하지 않아요.' },
-  rewatch:       { num:'④', label:'영상 재시청',  icon:'🔂',
-    title:'영상 재시청과 성취의 관계',
-    help:'영상(콘텐츠) 반복 접근 횟수로 그룹을 나눠 도달률을 견주려 하지만, 접근은 실제 시청과 다르고 반 단위 표본이 적어 기본적으로 표시하지 않아요.' },
+  video:         { num:'④', label:'영상 학습 행동', icon:'🎬',
+    title:'영상 학습 행동과 성취의 관계',
+    help:'영상을 끝까지 봤는지(완주)·다시 봤는지(재시청)·건너뛰었는지(건너뛰기) 3가지를 성취와 견줘요. 현재는 시연용 데모 계측이에요.' },
+};
+/* [Phase 4a] video 우산 3지표(완주율·재시청·건너뛰기) 세로 섹션 메타 — 라벨·(?)·마이크로 caveat(§7 고정 문안, 상관≠인과).
+   micro 는 <b> 강조 포함 고정 HTML(사용자 데이터 없음 → 그대로 삽입). key 는 BE metrics[].key(completion|replay|seek). */
+const VIDEO_METRIC_META = {
+  completion: { num:'①', label:'완주율',   help:'영상을 얼마나 끝까지 봤는지(시청 비율)로 그룹을 나눠 그룹별 평균 도달률을 견줘요.',
+    micro:'완주가 성취의 <b>원인</b>은 아니에요 — 이미 잘 아는 학생이 끝까지 볼 수도, 어려워서 오래 붙든 것일 수도 있어요.' },
+  replay:     { num:'②', label:'재시청',   help:'같은 영상을 다시 본 횟수로 그룹을 나눠 그룹별 평균 도달률을 견줘요.',
+    micro:'재시청은 <b>‘도움 신호’</b>일 수 있어요 — 어려워서 다시 챙겨 본 성실한 학생일 수 있어요(역인과). 재시청 많음을 문제로 보지 마세요.' },
+  seek:       { num:'③', label:'건너뛰기', help:'영상 구간을 건너뛴 횟수를 반 중앙값으로 적음/많음으로 나눠 그룹별 평균 도달률을 견줘요.',
+    micro:'건너뛰기가 많다고 <b>‘못한다’는 뜻이 아니에요</b> — 이미 아는 부분을 넘겼을 수도 있어요. 낮은 성취의 ‘원인’으로 단정하지 마세요.' },
 };
 // 그룹 톤 → 색(§6-1 토큰 계열 일치: 막대 채움/글자). BE groups[].tone(good/warn/info/danger).
 const BEHAV_TONE = {
@@ -9690,7 +9701,9 @@ function renderGroupCompare(host, cfg){
   const refLegend = refValue != null
     ? `<span class="behav-gc-reflegend"><i aria-hidden="true"></i> 반 평균 ${escapeHtml(String(refValue))}${unit}</span>` : '';
   const cmp = cfg.comparison;
-  const cmpLine = (cmp && cmp.gapPP != null)
+  // 두 그룹이 동일(top===bot·gapPP 0)하면 '‘A’과(와) ‘A’ 격차 0%p' 무의미 라인이 되므로 미표시.
+  // comparison 객체는 유지 → insight 는 gapPP≤3 '차이 없음' 로 정상 라우팅.
+  const cmpLine = (cmp && cmp.gapPP != null && cmp.topLabel !== cmp.bottomLabel)
     ? `<div class="behav-gc-cmp"><i class="fas fa-left-right" aria-hidden="true"></i> ‘${escapeHtml(cmp.topLabel)}’과(와) ‘${escapeHtml(cmp.bottomLabel)}’ 그룹의 관측 격차 <b>${escapeHtml(String(cmp.gapPP))}%p</b> <span class="behav-gc-cmpnote">(${escapeHtml(cmp.note || '관측된 차이')})</span></div>`
     : '';
 
@@ -9710,9 +9723,93 @@ function _behavCaveatsHtml(caveats){
   </div>`;
 }
 
+/* [Phase 4a] 영상 학습 행동(video 우산) — 완주율→재시청→건너뛰기 세로 3섹션 스택.
+   각 섹션 = 섹션헤더(구분선+번호+라벨+?+표본칩) → renderGroupCompare(그룹×평균 도달률) → 지표별 마이크로 caveat.
+   정직 3중: ★데모 계측 배너(신규 강조) + [시연 데모] pill + seedBar(뷰단) + 소표본 마스킹(renderGroupCompare 기존).
+   빈 상태는 공유 tplEmpty 1개(3 빈 박스 금지). 성취 축 3지표 공통 '평균 도달률'(스케일 혼재 0). */
+function renderVideoSignal(host, d){
+  if (!host) return;
+  const meta = BEHAV_SIG_META.video;
+  const caveats = Array.isArray(d.caveats) ? d.caveats : [];
+  const topCaveat = caveats.length ? _reportInsightHtml({ level:'info', text: caveats[0] }) : '';
+  const studentCount = Number(d.studentCount) || 0;
+  const periodLabel = d.period === '30d' ? '최근 30일' : (d.period === 'term' ? '이번 학기' : '최근 90일');
+  const isDemo = d.instrumentation === 'demo' || d.demoInstrumented === true;
+  const metrics = Array.isArray(d.metrics) ? d.metrics : [];
+
+  const demoPill = isDemo ? `<span class="behav-demo-pill"><i class="fas fa-flask" aria-hidden="true"></i> 시연 데모</span>` : '';
+  const header = `<header class="behav-card-head">
+      <div class="behav-card-headmain">
+        <h2 class="behav-card-title">${meta.icon} ${escapeHtml(meta.title)}<span class="lrs-help" tabindex="0" role="button" aria-label="${escapeAttr(meta.label)} 설명"><i class="fas fa-circle-question" aria-hidden="true"></i><span class="lrs-help-pop">${escapeHtml(meta.help)}</span></span>${demoPill}</h2>
+        ${d.dataNote ? `<div class="behav-card-sub">${escapeHtml(d.dataNote)}</div>` : ''}
+      </div>
+      <div class="behav-headchips">
+        <span class="behav-chip"><i class="fas fa-users" aria-hidden="true"></i> 대상 ${studentCount}명</span>
+        <span class="behav-chip"><i class="fas fa-calendar-day" aria-hidden="true"></i> ${periodLabel} 누적</span>
+      </div>
+    </header>`;
+
+  // ★ 데모 계측 배너(신규·강조) — 이 화면의 최우선 정직 장치. instrumentation:'live' 승격 시 자동 제거.
+  const demoBanner = isDemo ? `<div class="behav-demo" role="note" aria-label="시연용 데모 계측 안내">
+      <div class="behav-demo-h"><i class="fas fa-flask" aria-hidden="true"></i> 시연용 데모 계측</div>
+      <p class="behav-demo-b">영상 완주·재시청·건너뛰기는 현재 <b>‘시연용 데모 계측’</b>이에요. 실제 영상 플레이어 계측(재생 위치·완주·구간 이동)은 향후 연동되면 자동으로 바뀌어요.</p>
+    </div>` : '';
+
+  const lowConfBanner = (d.lowConfidence && studentCount > 0)
+    ? `<div class="behav-lowconf"><i class="fas fa-circle-info" aria-hidden="true"></i> 우리 반은 표본이 작아(성취 산출 ${studentCount}명) 그룹 경향이 불안정해요. 학습이 쌓이면 더 정확해져요.</div>`
+    : '';
+
+  let body;
+  if (d.empty || !metrics.length){
+    // 우산 전체 빈 — 공유 tplEmpty 1개(§8, 3 빈 박스 아님)
+    body = `${tplEmpty(d.emptyReason || '우리 반의 영상 학습 기록이 아직 적어요. 영상 학습이 쌓이면 자동으로 채워져요.')}
+      <div class="behav-foot"><i class="fas fa-circle-info" aria-hidden="true"></i> ${escapeHtml(d.disclaimer || '')}</div>`;
+  } else {
+    const sections = metrics.map((m, i) => {
+      const mm = VIDEO_METRIC_META[m.key] || { num:'', label:(m.label || ''), help:'', micro:'' };
+      // 섹션 표본 칩 — 지표별 최대 밴드 n(distinct 학생 하한, 로스터 이하) · 전부 마스킹 시 '표본 부족'.
+      const maxN = (m.groups || []).reduce((a, g) => Math.max(a, Number(g.n) || 0), 0);
+      const sampleChip = m.masked
+        ? `<span class="behav-sec-chip behav-sec-chip--muted">표본 부족</span>`
+        : `<span class="behav-sec-chip">표본 ${maxN}명</span>`;
+      const micro = mm.micro ? `<div class="behav-sec-micro"><i class="fas fa-circle-info" aria-hidden="true"></i> ${mm.micro}</div>` : '';
+      return `<section class="behav-metric-sec"${i === 0 ? ' data-first="1"' : ''}>
+        <div class="behav-sec-head">
+          <span class="behav-sec-title"><span class="behav-sec-num">${mm.num}</span> ${escapeHtml(mm.label)} <span class="behav-sec-arrow">↔ 성취</span><span class="lrs-help" tabindex="0" role="button" aria-label="${escapeAttr(mm.label)} 설명"><i class="fas fa-circle-question" aria-hidden="true"></i><span class="lrs-help-pop">${escapeHtml(mm.help)}</span></span></span>
+          ${sampleChip}
+        </div>
+        <div id="videoGC_${escapeAttr(m.key)}" class="behav-gc-wrap"></div>
+        ${micro}
+      </section>`;
+    }).join('');
+    body = sections + `<div class="behav-foot"><i class="fas fa-circle-info" aria-hidden="true"></i> ${escapeHtml(d.disclaimer || '')}</div>`;
+  }
+
+  host.innerHTML = `<section class="dc-chart-wrapper behav-card" style="padding:24px 28px;border-radius:16px;">
+      ${header}
+      ${demoBanner}
+      ${topCaveat}
+      ${lowConfBanner}
+      <div class="lrs-insight-wrap" id="behavInsights" style="display:none;"></div>
+      ${body}
+      ${_behavCaveatsHtml(caveats.slice(1))}
+    </section>`;
+
+  renderInsights(document.getElementById('behavInsights'), d.insights);
+  // 3섹션 각각 renderGroupCompare(성취 축 공통 '평균 도달률') — 지표별 refValue/comparison 사용.
+  metrics.forEach(m => {
+    const gcHost = document.getElementById(`videoGC_${m.key}`);
+    if (gcHost) renderGroupCompare(gcHost, {
+      metricLabel: m.metricLabel || d.metricLabel, unit: m.unit || d.unit || '%',
+      groups: m.groups, refValue: (m.refValue != null ? m.refValue : d.refValue), comparison: m.comparison,
+    });
+  });
+}
+
 /* 신호 카드 렌더 — §3-1 공통 4블록(헤더 → 고정 캐비어트 → 관찰형 insights → 그룹비교 막대(+신호① 매트릭스) → 하단 caveats). */
 function renderBehaviorSignal(host, signal, d){
   if (!host) return;
+  if (signal === 'video'){ renderVideoSignal(host, d); return; }   // [Phase 4a] 영상 학습 행동 우산 → 세로 3섹션 전용 렌더
   const meta = BEHAV_SIG_META[signal] || { icon:'📊', label:'행동 신호', title:'행동 신호', help:'' };
   const caveats = Array.isArray(d.caveats) ? d.caveats : [];
   const topCaveat = caveats.length ? _reportInsightHtml({ level:'info', text: caveats[0] }) : '';
@@ -9802,7 +9899,7 @@ const BEHAV_STYLE = `<style>
   .behav-card-head{ display:flex; align-items:flex-start; justify-content:space-between; gap:12px; flex-wrap:wrap; margin-bottom:12px; }
   .behav-card-headmain{ flex:1 1 auto; min-width:0; }
   /* .behav-card 접두어로 전역 '.dc-chart-wrapper h2'(--fs-h2) 특이도를 이겨 20px 유지 */
-  .behav-card .behav-card-title{ font-size:20px; font-weight:700; color:var(--gray-900); margin:0; display:inline-flex; align-items:center; line-height:1.35; }
+  .behav-card .behav-card-title{ font-size:20px; font-weight:700; color:var(--gray-900); margin:0; display:inline-flex; align-items:center; flex-wrap:wrap; row-gap:6px; line-height:1.35; }
   .behav-card-sub{ font-size:14px; color:var(--gray-600); line-height:1.6; margin-top:4px; }
   .behav-headchips{ flex:none; display:flex; gap:8px; flex-wrap:wrap; }
   .behav-chip{ display:inline-flex; align-items:center; gap:6px; white-space:nowrap;
@@ -9843,6 +9940,31 @@ const BEHAV_STYLE = `<style>
   .behav-lowconf i{ margin-right:6px; }
   .behav-foot{ margin-top:14px; font-size:13px; color:var(--gray-500); line-height:1.6; }
   .behav-foot i{ margin-right:6px; }
+  /* [Phase 4a] 데모 계측 배너(신규·강조) + 헤더 [시연 데모] pill — 앰버 토큰(§9-1) */
+  .behav-demo-pill{ flex:none; margin-left:8px; display:inline-flex; align-items:center; gap:5px; white-space:nowrap;
+    font-size:13px; font-weight:700; padding:3px 10px; border-radius:999px;
+    background:#fef3c7; color:#92400e; border:1px solid #fde68a; }
+  .behav-demo-pill i{ font-size:11px; }
+  .behav-demo{ margin:12px 0 0; background:#fffbeb; border:1px solid #fde68a; border-left:4px solid #f59e0b;
+    border-radius:8px; padding:12px 16px; }
+  .behav-demo-h{ font-size:15px; font-weight:700; color:#92400e; display:flex; align-items:center; gap:7px; }
+  .behav-demo-h i{ font-size:13px; color:#b45309; }
+  .behav-demo-b{ margin:5px 0 0; font-size:16px; line-height:1.7; color:#92400e; }
+  .behav-demo-b b{ font-weight:700; }
+  /* [Phase 4a] 지표 섹션(세로 3섹션 스택) — 얇은 상단 구분선 + 번호·라벨 + (?) + 우측 표본 칩 */
+  .behav-metric-sec{ border-top:1px solid #eef1f4; padding-top:14px; margin-top:18px; }
+  .behav-metric-sec[data-first="1"]{ border-top:0; padding-top:6px; margin-top:14px; }
+  .behav-sec-head{ display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; }
+  .behav-sec-title{ font-size:16px; font-weight:700; color:var(--gray-900); display:inline-flex; align-items:center; gap:6px; min-width:0; line-height:1.4; }
+  .behav-sec-num{ font-weight:800; color:var(--lrs-primary-dark); }
+  .behav-sec-arrow{ font-size:14px; font-weight:600; color:var(--gray-500); }
+  .behav-sec-chip{ flex:none; font-size:13px; font-weight:600; padding:4px 12px; border-radius:999px;
+    background:#eff6ff; color:#1d4ed8; white-space:nowrap; }
+  .behav-sec-chip--muted{ background:var(--gray-100); color:#9ca3af; }
+  .behav-sec-micro{ margin:10px 0 2px; font-size:14px; line-height:1.6; color:#4b5563;
+    background:#f9fafb; border:1px solid #eef2f7; border-radius:8px; padding:9px 13px; }
+  .behav-sec-micro i{ color:#9ca3af; margin-right:6px; }
+  .behav-sec-micro b{ color:#374151; font-weight:700; }
   /* 하단 caveats 배너(항상 노출) */
   .behav-caveats{ margin-top:16px; background:#eff6ff; border:1px solid #bfdbfe; border-left:4px solid var(--lrs-primary); border-radius:10px; padding:14px 18px; }
   .behav-caveats-h{ font-size:15px; font-weight:700; color:var(--lrs-primary-dark); margin-bottom:8px; }
@@ -9901,7 +10023,7 @@ VIEWS['t-behavior'] = async function(root){
     </div>`;
   const headBlock = `<div class="behav-head">
       <h1 class="behav-h1">학습 행동 심화 분석</h1>
-      <p class="behav-lead">학습 행동(풀이 속도·오답 재풀이·기간 참여·영상 재시청)이 <b>성취</b>와 어떤 관계로 <b>함께 나타나는지</b> 살펴봐요. 아래 값은 <b>‘연관성’이지 ‘원인’이 아니에요</b> — 개별 판단 전에 학생과 대화로 확인해 주세요.</p>
+      <p class="behav-lead">학습 행동(풀이 속도·오답 재풀이·기간 참여·영상 학습 행동)이 <b>성취</b>와 어떤 관계로 <b>함께 나타나는지</b> 살펴봐요. 아래 값은 <b>‘연관성’이지 ‘원인’이 아니에요</b> — 개별 판단 전에 학생과 대화로 확인해 주세요.</p>
     </div>`;
   const seedBar = _bmSeedBar(d ? d.seedNoticeText : '', realOn, '_behavRealOnly');
 

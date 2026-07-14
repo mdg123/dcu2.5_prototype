@@ -175,16 +175,20 @@ test('INV-BH6: retry — 정확히 2그룹(재풀이 유/무)', async () => {
   assert.deepEqual(b.groups.map(g => g.key), ['retried', 'not_retried']);
 });
 
-// ── INV-BH8: rewatch 정직 비노출 ─────────────────────────────────────────────
-test('INV-BH8: rewatch — 반 스코프 정직 비노출(available:false·reason·masked)', async () => {
+// ── INV-BH8: rewatch — Phase 4a 로 계약 변경(video/replay 하위호환 alias) ─────
+//   기존 "정직 비노출(available:false)" 계약은 Phase 4a 에서 데모 계측 활성화로 대체.
+//   이제 rewatch 는 signal=video&sub=replay 로 승격되어 완주/재시청/건너뛰기 중 재시청 지표를 반환한다.
+//   (available 값은 시드 유무에 따라 달라지므로 단언하지 않고, alias 구조·정직 플래그를 박제한다.)
+test('INV-BH8: rewatch — video/replay 하위호환 alias(demoInstrumented·once/few/many)', async () => {
   const r = await req(`/stats/behavior?classId=${ownedClassId}&signal=rewatch`, TEACHER1);
   assert.equal(r.status, 200);
   const b = r.json;
-  assert.equal(b.available, false, 'rewatch 반 스코프는 저표본이라 available:false 이어야 함');
-  assert.ok(typeof b.reason === 'string' && b.reason.length > 0, 'rewatch 비노출 사유(reason) 필요');
-  assert.equal(b.masked, true, 'rewatch 는 억지 그래프 금지(masked:true)');
-  // dataNote 에 '접근'(≠시청) 캐비어트 필수
-  assert.ok(/접근/.test(b.dataNote || ''), 'rewatch dataNote 에 접근≠시청 고지 필요');
+  assert.equal(b.signal, 'rewatch', 'rewatch 는 요청 신호 그대로 echo');
+  assert.equal(b.sub, 'replay', 'rewatch → sub=replay 로 매핑');
+  assert.equal(b.demoInstrumented, true, 'video 계약: demoInstrumented 플래그');
+  assert.equal(b.instrumentation, 'demo', "video 계약: instrumentation==='demo'");
+  assert.deepEqual(b.groups.map(g => g.key), ['once', 'few', 'many'], '재시청 밴드 once/few/many');
+  assert.ok((b.caveats || []).join(' ').includes('데모 계측'), 'video caveats 에 데모 계측 문구 필요');
 });
 
 // ── INV-BH9: speed 위임 ──────────────────────────────────────────────────────

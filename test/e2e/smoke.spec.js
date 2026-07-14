@@ -1041,7 +1041,7 @@ test.describe('스모크: LRS 학습 행동 심화 분석(t-behavior)', () => {
         const noClass = await page.evaluate(() => !document.querySelector('.behav-seg-btn'));
         if (noClass) { test.skip(true, '담당(개설) 반 0개 — 빈 패널로 스킵'); }
 
-        const SIGS = ['speed', 'retry', 'participation', 'rewatch'];
+        const SIGS = ['speed', 'retry', 'participation', 'video']; // [Phase 4a] ④ rewatch→video(영상 학습 행동 우산)
         for (const sig of SIGS) {
           await page.evaluate((s) => { const b = document.querySelector(`.behav-seg-btn[data-behavsig="${s}"]`); if (b) b.click(); }, sig).catch(() => {});
           await page.waitForFunction((s) => {

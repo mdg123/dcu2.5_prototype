@@ -66,6 +66,19 @@ function init() {
     `);
   } catch (e) { console.error('[self-learn init] schema error:', e.message); }
 
+  // ── [LRS Phase 4a] 영상 학습 행동(완주율·재시청·건너뛰기) 컬럼 확장 (멱등 ALTER) ──
+  //   watch_ratio(완주)·view_count(재시청)는 기존 보유 → seek(건너뛰기)·is_seed(데모 계측 태그)만 추가.
+  //   learning_logs·achievement_stats 는 무변경(성취 하네스 GT 무오염). PRAGMA table_info 로 존재 확인 후 ADD.
+  try {
+    const ucpCols = new Set(db.prepare('PRAGMA table_info(user_content_progress)').all().map(c => c.name));
+    if (!ucpCols.has('seek_count')) {
+      db.exec('ALTER TABLE user_content_progress ADD COLUMN seek_count INTEGER DEFAULT 0'); // 구간 이동(건너뛰기) 횟수
+    }
+    if (!ucpCols.has('is_seed')) {
+      db.exec('ALTER TABLE user_content_progress ADD COLUMN is_seed INTEGER DEFAULT 0');     // 1=시연용 데모 계측(멱등·teardown 키)
+    }
+  } catch (e) { console.error('[self-learn init] user_content_progress phase4a migration error:', e.message); }
+
   // diagnosis_sessions 컬럼 확장 (ALTER 안전 가드)
   const diagCols = ['difficulty_path TEXT', 'queue_nodes TEXT', 'current_node_id VARCHAR(50)', 'current_difficulty TEXT', 'per_node_answers TEXT'];
   for (const col of diagCols) {
