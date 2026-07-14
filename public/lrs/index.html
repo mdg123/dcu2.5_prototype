@@ -9625,7 +9625,7 @@ function _bmBindDaily(root){
  *   재사용: _bmFetchOwnedClasses·_bmNoClassPanel·_bmSeedBar·_bmBindCommon·renderInsights·
  *     renderShallowLearning·_reportInsightHtml·tplEmpty/Error. 신규는 renderGroupCompare 1개.
  * ==================================================================== */
-const BEHAV_SIGNALS = ['speed', 'retry', 'participation', 'video'];
+const BEHAV_SIGNALS = ['speed', 'retry', 'participation', 'video', 'social'];
 const BEHAV_PERIOD_DAYS_FE = { '30d': 30, '90d': 90, 'term': 180 };
 const BEHAV_SIG_META = {
   speed:         { num:'①', label:'풀이 속도',    icon:'⏱️',
@@ -9640,6 +9640,9 @@ const BEHAV_SIG_META = {
   video:         { num:'④', label:'영상 학습 행동', icon:'🎬',
     title:'영상 학습 행동과 성취의 관계',
     help:'영상을 끝까지 봤는지(완주)·다시 봤는지(재시청)·건너뛰었는지(건너뛰기) 3가지를 성취와 견줘요. 현재는 시연용 데모 계측이에요.' },
+  social:        { num:'⑤', label:'학급 관계·정서', icon:'🫂',
+    title:'학급 관계·정서',
+    help:'게시판 댓글·답글로 이어진 학급 관계망과 학급 전체 정서 분위기를 살펴봐요. 개별 학생을 판정하는 자료가 아니라 대화의 출발점이에요.' },
 };
 /* [Phase 4a] video 우산 3지표(완주율·재시청·건너뛰기) 세로 섹션 메타 — 라벨·(?)·마이크로 caveat(§7 고정 문안, 상관≠인과).
    micro 는 <b> 강조 포함 고정 HTML(사용자 데이터 없음 → 그대로 삽입). key 는 BE metrics[].key(completion|replay|seek). */
@@ -9806,10 +9809,210 @@ function renderVideoSignal(host, d){
   });
 }
 
+/* [Phase 4b] 경량 결정론 소시오그램 SVG — 라이브러리 미도입. viewBox 0 0 680 680, 원형 등간격(12시 시계방향).
+   노드 지름 36 균일(참여수 비례 절대 금지) · 엣지 곡선 Q(양방향 부호분리) · comment 실선/reply 파선(색맹 대응).
+   노드 aria-label(이름·참여수, 감정 없음) · <title> 호버 · 엣지 aria-hidden. hideLabels 시 이름 pill 미렌더(번호만). */
+function _socialSvg(nodes, edges, hideLabels){
+  const cx = 340, cy = 340, R = 210, r = 18, n = nodes.length;
+  const pos = new Map();
+  nodes.forEach((nd, i) => {
+    const th = -Math.PI / 2 + 2 * Math.PI * i / n;
+    pos.set(nd.id, { x: cx + R * Math.cos(th), y: cy + R * Math.sin(th), th, i });
+  });
+  // 엣지(노드 아래) — 경계 r+3 에서 시작·끝(화살표 노드 정착), 제어점 수직오프셋 0.14·L·dir(양방향 좌우 분리).
+  const edgeParts = [];
+  edges.forEach(e => {
+    const a = pos.get(e.from), b = pos.get(e.to);
+    if (!a || !b) return;
+    const dx = b.x - a.x, dy = b.y - a.y, L = Math.hypot(dx, dy);
+    if (L < 1) return;
+    const ux = dx / L, uy = dy / L;
+    const x1 = a.x + ux * (r + 3), y1 = a.y + uy * (r + 3);
+    const x2 = b.x - ux * (r + 3), y2 = b.y - uy * (r + 3);
+    const mx = (x1 + x2) / 2, my = (y1 + y2) / 2;
+    const nx = -uy, ny = ux;
+    const dir = (Number(e.from) < Number(e.to)) ? 1 : -1;        // 양방향 쌍 좌우 반대 아크
+    const k = 0.14 * L * dir;
+    const qx = mx + nx * k, qy = my + ny * k;
+    const w = Number(e.weight) || 1;
+    const sw = (1.5 + Math.min(w, 5) * 0.6).toFixed(2);          // 1.5~4.5(과도 금지)
+    const isReply = e.type === 'reply';
+    const color = isReply ? '#8b5cf6' : '#64748b';
+    const dash = isReply ? ' stroke-dasharray="5 4"' : '';
+    const marker = isReply ? 'arw-reply' : 'arw-comment';
+    edgeParts.push(`<path d="M ${x1.toFixed(1)} ${y1.toFixed(1)} Q ${qx.toFixed(1)} ${qy.toFixed(1)} ${x2.toFixed(1)} ${y2.toFixed(1)}" fill="none" stroke="${color}" stroke-width="${sw}"${dash} marker-end="url(#${marker})" opacity="0.72" aria-hidden="true"/>`);
+  });
+  // 노드(위) — 지름 36 균일. 중앙 색인번호(순위 아님) + (라벨 표시 시) 방사형 바깥 이름 pill. 고립 노드도 동일 스타일.
+  const nodeParts = nodes.map((nd, i) => {
+    const p = pos.get(nd.id);
+    const pa = nd.participation || {};
+    const name = String(nd.label || '');
+    const aria = `${name}: 쓴 글 ${Number(pa.posts) || 0}, 받은 댓글 ${Number(pa.commentsReceived) || 0}, 보낸 댓글 ${Number(pa.commentsGiven) || 0}`;
+    let labelSvg = '';
+    if (!hideLabels) {
+      const lr = 240, lx = cx + lr * Math.cos(p.th), ly = cy + lr * Math.sin(p.th);
+      const disp = name.length > 5 ? name.slice(0, 4) + '…' : name;
+      const wpill = Math.min(disp.length, 5) * 13 + 16;
+      labelSvg = `<g class="social-name-pill"><rect x="${(lx - wpill / 2).toFixed(1)}" y="${(ly - 11).toFixed(1)}" width="${wpill}" height="22" rx="6" fill="#ffffff" stroke="#e2e8f0"></rect><text x="${lx.toFixed(1)}" y="${ly.toFixed(1)}" text-anchor="middle" dominant-baseline="central" font-size="12" font-weight="600" fill="#334155">${escapeHtml(disp)}</text></g>`;
+    }
+    return `<g role="img" aria-label="${escapeAttr(aria)}"><title>${escapeHtml(aria)}</title>` +
+      `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="${r}" fill="#e5e7eb" stroke="#94a3b8" stroke-width="1.5"></circle>` +
+      `<text x="${p.x.toFixed(1)}" y="${p.y.toFixed(1)}" text-anchor="middle" dominant-baseline="central" font-size="12" font-weight="700" fill="#475569">${i + 1}</text>` +
+      labelSvg + `</g>`;
+  });
+  const defs = `<defs>` +
+    `<marker id="arw-comment" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L8,4 L0,8 Z" fill="#64748b"></path></marker>` +
+    `<marker id="arw-reply" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L8,4 L0,8 Z" fill="#8b5cf6"></path></marker>` +
+    `</defs>`;
+  return `<svg class="social-svg" viewBox="0 0 680 680" preserveAspectRatio="xMidYMid meet" role="group" aria-label="학급 관계망: 노드 ${n}개, 상호작용 ${edges.length}건" xmlns="http://www.w3.org/2000/svg">${defs}<g>${edgeParts.join('')}</g><g>${nodeParts.join('')}</g></svg>`;
+}
+
+/* [Phase 4b] ⑤ 학급 관계·정서 전용 렌더 — 실명 소시오그램 + 정서 병렬 패널(노드 미결합).
+   세로 순서: 헤더+pill → 목적제한 → 데모 → 소표본 → 상단caveat → SVG+범례 → 텍스트 등가 표 → 균형칩 → 구분선+정서 스택바 → 하단caveats.
+   안전(낙인·재식별 최소화): 노드 크기 균일 · 감정 노드 미결합 · 고립 무강조 · 자동 판정 라벨 0 · 목적제한/유출금지 상시. */
+function renderSocialClimate(host, d){
+  if (!host) return;
+  const meta = BEHAV_SIG_META.social;
+  const graph = (d && d.graph) || { nodes: [], edges: [] };
+  const nodes = Array.isArray(graph.nodes) ? graph.nodes : [];
+  const edges = Array.isArray(graph.edges) ? graph.edges : [];
+  const nodeCount = Number(d.nodeCount != null ? d.nodeCount : nodes.length) || 0;
+  const edgeCount = edges.length;
+  const caveats = Array.isArray(d.caveats) ? d.caveats : [];
+  const topCaveat = caveats.length ? _reportInsightHtml({ level: 'info', text: caveats[0] }) : '';
+  const periodLabel = d.period === '30d' ? '최근 30일' : (d.period === 'term' ? '이번 학기' : '최근 90일');
+  const isDemo = d.instrumentation === 'demo' || d.demoInstrumented === true;
+  const smallSample = !!d.smallSample;
+
+  const demoPill = isDemo ? `<span class="behav-demo-pill"><i class="fas fa-flask" aria-hidden="true"></i> 시연 데모</span>` : '';
+  const header = `<header class="behav-card-head">
+      <div class="behav-card-headmain">
+        <h2 class="behav-card-title">${meta.icon} ${escapeHtml(meta.title)}<span class="lrs-help" tabindex="0" role="button" aria-label="${escapeAttr(meta.label)} 설명"><i class="fas fa-circle-question" aria-hidden="true"></i><span class="lrs-help-pop">${escapeHtml(meta.help)}</span></span>${demoPill}</h2>
+      </div>
+      <div class="behav-headchips">
+        <span class="behav-chip"><i class="fas fa-users" aria-hidden="true"></i> 대상 ${nodeCount}명</span>
+        <span class="behav-chip"><i class="fas fa-calendar-day" aria-hidden="true"></i> ${periodLabel} 누적</span>
+      </div>
+    </header>`;
+
+  // 🔒 목적 제한 배너(상시) — 경고 아닌 안내(info 블루). v2 §7 purposeNote 상시 노출.
+  const purposeBanner = `<div class="social-purpose" role="note" aria-label="목적 제한 안내">
+      <i class="fas fa-lock" aria-hidden="true"></i> <b>담임 교사 전용</b> 자료예요. 학급 관계·정서 지원 목적이며, <b>상담·평가·생활지도 판정 근거로 쓰지 마세요.</b>
+    </div>`;
+
+  // 🧪 데모 계측 배너(demoInstrumented 시) — 앰버(.behav-demo 재사용, 문안 교체).
+  const demoBanner = isDemo ? `<div class="behav-demo" role="note" aria-label="시연용 합성 데이터 안내">
+      <div class="behav-demo-h"><i class="fas fa-flask" aria-hidden="true"></i> 시연용 합성 데이터</div>
+      <p class="behav-demo-b">이 학급은 그래프가 충분히 클 때 관계망이 어떻게 읽히는지 보여주는 <b>시연용 합성 데이터</b>예요. <b>실제 학생이 아니에요.</b></p>
+    </div>` : '';
+
+  // ⚠ 소표본 배지(smallSample 시) — 하드 마스킹 아님(그래프는 렌더). .behav-lowconf 재사용.
+  const lowSampleBadge = smallSample ? `<div class="behav-lowconf"><i class="fas fa-triangle-exclamation" aria-hidden="true"></i> 학생 수가 적어 관계 해석에 <b>주의가 필요해요</b> (노드 ${nodeCount}개·엣지 ${edgeCount}개). 관계망 지표(중심성·응집도)는 산출하지 않으며, 그래프는 <b>참고용</b>이에요.</div>` : '';
+
+  let body;
+  if (!nodes.length){
+    body = tplEmpty('학급 구성원이 없어요. 학생이 클래스에 참여하면 관계망이 나타나요.');
+  } else {
+    const ordered = [...nodes].sort((a, b) => Number(a.id) - Number(b.id));   // 결정론 정렬(레이아웃·표 대조 안정)
+    const nameById = new Map(ordered.map(nd => [nd.id, String(nd.label || '')]));
+    const isNarrow = !!(typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(max-width:767px)').matches);
+    const hideLabels = nodeCount > 16 || isNarrow;                            // 과밀·모바일 → 이름 pill 숨김(번호만)
+    const svg = _socialSvg(ordered, edges, hideLabels);
+
+    const legend = `<div class="social-legend">
+        <span class="social-legend-item"><svg width="30" height="10" aria-hidden="true"><line x1="0" y1="5" x2="21" y2="5" stroke="#64748b" stroke-width="2"></line><path d="M21,1 L30,5 L21,9 Z" fill="#64748b"></path></svg> 댓글</span>
+        <span class="social-legend-item"><svg width="30" height="10" aria-hidden="true"><line x1="0" y1="5" x2="21" y2="5" stroke="#8b5cf6" stroke-width="2" stroke-dasharray="4 3"></line><path d="M21,1 L30,5 L21,9 Z" fill="#8b5cf6"></path></svg> 답글(대댓글)</span>
+        <span class="social-legend-item">화살표 = 댓글을 단 방향(단 사람 → 받은 사람)</span>
+        <span class="social-legend-sub">노드 = 학급 구성원(크기 모두 같아요) · 연결 없는 학생도 담담히 함께 표시돼요 · 노드 안 번호는 순위가 아니라 아래 표와 맞춰 보는 색인이에요.</span>
+      </div>`;
+
+    const noEdgeNote = edgeCount === 0
+      ? `<div class="behav-note"><i class="fas fa-circle-info" aria-hidden="true"></i> 아직 게시판 댓글·답글 상호작용이 없어요. 서로의 글에 댓글을 달면 연결선이 나타나요.</div>`
+      : '';
+
+    const rows = ordered.map((nd, i) => {
+      const pa = nd.participation || {};
+      return `<tr>
+          <td class="idx">${i + 1}</td>
+          <td class="name">${escapeHtml(String(nd.label || ''))}</td>
+          <td class="num">${Number(pa.posts) || 0}</td>
+          <td class="num">${Number(pa.commentsReceived) || 0}</td>
+          <td class="num">${Number(pa.commentsGiven) || 0}</td>
+        </tr>`;
+    }).join('');
+    const interactions = edgeCount
+      ? `<div class="social-int-h">상호작용 목록</div><ul>${edges.map(e =>
+          `<li>${escapeHtml(nameById.get(e.from) || '?')} → ${escapeHtml(nameById.get(e.to) || '?')} · ${e.type === 'reply' ? '답글' : '댓글'} ${Number(e.weight) || 0}회</li>`).join('')}</ul>`
+      : `<div class="social-int-empty">아직 서로의 글에 댓글·답글을 단 기록이 없어요.</div>`;
+    const tableOpen = (nodeCount > 16 || isNarrow) ? ' open' : '';
+    const table = `<details class="social-table-wrap"${tableOpen}>
+        <summary>표로 보기 (번호·이름·참여수)</summary>
+        <div class="social-table-scroll">
+          <table class="social-table">
+            <thead><tr><th class="num">번호</th><th>이름</th><th class="num">쓴 글</th><th class="num">받은 댓글</th><th class="num">보낸 댓글</th></tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+        <div class="social-interactions">${interactions}</div>
+      </details>`;
+
+    // 참여 균형 밴드 칩(보조) — 균형=blue / 다소편중·편중=amber(빨강 금지). null 생략.
+    const band = d.balanceBand;
+    const bandChip = band
+      ? `<div class="social-band-wrap"><span class="social-band-chip ${band === '균형' ? 'social-band-chip--blue' : 'social-band-chip--amber'}"><i class="fas fa-scale-balanced" aria-hidden="true"></i> 참여 균형: ${escapeHtml(band)}</span><span class="lrs-help" tabindex="0" role="button" aria-label="참여 균형 설명"><i class="fas fa-circle-question" aria-hidden="true"></i><span class="lrs-help-pop">상호작용이 소수에 몰려 있는지의 관찰이며, 편중=문제라는 뜻이 아니에요. 정밀 수치는 소표본에서 불안정해 밴드로만 보여드려요.</span></span></div>`
+      : '';
+
+    // 정서 병렬 패널(구분선 분리) — 100% 스택 단일 막대(노드 미결합). masked(n<5) 빈 상태.
+    const ec = d.emotionClimate || {};
+    let climateBody;
+    if (ec.masked || ec.positive == null){
+      climateBody = `<div class="social-climate-empty"><i class="fas fa-chart-simple" aria-hidden="true"></i> 감정 기록이 아직 적어 학급 정서 분위기를 보여드리기 어려워요(최소 5명·5일 필요). 학생들이 감정 출석을 이어가면 자동으로 채워져요.</div>`;
+    } else {
+      const pos = Number(ec.positive) || 0, neu = Number(ec.neutral) || 0, neg = Number(ec.negative) || 0;
+      climateBody = `<div class="social-climate-bar" role="img" aria-label="학급 정서 분포 — 긍정 ${pos}퍼센트, 중립 ${neu}퍼센트, 부정 ${neg}퍼센트">
+          ${pos > 0 ? `<div class="social-climate-seg" style="width:${pos}%;background:#22c55e;">${pos >= 12 ? `긍정 ${pos}%` : ''}</div>` : ''}
+          ${neu > 0 ? `<div class="social-climate-seg" style="width:${neu}%;background:#94a3b8;">${neu >= 12 ? `중립 ${neu}%` : ''}</div>` : ''}
+          ${neg > 0 ? `<div class="social-climate-seg" style="width:${neg}%;background:#f87171;">${neg >= 12 ? `부정 ${neg}%` : ''}</div>` : ''}
+        </div>
+        <div class="social-climate-legend">
+          <span><span class="social-sw" style="background:#22c55e;"></span> 긍정 ${pos}%</span>
+          <span><span class="social-sw" style="background:#94a3b8;"></span> 중립 ${neu}%</span>
+          <span><span class="social-sw" style="background:#f87171;"></span> 부정 ${neg}%</span>
+        </div>`;
+    }
+    const climateChip = (ec.n != null)
+      ? `<span class="social-climate-chip${ec.masked ? ' social-climate-chip--muted' : ''}">감정 기록 ${Number(ec.n) || 0}건</span>`
+      : '';
+    const climate = `<div class="social-climate">
+        <div class="social-climate-head">
+          <div class="social-climate-headmain">
+            <div class="social-climate-h">학급 정서 분위기</div>
+            <div class="social-climate-sub">관계망과 결합하지 않은 <b>학급 전체 집계</b>예요(개별 학생 감정과 이어 붙이지 않아요).</div>
+          </div>
+          ${climateChip}
+        </div>
+        ${climateBody}
+      </div>`;
+
+    body = `<div class="social-svg-wrap">${svg}</div>${legend}${noEdgeNote}${table}${bandChip}${climate}`;
+  }
+
+  host.innerHTML = `<section class="dc-chart-wrapper behav-card" style="padding:24px 28px;border-radius:16px;">
+      ${header}
+      ${purposeBanner}
+      ${demoBanner}
+      ${lowSampleBadge}
+      ${topCaveat}
+      ${body}
+      ${_behavCaveatsHtml(caveats.slice(1))}
+    </section>`;
+}
+
 /* 신호 카드 렌더 — §3-1 공통 4블록(헤더 → 고정 캐비어트 → 관찰형 insights → 그룹비교 막대(+신호① 매트릭스) → 하단 caveats). */
 function renderBehaviorSignal(host, signal, d){
   if (!host) return;
   if (signal === 'video'){ renderVideoSignal(host, d); return; }   // [Phase 4a] 영상 학습 행동 우산 → 세로 3섹션 전용 렌더
+  if (signal === 'social'){ renderSocialClimate(host, d); return; } // [Phase 4b] ⑤ 학급 관계·정서 → 소시오그램+정서 병렬 전용 렌더
   const meta = BEHAV_SIG_META[signal] || { icon:'📊', label:'행동 신호', title:'행동 신호', help:'' };
   const caveats = Array.isArray(d.caveats) ? d.caveats : [];
   const topCaveat = caveats.length ? _reportInsightHtml({ level:'info', text: caveats[0] }) : '';
@@ -9979,6 +10182,62 @@ const BEHAV_STYLE = `<style>
   .behav-matrix-details > summary .sd-caret{ transition:transform .15s; font-size:12px; }
   .behav-matrix-details[open] > summary .sd-caret{ transform:rotate(90deg); }
   .behav-matrix-details > summary:focus-visible{ outline:0; box-shadow:0 0 0 3px rgba(37,99,235,.35); border-radius:6px; }
+  /* [Phase 4b] ⑤ 학급 관계·정서 — 목적 제한 배너(info 블루·상시) */
+  .social-purpose{ margin:12px 0 0; background:#eff6ff; border:1px solid #bfdbfe; border-left:4px solid #2563eb; border-radius:8px; padding:12px 16px; font-size:15px; line-height:1.7; color:#1e3a8a; }
+  .social-purpose i{ color:#2563eb; margin-right:7px; }
+  .social-purpose b{ font-weight:700; color:#1d4ed8; }
+  /* 소시오그램 SVG — viewBox 반응형(가로 스크롤 구조적 0), wrapper overflow:hidden */
+  .social-svg-wrap{ margin:16px 0 0; width:100%; overflow:hidden; }
+  .social-svg{ display:block; width:100%; height:auto; max-width:680px; margin:0 auto; }
+  .social-svg text{ font-family:inherit; }
+  /* 범례(색+패턴 병행) */
+  .social-legend{ margin:12px 0 0; display:flex; flex-wrap:wrap; align-items:center; gap:16px; font-size:14px; color:var(--gray-700); }
+  .social-legend-item{ display:inline-flex; align-items:center; gap:7px; }
+  .social-legend-item svg{ flex:none; }
+  .social-legend-sub{ width:100%; margin-top:2px; font-size:13px; color:var(--gray-500); line-height:1.6; }
+  /* 텍스트 등가 표(리스트 뷰·상시 병기) */
+  .social-table-wrap{ margin:16px 0 0; }
+  .social-table-wrap > summary{ cursor:pointer; list-style:none; display:inline-flex; align-items:center; gap:6px; font-size:15px; font-weight:700; color:var(--lrs-primary-dark); padding:6px 2px; user-select:none; }
+  .social-table-wrap > summary::-webkit-details-marker{ display:none; }
+  .social-table-wrap > summary::before{ content:'\\25B8'; font-size:12px; transition:transform .15s; display:inline-block; }
+  .social-table-wrap[open] > summary::before{ transform:rotate(90deg); }
+  .social-table-wrap > summary:focus-visible{ outline:0; box-shadow:0 0 0 3px rgba(37,99,235,.35); border-radius:6px; }
+  .social-table-scroll{ margin-top:10px; overflow-x:auto; }
+  .social-table{ width:100%; border-collapse:collapse; }
+  .social-table th{ font-size:14px; font-weight:700; color:var(--gray-600); text-align:left; padding:8px 12px; border-bottom:2px solid var(--gray-200); white-space:nowrap; }
+  .social-table th.num{ text-align:right; }
+  .social-table td{ font-size:15px; color:var(--gray-800); padding:8px 12px; border-bottom:1px solid var(--gray-100); }
+  .social-table td.num{ text-align:right; font-variant-numeric:tabular-nums; }
+  .social-table td.name{ font-weight:700; }
+  .social-table td.idx{ text-align:right; color:var(--gray-500); font-weight:700; }
+  .social-interactions{ margin-top:12px; font-size:14px; line-height:1.7; color:var(--gray-700); }
+  .social-int-h{ font-weight:700; color:var(--gray-600); margin-bottom:4px; }
+  .social-interactions ul{ margin:0; padding-left:18px; }
+  .social-interactions li{ margin:2px 0; word-break:keep-all; }
+  .social-int-empty{ color:var(--gray-500); }
+  /* 참여 균형 밴드 칩(빨강 금지) */
+  .social-band-wrap{ margin:16px 0 0; display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+  .social-band-chip{ display:inline-flex; align-items:center; gap:6px; font-size:14px; font-weight:600; padding:6px 14px; border-radius:999px; }
+  .social-band-chip i{ font-size:12px; }
+  .social-band-chip--blue{ background:#eff6ff; color:#1d4ed8; }
+  .social-band-chip--amber{ background:#fffbeb; color:#b45309; }
+  /* 정서 병렬 패널(관계망과 border-top 2px 구분선 분리 · 노드 미결합) */
+  .social-climate{ border-top:2px solid #e5e7eb; margin-top:22px; padding-top:18px; }
+  .social-climate-head{ display:flex; align-items:flex-start; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+  .social-climate-headmain{ flex:1 1 auto; min-width:0; }
+  .social-climate-h{ font-size:19px; font-weight:700; color:var(--gray-900); }
+  .social-climate-sub{ font-size:14px; color:var(--gray-600); margin-top:4px; line-height:1.6; }
+  .social-climate-sub b{ color:var(--gray-800); font-weight:700; }
+  .social-climate-chip{ flex:none; font-size:13px; font-weight:600; padding:5px 12px; border-radius:999px; background:var(--gray-100); color:var(--gray-600); white-space:nowrap; }
+  .social-climate-chip--muted{ opacity:.7; }
+  .social-climate-bar{ display:flex; height:34px; border-radius:8px; overflow:hidden; width:100%; margin-top:14px; }
+  /* 세그 텍스트 — 소프트 채움(긍정/중립/부정) 위에서 #fff 는 대비 <4.5 실패 → 진한 텍스트로 ≥5.3 확보(소프트 톤·낙인방지 채움색은 유지). */
+  .social-climate-seg{ display:flex; align-items:center; justify-content:center; font-size:15px; font-weight:700; color:#0f172a; white-space:nowrap; min-width:0; overflow:hidden; }
+  .social-climate-legend{ margin-top:10px; display:flex; flex-wrap:wrap; gap:16px; font-size:14px; color:var(--gray-700); }
+  .social-climate-legend span{ display:inline-flex; align-items:center; gap:6px; }
+  .social-sw{ width:12px; height:12px; border-radius:999px; display:inline-block; flex:none; }
+  .social-climate-empty{ margin-top:14px; background:#f9fafb; border:1px dashed var(--gray-300); border-radius:8px; padding:16px; font-size:15px; line-height:1.7; color:var(--gray-600); }
+  .social-climate-empty i{ color:#9ca3af; margin-right:7px; }
   @media (max-width:767px){
     /* 그룹비교 막대: 라벨 위 / 막대+값 아래 2줄 스택(가로 스크롤 0) */
     .behav-gc-row{ grid-template-columns:minmax(0,1fr) auto; grid-template-areas:"label label" "track meta"; row-gap:6px; }
@@ -9987,6 +10246,11 @@ const BEHAV_STYLE = `<style>
     .behav-gc-meta{ grid-area:meta; }
     .behav-card .behav-card-title{ font-size:19px; }
     .behav-gc-val{ font-size:17px; }
+    /* [Phase 4b] 모바일 — 이름 pill 숨김(번호만·겹침/과밀 방지), 정서 소제목 축소, 표 여백 축소(375 내 수용) */
+    .social-name-pill{ display:none; }
+    .social-climate-h{ font-size:18px; }
+    .social-climate-seg{ font-size:14px; }
+    .social-table th, .social-table td{ padding:8px 7px; }
   }
 </style>`;
 
@@ -10001,10 +10265,13 @@ VIEWS['t-behavior'] = async function(root){
   if (!BEHAV_SIGNALS.includes(state._behavSignal)) state._behavSignal = 'speed';
   const signal = state._behavSignal;
   const realOn = !!state._behavRealOnly;
+  const isSocial = (signal === 'social');   // [Phase 4b] ⑤ 는 relationship 엔드포인트(그래프+정서 병렬 셰이프)
 
-  const d = await apiGet('/api/lrs/stats/behavior', {
-    scope:'class', classId: state._behavClassId, signal, period:'90d', realOnly: realOn ? '1' : '0'
-  });
+  const d = isSocial
+    ? await apiGet('/api/lrs/stats/relationship', { classId: state._behavClassId, period:'90d', realOnly: realOn ? '1' : '0' })
+    : await apiGet('/api/lrs/stats/behavior', {
+        scope:'class', classId: state._behavClassId, signal, period:'90d', realOnly: realOn ? '1' : '0'
+      });
 
   const clsName = (owned.find(c => String(c.id) === String(state._behavClassId)) || {}).name || (d && d.className) || '';
   const classChips = owned.length > 1
@@ -10025,7 +10292,10 @@ VIEWS['t-behavior'] = async function(root){
       <h1 class="behav-h1">학습 행동 심화 분석</h1>
       <p class="behav-lead">학습 행동(풀이 속도·오답 재풀이·기간 참여·영상 학습 행동)이 <b>성취</b>와 어떤 관계로 <b>함께 나타나는지</b> 살펴봐요. 아래 값은 <b>‘연관성’이지 ‘원인’이 아니에요</b> — 개별 판단 전에 학생과 대화로 확인해 주세요.</p>
     </div>`;
-  const seedBar = _bmSeedBar(d ? d.seedNoticeText : '', realOn, '_behavRealOnly');
+  // 신호 ①~④: seedBar 상시. ⑤ social: seedNotice(합성 포함) 일 때만 노출(§2 순서 · relationship 은 seedNoticeText 없어 문안 지정).
+  const seedBar = isSocial
+    ? ((d && d.seedNotice) ? _bmSeedBar('이 관계망·정서 수치에는 시연용 합성 데이터가 포함돼 있어요. 실데이터가 쌓이면 자동 전환돼요.', realOn, '_behavRealOnly') : '')
+    : _bmSeedBar(d ? d.seedNoticeText : '', realOn, '_behavRealOnly');
 
   if (!d || d.success === false){
     root.innerHTML = BEHAV_STYLE + seedBar + headBlock + filterbar + tplError('학습 행동 분석 데이터를 불러오지 못했어요', () => VIEWS['t-behavior'](root));

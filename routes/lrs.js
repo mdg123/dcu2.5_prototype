@@ -3176,6 +3176,257 @@ router.get('/stats/behavior', requireAuth, (req, res) => {
   }
 });
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// [Phase 4b] 학급 관계·정서 (실명 소시오그램) — GET /api/lrs/stats/relationship
+//   기획 정본: 보고서/LRS_Phase4b_교우관계_PIA_기획서_v2.md (§3 지표·§4 계약·§7 권한/audit·§8 데모)
+//   사용자(충북 평가자)가 PIA 검토 후 "실명 소시오그램"을 명시 채택. 함께 존치 지시한 안전장치는 전부 유지.
+//   ★ behavior signal 셰이프와 다르므로 별도 엔드포인트. 그래프(nodes/edges) + 정서 집계 병렬 패널.
+//   안전장치(코드로 못박음):
+//     - 권한: owner 교사/admin(canViewClass 자기반)만. 비소유 교사·학생·타반 403. classId 누락 400. 접근 audit.
+//     - 익명 글(is_anonymous=1) 작성자 미귀속 → edges·participation.posts 에서 제외(익명성 파훼 차단).
+//     - 노드에 감정·성취 등 개인 결합 필드 절대 부재(결정 5, 이중낙인 차단). 정서는 학급 집계 패널로만.
+//     - 네트워크 지표(중심성·응집도·군집) 미산출(소표본 무의미·낙인 차단).
+//     - smallSample = nodeCount < 20 (하드 마스킹 아님 — 렌더는 하되 "소표본·해석 주의" 신호).
+//     - 노드 크기/색을 참여수에 비례시키지 않음(FE) — 서버는 참여수를 툴팁·표용으로만 실어 보냄.
+// ═══════════════════════════════════════════════════════════════════════════════
+const REL_SMALL_SAMPLE_N = 20;              // nodeCount < 20 → smallSample=true(투명 고지, 마스킹 아님 — 작업지시/기획 §3-5)
+const REL_EMOTION_MASK_N = 5;               // 정서 집계 n<5 → 마스킹(A6 규칙 계승)
+const REL_NEUTRAL_EMOTIONS = new Set(['neutral', 'ok', 'soso', 'so-so', 'normal', '보통']); // A6 _emotionGroupKey 중립 어휘 동기화
+const REL_PURPOSE_NOTE = '본 화면은 학급 관계·정서 지원 목적의 담임 교사 전용 자료입니다. 상담·평가·생활지도 판정 근거로 사용하지 마세요.';
+
+// caveats — 상관≠인과·신호≠판정·소표본·목적제한·화면공유금지(항상 non-empty). 기획서 §5-3 문구.
+function _relationshipCaveats({ smallSample, nodeCount, edgeCount, demoInstrumented }) {
+  const c = [
+    '이 관계망은 게시판 댓글·답글 상호작용만 반영하며, 실제 교우관계의 전부가 아닙니다.',
+    '신호는 대화의 출발점일 뿐 판정이 아닙니다. 수치·연결로 학생을 규정하지 마세요(상관≠인과).',
+    '연결이 적은 학생이 문제 있는 학생인 것은 아닙니다. 맥락은 교사가 압니다.',
+    '정서 분위기는 학급 전체 집계이며 개별 학생 감정과 결합하지 않습니다.',
+    '담임 교사 전용 자료입니다. 화면 공유·캡처·타 용도 사용을 삼가세요(목적 제한).',
+  ];
+  if (smallSample) c.push(`노드 ${nodeCount}개·엣지 ${edgeCount}건으로 통계적 대표성이 낮습니다. 관계망 지표(중심성·응집도)는 산출하지 않으며 참고용입니다.`);
+  if (demoInstrumented) c.push('이 학급은 시연용 합성 데이터입니다. 실제 학생이 아닙니다.');
+  return c;
+}
+
+// 감정 라벨링(A6 _emotionGroupKey 동일 규칙) — emotion_score(1~3) 우선, 없으면 emotion 텍스트.
+function _relEmotionGroup(emotion, escore) {
+  if (escore != null && Number.isFinite(Number(escore))) {
+    const s = Number(escore);
+    if (s >= 2.5) return 'positive';
+    if (s >= 1.5) return 'neutral';
+    return 'negative';
+  }
+  const t = String(emotion || '').trim().toLowerCase();
+  if (!t) return null;
+  if (analytics.NEGATIVE_EMOTIONS.has(t)) return 'negative';
+  if (REL_NEUTRAL_EMOTIONS.has(t)) return 'neutral';
+  return 'positive';
+}
+
+// 테이블에 is_seed 컬럼이 있는지(seed-demo-social 마이그레이션 후에만 존재). realOnly 필터 안전 가드.
+//   미마이그레이션 DB(GCP 등, 시드 미실행)에서는 컬럼이 없으므로 realOnly 필터를 SQL 에 넣지 않는다
+//   (합성 데이터 자체가 없으니 realOnly=전체 = 정직). PRAGMA 는 저렴 → 캐시 없이 매 호출 확인(스테일 방지).
+function _relColHasIsSeed(table) {
+  try { return db.prepare(`PRAGMA table_info(${table})`).all().some(c => c.name === 'is_seed'); }
+  catch (_) { return false; }
+}
+
+// 정서 분위기(학급 집계 병렬 패널) — attendance(class_id 스코프) 감정을 A6 규칙으로 긍정/중립/부정 %.
+//   ★ 노드와 결합하지 않는다(결정 5). n<5 마스킹(수치 null). (user,date) 중복은 하루 1건.
+//   realOnly=true 면 memberIds(실학생만) + is_seed=1 attendance 제외 → 실데이터 기준 정서.
+function _relationshipEmotionClimate(classId, memberIds, fromDate, toDate, realOnly) {
+  if (!memberIds.length) return { positive: null, neutral: null, negative: null, n: 0, masked: true };
+  const ph = memberIds.map(() => '?').join(',');
+  const seedAtt = (realOnly && _relColHasIsSeed('attendance')) ? 'AND COALESCE(is_seed, 0) = 0' : '';
+  let rows;
+  try {
+    rows = db.prepare(`
+      SELECT user_id AS uid, attendance_date AS d, emotion, emotion_score AS escore
+      FROM attendance
+      WHERE class_id = ? AND user_id IN (${ph})
+        AND (emotion IS NOT NULL OR emotion_score IS NOT NULL)
+        AND DATE(attendance_date) BETWEEN ? AND ?
+        ${seedAtt}
+      ORDER BY attendance_date ASC
+    `).all(classId, ...memberIds, fromDate, toDate);
+  } catch (_) { rows = []; }
+  const byKey = new Map();                       // (user,date) 최신 1건(ORDER ASC → 마지막이 최신)
+  for (const r of rows) byKey.set(`${r.uid}|${r.d}`, r);
+  let pos = 0, neu = 0, neg = 0;
+  for (const r of byKey.values()) {
+    const k = _relEmotionGroup(r.emotion, r.escore);
+    if (k === 'positive') pos++; else if (k === 'neutral') neu++; else if (k === 'negative') neg++;
+  }
+  const n = pos + neu + neg;
+  if (n < REL_EMOTION_MASK_N) return { positive: null, neutral: null, negative: null, n, masked: true };
+  return {
+    positive: Math.round((pos / n) * 100),
+    neutral: Math.round((neu / n) * 100),
+    negative: Math.round((neg / n) * 100),
+    n, masked: false,
+  };
+}
+
+// 관계 그래프 — 노드(학급 실멤버 전원) + 방향 엣지(댓글→글작성자, 답글→부모댓글작성자).
+//   ★ 노드에 감정·성취 필드 절대 없음. 익명 글 작성자 미귀속(edges·posts 제외). 자기루프 제외.
+//   realOnly=true 면 합성(is_seed=1) 학생·게시글·댓글을 제외 → 실데이터만(Phase 4a 정직 패턴 일관).
+//     노드 = 실학생만(_behaviorMemberIds). 데모반은 전원 is_seed → 노드 0·엣지 0(화면 빔 = 정상).
+function _relationshipGraph(classId, fromDate, toDate, realOnly) {
+  let students = analytics.classStudents(classId);                // [{ id, name }]
+  if (realOnly) {
+    const realSet = new Set(_behaviorMemberIds(classId, true));    // users.is_seed=0 학생만
+    students = students.filter(s => realSet.has(s.id));
+  }
+  const memberSet = new Set(students.map(s => s.id));
+  const seedPost = (realOnly && _relColHasIsSeed('posts')) ? 'AND COALESCE(is_seed, 0) = 0' : '';
+  const seedComment = (realOnly && _relColHasIsSeed('comments')) ? 'AND COALESCE(c.is_seed, 0) = 0' : '';
+  // 비익명 게시글 수(작성자별) — 익명 글(is_anonymous=1) 제외(귀속 안 함). realOnly 시 is_seed 게시글 제외.
+  const postRows = db.prepare(`
+    SELECT author_id AS uid, COUNT(*) c FROM posts
+    WHERE class_id = ? AND COALESCE(is_anonymous, 0) = 0
+      AND DATE(created_at) BETWEEN ? AND ?
+      ${seedPost}
+    GROUP BY author_id
+  `).all(classId, fromDate, toDate);
+  const postCount = new Map(postRows.map(r => [r.uid, r.c]));
+  // 댓글/답글 → 방향 엣지. 익명 글 대상 제외, 비멤버·자기루프 제외. realOnly 시 is_seed 댓글 제외.
+  const cRows = db.prepare(`
+    SELECT c.author_id AS fromId, c.parent_id AS parentId,
+           pc.author_id AS parentAuthor,
+           p.author_id AS postAuthor, COALESCE(p.is_anonymous, 0) AS postAnon
+    FROM comments c
+    JOIN posts p ON p.id = c.post_id
+    LEFT JOIN comments pc ON pc.id = c.parent_id
+    WHERE p.class_id = ? AND DATE(c.created_at) BETWEEN ? AND ?
+      ${seedComment}
+  `).all(classId, fromDate, toDate);
+  const edgeMap = new Map();                                       // "from|to|type" → weight
+  for (const r of cRows) {
+    const from = r.fromId;
+    if (!memberSet.has(from)) continue;
+    let to, type;
+    if (r.parentId != null) { to = r.parentAuthor; type = 'reply'; }   // 답글 → 부모 댓글 작성자
+    else {
+      if (Number(r.postAnon) === 1) continue;                     // 익명 글 → 대상 미귀속(익명성 보호)
+      to = r.postAuthor; type = 'comment';                        // 댓글 → 글 작성자
+    }
+    if (to == null || !memberSet.has(to)) continue;
+    if (from === to) continue;                                    // 자기 루프 제외(자기댓글)
+    const key = `${from}|${to}|${type}`;
+    edgeMap.set(key, (edgeMap.get(key) || 0) + 1);                // weight = 누적 횟수
+  }
+  const given = new Map(), received = new Map();
+  const edges = [];
+  for (const [key, weight] of edgeMap) {
+    const [f, t, type] = key.split('|');
+    const from = Number(f), to = Number(t);
+    edges.push({ from, to, weight, type });
+    given.set(from, (given.get(from) || 0) + weight);
+    received.set(to, (received.get(to) || 0) + weight);
+  }
+  // 노드 — participation 만(감정·성취 결합 필드 부재). 크기 비례는 FE 에서 균일(참여수는 표·툴팁용).
+  const nodes = students.map(s => ({
+    id: s.id,
+    label: s.name,
+    participation: {
+      posts: postCount.get(s.id) || 0,
+      commentsGiven: given.get(s.id) || 0,
+      commentsReceived: received.get(s.id) || 0,
+    },
+  }));
+  return { nodes, edges };
+}
+
+// 참여 균형 밴드(보조) — (given+received) 지니계수 밴드. 정밀 수치 비노출. 활성 노드<5 → null.
+//   ★ 이것은 참여 편중 관찰 지표이며, 네트워크 지표(중심성·응집도·군집)가 아니다(그건 미산출).
+function _relationshipBalanceBand(nodes) {
+  const vals = nodes.map(n => n.participation.commentsGiven + n.participation.commentsReceived);
+  const active = vals.filter(v => v > 0).length;
+  if (nodes.length < 5 || active < 5) return null;
+  const sorted = [...vals].sort((a, b) => a - b);
+  const nn = sorted.length;
+  const sum = sorted.reduce((a, b) => a + b, 0);
+  if (sum === 0) return null;
+  let cum = 0;
+  for (let i = 0; i < nn; i++) cum += (i + 1) * sorted[i];
+  const gini = (2 * cum) / (nn * sum) - (nn + 1) / nn;
+  if (gini < 0.4) return '균형';
+  if (gini < 0.6) return '다소 편중';
+  return '편중';
+}
+
+// 시연 데모 학급 판별 — seed-demo-social.js 가 생성한 합성 학급(이름 '[시연' 접두).
+function _isDemoRelationshipClass(classId) {
+  try {
+    const c = db.prepare('SELECT name FROM classes WHERE id = ?').get(classId);
+    return !!(c && String(c.name || '').startsWith('[시연'));
+  } catch (_) { return false; }
+}
+
+// 핸들러 — 정본 경로(/stats/relationship) + 기획서 §4 계약 경로(/behavior/social-climate) 공용.
+function handleRelationship(req, res) {
+  try {
+    const classId = parseInt(req.query.classId, 10);
+    if (!Number.isInteger(classId)) {
+      return res.status(400).json({ success: false, message: 'classId가 필요합니다.' });
+    }
+    // 권한 — owner 교사/admin(canViewClass 자기반)만. 비소유 교사·학생(멤버 role) ·타반 → 403.
+    if (!canViewClass(req, classId)) {
+      return res.status(403).json({ success: false, message: '권한이 없습니다.' });
+    }
+    // 기간 — period=term 은 180일, 그 외 resolvePeriod(30d|90d|custom|기본30d).
+    let fromDate, toDate, periodLabel;
+    if (String(req.query.period) === 'term') {
+      const today = new Date(); const start = new Date(today); start.setDate(start.getDate() - 180);
+      fromDate = start.toISOString().slice(0, 10); toDate = today.toISOString().slice(0, 10); periodLabel = 'term';
+    } else {
+      const p = resolvePeriod(req);
+      if (p.invalid) return sendInvalidPeriod(res, p.reason);
+      fromDate = p.fromDate; toDate = p.toDate; periodLabel = p.label;
+    }
+
+    // realOnly=1 → 합성(is_seed) 학생·게시글·댓글·감정 제외(FE "실데이터만" 토글, Phase 4a 정직 패턴).
+    const realOnly = req.query.realOnly === '1' || req.query.realOnly === 'true';
+
+    const memberIds = _behaviorMemberIds(classId, realOnly);       // realOnly 시 users.is_seed=0 학생만
+    const graph = _relationshipGraph(classId, fromDate, toDate, realOnly);
+    const nodeCount = graph.nodes.length;
+    const edgeCount = graph.edges.length;
+    const smallSample = nodeCount < REL_SMALL_SAMPLE_N;
+    // realOnly 시 합성 데모 데이터를 배제하므로 데모 계측·시드 고지를 끈다(빈/실데이터 뷰 = 정직).
+    const demoInstrumented = !realOnly && _isDemoRelationshipClass(classId);
+    const seedNotice = !realOnly && _behaviorSeedFraction(classId) >= 0.5;
+    const emotionClimate = _relationshipEmotionClimate(classId, memberIds, fromDate, toDate, realOnly);
+    const balanceBand = _relationshipBalanceBand(graph.nodes);
+    const caveats = _relationshipCaveats({ smallSample, nodeCount, edgeCount, demoInstrumented });
+
+    // 접근 audit — 실명 그래프 열람(관리자 접근도 로깅). 노드가 있을 때만. best-effort.
+    if (nodeCount > 0) auditNameAccessLrs(req, 'social-graph', classId, nodeCount);
+
+    res.json({
+      success: true,
+      classId, period: periodLabel, realOnly,
+      nodeCount, smallSample,
+      demoInstrumented,
+      instrumentation: demoInstrumented ? 'demo' : 'live',
+      seedNotice,
+      graph,                                                       // canViewClass 통과 요청에만 전달(실패 시 위에서 403)
+      emotionClimate,                                              // 병렬 집계 패널 — 노드 미결합
+      balanceBand,
+      caveats,
+      purposeNote: REL_PURPOSE_NOTE,
+    });
+  } catch (err) {
+    console.error('[LRS] /stats/relationship error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+}
+
+// GET /api/lrs/stats/relationship?classId=&period= — 정본(작업지시). behavior signal 셰이프와 별개.
+router.get('/stats/relationship', requireAuth, handleRelationship);
+// GET /api/lrs/behavior/social-climate — 기획서 §4 계약 경로(alias, 동일 핸들러). FE 어느 참조든 동작.
+router.get('/behavior/social-climate', requireAuth, handleRelationship);
+
 // GET /api/lrs/emotion-engage/class/:id — B6 "정서-참여 교차"(교사 · 반 2×2 매트릭스).
 //   담임/담당(canViewClass) → 403. ?weeks=2(기본, 1~12 클램프).
 //   getClassRiskList 신호 2축 → 4사분면 좌표. 담임=실명+audit / 비담임 소표본=익명.
