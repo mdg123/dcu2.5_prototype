@@ -1004,3 +1004,84 @@ test.describe('스모크: CBT 이탈 감지 계약(이탈시간 누적·감독 �
     } finally { await context.close(); }
   });
 });
+
+// ── 6) [Phase 3] LRS 교사 "학습 행동 심화 분석"(t-behavior) 집중 회귀 ──
+//    기획: 보고서/LRS_Phase3_행동성취_UI_기획_v1.md
+//    activities 진입 → t-behavior 탭 → 4신호 세그먼트 순회. 각 신호에서:
+//      (A) 신호 카드(.behav-card) 렌더  (B) 상단+하단 caveat 안전장치 존재(상관≠인과)
+//      (C) [object Object]/깨진% 0  (D) 콘솔·JS 에러 0  (E) 가로 스크롤 0
+//    데스크탑·모바일 두 뷰포트. 신호①은 그룹비교 막대 + 흡수한 정오×속도 매트릭스 동시 존재.
+test.describe('스모크: LRS 학습 행동 심화 분석(t-behavior)', () => {
+  for (const vp of VIEWPORTS) {
+    test(`교사-t-behavior 4신호 렌더·무결·caveat [${vp.name}]`, async ({ browser }) => {
+      const context = await browser.newContext({ storageState: stateFor('teacher'), locale: 'ko-KR', baseURL: BASE_URL });
+      const consoleErrors = [];
+      const pageErrors = [];
+      try {
+        const page = await context.newPage();
+        page.setViewportSize({ width: vp.width, height: vp.height });
+        page.on('console', (msg) => { if (msg.type() === 'error') { const t = msg.text(); if (!isWhitelisted(t)) consoleErrors.push(`[${vp.name}] ${t}`); } });
+        page.on('pageerror', (err) => { pageErrors.push(`[${vp.name}] ${err.message}`); });
+
+        await page.goto('/lrs/index.html?menu=activities', { waitUntil: 'domcontentloaded' });
+        await page.waitForSelector('#dacheum-gnb-wrapper', { timeout: 10000 }).catch(() => {});
+        await page.waitForSelector('[data-view="t-behavior"]', { timeout: 15000 }).catch(() => {});
+
+        // t-behavior 탭 진입 → 신호 카드(또는 담당 0반 빈패널) 렌더 대기.
+        let landed = false;
+        for (let attempt = 0; attempt < 3 && !landed; attempt++) {
+          await page.evaluate(() => { const b = document.querySelector('[data-view="t-behavior"]'); if (b) b.click(); else location.hash = '#t-behavior'; }).catch(() => {});
+          landed = await page.waitForFunction(() => {
+            const vr = document.getElementById('viewRoot');
+            return !!(vr && vr.querySelector('.behav-card, .dc-state-panel'));
+          }, { timeout: 10000 }).then(() => true).catch(() => false);
+        }
+        expect.soft(landed, `t-behavior [${vp.name}] 신호 카드/빈패널 미렌더`).toBeTruthy();
+
+        const noClass = await page.evaluate(() => !document.querySelector('.behav-seg-btn'));
+        if (noClass) { test.skip(true, '담당(개설) 반 0개 — 빈 패널로 스킵'); }
+
+        const SIGS = ['speed', 'retry', 'participation', 'rewatch'];
+        for (const sig of SIGS) {
+          await page.evaluate((s) => { const b = document.querySelector(`.behav-seg-btn[data-behavsig="${s}"]`); if (b) b.click(); }, sig).catch(() => {});
+          await page.waitForFunction((s) => {
+            return (window.state && state._behavSignal === s) && !!document.querySelector('.behav-card');
+          }, sig, { timeout: 8000 }).catch(() => {});
+          await page.waitForTimeout(250);
+
+          const r = await page.evaluate(() => {
+            const card = document.querySelector('.behav-card');
+            const txt = card ? (card.innerText || '') : '';
+            return {
+              hasCard: !!card,
+              topCaveat: !!document.querySelector('.behav-card .lrs-insight.info'),
+              botCaveats: document.querySelectorAll('.behav-caveats li').length,
+              hasGroupsOrEmpty: !!(document.querySelector('.behav-gc-row') || document.querySelector('.behav-card .dc-state-panel')),
+              hasMatrix: !!document.querySelector('#behavShallowHost .shallow-matrix'),
+              objObj: (txt.match(/\[object Object\]/g) || []).length,
+              broken: /\b[1-9]\d{3,}\s*%|NaN/.test(txt),
+              titlePx: (() => { const h = document.querySelector('.behav-card-title'); return h ? parseFloat(getComputedStyle(h).fontSize) : null; })(),
+            };
+          });
+          expect.soft(r.hasCard, `t-behavior/${sig} [${vp.name}] 신호 카드 없음`).toBeTruthy();
+          expect.soft(r.topCaveat, `t-behavior/${sig} [${vp.name}] 상단 상관≠인과 캐비어트 배너 없음`).toBeTruthy();
+          expect.soft(r.botCaveats, `t-behavior/${sig} [${vp.name}] 하단 caveats 목록 없음`).toBeGreaterThan(0);
+          expect.soft(r.hasGroupsOrEmpty, `t-behavior/${sig} [${vp.name}] 그룹 막대/빈상태 둘 다 없음`).toBeTruthy();
+          expect.soft(r.objObj, `t-behavior/${sig} [${vp.name}] [object Object] ${r.objObj}건`).toBe(0);
+          expect.soft(r.broken, `t-behavior/${sig} [${vp.name}] 깨진 %/NaN 표기`).toBeFalsy();
+          expect.soft(r.titlePx, `t-behavior/${sig} [${vp.name}] 카드 제목 ${r.titlePx}px < 19(스케일 위반)`).toBeGreaterThanOrEqual(19);
+          if (sig === 'speed') expect.soft(r.hasMatrix, `t-behavior/speed [${vp.name}] 흡수한 정오×속도 매트릭스 없음`).toBeTruthy();
+
+          // 가로 스크롤 0 (각 신호마다)
+          const ov = await page.evaluate(() => ({ sw: document.documentElement.scrollWidth, cw: document.documentElement.clientWidth }));
+          expect.soft(ov.sw, `t-behavior/${sig} [${vp.name}] 가로 스크롤 scrollWidth ${ov.sw} > clientWidth ${ov.cw}`).toBeLessThanOrEqual(ov.cw + 1);
+        }
+        await page.close();
+      } finally {
+        await context.close();
+      }
+      const allErrors = [...pageErrors, ...consoleErrors];
+      expect.soft(allErrors.length, `t-behavior [${vp.name}] 콘솔/JS 에러:\n${allErrors.join('\n')}`).toBe(0);
+    });
+  }
+});

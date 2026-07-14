@@ -900,6 +900,15 @@
     .lrs-insight.info{   background:#eff6ff; border-left-color:#2563eb; color:#1e3a8a; }
     .lrs-insight.good{   background:#f0fdf4; border-left-color:#16a34a; color:#166534; }
 
+    /* ===== '풀이 속도-정확도 점검' 이관 안내 카드(t-usage 잔류 링크) ===== */
+    .behav-moved-card{ display:flex; align-items:center; justify-content:space-between; gap:14px; flex-wrap:wrap;
+      background:#eff6ff; border:1px solid #bfdbfe; border-left:4px solid #2563eb; border-radius:10px; padding:14px 18px; }
+    .behav-moved-card .behav-moved-txt{ display:flex; align-items:flex-start; gap:10px; flex:1 1 320px; min-width:0;
+      font-size:15px; color:#1e3a8a; line-height:1.6; }
+    .behav-moved-card .behav-moved-txt i{ color:#2563eb; margin-top:3px; }
+    .behav-moved-card .behav-moved-txt b{ color:#1d4ed8; font-weight:700; }
+    .behav-moved-card .btn-sm{ flex:none; white-space:nowrap; }
+
     /* ===== 풀이 속도-정확도 점검 — 2×3 카운트 매트릭스(주 시각화) ===== */
     .shallow-matrix{ display:grid; grid-template-columns:72px 1fr 1fr 1fr; gap:10px; margin-top:6px; }
     .shallow-matrix .sm-corner{ display:flex; flex-direction:column; align-items:flex-start; justify-content:flex-end;
@@ -1303,6 +1312,7 @@ const MENUS = {
     { id:'t-usage',      label:'활용 현황',        icon:'fa-chalkboard',            group:'분석',         category:'analytics' },
     { id:'t-xapi',       label:'표준체계 분석',    icon:'fa-diagram-project',       group:'분석',         category:'analytics' },
     { id:'t-perform',    label:'학습 활동 수행',  icon:'fa-tasks',                 group:'학습 활동',     category:'activities' },
+    { id:'t-behavior',   label:'학습 행동 심화 분석', icon:'fa-wave-square',        group:'학습 활동',     category:'activities' },
     { id:'t-daily-benchmark', label:'오늘의 학습 도 비교', icon:'fa-calendar-week',   group:'학습 활동',     category:'activities' },
     { id:'t-custom',     label:'맞춤학습 관리',    icon:'fa-compass',               group:'학습 활동',     category:'activities' },
     { id:'t-daily',      label:'일일현황',        icon:'fa-calendar-day',          group:'분석',         category:'analytics' },
@@ -1405,7 +1415,7 @@ const LEGACY_MENU_TO_CATEGORY = {
   's-perform':'activities','s-custom':'activities','s-daily':'analytics',
   't-home':'home','t-usage':'analytics','t-subject':'analytics',
   't-perform':'activities','t-custom':'activities','t-daily':'activities',
-  't-warnings':'analytics','t-weakstrong':'analytics','t-classcompare':'analytics','t-benchmark':'analytics','t-daily-benchmark':'activities','t-drill':'activities','t-teacher-idx':'operations',
+  't-warnings':'analytics','t-weakstrong':'analytics','t-classcompare':'analytics','t-benchmark':'analytics','t-daily-benchmark':'activities','t-behavior':'activities','t-drill':'activities','t-teacher-idx':'operations',
   // 신규 5블록
   'a-home':'home','a-svc-ops':'analytics','a-macro':'analytics','a-equity':'analytics','a-cross':'analytics','a-time':'analytics',
   'a-xapi':'operations','a-teacher-idx':'operations','a-quality':'operations','a-export':'reports',
@@ -5423,13 +5433,17 @@ function shallowSpeedOf(p){
   return 'normal';
 }
 
-async function renderShallowLearning(host){
+// opts(선택): { classId, days } — t-behavior 신호①(풀이속도) 재사용 시 선택 반·기간을 주입.
+//   미지정 시 기존 동작(resolveClassId · 30일) 유지.
+async function renderShallowLearning(host, opts){
   if (!host) return;
+  opts = opts || {};
   host.innerHTML = tplLoading(2);
-  const cid = await resolveClassId();
-  const d = await apiGet('/api/lrs/shallow/class/' + encodeURIComponent(cid), { days:30 });
+  const cid = (opts.classId != null) ? opts.classId : await resolveClassId();
+  const reqDays = (opts.days != null) ? opts.days : 30;
+  const d = await apiGet('/api/lrs/shallow/class/' + encodeURIComponent(cid), { days: reqDays });
   if (!d || d.success === false){
-    host.innerHTML = `<section class="dc-chart-wrapper" style="padding:24px 28px;border-radius:16px;">${tplError('풀이 속도-정확도 점검 데이터를 불러오지 못했어요', ()=>setView('t-usage'))}</section>`;
+    host.innerHTML = `<section class="dc-chart-wrapper" style="padding:24px 28px;border-radius:16px;">${tplError('풀이 속도-정확도 점검 데이터를 불러오지 못했어요', ()=>setView('t-behavior'))}</section>`;
     return;
   }
 
@@ -6987,8 +7001,14 @@ VIEWS['t-usage'] = async function(root){
         <div id="tUsageHeat"></div>
       </section>
     </div>
-    <!-- B4: 풀이 속도-정확도 점검 (하단 append) -->
-    <div id="tShallowHost" style="margin-top:16px;"></div>`;
+    <!-- B4 '풀이 속도-정확도 점검'은 t-behavior(학습 행동 심화 분석) 신호①로 이관 — 행방불명 방지 안내 링크만 잔류(1릴리스) -->
+    <div id="tShallowMoved" class="behav-moved-card" role="status" style="margin-top:16px;">
+      <div class="behav-moved-txt">
+        <i class="fas fa-circle-info" aria-hidden="true"></i>
+        <span>‘풀이 속도-정확도 점검’은 <b>학습 행동 심화 분석</b>으로 옮겼어요. 풀이 속도·오답 재풀이·기간 참여를 성취와 함께 살펴볼 수 있어요.</span>
+      </div>
+      <button type="button" class="btn btn-sm" id="tShallowMovedBtn"><i class="fas fa-wave-square" aria-hidden="true"></i> 학습 행동 심화 분석으로 이동</button>
+    </div>`;
   if (rows.length){
     mkChart(document.getElementById('tUsagePie'),'doughnut',{
       labels: rows.map(r=>pickLabel(r, ['service_label','service','source_service','service_key','service_name'], '(미분류)')),
@@ -7006,8 +7026,9 @@ VIEWS['t-usage'] = async function(root){
     document.getElementById('tUsageHeat').innerHTML = tplEmpty('아직 학급 활동 기록이 없어요');
   }
 
-  // B4 "풀이 속도-정확도 점검" — 정오×속도 매트릭스 + 분석 멘트 + 산점도(담임/담당, 하단 append)
-  await renderShallowLearning(document.getElementById('tShallowHost'));
+  // B4 "풀이 속도-정확도 점검"은 t-behavior 로 이관됨 → 안내 링크만 바인딩(복귀 동선).
+  const movedBtn = document.getElementById('tShallowMovedBtn');
+  if (movedBtn) movedBtn.onclick = ()=> setView('t-behavior');
 };
 
 VIEWS['t-subject'] = async function(root){
@@ -9594,6 +9615,321 @@ function _bmBindDaily(root){
 }
 
 /* ======================================================================
+ * [Phase 3] VIEWS['t-behavior'] — [교사] 학습 행동 심화 분석 · activities
+ *   기획: 보고서/LRS_Phase3_행동성취_UI_기획_v1.md((a) 흡수·확장) + _방법론_API_v1.md(정직성)
+ *   BE: GET /api/lrs/stats/behavior?scope=class&classId=&signal=speed|retry|participation|rewatch
+ *   4신호 인페이지 세그먼트 탭. 신호①(풀이속도)은 기존 shallow 카드를 그대로 흡수(renderShallowLearning),
+ *     상단에 그룹비교 막대(renderGroupCompare)만 얹음. 신호④(재시청)는 정직 비노출.
+ *   상관≠인과 3중 안전장치: 상단 고정 캐비어트 배너 + 관찰형 insights + 하단 caveats 배너.
+ *   재사용: _bmFetchOwnedClasses·_bmNoClassPanel·_bmSeedBar·_bmBindCommon·renderInsights·
+ *     renderShallowLearning·_reportInsightHtml·tplEmpty/Error. 신규는 renderGroupCompare 1개.
+ * ==================================================================== */
+const BEHAV_SIGNALS = ['speed', 'retry', 'participation', 'rewatch'];
+const BEHAV_PERIOD_DAYS_FE = { '30d': 30, '90d': 90, 'term': 180 };
+const BEHAV_SIG_META = {
+  speed:         { num:'①', label:'풀이 속도',    icon:'⏱️',
+    title:'풀이 속도와 성취의 관계',
+    help:'같은 콘텐츠를 푼 우리 반 학생의 중앙값 시간을 기준으로 빠름/보통/느림 3그룹으로 나눠 그룹별 평균 정답률을 견줘요. 아래엔 정답·오답까지 교차한 6칸 매트릭스가 이어져요.' },
+  retry:         { num:'②', label:'오답 재풀이',  icon:'🔁',
+    title:'오답 재풀이와 성취의 관계',
+    help:'오답노트 재풀이 기록의 유무로 두 그룹으로 나눠 그룹별 평균 성취(정답률)를 견줘요. 해결률은 데이터가 적어 사용하지 않아요.' },
+  participation: { num:'③', label:'기간 내 참여', icon:'📅',
+    title:'기한 내 참여와 성취의 관계',
+    help:'실제 제출·이수 기록(과제 제출·평가 응시·수업 이수)의 유무로 참여/미참여를 나눠 그룹별 평균 성취를 견줘요. 기한준수(기한내/지연)는 로그 조인 불가로 계측하지 않아요.' },
+  rewatch:       { num:'④', label:'영상 재시청',  icon:'🔂',
+    title:'영상 재시청과 성취의 관계',
+    help:'영상(콘텐츠) 반복 접근 횟수로 그룹을 나눠 도달률을 견주려 하지만, 접근은 실제 시청과 다르고 반 단위 표본이 적어 기본적으로 표시하지 않아요.' },
+};
+// 그룹 톤 → 색(§6-1 토큰 계열 일치: 막대 채움/글자). BE groups[].tone(good/warn/info/danger).
+const BEHAV_TONE = {
+  good:   { fill:'#16a34a', text:'#15803d' },
+  warn:   { fill:'#f59e0b', text:'#b45309' },
+  info:   { fill:'#2563eb', text:'#1d4ed8' },
+  danger: { fill:'#ef4444', text:'#b91c1c' },
+};
+
+/* ★신규 공통 위젯 — 행동 그룹 × 평균 성취 수평 막대(표본수 병기·소표본 마스킹·저신뢰 배지·반평균 기준선).
+   cfg = { metricLabel, unit, groups:[{key,label,value|null,n,masked,lowConf|lowConfidence,tone}], refValue, comparison }.
+   의미 순서 고정(정렬 금지) · n 무조건 병기 · masked 회색 해치 · 5≤n<10 '참고' 배지 · role=list 접근성. */
+function renderGroupCompare(host, cfg){
+  if (!host) return;
+  cfg = cfg || {};
+  const groups = Array.isArray(cfg.groups) ? cfg.groups : [];
+  const unit = cfg.unit || '%';
+  const metricLabel = cfg.metricLabel || '평균 성취';
+  const refValue = (cfg.refValue != null && !isNaN(cfg.refValue)) ? Number(cfg.refValue) : null;
+  if (!groups.length){ host.innerHTML = ''; return; }
+  const refPct = refValue != null ? Math.max(0, Math.min(100, refValue)) : null;
+
+  const rows = groups.map(g => {
+    const tone = BEHAV_TONE[g.tone] || BEHAV_TONE.info;
+    const n = Number(g.n) || 0;
+    const low = !!(g.lowConf || g.lowConfidence);
+    const nBadge = `<span class="behav-gc-n">· ${n}명</span>`;
+    if (g.masked || g.value == null){
+      return `<div class="behav-gc-row" role="listitem" aria-label="${escapeAttr(g.label + ', 표본 부족 ' + n + '명')}">
+        <div class="behav-gc-label">${escapeHtml(g.label)}</div>
+        <div class="behav-gc-track behav-gc-track--masked"><span class="behav-gc-maskn">표본 부족(n&lt;5)</span></div>
+        <div class="behav-gc-meta"><span class="behav-gc-val behav-gc-val--muted">–</span>${nBadge}</div>
+      </div>`;
+    }
+    const val = Number(g.value);
+    const w = Math.max(2, Math.min(100, val));
+    const lowBadge = low ? `<span class="behav-gc-low" title="표본 5~9명 — 참고">참고</span>` : '';
+    const aria = `${g.label}, ${metricLabel} ${val}${unit}, ${n}명${low ? ', 참고' : ''}`;
+    return `<div class="behav-gc-row" role="listitem" aria-label="${escapeAttr(aria)}">
+      <div class="behav-gc-label">${escapeHtml(g.label)}</div>
+      <div class="behav-gc-track">
+        <span class="behav-gc-fill" style="width:${w}%;background:${tone.fill};"></span>
+        ${refPct != null ? `<span class="behav-gc-ref" style="left:${refPct}%;"></span>` : ''}
+      </div>
+      <div class="behav-gc-meta"><span class="behav-gc-val" style="color:${tone.text};">${escapeHtml(String(val))}${unit}</span>${lowBadge}${nBadge}</div>
+    </div>`;
+  }).join('');
+
+  const refLegend = refValue != null
+    ? `<span class="behav-gc-reflegend"><i aria-hidden="true"></i> 반 평균 ${escapeHtml(String(refValue))}${unit}</span>` : '';
+  const cmp = cfg.comparison;
+  const cmpLine = (cmp && cmp.gapPP != null)
+    ? `<div class="behav-gc-cmp"><i class="fas fa-left-right" aria-hidden="true"></i> ‘${escapeHtml(cmp.topLabel)}’과(와) ‘${escapeHtml(cmp.bottomLabel)}’ 그룹의 관측 격차 <b>${escapeHtml(String(cmp.gapPP))}%p</b> <span class="behav-gc-cmpnote">(${escapeHtml(cmp.note || '관측된 차이')})</span></div>`
+    : '';
+
+  host.innerHTML = `
+    <div class="behav-gc-head"><span class="behav-gc-metric">${escapeHtml(metricLabel)}</span>${refLegend}</div>
+    <div class="behav-gc" role="list" aria-label="${escapeAttr(metricLabel + ' 그룹 비교')}">${rows}</div>
+    ${cmpLine}`;
+}
+
+/* 하단 caveats 배너(§4 상관≠인과 안전장치 — 접기 불가·항상 렌더). caveats[0]은 상단 배너로 노출하므로 여기선 나머지. */
+function _behavCaveatsHtml(caveats){
+  const list = Array.isArray(caveats) ? caveats.filter(Boolean) : [];
+  if (!list.length) return '';
+  return `<div class="behav-caveats" role="note" aria-label="해석할 때 주의사항">
+    <div class="behav-caveats-h"><i class="fas fa-triangle-exclamation" aria-hidden="true"></i> 해석할 때 꼭 기억해 주세요</div>
+    <ul>${list.map(c => `<li>${escapeHtml(c)}</li>`).join('')}</ul>
+  </div>`;
+}
+
+/* 신호 카드 렌더 — §3-1 공통 4블록(헤더 → 고정 캐비어트 → 관찰형 insights → 그룹비교 막대(+신호① 매트릭스) → 하단 caveats). */
+function renderBehaviorSignal(host, signal, d){
+  if (!host) return;
+  const meta = BEHAV_SIG_META[signal] || { icon:'📊', label:'행동 신호', title:'행동 신호', help:'' };
+  const caveats = Array.isArray(d.caveats) ? d.caveats : [];
+  const topCaveat = caveats.length ? _reportInsightHtml({ level:'info', text: caveats[0] }) : '';
+  const studentCount = Number(d.studentCount) || 0;
+  const periodLabel = d.period === '30d' ? '최근 30일' : (d.period === 'term' ? '이번 학기' : '최근 90일');
+
+  const header = `<header class="behav-card-head">
+      <div class="behav-card-headmain">
+        <h2 class="behav-card-title">${meta.icon} ${escapeHtml(meta.title)}<span class="lrs-help" tabindex="0" role="button" aria-label="${escapeAttr(meta.label)} 설명"><i class="fas fa-circle-question" aria-hidden="true"></i><span class="lrs-help-pop">${escapeHtml(meta.help)}</span></span></h2>
+        ${d.dataNote ? `<div class="behav-card-sub">${escapeHtml(d.dataNote)}</div>` : ''}
+      </div>
+      <div class="behav-headchips">
+        <span class="behav-chip"><i class="fas fa-users" aria-hidden="true"></i> 대상 ${studentCount}명</span>
+        <span class="behav-chip"><i class="fas fa-calendar-day" aria-hidden="true"></i> ${periodLabel} 누적</span>
+      </div>
+    </header>`;
+
+  const lowConfBanner = (d.lowConfidence && studentCount > 0 && !(signal === 'rewatch' && d.available === false))
+    ? `<div class="behav-lowconf"><i class="fas fa-circle-info" aria-hidden="true"></i> 우리 반은 표본이 작아(성취 산출 ${studentCount}명) 그룹 경향이 불안정해요. 학습이 쌓이면 더 정확해져요.</div>`
+    : '';
+
+  let body;
+  if (signal === 'rewatch' && d.available === false){
+    body = `${tplEmpty(d.emptyReason || '우리 반의 영상 재시청 기록이 아직 적어 관계를 보여드리기 어려워요. 영상 학습이 쌓이면 자동으로 채워져요.')}
+      <div class="behav-note behav-note--muted"><i class="fas fa-circle-info" aria-hidden="true"></i> 영상 건너뛰기(seek) 분석은 로깅 신설 후 향후 제공 예정이에요.</div>
+      <div class="behav-foot"><i class="fas fa-circle-info" aria-hidden="true"></i> ${escapeHtml(d.disclaimer || '')}</div>`;
+  } else if (d.empty && signal !== 'speed'){
+    body = `${tplEmpty(d.emptyReason || '아직 이 신호를 관측할 기록이 적어요. 학습이 쌓이면 자동으로 채워져요.')}
+      <div class="behav-foot"><i class="fas fa-circle-info" aria-hidden="true"></i> ${escapeHtml(d.disclaimer || '')}</div>`;
+  } else {
+    body = `<div id="behavGroupCompare" class="behav-gc-wrap"></div>`;
+    if (signal === 'participation'){
+      const ba = d.byActivity || {};
+      body += `<div class="behav-byact"><span class="behav-byact-h">참여 집계(실 제출·이수 기록):</span>
+          <span class="behav-chip behav-chip--soft">수업 이수 ${Number(ba.lesson && ba.lesson.n) || 0}명</span>
+          <span class="behav-chip behav-chip--soft">과제 제출 ${Number(ba.homework && ba.homework.n) || 0}명</span>
+          <span class="behav-chip behav-chip--soft">평가 응시 ${Number(ba.exam && ba.exam.n) || 0}명</span></div>`;
+      if (d.onTime && d.onTime.available === false){
+        body += `<div class="behav-note"><i class="fas fa-circle-info" aria-hidden="true"></i> 기한준수(기한내/지연)는 표시하지 않아요 — ${escapeHtml(d.onTime.reason || '')}</div>`;
+      }
+    }
+    if (signal === 'speed'){
+      body += `<details class="behav-matrix-details" open>
+          <summary><span class="sd-caret">▶</span> 정답·오답까지 함께 보기 (정오 × 속도 매트릭스)</summary>
+          <div id="behavShallowHost" style="margin-top:12px;"></div>
+        </details>`;
+    }
+    body += `<div class="behav-foot"><i class="fas fa-circle-info" aria-hidden="true"></i> ${escapeHtml(d.disclaimer || '')}</div>`;
+  }
+
+  host.innerHTML = `<section class="dc-chart-wrapper behav-card" style="padding:24px 28px;border-radius:16px;">
+      ${header}
+      ${topCaveat}
+      ${lowConfBanner}
+      <div class="lrs-insight-wrap" id="behavInsights" style="display:none;"></div>
+      ${body}
+      ${_behavCaveatsHtml(caveats.slice(1))}
+    </section>`;
+
+  renderInsights(document.getElementById('behavInsights'), d.insights);
+  const gcHost = document.getElementById('behavGroupCompare');
+  if (gcHost) renderGroupCompare(gcHost, { metricLabel: d.metricLabel, unit: d.unit || '%', groups: d.groups, refValue: d.refValue, comparison: d.comparison });
+  if (signal === 'speed'){
+    const mh = document.getElementById('behavShallowHost');
+    if (mh) renderShallowLearning(mh, { classId: state._behavClassId, days: BEHAV_PERIOD_DAYS_FE[d.period] || 90 });
+  }
+}
+
+/* 뷰 스코프 스타일(BM_STYLE 패턴 — 전체 재렌더로 중복 누적 없음). */
+const BEHAV_STYLE = `<style>
+  .behav-head{ margin:0 0 var(--space-4); }
+  .behav-h1{ font-size:var(--fs-h1); font-weight:800; color:var(--gray-900); margin:0 0 6px; }
+  .behav-lead{ font-size:16px; line-height:1.7; color:var(--gray-700); margin:0; max-width:900px; }
+  .behav-lead b{ color:var(--lrs-primary-dark); font-weight:700; }
+  /* 세그먼트 탭 4신호 — 선택 시 primary 배경·흰 글자(현재 위치 피드백). 좁으면 wrap(가로 스크롤 0). */
+  .behav-seg{ display:flex; flex-wrap:wrap; gap:8px; width:100%; }
+  .behav-seg-btn{ flex:1 1 auto; min-width:0; display:inline-flex; align-items:center; justify-content:center; gap:6px;
+    font-size:16px; font-weight:600; font-family:inherit; padding:10px 16px; border-radius:10px;
+    border:1px solid var(--gray-300); background:#fff; color:var(--gray-700); cursor:pointer;
+    white-space:nowrap; transition:background .12s, color .12s, border-color .12s; }
+  .behav-seg-btn .behav-seg-num{ font-weight:800; opacity:.8; }
+  .behav-seg-btn:hover{ background:var(--lrs-primary-lighter); color:var(--gray-900); }
+  .behav-seg-btn:focus-visible{ outline:2px solid var(--lrs-primary); outline-offset:2px; }
+  .behav-seg-btn.is-on{ background:var(--lrs-primary); color:#fff; border-color:var(--lrs-primary); }
+  .behav-seg-btn.is-on .behav-seg-num{ opacity:1; }
+  /* 신호 카드 */
+  .behav-card-head{ display:flex; align-items:flex-start; justify-content:space-between; gap:12px; flex-wrap:wrap; margin-bottom:12px; }
+  .behav-card-headmain{ flex:1 1 auto; min-width:0; }
+  /* .behav-card 접두어로 전역 '.dc-chart-wrapper h2'(--fs-h2) 특이도를 이겨 20px 유지 */
+  .behav-card .behav-card-title{ font-size:20px; font-weight:700; color:var(--gray-900); margin:0; display:inline-flex; align-items:center; line-height:1.35; }
+  .behav-card-sub{ font-size:14px; color:var(--gray-600); line-height:1.6; margin-top:4px; }
+  .behav-headchips{ flex:none; display:flex; gap:8px; flex-wrap:wrap; }
+  .behav-chip{ display:inline-flex; align-items:center; gap:6px; white-space:nowrap;
+    font-size:13px; font-weight:600; padding:5px 12px; border-radius:999px;
+    background:var(--gray-100); color:var(--gray-600); }
+  .behav-chip i{ font-size:12px; }
+  .behav-chip--soft{ background:#eff6ff; color:#1d4ed8; }
+  /* 그룹 비교 막대 */
+  .behav-gc-wrap{ margin:14px 0 4px; }
+  .behav-gc-head{ display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; margin-bottom:10px; }
+  .behav-gc-metric{ font-size:15px; font-weight:700; color:var(--gray-700); }
+  .behav-gc-reflegend{ font-size:13px; color:var(--gray-500); display:inline-flex; align-items:center; gap:6px; }
+  .behav-gc-reflegend i{ display:inline-block; width:0; height:14px; border-left:2px dashed #6b7280; }
+  .behav-gc{ display:flex; flex-direction:column; gap:12px; }
+  .behav-gc-row{ display:grid; grid-template-columns:116px minmax(0,1fr) minmax(96px,max-content); align-items:center; gap:12px; }
+  .behav-gc-label{ font-size:15px; font-weight:700; color:var(--gray-800); min-width:0; word-break:keep-all; }
+  .behav-gc-track{ position:relative; height:22px; background:var(--gray-100); border-radius:6px; overflow:hidden; }
+  .behav-gc-fill{ position:absolute; left:0; top:0; bottom:0; min-width:3px; border-radius:6px; }
+  .behav-gc-ref{ position:absolute; top:-3px; bottom:-3px; width:0; border-left:2px dashed #6b7280; z-index:1; }
+  .behav-gc-track--masked{ background:repeating-linear-gradient(45deg,#f3f4f6,#f3f4f6 6px,#e5e7eb 6px,#e5e7eb 12px); overflow:visible; display:flex; align-items:center; }
+  .behav-gc-maskn{ font-size:13px; font-weight:600; color:#9ca3af; padding-left:10px; }
+  .behav-gc-meta{ display:inline-flex; align-items:baseline; gap:6px; white-space:nowrap; justify-content:flex-end; }
+  .behav-gc-val{ font-size:18px; font-weight:700; }
+  .behav-gc-val--muted{ color:#9ca3af; }
+  .behav-gc-n{ font-size:13px; color:var(--gray-500); }
+  .behav-gc-low{ font-size:12px; font-weight:700; color:#b45309; border:1px dashed #f59e0b; border-radius:999px; padding:1px 8px; }
+  .behav-gc-cmp{ margin-top:12px; font-size:14px; color:var(--gray-700); line-height:1.6; }
+  .behav-gc-cmp i{ color:var(--lrs-primary); margin-right:4px; }
+  .behav-gc-cmp b{ color:var(--lrs-primary-dark); }
+  .behav-gc-cmpnote{ color:var(--gray-500); font-size:13px; }
+  /* 참여 집계·주석·각주·저신뢰 */
+  .behav-byact{ margin:14px 0 4px; display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+  .behav-byact-h{ font-size:14px; font-weight:600; color:var(--gray-600); }
+  .behav-note{ margin:12px 0 0; font-size:14px; color:var(--gray-600); line-height:1.6; background:#f9fafb; border:1px solid #eef2f7; border-radius:8px; padding:10px 14px; }
+  .behav-note i{ color:#9ca3af; margin-right:6px; }
+  .behav-note--muted{ background:transparent; border:0; padding:6px 0 0; }
+  .behav-lowconf{ margin:12px 0 0; font-size:14px; color:#92400e; background:#fffbeb; border:1px solid #fde68a; border-left:4px solid #f59e0b; border-radius:8px; padding:12px 16px; line-height:1.6; }
+  .behav-lowconf i{ margin-right:6px; }
+  .behav-foot{ margin-top:14px; font-size:13px; color:var(--gray-500); line-height:1.6; }
+  .behav-foot i{ margin-right:6px; }
+  /* 하단 caveats 배너(항상 노출) */
+  .behav-caveats{ margin-top:16px; background:#eff6ff; border:1px solid #bfdbfe; border-left:4px solid var(--lrs-primary); border-radius:10px; padding:14px 18px; }
+  .behav-caveats-h{ font-size:15px; font-weight:700; color:var(--lrs-primary-dark); margin-bottom:8px; }
+  .behav-caveats-h i{ margin-right:6px; }
+  .behav-caveats ul{ margin:0; padding-left:20px; }
+  .behav-caveats li{ font-size:14px; color:#1e3a8a; line-height:1.7; margin:2px 0; word-break:keep-all; }
+  /* 매트릭스 details(신호①) */
+  .behav-matrix-details{ margin-top:16px; border-top:1px solid #f0f1f3; padding-top:8px; }
+  .behav-matrix-details > summary{ cursor:pointer; list-style:none; display:inline-flex; align-items:center; gap:6px;
+    font-size:15px; font-weight:700; color:var(--lrs-primary-dark); padding:6px 2px; user-select:none; }
+  .behav-matrix-details > summary::-webkit-details-marker{ display:none; }
+  .behav-matrix-details > summary .sd-caret{ transition:transform .15s; font-size:12px; }
+  .behav-matrix-details[open] > summary .sd-caret{ transform:rotate(90deg); }
+  .behav-matrix-details > summary:focus-visible{ outline:0; box-shadow:0 0 0 3px rgba(37,99,235,.35); border-radius:6px; }
+  @media (max-width:767px){
+    /* 그룹비교 막대: 라벨 위 / 막대+값 아래 2줄 스택(가로 스크롤 0) */
+    .behav-gc-row{ grid-template-columns:minmax(0,1fr) auto; grid-template-areas:"label label" "track meta"; row-gap:6px; }
+    .behav-gc-label{ grid-area:label; }
+    .behav-gc-track{ grid-area:track; }
+    .behav-gc-meta{ grid-area:meta; }
+    .behav-card .behav-card-title{ font-size:19px; }
+    .behav-gc-val{ font-size:17px; }
+  }
+</style>`;
+
+VIEWS['t-behavior'] = async function(root){
+  // 세그먼트·클래스 칩은 setView 를 거치지 않고 이 뷰를 직접 재호출 → 신호①(속도) shallow 산점도
+  //   Chart.js 인스턴스 누수 방지로 재렌더 진입 시 차트 정리(신규 렌더가 필요분 재생성).
+  destroyCharts();
+  root.innerHTML = tplLoading(3);
+  const owned = await _bmFetchOwnedClasses();
+  if (!owned.length){ root.innerHTML = BEHAV_STYLE + _bmNoClassPanel(); return; }
+  if (state._behavClassId == null || !owned.some(c => String(c.id) === String(state._behavClassId))) state._behavClassId = owned[0].id;
+  if (!BEHAV_SIGNALS.includes(state._behavSignal)) state._behavSignal = 'speed';
+  const signal = state._behavSignal;
+  const realOn = !!state._behavRealOnly;
+
+  const d = await apiGet('/api/lrs/stats/behavior', {
+    scope:'class', classId: state._behavClassId, signal, period:'90d', realOnly: realOn ? '1' : '0'
+  });
+
+  const clsName = (owned.find(c => String(c.id) === String(state._behavClassId)) || {}).name || (d && d.className) || '';
+  const classChips = owned.length > 1
+    ? `<div class="dc-unit-toggle" id="behavClassToggle" role="group" aria-label="클래스 선택"><span class="dc-eq-flabel">클래스</span>${owned.map(c =>
+        `<button class="chip" type="button" data-behavclass="${escapeAttr(String(c.id))}" aria-pressed="${String(c.id) === String(state._behavClassId) ? 'true' : 'false'}">${escapeHtml(c.name)}</button>`).join('')}</div>`
+    : '';
+  const segTabs = `<div class="behav-seg" role="tablist" aria-label="행동 신호 선택">${
+    BEHAV_SIGNALS.map(s => { const m = BEHAV_SIG_META[s]; const on = s === signal;
+      return `<button class="behav-seg-btn${on ? ' is-on' : ''}" type="button" role="tab" data-behavsig="${s}" aria-selected="${on ? 'true' : 'false'}" tabindex="${on ? '0' : '-1'}"><span class="behav-seg-num">${m.num}</span> ${escapeHtml(m.label)}</button>`;
+    }).join('')}</div>`;
+  const summary = `<div class="dc-eq-summary" role="status"><i class="fas fa-filter" aria-hidden="true"></i> 필터: ${escapeHtml(clsName)} · ${escapeHtml((BEHAV_SIG_META[signal] || {}).label || '')}</div>`;
+  const filterbar = `<div class="bm-filterbar">
+      ${classChips ? `<div class="bm-frow">${classChips}</div>` : ''}
+      <div class="bm-frow">${segTabs}</div>
+      ${summary}
+    </div>`;
+  const headBlock = `<div class="behav-head">
+      <h1 class="behav-h1">학습 행동 심화 분석</h1>
+      <p class="behav-lead">학습 행동(풀이 속도·오답 재풀이·기간 참여·영상 재시청)이 <b>성취</b>와 어떤 관계로 <b>함께 나타나는지</b> 살펴봐요. 아래 값은 <b>‘연관성’이지 ‘원인’이 아니에요</b> — 개별 판단 전에 학생과 대화로 확인해 주세요.</p>
+    </div>`;
+  const seedBar = _bmSeedBar(d ? d.seedNoticeText : '', realOn, '_behavRealOnly');
+
+  if (!d || d.success === false){
+    root.innerHTML = BEHAV_STYLE + seedBar + headBlock + filterbar + tplError('학습 행동 분석 데이터를 불러오지 못했어요', () => VIEWS['t-behavior'](root));
+    _behavBind(root);
+    return;
+  }
+
+  root.innerHTML = BEHAV_STYLE + seedBar + headBlock + filterbar + `<div id="behavSignalCard"></div>`;
+  renderBehaviorSignal(document.getElementById('behavSignalCard'), signal, d);
+  _behavBind(root);
+};
+
+function _behavBind(root){
+  // 클래스 칩 → 선택 반 재조회
+  root.querySelectorAll('#behavClassToggle button[data-behavclass]').forEach(b => {
+    b.onclick = () => { if (String(state._behavClassId) === b.dataset.behavclass) return; state._behavClassId = b.dataset.behavclass; VIEWS['t-behavior'](root); };
+  });
+  // 신호 세그먼트 → 신호 전환 재조회
+  root.querySelectorAll('.behav-seg button[data-behavsig]').forEach(b => {
+    b.onclick = () => { if (state._behavSignal === b.dataset.behavsig) return; state._behavSignal = b.dataset.behavsig; VIEWS['t-behavior'](root); };
+  });
+  // 실데이터 토글(_bmSeedBar → data-realkey=_behavRealOnly) 재사용. 클래스 쿼리(#bmClassToggle)는 no-op.
+  _bmBindCommon(root, () => VIEWS['t-behavior'](root));
+}
+
+/* ======================================================================
  * ④ 활동×성취 교차분석 (a-cross)
  *    인사이트 배너 + 3분위 매트릭스 + 산점도 + 콘텐츠/스스로채움 상하위 비교
  * ==================================================================== */
@@ -10952,7 +11288,9 @@ async function setView(id){
     // Phase2 도 벤치마크: t-benchmark(누적 기준·기간 미배치) / t-daily-benchmark(뷰 자체 기간 세그먼트 사용)
     //   둘 다 전역 기간칩 무효 → inert. (t-daily-benchmark 는 'benchmark' 로 끝나 daily 정규식에 안 걸리므로 명시)
     const isBenchmark = (id === 't-benchmark' || id === 't-daily-benchmark');
-    const isPeriodInert = isDailyView || isWeakStrong || isBenchmark;
+    // t-behavior(학습 행동 심화 분석): 누적(90일) 기준·연관 분석이라 전역 기간칩 무효 → inert.
+    const isBehavior = (id === 't-behavior');
+    const isPeriodInert = isDailyView || isWeakStrong || isBenchmark || isBehavior;
     const picker = document.getElementById('periodPicker');
     const fbar = picker ? picker.closest('.dc-filter-bar') : null;
     if (fbar) {
@@ -10971,6 +11309,8 @@ async function setView(id){
             ? '<i class="fas fa-circle-info" aria-hidden="true"></i> 도 벤치마크는 평가 누적 기준이라 기간 선택을 쓰지 않아요'
           : (id === 't-daily-benchmark')
             ? '<i class="fas fa-circle-info" aria-hidden="true"></i> 이 화면은 아래 자체 날짜 선택을 써요 (위 기간 선택은 사용 안 함)'
+          : (id === 't-behavior')
+            ? '<i class="fas fa-circle-info" aria-hidden="true"></i> 학습 행동 심화 분석은 누적(최근 90일) 기준이라 기간 선택을 쓰지 않아요'
           : '<i class="fas fa-circle-info" aria-hidden="true"></i> 이 화면은 오늘·어제 고정이라 기간 선택을 쓰지 않아요';
         note.hidden = false;
       } else if (note) { note.hidden = true; }

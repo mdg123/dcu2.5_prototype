@@ -2619,6 +2619,380 @@ router.get('/shallow/class/:id', requireAuth, (req, res) => {
   }
 });
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// [Phase 3] 심화 행동분석 — GET /api/lrs/stats/behavior
+//   기획: 보고서/LRS_Phase3_행동성취_방법론_API_v1.md(산식·API) · _UI_기획_v1.md(FE 계약)
+//   원칙: 행동↔성취는 '연관(association)'이지 '인과' 아님 → insights 관찰형, caveats 4종 필수.
+//   재사용(신규 산식 최소): normScoreExpr/scoredWhere(점수 스케일 SSOT)·getShallowLearning(속도)·
+//     canViewClass·MIN_SAMPLE_N·classStudentIds/classStudents·mastery.reachRate.
+//   신규 집계 헬퍼는 retry(wrong_note_retry 로그)·participation(제출·이수 실테이블)만.
+//   마스킹: 그룹 n<5 → value=null(0채움 금지). 5≤n<10 → lowConfidence(참고 배지).
+//   ★ signal 별 데이터 한계(도메인 감사 실측):
+//     - retry: wrong_answers.is_resolved 5건뿐 → 해결률 미사용, 재풀이 유/무만(2그룹).
+//     - participation: 완료 로그 object_id 합성이라 assignment 조인 불가 → 기한준수(on-time) 계측 금지.
+//       실 제출·이수 테이블(homework_submissions·exam_students·lesson_self_check)만으로 참여 유/무.
+//     - rewatch: content_view 는 '접근' 이벤트(시청 완료 아님)+시드 스파이크+역인과 → 정직 비노출 기본.
+// ═══════════════════════════════════════════════════════════════════════════════
+const BEHAV_MASK_N = 5;                                  // 그룹 n<5 → 값 마스킹
+const BEHAV_PERIOD_DAYS = { '30d': 30, '90d': 90, 'term': 180 };
+const BEHAV_SIGNALS = ['speed', 'retry', 'participation', 'rewatch'];
+const BEHAV_SEED_TEXT = '본 분석은 시연용 시드 데이터 기반이며, 실 운영 데이터가 쌓이면 자동으로 반영됩니다.';
+const BEHAV_ASSOC_CAVEAT = "이 결과는 행동과 성취가 '함께 나타난' 연관성이며, 행동이 성취의 '원인'이라고 단정할 수 없습니다.";
+const BEHAV_SMALL_CAVEAT = '표본이 작을수록 학생 한 명이 결과를 크게 바꿉니다. n이 작은 그룹의 값은 참고로만 봐 주세요.';
+
+// realOnly 반영 반 학생 id (users.is_seed=0 만 — ON 시 거의 빈 결과가 정상).
+function _behaviorMemberIds(classId, realOnly) {
+  let ids = analytics.classStudentIds(classId);
+  if (realOnly && ids.length) {
+    const ph = ids.map(() => '?').join(',');
+    ids = db.prepare(
+      `SELECT id FROM users WHERE id IN (${ph}) AND (is_seed = 0 OR is_seed IS NULL)`
+    ).all(...ids).map(r => r.id);
+  }
+  return ids;
+}
+
+// 반 시드 비율(realOnly 무관 전체 명단 기준) — seedNotice 판정용.
+function _behaviorSeedFraction(classId) {
+  const ids = analytics.classStudentIds(classId);
+  if (!ids.length) return 0;
+  const ph = ids.map(() => '?').join(',');
+  const seed = db.prepare(`SELECT COUNT(*) c FROM users WHERE id IN (${ph}) AND is_seed = 1`).get(...ids).c;
+  return seed / ids.length;
+}
+
+// 교과 필터 alias 확장(선택) — 성취(채점 로그) 산출을 특정 교과로 한정. subject 없으면 null(전체).
+function _behaviorSubjectList(subject) {
+  if (!subject) return null;
+  const canon = analytics.canonicalSubject(subject);
+  const set = new Set([subject, canon]);
+  for (const [alias, c] of Object.entries(analytics.SUBJECT_ALIAS || {})) {
+    if (c === canon) set.add(alias);
+  }
+  return Array.from(set);
+}
+
+// 학생별 성취맵: 정규화 정답률(0~100) + success/attempts. 채점형 로그(scoredWhere)만.
+//   base 모집단 = "성취 산출 가능한(채점 로그 있는)" 학생 → 행동 그룹 비교의 공통 분모.
+function _behaviorAchMap(memberIds, days, subjectList) {
+  const map = new Map();
+  if (!memberIds.length) return map;
+  const ph = memberIds.map(() => '?').join(',');
+  const subjPh = subjectList && subjectList.length ? subjectList.map(() => '?').join(',') : null;
+  const rows = db.prepare(`
+    SELECT ll.user_id AS uid,
+           AVG(${normScoreExpr('ll')}) AS score,
+           COUNT(*) AS n,
+           SUM(CASE WHEN ll.result_success = 1 THEN 1 ELSE 0 END) AS success,
+           SUM(CASE WHEN ll.result_success IN (0,1) THEN 1 ELSE 0 END) AS attempts
+    FROM learning_logs ll
+    WHERE ll.user_id IN (${ph})
+      AND ${scoredWhere('ll')}
+      AND ll.result_score IS NOT NULL
+      AND ll.created_at >= date('now', ?)
+      ${subjPh ? `AND ll.subject_code IN (${subjPh})` : ''}
+    GROUP BY ll.user_id
+  `).all(...memberIds, `-${days} days`, ...(subjPh ? subjectList : []));
+  for (const r of rows) {
+    map.set(r.uid, {
+      score: r.score == null ? null : Math.round(Number(r.score) * 10) / 10,
+      n: Number(r.n) || 0,
+      success: Number(r.success) || 0,
+      attempts: Number(r.attempts) || 0,
+    });
+  }
+  return map;
+}
+
+// 그룹 1개 빌드 — values=그룹 학생들의 성취값 배열. n<5 마스킹(value null), 5≤n<10 저신뢰.
+//   metricField: 'avgScore'|'reachRate' (신호별 별칭도 함께 노출 — FE 하위호환).
+function _behaviorGroup(key, label, values, tone, metricField) {
+  const n = values.length;
+  const masked = n < BEHAV_MASK_N;
+  const lowConf = !masked && n < MIN_SAMPLE_N;
+  const value = masked ? null : Math.round((values.reduce((a, b) => a + b, 0) / n) * 10) / 10;
+  const compareText = masked
+    ? `${label}: 표본 부족(n<${BEHAV_MASK_N})`
+    : `${label} ${value}% · ${n}명${lowConf ? ' (참고)' : ''}`;
+  const g = { key, label, n, value, masked, lowConf, lowConfidence: lowConf, tone, compareText };
+  g[metricField] = value;                               // avgScore | reachRate
+  return g;
+}
+
+// 두 그룹 이상 비마스킹 시 최고↔최저 격차(pp). 아니면 null.
+function _behaviorComparison(groups) {
+  const vis = groups.filter(g => !g.masked && g.value != null);
+  if (vis.length < 2) return null;
+  const top = vis.reduce((a, b) => (b.value > a.value ? b : a));
+  const bot = vis.reduce((a, b) => (b.value < a.value ? b : a));
+  return {
+    topLabel: top.label, bottomLabel: bot.label,
+    gapPP: Math.round((top.value - bot.value) * 10) / 10,
+    note: '관측된 차이(연관)',
+  };
+}
+
+// caveats 4종(연관≠인과 + 소표본 + 역인과 + 교란 + 시드) — 신호별 맞춤. 항상 비어있지 않음.
+function _behaviorCaveats(signal) {
+  const reverse = {
+    speed: '어려운 내용일수록 오래 걸릴 수 있어, 낮은 성취가 느린 풀이를 유발했을 수도 있습니다(역인과 가능).',
+    retry: '성취가 낮아 오답이 많은 학생이 재풀이도 많이 하게 됐을 수 있습니다(역인과 가능).',
+    participation: '학습 습관이 좋은 학생이 참여도 성취도 함께 높은 것일 수 있어, 참여가 성취의 원인이라 단정할 수 없습니다(역인과 가능).',
+    rewatch: '어려운 콘텐츠일수록 반복해 접근하므로, 낮은 성취가 재시청을 유발했을 가능성이 큽니다(역인과). 재시청은 도움 신호로 읽어 주세요.',
+  };
+  const confound = {
+    speed: '빠르게 맞힌 학생은 이미 잘 아는 학생일 수도, 찍었을 수도 있어 속도만으로 성취를 설명할 수 없습니다(교란변수).',
+    retry: '재풀이가 많은 학생은 전반적으로 학습량·사전 학력도 높은 경향이 있어, 차이를 재풀이 하나로 볼 수 없습니다(교란변수).',
+    participation: '참여에는 가정·환경 등 여러 사정이 얽혀 있어, 미참여를 성취 부족으로 해석하면 안 됩니다(교란변수).',
+    rewatch: '재시청 로그는 실제 시청 완료가 아닌 접근 반복이라, 시청의 효과로 해석할 수 없습니다(교란변수).',
+  };
+  return [
+    BEHAV_ASSOC_CAVEAT,
+    BEHAV_SMALL_CAVEAT,
+    reverse[signal],
+    confound[signal],
+    BEHAV_SEED_TEXT,
+  ];
+}
+
+// ── 신호별 빌더 ────────────────────────────────────────────────────────────────
+function buildBehaviorSignal(classId, { signal, subject, period, realOnly }) {
+  const days = BEHAV_PERIOD_DAYS[period] || 90;
+  const subjectList = _behaviorSubjectList(subject);
+  const memberIds = _behaviorMemberIds(classId, realOnly);
+  const studentCount = memberIds.length;
+  let className = `클래스 ${classId}`;
+  try { const c = db.prepare('SELECT name FROM classes WHERE id = ?').get(classId); if (c && c.name) className = c.name; } catch (_) {}
+  const seedNotice = _behaviorSeedFraction(classId) >= 0.5;
+
+  const base = {
+    signal, subject: subject || 'all', period, realOnly: !!realOnly,
+    className, classStudents: studentCount, studentCount,
+    minSample: BEHAV_MASK_N, maskThreshold: BEHAV_MASK_N, lowConfThreshold: MIN_SAMPLE_N,
+    seedNotice, seedNoticeText: BEHAV_SEED_TEXT,
+    lowConfidence: studentCount < MIN_SAMPLE_N,
+    caveats: _behaviorCaveats(signal),
+    unit: '%',
+  };
+
+  // ── ① 풀이속도 → getShallowLearning 위임(신규 산식 0). points[]로 속도밴드 성취 재집계.
+  if (signal === 'speed') {
+    const shallow = analytics.getShallowLearning(classId, { days });
+    const bandAgg = {
+      fast: { correct: 0, total: 0, users: new Set() },
+      normal: { correct: 0, total: 0, users: new Set() },
+      slow: { correct: 0, total: 0, users: new Set() },
+    };
+    for (const p of (shallow.points || [])) {
+      const b = bandAgg[p.speed]; if (!b) continue;
+      b.total++; if (p.correct) b.correct++; b.users.add(p.userId);
+    }
+    const meta = [['fast', '빠름', 'warn'], ['normal', '보통', 'good'], ['slow', '느림', 'info']];
+    const groups = meta.map(([k, label, tone]) => {
+      const b = bandAgg[k];
+      const n = b.users.size;
+      const masked = n < BEHAV_MASK_N;
+      const lowConf = !masked && n < MIN_SAMPLE_N;
+      const value = (masked || b.total === 0) ? null : Math.round((b.correct / b.total) * 1000) / 10;
+      const compareText = masked
+        ? `${label}: 표본 부족(n<${BEHAV_MASK_N})`
+        : `${label} ${value}% · ${n}명${lowConf ? ' (참고)' : ''}`;
+      return { key: k, label, n, value, avgScore: value, masked, lowConf, lowConfidence: lowConf, tone, compareText };
+    });
+    const allCorrect = groups.reduce((s, _g, i) => s + bandAgg[meta[i][0]].correct, 0);
+    const allTotal = groups.reduce((s, _g, i) => s + bandAgg[meta[i][0]].total, 0);
+    const refValue = allTotal ? Math.round((allCorrect / allTotal) * 1000) / 10 : null;
+    // insights: getShallowLearning 이 이미 관찰형으로 산출(최대 2). 없으면 폴백.
+    let insights = (shallow.insights || []).slice(0, 2);
+    if (!insights.length) insights = [{ level: 'info', icon: '🔵', text: '아직 속도-성취 관계를 관측할 로그가 적어요. 학습이 쌓이면 자동으로 채워져요.' }];
+    return {
+      ...base,
+      metricLabel: '정답률',
+      groups, refValue, comparison: _behaviorComparison(groups),
+      matrix: shallow.matrix, hasWrongData: shallow.hasWrongData, wrongUnits: shallow.wrongUnits,
+      maskedContentCount: shallow.maskedContentCount, medianThreshold: shallow.medianThreshold,
+      available: true,
+      empty: (shallow.points || []).length === 0,
+      emptyReason: (shallow.points || []).length === 0 ? '풀이 시간·정오 로그가 아직 적어요.' : null,
+      masked: groups.every(g => g.masked),
+      insights,
+      dataNote: '풀이속도는 콘텐츠 그룹별 중앙시간 대비 상대속도로 추정하며, 정답·오답(정오)과 교차해 봅니다.',
+      disclaimer: shallow.disclaimer,
+    };
+  }
+
+  // 공통: 성취맵 + 반 평균(refValue)
+  const achMap = _behaviorAchMap(memberIds, days, subjectList);
+  const scored = Array.from(achMap.values()).filter(a => a.score != null);
+  const refValue = scored.length ? Math.round((scored.reduce((s, a) => s + a.score, 0) / scored.length) * 10) / 10 : null;
+  const noData = achMap.size === 0;
+
+  // ── ② 오답 재풀이 → wrong_note_retry 로그 유/무 2그룹 × 평균 성취(정답률).
+  if (signal === 'retry') {
+    let retrySet = new Set();
+    if (memberIds.length) {
+      const ph = memberIds.map(() => '?').join(',');
+      const rows = db.prepare(`
+        SELECT user_id, COUNT(*) c FROM learning_logs
+        WHERE activity_type = 'wrong_note_retry' AND user_id IN (${ph})
+          AND created_at >= date('now', ?)
+        GROUP BY user_id
+      `).all(...memberIds, `-${days} days`);
+      retrySet = new Set(rows.filter(r => r.c > 0).map(r => r.user_id));
+    }
+    const did = [], didnt = [];
+    for (const [uid, a] of achMap) { if (a.score == null) continue; (retrySet.has(uid) ? did : didnt).push(a.score); }
+    const groups = [
+      _behaviorGroup('retried', '오답 재풀이함', did, 'good', 'avgScore'),
+      _behaviorGroup('not_retried', '재풀이 안 함', didnt, 'info', 'avgScore'),
+    ];
+    const comparison = _behaviorComparison(groups);
+    const insights = comparison
+      ? [{ level: 'info', icon: '🔵', text: `오답을 다시 푼 학생 그룹에서 평균 성취가 ${comparison.topLabel === '오답 재풀이함' ? '더 높게' : '다르게'} 관측됩니다(연관 경향). 성실한 학생이 재풀이도 성취도 함께 높은 것일 수 있어요.` }]
+      : [{ level: 'info', icon: '🔵', text: '재풀이 기록 표본이 적어 두 그룹의 차이를 안정적으로 관측하기 어렵습니다. 기록이 쌓이면 자동으로 반영돼요.' }];
+    return {
+      ...base, metricLabel: '평균 성취(정답률)',
+      groups, refValue, comparison, available: true,
+      empty: noData, emptyReason: noData ? '아직 채점된 학습 기록이 적어 성취를 계산할 수 없어요.' : null,
+      masked: groups.every(g => g.masked),
+      insights,
+      dataNote: '오답 재풀이는 오답노트 재풀이 로그의 유/무로만 그룹화합니다(해결률은 데이터 부족으로 사용하지 않음).',
+      disclaimer: '재풀이한 학생이 원래 성실해서 성취가 높을 수도 있어요(원인·결과가 반대일 수 있음).',
+    };
+  }
+
+  // ── ③ 기간내 참여 → 실 제출·이수 테이블(과제·평가·수업) 유/무 2그룹 × 평균 성취.
+  if (signal === 'participation') {
+    const partSet = new Set();
+    const chan = { lesson: new Set(), homework: new Set(), exam: new Set() };
+    if (memberIds.length) {
+      const ph = memberIds.map(() => '?').join(',');
+      const days2 = `-${days} days`;
+      try {
+        for (const r of db.prepare(`
+          SELECT DISTINCT hs.student_id AS uid FROM homework_submissions hs
+          JOIN homework h ON h.id = hs.homework_id
+          WHERE h.class_id = ? AND hs.student_id IN (${ph})
+            AND (hs.is_draft = 0 OR hs.is_draft IS NULL) AND hs.submitted_at IS NOT NULL
+        `).all(classId, ...memberIds)) { partSet.add(r.uid); chan.homework.add(r.uid); }
+      } catch (_) {}
+      try {
+        for (const r of db.prepare(`
+          SELECT DISTINCT es.user_id AS uid FROM exam_students es
+          JOIN exams e ON e.id = es.exam_id
+          WHERE e.class_id = ? AND es.user_id IN (${ph}) AND es.status = 'submitted'
+        `).all(classId, ...memberIds)) { partSet.add(r.uid); chan.exam.add(r.uid); }
+      } catch (_) {}
+      try {
+        for (const r of db.prepare(`
+          SELECT DISTINCT lsc.user_id AS uid FROM lesson_self_check lsc
+          WHERE lsc.class_id = ? AND lsc.user_id IN (${ph})
+        `).all(classId, ...memberIds)) { partSet.add(r.uid); chan.lesson.add(r.uid); }
+      } catch (_) {}
+    }
+    const yes = [], no = [];
+    for (const [uid, a] of achMap) { if (a.score == null) continue; (partSet.has(uid) ? yes : no).push(a.score); }
+    const groups = [
+      _behaviorGroup('participated', '기간 내 참여', yes, 'good', 'avgScore'),
+      _behaviorGroup('not_participated', '미참여', no, 'info', 'avgScore'),
+    ];
+    const comparison = _behaviorComparison(groups);
+    const insights = comparison
+      ? [{ level: 'info', icon: '🔵', text: `${comparison.topLabel === '기간 내 참여' ? '기간 내 참여 학생 그룹에서 평균 성취가 더 높게' : '이 표본에서는 미참여 학생 그룹의 평균 성취가 더 높게'} 관측됩니다(연관 경향). 참여 여부를 성취의 원인으로 단정하지 말아 주세요.` }]
+      : [{ level: 'info', icon: '🔵', text: '참여/미참여 표본이 한쪽으로 치우쳐(또는 적어) 두 그룹 비교가 어렵습니다. 기록이 쌓이면 자동으로 반영돼요.' }];
+    return {
+      ...base, metricLabel: '평균 성취(정답률)',
+      groups, refValue, comparison, available: true,
+      byActivity: { lesson: { n: chan.lesson.size }, homework: { n: chan.homework.size }, exam: { n: chan.exam.size } },
+      // 기한준수(on-time): 완료 로그 object_id 합성이라 assignment 조인 불가 → 정직 비노출.
+      onTime: { available: false, reason: '완료 로그가 과제·평가와 조인되지 않고 실 제출 표본도 적어, 기한준수(기한내/지연)는 계측하지 않습니다.' },
+      empty: noData, emptyReason: noData ? '아직 채점된 학습 기록이 적어 성취를 계산할 수 없어요.' : null,
+      masked: groups.every(g => g.masked),
+      insights,
+      dataNote: '참여는 실제 제출·이수 기록(과제 제출·평가 응시·수업 이수) 유무만 사용합니다. 기한준수는 로그 조인 불가로 계측하지 않습니다.',
+      disclaimer: '기한을 지킨(참여한) 학생이 원래 학습 습관이 좋아 성취가 높을 수 있어, 참여 자체가 원인이라 단정할 수 없어요.',
+    };
+  }
+
+  // ── ④ 재시청 → content_view 반복(접근 이벤트). 오독 위험 최고 → 기본 정직 비노출.
+  if (signal === 'rewatch') {
+    const bandUsers = { none: [], mid: [], high: [] }; // 없음(<2) / 2~5회 / 6회+
+    let rwMap = new Map();
+    if (memberIds.length) {
+      const ph = memberIds.map(() => '?').join(',');
+      const rows = db.prepare(`
+        SELECT user_id AS uid, MAX(rep) AS maxrep FROM (
+          SELECT user_id, object_id, COUNT(*) AS rep FROM learning_logs
+          WHERE activity_type = 'content_view' AND object_id IS NOT NULL
+            AND user_id IN (${ph}) AND created_at >= date('now', ?)
+          GROUP BY user_id, object_id
+        ) GROUP BY user_id
+      `).all(...memberIds, `-${days} days`);
+      rwMap = new Map(rows.map(r => [r.uid, Number(r.maxrep) || 0]));
+    }
+    // 성취값 = 도달률(reachRate) 재사용. base 모집단 = 성취 산출 가능 학생.
+    for (const [uid, a] of achMap) {
+      if (a.score == null) continue;
+      const reach = mastery.reachRate(a.success, a.attempts, a.score);
+      if (reach == null) continue;
+      const maxrep = rwMap.get(uid) || 0;
+      if (maxrep >= 6) bandUsers.high.push(reach);
+      else if (maxrep >= 2) bandUsers.mid.push(reach);
+      else bandUsers.none.push(reach);
+    }
+    const groups = [
+      _behaviorGroup('none', '재시청 없음', bandUsers.none, 'info', 'reachRate'),
+      _behaviorGroup('mid', '재시청 2~5회', bandUsers.mid, 'good', 'reachRate'),
+      _behaviorGroup('high', '재시청 6회+', bandUsers.high, 'warn', 'reachRate'),
+    ];
+    // 정직 노출 게이트: 주요 밴드(없음·2~5회) 각각 n≥10 이어야 노출. 반 스코프는 사실상 항상 비노출.
+    const available = groups[0].n >= MIN_SAMPLE_N && groups[1].n >= MIN_SAMPLE_N;
+    return {
+      ...base, metricLabel: '평균 도달률',
+      groups, refValue: null, comparison: available ? _behaviorComparison(groups) : null,
+      available,
+      reason: available ? null : 'insufficient_or_misleading',
+      empty: !available,
+      emptyReason: available ? null : '우리 반의 영상 재시청 기록이 아직 적고, 재시청은 실제 시청과 다를 수 있어 관계를 보여드리기 어려워요. 영상 학습이 쌓이면 자동으로 채워져요.',
+      masked: true,
+      lowConfidence: true,
+      insights: [{ level: 'info', icon: '🔵', text: '재시청은 콘텐츠 접근(조회) 반복이라 실제 시청 완료를 알 수 없고, 반 단위 표본도 적어 경향을 제시하지 않습니다.' }],
+      dataNote: '재시청은 콘텐츠 접근(조회) 반복 횟수로, 실제 시청 완료·시청 구간은 계측되지 않습니다. 영상 건너뛰기(seek) 분석은 향후 제공 예정입니다.',
+      disclaimer: '재시청 로그는 접속 반복이라 실제로 끝까지 봤는지는 알 수 없어요.',
+    };
+  }
+
+  return { ...base, groups: [], available: false, empty: true, insights: [{ level: 'info', icon: '🔵', text: '알 수 없는 신호입니다.' }] };
+}
+
+// GET /api/lrs/stats/behavior?scope=class&classId=&signal=speed|retry|participation|rewatch
+//   권한: canViewClass(소유 교사/admin) — 비소유 403. classId 누락 400 · bad signal 400.
+//   subject(선택)·period(30d|90d|term, 기본 90d)·realOnly(0|1).
+router.get('/stats/behavior', requireAuth, (req, res) => {
+  try {
+    const classId = parseInt(req.query.classId, 10);
+    if (!Number.isInteger(classId)) {
+      return res.status(400).json({ success: false, message: 'classId가 필요합니다.' });
+    }
+    const signal = String(req.query.signal || '').toLowerCase();
+    if (!BEHAV_SIGNALS.includes(signal)) {
+      return res.status(400).json({ success: false, message: 'signal은 speed|retry|participation|rewatch 중 하나여야 합니다.' });
+    }
+    if (!canViewClass(req, classId)) {
+      return res.status(403).json({ success: false, message: '권한이 없습니다.' });
+    }
+    const subject = (req.query.subject && req.query.subject !== 'all') ? String(req.query.subject) : null;
+    const period = ['30d', '90d', 'term'].includes(String(req.query.period)) ? String(req.query.period) : '90d';
+    const realOnly = req.query.realOnly === '1' || req.query.realOnly === 'true';
+
+    const result = buildBehaviorSignal(classId, { signal, subject, period, realOnly });
+    res.json({ success: true, scope: 'class', classId, ...result });
+  } catch (err) {
+    console.error('[LRS] /stats/behavior error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
 // GET /api/lrs/emotion-engage/class/:id — B6 "정서-참여 교차"(교사 · 반 2×2 매트릭스).
 //   담임/담당(canViewClass) → 403. ?weeks=2(기본, 1~12 클램프).
 //   getClassRiskList 신호 2축 → 4사분면 좌표. 담임=실명+audit / 비담임 소표본=익명.
