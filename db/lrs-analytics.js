@@ -1395,7 +1395,9 @@ function getEmotionEngage(classId, { weeks = 2 } = {}) {
     let engageNote = '정상';
     if (sEngage >= 0.7) engageNote = '활동 급감';
     else if (sEngage >= 0.4) engageNote = '활동 감소';
-    const emotionNote = hasEmotion ? `부정 ${Math.round(sEmotion * 100)}%` : '감정 기록 없음';
+    // 툴팁 감정 요약 — 긍정·부정을 함께(부정만 노출하면 편향). 긍정=비부정(점 y축과 일치), 합 100%.
+    const _negPct = Math.round(sEmotion * 100);
+    const emotionNote = hasEmotion ? `긍정 ${100 - _negPct}% · 부정 ${_negPct}%` : '감정 기록 없음';
 
     points.push({
       userId: r.userId,
