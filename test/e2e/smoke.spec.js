@@ -1085,3 +1085,51 @@ test.describe('스모크: LRS 학습 행동 심화 분석(t-behavior)', () => {
     });
   }
 });
+
+// ── 7) [활동 현황 F] LRS 교사 활용 히트맵 스코프 계약 회귀 (감리 REWORK 박제) ──
+//    RW-1: 전체 스코프 히트맵 셀 드릴이 classId=all 전송으로 400(첫 방문 전원 영향)이 되지 않아야 함.
+//          FE 계약: 전체 스코프 드릴은 권한 게이트용 classId(소유 반)만 + heatScope 미전송 → BE all-owned 200.
+//    RW-2: 특정 클래스 스코프에서 daily 히트맵은 heatScope=class 로 좁혀져 by-service(도넛) 합과 일치해야 함
+//          (INV-HC1: heatmapDowHour 합 == by-service count 합 == heatmap-cell 드릴 total 정합).
+test.describe('스모크: LRS 활동 현황 히트맵 스코프 계약(감리 REWORK)', () => {
+  test('전체 드릴 200(400 아님) · 클래스 히트맵==도넛 합 · 드릴 heatScope 좁힘', async ({ browser }) => {
+    const context = await browser.newContext({ storageState: stateFor('teacher'), locale: 'ko-KR', baseURL: BASE_URL });
+    try {
+      const page = await context.newPage();
+      await page.goto('/lrs/index.html?menu=analytics#t-usage', { waitUntil: 'domcontentloaded' });
+      // 소유 클래스 목록 → 데이터(비 데모/시연) 클래스 선정
+      const owned = await page.evaluate(async () => {
+        const r = await fetch('/api/class/my', { credentials: 'include' });
+        const j = await r.json();
+        return (j.classes || []).map(c => ({ id: c.id, name: c.name }));
+      });
+      if (!owned.length) { test.info().annotations.push({ type: 'skip-screen', description: '담당 클래스 0 — 스킵' }); await page.close(); return; }
+      const dataClass = owned.find(c => !/시연|데모/.test(c.name || '')) || owned[0];
+
+      // RW-1: 전체 스코프 드릴(권한용 classId + heatScope 없음) → 200. classId=all(NaN) → 400 회귀 감시.
+      const rw1 = await page.evaluate(async (cid) => {
+        const okAll = await fetch(`/api/lrs/stats/heatmap-cell?dow=0&hour=1&classId=${cid}`, { credentials: 'include' }).then(r => r.status);
+        const badAll = await fetch('/api/lrs/stats/heatmap-cell?dow=0&hour=1&classId=all', { credentials: 'include' }).then(r => r.status);
+        return { okAll, badAll };
+      }, dataClass.id);
+      expect(rw1.okAll, `RW-1: 전체 스코프 드릴(classId=${dataClass.id}, heatScope 없음) 200 기대`).toBe(200);
+      expect(rw1.badAll, 'RW-1 회귀 감시: classId=all 은 400(FE 가 이 값을 보내면 안 됨)').toBe(400);
+
+      // RW-2: 특정 클래스 스코프 — daily(heatScope=class) 히트맵 합 == by-service(classId) 도넛 합.
+      const rw2 = await page.evaluate(async (cid) => {
+        const daily = await fetch(`/api/lrs/stats/daily?classId=${cid}&heatScope=class`, { credentials: 'include' }).then(r => r.json());
+        const svc = await fetch(`/api/lrs/stats/by-service?classId=${cid}`, { credentials: 'include' }).then(r => r.json());
+        const heat = (daily.heatmapDowHour || []).reduce((a, row) => a + row.reduce((x, y) => x + (Number(y) || 0), 0), 0);
+        const donut = (svc.stats || []).reduce((a, r) => a + (Number(r.count) || 0), 0);
+        const drillStatus = await fetch(`/api/lrs/stats/heatmap-cell?dow=0&hour=1&classId=${cid}&heatScope=class`, { credentials: 'include' }).then(r => r.status);
+        return { heat, donut, drillStatus };
+      }, dataClass.id);
+      expect(rw2.drillStatus, 'RW-2: 클래스 스코프 드릴(classId+heatScope) 200 기대').toBe(200);
+      expect(rw2.heat, `RW-2: 클래스 히트맵 합(${rw2.heat}) == 도넛 합(${rw2.donut}) (heatScope 좁힘 정합)`).toBe(rw2.donut);
+
+      await page.close();
+    } finally {
+      await context.close();
+    }
+  });
+});

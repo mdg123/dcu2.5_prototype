@@ -1255,20 +1255,51 @@ function periodDays(){
   return isFinite(n) && n > 0 ? n : 30;
 }
 
+/* 클래스에 채점/활동 데이터가 있는지 판정(버그 A 공통 기준). BE 힌트(has_scored_activity/
+   activity_count) 우선, 없으면 null(미상) — 미상이면 "제외하지 않음". BE·FE 공유 규칙. */
+function _classHasData(c){
+  if (!c) return null;
+  const f = (c.has_scored_activity != null) ? c.has_scored_activity
+          : (c.hasScoredActivity != null) ? c.hasScoredActivity : null;
+  if (f != null) return !!f;
+  const cnt = (c.activity_count != null) ? c.activity_count
+            : (c.scored_count != null) ? c.scored_count
+            : (c.log_count != null) ? c.log_count : null;
+  if (cnt != null) return Number(cnt) > 0;
+  return null; // 미상 — 플래그 미배포 시
+}
+/* 데이터 있는 첫 클래스 선택(없으면 첫 클래스 폴백). 데모반(활동0)이 기본이 되지 않게(버그 A).
+   1순위: BE 데이터 플래그 true. 2순위(플래그 미배포 폴백): 데모/시연 이름 아닌 첫 클래스. 3순위: 첫 클래스. */
+function _pickDataClassId(list){
+  if (!Array.isArray(list) || !list.length) return null;
+  const withData = list.find(c => _classHasData(c) === true);
+  if (withData) return withData.id;
+  const nonDemo = list.find(c => !/시연|데모/.test((c && c.name) || ''));
+  if (nonDemo) return nonDemo.id;
+  return list[0].id;
+}
+/* 교사 담당 클래스 목록(전체) — /api/lrs/classes(hasScoredActivity 플래그 포함) 우선, 미배포 시 /api/class/my 폴백.
+   세션 캐시. resolveClassId·t-warnings·활동현황 공유. (버그 A: 데이터 기반 기본선택을 위해 lrs/classes 우선.) */
+async function _fetchMyClasses(){
+  if (Array.isArray(state._myClasses)) return state._myClasses;
+  let list = [];
+  for (const path of ['/api/lrs/classes', '/api/class/my', '/api/classes/my']){
+    try {
+      const r = await fetch(path, { credentials:'include' });
+      if (r.ok){ const j = await r.json(); list = (j && j.classes) || []; if (list.length) break; }
+    } catch(_){}
+  }
+  state._myClasses = list;
+  return list;
+}
+
 /* ---- 교사 class_id 해석 (fallback 1) ---- */
 async function resolveClassId(){
   if (state.classId) return state.classId;
-  // 실제 prefix: /api/class (single)
-  for (const path of ['/api/class/my', '/api/classes/my']){
-    try {
-      const r = await fetch(path, { credentials:'include' });
-      if (r.ok){
-        const j = await r.json();
-        const list = (j && j.classes) || [];
-        if (list.length){ state.classId = list[0].id; return state.classId; }
-      }
-    } catch(_){}
-  }
+  const list = await _fetchMyClasses();
+  // 데이터(채점/활동) 있는 첫 클래스 우선 → 없으면 첫 클래스 폴백(버그 A: 데모반이 기본이 되지 않게).
+  const picked = _pickDataClassId(list);
+  if (picked != null){ state.classId = picked; return state.classId; }
   state.classId = (state.me && (state.me.class_id || state.me.classId)) || 1;
   return state.classId;
 }
@@ -1306,10 +1337,10 @@ const MENUS = {
     { id:'t-home',       label:'홈',              icon:'fa-gauge',                 group:'우리반',        category:'home' },
     { id:'t-warnings',   label:'성취 도달 현황',   icon:'fa-table-cells',           group:'분석',         category:'analytics' },
     { id:'t-weakstrong', label:'성취기준 강·약',   icon:'fa-ranking-star',          group:'분석',         category:'analytics' },
-    { id:'t-classcompare',label:'개설클래스 비교',  icon:'fa-scale-balanced',        group:'분석',         category:'analytics' },
-    { id:'t-benchmark',  label:'도 벤치마크',      icon:'fa-map-location-dot',       group:'분석',         category:'analytics' },
-    { id:'t-subject',    label:'교과별 활동 현황', icon:'fa-book',                  group:'분석',         category:'analytics' },
-    { id:'t-usage',      label:'활용 현황',        icon:'fa-chalkboard',            group:'분석',         category:'analytics' },
+    // 분석 탭 재편(6→4): 성취수준 비교 = 개설클래스 비교 + 도 벤치마크 통합(스코프 세그먼트). t-classcompare id 재활용.
+    { id:'t-classcompare',label:'성취수준 비교',   icon:'fa-scale-balanced',        group:'분석',         category:'analytics' },
+    // 활동 현황 = 교과별 활동 현황(구 t-subject) + 활용 현황(구 t-usage) 통합(전체/클래스별 필터). t-usage id 재활용.
+    { id:'t-usage',      label:'활동 현황',        icon:'fa-chart-column',          group:'분석',         category:'analytics' },
     { id:'t-xapi',       label:'표준체계 분석',    icon:'fa-diagram-project',       group:'분석',         category:'analytics' },
     { id:'t-perform',    label:'학습 활동 수행',  icon:'fa-tasks',                 group:'학습 활동',     category:'activities' },
     { id:'t-behavior',   label:'학습 행동 심화 분석', icon:'fa-wave-square',        group:'학습 활동',     category:'activities' },
@@ -2952,8 +2983,10 @@ let _hcReqSeq = 0;
 let _hcLastTrigger = null;
 function _hcEl(id){ return document.getElementById(id); }
 
-/* 팝업 열기: 헤더 즉시 → 스켈레톤 → fetch → 렌더 (경합가드 _hcReqSeq) */
-function openHeatmapCell(dow, hour, triggerEl){
+/* 팝업 열기: 헤더 즉시 → 스켈레톤 → fetch → 렌더 (경합가드 _hcReqSeq)
+   scopeOpts: 활동 현황 스코프. 미지정=레거시(resolveClassId 폴백). {mode:'all'}=전체(classId·heatScope 무전송
+   → BE all-owned 합산·응답 className 식별). {mode:'class',classId}=특정 클래스(classId+heatScope=class → BE 좁힘). */
+function openHeatmapCell(dow, hour, triggerEl, scopeOpts){
   const overlay = _hcEl('lrsHeatCellModal');
   if (!overlay) return;
   if (triggerEl) _hcLastTrigger = triggerEl;
@@ -2975,19 +3008,31 @@ function openHeatmapCell(dow, hour, triggerEl){
 
   const seq = ++_hcReqSeq;
   (async () => {
-    const cid = await resolveClassId();
-    const d = await apiGet('/api/lrs/stats/heatmap-cell', { classId: cid, dow, hour });
+    // BE 계약(routes/lrs.js): heatmap-cell 은 classId(정수) 필수(권한 게이트). 실제 좁힘은 heatScope=class 플래그로만.
+    //   전체 스코프: 권한용 classId(소유 반) + heatScope 생략 → all-owned 합산(응답 className 으로 클래스 식별).
+    //   특정 클래스: classId + heatScope=class → 그 클래스로 좁힘(drill 그 클래스만·daily 히트맵과 count 정합).
+    //   레거시(scopeOpts 없음): resolveClassId 폴백.
+    const extra = { dow, hour };
+    if (scopeOpts && scopeOpts.mode === 'class' && scopeOpts.classId != null){
+      extra.classId = scopeOpts.classId; extra.heatScope = 'class';
+    } else {
+      // 전체 스코프 또는 레거시 — 권한 게이트용 classId만(heatScope 없음 → all-owned).
+      extra.classId = (scopeOpts && scopeOpts.gateClassId != null) ? scopeOpts.gateClassId : await resolveClassId();
+    }
+    const d = await apiGet('/api/lrs/stats/heatmap-cell', extra);
     if (seq !== _hcReqSeq) return;                  // 더 최신 요청이 떴으면 무시
     if (!d || d.success === false){
       const is403 = d && (d.status === 403 || d.code === 'FORBIDDEN');
       _hcRenderError(is403 ? '이 학급의 활동을 볼 권한이 없어요' : '활동 목록을 불러오지 못했어요');
       return;
     }
-    renderHeatmapCell(d, dow, hour);
+    // className 배지는 전체 스코프에서만(클래스 식별용). 특정 클래스 스코프면 선택 클래스와 다른 배지가
+    //   다중소속 학생에게 뜨는 혼선 방지 → 미표기.
+    renderHeatmapCell(d, dow, hour, !!(scopeOpts && scopeOpts.mode === 'all'));
   })();
 }
 
-function renderHeatmapCell(d, dow, hour){
+function renderHeatmapCell(d, dow, hour, showClassName){
   const total = Number(d.total || 0);
   const items = Array.isArray(d.items) ? d.items : [];
   _hcEl('lrsHcTitleText').textContent = `${HC_DOW_KO[dow]}요일 ${hour}시 활동`;
@@ -3006,12 +3051,14 @@ function renderHeatmapCell(d, dow, hour){
     const ico = HC_TYPE_ICON[it.activityType] || '🔹';
     const who = escapeHtml(it.name || '학생');
     const act = escapeHtml(it.activityKo || '학습 활동');
+    // 전체 스코프 드릴에서만 어느 클래스인지 식별(BE className). 특정 클래스 스코프면 미표기(혼선 방지).
+    const cls = (showClassName && it.className) ? `<span class="dc-badge" style="margin-left:6px;background:var(--gray-100);color:var(--gray-600);border:1px solid var(--gray-200);font-size:13px;">${escapeHtml(it.className)}</span>` : '';
     const label = it.label ? `<div class="lrs-dm-row-meta">${escapeHtml(it.label)}</div>` : '';
     const time = it.createdAt ? `<span class="lrs-dm-row-date">${escapeHtml(it.createdAt)}</span>` : '';
     return `<div class="lrs-dm-row">
       <div class="lrs-dm-row-icon">${ico}</div>
       <div class="lrs-dm-row-body">
-        <div class="lrs-dm-row-primary">${who} · ${act}</div>
+        <div class="lrs-dm-row-primary">${who} · ${act}${cls}</div>
         ${label}
       </div>
       <div class="lrs-dm-row-tail">${time}</div>
@@ -6291,10 +6338,32 @@ function _bindMasteryDrillDelegation(){
  * ===================================================================== */
 VIEWS['t-warnings'] = async function(root){
   root.innerHTML = tplLoading(3);
-  const cid = await resolveClassId();
+  // (A) 클래스 선택기 신설 + 데이터 있는 클래스 기본 선택(데모반 회피). 현재위치 피드백·복귀 동선.
+  const classes = await _fetchMyClasses();
+  if (state._warnClassId == null || !classes.some(c=>String(c.id)===String(state._warnClassId))){
+    state._warnClassId = _pickDataClassId(classes);
+  }
+  const cid = (state._warnClassId != null) ? state._warnClassId : await resolveClassId();
+  const curClass = classes.find(c=>String(c.id)===String(cid)) || {};
+  const curName = curClass.name || '';
+  const isDemo = /시연|데모/.test(curName);
+  const classBar = (classes.length > 1) ? `
+    <div class="dc-chart-wrapper dc-eq-filterbar" style="margin-bottom:var(--space-4);">
+      <div class="dc-eq-filters">
+        <div class="dc-unit-toggle" id="warnClassToggle" role="group" aria-label="클래스 선택">
+          <span class="dc-eq-flabel">클래스</span>${classes.map(c=>`<button class="chip" type="button" data-warnclass="${escapeAttr(String(c.id))}" aria-pressed="${String(c.id)===String(cid)?'true':'false'}">${escapeHtml(c.name)}</button>`).join('')}
+        </div>
+      </div>
+    </div>` : '';
+  const bindWarnChips = ()=>{
+    root.querySelectorAll('#warnClassToggle button[data-warnclass]').forEach(b=>{
+      b.onclick = ()=>{ if (String(state._warnClassId)===b.dataset.warnclass) return; state._warnClassId = b.dataset.warnclass; VIEWS['t-warnings'](root); };
+    });
+  };
   const m = await apiGet('/api/lrs/mastery/class/' + encodeURIComponent(cid), {});
   if (!m || !m.success){
-    root.innerHTML = tplError('성취 도달 데이터를 불러오지 못했습니다', () => setView('t-warnings'));
+    root.innerHTML = classBar + tplError('성취 도달 데이터를 불러오지 못했습니다', () => VIEWS['t-warnings'](root));
+    bindWarnChips();
     return;
   }
 
@@ -6305,10 +6374,12 @@ VIEWS['t-warnings'] = async function(root){
   const masked = !!m.masked;
 
   if (!students.length || !standards.length){
-    root.innerHTML = `<section class="mastery-section"><div class="mastery-empty">
+    root.innerHTML = classBar + `<section class="mastery-section"><div class="mastery-empty">
       <i class="fas fa-table-cells me-icon" aria-hidden="true"></i>
-      <p>아직 반 학생들의 성취 데이터가 충분하지 않아요. 평가·학습이 쌓이면 히트맵이 채워져요.</p>
+      <p style="font-weight:700;margin:0 0 6px;color:var(--gray-900);">이 클래스(${escapeHtml(curName||'선택한 클래스')})는 아직 평가·채점 데이터가 없어요.</p>
+      <p style="color:var(--gray-600);line-height:1.7;margin:0;">${classes.length>1?'위에서 다른 클래스를 선택하거나, ':''}평가·과제를 채점하면 성취 도달 현황이 채워져요.${isDemo?' <span class="dc-badge" style="background:var(--gray-100);color:var(--gray-500);border:1px solid var(--gray-200);">시연용 클래스</span>':''}</p>
     </div></section>`;
+    bindWarnChips();
     return;
   }
 
@@ -6328,17 +6399,17 @@ VIEWS['t-warnings'] = async function(root){
   }));
 
   const totalEval = (dist.reached||0)+(dist.partial||0)+(dist.not_reached||0);
-  root.innerHTML = `
+  root.innerHTML = classBar + `
     <!-- T1 히트맵 -->
     <section class="mastery-section" id="tMasterySection">
       <div class="ms-head">
         <div class="ms-titles">
           <h2 class="mastery-h2">성취기준 × 학생 도달 현황</h2>
-          <div class="mastery-sub">셀은 시도 내역, 왼쪽 단원 이름은 반 분포, 학생 이름은 학생 현황으로 이어져요. ${masked ? '<span class="mastery-chip-gray" style="margin-left:6px;"><i class="fas fa-user-shield"></i> 타 반 — 이름 익명</span>' : ''}</div>
+          <div class="mastery-sub">셀은 시도 내역, 왼쪽 단원 이름은 클래스 분포, 학생 이름은 학생 현황으로 이어져요. ${masked ? '<span class="mastery-chip-gray" style="margin-left:6px;"><i class="fas fa-user-shield"></i> 타 클래스 — 이름 익명</span>' : ''}</div>
         </div>
         <div class="ms-controls">
           <select class="ms-select" id="tMastSort" aria-label="행 정렬">
-            <option value="weak">반 평균 낮은 순</option>
+            <option value="weak">클래스 평균 낮은 순</option>
             <option value="code">코드순</option>
           </select>
           ${subjects.length > 1 ? `<select class="ms-select" id="tMastSubject" aria-label="교과 필터">
@@ -6359,7 +6430,7 @@ VIEWS['t-warnings'] = async function(root){
           <h2 class="mastery-h2">보충이 필요한 성취기준</h2>
           <div class="mastery-sub">미도달 학생이 있는 성취기준이에요. 추천 학습을 배정해 도달을 도와요.</div>
         </div>
-        <div class="ms-controls"><span class="mastery-btn mastery-btn-sm" style="background:#cbd5e1;cursor:not-allowed;" title="반 전체 보충 배정은 다음 단계(P1)에 제공됩니다" aria-disabled="true"><i class="fas fa-layer-group"></i> 반 전체 배정(준비 중)</span></div>
+        <div class="ms-controls"><span class="mastery-btn mastery-btn-sm" style="background:#cbd5e1;cursor:not-allowed;" title="클래스 전체 보충 배정은 다음 단계(P1)에 제공됩니다" aria-disabled="true"><i class="fas fa-layer-group"></i> 클래스 전체 배정(준비 중)</span></div>
       </div>
       <div id="tNotReachedTable"></div>
     </section>
@@ -6381,7 +6452,7 @@ VIEWS['t-warnings'] = async function(root){
       <div class="ms-head">
         <div class="ms-titles">
           <h2 class="mastery-h2"><i class="fas fa-bullseye" aria-hidden="true" style="color:#2563eb;"></i> 목표 도달 예상<span class="tprog-info" id="tProgHow" tabindex="0" role="img" aria-label="예측 방식 안내" title="최근 주별 정답률에 직선(추세)을 그어 앞으로 연장한 값이에요. 지금 속도가 계속된다는 단순 가정이라 실제와 다를 수 있어요.">?</span></h2>
-          <div class="mastery-sub" id="tProgSubtitle">이 반 <b>전체 학생</b>의 <b>전체 교과</b> <b>정답률(맞힌 문항 비율)</b>이 지금 속도로 오르면 <b>목표 80%</b>에 언제 닿을지 예측해요.</div>
+          <div class="mastery-sub" id="tProgSubtitle">이 클래스 <b>전체 학생</b>의 <b>전체 교과</b> <b>정답률(맞힌 문항 비율)</b>이 지금 속도로 오르면 <b>목표 80%</b>에 언제 닿을지 예측해요.</div>
           <div class="mastery-sub" id="tProgHeadline" style="margin-top:4px;">실선=지금까지, 점선=예상 범위(추정). 폭이 넓을수록 불확실해요.</div>
         </div>
         <div class="ms-controls" id="tProgConf">
@@ -6412,6 +6483,7 @@ VIEWS['t-warnings'] = async function(root){
 
     <!-- B6: 정서-참여 교차 (하단 append) -->
     <div id="tEmotionEngageHost" style="margin-top:16px;"></div>`;
+  bindWarnChips();
 
   // ── 상태 관리 (정렬·필터·행수) ─────────────────────────────────────
   const tState = { sort:'weak', subject:'', expanded:false, rowLimit:12 };
@@ -6449,7 +6521,7 @@ VIEWS['t-warnings'] = async function(root){
       <th class="corner">성취기준 \\ 학생</th>
       ${students.map(st=>`<th class="mh-stu" data-uid="${escapeAttr(st.id)}" title="${escapeAttr(st.name)}"
         role="button" tabindex="0" aria-label="${escapeAttr(st.name + ' 성취 현황 보기')}">${escapeHtml(st.name)}</th>`).join('')}
-      <th class="summary-h">반 평균</th><th class="summary-h">도달수</th>
+      <th class="summary-h">클래스 평균</th><th class="summary-h">도달수</th>
     </tr></thead>`;
     const tbody = `<tbody>${rows.map(s => {
       const codeBare = String(s.code||'').replace(/^\[|\]$/g,'');
@@ -6480,7 +6552,7 @@ VIEWS['t-warnings'] = async function(root){
       const seg = (k,n)=> n>0 ? `<span class="${k}" style="flex-basis:${(n/tot*100).toFixed(1)}%"></span>` : '';
       return `<div class="mastery-card">
         <div class="mc-title">${escapeHtml(s.label||codeBare)}</div>
-        <div class="mc-sub">[${escapeHtml(codeBare)}] · ${escapeHtml(s.subject||'')} · 반 평균 ${s.reachedRate==null?'—':s.reachedRate+'%'}</div>
+        <div class="mc-sub">[${escapeHtml(codeBare)}] · ${escapeHtml(s.subject||'')} · 클래스 평균 ${s.reachedRate==null?'—':s.reachedRate+'%'}</div>
         <div class="mastery-stack">${seg('reached',s.reached)}${seg('partial',s.partial)}${seg('notReached',s.notReached)}${seg('insufficient',s.insufficient)}</div>
         <div class="mc-counts">
           <span><b>${s.reached||0}</b> 도달</span><span><b>${s.partial||0}</b> 부분</span>
@@ -6622,7 +6694,7 @@ VIEWS['t-warnings'] = async function(root){
     LRS.openMasteryDrawer({
       title: std.label || codeBare,
       bodyHtml: `
-        <div class="drw-meta">[${escapeHtml(codeBare)}] · ${escapeHtml(std.subject||'')} · 반 평균 ${std.reachedRate==null?'—':std.reachedRate+'%'} · 평가 ${std.evaluated||0}/${students.length}명</div>
+        <div class="drw-meta">[${escapeHtml(codeBare)}] · ${escapeHtml(std.subject||'')} · 클래스 평균 ${std.reachedRate==null?'—':std.reachedRate+'%'} · 평가 ${std.evaluated||0}/${students.length}명</div>
         ${groupsHtml}
         <button type="button" class="drw-link" id="drwGotoT3">보충이 필요한 성취기준 표로 이동 ›</button>`
     });
@@ -6703,7 +6775,7 @@ VIEWS['t-warnings'] = async function(root){
     list.sort((a,b)=> (a.avgRate==null?Infinity:a.avgRate) - (b.avgRate==null?Infinity:b.avgRate));
     if (!list.length){
       host.innerHTML = `<div class="mastery-empty"><i class="fas fa-face-smile me-icon" style="color:#86efac;"></i>
-        <p>보충이 필요한 학생이 없어요. 반 전체가 잘 따라오고 있어요! 🎉</p></div>`;
+        <p>보충이 필요한 학생이 없어요. 클래스 전체가 잘 따라오고 있어요! 🎉</p></div>`;
       return;
     }
     // recommendations 룩업 (weakTop에 추천 포함)
@@ -6821,7 +6893,7 @@ VIEWS['t-warnings'] = async function(root){
     if (!el) return;
     const lbl = subjectLabel || '전체 교과';
     const tgt = (target != null) ? target : tProgState.target;
-    el.innerHTML = `이 반 <b>전체 학생</b>의 <b>${escapeHtml(lbl)}</b> <b>정답률(맞힌 문항 비율)</b>이 지금 속도로 오르면 <b>목표 ${escapeHtml(String(tgt))}%</b>에 언제 닿을지 예측해요.`;
+    el.innerHTML = `이 클래스 <b>전체 학생</b>의 <b>${escapeHtml(lbl)}</b> <b>정답률(맞힌 문항 비율)</b>이 지금 속도로 오르면 <b>목표 ${escapeHtml(String(tgt))}%</b>에 언제 닿을지 예측해요.`;
   }
 
   // T-TREND: 학생별 추세 표(데스크탑) + 카드(모바일)
@@ -6980,65 +7052,40 @@ VIEWS['t-warnings'] = async function(root){
   await renderEmotionEngage(document.getElementById('tEmotionEngageHost'));
 };
 
-VIEWS['t-usage'] = async function(root){
-  root.innerHTML = tplLoading(2);
-  // 스코프 fix: role:'teacher'(교사 본인 로그만) 제거 → 학급 전체 활동 기준.
-  //   by-service·daily 둘 다 scope=class(멤버십, 소유 반 학생 합집합)로 집계돼 다서비스·다중 셀이 나온다.
-  const [svc, daily] = await Promise.all([
-    apiGet('/api/lrs/stats/by-service'),
-    apiGet('/api/lrs/stats/daily')
-  ]);
-  const rows = (svc && svc.stats) || [];
-  // 히트맵: 서버가 요일×시간(7x24)으로 직접 집계한 heatmapDowHour 사용(정본).
-  //   기존 data(날짜별 1행)에 getHours() 를 쓰던 방식은 모든 활동이 한 칸에 뭉치는 버그였음.
-  const heat = (daily && Array.isArray(daily.heatmapDowHour)) ? daily.heatmapDowHour : null;
-  const heatSum = heat ? heat.reduce((s,row)=>s+row.reduce((a,b)=>a+(Number(b)||0),0),0) : 0;
-  root.innerHTML = `
-    <div class="grid-2">
-      ${chartWrap('tUsagePie','학급 서비스별 활용 비중')}
-      <section class="dc-chart-wrapper">
-        <header><h2>요일×시간 활동 히트맵</h2><div class="subtitle">학급 전체 활동 기반</div></header>
-        <div id="tUsageHeat"></div>
-      </section>
-    </div>
-    <!-- B4 '풀이 속도-정확도 점검'은 t-behavior(학습 행동 심화 분석) 신호①로 이관 — 행방불명 방지 안내 링크만 잔류(1릴리스) -->
-    <div id="tShallowMoved" class="behav-moved-card" role="status" style="margin-top:16px;">
-      <div class="behav-moved-txt">
-        <i class="fas fa-circle-info" aria-hidden="true"></i>
-        <span>‘풀이 속도-정확도 점검’은 <b>학습 행동 심화 분석</b>으로 옮겼어요. 풀이 속도·오답 재풀이·기간 참여를 성취와 함께 살펴볼 수 있어요.</span>
+/* ======================================================================
+ * VIEWS['t-usage'] — [교사] "활동 현황" (분석 탭 재편 F)
+ *   상단 전체/클래스별 단일 필터 + 2섹션 세로 흐름: ① 교과별 활동(구 t-subject) → ② 활용 시간대(구 t-usage).
+ *   스코프가 두 섹션 공통(state._actScope: 'all'|classId). classId 파라미터를 두 섹션 API에 전달.
+ *   히트맵 드릴다운은 스코프 classId 로(전체=all → BE className 식별). t-usage id 재활용(드릴다운 배선 보존).
+ * ==================================================================== */
+const ACT_STYLE = `<style>
+  .act-sec-title{ font-size:20px; font-weight:800; color:var(--gray-900); line-height:1.3; margin:0 0 4px; display:flex; align-items:center; gap:8px; }
+  .act-sec-title i{ font-size:18px; color:#2563eb; }
+  .act-sec-sub{ font-size:15px; color:var(--gray-600); line-height:1.6; margin:0 0 12px; }
+  .act-sec{ margin:0 0 var(--space-5); }
+</style>`;
+/* 활동 현황 스코프 필터바(전체 + 클래스별) — 교과칩 스타일 재사용. data-actscope */
+function _actScopeBarHtml(classes, active){
+  const chips = [`<button class="chip" type="button" data-actscope="all" aria-pressed="${active==='all'?'true':'false'}">전체</button>`]
+    .concat((classes||[]).map(c=>`<button class="chip" type="button" data-actscope="${escapeAttr(String(c.id))}" aria-pressed="${String(c.id)===String(active)?'true':'false'}">${escapeHtml(c.name)}</button>`));
+  return `<div class="dc-chart-wrapper dc-eq-filterbar" style="margin-bottom:var(--space-4);">
+      <div class="dc-eq-filters">
+        <div class="dc-unit-toggle" id="actScopeToggle" role="group" aria-label="대상 클래스 선택">
+          <span class="dc-eq-flabel">대상</span>${chips.join('')}
+        </div>
       </div>
-      <button type="button" class="btn btn-sm" id="tShallowMovedBtn"><i class="fas fa-wave-square" aria-hidden="true"></i> 학습 행동 심화 분석으로 이동</button>
+      <div class="dc-eq-caption">‘전체’는 개설한 모든 클래스를 합산해요. 특정 클래스를 고르면 그 클래스만 봐요.</div>
     </div>`;
-  if (rows.length){
-    mkChart(document.getElementById('tUsagePie'),'doughnut',{
-      labels: rows.map(r=>pickLabel(r, ['service_label','service','source_service','service_key','service_name'], '(미분류)')),
-      datasets:[{ data: rows.map(r=>r.count||0), backgroundColor:['var(--chart-1)','var(--chart-2)','var(--chart-3)','var(--chart-4)','var(--chart-5)','var(--chart-6)'] }]
-    }, donutLegendOpts('건'));
-  } else {
-    document.getElementById('tUsagePie').closest('.dc-chart-wrapper').innerHTML =
-      `<header><h2>학급 서비스별 활용 비중</h2></header>` + tplEmpty();
-  }
-  if (heat && heatSum > 0){
-    renderHeatmapMatrix(document.getElementById('tUsageHeat'), heat, {
-      onCellClick: (dow, hour, el) => openHeatmapCell(dow, hour, el)
-    });
-  } else {
-    document.getElementById('tUsageHeat').innerHTML = tplEmpty('아직 학급 활동 기록이 없어요');
-  }
+}
 
-  // B4 "풀이 속도-정확도 점검"은 t-behavior 로 이관됨 → 안내 링크만 바인딩(복귀 동선).
-  const movedBtn = document.getElementById('tShallowMovedBtn');
-  if (movedBtn) movedBtn.onclick = ()=> setView('t-behavior');
-};
-
-VIEWS['t-subject'] = async function(root){
-  root.innerHTML = tplLoading(2);
-  // 응답: { lessonStats:[], homeworkStats:[], examStats:[] }  — 또는 구버전 { stats:[] }
-  // 이슈3: 이 탭은 전체 기간 누적 기준(period=all). 기간 필터 영향 배제.
-  const s = await apiGet('/api/lrs/stats/by-subject', { period:'all' });
-  // 이슈3: 누적 집계 안내 배너(기간 칩과의 혼란 방지)
+/* 섹션① 교과별 활동(구 t-subject 본문). host=섹션 컨테이너, cid='all'|classId → by-subject classId 전달. */
+async function _renderActSubjectSection(host, cid){
+  if (!host) return;
+  host.innerHTML = tplLoading(2);
+  // 이 섹션은 전체 기간 누적 기준(period=all). 기간 필터 영향 배제.
+  const s = await apiGet('/api/lrs/stats/by-subject', { period:'all', classId: cid });
   const scopeNote = `<div class="lrs-scope-note">
-      <i class="fas fa-layer-group" aria-hidden="true"></i> 이 탭은 <b>전체 기간 누적</b> 기준입니다. (기간 필터의 영향을 받지 않아요)
+      <i class="fas fa-layer-group" aria-hidden="true"></i> 이 섹션은 <b>전체 기간 누적</b> 기준이에요. (위 기간 선택의 영향을 받지 않아요)
     </div>`;
   const lessonStats   = (s && s.lessonStats)   || [];
   const homeworkStats = (s && s.homeworkStats) || [];
@@ -7047,7 +7094,7 @@ VIEWS['t-subject'] = async function(root){
 
   // legacy 응답 fallback: 3갈래로 분리 불가 → 단일 chart만 표시 후 종료
   if (!lessonStats.length && !homeworkStats.length && !examStats.length && legacyRows.length){
-    root.innerHTML = scopeNote + chartWrap('tSubjBar','교과별 활동량 & 평균 성취');
+    host.innerHTML = scopeNote + chartWrap('tSubjBar','교과별 활동량 & 평균 성취');
     mkChart(document.getElementById('tSubjBar'),'bar',{
       labels: legacyRows.map(r=>pickLabel(r, ['subject_label','subject','subject_code','subject_name'], '(교과 미지정)')),
       datasets:[
@@ -7059,11 +7106,11 @@ VIEWS['t-subject'] = async function(root){
   }
 
   if (!lessonStats.length && !homeworkStats.length && !examStats.length){
-    root.innerHTML = `${scopeNote}
+    host.innerHTML = `${scopeNote}
       <div class="dc-state-panel" role="status">
         <i class="fas fa-inbox" aria-hidden="true"></i>
         <p style="font-weight:700;margin-bottom:4px;">아직 등록된 수업·과제·평가가 없어요</p>
-        <p style="font-size:14px;color:#6b7280;">이 반에 수업 꾸러미나 과제·평가를 등록하면 교과별로 자동 집계돼요.</p>
+        <p style="font-size:14px;color:#6b7280;">이 클래스에 수업 꾸러미나 과제·평가를 등록하면 교과별로 자동 집계돼요.</p>
         <a class="mastery-btn" href="/class/class-home.html"><i class="fas fa-arrow-right" aria-hidden="true"></i> 클래스로 이동해 수업 만들기</a>
       </div>`;
     return;
@@ -7093,7 +7140,7 @@ VIEWS['t-subject'] = async function(root){
     total:   (mapL[c]||0)+(mapH[c]||0)+(mapE[c]||0)
   }));
 
-  root.innerHTML = `
+  host.innerHTML = `
     ${scopeNote}
     <div class="dc-kpi-grid">
       ${kpiCard('수업 교과 수', lessonStats.length,   '과', {dir:'flat',text:'진도/차시'}, 'primary')}
@@ -7126,7 +7173,83 @@ VIEWS['t-subject'] = async function(root){
     rows: tableRows,
     initialSort:'total', initialDir:'desc'
   });
+}
+
+/* 섹션② 활용 시간대(구 t-usage 본문). host=섹션 컨테이너, cid='all'|classId.
+   전체 스코프: classId·heatScope 미전송(by-service·daily 모두 all-owned 합산). 특정 클래스: by-service=classId,
+   daily=classId+heatScope=class(히트맵 좁힘). 드릴다운도 동일 스코프(전체=무플래그·className 식별 / 클래스=classId+heatScope). */
+async function _renderActUsageSection(host, cid){
+  if (!host) return;
+  host.innerHTML = tplLoading(2);
+  const isAll = (cid == null || cid === 'all');
+  const svcParams   = isAll ? {} : { classId: cid };
+  const dailyParams = isAll ? {} : { classId: cid, heatScope: 'class' };
+  const [svc, daily] = await Promise.all([
+    apiGet('/api/lrs/stats/by-service', svcParams),
+    apiGet('/api/lrs/stats/daily', dailyParams)
+  ]);
+  const rows = (svc && svc.stats) || [];
+  const heat = (daily && Array.isArray(daily.heatmapDowHour)) ? daily.heatmapDowHour : null;
+  const heatSum = heat ? heat.reduce((s,row)=>s+row.reduce((a,b)=>a+(Number(b)||0),0),0) : 0;
+  host.innerHTML = `
+    <div class="grid-2">
+      ${chartWrap('tUsagePie','서비스별 활용 비중')}
+      <section class="dc-chart-wrapper">
+        <header><h2>요일×시간 활동 히트맵</h2><div class="subtitle">${isAll?'개설 클래스 전체 합산 · 셀 클릭 시 상세':'선택 클래스 · 셀 클릭 시 상세'}</div></header>
+        <div id="tUsageHeat"></div>
+      </section>
+    </div>`;
+  if (rows.length){
+    mkChart(document.getElementById('tUsagePie'),'doughnut',{
+      labels: rows.map(r=>pickLabel(r, ['service_label','service','source_service','service_key','service_name'], '(미분류)')),
+      datasets:[{ data: rows.map(r=>r.count||0), backgroundColor:['var(--chart-1)','var(--chart-2)','var(--chart-3)','var(--chart-4)','var(--chart-5)','var(--chart-6)'] }]
+    }, donutLegendOpts('건'));
+  } else {
+    document.getElementById('tUsagePie').closest('.dc-chart-wrapper').innerHTML =
+      `<header><h2>서비스별 활용 비중</h2></header>` + tplEmpty();
+  }
+  if (heat && heatSum > 0){
+    const drillScope = isAll ? { mode:'all' } : { mode:'class', classId: cid };
+    renderHeatmapMatrix(document.getElementById('tUsageHeat'), heat, {
+      onCellClick: (dow, hour, el) => openHeatmapCell(dow, hour, el, drillScope)
+    });
+  } else {
+    document.getElementById('tUsageHeat').innerHTML = tplEmpty('아직 활동 기록이 없어요');
+  }
+}
+
+VIEWS['t-usage'] = async function(root){
+  root.innerHTML = tplLoading(2);
+  const classes = await _fetchMyClasses();
+  if (state._actScope == null) state._actScope = 'all';
+  if (state._actScope !== 'all' && !classes.some(c=>String(c.id)===String(state._actScope))) state._actScope = 'all';
+  const scope = state._actScope;
+  const scopeBar = (classes.length > 1) ? _actScopeBarHtml(classes, scope) : '';
+  root.innerHTML = ACT_STYLE + scopeBar + `
+    <section class="act-sec" id="actSubjectSec">
+      <h2 class="act-sec-title"><i class="fas fa-book" aria-hidden="true"></i> 교과별 활동</h2>
+      <p class="act-sec-sub">무엇을·얼마나 — 수업·과제·평가를 교과별로 봐요.</p>
+      <div id="actSubjectHost"></div>
+    </section>
+    <section class="act-sec" id="actUsageSec">
+      <h2 class="act-sec-title"><i class="fas fa-chalkboard" aria-hidden="true"></i> 활용 시간대</h2>
+      <p class="act-sec-sub">언제 — 서비스별 비중과 요일×시간 활동을 봐요.</p>
+      <div id="actUsageHost"></div>
+    </section>`;
+  root.querySelectorAll('#actScopeToggle button[data-actscope]').forEach(b=>{
+    b.onclick = ()=>{ if (String(state._actScope)===b.dataset.actscope) return; state._actScope = b.dataset.actscope; VIEWS['t-usage'](root); };
+  });
+  const cid = (scope === 'all') ? 'all' : scope;
+  await Promise.all([
+    _renderActSubjectSection(document.getElementById('actSubjectHost'), cid),
+    _renderActUsageSection(document.getElementById('actUsageHost'), cid)
+  ]);
+  // 레거시 진입 섹션 포커스(t-usage→활용 / t-subject→교과별). 1회 소비.
+  const focus = state._actSecFocus; state._actSecFocus = null;
+  if (focus === 'usage'){ const el = document.getElementById('actUsageSec'); if (el) try { el.scrollIntoView({behavior:'smooth', block:'start'}); } catch(_){} }
 };
+/* 레거시 직접 호출 방어(setView 해시 리다이렉트가 우선). 구 t-subject → 활동 현황 교과별 섹션. */
+VIEWS['t-subject'] = function(root){ if (!state._actSecFocus) state._actSecFocus = 'subject'; return VIEWS['t-usage'](root); };
 
 /* ===== 관리자 ===== */
 
@@ -8249,9 +8372,10 @@ function _equityInsight(d, dimLabelArg){
       else if (gap >= 8) verdict = '중간 수준 격차입니다. 추세를 함께 확인하세요.';
       else verdict = '격차가 크지 않습니다.';
     } else {
-      if (gap >= 15) verdict = '반 사이 차이가 큽니다. 가장 낮은 반을 먼저 살펴보세요.';
-      else if (gap >= 8) verdict = '차이가 어느 정도 있어요. 낮은 반을 확인해 보세요.';
-      else verdict = '반 사이 차이는 크지 않아요.';
+      const dl = dimLabel, dlEul = _josa(dimLabel, '을', '를');
+      if (gap >= 15) verdict = `${dl} 사이 차이가 큽니다. 가장 낮은 ${dl}${dlEul} 먼저 살펴보세요.`;
+      else if (gap >= 8) verdict = `차이가 어느 정도 있어요. 낮은 ${dl}${dlEul} 확인해 보세요.`;
+      else verdict = `${dl} 사이 차이는 크지 않아요.`;
     }
     out.headline = `${dimLabel} 간 평균 ${scoreNoun} ${gapWord}는 ${gap}%p입니다. ${escapeHtml(topL)}(최상위)${_josa(topL,'과','와')} ${escapeHtml(botL)}(최하위)의 차이로, ${verdict}`;
   }
@@ -8706,16 +8830,16 @@ function _renderClassCmpChips(d){
           <button class="chip" type="button" data-ccperiod="90d" aria-pressed="${per==='90d'}">90일</button>
         </div>
       </div>
-      <div class="dc-eq-caption">성취수준 = 채점형 학습활동(평가·과제·문항풀이·오늘의 학습 등)의 평균 정답률(0~100점)이에요. <span style="color:var(--gray-500);">한 학생이 두 반에 속하면 각 반 통계에 모두 반영돼요.</span></div>
+      <div class="dc-eq-caption">성취수준 = 채점형 학습활동(평가·과제·문항풀이·오늘의 학습 등)의 평균 정답률(0~100점)이에요. <span style="color:var(--gray-500);">한 학생이 두 클래스에 속하면 각 클래스 통계에 모두 반영돼요.</span></div>
       ${summary}
     </div>`;
 }
 function _bindClassCmpChips(root){
   root.querySelectorAll('#ccSubjectToggle button[data-subj]').forEach(btn=>{
-    btn.onclick = ()=>{ if (state._ccSubject===btn.dataset.subj) return; state._ccSubject = btn.dataset.subj; VIEWS['t-classcompare'](root); };
+    btn.onclick = ()=>{ if (state._ccSubject===btn.dataset.subj) return; state._ccSubject = btn.dataset.subj; _renderCompareClassBody(root); };
   });
   root.querySelectorAll('#ccPeriodToggle button[data-ccperiod]').forEach(btn=>{
-    btn.onclick = ()=>{ if (state._ccPeriod===btn.dataset.ccperiod) return; state._ccPeriod = btn.dataset.ccperiod; VIEWS['t-classcompare'](root); };
+    btn.onclick = ()=>{ if (state._ccPeriod===btn.dataset.ccperiod) return; state._ccPeriod = btn.dataset.ccperiod; _renderCompareClassBody(root); };
   });
 }
 
@@ -8739,7 +8863,7 @@ function _renderClassSubjectHeat(d){
 
   const headCells = colOrder.map(k=>`<th scope="col" title="${escapeAttr(colLabel[k])}">${escapeHtml(colLabel[k])}</th>`).join('');
   const thead = `<thead><tr>
-      <th scope="col" class="dc-clr-corner">반 \\ 교과</th>
+      <th scope="col" class="dc-clr-corner">클래스 \\ 교과</th>
       ${headCells}
       <th scope="col" style="text-align:left;">교과 간 격차</th>
     </tr></thead>`;
@@ -8776,7 +8900,7 @@ function _renderClassSubjectHeat(d){
       <span class="sw"><i style="background:${_equityScoreColor(35)};"></i>낮음</span>
       <span class="sw"><i style="background:repeating-linear-gradient(45deg,#e2e8f0,#e2e8f0 4px,#cbd5e1 4px,#cbd5e1 8px);"></i>표본 적음</span>
     </div>`;
-  host.innerHTML = `<div class="dc-clr-wrap"><table class="dc-clr-table" aria-label="반별 교과 평균 정답률 히트맵">${thead}<tbody>${bodyRows}</tbody></table></div>${legend}`;
+  host.innerHTML = `<div class="dc-clr-wrap"><table class="dc-clr-table" aria-label="클래스별 교과 평균 정답률 히트맵">${thead}<tbody>${bodyRows}</tbody></table></div>${legend}`;
 }
 
 /* ④ 반 상세표 행 클릭 → 그 반 교과별 정답률 인라인 드릴(모달 아님, 재클릭 접힘).
@@ -8805,7 +8929,7 @@ function _toggleClassSubjectDrill(row, d){
   if (!valid.length){
     const subjActive = (state._ccSubject && state._ccSubject!=='all');
     inner = `<div class="eq-drill-empty">${subjActive
-      ? '교과 <b>전체</b>를 선택하면 이 반의 교과별 정답률을 펼쳐 볼 수 있어요.'
+      ? '교과 <b>전체</b>를 선택하면 이 클래스의 교과별 정답률을 펼쳐 볼 수 있어요.'
       : `${escapeHtml(row.label)}에 표시할 교과별 정답률이 아직 부족해요.`}</div>`;
   } else {
     const ordered = cells.slice().sort((a,b)=>{
@@ -8838,7 +8962,9 @@ function _toggleClassSubjectDrill(row, d){
   targetTr.after(panel);
 }
 
-VIEWS['t-classcompare'] = async function(root){
+/* 성취수준 비교 · 스코프="내 클래스끼리" 본문 렌더러(구 VIEWS['t-classcompare'] 본문).
+   오케스트레이터(VIEWS['t-classcompare'])가 #cmpBody 컨테이너를 root 로 넘겨 호출. */
+async function _renderCompareClassBody(root){
   root.innerHTML = tplLoading(3);
   if (!state._ccSubject) state._ccSubject = 'all';
   if (!state._ccPeriod)  state._ccPeriod  = '30d';
@@ -8850,15 +8976,15 @@ VIEWS['t-classcompare'] = async function(root){
   const qp = { period };
   if (subject !== 'all') qp.subject = subject;
   const d = await apiGet('/api/lrs/stats/class-compare', qp);
-  if (!d || !d.success){ root.innerHTML = tplError('개설클래스 비교 데이터를 불러오지 못했습니다', ()=>VIEWS['t-classcompare'](root)); return; }
+  if (!d || !d.success){ root.innerHTML = tplError('개설한 클래스 비교 데이터를 불러오지 못했습니다', ()=>_renderCompareClassBody(root)); return; }
 
-  // 담당 active 반 < 2 → 비교 불가 빈상태(§A-3). 진입은 허용, 본문만 안내(현재위치·다음행동 명확).
+  // 담당 active 클래스 < 2 → 비교 불가 빈상태(§A-3). 진입은 허용, 본문만 안내(현재위치·다음행동 명확).
   if (d.insufficientClasses){
     const n = (d.ownedCount!=null) ? d.ownedCount : (Array.isArray(d.units)?d.units.length:0);
     root.innerHTML = `
       <div class="dc-state-panel" role="status" style="text-align:center;">
         <div style="font-size:34px;line-height:1;margin-bottom:10px;" aria-hidden="true">🏫</div>
-        <p style="font-size:var(--fs-h3);font-weight:700;color:var(--gray-900);margin:0 0 6px;">개설클래스 비교는 개설한 클래스가 2개 이상일 때 볼 수 있어요.</p>
+        <p style="font-size:var(--fs-h3);font-weight:700;color:var(--gray-900);margin:0 0 6px;">클래스끼리 성취수준 비교는 개설한 클래스가 2개 이상일 때 볼 수 있어요.</p>
         <p style="line-height:1.7;color:var(--gray-700);margin:0;">지금 개설한 클래스는 <b>${n}개</b>예요. 클래스를 더 만들면 클래스끼리 성취·활용을 나란히 비교할 수 있어요.</p>
         <div style="margin-top:16px;"><a class="btn" href="/class/index.html"><i class="fas fa-chalkboard-user" aria-hidden="true"></i> 클래스로 이동</a></div>
       </div>`;
@@ -8880,7 +9006,7 @@ VIEWS['t-classcompare'] = async function(root){
     const cond = _ccSummaryText(subject, period);
     const msg = (subject!=='all')
       ? `선택하신 조건(${cond})에는 비교할 정답률 데이터가 부족해요. 교과나 기간을 바꿔보세요.`
-      : `아직 반별로 비교할 정답률 데이터가 부족해요. 기간을 90일로 넓혀보거나 학습이 더 쌓인 뒤 다시 확인해 주세요.`;
+      : `아직 클래스별로 비교할 정답률 데이터가 부족해요. 기간을 90일로 넓혀보거나 학습이 더 쌓인 뒤 다시 확인해 주세요.`;
     root.innerHTML = _renderClassCmpChips(d) + _seedHintEmpty(msg);
     _bindClassCmpChips(root);
     return;
@@ -8899,15 +9025,26 @@ VIEWS['t-classcompare'] = async function(root){
   const fmtPP = (v)=> (v==null?'-':Number(v).toFixed(1));
   const fmtX  = (v)=> (v==null?'-':Number(v).toFixed(1));
 
-  // 인사이트 배너 — dimLabel='반'. metrics.avgScore를 폴백값으로 보정해 넘김.
+  // 인사이트 배너 — dimLabel='클래스'. metrics.avgScore를 폴백값으로 보정해 넘김.
   const insD = { ...d, units, priorityUnits, metrics:{ ...(d.metrics||{}), avgScore: mScore } };
   const ins = _equityInsight(insD, dimLabel);
 
+  // 활동 없는(데모반 등) 클래스 비교 제외 고지(§2·§4.2) — BE excludedNoData 배열 소비(미배포면 미노출).
+  const excluded = Array.isArray(d.excludedNoData) ? d.excludedNoData
+                 : Array.isArray(d.excludedClasses) ? d.excludedClasses : [];
+  const excludedNames = excluded.map(x => (x && (x.name!=null ? x.name : x.label!=null ? x.label : x))).filter(Boolean);
+  const excludedNote = excludedNames.length
+    ? `<div class="lrs-scope-note" role="status" style="margin-bottom:var(--space-4);">
+         <i class="fas fa-circle-info" aria-hidden="true"></i> ${excludedNames.length}개 클래스는 활동이 없어 비교에서 제외했어요 (${escapeHtml(excludedNames.join(', '))}).
+       </div>`
+    : '';
+
   root.innerHTML = `
     ${_renderClassCmpChips(d)}
+    ${excludedNote}
     <div class="dc-kpi-grid dc-kpi-grid--2">
       ${kpiCard(`${scoreLabel} 격차`, fmtPP(mScore.gapPP), '%p',
-        {dir:'flat', text: (mScore.top&&mScore.bottom) ? `${escapeHtml(mScore.top.label)}↔${escapeHtml(mScore.bottom.label)}` : '가장 높은 반↔가장 낮은 반'},
+        {dir:'flat', text: (mScore.top&&mScore.bottom) ? `${escapeHtml(mScore.top.label)}↔${escapeHtml(mScore.bottom.label)}` : '가장 높은 클래스↔가장 낮은 클래스'},
         _equityGapTone(mScore.gapPP))}
       ${kpiCard('활용도 격차(1인당 활동)', fmtX(mActs.gapX), '배',
         {dir:'flat', text: (mActs.top&&mActs.bottom) ? `${escapeHtml(mActs.top.label)}↔${escapeHtml(mActs.bottom.label)}` : '최다÷최소'},
@@ -8917,28 +9054,28 @@ VIEWS['t-classcompare'] = async function(root){
     <section class="dc-insight-banner" style="margin-bottom:var(--space-4);">
       <span class="ib-icon">💡</span>
       <div>
-        <div style="font-weight:700;color:var(--gray-900);margin-bottom:4px;">반 간 ${escapeHtml(scoreShort)} 차이</div>
+        <div style="font-weight:700;color:var(--gray-900);margin-bottom:4px;">클래스 간 ${escapeHtml(scoreShort)} 차이</div>
         <div style="line-height:1.7;">${ins.headline}</div>
       </div>
     </section>
 
     <section class="dc-chart-wrapper">
-      <header><h2>반별 ${escapeHtml(scoreLabel)}</h2><div class="subtitle">평균 정답률 내림차순 · 가장 낮은 반 빨강 강조</div></header>
-      <div class="chart-body" style="height:${Math.max(220, scored.length*52)}px;"><canvas id="ccBar" role="img" aria-label="반별 ${escapeAttr(scoreLabel)} 막대"></canvas></div>
+      <header><h2>클래스별 ${escapeHtml(scoreLabel)}</h2><div class="subtitle">평균 정답률 내림차순 · 가장 낮은 클래스 빨강 강조</div></header>
+      <div class="chart-body" style="height:${Math.max(220, scored.length*52)}px;"><canvas id="ccBar" role="img" aria-label="클래스별 ${escapeAttr(scoreLabel)} 막대"></canvas></div>
     </section>
 
     <section class="dc-chart-wrapper">
-      <header><h2>반별 상세</h2><div class="subtitle">행을 누르면 그 반의 교과별 정답률을 펼쳐 볼 수 있어요 · 열 머리글로 정렬</div></header>
+      <header><h2>클래스별 상세</h2><div class="subtitle">행을 누르면 그 클래스의 교과별 정답률을 펼쳐 볼 수 있어요 · 열 머리글로 정렬</div></header>
       <div id="ccTable"></div>
     </section>
 
     <section class="dc-chart-wrapper">
-      <header><h2>우선 관심 반</h2><div class="subtitle">${subjLabel ? `${escapeHtml(subjLabel)} 활용도와 정답률이` : '활용도와 성취(정답률)가'} 함께 낮아 먼저 살펴보면 좋은 반이에요.</div></header>
+      <header><h2>우선 관심 클래스</h2><div class="subtitle">${subjLabel ? `${escapeHtml(subjLabel)} 활용도와 정답률이` : '활용도와 성취(정답률)가'} 함께 낮아 먼저 살펴보면 좋은 클래스예요.</div></header>
       <div id="ccPriority"></div>
     </section>
 
     <section class="dc-chart-wrapper" id="ccHeatSec" style="display:none;">
-      <header><h2>반별 교과 성취수준(정답률)</h2><div class="subtitle">행=반, 열=교과 · 셀 색: 초록(높음)↔빨강(낮음), 회색(표본 적음) · 교과 전체일 때만 보여요</div></header>
+      <header><h2>클래스별 교과 성취수준(정답률)</h2><div class="subtitle">행=클래스, 열=교과 · 셀 색: 초록(높음)↔빨강(낮음), 회색(표본 적음) · 교과 전체일 때만 보여요</div></header>
       <div id="ccHeat"></div>
     </section>`;
 
@@ -8962,7 +9099,7 @@ VIEWS['t-classcompare'] = async function(root){
         label:(item)=> `${barRows[item.dataIndex].label} · ${scoreShort} ${Number(item.raw).toFixed(1)}점`,
         afterLabel:(item)=>{
           const u = barRows[item.dataIndex]; const notes = [];
-          if (u.id===lowId) notes.push('가장 낮은 반 — 먼저 살펴보세요');
+          if (u.id===lowId) notes.push('가장 낮은 클래스 — 먼저 살펴보세요');
           if (u.lowSample)  notes.push('표본 적음 · 참고용');
           return notes.join('\n');
         } } }
@@ -8979,7 +9116,7 @@ VIEWS['t-classcompare'] = async function(root){
     good:     { cls:'dc-badge--success', label:'양호' }
   };
   const cols = [
-    { key:'label', label:'반', format:(v,r)=> escapeHtml(v)
+    { key:'label', label:'클래스', format:(v,r)=> escapeHtml(v)
         + (r.lowSample ? ` <span class="dc-badge" style="background:var(--gray-100);color:var(--gray-500);border:1px solid var(--gray-200);">표본 적음</span>` : '') },
     { key:'students', label:'학생수', align:'right', format:v=>escapeHtml((Number(v)||0).toLocaleString()) },
     { key:'activeRate', label:'활성률(%)', align:'right', format:v=>escapeHtml(v==null?'-':Number(v).toFixed(1)) },
@@ -9002,7 +9139,7 @@ VIEWS['t-classcompare'] = async function(root){
     if (priorityUnits.length){
       priHost.innerHTML = `
         <div class="dc-state-panel" role="status" style="text-align:left;border-left:4px solid #dc2626;background:#fef2f2;margin:0;">
-          <div style="font-weight:700;color:#991b1b;margin-bottom:6px;"><i class="fas fa-triangle-exclamation" aria-hidden="true"></i> 우선 관심 반</div>
+          <div style="font-weight:700;color:#991b1b;margin-bottom:6px;"><i class="fas fa-triangle-exclamation" aria-hidden="true"></i> 우선 관심 클래스</div>
           <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px;">
             ${priorityUnits.map(u=>`<span class="dc-badge dc-badge--danger">${escapeHtml(u.label)}</span>`).join('')}
           </div>
@@ -9021,6 +9158,61 @@ VIEWS['t-classcompare'] = async function(root){
     const hs = document.getElementById('ccHeatSec'); if (hs) hs.style.display = 'none';
   }
 };
+
+/* ======================================================================
+ * VIEWS['t-classcompare'] — [교사] "성취수준 비교" 오케스트레이터 (분석 탭 재편 E)
+ *   스코프 세그먼트(내 클래스끼리 / 충북 도 전체와) 상단 토글 → 두 본문 렌더러 분기 호출.
+ *   내 클래스끼리 = _renderCompareClassBody(구 개설클래스 비교), 충북 도 전체와 = _renderCompareProvinceBody(구 도 벤치마크).
+ *   공통 교과칩은 각 본문이 데이터 주도로 렌더하되, 스코프 전환 시 선택 교과를 이월(§2.5).
+ * ==================================================================== */
+const CMP_STYLE = `<style>
+  .cmp-scopebar{ display:flex; flex-wrap:wrap; align-items:center; gap:10px 14px;
+    background:#fff; border:1px solid var(--gray-200); border-radius:12px; padding:14px 16px; margin:0 0 var(--space-4); }
+  .cmp-scope-flabel{ font-size:15px; font-weight:700; color:var(--gray-700); flex:0 0 auto; }
+  .cmp-scope-seg{ flex:0 1 auto; min-width:0; }
+  .cmp-scope-sub{ flex:1 1 100%; margin:2px 0 0; font-size:15px; color:var(--gray-600); line-height:1.6; }
+  @media (max-width:767px){
+    .cmp-scope-seg{ width:100%; flex-wrap:wrap; }
+    .cmp-scope-seg .chip{ flex:1 1 auto; }
+  }
+</style>`;
+/* 교과칩 선택 이월(§2.5) — 국어 보다가 스코프만 바꿔도 국어 유지. 도 성취기준별(level=achievement)은 subject 강제 all. */
+function _carryCompareSubject(from, to){
+  if (from==='class' && to==='province'){ if (state._bmLevel!=='achievement') state._bmSubject = state._ccSubject || 'all'; }
+  else if (from==='province' && to==='class'){ state._ccSubject = state._bmSubject || 'all'; }
+}
+VIEWS['t-classcompare'] = async function(root){
+  if (state._compareScope !== 'class' && state._compareScope !== 'province') state._compareScope = 'class';
+  const scope = state._compareScope;
+  const subtitle = scope==='province'
+    ? '우리 반이 충북 도 전체 같은 학년과 견줘 어디쯤인지 봅니다.'
+    : '개설한 클래스끼리 성취·활용을 나란히 비교합니다.';
+  root.innerHTML = CMP_STYLE + `
+    <div class="cmp-scopebar">
+      <span class="cmp-scope-flabel">비교 대상</span>
+      <div class="dc-unit-toggle cmp-scope-seg" role="group" aria-label="비교 대상 선택">
+        <button class="chip" type="button" data-cmpscope="class" aria-pressed="${scope==='class'?'true':'false'}">내 클래스끼리</button>
+        <button class="chip" type="button" data-cmpscope="province" aria-pressed="${scope==='province'?'true':'false'}">충북 도 전체와</button>
+      </div>
+      <p class="cmp-scope-sub">${subtitle}</p>
+    </div>
+    <div id="cmpBody"></div>`;
+  root.querySelectorAll('.cmp-scope-seg button[data-cmpscope]').forEach(b=>{
+    b.onclick = ()=>{
+      const ns = b.dataset.cmpscope;
+      if (state._compareScope === ns) return;
+      _carryCompareSubject(state._compareScope, ns);
+      state._compareScope = ns;
+      VIEWS['t-classcompare'](root);
+    };
+  });
+  const body = document.getElementById('cmpBody');
+  body.innerHTML = tplLoading(3);
+  if (scope === 'province') await _renderCompareProvinceBody(body);
+  else await _renderCompareClassBody(body);
+};
+/* 레거시 직접 호출 방어(setView 해시 리다이렉트가 우선이나, 프로그램 호출 대비 alias). */
+VIEWS['t-benchmark'] = function(root){ state._compareScope = 'province'; return VIEWS['t-classcompare'](root); };
 
 /* ======================================================================
  * [Phase 2] 도 전체 벤치마크 — 공통 자산 (t-benchmark · t-daily-benchmark 공유)
@@ -9085,7 +9277,7 @@ async function _bmPresentSubjects(classId, realOnly){
 /* 시드 고지 배너(상단 상시 · §5-1) + in-view 실데이터 토글(교사 전역 realOnly 숨김 대체). realKey=state 키명. */
 function _bmSeedBar(seedNotice, realOn, realKey){
   const banner = _reportInsightHtml({ level:'info',
-    text: (seedNotice || '도 전체 수치는 시연용 시드 데이터 기반이에요. 실제 학교·학급 데이터가 쌓이면 자동으로 실데이터 비교로 바뀌어요.') });
+    text: (seedNotice || '충북 도 전체 수치는 아직 시연용 예시 데이터(대부분 합성)예요. 실제 학교 데이터가 쌓이면 자동으로 진짜 비교로 바뀌어요.') });
   return `<div class="bm-topbar">
     <div class="bm-topbar-notice">${banner}</div>
     <div class="dc-unit-toggle bm-realtoggle" id="bmRealToggle" role="group" aria-label="데이터 범위" data-realkey="${escapeAttr(realKey)}">
@@ -9144,7 +9336,7 @@ function _bmHeadlineHero(h, m){
        <span class="sw"><i class="bm-sw-mean"></i> 도 평균(실선) ${_bmNum(h.provMean,m)}${unit}</span>
        <span class="sw"><i class="bm-sw-median"></i> 도 중앙값(점선) ${_bmNum(h.provMedian,m)}${unit}</span>`;
   const note = masked ? '' :
-    `<div class="bm-hero-note">평균과 중앙값이 다르면 충북 안에 유독 높거나 낮은 반이 섞여 있다는 뜻이에요. 상위%는 충북 같은 학년 학생들 대비 우리 반 평균의 위치예요(시연 시드 기준).</div>`;
+    `<div class="bm-hero-note">평균과 중앙값이 다르면 충북 안에 유독 높거나 낮은 클래스가 섞여 있다는 뜻이에요. 상위%는 충북 같은 학년 학생들 대비 우리 반 평균의 위치예요(시연 시드 기준).</div>`;
   return `<div class="bm-hero">
     <div class="bm-hero-top"><div class="bm-hero-sentence">${sentence}</div>${badge}</div>
     <div class="bm-track" role="img" aria-label="우리 반 ${mineTxt}${unit}${masked?'':', 도 평균 '+_bmNum(h.provMean,m)+unit}">
@@ -9246,12 +9438,15 @@ function _bmBindCommon(root, rerun){
     });
   }
 }
-VIEWS['t-benchmark'] = async function(root){
+/* 성취수준 비교 · 스코프="충북 도 전체와" 본문 렌더러(구 VIEWS['t-benchmark'] 본문).
+   오케스트레이터(VIEWS['t-classcompare'])가 #cmpBody 컨테이너를 root 로 넘겨 호출.
+   도워딩(§2.4): '벤치마크' 단어 폐기 → "우리 반 vs 충북 도 전체". 1인칭 "우리 반"은 유지. */
+async function _renderCompareProvinceBody(root){
   root.innerHTML = tplLoading(3);
   const owned = await _bmFetchOwnedClasses();
   if (!owned.length){ root.innerHTML = BM_STYLE + _bmNoClassPanel(); return; }
-  // 상태 기본값
-  if (state._bmClassId == null || !owned.some(c=>String(c.id)===String(state._bmClassId))) state._bmClassId = owned[0].id;
+  // 상태 기본값 — 데이터 있는 클래스 우선(데모반이 기본이 되어 빈 히어로가 뜨는 것 방지, §2.4·§4.1).
+  if (state._bmClassId == null || !owned.some(c=>String(c.id)===String(state._bmClassId))) state._bmClassId = _pickDataClassId(owned);
   if (!state._bmSubject) state._bmSubject = 'all';
   if (!state._bmLevel) state._bmLevel = 'subject';
   if (!state._bmMetric) state._bmMetric = 'score';
@@ -9264,7 +9459,7 @@ VIEWS['t-benchmark'] = async function(root){
   const d = await apiGet('/api/lrs/stats/benchmark', {
     classId: state._bmClassId, level, subject: state._bmSubject, metric: metricKey, realOnly: realOn?'1':'0'
   });
-  if (!d || !d.success){ root.innerHTML = tplError('도 벤치마크 데이터를 불러오지 못했습니다', ()=>VIEWS['t-benchmark'](root)); return; }
+  if (!d || !d.success){ root.innerHTML = tplError('충북 도 전체 비교 데이터를 불러오지 못했습니다', ()=>_renderCompareProvinceBody(root)); return; }
 
   // 교과 present 캐시(subject=all 응답일 때 파생) — 칩 죽음 방지
   if (state._bmSubject === 'all' && Array.isArray(d.cells) && level === 'subject'){
@@ -9291,7 +9486,7 @@ VIEWS['t-benchmark'] = async function(root){
   const subjLabel = state._bmSubject!=='all' ? (_eqSubjectLabelOf(state._bmSubject)||'') : '전체';
   const summary = `<div class="dc-eq-summary" role="status"><i class="fas fa-filter" aria-hidden="true"></i> 필터: ${escapeHtml(clsName)} · ${escapeHtml(subjLabel)} · ${level==='achievement'?'성취기준별':'교과별'}${level==='subject'?(' · '+escapeHtml(m.label)):''}</div>`;
   const volCaption = (level==='subject')
-    ? `<div class="bm-caption">정답률·도달률은 학생별 비율이라 반↔도 비교가 공정해요. 학습시간·활용률은 충북 시드 학생의 누적 기록이 많아 절대 비교는 참고용이에요.</div>`
+    ? `<div class="bm-caption">정답률·도달률은 학생별 비율이라 우리 반과 도 비교가 공정해요. 학습시간·활용률은 충북 시드 학생의 누적 기록이 많아 절대 비교는 참고용이에요.</div>`
     : `<div class="bm-caption">표본이 충분한(도 50명 이상 학습한) 초등 코어 성취기준만 보여드려요. 우리 반이 평가한 기준만 비교표에 담아요.</div>`;
 
   const filterbar = `<div class="bm-filterbar">
@@ -9305,13 +9500,13 @@ VIEWS['t-benchmark'] = async function(root){
   const gradeLine = d.gradeLabel ? `충북 <b>${escapeHtml(d.gradeLabel)}</b>` : '충북 동학년';
   if (d.empty){
     const msg = d.emptyReason === 'achievement_elementary_only'
-      ? '성취기준 단위 벤치마크는 초등학교 반만 제공돼요. 이 반은 교과별 비교를 이용해 주세요.'
-      : (d.message || '이 반의 학년 정보를 확인할 수 없어 도 비교를 만들 수 없어요.');
+      ? '성취기준 단위 비교는 초등학교 클래스만 제공돼요. 이 클래스는 교과별 비교를 이용해 주세요.'
+      : (d.message || '이 클래스의 학년 정보를 확인할 수 없어 도 비교를 만들 수 없어요.');
     root.innerHTML = BM_STYLE + _bmSeedBar(d.seedNotice, realOn, '_bmRealOnly')
-      + `<div class="bm-block"><h2 class="bm-sec-title">도 벤치마크 비교</h2>
+      + `<div class="bm-block"><h2 class="bm-sec-title">우리 반 vs 충북 도 전체 · 같은 학년</h2>
          <p class="bm-sec-sub">우리 반이 ${gradeLine} 대비 어디쯤 있는지 성취(정답률·도달률) 중심으로 보여줘요.</p></div>`
       + filterbar + tplEmpty(msg);
-    _bmBindCommon(root, ()=>VIEWS['t-benchmark'](root));
+    _bmBindCommon(root, ()=>_renderCompareProvinceBody(root));
     _bmBindBenchToggles(root);
     return;
   }
@@ -9331,8 +9526,8 @@ VIEWS['t-benchmark'] = async function(root){
 
   root.innerHTML = BM_STYLE
     + _bmSeedBar(d.seedNotice, realOn, '_bmRealOnly')
-    + `<div class="bm-block"><h2 class="bm-sec-title">도 벤치마크 비교</h2>
-       <p class="bm-sec-sub">우리 반이 <b>${escapeHtml(clsName)}</b> · ${gradeLine} 대비 어디쯤 있는지 성취 중심으로 보여줘요. 평균·중앙값·상위%를 함께 봐요.</p></div>`
+    + `<div class="bm-block"><h2 class="bm-sec-title">우리 반 vs 충북 도 전체 · 같은 학년</h2>
+       <p class="bm-sec-sub"><b>${escapeHtml(clsName)}</b>이(가) ${gradeLine} 대비 어디쯤 있는지 성취 중심으로 보여줘요. 평균·중앙값·상위%를 함께 봐요.</p></div>`
     + filterbar
     + `<div id="bmHero"></div>`
     + `<div class="bm-block">${_bmKpiRow(d.mine, d.province)}</div>`
@@ -9381,20 +9576,20 @@ VIEWS['t-benchmark'] = async function(root){
     foot.innerHTML = bits.join(' ');
   }
 
-  _bmBindCommon(root, ()=>VIEWS['t-benchmark'](root));
+  _bmBindCommon(root, ()=>_renderCompareProvinceBody(root));
   _bmBindBenchToggles(root);
-};
-/* 벤치마크 전용 토글(교과·비교단위·지표) 바인딩 — 전체 재렌더. */
+}
+/* 도 전체 스코프 전용 토글(교과·비교단위·지표) 바인딩 — 전체 재렌더. */
 function _bmBindBenchToggles(root){
   root.querySelectorAll('#bmSubjToggle button[data-subj]').forEach(b=>{
-    b.onclick = ()=>{ if ((state._bmSubject||'all')===b.dataset.subj) return; state._bmSubject = b.dataset.subj; VIEWS['t-benchmark'](root); };
+    b.onclick = ()=>{ if ((state._bmSubject||'all')===b.dataset.subj) return; state._bmSubject = b.dataset.subj; _renderCompareProvinceBody(root); };
   });
   root.querySelectorAll('#bmLevelToggle button[data-bmlevel]').forEach(b=>{
     b.onclick = ()=>{ if (state._bmLevel===b.dataset.bmlevel) return; state._bmLevel = b.dataset.bmlevel;
-      if (b.dataset.bmlevel==='achievement') state._bmSubject = 'all'; VIEWS['t-benchmark'](root); };
+      if (b.dataset.bmlevel==='achievement') state._bmSubject = 'all'; _renderCompareProvinceBody(root); };
   });
   root.querySelectorAll('#bmMetricToggle button[data-bmmetric]').forEach(b=>{
-    b.onclick = ()=>{ if (state._bmMetric===b.dataset.bmmetric) return; state._bmMetric = b.dataset.bmmetric; VIEWS['t-benchmark'](root); };
+    b.onclick = ()=>{ if (state._bmMetric===b.dataset.bmmetric) return; state._bmMetric = b.dataset.bmmetric; _renderCompareProvinceBody(root); };
   });
 }
 
@@ -11625,6 +11820,11 @@ async function setView(id){
   if (state.role === 'admin' && ADMIN_VIEW_ALIAS[id] && !(MENUS.admin||[]).some(it=>it.id===id)) {
     id = ADMIN_VIEW_ALIAS[id];
   }
+  // 교사 분석 탭 재편(6→4): 폐지·통합된 구 뷰 id → 새 통합 탭으로 리다이렉트(북마크/역할스위치 호환).
+  //   t-benchmark → 성취수준 비교(도 전체 스코프) / t-subject → 활동 현황(교과별 섹션) / t-usage → 활동 현황(활용 섹션).
+  if (id === 't-benchmark'){ id = 't-classcompare'; state._compareScope = 'province'; }
+  else if (id === 't-subject'){ id = 't-usage'; state._actSecFocus = 'subject'; }
+  else if (id === 't-usage'){ if (!state._actSecFocus) state._actSecFocus = 'usage'; }
   // P0-4(IA 정리): 학생 "오늘 활동 요약"(s-daily) 폐지 — 구 URL/해시 진입은 "활동 유형별 수행"으로 폴백.
   //   (교사 t-daily·관리자 a-daily 일일현황은 불변)
   if (id === 's-daily') id = 's-perform';
@@ -11686,7 +11886,9 @@ async function setView(id){
     const isBenchmark = (id === 't-benchmark' || id === 't-daily-benchmark');
     // t-behavior(학습 행동 심화 분석): 누적(90일) 기준·연관 분석이라 전역 기간칩 무효 → inert.
     const isBehavior = (id === 't-behavior');
-    const isPeriodInert = isDailyView || isWeakStrong || isBenchmark || isBehavior;
+    // 성취수준 비교(t-classcompare): 화면 자체 조건(교과·기간·스코프)을 써 전역 기간칩 무효 → inert(§2.2).
+    const isCompare = (id === 't-classcompare');
+    const isPeriodInert = isDailyView || isWeakStrong || isBenchmark || isBehavior || isCompare;
     const picker = document.getElementById('periodPicker');
     const fbar = picker ? picker.closest('.dc-filter-bar') : null;
     if (fbar) {
@@ -11707,6 +11909,8 @@ async function setView(id){
             ? '<i class="fas fa-circle-info" aria-hidden="true"></i> 이 화면은 아래 자체 날짜 선택을 써요 (위 기간 선택은 사용 안 함)'
           : (id === 't-behavior')
             ? '<i class="fas fa-circle-info" aria-hidden="true"></i> 학습 행동 심화 분석은 누적(최근 90일) 기준이라 기간 선택을 쓰지 않아요'
+          : (id === 't-classcompare')
+            ? '<i class="fas fa-circle-info" aria-hidden="true"></i> 성취수준 비교는 화면 안 자체 조건(교과·기간·스코프)을 써요 (위 기간 선택은 사용 안 함)'
           : '<i class="fas fa-circle-info" aria-hidden="true"></i> 이 화면은 오늘·어제 고정이라 기간 선택을 쓰지 않아요';
         note.hidden = false;
       } else if (note) { note.hidden = true; }

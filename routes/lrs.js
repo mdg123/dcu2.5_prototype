@@ -554,6 +554,59 @@ function canViewClass(req, classId) {
 }
 
 // ─────────────────────────────────────────────────────────
+// [활동 현황 F / 성취0 제외 C·A] 공통 유틸 (교사분석탭 재편 기획서 §6.2)
+//   hasComparableActivity(unit): 비교 가능한 활동이 있는 클래스인가.
+//     = 1인당 활동 > 0(avgActsPerStudent) OR 채점 데이터 존재(avgScore != null).
+//   [시연] 관계분석 데모반(활동0·채점0)을 KPI·격차·우선관심에서 배제하는 단일 진실원천.
+//   resolveClassId 기본값(A)·class-compare 지표 제외(C)·활동현황 평균 산출이 동일 기준을 공유.
+function hasComparableActivity(unit) {
+  if (!unit) return false;
+  const acts = Number(unit.avgActsPerStudent);
+  return (Number.isFinite(acts) && acts > 0) || unit.avgScore != null;
+}
+
+// classId → 클래스명 (활동 현황 드릴 className · excludedNoData 라벨 · 스코프 표기).
+function _classNameById(id) {
+  try {
+    const r = db.prepare('SELECT name FROM classes WHERE id = ?').get(id);
+    return r ? r.name : null;
+  } catch (_) { return null; }
+}
+
+// ─────────────────────────────────────────────────────────
+// [활동 현황 F] 멤버십 스코프 + 선택적 classId 좁힘.
+//   기본(classId 미지정/all): resolveMembershipScopeFilter(소유 반 전체 학생 멤버 합집합) — 현행·회귀 0.
+//   ?classId=<id> (canViewClass 통과): 그 클래스의 학생 멤버로 좁힘.
+//   opts.requireFlag=true 이면 ?heatScope=class 일 때만 좁힘 — 활용 히트맵/드릴의 count 정합 계약
+//     (INV-HC1: heatmap-cell.total == daily heatmapDowHour)을 보호한다. FE 는 '전체' 스코프에서도
+//     권한 게이트로 classId 를 넘기므로, 플래그로 "좁힘 의도"를 명시해야 기존 all-owned 드릴이 안 깨진다.
+//   반환: { where, params, scope, classId, className }. scope: 'class-one'|'class'|'mine'|'all'.
+function resolveActivityScope(req, colAlias, opts = {}) {
+  const prefix = colAlias ? `${colAlias}.` : '';
+  const flagOk = opts.requireFlag ? String(req.query.heatScope || '').toLowerCase() === 'class' : true;
+  const raw = String(req.query.classId || '').trim().toLowerCase();
+  const cid = parseInt(raw, 10);
+  if (flagOk && raw && raw !== 'all' && Number.isInteger(cid) && canViewClass(req, cid)) {
+    let memberIds = [];
+    try {
+      memberIds = db.prepare(`
+        SELECT DISTINCT cm.user_id AS id
+        FROM class_members cm JOIN users u ON u.id = cm.user_id
+        WHERE cm.class_id = ? AND u.role = 'student'
+      `).all(cid).map(r => r.id);
+    } catch (_) { memberIds = []; }
+    const className = _classNameById(cid);
+    if (!memberIds.length) {
+      return { where: ' AND 1=0', params: [], scope: 'class-one', classId: cid, className };
+    }
+    const ph = memberIds.map(() => '?').join(',');
+    return { where: ` AND ${prefix}user_id IN (${ph})`, params: memberIds, scope: 'class-one', classId: cid, className };
+  }
+  const base = resolveMembershipScopeFilter(req, colAlias);
+  return { where: base.where, params: base.params, scope: base.scope, classId: null, className: null, downgraded: base.downgraded };
+}
+
+// ─────────────────────────────────────────────────────────
 // 개인정보 마스킹 정책 (2026-06 전환 — 단일 진실원천)
 //   isClassManager: 그 반의 담임/담당(owner·teacher·co_teacher 멤버)인가.
 //     ★ admin 이라도 "그 반의 교사-티어 멤버가 아니면" manager 가 아니다(거시뷰=익명).
@@ -793,7 +846,8 @@ router.get('/stats/by-service', requireAuth, (req, res) => {
     const r = dateRangeWhere(req, 'created_at', 'll');
     if (r.invalid) return sendInvalidPeriod(res, r.reason);
     const role = req.query.role;
-    const sf = resolveMembershipScopeFilter(req, 'll');
+    // [활동 현황 F] ?classId=<id>(canViewClass) → 그 클래스로 좁힘, 미지정/all → 소유 반 전체 합산(현행).
+    const sf = resolveActivityScope(req, 'll');
     let join = '';
     // demo_* 합성 시드 제외(P2 관리자·교사 결함): 실서비스 랭킹에 demo_b4 등 데모 시드가 노출되면 안 됨.
     //   realOnly 와 무관하게 '항상' 제외한다(데모는 실서비스가 아님).
@@ -821,7 +875,7 @@ router.get('/stats/by-service', requireAuth, (req, res) => {
       service: row.source_service,
       service_label: serviceLabel(row.source_service)
     }));
-    res.json({ success: true, scope: sf.scope, stats });
+    res.json({ success: true, scope: sf.scope, appliedClassId: sf.classId, appliedClassName: sf.className, stats });
   } catch (err) {
     res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
   }
@@ -1133,7 +1187,9 @@ router.get('/stats/daily', requireAuth, (req, res) => {
     //   직접 집계해 실제 분포(다중 셀)를 준다.
     //   스코프: 멤버십(소유 반 학생 user_id 합집합) — class_id NULL(self-learn·content)도 포착.
     //   admin scope=all → 필터 없음. demo_* 합성 시드 제외(현황 시각화 정책과 동일).
-    const msf = resolveMembershipScopeFilter(req, 'll');
+    //   [활동 현황 F] ?heatScope=class&classId=<id> → 그 클래스로 좁힘(drill heatmap-cell 과 대칭·count 정합).
+    //   heatScope 미지정 → 소유 반 전체(현행·INV-HC1 count 정합 계약 보존).
+    const msf = resolveActivityScope(req, 'll', { requireFlag: true });
     const hmWhere = 'WHERE 1=1' + r.where + msf.where
       + " AND (ll.source_service IS NULL OR ll.source_service NOT LIKE 'demo%')"
       + (activity_type ? ' AND ll.activity_type = ?' : '')
@@ -1160,7 +1216,11 @@ router.get('/stats/daily', requireAuth, (req, res) => {
       byHourBasis: '학습활동 7종(기간 내)',
       heatmapDowHour,
       heatmapScope: msf.scope,
-      heatmapBasis: '학급 전체 활동(요일×시간, 멤버십 기준)',
+      heatmapClassId: msf.classId,
+      heatmapClassName: msf.className,
+      heatmapBasis: msf.classId != null
+        ? `${msf.className || '선택 클래스'} 활동(요일×시간)`
+        : '학급 전체 활동(요일×시간, 멤버십 기준)',
       period: r.fromDate && r.toDate ? { from: r.fromDate, to: r.toDate } : null
     });
   } catch (err) {
@@ -1205,7 +1265,8 @@ router.get('/stats/heatmap-cell', requireAuth, (req, res) => {
     if (r.invalid) return sendInvalidPeriod(res, r.reason);
 
     // heatmapDowHour(/stats/daily) 와 동일 스코프·필터 — count 정합 보장.
-    const msf = resolveMembershipScopeFilter(req, 'll');
+    //   [활동 현황 F] ?heatScope=class → classId 로 좁힘(daily 히트맵과 대칭). 미지정 → 소유 반 전체(현행·INV-HC1).
+    const msf = resolveActivityScope(req, 'll', { requireFlag: true });
     const dowStr = String(dow);
     const hourStr = String(hour).padStart(2, '0');
     const cellWhere = 'WHERE 1=1' + r.where + msf.where
@@ -1254,6 +1315,26 @@ router.get('/stats/heatmap-cell', requireAuth, (req, res) => {
     const mask = shouldMaskNames(req, classId, studentCount);
     const maskIdx = new Map();  // userId → 안정적 익명 인덱스
 
+    // [활동 현황 F] userId → 클래스명 맵 — 전체(all-owned) 스코프 드릴에서 각 활동이 어느 클래스 학생인지 식별.
+    //   교사: 소유 active 반 멤버십 기준. 관리자: 드릴 대상 classId 멤버 기준(거시 all 은 최선값·미매칭 null).
+    const userClassName = new Map();
+    try {
+      const nameRows = (req.user.role === 'admin')
+        ? db.prepare(`
+            SELECT cm.user_id AS uid, c.name AS cname
+            FROM class_members cm JOIN classes c ON c.id = cm.class_id
+            JOIN users u ON u.id = cm.user_id
+            WHERE cm.class_id = ? AND u.role = 'student'
+          `).all(classId)
+        : db.prepare(`
+            SELECT cm.user_id AS uid, c.name AS cname
+            FROM class_members cm JOIN classes c ON c.id = cm.class_id
+            JOIN users u ON u.id = cm.user_id
+            WHERE c.owner_id = ? AND c.status = 'active' AND u.role = 'student'
+          `).all(req.user.id);
+      nameRows.forEach(x => { if (!userClassName.has(x.uid)) userClassName.set(x.uid, x.cname); });
+    } catch (_) { /* className best-effort */ }
+
     // 대상/콘텐츠 제목(target 기반) 보강.
     function cellTitle(row) {
       const at = row.activity_type;
@@ -1283,6 +1364,7 @@ router.get('/stats/heatmap-cell', requireAuth, (req, res) => {
       return {
         userId: row.user_id,
         name,
+        className: userClassName.get(row.user_id) || null,
         activityType: row.activity_type,
         activityKo: masteryDetailTypeLabel(row.activity_type, row.source_service),
         service: row.source_service || null,
@@ -1302,6 +1384,7 @@ router.get('/stats/heatmap-cell', requireAuth, (req, res) => {
       count: Math.min(total, HEATMAP_CELL_LIMIT),
       total,
       masked: mask,
+      scope: msf.scope, scopeClassId: msf.classId, scopeClassName: msf.className,
       items,
     });
   } catch (err) {
@@ -1323,7 +1406,16 @@ router.get('/stats/by-subject', requireAuth, (req, res) => {
     //        class=교사 소유 반의 class_id IN (...).  학생이 mine 요청 시 자신이 속한 class 의 자료 노출은 피하고 빈 결과 폴백.
     const sfRaw = resolveScopeFilter(req);
     const role = req.user.role;
+    // [활동 현황 F] ?classId=<id>(canViewClass 통과) → 그 클래스 하나로 좁힘(class_id = ?).
+    //   미지정/all → 기존 scope(소유 반 class_id IN / mine). 권한 없거나 잘못된 id 는 무시(현행 스코프).
+    const rawCid = String(req.query.classId || '').trim().toLowerCase();
+    let oneClassId = null;
+    if (rawCid && rawCid !== 'all') {
+      const c = parseInt(rawCid, 10);
+      if (Number.isInteger(c) && canViewClass(req, c)) oneClassId = c;
+    }
     const buildScope = (alias, ownerCol) => {
+      if (oneClassId != null) return { w: ` AND ${alias}.class_id = ?`, p: [oneClassId] };
       if (sfRaw.scope === 'all') return { w: '', p: [] };
       if (sfRaw.scope === 'class') {
         // class_id IN (교사 소유 반). sfRaw.params 에 이미 class id 목록 보유.
@@ -1369,7 +1461,9 @@ router.get('/stats/by-subject', requireAuth, (req, res) => {
     });
     res.json({
       success: true,
-      scope: sfRaw.scope,
+      scope: oneClassId != null ? 'class-one' : sfRaw.scope,
+      appliedClassId: oneClassId,
+      appliedClassName: oneClassId != null ? _classNameById(oneClassId) : null,
       lessonStats: enrich(lessonStats, 'lesson_count'),
       homeworkStats: enrich(homeworkStats, 'hw_count'),
       examStats: enrich(examStats, 'exam_count')
@@ -6233,6 +6327,58 @@ router.get('/stats/equity', requireAuth, (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────
+// GET /api/lrs/classes — 교사 LRS 클래스 선택기용 경량 목록 (A: 데이터 기반 기본 선택)
+//   목적: FE resolveClassId 가 "채점/활동 데이터가 있는 클래스"를 기본 선택하도록, 소유 active
+//         클래스별 hasScoredActivity/activityCount 플래그를 제공한다.
+//   [시연] 관계분석 데모반(활동0·채점0) → hasScoredActivity=false → 기본 선택 제외(A 근본 해소).
+//   권한: teacher/admin. teacher=본인 소유 active 클래스만(class-compare 스코프와 동일 정의).
+//   회귀 0: /api/class/my 는 미변경(광범위 소비처 보호) — 이 경량 엔드포인트는 LRS 전용 신설.
+//   정렬: created_at DESC(=/api/class/my 동일) → FE drop-in.
+// ─────────────────────────────────────────────────────────
+router.get('/classes', requireAuth, (req, res) => {
+  try {
+    const role = req.user && req.user.role;
+    if (role !== 'teacher' && role !== 'admin') {
+      return res.status(403).json({ success: false, message: '교사 또는 관리자 권한이 필요합니다.' });
+    }
+    const owned = db.prepare(
+      "SELECT id, name FROM classes WHERE owner_id = ? AND status = 'active' ORDER BY created_at DESC, id DESC"
+    ).all(req.user.id);
+
+    const classes = owned.map(c => {
+      const memberRow = db.prepare(`
+        SELECT COUNT(*) AS n, GROUP_CONCAT(cm.user_id) AS ids
+        FROM class_members cm JOIN users u ON u.id = cm.user_id
+        WHERE cm.class_id = ? AND u.role = 'student'
+      `).get(c.id);
+      const students = memberRow.n || 0;
+      const memberIds = String(memberRow.ids || '').split(',').filter(Boolean).map(Number);
+      let activityCount = 0, scoredCount = 0;
+      if (memberIds.length) {
+        const ph = memberIds.map(() => '?').join(',');
+        const agg = db.prepare(`
+          SELECT COUNT(*) AS acts,
+                 SUM(CASE WHEN ${scoredWhere('ll')} THEN 1 ELSE 0 END) AS scored
+          FROM learning_logs ll
+          WHERE ll.user_id IN (${ph})
+        `).get(...memberIds);
+        activityCount = agg.acts || 0;
+        scoredCount = agg.scored || 0;
+      }
+      return {
+        id: c.id, name: c.name, students,
+        activityCount, scoredCount,
+        hasScoredActivity: scoredCount > 0,
+        hasComparableActivity: activityCount > 0 || scoredCount > 0,
+      };
+    });
+    res.json({ success: true, classes });
+  } catch (err) {
+    console.error('[LRS] /classes error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
 // [반별 비교] GET /api/lrs/stats/class-compare — 교사 담당 반 성취/활용 비교
 //   기획서: 보고서/LRS_교사_반별비교_기획서_v1.md §C-1·§C-2 (관리자 /stats/equity 의 "반(class)" 버전)
 //   ★ equity 와의 차이(문서화):
@@ -6281,6 +6427,7 @@ router.get('/stats/class-compare', requireAuth, (req, res) => {
         priorityUnits: [],
         availableSubjects: buildAvailableSubjects(new Set()),
         classSubjectMatrix: [],
+        excludedNoData: [],
         appliedSubject: subjectParam, appliedSubjectLabel: subjectLabelApplied,
         insufficientClasses: true, ownedCount, minScoredForCaption: LOW_SAMPLE_SCORED
       });
@@ -6353,12 +6500,25 @@ router.get('/stats/class-compare', requireAuth, (req, res) => {
       };
     });
 
-    // ── 사분면(활용 중앙값 × 성취 중앙값) — avgScore null 반은 판정 제외(quadrant null). ──
-    const actsVals = units.map(u => u.avgActsPerStudent).filter(v => v != null).sort((a, b) => a - b);
-    const scoreVals = units.map(u => u.avgScore).filter(v => v != null).sort((a, b) => a - b);
+    // ── [C·A 해소] 비교 가능한 활동이 없는 클래스([시연] 데모반 등)를 지표에서 배제 ──
+    //   기획서 §4.2·§6: avgActsPerStudent===0 && avgScore==null(활동0·채점0) 클래스는
+    //   KPI·격차·사분면·우선관심·매트릭스 산출에서 제외한다(활용도 격차 "-배" 붕괴 방지).
+    //   단, units(표)에는 남겨 존재를 알리고, excludedNoData 로 FE 가
+    //   "N개 클래스는 활동이 없어 비교에서 제외했어요"라고 정직 고지한다.
+    const comparableUnits = units.filter(hasComparableActivity);
+    const comparableIds = new Set(comparableUnits.map(u => u.id));
+    const excludedNoData = units
+      .filter(u => !comparableIds.has(u.id))
+      .map(u => ({ id: u.id, name: u.label }));
+    // 실제 비교 가능한 클래스 < 2 → 비교 무의미(insufficientClasses). 표·excludedNoData 는 유지.
+    const insufficientClasses = comparableUnits.length < 2;
+
+    // ── 사분면(활용 중앙값 × 성취 중앙값) — 비교가능 클래스만으로 중앙값 산출(데모반 0 배제). ──
+    const actsVals = comparableUnits.map(u => u.avgActsPerStudent).filter(v => v != null).sort((a, b) => a - b);
+    const scoreVals = comparableUnits.map(u => u.avgScore).filter(v => v != null).sort((a, b) => a - b);
     const medActs = actsVals.length ? _pctile(actsVals, 0.5) : null;
     const medScore = scoreVals.length ? _pctile(scoreVals, 0.5) : null;
-    units.forEach(u => {
+    comparableUnits.forEach(u => {
       if (u.avgScore == null || medActs == null || medScore == null) { u.quadrant = null; return; }
       const useLow = u.avgActsPerStudent <= medActs;
       const achLow = u.avgScore <= medScore;
@@ -6367,8 +6527,8 @@ router.get('/stats/class-compare', requireAuth, (req, res) => {
         : !useLow && achLow ? 'ach_low' : 'good';
     });
 
-    // ── 지표(_equityMetric 재사용) — FE 는 avgScore.gapPP·actsPerStu.gapX 사용(격차 중심). ──
-    const mkVals = (field) => units.filter(u => u[field] != null).map(u => ({ id: u.id, label: u.label, v: u[field] }));
+    // ── 지표(_equityMetric 재사용) — 비교가능 클래스만 투입. FE 는 avgScore.gapPP·actsPerStu.gapX 사용. ──
+    const mkVals = (field) => comparableUnits.filter(u => u[field] != null).map(u => ({ id: u.id, label: u.label, v: u[field] }));
     const metrics = {
       avgScore:   _equityMetric(mkVals('avgScore'), 'pp'),
       actsPerStu: _equityMetric(mkVals('avgActsPerStudent'), 'ratio'),
@@ -6376,8 +6536,8 @@ router.get('/stats/class-compare', requireAuth, (req, res) => {
       reachRate:  _equityMetric(mkVals('reachRate'), 'pp')
     };
 
-    // ── 우선 관심 반: 이중취약(both_low), 성취 낮은 순. (산점도 없음 — 목록만) ──
-    const priorityUnits = units
+    // ── 우선 관심 반: 이중취약(both_low), 성취 낮은 순. 비교가능 클래스만. (산점도 없음 — 목록만) ──
+    const priorityUnits = comparableUnits
       .filter(u => u.quadrant === 'both_low')
       .map(u => ({
         id: u.id, label: u.label, classId: u.id, className: u.label,
@@ -6419,7 +6579,9 @@ router.get('/stats/class-compare', requireAuth, (req, res) => {
       const keyToCodeSet = {};
       distinctCodes.forEach(c => { const k = canonicalSubjectKey(subjectLabel(c)); if (k) (keyToCodeSet[k] = keyToCodeSet[k] || []).push(c); });
       const presentSubjKeys = CANONICAL_SUBJECT_ORDER.filter(k => presentKeys.has(k));
-      classSubjectMatrix = ownedClasses.map(c => {
+      // 비교가능 클래스만 매트릭스 행으로(데모반 전셀 회색 노이즈 제거) — units(표)엔 남되 히트맵은 제외.
+      const matrixClasses = ownedClasses.filter(c => comparableIds.has(c.id));
+      classSubjectMatrix = matrixClasses.map(c => {
         const memberIds = memberIdsOf(c.id);
         const cells = presentSubjKeys.map(key => {
           const codeSet = keyToCodeSet[key] || [];
@@ -6447,8 +6609,10 @@ router.get('/stats/class-compare', requireAuth, (req, res) => {
       success: true,
       period: `${days}d`, realOnly: sfL.realOnly,
       units, metrics, priorityUnits, availableSubjects, classSubjectMatrix,
+      excludedNoData,
       appliedSubject: subjectParam, appliedSubjectLabel: subjectLabelApplied,
-      insufficientClasses: false, ownedCount, minScoredForCaption: LOW_SAMPLE_SCORED
+      insufficientClasses, ownedCount, comparableCount: comparableUnits.length,
+      minScoredForCaption: LOW_SAMPLE_SCORED
     });
   } catch (err) {
     console.error('[LRS] /stats/class-compare error:', err);
@@ -6798,7 +6962,7 @@ router.post('/supplement/:id/done', requireAuth, (req, res) => {
 //     · 성취기준 level 게이트: 초등만 노출 + 도 distinct 학생 n>=50 코어 화이트리스트(동적)만.
 //       중·고는 성취기준 단위 미노출(교과×학년만).
 // ═══════════════════════════════════════════════════════════════════════════
-const BENCH_SEED_NOTICE = '도 전체 수치는 시연용 시드 기반이며, 실데이터가 쌓이면 자동 반영됩니다.';
+const BENCH_SEED_NOTICE = '충북 도 전체 수치는 아직 시연용 예시 데이터(대부분 합성)예요. 실제 학교 데이터가 쌓이면 자동으로 진짜 비교로 바뀌어요.';
 const BENCH_MIN_SAMPLE = LRS_CONFIG.minSampleN;   // 10 — 소표본 마스킹 게이트
 const BENCH_CORE_MIN = 50;                        // 초등 코어 화이트리스트 게이트(도 distinct 학생 n>=50)
 const BENCH_DUR_SQL = "COALESCE(ll.duration_sec, CAST(REPLACE(REPLACE(COALESCE(ll.result_duration,''),'PT',''),'S','') AS INTEGER), 0)";
@@ -7025,7 +7189,7 @@ router.get('/stats/benchmark', requireAuth, (req, res) => {
       return res.json({
         ...base, mine: null, province: null, headline: null, cells: [], cellCount: 0,
         empty: true, emptyReason: 'achievement_elementary_only',
-        message: '성취기준 단위 벤치마크는 초등학교만 제공됩니다. 중·고는 교과×학년 비교를 이용하세요.'
+        message: '성취기준 단위의 도 전체 비교는 초등학교만 제공돼요. 중·고등학교는 교과×학년 비교를 이용해 주세요.'
       });
     }
 
