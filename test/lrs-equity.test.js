@@ -23,7 +23,7 @@
 const { test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const http = require('node:http');
-const { setupTestDb, openTestDb } = require('./_setup');
+const { setupTestDb, openTestDb, fixtureWindow } = require('./_setup');
 
 setupTestDb();
 require('../db/schema').initSchema();
@@ -37,7 +37,7 @@ const REGION_B = 'T_격차하위';   // 합성 지역 B(성취 低·활동 少) 
 const REGION_MASK = 'T_격차소표'; // 합성 지역 C(학생 6명 < 10) — 마스킹 대상
 
 let server, baseUrl, tdb;
-let studentId, teacherId;
+let studentId, teacherId, EQUITY_GT_Q;
 
 function buildApp() {
   const app = express();
@@ -103,6 +103,24 @@ before(async () => {
   teacherId = t ? Number(t.id)
     : Number(tdb.prepare("INSERT INTO users (username, display_name, password, role) VALUES (?, ?, 'x', 'teacher')").run(`t_eq_tch_${Date.now()}`, '격차교사').lastInsertRowid);
 
+  // ── EQUITY_GT_Q: INV-E3·E5b 용 시계 독립 창 (2026-07-30 시한폭탄 fix) ──────
+  //   두 테스트는 합성 지역(A/B)을 **실 지역들과 상대 비교**한다(gapX=top/bottom,
+  //   quadrant=중앙값 대비). 합성 시드는 now 기준이라 자가갱신이지만 **실 지역 활동량은
+  //   실 DB 고정분**이고 로그가 2026-07-16 에서 멈춰 있어, 롤링 30일 창은 2026-08-16 부터
+  //   실 지역이 전부 0 활동이 된다 → bottom.v=0(gapX null)·B 사분면 뒤집힘으로 붕괴.
+  //   (카나리아 45일에서 정확히 재현: gapX object·quadrant ach_low)
+  //   ★ 시드 INSERT 이후에 계산 — 창이 실 고정분 + now 시드를 모두 덮어야 한다.
+  //   ※ /stats/equity 는 macroDays(routes/lrs.js L5495)로 **period=Nd 만** 해석한다
+  //     (from/to 미지원 → 넘겨도 무시되고 기본 30일로 떨어진다). 그래서 창을 "데이터 전
+  //     구간을 덮는 일수"로 유도한다. 어느 날 돌려도 포함 행 집합은 항상 전체 = 결정적.
+  {
+    const w = fixtureWindow(tdb);
+    const spanDays = Math.ceil((Date.now() - new Date(`${w.from}T00:00:00Z`).getTime()) / 86400000) + 1;
+    assert.ok(spanDays <= 365,
+      `equity 창(${spanDays}일)이 라우트 상한 365일 초과 — 가장 오래된 로그(${w.from})가 범위 밖. GT 재설계 필요`);
+    EQUITY_GT_Q = `period=${spanDays}d`;
+  }
+
   await new Promise((resolve) => {
     server = http.createServer(buildApp()).listen(0, '127.0.0.1', () => {
       baseUrl = `http://127.0.0.1:${server.address().port}`;
@@ -163,7 +181,8 @@ test('INV-E2: gapPP === top.v − bottom.v (avgScore·activeRate·reachRate)', a
 // INV-E3: actsPerStu 는 배수(gapX = top/bottom), gapPP 없음.
 // ──────────────────────────────────────────────────────────────────────────
 test('INV-E3: actsPerStu.gapX === top.v / bottom.v (배수), gapPP 없음', async () => {
-  const j = await fetchEquity();
+  // 실 지역과의 상대 비교라 롤링 창이면 시간이 지나 bottom.v=0 → gapX null 붕괴. 창 결정화.
+  const j = await fetchEquity(`?dim=region&${EQUITY_GT_Q}`);
   const m = j.metrics.actsPerStu;
   assert.equal(typeof m.gapX, 'number', 'actsPerStu.gapX 숫자');
   assert.equal(m.gapPP, undefined, 'actsPerStu 는 gapPP 없음(배수 규약)');
@@ -220,7 +239,8 @@ test('INV-E5: 마스킹 — <10 단위 값 null·지표 제외·excludedMasked �
 //   REGION_B: 각 학생 1 act·score50  → avgActs=1·avgScore≈50·reach=0.
 // ──────────────────────────────────────────────────────────────────────────
 test('INV-E5b: 합성 지역 값 정확 — avgActs/avgScore/reachRate 결정적', async () => {
-  const j = await fetchEquity();
+  // b.quadrant 는 실 지역 중앙값 대비 판정 → 롤링 창이면 실 지역 0활동으로 뒤집힌다. 창 결정화.
+  const j = await fetchEquity(`?dim=region&${EQUITY_GT_Q}`);
   const a = findUnit(j, REGION_A), b = findUnit(j, REGION_B);
   assert.equal(a.masked, false); assert.equal(b.masked, false);
   assert.equal(a.students, 10); assert.equal(b.students, 10);

@@ -17,7 +17,7 @@
 const { test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const http = require('node:http');
-const { setupTestDb, openTestDb } = require('./_setup');
+const { setupTestDb, openTestDb, fixtureWindow } = require('./_setup');
 
 setupTestDb();
 require('../db/schema').initSchema();
@@ -1181,7 +1181,12 @@ test('MEMB-1: /stats/custom?scope=class — 교사가 우리 반 학생 self-lea
     `SELECT COUNT(*) c FROM learning_logs WHERE source_service='self-learn' AND user_id IN (${ph})`
   ).all ? db.prepare(`SELECT COUNT(*) c FROM learning_logs WHERE source_service='self-learn' AND user_id IN (${ph})`).get(...memberIds).c : 0;
 
-  const res = await req(`/stats/custom?scope=class`, TEACHER);
+  // [2026-07-30 fix] 위 expected 는 **기간 필터 없이** 전체를 세는데, /stats/custom 은
+  //   기간 미지정 시 롤링 30일이 기본이라 둘의 기준이 어긋나 있었다. 실 로그가
+  //   2026-07-16 에서 멈춰 있어 2026-08-16 부터는 창이 비고 recommendedCount=0 → 붕괴.
+  //   창을 데이터에서 유도해 API 와 SQL 미러의 모집단을 일치시킨다(불변식 의미는 그대로).
+  const w = fixtureWindow(db);
+  const res = await req(`/stats/custom?scope=class&from=${w.from}&to=${w.to}`, TEACHER);
   assert.equal(res.status, 200);
   // 멤버십 기반이면 class_id NULL self-learn 도 포착 → 멤버에 self-learn 로그가 있으면 recommendedCount>0
   if (expected > 0) {

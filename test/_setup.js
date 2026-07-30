@@ -90,14 +90,20 @@ function _copyDbSync(srcPath, destPath) {
  * @returns {string} 임시 DB 경로
  */
 function setupTestDb() {
-  if (!fs.existsSync(REAL_DB)) {
-    throw new Error(`실 DB 가 없습니다: ${REAL_DB}`);
+  // TEST_SRC_DB: 복사 원본 오버라이드(기본 = 실 DB).
+  //   "시간 부패 카나리아"(scripts/age-db-canary.js)가 만든 **N일 앞당긴 DB**를 주입해
+  //   `npm test` 를 그대로 돌리면, 롤링 창(period=30d 등)이 N일 뒤 상태로 동작한다.
+  //   JS Date 와 SQLite 'now' 를 둘 다 실시간으로 두므로 desync 위산(false positive) 없음.
+  //   미설정 시 동작 완전 불변 — 평시 npm test 에 영향 0.
+  const SRC = process.env.TEST_SRC_DB || REAL_DB;
+  if (!fs.existsSync(SRC)) {
+    throw new Error(`원본 DB 가 없습니다: ${SRC}`);
   }
   const tmp = path.join(
     os.tmpdir(),
     `dacheum_test_${process.pid}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.db`
   );
-  _copyDbSync(REAL_DB, tmp);
+  _copyDbSync(SRC, tmp);
   process.env.DB_PATH = tmp;
   _tempFiles.push(tmp);
   _installExitCleanup();
@@ -118,4 +124,57 @@ function openTestDb() {
   return d;
 }
 
-module.exports = { setupTestDb, openTestDb, REAL_DB };
+/**
+ * GT(실측 회귀) 단언이 쓸 **시계 독립 창(from/to)** 을 데이터에서 유도한다.
+ *
+ * ── 왜 필요한가: 2026-07-30 사고(롤링 창 시한폭탄) ───────────────────────────
+ * `period=30d` 는 wall clock 기준(오늘-30일 ~ 오늘)으로 매일 움직인다. 그 위에
+ * "실측 GT"(하드코딩 숫자·존재성 단언)를 얹으면, **코드가 한 줄도 안 바뀌어도**
+ * 근거 데이터가 창 밖으로 노화되는 순간 테스트가 깨진다.
+ * 실제 사례 — test/lrs-keris-p2.test.js INV-K13③:
+ *   · uid3(student1) 의 exam_complete 로그는 2026-06-22(29건)·2026-07-04(2건) 뿐.
+ *   · 응시자 ≥5(가드 통과) 평가는 전부 06-22 자. 07-04 자 2건은 응시자 1명(차단).
+ *   · 2026-07-16(마지막 green push) 창 = 06-16~07-16 → 통과 26·차단 5 → PASS.
+ *   · 2026-07-30 창 = 06-30~07-30 → 통과 0·차단 2 → "가드 통과 케이스 존재" 붕괴.
+ * 즉 07-22 경부터 자동 폭발하도록 예약돼 있던 시한폭탄이었다.
+ *
+ * ── 해법: 창을 시계가 아니라 데이터에서 유도 ────────────────────────────────
+ * 대상 계정·활동유형 로그의 전 구간[MIN(DATE) - pad, MAX(DATE) + pad]을 돌려준다.
+ * 그 계정·유형의 모든 행을 항상 포함하므로 **오늘이 언제든 같은 행 집합**을 본다.
+ * 시드가 나중에 행을 더 넣어도 창이 함께 넓어져 전수를 유지한다(결정성 보존).
+ *
+ * 규칙: 롤링 `period=NNd` 위에 고정 GT 를 얹지 말 것. GT 단언은 이 헬퍼를 쓸 것.
+ *
+ * @param {import('better-sqlite3').Database} db  openTestDb() 핸들
+ * @param {{userId:number, activityType:string, pad?:number}} opts
+ * @returns {{from:string, to:string, rows:number}} YYYY-MM-DD 창 + 포함 행수
+ */
+function fixtureWindow(db, { userId, activityType, pad = 1 } = {}) {
+  // userId·activityType 은 선택. 둘 다 생략하면 learning_logs 전체 구간을 덮는다
+  //   (클래스 스코프·지역 집계처럼 특정 계정에 매이지 않는 GT 용).
+  //   ★ 런타임 시드를 쓰는 테스트는 **시드 INSERT 이후**에 호출할 것 —
+  //     그래야 창이 "실 DB 고정분 + now 기준 시드"를 모두 덮는다.
+  const cond = [], args = [];
+  if (userId != null) { cond.push('user_id = ?'); args.push(userId); }
+  if (activityType != null) { cond.push('activity_type = ?'); args.push(activityType); }
+  const where = cond.length ? `WHERE ${cond.join(' AND ')}` : '';
+  const r = db.prepare(`
+    SELECT MIN(DATE(created_at)) lo, MAX(DATE(created_at)) hi, COUNT(*) n
+    FROM learning_logs ${where}
+  `).get(...args);
+  if (!r || !r.lo || !r.hi) {
+    throw new Error(
+      `fixtureWindow: ${userId != null ? `GT 고정계정 uid${userId} 의 ` : ''}` +
+      `${activityType || 'learning_logs'} 로그가 0건입니다. ` +
+      `실 DB 픽스처가 사라졌거나 계정 id 가 바뀌었습니다(테스트 전제 붕괴).`
+    );
+  }
+  const shift = (iso, days) => {
+    const d = new Date(`${iso}T00:00:00Z`);
+    d.setUTCDate(d.getUTCDate() + days);
+    return d.toISOString().slice(0, 10);
+  };
+  return { from: shift(r.lo, -pad), to: shift(r.hi, pad), rows: r.n };
+}
+
+module.exports = { setupTestDb, openTestDb, fixtureWindow, REAL_DB };

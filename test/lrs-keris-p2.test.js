@@ -26,7 +26,7 @@
 const { test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const http = require('node:http');
-const { setupTestDb, openTestDb } = require('./_setup');
+const { setupTestDb, openTestDb, fixtureWindow } = require('./_setup');
 
 setupTestDb();
 require('../db/schema').initSchema();
@@ -39,6 +39,21 @@ const TEACHER = 2, STUDENT1 = 3, STUDENT2 = 4, MIDDLE1 = 2040;
 const MIN_PEERS = 5;
 
 let server, baseUrl, tdb, mteacherId, midClassId;
+
+// ── EXAM_GT_Q: INV-K13③④⑥ 이 공유하는 **시계 독립** 기간 쿼리 조각 ─────────
+//   ★ 절대 `period=NNd`(롤링 창)로 되돌리지 말 것 — 2026-07-30 사고 재발.
+//     uid3 의 exam_complete 는 2026-06-22(응시자 7명·가드 통과)·2026-07-04
+//     (응시자 1명·가드 차단) 두 날짜뿐이라, 롤링 30일 창은 07-22 경 06-22 자
+//     데이터를 잃고 "가드 통과 케이스 존재" 단언이 코드 변경 없이 붕괴한다.
+//     fixtureWindow 는 창을 시계가 아니라 데이터에서 유도 → 오늘과 무관하게 동일.
+//   되돌림 감시는 INV-K13⑥(시계 이동 불변성)이 기계적으로 수행한다.
+let EXAM_GT_Q;
+// ── LESSON_GT_Q: INV-K13① 용 시계 독립 창 ──────────────────────────────────
+//   같은 부류의 2차 폭탄이었다: uid3 의 lesson_progress 는 2026-06-22·06-29·06-30·
+//   07-01 뿐이라 롤링 30일 창은 **2026-08-01 에 0건**이 되어 `sqlRows.length > 0`
+//   전제가 붕괴한다(실측 시뮬레이션 확인). 창을 데이터에서 유도해 무력화.
+let LESSON_GT_Q;
+let MIDDLE_GT_Q;
 
 function buildApp() {
   const app = express();
@@ -85,6 +100,17 @@ before(async () => {
   seedMiddle.run({ log: () => {} });
   const s2 = snap();
   assert.deepEqual(s2, s1, '시드 재실행이 행을 추가함(멱등 위반)');
+
+  // INV-K13③④⑥ 공용 창 — uid3 exam_complete 로그 전 구간(시계 독립).
+  const w = fixtureWindow(tdb, { userId: STUDENT1, activityType: 'exam_complete' });
+  EXAM_GT_Q = `from=${w.from}&to=${w.to}`;
+  const wl = fixtureWindow(tdb, { userId: STUDENT1, activityType: 'lesson_progress' });
+  LESSON_GT_Q = `from=${wl.from}&to=${wl.to}`;
+  // MIDDLE_GT_Q: INV-K11′ 용. middle1(2040) 의 exam_complete 는 실 DB 고정분(2026-03-16~06-05)이라
+  //   롤링 90일 창은 2026-09-04 경 비어 classAvg 부착 0건 → `withAvg.length > 0` 붕괴(실측 시뮬레이션).
+  //   seedMiddle.run() 이후에 계산해야 시드로 생성된 계정·로그까지 창에 든다.
+  const wm = fixtureWindow(tdb, { userId: MIDDLE1, activityType: 'exam_complete' });
+  MIDDLE_GT_Q = `from=${wm.from}&to=${wm.to}`;
 
   mteacherId = tdb.prepare("SELECT id FROM users WHERE username = 'mteacher1'").get().id;
   midClassId = tdb.prepare(
@@ -190,7 +216,9 @@ test('INV-K13①: lesson_progress progressPct == round(NORM(result_score)) ∈ [
   //   API 0건이 정상인데 어서션이 FAIL 하는 데이터 의존 취약. → 세그먼트 드릴(bucket=content&
   //   segment=lesson — 같은 라우트·같은 item 매핑 코드)로 lesson 행만 요청하고, SQL 미러에도
   //   라우트와 동일한 "최신순 LIMIT 200" 캡을 걸어 어느 데이터 상태에서도 결정적으로 대조한다.
-  const r = await req('/perform/detail?bucket=content&segment=lesson&period=30d', STUDENT1);
+  //   [2026-07-30 fix] period=30d(롤링) → LESSON_GT_Q(데이터 유도). 롤링 창이면
+  //   uid3 lesson_progress 가 2026-08-01 에 창 밖으로 노화되어 L227 전제가 붕괴한다.
+  const r = await req(`/perform/detail?bucket=content&segment=lesson&${LESSON_GT_Q}`, STUDENT1);
   assert.equal(r.status, 200);
   const j = r.json;
   const [from, to] = String(j.period).split(' ~ ');
@@ -269,7 +297,7 @@ test('INV-K13⑤: limit=8 → items ≤ 8 · count 는 전체 불변 · 클램�
 // INV-K13③④: withClassAvg 옵트인 — 표본 가드·SQL 대조·미지정 불변·식별자 미노출.
 // ──────────────────────────────────────────────────────────────────────────
 test('INV-K13③: withClassAvg=1 — classAvg 존재 ⇔ takers ≥ 5, classAvg ∈ [0,100], SQL 멀티셋 대조 (uid3: 7명 6건 통과·1명 1건 차단)', async () => {
-  const r = await req('/perform/detail?bucket=exam&period=30d&withClassAvg=1', STUDENT1);
+  const r = await req(`/perform/detail?bucket=exam&${EXAM_GT_Q}&withClassAvg=1`, STUDENT1);
   assert.equal(r.status, 200);
   const j = r.json;
   const [from, to] = String(j.period).split(' ~ ');
@@ -301,14 +329,58 @@ test('INV-K13③: withClassAvg=1 — classAvg 존재 ⇔ takers ≥ 5, classAvg 
   assert.equal(got.length, expected.length, 'exam 항목 수 == SQL 행수');
   assert.deepEqual(multiset(got), multiset(expected), 'classAvg·takers 멀티셋 == SQL 기대값');
   // 실측 회귀(스펙 §1-4): 응시자 7명 평가는 통과, 1명 평가는 차단 — 둘 다 존재해야 가드가 실검증됨
-  assert.ok(got.some(x => x.takers !== undefined), '가드 통과 케이스 존재(응시자 ≥5)');
+  //   창은 EXAM_GT_Q(데이터 유도)라 시계와 무관하게 양 케이스가 항상 창 안에 있다.
+  assert.ok(got.some(x => x.takers !== undefined),
+    '가드 통과 케이스 존재(응시자 ≥5) — 0이면 EXAM_GT_Q 가 롤링 창으로 되돌아갔는지 확인');
   assert.ok(got.some(x => x.takers === undefined), '가드 차단 케이스 존재(응시자 <5)');
 });
 
+// ──────────────────────────────────────────────────────────────────────────
+// INV-K13⑥ [회귀 박제 — 2026-07-30 사고]: GT 창의 **시계 독립성**.
+//   사고: INV-K13③ 이 `period=30d`(wall-clock 롤링)를 쓰는 바람에, 근거 데이터
+//         (uid3 exam_complete 2026-06-22)가 창 밖으로 노화되자 코드 변경 0 인데도
+//         "가드 통과 케이스 존재" 단언이 붕괴했다(마지막 green 2026-07-16).
+//   박제: 시스템 시각을 크게 밀어도 EXAM_GT_Q 응답이 **완전 동일**해야 한다.
+//         누군가 EXAM_GT_Q 를 롤링 period 로 되돌리면 이 테스트가 즉시 잡는다
+//         (롤링 창은 시각이 바뀌면 응답이 달라지므로 deepEqual 실패).
+// ──────────────────────────────────────────────────────────────────────────
+test('INV-K13⑥: GT 창 시계 독립 — 시스템 시각 +400일/-400일 이동에도 withClassAvg 응답 불변(롤링 창 회귀 방지)', async () => {
+  const RealDate = global.Date;
+  const shiftClock = (deltaDays) => {
+    const fixed = RealDate.now() + deltaDays * 86400000;
+    class FakeDate extends RealDate {
+      constructor(...a) { return a.length === 0 ? super(fixed) : super(...a); }
+      static now() { return fixed; }
+    }
+    global.Date = FakeDate;
+  };
+  const path = `/perform/detail?bucket=exam&${EXAM_GT_Q}&withClassAvg=1`;
+  const base = await req(path, STUDENT1);
+  assert.equal(base.status, 200);
+
+  let future, past;
+  try {
+    shiftClock(400); future = await req(path, STUDENT1);
+    global.Date = RealDate;
+    shiftClock(-400); past = await req(path, STUDENT1);
+  } finally { global.Date = RealDate; }
+
+  assert.deepEqual(future.json, base.json,
+    'GT 창이 시계에 의존함(+400일에서 응답 변화) — EXAM_GT_Q 가 롤링 period 로 회귀했는지 확인');
+  assert.deepEqual(past.json, base.json,
+    'GT 창이 시계에 의존함(-400일에서 응답 변화) — EXAM_GT_Q 가 롤링 period 로 회귀했는지 확인');
+  // 비공허성: 창 안에 가드 통과·차단 양 케이스가 실제로 있어야 ③ 이 의미를 갖는다.
+  const t = base.json.items.map(x => x.takers);
+  assert.ok(t.some(x => x !== undefined) && t.some(x => x === undefined),
+    'GT 창이 가드 통과·차단 양 케이스를 담지 못함 — 픽스처 노화(공허 통과) 감시');
+});
+
 test('INV-K13④: withClassAvg 미지정 → classAvg·takers 키 부재 + (옵트인 응답 − 두 키) == 미지정 응답 deepEqual', async () => {
-  const plain = await req('/perform/detail?bucket=exam&period=30d', STUDENT1);
-  const opted = await req('/perform/detail?bucket=exam&period=30d&withClassAvg=1', STUDENT1);
+  // ③ 과 동일한 시계 독립 창 — 롤링 창이면 exam 항목이 0건이 되어 공허하게 통과한다.
+  const plain = await req(`/perform/detail?bucket=exam&${EXAM_GT_Q}`, STUDENT1);
+  const opted = await req(`/perform/detail?bucket=exam&${EXAM_GT_Q}&withClassAvg=1`, STUDENT1);
   assert.equal(plain.status, 200); assert.equal(opted.status, 200);
+  assert.ok(plain.json.items.length > 0, '비공허성: 비교할 exam 항목이 0건(픽스처 노화)');
   for (const it of plain.json.items) {
     assert.ok(!('classAvg' in it) && !('takers' in it), '미지정 응답에 classAvg/takers 키 존재(회귀)');
   }
@@ -480,7 +552,8 @@ test("INV-K11′(BE): peer-compare(2040).peerCount ≥ 5 + mteacher1 mastery/cla
 });
 
 test("INV-K11′(BE): P2-2 델타 자산 — middle1 withClassAvg=1 평가 항목에 classAvg 존재(응시자 ≥5 평가 보유)", async () => {
-  const r = await req('/perform/detail?bucket=exam&period=90d&withClassAvg=1', MIDDLE1);
+  // [2026-07-30 fix] period=90d(롤링) → MIDDLE_GT_Q(데이터 유도).
+  const r = await req(`/perform/detail?bucket=exam&${MIDDLE_GT_Q}&withClassAvg=1`, MIDDLE1);
   assert.equal(r.status, 200);
   const withAvg = r.json.items.filter(it => it.classAvg !== undefined);
   assert.ok(withAvg.length > 0, `middle1 평가 중 classAvg 부착 ${withAvg.length}건 > 0(델타 칩 실검증 가능)`);

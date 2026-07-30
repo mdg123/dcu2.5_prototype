@@ -17,7 +17,7 @@
 const { test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const http = require('node:http');
-const { setupTestDb, openTestDb } = require('./_setup');
+const { setupTestDb, openTestDb, fixtureWindow } = require('./_setup');
 
 setupTestDb();   // ★ 라우터가 db 모듈 require 하기 전에 DB_PATH 주입
 require('../db/schema').initSchema(); // 복사본에 최신 스키마/마이그레이션 적용
@@ -38,6 +38,12 @@ const LEARN_TYPES = [
 ];
 
 let server, baseUrl;
+// ── ALL_GT_Q: 롤링 90일 창 위에 "데이터가 존재함"을 단언하던 곳의 시계 독립 창.
+//   (2026-07-30 시한폭탄 fix) 실 로그가 2026-07-16 에서 멈춰 있어 롤링 90일 창은
+//   2026-10-14 경 완전히 비고, INV-7a·USAGE-1·USAGE-2 의 존재성 전제가 코드 변경
+//   없이 붕괴한다(카나리아 119일에서 재현: 채점된 날 0·서비스 수 0).
+//   창을 learning_logs 전 구간에서 유도해 결정화 — 단언 의미(존재성)는 그대로.
+const ALL_GT_Q = (() => { const w = fixtureWindow(tdb); return `from=${w.from}&to=${w.to}`; })();
 
 function buildApp() {
   const app = express();
@@ -252,7 +258,7 @@ function assertScore0to100(v, label) {
 //   과거 결함: AVG(result_score) 비정규화 → 교사 홈 학급 평균 성취 8.5점(실제 ≈78).
 // ──────────────────────────────────────────────────────────────────────────
 test('INV-7a: /stats/daily avg_score 는 0~100|null (교사 홈 학급평균 붕괴 방지)', async () => {
-  const r = await getJson(`/api/lrs/stats/daily?scope=class&period=90d`, TEACHER);
+  const r = await getJson(`/api/lrs/stats/daily?scope=class&${ALL_GT_Q}`, TEACHER);
   assert.equal(r.status, 200, 'teacher daily 200');
   assert.ok(Array.isArray(r.json.data), 'data 는 배열');
   let sawScore = false, maxScore = 0;
@@ -416,7 +422,7 @@ test('INV-11: demo_* 서비스가 by-service·service-ops·dataset-coverage 랭�
 //   fix: 멤버십 스코프(소유 반 학생 user_id 합집합)로 학급 전체 서비스 분포가 나와야 함.
 // ──────────────────────────────────────────────────────────────────────────
 test('USAGE-1: 교사 by-service(scope=class) 는 다서비스 반환(단일 class 아님)', async () => {
-  const r = await getJson(`/api/lrs/stats/by-service?scope=class&period=90d`, TEACHER);
+  const r = await getJson(`/api/lrs/stats/by-service?scope=class&${ALL_GT_Q}`, TEACHER);
   assert.equal(r.status, 200);
   const stats = r.json.stats || [];
   assert.ok(stats.length >= 2,
@@ -437,7 +443,7 @@ test('USAGE-1: 교사 by-service(scope=class) 는 다서비스 반환(단일 cla
 // USAGE-2 (회귀 0): 관리자 by-service(scope=all) 는 기존과 동일 — 멤버십 스코프 전환이
 //   admin=all(필터 없음) 경로를 바꾸지 않았음을 확인.
 test('USAGE-2: 관리자 by-service(scope=all) 회귀 0 — 전체 집계 유지', async () => {
-  const r = await getJson(`/api/lrs/stats/by-service?scope=all&period=90d`, ADMIN);
+  const r = await getJson(`/api/lrs/stats/by-service?scope=all&${ALL_GT_Q}`, ADMIN);
   assert.equal(r.status, 200);
   const stats = r.json.stats || [];
   assert.equal(r.json.scope, 'all', 'admin scope=all 유지');

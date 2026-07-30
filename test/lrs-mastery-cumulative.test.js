@@ -21,7 +21,7 @@ const assert = require('node:assert/strict');
 const http = require('node:http');
 const express = require('express');
 const session = require('express-session');
-const { setupTestDb } = require('./_setup');
+const { setupTestDb, openTestDb, fixtureWindow } = require('./_setup');
 
 setupTestDb();                          // ★ db require 전에 DB_PATH 주입
 require('../db/schema').initSchema();   // 격리 DB 마이그레이션(std_id·level 등)
@@ -29,7 +29,7 @@ require('../db/schema').initSchema();   // 격리 DB 마이그레이션(std_id·
 const ADMIN = 1, TEACHER = 2, STUDENT1 = 3, STUDENT2 = 4;
 
 // ── HTTP 하니스 (mastery.test.js 패턴 복제) ──────────────────────────────────
-let server, baseUrl;
+let server, baseUrl, CONTENT_GT_Q;
 function buildApp() {
   const app = express();
   app.use(express.json());
@@ -58,6 +58,15 @@ function req(path, userId) {
 }
 
 before(async () => {
+  // ── CONTENT_GT_Q: DRILL-6 용 시계 독립 창 (2026-07-30 시한폭탄 fix) ─────────
+  //   DRILL-6 은 days=90(롤링) 위에서 solve·view 항목이 **존재함**을 단언한다. 실 로그가
+  //   2026-07-16 에서 멈춰 있어 90일 창은 2026-10-14 경 완전히 비고 전제가 붕괴한다
+  //   (카나리아 63일에서 재현 — 45일에서는 아직 통과). 창을 uid3 로그 전 구간에서 유도.
+  {
+    const tdb = openTestDb();
+    const w = fixtureWindow(tdb, { userId: STUDENT1 });
+    CONTENT_GT_Q = `from=${w.from}&to=${w.to}`;
+  }
   await new Promise((resolve) => {
     server = http.createServer(buildApp()).listen(0, '127.0.0.1', () => {
       baseUrl = `http://127.0.0.1:${server.address().port}`;
@@ -175,14 +184,14 @@ test('DRILL-5: 카드=내역 일치 — stats/perform summary == detail count (3
 // TASK 2 — score 정규화: solve 는 0~100(비 null), view 는 전부 null.
 // ──────────────────────────────────────────────────────────────────────────
 test('DRILL-6: content solve items score 0~100(비 null), view items score 전부 null (90d)', async () => {
-  const solve = await req(`/perform/detail?bucket=content&segment=solve&days=90`, STUDENT1);
+  const solve = await req(`/perform/detail?bucket=content&segment=solve&${CONTENT_GT_Q}`, STUDENT1);
   assert.equal(solve.status, 200);
   assert.ok(solve.json.items.length > 0, 'solve 항목이 존재해야(90d)');
   for (const it of solve.json.items) {
     assert.ok(it.score != null, `solve item score 는 비 null 이어야. title=${it.title}`);
     assert.ok(it.score >= 0 && it.score <= 100, `solve score(${it.score}) 는 0~100`);
   }
-  const view = await req(`/perform/detail?bucket=content&segment=view&days=90`, STUDENT1);
+  const view = await req(`/perform/detail?bucket=content&segment=view&${CONTENT_GT_Q}`, STUDENT1);
   assert.equal(view.status, 200);
   assert.ok(view.json.items.length > 0, 'view 항목이 존재해야(90d)');
   for (const it of view.json.items) {

@@ -23,7 +23,7 @@
 const { test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const http = require('node:http');
-const { setupTestDb, openTestDb } = require('./_setup');
+const { setupTestDb, openTestDb, fixtureWindow } = require('./_setup');
 
 setupTestDb();
 require('../db/schema').initSchema();
@@ -39,7 +39,7 @@ const LEARN7 = [
 ];
 
 // ── HTTP 하네스 (lrs-perform-detail.test.js 와 동일 패턴) ────────────────────
-let server, baseUrl, tdb, SEED_UID, HEAT_TS;
+let server, baseUrl, tdb, SEED_UID, HEAT_TS, HEAT_GT_Q;
 function buildApp() {
   const app = express();
   app.use(express.json());
@@ -113,6 +113,16 @@ before(async () => {
   insHm.run(3, 'exam_complete', 'e-hm1', 'exam', tueLocal);           // 실데이터(포함)
   insHm.run(4, 'homework_submit', 'h-hm1', 'homework', tueLocal);     // 실데이터(포함·다른 학생)
   insHm.run(3, 'content_view', 'c-hm2', 'demo_seed', tueLocal);       // demo_* → 히트맵/드릴 모두 제외
+
+  // ── HEAT_GT_Q: INV-HC2 용 시계 독립 창 (2026-07-30 시한폭탄 fix) ────────────
+  //   INV-HC2 의 total>=3 은 사실상 **실 DB 고정 데이터**(class 2 의 화요일 10시 칸)에
+  //   기대고 있다(위 시드는 localtime 변환으로 다른 시각 칸에 귀속). 롤링 90일 창이라
+  //   실측상 2026-09-30 경 그 칸이 0건이 되어 전제가 붕괴한다(카나리아 45일에서 재현).
+  //   창을 learning_logs 전 구간(시드 포함 — 이 시점 이후 계산)에서 유도해 결정화.
+  {
+    const hw = fixtureWindow(tdb);
+    HEAT_GT_Q = `from=${hw.from}&to=${hw.to}`;
+  }
 
   await new Promise((resolve) => {
     server = http.createServer(buildApp()).listen(0, '127.0.0.1', () => {
@@ -403,14 +413,16 @@ test('INV-HC1: heatmap-cell.total == /stats/daily heatmapDowHour 전 칸 정합(
 });
 
 test('INV-HC2: 시드 화요일 10시 칸 — 실데이터 3건(demo 제외), demo_seed 미포함', async () => {
-  const r = await req(`/stats/heatmap-cell?classId=2&dow=${HEAT_DOW}&hour=${HEAT_HOUR}&period=90d`, TEACHER);
+  // [2026-07-30 fix] period=90d(롤링) → HEAT_GT_Q(데이터 유도). 롤링 창이면 이 칸의
+  //   실 데이터가 2026-09-30 경 0건이 되어 아래 total>=3 전제가 코드 변경 없이 붕괴한다.
+  const r = await req(`/stats/heatmap-cell?classId=2&dow=${HEAT_DOW}&hour=${HEAT_HOUR}&${HEAT_GT_Q}`, TEACHER);
   assert.equal(r.status, 200, '200');
   // 시드 3건(content_solve·exam_complete·homework_submit) 이상(기존 실데이터가 같은 칸일 수도 있어 >=)
   assert.ok(r.json.total >= 3, `시드 실데이터 3건 이상 (현재 ${r.json.total})`);
   const services = r.json.items.map(it => String(it.service||''));
   assert.ok(!services.some(s => /demo/i.test(s)), 'demo_seed 행은 items 에 없어야');
   // daily 히트맵 그 칸과 정확히 일치(정합 재확인)
-  const daily = await req(`/stats/daily?period=90d`, TEACHER);
+  const daily = await req(`/stats/daily?${HEAT_GT_Q}`, TEACHER); // 같은 창이어야 정합 비교 성립
   assert.equal(r.json.total, daily.json.heatmapDowHour[HEAT_DOW][HEAT_HOUR], '그 칸 heatmapDowHour 와 일치');
 });
 

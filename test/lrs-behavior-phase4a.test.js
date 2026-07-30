@@ -185,7 +185,14 @@ for (const sub of ['completion', 'replay', 'seek']) {
 
 test('INV-V4: activation — 시드 후 3 sub 모두 available:true · realOnly=1 은 빈 결과', async () => {
   for (const sub of ['completion', 'replay', 'seek']) {
-    const r = await req(`/stats/behavior?classId=${ownedClassId}&signal=video&sub=${sub}`, TEACHER1);
+    // [2026-07-30 시한폭탄 부분 완화] available 은 _behaviorAchMap(성취 원천 = 실 DB
+    //   learning_logs)이 창 안에 있어야 true 다. 기본 창은 90일 → 실 로그가 2026-07-16 에
+    //   멈춰 있어 2026-10-14 경 붕괴한다(카나리아 119일에서 재현, 63일에서는 통과).
+    //   ※ /stats/behavior 는 period 를 {30d,90d,term} 화이트리스트로만 받아(routes/lrs.js
+    //     L3262·BEHAV_PERIOD_DAYS L2731) from/to 데이터 유도 창을 표현할 수 없다. 따라서
+    //     최장인 term(180일)로 완화만 가능 — 도화선이 2027-01 경으로 밀릴 뿐 제거는 아니다.
+    //     근본 해결은 (a) /stats/behavior 에 from/to 지원 추가 또는 (b) GT 데이터 재시드.
+    const r = await req(`/stats/behavior?classId=${ownedClassId}&signal=video&sub=${sub}&period=term`, TEACHER1);
     assert.equal(r.json.available, true, `${sub}: 시드 후 available 이어야 함`);
     const unmasked = r.json.groups.filter(g => !g.masked).length;
     assert.ok(unmasked >= 2, `${sub}: 주요 2밴드 이상 unmask 필요 (unmasked=${unmasked})`);
