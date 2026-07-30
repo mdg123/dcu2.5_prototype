@@ -375,7 +375,10 @@
     .mastery-legend .info{ cursor:help; color:#9ca3af; font-size:13px; }
 
     /* 신규 버튼/뱃지 (CLAUDE.md 스케일) */
-    .mastery-btn{ font-size:16px; font-weight:700; padding:12px 22px; border-radius:10px; border:0; cursor:pointer;
+    /* box-sizing:border-box 필수 — <button>은 전역 리셋으로 border-box 지만 <a class="mastery-btn">는
+       기본 content-box 라, width:100% 를 주면 padding(좌우 22px)이 더해져 부모 밖으로 44px 삐져나온다.
+       (2026-07-30 회귀: .reco-cta 가 카드 오른쪽 테두리를 23px 이탈 → 버튼이 카드 밖에 뜬 것처럼 보임) */
+    .mastery-btn{ box-sizing:border-box; font-size:16px; font-weight:700; padding:12px 22px; border-radius:10px; border:0; cursor:pointer;
       background:var(--lrs-primary,#2563eb); color:#fff; display:inline-flex; align-items:center; justify-content:center; gap:8px;
       font-family:inherit; transition:background .15s,transform .05s; text-decoration:none; }
     .mastery-btn:hover{ background:#1d4ed8; }
@@ -470,7 +473,9 @@
     .sh-zone__link:focus-visible{ outline:2px solid #2563eb; outline-offset:2px; }
 
     /* ── P0-2: 우선순위 추천 카드 (KERIS 3열 — ①시급 ②권장 ③선택) ── */
-    .reco-grid{ display:grid; grid-template-columns:repeat(3,1fr); gap:16px; margin-bottom:16px; }
+    /* align-items:stretch — 본문 줄 수가 달라도 같은 행의 카드 높이를 맞춰 CTA 라인을 가지런히
+       (.next-grid 와 동일 패턴: 카드 flex-column + CTA margin-top:auto) */
+    .reco-grid{ display:grid; grid-template-columns:repeat(3,1fr); gap:16px; margin-bottom:16px; align-items:stretch; }
     @media (max-width:1199px){ .reco-grid{ grid-template-columns:repeat(2,1fr); } }
     @media (max-width:767px){ .reco-grid{ grid-template-columns:1fr; } }
     .reco-card{ background:#fff; border:1px solid #e5e7eb; border-radius:12px; padding:20px;
@@ -1344,7 +1349,7 @@ const MENUS = {
     { id:'t-xapi',       label:'표준체계 분석',    icon:'fa-diagram-project',       group:'분석',         category:'analytics' },
     { id:'t-perform',    label:'학습 활동 수행',  icon:'fa-tasks',                 group:'학습 활동',     category:'activities' },
     { id:'t-behavior',   label:'학습 행동 심화 분석', icon:'fa-wave-square',        group:'학습 활동',     category:'activities' },
-    { id:'t-daily-benchmark', label:'오늘의 학습 도 비교', icon:'fa-calendar-week',   group:'학습 활동',     category:'activities' },
+    { id:'t-daily-benchmark', label:'오늘의 학습 분석', icon:'fa-calendar-week',   group:'학습 활동',     category:'activities' },
     { id:'t-custom',     label:'맞춤학습 관리',    icon:'fa-compass',               group:'학습 활동',     category:'activities' },
     { id:'t-daily',      label:'일일현황',        icon:'fa-calendar-day',          group:'분석',         category:'analytics' },
     { id:'t-drill',      label:'학생 드릴다운',    icon:'fa-user-magnifying-glass', group:'학습 활동',     category:'activities' },
@@ -9645,7 +9650,9 @@ function _bmBindBenchToggles(root){
 }
 
 /* ======================================================================
- * VIEWS['t-daily-benchmark'] — [교사] 오늘의 학습 도 비교(일자별) · activities
+ * VIEWS['t-daily-benchmark'] — [교사] 오늘의 학습 분석(일자별 도 비교) · activities
+ *   네비 라벨은 "오늘의 학습 분석"(탭·브레드크럼). 뷰 본문 히어로 제목 "오늘의 학습 · 충북 도 비교"는
+ *   실제 도 비교 내용을 설명하므로 유지. id·해시·API 경로(t-daily-benchmark)는 변경 금지.
  * ==================================================================== */
 const DB_RANGES = [['today','오늘'],['7d','최근 7일'],['30d','최근 30일'],['custom','기간 지정']];
 function _dbTodayIso(){ const d=new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
@@ -9730,7 +9737,7 @@ VIEWS['t-daily-benchmark'] = async function(root){
   }
   if (!d || !d.success){
     root.innerHTML = BM_STYLE + _bmSeedBar('도 전체 수치는 시연용 시드 데이터 기반이에요. 실데이터가 쌓이면 자동 전환돼요.', realOn, '_dbRealOnly')
-      + head + filterbar + tplError('오늘의 학습 도 비교 데이터를 불러오지 못했습니다', ()=>VIEWS['t-daily-benchmark'](root));
+      + head + filterbar + tplError('오늘의 학습 분석 데이터를 불러오지 못했습니다', ()=>VIEWS['t-daily-benchmark'](root));
     _bmBindDaily(root); return;
   }
 
