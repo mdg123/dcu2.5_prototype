@@ -1598,33 +1598,56 @@ function achievementLabel(code) {
 // ─────────────────────────────────────────────────────────
 
 /**
- * 이유 한줄 reasonText — 기획서 확정 템플릿 5종(상태×채점 분기), 임의 변형 금지.
- *   시급(채점)      : 정답률 {avg}%예요 — 여기부터 다시 잡아봐요
+ * 이유 한줄 reasonText — 상태×채점 분기 템플릿 5종. 임의 변형 금지.
+ *
+ * ── C-1 표기 정직성 fix (사용자 실측 결함) ────────────────────────────────
+ *  결함: 이 함수에 넘어오던 {avg} 는 `lrs_achievement_stats.avg_score`
+ *        (= AVG(learning_logs.result_score), "점수 평균") 인데 라벨은 "정답률"이었다.
+ *        도달 판정(classifyStatus)은 전혀 다른 값인 reachRate(success/attempt)를 쓴다.
+ *        → 실측 student1 [4수03-10]: avg_score 0.75(=75) · success/attempt 0/5(=0%)
+ *          ⇒ 화면에 "미도달"인데 이유는 "정답률 75%" 라는 자기모순이 발생했다.
+ *  판정: 값은 "점수 평균"이 맞다(정답 비율 아님). DB 실측 근거 —
+ *        lrs_achievement_stats.avg_score 는 AVG(result_score) 로만 채워진다
+ *        (db/lrs-aggregate.js §7 · db/learning-log-helper.js 증분 평균).
+ *  조치: 라벨을 값의 정체에 맞춰 "평균 점수"로 정정하고,
+ *        도달 판정에 실제로 쓰인 두 수(정답 인정 {succ} / 시도 {att})를 병기해
+ *        "평균 점수는 높은데 왜 미도달인지"가 카드 안에서 자명해지게 한다.
+ *        (산식·status 는 일절 변경하지 않음 — 표기만 정정)
+ * ─────────────────────────────────────────────────────────────────────────
+ *   시급(채점)      : 평균 점수 {avg}% · 정답 인정 {succ}/{att}회 — 여기부터 다시 잡아봐요
  *   시급(미채점)    : 가장 많이 연습한 단원이에요({att}회) — 채점되는 문제로 실력을 확인해봐요
- *   권장(부분도달)  : 정답률 {avg}% — 조금만 더 하면 도달해요
+ *   권장(부분도달)  : 평균 점수 {avg}% · 정답 인정 {succ}/{att}회 — 조금만 더 하면 도달해요
  *   권장(평가부족)  : 아직 {att}번밖에 안 풀었어요 — 3번 이상 풀면 도달 판정을 받을 수 있어요
- *   선택(강점 심화) : 정답률 {avg}%로 잘하고 있어요 — 한 단계 더 깊게 배워볼까요?
- *   → 실측 결함 해소: 정답률 100%·평가부족([4영01-08]) 행도 "아직 {att}번밖에…" 로 이유가 자명해진다.
- *     (기획서 결정: 100% 행을 약점에서 제거하는 게 아니라 이유 문구로 해소 — §3 P0-2 ②·수용기준 2)
+ *   선택(강점 심화) : 평균 점수 {avg}% · 정답 인정 {succ}/{att}회 — 한 단계 더 깊게 배워볼까요?
+ *
  * @param {string} status  mastery.STATUS 값 (not_reached|partial|insufficient) 또는 'strength'
- * @param {boolean} hasScore 채점 데이터 존재 여부
- * @param {number|null} avg 표시용 정답률(0~100 정규화). 미채점이면 null 허용.
- * @param {number} att 시도 횟수
+ * @param {boolean} hasScore 채점(avg_score) 데이터 존재 여부
+ * @param {number|null} avg 표시용 **평균 점수**(0~100 정규화). 미채점이면 null 허용. (정답률 아님)
+ * @param {number} att 시도 횟수(attempt_count) — 도달 판정 분모
+ * @param {number|null} succ 정답 인정 횟수(success_count) — 도달 판정 분자. 없으면 병기 생략.
  */
-function recoReasonText(status, hasScore, avg, att) {
-  const a = avg != null ? Math.round(avg) : null;
+function recoReasonText(status, hasScore, avg, att, succ) {
+  const a = (hasScore && avg != null) ? Math.round(avg) : null;   // 평균 점수(0~100) — 없으면 null
+  // 도달 판정에 실제 쓰인 분자/분모 — 라벨↔값 정체 일치를 카드 안에서 증명한다.
+  const hasHit = (succ != null && Number.isFinite(Number(succ)) && Number(att) > 0);
+  const hitFrag = hasHit ? `정답 인정 ${Number(succ)}/${Number(att)}회` : '';
+  // 지표 앞부분 조립: 평균 점수(있으면) + 정답 인정(있으면). 둘 다 없으면 빈 문자열.
+  //   ★ 값이 없을 때 "평균 점수 null%" 같은 허위 표기가 절대 나오지 않게 한다.
+  const metric = [a != null ? `평균 점수 ${a}%` : '', hitFrag].filter(Boolean).join(' · ');
   if (status === 'strength') {
-    return `정답률 ${a}%로 잘하고 있어요 — 한 단계 더 깊게 배워볼까요?`;
+    return metric ? `${metric} — 한 단계 더 깊게 배워볼까요?`
+                  : `꾸준히 잘하고 있어요 — 한 단계 더 깊게 배워볼까요?`;
   }
   if (status === mastery.STATUS.PARTIAL) {
-    return `정답률 ${a}% — 조금만 더 하면 도달해요`;
+    return metric ? `${metric} — 조금만 더 하면 도달해요`
+                  : `조금만 더 하면 도달해요 — 이어서 풀어볼까요?`;
   }
   if (status === mastery.STATUS.INSUFFICIENT) {
     return `아직 ${att}번밖에 안 풀었어요 — 3번 이상 풀면 도달 판정을 받을 수 있어요`;
   }
   // not_reached (시급 계열)
-  if (hasScore && a != null) {
-    return `정답률 ${a}%예요 — 여기부터 다시 잡아봐요`;
+  if (a != null) {
+    return `${metric} — 여기부터 다시 잡아봐요`;
   }
   return `가장 많이 연습한 단원이에요(${att}회) — 채점되는 문제로 실력을 확인해봐요`;
 }
@@ -1708,7 +1731,9 @@ router.get('/insights/:userId', requireAuth, (req, res) => {
     //   과거엔 COALESCE(avg_score,0) 로 null 을 0점 취급 → avg_score 전무한 학생은
     //   사실상 '시도 많은 순'인데 FE가 그걸 구분할 신호가 없었다(사용자 실측 결함).
     //   → hasScore/avg_score(0~100)/criterion 을 함께 반환해 FE가 정답률 유무를 표시하게 한다.
-    const WEAKNESS_CRITERION = '미도달·부분도달·평가부족 중 정답률 낮은 순 · 미채점은 연습량 순 (도달 제외)';
+    // C-1 표기 정직성: 아래 SQL 정렬 키는 avg_score(=점수 평균)이지 정답률이 아니다.
+    //   기준 문구가 "정답률 낮은 순"이라 라벨↔실제 정렬키가 어긋나 있었다 → 실제 키 이름으로 정정.
+    const WEAKNESS_CRITERION = '미도달·부분도달·평가부족 중 평균 점수 낮은 순 · 미채점은 연습량 순 (도달 제외)';
     // 약점 후보: attempt_count>=1 전체를 뽑아 단일 분류기(reachRate→classifyStatus)로 상태를 부여하고,
     //   '도달(reached)' 은 약점에서 제외한다(P1 학생 결함: 시드에서 도달·avg95 성취기준이 약점 TOP5 에 혼입).
     //   후보 = 미도달·부분도달·평가부족. SQL 정렬 순서(채점 우선 → 정답률↓ → 연습량↑)는 그대로 유지하되,
@@ -1757,7 +1782,7 @@ router.get('/insights/:userId', requireAuth, (req, res) => {
 
     // 강점 TOP5
     const strengths = db.prepare(`
-      SELECT achievement_code, subject_code, attempt_count, avg_score, last_level
+      SELECT achievement_code, subject_code, attempt_count, success_count, avg_score, last_level
       FROM lrs_achievement_stats
       WHERE user_id = ? AND attempt_count >= 3
       ORDER BY COALESCE(avg_score, 0) DESC
@@ -1769,6 +1794,10 @@ router.get('/insights/:userId', requireAuth, (req, res) => {
       s.subject_label = s.subject_label || nm.subjectLabel;
       s.hasScore = s.avg_score != null;
       s.avg_score = normStat(s.avg_score); // 약점과 동일 스케일(0~100)로 통일
+      // C-1: 진짜 정답률(success/attempt) 을 avg_score 와 **별도 필드**로 노출.
+      //   FE 가 "정답률" 라벨을 쓰려면 반드시 이 값을 써야 한다(avg_score 재사용 금지).
+      s.correctRate = (s.attempt_count > 0 && s.success_count != null)
+        ? Math.round((s.success_count / s.attempt_count) * 1000) / 10 : null;
     }
 
     // ── P0-2 추천 SSOT (KERIS 로드맵 §3 P0-2 (b)) ─────────────────────────
@@ -1783,9 +1812,14 @@ router.get('/insights/:userId', requireAuth, (req, res) => {
     //                          (채점 데이터 있는 강점만 — 이유 문구 {avg} 필요.)
     // 후보 부족 시 있는 것만 반환, 전부 없으면 recommendations:[].
     for (const w of weaknesses) {
-      // 이유 문구 {avg}: 채점이면 정규화 avg_score, 미채점 partial 은 분류기와 동일 rate 폴백.
-      const dispAvg = w.hasScore ? w.avg_score : (w.reachRateVal != null ? Math.round(w.reachRateVal) : null);
-      w.reasonText = recoReasonText(w.status, w.hasScore, dispAvg, w.attempt_count);
+      // C-1: 이유 문구의 {avg} 는 **평균 점수**(avg_score)다 — 정답률이 아니다.
+      //   과거엔 미채점 행에 reachRateVal(=정답률)을 {avg} 로 밀어넣어 두 지표가 한 라벨에 섞였다.
+      //   이제 채점 없는 행은 null 을 넘겨(평균 점수 표기 자체를 생략) 값 정체를 1:1로 유지한다.
+      const dispAvg = w.hasScore ? w.avg_score : null;
+      // 진짜 정답률(success/attempt) — avg_score 와 별도 필드. "정답률" 라벨 전용 값.
+      w.correctRate = (w.attempt_count > 0 && w.success_count != null)
+        ? Math.round((w.success_count / w.attempt_count) * 1000) / 10 : null;
+      w.reasonText = recoReasonText(w.status, w.hasScore, dispAvg, w.attempt_count, w.success_count);
       w.estMinutes = computeEstMinutes(w.recommendedContentIds);
       w.priority = null; // 아래 선정 후 부여
     }
@@ -1817,7 +1851,8 @@ router.get('/insights/:userId', requireAuth, (req, res) => {
           .all(recoOptional.achievement_code);
         recoOptional.recommendedContentIds = cs.map(c => c.id);
       } catch (_) { recoOptional.recommendedContentIds = []; }
-      recoOptional.reasonText = recoReasonText('strength', true, recoOptional.avg_score, recoOptional.attempt_count);
+      recoOptional.reasonText = recoReasonText('strength', recoOptional.hasScore, recoOptional.avg_score,
+                                               recoOptional.attempt_count, recoOptional.success_count);
       recoOptional.estMinutes = computeEstMinutes(recoOptional.recommendedContentIds);
       recoOptional.priority = 'optional';
     }
@@ -1831,7 +1866,11 @@ router.get('/insights/:userId', requireAuth, (req, res) => {
       status: row.status || null,
       statusLabel: row.statusLabel || null,
       hasScore: !!row.hasScore,
+      // ⚠ avg_score 는 "평균 점수"(AVG(result_score)) — 정답률이 아니다. FE 라벨은 '평균 점수'.
       avg_score: row.avg_score != null ? row.avg_score : null,
+      // 진짜 정답률(success/attempt·0~100). "정답률" 라벨을 붙일 값은 이것뿐이다.
+      correctRate: row.correctRate != null ? row.correctRate : null,
+      success_count: row.success_count != null ? row.success_count : null,
       attempt_count: row.attempt_count || 0,
       reasonText: row.reasonText,
       estMinutes: row.estMinutes,
@@ -1893,7 +1932,7 @@ router.get('/insights/:userId', requireAuth, (req, res) => {
     // (1) periodScoreAvg: /stats/perform 과 동일 로직으로 0~100 정규화 평균 재산출.
     //     lrs_user_daily.avg_score(스케일 혼재) 대신 learning_logs 원천에서 채점된 유형만.
     const periodScoreAvg = computeNormScoreAvg(userId, pFrom, pTo);
-    const scoreBasis = '채점된 문항·평가의 평균 정답률';
+    const scoreBasis = '채점된 문항·평가의 평균 점수';
 
     // (2) completedAssignments: 선택 기간 내 실제 과제 제출/이수 건수.
     //     소스 = homework_submissions (권위 원천). draft 제외, 제출/재제출/채점 상태만.

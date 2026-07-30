@@ -297,27 +297,124 @@ test('REG-K3: uid3 ground-truth — ①시급 [4수03-10] ②권장 [4국01-01] 
   // [재기준 2026-07-10 · 벤치 재시드 rebuild] 25%→75%.
   //   원인: 벤치마크 집중 재시드(scripts/seed-benchmark-enrich.js)가 rebuildAllAggregates()로
   //   lrs_achievement_stats를 learning_logs 진실원에서 전면 재파생 → uid3(student1, 실사용자)의
-  //   [4수03-10] avg_score가 stale 0.25 → 로그정합 0.75로 교정됨(재시드 前 백업 대조 실측:
-  //   해당 daily_complete 로그 result_score=0.75인데 커밋 achievement_stats는 0.25로 불일치했음
-  //   — 2026-07-04 uid3 오염복구 때 로그만 고치고 집계 미재빌드로 남은 stale). uid3 로그·attempt·success는
-  //   불변(내 재시드는 is_seed=1 로그만 추가, uid3 무영향; 130=130건 실측). 표시값이 진실원에 정합화된
-  //   정당 교정이다. (미도달인데 avg 75% 표기의 의미괴리는 reasonText가 avg_score를, 도달판정은
-  //   success/attempt를 쓰는 기존 insights 산식 특성 — 별건, 본 재시드 범위 밖.)
-  assert.equal(recs[0].reasonText, '정답률 75%예요 — 여기부터 다시 잡아봐요', '시급(채점) 템플릿 그대로 · avg 진실원 정합(0.75)');
+  //   [4수03-10] avg_score가 stale 0.25 → 로그정합 0.75로 교정됨.
+  // [재기준 2026-07-30 · C-1 표기 정직성 fix] '정답률 75%' → '평균 점수 75% · 정답 인정 0/5회'.
+  //   과거 이 자리에 박제돼 있던 "미도달인데 avg 75%" 의미괴리(= reasonText는 avg_score를,
+  //   도달판정은 success/attempt를 쓰는 산식 특성)를 "별건"으로 넘겼으나, 사용자 실측 지적으로
+  //   **거짓 라벨**로 확정 판정. 값(75)의 정체는 AVG(result_score)= 평균 점수이지 정답률이 아니다
+  //   (실측 [4수03-10]: 정답률 = success/attempt = 0/5 = 0%). 라벨을 값의 정체에 맞춰 정정하고,
+  //   도달 판정에 실제 쓰인 두 수(정답 인정 0/5)를 병기해 "왜 미도달인지"를 카드 안에서 자명화.
+  assert.equal(recs[0].reasonText, '평균 점수 75% · 정답 인정 0/5회 — 여기부터 다시 잡아봐요',
+    '시급(채점) 템플릿 — 라벨=평균 점수(값 정체 일치) + 도달판정 분자/분모 병기');
   assert.equal(recs[1].priority, 'recommended');
   assert.equal(recs[1].achievement_code, '[4국01-01]', '② 권장 = 평가부족(채점 우선)');
   assert.equal(recs[1].reasonText, '아직 2번밖에 안 풀었어요 — 3번 이상 풀면 도달 판정을 받을 수 있어요', '권장(평가부족) 템플릿 그대로');
   assert.equal(recs[2].priority, 'optional');
   assert.equal(recs[2].achievement_code, '[4수03-09]', '③ 선택 = 강점(att≥3·avg 최고) 심화');
-  assert.equal(recs[2].reasonText, '정답률 100%로 잘하고 있어요 — 한 단계 더 깊게 배워볼까요?', '선택(강점 심화) 템플릿 그대로');
+  assert.equal(recs[2].reasonText, '평균 점수 100% · 정답 인정 5/5회 — 한 단계 더 깊게 배워볼까요?', '선택(강점 심화) 템플릿');
 });
 
-test('REG-K3b: 정답률 100%·평가부족 약점행([4영01-08])은 "아직 N번밖에…" 이유로 자명 (기획서 §3 P0-2 ② 해소 방식)', async () => {
+test('REG-K3b: 평균 점수 100%·평가부족 약점행([4영01-08])은 "아직 N번밖에…" 이유로 자명 (기획서 §3 P0-2 ② 해소 방식)', async () => {
   const r = await req(`/insights/${STUDENT1}?period=30d`, STUDENT1);
   const w100 = (r.json.weaknesses || []).find(w => w.avg_score === 100);
   assert.ok(w100, 'uid3 약점에 100% 평가부족 행([4영01-08]) 존재(기획서 실측 전제)');
   assert.equal(w100.status, 'insufficient', '100% 행은 평가부족(att<3)이어야 약점에 남는다');
   assert.match(w100.reasonText, /^아직 \d+번밖에 안 풀었어요/, '평가부족 이유 문구로 "100%인데 왜?" 해소');
+});
+
+// ──────────────────────────────────────────────────────────────────────────
+// INV-K3L (C-1 표기 정직성): **라벨 ↔ 값 정체 일치**를 박제한다.
+//   결함 부류(재발 방지 대상): 라벨은 "정답률"인데 값은 avg_score(평균 점수)를 넣는 것.
+//   두 지표는 실제로 다르다 — 실측 lrs_achievement_stats 채점행 19,282건 중 30.4%(5,860건)가
+//   |평균 점수 − 정답률| ≥ 20%p. 라벨을 잘못 붙이면 "미도달인데 정답률 75%" 같은 자기모순이 뜬다.
+//   규칙: reasonText 안의 모든 수치는 그 라벨이 가리키는 필드와 정확히 일치해야 한다.
+//     · "평균 점수 N%"   → N === round(avg_score)      (avg_score 없으면 이 조각 자체가 없어야 함)
+//     · "정답률 N%"      → N === round(correctRate)    (avg_score 재사용 금지)
+//     · "정답 인정 S/A회" → S === success_count, A === attempt_count (도달 판정 분자/분모)
+//   + correctRate 계약: null 이거나 0~100, 그리고 success/attempt 에서 파생된 값과 일치.
+// ──────────────────────────────────────────────────────────────────────────
+test('INV-K3L: reasonText 라벨↔값 정체 일치 (평균 점수=avg_score · 정답률=correctRate · 정답 인정=succ/att)', async () => {
+  let checked = 0, avgFrags = 0, hitFrags = 0;
+  for (const uid of [STUDENT1, STUDENT2]) {
+    for (const p of PERIODS) {
+      const r = await req(`/insights/${uid}?period=${p}`, uid);
+      assert.equal(r.status, 200, `insights uid${uid}@${p} 200`);
+      const rows = [...(r.json.recommendations || []), ...(r.json.weaknesses || []), ...(r.json.strengths || [])];
+      for (const row of rows) {
+        const t = row.reasonText;
+        if (typeof t !== 'string' || !t) continue;
+        checked++;
+        const where = `uid${uid}@${p} ${row.achievement_code}: "${t}"`;
+
+        // (0) 숫자 자리에 결측이 새는 것 금지
+        assert.ok(!/(null|undefined|NaN)\s*%/.test(t), `결측 표기 금지 — ${where}`);
+        assert.ok(!/\/\s*(null|undefined|NaN)/.test(t), `결측 분모 금지 — ${where}`);
+
+        // (1) "평균 점수 N%" ↔ avg_score
+        const mAvg = t.match(/평균 점수\s*(\d+(?:\.\d+)?)%/);
+        if (mAvg) {
+          avgFrags++;
+          assert.ok(row.avg_score != null, `"평균 점수" 표기가 있으면 avg_score 필수 — ${where}`);
+          assert.equal(Number(mAvg[1]), Math.round(Number(row.avg_score)),
+            `"평균 점수 N%" 의 N 은 avg_score 반올림과 일치 (avg_score=${row.avg_score}) — ${where}`);
+        }
+
+        // (2) "정답률 N%" ↔ correctRate  (★ avg_score 를 정답률로 부르는 것이 이 결함의 본체)
+        const mRate = t.match(/정답률\s*(\d+(?:\.\d+)?)%/);
+        if (mRate) {
+          assert.ok(row.correctRate != null, `"정답률" 표기가 있으면 correctRate 필수 — ${where}`);
+          assert.equal(Number(mRate[1]), Math.round(Number(row.correctRate)),
+            `"정답률 N%" 의 N 은 correctRate(success/attempt) 와 일치해야 하며 avg_score 재사용 금지 ` +
+            `(correctRate=${row.correctRate}, avg_score=${row.avg_score}) — ${where}`);
+        }
+
+        // (3) "정답 인정 S/A회" ↔ success_count / attempt_count (도달 판정 입력값 그대로)
+        const mHit = t.match(/정답 인정\s*(\d+)\s*\/\s*(\d+)회/);
+        if (mHit) {
+          hitFrags++;
+          assert.equal(Number(mHit[1]), Number(row.success_count),
+            `"정답 인정 S/A" 의 S 는 success_count — ${where}`);
+          assert.equal(Number(mHit[2]), Number(row.attempt_count),
+            `"정답 인정 S/A" 의 A 는 attempt_count — ${where}`);
+        }
+
+        // (4) correctRate 계약 — null 또는 0~100, success/attempt 파생값과 일치
+        if (row.correctRate != null) {
+          assert.ok(row.correctRate >= 0 && row.correctRate <= 100,
+            `correctRate(${row.correctRate}) 0~100 — ${where}`);
+          if (row.attempt_count > 0 && row.success_count != null) {
+            const expect = Math.round((row.success_count / row.attempt_count) * 1000) / 10;
+            assert.equal(row.correctRate, expect,
+              `correctRate 는 success/attempt 파생 (기대 ${expect}) — ${where}`);
+          }
+        }
+      }
+    }
+  }
+  assert.ok(checked > 0, '검사한 reasonText 행이 있어야 한다');
+  assert.ok(avgFrags > 0, '"평균 점수 N%" 조각이 최소 1건은 나와야 한다(템플릿 실제 사용 확인)');
+  assert.ok(hitFrags > 0, '"정답 인정 S/A회" 조각이 최소 1건은 나와야 한다(판정 근거 병기 확인)');
+});
+
+// FE 정적 가드: 같은 결함 부류가 화면단에서 재발하는 것을 막는다.
+//   public/lrs/index.html 에서 "정답률" 이라는 라벨과 avg_score 가 **같은 줄**에 있으면
+//   avg_score 를 정답률로 표기하는 것 — 이 결함의 화면판이다. (진짜 정답률은 correctRate 사용)
+test('INV-K3L-FE: LRS 화면 소스에 "정답률" 라벨 + avg_score 동시 등장 0건 (avg_score 를 정답률로 표기 금지)', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const file = path.join(__dirname, '..', 'public', 'lrs', 'index.html');
+  const lines = fs.readFileSync(file, 'utf8').split(/\r?\n/);
+  const bad = [];
+  lines.forEach((ln, i) => {
+    if (ln.includes('정답률') && /avg_score/.test(ln) && !/correctRate/.test(ln)) {
+      // 주석 줄은 설명 목적이므로 제외(라벨 렌더가 아님)
+      const s = ln.trim();
+      if (s.startsWith('//') || s.startsWith('*') || s.startsWith('/*')) return;
+      bad.push(`${i + 1}: ${s.slice(0, 160)}`);
+    }
+  });
+  assert.equal(bad.length, 0,
+    `avg_score 를 "정답률" 라벨로 렌더하는 줄이 있으면 안 된다(평균 점수로 표기하거나 correctRate 사용):\n${bad.join('\n')}`);
 });
 
 // ──────────────────────────────────────────────────────────────────────────

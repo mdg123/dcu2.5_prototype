@@ -1890,12 +1890,14 @@ function _ewsWeakHtml(weaknesses){
   const list = weaknesses.slice().sort(_ewsWeakSort);
   const w0 = list[0];
   const total = list.length;
+  // ★ C-1 표기 정직성: avg_score = AVG(result_score) = "평균 점수". 정답률(success/attempt) 아님.
+  //   미도달 배지 옆에 라벨 없는 "75%" 가 붙으면 정답률로 오독된다 → 지표명을 명시한다.
   const rateHtml = (w) => (w.hasScore && w.avg_score != null && normStatus(w.status) !== 'insufficient')
-    ? Math.round(w.avg_score) + '%' : '';
+    ? '평균 ' + Math.round(w.avg_score) + '점' : '';
   // (B) hero — 최취약 1건
   const heroSubjCls = _subjectBadgeClass(w0.subject_label);
   const heroRate = (w0.hasScore && w0.avg_score != null)
-    ? `<span class="ews-drw-hero__rate">정답률 ${Math.round(w0.avg_score)}%</span>` : '';
+    ? `<span class="ews-drw-hero__rate">평균 점수 ${Math.round(w0.avg_score)}%</span>` : '';
   const heroHtml = `
     <div class="ews-drw-hero">
       <div class="ews-drw-hero__cap"><i class="fas fa-flag" aria-hidden="true"></i> 이 학생이 특히 어려워하는 것</div>
@@ -3811,7 +3813,7 @@ VIEWS['s-home'] = async function(root){
   const periodScoreAvg = (snap.periodScoreAvg != null && !isNaN(Number(snap.periodScoreAvg)))
     ? Math.round(Number(snap.periodScoreAvg) * 10) / 10
     : null;
-  const scoreBasis = snap.scoreBasis || '채점된 평가·문항의 평균 정답률';
+  const scoreBasis = snap.scoreBasis || '채점된 평가·문항의 평균 점수';
   const streakDays = snap.streakDays || 0;
   // "낸 과제" = 실제 과제 제출/이수 건수(completedAssignments). 총 활동수(totalActivities) 아님.
   const submittedAssignments = Number(snap.completedAssignments)||0;
@@ -3862,7 +3864,7 @@ VIEWS['s-home'] = async function(root){
   const weakHtml = `
     <section class="dc-chart-wrapper" aria-label="보완 추천 단원">
       <header><div><h2>보완 추천 단원</h2>
-        <div class="subtitle">정답률이 낮거나 아직 채점 전이라 더 연습하면 좋은 단원이에요</div></div></header>
+        <div class="subtitle">평균 점수가 낮거나 아직 채점 전이라 더 연습하면 좋은 단원이에요</div></div></header>
       <div id="sWeakList" class="s-weak-list"></div>
     </section>`;
 
@@ -3942,7 +3944,10 @@ VIEWS['s-home'] = async function(root){
       const name = nameOf(w);
       const subjLabel = w.subject_label || '기타';
       const subjCls = _subjectBadgeClass(subjLabel);
-      // 지표영역: hasScore면 정답률 미니바, 아니면 "연습 N회"(정직 표기 — 없는 정답률 암시 금지)
+      // 지표영역: hasScore면 평균 점수 미니바, 아니면 "연습 N회"(정직 표기 — 없는 지표 암시 금지)
+      //   ★ C-1 표기 정직성: w.avg_score 는 AVG(result_score)= "평균 점수"다. 정답률(success/attempt)이 아니다.
+      //     과거 라벨이 "정답률"이라 도달 판정(정답률 기준)과 값이 어긋나 보였다(실측 [4수03-10] 미도달 ↔ 75%).
+      //     진짜 정답률이 필요하면 BE가 별도 제공하는 w.correctRate 를 쓸 것 — avg_score 재사용 금지.
       const hasScore = (w.hasScore === true) || (w.avg_score != null);
       const attempts = Number(w.attempt_count)||0;
       let metricHtml;
@@ -3950,7 +3955,7 @@ VIEWS['s-home'] = async function(root){
         const pct = Math.max(0, Math.min(100, Math.round(Number(w.avg_score)||0)));
         metricHtml = `<div class="s-weak-metric">
           <span class="s-weak-bar" aria-hidden="true"><span class="s-weak-bar__fill" style="width:${pct}%;"></span></span>
-          <span class="s-weak-metric__num">정답률 ${pct}%</span>
+          <span class="s-weak-metric__num">평균 점수 ${pct}%</span>
         </div>`;
       } else {
         metricHtml = `<div class="s-weak-metric"><span class="s-weak-metric__num">연습 ${attempts}회</span></div>`;
@@ -9224,7 +9229,11 @@ VIEWS['t-benchmark'] = function(root){ state._compareScope = 'province'; return 
 /* 비교 지표 정의 — pct(0~100 트랙) 여부·단위·표기 폭. score/reach=비율(반↔도 공정),
    time/usage=누적량(충북 시드 학생이 많아 절대비교는 참고용 — §정직성 캡션). */
 const BM_METRICS = [
-  { key:'score', label:'정답률',   unit:'점', pct:true,  vol:false },
+  // C-1 전수: score 지표의 값은 BE `_benchScoreTimeUsage` 의 AVG(NORM_SCORE(result_score)) —
+  //   즉 0~100 **평균 점수**다(단위도 '점'). 라벨만 '정답률'이라 "정답률 80점" 처럼
+  //   비율 라벨 + 점수 단위가 충돌했다. 값 정체(점수)에 맞춰 라벨·델타 단위를 통일한다.
+  //   ※ pct:true 는 트랙 최대치 100 고정용 플래그라 유지(0~100 스케일이 맞음).
+  { key:'score', label:'평균 점수', unit:'점', pct:true,  vol:false, deltaUnit:'점' },
   { key:'reach', label:'도달률',   unit:'%',  pct:true,  vol:false },
   { key:'time',  label:'학습시간', unit:'분', pct:false, vol:true  },
   { key:'usage', label:'활용률',   unit:'건', pct:false, vol:true  },
@@ -9233,7 +9242,7 @@ const BM_METRIC_BY = Object.fromEntries(BM_METRICS.map(m=>[m.key, m]));
 /* 값 표기 — 활용률(건)만 소수1, 나머지 정수 반올림. null 은 '-'. */
 function _bmNum(v, m){ if (v==null || isNaN(v)) return '-'; return (m && m.key==='usage') ? Number(v).toFixed(1) : String(Math.round(v)); }
 /* 델타 단위 — 비율지표=%p, 그 외=지표단위. */
-function _bmDeltaUnit(m){ return m && m.pct ? '%p' : (m ? m.unit : ''); }
+function _bmDeltaUnit(m){ return (m && m.deltaUnit) || (m && m.pct ? '%p' : (m ? m.unit : '')); }
 
 /* 담당(개설) active 클래스 목록 — /api/lrs/classes(소유·active 스코프 + hasScoredActivity 플래그) 우선,
    미배포 시 /api/class/my + owner_id 필터 폴백. 세션 캐시.
@@ -9297,16 +9306,36 @@ function _bmSeedBar(seedNotice, realOn, realKey){
     </div>
   </div>`;
 }
-/* 백분위 배지(§2-2) — 상대 위치 색 + '순위 배지' 명시(fa-ranking-star + 상위/중간 병기). */
+/* ── C-2② 백분위 표현 정직성 ───────────────────────────────────────────────
+   BE `_benchTopPct` 는 100 − (나보다 낮은 표본 비율) 을 돌려준다. 즉 **작을수록 앞순위**인
+   "상위 N%" 스케일이다. 그런데 하위권일수록 N 이 커져(예: 98) 화면에 "상위 98%" 로 찍혔고,
+   이는 "98번째 백분위(=최상위)" 로 읽히는 정반대 오독을 낳았다(감리 지적).
+   → 앞순위 구간(≤50)만 "상위 N%" 로 두고, 뒤순위 구간은 방향이 자명한 "하위 M%"(M = 100−N)
+     로 뒤집어 표기한다. 두 표기 모두 "숫자가 작을수록 극단(앞/뒤)" 이라 방향 혼동이 없다.
+   ※ 주의: 학생용 또래비교(_pctlText, /peer-compare)는 percentile 정의가 **반대**
+     (= 나보다 낮은 비율, 클수록 앞순위)이므로 이 함수를 재사용하면 안 된다. */
+function _bmPctlText(pct){
+  const p = Math.max(1, Math.round(pct));
+  const bottom = Math.max(1, 100 - p);   // 하위 M% (BE below 비율과 동일)
+  if (pct <= 25) return { tone:'success', text:'상위 '+p+'%' };
+  if (pct <= 50) return { tone:'info',    text:'상위 '+p+'%' };
+  if (pct <= 74) return { tone:'muted',   text:'충북 중간쯤 (하위 '+bottom+'%)' };
+  return { tone:'warning', text:'더 올라갈 여지가 커요 (하위 '+bottom+'%)' };
+}
+const BM_PCTL_HINT = '충북 동학년 분포에서 우리 반의 상대 위치예요. 상위 1%가 가장 앞순위, 하위 1%가 가장 뒤순위입니다.';
+/* 한국어 조사 은/는 자동 선택 — 지표명이 늘어도 "은(는)" 같은 미완성 표기가 나오지 않게. */
+function _koJosaEunNeun(word){
+  const s = String(word||'').trim();
+  if (!s) return '는';
+  const c = s.charCodeAt(s.length-1);
+  if (c < 0xAC00 || c > 0xD7A3) return '는';   // 한글 음절이 아니면 기본값
+  return ((c - 0xAC00) % 28) ? '은' : '는';     // 종성 있으면 '은'
+}
+/* 백분위 배지(§2-2) — 상대 위치 색 + '순위 배지' 명시(fa-ranking-star + 상위/하위 방향 명시). */
 function _bmPctlBadge(pct){
   if (pct == null) return `<span class="bm-badge bm-badge--muted"><i class="fas fa-ranking-star" aria-hidden="true"></i> 표본 부족</span>`;
-  const p = Math.max(1, Math.round(pct));
-  let tone, text;
-  if (pct <= 25){ tone='success'; text='상위 '+p+'%'; }
-  else if (pct <= 50){ tone='info'; text='상위 '+p+'%'; }
-  else if (pct <= 74){ tone='muted'; text='충북 중간쯤 (상위 '+p+'%)'; }
-  else { tone='warning'; text='더 올라갈 여지가 커요 (상위 '+p+'%)'; }
-  return `<span class="bm-badge bm-badge--${tone}"><i class="fas fa-ranking-star" aria-hidden="true"></i> ${escapeHtml(text)}</span>`;
+  const { tone, text } = _bmPctlText(pct);
+  return `<span class="bm-badge bm-badge--${tone}" title="${escapeAttr(BM_PCTL_HINT)}"><i class="fas fa-ranking-star" aria-hidden="true"></i> ${escapeHtml(text)}</span>`;
 }
 /* 표 델타 배지 — +초록▲/−빨강▼/0회색. 지표별 단위. */
 function _bmDeltaBadge(delta, m){
@@ -9345,8 +9374,15 @@ function _bmHeadlineHero(h, m){
     : `<span class="sw"><i class="bm-sw-fill"></i> 우리 반 ${mineTxt}${unit}</span>
        <span class="sw"><i class="bm-sw-mean"></i> 도 평균(실선) ${_bmNum(h.provMean,m)}${unit}</span>
        <span class="sw"><i class="bm-sw-median"></i> 도 중앙값(점선) ${_bmNum(h.provMedian,m)}${unit}</span>`;
-  const note = masked ? '' :
-    `<div class="bm-hero-note">평균과 중앙값이 다르면 충북 안에 유독 높거나 낮은 클래스가 섞여 있다는 뜻이에요. 상위%는 충북 같은 학년 학생들 대비 우리 반 평균의 위치예요(시연 시드 기준).</div>`;
+  // C-2① 누적 지표 비대칭 고지 — 학습시간(분)·활용률(건)은 1인당 평균이긴 하나 **기간 보정이 없는
+  //   누적 총량**이라, 누적 기간이 긴 도 표본과의 절대 비교는 불공정하다(실측: 우리 반 817.9분 vs
+  //   충북 5256.2분 — 강도 차가 아니라 쌓인 기간 차가 대부분). 순위·우열 판단 금지를 명시한다.
+  //   비율 지표(정답률·도달률)는 기간에 중립이라 이 고지 대상이 아니다.
+  const volNote = m.vol
+    ? `<div class="bm-hero-note bm-hero-note--caution"><i class="fas fa-circle-info" aria-hidden="true"></i> ${escapeHtml(m.label)}${_koJosaEunNeun(m.label)} 학생 1인당 <b>누적 총량</b>이라 기간 보정이 없어요. 쌓인 기간이 길수록 커지므로 <b>순위·우열 판단이 아닌 참고용</b>으로만 봐주세요. 우열은 비율/점수 지표(평균 점수·도달률)로 판단하시는 편이 정확해요.</div>`
+    : '';
+  const note = masked ? volNote :
+    `<div class="bm-hero-note">평균과 중앙값이 다르면 충북 안에 유독 높거나 낮은 클래스가 섞여 있다는 뜻이에요. 상위·하위%는 충북 같은 학년 학생들 대비 우리 반 평균의 위치예요 — <b>상위 1%가 가장 앞순위, 하위 1%가 가장 뒤순위</b>입니다(시연 시드 기준).</div>${volNote}`;
   return `<div class="bm-hero">
     <div class="bm-hero-top"><div class="bm-hero-sentence">${sentence}</div>${badge}</div>
     <div class="bm-track" role="img" aria-label="우리 반 ${mineTxt}${unit}${masked?'':', 도 평균 '+_bmNum(h.provMean,m)+unit}">
@@ -9406,6 +9442,11 @@ const BM_STYLE = `<style>
   .bm-legend i.bm-sw-median{ width:16px; border-top:2px dashed #9ca3af; }
   .bm-hero-note{ font-size:13px; color:var(--gray-500); line-height:1.6; margin-top:12px;
     border-top:1px dashed var(--gray-200); padding-top:10px; }
+  /* C-2① 누적 지표(학습시간·활용률) 참고용 고지 — 눈에 띄되 경고톤 과하지 않게. */
+  .bm-hero-note--caution{ border-top:0; background:#fffbeb; color:#92400e; border:1px solid #fde68a;
+    border-radius:10px; padding:10px 12px; margin-top:10px; }
+  .bm-hero-note--caution i{ margin-right:6px; color:#b45309; }
+  .bm-hero-note--caution b{ color:#7c2d12; }
   .bm-badge{ display:inline-flex; align-items:center; gap:6px; flex:none; white-space:nowrap;
     font-size:13px; font-weight:700; padding:5px 12px; border-radius:999px; }
   .bm-badge i{ font-size:12px; }
@@ -9496,7 +9537,7 @@ async function _renderCompareProvinceBody(root){
   const subjLabel = state._bmSubject!=='all' ? (_eqSubjectLabelOf(state._bmSubject)||'') : '전체';
   const summary = `<div class="dc-eq-summary" role="status"><i class="fas fa-filter" aria-hidden="true"></i> 필터: ${escapeHtml(clsName)} · ${escapeHtml(subjLabel)} · ${level==='achievement'?'성취기준별':'교과별'}${level==='subject'?(' · '+escapeHtml(m.label)):''}</div>`;
   const volCaption = (level==='subject')
-    ? `<div class="bm-caption">정답률·도달률은 학생별 비율이라 우리 반과 도 비교가 공정해요. 학습시간·활용률은 충북 시드 학생의 누적 기록이 많아 절대 비교는 참고용이에요.</div>`
+    ? `<div class="bm-caption">평균 점수·도달률은 학생 1인당 비율/점수라 우리 반과 도 비교가 공정해요. 학습시간·활용률은 기간 보정이 없는 누적 총량이라(충북 시드 학생의 누적 기록이 많음) 절대 비교는 참고용이에요.</div>`
     : `<div class="bm-caption">표본이 충분한(도 50명 이상 학습한) 초등 코어 성취기준만 보여드려요. 우리 반이 평가한 기준만 비교표에 담아요.</div>`;
 
   const filterbar = `<div class="bm-filterbar">
@@ -9514,7 +9555,7 @@ async function _renderCompareProvinceBody(root){
       : (d.message || '이 클래스의 학년 정보를 확인할 수 없어 도 비교를 만들 수 없어요.');
     root.innerHTML = BM_STYLE + _bmSeedBar(d.seedNotice, realOn, '_bmRealOnly')
       + `<div class="bm-block"><h2 class="bm-sec-title">우리 반 vs 충북 도 전체 · 같은 학년</h2>
-         <p class="bm-sec-sub">우리 반이 ${gradeLine} 대비 어디쯤 있는지 성취(정답률·도달률) 중심으로 보여줘요.</p></div>`
+         <p class="bm-sec-sub">우리 반이 ${gradeLine} 대비 어디쯤 있는지 성취(평균 점수·도달률) 중심으로 보여줘요.</p></div>`
       + filterbar + tplEmpty(msg);
     _bmBindCommon(root, ()=>_renderCompareProvinceBody(root));
     _bmBindBenchToggles(root);
@@ -9709,7 +9750,8 @@ VIEWS['t-daily-benchmark'] = async function(root){
     ? { dir: (sm.classTime-sm.provinceTime)>0?'up':(sm.classTime-sm.provinceTime)<0?'down':'flat', text:`충북 ${sm.provinceTime}분 · ${(sm.classTime-sm.provinceTime)>0?'+':(sm.classTime-sm.provinceTime)<0?'−':''}${Math.abs(sm.classTime-sm.provinceTime)}분` }
     : { dir:'flat', text: sm.provinceTime!=null?`충북 ${sm.provinceTime}분`:'표본 부족' };
   const timeTone = (sm.classTime==null||sm.provinceTime==null)?'muted':((sm.classTime-sm.provinceTime)>0?'success':(sm.classTime-sm.provinceTime)<0?'danger':'muted');
-  const pctlVal = sm.percentile!=null ? `상위 ${Math.max(1,Math.round(sm.percentile))}%` : '표본 부족';
+  // C-2②: "상위 98%" 오독 방지 — 뒤순위 구간은 "하위 M%" 로 방향 명시(_bmPctlText 공용 규칙).
+  const pctlVal = sm.percentile!=null ? _bmPctlText(sm.percentile).text : '표본 부족';
   const kpi = `<section class="bm-kpi3">
     ${kpiCard(accLabel, sm.classAcc!=null?Math.round(sm.classAcc):'-', '%', accTrend, accTone)}
     ${kpiCard(timeLabel, sm.classTime!=null?sm.classTime:'-', '분', timeTrend, timeTone)}
