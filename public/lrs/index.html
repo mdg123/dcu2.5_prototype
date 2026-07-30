@@ -9235,9 +9235,19 @@ function _bmNum(v, m){ if (v==null || isNaN(v)) return '-'; return (m && m.key==
 /* 델타 단위 — 비율지표=%p, 그 외=지표단위. */
 function _bmDeltaUnit(m){ return m && m.pct ? '%p' : (m ? m.unit : ''); }
 
-/* 담당(개설) active 클래스 목록 — /api/class/my 에서 owner_id=본인 필터. 세션 캐시. */
+/* 담당(개설) active 클래스 목록 — /api/lrs/classes(소유·active 스코프 + hasScoredActivity 플래그) 우선,
+   미배포 시 /api/class/my + owner_id 필터 폴백. 세션 캐시.
+   플래그가 있어야 _pickDataClassId 가 "데이터 있는 클래스"를 기본 선택한다(데모반 기본 방지·버그 A). */
 async function _bmFetchOwnedClasses(){
   if (Array.isArray(state._bmOwnedClasses)) return state._bmOwnedClasses;
+  try {
+    const r = await fetch('/api/lrs/classes', { credentials:'include' });
+    if (r.ok){
+      const j = await r.json();
+      const lrsList = (j && j.classes) || [];
+      if (lrsList.length){ state._bmOwnedClasses = lrsList; return lrsList; }
+    }
+  } catch(_){}
   let list = [];
   try {
     const r = await fetch('/api/class/my', { credentials:'include' });
@@ -10460,7 +10470,8 @@ VIEWS['t-behavior'] = async function(root){
   root.innerHTML = tplLoading(3);
   const owned = await _bmFetchOwnedClasses();
   if (!owned.length){ root.innerHTML = BEHAV_STYLE + _bmNoClassPanel(); return; }
-  if (state._behavClassId == null || !owned.some(c => String(c.id) === String(state._behavClassId))) state._behavClassId = owned[0].id;
+  // 기본 클래스 = 데이터(채점/활동) 있는 클래스 우선(버그 A와 동일 근본 — 데모반이 기본이 되지 않게).
+  if (state._behavClassId == null || !owned.some(c => String(c.id) === String(state._behavClassId))) state._behavClassId = _pickDataClassId(owned);
   if (!BEHAV_SIGNALS.includes(state._behavSignal)) state._behavSignal = 'speed';
   const signal = state._behavSignal;
   const realOn = !!state._behavRealOnly;
