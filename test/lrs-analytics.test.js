@@ -520,12 +520,189 @@ const MIRROR_UID = 99101;
                              VALUES (1, ?, ?, 'present', ?)`);
   const insDaily = db.prepare(`INSERT OR IGNORE INTO lrs_user_daily (user_id, stat_date, activity_count, duration_sec, avg_score)
                                VALUES (?, ?, ?, ?, ?)`);
+  // ★ 점수 축 원천은 learning_logs 다(lrs_user_daily.avg_score 아님 — 스케일 혼재·모집단 오염).
+  //   활동량(avgActs)만 lrs_user_daily 를 쓰므로 두 테이블 모두 시드한다.
+  const insLog = db.prepare(`INSERT INTO learning_logs
+      (user_id, class_id, activity_type, verb, result_score, created_at)
+      VALUES (?, 1, 'content_solve', 'completed', ?, ?)`);
   for (const s of seed) {
     const date = isoBack(s.off);
     try { insAtt.run(MIRROR_UID, date, s.emo); } catch (_) {}
     try { insDaily.run(MIRROR_UID, date, s.acts, s.acts * 300, s.score); } catch (_) {}
+    // 하루 3건씩(A6_MIN_SCORE_N 충족용은 '날짜 수'라 3일 이상이면 됨) — 0~100 스케일.
+    try { insLog.run(MIRROR_UID, s.score, `${date} 10:00:00`); } catch (_) {}
   }
 }
+
+// ── A6 스케일 혼재 회귀 전용 시드 ────────────────────────────────────────────
+//   0~1 스케일 로그만 가진 학생. 정규화가 빠지면 avgScore 가 0~1 로 새어나온다.
+const MIRROR_SCALE_UID = 99102;
+function seedMirrorScaleMix() {
+  const isoBack = (n) => { const d = new Date(); d.setDate(d.getDate() - n); return d.toISOString().slice(0, 10); };
+  try {
+    db.prepare(`INSERT OR IGNORE INTO users (id, username, password, display_name, role)
+                VALUES (?, ?, ?, ?, 'student')`)
+      .run(MIRROR_SCALE_UID, `mirrorscale_${MIRROR_SCALE_UID}`, 'x', '스케일테스트');
+  } catch (_) {}
+  const insAtt = db.prepare(`INSERT OR IGNORE INTO attendance (class_id, user_id, attendance_date, status, emotion)
+                             VALUES (1, ?, ?, 'present', ?)`);
+  const insLog = db.prepare(`INSERT INTO learning_logs
+      (user_id, class_id, activity_type, verb, result_score, created_at)
+      VALUES (?, 1, ?, 'completed', ?, ?)`);
+  // 긍정 6일 — exam_complete 를 0~1 스케일(0.9)로 저장. 정규화되면 90점이어야 한다.
+  for (let i = 0; i < 6; i++) {
+    const date = isoBack(i + 1);
+    try { insAtt.run(MIRROR_SCALE_UID, date, 'happy'); } catch (_) {}
+    try { insLog.run(MIRROR_SCALE_UID, 'exam_complete', 0.9, `${date} 10:00:00`); } catch (_) {}
+    // 진도율(lesson_progress 0.5)도 같은 날 넣는다 — 모집단에서 제외돼야 하므로 평균은 90 유지.
+    try { insLog.run(MIRROR_SCALE_UID, 'lesson_progress', 0.5, `${date} 11:00:00`); } catch (_) {}
+  }
+  // 부정 6일 — 감정 기록은 충분(n=6≥5)하지만 점수 있는 날은 1일뿐 → scoreN 마스킹 대상.
+  for (let i = 0; i < 6; i++) {
+    const date = isoBack(i + 20);
+    try { insAtt.run(MIRROR_SCALE_UID, date, 'sad'); } catch (_) {}
+  }
+  const oneDay = isoBack(20);
+  try { insLog.run(MIRROR_SCALE_UID, 'content_solve', 100, `${oneDay} 10:00:00`); } catch (_) {}
+}
+seedMirrorScaleMix();
+
+// ════════════════════════════════════════════════════════════════════════════
+// [A6SCALE] ★ 스케일 혼재 부류 박제 (2026-07 P0 실측 결함)
+//   결함: getEmotionMirror 가 lrs_user_daily.avg_score 를 정규화 없이 평균내
+//         중립 1점 / 부정 100점 을 한 축에 그렸다(학생에게 거짓 비교).
+//   원천 결함 2겹: (1) 0~1·0~100 스케일 혼재 저장 (2) 모집단 오염(진도율 lesson_progress 포함).
+//   → 아래 불변식은 두 겹 모두, 그리고 소표본 정직성(scoreN)까지 재발을 잡는다.
+// ════════════════════════════════════════════════════════════════════════════
+test('A6SCALE-1: 0~1 원천이 ×100 정규화된다 — exam 0.9 → avgScore 90 (1 아님)', () => {
+  const m = analytics.getEmotionMirror(MIRROR_SCALE_UID, { days: 60 });
+  const pos = m.groups.find(g => g.key === 'positive');
+  assert.ok(pos.avgScore != null, `positive 마스킹되면 안 됨 (n=${pos.n}, scoreN=${pos.scoreN})`);
+  assert.ok(Math.abs(pos.avgScore - 90) < 0.5,
+    `0~1 스케일(0.9) 미정규화 의심 — avgScore=${pos.avgScore}, 기대 90`);
+});
+
+test('A6SCALE-2: 진도율(lesson_progress)은 점수 모집단에서 제외 — 0.5 가 평균을 끌어내리지 않음', () => {
+  const m = analytics.getEmotionMirror(MIRROR_SCALE_UID, { days: 60 });
+  const pos = m.groups.find(g => g.key === 'positive');
+  // exam 0.9(→90) + lesson_progress 0.5(→50, 제외돼야 함). 포함되면 70 으로 내려간다.
+  assert.ok(pos.avgScore > 85,
+    `lesson_progress 오염 의심 — avgScore=${pos.avgScore} (제외 시 90, 포함 시 ≈70)`);
+});
+
+test('A6SCALE-3: ★부류 불변식 — 모든 그룹 avgScore 는 null 이거나 0~100, 그리고 0~1 잔재(0<v<=1) 금지', () => {
+  for (const uid of [MIRROR_UID, MIRROR_SCALE_UID]) {
+    const m = analytics.getEmotionMirror(uid, { days: 60 });
+    for (const g of m.groups) {
+      if (g.avgScore == null) continue;
+      assert.ok(g.avgScore >= 0 && g.avgScore <= 100,
+        `uid=${uid} ${g.key} avgScore=${g.avgScore} 0~100 범위 밖`);
+      // 0~1 스케일이 새어나오면 값이 (0,1] 에 갇힌다 — 정규화 누락의 지문.
+      assert.ok(!(g.avgScore > 0 && g.avgScore <= 1),
+        `uid=${uid} ${g.key} avgScore=${g.avgScore} — 0~1 스케일 미정규화 의심`);
+    }
+  }
+});
+
+test('A6SCALE-4: 한 응답 안에서 그룹 간 스케일이 섞이지 않는다(최대/최소 비율 100배 금지)', () => {
+  // 원 결함의 지문: 중립 1점 vs 부정 100점 = 100배. 동일 스케일이면 이런 비율은 나올 수 없다.
+  for (const uid of [MIRROR_UID, MIRROR_SCALE_UID]) {
+    const vals = analytics.getEmotionMirror(uid, { days: 60 })
+      .groups.map(g => g.avgScore).filter(v => v != null && v > 0);
+    if (vals.length < 2) continue;
+    const ratio = Math.max(...vals) / Math.min(...vals);
+    assert.ok(ratio < 50, `uid=${uid} 그룹 간 비율 ${ratio.toFixed(1)}배 — 스케일 혼재 의심 (${vals})`);
+  }
+});
+
+test('A6SCALE-5: scoreN < 3 이면 avgScore 마스킹 + 사유 표기(0 채움 금지)', () => {
+  const m = analytics.getEmotionMirror(MIRROR_SCALE_UID, { days: 60 });
+  const neg = m.groups.find(g => g.key === 'negative');
+  // 감정 기록 6일(n>=5)이라 기존 n 기반 마스킹은 통과하지만, 점수 있는 날은 1일뿐.
+  assert.ok(neg.n >= 5, `시드 전제: negative n>=5 (실제 ${neg.n})`);
+  assert.ok(neg.scoreN < 3, `시드 전제: negative scoreN<3 (실제 ${neg.scoreN})`);
+  assert.equal(neg.avgScore, null,
+    `scoreN=${neg.scoreN} 하루치가 대표값으로 노출됨 — 마스킹 누락`);
+  assert.ok(typeof neg.scoreNote === 'string' && neg.scoreNote.length > 0,
+    '마스킹 사유(scoreNote) 없음 — FE 가 빈 칸을 설명할 수 없다');
+});
+
+// ── 부류 B 박제: 감정 스케일 혼재 (정본사전 §2-B) ────────────────────────────
+//   attendance.emotion_score 는 0~1 / 1~3 / 8.5~9.5 세 스케일 공존.
+//   단일 임계(`<1.5 부정`)를 쓰면 0~1 로 저장된 긍정 어휘가 전부 부정으로 뒤집힌다.
+//   실측 영향: class 2 부정비율 88% → 17%. 아래는 그 메커니즘 자체를 박제한다.
+const EMO = require('../lib/lrs/emotion-scale');
+
+test('EMOSCALE-1: SSOT — 0~1·1~3·8.5~9.5 어느 스케일로 저장돼도 긍정 어휘는 positive', () => {
+  for (const sc of [0.1, 0.4, 0.6, 0.95, 1, 2, 3, 8.5, 9.5, null]) {
+    for (const emo of ['happy', 'good', 'great', 'calm', 'excited']) {
+      assert.equal(EMO.emotionGroupKey(emo, sc), 'positive',
+        `${emo}(score=${sc}) 가 positive 가 아님 — 점수 스케일이 텍스트를 덮었다`);
+      assert.equal(EMO.isNegativeEmotion(emo, sc), false, `${emo}(score=${sc}) 부정 판정됨`);
+    }
+    for (const emo of ['sad', 'angry', 'tired', 'anxious']) {
+      assert.equal(EMO.emotionGroupKey(emo, sc), 'negative', `${emo}(score=${sc}) 부정 분류 실패`);
+    }
+    for (const emo of ['neutral', 'soso', '보통']) {
+      assert.equal(EMO.emotionGroupKey(emo, sc), 'neutral', `${emo}(score=${sc}) 중립 분류 실패`);
+    }
+  }
+});
+
+test('EMOSCALE-2: 감정 정보 없는 행은 null — 0 채움 금지(분모 제외 신호)', () => {
+  assert.equal(EMO.emotionGroupKey(null, null), null);
+  assert.equal(EMO.emotionGroupKey('', null), null);
+  assert.equal(EMO.isNegativeEmotion(null, null), null);
+  assert.equal(EMO.emotionNegWeight(null, null), null);
+});
+
+test('EMOSCALE-3: 부정도 가중치 — negative 1 / neutral 0.5 / positive 0 (s_emotion 연속값)', () => {
+  assert.equal(EMO.emotionNegWeight('sad', 0.9), 1);
+  assert.equal(EMO.emotionNegWeight('neutral', 0.9), 0.5);
+  assert.equal(EMO.emotionNegWeight('happy', 0.9), 0);
+  // ☠ 구 구현은 score 0.9 를 1~3 으로 오해해 happy 조차 (3-1)/2=1(완전 부정)로 계산했다.
+  assert.notEqual(EMO.emotionNegWeight('happy', 0.9), 1, 'happy 가 완전 부정으로 계산됨');
+});
+
+test('EMOSCALE-4: ★전 사이트 일관 — 모든 감정 분류 사이트가 SSOT 와 같은 답을 낸다', () => {
+  // 사이트별 사본이 드리프트해 4곳이 점수 우선으로 남았던 것이 결함의 소재였다.
+  // 라우터/스쿨 모듈이 SSOT 를 재정의하지 않았는지 소스 수준에서 확인.
+  const fs = require('fs'); const path = require('path');
+  const root = path.join(__dirname, '..');
+  for (const f of ['routes/lrs.js', 'db/lrs-school.js', 'db/lrs-analytics.js']) {
+    const raw = fs.readFileSync(path.join(root, f), 'utf8');
+    // 주석(설명문)은 제외하고 '실행되는 코드'만 검사 — 결함 이력 설명에 임계값이 등장하기 때문.
+    // ★ CRLF 정규화 먼저: JS 의 `.` 은 \r 을 매치하지 않아 CRLF 파일에서 //주석 제거가 조용히 실패한다.
+    const src = raw
+      .replace(/\r/g, '')
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .split('\n').map(l => l.replace(/\/\/.*$/, '')).join('\n');
+    // emotion_score/escore 를 임계 비교하는 코드가 남아 있으면 사본 드리프트.
+    const bad = src.match(/(emotion_score|escore)\s*\)?\s*(<=?|>=?)\s*[0-9.]+/g);
+    assert.equal(bad, null, `${f} 에 emotion_score 임계 비교 잔존: ${bad && bad.join(' | ')}`);
+  }
+});
+
+test('A6SCALE-6: 감정 분류는 텍스트 우선 — 긍정 어휘가 emotion_score 스케일 때문에 부정으로 가지 않음', () => {
+  // attendance.emotion_score 는 0~1·1~3·>3 혼재 저장. 과거엔 score 우선이라
+  // 'happy'(0.6) 같은 긍정 어휘가 <1.5 라는 이유로 negative 로 분류됐다(실측 138/524행).
+  const uid = 99103;
+  try {
+    db.prepare(`INSERT OR IGNORE INTO users (id, username, password, display_name, role)
+                VALUES (?, ?, ?, ?, 'student')`).run(uid, `emo_${uid}`, 'x', '감정분류');
+  } catch (_) {}
+  const iso = (n) => { const d = new Date(); d.setDate(d.getDate() - n); return d.toISOString().slice(0, 10); };
+  const ins = db.prepare(`INSERT OR IGNORE INTO attendance
+      (class_id, user_id, attendance_date, status, emotion, emotion_score)
+      VALUES (1, ?, ?, 'present', ?, ?)`);
+  // 0~1 스케일로 저장된 명백한 긍정 감정들.
+  for (let i = 0; i < 5; i++) { try { ins.run(uid, iso(i + 1), 'happy', 0.9); } catch (_) {} }
+  const m = analytics.getEmotionMirror(uid, { days: 60 });
+  const pos = m.groups.find(g => g.key === 'positive');
+  const neg = m.groups.find(g => g.key === 'negative');
+  assert.equal(neg.n, 0, `'happy'(score 0.9)가 부정으로 분류됨 — negative n=${neg.n}`);
+  assert.equal(pos.n, 5, `'happy' 5일이 긍정으로 안 잡힘 — positive n=${pos.n}`);
+});
 
 test('MIRROR-1: groups 항상 3개 · 순서 positive/neutral/negative', () => {
   const m = analytics.getEmotionMirror(MIRROR_UID, { days: 60 });

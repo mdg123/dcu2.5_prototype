@@ -11,6 +11,12 @@ const supplement = require('../db/lrs-supplement');
 const { rebuildAllAggregates } = require('../db/lrs-aggregate');
 const { logLearningActivity } = require('../db/learning-log-helper');
 const { LRS_CONFIG } = require('../lib/lrs-config');
+// 점수 스케일·모집단 정규화 SSOT (lib/lrs/score-scale.js). 인라인 재정의 금지.
+const {
+  SCORED_TYPES, SCORED_TYPES_SQL_LIST, normScoreExpr, scoredWhere, normScore,
+} = require('../lib/lrs/score-scale');
+// 감정 분류 SSOT — 정본사전 §2-B(텍스트 어휘 우선, emotion_score 임계 비교 금지).
+const { emotionGroupKey } = require('../lib/lrs/emotion-scale');
 
 /**
  * CSV 셀 injection 방어 — 값이 수식/명령 프리픽스(=, +, -, @, TAB, CR)로 시작하면
@@ -232,11 +238,88 @@ function sendInvalidPeriod(res, reason) {
   return res.status(400).json({ success: false, message: `잘못된 기간 파라미터: ${reason || 'from > to'}` });
 }
 
-/** 역할 가드: 본인이거나 teacher/admin만 허용 */
+// ─────────────────────────────────────────────────────────────────────────────
+// [P0 보안·개인정보 fix — 2026-07-30] 학생 "단위" 열람 가드에 소속 검증 추가.
+//
+//   과거 판정: `본인 || role==='teacher' || role==='admin'` — 담임·소속 검증이 전무했다.
+//   → 시스템의 아무 교사나(전혀 다른 학교의 중학교 교사까지) 아무 학생의 학습·정서 데이터를
+//     200 OK 로 열람할 수 있었다(emotion-mirror 감정 데이터 포함 = 민감정보). 감사 실증.
+//   반 단위 가드(canViewClass)는 이미 옳게 403 이었고 학생 단위만 뚫려 있었으므로,
+//   **새 정책을 발명하지 않고 canViewClass 의 판정 기준을 그대로 학생 단위로 확장**한다.
+//
+//   정책:
+//     - 본인            → 허용
+//     - admin           → 허용(전체 거버넌스, canViewClass 와 동일)
+//     - teacher         → 그 학생이 "내가 교사-티어인 클래스"의 active 멤버일 때만 허용
+//                         (교사-티어 = CLASS_TEACHER_ROLES — canViewClass 와 동일 집합 재사용)
+//     - principal       → 자기 school_name 학교 소속일 때만 (middleware/auth requireSchoolScope
+//                         의 "users.school_name 정확 일치" 스코프 정책과 정합)
+//     - 그 외(학생·학부모·staff) → 거부. 학부모는 /parent/:childId/digest 가 parent_id 관계를
+//                         별도로 검증하므로 여기서 거부해도 정상 동선은 유지된다.
+//
+//   성능: 요청마다 도는 가드다. N+1 금지 — 클래스 목록을 뽑아 반복 검사하지 않고
+//     **단일 EXISTS 쿼리 1회**로 판정하고, prepared statement 는 모듈 레벨에 캐시한다.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// prepared statement 캐시(모듈 로드 시점엔 CLASS_TEACHER_ROLES 가 TDZ 라 lazy 초기화).
+let _sharedClassStmt = null;
+let _sameSchoolStmt = null;
+
+/**
+ * 교사 ↔ 학생 소속 공유 판정 — "내가 교사-티어인 클래스에 그 학생이 active 멤버인가".
+ *   owner_id 폴백 포함: 클래스 소유자인데 class_members 소유자 행이 유실된 경우에도
+ *   자기 반 학생은 봐야 한다(과차단 방지). 어느 쪽이든 "내 클래스"라는 사실은 동일.
+ *   ※ 클래스 status 는 필터하지 않는다 — canViewClass 와 동일 기준 유지(정책 발명 금지).
+ * @returns {boolean}
+ */
+function _teacherSharesClassWith(teacherId, studentId) {
+  if (!_sharedClassStmt) {
+    const ph = [...CLASS_TEACHER_ROLES].map(() => '?').join(',');
+    _sharedClassStmt = db.prepare(`
+      SELECT 1
+      FROM class_members s
+      LEFT JOIN classes c ON c.id = s.class_id
+      WHERE s.user_id = ? AND s.status = 'active'
+        AND (
+          c.owner_id = ?
+          OR EXISTS (
+            SELECT 1 FROM class_members t
+            WHERE t.class_id = s.class_id AND t.user_id = ?
+              AND t.status = 'active' AND t.role IN (${ph})
+          )
+        )
+      LIMIT 1
+    `);
+  }
+  try {
+    return !!_sharedClassStmt.get(studentId, teacherId, teacherId, ...CLASS_TEACHER_ROLES);
+  } catch (_) { return false; }
+}
+
+/** principal 스코프 판정 — 대상이 자기 school_name 학교 소속인가(정확 일치). */
+function _principalSameSchool(user, targetUserId) {
+  const school = user.school_name ? String(user.school_name).trim() : '';
+  if (!school) return false;
+  if (!_sameSchoolStmt) {
+    _sameSchoolStmt = db.prepare(
+      "SELECT 1 FROM users WHERE id = ? AND TRIM(COALESCE(school_name,'')) = ? LIMIT 1"
+    );
+  }
+  try {
+    return !!_sameSchoolStmt.get(targetUserId, school);
+  } catch (_) { return false; }
+}
+
+/** 역할 가드: 본인 / admin / 담당 교사(소속 검증) / principal(자기 학교)만 허용 */
 function canViewUser(req, targetUserId) {
   if (!req.user) return false;
+  if (!Number.isFinite(targetUserId)) return false;   // NaN/undefined id → 거부(무조건 열림 방지)
   if (req.user.id === targetUserId) return true;
-  return req.user.role === 'teacher' || req.user.role === 'admin';
+  const role = req.user.role;
+  if (role === 'admin') return true;
+  if (role === 'teacher') return _teacherSharesClassWith(req.user.id, targetUserId);
+  if (role === 'principal') return _principalSameSchool(req.user, targetUserId);
+  return false;
 }
 
 // ── 학급(peer) 집합 공용 헬퍼 — P1-3 스펙 §4-2 ────────────────────────────
@@ -282,13 +365,13 @@ function _peerIdsOf(userId) {
 //     제외: content_view·post_create·attendance_checkin·survey_respond·homework_graded 등 7종 밖.
 //   (DB 실측: wrong_note_retry avg 68·min 24 = 실제 정답률 → 포함. lesson_progress avg 0.54 = 진도율 → 제외.)
 // ─────────────────────────────────────────────────────────
-const LRS_SCORED_TYPES = [
-  'exam_complete', 'homework_submit', 'content_solve',
-  'self_learn', 'daily_complete', 'wrong_note_retry', 'node_complete'
-];
-const LRS_SCORED_SQL = `ll.activity_type IN ('exam_complete','homework_submit','content_solve','self_learn','daily_complete','wrong_note_retry','node_complete')`;
+//   ★ 정의 실체는 lib/lrs/score-scale.js(SSOT). 과거 이 정의가 이 파일 안에만 있고 export 되지 않아
+//     db/ 계층(lrs-analytics.getEmotionMirror)이 재사용하지 못했고, 그 결과 정규화를 누락해
+//     학생에게 "슬픈 날 100점 / 보통인 날 1점" 이라는 거짓 비교를 보여줬다. 인라인 재정의 금지.
+const LRS_SCORED_TYPES = SCORED_TYPES;
+const LRS_SCORED_SQL = scoredWhere('ll');
 //   행 단위 0~1 값이면 ×100 → 모든 평균을 0~100 스케일로 통일 (perform L2019 와 동일 식).
-const LRS_NORM_SCORE = `(CASE WHEN ll.result_score <= 1 THEN ll.result_score*100 ELSE ll.result_score END)`;
+const LRS_NORM_SCORE = normScoreExpr('ll');
 
 // ─────────────────────────────────────────────────────────
 // [P0 시스템성] 점수 스케일 정규화 공통 헬퍼 (단일 출처)
@@ -305,17 +388,8 @@ const LRS_NORM_SCORE = `(CASE WHEN ll.result_score <= 1 THEN ll.result_score*100
 //     - scoredWhere(alias):   진도형(lesson_progress)·점수없음 유형을 제외하는 화이트리스트 조각
 //   각 사이트에서 AVG(result_score) → AVG(normScoreExpr(alias)), 그리고 WHERE 에 scoredWhere(alias) 를 AND 로 건다.
 // ─────────────────────────────────────────────────────────
-const LRS_SCORED_TYPES_SQL_LIST = "'exam_complete','homework_submit','content_solve','self_learn','daily_complete','wrong_note_retry','node_complete'";
-/** 행 단위 result_score 를 0~100 로 정규화하는 SQL 조각. alias 없으면 컬럼만. */
-function normScoreExpr(alias) {
-  const col = alias ? `${alias}.result_score` : 'result_score';
-  return `(CASE WHEN ${col} <= 1 THEN ${col}*100 ELSE ${col} END)`;
-}
-/** 점수(정답률) 개념이 있는 유형만 남기는 SQL 조각 — 진도형(lesson_progress) 등 자동 제외. */
-function scoredWhere(alias) {
-  const col = alias ? `${alias}.activity_type` : 'activity_type';
-  return `${col} IN (${LRS_SCORED_TYPES_SQL_LIST})`;
-}
+//   normScoreExpr / scoredWhere / SCORED_TYPES_SQL_LIST 는 lib/lrs/score-scale.js 에서 import.
+const LRS_SCORED_TYPES_SQL_LIST = SCORED_TYPES_SQL_LIST;
 
 // ─────────────────────────────────────────────────────────
 // [2-A] 데이터 품질 KPI "정당 분모" 화이트리스트 (기획서 §2-A-1 표)
@@ -1716,9 +1790,14 @@ router.get('/insights/:userId', requireAuth, (req, res) => {
       }
     }
 
-    // 기간 통계(구 "주간") — 선택 기간(pFrom~pTo)의 학습시간·평균성취.
+    // 기간 통계(구 "주간") — 선택 기간(pFrom~pTo)의 학습시간.
+    //   ★ 평균성취는 여기서 뽑지 않는다. lrs_user_daily.avg_score 는 0~1·0~100 스케일 혼재 + 모집단
+    //     오염(진도율 lesson_progress 포함)이라 AVG 하면 거짓값이 된다(위 §점수 정규화 공통 정의 참조).
+    //     평균성취는 computeNormScoreAvg() 가 learning_logs 원천에서 정규화해 따로 계산한다.
+    //     과거 이 자리에 있던 AVG(avg_score) 별칭은 아무도 안 쓰는 죽은 값이면서, 집어다 쓰면
+    //     바로 결함이 되는 지뢰였다 → 아예 제거.
     const periodStat = db.prepare(`
-      SELECT COALESCE(SUM(duration_sec),0) as dur, AVG(avg_score) as avg_score
+      SELECT COALESCE(SUM(duration_sec),0) as dur
       FROM lrs_user_daily
       WHERE user_id = ?
         ${pFrom ? 'AND stat_date >= ?' : ''}
@@ -3324,7 +3403,7 @@ router.get('/stats/behavior', requireAuth, (req, res) => {
 // ═══════════════════════════════════════════════════════════════════════════════
 const REL_SMALL_SAMPLE_N = 20;              // nodeCount < 20 → smallSample=true(투명 고지, 마스킹 아님 — 작업지시/기획 §3-5)
 const REL_EMOTION_MASK_N = 5;               // 정서 집계 n<5 → 마스킹(A6 규칙 계승)
-const REL_NEUTRAL_EMOTIONS = new Set(['neutral', 'ok', 'soso', 'so-so', 'normal', '보통']); // A6 _emotionGroupKey 중립 어휘 동기화
+// (중립 어휘 사전은 lib/lrs/emotion-scale.js 로 이관 — 사이트별 사본이 드리프트의 원인이었다.)
 const REL_PURPOSE_NOTE = '본 화면은 학급 관계·정서 지원 목적의 담임 교사 전용 자료입니다. 상담·평가·생활지도 판정 근거로 사용하지 마세요.';
 
 // caveats — 상관≠인과·신호≠판정·소표본·목적제한·화면공유금지(항상 non-empty). 기획서 §5-3 문구.
@@ -3341,19 +3420,12 @@ function _relationshipCaveats({ smallSample, nodeCount, edgeCount, demoInstrumen
   return c;
 }
 
-// 감정 라벨링(A6 _emotionGroupKey 동일 규칙) — emotion_score(1~3) 우선, 없으면 emotion 텍스트.
+// 감정 라벨링 — A6 와 '진짜로' 동일 규칙(정본사전 §2-B: 텍스트 어휘 우선).
+//   ★ 과거 주석은 "A6 동일 규칙"이라 했지만 실제로는 emotion_score(1~3 가정) 우선이라 A6 와 달랐다.
+//     0~1 로 저장된 감정 행이 전부 negative 로 뒤집혀 정서 분위기 패널이 부정 편향됐다.
+//     이제 lib/lrs/emotion-scale.js(SSOT) 에 위임해 주석과 구현이 어긋날 수 없게 한다.
 function _relEmotionGroup(emotion, escore) {
-  if (escore != null && Number.isFinite(Number(escore))) {
-    const s = Number(escore);
-    if (s >= 2.5) return 'positive';
-    if (s >= 1.5) return 'neutral';
-    return 'negative';
-  }
-  const t = String(emotion || '').trim().toLowerCase();
-  if (!t) return null;
-  if (analytics.NEGATIVE_EMOTIONS.has(t)) return 'negative';
-  if (REL_NEUTRAL_EMOTIONS.has(t)) return 'neutral';
-  return 'positive';
+  return emotionGroupKey(emotion, escore);
 }
 
 // 테이블에 is_seed 컬럼이 있는지(seed-demo-social 마이그레이션 후에만 존재). realOnly 필터 안전 가드.

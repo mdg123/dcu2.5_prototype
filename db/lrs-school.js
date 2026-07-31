@@ -16,6 +16,8 @@
 const db = require('./index');
 const mastery = require('./lrs-mastery');
 const analytics = require('./lrs-analytics');
+// 감정 분류 SSOT — 정본사전 §2-B(텍스트 어휘 우선, emotion_score 임계 비교 금지).
+const { isNegativeEmotion } = require('../lib/lrs/emotion-scale');
 const { classifyStatus, reachRate, STATUS, resolveCode, subjectLabel } = mastery;
 
 const MIN_CROSS_N = 10; // 교과×학급 교차드릴 개별 노출 금지 임계(기획서 §3-2) — 미만은 카운트만.
@@ -145,17 +147,17 @@ function _emotionSummary(studentIds) {
     `).all(...studentIds);
   } catch (_) { rows = []; }
   if (!rows.length) return { positivePct: null, sampleN: 0 };
+  // ★ 텍스트 우선 분류(정본사전 §2-B). 과거의 `emotion_score <= 1.5 → 부정` 단일 임계는
+  //   0~1 스케일로 저장된 행(seed-balance, 0.1~0.95)을 전부 '부정'으로 뒤집어
+  //   학교 대시보드 '긍정 감정 비율'을 0% 로 만들었다. 감정 없는 행은 분모에서 제외.
   let pos = 0, n = 0;
   for (const r of rows) {
+    const neg = isNegativeEmotion(r.emotion, r.emotion_score);
+    if (neg == null) continue;
     n++;
-    let isNeg;
-    if (r.emotion_score != null && Number.isFinite(Number(r.emotion_score))) {
-      isNeg = Number(r.emotion_score) <= 1.5;
-    } else {
-      isNeg = analytics.NEGATIVE_EMOTIONS.has(String(r.emotion || '').toLowerCase());
-    }
-    if (!isNeg) pos++;
+    if (!neg) pos++;
   }
+  if (!n) return { positivePct: null, sampleN: 0 };
   return { positivePct: pctOf(pos, n), sampleN: n };
 }
 
@@ -516,13 +518,13 @@ function _emotionWeeklyTrend(ids) {
         AND attendance_date >= DATE('now','localtime','-56 days')
     `).all(...ids);
   } catch (_) { rows = []; }
+  // ★ 텍스트 우선 분류(정본사전 §2-B) — _emotionSummary 와 동일 사유. 감정 없는 행은 분모 제외.
   const byWeek = new Map();
   for (const r of rows) {
+    const isNeg = isNegativeEmotion(r.emotion, r.emotion_score);
+    if (isNeg == null) continue;
     if (!byWeek.has(r.week)) byWeek.set(r.week, { week: r.week, neg: 0, total: 0 });
     const w = byWeek.get(r.week); w.total++;
-    let isNeg;
-    if (r.emotion_score != null && Number.isFinite(Number(r.emotion_score))) isNeg = Number(r.emotion_score) <= 1.5;
-    else isNeg = analytics.NEGATIVE_EMOTIONS.has(String(r.emotion || '').toLowerCase());
     if (isNeg) w.neg++;
   }
   const weeks = [...byWeek.values()].sort((a, b) => a.week < b.week ? -1 : 1)

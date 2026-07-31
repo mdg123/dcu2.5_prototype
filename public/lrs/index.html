@@ -5130,15 +5130,26 @@ async function renderEmotionMirror(host){
   const groups = Array.isArray(d.groups) ? d.groups : [];
   const totalDays = Number(d.totalDays) || 0;
   // 빈 상태(§⑤): 전체 기록<5일 또는 모든 그룹 소표본(n<5 → 비교할 그룹 없음).
-  // n>=5 그룹이 하나라도 있으면 렌더(점수 없이 활동량만 있는 경우도 비교 대상).
   const hasComparableGroup = groups.some(g => g && Number(g.n) >= 5);
-  if (totalDays < 5 || !hasComparableGroup || !groups.length){
+  // ★ 이 카드의 y축은 '점수' 하나뿐이다. 점수가 있는 그룹이 0개면 막대가 하나도 안 그려져
+  //   빈 캔버스에 회색 문구만 뜬다 → 차트를 그리지 말고 빈 상태로 안내한다.
+  //   (BE 가 점수 표본 부족 그룹을 정직하게 마스킹하면서 이 경우가 실제로 발생한다.)
+  const hasAnyScore = groups.some(g => g && g.avgScore != null);
+  if (totalDays < 5 || !hasComparableGroup || !hasAnyScore || !groups.length){
+    // 감정 기록은 충분한데 점수 표본만 없는 경우와, 감정 기록 자체가 부족한 경우를 구분해 안내.
+    const scoreOnlyGap = totalDays >= 5 && hasComparableGroup && !hasAnyScore;
+    const emptyMsg = scoreOnlyGap
+      ? '채점된 학습 기록이 더 쌓이면 기분에 따른 성취 변화를 보여드릴게요'
+      : '감정 기록이 더 쌓이면 감정체크-학습성취 연관 분석을 보여드릴게요';
+    const emptyCta = scoreOnlyGap
+      ? {href:'/self-learn', label:'오늘의 학습 하러 가기'}
+      : {href:'/attendance', label:'감정 출석 하러 가기'};
     host.innerHTML = `<section class="dc-chart-wrapper" style="padding:24px 28px;border-radius:16px;">
       <header style="margin-bottom:12px;"><div>
         <h2 style="font-size:20px;font-weight:700;margin:0;word-break:keep-all;">📊 감정체크-학습성취 수준 연관 분석</h2>
         <div class="subtitle" style="font-size:14px;">기분에 따라 내 성취(학습 점수)가 어떻게 달랐는지 살펴봐요</div>
       </div></header>
-      ${tplEmpty('감정 기록이 더 쌓이면 감정체크-학습성취 연관 분석을 보여드릴게요', {href:'/attendance', label:'감정 출석 하러 가기'})}
+      ${tplEmpty(emptyMsg, emptyCta)}
     </section>`;
     return;
   }
@@ -5166,10 +5177,13 @@ async function renderEmotionMirror(host){
     </div>
   </section>`;
 
-  // x라벨 = 이모지+텍스트. n<5(avgScore=null) 그룹은 데이터 null(막대 미표시).
+  // x라벨 = 이모지+텍스트. 마스킹된(avgScore=null) 그룹은 데이터 null(막대 미표시).
   const labels   = groups.map(g => `${g.emoji || ''} ${g.label || ''}`.trim());
   const scoreData = groups.map(g => (g && g.avgScore != null) ? g.avgScore : null);
   const nList     = groups.map(g => (g && g.n != null) ? Number(g.n) : 0);
+  // 마스킹 사유는 BE(scoreNote)가 준다 — 감정 기록 부족 / 점수 기록 부족을 구분해 표기.
+  //   (BE 가 scoreNote 를 안 주는 구버전 응답 대비 폴백 문구 유지.)
+  const noteList  = groups.map(g => (g && g.scoreNote) ? String(g.scoreNote) : '기록 부족');
   const shortLabelP = window.matchMedia && window.matchMedia('(max-width:768px)').matches ? 13 : 14;
 
   // 데이터라벨(막대 위 수치, 값 있을 때만) + 소표본 "기록 부족"(차트 영역 중앙 높이) — 인라인 플러그인(신규 라이브러리 없음)
@@ -5193,15 +5207,17 @@ async function renderEmotionMirror(host){
           ctx.fillText(String(Math.round(v)) + '점', bar.x, bar.y - 4);
         });
       }
-      // 소표본 그룹(n<5) → 차트 영역 중앙 높이에 옅은 회색 "기록 부족"(x축 감정 라벨과 분리)
+      // 마스킹된 그룹 → 차트 영역 중앙 높이에 옅은 회색 사유 문구(x축 감정 라벨과 분리)
+      //   ★ 기준은 n<5 가 아니라 '막대가 없는가(scoreData==null)'. 감정 기록은 많아도 점수 표본이
+      //     부족해 마스킹된 그룹(BE A6_MIN_SCORE_N)이 아무 설명 없는 빈 칸으로 남는 것을 방지.
       ctx.fillStyle = '#9ca3af';
       ctx.font = '600 ' + shortLabelP + 'px Pretendard, system-ui, sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       const midY = (area.top + area.bottom) / 2;
       labels.forEach((_, i) => {
-        if (nList[i] < 5){
-          ctx.fillText('기록 부족', xScale.getPixelForValue(i), midY);
+        if (scoreData[i] == null){
+          ctx.fillText(noteList[i], xScale.getPixelForValue(i), midY);
         }
       });
       ctx.restore();
@@ -5227,7 +5243,7 @@ async function renderEmotionMirror(host){
           callbacks:{
             label(c){
               const g = groups[c.dataIndex] || {};
-              if (g.avgScore == null) return `${g.label||''} · ${g.n||0}일 · 기록 부족`;
+              if (g.avgScore == null) return `${g.label||''} · ${g.n||0}일 · ${g.scoreNote || '기록 부족'}`;
               const acts = g.avgActs != null ? `활동 ${g.avgActs}건 · ` : '';
               return `${g.label||''} · 평균 ${g.avgScore}점 · ${acts}${g.n||0}일`;
             }

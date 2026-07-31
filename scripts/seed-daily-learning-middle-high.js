@@ -30,8 +30,12 @@ db.pragma('journal_mode = WAL');
 // ─────────────────────────────────────────────────────────
 // 1. 설정
 // ─────────────────────────────────────────────────────────
-const START_DATE = '2026-04-01';
-const END_DATE = '2026-05-31';
+// ※ 이 스크립트는 **의도적으로 과거 특정 학기 구간**(4~5월)을 채우는 일회성 백필이다.
+//   파일명·rebuild-daily-learning-alive-only.js 가 이 구간을 전제하므로 기본값은 유지한다.
+//   다른 구간이 필요하면 --from YYYY-MM-DD --to YYYY-MM-DD 로 덮어쓴다(상대 날짜 생성용).
+const _arg = (k, d) => { const i = process.argv.indexOf(k); return i >= 0 ? process.argv[i + 1] : d; };
+const START_DATE = _arg('--from', '2026-04-01');
+const END_DATE = _arg('--to', '2026-05-31');
 
 // (라벨, target_grade 정수, school_level 후보 배열, content grade 정수)
 const TARGETS = [

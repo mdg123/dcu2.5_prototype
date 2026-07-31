@@ -58,10 +58,25 @@ if (!MODE) {
 const TEACHER1 = 2;                          // 담임 교사 계정(고정)
 const DEMO_TAG = 'demo_daily_v1';            // 멱등 태그(context_registration)
 const SEED = 20260714;
-// 보강 창: 현재 도 라인 커버리지(...~2026-07-10)와 동일 구간으로 맞춰 두 라인이 "나란히" 끝나게 한다.
-//   (기본 조회 창은 today-29~today = 2026-06-15~07-14 이지만, 도 라인이 07-10 까지라 그에 맞춤.)
-const WIN_FROM = '2026-06-15';
-const WIN_TO   = '2026-07-10';
+// 보강 창: 도(시드) 라인 커버리지 끝에 자동으로 맞춘다 — 두 라인이 "나란히" 끝나게.
+//   ★ 과거에는 '2026-06-15'~'2026-07-10' 로 **고정**돼 있었다. 그 탓에 달력이 지나면
+//     이 데모 보강분이 기본 조회 창(today-29~today) 밖으로 통째로 빠져나가
+//     "우리 반" 라인이 다시 비어버렸다(2026-07-30 사고의 한 갈래).
+//   → 이제 DB 의 실제 시드 라인 끝(MAX)에서 역산한다. 시드를 롤링해도 자동 추종.
+//     명시 지정이 필요하면 --from / --to 로 덮어쓴다.
+const argOfLocal = (k, d) => { const i = argv.indexOf(k); return i >= 0 ? argv[i + 1] : d; };
+const _seedLineEnd = (() => {
+  try {
+    const r = db.prepare("SELECT MAX(DATE(created_at)) m FROM learning_logs WHERE is_seed = 1").get();
+    return (r && r.m) || null;
+  } catch (_) { return null; }
+})();
+const _today = new Date().toISOString().slice(0, 10);
+const WIN_TO   = argOfLocal('--to', _seedLineEnd || _today);
+const WIN_FROM = argOfLocal('--from', (() => {
+  const d = new Date(WIN_TO + 'T00:00:00'); d.setDate(d.getDate() - 25);
+  return d.toISOString().slice(0, 10);
+})());
 // 오늘의 학습(self_learn) 교과 — 두 반 모두 수학 편중(class2=수학교실, class1 최빈=math-e). 캐노니컬 -e 코드.
 const SUBJECT_WEIGHTS = [
   ['math-e', 55], ['korean-e', 15], ['science-e', 12], ['english-e', 10], ['social-e', 8],

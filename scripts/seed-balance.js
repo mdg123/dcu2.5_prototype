@@ -66,7 +66,11 @@ function fmtDateTime(d) {
 //   클래스 2의 학생 6명에 대해 오늘 기준 최근 4주(28일)를 일별로 순회하면서
 //   주말 제외(토/일) → 평일(월~금)에만 출석. 7요일 균등 분포가 핵심이므로
 //   주말도 일부 포함시켜 토·일 데이터도 0보다 크게 보장.
-const TODAY = new Date('2026-05-07T00:00:00');
+// ★ 과거에는 new Date('2026-05-07') 로 **고정**돼 있었다. 스크립트를 언제 돌리든
+//   2026-05-07 기준으로만 데이터가 생겨, 시간이 지나면 최근 창(7일·30일)에서 전부 빠졌다.
+//   → 실행 시점(오늘) 기준 상대 날짜로 생성한다. 재현이 필요하면 --today YYYY-MM-DD.
+const _todayArg = (() => { const i = process.argv.indexOf('--today'); return i >= 0 ? process.argv[i + 1] : null; })();
+const TODAY = _todayArg ? new Date(_todayArg + 'T00:00:00') : new Date(new Date().toISOString().slice(0, 10) + 'T00:00:00');
 
 const CLASS_ID = 2;
 const studentRows = db
@@ -173,7 +177,8 @@ console.log('[attendance] 신규 시드 요일별 분포 (월~일):', weekdayDis
 //   각 일자마다 학생별로 1~3건 활동, activity_type/verb/source_service 다양하게.
 //   시간대도 09~17시 사이로 분산.
 
-const LL_START = new Date('2026-04-22T00:00:00');
+// TODAY 기준 역산(고정 '2026-04-22' 이었음 — 위 TODAY 주석 참조). 창 길이 16일 유지.
+const LL_START = (() => { const d = new Date(TODAY); d.setDate(d.getDate() - 15); return d; })();
 const LL_END = new Date(TODAY);
 const ALL_STUDENTS = db
   .prepare(`SELECT id FROM users WHERE role = 'student' ORDER BY id`)

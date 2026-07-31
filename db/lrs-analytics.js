@@ -17,6 +17,8 @@ const { ols } = require('../lib/analytics/regression');
 const {
   classifyStatus, reachRate, STATUS, resolveCode, recommendForCode,
 } = require('./lrs-mastery');
+// 점수 스케일·모집단 정규화 SSOT (인라인 재정의 금지 — lib/lrs/score-scale.js 주석 참조).
+const { normScoreExpr, scoredWhere } = require('../lib/lrs/score-scale');
 
 // ── 신뢰도 라벨 공통(§B-5) ───────────────────────────────────────────────────
 const CONFIDENCE = { HIGH: 'high', MEDIUM: 'medium', LOW: 'low' };
@@ -27,9 +29,11 @@ const MIN_WEEKS = 3;       // 관측주차 < 3 → 추세 미산출
 const MIN_WEEK_ATTEMPTS = 3; // 한 주 시도 < 3 → 그 주 결측
 const DEFAULT_WEEKS = 8;   // 기본 관측 창(최근 N주)
 
-// 감정 부정 어휘(§B-1 s_emotion). attendance.emotion 텍스트 기준.
-//   (실 DB 의 emotion_score 는 대부분 NULL → 어휘 분류가 1차, score 는 있을 때만 폴백)
-const NEGATIVE_EMOTIONS = new Set(['angry', 'anxious', 'sad', 'frustrated', 'tired', 'bad']);
+// 감정 분류 SSOT — 정본사전 §2-B("emotion_score 사용 금지, 텍스트 어휘가 정본").
+//   어휘 사전·분류 규칙은 lib/lrs/emotion-scale.js 한 곳에만 둔다. 여기서 재정의 금지.
+const {
+  NEGATIVE_EMOTIONS, NEUTRAL_EMOTIONS, emotionGroupKey, emotionNegWeight,
+} = require('../lib/lrs/emotion-scale');
 
 // 위험 가중치(§B-1, 합=1). 감정 신호 없으면 w_emotion=0 후 나머지 비례 재정규화.
 const RISK_WEIGHTS = { mastery: 0.40, decline: 0.30, engage: 0.20, emotion: 0.10 };
@@ -511,16 +515,15 @@ function _emotionNeg(userIds, recent = 10) {
       `).all(uid, recent);
     } catch (_) { rows = []; }
     if (!rows.length) { byUser.set(uid, { neg: null, count: 0 }); continue; }
+    // ★ 텍스트 우선 분류(정본사전 §2-B). 과거엔 emotion_score 를 '1~3 스케일'로 가정해 우선 적용했는데,
+    //   seed-balance 가 0~1(0.1~0.95)로 기록해 둔 감정 행이 전부 (3-sc)/2 ≈ 1(=완전 부정)로 계산됐다.
+    //   → s_emotion 이 최대치 1.0 에 고정되어 위험점수·정서 사분면·부정 비율이 통째로 부풀었다.
+    //   감정 정보가 없는 행(weight null)은 분모에서도 제외한다(0 채움 금지).
     let negSum = 0, n = 0;
     for (const r of rows) {
-      n++;
-      if (r.emotion_score != null && Number.isFinite(Number(r.emotion_score))) {
-        // score 1~3 가정: (3 - score)/3 → 부정도 0~1 (낮을수록 부정)
-        const sc = Math.max(1, Math.min(3, Number(r.emotion_score)));
-        negSum += (3 - sc) / 2; // 1→1, 2→0.5, 3→0
-      } else if (r.emotion) {
-        negSum += NEGATIVE_EMOTIONS.has(String(r.emotion).toLowerCase()) ? 1 : 0;
-      }
+      const w = emotionNegWeight(r.emotion, r.emotion_score); // negative 1 / neutral 0.5 / positive 0
+      if (w == null) continue;
+      negSum += w; n++;
     }
     byUser.set(uid, { neg: n > 0 ? negSum / n : null, count: n });
   }
@@ -899,23 +902,25 @@ const EMOTION_GROUP_META = {
   neutral:  { key: 'neutral',  label: '중립',      emoji: '😐' },
   negative: { key: 'negative', label: '부정 감정', emoji: '😢' },
 };
-// 중립 어휘(스펙 §카드1-③ "neutral/ok/soso/보통"류). 그 외 비부정은 긍정으로 분류.
-const NEUTRAL_EMOTIONS = new Set(['neutral', 'ok', 'soso', 'so-so', 'normal', '보통']);
-const A6_MIN_GROUP_N = 5; // 그룹 n<5 → 수치 마스킹(null)
+// 중립 어휘(스펙 §카드1-③ "neutral/ok/soso/보통"류)는 lib/lrs/emotion-scale.js 에서 import.
+const A6_MIN_GROUP_N = 5; // 그룹 '감정 기록 일수' n<5 → 수치 마스킹(null)
+// 그룹 '점수가 있는 날' 수 임계 — 이 미만이면 avgScore 마스킹(하루치가 대표값 행세 방지).
+//   lrs-mastery.MIN_ATTEMPTS(=3, "시도<3 은 평가부족") 관례와 동일값으로 정합.
+const A6_MIN_SCORE_N = 3;
 
-// 감정 라벨링: emotion_score(1~3) 우선, 없으면 emotion 텍스트.
+// ── 감정 라벨링 ───────────────────────────────────────────────────────────────
+// ★ 텍스트 우선(2026-07 실측 결함 수정).
+//   과거에는 emotion_score 를 '1~3 스케일'로 가정해 우선 적용했으나,
+//   attendance.emotion_score 는 실제로 0~1(196행)·1~3(208행)·>3(12행)이 혼재 저장돼 있다.
+//   그 결과 'great'(0.6~0.95)·'calm'(0.4~0.91)·'good'·'excited'·'happy' 같은 명백한 긍정 감정이
+//   1.5 미만이라는 이유로 전부 '부정 감정'으로 분류됐다 — 실측 138/524행(26.3%) 오분류,
+//   게다가 오분류 방향이 전부 '긍정 → 부정' 한쪽이라 부정 그룹이 통째로 오염됐다.
+//   텍스트 어휘는 스케일 문제가 없고, 실측상 '점수만 있고 텍스트가 없는 행은 0건'이므로
+//   텍스트 우선 전환은 무손실이다. score 는 텍스트가 없을 때만 쓰는 방어적 폴백으로 남긴다.
+//   ★ 구현 실체는 lib/lrs/emotion-scale.js(SSOT) — 정본사전 §2-B. 여기서는 위임만 한다.
+//     (같은 규칙을 사이트마다 다시 쓰다가 4개 사이트가 점수 우선으로 남아 "부정 76%" 를 만들었다.)
 function _emotionGroupKey(emotion, emotionScore) {
-  if (emotionScore != null && Number.isFinite(Number(emotionScore))) {
-    const sc = Number(emotionScore);
-    if (sc >= 2.5) return 'positive';
-    if (sc >= 1.5) return 'neutral';
-    return 'negative';
-  }
-  const t = String(emotion || '').trim().toLowerCase();
-  if (!t) return null; // 감정 정보 없음(레코드 자체가 감정없음이면 SQL 에서 제외됨)
-  if (NEGATIVE_EMOTIONS.has(t)) return 'negative';
-  if (NEUTRAL_EMOTIONS.has(t)) return 'neutral';
-  return 'positive';
+  return emotionGroupKey(emotion, emotionScore); // 감정 정보 없으면 null(집계 제외 — 0 채움 금지)
 }
 
 function getEmotionMirror(userId, { days = 60 } = {}) {
@@ -927,12 +932,26 @@ function getEmotionMirror(userId, { days = 60 } = {}) {
 
   let rows;
   try {
+    // ★ 점수 축은 lrs_user_daily.avg_score 를 쓰지 않는다(2026-07 실측 결함 수정).
+    //   그 컬럼은 (1) 0~1·0~100 스케일 혼재 저장 + (2) 모집단 오염(진도율 lesson_progress 포함)
+    //   두 결함을 동시에 갖는다. 실측: user 3 의 2026-07-01 행 avg_score=0.5 는 전부 lesson_progress
+    //   (진도율 0.5)라서 ×100 정규화만 해도 '채점 활동 0건인 날 = 성취 50점'이라는 거짓이 된다.
+    //   → /insights 가 이미 택한 해법과 동일하게(routes/lrs.js §점수 정규화 공통 정의)
+    //     learning_logs 원천에서 채점형(scoredWhere)만 골라 normScoreExpr 로 0~100 정규화해 평균낸다.
+    //   activity_count(활동량)는 스케일 문제가 없으므로 lrs_user_daily 를 계속 쓴다.
+    const NORM = normScoreExpr('ll');
+    const SCORED = scoredWhere('ll');
     rows = db.prepare(`
       SELECT a.attendance_date AS d,
              a.emotion         AS emotion,
              a.emotion_score   AS escore,
-             ud.avg_score      AS avg_score,
-             ud.activity_count AS acts
+             ud.activity_count AS acts,
+             (SELECT AVG(${NORM})
+                FROM learning_logs ll
+               WHERE ll.user_id = a.user_id
+                 AND DATE(ll.created_at) = a.attendance_date
+                 AND ll.result_score IS NOT NULL
+                 AND ${SCORED})            AS avg_score
       FROM attendance a
       LEFT JOIN lrs_user_daily ud
              ON ud.user_id = a.user_id AND ud.stat_date = a.attendance_date
@@ -971,12 +990,21 @@ function getEmotionMirror(userId, { days = 60 } = {}) {
 
   const groups = ['positive', 'neutral', 'negative'].map(k => {
     const a = acc[k];
-    const masked = a.n < A6_MIN_GROUP_N; // 소표본 → 수치 마스킹
+    const masked = a.n < A6_MIN_GROUP_N;        // 감정 기록 일수 부족 → 수치 마스킹
+    // ★ 점수는 '감정 기록 일수(n)'가 아니라 '점수가 있는 날 수(scoreN)'로도 마스킹해야 한다.
+    //   (2026-07 감사 P2) 예: n=13 이어도 그중 점수가 있는 날이 1일뿐이면 그룹 평균은 사실상
+    //   하루치인데 대표값처럼 보인다. 실측 user 3: 부정 그룹 100점이 단 1일(로그 1건)에서 나왔다.
+    //   0 으로 채우지 않고 null 로 마스킹 + scoreN 을 함께 내보내 FE 가 '표본 부족'을 정직하게 표기.
+    const scoreMasked = masked || a.scoreN < A6_MIN_SCORE_N;
     return {
       ...EMOTION_GROUP_META[k],
       n: a.n,
-      avgScore: (masked || a.scoreN === 0) ? null : round1(a.scoreSum / a.scoreN),
-      avgActs:  (masked || a.actN === 0)   ? null : round1(a.actSum / a.actN),
+      avgScore: scoreMasked ? null : round1(a.scoreSum / a.scoreN),
+      avgActs:  (masked || a.actN === 0) ? null : round1(a.actSum / a.actN),
+      // 마스킹 사유(FE 표기용). 값이 있으면 null.
+      scoreN: a.scoreN,
+      scoreNote: !scoreMasked ? null
+        : (a.n < A6_MIN_GROUP_N ? '감정 기록이 적어요' : '점수 기록이 적어요'),
     };
   });
 
