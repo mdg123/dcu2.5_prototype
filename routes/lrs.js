@@ -14,7 +14,17 @@ const { LRS_CONFIG } = require('../lib/lrs-config');
 // 점수 스케일·모집단 정규화 SSOT (lib/lrs/score-scale.js). 인라인 재정의 금지.
 const {
   SCORED_TYPES, SCORED_TYPES_SQL_LIST, normScoreExpr, scoredWhere, normScore,
+  LEARNING_ACTIVITY_TYPES: SSOT_LEARN_TYPES,
 } = require('../lib/lrs/score-scale');
+// [W2-b] C1(학습 활동 수)과 SCORED(점수 모집단)는 **서로 다른 질문**이라 목록이 다르다.
+//   C1  = "학습으로 셀 것인가"      → LEARNING_ACTIVITY_TYPES (정본 7종)
+//   SCORED = "정답/점수 판정이 있는가" → SCORED_TYPES
+//   한 목록으로 겸용하면 반드시 한쪽이 틀린다. SSOT 미배포 시에만 로컬 폴백.
+const C1_TYPES = Array.isArray(SSOT_LEARN_TYPES) && SSOT_LEARN_TYPES.length ? SSOT_LEARN_TYPES : [
+  'exam_complete', 'homework_submit', 'content_solve',
+  'self_learn', 'daily_complete', 'wrong_note_retry', 'node_complete',
+];
+const C1_TYPES_SQL_LIST = C1_TYPES.map(t => `'${t}'`).join(',');
 // 감정 분류 SSOT — 정본사전 §2-B(텍스트 어휘 우선, emotion_score 임계 비교 금지).
 const { emotionGroupKey } = require('../lib/lrs/emotion-scale');
 
@@ -3154,16 +3164,22 @@ function buildBehaviorSignal(classId, { signal, sub, subject, period, realOnly }
 // [Phase 4a] 영상 학습 행동(video) — 완주율(completion)·재시청(replay)·건너뛰기(seek)
 //   기획: 보고서/LRS_Phase4a_영상행동_방법론_API_v1.md(정본 산식·시드·API) · _UI_기획_v1.md(FE 계약)
 //   저장: user_content_progress(watch_ratio·view_count·seek_count·is_seed) — learning_logs 무변경.
-//   집계 단위 = (학생×영상) 관측치. 밴드 값 = 밴드에 ≥1 관측치 가진 distinct 학생의 성취(도달률) 1회씩.
+//   집계 단위 = (학생×영상) 관측치. 밴드 값 = 밴드에 ≥1 관측치 가진 distinct 학생의 성취 1회씩.
 //   정직: instrumentation:'demo'·demoInstrumented:true 상시. 억지 상관 없음(주변분포 독립 시드).
+//
+//   🔴 [W2-b 6-12] 이 축의 값은 **정답률**이지 도달률(A3)이 아니다.
+//     _behaviorAchMap 은 기간창 안의 학생별 success/attempts 를 모아 mastery.reachRate 로 넘기는데,
+//     그 경로는 classifyStatus(시도≥3 게이트)를 **거치지 않고** 성취기준별 reached/evaluated 도 아니다.
+//     즉 "학생이 그 기간에 맞힌 비율"이다. 이걸 '평균 도달률'로 부르면 같은 교사 화면의
+//     성취 탭(A3 도달률)과 뜻이 다른 같은 단어가 둘이 되어 §6-12 자동 REWORK 대상이 된다.
 // ═══════════════════════════════════════════════════════════════════════════════
 const VIDEO_SUB_META = {
-  completion: { label: '완주율', metricLabel: '평균 도달률' },
-  replay:     { label: '재시청', metricLabel: '평균 도달률' },
-  seek:       { label: '건너뛰기', metricLabel: '평균 도달률' },
+  completion: { label: '완주율', metricLabel: '평균 정답률' },
+  replay:     { label: '재시청', metricLabel: '평균 정답률' },
+  seek:       { label: '건너뛰기', metricLabel: '평균 정답률' },
 };
 const VIDEO_SUB_DATANOTE = {
-  completion: '완주율은 영상 시청 비율(watch_ratio) 기준입니다. 성취는 해당 교과 도달률로, 영상별 성취기준 정합은 데이터가 쌓이면 정밀화됩니다.',
+  completion: '완주율은 영상 시청 비율(watch_ratio) 기준입니다. 성취는 해당 교과의 정답률(맞힌 비율)로 견주며, 성취기준 도달률과는 다른 값입니다. 영상별 성취기준 정합은 데이터가 쌓이면 정밀화됩니다.',
   replay: '재시청은 영상 재생 횟수(view_count) 기준입니다. 콘텐츠 접근(조회) 반복은 실제 시청과 달라 보조 참고로만 봅니다.',
   seek: '건너뛰기는 영상 구간 이동(seek) 횟수 기준이며, 반 중앙값으로 적음/많음을 나눕니다. 실제 플레이어 구간 계측은 향후 제공됩니다.',
 };
@@ -3208,7 +3224,7 @@ function _videoObservations(memberIds, realOnly) {
   }));
 }
 
-// sub 1개 산출 — 밴드 → distinct 학생 도달률 → _behaviorGroup 재사용(마스킹·저신뢰 SSOT).
+// sub 1개 산출 — 밴드 → distinct 학생 정답률 → _behaviorGroup 재사용(마스킹·저신뢰 SSOT).
 function _computeVideoSub(sub, observations, reachByUid, refValue) {
   const meta = VIDEO_SUB_META[sub];
   let bands, median = null;
@@ -3265,9 +3281,9 @@ function _videoSubInsights(comparison, available) {
     return [{ level: 'info', icon: '🔵', text: '영상 학습 기록이 아직 적어 그룹 간 차이를 안정적으로 보여드리기 어려워요. 기록이 쌓이면 자동으로 반영돼요.' }];
   }
   if (comparison.gapPP <= 3) {
-    return [{ level: 'info', icon: '🔵', text: '그룹 간 평균 도달률에 뚜렷한 차이가 관측되지 않습니다(연관 약함). 영상 행동만으로 성취를 예측하기는 어려워요.' }];
+    return [{ level: 'info', icon: '🔵', text: '그룹 간 평균 정답률에 뚜렷한 차이가 관측되지 않습니다(연관 약함). 영상 행동만으로 성취를 예측하기는 어려워요.' }];
   }
-  return [{ level: 'info', icon: '🔵', text: `'${comparison.topLabel}' 그룹에서 평균 도달률이 다소 높게 관측됩니다(연관 경향). 다만 원인이라 단정할 수 없어요.` }];
+  return [{ level: 'info', icon: '🔵', text: `'${comparison.topLabel}' 그룹에서 평균 정답률이 다소 높게 관측됩니다(연관 경향). 다만 원인이라 단정할 수 없어요.` }];
 }
 
 // video 우산 빌더 — signal=video(+sub 또는 metrics[] 우산) · signal=rewatch(→sub=replay 하위호환).
@@ -3279,7 +3295,9 @@ function buildVideoSignal(classId, { signal, sub, subject, period, realOnly }) {
   let className = `클래스 ${classId}`;
   try { const c = db.prepare('SELECT name FROM classes WHERE id = ?').get(classId); if (c && c.name) className = c.name; } catch (_) {}
 
-  // 성취(도달률) 맵 — 학생별 reachRate 1회(다시청 편중 방지).
+  // 성취(정답률) 맵 — 학생별 1회(다시청 편중 방지).
+  //   ⚠ mastery.reachRate 를 호출하지만 classifyStatus 를 거치지 않으므로 A3 도달률이 아니다(§6-12).
+  //     여기서 나오는 값의 정본 이름은 '정답률'이다.
   const achMap = _behaviorAchMap(memberIds, days, subjectList);
   const reachByUid = new Map();
   for (const [uid, a] of achMap) {
@@ -3317,7 +3335,7 @@ function buildVideoSignal(classId, { signal, sub, subject, period, realOnly }) {
     const firstAvail = metrics.find(m => m.available);
     return {
       ...base,
-      metricLabel: '평균 도달률',
+      metricLabel: '평균 정답률',   // [W2-b 6-12] A3 도달률 아님 — 위 VIDEO_SUB_META 주석 참조
       metrics,
       refValue,
       available: anyAvailable,
@@ -4210,8 +4228,13 @@ router.get('/warnings/:classId', requireAuth, (req, res) => {
     for (const w of weakRows) {
       if (!weakMap.has(w.user_id)) weakMap.set(w.user_id, { userId: w.user_id, displayName: w.display_name, items: [] });
       const rec = weakMap.get(w.user_id);
+      // [W2-b 부수] lrs_achievement_stats.avg_score 는 0~1 / 0~100 이 혼재 저장돼 있어 그대로 내보내면
+      //   t-drill 목록엔 "평균 0.75", 같은 값이 드로어엔 "75점"으로 떴다(같은 값 두 표기).
+      //   → 응답 경계에서 SSOT(normScore, lib/lrs/score-scale.js)로 0~100 정규화해 내보낸다.
+      //   ※ 저장값 자체의 정규화(집계 테이블 재생성)는 상류 W2-a 범위.
       if (rec.items.length < 5) rec.items.push({
-        achievement_code: w.achievement_code, avg_score: w.avg_score, last_level: w.last_level, attempt_count: w.attempt_count
+        achievement_code: w.achievement_code, avg_score: normScore(w.avg_score),
+        last_level: w.last_level, attempt_count: w.attempt_count
       });
     }
     const weakAchievements = Array.from(weakMap.values());
@@ -4267,36 +4290,40 @@ router.get('/stats/perform', requireAuth, (req, res) => {
     const r = dateRangeWhere(req, 'created_at', 'll');
     if (r.invalid) return sendInvalidPeriod(res, r.reason);
     const sf = resolveScopeFilter(req, 'll');
-    // '자기주도 학습' 버킷 = self_learn(시드/구 경로) ∪ daily_complete(오늘의 학습 실 경로).
-    //   completeDailyItem()(db/self-learn-extended.js)는 오늘의 학습 이수를 activity_type='daily_complete'
-    //   로 발행하지만, LRS 활동유형 요약/추이는 self_learn 만 읽어 실제 이수가 표에서 누락됐다.
-    //   두 타입은 서로 다른 row(각 이수 1건 → 1 row)라 함께 세도 이중 카운트 없음.
-    //   집계·라벨·추이는 daily_complete 를 self_learn 으로 정규화해 '자기주도 학습' 단일 행으로 합친다.
-    const SELF_LEARN_TYPES = ['self_learn', 'daily_complete'];
-    // 학습 수행에 포함할 콘텐츠·수업 성격 활동:
-    //   content_solve(콘텐츠 문항풀이, 점수 있음), content_view(콘텐츠 학습, 점수 없음),
-    //   lesson_progress(수업 진행, result_score 는 진도율 0~1 이라 '점수'가 아님 → 표에서 점수 없음 처리).
-    //   추이(trend)는 이 3종을 '콘텐츠 학습' 1계열로 묶어 계열 폭주를 막는다.
-    const CONTENT_TYPES = ['content_solve', 'content_view', 'lesson_progress'];
-    // 제외: attendance_checkin(감정출석)·post_create(게시글)·survey_respond(설문) — 학습 수행 아님.
-    const perfTypes = ['exam_complete', 'homework_submit', ...SELF_LEARN_TYPES, ...CONTENT_TYPES];
+    // ── [W2-b 6-9 산식] '학습 활동' 모집단 = 정본 7종(C1). 조회·진도는 학습 활동이 아니다. ──
+    //   과거: perfTypes 에 content_view·lesson_progress 가 포함돼 학생 "학습 활동 40건" 중 23건이
+    //         단순 조회였다(정본사전 §1-C C1 실측). 클릭만 한 학생이 성실한 학생으로 보이는 구조.
+    //   정본: lib/lrs/score-scale.js 의 SCORED_TYPES(=정본 7종)를 그대로 모집단으로 쓴다(인라인 재정의 금지).
+    //         조회(content_view)는 C2 '콘텐츠 조회'로 **분리 집계**하고 절대 합산하지 않는다.
+    // '자기주도 학습' 버킷 = self_learn ∪ daily_complete(오늘의 학습) ∪ wrong_note_retry(오답노트)
+    //   ∪ node_complete(AI 맞춤학습 노드) — 모두 '스스로채움' 계열 능동 학습.
+    //   (버킷 소계 합 = 학습 활동 7종 총계 불변식을 유지하려면 7종이 4버킷에 빠짐없이 배치돼야 한다.)
+    const SELF_LEARN_TYPES = ['self_learn', 'daily_complete', 'wrong_note_retry', 'node_complete'];
+    // 콘텐츠 학습 버킷 = content_solve(문항풀이)만. content_view(조회)·lesson_progress(진도율)는
+    //   학습 활동이 아니므로 별도 지표(C2·진도)로 분리한다.
+    const CONTENT_TYPES = ['content_solve'];
+    // 제외: content_view(조회)·lesson_progress(진도)·attendance_checkin·post_create·survey_respond.
+    //   ★ 4버킷의 합집합이 C1 정본 7종과 정확히 같아야 한다(버킷 소계 합 = 학습 활동 수 불변식).
+    const perfTypes = ['exam_complete', 'homework_submit', ...SELF_LEARN_TYPES, ...CONTENT_TYPES]
+      .filter(t => C1_TYPES.includes(t));
     const typePH = perfTypes.map(()=>'?').join(',');
     const baseWhere = `WHERE ll.activity_type IN (${typePH}) ${r.where} ${sf.where}`;
     const baseParams = [...perfTypes, ...r.params, ...sf.params];
-    // self_learn 버킷 판정 SQL 조각 (재사용). daily_complete 도 자기주도 학습으로 합산.
-    const SELF_SQL = `ll.activity_type IN ('self_learn','daily_complete')`;
-    // 콘텐츠 학습 버킷 판정 SQL 조각 (추이 묶음 계열 + summary KPI 재사용).
-    const CONTENT_SQL = `ll.activity_type IN ('content_solve','content_view','lesson_progress')`;
-    // '점수' 개념이 있는 유형만 평균점수 집계 대상. content_view/lesson_progress 는 제외(진도율·조회는 점수 아님).
-    //   → byType 평균점수 컬럼에서 이 두 유형은 '-'(NULL) 로 표시된다.
-    const SCORED_SQL = `ll.activity_type IN ('exam_complete','homework_submit','self_learn','daily_complete','content_solve')`;
+    // self_learn 버킷 판정 SQL 조각 (재사용).
+    const SELF_SQL = `ll.activity_type IN ('self_learn','daily_complete','wrong_note_retry','node_complete')`;
+    // 콘텐츠 학습(문항풀이) 버킷 판정 SQL 조각.
+    const CONTENT_SQL = `ll.activity_type IN ('content_solve')`;
+    // '점수' 개념이 있는 유형 — SSOT(lib/lrs/score-scale.js) 7종. 과거 이 자리에 5종 로컬 정의가 있어
+    //   같은 '평균 점수'인데 화면마다 모집단이 달랐다(정본사전 §2-A-2). 로컬 정의 폐기.
+    const SCORED_SQL = LRS_SCORED_SQL;
     // ── 표시용 0~100 정규화 (표시 계층 band-aid) ──────────────────────────────
     //   DB 저장 스케일 혼재: exam/self/homework_graded 등은 result_score 0~1, content_solve 는 0~100.
     //   그대로 AVG 하면 평가 평균이 0.9(=94.5%)로 오해되게 뜬다(사용자 지적 결함).
     //   행 단위로 0~1 값이면 ×100 해서 모든 '평균 점수'를 0~100 로 통일한다.
     //   (저장 스케일 통일 마이그레이션은 별건 — 여기선 표시만 교정.)
     //   ※ lesson_progress 는 진도율이라 애초에 SCORED_SQL 밖 → 정규화 대상 아님(계속 NULL/'-').
-    const NORM_SCORE = `(CASE WHEN ll.result_score <= 1 THEN ll.result_score*100 ELSE ll.result_score END)`;
+    //   ★ 정의 실체는 lib/lrs/score-scale.js(SSOT) — 인라인 재정의 금지(정본사전 §2-A-1).
+    const NORM_SCORE = LRS_NORM_SCORE;
 
     // summary
     const sumRow = db.prepare(`
@@ -4315,18 +4342,108 @@ router.get('/stats/perform', requireAuth, (req, res) => {
       ${baseWhere}
     `).get(...baseParams);
 
+    // C2 콘텐츠 조회 수 — 학습 활동(C1)과 **별도 집계·합산 금지**(정본사전 §1-C C2).
+    const viewRow = db.prepare(`
+      SELECT SUM(CASE WHEN ll.activity_type='content_view' THEN 1 ELSE 0 END) view_cnt,
+             SUM(CASE WHEN ll.activity_type='lesson_progress' THEN 1 ELSE 0 END) lesson_cnt
+      FROM learning_logs ll
+      WHERE 1=1 ${r.where} ${sf.where}
+    `).get(...r.params, ...sf.params);
+
+    // ── [W2-b 6-5] B1 과제 제출률 — 분모는 '부과 대상 쌍'(과제 × 반 학생). 로그 아님. ──
+    //   과거: hw_ok/hw_cnt = 제출 로그의 성공비율(B6). 미제출자가 분모에 없어 항상 부풀려졌고,
+    //         routes/homework.js 가 제출 로그에 resultSuccess:1 을 하드코딩해 실데이터는 항상 100%.
+    //   정본(정본사전 §1-B B1): 제출한 (과제,학생) 쌍 / 부과된 (과제,학생) 쌍.
+    function homeworkAssignedStats() {
+      const empty = { assigned: 0, submitted: 0, rate: null, openPairs: 0 };
+      try {
+        let scopeSql = '', scopeParams = [];
+        if (sf.scope === 'mine') { scopeSql = ' AND cm.user_id = ?'; scopeParams = [req.user.id]; }
+        else if (sf.scope === 'class') {
+          const cids = db.prepare("SELECT id FROM classes WHERE owner_id = ?").all(req.user.id).map(x => x.id);
+          if (!cids.length) return empty;
+          scopeSql = ` AND h.class_id IN (${cids.map(() => '?').join(',')})`; scopeParams = cids;
+        }
+        let dateSql = '', dateParams = [];
+        if (r.fromDate) { dateSql += ' AND DATE(h.created_at) >= ?'; dateParams.push(r.fromDate); }
+        if (r.toDate)   { dateSql += ' AND DATE(h.created_at) <= ?'; dateParams.push(r.toDate); }
+        const row = db.prepare(`
+          SELECT COUNT(*) assigned,
+                 SUM(CASE WHEN s.id IS NOT NULL THEN 1 ELSE 0 END) submitted,
+                 SUM(CASE WHEN s.id IS NULL AND h.due_date IS NOT NULL
+                            AND DATE(h.due_date) >= DATE('now','localtime') THEN 1 ELSE 0 END) open_pairs
+          FROM homework h
+          JOIN class_members cm ON cm.class_id = h.class_id AND cm.status = 'active'
+          JOIN users u ON u.id = cm.user_id AND u.role = 'student'
+          LEFT JOIN homework_submissions s
+            ON s.homework_id = h.id AND s.student_id = cm.user_id AND COALESCE(s.is_draft, 0) = 0
+          WHERE h.status <> 'draft' ${scopeSql} ${dateSql}
+        `).get(...scopeParams, ...dateParams);
+        const assigned = row.assigned || 0, submitted = row.submitted || 0;
+        return {
+          assigned, submitted,
+          rate: assigned ? Math.round(submitted * 1000 / assigned) / 10 : null,
+          openPairs: row.open_pairs || 0
+        };
+      } catch (_) { return empty; }
+    }
+    const hwB1 = homeworkAssignedStats();
+
+    // ── [W2-b 6-6] B3 평가 응시율 / B4 평가 합격률 — "완료율" 폐기(응시·합격 중 무엇인지 알 수 없음) ──
+    //   B3 = exam_students.status='submitted' / 응시 대상 학생 수(exam_students 행 수)
+    //   B4 = result_success=1 / 응시(제출) 건수. routes/exam.js 가 score>=60 으로 세팅 → 부제 '60점 이상' 병기.
+    function examTakeStats() {
+      const empty = { assigned: 0, taken: 0, rate: null };
+      try {
+        if (!_tableExists('exam_students') || !_tableExists('exams')) return empty;
+        let scopeSql = '', scopeParams = [];
+        if (sf.scope === 'mine') { scopeSql = ' AND es.user_id = ?'; scopeParams = [req.user.id]; }
+        else if (sf.scope === 'class') {
+          const cids = db.prepare("SELECT id FROM classes WHERE owner_id = ?").all(req.user.id).map(x => x.id);
+          if (!cids.length) return empty;
+          scopeSql = ` AND e.class_id IN (${cids.map(() => '?').join(',')})`; scopeParams = cids;
+        }
+        let dateSql = '', dateParams = [];
+        if (r.fromDate) { dateSql += ' AND DATE(e.created_at) >= ?'; dateParams.push(r.fromDate); }
+        if (r.toDate)   { dateSql += ' AND DATE(e.created_at) <= ?'; dateParams.push(r.toDate); }
+        const row = db.prepare(`
+          SELECT COUNT(*) assigned,
+                 SUM(CASE WHEN es.status = 'submitted' THEN 1 ELSE 0 END) taken
+          FROM exam_students es JOIN exams e ON e.id = es.exam_id
+          JOIN users u ON u.id = es.user_id AND u.role = 'student'
+          WHERE 1=1 ${scopeSql} ${dateSql}
+        `).get(...scopeParams, ...dateParams);
+        const assigned = row.assigned || 0, taken = row.taken || 0;
+        return { assigned, taken, rate: assigned ? Math.round(taken * 1000 / assigned) / 10 : null };
+      } catch (_) { return empty; }
+    }
+    const examB3 = examTakeStats();
+
     const summary = {
       examCount: sumRow.exam_cnt || 0,
       examAvgScore: sumRow.exam_avg != null ? Math.round(sumRow.exam_avg*10)/10 : null,
-      examCompletionRate: sumRow.exam_cnt ? Math.round((sumRow.exam_ok||0)*1000/sumRow.exam_cnt)/10 : null,
+      // B4 평가 합격률(=60점 이상 비율). 구 키 examCompletionRate 는 "완료율"이라는 자기모순 라벨이라 폐기.
+      examPassRate: sumRow.exam_cnt ? Math.round((sumRow.exam_ok||0)*1000/sumRow.exam_cnt)/10 : null,
+      examPassCount: sumRow.exam_ok || 0,
+      // B3 평가 응시율(응시 대상 학생 기준). 대상 데이터가 없으면 null(0 채움 금지).
+      examTakeRate: examB3.rate,
+      examTakeCount: examB3.taken,
+      examAssignedCount: examB3.assigned,
       homeworkCount: sumRow.hw_cnt || 0,
-      homeworkSubmitRate: sumRow.hw_cnt ? Math.round((sumRow.hw_ok||0)*1000/sumRow.hw_cnt)/10 : null,
+      // B1 과제 제출률 — 분모=부과 쌍(assigned). 분자·분모를 함께 노출해 화면에서 검산 가능하게 한다.
+      homeworkSubmitRate: hwB1.rate,
+      homeworkAssignedPairs: hwB1.assigned,
+      homeworkSubmittedPairs: hwB1.submitted,
+      homeworkOpenPairs: hwB1.openPairs,      // 마감 전 미제출 쌍(아직 기간 중 — 미제출로 단정 금지)
       selfLearnCount: sumRow.self_cnt || 0,
       selfLearnAvgScore: sumRow.self_avg != null ? Math.round(sumRow.self_avg*10)/10 : null,
-      // 콘텐츠 학습(콘텐츠 문항풀이·콘텐츠 학습·수업 진행) 통합 건수. 평균점수는 점수 있는 content_solve 만.
+      // 콘텐츠 문항풀이(content_solve) 건수 — 조회(content_view)는 아래 contentViewCount 로 분리.
       contentCount: sumRow.content_cnt || 0,
       contentSolveAvgScore: sumRow.content_solve_avg != null ? Math.round(sumRow.content_solve_avg*10)/10 : null,
-      totalActs: sumRow.total_acts || 0
+      // C1 학습 활동 수(정본 7종). C2 콘텐츠 조회·진도는 아래 별도 키 — 합산 금지.
+      totalActs: sumRow.total_acts || 0,
+      contentViewCount: viewRow.view_cnt || 0,
+      lessonProgressCount: viewRow.lesson_cnt || 0
     };
 
     // byType — "활동 유형별 요약" 표는 **모든 activity_type 을 투명하게** 노출한다.
@@ -4447,25 +4564,31 @@ router.get('/stats/perform', requireAuth, (req, res) => {
 // ─────────────────────────────────────────────────────────────────────────────
 const PERFORM_DETAIL_ITEM_CAP = 200;
 // bucket → activity_type 화이트리스트 (전부 learning_logs 단일 원천).
+//   ★ [W2-b 6-9] all = 학습 활동 정본 7종(C1). 조회(content_view)·진도(lesson_progress)는
+//     학습 활동이 아니므로 all 에서 빼고 별도 버킷(view·lesson)으로 드릴한다.
+//     버킷 소계 합(exam+homework+self+content) = all 불변식을 유지하려면 7종이 4버킷에 빠짐없이 배치돼야 한다.
 const PERFORM_BUCKET_TYPES = {
   exam:     ['exam_complete'],
   homework: ['homework_submit'],
-  self:     ['self_learn', 'daily_complete'],
-  content:  ['content_view', 'lesson_progress', 'content_solve'],
+  self:     ['self_learn', 'daily_complete', 'wrong_note_retry', 'node_complete'],
+  content:  ['content_solve'],
   all:      ['exam_complete', 'homework_submit', 'self_learn', 'daily_complete',
-             'content_view', 'lesson_progress', 'content_solve'],
+             'wrong_note_retry', 'node_complete', 'content_solve'],
+  view:     ['content_view'],
+  lesson:   ['lesson_progress'],
 };
 const PERFORM_BUCKET_TITLE = {
   exam: '완료 평가', homework: '제출 과제', self: '자기주도 학습',
-  content: '콘텐츠 활동', all: '학습 활동',
+  content: '콘텐츠 문항풀이', all: '학습 활동',
+  view: '콘텐츠 조회', lesson: '수업 진행',
 };
 // content 세그먼트 → activity_type
 const PERFORM_SEGMENT_TYPE = { view: 'content_view', lesson: 'lesson_progress', solve: 'content_solve' };
 const PERFORM_SEGMENT_LABEL = { view: '콘텐츠 학습', lesson: '수업 진행', solve: '문항풀이' };
 // 점수(정답률) 개념이 있는 유형만 NORM_SCORE 정규화, 그 외(조회·진도율)는 null.
-const PERFORM_SCORED_TYPES = new Set([
-  'exam_complete', 'homework_submit', 'self_learn', 'daily_complete', 'content_solve',
-]);
+//   ★ SSOT(lib/lrs/score-scale.js) 7종 — 과거 여기 5종 로컬 사본이 있어 wrong_note_retry·node_complete
+//     점수가 드릴다운에서만 '-'로 빠졌다(정본사전 §2-A-2 '두 벌' 결함).
+const PERFORM_SCORED_TYPES = new Set(SCORED_TYPES);
 
 router.get('/perform/detail', requireAuth, (req, res) => {
   try {
@@ -4590,9 +4713,12 @@ router.get('/perform/detail', requireAuth, (req, res) => {
 
     // bucket=content 세그먼트 소계 (segment 미지정일 때만 소계 제공, 합=count)
     //   learnOnly 시 7종 밖 세그먼트(view)는 목록에서 제외 — 합=count 불변식 유지.
+    //   ★ [W2-b 6-9] content 버킷이 content_solve 단일 유형이 된 뒤로는 세그먼트 소계가 무의미하고,
+    //     버킷에 없는 유형(view·lesson)까지 세면 '소계 합 = count' 불변식이 깨진다 → 버킷 유형 교집합으로 제한.
     let segments;
-    if (bucket === 'content' && !segmentKey) {
+    if (bucket === 'content' && !segmentKey && types.length > 1) {
       segments = ['view', 'lesson', 'solve']
+        .filter(k => types.includes(PERFORM_SEGMENT_TYPE[k]))
         .filter(k => !LEARN_SET || LEARN_SET.has(PERFORM_SEGMENT_TYPE[k]))
         .map(k => {
           const t = PERFORM_SEGMENT_TYPE[k];
@@ -4765,20 +4891,33 @@ router.get('/stats/custom', requireAuth, (req, res) => {
     // 스케일 정규화(감사 §4·P0-5): self-learn 로그는 result_score 를 0~1 로 저장(0.75~1.0).
     //   AVG(result_score) 를 그대로 내보내면 "평균 0.9점"으로 오노출된다. perform 선례대로
     //   NORM_SCORE(≤1 이면 ×100)로 0~100 정규화한다.
-    const NORM_SCORE = `(CASE WHEN ll.result_score <= 1 THEN ll.result_score*100 ELSE ll.result_score END)`;
+    //   ★ 정의 실체는 lib/lrs/score-scale.js(SSOT) — 인라인 재정의 금지(정본사전 §2-A-1).
+    const NORM_SCORE = LRS_NORM_SCORE;
     const sumRow = db.prepare(`
       SELECT COUNT(*) recommended,
              SUM(CASE WHEN ll.result_success=1 THEN 1 ELSE 0 END) completed,
-             AVG(${NORM_SCORE}) avg_score,
+             AVG(CASE WHEN ${LRS_SCORED_SQL} THEN ${NORM_SCORE} END) avg_score,
              COUNT(DISTINCT ll.user_id) uniq_learners
       FROM learning_logs ll
       ${baseWhere}
     `).get(...baseParams);
 
+    // ── [W2-b 6-7] "추천수 / 이행률" 정직화 ────────────────────────────────────
+    //   recommendedCount 는 추천 수가 아니다. self-learn 서비스가 발행한 **모든** 이벤트
+    //   (self_learn·node_complete·diagnosis_complete·wrong_note_retry …) 수다 → '자기주도 학습 활동 수'.
+    //   이행률(B5)은 분모가 '추천 원장(추천 발생 레코드)'이어야 하는데 그 원장이 존재하지 않는다.
+    //   과거 completionRate 는 result_success 비율이라, 진짜 이수 로그(daily_complete)가
+    //   result_success 전량 NULL 이어서 '미완료'로 집계됐다 — 완료할수록 이행률이 깎이는 역전.
+    //   → 분모가 없으면 비율을 만들지 않는다(0 채움·대체 산식 금지).
     const summary = {
+      // 키는 하위호환 유지(소비처 계약). 화면 라벨은 '자기주도 학습 활동 수'.
       recommendedCount: sumRow.recommended || 0,
+      selfDirectedActivityCount: sumRow.recommended || 0,
       completedCount: sumRow.completed || 0,
-      completionRate: sumRow.recommended ? Math.round((sumRow.completed||0)*1000/sumRow.recommended)/10 : null,
+      completionRate: null,                       // ← 폐기(B6 를 B5 자리에 쓰던 값)
+      recoFollowRate: null,                       // B5 — 추천 원장 부재로 계산 불가
+      recoFollowUnavailable: true,
+      recoFollowNote: '추천 이력이 집계되지 않아 이행률을 계산할 수 없습니다',
       avgScore: sumRow.avg_score != null ? Math.round(sumRow.avg_score*10)/10 : null,
       uniqueLearners: sumRow.uniq_learners || 0
     };
@@ -4793,30 +4932,51 @@ router.get('/stats/custom', requireAuth, (req, res) => {
       ORDER BY date
     `).all(...baseParams);
 
-    const weakTargets = db.prepare(`
+    // ── [W2-b 6-10] "보완이 필요한 성취기준" — 도달한 기준은 항상 제외, 미채점은 점수 0 채움 금지 ──
+    //   과거: 평균 100점·미채점 항목이 '약점 Top10' 에 등재됐다(학생 insights 만 고쳐져 있었음).
+    //   정본: 후보 = 미도달·부분도달·평가부족. 도달(reached)은 제외. 분류기는 db/lrs-mastery(SSOT).
+    const weakRaw = db.prepare(`
       SELECT ll.achievement_code,
              COUNT(*) attempts,
-             AVG(${NORM_SCORE}) avg_score,
+             SUM(CASE WHEN ll.result_success=1 THEN 1 ELSE 0 END) success,
+             SUM(CASE WHEN ll.result_score IS NOT NULL AND ${LRS_SCORED_SQL} THEN 1 ELSE 0 END) scored_cnt,
+             AVG(CASE WHEN ${LRS_SCORED_SQL} THEN ${NORM_SCORE} END) avg_score,
              MAX(ll.created_at) last_at
       FROM learning_logs ll
       ${baseWhere} AND ll.achievement_code IS NOT NULL AND ll.achievement_code != ''
       GROUP BY ll.achievement_code
       HAVING attempts >= 1
-      ORDER BY avg_score ASC NULLS LAST
-      LIMIT 10
-    `).all(...baseParams).map(w => {
-      // 코드→이름 통일(P0-4): 약점표에 단원명 label 부착(raw 코드 단독 노출 방지). FE 는 label||code 표기.
-      const nm = achievementLabel(w.achievement_code);
-      return {
-        achievement_code: w.achievement_code,
-        label: nm.label,            // 화면 표기용 짧은 이름(단원명 우선)
-        fullLabel: nm.fullLabel,    // 툴팁/보조 서술
-        subject_label: nm.subjectLabel,
-        attempts: w.attempts,
-        avg_score: w.avg_score != null ? Math.round(w.avg_score*10)/10 : null,
-        last_at: w.last_at
-      };
-    });
+    `).all(...baseParams);
+    const weakTargets = weakRaw
+      .map(w => {
+        const rate = mastery.reachRate(w.success, w.attempts, w.avg_score);
+        const status = mastery.classifyStatus(w.attempts, rate);
+        return { ...w, _status: status, _hasScore: (w.scored_cnt || 0) > 0 };
+      })
+      .filter(w => w._status !== mastery.STATUS.REACHED)   // 도달은 약점이 아니다 — 항상 제외
+      // 채점분 우선(평균 점수 낮은 순) → 미채점분은 뒤에 연습량 많은 순(점수 0 채움 금지)
+      .sort((a, b) => {
+        if (a._hasScore !== b._hasScore) return a._hasScore ? -1 : 1;
+        if (a._hasScore) return (a.avg_score ?? 999) - (b.avg_score ?? 999);
+        return (b.attempts || 0) - (a.attempts || 0);
+      })
+      .slice(0, 10)
+      .map(w => {
+        // 코드→이름 통일(P0-4): 약점표에 단원명 label 부착(raw 코드 단독 노출 방지). FE 는 label||code 표기.
+        const nm = achievementLabel(w.achievement_code);
+        return {
+          achievement_code: w.achievement_code,
+          label: nm.label,            // 화면 표기용 짧은 이름(단원명 우선)
+          fullLabel: nm.fullLabel,    // 툴팁/보조 서술
+          subject_label: nm.subjectLabel,
+          attempts: w.attempts,
+          successCount: w.success || 0,
+          hasScore: w._hasScore,                                   // false → 화면은 '아직 채점된 문제가 없어요'
+          status: w._status,                                       // not_reached | partial | insufficient
+          avg_score: w._hasScore && w.avg_score != null ? Math.round(w.avg_score*10)/10 : null,
+          last_at: w.last_at
+        };
+      });
 
     res.json({ success:true, scope: sf.scope, period: { fromDate: r.fromDate, toDate: r.toDate }, summary, byDay, weakTargets });
   } catch (err) {
@@ -5012,13 +5172,15 @@ router.get('/stats/teacher-index', requireAuth, (req, res) => {
       };
     });
 
-    // 정규화
+    // 정규화 — 분모가 '응답 배열 내 최댓값'이라 배열 길이가 1이면(교사 본인 뷰) 항상 100 이 나오는
+    //   죽은 지표였다(정본사전 §6-8-5). 비교 대상이 2명 미만이면 값을 만들지 않는다(null·flag).
     const maxRaw = teachers.reduce((m,t)=> t._raw>m?t._raw:m, 0);
+    const utilizationComparable = teachers.length >= 2;
     teachers.forEach(t => {
-      t.utilization_score = maxRaw>0 ? Math.round((t._raw/maxRaw)*100) : 0;
+      t.utilization_score = (utilizationComparable && maxRaw>0) ? Math.round((t._raw/maxRaw)*100) : null;
       delete t._raw;
     });
-    teachers.sort((a,b)=> b.utilization_score - a.utilization_score);
+    teachers.sort((a,b)=> (b.utilization_score||0) - (a.utilization_score||0));
 
     let myIndex = null;
     if (role === 'teacher') {
@@ -5027,7 +5189,7 @@ router.get('/stats/teacher-index', requireAuth, (req, res) => {
         // 본인 데이터 개별 계산
         const u = db.prepare('SELECT id, COALESCE(display_name, username) name FROM users WHERE id = ?').get(req.user.id);
         myIndex = { user_id: req.user.id, name: u ? u.name : '나', class_count: 0,
-          contents_authored: 0, lessons_held: 0, exams_opened: 0, feedback_count: 0, utilization_score: 0 };
+          contents_authored: 0, lessons_held: 0, exams_opened: 0, feedback_count: 0, utilization_score: null };
       }
     }
 
@@ -5080,6 +5242,8 @@ router.get('/stats/teacher-index', requireAuth, (req, res) => {
       },
       teachers,
       myIndex,
+      // utilization_score 유효성 — 비교 대상 2명 미만이면 분모가 자기 자신이라 지표가 성립하지 않는다.
+      utilizationComparable,
       // 교사 스코프 신규 계약(FE t-teacher-idx 소비). 관리자 scope='all' 시 null.
       prev,     // { contents_authored, lessons_held, exams_opened, feedback_count } — KPI 델타 화살표용
       trend,    // [ { label, from, to, contents, lessons, exams, feedback } ] — 라인차트용
@@ -5095,6 +5259,17 @@ router.get('/stats/teacher-index', requireAuth, (req, res) => {
 router.get('/stats/daily-snapshot', requireAuth, (req, res) => {
   try {
     const sf = resolveScopeFilter(req, 'll');
+    // [W2-b 6-3 ②] classId 옵션 — 교사 홈의 '오늘' 띠가 상단 KPI(반 스코프)와 분모가 달라지는 문제 해소.
+    //   권한 있는 반에 한해 로그를 그 반으로 좁힌다(미지정 시 기존 동작 완전 불변).
+    const classIdParam = parseInt(req.query.classId, 10);
+    if (Number.isInteger(classIdParam)) {
+      if (!canViewClass(req, classIdParam)) {
+        return res.status(403).json({ success: false, message: '권한이 없습니다.' });
+      }
+      sf.where += ' AND ll.class_id = ?';
+      sf.params = [...sf.params, classIdParam];
+      sf.scope = 'class';
+    }
 
     // 기간 반영(감사 §3 s-daily, P0): 이전엔 DATE('now')/DATE('now','-1 day') 하드코딩이라
     //   기간칩 7d/30d/90d 응답이 완전 동일했다. 이제 선택 기간 범위(from~to)로 요약하고,
@@ -5103,10 +5278,18 @@ router.get('/stats/daily-snapshot', requireAuth, (req, res) => {
     function snapshotRange(fromIso, toIso) {
       const where = `WHERE DATE(ll.created_at) >= ? AND DATE(ll.created_at) <= ? ${sf.where}`;
       const params = [fromIso, toIso, ...sf.params];
+      // [W2-b 6-3 추가결함] daily-snapshot 은 활동 유형 필터가 전혀 없어 content_view·출석·게시글은 물론
+      //   LRS 열람 로그까지 total_acts 에 들어갔다(자기참조 착시). 계약 파괴 없이 **정본 7종 기준 필드를
+      //   추가**한다 — /insights 의 todayActs vs todayLearnActs 분리(정본 패턴)를 그대로 따른다.
       const sumRow = db.prepare(`
         SELECT COUNT(*) total_acts,
                COUNT(DISTINCT ll.user_id) uniq_users,
-               COALESCE(SUM(COALESCE(ll.duration_sec, CAST(REPLACE(REPLACE(COALESCE(ll.result_duration,''),'PT',''),'S','') AS INTEGER), 0)),0) dur_sec
+               COALESCE(SUM(COALESCE(ll.duration_sec, CAST(REPLACE(REPLACE(COALESCE(ll.result_duration,''),'PT',''),'S','') AS INTEGER), 0)),0) dur_sec,
+               SUM(CASE WHEN ll.activity_type IN (${C1_TYPES_SQL_LIST}) THEN 1 ELSE 0 END) learn_acts,
+               COUNT(DISTINCT CASE WHEN ll.activity_type IN (${C1_TYPES_SQL_LIST}) THEN ll.user_id END) learn_users,
+               COALESCE(SUM(CASE WHEN ll.activity_type IN (${C1_TYPES_SQL_LIST}) THEN COALESCE(ll.duration_sec,
+                 CAST(REPLACE(REPLACE(COALESCE(ll.result_duration,''),'PT',''),'S','') AS INTEGER), 0) ELSE 0 END),0) learn_dur_sec,
+               SUM(CASE WHEN ll.activity_type='content_view' THEN 1 ELSE 0 END) view_acts
         FROM learning_logs ll ${where}
       `).get(...params);
       const byServiceRows = db.prepare(`
@@ -5128,6 +5311,11 @@ router.get('/stats/daily-snapshot', requireAuth, (req, res) => {
         totalActs: sumRow.total_acts || 0,
         uniqueUsers: sumRow.uniq_users || 0,
         durationMin: Math.round((sumRow.dur_sec||0)/60),
+        // C1 정본 7종 기준(조회·출석·게시글·설문·LRS 열람 제외). 화면은 이 필드를 쓴다.
+        learnActs: sumRow.learn_acts || 0,
+        learnUsers: sumRow.learn_users || 0,
+        learnDurationMin: Math.round((sumRow.learn_dur_sec||0)/60),
+        contentViews: sumRow.view_acts || 0,   // C2 — 합산 금지
         byService: byServiceRows.map(row => ({
           source_service: row.source_service,
           count: row.cnt,
@@ -6207,10 +6395,14 @@ router.get('/stats/equity', requireAuth, (req, res) => {
       `).all(...levelParams, ...subjP) : [];
       const wauMap = new Map(wauAgg.map(r => [String(r.id), r.wau]));
 
-      // 도달률(reachRate) — v1 간이 정의: 학생 개인 avg_score ≥ 60 인 학생 수(단위별).
-      //   분모는 units 의 students(재학생 전체) — reached/students ×100.
-      const reachAgg = db.prepare(`
-        SELECT region_id id, SUM(CASE WHEN uavg >= 60 THEN 1 ELSE 0 END) reached
+      // ── [W2-b 6-1] 구 '도달률' → **평균 60점 이상 학생 비율**(avgOver60Rate). 도달률이 아니다. ──
+      //   폐기 근거(정본사전 §1-A-2): 최소시도 게이트 없음 · 임계 60점 · lrs_achievement_stats 미참조 ·
+      //   분자 서브쿼리가 INNER JOIN + HAVING uavg IS NOT NULL 이라 채점 로그 0건 학생은 분자에 못 든다.
+      //   분모가 재학생 전수였으므로 수학적으로 `값 ≤ 채점 데이터 보유율` — 성취가 아니라 커버리지를 보고 있었다
+      //   (11개 지역 중 10개가 소수점까지 일치한 원인). 게다가 교과 필터가 분자에만 걸려 교과를 좁히면 붕괴했다.
+      //   → 분모를 **분자와 같은 모집단(채점 기록 보유 학생)** 으로 맞춘다. 이제 교과 필터가 분자·분모에 동시 적용된다.
+      const over60Agg = db.prepare(`
+        SELECT region_id id, COUNT(*) scored, SUM(CASE WHEN uavg >= 60 THEN 1 ELSE 0 END) reached
         FROM (
           SELECT ${gcol} region_id, u.id uid,
                  AVG(CASE WHEN ${scoredWhere('ll')} THEN ${normScoreExpr('ll')} END) uavg
@@ -6221,7 +6413,8 @@ router.get('/stats/equity', requireAuth, (req, res) => {
           HAVING uavg IS NOT NULL
         ) GROUP BY region_id
       `).all(...dateParams, ...levelParams, ...subjP);
-      const reachMap = new Map(reachAgg.map(r => [String(r.id), r.reached]));
+      const reachMap = new Map(over60Agg.map(r => [String(r.id), r.reached]));
+      const scoredMap = new Map(over60Agg.map(r => [String(r.id), r.scored]));
 
       const map = new Map();
       studAgg.forEach(s => {
@@ -6233,11 +6426,41 @@ router.get('/stats/equity', requireAuth, (req, res) => {
           dur_sec: l.dur_sec || 0,
           avg_score: l.avg_score,
           wau: wauMap.get(key) || 0,
-          reached: reachMap.get(key) || 0
+          reached: reachMap.get(key) || 0,
+          scored: scoredMap.get(key) || 0
         });
       });
       return map;
     }
+
+    // ── [W2-b 6-1 ②] A3 집단 도달률(groupReachedRate) — 성취 섹션의 정본 지표 ──────────
+    //   라벨만 바꾸면 관리자 화면에서 성취 지표가 사라지므로, 정본 도달률을 **새로 계산**해 넣는다.
+    //   분자·분모 = (학생×성취기준) 행. 판정은 db/lrs-mastery(SSOT: att>=3 & rate>=80 → reached,
+    //   att<3 → 평가부족은 분모에서 제외). 산식 2벌 금지 — 도 벤치마크의 _benchReach 를 그대로 재사용한다.
+    //   성취수준은 '누적'이 정책(db/lrs-mastery.js)이므로 기간창(days)을 적용하지 않는다 → 기간칩과 무관.
+    //   교과 필터는 같은 행집합에 걸리므로 분자·분모에 **동시** 적용된다.
+    const subjKeyForReach = subjectParam !== 'all' ? subjectParam : null;
+    const groupReachMap = (() => {
+      const out = new Map();
+      try {
+        const rows = db.prepare(`
+          SELECT ${gcol} unit, s.user_id uid, s.achievement_code code, s.subject_code sc,
+                 s.attempt_count att, s.success_count succ, s.avg_score avg
+          FROM lrs_achievement_stats s JOIN users u ON u.id = s.user_id
+          WHERE u.role='student' AND ${gcol} IS NOT NULL AND ${gcol} <> ''
+            AND s.achievement_code IS NOT NULL AND s.achievement_code <> ''
+            ${sfU.where} ${levelWhere}
+        `).all(...levelParams);
+        const byUnit = new Map();
+        rows.forEach(r => {
+          const k = String(r.unit);
+          if (!byUnit.has(k)) byUnit.set(k, []);
+          byUnit.get(k).push(r);
+        });
+        for (const [k, rs] of byUnit.entries()) out.set(k, _benchReach(rs, subjKeyForReach));
+      } catch (_) { /* 집계 테이블 부재 시 성취 지표 없음(0 채움 금지 — null 유지) */ }
+      return out;
+    })();
 
     const cur = aggregate(0);
     const labelFn = dim === 'school_level' ? levelLabel : (c) => String(c);
@@ -6253,14 +6476,21 @@ router.get('/stats/equity', requireAuth, (req, res) => {
       const avgActsPerStudent = students > 0 ? Math.round((a.acts / students) * 10) / 10 : 0;
       const avgLearnMin = students > 0 ? Math.round((a.dur_sec / students) / 60) : 0;
       const avgScore = a.avg_score == null ? null : Math.round(a.avg_score * 10) / 10;
-      const reachRate = students > 0 ? Math.round((a.reached / students) * 1000) / 10 : 0;
+      // 평균 60점 이상 학생 비율 — 분모는 '채점 기록 보유 학생'(a.scored). 0 이면 비율 없음(null, 0 채움 금지).
+      const avgOver60Rate = a.scored > 0 ? Math.round((a.reached / a.scored) * 1000) / 10 : null;
+      const gr = groupReachMap.get(String(id)) || { mean: null, n: 0 };
       units.push({
         id, label: labelFn(id), students,
         activeRate: masked ? null : activeRate,
         avgActsPerStudent: masked ? null : avgActsPerStudent,
         avgLearnMin: masked ? null : avgLearnMin,
         avgScore: masked ? null : avgScore,
-        reachRate: masked ? null : reachRate,
+        // A3 집단 도달률(정본 성취 지표) + 그 분모(평가충분 학생 수) — 분모를 화면에서 볼 수 있어야 한다.
+        groupReachedRate: masked ? null : gr.mean,
+        evaluatedStudents: masked ? null : (gr.n || 0),
+        // ↓ 성취 지표가 **아님**. 데이터 품질/참고용(정본사전 §1-A-2). 'reachRate' 키는 폐기.
+        avgOver60Rate: masked ? null : avgOver60Rate,
+        scoredStudents: masked ? null : (a.scored || 0),
         quadrant: null,   // 아래에서 사분면 산정 후 채움(마스킹은 null 유지)
         masked
       });
@@ -6293,7 +6523,10 @@ router.get('/stats/equity', requireAuth, (req, res) => {
       activeRate: _equityMetric(mkVals('activeRate'), 'pp'),
       avgScore:   _equityMetric(mkVals('avgScore'), 'pp'),
       actsPerStu: _equityMetric(mkVals('avgActsPerStudent'), 'ratio'),  // 활동량은 배수(gapX)
-      reachRate:  _equityMetric(mkVals('reachRate'), 'pp')
+      // 성취 격차는 A3(집단 도달률) 기준. 구 reachRate(=평균60점이상 비율)는 성취 지표가 아니라
+      // 데이터 품질 참고 지표로 분리 노출한다(같은 화면에 뜻 다른 '도달률' 2개 금지 — §6-12).
+      groupReachedRate: _equityMetric(mkVals('groupReachedRate'), 'pp'),
+      avgOver60Rate:    _equityMetric(mkVals('avgOver60Rate'), 'pp')
     };
 
     // ── 추세(§T1-3): 최근 3구간 avgScore 헤드라인 격차(pp) 3점 ─────────────────
@@ -6326,7 +6559,9 @@ router.get('/stats/equity', requireAuth, (req, res) => {
       .map(u => ({
         id: u.id, label: u.label, students: u.students,
         avgActsPerStudent: u.avgActsPerStudent, avgScore: u.avgScore,
-        activeRate: u.activeRate, reachRate: u.reachRate
+        activeRate: u.activeRate,
+        groupReachedRate: u.groupReachedRate, evaluatedStudents: u.evaluatedStudents,
+        avgOver60Rate: u.avgOver60Rate, scoredStudents: u.scoredStudents
       }))
       .sort((a, b) => (a.avgScore || 0) - (b.avgScore || 0)); // 성취 낮은 순(가장 취약 먼저)
 
@@ -6518,6 +6753,8 @@ router.get('/stats/class-compare', requireAuth, (req, res) => {
     }
     const subjF = subjectCodeSetFilter(subjectParam, 'll');   // { where, params }
     const subjW = subjF.where, subjP = subjF.params;
+    // A3(집단 도달률)용 교과 키 — _benchReach 는 성취통계 행의 subject_code 로 직접 거른다(분자·분모 동시 적용).
+    const subjKeyForReach = subjectParam !== 'all' ? subjectParam : null;
     const days = macroDays(req, 30);                          // 30d 기본, 90d 허용
     const sfL = seedFilter(req, 'll');
     const dateFromExpr = `-${days - 1} days`;                 // equity 현재창(-(days-1)일)과 동일
@@ -6534,7 +6771,7 @@ router.get('/stats/class-compare', requireAuth, (req, res) => {
       return res.json({
         success: true, period: `${days}d`, realOnly: sfL.realOnly,
         units: [],
-        metrics: { avgScore: null, actsPerStu: null, activeRate: null, reachRate: null },
+        metrics: { avgScore: null, actsPerStu: null, activeRate: null, groupReachedRate: null, avgOver60Rate: null },
         priorityUnits: [],
         availableSubjects: buildAvailableSubjects(new Set()),
         classSubjectMatrix: [],
@@ -6573,20 +6810,21 @@ router.get('/stats/class-compare', requireAuth, (req, res) => {
         WHERE ll.user_id IN (${ph})
           AND DATE(ll.created_at) >= DATE('now','localtime','-6 days') ${sfL.where} ${subjW}
       `).get(...memberIds, ...subjP).wau || 0;
-      // 도달률 분자 — 개인 avg_score(채점형·0~100 정규화) ≥ 60 학생 수. equity reachAgg 동일.
-      const reached = db.prepare(`
-        SELECT COUNT(*) reached FROM (
+      // 평균 60점 이상 학생 수/분모 — equity 와 동일 정의(성취 지표 아님·데이터 품질 참고).
+      const over60 = db.prepare(`
+        SELECT COUNT(*) scored, SUM(CASE WHEN uavg >= 60 THEN 1 ELSE 0 END) reached FROM (
           SELECT ll.user_id, AVG(CASE WHEN ${scoredWhere('ll')} THEN ${normScoreExpr('ll')} END) uavg
           FROM learning_logs ll
           WHERE ll.user_id IN (${ph})
             AND DATE(ll.created_at) >= DATE('now','localtime', ?) ${sfL.where} ${subjW}
           GROUP BY ll.user_id
-          HAVING uavg IS NOT NULL AND uavg >= 60
+          HAVING uavg IS NOT NULL
         )
-      `).get(...memberIds, dateFromExpr, ...subjP).reached || 0;
+      `).get(...memberIds, dateFromExpr, ...subjP);
       return {
         acts: logRow.acts || 0, dur_sec: logRow.dur_sec || 0, avg_score: logRow.avg_score,
-        scored_students: logRow.scored_students || 0, wau, reached
+        scored_students: logRow.scored_students || 0, wau,
+        reached: over60.reached || 0, over60Denom: over60.scored || 0
       };
     }
 
@@ -6599,12 +6837,24 @@ router.get('/stats/class-compare', requireAuth, (req, res) => {
       const avgActsPerStudent = students > 0 ? Math.round((a.acts / students) * 10) / 10 : 0;
       const avgLearnMin = students > 0 ? Math.round((a.dur_sec / students) / 60) : 0;
       const avgScore = a.avg_score == null ? null : Math.round(a.avg_score * 10) / 10;
-      const reachRate = students > 0 ? Math.round((a.reached / students) * 1000) / 10 : 0;
+      const avgOver60Rate = a.over60Denom > 0 ? Math.round((a.reached / a.over60Denom) * 1000) / 10 : null;
+      // ── [W2-b 6-11] 반 스코프의 '도달률'을 **도 스코프와 같은 정의(A3)** 로 교체 ────────────
+      //   과거: 같은 탭의 스코프 칩만 바꿔도 도달률의 정의가 통째로 달랐다(비교 불가 수준).
+      //     반: learning_logs 원시로그 · 학생단위 · 평균≥60 · 분모=반 학생 전원 · 최소시도 게이트 없음 · 30일 창
+      //     도: lrs_achievement_stats · (학생×기준)단위 · rate≥80&att≥3 · 분모=평가충분 · 누적
+      //   정본: 도 스코프가 정본. 산식 2벌 금지 — _benchReach 를 그대로 재사용한다.
+      //     스코프가 달라도 정의는 동일하고, 다른 것은 모집단뿐이다. 기간도 '누적'으로 통일(성취수준 정책).
+      const gr = (() => {
+        try { return _benchReach(_benchAchAgg(memberIds, sfL.realOnly), subjKeyForReach); }
+        catch (_) { return { mean: null, n: 0 }; }
+      })();
       return {
         id: c.id, label: c.name,
         classId: c.id, className: c.name,       // equity 렌더러=id/label · 계약=classId/className 양립
         students,
-        activeRate, avgActsPerStudent, avgLearnMin, avgScore, reachRate,
+        activeRate, avgActsPerStudent, avgLearnMin, avgScore,
+        groupReachedRate: gr.mean, evaluatedStudents: gr.n || 0,
+        avgOver60Rate, scoredStudents: a.over60Denom || 0,
         quadrant: null,
         masked: false,                          // ★ 프라이버시 마스킹 미적용(§C-2) — 항상 false
         lowSample: a.scored_students < LOW_SAMPLE_SCORED
@@ -6644,7 +6894,9 @@ router.get('/stats/class-compare', requireAuth, (req, res) => {
       avgScore:   _equityMetric(mkVals('avgScore'), 'pp'),
       actsPerStu: _equityMetric(mkVals('avgActsPerStudent'), 'ratio'),
       activeRate: _equityMetric(mkVals('activeRate'), 'pp'),
-      reachRate:  _equityMetric(mkVals('reachRate'), 'pp')
+      // 성취 격차 = A3(집단 도달률). 구 reachRate 키 폐기(정본사전 §6-11).
+      groupReachedRate: _equityMetric(mkVals('groupReachedRate'), 'pp'),
+      avgOver60Rate:    _equityMetric(mkVals('avgOver60Rate'), 'pp')
     };
 
     // ── 우선 관심 반: 이중취약(both_low), 성취 낮은 순. 비교가능 클래스만. (산점도 없음 — 목록만) ──
@@ -6653,7 +6905,10 @@ router.get('/stats/class-compare', requireAuth, (req, res) => {
       .map(u => ({
         id: u.id, label: u.label, classId: u.id, className: u.label,
         students: u.students, avgActsPerStudent: u.avgActsPerStudent, avgScore: u.avgScore,
-        activeRate: u.activeRate, reachRate: u.reachRate, lowSample: u.lowSample
+        activeRate: u.activeRate,
+        groupReachedRate: u.groupReachedRate, evaluatedStudents: u.evaluatedStudents,
+        avgOver60Rate: u.avgOver60Rate, scoredStudents: u.scoredStudents,
+        lowSample: u.lowSample
       }))
       .sort((a, b) => (a.avgScore || 0) - (b.avgScore || 0));
 
@@ -7237,6 +7492,9 @@ function _benchBundle(ids, logRows, achRows, subjKey) {
   return {
     students: ids.length,
     avgScore: sc.mean, scoredStudents: sc.n,
+    // ⚠ 이 reachRate 는 _benchReach 산출 = **A3 집단 도달률**(정본)이다.
+    //   equity/class-compare 에서 폐기된 동명의 구 지표(평균 60점 이상 학생 비율)와 값이 다르다.
+    //   벤치마크는 처음부터 A3 를 썼으므로 값 변경 없이 키만 유지한다(코드 개명은 정본사전 §6-16 P2).
     reachRate: rc.mean, evaluated: rc.n,
     avgLearnMin: tm.mean, avgActsPerStudent: us.mean,
   };

@@ -329,20 +329,26 @@ function _peerSchoolAvg(db, filter, fromDay) {
   };
 }
 
-// 전월 대비(우리 학교 활동 점수 평균) — 최근 30일 vs 직전 30일.
+// [W2-b 6-12] 전월 대비 — 최근 30일 vs 직전 30일. **평균 점수(A5)이지 도달률(A3)이 아니다.**
+//   이 값은 학생×성취기준의 reached/evaluated 가 아니라 채점 로그의 점수 평균이다.
+//   화면(public/school/index.html ⑥)이 이걸 '평균 성취 도달률'로 부르던 것이 §6-12 위반이었다
+//   — 같은 패널의 막대(ours.reachedRate)는 진짜 A3 라 한 화면에 뜻이 다른 '도달률'이 둘이었다.
+//   라벨은 '평균 점수(점)'로 정정했고, 산식도 SSOT(avgScoreExpr)로 옮긴다:
+//   과거 AVG(result_score) 는 ①진도율(lesson_progress) 등 비채점형 혼입 ②집계 후 스케일 보정
+//   (0~1 과 0~100 이 섞인 채 평균 낸 뒤 ×100)이라 두 번 틀렸다.
 function _monthOverMonth(db, ids) {
   if (!ids.length) return { current: null, previous: null, deltaPP: null };
   const ph = ids.map(() => '?').join(',');
+  const { avgScoreExpr, scoredScoreWhere } = require('../lib/lrs/score-scale');
   const q = (fromExpr, toExpr) => {
     try {
       const row = db.prepare(`
-        SELECT AVG(result_score) s, COUNT(result_score) n FROM learning_logs
-        WHERE user_id IN (${ph}) AND result_score IS NOT NULL
+        SELECT ${avgScoreExpr('')} s, COUNT(result_score) n FROM learning_logs
+        WHERE user_id IN (${ph}) AND ${scoredScoreWhere('')}
           AND DATE(created_at) >= DATE('now','localtime', ?) ${toExpr ? "AND DATE(created_at) < DATE('now','localtime', ?)" : ''}
       `).get(...ids, fromExpr, ...(toExpr ? [toExpr] : []));
       if (!row || row.n === 0 || row.s == null) return null;
-      const v = Number(row.s) > 1 ? Number(row.s) : Number(row.s) * 100;
-      return Math.round(v * 10) / 10;
+      return Math.round(Number(row.s) * 10) / 10;
     } catch (_) { return null; }
   };
   const current = q('-29 days', null);

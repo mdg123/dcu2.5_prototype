@@ -177,9 +177,21 @@ test('INV-CC-2: MIN_N 프라이버시 마스킹 미적용 · lowSample 은 채�
   assert.equal(cb.lowSample, true, 'CB lowSample=true(채점형 2명<3)');
   assert.equal(j.minScoredForCaption, 3, 'minScoredForCaption=3');
 
-  // 도달률: CA 개인평균 65≥60 4명 → 100%. CB 60≥60 2명/4 → 50%.
-  assert.equal(ca.reachRate, 100, 'CA reachRate=100');
-  assert.equal(cb.reachRate, 50, 'CB reachRate=50');
+  // ── [W2-b 6-11] '도달률' 정의 통일 ──────────────────────────────────────────
+  //   구: reachRate = 개인 평균≥60 학생수 / **반 학생 전원**(CB 2/4=50) — 도 스코프와 정의가 달라
+  //       같은 탭에서 스코프 칩만 바꿔도 '도달률'의 뜻이 통째로 바뀌었다.
+  //   정본: 도달률 = A3(집단 도달률, lrs_achievement_stats + db/lrs-mastery 판정, 누적).
+  //       합성 학생에겐 성취통계가 없으므로 null 이어야 한다(0 으로 채우면 '전원 미도달' 거짓).
+  assert.equal(ca.reachRate, undefined, "폐기된 'reachRate' 키 잔존 금지(뜻 다른 도달률 2개 금지)");
+  assert.equal(ca.groupReachedRate, null, 'CA 도달률 — 성취통계 없음 → null(0 채움 금지)');
+  assert.equal(cb.groupReachedRate, null, 'CB 도달률 — 성취통계 없음 → null(0 채움 금지)');
+  assert.equal(ca.evaluatedStudents, 0, 'CA 평가충분 표본 0(분모 노출)');
+  //   구 값은 '평균 60점 이상 학생 비율'로 개명 + 분모를 분자와 같은 모집단(채점 보유 학생)으로 교정.
+  //   CB 는 분모가 4(반 전원) → 2(채점 보유)로 바뀌므로 50 → 100.
+  assert.equal(ca.avgOver60Rate, 100, 'CA 평균 60점 이상 비율=100 (채점 4명 전원 ≥60)');
+  assert.equal(ca.scoredStudents, 4, 'CA 채점 보유 학생 4명(분모 노출)');
+  assert.equal(cb.avgOver60Rate, 100, 'CB 평균 60점 이상 비율=100 (채점 2명 전원 ≥60)');
+  assert.equal(cb.scoredStudents, 2, 'CB 채점 보유 학생 2명(분모 노출) — 구 분모 4와 다름');
 
   // 사분면·우선관심반: n=2 중앙값 분할 → 약한 CB=both_low, CA=good. priorityUnits=[CB].
   assert.equal(ca.quadrant, 'good', 'CA quadrant=good');

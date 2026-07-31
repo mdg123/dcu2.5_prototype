@@ -149,7 +149,7 @@ test('INV-E1: 계약 필드 — units/metrics/trend/priorityUnits/excludedMasked
   assert.equal(j.minSample, 10);
   assert.ok(Array.isArray(j.units) && j.units.length >= 3, 'units 배열');
   assert.equal(typeof j.excludedMasked, 'number', 'excludedMasked 숫자');
-  for (const m of ['activeRate', 'avgScore', 'actsPerStu', 'reachRate']) {
+  for (const m of ['activeRate', 'avgScore', 'actsPerStu', 'groupReachedRate', 'avgOver60Rate']) {
     assert.ok(j.metrics[m], `metrics.${m} 존재`);
   }
   assert.equal(j.trend.metric, 'avgScore');
@@ -164,7 +164,7 @@ test('INV-E1: 계약 필드 — units/metrics/trend/priorityUnits/excludedMasked
 // ──────────────────────────────────────────────────────────────────────────
 test('INV-E2: gapPP === top.v − bottom.v (avgScore·activeRate·reachRate)', async () => {
   const j = await fetchEquity();
-  for (const m of ['avgScore', 'activeRate', 'reachRate']) {
+  for (const m of ['avgScore', 'activeRate', 'groupReachedRate', 'avgOver60Rate']) {
     const mm = j.metrics[m];
     assert.equal(typeof mm.gapPP, 'number', `${m}.gapPP 숫자`);
     assert.ok(mm.top && mm.bottom, `${m} top/bottom 존재`);
@@ -197,7 +197,7 @@ test('INV-E3: actsPerStu.gapX === top.v / bottom.v (배수), gapPP 없음', asyn
 // ──────────────────────────────────────────────────────────────────────────
 test('INV-E4: CV ≥ 0 · bottom20Ratio 0~100 (전 지표)', async () => {
   const j = await fetchEquity();
-  for (const m of ['activeRate', 'avgScore', 'actsPerStu', 'reachRate']) {
+  for (const m of ['activeRate', 'avgScore', 'actsPerStu', 'groupReachedRate', 'avgOver60Rate']) {
     const mm = j.metrics[m];
     assert.ok(mm.cv >= 0, `${m}: cv ≥ 0 (got ${mm.cv})`);
     assert.ok(mm.bottom20Ratio >= 0 && mm.bottom20Ratio <= 100, `${m}: bottom20Ratio 0~100 (got ${mm.bottom20Ratio})`);
@@ -215,7 +215,7 @@ test('INV-E5: 마스킹 — <10 단위 값 null·지표 제외·excludedMasked �
   assert.ok(mask, '마스킹 지역 units 에 포함');
   assert.equal(mask.students, 6, '학생 6명(<10)');
   assert.equal(mask.masked, true, 'masked=true');
-  for (const f of ['activeRate', 'avgActsPerStudent', 'avgLearnMin', 'avgScore', 'reachRate']) {
+  for (const f of ['activeRate', 'avgActsPerStudent', 'avgLearnMin', 'avgScore', 'groupReachedRate', 'avgOver60Rate']) {
     assert.equal(mask[f], null, `마스킹 단위 ${f}=null`);
   }
   assert.equal(mask.quadrant, null, '마스킹 단위 quadrant=null');
@@ -226,7 +226,7 @@ test('INV-E5: 마스킹 — <10 단위 값 null·지표 제외·excludedMasked �
 
   // 지표 top/bottom 에 마스킹 단위 id 가 절대 등장하지 않음(분모 제외 증거)
   const maskedIds = new Set(j.units.filter(u => u.masked).map(u => u.id));
-  for (const m of ['activeRate', 'avgScore', 'actsPerStu', 'reachRate']) {
+  for (const m of ['activeRate', 'avgScore', 'actsPerStu', 'groupReachedRate', 'avgOver60Rate']) {
     const mm = j.metrics[m];
     assert.ok(!maskedIds.has(mm.top.id), `${m}.top 은 마스킹 단위 아님`);
     assert.ok(!maskedIds.has(mm.bottom.id), `${m}.bottom 은 마스킹 단위 아님`);
@@ -248,8 +248,13 @@ test('INV-E5b: 합성 지역 값 정확 — avgActs/avgScore/reachRate 결정적
   assert.equal(b.avgActsPerStudent, 1, 'B 1인당 활동=1');
   assert.equal(a.avgScore, 90, 'A 평균성취=90');
   assert.equal(b.avgScore, 50, 'B 평균성취=50');
-  assert.equal(a.reachRate, 100, 'A 도달률=100(전원 ≥60)');
-  assert.equal(b.reachRate, 0, 'B 도달률=0(전원 <60)');
+  // [W2-b 6-1] 구 reachRate 는 '평균 60점 이상 학생 비율'(avgOver60Rate)로 개명·분모 교정됐다.
+  //   분모가 '재적 전수' → '채점 기록 보유 학생'이라 합성 지역(전원 채점 로그 보유)에선 값이 같다.
+  assert.equal(a.reachRate, undefined, "폐기된 'reachRate' 키가 남아 있으면 안 된다(뜻이 다른 도달률 2개 금지)");
+  assert.equal(a.avgOver60Rate, 100, 'A 평균 60점 이상 학생 비율=100(전원 ≥60)');
+  assert.equal(b.avgOver60Rate, 0, 'B 평균 60점 이상 학생 비율=0(전원 <60)');
+  assert.equal(a.scoredStudents, 10, 'A 채점 기록 보유 학생 10명(분모 노출)');
+  assert.equal(b.scoredStudents, 10, 'B 채점 기록 보유 학생 10명(분모 노출)');
   // A 는 활용·성취 모두 최상위권 → good, B 는 하위권 → both_low 후보
   assert.equal(b.quadrant, 'both_low', 'B 는 이중취약(both_low)');
 });
@@ -322,17 +327,21 @@ test('INV-E8: 권한 — 학생·교사 403, admin 200, dim 오류 400', async (
 });
 
 // ──────────────────────────────────────────────────────────────────────────
-// INV-E9: reachRate(v1 간이) SQL 미러 — 개인 avg_score≥60 학생수/재학생수 ×100.
-//   합성 지역 A(100)/B(0) 로 결정적 대조 + SQL 재계산 교차.
+// INV-E9(W2-b 개정): '평균 60점 이상 학생 비율' SQL 미러 — 분모는 **채점 기록 보유 학생**.
+//   구 정의(분모=재적 전수)는 정본사전 §1-A-2 로 폐기됐다. 폐기 근거:
+//     분자 서브쿼리가 INNER JOIN + HAVING uavg IS NOT NULL 이라 채점 로그 0건 학생은 분자에
+//     절대 못 들어가는데 분모는 로그 유무 무관 전수 → 수학적으로 `값 ≤ 채점 데이터 보유율`.
+//     즉 성취가 아니라 커버리지를 재던 지표였고, 교과 필터가 분자에만 걸려 교과를 좁히면 붕괴했다.
+//   → 분자·분모를 같은 모집단으로 맞춘다(교과 필터도 분자·분모 동시 적용).
 // ──────────────────────────────────────────────────────────────────────────
-test('INV-E9: reachRate v1 정의 = 개인 avg≥60 학생수/재학생수 (SQL 미러)', async () => {
+test('INV-E9: avgOver60Rate 분모 = 채점 기록 보유 학생(재적 전수 아님) — SQL 미러', async () => {
   const j = await fetchEquity();
-  const SCORED = "'exam_complete','homework_submit','content_solve','self_learn','daily_complete','wrong_note_retry','node_complete'";
+  const SCORED = "'exam_complete','homework_submit','content_solve','self_learn','daily_complete','wrong_note_retry','node_complete','content_complete','problem_attempt'";
   const norm = '(CASE WHEN ll.result_score <= 1 THEN ll.result_score*100 ELSE ll.result_score END)';
   for (const region of [REGION_A, REGION_B]) {
     const u = findUnit(j, region);
     const row = tdb.prepare(`
-      SELECT SUM(CASE WHEN uavg >= 60 THEN 1 ELSE 0 END) reached
+      SELECT COUNT(*) scored, SUM(CASE WHEN uavg >= 60 THEN 1 ELSE 0 END) reached
       FROM (
         SELECT u.id uid, AVG(CASE WHEN ll.activity_type IN (${SCORED}) THEN ${norm} END) uavg
         FROM users u JOIN learning_logs ll ON ll.user_id = u.id
@@ -341,9 +350,12 @@ test('INV-E9: reachRate v1 정의 = 개인 avg≥60 학생수/재학생수 (SQL 
         GROUP BY u.id HAVING uavg IS NOT NULL
       )
     `).get(region);
-    const reached = row.reached || 0;
-    const expect = Math.round((reached / u.students) * 1000) / 10;
-    assert.equal(u.reachRate, expect, `${region}: reachRate(${u.reachRate}) == reached/students(${expect})`);
+    const reached = row.reached || 0, scored = row.scored || 0;
+    const expect = scored > 0 ? Math.round((reached / scored) * 1000) / 10 : null;
+    assert.equal(u.scoredStudents, scored, `${region}: scoredStudents(분모) 노출 일치`);
+    assert.equal(u.avgOver60Rate, expect, `${region}: avgOver60Rate(${u.avgOver60Rate}) == reached/scored(${expect})`);
+    // 폐기 계약: '도달률' 의미 필드는 groupReachedRate(A3) 하나뿐이어야 한다.
+    assert.equal(u.reachRate, undefined, `${region}: 폐기된 reachRate 키 잔존 금지`);
   }
 });
 

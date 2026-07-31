@@ -31,6 +31,12 @@ require('../db/schema').initSchema();
 
 const express = require('express');
 const session = require('express-session');
+// [W2-a] 채점형 유형 목록은 SSOT 에서 가져온다.
+//   과거 이 파일은 7종을 SQL 문자열로 하드코딩했다가, 채점형 화이트리스트가
+//   확장되자(content_complete·problem_attempt 편입) API 와 어긋나 오탐을 냈다.
+//   테스트가 지켜야 할 계약은 "분모가 채점형이다"이지 "분모가 정확히 이 7개다"가 아니므로,
+//   목록 자체는 SSOT 를 미러링하고 **의미**를 별도로 단언한다(아래 INV-R3).
+const { SCORED_TYPES_SQL_LIST } = require('../lib/lrs/score-scale');
 
 const ADMIN = 1;
 const SVC = 't_rel_p0_svc';       // 합성 전용 서비스(격리 대조용)
@@ -214,17 +220,54 @@ test('INV-R3: missing_*_rate/denominators/last_synced 계약 + 결측률=채점�
   // 결측률 = miss/denom 재계산 대조(채점형 분모 — SQL 미러). 전 로그 분모가 아님을 박제.
   const denom = d.denominators.achievement;
   assert.ok(denom > 0, '전제: 채점형 분모 > 0');
-  const missSql = tdb.prepare(`
-    SELECT SUM(CASE WHEN activity_type IN ('exam_complete','homework_submit','content_solve','self_learn','daily_complete','wrong_note_retry','node_complete')
-                     AND (achievement_code IS NULL OR TRIM(achievement_code)='') THEN 1 ELSE 0 END) miss,
-           SUM(CASE WHEN activity_type IN ('exam_complete','homework_submit','content_solve','self_learn','daily_complete','wrong_note_retry','node_complete') THEN 1 ELSE 0 END) denom
-    FROM learning_logs
+  const WINDOW = `
     WHERE source_service IS NOT NULL AND source_service NOT LIKE 'demo%'
-      AND DATE(created_at) >= DATE('now','-30 days') AND DATE(created_at) <= DATE('now')
+      AND DATE(created_at) >= DATE('now','-30 days') AND DATE(created_at) <= DATE('now')`;
+  const missSql = tdb.prepare(`
+    SELECT SUM(CASE WHEN activity_type IN (${SCORED_TYPES_SQL_LIST})
+                     AND (achievement_code IS NULL OR TRIM(achievement_code)='') THEN 1 ELSE 0 END) miss,
+           SUM(CASE WHEN activity_type IN (${SCORED_TYPES_SQL_LIST}) THEN 1 ELSE 0 END) denom
+    FROM learning_logs ${WINDOW}
   `).get();
   assert.equal(d.denominators.achievement, missSql.denom, 'API 성취분모 == SQL 채점형 분모');
   const expectRate = Math.round((missSql.miss / missSql.denom) * 1000) / 10;
   assert.equal(d.missing_achievement_rate, expectRate, `성취결측률=miss/denom(채점형 분모): API ${d.missing_achievement_rate} vs SQL ${expectRate}`);
+
+  // ★ 이 테스트의 진짜 계약 — 목록이 아니라 "의미"를 박제한다.
+  //   분모는 전체 로그가 아니라 채점형이며, 조회 로그는 절대 분모에 없다.
+  //   (조회를 분모에 넣으면 "성취기준 결측 85%" 같은 허위 경보가 만들어진다)
+  const totals = tdb.prepare(`
+    SELECT COUNT(*) allLogs,
+           SUM(CASE WHEN activity_type IN ('content_view','lesson_view','attendance_checkin','post_view','survey_respond') THEN 1 ELSE 0 END) viewish
+    FROM learning_logs ${WINDOW}
+  `).get();
+  assert.ok(totals.viewish > 0, '전제: 창 안에 조회류 로그가 존재해야 대조가 의미 있음');
+  assert.ok(d.denominators.achievement < totals.allLogs,
+    `분모(${d.denominators.achievement})가 전체 로그(${totals.allLogs})와 같다 — 채점형 필터 소실`);
+  assert.ok(d.denominators.achievement <= totals.allLogs - totals.viewish,
+    `분모에 조회류 로그가 섞였다 (분모 ${d.denominators.achievement} > 비조회 ${totals.allLogs - totals.viewish})`);
+
+  // ★★ [재감리 2026-07-31] 이중 장부 복원 — 위 대조만으로는 결함을 못 잡는다.
+  //   위 `denominators.achievement == missSql.denom` 은 테스트가 라우트와 **같은 SSOT**
+  //   (SCORED_TYPES_SQL_LIST)를 import 해 만든 SQL 이라, SSOT 가 오염되면 양쪽이 함께 움직여
+  //   항상 통과한다. 실제로 lesson_progress(진도율)를 SCORED_TYPES 에 주입해도 전부 통과했다:
+  //     · SSOT 미러라 분모 일치 유지  · lesson_progress 는 위 viewish 목록에도 없어 상한도 통과.
+  //   → 목록을 미러링하지 않는 **독립 단언**을 둔다. "무엇이 채점형인가"는 바뀔 수 있어도
+  //     "진도율·조회는 채점이 아니다"는 정의상 불변이므로 이 목록은 stale 되지 않는다.
+  const { SCORED_TYPES } = require('../lib/lrs/score-scale');
+  for (const banned of ['lesson_progress', 'content_view', 'lesson_view', 'attendance_checkin', 'post_view', 'survey_respond']) {
+    assert.ok(!SCORED_TYPES.includes(banned),
+      `'${banned}' 는 정답/점수 판정이 없는 유형이다 — 채점형 모집단(SCORED_TYPES)에 들어가면 ` +
+      `성취기준 결측률·평균 점수 분모가 오염된다 (진도율 0.5 가 '성취 50점'이 되는 부류)`);
+  }
+  // 진도형 로그가 분모에서 실제로 빠졌는지 수치로도 확인(목록 단언의 행동적 짝).
+  const progressCnt = tdb.prepare(`
+    SELECT COUNT(*) c FROM learning_logs ${WINDOW} AND activity_type = 'lesson_progress'
+  `).get().c;
+  if (progressCnt > 0) {
+    assert.ok(d.denominators.achievement <= totals.allLogs - totals.viewish - progressCnt,
+      `분모에 진도형(lesson_progress ${progressCnt}건)이 섞였다 (분모 ${d.denominators.achievement})`);
+  }
 });
 
 // ──────────────────────────────────────────────────────────────────────────

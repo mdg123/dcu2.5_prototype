@@ -9,10 +9,64 @@ const { extractLogContext } = require('../lib/log-context');
 const { ensureTodayAttendance } = require('../db/attendance');
 const buildAssignment = require('../lib/xapi/builders/assignment');
 const xapiSpool = require('../lib/xapi/spool');
+const db = require('../db/index');
+const { masteryRecomputeSql } = require('../lib/lrs/mastery-population');
 
 function _hwSchoolLevel(sc) {
   const s = String(sc || '');
   return s.endsWith('-e') ? '초' : s.endsWith('-m') ? '중' : s.endsWith('-h') ? '고' : null;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// [W2-b R3] 채점 시점에 '성취 시도'를 확정한다 — 과제의 성취 반영 경로 완성.
+//
+//   성취 1시도의 정본 술어(lib/lrs/mastery-population.js masteryAttemptWhere)는 셋을 모두 요구한다:
+//     ① achievement_code 있음  ② 채점형 유형(SCORED_TYPES)  ③ result_success 있음
+//   과제가 남기는 두 로그는 각각 한 조건씩 놓쳐, 지금까지 **어느 쪽도 성취에 기여하지 못했다**:
+//     · homework_submit — ①② 만족. 그러나 제출 시점엔 채점 전이라 ③이 NULL(§6-5 에서 의도적으로 NULL 화).
+//     · homework_graded — ③ 보유. 그러나 SCORED_TYPES 에서 **의도적으로 제외**(②)돼 있다.
+//       (score-scale.js 근거: "교사의 채점 '행위' 로그이지 학생 성취가 아니다" — 이 제외는 옳다.)
+//   ⇒ 판정이 생기는 순간(채점)에 **학생의 제출 로그(①②)에 그 판정을 채워 넣는 것**이 정답이다.
+//     제출은 여전히 판정이 아니며(제출 직후 result_success 는 NULL 유지),
+//     채점된 뒤에만 실제 정오값이 붙는다. 하드코딩 100% 로 돌아가지 않는다.
+//
+//   재계산은 증분이 아니라 SSOT 술어로 (user, code) 한 쌍을 원천에서 다시 센다.
+//   learning-log-helper 와 **같은 SQL 문자열·같은 분류기**를 호출한다(규칙 2벌 금지).
+// ─────────────────────────────────────────────────────────────────────────────
+function applyGradeToSubmitLog({ userId, homeworkId, classId, normalizedScore, achievementCode, subjectCode }) {
+  const success = normalizedScore >= 0.6 ? 1 : 0;
+  const upd = db.prepare(`
+    UPDATE learning_logs
+       SET result_score = ?, result_success = ?
+     WHERE user_id = ? AND activity_type = 'homework_submit'
+       AND CAST(target_id AS INTEGER) = ? AND class_id = ?
+  `).run(normalizedScore, success, userId, parseInt(homeworkId), classId);
+
+  // achievement_code 가 없는 과제는 어느 성취기준에 대한 시도인지 특정할 수 없다(① 미충족).
+  //   이때는 로그에 판정만 남고 성취 집계에는 기여하지 않는다 — 거짓 귀속을 만들지 않기 위함.
+  if (!upd.changes || !achievementCode) return { updated: upd.changes || 0, mastery: false };
+
+  const { classifyStatus, reachRate, STATUS_KO } = require('../db/lrs-mastery');
+  const agg = db.prepare(masteryRecomputeSql()).get(userId, achievementCode);
+  if (!agg || !agg.attempt_count) return { updated: upd.changes, mastery: false };
+  const rate = reachRate(agg.success_count, agg.attempt_count, agg.avg_score);
+  const status = classifyStatus(agg.attempt_count, rate);
+  db.prepare(`
+    INSERT INTO lrs_achievement_stats (user_id, achievement_code, subject_code, attempt_count, success_count, avg_score, level, last_level, last_attempt_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+    ON CONFLICT(user_id, achievement_code)
+    DO UPDATE SET
+      subject_code = COALESCE(excluded.subject_code, subject_code),
+      attempt_count = excluded.attempt_count,
+      success_count = excluded.success_count,
+      avg_score = excluded.avg_score,
+      level = excluded.level,
+      last_level = excluded.last_level,
+      last_attempt_at = CURRENT_TIMESTAMP,
+      updated_at = CURRENT_TIMESTAMP
+  `).run(userId, achievementCode, agg.subject_code ?? subjectCode ?? null,
+         agg.attempt_count, agg.success_count, agg.avg_score, status, STATUS_KO[status]);
+  return { updated: upd.changes, mastery: true };
 }
 
 function requireClassMember(req, res, next) {
@@ -294,7 +348,12 @@ router.post('/:classId/:homeworkId/submit', requireAuth, requireClassMember, (re
       classId: parseInt(req.params.classId),
       verb: 'submitted',
       sourceService: 'class',
-      resultSuccess: 1,
+      // [W2-b 6-5] 제출은 성공/실패 판정이 아니다 — 채점 전이므로 결과는 '미정'(NULL).
+      //   과거 하드코딩 1 때문에 '제출 로그의 성공비율'을 쓰던 과제 제출률이 실데이터에서 구조적으로 항상 100%였다.
+      //   [W2-b R3] 합격/점수 판정은 **교사 채점 시 이 제출 로그에 채워진다**(applyGradeToSubmitLog).
+      //   homework_graded 로그는 채점 '행위' 기록일 뿐 채점형 모집단(SCORED_TYPES)에서 제외돼 있어
+      //   그 로그만으로는 점수·성취에 기여하지 못한다 — 반드시 이 행이 갱신돼야 한다.
+      resultSuccess: null,
       objectType: hw ? hw.title : '과제',
       achievementCode: hw ? hw.achievement_code : null,
       subjectCode: hw ? hw.subject_code : null,
@@ -366,6 +425,17 @@ router.post('/:classId/:homeworkId/grade/:submissionId', requireAuth, requireCla
         ...extractLogContext(req),
         metadata: { subject: hw ? hw.subject_code : null, feedback }
       });
+      // [W2-b R3] 채점 판정을 학생의 제출 로그에 확정 — 이 호출이 있어야 과제가 성취 집계에 들어간다.
+      try {
+        applyGradeToSubmitLog({
+          userId: submission.student_id,
+          homeworkId: req.params.homeworkId,
+          classId: parseInt(req.params.classId),
+          normalizedScore,
+          achievementCode: hw ? hw.achievement_code : null,
+          subjectCode: hw ? hw.subject_code : null
+        });
+      } catch (e) { console.error('[homework] applyGradeToSubmitLog:', e.message); }
       // xAPI: 과제 채점 assignment.finished (채점 결과 포함, 학생 명의로)
       try {
         xapiSpool.record('assignment', buildAssignment, { userId: submission.student_id, classId: parseInt(req.params.classId) }, {

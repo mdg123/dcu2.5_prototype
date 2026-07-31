@@ -1665,6 +1665,18 @@ function kpiCard(label, value, unit, trend, tone, extra, drill){
   </article>`;
 }
 
+/* [W2-b] 비율 표기 — 표본이 없어 계산 불가면 0 이 아니라 '—'(정본사전 §4-2 '0 채움 금지'). */
+function _pctOrDash(v){ return (v == null || v === '' || Number.isNaN(Number(v))) ? '—' : String(v); }
+/* 값이 없으면 단위(%)도 붙이지 않는다 — "—%" 같은 표기 방지. */
+function _pctUnit(v){ return (v == null || v === '' || Number.isNaN(Number(v))) ? '' : '%'; }
+/* [W2-b §4-2] 채점 데이터가 없을 때 "평균 0점"으로 채우지 않는다 — 0점은 '못했다'는 거짓 신호. */
+function _avgNote(v){ return (v == null) ? '아직 채점된 활동이 없어요' : `평균 ${v}점`; }
+/* [W2-b 6-5] 마감 전 미제출 쌍은 '미제출'로 단정하지 않는다 — 아직 기간 중임을 병기. */
+function _hwOpenNote(s){
+  const open = Number(s && s.homeworkOpenPairs) || 0;
+  return open > 0 ? `이 중 ${open}개는 아직 마감 전이에요` : null;
+}
+
 function chartWrap(id, title, subtitle, insight){
   return `<section class="dc-chart-wrapper">
     <header>
@@ -1902,7 +1914,7 @@ function _ewsWeakHtml(weaknesses){
   // (B) hero — 최취약 1건
   const heroSubjCls = _subjectBadgeClass(w0.subject_label);
   const heroRate = (w0.hasScore && w0.avg_score != null)
-    ? `<span class="ews-drw-hero__rate">평균 점수 ${Math.round(w0.avg_score)}%</span>` : '';
+    ? `<span class="ews-drw-hero__rate">평균 점수 ${Math.round(w0.avg_score)}점</span>` : '';
   const heroHtml = `
     <div class="ews-drw-hero">
       <div class="ews-drw-hero__cap"><i class="fas fa-flag" aria-hidden="true"></i> 이 학생이 특히 어려워하는 것</div>
@@ -2233,22 +2245,25 @@ VIEWS['s-perform'] = async function(root){
     root.innerHTML = tplEmpty('최근 수행한 평가·과제·자기주도·콘텐츠 학습이 없어요', {href:'/self-learn/', label:'스스로채움 시작하기'});
     return;
   }
-  // 콘텐츠 활동 KPI 부제: 점수 있는 콘텐츠 문항풀이 평균만 표기(조회·수업진행은 점수 없음).
-  const contentSub = s.contentSolveAvgScore != null ? `문항풀이 평균 ${s.contentSolveAvgScore}점` : '조회·수업 포함';
+  // 콘텐츠 문항풀이 KPI 부제: 점수 있는 content_solve 평균만 표기.
+  const contentSub = s.contentSolveAvgScore != null ? `평균 ${s.contentSolveAvgScore}점` : '아직 채점된 문제가 없어요';
+  // [W2-b 6-9] 조회는 학습 활동이 아니다 — 별도 줄로 분리 표기(합산 금지).
+  const viewCnt = Number(s.contentViewCount)||0;
+  const viewNote = viewCnt>0 ? `콘텐츠 조회 ${viewCnt.toLocaleString()}회 (학습활동에는 안 세요)` : null;
   root.innerHTML = `
     <section class="dc-kpi-grid">
-      ${kpiCard('완료 평가', (s.examCount||0).toLocaleString(), '건', {dir:'flat',text:`평균 ${s.examAvgScore||0}점`}, 'primary', null, {bucket:'exam'})}
-      ${kpiCard('제출 과제', (s.homeworkCount||0).toLocaleString(), '건', {dir:'flat',text:`제출률 ${s.homeworkSubmitRate||0}%`}, 'success', null, {bucket:'homework'})}
-      ${kpiCard('자기주도 학습', (s.selfLearnCount||0).toLocaleString(), '건', {dir:'flat',text:`평균 ${s.selfLearnAvgScore||0}점`}, 'warning', null, {bucket:'self'})}
-      ${kpiCard('콘텐츠 활동', (s.contentCount||0).toLocaleString(), '건', {dir:'flat',text:`조회·풀이·수업 · ${contentSub}`}, 'purple', null, {bucket:'content'})}
-      ${kpiCard('학습 활동', (s.totalActs||0).toLocaleString(), '건', {dir:'flat',text:'평가·과제·자기주도·콘텐츠 학습 합계'}, 'primary', null, {bucket:'all'})}
+      ${kpiCard('완료 평가', (s.examCount||0).toLocaleString(), '건', {dir:'flat',text:_avgNote(s.examAvgScore)}, 'primary', null, {bucket:'exam'})}
+      ${kpiCard('제출 과제', (s.homeworkCount||0).toLocaleString(), '건', {dir:'flat',text:`부과 ${(s.homeworkAssignedPairs||0)}개 중 ${(s.homeworkSubmittedPairs||0)}개 제출`}, 'success', null, {bucket:'homework'})}
+      ${kpiCard('자기주도 학습', (s.selfLearnCount||0).toLocaleString(), '건', {dir:'flat',text:_avgNote(s.selfLearnAvgScore)}, 'warning', null, {bucket:'self'})}
+      ${kpiCard('콘텐츠 문항풀이', (s.contentCount||0).toLocaleString(), '건', {dir:'flat',text:contentSub}, 'purple', null, {bucket:'content'})}
+      ${kpiCard('학습 활동', (s.totalActs||0).toLocaleString(), '건', {dir:'flat',text:'평가·과제·자기주도·문항풀이 합계'}, 'primary', viewNote, {bucket:'all'})}
     </section>
     <div id="sRecentActs"></div>
     <section class="dc-chart-grid">
-      ${chartWrap('sPerfTrend','일별 학습수행 추이','평가·과제·자기주도·콘텐츠 학습')}
+      ${chartWrap('sPerfTrend','일별 학습수행 추이','평가·과제·자기주도·문항풀이')}
     </section>
     <section><h2 style="margin:16px 0 8px;">활동 유형별 요약</h2><div id="sPerfTypeTable"></div>
-      <p class="s-perf-note"><i class="fas fa-circle-info" aria-hidden="true"></i> 표는 게시글·설문 등 전체 활동을 포함해요. 위 <b>학습 활동</b> 카드는 평가·과제·자기주도·콘텐츠 학습만 합한 수예요.</p>
+      <p class="s-perf-note"><i class="fas fa-circle-info" aria-hidden="true"></i> 표는 콘텐츠 조회·게시글·설문 등 전체 활동을 포함해요. 위 <b>학습 활동</b> 카드는 직접 풀고 제출한 활동만 집계해요(조회는 빠져요).</p>
     </section>`;
   bindPerfDrilldown(root);
   renderRecentActs();   // P2-2: 최근 학습 활동 카드 (KPI 아래·추이 위, 비동기 후행 채움)
@@ -3124,10 +3139,10 @@ VIEWS['t-perform'] = async function(root){
   const studentCount = (d.byStudent||[]).filter(r => r.self_cnt>0).length;
   root.innerHTML = `
     <section class="dc-kpi-grid">
-      ${kpiCard('반 평가 완료', (s.examCount||0).toLocaleString(), '건', {dir:'flat',text:`완료율 ${s.examCompletionRate||0}%`}, 'primary')}
-      ${kpiCard('반 과제 제출률', (s.homeworkSubmitRate||0), '%', {dir:'flat',text:`${s.homeworkCount||0}건 중`}, 'success')}
+      ${kpiCard('평가 응시율', _pctOrDash(s.examTakeRate), _pctUnit(s.examTakeRate), {dir:'flat',text:`응시 대상 ${(s.examAssignedCount||0)}명 중 ${(s.examTakeCount||0)}명 응시`}, 'primary')}
+      ${kpiCard('평가 합격률', _pctOrDash(s.examPassRate), _pctUnit(s.examPassRate), {dir:'flat',text:`60점 이상 · 응시 ${(s.examCount||0)}건 중 ${(s.examPassCount||0)}건`}, 'primary')}
+      ${kpiCard('과제 제출률', _pctOrDash(s.homeworkSubmitRate), _pctUnit(s.homeworkSubmitRate), {dir:'flat',text: s.homeworkAssignedPairs ? `부과 ${s.homeworkAssignedPairs}개 중 ${(s.homeworkSubmittedPairs||0)}개 제출` : '이 기간에 부과된 과제가 없어요'}, 'success', _hwOpenNote(s))}
       ${kpiCard('자기주도 참여자', studentCount, '명', {dir:'flat',text:`총 ${(s.selfLearnCount||0)}건`}, 'warning')}
-      ${kpiCard('반 평균 점수', (s.examAvgScore||0), '점', {dir:'flat',text:'평가 기준'}, 'primary')}
     </section>
     <section class="dc-chart-grid">
       ${chartWrap('tPerfBar','활동유형별 건수','전체 활동유형')}
@@ -3164,10 +3179,10 @@ VIEWS['a-perform'] = async function(root){
   const s = d.summary || {};
   root.innerHTML = `
     <section class="dc-kpi-grid">
-      ${kpiCard('전체 평가', (s.examCount||0).toLocaleString(), '건', {dir:'flat',text:`평균 ${s.examAvgScore||0}점`}, 'primary')}
-      ${kpiCard('전체 과제', (s.homeworkCount||0).toLocaleString(), '건', {dir:'flat',text:`제출률 ${s.homeworkSubmitRate||0}%`}, 'success')}
-      ${kpiCard('자기주도 학습', (s.selfLearnCount||0).toLocaleString(), '건', {dir:'flat',text:`평균 ${s.selfLearnAvgScore||0}점`}, 'warning')}
-      ${kpiCard('전체 평균점수', (s.examAvgScore||0), '점', {dir:'flat',text:'평가 기준'}, 'primary')}
+      ${kpiCard('전체 평가', (s.examCount||0).toLocaleString(), '건', {dir:'flat',text:_avgNote(s.examAvgScore)}, 'primary')}
+      ${kpiCard('전체 과제', (s.homeworkCount||0).toLocaleString(), '건', {dir:'flat',text:`제출률 ${_pctOrDash(s.homeworkSubmitRate)}${_pctUnit(s.homeworkSubmitRate)} (부과 ${(s.homeworkAssignedPairs||0)}개 기준)`}, 'success', _hwOpenNote(s))}
+      ${kpiCard('자기주도 학습', (s.selfLearnCount||0).toLocaleString(), '건', {dir:'flat',text:_avgNote(s.selfLearnAvgScore)}, 'warning')}
+      ${kpiCard('전체 평균 점수', (s.examAvgScore||0), '점', {dir:'flat',text:'평가 기준'}, 'primary')}
     </section>
     <section class="dc-chart-grid">
       ${chartWrap('aPerfTrend','일별 수행 추이','전체 학급')}
@@ -3201,34 +3216,41 @@ VIEWS['a-perform'] = async function(root){
 function _renderCustomCore(root, d, opts){
   opts = opts || {};
   const s = d.summary || {};
+  // [W2-b 6-7] '추천수/이행률' 정직화 — 이 화면의 건수는 추천 원장이 아니라 self-learn 서비스가
+  //   발행한 모든 활동 로그 수다. 이행률(B5)은 분모(추천 원장)가 없어 계산 자체가 불가 → 카드에서 제거하고
+  //   그 사실을 문장으로 고지한다(0%·대체 산식으로 채우지 않는다).
   const kpi3 = opts.kpi3 || [
-    ['추천받은 학습', (s.recommendedCount||0).toLocaleString(), '건', `고유 학생 ${s.uniqueLearners||0}명`],
-    ['완료한 학습',   (s.completedCount||0).toLocaleString(), '건', `평균 ${s.avgScore||0}점`],
-    ['이행률',        (s.completionRate||0), '%', '완료/추천']
+    ['자기주도 학습 활동', (s.selfDirectedActivityCount ?? s.recommendedCount ?? 0).toLocaleString(), '건', `참여 학생 ${s.uniqueLearners||0}명`],
+    ['정답 인정 활동',     (s.completedCount||0).toLocaleString(), '건', '채점된 활동 중 정답 인정'],
+    ['평균 점수',          (s.avgScore==null?'—':s.avgScore), (s.avgScore==null?'':'점'), '채점형 활동 기준']
   ];
   const kpiHtml = kpi3.map((k,i)=> kpiCard(k[0], k[1], k[2], {dir:'flat',text:k[3]}, ['primary','success','warning'][i])).join('');
+  const recoNote = s.recoFollowUnavailable
+    ? `<p class="s-perf-note"><i class="fas fa-circle-info" aria-hidden="true"></i> ${escapeHtml(s.recoFollowNote||'추천 이력이 집계되지 않아 이행률을 계산할 수 없습니다')}.</p>`
+    : '';
   root.innerHTML = `
     <section class="dc-kpi-grid">${kpiHtml}</section>
+    ${recoNote}
     <section class="dc-chart-grid">
-      ${chartWrap('customByDay','일별 추천·완료 추이','맞춤학습')}
+      ${chartWrap('customByDay','일별 자기주도 학습 추이','스스로채움 활동 로그')}
     </section>
-    <section><h2 style="margin:16px 0 8px;">약점 성취기준 Top 10</h2><div id="customWeak"></div></section>`;
+    <section><h2 style="margin:16px 0 8px;">보완이 필요한 성취기준</h2><div id="customWeak"></div></section>`;
   const days = d.byDay || [];
   if (!days.length) {
     document.getElementById('customByDay').closest('.dc-chart-wrapper').innerHTML =
-      `<header><h2>일별 추천·완료 추이</h2></header>` + tplEmpty('추이 데이터가 없어요');
+      `<header><h2>일별 자기주도 학습 추이</h2></header>` + tplEmpty('추이 데이터가 없어요');
   } else {
     mkChart(document.getElementById('customByDay'),'bar', {
       labels: days.map(x=>x.date),
       datasets: [
-        { label:'추천', data: days.map(x=>x.recommended||0), backgroundColor:'#2563eb' },
-        { label:'완료', data: days.map(x=>x.completed||0),   backgroundColor:'#10b981' }
+        { label:'학습 활동', data: days.map(x=>x.recommended||0), backgroundColor:'#2563eb' },
+        { label:'정답 인정', data: days.map(x=>x.completed||0),   backgroundColor:'#10b981' }
       ]
     });
   }
   const weak = d.weakTargets || [];
   if (!weak.length) {
-    document.getElementById('customWeak').innerHTML = tplEmpty('약점 성취기준이 없습니다');
+    document.getElementById('customWeak').innerHTML = tplEmpty('아직 보완이 필요한 성취기준이 없어요');
   } else {
     renderDataTable(document.getElementById('customWeak'), {
       columns:[
@@ -3244,13 +3266,14 @@ function _renderCustomCore(root, d, opts){
               : '';
             return `<span style="font-weight:600;">${escapeHtml(name)}</span>${codeSub}`;
           }},
-        {key:'attempts',label:'시도',align:'right'},
-        // 평균점수: BE가 0~100으로 정규화(계약). 방어적 폴백 — 값이 0<v≤1로 오면(구 0~1 원점수) ×100.
-        //   >1이면 그대로 통과(BE 정규화 후 재변환 방지, 멱등). null은 '-'.
-        {key:'avg_score',label:'평균점수',align:'right', format:(v)=>{
+        {key:'attempts',label:'연습 횟수',align:'right'},
+        // [W2-b 6-10-④] FE 스케일 되돌림 폴백 제거 — 정확히 1.0(만점)이 100 으로 튀는 경계 버그가
+        //   구조적으로 존재했다. BE 가 0~100 정규화 계약을 지키므로 FE 재변환은 불필요·유해(정본사전 §2-A-3).
+        //   미채점 항목은 0 으로 채우지 않고 사유를 그대로 쓴다.
+        {key:'avg_score',label:'평균 점수',align:'right', format:(v,row)=>{
+          if (row && row.hasScore === false) return '<span style="color:var(--gray-500);">아직 채점 전</span>';
           if (v==null) return '-';
-          let n = Number(v); if (!isFinite(n)) return '-';
-          if (n > 0 && n <= 1) n = n * 100;
+          const n = Number(v); if (!isFinite(n)) return '-';
           return (Math.round(n*10)/10) + '점';
         }},
         // 풀 타임스탬프 → 날짜(YYYY-MM-DD)만.
@@ -3280,9 +3303,9 @@ VIEWS['t-custom'] = async function(root){
   const s = d.summary || {};
   _renderCustomCore(root, d, {
     kpi3: [
-      ['반 추천수',  (s.recommendedCount||0).toLocaleString(), '건', `완료 ${s.completedCount||0}건`],
-      ['반 이행률', (s.completionRate||0), '%', '완료/추천'],
-      ['참여 학생', (s.uniqueLearners||0), '명', '고유']
+      ['반 자기주도 학습 활동', (s.selfDirectedActivityCount ?? s.recommendedCount ?? 0).toLocaleString(), '건', `정답 인정 ${s.completedCount||0}건`],
+      ['반 평균 점수', (s.avgScore==null?'—':s.avgScore), (s.avgScore==null?'':'점'), '채점형 활동 기준'],
+      ['참여 학생', (s.uniqueLearners||0), '명', '활동 1회 이상']
     ]
   });
 };
@@ -3295,9 +3318,9 @@ VIEWS['a-custom'] = async function(root){
   const s = d.summary || {};
   _renderCustomCore(root, d, {
     kpi3: [
-      ['전체 추천수', (s.recommendedCount||0).toLocaleString(), '건', `학생 ${s.uniqueLearners||0}명`],
-      ['전체 이행률', (s.completionRate||0), '%', `완료 ${s.completedCount||0}건`],
-      ['평균 점수',   (s.avgScore||0), '점', '완료 기준']
+      ['전체 자기주도 학습 활동', (s.selfDirectedActivityCount ?? s.recommendedCount ?? 0).toLocaleString(), '건', `학생 ${s.uniqueLearners||0}명`],
+      ['정답 인정 활동', (s.completedCount||0).toLocaleString(), '건', '채점된 활동 중 정답 인정'],
+      ['평균 점수',   (s.avgScore==null?'—':s.avgScore), (s.avgScore==null?'':'점'), '채점형 활동 기준']
     ]
   });
 };
@@ -3307,11 +3330,15 @@ VIEWS['a-custom'] = async function(root){
  * BE 신규 계약(prev/trend/recent/정확한 lessons_held) 소비 + 옛 계약 graceful 폴백. */
 
 // 4지표 고정 색 토큰 (전 블록 통일)
+// [W2-b 6-8] 라벨 정정 — 4지표 모두 '기간 내 생성(개설·등록·작성)' 카운트다.
+//   'lessons_held(진행 수업)'는 lessons.created_at 기준 개설 수여서, 같은 기간에 수업 진행 로그가
+//   있어도 0 건으로 표시돼 "수업을 안 했다"는 거짓 신호를 줬다 → '개설 수업 수'로 정정.
+//   (진짜 진행 수업 지표는 근거 데이터(수업 진행 로그)가 확정되기 전까지 만들지 않는다.)
 const TIDX_METRICS = [
-  { key:'contents_authored', label:'작성 콘텐츠', short:'콘텐츠', unit:'개', color:'#2563eb', tone:'primary', trendKey:'contents' },
-  { key:'lessons_held',      label:'진행 수업',   short:'수업',   unit:'건', color:'#10b981', tone:'success', trendKey:'lessons'  },
-  { key:'exams_opened',      label:'개설 평가',   short:'평가',   unit:'건', color:'#f59e0b', tone:'warning', trendKey:'exams'    },
-  { key:'feedback_count',    label:'피드백',      short:'피드백', unit:'건', color:'#8b5cf6', tone:'purple',  trendKey:'feedback' },
+  { key:'contents_authored', label:'등록 콘텐츠 수', short:'콘텐츠', unit:'개', color:'#2563eb', tone:'primary', trendKey:'contents' },
+  { key:'lessons_held',      label:'개설 수업 수',   short:'수업',   unit:'건', color:'#10b981', tone:'success', trendKey:'lessons'  },
+  { key:'exams_opened',      label:'개설 평가 수',   short:'평가',   unit:'건', color:'#f59e0b', tone:'warning', trendKey:'exams'    },
+  { key:'feedback_count',    label:'작성 피드백 수', short:'피드백', unit:'건', color:'#8b5cf6', tone:'purple',  trendKey:'feedback' },
 ];
 // 최근활동 유형 → 아이콘·라벨·색 (4지표 색 토큰 재사용)
 const TIDX_TYPE = {
@@ -3729,21 +3756,26 @@ VIEWS['s-daily'] = async function(root){
 /* ======== t-daily ======== */
 VIEWS['t-daily'] = async function(root){
   root.innerHTML = tplLoading(3);
-  const d = await apiGet('/api/lrs/stats/daily-snapshot');
+  // 🔴 [W2-b R2] apiGet 금지 — state.period 가 자동 부착되면 BE 가 '기간 누계'를 today 로 돌려준다.
+  const d = await _fetchNoPeriod('/api/lrs/stats/daily-snapshot' + _dailySnapQS());
   if (!d || !d.success) { root.innerHTML = tplEmpty('일일현황 데이터를 불러오지 못했습니다'); return; }
   const t = d.today || {}, y = d.yesterday || {};
-  if (!(t.totalActs||y.totalActs)) {
-    root.innerHTML = tplEmpty('오늘/어제 반 활동 기록이 없어요'); return;
+  // 값은 정본 7종(학습활동)만 — 조회·게시글·출석은 '학습'이 아니므로 KPI 에서 제외한다.
+  const tActs = _dsPick(t,'learnActs','totalActs'),         yActs = _dsPick(y,'learnActs','totalActs');
+  const tUsers = _dsPick(t,'learnUsers','uniqueUsers'),     yUsers = _dsPick(y,'learnUsers','uniqueUsers');
+  const tDur = _dsPick(t,'learnDurationMin','durationMin'), yDur = _dsPick(y,'learnDurationMin','durationMin');
+  if (!(tActs||yActs)) {
+    root.innerHTML = tplEmpty('오늘/어제 반 학습활동 기록이 없어요'); return;
   }
   root.innerHTML = `
     <section class="dc-kpi-grid">
-      ${kpiCard('반 오늘 활동', (t.totalActs||0).toLocaleString(), '건', _deltaTrend(t.totalActs, y.totalActs), 'primary')}
-      ${kpiCard('반 오늘 학생', (t.uniqueUsers||0).toLocaleString(), '명', _deltaTrend(t.uniqueUsers, y.uniqueUsers), 'success')}
-      ${kpiCard('반 학습시간', (t.durationMin||0).toLocaleString(), '분', _deltaTrend(t.durationMin, y.durationMin), 'warning')}
+      ${kpiCard('반 오늘 학습활동', tActs.toLocaleString(), '건', _deltaTrend(tActs, yActs), 'primary')}
+      ${kpiCard('반 오늘 학습한 학생', tUsers.toLocaleString(), '명', _deltaTrend(tUsers, yUsers), 'success')}
+      ${kpiCard('반 오늘 학습시간', tDur.toLocaleString(), '분', _deltaTrend(tDur, yDur), 'warning')}
     </section>
     <section class="dc-chart-grid">
-      ${chartWrap('tDailyHour','시간대별 활동','오늘·어제 비교')}
-      ${chartWrap('tDailySvc','오늘 서비스별 비중')}
+      ${chartWrap('tDailyHour','시간대별 활동','오늘·어제 비교 · 조회 등 전체 활동 포함')}
+      ${chartWrap('tDailySvc','오늘 서비스별 비중','조회 등 전체 활동 포함')}
     </section>`;
   _dailyHourChart('tDailyHour', t, y);
   const bs = t.byService || [];
@@ -3760,21 +3792,26 @@ VIEWS['t-daily'] = async function(root){
 /* ======== a-daily ======== */
 VIEWS['a-daily'] = async function(root){
   root.innerHTML = tplLoading(3);
-  const d = await apiGet('/api/lrs/stats/daily-snapshot');
+  // 🔴 [W2-b R2] apiGet 금지 — period 가 붙으면 '어제'가 직전 30일 누계(617,547분)로 부풀었다.
+  const d = await _fetchNoPeriod('/api/lrs/stats/daily-snapshot' + _dailySnapQS());
   if (!d || !d.success) { root.innerHTML = tplEmpty('일일현황 데이터를 불러오지 못했습니다'); return; }
   const t = d.today || {}, y = d.yesterday || {};
+  // 값은 정본 7종(학습활동)만 — 조회·게시글·출석 혼입 금지.
+  const tActs = _dsPick(t,'learnActs','totalActs'),         yActs = _dsPick(y,'learnActs','totalActs');
+  const tUsers = _dsPick(t,'learnUsers','uniqueUsers'),     yUsers = _dsPick(y,'learnUsers','uniqueUsers');
+  const tDur = _dsPick(t,'learnDurationMin','durationMin'), yDur = _dsPick(y,'learnDurationMin','durationMin');
   root.innerHTML = `
     <section class="dc-kpi-grid">
-      ${kpiCard('전체 오늘 활동', (t.totalActs||0).toLocaleString(), '건', _deltaTrend(t.totalActs, y.totalActs), 'primary')}
-      ${kpiCard('고유 사용자',   (t.uniqueUsers||0).toLocaleString(), '명', _deltaTrend(t.uniqueUsers, y.uniqueUsers), 'success')}
-      ${kpiCard('학습시간',      (t.durationMin||0).toLocaleString(), '분', _deltaTrend(t.durationMin, y.durationMin), 'warning')}
-      ${kpiCard('어제 활동',     (y.totalActs||0).toLocaleString(), '건', {dir:'flat',text:y.date||''}, 'primary')}
+      ${kpiCard('전체 오늘 학습활동', tActs.toLocaleString(), '건', _deltaTrend(tActs, yActs), 'primary')}
+      ${kpiCard('오늘 학습한 사용자', tUsers.toLocaleString(), '명', _deltaTrend(tUsers, yUsers), 'success')}
+      ${kpiCard('오늘 학습시간',      tDur.toLocaleString(), '분', _deltaTrend(tDur, yDur), 'warning')}
+      ${kpiCard('어제 학습활동',      yActs.toLocaleString(), '건', {dir:'flat',text:y.date||''}, 'primary')}
     </section>
     <section class="dc-chart-grid">
-      ${chartWrap('aDailyHour','시간대별 활동','오늘·어제 비교')}
-      ${chartWrap('aDailySvc','오늘 서비스별 비중')}
+      ${chartWrap('aDailyHour','시간대별 활동','오늘·어제 비교 · 조회 등 전체 활동 포함')}
+      ${chartWrap('aDailySvc','오늘 서비스별 비중','조회 등 전체 활동 포함')}
     </section>`;
-  if (!(t.totalActs||y.totalActs)) {
+  if (!(tActs||yActs)) {
     document.getElementById('aDailyHour').closest('.dc-chart-wrapper').innerHTML =
       `<header><h2>시간대별 활동</h2></header>` + tplEmpty('오늘/어제 활동이 없어요');
     document.getElementById('aDailySvc').closest('.dc-chart-wrapper').innerHTML =
@@ -3960,7 +3997,7 @@ VIEWS['s-home'] = async function(root){
         const pct = Math.max(0, Math.min(100, Math.round(Number(w.avg_score)||0)));
         metricHtml = `<div class="s-weak-metric">
           <span class="s-weak-bar" aria-hidden="true"><span class="s-weak-bar__fill" style="width:${pct}%;"></span></span>
-          <span class="s-weak-metric__num">평균 점수 ${pct}%</span>
+          <span class="s-weak-metric__num">평균 점수 ${pct}점</span>
         </div>`;
       } else {
         metricHtml = `<div class="s-weak-metric"><span class="s-weak-metric__num">연습 ${attempts}회</span></div>`;
@@ -4015,6 +4052,23 @@ function _subjectBadgeClass(label){
   const m = { '수학':'subj-math', '국어':'subj-korean', '영어':'subj-english', '과학':'subj-science', '사회':'subj-social' };
   return m[String(label||'').trim()] || 'subj-etc';
 }
+
+/* [W2-b R2] daily-snapshot 전용 쿼리스트링 — scope·realOnly 는 유지하되 period 는 절대 부착하지 않는다.
+ *   BE 는 period/days/from/to 중 하나라도 오면 hasPeriodParam 분기로 '기간 누계 / 직전 동기간'을 반환한다.
+ *   그 값을 '오늘 / 어제' 라벨로 그리면 어제가 617,547분(=1만 시간) 같은 물리 불가능 값이 된다.
+ *   setView 는 이미 이 화면들에서 기간칩을 disabled 하고 "오늘·어제 고정" 이라 고지하는데,
+ *   정작 fetch 는 state.period 를 붙이고 있었다(고지와 동작 불일치). rangeQS 를 쓰면 안 되는 이유. */
+function _dailySnapQS(extra){
+  const p = new URLSearchParams();
+  const sc = state.scope || computeScope();
+  if (sc) p.set('scope', sc);
+  if (state.role === 'admin' && state.realOnly) p.set('realOnly', '1');
+  if (extra) Object.entries(extra).forEach(([k,v])=>{ if(v!=null) p.set(k,v); });
+  const qs = p.toString();
+  return qs ? '?' + qs : '';
+}
+/* 정본 7종(learnActs 등) 우선, 구 BE(필드 미배포) 폴백만 전체 활동 수 — renderDodMini 와 동일 규칙 */
+function _dsPick(o, k, fb){ return Number((o && o[k] != null) ? o[k] : (o && o[fb])) || 0; }
 
 /* period 미부착 직접 fetch (apiGet의 state.period 자동부착 우회) — daily-snapshot '진짜 오늘' 보장 */
 async function _fetchNoPeriod(path){
@@ -4107,11 +4161,13 @@ VIEWS['s-achieve'] = async function(root){
       <section class="mastery-section">
         <div class="ms-head"><div class="ms-titles">
           <h2 class="mastery-h2">성취기준 도달률</h2>
-          <div class="mastery-sub">전체 ${counts.total}개 성취기준 중 도달한 비율 (평가 부족 ${counts.insufficient||0}개 포함)</div>
+          <!-- [W2-b 6-12] 분모는 '평가된 것'(총계 − 평가부족) — 같은 앱의 또래비교 탭·교사 히트맵과 같은 정의(A3).
+               과거엔 여기만 평가부족을 분모에 포함(A1)해, 탭을 옮기면 같은 단어가 다른 뜻이 됐다. -->
+          <div class="mastery-sub">평가된 ${evaluatedCount}개 성취기준 중 도달한 비율${(counts.insufficient||0) > 0 ? ` (평가 부족 ${counts.insufficient}개는 분모에서 제외)` : ''}</div>
         </div></div>
         <div class="chart-body donut-wrap" style="height:300px;">
           <canvas id="sMastDonut" role="img" aria-label="성취기준 도달률 도넛"></canvas>
-          ${donutCenterHtml((counts.reached||0) + ' / ' + counts.total, '성취기준 도달')}
+          ${donutCenterHtml((counts.reached||0) + ' / ' + evaluatedCount, '도달 / 평가')}
         </div>
       </section>
     </div>
@@ -4461,7 +4517,7 @@ VIEWS['s-achieve'] = async function(root){
     // ★ 윤리(P6): 위험점수·등수·"위험" 어휘·신뢰배지 절대 미표기. 하락도 파랑 유지.
     //   선을 못 그리는 경우(점<2)에만 히어로 단독 폴백.
     if (!td || !td.success || !trend || !canDrawLine){
-      // 관측 주차 부족(<3주)이라 '추세선'은 못 그려도, 이번 주 실제 도달률은 반드시 보여준다(학생 노력 반영).
+      // 관측 주차 부족(<3주)이라 '추세선'은 못 그려도, 이번 주 실제 정답률은 반드시 보여준다(학생 노력 반영).
       const sec = document.getElementById('sTrendSection');
       const s0 = trend && (trend.series||[]).filter(p=>p && p.attempts>0).slice(-1)[0];
       const curRate = (trend && trend.currentRate!=null) ? trend.currentRate
@@ -4469,7 +4525,7 @@ VIEWS['s-achieve'] = async function(root){
       const obsW = (trend && trend.observedWeeks) || (s0 ? 1 : 0);
       if (sec){
         if (curRate != null && s0){
-          // 데이터는 있으나 아직 1~2주 → 이번 주 도달률을 큰 숫자로, 추세선은 왜 아직 안 뜨는지 안내
+          // 데이터는 있으나 아직 1~2주 → 이번 주 정답률을 큰 숫자로, 추세선은 왜 아직 안 뜨는지 안내
           sec.querySelector('#sTrendBody').outerHTML =
             `<div class="mastery-empty" id="sTrendBody" style="display:flex;flex-direction:column;align-items:center;gap:14px;padding:22px 18px;">
                <div style="display:flex;align-items:center;gap:16px;">
@@ -4484,7 +4540,10 @@ VIEWS['s-achieve'] = async function(root){
           // 진짜 기록 없음
           sec.querySelector('#sTrendBody').outerHTML =
             `<div class="mastery-empty" id="sTrendBody"><i class="fas fa-seedling me-icon" style="color:#86efac;"></i>
-               <p>아직 성취 기록이 없어요. <b>오늘의 학습</b>이나 문제풀이를 하면 여기에 도달률이 쌓여요!</p>
+               <!-- [W2-b 6-12] 이 차트가 그리는 값은 주별 정답률(success/attempts)이다.
+                    바로 위 형제 분기(4531행)는 이미 '이번 주 정답률'로 올바르게 부르는데
+                    여기만 '도달률'이라 같은 함수가 학생에게 두 가지 지표를 약속하고 있었다. -->
+               <p>아직 성취 기록이 없어요. <b>오늘의 학습</b>이나 문제풀이를 하면 여기에 정답률이 쌓여요!</p>
                <a class="mastery-btn mastery-btn-sm" href="/self-learn/"><i class="fas fa-rocket"></i> 오늘의 학습 시작하기</a></div>`;
         }
       }
@@ -6103,7 +6162,8 @@ function flattenWarnings(w){
     items.forEach(it => all.push({
       user_id: uidOf(x), name: nameOf(x),
       severity: it.severity || (it.avg_score != null && it.avg_score < 50 ? 'high' : 'medium'),
-      reason: `${it.achievement_code||'-'} · ${it.last_level||'미도달'}${it.avg_score!=null?` (평균 ${it.avg_score})`:''} · ${it.attempt_count||'-'}회 시도`,
+      // [W2-b 부수] 단위를 명시한다 — 라벨 없는 숫자는 정답률로 오독된다. BE가 0~100 정규화해 보낸다.
+      reason: `${it.achievement_code||'-'} · ${it.last_level||'미도달'}${it.avg_score!=null?` (평균 점수 ${Math.round(Number(it.avg_score)*10)/10}점)`:''} · ${it.attempt_count||'-'}회 시도`,
       achievement_code: it.achievement_code, _kind:'weak'
     }));
   });
@@ -6126,14 +6186,21 @@ VIEWS['t-home'] = async function(root){
 
   const stats = (dash && dash.stats) || {};
 
-  // 평균성취: stats/daily의 avg_score·count 가중평균
+  // ── [W2-b 6-4] 학급 평균 점수(A5) — 가중치는 '채점 건수'(scored_count) ────────────────
+  //   과거: 일별 avg_score 를 count(=그날 전체 활동 수)로 가중해 95.9점이 나왔다(정답 79.3).
+  //         채점 1건뿐인 날이 활동 200건의 무게를 갖는 구조. BE 는 바로 이 목적으로 scored_count 를
+  //         반환하고 주석에 계약까지 명시돼 있었는데 FE 가 계약을 안 지킨 것이다(BE 수정 불필요).
+  //   또한 `if (s > 0)` 조건 때문에 평균이 정확히 0점인 날이 통째로 빠졌다 → `s != null` 로 교체.
+  //   데이터가 없으면 0 이 아니라 null → '—'(0 채움 금지, 정본사전 §4-2).
   const drowsRaw = (daily && daily.data) || [];
   let wSum = 0, wCnt = 0;
   drowsRaw.forEach(r => {
-    const s = Number(r.avg_score)||0, c = Number(r.count)||0;
-    if (s > 0 && c > 0){ wSum += s*c; wCnt += c; }
+    const s = (r.avg_score == null) ? null : Number(r.avg_score);
+    // 가중치: 채점 건수. BE 미배포(구 계약) 폴백으로만 count 를 쓴다.
+    const c = Number(r.scored_count != null ? r.scored_count : r.count) || 0;
+    if (s != null && isFinite(s) && c > 0){ wSum += s*c; wCnt += c; }
   });
-  const avgScore = wCnt ? Math.round((wSum/wCnt)*10)/10 : 0;
+  const avgScore = wCnt ? Math.round((wSum/wCnt)*10)/10 : null;
 
   const totalActs = stats.totalActivities || 0;
   const totalHours = Math.round((stats.totalDurationMinutes||0)/60);
@@ -6148,7 +6215,7 @@ VIEWS['t-home'] = async function(root){
 
   root.innerHTML = `
     <div class="dc-kpi-grid">
-      ${kpiCard('학급 평균 성취', avgScore,      '점', {dir:'flat', text:'이번 기간'}, 'primary')}
+      ${kpiCard('학급 평균 점수', (avgScore==null?'—':avgScore), '점', {dir:'flat', text: avgScore==null ? '이 기간에 채점된 활동이 없어요' : '채점된 활동 기준 · 이번 기간'}, 'primary')}
       ${kpiCard('총 활동',        totalActs.toLocaleString(), '건', {dir:'up', text:'기간 누적'}, 'success')}
       ${kpiCard('총 학습시간',    totalHours,    '시간', {dir:'flat', text:''}, 'primary')}
       ${kpiCard('지금 지원이 필요한 학생', supportCount, '명', {dir:supportCount?'down':'flat', text:`위험 높음 ${riskSummary.high||0} · 보통 ${riskSummary.medium||0}`}, supportCount?'warning':'primary')}
@@ -6182,7 +6249,8 @@ VIEWS['t-home'] = async function(root){
   }
 
   renderEwsList(document.getElementById('ewsList'), { ok:ewsOk, masked:ewsMasked, list:riskList, summary:riskSummary });
-  await renderDodMini(root);
+  // [W2-b 6-3 ②] 상단 KPI 와 같은 반 스코프로 '오늘' 띠를 그린다(분모 일치).
+  await renderDodMini(root, { classId: cid });
 };
 
 /* ── T-EWS 위험군 카드 리스트 렌더(공통) ── */
@@ -6435,7 +6503,7 @@ VIEWS['t-warnings'] = async function(root){
         </div>
         <div class="ms-controls">
           <select class="ms-select" id="tMastSort" aria-label="행 정렬">
-            <option value="weak">클래스 평균 낮은 순</option>
+            <option value="weak">도달률 낮은 순</option>
             <option value="code">코드순</option>
           </select>
           ${subjects.length > 1 ? `<select class="ms-select" id="tMastSubject" aria-label="교과 필터">
@@ -6547,7 +6615,7 @@ VIEWS['t-warnings'] = async function(root){
       <th class="corner">성취기준 \\ 학생</th>
       ${students.map(st=>`<th class="mh-stu" data-uid="${escapeAttr(st.id)}" title="${escapeAttr(st.name)}"
         role="button" tabindex="0" aria-label="${escapeAttr(st.name + ' 성취 현황 보기')}">${escapeHtml(st.name)}</th>`).join('')}
-      <th class="summary-h">클래스 평균</th><th class="summary-h">도달수</th>
+      <th class="summary-h" title="그 성취기준에 도달한 학생 수 ÷ 평가된 학생 수(평가부족 제외)">도달률</th><th class="summary-h" title="도달 학생 수 / 평가된 학생 수">도달 / 평가</th>
     </tr></thead>`;
     const tbody = `<tbody>${rows.map(s => {
       const codeBare = String(s.code||'').replace(/^\[|\]$/g,'');
@@ -6578,7 +6646,7 @@ VIEWS['t-warnings'] = async function(root){
       const seg = (k,n)=> n>0 ? `<span class="${k}" style="flex-basis:${(n/tot*100).toFixed(1)}%"></span>` : '';
       return `<div class="mastery-card">
         <div class="mc-title">${escapeHtml(s.label||codeBare)}</div>
-        <div class="mc-sub">[${escapeHtml(codeBare)}] · ${escapeHtml(s.subject||'')} · 클래스 평균 ${s.reachedRate==null?'—':s.reachedRate+'%'}</div>
+        <div class="mc-sub">[${escapeHtml(codeBare)}] · ${escapeHtml(s.subject||'')} · 도달률 ${s.reachedRate==null?'—':s.reachedRate+'%'} (도달 ${s.reached||0} / 평가 ${s.evaluated||0}명)</div>
         <div class="mastery-stack">${seg('reached',s.reached)}${seg('partial',s.partial)}${seg('notReached',s.notReached)}${seg('insufficient',s.insufficient)}</div>
         <div class="mc-counts">
           <span><b>${s.reached||0}</b> 도달</span><span><b>${s.partial||0}</b> 부분</span>
@@ -6615,7 +6683,9 @@ VIEWS['t-warnings'] = async function(root){
         let body;
         if (state === 'none') body = `${escapeHtml(sname)} · ${escapeHtml(code)}<br>데이터 없음`;
         else if (state === 'insufficient') body = `${escapeHtml(sname)} · ${escapeHtml(code)}<br>평가 부족 · 3회 미만 풀어 판정 불가`;
-        else body = `${escapeHtml(sname)} · ${escapeHtml(code)}<br>${MASTERY_KO[state]}${rate!==''?` · 정답률 ${Math.round(rate)}%`:''}`;
+        // [W2-b 6-2] 셀 값은 (학생×성취기준) success/attempt = A4 '정답 인정률'이다.
+        //   '도달률'(A1/A3)은 집단 비율에만 쓴다 — 한 단어를 두 뜻으로 쓰지 않는다.
+        else body = `${escapeHtml(sname)} · ${escapeHtml(code)}<br>${MASTERY_KO[state]}${rate!==''?` · 정답 인정률 ${Math.round(rate)}%`:''}`;
         const r = td.getBoundingClientRect();
         MasteryTip.show(body, r.right, r.top);
       };
@@ -6635,7 +6705,7 @@ VIEWS['t-warnings'] = async function(root){
     const codeBare = String(code||'').replace(/^\[|\]$/g,'');
     // 마감1: insufficient 또는 rate null → 정답률 미표기(채점된 값에만 허용). 시도수는 fetch 후 병기.
     const rateTxt = (state !== 'insufficient' && rate != null && rate !== '')
-      ? `정답률 ${Math.round(rate)}%` : '';
+      ? `정답 인정률 ${Math.round(rate)}%` : '';
     LRS.openMasteryDrawer({
       title: stu.name || '학생',
       bodyHtml: `
@@ -6720,7 +6790,7 @@ VIEWS['t-warnings'] = async function(root){
     LRS.openMasteryDrawer({
       title: std.label || codeBare,
       bodyHtml: `
-        <div class="drw-meta">[${escapeHtml(codeBare)}] · ${escapeHtml(std.subject||'')} · 클래스 평균 ${std.reachedRate==null?'—':std.reachedRate+'%'} · 평가 ${std.evaluated||0}/${students.length}명</div>
+        <div class="drw-meta">[${escapeHtml(codeBare)}] · ${escapeHtml(std.subject||'')} · 도달률 ${std.reachedRate==null?'—':std.reachedRate+'%'} · 평가 ${std.evaluated||0}/${students.length}명</div>
         ${groupsHtml}
         <button type="button" class="drw-link" id="drwGotoT3">보충이 필요한 성취기준 표로 이동 ›</button>`
     });
@@ -7125,7 +7195,7 @@ async function _renderActSubjectSection(host, cid){
       labels: legacyRows.map(r=>pickLabel(r, ['subject_label','subject','subject_code','subject_name'], '(교과 미지정)')),
       datasets:[
         { label:'활동 건수', data:legacyRows.map(r=>r.count||0), backgroundColor:'var(--chart-1)' },
-        { label:'평균 성취(%)', data:legacyRows.map(r=>r.avg_score||0), backgroundColor:'var(--chart-2)', yAxisID:'y2' }
+        { label:'평균 점수(점)', data:legacyRows.map(r=>r.avg_score||0), backgroundColor:'var(--chart-2)', yAxisID:'y2' }
       ]
     }, { scales:{ y2:{ position:'right', max:100, grid:{drawOnChartArea:false} } } });
     return;
@@ -7360,13 +7430,25 @@ async function renderDodMini(root, opts){
     }
 
     // ── 교사·관리자: 어제 대비 오늘 미니 띠 (daily-snapshot 사용 유지) ──
-    const dd = await apiGet('/api/lrs/stats/daily-snapshot');
+    // 🔴 [W2-b 6-3] 반드시 _fetchNoPeriod 로 호출한다.
+    //   apiGet 은 state.period 를 자동 부착하고, BE 는 period 파라미터가 있으면 hasPeriodParam 분기로
+    //   '기간 누계 / 직전 기간'을 반환한다. 그 값을 '오늘 / 어제 대비'라는 라벨로 그리는 바람에
+    //   "어제 3,035분(=50시간) 학습" 같은 물리적으로 불가능한 값이 떴다.
+    //   학생 분기는 이미 period 미부착 경로였다 — 같은 패턴으로 통일한다.
+    //   classId 를 부착해 상단 KPI(반 스코프)와 분모도 일치시킨다.
+    const _dsQs = (opts.classId != null) ? `?classId=${encodeURIComponent(opts.classId)}` : '';
+    const dd = await _fetchNoPeriod('/api/lrs/stats/daily-snapshot' + _dsQs);
     if (!dd || !dd.success) return;
     const t = dd.today || {};
     const y = dd.yesterday || {};
-    const deltaActs = (Number(t.totalActs)||0) - (Number(y.totalActs)||0);
-    const deltaUsers = (Number(t.uniqueUsers)||0) - (Number(y.uniqueUsers)||0);
-    const deltaDur = (Number(t.durationMin)||0) - (Number(y.durationMin)||0);
+    // 값은 정본 7종(learnActs 등) 기준. 구 BE(필드 미배포) 폴백만 전체 활동 수를 쓴다.
+    const pick = (o, k, fb) => Number((o && o[k] != null) ? o[k] : (o && o[fb])) || 0;
+    const tActs = pick(t,'learnActs','totalActs'),        yActs = pick(y,'learnActs','totalActs');
+    const tUsers = pick(t,'learnUsers','uniqueUsers'),    yUsers = pick(y,'learnUsers','uniqueUsers');
+    const tDur = pick(t,'learnDurationMin','durationMin'), yDur = pick(y,'learnDurationMin','durationMin');
+    const deltaActs = tActs - yActs;
+    const deltaUsers = tUsers - yUsers;
+    const deltaDur = tDur - yDur;
     {
 
     // ── 교사·관리자: 기존 미니 띠 유지(활성 사용자 유의미) ──
@@ -7376,18 +7458,18 @@ async function renderDodMini(root, opts){
       <section class="dc-dod-mini" aria-label="어제 대비 오늘 요약"
         style="display:flex;flex-wrap:wrap;gap:12px;margin-bottom:16px;padding:12px 14px;background:var(--gray-50);border-radius:8px;border:1px solid var(--gray-100);">
         <div style="min-width:140px;">
-          <span class="label" style="font-size:var(--fs-cap);color:var(--gray-500);">오늘 활동</span>
-          <strong style="font-size:var(--fs-h2);display:block;">${(Number(t.totalActs)||0).toLocaleString()}건</strong>
+          <span class="label" style="font-size:var(--fs-cap);color:var(--gray-500);">오늘 학습 활동</span>
+          <strong style="font-size:var(--fs-h2);display:block;">${tActs.toLocaleString()}건</strong>
           <span style="font-size:var(--fs-sm);color:${colorOf(deltaActs)};">${arrow(deltaActs)} 어제 대비 ${deltaActs>=0?'+':''}${deltaActs}</span>
         </div>
         <div style="min-width:140px;">
-          <span class="label" style="font-size:var(--fs-cap);color:var(--gray-500);">활성 사용자</span>
-          <strong style="font-size:var(--fs-h2);display:block;">${(Number(t.uniqueUsers)||0).toLocaleString()}명</strong>
-          <span style="font-size:var(--fs-sm);color:${colorOf(deltaUsers)};">${arrow(deltaUsers)} 어제 ${(Number(y.uniqueUsers)||0)}명 → ${deltaUsers>=0?'+':''}${deltaUsers}</span>
+          <span class="label" style="font-size:var(--fs-cap);color:var(--gray-500);">오늘 활동 학생</span>
+          <strong style="font-size:var(--fs-h2);display:block;">${tUsers.toLocaleString()}명</strong>
+          <span style="font-size:var(--fs-sm);color:${colorOf(deltaUsers)};">${arrow(deltaUsers)} 어제 ${yUsers}명 → ${deltaUsers>=0?'+':''}${deltaUsers}</span>
         </div>
         <div style="min-width:140px;">
-          <span class="label" style="font-size:var(--fs-cap);color:var(--gray-500);">학습시간</span>
-          <strong style="font-size:var(--fs-h2);display:block;">${(Number(t.durationMin)||0).toLocaleString()}분</strong>
+          <span class="label" style="font-size:var(--fs-cap);color:var(--gray-500);">오늘 학습 시간</span>
+          <strong style="font-size:var(--fs-h2);display:block;">${tDur.toLocaleString()}분</strong>
           <span style="font-size:var(--fs-sm);color:${colorOf(deltaDur)};">${arrow(deltaDur)} 어제 대비 ${deltaDur>=0?'+':''}${deltaDur}분</span>
         </div>
       </section>`;
@@ -8454,8 +8536,10 @@ VIEWS['a-macro'] = async function(root){
 
   // 성취수준=정답률 라벨(교과 선택 시 "○○ 정답률"로 적응)
   const subjLabel  = d.appliedSubjectLabel || _eqSubjectLabelOf(subject);
-  const scoreLabel = subjLabel ? `${subjLabel} 정답률` : '성취수준(정답률)';
-  const scoreShort = subjLabel ? `${subjLabel} 정답률` : '정답률';
+  // [W2-b 부수] 같은 BE 필드(avgScore = A5 평균 점수, 단위 '점')인데 스코프별로 '성취수준(정답률)'·
+  //   '○○ 정답률'로 이름이 갈렸다. 정본 명칭 '평균 점수'로 통일한다(정답률(%)과 다른 값 — §1-A-3).
+  const scoreLabel = subjLabel ? `${subjLabel} 평균 점수` : '평균 점수';
+  const scoreShort = subjLabel ? `${subjLabel} 평균 점수` : '평균 점수';
   const axisTitle  = subjLabel ? `${subjLabel} 정답률(0~100점)` : '성취수준(정답률, 0~100점)';
 
   const units = Array.isArray(d.units) ? d.units : [];
@@ -8476,7 +8560,10 @@ VIEWS['a-macro'] = async function(root){
   const mScore = ms.avgScore || {};
   const mActive = ms.activeRate || {};
   const mActs = ms.actsPerStu || {};
-  const mReach = ms.reachRate || {};
+  // [W2-b 6-1/6-12] 성취 격차는 A3(집단 도달률). 구 reachRate(=평균 60점 이상 학생 비율)는
+  //   성취 지표가 아니므로 별도 라벨(데이터 품질 참고)로만 노출한다 — 한 페이지에 뜻 다른 '도달률' 2개 금지.
+  const mReach = ms.groupReachedRate || {};
+  const mOver60 = ms.avgOver60Rate || {};
   const ins = _equityInsight(d);
   const fmtPP = (v)=> (v==null?'-':Number(v).toFixed(1));
   const fmtX  = (v)=> (v==null?'-':Number(v).toFixed(1));
@@ -8502,9 +8589,17 @@ VIEWS['a-macro'] = async function(root){
         {dir:'flat', text: mActs.top&&mActs.bottom ? `${escapeHtml(mActs.top.label)}↔${escapeHtml(mActs.bottom.label)}` : '최다÷최소'},
         _equityGapToneX(mActs.gapX), cvExtra(mActs.cv))}
       ${kpiCard('도달률 격차', fmtPP(mReach.gapPP), '%p',
-        {dir:'flat', text: mReach.top&&mReach.bottom ? `${escapeHtml(mReach.top.label)}↔${escapeHtml(mReach.bottom.label)}` : '성취기준 도달 학생비중'},
-        _equityGapTone(mReach.gapPP), cvExtra(mReach.cv))}
+        {dir:'flat', text: mReach.top&&mReach.bottom ? `${escapeHtml(mReach.top.label)}↔${escapeHtml(mReach.bottom.label)}` : '성취기준 도달 비율(누적)'},
+        _equityGapTone(mReach.gapPP), '도달 (학생×성취기준) ÷ 평가된 (학생×성취기준) · 시도 3회 미만은 분모에서 제외 · 누적 기준이라 기간 선택과 무관')}
     </div>
+    <!-- [W2-b 비블로킹] 기간칩을 바꾸면 활동·참여 지표는 움직이지만 도달률은 그대로다(성취는 누적이 정책).
+         t-weakstrong 이 칩 자체를 inert 처리한 것과 달리 여기는 기간 반응 지표가 섞여 있어 칩을 끌 수 없으므로,
+         "무엇이 안 움직이는지"를 지면에 명시한다 — 사용자가 조작 무반응을 버그로 오해하지 않도록. -->
+    <p class="s-perf-note"><i class="fas fa-circle-info" aria-hidden="true"></i>
+      기간을 바꾸면 <b>활동·참여</b> 지표는 달라지지만 <b>도달률</b>은 그대로예요 — 성취는 <b>누적</b>으로 판정하는 것이 정책이라 기간 선택의 영향을 받지 않아요.</p>
+    ${mOver60.gapPP==null ? '' : `<p class="s-perf-note"><i class="fas fa-circle-info" aria-hidden="true"></i>
+      <b>참고(데이터 품질)</b> — 평균 60점 이상 학생 비율의 지역 간 격차는 ${fmtPP(mOver60.gapPP)}%p예요.
+      이 값은 성취 도달 지표가 아니라 <b>채점 데이터가 얼마나 쌓였는지</b>에 크게 좌우되므로 성취 판단에 쓰지 않습니다.</p>`}
 
     <section class="dc-insight-banner" style="margin-bottom:var(--space-4);">
       <span class="ib-icon">💡</span>
@@ -8515,7 +8610,7 @@ VIEWS['a-macro'] = async function(root){
     </section>
 
     <section class="dc-chart-wrapper">
-      <header><h2>지역별 ${escapeHtml(scoreLabel)}</h2><div class="subtitle">평균 정답률 내림차순 · 하위 3개 지역 빨강 강조${maskedCnt?` · 표본 부족 ${maskedCnt}개 제외`:''}</div></header>
+      <header><h2>지역별 ${escapeHtml(scoreLabel)}</h2><div class="subtitle">평균 점수 내림차순 · 하위 3개 지역 빨강 강조${maskedCnt?` · 표본 부족 ${maskedCnt}개 제외`:''}</div></header>
       <div class="chart-body" style="height:${Math.max(280, visible.length*34)}px;"><canvas id="aEquityBar" role="img" aria-label="지역별 ${escapeAttr(scoreLabel)} 막대"></canvas></div>
     </section>
 
@@ -8631,7 +8726,12 @@ VIEWS['a-macro'] = async function(root){
       { key:'avgActsPerStudent', label:'1인당활동(건)', align:'right', format:(v,r)=> r.masked ? '<span style="color:var(--gray-400);">·</span>' : escapeHtml(v==null?'-':Number(v).toFixed(1)) },
       { key:'avgLearnMin', label:'평균학습시간(분)', align:'right', format:(v,r)=> r.masked ? '<span style="color:var(--gray-400);">·</span>' : escapeHtml((Number(v)||0).toLocaleString()) },
       { key:'avgScore', label:scoreLabel, align:'right', format:(v,r)=> r.masked ? '<span style="color:var(--gray-400);">·</span>' : escapeHtml(v==null?'-':Number(v).toFixed(1)) },
-      { key:'reachRate', label:'도달률(%)', align:'right', format:(v,r)=> r.masked ? '<span style="color:var(--gray-400);">·</span>' : escapeHtml(v==null?'-':Number(v).toFixed(1)) },
+      { key:'groupReachedRate', label:'도달률(%)', align:'right', format:(v,r)=> r.masked ? '<span style="color:var(--gray-400);">·</span>'
+          : (v==null ? '<span style="color:var(--gray-400);">평가 표본 없음</span>'
+             : `${escapeHtml(Number(v).toFixed(1))} <span style="color:var(--gray-400);font-size:13px;">(평가 ${escapeHtml(String(r.evaluatedStudents||0))}명)</span>`) },
+      { key:'avgOver60Rate', label:'평균 60점 이상 학생 비율(%)', align:'right', format:(v,r)=> r.masked ? '<span style="color:var(--gray-400);">·</span>'
+          : (v==null ? '<span style="color:var(--gray-400);">채점 기록 없음</span>'
+             : `${escapeHtml(Number(v).toFixed(1))} <span style="color:var(--gray-400);font-size:13px;">(채점 ${escapeHtml(String(r.scoredStudents||0))}명)</span>`) },
       { key:'quadrant', label:'구간', align:'center', format:(v,r)=>{
           if (r.masked) return '<span style="color:var(--gray-400);">·</span>';
           const q = QUAD_BADGE[v] || QUAD_BADGE.good;
@@ -9019,8 +9119,10 @@ async function _renderCompareClassBody(root){
 
   // 성취수준=정답률 라벨(교과 선택 시 "○○ 정답률"로 적응)
   const subjLabel  = d.appliedSubjectLabel || _eqSubjectLabelOf(subject);
-  const scoreLabel = subjLabel ? `${subjLabel} 정답률` : '성취수준(정답률)';
-  const scoreShort = subjLabel ? `${subjLabel} 정답률` : '정답률';
+  // [W2-b 부수] 같은 BE 필드(avgScore = A5 평균 점수, 단위 '점')인데 스코프별로 '성취수준(정답률)'·
+  //   '○○ 정답률'로 이름이 갈렸다. 정본 명칭 '평균 점수'로 통일한다(정답률(%)과 다른 값 — §1-A-3).
+  const scoreLabel = subjLabel ? `${subjLabel} 평균 점수` : '평균 점수';
+  const scoreShort = subjLabel ? `${subjLabel} 평균 점수` : '평균 점수';
   const axisTitle  = subjLabel ? `${subjLabel} 정답률(0~100점)` : '성취수준(정답률, 0~100점)';
 
   const units = (Array.isArray(d.units)?d.units:[]).map(_ccNorm);
@@ -9086,7 +9188,7 @@ async function _renderCompareClassBody(root){
     </section>
 
     <section class="dc-chart-wrapper">
-      <header><h2>클래스별 ${escapeHtml(scoreLabel)}</h2><div class="subtitle">평균 정답률 내림차순 · 가장 낮은 클래스 빨강 강조</div></header>
+      <header><h2>클래스별 ${escapeHtml(scoreLabel)}</h2><div class="subtitle">평균 점수 내림차순 · 가장 낮은 클래스 빨강 강조</div></header>
       <div class="chart-body" style="height:${Math.max(220, scored.length*52)}px;"><canvas id="ccBar" role="img" aria-label="클래스별 ${escapeAttr(scoreLabel)} 막대"></canvas></div>
     </section>
 
@@ -9101,7 +9203,7 @@ async function _renderCompareClassBody(root){
     </section>
 
     <section class="dc-chart-wrapper" id="ccHeatSec" style="display:none;">
-      <header><h2>클래스별 교과 성취수준(정답률)</h2><div class="subtitle">행=클래스, 열=교과 · 셀 색: 초록(높음)↔빨강(낮음), 회색(표본 적음) · 교과 전체일 때만 보여요</div></header>
+      <header><h2>클래스별 교과 평균 점수</h2><div class="subtitle">행=클래스, 열=교과 · 셀 색: 초록(높음)↔빨강(낮음), 회색(표본 적음) · 교과 전체일 때만 보여요</div></header>
       <div id="ccHeat"></div>
     </section>`;
 
@@ -9151,7 +9253,10 @@ async function _renderCompareClassBody(root){
   if (hasLearnMin) cols.push({ key:'avgLearnMin', label:'평균학습시간(분)', align:'right', format:v=>escapeHtml(v==null?'-':(Number(v)||0).toLocaleString()) });
   cols.push({ key:'avgScore', label:scoreLabel, align:'right',
     format:v=> v==null ? '<span style="color:var(--gray-400);">활동 없음</span>' : escapeHtml(Number(v).toFixed(1)) });
-  cols.push({ key:'reachRate', label:'도달률(%)', align:'right', format:v=>escapeHtml(v==null?'-':Number(v).toFixed(1)) });
+  // [W2-b 6-11] 반 스코프 도달률 = A3(도 스코프와 동일 정의·누적). 분모(평가 학생 수)를 병기해 검산 가능하게.
+  cols.push({ key:'groupReachedRate', label:'도달률(%)', align:'right',
+    format:(v,r)=> v==null ? '<span style="color:var(--gray-400);">평가 표본 없음</span>'
+      : `${escapeHtml(Number(v).toFixed(1))} <span style="color:var(--gray-400);font-size:13px;">(평가 ${escapeHtml(String(r.evaluatedStudents||0))}명)</span>` });
   if (hasQuad) cols.push({ key:'quadrant', label:'구간', align:'center', format:v=>{
       const q = QUAD_BADGE[v]; return q ? `<span class="dc-badge ${q.cls}">${q.label}</span>` : '<span style="color:var(--gray-400);">·</span>'; } });
   renderDataTable(document.getElementById('ccTable'), {
@@ -9257,7 +9362,8 @@ const BM_METRICS = [
   { key:'score', label:'평균 점수', unit:'점', pct:true,  vol:false, deltaUnit:'점' },
   { key:'reach', label:'도달률',   unit:'%',  pct:true,  vol:false },
   { key:'time',  label:'학습시간', unit:'분', pct:false, vol:true  },
-  { key:'usage', label:'활용률',   unit:'건', pct:false, vol:true  },
+  // [W2-b 6-15] '률'로 끝나는데 단위가 '건' — 실제 값은 avgActsPerStudent(C3). 비율이 아니다.
+  { key:'usage', label:'1인당 활동 수', unit:'건', pct:false, vol:true  },
 ];
 const BM_METRIC_BY = Object.fromEntries(BM_METRICS.map(m=>[m.key, m]));
 /* 값 표기 — 활용률(건)만 소수1, 나머지 정수 반올림. null 은 '-'. */
@@ -9558,7 +9664,7 @@ async function _renderCompareProvinceBody(root){
   const subjLabel = state._bmSubject!=='all' ? (_eqSubjectLabelOf(state._bmSubject)||'') : '전체';
   const summary = `<div class="dc-eq-summary" role="status"><i class="fas fa-filter" aria-hidden="true"></i> 필터: ${escapeHtml(clsName)} · ${escapeHtml(subjLabel)} · ${level==='achievement'?'성취기준별':'교과별'}${level==='subject'?(' · '+escapeHtml(m.label)):''}</div>`;
   const volCaption = (level==='subject')
-    ? `<div class="bm-caption">평균 점수·도달률은 학생 1인당 비율/점수라 우리 반과 도 비교가 공정해요. 학습시간·활용률은 기간 보정이 없는 누적 총량이라(충북 시드 학생의 누적 기록이 많음) 절대 비교는 참고용이에요.</div>`
+    ? `<div class="bm-caption">평균 점수·도달률은 학생 1인당 비율/점수라 우리 반과 도 비교가 공정해요. 학습시간·1인당 활동 수는 기간 보정이 없는 누적 총량이라(충북 시드 학생의 누적 기록이 많음) 절대 비교는 참고용이에요.</div>`
     : `<div class="bm-caption">표본이 충분한(도 50명 이상 학습한) 초등 코어 성취기준만 보여드려요. 우리 반이 평가한 기준만 비교표에 담아요.</div>`;
 
   const filterbar = `<div class="bm-filterbar">
@@ -9917,11 +10023,11 @@ const BEHAV_SIG_META = {
 /* [Phase 4a] video 우산 3지표(완주율·재시청·건너뛰기) 세로 섹션 메타 — 라벨·(?)·마이크로 caveat(§7 고정 문안, 상관≠인과).
    micro 는 <b> 강조 포함 고정 HTML(사용자 데이터 없음 → 그대로 삽입). key 는 BE metrics[].key(completion|replay|seek). */
 const VIDEO_METRIC_META = {
-  completion: { num:'①', label:'완주율',   help:'영상을 얼마나 끝까지 봤는지(시청 비율)로 그룹을 나눠 그룹별 평균 도달률을 견줘요.',
+  completion: { num:'①', label:'완주율',   help:'영상을 얼마나 끝까지 봤는지(시청 비율)로 그룹을 나눠 그룹별 평균 정답률을 견줘요.',
     micro:'완주가 성취의 <b>원인</b>은 아니에요 — 이미 잘 아는 학생이 끝까지 볼 수도, 어려워서 오래 붙든 것일 수도 있어요.' },
-  replay:     { num:'②', label:'재시청',   help:'같은 영상을 다시 본 횟수로 그룹을 나눠 그룹별 평균 도달률을 견줘요.',
+  replay:     { num:'②', label:'재시청',   help:'같은 영상을 다시 본 횟수로 그룹을 나눠 그룹별 평균 정답률을 견줘요.',
     micro:'재시청은 <b>‘도움 신호’</b>일 수 있어요 — 어려워서 다시 챙겨 본 성실한 학생일 수 있어요(역인과). 재시청 많음을 문제로 보지 마세요.' },
-  seek:       { num:'③', label:'건너뛰기', help:'영상 구간을 건너뛴 횟수를 반 중앙값으로 적음/많음으로 나눠 그룹별 평균 도달률을 견줘요.',
+  seek:       { num:'③', label:'건너뛰기', help:'영상 구간을 건너뛴 횟수를 반 중앙값으로 적음/많음으로 나눠 그룹별 평균 정답률을 견줘요.',
     micro:'건너뛰기가 많다고 <b>‘못한다’는 뜻이 아니에요</b> — 이미 아는 부분을 넘겼을 수도 있어요. 낮은 성취의 ‘원인’으로 단정하지 마세요.' },
 };
 // 그룹 톤 → 색(§6-1 토큰 계열 일치: 막대 채움/글자). BE groups[].tone(good/warn/info/danger).
@@ -9997,9 +10103,9 @@ function _behavCaveatsHtml(caveats){
 }
 
 /* [Phase 4a] 영상 학습 행동(video 우산) — 완주율→재시청→건너뛰기 세로 3섹션 스택.
-   각 섹션 = 섹션헤더(구분선+번호+라벨+?+표본칩) → renderGroupCompare(그룹×평균 도달률) → 지표별 마이크로 caveat.
+   각 섹션 = 섹션헤더(구분선+번호+라벨+?+표본칩) → renderGroupCompare(그룹×평균 정답률) → 지표별 마이크로 caveat.
    정직 3중: ★데모 계측 배너(신규 강조) + [시연 데모] pill + seedBar(뷰단) + 소표본 마스킹(renderGroupCompare 기존).
-   빈 상태는 공유 tplEmpty 1개(3 빈 박스 금지). 성취 축 3지표 공통 '평균 도달률'(스케일 혼재 0). */
+   빈 상태는 공유 tplEmpty 1개(3 빈 박스 금지). 성취 축 3지표 공통 '평균 정답률'(스케일 혼재 0). */
 function renderVideoSignal(host, d){
   if (!host) return;
   const meta = BEHAV_SIG_META.video;
@@ -10069,7 +10175,7 @@ function renderVideoSignal(host, d){
     </section>`;
 
   renderInsights(document.getElementById('behavInsights'), d.insights);
-  // 3섹션 각각 renderGroupCompare(성취 축 공통 '평균 도달률') — 지표별 refValue/comparison 사용.
+  // 3섹션 각각 renderGroupCompare(성취 축 공통 '평균 정답률') — 지표별 refValue/comparison 사용.
   metrics.forEach(m => {
     const gcHost = document.getElementById(`videoGC_${m.key}`);
     if (gcHost) renderGroupCompare(gcHost, {

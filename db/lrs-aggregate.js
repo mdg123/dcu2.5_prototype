@@ -1,6 +1,33 @@
 // db/lrs-aggregate.js
-// 기존 learning_logs 데이터를 5개 집계 테이블로 일괄 재집계하는 배치 함수
+// 기존 learning_logs 데이터를 7개 집계 테이블로 일괄 재집계하는 배치 함수
+//
+// ── [W2-a] 쓰기 시점 정본화 (2026-07-31) ────────────────────────────────────
+// 이 파일은 LRS 지표 오염의 **최상류**였다. 하류(routes/lrs.js·db/lrs-*.js)가 아무리
+// 정규화해도, 여기서 이미 오염된 값을 저장하면 그 정규화는 전부 사후약방문이다.
+//
+//   결함 1  avg_score 7개 컬럼 전부가 원시 AVG(result_score).
+//           0~1 과 0~100 이 섞인 채 평균 → "학급 평균 성취 8.5점"(실제 ≈78) 류의 붕괴.
+//           게다가 lesson_progress 의 '진도율'(0.5~1.0)이 성취 점수로 섞여 들어갔다.
+//           → lib/lrs/score-scale.js 의 avgScoreExpr(정규화 + 채점형 모집단)로 교체.
+//
+//   결함 2  lrs_achievement_stats.attempt_count 가 무필터 COUNT(*).
+//           조회 로그(content_view)까지 '시도'로 계수됐다. 실측: achievement_code 를 단
+//           content_view 가 **36,410건**인데 점수·정오 판정이 전무하다.
+//           분모에만 들어가고 분자(success_count)에는 절대 못 들어가므로
+//           **모든 정답률이 구조적으로 하향 편향**됐다.
+//           실측 영향: 풀드 정답 인정률 51.8% → 76.5%, 저장 행 49,336 → 30,989.
+//           → lib/lrs/mastery-population.js 의 정본 술어로 교체.
+//
+//   결함 3  실시간 경로(db/learning-log-helper.js)에는 있던 평가신호 필터가 여기엔 없어
+//           **재집계를 돌릴 때마다 2,344행의 도달/미도달이 뒤집혔다.**
+//           → 두 경로가 SQL 술어·집계식을 문자 그대로 공유하도록 통일(mastery-population.js).
+//
+// ⚠ is_seed 전파는 이 커밋 범위 밖(집계 테이블 스키마 변경 + 소비처 배선 필요).
+//    현재도 realOnly=1 은 집계 경유 지표에 작동하지 않는다(지표 정본사전 §3-3 규칙 5).
+// ─────────────────────────────────────────────────────────────────────────────
 const db = require('./index');
+const { avgScoreExpr } = require('../lib/lrs/score-scale');
+const { masteryAttemptWhere, masteryAggSelect } = require('../lib/lrs/mastery-population');
 
 /**
  * 모든 집계 테이블을 초기화하고 learning_logs에서 재집계한다.
@@ -32,7 +59,7 @@ function rebuildAllAggregates() {
         COALESCE(class_id, 0) as class_id,
         COUNT(*) as activity_count,
         COUNT(DISTINCT user_id) as unique_users,
-        AVG(result_score) as avg_score,
+        ${avgScoreExpr('')} as avg_score,
         COALESCE(SUM(CAST(REPLACE(REPLACE(COALESCE(result_duration,''),'PT',''),'S','') AS INTEGER)), 0) as total_duration
       FROM learning_logs
       GROUP BY DATE(created_at), activity_type, COALESCE(source_service,''), COALESCE(class_id,0)
@@ -46,7 +73,7 @@ function rebuildAllAggregates() {
         activity_type,
         COUNT(*) as total_count,
         COALESCE(SUM(CAST(REPLACE(REPLACE(COALESCE(result_duration,''),'PT',''),'S','') AS INTEGER)), 0) as total_duration,
-        AVG(result_score) as avg_score,
+        ${avgScoreExpr('')} as avg_score,
         MAX(created_at) as last_activity_at
       FROM learning_logs
       GROUP BY user_id, activity_type
@@ -61,7 +88,7 @@ function rebuildAllAggregates() {
         SUM(CASE WHEN verb = 'accessed' OR activity_type LIKE '%view%' THEN 1 ELSE 0 END) as view_count,
         SUM(CASE WHEN verb IN ('completed','submitted','answered') THEN 1 ELSE 0 END) as complete_count,
         COUNT(DISTINCT user_id) as unique_users,
-        AVG(result_score) as avg_score
+        ${avgScoreExpr('')} as avg_score
       FROM learning_logs
       WHERE target_type IS NOT NULL AND target_id IS NOT NULL
       GROUP BY target_type, target_id
@@ -75,7 +102,7 @@ function rebuildAllAggregates() {
         activity_type,
         COUNT(*) as total_count,
         COUNT(DISTINCT user_id) as unique_users,
-        AVG(result_score) as avg_score
+        ${avgScoreExpr('')} as avg_score
       FROM learning_logs
       WHERE class_id IS NOT NULL
       GROUP BY class_id, activity_type
@@ -89,7 +116,7 @@ function rebuildAllAggregates() {
         verb,
         COUNT(*) as total_count,
         COUNT(DISTINCT user_id) as unique_users,
-        AVG(result_score) as avg_score
+        ${avgScoreExpr('')} as avg_score
       FROM learning_logs
       GROUP BY COALESCE(source_service, 'unknown'), verb
     `);
@@ -99,19 +126,20 @@ function rebuildAllAggregates() {
     //    (결함 B fix: 과거에는 avg_score 기반 CASE SQL 로 산출 → avg_score IS NULL 인데
     //     attempt 多·success 0 인 행이 'insufficient/평가부족' 으로 박혀 mastery API 의
     //     success/attempt 기반 'not_reached/미도달' 과 어긋남(2020행 불일치). 분류기 통일로 정합.)
+    //
+    //    ★ [W2-a] 모집단·집계식은 lib/lrs/mastery-population.js 가 단독 정의한다.
+    //      실시간 경로(db/learning-log-helper.js)가 **이 문자열을 그대로 재사용**하므로
+    //      두 경로는 키 범위(전수 GROUP BY vs 단일 user+code)만 다르고 판정은 동일하다.
+    //      여기에 술어나 집계식을 인라인으로 다시 쓰면 그 순간 두 경로가 갈라진다 — 금지.
     db.exec(`
-      INSERT INTO lrs_achievement_stats (user_id, achievement_code, subject_code, attempt_count, success_count, avg_score, last_attempt_at, updated_at)
+      INSERT INTO lrs_achievement_stats (user_id, achievement_code, attempt_count, success_count, avg_score, subject_code, last_attempt_at, updated_at)
       SELECT
         user_id,
         achievement_code,
-        MAX(subject_code) as subject_code,
-        COUNT(*) as attempt_count,
-        SUM(CASE WHEN result_success = 1 THEN 1 ELSE 0 END) as success_count,
-        AVG(result_score) as avg_score,
-        MAX(created_at) as last_attempt_at,
+        ${masteryAggSelect('')},
         CURRENT_TIMESTAMP as updated_at
       FROM learning_logs
-      WHERE achievement_code IS NOT NULL
+      WHERE ${masteryAttemptWhere('')}
       GROUP BY user_id, achievement_code
     `);
 
@@ -154,7 +182,7 @@ function rebuildAllAggregates() {
         DATE(created_at) as stat_date,
         COUNT(*) as activity_count,
         COALESCE(SUM(COALESCE(duration_sec, CAST(REPLACE(REPLACE(COALESCE(result_duration,''),'PT',''),'S','') AS INTEGER))), 0) as duration_sec,
-        AVG(result_score) as avg_score,
+        ${avgScoreExpr('')} as avg_score,
         GROUP_CONCAT(DISTINCT subject_code) as subjects_touched
       FROM learning_logs
       GROUP BY user_id, DATE(created_at)

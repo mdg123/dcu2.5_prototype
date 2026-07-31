@@ -29,6 +29,26 @@ const mastery = require('../db/lrs-mastery');
 const db = openTestDb();
 
 const ADMIN = 1, TEACHER = 2, STUDENT1 = 3, STUDENT2 = 4;
+
+// ── [W2-a] 결정적 '미도달' 픽스처 (test/mastery.test.js 와 동일 취지) ────────
+// MASTERY-WEAK-1 은 "success=0·avg=null 인 미도달이 은폐되지 않는다"는 **분류기 계약**을
+// 검증하는 테스트인데, 그 입력을 실 DB 의 우연한 상태에서 빌려 쓰고 있었다.
+// 상류 집계기 정본화(W2-a) 후 uid3 의 과거 미도달 5건이 **정오 판정 0건짜리 조회 로그**
+// 로만 만들어진 허위였음이 드러나 사라졌다(오염 제거이지 은폐가 아니다).
+// 계약은 그대로 지켜야 하므로 입력을 합성해 결정적으로 박제한다.
+(function seedNotReachedFixture(uid) {
+  const pick = db.prepare(`
+    SELECT code, subject_code FROM curriculum_standards
+    WHERE code NOT IN (SELECT achievement_code FROM lrs_achievement_stats WHERE user_id = ?)
+    ORDER BY code LIMIT 1
+  `).get(uid);
+  const code = pick ? pick.code : '[W2A-NR-FIXTURE]';
+  db.prepare(`
+    INSERT OR REPLACE INTO lrs_achievement_stats
+      (user_id, achievement_code, subject_code, attempt_count, success_count, avg_score, level, last_level, last_attempt_at)
+    VALUES (?, ?, ?, 3, 0, NULL, 'not_reached', '미도달', CURRENT_TIMESTAMP)
+  `).run(uid, code, pick ? pick.subject_code : null);
+})(STUDENT1);
 const CLASS = 1;
 
 // ════════════════════════════════════════════════════════════════════════════

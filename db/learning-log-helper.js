@@ -1,5 +1,10 @@
 // db/learning-log-helper.js
 const db = require('./index');
+// [W2-a] 점수 스케일·채점형 모집단 SSOT. 집계 테이블에 **정규화된 값만** 넣기 위해 쓴다.
+//   과거 이 파일은 resultScore 를 원시값 그대로 집계에 흘려보냈다 → 0~1 과 0~100 이
+//   같은 컬럼에 섞이고, 진도율(lesson_progress 0.5~1.0)이 '성취 점수'로 둔갑했다.
+const { normScore, isScoredType } = require('../lib/lrs/score-scale');
+const { isMasteryAttempt, masteryRecomputeSql } = require('../lib/lrs/mastery-population');
 
 // 학년 → 학교급 매핑 (growth-extended.js gradeToSchoolLevel 와 동일 규칙을 로컬 복제 — 순환참조 방지)
 function gradeToSchoolLevel(grade) {
@@ -115,16 +120,26 @@ function getStmts() {
           ELSE avg_score END,
         updated_at = CURRENT_TIMESTAMP
     `),
+    // ── [W2-a] 성취 집계: 증분 누적을 버리고 **원천 재계산**으로 전환 ──
+    //   과거: attempt_count+1 / avg=(avg*attempt+new)/(attempt+1) 식의 증분 UPSERT.
+    //     · 가중치가 attempt_count 였는데 attempt_count 는 점수 없는 행까지 세고 있어
+    //       평균이 조용히 표류했고,
+    //     · 무엇보다 재집계 경로와 산식이 **따로** 정의돼 있어 재집계 한 번에
+    //       2,344행의 도달/미도달이 뒤집혔다(실측).
+    //   현재: lib/lrs/mastery-population.js 의 술어·집계식으로 해당 (user, code) 한 쌍만
+    //     learning_logs 에서 재계산해 **절대값으로 덮어쓴다.**
+    //     원본 INSERT 가 같은 트랜잭션 안에서 먼저 일어나므로 방금 들어온 로그도 자연히 포함된다.
+    //     → 재집계 결과와 산술적으로 동일함이 구조적으로 보장된다(동기화 유지 불필요).
+    recomputeAchievement: db.prepare(masteryRecomputeSql()),
     upsertAchievement: db.prepare(`
       INSERT INTO lrs_achievement_stats (user_id, achievement_code, subject_code, attempt_count, success_count, avg_score, level, last_level, last_attempt_at)
-      VALUES (?, ?, ?, 1, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
       ON CONFLICT(user_id, achievement_code)
       DO UPDATE SET
-        attempt_count = attempt_count + 1,
-        success_count = success_count + excluded.success_count,
-        avg_score = CASE WHEN excluded.avg_score IS NOT NULL
-          THEN (COALESCE(avg_score,0) * attempt_count + excluded.avg_score) / (attempt_count + 1)
-          ELSE avg_score END,
+        subject_code = COALESCE(excluded.subject_code, subject_code),
+        attempt_count = excluded.attempt_count,
+        success_count = excluded.success_count,
+        avg_score = excluded.avg_score,
         level = excluded.level,
         last_level = excluded.last_level,
         last_attempt_at = CURRENT_TIMESTAMP,
@@ -318,11 +333,20 @@ function logLearningActivity({
     try {
       const durationForAgg = finalDurationSec;
 
+      // ── [W2-a] 집계 테이블에 넣을 점수는 **정규화 + 채점형만** ──────────────
+      //   · 채점형이 아니면 NULL → 집계의 avg_score 갱신 분기가 통째로 건너뛴다.
+      //     (진도율·조회 로그가 '성취 점수'로 섞이던 경로를 원천 차단)
+      //   · 채점형이면 0~100 으로 정규화해서 넣는다(0~1 저장분이 '0.9점'으로 보이던 것 차단).
+      //   재집계 경로의 avgScoreExpr(= 채점형 AND 점수기록 행만 정규화 평균)와 같은 규칙이다.
+      const scoreForAgg = (isScoredType(activityType) && resultScore != null)
+        ? normScore(resultScore)
+        : null;
+
       // lrs_daily_stats
-      stmts.upsertDaily.run(activityType, sourceService || '', classId || 0, isNewDailyUser, resultScore, durationForAgg);
+      stmts.upsertDaily.run(activityType, sourceService || '', classId || 0, isNewDailyUser, scoreForAgg, durationForAgg);
 
       // lrs_user_summary
-      stmts.upsertUser.run(userId, activityType, durationForAgg, resultScore);
+      stmts.upsertUser.run(userId, activityType, durationForAgg, scoreForAgg);
 
       // lrs_content_summary
       if (targetType && targetId) {
@@ -333,62 +357,52 @@ function logLearningActivity({
           isView ? 1 : 0,
           isComplete ? 1 : 0,
           isNewContentUser,
-          resultScore
+          scoreForAgg
         );
       }
 
       // lrs_class_summary
       if (classId) {
-        stmts.upsertClass.run(classId, activityType, isNewClassUser, resultScore);
+        stmts.upsertClass.run(classId, activityType, isNewClassUser, scoreForAgg);
       }
 
       // lrs_service_stats
       if (sourceService) {
-        stmts.upsertService.run(sourceService, verb, isNewServiceUser, resultScore);
+        stmts.upsertService.run(sourceService, verb, isNewServiceUser, scoreForAgg);
       }
 
       // 신규: lrs_user_daily
-      stmts.upsertUserDaily.run(userId, durationForAgg, resultScore, subjectCode || '');
+      stmts.upsertUserDaily.run(userId, durationForAgg, scoreForAgg, subjectCode || '');
 
-      // 신규: lrs_achievement_stats
-      //   ── 평가신호 없는 이수(콘텐츠 시청형)는 성취 시도에서 제외(도달률 역효과 fix) ──
-      //     resultScore·resultSuccess 둘 다 없는 완료(=순수 활동/시청)는 정오답 판정 대상이 아니다.
-      //     이런 건을 attempt_count 로 올리면 thisSuccess=0(NULL→0) 이 누적돼 "1시도 0정답"으로
-      //     도달률을 끌어내리는 왜곡이 발생(LRS 학생 전수감사 §1 근본원인 A-2). 따라서 평가신호가
-      //     하나라도 있는 완료만 mastery 집계에 반영한다. (문항 정답률은 정상 기여, 이수는 활동으로만)
-      const hasEvalSignal = (resultScore != null) || (resultSuccess != null);
-      if (achievementCode && hasEvalSignal) {
-        // ── REWORK-1: realtime upsert 도 mastery 의 "단일 분류기"로 통일 ──
-        //   레거시 computeAchievementLevel(avg 기반 상/중/하, att<3→'미도달') 폐기.
-        //   rebuild 경로(db/lrs-aggregate.js 7-classify)와 동일하게
-        //   success/attempt 우선(없으면 avg 폴백)으로 reachRate→classifyStatus 산출,
-        //   영문 level(reached/partial/not_reached/insufficient)과
-        //   한글 last_level(STATUS_KO: 도달/부분도달/미도달/평가부족)을 함께 기록한다.
-        //   → realtime 과 rebuild 가 동일 결과(플리커 0). att<3 정답은 '평가부족'(insufficient)
-        //     로 분류되어 /warnings 의 '하'/'미도달' 결손 매칭에서 제외(오탐 해소).
+      // ── 신규: lrs_achievement_stats — [W2-a] 원천 재계산 방식 ────────────────
+      //   "성취 1시도"의 정의는 lib/lrs/mastery-population.js 가 단독으로 갖는다:
+      //     achievement_code 있음 AND 채점형 유형 AND result_success 있음.
+      //
+      //   ★ 왜 result_success 를 요구하는가
+      //     attempt_count 는 success_count 의 **분모**다. 정오 판정이 없는 행을 분모에만
+      //     넣으면 분자에는 영원히 못 들어가 정답률이 구조적으로 낮아진다.
+      //     과거 필터(score 또는 success 중 하나만 있어도 통과)는 이 비대칭을 남겨두어,
+      //     점수만 있고 정오 판정이 없는 유형(daily_complete 등)이 "시도했는데 0정답"으로
+      //     집계되는 함정이 있었다. 이제 분모와 분자가 정의상 같은 행 집합을 본다.
+      //
+      //   ★ 왜 증분이 아니라 재계산인가
+      //     증분식이 재집계식과 따로 존재하는 한 둘은 반드시 갈라진다(실측 2,344행 뒤집힘).
+      //     아래는 재집계와 **같은 SQL 술어·집계식**으로 이 (user, code) 한 쌍만 다시 센다.
+      //     원본 INSERT 가 같은 트랜잭션에서 선행하므로 방금 들어온 로그도 포함된다.
+      if (isMasteryAttempt({ activityType, achievementCode, resultSuccess })) {
         const { classifyStatus, reachRate, STATUS_KO } = require('./lrs-mastery');
-        // 현재 누적(success/attempt/avg)을 조회해 "이번 1건 반영 후" 누적값으로 재계산.
-        //   (upsert 의 증분 로직과 동일한 결과: attempt+1, success+이번성공, avg 증분평균)
-        const cur = db.prepare(
-          'SELECT attempt_count, success_count, avg_score FROM lrs_achievement_stats WHERE user_id = ? AND achievement_code = ?'
-        ).get(userId, achievementCode);
-        const thisSuccess = resultSuccess ? 1 : 0;
-        const newAttempts = (cur?.attempt_count || 0) + 1;
-        const newSuccess = (cur?.success_count || 0) + thisSuccess;
-        let newAvg;
-        if (resultScore != null) {
-          newAvg = cur ? ((cur.avg_score || 0) * (cur.attempt_count || 0) + resultScore) / newAttempts : resultScore;
-        } else {
-          newAvg = cur?.avg_score ?? null;
+        const agg = stmts.recomputeAchievement.get(userId, achievementCode);
+        if (agg && agg.attempt_count > 0) {
+          // 분류기도 mastery SSOT 단일 구현(success/attempt 우선, 없으면 avg 폴백).
+          const rate = reachRate(agg.success_count, agg.attempt_count, agg.avg_score);
+          const status = classifyStatus(agg.attempt_count, rate);
+          stmts.upsertAchievement.run(
+            userId, achievementCode,
+            agg.subject_code ?? subjectCode ?? null,
+            agg.attempt_count, agg.success_count, agg.avg_score,
+            status, STATUS_KO[status]
+          );
         }
-        // success/attempt 우선 정답률 → 단일 분류기. (avg 기반 상/중/하 폐기)
-        const rate = reachRate(newSuccess, newAttempts, newAvg);
-        const status = classifyStatus(newAttempts, rate);   // 영문 status (level)
-        const lastLevelKo = STATUS_KO[status];              // 한글 (last_level)
-        stmts.upsertAchievement.run(
-          userId, achievementCode, subjectCode,
-          thisSuccess, resultScore, status, lastLevelKo
-        );
       }
 
       // 신규: session activity_count 증가

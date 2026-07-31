@@ -48,9 +48,17 @@ function pickNoMapContent() {
 function pickStudents(n) {
   return db.prepare("SELECT id FROM users WHERE role = 'student' ORDER BY id LIMIT ?").all(n).map(r => r.id);
 }
-// (user, code) 누적 격리: 그 학생의 해당 코드 집계행 + 관련 problem_attempt 로그 제거
+// (user, code) 누적 격리: 그 학생의 해당 코드 집계행 + 관련 로그를 함께 제거.
+//
+// ★ [W2-a] 로그 삭제가 **필수**가 됐다.
+//   과거 realtime 은 집계행을 증분(attempt+1)으로 쌓았으므로, 집계행만 지우면 0부터 다시 셌다.
+//   이제 realtime 은 재집계와 동일하게 **learning_logs 에서 재계산**한다
+//   (그래야 두 경로가 갈라지지 않는다). 즉 집계값은 로그의 순수 함수이므로
+//   집계행만 지워도 다음 기록 때 과거 로그가 되살아난다 — 그게 정상 동작이다.
+//   따라서 이 헬퍼는 원래 주석이 명시했던 대로 로그까지 지워야 진짜 격리가 된다.
 function resetStat(userId, code) {
   db.prepare('DELETE FROM lrs_achievement_stats WHERE user_id = ? AND achievement_code = ?').run(userId, code);
+  db.prepare('DELETE FROM learning_logs WHERE user_id = ? AND achievement_code = ?').run(userId, code);
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -201,4 +209,109 @@ test('RT-5: 정답만 푼 att<3 학생 → /warnings 결손 미등재 (오탐 �
 
   resetStat(okUser, code);
   resetStat(badUser, code);
+});
+
+// ──────────────────────────────────────────────────────────────────────────
+// INV-W2B-11  [감리 R3] 채점된 과제는 성취 집계에 **반드시** 기여한다.
+//
+//   구조적 결함이었다: 성취 1시도의 정본 술어는 ①achievement_code ②채점형 유형 ③result_success
+//   셋을 모두 요구하는데, 과제가 남기는 두 로그가 각각 한 조건씩 놓쳤다.
+//     · homework_submit — ①② 만족, 채점 전이라 ③ NULL
+//     · homework_graded — ③ 보유, 그러나 SCORED_TYPES 에서 제외(②)
+//   ⇒ 어느 쪽도 시도로 세어지지 않아 **채점해도 성취가 0** 이었다.
+//   fix: 채점 시 학생의 제출 로그에 판정을 채운다(routes/homework.js applyGradeToSubmitLog).
+//
+//   ★ [재감리 2026-07-31] 이 검사는 반드시 **채점 라우트를 실제로 태워야** 한다.
+//     이전 판은 헬퍼(applyGradeToSubmitLog)를 직접 호출해, 정작 R3 의 핵심인 "라우트가 그 헬퍼를
+//     부르는 배선 1줄"이 무방비였다. 그 상태로 주석만 "호출을 지우면 빨간불"이라 단언한 것은
+//     R3 에서 고친 것과 같은 종류의 허위 주석이었다. → HTTP 통합 검사로 바꾼다.
+//   역주입 확인(2026-07-31): routes/homework.js 의 applyGradeToSubmitLog 호출 1줄을 제거하면
+//     '채점 후 1건' 이 0건이 되어 실제로 빨간불이 뜨는 것을 실행으로 확인했다.
+// ──────────────────────────────────────────────────────────────────────────
+const http = require('node:http');
+const express = require('express');
+const session = require('express-session');
+const { masteryAttemptWhere } = require('../lib/lrs/mastery-population');
+
+// 채점 라우트를 실제로 태우는 최소 HTTP 하네스(lrs-*.test.js 와 동일 패턴).
+function startHomeworkServer() {
+  const app = express();
+  app.use(express.json());
+  app.use(session({ secret: 'test-inv-w2b-11', resave: false, saveUninitialized: false }));
+  app.use((req, res, next) => {
+    const uid = req.headers['x-test-user'];
+    if (uid) req.session.userId = parseInt(uid, 10);
+    next();
+  });
+  app.use('/api/homework', require('../routes/homework'));
+  return new Promise((resolve) => {
+    const srv = http.createServer(app).listen(0, () => resolve({ srv, port: srv.address().port }));
+  });
+}
+function post(port, path, userId, body) {
+  return new Promise((resolve) => {
+    const data = JSON.stringify(body || {});
+    const r = http.request({ port, path, method: 'POST', headers: {
+      'content-type': 'application/json', 'content-length': Buffer.byteLength(data),
+      'x-test-user': String(userId) } },
+      (res) => { let b = ''; res.on('data', c => b += c);
+        res.on('end', () => { let j = null; try { j = JSON.parse(b); } catch (_) {} resolve({ status: res.statusCode, json: j }); }); });
+    r.on('error', () => resolve({ status: 0, json: null }));
+    r.write(data); r.end();
+  });
+}
+
+test('INV-W2B-11: /grade/ 라우트 통합 — 제출은 성취 시도 0 · 채점되면 성취 시도 1(판정·점수 반영)', async () => {
+  // owner 교사 + member 학생이 같이 있는 실제 클래스(라우트가 requireClassMember·owner 를 본다)
+  const cls = db.prepare(`
+    SELECT cm.class_id AS classId, cm.user_id AS ownerId FROM class_members cm
+    JOIN users u ON u.id = cm.user_id
+    WHERE cm.role = 'owner' AND u.role = 'teacher' LIMIT 1`).get();
+  assert.ok(cls, '전제: owner 교사가 있는 클래스 필요');
+  const stu = db.prepare(`
+    SELECT cm.user_id AS id FROM class_members cm JOIN users u ON u.id = cm.user_id
+    WHERE cm.class_id = ? AND u.role = 'student' LIMIT 1`).get(cls.classId);
+  assert.ok(stu, '전제: 해당 클래스에 학생 멤버 필요');
+
+  const code = '[4수01-09]';
+  // achievement_code 가 붙은 과제를 실제 테이블에 만든다(라우트가 hw 에서 코드를 읽는다).
+  const hwId = db.prepare(`
+    INSERT INTO homework (class_id, teacher_id, title, content, achievement_code, subject_code, max_score, due_date)
+    VALUES (?,?,?,?,?,?,100,DATE('now','+7 day'))`)
+    .run(cls.classId, cls.ownerId, 'INV-W2B-11 과제', '본문', code, 'math-e').lastInsertRowid;
+
+  db.prepare('DELETE FROM lrs_achievement_stats WHERE user_id=? AND achievement_code=?').run(stu.id, code);
+
+  const isAttempt = () => db.prepare(
+    `SELECT COUNT(*) n FROM learning_logs WHERE ${masteryAttemptWhere('')} AND user_id=? AND achievement_code=? AND target_id=?`
+  ).get(stu.id, code, String(hwId)).n;
+
+  const { srv, port } = await startHomeworkServer();
+  try {
+    // 1) 학생 제출 — 채점 전이므로 판정 없음(result_success NULL) → 시도 아님
+    const sub = await post(port, `/api/homework/${cls.classId}/${hwId}/submit`, stu.id, { content: '제출 내용' });
+    assert.equal(sub.status, 200, `제출 200 (got ${sub.status})`);
+    assert.equal(isAttempt(), 0, '제출만으로는 성취 시도가 아니다(판정 없음)');
+
+    // 2) 교사 채점 — **라우트가** 제출 로그에 판정을 확정해야 한다(배선 포함 검증)
+    const subRow = db.prepare('SELECT id FROM homework_submissions WHERE homework_id=? AND student_id=?').get(hwId, stu.id);
+    assert.ok(subRow, '제출 행이 있어야 한다');
+    const gr = await post(port, `/api/homework/${cls.classId}/${hwId}/grade/${subRow.id}`, cls.ownerId, { score: 85, feedback: '잘했어요' });
+    assert.equal(gr.status, 200, `채점 200 (got ${gr.status})`);
+
+    assert.equal(isAttempt(), 1,
+      '채점된 과제가 성취 시도로 안 세어진다 — /grade/ 라우트가 applyGradeToSubmitLog 를 호출하는 배선이 끊겼다');
+
+    const row = db.prepare('SELECT attempt_count, success_count, avg_score FROM lrs_achievement_stats WHERE user_id=? AND achievement_code=?').get(stu.id, code);
+    assert.ok(row, '채점 후 lrs_achievement_stats 행이 있어야 한다');
+    assert.equal(row.attempt_count, 1, '시도 1');
+    assert.equal(row.success_count, 1, '85점 → 합격 1');
+    assert.equal(row.avg_score, 85, '점수는 0~100 정규화(0.85 → 85)로 저장돼야 한다');
+  } finally {
+    await new Promise(res => srv.close(res));
+    db.prepare(`DELETE FROM learning_logs WHERE user_id=? AND target_id=?`).run(stu.id, String(hwId));
+    db.prepare('DELETE FROM homework_submissions WHERE homework_id=?').run(hwId);
+    db.prepare('DELETE FROM homework WHERE id=?').run(hwId);
+    db.prepare('DELETE FROM lrs_achievement_stats WHERE user_id=? AND achievement_code=?').run(stu.id, code);
+  }
 });

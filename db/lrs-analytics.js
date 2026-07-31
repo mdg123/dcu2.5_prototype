@@ -301,7 +301,9 @@ function classSubjects(classId) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// §B-3. 도달 예측 — 현재 도달률 + 기울기 외삽 + 불확실성 밴드.
+// §B-3. 도달 예측 — 현재 정답률 + 기울기 외삽 + 불확실성 밴드.
+//   ⚠ [W2-b 6-12] trend.currentRate 는 _weeklyRateSeries 의 success/attempts = **정답률**이다.
+//     A3 도달률(성취기준별 reached/evaluated)이 아니므로 사용자 문구에서 '도달률'로 부르지 않는다.
 //   projectReach(trend, { target=80 }) →
 //     { reachable, weeksToReach, projectedRate, band:{lo,hi}, message, confidence }
 //   slope<=0 → reachable=false("현 추세로 도달 어려움"). 단일 확정선 금지(밴드 동반).
@@ -310,10 +312,10 @@ function projectReach(trend, { target = 80 } = {}) {
   if (!trend || trend.status !== 'ok' || trend.currentRate == null) {
     // 문구 정직성(감사 §3·§7): insufficient 는 "덜 풀어서"가 아니라 "관측 주차(시간)가 3주 미만"이라
     //   추세선을 아직 못 그리는 상태다. currentRate 는 이미 있는데 "더 풀면"이라 하면 오해를 준다.
-    //   → 시간(주차) 어휘로 교정. 현재 도달률이 있으면 그 값을 함께 안내.
+    //   → 시간(주차) 어휘로 교정. 현재 정답률이 있으면 그 값을 함께 안내.
     const nW = trend && trend.observedWeeks != null ? trend.observedWeeks : 0;
     const rateHint = (trend && trend.currentRate != null)
-      ? ` 지금 도달률은 약 ${Math.round(trend.currentRate)}%예요.` : '';
+      ? ` 지금 정답률은 약 ${Math.round(trend.currentRate)}%예요.` : '';
     return {
       status: 'insufficient',
       reachable: null, weeksToReach: null,
@@ -372,7 +374,7 @@ function projectReach(trend, { target = 80 } = {}) {
 // ─────────────────────────────────────────────────────────────────────────────
 // §B-3b. 도달 예측 "분석 멘트"(insights[]) — projectReach 결과를 규칙 기반 문안으로.
 //   전체 LRS 공통 lrs-insight 컴포넌트가 소비(FE 문안 하드코딩 금지 — 문안은 BE 소유).
-//   관점: "이 반 전체 학생 평균 성취 도달률"이 목표(target%)에 언제 닿을지.
+//   관점: "이 반 전체 학생 평균 정답률"이 목표(target%)에 언제 닿을지. (도달률 아님 — §6-12)
 //   톤: 단정 금지·행동 유도(초등 담임 이해). 최대 2개(정보 과부하 차단).
 //   → [{ level:'good|warn|info', icon, text }]
 function projectionInsights(trend, projection, target = 80, subjectLabel = null) {
@@ -384,7 +386,8 @@ function projectionInsights(trend, projection, target = 80, subjectLabel = null)
   //   ★ 문안 하드코딩·단정 금지 원칙 유지 — 자연스러운 라벨만 덧댄다("이 교과는 …").
   const isSubjectScope = subjectLabel != null
     && String(subjectLabel).trim() !== '' && String(subjectLabel).trim() !== '전체 교과';
-  const subj = isSubjectScope ? `${String(subjectLabel).trim()} 정답률` : '반 평균 도달률';
+  // [W2-b 6-12] 두 분기 모두 같은 값(currentRate=정답률)인데 스코프에 따라 이름이 갈렸다 — '정답률'로 통일.
+  const subj = isSubjectScope ? `${String(subjectLabel).trim()} 정답률` : '반 평균 정답률';
   const subjShort = isSubjectScope ? `${String(subjectLabel).trim()}은(는)` : '반 평균이';
 
   // (1) 자료 부족 — 추세선을 아직 못 그림(관측 주차 < 3)

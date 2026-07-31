@@ -35,24 +35,33 @@ const express = require('express');
 const session = require('express-session');
 
 const ADMIN = 1, TEACHER = 2, STUDENT1 = 3, STUDENT2 = 4;
-const BUCKETS = ['exam', 'homework', 'self', 'content', 'all'];
+// [W2-b 6-9] 버킷 재편 — all = 학습 활동 정본 7종(C1). 조회(view)·진도(lesson)는 학습 활동이
+//   아니므로 all 에서 빠지고 **별도 버킷**으로 드릴한다(합산 금지, 은폐도 금지).
+const BUCKETS = ['exam', 'homework', 'self', 'content', 'all', 'view', 'lesson'];
+// all 을 구성하는 4버킷(소계 합 == all 불변식 대상). view·lesson 은 여기 들어가면 안 된다.
+const SUM_BUCKETS = ['exam', 'homework', 'self', 'content'];
 const PERIODS = ['7d', '30d', '90d'];
 
 // ground-truth 절대값(uid3) — 고정 from/to 창(달력 경과 불변 — 파일 헤더 주석 참조).
 //   uid3 최초 로그 2026-04-19: 창이 당시 전 데이터를 포괄하고, 창 끝(07-02)이 과거로 고정이라
 //   이후 새 로그가 쌓여도 이 절대값은 변하지 않는다(재시드 시에만 갱신).
+//   ★ W2-b 재산출: all 86 → 50. 감소가 정상이다 — 조회 23건·진도 15건이 '학습 활동'에서 빠지고
+//     오답노트 재풀이 2건이 자기주도 학습에 들어왔다(29+2+12+7=50). 조회·진도는 별도 버킷에 그대로 남는다.
+//     problem_attempt 11건은 채점형(SCORED)이지만 C1 7종 밖이라 활동 수에는 안 들어간다(모집단 분리).
 const GT_FIXED = {
   from: '2026-04-01', to: '2026-07-02',
-  exam: 29, homework: 2, self: 10, content: 45, all: 86,
-  seg: { view: 23, lesson: 15, solve: 7 },
+  exam: 29, homework: 2, self: 12, content: 7, all: 50,
+  view: 23, lesson: 15,
 };
 // 상대기간 SQL 독립 대조용 — 라우트와 같은 화이트리스트를 테스트가 별도로 소유(이중 장부).
 //   라우트 쪽 화이트리스트가 바뀌면 여기와 어긋나 빨간불 → 의도된 감시.
 const BUCKET_TYPES_MIRROR = {
-  exam: ['exam_complete'], homework: ['homework_submit'], self: ['self_learn', 'daily_complete'],
-  content: ['content_view', 'lesson_progress', 'content_solve'],
+  exam: ['exam_complete'], homework: ['homework_submit'],
+  self: ['self_learn', 'daily_complete', 'wrong_note_retry', 'node_complete'],
+  content: ['content_solve'],
   all: ['exam_complete', 'homework_submit', 'self_learn', 'daily_complete',
-        'content_view', 'lesson_progress', 'content_solve'],
+        'wrong_note_retry', 'node_complete', 'content_solve'],
+  view: ['content_view'], lesson: ['lesson_progress'],
 };
 
 // ── HTTP 하네스 ────────────────────────────────────────────────────────────
@@ -121,7 +130,10 @@ test('INV-DRILL-a: detail.count == items.length (5 bucket × 7d/30d/90d)', async
 // ⓑ detail.count == /stats/perform 카드 숫자 (bucket ↔ summary 필드)
 // ──────────────────────────────────────────────────────────────────────────
 test('INV-DRILL-b: detail.count == stats/perform 카드 숫자 (동일 원천·필터)', async () => {
-  const cardField = { exam: 'examCount', homework: 'homeworkCount', self: 'selfLearnCount', content: 'contentCount', all: 'totalActs' };
+  // [W2-b 6-9] 분리된 조회·진도 카드도 같은 '카드=내역' 계약을 지켜야 한다(분리했다고 검증 면제 아님).
+  const cardField = { exam: 'examCount', homework: 'homeworkCount', self: 'selfLearnCount',
+    content: 'contentCount', all: 'totalActs',
+    view: 'contentViewCount', lesson: 'lessonProgressCount' };
   for (const p of PERIODS) {
     const perf = await req(`/stats/perform?period=${p}&scope=mine`, STUDENT1);
     assert.equal(perf.status, 200, `stats/perform@${p} 200`);
@@ -157,23 +169,29 @@ test('INV-DRILL-c: all.count == exam+homework+self+content (subtotals 합 = all)
 // ──────────────────────────────────────────────────────────────────────────
 // ⓓ content segments(view+lesson+solve) 합 == content.count, 세그먼트 필터 count 일치
 // ──────────────────────────────────────────────────────────────────────────
-test('INV-DRILL-d: content 세그먼트 합 == content.count, ?segment 필터 count 일치', async () => {
+// [W2-b 6-9 개정] content 버킷이 content_solve 단일 유형이 되면서 세그먼트 소계가 사라졌다.
+//   과거 세그먼트(view·lesson)는 이제 **독립 버킷**이다. 여기서 지키는 것은 두 가지:
+//     ① 조회·진도가 '학습 활동'(all)에 절대 섞이지 않는다   ② 그렇다고 은폐되지도 않는다(버킷으로 조회 가능)
+test('INV-DRILL-d: 조회·진도는 all 에 불포함이되 별도 버킷으로 조회 가능(합산 금지·은폐 금지)', async () => {
   for (const p of PERIODS) {
     const content = await detail('content', p);
-    assert.ok(Array.isArray(content.json.segments), `content@${p} segments 배열`);
-    const segSum = content.json.segments.reduce((s, x) => s + x.count, 0);
-    assert.equal(segSum, content.json.count, `세그먼트 합(${segSum}) != content(${content.json.count}) @${p}`);
+    assert.equal(content.json.segments, undefined, `content@${p}: 단일 유형이므로 segments 없음`);
+    assert.equal(content.json.title, '콘텐츠 문항풀이', 'content 버킷 제목 = 콘텐츠 문항풀이');
 
-    // ?segment=view|lesson|solve 각각의 count == 세그먼트 소계, items 는 200 캡 인지
-    //   (R-2 부류 fix: view 조회 로그가 200 을 넘으면 items 는 상한 — count 와 무조건 등치 금지.
-    //    2026-07-03 프리뷰 사용 로그 유입으로 uid3 content_view 가 200 을 넘어 표면화.)
-    for (const seg of ['view', 'lesson', 'solve']) {
-      const s = await detail('content', p, STUDENT1, `&segment=${seg}`);
-      const declared = content.json.segments.find(x => x.key === seg).count;
-      assert.equal(s.json.count, declared, `segment=${seg}@${p}: count(${s.json.count}) != 소계(${declared})`);
-      assert.equal((s.json.items || []).length, Math.min(200, s.json.count),
-        `segment=${seg}@${p}: items.length != min(200, count)`);
-      if (s.json.count > 200) assert.ok(s.json.note, `segment=${seg}@${p}: 상한 안내 note 필요`);
+    const all = await detail('all', p);
+    const view = await detail('view', p);
+    const lesson = await detail('lesson', p);
+    assert.equal(view.json.title, '콘텐츠 조회', 'view 버킷 제목 = 콘텐츠 조회');
+    // ① all 은 4버킷 합과 정확히 같다 → 조회·진도가 섞였다면 여기서 깨진다.
+    let sum = 0;
+    for (const b of SUM_BUCKETS) sum += (await detail(b, p)).json.count;
+    assert.equal(all.json.count, sum, `all(${all.json.count}) != 4버킷 합(${sum}) @${p}`);
+    // ② 조회·진도 로그가 존재하면 각 버킷에서 실제로 조회돼야 한다(은폐 금지).
+    for (const [b, r] of [['view', view], ['lesson', lesson]]) {
+      assert.equal(r.status, 200, `${b}@${p} 200`);
+      assert.equal((r.json.items || []).length, Math.min(200, r.json.count),
+        `${b}@${p}: items.length != min(200, count)`);
+      if (r.json.count > 200) assert.ok(r.json.note, `${b}@${p}: 상한 안내 note 필요`);
     }
   }
 });
@@ -187,16 +205,21 @@ test('INV-DRILL-d: content 세그먼트 합 == content.count, ?segment 필터 co
 // ──────────────────────────────────────────────────────────────────────────
 test('REG-DRILL-e1: uid3 고정 창(2026-04-01~07-02) 절대값 (bucket × 세그먼트)', async () => {
   const win = `&from=${GT_FIXED.from}&to=${GT_FIXED.to}`;
+  const actual = {};
   for (const b of BUCKETS) {
     const r = await req(`/perform/detail?bucket=${b}${win}`, STUDENT1);
     assert.equal(r.status, 200, `${b}@fixed 200`);
     assert.equal(r.json.count, GT_FIXED[b], `uid3 ${b}@고정창 count=${GT_FIXED[b]} 이어야 (현재 ${r.json.count})`);
+    actual[b] = r.json.count;
   }
-  const content = await req(`/perform/detail?bucket=content${win}`, STUDENT1);
-  for (const seg of ['view', 'lesson', 'solve']) {
-    const declared = content.json.segments.find(x => x.key === seg).count;
-    assert.equal(declared, GT_FIXED.seg[seg], `uid3 content/${seg}@고정창=${GT_FIXED.seg[seg]} 이어야 (현재 ${declared})`);
-  }
+  // [재감리 2026-07-31] 과거 이 줄은 `assert.equal(GT_FIXED.all, sum4)` — 상수끼리의 비교(50===50)라
+  //   I/O 가 전혀 없었다. 소스가 어떻게 깨져도 절대 붉어지지 않는 죽은 단언이면서
+  //   주석은 "조회·진도 혼입 시 즉시 빨간불" 이라 광고했다.
+  //   → **API 가 실제로 돌려준 값끼리** 대조한다. bucket=all 에 조회(content_view)나
+  //     진도(lesson_progress)가 섞이면 all 이 4버킷 합을 초과해 여기서 즉시 터진다.
+  const sum4 = SUM_BUCKETS.reduce((s, b) => s + actual[b], 0);
+  assert.equal(actual.all, sum4,
+    `API 실측 정합: all(${actual.all}) == ${SUM_BUCKETS.join('+')}(${sum4}) — 초과분은 조회·진도 혼입`);
 });
 
 test('REG-DRILL-e2: uid3 상대기간(7d/30d/90d) — 원천 SQL 독립 대조 (달력 무관)', async () => {

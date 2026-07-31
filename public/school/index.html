@@ -941,7 +941,9 @@ function renderAcademics(panel){
     + '<div class="sch-section"><div class="sch-section-head"><div class="ssh-titles"><h2 class="mastery-h2">취약 성취기준 Top10</h2><div class="mastery-sub">도달률 낮은 순</div></div></div>'
     + '<div id="acWeak"></div></div>'
     + '</div>'
-    + '<div class="sch-section"><div class="sch-section-head"><div class="ssh-titles"><h2 class="mastery-h2">성취 추세</h2><div class="mastery-sub">학교 전체 주별 도달률</div></div>'
+    // [W2-b 6-12] computeTrend 의 series[].rate 는 주별 success/attempts = **정답률**이다(도달률 아님).
+    //   같은 화면의 히트맵·취약Top10·학급격차는 A3 도달률이라, 이 문구까지 '도달률'이면 §6-12 위반.
+    + '<div class="sch-section"><div class="sch-section-head"><div class="ssh-titles"><h2 class="mastery-h2">성취 추세</h2><div class="mastery-sub">학교 전체 주별 정답률(맞힌 비율) · 도달률과 다른 값</div></div>'
     + (tr.status==='ok'?'<span class="trend-arrow" data-trend="'+(tr.direction==='down'?'down':tr.direction==='up'?'up':'flat')+'">'+(tr.direction==='down'?'↘':tr.direction==='up'?'↗':'→')+' '+escapeHtml(tr.directionKo||'')+(tr.slope!=null?' '+tr.slope+'%p/주':'')+'</span>':'')+'</div>'
     + '<div class="chart-body"><canvas id="acTrend"></canvas></div></div>'
     + '<div class="sch-section"><div class="sch-section-head"><div class="ssh-titles"><h2 class="mastery-h2">학급 간 격차</h2><div class="mastery-sub">같은 학년·교과 안에서 학급별 도달률 범위</div></div></div>'
@@ -1054,7 +1056,8 @@ function drawTrendChart(tr){
   const series=(tr.series||[]);
   if (series.length<2){ cv.closest('.chart-body').innerHTML=tplEmpty('추세를 그릴 데이터가 아직 적어요.'); return; }
   mkChart(cv,'line',{ labels:series.map(s=>s.week),
-    datasets:[{ label:'주별 도달률(%)', data:series.map(s=>s.rate), borderColor:'#2563eb', backgroundColor:'rgba(37,99,235,.1)', tension:.3, fill:true, pointRadius:4 }] },
+    // [W2-b 6-12] rate = success/attempts(정답률). '도달률'로 부르면 같은 화면 A3 와 충돌한다.
+    datasets:[{ label:'주별 정답률(%)', data:series.map(s=>s.rate), borderColor:'#2563eb', backgroundColor:'rgba(37,99,235,.1)', tension:.3, fill:true, pointRadius:4 }] },
     { scales:{ y:{ beginAtZero:true, max:100, ticks:{ callback:v=>v+'%' } } } });
 }
 
@@ -1233,10 +1236,13 @@ function renderBenchmark(panel){
   panel.innerHTML =
     '<div class="sch-section"><div class="sch-section-head"><div class="ssh-titles"><h2 class="mastery-h2">우리 학교 vs 평균</h2><div class="mastery-sub">'+levelKo+' 평균('+num(lv.schools)+'교) · '+escapeHtml(bm.region||'지역')+' 평균('+num(rg.schools)+'교)과 비교</div></div></div>'
     + '<div class="chart-body tall"><canvas id="bmBars"></canvas></div></div>'
-    + '<div class="sch-section"><div class="sch-section-head"><div class="ssh-titles"><h2 class="mastery-h2">전월 대비</h2><div class="mastery-sub">최근 90일 성취 도달률 추세 비교</div></div></div>'
+    // [W2-b 6-12] 이 카드들의 값(monthCompare)은 채점 로그의 **평균 점수**이지 도달률(A3)이 아니다.
+    //   바로 위 막대(ours.reachedRate)가 진짜 도달률이라, 같은 패널에서 같은 단어를 쓰면 §6-12 위반.
+    //   기간도 90일이 아니라 최근 30일 vs 직전 30일이다 — 문구를 실제 창에 맞춘다.
+    + '<div class="sch-section"><div class="sch-section-head"><div class="ssh-titles"><h2 class="mastery-h2">전월 대비</h2><div class="mastery-sub">최근 30일 vs 직전 30일 · 채점된 학습의 평균 점수(도달률과 다른 값)</div></div></div>'
     + '<div class="sch-delta-grid">'
-    + deltaCard('평균 성취 도달률', mc.deltaPP, 'pp')
-    + deltaCard2('이번 달 도달률', pct(mc.current)+'%', '지난 달 '+pct(mc.previous)+'%')
+    + deltaCard('평균 점수', mc.deltaPP, 'point')
+    + deltaCard2('이번 달 평균 점수', pct(mc.current)+'점', '지난 달 '+pct(mc.previous)+'점')
     + deltaCard2('학생당 활동량', num(Math.round(ours.avgActsPerStudent))+'건', levelKo+' 평균 '+num(Math.round(lv.avgActsPerStudent))+'건')
     + deltaCard2('학생당 학습시간', num(Math.round(ours.avgLearnMin))+'분', levelKo+' 평균 '+num(Math.round(lv.avgLearnMin))+'분')
     + '</div>'
@@ -1255,7 +1261,8 @@ function deltaCard(label, deltaPP, kind){
   const v=Number(deltaPP)||0;
   const cls = v>0?'up':v<0?'down':'flat';
   const arrow = v>0?'▲':v<0?'▼':'·';
-  const txt = arrow+' '+(v>0?'+':'')+v+(kind==='pp'?'%p':'');
+  // kind: 'pp'=비율 지표의 %포인트 / 'point'=점수 지표의 점수차(도달률 아님, §6-12) / 그 외=단위 없음
+  const txt = arrow+' '+(v>0?'+':'')+v+(kind==='pp'?'%p':kind==='point'?'점':'');
   return '<div class="sch-delta-card"><div class="dl-label">'+escapeHtml(label)+'</div>'
     + '<div class="sch-delta '+cls+'">'+txt+'</div><div class="dl-sub">전월 대비</div></div>';
 }

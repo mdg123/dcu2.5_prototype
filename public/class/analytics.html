@@ -1557,14 +1557,18 @@
         <div class="chart-container mastery-donut-wrap" style="height:280px;">
           <canvas id="masteryDonutCanvas"></canvas>
           <div class="mastery-donut-center">
-            <div class="md-num">${onlyInsufficient ? '–' : `${reached}/${total}`}</div>
-            <div class="md-label">${onlyInsufficient ? '판정 전' : '도달'}</div>
+            <div class="md-num">${onlyInsufficient ? '–' : `${reached}/${judged}`}</div>
+            <div class="md-label">${onlyInsufficient ? '판정 전' : '도달 / 평가'}</div>
           </div>
         </div>
         ${_masteryLegend}
         <div class="insight-box" id="masteryDonutInsight"></div>`;
 
-      const reachRate = total > 0 ? Math.round((reached / total) * 100) : 0;
+      // 🔴 [W2-b 6-12] 분모는 '평가된 것'(judged)이다 — 평가부족을 분모에 넣으면 미도달과 같은 취급이 된다.
+      //   과거 reached/total 은 A1(평가부족 포함)이라, **같은 페이지 아래 취약 성취기준 막대**가 쓰는
+      //   A3(reached/evaluated)와 뜻이 다른 '도달률'이 둘 공존했다(§6-12 자동 REWORK 조건).
+      //   LRS 교사 히트맵 툴팁("도달한 학생 수 ÷ 평가된 학생 수(평가부족 제외)")과 정의를 맞춘다.
+      const reachRate = judged > 0 ? Math.round((reached / judged) * 100) : 0;
       masteryDonutChart = new Chart(document.getElementById('masteryDonutCanvas'), {
         type: 'doughnut',
         data: {
@@ -1579,9 +1583,15 @@
           responsive: true, maintainAspectRatio: false, cutout: '62%',
           plugins: {
             legend: { position: window.innerWidth < 768 ? 'bottom' : 'right', labels: { font: { size: 13 }, padding: 12, usePointStyle: true } },
+            // 🔴 [W2-b 6-12] 툴팁 분모도 헤드라인(A3)과 **같은 judged** 여야 한다.
+            //   과거 total(=평가부족 포함, A1) 이라 같은 위젯에서 "도달률 29%" 와 "도달: 12건(5%)" 가
+            //   동시에 보였다 — 한 페이지 두 뜻 금지(§6-12) 정면 위반.
+            //   평가부족은 A3 분모 밖이므로 비율을 아예 찍지 않는다(분모에 없는 값에 %를 주면 또 다른 거짓).
             tooltip: { callbacks: { label: ctx => {
-              const v = ctx.parsed; const p = total > 0 ? Math.round(v / total * 100) : 0;
-              return `${ctx.label}: ${v}건 (${p}%)`;
+              const v = ctx.parsed;
+              if (ctx.label === '평가 부족') return `${ctx.label}: ${v}건 (도달률 분모에서 제외)`;
+              const p = judged > 0 ? Math.round(v / judged * 100) : 0;
+              return `${ctx.label}: ${v}건 (평가 ${judged}건 중 ${p}%)`;
             }}}
           }
         }
@@ -1596,7 +1606,7 @@
           let extra = '';
           if (insufficient > judged) extra = ` 평가 부족이 ${insufficient}건으로 더 풀어야 판정될 항목이 많아요.`;
           else if (notReached > 0) extra = ` 미도달 ${notReached}건은 보충이 필요해요.`;
-          insightEl.innerHTML = `<strong>📊 인사이트</strong>성취기준 도달률 <strong>${reachRate}%</strong> (도달 ${reached} / 전체 ${total}건).${extra} <a href="/lrs/index.html" style="color:var(--primary);font-weight:600;">→ LRS 성취 도달 현황 보기</a>`;
+          insightEl.innerHTML = `<strong>📊 인사이트</strong>성취기준 도달률 <strong>${reachRate}%</strong> (도달 ${reached} / 평가 ${judged}건${insufficient > 0 ? ` · 평가부족 ${insufficient}건은 분모에서 제외` : ''}).${extra} <a href="/lrs/index.html" style="color:var(--primary);font-weight:600;">→ LRS 성취 도달 현황 보기</a>`;
         }
       }
     }

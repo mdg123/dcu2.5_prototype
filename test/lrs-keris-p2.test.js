@@ -415,8 +415,15 @@ test('R-1①: learnOnly=1 bucket=all — content_view 0건 · count == 7종∩�
   // ① 조회성(content_view) 항목 0건 — segment 'view'·라벨 '콘텐츠 학습' 부재
   assert.equal(j.items.filter(it => it.segment === 'view').length, 0, 'learnOnly 응답에 view(조회) 항목 잔존');
   // ② count == 7종∩all버킷 유형 SQL(테스트 독립 미러)
-  const allowed = LEARN7.filter(t => ['exam_complete', 'homework_submit', 'self_learn', 'daily_complete',
-    'content_view', 'lesson_progress', 'content_solve'].includes(t));
+  // [수정 2026-07-31] 미러가 all 버킷 정의와 어긋나 있었다(테스트 자체 결함, 롤링 시드가 노출).
+  //   · 잘못 포함: lesson_progress — all 버킷은 '진도'를 제외한다(INV-DRILL-c/d 가 박제한 계약).
+  //   · 잘못 누락: wrong_note_retry · node_complete — all 버킷에 포함되는 유형이다.
+  //   uid3 에 두 유형 로그가 0건이던 동안은 두 오류가 상쇄돼 통과했고, 재시드로 진도 7건이
+  //   들어오자 기대값이 9(=진도7+평가2), 실제가 3(=평가2+오답노트1)로 갈라졌다.
+  //   → routes/lrs.js PERFORM_BUCKET_TYPES.all 과 동일한 집합으로 미러를 교정한다.
+  const ALL_BUCKET = ['exam_complete', 'homework_submit', 'self_learn', 'daily_complete',
+    'wrong_note_retry', 'node_complete', 'content_solve'];
+  const allowed = LEARN7.filter(t => ALL_BUCKET.includes(t));
   const ph = allowed.map(() => '?').join(',');
   const expected = tdb.prepare(`
     SELECT COUNT(*) c FROM learning_logs
@@ -448,13 +455,19 @@ test('R-1②: learnOnly 미지정/비-1 값 → 응답 완전 불변(deepEqual �
   }
 });
 
-test('R-1③: learnOnly=1 bucket=content — segments == lesson·solve(view 제외)·합==count / segment=view → 빈 응답', async () => {
+test('R-1③: learnOnly=1 bucket=content — 단일유형이라 소계 미제공(계약) / segment=view → 빈 응답', async () => {
   const r = await req('/perform/detail?bucket=content&period=30d&learnOnly=1', STUDENT1);
   assert.equal(r.status, 200);
   const j = r.json;
-  assert.deepEqual(j.segments.map(s => s.key).sort(), ['lesson', 'solve'], 'learnOnly segments 는 lesson·solve 만');
-  const segSum = j.segments.reduce((s, x) => s + x.count, 0);
-  assert.equal(segSum, j.count, `learnOnly content 세그먼트 합(${segSum}) != count(${j.count})`);
+  // [수정 2026-07-31 / 재감리 2026-07-31] 과거 `if (j.segments !== undefined)` 로 감싼 단언 3개는
+  //   PERFORM_BUCKET_TYPES.content = ['content_solve'] (1원소) 때문에 라우트의 `types.length > 1`
+  //   가드가 영원히 false → segments 항상 undefined → **한 번도 실행되지 않는 죽은 검사**였다.
+  //   그런데 테스트 이름은 "segments == lesson·solve·합==count" 를 광고해 거짓 안심을 줬다.
+  //   → 조건부 제거. 현행 계약(소계 미제공)을 무조건 단언하고, 이름도 실제 검사에 맞춘다.
+  //     content 버킷에 유형이 되돌아오면 이 단언이 터져 view 배제·소계합 불변식 복원을 강제한다.
+  assert.equal(j.segments, undefined,
+    'content 는 단일 유형(content_solve) 버킷 → 세그먼트 소계 미제공이어야 한다 ' +
+    '(소계가 부활했다면 view 배제·"소계 합 == count" 단언도 함께 되살릴 것)');
   // 7종 밖 세그먼트 명시 요청 → 빈 응답(공집합 가드 — 500/SQL 오류 없이)
   const view = await req('/perform/detail?bucket=content&period=30d&segment=view&learnOnly=1', STUDENT1);
   assert.equal(view.status, 200, 'segment=view&learnOnly=1 도 200(공집합 가드)');

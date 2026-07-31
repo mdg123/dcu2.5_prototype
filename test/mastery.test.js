@@ -27,6 +27,31 @@ const mastery = require('../db/lrs-mastery');
 const db = openTestDb();
 
 const ADMIN = 1, TEACHER = 2, STUDENT1 = 3, STUDENT2 = 4;
+
+// ── [W2-a] 결정적 '미도달' 픽스처 ────────────────────────────────────────────
+// 왜 필요한가: 이 파일의 여러 단언이 "uid3 에 미도달이 최소 1건 있다"를 전제로 삼았는데,
+//   그 전제는 실 DB 의 우연한 상태에 기대고 있었다. 상류 집계기 정본화(W2-a) 이후
+//   uid3 의 과거 '미도달' 5건은 **전부 조회(content_view) 로그만으로 만들어진 허위**임이
+//   드러나 사라졌다(정오 판정이 단 1건도 없었다 — 즉 틀린 게 아니라 안 푼 것).
+//   전제가 깨진 것은 은폐가 아니라 **오염 제거**다.
+//   그러나 "진짜 미도달을 숨기지 않는다"는 계약 자체는 계속 지켜야 하므로,
+//   실데이터에 기대는 대신 **진짜 오답 이력(att>=3·success=0)을 합성해 박제**한다.
+//   → 시드 드리프트와 무관하게 분류기 계약만 검증한다(fixtureWindow 와 같은 취지).
+function seedNotReachedFixture(dbh, uid) {
+  const pick = dbh.prepare(`
+    SELECT code, subject_code FROM curriculum_standards
+    WHERE code NOT IN (SELECT achievement_code FROM lrs_achievement_stats WHERE user_id = ?)
+    ORDER BY code LIMIT 1
+  `).get(uid);
+  const code = pick ? pick.code : '[W2A-NR-FIXTURE]';
+  dbh.prepare(`
+    INSERT OR REPLACE INTO lrs_achievement_stats
+      (user_id, achievement_code, subject_code, attempt_count, success_count, avg_score, level, last_level, last_attempt_at)
+    VALUES (?, ?, ?, 3, 0, NULL, 'not_reached', '미도달', CURRENT_TIMESTAMP)
+  `).run(uid, code, pick ? pick.subject_code : null);
+  return code;
+}
+seedNotReachedFixture(db, STUDENT1);
 const CLASS = 1;
 
 const VALID_STATUS = new Set(['reached', 'partial', 'not_reached', 'insufficient']);

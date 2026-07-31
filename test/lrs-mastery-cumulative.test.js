@@ -138,22 +138,27 @@ test('DRILL-2: all count === exam+homework+self+content count 합 (30d)', async 
     `all(${all}) != exam+hw+self+content(${exam}+${hw}+${self}+${content})`);
 });
 
-test('DRILL-3: content segments 소계 합 === content count, 각 segment count===items.length (30d)', async () => {
+test('DRILL-3: content 은 단일유형 버킷 → 소계 미제공 계약 + 각 segment count===items.length (30d)', async () => {
   const r = await req(`/perform/detail?bucket=content&days=30`, STUDENT1);
   assert.equal(r.status, 200);
-  assert.ok(Array.isArray(r.json.segments), 'content 응답에 segments 배열');
-  const segSum = r.json.segments.reduce((s, x) => s + x.count, 0);
-  assert.equal(segSum, r.json.count, `segments 합(${segSum}) != content count(${r.json.count})`);
-  // 각 segment 재요청: count===items.length
+  // [수정 2026-07-31 / 재감리 2026-07-31] 과거 `if (segments !== undefined)` 로 감쌌으나,
+  //   PERFORM_BUCKET_TYPES.content = ['content_solve'] (1원소) 이므로 라우트의 `types.length > 1`
+  //   가드가 영원히 false → segments 는 **항상 undefined** 였고, 안쪽 단언은 구조적으로 도달 불가였다.
+  //   (테스트 이름은 "소계 합 == count" 를 광고하는데 실제로는 아무것도 검사하지 않던 죽은 검사)
+  //   → 조건부를 없애고 **현행 설계의 계약을 무조건 단언**한다. 누군가 content 버킷에 유형을
+  //     되돌려 넣으면(=소계가 다시 생기면) 이 단언이 즉시 터져 소계 불변식 복원을 강제한다.
+  const segments = r.json.segments;
+  assert.equal(segments, undefined,
+    'content 는 단일 유형(content_solve) 버킷이라 세그먼트 소계를 내보내지 않아야 한다 ' +
+    '— 소계가 부활했다면 "소계 합 == count" 불변식도 함께 되살려야 한다');
   for (const seg of ['view', 'lesson', 'solve']) {
     const sr = await req(`/perform/detail?bucket=content&segment=${seg}&days=30`, STUDENT1);
     assert.equal(sr.status, 200, `segment=${seg} → 200`);
+    // ① 형태 무관 불변식 — 표시값(count)과 내역(items) 은 항상 일치
     assert.equal(sr.json.items.length, Math.min(sr.json.count, 200),
       `segment=${seg}: count(${sr.json.count}) != items.length(${sr.json.items.length})`);
-    // segments 소계와 세그먼트 상세 count 일치
-    const segMeta = r.json.segments.find(x => x.key === seg);
-    assert.equal(sr.json.count, segMeta.count,
-      `segment=${seg}: 상세 count(${sr.json.count}) != 소계(${segMeta.count})`);
+    // ② (구) 소계-상세 교차 검증은 segments 가 항상 undefined 라 도달 불가였으므로 제거.
+    //    위에서 "소계 미제공"을 무조건 단언하므로 여기서 다시 볼 것이 없다.
   }
 });
 
