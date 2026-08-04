@@ -22,6 +22,13 @@ const SMOKE_DB_PATH = path.join(
   `dacheum_smoke_${process.pid}_${Date.now()}.db`
 );
 
+// [W4] 업로드 산출물 격리 경로. 스모크 서버는 정본 uploads/ 에 쓰면 안 된다
+//   (DB 만 사본이고 PDF 는 정본 디스크에 쌓이던 부류의 재발 방지 — webServer.env 로 주입).
+const SMOKE_UPLOAD_DIR = path.join(
+  os.tmpdir(),
+  `dacheum_smoke_uploads_${process.pid}_${Date.now()}`
+);
+
 const _temp = [SMOKE_DB_PATH];
 
 // WAL 안전 복사: VACUUM INTO(동기·단일 파일). 실패 시 backup() 동기 대기 폴백.
@@ -61,6 +68,7 @@ function makeSmokeDb() {
     throw new Error(`실 DB 가 없습니다: ${REAL_DB}`);
   }
   copyDbSync(REAL_DB, SMOKE_DB_PATH);
+  try { fs.mkdirSync(SMOKE_UPLOAD_DIR, { recursive: true }); } catch (_) {}
   return SMOKE_DB_PATH;
 }
 
@@ -70,6 +78,7 @@ function cleanupSmokeDb() {
       try { fs.existsSync(f + ext) && fs.unlinkSync(f + ext); } catch (_) {}
     }
   }
+  try { fs.existsSync(SMOKE_UPLOAD_DIR) && fs.rmSync(SMOKE_UPLOAD_DIR, { recursive: true, force: true }); } catch (_) {}
 }
 
-module.exports = { SMOKE_DB_PATH, REAL_DB, makeSmokeDb, cleanupSmokeDb };
+module.exports = { SMOKE_DB_PATH, SMOKE_UPLOAD_DIR, REAL_DB, makeSmokeDb, cleanupSmokeDb };

@@ -119,7 +119,18 @@ function verify(db) {
   const truth = db.prepare(`SELECT COUNT(*) n FROM learning_logs WHERE ${masteryAttemptWhere('')}`).get().n;
   checks.push(['attempt 합계 = 정본 술어 통과 로그수', stored === truth, `${stored} vs ${truth}`]);
   checks.push(['분자 <= 분모', db.prepare('SELECT COUNT(*) n FROM lrs_achievement_stats WHERE success_count > attempt_count').get().n === 0, '']);
-  checks.push(['시도 0 유령행 없음', db.prepare('SELECT COUNT(*) n FROM lrs_achievement_stats WHERE COALESCE(attempt_count,0)=0').get().n === 0, '']);
+  // [A4/B-1 재기준 — 2026-08-04] 유령의 정의가 옮겨졌다.
+  //   과거: "시도 0인 행" = 유령. 그 정의는 "판정 분모"와 "칸의 존재"를 묶고 있어서,
+  //   정오 판정이 없는 채점형 학습(오늘의 학습)만 한 성취기준의 칸을 통째로 지웠다(9셀 소멸).
+  //   현재: 유령 = **채점형 학습 기록이 하나도 없는데 존재하는 행**. 원래 막고 싶었던 대상
+  //   (조회 로그가 만든 행)은 새 정의에서도 그대로 막힌다.
+  checks.push(['채점형 기록 없는 유령행 없음', db.prepare(`
+    SELECT COUNT(*) n FROM lrs_achievement_stats s
+    WHERE NOT EXISTS (SELECT 1 FROM learning_logs l
+      WHERE l.user_id = s.user_id AND l.achievement_code = s.achievement_code
+        AND (${require(path.join(ROOT, 'lib', 'lrs', 'score-scale')).scoredWhere('l')}))
+  `).get().n === 0, '']);
+  checks.push(['attempt_count NULL 없음', db.prepare('SELECT COUNT(*) n FROM lrs_achievement_stats WHERE attempt_count IS NULL').get().n === 0, '']);
   let scaleOk = true;
   for (const tb of Object.keys(snapshot(db).scaleViolations)) {
     if (snapshot(db).scaleViolations[tb] !== 0) scaleOk = false;

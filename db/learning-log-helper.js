@@ -4,7 +4,7 @@ const db = require('./index');
 //   과거 이 파일은 resultScore 를 원시값 그대로 집계에 흘려보냈다 → 0~1 과 0~100 이
 //   같은 컬럼에 섞이고, 진도율(lesson_progress 0.5~1.0)이 '성취 점수'로 둔갑했다.
 const { normScore, isScoredType } = require('../lib/lrs/score-scale');
-const { isMasteryAttempt, masteryRecomputeSql } = require('../lib/lrs/mastery-population');
+const { isMasteryObserved, masteryRecomputeSql } = require('../lib/lrs/mastery-population');
 
 // 학년 → 학교급 매핑 (growth-extended.js gradeToSchoolLevel 와 동일 규칙을 로컬 복제 — 순환참조 방지)
 function gradeToSchoolLevel(grade) {
@@ -389,17 +389,27 @@ function logLearningActivity({
       //     증분식이 재집계식과 따로 존재하는 한 둘은 반드시 갈라진다(실측 2,344행 뒤집힘).
       //     아래는 재집계와 **같은 SQL 술어·집계식**으로 이 (user, code) 한 쌍만 다시 센다.
       //     원본 INSERT 가 같은 트랜잭션에서 선행하므로 방금 들어온 로그도 포함된다.
-      if (isMasteryAttempt({ activityType, achievementCode, resultSuccess })) {
+      //   ★ [A4/B-1] 선판정 게이트는 **관측(observed)** 이다 — 시도(attempt)가 아니다.
+      //     정오 판정이 없는 채점형 학습(오늘의 학습 daily_complete 등)도 성취 칸을 만든다.
+      //     그 칸은 attempt_count=0 으로 저장돼 classifyStatus 가 평가부족(회색)으로 분류한다
+      //     ("안 해본 것"이 아니라 "판정할 자료가 아직 없는 것"). 도달률 분모는 attempt 기준
+      //     이므로 불변이다. 비학습형(조회·진도)은 isMasteryObserved 안의 채점형 화이트리스트가
+      //     계속 배제한다 — 이 게이트를 유형 무관으로 넓히면 회색 셀이 수만 개 쏟아진다.
+      if (isMasteryObserved({ activityType, achievementCode })) {
         const { classifyStatus, reachRate, STATUS_KO } = require('./lrs-mastery');
         const agg = stmts.recomputeAchievement.get(userId, achievementCode);
-        if (agg && agg.attempt_count > 0) {
+        // observed_count 로 "그룹이 비었는가"를 본다. 0행이면 SUM 이 NULL 을 돌려주므로
+        // attempt_count 만으로는 '시도 0인 관측 칸'과 '아예 없는 칸'이 구분되지 않는다.
+        if (agg && agg.observed_count > 0) {
+          const attemptCount = agg.attempt_count || 0;
+          const successCount = agg.success_count || 0;
           // 분류기도 mastery SSOT 단일 구현(success/attempt 우선, 없으면 avg 폴백).
-          const rate = reachRate(agg.success_count, agg.attempt_count, agg.avg_score);
-          const status = classifyStatus(agg.attempt_count, rate);
+          const rate = reachRate(successCount, attemptCount, agg.avg_score);
+          const status = classifyStatus(attemptCount, rate);
           stmts.upsertAchievement.run(
             userId, achievementCode,
             agg.subject_code ?? subjectCode ?? null,
-            agg.attempt_count, agg.success_count, agg.avg_score,
+            attemptCount, successCount, agg.avg_score,
             status, STATUS_KO[status]
           );
         }

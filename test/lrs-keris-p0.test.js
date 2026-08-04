@@ -330,7 +330,7 @@ test('REG-K3: 추천 3단 선정 규칙 — ①시급=미도달·채점 ②권�
   assert.equal(recs[0].status, 'not_reached', '① 은 미도달 상태여야(평가부족을 시급으로 올리면 안 됨)');
   // 문구의 두 수는 테스트가 심은 분자/분모에서 그대로 유도된다:
   //   평균 점수 = AVG(정규화 점수) = (0+0+0+100)/4 = 25 · 정답 인정 = success/attempt = 1/4
-  assert.equal(recs[0].reasonText, '평균 점수 25% · 정답 인정 1/4회 — 여기부터 다시 잡아봐요',
+  assert.equal(recs[0].reasonText, '평균 점수 25점 · 정답 인정 1/4회 — 여기부터 다시 잡아봐요',
     '시급(채점) 템플릿 — 라벨=평균 점수(값 정체 일치) + 도달판정 분자/분모 병기');
 
   assert.equal(recs[1].priority, 'recommended');
@@ -341,7 +341,7 @@ test('REG-K3: 추천 3단 선정 규칙 — ①시급=미도달·채점 ②권�
 
   assert.equal(recs[2].priority, 'optional');
   assert.equal(recs[2].achievement_code, RECO_OPTIONAL_CODE, '③ 선택 = 강점(att≥3·avg 최고) 심화');
-  assert.equal(recs[2].reasonText, '평균 점수 100% · 정답 인정 5/5회 — 한 단계 더 깊게 배워볼까요?',
+  assert.equal(recs[2].reasonText, '평균 점수 100점 · 정답 인정 5/5회 — 한 단계 더 깊게 배워볼까요?',
     '선택(강점 심화) 템플릿');
 
   // 도달한 성취기준이 약점 목록에 섞이면 안 된다(정본사전 §6-10-2: 도달은 항상 제외).
@@ -399,7 +399,10 @@ test('REG-K3c: uid3 이중장부 — insights 약점·강점의 시도/정답 ==
 //   두 지표는 실제로 다르다 — 실측 lrs_achievement_stats 채점행 19,282건 중 30.4%(5,860건)가
 //   |평균 점수 − 정답률| ≥ 20%p. 라벨을 잘못 붙이면 "미도달인데 정답률 75%" 같은 자기모순이 뜬다.
 //   규칙: reasonText 안의 모든 수치는 그 라벨이 가리키는 필드와 정확히 일치해야 한다.
-//     · "평균 점수 N%"   → N === round(avg_score)      (avg_score 없으면 이 조각 자체가 없어야 함)
+//     · "평균 점수 N점"  → N === round(avg_score)      (avg_score 없으면 이 조각 자체가 없어야 함)
+//       ※ 단위는 반드시 "점". 2026-08-04 이전엔 "평균 점수 N%" 였는데, avg_score 는 0~100 **점수**이지
+//         백분율이 아니다. 정본사전 §6-13 이 "점수를 %로 표기"를 자동 REWORK 사유로 규정한다.
+//         아래 NO-PCT 단언이 이 표기의 재발을 막는다.
 //     · "정답률 N%"      → N === round(correctRate)    (avg_score 재사용 금지)
 //     · "정답 인정 S/A회" → S === success_count, A === attempt_count (도달 판정 분자/분모)
 //   + correctRate 계약: null 이거나 0~100, 그리고 success/attempt 에서 파생된 값과 일치.
@@ -421,13 +424,15 @@ test('INV-K3L: reasonText 라벨↔값 정체 일치 (평균 점수=avg_score ·
         assert.ok(!/(null|undefined|NaN)\s*%/.test(t), `결측 표기 금지 — ${where}`);
         assert.ok(!/\/\s*(null|undefined|NaN)/.test(t), `결측 분모 금지 — ${where}`);
 
-        // (1) "평균 점수 N%" ↔ avg_score
-        const mAvg = t.match(/평균 점수\s*(\d+(?:\.\d+)?)%/);
+        // (1) "평균 점수 N점" ↔ avg_score
+        assert.ok(!/평균 점수\s*\d+(?:\.\d+)?%/.test(t),
+          `NO-PCT: 점수를 "%"로 표기하면 안 된다 — avg_score 는 0~100 점수다 (정본사전 §6-13) — ${where}: ${t}`);
+        const mAvg = t.match(/평균 점수\s*(\d+(?:\.\d+)?)점/);
         if (mAvg) {
           avgFrags++;
           assert.ok(row.avg_score != null, `"평균 점수" 표기가 있으면 avg_score 필수 — ${where}`);
           assert.equal(Number(mAvg[1]), Math.round(Number(row.avg_score)),
-            `"평균 점수 N%" 의 N 은 avg_score 반올림과 일치 (avg_score=${row.avg_score}) — ${where}`);
+            `"평균 점수 N점" 의 N 은 avg_score 반올림과 일치 (avg_score=${row.avg_score}) — ${where}`);
         }
 
         // (2) "정답률 N%" ↔ correctRate  (★ avg_score 를 정답률로 부르는 것이 이 결함의 본체)
@@ -463,7 +468,7 @@ test('INV-K3L: reasonText 라벨↔값 정체 일치 (평균 점수=avg_score ·
     }
   }
   assert.ok(checked > 0, '검사한 reasonText 행이 있어야 한다');
-  assert.ok(avgFrags > 0, '"평균 점수 N%" 조각이 최소 1건은 나와야 한다(템플릿 실제 사용 확인)');
+  assert.ok(avgFrags > 0, '"평균 점수 N점" 조각이 최소 1건은 나와야 한다(템플릿 실제 사용 확인)');
   assert.ok(hitFrags > 0, '"정답 인정 S/A회" 조각이 최소 1건은 나와야 한다(판정 근거 병기 확인)');
 });
 

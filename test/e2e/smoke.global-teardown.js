@@ -18,6 +18,16 @@ module.exports = async () => {
     }
   } catch (_) {}
 
+  // 1-b) [W4] 스모크 업로드 격리 디렉터리 정리 (dacheum_smoke_uploads_*)
+  try {
+    const tmp = os.tmpdir();
+    for (const name of fs.readdirSync(tmp)) {
+      if (/^dacheum_smoke_uploads_/.test(name)) {
+        try { fs.rmSync(path.join(tmp, name), { recursive: true, force: true }); } catch (_) {}
+      }
+    }
+  } catch (_) {}
+
   // 2) storageState(.smoke-state) 정리 — 쿠키 잔존 방지
   const stateDir = path.join(__dirname, '.smoke-state');
   try {

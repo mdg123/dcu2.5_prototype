@@ -29,7 +29,7 @@ const {
   SCORED_TYPES, isScoredType, normScore, avgScoreExpr, scoredWhere,
 } = require('../lib/lrs/score-scale');
 const {
-  masteryAttemptWhere, isMasteryAttempt,
+  masteryAttemptWhere, isMasteryAttempt, observedWhere, isMasteryObserved,
 } = require('../lib/lrs/mastery-population');
 const db = openTestDb();
 
@@ -121,11 +121,33 @@ test('[POP-3] success_count <= attempt_count (분자가 분모를 넘지 않는�
   assert.equal(bad, 0, `분자>분모 행 ${bad}건`);
 });
 
-test('[POP-4] attempt_count = 0 인 유령 행이 저장되지 않는다', () => {
-  const ghosts = db.prepare(
-    'SELECT COUNT(*) n FROM lrs_achievement_stats WHERE attempt_count IS NULL OR attempt_count = 0'
+// ── [A4/B-1 재기준 — 2026-08-04] ────────────────────────────────────────────
+//   이 검사는 원래 `attempt_count = 0` 인 행을 유령으로 보고 0건을 요구했다.
+//   그 요구는 "판정 분모"와 "칸의 존재"를 같은 조건으로 묶고 있었고, 그래서
+//   정오 판정이 없는 채점형 학습(오늘의 학습)만 한 성취기준의 칸이 통째로 지워졌다
+//   (실측: 전 사이트 9셀 소멸 — student1 7셀). B-1 이 두 역할을 분리했으므로
+//   attempt_count = 0 은 이제 **정상 상태**(평가 부족·회색)다.
+//
+//   유령의 정의를 옮긴다: 유령은 "시도가 0인 행"이 아니라
+//   **"채점형 학습 기록이 하나도 없는데 존재하는 행"** 이다. 원래 이 검사가 막고 싶었던
+//   대상(조회 36,410건이 만든 행)은 새 정의에서도 그대로 막힌다 — 오히려 더 정확하게.
+//   NULL attempt_count 금지는 그대로 유지한다(집계식이 NULL 을 흘리면 산술이 무너진다).
+test('[POP-4] 채점형 학습 기록이 없는 유령 행이 저장되지 않는다 (attempt_count NULL 금지 포함)', () => {
+  const nulls = db.prepare(
+    'SELECT COUNT(*) n FROM lrs_achievement_stats WHERE attempt_count IS NULL'
   ).get().n;
-  assert.equal(ghosts, 0, `시도 0인 성취 행 ${ghosts}건 — 판정 불가 행이 도달률 분모를 오염시킨다`);
+  assert.equal(nulls, 0, `attempt_count 가 NULL 인 행 ${nulls}건 — 집계식이 NULL 을 흘렸다`);
+
+  const ghosts = db.prepare(`
+    SELECT COUNT(*) n FROM lrs_achievement_stats s
+    WHERE NOT EXISTS (
+      SELECT 1 FROM learning_logs l
+      WHERE l.user_id = s.user_id AND l.achievement_code = s.achievement_code
+        AND (${scoredWhere('l')})
+    )
+  `).get().n;
+  assert.equal(ghosts, 0,
+    `채점형 학습 기록이 없는 성취 행 ${ghosts}건 — 조회·진도 로그가 성취 칸을 만들고 있다`);
 });
 
 test('[POP-5] 조회 로그를 역주입해도 attempt_count 가 늘지 않는다', () => {
@@ -232,6 +254,44 @@ test('[TWIN-1] isMasteryAttempt(JS) 와 masteryAttemptWhere(SQL) 가 전수 일�
   }
   assert.equal(mismatch, 0,
     `SQL·JS 술어 불일치 ${mismatch}건 (예: ${JSON.stringify(sample)}) — 쌍둥이 드리프트`);
+});
+
+// [A4/B-1] 관측 술어도 쌍둥이다 — 실시간 게이트(JS)와 재집계 모집단(SQL)이 갈라지면
+//   "실시간엔 칸이 생기는데 재집계하면 사라진다"(또는 그 반대)가 되어, 재집계 시점이
+//   다시 학생의 화면을 바꾼다(W2-a 가 없앤 바로 그 부류의 재발).
+test('[TWIN-1b] isMasteryObserved(JS) 와 observedWhere(SQL) 가 전수 일치', () => {
+  const rows = db.prepare(`
+    SELECT id, activity_type, achievement_code,
+           (${observedWhere('')}) AS sql_says
+    FROM learning_logs
+  `).all();
+  let mismatch = 0, sample = null;
+  for (const r of rows) {
+    const jsSays = isMasteryObserved({
+      activityType: r.activity_type,
+      achievementCode: r.achievement_code,
+    }) ? 1 : 0;
+    if (jsSays !== r.sql_says) { mismatch++; if (!sample) sample = r; }
+  }
+  assert.equal(mismatch, 0,
+    `SQL·JS 관측 술어 불일치 ${mismatch}건 (예: ${JSON.stringify(sample)}) — 쌍둥이 드리프트`);
+});
+
+test('[TWIN-1c] 시도(attempt) 는 관측(observed) 의 진부분집합이며, 차집합은 정확히 "정오 판정 없음"', () => {
+  // 두 술어가 같은 집합이 되면 B-1 이 되돌려진 것이고,
+  // 시도가 관측 밖으로 나가면 판정 분모가 관측되지 않은 행을 세는 것이다. 둘 다 붕괴.
+  const r = db.prepare(`
+    SELECT
+      SUM(CASE WHEN (${masteryAttemptWhere('')}) AND NOT (${observedWhere('')}) THEN 1 ELSE 0 END) attempt_outside_observed,
+      SUM(CASE WHEN (${observedWhere('')}) AND NOT (${masteryAttemptWhere('')})
+                AND result_success IS NOT NULL THEN 1 ELSE 0 END) diff_wrong_reason,
+      SUM(CASE WHEN (${observedWhere('')}) AND NOT (${masteryAttemptWhere('')}) THEN 1 ELSE 0 END) observed_only
+    FROM learning_logs
+  `).get();
+  assert.equal(r.attempt_outside_observed, 0, '시도가 관측 밖에 있다 — 판정 분모 오염');
+  assert.equal(r.diff_wrong_reason, 0, '관측−시도 차집합에 정오 판정이 있는 행이 섞였다');
+  assert.ok(r.observed_only > 0,
+    '관측만 되고 판정은 없는 로그가 0건 — 전제 붕괴(오늘의 학습 픽스처 소실) 또는 B-1 되돌림');
 });
 
 test('[TWIN-2] isScoredType(JS) 와 scoredWhere(SQL) 가 전수 일치', () => {

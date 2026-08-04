@@ -27,7 +27,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 const db = require('./index');
 const { avgScoreExpr } = require('../lib/lrs/score-scale');
-const { masteryAttemptWhere, masteryAggSelect } = require('../lib/lrs/mastery-population');
+const { observedWhere, masteryAggSelect } = require('../lib/lrs/mastery-population');
 
 /**
  * 모든 집계 테이블을 초기화하고 learning_logs에서 재집계한다.
@@ -131,6 +131,12 @@ function rebuildAllAggregates() {
     //      실시간 경로(db/learning-log-helper.js)가 **이 문자열을 그대로 재사용**하므로
     //      두 경로는 키 범위(전수 GROUP BY vs 단일 user+code)만 다르고 판정은 동일하다.
     //      여기에 술어나 집계식을 인라인으로 다시 쓰면 그 순간 두 경로가 갈라진다 — 금지.
+    //
+    //    ★ [A4/B-1] 그룹 모집단은 **observedWhere(관측)** 이다 — masteryAttemptWhere 가 아니다.
+    //      정오 판정이 없는 채점형 학습(오늘의 학습)만 한 성취기준의 칸이 통째로 사라지던
+    //      결함(전 사이트 9셀·student1 7셀)을 되살린다. 그 칸은 attempt_count=0 으로 저장돼
+    //      classifyStatus 가 평가부족(회색)으로 분류한다. 도달률 분모는 attempt 기준이므로 불변.
+    //      비학습형(조회·진도·게시글·출석)은 observedWhere 안의 scoredWhere 가 계속 배제한다.
     db.exec(`
       INSERT INTO lrs_achievement_stats (user_id, achievement_code, attempt_count, success_count, avg_score, subject_code, last_attempt_at, updated_at)
       SELECT
@@ -139,7 +145,7 @@ function rebuildAllAggregates() {
         ${masteryAggSelect('')},
         CURRENT_TIMESTAMP as updated_at
       FROM learning_logs
-      WHERE ${masteryAttemptWhere('')}
+      WHERE ${observedWhere('')}
       GROUP BY user_id, achievement_code
     `);
 

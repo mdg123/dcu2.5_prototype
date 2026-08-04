@@ -419,7 +419,12 @@ test('INV-SEC-G10b: 본인 소유 쓰기 유지 · 남의 자원 id 로는 수�
 //   ※ PDF 를 실제로 만들지 않는다(디스크 오염 금지) — 합성 행을 격리 사본에 넣고
 //     "게이트 통과 시 404(파일 없음) / 차단 시 403" 의 차이로 판정한다.
 // ──────────────────────────────────────────────────────────────────────────
-test('INV-SEC-G11: 리포트 생성·조회·다운로드 3라우트의 권한 판정 일치(principal 포함)', async () => {
+//   [W4] 여기에 **PDF 이력(GET /portfolios/reports?userId=)** 을 4번째 라우트로 합류시킨다.
+//   이력만 판정을 손으로 다시 써(`role==='admin' && query.userId` 일 때만 대상 인정) 담임·교장이
+//   요청한 userId 를 **조용히 무시하고 본인 것으로 폴백**했다 → 담임 화면에 "이력 없음"(실측
+//   2026-08-04: teacher1 → 200 reports:0, student1 본인 → 200 reports:18).
+//   조용한 폴백은 "권한이 없다"를 "데이터가 없다"로 위장해 진단을 막는다(G9 가 금지한 패턴).
+test('INV-SEC-G11: 리포트 생성·조회·다운로드·이력 4라우트의 권한 판정 일치(principal 포함)', async () => {
   const rid = `rpt_g11_${Date.now()}`;
   db.prepare(`
     INSERT INTO portfolio_reports (id, user_id, title, period_from, period_to, school_level, file_path, status)
@@ -440,11 +445,16 @@ test('INV-SEC-G11: 리포트 생성·조회·다운로드 3라우트의 권한 �
   for (const [who, actor, shouldPass] of actors) {
     const dl = await call('GET', `/api/growth/portfolios/report/${rid}/download`, actor);
     const view = await call('GET', `/api/growth/portfolios/${S_TARGET}/report-data`, actor);
+    const hist = await call('GET', `/api/growth/portfolios/reports?userId=${S_TARGET}`, actor);
     const dlPassed = dl.status !== 403;
     const viewPassed = view.status !== 403;
+    const histPassed = hist.status !== 403;
 
     if (dlPassed !== viewPassed) {
       mismatches.push(`${who}: 화면조회 ${viewPassed ? '허용' : '차단'} 인데 다운로드 ${dlPassed ? '허용' : '차단'}`);
+    }
+    if (histPassed !== viewPassed) {
+      mismatches.push(`${who}: 화면조회 ${viewPassed ? '허용' : '차단'} 인데 PDF 이력 ${histPassed ? '허용' : '차단'}`);
     }
     if (dlPassed !== shouldPass) {
       mismatches.push(`${who}: 다운로드 기대=${shouldPass ? '허용' : '차단'} 실제=${dl.status}`);
@@ -458,6 +468,116 @@ test('INV-SEC-G11: 리포트 생성·조회·다운로드 3라우트의 권한 �
     `리포트 3라우트 권한 판정 불일치:\n  - ${mismatches.join('\n  - ')}`);
 
   db.prepare('DELETE FROM portfolio_reports WHERE id = ?').run(rid);   // 격리 사본 정리
+});
+
+// ──────────────────────────────────────────────────────────────────────────
+// G12: PDF 이력의 **대상 해석** — "허용/차단"만이 아니라 "누구의 데이터를 돌려주는가".
+//
+//   G11 은 403 여부만 본다. 조용한 본인 폴백은 403 을 내지 않으므로 G11 만으로는 못 잡는다
+//   (담임 → 200 인데 내용이 본인 것 = "이력 없음"으로 보임). 그래서 여기서 **내용**을 대조한다:
+//     · 담임/교장/admin 이 ?userId=학생 으로 받은 목록 == 학생 본인이 받은 목록
+//     · 요청자 본인의 이력이 섞여 있으면 폴백(붉어짐)
+//     · 파라미터를 안 주면 종전대로 본인 이력(회귀 방지)
+// ──────────────────────────────────────────────────────────────────────────
+test('INV-SEC-G12: PDF 이력 — 담당 교사·교장·admin 이 "대상 학생의" 이력을 받는다(조용한 본인 폴백 금지)', async () => {
+  const stamp = Date.now();
+  const ridS = `rpt_g12_s_${stamp}`;   // 대상 학생 소유
+  const ridT = `rpt_g12_t_${stamp}`;   // 요청자(교사) 본인 소유 — 폴백 검출용 미끼
+  const ins = db.prepare(`
+    INSERT INTO portfolio_reports (id, user_id, title, period_from, period_to, school_level, status)
+    VALUES (?, ?, ?, '2026-01-01', '2026-12-31', 'elementary', 'ready')
+  `);
+  ins.run(ridS, S_TARGET, 'G12 학생 이력');
+  ins.run(ridT, T1, 'G12 교사 본인 이력');
+
+  const idsOf = (r) => {
+    const p = JSON.parse(r.body);
+    assert.ok(Array.isArray(p.reports), `reports 배열이 있어야 한다 (실제=${r.body.slice(0, 120)})`);
+    return p.reports.map((x) => x.id);
+  };
+
+  try {
+    const self = await get('/api/growth/portfolios/reports', S_TARGET);
+    assert.equal(self.status, 200, `학생 본인 이력은 200 (실제=${self.status})`);
+    const selfIds = idsOf(self).sort();
+    assert.ok(selfIds.includes(ridS), '전제: 학생 본인 이력에 합성 행이 보여야 한다');
+
+    for (const [who, actor] of [['담임(teacher1)', T1], ['교장(자기 학교)', PRIN], ['admin', ADMIN]]) {
+      const r = await get(`/api/growth/portfolios/reports?userId=${S_TARGET}`, actor);
+      assert.equal(r.status, 200, `${who} 의 학생 PDF 이력 조회는 200 (실제=${r.status})`);
+      const got = idsOf(r).sort();
+      assert.ok(got.includes(ridS), `${who} 가 학생 이력을 못 본다(조용한 본인 폴백)`);
+      assert.ok(!got.includes(ridT), `${who} 응답에 요청자 본인 이력이 섞였다(조용한 본인 폴백)`);
+      assert.deepEqual(got, selfIds, `${who} 가 받은 이력이 학생 본인 것과 다르다`);
+    }
+
+    // 차단은 "빈 목록 200" 이 아니라 403 이어야 한다(권한 문제를 데이터 문제로 위장 금지).
+    for (const [who, actor] of [['비담당 교사(mteacher1)', TFOE], ['타 학생(student8)', S_OTHER],
+                                ['학부모(parent1)', PARENT]]) {
+      const r = await get(`/api/growth/portfolios/reports?userId=${S_TARGET}`, actor);
+      assert.equal(r.status, 403, `${who} 의 남의 PDF 이력 조회는 403 (실제=${r.status} ${r.body.slice(0, 90)})`);
+      const p = JSON.parse(r.body);
+      assert.equal(p.success, false, `${who} 차단 응답은 success:false`);
+      assert.ok(!('reports' in p), `${who} 차단인데 reports 를 함께 돌려줬다`);
+    }
+
+    // 파라미터 미지정 = 본인 이력(기존 동선 회귀 방지)
+    const own = await get('/api/growth/portfolios/reports', T1);
+    assert.equal(own.status, 200, `파라미터 없는 본인 이력은 200 (실제=${own.status})`);
+    const ownIds = idsOf(own);
+    assert.ok(ownIds.includes(ridT), '파라미터 없으면 요청자 본인 이력이어야 한다');
+    assert.ok(!ownIds.includes(ridS), '파라미터가 없는데 남의 이력이 섞였다');
+  } finally {
+    db.prepare('DELETE FROM portfolio_reports WHERE id IN (?, ?)').run(ridS, ridT);
+  }
+});
+
+// ──────────────────────────────────────────────────────────────────────────
+// G13: 클래스 성장 현황(GET /api/growth/class/:classId) 의 판정이 **SSOT 한 벌**인가.
+//
+//   이 라우트만 `getMemberRole(...) === 'owner'` 로 손수 판정해 SSOT
+//   (lib/auth/can-view-user.js: CLASS_TEACHER_ROLES = owner|teacher|co_teacher)를 안 썼다.
+//   현재 시드에 co_teacher 행이 0 건이라 실해는 없지만, **같은 판정이 두 벌 있는 상태 자체**가
+//   W3 사고(다운로드만 principal 누락)의 원인이었다. 판정이 갈라지면 여기서 붉어진다.
+//
+//   ※ class_members 에는 아직 CHECK(role IN ('owner','member')) 가 남아 있어 co_teacher 를
+//     정상 INSERT 할 수 없다(별건 — 스키마·SSOT 불일치로 보고). 격리 사본에서만
+//     ignore_check_constraints 로 우회해 "SSOT 가 인정하는 티어"를 실제로 태워 본다.
+//     정본 DB 는 손대지 않는다.
+// ──────────────────────────────────────────────────────────────────────────
+test('INV-SEC-G13: 클래스 성장 현황 — SSOT 교사-티어(co_teacher) 통과 · 비멤버/학생 403', async () => {
+  const url = `/api/growth/class/${CLASS_FOE}`;
+
+  const existing = db.prepare('SELECT role FROM class_members WHERE class_id = ? AND user_id = ?')
+    .get(CLASS_FOE, TSEED);
+  assert.ok(!existing, '전제: seed_t001 은 CLASS_FOE 의 멤버가 아니어야 한다');
+
+  const before = await get(url, TSEED);
+  assert.equal(before.status, 403, `비멤버 교사는 403 (실제=${before.status})`);
+
+  db.pragma('ignore_check_constraints = ON');
+  db.prepare("INSERT INTO class_members (class_id, user_id, role, status) VALUES (?, ?, 'co_teacher', 'active')")
+    .run(CLASS_FOE, TSEED);
+  try {
+    const co = await get(url, TSEED);
+    assert.notEqual(co.status, 403,
+      `co_teacher 는 CLASS_TEACHER_ROLES(SSOT) 에 속하는데 차단됨(실제=${co.status}) — ` +
+      `라우트가 role==='owner' 를 손으로 다시 판정하고 있다`);
+
+    const owner = await get(url, TFOE);
+    assert.notEqual(owner.status, 403, `개설자(owner)가 차단됨(과차단 회귀, 실제=${owner.status})`);
+    const ad = await get(url, ADMIN);
+    assert.notEqual(ad.status, 403, `admin 이 차단됨(실제=${ad.status})`);
+
+    const stu = await get(`/api/growth/class/${CLASS_T1}`, S_TARGET);
+    assert.equal(stu.status, 403, `학생 멤버가 클래스 성장 현황을 열람(실제=${stu.status})`);
+    const foe = await get(`/api/growth/class/${CLASS_T1}`, TFOE);
+    assert.equal(foe.status, 403, `비담당 교사가 남의 반 성장 현황을 열람(실제=${foe.status})`);
+  } finally {
+    db.prepare("DELETE FROM class_members WHERE class_id = ? AND user_id = ? AND role = 'co_teacher'")
+      .run(CLASS_FOE, TSEED);
+    db.pragma('ignore_check_constraints = OFF');
+  }
 });
 
 test('INV-SEC-G9: 차단 응답 계약 — 403 + success:false + 한국어 message', async () => {

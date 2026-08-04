@@ -344,6 +344,7 @@
 </head>
 <body>
   <script src="/js/common-nav.js"></script>
+<script src="/js/access-denied.js"></script>
   <script src="/js/class-ui.js"></script>
   <div class="container page-shell" id="mainContent" style="display:none;">
     <header class="page-header page-header--class" id="classHeader">
@@ -1437,6 +1438,13 @@
 
     async function loadClass() {
       const res = await fetch(`/api/class/${classId}`);
+      // 403 은 "실패"가 아니라 "권한 없음" — 토스트 후 튕겨내지 말고 이유와 복귀 동선을 함께 안내한다
+      if (window.DacheumAccess && DacheumAccess.denied(res, {
+        what: '이 클래스',
+        who: '이 클래스에 들어와 있는 선생님과 학생',
+        backHref: '/class/index.html',
+        backLabel: '나의 클래스로 가기'
+      })) return;
       const data = await res.json();
       if (!data.success) { classToast(data.message || '클래스를 찾을 수 없습니다.', 'error'); setTimeout(() => { location.href = '/class/index.html'; }, 1200); return; }
 

@@ -1649,11 +1649,14 @@ function achievementLabel(code) {
  *        "평균 점수는 높은데 왜 미도달인지"가 카드 안에서 자명해지게 한다.
  *        (산식·status 는 일절 변경하지 않음 — 표기만 정정)
  * ─────────────────────────────────────────────────────────────────────────
- *   시급(채점)      : 평균 점수 {avg}% · 정답 인정 {succ}/{att}회 — 여기부터 다시 잡아봐요
+ *   시급(채점)      : 평균 점수 {avg}점 · 정답 인정 {succ}/{att}회 — 여기부터 다시 잡아봐요
  *   시급(미채점)    : 가장 많이 연습한 단원이에요({att}회) — 채점되는 문제로 실력을 확인해봐요
- *   권장(부분도달)  : 평균 점수 {avg}% · 정답 인정 {succ}/{att}회 — 조금만 더 하면 도달해요
+ *   권장(부분도달)  : 평균 점수 {avg}점 · 정답 인정 {succ}/{att}회 — 조금만 더 하면 도달해요
  *   권장(평가부족)  : 아직 {att}번밖에 안 풀었어요 — 3번 이상 풀면 도달 판정을 받을 수 있어요
- *   선택(강점 심화) : 평균 점수 {avg}% · 정답 인정 {succ}/{att}회 — 한 단계 더 깊게 배워볼까요?
+ *   선택(강점 심화) : 평균 점수 {avg}점 · 정답 인정 {succ}/{att}회 — 한 단계 더 깊게 배워볼까요?
+ *   ※ 단위는 "점" — avg_score 는 0~100 **점수**이지 백분율이 아니다(정본사전 §6-13).
+ *     2026-08-04 이전 표기 "{avg}%" 는 오표기였고, test/lrs-keris-p0.test.js 의
+ *     NO-PCT 단언이 재발을 막는다.
  *
  * @param {string} status  mastery.STATUS 값 (not_reached|partial|insufficient) 또는 'strength'
  * @param {boolean} hasScore 채점(avg_score) 데이터 존재 여부
@@ -1668,7 +1671,7 @@ function recoReasonText(status, hasScore, avg, att, succ) {
   const hitFrag = hasHit ? `정답 인정 ${Number(succ)}/${Number(att)}회` : '';
   // 지표 앞부분 조립: 평균 점수(있으면) + 정답 인정(있으면). 둘 다 없으면 빈 문자열.
   //   ★ 값이 없을 때 "평균 점수 null%" 같은 허위 표기가 절대 나오지 않게 한다.
-  const metric = [a != null ? `평균 점수 ${a}%` : '', hitFrag].filter(Boolean).join(' · ');
+  const metric = [a != null ? `평균 점수 ${a}점` : '', hitFrag].filter(Boolean).join(' · ');
   if (status === 'strength') {
     return metric ? `${metric} — 한 단계 더 깊게 배워볼까요?`
                   : `꾸준히 잘하고 있어요 — 한 단계 더 깊게 배워볼까요?`;
@@ -4891,33 +4894,76 @@ router.get('/stats/custom', requireAuth, (req, res) => {
       ORDER BY date
     `).all(...baseParams);
 
-    // ── [W2-b 6-10] "보완이 필요한 성취기준" — 도달한 기준은 항상 제외, 미채점은 점수 0 채움 금지 ──
-    //   과거: 평균 100점·미채점 항목이 '약점 Top10' 에 등재됐다(학생 insights 만 고쳐져 있었음).
-    //   정본: 후보 = 미도달·부분도달·평가부족. 도달(reached)은 제외. 분류기는 db/lrs-mastery(SSOT).
+    // ── [A4/B-3] "보완이 필요한 성취기준" — 성취 판정은 mastery SSOT 하나만 쓴다 ──────────
+    //
+    //   ■ 무엇이 틀려 있었나 (2026-08-04 실측, uid3 [4수01-07])
+    //     이 표는 learning_logs 를 **자체 GROUP BY** 로 다시 세고 있었다. 그 자체 산식은
+    //     성취수준 화면(lrs_achievement_stats)과 네 군데가 달랐다:
+    //       ① 서비스 범위 : source_service='self-learn' 만    ↔ 성취 화면은 전 서비스
+    //       ② 기간        : 기간 칩 창(기본 30일)             ↔ 성취 화면은 누적 전기간(§6-11-3)
+    //       ③ attempt 정의: 필터 없는 COUNT(*)                ↔ 채점형 ∧ 정오 판정 존재
+    //       ④ success     : NULL 을 0(오답)으로 취급          ↔ NULL 은 분모에도 안 들어감
+    //     그래서 [4수01-07] 은 성취 화면에서 **도달(5시도 5정답)**, 이 표에서 **보완 필요(0/1)** 였다.
+    //     같은 학생·같은 성취기준을 두고 한 화면은 "완벽히 해냈다", 다른 화면은 "못했다"고 말한 것이다.
+    //     라벨을 아무리 정직하게 고쳐도 화면 안에서 화해되지 않는 모순이므로 **산식을 없앤다.**
+    //
+    //   ■ 정본
+    //     status·attempts·successCount·avg_score 는 전부 lrs_achievement_stats(누적)에서 읽는다.
+    //     기간 연습량은 판정에서 분리해 periodPracticeCount 로만 병기한다("이 기간 연습 N회").
+    //     후보 = 미도달·부분도달·평가부족. 도달(reached)은 **구조적으로** 등재될 수 없다.
+    //     ★ 자체 GROUP BY 를 다시 도입하지 말 것 — 그 순간 두 화면이 또 갈라진다(INV-A4-1·2 가 박제).
+    //
+    //   ■ 다중 사용자 스코프(교사 class / 관리자 all)
+    //     성취 행을 코드별로 풀링(SUM)한다. 학생 1명(scope=mine)이면 그 학생의 SSOT 행과
+    //     산술적으로 동일해진다 → 학생 화면 두 곳의 status 가 정의상 일치한다.
+    const sfStats = resolveMembershipScopeFilter(req, 'las');
     const weakRaw = db.prepare(`
-      SELECT ll.achievement_code,
-             COUNT(*) attempts,
-             SUM(CASE WHEN ll.result_success=1 THEN 1 ELSE 0 END) success,
-             SUM(CASE WHEN ll.result_score IS NOT NULL AND ${LRS_SCORED_SQL} THEN 1 ELSE 0 END) scored_cnt,
-             AVG(CASE WHEN ${LRS_SCORED_SQL} THEN ${NORM_SCORE} END) avg_score,
-             MAX(ll.created_at) last_at
+      SELECT las.achievement_code,
+             SUM(las.attempt_count) attempts,
+             SUM(las.success_count) success,
+             SUM(CASE WHEN las.avg_score IS NOT NULL THEN las.avg_score * las.attempt_count END)
+               / NULLIF(SUM(CASE WHEN las.avg_score IS NOT NULL THEN las.attempt_count END), 0) avg_score,
+             MAX(las.last_attempt_at) last_at
+      FROM lrs_achievement_stats las
+      WHERE las.achievement_code IS NOT NULL AND las.achievement_code != '' ${sfStats.where}
+      GROUP BY las.achievement_code
+    `).all(...sfStats.params);
+
+    // 기간 연습량(판정 비참여) — 이 기간에 스스로채움으로 몇 번 연습했는가.
+    //   ★ 이 값을 status·attempts 로 승격시키지 말 것. 그것이 위 ②③④ 결함의 정체였다.
+    const practiceRows = db.prepare(`
+      SELECT ll.achievement_code code, COUNT(*) n
       FROM learning_logs ll
       ${baseWhere} AND ll.achievement_code IS NOT NULL AND ll.achievement_code != ''
       GROUP BY ll.achievement_code
-      HAVING attempts >= 1
     `).all(...baseParams);
+    const practiceByCode = new Map(practiceRows.map(p => [p.code, p.n]));
+
     const weakTargets = weakRaw
       .map(w => {
-        const rate = mastery.reachRate(w.success, w.attempts, w.avg_score);
-        const status = mastery.classifyStatus(w.attempts, rate);
-        return { ...w, _status: status, _hasScore: (w.scored_cnt || 0) > 0 };
+        const attempts = w.attempts || 0;
+        const success = w.success || 0;
+        const rate = mastery.reachRate(success, attempts, w.avg_score);
+        const status = mastery.classifyStatus(attempts, rate);
+        return {
+          ...w, attempts, success,
+          _status: status,
+          _hasScore: w.avg_score != null,
+          _practice: practiceByCode.get(w.achievement_code) || 0,
+        };
       })
       .filter(w => w._status !== mastery.STATUS.REACHED)   // 도달은 약점이 아니다 — 항상 제외
-      // 채점분 우선(평균 점수 낮은 순) → 미채점분은 뒤에 연습량 많은 순(점수 0 채움 금지)
+      // 채점분 우선(평균 점수 낮은 순) → 미채점분은 뒤에 판정 시도 많은 순(점수 0 채움 금지).
+      //   ★ 정렬 키에 periodPracticeCount 를 쓰지 않는다. 쓰면 기간 칩에 따라 목록의 구성원이
+      //     달라져 "이 표의 판정은 누적" 이라는 약속이 표시 단계에서 다시 깨진다.
+      //     마지막 키는 코드(사전순) — 동점에서도 결정적인 목록이 되도록.
       .sort((a, b) => {
         if (a._hasScore !== b._hasScore) return a._hasScore ? -1 : 1;
-        if (a._hasScore) return (a.avg_score ?? 999) - (b.avg_score ?? 999);
-        return (b.attempts || 0) - (a.attempts || 0);
+        if (a._hasScore && (a.avg_score ?? 999) !== (b.avg_score ?? 999)) {
+          return (a.avg_score ?? 999) - (b.avg_score ?? 999);
+        }
+        return (b.attempts - a.attempts)
+          || String(a.achievement_code).localeCompare(String(b.achievement_code));
       })
       .slice(0, 10)
       .map(w => {
@@ -4928,16 +4974,23 @@ router.get('/stats/custom', requireAuth, (req, res) => {
           label: nm.label,            // 화면 표기용 짧은 이름(단원명 우선)
           fullLabel: nm.fullLabel,    // 툴팁/보조 서술
           subject_label: nm.subjectLabel,
-          attempts: w.attempts,
-          successCount: w.success || 0,
+          attempts: w.attempts,       // ★ 판정 시도(누적) — '연습 횟수'가 아니다(화면 라벨 '판정 시도')
+          successCount: w.success,
           hasScore: w._hasScore,                                   // false → 화면은 '아직 채점된 문제가 없어요'
           status: w._status,                                       // not_reached | partial | insufficient
           avg_score: w._hasScore && w.avg_score != null ? Math.round(w.avg_score*10)/10 : null,
+          periodPracticeCount: w._practice,                        // 이 기간 스스로채움 연습 횟수(판정 비참여)
           last_at: w.last_at
         };
       });
 
-    res.json({ success:true, scope: sf.scope, period: { fromDate: r.fromDate, toDate: r.toDate }, summary, byDay, weakTargets });
+    res.json({
+      success:true, scope: sf.scope, period: { fromDate: r.fromDate, toDate: r.toDate },
+      summary, byDay, weakTargets,
+      // 축이 둘임을 화면이 숨기지 않게 한다(정본사전 §5-4-2 "분모를 숨기지 않는다").
+      //   상단 summary·byDay = 기간 창 / weakTargets 의 성취 판정 = 전기간 누적.
+      weakTargetsBasis: { status: 'cumulative', practice: 'period' },
+    });
   } catch (err) {
     console.error('[LRS] /stats/custom error:', err);
     res.status(500).json({ success:false, message:'서버 오류가 발생했습니다.' });

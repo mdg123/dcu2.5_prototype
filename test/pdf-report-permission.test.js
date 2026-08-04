@@ -21,6 +21,8 @@
 const { test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const http = require('node:http');
+const fs = require('node:fs');
+const path = require('node:path');
 const { setupTestDb } = require('./_setup');
 
 setupTestDb();   // ★ 라우터/미들웨어가 db 모듈 require 전에 DB_PATH 주입
@@ -116,4 +118,34 @@ test('PDF-PERM-d: 타 학생 → 다른 학생 PDF 생성 403', async () => {
 test('PDF-PERM-e: admin → 임의 학생 PDF 생성 권한 통과(403 아님)', async () => {
   const r = await postReport(STUDENT1, ADMIN);
   assert.notEqual(r.status, 403, `admin 은 권한 통과해야(403 아님). 실제=${r.status} body=${r.body.slice(0,200)}`);
+});
+
+// ──────────────────────────────────────────────────────────────────────────
+// (f) [W4] 디스크 격리 — DB 는 임시 사본을 쓰면서 PDF 만 정본 디스크에 썼다.
+//   실측(2026-08-04): uploads/portfolio-reports 에 1103 개 중 1095 개가 정본 DB 미참조 고아.
+//   전부 user_id=3(=STUDENT1, 이 파일이 쓰는 계정)이고, 인접 생성 간격의 66%가 1초 미만,
+//   "5분 공백" 기준 226 세션 중 149 세션이 정확히 3 개 = 이 파일의 허용 케이스(a·c·e) 3 건과 일치.
+//   즉 테스트가 매 실행마다 정본 디스크에 3 개씩 쌓고 있었다.
+//   → setupTestDb() 가 PORTFOLIO_REPORT_DIR 를 임시 경로로 주입하고, 생성 경로가 그것을 따른다.
+//   "쓰지 않는다"가 아니라 "임시로 쓴다"를 검증한다(생성 기능이 죽으면 그것도 붉어지도록).
+// ──────────────────────────────────────────────────────────────────────────
+test('PDF-PERM-f: 테스트가 만든 PDF 는 정본 uploads/ 를 오염시키지 않고 임시 경로에 쌓인다', async () => {
+  const realDir = path.join(process.cwd(), 'uploads', 'portfolio-reports');
+  const countIn = (d) => (d && fs.existsSync(d) ? fs.readdirSync(d).length : 0);
+
+  const isoDir = process.env.PORTFOLIO_REPORT_DIR;
+  assert.ok(isoDir, 'setupTestDb() 가 PORTFOLIO_REPORT_DIR(임시 경로)를 주입해야 한다');
+  assert.notEqual(path.resolve(isoDir), path.resolve(realDir), '격리 경로가 정본 경로와 같다');
+
+  const realBefore = countIn(realDir);
+  const isoBefore = countIn(isoDir);
+
+  const r = await postReport(STUDENT1, STUDENT1);
+  assert.notEqual(r.status, 403, `전제: 본인 PDF 생성은 권한 통과 (실제=${r.status})`);
+  assert.equal(r.status, 201, `전제: PDF 가 실제로 생성돼야 한다 (실제=${r.status} ${r.body.slice(0, 200)})`);
+
+  assert.equal(countIn(realDir), realBefore,
+    `테스트가 정본 uploads/portfolio-reports 에 파일을 ${countIn(realDir) - realBefore} 개 남겼다(디스크 오염)`);
+  assert.ok(countIn(isoDir) > isoBefore,
+    '임시 경로에 PDF 가 생성되지 않았다(경로만 바꾸고 생성이 죽었을 수 있다)');
 });

@@ -21,6 +21,39 @@ const STATE_DIR = path.join(__dirname, '.smoke-state');
 const stateFor = (role) => path.join(STATE_DIR, `${role}.json`);
 const BASE_URL = 'http://localhost:3100'; // smoke.config.js 의 PORT 와 동일
 
+// ── [W4] 시간 부패(롤링 창 시한폭탄) 방어 ──────────────────────────────────
+//   LRS 기본 기간칩은 "최근 30일"(wall clock). 그 위에 "행이 존재한다" 류의 단언을 얹으면
+//   코드가 한 줄도 안 바뀌어도 근거 데이터가 창 밖으로 노화되는 순간 터진다.
+//   실제 사례 — P2-2("최근 학습 활동" 카드): student1 의 마지막 학습활동이 2026-07-04 인데
+//   2026-08-04 의 30일 창(07-05~08-04)에는 0 건 → #sRecentActs 미렌더로 08-04 부터 자동 실패.
+//   해법은 커밋 cf04470(고정 GT 11건)과 동일: **창을 시계가 아니라 데이터에서 유도**한다.
+//   test/_setup.js 의 fixtureWindow(SSOT)를 스모크 DB 사본에 그대로 적용하고, 화면에서는
+//   실제 UI 경로(기간칩 "사용자 지정" → from/to → 적용)로 그 창을 태운다.
+const { SMOKE_DB_PATH } = require('./smoke.db-copy');
+const { fixtureWindow } = require('../_setup');
+
+/** 스모크 DB 사본에서 특정 계정의 learning_logs 전 구간 창(YYYY-MM-DD)을 유도. */
+function activityWindowFor(username) {
+  const Database = require('better-sqlite3');
+  const db = new Database(SMOKE_DB_PATH, { readonly: true });
+  try {
+    const u = db.prepare('SELECT id FROM users WHERE username = ?').get(username);
+    if (!u) throw new Error(`스모크 DB 에 ${username} 계정이 없습니다(테스트 전제 붕괴).`);
+    return fixtureWindow(db, { userId: u.id, pad: 1 });
+  } finally {
+    try { db.close(); } catch (_) {}
+  }
+}
+
+/** 기간칩을 "사용자 지정"으로 바꾸고 from~to 를 적용한다(실 UI 경로 — state 직접 주입 아님). */
+async function applyCustomPeriod(page, { from, to }) {
+  await page.waitForSelector('#periodPicker button[data-period="custom"]', { timeout: 15000 });
+  await page.click('#periodPicker button[data-period="custom"]');
+  await page.fill('#rangeFrom', from);
+  await page.fill('#rangeTo', to);
+  await page.click('#applyCustom');
+}
+
 // ── 콘솔 error 화이트리스트: 무해한 외부 리소스/네트워크 잡음만 허용 ──
 //    (JS 런타임 에러·정의되지 않은 변수·TypeError 등은 절대 허용하지 않는다)
 const CONSOLE_WHITELIST = [
@@ -718,6 +751,9 @@ test.describe('스모크: LRS P2 히트맵 드릴·최근 학습 활동(INV-K13~
       const withClassReqs = [];
       page.on('request', (r) => { if (/withClass(Avg)?=/.test(r.url())) withClassReqs.push(r.url()); });
       await page.goto('/lrs/index.html#s-perform', { waitUntil: 'domcontentloaded' });
+      // [W4] 기본 30일 롤링 창 대신 **데이터에서 유도한 창**을 적용한다(시간 부패 방어).
+      //   student1 의 학습활동 전 구간을 덮으므로 오늘이 언제든 같은 행 집합을 본다.
+      await applyCustomPeriod(page, activityWindowFor('student1'));
       await page.waitForFunction(() => {
         const h = document.getElementById('sRecentActs');
         return !!(h && h.querySelector('.lrs-dm-row'));
@@ -1131,5 +1167,162 @@ test.describe('스모크: LRS 활동 현황 히트맵 스코프 계약(감리 RE
     } finally {
       await context.close();
     }
+  });
+});
+
+// ── 8) [A4 성취 모집단 정합] 학생 뷰 고지 정합·표기 정직성 회귀 박제 ──────────
+//    기획서: 보고서/LRS_A4_성취모집단_정합_UI_기획_v1.md §4-5
+//      INV-A4-5 고지 정합 : 도넛 부제의 "아직 판정 못 한 N개" == counts.insufficient
+//                           == standards[status==='insufficient'].length == 범례 개수
+//                           (N 을 하드코딩하면 재집계 후 3↔10 처럼 즉시 어긋난다)
+//      INV-A4-7 % 금지     : "평균 점수 12%" 부류 0건 — 평균 점수는 점, 정답률만 %
+//      INV-A4-8 금지 표현  : 미측정을 정상으로 단정하는 문구("잘하고 있어요"·"이상 없음"·
+//                           "격차 없음") 0건 + 저신뢰(r²<0.3)에 방향·시기를 단정하지 않는지
+//    INV-A4-1~4·6 은 BE 하네스(test/lrs-a4-population.test.js)가 담당한다.
+test.describe('스모크: LRS A4 성취 모집단 고지 정합·표기 정직성(INV-A4-5·7·8)', () => {
+  /** 학생 "성취수준 분석"(s-achieve) 진입 — 도넛 + 후행 로드(추이/다음 한 걸음)까지 대기. */
+  async function gotoStudentAchieve(page) {
+    await page.goto('/lrs/index.html?menu=analytics#s-achieve', { waitUntil: 'domcontentloaded' });
+    await page.waitForSelector('#dacheum-gnb-wrapper', { timeout: 10000 }).catch(() => {});
+    await page.waitForFunction(() => {
+      const vr = document.getElementById('viewRoot');
+      return !!(vr && (vr.querySelector('#sMastDonut') || vr.querySelector('.mastery-empty')));
+    }, { timeout: 20000 }).catch(() => {});
+    await page.waitForFunction(() => {
+      const c = document.getElementById('sTrendChips');
+      const n = document.getElementById('sNextStepHost');
+      return !!(c && c.innerHTML) || !!(n && n.innerHTML);
+    }, { timeout: 20000 }).catch(() => {});
+    await page.waitForTimeout(800);
+  }
+
+  for (const vp of VIEWPORTS) {
+    test(`INV-A4-5: 도넛 고지 N == counts.insufficient == 배열 길이 == 범례 [${vp.name}]`, async ({ browser }) => {
+      const context = await browser.newContext({ storageState: stateFor('student'), locale: 'ko-KR', baseURL: BASE_URL });
+      try {
+        const page = await context.newPage();
+        page.setViewportSize({ width: vp.width, height: vp.height });
+        await gotoStudentAchieve(page);
+
+        const r = await page.evaluate(async () => {
+          const me = await fetch('/api/auth/me', { credentials: 'include' }).then((x) => x.json()).catch(() => null);
+          const uid = me && (me.user ? me.user.id : me.id);
+          const api = uid
+            ? await fetch('/api/lrs/mastery/student/' + uid, { credentials: 'include' }).then((x) => x.json()).catch(() => null)
+            : null;
+          const txt = (document.getElementById('viewRoot') || {}).innerText || '';
+          const subM = txt.match(/아직 판정 못 한 성취기준 (\d+)개/);
+          const recoM = txt.match(/미판정 (\d+)개/);
+          // 도넛 범례·세그먼트는 canvas 안이라 innerText 로 안 잡힌다 → Chart 인스턴스에서 직접 읽는다.
+          const canvas = document.getElementById('sMastDonut');
+          const ch = (canvas && window.Chart && window.Chart.getChart) ? window.Chart.getChart(canvas) : null;
+          let segN = null;
+          if (ch && ch.data && Array.isArray(ch.data.labels)) {
+            const i = ch.data.labels.indexOf('아직 판정 못 함');
+            if (i >= 0) segN = Number(ch.data.datasets[0].data[i]);
+          }
+          return {
+            hasDonut: !!canvas,
+            noData: !api || api.success === false || !api.counts,
+            apiInsuf: api && api.counts ? Number(api.counts.insufficient) : null,
+            arrLen: api && Array.isArray(api.standards)
+              ? api.standards.filter((s) => s && s.status === 'insufficient').length : null,
+            subN: subM ? Number(subM[1]) : null,
+            segN,
+            recoN: recoM ? Number(recoM[1]) : null,
+            // 구 어휘("평가 부족")가 학생 도넛 범례로 되살아나면 실패
+            oldLegend: !!(ch && ch.data && Array.isArray(ch.data.labels) && ch.data.labels.indexOf('평가 부족') >= 0),
+            oldSub: /평가 부족 \d+개는 분모에서 제외/.test(txt),
+          };
+        });
+
+        if (r.noData || !r.hasDonut) {
+          test.info().annotations.push({ type: 'skip-screen', description: 'mastery 데이터 없음 — 스킵' });
+          await page.close();
+          return;
+        }
+        // (a) BE 자체 정합
+        expect.soft(r.arrLen, `INV-A4-5 [${vp.name}] counts.insufficient(${r.apiInsuf}) != standards 배열 길이(${r.arrLen})`).toBe(r.apiInsuf);
+        // (b) 화면 고지가 그 값을 그대로 렌더하는가(하드코딩 금지)
+        if (r.apiInsuf > 0) {
+          expect.soft(r.subN, `INV-A4-5 [${vp.name}] 도넛 부제 고지 N(${r.subN}) != counts.insufficient(${r.apiInsuf})`).toBe(r.apiInsuf);
+          expect.soft(r.segN, `INV-A4-5 [${vp.name}] 도넛 회색 세그먼트 값(${r.segN}) != counts.insufficient(${r.apiInsuf})`).toBe(r.apiInsuf);
+          expect.soft(r.recoN, `INV-A4-5 [${vp.name}] 추천 카운터 미판정 N(${r.recoN}) != counts.insufficient(${r.apiInsuf})`).toBe(r.apiInsuf);
+        }
+        expect.soft(r.oldSub, `INV-A4-5 [${vp.name}] 구 문구 "평가 부족 N개는 분모에서 제외" 재출현`).toBeFalsy();
+        expect.soft(r.oldLegend, `INV-A4-5 [${vp.name}] 학생 도넛 범례에 구 어휘 "평가 부족" 재출현`).toBeFalsy();
+
+        await page.close();
+      } finally { await context.close(); }
+    });
+  }
+
+  test('INV-A4-7: 학생 뷰에 "평균 점수 N%" 0건 (평균 점수는 점, 정답률만 %)', async ({ browser }) => {
+    const context = await browser.newContext({ storageState: stateFor('student'), locale: 'ko-KR', baseURL: BASE_URL });
+    try {
+      const page = await context.newPage();
+      page.setViewportSize({ width: 1440, height: 900 });
+      const hits = [];
+      for (const go of [gotoStudentHome, gotoStudentAchieve]) {
+        await go(page);
+        const found = await page.evaluate(() => {
+          const t = (document.getElementById('viewRoot') || {}).innerText || '';
+          return (t.match(/평균\s*점수\s*\d+(?:\.\d+)?\s*%/g) || []);
+        });
+        hits.push(...found);
+      }
+      expect(hits.length, `INV-A4-7: "평균 점수 N%" 표기 발견: ${JSON.stringify(hits)}`).toBe(0);
+      await page.close();
+    } finally { await context.close(); }
+  });
+
+  test('INV-A4-8: 학생 뷰 금지 표현 0 + 저신뢰 추세 방향·시기 단정 금지', async ({ browser }) => {
+    const context = await browser.newContext({ storageState: stateFor('student'), locale: 'ko-KR', baseURL: BASE_URL });
+    try {
+      const page = await context.newPage();
+      page.setViewportSize({ width: 1440, height: 900 });
+
+      // 미측정을 정상으로 단정하는 문구(정본사전 §5-1).
+      //   "모두 도달"은 측정 범위를 앞에 밝힌 형태("평가로 판정한 …는 모두 도달")만 허용하므로 목록에서 제외.
+      const BANNED = ['잘하고 있어요', '이상 없음', '격차 없음', '막힌 곳이 없어요'];
+      const all = [];
+      for (const go of [gotoStudentHome, gotoStudentAchieve]) {
+        await go(page);
+        const found = await page.evaluate((banned) => {
+          const t = (document.getElementById('viewRoot') || {}).innerText || '';
+          return banned.filter((b) => t.includes(b));
+        }, BANNED);
+        all.push(...found);
+      }
+      expect.soft(all.length, `INV-A4-8: 금지 표현 노출: ${JSON.stringify([...new Set(all)])}`).toBe(0);
+
+      // 저신뢰(BE confidence !== 'high') 추세에 상승/시기를 단정하는 칩이 뜨면 실패.
+      //   BE _trendConfidence: 관측 6주 이상 ∧ r² ≥ 0.3 일 때만 'high'.
+      await gotoStudentAchieve(page);
+      const tr = await page.evaluate(async () => {
+        const me = await fetch('/api/auth/me', { credentials: 'include' }).then((x) => x.json()).catch(() => null);
+        const uid = me && (me.user ? me.user.id : me.id);
+        const td = uid
+          ? await fetch('/api/lrs/trend/student/' + uid, { credentials: 'include' }).then((x) => x.json()).catch(() => null)
+          : null;
+        const chips = document.getElementById('sTrendChips');
+        return {
+          conf: td && td.trend ? td.trend.confidence : null,
+          status: td && td.trend ? td.trend.status : null,
+          weeks: td && td.trend ? Number(td.trend.observedWeeks) : null,
+          chipsTxt: chips ? (chips.innerText || '') : '',
+          hasBadge: !!document.querySelector('.strend-lowconf'),
+        };
+      });
+      if (tr.status === 'ok' && tr.conf && tr.conf !== 'high' && (tr.weeks || 0) >= 3) {
+        expect.soft(/꾸준히 오르고 있어요/.test(tr.chipsTxt),
+          `INV-A4-8: confidence=${tr.conf}(저신뢰)인데 "꾸준히 오르고 있어요" 단정 노출 — ${tr.chipsTxt}`).toBeFalsy();
+        expect.soft(/\d+\s*주 후/.test(tr.chipsTxt),
+          `INV-A4-8: confidence=${tr.conf}(저신뢰)인데 "N주 후" 시기 단정 노출 — ${tr.chipsTxt}`).toBeFalsy();
+        expect.soft(tr.hasBadge,
+          `INV-A4-8: confidence=${tr.conf}(저신뢰)인데 "변동이 커서 참고용" 배지 없음`).toBeTruthy();
+      }
+      await page.close();
+    } finally { await context.close(); }
   });
 });

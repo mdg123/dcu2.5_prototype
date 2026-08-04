@@ -170,6 +170,7 @@
 </head>
 <body>
   <script src="/js/common-nav.js"></script>
+<script src="/js/access-denied.js"></script>
 
   <div class="page-wrap">
     <a href="/growth/class-dashboard.html" class="back-link" id="backLink"><i class="fas fa-arrow-left"></i> 학습분석 대시보드로 돌아가기</a>
@@ -319,6 +320,13 @@
           url += `?startDate=${startDate}&endDate=${endDate}`;
         }
         const res = await fetch(url);
+        // 403 은 "실패"가 아니라 "권한 없음" — 교사용 화면을 감추고 안내로 대체한다
+        if (window.DacheumAccess && DacheumAccess.denied(res, {
+          what: '학급 감정 현황',
+          who: '이 클래스를 맡은 선생님',
+          backHref: '/class/',
+          backLabel: '나의 클래스로 가기'
+        })) return;
         const data = await res.json();
         if (!data.success) throw new Error(data.message);
         monitorData = data;

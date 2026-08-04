@@ -5,7 +5,8 @@ const path = require('path');
 const multer = require('multer');
 const { requireAuth } = require('../middleware/auth');
 const growthDb = require('../db/growth');
-const classDb = require('../db/class');
+// [W4] db/class 의 getMemberRole 직접 참조를 걷어냈다. 이 파일에서 클래스 멤버십 판정이 필요하면
+//   반드시 canViewClass(SSOT)를 쓴다 — require 를 남겨두면 "손으로 다시 쓴 판정"이 또 자란다.
 const growthExtDb = require('../db/growth-extended');
 const notifDb = require('../db/notifications');
 const buildSurvey = require('../lib/xapi/builders/survey');
@@ -173,8 +174,10 @@ router.get('/portfolios/:id', requireAuth, (req, res, next) => {
     if (!portfolio) return res.status(404).json({ success: false, message: '포트폴리오를 찾을 수 없습니다.' });
     const isOwner = portfolio.student_id === req.user.id;
     const isAdmin = req.user.role === 'admin';
+    // [W4] 여기도 'owner' 하드코딩이었다 → canViewClass(SSOT: owner|teacher|co_teacher, admin 포함).
+    //   권한 확대가 아니라 공동담임 과차단 해소 + 판정 사본 제거(같은 이유로 /class/:classId 도 교체).
     const isClassOwner = portfolio.class_id
-      ? classDb.getMemberRole(portfolio.class_id, req.user.id) === 'owner'
+      ? canViewClass(req, portfolio.class_id)
       : false;
     const isPublic = portfolio.is_public === 1 || portfolio.is_public === true;
     if (!isOwner && !isAdmin && !isClassOwner && !isPublic) {
@@ -231,13 +234,14 @@ router.get('/summary', requireAuth, (req, res) => {
 });
 
 // GET /api/growth/class/:classId - 클래스 성장 현황 (교사용)
+//   ★ [W4] 구 코드는 getMemberRole(...)==='owner' 로 판정을 손수 재작성해 SSOT
+//     (CLASS_TEACHER_ROLES = owner|teacher|co_teacher)를 쓰지 않았다 → 공동담임 과차단.
+//     현재 시드에 co_teacher 행이 0 건이라 실해는 없었지만, **같은 판정이 두 벌 존재하는 상태
+//     자체**가 W3 사고(다운로드만 principal 누락)의 원인이었다. denyClass(canViewClass)로 통일.
 router.get('/class/:classId', requireAuth, (req, res) => {
   try {
     const classId = parseInt(req.params.classId);
-    const myRole = classDb.getMemberRole(classId, req.user.id);
-    if (myRole !== 'owner' && req.user.role !== 'admin') {
-      return res.status(403).json({ success: false, message: '개설자만 접근 가능합니다.' });
-    }
+    if (denyClass(req, res, classId)) return;
     const overview = growthDb.getClassGrowthOverview(classId, {
       startDate: req.query.startDate,
       endDate: req.query.endDate
@@ -1134,8 +1138,9 @@ router.post('/portfolios/report', requireAuth, async (req, res) => {
 
     // 미션 명세 파일명: <studentId>-<timestamp>.pdf
     const ts = Date.now();
-    const baseDir = path.join(process.cwd(), 'uploads', 'portfolio-reports');
-    if (!fs.existsSync(baseDir)) fs.mkdirSync(baseDir, { recursive: true });
+    // [W4] 경로를 여기서 다시 조립하면 db/growth-extended.js 의 reportsDirFor 와 두 벌이 된다
+    //   (실제로 그래서 PORTFOLIO_REPORT_DIR 격리가 이 경로만 비껴갔다). SSOT 호출로 통일.
+    const baseDir = growthExtDb.reportsDirFor(studentId);
     const fileName = `${studentId}-${ts}.pdf`;
     const filePath = path.join(baseDir, fileName);
 
@@ -1216,15 +1221,20 @@ router.put('/portfolios/report/:id/upload', requireAuth, pdfUpload.single('file'
   }
 });
 
-// GET /api/growth/portfolios/reports — 학생의 PDF 이력 (본인 + admin 가능)
+// GET /api/growth/portfolios/reports — 학생의 PDF 이력
+//   ★ [W4] 구 코드는 `role==='admin' && query.userId` 일 때만 userId 를 인정하고, 그 외에는
+//     **파라미터를 조용히 무시하고 본인 id 로 폴백**했다. 결과: 담임이 학생 이력을 요청하면
+//     403 도 아니고 학생 데이터도 아닌 "본인 이력(=대개 0건)"이 200 으로 돌아와 화면에는
+//     "이력 없음"으로 보였다(실측 2026-08-04: teacher1 → reports:0 / student1 본인 → 18).
+//     조용한 폴백은 "권한 없음"을 "데이터 없음"으로 위장해 진단을 막는다 — 같은 파일 G9 주석이
+//     스스로 비판했던 패턴이 정작 여기 남아 있었다.
+//   → resolveTargetUserId(SSOT canViewUser) 로 통일: 없으면 본인, 남이면 권한 통과 시에만 대상,
+//     아니면 403. 생성(POST)·화면조회(report-data)·다운로드와 같은 판정 한 벌
+//     (INV-SEC-G11 이 4라우트 일치를, G12 가 "대상 해석"을 감시한다).
 router.get('/portfolios/reports', requireAuth, (req, res) => {
   try {
-    const studentId = (req.user.role === 'admin' && req.query.userId)
-      ? parseInt(req.query.userId)
-      : req.user.id;
-    if (req.user.id !== studentId && req.user.role !== 'admin') {
-      return res.status(403).json({ success: false, message: '본인 이력만 조회 가능합니다.' });
-    }
+    const studentId = resolveTargetUserId(req, res, 'userId');
+    if (studentId === null) return;   // 이미 403 응답됨
     const reports = growthExtDb.getPortfolioReports(studentId);
     res.json({ success: true, reports });
   } catch (err) {

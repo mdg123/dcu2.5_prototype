@@ -293,7 +293,13 @@ function generateReportId() {
 
 function reportsDirFor(userId) {
   // 미션 명세: uploads/portfolio-reports/<studentId>-<timestamp>.pdf
-  const baseDir = path.join(process.cwd(), 'uploads', 'portfolio-reports');
+  //   ★ [W4] PORTFOLIO_REPORT_DIR 로 덮어쓸 수 있게 한다(기본값·평시 동작 완전 불변).
+  //     테스트는 DB 를 임시 사본으로 격리하면서 **PDF 만 정본 디스크에 썼다** — 실행마다 3 개씩
+  //     쌓여 1000+ 개의 고아 파일이 남았다(test/pdf-report-permission.test.js PDF-PERM-f 근거).
+  //     test/_setup.js 의 setupTestDb() 와 스모크 webServer 가 이 env 를 임시 경로로 주입한다.
+  //   ※ env 를 모듈 로드 시점이 아니라 **호출 시점**에 읽는다(주입 순서에 의존하지 않도록).
+  const baseDir = process.env.PORTFOLIO_REPORT_DIR
+    || path.join(process.cwd(), 'uploads', 'portfolio-reports');
   if (!fs.existsSync(baseDir)) fs.mkdirSync(baseDir, { recursive: true });
   return baseDir;
 }
@@ -2948,6 +2954,7 @@ module.exports = {
   // PDF 보고서
   createPortfolioReport, attachPortfolioReportFile, saveGeneratedReport,
   getPortfolioReportById, getPortfolioReports, deletePortfolioReport,
+  reportsDirFor,   // [W4] 저장 경로 SSOT — routes/growth.js 가 경로를 손으로 다시 조립하지 않도록 공개
   getPortfolioReportData,
   // 학교급 helper
   gradeToSchoolLevel, schoolLevelLabel, schoolLevelToGradeRange,

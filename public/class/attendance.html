@@ -578,6 +578,7 @@
     }
   </style>
   <script src="/js/common-nav.js"></script>
+<script src="/js/access-denied.js"></script>
   <script src="/js/api.js"></script>
   <script src="/socket.io/socket.io.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
@@ -1096,10 +1097,15 @@
     async function apiGet(url){
       try {
         const res = await fetch(url);
-        if (res.status === 401 || res.status === 403) {
+        if (res.status === 401) {
           toast('로그인이 필요합니다', true);
           return null;
         }
+        // 403 을 401 과 함께 "로그인이 필요합니다"로 뭉뚱그리던 것을 분리한다.
+        //   여기서는 조용히 null 만 돌려준다 — /table 처럼 "개설자면 성공, 아니면 폴백"인
+        //   의도된 시도가 있어서, 개별 403 을 곧바로 권한 안내 화면으로 바꾸면 정상 학생 화면이 사라진다.
+        //   화면 전체를 막아야 하는 판정은 클래스 정보 로드(loadClassInfo)에서 한 번만 한다.
+        if (res.status === 403) return null;
         if (!res.ok) throw new Error('요청 실패');
         return await res.json();
       } catch(e) { console.error(e); return null; }
@@ -1132,7 +1138,15 @@
       currentUser = (meRes && meRes.user) ? meRes.user : meRes;
       if (!currentUser || !currentUser.id) { location.href = '/login.html'; return; }
 
-      classInfo = await apiGet(`/api/class/${classId}`);
+      // 화면 전체 차단 판정은 여기 한 곳에서만 — 403 이면 출석부 UI 를 렌더하지 않고 안내로 대체
+      const clsRes = await fetch(`/api/class/${classId}`);
+      if (window.DacheumAccess && DacheumAccess.denied(clsRes, {
+        what: '이 클래스의 출석부',
+        who: '이 클래스에 들어와 있는 선생님과 학생',
+        backHref: '/class/index.html',
+        backLabel: '나의 클래스로 가기'
+      })) return;
+      classInfo = await clsRes.json().catch(() => null);
       if (!classInfo || !classInfo.success) {
         toast('클래스 정보를 불러올 수 없습니다', true);
         return;

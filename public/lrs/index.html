@@ -233,7 +233,8 @@
     .conf-badge[data-conf="low"]  .conf-dot{ background:var(--conf-low); }
     .lowsample-chip{ display:inline-flex; align-items:center; gap:5px; font-size:12px; font-weight:600;
       color:#92400e; background:#fffbeb; border:1px solid #fde68a; border-radius:9999px; padding:3px 10px; white-space:nowrap; }
-    .proj-disclaimer{ font-size:13px; color:#9ca3af; margin-top:10px; display:flex; align-items:center; gap:6px; }
+    /* [A4 §9-4] 신뢰도·추정 고지는 화면 최소 크기여선 안 된다 → 13px→14px, 대비도 한 단계 올림 */
+    .proj-disclaimer{ font-size:14px; line-height:1.6; color:#6B7280; margin-top:10px; display:flex; align-items:flex-start; gap:6px; }
     .proj-headline{ font-size:13px; color:#374151; font-weight:600; }
     .proj-headline strong{ color:var(--proj-line); }
     .proj-headline.warn strong{ color:var(--trend-down); }
@@ -289,12 +290,22 @@
     .trend-arrow[data-trend="flat"]{ color:var(--trend-flat); }
     .trend-arrow[data-trend="down"]{ color:var(--trend-down); }
     .trend-note{ font-size:13px; color:#9ca3af; }
+    /* W4: 합성 스파크라인(코드에 박은 기준선 50 + 기울기 직선) 대신, 실제 측정값인
+       '주당 변화폭(기울기)'만 0 기준 좌우 막대로 표시. 없는 주별 원자료를 그린 척하지 않는다. */
+    .slope-bar{ display:block; width:120px; height:24px; max-width:100%; cursor:help; }
+    .slope-bar .sb-track{ fill:#f1f5f9; }
+    .slope-bar .sb-zero{ stroke:#94a3b8; stroke-width:1.5; }
+    .slope-bar .sb-fill[data-trend="up"]{ fill:var(--trend-up); }
+    .slope-bar .sb-fill[data-trend="flat"]{ fill:var(--trend-flat); }
+    .slope-bar .sb-fill[data-trend="down"]{ fill:var(--trend-down); }
+    .trend-foot{ margin-top:10px; font-size:14px; line-height:1.6; color:#6b7280; word-break:keep-all; }
     /* T-TREND 모바일 카드 전환 */
     .trend-cards{ display:none; }
     .trend-card{ background:#fff; border:1px solid #e5e7eb; border-radius:12px; padding:14px 16px; margin-bottom:10px; }
     .trend-card .tc-top{ display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:8px; }
     .trend-card .tc-name{ font-size:15px; font-weight:700; color:#1f2937; }
     .trend-card .spark{ width:100%; max-width:240px; }
+    .trend-card .slope-bar{ width:100%; max-width:240px; }
     @media (max-width:767px){
       .trend-table-wrap{ display:none; }
       .trend-cards{ display:block; }
@@ -317,6 +328,55 @@
     .strend-rx__link{ color:#1d4ed8; font-weight:700; text-decoration:underline; text-underline-offset:3px; }
     .strend-rx__link:focus-visible{ outline:2px solid #2563eb; outline-offset:2px; border-radius:4px; }
     .proj-disclaimer.strend-anon{ font-size:14px; }   /* 익명·표본 안내는 14px(스펙 §4-3) */
+
+    /* ── [A4 §7-4] 신뢰도 고지의 위계 — 가장 중요한 정보가 가장 작지 않도록 ──
+         r²<0.3(=BE confidence!==high)일 때 방향을 단정하지 않는다는 사실을
+         13px 회색 각주가 아니라 칩 줄 맨 앞 배지로 먼저 말한다. */
+    .strend-lowconf{ display:inline-flex; align-items:center; gap:6px;
+      font-size:13px; font-weight:600; padding:4px 12px; border-radius:999px;
+      background:#FEF3C7; color:#92400E; margin-right:8px; line-height:1.4; }
+    .sproj-chip.warn{ background:#FEF3C7; color:#92400E; }   /* T5 하락 — 빨강 금지(§7-3-1 낙인 방지) */
+    .sproj-chip.delta{ background:#F3F4F6; color:#6B7280; }  /* 최근 2주 변화 — 중립 회색(부호만) */
+    .sproj-chip{ max-width:100%; }
+    @media (max-width:767px){ .strend-lowconf{ margin-right:0; margin-bottom:8px; width:100%; justify-content:center; } }
+
+    /* ── [A4 §9-1] 기간 빈 상태 배너 .lrs-period-empty ──
+         "최근 30일 0건"을 학생이 '내가 아무것도 안 했다'로 읽지 않도록,
+         무엇을 보고 있는 창인지 + 넓혀보는 복귀 동선을 함께 준다. */
+    .lrs-period-empty{ padding:20px 24px; margin:0 0 16px; border-radius:12px;
+      border:1px solid #E5E7EB; border-left:4px solid #2563eb; background:rgba(37,99,235,.06);
+      display:flex; flex-wrap:wrap; align-items:flex-start; gap:12px 16px;
+      box-sizing:border-box; max-width:100%; }
+    .lrs-period-empty__ico{ font-size:24px; line-height:1; flex:0 0 auto; }
+    .lrs-period-empty__body{ flex:1 1 260px; min-width:0; }
+    .lrs-period-empty__title{ font-size:17px; font-weight:700; color:#1A1A2E; line-height:1.5; }
+    .lrs-period-empty__text{ font-size:15px; color:#4B5563; line-height:1.7; margin-top:4px; }
+    .lrs-period-empty__acts{ display:flex; flex-wrap:wrap; gap:8px; margin-top:12px; width:100%; }
+    .lrs-period-empty__acts > *{ font-size:16px; padding:12px 22px; border-radius:10px; font-weight:600;
+      border:1px solid transparent; cursor:pointer; text-decoration:none; line-height:1.3; }
+    .lrs-period-empty__acts .pe-primary{ background:#2563eb; color:#fff; }
+    .lrs-period-empty__acts .pe-primary:hover{ background:#1d4ed8; }
+    .lrs-period-empty__acts .pe-ghost{ background:#fff; color:#2563eb; border-color:#2563eb; }
+    .lrs-period-empty__acts .pe-ghost:hover{ background:#EFF6FF; }
+    .lrs-period-empty__acts > *:focus-visible{ outline:2px solid #2563eb; outline-offset:2px; }
+    @media (max-width:767px){
+      .lrs-period-empty{ flex-direction:column; padding:16px 18px; }
+      .lrs-period-empty__title{ font-size:16px; }
+      .lrs-period-empty__acts > *{ width:100%; text-align:center; }
+    }
+
+    /* ── [A4 §8-2] 게이지 미렌더 자리 대체(카드 높이 유지 — 그리드 붕괴 방지) ── */
+    .dc-gauge-na{ display:flex; align-items:center; justify-content:center; text-align:center;
+      min-height:96px; font-size:14px; line-height:1.6; color:#6B7280; padding:8px 6px; box-sizing:border-box; }
+
+    /* ── [A4 §9-10] 구간 기준 칩 — 기간 축과 누적 축을 화면에서 구분 ── */
+    .sh-zone__basis{ font-size:13px; padding:3px 10px; border-radius:999px;
+      background:#F3F4F6; color:#6B7280; margin-left:8px; font-weight:500; white-space:nowrap; }
+
+    /* ── [A4 §6-4] 강·약 차트 좌반면(약점) 전면 공백 안내 ── */
+    .diverge-noweak{ font-size:14px; color:#6B7280; line-height:1.6; margin:8px 0 0;
+      text-align:center; }
+    @media (min-width:768px){ .diverge-noweak{ text-align:left; padding-left:8%; } }
 
     /* ── A-WEAK: 취약 성취기준 추세 랭킹 — 인라인 도달 Bar ── */
     .weak-bar{ display:inline-flex; align-items:center; gap:8px; }
@@ -1249,6 +1309,87 @@ function periodLabelKo(){
   const n = String(state.period||'').replace('d','');
   return n ? `최근 ${n}일` : '선택 기간';
 }
+
+/* =====================================================================
+ * [A4 §3-3 · §8-1] 기간 기본값 하이브리드 + 기간 빈 상태 배너
+ * ---------------------------------------------------------------------
+ *  기본은 최근 30일 그대로. **학생 본인 뷰의 첫 렌더가 0건일 때만** 90일로
+ *  1회 자동 확장하고, 화면 최상단에 "왜 넓혀서 보는지 + 30일로 돌아가기"를 띄운다.
+ *   - 창은 항상 30d/90d 둘 중 하나 — 사람마다 임의 창이 되면 학생↔반 비교가 깨진다.
+ *   - 교사·관리자 뷰에는 적용하지 않는다(state.period 가 전역이라 반 비교 창이 흔들린다).
+ *   - 사용자가 기간칩을 한 번이라도 누르면(state._periodTouched) 이후 자동 전환 없음.
+ *  신규 API 0 — 판정 신호는 각 뷰가 이미 계산하는 "이 기간 활동 0건" 값을 그대로 받는다.
+ * ===================================================================== */
+function _isOwnStudentView(){
+  return state.role === 'student'
+      && !!(state.me && state.me.role === 'student')
+      && computeScope() === 'mine';
+}
+/** 기간칩 aria-pressed 동기화(모달 CTA 핸들러와 같은 패턴 — 로직 재작성 아님). */
+function _syncPeriodChips(p){
+  try {
+    document.querySelectorAll('#periodPicker button[data-period]').forEach(b =>
+      b.setAttribute('aria-pressed', b.dataset.period === p ? 'true' : 'false'));
+    const cr = document.getElementById('customRange'); if (cr) cr.hidden = true;
+  } catch(_){}
+}
+/** 자동 확장 판정. true 를 반환하면 호출한 뷰는 렌더를 중단하고 재렌더에 맡긴다. */
+function maybeAutoWidenPeriod(isEmpty){
+  if (!isEmpty) return false;
+  if (!_isOwnStudentView()) return false;
+  if (state.period !== '30d') return false;
+  if (state._autoWidened || state._periodTouched) return false;
+  state._autoWidened = true;
+  state.period = '90d';
+  _syncPeriodChips('90d');
+  if (state.view) { try { setView(state.view); } catch(_){} }
+  return true;
+}
+/**
+ * 기간 빈 상태 배너 HTML. 자동 확장된 세션이면 "복귀" 변형, 아니면 "넓혀보기" 변형.
+ * lastAt(마지막 학습일)은 BE 가 값을 줄 때만 표시한다(없는 값을 지어내지 않는다).
+ */
+function periodEmptyBannerHtml(lastAt){
+  const lastLine = lastAt
+    ? `<div class="lrs-period-empty__text">마지막 학습은 ${escapeHtml(fmtFullDate(lastAt))}이에요.</div>` : '';
+  if (state._autoWidened && state.period === '90d'){
+    return `<div class="lrs-period-empty" role="status">
+      <span class="lrs-period-empty__ico" aria-hidden="true">🔎</span>
+      <div class="lrs-period-empty__body">
+        <div class="lrs-period-empty__title">최근 30일에 기록이 없어서 90일로 넓혀서 보고 있어요</div>
+        ${lastLine}
+        <div class="lrs-period-empty__acts">
+          <button type="button" class="pe-ghost" data-narrow="30d">최근 30일로 돌아가기</button>
+        </div>
+      </div>
+    </div>`;
+  }
+  const canWiden = state.period !== 'custom' && state.period !== '90d';
+  return `<div class="lrs-period-empty" role="status">
+    <span class="lrs-period-empty__ico" aria-hidden="true">📭</span>
+    <div class="lrs-period-empty__body">
+      <div class="lrs-period-empty__title">${escapeHtml(periodLabelKo())}에는 학습 기록이 없어요</div>
+      ${lastLine}
+      <div class="lrs-period-empty__acts">
+        ${canWiden ? `<button type="button" class="pe-primary" data-widen="90d">최근 90일로 보기</button>` : ''}
+        <a class="pe-ghost" href="/self-learn/">스스로채움 하러 가기 →</a>
+      </div>
+    </div>
+  </div>`;
+}
+/* data-widen / data-narrow 문서 위임 — 모달 안(#lrsPerfDetailModal)은 기존 핸들러가 처리하므로 제외. */
+document.addEventListener('click', (e) => {
+  const btn = e.target.closest('button[data-widen], button[data-narrow]');
+  if (!btn) return;
+  if (btn.closest('#lrsPerfDetailModal')) return;   // 상세 모달 CTA = 기존 핸들러 담당(중복 처리 금지)
+  const p = btn.getAttribute('data-widen') || btn.getAttribute('data-narrow');
+  if (!p) return;
+  state._periodTouched = true;   // 사용자가 직접 창을 정했다 → 이후 자동 전환 영구 해제
+  state._autoWidened = false;
+  state.period = p;
+  _syncPeriodChips(p);
+  if (state.view) { try { setView(state.view); } catch(_){} }
+});
 /* 현재 기간칩을 일수(days)로 — ?days= 계약 엔드포인트(emotion-mirror 등)에 전달용. custom은 from~to 폭. */
 function periodDays(){
   if (state.period === 'custom' && state.from && state.to){
@@ -1288,7 +1429,9 @@ function _pickDataClassId(list){
 async function _fetchMyClasses(){
   if (Array.isArray(state._myClasses)) return state._myClasses;
   let list = [];
-  for (const path of ['/api/lrs/classes', '/api/class/my', '/api/classes/my']){
+  // W4: 3번째 폴백 '/api/classes/my' 는 서버에 존재하지 않는 경로였다(항상 404).
+  //   담당 클래스가 0개인 계정(예: 관리자가 교사 화면 보기)에서 매번 404 를 찍었다 → 제거.
+  for (const path of ['/api/lrs/classes', '/api/class/my']){
     try {
       const r = await fetch(path, { credentials:'include' });
       if (r.ok){ const j = await r.json(); list = (j && j.classes) || []; if (list.length) break; }
@@ -1968,11 +2111,15 @@ function _ewsWeakHtml(weaknesses){
 
 /* 4상태 범례 (모든 위젯 공통) */
 function masteryLegend(){
+  // [A4 §6-2] 학생 화면은 "평가 부족" → "아직 판정 못 함"으로 평이화(개념·회색 동일).
+  //   같은 페이지의 도넛 부제·범례와 어휘가 갈리면 같은 회색이 두 이름을 갖게 된다.
+  //   교사·관리자는 정본사전 용어("평가 부족") 유지.
+  const insufLabel = (state.role === 'student') ? '아직 판정 못 함' : '평가 부족';
   return `<div class="mastery-legend" aria-label="성취 5상태 범례">
     <span class="item"><span class="dot reached"></span>도달</span>
     <span class="item"><span class="dot partial"></span>부분 도달</span>
     <span class="item"><span class="dot notReached"></span>미도달</span>
-    <span class="item"><span class="dot insufficient"></span>평가 부족
+    <span class="item"><span class="dot insufficient"></span>${insufLabel}
       <i class="fas fa-circle-info info" title="평가를 시작했지만 시도가 3회 미만 — 더 풀어야 도달 여부를 판정할 수 있어요"></i></span>
     <span class="item"><span class="dot none"></span>데이터 없음
       <i class="fas fa-circle-info info" title="아직 평가·학습 기록이 없어요 (이 성취기준을 아직 배우지 않았거나 한 번도 풀지 않음)"></i></span>
@@ -2137,6 +2284,25 @@ function trendSeriesPercents(trend){
   }
   return null;
 }
+/* [W4] 주당 변화폭(기울기) 막대 — 0 기준 좌우. 실제 측정값(slope)만 쓰고 절대 수준은 그리지 않는다.
+ *   합성 스파크라인(기준선 50 고정 + 기울기 직선)은 "주별 정답률 추이"처럼 보였지만 근거 데이터가 없었다. */
+function slopeBarSvg(slope, dir, opts){
+  if (slope == null || isNaN(Number(slope))) return `<span class="trend-note">변화폭 계산 불가</span>`;
+  const W = 120, H = 24, MID = W/2, MAX = 10; // ±10%p/주에서 막대가 가득 참
+  const v = Math.max(-MAX, Math.min(MAX, Number(slope)));
+  const len = Math.abs(v) / MAX * (MID - 4);
+  const w = Math.max(2, len);                 // 0 근처도 눈에 보이도록 최소 2px
+  const x = v >= 0 ? MID : MID - w;
+  const d = normTrendDir(dir);
+  const sign = (Number(slope) > 0 ? '+' : '');
+  const aria = (opts && opts.aria ? opts.aria + ' ' : '') + `주당 ${sign}${slope}%p`;
+  return `<svg class="slope-bar" viewBox="0 0 ${W} ${H}" role="img" aria-label="${escapeAttr(aria)}" preserveAspectRatio="none">
+    <rect class="sb-track" x="0" y="7" width="${W}" height="10" rx="5"></rect>
+    <rect class="sb-fill" data-trend="${d}" x="${x.toFixed(1)}" y="7" width="${w.toFixed(1)}" height="10" rx="3"></rect>
+    <line class="sb-zero" x1="${MID}" y1="1" x2="${MID}" y2="${H-1}"></line>
+  </svg>`;
+}
+
 /* 학생 행: 관측주차·기울기·현재율로 추세 직선 합성(스파크라인용, series 미제공 시) */
 function synthLineFromSlope(currentRate, slope, observedWeeks){
   const n = Math.max(2, Math.min(8, observedWeeks || 0));
@@ -3871,6 +4037,14 @@ VIEWS['s-home'] = async function(root){
 
   // 관리자 계정이 학생 뷰 (scope=mine) 로 볼 때 전부 0이면 안내
   const allZero = !totalMinutes && !submittedAssignments && !periodScoreAvg && !streakDays;
+  // [A4 §3-3 하이브리드] 학생 본인 뷰 첫 렌더가 0건이면 90일로 1회 자동 확장 후 재렌더.
+  //   (교사·관리자 뷰 제외 — maybeAutoWidenPeriod 내부에서 판정)
+  if (maybeAutoWidenPeriod(allZero)) return;
+  // [A4 §8-1] 기간 0건 배너 — "무엇을 보고 있는 창인지 + 넓혀보기/돌아가기" 복귀 동선.
+  //   lastActivityDate 는 BE 가 줄 때만 표시(없는 값은 지어내지 않는다).
+  //   자동 확장된 세션에서는 (데이터가 보이더라도) "왜 90일을 보고 있는지 + 돌아가기"를 반드시 남긴다.
+  const periodEmptyHtml = (allZero || (state._autoWidened && state.period === '90d'))
+    ? periodEmptyBannerHtml(snap.lastActivityDate || (insights && insights.lastActivityDate) || null) : '';
   const isAdminAsStudent = (state.me && state.me.role === 'admin') && state.role === 'student';
   const adminHintHtml = (allZero && isAdminAsStudent) ? `
     <div class="dc-state-panel" role="status" style="border-left:4px solid var(--lrs-primary);background:rgba(37,99,235,.06);margin-bottom:12px;">
@@ -3887,14 +4061,20 @@ VIEWS['s-home'] = async function(root){
     : { dir:'flat', text:'아직 채점된 평가가 없어요' };
   const assignTrend = (summary.submitted_assignments > 0)
     ? { dir:'flat', text:'이번 기간 제출·이수한 과제' }
-    : { dir:'flat', text:'이번 기간 낸 과제가 없어요' };
+    : { dir:'flat', text:'이번 기간 제출한 과제가 없어요' };
+  // [A4 §8-2] 게이지: 기간 기록이 0건이면 "목표 대비 0%"는 파생 비율의 거짓 표시다(정본사전 §4-2-3).
+  //   → 도넛을 아예 그리지 않고 같은 높이의 안내 박스로 대체(카드 높이 유지 → 그리드 붕괴 방지).
+  const gaugeSlotHtml = allZero
+    ? '<div class="dc-gauge-na">목표 대비 진행률은 학습 기록이 쌓이면 보여드려요</div>'
+    : '<div class="dc-gauge" id="sHomeGauge"></div>';
+  // [A4 §7-1 정본 라벨] 낸 과제→제출 과제 / 학습한 날→학습 일수
   const kpiHtml = `
     <div class="dc-kpi-grid">
       ${kpiCard('이번 기간 학습시간', (summary.total_minutes||0).toLocaleString(), '분', {dir:'flat', text:'이번 기간 공부한 시간'}, 'primary',
-        '<div class="dc-gauge" id="sHomeGauge"></div>')}
-      ${kpiCard('낸 과제',           (summary.submitted_assignments||0).toLocaleString(), '건', assignTrend, 'success')}
-      ${kpiCard('평균 성취',          scoreVal, scoreUnit, scoreTrend, 'primary')}
-      ${kpiCard('학습한 날',          (summary.active_days||0),                 '일', {dir:'flat', text:'이번 기간 공부한 날 수'}, 'warning')}
+        gaugeSlotHtml)}
+      ${kpiCard('제출 과제',         (summary.submitted_assignments||0).toLocaleString(), '건', assignTrend, 'success')}
+      ${kpiCard('평균 점수',          scoreVal, scoreUnit, scoreTrend, 'primary')}
+      ${kpiCard('학습 일수',          (summary.active_days||0),                 '일', {dir:'flat', text:'이번 기간 공부한 날 수'}, 'warning')}
     </div>`;
 
   // ── C. 일별 추이(전폭) + 통합 약점 순위 리스트(전폭) — 막대·카드 중복 제거 ──
@@ -3906,7 +4086,8 @@ VIEWS['s-home'] = async function(root){
   const weakHtml = `
     <section class="dc-chart-wrapper" aria-label="보완 추천 단원">
       <header><div><h2>보완 추천 단원</h2>
-        <div class="subtitle">평균 점수가 낮거나 아직 채점 전이라 더 연습하면 좋은 단원이에요</div></div></header>
+        <!-- [A4 §8-4] 상단 KPI는 '기간', 이 카드는 '누적' — 축이 다르다는 사실을 숨기지 않는다(정본사전 §5-4-2). -->
+        <div class="subtitle">평균 점수가 낮거나 아직 채점 전이라 더 연습하면 좋은 단원이에요 · 전체 기간 누적 기준</div></div></header>
       <div id="sWeakList" class="s-weak-list"></div>
     </section>`;
 
@@ -3919,9 +4100,12 @@ VIEWS['s-home'] = async function(root){
     flow: { label:'지금까지의 흐름',  bar:'#16a34a' },   // success(도달 초록과 동일 계열)
     next: { label:'다음에 할 것',     bar:'#f59e0b' },   // warning(권장 노랑과 동일 계열)
   };
-  root.innerHTML = adminHintHtml + `
+  // [A4 §8-4] 구간별 기준 칩 — "지금 나의 학습"=기간 창 / "다음에 할 것"=누적.
+  //   두 칩이 나란히 다르면 사용자는 모순이 아니라 "축이 둘"임을 이해한다.
+  const basisChip = (t) => `<span class="sh-zone__basis">${escapeHtml(t)}</span>`;
+  root.innerHTML = adminHintHtml + periodEmptyHtml + `
     <div class="sh-zone" data-zone="now">
-      <div class="sh-zone__head"><span class="sh-zone__bar" style="background:${ZONES.now.bar};"></span>${ZONES.now.label}</div>
+      <div class="sh-zone__head"><span class="sh-zone__bar" style="background:${ZONES.now.bar};"></span>${ZONES.now.label}${basisChip(periodLabelKo())}</div>
       <div class="sh-zone__body" id="shZoneNowBody">${kpiHtml}</div>
     </div>
     <div class="sh-zone" data-zone="flow">
@@ -3930,7 +4114,7 @@ VIEWS['s-home'] = async function(root){
       <div class="sh-zone__body">${dailyHtml}</div>
     </div>
     <div class="sh-zone" data-zone="next">
-      <div class="sh-zone__head"><span class="sh-zone__bar" style="background:${ZONES.next.bar};"></span>${ZONES.next.label}</div>
+      <div class="sh-zone__head"><span class="sh-zone__bar" style="background:${ZONES.next.bar};"></span>${ZONES.next.label}${basisChip('누적')}</div>
       <div class="sh-zone__body">${weakHtml}</div>
     </div>`;
 
@@ -3954,7 +4138,8 @@ VIEWS['s-home'] = async function(root){
 
   // 게이지 (학습시간 목표 대비 달성률) — 기본 목표치: 7d 60분*7일, 30d 60*30 등
   const targetMin = Number(snap.weeklyTarget) || (state.period==='7d'?420: state.period==='30d'?1800: state.period==='90d'?5400: 1800);
-  renderGauge(document.getElementById('sHomeGauge'), summary.total_minutes||0, targetMin, '목표 대비');
+  // [A4 §8-2] allZero면 #sHomeGauge 자체가 없다(안내 박스로 대체) → renderGauge 미호출. 0% 도넛 금지.
+  if (!allZero) renderGauge(document.getElementById('sHomeGauge'), summary.total_minutes||0, targetMin, '목표 대비');
 
   // 일별 추이 차트
   const dailyData = (daily && daily.data) || [];
@@ -3969,8 +4154,15 @@ VIEWS['s-home'] = async function(root){
       }]
     });
   } else {
+    // [A4 §8-3] "선택한 기간"은 사용자가 고르지 않은 기본값일 때 부정확 → 실제 기간 라벨 + 넓혀보기 CTA.
+    const canWidenChart = state.period !== 'custom' && state.period !== '90d';
     document.getElementById('sHomeDaily').closest('.dc-chart-wrapper').innerHTML =
-      `<header><h2>일별 학습시간 추이</h2></header>` + tplEmpty('선택한 기간의 데이터가 없어요');
+      `<header><h2>일별 학습시간 추이</h2></header>
+       <div class="dc-state-panel" role="status">
+         <i class="fas fa-inbox" aria-hidden="true"></i>
+         <p>${escapeHtml(periodLabelKo())}에는 학습 기록이 없어요</p>
+         ${canWidenChart ? `<button type="button" class="btn" data-widen="90d">최근 90일로 보기</button>` : ''}
+       </div>`;
   }
 
   // ── C. 통합 약점 순위 리스트 (막대 캔버스·중복 카드 제거 → 단일 렌더) ──
@@ -4028,11 +4220,20 @@ VIEWS['s-home'] = async function(root){
       </div>`;
     }).join('');
   } else {
+    // [A4 §5-3] 금지 문구("잘하고 있어요") 교체 — 미측정을 정상으로 단정하지 않는다(정본사전 §5-1).
+    //   "보완할 게 없다"와 "아직 판정 못 한 게 N개다"는 다른 말이다. N 은 mastery SSOT 값 그대로.
     weakHost.innerHTML = `<div class="dc-state-panel" role="status">
       <i class="fas fa-circle-check" aria-hidden="true" style="color:var(--lrs-secondary);font-size:28px;"></i>
-      <p>지금은 더 연습할 단원이 없어요. 잘하고 있어요!</p>
+      <p>지금 보완이 필요한 단원은 없어요.</p>
       <a class="btn" href="/self-learn/"><i class="fas fa-book-open-reader"></i> 스스로채움 둘러보기</a>
     </div>`;
+    (async () => {
+      const m = uid ? await apiGet(`/api/lrs/mastery/student/${uid}`) : null;
+      const n = (m && m.counts && Number(m.counts.insufficient)) || 0;
+      const p = weakHost.querySelector('p');
+      if (p && n > 0) p.textContent = `지금 보완이 필요한 단원은 없어요. 아직 판정하지 못한 단원이 ${n}개 있어요.`;
+      else if (p) p.textContent = '평가로 판정한 단원은 모두 도달했어요.';
+    })();
   }
   // P1-1(필수): 스냅샷 마운트를 구간① 본문으로 — root 전달 시 afterbegin 삽입이 구간 밖(관리자 힌트 위)으로 새므로 반드시 구간① 내부에 마운트(스펙 §2-4).
   await renderDodMini(document.getElementById('shZoneNowBody') || root, {
@@ -4153,6 +4354,13 @@ VIEWS['s-achieve'] = async function(root){
         </div>
       </section>`;
 
+  // [A4 §5-2] 추천 카운터 — 실제로 그려질 추천 카드 구성을 그대로 센다(라벨↔내용 불일치 방지).
+  //   보완 = 미도달·부분도달·평가부족 / 심화 = 도달(한 단계 더) / 미판정 = counts.insufficient(SSOT).
+  const _recosForCount = (insightsForReco && Array.isArray(insightsForReco.recommendations))
+    ? insightsForReco.recommendations.slice(0, 3) : [];
+  const _recoDeepCount = _recosForCount.filter(r => normStatus(r.status) === 'reached').length;
+  const _recoFillCount = _recosForCount.length - _recoDeepCount;
+
   // ── 화면 골격 (S1 → S2 → S4) ─────────────────────────────────────────
   root.innerHTML = `
     <!-- S1: 내 성취 한눈 -->
@@ -4163,11 +4371,13 @@ VIEWS['s-achieve'] = async function(root){
           <h2 class="mastery-h2">성취기준 도달률</h2>
           <!-- [W2-b 6-12] 분모는 '평가된 것'(총계 − 평가부족) — 같은 앱의 또래비교 탭·교사 히트맵과 같은 정의(A3).
                과거엔 여기만 평가부족을 분모에 포함(A1)해, 탭을 옮기면 같은 단어가 다른 뜻이 됐다. -->
-          <div class="mastery-sub">평가된 ${evaluatedCount}개 성취기준 중 도달한 비율${(counts.insufficient||0) > 0 ? ` (평가 부족 ${counts.insufficient}개는 분모에서 제외)` : ''}</div>
+          <!-- [A4 §6-2] 고지 숫자는 하드코딩 금지 — counts.insufficient 를 그대로 렌더한다.
+               (INV-A4-5: 이 N == 범례 개수 == standards[status==='insufficient'] 길이) -->
+          <div class="mastery-sub">평가된 ${evaluatedCount}개 중 ${counts.reached||0}개 도달${(counts.insufficient||0) > 0 ? ` · 아직 판정 못 한 성취기준 ${counts.insufficient}개` : ''}</div>
         </div></div>
         <div class="chart-body donut-wrap" style="height:300px;">
           <canvas id="sMastDonut" role="img" aria-label="성취기준 도달률 도넛"></canvas>
-          ${donutCenterHtml((counts.reached||0) + ' / ' + evaluatedCount, '도달 / 평가')}
+          ${donutCenterHtml((counts.reached||0) + ' / ' + evaluatedCount, '도달 / 평가된 기준')}
         </div>
       </section>
     </div>
@@ -4199,7 +4409,8 @@ VIEWS['s-achieve'] = async function(root){
       <div class="ms-head">
         <div class="ms-titles">
           <h2 class="mastery-h2">성취기준 강·약 분석</h2>
-          <div class="mastery-sub">정답률 기준 — 오른쪽이 강점, 왼쪽이 약점. 평가된 성취기준만 표시해요(평가 부족 ${counts.insufficient||0}개 제외).</div>
+          <!-- [A4 §6-4] 좌반면(약점)이 비어도 "약점이 없다"로 읽히지 않게, 미판정 N을 도넛으로 연결해 안내 -->
+          <div class="mastery-sub">정답률 기준 — 오른쪽이 강점, 왼쪽이 약점. 판정이 끝난 성취기준만 나와요${(counts.insufficient||0) > 0 ? `(아직 판정 못 한 ${counts.insufficient}개는 위 도넛에서 볼 수 있어요)` : ''}.</div>
         </div>
         <div class="ms-controls">
           <label class="ms-controls__lbl" for="sDivergeTopN">표시 개수</label>
@@ -4220,9 +4431,11 @@ VIEWS['s-achieve'] = async function(root){
     <section class="mastery-section" id="sNextSection" style="margin-top:16px;">
       <div class="ms-head"><div class="ms-titles">
         <h2 class="mastery-h2">맞춤 학습 추천</h2>
-        <div class="mastery-sub">약한 성취기준을 채울 학습이에요. 하나씩 풀어 도달로 바꿔봐요.</div>
+        <!-- [A4 §5-2] 부제가 "약한 성취기준"이라 말하는데 심화(도달) 카드가 함께 뜨던 모순을 해소.
+             카운터도 "미도달·부분 0개"↔카드 2장 모순 대신 카드 구성 그대로를 센다. -->
+        <div class="mastery-sub">아직 판정받지 못했거나 더 다져야 할 성취기준이에요. 하나씩 풀어 도달로 바꿔봐요.</div>
       </div>
-      <div class="ms-controls"><span class="mastery-sub">미도달·부분 ${weaknesses.length}개</span></div>
+      <div class="ms-controls"><span class="mastery-sub">보완 ${_recoFillCount}개 · 심화 ${_recoDeepCount}개 · 미판정 ${counts.insufficient||0}개</span></div>
       </div>
       <!-- P0-2: 우선순위 추천 3장(시급·권장·선택, KERIS 3열) — 잔여 미도달 카드는 그 아래 -->
       <div id="sRecoGrid"></div>
@@ -4355,14 +4568,15 @@ VIEWS['s-achieve'] = async function(root){
   if (allInsufficient){
     // 평가부족만 — 회색 1색 + 안내
     document.getElementById('sMastDonut').closest('.donut-wrap').querySelector('.donut-center').innerHTML =
-      `<span class="dc-num">${counts.insufficient} / ${counts.total}</span><span class="dc-lbl">평가 부족</span>`;
+      `<span class="dc-num">${counts.insufficient} / ${counts.total}</span><span class="dc-lbl">아직 판정 못 함</span>`;
     mkChart(document.getElementById('sMastDonut'), 'doughnut', {
-      labels:['평가 부족'],
+      labels:['아직 판정 못 함'],
       datasets:[{ data:[counts.insufficient], backgroundColor:[MASTERY_HEX.insufficient] }]
     }, Object.assign({ cutout:'62%' }, donutLegendOpts('개')));
   } else {
+    // [A4 §6-2] 학생 화면이므로 "평가 부족" → "아직 판정 못 함"으로 평이화(개념·회색 동일).
     mkChart(document.getElementById('sMastDonut'), 'doughnut', {
-      labels:['도달','부분 도달','미도달','평가 부족'],
+      labels:['도달','부분 도달','미도달','아직 판정 못 함'],
       datasets:[{
         data:[counts.reached||0, counts.partial||0, counts.notReached||0, counts.insufficient||0],
         backgroundColor:[MASTERY_HEX.reached, MASTERY_HEX.partial, MASTERY_HEX.notReached, MASTERY_HEX.insufficient]
@@ -4420,6 +4634,9 @@ VIEWS['s-achieve'] = async function(root){
     // 강점은 위(rate 내림차) → 가운데 0선 → 약점은 아래(rate 오름차 = 최저 맨 아래)
     const ordered = pickStrong.slice().concat(pickWeak.slice().reverse());
     const bodyEl = document.getElementById('sDivergeBody');
+    // [A4 §6-4] 재그림마다 좌반면 안내를 초기화(중복 누적 방지)
+    (function(){ const sec = document.getElementById('sDivergeSection');
+      const old = sec && sec.querySelector('.diverge-noweak'); if (old) old.remove(); })();
 
     if (!ordered.length){
       bodyEl.innerHTML = `<div class="mastery-empty"><i class="fas fa-scale-balanced me-icon"></i>
@@ -4429,6 +4646,11 @@ VIEWS['s-achieve'] = async function(root){
     }
     bodyEl.innerHTML = '<canvas id="sMastDiverge" role="img" aria-label="성취기준 강약 다이버징 차트"></canvas>';
     bodyEl.style.height = (Math.max(360, ordered.length * 34 + 40)) + 'px';
+    // [A4 §6-4] 약점 0건이면 왼쪽 절반이 통째로 비어 "약점이 없다"로 오독된다 → 안내 1줄로 빈 공백 해소.
+    //   (플롯 안 겹침 위험을 피해 차트 바로 아래에 배치 — 데스크탑은 좌측 정렬로 '왼쪽=약점' 문법 유지)
+    if (!pickWeak.length){
+      bodyEl.insertAdjacentHTML('afterend', `<p class="diverge-noweak">아직 약점으로 판정된 성취기준이 없어요</p>`);
+    }
 
     // 약점 여부는 status 문자열이 아니라 "어느 버킷(weak/strong)에 담겼는지"로 판정.
     //   (평가부족으로 강등된 미도달도 weak 버킷에 있으면 왼쪽 빨강으로 그린다.)
@@ -4579,12 +4801,23 @@ VIEWS['s-achieve'] = async function(root){
       ? myVals.reduce((acc, v, i) => (v != null ? i : acc), -1)
       : vals.length - 1;
 
+    // [A4 §7-2] 표본이 적은 주(1~2문제) 처리 — 점을 지우지 않되 "속 빈 점"으로 구분한다.
+    //   실측 사례: 2026-24 주의 100% 봉우리는 그 주에 1문제를 맞힌 것이다.
+    //   기록을 감추지 않으면서, 그 봉우리가 흔들리기 쉬운 값임을 시각으로 먼저 알린다.
+    const _attMap = new Map(series.map(p => [String(p.week || ''), (p.attempts == null ? null : Number(p.attempts))]));
+    const myAtt = chartLabels.map(w => _attMap.has(String(w)) ? _attMap.get(String(w)) : null);
+    const isThin = (i) => { const a = myAtt[i]; return a != null && a < 3; };
+    const hasThinWeek = chartLabels.some((_, i) => myVals[i] != null && isThin(i));
+
     const datasets = [{
       label:'내 정답률(%)', data: myVals,
       borderColor:'#2563eb', backgroundColor:'rgba(37,99,235,.15)',   // 내 라인 파랑 유지(변경 금지 — 파랑=나, 회색=참조가 전 카드 공통 문법)
       borderWidth:2.5, tension:.3, fill:true, spanGaps:true, order:1,
-      pointRadius:(c)=> c.dataIndex === lastI ? 6 : 3,
-      pointBackgroundColor:'#2563eb', pointBorderColor:'#fff', pointBorderWidth:2
+      pointRadius:(c)=> isThin(c.dataIndex) ? 4 : (c.dataIndex === lastI ? 6 : 3),
+      pointHoverRadius: 7,
+      pointBackgroundColor:(c)=> isThin(c.dataIndex) ? '#fff' : '#2563eb',
+      pointBorderColor:(c)=> isThin(c.dataIndex) ? '#2563eb' : '#fff',
+      pointBorderWidth:2
     }];
     if (drawOverlay){
       datasets.push({
@@ -4598,48 +4831,95 @@ VIEWS['s-achieve'] = async function(root){
       labels: chartLabels,
       datasets
     }, {
-      scales:{ y:{ min:0, max:100, ticks:{ callback:v=>v+'%', font:{size:12} } }, x:{ ticks:{ font:{size:11}, maxTicksLimit: window.innerWidth<768?6:10 } } },
+      // [A4 §9-6] x축 tick 11px → 12px (12px 이하 금지 하한 준수)
+      scales:{ y:{ min:0, max:100, ticks:{ callback:v=>v+'%', font:{size:12} } }, x:{ ticks:{ font:{size:12}, maxTicksLimit: window.innerWidth<768?6:10 } } },
       plugins:{
         // 범례는 오버레이가 실제로 그려질 때만(선 2개 식별 필요) — 아니면 현행 display:false 유지.
         legend: drawOverlay
           ? { display:true, position:'bottom', labels:{ boxWidth:18, font:{ size:13 } } }
           : { display:false },
-        tooltip:{ callbacks:{ label:(c)=> c.parsed.y==null ? null :
-          (drawOverlay ? `${String(c.dataset.label||'').replace('(%)','').trim()} ${c.parsed.y}%` : `정답률 ${c.parsed.y}%`) } }
+        // [A4 §7-2] 툴팁에 시도 수 병기 — "100%"가 몇 문제 기준인지 점 위에서 바로 확인.
+        tooltip:{ callbacks:{ label:(c)=> {
+          if (c.parsed.y == null) return null;
+          if (drawOverlay && c.datasetIndex !== 0) return `${String(c.dataset.label||'').replace('(%)','').trim()} ${c.parsed.y}%`;
+          const a = myAtt[c.dataIndex];
+          const head = drawOverlay ? `${String(c.dataset.label||'').replace('(%)','').trim()} ` : '정답률 ';
+          return (a != null && a > 0)
+            ? `${head}${c.parsed.y}% (${a}문제 중 ${Math.round(c.parsed.y * a / 100)}개)`
+            : `${head}${c.parsed.y}%`;
+        } } }
       }
     });
 
+    // ── [A4 §7-1] 추세·예측 문구 판정표 T1~T6 ────────────────────────────
+    //   BE 는 confidence·r²·band 를 이미 정확히 보내는데 FE 가 쓰지 않아,
+    //   r²=0.16(오르내림이 큼)·최근 2주 −28%p 인 화면에 "꾸준히 오르고 있어요 ·
+    //   2주 후 80% 예상"이 떴다. 산식이 아니라 문구가 틀린 사안이다.
+    //   판정 상수는 전부 기존값(MIN_WEEKS=3 / r² 0.3 / nW 6) — 신규 임계 발명 0.
+    //   BE _trendConfidence: nW>=6 && r²>=0.3 일 때만 'high' → high 여부가 곧 T3~T5 게이트.
+    const r2v   = (trend && trend.r2 != null) ? Number(trend.r2) : null;
+    const slope = (trend && trend.slope != null) ? Number(trend.slope) : 0;
+    const highConf = (trend && trend.confidence === 'high');
+    const band = (proj && proj.band) || null;
+    const bandTxt = (band && band.lo != null && band.hi != null)
+      ? ` (${Math.round(band.lo)}~${Math.round(band.hi)}%)` : '';
+    const curR = (curRate != null) ? Math.round(curRate) : null;
+
     let chipHtml = '';
     if (canPredict){
-      // ── 3주 이상 관측: 추세·전망 문구 노출 ──
-      const dir = normTrendDir(trend.direction);
-      if (dir === 'up'){
-        chipHtml += `<span class="sproj-chip good"><i class="fas fa-wand-magic-sparkles"></i> 꾸준히 오르고 있어요!</span>`;
+      if (curRate != null && curRate >= target){
+        // T6 — 이미 목표 수준(어느 경우든 우선)
+        chipHtml += `<span class="sproj-chip good"><i class="fas fa-star"></i> 이미 정답률 ${target}% 수준이에요</span>`;
+        chipHtml += `<span class="sproj-chip proj"><i class="fas fa-seedling"></i> 이대로 꾸준히!</span>`;
+      } else if (!highConf){
+        // T2 — r²<0.3 또는 관측 6주 미만: 방향도 시기도 단정하지 않는다.
+        //   강조는 1개만 → 방향·예측 칩은 중립 회색, 신뢰도 배지가 맨 앞에서 먼저 말한다.
+        chipHtml += `<span class="strend-lowconf"><i class="fas fa-triangle-exclamation" aria-hidden="true"></i> 변동이 커서 참고용</span>`;
+        chipHtml += `<span class="sproj-chip soft"><i class="fas fa-wave-square"></i> 오르내림이 커요.${curR != null ? ` 이번 주 정답률은 ${curR}%예요` : ''}</span>`;
+        chipHtml += `<span class="sproj-chip soft"><i class="fas fa-bullseye"></i> 이대로 꾸준히 하면 ${target}%에 가까워질 수 있어요</span>`;
+      } else if (slope >= 2){
+        // T3 — 관측 6주 이상 ∧ r²≥0.3 ∧ 상승: 이때만 방향을 단정하고, 예측은 밴드를 병기한다.
+        chipHtml += `<span class="sproj-chip good"><i class="fas fa-wand-magic-sparkles"></i> 꾸준히 오르고 있어요</span>`;
+        chipHtml += (proj && proj.reachable && proj.weeksToReach != null && proj.weeksToReach > 0)
+          ? `<span class="sproj-chip proj"><i class="fas fa-bullseye"></i> 이 속도면 약 ${proj.weeksToReach}주 후 ${target}% 예상이에요${bandTxt}</span>`
+          : `<span class="sproj-chip proj"><i class="fas fa-seedling"></i> 조금만 더 풀면 가까워져요</span>`;
+      } else if (slope <= -2){
+        // T5 — 하락. 빨강 금지(정본사전 §7-3-1 낙인 방지) → 노랑 톤.
+        chipHtml += `<span class="sproj-chip warn"><i class="fas fa-hand-holding-heart"></i> 최근 조금 어려워졌네요. 이걸 같이 볼까요?</span>`;
+        chipHtml += `<span class="sproj-chip soft"><i class="fas fa-bullseye"></i> 지금은 ${target}%에 닿는 시기를 말하기 어려워요</span>`;
       } else {
-        chipHtml += `<span class="sproj-chip soft"><i class="fas fa-hand-holding-heart"></i> 최근 조금 어려워졌네요. 이걸 같이 볼까요?</span>`;
-      }
-      if (proj && proj.reachable && proj.weeksToReach != null && proj.weeksToReach > 0){
-        chipHtml += `<span class="sproj-chip proj"><i class="fas fa-bullseye"></i> 이 속도면 약 ${proj.weeksToReach}주 후 정답률 ${target}% 예상이에요! 👍</span>`;
-      } else if (proj && proj.reachable && proj.weeksToReach === 0){
-        chipHtml += `<span class="sproj-chip good"><i class="fas fa-star"></i> 이미 정답률 ${target}% 수준이에요. 이대로 꾸준히!</span>`;
-      } else {
-        chipHtml += `<span class="sproj-chip proj"><i class="fas fa-seedling"></i> 조금만 더 풀면 가까워져요.</span>`;
+        // T4 — 횡보
+        chipHtml += `<span class="sproj-chip soft"><i class="fas fa-equals"></i> 비슷한 수준을 이어가고 있어요</span>`;
+        chipHtml += `<span class="sproj-chip soft"><i class="fas fa-bullseye"></i> 지금 속도로는 큰 변화가 관측되지 않아요</span>`;
       }
     } else {
-      // ── 2주(2점) 이하: '최근 기록' 선만. 전망·기울기 문구는 아직 숨김 ──
-      if (curRate != null){
-        chipHtml += `<span class="sproj-chip good"><i class="fas fa-chart-line"></i> 이번 주 정답률 ${Math.round(curRate)}%예요.</span>`;
+      // T1 — 관측 3주 미만: 방향·예측 미산출. 이번 주 실제 정답률만(학생 노력 반영).
+      if (curR != null){
+        chipHtml += `<span class="sproj-chip good"><i class="fas fa-chart-line"></i> 이번 주 정답률 ${curR}%예요.</span>`;
       }
-      chipHtml += `<span class="sproj-chip soft"><i class="fas fa-seedling"></i> 최근 기록을 이어 그렸어요. 3주 이상 쌓이면 전망도 보여드릴게요(현재 ${observedWeeks}주).</span>`;
+      chipHtml += `<span class="sproj-chip soft"><i class="fas fa-seedling"></i> 아직 변화를 알아보기엔 일러요 (지금 ${observedWeeks}주치 기록)</span>`;
+    }
+    // [A4 §7-3] 최근 2주 변화 — 전 구간 회귀 방향과 최근 방향이 어긋날 때 그 사실을 감추지 않는다.
+    //   색으로 경고하지 않는다(중립 회색, 부호만). |Δ| ≥ 5%p 일 때만 표시(잡음 억제).
+    if (valuedPts.length >= 2){
+      const d2 = Math.round(valuedPts[valuedPts.length-1].rate - valuedPts[valuedPts.length-2].rate);
+      if (Math.abs(d2) >= 5){
+        chipHtml += `<span class="sproj-chip delta"><i class="fas fa-arrow-right-arrow-left"></i> 최근 2주 변화 ${d2 > 0 ? '+' : '−'}${Math.abs(d2)}%p</span>`;
+      }
     }
     if (chips) chips.innerHTML = chipHtml;
-    const lowSample = (observedWeeks||0) < 6 || trend.confidence === 'low';
 
     // 학생용 순화 disclaimer — 전망을 낼 때만 '추정' 문구, 최근 기록만 그릴 땐 중립 안내.
+    //   [A4 §4-4] 예측에는 근거(관측 주 수·r²)를 함께 적는다. 14px(§9-4).
     if (foot){
       foot.innerHTML = canPredict
-        ? `<p class="proj-disclaimer"><i class="fas fa-circle-info"></i> 이 추정은 함께 참고하는 거예요.${lowSample ? ' 표본이 적어 대략적인 추정이에요.' : ''}</p>`
+        ? `<p class="proj-disclaimer"><i class="fas fa-circle-info"></i> 이 추정은 함께 참고하는 거예요. 최근 ${observedWeeks}주 기록으로 계산했어요${r2v != null ? ` (흐름이 또렷한 정도 r² ${r2v.toFixed(2)} — 1에 가까울수록 또렷해요)` : ''}.</p>`
         : `<p class="proj-disclaimer"><i class="fas fa-circle-info"></i> 지금은 최근 기록만 이어 그렸어요. 전망은 3주 이상 쌓이면 보여드려요.</p>`;
+      // [A4 §7-2] 속 빈 점이 실제로 있을 때만 각주(무의미한 상시 노출 금지)
+      if (hasThinWeek){
+        foot.insertAdjacentHTML('afterbegin',
+          `<p class="proj-disclaimer"><i class="fas fa-circle-notch" aria-hidden="true"></i> 속이 빈 동그라미는 1~2문제만 푼 주예요. 적게 풀면 정답률이 크게 흔들려요.</p>`);
+      }
       // P1-3 안내문(스펙 §4-3): 오버레이 렌더 시 익명 안내(14px) / 표본 부족(status='insufficient')일 때만 격려 안내 1줄.
       if (drawOverlay){
         foot.insertAdjacentHTML('beforeend',
@@ -4801,7 +5081,11 @@ VIEWS['s-achieve'] = async function(root){
   }
 
   // A4 "다음 한 걸음" — 선수→후속 경로 사슬 + CTA (학생 본인, 정상 렌더 경로 말미)
-  await renderNextStep(document.getElementById('sNextStepHost'));
+  await renderNextStep(document.getElementById('sNextStepHost'), {
+    insufficientCount: counts.insufficient || 0,
+    evaluatedCount,
+    reachedCount: counts.reached || 0
+  });
 };
 
 /* =====================================================================
@@ -5921,8 +6205,9 @@ async function renderShallowLearning(host, opts){
  *   → { keyNodes:[{code,label,status,unlocksCount,unlocks,chain:[{code,label,status,current}],
  *       recommendations:[{id,title,type,thumbnail_url}],cta}], readyToChallenge:[...], note }
  * HTML/CSS flex 경로 사슬 + "지금 이거 하나!" CTA(강조 1장). [바로 풀기]=MasteryPlayer.open(90vw×90vh). 모바일<768=세로 스택. */
-async function renderNextStep(host){
+async function renderNextStep(host, opts){
   if (!host) return;
+  const _ns = opts || {};
   const uid = state.me && state.me.id;
   if (!uid){ host.innerHTML = ''; return; }
 
@@ -5944,11 +6229,39 @@ async function renderNextStep(host){
     </div></div>`;
 
   // 빈 상태(§⑤): keyNodes·readyToChallenge 둘 다 0
+  //   [A4 §5-1] 금지 문구 교체 — "지금은 막힌 곳이 없어요! 잘하고 있어요 🎉"는
+  //   측정하지 않은 것까지 정상으로 단정한다(정본사전 §5-1 "이상 없음/정상" 금지).
+  //   → 측정한 범위(평가로 판정한 N개)를 앞에 명시하고, 아직 판정 못 한 M개를 함께 말한다.
   if (!keyNodes.length && !ready.length){
+    const ev = Number(_ns.evaluatedCount) || 0;
+    const rc = Number(_ns.reachedCount) || 0;
+    const insuf = Number(_ns.insufficientCount) || 0;
+    const line1 = ev > 0
+      ? (rc >= ev ? `평가로 판정한 성취기준 ${ev}개는 모두 도달했어요.`
+                  : `평가로 판정한 성취기준 ${ev}개 중 ${rc}개가 도달했어요.`)
+      : '아직 도달 판정을 받은 성취기준이 없어요.';
+    const line2 = insuf > 0
+      ? `아직 판정하지 못한 성취기준이 ${insuf}개 있어요 — 3번 이상 풀면 도달 판정을 받을 수 있어요.`
+      : '새로운 학습을 이어가 볼까요?';
     host.innerHTML = `<section class="mastery-section" style="margin-top:16px;">
       ${headerHtml}
-      ${tplEmpty('지금은 막힌 곳이 없어요! 잘하고 있어요 🎉 새로운 학습을 이어가 볼까요?', {href:'/self-learn', label:'맞춤학습 하러 가기'})}
+      <div class="dc-state-panel" role="status">
+        <i class="fas fa-inbox" aria-hidden="true"></i>
+        <p>${escapeHtml(line1)}<br>${escapeHtml(line2)}</p>
+        <div style="display:flex;flex-wrap:wrap;gap:8px;justify-content:center;">
+          ${insuf > 0 ? `<button type="button" class="btn" id="nsGotoUnjudged">아직 판정 못 한 단원 보기</button>` : ''}
+          <a class="btn" href="/self-learn/" ${insuf > 0 ? 'style="background:#fff;color:#2563eb;border:1px solid #2563eb;"' : ''}>맞춤학습 하러 가기</a>
+        </div>
+      </div>
     </section>`;
+    // "아직 판정 못 한 단원 보기" → 같은 화면의 도넛(회색 조각 = 미판정 N)으로 이동.
+    //   별도 드로어를 새로 만들지 않고 이미 그 숫자를 말하고 있는 카드로 데려간다.
+    const goBtn = document.getElementById('nsGotoUnjudged');
+    if (goBtn) goBtn.addEventListener('click', () => {
+      const donut = document.getElementById('sMastDonut');
+      const card = donut && donut.closest('.mastery-section');
+      if (card) card.scrollIntoView({ behavior:'smooth', block:'center' });
+    });
     return;
   }
 
@@ -6900,7 +7213,7 @@ VIEWS['t-warnings'] = async function(root){
             if (!rec) return '<span style="color:#9ca3af;font-size:13px;">준비 중</span>';
             return `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
               <span style="font-size:13px;color:#374151;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:160px;"><i class="fas ${recTypeIcon(rec.type)}"></i> ${escapeHtml(rec.title||'추천 콘텐츠')}</span>
-              <button type="button" class="mastery-btn mastery-btn-sm mastery-btn-ghost" data-assign="${escapeAttr(r.code)}" data-recid="${escapeAttr(rec.id)}" data-rectitle="${escapeAttr(rec.title||'')}">배정</button>
+              <span class="mastery-btn mastery-btn-sm" style="background:#cbd5e1;color:#fff;cursor:not-allowed;white-space:nowrap;" aria-disabled="true" title="보충 배정 기능은 준비 중입니다. 지금은 추천 콘텐츠만 안내해요.">배정(준비 중)</span>
             </div>`;
           } }
       ],
@@ -6908,16 +7221,9 @@ VIEWS['t-warnings'] = async function(root){
       initialSort:'avgRate', initialDir:'asc'
     });
 
-    // 배정 버튼 — P0: 확인 토스트(목업). 실제 일괄 배정 API는 P1.
-    host.querySelectorAll('button[data-assign]').forEach(btn => {
-      btn.addEventListener('click', (ev)=>{
-        ev.stopPropagation();
-        const title = btn.getAttribute('data-rectitle') || '추천 콘텐츠';
-        if (confirm(`[${title}]을(를) 미도달 학생에게 배정할까요?\n(개별 배정은 다음 단계에서 실제 연동됩니다)`)){
-          btn.outerHTML = `<span class="mastery-badge reached"><i class="fas fa-check"></i> 배정됨</span>`;
-        }
-      });
-    });
+    // W4: 개별 '배정' 버튼은 배정 API 를 부르지 않는 목업이었다. 눌러도 저장되는 것이 없는데
+    //   '배정됨' 배지로 바뀌어 실제 배정된 것처럼 보였다(새로고침하면 원상복구).
+    //   → 거짓 성공 상태 제거. 클래스 전체 배정과 동일한 '준비 중' 비활성 표기로 통일.
   }
   renderNotReached();
 
@@ -7031,10 +7337,10 @@ VIEWS['t-warnings'] = async function(root){
       const r2note = '';
       const hint = lowSample ? `관측 ${r.observedWeeks||0}주 · 표본 적어 참고용`
         : `최근 ${r.observedWeeks||0}주 정답률 기울기 ${slope==null?'-':((slope>0?'+':'')+slope)}%p/주`;
-      // 스파크라인: series 미제공이므로 OLS 기울기로 추세 직선 합성(현재율 미상이면 부족 표시)
-      const synth = lowSample ? null : synthLineFromSlope(50, slope, r.observedWeeks); // 절대값 미상 → 중앙 기준 상대선
-      const sparkOk = !lowSample && synth;
-      const spark = sparkOk ? sparklineSvg(synth, dir, { aria:`${r.name} 추세` }) : `<span class="trend-note">추세 데이터 부족</span>`;
+      // [W4] 기존: 기준선 50(코드 상수) + 기울기로 직선을 합성해 "최근 8주 추이" 스파크라인을 그렸다.
+      //   주별 정답률 원자료가 없어 모양이 전부 지어낸 값이었다 → 실측값인 '주당 변화폭'만 막대로 표시.
+      const spark = lowSample ? `<span class="trend-note">추세 데이터 부족</span>`
+                              : slopeBarSvg(slope, dir, { aria:`${r.name}` });
       const arrow = lowSample ? '<span class="trend-note">—</span>' : trendArrow(dir, slope, hint);
       const note = lowSample ? `관측 ${r.observedWeeks||0}주` : '';
       return { name:r.name, spark, arrow, note, hint };
@@ -7063,11 +7369,14 @@ VIEWS['t-warnings'] = async function(root){
     host.innerHTML = `
       <div class="trend-table-wrap">
         <table class="trend-table">
-          <thead><tr><th>학생</th><th>최근 8주 추이</th><th>추세</th><th>비고</th></tr></thead>
+          <thead><tr><th>학생</th><th>주당 변화폭</th><th>추세</th><th>비고</th></tr></thead>
           <tbody>${trHtml}</tbody>
         </table>
       </div>
-      <div class="trend-cards">${cardHtml}</div>`;
+      <div class="trend-cards">${cardHtml}</div>
+      <p class="trend-foot"><i class="fas fa-circle-info" aria-hidden="true"></i>
+        막대는 최근 8주 기록으로 계산한 <b>일주일당 정답률 변화폭</b>이에요(가운데가 0, 오른쪽이 오름).
+        주별 정답률을 따로 저장하고 있지 않아 <b>주별 꺾은선 그래프는 준비 중</b>이에요.</p>`;
   }
 
   // T-PROG: 반 전체 학생 주간 정답률 목표 도달 예상(점선 밴드 외삽)
@@ -7132,7 +7441,7 @@ VIEWS['t-warnings'] = async function(root){
     mkChart(ctx, 'line', cfg, {
       scales:{
         y:{ min:0, max:100, ticks:{ callback:v=>v+'%', font:{size:12} } },
-        x:{ ticks:{ font:{size:11}, maxRotation:0, autoSkip:true, maxTicksLimit: window.innerWidth<768?6:10 },
+        x:{ ticks:{ font:{size:12}, maxRotation:0, autoSkip:true, maxTicksLimit: window.innerWidth<768?6:10 },   /* [A4 §9-6] 11→12px */
             grid:{ color:(c)=> c.index===boundaryIndex ? '#d1d5db' : 'rgba(0,0,0,.04)' } }
       },
       plugins:{
@@ -7412,7 +7721,8 @@ async function renderDodMini(root, opts){
       const cvNote = cv>0 ? `<div class="dc-snapshot__cv">콘텐츠 조회 ${cv}회 (학습활동에는 안 세요)</div>` : '';
       const html = `
         <section class="dc-snapshot" aria-label="오늘 스냅샷">
-          <div class="dc-snapshot__label">오늘 활동을 어제와 비교했어요
+          <!-- [A4 §7-1 정본 라벨] "오늘 활동을 어제와 비교했어요" → "오늘 학습 현황" -->
+          <div class="dc-snapshot__label">오늘 학습 현황
             <span class="dc-snapshot__help" tabindex="0" role="note"
               aria-label="오늘 한 학습활동만 세요 (수업·평가·과제·문항 풀이·오늘의학습·맞춤학습·오답노트). 콘텐츠 조회·게시글·출석은 빼요.">
               <i class="fas fa-circle-question" aria-hidden="true"></i>
@@ -7420,7 +7730,7 @@ async function renderDodMini(root, opts){
             </span>
           </div>
           <div class="dc-kpi-grid dc-snapshot-strip">
-            ${kpiCard('오늘 배운 것',  todayLearn.toLocaleString(), '건', actsTrend,   'primary', cvNote || null)}
+            ${kpiCard('오늘 학습 활동',  todayLearn.toLocaleString(), '건', actsTrend,   'primary', cvNote || null)}
             ${kpiCard('오늘 학습시간', todayDur.toLocaleString(),   '분', durTrend,    'success')}
             ${kpiCard('연속 학습',     streak.toLocaleString(),     '일', streakTrend, 'warning')}
           </div>
@@ -11140,13 +11450,16 @@ function tplXapiInsufficient(total, min){
 }
 async function _renderXapiAnalysis(root, scope) {
   root.innerHTML = tplLoading(5);
-  const qs = scope ? `?scope=${encodeURIComponent(scope)}` : '';
+  // [W4] 기존에는 경로에 '?scope=...&depth=2' 를 직접 붙였는데 apiGet 이 다시 '?period=...' 를 이어 붙여
+  //   '/api/lrs/xapi/std-heatmap?depth=2?period=30d' 처럼 물음표가 두 번 들어간 요청이 나갔다.
+  //   → 추가 파라미터는 apiGet 의 두 번째 인자로 넘겨 정상 쿼리스트링이 되게 한다.
+  const sc = scope || null;
   const [ov, heat, dist, area, recent] = await Promise.all([
-    apiGet(`/api/lrs/xapi/overview${qs}`),
-    apiGet(`/api/lrs/xapi/std-heatmap${qs}${qs?'&':'?'}depth=2`),
-    apiGet(`/api/lrs/xapi/achievement-distribution${qs}`),
-    apiGet(`/api/lrs/xapi/area-breakdown${qs}${qs?'&':'?'}days=7`),
-    apiGet(`/api/lrs/xapi/recent-events${qs}${qs?'&':'?'}limit=20`),
+    apiGet('/api/lrs/xapi/overview', { scope: sc }),
+    apiGet('/api/lrs/xapi/std-heatmap', { scope: sc, depth: 2 }),
+    apiGet('/api/lrs/xapi/achievement-distribution', { scope: sc }),
+    apiGet('/api/lrs/xapi/area-breakdown', { scope: sc, days: 7 }),
+    apiGet('/api/lrs/xapi/recent-events', { scope: sc, limit: 20 }),
   ]);
   if (!ov || !ov.success) { root.innerHTML = tplEmpty('xAPI 수집 데이터를 불러오지 못했습니다'); return; }
 
@@ -12070,7 +12383,15 @@ async function setView(id){
     const isBehavior = (id === 't-behavior');
     // 성취수준 비교(t-classcompare): 화면 자체 조건(교과·기간·스코프)을 써 전역 기간칩 무효 → inert(§2.2).
     const isCompare = (id === 't-classcompare');
-    const isPeriodInert = isDailyView || isWeakStrong || isBenchmark || isBehavior || isCompare;
+    // [W4] 실측 결과 기간칩이 눌려도 숫자가 전혀 바뀌지 않던 4개 탭 — 칩만 살아 있어 "고장난 화면"으로 보였다.
+    //   t-warnings : mastery/ews/trend/emotion-engage 4개 API 모두 period 무시(성취 도달은 누적 기준)
+    //   t-drill    : warnings/:classId 가 period 무시(누적 위험 신호)
+    //   t-xapi     : xapi/* 가 period 무시(수집 누적 기준)
+    //   a-macro    : 화면 안 자체 기간(30일/90일) 선택을 쓰고 전역 기간칩은 덮어씀
+    const isCumulativeOnly = (id === 't-warnings' || id === 't-drill' || id === 't-xapi');
+    const isOwnPeriodMacro = (id === 'a-macro');
+    const isPeriodInert = isDailyView || isWeakStrong || isBenchmark || isBehavior || isCompare
+      || isCumulativeOnly || isOwnPeriodMacro;
     const picker = document.getElementById('periodPicker');
     const fbar = picker ? picker.closest('.dc-filter-bar') : null;
     if (fbar) {
@@ -12093,6 +12414,14 @@ async function setView(id){
             ? '<i class="fas fa-circle-info" aria-hidden="true"></i> 학습 행동 심화 분석은 누적(최근 90일) 기준이라 기간 선택을 쓰지 않아요'
           : (id === 't-classcompare')
             ? '<i class="fas fa-circle-info" aria-hidden="true"></i> 성취수준 비교는 화면 안 자체 조건(교과·기간·스코프)을 써요 (위 기간 선택은 사용 안 함)'
+          : (id === 't-warnings')
+            ? '<i class="fas fa-circle-info" aria-hidden="true"></i> 성취 도달 현황은 지금까지 쌓인 기록 전체(누적) 기준이라 기간 선택을 쓰지 않아요'
+          : (id === 't-drill')
+            ? '<i class="fas fa-circle-info" aria-hidden="true"></i> 학생 드릴다운은 누적 기록 기준이라 기간 선택을 쓰지 않아요'
+          : (id === 't-xapi')
+            ? '<i class="fas fa-circle-info" aria-hidden="true"></i> 표준체계 분석은 수집된 기록 전체(누적) 기준이라 기간 선택을 쓰지 않아요'
+          : (id === 'a-macro')
+            ? '<i class="fas fa-circle-info" aria-hidden="true"></i> 이 화면은 아래 자체 기간(30일/90일) 선택을 써요 (위 기간 선택은 사용 안 함)'
           : '<i class="fas fa-circle-info" aria-hidden="true"></i> 이 화면은 오늘·어제 고정이라 기간 선택을 쓰지 않아요';
         note.hidden = false;
       } else if (note) { note.hidden = true; }
@@ -12120,6 +12449,9 @@ function bindPeriodPicker(){
       const p = btn.dataset.period;
       root.querySelectorAll('button[data-period]').forEach(b=>b.setAttribute('aria-pressed', b===btn?'true':'false'));
       document.getElementById('customRange').hidden = (p !== 'custom');
+      // [A4 §3-3] 사용자가 기간을 직접 골랐다 → 자동 확장(하이브리드) 영구 해제.
+      state._periodTouched = true;
+      state._autoWidened = false;
       state.period = p;
       if (p !== 'custom' && state.view) setView(state.view);
     };

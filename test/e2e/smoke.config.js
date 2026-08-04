@@ -16,7 +16,7 @@ const path = require('path');
 // ★ config 로드(require) 시점에 실 DB → 임시 복사본 생성.
 //   Playwright 는 webServer 를 globalSetup 보다 먼저 띄우므로, 서버가 DB 를 열기
 //   전에 복사가 끝나 있어야 한다. config 로드 시점이 가장 이른 안전 지점.
-const { SMOKE_DB_PATH, makeSmokeDb } = require('./smoke.db-copy');
+const { SMOKE_DB_PATH, SMOKE_UPLOAD_DIR, makeSmokeDb } = require('./smoke.db-copy');
 makeSmokeDb(); // VACUUM INTO 동기 복사
 
 const PORT = 3100;
@@ -52,6 +52,8 @@ module.exports = defineConfig({
     env: {
       PORT: String(PORT),
       DB_PATH: SMOKE_DB_PATH,
+      // [W4] PDF 산출물도 격리 — 스모크 서버가 정본 uploads/portfolio-reports 를 오염시키지 않도록
+      PORTFOLIO_REPORT_DIR: SMOKE_UPLOAD_DIR,
       NODE_ENV: 'test',
     },
     // server.js 의 cwd 는 루트여야 함(정적 파일/상대경로). config 가 test/e2e 에 있어도

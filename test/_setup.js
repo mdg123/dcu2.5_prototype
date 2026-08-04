@@ -27,6 +27,7 @@ const REAL_DB = path.join(__dirname, '..', 'data', 'dacheum.db');
 
 // 정리 대상 임시 파일 목록 + 열린 핸들 (테스트 종료 시 close 후 best-effort 삭제)
 const _tempFiles = [];
+const _tempDirs = [];    // 업로드 산출물 격리 디렉터리 (exit 시 통째로 삭제)
 const _openHandles = []; // openTestDb()가 연 핸들 (exit 시 close 해야 Windows 잠금 해제)
 let _installedExitHook = false;
 
@@ -48,6 +49,10 @@ function _installExitCleanup() {
       for (const ext of ['', '-wal', '-shm', '-journal']) {
         try { fs.existsSync(f + ext) && fs.unlinkSync(f + ext); } catch (_) { /* EBUSY 무시 */ }
       }
+    }
+    // 4) 업로드 산출물 임시 디렉터리 삭제 (남아도 OS 가 정리 — best effort)
+    for (const d of _tempDirs) {
+      try { fs.existsSync(d) && fs.rmSync(d, { recursive: true, force: true }); } catch (_) {}
     }
   });
 }
@@ -106,6 +111,19 @@ function setupTestDb() {
   _copyDbSync(SRC, tmp);
   process.env.DB_PATH = tmp;
   _tempFiles.push(tmp);
+
+  // ★ [W4] 업로드 산출물도 격리한다.
+  //   DB 만 사본으로 돌리고 PDF 는 정본 uploads/portfolio-reports 에 쓰고 있었다 →
+  //   테스트를 돌릴 때마다 3 개씩 쌓여 1000+ 개의 "정본 DB 미참조 고아 PDF" 가 남았다.
+  //   db/growth-extended.js reportsDirFor() 가 호출 시점에 이 env 를 읽는다(미설정 시 평시 경로).
+  //   ※ 여러 테스트 파일이 각각 setupTestDb() 를 호출하지만 프로세스가 다르므로 충돌 없음.
+  if (!process.env.PORTFOLIO_REPORT_DIR) {
+    const upl = path.join(os.tmpdir(), `dacheum_test_uploads_${process.pid}_${Date.now()}`);
+    fs.mkdirSync(upl, { recursive: true });
+    process.env.PORTFOLIO_REPORT_DIR = upl;
+    _tempDirs.push(upl);
+  }
+
   _installExitCleanup();
   return tmp;
 }

@@ -548,6 +548,7 @@
 </div>
 
 <script src="/js/common-nav.js"></script>
+<script src="/js/access-denied.js"></script>
 <script>
 (function() {
   'use strict';
@@ -749,6 +750,13 @@
     document.getElementById('emptyState').style.display = 'none';
     try {
       const res = await fetchWithAuth(`/api/growth/report/class/${classId}`);
+      // 403 은 "실패"가 아니라 "권한 없음" — 교사용 화면을 감추고 안내로 대체한다
+      if (window.DacheumAccess && DacheumAccess.denied(res, {
+        what: '이 학급의 학습분석',
+        who: '이 학급을 맡은 선생님',
+        backHref: '/growth/',
+        backLabel: '성장기록 홈으로 가기'
+      })) return;
       const data = await res.json();
       if (!data.success) { console.error('데이터 로드 실패:', data.message); return; }
       renderDashboard(data);
@@ -762,6 +770,13 @@
     document.getElementById('emptyState').style.display = 'none';
     try {
       const res = await fetchWithAuth(`/api/growth/report/class/${classId}?startDate=${startDate}&endDate=${endDate}`);
+      // 403 은 "실패"가 아니라 "권한 없음" — 교사용 화면을 감추고 안내로 대체한다
+      if (window.DacheumAccess && DacheumAccess.denied(res, {
+        what: '이 학급의 학습분석',
+        who: '이 학급을 맡은 선생님',
+        backHref: '/growth/',
+        backLabel: '성장기록 홈으로 가기'
+      })) return;
       const data = await res.json();
       if (!data.success) { console.error('데이터 로드 실패:', data.message); return; }
       renderDashboard(data);
