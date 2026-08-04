@@ -11,6 +11,10 @@ const supplement = require('../db/lrs-supplement');
 const { rebuildAllAggregates } = require('../db/lrs-aggregate');
 const { logLearningActivity } = require('../db/learning-log-helper');
 const { LRS_CONFIG } = require('../lib/lrs-config');
+// 열람 권한 판정 SSOT (lib/auth/can-view-user.js) — canViewUser·canViewClass 실체.
+//   W1(3c08d2a)에서 이 파일 안에 만든 소속 검증을 W3 에서 lib 로 승격했다.
+//   routes/growth.js 가 동일 판정을 필요로 했고(무검사 구멍 15곳), 복사본은 반드시 드리프트한다.
+const canViewUserLib = require('../lib/auth/can-view-user');
 // 점수 스케일·모집단 정규화 SSOT (lib/lrs/score-scale.js). 인라인 재정의 금지.
 const {
   SCORED_TYPES, SCORED_TYPES_SQL_LIST, normScoreExpr, scoredWhere, normScore,
@@ -275,66 +279,15 @@ function sendInvalidPeriod(res, reason) {
 //     **단일 EXISTS 쿼리 1회**로 판정하고, prepared statement 는 모듈 레벨에 캐시한다.
 // ─────────────────────────────────────────────────────────────────────────────
 
-// prepared statement 캐시(모듈 로드 시점엔 CLASS_TEACHER_ROLES 가 TDZ 라 lazy 초기화).
-let _sharedClassStmt = null;
-let _sameSchoolStmt = null;
-
-/**
- * 교사 ↔ 학생 소속 공유 판정 — "내가 교사-티어인 클래스에 그 학생이 active 멤버인가".
- *   owner_id 폴백 포함: 클래스 소유자인데 class_members 소유자 행이 유실된 경우에도
- *   자기 반 학생은 봐야 한다(과차단 방지). 어느 쪽이든 "내 클래스"라는 사실은 동일.
- *   ※ 클래스 status 는 필터하지 않는다 — canViewClass 와 동일 기준 유지(정책 발명 금지).
- * @returns {boolean}
- */
-function _teacherSharesClassWith(teacherId, studentId) {
-  if (!_sharedClassStmt) {
-    const ph = [...CLASS_TEACHER_ROLES].map(() => '?').join(',');
-    _sharedClassStmt = db.prepare(`
-      SELECT 1
-      FROM class_members s
-      LEFT JOIN classes c ON c.id = s.class_id
-      WHERE s.user_id = ? AND s.status = 'active'
-        AND (
-          c.owner_id = ?
-          OR EXISTS (
-            SELECT 1 FROM class_members t
-            WHERE t.class_id = s.class_id AND t.user_id = ?
-              AND t.status = 'active' AND t.role IN (${ph})
-          )
-        )
-      LIMIT 1
-    `);
-  }
-  try {
-    return !!_sharedClassStmt.get(studentId, teacherId, teacherId, ...CLASS_TEACHER_ROLES);
-  } catch (_) { return false; }
-}
-
-/** principal 스코프 판정 — 대상이 자기 school_name 학교 소속인가(정확 일치). */
-function _principalSameSchool(user, targetUserId) {
-  const school = user.school_name ? String(user.school_name).trim() : '';
-  if (!school) return false;
-  if (!_sameSchoolStmt) {
-    _sameSchoolStmt = db.prepare(
-      "SELECT 1 FROM users WHERE id = ? AND TRIM(COALESCE(school_name,'')) = ? LIMIT 1"
-    );
-  }
-  try {
-    return !!_sameSchoolStmt.get(targetUserId, school);
-  } catch (_) { return false; }
-}
+//   ★ [W3 — 2026-08-04] 판정 실체는 lib/auth/can-view-user.js(SSOT) 로 이관했다.
+//     이유: routes/growth.js 에 완전히 동일한 구멍이 남아 있었는데(학부모 리포트·감정
+//     모니터는 검사 자체가 없었다), 판정 로직을 복사하면 사이트별 사본이 되어 드리프트한다.
+//     여기서는 이름만 유지해 아래 라우트들의 호출부를 그대로 둔다. 인라인 재정의 금지.
+const _teacherSharesClassWith = canViewUserLib.teacherSharesClassWith;
+const _principalSameSchool = canViewUserLib.principalSameSchool;
 
 /** 역할 가드: 본인 / admin / 담당 교사(소속 검증) / principal(자기 학교)만 허용 */
-function canViewUser(req, targetUserId) {
-  if (!req.user) return false;
-  if (!Number.isFinite(targetUserId)) return false;   // NaN/undefined id → 거부(무조건 열림 방지)
-  if (req.user.id === targetUserId) return true;
-  const role = req.user.role;
-  if (role === 'admin') return true;
-  if (role === 'teacher') return _teacherSharesClassWith(req.user.id, targetUserId);
-  if (role === 'principal') return _principalSameSchool(req.user, targetUserId);
-  return false;
-}
+const canViewUser = canViewUserLib.canViewUser;
 
 // ── 학급(peer) 집합 공용 헬퍼 — P1-3 스펙 §4-2 ────────────────────────────
 // 표본 가드: 반 학생 수가 이 미만이면 익명 집계여도 비교 비노출(개인정보/신뢰도).
@@ -630,16 +583,10 @@ function resolveMembershipScopeFilter(req, colAlias) {
  *     모든 반 통과를 허용 → 반 경계를 넘어 개인 성취 데이터 노출. 폴백 제거.)
  *   co_teacher 티어 정의는 마일리지 랭킹 제외(class-mileage.js, lrs.js mileage)와 동일하게 통일.
  */
-const CLASS_TEACHER_ROLES = new Set(['owner', 'teacher', 'co_teacher']);
-function canViewClass(req, classId) {
-  if (!req.user) return false;
-  if (req.user.role === 'admin') return true;
-  try {
-    const role = classDb.getMemberRole(classId, req.user.id);
-    if (CLASS_TEACHER_ROLES.has(role)) return true;
-  } catch (_) {}
-  return false;
-}
+//   ★ [W3 — 2026-08-04] 실체는 lib/auth/can-view-user.js(SSOT). routes/growth.js 가
+//     같은 판정을 필요로 했고(무검사였던 emotion-monitor/:classId 등), 복사본은 드리프트한다.
+const CLASS_TEACHER_ROLES = canViewUserLib.CLASS_TEACHER_ROLES;
+const canViewClass = canViewUserLib.canViewClass;
 
 // ─────────────────────────────────────────────────────────
 // [활동 현황 F / 성취0 제외 C·A] 공통 유틸 (교사분석탭 재편 기획서 §6.2)

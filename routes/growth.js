@@ -14,6 +14,17 @@ const buildTeaching = require('../lib/xapi/builders/teaching');
 const buildNavigation = require('../lib/xapi/builders/navigation');
 const xapiSpool = require('../lib/xapi/spool');
 const { generatePortfolioReport } = require('../lib/portfolio-pdf');
+// ── 열람 권한 판정 SSOT (lib/auth/can-view-user.js) ─────────────────────────────
+//   [W3 P0 보안 fix — 2026-08-04] 이 파일에는 W1(3c08d2a)이 routes/lrs.js 에서 막은 것과
+//   **동일 부류의 구멍**이 남아 있었다(전수 감사 실측, 로컬 3100):
+//     · GET /report/parent/:studentId   — 검사 자체가 없음. 아무 로그인 사용자나 남의 자녀
+//       성장 리포트를 실명("이학생")·정서발달 점수까지 200 으로 읽었다.
+//     · GET /emotion-monitor/:classId   — 검사 자체가 없음. 학생 계정으로 학급 전원의 감정·
+//       자유서술 사유·"주의 필요 학생"(3일 연속 부정 감정) 실명 목록이 200 으로 나왔다.
+//     · report/student·area·observations·daily-set·daily-item·portfolio(userId=)·reading(studentId=)
+//       ·report/class(2종) — 역할만 보고 소속을 안 봐서 **무관 교사(타 학교)** 가 전부 200.
+//   정책을 새로 만들지 않고 W1 의 canViewUser / canViewClass 를 그대로 이식한다.
+const { canViewUser, canViewClass, isParentOf } = require('../lib/auth/can-view-user');
 
 // PDF 업로드용 multer (메모리 저장 — DB는 file_path 만 보유)
 const pdfUpload = multer({
@@ -65,16 +76,62 @@ const eventThumbUpload = multer({
   }
 });
 
-// 학생-교사 동일 클래스 검사 (보고서 권한)
-function teacherSharesClassWithStudent(teacherId, studentId) {
-  const db = require('../db/index');
-  const row = db.prepare(`
-    SELECT 1 FROM class_members tm
-    JOIN class_members sm ON sm.class_id = tm.class_id
-    WHERE tm.user_id = ? AND tm.role = 'owner' AND sm.user_id = ? AND sm.status = 'active'
-    LIMIT 1
-  `).get(teacherId, studentId);
-  return !!row;
+// (구 teacherSharesClassWithStudent 는 제거됐다. 실체는 lib/auth/can-view-user.js(SSOT).
+//  과거 이 자리의 사본은 tm.role='owner' 만 인정해 공동담임(teacher·co_teacher)을 과차단했고
+//  classes.owner_id 폴백도 없었다. 이제 모든 호출부가 canViewUser/canAccessStudentReport 를
+//  거치므로 별도 별칭이 필요 없다 — 별칭을 남겨두면 "손으로 다시 쓴 판정"이 또 자란다(B2 원인).)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 공통 가드 3종 — 라우트마다 손으로 role 을 비교하다 빠뜨린 것이 이번 사고의 원인이다.
+//   denyUser/denyClass 는 "막혔으면 응답을 보내고 true" 를 돌려주므로 호출부는
+//   `if (denyUser(req, res, id)) return;` 한 줄이면 된다(누락하기 어려운 형태).
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** 학생 단위 열람 가드. 본인/admin/담당 교사/principal(자기 학교) 외 403. */
+function denyUser(req, res, targetUserId) {
+  if (canViewUser(req, targetUserId)) return false;
+  res.status(403).json({ success: false, message: '접근 권한이 없습니다.' });
+  return true;
+}
+
+/** 클래스 단위 열람 가드. admin/그 클래스 교사-티어 멤버 외 403. */
+function denyClass(req, res, classId) {
+  if (canViewClass(req, classId)) return false;
+  res.status(403).json({ success: false, message: '담당 학급만 조회할 수 있습니다.' });
+  return true;
+}
+
+/**
+ * 학생 단위 "쓰기/교사 전용" 가드 — admin 또는 그 학생의 담당 교사만.
+ *   학생 본인·학부모·principal 은 제외한다(공개 설정 변경·타 학생 정오답 열람 등
+ *   교사 업무 행위. 기존 라우트의 `teacher||admin` 게이트를 소속 검증만 덧대 유지).
+ */
+/**
+ * ?userId= / ?studentId= 로 "남의 데이터"를 요청했을 때의 대상 해석 + 가드.
+ *   파라미터가 없거나 본인이면 본인 id. 남의 id 면 canViewUser 를 통과해야만 허용한다.
+ *   ※ 과거에는 role 이 teacher/admin 이기만 하면 파라미터를 그대로 신뢰했다 →
+ *     무관 교사(타 학교)가 임의 학생의 포트폴리오·역량·통계·목표·독서기록을
+ *     **본인이 본 것과 바이트 동일하게** 열람했다(2026-08-04 실측).
+ * @returns {number|null} null 이면 이미 403 을 보냈으므로 호출부는 즉시 return 할 것.
+ */
+function resolveTargetUserId(req, res, key) {
+  const raw = req.query ? req.query[key] : null;
+  if (raw == null || raw === '') return req.user.id;
+  const id = parseInt(raw, 10);
+  if (!Number.isFinite(id) || id === req.user.id) return req.user.id;
+  if (!canViewUser(req, id)) {
+    res.status(403).json({ success: false, message: '접근 권한이 없습니다.' });
+    return null;
+  }
+  return id;
+}
+
+function denyTeacherOfStudent(req, res, studentId) {
+  const role = req.user && req.user.role;
+  if (role === 'admin') return false;
+  if (role === 'teacher' && canViewUser(req, studentId)) return false;
+  res.status(403).json({ success: false, message: '해당 학생의 담당 교사만 접근할 수 있습니다.' });
+  return true;
 }
 
 // ===== 포트폴리오 =====
@@ -921,9 +978,8 @@ router.post('/events/:id/submit', requireAuth, (req, res) => {
 // BUG-3: 학년/학기/과목/유형/기간/학교급 필터 동작
 router.get('/portfolio/items', requireAuth, (req, res) => {
   try {
-    const userId = (req.user.role === 'teacher' || req.user.role === 'admin') && req.query.userId
-      ? parseInt(req.query.userId)
-      : req.user.id;
+    const userId = resolveTargetUserId(req, res, 'userId');
+    if (userId === null) return;
     const opts = {
       page: parseInt(req.query.page) || 1,
       limit: parseInt(req.query.limit) || 20,
@@ -964,9 +1020,8 @@ router.post('/portfolio/items', requireAuth, (req, res) => {
 // GET /api/growth/portfolio/competency-stats — 6대 핵심역량 (BUG-4)
 router.get('/portfolio/competency-stats', requireAuth, (req, res) => {
   try {
-    const userId = (req.user.role === 'teacher' || req.user.role === 'admin') && req.query.userId
-      ? parseInt(req.query.userId)
-      : req.user.id;
+    const userId = resolveTargetUserId(req, res, 'userId');
+    if (userId === null) return;
     const competencies = growthExtDb.getCompetencyStats(userId, {
       startDate: req.query.from || req.query.startDate || null,
       endDate: req.query.to || req.query.endDate || null
@@ -980,12 +1035,11 @@ router.get('/portfolio/competency-stats', requireAuth, (req, res) => {
 
 // ===== PDF 보고서 (포트폴리오) =====
 
-// 권한 helper: 본인 / 같은 클래스 교사 / admin
+// 권한 helper: 본인 / 같은 클래스 교사 / admin / principal(자기 학교)
+//   [W3] 판정을 canViewUser(SSOT)로 통일. 과거 사본은 principal 을 누락해 교장이 자기 학교
+//   학생의 리포트 드릴다운·PDF 만 403 이었다(LRS 는 200) — 같은 데이터의 화면별 불일치.
 function canAccessStudentReport(req, studentId) {
-  if (req.user.role === 'admin') return true;
-  if (req.user.id === studentId) return true;
-  if (req.user.role === 'teacher' && teacherSharesClassWithStudent(req.user.id, studentId)) return true;
-  return false;
+  return canViewUser(req, studentId);
 }
 
 // GET /api/growth/portfolios/:studentId/report-data
@@ -1186,11 +1240,14 @@ router.get('/portfolios/report/:id/download', requireAuth, (req, res) => {
     const row = growthExtDb.getPortfolioReportById(reportId);
     if (!row) return res.status(404).json({ success: false, message: '보고서를 찾을 수 없습니다.' });
 
-    const owner = row.user_id;
-    const isOwner = req.user.id === owner;
-    const isAdmin = req.user.role === 'admin';
-    const isTeacherWithAccess = req.user.role === 'teacher' && teacherSharesClassWithStudent(req.user.id, owner);
-    if (!isOwner && !isAdmin && !isTeacherWithAccess) {
+    // ★ [W3-B2] 생성(POST /portfolios/report)·화면조회(GET .../report-data)는
+    //   canAccessStudentReport 로 통일돼 principal 을 포함하는데, 이 다운로드만 판정을
+    //   손으로 다시 써서 principal 을 빠뜨렸다 → 교장이 PDF 를 **만들 수는 있는데 받을 수 없고**
+    //   uploads/ 에 고아 파일만 쌓였다(격리 사본 실측: POST 201 / GET download 403).
+    //   pdf-report-permission.test.js 가 "결함 #7"로 이미 박제한 모순(그땐 담임이 피해자)의
+    //   재발이므로, 자리를 옮기지 말고 **세 라우트를 같은 판정 하나로** 묶는다.
+    //   권한 확대가 아니다 — 교장은 이미 같은 학생의 같은 데이터를 화면으로 볼 수 있다.
+    if (!canAccessStudentReport(req, row.user_id)) {
       return res.status(403).json({ success: false, message: '접근 권한이 없습니다.' });
     }
 
@@ -1230,9 +1287,10 @@ router.get('/portfolio/items/:id', requireAuth, (req, res) => {
   try {
     const detail = growthExtDb.getPortfolioItemDetail(parseInt(req.params.id));
     if (!detail) return res.status(404).json({ success: false, message: '항목을 찾을 수 없습니다.' });
-    if (req.user.role === 'student' && detail.item && detail.item.user_id !== req.user.id) {
-      return res.status(403).json({ success: false, message: '접근 권한이 없습니다.' });
-    }
+    // [W3] 구: 학생만 차단 → 소속 무관 교사가 임의 학생의 활동 상세를 열람.
+    //   소유자 판정이 가능한 경우 canViewUser 로 통일(소유자 미상이면 기존대로 통과).
+    const ownerId = detail.item && Number.isFinite(detail.item.user_id) ? detail.item.user_id : null;
+    if (ownerId !== null && denyUser(req, res, ownerId)) return;
     res.json({ success: true, ...detail });
   } catch (err) { res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' }); }
 });
@@ -1261,9 +1319,8 @@ router.put('/portfolio/items/:id/privacy', requireAuth, (req, res) => {
 
 router.get('/portfolio/stats', requireAuth, (req, res) => {
   try {
-    const userId = (req.user.role === 'teacher' || req.user.role === 'admin') && req.query.userId
-      ? parseInt(req.query.userId)
-      : req.user.id;
+    const userId = resolveTargetUserId(req, res, 'userId');
+    if (userId === null) return;
     const stats = growthExtDb.getPortfolioStats(userId);
     res.json({ success: true, ...stats });
   } catch (err) { res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' }); }
@@ -1271,9 +1328,8 @@ router.get('/portfolio/stats', requireAuth, (req, res) => {
 
 router.get('/portfolio/goals', requireAuth, (req, res) => {
   try {
-    const userId = (req.user.role === 'teacher' || req.user.role === 'admin') && req.query.userId
-      ? parseInt(req.query.userId)
-      : req.user.id;
+    const userId = resolveTargetUserId(req, res, 'userId');
+    if (userId === null) return;
     const goals = growthExtDb.getGrowthGoals(userId);
     res.json({ success: true, goals });
   } catch (err) { res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' }); }
@@ -1312,11 +1368,11 @@ router.delete('/portfolio/goals/:id', requireAuth, (req, res) => {
 
 router.get('/report/class/:classId', requireAuth, (req, res) => {
   try {
-    // 교사/관리자만 클래스 대시보드 접근 가능
-    if (req.user.role !== 'teacher' && req.user.role !== 'admin') {
-      return res.status(403).json({ success: false, message: '교사만 접근 가능합니다.' });
-    }
-    const data = growthExtDb.getClassDashboard(parseInt(req.params.classId), req.user.id, req.query);
+    // [W3] 구: "교사면 통과" → 소속 무관 교사가 남의 학급 성장 대시보드(학생 명단·점수)를
+    //   200 으로 열람. canViewClass(admin || 그 클래스 교사-티어 멤버)로 교체.
+    const classId = parseInt(req.params.classId);
+    if (denyClass(req, res, classId)) return;
+    const data = growthExtDb.getClassDashboard(classId, req.user.id, req.query);
     res.json({ success: true, ...data });
   } catch (err) { console.error('[GROWTH] class dashboard error:', err); res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' }); }
 });
@@ -1324,11 +1380,11 @@ router.get('/report/class/:classId', requireAuth, (req, res) => {
 // 교사: 특정 학생의 오늘의학습 항목 정오답 결과 조회
 router.get('/report/student/:studentId/daily-item/:itemId/result', requireAuth, (req, res) => {
   try {
-    if (req.user.role !== 'teacher' && req.user.role !== 'admin') {
-      return res.status(403).json({ success: false, message: '교사만 접근 가능합니다.' });
-    }
-    const selfLearnDb = require('../db/self-learn-extended');
     const studentId = parseInt(req.params.studentId);
+    // [W3] 구: "교사면 통과" → 소속 무관 교사가 임의 학생의 문항별 정오답을 열람.
+    //   교사 전용 성격은 유지하고(학생 본인은 자기 화면에서 확인) 소속 검증만 덧댄다.
+    if (denyTeacherOfStudent(req, res, studentId)) return;
+    const selfLearnDb = require('../db/self-learn-extended');
     const itemId = parseInt(req.params.itemId);
     const result = selfLearnDb.getDailyItemResult(itemId, studentId);
     if (!result) return res.status(404).json({ success: false, message: '항목을 찾을 수 없습니다.' });
@@ -1342,10 +1398,8 @@ router.get('/report/student/:studentId/daily-item/:itemId/result', requireAuth, 
 // 교사: 특정 학생의 특정 날짜 오늘의학습 진행 항목 목록 (set 단위)
 router.get('/report/student/:studentId/daily-set/:setId/items', requireAuth, (req, res) => {
   try {
-    if (req.user.role !== 'teacher' && req.user.role !== 'admin') {
-      return res.status(403).json({ success: false, message: '교사만 접근 가능합니다.' });
-    }
     const studentId = parseInt(req.params.studentId);
+    if (denyTeacherOfStudent(req, res, studentId)) return;   // [W3] 소속 검증 추가
     const setId = parseInt(req.params.setId);
     const db = require('../db/index');
     const items = db.prepare(`
@@ -1368,11 +1422,10 @@ router.get('/report/student/:studentId/daily-set/:setId/items', requireAuth, (re
 // 클래스별 오늘의학습 상세 (날짜별 학생 참여 현황)
 router.get('/report/class/:classId/daily-learning', requireAuth, (req, res) => {
   try {
-    if (req.user.role !== 'teacher' && req.user.role !== 'admin') {
-      return res.status(403).json({ success: false, message: '교사만 접근 가능합니다.' });
-    }
+    const classId = parseInt(req.params.classId);
+    if (denyClass(req, res, classId)) return;   // [W3] 구: "교사면 통과" → 소속 검증 추가
     const { period, startDate, endDate } = req.query;
-    const data = growthExtDb.getClassDailyLearning(parseInt(req.params.classId), { period, startDate, endDate });
+    const data = growthExtDb.getClassDailyLearning(classId, { period, startDate, endDate });
     res.json({ success: true, ...data });
   } catch (err) {
     console.error('[GROWTH] daily-learning error:', err);
@@ -1383,10 +1436,9 @@ router.get('/report/class/:classId/daily-learning', requireAuth, (req, res) => {
 router.get('/report/student/:studentId', requireAuth, (req, res) => {
   try {
     const studentId = parseInt(req.params.studentId);
-    // 학생은 자신의 리포트만 조회 가능
-    if (req.user.role === 'student' && req.user.id !== studentId) {
-      return res.status(403).json({ success: false, message: '본인의 리포트만 조회 가능합니다.' });
-    }
+    // [W3] 과거엔 "학생이 남의 것을 보는가"만 봤다 → 소속 무관 교사·학부모가 전부 200.
+    //   본인/담당 교사/admin/principal(자기 학교)로 통일(canViewUser SSOT).
+    if (denyUser(req, res, studentId)) return;
     const report = growthExtDb.getStudentReport(studentId, req.query);
     res.json({ success: true, report });
   } catch (err) { res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' }); }
@@ -1395,9 +1447,7 @@ router.get('/report/student/:studentId', requireAuth, (req, res) => {
 router.get('/report/student/:studentId/area/:areaName', requireAuth, (req, res) => {
   try {
     const studentId = parseInt(req.params.studentId);
-    if (req.user.role === 'student' && req.user.id !== studentId) {
-      return res.status(403).json({ success: false, message: '본인의 리포트만 조회 가능합니다.' });
-    }
+    if (denyUser(req, res, studentId)) return;   // [W3] 소속 검증 추가 (구: 학생만 차단)
     const data = growthExtDb.getStudentReportArea(studentId, req.params.areaName, req.query);
     res.json({ success: true, data });
   } catch (err) { res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' }); }
@@ -1436,11 +1486,21 @@ router.get('/report/student/:studentId/detail', requireAuth, (req, res) => {
   }
 });
 
+// POST /api/growth/report/observation — 교사 관찰(생활지도 서술) 작성
+//   ★ [W3-B1] 같은 자원의 **읽기는 막고 쓰기는 열어둔** 비대칭이 남아 있었다(감리 침투 성공).
+//     게이트가 `teacher||admin` 뿐이라 req.body.studentId 를 그대로 신뢰했다 →
+//     청주북중 교사(mteacher1)가 금성초 student1 앞으로 관찰 기록을 INSERT 했고
+//     (teacher_observations 14→15행), 그 서술이 **student1 본인과 담임 teacher1 화면에
+//     모르는 교사 명의로 그대로 렌더**됐다(격리 사본 실측).
+//     읽기(GET /report/observations/:id)만 보고 감사한 것이 누락 원인 — 쓰기도 동일 기준으로.
+//   정책: admin 또는 그 학생의 담당 교사만(GET 과 동일한 소속 판정).
 router.post('/report/observation', requireAuth, (req, res) => {
   try {
-    if (req.user.role !== 'teacher' && req.user.role !== 'admin') {
-      return res.status(403).json({ success: false, message: '교사만 관찰 기록을 작성할 수 있습니다.' });
+    const studentId = parseInt(req.body && req.body.studentId, 10);
+    if (!Number.isFinite(studentId)) {
+      return res.status(400).json({ success: false, message: '학생을 지정해 주세요.' });
     }
+    if (denyTeacherOfStudent(req, res, studentId)) return;
     const result = growthExtDb.createObservation(req.user.id, req.body);
     res.json({ success: true, ...result });
   } catch (err) { res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' }); }
@@ -1449,24 +1509,48 @@ router.post('/report/observation', requireAuth, (req, res) => {
 router.get('/report/observations/:studentId', requireAuth, (req, res) => {
   try {
     const studentId = parseInt(req.params.studentId);
-    if (req.user.role === 'student' && req.user.id !== studentId) {
-      return res.status(403).json({ success: false, message: '본인의 기록만 조회 가능합니다.' });
-    }
+    // [W3] 교사 관찰 기록은 생활지도 서술이라 민감도가 높다. 소속 검증 추가(구: 학생만 차단).
+    if (denyUser(req, res, studentId)) return;
     const observations = growthExtDb.getObservations(studentId, req.query.classId ? parseInt(req.query.classId) : null);
     res.json({ success: true, observations });
   } catch (err) { res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' }); }
 });
 
+// PUT /api/growth/report/visibility/:studentId — 학생에게 리포트 공개 여부 설정(교사 업무)
+//   ★ [W3 P0] **권한 검사 자체가 없던 쓰기 라우트**. 아무 로그인 사용자가 임의 학생의
+//     리포트 공개 설정(report_visibility)을 덮어쓸 수 있었다 — 학생이 자기 정서·성적
+//     영역을 스스로 숨기거나, 남의 반 교사가 남의 학급 설정을 뒤집을 수 있는 상태.
+//   정책: admin 또는 그 학생의 담당 교사만(FE 도 isTeacher 조건에서만 노출).
 router.put('/report/visibility/:studentId', requireAuth, (req, res) => {
   try {
-    growthExtDb.setReportVisibility(req.user.id, parseInt(req.params.studentId), req.body.classId || 0, req.body);
+    const studentId = parseInt(req.params.studentId);
+    if (!Number.isFinite(studentId)) {
+      return res.status(400).json({ success: false, message: '잘못된 요청입니다.' });
+    }
+    if (denyTeacherOfStudent(req, res, studentId)) return;
+    growthExtDb.setReportVisibility(req.user.id, studentId, req.body.classId || 0, req.body);
     res.json({ success: true });
   } catch (err) { res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' }); }
 });
 
+// GET /api/growth/report/parent/:studentId — 학부모 공개용 성장 리포트
+//   ★ [W3 P0] 이 라우트는 **권한 검사 자체가 없었다**. requireAuth 만 통과하면 임의의
+//     로그인 사용자(다른 반 학생 포함)가 남의 자녀 리포트를 실명·정서발달 점수·참여도까지
+//     200 으로 읽었다. 2026-08-04 실측: student2 세션 → /report/parent/3 → 200
+//     {"studentName":"이학생","areas":{"정서발달":{"score":77 ...}}}.
+//   정책: 본인 / 그 학생의 학부모(users.parent_id) / 담당 교사 / admin / principal(자기 학교).
+//     학부모는 canViewUser 가 거부하므로 isParentOf 관계 검증을 따로 얹는다
+//     (LRS /parent/:childId/digest 와 동일 기준 — 정책 재발명 아님).
 router.get('/report/parent/:studentId', requireAuth, (req, res) => {
   try {
-    const report = growthExtDb.getParentReport(parseInt(req.params.studentId));
+    const studentId = parseInt(req.params.studentId);
+    if (!Number.isFinite(studentId)) {
+      return res.status(400).json({ success: false, message: '잘못된 요청입니다.' });
+    }
+    if (!canViewUser(req, studentId) && !isParentOf(req.user.id, studentId)) {
+      return res.status(403).json({ success: false, message: '접근 권한이 없습니다.' });
+    }
+    const report = growthExtDb.getParentReport(studentId);
     res.json({ success: true, report });
   } catch (err) { res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' }); }
 });
@@ -1475,11 +1559,10 @@ router.get('/report/parent/:studentId', requireAuth, (req, res) => {
 
 router.get('/reading', requireAuth, (req, res) => {
   try {
-    // 교사/관리자가 studentId 파라미터로 학생 독서기록 조회 가능
-    let targetUserId = req.user.id;
-    if (req.query.studentId && (req.user.role === 'teacher' || req.user.role === 'admin')) {
-      targetUserId = parseInt(req.query.studentId);
-    }
+    // 담당 교사/관리자/교장(자기 학교)이 studentId 파라미터로 학생 독서기록 조회 가능.
+    //   [W3] 과거엔 role 만 보고 파라미터를 신뢰 → 무관 교사가 임의 학생 독서기록 열람.
+    const targetUserId = resolveTargetUserId(req, res, 'studentId');
+    if (targetUserId === null) return;
     const result = growthExtDb.getReadingLogs(targetUserId, req.query);
     res.json({ success: true, ...result });
   } catch (err) { res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' }); }
@@ -1659,10 +1742,18 @@ router.get('/emotion-history', requireAuth, (req, res) => {
 });
 
 // 교사용 학급 감정 모니터링 상세 데이터
+//   ★ [W3 P0] "교사용"이라는 주석만 있고 **권한 검사 자체가 없었다.** requireAuth 만 통과하면
+//     학생 계정으로도 학급 전원의 감정·자유서술 사유·"주의 필요 학생"(3일 연속 부정 감정)
+//     실명 목록이 200 으로 나왔다. 2026-08-04 실측(student2 세션, class 1, 3~6월 범위):
+//       alertStudents=[{"name":"한서윤",...},{"name":"정민재",...}]
+//       stairsData=[{"name":"이학생","emotion":"tired","reason":"피곤한 - 몸살..."} ...]
+//     이 화면의 데이터는 이 서비스에서 가장 민감한 축(정서·생활지도)이다.
+//   정책: canViewClass — admin 또는 그 학급의 교사-티어 멤버만. (FE 도 교사/관리자 전용 메뉴)
 router.get('/emotion-monitor/:classId', requireAuth, (req, res) => {
   try {
     const db = require('../db/index');
     const classId = parseInt(req.params.classId);
+    if (denyClass(req, res, classId)) return;
     const today = new Date().toISOString().slice(0, 10);
     const positiveEmotions = ['happy', 'excited', 'good', 'great', 'calm'];
 
