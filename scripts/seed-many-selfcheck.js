@@ -1,3 +1,4 @@
+require('./_stamp-on-write'); // 데이터 변형 자동 표식 — 하네스 재검증 강제(2026-07-31 사고)
 // 클래스 2에 20개 수업 + 셀프체크 응답 시드 (이해도/집중도 스크롤 검증)
 const Database = require('better-sqlite3');
 const db = new Database('./data/dacheum.db');

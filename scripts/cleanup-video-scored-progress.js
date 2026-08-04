@@ -1,3 +1,4 @@
+require('./_stamp-on-write'); // 데이터 변형 자동 표식 — 하네스 재검증 강제(2026-07-31 사고)
 // scripts/cleanup-video-scored-progress.js
 // 영상·자료 시청 항목 완료 데이터 중 score가 들어있는 행을 NULL로 정리.
 // 정책: 시청형 콘텐츠(video/document/image/external/audio)는 점수 없음.

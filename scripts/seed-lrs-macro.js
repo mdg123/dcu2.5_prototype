@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+require('./_stamp-on-write'); // 데이터 변형 자동 표식 — 하네스 재검증 강제(2026-07-31 사고)
 /**
  * seed-lrs-macro.js — LRS 관리자 거시분석용 격리 더미 시드 (중형 B)
  *

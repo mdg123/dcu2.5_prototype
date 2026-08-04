@@ -1,3 +1,4 @@
+require('./_stamp-on-write'); // 데이터 변형 자동 표식 — 하네스 재검증 강제(2026-07-31 사고)
 // Unit test for judgeQuestionAnswer / recordProblemAttempt — 진단 v3 채점 인덱스 정합(2026-06-08)
 //
 // 새 규약(통일): 객관식은 선택 보기 텍스트(answer) + 0-based answerIndex 를 함께 전송.

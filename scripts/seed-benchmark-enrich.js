@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+require('./_stamp-on-write'); // 데이터 변형 자동 표식 — 하네스 재검증 강제(2026-07-31 사고)
 /**
  * seed-benchmark-enrich.js — LRS 도 전체 벤치마크(성취기준 단위) 집중 재시드 (Phase 0)
  *

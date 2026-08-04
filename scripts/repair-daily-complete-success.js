@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+require('./_stamp-on-write'); // 데이터 변형 자동 표식 — 하네스 재검증 강제(2026-07-31 사고)
 // scripts/repair-daily-complete-success.js
 // ─────────────────────────────────────────────────────────────────────────────
 // [LRS 학생 전수감사 §1 복구] 이미 쌓인 daily_complete 로그의 result_success=NULL 손상 교정.
@@ -55,16 +56,29 @@ const PASS_THRESHOLD = 0.6;
 function log(...a) { console.log('[repair-daily-success]', ...a); }
 
 // ── 백업 테이블 보장 ──
-db.prepare(`
-  CREATE TABLE IF NOT EXISTS _daily_success_repair_backup (
-    log_id INTEGER PRIMARY KEY,
-    old_result_success INTEGER,
-    old_result_score REAL,
-    old_correct_count INTEGER,
-    old_total_items INTEGER,
-    repaired_at TEXT DEFAULT CURRENT_TIMESTAMP
-  )
-`).run();
+// ⚠ 반드시 "실제 적용 직전"에만 호출할 것. 모듈 최상위에서 무조건 실행하면
+//   --dry-run 에서도 CREATE TABLE 이 나가 정본 DB 에 쓰기가 발생한다.
+//   그 쓰기는 scripts/_stamp-on-write.js 후킹에 잡혀 **DRY-RUN 인데 "데이터 변형" 표식**이
+//   남고, 하네스가 미검증으로 붉어진다(거짓 경보 → 경보 자체가 무시당하게 됨).
+function ensureBackupTable() {
+  db.prepare(`
+    CREATE TABLE IF NOT EXISTS _daily_success_repair_backup (
+      log_id INTEGER PRIMARY KEY,
+      old_result_success INTEGER,
+      old_result_score REAL,
+      old_correct_count INTEGER,
+      old_total_items INTEGER,
+      repaired_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )
+  `).run();
+}
+
+/** 백업 테이블 존재 여부 (읽기 전용 — DRY-RUN 안전) */
+function backupTableExists() {
+  return !!db.prepare(
+    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='_daily_success_repair_backup'"
+  ).get();
+}
 
 // ── 영향받은 성취기준 (user_id, achievement_code) 를 learning_logs 로부터 전량 재계산 ──
 //   평가신호(result_score 또는 result_success 비-NULL) 있는 로그만 시도로 집계 → 도달률 역효과 제거.
@@ -116,6 +130,8 @@ function rebuildAchievementStats(pairs) {
 
 // ── REVERT: 백업 기준 원복 ──
 if (REVERT) {
+  // 테이블 존재 확인을 읽기 전용으로 먼저 — 없으면 CREATE 하지 않고 그대로 종료(쓰기 0).
+  if (!backupTableExists()) { log('되돌릴 백업이 없습니다(백업 테이블 미생성).'); process.exit(0); }
   const backups = db.prepare('SELECT * FROM _daily_success_repair_backup').all();
   if (!backups.length) { log('되돌릴 백업이 없습니다.'); process.exit(0); }
   log(`원복 대상 ${backups.length}건.`);
@@ -196,6 +212,8 @@ if (plan.length) {
 
 if (DRY_RUN) { log('[dry-run] 실제 변경 안 함. --revert 없이 재실행하면 적용됩니다.'); process.exit(0); }
 if (!plan.length) { log('교정할 손상 로그가 없습니다(멱등).'); process.exit(0); }
+
+ensureBackupTable(); // ← 실제 적용이 확정된 뒤에만 생성 (DRY-RUN 경로는 여기 도달 못 함)
 
 const affectedPairs = new Set();
 const apply = db.transaction(() => {

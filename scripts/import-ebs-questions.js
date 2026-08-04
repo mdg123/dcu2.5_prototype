@@ -1,3 +1,4 @@
+require('./_stamp-on-write'); // 데이터 변형 자동 표식 — 하네스 재검증 강제(2026-07-31 사고)
 /**
  * EBS 문항 → 채움콘텐츠 (공개·승인됨) → AI 맞춤학습(node_contents) 매핑 import
  *

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+require('./_stamp-on-write'); // 데이터 변형 자동 표식 — 하네스 재검증 강제(2026-07-31 사고)
 /**
  * seed-demo-daily.js — "오늘의 학습 도 비교"(daily-benchmark) 우리 반 라인 최근기간 보강 (데모)
  *

@@ -32,6 +32,16 @@ initCurriculum();
 const { initSchema } = require('./db/schema');
 initSchema();
 
+// ── 하네스 검증 스탬프 고지 (2026-07-31 사고 재발 방지) ──────────────────────
+// 정본 DB 가 재집계·시드 스크립트로 바뀐 뒤 전체 하네스를 돌리지 않았다면 기동 시 알린다.
+// GCP 실서버에서 원격으로 재집계한 경우, 배포 절차의 pm2 restart 가 곧 이 배너를 띄운다
+// (표식은 DB 안에 있으므로 로컬/원격 구분 없이 따라다닌다).
+try {
+  const _hs = require('./scripts/harness-stamp');
+  const _stamp = _hs.read(require('./db/index'));
+  if (_hs.isStale(_stamp)) console.warn(_hs.staleMessage(_stamp, require('./db/index').name));
+} catch (e) { /* 스탬프 조회 실패는 서버 기동을 막지 않는다 */ }
+
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);

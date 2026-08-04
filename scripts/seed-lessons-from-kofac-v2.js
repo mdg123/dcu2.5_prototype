@@ -1,3 +1,4 @@
+require('./_stamp-on-write'); // 데이터 변형 자동 표식 — 하네스 재검증 강제(2026-07-31 사고)
 /**
  * 통합_학습맵_계통도_KOFAC기준매핑_v2.xlsx 를 기준으로 learning_map_nodes 차시(level=3)를 재시드한다.
  *
@@ -291,8 +292,10 @@ console.log('  orphan 삭제:', stats.orphanDelete);
 
 if (!APPLY) {
   console.log('\n[seed] --apply 옵션 없음 → 변경하지 않음 (dry-run).');
-  // 시뮬레이션을 위해 트랜잭션을 실행하고 ROLLBACK 효과 — better-sqlite3 transaction은 명시적 throw 시 롤백
-  // 여기선 그냥 종료
+  // ※ 이 dry-run 은 **트랜잭션을 아예 실행하지 않는다**(tx() 호출 전에 종료).
+  //    위 요약은 전부 SELECT 로 계산한 것이라 DB write 가 0 이다.
+  //    (예전 주석이 "트랜잭션을 실행하고 ROLLBACK" 이라고 적혀 있어 write→ROLLBACK 방식으로
+  //     오인되기 쉬웠다 — 2026-08-04 감리에서 실제로 그렇게 지목됐다. 사실과 다르므로 정정.)
   db.close();
   process.exit(0);
 }

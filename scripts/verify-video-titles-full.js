@@ -1,3 +1,4 @@
+require('./_stamp-on-write'); // 데이터 변형 자동 표식 — 하네스 재검증 강제(2026-07-31 사고)
 /**
  * verify-video-titles-full.js
  * daily_learning_items에 연결된 모든 YouTube 영상의 제목을 oEmbed로 확인하여

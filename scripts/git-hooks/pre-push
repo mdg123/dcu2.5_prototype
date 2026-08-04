@@ -4,8 +4,11 @@
 # 활성화(1회): git config core.hooksPath scripts/git-hooks
 # 긴급 우회   : git push --no-verify
 #
-# npm test 는 ~3초(node:test, 실DB 임시복사 격리). 화면 스모크(test:e2e:smoke)는
-# 무거워서 여기 넣지 않는다 — FE 화면 변경 시 수동/CI로 돌린다.
+# npm test 는 실측 ~240초(2026-08-04 3회 측정 214·235·248초 / node:test 585건,
+#   실DB 임시복사 격리). 테스트가 늘면 함께 늘어난다.
+#   ※ 초판 주석의 "~3초" 는 테스트가 수십 건이던 시절 값이라 80배 어긋나 있었다.
+#     push 가 4분 걸리는 이유를 오해하지 않도록 실측값을 유지할 것.
+# 화면 스모크(test:e2e:smoke)는 더 무거워서 여기 넣지 않는다 — FE 변경 시 수동/CI로 돌린다.
 
 echo "[pre-push] 🔍 npm test (데이터/함수 하네스) 실행..."
 npm test
@@ -17,5 +20,19 @@ if [ "$status" -ne 0 ]; then
   echo "           (긴급 우회: git push --no-verify)"
   exit 1
 fi
+
+# 하네스 검증 스탬프 확인.
+#   npm test(run-harness)가 전건 통과 시 스탬프를 갱신하므로 여기선 통상 초록이다.
+#   여기서 붉으면 = 스탬프 기록 자체가 실패했거나, 테스트 도중 다른 프로세스가
+#   정본 DB 를 또 바꿨다는 뜻 → 그대로 push 하면 07-31 사고 재현이다.
+npm run --silent verify:fresh
+if [ "$?" -ne 0 ]; then
+  echo ""
+  echo "[pre-push] ❌ 하네스 미검증 표식이 남아 있습니다 — push를 막았습니다."
+  echo "           'npm test' 를 다시 전건 실행해 표식을 해소하세요."
+  echo "           (긴급 우회: git push --no-verify)"
+  exit 1
+fi
+
 echo "[pre-push] ✅ 통과 — push 진행"
 exit 0

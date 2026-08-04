@@ -1,3 +1,4 @@
+require('./_stamp-on-write'); // 데이터 변형 자동 표식 — 하네스 재검증 강제(2026-07-31 사고)
 /**
  * cleanup-latex-questions.js
  * content_questions 테이블의 LaTeX 잔류 문항을 한글·유니코드 표기로 치환한다.

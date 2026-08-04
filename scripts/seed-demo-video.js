@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+require('./_stamp-on-write'); // 데이터 변형 자동 표식 — 하네스 재검증 강제(2026-07-31 사고)
 /**
  * seed-demo-video.js — LRS Phase 4a "영상 학습 행동"(완주율·재시청·건너뛰기) 데모 계측 시드
  *

@@ -1,3 +1,4 @@
+require('./_stamp-on-write'); // 데이터 변형 자동 표식 — 하네스 재검증 강제(2026-07-31 사고)
 // 빈(items=0) daily_learning_sets 정리 + 사후 검증
 const path = require('path');
 const Database = require('better-sqlite3');

@@ -1,3 +1,4 @@
+require('./_stamp-on-write'); // 데이터 변형 자동 표식 — 하네스 재검증 강제(2026-07-31 사고)
 /**
  * scripts/backfill-problem-attempts.js  —  성장기록 정합성 #5 백필 (의도된 데이터 정합 수정)
  *

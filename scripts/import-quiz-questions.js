@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+require('./_stamp-on-write'); // 데이터 변형 자동 표식 — 하네스 재검증 강제(2026-07-31 사고)
 /**
  * import-quiz-questions.js
  * ----------------------------------------------
@@ -13,6 +14,13 @@
  * 사용법:
  *   node scripts/import-quiz-questions.js <path/to/chunk-XX.json>           # dry-run (기본)
  *   node scripts/import-quiz-questions.js <path/to/chunk-XX.json> --apply   # 실제 INSERT
+ *
+ * ⚠ 이 스크립트의 dry-run 은 "write→ROLLBACK" 방식이다.
+ *   실제로 INSERT 를 **모두 실행한 뒤** 트랜잭션을 ROLLBACK 한다(DB 순변경 0).
+ *   따라서 dry-run 중에도 디스크 I/O·제약조건 검사는 실제로 일어난다.
+ *   하네스 변형 표식(scripts/_stamp-on-write.js)은 트랜잭션 결과를 존중하도록 되어 있어
+ *   롤백된 write 에는 표식을 남기지 않는다. 그 동작은 test/harness-freshness.test.js
+ *   REG-HF6b 가 고정한다 — 후킹을 손볼 때 이 스크립트를 반드시 함께 확인할 것.
  *
  * 옵션:
  *   --apply           실제 트랜잭션 commit (없으면 dry-run = 트랜잭션 rollback)

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import './_stamp-on-write.js'; // 데이터 변형 자동 표식 — 하네스 재검증 강제(2026-07-31 사고)
 /**
  * scripts/import-learning-map-edges.mjs
  * ------------------------------------------------------------------
@@ -20,6 +21,10 @@
  *                          (단, `edge_type IN ('manual','custom')` 는 보존)
  * - 기본(`--truncate` 없음) : INSERT OR IGNORE 로 누락분만 보강
  * - `--dry-run`          : DB 변경 없이 시뮬레이션
+ *                          ⚠ 방식은 "write→ROLLBACK" — db.transaction() 안에서 실제로
+ *                          INSERT 를 수행한 뒤 의도적 throw 로 롤백한다(DB 순변경 0).
+ *                          하네스 변형 표식은 트랜잭션 결과를 존중해 롤백분을 표식하지
+ *                          않는다(test/harness-freshness.test.js REG-HF6b 가 고정).
  * - `--excel <경로>`     : 엑셀 경로 (기본 ./통합_학습맵_계통도_KOFAC기준매핑_v2.xlsx)
  * - `--db <경로>`        : SQLite 경로 (기본 ./data/dacheum.db)
  *

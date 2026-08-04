@@ -1,3 +1,4 @@
+require('./_stamp-on-write'); // 데이터 변형 자동 표식 — 하네스 재검증 강제(2026-07-31 사고)
 // hqdefault.jpg 200이라도 oembed 차단된 영상이 있음 (임베드 불가)
 // oembed API로 한 번 더 검증해 embeddable=false 인 영상도 inactive 마킹
 const Database = require('better-sqlite3');
