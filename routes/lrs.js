@@ -27,6 +27,10 @@ const C1_TYPES = Array.isArray(SSOT_LEARN_TYPES) && SSOT_LEARN_TYPES.length ? SS
 const C1_TYPES_SQL_LIST = C1_TYPES.map(t => `'${t}'`).join(',');
 // 감정 분류 SSOT — 정본사전 §2-B(텍스트 어휘 우선, emotion_score 임계 비교 금지).
 const { emotionGroupKey } = require('../lib/lrs/emotion-scale');
+// [W2-a 후속] 성취 '시도(attempt)' 술어 SSOT. lrs_achievement_stats.attempt_count 를
+//   만든 것과 **글자 그대로 같은 WHERE** 를 드릴다운에서도 써야 "표시값=내역"이 성립한다.
+//   (인라인으로 다시 쓰면 그 순간 셀과 내역이 갈라진다 — 실제로 갈라졌던 이력이 아래 §mastery/detail.)
+const { masteryAttemptWhere } = require('../lib/lrs/mastery-population');
 
 /**
  * CSV 셀 injection 방어 — 값이 수식/명령 프리픽스(=, +, -, @, TAB, CR)로 시작하면
@@ -2388,14 +2392,20 @@ router.get('/mastery/class/:id', requireAuth, (req, res) => {
 //     - label·subject: resolveCode 보강(서술 전문 + 교과 라벨), 매핑 없으면 코드 폴백(무손상)
 //     - status·rate: 셀과 동일 분류기(classifyStatus·reachRate — SSOT) + 매트릭스와 동일 반올림(0.1)
 //     - attempts: lrs_achievement_stats.attempt_count (셀 툴팁과 동일 값)
-//     - count: learning_logs 행수(user_id×achievement_code 전체 — LIMIT 무관 전체 건수)
+//     - count: **시도 술어를 통과한** learning_logs 행수(LIMIT 무관 전체 건수)
 //     - items: 최신순 최대 50행 { date, activityType, typeLabel, success, scoreNorm }
 //
-//   ★ 표시값=내역 정합 계약: count == attempt_count == 로그 행수.
-//     (스펙 §1-4 실측: uid3 상위 8개 코드 전부 정확 일치 8=8·6=6·5=5.
-//      attempt_count 정본 산식 = rebuild 경로(db/lrs-aggregate.js §7):
-//      COUNT(*) FROM learning_logs WHERE achievement_code IS NOT NULL GROUP BY user_id, code
-//      → 본 라우트도 동일 WHERE(user_id×achievement_code, 유형 필터 없음)를 재사용한다.)
+//   ★ 표시값=내역 정합 계약: count == attempt_count == 시도 로그 행수.
+//
+//   ── 2026-08-04 회귀 수정 (W2-a 후속 누락분) ────────────────────────────────
+//   과거 attempt_count 는 무필터 COUNT(*) 였고 본 라우트도 무필터 COUNT(*) 라 우연히 맞았다.
+//   W2-a 가 attempt_count 를 정본 술어(채점형 ∧ result_success IS NOT NULL)로 좁혔는데
+//   **본 라우트만 무필터로 남아** 계약이 깨졌다. 실측(uid3 [4수01-07]):
+//     셀 "5시도 5정답 · 도달"  ↔  드릴 서랍 내역 6줄(정오 판정 없는 daily_complete 1줄 포함)
+//   교사가 셀을 열면 숫자가 서로 다른 화면을 보게 된다.
+//   → count·items 모두 masteryAttemptWhere(SSOT)를 재사용한다. 술어 인라인 재작성 금지.
+//   (정오 판정이 없는 학습 이력은 '시도'가 아니므로 이 서랍의 관심사가 아니다.
+//    연습 이력을 보여주려면 별도 섹션으로 — 시도 내역에 섞으면 분모가 다시 오염된다.)
 //     불일치 시 응답은 로그 기준(count=행수)으로 내리되 서버 콘솔 경고 1줄(정합 감시).
 //
 //   기간 파라미터 없음 — mastery 는 누적이 정책(P1 스펙 §3-3 계승). period 류가 와도 무시.
@@ -2463,10 +2473,11 @@ router.get('/mastery/detail', requireAuth, (req, res) => {
     const rate = rateRaw == null ? null : Math.round(rateRaw * 10) / 10; // 매트릭스 셀과 동일 반올림
     const status = mastery.classifyStatus(attempts, rate);
 
-    // ② count — 로그 행수(전체, LIMIT 무관). attempt_count 정본 산식과 동일 WHERE.
+    // ② count — 시도 로그 행수(전체, LIMIT 무관). attempt_count 정본 산식과 **동일 WHERE**.
     const totalRow = db.prepare(`
       SELECT COUNT(*) AS c FROM learning_logs
       WHERE user_id = ? AND achievement_code IN (${ph})
+        AND ${masteryAttemptWhere('')}
     `).get(userId, ...codeForms);
     const count = totalRow.c || 0;
     if (statRows.length > 0 && count !== attempts) {
@@ -2482,6 +2493,7 @@ router.get('/mastery/detail', requireAuth, (req, res) => {
              ${NORM} AS norm_score
       FROM learning_logs ll
       WHERE ll.user_id = ? AND ll.achievement_code IN (${ph})
+        AND ${masteryAttemptWhere('ll')}
       ORDER BY ll.created_at DESC
       LIMIT ?
     `).all(userId, ...codeForms, MASTERY_DETAIL_LIMIT);

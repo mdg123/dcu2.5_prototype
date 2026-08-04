@@ -881,25 +881,68 @@ test('BUG20(정정): 성취수준 분류는 누적 — fromDate/toDate 를 줘�
 });
 
 // ──────────────────────────────────────────────────────────────────────────
-// BUG20b(신규 핵심): uid3(student1) 누적 미도달 5건이 항상 잡혀야 한다.
-//   결함: 옛 기간 스코프가 30일 창 밖 누적 미도달을 은폐(notReached 5→0).
-//   uid3 의 5건은 기존 시드 데이터라 삽입 없이 존재해야 한다(읽기만; 삽입 순서 무관).
-//   기대: notReached=5, weakness 코드 집합에 5건 모두 포함(순서 무관 Set 비교).
+// BUG20b(신규 핵심): **기간 창 밖의 오래된 누적 미도달**이 은폐되면 안 된다.
+//   결함: 옛 기간 스코프가 30일 창 밖 누적 미도달을 숨겨 notReached 를 0 으로 만들었다.
+//
+// ── 2026-08-04 GT 재작성 (동어반복 아님 · 시한폭탄 제거) ───────────────────
+//   이전 GT 는 "uid3 의 미도달 5건"이라는 **실 DB 시드 스냅샷**이었다. 그 5건은
+//   집계기 결함의 산물이었음이 원시 로그 대조로 확인됐다 — 5개 코드 전부
+//   정오 판정 로그가 **0건**이고(콘텐츠 조회·이수형뿐), 무필터 COUNT(*) 가 분모로
+//   들어가 '시도 N · 정답 0 → 정답률 0% → 미도달' 이 만들어졌을 뿐이다.
+//   (정본사전 §4-3: 판정 자료가 없으면 '평가 부족(회색)'이지 '미도달(빨강)'이 아니다.)
+//   W2-a 로 분모가 정화되자 uid3 의 진짜 미도달은 0 이 됐고, 이 GT 는 근거를 잃었다.
+//
+//   그래서 GT 를 **테스트가 직접 만든 데이터**에서 유도한다:
+//     시도 4 · 정답 1 → 정답률 25% (<50) · 시도 ≥3  ⇒ 미도달   (정본사전 §1-A-1)
+//   판정 근거가 산식뿐이라 시드가 어떻게 바뀌어도, 오늘이 언제여도 흔들리지 않는다.
+//   로그 날짜를 **200일 전**으로 못박아 7/30/90d 창 **바깥**에 두는 것이 이 검사의 핵심 —
+//   기간 스코프가 되살아나면 notReached 가 0 으로 떨어져 즉시 붉어진다.
 // ──────────────────────────────────────────────────────────────────────────
-test('BUG20b: uid3 누적 미도달 5건(은폐 방지) — notReached=5 + 5개 코드 전부', () => {
+test('BUG20b: 기간 창 밖(200일 전) 누적 미도달 은폐 방지 — period 무관 항상 계수', () => {
+  const { logLearningActivity } = require('../db/learning-log-helper');
   const mastery = require('../db/lrs-mastery');
-  const d = mastery.getStudentMastery(3); // student1 = id 3 (읽기 전용)
-  assert.equal(d.counts.notReached, 5,
-    `BUG20b: uid3 누적 notReached 는 5여야(은폐되면 <5). 실제=${d.counts.notReached}`);
-  const EXPECTED = new Set(['[4수01-02]', '[4수03-02]', '[4수03-10]', '[4수01-13]', '[4수03-04]']);
-  // weaknesses 는 상위 5건 슬라이스 — 미도달 5건이 전부(부분도달보다 우선 정렬).
-  const nrCodes = new Set(
-    d.weaknesses.filter(w => w.status === 'not_reached').map(w => w.code)
-  );
-  for (const code of EXPECTED) {
-    assert.ok(nrCodes.has(code), `BUG20b: 미도달 코드 ${code} 가 weaknesses 에 없음(은폐)`);
+
+  // 전용 픽스처 계정 — 실 계정 통계를 오염시키지 않는다.
+  const uid = Number(db.prepare(
+    "INSERT INTO users (username, password, display_name, role) VALUES ('t_bug20b_seed', 'x', '은폐방지시드', 'student')"
+  ).run().lastInsertRowid);
+
+  const OLD_CODE = '[4수98-01]';   // 200일 전 미도달 — 창 밖
+  const NEW_CODE = '[4수98-02]';   // 3일 전 도달   — 창 안(대조군: 전부 미도달로 세지 않음을 증명)
+  const daysAgo = (n) => {
+    const d = new Date(); d.setDate(d.getDate() - n);
+    return d.toISOString().slice(0, 10) + ' 10:00:00';
+  };
+  const put = (code, success, ago, seq) => logLearningActivity({
+    userId: uid, activityType: 'exam_complete', targetType: 'exam', targetId: 9900000 + seq,
+    verb: 'completed', sourceService: 'exam', resultScore: success ? 1 : 0, resultSuccess: success,
+    achievementCode: code, subjectCode: 'math-e', createdAt: daysAgo(ago),
+  });
+  // 시도 4 · 정답 1 = 25% → 미도달 (분자·분모를 테스트가 직접 정한다)
+  [0, 0, 0, 1].forEach((s, i) => put(OLD_CODE, s, 200, i));
+  // 시도 3 · 정답 3 = 100% → 도달
+  [1, 1, 1].forEach((s, i) => put(NEW_CODE, s, 3, 10 + i));
+
+  // 산식이 실제로 미도달을 만들었는지 먼저 확인(전제 붕괴 시 조기 실패 — 착시 통과 방지)
+  const base = mastery.getStudentMastery(uid);
+  const old = base.standards.find(s => s.code === OLD_CODE);
+  assert.ok(old, `BUG20b: 전제 붕괴 — ${OLD_CODE} 셀이 만들어지지 않음`);
+  assert.equal(old.attempts, 4, 'BUG20b: 전제 — 시도 4');
+  assert.equal(old.correct, 1, 'BUG20b: 전제 — 정답 1');
+  assert.equal(old.status, 'not_reached', `BUG20b: 25% 는 미도달이어야. 실제=${old.status}`);
+
+  // 본 검사: 기간 인자를 무엇으로 주든 200일 전 미도달이 계수돼야 한다.
+  const isoD = (n) => { const d = new Date(); d.setDate(d.getDate() - n); return d.toISOString().slice(0, 10); };
+  const today = new Date().toISOString().slice(0, 10);
+  for (const days of [7, 30, 90]) {
+    const m = mastery.getStudentMastery(uid, { fromDate: isoD(days), toDate: today });
+    assert.equal(m.counts.notReached, 1,
+      `BUG20b: period=${days}d 에서 창 밖 미도달이 은폐됨(notReached=${m.counts.notReached}, 기대 1)`);
+    assert.equal(m.counts.reached, 1, `BUG20b: period=${days}d 도달 1건도 유지돼야`);
+    const nrCodes = new Set(m.weaknesses.filter(w => w.status === 'not_reached').map(w => w.code));
+    assert.ok(nrCodes.has(OLD_CODE),
+      `BUG20b: period=${days}d weaknesses 에 ${OLD_CODE} 누락(은폐)`);
   }
-  assert.equal(nrCodes.size, 5, `BUG20b: 미도달 weakness 코드 수는 5여야. 실제=${nrCodes.size}`);
 });
 
 // ──────────────────────────────────────────────────────────────────────────

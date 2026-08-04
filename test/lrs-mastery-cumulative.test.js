@@ -57,7 +57,38 @@ function req(path, userId) {
   });
 }
 
+// ── CUMUL 픽스처 ────────────────────────────────────────────────────────────
+//   [2026-08-04 GT 재작성] 예전 CUMUL-1/2 는 "uid3 의 미도달 5건"을 상수로 박아뒀다.
+//   그 5건은 집계 결함(무필터 분모)의 산물이었고 — 5개 코드 모두 정오 판정 로그 0건 —
+//   W2-a 로 분모가 정화되자 사라졌다. 실 시드 스냅샷을 GT 로 쓰면 이렇게 근거가 증발한다.
+//   → 이제 테스트가 **직접 만든 데이터**로 GT 를 세운다:
+//        시도 4 · 정답 1 = 25% (<50) · 시도 ≥3  ⇒ 미도달  (정본사전 §1-A-1)
+//      로그를 **200일 전**에 두어 7/30/90d 창 바깥에 배치 — 기간 스코프가 되살아나면
+//      notReached 가 0 으로 떨어져 즉시 붉어진다(이 검사의 존재 이유).
+let CUMUL_UID;
+const CUMUL_OLD_CODE = '[4수97-01]';   // 200일 전 미도달
+const CUMUL_NEW_CODE = '[4수97-02]';   // 3일 전 도달(대조군)
+
+//   ★ 집계 행은 손으로 넣지 않는다 — 운영 경로(logLearningActivity)가 로그에서 파생하게 둔다.
+//     그래야 집계기가 망가지면 이 검사도 함께 붉어진다(집계 우회 = 검사 무력화).
+function seedCumulFixture(tdb) {
+  const { logLearningActivity } = require('../db/learning-log-helper');
+  const uid = Number(tdb.prepare(
+    "INSERT INTO users (username, password, display_name, role) VALUES ('t_cumul_seed', 'x', '누적판정시드', 'student')"
+  ).run().lastInsertRowid);
+  const daysAgo = (n) => { const d = new Date(); d.setDate(d.getDate() - n); return d.toISOString().slice(0, 10) + ' 10:00:00'; };
+  const put = (code, success, ago, seq) => logLearningActivity({
+    userId: uid, activityType: 'exam_complete', targetType: 'exam', targetId: 9700000 + seq,
+    verb: 'completed', sourceService: 'exam', resultScore: success ? 1 : 0, resultSuccess: success,
+    achievementCode: code, subjectCode: 'math-e', createdAt: daysAgo(ago),
+  });
+  [0, 0, 0, 1].forEach((s, i) => put(CUMUL_OLD_CODE, s, 200, i));       // 4시도 1정답 = 25% → 미도달
+  [1, 1, 1].forEach((s, i) => put(CUMUL_NEW_CODE, s, 3, 10 + i));       // 3시도 3정답 = 100% → 도달
+  return uid;
+}
+
 before(async () => {
+  { const t = openTestDb(); CUMUL_UID = seedCumulFixture(t); }
   // ── CONTENT_GT_Q: DRILL-6 용 시계 독립 창 (2026-07-30 시한폭탄 fix) ─────────
   //   DRILL-6 은 days=90(롤링) 위에서 solve·view 항목이 **존재함**을 단언한다. 실 로그가
   //   2026-07-16 에서 멈춰 있어 90일 창은 2026-10-14 경 완전히 비고 전제가 붕괴한다
@@ -79,34 +110,38 @@ after(async () => { if (server) await new Promise(r => server.close(r)); });
 // ──────────────────────────────────────────────────────────────────────────
 // TASK 1 — 성취수준 누적화(P0): notReached 는 period 무관 항상 5.
 // ──────────────────────────────────────────────────────────────────────────
-test('CUMUL-1: /mastery/student/3 notReached 는 period 7/30/90/무관 항상 5', async () => {
-  const paths = [
-    '/mastery/student/3',
-    '/mastery/student/3?period=7d',
-    '/mastery/student/3?period=30d',
-    '/mastery/student/3?period=90d',
-  ];
+test('CUMUL-1: 창 밖(200일 전) 미도달은 period 7/30/90/무관 항상 계수 (HTTP)', async () => {
+  const paths = ['', '?period=7d', '?period=30d', '?period=90d'].map(q => `/mastery/student/${CUMUL_UID}${q}`);
   for (const p of paths) {
-    const r = await req(p, STUDENT1);
+    const r = await req(p, CUMUL_UID);
     assert.equal(r.status, 200, `${p} → 200`);
-    assert.equal(r.json.counts.notReached, 5,
-      `${p}: notReached 는 5여야(누적 미도달 은폐 방지). 실제=${r.json.counts.notReached}`);
+    assert.equal(r.json.counts.notReached, 1,
+      `${p}: 창 밖 미도달이 은폐됨(notReached=${r.json.counts.notReached}, 기대 1)`);
+    assert.equal(r.json.counts.reached, 1,
+      `${p}: 창 안 도달 1건도 유지돼야(실제=${r.json.counts.reached})`);
     assert.equal(r.json.scoped, false, `${p}: scoped=false(누적)`);
     assert.equal(r.json.period, null, `${p}: period=null(누적)`);
   }
 });
 
-test('CUMUL-2: /mastery/student/3 미도달 5개 코드 전부 포함(period 무관)', async () => {
-  const EXPECTED = new Set(['[4수01-02]', '[4수03-02]', '[4수03-10]', '[4수01-13]', '[4수03-04]']);
-  for (const p of ['/mastery/student/3', '/mastery/student/3?period=90d']) {
-    const r = await req(p, STUDENT1);
+test('CUMUL-2: 창 밖 미도달 코드가 weaknesses 에 남아 있어야 (period 무관)', async () => {
+  for (const q of ['', '?period=7d', '?period=90d']) {
+    const p = `/mastery/student/${CUMUL_UID}${q}`;
+    const r = await req(p, CUMUL_UID);
     assert.equal(r.status, 200);
     // route 는 label 을 단원명으로 relabel 하지만 code 는 원본 유지.
-    const nrCodes = new Set(
-      (r.json.weaknesses || []).filter(w => w.status === 'not_reached').map(w => w.code)
-    );
-    for (const code of EXPECTED) assert.ok(nrCodes.has(code), `${p}: 미도달 코드 ${code} 누락`);
-    assert.equal(nrCodes.size, 5, `${p}: 미도달 weakness 코드 수 5여야. 실제=${nrCodes.size}`);
+    const nr = (r.json.weaknesses || []).filter(w => w.status === 'not_reached');
+    const nrCodes = new Set(nr.map(w => w.code));
+    assert.ok(nrCodes.has(CUMUL_OLD_CODE), `${p}: 미도달 코드 ${CUMUL_OLD_CODE} 누락(은폐)`);
+    assert.equal(nrCodes.size, 1, `${p}: 미도달 코드 수 1이어야. 실제=${nrCodes.size}`);
+    // 분자/분모가 화면까지 그대로 실려야 "왜 미도달인지"가 자명하다(정본사전 §6-10-5).
+    const row = nr.find(w => w.code === CUMUL_OLD_CODE);
+    assert.equal(row.attempts, 4, `${p}: attempts 4(테스트가 심은 시도 수)`);
+    assert.equal(row.correct, 1, `${p}: correct 1(테스트가 심은 정답 수)`);
+    assert.equal(row.rate, 25, `${p}: rate 25(=1/4) — 분자·분모에서 유도된 값`);
+    // 도달(100%)은 약점에 섞이면 안 된다.
+    assert.ok(!(r.json.weaknesses || []).some(w => w.code === CUMUL_NEW_CODE),
+      `${p}: 도달 코드 ${CUMUL_NEW_CODE} 가 약점에 혼입`);
   }
 });
 

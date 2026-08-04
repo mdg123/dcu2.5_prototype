@@ -39,7 +39,11 @@ const LEARN7 = [
 ];
 
 // ── HTTP 하네스 (lrs-perform-detail.test.js 와 동일 패턴) ────────────────────
-let server, baseUrl, tdb, SEED_UID, HEAT_TS, HEAT_GT_Q;
+let server, baseUrl, tdb, SEED_UID, HEAT_TS, HEAT_GT_Q, RECO_UID;
+// REG-K3/K3b 픽스처 성취기준 코드(실 데이터와 충돌하지 않는 대역)
+const RECO_URGENT_CODE = '[4수96-01]';
+const RECO_RECOMMEND_CODE = '[4수96-02]';
+const RECO_OPTIONAL_CODE = '[4수96-03]';
 function buildApp() {
   const app = express();
   app.use(express.json());
@@ -113,6 +117,33 @@ before(async () => {
   insHm.run(3, 'exam_complete', 'e-hm1', 'exam', tueLocal);           // 실데이터(포함)
   insHm.run(4, 'homework_submit', 'h-hm1', 'homework', tueLocal);     // 실데이터(포함·다른 학생)
   insHm.run(3, 'content_view', 'c-hm2', 'demo_seed', tueLocal);       // demo_* → 히트맵/드릴 모두 제외
+
+  // ── REG-K3/K3b 추천 우선순위 픽스처 ────────────────────────────────────────
+  //   [2026-08-04 GT 재작성] 이전 GT 는 uid3 의 실 시드 스냅샷
+  //   (①[4수03-10] ②[4국01-01] ③[4수03-09])을 상수로 박아뒀다. 원시 로그 대조 결과
+  //   ①② 는 **정오 판정 로그가 0건**(콘텐츠 조회·이수형뿐)인데 무필터 COUNT(*) 가
+  //   분모로 들어가 '시도 N · 정답 0 → 0% → 미도달' 로 만들어진 허깨비였다.
+  //   W2-a 로 분모가 정화되자 근거가 증발했다(uid3 의 진짜 미도달은 0건).
+  //   → 세 우선순위가 **모두 존재하는** 상황을 테스트가 직접 만들어 선정 규칙 자체를 박제한다.
+  //      숫자는 전부 테스트가 정한 분자/분모에서 유도되므로 시드가 바뀌어도 흔들리지 않는다.
+  //        A 시도4·정답1 → 25% (<50, att≥3) ⇒ 미도달·채점  → ① 시급
+  //        B 시도2·정답2 → att<3            ⇒ 평가부족·채점 → ② 권장  (평균 100 → REG-K3b 겸용)
+  //        C 시도5·정답5 → 100% (att≥3)     ⇒ 도달          → ③ 선택(강점 심화)
+  {
+    const { logLearningActivity } = require('../db/learning-log-helper');
+    RECO_UID = Number(tdb.prepare(
+      "INSERT INTO users (username, password, display_name, role) VALUES ('t_reco_seed', 'x', '추천선정시드', 'student')"
+    ).run().lastInsertRowid);
+    const ago = (n) => { const d = new Date(); d.setDate(d.getDate() - n); return d.toISOString().slice(0, 10) + ' 10:00:00'; };
+    const put = (code, success, seq) => logLearningActivity({
+      userId: RECO_UID, activityType: 'exam_complete', targetType: 'exam', targetId: 9800000 + seq,
+      verb: 'completed', sourceService: 'exam', resultScore: success ? 1 : 0, resultSuccess: success,
+      achievementCode: code, subjectCode: 'math-e', createdAt: ago(2),
+    });
+    [0, 0, 0, 1].forEach((s, i) => put(RECO_URGENT_CODE, s, i));        // 1/4 = 25%  → 미도달
+    [1, 1].forEach((s, i) => put(RECO_RECOMMEND_CODE, s, 10 + i));      // 2/2, att<3 → 평가부족(평균 100)
+    [1, 1, 1, 1, 1].forEach((s, i) => put(RECO_OPTIONAL_CODE, s, 20 + i)); // 5/5      → 도달(강점)
+  }
 
   // ── HEAT_GT_Q: INV-HC2 용 시계 독립 창 (2026-07-30 시한폭탄 fix) ────────────
   //   INV-HC2 의 total>=3 은 사실상 **실 DB 고정 데이터**(class 2 의 화요일 10시 칸)에
@@ -288,38 +319,78 @@ test('INV-K3: recommendations ≤3 · priority enum 중복없음 · estMinutes 5
   }
 });
 
-test('REG-K3: uid3 ground-truth — ①시급 [4수03-10] ②권장 [4국01-01] ③선택 [4수03-09] + 확정 이유 문구', async () => {
-  const r = await req(`/insights/${STUDENT1}?period=30d`, STUDENT1);
+test('REG-K3: 추천 3단 선정 규칙 — ①시급=미도달·채점 ②권장=평가부족 ③선택=강점 + 확정 이유 문구', async () => {
+  const r = await req(`/insights/${RECO_UID}?period=30d`, RECO_UID);
+  assert.equal(r.status, 200);
   const recs = r.json.recommendations;
-  assert.equal(recs.length, 3, 'uid3 은 3건 모두 선정');
+  assert.equal(recs.length, 3, '세 우선순위가 모두 존재하는 픽스처이므로 3건 전부 선정돼야');
+
   assert.equal(recs[0].priority, 'urgent');
-  assert.equal(recs[0].achievement_code, '[4수03-10]', '① 시급 = 미도달·채점 avg 최저');
-  // [재기준 2026-07-10 · 벤치 재시드 rebuild] 25%→75%.
-  //   원인: 벤치마크 집중 재시드(scripts/seed-benchmark-enrich.js)가 rebuildAllAggregates()로
-  //   lrs_achievement_stats를 learning_logs 진실원에서 전면 재파생 → uid3(student1, 실사용자)의
-  //   [4수03-10] avg_score가 stale 0.25 → 로그정합 0.75로 교정됨.
-  // [재기준 2026-07-30 · C-1 표기 정직성 fix] '정답률 75%' → '평균 점수 75% · 정답 인정 0/5회'.
-  //   과거 이 자리에 박제돼 있던 "미도달인데 avg 75%" 의미괴리(= reasonText는 avg_score를,
-  //   도달판정은 success/attempt를 쓰는 산식 특성)를 "별건"으로 넘겼으나, 사용자 실측 지적으로
-  //   **거짓 라벨**로 확정 판정. 값(75)의 정체는 AVG(result_score)= 평균 점수이지 정답률이 아니다
-  //   (실측 [4수03-10]: 정답률 = success/attempt = 0/5 = 0%). 라벨을 값의 정체에 맞춰 정정하고,
-  //   도달 판정에 실제 쓰인 두 수(정답 인정 0/5)를 병기해 "왜 미도달인지"를 카드 안에서 자명화.
-  assert.equal(recs[0].reasonText, '평균 점수 75% · 정답 인정 0/5회 — 여기부터 다시 잡아봐요',
+  assert.equal(recs[0].achievement_code, RECO_URGENT_CODE, '① 시급 = 미도달·채점 avg 최저');
+  assert.equal(recs[0].status, 'not_reached', '① 은 미도달 상태여야(평가부족을 시급으로 올리면 안 됨)');
+  // 문구의 두 수는 테스트가 심은 분자/분모에서 그대로 유도된다:
+  //   평균 점수 = AVG(정규화 점수) = (0+0+0+100)/4 = 25 · 정답 인정 = success/attempt = 1/4
+  assert.equal(recs[0].reasonText, '평균 점수 25% · 정답 인정 1/4회 — 여기부터 다시 잡아봐요',
     '시급(채점) 템플릿 — 라벨=평균 점수(값 정체 일치) + 도달판정 분자/분모 병기');
+
   assert.equal(recs[1].priority, 'recommended');
-  assert.equal(recs[1].achievement_code, '[4국01-01]', '② 권장 = 평가부족(채점 우선)');
-  assert.equal(recs[1].reasonText, '아직 2번밖에 안 풀었어요 — 3번 이상 풀면 도달 판정을 받을 수 있어요', '권장(평가부족) 템플릿 그대로');
+  assert.equal(recs[1].achievement_code, RECO_RECOMMEND_CODE, '② 권장 = 평가부족(채점 우선)');
+  assert.equal(recs[1].status, 'insufficient', '② 는 평가부족(att<3)');
+  assert.equal(recs[1].reasonText, '아직 2번밖에 안 풀었어요 — 3번 이상 풀면 도달 판정을 받을 수 있어요',
+    '권장(평가부족) 템플릿 그대로 — {att} 는 심은 시도 수 2');
+
   assert.equal(recs[2].priority, 'optional');
-  assert.equal(recs[2].achievement_code, '[4수03-09]', '③ 선택 = 강점(att≥3·avg 최고) 심화');
-  assert.equal(recs[2].reasonText, '평균 점수 100% · 정답 인정 5/5회 — 한 단계 더 깊게 배워볼까요?', '선택(강점 심화) 템플릿');
+  assert.equal(recs[2].achievement_code, RECO_OPTIONAL_CODE, '③ 선택 = 강점(att≥3·avg 최고) 심화');
+  assert.equal(recs[2].reasonText, '평균 점수 100% · 정답 인정 5/5회 — 한 단계 더 깊게 배워볼까요?',
+    '선택(강점 심화) 템플릿');
+
+  // 도달한 성취기준이 약점 목록에 섞이면 안 된다(정본사전 §6-10-2: 도달은 항상 제외).
+  assert.ok(!(r.json.weaknesses || []).some(w => w.achievement_code === RECO_OPTIONAL_CODE),
+    '도달(100%) 코드가 약점에 혼입');
 });
 
-test('REG-K3b: 평균 점수 100%·평가부족 약점행([4영01-08])은 "아직 N번밖에…" 이유로 자명 (기획서 §3 P0-2 ② 해소 방식)', async () => {
-  const r = await req(`/insights/${STUDENT1}?period=30d`, STUDENT1);
-  const w100 = (r.json.weaknesses || []).find(w => w.avg_score === 100);
-  assert.ok(w100, 'uid3 약점에 100% 평가부족 행([4영01-08]) 존재(기획서 실측 전제)');
+test('REG-K3b: 평균 점수 100%·평가부족 약점행은 "아직 N번밖에…" 이유로 자명 (기획서 §3 P0-2 ② 해소 방식)', async () => {
+  const r = await req(`/insights/${RECO_UID}?period=30d`, RECO_UID);
+  const w100 = (r.json.weaknesses || []).find(w => w.achievement_code === RECO_RECOMMEND_CODE);
+  assert.ok(w100, '평균 100%·시도 2회 행이 약점에 남아야(도달 판정을 못 받았으므로)');
+  assert.equal(w100.avg_score, 100, '평균 점수 100 — 2회 모두 만점');
   assert.equal(w100.status, 'insufficient', '100% 행은 평가부족(att<3)이어야 약점에 남는다');
-  assert.match(w100.reasonText, /^아직 \d+번밖에 안 풀었어요/, '평가부족 이유 문구로 "100%인데 왜?" 해소');
+  assert.match(w100.reasonText, /^아직 2번밖에 안 풀었어요/, '평가부족 이유 문구로 "100%인데 왜?" 해소');
+});
+
+// ──────────────────────────────────────────────────────────────────────────
+// REG-K3c: 실 계정(uid3) 이중장부 — 성취 카드의 시도/정답이 **원시 로그**와 일치하는가.
+//   위 REG-K3 를 픽스처로 옮긴 대신, "실 계정 GT" 의 역할은 이 검사가 이어받는다.
+//   드리프트하는 상수를 박는 대신, 같은 사실을 **다른 경로로 두 번 계산해 대조**한다:
+//     · 좌변: /insights 응답(= lrs_achievement_stats 경유)
+//     · 우변: learning_logs 에 시도 술어를 손으로 걸어 센 값(집계 테이블 미경유)
+//   시드가 늘든 줄든 양변이 같이 움직이므로 시한폭탄이 아니고,
+//   집계 테이블이 로그와 어긋나는 순간(= 재집계 누락·증분 드리프트) 붉어진다.
+// ──────────────────────────────────────────────────────────────────────────
+test('REG-K3c: uid3 이중장부 — insights 약점·강점의 시도/정답 == 원시 로그 손계산', async () => {
+  const ATTEMPT_TYPES = [
+    'exam_complete', 'homework_submit', 'content_solve', 'self_learn', 'daily_complete',
+    'wrong_note_retry', 'node_complete', 'content_complete', 'problem_attempt',
+  ].map(t => `'${t}'`).join(',');
+  const r = await req(`/insights/${STUDENT1}?period=30d`, STUDENT1);
+  assert.equal(r.status, 200);
+  const rows = [...(r.json.weaknesses || []), ...(r.json.strengths || [])];
+  assert.ok(rows.length > 0, '전제: uid3 약점∪강점이 비어있지 않음');
+  let checked = 0;
+  for (const row of rows) {
+    const gt = tdb.prepare(`
+      SELECT COUNT(*) att, SUM(CASE WHEN result_success = 1 THEN 1 ELSE 0 END) succ
+      FROM learning_logs
+      WHERE user_id = ? AND achievement_code = ?
+        AND activity_type IN (${ATTEMPT_TYPES}) AND result_success IS NOT NULL
+    `).get(STUDENT1, row.achievement_code);
+    assert.equal(row.attempt_count, gt.att,
+      `${row.achievement_code}: 시도 불일치 — 집계 ${row.attempt_count} vs 로그 ${gt.att}`);
+    assert.equal(row.success_count, gt.succ,
+      `${row.achievement_code}: 정답 불일치 — 집계 ${row.success_count} vs 로그 ${gt.succ}`);
+    checked++;
+  }
+  assert.ok(checked >= 3, `대조한 성취기준이 너무 적다(${checked}) — 전제 붕괴 가능`);
 });
 
 // ──────────────────────────────────────────────────────────────────────────

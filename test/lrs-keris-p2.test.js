@@ -128,35 +128,83 @@ after(async () => { if (server) await new Promise(r => server.close(r)); });
 
 // ──────────────────────────────────────────────────────────────────────────
 // INV-K12①: 표시값=내역 — uid3 상위 코드( [4수01-04] 포함 ) 전수:
-//   count == items.length == attempt_count == learning_logs 행수(동일 WHERE).
+//   count == items.length == attempt_count == **시도** 로그 행수(동일 WHERE).
+//
+// ── 2026-08-04 재기준 (W2-a 시도 술어 도입) ───────────────────────────────
+//   이 검사의 "로그 행수" 레그는 원래 무필터 COUNT(*) 였다. attempt_count 도 무필터라
+//   우연히 맞아떨어졌을 뿐, 주석이 광고하던 "동일 WHERE"는 실제로 지켜지지 않았다.
+//   W2-a 가 attempt_count 를 정본 술어로 좁히자 즉시 갈라졌고(uid3 [4수01-07] 셀 5 ↔ 서랍 6),
+//   그 괴리가 여기서 붉게 잡혔다 — 검사는 옳았고 **라우트가 틀렸다**(routes/lrs.js /mastery/detail).
+//
+//   ★ 이중장부 유지: 술어를 lib/lrs/mastery-population 에서 import 하지 **않고** 여기 손으로 적는다.
+//     SSOT 를 같이 import 하면 SSOT 가 통째로 틀어져도 양쪽이 사이좋게 틀려 초록이 된다
+//     (W2 감리 지적 "테스트가 검사 대상과 같은 SSOT 를 import 해 이중장부 소멸"의 재발 방지).
 // ──────────────────────────────────────────────────────────────────────────
-test('INV-K12①: mastery/detail count == items.length == attempt_count == 로그 행수 (uid3 상위 3코드+[4수01-04])', async () => {
+// 시도 술어의 **독립 사본**(손으로 적은 장부). 정본과 뜻이 같아야 하되 코드는 공유하지 않는다.
+//   ① achievement_code 존재 ② 채점형 유형 ③ 정오 판정(result_success) 존재
+const ATTEMPT_TYPES_SQL = [
+  'exam_complete', 'homework_submit', 'content_solve', 'self_learn', 'daily_complete',
+  'wrong_note_retry', 'node_complete', 'content_complete', 'problem_attempt',
+].map(t => `'${t}'`).join(',');
+const ATTEMPT_WHERE_2ND_BOOK =
+  `achievement_code IS NOT NULL AND activity_type IN (${ATTEMPT_TYPES_SQL}) AND result_success IS NOT NULL`;
+
+test('INV-K12①: mastery/detail count == items.length == attempt_count == 시도 로그 행수 (uid3 상위 3코드+[4수01-04])', async () => {
   const tops = tdb.prepare(
     'SELECT achievement_code code, attempt_count FROM lrs_achievement_stats WHERE user_id = ? ORDER BY attempt_count DESC LIMIT 3'
   ).all(STUDENT1);
   assert.ok(tops.length > 0, '전제: uid3 stats 존재');
-  const codes = [...new Set([...tops.map(t => t.code), '[4수01-04]'])];
+  // [4수01-07] 을 강제 포함 — 판정 없는 학습 이력(daily_complete)이 섞여 있어 필터 유무가 갈리는 코드.
+  const codes = [...new Set([...tops.map(t => t.code), '[4수01-04]', '[4수01-07]'])];
   for (const code of codes) {
     const r = await req(`/mastery/detail?user_id=${STUDENT1}&achievement_code=${encodeURIComponent(code)}`, TEACHER);
     assert.equal(r.status, 200, `${code}: HTTP 200`);
     const j = r.json;
     assert.equal(j.success, true);
-    const logRows = tdb.prepare(
-      'SELECT COUNT(*) c FROM learning_logs WHERE user_id = ? AND achievement_code = ?'
+    const attemptRows = tdb.prepare(
+      `SELECT COUNT(*) c FROM learning_logs WHERE user_id = ? AND achievement_code = ? AND ${ATTEMPT_WHERE_2ND_BOOK}`
     ).get(STUDENT1, code).c;
     const stat = tdb.prepare(
       'SELECT attempt_count FROM lrs_achievement_stats WHERE user_id = ? AND achievement_code = ?'
     ).get(STUDENT1, code);
-    assert.equal(j.count, logRows, `${code}: count(${j.count}) != 로그 행수(${logRows})`);
+    assert.equal(j.count, attemptRows, `${code}: count(${j.count}) != 시도 로그 행수(${attemptRows})`);
     // items 는 LIMIT 50 캡 — cap 인지 비교(R-2 부류 재발 방지: count 는 항상 전체, items 는 캡 내)
     assert.equal(j.items.length, Math.min(50, j.count), `${code}: items.length != min(50, count)`);
+    // 서랍에 판정 없는 행이 섞이면 "시도 내역"이 아니게 된다 — 행 단위로도 막는다.
+    for (const it of j.items) {
+      assert.ok(it.success === 1 || it.success === 0,
+        `${code}: 시도 내역에 정오 판정 없는 행(${it.activityType})이 섞임 — 셀 분모와 서랍이 갈라진다`);
+    }
     if (stat) {
       assert.equal(j.attempts, stat.attempt_count, `${code}: attempts != attempt_count`);
       assert.equal(j.count, stat.attempt_count, `${code}: count != attempt_count(표시값=내역 계약)`);
     }
-    // 실측 박제: [4수01-04] 은 8=8=8 (스펙 §1-4)
+    // 실측 박제: [4수01-04] 은 8=8=8 (스펙 §1-4) — 전건 exam_complete 라 필터 전후 불변.
     if (code === '[4수01-04]') assert.equal(j.count, 8, '[4수01-04] 실측 8 회귀');
   }
+});
+
+// ──────────────────────────────────────────────────────────────────────────
+// INV-K12①': 필터가 **실제로 걸리는지**를 역으로 증명한다.
+//   [4수01-07](uid3) 은 원시 로그 6행 중 1행이 daily_complete·result_success NULL 이다.
+//   따라서 무필터 6 ≠ 시도 5. 라우트가 필터를 빼먹으면 count 가 6 이 되어 여기서 잡힌다.
+//   (INV-K12① 만으로는 "양쪽 다 무필터"여도 통과하므로 이 검사가 필요하다.)
+// ──────────────────────────────────────────────────────────────────────────
+test("INV-K12①': 필터 유효성 역증명 — [4수01-07] 원시 6행 ≠ 시도 5행, 서랍은 5를 보여야", async () => {
+  const CODE = '[4수01-07]';
+  const raw = tdb.prepare(
+    'SELECT COUNT(*) c FROM learning_logs WHERE user_id = ? AND achievement_code = ?'
+  ).get(STUDENT1, CODE).c;
+  const att = tdb.prepare(
+    `SELECT COUNT(*) c FROM learning_logs WHERE user_id = ? AND achievement_code = ? AND ${ATTEMPT_WHERE_2ND_BOOK}`
+  ).get(STUDENT1, CODE).c;
+  assert.ok(raw > att,
+    `전제 붕괴: ${CODE} 에 판정 없는 학습 이력이 없어 필터 유효성을 증명할 수 없음(raw=${raw}, att=${att}). ` +
+    '실 DB 픽스처가 바뀌었으면 같은 성질(판정 없는 행 혼재)의 코드로 교체할 것.');
+  const r = await req(`/mastery/detail?user_id=${STUDENT1}&achievement_code=${encodeURIComponent(CODE)}`, TEACHER);
+  assert.equal(r.status, 200);
+  assert.equal(r.json.count, att, `${CODE}: count 는 시도(${att})여야 — 무필터(${raw})면 필터 누락`);
+  assert.notEqual(r.json.count, raw, `${CODE}: count 가 무필터 행수(${raw})와 같음 = 필터 미적용`);
 });
 
 // ──────────────────────────────────────────────────────────────────────────
