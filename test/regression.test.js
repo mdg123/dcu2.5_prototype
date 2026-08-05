@@ -1044,7 +1044,7 @@ test('INV-K6: 스택바=내역 — 교과별 4상태 합 == bySubject.standardCo
 //   박제 소관: P2 스펙 §4-2(PM/BE). FE 코드를 복제(미러) 하지 않고 원본을 추출 실행
 //   — FE 가 템플릿을 바꾸면 이 테스트가 그 바뀐 문장을 그대로 검사한다.
 // ──────────────────────────────────────────────────────────────────────────
-test('INV-K9: 처방 템플릿 — 12조합(compare/self × +7/0/−7 × weak0 유무) 금칙어 0·변수잔존 0·단원명 정합', () => {
+test('INV-K9: 처방 템플릿 — 16조합(compare/self × +7/0/−7 × weak0 유무 + 얇은표본 4) 금칙어 0·변수잔존 0·단원명 정합', () => {
   const fs = require('fs');
   const path = require('path');
   const vm = require('vm');
@@ -1056,15 +1056,21 @@ test('INV-K9: 처방 템플릿 — 12조합(compare/self × +7/0/−7 × weak0 �
   const src = html.slice(start, end + '})();'.length);
 
   // 원본 IIFE 가 참조하는 클로저 변수·DOM 을 샌드박스로 주입해 실행
-  function runRx({ mode, delta, weak0 }) {
+  function runRx({ mode, delta, weak0, thin }) {
     const els = {
       sTrendRx: { hidden: true },
       sTrendRxText: { innerHTML: '' },
     };
+    // [A4b R-5] attempts 축 추가. 과거엔 valuedPts 에 attempts 가 아예 없어 IIFE 의
+    //   thinRecent 가 항상 false 였고, 그 분기의 문장("최근에 푼 문제가 적어서 …")은
+    //   금칙어·변수잔존 검사를 **한 번도 받지 못했다**. thin=true 면 마지막 주를 2문제로 만든다.
+    const att = (n) => (thin ? { attempts: n } : { attempts: 8 });
     const sandbox = {
       document: { getElementById: (id) => els[id] || null },
       // compare: 겹치는 주 2개, mean(my)-mean(class) == delta / self: 마지막 2점 차 == delta
-      valuedPts: mode === 'self' ? [{ rate: 50 }, { rate: 50 + delta }] : [{ rate: 60 }, { rate: 60 }],
+      valuedPts: mode === 'self'
+        ? [Object.assign({ rate: 50 }, att(8)), Object.assign({ rate: 50 + delta }, att(2))]
+        : [Object.assign({ rate: 60 }, att(8)), Object.assign({ rate: 60 }, att(2))],
       drawOverlay: mode === 'compare',
       chartLabels: ['2026-01', '2026-02'],
       myVals: mode === 'compare' ? [60 + delta, 60 + delta] : [60, 60],
@@ -1083,19 +1089,36 @@ test('INV-K9: 처방 템플릿 — 12조합(compare/self × +7/0/−7 × weak0 �
   const LEFTOVER = /\{[^}]*\}/; // {delta}·{단원} 류 변수 잔존
   const WEAK0 = { label: '두 자리 수의 곱셈', achievement_code: '[4수01-05]' };
 
+  // 12조합(두꺼운 표본) + 4조합(얇은 표본 self × delta ±7 × weak0 유무) = 16조합.
+  //   얇은 표본은 self 모드에서만 분기가 갈린다(compare 는 겹치는 주 평균이라 thinRecent 미사용).
+  const COMBOS = [];
   for (const mode of ['compare', 'self']) {
     for (const delta of [7, 0, -7]) {
-      for (const w of [WEAK0, null]) {
-        const tag = `${mode}/delta=${delta}/weak0=${w ? 'Y' : 'N'}`;
-        const els = runRx({ mode, delta, weak0: w });
-        assert.equal(els.sTrendRx.hidden, false, `INV-K9(${tag}): 처방 박스가 렌더되지 않음`);
-        const text = String(els.sTrendRxText.innerHTML || '');
-        assert.ok(text.length > 0, `INV-K9(${tag}): 문장 비어 있음`);
-        assert.ok(!FORBIDDEN.test(text), `INV-K9①(${tag}): 금칙어 검출 — "${text}"`);
-        assert.ok(!LEFTOVER.test(text), `INV-K9②(${tag}): 템플릿 변수 잔존 — "${text}"`);
-        if (w) assert.ok(text.includes(w.label), `INV-K9③(${tag}): 문장 속 단원명 != weaknesses[0].label — "${text}"`);
-      }
+      for (const w of [WEAK0, null]) COMBOS.push({ mode, delta, weak0: w, thin: false });
     }
+  }
+  for (const delta of [7, -7]) {
+    for (const w of [WEAK0, null]) COMBOS.push({ mode: 'self', delta, weak0: w, thin: true });
+  }
+  assert.equal(COMBOS.length, 16, 'INV-K9: 조합 수가 16이 아님(축 추가/삭제 시 갱신 필요)');
+
+  {
+    // 얇은 표본 분기가 실제로 다른 문장을 내는지 먼저 확인 — 아니면 축을 늘려도 죽은 검사다.
+    const thick = String(runRx({ mode: 'self', delta: 7, weak0: WEAK0, thin: false }).sTrendRxText.innerHTML || '');
+    const thinS = String(runRx({ mode: 'self', delta: 7, weak0: WEAK0, thin: true }).sTrendRxText.innerHTML || '');
+    assert.notEqual(thinS, thick, 'INV-K9: attempts<3 인데 두꺼운 표본과 같은 문장 — thinRecent 분기가 죽어 있음');
+    assert.ok(!/올랐어요/.test(thinS), `INV-K9: 얇은 표본(2문제)인데 상승 단정 문장 — "${thinS}"`);
+  }
+
+  for (const { mode, delta, weak0: w, thin } of COMBOS) {
+    const tag = `${mode}/delta=${delta}/weak0=${w ? 'Y' : 'N'}/thin=${thin ? 'Y' : 'N'}`;
+    const els = runRx({ mode, delta, weak0: w, thin });
+    assert.equal(els.sTrendRx.hidden, false, `INV-K9(${tag}): 처방 박스가 렌더되지 않음`);
+    const text = String(els.sTrendRxText.innerHTML || '');
+    assert.ok(text.length > 0, `INV-K9(${tag}): 문장 비어 있음`);
+    assert.ok(!FORBIDDEN.test(text), `INV-K9①(${tag}): 금칙어 검출 — "${text}"`);
+    assert.ok(!LEFTOVER.test(text), `INV-K9②(${tag}): 템플릿 변수 잔존 — "${text}"`);
+    if (w) assert.ok(text.includes(w.label), `INV-K9③(${tag}): 문장 속 단원명 != weaknesses[0].label — "${text}"`);
   }
 });
 

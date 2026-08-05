@@ -1212,7 +1212,12 @@ test.describe('스모크: LRS A4 성취 모집단 고지 정합·표기 정직�
             : null;
           const txt = (document.getElementById('viewRoot') || {}).innerText || '';
           const subM = txt.match(/아직 판정 못 한 성취기준 (\d+)개/);
-          const recoM = txt.match(/미판정 (\d+)개/);
+          // [A4b R-3] 세 번째 독립 렌더러가 추천 카운터 → 강·약 부제로 바뀌었다.
+          //   카운터에서 모집단 수를 뺀 이유: 한 줄에 "판정 전 1개 … 전체 미판정 14개"처럼
+          //   같은 상태의 이름이 둘 등장했기 때문(어휘 분열). 대신 **다른 DOM 노드**를 읽어
+          //   도넛 부제와의 독립성을 유지한다(innerText 전체 match 는 첫 일치만 잡혀 자기참조가 된다).
+          const dvSub = document.querySelector('#sDivergeSection .mastery-sub');
+          const recoM = (dvSub ? (dvSub.textContent || '') : '').match(/아직 판정 못 한 (\d+)개는 위 도넛/);
           // 도넛 범례·세그먼트는 canvas 안이라 innerText 로 안 잡힌다 → Chart 인스턴스에서 직접 읽는다.
           const canvas = document.getElementById('sMastDonut');
           const ch = (canvas && window.Chart && window.Chart.getChart) ? window.Chart.getChart(canvas) : null;
@@ -1247,7 +1252,7 @@ test.describe('스모크: LRS A4 성취 모집단 고지 정합·표기 정직�
         if (r.apiInsuf > 0) {
           expect.soft(r.subN, `INV-A4-5 [${vp.name}] 도넛 부제 고지 N(${r.subN}) != counts.insufficient(${r.apiInsuf})`).toBe(r.apiInsuf);
           expect.soft(r.segN, `INV-A4-5 [${vp.name}] 도넛 회색 세그먼트 값(${r.segN}) != counts.insufficient(${r.apiInsuf})`).toBe(r.apiInsuf);
-          expect.soft(r.recoN, `INV-A4-5 [${vp.name}] 추천 카운터 미판정 N(${r.recoN}) != counts.insufficient(${r.apiInsuf})`).toBe(r.apiInsuf);
+          expect.soft(r.recoN, `INV-A4-5 [${vp.name}] 강·약 부제 고지 N(${r.recoN}) != counts.insufficient(${r.apiInsuf})`).toBe(r.apiInsuf);
         }
         expect.soft(r.oldSub, `INV-A4-5 [${vp.name}] 구 문구 "평가 부족 N개는 분모에서 제외" 재출현`).toBeFalsy();
         expect.soft(r.oldLegend, `INV-A4-5 [${vp.name}] 학생 도넛 범례에 구 어휘 "평가 부족" 재출현`).toBeFalsy();
@@ -1322,6 +1327,336 @@ test.describe('스모크: LRS A4 성취 모집단 고지 정합·표기 정직�
         expect.soft(tr.hasBadge,
           `INV-A4-8: confidence=${tr.conf}(저신뢰)인데 "변동이 커서 참고용" 배지 없음`).toBeTruthy();
       }
+      await page.close();
+    } finally { await context.close(); }
+  });
+});
+
+// ── 9) [A4b 판정 임계 일관성] 도넛·강약차트·추천 카운터·추세 문구가 같은 분류기를 쓰는가 ──
+//    배경: A4 배포 후 GCP 실서버 student1(전 셀 attempts<3)에서 한 화면이 세 가지로 말했다.
+//      · 도넛 중앙 "14 / 14"(= 14개 중 14개 달성으로 읽힘) — 실제 도달 0개
+//      · 도넛 "평가된 0개" ↔ 강·약 차트 빨간 "미도달" 막대 2개(정본사전 §4-3 위반)
+//      · r²=0.02 인데 "이미 정답률 80% 수준이에요 · 이대로 꾸준히!"
+//    원인: 도넛은 SSOT status(classifyStatus, MIN_ATTEMPTS=3)를 쓰는데 강·약 차트와
+//          추천 카운터는 임계를 보지 않고 rate 만 봤다(FE 에 임계가 두 벌).
+//
+//      INV-A4-9  임계 일관성 : 강·약 차트에 그려진 막대는 전부 status !== 'insufficient'.
+//                              판정 끝난 셀이 0개면 차트가 아니라 빈 상태.
+//      INV-A4-10 도넛 중앙   : .dc-num 이 "A / B" 형태라면 A==counts.reached ∧ B==평가된 수.
+//                              (분모 0에서 비율을 만들지 않는다 — "14 / 14" 재발 차단)
+//      INV-A4-11 저신뢰 단정 : confidence!=='high' 이면 성취 수준·유지 단정 문구 0건.
+//    실 DB 는 이 상태를 재현하지 못하므로(로컬·스모크 사본 student1 은 판정 완료 셀 보유)
+//    GCP 실측을 그대로 옮긴 합성 페이로드를 route 스텁으로 주입해 FE 계약만 검사한다.
+test.describe('스모크: LRS A4b 판정 임계 일관성(INV-A4-9·10·11)', () => {
+  /** GCP 실측 재현 픽스처 — total 14 / 전부 insufficient / attempts>0 7건 / attempts>=3 0건 */
+  const S = (code, label, attempts, correct, subject) => ({
+    code, std_id: null, std_ids: [], label, fullLabel: label, area: null,
+    subject_code: 'math-e', subject: subject || '수학',
+    attempts, correct,
+    rate: attempts > 0 ? Math.round((correct / attempts) * 1000) / 10 : null,
+    status: 'insufficient', statusKo: '평가부족',
+    lastAt: '2026-08-01 10:00:00', recommendations: [],
+  });
+  const FIX_MASTERY = {
+    success: true, userId: 3, scoped: false, period: null,
+    counts: { total: 14, reached: 0, partial: 0, notReached: 0, insufficient: 14 },
+    distribution: { reached: 0, partial: 0, not_reached: 0, insufficient: 14, total: 14 },
+    bySubject: [
+      { subject_code: 'math-e', subject: '수학', standardCount: 13, evaluatedCount: 0, reachedCount: 0, reachedRate: null, avgRate: 77.8 },
+      { subject_code: 'english-e', subject: '영어', standardCount: 1, evaluatedCount: 0, reachedCount: 0, reachedRate: null, avgRate: null },
+    ],
+    strengths: [], weaknesses: [],
+    standards: [
+      S('[4수01-16]', '나눗셈의 활용', 2, 2),
+      S('[4수01-05]', '나눗셈의 의미', 1, 0),   // rate 0 — 과거 코드가 빨간 "미도달"로 그리던 셀
+      S('[4수01-14]', '곱셈의 활용', 1, 1),
+      S('[4수01-15]', '분수의 크기 비교', 1, 1),
+      S('[4수02-03]', '직각삼각형', 1, 0),      // rate 0 — 위와 같음
+      S('[4수01-11]', '소수의 덧셈', 1, 1),
+      S('[4수03-09]', '들이와 무게', 2, 2),
+      S('[4수01-02]', '큰 수의 자릿값', 0, 0),
+      S('[4수01-13]', '분수의 덧셈', 0, 0),
+      S('[4수03-02]', '평면도형의 이동', 0, 0),
+      S('[4수03-04]', '각도의 합과 차', 0, 0),
+      S('[4수03-10]', '시간의 계산', 0, 0),
+      S('[4수04-02]', '막대그래프', 0, 0),
+      S('[4영01-08]', '알파벳 익히기', 0, 0, '영어'),
+    ],
+  };
+  const RECO_ROW = {
+    priority: 'recommended', achievement_code: '[4수01-05]', label: '나눗셈의 의미', fullLabel: '나눗셈의 의미',
+    subject_code: 'math-e', subject_label: '수학', status: 'insufficient', statusLabel: '평가부족',
+    hasScore: false, avg_score: null, correctRate: 0, success_count: 0, attempt_count: 1,
+    // ⚠ 실제 BE 문구 그대로(routes/lrs.js recoReasonText — STATUS.INSUFFICIENT 분기).
+    //   픽스처가 임의 문구를 쓰면 어휘 단언이 화면이 아니라 픽스처를 검사하게 된다.
+    reasonText: '아직 1번밖에 안 풀었어요 — 3번 이상 풀면 도달 판정을 받을 수 있어요',
+    estMinutes: 12, recommendedContentIds: [],
+  };
+  const FIX_INSIGHTS = { success: true, userId: 3, weaknesses: [RECO_ROW], strengths: [], recommendations: [RECO_ROW] };
+  // r²=0.02(저신뢰) · 관측 4주 · 이번 주 100%(2문제 중 2개) · 최근 2주 35 → 100(+65%p)
+  const FIX_TREND = {
+    success: true, userId: 3, target: 80,
+    period: { fromDate: '2026-07-06', toDate: '2026-08-05', label: '최근 30일', weeks: 8 },
+    trend: {
+      status: 'ok', slope: 3.1, r2: 0.02, confidence: 'low',
+      direction: 'up', directionKo: '상승', observedWeeks: 4, currentRate: 100,
+      series: [
+        { week: '2026-28', rate: 50, attempts: 4 },
+        { week: '2026-29', rate: 0, attempts: 1 },
+        { week: '2026-30', rate: 35, attempts: 3 },
+        { week: '2026-31', rate: 100, attempts: 2 },
+      ],
+    },
+    projection: { status: 'ok', reachable: true, weeksToReach: 2, band: { lo: 40, hi: 100 } },
+    disclaimer: '이 추정은 규칙 기반이라 실제와 다를 수 있어요.',
+  };
+
+  async function gotoAchieve(page) {
+    await page.goto('/lrs/index.html?menu=analytics#s-achieve', { waitUntil: 'domcontentloaded' });
+    await page.waitForSelector('#viewRoot', { timeout: 15000 }).catch(() => {});
+    await page.waitForFunction(() => {
+      const vr = document.getElementById('viewRoot');
+      return !!(vr && (vr.querySelector('#sMastDonut') || vr.querySelector('.mastery-empty')));
+    }, { timeout: 20000 }).catch(() => {});
+    await page.waitForFunction(() => {
+      const c = document.getElementById('sTrendChips');
+      return !!(c && c.innerHTML);
+    }, { timeout: 20000 }).catch(() => {});
+    await page.waitForTimeout(700);
+  }
+
+  /** 화면에서 도넛 중앙·강약 막대·추천 카운터·추세 문구를 한 번에 채집. */
+  const probe = (page) => page.evaluate(async () => {
+    const vr = document.getElementById('viewRoot');
+    const txt = (vr && vr.innerText) || '';
+    const me = await fetch('/api/auth/me', { credentials: 'include' }).then((x) => x.json()).catch(() => null);
+    const uid = me && (me.user ? me.user.id : me.id);
+    const api = uid
+      ? await fetch('/api/lrs/mastery/student/' + uid, { credentials: 'include' }).then((x) => x.json()).catch(() => null)
+      : null;
+    const dc = document.querySelector('#sMastDonut')?.closest('.donut-wrap')?.querySelector('.donut-center');
+    const ch = (window.Chart && window.Chart.getChart)
+      ? window.Chart.getChart(document.getElementById('sMastDiverge')) : null;
+    const ds = ch && ch.data && ch.data.datasets[0] ? ch.data.datasets[0] : null;
+    const meta = ds ? (ds._meta || []) : null;
+    const c = api && api.counts ? api.counts : null;
+    // 카운터는 innerText 전역 매치가 아니라 **그 노드**에서 읽는다(다른 문구와 섞이지 않게).
+    const cnt = document.querySelector('#sNextSection .ms-controls')?.textContent || '';
+    // 범례 색(CSS 디자인 토큰) — 막대 색 계약의 기준값. JS 상수를 테스트가 복제하지 않는다.
+    const rs = getComputedStyle(document.documentElement);
+    const norm = (v) => String(v || '').trim().toLowerCase();
+    const legendHex = {
+      reached: norm(rs.getPropertyValue('--mastery-reached')),
+      partial: norm(rs.getPropertyValue('--mastery-partial')),
+      notReached: norm(rs.getPropertyValue('--mastery-notreached')),
+      insufficient: norm(rs.getPropertyValue('--mastery-insufficient')),
+    };
+    const normStatusT = (s) => (s === 'not_reached' || s === 'notReached') ? 'notReached'
+      : (s === 'reached' || s === 'partial' || s === 'insufficient') ? s : 'insufficient';
+    const bg = ds ? ds.backgroundColor : null;
+    return {
+      ok: !!(api && api.success && c),
+      counts: c,
+      evaluated: c ? (Number(c.reached || 0) + Number(c.partial || 0) + Number(c.notReached || 0)) : null,
+      dcNum: dc ? (dc.querySelector('.dc-num')?.textContent || '') : null,
+      barStatuses: meta ? meta.map((s) => String(s && s.status)) : null,
+      barCount: meta ? meta.length : 0,
+      // [A4b R-4] 막대별 (라벨, 상태, 실제 칠해진 색, 상태가 요구하는 범례 색, 부호)
+      bars: meta ? meta.map((s, i) => ({
+        label: s && s.label, status: normStatusT(s && s.status),
+        color: norm(Array.isArray(bg) ? bg[i] : bg),
+        want: legendHex[normStatusT(s && s.status)],
+        value: ds.data[i],
+      })) : null,
+      legendHex,
+      divergeEmpty: !!document.querySelector('#sDivergeBody .mastery-empty'),
+      // 빈 상태에서 막대에 종속된 부속 UI 가 남아 있는지(R-2)
+      asideVisible: ['#sDivergeSection .ms-controls', '#sDivergeSection .mastery-legend']
+        .map((sel) => { const e = document.querySelector(sel); return e ? getComputedStyle(e).display !== 'none' : false; }),
+      recoFill: (cnt.match(/보완\s*(\d+)\s*개/) || [null, null])[1],
+      recoPre: (cnt.match(/아직 판정 못 함\s*(\d+)\s*개/) || [null, null])[1],
+      recoDeep: (cnt.match(/심화\s*(\d+)\s*개/) || [null, null])[1],
+      counterTxt: cnt,
+      // [A4b R-3] 평가부족 상태를 부르는 이름이 화면에 몇 종류나 있는가(SSOT 1종이어야 함)
+      vocabHits: ['판정 전', '미판정', '판정을 기다리'].filter((w) => txt.includes(w)),
+      recoCards: document.querySelectorAll('#sRecoGrid .reco-card').length,
+      chips: document.getElementById('sTrendChips')?.innerText || '',
+      rx: document.getElementById('sTrendRxText')?.innerText || '',
+      lowConfBadge: !!document.querySelector('.strend-lowconf'),
+    };
+  });
+
+  /** 임계 일관성 + 도넛 중앙 비율 계약 — 어떤 데이터에서도 성립해야 하는 공통 단언. */
+  function assertThresholdContract(r, tag) {
+    // (1) 그려진 막대는 전부 판정이 끝난 셀이어야 한다("평가 부족" ≠ "미도달")
+    const bad = (r.barStatuses || []).filter((s) => s === 'insufficient');
+    expect.soft(bad.length,
+      `INV-A4-9 [${tag}] 강·약 차트에 판정 임계 미달(insufficient) 막대 ${bad.length}개 — 도넛은 평가된 ${r.evaluated}개라고 말하는데 여기선 미도달로 그린다`).toBe(0);
+    // (1-b) [A4b R-4] 막대 색은 **버킷(좌/우)이 아니라 상태**를 따라야 한다.
+    //   좌반면을 무조건 빨강(미도달)으로 칠하면 정답률 50~69 인 "부분 도달"이 범례상 미도달로 보인다.
+    //   기준값은 테스트가 복제한 상수가 아니라 화면이 실제로 쓰는 CSS 디자인 토큰(범례 색)이다.
+    for (const b of (r.bars || [])) {
+      if (!b.want) continue; // 토큰 미해석(브라우저 차이) 시 건너뜀 — 위양성 방지
+      expect.soft(b.color, `INV-A4-9 [${tag}] 막대 "${b.label}"(${b.status}) 색 ${b.color} != 범례 ${b.status} 색 ${b.want}`).toBe(b.want);
+    }
+    // (2) 판정 끝난 셀이 0개면 막대가 하나도 없어야 하고, 빈 상태가 떠야 한다
+    if (r.evaluated === 0) {
+      expect.soft(r.barCount, `INV-A4-9 [${tag}] 평가된 성취기준 0개인데 강·약 막대 ${r.barCount}개 렌더`).toBe(0);
+      expect.soft(r.divergeEmpty, `INV-A4-9 [${tag}] 평가된 성취기준 0개인데 강·약 빈 상태 안내 없음`).toBeTruthy();
+      // [A4b R-2] 막대가 0개면 그 막대를 설명하는 부속 UI(표시 개수·4색 범례)도 남으면 안 된다
+      expect.soft(r.asideVisible, `INV-A4-9 [${tag}] 빈 상태인데 [표시개수, 범례] 노출 = ${JSON.stringify(r.asideVisible)}`).toEqual([false, false]);
+    }
+    // (2-b) [A4b R-3] 평가부족 상태의 이름은 SSOT 1종("아직 판정 못 함")만 쓴다
+    expect.soft(r.vocabHits, `INV-A4-9 [${tag}] 평가부족 어휘 분열 — 금지 표현 ${JSON.stringify(r.vocabHits)} 노출(SSOT: insufKo())`).toEqual([]);
+    // (3) 도넛 중앙이 "A / B" 비율이면 A=도달·B=평가된 수여야 한다(분모 0 비율 창작 금지)
+    const m = String(r.dcNum || '').match(/^\s*(\d+)\s*\/\s*(\d+)\s*$/);
+    if (m) {
+      expect.soft(Number(m[1]), `INV-A4-10 [${tag}] 도넛 중앙 분자(${m[1]}) != counts.reached(${r.counts.reached})`).toBe(Number(r.counts.reached || 0));
+      expect.soft(Number(m[2]), `INV-A4-10 [${tag}] 도넛 중앙 분모(${m[2]}) != 평가된 성취기준 수(${r.evaluated}) — "N / N"이 완료율로 오독된다`).toBe(Number(r.evaluated));
+    }
+    // (4) 추천 카운터: 보완/판정 전/심화 합 == 실제 렌더된 추천 카드 수
+    if (r.recoFill != null && r.recoPre != null && r.recoDeep != null) {
+      const sum = Number(r.recoFill) + Number(r.recoPre) + Number(r.recoDeep);
+      expect.soft(sum, `INV-A4-9 [${tag}] 추천 카운터 합(${sum}) != 렌더된 추천 카드 수(${r.recoCards})`).toBe(r.recoCards);
+    }
+  }
+
+  test('INV-A4-9·10: 실 데이터 — 강·약 막대 전부 판정 완료 · 도넛 중앙 비율 계약', async ({ browser }) => {
+    const context = await browser.newContext({ storageState: stateFor('student'), locale: 'ko-KR', baseURL: BASE_URL });
+    try {
+      const page = await context.newPage();
+      page.setViewportSize({ width: 1440, height: 900 });
+      await gotoAchieve(page);
+      const r = await probe(page);
+      if (!r.ok) {
+        test.info().annotations.push({ type: 'skip-screen', description: 'mastery 데이터 없음 — 스킵' });
+      } else {
+        assertThresholdContract(r, '실DB');
+      }
+      await page.close();
+    } finally { await context.close(); }
+  });
+
+  for (const vp of VIEWPORTS) {
+    test(`INV-A4-9·10·11: GCP 재현(전 셀 판정 임계 미달) 합성 페이로드 [${vp.name}]`, async ({ browser }) => {
+      const context = await browser.newContext({ storageState: stateFor('student'), locale: 'ko-KR', baseURL: BASE_URL });
+      try {
+        const page = await context.newPage();
+        page.setViewportSize({ width: vp.width, height: vp.height });
+        const json = (body) => ({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
+        await page.route('**/api/lrs/mastery/student/**', (rt) => rt.fulfill(json(FIX_MASTERY)));
+        await page.route('**/api/lrs/insights/**', (rt) => rt.fulfill(json(FIX_INSIGHTS)));
+        await page.route('**/api/lrs/trend/student/**', (rt) => rt.fulfill(json(FIX_TREND)));
+        await gotoAchieve(page);
+        const r = await probe(page);
+
+        expect(r.ok, `[${vp.name}] 합성 mastery 페이로드가 주입되지 않음(route 스텁 실패)`).toBeTruthy();
+        expect(r.evaluated, `[${vp.name}] 픽스처 전제 붕괴 — 평가된 성취기준이 0이 아님`).toBe(0);
+        assertThresholdContract(r, `${vp.name}/합성`);
+
+        // 도넛 중앙이 "14 / 14"(= 평가부족 수 / 총계)로 되살아나면 실패
+        expect.soft(r.dcNum, `INV-A4-10 [${vp.name}] 도넛 중앙이 "N / N"(완료율 오독) 로 재출현 — ${r.dcNum}`)
+          .not.toMatch(/^\s*14\s*\/\s*14\s*$/);
+        // 판정 임계를 못 넘은 추천은 "보완"이 아니다(도넛의 평가된 0개와 모순)
+        expect.soft(Number(r.recoFill), `INV-A4-9 [${vp.name}] 평가된 0개인데 추천 카운터 "보완 ${r.recoFill}개"`).toBe(0);
+        // 고지 N 은 여전히 counts.insufficient(INV-A4-5 계약 유지)
+        // 고지 N 은 여전히 counts.insufficient — 렌더러가 카운터 → 강·약 부제로 바뀌었을 뿐(R-3)
+        const dvN = await page.evaluate(() => {
+          const e = document.querySelector('#sDivergeSection .mastery-sub');
+          const m = (e ? (e.textContent || '') : '').match(/아직 판정 못 한 (\d+)개는 위 도넛/);
+          return m ? Number(m[1]) : null;
+        });
+        expect.soft(dvN, `INV-A4-5 [${vp.name}] 강·약 부제 고지 N(${dvN}) != counts.insufficient(14)`).toBe(14);
+
+        // ── INV-A4-11: 저신뢰(r²=0.02)에서 성취 수준·유지 단정 금지 ──
+        expect.soft(/이미 정답률\s*\d+%\s*수준/.test(r.chips),
+          `INV-A4-11 [${vp.name}] 저신뢰(r²=0.02)·평가된 0개인데 "이미 정답률 N% 수준" 단정 — ${r.chips}`).toBeFalsy();
+        expect.soft(/이대로 꾸준히!/.test(r.chips),
+          `INV-A4-11 [${vp.name}] 저신뢰인데 "이대로 꾸준히!" 단정 — ${r.chips}`).toBeFalsy();
+        expect.soft(/꾸준히 오르고 있어요/.test(r.chips),
+          `INV-A4-11 [${vp.name}] 저신뢰인데 방향 단정 — ${r.chips}`).toBeFalsy();
+        expect.soft(/\d+\s*주 후/.test(r.chips),
+          `INV-A4-11 [${vp.name}] 저신뢰인데 시기 단정 — ${r.chips}`).toBeFalsy();
+        expect.soft(r.lowConfBadge,
+          `INV-A4-11 [${vp.name}] 저신뢰인데 "변동이 커서 참고용" 배지 없음`).toBeTruthy();
+        // 1~2문제만 푼 주가 낀 Δ 로 "N점 올랐어요" 단정 금지(35%→100% 의 실체는 2문제 중 2개)
+        expect.soft(/정답률이\s*\d+점\s*올랐어요/.test(r.rx),
+          `INV-A4-11 [${vp.name}] 표본 얇은 주(1~2문제)를 근거로 상승 단정 — ${r.rx}`).toBeFalsy();
+
+        // 가로 스크롤 0 (합성 데이터에서도)
+        const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+        expect.soft(overflow, `[${vp.name}] 가로 스크롤 ${overflow}px`).toBeLessThanOrEqual(0);
+
+        await page.close();
+      } finally { await context.close(); }
+    });
+  }
+
+  // ── [A4b R-4] 색 계약 — 4상태가 섞인 상태에서 막대 색이 상태와 1:1인가 ────────────
+  //   위 GCP 재현 픽스처는 전 셀이 평가부족이라 막대가 0개다. 그래서 "약점 버킷을 무조건
+  //   빨강으로 칠하던" 결함은 그 픽스처로는 **절대 재현되지 않는다**(감리 역주입 R5 가 뚫린 이유).
+  //   도달·부분(강)·부분(약)·미도달·평가부족을 한 학생에 섞어, 정답률 50~69 인 "부분 도달"이
+  //   좌반면에 놓여도 주황을 유지하는지 본다. 기준값은 화면이 쓰는 CSS 토큰(범례 색)이다.
+  const M = (code, label, attempts, correct, status) => ({
+    code, std_id: null, std_ids: [], label, fullLabel: label, area: null,
+    subject_code: 'math-e', subject: '수학', attempts, correct,
+    rate: attempts > 0 ? Math.round((correct / attempts) * 1000) / 10 : null,
+    status, statusKo: status, lastAt: '2026-08-01 10:00:00', recommendations: [],
+  });
+  const FIX_MIXED = {
+    success: true, userId: 3, scoped: false, period: null,
+    counts: { total: 5, reached: 1, partial: 2, notReached: 1, insufficient: 1 },
+    distribution: { reached: 1, partial: 2, not_reached: 1, insufficient: 1, total: 5 },
+    bySubject: [{ subject_code: 'math-e', subject: '수학', standardCount: 5, evaluatedCount: 4, reachedCount: 1, reachedRate: 25, avgRate: 62 }],
+    strengths: [], weaknesses: [],
+    standards: [
+      M('[4수01-04]', '두 자리 수의 곱셈', 10, 10, 'reached'),      // 100% → 강점 · 초록
+      M('[4수01-07]', '들이와 무게', 10, 7, 'partial'),             //  70% → 강점 · 주황
+      M('[4수01-08]', '분수의 크기 비교', 10, 6, 'partial'),        //  60% → 약점 · 주황  ★ R5 표적
+      M('[4수01-05]', '나눗셈의 의미', 10, 2, 'not_reached'),       //  20% → 약점 · 빨강
+      M('[4수03-02]', '평면도형의 이동', 1, 0, 'insufficient'),     //   0% → 그리지 않음
+    ],
+  };
+
+  test('INV-A4-9(색 계약): 4상태 혼합 — 막대 색 == 상태 색, 약점 부분도달이 빨강으로 강등되지 않음', async ({ browser }) => {
+    const context = await browser.newContext({ storageState: stateFor('student'), locale: 'ko-KR', baseURL: BASE_URL });
+    try {
+      const page = await context.newPage();
+      page.setViewportSize({ width: 1440, height: 900 });
+      const json = (b) => ({ status: 200, contentType: 'application/json', body: JSON.stringify(b) });
+      await page.route('**/api/lrs/mastery/student/**', (rt) => rt.fulfill(json(FIX_MIXED)));
+      await gotoAchieve(page);
+      const r = await probe(page);
+
+      expect(r.ok, '합성 mastery 페이로드 주입 실패').toBeTruthy();
+      // 평가부족 1건은 제외되고 판정 완료 4건만 그려진다
+      expect.soft(r.barCount, `INV-A4-9(색): 막대 수 ${r.barCount} != 판정 완료 4건`).toBe(4);
+      assertThresholdContract(r, '혼합');
+
+      const by = Object.fromEntries((r.bars || []).map((b) => [b.label, b]));
+      const pw = by['분수의 크기 비교'];   // 60% — 약점 버킷의 부분 도달
+      const nr = by['나눗셈의 의미'];      // 20% — 미도달
+      const ps = by['들이와 무게'];        // 70% — 강점 버킷의 부분 도달
+      const rc = by['두 자리 수의 곱셈'];  // 100% — 도달
+
+      expect.soft(!!pw, 'INV-A4-9(색): 약점 부분도달 막대가 없음(픽스처 전제 붕괴)').toBeTruthy();
+      if (pw) {
+        // ★ 감리 R5 역주입(약점 버킷 = 무조건 빨강)이 정확히 여기서 붉어진다
+        expect.soft(pw.color, `INV-A4-9(색): 정답률 60% "부분 도달"이 미도달 빨강(${r.legendHex.notReached})으로 강등 — 범례와 불일치`).toBe(r.legendHex.partial);
+        expect.soft(pw.color, 'INV-A4-9(색): 부분 도달 막대가 미도달 색과 같음').not.toBe(r.legendHex.notReached);
+        expect.soft(pw.value < 0, `INV-A4-9(색): 약점(60%)이 좌반면(음수)에 있지 않음 — value=${pw.value}`).toBeTruthy();
+      }
+      if (ps) {
+        expect.soft(ps.color, 'INV-A4-9(색): 강점 부분도달 색 != 범례 부분도달').toBe(r.legendHex.partial);
+        expect.soft(ps.value > 0, `INV-A4-9(색): 강점(70%)이 우반면(양수)에 있지 않음 — value=${ps.value}`).toBeTruthy();
+      }
+      if (nr) expect.soft(nr.color, 'INV-A4-9(색): 미도달 색 != 범례 미도달').toBe(r.legendHex.notReached);
+      if (rc) expect.soft(rc.color, 'INV-A4-9(색): 도달 색 != 범례 도달').toBe(r.legendHex.reached);
+      // 부분 도달 두 개가 좌·우로 갈려도 **같은 색**이어야 한다(버킷이 색을 바꾸지 않는다)
+      if (pw && ps) expect.soft(pw.color, 'INV-A4-9(색): 같은 부분 도달인데 좌/우 버킷에 따라 색이 다름').toBe(ps.color);
+      // 막대가 있으면 부속 UI(표시 개수·범례)는 보여야 한다(R-2 의 반대 방향 — 과잉 숨김 금지)
+      expect.soft(r.asideVisible, `INV-A4-9(색): 막대가 있는데 [표시개수, 범례] 노출 = ${JSON.stringify(r.asideVisible)}`).toEqual([true, true]);
+
       await page.close();
     } finally { await context.close(); }
   });

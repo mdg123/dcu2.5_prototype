@@ -461,7 +461,8 @@
     .mastery-empty{ display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center;
       padding:40px 24px; color:#6b7280; gap:14px; }
     .mastery-empty .me-icon{ font-size:34px; color:#cbd5e1; }
-    .mastery-empty p{ font-size:16px; line-height:1.6; margin:0; max-width:460px; }
+    /* word-break:keep-all — 한국어 어절 중간에서 줄이 끊기지 않게(“강점·약점 / 이 나타나요” 방지) */
+    .mastery-empty p{ font-size:16px; line-height:1.6; margin:0; max-width:460px; word-break:keep-all; }
 
     /* 2분할 그리드 (S1) */
     .mastery-grid2{ display:grid; grid-template-columns:1fr 1fr; gap:16px; }
@@ -470,8 +471,9 @@
     /* 도넛 중앙 텍스트 래퍼 */
     .donut-wrap{ position:relative; }
     .donut-center{ position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; pointer-events:none; }
-    .donut-center .dc-num{ font-size:24px; font-weight:700; color:#111827; line-height:1.1; }
-    .donut-center .dc-lbl{ font-size:13px; color:#6b7280; margin-top:2px; }
+    /* [A4b R-1] 구멍 폭(플러그인이 maxWidth 로 실측 주입)을 넘으면 어절 단위로 접어 링 침범을 막는다 */
+    .donut-center .dc-num{ font-size:24px; font-weight:700; color:#111827; line-height:1.1; text-align:center; word-break:keep-all; }
+    .donut-center .dc-lbl{ font-size:13px; color:#6b7280; margin-top:2px; text-align:center; word-break:keep-all; line-height:1.3; }
 
     /* ── P1-2: 교과별 성취수준 스택바(중·고 — 좌측 레이더 카드 대체) — 스펙 §3-4 ── */
     .subj-stack{ display:flex; flex-direction:column; gap:14px; justify-content:center; min-height:300px; }
@@ -1780,6 +1782,23 @@ const donutCenterAlignPlugin = {
       overlay.style.top    = (cv.offsetTop  + ca.top)  + 'px';
       overlay.style.width  = (ca.right  - ca.left) + 'px';
       overlay.style.height = (ca.bottom - ca.top)  + 'px';
+
+      // [A4b R-1] 중앙 글자를 **도넛 구멍 안**으로 가둔다.
+      //   오버레이는 chartArea 전체 폭이라, 라벨이 길면 글자가 구멍을 넘어 회색 링 위에 겹친다
+      //   (실측: 375px 에서 innerRadius 46 → 구멍 92px 인데 라벨 111px → 좌우 각 9~10px 침범.
+      //    회색 글자 × 회색 링이라 대비까지 무너졌다). 링 두께에 상관없이 구멍 크기를 실측해
+      //   상한을 걸면, 앞으로 라벨 문구가 길어져도 이 자리는 구조적으로 안전하다.
+      const meta = chart.getDatasetMeta && chart.getDatasetMeta(0);
+      const arc0 = meta && meta.data && meta.data[0];
+      const inner = arc0 && arc0.innerRadius != null ? Number(arc0.innerRadius) : null;
+      if (inner && inner > 0){
+        // 구멍 지름의 88% — 원형이라 모서리로 갈수록 여유가 줄어드는 것을 감안한 안전 여백.
+        overlay.style.maxWidth = Math.max(48, Math.floor(inner * 2 * 0.88)) + 'px';
+        overlay.style.marginLeft = 'auto';
+        overlay.style.marginRight = 'auto';
+        overlay.style.left = (cv.offsetLeft + ca.left + ((ca.right - ca.left) - Math.min((ca.right - ca.left), Math.max(48, Math.floor(inner * 2 * 0.88)))) / 2) + 'px';
+        overlay.style.width = Math.min((ca.right - ca.left), Math.max(48, Math.floor(inner * 2 * 0.88))) + 'px';
+      }
     } catch(_){ /* 오버레이 없으면 무시 */ }
   }
 };
@@ -2109,12 +2128,19 @@ function _ewsWeakHtml(weaknesses){
     </div>`;
 }
 
+/* [A4b R-3] 평가부족 상태의 **유일한** 표시 어휘(SSOT).
+ *   학생 화면은 "평가 부족" → "아직 판정 못 함"으로 평이화(개념·회색 동일),
+ *   교사·관리자는 정본사전 용어("평가 부족") 유지.
+ *   ⚠ 한 화면이 같은 회색을 "아직 판정 못 함"·"판정 전"·"미판정" 3가지로 부르던 것을 막는다.
+ *      새 문구를 쓸 때 이 함수를 거치지 않고 직접 적으면 그 순간 어휘가 다시 갈린다.
+ *   - insufKo()    : 명사형   "아직 판정 못 함"   (범례·카운터 항목)
+ *   - insufKoAdn() : 관형형   "아직 판정 못 한"   (뒤에 명사가 붙는 자리) */
+function insufKo(){ return (state.role === 'student') ? '아직 판정 못 함' : '평가 부족'; }
+function insufKoAdn(){ return (state.role === 'student') ? '아직 판정 못 한' : '평가가 부족한'; }
+
 /* 4상태 범례 (모든 위젯 공통) */
 function masteryLegend(){
-  // [A4 §6-2] 학생 화면은 "평가 부족" → "아직 판정 못 함"으로 평이화(개념·회색 동일).
-  //   같은 페이지의 도넛 부제·범례와 어휘가 갈리면 같은 회색이 두 이름을 갖게 된다.
-  //   교사·관리자는 정본사전 용어("평가 부족") 유지.
-  const insufLabel = (state.role === 'student') ? '아직 판정 못 함' : '평가 부족';
+  const insufLabel = insufKo();
   return `<div class="mastery-legend" aria-label="성취 5상태 범례">
     <span class="item"><span class="dot reached"></span>도달</span>
     <span class="item"><span class="dot partial"></span>부분 도달</span>
@@ -4334,6 +4360,20 @@ VIEWS['s-achieve'] = async function(root){
     return;
   }
 
+  // ── [A4b §1] 도넛 중앙 표기 ────────────────────────────────────────────
+  //   중앙의 "N / M" 은 완료율 관용구다. 평가된 셀이 0개일 때 과거 코드는 평가부족 수를
+  //   그대로 넣어 "14 / 14" 를 띄웠고, 이는 "14개 중 14개 달성"으로 정반대로 읽혔다
+  //   (실제 도달 0개). 도달/평가된 비율은 분모 0에서 정의되지 않으므로 비율을 만들지 않고,
+  //   **분모가 0이라는 사실 자체**를 적는다: "0개 / 평가된 기준".
+  //   [A4b R-3] 명사는 비어있지 않은 상태("도달 / 평가된 기준")와 같은 '평가된 기준'을 쓴다.
+  //     여기에 평가부족 어휘(insufKo)를 또 넣으면 한 화면에 같은 회색의 이름이 늘어난다 —
+  //     그 수(14개)는 바로 위 부제·오른쪽 범례·아래 강약 부제가 이미 SSOT 어휘로 말한다.
+  //   [A4b R-1] 짧게 유지해야 좁은 구멍(375px 에서 92px)을 넘지 않는다. 플러그인이 maxWidth 로
+  //     한 번 더 가두지만, 문구 자체도 구멍에 맞춰 고른다.
+  const donutCenter = allInsufficient
+    ? donutCenterHtml('0개', '평가된 기준')
+    : donutCenterHtml((counts.reached||0) + ' / ' + evaluatedCount, '도달 / 평가된 기준');
+
   // ── P1-2: 좌측 카드 분기(스펙 §3-4) — 중·고 스택바 / 초등 현행 레이더 카드 ──
   //   KERIS에서 가져오는 것은 "가로 스택바" 시각 형식뿐 — A~E 등급 매핑 금지, 우리 4상태 어휘·MASTERY_HEX 색 그대로.
   const leftCardHtml = useStackbar ? `
@@ -4354,12 +4394,22 @@ VIEWS['s-achieve'] = async function(root){
         </div>
       </section>`;
 
-  // [A4 §5-2] 추천 카운터 — 실제로 그려질 추천 카드 구성을 그대로 센다(라벨↔내용 불일치 방지).
-  //   보완 = 미도달·부분도달·평가부족 / 심화 = 도달(한 단계 더) / 미판정 = counts.insufficient(SSOT).
+  // [A4 §5-2 / A4b §2] 추천 카운터 — 실제로 그려질 추천 카드 구성을 그대로 센다(라벨↔내용 불일치 방지).
+  //   [A4b] 과거엔 "보완 = 도달이 아닌 전부"라 판정 임계(3회)를 못 넘긴 평가부족 카드까지 "보완"으로
+  //   셌다. 도넛이 "평가된 0개"라고 말하는 화면에 "보완 1개"가 함께 뜨던 원인이다.
+  //   → 도넛과 같은 분류기(API status)로 3갈래: 보완(미도달·부분도달) / 판정 전(평가부족) / 심화(도달).
   const _recosForCount = (insightsForReco && Array.isArray(insightsForReco.recommendations))
     ? insightsForReco.recommendations.slice(0, 3) : [];
   const _recoDeepCount = _recosForCount.filter(r => normStatus(r.status) === 'reached').length;
-  const _recoFillCount = _recosForCount.length - _recoDeepCount;
+  const _recoPreCount  = _recosForCount.filter(r => normStatus(r.status) === 'insufficient').length;
+  const _recoFillCount = _recosForCount.length - _recoDeepCount - _recoPreCount;
+  // [A4b R-3] 카운터는 **카드 구성만** 센다. 과거엔 여기에 모집단 수까지 얹으면서
+  //   "판정 전 1개 … 전체 미판정 14개"처럼 한 줄에 같은 상태의 이름이 둘 등장했다.
+  //   모집단 수(counts.insufficient)는 도넛 부제·범례·강약 부제가 SSOT 어휘로 이미 말한다.
+  //   항목 이름도 직접 적지 않고 insufKo() 를 거친다(어휘 분열 재발 차단).
+  const _recoCounterText = _recosForCount.length
+    ? `추천 ${_recosForCount.length}장 — 보완 ${_recoFillCount}개 · ${insufKo()} ${_recoPreCount}개 · 심화 ${_recoDeepCount}개`
+    : '아직 추천할 카드가 없어요';
 
   // ── 화면 골격 (S1 → S2 → S4) ─────────────────────────────────────────
   root.innerHTML = `
@@ -4373,11 +4423,12 @@ VIEWS['s-achieve'] = async function(root){
                과거엔 여기만 평가부족을 분모에 포함(A1)해, 탭을 옮기면 같은 단어가 다른 뜻이 됐다. -->
           <!-- [A4 §6-2] 고지 숫자는 하드코딩 금지 — counts.insufficient 를 그대로 렌더한다.
                (INV-A4-5: 이 N == 범례 개수 == standards[status==='insufficient'] 길이) -->
-          <div class="mastery-sub">평가된 ${evaluatedCount}개 중 ${counts.reached||0}개 도달${(counts.insufficient||0) > 0 ? ` · 아직 판정 못 한 성취기준 ${counts.insufficient}개` : ''}</div>
+          <!-- word-break:keep-all — 모바일에서 "성취기준 14 / 개" 처럼 수량 표기가 갈라지지 않게 -->
+          <div class="mastery-sub" style="word-break:keep-all;">평가된 ${evaluatedCount}개 중 ${counts.reached||0}개 도달${(counts.insufficient||0) > 0 ? ` · ${insufKoAdn()} 성취기준 ${counts.insufficient}개` : ''}</div>
         </div></div>
         <div class="chart-body donut-wrap" style="height:300px;">
           <canvas id="sMastDonut" role="img" aria-label="성취기준 도달률 도넛"></canvas>
-          ${donutCenterHtml((counts.reached||0) + ' / ' + evaluatedCount, '도달 / 평가된 기준')}
+          ${donutCenter}
         </div>
       </section>
     </div>
@@ -4410,7 +4461,8 @@ VIEWS['s-achieve'] = async function(root){
         <div class="ms-titles">
           <h2 class="mastery-h2">성취기준 강·약 분석</h2>
           <!-- [A4 §6-4] 좌반면(약점)이 비어도 "약점이 없다"로 읽히지 않게, 미판정 N을 도넛으로 연결해 안내 -->
-          <div class="mastery-sub">정답률 기준 — 오른쪽이 강점, 왼쪽이 약점. 판정이 끝난 성취기준만 나와요${(counts.insufficient||0) > 0 ? `(아직 판정 못 한 ${counts.insufficient}개는 위 도넛에서 볼 수 있어요)` : ''}.</div>
+          <!-- [A4b R-3] 이 줄의 N 은 INV-A4-5 의 세 번째 독립 렌더러다(도넛 부제·회색 세그먼트와 교차 검증) -->
+          <div class="mastery-sub" style="word-break:keep-all;">정답률 기준 — 오른쪽이 강점, 왼쪽이 약점. 판정이 끝난 성취기준만 나와요${(counts.insufficient||0) > 0 ? `(${insufKoAdn()} ${counts.insufficient}개는 위 도넛에서 볼 수 있어요)` : ''}.</div>
         </div>
         <div class="ms-controls">
           <label class="ms-controls__lbl" for="sDivergeTopN">표시 개수</label>
@@ -4435,7 +4487,7 @@ VIEWS['s-achieve'] = async function(root){
              카운터도 "미도달·부분 0개"↔카드 2장 모순 대신 카드 구성 그대로를 센다. -->
         <div class="mastery-sub">아직 판정받지 못했거나 더 다져야 할 성취기준이에요. 하나씩 풀어 도달로 바꿔봐요.</div>
       </div>
-      <div class="ms-controls"><span class="mastery-sub">보완 ${_recoFillCount}개 · 심화 ${_recoDeepCount}개 · 미판정 ${counts.insufficient||0}개</span></div>
+      <div class="ms-controls"><span class="mastery-sub">${escapeHtml(_recoCounterText)}</span></div>
       </div>
       <!-- P0-2: 우선순위 추천 3장(시급·권장·선택, KERIS 3열) — 잔여 미도달 카드는 그 아래 -->
       <div id="sRecoGrid"></div>
@@ -4566,9 +4618,8 @@ VIEWS['s-achieve'] = async function(root){
 
   // ── S1 도넛 (4상태) ──────────────────────────────────────────────────
   if (allInsufficient){
-    // 평가부족만 — 회색 1색 + 안내
-    document.getElementById('sMastDonut').closest('.donut-wrap').querySelector('.donut-center').innerHTML =
-      `<span class="dc-num">${counts.insufficient} / ${counts.total}</span><span class="dc-lbl">아직 판정 못 함</span>`;
+    // 평가부족만 — 회색 1색. 중앙 표기는 위 donutCenter 에서 이미 "판정 전"으로 렌더된다
+    // ([A4b §1] 여기서 "N / N" 으로 덮어쓰던 것을 제거 — 완료율 오독의 원인이었다).
     mkChart(document.getElementById('sMastDonut'), 'doughnut', {
       labels:['아직 판정 못 함'],
       datasets:[{ data:[counts.insufficient], backgroundColor:[MASTERY_HEX.insufficient] }]
@@ -4585,19 +4636,24 @@ VIEWS['s-achieve'] = async function(root){
   }
 
   // ── S2 다이버징 Bar (재그림 함수) ────────────────────────────────────
-  //   [PM P0 — 약점 은폐 방지] 미도달(not_reached)·부분도달 저조 단원은 기간 창에서
-  //   시도<3회라 status가 'insufficient'로 강등될 수 있다. avg_score/rate가 0(0정답)이라도
-  //   "평가 부족"으로 필터링하면 화면이 전부 초록(강점)만 남아 "약점 없음"으로 오인된다.
-  //   → 표시용 rate(BE가 주는 rate = correct/attempts, 0정답=0%)를 그대로 써서 미도달을
-  //     빨간 막대로 반드시 노출. 시도한 적 있는(attempts>0) 비-강점은 모두 약점 후보.
+  //   [A4b §2 — 임계 일관성] 이 차트는 도넛과 **같은 분류기**(BE lrs-mastery.classifyStatus 가
+  //   내려준 status)만 쓴다. FE 에서 임계를 다시 손으로 적지 않는다.
+  //
+  //   과거엔 status 를 무시하고 rate 만으로 좌반면을 채웠다("약점 은폐 방지" 목적). 그 전제는
+  //   "기간 창(30일) 때문에 attempts<3 으로 강등될 수 있다" 였는데, 성취수준 분류는 이미
+  //   누적 전용으로 바뀌어(getStudentMastery — period 무반영) 그런 강등이 발생하지 않는다.
+  //   남은 것은 부작용뿐이었다: 1회 풀어 0점인 셀이 "미도달(빨강)"로 그려져,
+  //   "평가 부족 ≠ 미도달"(정본사전 §4-3)을 어기고 부제의 "판정이 끝난 성취기준만 나와요"
+  //   약속과도 어긋났다(도넛은 평가된 0개, 여기선 미도달 2건).
+  //   판정 전 셀은 도넛 회색 조각 + 부제 고지 + 추천 카드가 담당한다(은폐 아님).
   const _attempts = s => Number(s.attempts != null ? s.attempts : s.attempt_count) || 0;
   const _rate = s => (s.rate != null ? Number(s.rate) : null);
+  // 판정이 끝난 셀(평가부족 제외)만 이 차트의 모집단. 도넛의 evaluatedCount 와 같은 정의.
+  const isJudged = s => normStatus(s.status) !== 'insufficient';
   // 강점: 도달 또는 부분도달이면서 정답률 ≥70 (실제로 잘하는 것만).
-  const isStrong = s => { const st = normStatus(s.status); return (st === 'reached') || (st === 'partial' && _rate(s) != null && _rate(s) >= 70); };
-  // 약점: 시도한 적 있고(attempts>0) rate가 낮은(<70) 단원 — status가 '평가 부족'으로
-  //       강등됐어도 실제로 풀어 0~저조 정답이면 빨간 막대로 반드시 노출(은폐 금지).
-  //       rate≥70인 '평가 부족'(우연히 다 맞음)은 약점 아님 → 제외.
-  const isWeakCandidate = s => _attempts(s) > 0 && _rate(s) != null && _rate(s) < 70 && !isStrong(s);
+  const isStrong = s => { if (!isJudged(s)) return false; const st = normStatus(s.status); return (st === 'reached') || (st === 'partial' && _rate(s) != null && _rate(s) >= 70); };
+  // 약점: 판정이 끝났고 정답률 <70 인 셀(미도달 + 저조 부분도달).
+  const isWeakCandidate = s => isJudged(s) && _rate(s) != null && _rate(s) < 70 && !isStrong(s);
   // 중복 std(같은 label) 제거 — 최저 rate 우선 유지(약점은 가장 낮은 값 대표).
   const dedupeByLabel = (arr, keepLowest) => {
     const seen = new Map();
@@ -4623,6 +4679,15 @@ VIEWS['s-achieve'] = async function(root){
     return codeBare || '성취기준';
   }
 
+  // [A4b R-2] 막대에 종속된 부속 UI(표시 개수 셀렉트 · 4색 범례)를 한 번에 켜고 끈다.
+  //   .ms-controls·.mastery-legend 는 display:flex 라 [hidden] 이 먹지 않아 인라인 display 로 제어한다.
+  function _divergeAside(show){
+    const sec = document.getElementById('sDivergeSection');
+    if (!sec) return;
+    sec.querySelectorAll('.ms-controls, .mastery-legend')
+       .forEach(el => { el.style.display = show ? '' : 'none'; });
+  }
+
   function drawDiverge(){
     destroyDivergeChart();
     // value = 강점·약점 "각각" 표시할 개수(Top-N per side). 라벨과 동작 일치.
@@ -4639,11 +4704,18 @@ VIEWS['s-achieve'] = async function(root){
       const old = sec && sec.querySelector('.diverge-noweak'); if (old) old.remove(); })();
 
     if (!ordered.length){
+      // 빈 상태: 360px 고정 높이를 풀어 카드 하단 빈 공백을 없애고, 막대가 0개라 아무것도
+      // 설명하지 못하는 부속 UI("표시 개수" 셀렉트 + 4색 범례)를 함께 숨긴다(죽은 UI 금지).
+      //   [A4b R-2] 셀렉트만 숨기고 범례를 남겨 두면, 막대 0개인 카드에 도달/부분/미도달 색만
+      //   덩그러니 남는다 — 같은 원칙을 절반만 적용한 상태였다.
+      bodyEl.style.height = 'auto';
+      _divergeAside(false);
       bodyEl.innerHTML = `<div class="mastery-empty"><i class="fas fa-scale-balanced me-icon"></i>
-        <p>아직 강·약을 가를 데이터가 부족해요. 성취기준당 3회 이상 풀면 강점·약점이 나타나요.</p>
+        <p>아직 강·약을 가를 데이터가 부족해요. 성취기준당 3회 이상 풀면 강점·약점이 나타나요.${(counts.insufficient||0) > 0 ? `<br>${insufKoAdn()} 성취기준이 ${counts.insufficient}개 있어요.` : ''}</p>
         <a class="mastery-btn mastery-btn-sm" href="/self-learn/"><i class="fas fa-book-open-reader"></i> 스스로채움 풀러 가기</a></div>`;
       return;
     }
+    _divergeAside(true);
     bodyEl.innerHTML = '<canvas id="sMastDiverge" role="img" aria-label="성취기준 강약 다이버징 차트"></canvas>';
     bodyEl.style.height = (Math.max(360, ordered.length * 34 + 40)) + 'px';
     // [A4 §6-4] 약점 0건이면 왼쪽 절반이 통째로 비어 "약점이 없다"로 오독된다 → 안내 1줄로 빈 공백 해소.
@@ -4652,16 +4724,13 @@ VIEWS['s-achieve'] = async function(root){
       bodyEl.insertAdjacentHTML('afterend', `<p class="diverge-noweak">아직 약점으로 판정된 성취기준이 없어요</p>`);
     }
 
-    // 약점 여부는 status 문자열이 아니라 "어느 버킷(weak/strong)에 담겼는지"로 판정.
-    //   (평가부족으로 강등된 미도달도 weak 버킷에 있으면 왼쪽 빨강으로 그린다.)
-    //   0정답(rate=0) 약점은 -0이라 막대가 안 보이므로 최소 표시폭(-8)을 줘 빨간 막대가 반드시 보이게.
+    // 좌/우(부호) = 약점/강점 버킷, 색 = 상태(도넛·범례와 동일 매핑).
+    //   [A4b §2] 과거엔 약점 버킷을 무조건 빨강(미도달)으로 칠해, 정답률 50~69 인 "부분 도달"까지
+    //   범례상 미도달로 보였다. 색은 분류기 결과만 따른다(범례 ↔ 막대 색 1:1).
+    //   0정답(rate=0) 약점은 -0이라 막대가 안 보이므로 최소 표시폭(-8)을 줘 반드시 보이게.
     const weakSet = new Set(pickWeak);
     const values = ordered.map(s => { const r = _rate(s)||0; return weakSet.has(s) ? -Math.max(r, 8) : r; });
-    const colors = ordered.map(s => {
-      if (weakSet.has(s)) return MASTERY_HEX.notReached;              // 약점 = 빨강(미도달 톤)
-      const st = normStatus(s.status);
-      return st === 'reached' ? MASTERY_HEX.reached : MASTERY_HEX.partial; // 강점 = 초록/주황(부분)
-    });
+    const colors = ordered.map(s => MASTERY_HEX[normStatus(s.status)] || MASTERY_HEX.insufficient);
 
     LRS._divergeChart = new Chart(document.getElementById('sMastDiverge'), {
       type:'bar',
@@ -4867,16 +4936,23 @@ VIEWS['s-achieve'] = async function(root){
 
     let chipHtml = '';
     if (canPredict){
-      if (curRate != null && curRate >= target){
-        // T6 — 이미 목표 수준(어느 경우든 우선)
-        chipHtml += `<span class="sproj-chip good"><i class="fas fa-star"></i> 이미 정답률 ${target}% 수준이에요</span>`;
-        chipHtml += `<span class="sproj-chip proj"><i class="fas fa-seedling"></i> 이대로 꾸준히!</span>`;
-      } else if (!highConf){
-        // T2 — r²<0.3 또는 관측 6주 미만: 방향도 시기도 단정하지 않는다.
+      if (!highConf){
+        // T2 — r²<0.3 또는 관측 6주 미만: 방향도, 시기도, **수준도** 단정하지 않는다.
+        //   [A4b §3] 과거엔 T6("이미 정답률 80% 수준이에요")가 이 검사보다 **앞에** 있어,
+        //   r²=0.02 로 주마다 0%↔100% 를 오가는 학생에게도 "이미 80% 수준 · 이대로 꾸준히!"
+        //   가 떴다. 저신뢰 게이트를 맨 앞에 두어 T3~T6 전부를 이 게이트 뒤로 보낸다.
         //   강조는 1개만 → 방향·예측 칩은 중립 회색, 신뢰도 배지가 맨 앞에서 먼저 말한다.
         chipHtml += `<span class="strend-lowconf"><i class="fas fa-triangle-exclamation" aria-hidden="true"></i> 변동이 커서 참고용</span>`;
         chipHtml += `<span class="sproj-chip soft"><i class="fas fa-wave-square"></i> 오르내림이 커요.${curR != null ? ` 이번 주 정답률은 ${curR}%예요` : ''}</span>`;
-        chipHtml += `<span class="sproj-chip soft"><i class="fas fa-bullseye"></i> 이대로 꾸준히 하면 ${target}%에 가까워질 수 있어요</span>`;
+        chipHtml += (curRate != null && curRate >= target)
+          // 이번 주만 목표 위 — "이미 그 수준"이라는 상태 단정 금지. 관측이 쌓여야 말할 수 있다고 적는다.
+          ? `<span class="sproj-chip soft"><i class="fas fa-bullseye"></i> 몇 주 더 쌓이면 ${target}% 유지 여부를 말할 수 있어요</span>`
+          : `<span class="sproj-chip soft"><i class="fas fa-bullseye"></i> 이대로 꾸준히 하면 ${target}%에 가까워질 수 있어요</span>`;
+      } else if (curRate != null && curRate >= target && evaluatedCount > 0){
+        // T6 — 이미 목표 수준. 고신뢰(관측 6주 이상 ∧ r²≥0.3)이고, 판정이 끝난 성취기준이
+        //   하나라도 있을 때만. (평가된 성취기준 0개인 학생에게 성취 수준 단정 금지 — §5-1)
+        chipHtml += `<span class="sproj-chip good"><i class="fas fa-star"></i> 이미 정답률 ${target}% 수준이에요</span>`;
+        chipHtml += `<span class="sproj-chip proj"><i class="fas fa-seedling"></i> 이대로 꾸준히!</span>`;
       } else if (slope >= 2){
         // T3 — 관측 6주 이상 ∧ r²≥0.3 ∧ 상승: 이때만 방향을 단정하고, 예측은 밴드를 병기한다.
         chipHtml += `<span class="sproj-chip good"><i class="fas fa-wand-magic-sparkles"></i> 꾸준히 오르고 있어요</span>`;
@@ -4901,10 +4977,15 @@ VIEWS['s-achieve'] = async function(root){
     }
     // [A4 §7-3] 최근 2주 변화 — 전 구간 회귀 방향과 최근 방향이 어긋날 때 그 사실을 감추지 않는다.
     //   색으로 경고하지 않는다(중립 회색, 부호만). |Δ| ≥ 5%p 일 때만 표시(잡음 억제).
+    //   [A4b §3] 두 주 중 하나라도 1~2문제만 푼 주면 그 Δ 는 표본이 얇다는 사실을 함께 적는다
+    //   (35% → 100% = +65%p 가 "2문제 중 2개"였던 실측 사례).
+    const _thinPt = p => { const a = (p && p.attempts != null) ? Number(p.attempts) : null; return a != null && a < 3; };
+    const lastTwoThin = valuedPts.length >= 2
+      && (_thinPt(valuedPts[valuedPts.length-1]) || _thinPt(valuedPts[valuedPts.length-2]));
     if (valuedPts.length >= 2){
       const d2 = Math.round(valuedPts[valuedPts.length-1].rate - valuedPts[valuedPts.length-2].rate);
       if (Math.abs(d2) >= 5){
-        chipHtml += `<span class="sproj-chip delta"><i class="fas fa-arrow-right-arrow-left"></i> 최근 2주 변화 ${d2 > 0 ? '+' : '−'}${Math.abs(d2)}%p</span>`;
+        chipHtml += `<span class="sproj-chip delta"><i class="fas fa-arrow-right-arrow-left"></i> 최근 2주 변화 ${d2 > 0 ? '+' : '−'}${Math.abs(d2)}%p${lastTwoThin ? ' (문제를 적게 푼 주가 있어요)' : ''}</span>`;
       }
     }
     if (chips) chips.innerHTML = chipHtml;
@@ -4939,6 +5020,14 @@ VIEWS['s-achieve'] = async function(root){
       if (!box || !txt) return;
       if (valuedPts.length < 2){ box.hidden = true; return; }   // 방어(이 경로는 항상 ≥2이긴 함)
 
+      // [A4b §3] 최근 두 주 중 하나라도 1~2문제만 푼 주면 그 Δ 로 오르내림을 단정하지 않는다.
+      //   ⚠ 이 IIFE 는 INV-K9(test/regression.test.js)가 소스를 통째로 추출해 격리 샌드박스에서
+      //     실행한다 — 주입되는 클로저 변수(valuedPts·drawOverlay·chartLabels·myVals·classVals·
+      //     insightsForReco·escape*) 외의 바깥 변수를 참조하면 ReferenceError 로 즉시 붉어진다.
+      //     그래서 판정을 여기서 지역으로 유도한다(바깥 칩 블록의 lastTwoThin 참조 금지).
+      const _thinWk = (p) => { const a = (p && p.attempts != null) ? Number(p.attempts) : null; return a != null && a < 3; };
+      const thinRecent = _thinWk(valuedPts[valuedPts.length - 1]) || _thinWk(valuedPts[valuedPts.length - 2]);
+
       // weak0 = insights.weaknesses[0] — s-achieve가 이미 페치한 스코프 변수(추가 fetch 금지).
       const weak0 = (insightsForReco && Array.isArray(insightsForReco.weaknesses) && insightsForReco.weaknesses[0]) || null;
 
@@ -4972,6 +5061,12 @@ VIEWS['s-achieve'] = async function(root){
         if (delta >= 5)       sentence = unitHtml ? `반 평균보다 정답률이 ${delta}점 정도 높아요. ${unitHtml} 학습으로 이 흐름을 이어가요!` : `반 평균보다 정답률이 ${delta}점 정도 높아요. 지금처럼 꾸준히 하면 돼요!`;
         else if (delta >= -4) sentence = unitHtml ? `반 평균과 비슷하게 가고 있어요. ${unitHtml} 학습을 추가로 해보길 권해요.` : `반 평균과 비슷하게 가고 있어요. 지금처럼 꾸준히 하면 돼요!`;
         else                  sentence = unitHtml ? `반 평균을 따라잡는 중이에요 — ${unitHtml}부터 하면 빨라져요.` : `반 평균을 따라잡는 중이에요 — ${dailyLink}부터 가볍게 시작해요.`;
+      } else if (thinRecent){
+        // 최근 두 주 중 하나가 1~2문제뿐이면 그 Δ 로 오르내림을 단정하지 않는다.
+        //   ("지난주보다 65점 올랐어요!"의 실체가 2문제 중 2개 정답이던 실측 사례)
+        sentence = unitHtml
+          ? `최근에 푼 문제가 적어서 정답률이 크게 흔들려요. ${unitHtml} 공부로 기록을 조금 더 쌓아볼까요?`
+          : `최근에 푼 문제가 적어서 정답률이 크게 흔들려요. ${dailyLink}으로 기록을 조금 더 쌓아볼까요?`;
       } else {
         if (delta >= 5)       sentence = unitHtml ? `지난주보다 정답률이 ${delta}점 올랐어요! ${unitHtml} 공부로 이어가 볼까요?` : `지난주보다 정답률이 ${delta}점 올랐어요! 지금처럼 꾸준히 하면 돼요!`;
         else if (delta >= -4) sentence = unitHtml ? `지난주와 비슷하게 가고 있어요. ${unitHtml} 공부를 하면 더 늘어나요.` : `지난주와 비슷하게 가고 있어요. 지금처럼 꾸준히 하면 돼요!`;
