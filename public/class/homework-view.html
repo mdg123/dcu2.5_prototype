@@ -2879,6 +2879,30 @@
     let submitHtmlMode = false;
     let _submitQuillReadOnly = false;
 
+    // ★ P0-1 — 프로그램적 에디터 주입 구간 가드.
+    //
+    //   [실측 2026-08-05, Chromium + Quill 1.3.7]
+    //   root.innerHTML 을 직접 대입하면 Quill 의 MutationObserver 경로를 타는데,
+    //   scroll.update(mutations) 가 source 를 **항상 'user' 로 고정**해 올려보낸다.
+    //   즉 `source === 'user'` 검사만으로는 프로그램적 주입을 걸러내지 못한다(실측 확인).
+    //
+    //   그래서 주입 구간을 이 헬퍼로 감싸고, 대기 중인 MutationRecord 를
+    //   update('silent') 로 **동기 소비**한다. Quill 의 modify() 는 source==='silent'
+    //   일 때 text-change 를 아예 발행하지 않으므로(EDITOR_CHANGE 만 발행),
+    //   나중에 비동기 옵저버 콜백이 'user' 로 되살아나는 경로까지 함께 막힌다.
+    //   (_editorLoading 플래그는 그래도 새는 경로가 있을 때를 위한 2차 그물)
+    let _editorLoading = false;
+    function _withEditorLoading(fn) {
+      _editorLoading = true;
+      try {
+        fn();
+        // 대기 중인 MutationRecord 를 지금 'silent' 로 소비 (비동기 재발화 차단)
+        try { submitQuill && submitQuill.update('silent'); } catch (_) {}
+      } finally {
+        _editorLoading = false;
+      }
+    }
+
     // ===========================================================
     // base64 이미지 자동 업로드 승격
     //  - paste/toolbar로 들어온 큰 이미지(100KB 초과 base64)는
@@ -2961,14 +2985,24 @@
         placeholder: '과제 풀이·감상·답안을 자유롭게 입력하세요. 이미지·동영상도 붙여넣을 수 있어요.'
       });
       // 내용 변경 → 카운터 + 임시저장 디바운스 + hidden textarea 동기화 + base64 자동 승격
-      submitQuill.on('text-change', () => {
+      //
+      // ★ P0-1 (2026-08-05): 예전엔 source 를 안 봤다. 서버에서 받은 답안을 에디터에
+      //   주입하는 순간에도 text-change 가 걸려 onContentChanged() 가 실행되고,
+      //   학생이 화면을 **열어두기만 해도** 30초 뒤 자동 임시저장이 발화했다.
+      //   그 결과 채점까지 끝난 제출물이 is_draft=1 로 강등돼 교사 화면에서 사라졌다.
+      //   → 사람이 친 변경일 때만 "수정됨"으로 취급한다.
+      //     (source 검사 + _editorLoading 가드 2중 — 위 _withEditorLoading 주석 참조.
+      //      Quill 은 프로그램적 innerHTML 대입도 source='user' 로 올리므로 가드가 본체다)
+      //     동기화·카운터·base64 승격은 프로그램적 주입에도 계속 필요하므로 그대로 둔다.
+      submitQuill.on('text-change', (delta, oldDelta, source) => {
         try {
           const html = submitQuill.root.innerHTML;
           const ta = document.getElementById('submitContent');
           if (ta) ta.value = html;
         } catch (_) {}
         updateSubmitCounter();
-        if (typeof onContentChanged === 'function') onContentChanged();
+        const isUserEdit = (source === 'user') && !_editorLoading;
+        if (isUserEdit && typeof onContentChanged === 'function') onContentChanged();
         // 큰 base64 이미지 자동 업로드 승격 (800ms 디바운스)
         schedulePromoteBase64();
       });
@@ -3010,14 +3044,20 @@
       const safe = html || '';
       initSubmitEditor();
       if (submitQuill) {
-        // 유튜브 URL 자동 임베드 후 주입
-        submitQuill.root.innerHTML = embedYouTubeUrls(safe);
+        // 유튜브 URL 자동 임베드 후 주입 — 프로그램적 주입이므로 "수정됨"으로 치지 않는다
+        _withEditorLoading(() => {
+          submitQuill.root.innerHTML = embedYouTubeUrls(safe);
+        });
       }
       const ta = document.getElementById('submitContent');
       if (ta) ta.value = safe;
       const hta = document.getElementById('submitHtmlEditor');
       if (hta) hta.value = safe;
       updateSubmitCounter();
+      // ★ P0-1 — 서버 내용을 그대로 되살린 직후는 "수정된 적 없음"이 진실이다.
+      //   혹시 남아 있던 자동 임시저장 예약이 있으면 취소한다(유령 saveDraft 차단).
+      _draftDirty = false;
+      if (_draftTimer) { clearTimeout(_draftTimer); _draftTimer = null; }
     }
 
     // 에디터 readonly 설정
@@ -3053,8 +3093,9 @@
         }
       } else {
         // HTML → 위지윅 (유튜브 URL 자동 변환)
+        //  모드 전환 자체는 내용 수정이 아니다 — 실제 타이핑은 onHtmlEditorInput 이 이미 표시했다.
         const raw = html.value || '';
-        if (submitQuill) submitQuill.root.innerHTML = embedYouTubeUrls(raw);
+        if (submitQuill) _withEditorLoading(() => { submitQuill.root.innerHTML = embedYouTubeUrls(raw); });
         wrap.classList.remove('html-mode');
         submitHtmlMode = false;
         if (btn) {

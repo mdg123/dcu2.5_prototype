@@ -2,6 +2,14 @@ const express = require('express');
 const router = express.Router();
 const { requireAuth, optionalAuth } = require('../middleware/auth');
 const contentDb = require('../db/content');
+// ── 콘텐츠 열람 권한 판정 SSOT (lib/auth/can-view-content.js) ──────────────────
+//   [P0-2 보안 fix — 2026-08-05] `GET /api/contents/:id` 가 is_public/status/creator_id 를
+//   전혀 보지 않아, 학생이 남의 draft·pending·rejected 콘텐츠를 200 으로 읽었다.
+//   문항 콘텐츠면 questions[].answer·explanation 까지 나갔다(검수 전 정답 노출).
+//   판정을 이 파일에 인라인으로 적으면 업로드 파일 가드(lib/uploads-access.js)가
+//   같은 판정을 또 복사해야 한다 → 실체는 lib 하나로 두고 여기선 호출만 한다.
+const { canViewContent, loadContentForAuth } = require('../lib/auth/can-view-content');
+const { removeOrphanUploads } = require('../lib/uploads-access');
 const featuredDb = require('../db/featured');
 const { logLearningActivity } = require('../db/learning-log-helper');
 const { extractLogContext } = require('../lib/log-context');
@@ -512,10 +520,16 @@ router.post('/', requireAuth, (req, res) => {
 });
 
 // GET /api/contents/:id - 콘텐츠 상세
+//   ★ 열람 게이트(P0-2). 공개 승인본 / 작성자 / admin / 이용 근거(수업·오늘의학습·평가·
+//     문제세트·보관함·꾸러미) 보유자만. 그 외 403 — 본문(file_path·description·questions)은
+//     한 조각도 내보내지 않는다.
 router.get('/:id', requireAuth, (req, res) => {
   try {
     const content = contentDb.getContentById(parseInt(req.params.id));
     if (!content) return res.status(404).json({ success: false, message: '콘텐츠를 찾을 수 없습니다.' });
+    if (!canViewContent(req.user, content)) {
+      return res.status(403).json({ success: false, message: '이 콘텐츠를 볼 권한이 없습니다.' });
+    }
     contentDb.incrementViewCount(content.id);
     logLearningActivity({
       userId: req.user.id,
@@ -547,9 +561,27 @@ router.get('/:id', requireAuth, (req, res) => {
   }
 });
 
+// ── 콘텐츠 하위 리소스 공통 게이트 ──────────────────────────────────────────
+//   상세 조회가 403 인 콘텐츠에는 댓글 읽기·쓰기·좋아요도 열려선 안 된다.
+//   (읽기 게이트와 쓰기 게이트가 같은 판정을 쓰게 한다 — 판정 사본 금지)
+function guardContent(req, res) {
+  const id = parseInt(req.params.id);
+  const content = loadContentForAuth(id);
+  if (!content) {
+    res.status(404).json({ success: false, message: '콘텐츠를 찾을 수 없습니다.' });
+    return null;
+  }
+  if (!canViewContent(req.user, content)) {
+    res.status(403).json({ success: false, message: '이 콘텐츠를 볼 권한이 없습니다.' });
+    return null;
+  }
+  return content;
+}
+
 // GET /api/contents/:id/comments - 댓글 목록
 router.get('/:id/comments', requireAuth, (req, res) => {
   try {
+    if (!guardContent(req, res)) return;
     const comments = contentDb.getContentComments(parseInt(req.params.id));
     res.json({ success: true, comments });
   } catch (err) {
@@ -561,6 +593,7 @@ router.get('/:id/comments', requireAuth, (req, res) => {
 router.post('/:id/comments', requireAuth, (req, res) => {
   try {
     if (!req.body.text || !req.body.text.trim()) return res.status(400).json({ success: false, message: '댓글 내용을 입력하세요.' });
+    if (!guardContent(req, res)) return;
     const comment = contentDb.addContentComment(parseInt(req.params.id), req.user.id, req.body.text.trim(), req.body.parentId);
     res.status(201).json({ success: true, comment });
   } catch (err) {
@@ -633,6 +666,11 @@ router.delete('/:id', requireAuth, (req, res) => {
       return res.status(403).json({ success: false, message: '권한이 없습니다.' });
     }
     contentDb.deleteContent(content.id);
+    // [W1-T3-11] 콘텐츠 행만 지우고 업로드 파일을 남기면 "삭제된 자료가 영구 다운로드" 된다.
+    //   (참조가 사라진 파일은 lib/uploads-access.js 판정에서 '미참조' 로 떨어져
+    //    로그인 사용자에게는 계속 열린다 → 디스크에서도 지워야 실제로 회수된다.)
+    //   ⚠ 같은 파일을 다른 행이 아직 참조하면 지우지 않는다(공유 썸네일 파괴 방지).
+    removeOrphanUploads([content.file_path, content.thumbnail_url, content.content_url]);
     res.json({ success: true, message: '삭제되었습니다.' });
   } catch (err) {
     res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
@@ -642,6 +680,7 @@ router.delete('/:id', requireAuth, (req, res) => {
 // POST /api/contents/:id/like - 좋아요
 router.post('/:id/like', requireAuth, (req, res) => {
   try {
+    if (!guardContent(req, res)) return;
     const content = contentDb.toggleLike(parseInt(req.params.id));
     res.json({ success: true, like_count: content.like_count });
   } catch (err) {
@@ -802,8 +841,13 @@ router.get('/channels/subscriptions/list', requireAuth, (req, res) => {
 });
 
 // ===== 콘텐츠 풀이 시도 기록 (문항/평가지) =====
-const Database = require('better-sqlite3');
-function _attemptsDb() { return new Database('data/dacheum.db'); }
+// [W1-T3-6 fix] 예전엔 `new Database('data/dacheum.db')` 로 **정본 경로를 하드코딩**해
+//   DB_PATH(테스트·스모크 격리 사본)를 무시했다. 그래서 격리 환경에서 돌린 풀이 트래픽이
+//   정본 DB 에 그대로 쌓였고(2026-08 테스트 트래픽 오염 포렌식), 정본을 잠가 SQLITE_BUSY 도 냈다.
+//   → 다른 모든 라우트와 같이 공용 싱글톤(db/index.js, DB_PATH 준수)을 쓴다.
+//   ⚠ 싱글톤이므로 close() 하면 앱 전체가 죽는다. 아래 핸들러들은 close 하지 않는다.
+const attemptsDb = require('../db/index');
+function _attemptsDb() { return attemptsDb; }
 
 // POST /api/contents/:id/attempts - 풀이 결과 기록
 router.post('/:id/attempts', requireAuth, (req, res) => {
@@ -838,7 +882,7 @@ router.post('/:id/attempts', requireAuth, (req, res) => {
         }
       } catch (_) {}
       res.json({ success: true, id: info.lastInsertRowid });
-    } finally { db.close(); }
+    } finally { /* 싱글톤 — close 금지 */ }
   } catch (err) {
     console.error('content attempts insert error:', err);
     res.status(500).json({ success: false, message: '기록 저장 실패' });
@@ -854,7 +898,7 @@ router.get('/:id/my-stats', requireAuth, (req, res) => {
       const row = db.prepare(`SELECT COUNT(*) AS attempt_count, MAX(score_percent) AS best_score_percent, MAX(attempted_at) AS last_attempted_at FROM content_attempts WHERE content_id = ? AND user_id = ?`).get(contentId, req.user.id);
       const last = db.prepare(`SELECT score_percent AS last_score_percent, correct_count AS last_correct, total_questions AS last_total FROM content_attempts WHERE content_id = ? AND user_id = ? ORDER BY attempted_at DESC LIMIT 1`).get(contentId, req.user.id);
       res.json({ success: true, stats: { ...(row || {}), ...(last || {}) } });
-    } finally { db.close(); }
+    } finally { /* 싱글톤 — close 금지 */ }
   } catch (err) {
     res.status(500).json({ success: false, message: '통계 조회 실패' });
   }
@@ -872,14 +916,16 @@ router.post('/my-stats-bulk', requireAuth, (req, res) => {
       const stats = {};
       rows.forEach(r => { stats[r.content_id] = r; });
       res.json({ success: true, stats });
-    } finally { db.close(); }
+    } finally { /* 싱글톤 — close 금지 */ }
   } catch (err) {
     res.status(500).json({ success: false, message: '통계 조회 실패' });
   }
 });
 
 // POST /api/contents/aggregate-stats-bulk - 여러 콘텐츠의 전체 사용자 풀이 통계 일괄 조회
-router.post('/aggregate-stats-bulk', (req, res) => {
+//   [W1-T3] requireAuth 누락이었다. 호출처(public/content/index.html)는 로그인 페이지이므로
+//   인증을 붙여도 동선 변화 없음(비로그인 포털은 이 API 를 쓰지 않는다 — 실측).
+router.post('/aggregate-stats-bulk', requireAuth, (req, res) => {
   try {
     const ids = Array.isArray(req.body.ids) ? req.body.ids.map(x => parseInt(x)).filter(Boolean) : [];
     if (!ids.length) return res.json({ success: true, stats: {} });
@@ -906,14 +952,14 @@ router.post('/aggregate-stats-bulk', (req, res) => {
         };
       });
       res.json({ success: true, stats });
-    } finally { db.close(); }
+    } finally { /* 싱글톤 — close 금지 */ }
   } catch (err) {
     res.status(500).json({ success: false, message: '집계 통계 조회 실패' });
   }
 });
 
 // GET /api/contents/:id/aggregate-stats - 단일 콘텐츠 전체 통계
-router.get('/:id/aggregate-stats', (req, res) => {
+router.get('/:id/aggregate-stats', requireAuth, (req, res) => {
   try {
     const id = parseInt(req.params.id);
     if (!id) return res.status(400).json({ success: false });
@@ -935,7 +981,7 @@ router.get('/:id/aggregate-stats', (req, res) => {
           correct_rate: (r && r.total_questions > 0) ? Math.round((r.total_correct / r.total_questions) * 100) : null
         }
       });
-    } finally { db.close(); }
+    } finally { /* 싱글톤 — close 금지 */ }
   } catch (err) {
     res.status(500).json({ success: false, message: '집계 통계 조회 실패' });
   }

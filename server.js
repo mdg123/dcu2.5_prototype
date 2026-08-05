@@ -109,9 +109,24 @@ app.use((req, res, next) => {
   next();
 });
 
+// ============ 업로드 파일 접근 가드 (P0-2) ============
+// public/uploads/** 는 express.static 아래에 있어 **전체가 무인증 공개**였다.
+// 상세 API 로 얻은 file_path 를 비로그인으로 그대로 다운로드할 수 있었다(실측 200).
+//
+// ⚠ 통째 차단은 금지 — 비로그인 포털의 명예의 전당(승인 작품 이미지)·인기 콘텐츠
+//   썸네일이 /uploads 를 쓴다. 그래서 경로가 아니라 **그 파일을 참조하는 자원의
+//   공개 여부**에서 권한을 유도한다(lib/uploads-access.js).
+// ★ 반드시 express.static 보다 먼저 마운트해야 한다. 뒤에 두면 파일이 먼저 나가서 무의미.
+{
+  const { optionalAuth } = require('./middleware/auth');
+  const { uploadsGuard } = require('./lib/uploads-access');
+  app.use('/uploads', optionalAuth, uploadsGuard);
+}
+
 // 정적 파일 서빙
 app.use(express.static(path.join(__dirname, 'public')));
 // 워크트리에서 실행될 때 부모 저장소의 uploads 폴더도 서빙 (fallback)
+//   ↑ 위 uploadsGuard 가 '/uploads' 전체를 먼저 통과시켜야 여기까지 온다.
 {
   const parentUploads = path.resolve(__dirname, '..', '..', '..', 'public', 'uploads');
   if (require('fs').existsSync(parentUploads)) {

@@ -184,6 +184,21 @@ function deleteHomework(id) {
   db.prepare('DELETE FROM homework WHERE id = ?').run(id);
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// "이 행은 이미 정식 제출된 행인가" — 임시저장 방어/재제출 판별의 단일 기준.
+//
+// homework_submissions 는 한 (과제, 학생) 당 1행(UNIQUE)이고, 그 행이 임시저장인지
+// 정식 제출인지는 오직 is_draft 가 가른다. 교사 측 모든 쿼리·집계가
+// COALESCE(hs.is_draft,0)=0 으로 거르므로, is_draft=0 인 행을 1로 되돌리는 순간
+// 그 제출물은 화면·통계·채점 결과까지 통째로 사라진다(2026-08-05 P0-1 사고).
+// 따라서 판정은 submitted_at 같은 부차 신호가 아니라 is_draft 자체를 기준으로 한다.
+// (실 DB 에는 status='submitted' 인데 submitted_at 이 NULL 인 초기 시드 행도 있어,
+//  submitted_at 을 조건에 넣으면 그 행이 다시 임시저장으로 강등된다.)
+// ─────────────────────────────────────────────────────────────────────────────
+function _isSubmittedRow(row) {
+  return !!row && !row.is_draft;
+}
+
 function submitHomework(homeworkId, studentId, data) {
   // G2: attachments JSON 배열 (멀티미디어 통합)
   const attachmentsJson = Array.isArray(data.attachments) ? JSON.stringify(data.attachments) : null;
@@ -200,13 +215,18 @@ function submitHomework(homeworkId, studentId, data) {
   } catch (e) {
     if (e.message.includes('UNIQUE')) {
       // G1: 정식 제출 시 임시저장 컬럼 정리
+      //
+      // W1-T1-11 (2026-08-05): 자동 임시저장이 행을 먼저 만들기 때문에 **정식 첫 제출**도
+      //   이 UNIQUE 충돌 경로를 탄다. 예전 CASE 는 status 문자열만 봤는데, 임시저장 행의
+      //   status 는 CHECK 통과용 placeholder 'submitted' 라서 첫 제출이 '재제출'로 기록됐다.
+      //   또 status='resubmitted' 인 행이 ELSE 로 떨어져 2회차 재제출이 '제출'로 되돌아갔다.
+      //   판정 기준을 문자열이 아니라 "직전에 정식 제출 행이었는가(is_draft=0)" 로 바꾼다.
       db.prepare(`
         UPDATE homework_submissions
            SET content = ?, file_path = ?, file_name = ?, attachments = ?,
                is_draft = 0, draft_content = NULL, draft_attachments = NULL, draft_updated_at = NULL,
                submitted_at = CURRENT_TIMESTAMP,
-               status = CASE WHEN status = 'graded' THEN 'resubmitted'
-                             WHEN status = 'submitted' THEN 'resubmitted'
+               status = CASE WHEN COALESCE(is_draft, 0) = 0 THEN 'resubmitted'
                              ELSE 'submitted' END
         WHERE homework_id = ? AND student_id = ?
       `).run(data.content || null, data.file_path || null, data.file_name || null,
@@ -229,17 +249,32 @@ function saveDraft(homeworkId, studentId, data) {
   })();
 
   const existing = db.prepare(
-    'SELECT id, status FROM homework_submissions WHERE homework_id = ? AND student_id = ?'
+    'SELECT id, status, is_draft, submitted_at FROM homework_submissions WHERE homework_id = ? AND student_id = ?'
   ).get(homeworkId, studentId);
 
   if (existing) {
-    // 정식 제출 컬럼은 보존 — draft 컬럼만 업데이트
-    db.prepare(`
-      UPDATE homework_submissions
-         SET draft_content = ?, draft_attachments = ?, draft_updated_at = ?,
-             is_draft = 1
-       WHERE homework_id = ? AND student_id = ?
-    `).run(draftContent, draftAttachmentsJson, nowKst, homeworkId, studentId);
+    // ★ P0-1 방어 (2026-08-05): 이미 **정식 제출된 행**의 is_draft 를 1로 되돌리면
+    //   교사 측 전 쿼리(COALESCE(is_draft,0)=0)에서 통째로 사라지고 채점까지 소실된다.
+    //   (사고: 학생이 과제 화면을 열어두기만 해도 자동 임시저장이 발화 → 제출·채점 증발)
+    //   제출된 행이면 draft 컬럼만 갱신하고 is_draft 는 손대지 않는다.
+    //   → 제출 뒤 '수정하기' 로 이어 쓰는 임시저장 기능은 그대로 살아 있고,
+    //     교사 화면·통계에서는 계속 제출물로 잡힌다(FE 는 제출 행이면 draft 를 무시).
+    const isSubmittedRow = _isSubmittedRow(existing);
+    if (isSubmittedRow) {
+      db.prepare(`
+        UPDATE homework_submissions
+           SET draft_content = ?, draft_attachments = ?, draft_updated_at = ?
+         WHERE homework_id = ? AND student_id = ?
+      `).run(draftContent, draftAttachmentsJson, nowKst, homeworkId, studentId);
+    } else {
+      // 아직 임시저장 상태인 행 — 기존과 동일
+      db.prepare(`
+        UPDATE homework_submissions
+           SET draft_content = ?, draft_attachments = ?, draft_updated_at = ?,
+               is_draft = 1
+         WHERE homework_id = ? AND student_id = ?
+      `).run(draftContent, draftAttachmentsJson, nowKst, homeworkId, studentId);
+    }
   } else {
     // 신규 행 — status는 'submitted' (CHECK 통과용 placeholder), is_draft=1로 진실 표시
     // submitted_at NULL 처리 (DEFAULT CURRENT_TIMESTAMP를 NULL로 명시 덮어쓰기)

@@ -26,6 +26,26 @@ const { generatePortfolioReport } = require('../lib/portfolio-pdf');
 //       ·report/class(2종) — 역할만 보고 소속을 안 봐서 **무관 교사(타 학교)** 가 전부 200.
 //   정책을 새로 만들지 않고 W1 의 canViewUser / canViewClass 를 그대로 이식한다.
 const { canViewUser, canViewClass, isParentOf } = require('../lib/auth/can-view-user');
+// ── 갤러리 단건 열람 판정 SSOT (lib/auth/can-view-gallery.js) ──────────────────
+//   [P0-3 보안 fix — 2026-08-05] 읽기(GET /gallery/:id)에는 승인 상태 검사가 있었는데
+//   **쓰기(comments·like·view)에는 없었다.** getGalleryItemById 로 존재 여부만 보고
+//   통과시켜서, student2 가 남의 pending 작품에 댓글 201 · 좋아요 200 을 넣을 수 있었다.
+//   승인되는 순간 그 댓글·좋아요가 공개된다.
+//   원칙: **상세 조회가 404 인 대상에는 쓰기도 404.** 읽기·쓰기가 같은 함수를 부른다.
+const { canViewGalleryItem } = require('../lib/auth/can-view-gallery');
+
+/**
+ * 갤러리 작품 단건 게이트 — 없거나 볼 수 없으면 404 응답을 보내고 null 을 돌려준다.
+ *   (존재 여부까지 감추기 위해 403 이 아니라 404 로 통일 — 기존 읽기 게이트와 동일)
+ */
+function guardGalleryItem(req, res, id) {
+  const item = growthDb.getGalleryItemById(id, req.user.id);
+  if (!item || !canViewGalleryItem(req.user, item)) {
+    res.status(404).json({ success: false, message: '작품을 찾을 수 없습니다.' });
+    return null;
+  }
+  return item;
+}
 
 // PDF 업로드용 multer (메모리 저장 — DB는 file_path 만 보유)
 const pdfUpload = multer({
@@ -453,11 +473,8 @@ router.get('/gallery/:id', requireAuth, (req, res, next) => {
     const id = pInt(req.params.id);
     if (!id) return res.status(400).json({ success: false, message: '잘못된 요청입니다.' });
     const item = growthDb.getGalleryItemWithAttachments(id, req.user.id);
-    if (!item) return res.status(404).json({ success: false, message: '작품을 찾을 수 없습니다.' });
-
-    const isOwner = item.student_id === req.user.id;
-    const isStaff = req.user.role === 'admin' || req.user.role === 'teacher';
-    if (!isOwner && !isStaff && item.approval_status && item.approval_status !== 'approved') {
+    // 판정은 canViewGalleryItem(SSOT) 하나로 — 쓰기 게이트(comments·like·view)가 같은 함수를 쓴다.
+    if (!item || !canViewGalleryItem(req.user, item)) {
       return res.status(404).json({ success: false, message: '작품을 찾을 수 없습니다.' });
     }
 
@@ -494,8 +511,7 @@ router.post('/gallery/:id/like', requireAuth, (req, res) => {
   try {
     const id = pInt(req.params.id);
     if (!id) return res.status(400).json({ success: false, message: '잘못된 요청입니다.' });
-    const item = growthDb.getGalleryItemById(id, req.user.id);
-    if (!item) return res.status(404).json({ success: false, message: '작품을 찾을 수 없습니다.' });
+    if (!guardGalleryItem(req, res, id)) return;   // 미승인 작품에 좋아요 주입 차단(P0-3)
     const result = growthDb.toggleGalleryLike(id, req.user.id);
     res.json({ success: true, liked: result.liked, like_count: result.like_count });
   } catch (err) {
@@ -510,8 +526,8 @@ router.post('/gallery/:id/view', requireAuth, (req, res) => {
   try {
     const id = pInt(req.params.id);
     if (!id) return res.status(400).json({ success: false, message: '잘못된 요청입니다.' });
-    const item = growthDb.getGalleryItemById(id, req.user.id);
-    if (!item) return res.status(404).json({ success: false, message: '작품을 찾을 수 없습니다.' });
+    const item = guardGalleryItem(req, res, id);   // 미승인 작품 조회수 주입 차단(P0-3)
+    if (!item) return;
     // 자기 작품은 카운트 제외
     if (item.student_id === req.user.id) {
       return res.json({ success: true, counted: false, view_count: item.view_count || 0 });
@@ -531,8 +547,7 @@ router.get('/gallery/:id/comments', requireAuth, (req, res) => {
   try {
     const id = pInt(req.params.id);
     if (!id) return res.status(400).json({ success: false, message: '잘못된 요청입니다.' });
-    const item = growthDb.getGalleryItemById(id, req.user.id);
-    if (!item) return res.status(404).json({ success: false, message: '작품을 찾을 수 없습니다.' });
+    if (!guardGalleryItem(req, res, id)) return;   // 미승인 작품 댓글 열람 차단(P0-3)
     const page = parseInt(req.query.page) || 1;
     const limit = Math.min(parseInt(req.query.limit) || 30, 100);
     const result = growthDb.listGalleryComments(id, { page, limit });
@@ -551,8 +566,7 @@ router.post('/gallery/:id/comments', requireAuth, (req, res) => {
     const content = String(req.body.content || '').trim();
     if (!content) return res.status(400).json({ success: false, message: '내용을 입력하세요.' });
     if (content.length > 500) return res.status(400).json({ success: false, message: '댓글은 500자 이하로 입력하세요.' });
-    const item = growthDb.getGalleryItemById(id, req.user.id);
-    if (!item) return res.status(404).json({ success: false, message: '작품을 찾을 수 없습니다.' });
+    if (!guardGalleryItem(req, res, id)) return;   // 미승인 작품 댓글 주입 차단(P0-3)
     const comment = growthDb.createGalleryComment(id, req.user.id, content);
     res.status(201).json({ success: true, comment });
   } catch (err) {

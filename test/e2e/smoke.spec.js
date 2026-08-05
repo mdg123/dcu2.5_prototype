@@ -19,7 +19,9 @@ const path = require('path');
 
 const STATE_DIR = path.join(__dirname, '.smoke-state');
 const stateFor = (role) => path.join(STATE_DIR, `${role}.json`);
-const BASE_URL = 'http://localhost:3100'; // smoke.config.js 의 PORT 와 동일
+// smoke.config.js 의 PORT 와 동일. 여러 작업자가 동시에 돌 때 3100 이 이미 점유돼 있으면
+// SMOKE_PORT 로 비켜 갈 수 있다(기본값은 그대로 3100 — 평시 동작 불변).
+const BASE_URL = `http://localhost:${process.env.SMOKE_PORT || 3100}`;
 
 // ── [W4] 시간 부패(롤링 창 시한폭탄) 방어 ──────────────────────────────────
 //   LRS 기본 기간칩은 "최근 30일"(wall clock). 그 위에 "행이 존재한다" 류의 단언을 얹으면

@@ -149,7 +149,8 @@ router.post('/:classId', requireAuth, requireClassMember, (req, res) => {
           type: 'homework_new',
           title: '새 과제가 등록되었습니다',
           message: hw.title,
-          link: `/class/class-homework.html?classId=${req.classId}&homeworkId=${hw.id}`,
+          // 실제 화면 파일명 = homework-view.html, 파라미터명은 homeworkId 가 아니라 id (실측)
+          link: `/class/homework-view.html?classId=${req.classId}&id=${hw.id}`,
           excludeUserId: req.user.id
         });
       }

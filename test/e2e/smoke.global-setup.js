@@ -52,7 +52,7 @@ async function loginAndSaveState(baseURL, account) {
 module.exports = async (config) => {
   const baseURL =
     (config.projects && config.projects[0] && config.projects[0].use && config.projects[0].use.baseURL) ||
-    'http://localhost:3100';
+    `http://localhost:${process.env.SMOKE_PORT || 3100}`;
 
   if (!fs.existsSync(STATE_DIR)) fs.mkdirSync(STATE_DIR, { recursive: true });
 

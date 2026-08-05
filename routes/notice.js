@@ -128,7 +128,8 @@ router.post('/:classId', requireAuth, requireMember, requireOwner, (req, res) =>
           type: 'notice_new',
           title: '새 알림장이 등록되었습니다',
           message: notice.title,
-          link: `/class/class-notice.html?classId=${req.classId}&noticeId=${notice.id}`,
+          // 실제 화면 파일명 = notice-board.html (params.get('classId'|'noticeId') 실측)
+          link: `/class/notice-board.html?classId=${req.classId}&noticeId=${notice.id}`,
           excludeUserId: req.user.id
         });
       }
@@ -330,7 +331,7 @@ router.post('/:classId/:noticeId/remind', requireAuth, requireMember, requireOwn
           classId: req.classId,
           noticeId: req.noticeId,
           title: req.notice.title,
-          link: `/class/notice.html?classId=${req.classId}&noticeId=${req.noticeId}`
+          link: `/class/notice-board.html?classId=${req.classId}&noticeId=${req.noticeId}`
         };
         for (const uid of r.target_user_ids) {
           io.to(`user:${uid}`).emit('notice:remind', payload);

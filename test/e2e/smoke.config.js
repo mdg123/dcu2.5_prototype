@@ -19,7 +19,8 @@ const path = require('path');
 const { SMOKE_DB_PATH, SMOKE_UPLOAD_DIR, makeSmokeDb } = require('./smoke.db-copy');
 makeSmokeDb(); // VACUUM INTO 동기 복사
 
-const PORT = 3100;
+// 기본 3100. 동시 작업으로 포트가 이미 점유된 경우 SMOKE_PORT 로 비켜 간다(평시 불변).
+const PORT = parseInt(process.env.SMOKE_PORT || '3100', 10);
 const BASE_URL = `http://localhost:${PORT}`;
 
 module.exports = defineConfig({

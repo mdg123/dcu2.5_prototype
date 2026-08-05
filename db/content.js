@@ -13,7 +13,9 @@ function createContent(creatorId, data) {
     data.subject || null, data.grade || null,
     data.tags ? JSON.stringify(data.tags) : null,
     data.is_public ? 1 : 0,
-    data.status || 'approved',
+    // [W1-T3-13] 기본값 'approved' → 'draft'. status 를 안 주고 부르는 시드·마이그레이션이
+    //   검토 없이 즉시 공개되던 것을 막는다. 정상 경로는 routes/content.js 가 항상 명시한다.
+    data.status || 'draft',
     data.allow_comments !== undefined ? (data.allow_comments ? 1 : 0) : 1,
     data.achievement_code || null,
     data.school_level || null,

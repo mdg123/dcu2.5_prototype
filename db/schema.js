@@ -382,7 +382,11 @@ function initSchema() {
       grade INTEGER,
       tags TEXT,
       is_public INTEGER DEFAULT 0,
-      status TEXT DEFAULT 'approved',
+      -- [W1-T3-13] 기본값은 'draft'. 예전 기본값이 'approved' 라, status 를 명시하지 않는
+      --   시드·마이그레이션 INSERT 가 **검토 없이 즉시 공개**되는 상태로 들어갔다.
+      --   정상 경로(routes/content.js POST)는 항상 status 를 서버에서 결정해 넣으므로
+      --   기본값을 안전한 쪽으로 내려도 동선 변화가 없다.
+      status TEXT DEFAULT 'draft',
       reject_reason TEXT,
       view_count INTEGER DEFAULT 0,
       like_count INTEGER DEFAULT 0,
@@ -2252,7 +2256,7 @@ function initSchema() {
           if (c.name === 'id') return 'id INTEGER PRIMARY KEY AUTOINCREMENT';
           if (c.name === 'creator_id') return 'creator_id INTEGER NOT NULL';
           if (c.name === 'title') return 'title TEXT NOT NULL';
-          if (c.name === 'status') return "status TEXT DEFAULT 'approved'";
+          if (c.name === 'status') return "status TEXT DEFAULT 'draft'";
           // PRAGMA 결과의 원본 타입 보존(없으면 TEXT). 신규 컬럼 정의 유실 방지.
           const t = (c.type && String(c.type).trim()) ? c.type : 'TEXT';
           return `${c.name} ${t}`;
@@ -2291,7 +2295,7 @@ function initSchema() {
         if (col === 'id') return 'id INTEGER PRIMARY KEY AUTOINCREMENT';
         if (col === 'creator_id') return 'creator_id INTEGER NOT NULL';
         if (col === 'title') return 'title TEXT NOT NULL';
-        if (col === 'status') return "status TEXT DEFAULT 'approved'";
+        if (col === 'status') return "status TEXT DEFAULT 'draft'";
         return `${col} TEXT`;
       }).join(',\n');
       db.pragma('foreign_keys = OFF');

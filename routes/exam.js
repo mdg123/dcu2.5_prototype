@@ -265,7 +265,8 @@ router.post('/:classId', requireAuth, requireClassMember, (req, res) => {
           type: 'exam_new',
           title: '새 평가가 등록되었습니다',
           message: exam.title,
-          link: `/class/class-evaluation.html?classId=${req.classId}&examId=${exam.id}`,
+          // 실제 화면 파일명 = exam-view.html, 파라미터명은 examId 가 아니라 id (실측)
+          link: `/class/exam-view.html?classId=${req.classId}&id=${exam.id}`,
           excludeUserId: req.user.id
         });
       }

@@ -244,6 +244,22 @@
     } else {
       userArea.innerHTML = `
         <button onclick="window.dacheumSearch && window.dacheumSearch.open()" class="gnb-icon-btn" title="통합 검색"><i class="fas fa-search"></i></button>
+        <span class="gnb-notif-wrap">
+          <button type="button" class="gnb-icon-btn gnb-notif-btn" id="gnbNotifBellBtn"
+                  title="알림" aria-label="알림" aria-haspopup="true" aria-expanded="false">
+            <i class="far fa-bell"></i>
+            <span class="gnb-notif-badge" id="gnbNotifBadge">0</span>
+          </button>
+          <div class="gnb-notif-panel" id="gnbNotifPanel" role="dialog" aria-label="알림 목록">
+            <div class="gnb-notif-head">
+              <strong><i class="far fa-bell" style="color:var(--gnb-primary);"></i> 알림 <span class="gnb-notif-count" id="gnbNotifCount"></span></strong>
+              <button type="button" class="gnb-notif-readall" id="gnbNotifReadAll">전체 읽음</button>
+            </div>
+            <div class="gnb-notif-list" id="gnbNotifList">
+              <div class="gnb-notif-empty">불러오는 중...</div>
+            </div>
+          </div>
+        </span>
         <a href="/message/index.html" class="gnb-icon-btn" title="소통쪽지" style="position:relative;text-decoration:none;">
           <i class="fas fa-envelope"></i>
           <span id="gnbUnreadBadge" style="display:none;position:absolute;top:-4px;right:-6px;background:#EF4444;color:#fff;border-radius:10px;min-width:18px;height:18px;font-size:13px;font-weight:700;line-height:18px;text-align:center;padding:0 5px;"></span>
@@ -329,6 +345,162 @@
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
   else init();
 
+  // ══════════════════════════════════════════════════════════════════════════
+  // 알림 벨 (전 페이지 공통)
+  //   2026-08-05 P0-4 이전에는 나도예술가(gallery.html) 한 페이지에만 있었다.
+  //   과제·평가·알림장 알림이 사실상 도달 불가였으므로 GNB 로 이관.
+  //   갤러리의 구현을 그대로 옮겨와 재사용한다(동작·문구 동일, 클래스만 gnb- 접두).
+  // ══════════════════════════════════════════════════════════════════════════
+  let notifItems = [];
+  let notifUnread = 0;
+
+  function notifEsc(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+  function notifTimeAgo(iso) {
+    if (!iso) return '';
+    const t = new Date(String(iso).replace(' ', 'T'));
+    if (isNaN(t)) return '';
+    const diff = Math.floor((Date.now() - t.getTime()) / 1000);
+    if (diff < 60) return '방금 전';
+    if (diff < 3600) return Math.floor(diff / 60) + '분 전';
+    if (diff < 86400) return Math.floor(diff / 3600) + '시간 전';
+    if (diff < 604800) return Math.floor(diff / 86400) + '일 전';
+    return t.toLocaleDateString('ko-KR', { month: 'long', day: 'numeric' });
+  }
+  function notifIcon(type) {
+    const t = String(type || '');
+    if (t.includes('reject')) return 'fa-circle-xmark';
+    if (t.includes('approve')) return 'fa-circle-check';
+    if (t.includes('takedown')) return 'fa-ban';
+    if (t.includes('comment')) return 'fa-comment';
+    if (t.startsWith('exam')) return 'fa-clipboard-check';
+    if (t.startsWith('homework')) return 'fa-pen-to-square';
+    if (t.startsWith('notice')) return 'fa-bullhorn';
+    if (t.startsWith('gallery')) return 'fa-palette';
+    return 'fa-bell';
+  }
+
+  function renderNotifBell() {
+    const btn = document.getElementById('gnbNotifBellBtn');
+    const badge = document.getElementById('gnbNotifBadge');
+    const cnt = document.getElementById('gnbNotifCount');
+    if (btn) btn.classList.toggle('has-unread', notifUnread > 0);
+    if (badge) badge.textContent = notifUnread > 99 ? '99+' : String(notifUnread);
+    if (cnt) cnt.textContent = notifUnread > 0 ? '미읽음 ' + notifUnread + '건' : '';
+  }
+
+  function renderNotifList() {
+    const list = document.getElementById('gnbNotifList');
+    if (!list) return;
+    if (!notifItems.length) {
+      list.innerHTML = '<div class="gnb-notif-empty"><i class="far fa-bell-slash"></i>새로운 알림이 없습니다.<br>새 과제·평가·알림장이 등록되면 여기에 표시됩니다.</div>';
+      return;
+    }
+    list.innerHTML = notifItems.map(n => {
+      const unread = !n.is_read && !n.read_at;
+      return '<div class="gnb-notif-item' + (unread ? ' is-unread' : '') + '"' +
+        ' role="button" tabindex="0" data-id="' + n.id + '" data-link="' + notifEsc(n.link || '') + '">' +
+        '<span class="gnb-notif-ico"><i class="fas ' + notifIcon(n.type) + '"></i></span>' +
+        '<span class="gnb-notif-txt">' +
+          '<span class="gnb-notif-title">' + notifEsc(n.title || '알림') + '</span>' +
+          '<span class="gnb-notif-msg">' + notifEsc(n.message || '') + '</span>' +
+          '<span class="gnb-notif-time">' + notifEsc(notifTimeAgo(n.created_at)) + '</span>' +
+        '</span></div>';
+    }).join('');
+  }
+
+  async function loadNotifications(renderList) {
+    try {
+      const res = await fetch('/api/notifications?limit=20');
+      if (!res.ok) throw new Error('http ' + res.status);
+      const data = await res.json();
+      notifItems = (data && data.items) || [];
+      notifUnread = (data && typeof data.unread_count === 'number')
+        ? data.unread_count
+        : notifItems.filter(n => !n.is_read && !n.read_at).length;
+      renderNotifBell();
+      if (renderList) renderNotifList();
+    } catch (e) {
+      if (renderList) {
+        const list = document.getElementById('gnbNotifList');
+        if (list) list.innerHTML = '<div class="gnb-notif-empty">알림을 불러오지 못했습니다.<br>잠시 후 다시 시도해 주세요.</div>';
+      }
+    }
+  }
+
+  async function openNotif(id, link, el) {
+    try { await fetch('/api/notifications/' + id + '/read', { method: 'POST' }); } catch (e) {}
+    if (el && el.classList.contains('is-unread')) {
+      el.classList.remove('is-unread');
+      notifUnread = Math.max(0, notifUnread - 1);
+      renderNotifBell();
+    }
+    if (link && link !== 'null' && link !== 'undefined') window.location.href = link;
+  }
+
+  function initNotifBell() {
+    const btn = document.getElementById('gnbNotifBellBtn');
+    const panel = document.getElementById('gnbNotifPanel');
+    if (!btn || !panel) return;
+
+    btn.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      const open = !panel.classList.contains('open');
+      panel.classList.toggle('open', open);
+      btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+      if (open) { renderNotifList(); loadNotifications(true); }
+    });
+
+    const readAll = document.getElementById('gnbNotifReadAll');
+    if (readAll) readAll.addEventListener('click', async (ev) => {
+      ev.stopPropagation();
+      try { await fetch('/api/notifications/read-all', { method: 'POST' }); } catch (e) {}
+      notifItems = notifItems.map(n => Object.assign({}, n, { is_read: true }));
+      notifUnread = 0;
+      renderNotifBell();
+      renderNotifList();
+    });
+
+    // 목록 항목 클릭/키보드 — 위임
+    const list = document.getElementById('gnbNotifList');
+    if (list) {
+      list.addEventListener('click', (ev) => {
+        const item = ev.target.closest('.gnb-notif-item');
+        if (!item) return;
+        openNotif(item.dataset.id, item.dataset.link, item);
+      });
+      list.addEventListener('keydown', (ev) => {
+        if (ev.key !== 'Enter' && ev.key !== ' ') return;
+        const item = ev.target.closest('.gnb-notif-item');
+        if (!item) return;
+        ev.preventDefault();
+        openNotif(item.dataset.id, item.dataset.link, item);
+      });
+    }
+
+    // 바깥 클릭 / ESC 로 닫기
+    document.addEventListener('click', (ev) => {
+      if (ev.target.closest('.gnb-notif-wrap')) return;
+      if (panel.classList.contains('open')) {
+        panel.classList.remove('open');
+        btn.setAttribute('aria-expanded', 'false');
+      }
+    });
+    document.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Escape' && panel.classList.contains('open')) {
+        panel.classList.remove('open');
+        btn.setAttribute('aria-expanded', 'false');
+        btn.focus();
+      }
+    });
+
+    loadNotifications(false);
+    setInterval(() => loadNotifications(panel.classList.contains('open')), 60000);
+  }
+
   async function loadUnreadCount() {
     try {
       const res = await fetch('/api/message/unread-count');
@@ -345,6 +517,7 @@
     const user = await loadUser();
     if (user) {
       buildGNB(user);
+      initNotifBell();
       loadUnreadCount();
       setInterval(loadUnreadCount, 60000);
       window.dacheumUser = user;
