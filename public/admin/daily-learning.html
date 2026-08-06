@@ -576,36 +576,58 @@
         title, description: document.getElementById('setDesc').value.trim(),
         target_date: targetDate, target_grade: grade ? parseInt(grade) : null,
         target_subject: subjects.join(','), difficulty,
-        is_active: document.getElementById('setActive').checked,
+        // ★ [W2-T4-4] boolean 을 그대로 보내면 better-sqlite3 가 바인딩을 거부해 수정이 항상 500 이었다.
+        //   서버도 방어 정규화하지만, 계약상 0/1 정수로 보낸다.
+        is_active: document.getElementById('setActive').checked ? 1 : 0,
         thumbnail_url: thumbnailUrl
       };
 
       try {
         let setId = editingSetId;
         if (editingSetId) {
-          await fetch('/api/self-learn/daily/sets/' + editingSetId, {
+          const r = await fetch('/api/self-learn/daily/sets/' + editingSetId, {
             method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
-          });
+          }).then(r => r.json()).catch(() => null);
+          if (!r || r.success === false) { showToast('수정 실패: ' + ((r && r.message) || '서버 오류')); return; }
         } else {
           const res = await fetch('/api/self-learn/daily/sets', {
             method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
           }).then(r => r.json());
+          if (!res || res.success === false) { showToast('저장 실패: ' + ((res && res.message) || '서버 오류')); return; }
           setId = res.id || res.set?.id || res.data?.id;
         }
 
-        // 아이템 저장
-        if (setId && addedContents.length) {
-          // 기존 아이템 삭제 후 다시 추가
-          for (let i = 0; i < addedContents.length; i++) {
-            await fetch('/api/self-learn/daily/sets/' + setId + '/items', {
-              method: 'POST', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                source_type: 'content', content_id: addedContents[i].id,
-                item_title: addedContents[i].title, sort_order: i + 1,
-                estimated_minutes: addedContents[i].estimated_minutes || 10
-              })
-            });
+        // ── 항목 저장 — 차집합 동기화 (전량 교체 금지) ────────────────────────────
+        //   [감리 B1] 예전에는 저장할 때마다 항목을 전부 지우고 다시 넣어서, 제목만 고쳐도
+        //   그 세트의 **학생 이수 기록이 전량 삭제**되고 항목 id 까지 재발급됐다
+        //   (learning_logs.daily_complete.target_id 가 고아가 됨).
+        //   이제 서버가 같은 콘텐츠의 항목 id 를 유지하고 메타만 갱신한다.
+        if (setId) {
+          const desired = addedContents.map((c, i) => ({
+            source_type: 'content', content_id: c.id,
+            item_title: c.title, sort_order: i + 1,
+            estimated_minutes: c.estimated_minutes || 10
+          }));
+
+          // 항목이 실제로 제거되는 경우에만, 사라질 학생 기록을 알려 주고 확인받는다.
+          if (editingSetId) {
+            try {
+              const pv = await fetch('/api/self-learn/daily/sets/' + setId + '/items?preview=1', {
+                method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ items: desired })
+              }).then(r => r.json());
+              const removing = (pv && pv.removing) || [];
+              const lostProgress = removing.reduce((a, x) => a + (x.progress || 0), 0);
+              if (removing.length && lostProgress > 0) {
+                const names = removing.map(x => '· ' + x.title).join('\n');
+                if (!confirm(`제거되는 학습 항목 ${removing.length}개에 학생 학습 기록 ${lostProgress}건이 있습니다.\n\n${names}\n\n이 기록도 함께 삭제됩니다. 계속할까요?`)) return;
+              }
+            } catch (_) { /* 미리보기 실패는 저장을 막지 않음 */ }
           }
+
+          const sync = await fetch('/api/self-learn/daily/sets/' + setId + '/items', {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ items: desired })
+          }).then(r => r.json()).catch(() => null);
+          if (!sync || sync.success === false) { showToast('항목 저장 실패: ' + ((sync && sync.message) || '서버 오류')); return; }
         }
 
         showToast(editingSetId ? '수정되었습니다!' : '배포되었습니다!');
@@ -615,9 +637,11 @@
     }
 
     async function deleteSet(setId) {
-      if (!confirm('이 학습 세트를 삭제하시겠습니까?')) return;
+      if (!confirm('이 학습 세트를 삭제하시겠습니까?\n세트에 담긴 학습 항목과 학생 진행 기록도 함께 지워집니다.')) return;
       try {
-        await fetch('/api/self-learn/daily/sets/' + setId, { method: 'DELETE' });
+        // [W2-T4-5] 이 경로에 해당하는 라우트가 없어 404 였다(버튼이 죽어 있었음). 라우트 추가 후 응답을 확인한다.
+        const r = await fetch('/api/self-learn/daily/sets/' + setId, { method: 'DELETE' }).then(r => r.json());
+        if (!r || r.success === false) { showToast('삭제 실패: ' + ((r && r.message) || '서버 오류')); return; }
         showToast('삭제되었습니다.');
         loadSets();
       } catch { showToast('삭제 실패'); }

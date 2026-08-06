@@ -136,14 +136,62 @@ try { init(); } catch (e) { console.error('[self-learn auto-init] ', e.message);
 
 // ========== 오늘의 학습 세트 ==========
 
-function getDailySets(userId, { date, grade, subject } = {}) {
+// ─────────────────────────────────────────────────────────────────────────────
+// 배포 대상 자격 — "이 세트가 이 사용자에게 배포된 것인가" 의 **단일 정본 술어**.
+//
+//   ★ 목록(getDailySets)·세트 상세(GET /daily/:setId)·항목 시작·이수가 전부 이 함수 하나를 쓴다.
+//     술어를 두 벌로 두면 "목록엔 뜨는데 열면 403" 이 반드시 생긴다(2026-08-06 감리 B2 실측:
+//     student8(grade IS NULL) 에게 764건이 노출되고 앞 12건 상세가 전부 403,
+//     클래스 전용 세트 7건도 비멤버에게 목록 노출). 그래서 술어를 한 곳으로 모았다.
+//
+//   판정 규칙(학생):
+//     · 세트가 배포 중(is_active=1)
+//     · target_grade 가 지정돼 있으면 내 학년과 일치
+//       ─ **학년 미설정(users.grade IS NULL) 학생은 학년 지정 세트의 대상이 아니다.**
+//         학년은 배정의 근거이므로, 근거가 없는 계정에 임의 학년 세트를 배정하지 않는다.
+//         결과적으로 목록도 비고 열람도 없다(=일관). 화면에는 학년 설정 안내가 필요하며
+//         라우트가 응답에 notice 를 실어 준다.
+//     · class_id 가 있으면 그 클래스의 active 멤버
+//   교사·관리자 등 비학생은 점검/미리보기 목적이므로 항상 true (기존 GET /daily 정책 유지).
+//
+//   @param {{id:number, role:string, grade:number|null}|null} viewer
+//   @param {{is_active:number, target_grade:number|null, class_id:number|null}} set
+// ─────────────────────────────────────────────────────────────────────────────
+function isDailySetTargetedTo(viewer, set) {
+  if (!set) return false;
+  if (!viewer || viewer.role !== 'student') return true;
+  if (Number(set.is_active) !== 1) return false;
+  if (set.target_grade != null) {
+    if (viewer.grade == null) return false;               // 학년 미설정 → 학년 지정 세트 비대상
+    if (Number(set.target_grade) !== Number(viewer.grade)) return false;
+  }
+  if (set.class_id != null) {
+    const member = db.prepare(
+      "SELECT 1 FROM class_members WHERE class_id = ? AND user_id = ? AND status = 'active' LIMIT 1"
+    ).get(set.class_id, viewer.id);
+    if (!member) return false;
+  }
+  return true;
+}
+
+/**
+ * 오늘의 학습 세트 목록.
+ * @param {object} opts.includeInactive  배포 중지(is_active=0) 세트 포함 여부.
+ *   [W2-T4-3 fix] 기본은 **false = 배포 중인 세트만**. 이전에는 필터 자체가 없어
+ *   관리자 화면에서 "비활성"으로 내린 세트가 학생 "오늘의 학습"에 그대로 떴다.
+ *   관리 화면(교사·관리자)만 true 를 넘겨 비활성까지 본다.
+ * @param {object} opts.viewer  {id, role, grade} — 주면 isDailySetTargetedTo 로 배포 대상만 남긴다.
+ *   [B2 fix] 목록과 열람이 같은 술어를 쓰게 하는 지점. 미지정 시 대상 필터 없음(내부 호출 호환).
+ */
+function getDailySets(userId, { date, grade, subject, includeInactive = false, viewer = null } = {}) {
   let where = 'WHERE 1=1';
   const params = [];
+  if (!includeInactive) { where += ' AND COALESCE(s.is_active, 1) = 1'; }
   if (date) { where += ' AND s.target_date = ?'; params.push(date); }
   if (grade) { where += ' AND s.target_grade = ?'; params.push(parseInt(grade)); }
   if (subject) { where += ' AND s.target_subject = ?'; params.push(subject); }
 
-  const sets = db.prepare(`
+  let sets = db.prepare(`
     SELECT s.*, u.display_name as teacher_name,
       (SELECT COUNT(*) FROM daily_learning_items WHERE set_id = s.id) as total_items,
       (SELECT COUNT(*) FROM daily_learning_progress p
@@ -154,6 +202,9 @@ function getDailySets(userId, { date, grade, subject } = {}) {
     ${where}
     ORDER BY s.target_date DESC, s.created_at DESC
   `).all(userId, ...params);
+
+  // ★ 배포 대상 필터 — items 를 붙이기 "전에" 거른다(불필요한 조회도 줄어든다).
+  if (viewer) sets = sets.filter(s => isDailySetTargetedTo(viewer, s));
 
   // 각 세트에 items 포함
   const getItems = db.prepare(`
@@ -499,17 +550,32 @@ function createDailySet(teacherId, data) {
   return { id: info.lastInsertRowid, set };
 }
 
+// 세트 수정 시 허용 컬럼. thumbnail_url 은 값이 있을 때만 갱신(미첨부 수정에서 기존 썸네일 삭제 방지).
+const DAILY_SET_UPDATABLE = ['title', 'description', 'target_date', 'target_grade', 'target_subject', 'is_active', 'difficulty', 'thumbnail_url'];
+
+/**
+ * [W2-T4-4 fix] 관리자 "수정"이 항상 500 이던 원인:
+ *   UI(daily-learning.html)가 `is_active: true/false`(boolean)를 보내는데 better-sqlite3 는
+ *   boolean 바인딩을 거부한다("TypeError: … can only bind numbers, strings, …").
+ *   → 여기서 boolean 을 0/1 로 정규화한다. 값 그대로 넘기던 다른 필드도 undefined 는 건너뛴다.
+ */
 function updateDailySet(setId, data) {
   const fields = [];
   const params = [];
-  for (const [k, v] of Object.entries(data)) {
-    if (['title', 'description', 'target_date', 'target_grade', 'target_subject', 'is_active', 'difficulty'].includes(k)) {
-      fields.push(`${k} = ?`); params.push(v);
-    }
+  for (const [k, v] of Object.entries(data || {})) {
+    if (!DAILY_SET_UPDATABLE.includes(k)) continue;
+    if (v === undefined) continue;
+    if (k === 'thumbnail_url' && (v === null || v === '')) continue;  // 미첨부 → 기존 값 유지
+    let val = v;
+    if (typeof val === 'boolean') val = val ? 1 : 0;                  // ★ boolean → 0/1
+    if (k === 'is_active') val = (val === null ? 1 : Number(val) ? 1 : 0);
+    if (k === 'target_grade' && val !== null) val = parseInt(val) || null;
+    fields.push(`${k} = ?`); params.push(val);
   }
-  if (!fields.length) return;
+  if (!fields.length) return { changes: 0 };
   params.push(setId);
-  db.prepare(`UPDATE daily_learning_sets SET ${fields.join(', ')} WHERE id = ?`).run(...params);
+  const info = db.prepare(`UPDATE daily_learning_sets SET ${fields.join(', ')} WHERE id = ?`).run(...params);
+  return { changes: info.changes };
 }
 
 function addDailyItem(setId, data) {
@@ -532,8 +598,172 @@ function addDailyItem(setId, data) {
   return { id: info.lastInsertRowid };
 }
 
-function removeDailyItem(itemId) {
-  db.prepare('DELETE FROM daily_learning_items WHERE id = ?').run(itemId);
+/**
+ * 학습 항목 삭제.
+ *  · setId 를 주면 그 세트 소속 항목인지 확인 후에만 지운다(경로 파라미터 무시로 인한 교차 삭제 차단).
+ *  · daily_learning_progress → daily_learning_items 로 FK 가 걸려 있어 진행행을 먼저 지워야 한다.
+ *    (기존에는 바로 DELETE 해서 진행 이력이 있는 항목은 FOREIGN KEY 위반 → 500)
+ * @returns {boolean} 실제로 삭제됐는지
+ */
+function removeDailyItem(itemId, setId = null) {
+  const id = parseInt(itemId);
+  if (!id) return false;
+  const item = setId != null
+    ? db.prepare('SELECT id FROM daily_learning_items WHERE id = ? AND set_id = ?').get(id, parseInt(setId))
+    : db.prepare('SELECT id FROM daily_learning_items WHERE id = ?').get(id);
+  if (!item) return false;
+  const tx = db.transaction(() => {
+    db.prepare('DELETE FROM daily_learning_progress WHERE item_id = ?').run(id);
+    db.prepare('DELETE FROM daily_learning_items WHERE id = ?').run(id);
+  });
+  tx();
+  return true;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 세트 항목 동기화 (감리 B1 fix, 2026-08-06)
+//
+//   결함: 관리자 "수정" 저장이 **항목을 전량 DELETE 후 재삽입**했다. 여기에 FK 회피용
+//   진행행 선삭제가 겹쳐, **제목 오타 하나만 고쳐도 그 세트의 학생 이수 기록이 전량 소실**됐다.
+//   감리 실측 — 편집 전 progress 1행 → 편집 후 0행, item_id 7186→7187 재발급.
+//   재발급은 learning_logs.daily_complete.target_id(=itemId) 를 고아로 만든다(정본에 이미 2건).
+//   ※ 종전에는 이 경로가 항상 500(boolean 바인딩)이라 아무도 수정하지 못했다 —
+//     500 을 고치면서 데이터 소실 위험이 새로 열린 것이므로, 저장 알고리즘 자체를 바꾼다.
+//
+//   해법: 전량 교체 폐기 → **차집합 동기화**. 같은 콘텐츠는 **항목 id 를 유지**하고 메타만 갱신한다.
+//     · 매칭 키 = source_type|content_id|external_url (같은 키가 여러 개면 순서대로 소진 = multiset)
+//     · 유지: UPDATE (item_title·sort_order·estimated_minutes) — id 보존 → 진행행·학습로그 보존
+//     · 삭제: 목록에서 빠진 것만 removeDailyItem (그 항목의 진행 기록은 의도대로 함께 삭제)
+//     · 추가: 새로 들어온 것만 addDailyItem
+//
+//   저장 로직을 FE 인라인이 아니라 여기 두는 이유: 하네스가 직접 불변식을 걸 수 있어야 한다.
+// ─────────────────────────────────────────────────────────────────────────────
+function _itemMatchKey(o) {
+  const st = o.source_type || o.sourceType || 'content';
+  const cid = o.content_id ?? o.contentId ?? null;
+  const url = o.external_url || o.externalUrl || null;
+  return `${st}|${cid == null ? '' : cid}|${url == null ? '' : url}`;
+}
+
+/**
+ * 세트의 항목 목록을 desired 상태로 맞춘다(전량 교체 금지).
+ * @param {number} setId
+ * @param {Array<object>} desired  [{source_type, content_id, item_title, sort_order, estimated_minutes, ...}]
+ * @returns {{kept:number, added:number, removed:number, removedProgress:number, keptItemIds:number[]}}
+ */
+function syncDailyItems(setId, desired) {
+  const id = parseInt(setId);
+  if (!id) return { kept: 0, added: 0, removed: 0, removedProgress: 0, keptItemIds: [] };
+  const wanted = Array.isArray(desired) ? desired : [];
+
+  const existing = db.prepare(
+    'SELECT id, source_type, content_id, external_url, item_title, sort_order, estimated_minutes FROM daily_learning_items WHERE set_id = ? ORDER BY sort_order, id'
+  ).all(id);
+
+  // 기존 항목을 매칭 키별 큐로 (같은 콘텐츠가 2번 담긴 경우까지 정확히 대응)
+  const pool = new Map();
+  for (const e of existing) {
+    const k = _itemMatchKey(e);
+    if (!pool.has(k)) pool.set(k, []);
+    pool.get(k).push(e);
+  }
+
+  const keptItemIds = [];
+  const toAdd = [];
+  const updates = [];
+  wanted.forEach((w, i) => {
+    const k = _itemMatchKey(w);
+    const q = pool.get(k);
+    const sortOrder = w.sort_order ?? w.sortOrder ?? (i + 1);
+    if (q && q.length) {
+      const e = q.shift();                    // 기존 항목 재사용 → id 보존
+      keptItemIds.push(e.id);
+      updates.push({
+        id: e.id,
+        item_title: (w.item_title || w.itemTitle || w.title || e.item_title),
+        sort_order: sortOrder,
+        estimated_minutes: w.estimated_minutes ?? w.estimatedMinutes ?? e.estimated_minutes,
+      });
+    } else {
+      toAdd.push({ ...w, sort_order: sortOrder });
+    }
+  });
+
+  // 매칭되지 않고 남은 기존 항목 = 이번 저장에서 제거된 것
+  const leftovers = [];
+  for (const q of pool.values()) leftovers.push(...q);
+
+  let removedProgress = 0;
+  const tx = db.transaction(() => {
+    const upd = db.prepare(
+      'UPDATE daily_learning_items SET item_title = ?, sort_order = ?, estimated_minutes = ? WHERE id = ?'
+    );
+    for (const u of updates) upd.run(u.item_title, u.sort_order, u.estimated_minutes, u.id);
+    for (const e of leftovers) {
+      removedProgress += db.prepare('SELECT COUNT(*) n FROM daily_learning_progress WHERE item_id = ?').get(e.id).n;
+      db.prepare('DELETE FROM daily_learning_progress WHERE item_id = ?').run(e.id);
+      db.prepare('DELETE FROM daily_learning_items WHERE id = ?').run(e.id);
+    }
+    for (const a of toAdd) addDailyItem(id, a);
+  });
+  tx();
+
+  return { kept: keptItemIds.length, added: toAdd.length, removed: leftovers.length, removedProgress, keptItemIds };
+}
+
+/**
+ * 세트 항목 중 "제거하면 학생 진행 기록이 함께 사라지는" 것을 미리 알려 준다(저장 전 확인용).
+ * @returns {{itemId:number, title:string, progress:number, completed:number}[]}
+ */
+function previewDailyItemRemoval(setId, desired) {
+  const id = parseInt(setId);
+  if (!id) return [];
+  const existing = db.prepare(
+    'SELECT id, source_type, content_id, external_url, item_title FROM daily_learning_items WHERE set_id = ? ORDER BY sort_order, id'
+  ).all(id);
+  const pool = new Map();
+  for (const e of existing) {
+    const k = _itemMatchKey(e);
+    if (!pool.has(k)) pool.set(k, []);
+    pool.get(k).push(e);
+  }
+  for (const w of (Array.isArray(desired) ? desired : [])) {
+    const q = pool.get(_itemMatchKey(w));
+    if (q && q.length) q.shift();
+  }
+  const out = [];
+  for (const q of pool.values()) {
+    for (const e of q) {
+      const p = db.prepare(
+        "SELECT COUNT(*) n, SUM(status='completed') c FROM daily_learning_progress WHERE item_id = ?"
+      ).get(e.id);
+      out.push({ itemId: e.id, title: e.item_title || '학습 항목', progress: p.n || 0, completed: p.c || 0 });
+    }
+  }
+  return out;
+}
+
+/**
+ * [W2-T4-5] 학습 세트 삭제 — 진행행 → 항목 → 세트 순으로 정리(FK 안전).
+ * @returns {{deleted:boolean, items:number, progress:number}}
+ */
+function deleteDailySet(setId) {
+  const id = parseInt(setId);
+  if (!id) return { deleted: false, items: 0, progress: 0 };
+  const set = db.prepare('SELECT id FROM daily_learning_sets WHERE id = ?').get(id);
+  if (!set) return { deleted: false, items: 0, progress: 0 };
+  let items = 0, progress = 0;
+  const tx = db.transaction(() => {
+    progress = db.prepare(
+      'DELETE FROM daily_learning_progress WHERE item_id IN (SELECT id FROM daily_learning_items WHERE set_id = ?)'
+    ).run(id).changes;
+    // set_id 로만 남아 있는 진행행(항목이 이미 지워진 잔존행)도 정리
+    try { progress += db.prepare('DELETE FROM daily_learning_progress WHERE set_id = ?').run(id).changes; } catch (_) {}
+    items = db.prepare('DELETE FROM daily_learning_items WHERE set_id = ?').run(id).changes;
+    db.prepare('DELETE FROM daily_learning_sets WHERE id = ?').run(id);
+  });
+  tx();
+  return { deleted: true, items, progress };
 }
 
 // ========== AI 맞춤학습 (학습맵) ==========
@@ -3546,7 +3776,20 @@ function recordProblemAttempt(userId, contentId, { isCorrect, selectedAnswer, us
     // questionId 없을 때 content 단위 대표 문항에서 해설만 조회
     const q = db.prepare('SELECT answer, options, explanation FROM content_questions WHERE content_id = ? ORDER BY question_number LIMIT 1').get(contentId);
     if (q) { questionExplanation = q.explanation || null; correctAnswer = resolveCorrectAnswerText(q); }
-    finalIsCorrect = isCorrect ? 1 : 0;
+    // ── [P0-5 방어] questionId 를 안 보내는 호출자를 위한 서버 재채점 ────────────────
+    //   결함(실측 2026-08-05): learning-map.html submitSolve 가 1-based 로 자체 채점하고
+    //   questionId 를 안 보내 서버가 그 값을 그대로 신뢰 → 오답이 is_correct=1 로 적재됐다.
+    //   FE 는 별도로 고쳤지만, "클라이언트 판정 무조건 신뢰"라는 구조 자체가 재발 통로다.
+    //   문항이 **정확히 1개뿐인 콘텐츠**(전체 9,551개 중 8,775개)면 그 문항이 곧 제출 대상이므로
+    //   서버가 judgeQuestionAnswer 로 다시 채점한다. 다문항 콘텐츠는 어느 문항인지 특정할 수
+    //   없으므로 기존 호환(클라 값) 유지.
+    const qCount = db.prepare('SELECT COUNT(*) AS n FROM content_questions WHERE content_id = ?').get(contentId);
+    const hasSubmission = (submittedIndex != null && submittedIndex !== '') || (submittedAnswer != null && String(submittedAnswer).trim() !== '');
+    if (q && qCount && qCount.n === 1 && hasSubmission) {
+      finalIsCorrect = judgeQuestionAnswer(q, submittedAnswer, submittedIndex) ? 1 : 0;
+    } else {
+      finalIsCorrect = isCorrect ? 1 : 0;
+    }
   }
 
   // BE-04: nodeId가 누락되면 node_contents에서 추론 (하나만 매핑된 경우 자동 보강)
@@ -7156,6 +7399,68 @@ function advanceDiagnosisV3(sessionId, payload = {}) {
 }
 
 // v3 완료 — 세션 마감 + 결과 집계 (현재 수준·시작점, 단원 현황)
+/** 정답률(0~1) → 진단 결과 enum. v2 finishDiagnosis 와 동일 임계값. */
+function _diagResultEnum(rate) {
+  if (rate < 0.4) return 'needs_review';
+  if (rate < 0.7) return 'developing';
+  if (rate < 0.9) return 'proficient';
+  return 'mastered';
+}
+
+/**
+ * [W2-T4-9 fix] 진단 결과를 user_node_status.diagnosis_result 에 반영한다.
+ *
+ *   결함(실측 2026-08-05): user_node_status 13행 중 diagnosis_result 가 10행 NULL.
+ *   원인 — 진단 결과를 노드에 기록하는 코드가 v2 `finishDiagnosis` 에만 있고,
+ *   실제 화면이 쓰는 v3(`finishDiagnosisV3`)에는 아예 없었다(DB 100세션 중 89건이 v3).
+ *   그래서 correct_rate 는 문제풀이로 갱신되는데 diagnosis_result 만 계속 NULL 이었다.
+ *
+ *   ※ status 는 건드리지 않는다 — 2026-06-05 "진단↔학습 분리" 정책(노드 학습 상태는
+ *     실제 학습으로만 산출). 따라서 status='completed' 0행 은 결함이 아니라 정책 결과다.
+ */
+function _applyDiagnosisNodeResult(userId, nodeId, rate) {
+  if (!userId || !nodeId) return false;
+  try {
+    db.prepare(`
+      INSERT INTO user_node_status (user_id, node_id, status, diagnosis_result, correct_rate, last_accessed_at)
+      VALUES (?, ?, 'not_started', ?, ?, CURRENT_TIMESTAMP)
+      ON CONFLICT(user_id, node_id) DO UPDATE SET
+        diagnosis_result = excluded.diagnosis_result,
+        correct_rate = excluded.correct_rate,
+        last_accessed_at = CURRENT_TIMESTAMP
+    `).run(userId, nodeId, _diagResultEnum(rate), rate);
+    return true;
+  } catch (e) {
+    console.error('[_applyDiagnosisNodeResult]', e.message);
+    return false;
+  }
+}
+
+/**
+ * v3 세션의 진단 결과를 노드에 기록.
+ *   ① 실제 채점된 개념(차시) 노드 — diagnosis_answers 를 node_id 로 집계한 개념별 정답률
+ *   ② 세션의 목표 노드(단원) — 세션 전체 정답률 (v2 와 동일 계약)
+ * @returns {number} 기록된 노드 수
+ */
+function _applyDiagnosisV3NodeResults(session) {
+  let n = 0;
+  const perNode = db.prepare(`
+    SELECT node_id, COUNT(*) AS total, SUM(is_correct) AS correct
+    FROM diagnosis_answers WHERE session_id = ? AND node_id IS NOT NULL
+    GROUP BY node_id
+  `).all(session.id);
+  for (const r of perNode) {
+    if (!r.node_id || r.node_id === 'unknown' || !r.total) continue;
+    if (_applyDiagnosisNodeResult(session.user_id, r.node_id, (r.correct || 0) / r.total)) n++;
+  }
+  if (session.target_node_id) {
+    const total = session.total_questions || 0;
+    const rate = total > 0 ? (session.correct_count || 0) / total : 0;
+    if (_applyDiagnosisNodeResult(session.user_id, session.target_node_id, rate)) n++;
+  }
+  return n;
+}
+
 function finishDiagnosisV3(sessionId) {
   const session = db.prepare('SELECT * FROM diagnosis_sessions WHERE id = ?').get(sessionId);
   if (!session) return null;
@@ -7163,6 +7468,12 @@ function finishDiagnosisV3(sessionId) {
   if (session.status !== 'completed') {
     db.prepare(`UPDATE diagnosis_sessions SET status='completed', completed_at=CURRENT_TIMESTAMP, result=? WHERE id = ?`)
       .run(_v3ResultEnum(session), sessionId);
+  }
+  // [W2-T4-9] 진단 결과 → 노드 상태 반영 (실패해도 finish 자체는 성공)
+  try {
+    _applyDiagnosisV3NodeResults(db.prepare('SELECT * FROM diagnosis_sessions WHERE id = ?').get(sessionId));
+  } catch (e) {
+    console.error('[finishDiagnosisV3] 노드 진단결과 반영 실패:', e.message);
   }
   // [2026-06-09] 진단 완료 즉시 추천학습 경로 영속 (v2 finishDiagnosis와 동일 패턴, 실패해도 finish는 성공)
   try {
@@ -7395,7 +7706,8 @@ module.exports = {
   init,
   getDailySets, getDailySetDetail, startDailyItem, completeDailyItem, getDailyStats,
   getDailyItemResult,
-  createDailySet, updateDailySet, addDailyItem, removeDailyItem,
+  createDailySet, updateDailySet, addDailyItem, removeDailyItem, deleteDailySet,
+  syncDailyItems, previewDailyItemRemoval, isDailySetTargetedTo,
   getMapNodes, getMapNodeDetail, getMapEdges, getUserNodeStatuses,
   collectFallbackProblems,
   startDiagnosis, submitDiagnosisAnswer, finishDiagnosis, getDiagnosisResult,

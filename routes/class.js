@@ -2,6 +2,26 @@ const express = require('express');
 const router = express.Router();
 const { requireAuth, requireRole, optionalAuth } = require('../middleware/auth');
 const classDb = require('../db/class');
+// 클래스 관리 권한 판정 SSOT — 사본 금지 (lib/auth/can-view-user.js 주석 참조)
+const { canManageClass } = require('../lib/auth/can-view-user');
+
+// ─────────────────────────────────────────────────────────────────────────────
+// [P0-7] 초대코드 마스킹
+//   classes.code 는 비공개 클래스의 **유일한 접근 통제 수단**이다
+//   (POST /api/class/join 은 is_public 을 보지 않는다 — "비공개 = 코드로만 가입"이 설계).
+//   그런데 상세·목록·검색·인기 응답이 전부 `SELECT c.*` 라 코드가 모든 멤버에게,
+//   심지어 인기 클래스는 비로그인에게까지 나갔다(2026-08-05 실측: student1 → code=UE9LT9).
+//   → 클래스를 "관리할 수 있는 사람"(canManageClass)에게만 코드를 붙인다.
+//   ★ 삭제가 아니라 필드 제거다. FE 는 "code 가 있으면 렌더"로 게이트하므로
+//     빈 문자열이나 '******' 같은 가짜 값을 넣지 않는다(빈 칩·가짜 코드 복사 방지).
+// ─────────────────────────────────────────────────────────────────────────────
+function withCodeIfManager(req, cls) {
+  if (!cls) return cls;
+  if (canManageClass(req, cls.id)) return cls;
+  const { code, ...rest } = cls;
+  return rest;
+}
+const withCodeIfManagerAll = (req, list) => (list || []).map((c) => withCodeIfManager(req, c));
 
 // POST /api/class - 클래스 생성 (누구나 가능)
 router.post('/', requireAuth, (req, res) => {
@@ -36,7 +56,7 @@ router.post('/', requireAuth, (req, res) => {
 // GET /api/class - 나의 클래스 목록
 router.get('/', requireAuth, (req, res) => {
   try {
-    const classes = classDb.getUserClasses(req.user.id);
+    const classes = withCodeIfManagerAll(req, classDb.getUserClasses(req.user.id));
     res.json({ success: true, classes });
   } catch (err) {
     res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
@@ -46,7 +66,7 @@ router.get('/', requireAuth, (req, res) => {
 // GET /api/class/my - 내 클래스 (alias)
 router.get('/my', requireAuth, (req, res) => {
   try {
-    const classes = classDb.getUserClasses(req.user.id);
+    const classes = withCodeIfManagerAll(req, classDb.getUserClasses(req.user.id));
     res.json({ success: true, classes });
   } catch (err) {
     res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
@@ -63,6 +83,7 @@ router.get('/search', requireAuth, (req, res) => {
       page: parseInt(page) || 1, limit: parseInt(limit) || 12,
       excludeOwnerId: excludeOwnerId ? parseInt(excludeOwnerId) : null
     });
+    result.classes = withCodeIfManagerAll(req, result.classes);
     res.json({ success: true, ...result });
   } catch (err) {
     res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
@@ -81,6 +102,8 @@ router.get('/popular', optionalAuth, (req, res) => {
       page: 1, limit,
       excludeOwnerId: (excludeSelf && req.user) ? req.user.id : null
     });
+    // optionalAuth — 비로그인이면 canManageClass 가 false 라 코드가 전부 제거된다.
+    result.classes = withCodeIfManagerAll(req, result.classes);
     res.json({ success: true, ...result });
   } catch (err) {
     console.error('[CLASS] popular error:', err);
@@ -100,7 +123,8 @@ router.post('/join', requireAuth, (req, res) => {
     const added = classDb.addMember(cls.id, req.user.id, 'member');
     if (!added) return res.status(409).json({ success: false, message: '이미 가입된 클래스입니다.' });
 
-    res.json({ success: true, message: '클래스에 가입했습니다.', class: cls });
+    // 가입 직후 응답에도 코드를 되돌려주지 않는다(가입자는 일반 멤버 → 마스킹).
+    res.json({ success: true, message: '클래스에 가입했습니다.', class: withCodeIfManager(req, cls) });
   } catch (err) {
     console.error('[CLASS] join error:', err);
     res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
@@ -145,7 +169,14 @@ router.get('/:classId', requireAuth, (req, res) => {
 
     const members = classDb.getClassMembers(classId);
     const myRole = classDb.getMemberRole(classId, req.user.id);
-    res.json({ success: true, class: cls, members, myRole });
+    // canManage — FE(클래스 설정 화면)가 관리 UI 노출을 게이트할 때 쓰는 서버 판정.
+    //   FE 가 myRole 로 다시 판정하면 그 순간 판정 사본이 하나 더 생긴다. 서버 답을 그대로 쓴다.
+    res.json({
+      success: true,
+      class: withCodeIfManager(req, cls),
+      members, myRole,
+      canManage: canManageClass(req, classId)
+    });
   } catch (err) {
     res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
   }
@@ -155,12 +186,12 @@ router.get('/:classId', requireAuth, (req, res) => {
 router.put('/:classId', requireAuth, (req, res) => {
   try {
     const classId = parseInt(req.params.classId);
-    const myRole = classDb.getMemberRole(classId, req.user.id);
-    if (myRole !== 'owner' && req.user.role !== 'admin') {
+    // 관리 권한 판정 SSOT — lib/auth/can-view-user.js canManageClass (사본 금지)
+    if (!canManageClass(req, classId)) {
       return res.status(403).json({ success: false, message: '클래스 개설자만 수정 가능합니다.' });
     }
     const updated = classDb.updateClass(classId, req.body);
-    res.json({ success: true, message: '클래스 정보가 수정되었습니다.', class: updated });
+    res.json({ success: true, message: '클래스 정보가 수정되었습니다.', class: withCodeIfManager(req, updated) });
   } catch (err) {
     res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
   }
@@ -170,8 +201,8 @@ router.put('/:classId', requireAuth, (req, res) => {
 router.delete('/:classId', requireAuth, (req, res) => {
   try {
     const classId = parseInt(req.params.classId);
-    const myRole = classDb.getMemberRole(classId, req.user.id);
-    if (myRole !== 'owner' && req.user.role !== 'admin') {
+    // 관리 권한 판정 SSOT — lib/auth/can-view-user.js canManageClass (사본 금지)
+    if (!canManageClass(req, classId)) {
       return res.status(403).json({ success: false, message: '클래스 개설자만 삭제 가능합니다.' });
     }
     classDb.deleteClass(classId);
@@ -211,8 +242,8 @@ router.post('/:classId/members', requireAuth, (req, res) => {
     }
 
     // 개설자에 의한 초대
-    const myRole = classDb.getMemberRole(classId, req.user.id);
-    if (myRole !== 'owner' && req.user.role !== 'admin') {
+    // 관리 권한 판정 SSOT — lib/auth/can-view-user.js canManageClass (사본 금지)
+    if (!canManageClass(req, classId)) {
       return res.status(403).json({ success: false, message: '개설자만 멤버를 초대할 수 있습니다.' });
     }
     if (!username) return res.status(400).json({ success: false, message: '사용자 아이디를 입력하세요.' });
@@ -236,9 +267,8 @@ router.put('/:classId/members/:userId/role', requireAuth, (req, res) => {
     const classId = parseInt(req.params.classId);
     const userId = parseInt(req.params.userId);
     const { role: newRole } = req.body;
-    const myRole = classDb.getMemberRole(classId, req.user.id);
-
-    if (myRole !== 'owner' && req.user.role !== 'admin') {
+    // 관리 권한 판정 SSOT — lib/auth/can-view-user.js canManageClass (사본 금지)
+    if (!canManageClass(req, classId)) {
       return res.status(403).json({ success: false, message: '개설자만 권한을 변경할 수 있습니다.' });
     }
     if (!['owner', 'member'].includes(newRole)) {
@@ -264,8 +294,8 @@ router.delete('/:classId/members/:userId', requireAuth, (req, res) => {
   try {
     const classId = parseInt(req.params.classId);
     const userId = parseInt(req.params.userId);
-    const myRole = classDb.getMemberRole(classId, req.user.id);
-    if (myRole !== 'owner' && req.user.role !== 'admin') {
+    // 관리 권한 판정 SSOT — lib/auth/can-view-user.js canManageClass (사본 금지)
+    if (!canManageClass(req, classId)) {
       return res.status(403).json({ success: false, message: '권한이 없습니다.' });
     }
     const removed = classDb.removeMember(classId, userId);
@@ -296,8 +326,8 @@ router.get('/:classId/owner-summary', requireAuth, (req, res) => {
   try {
     const classId = parseInt(req.params.classId);
     const type = String(req.query.type || 'ungraded'); // ungraded | missing
-    const myRole = classDb.getMemberRole(classId, req.user.id);
-    if (myRole !== 'owner' && req.user.role !== 'admin') {
+    // 관리 권한 판정 SSOT — lib/auth/can-view-user.js canManageClass (사본 금지)
+    if (!canManageClass(req, classId)) {
       return res.status(403).json({ success: false, message: '개설자만 접근 가능합니다.' });
     }
 

@@ -48,7 +48,12 @@
       defaultUrl: '/class/index.html',
       sub: [
         { label: '나의 클래스', url: '/class/index.html' },
-        { label: '클래스 관리', url: '/class/manage.html' },
+        // [P0-7] 학생 메뉴에 그대로 노출돼 URL 조작 없이 클래스 설정 화면에 도달했다.
+        //   화면·API 가 이제 개설자만 통과시키므로 학생에게는 "들어가 봐야 권한 안내"인 죽은 링크다.
+        //   ※ 학생도 클래스를 개설할 수 있다(POST /api/class 는 역할 제한이 없다).
+        //     그 학생-개설자는 이 메뉴 대신 클래스 홈의 "클래스 설정 / 설정 및 멤버 관리"
+        //     버튼(myRole==='owner' 일 때만 노출)으로 동일 화면에 들어간다 — 동선은 유지된다.
+        { label: '클래스 관리', url: '/class/manage.html', roles: ['teacher', 'admin'] },
         { label: '클래스 찾기', url: '/class/find.html' },
         { label: '클래스별 학습분석', url: '/class/analytics.html' },
         { label: '명예의 전당', url: '/class/hall-of-fame.html' }

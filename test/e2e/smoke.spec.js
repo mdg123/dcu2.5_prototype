@@ -1663,3 +1663,127 @@ test.describe('스모크: LRS A4b 판정 임계 일관성(INV-A4-9·10·11)', ()
     } finally { await context.close(); }
   });
 });
+
+// ── 8) [P0-7] 클래스 설정 화면 전면 진입 + 초대코드 유출 회귀 ───────────────
+//   2026-08-05 실서버 실측: student1(일반 멤버)이 /class/manage.html?id=N 로 그대로 들어가
+//   초대코드·복사/QR·공개여부 편집·멤버 강퇴·"클래스 삭제"까지 렌더됐다.
+//   초대코드는 비공개 클래스의 유일한 접근 통제 수단이므로(join 이 is_public 을 보지 않는다)
+//   학생이 외부에 뿌리면 임의의 제3자가 학급 게시판·감정·성적 화면까지 들어온다.
+//   API 층은 test/class-invite-code-guard.test.js 가 박제한다. 여기는 **화면과 GNB**다.
+test.describe('스모크: P0-7 클래스 설정 접근 통제', () => {
+  /** 해당 역할의 클래스 중 my_role 이 조건에 맞는 첫 클래스 id */
+  async function pickClass(browser, role, wantOwner) {
+    const context = await browser.newContext({ storageState: stateFor(role), locale: 'ko-KR', baseURL: BASE_URL });
+    try {
+      const page = await context.newPage();
+      await page.goto('/index.html', { waitUntil: 'domcontentloaded' }).catch(() => {});
+      const id = await page.evaluate(async (wo) => {
+        try {
+          const r = await fetch('/api/class/my');
+          if (!r.ok) return null;
+          const d = await r.json();
+          const hit = (d.classes || []).find((c) => (c.my_role === 'owner') === wo);
+          return hit ? hit.id : null;
+        } catch (_) { return null; }
+      }, wantOwner).catch(() => null);
+      await page.close();
+      return id;
+    } finally { await context.close(); }
+  }
+
+  test('P0-7①: 학생(일반 멤버)이 클래스 설정에 들어가면 권한 안내 — 초대코드·위험영역 0', async ({ browser }) => {
+    const cid = await pickClass(browser, 'student', false);
+    if (!cid) test.skip(true, 'student1 이 일반 멤버인 클래스 없음');
+    const context = await browser.newContext({ storageState: stateFor('student'), locale: 'ko-KR', baseURL: BASE_URL });
+    try {
+      const page = await context.newPage();
+      await page.goto(`/class/manage.html?id=${cid}`, { waitUntil: 'domcontentloaded' });
+      await page.waitForTimeout(2500);
+      const r = await page.evaluate(() => {
+        const t = document.body.innerText || '';
+        const code = document.getElementById('codeDisplay');
+        return {
+          denied: !!document.getElementById('dcDeniedPanel'),
+          codeText: code ? code.textContent.trim() : '',
+          codeVisible: !!(code && code.offsetParent !== null),
+          hasInviteLabel: /초대 코드/.test(t),
+          hasDanger: /위험 영역|클래스 삭제/.test(t),
+          hasKick: /내보내기|권한부여/.test(t),
+          hasPublicToggle: /공개 \(클래스 찾기에 노출\)/.test(t),
+        };
+      });
+      expect.soft(r.denied, 'P0-7①: 학생에게 권한 안내 패널이 안 뜬다(관리 UI 가 그대로 렌더됨)').toBeTruthy();
+      expect.soft(r.codeText, `P0-7①: 학생 화면에 초대코드 문자열이 남아 있다(${r.codeText})`).toBe('');
+      expect.soft(r.codeVisible, 'P0-7①: 초대코드 요소가 학생에게 보인다').toBeFalsy();
+      expect.soft(r.hasInviteLabel, 'P0-7①: 학생 화면에 "초대 코드" 라벨 노출').toBeFalsy();
+      expect.soft(r.hasDanger, 'P0-7①: 학생 화면에 위험 영역/클래스 삭제 노출').toBeFalsy();
+      expect.soft(r.hasKick, 'P0-7①: 학생 화면에 멤버 강퇴/권한부여 노출').toBeFalsy();
+      expect.soft(r.hasPublicToggle, 'P0-7①: 학생 화면에 공개여부 편집 폼 노출').toBeFalsy();
+      await page.close();
+    } finally { await context.close(); }
+  });
+
+  test('P0-7②: GNB "클래스 관리" 가 학생에게 미노출 · 교사에게 노출', async ({ browser }) => {
+    for (const [role, want] of [['student', false], ['teacher', true]]) {
+      const context = await browser.newContext({ storageState: stateFor(role), locale: 'ko-KR', baseURL: BASE_URL });
+      try {
+        const page = await context.newPage();
+        await page.goto('/class/index.html', { waitUntil: 'domcontentloaded' });
+        await page.waitForTimeout(1800);
+        const items = await page.evaluate(() =>
+          [...document.querySelectorAll('.gnb-nav2-item')].map((a) => a.textContent.trim()));
+        const has = items.includes('클래스 관리');
+        expect.soft(has, `P0-7②: ${role} GNB "클래스 관리" 노출=${has} (기대 ${want}) — 실제 메뉴 ${JSON.stringify(items)}`).toBe(want);
+        await page.close();
+      } finally { await context.close(); }
+    }
+  });
+
+  test('P0-7③: 나의 클래스 목록에 남의 반 초대코드 칩 0 (내가 만든 반은 유지)', async ({ browser }) => {
+    const context = await browser.newContext({ storageState: stateFor('student'), locale: 'ko-KR', baseURL: BASE_URL });
+    try {
+      const page = await context.newPage();
+      await page.goto('/class/index.html', { waitUntil: 'domcontentloaded' });
+      await page.waitForTimeout(2500);
+      const r = await page.evaluate(async () => {
+        const pills = [...document.querySelectorAll('.class-code-pill')].map((e) => e.textContent.trim()).filter(Boolean);
+        const d = await fetch('/api/class/my').then((x) => x.json()).catch(() => ({}));
+        const list = d.classes || [];
+        return {
+          pills,
+          ownedCodes: list.filter((c) => c.my_role === 'owner').map((c) => c.code).filter(Boolean),
+          memberWithCode: list.filter((c) => c.my_role !== 'owner' && c.code).length,
+        };
+      });
+      expect.soft(r.memberWithCode, `P0-7③: 일반 멤버 클래스 ${r.memberWithCode}건의 초대코드가 API 에서 내려온다`).toBe(0);
+      // 화면 칩은 "내가 개설한 반"의 코드만 남아야 한다 — 과잉 차단(내 반 코드까지 제거) 도 실패로 잡는다
+      expect.soft(r.pills.sort(), `P0-7③: 코드 칩 집합 불일치 (칩=${JSON.stringify(r.pills)} / 내가 개설=${JSON.stringify(r.ownedCodes)})`)
+        .toEqual(r.ownedCodes.sort());
+      await page.close();
+    } finally { await context.close(); }
+  });
+
+  test('P0-7④(과잉차단 금지): 교사(개설자)는 초대코드·위험영역·멤버관리가 그대로', async ({ browser }) => {
+    const cid = await pickClass(browser, 'teacher', true);
+    if (!cid) test.skip(true, 'teacher1 이 개설한 클래스 없음');
+    const context = await browser.newContext({ storageState: stateFor('teacher'), locale: 'ko-KR', baseURL: BASE_URL });
+    try {
+      const page = await context.newPage();
+      await page.goto(`/class/manage.html?id=${cid}`, { waitUntil: 'domcontentloaded' });
+      await page.waitForTimeout(2500);
+      const r = await page.evaluate(() => {
+        const code = document.getElementById('codeDisplay');
+        return {
+          denied: !!document.getElementById('dcDeniedPanel'),
+          code: code ? code.textContent.trim() : '',
+          tabs: [...document.querySelectorAll('.tab-btn')].map((b) => b.textContent.trim()),
+        };
+      });
+      expect.soft(r.denied, 'P0-7④: 개설자인데 권한 안내가 떴다(과잉 차단)').toBeFalsy();
+      expect.soft(/^[A-Z0-9]{6,}$/.test(r.code), `P0-7④: 개설자 화면에서 초대코드가 사라졌다(code="${r.code}")`).toBeTruthy();
+      expect.soft(r.tabs.some((t) => /위험 영역/.test(t)), 'P0-7④: 개설자 화면에서 위험 영역 탭이 사라졌다').toBeTruthy();
+      expect.soft(r.tabs.some((t) => /멤버 관리/.test(t)), 'P0-7④: 개설자 화면에서 멤버 관리 탭이 사라졌다').toBeTruthy();
+      await page.close();
+    } finally { await context.close(); }
+  });
+});

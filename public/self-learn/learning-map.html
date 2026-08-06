@@ -6862,7 +6862,8 @@ function renderProblemsHtml(n) {
     }
     // 깔끔한 콘텐츠 제목 (상단)
     const cleanTitle = title.replace(/\s*\(EBS\s*\d+\)\s*$/i, '').replace(/^\[+[^\]]+\]+\s*/, '');
-    const solvePayload = JSON.stringify({id, title, difficulty: diff, options: p.options || p.choices, question: stem, answer: p.answer || p.correct_answer, explanation: p.explanation, clear_top3: p.clear_top3 || p.clearTop3}).replace(/"/g,"&quot;");
+    // question_id 는 서버 재채점(POST /problem-attempt)의 필수 키 — 절대 빠뜨리지 말 것.
+    const solvePayload = JSON.stringify({id, title, difficulty: diff, options: p.options || p.choices, question: stem, answer: p.answer || p.correct_answer, explanation: p.explanation, clear_top3: p.clear_top3 || p.clearTop3, question_id: p.question_id ?? p.questionId ?? null}).replace(/"/g,"&quot;");
     // 정오답 라벨 (헤더에 인라인 배치)
     const statusBadge = myAttempts > 0
       ? `<span style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:6px;font-size:12px;font-weight:700;${statusCls==='correct'?'background:#D1FAE5;color:#059669':statusCls==='wrong'?'background:#FEE2E2;color:#DC2626':'background:#F3F4F6;color:#6B7280'}">${statusIcon} ${escHtml(statusTxt)}</span>`
@@ -7150,6 +7151,37 @@ function goToLastActivity() {
    Problem Solve Modal
    ========================================================= */
 let solveStart = 0;
+
+/* ── 채점 규약(정본) ────────────────────────────────────────────────────────────
+   content_questions.answer 는 **0-based 보기 index** 다.
+   (실측 2026-08-05: 전체 11,886 문항 중 answer='0' 이 2,275건(19%) — 1-based 로는 성립 불가)
+   같은 규약을 db/self-learn-extended.js judgeQuestionAnswer / content-player.html 이 쓴다.
+   여기서만 (idx+1)===answer 로 판정해 **오답을 정답으로 DB에 적재**하던 것이 P0-5 결함이었다.
+   아래 헬퍼는 서버 _resolveCorrectIndex 의 축소판(0-based → ①②③ prefix → 보기 텍스트 일치). */
+function _normAnsText(v) {
+  return String(v == null ? '' : v).replace(/[①②③④⑤]/g, '').replace(/\s+/g, '').trim().toLowerCase();
+}
+function resolveCorrectIndex(rawAnswer, opts) {
+  if (!Array.isArray(opts) || !opts.length) return null;
+  const raw = String(rawAnswer == null ? '' : rawAnswer).trim();
+  if (raw === '') return null;
+  // 1) 순수 숫자 → 0-based index
+  if (/^\d+$/.test(raw)) {
+    const n = Number(raw);
+    if (n >= 0 && n < opts.length) return n;
+  }
+  // 2) 원숫자 기호(①②③④⑤) → 1-based 표기이므로 -1
+  const circle = { '①': 0, '②': 1, '③': 2, '④': 3, '⑤': 4 }[raw[0]];
+  if (circle != null && circle < opts.length) return circle;
+  // 3) 정답 텍스트 ↔ 보기 텍스트
+  const an = _normAnsText(raw);
+  if (an) {
+    const i = opts.findIndex(o => _normAnsText(typeof o === 'string' ? o : (o && (o.text || o.label || o.content))) === an);
+    if (i >= 0) return i;
+  }
+  return null;
+}
+
 function openSolve(problem) {
   currentSolveProblem = problem;
   currentSolveNodeId = currentDrawerNode ? currentDrawerNode._id : null;
@@ -7169,26 +7201,35 @@ function openSolve(problem) {
     // {1:'..',2:'..'} 혹은 {a:'..'} 형태 대응
     rawOpts = Object.keys(rawOpts).sort().map(k => rawOpts[k]);
   }
-  const opts = (Array.isArray(rawOpts) && rawOpts.length) ? rawOpts : ['보기1', '보기2', '보기3', '보기4'];
+  // ★ 지어낸 보기 금지 — 보기가 없으면 채점할 근거가 없다.
+  //   기존에는 ['보기1'..'보기4'] 를 만들어 띄우고 제출까지 받아 존재하지 않는 문항을 채점했다.
+  const opts = (Array.isArray(rawOpts) && rawOpts.length) ? rawOpts : [];
+  problem._opts = opts;
   // 질문 문자열 — question/text/content/stem 순으로 탐색
   const questionText = problem.question || problem.text || problem.content || problem.stem || '';
   const labels = ['①', '②', '③', '④', '⑤'];
+  const solvable = opts.length > 0 && !!questionText;
 
-  $('solveBody').innerHTML = `
-    <div class="solve-question">${escHtml(questionText || '문항 내용이 제공되지 않았습니다. 보기 중 하나를 선택해보세요.')}</div>
+  $('solveBody').innerHTML = solvable ? `
+    <div class="solve-question">${escHtml(questionText)}</div>
     <div class="solve-options" id="solveOpts">
       ${opts.map((opt, i) => {
-        const t = typeof opt === 'string' ? opt : (opt.text || opt.label || opt.content || '보기' + (i+1));
+        const t = typeof opt === 'string' ? opt : (opt.text || opt.label || opt.content || '');
         return `<div class="solve-option" data-idx="${i}" onclick="selectSolveOption(this)">
           <div class="solve-option-num">${labels[i] || (i+1)}</div>
           <div class="solve-option-text">${escHtml(t)}</div>
         </div>`;
       }).join('')}
+    </div>` : `
+    <div class="solve-empty" style="padding:32px 20px;text-align:center;color:#6B7280;line-height:1.8">
+      <div style="font-size:34px;margin-bottom:12px">📄</div>
+      <div style="font-size:18px;font-weight:700;color:#1F2937;margin-bottom:6px">문항 내용을 불러오지 못했어요</div>
+      <div style="font-size:16px">이 문제는 아직 등록된 보기가 없어 풀 수 없습니다.<br>다른 문제를 선택하거나 오류 신고를 눌러 알려주세요.</div>
     </div>`;
   $('solveActions').innerHTML = `
     <button class="btn btn-ghost" onclick="closeSolve()">닫기</button>
     <button class="btn btn-accent" onclick="openReport('${problem.id}','problem')"><i class="fas fa-exclamation-triangle"></i> 오류 신고</button>
-    <button class="btn btn-primary" id="solveSubmitBtn" disabled onclick="submitSolve()"><i class="fas fa-check"></i> 제출</button>`;
+    ${solvable ? `<button class="btn btn-primary" id="solveSubmitBtn" disabled onclick="submitSolve()"><i class="fas fa-check"></i> 제출</button>` : ''}`;
   $('solveModal').classList.add('show');
 }
 
@@ -7198,39 +7239,67 @@ function selectSolveOption(el) {
   $('solveSubmitBtn').disabled = false;
 }
 
+function _optText(o, i) {
+  if (typeof o === 'string') return o;
+  return (o && (o.text || o.label || o.content)) || '';
+}
+
 async function submitSolve() {
   const sel = document.querySelector('#solveOpts .solve-option.selected');
   if (!sel) return;
   const idx = parseInt(sel.dataset.idx);
   const p = currentSolveProblem;
-  const answer = p.answer;
-  let isCorrect = false;
-  if (typeof answer === 'number') isCorrect = (idx + 1) === answer || idx === answer;
-  else if (typeof answer === 'string') isCorrect = (idx + 1).toString() === answer;
+  const solveOpts = (Array.isArray(p._opts) && p._opts.length)
+    ? p._opts
+    : (Array.isArray(p.options) ? p.options : (Array.isArray(p.choices) ? p.choices : []));
 
-  // Color
-  document.querySelectorAll('#solveOpts .solve-option').forEach(o => {
-    const i = parseInt(o.dataset.idx);
-    if (typeof answer === 'number' && (i + 1 === answer || i === answer)) o.classList.add('correct');
-    else if (o.classList.contains('selected') && !isCorrect) o.classList.add('wrong');
-  });
+  // 이중 제출 차단 + 채점 중 표시
+  const submitBtn = $('solveSubmitBtn');
+  if (submitBtn) { submitBtn.disabled = true; submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 채점 중'; }
 
-  // Submit to server (defensive) — 채점 규약 통일: 선택 보기 텍스트 + 0-based answerIndex
+  // ── 채점: 서버가 정본 ──────────────────────────────────────────────────────
+  //   questionId 를 함께 보내면 서버(recordProblemAttempt → judgeQuestionAnswer)가 다시 채점하고
+  //   그 결과(correct / correctAnswer)를 돌려준다. 화면·DB 가 갈라질 수 없다.
+  //   클라 판정은 서버 응답이 없을 때(오프라인·오류)만 쓰는 폴백이며, 규약은 0-based 로 통일.
+  const localCorrectIdx = resolveCorrectIndex(p.answer, solveOpts);
+  let correctIdx = localCorrectIdx;
+  let isCorrect = (localCorrectIdx != null) ? (idx === localCorrectIdx) : false;
+
   const timeTaken = Math.round((Date.now() - solveStart) / 1000);
-  const solveOpts = p.options || p.choices || [];
-  fetchApi('/api/self-learn/problem-attempt', {
+  const data = await fetchApi('/api/self-learn/problem-attempt', {
     method: 'POST',
     body: JSON.stringify({
       contentId: p.id,
+      questionId: p.question_id ?? p.questionId ?? null,   // ★ 서버 재채점 키
       isCorrect,
-      selectedAnswer: String(solveOpts[idx] != null ? solveOpts[idx] : (idx + 1)),
+      selectedAnswer: String(_optText(solveOpts[idx], idx)),
       answerIndex: idx,
       timeTaken,
       nodeId: currentSolveNodeId
     })
-  }).then(data => {
+  });
+
+  let serverExplanation = null;
+  if (data && typeof data.correct === 'boolean') {
+    isCorrect = data.correct;                       // 서버 판정이 최종
+    serverExplanation = data.explanation || null;
+    if (data.correctAnswer != null) {
+      const i = solveOpts.findIndex((o, k) => _normAnsText(_optText(o, k)) === _normAnsText(data.correctAnswer));
+      if (i >= 0) correctIdx = i;
+    }
+  }
+
+  // Color — 확정된 정답 index 기준
+  document.querySelectorAll('#solveOpts .solve-option').forEach(o => {
+    const i = parseInt(o.dataset.idx);
+    o.classList.remove('correct', 'wrong');
+    if (correctIdx != null && i === correctIdx) o.classList.add('correct');
+    else if (o.classList.contains('selected') && !isCorrect) o.classList.add('wrong');
+  });
+
+  if (data) {
     // §4.2: 서버가 숙달 승격 신호 반환 시 즉시 UI 반영
-    if (data && (data.newStatus || data.status) && currentSolveNodeId) {
+    if ((data.newStatus || data.status) && currentSolveNodeId) {
       const ns = data.newStatus || data.status;
       if (ns === 'mastered' || ns === 'completed' || ns === 'problem_solved') {
         userStatuses[currentSolveNodeId] = ns;
@@ -7239,9 +7308,9 @@ async function submitSolve() {
     }
     // F-P0-NEW-2: 대시보드 카드/랭킹 즉시 갱신 — 캐시 무효화 후 재로드
     try { dashboardCache = null; loadDashboard(); loadRanking(); } catch(_){}
-  });
+  }
 
-  // §4.3: 드로어 카드 즉시 낙관적 업데이트 (서버 응답 기다리지 않음)
+  // §4.3: 드로어 카드 갱신 (서버 확정 결과 기준)
   if (currentDrawerNode && Array.isArray(currentDrawerNode.problems)) {
     const targetId = String(p.id);
     const target = currentDrawerNode.problems.find(x =>
@@ -7268,35 +7337,19 @@ async function submitSolve() {
   }
 
   // Show explanation
-  // 해설 안에 "정답은 N번" / "N번이 정답" 등이 포함된 경우 해설 기준으로 번호 재조정 (서버 데이터 불일치 대응)
-  const expText = p.explanation || '';
-  let displayAnswer = answer;
-  const m = expText.match(/정답은?\s*([①②③④⑤1-5])\s*번|([①②③④⑤1-5])\s*번\s*이?\s*정답/);
-  if (m) {
-    const raw = m[1] || m[2];
-    const circleMap = { '①':1,'②':2,'③':3,'④':4,'⑤':5 };
-    displayAnswer = circleMap[raw] || parseInt(raw) || displayAnswer;
-    // 화면 색칠도 해설과 일치시키기 — 기존 정답 하이라이트 제거 후 재적용
-    document.querySelectorAll('#solveOpts .solve-option').forEach(o => {
-      o.classList.remove('correct');
-      const oi = parseInt(o.dataset.idx);
-      if (oi + 1 === displayAnswer) o.classList.add('correct');
-    });
-    // 정답 일치 여부 재판정(해설 기준)
-    isCorrect = (idx + 1) === displayAnswer;
-  }
+  //   ※ 예전에는 해설 문구("정답은 4번")를 정규식으로 긁어 1-based 로 정답을 재조정했다.
+  //     서버 채점과 화면 표시가 서로 다른 근거를 쓰던 원인이라 제거했다. 표시도 서버 확정값 기준.
+  const expText = serverExplanation || p.explanation || '';
   const body = $('solveBody');
-  // 정답 번호 → 실제 보기 텍스트 매핑 (가능한 경우 자연어로 노출)
   let answerText = '';
-  try {
-    const optEls = document.querySelectorAll('#solveOpts .solve-option');
-    if (displayAnswer && optEls[displayAnswer - 1]) {
-      answerText = optEls[displayAnswer - 1].querySelector('.solve-option-text')?.textContent?.trim() || '';
-    }
-  } catch(_) {}
-  const answerLabel = answerText
-    ? `${displayAnswer}번 "${answerText}"`
-    : (displayAnswer ? `${displayAnswer}번` : '?');
+  if (correctIdx != null) {
+    const el = document.querySelector(`#solveOpts .solve-option[data-idx="${correctIdx}"] .solve-option-text`);
+    answerText = (el && el.textContent.trim()) || _optText(solveOpts[correctIdx], correctIdx) || '';
+  }
+  // 사용자에게 보여주는 번호는 사람이 세는 방식(1부터) — 내부 index(0-based)와 구분한다.
+  const answerLabel = correctIdx == null
+    ? '?'
+    : (answerText ? `${correctIdx + 1}번 "${answerText}"` : `${correctIdx + 1}번`);
   let footer = `<div class="solve-explain"><strong>${isCorrect ? '✅ 정답입니다!' : '❌ 아쉬워요. 정답은 ' + answerLabel + ' 입니다.'}</strong><br>${escHtml(expText || '해설이 준비되면 이 자리에 표시됩니다.')}</div>`;
   if (p.clear_top3 && p.clear_top3.length) {
     footer += `<div class="clear-top3"><span class="medal">🏆</span> 클리어 TOP3: ${p.clear_top3.map((u, i) => ['🥇','🥈','🥉'][i] + ' ' + escHtml(u.name || u.username || '익명')).join(' · ')}</div>`;
@@ -12169,6 +12222,7 @@ async function startDirectLearning(nodeId) {
     const p = problems[0];
     openSolve({
       id: p.id || p.content_id || p.contentId,
+      question_id: p.question_id ?? p.questionId ?? null,   // 서버 재채점 키 (누락 시 클라 판정 신뢰 = P0-5 재발)
       title: p.title || p.name || '문제 풀이',
       difficulty: p.difficulty,
       options: p.options || p.choices,

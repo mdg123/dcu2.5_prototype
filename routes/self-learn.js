@@ -30,7 +30,7 @@ function _nodeStdContext(nodeId) {
 
 router.get('/settings', requireAuth, (req, res) => {
   try {
-    const db = require('better-sqlite3')('data/dacheum.db');
+    const db = require('../db');
     let settings = db.prepare('SELECT * FROM user_learn_settings WHERE user_id = ?').get(req.user.id);
     if (!settings) {
       db.prepare("INSERT INTO user_learn_settings (user_id) VALUES (?)").run(req.user.id);
@@ -46,7 +46,7 @@ router.get('/settings', requireAuth, (req, res) => {
 
 router.put('/settings', requireAuth, (req, res) => {
   try {
-    const db = require('better-sqlite3')('data/dacheum.db');
+    const db = require('../db');
     const { school_level, grade, subjects, difficulty } = req.body;
     db.prepare(`
       INSERT INTO user_learn_settings (user_id, school_level, grade, subjects, difficulty, updated_at)
@@ -66,17 +66,99 @@ router.put('/settings', requireAuth, (req, res) => {
 
 // ========== 오늘의 학습 ==========
 
+// ─────────────────────────────────────────────────────────────────────────────
+// 오늘의 학습 세트 권한 게이트 (P0-6, 2026-08-05)
+//
+//   결함(실측): 세트 생성·수정·항목추가·항목삭제 4개 라우트가 requireAuth 뿐이라
+//   student1 세션으로 전부 200 + DB 반영됐다.
+//     · POST   /daily/sets                   → 학생 본인이 teacher_id 인 세트 생성
+//     · PUT    /daily/sets/{교사세트}         → 남의 세트 제목 임의 변경
+//     · DELETE /daily/sets/{교사세트}/items/… → 남의 세트 항목 삭제
+//     · POST   /daily/{타학년 item}/complete  → 배포 대상이 아닌 항목 이수 + 포인트 적립
+//
+//   정책(신규 발명 금지 — routes/class-mileage.js 의 requireClassMember/requireOwner 계층을 그대로 따름):
+//     ① 역할 게이트  requireSetManager : 세트 관리(쓰기)는 teacher·admin 만
+//     ② 소유 게이트  requireSetOwner   : 교사는 본인이 만든 세트만. admin 은 전체.
+//     ③ 대상 자격    requireDailyItemTarget : 학생은 "나에게 배포된" 항목만 시작/이수/진행저장
+//        (배포 중지 세트 X · 타학년 X · 남의 클래스 전용 세트 X)
+// ─────────────────────────────────────────────────────────────────────────────
+const SET_MANAGER_ROLES = ['teacher', 'admin'];
+
+function requireSetManager(req, res, next) {
+  if (!req.user) {
+    return res.status(401).json({ success: false, message: '로그인이 필요합니다.' });
+  }
+  if (!SET_MANAGER_ROLES.includes(req.user.role)) {
+    return res.status(403).json({ success: false, message: '학습 세트는 교사·관리자만 관리할 수 있습니다.' });
+  }
+  next();
+}
+
+function requireSetOwner(req, res, next) {
+  const setId = parseInt(req.params.setId);
+  if (!setId || isNaN(setId)) {
+    return res.status(400).json({ success: false, message: '잘못된 학습 세트 ID입니다.' });
+  }
+  const set = require('../db')
+    .prepare('SELECT id, teacher_id, class_id FROM daily_learning_sets WHERE id = ?').get(setId);
+  if (!set) {
+    return res.status(404).json({ success: false, message: '학습 세트를 찾을 수 없습니다.' });
+  }
+  if (req.user.role !== 'admin' && set.teacher_id !== req.user.id) {
+    return res.status(403).json({ success: false, message: '본인이 등록한 학습 세트만 수정·삭제할 수 있습니다.' });
+  }
+  req.dailySet = set;
+  req.setId = setId;
+  next();
+}
+
+// 배포 대상 자격 술어는 db/self-learn-extended.js 의 **단일 정본**을 쓴다.
+//   목록(getDailySets)과 열람·이수가 같은 함수를 공유해야 "목록엔 뜨는데 열면 403" 이 생기지 않는다.
+const isDailySetTargetedTo = selfLearnDb.isDailySetTargetedTo;
+
+/** 학생은 "나에게 배포된" 항목만 시작/이수/진행저장 할 수 있다. */
+function requireDailyItemTarget(req, res, next) {
+  const itemId = parseInt(req.params.itemId);
+  if (!itemId || isNaN(itemId)) {
+    return res.status(400).json({ success: false, message: '잘못된 학습 항목 ID입니다.' });
+  }
+  const row = require('../db').prepare(`
+    SELECT i.id AS item_id, s.id AS set_id, s.is_active, s.target_grade, s.class_id
+    FROM daily_learning_items i
+    JOIN daily_learning_sets s ON s.id = i.set_id
+    WHERE i.id = ?
+  `).get(itemId);
+  if (!row) {
+    return res.status(404).json({ success: false, message: '학습 항목을 찾을 수 없습니다.' });
+  }
+  req.dailyItemId = itemId;
+  if (!isDailySetTargetedTo(req.user, row)) {
+    return res.status(403).json({ success: false, message: '나에게 배포된 학습 항목이 아닙니다.' });
+  }
+  next();
+}
+
 // GET /daily — 오늘의 학습 세트 목록
 //   학생이면 기본적으로 본인 학년 세트만 반환 (다른 학년 세트 노출 방지).
 //   교사/관리자는 필터 없이 전체 조회 허용. 명시적으로 grade를 넘기면 그 값을 우선.
+//   [W2-T4-3] 배포 중지(is_active=0) 세트는 학생 화면에 노출 금지. 관리 화면(teacher/admin)만 포함.
+//   [감리 B2] 목록도 열람과 **같은 술어**(isDailySetTargetedTo)로 거른다.
+//     이전에는 목록이 is_active 만 보고 학년·클래스 대상을 안 봐서, student8(grade IS NULL)에게
+//     764건이 뜨고 열면 전부 403 이었다. 목록에 뜬 세트는 반드시 상세가 열려야 한다.
 router.get('/daily', requireAuth, (req, res) => {
   try {
     const q = { ...req.query };
-    if (!q.grade && req.user.role === 'student' && req.user.grade != null) {
-      q.grade = req.user.grade;
-    }
+    //   학년 필터는 viewer 술어(isDailySetTargetedTo)가 담당한다.
+    //   여기서 q.grade = 내 학년 을 따로 걸면 **전 학년 대상(target_grade IS NULL) 세트가 목록에서만
+    //   사라지고 상세는 열리는** 반대 방향의 불일치가 생긴다. ?grade= 를 명시한 관리 화면 조회만 그대로 둔다.
+    q.includeInactive = SET_MANAGER_ROLES.includes(req.user.role);
+    q.viewer = { id: req.user.id, role: req.user.role, grade: req.user.grade };
     const sets = selfLearnDb.getDailySets(req.user.id, q);
-    res.json({ success: true, sets });
+    // 학년 미설정 학생은 학년 지정 세트의 배정 대상이 아니다 → 목록이 빈다. 화면이 이유를 말할 수 있게 고지한다.
+    const notice = (req.user.role === 'student' && req.user.grade == null && sets.length === 0)
+      ? '학년 정보가 등록되어 있지 않아 배정된 학습이 없습니다. 학년을 설정하면 오늘의 학습을 받을 수 있어요.'
+      : null;
+    res.json({ success: true, sets, ...(notice ? { notice } : {}) });
   } catch (err) {
     console.error('[SELF-LEARN] daily list error:', err);
     res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
@@ -94,10 +176,14 @@ router.get('/daily/stats', requireAuth, (req, res) => {
 });
 
 // GET /daily/:setId — 세트 상세
+//   [P0-6 같은 부류] 읽기도 배포 대상만. 이전에는 학생이 타학년·배포중지 세트의 제목·항목 구성을 그대로 읽었다.
 router.get('/daily/:setId', requireAuth, (req, res) => {
   try {
     const detail = selfLearnDb.getDailySetDetail(parseInt(req.params.setId), req.user.id);
     if (!detail) return res.status(404).json({ success: false, message: '학습 세트를 찾을 수 없습니다.' });
+    if (!isDailySetTargetedTo(req.user, detail.set)) {
+      return res.status(403).json({ success: false, message: '나에게 배포된 학습 세트가 아닙니다.' });
+    }
     res.json({ success: true, ...detail });
   } catch (err) {
     res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
@@ -121,7 +207,7 @@ function _loadDailyItemMeta(itemId) {
 }
 
 // POST /daily/:itemId/start — 학습 시작
-router.post('/daily/:itemId/start', requireAuth, (req, res) => {
+router.post('/daily/:itemId/start', requireAuth, requireDailyItemTarget, (req, res) => {
   try {
     const itemId = parseInt(req.params.itemId);
     selfLearnDb.startDailyItem(itemId, req.user.id);
@@ -148,7 +234,7 @@ router.post('/daily/:itemId/start', requireAuth, (req, res) => {
 });
 
 // POST /daily/:itemId/complete — 학습 완료
-router.post('/daily/:itemId/complete', requireAuth, (req, res) => {
+router.post('/daily/:itemId/complete', requireAuth, requireDailyItemTarget, (req, res) => {
   try {
     const itemId = parseInt(req.params.itemId);
     selfLearnDb.completeDailyItem(itemId, req.user.id, req.body);
@@ -213,16 +299,15 @@ router.get('/daily/:itemId/result', requireAuth, (req, res) => {
 });
 
 // POST /daily/:itemId/save-progress — 영상 시청 위치 저장
-router.post('/daily/:itemId/save-progress', requireAuth, (req, res) => {
+router.post('/daily/:itemId/save-progress', requireAuth, requireDailyItemTarget, (req, res) => {
   try {
     const itemId = parseInt(req.params.itemId);
     const { videoPosition, videoDuration, watchRatio } = req.body;
-    const db = require('better-sqlite3')('data/dacheum.db');
+    const db = require('../db');
     db.prepare(`UPDATE daily_learning_progress
       SET video_position = ?, video_duration = ?, watch_ratio = MAX(COALESCE(watch_ratio,0), ?)
       WHERE item_id = ? AND user_id = ?`
     ).run(videoPosition || 0, videoDuration || 0, watchRatio || 0, itemId, req.user.id);
-    db.close();
     // xAPI: 영상 진행 → media(played) — duration 초, completion %
     try {
       const mainDb = require('../db');
@@ -262,51 +347,90 @@ router.post('/daily/:itemId/save-progress', requireAuth, (req, res) => {
 router.get('/daily/:itemId/get-progress', requireAuth, (req, res) => {
   try {
     const itemId = parseInt(req.params.itemId);
-    const db = require('better-sqlite3')('data/dacheum.db');
+    const db = require('../db');
     const row = db.prepare('SELECT video_position, video_duration, watch_ratio FROM daily_learning_progress WHERE item_id = ? AND user_id = ?').get(itemId, req.user.id);
-    db.close();
     res.json({ success: true, progress: row || { video_position: 0, video_duration: 0, watch_ratio: 0 } });
   } catch (err) {
     res.status(500).json({ success: false, message: '서버 오류' });
   }
 });
 
-// POST /daily/sets — [교사] 학습 세트 생성
-router.post('/daily/sets', requireAuth, (req, res) => {
+// POST /daily/sets — [교사·관리자] 학습 세트 생성
+router.post('/daily/sets', requireAuth, requireSetManager, (req, res) => {
   try {
     const result = selfLearnDb.createDailySet(req.user.id, req.body);
     res.json({ success: true, ...result });
   } catch (err) {
+    console.error('[SELF-LEARN] daily/sets create error:', err);
     res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
   }
 });
 
-// PUT /daily/sets/:setId — [교사] 학습 세트 수정
-router.put('/daily/sets/:setId', requireAuth, (req, res) => {
+// PUT /daily/sets/:setId — [교사·관리자] 학습 세트 수정
+router.put('/daily/sets/:setId', requireAuth, requireSetManager, requireSetOwner, (req, res) => {
   try {
-    selfLearnDb.updateDailySet(parseInt(req.params.setId), req.body);
+    selfLearnDb.updateDailySet(req.setId, req.body);
     res.json({ success: true });
   } catch (err) {
+    console.error('[SELF-LEARN] daily/sets update error:', err);
     res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
   }
 });
 
-// POST /daily/sets/:setId/items — [교사] 학습 항목 추가
-router.post('/daily/sets/:setId/items', requireAuth, (req, res) => {
+// DELETE /daily/sets/:setId — [교사·관리자] 학습 세트 삭제
+//   [W2-T4-5] 관리자 화면(daily-learning.html deleteSet)이 이 경로를 호출했으나 라우트 자체가 없어 404였다.
+//   항목·진행행까지 함께 정리해야 FK(daily_learning_progress → daily_learning_items) 위반이 나지 않는다.
+router.delete('/daily/sets/:setId', requireAuth, requireSetManager, requireSetOwner, (req, res) => {
   try {
-    const result = selfLearnDb.addDailyItem(parseInt(req.params.setId), req.body);
+    const result = selfLearnDb.deleteDailySet(req.setId);
     res.json({ success: true, ...result });
   } catch (err) {
+    console.error('[SELF-LEARN] daily/sets delete error:', err);
     res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
   }
 });
 
-// DELETE /daily/sets/:setId/items/:itemId — [교사] 학습 항목 삭제
-router.delete('/daily/sets/:setId/items/:itemId', requireAuth, (req, res) => {
+// POST /daily/sets/:setId/items — [교사·관리자] 학습 항목 추가
+router.post('/daily/sets/:setId/items', requireAuth, requireSetManager, requireSetOwner, (req, res) => {
   try {
-    selfLearnDb.removeDailyItem(parseInt(req.params.itemId));
+    const result = selfLearnDb.addDailyItem(req.setId, req.body);
+    res.json({ success: true, ...result });
+  } catch (err) {
+    console.error('[SELF-LEARN] daily/sets item add error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// PUT /daily/sets/:setId/items — [교사·관리자] 학습 항목 **동기화**(차집합)
+//   [감리 B1] 관리자 저장이 "전량 DELETE 후 재삽입" 이라 제목만 고쳐도 학생 이수 기록이 사라졌다.
+//   이 라우트는 같은 콘텐츠의 **항목 id 를 유지**하고 메타만 갱신한다 → 진행행·learning_logs 보존.
+//   ?preview=1 이면 아무것도 바꾸지 않고 "제거될 항목과 그 진행 기록 수"만 돌려준다(저장 전 확인용).
+router.put('/daily/sets/:setId/items', requireAuth, requireSetManager, requireSetOwner, (req, res) => {
+  try {
+    const items = (req.body && (req.body.items || req.body)) || [];
+    if (!Array.isArray(items)) {
+      return res.status(400).json({ success: false, message: 'items 배열이 필요합니다.' });
+    }
+    if (String(req.query.preview || '') === '1') {
+      return res.json({ success: true, removing: selfLearnDb.previewDailyItemRemoval(req.setId, items) });
+    }
+    const result = selfLearnDb.syncDailyItems(req.setId, items);
+    res.json({ success: true, ...result });
+  } catch (err) {
+    console.error('[SELF-LEARN] daily/sets items sync error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// DELETE /daily/sets/:setId/items/:itemId — [교사·관리자] 학습 항목 삭제
+//   항목이 실제로 그 세트 소속인지까지 확인한다(기존에는 setId 를 무시하고 itemId 만으로 삭제).
+router.delete('/daily/sets/:setId/items/:itemId', requireAuth, requireSetManager, requireSetOwner, (req, res) => {
+  try {
+    const removed = selfLearnDb.removeDailyItem(parseInt(req.params.itemId), req.setId);
+    if (!removed) return res.status(404).json({ success: false, message: '해당 세트의 학습 항목을 찾을 수 없습니다.' });
     res.json({ success: true });
   } catch (err) {
+    console.error('[SELF-LEARN] daily/sets item remove error:', err);
     res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
   }
 });
@@ -343,8 +467,7 @@ router.get('/map/nodes', requireAuth, (req, res) => {
 // 각 차시의 videos_count, problems_count, user_status 를 포함 (공개 승인된 콘텐츠만 카운트)
 router.get('/map/nodes/:unitId/lessons', requireAuth, (req, res) => {
   try {
-    const path = require('path');
-    const db = require('better-sqlite3')(path.join(__dirname, '..', 'data', 'dacheum.db'));
+    const db = require('../db');
     const unitId = req.params.unitId;
     const unit = db.prepare('SELECT * FROM learning_map_nodes WHERE node_id = ?').get(unitId);
     if (!unit) {
@@ -487,12 +610,10 @@ router.get('/map/user-status', requireAuth, (req, res) => {
 router.post('/map/nodes/:nodeId/start', requireAuth, (req, res) => {
   try {
     const nodeId = req.params.nodeId;
-    const path = require('path');
-    const db = require('better-sqlite3')(path.join(__dirname, '..', 'data', 'dacheum.db'));
+    const db = require('../db');
 
     const node = db.prepare('SELECT node_id FROM learning_map_nodes WHERE node_id = ?').get(nodeId);
     if (!node) {
-      db.close();
       return res.status(404).json({ success: false, message: '노드를 찾을 수 없습니다.' });
     }
 
@@ -519,7 +640,6 @@ router.post('/map/nodes/:nodeId/start', requireAuth, (req, res) => {
       console.log(`[self-learn] /map/nodes/${nodeId}/start no-op (prevStatus=${prevStatus}, user=${req.user.id})`);
     }
 
-    db.close();
     // xAPI: AI 맞춤학습 차시 노드 진입 navigation.did
     try {
       const ctxN = _nodeStdContext(nodeId);
@@ -542,11 +662,10 @@ router.post('/map/nodes/:nodeId/start', requireAuth, (req, res) => {
 router.post('/map/nodes/:nodeId/diagnose-complete', requireAuth, (req, res) => {
   try {
     const nodeId = req.params.nodeId;
-    const db = require('better-sqlite3')('data/dacheum.db');
+    const db = require('../db');
 
     const node = db.prepare('SELECT node_id FROM learning_map_nodes WHERE node_id = ?').get(nodeId);
     if (!node) {
-      db.close();
       return res.status(404).json({ success: false, message: '노드를 찾을 수 없습니다.' });
     }
 
@@ -584,7 +703,6 @@ router.post('/map/nodes/:nodeId/diagnose-complete', requireAuth, (req, res) => {
       WHERE nc.node_id = ? AND c.content_type IN ('quiz','exam','problem','assessment','question')
     `).get(nodeId).cnt;
 
-    db.close();
     res.json({
       success: true,
       status: finalStatus,
@@ -619,10 +737,7 @@ router.get('/diagnosis/history', requireAuth, (req, res) => {
 
     // 기존 호환: nodeId 단일 노드 이력
     if (!nodeId) return res.status(400).json({ success: false, message: 'nodeId 또는 all=1 필요' });
-    const path = require('path');
-    const sqlite = require('better-sqlite3');
-    const dbPath = path.join(__dirname, '..', 'data', 'dacheum.db');
-    const db = sqlite(dbPath);
+    const db = require('../db');
     const recent = db.prepare(`
       SELECT id, target_node_id, status, total_questions, correct_count,
              started_at, completed_at, result, diagnosis_type
@@ -632,7 +747,6 @@ router.get('/diagnosis/history', requireAuth, (req, res) => {
     `).all(req.user.id, nodeId);
     const lastCompleted = recent.find(r => r.status === 'completed');
     const lastInProgress = recent.find(r => r.status === 'in_progress');
-    db.close();
     res.json({
       success: true,
       sessions: recent,
@@ -1450,13 +1564,12 @@ router.post('/problem-sets/:id/submit', requireAuth, (req, res) => {
 // POST /problem-sets/:id/reorder — 문제집 아이템 순서 변경
 router.post('/problem-sets/:id/reorder', requireAuth, (req, res) => {
   try {
-    const db = require('better-sqlite3')('data/dacheum.db');
+    const db = require('../db');
     const { order } = req.body; // [{id, sort_order}]
     if (Array.isArray(order)) {
       const stmt = db.prepare('UPDATE problem_set_items SET sort_order = ? WHERE id = ? AND problem_set_id = ?');
       order.forEach(o => stmt.run(o.sort_order, o.id, parseInt(req.params.id)));
     }
-    db.close();
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ success: false, message: '서버 오류' });

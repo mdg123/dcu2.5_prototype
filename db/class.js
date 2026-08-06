@@ -105,14 +105,49 @@ function deleteClass(classId) {
   db.prepare("UPDATE classes SET status = 'deleted' WHERE id = ?").run(classId);
 }
 
-// 멤버 추가
+// 멤버 추가 (신규 가입 + 강퇴·탈퇴자 재가입 복구)
+//
+// ── [W2-T6-7] 재가입이 영구 불가였던 버그 (2026-08-05 수정) ──────────────────
+//   removeMember 는 행을 지우지 않고 status='removed' 로 남긴다(기록 보존 목적).
+//   그런데 여기서는 INSERT 의 UNIQUE(class_id,user_id) 충돌을 **"이미 멤버"로 삼켜**
+//   409 를 돌려주고 있었다. 결과:
+//     · 강퇴된 학생이 코드로 재가입 → 409 "이미 가입된 클래스입니다."
+//     · 교사가 아이디로 다시 추가   → 409 "이미 멤버입니다."
+//   복구 경로가 코드 어디에도 없어서, 교사가 실수로 내보낸 학생은 DB 를 직접
+//   손대야만 돌아올 수 있었다.
+//   → status 가 active 가 아닌 행(removed/left/invited)이 있으면 **active 로 되살린다**.
+//
+//   과거 기록 처리: 출석·제출물·학습로그는 전부 (class_id, user_id) 로 매달려 있고
+//   class_members 행은 재사용(같은 id)되므로, 되살리면 과거 기록이 그대로 다시 보인다.
+//   같은 학생이 같은 반으로 돌아오는 것이니 이력 연속이 맞다(새 행을 만들어 기록을
+//   끊으면 성장기록·LRS 집계가 한 사람을 두 명으로 세게 된다).
+//   joined_at 만 "이번에 다시 들어온 날"로 갱신한다(멤버 관리 표의 가입일 열 = 현 소속 시작일).
+//
+//   ※ 이미 active 인 멤버의 중복 가입은 종전대로 false(409) — 재가입 복구를 넓히지 않는다.
+//   ※ 알려진 트레이드오프: 강퇴된 학생이 초대코드를 기억하면 스스로 다시 들어올 수 있다.
+//     지금은 코드 재발급 기능이 없어 방어 수단이 코드뿐이다(별건 후속 과제).
+// @returns {boolean} true = 가입/복구됨, false = 이미 active 멤버
 function addMember(classId, userId, role = 'member') {
+  const existing = db.prepare(
+    'SELECT id, status FROM class_members WHERE class_id = ? AND user_id = ?'
+  ).get(classId, userId);
+
+  if (existing) {
+    if (existing.status === 'active') return false; // 이미 멤버
+    db.prepare(
+      "UPDATE class_members SET status = 'active', role = ?, joined_at = CURRENT_TIMESTAMP WHERE id = ?"
+    ).run(role, existing.id);
+    db.prepare('UPDATE classes SET member_count = member_count + 1 WHERE id = ?').run(classId);
+    return true;
+  }
+
   try {
     db.prepare('INSERT INTO class_members (class_id, user_id, role) VALUES (?, ?, ?)').run(classId, userId, role);
     db.prepare('UPDATE classes SET member_count = member_count + 1 WHERE id = ?').run(classId);
     return true;
   } catch (e) {
-    if (e.message.includes('UNIQUE')) return false; // 이미 멤버
+    // 위 SELECT 와 INSERT 사이의 경합(동시 가입 클릭)만 여기로 온다.
+    if (e.message.includes('UNIQUE')) return false;
     throw e;
   }
 }

@@ -536,7 +536,7 @@
                   <div style="font-size:13px;color:var(--gray-500);">${c.description || ''}</div>
                   <div style="margin-top:12px;font-size:12px;color:var(--gray-400);display:flex;gap:12px;">
                     <span><i class="fas fa-users"></i> ${c.member_count || 0}명</span>
-                    <span><i class="fas fa-code"></i> ${c.code || ''}</span>
+                    ${c.code ? `<span><i class="fas fa-code"></i> ${c.code}</span>` : ''}
                   </div>
                 </a>
               `).join('')}
@@ -674,6 +674,25 @@
         })) return;
         const data = await res.json();
         if (!data.success) { showToast(data.message || '데이터 로드 실패'); location.href = '/class/index.html'; return; }
+
+        // [P0-7] 이 화면은 200 여부만 보고 관리 UI 를 통째로 렌더하고 있었다.
+        //   멤버면 누구나 200 이라, 학생에게 초대코드·복사/QR·공개여부 편집·멤버 강퇴·
+        //   "클래스 삭제"까지 그대로 보였다(파괴 API 자체는 403 이지만 코드와 UI 가 샜다).
+        //   판정은 서버가 내린다 — canManage 플래그를 그대로 쓴다(FE 판정 사본 금지).
+        if (!data.canManage) {
+          if (window.DacheumAccess) {
+            DacheumAccess.show({
+              what: '클래스 설정 화면',
+              who: '이 클래스를 만든 선생님',
+              reason: '클래스에 참여 중이어도 설정·멤버 관리는 개설자만 할 수 있어요.',
+              backHref: `/class/class-home.html?id=${classId}`,
+              backLabel: '클래스 홈으로 가기'
+            });
+          } else {
+            location.replace(`/class/class-home.html?id=${classId}`);
+          }
+          return;
+        }
 
         const c = data.class || data.classInfo;
         classOwnerId = c.owner_id;
