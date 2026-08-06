@@ -1,4 +1,6 @@
 const db = require('./index');
+// 학생 모집단 SSOT — 분모·명단은 손 SQL 로 다시 적지 말 것 (db/class.js 주석 참조)
+const { getClassStudents } = require('./class');
 
 // ========== 포트폴리오 ==========
 
@@ -109,12 +111,10 @@ function getClassGrowthOverview(classId, opts = {}) {
   const startDate = isIso(opts.startDate) ? opts.startDate : null;
   const endDate = isIso(opts.endDate) ? opts.endDate : null;
 
-  const members = db.prepare(`
-    SELECT cm.user_id, u.display_name, u.username
-    FROM class_members cm JOIN users u ON cm.user_id = u.id
-    WHERE cm.class_id = ? AND cm.role = 'member' AND u.role = 'student'
-    ORDER BY u.display_name
-  `).all(classId);
+  // 학생 명단은 SSOT 경유. 손 SQL 시절엔 cm.status·계정삭제를 안 봐서
+  // 탈퇴자·삭제 계정이 교사 화면에 실명으로 남았다(실측 class 1: 8명, 정본 7명).
+  const members = getClassStudents(classId)
+    .map(s => ({ user_id: s.user_id, display_name: s.display_name, username: s.username }));
 
   // learning_logs 용 기간 필터 (created_at 기준)
   function logsRange(extraParams) {

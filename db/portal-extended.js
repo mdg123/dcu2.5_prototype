@@ -1,5 +1,7 @@
 // db/portal-extended.js
 const db = require('./index');
+// 학생 모집단 SSOT — 분모·명단은 손 SQL 로 다시 적지 말 것 (db/class.js 주석 참조)
+const { studentPopulationSql, liveUserSql } = require('./class');
 
 // 마이그레이션: bookmark_count 컬럼 추가
 try { db.exec('ALTER TABLE contents ADD COLUMN bookmark_count INTEGER DEFAULT 0'); } catch(e) {}
@@ -48,10 +50,12 @@ function getHallOfFame(month, period) {
   `).all(...(useMonth ? [month] : []));
 
   // 최다학습 학습자
+  //   모집단은 "전체 학생"이 맞다(클래스 스코프 아님). 다만 관리자가 소프트 삭제한
+  //   계정이 그대로 남아 **삭제된 사람 실명이 명예의 전당에 뜰 수 있었다** → liveUserSql.
   const topLearners = db.prepare(`
     SELECT u.id, u.display_name, u.school_name, u.grade, COUNT(*) as learning_count
     FROM learning_logs ll JOIN users u ON ll.user_id = u.id
-    WHERE u.role = 'student' ${dateFilter}
+    WHERE u.role = 'student' AND ${liveUserSql('u')} ${dateFilter} /* pop-ok: 명예의 전당 최다학습 학습자 — 플랫폼 전체 학생이 모집단(클래스 스코프 아님). liveUserSql 만 더해 삭제 계정 실명 노출 차단 */
     GROUP BY u.id ORDER BY learning_count DESC LIMIT 20
   `).all(...(useMonth ? [month] : []));
 
@@ -361,20 +365,38 @@ function _teacherSummary(userId) {
   }
 
   // 미제출 학생 명단 수 (missingSubs): 마감일 지난/오늘 마감 과제 미제출 합계
+  //
+  // ── [P1-C] 2026-08-06 ─────────────────────────────────────────────────────
+  //   결함(수정 전): 분모 = `role='member' AND status='active'` 손 SQL (학부모·교직원·
+  //   삭제 계정 포함, 실측 class 1 = 10 / 정본 7). 분자 = `COUNT(*) FROM
+  //   homework_submissions` — 제출 **행 수**라 초안·재제출 중복·명단 밖 제출까지 세어
+  //   분자 ⊄ 분모 였다(7028533 감리 B-3 와 같은 형태). 두 오차가 반대 방향이라
+  //   "미제출 N명"이 얼마나 틀렸는지조차 알 수 없었다.
+  //
+  //   정본: db/homework.js getSubmissionStats 와 **같은 집합** —
+  //     분모 = 학생 모집단 SSOT, 분자 = 그 안에서 제출한 **학생 인원**(초안 제외).
+  //   ※ getSubmissionStats 를 그대로 호출하지 않는 이유: 그 함수는 과제 1건 단위인데
+  //     이 카드는 교사의 전 클래스 합계다. 루프로 부르면 과제 수 × 2 쿼리(N+1)가 된다.
+  //     술어(studentPopulationSql)는 공유하고 집계만 SQL 한 방으로 접는다.
   let missingSubs = 0;
   if (ownedClassIds.length > 0) {
     const ph = ownedClassIds.map(() => '?').join(',');
     try {
-      const hwList = db.prepare(`
-        SELECT id, class_id FROM homework
-        WHERE class_id IN (${ph}) AND status = 'published'
-          AND DATE(due_date) <= DATE('now', '+1 day')
-      `).all(...ownedClassIds);
-      for (const hw of hwList) {
-        const total = _safeCount(`SELECT COUNT(*) as cnt FROM class_members WHERE class_id = ? AND status='active' AND role='member'`, hw.class_id);
-        const submitted = _safeCount(`SELECT COUNT(*) as cnt FROM homework_submissions WHERE homework_id = ?`, hw.id);
-        missingSubs += Math.max(0, total - submitted);
-      }
+      missingSubs = _safeCount(`
+        SELECT COALESCE(SUM(MAX(0,
+          (SELECT COUNT(*) FROM class_members cm JOIN users u ON u.id = cm.user_id
+            WHERE cm.class_id = h.class_id AND ${studentPopulationSql('cm', 'u')})
+          -
+          (SELECT COUNT(DISTINCT hs.student_id) FROM homework_submissions hs
+            JOIN class_members cm2 ON cm2.user_id = hs.student_id AND cm2.class_id = h.class_id
+            JOIN users u2 ON u2.id = cm2.user_id
+            WHERE hs.homework_id = h.id AND COALESCE(hs.is_draft, 0) = 0
+              AND ${studentPopulationSql('cm2', 'u2')})
+        )), 0) as cnt
+        FROM homework h
+        WHERE h.class_id IN (${ph}) AND h.status = 'published'
+          AND DATE(h.due_date) <= DATE('now', '+1 day')
+      `, ...ownedClassIds);
     } catch {}
   }
 
@@ -695,7 +717,7 @@ function getPortalHighlights(userId) {
       const owned = db.prepare("SELECT id FROM classes WHERE owner_id = ? AND status='active'").all(userId).map(r => r.id);
       if (owned.length === 0) return new Set();
       const ph = owned.map(() => '?').join(',');
-      const ids = db.prepare(`SELECT DISTINCT user_id FROM class_members WHERE class_id IN (${ph}) AND status='active' AND role='member'`).all(...owned).map(r => r.user_id);
+      const ids = db.prepare(`SELECT DISTINCT user_id FROM class_members WHERE class_id IN (${ph}) AND status='active' AND role='member'`/* pop-ok: "우리반" 배지 대상은 학생 모집단이 아니라 내 클래스 구성원 전원(학부모·교직원 포함)이다. role='member' 는 개설자(나 자신) 제외용 */).all(...owned).map(r => r.user_id);
       return new Set(ids);
     } catch { return new Set(); }
   })();

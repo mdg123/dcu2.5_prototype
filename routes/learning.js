@@ -1,6 +1,8 @@
 const express = require('express');
 const router = express.Router();
 const { requireAuth } = require('../middleware/auth');
+// 클래스 관리 권한 판정 SSOT — 사본 금지 (lib/auth/can-view-user.js)
+const { canManageClass } = require('../lib/auth/can-view-user');
 const learningDb = require('../db/learning');
 
 // ===== 오늘의 학습 =====
@@ -214,12 +216,30 @@ router.post('/assign-all', requireAuth, requireRole('admin'), (req, res) => {
 router.get('/assign/:classId/completion', requireAuth, (req, res) => {
   try {
     const classId = parseInt(req.params.classId);
+
+    // ── [2026-08-06] 권한 가드 추가 ────────────────────────────────────────
+    //   결함: requireAuth 만 있어 **로그인한 아무나** 임의 classId 로 호출하면
+    //   그 반 학생 **실명 명단 + 개인별 이수율**을 통째로 받아갔다.
+    //   그동안 드러나지 않은 이유는 위 주석대로 모집단 산출이 죽어 있어
+    //   항상 `total 0 · completion []` 이었기 때문이다. 그 죽은 분모를 이번에
+    //   고치면서 **API 가 실제로 실명을 반환하게 되어 위험이 실체화**했다.
+    //   (감리 2차가 "악화되진 않았으나 실질 위험은 올라갔다"며 우선순위 상향 권고)
+    //   교사용 화면이므로 판정 SSOT 인 canManageClass 를 그대로 쓴다(사본 금지).
+    if (!canManageClass(req, classId)) {
+      return res.status(403).json({ success: false, message: '이 클래스의 학습 현황을 볼 권한이 없습니다.' });
+    }
+
     const date = req.query.date || new Date().toISOString().slice(0, 10);
     const db = require('../db/index');
     const classDb = require('../db/class');
 
-    // 클래스 멤버 중 학생 목록
-    const members = classDb.getClassMembers(classId).filter(m => m.role === 'student');
+    // 클래스 학생 목록 — 학생 모집단 SSOT.
+    //   결함(수정 전): getClassMembers(classId).filter(m => m.role === 'student')
+    //   getClassMembers 는 cm.role 을 m.role 로 준다. 그 값은 'owner' | 'member' 뿐이라
+    //   'student' 와는 절대 같아지지 않는다 → **항상 빈 배열**. 그 결과 이 API 는
+    //   클래스에 학생이 몇 명이든 total 0 · completion [] · rate 0 을 돌려주고 있었다
+    //   (죽은 분모. 실패가 아니라 "0명이 0% 이수" 라는 그럴듯한 거짓말로 나왔다).
+    const members = classDb.getClassStudents(classId);
     // 해당 날짜의 학습 기록 조회
     const records = db.prepare(`
       SELECT dl.*, u.display_name FROM daily_learning dl

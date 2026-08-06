@@ -109,14 +109,13 @@ test('INV2: getStudentReport 구조 계약 (6축 areas·participation 객체·ov
 //      — 멤버 집합이 곧 격리 단위이므로 멤버 명부의 A 소속을 검증한다.)
 // ──────────────────────────────────────────────────────────────────────────
 test('INV3: getClassDashboard 멤버는 모두 해당 classId 소속', () => {
-  const { openTestDb } = require('./_setup');
-  const db = openTestDb();
-  // class A 의 실제 멤버 명부 (member 역할 학생)
-  const realMembers = new Set(db.prepare(`
-    SELECT u.id FROM class_members cm JOIN users u ON u.id = cm.user_id
-    WHERE cm.class_id = ? AND cm.role = 'member' AND u.role = 'student'
-  `).all(CLASS).map(r => r.id));
-  db.close();
+  // 기대값도 학생 모집단 SSOT 를 경유한다.
+  //   [P1-C] 2026-08-06 — 여기에 `cm.role='member' AND u.role='student'` 손 SQL 을 적어 뒀던
+  //   탓에, 이 테스트의 "정답"이 곧 검사 대상의 **결함과 같은 술어**였다(class 1 = 8명).
+  //   cm.status·계정삭제를 안 보므로 탈퇴자·삭제 계정을 정답으로 인정하고 있었던 셈이고,
+  //   getClassDashboard 를 SSOT(7명)로 고치자 되레 이 테스트가 붉어졌다.
+  //   기대값을 손으로 적으면 결함을 박제하게 된다 → SSOT 경유.
+  const realMembers = new Set(require('../db/class').getClassStudentIds(CLASS));
 
   for (const r of RANGES) {
     const dash = g.getClassDashboard(CLASS, TEACHER, r.opts);

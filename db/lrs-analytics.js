@@ -19,6 +19,9 @@ const {
 } = require('./lrs-mastery');
 // 점수 스케일·모집단 정규화 SSOT (인라인 재정의 금지 — lib/lrs/score-scale.js 주석 참조).
 const { normScoreExpr, scoredWhere } = require('../lib/lrs/score-scale');
+// 학생 모집단 SSOT — 반 학생을 세는 SQL 은 여기 한 벌만 쓴다(db/class.js).
+//   순환 참조 없음: db/class.js 는 db/index.js 만 require 한다.
+const classDb = require('./class');
 
 // ── 신뢰도 라벨 공통(§B-5) ───────────────────────────────────────────────────
 const CONFIDENCE = { HIGH: 'high', MEDIUM: 'medium', LOW: 'low' };
@@ -94,23 +97,19 @@ function subjectAliases(canonical) {
 }
 
 // ── 멤버십 조인: 반의 student 멤버 id (C-5 표준) ──────────────────────────────
+//   [P1-C] 옛 손 SQL 은 `cm.class_id=? AND u.role='student'` 뿐이라 cm.role·cm.status·
+//   계정삭제를 전부 무시했다 → 학생 개설자(cm.role='owner')·탈퇴자(removed)·삭제 계정이
+//   위험목록·추세·선수갭 등 LRS 분석 전반의 모집단에 섞였다. SSOT 로 통일한다.
 function classStudentIds(classId) {
   try {
-    return db.prepare(`
-      SELECT cm.user_id AS id
-      FROM class_members cm JOIN users u ON u.id = cm.user_id
-      WHERE cm.class_id = ? AND u.role = 'student'
-    `).all(classId).map(r => r.id);
+    return classDb.getClassStudentIds(classId);
   } catch (_) { return []; }
 }
 
 function classStudents(classId) {
   try {
-    return db.prepare(`
-      SELECT cm.user_id AS id, COALESCE(u.display_name, u.username) AS name
-      FROM class_members cm JOIN users u ON u.id = cm.user_id
-      WHERE cm.class_id = ? AND u.role = 'student'
-    `).all(classId).map(r => ({ id: r.id, name: r.name || `학생${r.id}` }));
+    return classDb.getClassStudents(classId)
+      .map(r => ({ id: r.user_id, name: r.display_name || r.username || `학생${r.user_id}` }));
   } catch (_) { return []; }
 }
 

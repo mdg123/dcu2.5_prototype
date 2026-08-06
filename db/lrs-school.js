@@ -18,6 +18,8 @@ const mastery = require('./lrs-mastery');
 const analytics = require('./lrs-analytics');
 // 감정 분류 SSOT — 정본사전 §2-B(텍스트 어휘 우선, emotion_score 임계 비교 금지).
 const { isNegativeEmotion } = require('../lib/lrs/emotion-scale');
+// 학생 모집단 SSOT — 반 학생 명단·수는 db/class.js 한 벌만 쓴다.
+const classDb = require('./class');
 const { classifyStatus, reachRate, STATUS, resolveCode, subjectLabel } = mastery;
 
 const MIN_CROSS_N = 10; // 교과×학급 교차드릴 개별 노출 금지 임계(기획서 §3-2) — 미만은 카운트만.
@@ -420,12 +422,10 @@ function _classGap(scope) {
   } catch (_) { classIds = []; }
   const out = [];
   for (const c of classIds) {
+    // [P1-C] 학급 간 격차의 반 모집단 — SSOT 경유(옛 손 SQL 은 개설자·탈퇴자·삭제 계정 통과).
     let memberIds = [];
     try {
-      memberIds = db.prepare(`
-        SELECT cm.user_id id FROM class_members cm JOIN users u ON u.id = cm.user_id
-        WHERE cm.class_id = ? AND u.role='student'
-      `).all(c.id).map(r => r.id);
+      memberIds = classDb.getClassStudentIds(c.id);
     } catch (_) { memberIds = []; }
     if (!memberIds.length) continue;
     const roll = _schoolAchievementRollup(memberIds);

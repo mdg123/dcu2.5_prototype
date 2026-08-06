@@ -1,5 +1,7 @@
 const db = require('./index');
 const { v4: uuidv4 } = require('uuid');
+// 학생 모집단 SSOT — 분모·명단은 손 SQL 로 다시 적지 말 것 (db/class.js 주석 참조)
+const { studentPopulationSql } = require('./class');
 
 // ============================================================
 // 콘텐츠 공개정책 2단계 — 평가↔그림자 contents 동기화 헬퍼
@@ -157,23 +159,22 @@ function getExamsByClass(classId, { status, page = 1, limit = 20, std_ids } = {}
            e.start_date, e.end_date,
            u.display_name as author_name,
            (SELECT COUNT(*) FROM exam_students WHERE exam_id = e.id) as student_count,
+           -- 응시율의 분모·분자는 모두 학생 모집단 SSOT. 손 SQL 시절엔 u.role 을 안 봐서
+           -- 학부모·교직원·삭제 계정이 "응시 대상"으로 잡혔다(실측 class 1: 분모 10, 정본 7).
            (SELECT COUNT(DISTINCT es.user_id) FROM exam_students es
-             JOIN class_members cm ON cm.user_id = es.user_id
-                                  AND cm.class_id = e.class_id
-                                  AND cm.role = 'member'
-                                  AND cm.status = 'active'
-             WHERE es.exam_id = e.id) as participated_count,
-           (SELECT COUNT(DISTINCT es.user_id) FROM exam_students es
-             JOIN class_members cm ON cm.user_id = es.user_id
-                                  AND cm.class_id = e.class_id
-                                  AND cm.role = 'member'
-                                  AND cm.status = 'active'
+             JOIN class_members cm ON cm.user_id = es.user_id AND cm.class_id = e.class_id
+             JOIN users eu ON eu.id = cm.user_id
              WHERE es.exam_id = e.id
-               AND (es.submitted_at IS NOT NULL OR es.status IN ('submitted','graded','completed'))) as submitted_count,
-           (SELECT COUNT(*) FROM class_members cm2
+               AND ${studentPopulationSql('cm', 'eu')}) as participated_count,
+           (SELECT COUNT(DISTINCT es.user_id) FROM exam_students es
+             JOIN class_members cm ON cm.user_id = es.user_id AND cm.class_id = e.class_id
+             JOIN users eu ON eu.id = cm.user_id
+             WHERE es.exam_id = e.id
+               AND (es.submitted_at IS NOT NULL OR es.status IN ('submitted','graded','completed'))
+               AND ${studentPopulationSql('cm', 'eu')}) as submitted_count,
+           (SELECT COUNT(*) FROM class_members cm2 JOIN users eu2 ON eu2.id = cm2.user_id
              WHERE cm2.class_id = e.class_id
-               AND cm2.role = 'member'
-               AND cm2.status = 'active') as member_count
+               AND ${studentPopulationSql('cm2', 'eu2')}) as member_count
     FROM exams e JOIN users u ON e.owner_id = u.id
     ${where} ORDER BY e.created_at DESC LIMIT ? OFFSET ?
   `).all(...params, limit, (page - 1) * limit);

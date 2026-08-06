@@ -1,4 +1,6 @@
 const db = require('./index');
+// 학생 모집단 SSOT — 분모·명단은 손 SQL 로 다시 적지 말 것 (db/class.js 주석 참조)
+const { studentPopulationSql } = require('./class');
 
 // questions JSON 을 방어적으로 배열로 파싱한다.
 //  - 정상: '[{...},{...}]' → 배열
@@ -63,16 +65,16 @@ function getSurveysByClass(classId, { status, page = 1, limit = 20, userId = nul
            s.start_date, s.end_date, s.is_anonymous, s.created_at, s.questions,
            u.display_name as author_name,
            (SELECT COUNT(*) FROM survey_responses WHERE survey_id = s.id) as response_count,
+           -- 응답률의 분모·분자는 모두 학생 모집단 SSOT. 손 SQL 시절엔 u.role 을 안 봐서
+           -- 학부모·교직원·삭제 계정이 "응답 대상"으로 잡혔다(실측 class 1: 분모 10, 정본 7).
            (SELECT COUNT(DISTINCT sr.user_id) FROM survey_responses sr
-             JOIN class_members cm ON cm.user_id = sr.user_id
-                                  AND cm.class_id = s.class_id
-                                  AND cm.role = 'member'
-                                  AND cm.status = 'active'
-             WHERE sr.survey_id = s.id) as respondent_count,
-           (SELECT COUNT(*) FROM class_members cm2
+             JOIN class_members cm ON cm.user_id = sr.user_id AND cm.class_id = s.class_id
+             JOIN users su ON su.id = cm.user_id
+             WHERE sr.survey_id = s.id
+               AND ${studentPopulationSql('cm', 'su')}) as respondent_count,
+           (SELECT COUNT(*) FROM class_members cm2 JOIN users su2 ON su2.id = cm2.user_id
              WHERE cm2.class_id = s.class_id
-               AND cm2.role = 'member'
-               AND cm2.status = 'active') as member_count
+               AND ${studentPopulationSql('cm2', 'su2')}) as member_count
            ${myRespondedSelect}
     FROM surveys s JOIN users u ON s.author_id = u.id
     ${where} ORDER BY s.created_at DESC LIMIT ? OFFSET ?

@@ -930,8 +930,8 @@
 
     function escHtml(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 
-    const typeLabels = { video: '영상', document: '문서', image: '이미지', link: '링크', quiz: '퀴즈', whiteboard: '화이트보드' };
-    const typeTagClass = { video: 'tag-video', document: 'tag-document', image: 'tag-image', link: 'tag-link', quiz: 'tag-quiz', whiteboard: 'tag-whiteboard' };
+    const typeLabels = { video: '영상', document: '문서', image: '이미지', link: '링크', quiz: '퀴즈', exam: '평가지', whiteboard: '화이트보드' };
+    const typeTagClass = { video: 'tag-video', document: 'tag-document', image: 'tag-image', link: 'tag-link', quiz: 'tag-quiz', exam: 'tag-quiz', whiteboard: 'tag-whiteboard' };
     const badgeClass = { video: 'badge-video', document: 'badge-document', image: 'badge-image', link: 'badge-link', whiteboard: 'badge-whiteboard' };
     let whiteboardIdCounter = 0; // 화이트보드 가상 ID 카운터
     const whiteboardDataMap = {}; // 화이트보드별 드로잉 데이터 저장 { id: dataURL }
@@ -1204,7 +1204,7 @@
       if (cType === 'whiteboard') {
         renderWhiteboard(c, viewport);
       } else if ((cType === 'quiz' || cType === 'exam') && c.questions && c.questions.length > 0) {
-        renderQuestions(c, viewport);
+        renderQuestionPlayer(c, viewport);
       } else if (cType === 'quiz' || c._quiz) {
         renderQuiz(c, viewport);
       } else if (cType === 'video' && (c.file_path || c.content_url)) {
@@ -1336,92 +1336,75 @@
     }
 
     // ============================================================
-    // Questions Rendering (content_questions 기반)
+    // Questions Rendering — 채움콘텐츠 공용 플레이어(content-player) 재사용
     // ============================================================
-    function renderQuestions(content, viewport) {
-      const questions = content.questions || [];
-      const typeBadges = { choice: { label: '객관식', color: '#3b82f6' }, short: { label: '주관식', color: '#10b981' }, essay: { label: '서술형', color: '#8b5cf6' } };
-
-      const isLight = document.body.classList.contains('light-mode');
-      const C = isLight ? {
-        headerText: '#1f2937', metaText: '#6b7280',
-        cardBg: '#f9fafb', cardHoverBg: '#e5e7eb',
-        qText: '#111827',
-        optBg: '#f3f4f6', optText: '#374151',
-        optAnsBg: '#dcfce7', optAnsText: '#15803d',
-        shortBg: '#dcfce7', shortText: '#15803d',
-        essayBg: '#ede9fe', essayText: '#6d28d9',
-        explBg: '#dbeafe', explText: '#1e40af',
-      } : {
-        headerText: '#fff', metaText: '#94a3b8',
-        cardBg: 'rgba(255,255,255,0.05)', cardHoverBg: 'rgba(255,255,255,0.1)',
-        qText: '#f1f5f9',
-        optBg: 'rgba(255,255,255,0.05)', optText: '#cbd5e1',
-        optAnsBg: 'rgba(16,185,129,0.15)', optAnsText: '#34d399',
-        shortBg: 'rgba(16,185,129,0.1)', shortText: '#34d399',
-        essayBg: 'rgba(139,92,246,0.1)', essayText: '#a78bfa',
-        explBg: 'rgba(59,130,246,0.1)', explText: '#93c5fd',
-      };
-
-      let html = `<div style="width:100%;padding:32px 48px;overflow-y:auto;max-height:100%;scrollbar-width:none;-webkit-overflow-scrolling:touch;">
-        <div style="display:flex;align-items:center;gap:10px;margin-bottom:24px;">
-          <span style="background:#3b82f6;color:#fff;padding:4px 12px;border-radius:8px;font-size:13px;font-weight:700;">${content.content_type === 'exam' ? '📋 평가지' : '❓ 문항'}</span>
-          <span style="font-size:18px;font-weight:700;color:${C.headerText};">${escHtml(content.title)}</span>
-          <span style="font-size:13px;color:${C.metaText};">(${questions.length}문항)</span>
-        </div>`;
-
-      questions.forEach((q, i) => {
-        const tb = typeBadges[q.question_type] || typeBadges.choice;
-        const optionLabels = ['①', '②', '③', '④', '⑤'];
-
-        html += `<div style="background:${C.cardBg};border-radius:12px;padding:20px;margin-bottom:16px;border-left:3px solid ${tb.color};">
-          <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
-            <span style="background:${tb.color};color:#fff;padding:2px 10px;border-radius:6px;font-size:11px;font-weight:700;">${tb.label}</span>
-            <span style="font-size:12px;color:${C.metaText};">${q.points || 1}점</span>
-          </div>
-          <div style="font-size:15px;font-weight:600;color:${C.qText};margin-bottom:12px;">Q${q.question_number}. ${escHtml(q.question_text)}</div>`;
-
-        if (q.options && Array.isArray(q.options)) {
-          html += '<div style="display:flex;flex-direction:column;gap:6px;">';
-          q.options.forEach((opt, oi) => {
-            const isAnswer = String(oi + 1) === String(q.answer);
-            const ansBg = isAnswer ? C.optAnsBg : C.optBg;
-            const ansText = isAnswer ? C.optAnsText : C.optText;
-            html += `<div style="padding:8px 14px;border-radius:8px;font-size:14px;cursor:pointer;transition:all .15s;background:${ansBg};color:${ansText};${isAnswer ? 'font-weight:600;' : ''}"
-              onmouseenter="this.style.background='${C.cardHoverBg}'" onmouseleave="this.style.background='${ansBg}'">
-              ${optionLabels[oi] || (oi+1)} ${escHtml(opt)} ${isAnswer ? '<i class="fas fa-check" style="float:right;"></i>' : ''}
-            </div>`;
-          });
-          html += '</div>';
-        } else if (q.question_type === 'short') {
-          html += `<div style="padding:8px 14px;background:${C.shortBg};border-radius:8px;color:${C.shortText};font-size:14px;font-weight:500;">정답: ${escHtml(q.answer || '-')}</div>`;
-        } else {
-          html += `<div style="padding:8px 14px;background:${C.essayBg};border-radius:8px;color:${C.essayText};font-size:13px;">서술형 문항입니다.</div>`;
-        }
-
-        if (q.explanation) {
-          html += `<div style="margin-top:10px;padding:8px 12px;background:${C.explBg};border-radius:8px;font-size:12px;color:${C.explText};"><i class="fas fa-lightbulb" style="margin-right:4px;color:#fbbf24;"></i>${escHtml(q.explanation)}</div>`;
-        }
-        html += '</div>';
-      });
-
-      html += '</div>';
-      viewport.innerHTML = html;
-      // KaTeX 수식 렌더링
-      setTimeout(() => {
-        if (typeof renderMathInElement === 'function') {
-          renderMathInElement(viewport, {
-            delimiters: [
-              { left: '$$', right: '$$', display: true },
-              { left: '$', right: '$', display: false },
-              { left: '\\(', right: '\\)', display: false },
-              { left: '\\[', right: '\\]', display: true }
-            ],
-            throwOnError: false
-          });
-        }
-      }, 50);
+    //  [왜 iframe 인가]
+    //   과거 이 자리에는 renderQuestions() 가 있어 questions.forEach 로 전 문항을 한 화면에
+    //   나열했다. (1) 1페이지에 문항이 우르르 쏟아져 가독성이 없었고, (2) 정답 보기를 초록으로
+    //   칠해 학생에게 답을 그대로 노출했으며, (3) 그 정답 판정이 1-based(oi+1===answer)라
+    //   0-based 로 저장된 실제 정답과 어긋나 "틀린 정답"을 보여주기까지 했다.
+    //   채움콘텐츠·오늘의 학습·AI 학습맵이 모두 쓰는 공용 플레이어를 그대로 재사용해
+    //   "같은 기능은 같은 생김새(1문항 1페이지)"를 맞춘다.
+    //  [자리]
+    //   영상·PDF·링크와 동일하게 viewport.innerHTML 인라인 iframe. 별도 모달을 띄우면
+    //   수업꾸러미 동기화(lockstep)로 교사가 콘텐츠를 넘길 때 모달을 강제로 여닫아야 해
+    //   흐름이 깨지고, 판서 캔버스(.drawing-canvas, z-index:20)도 뷰포트 위에만 얹힌다.
+    //  [파라미터 규약] today.html / learning-map.html 과 동일: embed=1&solve=1
+    //   embed=1 → 플레이어 자체 헤더·사이드바 숨김 + 네비게이션 금지 + 부모에 postMessage
+    //   (embed 모드는 body 배경을 transparent 로 만들므로 iframe 요소에 background:#fff 필수)
+    function renderQuestionPlayer(content, viewport) {
+      viewport.innerHTML = `<iframe id="lessonQuizFrame" data-content-id="${content.id}"
+        src="/content/content-player.html?id=${content.id}&embed=1&solve=1"
+        title="${escHtml(content.title)}"
+        style="width:100%;height:100%;border:none;background:#fff;" allow="clipboard-write"></iframe>`;
     }
+
+    // 임베드 플레이어 → 수업꾸러미 메시지 수신
+    //  답안 저장·채점은 플레이어가 /api/contents/:id/attempts 로 직접 수행한다(여기서 중복 저장 금지).
+    //  수업꾸러미가 책임지는 것은 "수업 이수(진도)" 뿐이다.
+    window.addEventListener('message', (e) => {
+      if (e.origin !== location.origin) return;
+      const d = e && e.data;
+      if (!d || typeof d !== 'object') return;
+      if (d.type !== 'dacheum:quiz-graded' && d.type !== 'dacheum:player-close' && d.type !== 'dacheum:player-error') return;
+      const frame = document.getElementById('lessonQuizFrame');
+      if (!frame || e.source !== frame.contentWindow) return;
+      const c = contents[currentIndex];
+      if (!c) return;
+
+      if (d.type === 'dacheum:player-error') {
+        showToast('이 문항을 불러올 수 없습니다');
+        return;
+      }
+
+      if (d.type === 'dacheum:quiz-graded') {
+        // 미리보기·만들기·수정 모드와 개설자(교사)는 이수 대상이 아니다.
+        if (isPreviewMode || isCreatorMode || isEditMode) return;
+        const isOwner = currentUser && lessonData && currentUser.id === lessonData.teacher_id;
+        if (isOwner) return;
+        if (progressMap[c.id] && progressMap[c.id].completed) return;
+        progressMap[c.id] = { ...progressMap[c.id], progress_percent: 100, completed: 1 };
+        saveProgress(c.id, { progress_percent: 100, completed: true });
+        document.getElementById('contentProgressBar').style.width = '100%';
+        const btn = document.getElementById('completeBtn');
+        if (btn) {
+          btn.className = 'complete-btn completed';
+          btn.innerHTML = '<i class="fas fa-check-circle"></i> 학습 완료됨';
+        }
+        updateOverallProgress();
+        renderSidebar();
+        if (syncState.on && !isTeacherViewer) applyStepLock(true);
+        showToast('답안이 제출되었습니다', 'success');
+        if (contents.every(x => progressMap[x.id]?.completed)) setTimeout(() => showCompletionOverlay(), 800);
+        return;
+      }
+
+      // dacheum:player-close — 임베드 플레이어의 "완료" 버튼.
+      // 동기화 잠금 중인 학생은 스스로 이동할 수 없다(교사 위치 고정).
+      if (syncState.on && !isTeacherViewer) return;
+      const next = contents.findIndex((x, i) => i > currentIndex && !progressMap[x.id]?.completed);
+      if (next >= 0) selectContent(next);
+    });
 
     // ============================================================
     // Quiz Rendering (legacy _quiz 기반)
@@ -3067,10 +3050,15 @@
         // 미리보기 콘텐츠 생성
         let previewHtml = '';
         if ((cType === 'quiz' || cType === 'exam') && c.questions && c.questions.length > 0) {
+          // [의도적으로 전 문항 나열] 이 미리보기는 "수업 목차에 넣을지" 판단하려고 교사가
+          // 문항 구성을 훑는 용도다(학생 풀이 화면이 아니다). 1문항 1페이지로 바꾸면 오히려
+          // 몇 문항이 어떤 내용인지 훑을 수 없어진다. 학생 풀이는 renderQuestionPlayer 참고.
+          // 정답 인덱스는 0-based 저장(예: answer '2' = 세 번째 보기)이다. 과거 oi+1 비교라
+          // 엉뚱한 보기를 정답으로 칠했다.
           previewHtml = c.questions.map((q, i) => `
             <div style="background:#f9fafb;border-radius:8px;padding:12px;margin-bottom:8px;border-left:3px solid ${q.question_type==='choice'?'#3b82f6':'#10b981'};">
               <div style="font-size:13px;font-weight:600;margin-bottom:4px;">Q${q.question_number}. ${escHtml(q.question_text)}</div>
-              ${q.options && Array.isArray(q.options) ? q.options.map((o,oi) => `<div style="font-size:12px;color:#6b7280;padding:2px 8px;${String(oi+1)===String(q.answer)?'color:#10b981;font-weight:600;':''}">① ${escHtml(o)}</div>`).join('') : ''}
+              ${q.options && Array.isArray(q.options) ? q.options.map((o,oi) => `<div style="font-size:12px;color:#6b7280;padding:2px 8px;${String(oi)===String(q.answer)?'color:#10b981;font-weight:600;':''}">${optionLabels[oi] || (oi+1)} ${escHtml(o)}</div>`).join('') : ''}
             </div>`).join('');
         } else if (cType === 'video') {
           const src = c.content_url || c.file_path;

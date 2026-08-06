@@ -77,23 +77,49 @@ router.put('/settings', requireAuth, (req, res) => {
 //     · POST   /daily/{타학년 item}/complete  → 배포 대상이 아닌 항목 이수 + 포인트 적립
 //
 //   정책(신규 발명 금지 — routes/class-mileage.js 의 requireClassMember/requireOwner 계층을 그대로 따름):
-//     ① 역할 게이트  requireSetManager : 세트 관리(쓰기)는 teacher·admin 만
-//     ② 소유 게이트  requireSetOwner   : 교사는 본인이 만든 세트만. admin 은 전체.
+//     ① 역할 게이트  requireSetManager : 세트 관리(쓰기)는 **관리자만**
+//     ② 소유 게이트  requireSetOwner   : 세트 존재 확인 + req.dailySet 주입 (관리자 방어 확인)
 //     ③ 대상 자격    requireDailyItemTarget : 학생은 "나에게 배포된" 항목만 시작/이수/진행저장
 //        (배포 중지 세트 X · 타학년 X · 남의 클래스 전용 세트 X)
+//
+//   [2026-08-06 관리자 전용화 — 사용자 지시] 쓰기 권한을 teacher·admin → **admin 단독**으로 좁혔다.
+//     근거(실측): 교사에게는 애초에 **진입 UI 가 없었다**.
+//       · public/js/common-nav.js "학습 배포 관리" 는 roles:['admin']
+//       · 세트 구성·배포 화면은 public/admin/daily-learning.html 하나뿐(관리자 전용 경로)
+//     즉 교사의 쓰기 권한은 화면 없는 API 전용 능력이었고, 정책("오늘의 학습은 관리자가 구성·배포")과
+//     어긋나 있었다. 되돌리려는 다음 사람에게: **UI 를 먼저 만들지 않는 한 되돌릴 이유가 없다.**
+//
+//   ⚠ 기존 데이터는 건드리지 않는다. 교사(teacher1) 소유 세트 8건은 그대로 배포 상태로 남아 있고,
+//     학생 노출(GET /daily·상세)·시작·이수는 **teacher_id 와 무관**하게 동작한다
+//     (db/self-learn-extended.js isDailySetTargetedTo 는 is_active·target_grade·class_id 만 본다).
+//     즉 이 변경은 "앞으로의 쓰기"만 막고, 이미 배포된 학습의 학생 경험은 그대로다.
 // ─────────────────────────────────────────────────────────────────────────────
-const SET_MANAGER_ROLES = ['teacher', 'admin'];
+const SET_MANAGER_ROLES = ['admin'];
+
+//  읽기 전용 관리 시야는 **좁히지 않는다**(과차단 방지).
+//  교사는 배포 중지(is_active=0) 세트까지 포함해 점검 목적으로 볼 수 있어야 한다 — 쓰기만 admin.
+const SET_INSPECT_ROLES = ['teacher', 'admin'];
 
 function requireSetManager(req, res, next) {
   if (!req.user) {
     return res.status(401).json({ success: false, message: '로그인이 필요합니다.' });
   }
   if (!SET_MANAGER_ROLES.includes(req.user.role)) {
-    return res.status(403).json({ success: false, message: '학습 세트는 교사·관리자만 관리할 수 있습니다.' });
+    return res.status(403).json({ success: false, message: '오늘의 학습은 관리자만 구성·배포할 수 있습니다.' });
   }
   next();
 }
 
+/**
+ * 세트 존재 확인 + req.dailySet / req.setId 주입.
+ *
+ * 이전에는 `role !== 'admin' && set.teacher_id !== req.user.id → 403` 로 교사 소유권을 봤다.
+ * requireSetManager 가 admin 만 통과시키는 지금, 그 분기의 "교사 가지"는 **도달 불가능한 죽은 코드**라
+ * 제거했다. teacher_id 로 admin 을 막으면 오히려 과차단이다 — 정본 DB 의 교사 소유 세트 8건을
+ * 관리자가 손대지 못하게 되기 때문. 따라서 남는 조건은 "관리자인가" 하나뿐이다.
+ * (게이트 순서가 바뀌어도 안전하도록 방어적으로 한 번 더 확인한다. 조건은 role !== 'admin' 뿐이므로
+ *  admin 은 어떤 경우에도 여기서 막히지 않는다.)
+ */
 function requireSetOwner(req, res, next) {
   const setId = parseInt(req.params.setId);
   if (!setId || isNaN(setId)) {
@@ -104,8 +130,8 @@ function requireSetOwner(req, res, next) {
   if (!set) {
     return res.status(404).json({ success: false, message: '학습 세트를 찾을 수 없습니다.' });
   }
-  if (req.user.role !== 'admin' && set.teacher_id !== req.user.id) {
-    return res.status(403).json({ success: false, message: '본인이 등록한 학습 세트만 수정·삭제할 수 있습니다.' });
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ success: false, message: '오늘의 학습은 관리자만 구성·배포할 수 있습니다.' });
   }
   req.dailySet = set;
   req.setId = setId;
@@ -151,7 +177,8 @@ router.get('/daily', requireAuth, (req, res) => {
     //   학년 필터는 viewer 술어(isDailySetTargetedTo)가 담당한다.
     //   여기서 q.grade = 내 학년 을 따로 걸면 **전 학년 대상(target_grade IS NULL) 세트가 목록에서만
     //   사라지고 상세는 열리는** 반대 방향의 불일치가 생긴다. ?grade= 를 명시한 관리 화면 조회만 그대로 둔다.
-    q.includeInactive = SET_MANAGER_ROLES.includes(req.user.role);
+    //  [과차단 방지] 여기는 **읽기**다. 쓰기 권한(SET_MANAGER_ROLES=admin)과 분리해 교사 점검 시야를 유지한다.
+    q.includeInactive = SET_INSPECT_ROLES.includes(req.user.role);
     q.viewer = { id: req.user.id, role: req.user.role, grade: req.user.grade };
     const sets = selfLearnDb.getDailySets(req.user.id, q);
     // 학년 미설정 학생은 학년 지정 세트의 배정 대상이 아니다 → 목록이 빈다. 화면이 이유를 말할 수 있게 고지한다.
@@ -355,7 +382,7 @@ router.get('/daily/:itemId/get-progress', requireAuth, (req, res) => {
   }
 });
 
-// POST /daily/sets — [교사·관리자] 학습 세트 생성
+// POST /daily/sets — [관리자 전용] 학습 세트 생성
 router.post('/daily/sets', requireAuth, requireSetManager, (req, res) => {
   try {
     const result = selfLearnDb.createDailySet(req.user.id, req.body);
@@ -366,7 +393,7 @@ router.post('/daily/sets', requireAuth, requireSetManager, (req, res) => {
   }
 });
 
-// PUT /daily/sets/:setId — [교사·관리자] 학습 세트 수정
+// PUT /daily/sets/:setId — [관리자 전용] 학습 세트 수정
 router.put('/daily/sets/:setId', requireAuth, requireSetManager, requireSetOwner, (req, res) => {
   try {
     selfLearnDb.updateDailySet(req.setId, req.body);
@@ -377,7 +404,7 @@ router.put('/daily/sets/:setId', requireAuth, requireSetManager, requireSetOwner
   }
 });
 
-// DELETE /daily/sets/:setId — [교사·관리자] 학습 세트 삭제
+// DELETE /daily/sets/:setId — [관리자 전용] 학습 세트 삭제
 //   [W2-T4-5] 관리자 화면(daily-learning.html deleteSet)이 이 경로를 호출했으나 라우트 자체가 없어 404였다.
 //   항목·진행행까지 함께 정리해야 FK(daily_learning_progress → daily_learning_items) 위반이 나지 않는다.
 router.delete('/daily/sets/:setId', requireAuth, requireSetManager, requireSetOwner, (req, res) => {
@@ -390,7 +417,7 @@ router.delete('/daily/sets/:setId', requireAuth, requireSetManager, requireSetOw
   }
 });
 
-// POST /daily/sets/:setId/items — [교사·관리자] 학습 항목 추가
+// POST /daily/sets/:setId/items — [관리자 전용] 학습 항목 추가
 router.post('/daily/sets/:setId/items', requireAuth, requireSetManager, requireSetOwner, (req, res) => {
   try {
     const result = selfLearnDb.addDailyItem(req.setId, req.body);
@@ -401,7 +428,7 @@ router.post('/daily/sets/:setId/items', requireAuth, requireSetManager, requireS
   }
 });
 
-// PUT /daily/sets/:setId/items — [교사·관리자] 학습 항목 **동기화**(차집합)
+// PUT /daily/sets/:setId/items — [관리자 전용] 학습 항목 **동기화**(차집합)
 //   [감리 B1] 관리자 저장이 "전량 DELETE 후 재삽입" 이라 제목만 고쳐도 학생 이수 기록이 사라졌다.
 //   이 라우트는 같은 콘텐츠의 **항목 id 를 유지**하고 메타만 갱신한다 → 진행행·learning_logs 보존.
 //   ?preview=1 이면 아무것도 바꾸지 않고 "제거될 항목과 그 진행 기록 수"만 돌려준다(저장 전 확인용).
@@ -422,7 +449,7 @@ router.put('/daily/sets/:setId/items', requireAuth, requireSetManager, requireSe
   }
 });
 
-// DELETE /daily/sets/:setId/items/:itemId — [교사·관리자] 학습 항목 삭제
+// DELETE /daily/sets/:setId/items/:itemId — [관리자 전용] 학습 항목 삭제
 //   항목이 실제로 그 세트 소속인지까지 확인한다(기존에는 setId 를 무시하고 itemId 만으로 삭제).
 router.delete('/daily/sets/:setId/items/:itemId', requireAuth, requireSetManager, requireSetOwner, (req, res) => {
   try {
@@ -494,7 +521,9 @@ router.get('/map/nodes/:unitId/lessons', requireAuth, (req, res) => {
       ORDER BY n.sort_order, n.node_id
     `).all(req.user.id, unitId);
 
-    // progress_percent 계산 (영상 0.5 + 문제 0.5 가중)
+    // progress_percent 계산 — [2026-08-06 사용자 확정 정책] **문항 기준만** 사용.
+    //   영상은 "봐도 안 봐도 그만"이므로 진행률에서 완전히 제외한다.
+    //   (videos_watched / videos_total 필드는 화면의 "영상 n/m" 칩용으로 그대로 유지)
     const videoIdsStmt = db.prepare(`
       SELECT c.id FROM node_contents nc JOIN contents c ON nc.content_id = c.id
       WHERE nc.node_id = ? AND c.content_type = 'video'
@@ -526,24 +555,22 @@ router.get('/map/nodes/:unitId/lessons', requireAuth, (req, res) => {
         const p = problemCorrectStmt.get(req.user.id, pid);
         if (p && p.ok === 1) solvedP++;
       }
-      let progress;
-      if (totalV === 0 && totalP === 0) {
-        if (lesson.user_status === 'completed' || lesson.user_status === 'mastered') progress = 100;
-        else if (lesson.user_status === 'in_progress') progress = 30;
-        else progress = 0;
-      } else if (totalV === 0) {
-        progress = Math.round((solvedP / totalP) * 100);
-      } else if (totalP === 0) {
-        progress = Math.round((watchedV / totalV) * 100);
-      } else {
-        progress = Math.round((watchedV / totalV) * 50 + (solvedP / totalP) * 50);
-      }
+      // 문항이 0개면 0% — 상태 기반 추정(진행중=30% 등)은 지어낸 값이므로 금지.
+      const progress = totalP > 0 ? Math.round((solvedP / totalP) * 100) : 0;
       lesson.videos_watched = watchedV;
       lesson.videos_total = totalV;
       lesson.problems_solved = solvedP;
       lesson.problems_total = totalP;
       lesson.progress_percent = Math.max(0, Math.min(100, progress));
     }
+    // 단원 진행률 = 자식 차시 문항 **총합** 기준 (차시 진행률의 평균이 아님).
+    //   여기서는 위에서 이미 센 차시별 값을 더하므로 추가 쿼리가 없다.
+    const unitTotalP = lessons.reduce((a, l) => a + (l.problems_total || 0), 0);
+    const unitSolvedP = lessons.reduce((a, l) => a + (l.problems_solved || 0), 0);
+    unit.problems_total = unitTotalP;
+    unit.problems_solved = unitSolvedP;
+    unit.progress_percent = unitTotalP > 0 ? Math.round((unitSolvedP / unitTotalP) * 100) : 0;
+
     res.json({ success: true, unit, lessons });
   } catch (err) {
     console.error('[SELF-LEARN] map/nodes/:unitId/lessons error:', err && (err.stack || err.message || err));

@@ -1,4 +1,5 @@
 const db = require('./index');
+const classDb = require('./class');   // 학생 모집단 SSOT (studentPopulationSql / getClassStudentIds)
 
 // ========== 오늘의 학습 ==========
 
@@ -148,12 +149,17 @@ function createDailyAssignment(classId, teacherId, data) {
 
   const assignment = db.prepare('SELECT * FROM daily_assignments WHERE id = ?').get(info.lastInsertRowid);
 
-  // 클래스 학생들에게 오늘의 학습 자동 배포
+  // 클래스 학생들에게 오늘의 학습 자동 배포 — 학생 모집단 SSOT.
+  //
+  // ── [N-2] 죽어 있던 조건 ────────────────────────────────────────────────────
+  //   결함(수정 전): `WHERE class_id = ? AND role = 'student' AND status = 'active'`
+  //   여기서 role 은 class_members.role 이고 그 값 도메인은 실측 {member, owner} 뿐이라
+  //   'student' 와는 절대 같아지지 않는다 → **항상 0행**. 즉 이 자동 배포 루프는
+  //   한 번도 돈 적이 없고, API 는 201 + assignment 를 돌려주므로 교사에게는
+  //   "배포 완료"로 보였다(조용한 무동작).
+  //   같은 결함을 형제 파일 routes/learning.js:221 에서는 먼저 고쳤는데 여기가 남았다.
   if (assignment.status === 'active') {
-    const members = db.prepare(`
-      SELECT user_id FROM class_members WHERE class_id = ? AND role = 'student' AND status = 'active'
-    `).all(classId);
-
+    const members = classDb.getClassStudentIds(classId).map(user_id => ({ user_id }));
     for (const m of members) {
       const today = assignment.assign_date;
       const existing = db.prepare('SELECT id FROM daily_learning WHERE user_id = ? AND learning_date = ?').get(m.user_id, today);

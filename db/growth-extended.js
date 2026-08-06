@@ -3,6 +3,8 @@ const db = require('./index');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+// 학생 모집단 SSOT — 분모·명단은 손 SQL 로 다시 적지 말 것 (db/class.js 주석 참조)
+const { studentPopulationSql } = require('./class');
 
 // 서비스 미제공 영역 — 실제 데이터가 없을 때만 점수 0 처리 (데이터가 있으면 정상 표시)
 const NO_SERVICE_AREAS = [];
@@ -652,13 +654,15 @@ function getClassDashboard(classId, teacherId, { period, startDate, endDate } = 
   const cls = db.prepare('SELECT name FROM classes WHERE id = ?').get(classId);
   const className = cls ? cls.name : '';
 
+  // 학생 명단은 SSOT 경유(studentPopulationSql). 손 SQL 시절엔 cm.status·계정삭제를
+  // 안 봐서 탈퇴자·삭제 계정이 대시보드에 실명으로 남았다(실측 class 1: 8명, 정본 7명).
   const members = db.prepare(`
     SELECT u.id, u.display_name, u.grade, u.class_number,
       (SELECT COUNT(*) FROM attendance WHERE class_id = ? AND user_id = u.id AND status = 'present') as attendance_count,
       (SELECT COUNT(*) FROM learning_logs WHERE class_id = ? AND user_id = u.id) as activity_count,
       (SELECT emotion FROM attendance WHERE class_id = ? AND user_id = u.id ORDER BY attendance_date DESC LIMIT 1) as latest_emotion
     FROM class_members cm JOIN users u ON cm.user_id = u.id
-    WHERE cm.class_id = ? AND cm.role = 'member' AND u.role = 'student'
+    WHERE cm.class_id = ? AND ${studentPopulationSql('cm', 'u')}
     ORDER BY u.display_name
   `).all(classId, classId, classId, classId);
 
@@ -971,7 +975,7 @@ function computeAreas6(studentId, { classId, startDate, endDate } = {}) {
       return {
         clause: `${col} IN (
           SELECT cm.class_id FROM class_members cm
-          WHERE cm.user_id = ? AND cm.role = 'member' AND cm.status = 'active'
+          WHERE cm.user_id = ? AND cm.role = 'member' AND cm.status = 'active' /* pop-ok: 클래스 집합 스코프 — user_id=? 로 학생 1명이 이미 확정, role='member' 는 '본인이 개설한 클래스 제외'를 뜻한다(학생 개설 클래스 id 999 실존). 사람 모집단이 아니므로 studentPopulationSql 을 끼우면 오히려 틀린다 */
             AND cm.class_id NOT IN (SELECT id FROM classes WHERE owner_id = ?)
         )`,
         params: [studentId, studentId]
@@ -1267,7 +1271,7 @@ function participationSourceCounts(studentId, { classId, startDate, endDate } = 
     return {
       clause: `${col} IN (
         SELECT cm.class_id FROM class_members cm
-        WHERE cm.user_id = ? AND cm.role = 'member' AND cm.status = 'active'
+        WHERE cm.user_id = ? AND cm.role = 'member' AND cm.status = 'active' /* pop-ok: 클래스 집합 스코프 — user_id=? 로 학생 1명이 이미 확정, role='member' 는 '본인이 개설한 클래스 제외'를 뜻한다(학생 개설 클래스 id 999 실존). 사람 모집단이 아니므로 studentPopulationSql 을 끼우면 오히려 틀린다 */
           AND cm.class_id NOT IN (SELECT id FROM classes WHERE owner_id = ?)
       )`,
       params: [studentId, studentId]
@@ -1784,9 +1788,12 @@ function getObservations(studentId, classId) {
 
 function getClassDailyLearning(classId, { period = 'weekly', startDate, endDate } = {}) {
   // 1. 클래스 학생 목록 (학생 grade 포함 — 학년별 글로벌 세트 매칭에 사용)
+  //    SSOT 경유. 손 SQL 시절엔 cm.role·cm.status 를 **둘 다** 안 봐서 탈퇴자는 물론
+  //    학생이 개설한 클래스의 owner 까지 학생으로 셌다(class 999 실존).
   const members = db.prepare(`
     SELECT u.id, u.display_name, u.grade FROM class_members cm
-    JOIN users u ON cm.user_id = u.id WHERE cm.class_id = ? AND u.role = 'student'
+    JOIN users u ON cm.user_id = u.id
+    WHERE cm.class_id = ? AND ${studentPopulationSql('cm', 'u')}
     ORDER BY u.display_name
   `).all(classId);
   if (members.length === 0) return { students: [], dates: [], sets: [] };
@@ -2437,7 +2444,7 @@ function detailCountFor(studentId, detailType, opts = {}) {
     return {
       clause: `${col} IN (
         SELECT cm.class_id FROM class_members cm
-        WHERE cm.user_id = ? AND cm.role = 'member' AND cm.status = 'active'
+        WHERE cm.user_id = ? AND cm.role = 'member' AND cm.status = 'active' /* pop-ok: 클래스 집합 스코프 — user_id=? 로 학생 1명이 이미 확정, role='member' 는 '본인이 개설한 클래스 제외'를 뜻한다(학생 개설 클래스 id 999 실존). 사람 모집단이 아니므로 studentPopulationSql 을 끼우면 오히려 틀린다 */
           AND cm.class_id NOT IN (SELECT id FROM classes WHERE owner_id = ?)
       )`,
       params: [studentId, studentId]
@@ -2521,7 +2528,7 @@ function getReportDetail(studentId, type, opts = {}) {
     return {
       clause: `${col} IN (
         SELECT cm.class_id FROM class_members cm
-        WHERE cm.user_id = ? AND cm.role = 'member' AND cm.status = 'active'
+        WHERE cm.user_id = ? AND cm.role = 'member' AND cm.status = 'active' /* pop-ok: 클래스 집합 스코프 — user_id=? 로 학생 1명이 이미 확정, role='member' 는 '본인이 개설한 클래스 제외'를 뜻한다(학생 개설 클래스 id 999 실존). 사람 모집단이 아니므로 studentPopulationSql 을 끼우면 오히려 틀린다 */
           AND cm.class_id NOT IN (SELECT id FROM classes WHERE owner_id = ?)
       )`,
       params: [studentId, studentId]

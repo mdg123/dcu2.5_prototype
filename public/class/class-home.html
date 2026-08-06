@@ -128,6 +128,7 @@
     .member-role { font-size: 11px; color: #9ca3af; margin-left: auto; }
     .member-role.owner { color: #f59e0b; }
     .member-role.teacher { color: #2563eb; }
+    .member-count-sub { font-weight: 500; color: #6B7280; }
 
     .empty-card { text-align: center; padding: 32px; color: #9ca3af; font-size: 13px; }
     .empty-card i { font-size: 28px; margin-bottom: 8px; display: block; }
@@ -730,7 +731,13 @@
         </div>
 
         <div class="card">
-          <h3><i class="fas fa-users"></i>멤버 (<span id="memberCount">0</span>)</h3>
+          <!-- 두 수는 뜻이 다르다: 멤버(개설자·학부모·교직원 포함 전원) ≠ 학생(모든 비율의 분모).
+               한쪽만 적어 두면 헤더의 "학생 N명" 과 싸우는 것처럼 보이므로 둘을 함께 명시한다. -->
+          <!-- ⚠ .card h3 는 display:flex; gap:8px 다. 텍스트 노드가 **각각 별개 플렉스 아이템**이 되어
+               "멤버"/"10"/"명" 사이가 8px 씩 벌어진다(= `멤버 10 명`). DOM textContent 는 멀쩡해서
+               eval 검증은 통과하고 **확대 스크린샷으로만 잡히는** 부류다.
+               → 아이콘 뒤 라벨 전체를 span 하나로 감싸 플렉스 아이템을 2개(아이콘+라벨)로 고정한다. -->
+          <h3><i class="fas fa-users"></i><span>멤버 <span id="memberCount">0</span>명<span class="member-count-sub"> · 학생 <span id="memberStudentCount">0</span>명</span></span></h3>
           <ul class="member-list" id="memberList"></ul>
         </div>
         <div class="card" id="manageCard" style="display:none;">
@@ -1457,21 +1464,39 @@
         ${classData.class_type ? `<span><i class="fas fa-tag"></i>${classData.class_type}</span>` : ''}
         ${classData.subject ? `<span><i class="fas fa-book"></i>${classData.subject}</span>` : ''}
         ${classData.grade ? `<span><i class="fas fa-graduation-cap"></i>${classData.grade}학년</span>` : ''}
-        <span><i class="fas fa-users"></i>${classData.member_count}명</span>
+        <span><i class="fas fa-user-graduate"></i>학생 ${getClassStudentCount(null, data.members)}명</span>
         <span><i class="fas fa-user-crown"></i>${escHtml(classData.owner_name || '')}</span>
         ${classData.code ? `<span class="code-copy" onclick="copyCode('${classData.code}')" title="클릭하여 복사"><i class="fas fa-copy"></i> ${classData.code}</span>` : ''}
       `;
 
       classMembers = data.members;
+      // ── [P1-C 재작업 / 감리 R-2] 2026-08-06 ─────────────────────────────────
+      //   결함(수정 전): 헤더 배지가 비정규화 카운터 classData.member_count 를 그대로 찍었다.
+      //   실측 활성 클래스 7개 중 6개가 학생 모집단과 불일치(class 2: 배지 7 ↔ 수업 게시판
+      //   "5명 중", class 1: 배지 7 ↔ 바로 아래 멤버 목록 10). 한 페이지 안에서 숫자가 싸웠다.
+      //   정본: 헤더 = 학생 수(모든 비율의 분모) — getClassStudentCount() 한 벌만 경유.
+      //         멤버 카드 = 구성원 전원(학부모·교직원·개설자 포함, 명단은 그대로 보여야 한다)
+      //         + 같은 카드에 학생 수를 병기해 두 숫자의 관계를 화면에서 바로 읽히게 한다.
+      //   ※ 술어를 여기에 다시 적지 말 것 — getClassStudentCount() 가 유일한 판정처다.
       document.getElementById('memberCount').textContent = data.members.length;
+      const memberStudentEl = document.getElementById('memberStudentCount');
+      if (memberStudentEl) memberStudentEl.textContent = getClassStudentCount(null, data.members);
+      // 학부모·교직원이 "멤버" 로 뭉뚱그려지면 멤버 수(전원)와 학생 수의 차이를 눈으로 확인할 수 없다.
+      // 명단에서 빼지 않고(과잉 필터 금지) 정확한 라벨만 붙인다.
+      const userRoleLabel = { parent: '학부모', staff: '교직원', teacher: '교사' };
       const roleLabel = { owner: '개설자', member: '멤버' };
-      document.getElementById('memberList').innerHTML = data.members.map(m => `
+      document.getElementById('memberList').innerHTML = data.members.map(m => {
+        const label = m.role === 'owner'
+          ? (roleLabel.owner)
+          : (userRoleLabel[m.user_role] || roleLabel[m.role] || m.role);
+        return `
         <li class="member-item">
           <div class="member-avatar">${m.display_name.charAt(0)}</div>
           <span class="member-name">${escHtml(m.display_name)}</span>
-          <span class="member-role ${m.role}">${roleLabel[m.role] || m.role}</span>
+          <span class="member-role ${m.role}">${escHtml(label)}</span>
         </li>
-      `).join('');
+      `;
+      }).join('');
 
       // 역할 라벨 표시 (h1 안이 아니라 title-row 옆에 칩으로 노출)
       const roleTag = document.createElement('span');
@@ -1748,7 +1773,9 @@
             <div class="item-icon" style="background:#10b981;"><i class="fas fa-tasks"></i></div>
             <div class="item-body">
               <div class="item-title">${escHtml(h.title)}</div>
-              <div class="item-meta">마감: ${h.due_date || '없음'}${canManage() ? ` · 제출 ${h.submission_count || 0}건` : ''}</div>
+              <!-- 단위 "명": 7028533 에서 submission_count 의 의미가 "제출 행 수" →
+                   "제출 학생 인원"(COUNT DISTINCT student_id, 학생 모집단 한정)으로 바뀌었다. -->
+              <div class="item-meta">마감: ${h.due_date || '없음'}${canManage() ? ` · 제출 ${h.submission_count || 0}명` : ''}</div>
             </div>
             <span class="item-badge badge-active">진행중</span>
           </div>

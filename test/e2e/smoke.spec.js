@@ -1763,6 +1763,27 @@ test.describe('스모크: P0-7 클래스 설정 접근 통제', () => {
     } finally { await context.close(); }
   });
 
+  test('P0-7④-2(과잉차단 금지 · R-2): 멤버 목록에 학부모·교직원이 그대로 남아 있다', async ({ browser }) => {
+    // R-2 수정이 "숫자를 맞추려고 사람을 명단에서 지우는" 방향으로 새면 여기서 잡는다.
+    // 학생 수 배지는 학생만 세지만, 멤버 **목록**은 개설자·학부모·교직원을 전부 보여야 한다.
+    const cls = ssotClasses().find((c) => c.members > c.students);
+    if (!cls) test.skip(true, '학생 아닌 구성원이 있는 클래스가 스모크 DB 에 없음');
+    const context = await browser.newContext({ storageState: stateFor('teacher'), locale: 'ko-KR', baseURL: BASE_URL });
+    try {
+      const page = await context.newPage();
+      await page.goto(`/class/class-home.html?id=${cls.id}`, { waitUntil: 'domcontentloaded' });
+      await page.waitForTimeout(2500);
+      const r = await page.evaluate(() => ({
+        rows: [...document.querySelectorAll('#memberList .member-item')].length,
+        roles: [...document.querySelectorAll('#memberList .member-role')].map((e) => e.textContent.trim()),
+      }));
+      expect.soft(r.rows, `R-2 과잉필터: class ${cls.id} 멤버 목록이 ${r.rows}행 — 구성원 ${cls.members}명 전원이 보여야 한다`)
+        .toBe(cls.members);
+      expect.soft(r.roles.includes('개설자'), 'R-2 과잉필터: 멤버 목록에서 개설자가 사라졌다').toBeTruthy();
+      await page.close();
+    } finally { await context.close(); }
+  });
+
   test('P0-7④(과잉차단 금지): 교사(개설자)는 초대코드·위험영역·멤버관리가 그대로', async ({ browser }) => {
     const cid = await pickClass(browser, 'teacher', true);
     if (!cid) test.skip(true, 'teacher1 이 개설한 클래스 없음');
@@ -1783,6 +1804,157 @@ test.describe('스모크: P0-7 클래스 설정 접근 통제', () => {
       expect.soft(/^[A-Z0-9]{6,}$/.test(r.code), `P0-7④: 개설자 화면에서 초대코드가 사라졌다(code="${r.code}")`).toBeTruthy();
       expect.soft(r.tabs.some((t) => /위험 영역/.test(t)), 'P0-7④: 개설자 화면에서 위험 영역 탭이 사라졌다').toBeTruthy();
       expect.soft(r.tabs.some((t) => /멤버 관리/.test(t)), 'P0-7④: 개설자 화면에서 멤버 관리 탭이 사라졌다').toBeTruthy();
+      await page.close();
+    } finally { await context.close(); }
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// [R-2] 클래스 홈 인원 표기 정합 — FE 불변식.
+//
+// ── 왜 스모크인가 ───────────────────────────────────────────────────────────
+//   소스 락 INV-P6 는 **SQL 술어**만 훑는다. 그런데 이 결함은 SQL 이 아니라 FE 가
+//   비정규화 카운터를 그대로 찍은 것이었다:
+//     public/class/class-home.html  `${classData.member_count}명`
+//   실측(정본 DB, 활성 클래스 7개 중 6개 불일치):
+//     class 2  배지 7 ↔ 학생 모집단 5   (같은 반 수업 게시판은 "5명 중")
+//     class 1  배지 7 ↔ 바로 아래 멤버 목록 10
+//     3→6/4 · 4→8/6 · 999→1/0 · 1004→9/8 · 1005→25/24
+//   즉 한 페이지 안에서 두 숫자가 싸우는데 소스 락은 영원히 못 잡는다. 화면에서 잡는다.
+//
+// ── 무엇을 고정하는가 ───────────────────────────────────────────────────────
+//   ① 헤더 배지 "학생 N명" == 학생 모집단 SSOT(db/class.js)
+//   ② 멤버 카드의 "학생 N명" == 같은 SSOT       (같은 화면 두 곳이 같은 값)
+//   ③ 멤버 카드의 "멤버 N명" == 구성원 전원      (학부모·교직원·개설자 포함 — 과잉 필터 금지)
+//   ④ 수업 게시판의 "N명 중" == 같은 SSOT        (화면 간 교차)
+//   ⑤ class 2 가 반드시 케이스에 포함           (수정 전 불일치가 실 데이터로 재현되던 반)
+//
+//   ★ 역주입: 배지를 `${classData.member_count}명` 으로 되돌리면 ①이 붉어진다.
+//
+//   기대값은 손으로 적지 않는다 — 스모크가 술어 사본을 또 만들면 같은 병이 재발한다.
+//   db/class.js SSOT 를 스모크 DB 사본에 붙여 그대로 부른다.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** 스모크 DB 사본을 대상으로 db/class.js SSOT 를 부른다(술어 사본 금지). */
+let _ssotCache = null;
+function ssotClasses() {
+  if (_ssotCache) return _ssotCache;
+  const Database = require('better-sqlite3');
+  const os = require('os');
+  const fs = require('fs');
+  // ⚠ db/index.js 는 DB 를 **읽기·쓰기**로 열고 pragma 까지 건다. 스모크 서버가 쓰고 있는
+  //   파일을 그대로 붙이면 검증 도구가 피검증 대상에 개입한다 → 스냅샷을 하나 더 떠서 쓴다.
+  const snap = path.join(os.tmpdir(), `dacheum_smoke_ssot_${process.pid}_${Date.now()}.db`);
+  const src = new Database(SMOKE_DB_PATH, { readonly: true });
+  try { src.exec(`VACUUM INTO '${snap.replace(/'/g, "''")}'`); } finally { try { src.close(); } catch (_) {} }
+  const prev = process.env.DB_PATH;
+  process.env.DB_PATH = snap;                   // db/index.js 는 require 시점 1회 읽는다
+  try {
+    const classDb = require('../../db/class');
+    const raw = new Database(snap, { readonly: true });
+    try {
+      // teacher1(개설자)로 열 수 있는 클래스만 — 권한 리다이렉트로 스킵되는 케이스를 피한다.
+      const rows = raw.prepare(`
+        SELECT c.id, c.name, c.member_count AS denorm
+          FROM classes c JOIN users u ON u.id = c.owner_id
+         WHERE u.username = 'teacher1' AND c.status = 'active'
+         ORDER BY c.id
+      `).all();
+      _ssotCache = rows.map((r) => ({
+        id: r.id,
+        name: r.name,
+        denorm: r.denorm,                                   // 비정규화 카운터(옛 배지 값)
+        students: classDb.getClassStudentCount(r.id),       // ← SSOT
+        members: classDb.getClassMembers(r.id).length,      // 구성원 전원(삭제 계정만 제외)
+      }));
+    } finally { try { raw.close(); } catch (_) {} }
+  } finally {
+    if (prev === undefined) delete process.env.DB_PATH; else process.env.DB_PATH = prev;
+    // db/index.js 싱글톤 핸들을 닫아 Windows 파일 잠금을 풀고 스냅샷을 지운다.
+    try {
+      const m = require.cache[require.resolve('../../db/index')];
+      if (m && m.exports && m.exports.open) m.exports.close();
+      // 닫힌 핸들이 캐시에 남으면 뒤에서 누가 require 했을 때 조용히 실패한다 → 캐시도 비운다.
+      delete require.cache[require.resolve('../../db/index')];
+      delete require.cache[require.resolve('../../db/class')];
+    } catch (_) {}
+    for (const ext of ['', '-wal', '-shm']) { try { fs.unlinkSync(snap + ext); } catch (_) {} }
+  }
+  return _ssotCache;
+}
+
+test.describe('스모크: 클래스 홈 인원 표기 정합(R-2)', () => {
+  test('R-2: 클래스 홈 헤더 "학생 N명" == 학생 모집단 SSOT · 같은 화면 두 수치 무모순', async ({ browser }) => {
+    const targets = ssotClasses();
+    expect(targets.length, 'R-2: teacher1 이 개설한 활성 클래스가 스모크 DB 에 없다(테스트 전제 붕괴)').toBeGreaterThan(0);
+    // 수정 전 불일치가 실 데이터로 재현되던 반을 반드시 포함시킨다(감리 지시).
+    expect(targets.some((c) => c.id === 2), 'R-2: class 2(즐거운 수학교실)가 케이스에 없다 — 불일치 재현 반이 빠지면 검증 의미가 없다')
+      .toBeTruthy();
+
+    const context = await browser.newContext({ storageState: stateFor('teacher'), locale: 'ko-KR', baseURL: BASE_URL });
+    try {
+      const page = await context.newPage();
+      for (const c of targets) {
+        await page.goto(`/class/class-home.html?id=${c.id}`, { waitUntil: 'domcontentloaded' });
+        await page.waitForTimeout(2500);
+        const r = await page.evaluate(() => {
+          const info = document.getElementById('classInfo');
+          const txt = info ? (info.innerText || info.textContent || '') : '';
+          const m = txt.match(/학생\s*(\d+)\s*명/);
+          const num = (id) => {
+            const el = document.getElementById(id);
+            const v = el ? parseInt((el.textContent || '').replace(/[^\d]/g, ''), 10) : NaN;
+            return Number.isFinite(v) ? v : null;
+          };
+          return { headerText: txt.replace(/\s+/g, ' ').trim(), headerStudents: m ? Number(m[1]) : null,
+                   memberCount: num('memberCount'), memberStudentCount: num('memberStudentCount') };
+        });
+
+        // ① 헤더 배지 == SSOT  (★ 역주입 지점: member_count 로 되돌리면 여기가 붉어진다)
+        expect.soft(r.headerStudents,
+          `R-2① class ${c.id}(${c.name}): 헤더 학생 수=${r.headerStudents} · SSOT=${c.students} · 옛 비정규화 카운터=${c.denorm}\n  헤더 원문="${r.headerText}"`)
+          .toBe(c.students);
+        // ② 멤버 카드의 학생 수 == 같은 SSOT
+        expect.soft(r.memberStudentCount,
+          `R-2② class ${c.id}: 멤버 카드 학생 수=${r.memberStudentCount} · SSOT=${c.students}`)
+          .toBe(c.students);
+        // ③ 멤버 카드의 멤버 수 == 구성원 전원 (학부모·교직원이 사라지면 안 된다)
+        expect.soft(r.memberCount,
+          `R-2③ class ${c.id}: 멤버 수=${r.memberCount} · 구성원 전원=${c.members} (과잉 필터 또는 누락)`)
+          .toBe(c.members);
+        // ④ 한 화면 안에서 두 "학생 수" 가 서로 다르면 사용자는 뭐가 맞는지 알 수 없다
+        expect.soft(r.headerStudents,
+          `R-2④ class ${c.id}: 같은 화면의 학생 수가 헤더 ${r.headerStudents} ↔ 멤버 카드 ${r.memberStudentCount} 로 갈렸다`)
+          .toBe(r.memberStudentCount);
+      }
+      await page.close();
+    } finally { await context.close(); }
+  });
+
+  test('R-2⑤: 수업 게시판 "N명 중" 이 클래스 홈 헤더의 학생 수와 같다 (화면 간 교차)', async ({ browser }) => {
+    const targets = ssotClasses();
+    const context = await browser.newContext({ storageState: stateFor('teacher'), locale: 'ko-KR', baseURL: BASE_URL });
+    try {
+      const page = await context.newPage();
+      let checked = 0;
+      for (const c of targets) {
+        await page.goto(`/class/lesson-board.html?classId=${c.id}`, { waitUntil: 'domcontentloaded' });
+        await page.waitForTimeout(2500);
+        const totals = await page.evaluate(() => {
+          const t = document.body.innerText || '';
+          return [...t.matchAll(/(\d+)\s*명\s*중\s*\d+\s*명\s*이수/g)].map((m) => Number(m[1]));
+        });
+        if (totals.length === 0) continue;   // 수업이 없는 반은 교차할 대상이 없다
+        checked++;
+        const uniq = [...new Set(totals)];
+        expect.soft(uniq.length,
+          `R-2⑤ class ${c.id}(${c.name}): 수업 게시판 안에서 분모가 여러 벌이다 ${JSON.stringify(uniq)}`)
+          .toBe(1);
+        expect.soft(uniq[0],
+          `R-2⑤ class ${c.id}(${c.name}): 수업 게시판 "${uniq[0]}명 중" ↔ 클래스 홈 학생 ${c.students}명 — 같은 반인데 화면마다 인원이 다르다`)
+          .toBe(c.students);
+      }
+      expect(checked, 'R-2⑤: 수업이 있는 클래스가 하나도 없어 교차 검증을 못 했다(테스트 전제 붕괴)').toBeGreaterThan(0);
       await page.close();
     } finally { await context.close(); }
   });

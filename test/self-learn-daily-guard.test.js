@@ -11,11 +11,20 @@
 //   4개 라우트가 전부 requireAuth 뿐이었고 completeDailyItem 에 대상 자격 검사가 없었다.
 //
 // 정책 — 새로 발명하지 않고 routes/class-mileage.js 의 requireClassMember/requireOwner 계층을 따른다.
-//   requireSetManager(teacher·admin) → requireSetOwner(본인 세트 or admin) → requireDailyItemTarget(배포 대상)
+//   requireSetManager(admin) → requireSetOwner(존재확인·관리자 방어) → requireDailyItemTarget(배포 대상)
+//
+// [2026-08-06 관리자 전용화 — 사용자 지시] 세트 구성·배포 쓰기 권한을 teacher·admin → **admin 단독**으로.
+//   근거: 교사에겐 진입 UI 가 애초에 없었다(common-nav.js "학습 배포 관리" roles:['admin'],
+//   관리 화면은 /admin/daily-learning.html 뿐) → 화면 없는 API 전용 능력이었다.
+//   ⚠ 과차단이 이 변경의 최대 위험이다. 아래 INV-SLD12 가 "원래 되던 것"을 지킨다.
 //
 // 불변식:
 //   INV-SLD1  학생 세션 — 세트 생성/수정/삭제/항목추가/항목삭제 전수 403 + DB 무변화
-//   INV-SLD2  소유 교사·admin 은 200 유지 (과차단 없음), 타 교사는 403
+//   INV-SLD2  admin 만 200. 교사는 **본인이 만든 세트여도** 쓰기 전수 403
+//   INV-SLD11 교사 세션 — 세트 생성/수정/삭제/항목동기화 전수 403 + DB 무변화 (관리자 전용화)
+//   INV-SLD12 과차단 없음 — 교사 소유 기존 세트를 학생이 여전히 조회·시작·이수하고,
+//             관리자가 그 세트를 계속 관리할 수 있다 (권한 축소는 앞으로의 쓰기만 막는다)
+//   INV-SLD13 문구 — today.html 빈 상태가 학생에게 "학습목록 추가"를 권하지 않는다
 //   INV-SLD3  DELETE /daily/sets/:id 라우트가 존재(404 아님)하고 실제로 세트·항목·진행행을 정리
 //   INV-SLD4  타학년 / 배포중지 세트 항목 이수는 403 + 진행행 미생성
 //   INV-SLD5  is_active=0 세트는 getDailySets 기본 결과·학생 GET /daily 에 미포함, 관리 화면엔 포함
@@ -140,35 +149,139 @@ test('INV-SLD1 학생 세션 — 세트 관리 API 전수 403 + DB 무변화', a
   assert.ok(setExists(setId), '세트가 삭제되면 안 된다');
 });
 
-// ── INV-SLD2: 과차단 없음 + 타 교사 차단 ────────────────────────────────────
-test('INV-SLD2 소유 교사·admin 은 통과, 타 교사는 403', async () => {
-  const { setId, itemId } = makeSet({ title: '[테스트] 소유권' });
+// ── INV-SLD2: 관리자만 통과 + 교사(소유·비소유 모두) 차단 ───────────────────
+test('INV-SLD2 admin 은 통과, 교사는 본인 세트여도 403', async () => {
+  const { setId, itemId } = makeSet({ title: '[테스트] 소유권' });   // teacher_id = T1
 
   const foe = await call('PUT', `/api/self-learn/daily/sets/${setId}`, TFOE.id, { title: '남의 교사가 바꿈' });
   assert.equal(foe.status, 403, '자기가 만들지 않은 세트는 교사여도 수정 불가');
   assert.equal(titleOf(setId), '[테스트] 소유권');
 
+  // [2026-08-06] 예전에는 200 이었다. 오늘의 학습 구성·배포는 관리자 전용이다.
   const own = await call('PUT', `/api/self-learn/daily/sets/${setId}`, T1.id, { title: '[테스트] 소유교사 수정' });
-  assert.equal(own.status, 200, '소유 교사는 수정 가능해야 한다(과차단 금지)');
-  assert.equal(titleOf(setId), '[테스트] 소유교사 수정');
+  assert.equal(own.status, 403, '소유 교사여도 세트를 수정할 수 없어야 한다(관리자 전용)');
+  assert.equal(titleOf(setId), '[테스트] 소유권', '교사 요청으로 제목이 바뀌면 안 된다');
 
   const byAdmin = await call('PUT', `/api/self-learn/daily/sets/${setId}`, ADMIN.id, { title: '[테스트] 관리자 수정' });
   assert.equal(byAdmin.status, 200, 'admin 은 전체 관리 권한');
   assert.equal(titleOf(setId), '[테스트] 관리자 수정');
 
-  const add = await call('POST', `/api/self-learn/daily/sets/${setId}/items`, T1.id,
-    { source_type: 'content', item_title: '[테스트] 교사 추가 항목' });
+  const add = await call('POST', `/api/self-learn/daily/sets/${setId}/items`, ADMIN.id,
+    { source_type: 'content', item_title: '[테스트] 관리자 추가 항목' });
   assert.equal(add.status, 200);
 
-  const rm = await call('DELETE', `/api/self-learn/daily/sets/${setId}/items/${itemId}`, T1.id);
+  const rm = await call('DELETE', `/api/self-learn/daily/sets/${setId}/items/${itemId}`, ADMIN.id);
   assert.equal(rm.status, 200);
   assert.equal(itemExists(itemId), false);
 
   // 다른 세트의 항목을 이 세트 경로로 지우려는 교차 삭제 차단
   const other = makeSet({ title: '[테스트] 다른 세트' });
-  const cross = await call('DELETE', `/api/self-learn/daily/sets/${setId}/items/${other.itemId}`, T1.id);
+  const cross = await call('DELETE', `/api/self-learn/daily/sets/${setId}/items/${other.itemId}`, ADMIN.id);
   assert.equal(cross.status, 404, '경로의 세트에 속하지 않는 항목은 지울 수 없어야 한다');
   assert.ok(itemExists(other.itemId));
+});
+
+// ── INV-SLD11: 교사 전수 차단 (관리자 전용화) ───────────────────────────────
+//   사용자 지시(2026-08-06): "오늘의 학습은 관리자가 관리페이지에서 구성·배포해야 나오는 것."
+//   교사에겐 진입 UI 가 없었으므로 이 권한은 화면 없는 API 전용 능력이었다.
+test('INV-SLD11 교사 세션 — 세트 관리 API 전수 403 + DB 무변화', async () => {
+  const { setId, itemId } = makeSet({ teacherId: T1.id, title: '[테스트] 교사차단 대상' });
+  const before = db.prepare('SELECT COUNT(*) n FROM daily_learning_sets').get().n;
+  const koreanish = (m) => assert.ok(m && /[가-힣]/.test(m), `한국어 안내 메시지여야 한다: ${m}`);
+
+  for (const who of [T1, TFOE]) {
+    const create = await call('POST', '/api/self-learn/daily/sets', who.id,
+      { title: '교사가 만든 세트', target_grade: 5, target_date: '2026-08-06' });
+    assert.equal(create.status, 403, `uid${who.id}(teacher) 는 세트를 만들 수 없어야 한다`);
+    koreanish(create.body && create.body.message);
+    assert.match(create.body.message, /관리자/, '메시지가 실제 정책(관리자 전용)을 말해야 한다');
+    assert.equal(db.prepare('SELECT COUNT(*) n FROM daily_learning_sets').get().n, before, '세트가 생성되면 안 된다');
+
+    const upd = await call('PUT', `/api/self-learn/daily/sets/${setId}`, who.id, { title: '교사가 제목 바꿈' });
+    assert.equal(upd.status, 403);
+    assert.equal(titleOf(setId), '[테스트] 교사차단 대상', '제목이 바뀌면 안 된다');
+
+    const addItem = await call('POST', `/api/self-learn/daily/sets/${setId}/items`, who.id,
+      { source_type: 'content', item_title: '교사가 넣은 항목' });
+    assert.equal(addItem.status, 403);
+
+    const syncItems = await call('PUT', `/api/self-learn/daily/sets/${setId}/items`, who.id, { items: [] });
+    assert.equal(syncItems.status, 403, '항목 동기화(전량 교체) 경로도 막혀야 한다');
+    assert.ok(itemExists(itemId), '동기화로 항목이 사라지면 안 된다');
+
+    const delItem = await call('DELETE', `/api/self-learn/daily/sets/${setId}/items/${itemId}`, who.id);
+    assert.equal(delItem.status, 403);
+    assert.ok(itemExists(itemId), '항목이 삭제되면 안 된다');
+
+    const delSet = await call('DELETE', `/api/self-learn/daily/sets/${setId}`, who.id);
+    assert.equal(delSet.status, 403);
+    assert.ok(setExists(setId), '세트가 삭제되면 안 된다');
+  }
+});
+
+// ── INV-SLD12: 과차단 방지 — 기존 교사 소유 세트의 학생 경험은 그대로 ───────
+//   정본 DB 에는 teacher1 소유 세트 8건이 이미 배포돼 학생 진행 기록이 붙어 있다.
+//   권한 축소는 **앞으로의 쓰기**만 막아야 하고, 이미 배포된 학습의 조회·시작·이수는 그대로여야 한다.
+//   (이 작업에서 제일 위험한 실패 모드가 "원래 되던 게 안 되게 되는 것"이다.)
+test('INV-SLD12 교사 소유 기존 세트 — 학생은 여전히 조회·시작·이수, 관리자는 여전히 관리', async () => {
+  const { setId, itemId } = makeSet({ teacherId: T1.id, grade: STU.grade, active: 1, title: '[테스트] 기존 배포 세트' });
+
+  // ① 목록에 뜬다 (teacher_id 는 노출 조건이 아니다)
+  const list = await call('GET', '/api/self-learn/daily', STU.id);
+  assert.equal(list.status, 200);
+  assert.ok((list.body.sets || []).some(s => s.id === setId),
+    '교사가 만든 기존 세트가 학생 목록에서 사라지면 안 된다(과차단)');
+
+  // ② 상세가 열린다
+  assert.equal((await call('GET', `/api/self-learn/daily/${setId}`, STU.id)).status, 200,
+    '교사 소유 세트의 상세를 학생이 못 열면 안 된다');
+
+  // ③ 시작·이수가 된다 + 진행행이 남는다
+  assert.equal((await call('POST', `/api/self-learn/daily/${itemId}/start`, STU.id)).status, 200,
+    '교사 소유 세트 항목의 학습 시작이 막히면 안 된다');
+  const done = await call('POST', `/api/self-learn/daily/${itemId}/complete`, STU.id, { score: 90 });
+  assert.equal(done.status, 200, `교사 소유 세트 항목의 이수가 막히면 안 된다: ${done.raw}`);
+  const prog = progressOf(STU.id, itemId);
+  assert.ok(prog && prog.status === 'completed', '이수 기록이 남아야 한다');
+
+  // ④ 관리자는 남의(교사) 세트를 계속 관리할 수 있다 — teacher_id 로 admin 을 막으면 8건이 고아가 된다
+  const byAdmin = await call('PUT', `/api/self-learn/daily/sets/${setId}`, ADMIN.id, { title: '[테스트] 관리자가 인계' });
+  assert.equal(byAdmin.status, 200, '관리자가 교사 소유 세트를 수정하지 못하면 기존 8건이 관리 불능이 된다');
+  assert.equal(titleOf(setId), '[테스트] 관리자가 인계');
+
+  // ⑤ 관리자 수정 후에도 학생 이수 기록이 살아 있다
+  assert.ok(progressOf(STU.id, itemId), '관리자 수정이 학생 이수 기록을 지우면 안 된다');
+});
+
+// ── INV-SLD13: 학생 화면 문구 — 할 수 없는 일을 권하지 않는다 ───────────────
+//   발단: today.html 빈 상태가 "학습목록 추가하러 가기"/"직접 학습을 시작할 수 있어요" 라고 말했지만
+//   학생은 오늘의 학습을 스스로 채울 수 없다(requireSetManager=admin). 화면이 거짓말하지 않게 박제.
+test('INV-SLD13 today.html 빈 상태 — "학습목록 추가" 유도 문구가 없다', () => {
+  const p = path.join(__dirname, '..', 'public', 'self-learn', 'today.html');
+  const src = fs.readFileSync(p, 'utf8');
+
+  // 주석(정책 설명)에는 과거 문구가 인용될 수 있으므로 **렌더되는 마크업**만 본다.
+  const rendered = src.split('\n').filter(l => !/^\s*\/\//.test(l)).join('\n');
+
+  assert.equal(/학습목록 추가/.test(rendered), false,
+    '학생 화면이 오늘의 학습을 스스로 추가할 수 있다고 말하면 안 된다 (구성·배포는 관리자 전용)');
+  assert.equal(/아래에서 직접 학습을 시작할 수 있어요/.test(rendered), false,
+    '오늘의 학습을 스스로 채울 수 있다는 오해를 주는 안내 문구가 남아 있으면 안 된다');
+
+  // 빈 상태가 "누가 올려 주는지" 를 말하고, 학생이 실제로 할 수 있는 곳으로 보내야 한다
+  const i = rendered.indexOf('const headLine');
+  assert.ok(i > 0, '빈 상태 렌더 코드가 있어야 한다');
+  const empty = rendered.slice(i, i + 3000);
+  // [2026-08-06] 문구를 통째로 고정하지 않는다.
+  //   한때 `/선생님이 올려 주시면/` 을 박아 뒀는데, 구성·배포는 **관리자 전용**이라
+  //   교사는 전 경로 403 이다 — 즉 **테스트가 사실이 아닌 문구를 지키고 있었다.**
+  //   지켜야 할 것은 특정 낱말이 아니라 **"학생이 채우는 게 아니라 배정받는다"는 뜻**이다.
+  assert.match(empty, /배정되면|올려 주시면|정해지면/,
+    '빈 상태가 "내가 채우는 게 아니라 배정받는 것"임을 알려야 한다');
+  assert.equal(/선생님이 올려/.test(empty), false,
+    '교사는 오늘의 학습을 구성·배포할 수 없다(관리자 전용). 학생에게 사실과 다르게 안내하면 안 된다');
+  assert.match(empty, /AI 맞춤학습 시작하기/, 'CTA 라벨이 도착지(learning-map.html)와 일치해야 한다');
+  assert.match(empty, /learning-map\.html/, 'CTA 링크가 AI 맞춤학습으로 가야 한다');
 });
 
 // ── INV-SLD3: 삭제 라우트 존재 + 실제 정리 ──────────────────────────────────
@@ -178,7 +291,7 @@ test('INV-SLD3 DELETE /daily/sets/:id — 404 가 아니고 세트·항목·진�
   db.prepare(`INSERT INTO daily_learning_progress (user_id, item_id, set_id, status) VALUES (?,?,?,'completed')`)
     .run(STU.id, itemId, setId);
 
-  const res = await call('DELETE', `/api/self-learn/daily/sets/${setId}`, T1.id);
+  const res = await call('DELETE', `/api/self-learn/daily/sets/${setId}`, ADMIN.id);
   assert.notEqual(res.status, 404, '라우트가 존재해야 한다 (관리자 화면 삭제 버튼이 부르는 경로)');
   assert.equal(res.status, 200, `삭제 실패: ${res.raw}`);
   assert.equal(setExists(setId), false);
@@ -244,11 +357,11 @@ test('INV-SLD6 updateDailySet — is_active 를 boolean 으로 줘도 500 없이
   const { setId } = makeSet({ title: '[테스트] boolean 수정', active: 1 });
 
   // UI(daily-learning.html) 가 실제로 보내던 형태
-  const res = await call('PUT', `/api/self-learn/daily/sets/${setId}`, T1.id, { title: '[테스트] boolean 수정', is_active: false });
+  const res = await call('PUT', `/api/self-learn/daily/sets/${setId}`, ADMIN.id, { title: '[테스트] boolean 수정', is_active: false });
   assert.equal(res.status, 200, `boolean is_active 로 500 이 나면 안 된다: ${res.raw}`);
   assert.equal(db.prepare('SELECT is_active FROM daily_learning_sets WHERE id=?').get(setId).is_active, 0);
 
-  const res2 = await call('PUT', `/api/self-learn/daily/sets/${setId}`, T1.id, { is_active: true });
+  const res2 = await call('PUT', `/api/self-learn/daily/sets/${setId}`, ADMIN.id, { is_active: true });
   assert.equal(res2.status, 200);
   assert.equal(db.prepare('SELECT is_active FROM daily_learning_sets WHERE id=?').get(setId).is_active, 1);
 
@@ -286,7 +399,7 @@ test('INV-SLD8 항목 동기화 — 같은 구성으로 재저장하면 item id�
     { source_type: 'content', content_id: CID_A, item_title: '[테스트] 항목A(제목변경)', sort_order: 1, estimated_minutes: 15 },
     { source_type: 'content', content_id: CID_B, item_title: '[테스트] 항목B', sort_order: 2, estimated_minutes: 10 },
   ];
-  const r = await call('PUT', `/api/self-learn/daily/sets/${setId}/items`, T1.id, { items: same });
+  const r = await call('PUT', `/api/self-learn/daily/sets/${setId}/items`, ADMIN.id, { items: same });
   assert.equal(r.status, 200, `동기화 실패: ${r.raw}`);
   assert.deepEqual({ kept: r.body.kept, added: r.body.added, removed: r.body.removed },
     { kept: 2, added: 0, removed: 0 }, '같은 구성이면 유지만 하고 추가·삭제가 없어야 한다');
@@ -303,7 +416,7 @@ test('INV-SLD8 항목 동기화 — 같은 구성으로 재저장하면 item id�
   assert.equal(a.estimated_minutes, 15);
 
   // ② 항목 하나를 실제로 빼면 그것만 삭제되고, 남은 항목의 기록은 그대로
-  const r2 = await call('PUT', `/api/self-learn/daily/sets/${setId}/items`, T1.id, { items: [same[0]] });
+  const r2 = await call('PUT', `/api/self-learn/daily/sets/${setId}/items`, ADMIN.id, { items: [same[0]] });
   assert.equal(r2.status, 200);
   assert.deepEqual({ kept: r2.body.kept, added: r2.body.added, removed: r2.body.removed },
     { kept: 1, added: 0, removed: 1 });
@@ -314,7 +427,7 @@ test('INV-SLD8 항목 동기화 — 같은 구성으로 재저장하면 item id�
     '남은 항목의 이수 기록은 그대로');
 
   // ③ preview 는 아무것도 바꾸지 않고 사라질 기록만 알려 준다
-  const pv = await call('PUT', `/api/self-learn/daily/sets/${setId}/items?preview=1`, T1.id, { items: [] });
+  const pv = await call('PUT', `/api/self-learn/daily/sets/${setId}/items?preview=1`, ADMIN.id, { items: [] });
   assert.equal(pv.status, 200);
   assert.equal(pv.body.removing.length, 1);
   assert.equal(pv.body.removing[0].progress, 1);

@@ -303,16 +303,18 @@ const MIN_PEERS = 5;
  * @returns {{ classIds:number[], peerIds:number[] }} 반 없음이면 둘 다 빈 배열
  */
 function _peerIdsOf(userId) {
+  // [P1-C] 소속 반·peer 모두 학생 모집단 SSOT 경유. 옛 손 SQL 은 탈퇴한 반(removed)까지
+  //   "내 반"으로 세고, peer 에 삭제 계정을 넣어 MIN_PEERS 게이트를 거짓으로 통과시켰다.
   const classRows = db.prepare(`
     SELECT cm.class_id FROM class_members cm JOIN users u ON u.id = cm.user_id
-    WHERE cm.user_id = ? AND u.role = 'student'
+    WHERE cm.user_id = ? AND ${classDb.studentPopulationSql('cm', 'u')}
   `).all(userId);
   const classIds = [...new Set(classRows.map(r => r.class_id))];
   if (!classIds.length) return { classIds: [], peerIds: [] };
   const ph = classIds.map(() => '?').join(',');
   const peerIds = db.prepare(`
     SELECT DISTINCT cm.user_id AS id FROM class_members cm JOIN users u ON u.id = cm.user_id
-    WHERE cm.class_id IN (${ph}) AND u.role = 'student'
+    WHERE cm.class_id IN (${ph}) AND ${classDb.studentPopulationSql('cm', 'u')}
   `).all(...classIds).map(r => r.id);
   return { classIds, peerIds };
 }
@@ -562,7 +564,7 @@ function resolveMembershipScopeFilter(req, colAlias) {
       memberIds = db.prepare(`
         SELECT DISTINCT cm.user_id AS id
         FROM class_members cm JOIN users u ON u.id = cm.user_id
-        WHERE cm.class_id IN (${ph}) AND u.role = 'student'
+        WHERE cm.class_id IN (${ph}) AND ${classDb.studentPopulationSql('cm', 'u')}
       `).all(...classIds).map(r => r.id);
     }
   } catch (_) { memberIds = []; }
@@ -627,7 +629,7 @@ function resolveActivityScope(req, colAlias, opts = {}) {
       memberIds = db.prepare(`
         SELECT DISTINCT cm.user_id AS id
         FROM class_members cm JOIN users u ON u.id = cm.user_id
-        WHERE cm.class_id = ? AND u.role = 'student'
+        WHERE cm.class_id = ? AND ${classDb.studentPopulationSql('cm', 'u')}
       `).all(cid).map(r => r.id);
     } catch (_) { memberIds = []; }
     const className = _classNameById(cid);
@@ -1340,12 +1342,11 @@ router.get('/stats/heatmap-cell', requireAuth, (req, res) => {
     `).all(...cellParams, HEATMAP_CELL_LIMIT);
 
     // 이름 마스킹 정책: 반 학생 수 기준(shouldMaskNames). 담임/담당 → 실명, 비담임 소표본 → 익명.
+    //   [P1-C] 마스킹 임계(n<10)의 n 도 재적 학생 수여야 한다 — 유령이 n 을 부풀리면
+    //   소표본 반이 "표본 충분"으로 오판돼 익명화가 풀린다(개인정보 방향의 오류).
     let studentCount = 0;
     try {
-      studentCount = db.prepare(`
-        SELECT COUNT(*) AS c FROM class_members cm JOIN users u ON u.id = cm.user_id
-        WHERE cm.class_id = ? AND u.role = 'student'
-      `).get(classId).c || 0;
+      studentCount = classDb.getClassStudentCount(classId);
     } catch (_) { studentCount = 0; }
     const mask = shouldMaskNames(req, classId, studentCount);
     const maskIdx = new Map();  // userId → 안정적 익명 인덱스
@@ -1359,13 +1360,13 @@ router.get('/stats/heatmap-cell', requireAuth, (req, res) => {
             SELECT cm.user_id AS uid, c.name AS cname
             FROM class_members cm JOIN classes c ON c.id = cm.class_id
             JOIN users u ON u.id = cm.user_id
-            WHERE cm.class_id = ? AND u.role = 'student'
+            WHERE cm.class_id = ? AND ${classDb.studentPopulationSql('cm', 'u')}
           `).all(classId)
         : db.prepare(`
             SELECT cm.user_id AS uid, c.name AS cname
             FROM class_members cm JOIN classes c ON c.id = cm.class_id
             JOIN users u ON u.id = cm.user_id
-            WHERE c.owner_id = ? AND c.status = 'active' AND u.role = 'student'
+            WHERE c.owner_id = ? AND c.status = 'active' AND ${classDb.studentPopulationSql('cm', 'u')}
           `).all(req.user.id);
       nameRows.forEach(x => { if (!userClassName.has(x.uid)) userClassName.set(x.uid, x.cname); });
     } catch (_) { /* className best-effort */ }
@@ -3880,7 +3881,7 @@ function _computeTrendRanking(req, res, order) {
   const lvlArg = wLevel !== 'all' ? [wLevel] : [];
   let baseRows = [];
   if (scope === 'all') {
-    baseRows = db.prepare(`SELECT u.id AS id, u.grade AS grade FROM users u WHERE u.role='student'${lvlCond}`)
+    baseRows = db.prepare(`SELECT u.id AS id, u.grade AS grade FROM users u WHERE u.role='student'${lvlCond}`) /* pop-ok: scope='all' = 충북 전체 학생 거시 모집단. 클래스 로스터가 아니다(아래 class 분기와 대비). */
       .all(...lvlArg);
   } else {
     // class: 교사 소유 반들의 student 멤버 합집합
@@ -3890,7 +3891,7 @@ function _computeTrendRanking(req, res, order) {
       baseRows = db.prepare(`
         SELECT DISTINCT cm.user_id AS id, u.grade AS grade
         FROM class_members cm JOIN users u ON u.id = cm.user_id
-        WHERE cm.class_id IN (${ph}) AND u.role = 'student'${lvlCond}
+        WHERE cm.class_id IN (${ph}) AND ${classDb.studentPopulationSql('cm', 'u')}${lvlCond}
       `).all(...classIds, ...lvlArg);
     }
   }
@@ -4125,12 +4126,20 @@ router.get('/warnings/:classId', requireAuth, (req, res) => {
     }
 
     // M-3: 단일 JOIN 쿼리로 멤버 + 마지막 활동일 조회 (기존 N+1 제거)
+    //
+    // ── [P1-C] 죽은 disjunct 제거 + 모집단 SSOT 화 ──────────────────────────────
+    //   옛 조건: `(cm.role = 'student' OR u.role = 'student')`
+    //   `cm.role` 의 값 도메인은 실측 {member, owner} 뿐이라 왼쪽 항은 **절대 참이 아니다**
+    //   (죽은 disjunct). 따라서 제거해도 결과는 바뀌지 않는다 — OR 이라 오른쪽이 살려주고
+    //   있었을 뿐이다. 진짜 결함은 cm.status·계정삭제를 안 본 쪽이었다:
+    //     실측 /warnings/1 명단에 **삭제 계정 한서윤이 실명으로 노출**됐다(8명 → 정답 7명).
+    //   위험 학생 명단은 교사가 실제로 지도 대상을 고르는 화면이라 유령이 섞이면 안 된다.
     const memberRows = db.prepare(`
       SELECT u.id as user_id, u.display_name,
         (SELECT MAX(DATE(ll.created_at)) FROM learning_logs ll WHERE ll.user_id = u.id) as last_date
       FROM class_members cm
       JOIN users u ON u.id = cm.user_id
-      WHERE cm.class_id = ? AND (cm.role = 'student' OR u.role = 'student')
+      WHERE cm.class_id = ? AND ${classDb.studentPopulationSql('cm', 'u')}
     `).all(classId);
 
     const inactive = [];
@@ -4152,7 +4161,7 @@ router.get('/warnings/:classId', requireAuth, (req, res) => {
         ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY created_at DESC) as rn
       FROM learning_logs
       WHERE class_id = ? AND result_success IS NOT NULL
-        AND user_id IN (SELECT cm.user_id FROM class_members cm JOIN users u ON u.id = cm.user_id WHERE cm.class_id = ? AND u.role = 'student')
+        AND user_id IN (SELECT cm.user_id FROM class_members cm JOIN users u ON u.id = cm.user_id WHERE cm.class_id = ? AND ${classDb.studentPopulationSql('cm', 'u')})
     `).all(classId, classId);
     const streakByUser = new Map();
     // 사용자별 첫 10건까지만 고려, 선두 연속 0 카운트
@@ -4178,11 +4187,23 @@ router.get('/warnings/:classId', requireAuth, (req, res) => {
     }
 
     // 결손 성취기준 — 클래스 멤버 전체 한 번에
+    //
+    // ── [N-1] 한 응답 안에서 모집단이 갈리던 자리 ──────────────────────────────
+    //   결함(수정 전): 여기만 손 SQL `... JOIN users u2 ... AND u2.role = 'student'` 로 남아
+    //   cm.role · cm.status · 계정삭제를 보지 않았다. 위 memberRows(inactive/noData/
+    //   consecutiveWrong)는 SSOT 를 쓰므로 **같은 응답 안에서 명단이 서로 모순**됐다.
+    //     실측(class 2, 2026-08-06): 탈퇴 멤버 강다은(cm.status='removed')이
+    //     inactive 에는 없는데 weakAchievements 에는 실명으로 남았다.
+    //   더 나쁜 건 아래 마스킹 경로다 — labelById 는 memberRows 로만 만들어져
+    //   모집단 밖 사람은 relabel 이 '학생' 폴백으로 떨어진다(정체불명 항목 생성).
+    //   ⚠ 소스 락(INV-L3)이 못 잡은 이유: 별칭이 u·cu 가 아니라 u2 여서 창 조건에
+    //     안 걸렸다 → 스캐너를 별칭 무관으로 일반화했다(test/class-student-population.js).
     const weakRows = db.prepare(`
       SELECT las.user_id, u.display_name, las.achievement_code, las.avg_score, las.last_level, las.attempt_count
       FROM lrs_achievement_stats las
       JOIN users u ON u.id = las.user_id
-      WHERE las.user_id IN (SELECT cm.user_id FROM class_members cm JOIN users u2 ON u2.id = cm.user_id WHERE cm.class_id = ? AND u2.role = 'student')
+      WHERE las.user_id IN (SELECT cm.user_id FROM class_members cm JOIN users u2 ON u2.id = cm.user_id
+                             WHERE cm.class_id = ? AND ${classDb.studentPopulationSql('cm', 'u2')})
         AND (las.last_level IN ('하', '미도달') OR las.level = 'not_reached')
       ORDER BY las.user_id, COALESCE(las.avg_score, 0) ASC
     `).all(classId);
@@ -4335,8 +4356,8 @@ router.get('/stats/perform', requireAuth, (req, res) => {
                  SUM(CASE WHEN s.id IS NULL AND h.due_date IS NOT NULL
                             AND DATE(h.due_date) >= DATE('now','localtime') THEN 1 ELSE 0 END) open_pairs
           FROM homework h
-          JOIN class_members cm ON cm.class_id = h.class_id AND cm.status = 'active'
-          JOIN users u ON u.id = cm.user_id AND u.role = 'student'
+          JOIN class_members cm ON cm.class_id = h.class_id
+          JOIN users u ON u.id = cm.user_id AND ${classDb.studentPopulationSql('cm', 'u')}
           LEFT JOIN homework_submissions s
             ON s.homework_id = h.id AND s.student_id = cm.user_id AND COALESCE(s.is_draft, 0) = 0
           WHERE h.status <> 'draft' ${scopeSql} ${dateSql}
@@ -5615,10 +5636,8 @@ function _xapiScopeUserIds(req, scope) {
     const classId = parseInt(scope.slice(6));
     if (!classId) return [req.user.id];
     try {
-      // 학생 모집단만 (비학생 체험 기록 격리)
-      const members = db.prepare(
-        "SELECT cm.user_id FROM class_members cm JOIN users u ON u.id = cm.user_id WHERE cm.class_id = ? AND u.role = 'student'"
-      ).all(classId).map(r => r.user_id);
+      // 학생 모집단만 (비학생 체험 기록 격리) — [P1-C] SSOT 경유
+      const members = classDb.getClassStudentIds(classId);
       // 교사면 자기 학급 허용, 학생이면 본인만
       const role = classDb.getMemberRole(classId, req.user.id);
       if (role === 'owner' || req.user.role === 'admin') return members;
@@ -6704,13 +6723,9 @@ router.get('/classes', requireAuth, (req, res) => {
     ).all(req.user.id);
 
     const classes = owned.map(c => {
-      const memberRow = db.prepare(`
-        SELECT COUNT(*) AS n, GROUP_CONCAT(cm.user_id) AS ids
-        FROM class_members cm JOIN users u ON u.id = cm.user_id
-        WHERE cm.class_id = ? AND u.role = 'student'
-      `).get(c.id);
-      const students = memberRow.n || 0;
-      const memberIds = String(memberRow.ids || '').split(',').filter(Boolean).map(Number);
+      // [P1-C] 학생 수·id 는 SSOT 한 벌. 정본사전 §3-1 이 `/classes` 를 결함 지점으로 지목했다.
+      const memberIds = classDb.getClassStudentIds(c.id);
+      const students = memberIds.length;
       let activityCount = 0, scoredCount = 0;
       if (memberIds.length) {
         const ph = memberIds.map(() => '?').join(',');
@@ -6795,11 +6810,8 @@ router.get('/stats/class-compare', requireAuth, (req, res) => {
 
     // ── 반별 학생 멤버(§0-4 멤버십 조인) — resolveMembershipScopeFilter 와 동일 방식. ──
     //   class_id NULL 자기주도 활동(self-learn·content)도 user_id IN 으로 반에 귀속.
-    const memberIdsOf = (classId) => db.prepare(`
-      SELECT cm.user_id AS id
-      FROM class_members cm JOIN users u ON u.id = cm.user_id
-      WHERE cm.class_id = ? AND u.role = 'student'
-    `).all(classId).map(r => r.id);
+    //   [P1-C] SSOT 경유 — 정본사전 §3-1·§3-6(단일 헬퍼 강제)이 지목한 지점.
+    const memberIdsOf = (classId) => classDb.getClassStudentIds(classId);
 
     // ── 반 단위 집계(memberIds IN) — logAgg/wau/reach. equity logAgg/wauAgg/reachAgg 산식 미러. ──
     function aggClass(memberIds) {
@@ -7353,10 +7365,11 @@ const _bR1 = (x) => (x == null || isNaN(x)) ? null : Math.round(x * 10) / 10;
 function _benchClassCtx(classId) {
   const cls = db.prepare('SELECT id, name, grade, status FROM classes WHERE id = ?').get(classId);
   if (!cls) return null;
+  // [P1-C] 벤치마크의 "우리 반" 쪽 모집단 — SSOT 경유. 유령이 섞이면 반 평균이 흔들린다.
   const members = db.prepare(`
     SELECT u.id, u.grade, u.school_level
     FROM class_members cm JOIN users u ON u.id = cm.user_id
-    WHERE cm.class_id = ? AND u.role = 'student'
+    WHERE cm.class_id = ? AND ${classDb.studentPopulationSql('cm', 'u')}
   `).all(classId);
   const studentIds = members.map(m => m.id);
   // school_level = 멤버 최빈 school_level

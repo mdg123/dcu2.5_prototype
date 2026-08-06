@@ -1,6 +1,8 @@
 // db/self-learn-extended.js
 const db = require('./index');
 const { logLearningActivity } = require('./learning-log-helper');
+// 학생 모집단 SSOT — 분모·명단은 손 SQL 로 다시 적지 말 것 (db/class.js 주석 참조)
+const { studentPopulationSql, liveUserSql } = require('./class');
 const { awardPoints, getSetting } = require('./point-helper');
 
 // ========== 스키마 초기화 (P0 AI 맞춤학습 확장) ==========
@@ -768,6 +770,86 @@ function deleteDailySet(setId) {
 
 // ========== AI 맞춤학습 (학습맵) ==========
 
+// ── 학습맵 진행률 = "문항" 기준 (2026-08-06 사용자 확정 정책) ───────────────────
+//  · 차시(level=3) 진행률 = 그 차시 안의 문항 중 완료 문항 비율
+//  · 단원(level=2) 진행률 = 자식 차시들의 문항을 **총합**한 뒤 완료 문항 비율
+//      (차시 진행률의 "평균"이 아니다. 차시별 문항 수가 다르면 값이 달라진다.)
+//  · 영상 시청은 진행률에 **전혀 반영하지 않는다**(봐도 안 봐도 그만).
+//  · "완료" 판정 = problem_attempts 에 is_correct=1 이 한 번이라도 기록된 문항.
+//      (routes/self-learn.js 의 차시 목록 API 와 동일 정의 — 화면의 "문항 n/m" 칩과 일치)
+//  ⚠ N+1 금지: 노드가 1,300여 개라 노드마다 쿼리를 돌리면 화면이 느려진다.
+//     아래는 노드 수와 무관하게 집계 SQL 2벌로 끝낸다(실측 ~12ms).
+const MAP_PROBLEM_TYPES = "('quiz','exam','problem','question','assessment')";
+
+/**
+ * 학습맵 문항 집계 (사용자 1명 기준, 전 노드 일괄).
+ * @param {number|null} userId  없으면 완료 수 0 (총 문항 수만 유효)
+ * @returns {{perNode: Map<string,{total:number,solved:number}>, perUnit: Map<string,{total:number,solved:number}>}}
+ */
+function getMapProblemRollup(userId = null) {
+  const perNode = new Map(); // 문항이 직접 매핑된 노드(사실상 차시 level=3)
+  const perUnit = new Map(); // 단원(level=2) = 자식 차시 총합
+
+  const rows = db.prepare(`
+    SELECT nc.node_id AS node_id,
+           COUNT(*) AS total,
+           SUM(CASE WHEN pa.ok = 1 THEN 1 ELSE 0 END) AS solved
+    FROM node_contents nc
+    JOIN contents c ON c.id = nc.content_id
+      AND c.content_type IN ${MAP_PROBLEM_TYPES}
+      AND c.is_public = 1 AND c.status = 'approved'
+    LEFT JOIN (
+      SELECT content_id, MAX(is_correct) AS ok
+      FROM problem_attempts WHERE user_id = ? GROUP BY content_id
+    ) pa ON pa.content_id = c.id
+    GROUP BY nc.node_id
+  `).all(userId == null ? -1 : userId);
+  for (const r of rows) {
+    perNode.set(r.node_id, { total: r.total || 0, solved: r.solved || 0 });
+  }
+
+  const children = db.prepare(`
+    SELECT node_id, parent_node_id FROM learning_map_nodes
+    WHERE node_level = 3 AND parent_node_id IS NOT NULL
+  `).all();
+  for (const ch of children) {
+    const agg = perUnit.get(ch.parent_node_id) || { total: 0, solved: 0 };
+    const p = perNode.get(ch.node_id);
+    if (p) { agg.total += p.total; agg.solved += p.solved; }
+    perUnit.set(ch.parent_node_id, agg);
+  }
+  return { perNode, perUnit };
+}
+
+/**
+ * 차시(level=3)의 영상 수 / 시청 완료 수 — **표시 전용**.
+ * 진행률에는 절대 쓰지 않는다(영상은 봐도 안 봐도 그만). 학습맵 차시 카드의 "📹n" 칩용.
+ * 시청 완료 기준은 차시 목록 API 와 동일하게 watch_ratio >= 0.8.
+ */
+function getMapVideoRollup(userId = null) {
+  const perNode = new Map();
+  const rows = db.prepare(`
+    SELECT nc.node_id AS node_id,
+           COUNT(*) AS total,
+           SUM(CASE WHEN ucp.watch_ratio >= 0.8 THEN 1 ELSE 0 END) AS watched
+    FROM node_contents nc
+    JOIN contents c ON c.id = nc.content_id
+      AND c.content_type = 'video' AND c.is_public = 1 AND c.status = 'approved'
+    LEFT JOIN user_content_progress ucp ON ucp.content_id = c.id AND ucp.user_id = ?
+    GROUP BY nc.node_id
+  `).all(userId == null ? -1 : userId);
+  for (const r of rows) perNode.set(r.node_id, { total: r.total || 0, watched: r.watched || 0 });
+  return perNode;
+}
+
+/** 문항 기준 진행률(%). 문항이 0개면 0 — 상태 기반 추정(진행중=50% 등) 금지. */
+function problemProgressPercent(agg) {
+  const total = (agg && agg.total) || 0;
+  const solved = (agg && agg.solved) || 0;
+  if (!total) return 0;
+  return Math.max(0, Math.min(100, Math.round((solved / total) * 100)));
+}
+
 function getMapNodes({ subject, gradeLevel, grade, grades, schoolLevel, schoolLevels, semester, area, keyword, status, userId } = {}) {
   let where = 'WHERE 1=1';
   const params = [];
@@ -822,6 +904,31 @@ function getMapNodes({ subject, gradeLevel, grade, grades, schoolLevel, schoolLe
     rows = rows.map(r => ({ ...r, user_status: map.get(r.node_id) || 'not_started' }));
     if (status) rows = rows.filter(r => r.user_status === status);
   }
+
+  // 진행률(문항 기준) 주입 — 단원(level=2)은 자식 차시 문항 총합 롤업.
+  // 화면(learning-map.html)이 상태로 진행률을 지어내지 않도록 서버가 실제 값을 항상 내려준다.
+  try {
+    const rollup = getMapProblemRollup(userId || null);
+    const videoRollup = getMapVideoRollup(userId || null);
+    rows = rows.map(r => {
+      const agg = (r.node_level === 2 ? rollup.perUnit.get(r.node_id) : rollup.perNode.get(r.node_id))
+        || { total: 0, solved: 0 };
+      const out = {
+        ...r,
+        problems_total: agg.total,
+        problems_solved: agg.solved,
+        progress_percent: problemProgressPercent(agg)
+      };
+      // 영상 칩은 차시에만 붙인다(표시 전용, 진행률과 무관). 단원 카드는 문항·차시 수만 보여준다.
+      if (r.node_level !== 2) {
+        const v = videoRollup.get(r.node_id) || { total: 0, watched: 0 };
+        out.videos_total = v.total;
+        out.videos_watched = v.watched;
+      }
+      return out;
+    });
+  } catch (_) { /* 롤업 실패 시 진행률 필드 없이 반환 (화면은 0% 로 표시) */ }
+
   return rows;
 }
 
@@ -1056,6 +1163,12 @@ function getUserNodeStatuses(userId) {
     `).all(userId);
 
     const rowByNode = new Map(rows.map(r => [r.node_id, r]));
+    // [2026-08-06 진행률=문항 정책] 단원 합성 상태를 "문항 완료"로 게이트한다.
+    //   결함: 자식 차시를 '학습 시작'만 눌러도(문항 0/41) 단원 배지가 '진행중' 이 되고,
+    //         화면 폴백이 진행중=50% 로 지어내 "50% 인데 차시는 전부 0%" 가 나왔다.
+    //   규칙: 문항이 있는 단원인데 완료 문항이 0이면 합성하지 않는다(= available).
+    //         문항이 아예 없는 단원은 판단 근거가 없으므로 기존 규칙(차시 상태)을 유지.
+    const unitRollup = getMapProblemRollup(userId).perUnit;
     for (const u of unitRows) {
       const total = u.total_children || 0;
       const done = u.completed_children || 0;
@@ -1064,6 +1177,8 @@ function getUserNodeStatuses(userId) {
       if (total > 0 && done === total) synth = 'completed';
       else if (engaged > 0) synth = 'in_progress';
       if (!synth) continue; // 학습 흔적 없는 단원은 미노출(available로 처리됨)
+      const pr = unitRollup.get(u.unit_id);
+      if (pr && pr.total > 0 && pr.solved === 0) continue; // 문항 0건 완료 → 진행중으로 승격 금지
       const existing = rowByNode.get(u.unit_id);
       if (existing) {
         // 실제 학습 합성값으로 단원 status 보정 (강등 금지: completed는 유지)
@@ -2857,6 +2972,11 @@ function getLearningDashboard(userId) {
   const totalNodes = unitProgressRows.length;
   let completedNodes = 0;
   let inProgressNodes = 0;
+  // [2026-08-06 진행률=문항 정책] 학습맵 배지(getUserNodeStatuses)와 **같은 게이트**를 적용한다.
+  //   문항이 있는 단원인데 완료 문항이 0이면 '진행 중'으로 세지 않는다.
+  //   (게이트가 한쪽에만 있으면 같은 화면 상단 KPI 는 "3개 진행 중", 아래 학습맵 카드는 1개만
+  //    진행중으로 표시돼 서로 어긋난다.)
+  const dashRollup = getMapProblemRollup(userId).perUnit;
   for (const r of unitProgressRows) {
     const total = r.total_children || 0;
     const done = r.completed_children || 0;
@@ -2864,6 +2984,8 @@ function getLearningDashboard(userId) {
     if (total > 0 && done === total) {
       completedNodes++;
     } else if (engaged > 0) {
+      const pr = dashRollup.get(r.unit_id);
+      if (pr && pr.total > 0 && pr.solved === 0) continue; // 문항 0건 완료 → 진행 중으로 세지 않음
       inProgressNodes++;
     }
   }
@@ -3012,7 +3134,7 @@ function getLearningDashboard(userId) {
           COALESCE((SELECT COUNT(*) FROM problem_attempts WHERE user_id = u.id AND is_correct = 1), 0) as correct_cnt,
           COALESCE((SELECT COUNT(*) FROM problem_attempts WHERE user_id = u.id), 0) as total_cnt
         FROM users u
-        WHERE u.role = 'student' AND u.grade = ?
+        WHERE u.role = 'student' AND u.grade = ? AND ${liveUserSql('u')} /* pop-ok: 학년 코호트 — 클래스가 아니라 같은 학년 전체 학생이 모집단(랭킹 비교군). liveUserSql 만 더해 삭제 계정 제외 */
       `).all(myGrade);
     }
     if (cohort.length < 2) {
@@ -3021,7 +3143,7 @@ function getLearningDashboard(userId) {
           COALESCE((SELECT COUNT(*) FROM problem_attempts WHERE user_id = u.id AND is_correct = 1), 0) as correct_cnt,
           COALESCE((SELECT COUNT(*) FROM problem_attempts WHERE user_id = u.id), 0) as total_cnt
         FROM users u
-        WHERE u.role = 'student'
+        WHERE u.role = 'student' AND ${liveUserSql('u')} /* pop-ok: 전체 학생 폴백 코호트(해당 학년 학생이 1명뿐일 때) — 클래스 스코프 아님. liveUserSql 만 더해 삭제 계정 제외 */
       `).all();
     }
     total_users = cohort.length;
@@ -3079,7 +3201,7 @@ function getRanking({ period, page = 1, limit = 20 } = {}) {
       (SELECT COUNT(*) FROM diagnosis_sessions WHERE user_id = u.id AND status = 'completed' ${diagDateFilter}) as diagnoses
     FROM users u
     LEFT JOIN user_points p ON u.id = p.user_id ${dateFilter}
-    WHERE u.role = 'student'
+    WHERE u.role = 'student' AND ${liveUserSql('u')} /* pop-ok: 플랫폼 전체 학습 랭킹 — 클래스 스코프 아님. 실측: 삭제 계정 student7(한서윤)이 Top20 9위로 노출돼 liveUserSql 추가 */
     GROUP BY u.id
     ORDER BY total_points DESC, correct_problems DESC
     LIMIT ? OFFSET ?
@@ -3138,17 +3260,19 @@ function getTeacherWrongNoteDashboard(classId, teacherId) {
         (SELECT COUNT(*) FROM wrong_answers WHERE student_id = u.id) as total_wrong,
         (SELECT COUNT(*) FROM wrong_answers WHERE student_id = u.id AND is_resolved = 1) as resolved_wrong
       FROM users u
-      WHERE u.role = 'student' AND u.school_name = ? AND u.grade = ? AND u.class_number = ?
+      WHERE u.role = 'student' AND u.school_name = ? AND u.grade = ? AND u.class_number = ? AND ${liveUserSql('u')} /* pop-ok: 학적(학교+학년+반) 기반 명단 — 채움클래스 소속이 아니라 학적이 모집단(1순위 분기). liveUserSql 만 더해 삭제 계정 제외 */
       ORDER BY total_wrong DESC
     `).all(teacher.school_name, teacher.grade, teacher.class_number);
   } else if (classId) {
-    // 학적 정보 없으면 기존 채움클래스 기반 폴백
+    // 학적 정보 없으면 기존 채움클래스 기반 폴백 — 명단은 학생 모집단 SSOT 경유.
+    //   손 SQL 시절엔 `cm.role='member'` 하나뿐이라 학부모·교직원·탈퇴자·삭제 계정이
+    //   전부 교사 오답노트 대시보드에 실명으로 들어왔다(실측 class 1: 10명, 정본 7명).
     students = db.prepare(`
       SELECT u.id, u.display_name, u.username,
         (SELECT COUNT(*) FROM wrong_answers WHERE student_id = u.id) as total_wrong,
         (SELECT COUNT(*) FROM wrong_answers WHERE student_id = u.id AND is_resolved = 1) as resolved_wrong
       FROM class_members cm JOIN users u ON cm.user_id = u.id
-      WHERE cm.class_id = ? AND cm.role = 'member'
+      WHERE cm.class_id = ? AND ${studentPopulationSql('cm', 'u')}
       ORDER BY total_wrong DESC
     `).all(classId);
   }
@@ -7709,6 +7833,7 @@ module.exports = {
   createDailySet, updateDailySet, addDailyItem, removeDailyItem, deleteDailySet,
   syncDailyItems, previewDailyItemRemoval, isDailySetTargetedTo,
   getMapNodes, getMapNodeDetail, getMapEdges, getUserNodeStatuses,
+  getMapProblemRollup, problemProgressPercent,
   collectFallbackProblems,
   startDiagnosis, submitDiagnosisAnswer, finishDiagnosis, getDiagnosisResult,
   startDiagnosisCAT, submitDiagnosisAnswerCAT, drillDownDiagnosis, getDiagnosisState,

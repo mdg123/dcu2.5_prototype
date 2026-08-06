@@ -209,15 +209,18 @@
     let myRole = null;
     let currentStatus = 'all';
     let currentPage = 1;
-    let classMembersCache = []; // 멤버 목록 (학생 수 산출용)
+    let classMembersCache = []; // 멤버 목록 (사이드바·표시용)
 
-    // 학생 수 (개설자 제외) 산출
+    // 학생 수 = 서버가 준 값을 그대로 쓴다.
+    //   BE 의 lesson.member_count 는 db/lesson.js 가 getClassStudentCount()(학생 모집단
+    //   SSOT: 멤버 & 학생 & 활성 & 미삭제)로 산출한 정본이다.
+    //   결함(수정 전): 여기서 `classMembersCache.filter(m => m.role === 'member').length`
+    //   로 손계산해, 라벨은 "학생 수(개설자 제외)" 인데 실제로는 학부모·교직원·삭제 계정까지
+    //   셌다(실측 class 1: 10명, 정본 7명). 같은 결함을 class-home.html 에서 고친 뒤에도
+    //   수업 게시판에만 사본이 남아 한 클래스의 분모가 화면마다 갈렸다.
+    //   ※ 이 술어를 FE 에 다시 적지 말 것 — 사본이 생기는 순간 분모가 또 갈린다.
     function getStudentTotal(lesson) {
-      if (Array.isArray(classMembersCache) && classMembersCache.length > 0) {
-        return classMembersCache.filter(m => m.role === 'member').length;
-      }
-      // 폴백: Backend의 member_count (이 값은 모든 멤버 포함일 수 있음)
-      return lesson?.member_count || 0;
+      return Number(lesson?.member_count) || 0;
     }
 
     // URL에서 classId 가져오기

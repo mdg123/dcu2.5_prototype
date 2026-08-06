@@ -1,5 +1,7 @@
 const db = require('./index');
 const { logLearningActivity } = require('./learning-log-helper');
+// 학생 모집단 SSOT — 반 학생 수·명단은 db/class.js 한 벌만 쓴다.
+const classDb = require('./class');
 
 // 학습 로그 기록 (레거시 진입점 — 내부적으로 logLearningActivity 래핑)
 function logActivity(userId, data) {
@@ -144,12 +146,31 @@ function getClassLrsStats(classId, opts = {}) {
 
   // 학생별 활동 통계 — duration_sec 우선 (C-4)
   // 모집단을 role='student'로 고정 — 비학생(교사/학부모/관리자) 체험 기록 격리
+  //
+  // ── [P1-C] 이 표의 모집단은 "재적 학생"이 아니다 ────────────────────────────
+  //   WHERE 가 learning_logs.class_id 기준이라 **이 반에 로그를 남긴 사람**이 대상이다.
+  //   즉 아래 summary.memberCount(재적 학생 = SSOT)와 모집단이 서로 다르다.
+  //   로스터 조인으로 바꾸면 "활동자 표"가 "재적자 표"로 의미가 바뀌므로(활동 0명이
+  //   0건으로 등장) 이번 사이클에서는 **계정삭제 필터만** 건다 — 삭제 계정이 교사
+  //   화면에 실명으로 남던 누수(실측: 한서윤, class 1, 로그 56건)를 차단하는 최소 조치.
+  //
+  //   ⚠ **미해소로 남는 것 — 한 함수 안의 모집단 2벌**: summary.memberCount 는 "재적 학생"
+  //     (SSOT)이고 이 byStudent 는 "활동 기록 보유 학생"이다. 실측 class 2 에서 byStudent 6명
+  //     vs memberCount 5명으로 갈린다(탈퇴자가 로그를 남겼기 때문).
+  //     지금 사용자에게 드러나지 않는 이유는 단 하나 — **byStudent 를 렌더하는 화면이 없다**
+  //     (유일 소비처 public/class/analytics.html 은 summary 의 KPI 4개만 쓴다. 2026-08-06 확인).
+  //     ★ 장래에 byStudent 를 표로 그리는 사람에게: 그 표에는 "활동 기록이 있는 학생만"이라는
+  //       고지를 **화면에** 반드시 넣을 것. 재적 수와 나란히 놓고 고지가 없으면, 이번 작업이
+  //       없애려던 "라벨↔집계 불일치"가 그대로 재발한다.
+  //     (한때 여기서 byStudentScope 문구 필드를 응답에 실었으나, 아무 FE 도 렌더하지 않아
+  //      "고지가 있다"는 착각만 만들었다 → 2026-08-06 감리 R-1 로 제거. 고지의 정본은 화면이다.)
+  //     (로스터 기반 재구성은 별건 접수 — 수치 변동이 커 설계 판단이 필요.)
   const wByS = buildWhere('ll');
   const byStudent = db.prepare(`
     SELECT ll.user_id, u.display_name, COUNT(*) as activity_count,
            COALESCE(SUM(COALESCE(ll.duration_sec, ll.duration, CAST(REPLACE(REPLACE(COALESCE(ll.result_duration,''),'PT',''),'S','') AS INTEGER), 0)), 0) as total_duration
     FROM learning_logs ll JOIN users u ON ll.user_id = u.id
-    WHERE ${wByS.sql} AND u.role = 'student'
+    WHERE ${wByS.sql} AND u.role = 'student' AND ${classDb.liveUserSql('u')}
     GROUP BY ll.user_id ORDER BY activity_count DESC
   `).all(...wByS.params);
 
@@ -184,12 +205,11 @@ function getClassLrsStats(classId, opts = {}) {
     return { sql: parts.length ? ' AND ' + parts.join(' AND ') : '', params };
   }
 
-  // 활동 멤버 수 (status='active', role='member' — 학생만)
-  const memberCount = db.prepare(
-    `SELECT COUNT(*) AS cnt FROM class_members cm
-     JOIN users u ON u.id = cm.user_id
-     WHERE cm.class_id = ? AND cm.status = 'active' AND u.role = 'student'`
-  ).get(classId).cnt || 0;
+  // 재적 학생 수 = 이수율·제출률·응시율 3종의 분모(횟수 × 인원). SSOT 경유.
+  //   [P1-C] 옛 손 SQL 은 cm.role 을 안 봐서 **학생이 개설한 반의 개설자**를 학생으로
+  //   셌고(실측 class 999: 1 → 정답 0), 삭제 계정도 통과시켰다(class 1: 8 → 정답 7).
+  //   분모가 틀리면 lessonCompletionRate·homeworkSubmitRate·examSubmitRate 가 함께 틀린다.
+  const memberCount = classDb.getClassStudentCount(classId);
 
   // 수업 수 (published 만 — 학생에게 노출된 것만 분모로)
   const lessonRange = rangeFor('created_at');

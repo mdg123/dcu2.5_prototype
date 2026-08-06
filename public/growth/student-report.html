@@ -2722,7 +2722,15 @@
     const gridStart = new Date(start); gridStart.setDate(gridStart.getDate() - startDow);
     const endDow = (today.getDay() + 6) % 7;
     const gridEnd = new Date(today); gridEnd.setDate(gridEnd.getDate() + (6 - endDow));
-    const weeks = Math.round((gridEnd - gridStart) / 86400000 / 7) + 1;
+    // [2026-08-06] off-by-one 수정 — 빈 주차열이 하나 더 그려지던 것.
+    //   결함: `Math.round((gridEnd-gridStart)/86400000/7) + 1`
+    //   gridStart(주 월요일)~gridEnd(주 일요일)의 **차이**는 이미 (주수×7 - 1)일이라
+    //   7로 나눠 반올림하면 그 자체가 주 수다. 거기에 +1 을 또 더해 **항상 1주 초과**했다.
+    //   예) 2026-08-06 기준 30일 → gridStart 7/6 · gridEnd 8/9 → 34/7=4.857→5, +1 = 6주.
+    //   실제 필요한 건 5주. 6번째 열의 칸은 전부 범위 밖(.out, 투명)이라 셀은 안 보이고
+    //   **머리글 "8/10" 만 덩그러니 남아** 사용자가 "이 열은 뭐냐"고 지적했다.
+    //   → 양끝 포함 일수(diff+1)를 7로 나눈다.
+    const weeks = Math.round(((gridEnd - gridStart) / 86400000 + 1) / 7);
     const wrapCls = 'heatmap-wrap weeks-' + (weeks <= 6 ? 5 : 13);
     // 주차열을 1fr 균등 분할 → 메인 컬럼 폭을 꽉 채움(우측 빈 공간 제거).
     // 셀 상한은 CSS .heatmap-cell { max-width:40px; aspect-ratio:1 }이 담당.
