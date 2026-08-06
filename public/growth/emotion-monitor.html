@@ -216,6 +216,7 @@
   </style>
 </head>
 <body>
+  <script src="/js/kst.js"></script>
   <script src="/js/common-nav.js"></script>
 <script src="/js/access-denied.js"></script>
 
@@ -338,11 +339,10 @@
     const classId = params.get('id') || params.get('classId') || 1;
     let monitorData = null;
 
-    // 로컬 기준 YYYY-MM-DD 포맷터 (toISOString은 UTC 변환으로 KST에서 하루 밀림 발생)
-    const toLocalYMD = (d) => {
-      const pad = n => String(n).padStart(2, '0');
-      return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
-    };
+    // 날짜·시각은 시각 SSOT(/js/kst.js)에 위임한다.
+    //   toISOString() 은 UTC 변환이라 KST 에서 하루 밀린다 — 직접 쓰지 말 것.
+    const T = window.DacheumTime;
+    const toLocalYMD = (d) => T.toLocalYMD(d);
 
     // 날짜 초기값 세팅 (최근 1주, 오늘 포함 7일)
     const todayStr = toLocalYMD(new Date());
@@ -583,18 +583,18 @@
           const lastDate = lastCheckinDate(s);
           tl.forEach(t => {
             const score = t.emotionScore != null ? t.emotionScore : (SCORE_MAP[t.emotion] || 5);
-            // checkedAt이 있으면 날짜+시간 반영, 없으면 날짜만 (정오 기본)
-            let ts;
-            if (t.checkedAt) {
-              ts = new Date(t.checkedAt).getTime();
-              // checkedAt이 UTC이면 로컬로 보정 (SQLite CURRENT_TIMESTAMP는 UTC)
-              if (!isNaN(ts)) {
-                // 이미 파싱됨
-              } else {
-                ts = new Date(t.date + 'T12:00:00').getTime();
-              }
-            } else {
-              ts = new Date(t.date + 'T12:00:00').getTime();
+            // checkedAt 이 있으면 날짜+시간 반영, 없으면 날짜만 (정오 기본).
+            //   ⚠ checked_at 은 UTC 저장('YYYY-MM-DD HH:MM:SS', 오프셋 표기 없음)이라
+            //     new Date(문자열) 로 파싱하면 KST 브라우저에서 9시간 앞으로 밀린다.
+            //     실제로 KST 16:59 입력이 X축 7시에 찍혀 교사가 "등교 직후 감정"으로
+            //     오독했다(W2-T5-13). 예전 코드는 보정하겠다고 주석만 달고 분기가 비어
+            //     있었다. 시각 SSOT(T.parse)가 'Z' 를 붙여 UTC 로 해석한다.
+            let ts = null;
+            const parsedCheckedAt = t.checkedAt ? T.parse(t.checkedAt) : null;
+            if (parsedCheckedAt) ts = parsedCheckedAt.getTime();
+            if (ts == null) {
+              const noon = T.parse(t.date);           // 그 날 KST 00:00
+              ts = noon ? noon.getTime() + 12 * 3600 * 1000 : Date.now();
             }
             points.push({
               userId: s.userId,

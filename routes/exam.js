@@ -31,10 +31,10 @@ const initSocket = require('../socket');
 // 콘텐츠 임포트/일부 경로는 'YYYY-MM-DD HH:MM' 로도 저장될 수 있어 앞 10자(날짜부)만
 // 비교한다. 타임존은 코드베이스 공통 규칙(homework.js·growth.js 의 date('now','+9 hours'))
 // 과 일관되게 KST(UTC+9) 로컬 날짜를 기준일로 삼는다.
+// 이 함수의 계산이 lib/kst.js 로 승격됐다(시각 규약 SSOT). 사본을 남기지 않고 위임한다.
+const kstLib = require('../lib/kst');
 function kstTodayStr() {
-  // 현재 시각 + 9시간 = KST → 날짜부(YYYY-MM-DD) 추출
-  const kst = new Date(Date.now() + 9 * 60 * 60 * 1000);
-  return kst.toISOString().slice(0, 10);
+  return kstLib.kstToday();
 }
 function dateOnly(v) {
   if (v == null) return null;

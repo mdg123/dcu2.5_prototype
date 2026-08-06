@@ -1,8 +1,27 @@
 const db = require('./index');
+const classDb = require('./class');
+const kst = require('../lib/kst');
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 이 모듈의 두 가지 SSOT 의존 (사본 금지)
+//
+//  ① 날짜 귀속 — lib/kst.js
+//     출석은 "몇 시에 왔나" 가 아니라 **"어느 날 왔나"** 가 판정 기준이다.
+//     예전에는 `new Date().toISOString().slice(0,10)`(= UTC 날짜)을 썼는데,
+//     KST 00:00~08:59 가 전날 UTC 로 떨어진다. 등교 체크인 시간대(08:00~08:50)가
+//     정확히 그 구간이라 실사용 첫날부터 출석일이 하루씩 밀린다.
+//     → 날짜는 전부 kst.kstToday() / kst.sqlKstDate() 로만 만든다.
+//
+//  ② 학생 모집단 — db/class.js studentPopulationSql()/getClassStudents()
+//     class_members.role 의 실제 값은 owner/member 두 종뿐이다. 그래서
+//     `role !== 'teacher'` 로 거르면 학부모·교직원이 통과하고,
+//     `role === 'student'` 로 거르면 항상 0건이 된다. 둘 다 실제로 있었던 결함.
+//     → 명단·분모·랭킹은 전부 db/class.js 의 한 벌을 쓴다.
+// ═══════════════════════════════════════════════════════════════════════════
 
 // 출석 체크 (1클릭)
 function checkIn(classId, userId, comment = null, emotion = null, emotionReason = null, checkinSource = 'manual') {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = kst.kstToday();
   try {
     const info = db.prepare(`
       INSERT INTO attendance (class_id, user_id, attendance_date, status, comment, emotion, emotion_reason, checkin_source)
@@ -23,7 +42,7 @@ function checkIn(classId, userId, comment = null, emotion = null, emotionReason 
 // 오늘 출석 자동 기록 (멱등) — 학습 활동 발생 시 라우트가 호출.
 //   수업 이수·과제 열람·평가 응시·설문 응답·게시판 활동 등에서 "오늘 출석"을 자동 present 기록한다.
 //   ⚠ 멱등: 오늘 이미 출석행(수동 checkin·감정 포함)이 있으면 절대 덮어쓰지 않고 skip.
-//   날짜 규칙은 기존 checkIn/isCheckedIn 과 동일(new Date().toISOString().slice(0,10), YYYY-MM-DD).
+//   날짜 규칙은 기존 checkIn/isCheckedIn 과 동일(kst.kstToday(), KST 기준 YYYY-MM-DD).
 //   스키마 근거(실 DB PRAGMA table_info): attendance(class_id,user_id,attendance_date,status,
 //     comment,checked_at,emotion,emotion_reason,emotion_reason_type,emotion_score,checkin_source),
 //     UNIQUE(class_id,user_id,attendance_date), status CHECK IN('present','absent','late','excused').
@@ -31,7 +50,7 @@ function checkIn(classId, userId, comment = null, emotion = null, emotionReason 
 //     'survey_respond','post_read','comment_write'). 미지정 시 'auto'.
 function ensureTodayAttendance(classId, userId, source = 'auto') {
   if (!classId || !userId) return { success: false, skipped: true };
-  const today = new Date().toISOString().slice(0, 10);
+  const today = kst.kstToday();
 
   // 이미 오늘 출석행이 있으면 무변경(수동 checkin·감정 데이터 보존).
   const existing = db.prepare(
@@ -58,7 +77,7 @@ function ensureTodayAttendance(classId, userId, source = 'auto') {
 
 // 오늘 출석 여부 확인
 function isCheckedIn(classId, userId) {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = kst.kstToday();
   return !!db.prepare(
     "SELECT id FROM attendance WHERE class_id = ? AND user_id = ? AND attendance_date = ?"
   ).get(classId, userId, today);
@@ -97,7 +116,7 @@ function getStreak(classId, userId) {
   if (rows.length === 0) return 0;
 
   let streak = 1; // 가장 최근 출석일 포함
-  const today = new Date().toISOString().slice(0, 10);
+  const today = kst.kstToday();
   const lastDate = rows[0].attendance_date;
 
   // 마지막 출석이 오늘도 어제도 아니면 스트릭 끊긴 것
@@ -120,31 +139,108 @@ function getStreak(classId, userId) {
   return streak;
 }
 
+// 날짜 연산은 lib/kst 의 달력 헬퍼를 쓴다.
+//   예전에는 `new Date('YYYY-MM-DD').getDay()` 를 썼는데, 이 파싱은 UTC 자정이고
+//   getDay() 는 로컬 요일이라 두 기준이 섞여 있었다(UTC 서쪽 지역에서 요일이 밀린다).
+//   ymdWeekday/ymdDiffDays 는 둘 다 UTC 달력 기준이라 타임존과 무관하게 일정하다.
 function dateDiffDays(earlier, later) {
-  const d1 = new Date(earlier);
-  const d2 = new Date(later);
-  return Math.round((d2 - d1) / (1000 * 60 * 60 * 24));
+  return kst.ymdDiffDays(earlier, later);
 }
 
 function isWeekendGap(earlier, later) {
   // 금요일→월요일 (3일 차이), 주말에 출석 안 해도 연속으로 인정
   const diff = dateDiffDays(earlier, later);
+  if (diff == null) return false;
   if (diff <= 1) return true;
   if (diff > 3) return false;
-  const d1 = new Date(earlier);
-  const day1 = d1.getDay(); // 0=Sun
+  const day1 = kst.ymdWeekday(earlier); // 0=일
   // 금→월: day1=5, diff=3
   if (day1 === 5 && diff <= 3) return true;
-  // 금→토→월 등 중간 주말 포함
-  if (diff === 2) {
-    // 토→월: day1=6, diff=2
-    if (day1 === 6) return true;
-  }
+  // 토→월: day1=6, diff=2
+  if (diff === 2 && day1 === 6) return true;
   return false;
 }
 
-// 전체 출석 통계 (학생 본인용)
-function getUserStats(classId, userId) {
+/** 주말(토·일)인가 — 학교일 분모 계산용. */
+function isWeekendYmd(ymd) {
+  const w = kst.ymdWeekday(ymd);
+  return w === 0 || w === 6;
+}
+
+/** [from, to] 사이의 학교일(주말 제외) 'YYYY-MM-DD' 배열. */
+function schoolDaysBetween(from, to) {
+  const out = [];
+  let cur = from;
+  let guard = 0;
+  while (cur && cur <= to && guard++ < 400) {
+    if (!isWeekendYmd(cur)) out.push(cur);
+    cur = kst.kstAddDays(cur, 1);
+  }
+  return out;
+}
+
+/**
+ * 기간 [from, to] 의 출석률(%) — 분모는 **학교일(주말 제외)**, 분자는 present/late.
+ * 분모 0(방학·학기 시작 전 등)이면 0 을 돌려준다.
+ */
+function getRateBetween(classId, userId, from, to) {
+  const days = schoolDaysBetween(from, to);
+  if (days.length === 0) return 0;
+  const ph = days.map(() => '?').join(',');
+  const attended = db.prepare(`
+    SELECT COUNT(DISTINCT attendance_date) AS cnt
+    FROM attendance
+    WHERE class_id = ? AND user_id = ?
+      AND status IN ('present', 'late')
+      AND attendance_date IN (${ph})
+  `).get(classId, userId, ...days).cnt;
+  return Math.min(100, Math.round((attended / days.length) * 100));
+}
+
+/** 역대 최고 연속 출석일 — 현재 스트릭이 끊겨도 "최고 기록" 은 남아야 한다. */
+function getBestStreak(classId, userId) {
+  const rows = db.prepare(`
+    SELECT DISTINCT attendance_date FROM attendance
+    WHERE class_id = ? AND user_id = ? AND status IN ('present', 'late')
+    ORDER BY attendance_date ASC
+  `).all(classId, userId).map(r => r.attendance_date);
+  if (rows.length === 0) return 0;
+  let best = 1, run = 1;
+  for (let i = 1; i < rows.length; i++) {
+    const prev = rows[i - 1], curr = rows[i];
+    const diff = dateDiffDays(prev, curr);
+    // 연속 판정은 현재 스트릭(getStreak)과 동일한 규칙 — 주말 건너뜀 인정.
+    if (diff === 1 || isWeekendGap(prev, curr)) run++;
+    else run = 1;
+    if (run > best) best = run;
+  }
+  return best;
+}
+
+/** 아직 못 받은 다음 뱃지 — "N일 남음" 안내용. 전부 달성했으면 null. */
+function getNextBadge(streak) {
+  const next = BADGE_DEFS.find(d => d.threshold > streak);
+  if (!next) return null;
+  return {
+    type: next.type,
+    name: next.name,
+    threshold: next.threshold,
+    remaining: Math.max(0, next.threshold - streak)
+  };
+}
+
+/**
+ * 전체 출석 통계 (학생 본인용).
+ *
+ * ⚠ 반환 키는 FE 계약이다(public/class/attendance.html loadStatus).
+ *   this_week_rate·this_month_rate·best_streak·next_badge 가 빠져 있어서
+ *   오늘 출석한 학생 화면에도 "이번 주 0% / 이번 달 0%" 도넛이 떴다(W2-T5-3).
+ *   test/attendance-p1a.test.js INV-ATT-3 이 이 계약을 박제한다.
+ *
+ * @param {object} [opts] { ref } — 기준 시각(테스트용). 미지정 시 현재.
+ */
+function getUserStats(classId, userId, opts = {}) {
+  const ref = opts.ref;
   const total = db.prepare(
     "SELECT COUNT(*) as cnt FROM attendance WHERE class_id = ? AND user_id = ? AND status = 'present'"
   ).get(classId, userId).cnt;
@@ -153,7 +249,24 @@ function getUserStats(classId, userId) {
   const badges = getUserBadges(classId, userId);
   const title = getTitle(streak);
 
-  return { totalDays: total, streak, badges, title };
+  // 주/월 출석률 — 기간 끝은 "오늘"까지. 아직 오지 않은 날을 분모에 넣으면
+  // 월초에 출석률이 구조적으로 낮게 나와 학생이 손해를 본다.
+  const today = kst.kstToday(ref);
+  const week = kst.kstWeekRange(ref);
+  const month = kst.kstMonthRange(ref);
+  const this_week_rate = getRateBetween(classId, userId, week.start, today < week.end ? today : week.end);
+  const this_month_rate = getRateBetween(classId, userId, month.start, today < month.end ? today : month.end);
+
+  return {
+    totalDays: total,
+    streak,
+    badges,
+    title,
+    best_streak: Math.max(streak, getBestStreak(classId, userId)),
+    this_week_rate,
+    this_month_rate,
+    next_badge: getNextBadge(streak),
+  };
 }
 
 // 칭호 계산
@@ -169,15 +282,17 @@ function getTitle(streak) {
 }
 
 // 뱃지 시스템
+// threshold 를 단일 출처로 두고 check 는 그로부터 파생시킨다.
+//   (임계값이 두 곳에 적히면 "다음 목표" 안내와 실제 지급 기준이 어긋난다.)
 const BADGE_DEFS = [
-  { type: 'streak_3', name: '3일 연속 출석', check: (streak) => streak >= 3 },
-  { type: 'streak_5', name: '5일 연속 출석', check: (streak) => streak >= 5 },
-  { type: 'streak_10', name: '10일 연속 출석', check: (streak) => streak >= 10 },
-  { type: 'streak_20', name: '20일 연속 출석', check: (streak) => streak >= 20 },
-  { type: 'streak_30', name: '한 달 개근', check: (streak) => streak >= 30 },
-  { type: 'streak_50', name: '50일 연속 출석', check: (streak) => streak >= 50 },
-  { type: 'streak_100', name: '100일 연속 출석', check: (streak) => streak >= 100 },
-];
+  { type: 'streak_3', name: '3일 연속 출석', threshold: 3 },
+  { type: 'streak_5', name: '5일 연속 출석', threshold: 5 },
+  { type: 'streak_10', name: '10일 연속 출석', threshold: 10 },
+  { type: 'streak_20', name: '20일 연속 출석', threshold: 20 },
+  { type: 'streak_30', name: '한 달 개근', threshold: 30 },
+  { type: 'streak_50', name: '50일 연속 출석', threshold: 50 },
+  { type: 'streak_100', name: '100일 연속 출석', threshold: 100 },
+].map(d => ({ ...d, check: (streak) => streak >= d.threshold }));
 
 function checkAndAwardBadges(classId, userId) {
   const streak = getStreak(classId, userId);
@@ -200,28 +315,49 @@ function getUserBadges(classId, userId) {
   ).all(classId, userId);
 }
 
-// 클래스 출석 랭킹
+/**
+ * 클래스 출석 랭킹.
+ *
+ * 결함(W2-T5-6, 수정 전): 모집단 필터가 하나도 없어서
+ *   · 개설자(교사)가 랭킹에 올라왔고 (실측: class1 "김선생 9위")
+ *   · 탈퇴자(class_members.status='removed')의 출석 29건이 계속 집계됐으며
+ *   · 동점자를 배열 인덱스로 줄 세워 같은 일수인데 순위가 달랐다.
+ *
+ * 정본: db/class.js 학생 모집단에 INNER JOIN + 표준 경쟁 순위(1,1,3).
+ */
 function getRanking(classId) {
-  return db.prepare(`
+  const rows = db.prepare(`
     SELECT a.user_id, u.display_name, COUNT(*) as total_days,
            MAX(a.attendance_date) as last_date
-    FROM attendance a JOIN users u ON a.user_id = u.id
+    FROM attendance a
+    JOIN class_members cm ON cm.user_id = a.user_id AND cm.class_id = a.class_id
+    JOIN users u ON u.id = a.user_id
     WHERE a.class_id = ? AND a.status = 'present'
+      AND ${classDb.studentPopulationSql('cm', 'u')}
     GROUP BY a.user_id
-    ORDER BY total_days DESC, last_date DESC
+    ORDER BY total_days DESC, last_date DESC, u.display_name ASC
   `).all(classId);
+
+  // 표준 경쟁 순위(standard competition ranking): 동점은 같은 순위, 다음은 건너뛴다.
+  let prevDays = null, prevRank = 0;
+  return rows.map((r, idx) => {
+    const rank = (r.total_days === prevDays) ? prevRank : idx + 1;
+    prevDays = r.total_days;
+    prevRank = rank;
+    return { ...r, rank };
+  });
 }
 
 // 클래스 출석 통계 (교사 대시보드용)
 function getClassStats(classId) {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = kst.kstToday();
   const todayCount = db.prepare(
     "SELECT COUNT(*) as cnt FROM attendance WHERE class_id = ? AND attendance_date = ? AND status = 'present'"
   ).get(classId, today).cnt;
 
-  const totalMembers = db.prepare(
-    "SELECT COUNT(*) as cnt FROM class_members WHERE class_id = ? AND status = 'active' AND role IN ('student', 'owner', 'teacher', 'member')"
-  ).get(classId).cnt;
+  // 분모는 순수 학생 수(SSOT). 예전에는 owner·member 를 전부 세어 교사·학부모·
+  // 교직원까지 총원에 들어갔고, 그 총원으로 나눈 출석률이 구조적으로 낮게 나왔다.
+  const totalMembers = classDb.getClassStudentCount(classId);
 
   // 이번 주 출석 현황
   const weekStart = getWeekStart();
@@ -234,15 +370,14 @@ function getClassStats(classId) {
   `).all(classId, weekStart);
 
   // ─── 게이미피케이션 통계 (RFP SFR-017) ────────────────────────────
-  // 학생 멤버(role='member') 대상으로 연속 출석·뱃지 집계
-  const studentMembers = db.prepare(
-    "SELECT user_id FROM class_members WHERE class_id = ? AND status = 'active' AND role = 'member'"
-  ).all(classId);
+  // 순수 학생(SSOT) 대상으로 연속 출석·뱃지 집계.
+  //   role='member' 만 보면 학부모·교직원의 스트릭이 평균에 섞인다.
+  const studentMembers = classDb.getClassStudentIds(classId);
 
   let maxStreak = 0;
   let sumStreak = 0;
-  for (const m of studentMembers) {
-    const s = getStreak(classId, m.user_id) || 0;
+  for (const uid of studentMembers) {
+    const s = getStreak(classId, uid) || 0;
     if (s > maxStreak) maxStreak = s;
     sumStreak += s;
   }
@@ -306,15 +441,16 @@ function updateSettings(classId, data) {
   return getSettings(classId);
 }
 
-// 멤버별 출석 테이블 (교사 엑셀 다운로드용)
+// 멤버별 출석 테이블 (교사 화면 매트릭스 + 엑셀 다운로드)
 function getAttendanceTable(classId, startDate, endDate, includeWeekends = false) {
-  // 멤버 목록
-  const members = db.prepare(`
-    SELECT cm.user_id, u.display_name, u.username
-    FROM class_members cm JOIN users u ON cm.user_id = u.id
-    WHERE cm.class_id = ? AND cm.status = 'active'
-    ORDER BY u.display_name
-  `).all(classId);
+  // 명단 = 순수 학생만 (SSOT).
+  //   결함(W2-T5-4): status='active' 전원을 돌려주고 걸러내는 일을 FE·export 에
+  //   맡겼는데, 그 필터가 class_members.role 을 봤다. 실제 값은 owner/member 뿐이라
+  //   학부모(parent1)·교직원(staff1)이 그대로 통과해 명단·CSV·분모를 오염시켰다.
+  //   ⚠ 과잉 필터 아님 — 여기서 빠지는 건 학생이 아니거나(학부모·교직원·교사)
+  //     이 클래스 소속이 아닌(탈퇴) 사람뿐이다. 출석부는 학생 명부다.
+  const members = classDb.getClassStudents(classId)
+    .map(m => ({ user_id: m.user_id, display_name: m.display_name, username: m.username }));
 
   // 출석 데이터 (checkin_source, emotion, emotion_reason 포함 — 4팀 통합 보고서·교사 테이블 노출용)
   const records = db.prepare(`
@@ -323,16 +459,16 @@ function getAttendanceTable(classId, startDate, endDate, includeWeekends = false
     WHERE class_id = ? AND attendance_date BETWEEN ? AND ?
   `).all(classId, startDate, endDate);
 
-  // 날짜 목록 생성
+  // 날짜 목록 생성 — 달력 문자열 연산(타임존 무관).
+  //   예전에는 Date 객체를 로컬로 증가시키고 toISOString()(UTC)으로 되돌려서
+  //   요일 판정과 출력 날짜의 기준이 서로 달랐다.
   const dates = [];
-  const d = new Date(startDate);
-  const end = new Date(endDate);
-  while (d <= end) {
-    const day = d.getDay();
-    if (includeWeekends || (day !== 0 && day !== 6)) {
-      dates.push(d.toISOString().slice(0, 10));
-    }
-    d.setDate(d.getDate() + 1);
+  let cur = String(startDate).slice(0, 10);
+  const end = String(endDate).slice(0, 10);
+  let guard = 0;
+  while (cur && cur <= end && guard++ < 800) {
+    if (includeWeekends || !isWeekendYmd(cur)) dates.push(cur);
+    cur = kst.kstAddDays(cur, 1);
   }
 
   // 멤버×날짜 매트릭스
@@ -345,14 +481,12 @@ function getAttendanceTable(classId, startDate, endDate, includeWeekends = false
 }
 
 function getWeekStart() {
-  const d = new Date();
-  const day = d.getDay();
-  d.setDate(d.getDate() - (day === 0 ? 6 : day - 1));
-  return d.toISOString().slice(0, 10);
+  return kst.kstWeekStart();
 }
 
 module.exports = {
   checkIn, ensureTodayAttendance, isCheckedIn, getAttendanceByDate, getAttendanceRange,
-  getStreak, getUserStats, getRanking, getClassStats,
-  getSettings, updateSettings, getAttendanceTable, getUserBadges
+  getStreak, getBestStreak, getUserStats, getRanking, getClassStats,
+  getSettings, updateSettings, getAttendanceTable, getUserBadges,
+  getRateBetween, schoolDaysBetween,
 };

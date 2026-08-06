@@ -1133,6 +1133,7 @@
   </style>
 </head>
 <body>
+  <script src="/js/kst.js"></script>
   <script src="/js/common-nav.js"></script>
   <div class="container" id="mainContent" style="display:none;">
     <header class="page-header">
@@ -1394,6 +1395,8 @@
             <h3 id="detailTitle" class="detail-title"></h3>
           </div>
           <div class="detail-meta" id="detailMeta"></div>
+          <!-- [P1-B / W1-T2-04] 반려/대기 사유 — 작성자·교사·관리자에게만 표시 -->
+          <div id="detailApprovalNote" style="display:none;"></div>
           <div id="detailDesc" class="detail-desc"></div>
           <div id="detailBodyText" class="detail-body-text" style="display:none;">
             <div class="detail-body-text-label"><i class="fas fa-feather"></i> 작품 본문</div>
@@ -1479,17 +1482,9 @@
     function debounce(fn, wait) {
       let t; return function(...args) { clearTimeout(t); t = setTimeout(() => fn.apply(this, args), wait); };
     }
-    function timeAgo(iso) {
-      if (!iso) return '';
-      const dt = new Date(iso.replace(' ', 'T') + (iso.includes('Z') ? '' : 'Z'));
-      const diff = (Date.now() - dt.getTime()) / 1000;
-      if (isNaN(diff)) return iso.slice(0, 10);
-      if (diff < 60) return '방금 전';
-      if (diff < 3600) return `${Math.floor(diff/60)}분 전`;
-      if (diff < 86400) return `${Math.floor(diff/3600)}시간 전`;
-      if (diff < 86400*7) return `${Math.floor(diff/86400)}일 전`;
-      return iso.slice(0, 10);
-    }
+    // 이 함수의 UTC 파싱 패턴('Z' 부착)이 시각 SSOT(/js/kst.js)로 승격됐다.
+    //   사본을 남기면 다시 두 벌이 되므로 여기서는 SSOT 에 위임만 한다.
+    function timeAgo(iso) { return window.DacheumTime.timeAgo(iso, ''); }
     function getCatClass(cat) {
       if (cat === 'literature') return 'cat-writing';
       return ['art','music','writing','video','other'].includes(cat) ? 'cat-' + cat : 'cat-other';
@@ -1901,9 +1896,65 @@
       renderDetailThumbs(catCls);
     }
 
+    // 승인 상태 안내(반려 사유·승인 대기)
+    // ── [P1-B / W1-T2-04] 2026-08-06 ───────────────────────────────────────────
+    //   교사가 사유를 적어 반려해도 학생이 사유를 볼 수 있는 곳이 **한 군데도 없었다**.
+    //     ① 내 작품 탭 반려 필터 — 카드가 `item.rejection_reason` 을 읽고 있었는데
+    //        DB·API 의 실제 필드명은 `reject_reason` (게시판 posts 테이블의
+    //        rejection_reason 과 혼동한 오타) → 항상 undefined → 영구 미표시.
+    //     ② 카드 클릭 상세 모달 — 사유를 그리는 코드 자체가 없음.
+    //     ③ ?open={id} 딥링크 — 위와 동일.
+    //   API 는 처음부터 item.reject_reason 을 정상 반환하고 있었다(FE 렌더 누락).
+    // @param {'card'|'detail'} shape
+    function approvalNoteHtml(item, shape = 'card') {
+      if (!item) return '';
+      const st = item.approval_status || 'pending';
+      if (st === 'approved') return '';
+      // 사유·상태는 작성자 본인과 교사·관리자에게만. (승인 전 작품은 원래 남에게 안 보인다)
+      const mine = isOwner(item);
+      const staff = currentUser && ['teacher', 'admin'].includes(currentUser.role);
+      if (!mine && !staff) return '';
+
+      const rejected = st === 'rejected';
+      const reason = (item.reject_reason || '').trim();
+      const title = rejected ? '반려되었어요' : '승인을 기다리고 있어요';
+      const body = rejected
+        ? (reason
+            ? escHtml(reason)
+            : '사유가 적혀 있지 않아요. 담당 선생님께 여쭤보세요.')
+        : '선생님이 확인하면 갤러리에 공개돼요.';
+      const bg = rejected ? '#FEF2F2' : '#FFFBEB';
+      const fg = rejected ? '#B91C1C' : '#B45309';
+      const bar = rejected ? '#EF4444' : '#F59E0B';
+      const ico = rejected ? 'fa-circle-xmark' : 'fa-hourglass-half';
+      const pad = shape === 'detail' ? '12px 16px' : '8px 12px';
+      const fs = shape === 'detail' ? '15px' : '14px';
+      const hint = (rejected && mine)
+        ? `<div style="margin-top:6px;font-size:${shape === 'detail' ? '14px' : '13px'};opacity:.9;">작품을 고쳐서 다시 올리면 새로 검토받을 수 있어요.</div>`
+        : '';
+      return `<div style="margin-top:8px;padding:${pad};background:${bg};border-left:3px solid ${bar};border-radius:8px;font-size:${fs};line-height:1.6;color:${fg};">
+        <div style="font-weight:700;"><i class="fas ${ico}" style="margin-right:6px;"></i>${title}</div>
+        <div style="margin-top:4px;">${rejected ? '<strong>사유</strong> · ' : ''}${body}</div>
+        ${hint}
+      </div>`;
+    }
+
     async function showDetail(id) {
       let item = galleryItems.find(x => x.id === id);
-      if (!item) return;
+      if (!item) {
+        // 캐시에 없어도(딥링크·다른 탭 진입) 서버에서 직접 가져와 연다.
+        //   ?open={id} 로 들어온 본인 반려 작품이 galleryItems(승인 목록)에 없어
+        //   10회 재시도 끝에 아무것도 안 열리던 경로를 닫는다.
+        try {
+          const r0 = await fetch(`/api/growth/gallery/${id}`);
+          const d0 = await r0.json();
+          if (d0 && d0.success && d0.item) {
+            item = d0.item;
+            if (!galleryItems.find(x => x.id === item.id)) galleryItems.push(item);
+          }
+        } catch (e) {}
+        if (!item) { showToast('작품을 찾을 수 없어요.'); return; }
+      }
       detailItemId = id;
       detailViewLogged = false;
       detailCommentPage = 1;
@@ -1967,6 +2018,14 @@
         <span><i class="far fa-eye"></i> <span id="detailViewCount">${item.view_count || 0}</span></span>
         <span><i class="far fa-comment"></i> <span id="detailCommentMeta">${item.comment_count || 0}</span></span>
       `;
+
+      // 승인 상태 안내 (반려 사유 · 승인 대기) — 작성자·교사·관리자에게만
+      const noteEl = document.getElementById('detailApprovalNote');
+      if (noteEl) {
+        const noteHtml = approvalNoteHtml(item, 'detail');
+        noteEl.innerHTML = noteHtml;
+        noteEl.style.display = noteHtml ? 'block' : 'none';
+      }
 
       // 설명
       const descEl = document.getElementById('detailDesc');
@@ -2622,6 +2681,7 @@
                 <i class="fas fa-user"></i> ${escHtml(item.student_name||'익명')} · ${catNames[catKey]||catKey} · ${(item.created_at||'').slice(0,10)}
               </div>
               ${item.description ? `<div style="font-size:14px;color:var(--gray-500);margin-top:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escHtml(item.description)}</div>` : ''}
+              ${item.approval_status === 'rejected' ? `<div style="margin-top:6px;padding:6px 10px;background:#FEF2F2;border-left:3px solid #EF4444;border-radius:6px;font-size:14px;color:#B91C1C;"><strong>반려 사유</strong> · ${escHtml((item.reject_reason || '').trim() || '미기재')}</div>` : ''}
             </div>
             <div style="display:flex;gap:6px;flex-shrink:0;">
               ${approvalFilter === 'pending' ? `
@@ -3242,7 +3302,7 @@
             <span><i class="fas fa-user"></i> ${escHtml(item.student_name || currentUser?.display_name || '나')}</span>
             <span><i class="far fa-calendar"></i> ${item.created_at ? item.created_at.slice(0,10) : ''}</span>
           </div>
-          ${status === 'rejected' && item.rejection_reason ? `<div style="font-size:13px;color:#b91c1c;background:#fef2f2;padding:6px 10px;border-radius:6px;margin-top:6px;border-left:3px solid #ef4444;">반려 사유: ${escHtml(item.rejection_reason)}</div>` : ''}
+          ${approvalNoteHtml(item, 'card')}
           <div class="gallery-actions">
             <span class="${liked}"><i class="${heartIco}"></i> ${item.like_count || 0}</span>
             <span><i class="far fa-eye"></i> ${item.view_count || 0}</span>
@@ -3436,18 +3496,10 @@
       // URL ?open=ID 자동 열기
       const openId = new URLSearchParams(window.location.search).get('open');
       if (openId) {
-        setTimeout(() => {
-          // 첫 로드 완료 후 시도
-          let tries = 0;
-          const tryOpen = () => {
-            if (galleryItems.find(x => x.id === Number(openId))) {
-              showDetail(Number(openId));
-            } else if (++tries < 10) {
-              setTimeout(tryOpen, 300);
-            }
-          };
-          tryOpen();
-        }, 500);
+        // showDetail 이 캐시에 없으면 서버에서 단건을 직접 가져오므로 대기 루프가 필요 없다.
+        //   (예전엔 galleryItems = 승인된 공개 목록만이라, 본인 반려 작품 딥링크는
+        //    10회 재시도 후 아무것도 열리지 않고 조용히 끝났다.)
+        setTimeout(() => showDetail(Number(openId)), 300);
       }
     });
   </script>

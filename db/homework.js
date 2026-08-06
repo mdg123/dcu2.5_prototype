@@ -1,4 +1,6 @@
 const db = require('./index');
+// 학생 모집단 SSOT (db/class.js) — 제출률 분모·제출자 집계는 전부 이것을 경유한다.
+const { studentPopulationSql } = require('./class');
 
 // display_mode 화이트리스트
 const DISPLAY_MODE_VALUES = ['list', 'comment'];
@@ -104,24 +106,25 @@ function getHomeworkByClass(classId, { status, page = 1, limit = 20, userId = nu
     : '';
   const list = db.prepare(`
     SELECT h.*, u.display_name as author_name,
-    (SELECT COUNT(*) FROM homework_submissions WHERE homework_id = h.id AND COALESCE(is_draft,0) = 0) as submission_count,
+    -- submission_count 는 FE 폴백 경로(submitted_count ?? submission_count)라
+    -- 모집단이 다르면 폴백이 일어나는 순간 분모만 바뀐 값이 나온다 → 같은 집합으로 맞춘다.
     (SELECT COUNT(DISTINCT hs.student_id) FROM homework_submissions hs
-      JOIN class_members cm ON cm.user_id = hs.student_id
-                           AND cm.class_id = h.class_id
-                           AND cm.role = 'member'
-                           AND cm.status = 'active'
-      JOIN users us ON us.id = cm.user_id AND us.role = 'student'
-      WHERE hs.homework_id = h.id AND COALESCE(hs.is_draft,0) = 0) as submitted_count,
+      JOIN class_members cm ON cm.user_id = hs.student_id AND cm.class_id = h.class_id
+      JOIN users us ON us.id = cm.user_id
+      WHERE hs.homework_id = h.id AND COALESCE(hs.is_draft,0) = 0
+        AND ${studentPopulationSql('cm', 'us')}) as submission_count,
     (SELECT COUNT(DISTINCT hs.student_id) FROM homework_submissions hs
-      JOIN class_members cm ON cm.user_id = hs.student_id
-                           AND cm.class_id = h.class_id
-                           AND cm.role = 'member'
-                           AND cm.status = 'active'
-      JOIN users us ON us.id = cm.user_id AND us.role = 'student'
-      WHERE hs.homework_id = h.id AND COALESCE(hs.is_draft,0) = 0 AND hs.status = 'graded') as graded_count,
+      JOIN class_members cm ON cm.user_id = hs.student_id AND cm.class_id = h.class_id
+      JOIN users us ON us.id = cm.user_id
+      WHERE hs.homework_id = h.id AND COALESCE(hs.is_draft,0) = 0
+        AND ${studentPopulationSql('cm', 'us')}) as submitted_count,
+    (SELECT COUNT(DISTINCT hs.student_id) FROM homework_submissions hs
+      JOIN class_members cm ON cm.user_id = hs.student_id AND cm.class_id = h.class_id
+      JOIN users us ON us.id = cm.user_id
+      WHERE hs.homework_id = h.id AND COALESCE(hs.is_draft,0) = 0 AND hs.status = 'graded'
+        AND ${studentPopulationSql('cm', 'us')}) as graded_count,
     (SELECT COUNT(*) FROM class_members cm2 JOIN users u2 ON u2.id = cm2.user_id
-       WHERE cm2.class_id = h.class_id AND cm2.role = 'member' AND cm2.status = 'active'
-         AND u2.role = 'student') as member_count
+       WHERE cm2.class_id = h.class_id AND ${studentPopulationSql('cm2', 'u2')}) as member_count
     ${mySubSelect}
     FROM homework h JOIN users u ON h.teacher_id = u.id
     ${where} ORDER BY (h.due_date IS NULL) ASC, h.due_date DESC, h.created_at DESC LIMIT ? OFFSET ?
@@ -328,20 +331,29 @@ function getSubmissions(homeworkId) {
 
 // G6: 제출률 통계 — 클래스 전체 학생 수 대비 제출 수
 function getSubmissionStats(homeworkId, classId) {
+  // ── [P1-B 재작업 / 감리 B-3] 2026-08-06 ────────────────────────────────────
+  //   같은 함수 안에서 **분모만 SSOT 로 바꾸고 분자는 필터 0개**로 남겨,
+  //   분자 ⊄ 분모 가 되어 100% 초과가 가능했다. 감리 재현(격리 DB 에 "명단 밖 제출"
+  //   1건 주입): 히어로 칩 `제출 2/7 · 28.6%` 인데 바로 아래 표는 `제출 2 / 미제출 6`
+  //   (합계 8) — 분자 2 중 1명이 분모 7 에 없었다.
+  //   현행 정본에는 그런 행이 없어 잠복 상태였을 뿐, 전학·역할 변경 1건이면 즉시 발현한다.
+  //   분자·분모를 같은 모집단으로 맞춘다(= 화면의 "제출/미제출" 표와 동일 집합).
   const submitted_count = db.prepare(`
-    SELECT COUNT(*) AS c
-      FROM homework_submissions
-     WHERE homework_id = ? AND COALESCE(is_draft, 0) = 0
-  `).get(homeworkId).c;
+    SELECT COUNT(DISTINCT hs.student_id) AS c
+      FROM homework_submissions hs
+      JOIN homework h ON h.id = hs.homework_id
+      JOIN class_members cm ON cm.user_id = hs.student_id AND cm.class_id = ?
+      JOIN users u ON u.id = cm.user_id
+     WHERE hs.homework_id = ? AND COALESCE(hs.is_draft, 0) = 0
+       AND ${studentPopulationSql('cm', 'u')}
+  `).get(classId, homeworkId).c;
 
-  // 정본 분모: cm.role='member' & cm.status='active' & u.role='student'
-  //   (owner·co_teacher·parent·removed 제외 — 전 화면 동일 학생 모집단)
+  // 정본 분모 = db/class.js 학생 모집단 SSOT (owner·co_teacher·parent·staff·removed·삭제계정 제외)
   const total_students = db.prepare(`
     SELECT COUNT(*) AS c
       FROM class_members cm
       JOIN users u ON cm.user_id = u.id
-     WHERE cm.class_id = ? AND cm.role = 'member' AND cm.status = 'active'
-       AND u.role = 'student'
+     WHERE cm.class_id = ? AND ${studentPopulationSql()}
   `).get(classId).c;
 
   const percent = total_students > 0

@@ -29,7 +29,8 @@
 
     .hw-desc { font-size: 16px; line-height: 1.8; white-space: pre-wrap; }
 
-    .stat-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 16px; }
+    /* 제출/미제출/채점완료/미채점 4칸. 좁은 화면에서는 자동으로 2줄 — 가로 스크롤 0 */
+    .stat-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 12px; margin-bottom: 16px; }
     .mini-stat { background: #f9fafb; border-radius: 8px; padding: 14px; text-align: center; }
     .mini-stat .val { font-size: 24px; font-weight: 700; color: #10b981; }
     .mini-stat .lbl { font-size: 13px; color: #6B7280; margin-top: 4px; }
@@ -133,6 +134,9 @@
     .status-graded { background: #dbeafe; border: 1px solid #bfdbfe; }
 
     table { width: 100%; border-collapse: collapse; font-size: 15px; }
+    /* 표는 자기 컨테이너 안에서만 가로 스크롤 — 페이지 본문은 절대 가로로 밀리지 않는다 */
+    .table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; max-width: 100%; }
+    .table-scroll table { min-width: 720px; }
     th { text-align: left; padding: 10px 12px; background: #f9fafb; border-bottom: 2px solid #e5e7eb; font-weight: 600; }
     td { padding: 10px 12px; border-bottom: 1px solid #f3f4f6; }
 
@@ -148,6 +152,11 @@
     .badge-submitted { background: #dcfce7; color: #16a34a; }
     .badge-graded { background: #dbeafe; color: #2563eb; }
     .badge-pending { background: #fef3c7; color: #d97706; }
+    /* 미제출 — 제출됨(초록)·채점완료(파랑)와 한눈에 구분되는 경고 톤 */
+    .badge-missing { background: #FEE2E2; color: #B91C1C; }
+    /* 학생 명단 밖 제출(전학·역할 변경) — 보여는 주되 제출률 통계에는 넣지 않는다 */
+    .badge-orphan { background: #FEF3C7; color: #B45309; margin-left: 6px; }
+    tr.row-missing td { color: #6B7280; }
 
     .grade-form { display: flex; gap: 8px; align-items: center; }
     .grade-form input { width: 64px; padding: 8px 10px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; text-align: center; }
@@ -686,10 +695,18 @@
     <div class="card" id="teacherSubmissionsCard" style="display:none;">
       <h3><i class="fas fa-users"></i> 제출 현황</h3>
       <div class="stat-row" id="submissionStats"></div>
-      <table>
-        <thead><tr><th>학생</th><th>제출 내용</th><th>제출일</th><th>상태</th><th>점수</th><th>채점</th><th>피드백</th></tr></thead>
-        <tbody id="submissionTable"></tbody>
-      </table>
+      <div id="orphanSubNote" style="display:none;margin-bottom:12px;padding:10px 14px;background:#FFFBEB;border-left:3px solid #F59E0B;border-radius:8px;font-size:14px;line-height:1.6;color:#B45309;"></div>
+      <!-- 7열 표는 좁은 화면에서 375px 를 넘는다. 페이지가 아니라 **표 자신만** 가로로
+           스크롤되게 감싼다(가로 스크롤 0 규칙). -->
+      <div class="table-scroll">
+        <table>
+          <!-- [감리 B-5] 헤더 7열인데 행은 6열이라 오른쪽 "피드백" 열이 늘 비어 있었다.
+               (채점 버튼과 피드백 버튼이 같은 td 안에 있다.) 미제출자 병합으로 1행→8행이
+               되며 빈 열이 8배로 도드라져 이번에 정리한다. -->
+          <thead><tr><th>학생</th><th>제출 내용</th><th>제출일</th><th>상태</th><th>점수</th><th>채점 · 피드백</th></tr></thead>
+          <tbody id="submissionTable"></tbody>
+        </table>
+      </div>
     </div>
 
     <!-- 학생: 나의 피드백 영역은 별도 레이어 팝업(stuFeedbackOverlay)으로 분리됨 -->
@@ -1062,6 +1079,9 @@
     if (!classId || !homeworkId) location.href = '/class/index.html';
 
     let hwData = null, myRole = null, currentUser = null;
+    // 클래스 학생 명단(순수 학생) — 제출 현황표에 **미제출자를 함께 세우기** 위한 모집단.
+    //   원천은 GET /api/class/:id 의 members (BE 학생 모집단 SSOT: db/class.js).
+    let _classStudents = [];
     let uploadedFileUrl = null;
     let mySubmissionId = null;
 
@@ -1524,6 +1544,9 @@
       if (classData.success) {
         myRole = classData.myRole;
         _className = classData.class && classData.class.name ? classData.class.name : null;
+        // 순수 학생만 (개설자·공동교사·학부모·교직원 제외). BE 가 이미 삭제 계정을 걸러 보낸다.
+        _classStudents = (classData.members || [])
+          .filter(m => m.role === 'member' && m.user_role === 'student');
       }
 
       document.getElementById('breadcrumb').innerHTML =
@@ -1598,18 +1621,74 @@
       if (myRole === 'owner') {
         // 교사 뷰: 제출 현황 — 데이터는 항상 채우고, 표시는 applyViewMode()가 분기
         const subs = data.submissions || [];
-        window._allSubmissions = subs;  // 제출 내용 상세 모달용 캐시
-        const graded = subs.filter(s => s.score !== null).length;
+        // ── [P1-B / W1-T1-6] 미제출자 병합 (2026-08-06) ─────────────────────────
+        //   제출 현황표가 data.submissions 만 그려서, 8명 중 1명 제출인 과제는
+        //   **제출자 1행**만 보였다. 나머지 7명은 화면 어디에도 없어 교사가
+        //   "누가 안 냈는지"를 알 방법이 자체가 없었다.
+        //   (상세 드로어에는 `if (!sub.submitted_at) '미제출'` 분기가 이미 있어
+        //    설계 의도는 처음부터 명단 병합이었다.)
+        //   → 클래스 학생 명단 ⟕ 제출 (LEFT JOIN) 결과를 이름순으로 렌더한다.
+        const _subByStudent = new Map(subs.map(s => [s.student_id, s]));
+        const _rosterIds = new Set(_classStudents.map(m => m.user_id));
+        const _rosterRows = _classStudents.map(m => _subByStudent.get(m.user_id) || {
+          id: null, _missing: true, student_id: m.user_id,
+          display_name: m.display_name, username: m.username,
+          content: null, file_path: null, attachments: [],
+          submitted_at: null, score: null, status: null
+        });
+        // 명단 밖에서 들어온 제출(전학·역할 변경 등)은 숨기지 않고 뒤에 붙인다 — 과잉 필터 금지.
+        //   ★ 단, **집계에는 넣지 않는다**(감리 B-3). 히어로 칩의 제출률 분모는
+        //     학생 모집단(7)인데 여기서 명단 밖 1건을 함께 세면
+        //     칩 `제출 1/7` vs 표 `제출 2 / 미제출 6`(합 8) 로 같은 화면이 어긋난다.
+        //     보여는 주되 세지는 않고, 왜 표 밖인지 라벨로 밝힌다.
+        const _orphanSubs = subs.filter(s => !_rosterIds.has(s.student_id))
+          .map(s => Object.assign({}, s, { _orphan: true }));
+        const merged = _rosterRows.concat(_orphanSubs);
+        window._allSubmissions = merged;  // 제출 내용 상세 모달용 캐시(미제출자 포함)
+
+        // 집계 모집단 = 학생 명단(_rosterRows) 만. 칩 분모와 항상 일치한다.
+        const submittedRows = _rosterRows.filter(s => !!s.submitted_at);
+        const missingRows = _rosterRows.filter(s => !s.submitted_at);
+        const graded = _rosterRows.filter(s => s.score !== null && s.score !== undefined).length;
+        window._subStats = {
+          students: _rosterRows.length,
+          submitted: submittedRows.length,
+          missing: missingRows.length,
+          graded,
+          ungraded: submittedRows.length - graded,
+          orphan: _orphanSubs.length,
+        };
         document.getElementById('submissionStats').innerHTML = `
-          <div class="mini-stat"><div class="val">${subs.length}</div><div class="lbl">제출</div></div>
+          <div class="mini-stat"><div class="val">${submittedRows.length}</div><div class="lbl">제출</div></div>
+          <div class="mini-stat"><div class="val" style="${missingRows.length ? 'color:#DC2626;' : ''}">${missingRows.length}</div><div class="lbl">미제출</div></div>
           <div class="mini-stat"><div class="val">${graded}</div><div class="lbl">채점 완료</div></div>
-          <div class="mini-stat"><div class="val">${subs.length - graded}</div><div class="lbl">미채점</div></div>
+          <div class="mini-stat"><div class="val">${submittedRows.length - graded}</div><div class="lbl">미채점</div></div>
         `;
-        document.getElementById('submissionTable').innerHTML = subs.length === 0
-          ? '<tr><td colspan="6" style="text-align:center;color:#9ca3af;padding:24px 0;">아직 제출한 학생이 없어요. 제출이 들어오면 채점할 수 있어요.</td></tr>'
-          : subs.map(s => `
-            <tr style="cursor:pointer;" title="자세히 채점하기" onclick="if(!event.target.closest('.no-row-open'))openSubmissionDetail(${s.id})" onmouseenter="this.style.background='#F9FAFB'" onmouseleave="this.style.background=''">
-              <td>${escHtml(s.display_name)}</td>
+        // 명단 밖 제출이 있으면 그 사실을 명시 (합계가 안 맞아 보이는 이유를 화면에서 설명)
+        const _orphanNote = document.getElementById('orphanSubNote');
+        if (_orphanNote) {
+          _orphanNote.innerHTML = _orphanSubs.length
+            ? `<i class="fas fa-circle-info"></i> 학생 명단에 없는 제출이 ${_orphanSubs.length}건 있어요(전학·역할 변경 등). `
+              + `표 맨 아래에 따로 표시했고, 위 제출률 통계에는 넣지 않았어요.`
+            : '';
+          _orphanNote.style.display = _orphanSubs.length ? 'block' : 'none';
+        }
+        document.getElementById('submissionTable').innerHTML = merged.length === 0
+          ? '<tr><td colspan="6" style="text-align:center;color:#9ca3af;padding:24px 0;">이 클래스에 학생이 없어요. 학생이 들어오면 제출 현황이 표시돼요.</td></tr>'
+          : merged.map((s, i) => s._missing ? `
+            <tr class="row-missing" style="cursor:pointer;background:#FEF7F7;" title="아직 제출하지 않았어요" onclick="if(!event.target.closest('.no-row-open'))openSubmissionAt(${i})" onmouseenter="this.style.background='#FDECEC'" onmouseleave="this.style.background='#FEF7F7'">
+              <td style="color:#B91C1C;font-weight:600;">${escHtml(s.display_name)}</td>
+              <td><span style="font-size:15px;color:#9CA3AF;">제출한 내용이 없어요</span></td>
+              <td style="color:#9CA3AF;">-</td>
+              <td><span class="badge badge-missing">미제출</span></td>
+              <td style="color:#9CA3AF;">-</td>
+              <td class="no-row-open" onclick="event.stopPropagation()">
+                <span style="font-size:14px;color:#9CA3AF;">채점 대기</span>
+              </td>
+            </tr>
+          ` : `
+            <tr style="cursor:pointer;" title="자세히 채점하기" onclick="if(!event.target.closest('.no-row-open'))openSubmissionAt(${i})" onmouseenter="this.style.background='#F9FAFB'" onmouseleave="this.style.background=''">
+              <td>${escHtml(s.display_name)}${s._orphan ? ' <span class="badge badge-orphan" title="현재 학생 명단에 없는 제출이에요">명단 밖</span>' : ''}</td>
               <td>
                 <div style="max-width:280px;font-size:14px;color:#374151;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-decoration:underline;text-decoration-color:#cbd5e1;text-underline-offset:2px;">
                   ${escHtml((s.content || '내용 없음').substring(0, 40))}${(s.content || '').length > 40 ? '...' : ''}
@@ -1623,13 +1702,13 @@
                 <div class="grade-form">
                   <input type="number" id="grade_${s.id}" value="${s.score || ''}" min="0" max="${hwData.max_score}" placeholder="점수" onclick="event.stopPropagation()">
                   <button class="btn btn-blue btn-sm" onclick="event.stopPropagation();gradeSubmission(${s.id})">채점</button>
-                  <button class="btn-feedback" onclick="event.stopPropagation();openSubmissionDetail(${s.id})" title="자세히 채점·피드백"><i class="fas fa-comment-dots"></i></button>
+                  <button class="btn-feedback" onclick="event.stopPropagation();openSubmissionAt(${i})" title="자세히 채점·피드백"><i class="fas fa-comment-dots"></i></button>
                 </div>
               </td>
             </tr>
           `).join('');
-        // 댓글 스레드 데이터 캐싱 (교사는 모든 댓글) — 표시 여부는 applyViewMode()가 결정
-        _cmtCachedSubs = subs;
+        // 댓글 스레드 데이터 캐싱 (교사는 모든 댓글) — 실제 제출만 (미제출자는 스레드 없음)
+        _cmtCachedSubs = submittedRows;
         _cmtViewerIsOwner = true;
       } else {
         // 학생 뷰: 제출
@@ -1771,7 +1850,7 @@
                   ${fbHtml}
                   <div style="font-size:12px;color:#6B7280;margin-top:4px;">제출: ${data.submission.submitted_at ? data.submission.submitted_at.slice(0,16) : ''}</div>
                 </div>
-                <div style="display:flex;gap:10px;align-items:center;flex-shrink:0;flex-wrap:wrap;">
+                <div style="display:flex;gap:10px;align-items:center;flex-shrink:1;flex-wrap:wrap;min-width:0;max-width:100%;">
                   <button id="openFeedbackBtn" type="button"
                           onclick="openStudentFeedbackModal()"
                           style="position:relative;background:#3B82F6;color:#fff;border:none;border-radius:10px;padding:10px 18px;font-size:16px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:8px;font-family:inherit;box-shadow:0 2px 6px rgba(59,130,246,0.28);">
@@ -2183,6 +2262,20 @@
       return { late: true, days: diff };
     }
 
+    // 본 모달 열기 — 표 인덱스로 직접 (미제출자 행은 제출 id 가 없어 인덱스만 유효)
+    function openSubmissionAt(idx) {
+      const subs = window._allSubmissions || [];
+      if (!subs[idx]) { showToast('학생 정보를 찾지 못했어요.', 'error'); return; }
+      sdCurrentIndex = idx;
+      currentFeedbackSubId = subs[idx].id || null;
+      renderSubmissionDetail();
+      document.getElementById('submissionDetailModal').classList.add('active');
+      setTimeout(() => {
+        const input = document.getElementById('sdScoreInput');
+        if (input && !input.disabled) { input.focus(); input.select(); }
+      }, 80);
+    }
+
     // 본 모달 열기 — 인덱스 우선, subId 보조
     function openSubmissionDetail(subId) {
       const subs = window._allSubmissions || [];
@@ -2212,7 +2305,7 @@
       const next = sdCurrentIndex + direction;
       if (next < 0 || next >= subs.length) return;
       sdCurrentIndex = next;
-      currentFeedbackSubId = subs[next].id;
+      currentFeedbackSubId = subs[next].id || null;   // 미제출자 행은 제출 id 가 없다
       // 좌패널 페이드
       const left = document.getElementById('sdLeft');
       left.classList.add('fading');
@@ -2283,7 +2376,9 @@
         else if (diff === 0) dueText = ' · 오늘 마감';
         else dueText = ` · 마감 ${Math.abs(diff)}일 경과`;
       }
-      document.getElementById('sdStuSub').textContent = `${subAt} 제출${dueText}`;
+      document.getElementById('sdStuSub').textContent = sub.submitted_at
+        ? `${subAt} 제출${dueText}`
+        : `아직 제출하지 않았어요${dueText}`;
 
       // 진행 바 + 순회 버튼
       const total = subs.length;
@@ -2293,7 +2388,10 @@
 
       // ---- 좌측: 본문 ----
       const contentEl = document.getElementById('sdContent');
-      if (sub.content && sub.content.trim()) {
+      if (!sub.submitted_at) {
+        contentEl.innerHTML = '<div class="sd-empty-card"><i class="fas fa-inbox"></i>아직 제출하지 않았어요.</div>';
+        contentEl.style.color = '#6B7280';
+      } else if (sub.content && sub.content.trim()) {
         // 학생 제출 HTML은 sanitize 후 HTML 렌더링 (XSS 방어)
         contentEl.innerHTML = sanitizeForDisplay(sub.content);
         contentEl.style.color = '#1A1A2E';
@@ -2336,11 +2434,14 @@
       btnNext.disabled = !sub.submitted_at;
 
       // ---- 우측: 채점 가이드 ----
-      const ungraded = total - graded;
+      // 가이드 수치는 표 상단 요약(_subStats)과 같은 모집단을 쓴다 — 한 화면 두 숫자 금지
+      const st = window._subStats || null;
+      const submittedTotal = st ? st.submitted : subs.filter(s => !!s.submitted_at).length;
+      const ungraded = st ? st.ungraded : (submittedTotal - graded);
       const guide = [
         `만점 ${max}점${avg !== null ? ` · 학급 평균 ${avg}점` : ''}`,
         hwData?.due_date ? `마감 ${hwData.due_date}${dueText}` : '마감 일정 없음',
-        `미채점 ${ungraded}명 / ${total}명`,
+        `미채점 ${ungraded}명 / 제출 ${submittedTotal}명 (학생 ${st ? st.students : total}명)`,
       ];
       // 채점 가이드는 폐기 (인라인 — 채점 박스 옆에 학급평균 이미 표시)
       const guideEl = document.getElementById('sdGuideList');
@@ -2354,6 +2455,12 @@
       const subs = window._allSubmissions || [];
       const sub = subs[sdCurrentIndex];
       if (!sub) return;
+      // 미제출자에게는 제출물이 없으므로 피드백 스레드도 없다 (404 호출 방지)
+      if (!sub.id) {
+        const c0 = document.getElementById('sdFeedbackCount');
+        if (c0) c0.style.display = 'none';
+        return;
+      }
       try {
         const res = await fetch(`/api/homework/${classId}/${homeworkId}/submissions/${sub.id}/feedback`);
         const data = await res.json();
@@ -2474,6 +2581,7 @@
       const subs = window._allSubmissions || [];
       const sub = subs[sdCurrentIndex];
       if (!sub) return;
+      if (!sub.id) { showToast('아직 제출하지 않은 학생이에요. 채점할 제출물이 없어요.', 'info'); return; }
       const inputEl = document.getElementById('sdScoreInput');
       const raw = (inputEl.value || '').trim();
       if (raw === '') {
@@ -2546,6 +2654,11 @@
       const subs = window._allSubmissions || [];
       const sub = subs[sdCurrentIndex];
       if (!sub) return;
+      if (!sub.id) {
+        document.getElementById('sdFeedbackBody').innerHTML =
+          '<div class="fb-empty">아직 제출하지 않은 학생이에요. 제출이 들어오면 1:1 피드백을 남길 수 있어요.</div>';
+        return;
+      }
       try {
         const res = await fetch(`/api/homework/${classId}/${homeworkId}/submissions/${sub.id}/feedback`);
         const data = await res.json();
@@ -2574,6 +2687,7 @@
       const subs = window._allSubmissions || [];
       const sub = subs[sdCurrentIndex];
       if (!sub) return;
+      if (!sub.id) { showToast('아직 제출하지 않은 학생이에요. 제출이 들어오면 피드백을 남길 수 있어요.', 'info'); return; }
       const sub2 = document.getElementById('sdFbModalSub');
       if (sub2) sub2.textContent = (sub.display_name || '학생') + '님과의 1:1 피드백';
       document.getElementById('sdFeedbackOverlay').style.display = 'flex';
@@ -2587,7 +2701,7 @@
     async function loadSdFbModal() {
       const subs = window._allSubmissions || [];
       const sub = subs[sdCurrentIndex];
-      if (!sub) return;
+      if (!sub || !sub.id) return;
       const body = document.getElementById('sdFbModalBody');
       body.innerHTML = '<div style="color:#9CA3AF;text-align:center;padding:20px;">불러오는 중...</div>';
       try {
@@ -2624,7 +2738,7 @@
     async function sendSdFbModal() {
       const subs = window._allSubmissions || [];
       const sub = subs[sdCurrentIndex];
-      if (!sub) return;
+      if (!sub || !sub.id) return;
       const input = document.getElementById('sdFbModalInput');
       const content = input.value.trim();
       if (!content) return;

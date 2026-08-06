@@ -70,15 +70,12 @@ router.get('/:classId', requireAuth, requireClassMember, (req, res) => {
 router.get('/:classId/completion-rate', requireAuth, requireClassMember, (req, res) => {
   try {
     // 교사/개설자일 경우: 전체 학생 평균 이수율
+    //   [P1-B / W1-T1-4] 분모 손계산 사본을 제거했다. 여기서 getClassMembers 를
+    //   role==='member' 로만 걸러 쓰던 탓에 학부모·교직원·삭제 계정이 분모에 들어가
+    //   같은 페이지의 수업 탭 이수율과 값이 갈렸다(10 vs 8 vs 7).
+    //   모집단·평균 산식은 db/lesson.js getClassAverageCompletionRate 한 곳뿐이다.
     if (req.myRole === 'owner' || req.user.role === 'teacher') {
-      const classDb = require('../db/class');
-      const members = classDb.getClassMembers(req.classId).filter(m => m.role === 'member');
-      if (members.length === 0) return res.json({ success: true, rate: 0 });
-      let totalRate = 0;
-      members.forEach(m => {
-        totalRate += lessonDb.getClassCompletionStats(req.classId, m.user_id);
-      });
-      return res.json({ success: true, rate: Math.round(totalRate / members.length) });
+      return res.json({ success: true, rate: lessonDb.getClassAverageCompletionRate(req.classId) });
     }
     // 학생: 본인 이수율
     const rate = lessonDb.getClassCompletionStats(req.classId, req.user.id);
@@ -357,7 +354,8 @@ router.get('/:classId/:lessonId/self-check', requireAuth, requireClassMember, (r
     if (isOwnerOrAdmin) {
       const responses = lessonDb.getSelfChecksByLesson(lessonId);
       const nonRespondents = lessonDb.getClassNonRespondents(classId, lessonId);
-      const totalMembers = classDb.getClassMembers(classId).filter(m => m.role === 'member').length;
+      // 셀프체크 응답률 분모도 학생 모집단 SSOT (미응답자 명단 getClassNonRespondents 와 동일 모집단)
+      const totalMembers = classDb.getClassStudentCount(classId);
       return res.json({
         success: true,
         responses,

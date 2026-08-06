@@ -7,6 +7,7 @@ const emotionDb = require('../db/emotion-extended');
 const classDb = require('../db/class');
 const { logLearningActivity } = require('../db/learning-log-helper');
 const { extractLogContext } = require('../lib/log-context');
+const kst = require('../lib/kst');
 const buildNavigation = require('../lib/xapi/builders/navigation');
 const xapiSpool = require('../lib/xapi/spool');
 const XLSX = require('xlsx');
@@ -120,10 +121,11 @@ router.get('/:classId/status', requireAuth, requireMember, (req, res) => {
 // GET /api/attendance/:classId/ranking - 출석 랭킹
 router.get('/:classId/ranking', requireAuth, requireMember, (req, res) => {
   try {
+    // rank 는 getRanking 이 계산한 값(동점 공동순위)을 그대로 쓴다.
+    //   예전에는 여기서 idx+1 로 덮어써서 같은 출석일수인데 순위가 갈렸다.
     const ranking = attendanceDb.getRanking(req.classId);
-    const enriched = ranking.map((r, idx) => ({
+    const enriched = ranking.map(r => ({
       ...r,
-      rank: idx + 1,
       streak: attendanceDb.getStreak(req.classId, r.user_id)
     }));
     res.json({ success: true, ranking: enriched });
@@ -155,7 +157,7 @@ router.get('/:classId/table', requireAuth, requireMember, (req, res) => {
     }
     const { startDate, endDate, includeWeekends } = req.query;
     const start = startDate || getMonthStart();
-    const end = endDate || new Date().toISOString().slice(0, 10);
+    const end = endDate || kst.kstToday();
     const table = attendanceDb.getAttendanceTable(req.classId, start, end, includeWeekends === 'true');
     res.json({ success: true, ...table });
   } catch (err) {
@@ -163,13 +165,65 @@ router.get('/:classId/table', requireAuth, requireMember, (req, res) => {
   }
 });
 
-// GET /api/attendance/:classId/today - 오늘 출석 목록 (교사용)
+// ─── 학생 피드 공개 필드 화이트리스트 ────────────────────────────────────────
+//  attendance.html loadFeed() 가 실제로 렌더하는 것만 남긴다:
+//    아바타 이니셜·이름(display_name) / 한마디(comment) / 이모지(emotion) / 시각(checked_at)
+//  ⚠ emotion_reason(감정 사유 자유서술)은 **화면에 없다**. 즉 공유 의도 밖이며
+//    "수학 시험이 걱정돼서 마음이 무거워요" 같은 민감 서술이 학생 간에 오갔다(W2-T5-1).
+//  ⚠ 화이트리스트 방식 고정 — SELECT a.* 에 컬럼이 추가돼도 자동으로 새지 않는다.
+function toPublicFeedRecord(r) {
+  return {
+    user_id: r.user_id,
+    display_name: r.display_name,
+    status: r.status,
+    emotion: r.emotion || null,
+    comment: r.comment || null,
+    checked_at: r.checked_at,
+    attendance_date: r.attendance_date,
+  };
+}
+
+// GET /api/attendance/:classId/today - 오늘 출석 현황
+//
+//  역할별 스코프 (W2-T5-1 수정):
+//    · 개설자/admin  → 전체 행(감정 사유 포함). 감정 리포트·관심학생 기능 유지.
+//    · 그 외 멤버    → is_public=1 일 때만 학생 명단의 공개 4필드.
+//                      is_public=0 이면 records 는 비우고 **카운트만** 준다.
+//  카운트를 항상 주는 이유: 학생 화면 '클래스 공동 목표'(loadGoal)가 필요로 하는 건
+//  인원수뿐이라, 명단을 막아도 기능이 죽지 않는다(과잉 차단 방지).
 router.get('/:classId/today', requireAuth, requireMember, (req, res) => {
   try {
-    const today = new Date().toISOString().slice(0, 10);
-    const records = attendanceDb.getAttendanceByDate(req.classId, today);
-    res.json({ success: true, records, date: today });
+    const today = kst.kstToday();
+    const all = attendanceDb.getAttendanceByDate(req.classId, today);
+
+    // 집계는 언제나 순수 학생 기준 (SSOT) — 학부모·교직원이 출석률에 섞이면 안 된다.
+    const studentIds = new Set(classDb.getClassStudentIds(req.classId));
+    const studentRows = all.filter(r => studentIds.has(r.user_id));
+    const presentCount = studentRows.filter(
+      r => r.status === 'present' || r.status === 'late'
+    ).length;
+    const studentTotal = classDb.getClassStudentCount(req.classId);
+
+    const myRole = classDb.getMemberRole(req.classId, req.user.id);
+    const isOwner = myRole === 'owner' || req.user.role === 'admin';
+    const settings = attendanceDb.getSettings(req.classId);
+
+    const records = isOwner
+      ? all                                                   // 교사: 전체(사유 포함)
+      : (settings && settings.is_public
+        ? studentRows.map(toPublicFeedRecord)                 // 학생: 공개 4필드
+        : []);                                                // 공개 OFF: 명단 없음
+
+    res.json({
+      success: true,
+      records,
+      date: today,
+      present_count: presentCount,
+      student_total: studentTotal,
+      is_public: !!(settings && settings.is_public),
+    });
   } catch (err) {
+    console.error('[ATTENDANCE] today error:', err);
     res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
   }
 });
@@ -199,8 +253,7 @@ router.put('/:classId/settings', requireAuth, requireMember, (req, res) => {
 });
 
 function getMonthStart() {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`;
+  return kst.kstMonthStart();
 }
 
 // =============================================================
@@ -210,7 +263,7 @@ function getMonthStart() {
 // GET /api/attendance/:classId/emotion/today - 오늘 본인 감정 체크 상태
 router.get('/:classId/emotion/today', requireAuth, requireMember, (req, res) => {
   try {
-    const today = new Date().toISOString().slice(0, 10);
+    const today = kst.kstToday();
     const row = db.prepare(`
       SELECT id, emotion, emotion_reason, comment, attendance_date, checked_at
       FROM attendance
@@ -241,8 +294,8 @@ router.post('/:classId/emotion', requireAuth, requireMember, (req, res) => {
     if (!emotionKey) {
       return res.status(400).json({ success: false, message: '유효한 감정 값(1~5)을 입력해 주세요.' });
     }
-    const targetDate = date || new Date().toISOString().slice(0, 10);
-    const today = new Date().toISOString().slice(0, 10);
+    const targetDate = date || kst.kstToday();
+    const today = kst.kstToday();
     // 미래 날짜 차단
     if (targetDate > today) {
       return res.status(400).json({ success: false, message: '미래 날짜는 감정을 기록할 수 없습니다.' });
@@ -293,9 +346,9 @@ router.post('/:classId/emotion', requireAuth, requireMember, (req, res) => {
 // GET /api/attendance/:classId/emotion/calendar?from&to - 본인 월간 감정 캘린더
 router.get('/:classId/emotion/calendar', requireAuth, requireMember, (req, res) => {
   try {
-    const today = new Date();
-    const defaultFrom = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-01`;
-    const defaultTo = today.toISOString().slice(0, 10);
+    const month = kst.kstMonthRange();
+    const defaultFrom = month.start;
+    const defaultTo = kst.kstToday();
     const from = req.query.from || defaultFrom;
     const to = req.query.to || defaultTo;
     const timeline = emotionDb.getEmotionTimeline(req.classId, req.user.id, {
@@ -337,31 +390,17 @@ router.post('/:classId/emotion/reflections', requireAuth, requireMember, (req, r
     let { period, start_date, end_date, question, content, answer } = req.body || {};
     const reflectionType = period === 'monthly' ? 'monthly' : 'weekly';
 
-    // KST(UTC+9) 기준 자동 보정 함수
+    // KST 기준 자동 보정 — 계산은 lib/kst SSOT 에 위임(사본 유지 금지).
     function autoStartEndKST(p) {
-      const now = new Date(Date.now() + 9 * 3600 * 1000); // UTC → KST 로 9시간 시프트
-      const today = now.toISOString().slice(0, 10);
       if (p === 'weekly') {
-        const dow = now.getUTCDay(); // 시프트된 시간 기준 요일 (0=일, 1=월, ...)
-        const monday = new Date(now);
-        monday.setUTCDate(now.getUTCDate() - (dow === 0 ? 6 : dow - 1));
-        const sunday = new Date(monday);
-        sunday.setUTCDate(monday.getUTCDate() + 6);
-        return {
-          start_date: monday.toISOString().slice(0, 10),
-          end_date: sunday.toISOString().slice(0, 10)
-        };
+        const w = kst.kstWeekRange();
+        return { start_date: w.start, end_date: w.end };
       }
       if (p === 'monthly') {
-        const y = now.getUTCFullYear();
-        const m = now.getUTCMonth();
-        const first = new Date(Date.UTC(y, m, 1));
-        const last = new Date(Date.UTC(y, m + 1, 0)); // 다음달 0일 = 이번 달 마지막 날
-        return {
-          start_date: first.toISOString().slice(0, 10),
-          end_date: last.toISOString().slice(0, 10)
-        };
+        const m = kst.kstMonthRange();
+        return { start_date: m.start, end_date: m.end };
       }
+      const today = kst.kstToday();
       return { start_date: today, end_date: today };
     }
 
@@ -378,11 +417,7 @@ router.post('/:classId/emotion/reflections', requireAuth, requireMember, (req, r
     }
 
     // end_date 미지정 시 자동 계산 (weekly=+6, monthly=+29) — 레거시 호환
-    const computeEnd = (s) => {
-      const d = new Date(s);
-      d.setDate(d.getDate() + (reflectionType === 'monthly' ? 29 : 6));
-      return d.toISOString().slice(0, 10);
-    };
+    const computeEnd = (s) => kst.kstAddDays(s, reflectionType === 'monthly' ? 29 : 6);
     const periodEnd = end_date || computeEnd(start_date);
     const answerText = content || answer || '';
     if (!answerText || !answerText.trim()) {
@@ -628,7 +663,7 @@ router.patch('/:classId/cell', requireAuth, requireMember, requireOwner, (req, r
 // GET /api/attendance/:classId/export?from&to&format=xlsx|csv - 출석부 엑셀/CSV 다운로드 (교사)
 router.get('/:classId/export', requireAuth, requireMember, requireOwner, (req, res) => {
   try {
-    const today = new Date().toISOString().slice(0, 10);
+    const today = kst.kstToday();
     const from = req.query.from || getMonthStart();
     const to = req.query.to || today;
     const format = (req.query.format || 'xlsx').toLowerCase();
@@ -638,16 +673,11 @@ router.get('/:classId/export', requireAuth, requireMember, requireOwner, (req, r
     const classInfo = db.prepare('SELECT name FROM classes WHERE id = ?').get(req.classId);
     const className = (classInfo && classInfo.name) ? classInfo.name : `class_${req.classId}`;
 
-    // 학생만 (owner/teacher 제외)
-    const memberRoles = db.prepare(
-      "SELECT user_id, role FROM class_members WHERE class_id = ? AND status = 'active'"
-    ).all(req.classId);
-    const roleMap = {};
-    memberRoles.forEach(m => { roleMap[m.user_id] = m.role; });
-    const students = (table.members || []).filter(m => {
-      const r = roleMap[m.user_id];
-      return r !== 'owner' && r !== 'teacher';
-    });
+    // 명단은 getAttendanceTable 이 이미 학생 모집단(SSOT)으로 좁혀서 준다.
+    //   예전에는 여기서 class_members.role 로 다시 걸렀는데, 그 값이 owner/member
+    //   두 종뿐이라 학부모·교직원이 통과해 CSV 에 `4,이학부모,-,-,-,0,0,-` 로 찍혔다.
+    //   → 판정을 여기서 다시 하지 않는다(사본 금지). 화면 매트릭스와 CSV 가 항상 같은 명단.
+    const students = table.members || [];
 
     const dates = table.dates || [];
     const records = table.records || {};

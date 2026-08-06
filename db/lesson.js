@@ -1,4 +1,7 @@
 const db = require('./index');
+// 학생 모집단 SSOT (db/class.js). 이수율 분모·이수 명단은 전부 이것을 경유한다.
+//   여기서 SQL 을 따로 적으면 test/class-student-population.test.js INV-P6 이 붉어진다.
+const { studentPopulationSql, getClassStudents, getClassStudentIds, getClassStudentCount } = require('./class');
 
 // ============================================================
 // 콘텐츠 공개정책 1단계 — 수업↔그림자 contents 동기화 헬퍼
@@ -293,19 +296,26 @@ function getClassCompletionStats(classId, userId) {
   return Math.round((completedResult.cnt / totalContents) * 100);
 }
 
+// 클래스 평균 이수율 (교사·개설자 홈 탭 활동 도넛)
+// ── [P1-B / W1-T1-4] 2026-08-06 ────────────────────────────────────────────
+//   routes/lesson.js 가 getClassMembers().filter(m => m.role === 'member') 로
+//   손계산하고 있었다 → 학부모·교직원·삭제 계정이 분모에 들어가 라이브 class 1 에서
+//   분모 10(도넛) vs 8(수업 탭) vs 7(정답) 세 벌이 한 화면에 공존했다.
+//   평균의 모집단은 db/class.js 학생 SSOT 하나뿐이다.
+// @returns {number} 0~100 정수. 학생이 없으면 0.
+function getClassAverageCompletionRate(classId) {
+  const ids = getClassStudentIds(classId);
+  if (ids.length === 0) return 0;
+  const sum = ids.reduce((acc, uid) => acc + getClassCompletionStats(classId, uid), 0);
+  return Math.round(sum / ids.length);
+}
+
 // 수업 목록에 각 수업별 이수율 포함하여 반환
 function getLessonsByClassWithProgress(classId, userId, { status, page = 1, limit = 20, std_ids } = {}) {
   const result = getLessonsByClass(classId, { status, page, limit, std_ids });
   result.lessons.forEach(l => { try { l.std_ids = getLessonStdIds(l.id); } catch { l.std_ids = []; } });
-  // 클래스 순수 학생 수 (정본 분모: cm.role='member' & cm.status='active' & u.role='student')
-  //   owner·co_teacher·parent·removed 제외 — 전 화면 동일 모집단. 모든 lesson에 공통값.
-  const memberCount = db.prepare(`
-    SELECT COUNT(*) as cnt
-      FROM class_members cm
-      JOIN users u ON u.id = cm.user_id
-     WHERE cm.class_id = ? AND cm.role = 'member' AND cm.status = 'active'
-       AND u.role = 'student'
-  `).get(classId).cnt;
+  // 클래스 학생 수 — 정본 분모는 db/class.js SSOT 하나뿐 (모든 lesson 공통값).
+  const memberCount = getClassStudentCount(classId);
   result.lessons = result.lessons.map(lesson => {
     const totalContents = db.prepare('SELECT COUNT(*) as cnt FROM lesson_contents WHERE lesson_id = ?').get(lesson.id).cnt;
     let completedContents = 0;
@@ -322,23 +332,21 @@ function getLessonsByClassWithProgress(classId, userId, { status, page = 1, limi
       JOIN contents c ON lc.content_id = c.id
       WHERE lc.lesson_id = ?
     `).all(lesson.id).map(r => r.content_type);
-    // 수업 콘텐츠를 모두 완료한 학생 수 (member 역할 한정)
-    // 콘텐츠가 0개면 0명. 콘텐츠가 있으면 학생별 완료 콘텐츠 수가 lesson의 총 콘텐츠 수 이상인 학생 카운트
+    // 이수 인원 = 수업의 **모든** 콘텐츠를 완료한 학생 수 (학생 모집단 SSOT 한정).
+    //   콘텐츠가 0개면 0명.
     let completedStudents = 0;
     if (totalContents > 0 && memberCount > 0) {
       const row = db.prepare(`
         SELECT COUNT(*) as cnt FROM (
           SELECT cp.user_id
             FROM content_progress cp
-            JOIN class_members cm ON cm.user_id = cp.user_id
-                                  AND cm.class_id = ?
-                                  AND cm.role = 'member'
-                                  AND cm.status = 'active'
-            JOIN users cu ON cu.id = cm.user_id AND cu.role = 'student'
+            JOIN class_members cm ON cm.user_id = cp.user_id AND cm.class_id = ?
+            JOIN users cu ON cu.id = cm.user_id
             JOIN lesson_contents lc ON lc.lesson_id = cp.lesson_id
                                     AND lc.content_id = cp.content_id
            WHERE cp.lesson_id = ?
              AND cp.completed = 1
+             AND ${studentPopulationSql('cm', 'cu')}
            GROUP BY cp.user_id
           HAVING COUNT(DISTINCT cp.content_id) >= ?
         )
@@ -394,15 +402,8 @@ function getLessonBoardList(classId, { status, search, sort = 'latest', page = 1
     ${where} ${orderBy} LIMIT ? OFFSET ?
   `).all(...params, limit, (page - 1) * limit);
 
-  // 클래스 순수 학생 수 (정본 분모: cm.role='member' & cm.status='active' & u.role='student')
-  //   owner·co_teacher·parent·removed 제외 — 전 화면 동일 모집단.
-  const memberCount = db.prepare(`
-    SELECT COUNT(*) as cnt
-      FROM class_members cm
-      JOIN users u ON u.id = cm.user_id
-     WHERE cm.class_id = ? AND cm.role = 'member' AND cm.status = 'active'
-       AND u.role = 'student'
-  `).get(classId).cnt;
+  // 클래스 학생 수 — 정본 분모는 db/class.js SSOT 하나뿐.
+  const memberCount = getClassStudentCount(classId);
 
   // 각 수업에 추가 정보 부여
   const enriched = lessons.map(lesson => {
@@ -415,20 +416,33 @@ function getLessonBoardList(classId, { status, search, sort = 'latest', page = 1
     const contentTypes = [...new Set(contents.map(c => c.content_type))];
     const contentCount = contents.length;
 
-    // 이수 완료 학생 수 (모든 콘텐츠를 완료한 학생) — 정본 학생 모집단 한정
-    //   (cm.role='member' & cm.status='active' & u.role='student' 인 사용자만 집계)
+    // 이수 완료 학생 수 = 수업의 **모든** 콘텐츠를 완료한 학생 (학생 모집단 SSOT 한정).
+    //
+    // ── [P1-B / W1-T1-3] 2026-08-06 라벨↔산식 불일치 수정 ─────────────────────
+    //   주석은 "모든 콘텐츠를 완료한 학생"인데 SQL 은
+    //     COUNT(DISTINCT cp.user_id) WHERE cp.lesson_id=? AND cp.completed=1
+    //   이라 **1개라도 완료하면 이수**로 셌다. 콘텐츠 2개 수업에서 student1 이 1개만
+    //   완료한 상태에서 교사 화면은 "8명 중 1명 이수", 같은 교사의 학생별 이수 현황표는
+    //   전원 is_complete=false(student1 은 1/2) — 두 곳이 정면으로 모순됐다.
+    //   getLessonsByClassWithProgress 는 이미 HAVING >= totalContents 였으므로
+    //   같은 파일 안에서도 두 벌이었다. 여기를 정답 산식으로 통일한다.
     let completedStudents = 0;
     if (contentCount > 0) {
       const result = db.prepare(`
-        SELECT COUNT(DISTINCT cp.user_id) as cnt
-        FROM content_progress cp
-        JOIN class_members cm ON cm.user_id = cp.user_id
-                             AND cm.class_id = ?
-                             AND cm.role = 'member'
-                             AND cm.status = 'active'
-        JOIN users u ON u.id = cm.user_id AND u.role = 'student'
-        WHERE cp.lesson_id = ? AND cp.completed = 1
-      `).get(classId, lesson.id);
+        SELECT COUNT(*) as cnt FROM (
+          SELECT cp.user_id
+            FROM content_progress cp
+            JOIN class_members cm ON cm.user_id = cp.user_id AND cm.class_id = ?
+            JOIN users u ON u.id = cm.user_id
+            JOIN lesson_contents lc ON lc.lesson_id = cp.lesson_id
+                                    AND lc.content_id = cp.content_id
+           WHERE cp.lesson_id = ?
+             AND cp.completed = 1
+             AND ${studentPopulationSql('cm', 'u')}
+           GROUP BY cp.user_id
+          HAVING COUNT(DISTINCT cp.content_id) >= ?
+        )
+      `).get(classId, lesson.id, contentCount);
       completedStudents = result.cnt;
     }
 
@@ -465,16 +479,10 @@ function getLessonBoardList(classId, { status, search, sort = 'latest', page = 1
 
 // 특정 수업의 모든 학생별 이수 현황
 function getLessonStudentProgress(lessonId, classId) {
-  // 클래스 순수 학생 명단 (정본: cm.role='member' & cm.status='active' & u.role='student')
-  //   removed(탈퇴)·parent(학부모)·owner·co_teacher 제외 → 이수 명단에 순수 학생만.
-  const members = db.prepare(`
-    SELECT cm.user_id, u.display_name, u.username
-    FROM class_members cm
-    JOIN users u ON cm.user_id = u.id
-    WHERE cm.class_id = ? AND cm.role = 'member' AND cm.status = 'active'
-      AND u.role = 'student'
-    ORDER BY u.display_name
-  `).all(classId);
+  // 클래스 학생 명단 — db/class.js SSOT.
+  //   owner·co_teacher·parent·staff·removed·삭제계정 제외 → 이수 명단에 살아있는 학생만.
+  //   (삭제 계정의 실명이 교사 이수 현황표에 남아 있던 W1-T1-9 도 여기서 함께 닫힌다)
+  const members = getClassStudents(classId);
 
   // 수업 콘텐츠 수
   const totalContents = db.prepare('SELECT COUNT(*) as cnt FROM lesson_contents WHERE lesson_id = ?').get(lessonId).cnt;
@@ -584,20 +592,22 @@ function getClassSelfCheckAggregate(classId, { startDate, endDate, lessonId } = 
     ORDER BY COALESCE(l.lesson_date, DATE(l.created_at)) ASC, l.id ASC
   `).all(...params);
 
-  // 클래스 학생 수 (member 역할만)
-  const totalMembers = db.prepare(`
-    SELECT COUNT(*) as cnt FROM class_members
-    WHERE class_id = ? AND status = 'active' AND role = 'member'
-  `).get(classId).cnt;
-
-  // 클래스 멤버(학생) 명단 조회 — rosters용
-  const classMembers = db.prepare(`
-    SELECT u.id, u.display_name, u.username
-    FROM class_members cm
-    JOIN users u ON u.id = cm.user_id
-    WHERE cm.class_id = ? AND cm.status = 'active' AND cm.role = 'member'
-    ORDER BY u.display_name
-  `).all(classId);
+  // 클래스 학생 수·명단 — db/class.js 학생 모집단 SSOT
+  //
+  // ── [P1-B 재작업 / 감리 B-1] 2026-08-06 ────────────────────────────────────
+  //   바로 아래 getClassNonRespondents 는 SSOT 로 바꾸면서 이 함수만 건너뛰어,
+  //   **같은 lesson 의 미응답 명단이 화면마다 달라졌다**(라이브 실측):
+  //     /api/class/1/lessons/self-check/aggregate → 10명
+  //        강다은·박학생·윤서준·이학부모·이학생·임지호·정교직원·정민재·최학생·한서윤
+  //                        ↑학부모      ↑교직원                    ↑삭제 계정
+  //     /api/lesson/1/1/self-check                → 7명 (정본)
+  //   수정 전에는 둘 다 틀려서 최소한 일관됐는데, 부분 수정이 불일치를 새로 만들었다.
+  //   교사 화면에 삭제 계정(한서윤) 실명이 남아 있던 것도 여기였다.
+  //   ※ 명단 키: getClassStudents 는 user_id 와 id 를 함께 주지만, 아래 memberMap·
+  //     nonRespondList 가 m.id 를 쓰므로 여기서 명시적으로 정규화한다(키 어긋남 방지).
+  const totalMembers = getClassStudentCount(classId);
+  const classMembers = getClassStudents(classId)
+    .map(m => ({ id: m.user_id, display_name: m.display_name, username: m.username }));
   const memberMap = new Map(classMembers.map(m => [m.id, m]));
 
   let sumU = 0, sumF = 0, respondTotal = 0, lessonRespondRateSum = 0;
@@ -691,7 +701,7 @@ function getClassNonRespondents(classId, lessonId) {
     SELECT u.id as user_id, u.display_name, u.username
     FROM class_members cm
     JOIN users u ON cm.user_id = u.id
-    WHERE cm.class_id = ? AND cm.status = 'active' AND cm.role = 'member'
+    WHERE cm.class_id = ? AND ${studentPopulationSql()}
       AND u.id NOT IN (
         SELECT user_id FROM lesson_self_check WHERE lesson_id = ?
       )
@@ -705,7 +715,8 @@ module.exports = {
   addContentToLesson, removeContentFromLesson, getLessonContents,
   setLessonStdIds, getLessonStdIds,
   getContentProgress, updateContentProgress, getLessonProgress,
-  getLessonCompletionRate, getClassCompletionStats, getLessonsByClassWithProgress,
+  getLessonCompletionRate, getClassCompletionStats, getClassAverageCompletionRate,
+  getLessonsByClassWithProgress,
   getLessonBoardStats, getLessonBoardList, getLessonStudentProgress,
   // 셀프체크
   getSelfCheck, getSelfChecksByLesson, upsertSelfCheck,

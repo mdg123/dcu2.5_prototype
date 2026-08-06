@@ -333,13 +333,24 @@ router.get('/:classId/owner-summary', requireAuth, (req, res) => {
 
     const db = require('../db/index');
 
-    // 클래스 학생 목록 (역할: student 또는 일반 멤버)
-    const members = db.prepare(`
-      SELECT u.id, u.username, u.display_name, u.role
-      FROM class_members cm JOIN users u ON cm.user_id = u.id
-      WHERE cm.class_id = ? AND cm.status = 'active' AND cm.role = 'member'
-      ORDER BY u.display_name
-    `).all(classId);
+    // 클래스 학생 목록 — db/class.js 학생 모집단 SSOT
+    //
+    // ── [P1-B 재작업 / 감리 B-2] 2026-08-06 ──────────────────────────────────
+    //   분석 탭 7개소를 SSOT 로 바꾸면서 **8번째인 여기를 빠뜨렸다.** 개설자 홈
+    //   카드 칩이라 가장 눈에 띄는 표면인데도 학부모·교직원·삭제 계정이 그대로
+    //   "미제출 학생"으로 세어졌다(라이브 실측):
+    //     ?type=counts  → { ungraded: 5, missing: 137 }
+    //     ?type=missing → totalMembers 10 (정본 7)
+    //   손계산: 미제출 137건 중 60건이 유령 → 정본 77건. 표시값의 43.8% 가 허수.
+    //
+    //   ⚠ 키 정규화: getClassStudents 의 정본 키는 user_id 다. 이 라우트의 하위
+    //     코드는 전부 m.id 를 참조하므로 여기서 한 번만 id 로 맞춰 넘긴다.
+    const members = classDb.getClassStudents(classId).map(m => ({
+      id: m.user_id,
+      username: m.username,
+      display_name: m.display_name,
+      role: 'student',
+    }));
     const memberIds = members.map(m => m.id);
 
     if (type === 'counts') {
@@ -625,12 +636,12 @@ router.get('/:classId/students/self-learn-summary', requireAuth, (req, res) => {
       return { sql: parts.length ? ' AND ' + parts.join(' AND ') : '', params };
     }
 
-    // 클래스 학생 목록 (role=student)
+    // 클래스 학생 목록 — db/class.js 학생 모집단 SSOT
     const students = db.prepare(`
       SELECT u.id, u.username, u.display_name
       FROM class_members cm
       JOIN users u ON cm.user_id = u.id
-      WHERE cm.class_id = ? AND cm.status = 'active' AND u.role = 'student'
+      WHERE cm.class_id = ? AND ${classDb.studentPopulationSql()}
       ORDER BY u.display_name
     `).all(classId);
 
@@ -851,7 +862,7 @@ function _getClassStudents(db, classId) {
     SELECT u.id AS user_id, u.display_name AS name, u.class_number
     FROM class_members cm
     JOIN users u ON u.id = cm.user_id
-    WHERE cm.class_id = ? AND cm.status = 'active' AND u.role = 'student'
+    WHERE cm.class_id = ? AND ${classDb.studentPopulationSql()}
     ORDER BY u.class_number, u.display_name
   `).all(classId);
 }
@@ -866,10 +877,8 @@ router.get('/:classId/analytics/lessons', requireAuth, (req, res) => {
     const range = _parseRange(req);
     const db = require('../db/index');
 
-    const totalMembers = db.prepare(
-      `SELECT COUNT(*) AS c FROM class_members cm JOIN users u ON u.id = cm.user_id
-       WHERE cm.class_id = ? AND cm.status = 'active' AND u.role = 'student'`
-    ).get(classId).c || 0;
+    // 분모 = db/class.js 학생 모집단 SSOT (손 SQL 금지 — INV-P6)
+    const totalMembers = classDb.getClassStudentCount(classId);
 
     const lr = range.clause('l.created_at');
     const lessons = db.prepare(`
@@ -985,10 +994,8 @@ router.get('/:classId/analytics/homework', requireAuth, (req, res) => {
     const range = _parseRange(req);
     const db = require('../db/index');
 
-    const totalMembers = db.prepare(
-      `SELECT COUNT(*) AS c FROM class_members cm JOIN users u ON u.id = cm.user_id
-       WHERE cm.class_id = ? AND cm.status = 'active' AND u.role = 'student'`
-    ).get(classId).c || 0;
+    // 분모 = db/class.js 학생 모집단 SSOT (손 SQL 금지 — INV-P6)
+    const totalMembers = classDb.getClassStudentCount(classId);
 
     const hr = range.clause('h.created_at');
     const homeworks = db.prepare(`
@@ -1110,10 +1117,8 @@ router.get('/:classId/analytics/exams', requireAuth, (req, res) => {
     const range = _parseRange(req);
     const db = require('../db/index');
 
-    const totalMembers = db.prepare(
-      `SELECT COUNT(*) AS c FROM class_members cm JOIN users u ON u.id = cm.user_id
-       WHERE cm.class_id = ? AND cm.status = 'active' AND u.role = 'student'`
-    ).get(classId).c || 0;
+    // 분모 = db/class.js 학생 모집단 SSOT (손 SQL 금지 — INV-P6)
+    const totalMembers = classDb.getClassStudentCount(classId);
 
     const er = range.clause('e.created_at');
     const exams = db.prepare(`
@@ -1757,10 +1762,8 @@ router.get('/:classId/analytics/board', requireAuth, (req, res) => {
     const db = require('../db/index');
 
     // 학생 멤버 수 (알림장 읽음율/설문 응답률 분모)
-    const totalMembers = db.prepare(
-      `SELECT COUNT(*) AS c FROM class_members cm JOIN users u ON u.id = cm.user_id
-       WHERE cm.class_id = ? AND cm.status = 'active' AND u.role = 'student'`
-    ).get(classId).c || 0;
+    // 분모 = db/class.js 학생 모집단 SSOT (손 SQL 금지 — INV-P6)
+    const totalMembers = classDb.getClassStudentCount(classId);
 
     // posts (일반 게시글) — view_count는 컬럼, 좋아요 테이블 없음 → 0
     const pr = range.clause('created_at');
@@ -1981,10 +1984,8 @@ router.get('/:classId/analytics/surveys', requireAuth, (req, res) => {
     const range = _parseRange(req);
     const db = require('../db/index');
 
-    const totalMembers = db.prepare(
-      `SELECT COUNT(*) AS c FROM class_members cm JOIN users u ON u.id = cm.user_id
-       WHERE cm.class_id = ? AND cm.status = 'active' AND u.role = 'student'`
-    ).get(classId).c || 0;
+    // 분모 = db/class.js 학생 모집단 SSOT (손 SQL 금지 — INV-P6)
+    const totalMembers = classDb.getClassStudentCount(classId);
 
     const sr = range.clause('s.created_at');
     const surveys = db.prepare(`

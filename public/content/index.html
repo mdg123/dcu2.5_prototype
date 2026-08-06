@@ -1719,6 +1719,35 @@
       return `<span class="type-badge type-${type}">${typeNames[type] || type}</span>`;
     }
 
+    // 반려·보류 사유 안내
+    // ── [P1-B / W1-T3-4] 2026-08-06 ────────────────────────────────────────────
+    //   관리자가 사유를 적어 반려하면 GET /api/contents/my 가 reject_reason 을 정상
+    //   반환하는데, 화면은 빨간 "반려" 뱃지만 띄우고 사유를 어디에도 그리지 않았다
+    //   (reject_reason 을 그리는 코드는 파일 전체에서 관리자 승인관리 카드 1곳뿐).
+    //   → 작성자는 왜 반려됐는지 알 방법이 없어 수정 자체가 불가능했다.
+    //   내자료(내가 만든 콘텐츠) 카드·리스트·요약카드 세 곳에서 항상 함께 보여준다.
+    // @param {object} item  콘텐츠 항목
+    // @param {'card'|'row'|'compact'} shape  표시 밀도
+    function rejectReasonBox(item, shape = 'card') {
+      if (!item || (item.status !== 'rejected' && item.status !== 'hold')) return '';
+      const isHold = item.status === 'hold';
+      const label = isHold ? '보류 사유' : '반려 사유';
+      const bg = isHold ? 'var(--amber-50, #FFFBEB)' : 'var(--red-50, #FEF2F2)';
+      const fg = isHold ? '#B45309' : '#B91C1C';
+      const bar = isHold ? '#F59E0B' : '#EF4444';
+      const reason = (item.reject_reason || '').trim();
+      const body = reason
+        ? escHtml(reason)
+        : `사유가 적혀 있지 않아요. 담당 선생님이나 관리자에게 문의해 주세요.`;
+      if (shape === 'compact') {
+        return `<div style="margin-top:4px;font-size:13px;color:${fg};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${label}: ${escHtml(reason || '미기재')}"><i class="fas fa-circle-exclamation" style="margin-right:4px;"></i>${label}: ${body}</div>`;
+      }
+      const mt = shape === 'row' ? '4px' : '8px';
+      return `<div style="margin-top:${mt};padding:8px 12px;background:${bg};border-left:3px solid ${bar};border-radius:6px;font-size:14px;line-height:1.6;color:${fg};">
+        <i class="fas fa-circle-exclamation" style="margin-right:6px;"></i><strong>${label}</strong> · ${body}
+      </div>`;
+    }
+
     // ===== Content Card =====
     function renderContentCard(item, opts = {}) {
       const type = item.content_type || 'document';
@@ -1745,6 +1774,7 @@
             <div style="display:flex;gap:6px;align-items:center;margin-bottom:4px;">${showStatus ? statusBadge(item.status) : ''}${typeBadge(type)}</div>
             <div class="card-title" style="font-size:13px;font-weight:600;margin-bottom:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escHtml(item.title)}</div>
             <div style="font-size:11px;color:var(--gray-400);display:flex;gap:6px;align-items:center;flex-wrap:nowrap;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;">${metaParts.join(' <span style="color:var(--gray-200)">·</span> ')}</div>
+            ${showStatus ? rejectReasonBox(item, 'compact') : ''}
           </div>
         </div>`;
       }
@@ -1769,6 +1799,7 @@
             ${item.grade ? `<span>${item.grade}학년</span>` : ''}
             ${item.created_at ? `<span class="card-date" title="등록일"><i class="far fa-calendar-alt" style="margin-right:3px;"></i>${(item.created_at || '').slice(0, 10)}</span>` : ''}
           </div>
+          ${showStatus ? rejectReasonBox(item, 'card') : ''}
           ${isQuizLike
             ? `<div class="card-stats" data-stats-for="${item.id}" data-stats-type="${type}" style="display:flex;margin-top:6px;padding:6px 10px;background:var(--gray-50);border-radius:8px;font-size:11px;color:var(--gray-600);gap:10px;align-items:center;min-height:28px;box-sizing:border-box;"><span style="color:var(--gray-300);"><i class="far fa-circle"></i> 불러오는 중…</span></div>`
             : `<div class="card-stats-spacer" style="margin-top:6px;min-height:28px;" aria-hidden="true"></div>`}
@@ -1797,6 +1828,7 @@
         <div class="list-row-body">
           <div class="list-row-title">${escHtml(item.title)}</div>
           <div class="list-row-meta">${escHtml(item.creator_name || '')} · ${(item.created_at || '').slice(0, 10)}</div>
+          ${opts.showStatus ? rejectReasonBox(item, 'row') : ''}
         </div>
         ${opts.showStatus && item.status ? statusBadge(item.status) : ''} ${typeBadge(type)}
         <span style="font-size:11px;color:var(--gray-400);display:flex;align-items:center;gap:3px"><i class="fas fa-eye"></i> ${item.view_count || 0}</span>

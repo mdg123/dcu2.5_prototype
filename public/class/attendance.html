@@ -102,7 +102,8 @@
     }
     .comment-row input:focus { outline: none; border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37,99,235,0.1); }
     .comment-row input:disabled { background: #f3f4f6; cursor: not-allowed; }
-    .comment-count { font-size: 13px; color: #6b7280; min-width: 50px; text-align: right; }
+    .comment-count { font-size: 13px; color: #6b7280; min-width: 50px; text-align: right; flex-shrink: 0; white-space: nowrap; }
+    .comment-row input { min-width: 0; }   /* flex 자식 기본 min-width:auto 가 축소를 막아 넘쳤다 */
 
     .form-actions { display: flex; gap: 10px; justify-content: flex-end; align-items: center; }
     .form-actions .helper-text { font-size: 13px; color: #6b7280; margin-right: auto; }
@@ -168,7 +169,7 @@
     }
     .cal-cell.empty { background: transparent; }
     .cal-cell.today { border: 2px solid #2563eb; }
-    .cal-cell .day-num { font-size: 11px; position: absolute; top: 3px; left: 5px; font-weight: 500; opacity: 0.7; }
+    .cal-cell .day-num { font-size: 12px; position: absolute; top: 3px; left: 5px; font-weight: 500; opacity: 0.75; }
     .cal-cell .cal-emo { font-size: 18px; line-height: 1; }
     .cal-cell .cal-mark { font-size: 13px; }
     .cal-cell.s-present { background: #d1fae5; color: #065f46; }
@@ -532,7 +533,11 @@
     }
     #teacher-emotion-report .er-block {
       background: #f9fafb; border-radius: 10px; padding: 18px;
+      /* 그리드 아이템 기본값 min-width:auto 는 캔버스 고유폭(300px)만큼 트랙을 밀어낸다.
+         375px 에서 문서가 400px 로 넓어져 가로 스크롤이 생겼다 → 축소 허용. */
+      min-width: 0;
     }
+    #teacher-emotion-report .er-chart-wrap canvas { max-width: 100%; }
     #teacher-emotion-report .er-block h4 {
       font-size: 15px; font-weight: 600; color: #374151; margin-bottom: 12px;
     }
@@ -566,6 +571,13 @@
       font-size: 13px; color: #6b7280;
     }
 
+    /* 랭킹 + 공동 목표 2단. 예전에는 JS 가 인라인 style 로 '1fr 1fr' 을 박아
+       미디어쿼리가 이기지 못했고, 375px 에서 가로 스크롤(2px)이 생겼다. */
+    #student-engage-row { display: grid; gap: 16px; grid-template-columns: 1fr; }
+    #student-engage-row.two-col { grid-template-columns: 1fr 1fr; }
+    @media (max-width: 900px) {
+      #student-engage-row.two-col { grid-template-columns: 1fr; }
+    }
     @media (max-width: 768px) {
       #student-checkin-hero { padding: 16px; }
       #student-checkin-hero .hero-left h2 { font-size: 22px; }
@@ -577,6 +589,7 @@
       #student-reflection .reflect-tab { flex: 1; }
     }
   </style>
+  <script src="/js/kst.js"></script>
   <script src="/js/common-nav.js"></script>
 <script src="/js/access-denied.js"></script>
   <script src="/js/api.js"></script>
@@ -1075,13 +1088,11 @@
       survey_respond: '설문 응답으로 자동 출석'
     };
 
-    function fmtDate(d){
-      const y = d.getFullYear();
-      const m = String(d.getMonth()+1).padStart(2,'0');
-      const day = String(d.getDate()).padStart(2,'0');
-      return `${y}-${m}-${day}`;
-    }
-    function parseYMD(s){ const [y,m,d] = s.split('-').map(Number); return new Date(y, m-1, d); }
+    // 날짜·시각은 전부 시각 SSOT(/js/kst.js, window.DacheumTime)에 위임한다.
+    //   서버는 UTC 로 저장하므로 `new Date(저장문자열)` 로 직접 파싱하면 9시간 어긋난다.
+    const T = window.DacheumTime;
+    function fmtDate(d){ return T.toLocalYMD(d); }
+    function parseYMD(s){ return T.parseYMD(s); }
     function toast(msg, isError){
       const t = document.getElementById('toast');
       t.textContent = msg;
@@ -1161,6 +1172,7 @@
 
       const myRole = classInfo?.myRole;
       const isTeacherView = myRole === 'owner' || currentUser?.role === 'admin';
+      window._amOwner = isTeacherView;   // 개설자 전용 API 를 학생이 헛되이 호출하지 않도록
       if (isTeacherView) {
         document.getElementById('teacher-view').style.display = 'block';
         document.getElementById('student-view').style.display = 'none';
@@ -1438,8 +1450,8 @@
       rk.style.display = showRanking ? 'block' : 'none';
       gl.style.display = showGoal ? 'block' : 'none';
       row.style.display = (showRanking || showGoal) ? 'grid' : 'none';
-      if (showRanking && showGoal) row.style.gridTemplateColumns = '1fr 1fr';
-      else row.style.gridTemplateColumns = '1fr';
+      // 단수/복수는 클래스로만 표현한다(인라인 금지) — 좁은 화면에서 CSS 가 1단으로 접는다.
+      row.classList.toggle('two-col', showRanking && showGoal);
       // 피드 표시
       document.getElementById('student-feed').style.display = s.is_public ? 'block' : 'none';
     }
@@ -1661,22 +1673,35 @@
     async function loadGoal(){
       const target = studentState.settings.class_goal || 0;
       if (!target || target <= 0) return;
-      // 오늘 기준 클래스 출석률 (간이 계산: 전체 멤버 중 오늘 출석한 수)
+      // 분모(학생 수)·분자(출석 인원)를 **서버에서** 받는다.
+      //   예전에는 여기서 members.filter(m => m.role === 'student') 로 셌는데
+      //   class_members.role 에는 'student' 값이 없어 항상 0 → `|| 1` 로 분모가 1이 됐다.
+      //   그 결과 3명 출석 시 "현재 300% / 🎉 목표 달성!" — 한 명만 와도 즉시 달성이었다.
       const today = await apiGet(`/api/attendance/${classId}/today`);
-      let nowRate = 0;
-      if (today && today.success && Array.isArray(today.records)) {
-        const totalMembers = (classInfo?.members || []).filter(m => m.role === 'student').length || 1;
-        const presentCount = today.records.filter(r => r.status === 'present' || r.status === 'late').length;
-        nowRate = Math.round((presentCount / totalMembers) * 100);
+      const totalStudents = (today && Number.isFinite(today.student_total)) ? today.student_total : 0;
+      const presentCount = (today && Number.isFinite(today.present_count)) ? today.present_count : 0;
+
+      const barEl = document.getElementById('goal-bar-fill');
+      const nowEl = document.getElementById('goal-now');
+      const targetEl = document.getElementById('goal-target');
+      const msgEl = document.getElementById('goal-msg');
+      targetEl.textContent = target + '%';
+
+      // 학생이 0명이면 비율이 정의되지 않는다. 1로 덮어 100% 를 만들지 말고 빈 상태로 안내한다.
+      if (totalStudents <= 0) {
+        barEl.style.width = '0%';
+        nowEl.textContent = '—';
+        msgEl.textContent = '아직 클래스에 학생이 없어요. 학생이 참여하면 목표가 시작됩니다.';
+        return;
       }
+
+      const nowRate = Math.min(100, Math.round((presentCount / totalStudents) * 100));
       const pct = Math.min(100, Math.round((nowRate / target) * 100));
-      document.getElementById('goal-bar-fill').style.width = pct + '%';
-      document.getElementById('goal-now').textContent = nowRate + '%';
-      document.getElementById('goal-target').textContent = target + '%';
-      const msg = nowRate >= target
-        ? '🎉 목표 달성! 모두 잘했어요!'
-        : `목표까지 ${Math.max(0, target - nowRate)}%p 남았어요. 함께 달려요!`;
-      document.getElementById('goal-msg').textContent = msg;
+      barEl.style.width = pct + '%';
+      nowEl.textContent = nowRate + '%';
+      msgEl.textContent = nowRate >= target
+        ? `🎉 목표 달성! 오늘 ${totalStudents}명 중 ${presentCount}명이 출석했어요.`
+        : `오늘 ${totalStudents}명 중 ${presentCount}명 출석. 목표까지 ${Math.max(0, target - nowRate)}%p 남았어요!`;
     }
 
     async function loadFeed(){
@@ -1692,7 +1717,7 @@
         const initial = (it.display_name || it.username || '?').slice(0,1);
         const emoNum = EMOTION_NUM_BY_KEY[it.emotion] || null;
         const emoji = emoNum ? EMOTION_EMOJI[emoNum] : '';
-        const time = (it.checked_at || '').slice(11, 16);
+        const time = T.fmtTime(it.checked_at, '');   // UTC 저장 → KST 표시
         return `<div class="feed-item">
           <div class="feed-avatar">${escapeHtml(initial)}</div>
           <div class="feed-body">
@@ -1736,10 +1761,13 @@
       const end = fmtDate(last);
 
       const myMap = {};
-      // 1차 시도: /table (개설자 권한) — 출석 상태 + 감정 모두 포함
-      const data = await apiGet(
-        `/api/attendance/${classId}/table?startDate=${start}&endDate=${end}&includeWeekends=true`
-      );
+      // 1차 시도: /table (개설자 권한) — 출석 상태 + 감정 모두 포함.
+      //   ⚠ 개설자가 아니면 이 엔드포인트는 403 이다. 예전에는 학생도 일단 호출하고
+      //     403 을 받은 뒤 폴백해서, 학생 화면을 열 때마다 콘솔 에러가 하나씩 찍혔다.
+      //     결과는 같으므로 애초에 호출하지 않는다(폴백 경로는 그대로 유지).
+      const data = window._amOwner
+        ? await apiGet(`/api/attendance/${classId}/table?startDate=${start}&endDate=${end}&includeWeekends=true`)
+        : null;
       if (data && data.success && data.records && typeof data.records === 'object') {
         const myCandidate = currentUser.id;
         let myMember = (data.members || []).find(m => m.user_id === myCandidate);
@@ -2196,7 +2224,7 @@
       document.getElementById('cell-comment-input').value = (rec && rec.comment) || '';
       document.getElementById('cell-reason-input').value = (rec && rec.emotion_reason) || '';
       // 시각·출처
-      const t = rec && rec.checked_at ? rec.checked_at.replace('T',' ').slice(0,16) : '없음';
+      const t = rec && rec.checked_at ? T.fmtDateTime(rec.checked_at, '없음') : '없음';
       document.getElementById('cell-info-time').textContent = t;
       const src = rec && rec.checkin_source ? rec.checkin_source : (rec ? 'manual' : '없음');
       const srcLabel = SOURCE_LABEL[src] || (src === 'manual' ? '직접 출석' : (src === 'teacher_edit' ? '교사 편집' : src));
@@ -2294,42 +2322,41 @@
       document.getElementById('range-end').value = teacherState.end;
     }
 
-    // 학생 멤버만 (owner/teacher 제외)
+    // 명단은 서버(/table)가 이미 학생 모집단으로 좁혀서 준다.
+    //   예전에는 여기서 class_members.role 로 다시 걸렀는데, 그 값이 owner/member
+    //   두 종뿐이라 학부모(이학부모)·교직원(정교직원)이 통과해 총원·출석률 분모를
+    //   오염시켰다. 판정을 화면에서 다시 하지 않는다(사본 금지).
     function getStudentMembers(tableMembers){
-      // /table 응답의 members는 클래스 전원. /api/class 응답의 members에 role 있음.
-      const roleMap = {};
-      (classInfo?.members || []).forEach(m => { roleMap[m.user_id] = m.role; });
-      return (tableMembers || []).filter(m => {
-        const r = roleMap[m.user_id];
-        // role이 student이거나 알 수 없으면 포함, owner/teacher만 제외
-        return r !== 'owner' && r !== 'teacher';
-      });
+      return tableMembers || [];
     }
 
     function computeKPIs(data){
       const students = getStudentMembers(data.members || []);
-      const dates = data.dates || [];
       const records = data.records || {};
       // 주말 제외한 날짜만 분모로 사용 (주말포함 토글 무시하고 학교일 기준)
-      const schoolDates = dates.filter(ds => {
+      const schoolDates = (data.dates || []).filter(ds => {
         const dow = parseYMD(ds).getDay();
         return dow !== 0 && dow !== 6;
       });
       const denom = students.length * schoolDates.length;
       let presentLate = 0, absentTotal = 0, perfectCount = 0;
       students.forEach(m => {
-        let absentForMe = 0;
+        let attended = 0;
         schoolDates.forEach(ds => {
           const rec = records[`${m.user_id}_${ds}`];
           if (rec) {
-            if (rec.status === 'present' || rec.status === 'late') presentLate++;
-            else if (rec.status === 'absent') { absentTotal++; absentForMe++; }
+            if (rec.status === 'present' || rec.status === 'late') { presentLate++; attended++; }
+            else if (rec.status === 'absent') absentTotal++;
           }
         });
-        if (absentForMe === 0 && schoolDates.length > 0) perfectCount++;
+        // 개근 = "학교일 전부 출석". 예전에는 "absent 셀이 0개" 로 판정했는데,
+        //   실 DB 의 absent 는 0건이라 **아무 기록도 없는 학생까지 개근**이 됐다.
+        //   그래서 같은 화면에 "평균 출석률 4%" 와 "개근자 10명"(전원)이 동시에 떴다.
+        //   지금 정의는 정의상 perfectCount/총원 ≤ 평균 출석률 이라 모순이 불가능하다.
+        if (schoolDates.length > 0 && attended === schoolDates.length) perfectCount++;
       });
       const rate = denom > 0 ? Math.round((presentLate / denom) * 100) : 0;
-      return { total: students.length, rate, perfectCount, absentTotal };
+      return { total: students.length, rate, perfectCount, absentTotal, schoolDays: schoolDates.length };
     }
 
     function renderKPI(data){
@@ -2342,9 +2369,18 @@
       }
       const k = computeKPIs(data);
       document.getElementById('kpi-total').textContent = k.total + '명';
-      document.getElementById('kpi-rate').textContent = k.rate + '%';
-      document.getElementById('kpi-perfect').textContent = k.perfectCount + '명';
+      // 학교일이 0일(전 구간 주말·기간 미선택)이면 비율·개근이 정의되지 않는다 → '—'
+      const hasDays = k.schoolDays > 0 && k.total > 0;
+      document.getElementById('kpi-rate').textContent = hasDays ? k.rate + '%' : '—';
+      document.getElementById('kpi-perfect').textContent = hasDays ? k.perfectCount + '명' : '—';
       document.getElementById('kpi-absent').textContent = k.absentTotal + '회';
+      // 개근 기준을 툴팁으로 노출 — 라벨만 보고 다른 정의를 상상하지 않도록.
+      const perfectCard = document.getElementById('kpi-perfect').parentElement;
+      if (perfectCard) {
+        perfectCard.title = hasDays
+          ? `선택 기간의 학교일 ${k.schoolDays}일에 모두 출석한 학생 수입니다.`
+          : '학교일이 없어 계산할 수 없습니다.';
+      }
     }
 
     async function reloadMatrix(){

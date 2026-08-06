@@ -1558,23 +1558,29 @@
       if (canManage()) {
         try {
           const membersRes = await fetch(`/api/class/${classId}/members`).then(r=>r.json());
-          const students = (membersRes.members||[]).filter(m=>m.role==='member');
-          if (students.length > 0 && hwTotal > 0) {
+          // ── [P1-B / W1-T1-4] 2026-08-06 ─────────────────────────────────────
+          //   여기 분모가 `.filter(m => m.role==='member')` 라서 학부모·교직원까지
+          //   학생으로 셌다. 그 결과 **같은 페이지 안에서** 홈 탭 도넛 "과제 제출률"과
+          //   과제 탭 "평균 제출률"이 서로 다른 값을 띄웠다(실측 20% vs 25%).
+          //   분모·분자를 과제 탭/카드와 같은 것으로 맞춘다.
+          const studentCount = getClassStudentCount(null, membersRes.members || []);
+          if (studentCount > 0 && hwTotal > 0) {
             const hwRes2 = await fetch(`/api/homework/${classId}`).then(r=>r.json());
             // API는 `homework` (단수) 필드로 반환. 일부 구버전 호환 위해 두 필드 모두 시도.
             const allHwItems = hwRes2.homework || hwRes2.homeworks || [];
             if (allHwItems.length > 0) {
-              // 목록 API 응답 각 항목의 submission_count 합산 (별도 fetch 불필요)
-              const totalSubs = allHwItems.reduce((sum, h) => sum + (h.submission_count || 0), 0);
-              const denominator = students.length * allHwItems.length;
-              hwPct = denominator > 0 ? Math.round((totalSubs / denominator) * 100) : 0;
+              // 분자도 카드·과제 탭과 동일 (submitted_count = 순수 학생 제출 인원)
+              const totalSubs = allHwItems.reduce(
+                (sum, h) => sum + (Number.isFinite(h.submitted_count) ? h.submitted_count : (h.submission_count || 0)), 0);
+              const denominator = studentCount * allHwItems.length;
+              hwPct = denominator > 0 ? Math.min(Math.round((totalSubs / denominator) * 100), 100) : 0;
             } else { hwPct = 0; }
           }
-          if (students.length > 0 && examTotal > 0) {
+          if (studentCount > 0 && examTotal > 0) {
             // 평가 참여자 수 / (학생수 * 평가수) — 각 exam의 participant_count 사용 (서버 응답에 포함)
             const totalParticipants = allExams.reduce((s, e) => s + (e.participant_count || 0), 0);
-            const denominator = students.length * examTotal;
-            examPctVal = denominator > 0 ? Math.round((totalParticipants / denominator) * 100) : 0;
+            const denominator = studentCount * examTotal;
+            examPctVal = denominator > 0 ? Math.min(Math.round((totalParticipants / denominator) * 100), 100) : 0;
           }
         } catch(e) { console.warn('교사용 비율 계산 실패:', e); }
       }
@@ -2510,8 +2516,17 @@
       const tomorrow = new Date(now); tomorrow.setDate(tomorrow.getDate() + 3);
       const activeHw = allHomeworks.filter(h => !h.due_date || new Date(h.due_date) >= now);
       const urgentHw = allHomeworks.filter(h => h.due_date && new Date(h.due_date) >= now && new Date(h.due_date) <= tomorrow);
-      const totalSub = allHomeworks.reduce((s, h) => s + (h.submission_count || 0), 0);
-      const totalMembers = (classMembers?.length || 1) * total;
+      // 평균 제출률 = Σ제출인원 / (학생 수 × 과제 수)
+      // ── [P1-B / W1-T1-5] 2026-08-06 ────────────────────────────────────────
+      //   분모가 `classMembers.length`(= 개설자·학부모·교직원 포함 전체 멤버)였다.
+      //   같은 응답에 member_count(순수 학생)가 들어 있는데도 쓰지 않아, 아래 과제
+      //   카드들(getClassStudentCount 사용)과 상단 통계가 **상시 불일치**했다.
+      //   실측 class 1: Σ=16 · 과제 11건 · classMembers 11 → 13% (정답 16/(8×11)=18%).
+      //   분자도 카드와 같은 값(submitted_count 우선)으로 통일한다.
+      const hwStudentTotal = getClassStudentCount(allHomeworks[0]);
+      const totalSub = allHomeworks.reduce(
+        (s, h) => s + (Number.isFinite(h.submitted_count) ? h.submitted_count : (h.submission_count || 0)), 0);
+      const totalMembers = hwStudentTotal * total;
       const submitRate = totalMembers > 0 ? Math.round((totalSub / totalMembers) * 100) : 0;
 
       document.getElementById('statHwTotal').textContent = total;
@@ -5328,11 +5343,16 @@
     //          2) Backend의 member_count 필드 (백엔드별 정의가 다를 수 있어 후순위)
     //          3) classData.member_count - 1 (개설자 제외)
     // payload: API 응답 객체(예: lesson/homework/exam/survey의 한 항목)
-    function getClassStudentCount(payload) {
-      // 1순위: 프론트엔드 classMembers — 순수 학생(멤버 & user_role='student')만 집계.
-      //   classMembers 항목에는 user_role(users.role) 필드가 포함된다(getClassMembers 계약).
-      if (Array.isArray(classMembers) && classMembers.length > 0) {
-        return classMembers.filter(m => m.role === 'member' && m.user_role === 'student').length;
+    // @param payload         API 응답 객체(member_count 폴백용)
+    // @param membersOverride  방금 받은 멤버 배열(전역 classMembers 가 아직 비었을 때). 술어는 아래 한 벌만.
+    function getClassStudentCount(payload, membersOverride) {
+      // 1순위: 멤버 배열 — 순수 학생(멤버 & user_role='student')만 집계.
+      //   항목에는 user_role(users.role) 필드가 포함된다(getClassMembers 계약).
+      //   ※ 이 필터 술어를 다른 곳에 다시 적지 말 것 — 판정 사본이 생기는 순간 분모가 갈린다.
+      const src = (Array.isArray(membersOverride) && membersOverride.length > 0) ? membersOverride
+                : (Array.isArray(classMembers) && classMembers.length > 0) ? classMembers : null;
+      if (src) {
+        return src.filter(m => m.role === 'member' && m.user_role === 'student').length;
       }
       // 2순위: Backend의 member_count(payload별)
       if (payload && Number.isFinite(payload.member_count) && payload.member_count >= 0) return payload.member_count;

@@ -54,7 +54,11 @@ function getClassByCode(code) {
 function getUserClasses(userId) {
   return db.prepare(`
     SELECT c.*, u.display_name AS owner_name, cm.role AS my_role,
-      (SELECT COUNT(*) FROM class_members WHERE class_id = c.id AND status='active' AND role='member') AS student_count
+      -- student_count 는 이름 그대로 "학생 수". 예전엔 role='member' 만 봐서 학부모·교직원·
+      -- 삭제 계정까지 학생으로 셌고, 그 값이 나의 클래스 목록의 제출률 분모로도 쓰여
+      -- 클래스 홈의 분모와 어긋났다(P1-B). 학생 모집단 SSOT 로 통일한다.
+      (SELECT COUNT(*) FROM class_members cmx JOIN users ux ON ux.id = cmx.user_id
+        WHERE cmx.class_id = c.id AND ${studentPopulationSql('cmx', 'ux')}) AS student_count
     FROM class_members cm
     JOIN classes c ON cm.class_id = c.id
     JOIN users u ON c.owner_id = u.id
@@ -161,13 +165,100 @@ function removeMember(classId, userId) {
   return result.changes > 0;
 }
 
-// 멤버 목록
+// ═══════════════════════════════════════════════════════════════════════════
+// 클래스 "학생 모집단" 단일 정의 (SSOT)  — [P1-B] 2026-08-06
+//
+//   이수율·제출률·응답률·이수 명단·랭킹의 분모와 모집단은 **전부 여기를 경유**한다.
+//
+//   ── 왜 만들었나 (W1-T1-3/4/5/9) ────────────────────────────────────────────
+//   같은 정의가 db/lesson.js(3벌)·db/homework.js(1벌)·routes/class.js(7벌)·
+//   routes/lesson.js(2벌)에 손으로 적혀 있었고 조건이 조금씩 달랐다. 그 결과
+//   **클래스 홈 한 페이지 안에서 분모가 3종**이 되었다(라이브 class 1 실측):
+//     · 홈 탭 활동 도넛  = 10명  (getClassMembers 의 cm.role='member' 만 →
+//                                 학부모 parent1 · 교직원 staff1 · 삭제계정 student7 포함)
+//     · 수업 탭 이수율   = 8명   (u.role='student' 는 봤지만 계정 삭제는 못 봄)
+//     · 정답             = 7명   (student7 은 관리자가 삭제한 계정)
+//   교사 화면 이수 현황 명단에는 삭제 계정(한서윤)의 실명이 그대로 노출됐다.
+//
+//   ── 정의: "이 클래스에 살아있는 학생 계정" ────────────────────────────────
+//     · cm.role   = 'member'   → 개설자(owner)·공동교사(co_teacher) 제외
+//     · cm.status = 'active'   → 강퇴·탈퇴(removed/left/invited) 제외
+//     · u.role    = 'student'  → 학부모(parent)·교직원(staff)·교사 제외
+//     · 계정 미삭제            → 관리자 소프트 삭제 계정 제외
+//                                (routes/admin.js 는 status='deleted' + deleted_at 을 함께 세팅)
+//
+//   ⚠ 과잉 필터 금지 — 이것은 "교사가 봐야 할 명단"을 좁히는 장치가 아니다.
+//     여기서 빠지는 사람은 (a) 학생이 아니거나 (b) 이 클래스 소속이 아니거나
+//     (c) 로그인 자체가 불가능한 삭제 계정뿐이다. 멤버 관리 화면(getClassMembers)은
+//     개설자·학부모·교직원을 그대로 보여준다 — 거기서 빠지는 건 삭제 계정뿐.
+//
+//   ⚠ 새 집계를 만들 때: SQL 을 새로 적지 말고 studentPopulationSql() 를 끼워 넣거나
+//     getClassStudentIds() 로 id 목록을 받아 쓸 것. 손으로 적으면
+//     test/class-student-population.test.js INV-P6 이 즉시 붉어진다.
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** 살아있는 계정(관리자 소프트 삭제가 아닌) 조건. users 별칭을 받는다. */
+function liveUserSql(u = 'u') {
+  return `COALESCE(${u}.status, 'active') <> 'deleted' AND ${u}.deleted_at IS NULL`;
+}
+
+/**
+ * 학생 모집단 WHERE 조각. class_members·users 별칭을 받아 그대로 끼워 넣는다.
+ *   예) `... FROM class_members cm JOIN users u ON u.id = cm.user_id
+ *        WHERE cm.class_id = ? AND ${studentPopulationSql()}`
+ * @param {string} cm class_members 별칭
+ * @param {string} u  users 별칭
+ */
+function studentPopulationSql(cm = 'cm', u = 'u') {
+  return `${cm}.role = 'member' AND ${cm}.status = 'active' `
+       + `AND ${u}.role = 'student' AND ${liveUserSql(u)}`;
+}
+
+/** 클래스의 학생 명단 (표시 이름순). 이수 현황·제출 현황 명단의 정본. */
+function getClassStudents(classId) {
+  return db.prepare(`
+    SELECT cm.user_id, u.id, u.username, u.display_name, u.profile_image_url,
+           u.grade, u.class_number, cm.joined_at
+      FROM class_members cm
+      JOIN users u ON u.id = cm.user_id
+     WHERE cm.class_id = ? AND ${studentPopulationSql()}
+     ORDER BY u.display_name
+  `).all(classId);
+}
+
+/** 클래스 학생 id 목록. */
+function getClassStudentIds(classId) {
+  return getClassStudents(classId).map(s => s.user_id);
+}
+
+/** 클래스 학생 수 = 이수율·제출률·응답률의 정본 분모. */
+function getClassStudentCount(classId) {
+  return db.prepare(`
+    SELECT COUNT(*) AS c
+      FROM class_members cm
+      JOIN users u ON u.id = cm.user_id
+     WHERE cm.class_id = ? AND ${studentPopulationSql()}
+  `).get(classId).c;
+}
+
+/** 특정 사용자가 이 클래스의 (살아있는) 학생인가. */
+function isClassStudent(classId, userId) {
+  return !!db.prepare(`
+    SELECT 1
+      FROM class_members cm
+      JOIN users u ON u.id = cm.user_id
+     WHERE cm.class_id = ? AND cm.user_id = ? AND ${studentPopulationSql()}
+  `).get(classId, userId);
+}
+
+// 멤버 목록 (개설자·학부모·교직원 포함 — 관리 화면용).
+//   삭제 계정만 제외한다: 로그인 불가 계정이 명단에 실명으로 남아 있으면 안 된다.
 function getClassMembers(classId) {
   return db.prepare(`
     SELECT cm.*, u.username, u.display_name, u.role AS user_role, u.profile_image_url
     FROM class_members cm
     JOIN users u ON cm.user_id = u.id
-    WHERE cm.class_id = ? AND cm.status = 'active'
+    WHERE cm.class_id = ? AND cm.status = 'active' AND ${liveUserSql('u')}
     ORDER BY cm.role DESC, u.display_name
   `).all(classId);
 }
@@ -193,5 +284,8 @@ function getMemberRole(classId, userId) {
 module.exports = {
   createClass, getClassById, getClassByCode, getUserClasses,
   searchPublicClasses, updateClass, deleteClass,
-  addMember, removeMember, updateMemberRole, getClassMembers, isMember, getMemberRole
+  addMember, removeMember, updateMemberRole, getClassMembers, isMember, getMemberRole,
+  // 학생 모집단 SSOT — 분모·명단은 전부 이 5개를 경유할 것 (손 SQL 금지)
+  studentPopulationSql, liveUserSql,
+  getClassStudents, getClassStudentIds, getClassStudentCount, isClassStudent
 };

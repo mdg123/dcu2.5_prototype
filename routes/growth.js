@@ -5,6 +5,8 @@ const path = require('path');
 const multer = require('multer');
 const { requireAuth } = require('../middleware/auth');
 const growthDb = require('../db/growth');
+// 학생 모집단 SSOT (db/class.js) — 감정 모니터의 분모·명단도 전부 이것을 경유한다.
+const { studentPopulationSql, getClassStudentCount } = require('../db/class');
 // [W4] db/class 의 getMemberRole 직접 참조를 걷어냈다. 이 파일에서 클래스 멤버십 판정이 필요하면
 //   반드시 canViewClass(SSOT)를 쓴다 — require 를 남겨두면 "손으로 다시 쓴 판정"이 또 자란다.
 const growthExtDb = require('../db/growth-extended');
@@ -1802,9 +1804,9 @@ router.get('/emotion-monitor/:classId', requireAuth, (req, res) => {
     const periodEmotions = db.prepare(`
       SELECT ec.user_id, u.display_name, ec.emotion, ec.emotion_reason, ec.checkin_date AS attendance_date
       FROM emotion_checkins ec
-      JOIN class_members cm ON cm.user_id = ec.user_id AND cm.status = 'active'
+      JOIN class_members cm ON cm.user_id = ec.user_id
       JOIN users u ON u.id = ec.user_id
-      WHERE cm.class_id = ? AND ${dateWhere}
+      WHERE cm.class_id = ? AND ${studentPopulationSql('cm', 'u')} AND ${dateWhere}
       ORDER BY ec.checkin_date DESC, ec.id DESC
     `).all(...dateParams);
 
@@ -1817,9 +1819,12 @@ router.get('/emotion-monitor/:classId', requireAuth, (req, res) => {
     uniqueToday.forEach(e => { emotionDist[e.emotion] = (emotionDist[e.emotion] || 0) + 1; });
 
     // 3. 학급 전체 학생 수
-    const totalStudents = db.prepare(
-      "SELECT COUNT(*) as cnt FROM class_members WHERE class_id = ? AND role = 'member'"
-    ).get(classId).cnt;
+    // ── [P1-B / 팀A 보고] 2026-08-06 ──────────────────────────────────────────
+    //   분모가 role='member' 만이라 학부모·교직원·삭제 계정까지 학생으로 셌다.
+    //   실측 class 1: 감정 모니터가 "전체 학생 10명"(정답 7)을 표시. 위 ①의 명단에는
+    //   cm.role 검사가 없어 교사(김선생)까지 감정 타임라인에 섞여 나왔다.
+    //   분모·명단 모두 db/class.js 학생 모집단 SSOT 로 통일한다.
+    const totalStudents = getClassStudentCount(classId);
 
     // 4. 추이 분석 기간 설정 (기간 검색 시 해당 범위, 아닐 경우 최근 30일 ~ 오늘)
     let startDate, endDate;
@@ -1836,9 +1841,10 @@ router.get('/emotion-monitor/:classId', requireAuth, (req, res) => {
     const recentEmotions = db.prepare(`
       SELECT ec.user_id, u.display_name, ec.emotion, ec.checkin_date AS attendance_date, ec.checked_at, ec.emotion_score
       FROM emotion_checkins ec
-      JOIN class_members cm ON cm.user_id = ec.user_id AND cm.status = 'active'
+      JOIN class_members cm ON cm.user_id = ec.user_id
       JOIN users u ON u.id = ec.user_id
-      WHERE cm.class_id = ? AND ec.checkin_date >= ? AND ec.checkin_date <= ?
+      WHERE cm.class_id = ? AND ${studentPopulationSql('cm', 'u')}
+        AND ec.checkin_date >= ? AND ec.checkin_date <= ?
       ORDER BY ec.checkin_date ASC
     `).all(classId, startDate, endDate);
 
