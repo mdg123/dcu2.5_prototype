@@ -828,9 +828,16 @@ router.post('/learning-map/mappings/bulk', ...adminOnly, (req, res) => {
     let inserted = 0, skipped = 0;
     const errors = [];
 
+    // ── [P0 동류 2026-08-07] 검사하는 값과 쓰는 값이 갈리면 안 된다 ─────────────
+    //   결함: `checkContent.get(contentId)` 는 원본 문자열을 SQLite 에 넘겨 "2.17e2"→217 로
+    //   코어션해 **217 이 승인본인지** 확인했는데, `ins.run(…, parseInt(contentId))` 는 **2** 를
+    //   기록했다(검사한 콘텐츠 ≠ 매핑된 콘텐츠). self-learn 의 questionId P0 와 같은 형태다.
+    //   → lib/ids.js 로 한 번 정규화하고, 검사·기록 모두 그 값만 쓴다.
     if (dryRun) {
       for (const m of mappings) {
-        const { nodeId, contentId } = m;
+        const { nodeId } = m;
+        const contentId = normalizeId(m.contentId);
+        if (contentId === null) { errors.push({ nodeId, contentId: m.contentId, reason: 'invalid_content_id' }); continue; }
         if (!checkNode.get(nodeId)) { errors.push({ nodeId, contentId, reason: 'node_not_found' }); continue; }
         if (!checkContent.get(contentId)) { errors.push({ nodeId, contentId, reason: 'content_not_approved' }); continue; }
         const exists = db.prepare('SELECT 1 FROM node_contents WHERE node_id=? AND content_id=?').get(nodeId, contentId);
@@ -841,10 +848,12 @@ router.post('/learning-map/mappings/bulk', ...adminOnly, (req, res) => {
 
     const tx = db.transaction(() => {
       for (const m of mappings) {
-        const { nodeId, contentId, role = 'practice', sortOrder = 0 } = m;
+        const { nodeId, role = 'practice', sortOrder = 0 } = m;
+        const contentId = normalizeId(m.contentId);
+        if (contentId === null) { errors.push({ nodeId, contentId: m.contentId, reason: 'invalid_content_id' }); continue; }
         if (!checkNode.get(nodeId)) { errors.push({ nodeId, contentId, reason: 'node_not_found' }); continue; }
         if (!checkContent.get(contentId)) { errors.push({ nodeId, contentId, reason: 'content_not_approved' }); continue; }
-        const r = ins.run(nodeId, parseInt(contentId), role, sortOrder);
+        const r = ins.run(nodeId, contentId, role, sortOrder);
         if (r.changes > 0) inserted++; else skipped++;
       }
     });

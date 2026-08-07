@@ -84,6 +84,30 @@ const OUT_DIR = path.resolve(
     : path.join(path.dirname(DB_PATH), '증적_' + path.basename(DB_PATH, path.extname(DB_PATH))))
 );
 
+// ── 보존 가드 자가검증 (`--selftest-preserve`) ────────────────────────────────
+//   "가드를 달았다"는 **보고**가 아니라 **실행 결과**로 확인되게 한다.
+//   (이전 라운드에서 했다고 보고됐으나 실제로는 안 돼 있던 항목이라 자가검증을 붙인다)
+if (process.argv.includes('--selftest-preserve')) {
+  const os = require('os');
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'preserve-selftest-'));
+  const f = path.join(tmp, 'report.md');
+  fs.writeFileSync(f, '# 리포트\n\n> ## 정정 공지\n> 손으로 덧붙인 문장\n\n본문 0건\n', 'utf8');
+  const r1 = writePreservingAnnotations(f, '# 리포트\n\n본문 0건\n');
+  const kept = fs.readFileSync(f, 'utf8');
+  const previewOk = fs.existsSync(path.join(tmp, 'report.preview.md'));
+  const g = path.join(tmp, 'plain.md');
+  fs.writeFileSync(g, '# 주석 없음\n', 'utf8');
+  const r2 = writePreservingAnnotations(g, '# 갱신됨\n');
+  const ok =
+    r1.action === 'preserved' && kept.includes('정정 공지') && previewOk &&
+    r2.action === 'written' && fs.readFileSync(g, 'utf8').includes('갱신됨');
+  console.log(ok
+    ? '[selftest-preserve] PASS — 정정문 보존 O / 주석 없는 파일 갱신 O'
+    : `[selftest-preserve] FAIL — r1=${JSON.stringify(r1)} r2=${JSON.stringify(r2)} previewOk=${previewOk}`);
+  try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (_) {}
+  process.exit(ok ? 0 : 1);
+}
+
 if (!['explain', 'struct', 'both'].includes(TIER)) {
   console.error(`[중단] --tier 값이 올바르지 않습니다: ${TIER} (explain|struct|both)`);
   process.exit(1);
@@ -564,6 +588,43 @@ function writePreservingRollback(target, content) {
 }
 writePreservingRollback(rollbackPath, rollbackLines.join('\n'));
 
+/**
+ * 사람이 손으로 덧붙인 **주석·정정문이 있는 마크다운 산출물**을 덮어쓰지 않는다.
+ *
+ * 🔴 2026-08-07 감리 지적: 보존 가드가 `rollback.sql`·`changes.csv` 에만 걸려 있었다.
+ *   그런데 `report.md` 는 적용이 끝난 뒤 **감리 정정 공지가 손으로 덧붙여진** 파일이었고,
+ *   이 스크립트를 인자 없이 한 번만 다시 돌리면 그 정정문이 통째로 사라지고
+ *   "대상 0건 / 과거 제출 영향 0건" 이라는 **사실과 다른 본문**으로 되돌아갔다.
+ *   (rollback.sql 이 빈 파일로 덮인 사고와 정확히 같은 형태다)
+ *
+ * 판별 규칙: 이 생성기는 blockquote(`>`) 줄을 **한 줄도 만들지 않는다**.
+ *   따라서 기존 파일에 `>` 로 시작하는 줄이 있으면 그것은 사람이 덧붙인 것이다.
+ *   그 경우 원본을 그대로 두고 새 산출물을 `*.preview.md` 로 옆에 쓴다.
+ *   (이 규칙 자체는 test/self-learn-attempt-guard.test.js 가 아니라
+ *    `--selftest-preserve` 플래그로 코드에서 직접 확인할 수 있다 — 아래 참조)
+ */
+function hasHandWrittenNotes(text) {
+  return String(text).split(/\r?\n/).some(l => /^\s*>/.test(l));
+}
+function writePreservingAnnotations(target, content) {
+  if (fs.existsSync(target)) {
+    const prev = fs.readFileSync(target, 'utf8');
+    if (prev === content) return { action: 'same' };
+    if (hasHandWrittenNotes(prev)) {
+      const preview = target.replace(/\.md$/, '.preview.md');
+      fs.writeFileSync(preview, content, 'utf8');
+      console.warn(
+        `[보존] ${path.basename(target)} 에 손으로 덧붙인 주석(> …)이 있어 덮어쓰지 않았습니다.\n` +
+        `        기존 파일 유지: ${target}\n        새 산출물: ${preview}`
+      );
+      return { action: 'preserved', preview };
+    }
+  }
+  fs.writeFileSync(target, content, 'utf8');
+  return { action: 'written' };
+}
+
+
 // (2) changes.csv — 변경 목록
 const csvHead = ['question_id', 'content_id', 'question_number', 'answer_before', 'answer_after', 'before_option', 'after_option', 'options', 'evidence', 'verdict', 'question_text'];
 const csvBody = changes.map(c => [
@@ -600,7 +661,7 @@ for (const v of conflicts) {
   }
   conflictLines.push('');
 }
-fs.writeFileSync(path.join(OUT_DIR, 'conflicts.md'), conflictLines.join('\n'), 'utf8');
+writePreservingAnnotations(path.join(OUT_DIR, 'conflicts.md'), conflictLines.join('\n'));
 
 /** 사람이 직접 확인한 struct-only 문항 소견 (2026-08-07 전수 육안 검증). */
 const STRUCT_ONLY_NOTES = new Map([
@@ -636,7 +697,7 @@ for (const v of structOnly) {
     );
   }
 }
-fs.writeFileSync(path.join(OUT_DIR, 'struct-only.md'), structLines.join('\n'), 'utf8');
+writePreservingAnnotations(path.join(OUT_DIR, 'struct-only.md'), structLines.join('\n'));
 
 // (4) 영향 범위 — 참조 테이블 건수 + 과거 제출 오채점
 function tableExists(t) {
@@ -797,7 +858,8 @@ if (stats.floatAnswer.length) {
 }
 md.push('');
 const reportPath = path.join(OUT_DIR, 'report.md');
-fs.writeFileSync(reportPath, md.join('\n'), 'utf8');
+// ★ 손으로 덧붙인 정정 공지(> …)가 있으면 덮어쓰지 않는다 — rollback.sql 과 같은 보존 규칙.
+writePreservingAnnotations(reportPath, md.join('\n'));
 
 // ── 적용 ───────────────────────────────────────────────────────────────
 /**

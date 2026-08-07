@@ -3,8 +3,8 @@
 // [부류 D] 진단검사 v3 회귀 (이번 세션 다수 수정 — db/self-learn-extended.js v3 엔진).
 //   핵심 박제:
 //     D-1 단원 단위 진단: startDiagnosisV3 는 node_level=2(단원)만 수용. 차시(level3) 거부.
-//     D-2 종료 백스톱: 어떤 클라이언트 동작에서도 누적 출제가 하드캡(200)을 넘으면 finished.
-//         (DIAG_V3_HARD_QUESTION_CAP — 무한 제출 방어선)
+//     D-2 [2026-08-07 제거] 하드 문항캡(200) 백스톱 — 종료 조건 신설로 불필요해져 삭제.
+//         유한성은 self-learn-diag-v3-termination.test.js 의 INV-DV3-9·9b 가 지킨다.
 //     D-3 표본 과반 통과 규칙(DIAG_V3_PREREQ_SAMPLE_N=3): 선수 갈래 진입 시 표본 검사로 통과/하향.
 //         (직접 호출 가능 범위: 풀 시나리오 구성이 비결정적이라, 채점·이동의 "구조 계약"과
 //          상태 일관성을 검증 — strike/이동/오답노트 자동등록·종료 안전망.)
@@ -59,35 +59,25 @@ test('DIAG-D1: v3 진단은 단원(level2)만 — 차시·미존재 노드 거�
 });
 
 // ──────────────────────────────────────────────────────────────────────────
-// D-2: 종료 백스톱(하드 문항캡) — 누적 출제가 상한을 넘으면 어떤 동작에서도 finished.
+// D-2: [2026-08-07 제거됨 — 아래 주석 참조]
+//   (구) 종료 백스톱(하드 문항캡) — 누적 출제가 상한을 넘으면 어떤 동작에서도 finished.
 //   세션 상태(per_node_answers JSON)의 askedQuestionIds 를 상한(200) 이상으로 위조 후 제출 →
 //   엔진이 즉시 finished/sessionComplete 로 끊어야(무한 제출 방어선).
 // ──────────────────────────────────────────────────────────────────────────
-test('DIAG-D2: 하드 문항캡 백스톱 — 누적 출제 ≥ 상한이면 즉시 종료', () => {
-  const start = sl.startDiagnosisV3(S1, { unitNodeId: UNIT });
-  const sid = start.sessionId;
-
-  // 세션의 v3 상태(difficulty_path 컬럼에 JSON 저장 — _v3LoadState 가 여기서 읽음)에서
-  //   askedQuestionIds 를 상한(200) 이상으로 부풀린다.
-  //   (정상 경로는 소프트상한·downCount·시간이 먼저 작동 — 이 가드는 최종 방어선)
-  const row = db.prepare('SELECT difficulty_path FROM diagnosis_sessions WHERE id = ?').get(sid);
-  const st = JSON.parse(row.difficulty_path);
-  assert.ok(st && st.v3, 'v3 상태가 difficulty_path 에 저장되어 있어야');
-  const bloated = [];
-  for (let i = 0; i < 205; i++) bloated.push(start.question.questionId);
-  st.askedQuestionIds = bloated;
-  db.prepare('UPDATE diagnosis_sessions SET difficulty_path = ? WHERE id = ?')
-    .run(JSON.stringify(st), sid);
-
-  const sub = sl.submitDiagnosisV3(sid, {
-    questionId: start.question.questionId,
-    contentId: start.question.contentId,
-    nodeId: start.question.nodeId,
-    answer: '아무거나'
-  });
-  assert.equal(sub.finished, true, '누적 출제 ≥ 하드캡(200) 이면 finished:true 로 종료');
-  assert.equal(sub.sessionComplete, true, '하드캡 도달 시 sessionComplete:true');
-});
+// [2026-08-07 제거] DIAG-D2 하드 문항캡(200) 백스톱 — 사용자 확정 "상한 필요없어".
+//
+//   그 상한은 **진단이 끝나지 않던 시절의 응급 처치**였다. 당시 v3 엔진에는
+//   "출발선을 찾았으면 종료" 조건이 아예 없어 무한 제출을 끊을 방법이 숫자뿐이었다.
+//   옛 주석은 "정상 경로는 소프트상한·downCount·시간이 먼저 작동한다" 고 했으나
+//   **그 셋이 전부 꺼져 있었다**(개념 30 상한은 빈 if 문, 12분 소프트스톱은 v3 미연결).
+//
+//   2026-08-07 종료 조건을 신설하면서 상한을 제거했다. 유한성은 이제 구조가 보장한다 —
+//   visitedConcepts 단조 증가 + branchVerdicts 재진입 차단으로 같은 노드를 다시 방문할 수
+//   없고, 노드 그래프가 유한하며, DIAG_V3_DOWN_CONCEPT_CAP(20)이 남아 있다.
+//
+//   ⚠ 이 테스트를 되살리지 말 것. 대신 **"반드시 끝나는가"** 를 검사하는
+//     `test/self-learn-diag-v3-termination.test.js` 의 INV-DV3-9 · 9b 가 그 역할을 한다.
+//     숫자 상한이 없으므로 무한 루프가 생기면 그쪽 안전망(maxSteps)에 걸려 붉어진다.
 
 // ──────────────────────────────────────────────────────────────────────────
 // D-3: 채점·이동 구조 계약 + 오답 자동 오답노트 등록 + 정답 통과 처리.

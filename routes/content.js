@@ -975,9 +975,13 @@ router.post('/:id/grade', requireAuth, (req, res) => {
 });
 
 // POST /api/contents/:id/attempts - 풀이 결과 기록
+//   열람 권한이 없는 콘텐츠에는 풀이 기록도 남기지 않는다(채점 게이트와 같은 판정).
+//   실측(2026-08-07): 학생이 비공개 193 으로 200 을 받아 기록을 남길 수 있었다.
+//   과잉 차단 위험 0 — content-player 는 GET /api/contents/:id(같은 게이트) 로 연 콘텐츠만 기록한다.
 router.post('/:id/attempts', requireAuth, (req, res) => {
   try {
     const contentId = parseInt(req.params.id);
+    if (!guardContent(req, res)) return;
     const { total_questions = 0, correct_count = 0, score_percent = 0, answers = null } = req.body || {};
     const db = _attemptsDb();
     try {

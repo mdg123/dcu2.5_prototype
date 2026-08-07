@@ -4,6 +4,8 @@ const { logLearningActivity } = require('./learning-log-helper');
 // 학생 모집단 SSOT — 분모·명단은 손 SQL 로 다시 적지 말 것 (db/class.js 주석 참조)
 const { studentPopulationSql, liveUserSql } = require('./class');
 const { awardPoints, getSetting } = require('./point-helper');
+// 정수 식별자 정규화 SSOT — 라우터 게이트와 **같은 판정**을 써야 두 값이 갈리지 않는다(2026-08-07 P0).
+const { normalizeId } = require('../lib/ids');
 
 // ========== 스키마 초기화 (P0 AI 맞춤학습 확장) ==========
 function init() {
@@ -1708,6 +1710,16 @@ function _buildRecommendedPathV3(session, st) {
     } catch (_) { return null; }
   };
 
+  // [진단 종료 재설계 2026-08-07 §1-A] **표본 통과 단원은 학습경로에 넣지 않는다.**
+  //   사용자 확정: "통과했으면 아는 단원이므로 경로 미포함. 그 단원의 선수도 큐에 넣지 않는다."
+  //   ⚠ 4문항 중 3개로 통과해도 1개는 틀릴 수 있다 — 그 오답은 **오답노트에만** 남기고
+  //     (진단 오답은 _registerDiagnosisWrongNote 로 자동 등록) 학습경로에는 태우지 않는다.
+  //   → 학습경로에는 "실패한 단원"만 들어간다.
+  const passVerdictUnits = new Set(
+    Object.keys((st && st.branchVerdicts && typeof st.branchVerdicts === 'object') ? st.branchVerdicts : {})
+      .filter(uid => st.branchVerdicts[uid] === 'pass')
+  );
+
   // 1) 미통과 개념 수집 (conceptOrder + visitedConcepts, 통과·스킵 제외)
   const passed = new Set(Array.isArray(st.passedConcepts) ? st.passedConcepts : []);
   const skipped = new Set(Array.isArray(st.skippedConcepts) ? st.skippedConcepts : []);
@@ -1738,6 +1750,7 @@ function _buildRecommendedPathV3(session, st) {
   const unitOrder = [];          // 입력 순서 보존(시작점이 없을 때 폴백 정렬 기준)
   const addUnit = (uid) => {
     if (!uid || unitSet.has(uid)) return;
+    if (passVerdictUnits.has(uid)) return;   // [§1-A] 통과 단원은 경로 제외
     unitSet.add(uid); unitOrder.push(uid);
   };
   if (startUnitId) addUnit(startUnitId);
@@ -3888,7 +3901,18 @@ function recordProblemAttempt(userId, contentId, { isCorrect, selectedAnswer, us
   let questionExplanation = null;
   let correctAnswer = null;
   if (questionId) {
-    const q = db.prepare('SELECT answer, options, explanation FROM content_questions WHERE id = ?').get(questionId);
+    // ── [P0 2026-08-07] 게이트와 채점기가 같은 값을 보게 한다 ────────────────────
+    //   결함(실측): 라우터 게이트는 parseInt("2.17e2")→2 로 읽어 "콘텐츠 5의 2번 문항"으로
+    //   승인했는데, 여기서 **원본 문자열**을 그대로 바인드해 SQLite 가 `WHERE id='2.17e2'` 를
+    //   217 로 코어션 → 비공개 콘텐츠의 문항 정답·해설이 나갔다.
+    //   ① 정규화 SSOT(lib/ids.js)로 Number 로 변환해 코어션 여지를 없애고,
+    //   ② 조회를 content_id 로 스코프해 라우터를 우회해 들어와도 교차 문항이 잡히지 않게 한다.
+    //   (라우터를 안 거치는 스크립트·테스트 호출도 이 두 겹으로 보호된다)
+    const qidNum = normalizeId(questionId);
+    const cidNum = normalizeId(contentId);
+    const q = (qidNum && cidNum)
+      ? db.prepare('SELECT answer, options, explanation FROM content_questions WHERE id = ? AND content_id = ?').get(qidNum, cidNum)
+      : null;
     if (q) {
       finalIsCorrect = judgeQuestionAnswer(q, submittedAnswer, submittedIndex) ? 1 : 0;
       questionExplanation = q.explanation || null;
@@ -5908,11 +5932,14 @@ function getDiagnosisState(sessionId) {
 //   - 진단 입자 = 개념(node_level=3). 단원(node_level=2)을 학생이 고르면 그 단원 첫 개념부터.
 //   - 개념 선후 = learning_map_edges.edge_type='prerequisite' (정방향=후속, 역방향=선수). 단원 경계 가로지름.
 //   - 문항 = content_questions.difficulty(정수 1~5) 기준 (v2 contents.difficulty 문자열 매칭과 다름).
-//   - 2-strike: 1차 오답 → 같은 개념·같은 난이도 "다른 문항"(이미 출제 제외) 1회 더 → 2차 오답 → 하향.
+//   - 차시당 1문제(2026-08-07 확정): 오답 1회 = 그 차시 실패. 재출제 없음.
+//   - 단원 판정은 **표본을 다 본 뒤에만**(§1-A): 프리셋 문항 수(빠르게4·표준5·꼼꼼히=차시전부)를
+//     끝까지 채우고 needPass 와 비교한다. **목표 단원(본류)도 예외 없이 같은 규칙**이다 —
+//     통과가 수학적으로 불가능해져도 남은 문항을 계속 묻는다(조기 확정·즉시 하향 없음).
 //   - 정답 비노출: 출제 시 answer/explanation 미포함. 채점은 서버.
 // 세션 상태(diagnosis_sessions.difficulty_path)에 v3 진행 상태(JSON)를 저장한다:
 //   { v3:true, unit:{...}, conceptOrder:[...], passedConcepts:[...], skippedConcepts:[...],
-//     visitedConcepts:[...], currentConcept, currentDifficulty, strike, askedQuestionIds:[...],
+//     visitedConcepts:[...], currentConcept, currentDifficulty, askedQuestionIds:[...],
 //     completedUnits:[...], diagnosedConcepts, history:[...] }
 
 // node_level=2 단원의 정렬된 개념(차시) 목록 — prerequisite 체인 우선, 폴백 sort_order.
@@ -6150,6 +6177,15 @@ function _v3LoadState(session) {
   if (st.nextRoundQueue == null || !Array.isArray(st.nextRoundQueue)) st.nextRoundQueue = [];
   // [단계표기 2026-06-11] 하위호환 — 구 세션엔 unitRound 부재. {}로 정규화(diagPlan round 폴백=1).
   if (st.unitRound == null || typeof st.unitRound !== 'object') st.unitRound = {};
+  // [진단 종료 재설계 2026-08-07] 하위호환 — 구 세션엔 세 필드 부재.
+  //   preset: 미지정이면 _v3PresetOf 가 표준으로 폴백(여기서 값을 박지 않는다 — 구 세션의
+  //           branchSample 은 자체 needPass 를 갖고 있어 그 값이 우선한다).
+  //   endReason: 종료 사유('position_found'|'floor_reached'|'stopped'…). 구 세션 null.
+  //   softStopAsked: 중단 확인(§5)을 이미 물었는지 — 매 제출마다 다시 묻지 않기 위한 1회 플래그.
+  if (st.endReason === undefined) st.endReason = null;
+  if (st.softStopAsked == null) st.softStopAsked = false;
+  // [§1-B] _pendingMore: 추가 진단 동의 대기 상태. 구 세션엔 없음(=대기 없음).
+  if (st._pendingMore === undefined) st._pendingMore = null;
   return st;
 }
 function _v3SaveState(sessionId, st, extra = {}) {
@@ -6211,9 +6247,14 @@ function getV3Units(userId, { schoolLevel, grade, area } = {}) {
     const total = concepts.length;
     // 가장 최근 세션에서 이 단원 진행 상태 추출
     let status = 'untested', passed = 0;
+    // [§7-3 2026-08-07] 세션 id 를 함께 돌려준다 — FE 의 "결과 보기"(u.lastSessionId)가 BE 미노출로
+    //   항상 렌더되지 않는 죽은 버튼이었고, "이어서 진단 →"은 재개가 아니라 새 세션을 만들고 있었다.
+    //   lastSessionId  : 이 단원을 진단한 가장 최근 **완료** 세션(결과 다시 보기용)
+    //   activeSessionId: 이 단원에서 시작한 **진행중** 세션(진짜 재개용 — /v3/active 와 같은 세션)
+    let lastSessionId = null, activeSessionId = null;
     try {
       const sessions = db.prepare(`
-        SELECT difficulty_path FROM diagnosis_sessions
+        SELECT id, status, target_node_id, difficulty_path FROM diagnosis_sessions
         WHERE user_id = ? AND diagnosis_type = 'concept-v3'
         ORDER BY id DESC LIMIT 30
       `).all(userId);
@@ -6221,8 +6262,19 @@ function getV3Units(userId, { schoolLevel, grade, area } = {}) {
       for (const s of sessions) {
         let st = null; try { st = JSON.parse(s.difficulty_path || 'null'); } catch {}
         if (!st || !st.v3) continue;
+        // 이 단원과 관련된 세션인지 — 목표 단원이 이 단원이거나, 이 단원 개념을 방문/통과했거나.
+        const conceptIdSet = new Set(concepts.map(c => c.nodeId));
+        const touchesUnit = (s.target_node_id === u.node_id)
+          || (st.unit && st.unit.nodeId === u.node_id)
+          || (st.completedUnits || []).includes(u.node_id)
+          || (st.visitedConcepts || []).some(id => conceptIdSet.has(id));
+        if (touchesUnit) {
+          // 재개는 "이 단원을 목표로 시작한" 진행중 세션만 — 하향으로 지나간 남의 단원에서 재개하면 혼란.
+          if (activeSessionId == null && s.status === 'in_progress' && s.target_node_id === u.node_id) activeSessionId = s.id;
+          if (lastSessionId == null && s.status === 'completed') lastSessionId = s.id;
+        }
         const completed = (st.completedUnits || []).includes(u.node_id);
-        const conceptIds = new Set(concepts.map(c => c.nodeId));
+        const conceptIds = conceptIdSet;
         const passedHere = (st.passedConcepts || []).filter(id => conceptIds.has(id)).length;
         if (completed) {
           if ((best || 0) < 2) { best = 2; passed = total; }
@@ -6241,7 +6293,8 @@ function getV3Units(userId, { schoolLevel, grade, area } = {}) {
     return {
       nodeId: u.node_id, name: u.unit_name || '단원', area: u.area || null,
       gradeLevel: u.grade_level || null, grade: u.grade != null ? u.grade : null, semester: u.semester != null ? u.semester : null,
-      conceptTotal: total, status, passed, sortOrder: u.sort_order || 0
+      conceptTotal: total, status, passed, sortOrder: u.sort_order || 0,
+      lastSessionId, activeSessionId
     };
   });
   // 정렬: 미진단 → 진행중 → 완료, 같은 상태 내 sort_order (기획서 §3-4)
@@ -6275,7 +6328,7 @@ function getV3Areas(schoolLevel, grade) {
 }
 
 // v3 진단 세션 시작 — 선택 단원의 첫 개념부터 첫 문항 출제 (정답 비노출)
-function startDiagnosisV3(userId, { schoolLevel, grade, subject, area, unitNodeId } = {}) {
+function startDiagnosisV3(userId, { schoolLevel, grade, subject, area, unitNodeId, preset } = {}) {
   if (!unitNodeId) {
     const err = new Error('unitNodeId가 필요합니다.'); err.statusCode = 400; throw err;
   }
@@ -6286,19 +6339,46 @@ function startDiagnosisV3(userId, { schoolLevel, grade, subject, area, unitNodeI
   if (conceptsArr.length === 0) { const err = new Error('이 단원에 진단할 개념이 없습니다.'); err.statusCode = 422; throw err; }
   const conceptOrder = conceptsArr.map(c => c.nodeId);
 
-  // 첫 개념: 문항이 있는 첫 개념 (없으면 skip)
+  // [진단 종료 재설계 2026-08-07 §1-A] 프리셋 — 시작 시 1회 확정하고 세션 내내 유지한다.
+  //   재개(/v3/active) 때도 이 값을 그대로 쓴다. 중간에 바뀌면 갈래마다 판정 기준이 섞인다.
+  const presetKey = (typeof preset === 'string' && DIAG_V3_PRESETS[preset]) ? preset : DIAG_V3_PRESET_DEFAULT;
+
+  // ★ [§1-A "🔴 목표 단원(본류)에도 똑같이 적용한다" 2026-08-07 사용자 확정]
+  //   목표 단원도 갈래 단원과 **완전히 같은 규칙**으로 표본을 뽑는다(균등 간격 + 앞뒤 교차).
+  //   이전에는 본류만 표본 없이 conceptOrder 순서대로 물었고, 1문제만 틀려도 즉시 하향했다 —
+  //   화면은 "5문제 볼게요"라고 하는데 실제로는 1문제만 나오는 거짓말이었다.
   const skipped = [];
+  const mainSample = _v3UnitSampleConcepts(unitNodeId, null, {
+    passedConcepts: [], skippedConcepts: [], preset: presetKey
+  });
+  // 첫 개념: 표본 순서에서 실제로 출제 가능한 첫 개념(문항 없는 것은 skip 처리하고 표본에서 제외).
+  //   표본이 비면(문항 보유 차시 0 등) 기존 방식(conceptOrder 순회)으로 폴백해 구 동작을 보존한다.
+  const sampleSeq = mainSample.slice();
   let firstConcept = null, firstQuestion = null, firstDiff = 3;
-  for (const cid of conceptOrder) {
+  while (sampleSeq.length > 0) {
+    const cid = sampleSeq[0];
     const d = _v3StartDifficulty(cid);
     const q = _v3PickQuestion(cid, d, []);
     if (q) { firstConcept = cid; firstQuestion = q; firstDiff = d; break; }
     skipped.push(cid);
+    sampleSeq.shift();
+  }
+  if (!firstConcept) {
+    for (const cid of conceptOrder) {
+      if (skipped.includes(cid)) continue;
+      const d = _v3StartDifficulty(cid);
+      const q = _v3PickQuestion(cid, d, []);
+      if (q) { firstConcept = cid; firstQuestion = q; firstDiff = d; break; }
+      skipped.push(cid);
+    }
   }
   if (!firstConcept) { const err = new Error('이 단원의 개념에 등록된 문제가 없습니다.'); err.statusCode = 422; throw err; }
 
   const st = {
     v3: true,
+    preset: presetKey,
+    endReason: null,
+    softStopAsked: false,
     // 사이드바 단원 패널 스코프 — 학생이 최초로 고른 학교급/학년/영역을 영속(advance 후에도 동일 스코프 유지).
     //   하향으로 실제 진단 단원이 타 학년으로 가더라도 패널 기준은 최초 선택을 유지(report M-1 권장안).
     scope: {
@@ -6314,7 +6394,6 @@ function startDiagnosisV3(userId, { schoolLevel, grade, subject, area, unitNodeI
     completedUnits: [],
     currentConcept: firstConcept,
     currentDifficulty: firstDiff,
-    strike: 0,
     askedQuestionIds: [firstQuestion.questionId],
     diagnosedConcepts: 0,
     // [다갈래 선수큐] 설계서 §3 — 약점 선수를 모두 담아 근본도순으로 차례 검사
@@ -6328,8 +6407,14 @@ function startDiagnosisV3(userId, { schoolLevel, grade, subject, area, unitNodeI
     // [단계표기 2026-06-11] 단원별 진입 라운드 기록 { [unitId]: round } — FE "N단계 내려감" 그룹 표기용.
     //   갈래 진입(_v3MoveIntoPrereq) 시 첫 진입 라운드만 기록(이미 있으면 유지).
     unitRound: {},
-    history: []  // [{ concept, correct, strike, questionId }]
+    history: []  // [{ concept, correct, questionId }]
   };
+
+  // ★ [§1-A 본류 표본] 목표 단원의 표본을 세션 시작 시점에 세팅한다.
+  //   이 한 줄이 "화면이 5문제라고 하면 목표 단원에서도 5문제가 나온다"를 성립시킨다.
+  //   표본이 서면 submit 의 표본 라우팅(_v3SampleConceptFail / _v3SampleVerdict)이 본류에도 걸려
+  //   1문제 오답 즉시 하향(_v3DownTo)이 일어나지 않는다.
+  _v3InitBranchSample(st, firstConcept, sampleSeq.length > 0 ? sampleSeq : null);
 
   const info = db.prepare(`
     INSERT INTO diagnosis_sessions
@@ -6343,6 +6428,7 @@ function startDiagnosisV3(userId, { schoolLevel, grade, subject, area, unitNodeI
   const prog = _v3UnitProgress(st);
   return {
     sessionId,
+    preset: _v3PresetInfo(st),
     unit: { nodeId: unit.node_id, name: unit.unit_name || '단원', area: unit.area || null, gradeLevel: unit.grade_level || null, grade: unit.grade != null ? unit.grade : null, semester: unit.semester != null ? unit.semester : null, conceptTotal: conceptOrder.length },
     concept: conceptHydrated,
     question: firstQuestion,
@@ -6351,6 +6437,13 @@ function startDiagnosisV3(userId, { schoolLevel, grade, subject, area, unitNodeI
       diagnosedConcepts: 0, elapsedSec: 0,
       conceptCap: DIAG_V3_CONCEPT_CAP, softTimeLimitSec: DIAG_SOFT_TIME_SEC,
       unitPassed: prog.passed, unitTotal: prog.total,
+      // [§1-A 본류 표본] 첫 화면부터 "문제 1/5"가 맞게 나오도록 표본 메타를 함께 내린다(_v3Progress 와 같은 형태).
+      sample: (st.branchSample && st.branchSample.unitId) ? {
+        unitId: st.branchSample.unitId,
+        cap: st.branchSample.sampleCap,
+        needPass: Number.isFinite(st.branchSample.needPass) ? st.branchSample.needPass : null,
+        tested: 0, passed: 0
+      } : null,
       diagPlan: []   // 시작 시엔 항상 단갈래(큐 없음) → 빈 배열(패널 숨김)
     }
   };
@@ -6359,11 +6452,11 @@ function startDiagnosisV3(userId, { schoolLevel, grade, subject, area, unitNodeI
 // v3 종료 상수
 const DIAG_V3_CONCEPT_CAP = 30;   // 누적 진단 개념 소프트 상한
 // [루프 안전망] FE 가 down/unit-complete 분기 처리에 실패해 같은 문항을 반복 제출하거나
-//   하향이 비정상적으로 길어져도 진단이 절대 무한히 이어지지 않도록 하는 하드 상한.
-//   - 어떤 클라이언트 동작에서도 누적 출제 문항 수가 이 값을 넘으면 즉시 종료(finished:true).
-//   - 정상 경로(통과/하향/완주)는 위 소프트 상한·downCount(20)·시간 소프트스톱이 먼저 작동하므로
-//     이 값은 순수 방어선이다. 정상 진단(최대 약 130문항 관측)보다 충분히 큰 200으로 둔다.
-const DIAG_V3_HARD_QUESTION_CAP = 200;
+// [2026-08-07 제거] 문항 하드 상한(DIAG_V3_HARD_QUESTION_CAP = 200) — 사용자 확정 "상한 필요없어".
+//   진단이 끝나지 않던 시절의 응급 처치였다. 유한성은 이제 구조가 보장한다:
+//     visitedConcepts 단조 증가 + branchVerdicts 재진입 차단(재방문 불가)
+//     + DIAG_V3_DOWN_CONCEPT_CAP(20, 아래 유지) + position_found/큐소진/floor_reached 종료.
+//   되살리려면 위 종료 조건이 왜 불충분한지 먼저 밝힐 것. 자세한 근거는 제거 지점 주석 참조.
 
 // v3 다갈래 선수큐(prereqQueue) 상한 — 설계서 §5.1 + 사용자 확정(Q1="더 철저히").
 //   하향 약점 갈래를 넉넉히 검사하되, 기존 DIAG_V3_CONCEPT_CAP(30)+12분 소프트스톱이 실질 백스톱.
@@ -6371,13 +6464,67 @@ const DIAG_V3_DOWN_CONCEPT_CAP = 20;  // 한 진단에서 하향(선수)으로 �
 const DIAG_V3_DOWN_DEPTH_CAP   = 8;   // 한 갈래의 연속 하향 최대 깊이
 const DIAG_V3_PREREQ_FANOUT    = 6;   // 한 개념에서 한 번에 큐에 담는 선수 최대 수(근본도 상위)
 
-// [선수 표본 과반] 설계서 §6.1 — 선수 단원 '통과' 판정을 첫 개념 1정답 → 표본 과반으로.
-//   N=3: 선수 단원 진입 시 그 단원 개념을 conceptOrder 순으로 최대 3개 표본 검사.
-//   각 표본 개념은 기존 2-strike(1정답=통과·2오답=실패) 유지하되, 개념 실패가 즉시 하향을 일으키지 않고
-//   표본 카운트(passed/failed)에만 반영 → 표본 통과 과반이면 갈래 '통과', 미달이면 '하향'.
-//   조기확정 on: cap3에서 2통과/2실패 도달 즉시 판정해 진단 단축. 본류(branchDepth=0)는 미적용.
-const DIAG_V3_PREREQ_SAMPLE_N = 3;             // 선수 단원 표본 검사 개념 수(문항보유 개념 부족 시 축소)
-const DIAG_V3_PREREQ_SAMPLE_EARLYSTOP = true;  // 조기 확정 on(통과/실패 과반 도달 즉시 판정)
+// [단원 표본] 설계서 §6.1 — 단원 '통과' 판정을 첫 개념 1정답 → 표본 판정으로.
+//   단원 진입 시 그 단원 차시에서 프리셋 문항 수만큼 표본을 뽑아(균등 간격 + 앞뒤 교차) 검사한다.
+//   각 표본 개념은 문항 1개(정답=통과·오답=실패)로 판정하되, 개념 실패가 즉시 하향을 일으키지 않고
+//   표본 카운트(passed/failed)에만 반영 → 표본을 다 본 뒤 needPass 이상이면 '통과', 미만이면 '하향'.
+//   ★ [§1-A 2026-08-07] **목표 단원(본류)과 선수 갈래가 완전히 같은 규칙이다. 예외 없음.**
+//     (과거 주석의 "본류는 미적용"은 폐기됐다 — 화면이 "5문제"라고 하면 본류에서도 5문제가 나온다.)
+// [진단 종료 재설계 2026-08-07 §1-A] 표본 4문항·3개 통과(75%)가 정본.
+//   과거값 3/2(67%)는 4지선다 찍기 통과확률이 높아(26%) 통과가 헐렁했다.
+//   4문항 3개=5.1% / 5문항 3개=10.4% → 엄격한 4문항 3개를 기준선으로 둔다.
+//   ※ 프리셋 미지정(구 세션·API 직접 호출) 시 폴백값. 정상 경로는 아래 DIAG_V3_PRESETS 가 정한다.
+const DIAG_V3_PREREQ_SAMPLE_N = 4;             // 선수 단원 표본 검사 개념 수(문항보유 개념 부족 시 축소)
+// ★ [2026-08-07 사용자 확정 "B. 조기 확정 제거"] 조기 확정 상수(DIAG_V3_PREREQ_SAMPLE_EARLYSTOP)를 **삭제**했다.
+//   사용자가 고른 수만큼 **항상** 출제한다 — 앞 4개를 다 맞혀도 5번째를 묻고, 앞 2개를 다 틀려도 끝까지 묻는다.
+//   판정은 표본을 다 본 뒤 needPass 와 비교한다(_v3SampleVerdict).
+//   ⚠ false 상수로 남기지 않았다 — 실행되지 않는 분기를 남기면 오늘 §4-3 의 빈 if 문처럼 잠든 코드가 된다.
+
+// [진단 종료 재설계 2026-08-07 §1-A] 진단 시작 화면의 3단계 프리셋 — "문항 수만" 고르고 정답률은 고정.
+//   퍼센트를 고르게 하지 않는 이유: 정답 개수는 정수라 선택지가 서로 겹친다
+//   (4문항에서 60%·70%는 둘 다 "3개", 80·90·100%는 셋 다 "4개" — 고른 값과 실제 동작이 달라진다).
+//   화면에는 "차시 5개 중 4개 정답"처럼 **실제 판정을 그대로** 노출한다.
+//   thorough(꼼꼼히)는 단원의 차시를 전부 보되 폭주 방지 상한(DIAG_V3_THOROUGH_CAP)을 건다.
+const DIAG_V3_PRESETS = {
+  quick:    { key: 'quick',    label: '빠르게', sampleCap: 4,    passRatio: null, needPass: 3 },
+  standard: { key: 'standard', label: '표준',   sampleCap: 5,    passRatio: null, needPass: 4 },
+  thorough: { key: 'thorough', label: '꼼꼼히', sampleCap: null, passRatio: 0.8,  needPass: null }
+};
+const DIAG_V3_PRESET_DEFAULT = 'standard';
+// 실측(정본 스냅샷): 단원당 차시 최대 27 · 평균 8.0 · 중앙값 7~8.
+//   전부 보면 갈래 3개에서 81개념이 되어 개념 상한(30)·12분 소프트스톱을 즉시 때린다.
+//   12 로 두면 145개 단원 중 118개(81%)는 차시 전부를 확인한다.
+const DIAG_V3_THOROUGH_CAP = 12;
+
+/** 세션 상태의 프리셋 정의를 돌려준다. 미지정·미상 값은 표준으로 폴백(구 세션 안전). */
+function _v3PresetOf(st) {
+  const key = st && typeof st.preset === 'string' ? st.preset : null;
+  return DIAG_V3_PRESETS[key] || DIAG_V3_PRESETS[DIAG_V3_PRESET_DEFAULT];
+}
+
+/**
+ * 화면 표시용 프리셋 정보. 라벨 문구는 "실제 판정 그대로" 쓴다(퍼센트 표기 금지 — §1-A).
+ *   quick/standard: "차시 4개 중 3개 정답" / thorough: "차시 전부(최대 12개) · 80% 이상 정답"
+ */
+function _v3PresetInfo(st) {
+  const p = _v3PresetOf(st);
+  // ★ [2026-08-07] 차시당 1문제 + 조기 확정 제거 → **고른 수 = 실제 출제 수**가 정확히 일치한다.
+  //   그래서 "차시 N개" 대신 학생이 겪는 단위인 **"N문제"** 로 그대로 쓴다.
+  //   이 desc 가 프리셋 카드·진행 표시·결과 화면이 모두 참조하는 **정본 문구**다
+  //   (화면마다 다른 말이 되는 것을 막기 위해 test/self-learn-diag-v3-termination.test.js 가 FE 문구와 대조한다).
+  const desc = p.sampleCap
+    ? `${p.sampleCap}문제 중 ${_v3NeedPassFor(p, p.sampleCap)}문제 이상 정답`
+    : `단원 차시마다 1문제씩 (최대 ${DIAG_V3_THOROUGH_CAP}문제)`;
+  return { key: p.key, label: p.label, sampleCap: p.sampleCap, needPass: p.sampleCap ? _v3NeedPassFor(p, p.sampleCap) : null, desc };
+}
+
+/** 표본 크기(cap)에 대한 통과 기준 개수. 프리셋이 개수를 못박았으면 그 값, 비율형(꼼꼼히)이면 ceil(cap*비율). */
+function _v3NeedPassFor(preset, cap) {
+  const c = Math.max(1, Number(cap) || 1);
+  if (preset && Number.isFinite(preset.needPass)) return Math.min(c, preset.needPass);
+  const ratio = (preset && Number.isFinite(preset.passRatio)) ? preset.passRatio : 0.8;
+  return Math.min(c, Math.max(1, Math.ceil(c * ratio)));
+}
 
 // v3 다음 문항 1개 (현재 개념·난이도, 이미 출제 제외)
 function getNextDiagnosisV3(sessionId) {
@@ -6421,7 +6568,7 @@ function _v3ParentUnitOf(conceptId) {
 
 // [다갈래] 진단 진행 계획 목록 — 선수(하향) 갈래 단원만 done/current/pending으로 dedupe.
 //   본류 목표 단원(st.unit.nodeId)은 제외(헤더·결과에서 별도 안내). 단갈래/큐없음이면 [].
-//   정렬: prereqQueue가 이미 근본도(_gradeAbsOf 학년 오름차순) 순 → 그 순서를 단원 단위로 보존.
+//   정렬: prereqQueue가 이미 검사 순서(§6 이후 _gradeAbsOf 내림차순 = 목표에 가까운 선수 먼저) → 그 순서를 단원 단위로 보존.
 //        done(상단) → current(가운데) → pending(하단) 자연 순서.
 //   반환: [{ nodeId, unitName, gradeLabel, area, status, passed?, conceptTotal? }]
 function _v3BuildDiagPlan(st) {
@@ -6555,7 +6702,20 @@ function _v3BuildDiagPlan(st) {
 
 function _v3Progress(session, st) {
   const prog = _v3UnitProgress(st);
+  // ★ [§1-A 본류 표본 2026-08-07] 진행 중인 표본(본류·갈래 공통)을 진행 표시의 **단일 출처**로 내려준다.
+  //   결함: 진행 띠(diagPlan)에만 표본 메타를 실었는데, diagPlan 은 하향이 없으면 [] 라(본류=단갈래)
+  //   목표 단원에서는 "(3/5)" 를 만들 근거가 화면에 아예 없었다 — 프리셋은 5문제라고 해놓고
+  //   진행 표시는 단원 전체 차시 기준("개념 1/8")으로 나와 두 숫자가 서로 다른 말을 했다.
+  const _bs = st.branchSample;
   return {
+    preset: _v3PresetInfo(st),          // [§1-A] 진행 화면·결과에서 "어떤 기준으로 진단 중인지" 표시용
+    sample: (_bs && _bs.unitId) ? {
+      unitId: _bs.unitId,
+      cap: _bs.sampleCap,
+      needPass: Number.isFinite(_bs.needPass) ? _bs.needPass : null,
+      tested: Array.isArray(_bs.tested) ? _bs.tested.length : 0,
+      passed: _bs.passed || 0
+    } : null,
     diagnosedConcepts: st.diagnosedConcepts || 0,
     elapsedSec: _diagElapsedSec(session),
     conceptCap: DIAG_V3_CONCEPT_CAP,
@@ -6612,7 +6772,7 @@ function _v3PrereqConcept(st) {
 
 // ============================================================
 // 다갈래 선수큐(prereqQueue) — 설계서 §4
-//   2-strike 하향 시 현재 개념의 약한 선수를 "모두" 큐에 담아 근본(낮은 학년)부터 차례 검사.
+//   오답 하향 시 현재 개념의 약한 선수를 "모두" 큐에 담아 차례 검사(§6 이후 목표에 가까운 순).
 // ============================================================
 
 // 개념 node_id의 절대학년(_gradeAbs) — 개념(차시) 메타가 비면 부모 단원값으로 보강(_v3HydrateConcept 동일 패턴).
@@ -6668,15 +6828,27 @@ function _v3PrereqCandidates(st, conceptId) {
     // [P1 본류복귀 2026-06-11/P3 가드] 부모 단원이 이미 판정(pass/down)된 갈래면 후보 제외 — 판정 끝난 단원 재진입 차단.
     const pu = _v3ParentUnitOf(id);
     if (pu && pu.nodeId && verdicts[pu.nodeId]) continue;
+    // ★ [§1-A 본류 표본 2026-08-07] 이미 **통과로 마친 단원**의 개념도 후보에서 뺀다.
+    //   왜 필요해졌나 — 본류에 표본을 적용하기 전에는 목표 단원의 개념을 전부 물어 통과했으므로
+    //   남는 개념이 없었다. 이제는 프리셋 수(예: 9개 중 5개)만 묻고 통과하므로 **안 물어본 개념이 남는다.**
+    //   그 개념이 다음 단원의 선수로 걸리면 방금 통과한 단원을 다시 물어보게 된다
+    //   (§1-A "통과한 단원의 선수는 큐에 넣지 않는다"와 정면 충돌).
+    //   구 세션은 completedUnits 의 개념이 전부 passedConcepts 라 위 필터가 이미 걸러 — 동작 불변.
+    if (pu && pu.nodeId && Array.isArray(st.completedUnits) && st.completedUnits.includes(pu.nodeId)) continue;
     seen.add(id);
     cand.push(id);
   }
-  cand.sort((a, b) => (_gradeAbsOf(a) - _gradeAbsOf(b)) || (_sortOrderOf(a) - _sortOrderOf(b)));
+  // [진단 종료 재설계 2026-08-07 §6] 내림차순 — 1순위 높은 학년, 2순위 높은 학기(= 목표에 가까운 선수부터).
+  //   _gradeAbs 는 학년·학기를 한 축으로 합친 값(초1-1=2 … 고3-2=25)이라 비교 한 번으로 둘 다 해결된다.
+  //   ⚠ slice(0,N) 은 그대로 둔다 — 정렬을 뒤집으면 "앞"이 목표에 가까운 후보가 되어 절단이 저절로 옳아진다.
+  //   (오름차순 시절엔 절단이 경계 후보를 버리고 가장 깊은 것만 남겨 출발선을 놓쳤다.)
+  //   잘린 깊은 노드는 사라지지 않는다 — 가까운 선수를 실패하면 그 각각에서 다음 라운드가 파생된다.
+  cand.sort((a, b) => (_gradeAbsOf(b) - _gradeAbsOf(a)) || (_sortOrderOf(b) - _sortOrderOf(a)));
   return cand.slice(0, DIAG_V3_PREREQ_FANOUT);
 }
 
 // §4.2 — enqueue(현재 라운드, prereqQueue 적재용).
-//   [라운드방식 2026-06-11] 본류 2-strike에서 1라운드를 적재할 때만 사용. 라운드 진행 중 순서 불변이 핵심이므로
+//   [라운드방식 2026-06-11] 본류 오답에서 1라운드를 적재할 때만 사용. 라운드 진행 중 순서 불변이 핵심이므로
 //   여기서 전역 재정렬은 1회만(=라운드 적재 순간) 수행하고, 이후 dequeue는 순서를 절대 바꾸지 않는다.
 //   갈래 내부에서 발견된 더 깊은 선수는 prereqQueue가 아니라 nextRoundQueue로 적립한다(_v3EnqueueNextRound).
 function _v3EnqueuePrereqs(st, conceptId) {
@@ -6684,13 +6856,15 @@ function _v3EnqueuePrereqs(st, conceptId) {
   for (const id of cands) {
     if (!st.prereqQueue.includes(id)) st.prereqQueue.push(id);
   }
-  // 라운드 적재 순간 1회 근본도 오름차순 정렬(고정 순서 확정) — 이후 라운드 진행 중에는 재정렬 금지.
-  st.prereqQueue.sort((a, b) => (_gradeAbsOf(a) - _gradeAbsOf(b)) || (_sortOrderOf(a) - _sortOrderOf(b)));
-  // 큐 길이 상한: 가장 근본(앞)만 남기고 절단
+  // 라운드 적재 순간 1회 정렬(고정 순서 확정) — 이후 라운드 진행 중에는 재정렬 금지.
+  //   [§6 2026-08-07] 내림차순(높은 학년·학기 우선) — 목표에 가까운 선수부터 검사한다.
+  st.prereqQueue.sort((a, b) => (_gradeAbsOf(b) - _gradeAbsOf(a)) || (_sortOrderOf(b) - _sortOrderOf(a)));
+  // 큐 길이 상한: 목표에 가까운(앞) 후보만 남기고 절단
   if (st.prereqQueue.length > DIAG_V3_DOWN_CONCEPT_CAP) {
     st.prereqQueue = st.prereqQueue.slice(0, DIAG_V3_DOWN_CONCEPT_CAP);
   }
-  return cands.length;
+  // [§1-B] 절단 후 **실제로 큐에 남은** 후보만 반환 — 예고 문구가 거짓이 되지 않게.
+  return cands.filter(id => st.prereqQueue.includes(id));
 }
 
 // [라운드방식 2026-06-11] §4.2-R — enqueue(다음 라운드, nextRoundQueue 적립용).
@@ -6699,15 +6873,97 @@ function _v3EnqueuePrereqs(st, conceptId) {
 //   정렬은 하지 않는다(라운드 시작 시 _v3StartNextRound가 1회 정렬). 누적 상한만 적용.
 function _v3EnqueueNextRound(st, conceptId) {
   const cands = _v3PrereqCandidates(st, conceptId);
-  let added = 0;
   for (const id of cands) {
-    if (!st.nextRoundQueue.includes(id) && !st.prereqQueue.includes(id)) { st.nextRoundQueue.push(id); added++; }
+    if (!st.nextRoundQueue.includes(id) && !st.prereqQueue.includes(id)) st.nextRoundQueue.push(id);
   }
   // 적립 큐도 폭주 방지(근본 우선 절단) — 라운드 시작 시 정렬되므로 여기선 길이만 제한.
   if (st.nextRoundQueue.length > DIAG_V3_DOWN_CONCEPT_CAP) {
     st.nextRoundQueue = st.nextRoundQueue.slice(0, DIAG_V3_DOWN_CONCEPT_CAP);
   }
-  return added;
+  // [§1-B] 절단 후 **실제로 적립된** 후보만 반환 — 예고 문구가 거짓이 되지 않게.
+  return cands.filter(id => st.nextRoundQueue.includes(id));
+}
+
+/**
+ * [§1-B 최종 2026-08-07] 단원 실패 → **추가 진단 여부를 학생에게 묻는다.**
+ *
+ * > 사용자 확정: "계속하기 말고 [추가 진단에 넣기] / [넣지 않기] 이렇게 하고,
+ * >              넣지 않으면 현재 큐에 들어간 진단 단원의 문제만 나오는 걸로"
+ *
+ * 🔴 **"넣지 않기" 는 진단 종료가 아니다.** 그 단원 **아래로 더 안 파는 것**뿐이고,
+ *   현재 큐에 이미 들어간 단원은 그대로 진행된다. 모든 단원에서 넣지 않기를 고르면
+ *   큐가 자연히 소진돼 정상 종료(§4-1)로 이어진다.
+ *   진단을 아예 끝내는 것은 §5 중단 확인 모달이 담당한다 — 두 모달의 역할을 섞지 말 것.
+ *
+ * ⚠ 트레이드오프(기록): "넣지 않기"를 고르면 출발선이 실제보다 높게 잡힐 수 있다.
+ *   PM 이 이를 근거로 선택지 제거를 제안했으나 **사용자가 2지선다를 확정**했다
+ *   (자기주도 진단이므로 학생이 시간을 통제할 수 있어야 한다). **다시 제안하지 말 것.**
+ *
+ * 구현: 적재를 **지연**한다. 여기서는 "적재하면 얼마나 늘어나는지"만 실측하고 롤백한 뒤 묻는다.
+ *   학생이 '넣기'를 고르면 advanceDiagnosisV3('more-units', {accept:true}) 가 같은 계산을 다시 돌려 실제 적재한다.
+ *   (_v3PrereqCandidates 는 DB 조회+정렬로 결정적이므로 두 번 계산해도 같은 결과다.)
+ *
+ * @returns resp(완결 — 학생에게 묻는 응답) 또는 null(늘어날 게 없어 그냥 진행)
+ */
+function _v3AskMoreUnits(sessionId, session, st, resp, wrongNoteAdded, sources, mode) {
+  const snapCur = Array.isArray(st.prereqQueue) ? st.prereqQueue.slice() : [];
+  const snapNext = Array.isArray(st.nextRoundQueue) ? st.nextRoundQueue.slice() : [];
+  let added = [];
+  for (const cid of sources) {
+    const r = (mode === 'next') ? _v3EnqueueNextRound(st, cid) : _v3EnqueuePrereqs(st, cid);
+    added = added.concat(r || []);
+  }
+  const more = _v3ForecastAddition(st, added);
+  // 롤백 — 아직 적재하지 않는다(학생이 '넣기'를 골라야 확정).
+  st.prereqQueue = snapCur;
+  st.nextRoundQueue = snapNext;
+  if (!more) return null;   // 늘어날 게 없으면 묻지 않고 기존 흐름 진행
+
+  const unitName = (st.unit && st.unit.name) || '이 단원';
+  st._pendingMore = { sources: sources.slice(), mode, units: more.units, questions: more.questions, unitName };
+  resp.attemptStage = 'more-units';
+  resp.branch = null;
+  resp.nextQuestion = null;
+  resp.moreUnits = { units: more.units, questions: more.questions, unitName };
+  _v3SaveState(sessionId, st, { currentNodeId: st.currentConcept, wrongAddDelta: wrongNoteAdded ? 1 : 0 });
+  resp.progress = _v3Progress(session, st);
+  return resp;
+}
+
+/**
+ * [§1-B 2026-08-07] 한 단원이 실패해 선수가 추가될 때, **이번에 늘어나는 분량을 정확히** 산출한다.
+ *
+ * 사용자 확정: "단원 실패할때마다 물어야지. 그래야 사용자가 알지" → 실패할 때마다 묻는다.
+ *
+ * ★ 조기 확정을 없앤(§1-A) 덕분에 이 수치가 **추정이 아니라 확정값**이다.
+ *   단원마다 정확히 min(프리셋 문항 수, 그 단원의 출제 가능 차시 수) 문항이 나온다.
+ *   "시간이 조금 더 걸려요" 같은 막연한 말 대신 "문제 15개가 더 나와요"라고 말할 수 있는 이유다.
+ *
+ * @param addedConceptIds _v3EnqueuePrereqs/_v3EnqueueNextRound 가 돌려준 "실제로 적재된" 선수 개념들
+ * @returns {{units:number, questions:number}|null} 늘어날 게 없으면 null
+ */
+function _v3ForecastAddition(st, addedConceptIds) {
+  if (!Array.isArray(addedConceptIds) || addedConceptIds.length === 0) return null;
+  const preset = _v3PresetOf(st);
+  const perUnit = new Map();   // unitId → 그 단원에서 나올 문항 수
+  for (const cid of addedConceptIds) {
+    if (!cid || !_v3HasQuestion(cid)) continue;          // 문항 없는 토큰은 pop 에서 skip 되므로 예고에서 제외
+    const pu = _v3ParentUnitOf(cid);
+    if (!pu || !pu.nodeId || perUnit.has(pu.nodeId)) continue;
+    // 그 단원에서 실제 출제될 표본 크기 = _v3UnitSampleConcepts 와 동일한 풀 계산
+    let pool = [];
+    try {
+      pool = _v3ConceptsOfUnit(pu.nodeId).map(c => c.nodeId).filter(id =>
+        _v3HasQuestion(id) && !st.passedConcepts.includes(id) && !st.skippedConcepts.includes(id));
+    } catch (_) { pool = []; }
+    if (pool.length === 0) continue;
+    const capFor = preset.sampleCap != null ? preset.sampleCap : Math.min(pool.length, DIAG_V3_THOROUGH_CAP);
+    perUnit.set(pu.nodeId, Math.max(1, Math.min(capFor, pool.length)));
+  }
+  if (perUnit.size === 0) return null;
+  let questions = 0;
+  for (const n of perUnit.values()) questions += n;
+  return { units: perUnit.size, questions };
 }
 
 // [라운드방식 2026-06-11] §4.3-R — 라운드 전환. 현재 prereqQueue 소진 시 호출.
@@ -6725,9 +6981,10 @@ function _v3StartNextRound(st) {
     st.nextRoundQueue = [];   // 무한루프 가드: 폐기 시에도 반드시 비운다.
     return false;
   }
-  // 다음 라운드 적재 — 근본도 오름차순 1회 정렬(이후 라운드 진행 중 불변).
+  // 다음 라운드 적재 — 1회 정렬(이후 라운드 진행 중 불변).
+  //   [§6 2026-08-07] 내림차순(높은 학년·학기 우선) — _v3EnqueuePrereqs 와 같은 방향이어야 라운드 간 순서가 일관된다.
   const round = st.nextRoundQueue.slice();
-  round.sort((a, b) => (_gradeAbsOf(a) - _gradeAbsOf(b)) || (_sortOrderOf(a) - _sortOrderOf(b)));
+  round.sort((a, b) => (_gradeAbsOf(b) - _gradeAbsOf(a)) || (_sortOrderOf(b) - _sortOrderOf(a)));
   st.prereqQueue = (round.length > DIAG_V3_DOWN_CONCEPT_CAP) ? round.slice(0, DIAG_V3_DOWN_CONCEPT_CAP) : round;
   st.nextRoundQueue = [];     // 무한루프 가드: 전환 시 반드시 비운다(설계서 회귀 보존).
   return true;
@@ -6752,7 +7009,7 @@ function _v3DequeueNextRoundAware(st) {
   return { id: null, newRound };
 }
 
-// §4.3 — dequeue. 가장 근본(앞)부터 pop. visited/passed/skip·상한 가드·문항없음 skip 루프.
+// §4.3 — dequeue. 큐 앞부터 pop(§6 이후 = 목표에 가장 가까운 선수부터). visited/passed/skip·상한 가드·문항없음 skip 루프.
 //   반환: 다음 검사할 선수 node_id 또는 null(큐 소진/상한 → 하향 전체 종료).
 function _v3DequeueNext(st) {
   const maxIter = (st.prereqQueue.length || 0) + 2;  // 무한루프 방어(R3)
@@ -6766,6 +7023,10 @@ function _v3DequeueNext(st) {
     // [P1 본류복귀 2026-06-11/P3 가드] 부모 단원이 이미 판정(pass/down)된 갈래면 pop 대상에서 제외 — 재진입 차단.
     const pu = _v3ParentUnitOf(id);
     if (pu && pu.nodeId && verdicts[pu.nodeId]) continue;
+    // [§1-A 본류 표본 2026-08-07] "통과로 마친 단원(completedUnits) 재진입 금지"는 **적재 단계**
+    //   (_v3PrereqCandidates)에서 막는다. 여기에 같은 검사를 한 벌 더 두지 않는 이유: 적재 이후에
+    //   단원이 통과되는 경로가 없어(통과는 실패 이전에만 일어난다) 절대 발화하지 않는 분기가 되기 때문.
+    //   회귀는 INV-DV3-27 이 적재 단계에서 잡는다.
     if (!_v3HasQuestion(id)) { if (!st.skippedConcepts.includes(id)) st.skippedConcepts.push(id); continue; }  // 문항 없음 skip
     return id;
   }
@@ -6798,7 +7059,6 @@ function _v3MoveIntoPrereq(st, prereqId) {
 
   st.currentConcept = entryConcept;
   st.currentDifficulty = _v3StartDifficulty(entryConcept);
-  st.strike = 0;
   if (!st.visitedConcepts.includes(entryConcept)) st.visitedConcepts.push(entryConcept);
   st.downCount = (st.downCount || 0) + 1;
   // [라운드방식 2026-06-11] branchDepth = 현재 라운드 번호(증가 대신). branchDepth>0 게이트(표본 적용)는
@@ -6817,9 +7077,12 @@ function _v3MoveIntoPrereq(st, prereqId) {
 }
 
 // ============================================================
-// [선수 표본 과반] 단원 표본 검사(unit sampling) — 설계서 §4
-//   선수 갈래(branchDepth>0)에 한해 '통과' 판정을 첫 개념 1정답 → 표본 N개 중 과반 정답으로 강화.
-//   본류(branchDepth=0)는 미적용(기존 순차 진단 그대로).
+// [단원 표본] 단원 표본 검사(unit sampling) — 설계서 §4 + §1-A
+//   단원 '통과' 판정 = 프리셋 문항 수만큼 표본을 **끝까지 본 뒤** needPass 이상 정답.
+//   ★ [2026-08-07 사용자 확정] **목표 단원(본류)과 선수 갈래에 동일 적용한다.**
+//     세션 시작(startDiagnosisV3)·다음 단원 진행(advanceDiagnosisV3 'continue-next-unit')·
+//     갈래 진입(_v3MoveIntoPrereq) — 세 진입점 모두에서 _v3InitBranchSample 로 표본을 세운다.
+//     셋 중 하나라도 빠지면 그 경로만 조용히 "1오답 즉시 하향"으로 되돌아간다.
 // ============================================================
 
 // §4.1 — 표본 단원 개념 목록(문항 보유·미통과·미skip, conceptOrder 순).
@@ -6829,13 +7092,54 @@ function _v3MoveIntoPrereq(st, prereqId) {
 //   '앞에서부터' 문항보유·미통과·미skip 개념을 최대 N개 모아 표본으로 삼는다(단원 기초부터 검사).
 //   (visited는 무관 — _v3MoveIntoPrereq가 표본 산정 후 sample[0]을 진입 개념으로 세팅·visited.push 하므로
 //    표본 산정 단계에서는 visited를 필터에 넣지 않는다.)
+//   [진단 종료 재설계 2026-08-07 §1-A] "앞에서부터 N개" → **균등 간격 + 앞뒤 교차 순서**.
+//     결함(이전): conceptOrder 순서대로 뽑아 차시 5개에서 4개를 고르면 항상 앞의 4개 →
+//       마지막 차시가 진단 사각지대. "앞부분은 알고 뒷부분을 모르는 학생"을 통과시켜 출발선이 높게 잡혔다.
+//     정본: 양 끝을 포함하는 균등 간격 idx_i = round(i*(N-1)/(cap-1)) 로 cap 개를 고른다.
+//       예) N=5,cap=4 → 0,1,3,4 / N=8,cap=4 → 0,2,5,7. N<=cap 이면 전부.
+//     그리고 **묻는 순서를 앞뒤로 번갈아** 둔다(진입 → 마지막 → 두 번째 → 뒤에서 두 번째 …).
+//       조기 확정(연속 정답 시 남은 표본 생략) 때문에 순서대로 물으면 생략되는 것이 대개 마지막 차시라
+//       사각지대가 되살아난다. 교차로 물으면 3문항만에 끝나도 단원의 앞·뒤가 모두 확인된다.
 function _v3UnitSampleConcepts(unitId, entryConceptId, st) {
   const all = _v3ConceptsOfUnit(unitId).map(c => c.nodeId);   // conceptOrder(위상정렬) 순
   // 단원 앞에서부터: 문항보유 + 미통과 + 미skip만. (visited 무관 — 진입 직전 push 되므로 제외하면 표본 0됨)
-  const seq = all.filter(id =>
+  const pool = all.filter(id =>
     _v3HasQuestion(id) && !st.passedConcepts.includes(id) && !st.skippedConcepts.includes(id));
-  // 최대 N개(앞에서부터). 문항보유 개념이 N 미만이면 있는 만큼.
-  return seq.slice(0, DIAG_V3_PREREQ_SAMPLE_N);
+  if (pool.length === 0) return [];
+
+  const preset = _v3PresetOf(st);
+  // 꼼꼼히(sampleCap=null)는 단원 차시 전부 — 단, 폭주 방지 상한을 건다.
+  const wantCap = preset.sampleCap != null
+    ? preset.sampleCap
+    : Math.min(pool.length, DIAG_V3_THOROUGH_CAP);
+  const cap = Math.max(1, Math.min(wantCap, pool.length));
+
+  // ① 균등 간격 뽑기(양 끝 포함). cap 이 pool 이상이면 전부.
+  let picked;
+  if (cap >= pool.length) {
+    picked = pool.slice();
+  } else if (cap === 1) {
+    picked = [pool[0]];
+  } else {
+    const idxs = [];
+    for (let i = 0; i < cap; i++) {
+      const idx = Math.round(i * (pool.length - 1) / (cap - 1));
+      if (!idxs.includes(idx)) idxs.push(idx);
+    }
+    // 반올림 충돌로 모자라면 아직 안 뽑힌 인덱스로 보충(§1-A "다음 후보로 보충")
+    for (let i = 0; i < pool.length && idxs.length < cap; i++) if (!idxs.includes(i)) idxs.push(i);
+    idxs.sort((a, b) => a - b);
+    picked = idxs.map(i => pool[i]);
+  }
+
+  // ② 묻는 순서 — 진입(첫 차시) 뒤로는 앞뒤 교차. picked=[1,2,4,5] → [1,5,2,4]
+  const ordered = [picked[0]];
+  let lo = 1, hi = picked.length - 1, takeHigh = true;
+  while (lo <= hi) {
+    ordered.push(takeHigh ? picked[hi--] : picked[lo++]);
+    takeHigh = !takeHigh;
+  }
+  return ordered;
 }
 
 // §4.2 — 선수 단원 진입 시 표본 상태 초기화. cap<1이면 null(표본 미적용=구 동작 폴백).
@@ -6847,16 +7151,64 @@ function _v3InitBranchSample(st, entryConceptId, sampleArr) {
   const seq = (Array.isArray(sampleArr) && sampleArr.length > 0)
     ? sampleArr
     : _v3UnitSampleConcepts(unitId, entryConceptId, st);
-  const cap = Math.min(DIAG_V3_PREREQ_SAMPLE_N, seq.length);
+  // [진단 종료 재설계 2026-08-07 §1-A] cap 은 프리셋이 정한다(빠르게4·표준5·꼼꼼히=차시전부).
+  //   _v3UnitSampleConcepts 가 이미 프리셋 cap 만큼만 뽑아 오므로 seq.length 가 실질 cap.
+  const preset = _v3PresetOf(st);
+  const presetCap = preset.sampleCap != null ? preset.sampleCap : DIAG_V3_THOROUGH_CAP;
+  const cap = Math.min(presetCap, seq.length);
   if (cap < 1) { st.branchSample = null; return; }
   st.branchSample = {
     unitId,
     sampleCap: cap,
+    // ★ 통과 기준을 표본에 **박아 둔다.** 세션 중에 프리셋이 바뀌어도(또는 상수를 나중에 손대도)
+    //   진행 중인 갈래의 판정 기준이 흔들리지 않는다. 구 세션(needPass 부재)은 _v3SampleVerdict 가
+    //   과거 공식(과반)으로 폴백하므로 하위호환이 유지된다.
+    needPass: _v3NeedPassFor(preset, cap),
+    presetKey: preset.key,
     sampleQueue: seq.slice(1),   // 진입 개념(seq[0])은 곧 검사하므로 큐에서 제외
     tested: [],
     passed: 0,
     failed: 0
   };
+}
+
+/**
+ * 표본의 통과/실패 기준 개수. 표본에 needPass 가 박혀 있으면 그 값(신규 세션),
+ * 없으면 구 공식(과반 + cap2·cap1 엄격화)으로 폴백한다(구 세션 하위호환 — 동작 불변).
+ */
+function _v3SampleThresholds(bs) {
+  const cap = Math.max(1, Number(bs && bs.sampleCap) || 1);
+  let needPass;
+  if (bs && Number.isFinite(bs.needPass)) {
+    needPass = Math.min(cap, Math.max(1, bs.needPass));
+  } else {
+    needPass = Math.ceil(cap / 2);
+    if (cap === 2) needPass = 2;
+    if (cap === 1) needPass = 1;
+  }
+  // [2026-08-07] needFail 삭제 — 조기 확정이 없어져 "이만큼 틀리면 즉시 실패"라는 지점 자체가 사라졌다.
+  //   표본을 전부 본 뒤 passed 와 needPass 만 비교한다.
+  return { cap, needPass };
+}
+
+/**
+ * 표본 큐가 cap 을 다 채우지 못하고 소진됐을 때의 강제 판정.
+ *
+ * ★ [§1-A "문항이 4개 미만인 단원: 있는 만큼 출제하고 **과반**으로 판정한다"]
+ *   cap 기준을 그대로 쓰면 **3개를 다 맞혀도 실패**로 떨어진다(표준 프리셋 needPass=4).
+ *   실측(격리 사본, "각·직각" 갈래): 표본 4개로 잡혔으나 큐 토큰 개념이 visited 로 이미 마킹돼
+ *   실제로는 3개만 출제 → 3/3 정답인데 verdict='fail' → 엉뚱한 하향. 이 함수가 그 구멍을 막는다.
+ *   실제 검사한 개수(tested)가 cap 에 못 미치면 그 개수의 과반으로 판정한다.
+ *   (검사 1~2개면 전부 정답이어야 통과 — 우연 정답 1개로 단원을 통과시키지 않는다.)
+ */
+function _v3ForcedVerdict(bs) {
+  if (!bs) return 'pass';
+  const tested = Array.isArray(bs.tested) ? bs.tested.length : 0;
+  const { cap, needPass } = _v3SampleThresholds(bs);
+  if (tested >= cap) return (bs.passed >= needPass) ? 'pass' : 'fail';
+  const eff = Math.max(1, tested);
+  const needEff = eff <= 2 ? eff : Math.ceil(eff / 2);
+  return (bs.passed >= needEff) ? 'pass' : 'fail';
 }
 
 // §4.3 — 표본 1개념 판정 반영(개념 통과/실패 확정 순간). passed/failed·tested 갱신.
@@ -6867,20 +7219,16 @@ function _v3SampleRecord(st, conceptId, conceptPassed) {
   if (conceptPassed) bs.passed += 1; else bs.failed += 1;
 }
 
-// §4.4 — 갈래 판정. 'pass' | 'fail' | 'continue'. 조기확정·소수표본 엄격화 반영.
+// §4.4 — 단원 판정(본류·갈래 공통). 'pass' | 'fail' | 'continue'.
 function _v3SampleVerdict(bs) {
   if (!bs) return 'pass';
-  const cap = bs.sampleCap;
-  let needPass = Math.ceil(cap / 2);
-  let needFail = cap - needPass + 1;
-  // 소수 표본 엄격화(S5): cap2는 둘 다 맞아야 통과(1 우연정답 차단), cap1은 단일.
-  if (cap === 2) { needPass = 2; needFail = 1; }
-  if (cap === 1) { needPass = 1; needFail = 1; }
-  if (DIAG_V3_PREREQ_SAMPLE_EARLYSTOP) {
-    if (bs.passed >= needPass) return 'pass';   // 조기확정: 과반 통과 도달 즉시
-    if (bs.failed >= needFail) return 'fail';   // 조기확정: 과반 미달 확정 즉시
-  }
-  if (bs.tested.length >= cap) return (bs.passed >= needPass) ? 'pass' : 'fail';  // 표본 소진
+  const { cap, needPass } = _v3SampleThresholds(bs);
+  // ★ [2026-08-07] 조기 확정 없음 — 사용자가 고른 수(cap)를 **다 볼 때까지** 판정하지 않는다.
+  //   통과가 이미 확정됐어도(예: 5개 중 4개 정답) 남은 문항을 계속 묻는다. 고른 수 = 실제 출제 수.
+  //   ★ 통과가 **수학적으로 불가능해진 뒤에도** 마찬가지다(5개 중 앞 2개 오답 → 3·4·5번을 다 묻고
+  //     그 뒤에 하향). "이미 틀렸으니 그만"은 화면이 예고한 문항 수를 어기는 것이고,
+  //     같은 프리셋인데 단원마다 실제 출제 수가 달라진다. 목표 단원도 예외가 아니다.
+  if (bs.tested.length >= cap) return (bs.passed >= needPass) ? 'pass' : 'fail';  // 표본 소진 후에만 판정
   return 'continue';   // 다음 표본 개념으로
 }
 
@@ -6890,7 +7238,6 @@ function _v3SampleVerdict(bs) {
 function _v3MoveToSample(st, conceptId) {
   st.currentConcept = conceptId;
   st.currentDifficulty = _v3StartDifficulty(conceptId);
-  st.strike = 0;
   if (!st.visitedConcepts.includes(conceptId)) st.visitedConcepts.push(conceptId);
   const q = _v3PickQuestion(conceptId, st.currentDifficulty, st.askedQuestionIds);
   if (q) st.askedQuestionIds.push(q.questionId);
@@ -6903,23 +7250,25 @@ function _v3MoveToSample(st, conceptId) {
 function _v3SampleAdvance(st) {
   const bs = st.branchSample;
   if (!bs) return { kind: 'verdict', verdict: 'pass' };
-  const cap = bs.sampleCap;
-  let needPass = Math.ceil(cap / 2);
-  if (cap === 2) needPass = 2;
-  if (cap === 1) needPass = 1;
   // 표본 큐에서 문항 보유 다음 개념을 찾는다(문항없음 개념은 표본 제외·skip).
   let guard = (bs.sampleQueue.length || 0) + 2;
   while (bs.sampleQueue.length > 0 && guard-- > 0) {
     const nextC = bs.sampleQueue.shift();
     if (!nextC) continue;
-    if (st.passedConcepts.includes(nextC) || st.visitedConcepts.includes(nextC)) continue;  // 이미 검사됨
+    // ★ [2026-08-07] visitedConcepts 로 거르지 않는다 — 이 표본을 **cap 개만큼 정확히** 채우기 위해.
+    //   결함: _v3MoveIntoPrereq 가 큐 토큰(prereqId)을 "실제로 묻기도 전에" visitedConcepts 에 넣는데,
+    //   그 토큰이 이 단원의 표본에도 뽑히면 여기서 "이미 검사됨"으로 걸러져 표본이 1개 모자랐다.
+    //   (실측: "각·직각" 갈래가 표본 4개로 잡혔는데 3개만 출제 → 3/3 정답인데 미달 판정)
+    //   이 갈래에서 실제로 채점된 것(bs.tested)과 이미 통과·문항없음만 거르면 충분하다.
+    //   같은 단원 재진입은 branchVerdicts 가드가, 같은 문항 재출제는 askedQuestionIds 가 막는다.
+    if (bs.tested.includes(nextC) || st.passedConcepts.includes(nextC) || st.skippedConcepts.includes(nextC)) continue;
     if (!_v3HasQuestion(nextC)) { if (!st.skippedConcepts.includes(nextC)) st.skippedConcepts.push(nextC); continue; }
     const q = _v3MoveToSample(st, nextC);
     if (q) return { kind: 'sample-next', question: q };
     if (!st.skippedConcepts.includes(nextC)) st.skippedConcepts.push(nextC);
   }
-  // 큐 소진(문항없음 등으로 cap 미달) → 강제 판정.
-  return { kind: 'verdict', verdict: (bs.passed >= needPass) ? 'pass' : 'fail' };
+  // 큐 소진(문항없음·이미 검사됨 등으로 cap 미달) → 강제 판정(§1-A 과반 폴백).
+  return { kind: 'verdict', verdict: _v3ForcedVerdict(bs) };
 }
 
 // [P1 본류복귀 2026-06-11] 선수 큐 소진(prereqDone) 시 st.unit/conceptOrder를 "원 목표 단원"으로 복원.
@@ -6958,7 +7307,16 @@ function _v3RestoreOriginUnit(st) {
 //   resp에 next-prereq(다음 갈래) 출제 또는 prereqDone(본류 복귀) 신호를 채워 반환(완결) 또는 null(본류 합류).
 //   반환: resp(완결, return 대상) 또는 null(호출자가 이어서 본류 unit/next-concept 흐름 진행).
 function _v3BranchSamplePass(sessionId, session, st, resp, wrongNoteAdded) {
-  if (st.branchSample && st.branchSample.unitId) st.branchVerdicts[st.branchSample.unitId] = 'pass';
+  // ★ [§1-A 본류 표본 2026-08-07] 목표 단원(본류)의 표본이 통과한 경우를 구분한다.
+  //   갈래가 아니므로 "본류 복귀"도 "큐 다음 갈래"도 아니고, **그 단원의 진단이 끝난 것**이다.
+  //   → 기존 단원 완주와 같은 unit-complete 분기로 보낸다(모달·다음 단원 흐름 재사용).
+  const wasMainline = (st.branchDepth || 0) === 0 && !!(st.branchSample && st.branchSample.unitId);
+  const mainlineUnitId = wasMainline ? st.branchSample.unitId : null;
+  // 갈래 판정(pass) 기록은 갈래에만 남긴다.
+  //   ⚠ 본류에 'pass' 를 쓰면 결과 화면이 "통과 · 학습경로에 넣지 않았어요"라고 말하는데,
+  //     _buildRecommendedPathV3 는 **목표 단원을 항상 경로에 넣는다**(단일 STEP 폴백 포함).
+  //     라벨과 실제 경로가 어긋나므로(이 프로젝트가 반복해 잡아온 결함 부류) 쓰지 않는다.
+  if (!wasMainline && st.branchSample && st.branchSample.unitId) st.branchVerdicts[st.branchSample.unitId] = 'pass';
   st.branchSample = null;
   // [라운드방식 2026-06-11] 큐 다음 갈래 시도 — 라운드 인식 dequeue(현재 라운드 소진 시 다음 라운드로 전환).
   let deq = _v3DequeueNextRoundAware(st);
@@ -6980,13 +7338,53 @@ function _v3BranchSamplePass(sessionId, session, st, resp, wrongNoteAdded) {
     deq = _v3DequeueNextRoundAware(st);
     next = deq.id;
   }
-  // 큐 소진 → 본류 복귀. branchDepth 리셋·prereqDone 신호 후 본류 unit/next-concept 흐름으로 합류.
+  // 큐 소진 — 여기가 §4-1 "출발선을 찾았다 → 종료" 지점이다.
   st.branchDepth = 0;
+
+  // ★ [§1-A 본류 표본] 목표 단원 표본 통과 = 그 단원을 안다 → 단원 완료(unit-complete).
+  //   prereqDone(기초 점검 완료 → 본류 복귀)이 아니다. 이 턴엔 하향 자체가 없었다.
+  if (wasMainline) {
+    if (!st.completedUnits.includes(mainlineUnitId)) st.completedUnits.push(mainlineUnitId);
+    resp.unitDone = true;
+    resp.attemptStage = 'unit-done';
+    resp.queueRemaining = 0;
+    const nextUnitsM = _v3NextUnits(mainlineUnitId);
+    resp.branch = { type: 'unit-complete', unitName: st.unit.name, nextUnits: nextUnitsM, isLast: nextUnitsM.length === 0 };
+    _v3SaveState(sessionId, st, { currentNodeId: st.currentConcept, wrongAddDelta: wrongNoteAdded ? 1 : 0 });
+    resp.progress = _v3Progress(session, st);
+    return resp;
+  }
+
   resp.prereqDone = true;
   resp.queueRemaining = 0;
-  // [P1 본류복귀 2026-06-11] st.unit이 마지막 갈래 단원에 머물러 있으므로 원 목표 단원으로 복원.
-  //   복원 후 폴스루/_v3ResumeMainAfterPrereq가 목표 단원 기준으로 단원완료·후속개념 판정 → 미통과 본류 개념 재출제.
-  //   resp.unit으로 FE 플레이어 헤더 단원명을 갈래 단원(예: 다각형)→목표 단원(예: 합동과 대칭)으로 교체.
+
+  // ★ [진단 종료 재설계 2026-08-07 §4-1] 후퇴가 한 번이라도 있었다면(downCount>0) **종료**한다.
+  //   사용자 지적: "일부러 틀려서 이전 학년으로 이동 → 출발선을 확인해서 맞았는데
+  //                갑자기 원래 진단한 학년-학기의 문제가 나옴. 진단이 언제 끝나는거야"
+  //   원인 — 아래 _v3RestoreOriginUnit(본류 복귀)이 [P1 본류복귀 2026-06-11]로 **의도 설계**돼 있었고,
+  //   v3 에는 v2/CAT 의 position_found(전환 감지 조기종료)에 대응하는 코드가 한 줄도 없었다.
+  //   이제 갈래를 모두 확인해 큐가 비면 원 단원으로 돌아가지 않고 그 자리에서 진단을 끝낸다.
+  //   출발선 = 실패한 것 중 근본도 최저(getDiagnosisResultV3.recommendedStartNode) — 이미 그렇게 고른다.
+  //   ⚠ downCount === 0(후퇴 없이 본류만 푼 경우)은 기존 흐름 유지 — 구 세션(필드 부재 → 0 정규화)과
+  //     정상 완주 경로를 보호하기 위한 하위호환 게이트다.
+  if ((st.downCount || 0) > 0) {
+    st.endReason = 'position_found';
+    resp.finished = true;
+    resp.sessionComplete = true;
+    resp.endReason = 'position_found';
+    resp.attemptStage = 'finished';
+    resp.nextQuestion = null;
+    resp.nextConcept = null;
+    _v3SaveState(sessionId, st, {
+      currentNodeId: st.currentConcept, status: 'completed', completed: true,
+      wrongAddDelta: wrongNoteAdded ? 1 : 0
+    });
+    resp.progress = _v3Progress(session, st);
+    return resp;
+  }
+
+  // [P1 본류복귀 2026-06-11] (downCount===0 하위호환 경로) st.unit이 마지막 갈래 단원에 머물러 있으므로
+  //   원 목표 단원으로 복원. 복원 후 폴스루/_v3ResumeMainAfterPrereq가 목표 단원 기준으로 판정한다.
   const restored = _v3RestoreOriginUnit(st);
   if (restored) resp.unit = restored;
   return null;   // 호출자가 본류 단원완료/후속개념 흐름 이어감
@@ -7000,18 +7398,32 @@ function _v3BranchSampleDownshift(sessionId, session, st, resp, wrongNoteAdded) 
   resp.strike = 2;
   resp.attemptStage = 'down';
 
-  const depthCapped = (st.branchDepth || 0) >= DIAG_V3_DOWN_DEPTH_CAP;
-  // [라운드방식 2026-06-11 — 갭 fix 핵심] 실패한 '표본 개념 전체'의 더 깊은 선수를 "다음 라운드"에 적립.
+  // ★ [§1-A 본류 표본 2026-08-07] 이 함수는 이제 목표 단원(본류)의 표본 미달도 처리한다.
+  //   본류인지(inBranch=false) 갈래인지에 따라 라운드 적재 방식이 다르다 — _v3DownTo 와 같은 규칙:
+  //     본류 실패 = 1라운드 적재 시점 → 현재 라운드(prereqQueue, mode 'current')
+  //     갈래 실패 = 더 깊은 선수 → 다음 라운드(nextRoundQueue, mode 'next')
+  //   이 구분을 빼먹으면 본류 실패가 곧바로 2라운드로 세어져 라운드 깊이 상한(8)을 1 소모하고
+  //   진행 띠의 "N단계 내려감" 표기도 한 칸씩 밀린다.
+  const inBranch = (st.branchDepth || 0) > 0;
+  const depthCapped = inBranch && (st.branchDepth || 0) >= DIAG_V3_DOWN_DEPTH_CAP;
+  // [라운드방식 2026-06-11 — 갭 fix 핵심] 실패한 '표본 개념 전체'의 더 깊은 선수를 적립.
   //   이전: _v3EnqueuePrereqs(st, currentConcept) 1개만 → 표본 중 마지막 실패 개념의 선수만 검사돼
   //         (예: 각·직각 표본의 '각 이해하기' 선수 '반직선 구별하기'가 누락)되던 갭.
-  //   이번: bs.tested 중 미통과(=실패) 개념 각각의 선수를 nextRoundQueue로 push(중복·#217 가드는 후보 함수가 처리).
-  //   현재 라운드(prereqQueue)엔 끼워넣지 않으므로 라운드 내 고정 순서가 보존된다(끼어들기 제거).
+  //   이번: bs.tested 중 미통과(=실패) 개념 각각의 선수를 push(중복·#217 가드는 후보 함수가 처리).
+  const testedIds = (bs && Array.isArray(bs.tested)) ? bs.tested : [];
+  const failedIds = testedIds.filter(id => !st.passedConcepts.includes(id));
+  // 표본 미적용 폴백(bs 없음) 등으로 failed가 비면 현재 개념을 대상으로(하위호환).
+  const targets = failedIds.length > 0 ? failedIds : [st.currentConcept];
+  // 역방향 선수가 하나도 없으면 root(더 내려갈 곳 없음) — 본류에서만 의미 있는 표기(_v3DownTo 와 동일 규칙).
+  const hasBackward = targets.some(id => _v3BackwardConcepts(id).length > 0);
+  // [§1-B] 이 단원이 실패했다 → **적재 전에** 학생에게 묻는다([추가 진단에 넣기]/[넣지 않기]).
+  //   st.unit 은 이 시점에 "방금 실패한 단원"이다(다음 갈래 진입 전).
   if (!depthCapped) {
-    const tested = (bs && Array.isArray(bs.tested)) ? bs.tested : [];
-    const failed = tested.filter(id => !st.passedConcepts.includes(id));
-    // 표본 미적용 폴백(bs 없음) 등으로 failed가 비면 현재 개념을 대상으로(하위호환).
-    const targets = failed.length > 0 ? failed : [st.currentConcept];
-    for (const cid of targets) _v3EnqueueNextRound(st, cid);
+    st.branchSample = null;
+    // [§4-4] 본류 실패는 1라운드 시작 — 이미 라운드를 진행했으면 그 값을 보존한다(깊이 상한 무력화 방지).
+    if (!inBranch && !(st.prereqRound > 1)) st.prereqRound = 1;
+    const ask = _v3AskMoreUnits(sessionId, session, st, resp, wrongNoteAdded, targets, inBranch ? 'next' : 'current');
+    if (ask) return ask;   // 학생 응답 대기 — advance('more-units') 가 이어받는다
   }
   st.branchSample = null;
   // [라운드방식] dequeue는 현재 라운드(prereqQueue)에서만 — 소진 시 _v3DequeueNextRoundAware가 다음 라운드로 전환.
@@ -7019,9 +7431,20 @@ function _v3BranchSampleDownshift(sessionId, session, st, resp, wrongNoteAdded) 
   const next = deq.id;
   if (!next) {
     // 더 내려갈 곳 없음/모든 라운드 소진 → 종료형 안내(root 모달 재사용, 본류 복귀 대신 종료형).
-    resp.branch = { type: 'down', prereqConcept: null, isRoot: false, queueRemaining: 0, multi: false, autoProceed: false };
+    // ★ [§4-2 2026-08-07] 의미상 종료인데 종료 플래그가 없어, 사용자가 모달을 안 누르면 세션이
+    //   in_progress 로 영구 잔존했다(미종료 세션 생성 경로). 여기서 확실히 끝낸다.
+    //   isRoot: 본류 표본이 실패했는데 역방향 선수가 아예 없을 때만 true(_v3DownTo 와 동일 규칙).
+    resp.branch = { type: 'down', prereqConcept: null, isRoot: (!inBranch && !hasBackward), queueRemaining: 0, multi: false, autoProceed: false };
     delete st._pendingPrereq;
-    _v3SaveState(sessionId, st, { currentNodeId: st.currentConcept, wrongAddDelta: wrongNoteAdded ? 1 : 0 });
+    delete resp.moreUnits;   // [§1-B] 여기서 진단이 끝난다 — '더 나온다'고 예고해 놓고 끝내면 거짓말
+    st.endReason = 'floor_reached';
+    resp.finished = true;
+    resp.sessionComplete = true;
+    resp.endReason = 'floor_reached';
+    _v3SaveState(sessionId, st, {
+      currentNodeId: st.currentConcept, status: 'completed', completed: true,
+      wrongAddDelta: wrongNoteAdded ? 1 : 0
+    });
     resp.progress = _v3Progress(session, st);
     return resp;
   }
@@ -7043,7 +7466,7 @@ function _v3BranchSampleDownshift(sessionId, session, st, resp, wrongNoteAdded) 
   return resp;
 }
 
-// §4.5-(B) — 선수 갈래에서 표본 개념 '실패'(2-strike 또는 재출제 없음) 라우팅.
+// §4.5-(B) — 선수 갈래에서 표본 개념 '실패'(오답 1회) 라우팅.
 //   즉시 하향이 아니라 표본 실패 카운트 → verdict. continue=같은 단원 다음 표본 출제, fail=하향, pass(드묾)=갈래 통과.
 //   diagnosedConcepts++ 는 표본 개념도 "진단한 개념"이므로 여기서 1회 증가(기존 _v3DownTo 패턴 유지).
 function _v3SampleConceptFail(sessionId, session, st, resp, wrongNoteAdded) {
@@ -7092,7 +7515,6 @@ function _v3ResumeMainAfterPrereq(sessionId, session, st, resp, wrongNoteAdded) 
   if (nextC) {
     st.currentConcept = nextC;
     st.currentDifficulty = _v3StartDifficulty(nextC);
-    st.strike = 0;
     if (!st.visitedConcepts.includes(nextC)) st.visitedConcepts.push(nextC);
     const nq = _v3PickQuestion(nextC, st.currentDifficulty, st.askedQuestionIds);
     if (nq) {
@@ -7118,22 +7540,84 @@ function _v3ResumeMainAfterPrereq(sessionId, session, st, resp, wrongNoteAdded) 
   return resp;
 }
 
-// v3 채점 — 정규화 채점(judgeQuestionAnswer 재사용) + 2-strike 상태 관리 + 이동 결정.
+// v3 채점 — 정규화 채점(judgeQuestionAnswer 재사용) + 차시당 1문제 판정 + 이동 결정.
 //   payload: { questionId, contentId, nodeId, answer }
+/**
+ * v3 채점 진입점 — 실제 채점은 _submitDiagnosisV3Core, 여기서는 중단 확인(§5-1)만 일괄 부착한다.
+ *
+ * ★ 왜 래퍼가 필요한가 (2026-08-07 실측 회귀)
+ *   중단 확인 판정을 Core 함수 **끝**에 두었더니, 재출제(2-strike)를 제거한 뒤로
+ *   오답 경로가 전부 `_v3SampleConceptFail`·`_v3DownTo` 에서 **조기 return** 하면서
+ *   그 끝줄에 도달하지 못했다. 결과: 전부 오답 8개 단원 × 3프리셋에서 softStop 발생 **0건**
+ *   (95문항을 풀어도 아무도 "그만할까요?"를 묻지 않음). 되살린 브레이크가 다시 잠든 것이다.
+ *   → 반환 경로가 여러 개인 판정은 **경로마다 두지 말고 한 곳에서** 한다.
+ *
+ * ★ [2026-08-07 감리 P1-1] **표식(softStopAsked)은 학생이 실제로 볼 수 있는 턴에만 소진한다.**
+ *   결함(감리 84회 주행 중 1회 실측): `more-units` 턴에 softStop 을 함께 실었는데 FE 는
+ *   추가 진단 모달을 띄우고 `return` 해 softStop 을 읽지 않는다. 그런데 BE 는 이미
+ *   `softStopAsked=true` 를 영속해 **그 세션의 중단 확인이 영구 소실**됐다.
+ *   (되살린 브레이크가 좁은 경로에서 다시 잠든 세 번째 형태다.)
+ *
+ *   → 판정 자체를 **미루면 손실이 없다.** 두 트리거 모두 단조 증가이기 때문이다:
+ *     개념 수(diagnosedConcepts)는 줄지 않고, 경과 시간도 줄지 않는다.
+ *     따라서 이번 턴에 못 물으면 다음 제출에서 반드시 다시 참이 되어 그때 묻는다.
+ *     세션이 그 전에 끝나면 물을 이유 자체가 사라진다(강제 종료가 아니라 "그만할까요?"이므로).
+ *   반대로 **못 보여주는 턴에 표식만 태우면 그 세션은 영영 못 묻는다.** 비대칭이 분명하므로
+ *   "FE 가 그 턴에 확실히 읽는 경우"에만 붙인다 — 화면 전이를 독점하는 분기는 전부 제외:
+ *     ① 종료 ② 단원 완주 모달 ③ 하향 branch 전체(첫 하향 모달 + autoProceed 자동 이동)
+ *     ④ §1-B 추가 진단 모달(more-units)
+ *   ⚠ 이 목록은 FE submitDiagV3Answer 의 **early return 지점과 1:1 로 대응**한다.
+ *     FE 에 새 early return 을 추가하면 여기도 함께 넣을 것(안 그러면 같은 결함이 네 번째로 재발한다).
+ */
 function submitDiagnosisV3(sessionId, payload = {}) {
+  const resp = _submitDiagnosisV3Core(sessionId, payload);
+  try {
+    if (!resp || resp.finished || resp.sessionComplete) return resp;
+    const b = resp.branch;
+    // FE 가 이 턴을 모달·자동전이로 소비해 softStop 을 읽지 않는 분기들.
+    const consumedByOtherUi = !!(
+      resp.attemptStage === 'more-units' || resp.moreUnits ||   // §1-B 추가 진단 모달
+      (b && (b.type === 'unit-complete' || b.type === 'down'))  // 단원 완주 모달 / 하향(모달·자동진행)
+    );
+    if (consumedByOtherUi) return resp;
+    const session = db.prepare('SELECT * FROM diagnosis_sessions WHERE id = ?').get(sessionId);
+    if (!session || session.status === 'completed') return resp;
+    const st = _v3LoadState(session);
+    if (!st) return resp;
+    const softStop = _v3SoftStopSignal(session, st);
+    if (softStop) {
+      resp.softStop = softStop;
+      st.softStopAsked = true;      // 세션당 1회만 묻는다
+      _v3SaveState(sessionId, st);
+    }
+  } catch (e) {
+    console.error('[submitDiagnosisV3] 중단 확인 판정 실패:', e.message);
+  }
+  return resp;
+}
+
+function _submitDiagnosisV3Core(sessionId, payload = {}) {
   const session = db.prepare('SELECT * FROM diagnosis_sessions WHERE id = ?').get(sessionId);
   if (!session) { const err = new Error('세션 없음'); err.statusCode = 404; throw err; }
   const st = _v3LoadState(session);
   if (!st) { const err = new Error('v3 세션이 아닙니다.'); err.statusCode = 400; throw err; }
   if (session.status === 'completed') return { finished: true, sessionComplete: true, attemptStage: 'finished' };
 
-  // [루프 안전망] 누적 출제 문항이 하드 상한을 넘으면 — 어떤 분기·클라이언트 동작에서도 — 즉시 종료.
-  //   (정상 경로는 통과/하향 상한이 먼저 작동. 이 가드는 FE 분기 실패로 인한 무한 제출을 끊는 최종 방어선.)
-  const _askedSoFar = Array.isArray(st.askedQuestionIds) ? st.askedQuestionIds.length : (session.total_questions || 0);
-  if (_askedSoFar >= DIAG_V3_HARD_QUESTION_CAP) {
-    _v3SaveState(sessionId, st, { status: 'completed', completed: true });
-    return { finished: true, sessionComplete: true, attemptStage: 'finished', progress: _v3Progress(session, st) };
-  }
+  // ── [2026-08-07] 문항 하드 상한(200) 제거 — 사용자 확정 "상한 필요없어" ──────────
+  //   이 가드는 **진단이 끝나지 않던 시절의 응급 처치**였다. 당시 v3 엔진에는
+  //   "출발선을 찾았으면 종료" 라는 조건이 아예 없어서(§4-1 이 그것을 신설했다)
+  //   무한 제출을 끊을 방법이 이 숫자뿐이었다. 주석에 "정상 경로는 소프트 상한·
+  //   downCount·시간 소프트스톱이 먼저 작동한다" 고 적혀 있었으나 **그 셋이 전부
+  //   꺼져 있었다**(개념 30 상한은 빈 if 문, 12분 소프트스톱은 v3 미연결).
+  //
+  //   지금은 종료가 **구조적으로** 보장된다:
+  //     · visitedConcepts 단조 증가 + branchVerdicts 재진입 차단 → 같은 노드 재방문 불가
+  //     · DIAG_V3_DOWN_CONCEPT_CAP(20) — 하향 누적 상한(유지)
+  //     · position_found / 큐 소진 / floor_reached 종료(§4-1·4-2)
+  //     · 개념 30개·12분 → §5 중단 확인(이제 실제로 작동)
+  //   노드 그래프가 유한하고 재방문이 막혀 있으므로 무한 루프가 성립하지 않는다.
+  //   → 숫자로 끊지 않고 **끝날 때까지 진행**한다. 되돌리려면 위 종료 조건이 왜
+  //     불충분한지 먼저 밝힐 것.
 
   const questionId = payload.questionId != null ? payload.questionId : payload.question_id;
   const answer = payload.answer;
@@ -7168,10 +7652,11 @@ function submitDiagnosisV3(sessionId, payload = {}) {
     wrongNoteAdded = _registerDiagnosisWrongNote(session.user_id, curConcept, q, answer);
   }
 
-  st.history.push({ concept: curConcept, correct: isCorrect ? 1 : 0, strike: st.strike, questionId });
+  st.history.push({ concept: curConcept, correct: isCorrect ? 1 : 0, questionId });
 
   const resp = {
     isCorrect,
+    // API 응답 필드(§7 계약) — 0=정상 진행, 2=하향. [2026-08-07] 재출제 제거로 **1(재도전)은 더 이상 나오지 않는다.**
     strike: 0,
     attemptStage: null,
     nextQuestion: null,
@@ -7186,15 +7671,16 @@ function submitDiagnosisV3(sessionId, payload = {}) {
 
   if (isCorrect) {
     // ── 개념 통과 ──
-    st.strike = 0;
     if (!st.passedConcepts.includes(curConcept)) st.passedConcepts.push(curConcept);
     st.diagnosedConcepts = (st.diagnosedConcepts || 0) + 1;
     resp.attemptStage = 'next-concept';
 
-    // [선수 표본 과반 §4.5-(A)] 선수 갈래(branchDepth>0)에서 개념 통과(1정답) → 표본 카운트로 라우팅.
-    //   branchSample!=null이면: record(passed) → verdict. continue=같은 단원 다음 표본 출제(갈래 유지),
-    //   pass=갈래 통과(큐 다음/본류), fail(강제판정)=하향. 본류(branchSample==null)는 영향 없음.
-    if ((st.branchDepth || 0) > 0 && st.branchSample) {
+    // [선수 표본 과반 §4.5-(A)] 개념 통과(1정답) → 표본 카운트로 라우팅.
+    //   branchSample!=null이면: record(passed) → verdict. continue=같은 단원 다음 표본 출제(단원 유지),
+    //   pass=단원 통과(큐 다음/본류 단원완료), fail(강제판정)=하향.
+    // ★ [§1-A 2026-08-07] branchDepth>0(선수 갈래) 조건을 **뺐다** — 목표 단원(본류)도 같은 규칙이다.
+    //   표본이 서 있으면 본류든 갈래든 동일하게 표본을 소진한 뒤에만 판정한다(예외 없음).
+    if (st.branchSample) {
       _v3SampleRecord(st, curConcept, true);
       let verdict = _v3SampleVerdict(st.branchSample);
       if (verdict === 'continue') {
@@ -7241,7 +7727,6 @@ function submitDiagnosisV3(sessionId, payload = {}) {
     if (nextC) {
       st.currentConcept = nextC;
       st.currentDifficulty = _v3StartDifficulty(nextC);
-      st.strike = 0;
       if (!st.visitedConcepts.includes(nextC)) st.visitedConcepts.push(nextC);
       const nq = _v3PickQuestion(nextC, st.currentDifficulty, st.askedQuestionIds);
       if (nq) {
@@ -7263,45 +7748,52 @@ function submitDiagnosisV3(sessionId, payload = {}) {
       resp.branch = { type: 'unit-complete', unitName: st.unit.name, nextUnits, isLast: nextUnits.length === 0 };
     }
   } else {
-    // ── 오답 ──
-    if (st.strike === 0) {
-      // 1차 오답 → 같은 개념·같은 난이도 다른 문항(§9-A 폴백 포함)
-      const retryQ = _v3PickQuestion(curConcept, st.currentDifficulty, st.askedQuestionIds);
-      if (retryQ) {
-        st.strike = 1;
-        st.askedQuestionIds.push(retryQ.questionId);
-        resp.strike = 1;
-        resp.attemptStage = 'retry';
-        resp.nextQuestion = retryQ;
-        resp.nextConcept = _v3HydrateConcept(curConcept, st.conceptOrder);
-      } else {
-        // §9-A 3단계: 재출제 생략 → 개념 실패 처리.
-        resp.noRetryQuestion = true;
-        // [선수 표본 과반 §4.5-(B)] 선수 갈래·표본 진행 중이면 즉시 하향이 아니라 '표본 실패 1'.
-        if ((st.branchDepth || 0) > 0 && st.branchSample) {
-          return _v3SampleConceptFail(sessionId, session, st, resp, wrongNoteAdded);
-        }
-        return _v3DownTo(sessionId, session, st, resp, wrongNoteAdded, /*forced*/true);
-      }
-    } else {
-      // 2차 오답 → 개념 실패.
-      // [선수 표본 과반 §4.5-(B)] 선수 갈래·표본 진행 중이면 즉시 하향이 아니라 '표본 실패 1' → verdict.
-      if ((st.branchDepth || 0) > 0 && st.branchSample) {
-        return _v3SampleConceptFail(sessionId, session, st, resp, wrongNoteAdded);
-      }
-      // 본류(또는 표본 미적용) → 기존 하향(선수 개념)
-      return _v3DownTo(sessionId, session, st, resp, wrongNoteAdded, false);
+    // ── 오답 ── ★ [2026-08-07 사용자 확정 "차시당 1문제"] 재출제(2-strike) 제거.
+    //   이전: 1차 오답이면 같은 차시에서 "다른 문항"을 한 번 더 물어 2번 틀려야 실패했다.
+    //   그래서 "차시 5개"가 실제로는 최대 10문항이 되어, 사용자가 고른 수와 실제 출제 수가 어긋났다.
+    //   이제 **차시 1개 = 문항 1개**, 틀리면 그 차시는 그대로 실패다.
+    //
+    // ★ [§1-A 2026-08-07 사용자 확정 — 정정] "본류는 한 번 틀리면 즉시 하향"은 **폐기됐다.**
+    //   그 지시는 "차시당 1문제"를 확정하던 시점의 것이고, 이후 "조기 확정 제거 = 고른 수만큼
+    //   항상 출제"가 확정되며 무효가 됐다. 목표 단원도 프리셋 문항 수를 **끝까지 채운 뒤**에만 판정한다.
+    //   > "해당 단원을 프리셋에서 설정한 문항 수만큼 본다고, 이미 정답률이 기준에 못 미친다고
+    //   >  바로 하향으로 내리지 말라고"
+    //   통과가 수학적으로 불가능해져도(예: 5문제 중 앞 2개 오답) 멈추지 않는다. 화면이 "5문제"라고
+    //   했으면 5문제가 나와야 하고, "5문제 중 1개 오답=통과"인데 목표 단원만 1개 오답으로 탈락시키면
+    //   기준이 두 개가 된다.
+    // [선수 표본 §4.5-(B)] 표본이 진행 중이면(본류·갈래 동일) 즉시 하향이 아니라 '표본 실패 1' → verdict.
+    if (st.branchSample) {
+      return _v3SampleConceptFail(sessionId, session, st, resp, wrongNoteAdded);
     }
+    // 표본 미적용(구 세션·표본 구성 실패) → 기존 즉시 하향 경로(하위호환)
+    return _v3DownTo(sessionId, session, st, resp, wrongNoteAdded);
   }
 
-  // 종료 조건 (소프트 — 개념 상한)
-  if (!resp.finished && (st.diagnosedConcepts || 0) >= DIAG_V3_CONCEPT_CAP && !resp.nextQuestion) {
-    // 상한 도달이지만 다음 문항이 없을 때만 종료 신호 (강제 아님)
-  }
-
+  // (중단 확인 §5-1 판정은 래퍼 submitDiagnosisV3 가 **모든 반환 경로**에 대해 일괄 수행한다.)
   _v3SaveState(sessionId, st, { currentNodeId: st.currentConcept, wrongAddDelta: wrongNoteAdded ? 1 : 0 });
   resp.progress = _v3Progress(session, st);
   return resp;
+}
+
+/**
+ * [§5-1 2026-08-07] 중단 확인(그만할까요?)을 물어야 할 시점인지 판정한다.
+ *   ① 개념 30개 도달(DIAG_V3_CONCEPT_CAP) — 죽어 있던 브레이크(§4-3)
+ *   ② 12분 경과(DIAG_SOFT_TIME_SEC) — v3 에서 집행되지 않던 소프트스톱
+ *   세션당 1회만 묻는다(st.softStopAsked). 강제 종료가 아니므로 세션 상태는 건드리지 않는다.
+ * @returns {{reason:'concept_cap'|'time', diagnosedConcepts:number, conceptCap:number, elapsedSec:number, softTimeLimitSec:number}|null}
+ */
+function _v3SoftStopSignal(session, st) {
+  if (!st || st.softStopAsked) return null;
+  const diagnosedConcepts = st.diagnosedConcepts || 0;
+  const elapsedSec = _diagElapsedSec(session);
+  let reason = null;
+  if (diagnosedConcepts >= DIAG_V3_CONCEPT_CAP) reason = 'concept_cap';
+  else if (elapsedSec >= DIAG_SOFT_TIME_SEC) reason = 'time';
+  if (!reason) return null;
+  return {
+    reason, diagnosedConcepts, conceptCap: DIAG_V3_CONCEPT_CAP,
+    elapsedSec, softTimeLimitSec: DIAG_SOFT_TIME_SEC
+  };
 }
 
 // 문항 없는 개념 skip 후 다음 개념으로 진행 (정답 통과 경로 보조)
@@ -7331,7 +7823,6 @@ function _v3AdvanceAfterSkip(sessionId, session, st, resp, wrongNoteAdded) {
     }
     st.currentConcept = nextC;
     st.currentDifficulty = _v3StartDifficulty(nextC);
-    st.strike = 0;
     if (!st.visitedConcepts.includes(nextC)) st.visitedConcepts.push(nextC);
     const nq = _v3PickQuestion(nextC, st.currentDifficulty, st.askedQuestionIds);
     if (nq) {
@@ -7351,12 +7842,12 @@ function _v3AdvanceAfterSkip(sessionId, session, st, resp, wrongNoteAdded) {
   return resp;
 }
 
-// 하향(선수 개념) 진입 — 2-strike 실패 또는 §9-A 강제. 선수 없으면 종료형 branch.
-//   [다갈래] 설계서 §4.4-A(본류 2-strike) / §4.4-D(선수 2-strike) 통합.
+// 하향(선수 개념) 진입 — 개념 오답 실패. 선수 없으면 종료형 branch.
+//   [다갈래] 설계서 §4.4-A(본류 오답) / §4.4-D(선수 오답) 통합.
 //   실제 이동은 안 하고(FE 확인 대기) branch만 반환. branch.multi/queueRemaining/autoProceed 포함.
-//   §4.4-D: 이미 선수 갈래 안(branchDepth>0)에서 2-strike면 깊이 상한 검사 → 상한 도달 시 더 안 내려가고
+//   §4.4-D: 이미 선수 갈래 안(branchDepth>0)에서 오답이면 깊이 상한 검사 → 상한 도달 시 더 안 내려가고
 //           큐의 다음 갈래로(이 갈래의 더 깊은 선수 enqueue 생략). 미도달 시 선수의 선수 enqueue(BFS).
-function _v3DownTo(sessionId, session, st, resp, wrongNoteAdded, forced) {
+function _v3DownTo(sessionId, session, st, resp, wrongNoteAdded) {
   st.diagnosedConcepts = (st.diagnosedConcepts || 0) + 1;
   resp.strike = 2;
   resp.attemptStage = 'down';
@@ -7370,16 +7861,17 @@ function _v3DownTo(sessionId, session, st, resp, wrongNoteAdded, forced) {
   const hasBackward = _v3BackwardConcepts(st.currentConcept).length > 0;
 
   // [라운드방식 2026-06-11] enqueue 분기:
-  //   - 본류(!inBranch) 2-strike: 이번이 1라운드 적재 시점 → prereqRound=1로 두고 현재 라운드(prereqQueue)에 적재.
+  //   - 본류(!inBranch) 오답: 이번이 1라운드 적재 시점 → prereqRound=1로 두고 현재 라운드(prereqQueue)에 적재.
   //   - 갈래 내부(inBranch, 표본 미적용 구세션 등에서 직접 _v3DownTo로 진입): 더 깊은 선수는 다음 라운드로 적립.
   //   §4.4-D 깊이 상한 도달이면 이 갈래의 더 깊은 선수는 enqueue 안 함(이 갈래 포기).
   if (!depthCapped) {
-    if (!inBranch) {
-      st.prereqRound = 1;                        // 1라운드 시작 — 본류 직접 선수 적재
-      _v3EnqueuePrereqs(st, st.currentConcept);
-    } else {
-      _v3EnqueueNextRound(st, st.currentConcept); // 갈래 내부 발견 선수는 다음 라운드로
-    }
+    // [§4-4 2026-08-07] 무조건 1로 리셋하지 않는다 — 본류 재진입마다 리셋되어 라운드 깊이 상한
+    //   (DIAG_V3_DOWN_DEPTH_CAP=8)이 사실상 무력화됐다. 이미 라운드를 진행했으면 그 값을 보존한다.
+    if (!inBranch && !(st.prereqRound > 1)) st.prereqRound = 1;   // 1라운드 시작
+    // [§1-B] 이 단원이 실패했다 → **적재 전에** 묻는다. 본류(현재 라운드) / 갈래(다음 라운드) 구분.
+    const ask = _v3AskMoreUnits(sessionId, session, st, resp, wrongNoteAdded,
+                                [st.currentConcept], inBranch ? 'next' : 'current');
+    if (ask) return ask;   // 학생 응답 대기 — advance('more-units') 가 이어받는다
   }
   // [라운드방식] dequeue는 현재 라운드(prereqQueue)에서만 — 소진 시 _v3DequeueNextRoundAware가 다음 라운드로 전환.
   const deq = _v3DequeueNextRoundAware(st);
@@ -7387,9 +7879,18 @@ function _v3DownTo(sessionId, session, st, resp, wrongNoteAdded, forced) {
   if (!next) {
     // root/검사 가능한 선수 없음/모든 라운드 소진 → 종료형. (선수 갈래에서 소진이면 본류 복귀 대신 종료형 안내)
     //   isRoot: 본류 개념이면서 역방향 자체가 없을 때만 true. 그 외(큐 소진)는 isRoot false지만 prereqConcept null.
+    // ★ [§4-2 2026-08-07] 바닥 도달 = 종료. 여기도 종료 플래그가 없어 세션이 in_progress 로 남았다.
     resp.branch = { type: 'down', prereqConcept: null, isRoot: (!inBranch && !hasBackward), queueRemaining: 0, multi: false, autoProceed: false };
     delete st._pendingPrereq;
-    _v3SaveState(sessionId, st, { currentNodeId: st.currentConcept, wrongAddDelta: wrongNoteAdded ? 1 : 0 });
+    delete resp.moreUnits;   // [§1-B] 여기서 진단이 끝난다 — '더 나온다'고 예고해 놓고 끝내면 거짓말
+    st.endReason = 'floor_reached';
+    resp.finished = true;
+    resp.sessionComplete = true;
+    resp.endReason = 'floor_reached';
+    _v3SaveState(sessionId, st, {
+      currentNodeId: st.currentConcept, status: 'completed', completed: true,
+      wrongAddDelta: wrongNoteAdded ? 1 : 0
+    });
     resp.progress = _v3Progress(session, st);
     return resp;
   }
@@ -7425,8 +7926,10 @@ function advanceDiagnosisV3(sessionId, payload = {}) {
 
   const action = payload.action;
   if (action === 'finish') {
+    // [§5-2 2026-08-07] 학습자가 "여기까지 하고 결과 보기"를 고른 종료. 사유를 남긴다.
+    if (!st.endReason) st.endReason = 'stopped';
     _v3SaveState(sessionId, st, { status: 'completed', completed: true });
-    return { finished: true, sessionComplete: true };
+    return { finished: true, sessionComplete: true, endReason: st.endReason };
   }
 
   if (action === 'continue-next-unit') {
@@ -7438,13 +7941,29 @@ function advanceDiagnosisV3(sessionId, payload = {}) {
     if (conceptsArr.length === 0) { const err = new Error('이 단원에 진단할 개념이 없습니다.'); err.statusCode = 422; throw err; }
     const conceptOrder = conceptsArr.map(c => c.nodeId);
     // 첫 문항 보유 개념
+    // ★ [§1-A 본류 표본 2026-08-07] 이어서 진단하는 다음 단원도 **같은 규칙**이다 —
+    //   프리셋 표본(균등 간격 + 앞뒤 교차)으로 뽑고, 표본을 다 본 뒤에만 판정한다.
+    //   여기서 표본을 세우지 않으면 "다음 단원으로 계속"을 누른 순간부터 조용히 옛 동작(1오답 즉시 하향)으로 돌아간다.
+    const nextSample = _v3UnitSampleConcepts(unitNodeId, null, st);
+    const nextSeq = nextSample.slice();
     let firstConcept = null, firstQuestion = null, firstDiff = 3;
     const newSkipped = [];
-    for (const cid of conceptOrder) {
+    while (nextSeq.length > 0) {
+      const cid = nextSeq[0];
       const d = _v3StartDifficulty(cid);
       const q = _v3PickQuestion(cid, d, st.askedQuestionIds);
       if (q) { firstConcept = cid; firstQuestion = q; firstDiff = d; break; }
       newSkipped.push(cid);
+      nextSeq.shift();
+    }
+    if (!firstConcept) {
+      for (const cid of conceptOrder) {
+        if (newSkipped.includes(cid)) continue;
+        const d = _v3StartDifficulty(cid);
+        const q = _v3PickQuestion(cid, d, st.askedQuestionIds);
+        if (q) { firstConcept = cid; firstQuestion = q; firstDiff = d; break; }
+        newSkipped.push(cid);
+      }
     }
     if (!firstConcept) { const err = new Error('이 단원의 개념에 등록된 문제가 없습니다.'); err.statusCode = 422; throw err; }
 
@@ -7454,9 +7973,10 @@ function advanceDiagnosisV3(sessionId, payload = {}) {
     st.skippedConcepts = Array.from(new Set([...(st.skippedConcepts || []), ...newSkipped]));
     st.currentConcept = firstConcept;
     st.currentDifficulty = firstDiff;
-    st.strike = 0;
     if (!st.visitedConcepts.includes(firstConcept)) st.visitedConcepts.push(firstConcept);
     st.askedQuestionIds.push(firstQuestion.questionId);
+    st.branchDepth = 0;   // 새 본류 단원 — 갈래가 아니다
+    _v3InitBranchSample(st, firstConcept, nextSeq.length > 0 ? nextSeq : null);
     _v3SaveState(sessionId, st, { currentNodeId: firstConcept });
     const scope = _v3PanelScope(st);
     return {
@@ -7468,6 +7988,26 @@ function advanceDiagnosisV3(sessionId, payload = {}) {
     };
   }
 
+  // [§1-B 최종] 추가 진단 여부 확정 — payload.accept 로 그 단원의 선수를 적재할지 정한다.
+  //   🔴 accept=false 는 **종료가 아니다.** 그 단원 아래로 더 안 파는 것뿐이고,
+  //     현재 큐에 이미 들어간 단원은 그대로 이어서 진행된다(아래 go-prereq 위임).
+  //     모든 단원에서 거절하면 큐가 소진돼 정상 종료로 이어진다.
+  if (action === 'more-units') {
+    const pend = st._pendingMore;
+    delete st._pendingMore;
+    const accepted = (payload.accept === true || payload.accept === 'true');
+    if (pend && accepted && Array.isArray(pend.sources)) {
+      // 실제 적재 — _v3AskMoreUnits 가 롤백해 두었던 것과 동일한 계산을 다시 수행한다(결정적).
+      for (const cid of pend.sources) {
+        if (pend.mode === 'next') _v3EnqueueNextRound(st, cid);
+        else _v3EnqueuePrereqs(st, cid);
+      }
+    }
+    _v3SaveState(sessionId, st, { currentNodeId: st.currentConcept });
+    // 적재 여부와 무관하게 **진단은 계속된다** — 현재 큐의 다음 단원으로.
+    return advanceDiagnosisV3(sessionId, { action: 'go-prereq' });
+  }
+
   if (action === 'go-prereq') {
     // [다갈래] submit 때 정한 _pendingPrereq 우선(일관성) → 없으면 큐에서 dequeue.
     let prereq = st._pendingPrereq;
@@ -7477,8 +8017,14 @@ function advanceDiagnosisV3(sessionId, payload = {}) {
       prereq = _v3DequeueNextRoundAware(st).id;
     }
     if (!prereq) {
+      // 큐 소진 → 정상 종료. [§1-B] 모든 단원에서 "넣지 않기"를 골라도 결국 여기로 온다.
+      //   후퇴가 실제로 있었을 때만 "출발선을 찾아 마쳤다"(§4-1)로 기록한다.
+      //   ⚠ 후퇴 0회(첫 실패에서 바로 "넣지 않기")를 floor_reached 로 적으면 거짓말이 된다 —
+      //     내려갈 곳이 없던 게 아니라 학생이 안 내려간 것이다. 그 경우 사유를 비워 둔다
+      //     (사용자 확정: "넣지 않기"는 종료가 아니므로 별도 endReason 을 만들지 않는다).
+      if (!st.endReason && (st.downCount || 0) > 0) st.endReason = 'position_found';
       _v3SaveState(sessionId, st, { status: 'completed', completed: true });
-      return { finished: true, sessionComplete: true, isRoot: true };
+      return { finished: true, sessionComplete: true, isRoot: true, endReason: st.endReason };
     }
     // 선수 개념으로 실제 이동(부모 단원 전환·downCount++·branchDepth=라운드번호·출제) — _v3MoveIntoPrereq
     const q = _v3MoveIntoPrereq(st, prereq);
@@ -7617,6 +8163,37 @@ function _v3ResultEnum(session) {
   return 'mastered';
 }
 
+// [§7-2] 지연 복구 재진입 가드 — _buildRecommendedPathV3 가 getDiagnosisResultV3 를 다시 부르므로
+//   플래그 없이는 무한 재귀가 된다. 복구 중인 세션 id 를 담아 두고 내부 호출에서는 복구를 건너뛴다.
+const _v3RepairInFlight = new Set();
+
+/**
+ * 완료된 v3 세션인데 결과 반영 흔적(learning_paths)이 없으면 1회 복구한다.
+ *   - user_node_status.diagnosis_result 기록(_applyDiagnosisV3NodeResults)
+ *   - learning_paths 영속(buildRecommendedPath)
+ * 실패해도 결과 조회 자체는 성공해야 하므로 전부 try 로 감싼다.
+ */
+function _v3LazyRepairOutcome(session) {
+  if (!session || session.status !== 'completed') return false;
+  const sid = Number(session.id);
+  if (!sid || _v3RepairInFlight.has(sid)) return false;
+  let has = null;
+  try {
+    has = db.prepare("SELECT 1 AS x FROM learning_paths WHERE session_id = ? AND source_type = 'diagnosis'").get(sid);
+  } catch (_) { return false; }
+  if (has) return false;
+  _v3RepairInFlight.add(sid);
+  try {
+    try { _applyDiagnosisV3NodeResults(session); }
+    catch (e) { console.error('[_v3LazyRepairOutcome] 노드 반영 실패:', e.message); }
+    try { buildRecommendedPath(sid); }
+    catch (e) { console.error('[_v3LazyRepairOutcome] 경로 빌드 실패:', e.message); }
+    return true;
+  } finally {
+    _v3RepairInFlight.delete(sid);
+  }
+}
+
 // v3 결과 — summary + 단원 현황 + 추천 시작점 (기획서 §8)
 function getDiagnosisResultV3(sessionId) {
   const session = db.prepare('SELECT * FROM diagnosis_sessions WHERE id = ?').get(sessionId);
@@ -7627,11 +8204,29 @@ function getDiagnosisResultV3(sessionId) {
     return getDiagnosisResult(sessionId);
   }
 
+  // ★ [§7-2 2026-08-07] 결과·학습경로 누수 지연 복구.
+  //   결함(실측): 완료된 v3 세션 18건 중 learning_paths 가 있는 건 2건뿐,
+  //   user_node_status 13행 중 10행이 diagnosis_result IS NULL 이었다.
+  //   원인 — FE 가 종료 시 finishDiagV3(true) 로 POST /v3/:id/finish 를 건너뛰면
+  //   그 안에만 있는 _applyDiagnosisV3NodeResults · buildRecommendedPath 가 통째로 누락된다.
+  //   FE 를 고쳤지만(항상 /finish 경유), 이미 쌓인 세션과 다른 종료 경로(advance:'finish' 등)를 위해
+  //   결과 조회 시점에 1회 복구한다. getRecommendedPathBySession 의 지연 빌드와 동일 패턴.
+  _v3LazyRepairOutcome(session);
+
   // L-2: 실제로 "응시(채점된 문항 존재)"한 개념 집합 — diagnosis_answers 에 행이 있는 node_id.
   //   1문항 출제만 되고 미응답한 개념은 여기 포함되지 않음 → 단원 KPI 과다 집계 방지.
   const respondedConcepts = new Set(
     db.prepare('SELECT DISTINCT node_id FROM diagnosis_answers WHERE session_id = ?').all(sessionId).map(r => r.node_id)
   );
+
+  // [2026-08-07] 이 세션의 학습경로에 담긴 단원 — 결과 화면이 "경로에 담았어요/넣지 않았어요"를
+  //   verdict 추정이 아니라 **실제 경로**로 말하게 한다(본류 목표 단원은 branchVerdicts 가 없어
+  //   "확인함 · 더 볼 개념 있음" 같은 모호한 문구로 떨어졌다).
+  let pathUnitIds = new Set();
+  try {
+    const pr = db.prepare("SELECT path_nodes FROM learning_paths WHERE session_id = ? AND source_type = 'diagnosis'").get(sessionId);
+    if (pr) pathUnitIds = new Set(JSON.parse(pr.path_nodes || '[]'));
+  } catch (_) {}
 
   // 진단한 단원 집합 (방문/통과 개념의 부모 단원) — 표시용(현황 리스트)
   const touchedUnits = new Set([st.unit.nodeId, ...st.completedUnits]);
@@ -7652,26 +8247,50 @@ function getDiagnosisResultV3(sessionId) {
     units.push({
       nodeId: uid, name: u.unit_name || '단원',
       conceptTotal: need.length, passed, responded,
-      status: completed ? 'completed' : (passed > 0 ? 'in_progress' : 'untested')
+      // [§1-A 2026-08-07] 갈래 판정('pass'=통과·경로 제외 / 'down'=미달·경로 포함). 본류·미판정은 null.
+      //   결과 화면이 "확인함 · 더 볼 개념 있음" 대신 통과/보충 필요를 정확히 라벨링하는 데 쓴다.
+      verdict: (st.branchVerdicts && st.branchVerdicts[uid]) || null,
+      inPath: pathUnitIds.has(uid),   // 이 단원이 학습경로 STEP 으로 들어갔는지(실제 경로 기준)
+      // [2026-08-07] 통과 0 이어도 **실제로 응시했으면** '미진단'이 아니다.
+      //   조기종료(§4-1) 이후 실측: 일부러 다 틀린 목표 단원이 결과 화면에 "미진단"으로 떴다
+      //   (passed>0 만 in_progress 로 봐서). 사용자가 방금 푼 단원을 안 푼 것처럼 보이면 안 된다.
+      status: completed ? 'completed' : (responded ? 'in_progress' : 'untested')
     });
   }
 
   // 추천 시작점 = [다갈래 §6.2-A] 가장 근본(최저 _gradeAbs) 미통과 개념 1개.
   //   본류·하향 모두 검사한 개념(conceptOrder + visitedConcepts) 중 미통과·미skip을 근본도 오름차순으로 정렬해 최저 선택.
   //   학습은 "가장 기초부터" 시작이 정석 → 경로 STEP1도 그 단원이 선두(_buildRecommendedPathV3가 startUnitId 선두 고정).
+  //   ⚠ 정렬은 **오름차순 유지**가 정본이다(§3: 출발선 = 실패한 것 중 근본도가 가장 낮은 것).
+  //     §6 에서 뒤집는 것은 "검사 순서(선수 큐)"이지 "출발선 선택"이 아니다 — 혼동 금지.
   let recommendedStartNode = null;
   const candPool = [];
   const seenCand = new Set();
+  // [§1-A 2026-08-07] 표본 통과 판정을 받은 단원의 개념은 후보에서 뺀다.
+  //   4문항 중 3개로 통과해도 1개는 틀릴 수 있는데, 그 1개가 출발선이 되면
+  //   "아는 단원"에서 학습을 시작하게 된다. 출발선은 **실패한 것 중** 근본도 최저여야 한다.
+  const passVerdictUnits = new Set(
+    Object.keys((st.branchVerdicts && typeof st.branchVerdicts === 'object') ? st.branchVerdicts : {})
+      .filter(uid => st.branchVerdicts[uid] === 'pass')
+  );
+  const inPassedUnit = (cid) => {
+    if (passVerdictUnits.size === 0) return false;
+    const pu = _v3ParentUnitOf(cid);
+    return !!(pu && pu.nodeId && passVerdictUnits.has(pu.nodeId));
+  };
   for (const id of [...(st.conceptOrder || []), ...(st.visitedConcepts || [])]) {
     if (!id || seenCand.has(id)) continue;
     seenCand.add(id);
     if (st.passedConcepts.includes(id) || st.skippedConcepts.includes(id)) continue;
     candPool.push(id);
   }
+  // 통과 단원 제외 후보. 전부 걸러지면(=실패 단원이 없음) 필터 전 후보로 폴백해 기존 동작을 보존한다.
+  const failedPool = candPool.filter(id => !inPassedUnit(id));
+  const effPool = failedPool.length > 0 ? failedPool : candPool;
   let target = null;
-  if (candPool.length > 0) {
-    candPool.sort((a, b) => (_gradeAbsOf(a) - _gradeAbsOf(b)) || (_sortOrderOf(a) - _sortOrderOf(b)));
-    target = candPool[0];
+  if (effPool.length > 0) {
+    effPool.sort((a, b) => (_gradeAbsOf(a) - _gradeAbsOf(b)) || (_sortOrderOf(a) - _sortOrderOf(b)));
+    target = effPool[0];
   } else {
     // 폴백(전부 통과/skip): conceptOrder 첫 미통과(기존 동작 보존)
     target = st.conceptOrder.find(id => !st.passedConcepts.includes(id));
@@ -7698,11 +8317,16 @@ function getDiagnosisResultV3(sessionId) {
   return {
     summary: {
       diagnosedConcepts, passedConcepts, reviewConcepts, diagnosedUnits,
-      elapsedSec: _diagElapsedSec(session)
+      elapsedSec: _diagElapsedSec(session),
+      totalQuestions: session.total_questions || 0
     },
     units,
     lastPassedNode,
     recommendedStartNode,
+    // [§1-A 2026-08-07] "어떤 프리셋으로 진단했는지" 결과에 표시 — 나중에 다시 볼 때 기준을 알 수 있어야 한다.
+    preset: _v3PresetInfo(st),
+    // [§4 2026-08-07] 종료 사유 — 'position_found'(출발선 확인) | 'floor_reached'(더 내려갈 곳 없음) | null
+    endReason: st.endReason || null,
     wrongNoteAdded
   };
 }
@@ -7725,6 +8349,10 @@ function getActiveDiagnosisV3(userId) {
     const conceptHydrated = st.currentConcept ? _v3HydrateConcept(st.currentConcept, st.conceptOrder) : null;
     return {
       sessionId: row.id,
+      // [§7-3] 재개 판정용 — 이 세션이 "어느 단원을 목표로" 시작했는지(하향으로 st.unit 이 옮겨가도 불변).
+      targetNodeId: row.target_node_id || null,
+      // [§1-A] 재개 시 처음 고른 프리셋을 그대로 유지한다(중간에 바뀌면 갈래별 판정이 섞인다).
+      preset: _v3PresetInfo(st),
       unit: st.unit ? {
         nodeId: st.unit.nodeId, name: st.unit.name || '단원', area: st.unit.area || null,
         conceptTotal: Array.isArray(st.conceptOrder) ? st.conceptOrder.length : 0
@@ -7747,60 +8375,113 @@ function getActiveDiagnosisV3(userId) {
   return null;
 }
 
-// 진단용 폴백 problems: 노드 직접 매핑이 없을 때 자손/같은 단원 차시/같은 학년·과목에서 보충
+/**
+ * 진단·학습 흐름용 폴백 problems — 노드에 직접 매핑된 문항이 없을 때 가까운 곳에서 보충한다.
+ *
+ * ── 결함 이력 (2026-08-07 수정) ────────────────────────────────────────────
+ *  ① **컬럼명 오타로 폴백 2·3 이 통째로 죽어 있었다.**
+ *     `SELECT parent_id … FROM learning_map_nodes` — 실제 컬럼은 **`parent_node_id`** 다
+ *     (`PRAGMA table_info` 실측. `parent_id` 는 comments·notice_comments·users 등 **다른 테이블**의 컬럼).
+ *     첫 줄에서 throw → 바깥의 `catch (_) { /* skip *\/ }` 가 조용히 삼킴 → 폴백 2·3 이 건너뛰어지고
+ *     **매번 폴백 4(전 과목·전 학년 랜덤)** 로 떨어졌다. 초1 수학 노드에 중등 이차함수·영어 문항이 섞였다.
+ *     → 침묵하는 catch 가 결함을 몇 달간 숨겼다. 이제 **반드시 로그를 남긴다.**
+ *
+ *  ② **폴백 4(전체 풀 랜덤)를 제거했다.** 진단은 "이 학생이 이 단원을 아는가"를 보는 것인데
+ *     전혀 다른 과목·학년 문항을 내면 정답률·출발선·학습경로가 전부 무의미해진다.
+ *     실측(정본 스냅샷 1,307개 노드): 폴백1 1,162 · 폴백2 0 · 폴백3(과목+학교급+학년) 124 ·
+ *     폴백3b(과목+학교급) 21 · **나머지 0**. 즉 **같은 과목·같은 학교급으로 제한해도 커버리지 손실이 0**이다.
+ *     그래도 못 찾으면 빈 배열을 돌려준다 — "문항 준비 중"으로 건너뛰는 것이 랜덤 출제보다 정직하고,
+ *     엔진에는 이미 그 상태를 표현하는 1급 개념(skippedConcepts / _v3PickQuestion → null)이 있다.
+ *
+ *  ③ 폴백 3 의 학년 비교에 **grade_level 을 반드시 함께** 건다. `grade` 만 보면 초1·중1·고1 이
+ *     전부 grade=1 이라(실측: grade=1 이 초 305 · 중 27 · 고 51) 학교급을 넘나든다.
+ *
+ * ※ 열람 권한(is_public·status) 필터는 여기서 하지 않는다 — 호출부(routes/self-learn.js)가
+ *   canViewContent 로 한 벌 판정한다. 규칙을 두 곳에 적지 않는다.
+ */
 function collectFallbackProblems(nodeId, userId, limit = 10) {
   const problemTypes = "('quiz','exam','problem','assessment','question')";
+  const SELECT_COLS = 'c.id AS content_id, c.title, c.content_type, c.difficulty, c.estimated_minutes';
   let rows = [];
 
-  // 폴백 1: closure 자손 노드에 매핑된 quiz
+  // 폴백 1: closure 자손 노드에 매핑된 quiz (가장 정확 — 이 노드 아래의 실제 문항)
   try {
     rows = db.prepare(`
-      SELECT c.id AS content_id, c.title, c.content_type, c.difficulty, c.estimated_minutes
+      SELECT ${SELECT_COLS}
       FROM curriculum_node_descendants d
       JOIN node_contents nc ON nc.node_id = d.descendant_id
       JOIN contents c ON nc.content_id = c.id
       WHERE d.ancestor_id = ? AND c.content_type IN ${problemTypes}
       LIMIT ?
     `).all(nodeId, limit);
-  } catch (_) { rows = []; }
+  } catch (e) {
+    console.error('[collectFallbackProblems] 폴백1(자손 매핑) 실패:', e.message);
+    rows = [];
+  }
 
-  // 폴백 2: 같은 단원(parent)의 차시 quiz
   if (rows.length === 0) {
+    let node = null;
     try {
-      const node = db.prepare('SELECT parent_id, subject, grade FROM learning_map_nodes WHERE node_id = ?').get(nodeId);
-      if (node && node.parent_id) {
+      node = db.prepare(
+        'SELECT parent_node_id, subject, grade_level, grade FROM learning_map_nodes WHERE node_id = ?'
+      ).get(nodeId);
+    } catch (e) {
+      // ★ 삼키지 않는다. 컬럼 오타 같은 프로그래밍 오류는 여기서 반드시 드러나야 한다(①의 재발 방지).
+      console.error('[collectFallbackProblems] 노드 메타 조회 실패(스키마 확인 필요):', e.message);
+    }
+
+    // 폴백 2: 같은 단원(부모)의 형제 차시 quiz
+    if (node && node.parent_node_id) {
+      try {
         rows = db.prepare(`
-          SELECT c.id AS content_id, c.title, c.content_type, c.difficulty, c.estimated_minutes
+          SELECT ${SELECT_COLS}
           FROM learning_map_nodes lmn
           JOIN node_contents nc ON nc.node_id = lmn.node_id
           JOIN contents c ON nc.content_id = c.id
-          WHERE lmn.parent_id = ? AND c.content_type IN ${problemTypes}
+          WHERE lmn.parent_node_id = ? AND c.content_type IN ${problemTypes}
           LIMIT ?
-        `).all(node.parent_id, limit);
+        `).all(node.parent_node_id, limit);
+      } catch (e) {
+        console.error('[collectFallbackProblems] 폴백2(형제 차시) 실패:', e.message);
       }
-      // 폴백 3: 같은 학년·과목 풀
-      if (rows.length === 0 && node && node.subject) {
+    }
+
+    // 폴백 3: 같은 과목 + 같은 학교급 + 같은 학년
+    if (rows.length === 0 && node && node.subject) {
+      try {
         rows = db.prepare(`
-          SELECT c.id AS content_id, c.title, c.content_type, c.difficulty, c.estimated_minutes
+          SELECT ${SELECT_COLS}
           FROM learning_map_nodes lmn
           JOIN node_contents nc ON nc.node_id = lmn.node_id
           JOIN contents c ON nc.content_id = c.id
-          WHERE lmn.subject = ? ${node.grade ? 'AND lmn.grade = ?' : ''} AND c.content_type IN ${problemTypes}
-          ORDER BY RANDOM()
-          LIMIT ?
-        `).all(...(node.grade ? [node.subject, node.grade, limit] : [node.subject, limit]));
+          WHERE lmn.subject = ? AND lmn.grade_level IS ? AND lmn.grade IS ?
+            AND c.content_type IN ${problemTypes}
+          ORDER BY RANDOM() LIMIT ?
+        `).all(node.subject, node.grade_level, node.grade, limit);
+      } catch (e) {
+        console.error('[collectFallbackProblems] 폴백3(동학년 동교과) 실패:', e.message);
       }
-    } catch (_) { /* skip */ }
+    }
+
+    // 폴백 3b: 같은 과목 + 같은 학교급 (학년만 완화). 여기까지가 마지막 — 과목·학교급은 절대 넘지 않는다.
+    if (rows.length === 0 && node && node.subject) {
+      try {
+        rows = db.prepare(`
+          SELECT ${SELECT_COLS}
+          FROM learning_map_nodes lmn
+          JOIN node_contents nc ON nc.node_id = lmn.node_id
+          JOIN contents c ON nc.content_id = c.id
+          WHERE lmn.subject = ? AND lmn.grade_level IS ?
+            AND c.content_type IN ${problemTypes}
+          ORDER BY RANDOM() LIMIT ?
+        `).all(node.subject, node.grade_level, limit);
+      } catch (e) {
+        console.error('[collectFallbackProblems] 폴백3b(동교과 학교급) 실패:', e.message);
+      }
+    }
   }
 
-  // 폴백 4: 전체 풀에서 랜덤
-  if (rows.length === 0) {
-    rows = db.prepare(`
-      SELECT c.id AS content_id, c.title, c.content_type, c.difficulty, c.estimated_minutes
-      FROM contents c WHERE c.content_type IN ${problemTypes}
-      ORDER BY RANDOM() LIMIT ?
-    `).all(limit);
-  }
+  // ★ 폴백 4(전 과목·전 학년 랜덤)는 **없다.** 여기까지 못 찾으면 빈 배열 — "문항 준비 중"이 정직하다.
 
   // problems 형태로 매핑 (questions 포함)
   return rows.map(c => {

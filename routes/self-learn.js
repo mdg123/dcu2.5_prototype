@@ -14,6 +14,93 @@ const xapiSpool = require('../lib/xapi/spool');
 //   answer·explanation 을 그대로 실어 보냈다(2026-08-07 실측).
 //   채점은 서버가 questionId 로 재조회해 수행하므로(recordProblemAttempt) 회귀 없음.
 const { stripAnswers } = require('../lib/strip-answers');
+// ── 콘텐츠 열람 권한 판정 SSOT (lib/auth/can-view-content.js) ─────────────────
+//   routes/content.js 의 guardContent 와 **같은 판정**을 쓴다. 새로 적지 않는다.
+const { canViewContent } = require('../lib/auth/can-view-content');
+// ── 정수 식별자 정규화 SSOT (lib/ids.js) ──────────────────────────────────────
+//   게이트가 읽는 값과 쿼리가 읽는 값이 **같아야** 한다. parseInt 는 "2.17e2"→2,
+//   SQLite 코어션은 같은 문자열을 217 로 읽어 두 판정이 갈렸다(2026-08-07 P0).
+const { normalizeId, classifyId } = require('../lib/ids');
+
+/**
+ * 문제 풀이 시도 기록의 콘텐츠 게이트.
+ *
+ * 🔴 유래 (2026-08-07 감리 5차 실측, 격리 서버 3480 · student1 세션):
+ *     POST /api/self-learn/problem-attempt  {"contentId":193,"questionId":217}
+ *       → 200 { "correctAnswer":"56", "explanation":"7 × 8 = 56 입니다." }
+ *     같은 학생이 POST /api/contents/193/grade 에서는 403 이었다(193 = 비공개, teacher1 소유).
+ *   즉 콘텐츠 경로를 닫아도 **자기주도학습 경로가 권한 검사를 통째로 건너뛰어**
+ *   정답·해설이 그대로 나갔다. 비공개(193·194)·초안(34) 전부 재현됐다.
+ *
+ * ⚠ 과잉 차단 금지 — 판정은 canViewContent 한 벌뿐이고 정상 학습 동선은 전부 통과한다.
+ *   실측(정본 스냅샷): 학습맵 노출대상 표본 500/500 통과 · 오늘의학습 항목×멤버 30/30 통과.
+ *   차단되는 것은 비공개·초안·반려 콘텐츠뿐이다(= 애초에 열람이 403 인 것들).
+ *
+ * @returns {boolean} true 면 통과, false 면 이미 응답을 보냈으므로 호출부는 즉시 return
+ */
+function guardAttemptContent(req, res, contentId) {
+  if (canViewContent(req.user, contentId)) return true;
+  res.status(403).json({ success: false, message: '이 콘텐츠를 볼 권한이 없습니다.' });
+  return false;
+}
+
+/**
+ * questionId 가 **정말 그 콘텐츠의 문항인지** 확인한다 (교차 주입 차단).
+ *
+ * 🔴 유래 — 게이트만으로는 안 닫히는 두 번째 구멍 (2026-08-07 실측):
+ *     POST /problem-attempt {"contentId":5(열람가능), "questionId":217(비공개 193의 문항)}
+ *       → 200 { correctAnswer:"56", explanation:"7 × 8 = 56 입니다." }
+ *   guardAttemptContent 가 보는 키(contentId)와 채점기가 정답을 꺼내는 키(questionId)가
+ *   갈라져 있어서, **열람 가능한 콘텐츠를 방패로 삼아** 남의 문항 정답을 뽑을 수 있었다.
+ *   오답노트 자동 수집까지 그 문항을 그대로 담으므로 흔적을 남기며 새는 형태였다.
+ *
+ * ⚠ 과잉 차단 금지 — 정상 호출은 전부 통과한다.
+ *   FE(learning-map.html submitSolve · content 별칭 경로)는 항상 **같은 콘텐츠의**
+ *   question_id 를 실어 보낸다(`contentId: p.id, questionId: p.question_id`).
+ *   · questionId 미전송        → 검사 안 함(콘텐츠 단위 제출 — 기존 호환 경로 그대로)
+ *   · 존재하지 않는 questionId → 검사 안 함(기존과 동일하게 db 쪽 폴백 분기로 흡수)
+ *   · **다른 콘텐츠의 문항**   → 400. 정상 클라이언트가 만들 수 없는 요청이다.
+ *
+ * 🔴🔴 두 번째 유래 — **게이트와 채점기가 같은 문자열을 다르게 읽었다** (2026-08-07 감리 6차):
+ *     POST /problem-attempt {"contentId":5, "questionId":"2.17e2"}
+ *       → 200 { correctAnswer:"56", explanation:"7 × 8 = 56 입니다." }
+ *   여기(게이트)는 `parseInt("2.17e2",10)` → **2** 로 읽어 "콘텐츠 5의 2번 문항"이라 통과시켰고,
+ *   채점기(db/self-learn-extended.js recordProblemAttempt)는 **원본 문자열**을 SQLite 에 넘겨
+ *   `WHERE id = '2.17e2'` 가 **217**(비공개 193의 문항)로 코어션됐다.
+ *   지수·부호·공백 표기 6종(`2.17e2`·`2.17E2`·`+2.17e2`·`2.17e+2`·`.217e3`·`" 2.17e2 "`)이 전부 뚫렸다.
+ *
+ *   → 해법은 "한쪽을 고치는 것"이 아니라 **양쪽이 같은 값을 보게 하는 것**이다.
+ *     이 함수는 이제 **정규화된 Number 를 돌려주고**, 호출부는 그 값을 그대로 채점기에 넘긴다.
+ *     즉 게이트가 승인한 문항 = 채점기가 조회하는 문항이 구조적으로 동일해진다.
+ *     정규화 판정은 lib/ids.js 한 벌뿐이다(사본 금지).
+ *
+ * ※ 채점 로직 자체(db/self-learn-extended.js)는 진단 v3 재설계와 같은 파일이라 최소 침습으로만
+ *   건드린다 — 같은 SSOT 로 한 번 더 정규화하고 문항 조회를 content_id 로 스코프한다(이중 방어).
+ *
+ * @returns {number|null|false}
+ *   number — 정규화된 questionId. 호출부는 **이 값을** 채점기에 넘겨야 한다
+ *   null   — questionId 미전송(콘텐츠 단위 제출). 기존 호환 경로 그대로
+ *   false  — 차단됨(이미 응답을 보냈다). 호출부는 즉시 return
+ */
+function guardQuestionBelongsToContent(req, res, contentId, questionId) {
+  const kind = classifyId(questionId);
+  if (kind === 'absent') return null;                       // questionId 미전송 — 콘텐츠 단위 제출
+  if (kind === 'invalid') {
+    // "2.17e2" 같은 지수·소수·부호 표기. 정상 클라이언트가 만들 수 없고,
+    // 통과시키면 게이트와 SQLite 가 다른 문항을 가리킨다 → 규격 밖은 즉시 거부한다.
+    res.status(400).json({ success: false, message: '잘못된 문항 ID입니다.' });
+    return false;
+  }
+  const qid = normalizeId(questionId);
+  try {
+    const mainDb = require('../db');
+    const row = mainDb.prepare('SELECT content_id FROM content_questions WHERE id = ?').get(qid);
+    if (!row) return qid;                                   // 존재하지 않는 문항 — 기존 폴백 유지
+    if (Number(row.content_id) === Number(contentId)) return qid;
+  } catch (_) { return qid; }                               // 조회 실패는 막지 않는다(가용성 우선)
+  res.status(400).json({ success: false, message: '문항이 이 콘텐츠에 속하지 않습니다.' });
+  return false;
+}
 
 // 학습맵 노드 → 표준체계 컨텍스트 조회 헬퍼
 function _nodeStdContext(nodeId) {
@@ -517,12 +604,12 @@ router.get('/map/nodes/:unitId/lessons', requireAuth, (req, res) => {
                 JOIN contents c ON nc.content_id = c.id
                 WHERE nc.node_id = n.node_id
                   AND c.content_type = 'video'
-                  AND c.is_public = 1 AND c.status = 'approved') AS videos_count,
+                  AND c.is_public = 1 AND c.status = 'approved') AS videos_count,  -- access-ok: 학습맵 '목록 노출' 필터. can-view-content.js 가 전제로 삼는 그 필터이며 단건 열람 판정이 아니다
              (SELECT COUNT(*) FROM node_contents nc
                 JOIN contents c ON nc.content_id = c.id
                 WHERE nc.node_id = n.node_id
                   AND c.content_type IN ('quiz','exam','problem','question','assessment')
-                  AND c.is_public = 1 AND c.status = 'approved') AS problems_count,
+                  AND c.is_public = 1 AND c.status = 'approved') AS problems_count,  -- access-ok: 위와 동일(목록 카운트 필터)
              COALESCE(uns.status, 'not_started') AS user_status,
              uns.correct_rate AS correct_rate
       FROM learning_map_nodes n
@@ -537,13 +624,13 @@ router.get('/map/nodes/:unitId/lessons', requireAuth, (req, res) => {
     const videoIdsStmt = db.prepare(`
       SELECT c.id FROM node_contents nc JOIN contents c ON nc.content_id = c.id
       WHERE nc.node_id = ? AND c.content_type = 'video'
-        AND c.is_public = 1 AND c.status = 'approved'
+        AND c.is_public = 1 AND c.status = 'approved'  -- access-ok: 진행률 분모용 목록 필터(단건 열람 판정 아님)
     `);
     const problemIdsStmt = db.prepare(`
       SELECT c.id FROM node_contents nc JOIN contents c ON nc.content_id = c.id
       WHERE nc.node_id = ?
         AND c.content_type IN ('quiz','exam','problem','question','assessment')
-        AND c.is_public = 1 AND c.status = 'approved'
+        AND c.is_public = 1 AND c.status = 'approved'  -- access-ok: 진행률 분모용 목록 필터(단건 열람 판정 아님)
     `);
     const videoRatioStmt = db.prepare(`
       SELECT watch_ratio FROM user_content_progress WHERE user_id = ? AND content_id = ?
@@ -602,7 +689,13 @@ router.get('/map/nodes/:nodeId', requireAuth, (req, res) => {
           ? selfLearnDb.collectFallbackProblems(req.params.nodeId, req.user.id, 10)
           : null;
         if (Array.isArray(fallback) && fallback.length) {
-          detail.problems = fallback;
+          // ★ 폴백 후보는 **열람 권한을 통과한 것만** 남긴다.
+          //   collectFallbackProblems 는 교과·학교급·학년으로만 좁힐 뿐 is_public·status 를 보지 않는다.
+          //   그래서 비공개·초안·반려 콘텐츠의 문항이 학생 응답에 섞여 들어갔다.
+          //   판정은 여기서도 canViewContent 한 벌 — 새 규칙을 적지 않는다.
+          //   과잉 차단 위험 0: node_contents 매핑 문항형 8,898건 중 비공개·미승인은 0건이고
+          //   공개 승인본은 canViewContent 의 1번 규칙(공개 승인본 전원 허용)으로 그대로 통과한다.
+          detail.problems = fallback.filter(p => canViewContent(req.user, Number(p.content_id ?? p.id)));
           detail.problems_source = 'fallback';
         }
       } catch (_) { /* 폴백 실패 시 그대로 진행 */ }
@@ -1625,15 +1718,23 @@ router.post('/problem-attempt', requireAuth, (req, res) => {
     // 전 역할 허용: 모든 인증 사용자가 자기 user.id로 문제 풀이를 기록한다.
     // (비학생 기록은 학생 통계 집계 쿼리의 role='student' 필터로 격리됨)
     const { contentId, content_id, isCorrect, is_correct, selectedAnswer, userAnswer, user_answer, answer, answerIndex, answer_index, questionId, question_id, timeTaken, time_taken, nodeId, node_id } = req.body || {};
-    const cid = parseInt(contentId || content_id);
+    // ★ 식별자 정규화 SSOT — parseInt 는 "5.9e1"→5 처럼 관대해 게이트와 쿼리가 갈린다.
+    const cid = normalizeId(contentId ?? content_id);
     if (!cid) return res.status(400).json({ success: false, message: 'contentId 필요' });
+    // ★ 콘텐츠 열람 권한 게이트 — 정답·해설 조회 우회 금지(POST /api/contents/:id/grade 와 동일 판정)
+    if (!guardAttemptContent(req, res, cid)) return;
+    // ★ 게이트를 통과한 콘텐츠를 방패 삼아 남의 문항 정답을 뽑는 교차 주입도 함께 막는다.
+    //   반환된 **정규화 값(qid)** 을 그대로 채점기에 넘긴다 — 원본 문자열을 다시 넘기면
+    //   SQLite 코어션이 재개입해 게이트가 승인한 문항과 다른 행이 조회된다(2026-08-07 P0).
+    const qid = guardQuestionBelongsToContent(req, res, cid, questionId ?? question_id);
+    if (qid === false) return;
     const result = selfLearnDb.recordProblemAttempt(req.user.id, cid, {
       isCorrect: !!(isCorrect ?? is_correct),
       selectedAnswer: selectedAnswer ?? user_answer ?? userAnswer,
       userAnswer: userAnswer ?? user_answer,
       answer,
       answerIndex: answerIndex != null ? answerIndex : answer_index,
-      questionId: questionId || question_id,
+      questionId: qid,
       timeTaken: timeTaken || time_taken,
       nodeId: nodeId || node_id
     });
@@ -1665,12 +1766,17 @@ router.post('/video-progress', requireAuth, (req, res) => {
 // POST /contents/:contentId/attempt — 문제 풀이 시도 기록
 router.post('/contents/:contentId/attempt', requireAuth, (req, res) => {
   try {
-    const contentId = parseInt(req.params.contentId);
+    const contentId = normalizeId(req.params.contentId);   // ★ 정규화 SSOT (lib/ids.js)
     const { isCorrect, selectedAnswer, userAnswer, answer, questionId, timeTaken, nodeId } = req.body || {};
-    // 서버에서 서버 정답 판정 (questionId 있을 때)
+    if (!contentId) return res.status(400).json({ success: false, message: 'contentId 필요' });
+    // ★ /problem-attempt 와 같은 게이트 — 이 별칭 경로만 열려 있으면 우회로가 남는다.
+    if (!guardAttemptContent(req, res, contentId)) return;
+    const qid = guardQuestionBelongsToContent(req, res, contentId, questionId);
+    if (qid === false) return;
+    // 서버에서 서버 정답 판정 (questionId 있을 때) — 게이트가 승인한 **정규화 값**만 넘긴다.
     const result = selfLearnDb.recordProblemAttempt(req.user.id, contentId, {
       isCorrect: !!isCorrect,   // questionId 없을 때 호환성 fallback
-      selectedAnswer, userAnswer, answer, questionId, timeTaken, nodeId
+      selectedAnswer, userAnswer, answer, questionId: qid, timeTaken, nodeId
     });
     res.json({ success: true, ...result });
   } catch (err) {
