@@ -24,11 +24,17 @@ function getHallOfFame(month, period) {
   }
 
   // 최다활동 클래스 — owner_name·cover_image_url 포함 (포털 미리보기 카드용)
+  //   member_count 는 getClassMembers(db/class.js) 와 **같은 모집단**이어야 한다:
+  //   개설자·학부모·교직원은 포함하고(사용자 확정) **삭제 계정만** 뺀다 → liveUserSql.
+  //   ⚠ 2026-08-07 감리: 여기만 liveUserSql 이 빠져 있어 같은 클래스가
+  //     관리자 화면 10명 / 명예의 전당 11명으로 갈렸다(관리자 쪽이 옳다).
   const topClasses = db.prepare(`
     SELECT c.id, c.name, c.school_name, c.owner_id, c.cover_image_url,
       u.display_name as owner_name,
       COUNT(*) as activity_count,
-      (SELECT COUNT(DISTINCT cm.user_id) FROM class_members cm WHERE cm.class_id = c.id AND cm.status='active') as member_count
+      (SELECT COUNT(DISTINCT cm.user_id) FROM class_members cm
+         JOIN users mu ON mu.id = cm.user_id
+        WHERE cm.class_id = c.id AND cm.status='active' AND ${liveUserSql('mu')}) as member_count
     FROM learning_logs ll
     JOIN classes c ON ll.class_id = c.id
     LEFT JOIN users u ON c.owner_id = u.id

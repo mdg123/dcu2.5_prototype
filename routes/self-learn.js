@@ -9,6 +9,11 @@ const buildNavigation = require('../lib/xapi/builders/navigation');
 const buildAssessment = require('../lib/xapi/builders/assessment');
 const buildAnnotation = require('../lib/xapi/builders/annotation');
 const xapiSpool = require('../lib/xapi/spool');
+// ── 정답·해설 비노출 판정 SSOT (lib/strip-answers.js) ─────────────────────────
+//   학습맵 노드 상세(problems[])·오늘의 학습 결과(questions[])가 content_questions 의
+//   answer·explanation 을 그대로 실어 보냈다(2026-08-07 실측).
+//   채점은 서버가 questionId 로 재조회해 수행하므로(recordProblemAttempt) 회귀 없음.
+const { stripAnswers } = require('../lib/strip-answers');
 
 // 학습맵 노드 → 표준체계 컨텍스트 조회 헬퍼
 function _nodeStdContext(nodeId) {
@@ -318,6 +323,11 @@ router.get('/daily/:itemId/result', requireAuth, (req, res) => {
   try {
     const result = selfLearnDb.getDailyItemResult(parseInt(req.params.itemId), req.user.id);
     if (!result) return res.status(404).json({ success: false, message: '항목을 찾을 수 없습니다.' });
+    // ★ 정답 비노출 — 시점 분기. getDailyItemResult 는 "풀이 안 함" 인 경우에도
+    //   content_questions 정답지를 통째로 폴백으로 돌려줬다(주석에도 그렇게 적혀 있었다).
+    //   결과 화면은 **이수 후** 보는 화면이므로, 이수 전에는 정답을 벗긴다.
+    const done = !!(result.progress && (result.progress.completed_at || result.progress.status === 'completed'));
+    result.questions = stripAnswers(result.questions, req.user, { submitted: done });
     res.json({ success: true, ...result });
   } catch (err) {
     console.error('[SELF-LEARN] daily result error:', err);
@@ -597,6 +607,10 @@ router.get('/map/nodes/:nodeId', requireAuth, (req, res) => {
         }
       } catch (_) { /* 폴백 실패 시 그대로 진행 */ }
     }
+    // ★ 정답 비노출: problems[].answer·explanation 은 풀기 전 문항 제공이다.
+    //   FE(learning-map submitSolve)는 서버 채점 응답의 correctAnswer·explanation 을
+    //   최종값으로 쓰고 p.answer 는 폴백일 뿐이라 회귀가 없다.
+    if (Array.isArray(detail.problems)) detail.problems = stripAnswers(detail.problems, req.user);
     res.json({ success: true, ...detail });
   } catch (err) {
     console.error('[SELF-LEARN] map/nodes/:id error:', err);

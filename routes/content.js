@@ -9,6 +9,12 @@ const contentDb = require('../db/content');
 //   판정을 이 파일에 인라인으로 적으면 업로드 파일 가드(lib/uploads-access.js)가
 //   같은 판정을 또 복사해야 한다 → 실체는 lib 하나로 두고 여기선 호출만 한다.
 const { canViewContent, loadContentForAuth } = require('../lib/auth/can-view-content');
+// ── 정답·해설 비노출 판정 SSOT (lib/strip-answers.js) ─────────────────────────
+//   getContentById 는 quiz/exam 콘텐츠에 content_questions 를 SELECT * 로 붙인다
+//   (= answer·explanation 포함). 화면에서 안 그려도 네트워크 응답에는 그대로 실렸다.
+//   판정을 여기 인라인으로 적으면 routes/lesson.js·routes/exam.js 가 같은 판정을
+//   또 복사한다 → 실체는 lib 하나. (INV-AE4 소스 락이 사본을 금지)
+const { stripContentAnswers, stripAnswers } = require('../lib/strip-answers');
 const { removeOrphanUploads } = require('../lib/uploads-access');
 const featuredDb = require('../db/featured');
 const { logLearningActivity } = require('../db/learning-log-helper');
@@ -555,7 +561,10 @@ router.get('/:id', requireAuth, (req, res) => {
       });
     } catch (e) { console.error('[xapi:content_view]', e.message); }
     const isCollected = contentDb.isInCollection(req.user.id, content.id);
-    res.json({ success: true, content, isCollected });
+    // ★ 정답 비노출: 학생(=풀기 전)에게는 questions[].answer·explanation 을 벗긴다.
+    //   교사·관리자·작성자 본인은 그대로(문항 편집·미리보기·정답 확인은 정당한 직무).
+    //   학생의 "제출 후 해설"은 이 GET 이 아니라 채점 응답(POST /:id/grade)이 담당한다.
+    res.json({ success: true, content: stripContentAnswers(content, req.user), isCollected });
   } catch (err) {
     res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
   }
@@ -848,6 +857,122 @@ router.get('/channels/subscriptions/list', requireAuth, (req, res) => {
 //   ⚠ 싱글톤이므로 close() 하면 앱 전체가 죽는다. 아래 핸들러들은 close 하지 않는다.
 const attemptsDb = require('../db/index');
 function _attemptsDb() { return attemptsDb; }
+
+// ============================================================================
+// POST /api/contents/:id/grade — 문항 콘텐츠 **서버 채점**
+// ----------------------------------------------------------------------------
+// 왜 필요한가 (2026-08-07):
+//   content-player.html 은 `GET /api/contents/:id` 가 실어 준 `q.answer` 로
+//   **클라이언트에서 채점**했다. 그래서 정답을 응답에서 빼는 순간 채점·해설이 통째로
+//   깨진다. "제출 전엔 가리고, 제출 후엔 해설을 보여준다"는 정책을 지키려면 판정의
+//   주체가 서버여야 한다 → 이 엔드포인트가 그 자리다.
+//
+//   요청:  { answers: [{ questionId, value }, ...] }
+//   응답:  { results: [{ questionId, correct, score, maxScore, answer?, explanation? }] }
+//          ↑ answer·explanation 은 **채점을 마친 문항에만** 붙는다.
+//
+// 🔴 2026-08-07 감리 4차 — 이 엔드포인트가 정답지 전체를 내주던 구멍:
+//   `const base = { ..., answer: q.answer, explanation: ... }` 를 만들어 두고
+//   미응답(`given == null`)·서술형(자동채점 보류)에도 그 base 를 그대로 반환했다.
+//   → `POST /api/contents/:id/grade  {"answers":[]}` 한 번이면 **전 문항이 미응답**이 되어
+//     정답·해설이 통째로 돌아왔다. `attempt_count` 도 안 오르므로 흔적조차 남지 않는다.
+//     (9,918 콘텐츠 / 11,813 문항 — 학생 계정 하나 + for 루프면 전량 수집 가능했다)
+//   즉 GET 에서 벗긴 정답을 같은 파일의 POST 가 복원해 준 형태였다.
+//   → **채점이 실제로 끝난 문항만** "제출 완료(submitted)" 로 보고 공개한다.
+//     부분 제출(4문항 중 2개만 답)이면 **답한 2개만** 공개된다.
+//     "하나라도 답했으면 전부 공개" 는 같은 구멍이므로 판정은 **문항 단위**다.
+//   판정은 lib/strip-answers.js 한 벌만 쓴다(사본 금지 — INV-AE4 소스 락).
+//   교사·관리자·작성자는 canRevealAnswers 의 역할/소유자 분기로 지금처럼 전부 본다.
+//
+//   채점 규칙은 기존 content-player 의 클라이언트 로직과 **동일**하게 맞췄다(회귀 방지):
+//     · choice : String 비교
+//     · short  : 공백 제거 + 소문자화 후 비교(관대한 비교)
+//     · essay  : 자동채점 보류(correct=null)
+//     · 미응답 : correct=null, score=0
+// ============================================================================
+function _normalizeShort(s) {
+  return String(s == null ? '' : s).replace(/\s+/g, '').toLowerCase();
+}
+function _normalizeQType(t) {
+  const s = String(t || '').toLowerCase();
+  if (s === 'multiple_choice' || s === 'multiple' || s === 'mc' || s === 'choice') return 'choice';
+  if (s === 'short_answer' || s === 'short-answer' || s === 'fill' || s === 'short') return 'short';
+  if (s === 'essay' || s === 'long' || s === 'written' || s === 'long_answer') return 'essay';
+  return 'choice';
+}
+
+router.post('/:id/grade', requireAuth, (req, res) => {
+  try {
+    const contentId = parseInt(req.params.id);
+    // 열람 권한이 없는 콘텐츠는 채점도 해 주지 않는다(정답 조회 우회 금지).
+    const content = guardContent(req, res);
+    if (!content) return;
+
+    const db = require('../db/index');
+    const rows = db.prepare(
+      'SELECT id, question_number, question_type, options, answer, explanation, points FROM content_questions WHERE content_id = ? ORDER BY question_number'
+    ).all(contentId);
+    if (rows.length === 0) {
+      return res.status(404).json({ success: false, message: '등록된 문항이 없습니다.' });
+    }
+
+    const submitted = Array.isArray(req.body && req.body.answers) ? req.body.answers : [];
+    // questionId 우선 매칭, 없으면 순서(index) 매칭 — 두 경우 모두 서버 문항이 기준이다.
+    const byId = new Map();
+    submitted.forEach((a, i) => {
+      if (a && typeof a === 'object' && a.questionId != null) byId.set(Number(a.questionId), a.value);
+      else byId.set(`#${i}`, a && typeof a === 'object' ? a.value : a);
+    });
+
+    let totalScore = 0, maxTotal = 0, autoScored = 0;
+    const results = rows.map((q, i) => {
+      const maxScore = Number(q.points) || 1;
+      maxTotal += maxScore;
+      const given = byId.has(Number(q.id)) ? byId.get(Number(q.id)) : byId.get(`#${i}`);
+      const qType = _normalizeQType(q.question_type);
+
+      /**
+       * 결과 1건을 만든다.
+       * @param {boolean} graded  이 문항을 **실제로 채점했는가**(= 이 열람자에게 정답 공개 가능)
+       *   미응답·서술형 보류는 false → strip-answers 가 answer·explanation 을 벗긴다.
+       *   교사·관리자·작성자는 graded 와 무관하게 canRevealAnswers 가 통과시킨다.
+       */
+      const emit = (graded, verdict) => stripAnswers(
+        [{
+          questionId: q.id, questionNumber: q.question_number, maxScore,
+          answer: q.answer, explanation: q.explanation || null,
+          ...verdict,
+        }],
+        req.user,
+        { ownerId: content.creator_id, submitted: graded }
+      )[0];
+
+      if (given == null || given === '') return emit(false, { correct: null, score: 0 });
+      if (qType === 'essay') return emit(false, { correct: null, score: 0 });
+
+      let ok;
+      if (qType === 'choice') ok = String(given) === String(q.answer);
+      else ok = _normalizeShort(q.answer) !== '' && _normalizeShort(given) === _normalizeShort(q.answer);
+
+      autoScored += maxScore;
+      if (ok) totalScore += maxScore;
+      return emit(true, { correct: ok, score: ok ? maxScore : 0 });
+    });
+
+    const pctBase = autoScored > 0 ? autoScored : maxTotal;
+    const scorePercent = pctBase > 0 ? Math.round((totalScore / pctBase) * 100) : 0;
+    res.json({
+      success: true,
+      results,
+      totalScore, maxTotal, autoScored, scorePercent,
+      correctCount: results.filter(r => r.correct === true).length,
+      wrongCount: results.filter(r => r.correct === false).length,
+    });
+  } catch (err) {
+    console.error('[CONTENT] grade error:', err);
+    res.status(500).json({ success: false, message: '채점 중 오류가 발생했습니다.' });
+  }
+});
 
 // POST /api/contents/:id/attempts - 풀이 결과 기록
 router.post('/:id/attempts', requireAuth, (req, res) => {

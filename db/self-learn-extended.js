@@ -4141,16 +4141,15 @@ function reportContent(userId, contentId, { reason, details, contentType }) {
 //   객체에서 정답류 필드를 제거한다. 채점은 questionId 로 content_questions 를 재조회하므로
 //   응답에서 정답을 가려도 회귀가 없다. (v3 _v3PickQuestion 이 쓰는 비노출 규약과 동일 목적)
 //   ⚠ 응답 직전 sanitize 만 — DB·내부 채점 로직의 정답은 그대로 유지.
-const _DIAG_ANSWER_KEYS = [
-  'answer', 'correct_answer', 'correctAnswer',
-  'correctIndex', 'correct_index', 'answerIndex', 'answer_index',
-  'explanation'
-];
+//
+//   [2026-08-07] 키 목록을 여기 손으로 두면 lib/strip-answers.js 와 어긋난다
+//   (실제로 routes/exam.js 사본이 explanation 을 빼먹은 사고가 있었다).
+//   판정·키목록의 실체는 lib/strip-answers.js 하나이고 여기서는 호출만 한다.
+//   진단 문항 제공은 **언제나 풀기 전**이므로 viewer 무관 무조건 제거(null viewer).
+const { stripAnswers: _stripAnswersSSOT } = require('../lib/strip-answers');
 function _sanitizeDiagQuestion(q) {
   if (!q || typeof q !== 'object') return q;
-  const out = { ...q };
-  for (const k of _DIAG_ANSWER_KEYS) delete out[k];
-  return out;
+  return _stripAnswersSSOT([q], null)[0];
 }
 
 function _pickQuestionForNode(nodeId, difficulty) {

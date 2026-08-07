@@ -1,4 +1,6 @@
 const db = require('./index');
+// 소프트 삭제 계정 판정은 db/class.js 정본 헬퍼만 사용 (술어 손복사 금지).
+const { liveUserSql } = require('./class');
 
 // ─────────────────────────────────────────────────────────
 // JSON 안전 직렬화/역직렬화 헬퍼
@@ -144,6 +146,9 @@ function isRead(noticeId, userId) {
 // 개설자 전용: 읽은 멤버 / 미확인 멤버 (active 멤버 기준)
 // 도달율 왜곡 방지: 해당 알림장 "작성자(author)"는 읽음/미읽음 분모에서 제외한다.
 // (작성자는 스스로 알림장을 열지 않아도 되며, remindUnread 도 senderId 를 필터함 — 동일 기준)
+// 모집단 규약: 알림장은 "멤버 전원"이 대상이다 — 학부모·교직원도 알림장을 받아야 하므로
+//   분모에 그대로 포함한다(사용자 결정 2026-08-07). 여기서 빠지는 건 작성자와
+//   로그인 자체가 불가능한 소프트 삭제 계정뿐. ⚠ 역할로 좁히지 말 것.
 function getReadAndUnreadMembers(noticeId, classId) {
   const notice = db.prepare('SELECT author_id FROM notices WHERE id = ?').get(noticeId);
   const authorId = notice ? notice.author_id : null;
@@ -153,6 +158,7 @@ function getReadAndUnreadMembers(noticeId, classId) {
     JOIN users u ON cm.user_id = u.id
     WHERE cm.class_id = ? AND cm.status = 'active'
       AND cm.user_id != ?
+      AND ${liveUserSql('u')}
   `).all(classId, authorId);
   const readSet = new Set(
     db.prepare('SELECT user_id FROM notice_reads WHERE notice_id = ?').all(noticeId).map(r => r.user_id)

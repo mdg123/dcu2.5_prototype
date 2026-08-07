@@ -9,6 +9,12 @@ const { ensureTodayAttendance } = require('../db/attendance');
 const buildNavigation = require('../lib/xapi/builders/navigation');
 const buildMedia = require('../lib/xapi/builders/media');
 const xapiSpool = require('../lib/xapi/spool');
+// ── 정답·해설 비노출 판정 SSOT (lib/strip-answers.js) ─────────────────────────
+//   getLessonContents 가 content_questions 를 SELECT * 로 붙여, 수업꾸러미를 연 학생의
+//   응답에 `contents[n].questions[0].answer` 가 그대로 실렸다(2026-08-07 실측).
+//   FE(lesson-player)는 이 questions 를 **길이 게이트로만** 쓰고 실제 풀이는
+//   content-player iframe 에 위임하므로, 정답을 벗겨도 화면 회귀가 없다.
+const { stripContentAnswers } = require('../lib/strip-answers');
 
 function requireClassMember(req, res, next) {
   const classId = parseInt(req.params.classId);
@@ -117,7 +123,8 @@ router.get('/:classId/:lessonId', requireAuth, requireClassMember, (req, res) =>
       return res.status(404).json({ success: false, message: '수업을 찾을 수 없습니다.' });
     }
     const attachments = lessonDb.getAttachments(lesson.id);
-    const contents = lessonDb.getLessonContents(lesson.id);
+    // ★ 정답 비노출: 학생에게는 문항 콘텐츠의 answer·explanation 을 벗긴다(SSOT 판정).
+    const contents = lessonDb.getLessonContents(lesson.id).map(c => stripContentAnswers(c, req.user));
     const progress = lessonDb.getLessonProgress(req.user.id, lesson.id);
     const std_ids = lessonDb.getLessonStdIds(lesson.id);
     try { ensureTodayAttendance(req.classId, req.user.id, 'lesson_view'); } catch (e) {}

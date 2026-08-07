@@ -6,6 +6,8 @@ const crypto = require('crypto');
 const { requireAuth, requireRole } = require('../middleware/auth');
 const authDb = require('../db/auth');
 const db = require('../db/index');
+// 소프트 삭제 계정 판정 정본 헬퍼 (술어 손복사 금지)
+const classDb = require('../db/class');
 
 const adminOnly = [requireAuth, requireRole('admin')];
 
@@ -155,9 +157,18 @@ router.get('/classes', ...adminOnly, (req, res) => {
     const total = db.prepare('SELECT COUNT(*) as cnt FROM classes').get().cnt;
     // classes 테이블의 소유자 컬럼은 owner_id (created_by 아님 — 스키마 실측).
     // 소유자가 삭제된 클래스도 누락되지 않도록 LEFT JOIN 사용.
+    // member_count 규약(2026-08-07):
+    //   · cm.status='active'  → 강퇴(removed)·탈퇴(left)·초대중(invited)은 멤버가 아니다.
+    //     (이전에는 status 를 아예 안 봐서 탈퇴자·초대중까지 셌다 — 어느 규약으로도 오답)
+    //   · liveUserSql        → 로그인 불가능한 소프트 삭제 계정 제외. 상세 명단인
+    //     classDb.getClassMembers() 가 이미 삭제 계정을 빼므로, 빼지 않으면 카드≠내역.
+    //   · 역할 조건 없음     → 개설자·학부모·교직원도 클래스 멤버이므로 그대로 센다.
+    //     ⚠ 여기에 u.role='student' 를 넣지 말 것 (사용자 결정).
     const classes = db.prepare(`
       SELECT c.*, u.display_name as creator_name,
-        (SELECT COUNT(*) FROM class_members WHERE class_id = c.id) as member_count
+        (SELECT COUNT(*) FROM class_members m JOIN users mu ON mu.id = m.user_id
+          WHERE m.class_id = c.id AND m.status = 'active'
+            AND ${classDb.liveUserSql('mu')}) as member_count
       FROM classes c LEFT JOIN users u ON c.owner_id = u.id
       ORDER BY c.created_at DESC LIMIT ? OFFSET ?
     `).all(parseInt(limit), (parseInt(page) - 1) * parseInt(limit));

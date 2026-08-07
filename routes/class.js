@@ -1937,6 +1937,9 @@ router.get('/:classId/analytics/board/top-members', requireAuth, (req, res) => {
     const db = require('../db/index');
 
     // posts 작성 + comments 작성(클래스 소속 글에 한해) + notice_comments 작성 — 모두 기간 필터 적용
+    // 모집단 규약: 게시판 활동 랭킹은 "멤버 전원"(교사·학부모·교직원 포함)이 대상 —
+    //   실제로 글·댓글을 쓴 사람을 보여주는 화면이므로 역할로 좁히지 않는다(사용자 결정 2026-08-07).
+    //   제외 대상은 소프트 삭제 계정뿐 (liveUserSql — db/class.js 정본 헬퍼).
     const pp = range.clause('p.created_at');
     const cc = range.clause('c.created_at');
     const ncc = range.clause('nc.created_at');
@@ -1952,6 +1955,7 @@ router.get('/:classId/analytics/board/top-members', requireAuth, (req, res) => {
       FROM users u
       JOIN class_members cm ON cm.user_id = u.id
       WHERE cm.class_id = ? AND cm.status = 'active'
+        AND ${classDb.liveUserSql('u')}
     `).all(classId, ...pp.params, classId, ...cc.params, classId, ...ncc.params, classId);
 
     const items = rows

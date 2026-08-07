@@ -775,7 +775,18 @@
         });
         const data = await res.json();
         if (data.success) {
-          // 제출 완료 → 바로 리뷰 모드로 전환
+          // 제출 완료 → 바로 리뷰 모드로 전환.
+          //   ⚠ 응시 중 받은 questions 에는 정답·해설이 없다(제출 전 비노출).
+          //     그대로 리뷰로 넘어가면 "정답 0개 / 해설 없음" 으로 보인다.
+          //     제출을 마쳤으니 정답이 포함된 평가지를 **다시 받아** 교체한다.
+          //     (class/exam-view.html 이 이미 쓰는 방식과 동일)
+          try {
+            const fresh = await fetch(`/api/exam/${classId}/${examId}`).then(r => r.json());
+            if (fresh.success && fresh.exam) {
+              const fq = typeof fresh.exam.questions === 'string' ? JSON.parse(fresh.exam.questions) : (fresh.exam.questions || []);
+              if (fq.length === questions.length) questions = fq;
+            }
+          } catch (e) { /* 재조회 실패 시 기존 문항으로 진행(점수는 서버값 사용) */ }
           correctAnswers = questions.map(q => q.answer);
           reviewScore = data.score;
           enterReviewMode();

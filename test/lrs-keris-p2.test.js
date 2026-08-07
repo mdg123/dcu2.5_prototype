@@ -492,14 +492,31 @@ test('R-1②: learnOnly 미지정/비-1 값 → 응답 완전 불변(deepEqual �
   assert.equal(plain.status, 200);
   assert.deepEqual(zero.json, plain.json, 'learnOnly=0 이 응답을 바꿈(비-1 값은 불변이어야)');
   assert.deepEqual(junk.json, plain.json, 'learnOnly=yes 가 응답을 바꿈(비-1 값은 불변이어야)');
-  // 미지정 응답엔 조회성(view) 항목이 정상 포함(기존 bucket=all 계약 그대로) — 데이터 존재 시
+  // ── [2026-08-07] 낡은 단언 교체 ─────────────────────────────────────────
+  //   여기에 `미지정 count 에 조회성 포함(기존 계약)` 이 있었다. 그 계약은 이후
+  //   **학습활동 정본 7종 정의(사용자 확정)** 로 뒤집혔다 — `content_view`(조회)는
+  //   학습활동이 아니다(`routes/lrs.js` PERFORM_BUCKET_TYPES: all 에 없고 view 로 분리).
+  //   그런데 이 단언은 `if (viewSql > 0)` 안에 있어, **student1 에게 30일 내 조회 로그가
+  //   없는 동안은 한 번도 실행되지 않았다.** 오늘 조회 로그가 1건 생기자 비로소 붉어졌다.
+  //   → 잠복 중이던 낡은 계약이었다. 이제 **현행 정의를 지키는 단언**으로 바꾼다.
   const viewSql = tdb.prepare(`
     SELECT COUNT(*) c FROM learning_logs
     WHERE user_id = ? AND activity_type = 'content_view'
       AND DATE(created_at) >= ? AND DATE(created_at) <= ?
   `).get(STUDENT1, ...String(plain.json.period).split(' ~ ')).c;
+  // ⚠ 부정 단언은 **조건 밖**에 둔다.
+  //   조회 로그가 있을 때만 검사하면, 그 로그가 사라지는 순간 검사도 사라진다.
+  //   (실제로 이 자리의 옛 단언이 그렇게 몇 달간 잠들어 있었다. 게다가 지금 조건을 참으로
+  //    만드는 유일한 데이터는 2026-08-07 에 정본 DB 로 흘러든 오염 행 1개다 — 그걸 지우면
+  //    방금 고친 것이 그대로 재발한다.)
+  assert.ok(!(plain.json.items || []).some(it => it.activity_type === 'content_view'),
+    'bucket=all 에 조회성(content_view)이 섞이면 안 된다 — 학습활동 7종 정의(사용자 확정)');
+
   if (viewSql > 0) {
-    assert.ok(plain.json.count > 0 && plain.json.count >= viewSql, '미지정 count 에 조회성 포함(기존 계약)');
+    // 조회성은 bucket=view 로만 세어져야 한다(데이터가 있을 때만 확인 가능).
+    const viewOnly = await req('/perform/detail?bucket=view&period=30d', STUDENT1);
+    assert.equal(viewOnly.status, 200);
+    assert.ok(viewOnly.json.count >= viewSql, 'bucket=view 는 조회성을 세야 한다');
   }
 });
 

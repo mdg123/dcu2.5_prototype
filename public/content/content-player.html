@@ -659,10 +659,17 @@
 
     function reviewOptionClass(qIdx, optIdx){
       const q = questions[qIdx];
-      const correctIdx = Number(q.answer);
-      const userIdx = Number(answers[qIdx]);
-      if (optIdx === correctIdx) return 'review-correct';
-      if (optIdx === userIdx && userIdx !== correctIdx) return 'review-wrong';
+      const pick = answers[qIdx];
+      // ⚠ 미응답을 `Number(null) === 0` 으로 읽으면 **첫 보기가 학생이 고른 오답인 것처럼**
+      //   붉게 칠해진다(2026-08-07 실측: answers=[1,null] 인데 ①번이 빨강).
+      //   정답키도 미응답 문항에는 서버가 주지 않으므로(채점 보류) 없을 수 있다.
+      //   → 둘 다 "값이 있을 때만" 강조한다.
+      const hasPick = pick !== null && pick !== undefined && pick !== '';
+      const hasKey  = q.answer !== null && q.answer !== undefined && q.answer !== '';
+      const correctIdx = hasKey ? Number(q.answer) : NaN;
+      const userIdx = hasPick ? Number(pick) : NaN;
+      if (hasKey && optIdx === correctIdx) return 'review-correct';
+      if (hasPick && optIdx === userIdx && optIdx !== correctIdx) return 'review-wrong';
       return 'review-neutral';
     }
 
@@ -678,6 +685,10 @@
       const qType = q.question_type || 'choice';
       const r = results[idx];
       let fbHtml = '';
+      // [2026-08-07 보안] 서버는 **채점을 마친 문항에만** 정답·해설을 실어 준다.
+      //   미응답·서술형 보류에는 q.answer 가 아예 없으므로(hydrate 안 됨) 그대로 그리면
+      //   "NaN번" 이 뜬다 → 정답 키 유무를 먼저 확인하고 문구를 나눈다.
+      const hasKey = q.answer !== undefined && q.answer !== null && q.answer !== '';
       if (qType === 'choice' || qType === 'short'){
         const correctDisplay = qType === 'choice'
           ? (Array.isArray(q.options) && q.options[q.answer] != null ? `${Number(q.answer)+1}번 — ${escHtml(q.options[q.answer])}` : `${Number(q.answer)+1}번`)
@@ -686,8 +697,10 @@
           fbHtml = `<div class="q-feedback correct"><div class="fb-label"><i class="fas fa-check-circle"></i> 정답입니다!</div>${points_text(r)}</div>`;
         } else if (r.correct === false){
           fbHtml = `<div class="q-feedback wrong"><div class="fb-label"><i class="fas fa-times-circle"></i> 오답입니다</div>정답: <strong>${correctDisplay}</strong>${points_text(r)}</div>`;
-        } else {
+        } else if (hasKey){
           fbHtml = `<div class="q-feedback"><div class="fb-label"><i class="fas fa-info-circle"></i> 미응답</div>정답: <strong>${correctDisplay}</strong></div>`;
+        } else {
+          fbHtml = `<div class="q-feedback"><div class="fb-label"><i class="fas fa-info-circle"></i> 미응답</div>답을 제출하지 않아 정답과 해설이 표시되지 않습니다. 다시 풀어 보세요.</div>`;
         }
       } else {
         // 서술형: 자동 채점 불가
@@ -774,36 +787,50 @@
         });
         if (!ok) return;
       }
+      // ── 채점은 **서버**가 한다 (POST /api/contents/:id/grade) ──────────────────
+      //   [2026-08-07 보안] 예전에는 GET /api/contents/:id 가 실어 준 `q.answer` 로
+      //   여기서 직접 채점했다. 그래서 정답이 **풀기 전부터** 네트워크 응답에 들어 있었다
+      //   (콘솔에서 contents[0].questions[0].answer 한 줄이면 답이 보였다).
+      //   이제 서버가 판정하고, 정답·해설은 **채점 결과로만** 내려온다.
+      //   내려온 정답을 questions[] 에 되꽂아 두면(hydrate) 아래의 기존 렌더 코드
+      //   (buildFeedback·reviewOptionClass·postMessage detail)가 그대로 동작한다.
       let totalScore = 0;
       let maxTotal = 0;
       let autoScored = 0;
-      results = questions.map((q, i) => {
-        const maxScore = Number(q.points) || 1;
-        maxTotal += maxScore;
-        const a = answers[i];
-        if (a == null || a === '') return {correct: null, score: 0, maxScore};
-        const qType = q.question_type || 'choice';
-        if (qType === 'choice'){
-          const ok = String(a) === String(q.answer);
-          if (ok) totalScore += maxScore;
-          autoScored += maxScore;
-          return {correct: ok, score: ok ? maxScore : 0, maxScore};
-        } else if (qType === 'short'){
-          const expected = (q.answer == null ? '' : String(q.answer)).trim();
-          const got = String(a).trim();
-          // 관대한 비교: 공백/대소문자 무시
-          const ok = expected !== '' && normalize(got) === normalize(expected);
-          if (ok) totalScore += maxScore;
-          autoScored += maxScore;
-          return {correct: ok, score: ok ? maxScore : 0, maxScore};
-        } else {
-          // 서술형: 자동 채점 보류
-          return {correct: null, score: 0, maxScore};
-        }
-      });
+      let pct = 0;
+      try {
+        const gr = await fetch('/api/contents/' + contentId + '/grade', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            answers: questions.map((q, i) => ({ questionId: q.id, value: answers[i] }))
+          })
+        }).then(r => r.json());
+        if (!gr || !gr.success || !Array.isArray(gr.results)) throw new Error('grade failed');
+
+        const byId = new Map(gr.results.map(r => [String(r.questionId), r]));
+        results = questions.map((q, i) => {
+          const r = byId.get(String(q.id)) || gr.results[i] || {};
+          // 채점 후 정답·해설 hydrate — 리뷰 화면(정답 표시/해설)이 이 값을 쓴다.
+          if (r.answer !== undefined) q.answer = r.answer;
+          if (r.explanation !== undefined) q.explanation = r.explanation;
+          return {
+            correct: (r.correct === true || r.correct === false) ? r.correct : null,
+            score: Number(r.score) || 0,
+            maxScore: Number(r.maxScore) || Number(q.points) || 1
+          };
+        });
+        totalScore = Number(gr.totalScore) || 0;
+        maxTotal = Number(gr.maxTotal) || results.reduce((s, r) => s + r.maxScore, 0);
+        autoScored = Number(gr.autoScored) || 0;
+        pct = Number(gr.scorePercent) || 0;
+      } catch (e) {
+        console.error('[content-player] 서버 채점 실패', e);
+        showToast('채점에 실패했습니다. 잠시 후 다시 제출해 주세요.');
+        return;
+      }
       graded = true;
       const pctBase = autoScored > 0 ? autoScored : maxTotal;
-      const pct = pctBase > 0 ? Math.round((totalScore / pctBase) * 100) : 0;
 
       // 사이드바 점수 요약
       document.getElementById('reviewScoreSummary').style.display = '';
@@ -855,9 +882,9 @@
             const myText = qType === 'choice'
               ? (typeof myA === 'number' ? (opts[myA] || String(myA)) : '')
               : String(myA ?? '');
-            const corText = qType === 'choice'
-              ? (opts[Number(corA)] || String(corA))
-              : String(corA ?? '');
+            // 미응답·서술형 보류는 서버가 정답을 안 준다 → "undefined" 문자열이 새지 않게 방어
+            const corText = corA == null ? ''
+              : (qType === 'choice' ? (opts[Number(corA)] || String(corA)) : String(corA));
             return {
               questionNumber: q.question_number || (i+1),
               questionText: q.question_text || q.text || `문제 ${i+1}`,

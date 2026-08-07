@@ -3,6 +3,11 @@
 // 기존 채움포인트(point-helper / user_points)는 그대로 두고 별도 시스템으로 운영.
 
 const db = require('./index');
+// 살아있는 계정(관리자 소프트 삭제 아님) 판정은 db/class.js 정본 헬퍼만 사용한다.
+// ⚠ 여기에 술어를 손으로 다시 적지 말 것 — "정본 옆의 판정 사본"이 이 프로젝트의 반복 결함.
+// ⚠ 마일리지 모집단은 "멤버 전원"(학부모·교직원 포함) 규약이다. studentPopulationSql 을
+//    끼워 넣어 학생만 남기지 말 것 — 사용자 결정(2026-08-07)에 반한다.
+const { liveUserSql } = require('./class');
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Socket.IO 인스턴스 주입 (server에서 io를 setIo로 주입; 없으면 emit 생략)
@@ -391,6 +396,7 @@ function getRanking(classId, opts = {}) {
       JOIN class_members m ON m.class_id = cm.class_id AND m.user_id = cm.user_id AND m.status = 'active'
       WHERE cm.class_id = ?
         AND m.role NOT IN ('owner', 'teacher', 'co_teacher')
+        AND ${liveUserSql('u')}
       ORDER BY cm.balance DESC, cm.last_event_at ASC
       LIMIT ?
     `).all(classId, limit);
@@ -409,6 +415,7 @@ function getRanking(classId, opts = {}) {
       LEFT JOIN class_mileage_log l
         ON l.user_id = u.id AND l.class_id = ?
         AND l.created_at >= datetime('now', ?)
+      WHERE ${liveUserSql('u')}
       GROUP BY u.id
       ORDER BY balance DESC
       LIMIT ?
@@ -430,7 +437,7 @@ function getMembersMileage(classId, opts = {}) {
     FROM class_members m
     JOIN users u ON u.id = m.user_id
     LEFT JOIN class_mileage cm ON cm.class_id = m.class_id AND cm.user_id = m.user_id
-    WHERE m.class_id = ? AND m.status = 'active'
+    WHERE m.class_id = ? AND m.status = 'active' AND ${liveUserSql('u')}
     ORDER BY balance DESC, u.display_name ASC
   `).all(classId);
 }

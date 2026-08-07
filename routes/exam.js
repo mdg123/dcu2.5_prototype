@@ -14,6 +14,12 @@ const cbtExtDb = require('../db/cbt-extended');
 const buildAssessment = require('../lib/xapi/builders/assessment');
 const buildAssignment = require('../lib/xapi/builders/assignment');
 const xapiSpool = require('../lib/xapi/spool');
+// ── 정답·해설 비노출 판정 SSOT (lib/strip-answers.js) ─────────────────────────
+//   이 파일은 예전에 `{...q, answer: undefined}` 를 두 군데에 손으로 적고 있었다.
+//   결과: (a) /start 분기는 explanation 을 빼먹었고, (b) 두 분기 모두 **exams.answers
+//   원본 JSON 컬럼**을 그대로 실어 학생 세션에서 `exam.answers` 한 줄로 정답 전문이
+//   보였다(2026-08-07 실측). 판정 사본을 없애고 SSOT 호출로 통일한다.
+const { stripExamAnswers } = require('../lib/strip-answers');
 
 // subject_code 끝자리로 학교급 추정 (-e/-m/-h)
 function _examSchoolLevel(sc) {
@@ -145,8 +151,12 @@ router.get('/my', requireAuth, (req, res) => {
     // 학생: 내 응시 정보 추가
     const enriched = exams.map(exam => {
       const submission = db.prepare('SELECT score, submitted_at FROM exam_students WHERE exam_id = ? AND user_id = ?').get(exam.id, userId);
+      // ★ 정답 비노출(SSOT). `SELECT e.*` 이라 answers·explanations 원본 컬럼이 그대로
+      //   실려 나갔다 — 학생이 **아직 응시하지 않은** 평가의 정답 전문까지 목록 한 번에
+      //   딸려 왔다(2026-08-07 실측: /api/exam/my 96건 누출). 제출 완료분만 공개.
+      const safe = stripExamAnswers(exam, req.user, { submitted: !!submission?.submitted_at });
       return {
-        ...exam,
+        ...safe,
         my_score: submission ? submission.score : null,
         my_submitted: !!submission?.submitted_at
       };
@@ -425,13 +435,12 @@ router.get('/:classId/:examId', requireAuth, requireClassMember, (req, res) => {
       studentExam = examDb.getStudentExam(exam.id, req.user.id);
     } else {
       studentExam = examDb.getStudentExam(exam.id, req.user.id);
-      // 학생에게는 정답 숨기기 (단, 이미 제출한 경우 정답 공개)
-      const hasSubmitted = studentExam && (studentExam.status === 'submitted' || studentExam.status === 'completed');
-      if (!hasSubmitted) {
-        exam.questions = exam.questions.map(q => ({ ...q, answer: undefined, explanation: undefined }));
-      }
     }
-    res.json({ success: true, exam, studentExam, students });
+    // ★ 정답 비노출(SSOT). 개설자(owner_id)·교사·관리자는 그대로.
+    //   학생은 **제출 완료 시점부터** 정답·해설 공개(제출 후 해설 표시는 정상 학습 기능).
+    const hasSubmitted = !!(studentExam && (studentExam.status === 'submitted' || studentExam.status === 'completed'));
+    const safeExam = stripExamAnswers(exam, req.user, { submitted: hasSubmitted });
+    res.json({ success: true, exam: safeExam, studentExam, students });
   } catch (err) {
     res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
   }
@@ -484,10 +493,12 @@ router.post('/:classId/:examId/start', requireAuth, requireClassMember, (req, re
     const result = examDb.startExam(exam.id, req.user.id);
     if (!result.success) return res.status(409).json({ success: false, message: '이미 참여한 평가입니다.' });
 
-    // 학생에게 문제 전송 (정답 제외)
-    const questions = exam.questions.map(q => ({ ...q, answer: undefined }));
+    // 학생에게 문제 전송 (정답 제외 — SSOT).
+    //   ⚠ 손으로 `answer: undefined` 만 지우던 과거 코드는 explanation 과 원본
+    //     answers 컬럼을 놓쳤다. 시험 "시작" 시점은 언제나 제출 전이므로 submitted=false.
+    const safeExam = stripExamAnswers(exam, req.user, { submitted: false });
     try { ensureTodayAttendance(parseInt(req.params.classId), req.user.id, 'exam_take'); } catch (e) {}
-    res.json({ success: true, exam: { ...exam, questions }, message: '시험이 시작되었습니다.' });
+    res.json({ success: true, exam: safeExam, message: '시험이 시작되었습니다.' });
   } catch (err) {
     res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
   }
@@ -752,8 +763,14 @@ router.post('/:classId/:examId/delegate', requireAuth, requireClassMember, (req,
 });
 
 // GET /:classId/:examId/export-results — 결과 내보내기
+//   ⚠ [2026-08-07] 예전엔 requireClassMember 만 걸려 있어 **학생이 200 으로 받아 갔다**.
+//     내용은 (a) 평가지 정답 전문 + (b) 반 전원의 답안·점수 — 결과 상세(results-detail)가
+//     이미 owner/admin 으로 잠근 것과 같은 자료다. 같은 게이트를 적용한다.
 router.get('/:classId/:examId/export-results', requireAuth, requireClassMember, (req, res) => {
   try {
+    if (req.myRole !== 'owner' && req.user.role !== 'admin') {
+      return res.status(403).json({ success: false, message: '결과 내보내기는 교사만 이용할 수 있습니다.' });
+    }
     const data = cbtExtDb.getExamResultsForExport(req.params.examId);
     if (!data) return res.status(404).json({ success: false, message: '평가를 찾을 수 없습니다.' });
     res.json({ success: true, ...data });
