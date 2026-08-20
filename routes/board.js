@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { requireAuth } = require('../middleware/auth');
 const boardDb = require('../db/board');
+const boardGallery = require('../db/board-gallery');
 const classDb = require('../db/class');
 const { logLearningActivity } = require('../db/learning-log-helper');
 const { extractLogContext } = require('../lib/log-context');
@@ -95,21 +96,20 @@ router.post('/:classId', requireAuth, requireMember, (req, res) => {
     if (postData.is_anonymous !== undefined) postData.is_anonymous = postData.is_anonymous ? 1 : 0;
     if (postData.allow_comments !== undefined) postData.allow_comments = postData.allow_comments ? 1 : 0;
     // board_id로 게시판 유형 자동 판별
+    let board = null;
     if (postData.board_id) {
       try {
-        const board = boardDb.getBoardById(parseInt(postData.board_id));
+        board = boardDb.getBoardById(parseInt(postData.board_id));
         if (board) {
           postData.category = board.board_type; // general or gallery
           // 갤러리 게시판이고 승인 필요이면 pending
+          // (나도예술가 연동 게시판은 db/board.js 가 requires_approval=1 을 강제한다 —
+          //  "개설자 승인"이 연동의 게이트라는 확정 사양이기 때문)
           if (board.board_type === 'gallery' && board.requires_approval) {
             postData.approval_status = 'pending';
           }
         }
       } catch(e) {}
-    }
-    // 갤러리 + 나도예술가 공유 요청 시 승인 대기 상태로 생성
-    if (postData.category === 'gallery' && postData.shareToGallery) {
-      postData.approval_status = 'pending';
     }
     const post = boardDb.createPost(req.classId, req.user.id, postData);
     logLearningActivity({
@@ -122,28 +122,14 @@ router.post('/:classId', requireAuth, requireMember, (req, res) => {
       sourceService: 'class',
       ...extractLogContext(req)
     });
-    // 나도예술가 공유 옵션: 갤러리 게시글을 student_gallery에도 등록
-    // 트리거 조건 (둘 중 하나):
-    //   (1) shareToGallery=true (사용자 명시적 옵션)
-    //   (2) 갤러리 게시판(board_type='gallery')에 작성된 게시글 → 자동 동기화
-    // image_url이 없어도 placeholder로 row를 생성해야 승인/반려 시 동기화가 가능
-    const shouldShareToGallery = (req.body.shareToGallery === true)
-      || (postData.category === 'gallery');
-    if (shouldShareToGallery && post) {
+    // 나도예술가 연동: **게시판 설정(class_boards.share_to_gallery)이 유일한 기준**.
+    //   이전에는 "글 단위 체크박스 || category==='gallery'" 라 끄는 방법이 없었고,
+    //   image_url(파일 선택분) 하나만 넘겨 본문 에디터 이미지·동영상·음원이 누락됐다.
+    //   이제 db/board-gallery.js 가 image_url + 본문의 img/video/audio/source/iframe 을 전부 수집한다.
+    //   board_id 가 없는 레거시 글은 따를 게시판 설정이 없으므로 연동하지 않는다.
+    if (post) {
       try {
-        const growthDb = require('../db/growth');
-        const created = growthDb.createGalleryItem(req.user.id, {
-          title: req.body.title,
-          description: req.body.content || '',
-          image_url: req.body.image_url || '/images/placeholder.png',
-          category: req.body.galleryCategory || 'art',
-          approval_status: 'pending',
-          source_post_id: post.id,
-          source: 'board'
-        });
-        if (!created || !created.id) {
-          console.error('[BOARD] gallery share: createGalleryItem returned empty', { post_id: post.id });
-        }
+        boardGallery.syncOnPostCreate(post, board, { category: req.body.galleryCategory });
       } catch (e) {
         console.error('[BOARD] gallery share error:', e && e.message, 'post_id=', post.id);
       }
@@ -312,39 +298,11 @@ router.post('/:classId/:postId/approve', requireAuth, requireMember, (req, res) 
     if (req.myRole !== 'owner') return res.status(403).json({ success: false, message: '개설자만 승인할 수 있습니다.' });
     const post = boardDb.approvePost(parseInt(req.params.postId));
     if (!post) return res.status(404).json({ success: false, message: '게시글을 찾을 수 없습니다.' });
-    // 연결된 student_gallery 항목 동기화 — row가 없으면 새로 INSERT (UPSERT 패턴)
+    // 연결된 student_gallery 항목 동기화 — 행이 있으면 approved 전환(+첨부 비었으면 이때 채움),
+    // 없고 게시판 설정이 켜져 있으면 새로 INSERT (누락 보정). 판단 기준은 생성 시점과 동일하다.
     try {
-      const db = require('../db/index');
-      const existing = db.prepare('SELECT id FROM student_gallery WHERE source_post_id = ?').get(post.id);
-      if (existing) {
-        const upd = db.prepare(`
-          UPDATE student_gallery SET approval_status = 'approved', approved_by = ?, approved_at = CURRENT_TIMESTAMP
-          WHERE source_post_id = ?
-        `).run(req.user.id, post.id);
-        if (!upd.changes) {
-          console.error('[BOARD] approve: gallery UPDATE no-op', { post_id: post.id });
-        }
-      } else if (post.category === 'gallery') {
-        // 갤러리 카테고리 게시글인데 student_gallery row가 없는 경우 — 누락 보정
-        const growthDb = require('../db/growth');
-        const created = growthDb.createGalleryItem(post.author_id, {
-          title: post.title,
-          description: post.content || '',
-          image_url: post.image_url || '/images/placeholder.png',
-          category: 'art',
-          approval_status: 'approved',
-          source_post_id: post.id,
-          source: 'board'
-        });
-        if (created && created.id) {
-          db.prepare(`
-            UPDATE student_gallery SET approved_by = ?, approved_at = CURRENT_TIMESTAMP
-            WHERE id = ?
-          `).run(req.user.id, created.id);
-        } else {
-          console.error('[BOARD] approve: gallery backfill INSERT failed', { post_id: post.id });
-        }
-      }
+      const board = post.board_id ? boardDb.getBoardById(post.board_id) : null;
+      boardGallery.syncOnPostApprove(post, board, req.user.id);
     } catch (e) {
       console.error('[BOARD] approve gallery sync error:', e && e.message, 'post_id=', post.id);
     }
@@ -363,12 +321,7 @@ router.post('/:classId/:postId/reject', requireAuth, requireMember, (req, res) =
     if (!post) return res.status(404).json({ success: false, message: '게시글을 찾을 수 없습니다.' });
     // 연결된 student_gallery 항목도 반려
     try {
-      const db = require('../db/index');
-      const upd = db.prepare("UPDATE student_gallery SET approval_status = 'rejected', reject_reason = ? WHERE source_post_id = ?")
-        .run(req.body.reason || null, post.id);
-      if (!upd.changes && post.category === 'gallery') {
-        console.error('[BOARD] reject: no student_gallery row to sync', { post_id: post.id });
-      }
+      boardGallery.syncOnPostReject(post, req.body.reason);
     } catch (e) {
       console.error('[BOARD] reject gallery sync error:', e && e.message, 'post_id=', post.id);
     }

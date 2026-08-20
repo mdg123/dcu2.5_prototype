@@ -212,7 +212,15 @@
     .notice-card .nc-preview { font-size: 13px; color: #6B7280; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-bottom: 6px; }
     .notice-card .nc-meta { font-size: 12px; color: #9ca3af; display: flex; gap: 12px; }
 
-    .tab-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+    .tab-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; gap: 12px; flex-wrap: wrap; }
+    /* 좁은 화면에서 제목이 액션 버튼에 밀려 한 글자씩 세로로 끊기던 문제 —
+       제목 줄과 액션 줄을 분리하고 제목은 줄바꿈하지 않는다. */
+    .tab-header > * { min-width: 0; }
+    .tab-header h3 { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    @media (max-width: 640px) {
+      .tab-header { flex-direction: column; align-items: stretch; }
+      .tab-header > div:last-child { justify-content: flex-end; }
+    }
 
     .modal-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 10000; align-items: safe center; justify-content: center; overflow-y: auto; padding: 24px; }
     .modal-overlay.active { display: flex; }
@@ -347,6 +355,8 @@
   <script src="/js/common-nav.js"></script>
 <script src="/js/access-denied.js"></script>
   <script src="/js/class-ui.js"></script>
+  <!-- 첨부 미디어 종류 판정 SSOT — 게시판 목록·카드·상세·승인대기 4곳이 전부 이것만 쓴다 -->
+  <script src="/js/media-kind.js"></script>
   <div class="container page-shell" id="mainContent" style="display:none;">
     <header class="page-header page-header--class" id="classHeader">
       <div class="page-header__main">
@@ -624,7 +634,8 @@
             </div>
             <h3 id="postDetailTitle" style="font-size:18px;margin-bottom:8px;"></h3>
             <div id="postDetailMeta" style="font-size:12px;color:#6B7280;margin-bottom:16px;display:flex;gap:12px;"></div>
-            <div id="postDetailImage" style="display:none;margin-bottom:16px;min-height:240px;background:#f3f4f6;border-radius:12px;padding:20px;align-items:center;justify-content:center;"><img style="max-width:100%;max-height:520px;border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,.1);cursor:zoom-in;" onclick="openImageLightbox(this.src)" /></div>
+            <!-- 첨부 미디어 — 이미지/동영상/음원에 따라 openPost() 가 내용을 바꿔 넣는다(postMediaHtml). -->
+            <div id="postDetailImage" style="display:none;margin-bottom:16px;min-height:240px;background:#f3f4f6;border-radius:12px;padding:20px;align-items:center;justify-content:center;"></div>
             <div id="postDetailContent" style="font-size:15px;line-height:1.8;padding-bottom:16px;border-bottom:1px solid #e5e7eb;margin-bottom:16px;"></div>
             <!-- 좋아요 액션 영역 -->
             <div id="postActionsBar" style="display:flex;justify-content:center;gap:10px;padding:12px 0 20px;border-bottom:1px solid #e5e7eb;margin-bottom:16px;">
@@ -1202,13 +1213,19 @@
       </div>
       <div class="form-group"><label>제목</label><input type="text" id="postTitle" required></div>
       <div class="form-group" id="postImageGroup" style="display:none;">
-        <label>이미지</label>
+        <label>이미지 · 동영상 · 음원</label>
         <div style="display:flex;gap:8px;">
-          <input type="file" id="postImageFile" accept="image/*" capture="environment" style="padding:8px;border:1.5px solid #d1d5db;border-radius:8px;font-size:13px;flex:1;">
+          <!-- 서버(routes/upload.js)가 받는 확장자와 맞춘다: 이미지 · mp4 · mp3 · wav -->
+          <input type="file" id="postImageFile" accept="image/*,video/mp4,audio/mpeg,audio/wav" capture="environment" style="padding:8px;border:1.5px solid #d1d5db;border-radius:8px;font-size:13px;flex:1;">
           <button type="button" class="btn btn-sm" onclick="document.getElementById('postImageFile').click()" style="white-space:nowrap;"><i class="fas fa-camera"></i> 촬영</button>
         </div>
+        <div style="font-size:13px;color:#6B7280;margin-top:6px;">사진·그림은 물론 동영상(mp4)과 음원(mp3·wav)도 올릴 수 있어요.</div>
         <div id="postImagePreview" style="margin-top:8px;display:none;text-align:center;">
           <img style="max-width:100%;max-height:200px;border-radius:8px;" />
+        </div>
+        <div id="postMediaPreview" style="margin-top:8px;display:none;align-items:center;gap:10px;background:#EEF2FF;border-radius:10px;padding:12px 14px;font-size:15px;color:#4338CA;">
+          <i class="fas fa-file" id="postMediaIcon" style="font-size:20px;"></i>
+          <span id="postMediaName"></span>
         </div>
       </div>
       <div class="form-group">
@@ -1232,17 +1249,24 @@
           <i class="fas fa-user-secret" style="color:#6b7280;"></i> 익명으로 작성
         </label>
       </div>
-      <div id="shareToGalleryGroup" style="display:none;margin-bottom:12px;">
-        <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;">
-          <input type="checkbox" id="shareToGallery">
-          <i class="fas fa-palette" style="color:#f97316;"></i> 나도예술가에도 공유하기
-        </label>
-        <select id="galleryCategory" style="margin-top:6px;padding:8px 12px;border:1.5px solid #d1d5db;border-radius:8px;font-size:13px;width:100%;display:none;">
-          <option value="art">미술</option>
-          <option value="music">음악</option>
-          <option value="writing">문학</option>
-          <option value="video">영상</option>
-          <option value="other">기타</option>
+      <!-- 나도예술가 연동은 게시판 단위 설정(class_boards.share_to_gallery)이다.
+           글마다 켜고 끄던 체크박스는 폐지 — 여기서는 "이 게시판이 연동 중"임을 알리고
+           작품 분야만 고르게 한다. -->
+      <div id="shareToGalleryGroup" style="display:none;margin-bottom:12px;background:#FFF7ED;border:1px solid #FED7AA;border-radius:10px;padding:14px 16px;">
+        <div style="display:flex;align-items:flex-start;gap:10px;font-size:15px;color:#9A3412;line-height:1.6;">
+          <i class="fas fa-palette" style="color:#EA580C;margin-top:3px;"></i>
+          <div>
+            <strong>나도예술가 연동 게시판입니다.</strong><br>
+            선생님이 승인하면 이 글의 이미지·동영상·음원이 나도예술가 갤러리에도 함께 올라갑니다.
+          </div>
+        </div>
+        <label for="galleryCategory" style="display:block;font-size:14px;color:#9A3412;margin:12px 0 6px;font-weight:600;">작품 분야</label>
+        <select id="galleryCategory" style="padding:12px 14px;border:1.5px solid #FDBA74;border-radius:8px;font-size:16px;width:100%;background:#fff;font-family:inherit;">
+          <option value="art">🎨 미술</option>
+          <option value="music">🎵 음악</option>
+          <option value="writing">📝 문학</option>
+          <option value="video">🎬 영상</option>
+          <option value="other">✨ 기타</option>
         </select>
       </div>
       <div class="modal-actions">
@@ -4190,7 +4214,10 @@
     function togglePostImage() {
       const isGallery = currentBoardType === 'gallery' || document.getElementById('postCategory').value === 'gallery';
       document.getElementById('postImageGroup').style.display = isGallery ? '' : 'none';
-      document.getElementById('shareToGalleryGroup').style.display = isGallery ? '' : 'none';
+      // 나도예술가 안내는 게시판 설정(share_to_gallery)이 켜져 있을 때만 노출한다
+      const boardForShare = classBoards.find(b => b.id === currentBoardId);
+      const shareOn = isGallery && !!(boardForShare && boardForShare.share_to_gallery);
+      document.getElementById('shareToGalleryGroup').style.display = shareOn ? '' : 'none';
     }
 
     // 이미지 파일 선택 시 미리보기
@@ -4199,17 +4226,21 @@
       if (fileInput) fileInput.addEventListener('change', (e) => {
         const file = e.target.files[0];
         const preview = document.getElementById('postImagePreview');
-        if (file && file.type.startsWith('image/')) {
+        const media = document.getElementById('postMediaPreview');
+        preview.style.display = 'none';
+        media.style.display = 'none';
+        if (!file) return;
+        if (file.type.startsWith('image/')) {
           const reader = new FileReader();
           reader.onload = (ev) => { preview.querySelector('img').src = ev.target.result; preview.style.display = ''; };
           reader.readAsDataURL(file);
         } else {
-          preview.style.display = 'none';
+          // 동영상·음원은 미리보기 대신 파일 이름을 확인할 수 있게 한다
+          const isVideo = file.type.startsWith('video/');
+          document.getElementById('postMediaIcon').className = 'fas ' + (isVideo ? 'fa-video' : 'fa-music');
+          document.getElementById('postMediaName').textContent = (isVideo ? '동영상 · ' : '음원 · ') + file.name;
+          media.style.display = 'flex';
         }
-      });
-      const shareChk = document.getElementById('shareToGallery');
-      if (shareChk) shareChk.addEventListener('change', (e) => {
-        document.getElementById('galleryCategory').style.display = e.target.checked ? '' : 'none';
       });
     });
 
@@ -4284,10 +4315,10 @@
         area.style.display = 'block';
         list.innerHTML = data.posts.map(p => `
           <div style="display:flex;align-items:center;gap:12px;padding:10px;background:#fffbeb;border-radius:8px;margin-bottom:8px;">
-            ${p.image_url ? `<img src="${p.image_url}" style="width:48px;height:48px;object-fit:cover;border-radius:8px;" onerror="this.style.display='none'">` : ''}
+            ${mediaThumbHtml(p.image_url, 48, p.content)}
             <div style="flex:1;min-width:0;">
               <div style="font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escHtml(p.title)}</div>
-              <div style="font-size:11px;color:#6B7280;">${escHtml(p.author_name)} · ${p.created_at ? p.created_at.slice(0,10) : ''}</div>
+              <div style="font-size:11px;color:#6B7280;">${escHtml(p.author_name)} · ${p.created_at ? p.created_at.slice(0,10) : ''}${(() => { const k = mediaKindIcon(p.image_url); return k ? ` · <span style="color:#6366f1;font-weight:700;">${k.label}</span>` : ''; })()}</div>
             </div>
             <button class="btn btn-sm" style="background:#10b981;color:#fff;padding:6px 12px;font-size:12px;" onclick="event.stopPropagation();approvePost(${p.id})"><i class="fas fa-check"></i> 승인</button>
             <button class="btn btn-sm" style="background:#ef4444;color:#fff;padding:6px 12px;font-size:12px;" onclick="event.stopPropagation();rejectPost(${p.id})"><i class="fas fa-times"></i> 반려</button>
@@ -4330,7 +4361,13 @@
             <div class="item-title">${tags.join('')}${escHtml(p.title)}</div>
             <div class="item-meta">${escHtml(p.author_name)} · ${p.created_at ? p.created_at.slice(0,10) : ''} · 조회 ${p.view_count || 0}${commentInfo}${likeInfo}</div>
           </div>
-          ${(p.image_url || extractFirstImage(p.content)) ? `<img src="${p.image_url || extractFirstImage(p.content)}" style="width:56px;height:56px;object-fit:cover;border-radius:8px;margin-left:8px;" onerror="this.style.display='none'">` : ''}
+          ${(() => {
+            const thumb = asImageThumb(p.image_url) || extractFirstImage(p.content);
+            if (thumb) return `<img src="${thumb}" style="width:56px;height:56px;object-fit:cover;border-radius:8px;margin-left:8px;" onerror="this.style.display='none'">`;
+            const kind = mediaKindIcon(p.image_url);
+            if (kind) return `<div title="${kind.label}" style="width:56px;height:56px;border-radius:8px;margin-left:8px;display:flex;align-items:center;justify-content:center;background:#EEF2FF;color:#6366f1;font-size:20px;flex-shrink:0;"><i class="fas ${kind.icon}"></i></div>`;
+            return '';
+          })()}
         </div>`;
       }).join('');
     }
@@ -4338,7 +4375,73 @@
     function extractFirstImage(html) {
       if (!html) return null;
       const m = html.match(/<img[^>]+src=["']([^"']+)["']/i);
-      return m ? m[1] : null;
+      if (!m) return null;
+      // <img> 태그이므로 종류 힌트는 image(확장자 없는 /api/file/1 도 허용).
+      // 존재하지 않는 자리표시자는 SSOT 가 걸러 null 을 준다 → 이모지·아이콘 폴백으로 간다.
+      return window.DacheumMedia.mediaKindOf(m[1], 'image') === 'image' ? m[1] : null;
+    }
+    // ───────────────────────────────────────────────────────────────────────
+    // 첨부 미디어 판정 — 판단은 전부 /js/media-kind.js(SSOT) 가 한다.
+    //   image_url 에는 이미지뿐 아니라 동영상·음원이 담길 수 있다(accept 가 mp4·mp3·wav 포함).
+    //   그것을 <img> 로 그리면 16×16 깨진 이미지가 뜬다 — 사용자가 신고한 "빈 이미지".
+    //   ⚠ 판정 규칙(확장자·유튜브·placeholder)을 이 파일에 다시 적지 말 것.
+    //      쓰는 곳: 목록(renderBoardList) · 카드(renderBoardGallery) · 상세(openPost) · 승인대기(loadPendingPosts)
+    // ───────────────────────────────────────────────────────────────────────
+    function asImageThumb(url) { return window.DacheumMedia.asImageUrl(url); }
+    /** 이미지가 아닌 첨부(동영상·음원)의 표시용 아이콘·라벨. 이미지·없음이면 null. */
+    function mediaKindIcon(url) { return window.DacheumMedia.nonImageKindMeta(url); }
+
+    /**
+     * 게시글 상세의 첨부 미디어 블록 HTML. 종류에 맞는 요소를 돌려준다.
+     *   이미지 → <img>(클릭 확대) · 동영상 → <video controls> · 음원 → <audio controls>
+     *   판정 불가(없는 자리표시자 등) → '' (호출부가 영역을 감춘다)
+     */
+    function postMediaHtml(url) {
+      const M = window.DacheumMedia;
+      const kind = M.mediaKindOf(url);
+      if (!kind) return '';
+      const safe = escHtml(url);
+      if (kind === 'image') {
+        return `<img src="${safe}" alt="첨부 이미지" style="max-width:100%;max-height:520px;border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,.1);cursor:zoom-in;" onclick="openImageLightbox(this.src)" onerror="this.parentElement.innerHTML='<div style=\\'color:#6B7280;font-size:15px;\\'><i class=&quot;fas fa-image&quot;></i> 이미지를 불러오지 못했습니다.</div>'">`;
+      }
+      if (kind === 'video' || kind === 'youtube') {
+        if (kind === 'youtube') {
+          const id = (String(url).match(/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([\w-]+)/) || [])[1];
+          return id ? `<iframe width="100%" height="360" src="https://www.youtube.com/embed/${escHtml(id)}" frameborder="0" allowfullscreen style="border-radius:10px;max-width:640px;"></iframe>` : '';
+        }
+        return `<video src="${safe}" controls preload="metadata" style="max-width:100%;max-height:520px;border-radius:10px;background:#000;">첨부된 동영상을 재생할 수 없는 브라우저입니다.</video>`;
+      }
+      if (kind === 'audio') {
+        return `<div style="width:100%;max-width:520px;text-align:center;">
+          <div style="font-size:40px;color:#6366f1;margin-bottom:12px;"><i class="fas fa-music"></i></div>
+          <div style="font-size:15px;color:#374151;margin-bottom:10px;">음원 첨부</div>
+          <audio src="${safe}" controls preload="metadata" style="width:100%;">첨부된 음원을 재생할 수 없는 브라우저입니다.</audio>
+        </div>`;
+      }
+      return '';
+    }
+
+    /**
+     * 작은 정사각 썸네일(승인 대기 목록 등) — 이미지면 <img>, 동영상·음원이면 아이콘 카드.
+     * 교사가 승인 화면에서 **무슨 종류의 제출물인지** 구분할 수 있어야 한다.
+     */
+    function mediaThumbHtml(url, size, bodyHtml) {
+      const px = size || 48;
+      const img = asImageThumb(url) || (bodyHtml ? extractFirstImage(bodyHtml) : null);
+      if (img) {
+        return `<div style="width:${px}px;height:${px}px;border-radius:8px;flex-shrink:0;overflow:hidden;background:#EEF2FF;">
+          <img src="${escHtml(img)}" alt="" style="width:100%;height:100%;object-fit:cover;" onerror="this.parentElement.innerHTML='<div style=\\'width:100%;height:100%;display:flex;align-items:center;justify-content:center;color:#6366f1;\\'><i class=&quot;fas fa-image&quot;></i></div>'">
+        </div>`;
+      }
+      const kind = mediaKindIcon(url);
+      if (kind) {
+        return `<div title="${kind.label}" style="width:${px}px;height:${px}px;border-radius:8px;flex-shrink:0;display:flex;flex-direction:column;gap:2px;align-items:center;justify-content:center;background:#EEF2FF;color:#6366f1;">
+          <i class="fas ${kind.icon}" style="font-size:16px;"></i><span style="font-size:11px;font-weight:700;">${kind.label}</span>
+        </div>`;
+      }
+      return `<div title="글" style="width:${px}px;height:${px}px;border-radius:8px;flex-shrink:0;display:flex;align-items:center;justify-content:center;background:#F3F4F6;color:#9ca3af;">
+        <i class="fas fa-align-left" style="font-size:16px;"></i>
+      </div>`;
     }
     function extractYoutubeThumbnail(html) {
       if (!html) return null;
@@ -4350,9 +4453,10 @@
       document.getElementById('boardList').innerHTML = `
         <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:18px;">
           ${posts.map(p => {
-            // 썸네일 우선순위: image_url > 본문 내 이미지 > 유튜브 썸네일
-            const thumb = p.image_url || extractFirstImage(p.content) || extractYoutubeThumbnail(p.content);
-            const isVideo = !p.image_url && extractYoutubeThumbnail(p.content);
+            // 썸네일 우선순위: image_url(이미지일 때만) > 본문 내 이미지 > 유튜브 썸네일
+            const thumb = asImageThumb(p.image_url) || extractFirstImage(p.content) || extractYoutubeThumbnail(p.content);
+            const kind = mediaKindIcon(p.image_url);
+            const isVideo = (!thumb && kind && kind.icon === 'fa-video') || (!asImageThumb(p.image_url) && !!extractYoutubeThumbnail(p.content));
             return `
             <div onclick="openPost(${p.id})" style="cursor:pointer;background:#fff;border-radius:14px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,.08);border:1px solid #e5e7eb;transition:all .2s;" onmouseover="this.style.transform='translateY(-4px)';this.style.boxShadow='0 8px 24px rgba(0,0,0,.12)'" onmouseout="this.style.transform='';this.style.boxShadow='0 2px 8px rgba(0,0,0,.08)'">
               ${thumb
@@ -4360,7 +4464,7 @@
                     <img src="${thumb}" style="width:100%;height:100%;object-fit:cover;" onerror="this.parentElement.innerHTML='<div style=\\'height:100%;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#667eea,#764ba2);color:rgba(255,255,255,.7);font-size:40px;\\'>🎨</div>'">
                     ${isVideo ? '<div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:48px;height:48px;background:rgba(0,0,0,.6);border-radius:50%;display:flex;align-items:center;justify-content:center;"><i class="fas fa-play" style="color:#fff;font-size:18px;margin-left:3px;"></i></div>' : ''}
                   </div>`
-                : `<div style="height:180px;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#e0e7ff,#c7d2fe);color:#6366f1;font-size:40px;"><i class="fas fa-comment-dots"></i></div>`
+                : `<div style="height:180px;display:flex;flex-direction:column;gap:8px;align-items:center;justify-content:center;background:linear-gradient(135deg,#e0e7ff,#c7d2fe);color:#6366f1;font-size:40px;"><i class="fas ${kind ? kind.icon : 'fa-comment-dots'}"></i>${kind ? `<span style="font-size:14px;font-weight:600;">${kind.label}</span>` : ''}</div>`
               }
               <div style="padding:14px 16px;">
                 <div style="font-size:15px;font-weight:700;margin-bottom:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escHtml(p.title)}</div>
@@ -4388,14 +4492,12 @@
         ${p.category === 'gallery' ? '<span style="color:#f97316;"><i class="fas fa-image"></i> 갤러리</span>' : ''}
         ${p.is_anonymous ? '<span style="color:#8b5cf6;"><i class="fas fa-user-secret"></i> 익명</span>' : ''}
       `;
-      // 이미지 표시
+      // 첨부 미디어 표시 — image_url 에 동영상·음원도 담기므로 종류에 맞게 그린다.
+      //   (예전에는 무조건 <img src> 라 mp4 첨부가 깨진 이미지로 노출됐다 — 감리 R1)
       const imgEl = document.getElementById('postDetailImage');
-      if (p.image_url) {
-        imgEl.querySelector('img').src = p.image_url;
-        imgEl.style.display = 'flex';
-      } else {
-        imgEl.style.display = 'none';
-      }
+      const mediaHtml = postMediaHtml(p.image_url);
+      imgEl.innerHTML = mediaHtml;
+      imgEl.style.display = mediaHtml ? 'flex' : 'none';
       // HTML 콘텐츠 렌더링 (위지윅 에디터 결과물) + 유튜브 자동 임베드
       let postHtml = p.content || '';
       // 유튜브 URL 자동 임베드
@@ -4809,11 +4911,14 @@
       const catRow = document.getElementById('postCategory').closest('.form-group');
       if (catRow) catRow.style.display = isGallery ? 'none' : '';
       document.getElementById('postImageGroup').style.display = isGallery ? '' : 'none';
-      document.getElementById('shareToGalleryGroup').style.display = isGallery ? '' : 'none';
       document.getElementById('postImagePreview').style.display = 'none';
+      document.getElementById('postMediaPreview').style.display = 'none';
       document.getElementById('postImageFile').value = '';
-      document.getElementById('shareToGallery').checked = false;
-      document.getElementById('galleryCategory').style.display = 'none';
+      // 나도예술가 안내는 "게시판 설정이 켜져 있을 때"만 — 글 단위 체크박스는 폐지됨
+      const boardForShare = classBoards.find(b => b.id === currentBoardId);
+      const shareOn = !!(boardForShare && boardForShare.share_to_gallery);
+      document.getElementById('shareToGalleryGroup').style.display = shareOn ? '' : 'none';
+      document.getElementById('galleryCategory').value = 'art';
       document.getElementById('postNoComments').checked = false;
       document.getElementById('postAnonymous').checked = false;
       // 게시판 이름 모달 타이틀에 반영
@@ -4832,7 +4937,7 @@
       if (!title) { classToast('제목을 입력하세요.', 'warning'); return; }
       const category = document.getElementById('postCategory').value;
 
-      // 갤러리 타입이면 이미지 업로드
+      // 갤러리 타입이면 첨부(이미지·동영상·음원) 업로드
       let imageUrl = null;
       if (category === 'gallery') {
         const fileInput = document.getElementById('postImageFile');
@@ -4842,7 +4947,7 @@
           const uploadRes = await fetch('/api/upload?type=board', { method: 'POST', body: formData });
           const uploadData = await uploadRes.json();
           if (uploadData.success) imageUrl = uploadData.file.url;
-          else { classToast('이미지 업로드 실패: ' + uploadData.message, 'error'); return; }
+          else { classToast('첨부 파일 업로드 실패: ' + uploadData.message, 'error'); return; }
         }
       }
 
@@ -4853,9 +4958,9 @@
         allow_comments: !document.getElementById('postNoComments').checked,
         board_id: currentBoardId || null
       };
-      // 나도예술가 공유
-      if (category === 'gallery' && document.getElementById('shareToGallery').checked && imageUrl) {
-        body.shareToGallery = true;
+      // 나도예술가 연동 여부는 서버가 게시판 설정으로 판단한다 — 여기서는 작품 분야만 전달.
+      const boardForShare = classBoards.find(b => b.id === currentBoardId);
+      if (boardForShare && boardForShare.share_to_gallery) {
         body.galleryCategory = document.getElementById('galleryCategory').value;
       }
 

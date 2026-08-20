@@ -382,7 +382,8 @@
         <h3 class="card-title"><i class="fas fa-comments" style="color:var(--primary);"></i> 게시판 관리</h3>
         <p style="font-size:13px;color:var(--gray-500);margin-bottom:20px;line-height:1.6;">
           클래스에 게시판을 추가하고 유형(일반/갤러리형)을 설정합니다.<br>
-          <strong>갤러리형 게시판</strong>은 게시물 공개 시 교사 승인이 필요하며, <strong>나도예술가</strong>와 연동됩니다.
+          <strong>갤러리형 게시판</strong>은 게시물 공개 시 교사 승인이 필요합니다.
+          <strong>나도예술가 연동</strong>을 켜두면 승인한 게시물의 이미지·동영상·음원이 나도예술가로 함께 올라갑니다.
         </p>
         <div id="boardsList" style="margin-bottom:16px;min-height:60px;">
           <div style="text-align:center;color:var(--gray-400);padding:20px;"><i class="fas fa-spinner fa-spin"></i> 로딩 중...</div>
@@ -436,7 +437,18 @@
           <input type="checkbox" id="boardRequiresApproval" checked>
           <span><i class="fas fa-shield-alt" style="color:#D97706;"></i> 게시물 공개 시 교사 승인 필요</span>
         </label>
-        <p style="font-size:11px;color:#92400e;margin-top:6px;margin-left:20px;">학생이 게시물을 올리면 교사 확인 후 공개됩니다. 나도예술가에도 연동됩니다.</p>
+        <p id="approvalHint" style="font-size:12px;color:#92400e;margin-top:6px;margin-left:20px;line-height:1.6;">학생이 게시물을 올리면 개설자(선생님) 확인 후 공개됩니다.</p>
+      </div>
+      <!-- 나도예술가 연동 — 게시판 단위 설정 (class_boards.share_to_gallery) -->
+      <div class="form-group" id="shareGalleryGroup" style="display:none;background:#FFF7ED;border:1px solid #FED7AA;border-radius:var(--radius-sm);padding:12px 14px;">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin:0;">
+          <input type="checkbox" id="boardShareToGallery" onchange="syncShareGalleryUi()">
+          <span><i class="fas fa-palette" style="color:#EA580C;"></i> 나도예술가에 함께 올리기</span>
+        </label>
+        <p style="font-size:12px;color:#9A3412;margin-top:6px;margin-left:20px;line-height:1.6;">
+          켜두면 <strong>개설자가 승인한 게시물</strong>의 이미지·동영상·음원이 나도예술가 갤러리에 함께 표시됩니다.<br>
+          승인 전에는 나도예술가에 보이지 않으므로, 이 설정을 켜면 <strong>승인 필요</strong>가 함께 켜집니다.
+        </p>
       </div>
       <div class="form-group">
         <label>설명 (선택)</label>
@@ -561,10 +573,15 @@
     }
 
     // ==================== 게시판 관리 ====================
+    // 수정 모달이 참조할 게시판 원본 (onclick 인라인 인자에 문자열을 실어 나르면
+    // 이름에 따옴표가 들어갈 때 깨진다 — id 로만 넘기고 여기서 찾는다)
+    let classBoardsCache = [];
+
     async function loadBoards() {
       if (!classId) return;
       const res = await fetch(`/api/board/${classId}/boards`);
       const data = await res.json();
+      classBoardsCache = (data && data.boards) || [];
       const container = document.getElementById('boardsList');
       if (!data.success || !data.boards.length) {
         container.innerHTML = `<div style="text-align:center;color:var(--gray-400);padding:24px;"><i class="fas fa-comments" style="font-size:32px;margin-bottom:8px;display:block;"></i>게시판이 없습니다.<br>게시판을 추가해주세요.</div>`;
@@ -578,12 +595,13 @@
               <span style="font-size:14px;font-weight:700;color:var(--gray-800);">${escHtml(b.name)}</span>
               <span class="board-type-badge ${b.board_type}">${b.board_type === 'gallery' ? '갤러리형' : '일반'}</span>
               ${b.requires_approval ? '<span style="font-size:11px;color:#D97706;background:#FEF3C7;padding:2px 8px;border-radius:99px;"><i class="fas fa-shield-alt"></i> 승인 필요</span>' : ''}
+              ${b.share_to_gallery ? '<span style="font-size:11px;color:#C2410C;background:#FFEDD5;padding:2px 8px;border-radius:99px;"><i class="fas fa-palette"></i> 나도예술가 연동</span>' : ''}
             </div>
             ${b.description ? `<div style="font-size:12px;color:var(--gray-500);margin-top:2px;">${escHtml(b.description)}</div>` : ''}
             <div style="font-size:11px;color:var(--gray-400);margin-top:2px;">게시글 ${b.post_count || 0}개</div>
           </div>
           <div style="display:flex;gap:6px;flex-shrink:0;">
-            <button class="btn btn-ghost btn-sm" onclick="editBoard(${b.id},'${escHtml(b.name)}','${b.board_type}',${b.requires_approval},'${escHtml(b.description||'')}')">
+            <button class="btn btn-ghost btn-sm" onclick="editBoard(${b.id})">
               <i class="fas fa-edit"></i> 수정
             </button>
             <button class="btn btn-ghost btn-sm" onclick="deleteBoardConfirm(${b.id},'${escHtml(b.name)}')" style="color:var(--danger);">
@@ -603,8 +621,11 @@
         document.getElementById('editBoardId').value = '';
         document.getElementById('boardName').value = '';
         document.getElementById('boardDesc').value = '';
-        selectBoardType('general');
         document.getElementById('boardRequiresApproval').checked = true;
+        // 신규 게시판의 나도예술가 연동은 화면에서 명시적으로 고른다.
+        // 갤러리형을 고르면 기본 체크(지금까지의 자동 연동 동작과 동일) — 끄고 싶으면 해제하면 된다.
+        document.getElementById('boardShareToGallery').checked = true;
+        selectBoardType('general');
       }
       setTimeout(() => document.getElementById('boardName').focus(), 100);
     }
@@ -619,14 +640,39 @@
       document.getElementById('typeGeneral').classList.toggle('selected', type === 'general');
       document.getElementById('typeGallery').classList.toggle('selected', type === 'gallery');
       document.getElementById('approvalGroup').style.display = type === 'gallery' ? '' : 'none';
+      // 나도예술가는 작품 갤러리 — 갤러리형 게시판에서만 의미가 있다
+      document.getElementById('shareGalleryGroup').style.display = type === 'gallery' ? '' : 'none';
+      syncShareGalleryUi();
     }
 
-    function editBoard(id, name, type, requiresApproval, desc) {
-      document.getElementById('editBoardId').value = id;
-      document.getElementById('boardName').value = name;
-      document.getElementById('boardDesc').value = desc;
-      document.getElementById('boardRequiresApproval').checked = !!requiresApproval;
-      selectBoardType(type);
+    // 나도예술가 연동이 켜지면 "승인 필요"는 반드시 켜진 상태여야 한다.
+    // (개설자 승인이 나도예술가 게시의 게이트 — 서버 db/board.js 도 같은 규칙을 강제한다)
+    function syncShareGalleryUi() {
+      const shareOn = document.getElementById('boardShareToGallery').checked
+        && document.getElementById('boardType').value === 'gallery';
+      const approvalChk = document.getElementById('boardRequiresApproval');
+      const hint = document.getElementById('approvalHint');
+      if (shareOn) {
+        approvalChk.checked = true;
+        approvalChk.disabled = true;
+        approvalChk.closest('label').style.cursor = 'not-allowed';
+        hint.textContent = '나도예술가 연동이 켜져 있어 승인 절차가 항상 적용됩니다. 개설자가 승인해야 공개됩니다.';
+      } else {
+        approvalChk.disabled = false;
+        approvalChk.closest('label').style.cursor = 'pointer';
+        hint.textContent = '학생이 게시물을 올리면 개설자(선생님) 확인 후 공개됩니다.';
+      }
+    }
+
+    function editBoard(id) {
+      const b = classBoardsCache.find(x => x.id === id);
+      if (!b) { showToast('게시판 정보를 찾을 수 없습니다.'); return; }
+      document.getElementById('editBoardId').value = b.id;
+      document.getElementById('boardName').value = b.name || '';
+      document.getElementById('boardDesc').value = b.description || '';
+      document.getElementById('boardRequiresApproval').checked = !!b.requires_approval;
+      document.getElementById('boardShareToGallery').checked = !!b.share_to_gallery;
+      selectBoardType(b.board_type);
       showBoardModal('edit');
     }
 
@@ -634,10 +680,13 @@
       const name = document.getElementById('boardName').value.trim();
       if (!name) { showToast('게시판 이름을 입력하세요.'); return; }
       const boardId = document.getElementById('editBoardId').value;
+      const boardType = document.getElementById('boardType').value;
+      const shareToGallery = (boardType === 'gallery' && document.getElementById('boardShareToGallery').checked) ? 1 : 0;
       const payload = {
         name,
-        board_type: document.getElementById('boardType').value,
-        requires_approval: document.getElementById('boardRequiresApproval').checked ? 1 : 0,
+        board_type: boardType,
+        requires_approval: shareToGallery ? 1 : (document.getElementById('boardRequiresApproval').checked ? 1 : 0),
+        share_to_gallery: shareToGallery,
         description: document.getElementById('boardDesc').value.trim()
       };
       const url = boardId

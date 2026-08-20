@@ -2004,20 +2004,47 @@ function initSchema() {
         FOREIGN KEY (class_id) REFERENCES classes(id) ON DELETE CASCADE
       )
     `);
+
+    // ── share_to_gallery: 나도예술가 연동을 "게시판 단위"로 켜고 끄는 설정 (2026-08-20) ──
+    //   이전에는 routes/board.js 가 board_type='gallery' 이면 **무조건** 연동했다 → 끄는 방법이 없었다.
+    //   이 컬럼이 유일한 기준이 된다(글 단위 체크박스 폐지).
+    //   ★ 아래 기본 게시판 시드보다 "먼저" 추가해야 신규 DB 의 갤러리 게시판이 1 로 시드된다.
+    {
+      const cbCols = db.prepare("PRAGMA table_info(class_boards)").all().map(c => c.name);
+      if (!cbCols.includes('share_to_gallery')) {
+        db.exec("ALTER TABLE class_boards ADD COLUMN share_to_gallery INTEGER DEFAULT 0");
+      }
+    }
+    // 기존 갤러리 게시판 백필 — 지금까지 자동 연동되고 있었으므로 1 로 올려 동작 연속성을 지킨다.
+    // (기본을 0 으로 두면 이미 쓰고 있던 클래스의 나도예술가 연동이 조용히 끊긴다.)
+    db.exec(`CREATE TABLE IF NOT EXISTS _migrations (name TEXT PRIMARY KEY, applied_at TEXT DEFAULT (DATETIME('now')))`);
+    const migShareDone = db.prepare("SELECT 1 FROM _migrations WHERE name = 'class_boards_share_to_gallery_backfill_2026_08_20'").get();
+    if (!migShareDone) {
+      // requires_approval 도 함께 세운다 — "share=1 이면 승인 필요" 는 db/board.js
+      //   _resolveShareToGallery 가 생성·수정 때 강제하는 불변식이다. 백필만 예외로 두면
+      //   `share=1 AND requires_approval=0` 인 행이 남아, 글은 즉시 승인(approved)인데
+      //   student_gallery 행은 pending 으로 만들어져 **영원히 안 보이는 유령 작품**이 된다.
+      const info = db.prepare(
+        "UPDATE class_boards SET share_to_gallery = 1, requires_approval = 1 WHERE board_type = 'gallery' AND COALESCE(share_to_gallery, 0) = 0"
+      ).run();
+      db.prepare("INSERT INTO _migrations (name) VALUES ('class_boards_share_to_gallery_backfill_2026_08_20')").run();
+      console.log(`[DB] class_boards.share_to_gallery 기존 갤러리 게시판 백필: ${info.changes}건`);
+    }
+
     // 기존 클래스에 기본 게시판 생성
     const classes = db.prepare('SELECT id FROM classes').all();
     const boardCheck = db.prepare('SELECT COUNT(*) as cnt FROM class_boards WHERE class_id = ?');
     const insertBoard = db.prepare(`
-      INSERT INTO class_boards (class_id, name, board_type, requires_approval, sort_order)
-      VALUES (?, ?, ?, ?, ?)
+      INSERT INTO class_boards (class_id, name, board_type, requires_approval, sort_order, share_to_gallery)
+      VALUES (?, ?, ?, ?, ?, ?)
     `);
     for (const cls of classes) {
       if (boardCheck.get(cls.id).cnt === 0) {
-        insertBoard.run(cls.id, '일반 게시판', 'general', 0, 0);
-        insertBoard.run(cls.id, '갤러리 게시판', 'gallery', 1, 1);
+        insertBoard.run(cls.id, '일반 게시판', 'general', 0, 0, 0);
+        insertBoard.run(cls.id, '갤러리 게시판', 'gallery', 1, 1, 1);
       }
     }
-  } catch (e) { /* 이미 존재하면 무시 */ }
+  } catch (e) { console.error('[DB] class_boards 마이그레이션 실패:', e.message); }
 
   // 마이그레이션: posts 테이블에 board_id 컬럼 추가
   try {

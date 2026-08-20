@@ -13,26 +13,57 @@ function getBoardById(boardId) {
   return db.prepare('SELECT * FROM class_boards WHERE id = ?').get(boardId) || null;
 }
 
+// 나도예술가 연동(share_to_gallery) 정규화.
+//   · 명시값이 오면 그대로 (0/1)
+//   · 미지정이면 갤러리형은 1 — 지금까지 갤러리 게시판은 "무조건 자동 연동" 이었으므로
+//     API 를 직접 호출하는 시드·스크립트에서 연동이 조용히 꺼지지 않게 한다.
+//   · 일반 게시판은 항상 0 (나도예술가는 작품 갤러리이므로 갤러리형에서만 의미가 있다)
+function _resolveShareToGallery(boardType, raw) {
+  if (boardType !== 'gallery') return 0;
+  if (raw === undefined || raw === null || raw === '') return 1;
+  return raw ? 1 : 0;
+}
+
 function createBoard(classId, data) {
   const maxOrder = db.prepare('SELECT MAX(sort_order) as m FROM class_boards WHERE class_id = ?').get(classId);
   const nextOrder = (maxOrder && maxOrder.m !== null) ? maxOrder.m + 1 : 0;
+  const boardType = data.board_type || 'general';
+  const share = _resolveShareToGallery(boardType, data.share_to_gallery);
+  // 나도예술가 연동은 "개설자 승인"을 게이트로 삼는 사양이다(사용자 확정).
+  // 승인 단계가 없으면 미검토 작품이 그대로 공개되므로, 연동 ON 이면 승인 필요를 강제한다.
+  const requiresApproval = share ? 1 : (data.requires_approval ? 1 : 0);
   const info = db.prepare(`
-    INSERT INTO class_boards (class_id, name, board_type, requires_approval, description, sort_order)
-    VALUES (?, ?, ?, ?, ?, ?)
-  `).run(classId, data.name || '새 게시판', data.board_type || 'general',
-    data.requires_approval ? 1 : 0, data.description || null, nextOrder);
+    INSERT INTO class_boards (class_id, name, board_type, requires_approval, description, sort_order, share_to_gallery)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).run(classId, data.name || '새 게시판', boardType,
+    requiresApproval, data.description || null, nextOrder, share);
   return getBoardById(info.lastInsertRowid);
 }
 
 function updateBoard(boardId, data) {
+  const current = getBoardById(boardId);
+  if (!current) return null;
   const fields = [];
   const params = [];
   if (data.name !== undefined) { fields.push('name = ?'); params.push(data.name); }
   if (data.board_type !== undefined) { fields.push('board_type = ?'); params.push(data.board_type); }
-  if (data.requires_approval !== undefined) { fields.push('requires_approval = ?'); params.push(data.requires_approval ? 1 : 0); }
   if (data.description !== undefined) { fields.push('description = ?'); params.push(data.description || null); }
   if (data.sort_order !== undefined) { fields.push('sort_order = ?'); params.push(data.sort_order); }
-  if (!fields.length) return getBoardById(boardId);
+
+  const nextType = data.board_type !== undefined ? data.board_type : current.board_type;
+  let nextShare = current.share_to_gallery;
+  if (data.share_to_gallery !== undefined || data.board_type !== undefined) {
+    const raw = data.share_to_gallery !== undefined ? data.share_to_gallery : current.share_to_gallery;
+    nextShare = _resolveShareToGallery(nextType, raw);
+    fields.push('share_to_gallery = ?'); params.push(nextShare);
+  }
+  if (data.requires_approval !== undefined || nextShare !== current.share_to_gallery) {
+    const raw = data.requires_approval !== undefined ? data.requires_approval : current.requires_approval;
+    // createBoard 와 동일: 연동 ON 이면 승인 필요 강제 (승인이 연동의 게이트이므로)
+    fields.push('requires_approval = ?'); params.push(nextShare ? 1 : (raw ? 1 : 0));
+  }
+
+  if (!fields.length) return current;
   params.push(boardId);
   db.prepare(`UPDATE class_boards SET ${fields.join(', ')} WHERE id = ?`).run(...params);
   return getBoardById(boardId);
