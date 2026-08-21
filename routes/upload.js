@@ -1,57 +1,43 @@
 const express = require('express');
 const router = express.Router();
 const multer = require('multer');
-const path = require('path');
 const fs = require('fs');
 const { requireAuth } = require('../middleware/auth');
 
-// 업로드 디렉토리 설정
-const uploadDir = path.join(__dirname, '..', 'public', 'uploads');
-if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+// ★ 저장 위치·파일명·허용 목록·용량 상한은 lib/upload-rules.js 한 벌만 쓴다(SSOT).
+//   본문 붙여넣기(data: URL) 변환기도 같은 규칙을 쓰므로, 그 경로가
+//   "검사를 건너뛰는 뒷문"이 되지 않는다. 여기서 규칙을 다시 적지 말 것.
+const rules = require('../lib/upload-rules');
+const { UPLOAD_ROOT: uploadDir, getSubDir, makeFilename, isAllowedFileName,
+        MAX_FILE_SIZE, MSG_BAD_TYPE, MSG_TOO_LARGE } = rules;
 
-// MIME 타입 기반 하위 폴더 결정
-function getSubDir(mimeType, queryType) {
-  if (mimeType) {
-    if (mimeType.startsWith('video/')) return 'videos';
-    if (mimeType.startsWith('image/')) return 'images';
-    if (mimeType.startsWith('audio/')) return 'audios';
-    if (mimeType === 'application/pdf' || mimeType.includes('document') || mimeType.includes('hwp') ||
-        mimeType.includes('presentation') || mimeType.includes('spreadsheet') || mimeType.includes('text/')) return 'documents';
-  }
-  return queryType || 'general';
-}
+if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
 
 // multer 스토리지 설정
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     const subDir = getSubDir(file.mimetype, req.query.type);
     req._uploadSubDir = subDir; // POST 핸들러에서 참조
-    const dir = path.join(uploadDir, subDir);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    cb(null, dir);
+    cb(null, rules.ensureSubDir(subDir));
   },
   filename: (req, file, cb) => {
-    const ext = path.extname(file.originalname);
-    const basename = path.basename(file.originalname, ext).replace(/[^a-zA-Z0-9가-힣_-]/g, '_');
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e4);
-    cb(null, `${basename}-${uniqueSuffix}${ext}`);
+    cb(null, makeFilename(file.originalname));
   }
 });
 
 // 파일 필터
 const fileFilter = (req, file, cb) => {
-  const allowed = /\.(jpg|jpeg|png|gif|webp|pdf|doc|docx|xls|xlsx|ppt|pptx|hwp|hwpx|txt|zip|mp4|mp3|wav)$/i;
-  if (allowed.test(path.extname(file.originalname))) {
+  if (isAllowedFileName(file.originalname)) {
     cb(null, true);
   } else {
-    cb(new Error('허용되지 않는 파일 형식입니다.'), false);
+    cb(new Error(MSG_BAD_TYPE), false);
   }
 };
 
 const upload = multer({
   storage,
   fileFilter,
-  limits: { fileSize: 50 * 1024 * 1024 } // 50MB
+  limits: { fileSize: MAX_FILE_SIZE } // 50MB
 });
 
 // POST /api/upload - 단일 파일 업로드
@@ -90,11 +76,11 @@ router.post('/multi', requireAuth, upload.array('files', 5), (req, res) => {
 router.use((err, req, res, next) => {
   if (err instanceof multer.MulterError) {
     if (err.code === 'LIMIT_FILE_SIZE') {
-      return res.status(400).json({ success: false, message: '파일 크기가 50MB를 초과합니다.' });
+      return res.status(400).json({ success: false, message: MSG_TOO_LARGE });
     }
     return res.status(400).json({ success: false, message: err.message });
   }
-  if (err.message === '허용되지 않는 파일 형식입니다.') {
+  if (err.message === MSG_BAD_TYPE) {
     return res.status(400).json({ success: false, message: err.message });
   }
   next(err);

@@ -8,6 +8,28 @@ const initSocket = require('../socket'); // initSocket._io 접근용
 const buildNavigation = require('../lib/xapi/builders/navigation');
 const buildSocial = require('../lib/xapi/builders/social');
 const xapiSpool = require('../lib/xapi/spool');
+const { normalizeInlineMedia } = require('../lib/inline-data-media');
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 알림장 본문의 붙여넣기 이미지(data:base64) → 실제 업로드 파일
+//
+// 알림장 에디터도 게시판과 **같은 Quill** 이라 이미지를 붙여넣으면 본문에
+// data:image/png;base64,… 가 그대로 박힌다. 그대로 저장하면
+//   ⓐ notices.content 가 비대해지고(이미지 1장에 수백 KB~수 MB)
+//   ⓑ 목록 API(getNoticesByClass)가 content 를 통째로 실어 날라 알림장 목록이 무거워진다.
+//     — 알림장은 **학부모까지 보는 화면**이라 목록 응답 크기가 곧 체감 속도다.
+// 규칙(허용 확장자·50MB·저장 위치·파일명)은 /api/upload 와 같은 lib/upload-rules.js.
+//
+// 대표 이미지 컬럼은 만들지 않는다 — notices 테이블에 그런 컬럼이 없고(schema.js),
+// 없는 규약을 여기서 새로 만들면 게시판(posts.image_url)과 의미가 갈린다. coverField 를 넘기지 않는 이유.
+//
+// 임시저장(PUT /:classId/draft)은 **변환하지 않는다**(판단 근거):
+//   자동 임시저장은 편집 중 반복 발화한다. 거기서 변환하면 한 번 붙여넣은 이미지가
+//   저장 틱마다 새 파일로 복제돼 고아 파일이 무한히 쌓인다. 임시저장은 (클래스,작성자) 1행뿐이고
+//   정식 등록 시 deleteDraft 로 지워지므로 base64 가 남아도 유실·비대 위험이 없다.
+//   실제로 DB 에 실리는 알림장은 반드시 아래 POST/PUT 관문을 지난다.
+// ─────────────────────────────────────────────────────────────────────────────
+const NOTICE_MEDIA_OPTS = { queryType: 'notice' };
 
 // ─────────────────────────────────────────────────────────
 // 공통 미들웨어
@@ -110,7 +132,11 @@ router.post('/:classId', requireAuth, requireMember, requireOwner, (req, res) =>
     if (!req.body || !req.body.title || !req.body.title.trim()) {
       return res.status(400).json({ success: false, message: '제목을 입력하세요.' });
     }
-    const notice = noticeDb.createNotice(req.classId, req.user.id, req.body);
+    // 본문 붙여넣기 이미지(data:base64) → 실제 파일. 규칙 위반이면 여기서 400(= 저장 자체를 안 한다).
+    const payload = { ...req.body };
+    const mediaErr = normalizeInlineMedia(payload, NOTICE_MEDIA_OPTS);
+    if (mediaErr) return res.status(mediaErr.status).json({ success: false, message: mediaErr.message });
+    const notice = noticeDb.createNotice(req.classId, req.user.id, payload);
     // 임시저장 정리
     try { noticeDb.deleteDraft(req.classId, req.user.id); } catch {}
     // Socket.IO 브로드캐스트 (실패해도 응답엔 영향 없음)
@@ -178,7 +204,11 @@ router.get('/:classId/:noticeId', requireAuth, requireMember, loadNotice, (req, 
 
 router.put('/:classId/:noticeId', requireAuth, requireMember, requireOwner, loadNotice, (req, res) => {
   try {
-    const notice = noticeDb.updateNotice(req.noticeId, req.body || {});
+    // 수정 경로도 같은 관문을 지난다 — 작성 때만 막으면 수정으로 base64 를 다시 넣을 수 있다.
+    const patch = { ...(req.body || {}) };
+    const mediaErr = normalizeInlineMedia(patch, NOTICE_MEDIA_OPTS);
+    if (mediaErr) return res.status(mediaErr.status).json({ success: false, message: mediaErr.message });
+    const notice = noticeDb.updateNotice(req.noticeId, patch);
     res.json({ success: true, notice });
   } catch (err) {
     console.error('[notice PUT]', err);
@@ -257,8 +287,19 @@ router.get('/:classId/:noticeId/comments', requireAuth, requireMember, loadNotic
 
 router.post('/:classId/:noticeId/comments', requireAuth, requireMember, loadNotice, (req, res) => {
   try {
-    const content = (req.body && req.body.content) ? String(req.body.content).trim() : '';
-    if (!content) return res.status(400).json({ success: false, message: '내용을 입력하세요.' });
+    const raw = (req.body && req.body.content) ? String(req.body.content).trim() : '';
+    if (!raw) return res.status(400).json({ success: false, message: '내용을 입력하세요.' });
+    // 댓글 에디터도 이미지 툴바가 달린 Quill 이다 — 본문과 같은 관문을 지난다.
+    //   ★ 2000자 검사보다 **먼저** 변환한다(순서가 중요):
+    //     base64 는 작은 이미지 한 장도 문자열을 수천 자로 부풀리므로, 변환 전에 길이를 재면
+    //     사진 한 장 붙여넣은 댓글이 "댓글은 2000자 이내로" 라는 엉뚱한 이유로 거부된다.
+    //     (FE 는 q.getText() = 눈에 보이는 글자만 세므로 사용자는 왜 막혔는지 알 수 없다)
+    //     변환 후에는 본문이 짧은 파일 경로가 되므로, 2000자 제한은 **사람이 쓴 글자 수**에
+    //     그대로 걸린다 — 제한이 느슨해지는 것이 아니라 의도대로 작동하게 된다.
+    const payload = { content: raw };
+    const mediaErr = normalizeInlineMedia(payload, NOTICE_MEDIA_OPTS);
+    if (mediaErr) return res.status(mediaErr.status).json({ success: false, message: mediaErr.message });
+    const content = payload.content;
     if (content.length > 2000) return res.status(400).json({ success: false, message: '댓글은 2000자 이내로 작성해 주세요.' });
     const parent_id = req.body && req.body.parent_id ? parseInt(req.body.parent_id) : null;
     const comment = noticeDb.addComment(req.noticeId, req.user.id, { content, parent_id });
@@ -284,8 +325,13 @@ router.post('/:classId/:noticeId/comments', requireAuth, requireMember, loadNoti
 router.put('/:classId/:noticeId/comments/:commentId', requireAuth, requireMember, loadNotice, (req, res) => {
   try {
     const commentId = parseInt(req.params.commentId);
-    const content = (req.body && req.body.content) ? String(req.body.content).trim() : '';
-    if (!content) return res.status(400).json({ success: false, message: '내용을 입력하세요.' });
+    const raw = (req.body && req.body.content) ? String(req.body.content).trim() : '';
+    if (!raw) return res.status(400).json({ success: false, message: '내용을 입력하세요.' });
+    // 수정 경로도 같은 관문 — 작성만 막으면 수정으로 base64 를 다시 넣을 수 있다.
+    const payload = { content: raw };
+    const mediaErr = normalizeInlineMedia(payload, NOTICE_MEDIA_OPTS);
+    if (mediaErr) return res.status(mediaErr.status).json({ success: false, message: mediaErr.message });
+    const content = payload.content;
     const r = noticeDb.updateComment(commentId, req.user.id, content);
     if (!r.ok) {
       if (r.reason === 'not_found') return res.status(404).json({ success: false, message: '댓글을 찾을 수 없습니다.' });

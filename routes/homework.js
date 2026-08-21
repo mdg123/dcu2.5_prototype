@@ -11,6 +11,28 @@ const buildAssignment = require('../lib/xapi/builders/assignment');
 const xapiSpool = require('../lib/xapi/spool');
 const db = require('../db/index');
 const { masteryRecomputeSql } = require('../lib/lrs/mastery-population');
+const { normalizeInlineMedia } = require('../lib/inline-data-media');
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 과제 제출 본문의 붙여넣기 이미지(data:base64) → 실제 업로드 파일
+//
+// 제출란도 게시판·알림장과 **같은 Quill** 이라 이미지를 붙여넣으면 본문에 base64 가 박힌다.
+// FE(homework-view.html)에 100KB 초과분만 /api/upload 로 승격하는 보조 장치가 있지만
+//   ⓐ 100KB 이하는 그대로 통과하고 ⓑ FE 를 거치지 않는 호출은 아무 검사도 받지 않는다.
+//   → 서버 관문이 있어야 뒷문이 닫힌다(용량·형식 제한도 여기서 같이 걸린다).
+//
+// ★ 학생 제출물이라 게시판보다 조심한다 (지켜야 할 것)
+//   · 변환은 **src 문자열만** 바꾼다 — 글자·태그·첨부·유튜브 iframe 은 그대로다(무손실).
+//   · 규칙 위반이면 파일을 한 개도 쓰지 않고 400 — 제출이 **아예 일어나지 않는다**(반쯤 저장 금지).
+//   · 채점 결과(score·feedback·graded_at)는 submitHomework 의 UPDATE 대상이 아니다.
+//     이 관문은 그보다 앞이므로 채점·피드백을 건드릴 여지가 없다.
+//   · 제출 시각(submitted_at)도 submitHomework 가 정하는 값 그대로다.
+//
+// 임시저장(POST /:homeworkId/draft)은 변환하지 않는다 — 자동 임시저장이 반복 발화하므로
+//   틱마다 같은 이미지를 새 파일로 복제해 고아 파일이 쌓인다. draft_content 는 (과제,학생) 1행뿐이고
+//   정식 제출 시 NULL 로 정리되며, 교사 화면·통계·채점은 draft_content 를 보지 않는다.
+// ─────────────────────────────────────────────────────────────────────────────
+const HOMEWORK_MEDIA_OPTS = { queryType: 'homework' };
 
 function _hwSchoolLevel(sc) {
   const s = String(sc || '');
@@ -328,11 +350,17 @@ router.post('/:classId/:homeworkId/draft', requireAuth, requireClassMember, (req
 // POST /api/homework/:classId/:homeworkId/submit - 과제 제출
 router.post('/:classId/:homeworkId/submit', requireAuth, requireClassMember, (req, res) => {
   try {
-    const { content, file_url, file_path, file_name, attachments } = req.body;
+    const { file_url, file_path, file_name, attachments } = req.body;
     // G2: attachments 배열 길이 제한 (사진10·영상1·링크N·파일N 합산 ≤ 20)
     if (Array.isArray(attachments) && attachments.length > 20) {
       return res.status(400).json({ success: false, message: '첨부 항목은 최대 20개까지 가능합니다.' });
     }
+    // 본문 붙여넣기 이미지(data:base64) → 실제 파일. 규칙 위반이면 400 이고 제출 자체가 일어나지 않는다.
+    //   아래 로직(로그·xAPI)은 전부 이 변환된 content 를 쓴다 — 저장본과 로그가 갈라지면 안 된다.
+    const submitBody = { content: req.body.content };
+    const mediaErr = normalizeInlineMedia(submitBody, HOMEWORK_MEDIA_OPTS);
+    if (mediaErr) return res.status(mediaErr.status).json({ success: false, message: mediaErr.message });
+    const content = submitBody.content;
     const result = homeworkDb.submitHomework(parseInt(req.params.homeworkId), req.user.id, {
       content,
       file_path: file_path || file_url || null,

@@ -72,7 +72,10 @@ function request(method, path, asUser, payload) {
     if (asUser != null) headers['x-test-user'] = String(asUser);
     const data = payload != null ? JSON.stringify(payload) : null;
     if (data) headers['Content-Length'] = Buffer.byteLength(data);
-    const req = http.request(baseUrl + path, { method, headers }, (res) => {
+    // agent:false — 전역 agent 의 keep-alive 소켓을 쓰지 않는다.
+    //   INV-BG11/11b 가 execFileSync 로 수 초간 이벤트루프를 붙잡는 동안 유휴 소켓이 만료돼,
+    //   그 다음 요청이 죽은 소켓을 재사용하며 ECONNRESET 으로 터졌다(2026-08-21 실측).
+    const req = http.request(baseUrl + path, { method, headers, agent: false }, (res) => {
       let body = '';
       res.on('data', (c) => (body += c));
       res.on('end', () => {
@@ -684,4 +687,136 @@ test('INV-BG12b: class-home.html 4개 렌더 지점이 SSOT 만 쓴다 (판정 �
   // 상세가 다시 무조건 <img> 로 돌아가지 않았는지 — 그 코드가 정확히 이번 결함이었다
   assert.equal(/postDetailImage'\);\s*\n\s*if \(p\.image_url\) \{\s*\n\s*imgEl\.querySelector\('img'\)\.src/.test(html), false,
     'openPost 가 image_url 을 무조건 <img src> 로 넣던 코드로 되돌아가면 안 된다');
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+// INV-BG13~15 — 본문 붙여넣기 이미지(data:base64)를 **저장 시점에 파일로** 바꾼다.
+//
+// 발단(사용자 실측 2026-08-21 · GCP 정본 student_gallery 41~48 / posts 98~105):
+//   교사가 갤러리 게시판에 작품 8건을 올려 승인까지 했는데
+//     · 채움클래스 갤러리 → 이미지가 보인다(본문 첫 <img> 를 그리므로 base64 도 렌더)
+//     · 나도예술가        → 팔레트 이모지(빈 이미지)
+//   이미지가 파일이 아니라 본문에 data:image/png;base64,… 로 박혀 있었기 때문이다
+//   (Quill 에디터 붙여넣기). base64 를 그대로 두면
+//     ⓐ gallery_attachments.url 은 1000자로 잘려 **깨진 URL** 이 되고
+//     ⓑ posts.content 가 비대해지고 ⓒ 목록 API 가 무거워진다.
+//   → 근본 처방은 **데이터가 들어오는 문 앞에서 파일로 바꾸는 것**이다.
+//
+// ⚠ 단언을 조건문 안에 가두지 않는다. 각 테스트는 "픽스처 전제"를 최상위에서 먼저 단언한다.
+// ══════════════════════════════════════════════════════════════════════════
+const uploadRules = require('../lib/upload-rules');
+const inlineMedia = require('../lib/inline-data-media');
+
+// 16×16 투명 PNG (실제 디코딩 가능한 바이트 — 가짜 문자열이면 파일 검증이 무의미해진다)
+const PNG_B64 = Buffer.from(
+  '89504e470d0a1a0a0000000d49484452000000100000001008060000001ff3ff610000001f' +
+  '49444154388dedcd310100200c00b0f4bf9c0e0c1e2c0000000000000000f80d0a0f0a0100' +
+  '016b7a2f0000000049454e44ae426082', 'hex').toString('base64');
+const PNG_DATA_URL = `data:image/png;base64,${PNG_B64}`;
+
+/** 변환으로 생긴 업로드 파일 — 테스트가 끝나면 지운다(정본 uploads 오염 방지). */
+const CREATED_FILES = [];
+function absOfUploadUrl(url) {
+  return nodePath.join(ROOT, 'public', String(url).replace(/^\//, ''));
+}
+after(() => {
+  for (const u of CREATED_FILES) { try { fs.unlinkSync(absOfUploadUrl(u)); } catch (_) {} }
+});
+
+test('INV-BG13: 본문에 data: 이미지만 있는 글을 저장하면 파일로 변환되고 content 에 data: 가 남지 않는다', async () => {
+  // 픽스처 전제 — 우리가 보내는 본문에는 실제로 data: 이미지가 들어 있다
+  const content = `<p>붙여넣기 그림</p><img src="${PNG_DATA_URL}"><p>끝</p>`;
+  assert.equal(inlineMedia.hasInlineDataMedia(content), true,
+    '전제 — 보내는 본문에 data: 미디어가 있어야 (없으면 이 테스트는 아무것도 검사하지 않는다)');
+
+  const postId = await writePost(BOARD_ON, { title: `${TAG}-b64`, content });
+  const post = db.prepare('SELECT * FROM posts WHERE id = ?').get(postId);
+  assert.ok(post, '게시글이 생성되어야');
+
+  // ① content 에 data: 가 남으면 안 된다 — 이것이 결함의 뿌리
+  assert.equal(String(post.content).includes('data:image'), false,
+    `저장된 본문에 base64 가 남아 있다 (DB 비대·연동 불가). 실제=${String(post.content).slice(0, 120)}`);
+  assert.equal(inlineMedia.hasInlineDataMedia(post.content), false, '저장된 본문에 data: 미디어가 남으면 안 된다');
+
+  // ② 파일 경로로 바뀌었고 그 파일이 **실제로 존재**해야 한다 (경로만 바꾸고 안 쓰면 404 가 된다)
+  const m = String(post.content).match(/<img[^>]+src="([^"]+)"/i);
+  assert.ok(m, `본문에 파일 경로 <img> 가 있어야. 실제=${String(post.content).slice(0, 200)}`);
+  const url = m[1];
+  CREATED_FILES.push(url);
+  assert.match(url, /^\/uploads\//, `변환된 이미지는 업로드 경로여야 (실제=${url})`);
+  assert.equal(fs.existsSync(absOfUploadUrl(url)), true, `변환된 파일이 실제로 저장되어야: ${url}`);
+  assert.ok(fs.statSync(absOfUploadUrl(url)).size > 0, '저장된 파일이 비어 있으면 안 된다');
+
+  // ③ 대표 이미지(image_url)가 비어 있었으므로 변환된 첫 이미지로 채워져야 한다
+  assert.equal(post.image_url, url, '대표 이미지가 변환된 첫 이미지로 채워져야 (나도예술가 표지가 여기서 나온다)');
+});
+
+test('INV-BG14: 그 글이 연동되면 나도예술가 image_url 이 자리표시자가 아니다', async () => {
+  const content = `<p>표지 검증</p><img src="${PNG_DATA_URL}">`;
+  assert.equal(inlineMedia.hasInlineDataMedia(content), true, '전제 — 보내는 본문에 data: 이미지가 있어야');
+
+  const postId = await writePost(BOARD_ON, { title: `${TAG}-b64-gallery`, content });
+  await approvePost(postId);
+
+  const row = galleryRowOf(postId);
+  assert.ok(row, '연동 ON 게시판 글은 나도예술가 행이 있어야 (전제)');
+  assert.equal(row.approval_status, 'approved', '승인 후 approved 여야 (전제)');
+
+  // ★ 사용자가 본 증상의 직접 재현 — 자리표시자면 팔레트 이모지(빈 이미지)가 뜬다
+  const M = require('../public/js/media-kind');
+  assert.equal(M.isPlaceholderUrl(row.image_url), false,
+    `나도예술가 표지가 자리표시자면 빈 이미지가 된다 (실제=${row.image_url})`);
+  assert.equal(String(row.image_url).startsWith('data:'), false,
+    `표지에 base64 를 넣으면 1000자에서 잘려 깨진 이미지가 된다 (실제=${String(row.image_url).slice(0, 60)})`);
+  assert.match(String(row.image_url), /^\/uploads\//, '표지는 실제 업로드 파일 경로여야');
+  CREATED_FILES.push(row.image_url);
+  assert.equal(fs.existsSync(absOfUploadUrl(row.image_url)), true,
+    `표지 파일이 서버에 실제로 있어야 (없으면 404 = 빈 이미지): ${row.image_url}`);
+
+  // 첨부도 잘리지 않은 실제 URL 이어야 한다
+  const atts = attachmentsOf(row.id);
+  assert.equal(atts.length, 1, `첨부 1건이 들어가야 (실제=${JSON.stringify(atts)})`);
+  assert.equal(atts[0].type, 'image', '첨부 타입은 image');
+  assert.equal(atts[0].url, row.image_url, '첨부 URL 과 표지가 같은 파일이어야');
+  assert.ok(atts[0].url.length < 1000, '첨부 URL 이 1000자 절단선에 걸리면 안 된다(= base64 를 넣지 않았다는 뜻)');
+});
+
+test('INV-BG15: 용량·형식 제한이 data: 경로에서도 적용된다 (검사 우회 금지)', async () => {
+  // ① 기본 상한이 **업로드 규칙의 그 상한**이어야 한다 — 별도 상한을 새로 적으면 규칙이 두 벌이 된다
+  const noop = inlineMedia.materializeDataUrls('<p>없음</p>');
+  assert.equal(noop.changed, false, '전제 — data: 가 없으면 변환하지 않는다');
+  assert.equal(uploadRules.MAX_FILE_SIZE, 50 * 1024 * 1024, '업로드 상한은 50MB');
+  assert.equal(uploadRules.ALLOWED_EXT_RE.test('.svg'), false, 'svg 는 업로드 허용 목록 밖이어야 (XSS 벡터)');
+  assert.equal(uploadRules.ALLOWED_EXT_RE.test('.png'), true, 'png 는 허용');
+
+  // ② 형식 위반: svg 를 data: 로 밀어 넣으면 400 — 파일도 안 생기고 글도 안 만들어져야
+  const before = db.prepare('SELECT COUNT(*) c FROM posts WHERE class_id = ?').get(CLASS).c;
+  const svgUrl = 'data:image/svg+xml;base64,' + Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"/>').toString('base64');
+  const bad = await request('POST', `/api/board/${CLASS}`, STUDENT1, {
+    board_id: BOARD_ON, title: `${TAG}-svg`, content: `<p>x</p><img src="${svgUrl}">`,
+  });
+  assert.equal(bad.status, 400, `허용 목록 밖 형식은 400 이어야 (실제=${bad.status} ${bad.body.slice(0, 200)})`);
+  assert.equal(bad.json && bad.json.message, uploadRules.MSG_BAD_TYPE, '업로드 API 와 같은 한국어 메시지여야');
+  const afterCnt = db.prepare('SELECT COUNT(*) c FROM posts WHERE class_id = ?').get(CLASS).c;
+  assert.equal(afterCnt, before, '형식 위반 글은 저장되면 안 된다 (data: 가 검사를 건너뛰는 뒷문이 되면 안 된다)');
+
+  // ③ 용량 위반: 상한을 낮춰 주입하면 TOO_LARGE 로 막히고 파일이 생기지 않아야
+  const bigBuf = Buffer.alloc(4096, 7);
+  const bigUrl = 'data:image/png;base64,' + bigBuf.toString('base64');
+  const dirBefore = fs.readdirSync(nodePath.join(uploadRules.UPLOAD_ROOT, 'images')).length;
+  assert.throws(
+    () => inlineMedia.materializeDataUrls(`<img src="${bigUrl}">`, { maxBytes: 1024 }),
+    (e) => e.code === 'TOO_LARGE' && e.message === uploadRules.MSG_TOO_LARGE,
+    '상한을 넘는 data: 는 TOO_LARGE 로 막혀야'
+  );
+  const dirAfter = fs.readdirSync(nodePath.join(uploadRules.UPLOAD_ROOT, 'images')).length;
+  assert.equal(dirAfter, dirBefore, '용량 위반은 파일이 생기면 안 된다');
+
+  // ④ 개수 상한도 있어야 한다 — 붙여넣기 무한 첨부로 디스크를 채우지 못하게
+  const many = new Array(inlineMedia.MAX_DATA_FILES + 1).fill(`<img src="${PNG_DATA_URL}">`).join('');
+  assert.throws(
+    () => inlineMedia.materializeDataUrls(many, { maxFiles: 2 }),
+    (e) => e.code === 'TOO_MANY',
+    '개수 상한을 넘으면 TOO_MANY 로 막혀야'
+  );
 });

@@ -9,6 +9,22 @@ const { extractLogContext } = require('../lib/log-context');
 const { ensureTodayAttendance } = require('../db/attendance');
 const buildSocial = require('../lib/xapi/builders/social');
 const xapiSpool = require('../lib/xapi/spool');
+const inlineMedia = require('../lib/inline-data-media');
+
+// 본문에 붙여넣기로 들어온 data:image/... 를 **저장 전에** 실제 업로드 파일로 바꾼다.
+//   Quill 에디터는 이미지를 붙여넣으면 base64 로 본문에 박아 넣는다. 그대로 저장하면
+//   ① 나도예술가로 못 넘어가고(gallery_attachments.url 1000자 절단) ② posts.content 가 비대해진다.
+//   ⚠ 규칙(허용 확장자·50MB·저장 위치·파일명)은 /api/upload 와 **같은 lib/upload-rules.js** 를 쓴다.
+//     data: 가 검사를 건너뛰는 뒷문이 되면 안 된다.
+//   대표 이미지(image_url)가 비어 있으면 변환된 첫 이미지로 채운다 — 나도예술가 표지가 여기서 나온다.
+//
+// 판정·치환 본체는 lib/inline-data-media.normalizeInlineMedia 한 곳에만 있다
+//   — 알림장(routes/notice.js)·과제 제출(routes/homework.js)도 **같은 함수**를 쓴다.
+//     화면마다 규칙을 따로 적으면 그 순간 검사가 여러 벌이 된다.
+// @returns {null|{status:number, message:string}} null 이면 정상, 아니면 그대로 응답할 에러
+function normalizeInlineMedia(postData) {
+  return inlineMedia.normalizeInlineMedia(postData, { queryType: 'board', coverField: 'image_url' });
+}
 
 // 게시판 카테고리 → AIDT board_kind (C/G/E) 매핑용
 function _resolveBoardKind(post, classDb) {
@@ -93,6 +109,9 @@ router.post('/:classId', requireAuth, requireMember, (req, res) => {
     if (!req.body.title) return res.status(400).json({ success: false, message: '제목을 입력하세요.' });
     // is_anonymous, allow_comments 처리
     const postData = { ...req.body };
+    // 본문 붙여넣기 이미지(data:base64) → 실제 파일. 규칙 위반이면 여기서 400.
+    const mediaErr = normalizeInlineMedia(postData);
+    if (mediaErr) return res.status(mediaErr.status).json({ success: false, message: mediaErr.message });
     if (postData.is_anonymous !== undefined) postData.is_anonymous = postData.is_anonymous ? 1 : 0;
     if (postData.allow_comments !== undefined) postData.allow_comments = postData.allow_comments ? 1 : 0;
     // board_id로 게시판 유형 자동 판별
@@ -217,7 +236,16 @@ router.put('/:classId/:postId', requireAuth, requireMember, (req, res) => {
     if (post.author_id !== req.user.id && req.myRole !== 'owner') {
       return res.status(403).json({ success: false, message: '권한이 없습니다.' });
     }
-    const updated = boardDb.updatePost(post.id, req.body);
+    // 수정 경로도 같은 관문을 지난다 — 작성 때만 막으면 수정으로 base64 를 다시 넣을 수 있다.
+    const patch = { ...req.body };
+    const clientSentCover = patch.image_url !== undefined;
+    const mediaErr = normalizeInlineMedia(patch);
+    if (mediaErr) return res.status(mediaErr.status).json({ success: false, message: mediaErr.message });
+    // 자동 채움(변환된 첫 이미지)은 **원래 대표 이미지가 없을 때만**.
+    //   클라이언트가 image_url 을 직접 보냈으면 그 값을 존중하고,
+    //   보내지 않았는데 기존 대표 이미지가 있으면 덮지 않는다.
+    if (!clientSentCover && patch.image_url && post.image_url) delete patch.image_url;
+    const updated = boardDb.updatePost(post.id, patch);
     res.json({ success: true, post: updated });
   } catch (err) { res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' }); }
 });
