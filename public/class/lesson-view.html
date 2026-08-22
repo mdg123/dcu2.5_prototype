@@ -5,6 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>다채움 - 수업 상세</title>
   <link rel="stylesheet" href="/css/common-nav.css">
+  <!-- 응답 현황 모니터 (기획서 §5) — 🔴 이 화면에는 공통 GNB(z-index 9999)가 있다. 팝업은 10000 -->
+  <link rel="stylesheet" href="/css/response-monitor.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -79,6 +81,25 @@
 <body>
   <script src="/js/common-nav.js"></script>
   <script src="/js/class-ui.js"></script>
+  <script src="/js/response-monitor.js"></script>
+  <script>
+    // 사용자 지시(2026-08-21): 응답 현황은 레이어 팝업이 아니라 **별도 창**으로 띄운다.
+    let _rmWin = null;
+    function openMonitorWindow() {
+      const c = window._rmCtx || {};
+      if (!c.classId || !c.lessonId) { alert('수업 정보를 아직 불러오는 중입니다. 잠시 후 다시 눌러 주세요.'); return null; }
+      if (_rmWin && !_rmWin.closed) { _rmWin.focus(); return _rmWin; }
+      const url = '/class/response-monitor.html?classId=' + encodeURIComponent(c.classId) +
+                  '&lessonId=' + encodeURIComponent(c.lessonId);
+      const w = Math.min(1280, Math.max(900, screen.availWidth - 360));
+      const h = Math.min(860,  Math.max(600, screen.availHeight - 160));
+      _rmWin = window.open(url, 'dacheum-response-monitor',
+        'width=' + w + ',height=' + h + ',menubar=no,toolbar=no,location=no,status=no,resizable=yes,scrollbars=yes');
+      if (!_rmWin) { alert('팝업이 차단되었습니다. 주소창의 팝업 차단을 해제한 뒤 다시 눌러 주세요.'); return null; }
+      _rmWin.focus();
+      return _rmWin;
+    }
+  </script>
   <div class="container" id="mainContent" style="display:none;">
     <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;">
       <button class="btn btn-outline" onclick="goBackToList()" style="padding:8px 14px;font-size:14px;"><i class="fas fa-arrow-left"></i> 목록으로</button>
@@ -124,6 +145,13 @@
     <div class="card" id="studentProgressCard" style="display:none;">
       <h3><i class="fas fa-user-check"></i> 이수 현황</h3>
       <div id="progressSummary" style="margin-bottom:16px;"></div>
+      <!-- 진입점 ② — 수업 후 문항별 응답 확인 (기획서 §4-2) -->
+      <button class="btn btn-outline" id="openMonitorBtn"
+              style="width:100%;margin-top:14px;padding:14px 24px;font-size:16px;font-weight:700;
+                     border-radius:10px;display:flex;align-items:center;justify-content:center;gap:8px;"
+              onclick="openMonitorWindow()">
+        <i class="fas fa-table-list"></i> 문항별 응답 현황 보기
+      </button>
       <div id="studentProgressList" style="display:none;"></div>
     </div>
 
@@ -175,6 +203,11 @@
 
     let lessonData = null;
     let myRole = null;
+
+    // 응답 현황 모니터: "동기화 중"(내가 제어) / "○○님이 진행 중"(남이 제어) 판정에 필요
+    window.addEventListener('dacheim:user-loaded', (e) => {
+      if (e.detail && window.ResponseMonitor) ResponseMonitor.setViewer(e.detail.id);
+    });
 
     function escHtml(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 
@@ -337,6 +370,9 @@
         if (!res.success) return;
         allStudentProgress = res.students;
         document.getElementById('studentProgressCard').style.display = 'block';
+        // 응답 현황 모니터 컨텍스트 (이 화면의 수업 파라미터는 lessonId 가 아니라 id)
+        if (window.ResponseMonitor) ResponseMonitor.setContext({ classId: classId, lessonId: lessonId });
+        window._rmCtx = { classId: classId, lessonId: lessonId };
 
         const total = allStudentProgress.length;
         const doneCount = allStudentProgress.filter(s => s.is_complete).length;

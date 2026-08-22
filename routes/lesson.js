@@ -177,6 +177,58 @@ router.get('/:classId/:lessonId/students', requireAuth, requireClassMember, (req
   }
 });
 
+// ════════════════════════════════════════════════════════════════════════════
+// 응답 현황 모니터 (기획서 보고서/기획_수업꾸러미_응답모니터링_v1.md §8-1 · §8-4)
+// ════════════════════════════════════════════════════════════════════════════
+//
+// 🔴 이 응답에는 **다른 학생의 실명 + 문항별 정오답**이 들어 있다. 학생에게는 어떤 경로로도
+//    노출되지 않아야 한다. 아래 게이트가 유일한 문이다.
+//
+// ⚠ 바로 위 `GET .../students` 는 `req.user.role !== 'teacher'` 조건 때문에 **이 클래스와
+//   무관한 아무 교사나** 통과한다. 본 API 는 그 구멍을 답습하지 않는다 —
+//   개설자(owner) · co_teacher · admin 만. (test INV-M6)
+function requireLessonMonitorViewer(req, res, next) {
+  const lessonId = parseInt(req.params.lessonId);
+  const lesson = lessonDb.getLessonById(lessonId);
+  // lesson↔class 교차검증 — 타 클래스 lessonId 끼워넣기 차단(존재 여부도 흘리지 않게 404)
+  if (!lesson || Number(lesson.class_id) !== Number(req.classId)) {
+    return res.status(404).json({ success: false, message: '수업을 찾을 수 없습니다.' });
+  }
+  const ok = req.myRole === 'owner'
+          || req.myRole === 'co_teacher'      // 스키마상 휴면. 활성화 시 자동 포함
+          || req.user.role === 'admin';
+  if (!ok) return res.status(403).json({ success: false, message: '수업 개설자만 볼 수 있습니다.' });
+  req.lesson = lesson;
+  next();
+}
+
+// GET /api/lesson/:classId/:lessonId/response-monitor?include_outside=0
+router.get('/:classId/:lessonId/response-monitor', requireAuth, requireClassMember, requireLessonMonitorViewer, (req, res) => {
+  try {
+    const { buildResponseMonitor } = require('../db/lesson-monitor');
+    // 소켓 런타임(누가 접속해 어디를 보고 있는가). 서버가 소켓 없이 떠 있으면 null → 전원 미접속.
+    let runtime = null;
+    try {
+      const sock = require('../socket');
+      if (typeof sock.getLessonRuntime === 'function') runtime = sock.getLessonRuntime(req.params.lessonId);
+    } catch (_) { runtime = null; }
+
+    const snapshot = buildResponseMonitor({
+      classId: req.classId,
+      lessonId: parseInt(req.params.lessonId),
+      // 기본 0 — lesson_id IS NULL(수업 밖·과거 기록)은 섞지 않는다 (INV-M7)
+      includeOutside: String(req.query.include_outside || '0') === '1',
+      runtime,
+    });
+    if (!snapshot) return res.status(404).json({ success: false, message: '수업을 찾을 수 없습니다.' });
+    // 문항 0개 / 학생 0명 / 기록 0건 은 오류가 아니다 — 정상 200 + 빈 배열 (체크리스트 A-11)
+    res.json({ success: true, ...snapshot });
+  } catch (err) {
+    console.error('[LESSON] response-monitor error:', err);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
 // POST /api/lesson/:classId/:lessonId/progress - 학습 진도 업데이트
 router.post('/:classId/:lessonId/progress', requireAuth, requireClassMember, (req, res) => {
   try {

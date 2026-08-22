@@ -39,7 +39,7 @@ function loadChoiceRows(handle = db) {
     if (!opts || opts.length < 2) continue;
     const n = Number(String(r.answer).trim());
     if (!Number.isInteger(n)) continue;
-    out.push({ id: r.id, content_id: r.content_id, len: opts.length, n });
+    out.push({ id: r.id, content_id: r.content_id, len: opts.length, n, opts });
   }
   return out;
 }
@@ -78,46 +78,293 @@ test('INV-AI1: 한 콘텐츠가 answer===0 과 answer===options.length 를 동�
 // ── INV-AI2 ─────────────────────────────────────────────────────────────
 // 모든 객관식 answer 는 0-based 유효 범위 [0, len-1] 안에 있어야 한다.
 //
-// ⚠ 현재 DB 에는 이 범위를 벗어난 **정답키 손상** 행이 남아 있다.
-//   전수 육안 확인 결과 이들은 "1-based 저장"이 아니라 **애초에 틀린 정답키**다
-//   (예: c102 보기 ["12cm³","20cm³","60cm³","35cm³"] answer=4, 해설은 "60cm³"
-//        → -1 해도 "35cm³" 로 여전히 오답. 올바른 값은 2).
-//   그래서 일괄 -1 로 고칠 수 없고, 문항별 재작성이 필요하다.
-//   여기서는 **알려진 목록을 동결**해 "새로운 손상이 늘어나지 않는지"를 감시한다.
-//   손상을 하나 고칠 때마다 이 목록에서 지우면 된다(줄어드는 것은 통과, 느는 것은 실패).
-//   (2026-08-07 적용으로 q69·c85 와 q228·c196 은 해소돼 목록에서 제거했다 — 진짜 1-based 였다)
-const KNOWN_OUT_OF_RANGE = new Set([
-  86, 213, 214, 239, 240,                    // c102·187·205 — 초기 시드 정답키 손상
-  276, 279, 282, 285, 288, 291, 294, 297,    // c238~383 "예시 문제 2" 동일 템플릿 30건.
-  300, 303, 306, 309, 312, 315, 318, 321,    //   보기[3]="올바른 적용" 인데 answer=5,
-  324, 327, 330, 333, 336, 339, 342, 345,    //   해설은 "4번이 정답" → 올바른 값은 3.
-  348, 351, 354, 357, 360, 363,              //   -1(=4)은 "해당 없음" 이라 오히려 악화된다.
-]);
-
-/** INV-AI2 판정 — 동결 목록에 없는 **신규** 범위밖 문항 목록. */
-function findUnknownOutOfRange(rows) {
+// 🔴 예외 목록 없음 — **범위 밖 0건**이 불변식이다.
+//   2026-08-07 시점에는 손상 35건을 `KNOWN_OUT_OF_RANGE` 로 동결해 "신규만" 감시했는데,
+//   그 동안 이 불변식은 **기존 35건에 대해 잠들어 있었다**. 동결 목록은 결함을 관리 대상이
+//   아니라 배경으로 만든다. 2026-08-21 에 전건을 해소하고 목록 자체를 없앴다.
+//     · 34건 — 해설 대조로 문항별 정답 index 재작성(보고서/증적/정답키정합_20260821/,
+//       채점 실증은 test/content-answer-key-integrity.test.js REG-AK2)
+//     · q214 — 보기에 정답이 둘(1/2 = 2/4)이라 정답키로는 해소 불가했다.
+//       1/2 을 오답 보기 4/4 로 교체해 **문항 자체를 수리**했다
+//       (보고서/증적/문항중복정답_q214_20260821/).
+//   다시 범위 밖이 생기면 **동결하지 말고 고칠 것.**
+/** INV-AI2 판정 — 0-based 범위를 벗어난 문항 목록(테스트와 역주입이 같은 구현을 쓴다). */
+function findOutOfRange(rows) {
   return rows
     .filter(r => !(r.n >= 0 && r.n <= r.len - 1))
-    .filter(r => !KNOWN_OUT_OF_RANGE.has(r.id))
     .map(r => `q${r.id}(content ${r.content_id}) answer=${r.n} 보기수=${r.len}`);
 }
 
-test('INV-AI2: 객관식 answer 는 0-based 범위(0 ~ 보기수-1) 안이다 — 알려진 손상 외 신규 0건', () => {
-  const rows = loadChoiceRows();
-  const outOfRange = rows.filter(r => !(r.n >= 0 && r.n <= r.len - 1));
-
+test('INV-AI2: 객관식 answer 는 0-based 범위(0 ~ 보기수-1) 안이다 — 범위 밖 0건', () => {
   assert.deepStrictEqual(
-    findUnknownOutOfRange(rows),
+    findOutOfRange(loadChoiceRows()),
     [],
-    '0-based 범위를 벗어난 **신규** 문항이 생겼습니다. 1-based 로 저장됐다면 학생이 맞게 골라도 오답 처리됩니다.'
+    '0-based 범위를 벗어난 문항이 있습니다. 이 문항은 **어떤 보기를 골라도 오답**입니다.\n' +
+    '예외 목록에 넣지 말고 고치십시오 — 해설을 보기와 대조해 올바른 index 를 산출하면 됩니다.'
+  );
+});
+
+// ── INV-AI5 ─────────────────────────────────────────────────────────────
+// 정답 보기와 **글자가 똑같은 다른 보기**가 있으면 안 된다.
+//   q214 가 이 부류였다(1/2 과 2/4 — 값이 같은 두 보기). 학생이 정답과 똑같이 생긴 칸을
+//   골라도 오답 처리되므로, 정답키를 어떻게 잡아도 억울한 학생이 생긴다.
+//
+// ⚠ 여기서 잡는 것은 **문자열이 완전히 같은** 경우다. q214 처럼 "값은 같은데 표기가 다른"
+//   경우(1/2 vs 2/4)는 사람이 봐야 한다 — 그래서 이 불변식은 그 부류의 하위집합만 막는다.
+const DUP_ANSWER_OPTION_BACKLOG = new Set([
+  // 2026-08-21 발견 26건 중 **25건은 해소**했다(중복된 오답 칸만 교체 — 정답 칸 무변동).
+  //   보고서/증적/중복보기_20260821/ · 채점 실증은
+  //   test/content-answer-key-integrity.test.js REG-AK6
+  //
+  // 🟠 남은 1건 — q11666(content 9842) "계산 결과가 작은 것부터 나열한 것은?"
+  //   보기 ["0.6÷3, 0.8÷4, 0.9÷3"(중복), 정답(동일 문자열),
+  //         "0.9÷3, 0.8÷4, 0.6÷3", "0.8÷4, 0.6÷3, 0.9÷3"]
+  //   0.6÷3 과 0.8÷4 가 **둘 다 0.2 로 동점**이라 index 3 도 오름차순으로 옳다.
+  //   글자 중복 칸만 바꿔도 **정답이 두 개인 상태가 남는다**(q214 와 같은 의미적 중복).
+  //   해소하려면 나눗셈 수치를 바꿔 동점을 없애야 하고, 그러면 정답 보기 문구까지 바뀌어
+  //   "정답 칸 불변" 원칙에 어긋난다.
+  //   🔑 **선행 조건: 문항 전면 재작성**(동점이 나지 않는 세 나눗셈으로 수치를 다시 고르고
+  //     네 보기의 순열을 새로 짠다) + 그 콘텐츠의 **제출 기록이 0 건**인지 확인.
+  //     기록이 있으면 문항을 새로 만들어 교체하고 옛 문항은 보존해야 한다.
+  //   ⚠ 이 목록은 **줄어들기만** 해야 하며 최종 목표는 비우는 것이다. 늘면 실패한다.
+  //     (아래 역주입이 "목록에 있는데 실제로는 이미 고쳐진 항목"도 잡아 준다)
+  11666,
+]);
+
+/**
+ * INV-AI5 판정 — 정답 칸과 글자가 같은 다른 보기를 가진 문항.
+ * ⚠ 정규화는 **양끝 공백만** 제거한다. 내부 공백까지 지우면
+ *   "띄어쓰기가 바른 것은?"(보기가 공백으로만 구별되는 문항, q48·q163)이 통째로 오탐된다.
+ */
+function findDuplicateAnswerOption(rows, backlog = DUP_ANSWER_OPTION_BACKLOG) {
+  const out = [];
+  for (const r of rows) {
+    if (!(r.n >= 0 && r.n <= r.len - 1)) continue;          // 범위 밖은 INV-AI2 담당
+    const norm = r.opts.map(s => String(s).trim());
+    const twins = norm.map((s, i) => (i !== r.n && s === norm[r.n] ? i : -1)).filter(i => i >= 0);
+    if (twins.length && !backlog.has(r.id)) {
+      out.push(`q${r.id}(content ${r.content_id}) 정답 index ${r.n} 과 글자가 같은 보기 [${twins}] — ${JSON.stringify(r.opts)}`);
+    }
+  }
+  return out;
+}
+
+test('INV-AI5: 정답 보기와 글자가 같은 다른 보기가 없다 — 신규 0건', () => {
+  assert.deepStrictEqual(
+    findDuplicateAnswerOption(loadChoiceRows()), [],
+    '정답과 똑같이 생긴 오답 보기가 있는 문항이 새로 생겼습니다.\n' +
+    '학생이 정답과 동일한 글자를 골라도 오답 처리됩니다 — 중복 보기를 다른 값으로 바꾸십시오.'
+  );
+});
+
+test('INV-AI5 역주입: 중복 보기를 심으면 반드시 걸린다 (백로그도 실제로 잡히는지 확인)', () => {
+  const rows = loadChoiceRows();
+  assert.deepStrictEqual(findDuplicateAnswerOption(rows), [], '정본 데이터는 통과해야 한다');
+
+  // (a) 정상 문항에 중복을 심는다
+  const victim = rows.find(r => r.n >= 0 && r.n < r.len - 1 && !DUP_ANSWER_OPTION_BACKLOG.has(r.id));
+  assert.ok(victim, '역주입 대상 문항을 찾지 못했다');
+  const twinIdx = victim.n === 0 ? 1 : 0;
+  const injectedOpts = victim.opts.slice();
+  injectedOpts[twinIdx] = victim.opts[victim.n];
+  const injected = rows.map(r => (r.id === victim.id ? { ...r, opts: injectedOpts } : r));
+  assert.ok(
+    findDuplicateAnswerOption(injected).some(h => h.startsWith(`q${victim.id}(`)),
+    `중복 보기를 심었는데 INV-AI5 가 통과시켰다 — 불변식이 죽어 있다`
   );
 
-  // 동결 목록이 실제보다 커지면(=고쳐졌는데 목록을 안 지웠으면) 알려준다 — 실패는 아님.
-  const stillBroken = new Set(outOfRange.map(r => r.id));
-  const fixed = [...KNOWN_OUT_OF_RANGE].filter(id => !stillBroken.has(id));
-  if (fixed.length) {
-    console.log(`[INV-AI2] 손상이 해소된 문항 ${fixed.length}건 — KNOWN_OUT_OF_RANGE 에서 제거하세요: ${fixed.join(',')}`);
+  // (b) 백로그가 **실재하는 결함**인지 — 예외를 걷어내면 반드시 붉어져야 한다.
+  //     (이미 고쳐진 것을 목록에만 남겨 두면 이 단언이 알려 준다)
+  const withoutBacklog = findDuplicateAnswerOption(rows, new Set());
+  assert.equal(
+    withoutBacklog.length, DUP_ANSWER_OPTION_BACKLOG.size,
+    `백로그 ${DUP_ANSWER_OPTION_BACKLOG.size}건 중 실제로 남아 있는 것은 ${withoutBacklog.length}건입니다.\n` +
+    '해소된 항목은 DUP_ANSWER_OPTION_BACKLOG 에서 지우십시오(목록은 줄어들기만 해야 합니다).\n' +
+    withoutBacklog.join('\n')
+  );
+});
+
+// ── INV-AI6 ─────────────────────────────────────────────────────────────
+// 정답 보기와 **값이 같은**(글자는 다른) 보기가 없어야 한다.
+//   INV-AI5 가 잡는 "글자 중복" 의 상위 부류다. q214(1/2 = 2/4)·q11666(0.6÷3 = 0.8÷4)·
+//   q3877(6/12 = 1/2) 이 전부 이 부류였고, 학생이 **수학적으로 옳은 칸을 골라도 오답**이 된다.
+//
+// 판정에서 제외하는 것(결함이 아님):
+//   · 단위가 다른 보기 — `700kg ≠ 700g`. 값만 같을 뿐 다른 양이다.
+//   · 대분수의 분수부가 가분수인 형태(`3과 9/8` vs `4와 1/8`) — 대분수의 정의상 틀린 표기이므로
+//     **정당한 오답 보기**다.
+//   · 지문이 형식을 지정한 경우("**기약분수**로 나타내면?" 에 약분 전 값, "대분수로" 에 가분수)
+// ── 단위 분리 ────────────────────────────────────────────────────────────
+// 🔴 2026-08-21: 여기는 원래 **고정 단위 목록**(`['cm²','cm','kg','g','초',…]`)이었다.
+//   그 목록에 `L`·`장` 이 없어서 같은 부류의 결함 6건이 **몇 달간 탐지를 빠져나갔다**
+//   (q3391 `1 L` ↔ `8/8 L` · q3855 `3과 1/3 L` ↔ `10/3 L` · q10511 `1/2 장` ↔ `5/10 장` ·
+//    q12242 `1/6 L` ↔ `5/30 L` 및 복제본). 단위를 하나씩 추가하는 구조는 **다음 단위에서 또
+//   빠진다** — 목록을 늘리는 것으로는 같은 사고가 반복된다.
+//   → **수치 토큰을 앵커로 잡고, 그 뒤에 오는 임의의 문자열을 단위로 본다**.
+//     단위 자리에 숫자·연산자·구분자가 남으면 "수치+단위" 가 아니므로(수식·목록·비·범위)
+//     값 비교 대상에서 제외한다 — 이것이 오탐을 막는 실제 장치다.
+//   실측(2026-08-21): 객관식 11,878건 전수 스캔 → 적출 8건, **오탐 0건**.
+//     (일반화 전 목록 방식이 놓치던 6건 + 백로그 2건이 정확히 그 8건이다)
+const UNIT_TAIL_REJECT = /[\d/.,:=~×÷+\-*^()[\]{}<>]/;
+const NUM_TOKEN = /^([-+]?\d+(?:[과와]\d+\/\d+|\/\d+|\.\d+)?)(.*)$/;
+/** `{body, unit}` 또는 null(= 수치+단위 형태가 아니므로 값 비교 대상 아님). */
+function splitUnit(s) {
+  const t = String(s == null ? '' : s).replace(/\s+/g, '');
+  const m = t.match(NUM_TOKEN);
+  if (!m) return null;                                  // 수치로 시작하지 않는다
+  if (UNIT_TAIL_REJECT.test(m[2])) return null;         // `2 × 17` · `3:5` · `5, 8, 11` · 수식
+  return { body: m[1], unit: m[2] };
+}
+/** 단위(비교용). null 이면 값 비교 대상이 아니다. `700kg` 과 `700g` 은 서로 다른 양이다. */
+const unitOf = (s) => { const p = splitUnit(s); return p ? p.unit : null; };
+/** 문자열이 **수치 토큰(+임의 단위)** 일 때만 값으로 읽는다. `2 × 17`·`3:5` 는 null. */
+function semanticValue(s) {
+  const p = splitUnit(s);
+  if (!p) return null;
+  let m = p.body.match(/^([-+]?\d+)[과와](\d+)\/(\d+)$/); if (m) return Number(m[1]) + Number(m[2]) / Number(m[3]);
+  m = p.body.match(/^([-+]?\d+)\/(\d+)$/); if (m) return Number(m[1]) / Number(m[2]);
+  m = p.body.match(/^([-+]?\d+(?:\.\d+)?)$/); if (m) return Number(m[1]);
+  return null;
+}
+const asMixed = (s) => { const p = splitUnit(s); if (!p) return null; const m = p.body.match(/^([-+]?\d+)[과와](\d+)\/(\d+)$/); return m ? { n: +m[2], d: +m[3] } : null; };
+const asFrac = (s) => { const p = splitUnit(s); if (!p) return null; const m = p.body.match(/^([-+]?\d+)\/(\d+)$/); return m ? [+m[1], +m[2]] : null; };
+const gcdOf = (a, b) => (b ? gcdOf(b, a % b) : a);
+
+// 파서 계약을 표로 못 박는다 — 일반화를 다시 좁히면(또는 오탐 쪽으로 넓히면) 여기가 먼저 붉어진다.
+// [입력, 기대 값(null = 비교 대상 아님), 기대 단위]
+const PARSER_CONTRACT = [
+  // 수치 + 단위 — 단위가 무엇이든 읽어야 한다(고정 목록이 아니다)
+  ['-1/2', -0.5, ''], ['1과 2/10', 1.2, ''], ['3.5', 3.5, ''], ['+3/2', 1.5, ''],
+  ['1 L', 1, 'L'], ['8/8 L', 1, 'L'], ['3과 1/3 L', 10 / 3, 'L'], ['1/2 장', 0.5, '장'],
+  ['36cm²', 36, 'cm²'], ['180°', 180, '°'], ['4초', 4, '초'], ['2와1/21 kg', 2 + 1 / 21, 'kg'],
+  ['2배', 2, '배'],
+  // 단위가 다르면 다른 양이다 — 값이 같아도 짝으로 묶이면 안 된다
+  ['700kg', 700, 'kg'], ['700g', 700, 'g'],
+  // 수식·목록·비·번호 — 값 비교 대상이 아니다(여기가 오탐 방지선)
+  ['2 × 17', null, null], ['3:5', null, null], ['5, 8, 11, 14', null, null],
+  ['(x-2)²+(y+1)²=9', null, null], ['0.6÷3, 0.8÷4, 0.9÷3', null, null],
+  ['①-5', null, null], ['99x=27, x=3/11', null, null], ['올바른 적용', null, null],
+];
+
+test('INV-AI6 파서 계약: 수치+임의 단위는 읽고, 수식·목록·비는 읽지 않는다', () => {
+  const bad = [];
+  for (const [input, val, unit] of PARSER_CONTRACT) {
+    const gotVal = semanticValue(input);
+    const gotUnit = unitOf(input);
+    const valOk = val === null ? gotVal === null : (gotVal !== null && Math.abs(gotVal - val) < 1e-9);
+    if (!valOk) bad.push(`${JSON.stringify(input)}: 값 ${gotVal} — 기대 ${val}`);
+    if (gotUnit !== unit) bad.push(`${JSON.stringify(input)}: 단위 ${JSON.stringify(gotUnit)} — 기대 ${JSON.stringify(unit)}`);
   }
+  assert.deepStrictEqual(
+    bad, [],
+    '단위 파서가 계약에서 벗어났습니다. 좁아지면 결함이 다시 숨고(2026-08-21 L·장 6건),\n' +
+    '넓어지면 수식·목록이 오탐으로 쏟아집니다:\n' + bad.join('\n')
+  );
+  // 단위가 다른 같은 수는 **반드시** 다른 양으로 갈려야 한다(700kg ≠ 700g).
+  assert.equal(semanticValue('700kg'), semanticValue('700g'), '전제: 두 값의 수치는 같다');
+  assert.notStrictEqual(unitOf('700kg'), unitOf('700g'), '단위가 같다고 판정되면 700kg 과 700g 이 중복으로 잡힌다');
+});
+
+// 🟠 2026-08-21 남은 백로그 **1건**. **줄어들기만** 해야 하며 목표는 비우는 것이다.
+//   · 배치 1(66건) — 보고서/증적/의미적중복_20260821/ · 채점 실증 REG-AK7
+//   · 배치 2(34건) — 보고서/증적/의미적중복_배치2_20260821/ · 채점 실증 REG-AK8
+//     33건은 **지문에 형식 요구를 덧붙여**(해설이 이미 약분·대분수 변환을 요구하고 있었다 —
+//     지문↔해설 불일치였다), 1건(q7406)은 쌍둥이 보기를 교체해서.
+//   · 배치 3(7건) — 보고서/증적/의미적중복_배치3_20260821/ · 채점 실증 REG-AK8
+//     위 단위 파서를 일반화하며 드러난 6건(보기 교체) + q12417(정답키 이동).
+const SEMANTIC_DUP_BACKLOG = new Set([
+  // 🟠 q8954(content 7130) "11/4 ÷ 3/8" 보기 ["22/3"(정답), "33/32", "11/12", "7와 1/3", "5와 1/2"]
+  //   쌍둥이 "7와 1/3" 은 정답 22/3 의 **대분수 표기**다. 둘 다 기약이라 "기약분수로" 로는
+  //   구별되지 않고, "가분수로" 를 요구하는 것은 초등 6학년 나눗셈 차시의 통상 요구와 반대라
+  //   학습 목표를 바꾼다. 보기 교체도 막혀 있다 — 이 문항은 해설의 ③④⑤ 번호가 **현재 정확히
+  //   맞아** 있어 보기를 바꾸면 참조가 어긋난다.
+  //   결정적으로 해설이 자기모순이다 — 본문은 "88/12 = 22/3 = 7과 1/3이다" 로 두 표기를
+  //   **동치로 승인**하면서 "④는 약분 오류" 로 같은 칸을 오답 취급한다.
+  //   🔑 **선행 조건: 해설 재작성** — 작성자가 어느 표기를 최종 답으로 보는지 확정돼야
+  //     지문 형식 요구든 보기 교체든 근거가 생긴다. 그 전에는 무엇을 고쳐도 추측이다.
+  8954,
+]);
+
+/** INV-AI6 판정 — 정답과 값이 같은 보기를 가진 문항(백로그 제외). */
+function findSemanticDuplicates(rows, backlog = SEMANTIC_DUP_BACKLOG, texts = null) {
+  const out = [];
+  for (const r of rows) {
+    if (!(r.n >= 0 && r.n <= r.len - 1)) continue;              // 범위 밖은 INV-AI2 담당
+    const ansText = r.opts[r.n];
+    const av = semanticValue(ansText);
+    if (av === null) continue;
+    const unit = unitOf(ansText);
+    const tw = r.opts.map((o, i) => {
+      if (i === r.n) return -1;
+      if (unitOf(o) !== unit) return -1;                        // 단위가 다르면 다른 양
+      const v = semanticValue(o);
+      if (v === null || Math.abs(v - av) >= 1e-9) return -1;
+      const a = asMixed(ansText), b = asMixed(o);
+      if (a && b && a.n < a.d && b.n >= b.d) return -1;         // 가분수형 대분수 = 형식 오답
+      return i;
+    }).filter((i) => i >= 0);
+    if (!tw.length) continue;
+
+    // 지문이 형식을 지정하면 형식이 어긋난 동치는 정당한 오답 보기다
+    const q = String((texts && texts.get(r.id)) || '');
+    const af = asFrac(ansText);
+    const ansIrreducible = af ? gcdOf(Math.abs(af[0]), af[1]) === 1 : true;
+    if (/기약분수/.test(q) && ansIrreducible && tw.every((i) => { const p = asFrac(r.opts[i]); return p ? gcdOf(Math.abs(p[0]), p[1]) !== 1 : false; })) continue;
+    if (/대분수/.test(q) && asMixed(ansText) && tw.every((i) => !asMixed(r.opts[i]))) continue;
+
+    if (backlog.has(r.id)) continue;
+    out.push(`q${r.id}(content ${r.content_id}) 정답 "${ansText}" 와 값이 같은 보기 ${JSON.stringify(tw.map((i) => r.opts[i]))}`);
+  }
+  return out;
+}
+
+/** 지문 조회 — 형식 요구 판별에 쓴다. */
+function questionTexts() {
+  return new Map(db.prepare(
+    "SELECT id, question_text FROM content_questions WHERE question_type IN ('choice','multiple_choice')"
+  ).all().map(r => [r.id, r.question_text]));
+}
+
+test('INV-AI6: 정답과 값이 같은 보기가 없다 — 백로그 외 신규 0건', () => {
+  assert.deepStrictEqual(
+    findSemanticDuplicates(loadChoiceRows(), SEMANTIC_DUP_BACKLOG, questionTexts()), [],
+    '정답과 **값이 같은** 오답 보기가 있는 문항이 새로 생겼습니다.\n' +
+    '학생이 수학적으로 옳은 칸을 골라도 오답 처리됩니다 — 그 보기를 다른 값으로 바꾸십시오.'
+  );
+});
+
+test('INV-AI6 역주입: 값이 같은 보기를 심으면 걸린다 (백로그도 실제로 남아 있는지 확인)', () => {
+  const rows = loadChoiceRows();
+  const texts = questionTexts();
+  assert.deepStrictEqual(findSemanticDuplicates(rows, SEMANTIC_DUP_BACKLOG, texts), [], '정본 데이터는 통과해야 한다');
+
+  // (a) 정상 문항에 "값은 같고 글자는 다른" 보기를 심는다 — 글자 중복(INV-AI5)이 아닌 형태로.
+  const victim = rows.find(r => {
+    if (!(r.n >= 0 && r.n < r.len)) return false;
+    if (SEMANTIC_DUP_BACKLOG.has(r.id)) return false;
+    const f = asFrac(r.opts[r.n]);
+    return !!f && f[0] !== 0 && r.opts.some((o, i) => i !== r.n);
+  });
+  assert.ok(victim, '역주입 대상(정답이 분수인 문항)을 찾지 못했다');
+  const [p, q] = asFrac(victim.opts[victim.n]);
+  const twinIdx = victim.n === 0 ? 1 : 0;
+  const injectedOpts = victim.opts.slice();
+  injectedOpts[twinIdx] = `${p * 2}/${q * 2}`;                   // 값은 같고 글자는 다른 형태
+  assert.notStrictEqual(injectedOpts[twinIdx], victim.opts[victim.n], '역주입 값이 정답과 글자까지 같아졌다');
+  const injected = rows.map(r => (r.id === victim.id ? { ...r, opts: injectedOpts } : r));
+  assert.ok(
+    findSemanticDuplicates(injected, SEMANTIC_DUP_BACKLOG, texts).some(h => h.startsWith(`q${victim.id}(`)),
+    `q${victim.id} 에 ${p * 2}/${q * 2}(= 정답 ${p}/${q})를 심었는데 INV-AI6 가 통과시켰다 — 불변식이 죽어 있다`
+  );
+
+  // (b) 백로그가 **실재하는 결함**인지 — 예외를 걷어내면 정확히 그만큼 붉어져야 한다.
+  const withoutBacklog = findSemanticDuplicates(rows, new Set(), texts);
+  assert.equal(
+    withoutBacklog.length, SEMANTIC_DUP_BACKLOG.size,
+    `백로그 ${SEMANTIC_DUP_BACKLOG.size}건 중 실제로 남아 있는 것은 ${withoutBacklog.length}건입니다.\n` +
+    '해소된 항목은 SEMANTIC_DUP_BACKLOG 에서 지우십시오(목록은 줄어들기만 해야 합니다).\n' +
+    withoutBacklog.join('\n')
+  );
 });
 
 // ── INV-AI3 ─────────────────────────────────────────────────────────────
@@ -294,7 +541,6 @@ test('INV-AI1/AI2 역주입: 위반 데이터를 심으면 불변식이 붉어�
     inj.prepare('UPDATE content_questions SET answer = ? WHERE id = ?').run('0', qs[0].id);
     inj.prepare('UPDATE content_questions SET answer = ? WHERE id = ?').run('4', qs[1].id);
 
-    assert.ok(!KNOWN_OUT_OF_RANGE.has(qs[1].id), '역주입 대상이 동결 목록과 겹쳤다 — 다른 콘텐츠로 바꿔야 한다');
 
     // ── 불변식 **본체**를 그대로 돌려 실제로 붉어지는지 확인한다 ──
     const injRows = loadChoiceRows(inj);
@@ -305,7 +551,7 @@ test('INV-AI1/AI2 역주입: 위반 데이터를 심으면 불변식이 붉어�
       `INV-AI1 이 심어 둔 위반(content ${target.content_id})을 잡지 못했다 — 불변식이 죽어 있다`
     );
 
-    const ai2 = findUnknownOutOfRange(injRows);
+    const ai2 = findOutOfRange(injRows);
     assert.ok(
       ai2.some(v => v.startsWith(`q${qs[1].id}(`)),
       `INV-AI2 가 심어 둔 범위밖 문항(q${qs[1].id})을 잡지 못했다 — 불변식이 죽어 있다`
@@ -322,7 +568,7 @@ test('INV-AI1/AI2 역주입: 위반 데이터를 심으면 불변식이 붉어�
       '원복 후에도 INV-AI1 위반이 남아 있다'
     );
     assert.deepStrictEqual(
-      findUnknownOutOfRange(restored).filter(v => v.startsWith(`q${qs[1].id}(`)), [],
+      findOutOfRange(restored).filter(v => v.startsWith(`q${qs[1].id}(`)), [],
       '원복 후에도 INV-AI2 위반이 남아 있다'
     );
   } finally {

@@ -42,10 +42,16 @@ function getLessonSync(lessonId) {
       currentIndex: 0,
       members: new Map(),
       updatedAt: 0,
-      annotations: new Map()  // contentIndex -> Array<stroke>
+      annotations: new Map(), // contentIndex -> Array<stroke>
+      // 응답 현황 모니터(기획서 §8-3): userId -> { index, kind, at }
+      //   동기화 ON/OFF 와 무관하게 학생 selectContent() 마다 갱신된다.
+      positions: new Map()
     });
   }
-  return lessonSync.get(lid);
+  const s = lessonSync.get(lid);
+  // 구 엔트리(이 필드 추가 이전에 만들어진 것) 보정 — 없으면 즉시 채운다.
+  if (!(s.positions instanceof Map)) s.positions = new Map();
+  return s;
 }
 
 // 정규화 좌표 0~1 클램프 (NaN/범위밖 방어, 기획서 §8-5)
@@ -762,6 +768,104 @@ function initSocket(io) {
     });
 
     // ═════════════════════════════════════════════════════════════════════
+    // 응답 현황 모니터 — 🔴 교사 전용 룸 `lesson:{lid}:monitor` (기획서 §8-3)
+    //
+    //   왜 별도 룸인가 (이 기능 최대 위험지점):
+    //     기존 `lesson:${lid}` 룸에는 **학생이 들어 있다**(lesson:join 은 역할 무관).
+    //     거기로 모니터 데이터를 emit 하면 **다른 학생의 실명 + 정오답**이 학생 브라우저에
+    //     그대로 도착한다. 그래서 `lesson:monitor:*` 는 이 파일 어디에서도
+    //     `lesson:${lid}` 룸으로 나가지 않는다.
+    //     (test/lesson-response-monitor.test.js INV-M-ROOM 이 실제 소켓으로 매번 확인한다)
+    //
+    //   join 자격은 REST 와 같은 판정(canControlLesson) — 클라가 보낸 role 신뢰 금지.
+    // ═════════════════════════════════════════════════════════════════════
+    function monitorRoom(lid) { return `lesson:${lid}:monitor`; }
+
+    /** 모니터 룸에 스냅샷 1회 push. 룸에 아무도 없으면 계산조차 하지 않는다(낭비 차단). */
+    function pushMonitorSnapshot(lid, classId, target) {
+      try {
+        const room = io.sockets.adapter.rooms.get(monitorRoom(lid));
+        if (!target && (!room || room.size === 0)) return;
+        const { buildResponseMonitor } = require('../db/lesson-monitor');
+        const snap = buildResponseMonitor({
+          classId, lessonId: lid, includeOutside: false, runtime: getLessonSync(lid)
+        });
+        if (!snap) return;
+        (target || io.to(monitorRoom(lid))).emit('lesson:monitor:snapshot', { success: true, ...snap });
+      } catch (e) { /* silent — 모니터는 보조 채널. 본 수업 흐름을 막지 않는다 */ }
+    }
+
+    socket.on('lesson:monitor:join', ({ classId, lessonId }) => {
+      const lid = lessonId != null ? String(lessonId) : null;
+      if (!lid) return;
+      if (!canControlLesson(userId, classId, lid)) {
+        emitLessonError(lid, '학생 응답 현황을 볼 권한이 없습니다.');
+        return;
+      }
+      socket.join(monitorRoom(lid));
+      if (!socket.monitorRooms) socket.monitorRooms = new Set();
+      socket.monitorRooms.add(lid);
+      pushMonitorSnapshot(lid, parseInt(classId), socket);   // 즉시 1회 (§8-3)
+    });
+
+    socket.on('lesson:monitor:leave', ({ lessonId }) => {
+      const lid = lessonId != null ? String(lessonId) : null;
+      if (!lid) return;
+      socket.leave(monitorRoom(lid));
+      if (socket.monitorRooms) socket.monitorRooms.delete(lid);
+    });
+
+    // ─── 학생: 현재 보고 있는 아이템 위치 (동기화 ON/OFF 무관하게 항상) ───
+    //   throttle 1초/학생. 모니터 룸에만 브로드캐스트.
+    socket.on('lesson:progress', ({ classId, lessonId, index, kind }) => {
+      const lid = lessonId != null ? String(lessonId) : null;
+      const cid = parseInt(classId);
+      if (!lid || !cid) return;
+      // 멤버십 검증 — 룸 잠입 차단(lesson:join 과 같은 원칙)
+      const member = db.prepare(
+        "SELECT 1 FROM class_members WHERE class_id = ? AND user_id = ? AND status = 'active'"
+      ).get(cid, userId);
+      if (!member) return;
+      const lesson = lessonDb.getLessonById(lid);
+      if (!lesson || String(lesson.class_id) !== String(cid)) return;
+
+      const key = `lpos_${userId}_${lid}`;
+      const now = Date.now();
+      if (throttle[key] && now - throttle[key] < 1000) return;
+      throttle[key] = now;
+
+      const idx = parseInt(index);
+      const sync = getLessonSync(lid);
+      sync.positions.set(userId, {
+        index: Number.isFinite(idx) ? idx : null,
+        kind: (kind === 'quiz' || kind === 'exam' || kind === 'done') ? kind : 'media',
+        at: now
+      });
+      // 🔴 모니터 룸에만. 학생 룸으로 내보내면 다른 학생 위치가 학생에게 샌다.
+      io.to(monitorRoom(lid)).emit('lesson:monitor:position', {
+        userId,
+        index: Number.isFinite(idx) ? idx : null,
+        kind,
+        online: true,
+        following: sync.on ? (Number.isFinite(idx) && idx === sync.currentIndex) : true
+      });
+    });
+
+    // ─── 학생: 채점 완료 → 교사 화면 즉시 갱신 ───
+    //   ⚠ 실제 저장(POST /api/contents/:id/attempts)이 끝나기 전에 이 이벤트가 도착할 수 있다.
+    //     그래서 정본 트리거는 routes/content.js 의 저장 직후 push 이고, 이 핸들러는 보조다.
+    socket.on('lesson:answered', ({ classId, lessonId }) => {
+      const lid = lessonId != null ? String(lessonId) : null;
+      const cid = parseInt(classId);
+      if (!lid || !cid) return;
+      const member = db.prepare(
+        "SELECT 1 FROM class_members WHERE class_id = ? AND user_id = ? AND status = 'active'"
+      ).get(cid, userId);
+      if (!member) return;
+      pushMonitorSnapshot(lid, cid, null);
+    });
+
+    // ═════════════════════════════════════════════════════════════════════
     // 교사 판서 실시간 공유 (판서동기화 기획서 §3) — 단방향 교사→서버→학생.
     //   모든 draw/draw-clear 는 canControlLesson + controllerId 본인 + contentIndex 일치
     //   3중 재검증. 좌표는 0~1 정규화 그대로 중계(서버 변형 없음, 단 클램프·tool 화이트리스트).
@@ -889,6 +993,10 @@ function initSocket(io) {
           const existing = sync.members.get(userId);
           if (existing && existing.socketId === socket.id) {
             sync.members.delete(userId);
+            // 응답 현황 모니터: 위치 폐기 + 교사 화면 "미접속" 전환 (§8-3 presence)
+            //   🔴 모니터 룸에만 — 학생 룸으로 나가면 남의 접속 상태가 학생에게 샌다.
+            if (sync.positions instanceof Map) sync.positions.delete(userId);
+            io.to(`lesson:${lid}:monitor`).emit('lesson:monitor:presence', { userId, online: false });
           }
 
           // 컨트롤러(=이 userId)가 이탈하면 즉시 동기화 종료 → 학생 자동 잠금해제(fail-open)
@@ -917,6 +1025,9 @@ function initSocket(io) {
           if (sync.members.size === 0) {
             lessonSync.delete(lid);
           }
+
+          // 모니터 위치 throttle 키 정리 (lpos_ 는 `${userId}_` sweep 이 못 잡는 접두)
+          delete throttle[`lpos_${userId}_${lid}`];
 
           // L-1: 이 lesson의 throttle 키 정리 (접두 lmove_/lerr_ 는 위쪽 `${userId}_` sweep이 못 잡음).
           // 같은 userId의 다른 탭이 룸에 남아있어도, 이 lid 키는 userId 단위라 안전하게 정리 가능
@@ -982,6 +1093,47 @@ initSocket.notifySubmission = function({ examId, userId, score, submittedAt }) {
     tabSwitchCount,
     submittedAt: submittedAt || new Date().toISOString()
   });
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 응답 현황 모니터 — 외부(REST 라우트)에서 쓰는 두 진입점
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * 수업 런타임 상태(동기화 + 접속자 + 위치)를 읽기용으로 돌려준다.
+ * routes/lesson.js 의 스냅샷 API 가 "지금 누가 어디 있는가"를 채우는 데 쓴다.
+ * 엔트리가 없으면(아무도 접속 안 함) null — 호출측은 전원 미접속으로 그린다.
+ * ⚠ 반환된 Map 을 밖에서 변형하지 말 것(런타임 정본이다).
+ */
+initSocket.getLessonRuntime = function (lessonId) {
+  const s = lessonSync.get(String(lessonId));
+  if (!s) return null;
+  if (!(s.positions instanceof Map)) s.positions = new Map();
+  return s;
+};
+
+/**
+ * 학생이 답안을 **저장 완료**한 직후 교사 모니터를 갱신한다.
+ * 🔴 정본 트리거가 여기인 이유: 학생 브라우저가 보내는 `lesson:answered` 는
+ *    POST /api/contents/:id/attempts 의 INSERT 보다 먼저 도착할 수 있어(레이스)
+ *    직전 스냅샷을 다시 그리게 된다. 저장이 끝난 서버가 부르는 것이 유일하게 안전하다.
+ * 🔴 emit 대상은 교사 전용 룸 하나뿐이다.
+ */
+initSocket.notifyLessonAnswered = function ({ classId, lessonId }) {
+  const io = initSocket._io;
+  if (!io || !lessonId || !classId) return;
+  const lid = String(lessonId);
+  try {
+    const room = io.sockets.adapter.rooms.get(`lesson:${lid}:monitor`);
+    if (!room || room.size === 0) return;      // 보는 교사가 없으면 계산도 하지 않는다
+    const { buildResponseMonitor } = require('../db/lesson-monitor');
+    const snap = buildResponseMonitor({
+      classId: parseInt(classId), lessonId: lid, includeOutside: false,
+      runtime: lessonSync.get(lid) || null
+    });
+    if (!snap) return;
+    io.to(`lesson:${lid}:monitor`).emit('lesson:monitor:snapshot', { success: true, ...snap });
+  } catch (e) { /* silent — 보조 채널 */ }
 };
 
 // 단위 테스트용 노출 — 수업 동기화 권한 재검증 함수 (test/lesson-sync-permission.test.js)

@@ -1,0 +1,469 @@
+/* ─────────────────────────────────────────────────────────────────────────────
+   response-monitor.css — 수업꾸러미 "응답 현황" 모니터 (레이어 팝업)
+   기획서: 보고서/기획_수업꾸러미_응답모니터링_v1.md  §5 · §6 · §7 · §9 · §10
+
+   ⚠ 두 호스트에서 body font-size 가 다르다(lesson-player 16px / lesson-view 17px).
+     그래서 팝업 내부 요소는 **전부 명시 px** 을 준다. 상속에 기대지 않는다.
+   ⚠ 가로 스크롤은 `.rm-body` 안에서만 존재한다. 오버레이는 position:fixed 라
+     document 를 밀 수 없다.
+   ⚠ z-index: 오버레이 10000(공통 GNB 9999 위) / 시트 10001 / 툴팁 10002.
+   ───────────────────────────────────────────────────────────────────────────── */
+
+/* ── 오버레이 (analytics.html .roster-modal-overlay 계승) ───────────────────── */
+#respMonitorOverlay {
+  position: fixed; inset: 0;
+  background: rgba(0, 0, 0, .5);
+  -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px);
+  z-index: 10000;                    /* 🔴 GNB(9999) 위. 절대 낮추지 말 것 */
+  display: none; align-items: center; justify-content: center;
+  padding: 20px;
+  opacity: 0; transition: opacity .18s;
+  font-family: 'Pretendard', 'Noto Sans KR', system-ui, -apple-system, sans-serif;
+}
+#respMonitorOverlay.active { display: flex; opacity: 1; }
+
+/* ── 패널 (CLAUDE.md 플레이어 모달 표준 90vw × 90vh) ─────────────────────────── */
+#respMonitorPanel {
+  position: relative;                /* 드릴다운 시트의 기준 컨테이너 */
+  width: 90vw; height: 90vh; max-width: 1400px;
+  background: #fff; border-radius: 16px;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, .32);
+  display: flex; flex-direction: column; overflow: hidden;
+  color: #1A1A2E;
+  font-size: 16px; line-height: 1.5;
+  text-align: left;
+}
+#respMonitorPanel * { box-sizing: border-box; }
+
+/* ── 헤더 (64px) ─────────────────────────────────────────────────────────────── */
+.rm-header {
+  height: 64px; flex: 0 0 64px;
+  padding: 0 20px 0 24px;
+  border-bottom: 1px solid #e5e7eb;
+  display: flex; align-items: center; gap: 12px;
+  background: #fff;
+}
+.rm-head-left {
+  display: flex; align-items: center; gap: 12px;
+  flex: 1 1 auto; min-width: 0; overflow: hidden;
+}
+.rm-title    { font-size: 20px; font-weight: 700; color: #1A1A2E; white-space: nowrap; flex: 0 0 auto; }
+.rm-subtitle { font-size: 15px; color: #6B7280; max-width: 320px;
+               overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 0 1 auto; }
+.rm-chip     { font-size: 14px; font-weight: 600; padding: 5px 12px; border-radius: 9999px;
+               white-space: nowrap; flex: 0 0 auto; display: inline-flex; align-items: center; gap: 6px; }
+.rm-chip[hidden] { display: none !important; }
+.rm-chip-gray   { background: #f3f4f6; color: #6B7280; }
+.rm-chip-green  { background: #dcfce7; color: #15803d; }
+.rm-chip-amber  { background: #fef3c7; color: #b45309; }
+.rm-chip-live   { background: #fef2f2; color: #dc2626; }
+.rm-chip-poll   { background: #fff7ed; color: #c2410c; }
+/* supervisor.html .live-badge 펄스 점 계승 */
+.rm-chip-live .dot { width: 8px; height: 8px; border-radius: 50%; background: #dc2626;
+                     display: inline-block; animation: rm-live-pulse 1.4s infinite; }
+@keyframes rm-live-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .25; } }
+
+/* 🔴 닫기(×) 안전영역 — 우측 그룹에는 버튼만 둔다(배지·칩 금지) */
+.rm-actions  { margin-left: auto; display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
+.rm-icon-btn { width: 40px; height: 40px; border-radius: 50%; border: none; background: #f3f4f6;
+               color: #374151; font-size: 16px; cursor: pointer; padding: 0;
+               display: flex; align-items: center; justify-content: center;
+               transition: background .15s; font-family: inherit; flex: 0 0 auto; }
+.rm-icon-btn:hover         { background: #e5e7eb; }
+.rm-icon-btn:active        { background: #d1d5db; }
+.rm-icon-btn:focus-visible { outline: 3px solid rgba(37, 99, 235, .5); outline-offset: 2px; }
+.rm-icon-btn:disabled      { opacity: .45; cursor: not-allowed; }
+.rm-close    { margin-left: 16px; }   /* 좌 16px + 자기 40px + 우측 padding 20px */
+
+/* ── 툴바 (56px) ─────────────────────────────────────────────────────────────── */
+.rm-toolbar {
+  height: 56px; flex: 0 0 56px; padding: 0 24px;
+  border-bottom: 1px solid #f3f4f6;
+  display: flex; align-items: center; gap: 10px;
+  overflow-x: auto; overflow-y: hidden;   /* 칩이 많아도 자기 안에서만 스크롤 */
+  background: #fff;
+}
+.rm-filter-chip {
+  flex: 0 0 auto; font-size: 14px; font-weight: 600; padding: 7px 14px;
+  border-radius: 9999px; border: 1.5px solid #e5e7eb; background: #fff; color: #6B7280;
+  cursor: pointer; white-space: nowrap; transition: all .15s; font-family: inherit;
+}
+.rm-filter-chip:hover          { border-color: #c7d2fe; background: #f8faff; }
+.rm-filter-chip[aria-pressed="true"] { background: #2563eb; border-color: #2563eb; color: #fff; }
+.rm-filter-chip:focus-visible  { outline: 3px solid rgba(37, 99, 235, .5); outline-offset: 2px; }
+.rm-filter-chip:active         { transform: translateY(1px); }
+.rm-filter-chip:disabled       { opacity: .45; cursor: not-allowed; }
+.rm-filter-chip .cnt           { font-size: 13px; opacity: .75; margin-left: 5px; }
+
+/* ⚠ common-nav.css 가 `input,select,textarea { font-size:16px !important }`(iOS 확대 방지)를 건다.
+   lesson-view 에는 그 CSS 가 있고 lesson-player 에는 없어 14px 로 두면 두 호스트가 달라진다.
+   → CLAUDE.md 공통 스케일(입력창 16px)에 맞춰 양쪽 모두 16px 로 고정한다. */
+.rm-select { font-size: 16px; padding: 6px 10px; border: 1.5px solid #e5e7eb; border-radius: 8px;
+             background: #fff; color: #374151; min-width: 132px; font-family: inherit; flex: 0 0 auto; }
+.rm-select:focus-visible { outline: 3px solid rgba(37, 99, 235, .5); outline-offset: 2px; }
+.rm-select-sm { min-width: 108px; }
+
+.rm-check { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; color: #374151;
+            white-space: nowrap; cursor: pointer; flex: 0 0 auto; }
+.rm-check input { width: 16px; height: 16px; accent-color: #2563eb; cursor: pointer; margin: 0; }
+
+.rm-toggle-btn { font-size: 14px; font-weight: 600; padding: 7px 12px; border-radius: 8px;
+                 border: 1.5px solid #e5e7eb; background: #fff; color: #374151;
+                 cursor: pointer; white-space: nowrap; font-family: inherit; flex: 0 0 auto; }
+.rm-toggle-btn:hover { background: #f3f4f6; }
+.rm-toggle-btn:focus-visible { outline: 3px solid rgba(37, 99, 235, .5); outline-offset: 2px; }
+
+.rm-legend { margin-left: auto; display: flex; align-items: center; gap: 14px;
+             font-size: 14px; color: #6B7280; flex: 0 0 auto; }
+.rm-legend .lg { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.rm-legend .sw { width: 20px; height: 20px; border-radius: 6px; font-size: 13px; font-weight: 700;
+                 display: inline-flex; align-items: center; justify-content: center; }
+
+/* ── 안내 띠 (빈 상태·자동 필터 안내) ────────────────────────────────────────── */
+.rm-notices { flex: 0 0 auto; }
+.rm-notice  { font-size: 16px; line-height: 1.6; color: #1e3a8a;
+              background: #eff6ff; border-left: 3px solid #2563eb;
+              padding: 14px 20px; }
+.rm-notice + .rm-notice { border-top: 1px solid #dbeafe; }
+.rm-notice.warn { background: #fff7ed; border-left-color: #f59e0b; color: #92400e; }
+
+/* ── 본문 ────────────────────────────────────────────────────────────────────── */
+.rm-body { flex: 1; min-height: 0; overflow: auto; background: #fff; }
+.rm-body::-webkit-scrollbar { height: 10px; width: 10px; }
+.rm-body::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 5px; }
+.rm-body::-webkit-scrollbar-thumb:hover { background: #9ca3af; }
+
+.rm-table-view { display: block; }
+.rm-mobile     { display: none; }
+
+/* ⚠ `min-width:100%` 를 쓰지 않는다 — 표를 컨테이너 폭까지 늘리면 그 여유 폭이
+   auto 레이아웃에서 내용이 가장 넓은 학생 열로 몰려 435px 까지 부풀었다(실측).
+   `<td>` 의 max-width 는 auto 테이블에서 무시되므로 CSS 로는 막을 수 없다.
+   표는 내용 폭만 차지하고, 문항이 많으면 `.rm-body` 안에서 가로로 스크롤된다. */
+.rm-table { border-collapse: separate; border-spacing: 0; width: max-content; min-width: 100%;
+            font-size: 16px; }
+
+/* 학생 열 (sticky left) — 이름 + 위치 2줄을 한 셀에 넣어 sticky 열을 1개로 유지 */
+.rm-th-name, .rm-td-name {
+  position: sticky; left: 0; z-index: 2; background: #fff;
+  /* ⚠ max-width 가 핵심이다 — auto 테이블 레이아웃에서 `min-width:100%` 로 늘어난 여유 폭을
+     내용이 가장 넓은 이 열이 통째로 흡수해, 문항 4개짜리 수업에서 435px 까지 부풀었다(실측).
+     이름 44px + 위치 문구 36px 이면 내용은 최대 80px 이므로 160px 이면 여유 있게 충분하고,
+     남는 폭은 문항 열로 흘러가 셀·번호가 커진다. */
+  width: 160px; min-width: 160px; max-width: 160px;
+  padding: 6px 14px; text-align: left;
+  border-right: 1px solid #e5e7eb; border-bottom: 1px solid #f3f4f6;
+}
+.rm-td-name .nm  { display: block; font-size: 16px; font-weight: 600; color: #1A1A2E; line-height: 1.35;
+                   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* ⚠ 색은 .rm-pos-* 가 정본이다. 여기서 color 를 선언하면 (0,2,0) 이 (0,1,0) 을 눌러
+   위치 색 코딩(파랑/주황/초록/회색)이 통째로 죽는다 — 실측으로 잡은 결함. */
+.rm-td-name .pos { font-size: 13px; line-height: 1.4; margin-top: 2px;
+                   display: flex; align-items: center; gap: 5px;
+                   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rm-td-name .pos .dot, .rm-mcard .pos .dot {
+                   width: 7px; height: 7px; border-radius: 50%; background: currentColor;
+                   flex: 0 0 auto; }
+.rm-pos-here   { color: #1d4ed8; }
+.rm-pos-media  { color: #6B7280; }
+.rm-pos-done   { color: #15803d; }
+.rm-pos-off    { color: #9ca3af; }
+.rm-pos-behind { color: #c2410c; font-weight: 600; }
+
+.rm-name-btn { border: none; background: none; padding: 0; margin: 0; font-family: inherit;
+               cursor: pointer; text-align: left; width: 100%; display: block; color: inherit; }
+.rm-name-btn:focus-visible { outline: 3px solid rgba(37, 99, 235, .5); outline-offset: 2px; border-radius: 6px; }
+
+/* 문항 열 */
+/* 문항 열은 고정 폭이다. 남는 폭은 맨 오른쪽 점수 열이 흡수한다(아래 .rm-td-score 주석).
+   문항이 많아 폭이 모자라면 줄어들지 않고 `.rm-body` 안에서 가로로 스크롤된다. */
+.rm-th-q, .rm-td-q { width: 68px; min-width: 68px; text-align: center;
+                     border-bottom: 1px solid #f3f4f6; padding: 0; }
+.rm-band { height: 36px; font-size: 13px; font-weight: 600; color: #6B7280;
+           background: #f9fafb; border-bottom: 1px solid #e5e7eb;
+           padding: 0 8px; text-align: center;
+           overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 문항 번호는 교사가 몇 초 안에 훑는 스캔 앵커다 — 본문(16px)보다 커야 열이 구분된다. */
+.rm-th-q { height: 48px; font-size: 18px; font-weight: 700; color: #374151; background: #f9fafb;
+           cursor: pointer; }
+.rm-th-q:hover  { background: #f3f4f6; }
+.rm-th-q:active { background: #e5e7eb; }
+.rm-th-q:focus-visible { outline: 3px solid rgba(37, 99, 235, .5); outline-offset: -3px; }
+.rm-th-q .qno-viewers { display: block; font-size: 13px; font-weight: 700; line-height: 1.2;
+                        color: #1d4ed8; background: #eff6ff; border-radius: 9999px;
+                        padding: 0 6px; margin: 2px auto 0; width: fit-content; }
+.rm-th-q.cursor { border-top: 3px solid #2563eb; color: #1d4ed8; }
+.rm-td-q { height: 48px; }
+
+/* 헤더 sticky 계층 — 좌상/우상 코너가 항상 최상위 */
+thead .rm-band-row th.rm-band { position: sticky; top: 0;    z-index: 5; }
+thead .rm-qno-row  th.rm-th-q { position: sticky; top: 36px; z-index: 5; }
+/* 높이 84px = 밴드행 36px + 문항번호행 48px. 셋 중 하나를 바꾸면 나머지도 맞출 것. */
+thead .rm-th-name, thead .rm-th-score { position: sticky; top: 0; z-index: 7; height: 84px;
+                                        font-size: 15px; font-weight: 700; color: #374151;
+                                        background: #f9fafb; vertical-align: middle; }
+
+/* 점수 열 (sticky right) */
+.rm-th-score, .rm-td-score {
+  position: sticky; right: 0; z-index: 2; background: #fff;
+  /* ⚠ `width:100%` 는 "점수 열을 넓게" 가 아니라 **남는 폭을 여기로 흘려보내기** 위한 것이다.
+     auto 테이블 레이아웃은 여유 폭을 width:100% 인 열에 몰아주는데, 이것이 없으면
+     여유가 내용이 가장 넓은 학생 열로 가서 435px 까지 부푼다(실측). 맨 오른쪽이라
+     넓어져도 읽기 흐름을 해치지 않는다. 문항이 많으면 여유가 없어 min-width 로 수렴한다. */
+  width: 100%; min-width: 104px; text-align: center; padding: 6px 8px;
+  border-left: 1px solid #e5e7eb; border-bottom: 1px solid #f3f4f6;
+}
+.rm-td-score .sc  { font-size: 17px; font-weight: 700; color: #1A1A2E; line-height: 1.2; }
+.rm-td-score .scd { font-size: 13px; color: #6B7280; margin-top: 2px; }
+.rm-td-score.none .sc { color: #9ca3af; }
+
+/* 하단 문항 정답률 행 (sticky bottom) */
+.rm-foot td { position: sticky; bottom: 0; z-index: 3; height: 56px; background: #f9fafb;
+              border-top: 1px solid #e5e7eb; border-bottom: none; text-align: center; }
+.rm-foot .rm-td-name, .rm-foot .rm-td-score { z-index: 4; background: #f9fafb; }
+.rm-foot .rm-td-name { font-size: 15px; font-weight: 700; color: #374151; }
+.rm-foot .acc  { font-size: 15px; font-weight: 700; color: #374151; line-height: 1.2; }
+.rm-foot .base { font-size: 13px; color: #6B7280; margin-top: 1px; }
+
+/* 행 hover — 🔴 sticky 이름·점수 열도 함께 덮어써야 행이 끊겨 보이지 않는다 */
+.rm-table tbody tr:hover td,
+.rm-table tbody tr:hover .rm-td-name,
+.rm-table tbody tr:hover .rm-td-score { background: #f9fafb; }
+
+/* ── 셀 상태 (기호 + 색. 색맹 대응 — 색은 보조) ──────────────────────────────── */
+.rm-cell { width: 38px; height: 38px; border-radius: 10px; font-size: 18px; font-weight: 700;
+           display: inline-flex; align-items: center; justify-content: center;
+           cursor: pointer; transition: outline-color .12s, box-shadow .12s; position: relative;
+           border: none; padding: 0; font-family: inherit; }
+.rm-cell.correct    { background: #dcfce7; color: #15803d; }
+.rm-cell.wrong      { background: #fee2e2; color: #b91c1c; }
+.rm-cell.pending    { background: #fef3c7; color: #b45309; }
+.rm-cell.unanswered { background: #f3f4f6; color: #9ca3af; }
+.rm-cell.none       { background: #fff; border: 1.5px dashed #e5e7eb; cursor: default; }
+.rm-cell.norec      { background: #fafafa; color: #d1d5db; border: 1px solid #f3f4f6; cursor: default; }
+.rm-cell:hover:not(.none):not(.norec) { outline: 2px solid #9ca3af; outline-offset: -2px; }
+.rm-cell:focus-visible { outline: 3px solid rgba(37, 99, 235, .5); outline-offset: 2px; }
+.rm-cell:active:not(.none):not(.norec) { outline-color: #2563eb; }
+
+/* 🔴 D4 — "지금 이 문항을 보는 중"은 색이 아니라 링. 상태 색을 덮지 않는다 */
+.rm-cell.here { box-shadow: 0 0 0 2px #2563eb; animation: rm-pulse 1.6s ease-in-out infinite; }
+@keyframes rm-pulse {
+  0%   { box-shadow: 0 0 0 2px #2563eb, 0 0 0 0   rgba(37, 99, 235, .45); }
+  70%  { box-shadow: 0 0 0 2px #2563eb, 0 0 0 6px rgba(37, 99, 235, 0); }
+  100% { box-shadow: 0 0 0 2px #2563eb, 0 0 0 0   rgba(37, 99, 235, 0); }
+}
+@media (prefers-reduced-motion: reduce) { .rm-cell.here { animation: none; } }
+
+/* 저조 문항 강조 — 헤더·밴드·정답률 셀만. 본문 셀은 칠하지 않는다 (D7) */
+.rm-th-q.low, .rm-band.low, .rm-foot td.low { background: #fef2f2; }
+.rm-th-q.low { color: #b91c1c; }
+.rm-th-q.low .warn { display: block; font-size: 13px; line-height: 1; color: #dc2626; margin-bottom: 1px; }
+.rm-foot td.low .acc { color: #b91c1c; }
+
+/* 스켈레톤 (최초 로딩) */
+.rm-skel { display: inline-block; width: 32px; height: 32px; border-radius: 9px;
+           background: linear-gradient(90deg, #f3f4f6 25%, #e9ebef 37%, #f3f4f6 63%);
+           background-size: 400% 100%; animation: rm-shimmer 1.2s ease-in-out infinite; }
+.rm-skel-line { display: block; height: 14px; border-radius: 6px; background: #f3f4f6;
+                background: linear-gradient(90deg, #f3f4f6 25%, #e9ebef 37%, #f3f4f6 63%);
+                background-size: 400% 100%; animation: rm-shimmer 1.2s ease-in-out infinite; }
+@keyframes rm-shimmer { 0% { background-position: 100% 50%; } 100% { background-position: 0 50%; } }
+@media (prefers-reduced-motion: reduce) { .rm-skel, .rm-skel-line { animation: none; } }
+
+/* ── 빈 상태 · 오류 상태 (§7) ───────────────────────────────────────────────── */
+.rm-empty { text-align: center; padding: 56px 24px; }
+.rm-empty .ico   { font-size: 40px; color: #d1d5db; margin-bottom: 14px; display: block; }
+.rm-empty .ttl   { font-size: 18px; font-weight: 700; color: #374151; margin-bottom: 8px; }
+.rm-empty .desc  { font-size: 16px; color: #6B7280; line-height: 1.7; max-width: 460px;
+                   margin: 0 auto 18px; }
+.rm-empty .ico.ok   { color: #16a34a; }
+.rm-empty .ico.warn { color: #f59e0b; }
+
+.rm-btn { font-size: 16px; font-weight: 600; padding: 12px 22px; border-radius: 8px;
+          border: none; cursor: pointer; font-family: inherit; white-space: nowrap;
+          display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
+.rm-btn-primary { background: #2563eb; color: #fff; }
+.rm-btn-primary:hover  { background: #1d4ed8; }
+.rm-btn-primary:active { background: #1e40af; }
+.rm-btn-outline { background: #fff; color: #374151; border: 1.5px solid #d1d5db; }
+.rm-btn-outline:hover { background: #f3f4f6; }
+.rm-btn:focus-visible { outline: 3px solid rgba(37, 99, 235, .5); outline-offset: 2px; }
+.rm-btn:disabled { background: #e5e7eb; color: #9ca3af; cursor: not-allowed; border-color: #e5e7eb; }
+
+/* ── 푸터 (60px) ─────────────────────────────────────────────────────────────── */
+.rm-footer { flex: 0 0 auto; min-height: 60px; padding: 10px 24px;
+             border-top: 1px solid #e5e7eb; background: #fff;
+             display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.rm-foot-summary { font-size: 15px; color: #374151; font-weight: 600; }
+.rm-foot-low     { font-size: 15px; color: #b91c1c; }
+.rm-foot-low .qlink { border: none; background: none; padding: 0 2px; font: inherit;
+                      color: #b91c1c; text-decoration: underline; cursor: pointer; }
+.rm-foot-low .qlink:focus-visible { outline: 3px solid rgba(37, 99, 235, .5); outline-offset: 2px; }
+.rm-foot-time    { margin-left: auto; font-size: 13px; color: #6B7280; white-space: nowrap; }
+
+/* ── 드릴다운 시트 (패널 내부 우측) ─────────────────────────────────────────── */
+.rm-sheet {
+  position: absolute; top: 0; right: 0; height: 100%;
+  width: min(440px, 92vw);
+  background: #fff; border-left: 1px solid #e5e7eb;
+  box-shadow: -8px 0 32px rgba(0, 0, 0, .18);
+  z-index: 10001;
+  display: flex; flex-direction: column;
+  transform: translateX(100%); transition: transform .22s ease;
+  visibility: hidden;
+}
+.rm-sheet.open { transform: translateX(0); visibility: visible; }
+@media (prefers-reduced-motion: reduce) { .rm-sheet { transition: none; } }
+.rm-sheet-header { height: 60px; flex: 0 0 60px; padding: 0 18px; display: flex; align-items: center;
+                   gap: 10px; border-bottom: 1px solid #e5e7eb; }
+.rm-sheet-header .back { width: 36px; height: 36px; border-radius: 50%; background: #f3f4f6; border: none;
+                         font-size: 15px; color: #374151; cursor: pointer; flex: 0 0 auto;
+                         display: flex; align-items: center; justify-content: center; font-family: inherit; }
+.rm-sheet-header .back:hover { background: #e5e7eb; }
+.rm-sheet-header .back:focus-visible { outline: 3px solid rgba(37, 99, 235, .5); outline-offset: 2px; }
+.rm-sheet-title  { font-size: 19px; font-weight: 700; color: #1A1A2E;
+                   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rm-sheet-badge  { margin-left: auto; font-size: 14px; font-weight: 700; padding: 5px 12px;
+                   border-radius: 9999px; background: #f3f4f6; color: #6B7280; white-space: nowrap; }
+.rm-sheet-badge.low { background: #fef2f2; color: #b91c1c; }
+.rm-sheet-body   { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 18px 20px; }
+.rm-sheet-footer { flex: 0 0 auto; padding: 14px 20px; border-top: 1px solid #e5e7eb; }
+.rm-sheet-footer .rm-btn { width: 100%; }
+.rm-sheet-note   { font-size: 14px; color: #6B7280; line-height: 1.6; margin-top: 8px; }
+
+/* 학생 시트 */
+.rm-sheet-score  { font-size: 28px; font-weight: 700; color: #1A1A2E; line-height: 1.2; }
+.rm-sheet-score .sub { font-size: 15px; font-weight: 600; color: #6B7280; margin-left: 8px; }
+.rm-sheet-meta   { font-size: 15px; color: #374151; margin-top: 6px; }
+.rm-sheet-meta.dim { font-size: 14px; color: #6B7280; }
+.rm-sheet-hr     { height: 1px; background: #f3f4f6; margin: 16px 0; }
+.rm-qrow { padding: 12px 14px; border-radius: 10px; background: #f9fafb; margin-bottom: 8px;
+           display: flex; gap: 10px; align-items: flex-start; cursor: pointer; width: 100%;
+           border: none; font-family: inherit; text-align: left; }
+.rm-qrow:hover { background: #f3f4f6; }
+.rm-qrow:focus-visible { outline: 3px solid rgba(37, 99, 235, .5); outline-offset: 2px; }
+.rm-qrow .no  { font-size: 15px; font-weight: 700; color: #6B7280; flex: 0 0 22px; }
+.rm-qrow .mid { flex: 1 1 auto; min-width: 0; }
+.rm-qrow .qt  { font-size: 15px; line-height: 1.5; color: #1A1A2E;
+                display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+                overflow: hidden; }
+.rm-qrow .ans { display: block; font-size: 14px; color: #6B7280; margin-top: 4px; line-height: 1.5; }
+.rm-qrow .sec { display: block; font-size: 13px; color: #9ca3af; margin-top: 2px; }
+.rm-qrow .rm-cell { flex: 0 0 auto; }
+
+/* 문항 시트 */
+.rm-qtext { font-size: 17px; font-weight: 600; line-height: 1.6; color: #1A1A2E; }
+.rm-qmeta { font-size: 14px; color: #6B7280; margin-top: 6px; }
+.rm-sec-title { font-size: 16px; font-weight: 700; color: #1A1A2E; margin-bottom: 10px; }
+.rm-dist-row { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-radius: 8px;
+               margin-bottom: 4px; }
+.rm-dist-row.is-answer { background: #f0fdf4; }
+.rm-dist-row .lb  { font-size: 15px; color: #374151; flex: 0 0 96px;
+                    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rm-dist-row .bar { flex: 1 1 auto; height: 22px; border-radius: 6px; background: #e5e7eb; overflow: hidden; }
+.rm-dist-row .bar > span { display: block; height: 100%; border-radius: 6px; background: #ef4444; }
+.rm-dist-row.is-answer .bar > span { background: #16a34a; }
+.rm-dist-row.is-blank  .bar > span { background: #9ca3af; }
+.rm-dist-row .ct  { font-size: 14px; color: #374151; flex: 0 0 52px; text-align: right; }
+.rm-dist-row .tag { font-size: 13px; font-weight: 600; padding: 3px 8px; border-radius: 9999px;
+                    background: #fef3c7; color: #b45309; white-space: nowrap; flex: 0 0 auto; }
+.rm-name-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.rm-name-chips .grp { font-size: 15px; font-weight: 600; color: #374151; width: 100%; margin-bottom: 2px; }
+.rm-chip-name { font-size: 15px; padding: 6px 12px; border-radius: 9999px; border: none;
+                cursor: pointer; font-family: inherit; background: #f3f4f6; color: #374151; }
+.rm-chip-name.correct { background: #dcfce7; color: #15803d; }
+.rm-chip-name.wrong   { background: #fee2e2; color: #b91c1c; }
+.rm-chip-name:focus-visible { outline: 3px solid rgba(37, 99, 235, .5); outline-offset: 2px; }
+.rm-txt-ans { font-size: 15px; color: #374151; padding: 10px 12px; background: #f9fafb;
+              border-radius: 8px; margin-bottom: 6px; line-height: 1.5; }
+.rm-txt-ans .who { font-weight: 600; color: #1A1A2E; margin-right: 8px; }
+
+/* ── 툴팁 ────────────────────────────────────────────────────────────────────── */
+.rm-tooltip { position: absolute; z-index: 10002; pointer-events: none;
+              font-size: 14px; padding: 8px 12px; background: rgba(17, 24, 39, .92); color: #fff;
+              border-radius: 8px; max-width: 280px; line-height: 1.5;
+              opacity: 0; transition: opacity .12s; display: none; }
+.rm-tooltip.show { display: block; opacity: 1; }
+
+/* ── 모바일 2탭 (§9-3) ───────────────────────────────────────────────────────── */
+.rm-tabs { display: flex; border-bottom: 1px solid #e5e7eb; position: sticky; top: 0;
+           background: #fff; z-index: 2; }
+.rm-tab  { flex: 1 1 0; height: 48px; font-size: 16px; font-weight: 700; color: #6B7280;
+           background: none; border: none; cursor: pointer; font-family: inherit;
+           border-bottom: 3px solid transparent; }
+.rm-tab[aria-selected="true"] { color: #1d4ed8; border-bottom-color: #2563eb; }
+.rm-tab:focus-visible { outline: 3px solid rgba(37, 99, 235, .5); outline-offset: -3px; }
+
+.rm-mcard { padding: 14px 16px; border-bottom: 1px solid #f3f4f6; width: 100%;
+            background: none; border-left: none; border-right: none; border-top: none;
+            font-family: inherit; text-align: left; cursor: pointer; display: block; }
+.rm-mcard:focus-visible { outline: 3px solid rgba(37, 99, 235, .5); outline-offset: -3px; }
+.rm-mcard .top { display: flex; align-items: baseline; gap: 10px; }
+.rm-mcard .nm  { font-size: 17px; font-weight: 700; color: #1A1A2E; flex: 1 1 auto;
+                 overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rm-mcard .sc  { font-size: 17px; font-weight: 700; color: #1A1A2E; flex: 0 0 auto; }
+.rm-mcard .sc.none { color: #9ca3af; }
+/* color 미선언 — .rm-pos-* 가 정본 (위 주석 참조) */
+.rm-mcard .pos { font-size: 14px; margin-top: 3px;
+                 display: flex; align-items: center; gap: 5px; }
+.rm-mcard .badges { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.rm-mcard .badges .rm-cell { width: 30px; height: 30px; }
+
+.rm-mq { padding: 14px 16px; border-bottom: 1px solid #f3f4f6; width: 100%;
+         background: none; border-left: none; border-right: none; border-top: none;
+         font-family: inherit; text-align: left; cursor: pointer; display: block; }
+.rm-mq:focus-visible { outline: 3px solid rgba(37, 99, 235, .5); outline-offset: -3px; }
+.rm-mq .top { display: flex; align-items: baseline; gap: 8px; }
+.rm-mq .no  { font-size: 16px; font-weight: 700; color: #374151; flex: 0 0 auto; }
+.rm-mq .no.low { color: #b91c1c; }
+.rm-mq .qt  { font-size: 15px; color: #6B7280; flex: 1 1 auto;
+              overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rm-mq .row { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
+.rm-mq .bar { flex: 1 1 auto; height: 10px; border-radius: 5px; background: #e5e7eb; overflow: hidden; }
+.rm-mq .bar > span { display: block; height: 100%; border-radius: 5px; background: #2563eb; }
+.rm-mq .bar > span.low { background: #ef4444; }
+.rm-mq .pct { font-size: 15px; font-weight: 700; color: #374151; flex: 0 0 auto; }
+.rm-mq .base { font-size: 14px; color: #6B7280; flex: 0 0 auto; }
+
+/* ── 압축 모드 (표시 문항 > 40) ─────────────────────────────────────────────── */
+.rm-table.compact .rm-th-q, .rm-table.compact .rm-td-q { width: 36px; min-width: 36px; }
+.rm-table.compact .rm-cell { width: 26px; height: 26px; font-size: 14px; border-radius: 7px; }
+.rm-table.compact .rm-th-q { font-size: 14px; }
+/* 넓은 밴드는 좌측 정렬 — 가운데 정렬이면 글자가 스크롤 밖으로 밀려 빈 띠로 보인다 */
+.rm-table.compact .rm-band { text-align: left; padding-left: 10px; }
+.rm-table.compact .rm-th-q .tick { color: #9ca3af; }
+
+/* ── 반응형 768 ~ 1199px ─────────────────────────────────────────────────────── */
+@media (max-width: 1199px) {
+  #respMonitorPanel { width: 96vw; height: 92vh; }
+  .rm-header   { height: auto; min-height: 60px; padding: 10px 16px 10px 18px; flex-wrap: wrap; row-gap: 6px; }
+  .rm-subtitle { max-width: 200px; }
+  .rm-toolbar  { height: auto; flex: 0 0 auto; padding: 10px 16px; flex-wrap: wrap; row-gap: 8px; overflow-x: hidden; }
+  .rm-legend   { margin-left: 0; width: 100%; flex-wrap: wrap; row-gap: 6px; }
+  .rm-th-name, .rm-td-name  { width: 160px; min-width: 160px; padding: 6px 10px; }
+  .rm-td-name .nm           { font-size: 15px; }
+  .rm-th-q, .rm-td-q        { width: 44px; min-width: 44px; }
+  .rm-th-score, .rm-td-score{ width: 92px; min-width: 92px; }
+  .rm-sheet    { width: min(400px, 96vw); }
+}
+
+/* ── 반응형 <768px — 🔴 표를 버린다 (D10). 가로 스크롤 0 ─────────────────────── */
+@media (max-width: 767px) {
+  #respMonitorOverlay { padding: 0; }
+  #respMonitorPanel   { width: 100vw; height: 100dvh; max-width: none; border-radius: 0; }
+  .rm-table-view { display: none; }
+  .rm-mobile     { display: block; }
+  .rm-subtitle   { display: none; }
+  .rm-toolbar    { display: none; }          /* 모바일 툴바는 2탭이 대신한다 */
+  /* 툴바가 없으므로 "위 칩으로 바꿔 보세요" 안내는 모바일에서 무의미 → 숨긴다 */
+  .rm-notice.auto { display: none; }
+  .rm-body       { overflow-x: hidden; }
+  .rm-footer     { padding: 10px 16px; }
+  .rm-foot-time  { margin-left: 0; width: 100%; }
+  /* 모바일 시트 = 하단 시트 */
+  .rm-sheet { top: auto; bottom: 0; right: 0; left: 0; width: 100%; height: 82dvh;
+              border-left: none; border-top: 1px solid #e5e7eb;
+              border-radius: 16px 16px 0 0; box-shadow: 0 -8px 32px rgba(0, 0, 0, .18);
+              transform: translateY(100%); }
+  .rm-sheet.open { transform: translateY(0); }
+}

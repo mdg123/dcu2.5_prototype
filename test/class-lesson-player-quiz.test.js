@@ -86,24 +86,33 @@ test('INV-LP2: 학생 풀이 경로가 content-player.html 을 규약대로 재�
   );
 
   // 공용 플레이어 iframe — 경로와 쿼리 파라미터 규약(today.html / learning-map.html 과 동일)
+  //   2026-08-21: 뒤에 lessonId·classId 가 붙는다(응답 현황 모니터 BE-1 — 수업 맥락 기록).
+  //   앞부분 `id=${content.id}&embed=1&solve=1` 계약은 그대로다.
   assert.match(
-    LP, /src="\/content\/content-player\.html\?id=\$\{content\.id\}&embed=1&solve=1"/,
+    LP, /src="\/content\/content-player\.html\?id=\$\{content\.id\}&embed=1&solve=1/,
     'content-player.html 을 embed=1&solve=1 규약으로 임베드해야 합니다 '
     + '(today.html:1619 / learning-map.html 과 동일한 계약).'
   );
 
   // 새 파라미터 발명 금지 — 허용 어휘: id / embed / solve / auto / silent / popup
+  //   + lessonId / classId (BE-1: content-player 가 /attempts POST body 로 실어 보내
+  //     "수업 중 풀이"와 "혼자 푼 풀이"를 서버가 구분한다. content-player.html 이 실제로 읽는다)
+  const ALLOWED_CP_PARAMS = ['id', 'embed', 'solve', 'auto', 'silent', 'popup', 'lessonId', 'classId'];
   const qs = LP.match(/content-player\.html\?([^"'`\s]+)/g) || [];
   assert.ok(qs.length > 0, 'content-player 임베드 URL 을 찾지 못했습니다.');
   for (const u of qs) {
     for (const kv of u.split('?')[1].split('&')) {
       const key = kv.split('=')[0];
       assert.ok(
-        ['id', 'embed', 'solve', 'auto', 'silent', 'popup'].includes(key),
+        ALLOWED_CP_PARAMS.includes(key),
         `content-player 에 없는 쿼리 파라미터를 발명했습니다: ${key} (${u})`
       );
     }
   }
+  // 발명이 아님을 증명 — content-player.html 이 이 두 파라미터를 실제로 읽어 쓴다
+  const CP = fs.readFileSync(path.join(ROOT, 'public/content/content-player.html'), 'utf8');
+  assert.match(CP, /params\.get\('lessonId'\)/, "content-player 가 lessonId 를 읽지 않습니다(죽은 파라미터).");
+  assert.match(CP, /params\.get\('classId'\)/, "content-player 가 classId 를 읽지 않습니다(죽은 파라미터).");
 
   // embed 모드는 플레이어 body 를 transparent 로 만든다 → 어두운 뷰포트에 글자가 묻히지
   // 않도록 iframe 요소 자체에 흰 배경이 반드시 있어야 한다.

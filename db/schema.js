@@ -913,11 +913,19 @@ function initSchema() {
       correct_count INTEGER DEFAULT 0,
       score_percent REAL DEFAULT 0,
       answers TEXT,
+      -- BE-3: [{questionId,value}] 병행 저장. answers(순서 배열)는 레거시 하위호환으로 유지한다.
+      answers_detail TEXT,
+      -- BE-1: 수업 맥락. NULL = 수업 밖(채움콘텐츠에서 혼자 푼 기록). 기존 행은 전부 NULL.
+      lesson_id INTEGER,
+      class_id INTEGER,
       attempted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (content_id) REFERENCES contents(id),
       FOREIGN KEY (user_id) REFERENCES users(id)
     );
     CREATE INDEX IF NOT EXISTS idx_content_attempts_user ON content_attempts(user_id, content_id);
+    -- ⚠ lesson_id 인덱스는 여기 두지 않는다. 이 exec 블록은 **기존 DB 에서도** 매번 실행되는데
+    --   구 DB 의 content_attempts 에는 lesson_id 컬럼이 없어 "no such column" 으로 블록 전체가
+    --   중단된다. 컬럼 추가(ALTER)와 인덱스 생성은 아래 마이그레이션 구간에서 함께 한다.
 
     -- ============ CBT 확장 (SFR-032) ============
     CREATE TABLE IF NOT EXISTS exam_autosaves (
@@ -1180,6 +1188,28 @@ function initSchema() {
     db.exec("CREATE INDEX IF NOT EXISTS idx_gallery_reports_status ON gallery_reports(status, created_at DESC)");
   } catch (e) {
     console.error('[다채움] gallery_reports 처리 메타 컬럼 마이그레이션 실패:', e.message);
+  }
+
+  // ── 마이그레이션: content_attempts 에 수업 맥락 + 문항 매칭 컬럼 (기획서 BE-1 · BE-3) ──
+  //   BE-1  lesson_id·class_id  : 이게 없으면 "채움콘텐츠에서 3주 전에 혼자 푼 기록"과
+  //                               "오늘 수업 중에 푼 기록"이 구분되지 않는다.
+  //                               🔴 기존 행은 전부 NULL 로 남긴다(= 수업 밖). 채워 넣을 근거가
+  //                               없는 데이터를 추측으로 메우면 응답 현황 표가 거짓을 말한다.
+  //                               조건 없는 일괄 UPDATE 는 절대 넣지 말 것
+  //                               (test/schema-no-blanket-answer-shift.test.js 가 감시 중).
+  //   BE-3  answers_detail      : [{questionId,value}] 병행 저장. answers(순서 배열)는
+  //                               레거시 판독기(scripts/regrade-content-attempts.js 등)가
+  //                               위치로 읽으므로 형태를 바꾸지 않고 그대로 둔다.
+  try {
+    const caCols = db.prepare("PRAGMA table_info(content_attempts)").all().map(c => c.name);
+    if (caCols.length > 0) {
+      if (!caCols.includes('lesson_id')) db.exec("ALTER TABLE content_attempts ADD COLUMN lesson_id INTEGER");
+      if (!caCols.includes('class_id')) db.exec("ALTER TABLE content_attempts ADD COLUMN class_id INTEGER");
+      if (!caCols.includes('answers_detail')) db.exec("ALTER TABLE content_attempts ADD COLUMN answers_detail TEXT");
+      db.exec("CREATE INDEX IF NOT EXISTS idx_content_attempts_lesson ON content_attempts(lesson_id, content_id, user_id)");
+    }
+  } catch (e) {
+    console.error('[다채움] content_attempts 수업맥락 컬럼 마이그레이션 실패:', e.message);
   }
 
   // 마이그레이션: attendance 테이블에 감정 컬럼 추가 (SFR-031, legacy)
@@ -2438,83 +2468,39 @@ function initSchema() {
   // 마이그레이션 플래그 테이블
   db.exec(`CREATE TABLE IF NOT EXISTS _migrations (name TEXT PRIMARY KEY, applied_at TEXT DEFAULT (DATETIME('now')))`);
 
-  // 마이그레이션: content_questions answer 0-based 통일
-  // UI에서 생성된 문항은 1-based(1,2,3,4)로 저장됨 → 0-based(0,1,2,3)로 변환
-  // 시드 데이터는 이미 0-based이며 INTEGER 타입으로 저장됨 (typeof='integer')
-  // UI 데이터는 TEXT 타입으로 저장됨 (typeof='text'), 값이 "1","2","3","4" 형태
-  try {
-    const migDone = db.prepare("SELECT 1 FROM _migrations WHERE name = 'answer_0based'").get();
-    if (!migDone) {
-      const affected = db.prepare(
-        "SELECT COUNT(*) as cnt FROM content_questions WHERE answer IS NOT NULL AND answer != '' AND typeof(answer) = 'text' AND CAST(answer AS INTEGER) >= 1 AND answer NOT LIKE '%.%'"
-      ).get();
-      if (affected && affected.cnt > 0) {
-        console.log(`[DB] content_questions answer 1-based → 0-based 마이그레이션 (${affected.cnt}건)`);
-        db.exec(
-          "UPDATE content_questions SET answer = CAST(CAST(answer AS INTEGER) - 1 AS TEXT) WHERE answer IS NOT NULL AND answer != '' AND typeof(answer) = 'text' AND CAST(answer AS INTEGER) >= 1 AND answer NOT LIKE '%.%'"
-        );
-      }
-      // exams.answers JSON 내 answer도 0-based로 변환
-      try {
-        const exams = db.prepare("SELECT id, answers FROM exams WHERE answers IS NOT NULL").all();
-        let examFixed = 0;
-        for (const exam of exams) {
-          try {
-            const questions = JSON.parse(exam.answers);
-            let changed = false;
-            for (const q of questions) {
-              if (q.answer !== undefined && q.answer !== null && q.options && q.options.length > 0) {
-                const num = Number(q.answer);
-                if (!isNaN(num) && num >= 1 && Number.isInteger(num) && !String(q.answer).includes('.')) {
-                  q.answer = num - 1;
-                  changed = true;
-                }
-              }
-            }
-            if (changed) {
-              db.prepare("UPDATE exams SET answers = ? WHERE id = ?").run(JSON.stringify(questions), exam.id);
-              examFixed++;
-            }
-          } catch(e2) {}
-        }
-        if (examFixed > 0) console.log(`[DB] class_exams answer 마이그레이션 (${examFixed}건)`);
-      } catch(e2) { console.error('[DB] exam answer migration error:', e2.message); }
-
-      db.prepare("INSERT INTO _migrations (name) VALUES ('answer_0based')").run();
-      console.log('[DB] answer_0based 마이그레이션 완료');
-    }
-  } catch(e) { console.error('[DB] answer migration error:', e.message); }
-
-  // 마이그레이션: exams.answers JSON 내 answer 0-based 변환 (별도 마이그레이션)
-  try {
-    const migDone2 = db.prepare("SELECT 1 FROM _migrations WHERE name = 'exam_answer_0based'").get();
-    if (!migDone2) {
-      const exams = db.prepare("SELECT id, answers FROM exams WHERE answers IS NOT NULL").all();
-      let examFixed = 0;
-      for (const exam of exams) {
-        try {
-          const questions = JSON.parse(exam.answers);
-          let changed = false;
-          for (const q of questions) {
-            if (q.answer !== undefined && q.answer !== null && q.options && q.options.length > 0) {
-              const num = Number(q.answer);
-              if (!isNaN(num) && num >= 1 && Number.isInteger(num) && !String(q.answer).includes('.')) {
-                q.answer = num - 1;
-                changed = true;
-              }
-            }
-          }
-          if (changed) {
-            db.prepare("UPDATE exams SET answers = ? WHERE id = ?").run(JSON.stringify(questions), exam.id);
-            examFixed++;
-          }
-        } catch(e2) {}
-      }
-      if (examFixed > 0) console.log(`[DB] exams answer 0-based 마이그레이션 (${examFixed}건)`);
-      db.prepare("INSERT INTO _migrations (name) VALUES ('exam_answer_0based')").run();
-      console.log('[DB] exam_answer_0based 마이그레이션 완료');
-    }
-  } catch(e) { console.error('[DB] exam answer migration error:', e.message); }
+  // ══════════════════════════════════════════════════════════════════════════
+  // 🔴 제거됨 — `answer_0based` · `exam_answer_0based` 일괄 차감 마이그레이션
+  //    (2026-04-09 도입 / 2026-08-21 제거. 두 DB 모두 당시 1회 적용 완료)
+  //
+  //  ■ 무엇이었나
+  //    서버가 뜰 때마다 `_migrations` 플래그가 없으면 아래를 **조건 없이** 돌렸다:
+  //      UPDATE content_questions SET answer = CAST(CAST(answer AS INTEGER) - 1 AS TEXT)
+  //       WHERE typeof(answer)='text' AND CAST(answer AS INTEGER) >= 1 AND answer NOT LIKE '%.%'
+  //    exams.answers JSON 안의 answer 도 같은 방식으로 -1 했다.
+  //
+  //  ■ 왜 제거하는가 — 이 SQL 은 **정본 데이터에서 절대 옳을 수 없다**
+  //    1. 이 SQL 은 "1-based 로 저장된 값" 과 "0-based 인데 값이 1 이상인 값" 을
+  //       **구분할 수단이 없다**. 둘 다 똑같이 -1 한다.
+  //    2. 정본은 0-based 다. `answer='0'` 이 2,337건 있고 이는 1-based 로는 불가능한 값이다
+  //       (test/content-answer-index.test.js INV-AI3 소스 락 · routes/contents `/grade` ·
+  //        content-player 의 `q.options[q.answer]` 가 모두 0-based 계약).
+  //       즉 이 UPDATE 가 도는 순간 **맞는 정답키가 전부 한 칸씩 틀어진다**.
+  //    3. 단답형까지 망가뜨린다 — `typeof(answer)='text'` 만 보므로 정답이 숫자 문자열인
+  //       단답형("27")도 "26" 으로 바뀐다(실측).
+  //
+  //  ■ 실측한 사고 시나리오 (2026-08-21, 정본 사본에서 재현)
+  //    `_migrations` 행이 없는 DB 로 서버를 한 번 띄우면 → **9,544 문항이 일괄 차감**.
+  //    플래그 행 하나가 유일한 방벽이었고, 그 플래그는 **새 DB 에 없다**:
+  //      · `backups/gcp-content-sync.sql` 등 동기화 SQL 에는 `_migrations` 가 **0건** 이다.
+  //        빈 DB 에 그 SQL 을 부어 서버를 올리면(= GCP 재구축 절차) 그 자리에서 터진다.
+  //      · 구버전 DB 복원·개발자 로컬 재구축도 같은 경로다.
+  //
+  //  ■ 다시 넣지 말 것
+  //    1-based 데이터를 만나면 이런 "조건 없는 일괄 연산" 이 아니라,
+  //    `scripts/fix-answer-key-integrity-20260821.js` 처럼 **문항별 expect 가드 + 해설 대조 +
+  //    롤백 선기록 + DRY-RUN** 을 갖춘 일회성 스크립트로 처리한다.
+  //    회귀 박제: test/schema-no-blanket-answer-shift.test.js (INV-SM1/SM2 + 역주입)
+  // ══════════════════════════════════════════════════════════════════════════
 
   // 마이그레이션: lessons 테이블 확장 (시작일/종료일, 예상시간, status 확장)
   try { db.exec('ALTER TABLE lessons ADD COLUMN start_date DATE'); } catch(e) {}
@@ -2968,19 +2954,19 @@ function initSchema() {
 
   // ============ 나도예술가 멀티미디어 + 콘테스트 관리 마이그레이션 (2026-05-13) ============
   try {
-    // 1) student_gallery.body_text 컬럼 추가 (글 본문)
+    // 1. student_gallery.body_text 컬럼 추가 (글 본문)
     const sgCols3 = db.prepare("PRAGMA table_info(student_gallery)").all().map(c => c.name);
     if (!sgCols3.includes('body_text')) {
       db.exec("ALTER TABLE student_gallery ADD COLUMN body_text TEXT");
     }
 
-    // 2) gallery_events.deleted_at 컬럼 추가 (soft delete)
+    // 2. gallery_events.deleted_at 컬럼 추가 (soft delete)
     const geCols2 = db.prepare("PRAGMA table_info(gallery_events)").all().map(c => c.name);
     if (!geCols2.includes('deleted_at')) {
       db.exec("ALTER TABLE gallery_events ADD COLUMN deleted_at DATETIME");
     }
 
-    // 3) gallery_attachments 신규 테이블 (멀티미디어 첨부 정규화)
+    // 3. gallery_attachments 신규 테이블 (멀티미디어 첨부 정규화)
     db.exec(`
       CREATE TABLE IF NOT EXISTS gallery_attachments (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -2998,7 +2984,7 @@ function initSchema() {
       CREATE INDEX IF NOT EXISTS idx_gallery_attachments_type ON gallery_attachments(type);
     `);
 
-    // 4) 기존 image_url 데이터 이주 (1회 실행)
+    // 4. 기존 image_url 데이터 이주 (1회 실행)
     db.exec(`CREATE TABLE IF NOT EXISTS _migrations (name TEXT PRIMARY KEY, applied_at TEXT DEFAULT (DATETIME('now')))`);
     const migAttachDone = db.prepare("SELECT 1 FROM _migrations WHERE name = 'gallery_attachments_seed_from_image_url_2026_05_13'").get();
     if (!migAttachDone) {
@@ -3272,9 +3258,9 @@ function seedDummyData(db) {
   // ⚠ 학습맵 노드(`learning_map_nodes`)와 엣지(`learning_map_edges`)는 더 이상 schema.js 에서 시드하지 않는다.
   // 진실의 원천(SSOT)은 **공식 KOFAC 기준 엑셀 계통도**(`통합_학습맵_계통도_KOFAC기준매핑_v2.xlsx`) 이며,
   // 아래 두 경로로 일괄 임포트한다:
-  //   1) 노드/차시 일괄: `node scripts/seed-lessons-from-kofac-v2.js --apply`
-  //   2) 엣지 재시드(공식 계통도 기준): `node scripts/import-learning-map-edges.mjs --truncate`
-  //   3) (선택) 관리자 UI → 학습맵 엑셀 업로드 (routes/admin.js) — 동일한 KOFAC v2 엑셀을 업로드해야 함
+  //   1. 노드/차시 일괄: `node scripts/seed-lessons-from-kofac-v2.js --apply`
+  //   2. 엣지 재시드(공식 계통도 기준): `node scripts/import-learning-map-edges.mjs --truncate`
+  //   3. (선택) 관리자 UI → 학습맵 엑셀 업로드 (routes/admin.js) — 동일한 KOFAC v2 엑셀을 업로드해야 함
   //
   // ※ 참고: 과거 임시 엑셀 `통합_학습맵_계통도_연결_완성.xlsx` 는 2026-05-26부로 폐기되었다.
   // 비교/분석 스크립트(`scripts/diff-xlsx-kofac-v2.js`, `scripts/inspect-kofac.mjs` 등)에서만
@@ -3398,11 +3384,11 @@ function migrateFeaturedSectionsTargeting(db) {
  * featured_sections 테이블에 학년·교과 타깃팅 컬럼을 추가하고,
  * UNIQUE(key) 제약을 제거하여 같은 key에 다중 발행 row를 허용한다 (멱등).
  *
- * 1) 컬럼 추가:
+ * 1. 컬럼 추가:
  *    - target_grades   TEXT NULL — JSON 배열 (1~12 정수) / 'all' / NULL
  *    - target_subjects TEXT NULL — JSON 배열 (다채움 표준 교과 11종) / 'all' / NULL
  *
- * 2) UNIQUE(key) 제거:
+ * 2. UNIQUE(key) 제거:
  *    SQLite는 ALTER로 UNIQUE 제거가 안 되므로 표 재생성 패턴 사용.
  *    - PRAGMA index_list로 'sqlite_autoindex_featured_sections_1' (UNIQUE on key) 존재 여부 검사
  *    - 있으면 transaction 안에서:
@@ -3415,13 +3401,13 @@ function migrateFeaturedSectionsTargeting(db) {
  * 시드된 4행(planning/recommend/channels/new)은 PK·데이터 그대로 보존.
  */
 function migrateFeaturedSectionsGradeSubject(db) {
-  // 1) 표 존재 확인
+  // 1. 표 존재 확인
   const tableExists = db.prepare(
     "SELECT name FROM sqlite_master WHERE type='table' AND name='featured_sections'"
   ).get();
   if (!tableExists) return;
 
-  // 2) target_grades / target_subjects 컬럼 추가 (멱등)
+  // 2. target_grades / target_subjects 컬럼 추가 (멱등)
   const cols = db.prepare("PRAGMA table_info(featured_sections)").all().map(c => c.name);
   const additions = [
     { name: 'target_grades',   ddl: 'ALTER TABLE featured_sections ADD COLUMN target_grades TEXT' },
@@ -3442,7 +3428,7 @@ function migrateFeaturedSectionsGradeSubject(db) {
     console.log(`[DB] featured_sections 학년·교과 컬럼 ${addedCols}개 추가 완료 (target_grades, target_subjects)`);
   }
 
-  // 3) UNIQUE(key) 제약 제거 — 자동 인덱스(sqlite_autoindex_featured_sections_1)가 있으면 표 재생성
+  // 3. UNIQUE(key) 제약 제거 — 자동 인덱스(sqlite_autoindex_featured_sections_1)가 있으면 표 재생성
   const indexes = db.prepare("PRAGMA index_list('featured_sections')").all();
   const hasUniqueOnKey = indexes.some(idx => {
     if (!idx.unique) return false;

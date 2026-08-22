@@ -506,7 +506,17 @@ router.post('/', requireAuth, (req, res) => {
           q.question_text || q.text || '',
           q.question_type || q.type || 'multiple_choice',
           typeof q.options === 'string' ? q.options : JSON.stringify(q.options || []),
-          (q.answer ?? q.correct_index ?? q.correctIndex ?? q.answer_index ?? 0),
+          // 🔴 answer 는 **반드시 문자열로** 바인딩한다.
+          //   better-sqlite3 는 JS number 를 REAL 로 바인딩하고, answer 컬럼은 TEXT affinity 라
+          //   REAL 0 이 `'0.0'` 으로 저장된다(실측: 0→'0.0', 1→'1.0').
+          //   채점기는 `String(given) === String(q.answer)` 문자열 비교라 학생이 보낸 0-based
+          //   인덱스 `'0'` 과 `'0.0'` 이 영영 안 맞아 **첫 보기가 정답인 문항이 전부 오답**이 된다.
+          //   (2026-04-09 시드가 JS number 를 그대로 넘겨 11건이 이렇게 굳었다 —
+          //    보고서/증적/정답키정합_20260821/)
+          //   숫자 외 타입(단답형 문자열 등)은 손대지 않는다.
+          ((v) => (typeof v === 'number' ? String(v) : v))(
+            q.answer ?? q.correct_index ?? q.correctIndex ?? q.answer_index ?? 0
+          ),
           q.explanation || '',
           q.points || 10,
           q.difficulty || 3,
@@ -573,8 +583,12 @@ router.get('/:id', requireAuth, (req, res) => {
 // ── 콘텐츠 하위 리소스 공통 게이트 ──────────────────────────────────────────
 //   상세 조회가 403 인 콘텐츠에는 댓글 읽기·쓰기·좋아요도 열려선 안 된다.
 //   (읽기 게이트와 쓰기 게이트가 같은 판정을 쓰게 한다 — 판정 사본 금지)
-function guardContent(req, res) {
-  const id = parseInt(req.params.id);
+//
+//   @param {number|string} [contentId]  경로 파라미터 이름이 `:id` 가 아닌 라우트
+//     (예: `/collection/:contentId`)에서 대상 id 를 명시적으로 넘기기 위한 인자.
+//     넘기지 않으면 기존과 동일하게 `req.params.id` 를 읽는다.
+function guardContent(req, res, contentId) {
+  const id = parseInt(contentId != null ? contentId : req.params.id);
   const content = loadContentForAuth(id);
   if (!content) {
     res.status(404).json({ success: false, message: '콘텐츠를 찾을 수 없습니다.' });
@@ -714,8 +728,23 @@ router.get('/collection/list', requireAuth, (req, res) => {
 });
 
 // POST /api/contents/collection/:contentId - 보관함 추가
+//
+// 🔴 자기부여(self-grant) 차단 — 2026-08-21 실측
+//   보관함 행(content_collections)은 lib/auth/can-view-content.js 의 **이용 근거(usage grant)**
+//   중 하나다(via_collection). 그런데 이 라우트에는 열람 판정이 없어서, 학생이 열람 403 인
+//   비공개 콘텐츠를 **스스로 보관함에 담아 근거를 만들고** 그 다음 문을 여는 순환이 성립했다:
+//     POST /api/contents/collection/193   → 200 (근거 생성)
+//     GET  /api/contents/193              → 403 이던 것이 200
+//     POST /api/self-learn/problem-attempt {contentId:193} → correctAnswer:"56" · explanation
+//   즉 앞 라운드가 세운 guardContent 를 **쓰기 라우트가 우회해 무력화**했다.
+//   판정 사본을 새로 적지 않고 같은 guardContent 를 부른다(대상 id 만 명시).
+//
+// ⚠ 과잉 차단 없음 — 담기 버튼은 항상 "지금 보고 있는(=열람 가능한)" 콘텐츠에만 붙는다
+//   (public/content/index.html · content-player.html · public/index.html 실측).
+//   공개 승인본·내 콘텐츠·수업/평가/오늘의학습에 연결된 비공개본은 그대로 통과한다.
 router.post('/collection/:contentId', requireAuth, (req, res) => {
   try {
+    if (!guardContent(req, res, req.params.contentId)) return;
     const result = contentDb.addToCollection(req.user.id, parseInt(req.params.contentId), req.body && req.body.folder);
     if (!result.success) return res.status(409).json({ success: false, message: '이미 보관함에 있습니다.' });
     res.json({ success: true, message: '보관함에 추가했습니다.' });
@@ -890,16 +919,11 @@ function _attemptsDb() { return attemptsDb; }
 //     · essay  : 자동채점 보류(correct=null)
 //     · 미응답 : correct=null, score=0
 // ============================================================================
-function _normalizeShort(s) {
-  return String(s == null ? '' : s).replace(/\s+/g, '').toLowerCase();
-}
-function _normalizeQType(t) {
-  const s = String(t || '').toLowerCase();
-  if (s === 'multiple_choice' || s === 'multiple' || s === 'mc' || s === 'choice') return 'choice';
-  if (s === 'short_answer' || s === 'short-answer' || s === 'fill' || s === 'short') return 'short';
-  if (s === 'essay' || s === 'long' || s === 'written' || s === 'long_answer') return 'essay';
-  return 'choice';
-}
+// 🔴 판정 SSOT — lib/grade-answer.js 한 벌만 쓴다 (사본 금지, 기획서 BE-2).
+//    2026-08-21 이전에는 여기에 _normalizeShort/_normalizeQType 와 비교식이 인라인으로 있었고,
+//    응답 현황 모니터가 같은 로직을 다시 적으면 두 벌이 되어 어긋난다. 그래서 추출했다.
+//    · 채점 계약(0-based · 보정 없음)은 lib/grade-answer.js 주석 참조. 여기서 바꾸지 말 것.
+const { judge, buildAnswerLookup, isBlank } = require('../lib/grade-answer');
 
 router.post('/:id/grade', requireAuth, (req, res) => {
   try {
@@ -918,18 +942,14 @@ router.post('/:id/grade', requireAuth, (req, res) => {
 
     const submitted = Array.isArray(req.body && req.body.answers) ? req.body.answers : [];
     // questionId 우선 매칭, 없으면 순서(index) 매칭 — 두 경우 모두 서버 문항이 기준이다.
-    const byId = new Map();
-    submitted.forEach((a, i) => {
-      if (a && typeof a === 'object' && a.questionId != null) byId.set(Number(a.questionId), a.value);
-      else byId.set(`#${i}`, a && typeof a === 'object' ? a.value : a);
-    });
+    // 🔴 매칭 규칙도 SSOT(lib/grade-answer.js buildAnswerLookup). 모니터 API 가 같은 함수를 쓴다.
+    const pick = buildAnswerLookup(submitted);
 
     let totalScore = 0, maxTotal = 0, autoScored = 0;
     const results = rows.map((q, i) => {
       const maxScore = Number(q.points) || 1;
       maxTotal += maxScore;
-      const given = byId.has(Number(q.id)) ? byId.get(Number(q.id)) : byId.get(`#${i}`);
-      const qType = _normalizeQType(q.question_type);
+      const given = pick(q, i);
 
       /**
        * 결과 1건을 만든다.
@@ -947,12 +967,10 @@ router.post('/:id/grade', requireAuth, (req, res) => {
         { ownerId: content.creator_id, submitted: graded }
       )[0];
 
-      if (given == null || given === '') return emit(false, { correct: null, score: 0 });
-      if (qType === 'essay') return emit(false, { correct: null, score: 0 });
-
-      let ok;
-      if (qType === 'choice') ok = String(given) === String(q.answer);
-      else ok = _normalizeShort(q.answer) !== '' && _normalizeShort(given) === _normalizeShort(q.answer);
+      // 판정 SSOT — 미응답·서술형은 null(채점 보류), 그 외 true/false.
+      const ok = judge(q, given);
+      if (isBlank(given)) return emit(false, { correct: null, score: 0 });
+      if (ok === null) return emit(false, { correct: null, score: 0 });   // essay 보류
 
       autoScored += maxScore;
       if (ok) totalScore += maxScore;
@@ -978,15 +996,64 @@ router.post('/:id/grade', requireAuth, (req, res) => {
 //   열람 권한이 없는 콘텐츠에는 풀이 기록도 남기지 않는다(채점 게이트와 같은 판정).
 //   실측(2026-08-07): 학생이 비공개 193 으로 200 을 받아 기록을 남길 수 있었다.
 //   과잉 차단 위험 0 — content-player 는 GET /api/contents/:id(같은 게이트) 로 연 콘텐츠만 기록한다.
+// ── BE-1: 수업 맥락(lesson_id·class_id) 검증 ────────────────────────────────
+//   클라이언트가 보낸 lessonId 를 그대로 믿으면 학생이 남의 수업에 기록을 심을 수 있다.
+//   ① 수업이 실재하고 ② 그 수업에 이 콘텐츠가 실제로 들어 있고 ③ 호출자가 그 클래스의
+//   active 멤버(또는 admin)일 때만 채운다. 하나라도 어긋나면 **NULL**(수업 밖)로 저장한다 —
+//   거부(4xx)하지 않는 이유: 풀이 기록 자체는 남겨야 하고, 맥락만 못 믿을 뿐이다.
+function _resolveLessonContext(db, user, contentId, lessonIdRaw, classIdRaw) {
+  const NONE = { lesson_id: null, class_id: null };
+  const lid = parseInt(lessonIdRaw);
+  if (!Number.isInteger(lid) || lid <= 0) return NONE;
+  try {
+    const lesson = db.prepare('SELECT id, class_id FROM lessons WHERE id = ?').get(lid);
+    if (!lesson || !lesson.class_id) return NONE;
+    const cid = parseInt(classIdRaw);
+    // classId 를 함께 보냈다면 교차검증(불일치 = 조작 시도) — 안 보냈으면 수업의 class_id 를 쓴다.
+    if (Number.isInteger(cid) && cid > 0 && Number(lesson.class_id) !== cid) return NONE;
+    const inLesson = db.prepare('SELECT 1 FROM lesson_contents WHERE lesson_id = ? AND content_id = ?').get(lid, contentId);
+    if (!inLesson) return NONE;
+    const member = db.prepare(
+      "SELECT 1 FROM class_members WHERE class_id = ? AND user_id = ? AND status = 'active'"
+    ).get(lesson.class_id, user.id);
+    if (!member && user.role !== 'admin') return NONE;
+    return { lesson_id: lid, class_id: Number(lesson.class_id) };
+  } catch (e) { return NONE; }
+}
+
 router.post('/:id/attempts', requireAuth, (req, res) => {
   try {
     const contentId = parseInt(req.params.id);
     if (!guardContent(req, res)) return;
-    const { total_questions = 0, correct_count = 0, score_percent = 0, answers = null } = req.body || {};
+    const {
+      total_questions = 0, correct_count = 0, score_percent = 0, answers = null,
+      // BE-3: [{questionId,value}] — 순서 의존 제거용. 없으면 NULL(레거시 경로 그대로 동작).
+      answers_detail = null,
+      // BE-1: 수업꾸러미에서 푼 것인지. 없으면 NULL(= 수업 밖 풀이).
+      lesson_id = null, class_id = null,
+    } = req.body || {};
     const db = _attemptsDb();
     try {
-      const stmt = db.prepare(`INSERT INTO content_attempts (content_id, user_id, total_questions, correct_count, score_percent, answers) VALUES (?, ?, ?, ?, ?, ?)`);
-      const info = stmt.run(contentId, req.user.id, total_questions, correct_count, score_percent, answers ? JSON.stringify(answers) : null);
+      const ctx = _resolveLessonContext(db, req.user, contentId, lesson_id, class_id);
+      const stmt = db.prepare(`INSERT INTO content_attempts (content_id, user_id, total_questions, correct_count, score_percent, answers, answers_detail, lesson_id, class_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+      const info = stmt.run(
+        contentId, req.user.id, total_questions, correct_count, score_percent,
+        answers ? JSON.stringify(answers) : null,
+        Array.isArray(answers_detail) && answers_detail.length ? JSON.stringify(answers_detail) : null,
+        ctx.lesson_id, ctx.class_id
+      );
+      // 수업 중 제출이면 교사 응답 현황 모니터를 즉시 갱신 (기획서 §8-3).
+      //   저장이 끝난 뒤 서버가 부른다 — 학생이 보내는 lesson:answered 는 INSERT 보다
+      //   먼저 도착할 수 있어(레이스) 직전 스냅샷을 그린다.
+      //   🔴 emit 대상은 교사 전용 룸 lesson:{id}:monitor 하나뿐이다.
+      if (ctx.lesson_id && ctx.class_id) {
+        try {
+          const sock = require('../socket');
+          if (typeof sock.notifyLessonAnswered === 'function') {
+            sock.notifyLessonAnswered({ classId: ctx.class_id, lessonId: ctx.lesson_id });
+          }
+        } catch (_) { /* 소켓 미기동(테스트 등) — 기록 저장에는 영향 없음 */ }
+      }
       // xAPI: 바로 풀기 assessment.submitted (콘텐츠 표준체계 해소)
       try {
         const mainDb = require('../db');

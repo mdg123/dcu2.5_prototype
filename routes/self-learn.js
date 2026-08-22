@@ -36,6 +36,17 @@ const { normalizeId, classifyId } = require('../lib/ids');
  *   실측(정본 스냅샷): 학습맵 노출대상 표본 500/500 통과 · 오늘의학습 항목×멤버 30/30 통과.
  *   차단되는 것은 비공개·초안·반려 콘텐츠뿐이다(= 애초에 열람이 403 인 것들).
  *
+ * 🔴🔴 세 번째 유래 — **자기부여(self-grant)**: 학생이 스스로 근거를 만들어 문을 열었다
+ *   (2026-08-21 실측, 격리 서버 3487 · student1 세션):
+ *     POST /api/self-learn/problem-sets/default/add {"contentId":193}  → 200 (근거 생성)
+ *     POST /api/self-learn/problem-attempt {"contentId":193,"questionId":217}
+ *       → 200 { correctAnswer:"56", explanation:"7 × 8 = 56 입니다." }   ← 직전엔 403 이던 것
+ *   canViewContent 의 이용 근거 5종 중 **problem_set_items·content_collections 두 개는
+ *   학생이 직접 쓸 수 있는 테이블**이다. 그 쓰기 라우트에 열람 판정이 없으면
+ *   "근거를 만들고 → 근거를 내세워 통과" 하는 순환이 성립한다.
+ *   → 근거를 만드는 쓰기(문제집 담기·보관함 담기)도 **같은 문**을 통과해야 한다.
+ *     (보관함 쪽은 routes/content.js 의 guardContent 를 같은 이유로 호출한다)
+ *
  * @returns {boolean} true 면 통과, false 면 이미 응답을 보냈으므로 호출부는 즉시 return
  */
 function guardAttemptContent(req, res, contentId) {
@@ -1625,6 +1636,8 @@ router.post('/problem-sets/default/add', requireAuth, (req, res) => {
     const DEFAULT_TITLE = '기타(미지정)';
     const contentId = parseInt(req.body.contentId);
     if (!contentId) return res.status(400).json({ success: false, message: 'contentId가 필요합니다.' });
+    // 🔴 자기부여(self-grant) 차단 — 아래 guardAttemptContent 주석 참조.
+    if (!guardAttemptContent(req, res, contentId)) return;
     const sets = selfLearnDb.getProblemSets(req.user.id);
     let target = sets.find(s => s.title === DEFAULT_TITLE);
     if (!target) {
@@ -1643,6 +1656,8 @@ router.post('/problem-sets/default/add', requireAuth, (req, res) => {
 // POST /problem-sets/:id/items — 문제집에 문항 추가
 router.post('/problem-sets/:id/items', requireAuth, (req, res) => {
   try {
+    // 🔴 자기부여(self-grant) 차단 — 아래 guardAttemptContent 주석 참조.
+    if (!guardAttemptContent(req, res, req.body && req.body.contentId)) return;
     const result = selfLearnDb.addProblemSetItem(parseInt(req.params.id), req.body.contentId);
     res.json(result);
   } catch (err) {

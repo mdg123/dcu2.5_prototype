@@ -369,6 +369,20 @@ test('REG-HF8 거짓 표식 유발 패턴 — 가드 앞 최상위 write 는 0�
     }
   }
 
+  // ── 오탐 힌트 (판정에는 영향 없음) ─────────────────────────────────────────
+  // depthMap 은 정규식 리터럴을 모른다. `s.replace(/'/g, "''")` 처럼 정규식 안에 맨따옴표가
+  // 있으면 그 따옴표를 "문자열 시작" 으로 읽고 이후 수백 줄을 건너뛰어 깊이가 어긋난다
+  // → 함수 안의 write 가 "최상위 write" 로 잘못 잡힌다(2026-08-21 실측).
+  // 정규식 판별(나눗셈 `/` 과의 구분)을 제대로 하려면 앞 토큰까지 봐야 하는데, 잘못 맞히면
+  // 코드 덩어리를 통째로 건너뛰어 **진짜 위반을 놓치는**(거짓 음성) 더 나쁜 실패가 된다.
+  // 안전 스캐너에서 거짓 양성은 시끄럽고 즉시 고쳐지지만 거짓 음성은 조용히 잠든다.
+  // → 파서를 고치는 대신 **힌트만** 준다(판정은 그대로).
+  const quoteInRegex = [...new Set(offenders.map((o) => o.split(':')[0]))].filter((f) => {
+    try {
+      return /\/[^/\n\\]*['"][^/\n]*\/[gimsuy]*/.test(fs.readFileSync(path.join(scriptsDir, f), 'utf8'));
+    } catch (_) { return false; }
+  });
+
   assert.deepEqual(offenders, [], [
     '',
     '🔴 dry-run 플래그가 있는데 **모듈 최상위에서 무조건 실행되는 write** 가 있습니다.',
@@ -379,6 +393,15 @@ test('REG-HF8 거짓 표식 유발 패턴 — 가드 앞 최상위 write 는 0�
     '',
     ...offenders.map((o) => `   · ${o}`),
     '',
+    ...(quoteInRegex.length ? [
+      '   ⚠ 오탐일 수 있습니다 — 아래 파일에 **정규식 리터럴 안의 따옴표**가 있습니다:',
+      `       ${quoteInRegex.join(', ')}`,
+      '     이 스캐너는 정규식을 모르므로 그 따옴표를 문자열 시작으로 읽어 깊이가 어긋납니다.',
+      "     `s.replace(/'/g, \"''\")` 같은 코드를 split/join 으로 바꾸면 해소됩니다:",
+      "       const Q = String.fromCharCode(39); s.split(Q).join(Q + Q)",
+      '     (scripts/fix-answer-index-base.js 의 csvCell 이 같은 이유로 split/join 을 씁니다)',
+      '',
+    ] : []),
   ].join('\n'));
 });
 

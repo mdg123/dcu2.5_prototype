@@ -20,6 +20,10 @@ const xapiSpool = require('../lib/xapi/spool');
 //   원본 JSON 컬럼**을 그대로 실어 학생 세션에서 `exam.answers` 한 줄로 정답 전문이
 //   보였다(2026-08-07 실측). 판정 사본을 없애고 SSOT 호출로 통일한다.
 const { stripExamAnswers } = require('../lib/strip-answers');
+// ── 콘텐츠 열람 권한 판정 SSOT (lib/auth/can-view-content.js) ─────────────────
+//   `POST /import-from-content` 가 콘텐츠 문항을 정답째 복사해 오므로,
+//   routes/content.js guardContent 와 **같은 판정**을 통과해야 한다(사본 금지).
+const { canViewContent } = require('../lib/auth/can-view-content');
 
 // subject_code 끝자리로 학교급 추정 (-e/-m/-h)
 function _examSchoolLevel(sc) {
@@ -85,8 +89,12 @@ const pdfUpload = multer({
   limits: { fileSize: 10 * 1024 * 1024 } // 10MB
 });
 
+// 경로 파라미터가 없는 라우트(`POST /import-from-content` 는 classId 를 **본문**으로 받는다)도
+// 같은 판정을 쓰도록 body 폴백을 둔다. `:classId` 가 있는 기존 라우트에서는 폴백이 도달하지
+// 않으므로 동작 변화가 없다(판정 사본을 새로 적지 않기 위한 최소 확장).
 function requireClassMember(req, res, next) {
-  const classId = parseInt(req.params.classId);
+  const rawClassId = req.params.classId != null ? req.params.classId : (req.body && req.body.classId);
+  const classId = parseInt(rawClassId);
   req.classId = classId;
   // CBT는 클래스 독립 서비스 — 클래스 멤버가 아니어도 접근 허용
   if (classDb.isMember(classId, req.user.id)) {
@@ -170,9 +178,34 @@ router.get('/my', requireAuth, (req, res) => {
 });
 
 // POST /import-from-content — 콘텐츠에서 시험 가져오기 (must be before /:classId routes)
-router.post('/import-from-content', requireAuth, (req, res) => {
+//
+// 🔴 정답 전량 수확 통로였다 — 2026-08-21 실측 (격리 서버 3487 · student1 세션)
+//   이 라우트는 `requireAuth` 뿐이라 **학생도** 호출할 수 있었고, importFromContent 는
+//   대상 콘텐츠의 content_questions 를 `answer`·`explanation` 까지 그대로 exams.answers 에
+//   복사하면서 owner_id 를 **호출자 자신**으로 박았다. 그 다음 stripExamAnswers 는
+//   "작성자 본인이면 공개" 이므로 정답이 정상적으로 회신된다:
+//     POST /api/exam/import-from-content {contentId:193, classId:1}  → 200
+//     GET  /api/exam/my  →  answers:[{"question":"7 × 8 = ?","answer":"1",
+//                                     "explanation":"7 × 8 = 56 입니다."}, …]  ← 전 문항 일괄
+//   c193 은 학생 열람 403 인 비공개 콘텐츠다. 즉 problem-attempt 게이트를 세워 둔 옆에서
+//   **한 번의 요청으로 정답지 전체**가 나갔다(문항 단위도 아니고 통째로).
+//   덤으로 classId 검증도 없어 남의 클래스에 평가를 심을 수 있었다.
+//
+// 정책(신규 발명 금지 — 같은 행위인 `POST /api/exam/:classId` 와 **동일 규칙**):
+//   ① 클래스 권한: requireClassMember(body classId 폴백) + 개설자 또는 admin
+//   ② 콘텐츠 권한: canViewContent SSOT — 열람 403 인 콘텐츠는 가져오기도 불가
+//
+// ⚠ 과잉 차단 없음 — 유일한 호출부(public/class/class-home.html 평가 등록 모달)는
+//   개설자 화면에서 자기 클래스 id 와 열람 가능한(공개·보관함) 콘텐츠만 보낸다.
+router.post('/import-from-content', requireAuth, requireClassMember, (req, res) => {
   try {
     const { contentId, classId: cId, title, description, time_limit, start_date, end_date, std_ids } = req.body;
+    if (req.myRole !== 'owner' && req.user.role !== 'admin') {
+      return res.status(403).json({ success: false, message: '개설자만 평가를 생성할 수 있습니다.' });
+    }
+    if (!canViewContent(req.user, Number(contentId))) {
+      return res.status(403).json({ success: false, message: '이 콘텐츠를 볼 권한이 없습니다.' });
+    }
     const result = cbtExtDb.importFromContent(contentId, cId, req.user.id, { title, description, time_limit, start_date, end_date, std_ids: Array.isArray(std_ids) ? std_ids : null });
     if (!result) return res.status(404).json({ success: false, message: '콘텐츠를 찾을 수 없습니다.' });
     res.json({ success: true, ...result });

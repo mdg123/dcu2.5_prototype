@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>응답 현황 — 다채움</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+<link rel="stylesheet" href="/css/response-monitor.css">
+<style>
+  /* 별도 창 전용 — 뒤에 아무 페이지도 없으므로 오버레이가 창 전체를 채운다.
+     (레이어 팝업일 때의 딤 배경·바깥 여백·모서리 둥글기를 걷어낸다) */
+  html, body { margin: 0; padding: 0; height: 100%; background: #fff;
+               font-family: Pretendard, 'Noto Sans KR', system-ui, sans-serif; }
+  body { overflow: hidden; }
+  #rmStandaloneBoot { display: flex; align-items: center; justify-content: center;
+                      height: 100vh; color: #6B7280; font-size: 16px; gap: 10px; }
+  body.rm-ready #rmStandaloneBoot { display: none; }
+
+  /* 오버레이를 창에 꽉 채우기 */
+  .rm-overlay { position: fixed; inset: 0; background: #fff; padding: 0; }
+  .rm-panel   { width: 100%; height: 100%; max-width: none; max-height: none;
+                border-radius: 0; box-shadow: none; }
+</style>
+</head>
+<body>
+  <div id="rmStandaloneBoot"><i class="fas fa-circle-notch fa-spin"></i> 응답 현황을 불러오는 중…</div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/js/response-monitor.js"></script>
+  <script>
+  (function () {
+    var p = new URLSearchParams(location.search);
+    var classId  = p.get('classId');
+    var lessonId = p.get('lessonId');
+
+    document.title = '응답 현황 — 다채움';
+
+    if (!classId || !lessonId) {
+      document.getElementById('rmStandaloneBoot').innerHTML =
+        '<span style="color:#b91c1c;">주소에 수업 정보가 없습니다. 수업 화면에서 다시 열어 주세요.</span>';
+      return;
+    }
+
+    ResponseMonitor.setContext({ classId: classId, lessonId: lessonId });
+
+    // 닫기(×)·ESC 로 닫으면 창 자체를 닫는다 — 별도 창에서는 빈 화면만 남으면 안 된다.
+    ResponseMonitor.setOnClose(function () { window.close(); });
+
+    // 내 계정 — 동기화 진행자가 나인지 판별해 헤더 칩 색을 가른다(초록/주황).
+    fetch('/api/auth/me', { credentials: 'include' })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (j) { if (j && j.user) ResponseMonitor.setViewer(j.user.id); })
+      .catch(function () { /* 조회 실패해도 표는 그려야 한다 */ })
+      .then(function () {
+        document.body.classList.add('rm-ready');
+        return openResponseMonitor(lessonId);
+      });
+
+    /* ── 실시간 ──────────────────────────────────────────────────────────────
+       별도 창이어도 실시간은 유지한다 — 모니터는 "지금" 을 보는 화면이라
+       10초 폴링만으로는 존재 이유가 약해진다. 수업 플레이어와 **같은 교사 전용 룸**
+       (`lesson:<id>:monitor`)에 붙고, 못 붙으면 폴링으로 내려간다(§8-3 폴백).      */
+    var POLL_MS = 10000, pollTimer = null, socket = null;
+
+    function startPolling() {
+      if (pollTimer) return;
+      ResponseMonitor.setRealtime('polling');
+      pollTimer = setInterval(function () {
+        if (document.hidden) return;              // 가려져 있으면 서버를 두드리지 않는다
+        if (!ResponseMonitor.isOpen()) return;
+        ResponseMonitor.refresh();
+      }, POLL_MS);
+    }
+    function stopPolling() { if (pollTimer) { clearInterval(pollTimer); pollTimer = null; } }
+
+    try {
+      socket = io({ withCredentials: true });
+      socket.on('connect', function () {
+        socket.emit('lesson:monitor:join', { classId: classId, lessonId: lessonId });
+        // 1.5초 안에 스냅샷이 안 오면 폴링으로 내려간다
+        setTimeout(function () { if (!ResponseMonitor.getSnapshot()) startPolling(); }, 1500);
+      });
+      socket.on('lesson:monitor:snapshot', function (snap) {
+        if (!snap || !snap.success) return;
+        stopPolling();
+        ResponseMonitor.setRealtime('live');
+        renderResponseMonitor(snap);
+      });
+      socket.on('disconnect', startPolling);
+      socket.on('connect_error', startPolling);
+      window.addEventListener('beforeunload', function () {
+        try { socket.emit('lesson:monitor:leave', { lessonId: lessonId }); } catch (e) {}
+      });
+    } catch (e) {
+      startPolling();                              // socket.io 자체를 못 불러온 경우
+    }
+  })();
+  </script>
+</body>
+</html>
